@@ -1,0 +1,1514 @@
+2026/01/08 09:33:12 [warn] 227382#227382: protocol options redefined for 0.0.0.0:443 in /etc/nginx/sites-enabled/migrapanel.com.conf:8
+2026/01/08 09:33:12 [warn] 227382#227382: protocol options redefined for 0.0.0.0:443 in /etc/nginx/sites-enabled/migravoice.com.conf:25
+2026/01/08 09:33:12 [warn] 227382#227382: "ssl_stapling" ignored, no OCSP responder URL in the certificate "/etc/letsencrypt/live/call.migrahosting.com/fullchain.pem"
+2026/01/08 09:33:12 [warn] 227382#227382: "ssl_stapling" ignored, no OCSP responder URL in the certificate "/etc/letsencrypt/live/migravoice.com-0001/fullchain.pem"
+2026/01/08 09:33:12 [warn] 227382#227382: "ssl_stapling" ignored, no OCSP responder URL in the certificate "/etc/letsencrypt/live/voice.migrahosting.com/fullchain.pem"
+nginx: the configuration file /etc/nginx/nginx.conf syntax is ok
+nginx: configuration file /etc/nginx/nginx.conf test is successful
+# configuration file /etc/nginx/nginx.conf:
+user www-data;
+worker_processes auto;
+pid /run/nginx.pid;
+error_log /var/log/nginx/error.log;
+include /etc/nginx/modules-enabled/*.conf;
+
+events {
+	worker_connections 768;
+	# multi_accept on;
+}
+
+http {
+    log_format mpanel_api_trace '$remote_addr - $host [$time_local] 
+        "$request" $status $body_bytes_sent 
+        rt=$request_time uct=$upstream_connect_time uht=$upstream_header_time urt=$upstream_response_time 
+        ua="$http_user_agent" ref="$http_referer" upstream="$upstream_addr"';
+
+	##
+	# Basic Settings
+	##
+
+	sendfile on;
+	tcp_nopush on;
+	types_hash_max_size 2048;
+	# server_tokens off;
+
+	# server_names_hash_bucket_size 64;
+	# server_name_in_redirect off;
+
+	include /etc/nginx/mime.types;
+	default_type application/octet-stream;
+
+	##
+	# SSL Settings
+	##
+
+    # 	ssl_protocols TLSv1 TLSv1.1 TLSv1.2 TLSv1.3; # Dropping SSLv3, ref: POODLE
+    # 	ssl_prefer_server_ciphers on;
+
+	##
+	# Logging Settings
+	##
+
+	access_log /var/log/nginx/access.log;
+
+	##
+	# Gzip Settings
+	##
+
+	gzip on;
+
+	# gzip_vary on;
+	# gzip_proxied any;
+	# gzip_comp_level 6;
+	# gzip_buffers 16 8k;
+	# gzip_http_version 1.1;
+	# gzip_types text/plain text/css application/json application/javascript text/xml application/xml application/xml+rss text/javascript;
+
+	##
+	# Virtual Host Configs
+	##
+
+	include /etc/nginx/conf.d/*.conf;
+	include /etc/nginx/sites-enabled/*;
+}
+
+
+#mail {
+#	# See sample authentication script at:
+#	# http://wiki.nginx.org/ImapAuthenticateWithApachePhpScript
+#
+#	# auth_http localhost/auth.php;
+#	# pop3_capabilities "TOP" "USER";
+#	# imap_capabilities "IMAP4rev1" "UIDPLUS";
+#
+#	server {
+#		listen     localhost:110;
+#		protocol   pop3;
+#		proxy      on;
+#	}
+#
+#	server {
+#		listen     localhost:143;
+#		protocol   imap;
+#		proxy      on;
+#	}
+#}
+
+# configuration file /etc/nginx/mime.types:
+
+types {
+    text/html                                        html htm shtml;
+    text/css                                         css;
+    text/xml                                         xml;
+    image/gif                                        gif;
+    image/jpeg                                       jpeg jpg;
+    application/javascript                           js;
+    application/atom+xml                             atom;
+    application/rss+xml                              rss;
+
+    text/mathml                                      mml;
+    text/plain                                       txt;
+    text/vnd.sun.j2me.app-descriptor                 jad;
+    text/vnd.wap.wml                                 wml;
+    text/x-component                                 htc;
+
+    image/avif                                       avif;
+    image/png                                        png;
+    image/svg+xml                                    svg svgz;
+    image/tiff                                       tif tiff;
+    image/vnd.wap.wbmp                               wbmp;
+    image/webp                                       webp;
+    image/x-icon                                     ico;
+    image/x-jng                                      jng;
+    image/x-ms-bmp                                   bmp;
+
+    font/woff                                        woff;
+    font/woff2                                       woff2;
+
+    application/java-archive                         jar war ear;
+    application/json                                 json;
+    application/mac-binhex40                         hqx;
+    application/msword                               doc;
+    application/pdf                                  pdf;
+    application/postscript                           ps eps ai;
+    application/rtf                                  rtf;
+    application/vnd.apple.mpegurl                    m3u8;
+    application/vnd.google-earth.kml+xml             kml;
+    application/vnd.google-earth.kmz                 kmz;
+    application/vnd.ms-excel                         xls;
+    application/vnd.ms-fontobject                    eot;
+    application/vnd.ms-powerpoint                    ppt;
+    application/vnd.oasis.opendocument.graphics      odg;
+    application/vnd.oasis.opendocument.presentation  odp;
+    application/vnd.oasis.opendocument.spreadsheet   ods;
+    application/vnd.oasis.opendocument.text          odt;
+    application/vnd.openxmlformats-officedocument.presentationml.presentation
+                                                     pptx;
+    application/vnd.openxmlformats-officedocument.spreadsheetml.sheet
+                                                     xlsx;
+    application/vnd.openxmlformats-officedocument.wordprocessingml.document
+                                                     docx;
+    application/vnd.wap.wmlc                         wmlc;
+    application/wasm                                 wasm;
+    application/x-7z-compressed                      7z;
+    application/x-cocoa                              cco;
+    application/x-java-archive-diff                  jardiff;
+    application/x-java-jnlp-file                     jnlp;
+    application/x-makeself                           run;
+    application/x-perl                               pl pm;
+    application/x-pilot                              prc pdb;
+    application/x-rar-compressed                     rar;
+    application/x-redhat-package-manager             rpm;
+    application/x-sea                                sea;
+    application/x-shockwave-flash                    swf;
+    application/x-stuffit                            sit;
+    application/x-tcl                                tcl tk;
+    application/x-x509-ca-cert                       der pem crt;
+    application/x-xpinstall                          xpi;
+    application/xhtml+xml                            xhtml;
+    application/xspf+xml                             xspf;
+    application/zip                                  zip;
+
+    application/octet-stream                         bin exe dll;
+    application/octet-stream                         deb;
+    application/octet-stream                         dmg;
+    application/octet-stream                         iso img;
+    application/octet-stream                         msi msp msm;
+
+    audio/midi                                       mid midi kar;
+    audio/mpeg                                       mp3;
+    audio/ogg                                        ogg;
+    audio/x-m4a                                      m4a;
+    audio/x-realaudio                                ra;
+
+    video/3gpp                                       3gpp 3gp;
+    video/mp2t                                       ts;
+    video/mp4                                        mp4;
+    video/mpeg                                       mpeg mpg;
+    video/ogg                                        ogv;
+    video/quicktime                                  mov;
+    video/webm                                       webm;
+    video/x-flv                                      flv;
+    video/x-m4v                                      m4v;
+    video/x-matroska                                 mkv;
+    video/x-mng                                      mng;
+    video/x-ms-asf                                   asx asf;
+    video/x-ms-wmv                                   wmv;
+    video/x-msvideo                                  avi;
+}
+
+# configuration file /etc/nginx/sites-enabled/call.migrahosting.com.conf:
+# /etc/nginx/sites-available/call.migrahosting.com.conf
+# MigraSoftphone - Web Softphone SPA
+# 
+# This serves the web-based softphone application at call.migrahosting.com
+
+server {
+    if ($host = call.migrahosting.com) {
+        return 301 https://$host$request_uri;
+    } # managed by Certbot
+
+
+    listen 80;
+    listen [::]:80;
+    server_name call.migrahosting.com;
+    
+    # Redirect HTTP to HTTPS
+    return 301 https://$host$request_uri;
+
+
+}
+
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    server_name call.migrahosting.com;
+
+    # SSL certificates (Let's Encrypt)
+    ssl_certificate /etc/letsencrypt/live/call.migrahosting.com/fullchain.pem; # managed by Certbot
+    ssl_certificate_key /etc/letsencrypt/live/call.migrahosting.com/privkey.pem; # managed by Certbot
+    ssl_trusted_certificate /etc/letsencrypt/live/call.migrahosting.com/chain.pem;
+
+    # SSL settings
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_prefer_server_ciphers on;
+    ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384;
+    ssl_session_cache shared:SSL:10m;
+    ssl_session_timeout 1d;
+    ssl_stapling on;
+    ssl_stapling_verify on;
+
+    # Security headers
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-XSS-Protection "1; mode=block" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+
+    # Root for web softphone SPA
+    root /var/www/call.migrahosting.com;
+    index index.html;
+
+    # SPA routing - serve index.html for all routes
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+
+    # Cache static assets
+    location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot)$ {
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+    }
+
+    # Health check
+    location /health {
+        return 200 'OK';
+        add_header Content-Type text/plain;
+    }
+
+    # Deny hidden files
+    location ~ /\. {
+        deny all;
+    }
+
+    # Logging
+    access_log /var/log/nginx/call.migrahosting.com.access.log;
+    error_log /var/log/nginx/call.migrahosting.com.error.log;
+
+}
+
+# configuration file /etc/nginx/sites-enabled/console.mb.migrahosting.com.conf:
+server {
+    listen 80;
+    server_name console.mb.migrahosting.com;
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl;
+    server_name console.mb.migrahosting.com;
+    
+    ssl_certificate /etc/letsencrypt/live/console.mb.migrahosting.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/console.mb.migrahosting.com/privkey.pem;
+    include /etc/letsencrypt/options-ssl-nginx.conf;
+    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+    
+    
+    location / {
+        proxy_pass http://100.107.92.101:9001;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        
+        # WebSocket headers
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }
+}
+
+# configuration file /etc/letsencrypt/options-ssl-nginx.conf:
+# This file contains important security parameters. If you modify this file
+# manually, Certbot will be unable to automatically provide future security
+# updates. Instead, Certbot will print and log an error message with a path to
+# the up-to-date file that you will need to refer to when manually updating
+# this file. Contents are based on https://ssl-config.mozilla.org
+
+ssl_session_cache shared:le_nginx_SSL:10m;
+ssl_session_timeout 1440m;
+ssl_session_tickets off;
+
+ssl_protocols TLSv1.2 TLSv1.3;
+ssl_prefer_server_ciphers off;
+
+ssl_ciphers "ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:DHE-RSA-AES128-GCM-SHA256:DHE-RSA-AES256-GCM-SHA384";
+
+# configuration file /etc/nginx/sites-enabled/console.migradrive.com.conf:
+# HTTP
+server {
+    listen 80;
+    listen [::]:80;
+    server_name console.migradrive.com;
+
+    location /.well-known/acme-challenge/ { root /var/www/html; }
+    location / { return 301 https://$host$request_uri; }
+}
+
+# HTTPS
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    server_name console.migradrive.com;
+
+    ssl_certificate /etc/letsencrypt/live/console.migradrive.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/console.migradrive.com/privkey.pem;
+    include /etc/letsencrypt/options-ssl-nginx.conf;
+    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+
+    location / {
+        proxy_pass https://10.1.10.240;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+
+        proxy_ssl_server_name on;
+        proxy_ssl_name $host;
+        proxy_ssl_verify off;
+
+        proxy_connect_timeout 10s;
+        proxy_read_timeout 300s;
+    }
+}
+
+# configuration file /etc/nginx/sites-enabled/elizefoundation.org.conf:
+# HTTP -> HTTPS Redirect
+server {
+    listen 80 ;
+    listen [::]:80 ;
+    server_name elizefoundation.org www.elizefoundation.org;
+    client_max_body_size 256M;
+    return 301 https://$host$request_uri;
+}
+
+# HTTPS
+server {
+    listen 443 ssl http2 ;
+    listen [::]:443 ssl http2 ;
+    server_name elizefoundation.org www.elizefoundation.org;
+    client_max_body_size 256M;
+
+    root /srv/web/clients/elizefoundation.org/public;
+    index index.php index.html index.htm;
+
+    ssl_certificate /etc/letsencrypt/live/elizefoundation.org/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/elizefoundation.org/privkey.pem;
+    include /etc/letsencrypt/options-ssl-nginx.conf;
+    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+
+    access_log /var/log/nginx/elizefoundation.org.access.log;
+    error_log  /var/log/nginx/elizefoundation.org.error.log;
+
+    location / {
+        try_files $uri $uri/ /index.php?$args;
+    }
+
+    location ~ \.php$ {
+        include fastcgi_params;
+        fastcgi_pass unix:/run/php/php8.3-fpm.sock;
+        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+    }
+}
+
+# configuration file /etc/nginx/fastcgi_params:
+
+fastcgi_param  QUERY_STRING       $query_string;
+fastcgi_param  REQUEST_METHOD     $request_method;
+fastcgi_param  CONTENT_TYPE       $content_type;
+fastcgi_param  CONTENT_LENGTH     $content_length;
+
+fastcgi_param  SCRIPT_NAME        $fastcgi_script_name;
+fastcgi_param  REQUEST_URI        $request_uri;
+fastcgi_param  DOCUMENT_URI       $document_uri;
+fastcgi_param  DOCUMENT_ROOT      $document_root;
+fastcgi_param  SERVER_PROTOCOL    $server_protocol;
+fastcgi_param  REQUEST_SCHEME     $scheme;
+fastcgi_param  HTTPS              $https if_not_empty;
+
+fastcgi_param  GATEWAY_INTERFACE  CGI/1.1;
+fastcgi_param  SERVER_SOFTWARE    nginx/$nginx_version;
+
+fastcgi_param  REMOTE_ADDR        $remote_addr;
+fastcgi_param  REMOTE_PORT        $remote_port;
+fastcgi_param  REMOTE_USER        $remote_user;
+fastcgi_param  SERVER_ADDR        $server_addr;
+fastcgi_param  SERVER_PORT        $server_port;
+fastcgi_param  SERVER_NAME        $server_name;
+
+# PHP only, required if PHP was built with --enable-force-cgi-redirect
+fastcgi_param  REDIRECT_STATUS    200;
+
+# configuration file /etc/nginx/sites-enabled/holisticgroupllc.com.conf:
+# Maintenance mode - HTTP only
+server {
+    listen 80;
+    server_name holisticgroupllc.com www.holisticgroupllc.com;
+    client_max_body_size 256M;
+
+    root /srv/web/clients/holisticgroupllc.com;
+
+    location / {
+        return 503;
+    }
+
+    error_page 503 @maintenance;
+    location @maintenance {
+        rewrite ^(.*)$ /maintenance.html break;
+    }
+}
+
+# HTTPS - Also maintenance
+server {
+    listen 443 ssl;
+    server_name holisticgroupllc.com www.holisticgroupllc.com;
+    client_max_body_size 256M;
+
+    ssl_certificate /etc/letsencrypt/live/holisticgroupllc.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/holisticgroupllc.com/privkey.pem;
+    include /etc/letsencrypt/options-ssl-nginx.conf;
+    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+
+    root /srv/web/clients/holisticgroupllc.com;
+
+    location / {
+        return 503;
+    }
+
+    error_page 503 @maintenance;
+    location @maintenance {
+        rewrite ^(.*)$ /maintenance.html break;
+    }
+}
+
+# configuration file /etc/nginx/sites-enabled/intake.migrahosting.com:
+server {
+    listen 80;
+    listen [::]:80;
+    server_name intake.migrahosting.com;
+    return 301 https://$server_name$request_uri;
+}
+
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    server_name intake.migrahosting.com;
+
+    # SSL certificates
+    ssl_certificate /etc/letsencrypt/live/intake.migrahosting.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/intake.migrahosting.com/privkey.pem;
+    include /etc/letsencrypt/options-ssl-nginx.conf;
+    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+
+    # No cache for HTML files
+    location ~* \.html$ {
+        add_header Cache-Control "no-store, no-cache, must-revalidate, max-age=0";
+        add_header Pragma "no-cache";
+        proxy_pass http://127.0.0.1:4000;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # Proxy to Node.js app
+    location / {
+        proxy_pass http://127.0.0.1:4000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_connect_timeout 60s;
+        proxy_send_timeout 60s;
+        proxy_read_timeout 60s;
+        client_max_body_size 50M;
+    }
+
+    access_log /var/log/nginx/intake.migrahosting.com.access.log;
+    error_log /var/log/nginx/intake.migrahosting.com.error.log;
+}
+
+# configuration file /etc/nginx/sites-enabled/lituation.migrahosting.com.conf:
+# lituation.migrahosting.com (legacy staging) -> redirect to lituationdjs.migrahosting.com
+
+server {
+  listen 80;
+  listen [::]:80;
+  server_name lituation.migrahosting.com;
+  return 301 https://lituationdjs.migrahosting.com$request_uri;
+}
+
+server {
+  listen 443 ssl;
+  listen [::]:443 ssl;
+  server_name lituation.migrahosting.com;
+
+  ssl_certificate     /etc/letsencrypt/live/lituation.migrahosting.com/fullchain.pem;
+  ssl_certificate_key /etc/letsencrypt/live/lituation.migrahosting.com/privkey.pem;
+  include /etc/letsencrypt/options-ssl-nginx.conf;
+  ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+
+  return 301 https://lituationdjs.migrahosting.com$request_uri;
+}
+
+# configuration file /etc/nginx/sites-enabled/lituationdjs.com.conf:
+# lituationdjs.com - WordPress site on CloudPod 139
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name lituationdjs.com www.lituationdjs.com;
+    client_max_body_size 256M;
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    server_name lituationdjs.com www.lituationdjs.com;
+    client_max_body_size 256M;
+
+    ssl_certificate /etc/letsencrypt/live/lituationdjs.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/lituationdjs.com/privkey.pem;
+    include /etc/letsencrypt/options-ssl-nginx.conf;
+    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-XSS-Protection "1; mode=block" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+
+    access_log /var/log/nginx/lituationdjs.com.access.log;
+    error_log  /var/log/nginx/lituationdjs.com.error.log;
+
+    location / {
+        proxy_pass http://10.1.10.53:80;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Host $host;
+
+        proxy_buffer_size 128k;
+        proxy_buffers 4 256k;
+        proxy_busy_buffers_size 256k;
+
+        proxy_connect_timeout 60s;
+        proxy_send_timeout 60s;
+        proxy_read_timeout 60s;
+    }
+
+    location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot)$ {
+        proxy_pass http://10.1.10.53:80;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        expires 30d;
+        add_header Cache-Control "public, immutable";
+    }
+}
+
+# configuration file /etc/nginx/sites-enabled/lituationdjs.migrahosting.com.conf:
+# lituationdjs.migrahosting.com - Lituation DJs (staging)
+server {
+    server_name lituationdjs.migrahosting.com;
+
+    root /var/www/lituationdjs.com;
+    index index.php index.html index.htm;
+
+    access_log /var/log/nginx/lituationdjs.migrahosting.com.access.log;
+    error_log /var/log/nginx/lituationdjs.migrahosting.com.error.log;
+
+    client_max_body_size 50M;
+
+    location / {
+        try_files $uri $uri/ /index.php?$args;
+    }
+
+    location ~ \.php$ {
+        include snippets/fastcgi-php.conf;
+        fastcgi_pass unix:/run/php/php8.3-fpm.sock;
+        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+        include fastcgi_params;
+    }
+
+    location = /wp-config.php { deny all; }
+    location ~ /\. { deny all; }
+
+    listen [::]:443 ssl; # managed by Certbot
+    listen 443 ssl; # managed by Certbot
+    ssl_certificate /etc/letsencrypt/live/lituationdjs.migrahosting.com/fullchain.pem; # managed by Certbot
+    ssl_certificate_key /etc/letsencrypt/live/lituationdjs.migrahosting.com/privkey.pem; # managed by Certbot
+    include /etc/letsencrypt/options-ssl-nginx.conf; # managed by Certbot
+    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem; # managed by Certbot
+
+
+    add_header Strict-Transport-Security "max-age=31536000" always; # managed by Certbot
+
+}
+
+server {
+    if ($host = lituationdjs.migrahosting.com) {
+        return 301 https://$host$request_uri;
+    } # managed by Certbot
+
+
+    listen 80;
+    listen [::]:80;
+    server_name lituationdjs.migrahosting.com;
+
+    root /var/www/lituationdjs.com;
+    index index.php index.html index.htm;
+
+    access_log /var/log/nginx/lituationdjs.migrahosting.com.access.log;
+    error_log /var/log/nginx/lituationdjs.migrahosting.com.error.log;
+
+    client_max_body_size 50M;
+
+    location / {
+        try_files $uri $uri/ /index.php?$args;
+    }
+
+    location ~ \.php$ {
+        include snippets/fastcgi-php.conf;
+        fastcgi_pass unix:/run/php/php8.3-fpm.sock;
+        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+        include fastcgi_params;
+    }
+
+    location = /wp-config.php { deny all; }
+    location ~ /\. { deny all; }
+
+
+
+
+}
+# configuration file /etc/nginx/snippets/fastcgi-php.conf:
+# regex to split $uri to $fastcgi_script_name and $fastcgi_path
+fastcgi_split_path_info ^(.+?\.php)(/.*)$;
+
+# Check that the PHP script exists before passing it
+try_files $fastcgi_script_name =404;
+
+# Bypass the fact that try_files resets $fastcgi_path_info
+# see: http://trac.nginx.org/nginx/ticket/321
+set $path_info $fastcgi_path_info;
+fastcgi_param PATH_INFO $path_info;
+
+fastcgi_index index.php;
+include fastcgi.conf;
+
+# configuration file /etc/nginx/fastcgi.conf:
+
+fastcgi_param  SCRIPT_FILENAME    $document_root$fastcgi_script_name;
+fastcgi_param  QUERY_STRING       $query_string;
+fastcgi_param  REQUEST_METHOD     $request_method;
+fastcgi_param  CONTENT_TYPE       $content_type;
+fastcgi_param  CONTENT_LENGTH     $content_length;
+
+fastcgi_param  SCRIPT_NAME        $fastcgi_script_name;
+fastcgi_param  REQUEST_URI        $request_uri;
+fastcgi_param  DOCUMENT_URI       $document_uri;
+fastcgi_param  DOCUMENT_ROOT      $document_root;
+fastcgi_param  SERVER_PROTOCOL    $server_protocol;
+fastcgi_param  REQUEST_SCHEME     $scheme;
+fastcgi_param  HTTPS              $https if_not_empty;
+
+fastcgi_param  GATEWAY_INTERFACE  CGI/1.1;
+fastcgi_param  SERVER_SOFTWARE    nginx/$nginx_version;
+
+fastcgi_param  REMOTE_ADDR        $remote_addr;
+fastcgi_param  REMOTE_PORT        $remote_port;
+fastcgi_param  REMOTE_USER        $remote_user;
+fastcgi_param  SERVER_ADDR        $server_addr;
+fastcgi_param  SERVER_PORT        $server_port;
+fastcgi_param  SERVER_NAME        $server_name;
+
+# PHP only, required if PHP was built with --enable-force-cgi-redirect
+fastcgi_param  REDIRECT_STATUS    200;
+
+# configuration file /etc/nginx/sites-enabled/mail.migrahosting.com.conf:
+# mail.migrahosting.com - MigraMail Webmail React App
+server {
+    listen 80;
+    listen [::]:80;
+    server_name mail.migrahosting.com;
+    return 301 https://mail.migrahosting.com$request_uri;
+}
+
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    server_name mail.migrahosting.com;
+
+    ssl_certificate     /etc/letsencrypt/live/mail.migrahosting.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/mail.migrahosting.com/privkey.pem;
+    include /etc/letsencrypt/options-ssl-nginx.conf;
+    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+
+    root /var/www/mail.migrahosting.com;
+    index index.html;
+
+    # Gzip compression
+    gzip on;
+    gzip_types text/plain text/css application/json application/javascript text/xml application/xml;
+
+    # Cache static assets
+    location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2)$ {
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+    }
+
+    # SPA fallback - all routes go to index.html
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+
+    # Proxy API calls to mail-core backend on port 3010
+    location /api/ {
+        proxy_pass http://100.64.119.23:3010;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_cache_bypass $http_upgrade;
+    }
+
+    # Keep SnappyMail accessible at /snappymail for admin
+    location /snappymail {
+        proxy_pass https://100.64.119.23/snappymail;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_ssl_verify off;
+    }
+}
+
+# configuration file /etc/nginx/sites-enabled/mb.migrahosting.com.conf:
+server {
+    listen 80;
+    listen [::]:80;
+    server_name mb.migrahosting.com;
+    return 301 https://mb.migrahosting.com$request_uri;
+}
+
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    server_name mb.migrahosting.com;
+
+    ssl_certificate     /etc/letsencrypt/live/mb.migrahosting.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/mb.migrahosting.com/privkey.pem;
+    include /etc/letsencrypt/options-ssl-nginx.conf;
+    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+
+    client_max_body_size 0;
+
+    location / {
+        # MinIO on cloud-core (currently offline, will return 502 until cloud-core is back)
+        proxy_pass         http://100.65.164.127:9000;
+        proxy_set_header   Host $host;
+        proxy_set_header   X-Real-IP $remote_addr;
+        proxy_set_header   X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto $scheme;
+        proxy_http_version 1.1;
+        proxy_set_header   Connection "";
+        
+        # MinIO-specific headers
+        proxy_set_header   X-Forwarded-Host $host;
+        proxy_set_header   X-Forwarded-Port $server_port;
+    }
+}
+
+# configuration file /etc/nginx/sites-enabled/migradrive-migrahosting-http-proxy.conf:
+# /etc/nginx/sites-available/migradrive-migrahosting-http-proxy.conf
+# SRV1 front-door: temporary HTTP vhost(s) to support ACME HTTP-01 and proxy to k3s ingress LB.
+# After NAT is pointed to SRV1, run certbot --nginx for these hostnames.
+
+server {
+  listen 80;
+  listen [::]:80;
+
+  server_name migradrive.migrahosting.com console.migradrive.migrahosting.com;
+
+  access_log /var/log/nginx/migradrive-migrahosting.http.access.log;
+  error_log  /var/log/nginx/migradrive-migrahosting.http.error.log;
+
+  location /.well-known/acme-challenge/ {
+    root /var/www/html;
+  }
+
+  location / {
+    proxy_http_version 1.1;
+
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    # Ingress uses X-Forwarded-Proto for ssl-redirect decisions.
+    # Always present as https because SRV1 is the front-door TLS terminator.
+    proxy_set_header X-Forwarded-Proto https;
+    proxy_set_header X-Forwarded-Port 443;
+
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+
+    proxy_read_timeout 300;
+    proxy_send_timeout 300;
+
+    # Ingress for these hosts enforces ssl-redirect; proxying to :80 causes 308 loops.
+    # Re-encrypt on LAN to the ingress LB.
+    proxy_ssl_server_name on;
+    proxy_ssl_name $host;
+    proxy_ssl_verify off;
+
+    proxy_pass https://10.1.10.240;
+  }
+}
+
+# configuration file /etc/nginx/sites-enabled/migradrive.com.conf:
+# HTTP - Redirect to HTTPS
+server {
+    listen 80;
+    server_name migradrive.com www.migradrive.com;
+    return 301 https://$host$request_uri;
+}
+
+# HTTPS
+server {
+    server_name migradrive.com www.migradrive.com;
+    
+    root /srv/web/core/migradrive.com/public;
+    index index.html;
+
+    # Docs (SSI-enabled)
+    location ^~ /docs/_partials/ {
+        internal;
+    }
+
+    location ^~ /docs/ {
+        ssi on;
+        try_files $uri $uri/ /docs/index.html =404;
+    }
+
+
+    access_log /var/log/nginx/migradrive.com.access.log;
+    error_log  /var/log/nginx/migradrive.com.error.log;
+
+    location / {
+        try_files $uri $uri/ =404;
+    }
+
+    location /.well-known/acme-challenge/ {
+        root /var/www/html;
+    }
+    listen 443 ssl;
+    
+    ssl_certificate /etc/letsencrypt/live/migradrive.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/migradrive.com/privkey.pem;
+    include /etc/letsencrypt/options-ssl-nginx.conf;
+    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+}
+
+# configuration file /etc/nginx/sites-enabled/migramail.com.conf:
+# migramail.com - MigraMail Landing + Webmail
+server {
+    listen 80;
+    listen [::]:80;
+    server_name migramail.com www.migramail.com;
+    return 301 https://migramail.com$request_uri;
+}
+
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    server_name www.migramail.com;
+    
+    ssl_certificate     /etc/letsencrypt/live/migramail.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/migramail.com/privkey.pem;
+    include /etc/letsencrypt/options-ssl-nginx.conf;
+    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+    
+    return 301 https://migramail.com$request_uri;
+}
+
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    server_name migramail.com;
+
+    ssl_certificate     /etc/letsencrypt/live/migramail.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/migramail.com/privkey.pem;
+    include /etc/letsencrypt/options-ssl-nginx.conf;
+    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+
+    root /var/www/migramail.com/public;
+    index index.html;
+
+    # Gzip compression
+    gzip on;
+    gzip_types text/plain text/css application/json application/javascript text/xml application/xml;
+
+    # Cache static assets
+    location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2)$ {
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+    }
+
+    # SPA fallback
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+
+    # Proxy API calls to mail-core on port 3010
+    location /api/ {
+        proxy_pass http://100.64.119.23:3010;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_cache_bypass $http_upgrade;
+    }
+}
+
+# configuration file /etc/nginx/sites-enabled/migrapanel.com.conf:
+server {
+  listen 80;
+  server_name migrapanel.com www.migrapanel.com;
+  return 308 https://mpanel.migrahosting.com$request_uri;
+}
+
+server {
+  listen 443 ssl http2;
+  server_name migrapanel.com www.migrapanel.com;
+
+  ssl_certificate     /etc/letsencrypt/live/migrapanel.com/fullchain.pem;
+  ssl_certificate_key /etc/letsencrypt/live/migrapanel.com/privkey.pem;
+  include /etc/letsencrypt/options-ssl-nginx.conf;
+  ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+
+  return 308 https://mpanel.migrahosting.com$request_uri;
+}
+
+# configuration file /etc/nginx/sites-enabled/migravoice.com.conf:
+# /etc/nginx/sites-available/migravoice.com.conf
+# MigraVoice Web Softphone - Production nginx config
+# 
+# This serves:
+#   - / (root): Marketing site or redirect
+#   - /app: Web Softphone SPA
+
+server {
+    if ($host = migravoice.com) {
+        return 301 https://$host$request_uri;
+    } # managed by Certbot
+
+
+    listen 80;
+    listen [::]:80;
+    server_name migravoice.com www.migravoice.com;
+    
+    # Redirect HTTP to HTTPS
+    return 301 https://$host$request_uri;
+
+
+}
+
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    server_name migravoice.com www.migravoice.com;
+
+    # SSL certificates (Let's Encrypt)
+    ssl_certificate /etc/letsencrypt/live/migravoice.com-0001/fullchain.pem; # managed by Certbot
+    ssl_certificate_key /etc/letsencrypt/live/migravoice.com-0001/privkey.pem; # managed by Certbot
+    ssl_trusted_certificate /etc/letsencrypt/live/migravoice.com/chain.pem;
+
+    # SSL settings
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_prefer_server_ciphers on;
+    ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384;
+    ssl_session_cache shared:SSL:10m;
+    ssl_session_timeout 1d;
+    ssl_stapling on;
+    ssl_stapling_verify on;
+
+    # Security headers
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-XSS-Protection "1; mode=block" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+
+    # Root for marketing site (optional - can be a simple landing page)
+    root /var/www/migravoice.com/public;
+    index index.html;
+
+    # Marketing site root
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+
+    # Web Softphone SPA at /app
+    location /app {
+        alias /var/www/migravoice.com/app;
+        try_files $uri $uri/ /app/index.html;
+
+        # Cache static assets
+        location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot)$ {
+            expires 1y;
+            add_header Cache-Control "public, immutable";
+        }
+    }
+
+    # Health check
+    location /health {
+        return 200 'OK';
+        add_header Content-Type text/plain;
+    }
+
+    # Deny hidden files
+    location ~ /\. {
+        deny all;
+    }
+
+    # Logging
+    access_log /var/log/nginx/migravoice.com.access.log;
+    error_log /var/log/nginx/migravoice.com.error.log;
+
+}
+
+# configuration file /etc/nginx/sites-enabled/mpanel.migrahosting.com.conf:
+server {
+    listen 80;
+    listen [::]:80;
+    server_name mpanel.migrahosting.com;
+    access_log /var/log/nginx/mpanel.migrahosting.com.access.log;
+    error_log  /var/log/nginx/mpanel.migrahosting.com.error.log;
+    
+    location / {
+        return 301 https://$server_name$request_uri;
+    }
+}
+
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    server_name mpanel.migrahosting.com;
+
+    ssl_certificate /etc/letsencrypt/live/mpanel.migrahosting.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/mpanel.migrahosting.com/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers HIGH:!aNULL:!MD5;
+
+    root /srv/web/mpanel-frontend;
+    index index.html;
+    client_max_body_size 50M;
+
+    location /api/ {
+        access_log /var/log/nginx/mpanel.api.trace.log mpanel_api_trace;
+        proxy_pass http://100.97.213.11:2271;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 300;
+        proxy_connect_timeout 30;
+        proxy_send_timeout 300;
+    }
+
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+}
+
+# configuration file /etc/nginx/sites-enabled/panel.migrahosting.com.conf:
+server {
+    listen 80;
+    listen [::]:80;
+    server_name panel.migrahosting.com;
+    
+    location / {
+        return 301 https://$server_name$request_uri;
+    }
+}
+
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    server_name panel.migrahosting.com;
+
+    ssl_certificate /etc/letsencrypt/live/panel.migrahosting.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/panel.migrahosting.com/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers HIGH:!aNULL:!MD5;
+
+    root /srv/web/mpanel-frontend;
+    index index.html;
+    client_max_body_size 50M;
+
+    location /api/ {
+        proxy_pass http://10.1.10.206:2271;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 300;
+        proxy_connect_timeout 30;
+        proxy_send_timeout 300;
+    }
+
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+}
+
+# configuration file /etc/nginx/sites-enabled/premtint.com.conf:
+# premtint.com - WordPress site on CloudPod 138
+# Transferred from GoDaddy - Premier Tint Services
+
+# HTTP -> HTTPS redirect
+server {
+    listen 80;
+    listen [::]:80;
+    server_name premtint.com www.premtint.com;
+    client_max_body_size 256M;
+    return 301 https://$host$request_uri;
+}
+
+# HTTPS
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    server_name premtint.com www.premtint.com;
+    client_max_body_size 256M;
+
+    # SSL - will be issued by certbot
+    ssl_certificate /etc/letsencrypt/live/premtint.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/premtint.com/privkey.pem;
+
+    # SSL settings
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_prefer_server_ciphers on;
+    ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384;
+    ssl_session_cache shared:SSL:10m;
+    ssl_session_timeout 1d;
+
+    # Security headers
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-XSS-Protection "1; mode=block" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+
+    # Logging
+    access_log /var/log/nginx/premtint.com.access.log;
+    error_log /var/log/nginx/premtint.com.error.log;
+
+    # Proxy to CloudPod 138 (WordPress)
+    location / {
+        proxy_pass http://10.1.10.54:80;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Host $host;
+        
+        # WordPress needs these
+        proxy_buffer_size 128k;
+        proxy_buffers 4 256k;
+        proxy_busy_buffers_size 256k;
+        
+        # Timeouts
+        proxy_connect_timeout 60s;
+        proxy_send_timeout 60s;
+        proxy_read_timeout 60s;
+    }
+
+    # Static file caching
+    location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot)$ {
+        proxy_pass http://10.1.10.54:80;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        expires 30d;
+        add_header Cache-Control "public, immutable";
+    }
+}
+
+# configuration file /etc/nginx/sites-enabled/pve.migrahosting.com.conf:
+# HTTP -> HTTPS redirect
+server {
+    listen 80;
+    listen [::]:80;
+    server_name pve.migrahosting.com;
+    
+    location /.well-known/acme-challenge/ {
+        root /var/www/html;
+    }
+    
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+
+# HTTPS - Proxmox Reverse Proxy
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    server_name pve.migrahosting.com;
+
+    ssl_certificate     /etc/letsencrypt/live/pve.migrahosting.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/pve.migrahosting.com/privkey.pem;
+    include /etc/letsencrypt/options-ssl-nginx.conf;
+    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+
+    # Proxmox requires large client body size for ISO uploads
+    client_max_body_size 10G;
+    
+    # Timeouts for long-running operations
+    proxy_connect_timeout 600;
+    proxy_send_timeout 600;
+    proxy_read_timeout 600;
+    send_timeout 600;
+
+    location / {
+        proxy_pass https://10.1.10.70:8006;
+        proxy_http_version 1.1;
+        
+        # Required headers for Proxmox
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Host $host;
+        proxy_set_header X-Forwarded-Port $server_port;
+        
+        # WebSocket support for noVNC console
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        
+        # Disable buffering for WebSocket
+        proxy_buffering off;
+        
+        # SSL verification (Proxmox uses self-signed cert)
+        proxy_ssl_verify off;
+    }
+}
+
+# configuration file /etc/nginx/sites-enabled/s3.migradrive.com.conf:
+server {
+    listen 80;
+    listen [::]:80;
+    server_name s3.migradrive.com;
+
+    location /.well-known/acme-challenge/ { root /var/www/html; }
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    server_name s3.migradrive.com;
+
+    ssl_certificate     /etc/letsencrypt/live/s3.migradrive.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/s3.migradrive.com/privkey.pem;
+    include /etc/letsencrypt/options-ssl-nginx.conf;
+    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+
+    # Important for S3 / MinIO
+    client_max_body_size 0;
+
+    location / {
+        proxy_pass         https://10.1.10.240;
+        proxy_set_header   Host $host;
+        proxy_set_header   X-Real-IP $remote_addr;
+        proxy_set_header   X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto $scheme;
+        proxy_http_version 1.1;
+        proxy_set_header   Connection "";
+
+        # MinIO-specific headers
+        proxy_set_header   X-Forwarded-Host $host;
+        proxy_set_header   X-Forwarded-Port $server_port;
+
+        proxy_ssl_server_name on;
+        proxy_ssl_name $host;
+        proxy_ssl_verify off;
+
+        proxy_connect_timeout 10s;
+        proxy_read_timeout 300s;
+    }
+}
+
+# configuration file /etc/nginx/sites-enabled/voice.migrahosting.com.conf:
+# /etc/nginx/sites-available/voice.migrahosting.com.conf
+# MigraVoice - Admin Portal + Voice Backend API
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name voice.migrahosting.com;
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    server_name voice.migrahosting.com;
+
+    # SSL certificates (Let's Encrypt)
+    ssl_certificate /etc/letsencrypt/live/voice.migrahosting.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/voice.migrahosting.com/privkey.pem;
+    ssl_trusted_certificate /etc/letsencrypt/live/voice.migrahosting.com/chain.pem;
+
+    # SSL settings
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_prefer_server_ciphers on;
+    ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384;
+    ssl_session_cache shared:SSL:10m;
+    ssl_session_timeout 1d;
+    ssl_stapling on;
+    ssl_stapling_verify on;
+
+    # Security headers
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-XSS-Protection "1; mode=block" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+
+    # Root for admin portal SPA
+    root /var/www/voice.migrahosting.com;
+    index index.html;
+
+    # API proxy to voice-backend (Node.js on port 3003)
+    location /api/ {
+        proxy_pass http://127.0.0.1:3003/;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_cache_bypass $http_upgrade;
+        proxy_read_timeout 300s;
+        proxy_connect_timeout 75s;
+    }
+
+    # Public Widgets API (no auth required)
+    location /widgets/ {
+        proxy_pass http://127.0.0.1:3003/widgets/;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # CORS for widget embedding
+        add_header Access-Control-Allow-Origin "*" always;
+        add_header Access-Control-Allow-Methods "GET, POST, OPTIONS" always;
+        add_header Access-Control-Allow-Headers "Content-Type, X-Migra-Tenant-Id, X-Migra-Widget-Id" always;
+
+        if ($request_method = OPTIONS) {
+            return 204;
+        }
+    }
+
+    # Public static files for widget SDK
+    location /public/ {
+        alias /var/www/voice.migrahosting.com/public/;
+        expires 1d;
+        add_header Cache-Control "public, immutable";
+        add_header Access-Control-Allow-Origin "*";
+    }
+
+    # Admin WebSocket for real-time updates
+    location /ws/admin {
+        proxy_pass http://127.0.0.1:3003/ws/admin;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 86400s;
+        proxy_send_timeout 86400s;
+    }
+
+    # Health check endpoint
+    location = /health {
+        return 200 "OK";
+        add_header Content-Type text/plain;
+    }
+
+    # Deny hidden files
+    location ~ /\. {
+        deny all;
+    }
+
+    # SPA routing - serve index.html for all other routes
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+
+    # Logging
+    access_log /var/log/nginx/voice.migrahosting.com.access.log;
+    error_log /var/log/nginx/voice.migrahosting.com.error.log;
+}
+
+# configuration file /etc/nginx/sites-enabled/zz-migrahosting.com.conf:
+server {
+    listen 80 default_server;
+    listen [::]:80;
+    server_name migrahosting.com www.migrahosting.com;
+    return 301 https://migrahosting.com$request_uri;
+}
+
+server {
+    listen 443 ssl default_server;
+    listen [::]:443 ssl;
+    server_name migrahosting.com www.migrahosting.com;
+
+    ssl_certificate     /etc/letsencrypt/live/migrahosting.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/migrahosting.com/privkey.pem;
+    include /etc/letsencrypt/options-ssl-nginx.conf;
+    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+
+    root /srv/web/migrahosting;
+    index index.html index.php;
+
+    # Proxy portal auth to mpanel-core for social login
+    location /api/portal/ {
+        proxy_pass https://mpanel.migrahosting.com/api/portal/;
+        proxy_http_version 1.1;
+        proxy_set_header Host mpanel.migrahosting.com;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_ssl_server_name on;
+        proxy_read_timeout 60s;
+    }
+
+    # Marketing API routes - proxy to local marketing-api
+    location /api/ {
+        proxy_pass http://127.0.0.1:4242;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 60s;
+    }
+
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+}
+

@@ -1,0 +1,7 @@
+Name                  Type     Status     Total (KiB)      Used (KiB) Available (KiB)        %
+clients-backup     zfspool     active      1885863936      1867423228        18440708   99.02%
+clients-main       zfspool     active       942932007       869760252        73171755   92.24%
+iso-store              dir     active       491135216         7370056       458743396    1.50%
+local                  dir     active        40453376        14930508        23435752   36.91%
+t7-backup              dir     active      1921725720      1921512848               0   99.99%
+vzdump-backups         dir     active       789255424       770814720        18440704   97.66%

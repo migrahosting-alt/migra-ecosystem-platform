@@ -1,0 +1,11 @@
+      VMID NAME                 STATUS     MEM(MB)    BOOTDISK(GB) PID       
+       100 SRV1-WEB             running    8192             100.00 239508    
+       101 MAIL-CORE            running    4096              32.00 239674    
+       102 dns-core             running    4096              32.00 3882422   
+       103 CLOUD-CORE           running    4096              52.00 252062    
+       104 VOIP-CORE            running    4096             100.00 252206    
+       105 MIGRAGUARD-QUANTUM   stopped    4096              32.00 0         
+       106 db-core              running    4096              32.00 239388    
+       200 BASE-UBUNTU-24       stopped    4096              32.00 0         
+       220 MPANEL-CORE          running    8192             200.00 239447    
+       250 ubuntu-24-base-working stopped    4096              32.00 0         

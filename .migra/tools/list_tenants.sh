@@ -1,0 +1,1 @@
+/home/bonex/.migra-tools/list_tenants.sh

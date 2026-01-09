@@ -1,0 +1,1 @@
+/home/bonex/.migra-tools/backup_pods.sh

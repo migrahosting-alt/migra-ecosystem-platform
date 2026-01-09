@@ -1,0 +1,1 @@
+/home/bonex/.migra-tools/dns_manage.sh

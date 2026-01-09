@@ -1,0 +1,41 @@
+{
+  "scanned_at": "2026-01-08T09:33:02Z",
+  "infrastructure": {
+    "hypervisor": {
+      "alias": "pve",
+      "tailscale_ip": "100.73.199.109",
+      "vms": [
+        { "id": 100, "name": "SRV1-WEB", "status": "running", "ip": "100.68.239.94" },
+        { "id": 101, "name": "MAIL-CORE", "status": "running", "ip": "100.64.119.23" },
+        { "id": 102, "name": "dns-core", "status": "running", "ip": "100.73.241.82" },
+        { "id": 103, "name": "CLOUD-CORE", "status": "running", "ip": "100.120.118.39" },
+        { "id": 104, "name": "VOIP-CORE", "status": "running", "ip": "100.111.4.85" },
+        { "id": 106, "name": "db-core", "status": "running", "ip": "100.98.54.45" },
+        { "id": 220, "name": "MPANEL-CORE", "status": "running", "ip": "100.97.213.11" }
+      ],
+      "lxcs": [
+        { "id": 110, "name": "migra-stacks", "status": "running", "lan_ip": "10.1.10.104" },
+        { "id": 136, "name": "pod-elizefoundation", "status": "running", "lan_ip": "10.1.10.51" },
+        { "id": 137, "name": "pod-premtint", "status": "running", "lan_ip": "10.1.10.54" },
+        { "id": 138, "name": "pod-holisticgroupllc", "status": "running", "lan_ip": "10.1.10.52" },
+        { "id": 139, "name": "pod-lituationdjs", "status": "running", "lan_ip": "10.1.10.53" }
+      ]
+    },
+    "routing": {
+      "main_gateway": "srv1-web",
+      "domains": [
+        { "domain": "migrapanel.com", "upstream": "http://10.1.10.206:2271" },
+        { "domain": "migrahosting.com", "upstream": "http://127.0.0.1:4242" },
+        { "domain": "intake.migrahosting.com", "upstream": "http://100.97.213.11:2271" },
+        { "domain": "lituationdjs.com", "target_pod_ip": "10.1.10.53" },
+        { "domain": "premtint.com", "target_pod_ip": "10.1.10.54" }
+      ]
+    },
+    "mpanel": {
+      "host": "mpanel-core",
+      "pm2_processes": [
+        { "name": "mpanel-api", "status": "online", "uptime": "7h", "mem": "693.0mb" }
+      ]
+    }
+  }
+}

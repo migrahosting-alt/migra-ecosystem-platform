@@ -1,0 +1,31 @@
+lo               UNKNOWN        127.0.0.1/8 ::1/128 
+enp10s0          UP             
+vmbr0            UP             10.1.10.70/24 fe80::befc:e7ff:fe52:96e3/64 
+tailscale0       UNKNOWN        100.73.199.109/32 fd7a:115c:a1e0::4d34:c76d/128 fe80::866f:da1b:7e30:982c/64 
+veth137i0@if2    UP             
+veth9099i0@if2   UP             
+tap106i0         UNKNOWN        
+tap220i0         UNKNOWN        
+tap100i0         UNKNOWN        
+tap101i0         UNKNOWN        
+tap103i0         UNKNOWN        
+tap104i0         UNKNOWN        
+veth136i0@if2    UP             
+veth138i0@if2    UP             
+veth139i0@if2    UP             
+tap102i0         UNKNOWN        
+auto lo
+iface lo inet loopback
+
+iface enp10s0 inet manual
+
+auto vmbr0
+iface vmbr0 inet static
+	address 10.1.10.70/24
+	gateway 10.1.10.1
+	bridge-ports enp10s0
+	bridge-stp off
+	bridge-fd 0
+
+
+source /etc/network/interfaces.d/*

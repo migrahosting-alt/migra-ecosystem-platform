@@ -1,0 +1,7 @@
+VMID       Status     Lock         Name                
+136        running                 pod-elizefoundation 
+137        running                 pod-premtint        
+138        running                 pod-holisticgroupllc
+139        running                 pod-lituationdjs    
+9000       stopped                 cloudpod-template   
+9099       running                 cloudpod-template-backup

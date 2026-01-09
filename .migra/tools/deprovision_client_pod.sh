@@ -1,0 +1,1 @@
+/home/bonex/.migra-tools/deprovision_client_pod.sh

@@ -1,0 +1,26 @@
+● nginx.service - A high performance web server and a reverse proxy server
+     Loaded: loaded (/usr/lib/systemd/system/nginx.service; enabled; preset: enabled)
+     Active: active (running) since Mon 2025-12-22 23:35:39 UTC; 2 weeks 2 days ago
+       Docs: man:nginx(8)
+    Process: 219722 ExecReload=/usr/sbin/nginx -g daemon on; master_process on; -s reload (code=exited, status=0/SUCCESS)
+   Main PID: 1231 (nginx)
+      Tasks: 5 (limit: 9408)
+     Memory: 53.9M (peak: 96.6M)
+        CPU: 4min 19.181s
+     CGroup: /system.slice/nginx.service
+             ├─  1231 "nginx: master process /usr/sbin/nginx -g daemon on; master_process on;"
+             ├─219728 "nginx: worker process"
+             ├─219729 "nginx: worker process"
+             ├─219730 "nginx: worker process"
+             └─219731 "nginx: worker process"
+
+Jan 07 02:18:46 srv1.migrahosting.com nginx[215355]: 2026/01/07 02:18:46 [notice] 215355#215355: signal process started
+Jan 07 02:18:46 srv1.migrahosting.com systemd[1]: Reloaded nginx.service - A high performance web server and a reverse proxy server.
+Jan 07 14:16:28 srv1.migrahosting.com systemd[1]: Reloading nginx.service - A high performance web server and a reverse proxy server...
+Jan 07 14:16:28 srv1.migrahosting.com nginx[219722]: 2026/01/07 14:16:28 [warn] 219722#219722: protocol options redefined for 0.0.0.0:443 in /etc/nginx/sites-enabled/migrapanel.com.conf:8
+Jan 07 14:16:28 srv1.migrahosting.com nginx[219722]: 2026/01/07 14:16:28 [warn] 219722#219722: protocol options redefined for 0.0.0.0:443 in /etc/nginx/sites-enabled/migravoice.com.conf:25
+Jan 07 14:16:28 srv1.migrahosting.com nginx[219722]: 2026/01/07 14:16:28 [warn] 219722#219722: "ssl_stapling" ignored, no OCSP responder URL in the certificate "/etc/letsencrypt/live/call.migrahosting.com/fullchain.pem"
+Jan 07 14:16:28 srv1.migrahosting.com nginx[219722]: 2026/01/07 14:16:28 [warn] 219722#219722: "ssl_stapling" ignored, no OCSP responder URL in the certificate "/etc/letsencrypt/live/migravoice.com-0001/fullchain.pem"
+Jan 07 14:16:28 srv1.migrahosting.com nginx[219722]: 2026/01/07 14:16:28 [warn] 219722#219722: "ssl_stapling" ignored, no OCSP responder URL in the certificate "/etc/letsencrypt/live/voice.migrahosting.com/fullchain.pem"
+Jan 07 14:16:28 srv1.migrahosting.com nginx[219722]: 2026/01/07 14:16:28 [notice] 219722#219722: signal process started
+Jan 07 14:16:28 srv1.migrahosting.com systemd[1]: Reloaded nginx.service - A high performance web server and a reverse proxy server.

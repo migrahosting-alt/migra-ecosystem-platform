@@ -1,0 +1,100 @@
+name: Migra NGINX Gate
+
+on:
+  pull_request:
+    branches: ["**"]
+
+permissions:
+  contents: read
+
+jobs:
+  nginx-gate:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Determine changed files
+        id: changed
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE="${{ github.event.pull_request.base.sha }}"
+          HEAD="${{ github.event.pull_request.head.sha }}"
+          echo "Base: $BASE"
+          echo "Head: $HEAD"
+
+          git diff --name-only "$BASE" "$HEAD" | tee /tmp/changed_files.txt
+
+          # Define what "NGINX change" means in your repo.
+          # Canonical path: infra/nginx/
+          NGINX_CHANGED=0
+          if grep -E -q '(^infra/nginx/|^\.migra/applypacks/|^\.migra/runbooks/nginx-|^\.migra/ci/)' /tmp/changed_files.txt; then
+            NGINX_CHANGED=1
+          fi
+
+          echo "nginx_changed=$NGINX_CHANGED" >> "$GITHUB_OUTPUT"
+
+      - name: Enforce documentation + snapshot updates for NGINX changes
+        if: steps.changed.outputs.nginx_changed == '1'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # Required artifacts when NGINX/apply packs change
+          REQUIRED=(
+            ".migra/runbooks/nginx-hardening-apply-pack.md"
+            ".migra/runbooks/nginx-tls.md"
+            ".migra/runbooks/mpanel-security.md"
+            ".migra/infra.snapshot.json"
+            ".migra/infra.snapshot.md"
+            ".migra/scan.report.md"
+          )
+
+          for f in "${REQUIRED[@]}"; do
+            if [[ ! -f "$f" ]]; then
+              echo "❌ Missing required file: $f"
+              echo "Create it (or commit it) before merging NGINX changes."
+              exit 1
+            fi
+          done
+
+          # Ensure at least one of the docs/snapshot files changed in the PR
+          BASE="${{ github.event.pull_request.base.sha }}"
+          HEAD="${{ github.event.pull_request.head.sha }}"
+          git diff --name-only "$BASE" "$HEAD" | tee /tmp/changed_files.txt
+
+          if ! grep -E -q '(^\.migra/runbooks/nginx-|^\.migra/runbooks/mpanel-security\.md$|^\.migra/infra\.snapshot\.(json|md)$|^\.migra/scan\.report\.md$)' /tmp/changed_files.txt; then
+            echo "❌ NGINX-related changes detected, but runbooks/snapshots were not updated."
+            echo "Update at least one of:"
+            echo " - .migra/runbooks/nginx-tls.md"
+            echo " - .migra/runbooks/mpanel-security.md"
+            echo " - .migra/infra.snapshot.json / .md"
+            echo " - .migra/scan.report.md"
+            exit 1
+          fi
+
+          echo "✅ Documentation + snapshot gate passed."
+
+      - name: Validate NGINX config (nginx -t) in container
+        if: steps.changed.outputs.nginx_changed == '1'
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x .migra/ci/nginx_validate.sh
+          .migra/ci/nginx_validate.sh
+
+      - name: Policy lint (TLS/OCSP/limits rules)
+        if: steps.changed.outputs.nginx_changed == '1'
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x .migra/ci/nginx_policy_lint.sh
+          .migra/ci/nginx_policy_lint.sh
+
+      - name: Skip NGINX validation (no nginx changes)
+        if: steps.changed.outputs.nginx_changed != '1'
+        run: echo "No NGINX/apply-pack changes detected. Skipping nginx gate."

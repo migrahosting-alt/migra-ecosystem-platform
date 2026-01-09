@@ -1,0 +1,1314 @@
+{
+  "stats": {
+    "domains": 42,
+    "servers": 46,
+    "upstreams": 0,
+    "hints_domains": 42
+  },
+  "hints": {
+    "domains": [
+      "call.migrahosting.com",
+      "console.mb.migrahosting.com",
+      "console.migradrive.com",
+      "console.migradrive.migrahosting.com",
+      "customerdomain.com",
+      "demo-tenant.com",
+      "demo.migra.local",
+      "elizefoundation.org",
+      "example.com",
+      "holisticgroupllc.com",
+      "intake.migrahosting.com",
+      "lituation.migrahosting.com",
+      "lituationdjs.com",
+      "lituationdjs.migrahosting.com",
+      "mail.migrahosting.com",
+      "mb.migrahosting.com",
+      "migradrive.com",
+      "migradrive.migrahosting.com",
+      "migrahosting.com",
+      "migramail.com",
+      "migrapanel.com",
+      "migravoice.com",
+      "mpanel.migrahosting.com",
+      "new.holisticgroupllc.com",
+      "panel.migrahosting.com",
+      "premtint.com",
+      "pve.migrahosting.com",
+      "s3.migradrive.com",
+      "voice.migrahosting.com",
+      "www.customerdomain.com",
+      "www.demo-tenant.com",
+      "www.demo.migra.local",
+      "www.elizefoundation.org",
+      "www.holisticgroupllc.com",
+      "www.lituationdjs.com",
+      "www.mail.migrahosting.com",
+      "www.migradrive.com",
+      "www.migrahosting.com",
+      "www.migramail.com",
+      "www.migrapanel.com",
+      "www.migravoice.com",
+      "www.premtint.com"
+    ],
+    "proxy_pass_targets": [
+      "http://10.1.10.104:80",
+      "http://10.1.10.206:2271",
+      "http://10.1.10.206:2273/",
+      "http://10.1.10.206:80",
+      "http://10.1.10.53:80",
+      "http://100.107.92.101:2271",
+      "http://100.107.92.101:8080",
+      "http://100.107.92.101:9000",
+      "http://100.107.92.101:9001",
+      "http://100.64.119.23:3010",
+      "http://100.65.164.127:9000",
+      "http://100.97.213.11",
+      "http://100.97.213.11:2271",
+      "http://100.97.213.11:2272",
+      "http://127.0.0.1:2271",
+      "http://127.0.0.1:3003/",
+      "http://127.0.0.1:3003/widgets/",
+      "http://127.0.0.1:3003/ws/admin",
+      "http://127.0.0.1:4000",
+      "http://127.0.0.1:4242",
+      "https://10.1.10.240",
+      "https://10.1.10.70:8006",
+      "https://100.64.119.23/snappymail"
+    ]
+  },
+  "upstreams": {},
+  "servers": [
+    {
+      "server_names": [
+        "call.migrahosting.com"
+      ],
+      "listens": [
+        "80",
+        "[::]:80"
+      ],
+      "proxy_pass": [],
+      "returns": [
+        "301 https://$host$request_uri"
+      ]
+    },
+    {
+      "server_names": [
+        "call.migrahosting.com"
+      ],
+      "listens": [
+        "443 ssl http2",
+        "[::]:443 ssl http2"
+      ],
+      "proxy_pass": [],
+      "returns": [
+        "200 'OK'"
+      ]
+    },
+    {
+      "server_names": [
+        "console.mb.migrahosting.com"
+      ],
+      "listens": [
+        "80"
+      ],
+      "proxy_pass": [],
+      "returns": [
+        "301 https://$host$request_uri"
+      ]
+    },
+    {
+      "server_names": [
+        "console.mb.migrahosting.com"
+      ],
+      "listens": [
+        "443 ssl http2"
+      ],
+      "proxy_pass": [
+        "http://100.107.92.101:9001"
+      ],
+      "returns": []
+    },
+    {
+      "server_names": [
+        "console.migradrive.com"
+      ],
+      "listens": [
+        "80",
+        "[::]:80"
+      ],
+      "proxy_pass": [],
+      "returns": []
+    },
+    {
+      "server_names": [
+        "console.migradrive.com"
+      ],
+      "listens": [
+        "443 ssl http2",
+        "[::]:443 ssl http2"
+      ],
+      "proxy_pass": [
+        "https://10.1.10.240"
+      ],
+      "returns": []
+    },
+    {
+      "server_names": [
+        "elizefoundation.org",
+        "www.elizefoundation.org"
+      ],
+      "listens": [
+        "80",
+        "[::]:80"
+      ],
+      "proxy_pass": [],
+      "returns": [
+        "301 https://$host$request_uri"
+      ]
+    },
+    {
+      "server_names": [
+        "elizefoundation.org",
+        "www.elizefoundation.org"
+      ],
+      "listens": [
+        "443 ssl http2",
+        "[::]:443 ssl http2"
+      ],
+      "proxy_pass": [],
+      "returns": []
+    },
+    {
+      "server_names": [
+        "holisticgroupllc.com",
+        "www.holisticgroupllc.com"
+      ],
+      "listens": [
+        "80"
+      ],
+      "proxy_pass": [],
+      "returns": [
+        "503"
+      ]
+    },
+    {
+      "server_names": [
+        "holisticgroupllc.com",
+        "www.holisticgroupllc.com"
+      ],
+      "listens": [
+        "443 ssl http2"
+      ],
+      "proxy_pass": [],
+      "returns": [
+        "503"
+      ]
+    },
+    {
+      "server_names": [
+        "intake.migrahosting.com"
+      ],
+      "listens": [
+        "80",
+        "[::]:80"
+      ],
+      "proxy_pass": [],
+      "returns": [
+        "301 https://$server_name$request_uri"
+      ]
+    },
+    {
+      "server_names": [
+        "intake.migrahosting.com"
+      ],
+      "listens": [
+        "443 ssl http2",
+        "[::]:443 ssl http2"
+      ],
+      "proxy_pass": [
+        "http://127.0.0.1:4000"
+      ],
+      "returns": []
+    },
+    {
+      "server_names": [
+        "lituation.migrahosting.com"
+      ],
+      "listens": [
+        "80",
+        "[::]:80"
+      ],
+      "proxy_pass": [],
+      "returns": [
+        "301 https://lituationdjs.migrahosting.com$request_uri"
+      ]
+    },
+    {
+      "server_names": [
+        "lituation.migrahosting.com"
+      ],
+      "listens": [
+        "443 ssl http2",
+        "[::]:443 ssl http2"
+      ],
+      "proxy_pass": [],
+      "returns": [
+        "301 https://lituationdjs.migrahosting.com$request_uri"
+      ]
+    },
+    {
+      "server_names": [
+        "lituationdjs.com",
+        "www.lituationdjs.com"
+      ],
+      "listens": [
+        "80",
+        "[::]:80"
+      ],
+      "proxy_pass": [],
+      "returns": [
+        "301 https://$host$request_uri"
+      ]
+    },
+    {
+      "server_names": [
+        "lituationdjs.com",
+        "www.lituationdjs.com"
+      ],
+      "listens": [
+        "443 ssl http2",
+        "[::]:443 ssl http2"
+      ],
+      "proxy_pass": [
+        "http://10.1.10.53:80"
+      ],
+      "returns": []
+    },
+    {
+      "server_names": [
+        "lituationdjs.migrahosting.com"
+      ],
+      "listens": [
+        "443 ssl",
+        "[::]:443 ssl"
+      ],
+      "proxy_pass": [],
+      "returns": []
+    },
+    {
+      "server_names": [
+        "lituationdjs.migrahosting.com"
+      ],
+      "listens": [
+        "80",
+        "[::]:80"
+      ],
+      "proxy_pass": [],
+      "returns": [
+        "301 https://$host$request_uri"
+      ]
+    },
+    {
+      "server_names": [
+        "mail.migrahosting.com"
+      ],
+      "listens": [
+        "80",
+        "[::]:80"
+      ],
+      "proxy_pass": [],
+      "returns": [
+        "301 https://mail.migrahosting.com$request_uri"
+      ]
+    },
+    {
+      "server_names": [
+        "mail.migrahosting.com"
+      ],
+      "listens": [
+        "443 ssl http2",
+        "[::]:443 ssl http2"
+      ],
+      "proxy_pass": [
+        "http://100.64.119.23:3010",
+        "https://100.64.119.23/snappymail"
+      ],
+      "returns": []
+    },
+    {
+      "server_names": [
+        "mb.migrahosting.com"
+      ],
+      "listens": [
+        "80",
+        "[::]:80"
+      ],
+      "proxy_pass": [],
+      "returns": [
+        "301 https://mb.migrahosting.com$request_uri"
+      ]
+    },
+    {
+      "server_names": [
+        "mb.migrahosting.com"
+      ],
+      "listens": [
+        "443 ssl http2",
+        "[::]:443 ssl http2"
+      ],
+      "proxy_pass": [
+        "http://100.65.164.127:9000"
+      ],
+      "returns": []
+    },
+    {
+      "server_names": [
+        "console.migradrive.migrahosting.com",
+        "migradrive.migrahosting.com"
+      ],
+      "listens": [
+        "80",
+        "[::]:80"
+      ],
+      "proxy_pass": [
+        "https://10.1.10.240"
+      ],
+      "returns": []
+    },
+    {
+      "server_names": [
+        "migradrive.com",
+        "www.migradrive.com"
+      ],
+      "listens": [
+        "80"
+      ],
+      "proxy_pass": [],
+      "returns": [
+        "301 https://$host$request_uri"
+      ]
+    },
+    {
+      "server_names": [
+        "migradrive.com",
+        "www.migradrive.com"
+      ],
+      "listens": [
+        "443 ssl http2"
+      ],
+      "proxy_pass": [],
+      "returns": []
+    },
+    {
+      "server_names": [
+        "migramail.com",
+        "www.migramail.com"
+      ],
+      "listens": [
+        "80",
+        "[::]:80"
+      ],
+      "proxy_pass": [],
+      "returns": [
+        "301 https://migramail.com$request_uri"
+      ]
+    },
+    {
+      "server_names": [
+        "www.migramail.com"
+      ],
+      "listens": [
+        "443 ssl http2",
+        "[::]:443 ssl http2"
+      ],
+      "proxy_pass": [],
+      "returns": [
+        "301 https://migramail.com$request_uri"
+      ]
+    },
+    {
+      "server_names": [
+        "migramail.com"
+      ],
+      "listens": [
+        "443 ssl http2",
+        "[::]:443 ssl http2"
+      ],
+      "proxy_pass": [
+        "http://100.64.119.23:3010"
+      ],
+      "returns": []
+    },
+    {
+      "server_names": [
+        "migrapanel.com",
+        "www.migrapanel.com"
+      ],
+      "listens": [
+        "80"
+      ],
+      "proxy_pass": [],
+      "returns": [
+        "301 https://mpanel.migrahosting.com$request_uri"
+      ]
+    },
+    {
+      "server_names": [
+        "migrapanel.com",
+        "www.migrapanel.com"
+      ],
+      "listens": [
+        "443 ssl http2"
+      ],
+      "proxy_pass": [],
+      "returns": [
+        "301 https://mpanel.migrahosting.com$request_uri"
+      ]
+    },
+    {
+      "server_names": [
+        "migravoice.com",
+        "www.migravoice.com"
+      ],
+      "listens": [
+        "80",
+        "[::]:80"
+      ],
+      "proxy_pass": [],
+      "returns": [
+        "301 https://$host$request_uri"
+      ]
+    },
+    {
+      "server_names": [
+        "migravoice.com",
+        "www.migravoice.com"
+      ],
+      "listens": [
+        "443 ssl http2",
+        "[::]:443 ssl http2"
+      ],
+      "proxy_pass": [],
+      "returns": [
+        "200 'OK'"
+      ]
+    },
+    {
+      "server_names": [
+        "mpanel.migrahosting.com"
+      ],
+      "listens": [
+        "80",
+        "[::]:80"
+      ],
+      "proxy_pass": [],
+      "returns": [
+        "301 https://$server_name$request_uri"
+      ]
+    },
+    {
+      "server_names": [
+        "mpanel.migrahosting.com"
+      ],
+      "listens": [
+        "443 ssl http2",
+        "[::]:443 ssl http2"
+      ],
+      "proxy_pass": [
+        "http://100.97.213.11:2271"
+      ],
+      "returns": []
+    },
+    {
+      "server_names": [
+        "panel.migrahosting.com"
+      ],
+      "listens": [
+        "80",
+        "[::]:80"
+      ],
+      "proxy_pass": [],
+      "returns": [
+        "301 https://$server_name$request_uri"
+      ]
+    },
+    {
+      "server_names": [
+        "panel.migrahosting.com"
+      ],
+      "listens": [
+        "443 ssl http2",
+        "[::]:443 ssl http2"
+      ],
+      "proxy_pass": [
+        "http://10.1.10.206:2271"
+      ],
+      "returns": []
+    },
+    {
+      "server_names": [
+        "premtint.com",
+        "www.premtint.com"
+      ],
+      "listens": [
+        "80",
+        "[::]:80"
+      ],
+      "proxy_pass": [],
+      "returns": [
+        "301 https://$host$request_uri"
+      ]
+    },
+    {
+      "server_names": [
+        "premtint.com",
+        "www.premtint.com"
+      ],
+      "listens": [
+        "443 ssl http2",
+        "[::]:443 ssl http2"
+      ],
+      "proxy_pass": [
+        "http://10.1.10.104:80"
+      ],
+      "returns": []
+    },
+    {
+      "server_names": [
+        "pve.migrahosting.com"
+      ],
+      "listens": [
+        "80",
+        "[::]:80"
+      ],
+      "proxy_pass": [],
+      "returns": [
+        "301 https://$host$request_uri"
+      ]
+    },
+    {
+      "server_names": [
+        "pve.migrahosting.com"
+      ],
+      "listens": [
+        "443 ssl http2",
+        "[::]:443 ssl http2"
+      ],
+      "proxy_pass": [
+        "https://10.1.10.70:8006"
+      ],
+      "returns": []
+    },
+    {
+      "server_names": [
+        "s3.migradrive.com"
+      ],
+      "listens": [
+        "80",
+        "[::]:80"
+      ],
+      "proxy_pass": [],
+      "returns": [
+        "301 https://$host$request_uri"
+      ]
+    },
+    {
+      "server_names": [
+        "s3.migradrive.com"
+      ],
+      "listens": [
+        "443 ssl http2",
+        "[::]:443 ssl http2"
+      ],
+      "proxy_pass": [
+        "https://10.1.10.240"
+      ],
+      "returns": []
+    },
+    {
+      "server_names": [
+        "voice.migrahosting.com"
+      ],
+      "listens": [
+        "80",
+        "[::]:80"
+      ],
+      "proxy_pass": [],
+      "returns": [
+        "301 https://$host$request_uri"
+      ]
+    },
+    {
+      "server_names": [
+        "voice.migrahosting.com"
+      ],
+      "listens": [
+        "443 ssl http2",
+        "[::]:443 ssl http2"
+      ],
+      "proxy_pass": [
+        "http://127.0.0.1:3003/",
+        "http://127.0.0.1:3003/widgets/",
+        "http://127.0.0.1:3003/ws/admin"
+      ],
+      "returns": [
+        "200 \"OK\"",
+        "204"
+      ]
+    },
+    {
+      "server_names": [
+        "migrahosting.com",
+        "www.migrahosting.com"
+      ],
+      "listens": [
+        "80 default_server",
+        "[::]:80"
+      ],
+      "proxy_pass": [],
+      "returns": [
+        "301 https://migrahosting.com$request_uri"
+      ]
+    },
+    {
+      "server_names": [
+        "migrahosting.com",
+        "www.migrahosting.com"
+      ],
+      "listens": [
+        "443 ssl http2 default_server",
+        "[::]:443 ssl http2"
+      ],
+      "proxy_pass": [
+        "http://127.0.0.1:4242"
+      ],
+      "returns": []
+    }
+  ],
+  "domains": {
+    "call.migrahosting.com": {
+      "listens": [
+        "443 ssl http2",
+        "80",
+        "[::]:443 ssl http2",
+        "[::]:80"
+      ],
+      "proxy_pass": [],
+      "returns": [
+        "200 'OK'",
+        "301 https://$host$request_uri"
+      ],
+      "sources": [
+        "server_block:0",
+        "server_block:1"
+      ]
+    },
+    "console.mb.migrahosting.com": {
+      "listens": [
+        "443 ssl http2",
+        "80"
+      ],
+      "proxy_pass": [
+        "http://100.107.92.101:9001"
+      ],
+      "returns": [
+        "301 https://$host$request_uri"
+      ],
+      "sources": [
+        "server_block:2",
+        "server_block:3"
+      ]
+    },
+    "console.migradrive.com": {
+      "listens": [
+        "443 ssl http2",
+        "80",
+        "[::]:443 ssl http2",
+        "[::]:80"
+      ],
+      "proxy_pass": [
+        "https://10.1.10.240"
+      ],
+      "returns": [],
+      "sources": [
+        "server_block:4",
+        "server_block:5"
+      ]
+    },
+    "elizefoundation.org": {
+      "listens": [
+        "443 ssl http2",
+        "80",
+        "[::]:443 ssl http2",
+        "[::]:80"
+      ],
+      "proxy_pass": [],
+      "returns": [
+        "301 https://$host$request_uri"
+      ],
+      "sources": [
+        "server_block:6",
+        "server_block:7"
+      ]
+    },
+    "www.elizefoundation.org": {
+      "listens": [
+        "443 ssl http2",
+        "80",
+        "[::]:443 ssl http2",
+        "[::]:80"
+      ],
+      "proxy_pass": [],
+      "returns": [
+        "301 https://$host$request_uri"
+      ],
+      "sources": [
+        "server_block:6",
+        "server_block:7"
+      ]
+    },
+    "holisticgroupllc.com": {
+      "listens": [
+        "443 ssl http2",
+        "80"
+      ],
+      "proxy_pass": [],
+      "returns": [
+        "503"
+      ],
+      "sources": [
+        "server_block:8",
+        "server_block:9"
+      ]
+    },
+    "www.holisticgroupllc.com": {
+      "listens": [
+        "443 ssl http2",
+        "80"
+      ],
+      "proxy_pass": [],
+      "returns": [
+        "503"
+      ],
+      "sources": [
+        "server_block:8",
+        "server_block:9"
+      ]
+    },
+    "intake.migrahosting.com": {
+      "listens": [
+        "443 ssl http2",
+        "80",
+        "[::]:443 ssl http2",
+        "[::]:80"
+      ],
+      "proxy_pass": [
+        "http://127.0.0.1:4000"
+      ],
+      "returns": [
+        "301 https://$server_name$request_uri"
+      ],
+      "sources": [
+        "server_block:10",
+        "server_block:11"
+      ]
+    },
+    "lituation.migrahosting.com": {
+      "listens": [
+        "443 ssl http2",
+        "80",
+        "[::]:443 ssl http2",
+        "[::]:80"
+      ],
+      "proxy_pass": [],
+      "returns": [
+        "301 https://lituationdjs.migrahosting.com$request_uri"
+      ],
+      "sources": [
+        "server_block:12",
+        "server_block:13"
+      ]
+    },
+    "lituationdjs.com": {
+      "listens": [
+        "443 ssl http2",
+        "80",
+        "[::]:443 ssl http2",
+        "[::]:80"
+      ],
+      "proxy_pass": [
+        "http://10.1.10.53:80"
+      ],
+      "returns": [
+        "301 https://$host$request_uri"
+      ],
+      "sources": [
+        "server_block:14",
+        "server_block:15"
+      ]
+    },
+    "www.lituationdjs.com": {
+      "listens": [
+        "443 ssl http2",
+        "80",
+        "[::]:443 ssl http2",
+        "[::]:80"
+      ],
+      "proxy_pass": [
+        "http://10.1.10.53:80"
+      ],
+      "returns": [
+        "301 https://$host$request_uri"
+      ],
+      "sources": [
+        "server_block:14",
+        "server_block:15"
+      ]
+    },
+    "lituationdjs.migrahosting.com": {
+      "listens": [
+        "443 ssl",
+        "80",
+        "[::]:443 ssl",
+        "[::]:80"
+      ],
+      "proxy_pass": [],
+      "returns": [
+        "301 https://$host$request_uri"
+      ],
+      "sources": [
+        "server_block:16",
+        "server_block:17"
+      ]
+    },
+    "mail.migrahosting.com": {
+      "listens": [
+        "443 ssl http2",
+        "80",
+        "[::]:443 ssl http2",
+        "[::]:80"
+      ],
+      "proxy_pass": [
+        "http://100.64.119.23:3010",
+        "https://100.64.119.23/snappymail"
+      ],
+      "returns": [
+        "301 https://mail.migrahosting.com$request_uri"
+      ],
+      "sources": [
+        "server_block:18",
+        "server_block:19"
+      ]
+    },
+    "mb.migrahosting.com": {
+      "listens": [
+        "443 ssl http2",
+        "80",
+        "[::]:443 ssl http2",
+        "[::]:80"
+      ],
+      "proxy_pass": [
+        "http://100.65.164.127:9000"
+      ],
+      "returns": [
+        "301 https://mb.migrahosting.com$request_uri"
+      ],
+      "sources": [
+        "server_block:20",
+        "server_block:21"
+      ]
+    },
+    "console.migradrive.migrahosting.com": {
+      "listens": [
+        "80",
+        "[::]:80"
+      ],
+      "proxy_pass": [
+        "https://10.1.10.240"
+      ],
+      "returns": [],
+      "sources": [
+        "server_block:22"
+      ]
+    },
+    "migradrive.migrahosting.com": {
+      "listens": [
+        "80",
+        "[::]:80"
+      ],
+      "proxy_pass": [
+        "https://10.1.10.240"
+      ],
+      "returns": [],
+      "sources": [
+        "server_block:22"
+      ]
+    },
+    "migradrive.com": {
+      "listens": [
+        "443 ssl http2",
+        "80"
+      ],
+      "proxy_pass": [],
+      "returns": [
+        "301 https://$host$request_uri"
+      ],
+      "sources": [
+        "server_block:23",
+        "server_block:24"
+      ]
+    },
+    "www.migradrive.com": {
+      "listens": [
+        "443 ssl http2",
+        "80"
+      ],
+      "proxy_pass": [],
+      "returns": [
+        "301 https://$host$request_uri"
+      ],
+      "sources": [
+        "server_block:23",
+        "server_block:24"
+      ]
+    },
+    "migramail.com": {
+      "listens": [
+        "443 ssl http2",
+        "80",
+        "[::]:443 ssl http2",
+        "[::]:80"
+      ],
+      "proxy_pass": [
+        "http://100.64.119.23:3010"
+      ],
+      "returns": [
+        "301 https://migramail.com$request_uri"
+      ],
+      "sources": [
+        "server_block:25",
+        "server_block:27"
+      ]
+    },
+    "www.migramail.com": {
+      "listens": [
+        "443 ssl http2",
+        "80",
+        "[::]:443 ssl http2",
+        "[::]:80"
+      ],
+      "proxy_pass": [],
+      "returns": [
+        "301 https://migramail.com$request_uri"
+      ],
+      "sources": [
+        "server_block:25",
+        "server_block:26"
+      ]
+    },
+    "migrapanel.com": {
+      "listens": [
+        "443 ssl http2",
+        "80"
+      ],
+      "proxy_pass": [],
+      "returns": [
+        "301 https://mpanel.migrahosting.com$request_uri"
+      ],
+      "sources": [
+        "server_block:28",
+        "server_block:29"
+      ]
+    },
+    "www.migrapanel.com": {
+      "listens": [
+        "443 ssl http2",
+        "80"
+      ],
+      "proxy_pass": [],
+      "returns": [
+        "301 https://mpanel.migrahosting.com$request_uri"
+      ],
+      "sources": [
+        "server_block:28",
+        "server_block:29"
+      ]
+    },
+    "migravoice.com": {
+      "listens": [
+        "443 ssl http2",
+        "80",
+        "[::]:443 ssl http2",
+        "[::]:80"
+      ],
+      "proxy_pass": [],
+      "returns": [
+        "200 'OK'",
+        "301 https://$host$request_uri"
+      ],
+      "sources": [
+        "server_block:30",
+        "server_block:31"
+      ]
+    },
+    "www.migravoice.com": {
+      "listens": [
+        "443 ssl http2",
+        "80",
+        "[::]:443 ssl http2",
+        "[::]:80"
+      ],
+      "proxy_pass": [],
+      "returns": [
+        "200 'OK'",
+        "301 https://$host$request_uri"
+      ],
+      "sources": [
+        "server_block:30",
+        "server_block:31"
+      ]
+    },
+    "mpanel.migrahosting.com": {
+      "listens": [
+        "443 ssl http2",
+        "80",
+        "[::]:443 ssl http2",
+        "[::]:80"
+      ],
+      "proxy_pass": [
+        "http://100.97.213.11:2271"
+      ],
+      "returns": [
+        "301 https://$server_name$request_uri"
+      ],
+      "sources": [
+        "server_block:32",
+        "server_block:33"
+      ]
+    },
+    "panel.migrahosting.com": {
+      "listens": [
+        "443 ssl http2",
+        "80",
+        "[::]:443 ssl http2",
+        "[::]:80"
+      ],
+      "proxy_pass": [
+        "http://10.1.10.206:2271"
+      ],
+      "returns": [
+        "301 https://$server_name$request_uri"
+      ],
+      "sources": [
+        "server_block:34",
+        "server_block:35"
+      ]
+    },
+    "premtint.com": {
+      "listens": [
+        "443 ssl http2",
+        "80",
+        "[::]:443 ssl http2",
+        "[::]:80"
+      ],
+      "proxy_pass": [
+        "http://10.1.10.104:80"
+      ],
+      "returns": [
+        "301 https://$host$request_uri"
+      ],
+      "sources": [
+        "server_block:36",
+        "server_block:37"
+      ]
+    },
+    "www.premtint.com": {
+      "listens": [
+        "443 ssl http2",
+        "80",
+        "[::]:443 ssl http2",
+        "[::]:80"
+      ],
+      "proxy_pass": [
+        "http://10.1.10.104:80"
+      ],
+      "returns": [
+        "301 https://$host$request_uri"
+      ],
+      "sources": [
+        "server_block:36",
+        "server_block:37"
+      ]
+    },
+    "pve.migrahosting.com": {
+      "listens": [
+        "443 ssl http2",
+        "80",
+        "[::]:443 ssl http2",
+        "[::]:80"
+      ],
+      "proxy_pass": [
+        "https://10.1.10.70:8006"
+      ],
+      "returns": [
+        "301 https://$host$request_uri"
+      ],
+      "sources": [
+        "server_block:38",
+        "server_block:39"
+      ]
+    },
+    "s3.migradrive.com": {
+      "listens": [
+        "443 ssl http2",
+        "80",
+        "[::]:443 ssl http2",
+        "[::]:80"
+      ],
+      "proxy_pass": [
+        "https://10.1.10.240"
+      ],
+      "returns": [
+        "301 https://$host$request_uri"
+      ],
+      "sources": [
+        "server_block:40",
+        "server_block:41"
+      ]
+    },
+    "voice.migrahosting.com": {
+      "listens": [
+        "443 ssl http2",
+        "80",
+        "[::]:443 ssl http2",
+        "[::]:80"
+      ],
+      "proxy_pass": [
+        "http://127.0.0.1:3003/",
+        "http://127.0.0.1:3003/widgets/",
+        "http://127.0.0.1:3003/ws/admin"
+      ],
+      "returns": [
+        "200 \"OK\"",
+        "204",
+        "301 https://$host$request_uri"
+      ],
+      "sources": [
+        "server_block:42",
+        "server_block:43"
+      ]
+    },
+    "migrahosting.com": {
+      "listens": [
+        "443 ssl http2 default_server",
+        "80 default_server",
+        "[::]:443 ssl http2",
+        "[::]:80"
+      ],
+      "proxy_pass": [
+        "http://127.0.0.1:4242"
+      ],
+      "returns": [
+        "301 https://migrahosting.com$request_uri"
+      ],
+      "sources": [
+        "server_block:44",
+        "server_block:45"
+      ]
+    },
+    "www.migrahosting.com": {
+      "listens": [
+        "443 ssl http2 default_server",
+        "80 default_server",
+        "[::]:443 ssl http2",
+        "[::]:80"
+      ],
+      "proxy_pass": [
+        "http://127.0.0.1:4242"
+      ],
+      "returns": [
+        "301 https://migrahosting.com$request_uri"
+      ],
+      "sources": [
+        "server_block:44",
+        "server_block:45"
+      ]
+    },
+    "customerdomain.com": {
+      "listens": [],
+      "proxy_pass": [],
+      "returns": [],
+      "sources": [
+        "hints_only"
+      ]
+    },
+    "demo-tenant.com": {
+      "listens": [],
+      "proxy_pass": [],
+      "returns": [],
+      "sources": [
+        "hints_only"
+      ]
+    },
+    "demo.migra.local": {
+      "listens": [],
+      "proxy_pass": [],
+      "returns": [],
+      "sources": [
+        "hints_only"
+      ]
+    },
+    "example.com": {
+      "listens": [],
+      "proxy_pass": [],
+      "returns": [],
+      "sources": [
+        "hints_only"
+      ]
+    },
+    "new.holisticgroupllc.com": {
+      "listens": [],
+      "proxy_pass": [],
+      "returns": [],
+      "sources": [
+        "hints_only"
+      ]
+    },
+    "www.customerdomain.com": {
+      "listens": [],
+      "proxy_pass": [],
+      "returns": [],
+      "sources": [
+        "hints_only"
+      ]
+    },
+    "www.demo-tenant.com": {
+      "listens": [],
+      "proxy_pass": [],
+      "returns": [],
+      "sources": [
+        "hints_only"
+      ]
+    },
+    "www.demo.migra.local": {
+      "listens": [],
+      "proxy_pass": [],
+      "returns": [],
+      "sources": [
+        "hints_only"
+      ]
+    },
+    "www.mail.migrahosting.com": {
+      "listens": [],
+      "proxy_pass": [],
+      "returns": [],
+      "sources": [
+        "hints_only"
+      ]
+    }
+  },
+  "notes": [
+    "upstreams may be 0 if config uses direct proxy_pass to IP:port.",
+    "domains includes hints-only entries when server blocks could not be associated."
+  ]
+}

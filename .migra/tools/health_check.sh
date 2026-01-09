@@ -1,0 +1,1 @@
+/home/bonex/.migra-tools/health_check.sh

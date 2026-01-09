@@ -1,0 +1,1 @@
+/home/bonex/.migra-tools/mpanel_sync.sh

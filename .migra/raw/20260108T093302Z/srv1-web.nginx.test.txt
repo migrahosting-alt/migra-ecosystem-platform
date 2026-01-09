@@ -1,0 +1,7 @@
+2026/01/08 09:33:12 [warn] 227371#227371: protocol options redefined for 0.0.0.0:443 in /etc/nginx/sites-enabled/migrapanel.com.conf:8
+2026/01/08 09:33:12 [warn] 227371#227371: protocol options redefined for 0.0.0.0:443 in /etc/nginx/sites-enabled/migravoice.com.conf:25
+2026/01/08 09:33:12 [warn] 227371#227371: "ssl_stapling" ignored, no OCSP responder URL in the certificate "/etc/letsencrypt/live/call.migrahosting.com/fullchain.pem"
+2026/01/08 09:33:12 [warn] 227371#227371: "ssl_stapling" ignored, no OCSP responder URL in the certificate "/etc/letsencrypt/live/migravoice.com-0001/fullchain.pem"
+2026/01/08 09:33:12 [warn] 227371#227371: "ssl_stapling" ignored, no OCSP responder URL in the certificate "/etc/letsencrypt/live/voice.migrahosting.com/fullchain.pem"
+nginx: the configuration file /etc/nginx/nginx.conf syntax is ok
+nginx: configuration file /etc/nginx/nginx.conf test is successful

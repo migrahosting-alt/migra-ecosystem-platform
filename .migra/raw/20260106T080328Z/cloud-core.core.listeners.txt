@@ -1,0 +1,13 @@
+Netid State  Recv-Q Send-Q                     Local Address:Port  Peer Address:PortProcess                                               
+udp   UNCONN 0      0                             127.0.0.54:53         0.0.0.0:*    users:(("systemd-resolve",pid=561,fd=16))            
+udp   UNCONN 0      0                          127.0.0.53%lo:53         0.0.0.0:*    users:(("systemd-resolve",pid=561,fd=14))            
+udp   UNCONN 0      0                      10.1.10.126%ens18:68         0.0.0.0:*    users:(("systemd-network",pid=462,fd=24))            
+udp   UNCONN 0      0                                0.0.0.0:41641      0.0.0.0:*    users:(("tailscaled",pid=685,fd=16))                 
+udp   UNCONN 0      0      [fe80::be24:11ff:fe88:6021]%ens18:546           [::]:*    users:(("systemd-network",pid=462,fd=23))            
+udp   UNCONN 0      0                                   [::]:41641         [::]:*    users:(("tailscaled",pid=685,fd=17))                 
+tcp   LISTEN 0      4096                             0.0.0.0:22         0.0.0.0:*    users:(("sshd",pid=861,fd=3),("systemd",pid=1,fd=89))
+tcp   LISTEN 0      4096                          127.0.0.54:53         0.0.0.0:*    users:(("systemd-resolve",pid=561,fd=17))            
+tcp   LISTEN 0      4096                      100.120.118.39:35809      0.0.0.0:*    users:(("tailscaled",pid=685,fd=24))                 
+tcp   LISTEN 0      4096                       127.0.0.53%lo:53         0.0.0.0:*    users:(("systemd-resolve",pid=561,fd=15))            
+tcp   LISTEN 0      4096                                [::]:22            [::]:*    users:(("sshd",pid=861,fd=4),("systemd",pid=1,fd=90))
+tcp   LISTEN 0      4096         [fd7a:115c:a1e0::6934:7627]:65349         [::]:*    users:(("tailscaled",pid=685,fd=25))                 

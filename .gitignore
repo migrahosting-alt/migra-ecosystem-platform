@@ -1,0 +1,31 @@
+# OS / editor
+.DS_Store
+*.swp
+.vscode-server/
+.idea/
+
+# Node / build artifacts
+node_modules/
+dist/
+build/
+.next/
+.cache/
+coverage/
+tmp/
+logs/
+
+# Secrets & keys (never commit)
+*.key
+*.pem
+*.p12
+*.pfx
+*.jks
+.env
+.env.*
+secrets/
+private/
+**/id_rsa
+**/id_ed25519
+
+# Large VCS internals from nested repos (avoid accidental add)
+**/.git/
