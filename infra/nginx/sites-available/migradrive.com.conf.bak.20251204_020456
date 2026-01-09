@@ -1,0 +1,19 @@
+server {
+    listen 80;
+    listen [::]:80;
+    server_name migradrive.com www.migradrive.com;
+    
+    root /srv/web/core/migradrive.com/public;
+    index index.html;
+
+    access_log /var/log/nginx/migradrive.com.access.log;
+    error_log  /var/log/nginx/migradrive.com.error.log;
+
+    location / {
+        try_files $uri $uri/ =404;
+    }
+
+    location /.well-known/acme-challenge/ {
+        root /var/www/html;
+    }
+}

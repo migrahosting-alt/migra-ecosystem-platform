@@ -1,4 +1,4 @@
-# Migra Scan Report (2026-01-08)
+# Migra Scan Report (2026-01-09)
 
 ## Executive Summary
 Infrastructure is **Healthy**. All core nodes and tenant pods designated as 'running' are active.
@@ -8,6 +8,7 @@ Infrastructure is **Healthy**. All core nodes and tenant pods designated as 'run
 2.  **srv1-web:** Nginx is active with no reload errors in the last 24 hours. Protocol warnings detected for `migrapanel.com` and `migravoice.com` (non-critical).
 3.  **pve:** LXCs `pod-lituationdjs` (10.1.10.53) and `pod-premtint` (10.1.10.54) are active and correctly routed.
 4.  **Core Connectivity:** Tailscale links to all nodes are verified.
+5.  **Config Export:** Imported a sanitized `/etc/nginx` tree from `srv1-web` into `infra/nginx/` for CI validation (keys/certs excluded).
 
 ## Warnings
 - **Nginx protocol redefinition:** `protocol options redefined for 0.0.0.0:443` in `/etc/nginx/sites-enabled/migrapanel.com.conf`.

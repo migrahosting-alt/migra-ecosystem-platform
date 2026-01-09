@@ -1,0 +1,24 @@
+server {
+    listen 80 default_server;
+    listen [::]:80 default_server;
+    server_name migrahosting.com www.migrahosting.com;
+    return 301 https://migrahosting.com$request_uri;
+}
+
+server {
+    listen 443 ssl http2 default_server;
+    listen [::]:443 ssl http2 default_server;
+    server_name migrahosting.com www.migrahosting.com;
+
+    ssl_certificate     /etc/letsencrypt/live/migrahosting.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/migrahosting.com/privkey.pem;
+    include /etc/letsencrypt/options-ssl-nginx.conf;
+    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+
+    root /var/www/migrahosting.com/public;
+    index index.html index.php;
+
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+}

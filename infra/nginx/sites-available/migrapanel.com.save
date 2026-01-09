@@ -1,0 +1,4 @@
+# Change this line:
+#   proxy_pass http://127.0.0.1:2271;
+# To:
+#   proxy_pass http://10.1.10.206:2271;
