@@ -55,6 +55,14 @@ fi
 echo "✅ Using repo NGINX root: ${ROOT}"
 echo "✅ Using main config: ${NGINX_MAIN_CONF}"
 
+escape_gha() {
+  local s="$1"
+  s=${s//'%'/'%25'}
+  s=${s//$'\r'/'%0D'}
+  s=${s//$'\n'/'%0A'}
+  printf '%s' "$s"
+}
+
 # Containerized nginx -t
 # We copy repo config into a tmpfs /etc/nginx (writable) to allow
 # container-specific normalization (e.g. Alpine doesn't have user www-data).
@@ -62,7 +70,8 @@ echo "✅ Using main config: ${NGINX_MAIN_CONF}"
 # Production configs often reference certs/keys/includes outside /etc/nginx
 # (e.g., /etc/letsencrypt, /etc/ssl). CI runners won't have those, so we
 # stub them inside the container (ephemeral) to validate syntax safely.
-docker run --rm \
+set +e
+docker_output="$(docker run --rm \
   --tmpfs /etc/nginx:rw,mode=755 \
   --tmpfs /etc/letsencrypt:rw,mode=755 \
   --tmpfs /etc/ssl/private:rw,mode=755 \
@@ -171,4 +180,13 @@ out="$(nginx -t -c \"/etc/nginx/${NGINX_MAIN_CONF}\" -g 'pid /tmp/nginx.pid; err
 echo "$out"
 BASH
 
-    bash /tmp/migra_nginx_validate.sh"
+    bash /tmp/migra_nginx_validate.sh")"
+docker_rc=$?
+set -e
+
+echo "$docker_output"
+
+if [[ $docker_rc -ne 0 ]]; then
+  echo "::error::$(escape_gha "Validate NGINX config (nginx -t) failed. Output:\n$docker_output")"
+  exit "$docker_rc"
+fi
