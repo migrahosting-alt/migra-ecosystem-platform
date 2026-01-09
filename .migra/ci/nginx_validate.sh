@@ -154,7 +154,21 @@ while read -r inc; do
   : > \"$inc\"
 done < <(grep -RhoE '^\\s*include\\s+[^;]+' /etc/nginx | awk '{print $2}' | sed 's/[;\\r].*$//' | sort -u)
 
-nginx -t -c \"/etc/nginx/${NGINX_MAIN_CONF}\" -g 'pid /tmp/nginx.pid; error_log stderr notice;'
+escape_gha() {
+  local s="$1"
+  s=${s//'%'/'%25'}
+  s=${s//$'\r'/'%0D'}
+  s=${s//$'\n'/'%0A'}
+  printf '%s' "$s"
+}
+
+out="$(nginx -t -c \"/etc/nginx/${NGINX_MAIN_CONF}\" -g 'pid /tmp/nginx.pid; error_log stderr notice;' 2>&1)" || {
+  echo "$out"
+  echo "::error ::$(escape_gha \"nginx -t failed:\n$out\")"
+  exit 1
+}
+
+echo "$out"
 BASH
 
     bash /tmp/migra_nginx_validate.sh"
