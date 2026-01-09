@@ -56,7 +56,7 @@ echo "✅ Using repo NGINX root: ${ROOT}"
 echo "✅ Using main config: ${NGINX_MAIN_CONF}"
 
 escape_gha() {
-  local s="$1"
+  local s="${1-}"
   s=${s//'%'/'%25'}
   s=${s//$'\r'/'%0D'}
   s=${s//$'\n'/'%0A'}
@@ -164,7 +164,7 @@ while read -r inc; do
 done < <(grep -RhoE '^\\s*include\\s+[^;]+' /etc/nginx | awk '{print $2}' | sed 's/[;\\r].*$//' | sort -u)
 
 escape_gha() {
-  local s="$1"
+  local s="${1-}"
   s=${s//'%'/'%25'}
   s=${s//$'\r'/'%0D'}
   s=${s//$'\n'/'%0A'}
