@@ -1,20 +1,23 @@
-# OS / editor
-.DS_Store
-*.swp
-.vscode-server/
-.idea/
+# ===========================
+# Migra Ecosystem Platform Repo
+# Only track: .github/, .migra/, infra/
+# ===========================
 
-# Node / build artifacts
-node_modules/
-dist/
-build/
-.next/
-.cache/
-coverage/
-tmp/
-logs/
+# Default: ignore everything
+*
 
-# Secrets & keys (never commit)
+# Allowlist the platform directories
+!.gitignore
+!.github/
+!.github/**
+
+!.migra/
+!.migra/**
+
+!infra/
+!infra/**
+
+# ---- Never commit secrets/keys ----
 *.key
 *.pem
 *.p12
@@ -27,5 +30,30 @@ private/
 **/id_rsa
 **/id_ed25519
 
-# Large VCS internals from nested repos (avoid accidental add)
-**/.git/
+# ---- Common junk ----
+.DS_Store
+Thumbs.db
+.vscode/
+.vscode-server/
+.idea/
+*.swp
+
+# ---- Big artifacts ----
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.log
+dump.rdb
+test-results/
+coverage/
+node_modules/
+dist/
+build/
+.next/
+.cache/
+tmp/
+logs/
+backups/
+_tools/
+_security_scan_outputs/
