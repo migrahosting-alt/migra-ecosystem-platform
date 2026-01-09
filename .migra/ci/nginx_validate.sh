@@ -180,7 +180,7 @@ out="$(nginx -t -c \"/etc/nginx/${NGINX_MAIN_CONF}\" -g 'pid /tmp/nginx.pid; err
 echo "$out"
 BASH
 
-    bash /tmp/migra_nginx_validate.sh")"
+    bash /tmp/migra_nginx_validate.sh" 2>&1)"
 docker_rc=$?
 set -e
 
