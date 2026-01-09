@@ -7,13 +7,13 @@ server {
 
 server {
     listen 443 ssl;
+    include /etc/nginx/snippets/ocsp-off.conf;
     listen [::]:443 ssl;
     server_name intake.migrahosting.com;
 
     # SSL certificates
     ssl_certificate /etc/letsencrypt/live/intake.migrahosting.com/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/intake.migrahosting.com/privkey.pem;
-    include /etc/letsencrypt/options-ssl-nginx.conf;
     ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
 
     # No cache for HTML files
