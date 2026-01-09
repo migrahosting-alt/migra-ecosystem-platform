@@ -164,7 +164,7 @@ escape_gha() {
 
 out="$(nginx -t -c \"/etc/nginx/${NGINX_MAIN_CONF}\" -g 'pid /tmp/nginx.pid; error_log stderr notice;' 2>&1)" || {
   echo "$out"
-  echo "::error ::$(escape_gha \"nginx -t failed:\n$out\")"
+  echo "::error::$(escape_gha \"nginx -t failed:\n$out\")"
   exit 1
 }
 
