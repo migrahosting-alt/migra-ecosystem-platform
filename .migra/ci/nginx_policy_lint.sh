@@ -68,7 +68,13 @@ docker run --rm \
   -v "$PWD/${ROOT}:/mnt/src:ro" \
   -v "$PWD/.migra/ci/nginx_policy_container.sh:/tmp/migra_nginx_policy_container.sh:ro" \
   nginx:alpine \
-  sh -lc 'set -eu; apk add --no-cache bash openssl >/dev/null; bash /tmp/migra_nginx_policy_container.sh' \
+  sh -lc 'set -eu;
+    ALPINE_VER="$(cut -d. -f1,2 /etc/alpine-release)";
+    REPO_MAIN="http://dl-cdn.alpinelinux.org/alpine/v${ALPINE_VER}/main";
+    REPO_COMM="http://dl-cdn.alpinelinux.org/alpine/v${ALPINE_VER}/community";
+    apk add --no-cache --repository "$REPO_MAIN" --repository "$REPO_COMM" ca-certificates bash openssl >/dev/null;
+    update-ca-certificates >/dev/null 2>&1 || true;
+    bash /tmp/migra_nginx_policy_container.sh' \
    | tee "$TMP/nginx_T.txt"
 
 T="$TMP/nginx_T.txt"
