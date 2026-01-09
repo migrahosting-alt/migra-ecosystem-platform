@@ -71,7 +71,7 @@ escape_gha() {
 # (e.g., /etc/letsencrypt, /etc/ssl). CI runners won't have those, so we
 # stub them inside the container (ephemeral) to validate syntax safely.
 set +e
-docker_output="$(docker run --rm \
+docker_output="$({ docker run --rm \
   --tmpfs /etc/nginx:rw,mode=755 \
   --tmpfs /etc/letsencrypt:rw,mode=755 \
   --tmpfs /etc/ssl/private:rw,mode=755 \
@@ -180,7 +180,7 @@ out="$(nginx -t -c \"/etc/nginx/${NGINX_MAIN_CONF}\" -g 'pid /tmp/nginx.pid; err
 echo "$out"
 BASH
 
-    bash /tmp/migra_nginx_validate.sh" 2>&1)"
+  bash /tmp/migra_nginx_validate.sh"; } 2>&1)"
 docker_rc=$?
 set -e
 
