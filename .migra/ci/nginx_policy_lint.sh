@@ -84,10 +84,12 @@ T="$TMP/nginx_T.txt"
 # -----------------------------
 if grep -q "emerg" "$T"; then
   echo "❌ nginx -T contains emerg errors"
+  echo "::error::nginx -T contains emerg errors"
   exit 1
 fi
 if ! grep -q "configuration file" "$T"; then
   echo "❌ nginx -T output did not look valid"
+  echo "::error::nginx -T output did not look valid"
   exit 1
 fi
 echo "✅ Policy: nginx -T succeeded"
@@ -114,6 +116,7 @@ if awk '
 else
   echo "❌ Policy violation: limit_req_zone found inside a server{} block."
   echo "Fix: move limit_req_zone directives to http{} context (e.g., nginx.conf) and include snippets/mpanel-limits.conf there."
+  echo "::error::Policy violation: limit_req_zone found inside a server{} block"
   exit 1
 fi
 
@@ -130,6 +133,7 @@ if awk -v re="$TLS_KEYS_REGEX" '
 else
   echo "❌ Policy violation: TLS directives found inside a listen 443 server{} block."
   echo "Fix: remove tls directives from vhosts and include /etc/nginx/snippets/tls-common.conf in each SSL server."
+  echo "::error::Policy violation: TLS directives found inside a listen 443 server{} block"
   exit 1
 fi
 
@@ -154,6 +158,7 @@ else
   echo "Fix: add one of:"
   echo " - include /etc/nginx/snippets/ocsp-on.conf;"
   echo " - include /etc/nginx/snippets/ocsp-off.conf;"
+  echo "::error::Policy violation: SSL server block missing ocsp-on/off include"
   exit 1
 fi
 
