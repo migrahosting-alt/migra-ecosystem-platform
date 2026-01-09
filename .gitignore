@@ -1,21 +1,30 @@
+
 # ===========================
-# Migra Ecosystem Platform Repo
-# Only track: .github/, .migra/, infra/
+# Migra Ecosystem Platform Repo (Allowlist)
+# Track ONLY:
+#   - .github/**
+#   - .migra/**
+#   - infra/nginx/**
 # ===========================
 
-# Default: ignore everything
+# Ignore everything by default
 *
 
-# Allowlist the platform directories
+# Always keep gitignore
 !.gitignore
+
+# Allow .github (agents + workflows)
 !.github/
 !.github/**
 
+# Allow MigraAgent artifacts
 !.migra/
 !.migra/**
 
+# Allow ONLY nginx infra tree
 !infra/
-!infra/**
+!infra/nginx/
+!infra/nginx/**
 
 # ---- Never commit secrets/keys ----
 *.key
