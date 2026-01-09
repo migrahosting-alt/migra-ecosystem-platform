@@ -136,7 +136,7 @@ trap cleanup EXIT
        : > \"$inc\"
      done < <(grep -RhoE '^\s*include\s+[^;]+' /etc/nginx | awk '{print $2}' | sed 's/[;\r].*$//' | sort -u)
 
-     nginx -T -c /etc/nginx/${NGINX_MAIN_CONF} 2>&1" \
+     nginx -T -c /etc/nginx/${NGINX_MAIN_CONF} -g 'pid /tmp/nginx.pid; error_log stderr notice;' 2>&1" \
    | tee "$TMP/nginx_T.txt"
 
 T="$TMP/nginx_T.txt"
