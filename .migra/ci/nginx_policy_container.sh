@@ -7,6 +7,7 @@ cp -a /mnt/src/. /etc/nginx/
 
 if [[ -f "/etc/nginx/${NGINX_MAIN_CONF}" ]]; then
   sed -i -E 's/^\s*user\s+[^;]+;/user nginx;/' "/etc/nginx/${NGINX_MAIN_CONF}" || true
+  sed -i -E 's/^\s*pid\s+[^;]+;/pid \/tmp\/nginx.pid;/' "/etc/nginx/${NGINX_MAIN_CONF}" || true
 fi
 
 openssl req -x509 -nodes -newkey rsa:2048 \
@@ -70,4 +71,4 @@ while read -r inc; do
   : > "$inc"
 done < <(grep -RhoE '^\s*include\s+[^;]+' /etc/nginx | awk '{print $2}' | sed 's/[;\r].*$//' | sort -u)
 
-nginx -T -c "/etc/nginx/${NGINX_MAIN_CONF}" -g 'pid /tmp/nginx.pid; error_log stderr notice;' 2>&1
+nginx -T -c "/etc/nginx/${NGINX_MAIN_CONF}" 2>&1

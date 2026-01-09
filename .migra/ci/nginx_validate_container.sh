@@ -10,6 +10,7 @@ cp -a /mnt/src/. /etc/nginx/
 # Normalize for CI validation only.
 if [[ -f "/etc/nginx/${NGINX_MAIN_CONF}" ]]; then
   sed -i -E 's/^\s*user\s+[^;]+;/user nginx;/' "/etc/nginx/${NGINX_MAIN_CONF}" || true
+  sed -i -E 's/^\s*pid\s+[^;]+;/pid \/tmp\/nginx.pid;/' "/etc/nginx/${NGINX_MAIN_CONF}" || true
 fi
 
 # Dummy certificate/key for CI validation only (never committed)
@@ -80,4 +81,4 @@ while read -r inc; do
   : > "$inc"
 done < <(grep -RhoE '^\s*include\s+[^;]+' /etc/nginx | awk '{print $2}' | sed 's/[;\r].*$//' | sort -u)
 
-nginx -t -c "/etc/nginx/${NGINX_MAIN_CONF}" -g 'pid /tmp/nginx.pid; error_log stderr notice;' 
+nginx -t -c "/etc/nginx/${NGINX_MAIN_CONF}"
