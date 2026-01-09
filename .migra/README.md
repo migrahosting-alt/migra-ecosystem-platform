@@ -12,4 +12,3 @@ This directory is generated/maintained by MigraAgent.
 - Scan-first: do not apply changes until scan results are reviewed.
 - Always include validation + rollback steps for operational changes.
 - Do not store secrets in this directory.
-# CI ping Fri Jan  9 02:53:51 UTC 2026
