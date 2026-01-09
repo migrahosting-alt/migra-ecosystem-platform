@@ -56,18 +56,29 @@ echo "✅ Using repo NGINX root: ${ROOT}"
 echo "✅ Using main config: ${NGINX_MAIN_CONF}"
 
 # Containerized nginx -t
-# We mount repo config into /etc/nginx and force nginx to use it.
+# We copy repo config into a tmpfs /etc/nginx (writable) to allow
+# container-specific normalization (e.g. Alpine doesn't have user www-data).
 #
 # Production configs often reference certs/keys/includes outside /etc/nginx
 # (e.g., /etc/letsencrypt, /etc/ssl). CI runners won't have those, so we
 # stub them inside the container (ephemeral) to validate syntax safely.
 docker run --rm \
+  --tmpfs /etc/nginx:rw,mode=755 \
   --tmpfs /etc/letsencrypt:rw,mode=755 \
   --tmpfs /etc/ssl/private:rw,mode=755 \
   --tmpfs /etc/ssl/certs:rw,mode=755 \
-  -v "$PWD/${ROOT}:/etc/nginx:ro" \
+  -v "$PWD/${ROOT}:/mnt/src:ro" \
   nginx:alpine \
   sh -lc "set -euo pipefail
+
+    # Populate /etc/nginx from repo
+    cp -a /mnt/src/. /etc/nginx/
+
+    # Alpine nginx image typically uses user 'nginx' (not 'www-data').
+    # Normalize for CI validation only.
+    if [[ -f /etc/nginx/${NGINX_MAIN_CONF} ]]; then
+      sed -i -E 's/^\s*user\s+[^;]+;/user nginx;/' "/etc/nginx/${NGINX_MAIN_CONF}" || true
+    fi
 
     apk add --no-cache openssl >/dev/null
 

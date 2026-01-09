@@ -60,12 +60,19 @@ cleanup() { rm -rf "$TMP"; }
 trap cleanup EXIT
 
  docker run --rm \
+   --tmpfs /etc/nginx:rw,mode=755 \
    --tmpfs /etc/letsencrypt:rw,mode=755 \
    --tmpfs /etc/ssl/private:rw,mode=755 \
    --tmpfs /etc/ssl/certs:rw,mode=755 \
-   -v "$PWD/${ROOT}:/etc/nginx:ro" \
+   -v "$PWD/${ROOT}:/mnt/src:ro" \
    nginx:alpine \
    sh -lc "set -euo pipefail
+
+     cp -a /mnt/src/. /etc/nginx/
+
+     if [[ -f /etc/nginx/${NGINX_MAIN_CONF} ]]; then
+       sed -i -E 's/^\s*user\s+[^;]+;/user nginx;/' "/etc/nginx/${NGINX_MAIN_CONF}" || true
+     fi
 
      apk add --no-cache openssl >/dev/null
 
