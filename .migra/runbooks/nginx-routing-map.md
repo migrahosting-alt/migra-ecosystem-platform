@@ -1,5 +1,9 @@
 # NGINX Routing Map
 
+## Control Panel Notes (2026-01-21)
+- migrapanel.com is now served by migrapanel-core (100.119.105.93:2271).
+- mpanel.migrahosting.com and panel.migrahosting.com are deprecated and should not be treated as active control panel targets.
+
 Generated from `.migra/nginx.routing.map.json` (parsed from `nginx -T` + hints).
 
 ## Targets → Domains
@@ -12,7 +16,7 @@ Generated from `.migra/nginx.routing.map.json` (parsed from `nginx -T` + hints).
 
 ### http://10.1.10.206:2271
 - Owner: (not found in LXC iphost scan; likely VM or external) ip=10.1.10.206
-- panel.migrahosting.com
+- panel.migrahosting.com (deprecated)
 
 ### http://10.1.10.53:80
 - Owner: CT 139 (pod-lituationdjs)
@@ -34,7 +38,7 @@ Generated from `.migra/nginx.routing.map.json` (parsed from `nginx -T` + hints).
 
 ### http://100.97.213.11:2271
 - Owner: (not found in LXC iphost scan; likely VM or external) ip=100.97.213.11
-- mpanel.migrahosting.com
+- mpanel.migrahosting.com (deprecated)
 
 ### http://127.0.0.1:3003/
 - Owner: CT 136 (pod-elizefoundation)

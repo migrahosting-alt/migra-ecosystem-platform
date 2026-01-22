@@ -18,7 +18,7 @@
 - **mpanel-api:** Status: `online` | PID: `1277432` | Mem: `693.0mb` | Uptime: `7h`
 
 ## 4. Routing Table (srv1-web)
-- **migrapanel.com** -> `10.1.10.206:2271`
+- **migrapanel.com** -> `migrapanel-core (100.119.105.93:2271)`
 - **premtint.com** -> `10.1.10.54` (LXC 137)
 - **lituationdjs.com** -> `10.1.10.53` (LXC 139)
 - **intake.migrahosting.com** -> `100.97.213.11:2271`
