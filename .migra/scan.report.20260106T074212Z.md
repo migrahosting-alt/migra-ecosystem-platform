@@ -11,8 +11,8 @@ Linux pve.migrahosting.com 6.17.2-2-pve #1 SMP PREEMPT_DYNAMIC PMX 6.17.2-2 (202
 ```
       VMID NAME                 STATUS     MEM(MB)    BOOTDISK(GB) PID       
        100 SRV1-WEB             running    8192             100.00 239508    
-       101 MAIL-CORE            running    4096              32.00 239674    
-       102 dns-core             running    4096              32.00 2293904   
+      101 VPS-CORE             running    4096              32.00 239674    
+      102 vps-core-dns         running    4096              32.00 2293904   
        103 CLOUD-CORE           running    4096              52.00 252062    
        104 VOIP-CORE            running    4096             100.00 252206    
        105 MIGRAGUARD-QUANTUM   stopped    4096              32.00 0         
@@ -801,7 +801,7 @@ Mem:            7919        3821         212          26        4224        4098
 Swap:           4095        4063          32
 ```
 
-## mail-core — Mail listeners
+## vps-core — Mail listeners
 ```
 Netid State  Recv-Q Send-Q                     Local Address:Port  Peer Address:PortProcess                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            
 udp   UNCONN 0      0                             127.0.0.54:53         0.0.0.0:*    users:(("systemd-resolve",pid=466,fd=16))                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         
@@ -832,7 +832,7 @@ tcp   LISTEN 0      511                                    *:3010             *:
 tcp   LISTEN 0      4096         [fd7a:115c:a1e0::3f34:7717]:65192         [::]:*    users:(("tailscaled",pid=753,fd=24))                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              
 ```
 
-## dns-core — DNS listeners
+## vps-core — DNS listeners
 ```
 Netid State  Recv-Q Send-Q                     Local Address:Port  Peer Address:PortProcess                                                                                                                                                                                       
 udp   UNCONN 0      0                                0.0.0.0:53         0.0.0.0:*    users:(("pdns_server",pid=990,fd=5))                                                                                                                                                         

@@ -12,7 +12,7 @@ This maps internal target IPs observed in NGINX proxy_pass to Proxmox CTs when p
   - eth0@if9         UP             127.0.0.127/32 10.1.10.104/24 2603:3020:a5d:4600::6264/128 2603:3020:a5d:4600:be24:11ff:fe18:444/64 fe80::be24:11ff:fe18:444/64
 
 ## 10.1.10.206
-- Seen in proxy_pass: http://10.1.10.206:2271
+- Seen in proxy_pass: http://10.1.10.206:3020
 - CT: (not found in LXC scan; likely VM or external)
 
 ## 10.1.10.53
@@ -34,7 +34,7 @@ This maps internal target IPs observed in NGINX proxy_pass to Proxmox CTs when p
 - CT: (not found in LXC scan; likely VM or external)
 
 ## 100.97.213.11
-- Seen in proxy_pass: http://100.97.213.11:2271
+- Seen in proxy_pass: http://100.97.213.11:3020
 - CT: (not found in LXC scan; likely VM or external)
 
 ## 127.0.0.1

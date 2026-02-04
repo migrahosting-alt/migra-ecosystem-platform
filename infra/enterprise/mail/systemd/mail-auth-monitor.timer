@@ -1,0 +1,11 @@
+[Unit]
+Description=Mail Server Authentication Monitor Timer
+Requires=mail-auth-monitor.service
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=5min
+Unit=mail-auth-monitor.service
+
+[Install]
+WantedBy=timers.target

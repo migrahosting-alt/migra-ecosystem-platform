@@ -1,0 +1,17 @@
+[Unit]
+Description=Mail Server Authentication Monitor
+After=network.target postfix.service dovecot.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/migra/scripts/monitor-mail-auth.sh
+StandardOutput=journal
+StandardError=journal
+
+# Environment variables for alerting
+# Edit to add your webhook/email
+#Environment="ALERT_WEBHOOK=https://hooks.slack.com/services/YOUR/WEBHOOK/HERE"
+#Environment="ALERT_EMAIL=ops@migrahosting.com"
+
+[Install]
+WantedBy=multi-user.target

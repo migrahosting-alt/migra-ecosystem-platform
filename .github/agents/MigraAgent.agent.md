@@ -33,8 +33,7 @@ This agent enforces scan-first, change control, full documentation, and rollback
 - pve: 100.73.199.109
 - srv1-web: 100.68.239.94
 - mpanel-core: 100.97.213.11
-- mail-core: 100.64.119.23
-- dns-core: 100.73.241.82
+- vps-core (mail + PowerDNS): 100.81.76.39
 - db-core: 100.98.54.45
 - cloud-core: 100.120.118.39
 - voip-core: 100.111.4.85
@@ -109,7 +108,7 @@ MigraAgent will NOT:
 ---
 
 ## Ideal Input Format
-Scope: pve / srv1-web / mpanel-core / dns-core / mail-core / db-core / pods
+Scope: pve / srv1-web / mpanel-core / vps-core / db-core / pods
 Mode: inspect-only | plan | apply
 Goal: desired end state
 Constraints: no downtime / maintenance window allowed

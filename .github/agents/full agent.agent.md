@@ -18,8 +18,7 @@ We DO use:
 - pve: 100.73.199.109
 - srv1-web: 100.68.239.94
 - mpanel-core: 100.97.213.11
-- mail-core: 100.64.119.23
-- dns-core: 100.73.241.82
+- vps-core (mail + PowerDNS): 100.81.76.39
 - db-core: 100.98.54.45
 - cloud-core: 100.120.118.39
 - voip-core: 100.111.4.85
@@ -42,7 +41,7 @@ Using SSH from WSL, MigraAgent can discover:
 - Proxmox inventory (VMs/LXCs), networks, storage, backups
 - srv1-web NGINX routing: domains → server blocks → upstreams → pods/services
 - mpanel-core: services, ports, health endpoints, logs
-- dns-core/mail-core/db-core: service health and integration points
+- vps-core (mail + PowerDNS) / db-core: service health and integration points
 - pods: list, health, tenancy mapping
 
 ### B) Produce a “Truth Snapshot”

@@ -1,7 +1,7 @@
 # NGINX Routing Map
 
 ## Control Panel Notes (2026-01-21)
-- migrapanel.com is now served by migrapanel-core (100.119.105.93:2271).
+- migrapanel.com is now served by migrapanel-core (100.119.105.93:3020).
 - mpanel.migrahosting.com and panel.migrahosting.com are deprecated and should not be treated as active control panel targets.
 
 Generated from `.migra/nginx.routing.map.json` (parsed from `nginx -T` + hints).
@@ -14,7 +14,7 @@ Generated from `.migra/nginx.routing.map.json` (parsed from `nginx -T` + hints).
 - premtint.com
 - www.premtint.com
 
-### http://10.1.10.206:2271
+### http://10.1.10.206:3020
 - Owner: (not found in LXC iphost scan; likely VM or external) ip=10.1.10.206
 - panel.migrahosting.com (deprecated)
 
@@ -36,7 +36,7 @@ Generated from `.migra/nginx.routing.map.json` (parsed from `nginx -T` + hints).
 - Owner: (not found in LXC iphost scan; likely VM or external) ip=100.65.164.127
 - mb.migrahosting.com
 
-### http://100.97.213.11:2271
+### http://100.97.213.11:3020
 - Owner: (not found in LXC iphost scan; likely VM or external) ip=100.97.213.11
 - mpanel.migrahosting.com (deprecated)
 

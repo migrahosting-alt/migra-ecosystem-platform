@@ -4,8 +4,7 @@
 - **ID 100:** SRV1-WEB (100.68.239.94) - **Running**
 - **ID 220:** MPANEL-CORE (100.97.213.11) - **Running**
 - **ID 106:** DB-CORE (100.98.54.45) - **Running**
-- **ID 102:** DNS-CORE (100.73.241.82) - **Running**
-- **ID 101:** MAIL-CORE (100.64.119.23) - **Running**
+- **VPS-CORE (external):** 100.81.76.39 - **Running** (Mail + PowerDNS)
 
 ## 2. Active Tenant Pods (LXCs)
 - **pod-premtint (137):** 10.1.10.54 - **Running** (Premier Tint)
@@ -18,10 +17,10 @@
 - **mpanel-api:** Status: `online` | PID: `1277432` | Mem: `693.0mb` | Uptime: `7h`
 
 ## 4. Routing Table (srv1-web)
-- **migrapanel.com** -> `migrapanel-core (100.119.105.93:2271)`
+- **migrapanel.com** -> `migrapanel-core (100.119.105.93:3020)`
 - **premtint.com** -> `10.1.10.54` (LXC 137)
 - **lituationdjs.com** -> `10.1.10.53` (LXC 139)
-- **intake.migrahosting.com** -> `100.97.213.11:2271`
+- **intake.migrahosting.com** -> `100.97.213.11:3020`
 - **migrahosting.com** -> `127.0.0.1:4242`
 
 ---

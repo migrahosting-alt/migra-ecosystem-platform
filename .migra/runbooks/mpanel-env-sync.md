@@ -34,7 +34,7 @@ Risk: MED (PM2 restart; no NGINX changes)
 
 3) Validate from server:
 
-- `ssh root@100.97.213.11 "curl -sS http://127.0.0.1:2271/api/portal/auth/providers"`
+- `ssh root@100.97.213.11 "curl -sS http://127.0.0.1:3020/api/portal/auth/providers"`
 
 ## Rollback
 

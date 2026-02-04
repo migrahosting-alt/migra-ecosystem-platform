@@ -1,0 +1,122 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "MigraHosting Secrets Vault Schema",
+  "description": "Centralized secrets configuration for entire ecosystem",
+  "type": "object",
+  "properties": {
+    "version": {
+      "type": "string",
+      "description": "Vault schema version",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$"
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Last update timestamp (ISO 8601)"
+    },
+    "services": {
+      "type": "object",
+      "properties": {
+        "stripe": {
+          "type": "object",
+          "properties": {
+            "secret_key": { "type": "string", "pattern": "^sk_(test|live)_" },
+            "publishable_key": { "type": "string", "pattern": "^pk_(test|live)_" },
+            "webhook_secret": { "type": "string", "pattern": "^whsec_" }
+          },
+          "required": ["secret_key", "publishable_key", "webhook_secret"]
+        },
+        "sendgrid": {
+          "type": "object",
+          "properties": {
+            "api_key": { "type": "string", "pattern": "^SG\\." }
+          },
+          "required": ["api_key"]
+        },
+        "twilio": {
+          "type": "object",
+          "properties": {
+            "account_sid": { "type": "string", "pattern": "^AC[a-f0-9]{32}$" },
+            "auth_token": { "type": "string" },
+            "phone_number": { "type": "string", "pattern": "^\\+[0-9]{10,15}$" }
+          },
+          "required": ["account_sid", "auth_token"]
+        },
+        "aws": {
+          "type": "object",
+          "properties": {
+            "access_key_id": { "type": "string", "pattern": "^AKIA[A-Z0-9]{16}$" },
+            "secret_access_key": { "type": "string" },
+            "region": { "type": "string", "default": "us-east-1" },
+            "s3_bucket": { "type": "string" }
+          },
+          "required": ["access_key_id", "secret_access_key", "region"]
+        },
+        "cloudflare": {
+          "type": "object",
+          "properties": {
+            "api_token": { "type": "string" },
+            "zone_id": { "type": "string" }
+          }
+        }
+      }
+    },
+    "database": {
+      "type": "object",
+      "properties": {
+        "postgres": {
+          "type": "object",
+          "properties": {
+            "host": { "type": "string", "default": "100.98.54.45" },
+            "port": { "type": "integer", "default": 5432 },
+            "database": { "type": "string" },
+            "username": { "type": "string" },
+            "password": { "type": "string" },
+            "ssl": { "type": "boolean", "default": true }
+          },
+          "required": ["host", "database", "username", "password"]
+        },
+        "redis": {
+          "type": "object",
+          "properties": {
+            "host": { "type": "string", "default": "100.98.54.45" },
+            "port": { "type": "integer", "default": 6379 },
+            "password": { "type": "string" },
+            "db": { "type": "integer", "default": 0 }
+          },
+          "required": ["host"]
+        }
+      }
+    },
+    "auth": {
+      "type": "object",
+      "properties": {
+        "jwt_secret": {
+          "type": "string",
+          "minLength": 32,
+          "description": "JWT signing secret (min 32 chars)"
+        },
+        "jwt_refresh_secret": {
+          "type": "string",
+          "minLength": 32
+        },
+        "encryption_key": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$",
+          "description": "AES-256 encryption key (64-char hex)"
+        }
+      },
+      "required": ["jwt_secret", "encryption_key"]
+    },
+    "internal": {
+      "type": "object",
+      "description": "Internal service-to-service tokens",
+      "properties": {
+        "mpanel_api_key": { "type": "string" },
+        "guardian_api_key": { "type": "string" },
+        "provisioning_worker_key": { "type": "string" }
+      }
+    }
+  },
+  "required": ["version", "updated_at", "services", "database", "auth"]
+}

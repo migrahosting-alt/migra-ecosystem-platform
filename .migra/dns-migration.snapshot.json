@@ -1,0 +1,291 @@
+{
+  "timestamp": "2026-01-27T23:00:00Z",
+  "migration": "PowerDNS: dns-core (on-prem) → mail-core (Contabo VPS)",
+  "current_state": {
+    "dns_core": {
+      "host": "dns-core",
+      "tailscale_ip": "100.73.241.82",
+      "lan_ip": "10.1.10.102",
+      "location": "Proxmox VM (on-prem Xfinity ISP)",
+      "powerdns_version": "4.8.3-4build3.Ubuntu",
+      "backend": "gmysql",
+      "database": {
+        "host": "127.0.0.1",
+        "user": "pdns",
+        "password": "<REDACTED>",
+        "dbname": "powerdns"
+      },
+      "api": {
+        "enabled": true,
+        "port": 8081,
+        "allowed_from": "127.0.0.1,10.1.10.0/24,100.64.0.0/10"
+      },
+      "zones": {
+        "total": 30,
+        "list": [
+          "migrahosting.com",
+          "holisticgroupllc.com",
+          "elizefoundation.org",
+          "exampleclient.test",
+          "clientdomain.com",
+          "migradrive.com",
+          "anotherclient.com",
+          "demo-tenant.com",
+          "migrapanel.com",
+          "migravoice.com",
+          "migramail.com",
+          "test.migrahosting.com",
+          "usera75847aa-7871-4850-8048-f2bf8f5d9ad1.migrahosting.com",
+          "userc0dd4325-c028-4354-9095-733cdc15f44b.migrahosting.com",
+          "user4bad205f-f3ea-43ab-ae27-8f22a797f7e7.migrahosting.com",
+          "user107f74c1-534e-4c67-906d-d3e75d042d41.migrahosting.com",
+          "user287efc0e-121c-43db-86ff-9d34f82bee77.migrahosting.com",
+          "usere562dfc0-55d3-4b19-91d1-ba0185a73b31.migrahosting.com",
+          "user6fad2508-0a08-4a43-9e84-1a4d6382cfea.migrahosting.com",
+          "user1035b41e-4b6b-4e73-bc45-cbfc93a0fafe.migrahosting.com"
+        ]
+      },
+      "soa_serial": "2026012503",
+      "nameservers": {
+        "ns1.migrahosting.com": "73.139.18.218",
+        "ns2.migrahosting.com": "73.139.18.218"
+      },
+      "uptime": "20+ hours (since 2026-01-27 02:45:02 UTC)"
+    },
+    "mail_core": {
+      "host": "mail-core (to be renamed dns-mail-core)",
+      "tailscale_ip": "100.64.119.23",
+      "public_ip": "154.38.180.61",
+      "location": "Contabo VPS (Germany datacenter)",
+      "current_services": [
+        "Postfix (SMTP)",
+        "Dovecot (IMAP/POP3)",
+        "SnappyMail (Webmail on port 3010)",
+        "NGINX reverse proxy for mail.migrahosting.com"
+      ],
+      "open_ports_known": [
+        "25 (SMTP)",
+        "80 (HTTP)",
+        "443 (HTTPS)",
+        "587 (Submission)",
+        "993 (IMAPS)",
+        "995 (POP3S)",
+        "3010 (SnappyMail internal)"
+      ],
+      "ssh_access": "Not directly accessible from current WSL (likely requires SSH key setup or alternate route)",
+      "powerdns_installed": false,
+      "firewall": "Unknown (ufw or iptables - needs discovery)"
+    },
+    "registrar_glue_records": {
+      "ns1.migrahosting.com": "73.139.18.218",
+      "ns2.migrahosting.com": "73.139.18.218",
+      "note": "Both currently point to on-prem ISP IP (Xfinity residential)"
+    },
+    "public_resolution": {
+      "migrahosting.com_NS": [
+        "ns1.migrahosting.com",
+        "ns2.migrahosting.com"
+      ],
+      "migrahosting.com_SOA": "ns1.migrahosting.com. hostmaster.migrahosting.com. 2026012503 10800 3600 604800 3600"
+    }
+  },
+  "target_state": {
+    "dns_mail_core": {
+      "hostname": "dns-mail-core.migrahosting.com",
+      "tailscale_ip": "100.64.119.23",
+      "public_ip": "154.38.180.61",
+      "services": [
+        "Postfix + Dovecot (existing mail services)",
+        "PowerDNS Authoritative (NEW)",
+        "SnappyMail (existing webmail)",
+        "NGINX reverse proxy (existing)"
+      ],
+      "powerdns_config": {
+        "backend": "gmysql (MySQL/MariaDB)",
+        "database": {
+          "host": "localhost",
+          "user": "pdns",
+          "password": "<GENERATE_NEW_SECURE_PASSWORD>",
+          "dbname": "powerdns"
+        },
+        "api": {
+          "enabled": true,
+          "port": 8081,
+          "api_key": "<GENERATE_NEW_API_KEY>",
+          "allowed_from": "127.0.0.1,100.64.0.0/10"
+        },
+        "listeners": [
+          "0.0.0.0:53 (UDP)",
+          "0.0.0.0:53 (TCP)"
+        ]
+      },
+      "firewall_rules": [
+        "53/tcp ALLOW",
+        "53/udp ALLOW",
+        "25/tcp ALLOW (existing mail)",
+        "587/tcp ALLOW (existing mail)",
+        "993/tcp ALLOW (existing mail)",
+        "80/tcp ALLOW (existing NGINX)",
+        "443/tcp ALLOW (existing NGINX)"
+      ],
+      "zones": "All 30 zones migrated from dns-core"
+    },
+    "registrar_glue_records_final": {
+      "ns1.migrahosting.com": "154.38.180.61",
+      "ns2.migrahosting.com": "154.38.180.61",
+      "note": "Both point to Contabo VPS public IP"
+    },
+    "dns_core_decommissioned": {
+      "pdns_service": "stopped and disabled",
+      "port_53": "closed on Proxmox VM",
+      "vm_status": "Can be powered off or repurposed after 48h validation period"
+    }
+  },
+  "migration_phases": [
+    {
+      "phase": 1,
+      "name": "Prepare Contabo VPS",
+      "requires_approval": true,
+      "steps": [
+        "Establish SSH access to Contabo VPS (154.38.180.61)",
+        "Set hostname to dns-mail-core.migrahosting.com",
+        "Install MySQL/MariaDB if not present",
+        "Install PowerDNS authoritative server",
+        "Configure PowerDNS with MySQL backend",
+        "Enable and secure PowerDNS API",
+        "Configure firewall (allow 53/tcp, 53/udp)",
+        "Test PowerDNS service: systemctl status pdns",
+        "Test DNS resolution: dig @localhost migrahosting.com"
+      ],
+      "validation": [
+        "PowerDNS service active and running",
+        "Port 53 listening on all interfaces",
+        "API responding on port 8081",
+        "Firewall allows external DNS queries"
+      ],
+      "rollback": "Stop PowerDNS, remove packages (mail services unaffected)"
+    },
+    {
+      "phase": 2,
+      "name": "Migrate DNS Zones",
+      "requires_approval": true,
+      "steps": [
+        "Export all zones from dns-core: pdnsutil list-all-zones > zones.txt",
+        "For each zone: pdnsutil export-zone <zone> > <zone>.zone",
+        "Transfer zone files to Contabo VPS",
+        "Import zones: pdnsutil load-zone <zone> <zone>.zone",
+        "Verify all zones loaded: pdnsutil list-all-zones | wc -l (should be 30)",
+        "Test resolution from VPS: dig @localhost migrahosting.com SOA",
+        "Test resolution externally: dig @154.38.180.61 migrahosting.com SOA"
+      ],
+      "validation": [
+        "All 30 zones present in Contabo PowerDNS",
+        "SOA serials match dns-core",
+        "External queries to 154.38.180.61 resolve correctly",
+        "ns1/ns2 A records exist in migrahosting.com zone"
+      ],
+      "rollback": "Delete imported zones, keep dns-core as primary (no public impact)"
+    },
+    {
+      "phase": 3,
+      "name": "Update ns2 Glue Record (Safe First Step)",
+      "requires_approval": true,
+      "steps": [
+        "At domain registrar, update ONLY ns2.migrahosting.com glue record",
+        "Change ns2.migrahosting.com → 154.38.180.61",
+        "Leave ns1.migrahosting.com → 73.139.18.218 (unchanged)",
+        "Wait 15-60 minutes for propagation",
+        "Monitor resolution: dig NS migrahosting.com @1.1.1.1",
+        "Monitor resolution: dig NS migrahosting.com @8.8.8.8",
+        "Check both IPs respond: dig @73.139.18.218 migrahosting.com",
+        "Check both IPs respond: dig @154.38.180.61 migrahosting.com"
+      ],
+      "validation": [
+        "Public resolvers query both ns1 (old IP) and ns2 (new IP)",
+        "No SERVFAIL or NXDOMAIN errors",
+        "MigraPanel DNS tools still functional",
+        "Client domains resolve correctly"
+      ],
+      "rollback": "Change ns2 back to 73.139.18.218 at registrar (5-15 min)"
+    },
+    {
+      "phase": 4,
+      "name": "Update ns1 Glue Record (Complete Migration)",
+      "requires_approval": true,
+      "steps": [
+        "Confirm Phase 3 stable for at least 30 minutes",
+        "At domain registrar, update ns1.migrahosting.com glue record",
+        "Change ns1.migrahosting.com → 154.38.180.61",
+        "Both ns1 and ns2 now point to Contabo VPS",
+        "Wait 15-60 minutes for full propagation",
+        "Monitor from multiple locations: dig @1.1.1.1, @8.8.8.8, @9.9.9.9",
+        "Test client domains: dig <client-domain> @8.8.8.8",
+        "Run MigraPanel DNS validation on 5+ domains"
+      ],
+      "validation": [
+        "All public resolvers use Contabo VPS only",
+        "No queries hitting old on-prem IP",
+        "MigraPanel DNS validation passes",
+        "MigraPanel DNS propagation checks pass",
+        "Zero DNS-related errors in logs"
+      ],
+      "rollback": "Revert ns1 to 73.139.18.218 at registrar (both ns1/ns2 back to on-prem)"
+    },
+    {
+      "phase": 5,
+      "name": "Decommission On-Prem DNS",
+      "requires_approval": true,
+      "steps": [
+        "Wait 24-48 hours after Phase 4 completion",
+        "Confirm zero queries hitting dns-core (check PowerDNS logs)",
+        "Stop PowerDNS on dns-core: systemctl stop pdns",
+        "Disable PowerDNS: systemctl disable pdns",
+        "Close port 53 on dns-core firewall",
+        "Test external resolution still works: dig @1.1.1.1 migrahosting.com",
+        "Run MigraPanel DNS validation suite",
+        "Document new infrastructure state"
+      ],
+      "validation": [
+        "dns-core PowerDNS stopped and disabled",
+        "Port 53 closed on dns-core",
+        "All DNS queries served by Contabo VPS only",
+        "MigraPanel DNS tools 100% functional",
+        "Zero DNS errors or SERVFAIL responses"
+      ],
+      "rollback": "Restart PowerDNS on dns-core, revert glue records to 73.139.18.218 (emergency only)"
+    }
+  ],
+  "risks": {
+    "high": [
+      "Simultaneous ns1/ns2 change causes global DNS outage",
+      "PowerDNS not running on VPS when glue records change",
+      "Firewall blocks port 53 on VPS",
+      "Zone import fails or corrupts data"
+    ],
+    "medium": [
+      "SSH access issues to Contabo VPS delay migration",
+      "TTL caching causes slow propagation (mitigated by phased approach)",
+      "ISP blocks port 53 on Contabo (unlikely for datacenter IP)"
+    ],
+    "low": [
+      "PowerDNS version mismatch between dns-core and VPS",
+      "API key needs updating in MigraPanel after migration"
+    ]
+  },
+  "prerequisites": [
+    "SSH root access to Contabo VPS (154.38.180.61)",
+    "Domain registrar credentials (to update glue records)",
+    "Backup of all DNS zones from dns-core",
+    "MigraPanel API credentials to update PowerDNS endpoint",
+    "Monitoring access to verify queries during migration"
+  ],
+  "estimated_timeline": {
+    "phase_1": "1-2 hours (VPS prep + PowerDNS install)",
+    "phase_2": "30-60 minutes (zone export + import)",
+    "phase_3": "1-2 hours (ns2 update + monitoring)",
+    "phase_4": "1-2 hours (ns1 update + monitoring)",
+    "phase_5": "15 minutes (decommission after 24-48h wait)",
+    "total_active_time": "4-6 hours",
+    "total_elapsed_time": "3-4 days (including propagation waits)"
+  }
+}

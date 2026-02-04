@@ -24,9 +24,9 @@
     "routing": {
       "main_gateway": "srv1-web",
       "domains": [
-        { "domain": "migrapanel.com", "upstream": "http://10.1.10.206:2271" },
+        { "domain": "migrapanel.com", "upstream": "http://10.1.10.206:3020" },
         { "domain": "migrahosting.com", "upstream": "http://127.0.0.1:4242" },
-        { "domain": "intake.migrahosting.com", "upstream": "http://100.97.213.11:2271" },
+        { "domain": "intake.migrahosting.com", "upstream": "http://100.97.213.11:3020" },
         { "domain": "lituationdjs.com", "target_pod_ip": "10.1.10.53" },
         { "domain": "premtint.com", "target_pod_ip": "10.1.10.54" }
       ]

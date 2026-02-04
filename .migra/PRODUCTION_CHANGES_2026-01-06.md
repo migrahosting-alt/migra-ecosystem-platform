@@ -31,7 +31,7 @@ All minimal production sync fixes have been applied successfully. The portal aut
 **Changes**:
 - `APP_URL=https://mpanel.migrahosting.com` (was `https://migrapanel.com`)
 - `FRONTEND_URL=https://mpanel.migrahosting.com` (was `https://migrapanel.com`)
-- `CORS_ORIGIN=https://migrahosting.com,https://www.migrahosting.com,https://mpanel.migrahosting.com,https://panel.migrahosting.com,https://migrapanel.com,https://www.migrapanel.com,http://localhost:5173,http://127.0.0.1:5173,http://localhost:2272`
+- `CORS_ORIGIN=https://migrahosting.com,https://www.migrahosting.com,https://mpanel.migrahosting.com,https://panel.migrahosting.com,https://migrapanel.com,https://www.migrapanel.com,http://localhost:5173,http://127.0.0.1:5173,http://localhost:3010`
   - **Added**: `www.migrahosting.com`, `panel.migrahosting.com`, `www.migrapanel.com`
 
 **Backups**: Multiple timestamped `.bak` files (e.g., `.env.2026-01-06_193833.bak`)
@@ -43,8 +43,8 @@ All minimal production sync fixes have been applied successfully. The portal aut
 **File**: `/etc/migra/secrets/migrahosting-backend.env`
 
 **Changes**:
-- `MPANEL_API_BASE_URL=https://mpanel.migrahosting.com` (was `http://100.97.213.11:2272`)
-- `MPANEL_API_URL=https://mpanel.migrahosting.com` (was `http://100.97.213.11:2272`)
+- `MPANEL_API_BASE_URL=https://mpanel.migrahosting.com` (was `legacy mpanel-core URL`)
+- `MPANEL_API_URL=https://mpanel.migrahosting.com` (was `legacy mpanel-core URL`)
 
 **Backups**: Timestamped `.bak` files in `/etc/migra/secrets/`
 
@@ -81,7 +81,7 @@ curl -sS -I https://migrapanel.com/api/portal/auth/providers
 # Response: HTTP/2 308, Location: https://mpanel.migrahosting.com/api/portal/auth/providers
 
 # mPanel API server-local
-ssh root@100.97.213.11 'curl -sS http://127.0.0.1:2271/api/portal/auth/providers'
+ssh root@100.97.213.11 'curl -sS http://127.0.0.1:3020/api/portal/auth/providers'
 # Response: {"providers":[]}
 
 # Marketing backend server-local

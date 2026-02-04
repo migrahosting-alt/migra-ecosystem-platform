@@ -2,6 +2,7 @@ server {
     listen 80;
     listen [::]:80;
     server_name intake.migrahosting.com;
+    include /etc/nginx/snippets/tenant-suspension.conf;
     return 301 https://$server_name$request_uri;
 }
 
@@ -10,6 +11,7 @@ server {
     include /etc/nginx/snippets/ocsp-off.conf;
     listen [::]:443 ssl;
     server_name intake.migrahosting.com;
+    include /etc/nginx/snippets/tenant-suspension.conf;
 
     # SSL certificates
     ssl_certificate /etc/letsencrypt/live/intake.migrahosting.com/fullchain.pem;

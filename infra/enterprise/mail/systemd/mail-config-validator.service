@@ -1,0 +1,15 @@
+[Unit]
+Description=Mail Config Validator
+After=network.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/migra/scripts/validate-mail-configs.sh
+StandardOutput=journal
+StandardError=journal
+
+# Run sync if validation fails
+ExecStartPost=/bin/bash -c 'if [ $EXIT_STATUS -ne 0 ]; then /opt/migra/scripts/sync-mail-configs.sh; fi'
+
+[Install]
+WantedBy=multi-user.target

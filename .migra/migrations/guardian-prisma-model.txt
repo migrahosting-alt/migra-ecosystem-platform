@@ -1,0 +1,63 @@
+model GuardianInstance {
+  // Identity & Core
+  id                               String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  tenantId                         String   @map("tenant_id") @db.Uuid
+  customerId                       String?  @map("customer_id") @db.Uuid
+  
+  // Guardian AI Configuration (from raw SQL service)
+  instanceName                     String?  @map("instance_name")
+  widgetToken                      String   @unique @map("widget_token")
+  gatewayUrl                       String   @default("http://localhost:8080") @map("gateway_url")
+  allowedOrigins                   Json     @default("[]") @map("allowed_origins")
+  maxMessagesPerDay                Int      @default(100) @map("max_messages_per_day")
+  enableVoice                      Boolean  @default(false) @map("enable_voice")
+  
+  // LLM Configuration (from raw SQL service)
+  llmProvider                      String   @default("openai") @map("llm_provider")
+  llmModel                         String   @default("gpt-4o-mini") @map("llm_model")
+  llmTemperature                   Decimal  @default(0.7) @map("llm_temperature") @db.Decimal(3,2)
+  
+  // Widget Customization (from raw SQL service)
+  widgetTitle                      String   @default("AI Support Assistant") @map("widget_title")
+  widgetSubtitle                   String?  @map("widget_subtitle")
+  primaryColor                     String   @default("#3b82f6") @map("primary_color")
+  assistantName                    String   @default("Abigail") @map("assistant_name")
+  avatarUrl                        String?  @map("avatar_url")
+  
+  // Enterprise Features (from original Prisma schema)
+  dataRegion                       String   @default("us") @map("data_region")
+  environment                      String   @default("production")
+  enabled                          Boolean  @default(true)
+  policyPack                       String   @default("default") @map("policy_pack")
+  policyVersion                    String   @default("v1") @map("policy_version")
+  autoRemediationEnabled           Boolean  @default(false) @map("auto_remediation_enabled")
+  autoRemediationAllowedSeverities String   @default("low,medium") @map("auto_remediation_allowed_severities")
+  allowProdAutoRemediation         Boolean  @default(false) @map("allow_prod_auto_remediation")
+  
+  // Billing (from raw SQL service)
+  productId                        String?  @map("product_id") @db.Uuid
+  monthlyPrice                     Decimal  @default(29.99) @map("monthly_price") @db.Decimal(10,2)
+  status                           String   @default("active")
+  
+  // Audit Fields
+  createdByUserId                  String?  @map("created_by_user_id") @db.Uuid
+  updatedByUserId                  String?  @map("updated_by_user_id") @db.Uuid
+  createdAt                        DateTime @default(now()) @map("created_at")
+  updatedAt                        DateTime @updatedAt @map("updated_at")
+  
+  // Relations
+  tenant       Tenant                    @relation(fields: [tenantId], references: [id])
+  customer     Customer?                 @relation(fields: [customerId], references: [id])
+  product      Product?                  @relation(fields: [productId], references: [id])
+  scans        GuardianScan[]
+  findings     GuardianFinding[]
+  remediations GuardianRemediationTask[]
+  auditEvents  GuardianAuditEvent[]
+
+  @@index([tenantId])
+  @@index([customerId])
+  @@index([dataRegion])
+  @@index([status])
+  @@index([enabled])
+  @@map("guardian_instances")
+}

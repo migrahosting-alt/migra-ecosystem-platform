@@ -14,8 +14,7 @@ Use these Tailscale IPs for SSH access:
 | `srv1-web` | Main web/hosting node | 100.68.239.94 | 10.1.10.10 |
 | `cloud-core` | MinIO / object storage | 100.120.118.39 | - |
 | `db-core` | PostgreSQL database | 100.98.54.45 | 10.1.10.210 |
-| `dns-core` | PowerDNS authoritative | 100.73.241.82 | 10.1.10.102 |
-| `mail-core` | Primary mail (Postfix/Dovecot) | 100.64.119.23 | 10.1.10.101 |
+| `vps-core` | Mail + PowerDNS (VPS) | 100.81.76.39 | - |
 | `mail-vps` | Legacy/secondary mail VPS | 100.123.151.26 | - |
 | `mpanel-core` | mPanel backend API | 100.97.213.11 | 10.1.10.206 |
 | `migrapanel-core` | Control panel (migrapanel.com) | 100.119.105.93 | 10.1.10.141 |
@@ -40,8 +39,7 @@ Legacy LAN addresses (use Tailscale when possible):
 - `srv1-web` – 10.1.10.10 – main nginx web server (client websites)
 - `mpanel-core` – 10.1.10.206 – mPanel backend (Node/Express, queues, APIs)
 - `migrapanel-core` – 10.1.10.141 – control panel (migrapanel.com)
-- `dns-core` – 10.1.10.102 – PowerDNS authoritative DNS
-- `mail-core` – 10.1.10.101 – Postfix/Dovecot mail server
+- `vps-core` – 100.81.76.39 – Mail + PowerDNS (VPS)
 - `db-core` – 10.1.10.210 – central database host
 
 ---
