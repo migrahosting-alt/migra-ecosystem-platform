@@ -19,3 +19,8 @@
 ## Validation
 - nginx -t
 - nginx -T (for expanded config review)
+
+## 2026-04-08 MigraVoice Rollout Note
+- Normalize HTTPS listeners in tracked repo mirrors to use matching `listen 443 ssl http2;` and `listen [::]:443 ssl http2;` pairs.
+- When repo-tracking live `sites-enabled` vhosts, keep `sites-enabled` and `sites-available` copies aligned after listener or proxy-route changes.
+- For `call.migrahosting.com`, preserve the `tenant-suspension` include and no-cache rules for `sw.js`, `site.webmanifest`, `build.json`, and `apple-touch-icon.png` so service-worker updates propagate safely.

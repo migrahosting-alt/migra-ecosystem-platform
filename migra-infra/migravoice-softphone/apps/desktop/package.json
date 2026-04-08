@@ -1,0 +1,112 @@
+{
+  "name": "migravoice-desktop",
+  "version": "1.0.0",
+  "description": "MigraVoice Enterprise Softphone – Desktop Application",
+  "author": {
+    "name": "MigraHosting",
+    "email": "support@migrahosting.com",
+    "url": "https://migrahosting.com"
+  },
+  "license": "UNLICENSED",
+  "private": true,
+  "homepage": "https://migrahosting.com",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "cross-env NODE_ENV=development electron .",
+    "build:web": "cd ../web-softphone && pnpm run build",
+    "build:win": "electron-builder --win --x64",
+    "build:mac": "electron-builder --mac",
+    "build:linux": "electron-builder --linux",
+    "build:all": "electron-builder --win --mac --linux",
+    "dist": "pnpm run build:web && pnpm run build:all"
+  },
+  "build": {
+    "appId": "com.migrahosting.migravoice",
+    "productName": "MigraVoice",
+    "electronVersion": "28.3.3",
+    "copyright": "Copyright © 2026 MigraHosting",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "web-dist/**/*",
+      "node_modules/**/*",
+      "build/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "../web-softphone/dist",
+        "to": "web-dist"
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        }
+      ],
+      "icon": "build/icon.png",
+      "publisherName": "MigraHosting LLC"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "MigraVoice",
+      "perMachine": false,
+      "runAfterFinish": true
+    },
+    "mac": {
+      "target": ["dmg", "zip"],
+      "icon": "build/icon.png",
+      "category": "public.app-category.business",
+      "hardenedRuntime": true,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist"
+    },
+    "dmg": {
+      "title": "MigraVoice ${version}",
+      "contents": [
+        { "x": 130, "y": 220 },
+        { "x": 410, "y": 220, "type": "link", "path": "/Applications" }
+      ]
+    },
+    "linux": {
+      "target": ["AppImage", "deb", "snap"],
+      "icon": "build/icon.png",
+      "category": "Network",
+      "description": "MigraVoice Enterprise Softphone",
+      "desktop": {
+        "Name": "MigraVoice",
+        "Comment": "Enterprise VoIP Softphone",
+        "Type": "Application",
+        "Categories": "Network;InstantMessaging;VoIP;"
+      }
+    },
+    "snap": {
+      "grade": "stable",
+      "confinement": "strict",
+      "plugs": ["default", "audio-playback", "audio-record", "network"]
+    },
+    "publish": [
+      {
+        "provider": "generic",
+        "url": "https://call.migrahosting.com/downloads/"
+      }
+    ]
+  },
+  "dependencies": {
+    "electron-updater": "^6.1.7"
+  },
+  "devDependencies": {
+    "cross-env": "^7.0.3",
+    "electron": "^28.2.0",
+    "electron-builder": "^24.9.1"
+  }
+}
