@@ -20,24 +20,26 @@ interface AssertMutationSecurityInput {
 }
 
 export async function assertMutationSecurity(input: AssertMutationSecurityInput): Promise<void> {
-  await assertPlatformMutationAllowed({
+  const platformInput = {
     action: input.action,
     actorUserId: input.actorUserId,
-    actorRole: input.actorRole,
-    orgId: input.orgId,
-    ip: input.ip,
-    userAgent: input.userAgent,
-    route: input.route,
-  });
+    ...(input.actorRole !== undefined ? { actorRole: input.actorRole } : {}),
+    ...(input.orgId !== undefined ? { orgId: input.orgId } : {}),
+    ...(input.ip !== undefined ? { ip: input.ip } : {}),
+    ...(input.userAgent !== undefined ? { userAgent: input.userAgent } : {}),
+    ...(input.route !== undefined ? { route: input.route } : {}),
+  };
+
+  await assertPlatformMutationAllowed(platformInput);
 
   await assertOperatorRiskAllowed({
     action: input.action,
     actorUserId: input.actorUserId,
-    actorRole: input.actorRole,
-    orgId: input.orgId,
-    ip: input.ip,
-    userAgent: input.userAgent,
-    route: input.route,
+    ...(input.actorRole !== undefined ? { actorRole: input.actorRole } : {}),
+    ...(input.orgId !== undefined ? { orgId: input.orgId } : {}),
+    ...(input.ip !== undefined ? { ip: input.ip } : {}),
+    ...(input.userAgent !== undefined ? { userAgent: input.userAgent } : {}),
+    ...(input.route !== undefined ? { route: input.route } : {}),
     riskTier: input.riskTier,
   });
 
@@ -57,8 +59,8 @@ export async function assertMutationSecurity(input: AssertMutationSecurityInput)
     orgId: input.orgId || null,
     action: input.action,
     payloadHash,
-    ip: input.ip,
-    userAgent: input.userAgent,
+    ...(input.ip !== undefined ? { ip: input.ip } : {}),
+    ...(input.userAgent !== undefined ? { userAgent: input.userAgent } : {}),
     requireStepUp: runtimeStepUpMethod !== "NONE",
   });
 }

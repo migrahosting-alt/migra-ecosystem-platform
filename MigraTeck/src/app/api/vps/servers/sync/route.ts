@@ -51,13 +51,16 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const result = await syncVpsFleetForOrg({
+    const syncInput = {
       orgId: membership.orgId,
       actorUserId: authResult.session.user.id,
       actorRole: membership.role,
-      providerSlug: parsed.data.providerSlug,
-      ip,
-      userAgent: getUserAgent(request),
+      ...(parsed.data.providerSlug ? { providerSlug: parsed.data.providerSlug } : {}),
+      ...(ip ? { ip } : {}),
+      ...(getUserAgent(request) ? { userAgent: getUserAgent(request) } : {}),
+    };
+    const result = await syncVpsFleetForOrg({
+      ...syncInput,
     });
 
     const status = result.okCount > 0 ? 200 : 502;

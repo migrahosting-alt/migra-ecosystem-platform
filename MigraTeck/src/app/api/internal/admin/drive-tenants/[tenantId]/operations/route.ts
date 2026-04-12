@@ -29,7 +29,10 @@ export async function GET(
     return NextResponse.json({ error: "Invalid query" }, { status: 400 });
   }
 
-  const { items, nextCursor } = await listDriveTenantOperations(tenantId, parsed.data);
+  const { items, nextCursor } = await listDriveTenantOperations(tenantId, {
+    ...(parsed.data.cursor ? { cursor: parsed.data.cursor } : {}),
+    ...(parsed.data.limit !== undefined ? { limit: parsed.data.limit } : {}),
+  });
 
   return NextResponse.json({
     items: items.map(serializeDriveTenantOperation),

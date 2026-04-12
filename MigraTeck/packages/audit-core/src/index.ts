@@ -1,0 +1,1 @@
+export { writeAuditLog } from "@/lib/audit";

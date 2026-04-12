@@ -54,7 +54,7 @@ async function createMhServerFixture() {
     data: {
       serverId: server.id,
       providerSlug: "mh",
-      providerServerId: server.providerServerId,
+      providerServerId: server.providerServerId!,
       metadataJson: { mode: "stub", source: "test_fixture" },
     },
   });

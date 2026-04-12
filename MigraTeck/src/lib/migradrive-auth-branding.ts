@@ -1,4 +1,5 @@
 export const MIGRADRIVE_SITE_URL = "https://migradrive.com";
+export const MIGRATECK_SITE_URL = "https://migrateck.com";
 
 export type AuthPortalBranding = {
   host: string;
@@ -76,6 +77,49 @@ export const defaultAuthPortalBranding: AuthPortalBranding = {
     "MigraDrive uses essential storage for secure authentication, session continuity, and consent preferences. Optional analytics or preference storage should only run after consent.",
 };
 
+export const migrateckAuthPortalBranding: AuthPortalBranding = {
+  host: MIGRATECK_SITE_URL,
+  productName: "MigraTeck",
+  shortName: "MigraTeck",
+  sectionLabel: "MigraTeck account access",
+  headerLabel: "Enterprise account",
+  siteUrl: MIGRATECK_SITE_URL,
+  appLandingPath: "/app",
+  siteLabel: "MigraTeck Home",
+  heading: "Log in to MigraTeck",
+  description:
+    "Access your MigraTeck account, active organization context, and shared platform entrypoints from one secure surface.",
+  featureBullets: [
+    "Password login gives you direct access to your MigraTeck account and organization-aware platform controls.",
+    "Magic links and SMS codes reduce friction for operators and teams signing in across the MigraTeck ecosystem.",
+  ],
+  recoveryLabel: "MigraTeck account recovery",
+  recoveryHeading: "Reset your MigraTeck password",
+  recoveryDescription:
+    "Send a recovery link to the email address tied to your MigraTeck account so you can regain access safely.",
+  resetHeading: "Set a new MigraTeck password",
+  resetDescription:
+    "Choose a new password for your MigraTeck account to restore access to your shared platform surface.",
+  verifyLabel: "MigraTeck account setup",
+  verifyHeading: "Verify your MigraTeck email",
+  verifyDescription:
+    "Confirm your email address to activate your MigraTeck account and continue into the platform.",
+  signInLabel: "Sign in to MigraTeck",
+  invalidCredentialsMessage: "Invalid MigraTeck credentials.",
+  verifyEmailMessage: "Verify your email before logging in to MigraTeck.",
+  magicLinkMessage: "Magic link sent. Check your inbox for MigraTeck access.",
+  smsHeading: "Or sign in with a text message",
+  smsDescription:
+    "Use the mobile number saved on your account to receive a six-digit MigraTeck sign-in code.",
+  footerLabel: "MigraTeck account",
+  footerHeading: "Shared account access and recovery across the MigraTeck platform.",
+  footerDescription:
+    "Use this portal to create accounts, verify access, recover credentials, and continue into MigraTeck products.",
+  supportEmail: "support@migrateck.com",
+  cookieDescription:
+    "MigraTeck uses essential storage for secure authentication, session continuity, and consent preferences. Optional analytics or preference storage should only run after consent.",
+};
+
 export const vpsAuthPortalBranding: AuthPortalBranding = {
   host: "https://vps.migrahosting.com",
   productName: "MigraHosting VPS",
@@ -128,11 +172,17 @@ const MIGRADRIVE_AUTH_PATHS = new Set([
 ]);
 
 export const VPS_PORTAL_HOST = "vps.migrahosting.com";
+const MIGRATECK_ACCOUNT_HOSTS = new Set([
+  "migrateck.com",
+  "www.migrateck.com",
+  "localhost",
+  "127.0.0.1",
+]);
 
 function normalizePortalHostname(hostname: string | null | undefined): string {
   return (hostname || "")
-    .split(",")[0]
-    ?.trim()
+    .split(",")[0]!
+    .trim()
     .toLowerCase()
     .replace(/:\d+$/, "");
 }
@@ -154,6 +204,10 @@ export function resolveAuthPortalBranding(hostname: string | null | undefined): 
 
   if (normalizedHost === VPS_PORTAL_HOST) {
     return vpsAuthPortalBranding;
+  }
+
+  if (MIGRATECK_ACCOUNT_HOSTS.has(normalizedHost)) {
+    return migrateckAuthPortalBranding;
   }
 
   return defaultAuthPortalBranding;

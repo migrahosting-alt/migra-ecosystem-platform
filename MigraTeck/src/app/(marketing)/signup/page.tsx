@@ -16,12 +16,12 @@ export default async function SignupPage() {
   const starterPlan = getDefaultMigraDrivePlanConfig();
   const signupBlocked = !platformConfig.allowPublicSignup || platformConfig.maintenanceMode || platformConfig.freezeProvisioning;
   const signupBlockedIntro = platformConfig.maintenanceMode
-    ? "MigraDrive maintenance is active. Submit your details and we will onboard your team once public signup resumes."
+    ? `${authBranding.productName} maintenance is active. Submit your details and we will onboard your team once public signup resumes.`
     : platformConfig.freezeProvisioning
-      ? "MigraDrive provisioning is currently paused. Submit your details and operations will contact you with next steps."
+      ? `${authBranding.productName} provisioning is currently paused. Submit your details and operations will contact you with next steps.`
       : platformConfig.waitlistMode
-        ? "MigraDrive waitlist mode is active. Submit your details to reserve onboarding priority."
-        : "Signup is temporarily restricted. Submit your details and MigraDrive onboarding will follow up.";
+        ? `${authBranding.productName} waitlist mode is active. Submit your details to reserve onboarding priority.`
+        : `Signup is temporarily restricted. Submit your details and ${authBranding.productName} onboarding will follow up.`;
 
   return (
     <section className="px-6 py-16">
@@ -40,7 +40,9 @@ export default async function SignupPage() {
             <div className="rounded-2xl border border-[var(--line)] bg-white/70 px-4 py-3">
               {host === "vps.migrahosting.com"
                 ? "Provision your first VPS workspace and manage infrastructure, console sessions, backups, and billing in one place."
-                : `${starterPlan.storageQuotaGb} GiB starter capacity is provisioned with every new MigraDrive tenant.`}
+                : authBranding.productName === "MigraTeck"
+                  ? "Create one shared MigraTeck account for organization-aware access across the ecosystem and its product entrypoints."
+                  : `${starterPlan.storageQuotaGb} GiB starter capacity is provisioned with every new MigraDrive tenant.`}
             </div>
             <div className="rounded-2xl border border-[var(--line)] bg-white/70 px-4 py-3">
               Email, password, and optional text-message sign-in keep portal access flexible without exposing operator tooling.
@@ -59,9 +61,9 @@ export default async function SignupPage() {
           </p>
         </div>
         {signupBlocked ? (
-          <PublicAccessRequestForm source="signup_blocked" intro={signupBlockedIntro} />
+          <PublicAccessRequestForm source="signup_blocked" intro={signupBlockedIntro} productLabel={authBranding.productName} />
         ) : (
-          <SignupForm />
+          <SignupForm authBranding={authBranding} />
         )}
       </div>
     </section>

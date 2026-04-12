@@ -10,15 +10,20 @@ export async function createUserSession(userId: string) {
   const sessionToken = randomBytes(48).toString("base64url");
   const expiresAt = new Date(Date.now() + sessionMaxAgeSeconds * 1000);
   let prunedSessions = 0;
+  let sessionId = "";
 
   await prisma.$transaction(async (tx) => {
-    await tx.session.create({
+    const createdSession = await tx.session.create({
       data: {
         sessionToken,
         userId,
         expires: expiresAt,
       },
+      select: {
+        id: true,
+      },
     });
+    sessionId = createdSession.id;
 
     const overflowSessions = await tx.session.findMany({
       where: { userId },
@@ -41,6 +46,7 @@ export async function createUserSession(userId: string) {
   });
 
   return {
+    sessionId,
     sessionToken,
     expiresAt,
     prunedSessions,

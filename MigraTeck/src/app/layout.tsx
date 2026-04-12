@@ -6,20 +6,20 @@ import "./globals.css";
 const organizationStructuredData = {
   "@context": "https://schema.org",
   "@type": "Organization",
-  name: "MigraDrive",
-  url: "https://migradrive.com",
-  logo: "https://migradrive.com/icon.png",
+  name: "MigraTeck",
+  url: "https://migrateck.com",
+  logo: "https://migrateck.com/icon.png",
   description:
-    "MigraDrive secure cloud storage with web console, mobile access, desktop sync, and S3-compatible APIs.",
+    "MigraTeck account access, organization control, product launch, and platform operations.",
 };
 
 const websiteStructuredData = {
   "@context": "https://schema.org",
   "@type": "WebSite",
-  name: "MigraDrive",
-  url: "https://migradrive.com",
+  name: "MigraTeck",
+  url: "https://migrateck.com",
   description:
-    "MigraDrive secure cloud storage with web console, mobile access, desktop sync, and S3-compatible APIs.",
+    "MigraTeck account access, organization control, product launch, and platform operations.",
 };
 
 const sora = Sora({
@@ -35,14 +35,14 @@ const spaceGrotesk = Space_Grotesk({
 });
 
 export const metadata: Metadata = {
-  applicationName: "MigraDrive",
+  applicationName: "MigraTeck",
   title: {
-    default: "MigraDrive",
-    template: "%s | MigraDrive",
+    default: "MigraTeck",
+    template: "%s | MigraTeck",
   },
   description:
-    "MigraDrive secure cloud storage with web console, mobile access, desktop sync, and S3-compatible APIs.",
-  metadataBase: new URL("https://migradrive.com"),
+    "MigraTeck account access, organization control, product launch, and platform operations.",
+  metadataBase: new URL("https://migrateck.com"),
   manifest: "/manifest.webmanifest",
   alternates: {
     canonical: "/",
@@ -59,26 +59,26 @@ export const metadata: Metadata = {
     },
   },
   openGraph: {
-    title: "MigraDrive",
+    title: "MigraTeck",
     description:
-      "MigraDrive secure cloud storage with web console, mobile access, desktop sync, and S3-compatible APIs.",
-    url: "https://migradrive.com",
-    siteName: "MigraDrive",
+      "MigraTeck account access, organization control, product launch, and platform operations.",
+    url: "https://migrateck.com",
+    siteName: "MigraTeck",
     type: "website",
     images: [
       {
         url: "/icon.png",
         width: 512,
         height: 512,
-        alt: "MigraDrive official icon",
+        alt: "MigraTeck official icon",
       },
     ],
   },
   twitter: {
     card: "summary_large_image",
-    title: "MigraDrive",
+    title: "MigraTeck",
     description:
-      "MigraDrive secure cloud storage with web console, mobile access, desktop sync, and S3-compatible APIs.",
+      "MigraTeck account access, organization control, product launch, and platform operations.",
     images: ["/icon.png"],
   },
   icons: {

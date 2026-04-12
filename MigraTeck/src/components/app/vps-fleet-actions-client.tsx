@@ -5,12 +5,12 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import type { VpsFleetProviderStatus } from "@/lib/vps/types";
 
-const buttonBase = "rounded-full border px-5 py-2.5 text-sm font-semibold shadow-sm transition disabled:cursor-not-allowed disabled:opacity-50";
+const buttonBase = "inline-flex h-9 items-center justify-center rounded-lg border px-4 text-[13px] font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-200 disabled:cursor-not-allowed disabled:opacity-50";
 
 const tones = {
-  primary: "border-teal-700 bg-teal-700 text-white hover:bg-teal-800",
-  neutral: "border-slate-300 bg-white text-slate-900 hover:bg-slate-50",
-  muted: "border-slate-300 bg-slate-100 text-slate-700 hover:bg-slate-200",
+  primary: "border-transparent bg-indigo-600 text-white shadow-[0_1px_2px_rgba(0,0,0,0.08)] hover:bg-indigo-700",
+  neutral: "border-slate-200/60 bg-white text-slate-700 shadow-[0_1px_2px_rgba(0,0,0,0.04)] hover:border-slate-300 hover:text-slate-900",
+  muted: "border-slate-200/60 bg-white text-slate-500 hover:border-slate-300 hover:text-slate-700",
 } as const;
 
 function buttonClass(tone: keyof typeof tones) {
@@ -88,27 +88,29 @@ export function VpsFleetActionsClient({
   }
 
   return (
-    <div className="w-full max-w-[620px] space-y-3 lg:text-right">
-      <div id="vps-fleet-actions" className="flex flex-wrap justify-start gap-3 lg:justify-end">
-        <Link href={deployHref} className={buttonClass("primary")}>
-          Deploy
-        </Link>
+    <div className="w-full lg:max-w-[620px]">
+      <div className="flex flex-col gap-2 lg:items-end">
+        <div id="vps-fleet-actions" className="flex flex-wrap justify-start gap-2 lg:justify-end">
+          <Link href={deployHref} className={buttonClass("primary")}>
+            Deploy
+          </Link>
+          <button
+            className={buttonClass("neutral")}
+            disabled={!canManage || !canImportFromProviders || busyAction !== null}
+            onClick={() => void runFleetAction("Import")}
+          >
+            {busyAction === "Import" ? "Importing..." : "Import"}
+          </button>
+          <button
+            className={buttonClass("neutral")}
+            disabled={!canManage || !canImportFromProviders || busyAction !== null}
+            onClick={() => void runFleetAction("Sync")}
+          >
+            {busyAction === "Sync" ? "Syncing..." : "Sync now"}
+          </button>
+        </div>
         <button
-          className={buttonClass("neutral")}
-          disabled={!canManage || !canImportFromProviders || busyAction !== null}
-          onClick={() => void runFleetAction("Import")}
-        >
-          {busyAction === "Import" ? "Importing..." : "Import"}
-        </button>
-        <button
-          className={buttonClass("neutral")}
-          disabled={!canManage || !canImportFromProviders || busyAction !== null}
-          onClick={() => void runFleetAction("Sync")}
-        >
-          {busyAction === "Sync" ? "Syncing..." : "Sync now"}
-        </button>
-        <button
-          className={buttonClass(showProviderGuide ? "primary" : "muted")}
+          className={`${buttonClass(showProviderGuide ? "neutral" : "muted")} w-full sm:w-auto`}
           onClick={() => setShowProviderGuide((current) => !current)}
         >
           Connect provider
@@ -116,36 +118,36 @@ export function VpsFleetActionsClient({
       </div>
 
       {showProviderGuide ? (
-        <div className="rounded-2xl border border-slate-200 bg-white px-4 py-4 text-left shadow-sm">
+        <div className="mt-3 rounded-xl border border-slate-200/60 bg-white px-4 py-3 text-left shadow-[0_1px_2px_rgba(0,0,0,0.04),0_8px_32px_rgba(0,0,0,0.04)]">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
-              <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--ink-muted)]">Provider onboarding</p>
-              <p className="mt-1 text-sm font-semibold text-[var(--ink)]">Connect runtime credentials to turn this workspace into a live control plane.</p>
+              <p className="text-[11px] font-medium uppercase tracking-wider text-slate-400">Provider onboarding</p>
+              <p className="mt-1 text-[13px] font-semibold text-slate-800">Connect runtime credentials, then import or sync inventory.</p>
             </div>
-            <a href="#vps-provider-fabric" className="text-xs font-semibold uppercase tracking-[0.14em] text-[var(--brand-600)]">
+            <a href="#vps-provider-fabric" className="text-[11px] font-medium text-indigo-600">
               Review providers
             </a>
           </div>
           <div className="mt-3 grid gap-2 md:grid-cols-3">
             {providers.map((provider) => (
-              <div key={provider.slug} className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-3">
+              <div key={provider.slug} className="rounded-lg border border-slate-100 bg-slate-50/60 px-3 py-2.5">
                 <div className="flex items-center justify-between gap-2">
-                  <p className="text-sm font-semibold text-[var(--ink)]">{provider.label}</p>
-                  <span className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.14em] ${provider.configured ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-slate-200 bg-slate-100 text-slate-700"}`}>
+                  <p className="text-[13px] font-semibold text-slate-800">{provider.label}</p>
+                  <span className={`inline-flex rounded-md border px-1.5 py-0.5 text-[10px] font-medium ${provider.configured ? "border-emerald-200/60 bg-emerald-50 text-emerald-600" : "border-slate-200 bg-slate-50 text-slate-400"}`}>
                     {provider.configured ? "Ready" : "Missing"}
                   </span>
                 </div>
-                <p className="mt-2 text-xs leading-5 text-[var(--ink-muted)]">{provider.detail}</p>
+                <p className="mt-1 text-[11px] leading-4 text-slate-400">{provider.detail}</p>
               </div>
             ))}
           </div>
-          <p className="mt-3 text-xs leading-5 text-[var(--ink-muted)]">
-            After credentials are available, use Import or Sync to reconcile provider inventory into the fleet.
+          <p className="mt-3 text-[11px] leading-4 text-slate-400">
+            Runtime ready unlocks live sync, provider reconciliation, and lifecycle actions.
           </p>
         </div>
       ) : null}
 
-      {message ? <p className="text-sm text-[var(--ink-muted)]">{message}</p> : null}
+      {message ? <p className="mt-2 text-[12px] text-slate-500 lg:text-right">{message}</p> : null}
     </div>
   );
 }

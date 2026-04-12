@@ -90,8 +90,11 @@ function generateCode(secret: string, counter: number): string {
   const message = Buffer.alloc(8);
   message.writeBigUInt64BE(BigInt(counter));
   const digest = createHmac("sha1", key).update(message).digest();
-  const offset = digest[digest.length - 1] & 0x0f;
-  const binary = ((digest[offset] & 0x7f) << 24) | ((digest[offset + 1] & 0xff) << 16) | ((digest[offset + 2] & 0xff) << 8) | (digest[offset + 3] & 0xff);
+  const offset = (digest[digest.length - 1] ?? 0) & 0x0f;
+  const binary = (((digest[offset] ?? 0) & 0x7f) << 24)
+    | (((digest[offset + 1] ?? 0) & 0xff) << 16)
+    | (((digest[offset + 2] ?? 0) & 0xff) << 8)
+    | ((digest[offset + 3] ?? 0) & 0xff);
   return String(binary % 1_000_000).padStart(6, "0");
 }
 

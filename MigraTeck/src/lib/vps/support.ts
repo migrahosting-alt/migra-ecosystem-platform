@@ -182,7 +182,6 @@ export async function buildVpsDiagnosticsBundle(input: {
     })),
     snapshots: server.snapshots.map((snapshot) => ({
       id: snapshot.id,
-      providerSnapshotId: snapshot.providerSnapshotId,
       name: snapshot.name,
       note: snapshot.note,
       status: snapshot.status,

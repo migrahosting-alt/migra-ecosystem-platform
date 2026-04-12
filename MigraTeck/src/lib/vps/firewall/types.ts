@@ -1,35 +1,35 @@
 export type CanonicalFirewallRule = {
-  id?: string;
+  id?: string | undefined;
   direction: "INBOUND" | "OUTBOUND";
   action: "ALLOW" | "DENY";
   protocol: "TCP" | "UDP" | "ICMP" | "ANY";
-  portStart?: number;
-  portEnd?: number;
-  sourceCidr?: string;
-  destinationCidr?: string;
-  description?: string;
+  portStart?: number | undefined;
+  portEnd?: number | undefined;
+  sourceCidr?: string | undefined;
+  destinationCidr?: string | undefined;
+  description?: string | undefined;
   priority: number;
   isEnabled: boolean;
-  expiresAt?: string | null;
+  expiresAt?: string | null | undefined;
 };
 
 export type CanonicalFirewallState = {
-  profileId?: string;
-  profileName?: string;
-  status?: "DRAFT" | "ACTIVE" | "APPLYING" | "FAILED" | "DISABLED";
-  isEnabled?: boolean;
-  isActive?: boolean;
+  profileId?: string | undefined;
+  profileName?: string | undefined;
+  status?: "DRAFT" | "ACTIVE" | "APPLYING" | "FAILED" | "DISABLED" | undefined;
+  isEnabled?: boolean | undefined;
+  isActive?: boolean | undefined;
   inboundDefaultAction: "ALLOW" | "DENY";
   outboundDefaultAction: "ALLOW" | "DENY";
   antiLockoutEnabled: boolean;
   rollbackWindowSec: number;
-  providerVersion?: string | null;
-  lastAppliedAt?: string | null;
-  lastApplyJobId?: string | null;
-  lastError?: string | null;
-  rollbackPendingUntil?: string | null;
-  confirmedAt?: string | null;
-  driftDetectedAt?: string | null;
+  providerVersion?: string | null | undefined;
+  lastAppliedAt?: string | null | undefined;
+  lastApplyJobId?: string | null | undefined;
+  lastError?: string | null | undefined;
+  rollbackPendingUntil?: string | null | undefined;
+  confirmedAt?: string | null | undefined;
+  driftDetectedAt?: string | null | undefined;
   rules: CanonicalFirewallRule[];
 };
 

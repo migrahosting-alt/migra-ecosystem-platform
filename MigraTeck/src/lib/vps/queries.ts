@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 
 type ProviderBindingLike = {
+  id?: string | undefined;
   providerSlug: string;
   providerServerId: string;
   providerRegionId: string | null;

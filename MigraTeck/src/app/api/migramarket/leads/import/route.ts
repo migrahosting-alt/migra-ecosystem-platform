@@ -116,15 +116,16 @@ function parseLeadImport(text: string) {
     throw new Error("Provide a header row and at least one data row.");
   }
 
-  const delimiter = lines[0].includes("\t") ? "\t" : ",";
-  const rawHeaders = parseDelimitedLine(lines[0], delimiter);
+  const [headerLine = "", ...dataLines] = lines;
+  const delimiter = headerLine.includes("\t") ? "\t" : ",";
+  const rawHeaders = parseDelimitedLine(headerLine, delimiter);
   const headers = rawHeaders.map((header) => HEADER_MAP[normalizeHeader(header)] || null);
 
   if (!headers.includes("fullName")) {
     throw new Error("The import must include a name/fullName column.");
   }
 
-  return lines.slice(1).map((line, rowIndex) => {
+  return dataLines.map((line, rowIndex) => {
     const values = parseDelimitedLine(line, delimiter);
     const row: CanonicalLeadRow = {
       fullName: "",
@@ -215,7 +216,7 @@ export async function POST(request: NextRequest) {
     }
 
     console.error("[API] Unhandled entitlement error:", error instanceof Error ? error.message : "unknown");
-    return { ok: false as const, response: NextResponse.json({ error: "Internal server error." }, { status: 500, headers: { "Cache-Control": "no-store" } }) };
+    return NextResponse.json({ error: "Internal server error." }, { status: 500, headers: { "Cache-Control": "no-store" } });
   }
 
   const body = await request.json().catch(() => null);

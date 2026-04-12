@@ -20,7 +20,7 @@
 - Serve the public site over HTTPS in front of the application runtime.
 - Preserve response headers from the application middleware through any reverse proxy or CDN layer.
 - Current edge host: `srv1-web` (`100.68.239.94`)
-- Current live service: `migrateck.service` on `127.0.0.1:3111`
+- Current live service: `migrateck.service` on `127.0.0.1:3111`, serving `apps/web`
 - Current staging service: `migrateck-staging.service` on `127.0.0.1:3112`
 - Current staging nginx vhost: `/etc/nginx/sites-available/staging.migrateck.com.conf`
 - Current staging backup snapshot: `/root/backups/migrateck-staging-edge-20260410T100750Z`
@@ -53,7 +53,7 @@
 
 ## Rollback Notes
 
-- Live rollback posture is currently strong because the rebuilt platform is isolated on staging and `migrateck.com` still points at the existing `migrateck.service`.
+- Keep a copy of the pre-cutover `migrateck.service` unit before changing the live working directory or `ExecStart` target.
 - To roll back the staging release on `srv1-web`:
   - `systemctl stop migrateck-staging`
   - `systemctl disable migrateck-staging`
@@ -67,7 +67,7 @@
 ## Current Validation Notes
 
 - Local validation completed with `pnpm lint`, `pnpm typecheck`, `pnpm build`, and `pnpm --filter @migrateck/web build`.
-- Staging deployment is active at `https://staging.migrateck.com` on `srv1-web` without replacing the current live `migrateck.com` runtime.
+- Staging deployment remains active at `https://staging.migrateck.com` on `srv1-web` for regression comparison against the live `apps/web` runtime.
 - Manual staging browser screenshots were captured for homepage desktop/mobile, products, developers, and downloads.
 - Staging metadata now renders with staging-host canonical URLs and `noindex,nofollow` behavior.
 - Local and staging Lighthouse execution still returned `FAILED_DOCUMENT_REQUEST (net::ERR_ABORTED)` from the available runner, despite successful browser rendering and direct HTTPS responses. Treat Lighthouse score collection as still blocked until a stable runner environment is available.

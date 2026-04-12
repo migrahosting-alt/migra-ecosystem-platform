@@ -1890,6 +1890,7 @@ model Session {
   userId       String
   expires      DateTime
   user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  refreshSessions RefreshSession[]
 
   @@index([userId, expires])
 }
@@ -1898,6 +1899,7 @@ model RefreshSession {
   id         String       @id @default(cuid())
   userId     String
   orgId      String
+  sessionId  String?
   tokenHash  String       @unique
   familyId   String
   parentId   String?
@@ -1909,9 +1911,11 @@ model RefreshSession {
   lastUsedAt DateTime?
   user       User         @relation(fields: [userId], references: [id], onDelete: Cascade)
   org        Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  session    Session?     @relation(fields: [sessionId], references: [id], onDelete: SetNull)
 
   @@index([userId])
   @@index([orgId])
+  @@index([sessionId])
   @@index([expiresAt])
   @@index([familyId])
 }

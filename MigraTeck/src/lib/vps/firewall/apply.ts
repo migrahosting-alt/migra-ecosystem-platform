@@ -208,12 +208,12 @@ async function applyStateToProfile(profileId: string, state: CanonicalFirewallSt
         antiLockoutEnabled: state.antiLockoutEnabled,
         rollbackWindowSec: state.rollbackWindowSec,
         lastApplyJobId: input.jobId,
-        lastAppliedAt: input.status === "FAILED" ? undefined : new Date(),
+        ...(input.status !== "FAILED" ? { lastAppliedAt: new Date() } : {}),
         lastError: input.lastError || null,
         isActive: input.status !== "FAILED",
         rollbackPendingUntil: input.rollbackPendingUntil || null,
         confirmedAt: null,
-        lastKnownGoodJson: input.status === "FAILED" ? undefined : jsonValue(state),
+        ...(input.status !== "FAILED" ? { lastKnownGoodJson: jsonValue(state) } : {}),
       },
     });
 

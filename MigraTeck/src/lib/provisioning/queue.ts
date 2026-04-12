@@ -160,8 +160,8 @@ export async function queueProvisioningTask(input: QueueProvisioningTaskInput): 
       ...(input.payload || {}),
     },
     idempotencyKey,
-    ip: input.ip,
-    userAgent: input.userAgent,
+    ...(input.ip !== undefined ? { ip: input.ip } : {}),
+    ...(input.userAgent !== undefined ? { userAgent: input.userAgent } : {}),
   });
 }
 

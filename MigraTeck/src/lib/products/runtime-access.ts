@@ -16,7 +16,10 @@ interface EntitlementWindow {
 }
 
 type DriveTenantRuntimeShape = Pick<DriveTenant, "status">;
-type DriveTenantLifecycleShape = Pick<DriveTenant, "status" | "restrictionReason" | "disableReason">;
+type DriveTenantLifecycleShape = Pick<DriveTenant, "status"> & {
+  restrictionReason?: string | null | undefined;
+  disableReason?: string | null | undefined;
+};
 
 export interface ProductRuntimeAccess {
   canLaunch: boolean;
@@ -29,10 +32,10 @@ export interface ProductRuntimeAccess {
 
 interface ProductRuntimeAccessInput {
   productKey: ProductKey;
-  entitlement?: EntitlementWindow | null;
+  entitlement?: EntitlementWindow | null | undefined;
   isMigraHostingClient: boolean;
   isInternalOrg: boolean;
-  driveTenant?: DriveTenantLifecycleShape | null;
+  driveTenant?: DriveTenantLifecycleShape | null | undefined;
 }
 
 export function resolveProductRuntimeAccess(

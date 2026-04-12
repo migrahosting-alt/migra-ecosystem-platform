@@ -2,14 +2,19 @@ import { ProductKey } from "@prisma/client";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { ChangePasswordForm } from "@/components/app/change-password-form";
+import { PlatformCommandCenter } from "@/components/app/platform-command-center";
 import { ProductAccessGrid } from "@/components/app/product-access-grid";
 import { LogoutAllSessionsButton } from "@/components/app/logout-all-sessions-button";
 import { getActiveOrgContext, requireAuthSession } from "@/lib/auth/session";
+import { can } from "@/lib/rbac";
+import { PRODUCT_CATALOG } from "@/lib/constants";
 import { getDriveOperationPolicy } from "@/lib/drive/drive-operation-policy";
 import { getDriveRecentEvents } from "@/lib/drive/drive-recent-events";
 import { getDriveTenantSummary } from "@/lib/drive/drive-tenant-summary";
 import { isVpsPortalHost } from "@/lib/migradrive-auth-branding";
 import { prisma } from "@/lib/prisma";
+import { resolveProductRuntimeAccess } from "@/lib/products/runtime-access";
+import { isInternalOrg } from "@/lib/security/internal-org";
 import { listVpsServersForOrg, orgPrefersVpsWorkspace } from "@/lib/vps/data";
 import { listSuggestions, getActiveSuggestionCount } from "@/lib/suggestions";
 import { getJourney } from "@/lib/customer-journey";
@@ -105,35 +110,109 @@ export default async function DashboardPage() {
     };
   }
 
+  const internalOrg = isInternalOrg(activeMembership.org);
+  const launchReadyProducts = PRODUCT_CATALOG.filter((product) => {
+    const entitlement = entitlementMap[product.key];
+    const driveTenantInput = driveTenant
+      ? {
+          status: driveTenant.status,
+          ...(driveTenant.restrictionReason !== null ? { restrictionReason: driveTenant.restrictionReason } : {}),
+          ...(driveTenant.disableReason !== null ? { disableReason: driveTenant.disableReason } : {}),
+        }
+      : null;
+
+    return resolveProductRuntimeAccess({
+      productKey: product.key,
+      entitlement,
+      isMigraHostingClient: activeMembership.org.isMigraHostingClient,
+      isInternalOrg: internalOrg,
+      driveTenant: driveTenantInput,
+    }).canLaunch;
+  }).length;
+
+  const platformModules = [
+    {
+      href: "/app/products",
+      title: "Product Catalog",
+      description: "Entitlement-aware product activation, launch readiness, and request-access handling across the ecosystem.",
+      detail: `${launchReadyProducts} launch-ready products in the current org context`,
+      tone: launchReadyProducts > 0 ? "success" : "attention",
+    },
+    {
+      href: "/app/orgs",
+      title: "Organizations",
+      description: "Membership, org context, and account authority stay anchored to one shared tenancy model.",
+      detail: `${session.user.organizations.length} visible organization memberships`,
+      tone: session.user.organizations.length > 1 ? "success" : "default",
+    },
+    {
+      href: "/app/billing",
+      title: "Billing",
+      description: "Subscriptions, plan posture, and future commercial controls belong in the same platform contract.",
+      detail: can(activeMembership.role, "billing:manage") ? "Billing management available" : "Billing posture is visible through your current role",
+      tone: can(activeMembership.role, "billing:manage") ? "success" : "default",
+    },
+    {
+      href: "/app/audit",
+      title: "Audit & Security",
+      description: "Operator sessions, auth posture, and audit activity are first-class platform capabilities, not side tools.",
+      detail: `${auditCount7d} audit events recorded in the last 7 days`,
+      tone: auditCount7d > 0 ? "success" : "default",
+    },
+    {
+      href: "/app/launch",
+      title: "Launch Workflows",
+      description: "Provisioning and activation should be observable platform actions with clear downstream ownership.",
+      detail: "Open the launch surface for orchestrated product and service handoff",
+      tone: "default",
+    },
+    {
+      href: "/app/downloads",
+      title: "Distribution",
+      description: "Signed downloads and delivery channels belong under the same trust and identity boundary.",
+      detail: "Verified software delivery routed through the platform workspace",
+      tone: can(activeMembership.role, "downloads:sign") ? "success" : "default",
+    },
+    ...(can(activeMembership.role, "ops:read")
+      ? [{
+          href: "/app/platform/ops",
+          title: "Platform Ops",
+          description: "Operational control, queue posture, and runtime health should remain attached to the control plane.",
+          detail: "Administrative operations surface available for this org role",
+          tone: "success" as const,
+        }]
+      : []),
+    ...(activeMembership.role === "OWNER"
+      ? [{
+          href: "/app/system",
+          title: "System",
+          description: "Owner-level configuration and emergency authority stay explicit instead of being hidden across runtimes.",
+          detail: "System-level ownership controls are available",
+          tone: "attention" as const,
+        }]
+      : []),
+  ];
+
   return (
     <section className="space-y-6">
-      <article className="rounded-2xl border border-[var(--line)] bg-white p-6">
-        <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[var(--ink-muted)]">Ecosystem command center</p>
-        <h1 className="mt-2 text-3xl font-black tracking-tight">MigraTeck Platform Dashboard</h1>
-        <p className="mt-2 max-w-3xl text-sm text-[var(--ink-muted)]">
-          Central authority for tenant identity, product launch controls, and operational security across the full Migra stack.
-        </p>
-        <div className="mt-4 grid gap-3 md:grid-cols-3">
-          <div className="rounded-xl border border-[var(--line)] bg-[var(--surface-2)] p-3">
-            <p className="text-xs font-semibold uppercase tracking-wide text-[var(--ink-muted)]">Signed in as</p>
-            <p className="mt-1 text-sm font-semibold text-[var(--ink)]">{session.user.email}</p>
-          </div>
-          <div className="rounded-xl border border-[var(--line)] bg-[var(--surface-2)] p-3">
-            <p className="text-xs font-semibold uppercase tracking-wide text-[var(--ink-muted)]">Active organization</p>
-            <p className="mt-1 text-sm font-semibold text-[var(--ink)]">{activeMembership.org.name}</p>
-          </div>
-          <div className="rounded-xl border border-[var(--line)] bg-[var(--surface-2)] p-3">
-            <p className="text-xs font-semibold uppercase tracking-wide text-[var(--ink-muted)]">Role context</p>
-            <p className="mt-1 text-sm font-semibold text-[var(--ink)]">{activeMembership.role}</p>
-          </div>
-        </div>
-      </article>
+      <PlatformCommandCenter
+        email={session.user.email}
+        orgName={activeMembership.org.name}
+        orgSlug={activeMembership.org.slug}
+        role={activeMembership.role}
+        organizationCount={session.user.organizations.length}
+        activeSessionCount={activeSessionCount}
+        productsActive={launchReadyProducts}
+        auditCount7d={auditCount7d}
+        lastLoginLabel={lastLogin ? lastLogin.createdAt.toISOString() : "No login event recorded yet"}
+        modules={platformModules}
+      />
 
       <div className="grid gap-4 lg:grid-cols-[1.65fr_1fr]">
         <article className="rounded-2xl border border-[var(--line)] bg-white p-5">
-          <h2 className="text-xl font-bold">Product Access</h2>
+          <h2 className="text-xl font-bold">Product Control</h2>
           <p className="mt-1 text-sm text-[var(--ink-muted)]">
-            Entitlement-aware launch control for every ecosystem product.
+            Activate, launch, and manage product surfaces from the same organization-aware control plane.
           </p>
           <div className="mt-4">
             <ProductAccessGrid
@@ -150,8 +229,8 @@ export default async function DashboardPage() {
         </article>
 
         <article className="rounded-2xl border border-[var(--line)] bg-white p-5">
-          <h2 className="text-xl font-bold">Security Overview</h2>
-          <p className="mt-1 text-sm text-[var(--ink-muted)]">Session and audit posture for the current operator context.</p>
+          <h2 className="text-xl font-bold">Security & Access</h2>
+          <p className="mt-1 text-sm text-[var(--ink-muted)]">Session posture, operator identity, and audit visibility for the current control-plane context.</p>
           <div className="mt-4 space-y-3">
             <div className="rounded-xl border border-[var(--line)] bg-[var(--surface-2)] p-3">
               <p className="text-xs font-semibold uppercase tracking-wide text-[var(--ink-muted)]">Active sessions</p>

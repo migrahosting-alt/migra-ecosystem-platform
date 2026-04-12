@@ -1,6 +1,7 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import type { FormEvent } from "react";
+import { useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { ActionButton } from "@/components/ui/button";
 

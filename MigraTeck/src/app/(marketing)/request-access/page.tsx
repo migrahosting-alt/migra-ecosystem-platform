@@ -17,12 +17,14 @@ export default async function RequestAccessPage({
     requestedProduct === "migrahosting"
       ? {
           productInterest: "MigraHosting VPS",
-          planInterest: selectedPlan?.name,
-          billingPreference,
+          ...(selectedPlan?.name ? { planInterest: selectedPlan.name } : {}),
+          ...(billingPreference ? { billingPreference } : {}),
           sourceContext: selectedPlan ? "marketing:pricing:vps-plan" : "marketing:pricing:vps",
-          defaultUseCase: selectedPlan
-            ? `We are evaluating ${selectedPlan.name}${billingPreference === "yearly" ? " on annual billing" : ""} for our production workload. We need deployment guidance, target region confirmation, and onboarding timing.`
-            : undefined,
+          ...(selectedPlan
+            ? {
+                defaultUseCase: `We are evaluating ${selectedPlan.name}${billingPreference === "yearly" ? " on annual billing" : ""} for our production workload. We need deployment guidance, target region confirmation, and onboarding timing.`,
+              }
+            : {}),
         }
       : undefined;
   const intro = selectedPlan
@@ -39,7 +41,7 @@ export default async function RequestAccessPage({
       <PublicAccessRequestForm
         source="request_access_page"
         intro={intro}
-        interestContext={interestContext}
+        {...(interestContext ? { interestContext } : {})}
       />
     </section>
   );

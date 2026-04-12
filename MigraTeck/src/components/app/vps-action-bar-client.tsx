@@ -114,7 +114,15 @@ export function VpsActionBarClient({
         return;
       }
 
-      setMessage(formatActionMessage(label, payload?.result || (payload ? { message: payload.message, status: payload.status } : null)));
+      const actionResult = payload?.result
+        ? payload.result
+        : payload
+          ? {
+              ...(payload.message !== undefined ? { message: payload.message } : {}),
+              ...(payload.status !== undefined ? { status: payload.status } : {}),
+            }
+          : null;
+      setMessage(formatActionMessage(label, actionResult));
       if (label === "Rebuild") {
         setShowRebuildForm(false);
         setConfirmText("");

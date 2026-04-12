@@ -50,14 +50,17 @@ export async function requireMigraMarketManageContext(request: NextRequest, rout
   }
 
   try {
-    await assertEntitlement({
+    const entitlementInput = {
       orgId: activeOrg.orgId,
       feature: ProductKey.MIGRAMARKET,
       actorUserId: authResult.session.user.id,
       actorRole: activeOrg.role,
-      ip,
-      userAgent,
       route,
+      ...(ip ? { ip } : {}),
+      ...(userAgent ? { userAgent } : {}),
+    };
+    await assertEntitlement({
+      ...entitlementInput,
     });
   } catch (error) {
     if (error instanceof EntitlementEnforcementError) {

@@ -3,21 +3,21 @@
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { ActionButton } from "@/components/ui/button";
-import { VpsDetailGrid, VpsSectionCard } from "@/components/app/vps-ui";
+import { VpsDetailGrid } from "@/components/app/vps-ui";
 
 type BackupPolicyView = {
   enabled: boolean;
-  region?: string | null;
-  lastSyncedAt?: string | null;
+  region?: string | null | undefined;
+  lastSyncedAt?: string | null | undefined;
   policy: {
     status: string;
     frequency: string;
     retentionCount: number;
     encrypted: boolean;
     crossRegion: boolean;
-    backupWindow?: string | null;
-    lastSuccessAt?: string | null;
-    nextRunAt?: string | null;
+    backupWindow?: string | null | undefined;
+    lastSuccessAt?: string | null | undefined;
+    nextRunAt?: string | null | undefined;
   } | null;
 };
 
@@ -140,40 +140,88 @@ export function VpsBackupPolicyEditor({
     });
   }
 
-  return (
-    <div className="space-y-6">
-      <VpsSectionCard title="Recovery posture" description="Live policy state, replication coverage, and current backup schedule.">
-        <VpsDetailGrid
-          items={[
-            { label: "Status", value: backupState.policy?.status || (backupState.enabled ? "ACTIVE" : "DISABLED") },
-            { label: "Frequency", value: backupState.policy?.frequency || "Not configured" },
-            { label: "Retention", value: backupState.policy?.retentionCount ? `${backupState.policy.retentionCount} restore points` : "Not configured" },
-            { label: "Encrypted", value: backupState.policy?.encrypted ? "Yes" : "No" },
-            { label: "Cross-region", value: backupState.policy?.crossRegion ? "Enabled" : "Disabled" },
-            { label: "Backup window", value: backupState.policy?.backupWindow || "Provider default" },
-            { label: "Region", value: backupState.region || "Primary region" },
-            { label: "Last success", value: formatDateTime(backupState.policy?.lastSuccessAt) },
-            { label: "Next run", value: formatDateTime(backupState.policy?.nextRunAt) },
-            { label: "Last sync", value: formatDateTime(backupState.lastSyncedAt) },
-          ]}
-        />
-      </VpsSectionCard>
+  const summaryCards = [
+    {
+      label: "Policy state",
+      value: backupState.policy?.status || (backupState.enabled ? "ACTIVE" : "DISABLED"),
+      helper: backupState.enabled ? "Managed recovery policy is attached to this server." : "Managed backups are currently disabled.",
+    },
+    {
+      label: "Retention",
+      value: backupState.policy?.retentionCount ? `${backupState.policy.retentionCount} points` : "Not configured",
+      helper: backupState.policy?.frequency || "No frequency configured",
+    },
+    {
+      label: "Last success",
+      value: formatDateTime(backupState.policy?.lastSuccessAt),
+      helper: `Next run ${formatDateTime(backupState.policy?.nextRunAt)}`,
+    },
+    {
+      label: "Replication",
+      value: backupState.policy?.crossRegion ? "Cross-region enabled" : "Primary region only",
+      helper: backupState.region || "Primary region",
+    },
+  ];
 
-      <VpsSectionCard title="Policy editor" description="Change scheduling, retention, and recovery-copy settings without hardcoded plan assumptions.">
-        <div className="grid gap-4 md:grid-cols-2">
+  return (
+    <div className="space-y-4 pb-6">
+      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        {summaryCards.map((card) => (
+          <article key={card.label} className="rounded-[22px] border border-slate-200 bg-white px-4 py-4 shadow-[0_14px_30px_rgba(15,23,42,0.05)]">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">{card.label}</p>
+            <p className="mt-2 text-xl font-semibold tracking-tight text-slate-950">{card.value}</p>
+            <p className="mt-3 text-sm leading-6 text-slate-500">{card.helper}</p>
+          </article>
+        ))}
+      </section>
+
+      <div className="grid grid-cols-12 gap-4 xl:items-start">
+        <section className="col-span-12 rounded-[28px] border border-slate-200 bg-white px-5 py-5 shadow-[0_18px_42px_rgba(15,23,42,0.06)] xl:col-span-5">
+          <div className="mb-4">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">Recovery posture</p>
+            <h2 className="mt-1 text-[28px] font-semibold tracking-tight text-slate-950">Backup Inventory</h2>
+          </div>
+          <VpsDetailGrid
+            items={[
+              { label: "Status", value: backupState.policy?.status || (backupState.enabled ? "ACTIVE" : "DISABLED") },
+              { label: "Frequency", value: backupState.policy?.frequency || "Not configured" },
+              { label: "Retention", value: backupState.policy?.retentionCount ? `${backupState.policy.retentionCount} restore points` : "Not configured" },
+              { label: "Encrypted", value: backupState.policy?.encrypted ? "Yes" : "No" },
+              { label: "Cross-region", value: backupState.policy?.crossRegion ? "Enabled" : "Disabled" },
+              { label: "Backup window", value: backupState.policy?.backupWindow || "Provider default" },
+              { label: "Region", value: backupState.region || "Primary region" },
+              { label: "Last success", value: formatDateTime(backupState.policy?.lastSuccessAt) },
+              { label: "Next run", value: formatDateTime(backupState.policy?.nextRunAt) },
+              { label: "Last sync", value: formatDateTime(backupState.lastSyncedAt) },
+            ]}
+          />
+        </section>
+
+        <section className="col-span-12 rounded-[28px] border border-slate-200 bg-white px-5 py-5 shadow-[0_18px_42px_rgba(15,23,42,0.06)] xl:col-span-7">
+          <div className="flex flex-wrap items-end justify-between gap-3">
+            <div>
+              <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">Policy editor</p>
+              <h2 className="mt-1 text-[32px] font-semibold tracking-tight text-slate-950">Recovery Control Surface</h2>
+              <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">
+                Change scheduling, retention, encryption, and copy placement without relying on plan-specific assumptions.
+              </p>
+            </div>
+          </div>
+
+          <div className="mt-4 grid gap-4 md:grid-cols-2">
           <label className="space-y-2 text-sm">
-            <span className="font-semibold text-[var(--ink)]">Frequency</span>
+            <span className="font-semibold text-slate-900">Frequency</span>
             <input
-              className="w-full rounded-xl border border-[var(--line)] px-3 py-2 text-sm"
+              className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900"
               value={form.frequency}
               onChange={(event) => setForm((current) => ({ ...current, frequency: event.target.value }))}
               disabled={!canManageBackups || isPending}
             />
           </label>
           <label className="space-y-2 text-sm">
-            <span className="font-semibold text-[var(--ink)]">Retention count</span>
+            <span className="font-semibold text-slate-900">Retention count</span>
             <input
-              className="w-full rounded-xl border border-[var(--line)] px-3 py-2 text-sm"
+              className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900"
               type="number"
               min={1}
               max={365}
@@ -183,9 +231,9 @@ export function VpsBackupPolicyEditor({
             />
           </label>
           <label className="space-y-2 text-sm">
-            <span className="font-semibold text-[var(--ink)]">Backup window</span>
+            <span className="font-semibold text-slate-900">Backup window</span>
             <input
-              className="w-full rounded-xl border border-[var(--line)] px-3 py-2 text-sm"
+              className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900"
               value={form.backupWindow}
               onChange={(event) => setForm((current) => ({ ...current, backupWindow: event.target.value }))}
               placeholder="02:00-04:00 UTC"
@@ -193,19 +241,19 @@ export function VpsBackupPolicyEditor({
             />
           </label>
           <label className="space-y-2 text-sm">
-            <span className="font-semibold text-[var(--ink)]">Replication region</span>
+            <span className="font-semibold text-slate-900">Replication region</span>
             <input
-              className="w-full rounded-xl border border-[var(--line)] px-3 py-2 text-sm"
+              className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900"
               value={form.region}
               onChange={(event) => setForm((current) => ({ ...current, region: event.target.value }))}
               placeholder="us-east-2"
               disabled={!canManageBackups || isPending}
             />
           </label>
-        </div>
+          </div>
 
-        <div className="mt-4 grid gap-3 sm:grid-cols-3">
-          <label className="flex items-center gap-2 rounded-xl border border-[var(--line)] bg-[var(--surface-2)] px-4 py-3 text-sm font-medium text-[var(--ink)]">
+          <div className="mt-4 grid gap-3 sm:grid-cols-3">
+            <label className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-900">
             <input
               type="checkbox"
               checked={form.enabled}
@@ -213,8 +261,8 @@ export function VpsBackupPolicyEditor({
               disabled={!canManageBackups || isPending}
             />
             Enable backups
-          </label>
-          <label className="flex items-center gap-2 rounded-xl border border-[var(--line)] bg-[var(--surface-2)] px-4 py-3 text-sm font-medium text-[var(--ink)]">
+            </label>
+            <label className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-900">
             <input
               type="checkbox"
               checked={form.encrypted}
@@ -222,8 +270,8 @@ export function VpsBackupPolicyEditor({
               disabled={!canManageBackups || isPending}
             />
             Encrypt backup copies
-          </label>
-          <label className="flex items-center gap-2 rounded-xl border border-[var(--line)] bg-[var(--surface-2)] px-4 py-3 text-sm font-medium text-[var(--ink)]">
+            </label>
+            <label className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-900">
             <input
               type="checkbox"
               checked={form.crossRegion}
@@ -231,26 +279,40 @@ export function VpsBackupPolicyEditor({
               disabled={!canManageBackups || isPending}
             />
             Keep cross-region copy
-          </label>
-        </div>
-
-        {!canManageBackups ? (
-          <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-            Your current role can review backup posture but cannot change the policy.
+            </label>
           </div>
-        ) : null}
-        {message ? <div className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">{message}</div> : null}
-        {error ? <div className="mt-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">{error}</div> : null}
 
-        <div className="mt-4 flex flex-wrap gap-2">
-          <ActionButton onClick={savePolicy} disabled={!canManageBackups || isPending || !form.frequency.trim()}>
-            {isPending ? "Saving..." : "Save Backup Policy"}
-          </ActionButton>
-          <ActionButton variant="secondary" onClick={() => setForm(toFormState(backupState))} disabled={isPending}>
-            Reset Form
-          </ActionButton>
-        </div>
-      </VpsSectionCard>
+          <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_260px]">
+            <div>
+              {!canManageBackups ? (
+                <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                  Your current role can review backup posture but cannot change the policy.
+                </div>
+              ) : null}
+              {message ? <div className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">{message}</div> : null}
+              {error ? <div className="mt-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">{error}</div> : null}
+
+              <div className="mt-4 flex flex-wrap gap-2">
+                <ActionButton onClick={savePolicy} disabled={!canManageBackups || isPending || !form.frequency.trim()}>
+                  {isPending ? "Saving..." : "Save Backup Policy"}
+                </ActionButton>
+                <ActionButton variant="secondary" onClick={() => setForm(toFormState(backupState))} disabled={isPending}>
+                  Reset Form
+                </ActionButton>
+              </div>
+            </div>
+
+            <aside className="rounded-[22px] border border-slate-200 bg-slate-50 px-4 py-4">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">Operator guidance</p>
+              <div className="mt-3 space-y-3 text-sm leading-6 text-slate-600">
+                <p>Keep retention high enough to cover both operator error and delayed incident discovery windows.</p>
+                <p>Use encryption for any customer-bearing workload and enable cross-region copies when regional resilience matters.</p>
+                <p>Prefer an explicit backup window for noisy workloads so backup I/O stays predictable during peak hours.</p>
+              </div>
+            </aside>
+          </div>
+        </section>
+      </div>
     </div>
   );
 }

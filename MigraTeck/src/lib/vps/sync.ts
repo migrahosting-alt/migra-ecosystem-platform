@@ -177,7 +177,7 @@ export async function syncServer(serverId: string, context?: { actorUserId?: str
     });
 
     const existingBinding = getPrimaryProviderBinding(server);
-    if (existingBinding) {
+    if (existingBinding && "id" in existingBinding && existingBinding.id) {
       await tx.vpsProviderBinding.update({
         where: { id: existingBinding.id },
         data: {
@@ -185,6 +185,18 @@ export async function syncServer(serverId: string, context?: { actorUserId?: str
           providerServerId: remote.providerServerId || existingBinding.providerServerId,
           providerRegionId: remote.providerRegionId ?? existingBinding.providerRegionId,
           providerPlanId: remote.providerPlanId ?? existingBinding.providerPlanId,
+          lastKnownStateJson: jsonValue(remote),
+          lastSyncedAt: new Date(),
+        },
+      });
+    } else if (remote.providerServerId) {
+      await tx.vpsProviderBinding.create({
+        data: {
+          serverId: server.id,
+          providerSlug: remote.providerSlug,
+          providerServerId: remote.providerServerId,
+          providerRegionId: remote.providerRegionId ?? null,
+          providerPlanId: remote.providerPlanId ?? null,
           lastKnownStateJson: jsonValue(remote),
           lastSyncedAt: new Date(),
         },

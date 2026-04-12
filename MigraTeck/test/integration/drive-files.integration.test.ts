@@ -31,7 +31,7 @@ function makeJsonRequest(path: string, body?: unknown) {
       "content-type": "application/json",
       origin: "http://127.0.0.1:3109",
     },
-    body: body === undefined ? undefined : JSON.stringify(body),
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
 }
 
@@ -42,7 +42,7 @@ function makeMutationRequest(path: string, method: "PATCH" | "DELETE", body?: un
       "content-type": "application/json",
       origin: "http://127.0.0.1:3109",
     },
-    body: body === undefined ? undefined : JSON.stringify(body),
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
 }
 

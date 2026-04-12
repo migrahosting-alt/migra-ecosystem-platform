@@ -1,6 +1,7 @@
 "use client";
 
-import { FormEvent, useMemo, useState } from "react";
+import type { FormEvent } from "react";
+import { useMemo, useState } from "react";
 import { ActionButton } from "@/components/ui/button";
 
 interface MigraMarketOptInFormProps {

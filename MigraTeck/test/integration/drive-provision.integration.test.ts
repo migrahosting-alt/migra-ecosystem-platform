@@ -143,9 +143,9 @@ describe("MigraDrive provisioning integration", () => {
     // Verify single updated record
     const tenants = await prisma.driveTenant.findMany({ where: { orgId } });
     expect(tenants.length).toBe(1);
-    expect(tenants[0].planCode).toBe(businessDrivePlan.planCode);
-    expect(tenants[0].storageQuotaGb).toBe(businessDrivePlan.storageQuotaGb);
-    expect(tenants[0].subscriptionId).toBe("sub_upgraded_001");
+    expect(tenants[0]?.planCode).toBe(businessDrivePlan.planCode);
+    expect(tenants[0]?.storageQuotaGb).toBe(businessDrivePlan.storageQuotaGb);
+    expect(tenants[0]?.subscriptionId).toBe("sub_upgraded_001");
   });
 
   // ── Test 4: Disable disables without deleting data ──────

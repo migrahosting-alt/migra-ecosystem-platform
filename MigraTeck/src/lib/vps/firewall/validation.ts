@@ -32,7 +32,7 @@ function isValidCidr(input?: string): boolean {
     return true;
   }
 
-  const [ip, prefix] = input.split("/");
+  const [ip = "", prefix] = input.split("/");
   const family = isIP(ip);
   if (!family) {
     return false;

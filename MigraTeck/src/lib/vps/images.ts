@@ -8,8 +8,8 @@ export type VpsSupportedImage = {
   version: string;
   description: string;
   defaultUsername: string;
-  providerSlugs?: string[];
-  highlighted?: boolean;
+  providerSlugs?: string[] | undefined;
+  highlighted?: boolean | undefined;
 };
 
 const imageSchema = z.object({

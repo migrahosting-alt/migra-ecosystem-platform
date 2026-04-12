@@ -41,7 +41,7 @@ export const authOptions: NextAuthOptions = {
       });
 
       session.user.id = user.id;
-      session.user.defaultOrgId = user.defaultOrgId;
+      session.user.defaultOrgId = user.defaultOrgId ?? null;
       session.user.emailVerified = Boolean(user.emailVerified);
       session.user.organizations = memberships.map((membership) => ({
         id: membership.org.id,

@@ -55,7 +55,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: error.message, code: error.code }, { status: error.httpStatus });
     }
     console.error("[API] Unhandled entitlement error:", error instanceof Error ? error.message : "unknown");
-    return { ok: false as const, response: NextResponse.json({ error: "Internal server error." }, { status: 500, headers: { "Cache-Control": "no-store" } }) };
+    return NextResponse.json({ error: "Internal server error." }, { status: 500, headers: { "Cache-Control": "no-store" } });
   }
   const body = await request.json().catch(() => null);
   const parsed = createSchema.safeParse(body);

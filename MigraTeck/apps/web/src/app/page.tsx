@@ -1,6 +1,7 @@
 import Link from "next/link";
 import Image from "next/image";
 import { products, featuredProducts, productsGroupedByCategory } from "@/data/products";
+import { getAccountLinks } from "@/lib/account-links";
 import { cn } from "@/lib/cn";
 import ui from "@/lib/ui";
 
@@ -18,6 +19,8 @@ const pillars = [
 ] as const;
 
 export default function HomePage() {
+  const accountLinks = getAccountLinks();
+
   return (
     <>
       {/* ═══════════ HERO ═══════════ */}
@@ -39,15 +42,15 @@ export default function HomePage() {
             <p className="animate-fade-up-d2 mx-auto mt-6 max-w-2xl text-lg leading-8 text-slate-300/90">
               MigraTeck connects identity, governance, product access, and software
               distribution into one coordinated platform — from your first product
-              to your tenth.
+              to your tenth, with one shared account surface across the entire stack.
             </p>
             <div className="animate-fade-up-d3 mt-10 flex flex-wrap items-center justify-center gap-4">
-              <Link href="/products" className={ui.btnPrimaryLight}>
-                Explore products
+              <Link href={accountLinks.signup} className={ui.btnPrimaryLight}>
+                Create account
                 <span aria-hidden="true">→</span>
               </Link>
-              <Link href="/developers" className={ui.btnSecondaryDark}>
-                Developer docs
+              <Link href={accountLinks.login} className={ui.btnSecondaryDark}>
+                Log in
               </Link>
             </div>
           </div>
@@ -265,16 +268,16 @@ export default function HomePage() {
         <div className={cn(ui.maxW, "relative py-24 text-center sm:py-32")}>
           <h2 className={ui.h2Dark}>Ready to get started?</h2>
           <p className={cn(ui.bodyDark, "mx-auto mt-4 max-w-lg")}>
-            Explore the platform architecture, browse the product registry, or
-            dive straight into the developer documentation.
+            Start with a MigraTeck Account, then move into product access,
+            organization-aware onboarding, and shared session controls.
           </p>
           <div className="mt-10 flex flex-wrap justify-center gap-4">
-            <Link href="/platform" className={ui.btnPrimaryLight}>
-              Platform overview
+            <Link href={accountLinks.signup} className={ui.btnPrimaryLight}>
+              Create account
               <span aria-hidden="true">→</span>
             </Link>
-            <Link href="/products" className={ui.btnSecondaryDark}>
-              Browse products
+            <Link href={accountLinks.login} className={ui.btnSecondaryDark}>
+              Log in
             </Link>
           </div>
         </div>

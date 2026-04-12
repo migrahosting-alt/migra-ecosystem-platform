@@ -34,5 +34,6 @@ export async function POST(request: NextRequest) {
 
   const response = NextResponse.json({ message: "All active sessions invalidated." });
   clearRefreshCookie(response);
+  clearRefreshCookie(response, "/api");
   return response;
 }

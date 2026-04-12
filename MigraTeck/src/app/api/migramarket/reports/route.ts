@@ -78,7 +78,7 @@ export async function POST(request: NextRequest) {
     }
 
     console.error("[API] Unhandled entitlement error:", error instanceof Error ? error.message : "unknown");
-    return { ok: false as const, response: NextResponse.json({ error: "Internal server error." }, { status: 500, headers: { "Cache-Control": "no-store" } }) };
+    return NextResponse.json({ error: "Internal server error." }, { status: 500, headers: { "Cache-Control": "no-store" } });
   }
 
   const body = await request.json().catch(() => null);
@@ -90,9 +90,23 @@ export async function POST(request: NextRequest) {
   const report = await prisma.migraMarketReportSnapshot.create({
     data: {
       orgId: activeOrg.orgId,
-      ...parsed.data,
+      label: parsed.data.label,
       periodStart: new Date(parsed.data.periodStart),
       periodEnd: new Date(parsed.data.periodEnd),
+      leads: parsed.data.leads,
+      calls: parsed.data.calls,
+      bookedAppointments: parsed.data.bookedAppointments,
+      profileViews: parsed.data.profileViews,
+      websiteSessions: parsed.data.websiteSessions,
+      reviewCount: parsed.data.reviewCount,
+      socialReach: parsed.data.socialReach,
+      ...(parsed.data.conversionRate !== undefined ? { conversionRate: parsed.data.conversionRate } : {}),
+      ...(parsed.data.averageRating !== undefined ? { averageRating: parsed.data.averageRating } : {}),
+      ...(parsed.data.emailOpenRate !== undefined ? { emailOpenRate: parsed.data.emailOpenRate } : {}),
+      ...(parsed.data.adSpend !== undefined ? { adSpend: parsed.data.adSpend } : {}),
+      ...(parsed.data.costPerLead !== undefined ? { costPerLead: parsed.data.costPerLead } : {}),
+      ...(parsed.data.revenueAttributed !== undefined ? { revenueAttributed: parsed.data.revenueAttributed } : {}),
+      ...(parsed.data.summary !== undefined ? { summary: parsed.data.summary } : {}),
     },
   });
 

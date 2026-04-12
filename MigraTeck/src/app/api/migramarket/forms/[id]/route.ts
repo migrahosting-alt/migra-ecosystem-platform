@@ -69,14 +69,19 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ i
   if (!parsed.success) return NextResponse.json({ error: "Invalid payload." }, { status: 400 });
   const existing = await prisma.migraMarketLeadCaptureForm.findFirst({ where: { id, orgId: auth.activeOrg.orgId } });
   if (!existing) return NextResponse.json({ error: "Form not found." }, { status: 404 });
+  const updateData = {
+    ...(parsed.data.name !== undefined ? { name: parsed.data.name } : {}),
+    ...(parsed.data.slug !== undefined ? { slug: parsed.data.slug } : {}),
+    ...(parsed.data.sourceChannel !== undefined ? { sourceChannel: parsed.data.sourceChannel } : {}),
+    ...(parsed.data.destinationEmail !== undefined ? { destinationEmail: parsed.data.destinationEmail } : {}),
+    ...(parsed.data.thankYouMessage !== undefined ? { thankYouMessage: parsed.data.thankYouMessage } : {}),
+    ...(parsed.data.smsConsentEnabled !== undefined ? { smsConsentEnabled: parsed.data.smsConsentEnabled } : {}),
+    ...(parsed.data.smsConsentLabel !== undefined ? { smsConsentLabel: parsed.data.smsConsentLabel } : {}),
+    ...(parsed.data.active !== undefined ? { active: parsed.data.active } : {}),
+  };
   const form = await prisma.migraMarketLeadCaptureForm.update({
     where: { id },
-    data: {
-      ...parsed.data,
-      destinationEmail: parsed.data.destinationEmail ?? undefined,
-      thankYouMessage: parsed.data.thankYouMessage ?? undefined,
-      smsConsentLabel: parsed.data.smsConsentLabel ?? undefined,
-    },
+    data: updateData,
   });
   await writeAuditLog({
     actorId: auth.authResult.session.user.id,

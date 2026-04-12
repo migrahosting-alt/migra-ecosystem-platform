@@ -8,6 +8,7 @@ export function generateFamilyId(): string {
 export async function createRefreshSession(input: {
   userId: string;
   orgId: string;
+  sessionId?: string | null;
   tokenHash: string;
   familyId?: string | undefined;
   parentId?: string | undefined;
@@ -19,6 +20,7 @@ export async function createRefreshSession(input: {
     data: {
       userId: input.userId,
       orgId: input.orgId,
+      sessionId: input.sessionId || null,
       tokenHash: input.tokenHash,
       familyId: input.familyId || generateFamilyId(),
       parentId: input.parentId || null,
@@ -38,6 +40,7 @@ export async function findValidRefreshSession(tokenHash: string) {
     },
     include: {
       user: true,
+      session: true,
     },
   });
 }
@@ -106,6 +109,7 @@ export async function rotateRefreshSession(
   replacement: {
     userId: string;
     orgId: string;
+    sessionId?: string | null;
     tokenHash: string;
     userAgent?: string | null;
     ipAddress?: string | null;
@@ -115,7 +119,7 @@ export async function rotateRefreshSession(
   return prisma.$transaction(async (tx) => {
     const old = await tx.refreshSession.findFirst({
       where: { tokenHash: oldTokenHash, revokedAt: null },
-      select: { id: true, familyId: true },
+      select: { id: true, familyId: true, sessionId: true },
     });
 
     if (!old) {
@@ -137,6 +141,7 @@ export async function rotateRefreshSession(
       data: {
         userId: replacement.userId,
         orgId: replacement.orgId,
+        sessionId: old.sessionId || replacement.sessionId || null,
         tokenHash: replacement.tokenHash,
         familyId: old.familyId,
         parentId: old.id,

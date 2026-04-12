@@ -12,6 +12,7 @@ import { MutationIntentError } from "@/lib/security/intent";
 import { OperatorRiskError } from "@/lib/security/operator-risk";
 import { PlatformLockdownError } from "@/lib/security/platform-lockdown";
 import { assertRateLimit } from "@/lib/security/rate-limit";
+import type { PlatformConfigPatch } from "@/lib/platform-config";
 
 const patchSchema = z
   .object({
@@ -133,7 +134,18 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Invalid payload." }, { status: 400 });
   }
 
-  const { intentId, ...patch } = parsed.data;
+  const { intentId, ...patchPayload } = parsed.data;
+  const patch: PlatformConfigPatch = {
+    ...(patchPayload.allowPublicSignup !== undefined ? { allowPublicSignup: patchPayload.allowPublicSignup } : {}),
+    ...(patchPayload.allowOrgCreate !== undefined ? { allowOrgCreate: patchPayload.allowOrgCreate } : {}),
+    ...(patchPayload.waitlistMode !== undefined ? { waitlistMode: patchPayload.waitlistMode } : {}),
+    ...(patchPayload.maintenanceMode !== undefined ? { maintenanceMode: patchPayload.maintenanceMode } : {}),
+    ...(patchPayload.freezeProvisioning !== undefined ? { freezeProvisioning: patchPayload.freezeProvisioning } : {}),
+    ...(patchPayload.pauseProvisioningWorker !== undefined ? { pauseProvisioningWorker: patchPayload.pauseProvisioningWorker } : {}),
+    ...(patchPayload.pauseEntitlementExpiryWorker !== undefined
+      ? { pauseEntitlementExpiryWorker: patchPayload.pauseEntitlementExpiryWorker }
+      : {}),
+  };
 
   try {
     await assertMutationSecurity({

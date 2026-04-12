@@ -44,13 +44,18 @@ export function portRangeToBounds(portRange?: string | null): Pick<CanonicalFire
     return {};
   }
 
-  const portStart = Number.parseInt(match[1], 10);
-  const portEnd = Number.parseInt(match[2] || match[1], 10);
+  const portStart = Number.parseInt(match[1] ?? "0", 10);
+  const portEnd = Number.parseInt(match[2] ?? match[1] ?? "0", 10);
   return { portStart, portEnd };
 }
 
 export function canonicalRuleFromDb(rule: Pick<VpsFirewallRule, "id" | "direction" | "action" | "protocol" | "portStart" | "portEnd" | "portRange" | "sourceCidr" | "destinationCidr" | "description" | "priority" | "enabled" | "expiresAt">): CanonicalFirewallRule {
-  const bounds = rule.portStart || rule.portEnd ? { portStart: rule.portStart || undefined, portEnd: rule.portEnd || undefined } : portRangeToBounds(rule.portRange);
+  const bounds = rule.portStart || rule.portEnd
+    ? {
+        ...(rule.portStart ? { portStart: rule.portStart } : {}),
+        ...(rule.portEnd ? { portEnd: rule.portEnd } : {}),
+      }
+    : portRangeToBounds(rule.portRange);
 
   return {
     id: rule.id,

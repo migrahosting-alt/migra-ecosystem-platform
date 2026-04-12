@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
+import type { AccountLinks } from "@/lib/account-links";
 import ui from "@/lib/ui";
 import { cn } from "@/lib/cn";
 
@@ -16,7 +17,7 @@ const navigation = [
   { href: "/company", label: "Company" },
 ] as const;
 
-export function SiteHeader() {
+export function SiteHeader({ accountLinks }: { accountLinks: AccountLinks }) {
   const [mobileOpen, setMobileOpen] = useState(false);
 
   return (
@@ -55,14 +56,14 @@ export function SiteHeader() {
 
           {/* desktop CTAs */}
           <div className="hidden items-center gap-3 sm:flex">
-            <Link href="/products" className={ui.btnGhostDark}>
-              Products
+            <Link href={accountLinks.login} className={ui.btnGhostDark}>
+              Log in
             </Link>
             <Link
-              href="/developers"
+              href={accountLinks.signup}
               className="inline-flex items-center justify-center gap-2 rounded-full bg-white/10 px-5 py-2 text-sm font-semibold text-white backdrop-blur-sm transition-all duration-200 hover:bg-white/20 border border-white/15"
             >
-              Get started
+              Create account
               <span aria-hidden="true">→</span>
             </Link>
           </div>
@@ -102,9 +103,14 @@ export function SiteHeader() {
               ))}
             </div>
             <div className="mt-6 border-t border-white/10 pt-6">
-              <Link href="/developers" className={cn(ui.btnPrimaryLight, "w-full")} onClick={() => setMobileOpen(false)}>
-                Get started
-              </Link>
+              <div className="flex flex-col gap-3">
+                <Link href={accountLinks.signup} className={cn(ui.btnPrimaryLight, "w-full")} onClick={() => setMobileOpen(false)}>
+                  Create account
+                </Link>
+                <Link href={accountLinks.login} className={cn(ui.btnSecondaryDark, "w-full")} onClick={() => setMobileOpen(false)}>
+                  Log in
+                </Link>
+              </div>
             </div>
           </div>
         )}

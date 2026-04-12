@@ -164,7 +164,7 @@ export async function GET(request: NextRequest) {
     }
 
     console.error("[API] Unhandled entitlement error:", error instanceof Error ? error.message : "unknown");
-    return { ok: false as const, response: NextResponse.json({ error: "Internal server error." }, { status: 500, headers: { "Cache-Control": "no-store" } }) };
+    return NextResponse.json({ error: "Internal server error." }, { status: 500, headers: { "Cache-Control": "no-store" } });
   }
 
   const workspace = await getMigraMarketWorkspace(activeOrg.orgId);
@@ -240,7 +240,7 @@ export async function PATCH(request: NextRequest) {
     }
 
     console.error("[API] Unhandled entitlement error:", error instanceof Error ? error.message : "unknown");
-    return { ok: false as const, response: NextResponse.json({ error: "Internal server error." }, { status: 500, headers: { "Cache-Control": "no-store" } }) };
+    return NextResponse.json({ error: "Internal server error." }, { status: 500, headers: { "Cache-Control": "no-store" } });
   }
 
   const body = await request.json().catch(() => null);
@@ -250,6 +250,23 @@ export async function PATCH(request: NextRequest) {
   }
 
   const payload = parsed.data;
+  const createData = {
+    orgId: activeOrg.orgId,
+    packageName: payload.packageName ?? null,
+    packageTemplateId: payload.packageTemplateId ?? null,
+    clientStage: payload.clientStage || "onboarding",
+    healthStatus: payload.healthStatus || "needs_attention",
+    messagingBrandName: payload.messagingBrandName ?? null,
+    messagingFromNumber: payload.messagingFromNumber ?? null,
+    messagingSupportEmail: payload.messagingSupportEmail ?? null,
+    googleBusinessProfileUrl: payload.googleBusinessProfileUrl ?? null,
+    websiteUrl: payload.websiteUrl ?? null,
+    adBudgetMonthly: payload.adBudgetMonthly ?? null,
+    notes: payload.notes ?? null,
+    ...(payload.primaryGoals ? { primaryGoals: listToJson(payload.primaryGoals) } : {}),
+    ...(payload.targetMarkets ? { targetMarkets: listToJson(payload.targetMarkets) } : {}),
+    ...(payload.socialProfiles ? { socialProfiles: listToJson(payload.socialProfiles) } : {}),
+  };
   await prisma.migraMarketAccount.upsert({
     where: { orgId: activeOrg.orgId },
     update: {
@@ -270,23 +287,7 @@ export async function PATCH(request: NextRequest) {
       ...(payload.adBudgetMonthly !== undefined ? { adBudgetMonthly: payload.adBudgetMonthly } : {}),
       ...(payload.notes !== undefined ? { notes: payload.notes } : {}),
     },
-    create: {
-      orgId: activeOrg.orgId,
-      packageName: payload.packageName ?? null,
-      packageTemplateId: payload.packageTemplateId ?? null,
-      clientStage: payload.clientStage || "onboarding",
-      healthStatus: payload.healthStatus || "needs_attention",
-      messagingBrandName: payload.messagingBrandName ?? null,
-      messagingFromNumber: payload.messagingFromNumber ?? null,
-      messagingSupportEmail: payload.messagingSupportEmail ?? null,
-      primaryGoals: payload.primaryGoals ? listToJson(payload.primaryGoals) : undefined,
-      targetMarkets: payload.targetMarkets ? listToJson(payload.targetMarkets) : undefined,
-      googleBusinessProfileUrl: payload.googleBusinessProfileUrl ?? null,
-      websiteUrl: payload.websiteUrl ?? null,
-      socialProfiles: payload.socialProfiles ? listToJson(payload.socialProfiles) : undefined,
-      adBudgetMonthly: payload.adBudgetMonthly ?? null,
-      notes: payload.notes ?? null,
-    },
+    create: createData,
   });
 
   const workspace = await getMigraMarketWorkspace(activeOrg.orgId);

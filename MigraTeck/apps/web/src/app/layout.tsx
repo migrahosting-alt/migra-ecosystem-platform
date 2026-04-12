@@ -1,8 +1,8 @@
 import type { Metadata } from "next";
-import { headers } from "next/headers";
 import { Manrope, Space_Grotesk } from "next/font/google";
 import { SiteFooter } from "@/components/layout/SiteFooter";
 import { SiteHeader } from "@/components/layout/SiteHeader";
+import { getAccountLinks } from "@/lib/account-links";
 import { absoluteUrl, allowIndexing, defaultPageDescription, siteUrl } from "@/lib/metadata";
 import "./globals.css";
 
@@ -62,14 +62,12 @@ export const metadata: Metadata = {
   },
 };
 
-export const dynamic = "force-dynamic";
-
-export default async function RootLayout({
+export default function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  const nonce = (await headers()).get("x-nonce") ?? undefined;
+  const accountLinks = getAccountLinks();
   const organizationStructuredData = {
     "@context": "https://schema.org",
     "@type": "Organization",
@@ -92,21 +90,19 @@ export default async function RootLayout({
       <body className={`${bodyFont.variable} ${displayFont.variable} min-h-screen antialiased`}>
         <script
           type="application/ld+json"
-          nonce={nonce}
           dangerouslySetInnerHTML={{
             __html: JSON.stringify(organizationStructuredData),
           }}
         />
         <script
           type="application/ld+json"
-          nonce={nonce}
           dangerouslySetInnerHTML={{
             __html: JSON.stringify(websiteStructuredData),
           }}
         />
-        <SiteHeader />
+        <SiteHeader accountLinks={accountLinks} />
         <main>{children}</main>
-        <SiteFooter />
+        <SiteFooter accountLinks={accountLinks} />
       </body>
     </html>
   );

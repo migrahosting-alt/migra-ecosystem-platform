@@ -1,4 +1,4 @@
-import { Prisma, ServerPowerState, VpsBillingCycle, VpsStatus } from "@prisma/client";
+import { Prisma, ServerPowerState, SupportTier, VpsBillingCycle, VpsStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import type { ProviderActionResult, ProviderServerRef, ProviderServerSummary } from "@/lib/vps/providers";
 
@@ -44,6 +44,14 @@ function asPowerState(value: unknown, fallback: ServerPowerState) {
 
 function asBillingCycle(value: unknown, fallback: VpsBillingCycle) {
   return typeof value === "string" && value in VpsBillingCycle ? (value as VpsBillingCycle) : fallback;
+}
+
+function asSupportTier(value: unknown, fallback?: SupportTier | null) {
+  if (typeof value === "string" && value in SupportTier) {
+    return value as SupportTier;
+  }
+
+  return fallback ?? undefined;
 }
 
 function asJsonValue(input: unknown): Prisma.InputJsonValue {
@@ -155,7 +163,9 @@ function buildMhStubState(ref: ProviderServerRef, record: MhStubRecord): Provide
     billingCycle: asBillingCycle(persisted?.billingCycle, record?.billingCycle || VpsBillingCycle.MONTHLY),
     monthlyPriceCents: asNumber(persisted?.monthlyPriceCents, record?.monthlyPriceCents || 0),
     billingCurrency: asString(persisted?.billingCurrency, record?.billingCurrency || "USD"),
-    ...(typeof persisted?.supportTier === "string" || record?.supportTier ? { supportTier: (typeof persisted?.supportTier === "string" ? persisted.supportTier : record?.supportTier) || undefined } : {}),
+    ...(typeof persisted?.supportTier === "string" || record?.supportTier
+      ? { supportTier: asSupportTier(persisted?.supportTier, record?.supportTier) }
+      : {}),
     ...(asOptionalString(persisted?.supportTicketUrl) || record?.supportTicketUrl ? { supportTicketUrl: asOptionalString(persisted?.supportTicketUrl) || record?.supportTicketUrl || undefined } : {}),
     ...(asOptionalString(persisted?.supportDocsUrl) || record?.supportDocsUrl ? { supportDocsUrl: asOptionalString(persisted?.supportDocsUrl) || record?.supportDocsUrl || undefined } : {}),
     rescueEnabled: asBoolean(persisted?.rescueEnabled, record?.rescueEnabled ?? false),

@@ -14,7 +14,7 @@ interface RequestOptions {
 }
 
 function parseSetCookie(cookieHeader: string): { name: string; value: string } | null {
-  const first = cookieHeader.split(";", 1)[0];
+  const first = cookieHeader.split(";", 1)[0] ?? "";
   const separatorIndex = first.indexOf("=");
 
   if (separatorIndex < 1) {
@@ -110,7 +110,7 @@ export class HttpClient {
     const response = await fetch(`${this.baseUrl}${path}`, {
       method,
       headers,
-      body,
+      ...(body === undefined ? {} : { body }),
       redirect: "manual",
     });
 

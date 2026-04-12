@@ -78,13 +78,28 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ i
   if (!parsed.success) return NextResponse.json({ error: "Invalid payload." }, { status: 400 });
   const existing = await prisma.migraMarketReportSnapshot.findFirst({ where: { id, orgId: auth.activeOrg.orgId } });
   if (!existing) return NextResponse.json({ error: "Report not found." }, { status: 404 });
+  const updateData = {
+    ...(parsed.data.label !== undefined ? { label: parsed.data.label } : {}),
+    ...(parsed.data.periodStart !== undefined ? { periodStart: new Date(parsed.data.periodStart) } : {}),
+    ...(parsed.data.periodEnd !== undefined ? { periodEnd: new Date(parsed.data.periodEnd) } : {}),
+    ...(parsed.data.leads !== undefined ? { leads: parsed.data.leads } : {}),
+    ...(parsed.data.calls !== undefined ? { calls: parsed.data.calls } : {}),
+    ...(parsed.data.bookedAppointments !== undefined ? { bookedAppointments: parsed.data.bookedAppointments } : {}),
+    ...(parsed.data.profileViews !== undefined ? { profileViews: parsed.data.profileViews } : {}),
+    ...(parsed.data.websiteSessions !== undefined ? { websiteSessions: parsed.data.websiteSessions } : {}),
+    ...(parsed.data.conversionRate !== undefined ? { conversionRate: parsed.data.conversionRate } : {}),
+    ...(parsed.data.reviewCount !== undefined ? { reviewCount: parsed.data.reviewCount } : {}),
+    ...(parsed.data.averageRating !== undefined ? { averageRating: parsed.data.averageRating } : {}),
+    ...(parsed.data.emailOpenRate !== undefined ? { emailOpenRate: parsed.data.emailOpenRate } : {}),
+    ...(parsed.data.socialReach !== undefined ? { socialReach: parsed.data.socialReach } : {}),
+    ...(parsed.data.adSpend !== undefined ? { adSpend: parsed.data.adSpend } : {}),
+    ...(parsed.data.costPerLead !== undefined ? { costPerLead: parsed.data.costPerLead } : {}),
+    ...(parsed.data.revenueAttributed !== undefined ? { revenueAttributed: parsed.data.revenueAttributed } : {}),
+    ...(parsed.data.summary !== undefined ? { summary: parsed.data.summary } : {}),
+  };
   const report = await prisma.migraMarketReportSnapshot.update({
     where: { id },
-    data: {
-      ...parsed.data,
-      ...(parsed.data.periodStart !== undefined ? { periodStart: new Date(parsed.data.periodStart) } : {}),
-      ...(parsed.data.periodEnd !== undefined ? { periodEnd: new Date(parsed.data.periodEnd) } : {}),
-    },
+    data: updateData,
   });
   await writeAuditLog({
     actorId: auth.authResult.session.user.id,

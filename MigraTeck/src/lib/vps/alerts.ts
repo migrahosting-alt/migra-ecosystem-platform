@@ -86,7 +86,11 @@ export type VpsAlertEventView = {
 };
 
 const OPEN_EVENT_STATUSES = [VpsAlertEventStatus.ACTIVE, VpsAlertEventStatus.ACKNOWLEDGED] as const;
-const INCIDENT_OPEN_STATES = [VpsIncidentState.OPEN, VpsIncidentState.ACKNOWLEDGED, VpsIncidentState.MITIGATING] as const;
+const INCIDENT_OPEN_STATES: VpsIncidentState[] = [
+  VpsIncidentState.OPEN,
+  VpsIncidentState.ACKNOWLEDGED,
+  VpsIncidentState.MITIGATING,
+];
 export const VPS_OPEN_ALERT_EVENT_STATUSES = OPEN_EVENT_STATUSES;
 
 function jsonValue(input: unknown): Prisma.InputJsonValue {
@@ -823,6 +827,8 @@ export async function applyVpsAlertEventAction(input: {
         select: {
           id: true,
           status: true,
+          acknowledgedAt: true,
+          resolvedAt: true,
         },
       },
     },

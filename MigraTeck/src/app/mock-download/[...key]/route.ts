@@ -18,7 +18,7 @@ export async function GET(
     return NextResponse.json({ ok: false, error: "mock_object_not_found" }, { status: 404 });
   }
 
-  return new NextResponse(storedObject.body, {
+  return new NextResponse(new Uint8Array(storedObject.body), {
     status: 200,
     headers: {
       "content-length": String(storedObject.body.length),

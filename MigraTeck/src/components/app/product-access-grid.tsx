@@ -27,8 +27,8 @@ interface ProductAccessGridProps {
   entitlements: EntitlementsByProduct;
   driveTenant?: {
     status: DriveTenantStatus;
-    restrictionReason?: string | null;
-    disableReason?: string | null;
+    restrictionReason?: string | null | undefined;
+    disableReason?: string | null | undefined;
   } | null;
   driveTenantSummary?: DriveTenantSummary | null;
   driveOperationPolicy?: DriveOperationPolicy | null;
@@ -154,12 +154,19 @@ export function ProductAccessGrid({
     <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
       {PRODUCT_CATALOG.map((product) => {
         const entitlement = entitlements[product.key];
+        const driveTenantInput = driveTenant
+          ? {
+              status: driveTenant.status,
+              ...(driveTenant.restrictionReason !== undefined ? { restrictionReason: driveTenant.restrictionReason } : {}),
+              ...(driveTenant.disableReason !== undefined ? { disableReason: driveTenant.disableReason } : {}),
+            }
+          : null;
         const runtime = resolveProductRuntimeAccess({
           productKey: product.key,
           entitlement,
           isMigraHostingClient,
           isInternalOrg: internalOrg,
-          driveTenant,
+          driveTenant: driveTenantInput,
         });
 
         const statusLabel =

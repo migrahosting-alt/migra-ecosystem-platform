@@ -11,12 +11,13 @@ const defaultResponseSlaBusinessDays = 2;
 interface PublicAccessRequestFormProps {
   source: "signup_blocked" | "request_access_page";
   intro: string;
+  productLabel?: string;
   interestContext?: {
-    productInterest?: string;
-    planInterest?: string;
-    billingPreference?: MigraHostingBillingCycle;
-    sourceContext?: string;
-    defaultUseCase?: string;
+    productInterest?: string | undefined;
+    planInterest?: string | undefined;
+    billingPreference?: MigraHostingBillingCycle | undefined;
+    sourceContext?: string | undefined;
+    defaultUseCase?: string | undefined;
   };
 }
 
@@ -71,7 +72,7 @@ function trackMarketingEvent(eventName: string, properties: Record<string, unkno
   window.dispatchEvent(new CustomEvent("migrateck:analytics", { detail: payload }));
 }
 
-export function PublicAccessRequestForm({ source, intro, interestContext }: PublicAccessRequestFormProps) {
+export function PublicAccessRequestForm({ source, intro, productLabel = "MigraDrive", interestContext }: PublicAccessRequestFormProps) {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [company, setCompany] = useState("");
@@ -179,10 +180,10 @@ export function PublicAccessRequestForm({ source, intro, interestContext }: Publ
     return (
       <article className="rounded-2xl border border-emerald-200 bg-emerald-50 p-6 shadow-sm">
         <h2 className="text-xl font-bold text-emerald-900">
-          {source === "signup_blocked" ? "MigraDrive access request received" : "Access request received"}
+          {source === "signup_blocked" ? `${productLabel} access request received` : "Access request received"}
         </h2>
         <p className="mt-2 text-sm text-emerald-800">
-          {source === "signup_blocked" ? "MigraDrive onboarding" : "Platform operations"} reviews requests within {submission.responseSlaBusinessDays} business days.
+          {source === "signup_blocked" ? `${productLabel} onboarding` : "Platform operations"} reviews requests within {submission.responseSlaBusinessDays} business days.
         </p>
         <p className="mt-2 text-sm text-emerald-800">
           {submission.confirmationEmailSent
@@ -196,10 +197,10 @@ export function PublicAccessRequestForm({ source, intro, interestContext }: Publ
     );
   }
 
-  const heading = source === "signup_blocked" ? "MigraDrive signup is currently unavailable" : "Request access";
+  const heading = source === "signup_blocked" ? `${productLabel} signup is currently unavailable` : "Request access";
   const actionLabel =
     source === "signup_blocked"
-      ? "Request MigraDrive access"
+      ? `Request ${productLabel} access`
       : interestContext?.planInterest
         ? `Request ${interestContext.planInterest}`
         : interestContext?.productInterest

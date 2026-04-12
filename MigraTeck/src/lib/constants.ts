@@ -198,15 +198,23 @@ export const PUBLIC_NAV_ITEMS = [
   { href: "/company", label: "Company" },
 ];
 
+export type AppNavSection = "command" | "workspace" | "governance";
+
+export type AppNavItem = {
+  href: string;
+  label: string;
+  section: AppNavSection;
+};
+
 export const APP_NAV_ITEMS = [
-  { href: "/app", label: "Dashboard" },
-  { href: "/app/orgs", label: "Organizations" },
-  { href: "/app/billing", label: "Billing" },
-  { href: "/app/launch", label: "Launch" },
-  { href: "/app/drive", label: "Drive" },
-  { href: "/app/builder", label: "Builder" },
-  { href: "/app/migramarket", label: "MigraMarket" },
-  { href: "/app/products", label: "Products" },
-  { href: "/app/downloads", label: "Downloads" },
-  { href: "/app/audit", label: "Audit" },
-];
+  { href: "/app", label: "Command", section: "command" },
+  { href: "/app/products", label: "Products", section: "command" },
+  { href: "/app/launch", label: "Launch", section: "command" },
+  { href: "/app/orgs", label: "Organizations", section: "workspace" },
+  { href: "/app/billing", label: "Billing", section: "workspace" },
+  { href: "/app/downloads", label: "Downloads", section: "workspace" },
+  { href: "/app/drive", label: "Drive", section: "workspace" },
+  { href: "/app/builder", label: "Builder", section: "workspace" },
+  { href: "/app/migramarket", label: "MigraMarket", section: "workspace" },
+  { href: "/app/audit", label: "Audit", section: "governance" },
+] satisfies AppNavItem[];

@@ -66,7 +66,7 @@ export async function listTenantEvents(
 
   const hasMore = events.length > limit;
   const items = hasMore ? events.slice(0, limit) : events;
-  const nextCursor = hasMore ? items[items.length - 1].id : undefined;
+  const nextCursor = hasMore ? items[items.length - 1]?.id : undefined;
 
   return { items, nextCursor };
 }
@@ -92,7 +92,7 @@ export async function listOrgTenantEvents(
 
   const hasMore = events.length > limit;
   const items = hasMore ? events.slice(0, limit) : events;
-  const nextCursor = hasMore ? items[items.length - 1].id : undefined;
+  const nextCursor = hasMore ? items[items.length - 1]?.id : undefined;
 
   return { items, nextCursor };
 }

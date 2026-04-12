@@ -1,3 +1,4 @@
+import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 
 export interface DriveTenantListFilters {
@@ -31,22 +32,33 @@ export async function getDriveTenantByEntitlementId(entitlementId: string) {
 
 export async function listDriveTenants(filters: DriveTenantListFilters = {}) {
   const limit = Math.min(filters.limit ?? 50, 200);
+  const where: Prisma.DriveTenantWhereInput = {};
+
+  if (filters.status) {
+    where.status = filters.status as never;
+  }
+  if (filters.planCode) {
+    where.planCode = filters.planCode;
+  }
+  if (filters.subscriptionId) {
+    where.subscriptionId = filters.subscriptionId;
+  }
+  if (filters.entitlementId) {
+    where.entitlementId = filters.entitlementId;
+  }
+  if (filters.cursor) {
+    where.id = { lt: filters.cursor };
+  }
 
   const items = await prisma.driveTenant.findMany({
-    where: {
-      status: filters.status ? (filters.status as never) : undefined,
-      planCode: filters.planCode || undefined,
-      subscriptionId: filters.subscriptionId || undefined,
-      entitlementId: filters.entitlementId || undefined,
-      id: filters.cursor ? { lt: filters.cursor } : undefined,
-    },
+    where,
     orderBy: { createdAt: "desc" },
     take: limit + 1,
   });
 
   const hasMore = items.length > limit;
   const sliced = hasMore ? items.slice(0, limit) : items;
-  const nextCursor = hasMore ? sliced[sliced.length - 1].id : undefined;
+  const nextCursor = hasMore ? sliced[sliced.length - 1]?.id : undefined;
 
   return { items: sliced, nextCursor };
 }
@@ -56,19 +68,23 @@ export async function listDriveTenantOperations(
   opts: { cursor?: string | null; limit?: number } = {},
 ) {
   const limit = Math.min(opts.limit ?? 50, 200);
+  const where: Prisma.DriveTenantOperationWhereInput = {
+    tenantId,
+  };
+
+  if (opts.cursor) {
+    where.id = { lt: opts.cursor };
+  }
 
   const items = await prisma.driveTenantOperation.findMany({
-    where: {
-      tenantId,
-      id: opts.cursor ? { lt: opts.cursor } : undefined,
-    },
+    where,
     orderBy: { startedAt: "desc" },
     take: limit + 1,
   });
 
   const hasMore = items.length > limit;
   const sliced = hasMore ? items.slice(0, limit) : items;
-  const nextCursor = hasMore ? sliced[sliced.length - 1].id : undefined;
+  const nextCursor = hasMore ? sliced[sliced.length - 1]?.id : undefined;
 
   return { items: sliced, nextCursor };
 }

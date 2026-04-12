@@ -19,6 +19,7 @@ export async function POST(request: NextRequest) {
 
   const response = NextResponse.json({ ok: true });
   clearRefreshCookie(response);
+  clearRefreshCookie(response, "/api");
 
   for (const cookieName of SESSION_COOKIE_NAMES) {
     response.cookies.set(cookieName, "", {

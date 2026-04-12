@@ -5,6 +5,11 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
+      "@migrateck/api-contracts": path.resolve(__dirname, "./packages/api-contracts/src/index.ts"),
+      "@migrateck/auth-core": path.resolve(__dirname, "./packages/auth-core/src/index.ts"),
+      "@migrateck/org-core": path.resolve(__dirname, "./packages/org-core/src/index.ts"),
+      "@migrateck/audit-core": path.resolve(__dirname, "./packages/audit-core/src/index.ts"),
+      "@migrateck/events": path.resolve(__dirname, "./packages/events/src/index.ts"),
     },
   },
   test: {

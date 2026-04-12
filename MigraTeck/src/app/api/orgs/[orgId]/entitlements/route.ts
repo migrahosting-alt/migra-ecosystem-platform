@@ -264,6 +264,12 @@ export async function PUT(request: NextRequest, context: { params: Promise<{ org
     const results = [];
 
     for (const update of updates) {
+      const updateData = {
+        status: update.status,
+        ...(update.startsAt !== undefined ? { startsAt: update.startsAt ? new Date(update.startsAt) : null } : {}),
+        ...(update.endsAt !== undefined ? { endsAt: update.endsAt ? new Date(update.endsAt) : null } : {}),
+        ...(update.notes !== undefined ? { notes: update.notes } : {}),
+      };
       const row = await tx.orgEntitlement.upsert({
         where: {
           orgId_product: {
@@ -271,12 +277,7 @@ export async function PUT(request: NextRequest, context: { params: Promise<{ org
             product: update.product,
           },
         },
-        update: {
-          status: update.status,
-          startsAt: update.startsAt === undefined ? undefined : update.startsAt ? new Date(update.startsAt) : null,
-          endsAt: update.endsAt === undefined ? undefined : update.endsAt ? new Date(update.endsAt) : null,
-          notes: update.notes === undefined ? undefined : update.notes,
-        },
+        update: updateData,
         create: {
           orgId,
           product: update.product,

@@ -208,7 +208,7 @@ Note: The harness seeds DB-backed session cookies for authenticated endpoint tes
 
 ## Production Service
 
-The tracked production unit for `srv1-web` lives at [deploy/migrateck.service](/home/bonex/workspace/active/MigraTeck-Ecosystem/dev/MigraTeck/deploy/migrateck.service). It runs the compiled Next.js app directly with `node .../next start` on `127.0.0.1:3111`, loads `/etc/migrateck/migrateck.env` when present, and avoids the extra `npm` wrapper process that makes shutdown and restart behavior noisier under systemd.
+The tracked production unit for `srv1-web` lives at [deploy/migrateck.service](/home/bonex/workspace/active/MigraTeck-Ecosystem/dev/MigraTeck/deploy/migrateck.service). It runs the compiled public `apps/web` Next.js app directly with `node .../next start` on `127.0.0.1:3111`, loads `/etc/migrateck/migrateck.env` when present, and avoids the extra `npm` wrapper process that makes shutdown and restart behavior noisier under systemd.
 
 ## Security Defaults
 

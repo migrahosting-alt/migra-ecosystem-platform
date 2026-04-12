@@ -72,7 +72,7 @@ export async function proxyLaunchServiceJson(
       "x-launch-source": "migrapanel",
       "idempotency-key": idempotencyKey,
     },
-    body: init?.body ? JSON.stringify(init.body) : undefined,
+    ...(init?.body !== undefined ? { body: JSON.stringify(init.body) } : {}),
     cache: "no-store",
   });
 

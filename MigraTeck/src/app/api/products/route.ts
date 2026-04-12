@@ -42,12 +42,19 @@ export async function GET() {
   const products = PRODUCT_CATALOG.map((product) => {
     const entitlement = entitlementMap.get(product.key as ProductKey);
     const status = entitlement?.status;
+    const driveTenantInput = driveTenant
+      ? {
+          status: driveTenant.status,
+          ...(driveTenant.restrictionReason !== null ? { restrictionReason: driveTenant.restrictionReason } : {}),
+          ...(driveTenant.disableReason !== null ? { disableReason: driveTenant.disableReason } : {}),
+        }
+      : null;
     const runtime = resolveProductRuntimeAccess({
       productKey: product.key as ProductKey,
       entitlement,
       isMigraHostingClient: activeOrg.org.isMigraHostingClient,
       isInternalOrg: internalOrg,
-      driveTenant,
+      driveTenant: driveTenantInput,
     });
 
     return {

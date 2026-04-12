@@ -303,10 +303,11 @@ async function syncInstagramConnection(connection: SocialConnectionRecord, bundl
   const metadata = parseConnectionMetadata(connection.metadata);
   const selectedId = String(connection.externalAccountId || metadata.instagramAccountId || "").trim();
   const desiredHandle = connection.handle.trim().toLowerCase().replace(/^@/, "");
-  const selected =
+  const selected = (
     candidates.find((item) => item.igId === selectedId) ||
     candidates.find((item) => item.username.trim().toLowerCase() === desiredHandle) ||
-    candidates[0];
+    candidates[0]
+  )!;
 
   return prisma.migraMarketSocialConnection.update({
     where: { id: connection.id },
@@ -923,7 +924,8 @@ function looksLikeVideoUrl(value: string) {
     const ext = parsed.pathname.includes(".") ? parsed.pathname.split(".").pop()?.toLowerCase() || "" : "";
     return VIDEO_EXTENSIONS.has(ext);
   } catch {
-    const ext = raw.split("?")[0].split(".").pop()?.toLowerCase() || "";
+    const path = raw.split("?")[0] ?? "";
+    const ext = path.split(".").pop()?.toLowerCase() || "";
     return VIDEO_EXTENSIONS.has(ext);
   }
 }
@@ -960,7 +962,7 @@ function inferImageExtension(contentType: string | null) {
 }
 
 function inferImageMimeType(contentType: string | null, url?: string) {
-  const raw = String(contentType || "").split(";")[0].trim().toLowerCase();
+  const raw = (String(contentType || "").split(";")[0] ?? "").trim().toLowerCase();
   if (raw.startsWith("image/")) return raw;
   const lowerUrl = String(url || "").toLowerCase();
   if (lowerUrl.includes(".png")) return "image/png";
@@ -1059,7 +1061,7 @@ async function downloadRemoteVideo(url: string, maxBytes: number) {
   if (buffer.length > maxBytes) {
     throw new Error(`Video exceeds maximum upload size (${maxBytes} bytes).`);
   }
-  const headerType = String(response.headers.get("content-type") || "").split(";")[0].trim().toLowerCase();
+  const headerType = (String(response.headers.get("content-type") || "").split(";")[0] ?? "").trim().toLowerCase();
   return {
     buffer,
     mimeType: headerType.startsWith("video/") ? headerType : inferVideoMimeTypeFromUrl(url),

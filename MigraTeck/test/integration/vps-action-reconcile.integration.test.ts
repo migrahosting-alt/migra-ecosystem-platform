@@ -37,8 +37,8 @@ function buildReconcileProvider(statuses: ProviderActionResult[]): VpsProviderAd
   let pollIndex = 0;
 
   const summary = buildServerSummary("fixture");
-  const nextStatus = () => {
-    const current = statuses[Math.min(pollIndex, statuses.length - 1)] || statuses[statuses.length - 1];
+  const nextStatus = (): ProviderActionResult => {
+    const current = statuses[Math.min(pollIndex, statuses.length - 1)] ?? statuses[statuses.length - 1]!;
     pollIndex += 1;
     return current;
   };

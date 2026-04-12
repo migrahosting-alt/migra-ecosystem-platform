@@ -2,6 +2,34 @@ import type { Prisma, SecurityEventSeverity } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 
 export type SecurityEventType =
+  | "USER_SIGNED_UP"
+  | "EMAIL_VERIFICATION_SENT"
+  | "EMAIL_VERIFIED"
+  | "LOGIN_SUCCEEDED"
+  | "LOGIN_FAILED"
+  | "LOGIN_CHALLENGED"
+  | "PASSWORD_RESET_REQUESTED"
+  | "PASSWORD_RESET_COMPLETED"
+  | "PASSWORD_CHANGED"
+  | "MFA_ENROLLED"
+  | "MFA_VERIFIED"
+  | "MFA_DISABLED"
+  | "PASSKEY_REGISTERED"
+  | "PASSKEY_AUTH_SUCCEEDED"
+  | "PASSKEY_AUTH_FAILED"
+  | "SESSION_CREATED"
+  | "SESSION_REVOKED"
+  | "ALL_SESSIONS_REVOKED"
+  | "REFRESH_TOKEN_ROTATED"
+  | "REFRESH_TOKEN_REUSE_DETECTED"
+  | "INVITATION_ACCEPTED"
+  | "ORGANIZATION_CREATED"
+  | "ORGANIZATION_SWITCHED"
+  | "ACCOUNT_LOCKED"
+  | "ACCOUNT_DISABLED"
+  | "SUSPICIOUS_LOGIN_DETECTED"
+  | "TRUSTED_DEVICE_ADDED"
+  | "TRUSTED_DEVICE_REVOKED"
   | "REFRESH_TOKEN_REUSE"
   | "SUSPICIOUS_LOGIN"
   | "BRUTE_FORCE_DETECTED"
@@ -32,11 +60,17 @@ interface RecordSecurityEventInput {
 
 function deriveSeverity(eventType: SecurityEventType): SecurityEventSeverity {
   switch (eventType) {
+    case "LOGIN_FAILED":
+    case "ACCOUNT_LOCKED":
+    case "ACCOUNT_DISABLED":
+    case "REFRESH_TOKEN_REUSE_DETECTED":
     case "REFRESH_TOKEN_REUSE":
     case "BRUTE_FORCE_DETECTED":
     case "PERMISSION_ESCALATION":
     case "ADMIN_IMPERSONATION":
       return "CRITICAL";
+    case "LOGIN_CHALLENGED":
+    case "SUSPICIOUS_LOGIN_DETECTED":
     case "SUSPICIOUS_LOGIN":
     case "ACCOUNT_LOCKED":
     case "ORG_POLICY_VIOLATION":
@@ -52,17 +86,18 @@ function deriveSeverity(eventType: SecurityEventType): SecurityEventSeverity {
 
 export async function recordSecurityEvent(input: RecordSecurityEventInput): Promise<void> {
   try {
+    const data = {
+      userId: input.userId ?? null,
+      orgId: input.orgId ?? null,
+      eventType: input.eventType,
+      severity: input.severity ?? deriveSeverity(input.eventType),
+      ip: input.ip ?? null,
+      userAgent: input.userAgent ?? null,
+      country: input.country ?? null,
+      ...(input.metadata !== undefined ? { metadata: input.metadata } : {}),
+    };
     await prisma.securityEvent.create({
-      data: {
-        userId: input.userId ?? null,
-        orgId: input.orgId ?? null,
-        eventType: input.eventType,
-        severity: input.severity ?? deriveSeverity(input.eventType),
-        ip: input.ip ?? null,
-        userAgent: input.userAgent ?? null,
-        country: input.country ?? null,
-        metadata: input.metadata ?? undefined,
-      },
+      data,
     });
   } catch (error) {
     console.error("Failed to record security event", error);

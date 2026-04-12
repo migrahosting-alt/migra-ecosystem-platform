@@ -1,10 +1,10 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 
 const email = process.env.PLAYWRIGHT_TEST_EMAIL || "owner+migramarket-e2e@migrateck.com";
 const password = process.env.PLAYWRIGHT_TEST_PASSWORD || "ChangeMeImmediately123!";
 const serverId = process.env.PLAYWRIGHT_VPS_SERVER_ID || "cm_vps_playwright_alpha";
 
-async function signIn(page: Parameters<typeof test>[0]["page"]) {
+async function signIn(page: Page) {
   await page.goto("/login");
   await page.getByLabel("Email").fill(email);
   await page.getByLabel("Password").fill(password);

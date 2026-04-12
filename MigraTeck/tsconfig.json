@@ -9,6 +9,21 @@
     "paths": {
       "@/*": [
         "./src/*"
+      ],
+      "@migrateck/api-contracts": [
+        "./packages/api-contracts/src/index.ts"
+      ],
+      "@migrateck/auth-core": [
+        "./packages/auth-core/src/index.ts"
+      ],
+      "@migrateck/org-core": [
+        "./packages/org-core/src/index.ts"
+      ],
+      "@migrateck/audit-core": [
+        "./packages/audit-core/src/index.ts"
+      ],
+      "@migrateck/events": [
+        "./packages/events/src/index.ts"
       ]
     },
     "plugins": [
@@ -24,6 +39,8 @@
     "middleware.ts",
     "src/**/*.ts",
     "src/**/*.tsx",
+    "packages/**/*.ts",
+    "packages/**/*.tsx",
     "test/**/*.ts",
     "test/**/*.tsx",
     ".next/types/**/*.ts"

@@ -315,7 +315,7 @@ describe("VPS diagnostics integration", () => {
     expect(incident).not.toBeNull();
 
     await prisma.vpsIncident.update({
-      where: { id: incident?.id },
+      where: { id: incident!.id },
       data: {
         responseDeadlineAt: new Date(Date.now() - 60 * 1000),
         mitigationDeadlineAt: new Date(Date.now() + 60 * 60 * 1000),

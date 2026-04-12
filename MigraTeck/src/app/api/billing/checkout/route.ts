@@ -83,8 +83,8 @@ export async function POST(request: NextRequest) {
     });
 
     const stripeCustomer = await stripe.customers.create({
-      email: user?.email || undefined,
-      name: activeOrg.org.name || user?.name || undefined,
+      ...(user?.email ? { email: user.email } : {}),
+      ...(activeOrg.org.name || user?.name ? { name: activeOrg.org.name || user?.name || "" } : {}),
       metadata: {
         orgId: activeOrg.orgId,
         orgSlug: activeOrg.org.slug || "",

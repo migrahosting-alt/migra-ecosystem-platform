@@ -89,9 +89,20 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ i
     });
   }
 
+  const updateData = {
+    ...(parsed.data.name !== undefined ? { name: parsed.data.name } : {}),
+    ...(parsed.data.city !== undefined ? { city: parsed.data.city } : {}),
+    ...(parsed.data.region !== undefined ? { region: parsed.data.region } : {}),
+    ...(parsed.data.country !== undefined ? { country: parsed.data.country } : {}),
+    ...(parsed.data.serviceArea !== undefined ? { serviceArea: parsed.data.serviceArea } : {}),
+    ...(parsed.data.primaryPhone !== undefined ? { primaryPhone: parsed.data.primaryPhone } : {}),
+    ...(parsed.data.primary !== undefined ? { primary: parsed.data.primary } : {}),
+    ...(parsed.data.status !== undefined ? { status: parsed.data.status } : {}),
+  };
+
   const location = await prisma.migraMarketLocation.update({
     where: { id },
-    data: parsed.data,
+    data: updateData,
   });
 
   await writeAuditLog({

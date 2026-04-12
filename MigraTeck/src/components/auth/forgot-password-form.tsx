@@ -1,6 +1,7 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import type { FormEvent } from "react";
+import { useState } from "react";
 import { ActionButton } from "@/components/ui/button";
 
 export function ForgotPasswordForm() {

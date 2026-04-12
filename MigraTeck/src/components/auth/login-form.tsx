@@ -1,6 +1,7 @@
 "use client";
 
-import { FormEvent, useMemo, useState } from "react";
+import type { FormEvent } from "react";
+import { useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ActionButton } from "@/components/ui/button";
 import { setAccessToken } from "@/lib/auth/client-token";

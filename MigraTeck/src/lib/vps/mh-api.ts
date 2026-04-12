@@ -936,6 +936,5 @@ export async function getMhApiMetrics(id: string, range: string) {
       networkOutMbps: metric.networkOutMbps,
       uptimeSeconds: Number(metric.uptimeSeconds),
     })),
-    uptimeSeconds: ordered.length > 0 ? Number(ordered[ordered.length - 1].uptimeSeconds) : 0,
   } satisfies ProviderMetricsResult;
 }

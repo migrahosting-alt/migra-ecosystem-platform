@@ -177,7 +177,7 @@ export async function evaluateLoginSuspicion(ctx: LoginContext): Promise<Suspici
       severity: "WARNING",
       ip: ctx.ip,
       userAgent: ctx.userAgent,
-      metadata: { reasons, score, email: ctx.email } as Record<string, unknown>,
+      metadata: { reasons, score, email: ctx.email },
     });
   }
 

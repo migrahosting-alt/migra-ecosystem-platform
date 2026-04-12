@@ -19,7 +19,7 @@ function parseStripeSignatureHeader(header: string): { timestamp: number; signat
     .filter((pair) => pair.length === 2);
 
   const timestampRaw = pairs.find(([key]) => key === "t")?.[1];
-  const signatures = pairs.filter(([key]) => key === "v1").map(([, value]) => value);
+  const signatures = pairs.filter(([key]) => key === "v1").map(([, value]) => value).filter((value): value is string => Boolean(value));
 
   if (!timestampRaw || signatures.length === 0) {
     return null;

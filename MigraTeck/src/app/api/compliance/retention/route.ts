@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { Prisma } from "@prisma/client";
 import { requireApiSession } from "@/lib/auth/api-auth";
 import { getActiveOrgContext } from "@/lib/auth/session";
 import { can } from "@/lib/rbac";
@@ -49,13 +50,22 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: check.reason }, { status: 409 });
   }
 
-  const policy = await createRetentionPolicy({
-    entityType,
-    retentionDays,
-    action: action as "DELETE" | "ARCHIVE" | "ANONYMIZE" | undefined,
-    orgId: ctx.orgId,
-    description,
-  });
+  let policy;
+  try {
+    policy = await createRetentionPolicy({
+      entityType,
+      retentionDays,
+      action: action as "DELETE" | "ARCHIVE" | "ANONYMIZE" | undefined,
+      orgId: ctx.orgId,
+      description,
+    });
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+      return NextResponse.json({ error: "A retention policy already exists for this entity type." }, { status: 409 });
+    }
+
+    throw error;
+  }
 
   await writeAuditLog({
     actorId: auth.session.user.id,

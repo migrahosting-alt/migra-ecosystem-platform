@@ -64,39 +64,53 @@ function normalizeExact(value?: string | null) {
 
 function buildTenantWhere(filters: DriveOpsTenantFilters = {}): Prisma.DriveTenantWhereInput {
   const query = filters.query?.trim();
-  const where: Prisma.DriveTenantWhereInput = {
-    id: normalizeExact(filters.tenantId),
-    orgId: normalizeExact(filters.orgId),
-    orgSlug: normalizeExact(filters.orgSlug),
-    subscriptionId: normalizeExact(filters.subscriptionId),
-    entitlementId: normalizeExact(filters.entitlementId),
-    status: normalizeExact(filters.status) as DriveTenantStatus | undefined,
-    planCode: normalizeExact(filters.planCode),
-  };
+  const where: Prisma.DriveTenantWhereInput = {};
+
+  const tenantId = normalizeExact(filters.tenantId);
+  const orgId = normalizeExact(filters.orgId);
+  const orgSlug = normalizeExact(filters.orgSlug);
+  const subscriptionId = normalizeExact(filters.subscriptionId);
+  const entitlementId = normalizeExact(filters.entitlementId);
+  const status = normalizeExact(filters.status) as DriveTenantStatus | undefined;
+  const planCode = normalizeExact(filters.planCode);
+
+  if (tenantId) where.id = tenantId;
+  if (orgId) where.orgId = orgId;
+  if (orgSlug) where.orgSlug = orgSlug;
+  if (subscriptionId) where.subscriptionId = subscriptionId;
+  if (entitlementId) where.entitlementId = entitlementId;
+  if (status) where.status = status;
+  if (planCode) where.planCode = planCode;
 
   if (query) {
+    const containsQuery = { contains: query, mode: "insensitive" as const };
     where.OR = [
       { id: query },
       { orgId: query },
-      { orgSlug: maybeContains(query) },
+      { orgSlug: containsQuery },
       { subscriptionId: query },
       { entitlementId: query },
-      { org: { name: maybeContains(query) } },
-      { org: { memberships: { some: { user: { email: maybeContains(query) } } } } },
+      { org: { name: containsQuery } },
+      { org: { memberships: { some: { user: { email: containsQuery } } } } },
     ];
   }
 
   if (filters.userEmail?.trim()) {
-    where.org = {
-      ...(where.org || {}),
-      memberships: {
-        some: {
-          user: {
-            email: maybeContains(filters.userEmail),
+    const emailContains = { contains: filters.userEmail.trim(), mode: "insensitive" as const };
+    where.AND = [
+      ...(where.AND ? (Array.isArray(where.AND) ? where.AND : [where.AND]) : []),
+      {
+        org: {
+          memberships: {
+            some: {
+              user: {
+                email: emailContains,
+              },
+            },
           },
         },
       },
-    };
+    ];
   }
 
   if (filters.cursor) {
@@ -123,7 +137,7 @@ export async function listDriveTenantsForOps(filters: DriveOpsTenantFilters = {}
 
   const hasMore = items.length > limit;
   const sliced = hasMore ? items.slice(0, limit) : items;
-  const nextCursor = hasMore ? sliced[sliced.length - 1].id : undefined;
+  const nextCursor = hasMore ? sliced[sliced.length - 1]?.id : undefined;
 
   return { items: sliced, nextCursor };
 }
@@ -171,23 +185,29 @@ export async function listDriveFilesForOps(
   cursor?: string | null | undefined,
 ) {
   const take = parsePositiveInt(limit, 50);
-  const items = await prisma.driveFile.findMany({
-    where: {
-      tenantId,
-      status: mode === "trash"
+  const where: Prisma.DriveFileWhereInput = {
+    tenantId,
+    status:
+      mode === "trash"
         ? DriveFileStatus.DELETED
         : {
             in: [DriveFileStatus.PENDING_UPLOAD, DriveFileStatus.ACTIVE],
           },
-      id: cursor ? { lt: cursor } : undefined,
-    },
+  };
+
+  if (cursor) {
+    where.id = { lt: cursor };
+  }
+
+  const items = await prisma.driveFile.findMany({
+    where,
     orderBy: { createdAt: "desc" },
     take: take + 1,
   });
 
   const hasMore = items.length > take;
   const sliced = hasMore ? items.slice(0, take) : items;
-  const nextCursor = hasMore ? sliced[sliced.length - 1].id : undefined;
+  const nextCursor = hasMore ? sliced[sliced.length - 1]?.id : undefined;
 
   return { items: sliced, nextCursor };
 }
@@ -224,21 +244,30 @@ export async function getDriveFileVersionsForOps(tenantId: string, fileId: strin
 
 export async function listDriveOperationsForOps(filters: DriveOpsOperationFilters = {}) {
   const limit = parsePositiveInt(filters.limit, 50);
+  const where: Prisma.DriveTenantOperationWhereInput = {};
+
+  const tenantId = normalizeExact(filters.tenantId);
+  const orgId = normalizeExact(filters.orgId);
+  const operationType = normalizeExact(filters.operationType);
+  const status = normalizeExact(filters.status);
+
+  if (tenantId) where.tenantId = tenantId;
+  if (orgId) where.orgId = orgId;
+  if (operationType) where.operationType = operationType;
+  if (status) where.status = status;
+  if (filters.cursor) {
+    where.id = { lt: filters.cursor };
+  }
+
   const items = await prisma.driveTenantOperation.findMany({
-    where: {
-      tenantId: normalizeExact(filters.tenantId),
-      orgId: normalizeExact(filters.orgId),
-      operationType: normalizeExact(filters.operationType),
-      status: normalizeExact(filters.status),
-      id: filters.cursor ? { lt: filters.cursor } : undefined,
-    },
+    where,
     orderBy: { startedAt: "desc" },
     take: limit + 1,
   });
 
   const hasMore = items.length > limit;
   const sliced = hasMore ? items.slice(0, limit) : items;
-  const nextCursor = hasMore ? sliced[sliced.length - 1].id : undefined;
+  const nextCursor = hasMore ? sliced[sliced.length - 1]?.id : undefined;
 
   return { items: sliced, nextCursor };
 }

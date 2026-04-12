@@ -27,6 +27,8 @@ const requestedEventTypeByAction: Record<VpsActionName, string> = {
   DELETE_SNAPSHOT: "SNAPSHOT_DELETED",
   UPDATE_FIREWALL: "FIREWALL_UPDATED",
   UPDATE_BACKUP_POLICY: "BACKUP_POLICY_UPDATED",
+  ROLLBACK_FIREWALL: "FIREWALL_ROLLBACK_REQUESTED",
+  MANUAL_SYNC: "MANUAL_SYNC_REQUESTED",
 };
 
 const failedEventTypeByAction: Record<VpsActionName, string> = {
@@ -43,6 +45,8 @@ const failedEventTypeByAction: Record<VpsActionName, string> = {
   DELETE_SNAPSHOT: "SNAPSHOT_DELETE_FAILED",
   UPDATE_FIREWALL: "FIREWALL_UPDATE_FAILED",
   UPDATE_BACKUP_POLICY: "BACKUP_POLICY_UPDATE_FAILED",
+  ROLLBACK_FIREWALL: "FIREWALL_ROLLBACK_FAILED",
+  MANUAL_SYNC: "MANUAL_SYNC_FAILED",
 };
 
 function jsonValue(input: unknown): Prisma.InputJsonValue {
@@ -171,12 +175,7 @@ function optimisticPatchForAction(action: VpsActionName): Partial<{
 }
 
 function withRebuildImageMetadata(
-  patch: Partial<{
-    imageSlug: string;
-    osName: string;
-    imageVersion: string | null;
-    defaultUsername: string;
-  }> | null | undefined,
+  patch: ProviderActionResult["serverPatch"] | null | undefined,
   providerSlug: string,
   rebuildInput?: RebuildInput | undefined,
 ) {
@@ -404,8 +403,11 @@ export async function executeVpsAction(input: {
   }
 
   if (result.accepted) {
+    const basePatch = result.serverPatch || optimisticPatchForAction(input.action);
     const patch = withRebuildImageMetadata(
-      result.serverPatch || optimisticPatchForAction(input.action),
+      basePatch && ("imageSlug" in basePatch || "osName" in basePatch || "imageVersion" in basePatch || "defaultUsername" in basePatch)
+        ? basePatch
+        : null,
       server.providerSlug,
       input.rebuildInput,
     );
@@ -521,7 +523,7 @@ export async function syncVpsServer(input: {
 
   return syncServer(server.id, {
     actorUserId: input.actorUserId,
-    sourceIp: input.ip,
+    ...(input.ip !== undefined ? { sourceIp: input.ip } : {}),
   });
 }
 

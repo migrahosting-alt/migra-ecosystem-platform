@@ -1,14 +1,16 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import type { FormEvent } from "react";
+import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { MarketingSmsOptInFields } from "@/components/marketing/marketing-sms-opt-in-fields";
 import { ActionButton } from "@/components/ui/button";
 import { setAccessToken } from "@/lib/auth/client-token";
 import { LEGAL_PAGE_PATHS } from "@/lib/legal";
+import type { AuthPortalBranding } from "@/lib/migradrive-auth-branding";
 
-export function SignupForm() {
+export function SignupForm({ authBranding }: { authBranding: AuthPortalBranding }) {
   const router = useRouter();
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
@@ -61,7 +63,7 @@ export function SignupForm() {
     setIsLoading(false);
 
     if (!response.ok) {
-      setError(payload.error || "Unable to create your MigraDrive account.");
+      setError(payload.error || `Unable to create your ${authBranding.productName} account.`);
       return;
     }
 
@@ -83,7 +85,7 @@ export function SignupForm() {
           }
         : null,
     );
-    setMessage(payload.message || "Account created. Check your email to verify your MigraDrive access.");
+      setMessage(payload.message || `Account created. Check your email to verify your ${authBranding.productName} access.`);
     setPassword("");
   }
 
@@ -171,13 +173,13 @@ export function SignupForm() {
           </span>
         </label>
         <ActionButton type="submit" disabled={isLoading || !acceptedLegalTerms} className="w-full">
-          {isLoading ? "Creating account..." : "Create MigraDrive account"}
+          {isLoading ? "Creating account..." : `Create ${authBranding.shortName} account`}
         </ActionButton>
       </form>
       {message ? <p className="mt-3 text-sm text-green-700">{message}</p> : null}
       {registrationSummary ? (
         <div className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900">
-          <p className="font-semibold">Starter MigraDrive path created.</p>
+          <p className="font-semibold">Starter account path created.</p>
           <p className="mt-1">Organization slug: {registrationSummary.orgSlug}</p>
           <p>Tenant state: {registrationSummary.tenantStatus} · plan {registrationSummary.planCode} · {registrationSummary.storageQuotaGb} GiB quota</p>
           <p className="mt-2">

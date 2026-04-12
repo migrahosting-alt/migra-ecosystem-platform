@@ -1,9 +1,11 @@
 import Image from "next/image";
 import Link from "next/link";
+import type { AccountLinks } from "@/lib/account-links";
 import ui from "@/lib/ui";
 import { cn } from "@/lib/cn";
 
-const columns = [
+function buildColumns(accountLinks: AccountLinks) {
+  return [
   {
     title: "Products",
     links: [
@@ -27,9 +29,21 @@ const columns = [
       { href: "/.well-known/security.txt", label: "security.txt" },
     ],
   },
+  {
+    title: "Account",
+    links: [
+      { href: accountLinks.login, label: "Log in" },
+      { href: accountLinks.signup, label: "Create account" },
+      { href: accountLinks.forgotPassword, label: "Reset password" },
+      { href: accountLinks.sessions, label: "Sessions" },
+    ],
+  },
 ] as const;
+}
 
-export function SiteFooter() {
+export function SiteFooter({ accountLinks }: { accountLinks: AccountLinks }) {
+  const columns = buildColumns(accountLinks);
+
   return (
     <footer className="section-dark">
       {/* top separator line */}
@@ -60,7 +74,7 @@ export function SiteFooter() {
           </div>
 
           {/* link columns */}
-          <div className="grid grid-cols-2 gap-8 sm:grid-cols-3">
+          <div className="grid grid-cols-2 gap-8 sm:grid-cols-4">
             {columns.map((col) => (
               <div key={col.title}>
                 <p className={ui.eyebrowDarkMuted}>{col.title}</p>

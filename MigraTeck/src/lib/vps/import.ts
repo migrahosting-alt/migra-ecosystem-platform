@@ -1,4 +1,4 @@
-import { Prisma, ServerPowerState, SupportTier, VpsBillingCycle, VpsProviderHealthState, VpsStatus } from "@prisma/client";
+import { FirewallProfileStatus, Prisma, ServerPowerState, SupportTier, VpsBillingCycle, VpsProviderHealthState, VpsStatus } from "@prisma/client";
 import { z } from "zod";
 import { writeAuditLog } from "@/lib/audit";
 import { prisma } from "@/lib/prisma";
@@ -268,7 +268,7 @@ export async function upsertImportedVpsServer(input: {
   const firewallProfileData = {
     providerProfileId: providerServerId || null,
     name: parsed.firewallProfileName || (parsed.firewallEnabled ? "Default VPS Firewall" : "Firewall Disabled"),
-    status: parsed.firewallEnabled ? "ACTIVE" : "DISABLED",
+    status: parsed.firewallEnabled ? FirewallProfileStatus.ACTIVE : FirewallProfileStatus.DISABLED,
     protectionMode: parsed.firewallEnabled ? "provider-managed" : "disabled",
     lastAppliedAt: new Date(),
   };

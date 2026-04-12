@@ -1,7 +1,7 @@
 export class ProviderError extends Error {
   code: string;
   retryable: boolean;
-  status?: number;
+  status?: number | undefined;
   raw?: unknown;
 
   constructor(input: { code: string; message: string; retryable?: boolean; status?: number; raw?: unknown }) {

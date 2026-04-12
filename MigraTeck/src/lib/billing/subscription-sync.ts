@@ -15,7 +15,7 @@ import {
 } from "@/lib/drive/drive-billing-enforcement";
 import { prisma } from "@/lib/prisma";
 import { queueProvisioningForEntitlementTransition } from "@/lib/provisioning/queue";
-import { StripeEvent } from "@/lib/billing/stripe";
+import type { StripeEvent } from "@/lib/billing/stripe";
 
 interface StripeSubscriptionObject {
   id: string;

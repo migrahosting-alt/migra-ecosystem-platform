@@ -1,5 +1,5 @@
 import { createHmac, randomUUID } from "node:crypto";
-import { ProductKey, ProvisioningAction, ProvisioningJob, type Prisma } from "@prisma/client";
+import { ProductKey, ProvisioningAction, type ProvisioningJob, type Prisma } from "@prisma/client";
 import {
   env,
   provisioningDispatchTimeoutMs,
@@ -108,7 +108,7 @@ type DriveContext = {
   customerId: string | null;
 };
 
-const PRODUCT_DISPATCH_ENV_KEYS: Record<string, { url?: string; token?: string }> = {
+const PRODUCT_DISPATCH_ENV_KEYS: Record<string, { url?: string | undefined; token?: string | undefined }> = {
   [ProductKey.MIGRATECK]: {
     url: env.MIGRATECK_PROVISION_URL,
     token: env.MIGRATECK_PROVISION_TOKEN,

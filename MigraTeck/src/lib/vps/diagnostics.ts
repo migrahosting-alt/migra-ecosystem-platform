@@ -25,16 +25,23 @@ export type VpsDiagnosticsState = {
     criticalCount: number;
     items: Array<{
       id: string;
+      alertId: string | null;
       code: string;
-      status: "ACTIVE" | "ACKNOWLEDGED" | "SUPPRESSED";
+      name: string;
+      status: string;
       severity: AlertSeverity;
       title: string;
       message: string;
       source: string;
       firstDetectedAt: string;
       lastDetectedAt: string;
+      acknowledgedAt: string | null;
+      acknowledgedBy: string | null;
+      resolvedAt: string | null;
       suppressedUntil: string | null;
       remediationAction: string | null;
+      detail: unknown;
+      alertStatus: string | null;
       incident: {
         id: string;
         state: VpsIncidentState;
@@ -301,7 +308,9 @@ export async function getServerDiagnostics(serverId: string, orgId: string): Pro
       criticalCount: actionableAlerts.filter((event) => event.severity === "CRITICAL").length,
       items: actionableAlerts.slice(0, 5).map((event) => ({
         id: event.id,
+        alertId: event.alertId,
         code: event.code,
+        name: event.name,
         status: event.status,
         severity: event.severity,
         title: event.title,
@@ -309,8 +318,13 @@ export async function getServerDiagnostics(serverId: string, orgId: string): Pro
         source: event.source,
         firstDetectedAt: event.firstDetectedAt,
         lastDetectedAt: event.lastDetectedAt,
+        acknowledgedAt: event.acknowledgedAt,
+        acknowledgedBy: event.acknowledgedBy,
+        resolvedAt: event.resolvedAt,
         suppressedUntil: event.suppressedUntil,
         remediationAction: event.remediationAction,
+        detail: event.detail,
+        alertStatus: event.alertStatus,
         incident: event.incident
           ? {
               id: event.incident.id,

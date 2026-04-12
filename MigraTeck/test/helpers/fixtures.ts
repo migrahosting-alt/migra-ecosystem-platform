@@ -132,13 +132,14 @@ interface CreateOrganizationInput {
 }
 
 export async function createOrganization(input: CreateOrganizationInput) {
+  const data = {
+    name: input.name,
+    slug: input.slug,
+    isMigraHostingClient: input.isMigraHostingClient || false,
+    ...(input.createdById !== undefined ? { createdById: input.createdById } : {}),
+  };
   return prisma.organization.create({
-    data: {
-      name: input.name,
-      slug: input.slug,
-      isMigraHostingClient: input.isMigraHostingClient || false,
-      createdById: input.createdById,
-    },
+    data,
   });
 }
 
