@@ -125,9 +125,9 @@ def main():
         "srv1_nginx_test": raw / "srv1-web.nginx.test.txt",
         "srv1_nginx_hints": raw / "srv1-web.nginx.hints.txt",
         "srv1_nginx_dump": raw / "srv1-web.nginx.dump.txt",
-        "mpanel_listeners": raw / "mpanel-core.mpanel.listeners.txt",
-        "mpanel_services": raw / "mpanel-core.mpanel.services.txt",
-        "mpanel_pm2": raw / "mpanel-core.mpanel.pm2.status.txt",
+        "migrapanel_panel_api_listeners": raw / "mpanel-core.mpanel.listeners.txt",
+        "migrapanel_panel_api_services": raw / "mpanel-core.mpanel.services.txt",
+        "migrapanel_panel_api_pm2": raw / "mpanel-core.mpanel.pm2.status.txt",
     }
 
     snapshot = {
@@ -145,10 +145,10 @@ def main():
             "routing_hints": parse_nginx_hints(read_text(files["srv1_nginx_hints"])),
             "notes": "Full nginx -T captured in raw; snapshot only stores extracted hints to avoid secrets/noise.",
         },
-        "mpanel": {
-            "listeners": parse_ss_listeners(read_text(files["mpanel_listeners"])),
-            "services": redact(read_text(files["mpanel_services"])).splitlines()[:300],
-            "pm2_status": redact(read_text(files["mpanel_pm2"])).splitlines()[:200],
+        "migrapanel_panel_api": {
+            "listeners": parse_ss_listeners(read_text(files["migrapanel_panel_api_listeners"])),
+            "services": redact(read_text(files["migrapanel_panel_api_services"])).splitlines()[:300],
+            "pm2_status": redact(read_text(files["migrapanel_panel_api_pm2"])).splitlines()[:200],
         },
     }
 
@@ -171,8 +171,8 @@ def main():
     if snapshot["nginx"]["routing_hints"]["server_names"]:
         md.append("  - " + "\n  - ".join(snapshot["nginx"]["routing_hints"]["server_names"][:50]))
     md.append("")
-    md.append("## mPanel")
-    md.append(f"- listeners captured: {len(snapshot['mpanel']['listeners'])}")
+    md.append("## MigraPanel Panel API")
+    md.append(f"- listeners captured: {len(snapshot['migrapanel_panel_api']['listeners'])}")
     md.append("")
     (out / "infra.snapshot.md").write_text("\n".join(md) + "\n")
 
@@ -182,7 +182,7 @@ def main():
 
     (runbooks / "ssh-access.md").write_text(
         "# SSH Access Runbook\n\n"
-        "- Use host aliases: `pve`, `srv1-web`, `mpanel-core`, `db-core`, `dns-core`, `mail-core`, `cloud-core`, `voip-core`\n"
+        "- Use host aliases: `pve`, `srv1-web`, `migrapanel-core`, `db-core`, `dns-core`, `mail-core`, `cloud-core`, `voip-core`\n"
         "- Validate: `ssh pve 'hostname; pveversion'`\n"
     )
     (runbooks / "nginx-routing.md").write_text(
@@ -191,10 +191,10 @@ def main():
         "- Inspect routing: `ssh srv1-web \"grep -R --line-number -E 'server_name|proxy_pass|upstream' /etc/nginx | head\"`\n"
         "- No reloads/restarts without explicit approval.\n"
     )
-    (runbooks / "mpanel-ops.md").write_text(
-        "# mPanel Ops Runbook\n\n"
-        "- Check PM2: `ssh mpanel-core '/usr/local/bin/pm2 status'`\n"
-        "- Tail logs (if needed): `ssh mpanel-core '/usr/local/bin/pm2 logs --lines 200'`\n"
+    (runbooks / "migrapanel-ops.md").write_text(
+        "# MigraPanel Panel API Ops Runbook\n\n"
+        "- Check service state: `ssh migrapanel-core 'systemctl status migrapanel-panel-api.service --no-pager'`\n"
+        "- Tail logs (if needed): `ssh migrapanel-core 'journalctl -u migrapanel-panel-api.service --lines 200 --no-pager'`\n"
         "- No restarts without explicit approval.\n"
     )
 

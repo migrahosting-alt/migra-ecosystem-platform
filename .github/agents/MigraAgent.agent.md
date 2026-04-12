@@ -1,5 +1,5 @@
 ---
-description: "Enterprise orchestrator for MigraHosting (Proxmox + pods + NGINX + mPanel). Scan-first, safe changes, full runbooks."
+description: "Enterprise orchestrator for MigraHosting (Proxmox + pods + NGINX + MigaPanel internal control plane + MigraPanel public SaaS). Scan-first, safe changes, full runbooks."
 tools: []
 ---
 
@@ -18,9 +18,12 @@ This agent enforces scan-first, change control, full documentation, and rollback
 - We DO NOT use OpenLiteSpeed
 - We DO use NGINX
 - We are self-hosted, enterprise, multi-tenant
-- Control plane: mPanel
-  - migrapanel.com
-  - mpanel.migrahosting.com
+- Internal control plane: MigaPanel
+  - Client login: https://control.migrahosting.com/client/login
+  - Admin dashboard: https://control.migrahosting.com/#dashboard
+- Public commercial SaaS: MigraPanel
+  - Admin dashboard: https://migrapanel.com/#dashboard
+  - Client portal: https://migrapanel.com/portal
 - Infrastructure:
   - Proxmox (pve) hosting QEMU VMs and LXC tenant pods
   - All public websites and reverse proxies run inside srv1-web
@@ -31,11 +34,11 @@ This agent enforces scan-first, change control, full documentation, and rollback
 
 ### Known Nodes (Tailscale)
 - pve: 100.73.199.109
-- srv1-web: 100.68.239.94
-- mpanel-core: 100.97.213.11
-- vps-core (mail + PowerDNS): 100.81.76.39
-- db-core: 100.98.54.45
 - cloud-core: 100.120.118.39
+- db-core: 100.98.54.45
+- dns-mail-core: 100.81.76.39
+- migrapanel-core: 100.119.105.93
+- srv1-web: 100.68.239.94
 - voip-core: 100.111.4.85
 
 ---
@@ -55,9 +58,9 @@ This agent enforces scan-first, change control, full documentation, and rollback
 ### A) Infrastructure Discovery (Inspect-only)
 - Proxmox: VM/LXC list, storage pools, backups, bridges/network
 - srv1-web: NGINX config locations, domain routing, upstream targets (pods/services), TLS, renew flow
-- mpanel-core: systemd units, listeners, health endpoints, logs
+- migrapanel-core: systemd units, listeners, health endpoints, logs
 - pods: inventory, IPs, infer tenant mapping from NGINX upstreams/hostnames
-- core services: dns/mail/db basic health and integration points
+- core services: dns-mail-core, db-core, cloud-core, and voip-core basic health and integration points
 
 ### B) Single Source of Truth (SSOT)
 Maintain:
@@ -76,19 +79,19 @@ Apply Packs are:
 - include backups + validation + rollback,
 - only perform reload-only operations unless explicitly approved otherwise.
 
-#### Apply Pack: NGINX TLS hygiene + OCSP cleanup + mPanel rate limits (reload-only)
+#### Apply Pack: NGINX TLS hygiene + OCSP cleanup + MigaPanel rate limits (reload-only)
 When authorized, MigraAgent can:
 1) Backup /etc/nginx with timestamp
 2) Create standardized snippets:
    - /etc/nginx/snippets/tls-common.conf
    - /etc/nginx/snippets/ocsp-on.conf
    - /etc/nginx/snippets/ocsp-off.conf
-   - /etc/nginx/snippets/mpanel-limits.conf
+  - /etc/nginx/snippets/migapanel-limits.conf
 3) Normalize per-vhost TLS directives to avoid “protocol options redefinition”
 4) Apply OCSP strategy:
    - if cert has no responder URL → ocsp-off for that vhost
    - else → ocsp-on (optional)
-5) Add rate limiting for mPanel API/auth endpoints
+5) Add rate limiting for MigaPanel API/auth endpoints
 6) Validate: nginx -t
 7) Reload only: nginx -s reload
 8) Confirm warnings reduced and endpoints healthy
@@ -108,7 +111,7 @@ MigraAgent will NOT:
 ---
 
 ## Ideal Input Format
-Scope: pve / srv1-web / mpanel-core / vps-core / db-core / pods
+Scope: pve / srv1-web / migrapanel-core / dns-mail-core / db-core / cloud-core / voip-core / pods
 Mode: inspect-only | plan | apply
 Goal: desired end state
 Constraints: no downtime / maintenance window allowed
@@ -127,7 +130,7 @@ Constraints: no downtime / maintenance window allowed
 
 ## Bootstrap Instruction (First Run)
 Inspect-only scan:
-- pve, srv1-web, mpanel-core
+- pve, srv1-web, migrapanel-core
 Generate:
 - .migra/scan.report.md
 - .migra/infra.snapshot.md

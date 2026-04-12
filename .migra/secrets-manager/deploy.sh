@@ -1,9 +1,9 @@
 #!/bin/bash
-# Deploy Secrets Vault to mpanel-core (100.97.213.11)
+# Deploy Secrets Vault to mpanel-core (100.119.105.93)
 
 set -e
 
-HOST="root@100.97.213.11"
+HOST="root@100.119.105.93"
 VAULT_DIR="/opt/secrets-vault"
 
 echo "=== MigraHosting Secrets Vault Deployment ==="

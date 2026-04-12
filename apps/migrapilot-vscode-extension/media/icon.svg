@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" role="img" aria-label="MigraPilot">
+  <defs>
+    <radialGradient id="pilot-core" cx="38%" cy="28%" r="82%">
+      <stop offset="0%" stop-color="#d77cff"/>
+      <stop offset="48%" stop-color="#b83cff"/>
+      <stop offset="100%" stop-color="#ff3eb5"/>
+    </radialGradient>
+    <linearGradient id="pilot-rim" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#ffd8ff" stop-opacity="0.95"/>
+      <stop offset="100%" stop-color="#ff9de0" stop-opacity="0.45"/>
+    </linearGradient>
+    <filter id="pilot-shadow" x="-30%" y="-30%" width="160%" height="190%">
+      <feDropShadow dx="0" dy="52" stdDeviation="34" flood-color="#c02cff" flood-opacity="0.4"/>
+    </filter>
+  </defs>
+  <ellipse cx="512" cy="862" rx="238" ry="78" fill="#db39ff" opacity="0.28"/>
+  <g filter="url(#pilot-shadow)">
+    <circle cx="512" cy="458" r="324" fill="url(#pilot-core)"/>
+    <circle cx="512" cy="458" r="324" fill="none" stroke="url(#pilot-rim)" stroke-width="18"/>
+    <path fill="#fff" d="M319 594V352h82l119 92 117-92h170v69h-45l-52 54h-87v119h-76V432H532l-62 39-60-39v162z"/>
+    <path fill="#fff" d="M531 449h154v64H603v76l-70 48-64-20 62-79z"/>
+    <path fill="#fff" d="M405 734h215v35H405z" opacity="0.95"/>
+    <path fill="#fff" d="M456 782h111c18 0 33 14 33 32s-15 32-33 32H456c-18 0-33-14-33-32s15-32 33-32z" opacity="0.95"/>
+  </g>
+</svg>

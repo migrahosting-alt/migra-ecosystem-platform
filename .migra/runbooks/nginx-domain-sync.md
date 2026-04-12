@@ -1,6 +1,6 @@
 # Runbook: NGINX Domain Sync (srv1-web)
 
-Scope: Align migrahosting.com ↔ mPanel domains safely
+Scope: Align migrahosting.com ↔ MigraPanel domains safely
 Risk: MED (requires NGINX reload)
 
 ## Goal
@@ -9,14 +9,14 @@ Avoid redirect semantics that can break API POSTs and OAuth callbacks, while kee
 
 ## Current state (verified)
 
-- `migrapanel.com` blanket `return 301 https://mpanel.migrahosting.com$request_uri;`
-- `mpanel.migrahosting.com` serves frontend and proxies `/api/` to mpanel-core
+- `control.migrahosting.com` is the canonical MigraPanel control surface
+- `migrapanel.com` should point directly at the current control surface or serve the app without legacy `mpanel` redirects
 
 ## Recommended change options
 
-### Option B1 (minimal): change 301 → 308 on migrapanel.com
+### Option B1 (minimal): change legacy redirects to `control.migrahosting.com`
 
-Pros: preserves method/body on redirects.
+Pros: keeps user-visible traffic on the current control hostname.
 Cons: still a redirect (some OAuth providers and clients prefer no redirect).
 
 ### Option B2 (better): proxy `/api/` on migrapanel.com; redirect only `/`

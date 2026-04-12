@@ -1,0 +1,36 @@
+<svg width="1280" height="720" viewBox="0 0 1280 720" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="88" y1="48" x2="1188" y2="666" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#07111F"/>
+      <stop offset="0.55" stop-color="#121C34"/>
+      <stop offset="1" stop-color="#1D103A"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="218" y1="122" x2="1088" y2="600" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#6D5EFC"/>
+      <stop offset="0.5" stop-color="#B04CFF"/>
+      <stop offset="1" stop-color="#FF5E8A"/>
+    </linearGradient>
+  </defs>
+  <rect width="1280" height="720" rx="32" fill="url(#bg)"/>
+  <rect x="48" y="48" width="1184" height="624" rx="28" fill="rgba(255,255,255,0.03)" stroke="rgba(255,255,255,0.08)"/>
+  <text x="82" y="110" fill="#D6D9FF" font-family="Space Grotesk, Arial, sans-serif" font-size="16" font-weight="700" letter-spacing="0.18em">MIGRAHOSTING</text>
+  <text x="82" y="226" fill="white" font-family="Sora, Arial, sans-serif" font-size="72" font-weight="800">
+    <tspan x="82" dy="0">WEBSITE LIVE</tspan>
+    <tspan x="82" dy="84">IN 48 HOURS</tspan>
+  </text>
+  <text x="82" y="374" fill="#CBD5E1" font-family="Space Grotesk, Arial, sans-serif" font-size="26" font-weight="500">
+    Custom build. Domain. Business email. SEO-ready setup.
+  </text>
+  <rect x="82" y="430" width="250" height="52" rx="26" fill="url(#accent)"/>
+  <text x="144" y="464" fill="white" font-family="Space Grotesk, Arial, sans-serif" font-size="24" font-weight="700">Launch today</text>
+  <text x="364" y="465" fill="#F8FAFC" font-family="Sora, Arial, sans-serif" font-size="36" font-weight="800">$199 START</text>
+  <rect x="772" y="120" width="400" height="362" rx="30" fill="rgba(8,15,29,0.72)" stroke="rgba(255,255,255,0.12)"/>
+  <rect x="798" y="152" width="348" height="28" rx="14" fill="rgba(255,255,255,0.08)"/>
+  <rect x="798" y="202" width="180" height="162" rx="20" fill="rgba(109,94,252,0.14)" stroke="rgba(160,120,255,0.42)"/>
+  <rect x="996" y="208" width="122" height="24" rx="12" fill="rgba(255,255,255,0.1)"/>
+  <rect x="996" y="248" width="98" height="18" rx="9" fill="rgba(255,255,255,0.08)"/>
+  <rect x="996" y="280" width="112" height="18" rx="9" fill="rgba(255,255,255,0.08)"/>
+  <rect x="996" y="312" width="88" height="18" rx="9" fill="rgba(255,255,255,0.08)"/>
+  <rect x="996" y="352" width="130" height="42" rx="21" fill="url(#accent)"/>
+  <text x="1034" y="379" fill="white" font-family="Space Grotesk, Arial, sans-serif" font-size="18" font-weight="700">Services</text>
+</svg>

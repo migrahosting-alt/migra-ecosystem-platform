@@ -20,7 +20,7 @@ Successfully implemented unified Prisma-based Guardian service layer with 32-col
 - Added bidirectional Prisma relations (Customer ↔ GuardianInstance, Product ↔ GuardianInstance)
 - Generated Prisma Client v7.0.1 with full type safety
 
-**Database:** PostgreSQL on mpanel-core (100.97.213.11)  
+**Database:** PostgreSQL on mpanel-core (100.119.105.93)  
 **Table:** `guardian_instances` (0 rows - fresh start)
 
 ### Phase 2: Service Layer ✅

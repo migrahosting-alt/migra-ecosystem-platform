@@ -1,6 +1,6 @@
 #!/bin/bash
 # Deploy Guardian Unified Schema Migration
-# Run this script on mpanel-core (100.97.213.11)
+# Run this script on mpanel-core (100.119.105.93)
 
 set -e
 

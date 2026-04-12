@@ -1,0 +1,82 @@
+<svg width="1080" height="1350" viewBox="0 0 1080 1350" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="136" y1="68" x2="934" y2="1280" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#090F1D"/>
+      <stop offset="0.52" stop-color="#14183C"/>
+      <stop offset="1" stop-color="#210F3A"/>
+    </linearGradient>
+    <radialGradient id="glowA" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(535 429) rotate(90) scale(325)">
+      <stop stop-color="#A64DFF" stop-opacity="0.48"/>
+      <stop offset="1" stop-color="#A64DFF" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="glowB" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(548 1168) rotate(90) scale(210 348)">
+      <stop stop-color="#FF5C8D" stop-opacity="0.32"/>
+      <stop offset="1" stop-color="#FF5C8D" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="brand" x1="78" y1="72" x2="150" y2="144" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#775BFF"/>
+      <stop offset="1" stop-color="#FF5D92"/>
+    </linearGradient>
+    <linearGradient id="ring" x1="278" y1="280" x2="806" y2="812" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFE38D"/>
+      <stop offset="0.42" stop-color="#FFB85C"/>
+      <stop offset="0.68" stop-color="#C480FF"/>
+      <stop offset="1" stop-color="#FF70A8"/>
+    </linearGradient>
+    <linearGradient id="ribbon" x1="184" y1="710" x2="894" y2="710" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#6D5DFF"/>
+      <stop offset="0.52" stop-color="#AA4EFF"/>
+      <stop offset="1" stop-color="#FF5E8C"/>
+    </linearGradient>
+    <linearGradient id="cta" x1="218" y1="1181" x2="858" y2="1181" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#6D5DFE"/>
+      <stop offset="0.48" stop-color="#B550FF"/>
+      <stop offset="1" stop-color="#FF6490"/>
+    </linearGradient>
+    <filter id="badgeGlow" x="138" y="152" width="808" height="808" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feGaussianBlur stdDeviation="42"/>
+    </filter>
+  </defs>
+
+  <rect width="1080" height="1350" rx="36" fill="url(#bg)"/>
+  <rect x="52" y="52" width="976" height="1246" rx="28" fill="#FFFFFF" fill-opacity="0.03" stroke="#FFFFFF" stroke-opacity="0.08"/>
+  <circle cx="540" cy="432" r="325" fill="url(#glowA)"/>
+  <circle cx="548" cy="1168" r="210" fill="url(#glowB)"/>
+
+  <g>
+    <circle cx="114" cy="108" r="34" fill="url(#brand)"/>
+    <text x="114" y="119" text-anchor="middle" fill="#FFFFFF" font-family="Sora, Arial, sans-serif" font-size="29" font-weight="800">MH</text>
+    <text x="162" y="119" fill="#F8FAFC" font-family="Sora, Arial, sans-serif" font-size="34" font-weight="700">MigraHosting</text>
+  </g>
+
+  <g filter="url(#badgeGlow)">
+    <circle cx="542" cy="554" r="284" fill="#AC4FFF" fill-opacity="0.18"/>
+  </g>
+
+  <g>
+    <circle cx="542" cy="554" r="264" fill="#121537" fill-opacity="0.9" stroke="url(#ring)" stroke-width="14"/>
+    <circle cx="542" cy="554" r="220" fill="#0C1129" stroke="#FFFFFF" stroke-opacity="0.08"/>
+    <circle cx="542" cy="554" r="183" fill="#FFFFFF" fill-opacity="0.03"/>
+
+    <text x="542" y="520" text-anchor="middle" fill="#FFC870" font-family="Sora, Arial, sans-serif" font-size="170" font-weight="800">30</text>
+    <text x="542" y="592" text-anchor="middle" fill="#F8FAFC" font-family="Sora, Arial, sans-serif" font-size="46" font-weight="800">DAY</text>
+
+    <path d="M321 790H763L706 878H378L321 790Z" fill="#2A124E" fill-opacity="0.72" stroke="#FFFFFF" stroke-opacity="0.08"/>
+    <path d="M542 842L554 866H580L559 881L567 907L542 892L517 907L525 881L504 866H530L542 842Z" fill="#FFC66F"/>
+  </g>
+
+  <g>
+    <path d="M212 664L310 706V802L212 764V664Z" fill="#7C45FF" fill-opacity="0.42"/>
+    <path d="M870 664L772 706V802L870 764V664Z" fill="#FF5B98" fill-opacity="0.38"/>
+    <rect x="184" y="672" width="712" height="134" rx="67" fill="url(#ribbon)" stroke="#FFFFFF" stroke-opacity="0.12"/>
+    <text x="540" y="728" text-anchor="middle" fill="#FFD57D" font-family="Sora, Arial, sans-serif" font-size="52" font-weight="800">MONEY-BACK</text>
+    <text x="540" y="774" text-anchor="middle" fill="#FFFFFF" font-family="Sora, Arial, sans-serif" font-size="42" font-weight="800">GUARANTEE</text>
+  </g>
+
+  <text x="540" y="982" text-anchor="middle" fill="#FFFFFF" font-family="Sora, Arial, sans-serif" font-size="64" font-weight="800">Try Us Risk-Free</text>
+  <text x="540" y="1048" text-anchor="middle" fill="#D3DAEF" font-family="Space Grotesk, Arial, sans-serif" font-size="31" font-weight="500">30 days to experience performance, speed, and support</text>
+  <text x="540" y="1090" text-anchor="middle" fill="#D3DAEF" font-family="Space Grotesk, Arial, sans-serif" font-size="31" font-weight="500">without second-guessing your move.</text>
+
+  <rect x="218" y="1142" width="640" height="78" rx="39" fill="url(#cta)"/>
+  <text x="540" y="1190" text-anchor="middle" fill="#FFFFFF" font-family="Space Grotesk, Arial, sans-serif" font-size="34" font-weight="700">Start Your Migration Today</text>
+</svg>

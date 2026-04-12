@@ -232,7 +232,7 @@ export async function provisionEmail({
   planConfig,
   domain,
 }) {
-  // 1. Create email domain in vps-core (mail)
+  // 1. Create email domain in dns-mail-core
   const emailDomain = await createEmailDomain({
     domain,
     tenantId,
@@ -251,7 +251,7 @@ export async function provisionEmail({
     mailboxes.push(mailbox);
   }
 
-  // 3. Configure DNS records on vps-core (PowerDNS)
+  // 3. Configure DNS records on dns-mail-core (PowerDNS)
   await configureDNSRecords({
     domain,
     records: [
@@ -268,8 +268,8 @@ export async function provisionEmail({
 **Tasks**:
 - [ ] Create `apps/panel-api/src/routes/email-provision.ts`
 - [ ] Add `POST /email/provision` route
-- [ ] Create email domain setup script for vps-core (mail)
-- [ ] Auto-configure DNS records on vps-core (PowerDNS)
+- [ ] Create email domain setup script for dns-mail-core
+- [ ] Auto-configure DNS records on dns-mail-core (PowerDNS)
 - [ ] Generate DKIM keys and SPF/DMARC records
 
 ---
@@ -497,7 +497,7 @@ async function provisionBundle({ tenantId, subscriptionId, planConfig, metadata 
 |---------|--------------|------------------|
 | **CloudPod** | Order Student plan | Pod created, domain configured, SSH access |
 | **WordPress** | Order WP Starter | WordPress pod created, WP installed, admin account |
-| **Email** | Order Email Basic | Domain added to vps-core (mail), DNS configured on vps-core (PowerDNS), mailbox created |
+| **Email** | Order Email Basic | Domain added on dns-mail-core, DNS configured on dns-mail-core, mailbox created |
 | **VPS** | Order VPS-1 | VM cloned, started, IP assigned, firewall configured |
 | **Storage** | Order Storage Personal | S3 bucket created, credentials generated, quota set |
 | **Bundle** | Order Hosting + Email | Both services provisioned, DNS linked |
@@ -529,12 +529,10 @@ async function provisionBundle({ tenantId, subscriptionId, planConfig, metadata 
 
 ## Infrastructure Requirements
 
-### DNS Core (100.73.241.82)
+### DNS + Mail Core (dns-mail-core, 100.81.76.39)
 - PowerDNS API access
 - Auto-create zones for new domains
 - Auto-configure MX, SPF, DKIM, DMARC records
-
-### Mail Core (100.64.119.23)
 - Postfix/Dovecot control API
 - Mailbox creation scripts
 - DKIM key generation

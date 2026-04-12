@@ -6,6 +6,11 @@
 
 Generated from `.migra/nginx.routing.map.json` (parsed from `nginx -T` + hints).
 
+## MigraDrive Note (2026-04-01)
+- Active storage ingress should be treated as a single canonical gateway at `https://10.1.10.240`.
+- `https://migradrive.com` should remain the only human-facing MigraDrive URL.
+- `s3.migradrive.com`, `console.migradrive.com`, `mb.migrahosting.com`, `console.mb.migrahosting.com`, `migradrive.migrahosting.com`, and `console.migradrive.migrahosting.com` should not drift to different proxy targets.
+
 ## Targets → Domains
 
 ### http://10.1.10.104:80
@@ -36,8 +41,8 @@ Generated from `.migra/nginx.routing.map.json` (parsed from `nginx -T` + hints).
 - Owner: (not found in LXC iphost scan; likely VM or external) ip=100.65.164.127
 - mb.migrahosting.com
 
-### http://100.97.213.11:3020
-- Owner: (not found in LXC iphost scan; likely VM or external) ip=100.97.213.11
+### http://100.119.105.93:3020
+- Owner: (not found in LXC iphost scan; likely VM or external) ip=100.119.105.93
 - mpanel.migrahosting.com (deprecated)
 
 ### http://127.0.0.1:3003/
@@ -80,6 +85,10 @@ Generated from `.migra/nginx.routing.map.json` (parsed from `nginx -T` + hints).
 - Owner: CT 9099 (cloudpod-template-backup)
 - migrahosting.com
 - www.migrahosting.com
+
+### http://127.0.0.1:4300
+- Owner: srv1-web local service (`migra-market.service`)
+- marketing.migrahosting.com
 
 ### https://10.1.10.240
 - Owner: (not found in LXC iphost scan; likely VM or external) ip=10.1.10.240

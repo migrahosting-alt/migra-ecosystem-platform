@@ -111,18 +111,20 @@ EOF
 send_email_alert() {
     local message="$1"
     local failure_count="$2"
+  local mail_node_label="${MAIL_NODE_LABEL:-dns-mail-core}"
+  local mail_node_host="${MAIL_NODE_HOST:-root@dns-mail-core}"
     
     if [ -z "$ALERT_EMAIL" ]; then
         return 0
     fi
     
-    local subject="[ALERT] Mail Auth Failures on vps-core: $failure_count failures"
+    local subject="[ALERT] Mail Auth Failures on ${mail_node_label}: $failure_count failures"
     local body=$(cat <<EOF
 Mail Server Authentication Alert
 =================================
 
-Server: vps-core (100.81.76.39)
-Hostname: dns-mail-core.migrahosting.com
+Server: ${mail_node_label}
+Hostname: ${mail_node_label}
 Timestamp: $(date -u '+%Y-%m-%d %H:%M:%S UTC')
 
 ISSUE:
@@ -132,7 +134,7 @@ DETAILS:
 $message
 
 ACTION REQUIRED:
-1. SSH to vps-core: ssh root@100.81.76.39
+1. SSH to mail node: ssh ${mail_node_host}
 2. Run validation: /opt/migra/scripts/validate-mail-configs.sh --verbose
 3. If mismatches found, fix: /opt/migra/scripts/validate-mail-configs.sh --fix
 4. Reload services: systemctl reload postfix dovecot

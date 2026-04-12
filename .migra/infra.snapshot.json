@@ -1,18 +1,23 @@
 {
-  "scanned_at": "2026-01-08T09:33:02Z",
+  "scanned_at": "2026-04-01",
   "infrastructure": {
+    "canonical_source": "Tailscale inventory confirmed on 2026-04-01",
+    "notes": [
+      "dns-mail-core is the consolidated mail and DNS host.",
+      "Older references to vps-core, mail-core, or dns-core are legacy naming and should be read as dns-mail-core unless a historical document explicitly says otherwise."
+    ],
+    "servers": [
+      { "name": "pve", "role": "hypervisor", "ip": "100.73.199.109" },
+      { "name": "srv1-web", "role": "edge-nginx", "ip": "100.68.239.94" },
+      { "name": "migrapanel-core", "role": "panel-api", "ip": "100.119.105.93" },
+      { "name": "db-core", "role": "postgresql", "ip": "100.98.54.45" },
+      { "name": "cloud-core", "role": "cloud-storage", "ip": "100.120.118.39" },
+      { "name": "dns-mail-core", "role": "mail-and-dns", "ip": "100.81.76.39" },
+      { "name": "voip-core", "role": "voice-pbx", "ip": "100.111.4.85" }
+    ],
     "hypervisor": {
       "alias": "pve",
       "tailscale_ip": "100.73.199.109",
-      "vms": [
-        { "id": 100, "name": "SRV1-WEB", "status": "running", "ip": "100.68.239.94" },
-        { "id": 101, "name": "MAIL-CORE", "status": "running", "ip": "100.64.119.23" },
-        { "id": 102, "name": "dns-core", "status": "running", "ip": "100.73.241.82" },
-        { "id": 103, "name": "CLOUD-CORE", "status": "running", "ip": "100.120.118.39" },
-        { "id": 104, "name": "VOIP-CORE", "status": "running", "ip": "100.111.4.85" },
-        { "id": 106, "name": "db-core", "status": "running", "ip": "100.98.54.45" },
-        { "id": 220, "name": "MPANEL-CORE", "status": "running", "ip": "100.97.213.11" }
-      ],
       "lxcs": [
         { "id": 110, "name": "migra-stacks", "status": "running", "lan_ip": "10.1.10.104" },
         { "id": 136, "name": "pod-elizefoundation", "status": "running", "lan_ip": "10.1.10.51" },
@@ -26,15 +31,15 @@
       "domains": [
         { "domain": "migrapanel.com", "upstream": "http://10.1.10.206:3020" },
         { "domain": "migrahosting.com", "upstream": "http://127.0.0.1:4242" },
-        { "domain": "intake.migrahosting.com", "upstream": "http://100.97.213.11:3020" },
+        { "domain": "intake.migrahosting.com", "upstream": "http://100.119.105.93:3020" },
         { "domain": "lituationdjs.com", "target_pod_ip": "10.1.10.53" },
         { "domain": "premtint.com", "target_pod_ip": "10.1.10.54" }
       ]
     },
-    "mpanel": {
-      "host": "mpanel-core",
+    "migrapanel_panel_api": {
+      "host": "migrapanel-core",
       "pm2_processes": [
-        { "name": "mpanel-api", "status": "online", "uptime": "7h", "mem": "693.0mb" }
+        { "name": "migrapanel-panel-api", "status": "online", "uptime": "7h", "mem": "693.0mb" }
       ]
     }
   }

@@ -1,0 +1,115 @@
+<svg width="1200" height="628" viewBox="0 0 1200 628" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="78" y1="24" x2="1108" y2="604" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#070C19"/>
+      <stop offset="0.54" stop-color="#101735"/>
+      <stop offset="1" stop-color="#190E37"/>
+    </linearGradient>
+    <radialGradient id="violetGlow" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(843 162) rotate(90) scale(244 304)">
+      <stop stop-color="#B54DFF" stop-opacity="0.48"/>
+      <stop offset="1" stop-color="#B54DFF" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="pinkGlow" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(986 511) rotate(90) scale(170 230)">
+      <stop stop-color="#FF5F97" stop-opacity="0.42"/>
+      <stop offset="1" stop-color="#FF5F97" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="brand" x1="76" y1="51" x2="148" y2="123" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#7A5CFF"/>
+      <stop offset="1" stop-color="#FF5B94"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="88" y1="517" x2="339" y2="565" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#6B5BFF"/>
+      <stop offset="0.5" stop-color="#A850FF"/>
+      <stop offset="1" stop-color="#FF5D88"/>
+    </linearGradient>
+    <linearGradient id="panelStroke" x1="731" y1="125" x2="1067" y2="461" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#89A7FF" stop-opacity="0.42"/>
+      <stop offset="1" stop-color="#FF7DBA" stop-opacity="0.28"/>
+    </linearGradient>
+    <linearGradient id="bar" x1="793" y1="452" x2="793" y2="493" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#8164FF"/>
+      <stop offset="1" stop-color="#5B44D8"/>
+    </linearGradient>
+    <filter id="softGlow" x="688" y="61" width="464" height="474" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feGaussianBlur stdDeviation="34"/>
+    </filter>
+  </defs>
+
+  <rect width="1200" height="628" rx="32" fill="url(#bg)"/>
+  <rect x="48" y="48" width="1104" height="532" rx="28" fill="#FFFFFF" fill-opacity="0.03" stroke="#FFFFFF" stroke-opacity="0.08"/>
+  <circle cx="851" cy="166" r="244" fill="url(#violetGlow)"/>
+  <circle cx="998" cy="507" r="170" fill="url(#pinkGlow)"/>
+  <g filter="url(#softGlow)">
+    <circle cx="932" cy="298" r="120" fill="#7D5FFF" fill-opacity="0.22"/>
+  </g>
+
+  <g>
+    <circle cx="108" cy="87" r="32" fill="url(#brand)"/>
+    <text x="108" y="98" text-anchor="middle" fill="#FFFFFF" font-family="Sora, Arial, sans-serif" font-size="28" font-weight="800">MH</text>
+    <text x="154" y="98" fill="#F8FAFC" font-family="Sora, Arial, sans-serif" font-size="32" font-weight="700">MigraHosting</text>
+  </g>
+
+  <text x="76" y="198" fill="#FFFFFF" font-family="Sora, Arial, sans-serif" font-size="68" font-weight="800">
+    <tspan x="76" dy="0">Launch Your Website</tspan>
+    <tspan x="76" dy="78">in 48 Hours.</tspan>
+  </text>
+
+  <text x="76" y="334" fill="#C9D1E6" font-family="Space Grotesk, Arial, sans-serif" font-size="25" font-weight="500">
+    Strategy, design, domain, business email, and a clean launch stack
+  </text>
+  <text x="76" y="368" fill="#C9D1E6" font-family="Space Grotesk, Arial, sans-serif" font-size="25" font-weight="500">
+    for businesses that need to look established fast.
+  </text>
+
+  <g fill="#F8FAFC" font-family="Space Grotesk, Arial, sans-serif" font-size="21" font-weight="600">
+    <text x="112" y="432">Custom design</text>
+    <text x="112" y="473">Free domain setup</text>
+    <text x="112" y="514">Business email included</text>
+  </g>
+  <g>
+    <circle cx="85" cy="425" r="8" fill="#6DFAAF"/>
+    <circle cx="85" cy="466" r="8" fill="#6DFAAF"/>
+    <circle cx="85" cy="507" r="8" fill="#6DFAAF"/>
+  </g>
+
+  <rect x="76" y="521" width="260" height="48" rx="24" fill="url(#accent)"/>
+  <text x="126" y="551" fill="#FFFFFF" font-family="Space Grotesk, Arial, sans-serif" font-size="22" font-weight="700">Get Started Today</text>
+  <text x="369" y="553" fill="#FFFFFF" font-family="Sora, Arial, sans-serif" font-size="34" font-weight="800">$199 package</text>
+
+  <g>
+    <rect x="724" y="116" width="392" height="344" rx="28" fill="#0F1531" fill-opacity="0.86" stroke="url(#panelStroke)"/>
+    <rect x="724" y="116" width="392" height="44" rx="28" fill="#1A1F47" fill-opacity="0.72"/>
+    <circle cx="752" cy="138" r="6" fill="#FF6B6B"/>
+    <circle cx="774" cy="138" r="6" fill="#FFC145"/>
+    <circle cx="796" cy="138" r="6" fill="#44D96C"/>
+    <text x="824" y="144" fill="#9FA7C9" font-family="Space Grotesk, Arial, sans-serif" font-size="18" font-weight="600">MigraPanel dashboard</text>
+
+    <rect x="752" y="186" width="140" height="114" rx="18" fill="#111A3D" stroke="#6F86FF" stroke-opacity="0.36"/>
+    <rect x="770" y="206" width="104" height="10" rx="5" fill="#FFFFFF" fill-opacity="0.12"/>
+    <rect x="770" y="230" width="76" height="54" rx="14" fill="#6C5DFF" fill-opacity="0.18" stroke="#A38FFF" stroke-opacity="0.6"/>
+    <path d="M790 270C802 250 810 240 818 240C825 240 832 246 840 260C848 248 856 242 863 242" stroke="#AEE3FF" stroke-width="4" stroke-linecap="round"/>
+
+    <g>
+      <rect x="915" y="188" width="168" height="34" rx="17" fill="#0D2440"/>
+      <circle cx="941" cy="205" r="7" fill="#64F3A7"/>
+      <text x="956" y="212" fill="#E6ECFF" font-family="Space Grotesk, Arial, sans-serif" font-size="17" font-weight="700">Website live</text>
+    </g>
+    <g>
+      <rect x="915" y="233" width="168" height="34" rx="17" fill="#13213F"/>
+      <circle cx="941" cy="250" r="7" fill="#64F3A7"/>
+      <text x="956" y="257" fill="#E6ECFF" font-family="Space Grotesk, Arial, sans-serif" font-size="17" font-weight="700">SSL active</text>
+    </g>
+    <g>
+      <rect x="915" y="278" width="168" height="34" rx="17" fill="#182049"/>
+      <circle cx="941" cy="295" r="7" fill="#68B4FF"/>
+      <text x="956" y="302" fill="#E6ECFF" font-family="Space Grotesk, Arial, sans-serif" font-size="17" font-weight="700">Email ready</text>
+    </g>
+
+    <rect x="752" y="330" width="332" height="98" rx="20" fill="#0B1026" fill-opacity="0.9" stroke="#FFFFFF" stroke-opacity="0.08"/>
+    <rect x="776" y="390" width="52" height="18" rx="6" fill="url(#bar)"/>
+    <rect x="844" y="366" width="52" height="42" rx="6" fill="url(#bar)"/>
+    <rect x="912" y="379" width="52" height="29" rx="6" fill="url(#bar)"/>
+    <rect x="980" y="347" width="52" height="61" rx="6" fill="url(#bar)"/>
+    <rect x="1048" y="357" width="12" height="51" rx="6" fill="#FFFFFF" fill-opacity="0.14"/>
+  </g>
+</svg>

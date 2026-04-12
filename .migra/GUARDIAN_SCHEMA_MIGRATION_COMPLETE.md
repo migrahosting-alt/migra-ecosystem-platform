@@ -1,7 +1,7 @@
 # Guardian Schema Migration — COMPLETE ✅
 
 **Date:** 2026-01-13  
-**Target:** Production mpanel-core (100.97.213.11)  
+**Target:** Production mpanel-core (100.119.105.93)  
 **Status:** SUCCESS
 
 ---

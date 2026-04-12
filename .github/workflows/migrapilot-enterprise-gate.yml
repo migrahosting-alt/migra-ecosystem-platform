@@ -1,0 +1,433 @@
+name: MigraPilot Enterprise Gate
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - services/pilot-api/**
+      - .github/workflows/migrapilot-enterprise-gate.yml
+  schedule:
+    - cron: "20 3 * * *"
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: "Benchmark profile to run"
+        required: true
+        type: choice
+        default: deep
+        options:
+          - deep
+          - full
+
+permissions:
+  contents: read
+
+concurrency:
+  group: migrapilot-enterprise-gate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  chat-quality-gate:
+    name: Chat Quality Gate (Deep Strict)
+    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.profile == 'deep')
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: migra
+          POSTGRES_PASSWORD: migra
+          POSTGRES_DB: migra_core
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U migra -d migra_core"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+
+    env:
+      DATABASE_URL: postgresql://migra:migra@127.0.0.1:5432/migra_core?schema=public
+      AUTH_JWT_SECRET: dev-jwt-secret
+      APPROVAL_SIGNING_SECRET: dev-approval-secret
+      PILOT_API_PORT: 3377
+      PILOT_MOCK_PODS_CREATE_SUCCESS: "true"
+      PILOT_CHAT_STYLE: copilot
+      DEFAULT_PROVIDER: haiku
+      ESCALATION_PROVIDER: sonnet
+      BENCH_PROFILE: deep
+      BENCH_FAIL_ON_GATES: "true"
+      REG_ALLOW_BOOTSTRAP: "true"
+      SLO_DEEP_MIN_RELIABILITY: "1"
+      SLO_DEEP_MAX_P95_MS: "30000"
+      SLO_DEEP_MAX_ARTIFACT_LEAK_RATE: "0"
+      SLO_DEEP_MAX_EMPTY_REPLY_RATE: "0.25"
+      SLO_DEEP_MAX_MISSING_PATH_ANSWER_RATE: "0"
+      SLO_DEEP_MIN_OVERALL: "0.78"
+      SPEED_DEEP_P95_BUDGET_MS: "30000"
+      REG_MAX_P95_INCREASE_MS: "2500"
+      REG_MAX_OVERALL_DROP: "0.05"
+      REG_MAX_RELIABILITY_DROP: "0"
+      OBS_MIN_OVERALL: "0.8"
+      OBS_MIN_PATH_SCORE: "1"
+      OBS_MAX_P95_MS: "30000"
+      OBS_MAX_GATE_FAIL_RATE: "0.2"
+      BURN_MIN_RELIABILITY: "1"
+      BURN_MIN_OVERALL: "0.78"
+      BURN_SHORT_LIMIT: "8"
+      BURN_LONG_LIMIT: "2"
+      SUPPLY_MAX_HIGH: "0"
+      SUPPLY_MAX_CRITICAL: "0"
+      CLAUDE_API_KEY: ${{ secrets.CLAUDE_API_KEY }}
+      ANTHROPIC_API_KEY: ${{ secrets.CLAUDE_API_KEY }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: services/pilot-api/package-lock.json
+
+      - name: Validate required secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "${CLAUDE_API_KEY:-}" ]]; then
+            echo "❌ Missing required secret: CLAUDE_API_KEY"
+            echo "Add repository secret CLAUDE_API_KEY to enable enterprise benchmark gates."
+            exit 1
+          fi
+
+      - name: Install dependencies
+        working-directory: services/pilot-api
+        run: npm ci
+
+      - name: Security audit (dependencies)
+        working-directory: services/pilot-api
+        run: npm audit --audit-level=high || true
+
+      - name: Generate Prisma client
+        working-directory: services/pilot-api
+        run: npm run prisma:generate
+
+      - name: Type-check (strict)
+        working-directory: services/pilot-api
+        run: npx tsc --noEmit
+
+      - name: Build API
+        working-directory: services/pilot-api
+        run: npm run build
+
+      - name: Policy signer/verifier compatibility smoke
+        working-directory: services/pilot-api
+        shell: bash
+        run: |
+          set -euo pipefail
+          TMP_EXCEPTIONS_FILE="$(mktemp)"
+          trap 'rm -f "$TMP_EXCEPTIONS_FILE"' EXIT
+          printf '{"version":1,"exceptions":[]}\n' > "$TMP_EXCEPTIONS_FILE"
+
+          npm run ops:policy:sign-exception -- \
+            --ticket CI-POLICY-SMOKE \
+            --reason "CI signer/verifier compatibility check" \
+            --approved-by "ci" \
+            --tool repo.read \
+            --ttl-hours 1 \
+            --id ci-policy-smoke \
+            --file "$TMP_EXCEPTIONS_FILE"
+
+          POLICY_EXCEPTIONS_PATH="$TMP_EXCEPTIONS_FILE" npm run ops:policy:verify-exceptions
+
+      - name: Start API
+        working-directory: services/pilot-api
+        shell: bash
+        run: |
+          set -euo pipefail
+          nohup node dist/server.js > .pilot-api-ci.log 2>&1 &
+          echo $! > .pilot-api-ci.pid
+
+      - name: Wait for health
+        working-directory: services/pilot-api
+        shell: bash
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:${PILOT_API_PORT}/health > /dev/null; then
+              echo "✅ API healthy"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "❌ API did not become healthy in time"
+          tail -n 200 .pilot-api-ci.log || true
+          exit 1
+
+      - name: Run strict benchmark gate
+        working-directory: services/pilot-api
+        run: npm run benchmark:chat:gate
+
+      - name: Run runtime path eval
+        working-directory: services/pilot-api
+        run: npm run eval:path-answers
+
+      - name: Run degraded fallback eval
+        working-directory: services/pilot-api
+        run: npm run eval:chat-degraded-fallback
+
+      - name: Run prompt contracts eval
+        working-directory: services/pilot-api
+        run: npm run eval:prompt-contracts
+
+      - name: Run golden replay eval
+        working-directory: services/pilot-api
+        run: npm run eval:golden-replay
+
+      - name: Run failure-injection eval
+        working-directory: services/pilot-api
+        run: npm run eval:failure-injection
+
+      - name: Run observability alerts
+        working-directory: services/pilot-api
+        run: npm run ops:chat:observability
+
+      - name: Run burn-rate alerts
+        working-directory: services/pilot-api
+        run: npm run ops:chat:burn-rate
+
+      - name: Verify policy exceptions
+        working-directory: services/pilot-api
+        run: npm run ops:policy:verify-exceptions
+
+      - name: Run supply-chain guardrails
+        working-directory: services/pilot-api
+        run: npm run ops:supply-chain-guardrails
+
+      - name: Upload benchmark artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: migrapilot-chat-benchmark-artifacts
+          path: |
+            services/pilot-api/ops/benchmarks/chat-scorecard.json
+            services/pilot-api/ops/benchmarks/chat-scorecard.md
+            services/pilot-api/ops/benchmarks/chat-trend.jsonl
+            services/pilot-api/.pilot-api-ci.log
+
+      - name: Stop API
+        if: always()
+        working-directory: services/pilot-api
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -f .pilot-api-ci.pid ]]; then
+            kill "$(cat .pilot-api-ci.pid)" || true
+          fi
+
+  chat-quality-gate-full-nightly:
+    name: Chat Quality Gate (Full Nightly)
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.event.inputs.profile == 'full')
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: migra
+          POSTGRES_PASSWORD: migra
+          POSTGRES_DB: migra_core
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U migra -d migra_core"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+
+    env:
+      DATABASE_URL: postgresql://migra:migra@127.0.0.1:5432/migra_core?schema=public
+      AUTH_JWT_SECRET: dev-jwt-secret
+      APPROVAL_SIGNING_SECRET: dev-approval-secret
+      PILOT_API_PORT: 3377
+      PILOT_MOCK_PODS_CREATE_SUCCESS: "true"
+      PILOT_CHAT_STYLE: copilot
+      DEFAULT_PROVIDER: haiku
+      ESCALATION_PROVIDER: sonnet
+      BENCH_PROFILE: full
+      BENCH_FAIL_ON_GATES: "true"
+      REG_ALLOW_BOOTSTRAP: "true"
+      SLO_FULL_MIN_RELIABILITY: "1"
+      SLO_FULL_MAX_P95_MS: "45000"
+      SLO_FULL_MAX_ARTIFACT_LEAK_RATE: "0"
+      SLO_FULL_MAX_EMPTY_REPLY_RATE: "0.25"
+      SLO_FULL_MAX_MISSING_PATH_ANSWER_RATE: "0"
+      SLO_FULL_MIN_OVERALL: "0.8"
+      SPEED_FULL_P95_BUDGET_MS: "45000"
+      REG_MAX_P95_INCREASE_MS: "2500"
+      REG_MAX_OVERALL_DROP: "0.05"
+      REG_MAX_RELIABILITY_DROP: "0"
+      BURN_MIN_RELIABILITY: "1"
+      BURN_MIN_OVERALL: "0.8"
+      BURN_SHORT_LIMIT: "8"
+      BURN_LONG_LIMIT: "2"
+      SUPPLY_MAX_HIGH: "0"
+      SUPPLY_MAX_CRITICAL: "0"
+      CLAUDE_API_KEY: ${{ secrets.CLAUDE_API_KEY }}
+      ANTHROPIC_API_KEY: ${{ secrets.CLAUDE_API_KEY }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: services/pilot-api/package-lock.json
+
+      - name: Validate required secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "${CLAUDE_API_KEY:-}" ]]; then
+            echo "❌ Missing required secret: CLAUDE_API_KEY"
+            echo "Add repository secret CLAUDE_API_KEY to enable enterprise benchmark gates."
+            exit 1
+          fi
+
+      - name: Install dependencies
+        working-directory: services/pilot-api
+        run: npm ci
+
+      - name: Security audit (dependencies)
+        working-directory: services/pilot-api
+        run: npm audit --audit-level=high || true
+
+      - name: Generate Prisma client
+        working-directory: services/pilot-api
+        run: npm run prisma:generate
+
+      - name: Type-check (strict)
+        working-directory: services/pilot-api
+        run: npx tsc --noEmit
+
+      - name: Build API
+        working-directory: services/pilot-api
+        run: npm run build
+
+      - name: Policy signer/verifier compatibility smoke
+        working-directory: services/pilot-api
+        shell: bash
+        run: |
+          set -euo pipefail
+          TMP_EXCEPTIONS_FILE="$(mktemp)"
+          trap 'rm -f "$TMP_EXCEPTIONS_FILE"' EXIT
+          printf '{"version":1,"exceptions":[]}\n' > "$TMP_EXCEPTIONS_FILE"
+
+          npm run ops:policy:sign-exception -- \
+            --ticket CI-POLICY-SMOKE \
+            --reason "CI signer/verifier compatibility check" \
+            --approved-by "ci" \
+            --tool repo.read \
+            --ttl-hours 1 \
+            --id ci-policy-smoke \
+            --file "$TMP_EXCEPTIONS_FILE"
+
+          POLICY_EXCEPTIONS_PATH="$TMP_EXCEPTIONS_FILE" npm run ops:policy:verify-exceptions
+
+      - name: Start API
+        working-directory: services/pilot-api
+        shell: bash
+        run: |
+          set -euo pipefail
+          nohup node dist/server.js > .pilot-api-ci-full.log 2>&1 &
+          echo $! > .pilot-api-ci-full.pid
+
+      - name: Wait for health
+        working-directory: services/pilot-api
+        shell: bash
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:${PILOT_API_PORT}/health > /dev/null; then
+              echo "✅ API healthy"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "❌ API did not become healthy in time"
+          tail -n 200 .pilot-api-ci-full.log || true
+          exit 1
+
+      - name: Run full strict benchmark gate
+        working-directory: services/pilot-api
+        run: npm run benchmark:chat:full:strict
+
+      - name: Run full regression compare
+        working-directory: services/pilot-api
+        run: npm run benchmark:chat:compare:full
+
+      - name: Run runtime path eval
+        working-directory: services/pilot-api
+        run: npm run eval:path-answers
+
+      - name: Run degraded fallback eval
+        working-directory: services/pilot-api
+        run: npm run eval:chat-degraded-fallback
+
+      - name: Run prompt contracts eval
+        working-directory: services/pilot-api
+        run: npm run eval:prompt-contracts
+
+      - name: Run golden replay eval
+        working-directory: services/pilot-api
+        run: npm run eval:golden-replay
+
+      - name: Run failure-injection eval
+        working-directory: services/pilot-api
+        run: npm run eval:failure-injection
+
+      - name: Run shadow replay comparator
+        working-directory: services/pilot-api
+        run: npm run ops:chat:shadow-replay
+
+      - name: Run burn-rate alerts
+        working-directory: services/pilot-api
+        run: npm run ops:chat:burn-rate
+
+      - name: Verify policy exceptions
+        working-directory: services/pilot-api
+        run: npm run ops:policy:verify-exceptions
+
+      - name: Run supply-chain guardrails
+        working-directory: services/pilot-api
+        run: npm run ops:supply-chain-guardrails
+
+      - name: Upload full benchmark artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: migrapilot-chat-benchmark-artifacts-full
+          path: |
+            services/pilot-api/ops/benchmarks/chat-scorecard.json
+            services/pilot-api/ops/benchmarks/chat-scorecard.md
+            services/pilot-api/ops/benchmarks/chat-trend.jsonl
+            services/pilot-api/.pilot-api-ci-full.log
+
+      - name: Stop API
+        if: always()
+        working-directory: services/pilot-api
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -f .pilot-api-ci-full.pid ]]; then
+            kill "$(cat .pilot-api-ci-full.pid)" || true
+          fi

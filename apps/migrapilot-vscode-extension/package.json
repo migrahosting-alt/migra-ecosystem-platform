@@ -1,0 +1,288 @@
+{
+  "name": "migrapilot-vscode-extension",
+  "displayName": "MigraPilot",
+  "description": "MigraPilot AI SRE and operator cockpit for MigraTeck infrastructure, code, and control-plane workflows",
+  "version": "0.4.1",
+  "publisher": "migrateck",
+  "private": true,
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "keywords": [
+    "migrapilot",
+    "migrateck",
+    "migrapanel",
+    "migrahosting",
+    "sre",
+    "operations"
+  ],
+  "icon": "media/marketplace-icon.png",
+  "main": "./dist/extension.js",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "migrapilot",
+          "title": "MigraPilot",
+          "icon": "media/activitybar-icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "migrapilot": [
+        {
+          "id": "migrapilot.chatView",
+          "name": "Chat",
+          "type": "webview"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "migrapilot.openChat",
+        "title": "MigraPilot: Open Chat"
+      },
+      {
+        "command": "migrapilot.inspectService",
+        "title": "MigraPilot: Inspect Service"
+      },
+      {
+        "command": "migrapilot.assessServiceIncident",
+        "title": "MigraPilot: Assess Service Incident"
+      },
+      {
+        "command": "migrapilot.preflightOperation",
+        "title": "MigraPilot: Preflight Operation"
+      },
+      {
+        "command": "migrapilot.openLatestAuditRecord",
+        "title": "MigraPilot: Open Latest Audit Record"
+      },
+      {
+        "command": "migrapilot.checkHealth",
+        "title": "MigraPilot: Check Connection"
+      },
+      {
+        "command": "migrapilot.repairConnection",
+        "title": "MigraPilot: Repair Connection"
+      },
+      {
+        "command": "migrapilot.showLogs",
+        "title": "MigraPilot: Show Logs"
+      },
+      {
+        "command": "migrapilot.explainSelection",
+        "title": "MigraPilot: Explain Selection"
+      },
+      {
+        "command": "migrapilot.fixSelection",
+        "title": "MigraPilot: Fix Selection"
+      },
+      {
+        "command": "migrapilot.suggestPatchForFile",
+        "title": "MigraPilot: Suggest Patch For File"
+      },
+      {
+        "command": "migrapilot.applyPatch",
+        "title": "MigraPilot: Apply Patch"
+      },
+      {
+        "command": "migrapilot.runTests",
+        "title": "MigraPilot: Run Tests"
+      },
+      {
+        "command": "migrapilot.runBuild",
+        "title": "MigraPilot: Run Build"
+      },
+      {
+        "command": "migrapilot.toggleCompletions",
+        "title": "MigraPilot: Toggle Inline Completions"
+      },
+      {
+        "command": "migrapilot.inlineEdit",
+        "title": "MigraPilot: Inline Edit Selection"
+      },
+      {
+        "command": "migrapilot.sendTerminalToChat",
+        "title": "MigraPilot: Send Terminal Output to Chat"
+      },
+      {
+        "command": "migrapilot.searchWorkspace",
+        "title": "MigraPilot: Search Workspace (@workspace)"
+      },
+      {
+        "command": "migrapilot.reviewChanges",
+        "title": "MigraPilot: Review All Changes (Multi-file Diff)"
+      },
+      {
+        "command": "migrapilot.showUsageDashboard",
+        "title": "MigraPilot: Usage Dashboard"
+      },
+      {
+        "command": "migrapilot.showWorkspaceRegistrySummary",
+        "title": "MigraPilot: Show Workspace Registry Summary"
+      },
+      {
+        "command": "migrapilot.openArchitectureNavigator",
+        "title": "MigraPilot: Open Architecture Navigator"
+      },
+      {
+        "command": "migrapilot.openMasterArchitecture",
+        "title": "MigraPilot: Open Master Architecture"
+      },
+      {
+        "command": "migrapilot.openIncidentModel",
+        "title": "MigraPilot: Open Incident Operating Model"
+      },
+      {
+        "command": "migrapilot.openPlatformAutonomyModel",
+        "title": "MigraPilot: Open Platform Autonomy Model"
+      },
+      {
+        "command": "migrapilot.openTenantModel",
+        "title": "MigraPilot: Open Tenant Operating Model"
+      },
+      {
+        "command": "migrapilot.setAuthToken",
+        "title": "MigraPilot: Set Auth Token"
+      },
+      {
+        "command": "migrapilot.clearAuthToken",
+        "title": "MigraPilot: Clear Auth Token"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "migrapilot.inlineEdit",
+        "key": "ctrl+i",
+        "mac": "cmd+i",
+        "when": "editorHasSelection"
+      },
+      {
+        "command": "migrapilot.sendTerminalToChat",
+        "key": "ctrl+shift+t",
+        "mac": "cmd+shift+t",
+        "when": "terminalFocus"
+      }
+    ],
+    "configuration": {
+      "title": "MigraPilot",
+      "properties": {
+        "migrapilot.brainUrl": {
+          "type": "string",
+          "default": "http://127.0.0.1:3377",
+          "description": "MigraPilot Pilot API URL"
+        },
+        "migrapilot.autoStartBrain": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically start and keep the local Start Pilot API task running when the configured localhost brain is unreachable, including after reloads and periodic health checks."
+        },
+        "migrapilot.runnerTarget": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "local",
+            "server"
+          ],
+          "default": "auto",
+          "description": "Preferred runner target for execute requests"
+        },
+        "migrapilot.environment": {
+          "type": "string",
+          "enum": [
+            "dev",
+            "stage",
+            "staging",
+            "prod",
+            "test"
+          ],
+          "default": "dev",
+          "description": "Default execution environment"
+        },
+        "migrapilot.operatorId": {
+          "type": "string",
+          "default": "",
+          "description": "Optional operator id override"
+        },
+        "migrapilot.auditPath": {
+          "type": "string",
+          "default": ".migrapilot/audit",
+          "description": "Workspace-relative path used for persisted MigraPilot audit records."
+        },
+        "migrapilot.preflightMaxAgeMinutes": {
+          "type": "number",
+          "default": 30,
+          "minimum": 1,
+          "description": "Maximum age in minutes for a preflight audit record to be considered fresh for guarded operations."
+        },
+        "migrapilot.requirePreflightForRemoteWrites": {
+          "type": "boolean",
+          "default": true,
+          "description": "Require a fresh successful preflight before remote or production write operations are sent through the Brain API."
+        },
+        "migrapilot.authToken": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Bearer JWT used for pilot-api requests. Required for remote or production brain URLs."
+        },
+        "migrapilot.completions.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable MigraPilot inline ghost-text completions"
+        },
+        "migrapilot.completions.apiKey": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "API key sent as `x-ops-api-token` to Brain API for inline completions. Leave blank to rely on JWT auth or localhost open access."
+        },
+        "migrapilot.completions.debounceMs": {
+          "type": "number",
+          "default": 250,
+          "minimum": 0,
+          "maximum": 2000,
+          "description": "Debounce delay in milliseconds for automatic inline completion triggers"
+        },
+        "migrapilot.completions.maxTokens": {
+          "type": "number",
+          "default": 128,
+          "minimum": 1,
+          "maximum": 1024,
+          "description": "Maximum tokens to request for each inline completion"
+        },
+        "migrapilot.completions.maxPrefixLines": {
+          "type": "number",
+          "default": 60,
+          "minimum": 1,
+          "maximum": 500,
+          "description": "Maximum lines before the cursor to include as prefix context"
+        },
+        "migrapilot.completions.maxSuffixLines": {
+          "type": "number",
+          "default": 20,
+          "minimum": 0,
+          "maximum": 200,
+          "description": "Maximum lines after the cursor to include as suffix context"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "watch": "tsc -watch -p tsconfig.json",
+    "package": "npm run build && vsce package --no-dependencies --allow-missing-repository --skip-license",
+    "install:local": "npm run package && code --install-extension $(node -p \"require('./package.json').name\")-$(node -p \"require('./package.json').version\").vsix"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.1",
+    "@types/vscode": "^1.90.0",
+    "@vscode/vsce": "^3.7.1",
+    "typescript": "^5.9.3"
+  }
+}

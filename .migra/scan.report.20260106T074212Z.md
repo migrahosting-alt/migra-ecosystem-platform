@@ -434,7 +434,7 @@ drwxr-xr-x 8 root root 4096 Dec 29 21:43 ..
 /etc/nginx/sites-available/mpanel.migrahosting.com.conf.bak.1766656036:12:    listen 443 ssl http2;
 /etc/nginx/sites-available/mpanel.migrahosting.com.conf.bak.1766656036:13:    listen [::]:443 ssl http2;
 /etc/nginx/sites-available/mpanel.migrahosting.com.conf.bak.1766656036:14:    server_name mpanel.migrahosting.com;
-/etc/nginx/sites-available/mpanel.migrahosting.com.conf.bak.1766656036:26:        proxy_pass http://100.97.213.11;
+/etc/nginx/sites-available/mpanel.migrahosting.com.conf.bak.1766656036:26:        proxy_pass http://100.119.105.93;
 /etc/nginx/sites-available/console.migradrive.com.conf.bak.20251204_020456:2:    listen 80;
 /etc/nginx/sites-available/console.migradrive.com.conf.bak.20251204_020456:3:    server_name console.migradrive.com;
 /etc/nginx/sites-available/console.migradrive.com.conf.bak.20251204_020456:6:        proxy_pass http://100.107.92.101:9001;
@@ -459,7 +459,7 @@ drwxr-xr-x 8 root root 4096 Dec 29 21:43 ..
 /etc/nginx/sites-available/intake.migrahosting.com.conf:9:    listen 443 ssl http2;
 /etc/nginx/sites-available/intake.migrahosting.com.conf:10:    listen [::]:443 ssl http2;
 /etc/nginx/sites-available/intake.migrahosting.com.conf:11:    server_name intake.migrahosting.com;
-/etc/nginx/sites-available/intake.migrahosting.com.conf:19:        proxy_pass         http://100.97.213.11:2271;
+/etc/nginx/sites-available/intake.migrahosting.com.conf:19:        proxy_pass         http://100.119.105.93:2271;
 /etc/nginx/sites-available/call.migrahosting.com:2:    listen 80;
 /etc/nginx/sites-available/call.migrahosting.com:3:    listen [::]:80;
 /etc/nginx/sites-available/call.migrahosting.com:4:    server_name call.migrahosting.com;
@@ -763,7 +763,7 @@ tcp   LISTEN 0      4096                           10.1.10.206:7946       0.0.0.
 tcp   LISTEN 0      511                                0.0.0.0:80         0.0.0.0:*    users:(("nginx",pid=1205,fd=13),("nginx",pid=1204,fd=13),("nginx",pid=1203,fd=13),("nginx",pid=1202,fd=13),("nginx",pid=1200,fd=13))
 tcp   LISTEN 0      4096                               0.0.0.0:22         0.0.0.0:*    users:(("sshd",pid=1177,fd=3),("systemd",pid=1,fd=266))                                                                             
 tcp   LISTEN 0      80                               127.0.0.1:3306       0.0.0.0:*    users:(("mariadbd",pid=942,fd=24))                                                                                                  
-tcp   LISTEN 0      4096                         100.97.213.11:37079      0.0.0.0:*    users:(("tailscaled",pid=799,fd=27))                                                                                                
+tcp   LISTEN 0      4096                         100.119.105.93:37079      0.0.0.0:*    users:(("tailscaled",pid=799,fd=27))                                                                                                
 tcp   LISTEN 0      4096                            127.0.0.54:53         0.0.0.0:*    users:(("systemd-resolve",pid=754,fd=17))                                                                                           
 tcp   LISTEN 0      4096                         127.0.0.53%lo:53         0.0.0.0:*    users:(("systemd-resolve",pid=754,fd=15))                                                                                           
 tcp   LISTEN 0      511                                0.0.0.0:2272       0.0.0.0:*    users:(("node",pid=7764,fd=24))                                                                                                     

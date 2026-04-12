@@ -1,0 +1,95 @@
+<svg width="1080" height="1350" viewBox="0 0 1080 1350" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="86" y1="44" x2="960" y2="1278" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#080E1B"/>
+      <stop offset="0.58" stop-color="#11183A"/>
+      <stop offset="1" stop-color="#1B0F39"/>
+    </linearGradient>
+    <radialGradient id="topGlow" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(810 218) rotate(90) scale(284 286)">
+      <stop stop-color="#A94DFF" stop-opacity="0.42"/>
+      <stop offset="1" stop-color="#A94DFF" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="bottomGlow" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(520 1205) rotate(90) scale(210 320)">
+      <stop stop-color="#FF5A8E" stop-opacity="0.3"/>
+      <stop offset="1" stop-color="#FF5A8E" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="brand" x1="76" y1="74" x2="148" y2="146" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#7A5CFF"/>
+      <stop offset="1" stop-color="#FF5C93"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="120" y1="1168" x2="508" y2="1252" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#6D5DFE"/>
+      <stop offset="0.54" stop-color="#B34FFF"/>
+      <stop offset="1" stop-color="#FF5E8C"/>
+    </linearGradient>
+    <linearGradient id="monitorStroke" x1="242" y1="436" x2="840" y2="1040" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#8B9FFF" stop-opacity="0.56"/>
+      <stop offset="1" stop-color="#FF7FBD" stop-opacity="0.34"/>
+    </linearGradient>
+    <linearGradient id="cloudGlow" x1="335" y1="616" x2="745" y2="616" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#57B8FF"/>
+      <stop offset="0.54" stop-color="#8D7CFF"/>
+      <stop offset="1" stop-color="#FF7EB5"/>
+    </linearGradient>
+    <filter id="cloudBlur" x="173" y="390" width="671" height="472" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feGaussianBlur stdDeviation="32"/>
+    </filter>
+  </defs>
+
+  <rect width="1080" height="1350" rx="36" fill="url(#bg)"/>
+  <rect x="52" y="52" width="976" height="1246" rx="28" fill="#FFFFFF" fill-opacity="0.03" stroke="#FFFFFF" stroke-opacity="0.08"/>
+  <circle cx="822" cy="208" r="282" fill="url(#topGlow)"/>
+  <circle cx="548" cy="1210" r="210" fill="url(#bottomGlow)"/>
+
+  <g>
+    <circle cx="112" cy="110" r="34" fill="url(#brand)"/>
+    <text x="112" y="121" text-anchor="middle" fill="#FFFFFF" font-family="Sora, Arial, sans-serif" font-size="29" font-weight="800">MH</text>
+    <text x="160" y="121" fill="#F8FAFC" font-family="Sora, Arial, sans-serif" font-size="34" font-weight="700">MigraHosting</text>
+  </g>
+
+  <text x="92" y="232" fill="#F8FAFC" font-family="Sora, Arial, sans-serif" font-size="76" font-weight="800">
+    <tspan x="92" dy="0">Migrate to Managed</tspan>
+    <tspan x="92" dy="86">Cloud Hosting</tspan>
+  </text>
+  <text x="92" y="410" fill="#D4DBF1" font-family="Space Grotesk, Arial, sans-serif" font-size="31" font-weight="500">
+    Move off unreliable shared hosting and into a faster,
+  </text>
+  <text x="92" y="450" fill="#D4DBF1" font-family="Space Grotesk, Arial, sans-serif" font-size="31" font-weight="500">
+    better-managed environment built for growth.
+  </text>
+
+  <g>
+    <rect x="198" y="492" width="684" height="512" rx="34" fill="#0E1432" fill-opacity="0.84" stroke="url(#monitorStroke)"/>
+    <rect x="228" y="524" width="624" height="34" rx="17" fill="#FFFFFF" fill-opacity="0.06"/>
+    <g filter="url(#cloudBlur)">
+      <circle cx="538" cy="626" r="116" fill="#865BFF" fill-opacity="0.2"/>
+    </g>
+    <path d="M405 691H669C727 691 771 650 771 597C771 551 739 512 692 505C677 459 633 427 581 427C538 427 499 449 476 483C469 482 462 481 454 481C398 481 353 523 353 576C353 637 399 691 405 691Z" stroke="url(#cloudGlow)" stroke-width="10" stroke-linejoin="round"/>
+    <path d="M544 598V688" stroke="#72D8FF" stroke-width="8" stroke-linecap="round"/>
+    <path d="M475 742L475 786M545 742L545 816M615 742L615 790" stroke="#72D8FF" stroke-width="7" stroke-linecap="round"/>
+    <path d="M475 786H417M475 786H514M545 816H596M615 790H670" stroke="#72D8FF" stroke-width="7" stroke-linecap="round"/>
+
+    <rect x="258" y="846" width="248" height="108" rx="20" fill="#111938" stroke="#89A7FF" stroke-opacity="0.28"/>
+    <text x="286" y="886" fill="#8FF0BD" font-family="Space Grotesk, Arial, sans-serif" font-size="18" font-weight="700">99.9% uptime</text>
+    <text x="286" y="924" fill="#E7ECFF" font-family="Space Grotesk, Arial, sans-serif" font-size="29" font-weight="700">Stability built in</text>
+
+    <rect x="538" y="846" width="314" height="108" rx="20" fill="#131638" stroke="#FF80C2" stroke-opacity="0.26"/>
+    <text x="566" y="886" fill="#FFB669" font-family="Space Grotesk, Arial, sans-serif" font-size="18" font-weight="700">Managed migration</text>
+    <text x="566" y="924" fill="#E7ECFF" font-family="Space Grotesk, Arial, sans-serif" font-size="29" font-weight="700">Less downtime, less stress</text>
+  </g>
+
+  <g fill="#F8FAFC" font-family="Space Grotesk, Arial, sans-serif" font-size="24" font-weight="600">
+    <text x="152" y="1072">Blazing performance</text>
+    <text x="420" y="1072">Daily backups</text>
+    <text x="664" y="1072">SSL included</text>
+  </g>
+  <g>
+    <circle cx="124" cy="1063" r="8" fill="#6EFAA7"/>
+    <circle cx="392" cy="1063" r="8" fill="#6EFAA7"/>
+    <circle cx="636" cy="1063" r="8" fill="#6EFAA7"/>
+  </g>
+
+  <rect x="92" y="1156" width="430" height="78" rx="39" fill="url(#accent)"/>
+  <text x="156" y="1204" fill="#FFFFFF" font-family="Space Grotesk, Arial, sans-serif" font-size="34" font-weight="700">Get Started Today</text>
+  <text x="612" y="1206" fill="#FFFFFF" font-family="Sora, Arial, sans-serif" font-size="45" font-weight="800">Plans from $29/mo</text>
+</svg>

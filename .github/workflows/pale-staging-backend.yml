@@ -1,0 +1,27 @@
+name: pale-staging-backend
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "Software/Pale/**"
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: Software/Pale
+    steps:
+      - uses: actions/checkout@v4
+      - name: Placeholder staging deploy
+        env:
+          STAGING_DEPLOY_HOOK_URL: ${{ secrets.PALE_STAGING_DEPLOY_HOOK_URL }}
+        run: |
+          if [ -z "$STAGING_DEPLOY_HOOK_URL" ]; then
+            echo "Missing PALE_STAGING_DEPLOY_HOOK_URL secret"
+            exit 1
+          fi
+          curl -X POST "$STAGING_DEPLOY_HOOK_URL"

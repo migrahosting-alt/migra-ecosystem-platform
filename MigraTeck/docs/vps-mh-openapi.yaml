@@ -1,0 +1,482 @@
+openapi: 3.1.0
+info:
+  title: MigraHosting VPS API
+  version: 1.0.0
+
+servers:
+  - url: https://mh-api.example.com
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+
+  schemas:
+    ProviderActionResult:
+      type: object
+      required: [accepted, status]
+      properties:
+        accepted:
+          type: boolean
+        providerTaskId:
+          type: string
+          nullable: true
+        status:
+          type: string
+          enum: [PENDING, RUNNING, SUCCEEDED, FAILED]
+        message:
+          type: string
+          nullable: true
+
+    ServerSummary:
+      type: object
+      required: [providerServerId, name, status, powerState]
+      properties:
+        providerServerId: { type: string }
+        name: { type: string }
+        hostname: { type: string, nullable: true }
+        status:
+          type: string
+          enum: [PROVISIONING, RUNNING, STOPPED, REBOOTING, RESCUED, REBUILDING, SUSPENDED, TERMINATED, ERROR]
+        powerState:
+          type: string
+          enum: [ON, OFF, UNKNOWN]
+        publicIpv4: { type: string, nullable: true }
+        privateIpv4: { type: string, nullable: true }
+        region: { type: string, nullable: true }
+        osName: { type: string, nullable: true }
+        imageSlug: { type: string, nullable: true }
+        planSlug: { type: string, nullable: true }
+        vcpu: { type: integer, nullable: true }
+        memoryMb: { type: integer, nullable: true }
+        diskGb: { type: integer, nullable: true }
+        bandwidthTb: { type: integer, nullable: true }
+        billingCycle:
+          type: string
+          enum: [MONTHLY, YEARLY]
+          nullable: true
+        monthlyPriceCents: { type: integer, nullable: true }
+        renewalAt:
+          type: string
+          format: date-time
+          nullable: true
+        supportTier: { type: string, nullable: true }
+
+    ConsoleSessionRequest:
+      type: object
+      required: [actorUserId]
+      properties:
+        actorUserId:
+          type: string
+
+    ConsoleSessionResponse:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [READY, PENDING, FAILED]
+        url:
+          type: string
+          nullable: true
+        token:
+          type: string
+          nullable: true
+        expiresAt:
+          type: string
+          format: date-time
+          nullable: true
+
+    FirewallRule:
+      type: object
+      required: [direction, action, protocol, priority, isEnabled]
+      properties:
+        id: { type: string, nullable: true }
+        direction:
+          type: string
+          enum: [INBOUND, OUTBOUND]
+        action:
+          type: string
+          enum: [ALLOW, DENY]
+        protocol:
+          type: string
+          enum: [TCP, UDP, ICMP, ANY]
+        portStart: { type: integer, nullable: true }
+        portEnd: { type: integer, nullable: true }
+        sourceCidr: { type: string, nullable: true }
+        destinationCidr: { type: string, nullable: true }
+        description: { type: string, nullable: true }
+        priority: { type: integer }
+        isEnabled: { type: boolean }
+
+    FirewallState:
+      type: object
+      required: [inboundDefaultAction, outboundDefaultAction, antiLockoutEnabled, rollbackWindowSec, rules]
+      properties:
+        inboundDefaultAction:
+          type: string
+          enum: [ALLOW, DENY]
+        outboundDefaultAction:
+          type: string
+          enum: [ALLOW, DENY]
+        antiLockoutEnabled:
+          type: boolean
+        rollbackWindowSec:
+          type: integer
+        rules:
+          type: array
+          items:
+            $ref: '#/components/schemas/FirewallRule'
+
+    Snapshot:
+      type: object
+      required: [providerSnapshotId, name, status, createdAt]
+      properties:
+        providerSnapshotId: { type: string }
+        name: { type: string }
+        status:
+          type: string
+          enum: [CREATING, READY, RESTORING, FAILED, DELETING]
+        sizeGb: { type: integer, nullable: true }
+        createdAt:
+          type: string
+          format: date-time
+
+    BackupPolicy:
+      type: object
+      required: [enabled, frequency, retentionCount, encrypted]
+      properties:
+        enabled: { type: boolean }
+        frequency: { type: string }
+        retentionCount: { type: integer }
+        encrypted: { type: boolean }
+        crossRegion: { type: boolean, nullable: true }
+        backupWindow: { type: string, nullable: true }
+        lastSuccessAt:
+          type: string
+          format: date-time
+          nullable: true
+        nextRunAt:
+          type: string
+          format: date-time
+          nullable: true
+
+    MetricsPoint:
+      type: object
+      required: [ts]
+      properties:
+        ts:
+          type: string
+          format: date-time
+        cpuPercent: { type: number, nullable: true }
+        memoryPercent: { type: number, nullable: true }
+        diskPercent: { type: number, nullable: true }
+        networkInMbps: { type: number, nullable: true }
+        networkOutMbps: { type: number, nullable: true }
+
+    MetricsResponse:
+      type: object
+      required: [range, points]
+      properties:
+        range:
+          type: string
+          enum: [1h, 24h, 7d, 30d]
+        points:
+          type: array
+          items:
+            $ref: '#/components/schemas/MetricsPoint'
+        uptimeSeconds:
+          type: integer
+          nullable: true
+
+security:
+  - bearerAuth: []
+
+paths:
+  /v1/tasks/{taskId}:
+    get:
+      summary: Get provider task status
+      parameters:
+        - in: path
+          name: taskId
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProviderActionResult'
+
+  /v1/servers:
+    get:
+      summary: List VPS servers
+      responses:
+        '200':
+          description: OK
+
+  /v1/servers/{id}:
+    get:
+      summary: Get VPS server
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: OK
+
+  /v1/servers/{id}/power/on:
+    post:
+      summary: Power on server
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Accepted
+
+  /v1/servers/{id}/power/off:
+    post:
+      summary: Power off server
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Accepted
+
+  /v1/servers/{id}/power/reboot:
+    post:
+      summary: Reboot server
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                hard:
+                  type: boolean
+      responses:
+        '200':
+          description: Accepted
+
+  /v1/servers/{id}/rescue/enable:
+    post:
+      summary: Enable rescue mode
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Accepted
+
+  /v1/servers/{id}/rescue/disable:
+    post:
+      summary: Disable rescue mode
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Accepted
+
+  /v1/servers/{id}/rebuild:
+    post:
+      summary: Rebuild server
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [imageSlug]
+              properties:
+                imageSlug:
+                  type: string
+                hostname:
+                  type: string
+                sshKeys:
+                  type: array
+                  items: { type: string }
+      responses:
+        '200':
+          description: Accepted
+
+  /v1/servers/{id}/console/session:
+    post:
+      summary: Create console session
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConsoleSessionRequest'
+      responses:
+        '200':
+          description: OK
+
+  /v1/servers/{id}/firewall:
+    get:
+      summary: Get firewall state
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: OK
+    put:
+      summary: Update firewall state
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FirewallState'
+      responses:
+        '200':
+          description: Accepted
+
+  /v1/servers/{id}/snapshots:
+    get:
+      summary: List snapshots
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: OK
+    post:
+      summary: Create snapshot
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+      responses:
+        '200':
+          description: Accepted
+
+  /v1/servers/{id}/snapshots/{snapshotId}/restore:
+    post:
+      summary: Restore snapshot
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+        - in: path
+          name: snapshotId
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Accepted
+
+  /v1/servers/{id}/snapshots/{snapshotId}:
+    delete:
+      summary: Delete snapshot
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+        - in: path
+          name: snapshotId
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Accepted
+
+  /v1/servers/{id}/backups:
+    get:
+      summary: Get backup policy
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: OK
+    put:
+      summary: Update backup policy
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BackupPolicy'
+      responses:
+        '200':
+          description: Accepted
+
+  /v1/servers/{id}/metrics:
+    get:
+      summary: Get server metrics
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+        - in: query
+          name: range
+          required: true
+          schema:
+            type: string
+            enum: [1h, 24h, 7d, 30d]
+      responses:
+        '200':
+          description: OK

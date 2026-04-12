@@ -35,7 +35,7 @@ success() {
 }
 
 # Configuration
-VPS_CORE="root@100.81.76.39"
+VPS_CORE="${VPS_CORE:-root@dns-mail-core}"
 REMOTE_SCRIPT_DIR="/opt/migra/scripts"
 REMOTE_SYSTEMD_DIR="/etc/systemd/system"
 LOCAL_BASE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -44,7 +44,8 @@ echo "=========================================="
 echo "Mail Server Guardrails Deployment"
 echo "=========================================="
 echo ""
-log "Target: vps-core (100.81.76.39)"
+log "Target: dns-mail-core"
+log "Target host: $VPS_CORE"
 log "Source: $LOCAL_BASE"
 echo ""
 

@@ -81,7 +81,7 @@ curl -sS -I https://migrapanel.com/api/portal/auth/providers
 # Response: HTTP/2 308, Location: https://mpanel.migrahosting.com/api/portal/auth/providers
 
 # mPanel API server-local
-ssh root@100.97.213.11 'curl -sS http://127.0.0.1:3020/api/portal/auth/providers'
+ssh root@100.119.105.93 'curl -sS http://127.0.0.1:3020/api/portal/auth/providers'
 # Response: {"providers":[]}
 
 # Marketing backend server-local
@@ -117,7 +117,7 @@ sudo nginx -t && sudo systemctl reload nginx
 ### mPanel env (mpanel-core)
 
 ```bash
-ssh root@100.97.213.11 'sudo cp -a /opt/mpanel/.env.2026-01-06_193833.bak /opt/mpanel/.env; cd /opt/mpanel && /usr/local/bin/pm2 restart mpanel-api --update-env'
+ssh root@100.119.105.93 'sudo cp -a /opt/mpanel/.env.2026-01-06_193833.bak /opt/mpanel/.env; cd /opt/mpanel && /usr/local/bin/pm2 restart mpanel-api --update-env'
 ```
 
 ### Marketing backend env (srv1-web)
@@ -150,7 +150,7 @@ Example redirect URIs:
 
 ### 2) Set provider credentials on mpanel-core
 
-Edit `/opt/mpanel/.env` on `mpanel-core` (100.97.213.11) and fill:
+Edit `/opt/mpanel/.env` on `mpanel-core` (100.119.105.93) and fill:
 
 ```bash
 GOOGLE_OAUTH_CLIENT_ID=<your_google_client_id>
@@ -172,7 +172,7 @@ APPLE_OAUTH_PRIVATE_KEY=<your_apple_private_key_multiline>
 ### 3) Restart mPanel API
 
 ```bash
-ssh root@100.97.213.11 'cd /opt/mpanel && /usr/local/bin/pm2 restart mpanel-api --update-env && /usr/local/bin/pm2 status'
+ssh root@100.119.105.93 'cd /opt/mpanel && /usr/local/bin/pm2 restart mpanel-api --update-env && /usr/local/bin/pm2 status'
 ```
 
 ### 4) Validate providers endpoint

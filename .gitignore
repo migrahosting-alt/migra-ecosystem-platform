@@ -5,6 +5,7 @@
 #   - .github/**
 #   - .migra/**
 #   - infra/nginx/**
+#   - migra-infra/wordpress/migrastacks-plugins/**
 # ===========================
 
 # Ignore everything by default
@@ -25,6 +26,40 @@
 !infra/
 !infra/nginx/
 !infra/nginx/**
+
+# Allow MigraStacks enterprise WordPress plugins
+!migra-infra/
+!migra-infra/wordpress/
+!migra-infra/wordpress/migrastacks-plugins/
+!migra-infra/wordpress/migrastacks-plugins/**
+
+# --- MigraPilot apps (allowlist) ---
+!/apps/
+!/apps/migrapilot-console/
+!/apps/migrapilot-console/**
+!/apps/migrapilot-runner-local/
+!/apps/migrapilot-runner-local/**
+!/apps/migrapilot-runner-server/
+!/apps/migrapilot-runner-server/**
+!/apps/migrapilot-desktop/
+!/apps/migrapilot-desktop/**
+!/apps/migrapilot-vscode-extension/
+!/apps/migrapilot-vscode-extension/**
+!/apps/**/package.json
+!/apps/**/package-lock.json
+!/apps/**/pnpm-lock.yaml
+!/apps/**/yarn.lock
+!/apps/**/tsconfig.json
+!/apps/**/README.md
+
+# --- MigraTeck web (allowlist) ---
+!/MigraTeck/
+!/MigraTeck/**
+
+# Runtime state (never commit)
+/apps/migrapilot-console/.data/
+/apps/migrapilot-runner-local/.migrapilot/
+/apps/migrapilot-runner-server/.migrapilot/
 
 # ---- Never commit secrets/keys ----
 *.key

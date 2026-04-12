@@ -22,7 +22,7 @@ SLACK_WEBHOOK="${SLACK_WEBHOOK_URL:-}"  # Set in environment or /etc/environment
 
 # Services to monitor
 SERVICES=(
-    "mpanel-api:http://localhost:3020/api/health"
+    "migrapanel-panel-api:http://localhost:3020/api/health"
     "nginx:http://localhost/health"
     "postgresql:localhost:5432"
     "redis:localhost:6379"
@@ -32,7 +32,7 @@ SERVICES=(
 HOSTS=(
     "pve:100.73.199.109"
     "srv1-web:100.68.239.94"
-    "mpanel-core:100.97.213.11"
+    "migrapanel-core:100.119.105.93"
     "db-core:100.98.54.45"
 )
 

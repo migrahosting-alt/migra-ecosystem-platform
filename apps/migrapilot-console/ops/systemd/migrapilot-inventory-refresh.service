@@ -1,0 +1,12 @@
+[Unit]
+Description=MigraPilot Inventory Refresh
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/migrapilot/apps/migrapilot-console
+Environment=MIGRAPILOT_INVENTORY_PATH=/etc/migrapilot/inventory.json
+Environment=MIGRAPANEL_PANEL_ENV_PATH=/opt/MigraPanel/apps/panel-api/.env
+ExecStart=/usr/bin/npm run ops:refresh-inventory
+

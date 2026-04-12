@@ -1,0 +1,33 @@
+{
+  "name": "migrateck-enterprise-platform",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "pnpm@10.33.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "turbo dev --filter=@migrateck/web",
+    "build": "turbo build",
+    "lint": "turbo lint",
+    "test:e2e": "playwright test",
+    "test:e2e:migradrive": "playwright test test/e2e/migradrive.spec.ts",
+    "vps:import": "node scripts/import-live-vps.mjs",
+    "typecheck": "turbo typecheck",
+    "format": "prettier --check .",
+    "format:write": "prettier --write ."
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.59.1",
+    "@types/node": "^22.18.0",
+    "eslint": "^9.38.0",
+    "prettier": "^3.6.2",
+    "turbo": "^2.9.5",
+    "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "@simplewebauthn/server": "^11.0.0",
+    "@simplewebauthn/types": "^12.0.0"
+  }
+}

@@ -33,8 +33,8 @@ This maps internal target IPs observed in NGINX proxy_pass to Proxmox CTs when p
 - Seen in proxy_pass: http://100.65.164.127:9000
 - CT: (not found in LXC scan; likely VM or external)
 
-## 100.97.213.11
-- Seen in proxy_pass: http://100.97.213.11:3020
+## 100.119.105.93
+- Seen in proxy_pass: http://100.119.105.93:3020
 - CT: (not found in LXC scan; likely VM or external)
 
 ## 127.0.0.1

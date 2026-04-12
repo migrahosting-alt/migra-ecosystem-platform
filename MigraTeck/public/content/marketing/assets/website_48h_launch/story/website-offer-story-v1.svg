@@ -1,0 +1,48 @@
+<svg width="1080" height="1920" viewBox="0 0 1080 1920" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="104" y1="86" x2="964" y2="1828" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#07111F"/>
+      <stop offset="0.55" stop-color="#111B32"/>
+      <stop offset="1" stop-color="#1D103A"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="170" y1="218" x2="864" y2="1638" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#6D5EFC"/>
+      <stop offset="0.5" stop-color="#B04CFF"/>
+      <stop offset="1" stop-color="#FF5E8A"/>
+    </linearGradient>
+  </defs>
+  <rect width="1080" height="1920" rx="36" fill="url(#bg)"/>
+  <rect x="56" y="72" width="968" height="1776" rx="28" fill="rgba(255,255,255,0.03)" stroke="rgba(255,255,255,0.08)"/>
+  <text x="90" y="150" fill="#D6D9FF" font-family="Space Grotesk, Arial, sans-serif" font-size="16" font-weight="700" letter-spacing="0.18em">MIGRAHOSTING</text>
+  <text x="90" y="306" fill="white" font-family="Sora, Arial, sans-serif" font-size="86" font-weight="800">
+    <tspan x="90" dy="0">WEBSITE</tspan>
+    <tspan x="90" dy="98">LIVE IN</tspan>
+    <tspan x="90" dy="98">48 HOURS</tspan>
+  </text>
+  <text x="90" y="658" fill="#CBD5E1" font-family="Space Grotesk, Arial, sans-serif" font-size="32" font-weight="500">
+    Fast premium launch for businesses
+  </text>
+  <text x="90" y="702" fill="#CBD5E1" font-family="Space Grotesk, Arial, sans-serif" font-size="32" font-weight="500">
+    that need a real online presence now.
+  </text>
+  <rect x="90" y="804" width="900" height="500" rx="32" fill="rgba(8,15,29,0.72)" stroke="rgba(255,255,255,0.12)"/>
+  <rect x="126" y="846" width="838" height="34" rx="17" fill="rgba(255,255,255,0.08)"/>
+  <rect x="126" y="924" width="390" height="306" rx="24" fill="rgba(109,94,252,0.14)" stroke="rgba(160,120,255,0.42)"/>
+  <g fill="#F8FAFC" font-family="Space Grotesk, Arial, sans-serif" font-size="28" font-weight="600">
+    <text x="570" y="980">Custom design</text>
+    <text x="570" y="1052">Domain setup</text>
+    <text x="570" y="1124">Business email</text>
+    <text x="570" y="1196">SEO-ready build</text>
+  </g>
+  <g fill="url(#accent)">
+    <circle cx="540" cy="970" r="10"/>
+    <circle cx="540" cy="1042" r="10"/>
+    <circle cx="540" cy="1114" r="10"/>
+    <circle cx="540" cy="1186" r="10"/>
+  </g>
+  <text x="90" y="1468" fill="#F8FAFC" font-family="Sora, Arial, sans-serif" font-size="56" font-weight="800">Starting at $199</text>
+  <rect x="90" y="1530" width="332" height="66" rx="33" fill="url(#accent)"/>
+  <text x="168" y="1573" fill="white" font-family="Space Grotesk, Arial, sans-serif" font-size="30" font-weight="700">Launch today</text>
+  <rect x="90" y="1650" width="900" height="90" rx="24" fill="rgba(255,255,255,0.05)" stroke="rgba(255,255,255,0.08)"/>
+  <text x="126" y="1706" fill="#E2E8F0" font-family="Space Grotesk, Arial, sans-serif" font-size="28" font-weight="500">Visit migrahosting.com/services for the full launch offer.</text>
+</svg>

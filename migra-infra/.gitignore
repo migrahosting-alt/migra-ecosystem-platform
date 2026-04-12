@@ -1,0 +1,14 @@
+# Ignore secrets and machine-specific state
+*.log
+*.tmp
+*.swp
+*.swo
+*.local.sh
+.env
+.env.*
+secrets/
+__pycache__/
+*.tgz
+*.tar.gz
+.idea/
+.vscode/

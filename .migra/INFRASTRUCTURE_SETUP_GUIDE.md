@@ -74,7 +74,7 @@
 
 ```bash
 # SSH into mpanel-core
-ssh root@100.97.213.11
+ssh root@100.119.105.93
 
 # Create directory
 mkdir -p /opt/migra-guardian
@@ -82,7 +82,7 @@ mkdir -p /var/log/migra-guardian
 
 # Copy scripts from development
 scp /home/bonex/MigraWeb/MigraTeck-Ecosystem/dev/.migra/scripts/*.sh \
-    root@100.97.213.11:/opt/migra-guardian/
+    root@100.119.105.93:/opt/migra-guardian/
 
 # Make executable
 chmod +x /opt/migra-guardian/*.sh
@@ -258,7 +258,7 @@ echo "[$(date -u +'%Y-%m-%d %H:%M:%S UTC')] Deployed frontend build $(git rev-pa
 # Hard refresh: Ctrl+Shift+R
 
 # 6. Monitor for errors
-ssh root@100.97.213.11 "pm2 logs mpanel-api --lines 50"
+ssh root@100.119.105.93 "pm2 logs mpanel-api --lines 50"
 ```
 
 ### Rollback Procedure
@@ -296,20 +296,20 @@ ssh root@100.68.239.94 "tail -50 /var/log/nginx/error.log"
 
 ```bash
 # Check API status
-ssh root@100.97.213.11 "pm2 status"
+ssh root@100.119.105.93 "pm2 status"
 
 # Check API logs
-ssh root@100.97.213.11 "pm2 logs mpanel-api --lines 100"
+ssh root@100.119.105.93 "pm2 logs mpanel-api --lines 100"
 
 # Restart API
-ssh root@100.97.213.11 "pm2 restart mpanel-api"
+ssh root@100.119.105.93 "pm2 restart mpanel-api"
 ```
 
 ### Database Connection Issues
 
 ```bash
 # Test database connection
-ssh root@100.97.213.11 "
+ssh root@100.119.105.93 "
   cd /opt/mpanel &&
   node -e \"
     import pool from './dist/db/index.js';
@@ -347,9 +347,12 @@ If automated monitoring fails, contact:
 
 **Critical Services Priority:**
 1. Database (db-core: 100.98.54.45)
-2. Backend API (mpanel-core: 100.97.213.11)
+2. Backend API (migrapanel-core: 100.119.105.93)
 3. NGINX (srv1-web: 100.68.239.94)
-4. Proxmox (pve: 100.73.199.109)
+4. Mail + DNS (dns-mail-core: 100.81.76.39)
+5. Cloud services (cloud-core: 100.120.118.39)
+6. Voice (voip-core: 100.111.4.85)
+7. Proxmox (pve: 100.73.199.109)
 
 ---
 

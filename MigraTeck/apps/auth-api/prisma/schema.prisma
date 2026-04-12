@@ -1,0 +1,328 @@
+// MigraAuth — Centralized Identity Platform
+// Database: PostgreSQL dedicated to auth (auth_migrateck)
+// Aligned to 001_init_migraauth.sql — this is the Prisma mirror.
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../node_modules/.prisma/auth-client"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("AUTH_DATABASE_URL")
+}
+
+// ─── Enums ──────────────────────────────────────────────────────────
+
+enum UserStatus {
+  PENDING  @map("pending")
+  ACTIVE   @map("active")
+  LOCKED   @map("locked")
+  DISABLED @map("disabled")
+
+  @@map("user_status")
+}
+
+enum CredentialType {
+  PASSWORD      @map("password")
+  TOTP          @map("totp")
+  PASSKEY       @map("passkey")
+  RECOVERY_CODE @map("recovery_code")
+
+  @@map("credential_type")
+}
+
+enum TokenStatus {
+  ACTIVE  @map("active")
+  USED    @map("used")
+  REVOKED @map("revoked")
+  EXPIRED @map("expired")
+
+  @@map("token_status")
+}
+
+enum MemberRole {
+  OWNER         @map("owner")
+  ADMIN         @map("admin")
+  BILLING_ADMIN @map("billing_admin")
+  MEMBER        @map("member")
+
+  @@map("member_role")
+}
+
+enum MemberStatus {
+  INVITED   @map("invited")
+  ACTIVE    @map("active")
+  SUSPENDED @map("suspended")
+
+  @@map("member_status")
+}
+
+enum SessionType {
+  AUTH @map("auth")
+  APP  @map("app")
+
+  @@map("session_type")
+}
+
+enum AuditActorType {
+  USER    @map("user")
+  SYSTEM  @map("system")
+  ADMIN   @map("admin")
+  SERVICE @map("service")
+
+  @@map("audit_actor_type")
+}
+
+// ─── Users ──────────────────────────────────────────────────────────
+
+model User {
+  id              String     @id @default(uuid()) @db.Uuid
+  email           String     @unique @db.Citext
+  status          UserStatus @default(PENDING)
+  emailVerifiedAt DateTime?  @map("email_verified_at") @db.Timestamptz
+  displayName     String?    @map("display_name") @db.VarChar(120)
+  givenName       String?    @map("given_name") @db.VarChar(120)
+  familyName      String?    @map("family_name") @db.VarChar(120)
+  avatarUrl       String?    @map("avatar_url")
+  locale          String     @default("en") @db.VarChar(10)
+  timezone        String     @default("UTC") @db.VarChar(60)
+  lastLoginAt     DateTime?  @map("last_login_at") @db.Timestamptz
+  lockedAt        DateTime?  @map("locked_at") @db.Timestamptz
+  disabledAt      DateTime?  @map("disabled_at") @db.Timestamptz
+  createdAt       DateTime   @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt       DateTime   @updatedAt @map("updated_at") @db.Timestamptz
+  deletedAt       DateTime?  @map("deleted_at") @db.Timestamptz
+
+  credentials        UserCredential[]
+  emailVerifications EmailVerification[]
+  passwordResets     PasswordReset[]
+  authCodes          OAuthAuthorizationCode[]
+  refreshTokens      OAuthRefreshToken[]
+  sessions           Session[]
+  mfaChallenges      MfaChallenge[]
+  orgMemberships     OrganizationMember[]
+  organizationsOwned Organization[]
+  auditLogs          AuditLog[] @relation("AuditActor")
+  auditTargets       AuditLog[] @relation("AuditTarget")
+
+  @@map("users")
+}
+
+// ─── Credentials ────────────────────────────────────────────────────
+
+model UserCredential {
+  id         String         @id @default(uuid()) @db.Uuid
+  userId     String         @map("user_id") @db.Uuid
+  type       CredentialType
+  secretHash String?        @map("secret_hash")
+  metadata   Json           @default("{}")
+  priority   Int            @default(0) @db.SmallInt
+  isEnabled  Boolean        @default(true) @map("is_enabled")
+  createdAt  DateTime       @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt  DateTime       @updatedAt @map("updated_at") @db.Timestamptz
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_credentials")
+}
+
+// ─── Email Verification ─────────────────────────────────────────────
+
+model EmailVerification {
+  id        String      @id @default(uuid()) @db.Uuid
+  userId    String      @map("user_id") @db.Uuid
+  tokenHash String      @map("token_hash")
+  status    TokenStatus @default(ACTIVE)
+  expiresAt DateTime    @map("expires_at") @db.Timestamptz
+  usedAt    DateTime?   @map("used_at") @db.Timestamptz
+  createdAt DateTime    @default(now()) @map("created_at") @db.Timestamptz
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("email_verifications")
+}
+
+// ─── Password Reset ─────────────────────────────────────────────────
+
+model PasswordReset {
+  id                 String      @id @default(uuid()) @db.Uuid
+  userId             String      @map("user_id") @db.Uuid
+  tokenHash          String      @map("token_hash")
+  status             TokenStatus @default(ACTIVE)
+  expiresAt          DateTime    @map("expires_at") @db.Timestamptz
+  usedAt             DateTime?   @map("used_at") @db.Timestamptz
+  requestedIp        String?     @map("requested_ip") @db.Inet
+  requestedUserAgent String?     @map("requested_user_agent")
+  createdAt          DateTime    @default(now()) @map("created_at") @db.Timestamptz
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("password_resets")
+}
+
+// ─── OAuth Clients ──────────────────────────────────────────────────
+
+model OAuthClient {
+  id                     String   @id @default(uuid()) @db.Uuid
+  clientId               String   @unique @map("client_id") @db.VarChar(100)
+  clientName             String   @map("client_name") @db.VarChar(120)
+  clientSecretHash       String?  @map("client_secret_hash")
+  clientType             String   @map("client_type") @db.VarChar(20)
+  redirectUris           Json     @map("redirect_uris")
+  postLogoutRedirectUris Json     @default("[]") @map("post_logout_redirect_uris")
+  allowedScopes          Json     @default("[\"openid\"]") @map("allowed_scopes")
+  requiresPkce           Boolean  @default(true) @map("requires_pkce")
+  tokenAuthMethod        String   @default("none") @map("token_auth_method") @db.VarChar(40)
+  isFirstParty           Boolean  @default(true) @map("is_first_party")
+  isActive               Boolean  @default(true) @map("is_active")
+  createdAt              DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt              DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  @@map("oauth_clients")
+}
+
+// ─── Authorization Codes ────────────────────────────────────────────
+
+model OAuthAuthorizationCode {
+  id                  String    @id @default(uuid()) @db.Uuid
+  userId              String    @map("user_id") @db.Uuid
+  clientId            String    @map("client_id") @db.VarChar(100)
+  codeHash            String    @map("code_hash")
+  codeChallenge       String    @map("code_challenge")
+  codeChallengeMethod String    @map("code_challenge_method") @db.VarChar(10)
+  redirectUri         String    @map("redirect_uri")
+  scope               String    @default("openid")
+  nonce               String?
+  stateHash           String?   @map("state_hash")
+  nonceHash           String?   @map("nonce_hash")
+  issuedIp            String?   @map("issued_ip") @db.Inet
+  issuedUserAgent     String?   @map("issued_user_agent")
+  expiresAt           DateTime  @map("expires_at") @db.Timestamptz
+  usedAt              DateTime? @map("used_at") @db.Timestamptz
+  createdAt           DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("oauth_authorization_codes")
+}
+
+// ─── Refresh Tokens ─────────────────────────────────────────────────
+
+model OAuthRefreshToken {
+  id              String    @id @default(uuid()) @db.Uuid
+  userId          String    @map("user_id") @db.Uuid
+  clientId        String    @map("client_id") @db.VarChar(100)
+  tokenHash       String    @map("token_hash")
+  familyId        String    @map("family_id") @db.Uuid
+  parentTokenId   String?   @map("parent_token_id") @db.Uuid
+  scope           String    @default("openid")
+  issuedAt        DateTime  @map("issued_at") @db.Timestamptz
+  expiresAt       DateTime  @map("expires_at") @db.Timestamptz
+  rotatedAt       DateTime? @map("rotated_at") @db.Timestamptz
+  revokedAt       DateTime? @map("revoked_at") @db.Timestamptz
+  reuseDetectedAt DateTime? @map("reuse_detected_at") @db.Timestamptz
+  ipAddress       String?   @map("ip_address") @db.Inet
+  userAgent       String?   @map("user_agent")
+  deviceId        String?   @map("device_id") @db.Uuid
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([familyId])
+  @@index([tokenHash])
+  @@map("oauth_refresh_tokens")
+}
+
+// ─── Sessions ───────────────────────────────────────────────────────
+
+model Session {
+  id                String      @id @default(uuid()) @db.Uuid
+  userId            String      @map("user_id") @db.Uuid
+  sessionType       SessionType @default(AUTH) @map("session_type")
+  clientId          String?     @map("client_id") @db.VarChar(100)
+  sessionSecretHash String      @map("session_secret_hash")
+  deviceId          String?     @map("device_id") @db.Uuid
+  deviceName        String?     @map("device_name") @db.VarChar(120)
+  createdAt         DateTime    @default(now()) @map("created_at") @db.Timestamptz
+  expiresAt         DateTime    @map("expires_at") @db.Timestamptz
+  revokedAt         DateTime?   @map("revoked_at") @db.Timestamptz
+  lastSeenAt        DateTime?   @map("last_seen_at") @db.Timestamptz
+  ipAddress         String?     @map("ip_address") @db.Inet
+  userAgent         String?     @map("user_agent")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([sessionSecretHash])
+  @@map("sessions")
+}
+
+// ─── Organizations ──────────────────────────────────────────────────
+
+model Organization {
+  id          String   @id @default(uuid()) @db.Uuid
+  name        String   @db.VarChar(160)
+  slug        String   @unique @db.VarChar(120)
+  ownerUserId String   @map("owner_user_id") @db.Uuid
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  owner   User                 @relation(fields: [ownerUserId], references: [id])
+  members OrganizationMember[]
+
+  @@map("organizations")
+}
+
+model OrganizationMember {
+  id             String       @id @default(uuid()) @db.Uuid
+  organizationId String       @map("organization_id") @db.Uuid
+  userId         String       @map("user_id") @db.Uuid
+  role           MemberRole   @default(MEMBER)
+  status         MemberStatus @default(INVITED)
+  joinedAt       DateTime?    @map("joined_at") @db.Timestamptz
+  createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, userId])
+  @@map("organization_members")
+}
+
+// ─── MFA Challenges ─────────────────────────────────────────────────
+
+model MfaChallenge {
+  id            String    @id @default(uuid()) @db.Uuid
+  userId        String    @map("user_id") @db.Uuid
+  method        String    @db.VarChar(20)
+  challengeHash String    @map("challenge_hash")
+  expiresAt     DateTime  @map("expires_at") @db.Timestamptz
+  verifiedAt    DateTime? @map("verified_at") @db.Timestamptz
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("mfa_challenges")
+}
+
+// ─── Audit Logs ─────────────────────────────────────────────────────
+
+model AuditLog {
+  id           String         @id @default(uuid()) @db.Uuid
+  actorUserId  String?        @map("actor_user_id") @db.Uuid
+  actorType    AuditActorType @default(USER) @map("actor_type")
+  targetUserId String?        @map("target_user_id") @db.Uuid
+  clientId     String?        @map("client_id") @db.VarChar(100)
+  eventType    String         @map("event_type") @db.VarChar(80)
+  eventData    Json           @default("{}") @map("event_data")
+  ipAddress    String?        @map("ip_address") @db.Inet
+  userAgent    String?        @map("user_agent")
+  createdAt    DateTime       @default(now()) @map("created_at") @db.Timestamptz
+
+  actor  User? @relation("AuditActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+  target User? @relation("AuditTarget", fields: [targetUserId], references: [id], onDelete: SetNull)
+
+  @@index([actorUserId])
+  @@index([eventType])
+  @@index([createdAt])
+  @@map("audit_logs")
+}

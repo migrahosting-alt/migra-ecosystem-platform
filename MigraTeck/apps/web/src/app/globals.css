@@ -1,0 +1,153 @@
+@import "tailwindcss";
+@source "../../../packages/ui/src";
+
+:root {
+  /* ── brand palette (from MT logo) ──────────────────────────── */
+  --brand-deep:    #0a0e27;
+  --brand-navy:    #0f1733;
+  --brand-blue:    #1e40af;
+  --brand-royal:   #2563eb;
+  --brand-sky:     #0ea5e9;
+  --brand-cyan:    #22d3ee;
+  --brand-pink:    #ec4899;
+  --brand-yellow:  #fbbf24;
+  --brand-green:   #10b981;
+
+  --foreground:    #0f172a;
+  --muted:         #64748b;
+  --surface:       #ffffff;
+  --line:          #e2e8f0;
+}
+
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: var(--surface);
+  color: var(--foreground);
+  font-family: var(--font-body), system-ui, -apple-system, sans-serif;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+main { position: relative; isolation: isolate; }
+
+@layer base {
+  a { color: inherit; text-decoration: none; }
+  a:focus-visible, button:focus-visible {
+    outline: 2px solid rgba(37,99,235,0.5);
+    outline-offset: 2px;
+    border-radius: 8px;
+  }
+}
+
+img { max-width: 100%; height: auto; }
+p, li { text-wrap: pretty; }
+::selection { background: rgba(37,99,235,0.18); }
+
+/* ── Gradient backgrounds ───────────────────────────────────── */
+.hero-gradient {
+  background: linear-gradient(
+    165deg,
+    #080b20 0%,
+    #0f1733 20%,
+    #1a2755 40%,
+    #1e3a8a 60%,
+    #1e40af 75%,
+    #2563eb 90%,
+    #0ea5e9 100%
+  );
+}
+
+.hero-mesh::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(ellipse 60% 50% at 70% 20%, rgba(37,99,235,0.4), transparent),
+    radial-gradient(ellipse 40% 40% at 30% 70%, rgba(14,165,233,0.25), transparent),
+    radial-gradient(ellipse 30% 30% at 80% 80%, rgba(236,72,153,0.15), transparent),
+    radial-gradient(ellipse 35% 25% at 10% 30%, rgba(34,211,238,0.12), transparent);
+  pointer-events: none;
+}
+
+.section-dark {
+  background: linear-gradient(180deg, #080b20 0%, #0f1733 50%, #0a0e27 100%);
+}
+
+.section-dark-blue {
+  background: linear-gradient(165deg, #0f1733 0%, #1a2755 50%, #1e3a8a 100%);
+}
+
+/* ── Gradient text ──────────────────────────────────────────── */
+.gradient-text {
+  background: linear-gradient(135deg, #2563eb 0%, #0ea5e9 50%, #22d3ee 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.gradient-text-warm {
+  background: linear-gradient(135deg, #ec4899 0%, #fbbf24 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.gradient-text-hero {
+  background: linear-gradient(135deg, #ffffff 0%, #bae6fd 40%, #7dd3fc 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* ── Glow effects ───────────────────────────────────────────── */
+.glow-blue {
+  box-shadow: 0 0 50px -12px rgba(37,99,235,0.4), 0 0 100px -20px rgba(14,165,233,0.2);
+}
+
+.glow-line {
+  background: linear-gradient(90deg, transparent, rgba(37,99,235,0.6), rgba(14,165,233,0.6), transparent);
+}
+
+/* ── Animations ─────────────────────────────────────────────── */
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(28px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes float {
+  0%, 100% { transform: translateY(0); }
+  50%      { transform: translateY(-10px); }
+}
+@keyframes glow-pulse {
+  0%, 100% { opacity: 0.3; }
+  50%      { opacity: 0.6; }
+}
+@keyframes slide-right {
+  from { transform: translateX(-100%); }
+  to   { transform: translateX(100%); }
+}
+
+.animate-fade-up       { animation: fade-up 700ms cubic-bezier(0.22,1,0.36,1) both; }
+.animate-fade-up-d1    { animation: fade-up 700ms cubic-bezier(0.22,1,0.36,1) 80ms both; }
+.animate-fade-up-d2    { animation: fade-up 700ms cubic-bezier(0.22,1,0.36,1) 160ms both; }
+.animate-fade-up-d3    { animation: fade-up 700ms cubic-bezier(0.22,1,0.36,1) 240ms both; }
+.animate-fade-up-d4    { animation: fade-up 700ms cubic-bezier(0.22,1,0.36,1) 320ms both; }
+.animate-fade-in       { animation: fade-in 800ms ease both; }
+.animate-float         { animation: float 6s ease-in-out infinite; }
+.animate-glow-pulse    { animation: glow-pulse 4s ease-in-out infinite; }
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-fade-up, .animate-fade-up-d1, .animate-fade-up-d2,
+  .animate-fade-up-d3, .animate-fade-up-d4, .animate-fade-in,
+  .animate-float, .animate-glow-pulse {
+    animation: none !important;
+  }
+}

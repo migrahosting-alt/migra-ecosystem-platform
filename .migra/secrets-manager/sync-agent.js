@@ -19,7 +19,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // Configuration
 const CONFIG = {
-  VAULT_REDIS_URL: process.env.SECRETS_VAULT_URL || 'redis://100.97.213.11:6379',
+  VAULT_REDIS_URL: process.env.SECRETS_VAULT_URL || 'redis://100.119.105.93:6379',
   VAULT_KEY: process.env.SECRETS_VAULT_KEY || null,
   CACHE_DIR: process.env.SECRETS_CACHE_DIR || '/opt/secrets-vault/cache',
   SYNC_INTERVAL: parseInt(process.env.SECRETS_SYNC_INTERVAL || '10000'), // 10 seconds

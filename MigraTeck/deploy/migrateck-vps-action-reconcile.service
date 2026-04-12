@@ -1,0 +1,28 @@
+[Unit]
+Description=MigraTeck VPS Action Reconcile Worker
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/migra/repos/migrateck/app
+EnvironmentFile=-/etc/migrateck/migrateck.env
+Environment=NODE_ENV=production
+Environment=RUN_VPS_ACTION_RECONCILE_WORKER=true
+ExecStart=/usr/bin/npx --yes tsx workers/vps-action-reconcile.ts
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=migrateck-vps-action-reconcile
+KillMode=mixed
+TimeoutStopSec=30
+SuccessExitStatus=143 SIGTERM
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ReadWritePaths=/opt/migra/repos/migrateck/app /tmp
+
+[Install]
+WantedBy=multi-user.target

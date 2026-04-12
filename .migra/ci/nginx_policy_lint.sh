@@ -54,6 +54,71 @@ fi
 echo "✅ Using repo NGINX root: $ROOT"
 echo "✅ Using main config: $NGINX_MAIN_CONF"
 
+extract_first_proxy_pass() {
+  local file="$1"
+  local target=""
+  local include_target=""
+
+  target="$(awk '/proxy_pass[[:space:]]+/ {print $2; exit}' "$file" | sed 's/;$//')"
+  if [[ -n "$target" ]]; then
+    printf '%s\n' "$target"
+    return 0
+  fi
+
+  include_target="$(awk '/include[[:space:]]+\/etc\/nginx\/snippets\/migradrive-(api|console)-proxy\.conf;/ {print $2; exit}' "$file" | sed 's/;$//')"
+  if [[ -n "$include_target" ]]; then
+    local include_name=""
+    include_name="$(basename "$include_target")"
+    awk '/proxy_pass[[:space:]]+/ {print $2; exit}' "$ROOT/snippets/$include_name" | sed 's/;$//'
+    return 0
+  fi
+
+  return 0
+}
+
+check_migradrive_upstream_consistency() {
+  local files=(
+    "$ROOT/sites-enabled/s3.migradrive.com.conf"
+    "$ROOT/sites-enabled/console.migradrive.com.conf"
+    "$ROOT/sites-enabled/mb.migrahosting.com.conf"
+    "$ROOT/sites-enabled/console.mb.migrahosting.com.conf"
+    "$ROOT/sites-available/migradrive-migrahosting-http-proxy.conf"
+  )
+  local file=""
+  local target=""
+  local first_target=""
+  local details=()
+
+  for file in "${files[@]}"; do
+    if [[ ! -f "$file" ]]; then
+      echo "❌ Policy violation: missing required MigraDrive proxy config: $file"
+      echo "::error::Missing required MigraDrive proxy config: $file"
+      exit 1
+    fi
+
+    target="$(extract_first_proxy_pass "$file")"
+    if [[ -z "$target" ]]; then
+      echo "❌ Policy violation: could not find proxy_pass in $file"
+      echo "::error::Missing proxy_pass in $file"
+      exit 1
+    fi
+
+    details+=("$file -> $target")
+    if [[ -z "$first_target" ]]; then
+      first_target="$target"
+    elif [[ "$target" != "$first_target" ]]; then
+      echo "❌ Policy violation: MigraDrive storage domains do not share a single upstream target."
+      printf ' - %s\n' "${details[@]}"
+      echo "::error::MigraDrive storage domains use multiple upstream targets"
+      exit 1
+    fi
+  done
+
+  echo "✅ Policy: MigraDrive storage domains share a single upstream target ($first_target)"
+}
+
+check_migradrive_upstream_consistency
+
 # Run nginx -T and capture full expanded config output
 TMP="$(mktemp -d)"
 cleanup() { rm -rf "$TMP"; }
@@ -115,7 +180,7 @@ if awk '
   echo "✅ Policy: limit_req_zone not found inside server{}"
 else
   echo "❌ Policy violation: limit_req_zone found inside a server{} block."
-  echo "Fix: move limit_req_zone directives to http{} context (e.g., nginx.conf) and include snippets/mpanel-limits.conf there."
+  echo "Fix: move limit_req_zone directives to http{} context (e.g., nginx.conf) and include snippets/migrapanel-limits.conf there."
   echo "::error::Policy violation: limit_req_zone found inside a server{} block"
   exit 1
 fi

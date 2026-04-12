@@ -47,8 +47,8 @@
       },
       "soa_serial": "2026012503",
       "nameservers": {
-        "ns1.migrahosting.com": "73.139.18.218",
-        "ns2.migrahosting.com": "73.139.18.218"
+        "ns1.migrahosting.com": "67.191.84.254",
+        "ns2.migrahosting.com": "67.191.84.254"
       },
       "uptime": "20+ hours (since 2026-01-27 02:45:02 UTC)"
     },
@@ -77,8 +77,8 @@
       "firewall": "Unknown (ufw or iptables - needs discovery)"
     },
     "registrar_glue_records": {
-      "ns1.migrahosting.com": "73.139.18.218",
-      "ns2.migrahosting.com": "73.139.18.218",
+      "ns1.migrahosting.com": "67.191.84.254",
+      "ns2.migrahosting.com": "67.191.84.254",
       "note": "Both currently point to on-prem ISP IP (Xfinity residential)"
     },
     "public_resolution": {
@@ -193,11 +193,11 @@
       "steps": [
         "At domain registrar, update ONLY ns2.migrahosting.com glue record",
         "Change ns2.migrahosting.com → 154.38.180.61",
-        "Leave ns1.migrahosting.com → 73.139.18.218 (unchanged)",
+        "Leave ns1.migrahosting.com → 67.191.84.254 (unchanged)",
         "Wait 15-60 minutes for propagation",
         "Monitor resolution: dig NS migrahosting.com @1.1.1.1",
         "Monitor resolution: dig NS migrahosting.com @8.8.8.8",
-        "Check both IPs respond: dig @73.139.18.218 migrahosting.com",
+        "Check both IPs respond: dig @67.191.84.254 migrahosting.com",
         "Check both IPs respond: dig @154.38.180.61 migrahosting.com"
       ],
       "validation": [
@@ -206,7 +206,7 @@
         "MigraPanel DNS tools still functional",
         "Client domains resolve correctly"
       ],
-      "rollback": "Change ns2 back to 73.139.18.218 at registrar (5-15 min)"
+      "rollback": "Change ns2 back to 67.191.84.254 at registrar (5-15 min)"
     },
     {
       "phase": 4,
@@ -229,7 +229,7 @@
         "MigraPanel DNS propagation checks pass",
         "Zero DNS-related errors in logs"
       ],
-      "rollback": "Revert ns1 to 73.139.18.218 at registrar (both ns1/ns2 back to on-prem)"
+      "rollback": "Revert ns1 to 67.191.84.254 at registrar (both ns1/ns2 back to on-prem)"
     },
     {
       "phase": 5,
@@ -252,7 +252,7 @@
         "MigraPanel DNS tools 100% functional",
         "Zero DNS errors or SERVFAIL responses"
       ],
-      "rollback": "Restart PowerDNS on dns-core, revert glue records to 73.139.18.218 (emergency only)"
+      "rollback": "Restart PowerDNS on dns-core, revert glue records to 67.191.84.254 (emergency only)"
     }
   ],
   "risks": {

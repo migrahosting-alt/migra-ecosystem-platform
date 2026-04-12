@@ -1,0 +1,27 @@
+[Unit]
+Description=MigraTeck Next.js App
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/migra/repos/migrateck/app/apps/web
+EnvironmentFile=-/etc/migrateck/migrateck.env
+Environment=NODE_ENV=production
+ExecStart=/usr/bin/node /opt/migra/repos/migrateck/app/apps/web/node_modules/next/dist/bin/next start --hostname 127.0.0.1 --port 3111
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=migrateck
+KillMode=mixed
+TimeoutStopSec=30
+SuccessExitStatus=143 SIGTERM
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ReadWritePaths=/opt/migra/repos/migrateck/app /tmp
+
+[Install]
+WantedBy=multi-user.target

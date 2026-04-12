@@ -1,0 +1,44 @@
+<svg width="1080" height="1350" viewBox="0 0 1080 1350" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="104" y1="82" x2="934" y2="1264" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#07111F"/>
+      <stop offset="0.58" stop-color="#121C34"/>
+      <stop offset="1" stop-color="#1E103B"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="196" y1="184" x2="878" y2="1142" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#6D5EFC"/>
+      <stop offset="0.52" stop-color="#B04CFF"/>
+      <stop offset="1" stop-color="#FF5E8A"/>
+    </linearGradient>
+  </defs>
+  <rect width="1080" height="1350" rx="36" fill="url(#bg)"/>
+  <rect x="56" y="56" width="968" height="1238" rx="28" fill="rgba(255,255,255,0.03)" stroke="rgba(255,255,255,0.08)"/>
+  <text x="90" y="120" fill="#D6D9FF" font-family="Space Grotesk, Arial, sans-serif" font-size="16" font-weight="700" letter-spacing="0.18em">MIGRAHOSTING</text>
+  <text x="90" y="230" fill="white" font-family="Sora, Arial, sans-serif" font-size="76" font-weight="800">
+    <tspan x="90" dy="0">YOUR WEBSITE.</tspan>
+    <tspan x="90" dy="88">LIVE IN 48</tspan>
+    <tspan x="90" dy="88">HOURS.</tspan>
+  </text>
+  <text x="90" y="510" fill="#CBD5E1" font-family="Space Grotesk, Arial, sans-serif" font-size="28" font-weight="500">
+    Custom design, domain, business email,
+  </text>
+  <text x="90" y="548" fill="#CBD5E1" font-family="Space Grotesk, Arial, sans-serif" font-size="28" font-weight="500">
+    and SEO-ready launch support.
+  </text>
+  <rect x="90" y="610" width="900" height="358" rx="28" fill="rgba(8,15,29,0.7)" stroke="rgba(255,255,255,0.12)"/>
+  <rect x="118" y="644" width="844" height="30" rx="15" fill="rgba(255,255,255,0.08)"/>
+  <rect x="118" y="708" width="332" height="208" rx="24" fill="rgba(109,94,252,0.14)" stroke="rgba(160,120,255,0.42)"/>
+  <g fill="#F8FAFC" font-family="Space Grotesk, Arial, sans-serif" font-size="24" font-weight="600">
+    <text x="500" y="758">Custom design</text>
+    <text x="500" y="814">Business email</text>
+    <text x="500" y="870">SEO-ready structure</text>
+  </g>
+  <g fill="url(#accent)">
+    <circle cx="470" cy="748" r="9"/>
+    <circle cx="470" cy="804" r="9"/>
+    <circle cx="470" cy="860" r="9"/>
+  </g>
+  <text x="90" y="1088" fill="#F8FAFC" font-family="Sora, Arial, sans-serif" font-size="46" font-weight="800">Starting at $199</text>
+  <rect x="90" y="1132" width="300" height="62" rx="31" fill="url(#accent)"/>
+  <text x="164" y="1172" fill="white" font-family="Space Grotesk, Arial, sans-serif" font-size="28" font-weight="700">Launch today</text>
+</svg>

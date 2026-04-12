@@ -1,0 +1,12 @@
+{
+  "name": "@migrateck/config",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    "./tsconfig/base": "./tsconfig.base.json",
+    "./eslint/base": "./eslint/base.mjs",
+    "./eslint/next": "./eslint/next.mjs",
+    "./prettier": "./prettier/base.json"
+  }
+}

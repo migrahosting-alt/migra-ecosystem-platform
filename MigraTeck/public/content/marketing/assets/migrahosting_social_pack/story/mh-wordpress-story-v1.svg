@@ -1,0 +1,85 @@
+<svg width="1080" height="1920" viewBox="0 0 1080 1920" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="112" y1="72" x2="920" y2="1814" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#070B18"/>
+      <stop offset="0.54" stop-color="#101739"/>
+      <stop offset="1" stop-color="#1D0F3A"/>
+    </linearGradient>
+    <radialGradient id="glow1" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(690 320) rotate(90) scale(320)">
+      <stop stop-color="#AE4EFF" stop-opacity="0.46"/>
+      <stop offset="1" stop-color="#AE4EFF" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="glow2" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(410 1450) rotate(90) scale(330 420)">
+      <stop stop-color="#FF5A8E" stop-opacity="0.24"/>
+      <stop offset="1" stop-color="#FF5A8E" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="brand" x1="82" y1="108" x2="154" y2="180" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#775BFF"/>
+      <stop offset="1" stop-color="#FF5D93"/>
+    </linearGradient>
+    <linearGradient id="ring" x1="264" y1="622" x2="816" y2="1074" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#57C2FF"/>
+      <stop offset="0.5" stop-color="#8B77FF"/>
+      <stop offset="1" stop-color="#FF7CB7"/>
+    </linearGradient>
+    <linearGradient id="cta" x1="138" y1="1694" x2="942" y2="1694" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#6A5CFF"/>
+      <stop offset="0.52" stop-color="#B54FFF"/>
+      <stop offset="1" stop-color="#FF5D88"/>
+    </linearGradient>
+    <filter id="ringGlow" x="190" y="548" width="700" height="700" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feGaussianBlur stdDeviation="34"/>
+    </filter>
+  </defs>
+
+  <rect width="1080" height="1920" fill="url(#bg)"/>
+  <rect x="44" y="44" width="992" height="1832" rx="34" fill="#FFFFFF" fill-opacity="0.03" stroke="#FFFFFF" stroke-opacity="0.08"/>
+  <circle cx="688" cy="328" r="320" fill="url(#glow1)"/>
+  <circle cx="408" cy="1458" r="330" fill="url(#glow2)"/>
+
+  <g>
+    <circle cx="118" cy="144" r="34" fill="url(#brand)"/>
+    <text x="118" y="155" text-anchor="middle" fill="#FFFFFF" font-family="Sora, Arial, sans-serif" font-size="29" font-weight="800">MH</text>
+    <text x="166" y="155" fill="#F8FAFC" font-family="Sora, Arial, sans-serif" font-size="34" font-weight="700">MigraHosting</text>
+  </g>
+
+  <text x="90" y="300" fill="#F8FAFC" font-family="Sora, Arial, sans-serif" font-size="82" font-weight="800">
+    <tspan x="90" dy="0">WordPress Hosting</tspan>
+    <tspan x="90" dy="92">Fast, Secure,</tspan>
+    <tspan x="90" dy="92">&amp; Reliable</tspan>
+  </text>
+
+  <text x="90" y="618" fill="#D5DCF1" font-family="Space Grotesk, Arial, sans-serif" font-size="34" font-weight="500">
+    Performance tuning, SSL, caching, backups,
+  </text>
+  <text x="90" y="662" fill="#D5DCF1" font-family="Space Grotesk, Arial, sans-serif" font-size="34" font-weight="500">
+    and expert support for serious websites.
+  </text>
+
+  <g filter="url(#ringGlow)">
+    <circle cx="540" cy="890" r="248" fill="#845BFF" fill-opacity="0.24"/>
+  </g>
+  <circle cx="540" cy="890" r="222" stroke="url(#ring)" stroke-width="12"/>
+  <circle cx="540" cy="890" r="176" fill="#101631" stroke="#FFFFFF" stroke-opacity="0.08"/>
+  <text x="540" y="924" text-anchor="middle" fill="#BFE6FF" font-family="Sora, Arial, sans-serif" font-size="122" font-weight="800">WP</text>
+
+  <g>
+    <rect x="132" y="1158" width="816" height="216" rx="30" fill="#0F1430" fill-opacity="0.82" stroke="#FFFFFF" stroke-opacity="0.08"/>
+    <rect x="170" y="1214" width="742" height="28" rx="14" fill="#FFFFFF" fill-opacity="0.06"/>
+    <g fill="#F8FAFC" font-family="Space Grotesk, Arial, sans-serif" font-size="28" font-weight="600">
+      <text x="220" y="1298">Managed updates</text>
+      <text x="220" y="1360">Daily backups</text>
+      <text x="220" y="1422">Free SSL &amp; malware scans</text>
+    </g>
+    <g>
+      <circle cx="186" cy="1288" r="9" fill="#69F3AB"/>
+      <circle cx="186" cy="1350" r="9" fill="#69F3AB"/>
+      <circle cx="186" cy="1412" r="9" fill="#69F3AB"/>
+    </g>
+  </g>
+
+  <text x="540" y="1566" text-anchor="middle" fill="#FFE37D" font-family="Sora, Arial, sans-serif" font-size="58" font-weight="800">Get up to 75% off</text>
+  <rect x="138" y="1655" width="804" height="78" rx="39" fill="url(#cta)"/>
+  <text x="540" y="1703" text-anchor="middle" fill="#FFFFFF" font-family="Space Grotesk, Arial, sans-serif" font-size="36" font-weight="700">Claim Your Hosting Offer</text>
+  <text x="540" y="1800" text-anchor="middle" fill="#D5DCF1" font-family="Space Grotesk, Arial, sans-serif" font-size="28" font-weight="500">Built for stores, blogs, landing pages, and business websites.</text>
+</svg>

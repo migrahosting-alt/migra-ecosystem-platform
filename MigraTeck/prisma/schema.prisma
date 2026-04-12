@@ -1,0 +1,3339 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum OrgRole {
+  OWNER
+  ADMIN
+  BILLING
+  MEMBER
+  READONLY
+}
+
+enum MembershipStatus {
+  ACTIVE
+  INVITED
+  SUSPENDED
+}
+
+enum ProductKey {
+  MIGRATECK
+  MIGRAHOSTING
+  MIGRAPANEL
+  MIGRAVOICE
+  MIGRAMAIL
+  MIGRAINTAKE
+  MIGRAMARKET
+  MIGRAPILOT
+  MIGRAINVOICE
+  MIGRADRIVE
+  MIGRABUILDER
+}
+
+enum EntitlementStatus {
+  ACTIVE
+  TRIAL
+  RESTRICTED
+  INTERNAL_ONLY
+}
+
+enum AccessRequestStatus {
+  OPEN
+  TRIAGED
+  APPROVED
+  DENIED
+}
+
+enum BillingProvider {
+  STRIPE
+}
+
+enum BillingSubscriptionStatus {
+  TRIALING
+  ACTIVE
+  PAST_DUE
+  CANCELED
+  INCOMPLETE
+  INCOMPLETE_EXPIRED
+  UNPAID
+  PAUSED
+}
+
+enum BillingWebhookEventStatus {
+  RECEIVED
+  PROCESSED
+  IGNORED
+  FAILED
+}
+
+enum StepUpMethod {
+  NONE
+  REAUTH
+  TOTP
+  PASSKEY
+}
+
+enum ProvisioningAction {
+  ACCESS_GRANT
+  ACCESS_RESTRICT
+  POD_CREATE
+  POD_SCALE_DOWN
+  DNS_PROVISION
+  VOICE_PROVISION
+  VOICE_DISABLE
+  MAIL_PROVISION
+  MAIL_DISABLE
+  INTAKE_PROVISION
+  MARKET_PROVISION
+  PILOT_PROVISION
+  STORAGE_PROVISION
+  STORAGE_READ_ONLY
+  DRIVE_PROVISION
+  DRIVE_DISABLE
+}
+
+enum ProvisioningTaskStatus {
+  PENDING
+  PROCESSING
+  SUCCEEDED
+  FAILED
+}
+
+enum ProvisioningJobSource {
+  STRIPE
+  ENTITLEMENT_EXPIRY
+  MANUAL
+  SYSTEM
+}
+
+enum ProvisioningJobType {
+  PROVISION
+  DEPROVISION
+  SCALE
+  RESTRICT
+  UNRESTRICT
+  ARTIFACT_GRANT
+}
+
+enum ProvisioningJobStatus {
+  PENDING
+  RUNNING
+  SUCCEEDED
+  FAILED
+  DEAD
+  CANCELED
+}
+
+enum PilotRunStatus {
+  REQUESTED
+  VALIDATING
+  PLANNED
+  AWAITING_APPROVAL
+  EXECUTING
+  VERIFYING
+  COMPLETED
+  FAILED
+  ROLLED_BACK
+  CANCELED
+}
+
+enum PilotRunStepStatus {
+  PENDING
+  READY
+  RUNNING
+  SUCCEEDED
+  FAILED
+  SKIPPED
+  CANCELED
+  ROLLED_BACK
+}
+
+enum PilotVerificationState {
+  NOT_REQUIRED
+  PENDING
+  PASSED
+  FAILED
+}
+
+enum PilotRollbackState {
+  NOT_REQUIRED
+  AVAILABLE
+  STARTED
+  COMPLETED
+  FAILED
+}
+
+enum PilotApprovalStatus {
+  PENDING
+  APPROVED
+  DENIED
+  EXPIRED
+  SUPERSEDED
+}
+
+enum PilotPolicyDecisionResult {
+  ALLOW
+  BLOCK
+  REQUIRE_APPROVAL
+  ESCALATE
+}
+
+enum PilotArtifactRedactionState {
+  RAW
+  SANITIZED
+  REDACTED
+}
+
+enum ResourceNodeType {
+  TENANT
+  PRODUCT
+  DOMAIN
+  DNS_ZONE
+  ROUTE
+  CERTIFICATE
+  SERVICE
+  INFRASTRUCTURE_NODE
+  MAILBOX
+  STORAGE_BUCKET
+  PHONE_NUMBER
+  HOSTING_SITE
+  DEPLOYMENT_RELEASE
+  INCIDENT
+  BILLING_ACCOUNT
+  OTHER
+}
+
+enum ResourceRelationshipType {
+  OWNS
+  BELONGS_TO
+  USES
+  RUNS_ON
+  EXPOSES
+  ROUTES_TO
+  DEPENDS_ON
+  PROTECTS
+  BILLED_TO
+  AFFECTED_BY
+  MANAGED_BY
+  VERIFIED_BY
+}
+
+enum ServiceHealthState {
+  UNKNOWN
+  HEALTHY
+  DEGRADED
+  UNHEALTHY
+}
+
+enum VpsStatus {
+  PROVISIONING
+  RUNNING
+  STOPPED
+  REBOOTING
+  RESCUED
+  REBUILDING
+  SUSPENDED
+  TERMINATED
+  ERROR
+}
+
+enum ServerPowerState {
+  ON
+  OFF
+  UNKNOWN
+}
+
+enum VpsBillingCycle {
+  MONTHLY
+  YEARLY
+}
+
+enum VpsActionType {
+  POWER_ON
+  POWER_OFF
+  REBOOT
+  HARD_REBOOT
+  ENABLE_RESCUE
+  DISABLE_RESCUE
+  REBUILD
+  OPEN_CONSOLE_SESSION
+  CREATE_SNAPSHOT
+  RESTORE_SNAPSHOT
+  DELETE_SNAPSHOT
+  UPDATE_FIREWALL
+  ROLLBACK_FIREWALL
+  UPDATE_BACKUP_POLICY
+  MANUAL_SYNC
+}
+
+enum VpsActionStatus {
+  QUEUED
+  RUNNING
+  SUCCEEDED
+  FAILED
+  CANCELED
+}
+
+enum VpsServerMemberRole {
+  OWNER
+  ADMIN
+  OPERATOR
+  SUPPORT_VIEWER
+  BILLING
+  READ_ONLY
+}
+
+enum VpsProviderHealthState {
+  HEALTHY
+  DEGRADED
+  UNREACHABLE
+  UNKNOWN
+}
+
+enum VpsIncidentState {
+  OPEN
+  ACKNOWLEDGED
+  MITIGATING
+  RESOLVED
+}
+
+enum VpsAlertRuleStatus {
+  ENABLED
+  DISABLED
+}
+
+enum VpsAlertEventStatus {
+  ACTIVE
+  ACKNOWLEDGED
+  RESOLVED
+  SUPPRESSED
+}
+
+enum VpsSnapshotStatus {
+  CREATING
+  READY
+  RESTORING
+  FAILED
+  DELETING
+}
+
+enum VpsBackupPolicyStatus {
+  ACTIVE
+  PAUSED
+  DISABLED
+}
+
+enum VpsAuditSeverity {
+  INFO
+  WARNING
+  ERROR
+  CRITICAL
+}
+
+enum FirewallDirection {
+  INBOUND
+  OUTBOUND
+}
+
+enum FirewallAction {
+  ALLOW
+  DENY
+}
+
+enum FirewallProtocol {
+  TCP
+  UDP
+  ICMP
+  ANY
+}
+
+enum FirewallProfileStatus {
+  DRAFT
+  ACTIVE
+  APPLYING
+  FAILED
+  DISABLED
+}
+
+enum ConsoleSessionStatus {
+  REQUESTED
+  READY
+  ACTIVE
+  EXPIRED
+  FAILED
+  CLOSED
+}
+
+enum SupportTier {
+  STANDARD
+  PRIORITY
+  MANAGED
+  EMERGENCY
+}
+
+model User {
+  id                       String                   @id @default(cuid())
+  name                     String?
+  email                    String?                  @unique
+  emailVerified            DateTime?
+  phoneE164                String?                  @unique
+  phoneVerifiedAt          DateTime?
+  image                    String?
+  passwordHash             String?
+  defaultOrgId             String?
+  failedLoginAttempts      Int                      @default(0)
+  accountLockedUntil       DateTime?
+  createdAt                DateTime                 @default(now())
+  updatedAt                DateTime                 @updatedAt
+  accounts                 Account[]
+  sessions                 Session[]
+  memberships              Membership[]
+  organizationsCreated     Organization[]           @relation("OrganizationCreator")
+  defaultOrg               Organization?            @relation("DefaultOrg", fields: [defaultOrgId], references: [id], onDelete: SetNull)
+  auditLogs                AuditLog[]
+  emailVerificationTokens  EmailVerificationToken[]
+  passwordResetTokens      PasswordResetToken[]
+  refreshSessions          RefreshSession[]
+  smsOtpChallenges         SmsOtpChallenge[]
+  orgInvitationsCreated    OrgInvitation[]          @relation("OrgInvitationCreator")
+  accessRequestsCreated    AccessRequest[]          @relation("AccessRequestCreator")
+  provisioningTasksCreated ProvisioningTask[]       @relation("ProvisioningTaskCreator")
+  mutationIntentsCreated   MutationIntent[]         @relation("MutationIntentActor")
+  provisioningJobsCreated  ProvisioningJob[]        @relation("ProvisioningJobCreator")
+  pilotRunsCreated         PilotRun[]               @relation("PilotRunActor")
+  pilotApprovalsRequested  PilotApproval[]          @relation("PilotApprovalRequester")
+  pilotApprovalsDecided    PilotApproval[]          @relation("PilotApprovalApprover")
+  totpFactor               UserTotpFactor?
+  passkeys                 UserPasskey[]
+  securityEvents           SecurityEvent[]
+  permissions              Permission[]
+  builderSitesCreated      BuilderSite[]            @relation("BuilderSiteCreator")
+  apiKeysCreated           ApiKey[]                 @relation("ApiKeyCreator")
+  vpsServerMemberships     VpsServerMember[]
+  notifications            Notification[]
+  notificationPreferences  NotificationPreference[]
+  dataExports              DataExport[]
+  suggestions              Suggestion[]
+  // Phase F
+  secretsCreated           SecretEntry[]         @relation("SecretCreator")
+  blobsCreated             EncryptedBlob[]       @relation("BlobCreator")
+  deletionRequestsMade     DataDeletionRequest[] @relation("DeletionRequester")
+  deletionRequestsApproved DataDeletionRequest[] @relation("DeletionApprover")
+  accessReviewsInitiated   AccessReview[]        @relation("AccessReviewInitiator")
+  accessReviewSubject      AccessReviewEntry[]   @relation("AccessReviewSubject")
+  accessReviewDecisions    AccessReviewEntry[]   @relation("AccessReviewDecider")
+  backupsInitiated         BackupRecord[]        @relation("BackupInitiator")
+  backupValidations        BackupValidation[]    @relation("BackupValidator")
+  runbooksOwned            ComplianceRunbook[]   @relation("RunbookOwner")
+  incidentsReported        IncidentRecord[]      @relation("IncidentReporter")
+  incidentsAssigned        IncidentRecord[]      @relation("IncidentAssignee")
+}
+
+
+model Organization {
+  id                            String                             @id @default(cuid())
+  name                          String
+  slug                          String                             @unique
+  isMigraHostingClient          Boolean                            @default(false)
+  createdById                   String?
+  createdAt                     DateTime                           @default(now())
+  updatedAt                     DateTime                           @updatedAt
+  memberships                   Membership[]
+  entitlements                  OrgEntitlement[]
+  auditLogs                     AuditLog[]
+  createdBy                     User?                              @relation("OrganizationCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  defaultForUsers               User[]                             @relation("DefaultOrg")
+  invites                       OrgInvitation[]
+  accessRequests                AccessRequest[]
+  revenueOnboardingContacts     RevenueOnboardingContact[]
+  billingCustomers              BillingCustomer[]
+  billingSubscriptions          BillingSubscription[]
+  provisioningTasks             ProvisioningTask[]
+  mutationIntents               MutationIntent[]
+  provisioningJobs              ProvisioningJob[]
+  pilotRuns                     PilotRun[]
+  resourceNodes                 ResourceNode[]
+  runbooks                      Runbook[]
+  migraMarketAccount            MigraMarketAccount?
+  migraMarketLocations          MigraMarketLocation[]
+  migraMarketChecklistItems     MigraMarketChecklistItem[]
+  migraMarketTasks              MigraMarketTask[]
+  migraMarketReports            MigraMarketReportSnapshot[]
+  migraMarketLeadForms          MigraMarketLeadCaptureForm[]
+  migraMarketLeads              MigraMarketLeadRecord[]
+  migraMarketCampaigns          MigraMarketMessagingCampaign[]
+  migraMarketDeliveries         MigraMarketMessagingDelivery[]
+  migraMarketWebhookEvents      MigraMarketMessagingWebhookEvent[]
+  migraMarketSocialConnections  MigraMarketSocialConnection[]
+  migraMarketCreativeBriefs     MigraMarketCreativeBrief[]
+  migraMarketContentJobs        MigraMarketContentJob[]
+  migraMarketContentTemplates   MigraMarketContentTemplate[]
+  migraMarketCalendarSlots      MigraMarketContentCalendarSlot[]
+  migraMarketContentAssets      MigraMarketContentAsset[]
+  migraMarketContentCaptions    MigraMarketContentCaption[]
+  migraMarketOgSnapshots        MigraMarketOgSnapshot[]
+  migraMarketPublishValidations MigraMarketPublishValidation[]
+  driveFiles                    DriveFile[]
+  driveTenants                  DriveTenant[]
+  vpsServers                    VpsServer[]
+  vpsAlertRules                 VpsAlertRule[]
+  vpsAlertEvents                VpsAlertEvent[]
+  refreshSessions               RefreshSession[]
+  securityEvents                SecurityEvent[]
+  orgPolicy                     OrgPolicy?
+  permissions                   Permission[]
+  builderSites                  BuilderSite[]
+  apiKeys                       ApiKey[]
+  usageEvents                   UsageEvent[]
+  usageQuotas                   UsageQuota[]
+  webhookEndpoints              OrgWebhookEndpoint[]
+  notifications                 Notification[]
+  dataExports                   DataExport[]
+  suggestions                   Suggestion[]
+  customerJourney               CustomerJourney?
+  partnerReferralCodes          ReferralCode[]           @relation("PartnerReferralCodes")
+  referralConversions           ReferralConversion[]     @relation("ReferralConversions")
+  partnerBinding                PartnerBinding?
+  // Phase F
+  secrets                       SecretEntry[]
+  encryptedBlobs                EncryptedBlob[]
+  retentionPolicies             RetentionPolicy[]
+  dataDeletionRequests          DataDeletionRequest[]
+  accessReviews                 AccessReview[]
+  backupRecords                 BackupRecord[]
+  incidents                     IncidentRecord[]
+}
+
+model Membership {
+  id        String           @id @default(cuid())
+  userId    String
+  orgId     String
+  role      OrgRole          @default(MEMBER)
+  status    MembershipStatus @default(ACTIVE)
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  org       Organization     @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, orgId])
+  @@index([orgId, role])
+}
+
+model OrgEntitlement {
+  id        String            @id @default(cuid())
+  orgId     String
+  product   ProductKey
+  status    EntitlementStatus @default(RESTRICTED)
+  startsAt  DateTime?
+  endsAt    DateTime?
+  notes     String?
+  createdAt DateTime          @default(now())
+  updatedAt DateTime          @updatedAt
+  org       Organization      @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@unique([orgId, product])
+  @@index([product, status])
+}
+
+model PlatformConfig {
+  id                           String   @id
+  allowPublicSignup            Boolean  @default(false)
+  allowOrgCreate               Boolean  @default(false)
+  waitlistMode                 Boolean  @default(false)
+  maintenanceMode              Boolean  @default(false)
+  freezeProvisioning           Boolean  @default(false)
+  pauseProvisioningWorker      Boolean  @default(false)
+  pauseEntitlementExpiryWorker Boolean  @default(false)
+  createdAt                    DateTime @default(now())
+  updatedAt                    DateTime @updatedAt
+}
+
+model OrgInvitation {
+  id              String       @id @default(cuid())
+  orgId           String
+  email           String
+  role            OrgRole
+  tokenHash       String       @unique
+  expiresAt       DateTime
+  acceptedAt      DateTime?
+  createdByUserId String
+  createdAt       DateTime     @default(now())
+  org             Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  createdByUser   User         @relation("OrgInvitationCreator", fields: [createdByUserId], references: [id], onDelete: Cascade)
+
+  @@index([orgId])
+  @@index([email])
+  @@index([expiresAt])
+}
+
+model AccessRequest {
+  id              String              @id @default(cuid())
+  orgId           String
+  product         ProductKey
+  message         String?
+  status          AccessRequestStatus @default(OPEN)
+  createdByUserId String
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+  org             Organization        @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  createdByUser   User                @relation("AccessRequestCreator", fields: [createdByUserId], references: [id], onDelete: Cascade)
+
+  @@index([orgId, status])
+  @@index([product, status])
+}
+
+model VpsServer {
+  id                         String               @id @default(cuid())
+  orgId                      String
+  customerUserId             String?
+  providerSlug               String               @default("manual")
+  providerServerId           String?              @unique
+  providerRegionId           String?
+  providerPlanId             String?
+  name                       String
+  hostname                   String
+  instanceId                 String
+  status                     VpsStatus            @default(PROVISIONING)
+  powerState                 ServerPowerState     @default(UNKNOWN)
+  publicIpv4                 String
+  privateIpv4                String?
+  gatewayIpv4                String?
+  privateNetwork             String?
+  sshPort                    Int                  @default(22)
+  defaultUsername            String               @default("root")
+  region                     String
+  datacenterLabel            String?
+  imageSlug                  String
+  osName                     String
+  imageVersion               String?
+  virtualizationType         String?
+  planSlug                   String
+  planName                   String?
+  vcpu                       Int
+  memoryMb                   Int
+  diskGb                     Int
+  bandwidthTb                Int
+  bandwidthUsedGb            Int                  @default(0)
+  reverseDns                 String?
+  reverseDnsStatus           String?
+  firewallEnabled            Boolean              @default(true)
+  firewallProfileName        String?
+  monitoringEnabled          Boolean              @default(false)
+  monitoringStatus           String?
+  backupsEnabled             Boolean              @default(false)
+  backupRegion               String?
+  snapshotCountCached        Int                  @default(0)
+  nextInvoiceAt              DateTime?
+  renewalAt                  DateTime?
+  billingCycle               VpsBillingCycle      @default(MONTHLY)
+  monthlyPriceCents          Int                  @default(0)
+  billingCurrency            String               @default("USD")
+  supportTier                SupportTier?
+  supportTicketUrl           String?
+  supportDocsUrl             String?
+  rescueEnabled              Boolean              @default(false)
+  providerHealthState        VpsProviderHealthState @default(UNKNOWN)
+  providerLastCheckedAt      DateTime?
+  providerError              String?
+  driftDetectedAt            DateTime?
+  driftType                  String?
+  lastSyncedAt               DateTime?
+  lastKnownProviderStateJson Json?
+  createdAt                  DateTime             @default(now())
+  updatedAt                  DateTime             @updatedAt
+  organization               Organization         @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  snapshots                  VpsSnapshot[]
+  backupPolicies             VpsBackupPolicy[]
+  metrics                    VpsMetricRollup[]
+  actions                    VpsActionJob[]
+  audits                     VpsAuditEvent[]
+  firewallProfiles           VpsFirewallProfile[]
+  supportLinks               VpsSupportLink[]
+  consoleSessions            VpsConsoleSession[]
+  providerBindings           VpsProviderBinding[]
+  members                    VpsServerMember[]
+  incidents                  VpsIncident[]
+  alertEvents                VpsAlertEvent[]
+
+  @@index([orgId, createdAt])
+  @@index([orgId, status])
+  @@index([orgId, providerHealthState])
+  @@index([orgId, driftDetectedAt])
+}
+
+model VpsAlertRule {
+  id                   String             @id @default(cuid())
+  orgId                String
+  code                 String
+  name                 String
+  description          String?
+  status               VpsAlertRuleStatus @default(ENABLED)
+  severity             AlertSeverity      @default(WARNING)
+  escalationEnabled    Boolean            @default(false)
+  responseSlaMinutes   Int?
+  mitigationSlaMinutes Int?
+  suppressionMinutes   Int                @default(60)
+  metadataJson         Json?
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+  organization         Organization       @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  events               VpsAlertEvent[]
+
+  @@unique([orgId, code])
+  @@index([orgId, status, severity])
+}
+
+model VpsAlertEvent {
+  id                String              @id @default(cuid())
+  orgId             String
+  serverId          String
+  ruleId            String
+  alertId           String?
+  status            VpsAlertEventStatus @default(ACTIVE)
+  fingerprint       String
+  severity          AlertSeverity       @default(WARNING)
+  title             String
+  message           String
+  source            String
+  detailJson        Json?
+  acknowledgedAt    DateTime?
+  acknowledgedBy    String?
+  resolvedAt        DateTime?
+  firstDetectedAt   DateTime            @default(now())
+  lastDetectedAt    DateTime            @default(now())
+  suppressedUntil   DateTime?
+  lastRemediationJobId String?
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+  organization      Organization        @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  server            VpsServer           @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  rule              VpsAlertRule        @relation(fields: [ruleId], references: [id], onDelete: Cascade)
+  alert             Alert?              @relation(fields: [alertId], references: [id], onDelete: SetNull)
+
+  @@unique([serverId, fingerprint])
+  @@unique([alertId])
+  @@index([orgId, status, severity, lastDetectedAt])
+  @@index([serverId, status, lastDetectedAt])
+}
+
+model VpsServerMember {
+  id        String              @id @default(cuid())
+  serverId  String
+  userId    String
+  role      VpsServerMemberRole
+  createdAt DateTime            @default(now())
+  server    VpsServer           @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  user      User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([serverId, userId])
+  @@index([userId, role])
+}
+
+model VpsIncident {
+  id                   String           @id @default(cuid())
+  serverId             String
+  orgId                String
+  alertId              String?
+  state                VpsIncidentState @default(OPEN)
+  severity             AlertSeverity    @default(WARNING)
+  openedAt             DateTime         @default(now())
+  responseDeadlineAt   DateTime?
+  mitigationDeadlineAt DateTime?
+  breachedAt           DateTime?
+  createdAt            DateTime         @default(now())
+  updatedAt            DateTime         @updatedAt
+  server               VpsServer        @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  alert                Alert?           @relation(fields: [alertId], references: [id], onDelete: SetNull)
+
+  @@unique([alertId])
+  @@index([orgId, state, openedAt])
+  @@index([serverId, state, openedAt])
+}
+
+model VpsActionJob {
+  id                String          @id @default(cuid())
+  serverId          String
+  orgId             String
+  action            VpsActionType
+  status            VpsActionStatus @default(QUEUED)
+  requestedByUserId String
+  requestJson       Json?
+  resultJson        Json?
+  errorJson         Json?
+  providerRequestId String?
+  providerTaskId    String?
+  correlationId     String          @default(cuid())
+  retryCount        Int             @default(0)
+  attemptCount      Int             @default(0)
+  startedAt         DateTime?
+  finishedAt        DateTime?
+  nextPollAt        DateTime?
+  createdAt         DateTime        @default(now())
+  server            VpsServer       @relation(fields: [serverId], references: [id], onDelete: Cascade)
+
+  @@index([orgId, createdAt])
+  @@index([serverId, createdAt])
+  @@index([status, createdAt])
+  @@index([providerTaskId])
+}
+
+model VpsSnapshot {
+  id        String            @id @default(cuid())
+  serverId  String
+  name      String
+  note      String?
+  status    VpsSnapshotStatus @default(CREATING)
+  sizeGb    Int?
+  createdBy String?
+  createdAt DateTime          @default(now())
+  server    VpsServer         @relation(fields: [serverId], references: [id], onDelete: Cascade)
+
+  @@index([serverId, createdAt])
+}
+
+model VpsBackupPolicy {
+  id             String                @id @default(cuid())
+  serverId       String
+  status         VpsBackupPolicyStatus @default(DISABLED)
+  frequency      String
+  retentionCount Int
+  lastSuccessAt  DateTime?
+  nextRunAt      DateTime?
+  encrypted      Boolean               @default(true)
+  crossRegion    Boolean               @default(false)
+  createdAt      DateTime              @default(now())
+  updatedAt      DateTime              @updatedAt
+  server         VpsServer             @relation(fields: [serverId], references: [id], onDelete: Cascade)
+
+  @@index([serverId, updatedAt])
+}
+
+model VpsMetricRollup {
+  id             String    @id @default(cuid())
+  serverId       String
+  cpuPercent     Float     @default(0)
+  memoryPercent  Float     @default(0)
+  diskPercent    Float     @default(0)
+  networkInMbps  Float     @default(0)
+  networkOutMbps Float     @default(0)
+  uptimeSeconds  BigInt    @default(0)
+  capturedAt     DateTime  @default(now())
+  server         VpsServer @relation(fields: [serverId], references: [id], onDelete: Cascade)
+
+  @@index([serverId, capturedAt])
+}
+
+model VpsAuditEvent {
+  id           String           @id @default(cuid())
+  orgId        String
+  serverId     String
+  actorUserId  String?
+  eventType    String
+  severity     VpsAuditSeverity @default(INFO)
+  sourceIp     String?
+  relatedJobId String?
+  payloadJson  Json?
+  createdAt    DateTime         @default(now())
+  server       VpsServer        @relation(fields: [serverId], references: [id], onDelete: Cascade)
+
+  @@index([orgId, createdAt])
+  @@index([serverId, createdAt])
+}
+
+model VpsFirewallProfile {
+  id                    String            @id @default(cuid())
+  serverId              String
+  providerProfileId     String?
+  name                  String
+  status                FirewallProfileStatus @default(DRAFT)
+  version               Int               @default(1)
+  defaultInboundAction  FirewallAction    @default(DENY)
+  defaultOutboundAction FirewallAction    @default(ALLOW)
+  antiLockoutEnabled    Boolean           @default(true)
+  rollbackWindowSec     Int               @default(120)
+  protectionMode        String?
+  providerVersion       String?
+  lastAppliedAt         DateTime?
+  lastApplyJobId        String?
+  lastError             String?
+  isActive              Boolean           @default(false)
+  rollbackPendingUntil  DateTime?
+  confirmedAt           DateTime?
+  driftDetectedAt       DateTime?
+  driftSummaryJson      Json?
+  lastKnownGoodJson     Json?
+  createdAt             DateTime          @default(now())
+  updatedAt             DateTime          @updatedAt
+  server                VpsServer         @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  rules                 VpsFirewallRule[]
+
+  @@index([serverId, updatedAt])
+  @@index([serverId, isActive])
+}
+
+model VpsFirewallRule {
+  id              String             @id @default(cuid())
+  profileId       String
+  direction       FirewallDirection
+  action          FirewallAction
+  protocol        FirewallProtocol   @default(TCP)
+  portStart       Int?
+  portEnd         Int?
+  portRange       String?
+  sourceCidr      String?
+  destinationCidr String?
+  description     String?
+  priority        Int                @default(100)
+  enabled         Boolean            @default(true)
+  expiresAt       DateTime?
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+  profile         VpsFirewallProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  @@index([profileId, priority])
+  @@index([profileId, direction, priority])
+}
+
+model VpsSupportLink {
+  id               String    @id @default(cuid())
+  serverId         String
+  externalTicketId String?
+  title            String?
+  category         String?
+  priority         String?
+  status           String    @default("OPEN")
+  url              String?
+  metadataJson     Json?
+  lastUpdatedAt    DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  server           VpsServer @relation(fields: [serverId], references: [id], onDelete: Cascade)
+
+  @@index([serverId, updatedAt])
+}
+
+model VpsConsoleSession {
+  id                String               @id @default(cuid())
+  serverId          String
+  providerSessionId String?
+  launchUrl         String?
+  tokenPreview      String?
+  status            ConsoleSessionStatus @default(REQUESTED)
+  createdByUserId   String?
+  viewOnly          Boolean              @default(false)
+  expiresAt         DateTime?
+  lastConnectedAt   DateTime?
+  createdAt         DateTime             @default(now())
+  updatedAt         DateTime             @updatedAt
+  server            VpsServer            @relation(fields: [serverId], references: [id], onDelete: Cascade)
+
+  @@index([serverId, createdAt])
+  @@index([status, createdAt])
+}
+
+model VpsProviderBinding {
+  id                 String    @id @default(cuid())
+  serverId           String
+  providerSlug       String
+  providerServerId   String
+  providerRegionId   String?
+  providerPlanId     String?
+  metadataJson       Json?
+  lastKnownStateJson Json?
+  lastSyncedAt       DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+  server             VpsServer @relation(fields: [serverId], references: [id], onDelete: Cascade)
+
+  @@unique([providerSlug, providerServerId])
+  @@index([serverId, updatedAt])
+}
+
+model RevenueOnboardingContact {
+  id                String     @id @default(cuid())
+  orgId             String
+  reference         String     @unique
+  source            String     @default("migra-market")
+  company           String
+  contactName       String?
+  contactEmail      String?
+  plan              String
+  requestedProduct  ProductKey
+  status            String     @default("pending") // pending | provisioning | queued | contacted | completed | blocked
+  revenueCustomerId String?
+  tenantId          String?
+  monthlyRevenue    Float?
+  notes             String?
+  operatorEmailSent Boolean    @default(false)
+  contactEmailSent  Boolean    @default(false)
+  createdAt         DateTime   @default(now())
+  updatedAt         DateTime   @updatedAt
+
+  org Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([orgId, status, createdAt])
+  @@index([contactEmail, createdAt])
+}
+
+model MigraMarketAccount {
+  id                       String                      @id @default(cuid())
+  orgId                    String                      @unique
+  packageTemplateId        String?
+  packageName              String?
+  clientStage              String                      @default("onboarding")
+  healthStatus             String                      @default("needs_attention")
+  primaryGoals             Json?
+  targetMarkets            Json?
+  googleBusinessProfileUrl String?
+  websiteUrl               String?
+  socialProfiles           Json?
+  adBudgetMonthly          Float?
+  notes                    String?
+  messagingBrandName       String?
+  messagingFromNumber      String?
+  messagingSupportEmail    String?
+  createdAt                DateTime                    @default(now())
+  updatedAt                DateTime                    @updatedAt
+  org                      Organization                @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  packageTemplate          MigraMarketPackageTemplate? @relation(fields: [packageTemplateId], references: [id], onDelete: SetNull)
+
+  @@index([clientStage, updatedAt])
+}
+
+model MigraMarketPackageTemplate {
+  id            String               @id @default(cuid())
+  code          String               @unique
+  name          String
+  description   String
+  category      String               @default("managed_service")
+  monthlyPrice  Float?
+  setupPrice    Float?
+  serviceBundle Json?
+  defaultTasks  Json?
+  createdAt     DateTime             @default(now())
+  updatedAt     DateTime             @updatedAt
+  accounts      MigraMarketAccount[]
+}
+
+model MigraMarketLocation {
+  id           String       @id @default(cuid())
+  orgId        String
+  name         String
+  city         String
+  region       String?
+  country      String       @default("US")
+  serviceArea  String?
+  primaryPhone String?
+  primary      Boolean      @default(false)
+  status       String       @default("active")
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+  org          Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([orgId, status, createdAt])
+}
+
+model MigraMarketChecklistItem {
+  id          String       @id @default(cuid())
+  orgId       String
+  key         String
+  title       String
+  description String?
+  status      String       @default("pending")
+  owner       String?
+  dueAt       DateTime?
+  completedAt DateTime?
+  sortOrder   Int          @default(0)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  org         Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@unique([orgId, key])
+  @@index([orgId, status, sortOrder])
+}
+
+model MigraMarketTask {
+  id          String       @id @default(cuid())
+  orgId       String
+  title       String
+  category    String       @default("fulfillment")
+  status      String       @default("todo")
+  priority    String       @default("normal")
+  dueAt       DateTime?
+  completedAt DateTime?
+  assignee    String?
+  notes       String?
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  org         Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([orgId, status, createdAt])
+  @@index([orgId, priority, dueAt])
+}
+
+model MigraMarketReportSnapshot {
+  id                 String       @id @default(cuid())
+  orgId              String
+  label              String
+  periodStart        DateTime
+  periodEnd          DateTime
+  leads              Int          @default(0)
+  calls              Int          @default(0)
+  bookedAppointments Int          @default(0)
+  profileViews       Int          @default(0)
+  websiteSessions    Int          @default(0)
+  conversionRate     Float?
+  reviewCount        Int          @default(0)
+  averageRating      Float?
+  emailOpenRate      Float?
+  socialReach        Int          @default(0)
+  adSpend            Float?
+  costPerLead        Float?
+  revenueAttributed  Float?
+  summary            String?
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
+  org                Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([orgId, periodEnd, createdAt])
+}
+
+model MigraMarketLeadCaptureForm {
+  id                String                  @id @default(cuid())
+  orgId             String
+  name              String
+  slug              String
+  sourceChannel     String                  @default("website")
+  destinationEmail  String?
+  thankYouMessage   String?
+  smsConsentEnabled Boolean                 @default(false)
+  smsConsentLabel   String?
+  active            Boolean                 @default(true)
+  createdAt         DateTime                @default(now())
+  updatedAt         DateTime                @updatedAt
+  org               Organization            @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  leads             MigraMarketLeadRecord[]
+
+  @@unique([orgId, slug])
+  @@index([orgId, active, createdAt])
+}
+
+model MigraMarketLeadRecord {
+  id                 String                         @id @default(cuid())
+  orgId              String
+  formId             String?
+  fullName           String
+  email              String?
+  phone              String?
+  company            String?
+  sourceChannel      String                         @default("website")
+  campaign           String?
+  landingPage        String?
+  status             String                         @default("new")
+  valueEstimate      Float?
+  notes              String?
+  smsConsentStatus   String                         @default("unknown")
+  smsConsentAt       DateTime?
+  smsConsentSource   String?
+  smsConsentEvidence String?
+  smsOptedOutAt      DateTime?
+  messagingTags      Json?
+  metadata           Json?
+  createdAt          DateTime                       @default(now())
+  updatedAt          DateTime                       @updatedAt
+  org                Organization                   @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  form               MigraMarketLeadCaptureForm?    @relation(fields: [formId], references: [id], onDelete: SetNull)
+  deliveries         MigraMarketMessagingDelivery[]
+
+  @@index([orgId, status, createdAt])
+  @@index([orgId, sourceChannel, createdAt])
+}
+
+model MigraMarketMessagingCampaign {
+  id               String                         @id @default(cuid())
+  orgId            String
+  name             String
+  channel          String                         @default("sms")
+  status           String                         @default("draft")
+  fromNumber       String
+  audienceTag      String?
+  body             String
+  mediaUrls        Json?
+  scheduledAt      DateTime?
+  launchedAt       DateTime?
+  completedAt      DateTime?
+  lastDispatchedAt DateTime?
+  recipientCount   Int                            @default(0)
+  queuedCount      Int                            @default(0)
+  sentCount        Int                            @default(0)
+  deliveredCount   Int                            @default(0)
+  failedCount      Int                            @default(0)
+  notes            String?
+  createdAt        DateTime                       @default(now())
+  updatedAt        DateTime                       @updatedAt
+  org              Organization                   @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  deliveries       MigraMarketMessagingDelivery[]
+
+  @@index([orgId, status, createdAt])
+  @@index([orgId, scheduledAt, createdAt])
+}
+
+model MigraMarketMessagingDelivery {
+  id                String                        @id @default(cuid())
+  orgId             String
+  campaignId        String?
+  leadId            String?
+  phone             String
+  provider          String                        @default("telnyx")
+  direction         String                        @default("outbound")
+  status            String                        @default("queued")
+  externalMessageId String?                       @unique
+  body              String?
+  errorCode         String?
+  errorMessage      String?
+  costAmount        Float?
+  deliveredAt       DateTime?
+  finalizedAt       DateTime?
+  metadata          Json?
+  createdAt         DateTime                      @default(now())
+  updatedAt         DateTime                      @updatedAt
+  org               Organization                  @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  campaign          MigraMarketMessagingCampaign? @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  lead              MigraMarketLeadRecord?        @relation(fields: [leadId], references: [id], onDelete: SetNull)
+
+  @@index([orgId, status, createdAt])
+  @@index([orgId, direction, createdAt])
+  @@index([campaignId, status, createdAt])
+  @@index([leadId, createdAt])
+}
+
+model MigraMarketMessagingWebhookEvent {
+  id              String        @id @default(cuid())
+  provider        String        @default("telnyx")
+  orgId           String?
+  externalEventId String        @unique
+  eventType       String
+  status          String        @default("received")
+  payload         Json?
+  processedAt     DateTime?
+  receivedAt      DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  org             Organization? @relation(fields: [orgId], references: [id], onDelete: SetNull)
+
+  @@index([provider, receivedAt])
+  @@index([status, receivedAt])
+}
+
+model MigraMarketSocialConnection {
+  id                     String                           @id @default(cuid())
+  orgId                  String
+  platform               String
+  handle                 String
+  profileType            String                           @default("business")
+  profileUrl             String?
+  publishMode            String                           @default("assisted")
+  accessModel            String                           @default("profile_access")
+  status                 String                           @default("draft")
+  externalAccountId      String?
+  scopes                 Json?
+  metadata               Json?
+  credentialCiphertext   String?
+  refreshTokenCiphertext String?
+  tokenExpiresAt         DateTime?
+  lastVerifiedAt         DateTime?
+  createdAt              DateTime                         @default(now())
+  updatedAt              DateTime                         @updatedAt
+  org                    Organization                     @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  contentJobs            MigraMarketContentJob[]
+  calendarSlots          MigraMarketContentCalendarSlot[]
+
+  @@unique([orgId, platform, handle])
+  @@index([orgId, status, platform])
+}
+
+model MigraMarketCreativeBrief {
+  id                   String                         @id @default(cuid())
+  orgId                String
+  name                 String
+  campaignKey          String?
+  brand                String                         @default("MigraHosting")
+  category             String                         @default("brand")
+  product              String?
+  audience             String?
+  objective            String                         @default("awareness")
+  offer                String?
+  headline             String?
+  subheadline          String?
+  price                String?
+  cta                  String?
+  landingPage          String?
+  channels             Json?
+  visualFamily         String?
+  visualStyle          String?
+  approvedTemplateKeys Json?
+  disallowedAssetTags  Json?
+  requireOgMatch       Boolean                        @default(true)
+  active               Boolean                        @default(true)
+  diversityNotes       String?
+  brandSignature       String?                        @default("Powered by MigraTeck")
+  promptNotes          String?
+  status               String                         @default("draft")
+  createdAt            DateTime                       @default(now())
+  updatedAt            DateTime                       @updatedAt
+  org                  Organization                   @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  contentJobs          MigraMarketContentJob[]
+  captions             MigraMarketContentCaption[]
+  publishValidations   MigraMarketPublishValidation[]
+
+  @@unique([orgId, campaignKey])
+  @@index([orgId, status, createdAt])
+  @@index([orgId, active, category, createdAt])
+}
+
+model MigraMarketContentJob {
+  id               String                         @id @default(cuid())
+  orgId            String
+  briefId          String?
+  connectionId     String?
+  captionId        String?
+  selectedAssetId  String?
+  title            String
+  platform         String
+  format           String                         @default("post")
+  publishMode      String                         @default("assisted")
+  status           String                         @default("draft")
+  destinationUrl   String?
+  useLinkPreview   Boolean                        @default(false)
+  validationStatus String                         @default("unvalidated")
+  scheduledAt      DateTime?
+  publishedAt      DateTime?
+  caption          String?
+  assetUrls        Json?
+  thumbnailUrl     String?
+  externalPostUrl  String?
+  publishProofUrl  String?
+  aiPrompt         String?
+  internalNotes    String?
+  complianceNotes  String?
+  publishLogs      Json?
+  createdAt        DateTime                       @default(now())
+  updatedAt        DateTime                       @updatedAt
+  org              Organization                   @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  brief            MigraMarketCreativeBrief?      @relation(fields: [briefId], references: [id], onDelete: SetNull)
+  connection       MigraMarketSocialConnection?   @relation(fields: [connectionId], references: [id], onDelete: SetNull)
+  captionVariant   MigraMarketContentCaption?     @relation(fields: [captionId], references: [id], onDelete: SetNull)
+  selectedAsset    MigraMarketContentAsset?       @relation("SelectedAsset", fields: [selectedAssetId], references: [id], onDelete: SetNull)
+  validations      MigraMarketPublishValidation[]
+
+  @@index([orgId, status, scheduledAt])
+  @@index([orgId, platform, createdAt])
+  @@index([orgId, validationStatus, createdAt])
+}
+
+model MigraMarketContentTemplate {
+  id                  String                           @id @default(cuid())
+  orgId               String
+  name                String
+  templateKey         String?
+  platform            String
+  format              String                           @default("post")
+  cadence             String                           @default("weekly")
+  publishMode         String                           @default("assisted")
+  titleTemplate       String
+  captionTemplate     String?
+  aiPromptTemplate    String?
+  cta                 String?
+  width               Int?
+  height              Int?
+  styleFamily         String?
+  logoRequired        Boolean                          @default(true)
+  ctaRequired         Boolean                          @default(true)
+  maxHeadlineChars    Int                              @default(40)
+  maxSubheadlineChars Int                              @default(80)
+  maxBullets          Int                              @default(4)
+  safeZones           Json?
+  hashtags            Json?
+  diversityChecklist  Json?
+  status              String                           @default("active")
+  createdAt           DateTime                         @default(now())
+  updatedAt           DateTime                         @updatedAt
+  org                 Organization                     @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  calendarSlots       MigraMarketContentCalendarSlot[]
+
+  @@unique([orgId, templateKey])
+  @@index([orgId, status, platform])
+  @@index([orgId, cadence, createdAt])
+}
+
+model MigraMarketContentCalendarSlot {
+  id             String                       @id @default(cuid())
+  orgId          String
+  templateId     String?
+  connectionId   String?
+  title          String
+  platform       String
+  format         String                       @default("post")
+  publishMode    String                       @default("assisted")
+  weekday        Int
+  slotTime       String?
+  scheduledFor   DateTime?
+  status         String                       @default("planned")
+  theme          String?
+  cta            String?
+  aiPrompt       String?
+  assetChecklist Json?
+  notes          String?
+  createdAt      DateTime                     @default(now())
+  updatedAt      DateTime                     @updatedAt
+  org            Organization                 @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  template       MigraMarketContentTemplate?  @relation(fields: [templateId], references: [id], onDelete: SetNull)
+  connection     MigraMarketSocialConnection? @relation(fields: [connectionId], references: [id], onDelete: SetNull)
+
+  @@index([orgId, weekday, status])
+  @@index([orgId, scheduledFor])
+}
+
+model MigraMarketContentAsset {
+  id                    String                         @id @default(cuid())
+  orgId                 String
+  assetKey              String
+  brand                 String
+  category              String
+  offer                 String?
+  styleFamily           String?
+  platformTargets       Json?
+  width                 Int
+  height                Int
+  aspectRatio           String
+  fileUrl               String
+  previewUrl            String?
+  landingPageIntent     String?
+  status                String                         @default("draft")
+  qualityScore          Float?
+  tags                  Json?
+  campaignKeys          Json?
+  templateKey           String?
+  blacklistForCampaigns Json?
+  createdAt             DateTime                       @default(now())
+  updatedAt             DateTime                       @updatedAt
+  org                   Organization                   @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  selectedByJobs        MigraMarketContentJob[]        @relation("SelectedAsset")
+  publishValidations    MigraMarketPublishValidation[]
+
+  @@unique([orgId, assetKey])
+  @@index([orgId, status, createdAt])
+  @@index([orgId, brand, category, createdAt])
+}
+
+model MigraMarketContentCaption {
+  id                 String                         @id @default(cuid())
+  orgId              String
+  briefId            String
+  captionKey         String
+  platform           String
+  tone               String                         @default("premium_business")
+  body               String
+  cta                String
+  destinationUrl     String
+  useLinkPreview     Boolean                        @default(false)
+  status             String                         @default("approved")
+  createdAt          DateTime                       @default(now())
+  updatedAt          DateTime                       @updatedAt
+  org                Organization                   @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  brief              MigraMarketCreativeBrief       @relation(fields: [briefId], references: [id], onDelete: Cascade)
+  contentJobs        MigraMarketContentJob[]
+  publishValidations MigraMarketPublishValidation[]
+
+  @@unique([orgId, captionKey])
+  @@index([orgId, briefId, platform, status])
+}
+
+model MigraMarketOgSnapshot {
+  id                 String        @id @default(cuid())
+  orgId              String?
+  url                String
+  ogTitle            String?
+  ogDescription      String?
+  ogImage            String?
+  twitterTitle       String?
+  twitterDescription String?
+  twitterImage       String?
+  fetchedAt          DateTime      @default(now())
+  createdAt          DateTime      @default(now())
+  org                Organization? @relation(fields: [orgId], references: [id], onDelete: SetNull)
+
+  @@index([url, fetchedAt])
+  @@index([orgId, fetchedAt])
+}
+
+model MigraMarketPublishValidation {
+  id                 String                     @id @default(cuid())
+  orgId              String
+  jobId              String
+  briefId            String?
+  assetId            String?
+  captionId          String?
+  platform           String
+  campaignMatch      Boolean
+  assetApproved      Boolean
+  platformValid      Boolean
+  dimensionsValid    Boolean
+  captionMatch       Boolean
+  ctaMatch           Boolean
+  landingPageMatch   Boolean
+  ogMatch            Boolean
+  assetBlacklisted   Boolean
+  brandLogoMatch     Boolean
+  qualityScore       Float?
+  designQualityScore Float?
+  finalStatus        String
+  rawReport          Json?
+  createdAt          DateTime                   @default(now())
+  org                Organization               @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  job                MigraMarketContentJob      @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  brief              MigraMarketCreativeBrief?  @relation(fields: [briefId], references: [id], onDelete: SetNull)
+  asset              MigraMarketContentAsset?   @relation(fields: [assetId], references: [id], onDelete: SetNull)
+  caption            MigraMarketContentCaption? @relation(fields: [captionId], references: [id], onDelete: SetNull)
+
+  @@index([jobId, createdAt])
+  @@index([orgId, finalStatus, createdAt])
+}
+
+model DownloadArtifact {
+  id        String     @id @default(cuid())
+  name      String
+  product   ProductKey
+  version   String
+  fileKey   String
+  sha256    String
+  sizeBytes BigInt
+  isActive  Boolean    @default(true)
+  createdAt DateTime   @default(now())
+
+  @@index([product, isActive])
+  @@index([createdAt])
+}
+
+model BillingCustomer {
+  id                 String          @id @default(cuid())
+  orgId              String
+  provider           BillingProvider @default(STRIPE)
+  externalCustomerId String          @unique
+  email              String?
+  metadata           Json?
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+  org                Organization    @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@unique([orgId, provider])
+  @@index([provider, externalCustomerId])
+}
+
+model BillingSubscription {
+  id                     String                    @id @default(cuid())
+  orgId                  String
+  provider               BillingProvider           @default(STRIPE)
+  externalSubscriptionId String                    @unique
+  externalCustomerId     String?
+  status                 BillingSubscriptionStatus
+  currentPeriodStart     DateTime?
+  currentPeriodEnd       DateTime?
+  cancelAtPeriodEnd      Boolean                   @default(false)
+  canceledAt             DateTime?
+  metadata               Json?
+  createdAt              DateTime                  @default(now())
+  updatedAt              DateTime                  @updatedAt
+  org                    Organization              @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([orgId, status])
+  @@index([provider, externalCustomerId])
+}
+
+model BillingWebhookEvent {
+  id           String                    @id @default(cuid())
+  provider     BillingProvider           @default(STRIPE)
+  eventId      String                    @unique
+  eventType    String
+  eventCreated Int?
+  livemode     Boolean?
+  status       BillingWebhookEventStatus @default(RECEIVED)
+  reason       String?
+  processedAt  DateTime?
+  receivedAt   DateTime                  @default(now())
+  updatedAt    DateTime                  @updatedAt
+
+  @@index([provider, receivedAt])
+  @@index([status, receivedAt])
+}
+
+model BillingEntitlementBinding {
+  id              String            @id @default(cuid())
+  provider        BillingProvider   @default(STRIPE)
+  externalPriceId String            @unique
+  product         ProductKey
+  statusOnActive  EntitlementStatus @default(ACTIVE)
+  notes           String?
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  @@index([provider, product])
+}
+
+model ProvisioningTask {
+  id              String                 @id @default(cuid())
+  orgId           String
+  product         ProductKey?
+  action          ProvisioningAction
+  status          ProvisioningTaskStatus @default(PENDING)
+  attempts        Int                    @default(0)
+  runAfter        DateTime?
+  lastError       String?
+  payload         Json?
+  createdByUserId String?
+  createdAt       DateTime               @default(now())
+  updatedAt       DateTime               @updatedAt
+  org             Organization           @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  createdByUser   User?                  @relation("ProvisioningTaskCreator", fields: [createdByUserId], references: [id], onDelete: SetNull)
+
+  @@index([orgId, status, createdAt])
+  @@index([status, runAfter, createdAt])
+}
+
+model UserTotpFactor {
+  id               String    @id @default(cuid())
+  userId           String    @unique
+  secretCiphertext String
+  enabledAt        DateTime  @default(now())
+  lastUsedAt       DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model TotpCodeUsage {
+  id        String   @id @default(cuid())
+  userId    String
+  codeHash  String
+  usedAt    DateTime @default(now())
+  expiresAt DateTime
+
+  @@unique([userId, codeHash])
+  @@index([expiresAt])
+}
+
+model MutationIntent {
+  id               String        @id @default(cuid())
+  orgId            String?
+  actorId          String
+  action           String
+  riskTier         Int           @default(2)
+  payloadHash      String
+  expiresAt        DateTime
+  usedAt           DateTime?
+  createdAt        DateTime      @default(now())
+  ip               String?
+  userAgent        String?
+  stepUpMethod     StepUpMethod  @default(NONE)
+  stepUpVerifiedAt DateTime?
+  reason           String?
+  org              Organization? @relation(fields: [orgId], references: [id], onDelete: SetNull)
+  actor            User          @relation("MutationIntentActor", fields: [actorId], references: [id], onDelete: Cascade)
+
+  @@index([actorId, createdAt])
+  @@index([orgId, createdAt])
+  @@index([action])
+  @@index([expiresAt])
+  @@index([usedAt])
+}
+
+model ProvisioningJob {
+  id               String                 @id @default(cuid())
+  orgId            String
+  createdByActorId String?
+  source           ProvisioningJobSource
+  type             ProvisioningJobType
+  status           ProvisioningJobStatus  @default(PENDING)
+  attempts         Int                    @default(0)
+  maxAttempts      Int                    @default(5)
+  notBefore        DateTime?
+  lastError        String?
+  lastErrorAt      DateTime?
+  lockedAt         DateTime?
+  lockedBy         String?
+  startedAt        DateTime?
+  finishedAt       DateTime?
+  idempotencyKey   String                 @unique
+  envelopeVersion  Int                    @default(1)
+  payload          Json
+  payloadHash      String
+  signature        String
+  expiresAt        DateTime?
+  createdAt        DateTime               @default(now())
+  updatedAt        DateTime               @updatedAt
+  org              Organization           @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  createdByActor   User?                  @relation("ProvisioningJobCreator", fields: [createdByActorId], references: [id], onDelete: SetNull)
+  events           ProvisioningJobEvent[]
+
+  @@index([status, notBefore])
+  @@index([orgId, createdAt])
+}
+
+model ProvisioningJobEvent {
+  id        String                @id @default(cuid())
+  jobId     String
+  status    ProvisioningJobStatus
+  message   String?
+  metadata  Json?
+  createdAt DateTime              @default(now())
+  job       ProvisioningJob       @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@index([jobId, createdAt])
+}
+
+model AuditLog {
+  id         String        @id @default(cuid())
+  userId     String?
+  orgId      String?
+  action     String
+  entityType String?
+  entityId   String?
+  ip         String?
+  userAgent  String?
+  metadata   Json?
+  createdAt  DateTime      @default(now())
+  user       User?         @relation(fields: [userId], references: [id], onDelete: SetNull)
+  org        Organization? @relation(fields: [orgId], references: [id], onDelete: SetNull)
+
+  @@index([orgId, createdAt])
+  @@index([userId, createdAt])
+  @@index([action, createdAt])
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Enterprise Identity — Phase A
+// ═══════════════════════════════════════════════════════════════════════
+
+enum SecurityEventSeverity {
+  INFO
+  WARNING
+  CRITICAL
+}
+
+model SecurityEvent {
+  id         String                @id @default(cuid())
+  userId     String?
+  orgId      String?
+  eventType  String
+  severity   SecurityEventSeverity @default(INFO)
+  ip         String?
+  userAgent  String?
+  country    String?
+  metadata   Json?
+  createdAt  DateTime              @default(now())
+  user       User?                 @relation(fields: [userId], references: [id], onDelete: SetNull)
+  org        Organization?         @relation(fields: [orgId], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt])
+  @@index([orgId, createdAt])
+  @@index([eventType, createdAt])
+  @@index([severity, createdAt])
+}
+
+model UserPasskey {
+  id              String    @id @default(cuid())
+  userId          String
+  credentialId    String    @unique
+  publicKey       Bytes
+  counter         BigInt    @default(0)
+  deviceType      String?
+  backedUp        Boolean   @default(false)
+  transports      String[]
+  friendlyName    String?
+  lastUsedAt      DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model OrgPolicy {
+  id                  String        @id @default(cuid())
+  orgId               String
+  requireMfa          Boolean       @default(false)
+  allowedMfaMethods   String[]
+  allowedEmailDomains String[]
+  maxSessionDurationH Int?
+  requirePasskeyForAdmin Boolean   @default(false)
+  ipAllowlist         String[]
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime      @updatedAt
+  org                 Organization  @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@unique([orgId])
+}
+
+model Permission {
+  id         String       @id @default(cuid())
+  orgId      String
+  userId     String
+  action     String
+  resource   String?
+  resourceId String?
+  granted    Boolean      @default(true)
+  grantedBy  String?
+  expiresAt  DateTime?
+  createdAt  DateTime     @default(now())
+  updatedAt  DateTime     @updatedAt
+  org        Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  user       User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([orgId, userId, action, resource, resourceId])
+  @@index([userId, orgId])
+  @@index([orgId, action])
+}
+
+model EmailVerificationToken {
+  id        String    @id @default(cuid())
+  userId    String
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
+}
+
+model PasswordResetToken {
+  id        String    @id @default(cuid())
+  userId    String
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
+}
+
+model SmsOtpChallenge {
+  id           String    @id @default(cuid())
+  userId       String
+  phone        String
+  purpose      String    @default("login")
+  codeHash     String
+  attemptCount Int       @default(0)
+  expiresAt    DateTime
+  usedAt       DateTime?
+  ip           String?
+  userAgent    String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, purpose, createdAt])
+  @@index([phone, purpose, createdAt])
+  @@index([expiresAt, usedAt])
+}
+
+model RateLimitEvent {
+  id        String   @id @default(cuid())
+  key       String
+  action    String
+  createdAt DateTime @default(now())
+
+  @@index([key, action, createdAt])
+}
+
+model LaunchTokenNonce {
+  id        String     @id @default(cuid())
+  nonceHash String     @unique
+  userId    String
+  orgId     String
+  product   ProductKey
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime   @default(now())
+
+  @@index([expiresAt, usedAt])
+  @@index([userId, orgId, product])
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expires])
+}
+
+model RefreshSession {
+  id         String       @id @default(cuid())
+  userId     String
+  orgId      String
+  tokenHash  String       @unique
+  familyId   String
+  parentId   String?
+  userAgent  String?
+  ipAddress  String?
+  createdAt  DateTime     @default(now())
+  expiresAt  DateTime
+  revokedAt  DateTime?
+  lastUsedAt DateTime?
+  user       User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  org        Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([orgId])
+  @@index([expiresAt])
+  @@index([familyId])
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+model PilotRun {
+  id                     String                         @id @default(cuid())
+  source                 String
+  actorUserId            String?
+  delegatedByPrincipalId String?
+  orgId                  String?
+  environment            String                         @default("dev")
+  intent                 String
+  commandName            String?
+  riskTier               Int                            @default(1)
+  status                 PilotRunStatus                 @default(REQUESTED)
+  verificationState      PilotVerificationState         @default(PENDING)
+  rollbackState          PilotRollbackState             @default(NOT_REQUIRED)
+  correlationId          String?
+  summary                String?
+  startedAt              DateTime                       @default(now())
+  finishedAt             DateTime?
+  createdAt              DateTime                       @default(now())
+  updatedAt              DateTime                       @updatedAt
+  actorUser              User?                          @relation("PilotRunActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+  org                    Organization?                  @relation(fields: [orgId], references: [id], onDelete: SetNull)
+  steps                  PilotRunStep[]
+  events                 PilotEvent[]
+  policyDecisions        PilotPolicyDecision[]
+  approvals              PilotApproval[]
+  artifacts              PilotArtifact[]
+  executionLocks         PilotExecutionLock[]
+  incidentLinks          PilotIncidentLink[]
+  commandSnapshots       CommandDefinitionSnapshot[]
+  capabilitySnapshots    CapabilityDefinitionSnapshot[]
+
+  @@index([status, startedAt])
+  @@index([orgId, startedAt])
+  @@index([actorUserId, startedAt])
+  @@index([commandName, startedAt])
+}
+
+model PilotRunStep {
+  id                   String             @id @default(cuid())
+  pilotRunId           String
+  sequence             Int
+  stepType             String
+  title                String
+  description          String?
+  status               PilotRunStepStatus @default(PENDING)
+  targetType           String?
+  targetId             String?
+  retryCount           Int                @default(0)
+  rollbackStep         Boolean            @default(false)
+  verificationRequired Boolean            @default(true)
+  startedAt            DateTime?
+  finishedAt           DateTime?
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+  pilotRun             PilotRun           @relation(fields: [pilotRunId], references: [id], onDelete: Cascade)
+  events               PilotEvent[]
+  artifacts            PilotArtifact[]
+
+  @@unique([pilotRunId, sequence])
+  @@index([status, startedAt])
+}
+
+model PilotEvent {
+  id             String        @id @default(cuid())
+  pilotRunId     String
+  pilotRunStepId String?
+  eventType      String
+  message        String
+  severity       String?
+  metadata       Json?
+  createdAt      DateTime      @default(now())
+  pilotRun       PilotRun      @relation(fields: [pilotRunId], references: [id], onDelete: Cascade)
+  pilotRunStep   PilotRunStep? @relation(fields: [pilotRunStepId], references: [id], onDelete: SetNull)
+
+  @@index([pilotRunId, createdAt])
+  @@index([pilotRunStepId, createdAt])
+}
+
+model PilotPolicyDecision {
+  id               String                    @id @default(cuid())
+  pilotRunId       String
+  policyName       String
+  decision         PilotPolicyDecisionResult
+  reason           String?
+  riskTier         Int                       @default(1)
+  requiresApproval Boolean                   @default(false)
+  blocked          Boolean                   @default(false)
+  metadata         Json?
+  createdAt        DateTime                  @default(now())
+  pilotRun         PilotRun                  @relation(fields: [pilotRunId], references: [id], onDelete: Cascade)
+
+  @@index([pilotRunId, createdAt])
+  @@index([decision, createdAt])
+}
+
+model PilotApproval {
+  id                      String              @id @default(cuid())
+  pilotRunId              String
+  approvalType            String
+  status                  PilotApprovalStatus @default(PENDING)
+  requestedByUserId       String?
+  approverUserId          String?
+  reason                  String?
+  riskSummary             String?
+  blastRadiusSummary      String?
+  rollbackPlanSummary     String?
+  verificationPlanSummary String?
+  requestedAt             DateTime            @default(now())
+  decidedAt               DateTime?
+  pilotRun                PilotRun            @relation(fields: [pilotRunId], references: [id], onDelete: Cascade)
+  requestedByUser         User?               @relation("PilotApprovalRequester", fields: [requestedByUserId], references: [id], onDelete: SetNull)
+  approverUser            User?               @relation("PilotApprovalApprover", fields: [approverUserId], references: [id], onDelete: SetNull)
+
+  @@index([status, requestedAt])
+  @@index([pilotRunId, requestedAt])
+}
+
+model PilotArtifact {
+  id             String                      @id @default(cuid())
+  pilotRunId     String
+  pilotRunStepId String?
+  artifactType   String
+  storageUri     String
+  contentType    String?
+  checksum       String?
+  redactionState PilotArtifactRedactionState @default(SANITIZED)
+  createdAt      DateTime                    @default(now())
+  pilotRun       PilotRun                    @relation(fields: [pilotRunId], references: [id], onDelete: Cascade)
+  pilotRunStep   PilotRunStep?               @relation(fields: [pilotRunStepId], references: [id], onDelete: SetNull)
+
+  @@index([pilotRunId, createdAt])
+  @@index([artifactType, createdAt])
+}
+
+model PilotExecutionLock {
+  id         String    @id @default(cuid())
+  lockKey    String    @unique
+  lockScope  String
+  orgId      String?
+  targetType String?
+  targetId   String?
+  pilotRunId String
+  acquiredAt DateTime  @default(now())
+  expiresAt  DateTime
+  releasedAt DateTime?
+  pilotRun   PilotRun  @relation(fields: [pilotRunId], references: [id], onDelete: Cascade)
+
+  @@index([orgId, acquiredAt])
+  @@index([targetType, targetId])
+}
+
+model PilotIncidentLink {
+  id          String   @id @default(cuid())
+  pilotRunId  String
+  incidentRef String
+  linkType    String
+  createdAt   DateTime @default(now())
+  pilotRun    PilotRun @relation(fields: [pilotRunId], references: [id], onDelete: Cascade)
+
+  @@index([pilotRunId, createdAt])
+  @@index([incidentRef, createdAt])
+}
+
+model ResourceNode {
+  id              String                  @id @default(cuid())
+  nodeType        ResourceNodeType
+  externalId      String?
+  displayName     String
+  orgId           String?
+  product         ProductKey?
+  environment     String?
+  status          String                  @default("unknown")
+  metadata        Json?
+  createdAt       DateTime                @default(now())
+  updatedAt       DateTime                @updatedAt
+  org             Organization?           @relation(fields: [orgId], references: [id], onDelete: SetNull)
+  outgoingEdges   ResourceEdge[]          @relation("ResourceEdgeFrom")
+  incomingEdges   ResourceEdge[]          @relation("ResourceEdgeTo")
+  healthSnapshots ServiceHealthSnapshot[]
+
+  @@index([nodeType, createdAt])
+  @@index([orgId, nodeType])
+  @@index([product, nodeType])
+}
+
+model ResourceEdge {
+  id               String                   @id @default(cuid())
+  fromNodeId       String
+  toNodeId         String
+  relationshipType ResourceRelationshipType
+  metadata         Json?
+  createdAt        DateTime                 @default(now())
+  fromNode         ResourceNode             @relation("ResourceEdgeFrom", fields: [fromNodeId], references: [id], onDelete: Cascade)
+  toNode           ResourceNode             @relation("ResourceEdgeTo", fields: [toNodeId], references: [id], onDelete: Cascade)
+
+  @@index([fromNodeId, relationshipType])
+  @@index([toNodeId, relationshipType])
+}
+
+model ServiceHealthSnapshot {
+  id             String             @id @default(cuid())
+  resourceNodeId String
+  healthState    ServiceHealthState @default(UNKNOWN)
+  signalSource   String
+  latencyMs      Int?
+  errorRate      Float?
+  metadata       Json?
+  measuredAt     DateTime           @default(now())
+  resourceNode   ResourceNode       @relation(fields: [resourceNodeId], references: [id], onDelete: Cascade)
+
+  @@index([resourceNodeId, measuredAt])
+  @@index([healthState, measuredAt])
+}
+
+model Runbook {
+  id           String           @id @default(cuid())
+  name         String
+  slug         String           @unique
+  status       String           @default("draft")
+  ownerProduct ProductKey?
+  serviceScope String?
+  riskTier     Int              @default(1)
+  orgId        String?
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+  org          Organization?    @relation(fields: [orgId], references: [id], onDelete: SetNull)
+  versions     RunbookVersion[]
+
+  @@index([status, updatedAt])
+  @@index([ownerProduct, updatedAt])
+}
+
+model RunbookVersion {
+  id                     String    @id @default(cuid())
+  runbookId              String
+  version                String
+  definition             Json
+  verificationDefinition Json?
+  rollbackDefinition     Json?
+  publishedAt            DateTime  @default(now())
+  supersededAt           DateTime?
+  runbook                Runbook   @relation(fields: [runbookId], references: [id], onDelete: Cascade)
+
+  @@unique([runbookId, version])
+  @@index([publishedAt])
+}
+
+model CommandDefinitionSnapshot {
+  id              String   @id @default(cuid())
+  pilotRunId      String
+  commandName     String
+  registryVersion String?
+  definition      Json
+  capturedAt      DateTime @default(now())
+  pilotRun        PilotRun @relation(fields: [pilotRunId], references: [id], onDelete: Cascade)
+
+  @@index([pilotRunId, capturedAt])
+  @@index([commandName, capturedAt])
+}
+
+model CapabilityDefinitionSnapshot {
+  id             String   @id @default(cuid())
+  pilotRunId     String
+  capabilityName String
+  definition     Json
+  capturedAt     DateTime @default(now())
+  pilotRun       PilotRun @relation(fields: [pilotRunId], references: [id], onDelete: Cascade)
+
+  @@index([pilotRunId, capturedAt])
+  @@index([capabilityName, capturedAt])
+}
+
+// ── MigraDrive Provisioning ─────────────────────────────────
+
+enum DriveTenantStatus {
+  PENDING
+  ACTIVE
+  RESTRICTED
+  DISABLED
+}
+
+enum DriveTenantActorType {
+  SYSTEM
+  ADMIN
+  USER
+}
+
+enum DriveFileStatus {
+  PENDING_UPLOAD
+  ACTIVE
+  DELETED
+}
+
+model DriveTenant {
+  id                String            @id @default(cuid())
+  orgId             String            @unique
+  orgSlug           String            @unique
+  status            DriveTenantStatus @default(PENDING)
+  planCode          String
+  storageQuotaGb    Int
+  storageUsedBytes  BigInt            @default(0)
+  subscriptionId    String?
+  entitlementId     String?
+  externalRef       String?
+  provisioningJobId String?
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+  activatedAt       DateTime?
+  restrictedAt      DateTime?
+  disabledAt        DateTime?
+  disableReason     String?
+  restrictionReason String?
+
+  files  DriveFile[]
+  events DriveTenantEvent[]
+  org    Organization       @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([status])
+  @@index([subscriptionId])
+  @@index([entitlementId])
+}
+
+model DriveFile {
+  id             String          @id @default(cuid())
+  tenantId       String
+  orgId          String
+  objectKey      String          @unique
+  fileName       String
+  parentPath     String?
+  mimeType       String
+  sizeBytes      BigInt
+  checksumSha256 String?
+  status         DriveFileStatus @default(PENDING_UPLOAD)
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  uploadedAt     DateTime?
+  deletedAt      DateTime?
+
+  tenant DriveTenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  org    Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([orgId, status, createdAt])
+  @@index([tenantId, status, createdAt])
+  @@index([orgId, parentPath, fileName])
+}
+
+model DriveTenantEvent {
+  id               String               @id @default(cuid())
+  tenantId         String
+  orgId            String
+  action           String
+  previousStatus   DriveTenantStatus?
+  newStatus        DriveTenantStatus?
+  previousPlanCode String?
+  newPlanCode      String?
+  previousQuotaGb  Int?
+  newQuotaGb       Int?
+  subscriptionId   String?
+  entitlementId    String?
+  idempotencyKey   String?
+  traceId          String?
+  actorType        DriveTenantActorType
+  actorId          String?
+  metadataJson     String?
+  createdAt        DateTime             @default(now())
+
+  tenant DriveTenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, createdAt])
+  @@index([orgId, createdAt])
+  @@index([action, createdAt])
+  @@index([idempotencyKey])
+}
+
+model DriveTenantOperation {
+  id             String    @id @default(cuid())
+  tenantId       String?
+  orgId          String
+  operationType  String
+  status         String
+  requestJson    String?
+  responseJson   String?
+  errorCode      String?
+  errorMessage   String?
+  idempotencyKey String?
+  traceId        String?
+  startedAt      DateTime  @default(now())
+  completedAt    DateTime?
+
+  @@index([orgId, startedAt])
+  @@index([tenantId, startedAt])
+  @@index([operationType, startedAt])
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// MigraBuilder — AI Website Builder
+// ═══════════════════════════════════════════════════════════════════════
+
+enum BuilderSiteStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+enum BuilderDeploymentStatus {
+  PENDING
+  BUILDING
+  DEPLOYING
+  LIVE
+  FAILED
+  ROLLED_BACK
+}
+
+model BuilderSite {
+  id            String              @id @default(cuid())
+  orgId         String
+  name          String
+  slug          String              @unique
+  domain        String?
+  status        BuilderSiteStatus   @default(DRAFT)
+  themeJson     Json                @default("{}")
+  metaJson      Json                @default("{}")
+  createdById   String
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+  org           Organization        @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  createdBy     User                @relation("BuilderSiteCreator", fields: [createdById], references: [id], onDelete: Cascade)
+  pages         BuilderPage[]
+  versions      BuilderSiteVersion[]
+  assets        BuilderAsset[]
+  formBindings  BuilderFormBinding[]
+  deployments   BuilderDeployment[]
+
+  @@index([orgId, status])
+  @@index([createdById])
+}
+
+model BuilderPage {
+  id        String          @id @default(cuid())
+  siteId    String
+  title     String
+  slug      String
+  sortOrder Int             @default(0)
+  metaJson  Json            @default("{}")
+  createdAt DateTime        @default(now())
+  updatedAt DateTime        @updatedAt
+  site      BuilderSite     @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  sections  BuilderSection[]
+
+  @@unique([siteId, slug])
+  @@index([siteId, sortOrder])
+}
+
+model BuilderSection {
+  id          String      @id @default(cuid())
+  pageId      String
+  sectionType String
+  propsJson   Json        @default("{}")
+  sortOrder   Int         @default(0)
+  isVisible   Boolean     @default(true)
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+  page        BuilderPage @relation(fields: [pageId], references: [id], onDelete: Cascade)
+
+  @@index([pageId, sortOrder])
+}
+
+model BuilderSiteVersion {
+  id           String              @id @default(cuid())
+  siteId       String
+  version      Int
+  snapshotJson Json
+  createdById  String
+  createdAt    DateTime            @default(now())
+  site         BuilderSite         @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  deployments  BuilderDeployment[]
+
+  @@unique([siteId, version])
+  @@index([siteId, createdAt])
+}
+
+model BuilderAsset {
+  id        String      @id @default(cuid())
+  siteId    String
+  fileName  String
+  mimeType  String
+  sizeBytes Int
+  storageKey String
+  createdAt DateTime    @default(now())
+  site      BuilderSite @relation(fields: [siteId], references: [id], onDelete: Cascade)
+
+  @@index([siteId])
+}
+
+model BuilderFormBinding {
+  id          String      @id @default(cuid())
+  siteId      String
+  sectionId   String
+  targetType  String      @default("email")
+  targetValue String
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+  site        BuilderSite @relation(fields: [siteId], references: [id], onDelete: Cascade)
+
+  @@unique([siteId, sectionId])
+}
+
+model BuilderDeployment {
+  id          String                  @id @default(cuid())
+  siteId      String
+  versionId   String
+  status      BuilderDeploymentStatus @default(PENDING)
+  deployUrl   String?
+  errorMessage String?
+  startedAt   DateTime                @default(now())
+  completedAt DateTime?
+  site        BuilderSite             @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  version     BuilderSiteVersion      @relation(fields: [versionId], references: [id], onDelete: Cascade)
+
+  @@index([siteId, startedAt])
+  @@index([status])
+}
+
+// ─── Phase B: API Key Management ───────────────────────────────────────
+
+enum ApiKeyStatus {
+  ACTIVE
+  REVOKED
+  EXPIRED
+}
+
+model ApiKey {
+  id           String       @id @default(cuid())
+  orgId        String
+  name         String
+  prefixHint   String       // first 8 chars for identification
+  keyHash      String       @unique
+  status       ApiKeyStatus @default(ACTIVE)
+  scopes       String[]     @default([])
+  expiresAt    DateTime?
+  revokedAt    DateTime?
+  lastUsedAt   DateTime?
+  createdById  String
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+  org          Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  createdBy    User         @relation("ApiKeyCreator", fields: [createdById], references: [id], onDelete: Cascade)
+
+  @@index([orgId, status])
+  @@index([keyHash])
+}
+
+// ─── Phase B: Usage Metering ───────────────────────────────────────────
+
+enum UsageMetric {
+  API_CALLS
+  STORAGE_BYTES
+  BANDWIDTH_BYTES
+  SEATS
+  EMAILS_SENT
+  SMS_SENT
+  BUILDS
+  DEPLOYMENTS
+  VPS_HOURS
+  CUSTOM
+}
+
+model UsageEvent {
+  id        String      @id @default(cuid())
+  orgId     String
+  product   ProductKey
+  metric    UsageMetric
+  quantity  BigInt      @default(1)
+  metadata  Json?
+  timestamp DateTime    @default(now())
+  org       Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([orgId, product, metric, timestamp])
+  @@index([orgId, timestamp])
+}
+
+model UsageQuota {
+  id          String      @id @default(cuid())
+  orgId       String
+  product     ProductKey
+  metric      UsageMetric
+  limitValue  BigInt
+  periodStart DateTime
+  periodEnd   DateTime
+  currentUsed BigInt      @default(0)
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+  org         Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@unique([orgId, product, metric, periodStart])
+  @@index([orgId, periodEnd])
+}
+
+// ─── Phase B: Outbound Webhook Engine ──────────────────────────────────
+
+enum WebhookStatus {
+  ACTIVE
+  PAUSED
+  DISABLED
+}
+
+enum WebhookDeliveryStatus {
+  PENDING
+  DELIVERED
+  FAILED
+  EXPIRED
+}
+
+model OrgWebhookEndpoint {
+  id          String        @id @default(cuid())
+  orgId       String
+  url         String
+  secret      String        // signing secret for HMAC
+  events      String[]      @default([]) // event types subscribed
+  status      WebhookStatus @default(ACTIVE)
+  description String?
+  failCount   Int           @default(0)
+  lastDeliveryAt DateTime?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  org         Organization  @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  deliveries  WebhookDelivery[]
+
+  @@index([orgId, status])
+}
+
+model WebhookDelivery {
+  id          String                @id @default(cuid())
+  endpointId  String
+  eventType   String
+  payload     Json
+  status      WebhookDeliveryStatus @default(PENDING)
+  attempts    Int                   @default(0)
+  maxAttempts Int                   @default(5)
+  lastAttemptAt DateTime?
+  nextRetryAt   DateTime?
+  httpStatus    Int?
+  responseBody  String?
+  duration      Int?                // ms
+  createdAt   DateTime              @default(now())
+  updatedAt   DateTime              @updatedAt
+  endpoint    OrgWebhookEndpoint    @relation(fields: [endpointId], references: [id], onDelete: Cascade)
+
+  @@index([endpointId, status])
+  @@index([status, nextRetryAt])
+  @@index([createdAt])
+}
+
+// ─── Phase D: Operations Layer ──────────────────────────────────────────
+
+enum NotificationChannel {
+  IN_APP
+  EMAIL
+  SMS
+  WEBHOOK
+}
+
+enum NotificationStatus {
+  UNREAD
+  READ
+  ARCHIVED
+}
+
+enum AlertSeverity {
+  INFO
+  WARNING
+  CRITICAL
+}
+
+enum AlertStatus {
+  ACTIVE
+  ACKNOWLEDGED
+  RESOLVED
+  SILENCED
+}
+
+enum AlertRuleStatus {
+  ENABLED
+  DISABLED
+  SNOOZED
+}
+
+enum ScheduledTaskStatus {
+  ACTIVE
+  PAUSED
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+model Notification {
+  id          String             @id @default(cuid())
+  userId      String
+  orgId       String?
+  channel     NotificationChannel @default(IN_APP)
+  status      NotificationStatus  @default(UNREAD)
+  title       String
+  body        String
+  actionUrl   String?
+  category    String              // e.g. "billing", "provisioning", "security", "system"
+  metadata    Json?
+  readAt      DateTime?
+  archivedAt  DateTime?
+  expiresAt   DateTime?
+  createdAt   DateTime            @default(now())
+  user        User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  org         Organization?       @relation(fields: [orgId], references: [id], onDelete: SetNull)
+
+  @@index([userId, status, createdAt])
+  @@index([userId, category])
+  @@index([orgId])
+}
+
+model NotificationPreference {
+  id          String             @id @default(cuid())
+  userId      String
+  category    String             // e.g. "billing", "provisioning", "security"
+  channel     NotificationChannel
+  enabled     Boolean            @default(true)
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+  user        User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, category, channel])
+}
+
+model PlatformEvent {
+  id           String    @id @default(cuid())
+  eventType    String    // e.g. "org.created", "provisioning.completed", "billing.overdue"
+  source       String    // e.g. "provisioning-engine", "billing", "auth"
+  orgId        String?
+  actorId      String?
+  entityType   String?   // e.g. "Organization", "User", "ProvisioningJob"
+  entityId     String?
+  payload      Json?
+  processedAt  DateTime?
+  createdAt    DateTime  @default(now())
+
+  @@index([eventType, createdAt])
+  @@index([orgId, eventType])
+  @@index([processedAt])
+}
+
+model AlertRule {
+  id             String          @id @default(cuid())
+  name           String
+  description    String?
+  status         AlertRuleStatus @default(ENABLED)
+  eventType      String          // event type pattern to match (supports * wildcard)
+  condition      Json            // e.g. { "field": "payload.errorRate", "op": "gt", "value": 0.05 }
+  severity       AlertSeverity   @default(WARNING)
+  cooldownMinutes Int            @default(60)
+  notifyChannels  Json           // ["IN_APP", "EMAIL"]
+  notifyRoleMin   String?        // minimum OrgRole to notify (e.g. "ADMIN")
+  lastFiredAt     DateTime?
+  snoozedUntil    DateTime?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+  alerts          Alert[]
+
+  @@index([eventType, status])
+}
+
+model Alert {
+  id           String        @id @default(cuid())
+  ruleId       String?
+  orgId        String?
+  severity     AlertSeverity @default(WARNING)
+  status       AlertStatus   @default(ACTIVE)
+  title        String
+  message      String
+  source       String        // which system raised it
+  entityType   String?
+  entityId     String?
+  metadata     Json?
+  acknowledgedAt DateTime?
+  acknowledgedBy String?
+  resolvedAt     DateTime?
+  resolvedBy     String?
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+  rule           AlertRule?  @relation(fields: [ruleId], references: [id], onDelete: SetNull)
+  vpsIncidents   VpsIncident[]
+  vpsAlertEvent  VpsAlertEvent?
+
+  @@index([status, severity, createdAt])
+  @@index([orgId, status])
+  @@index([ruleId])
+}
+
+model ScheduledTask {
+  id             String              @id @default(cuid())
+  name           String
+  description    String?
+  status         ScheduledTaskStatus @default(ACTIVE)
+  cronExpression String?             // standard cron (null = one-shot)
+  runAt          DateTime?           // for one-shot tasks
+  lastRunAt      DateTime?
+  nextRunAt      DateTime?
+  handler        String              // function/action identifier, e.g. "cleanup:expired-sessions"
+  payload        Json?               // arguments passed to handler
+  maxRetries     Int                 @default(3)
+  retryCount     Int                 @default(0)
+  lastError      String?
+  lockedBy       String?             // instance ID for distributed locking
+  lockedAt       DateTime?
+  timeoutSeconds Int                 @default(300)
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+
+  @@index([status, nextRunAt])
+  @@index([handler])
+}
+
+model DataExport {
+  id          String    @id @default(cuid())
+  orgId       String
+  userId      String
+  exportType  String    // e.g. "users", "audit", "usage", "billing", "all"
+  format      String    @default("csv") // "csv" | "json" | "xlsx"
+  status      String    @default("PENDING") // PENDING | PROCESSING | COMPLETED | FAILED
+  filters     Json?     // query filters applied
+  fileKey     String?   // S3/storage key for completed export
+  fileName    String?
+  fileSize    Int?
+  rowCount    Int?
+  error       String?
+  expiresAt   DateTime? // auto-delete after this date
+  completedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  org         Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([orgId, status])
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+// ─── Phase B: Billing Plan Catalog ─────────────────────────────────────
+
+model BillingPlan {
+  id              String       @id @default(cuid())
+  product         ProductKey
+  name            String
+  slug            String       @unique
+  stripePriceId   String?      @unique
+  intervalMonths  Int          @default(1)   // 1=monthly, 12=annual
+  priceAmountCents Int
+  currency        String       @default("usd")
+  features        Json?        // feature matrix { key: boolean/limit }
+  trialDays       Int          @default(0)
+  isPublic        Boolean      @default(true)
+  sortOrder       Int          @default(0)
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  @@index([product, isPublic])
+}
+
+// ─── Phase E: Ecosystem Integration ────────────────────────────────────
+
+enum SuggestionStatus {
+  ACTIVE
+  DISMISSED
+  ACCEPTED
+  EXPIRED
+}
+
+enum SuggestionTrigger {
+  DOMAIN_VERIFIED
+  SITE_DEPLOYED
+  SITE_PUBLISHED
+  EMAIL_ACTIVE
+  STORAGE_LOW
+  BILLING_OVERDUE
+  NO_BACKUP
+  NO_VOICE
+  NO_MARKETING
+  PRODUCT_TRIAL_ENDING
+  USAGE_MILESTONE
+  MANUAL
+}
+
+enum JourneyStage {
+  ONBOARDING
+  ACTIVATED
+  ENGAGED
+  POWER_USER
+  AT_RISK
+  CHURNED
+}
+
+enum PartnerTier {
+  REFERRAL
+  AFFILIATE
+  RESELLER
+  AGENCY
+}
+
+enum PartnerStatus {
+  PENDING
+  ACTIVE
+  SUSPENDED
+  REVOKED
+}
+
+model SuggestionRule {
+  id              String            @id @default(cuid())
+  name            String
+  description     String?
+  trigger         SuggestionTrigger
+  sourceProduct   ProductKey?       // product that triggers suggestion
+  targetProduct   ProductKey        // product being suggested
+  priority        Int               @default(50) // 0=highest, 100=lowest
+  title           String            // display title
+  body            String            // display description
+  actionLabel     String            @default("Set Up") // CTA text
+  actionUrl       String?           // deep link to product setup
+  conditions      Json?             // extra evaluation conditions
+  isActive        Boolean           @default(true)
+  maxPerOrg       Int               @default(1) // how many times per org
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  suggestions     Suggestion[]
+
+  @@index([trigger, isActive])
+  @@index([targetProduct])
+}
+
+model Suggestion {
+  id            String            @id @default(cuid())
+  orgId         String
+  userId        String?           // null = org-wide
+  ruleId        String
+  status        SuggestionStatus  @default(ACTIVE)
+  triggerEvent  String?           // event type that triggered this
+  triggerData   Json?             // context from trigger
+  dismissedAt   DateTime?
+  acceptedAt    DateTime?
+  expiresAt     DateTime?
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+  org           Organization      @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  user          User?             @relation(fields: [userId], references: [id], onDelete: SetNull)
+  rule          SuggestionRule    @relation(fields: [ruleId], references: [id], onDelete: Cascade)
+
+  @@index([orgId, status])
+  @@index([userId, status])
+  @@index([ruleId])
+  @@index([expiresAt])
+}
+
+model CustomerJourney {
+  id                String        @id @default(cuid())
+  orgId             String        @unique
+  stage             JourneyStage  @default(ONBOARDING)
+  score             Int           @default(0) // 0-100 health score
+  productsActive    Int           @default(0)
+  firstProductAt    DateTime?
+  lastActivityAt    DateTime?
+  trialEndsAt       DateTime?
+  churnRiskScore    Int           @default(0) // 0-100
+  milestones        Json?         // achieved milestones { key: timestamp }
+  metadata          Json?
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+  org               Organization  @relation(fields: [orgId], references: [id], onDelete: Cascade)
+}
+
+model ReferralCode {
+  id              String        @id @default(cuid())
+  code            String        @unique
+  partnerId       String        // org that owns the referral code
+  description     String?
+  commissionPct   Int           @default(0)  // 0-100
+  maxUses         Int?          // null = unlimited
+  usedCount       Int           @default(0)
+  isActive        Boolean       @default(true)
+  expiresAt       DateTime?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  partner         Organization  @relation("PartnerReferralCodes", fields: [partnerId], references: [id], onDelete: Cascade)
+  conversions     ReferralConversion[]
+
+  @@index([code])
+  @@index([partnerId])
+}
+
+model ReferralConversion {
+  id              String        @id @default(cuid())
+  referralCodeId  String
+  convertedOrgId  String
+  convertedUserId String?
+  product         ProductKey?
+  revenueAmountCents Int?
+  commissionAmountCents Int?
+  settledAt       DateTime?
+  createdAt       DateTime      @default(now())
+  referralCode    ReferralCode  @relation(fields: [referralCodeId], references: [id], onDelete: Cascade)
+  convertedOrg    Organization  @relation("ReferralConversions", fields: [convertedOrgId], references: [id], onDelete: Cascade)
+
+  @@index([referralCodeId])
+  @@index([convertedOrgId])
+}
+
+model PartnerBinding {
+  id            String        @id @default(cuid())
+  orgId         String
+  tier          PartnerTier   @default(REFERRAL)
+  status        PartnerStatus @default(PENDING)
+  companyName   String?
+  contactEmail  String?
+  commissionPct Int           @default(10) // default commission
+  metadata      Json?
+  approvedAt    DateTime?
+  suspendedAt   DateTime?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+  org           Organization  @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@unique([orgId])
+  @@index([status, tier])
+}
+
+model BundlePlan {
+  id              String       @id @default(cuid())
+  name            String
+  slug            String       @unique
+  products        ProductKey[] // products included
+  stripePriceId   String?      @unique
+  priceAmountCents Int
+  savingsPercent  Int          @default(0)
+  currency        String       @default("usd")
+  intervalMonths  Int          @default(1)
+  features        Json?
+  trialDays       Int          @default(0)
+  isPublic        Boolean      @default(true)
+  sortOrder       Int          @default(0)
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  @@index([isPublic])
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Phase F: Enterprise / Compliance Posture
+// ═══════════════════════════════════════════════════════════════════════════
+
+// ─── Secret Management ────────────────────────────────────────────────────
+
+enum SecretScope {
+  PLATFORM
+  ORGANIZATION
+  SERVICE
+}
+
+model SecretEntry {
+  id               String      @id @default(cuid())
+  orgId            String?
+  scope            SecretScope @default(PLATFORM)
+  name             String      // logical name e.g. "STRIPE_SECRET_KEY"
+  encryptedValue   String      // AES-256-GCM ciphertext (base64)
+  iv               String      // initialization vector (base64)
+  authTag          String      // GCM auth tag (base64)
+  keyVersion       Int         @default(1) // envelope key version
+  rotateAfterDays  Int?        // auto-rotation cadence
+  lastRotatedAt    DateTime?
+  expiresAt        DateTime?
+  createdById      String?
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+  org              Organization? @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  createdBy        User?       @relation("SecretCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  rotationSchedules KeyRotationSchedule[]
+
+  @@unique([orgId, scope, name])
+  @@index([scope, expiresAt])
+}
+
+model KeyRotationSchedule {
+  id             String    @id @default(cuid())
+  secretId       String
+  cronExpression String    @default("0 0 1 * *") // monthly
+  lastRunAt      DateTime?
+  nextRunAt      DateTime?
+  isActive       Boolean   @default(true)
+  failCount      Int       @default(0)
+  lastError      String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  secret         SecretEntry @relation(fields: [secretId], references: [id], onDelete: Cascade)
+
+  @@index([isActive, nextRunAt])
+}
+
+// ─── Encrypted Object Storage ─────────────────────────────────────────────
+
+model EncryptedBlob {
+  id             String   @id @default(cuid())
+  orgId          String?
+  bucketName     String   // logical bucket (e.g. "exports", "backups")
+  objectKey      String   // storage path/key
+  mimeType       String?
+  sizeBytes      BigInt   @default(0)
+  encryptionAlgo String   @default("AES-256-GCM")
+  keyVersion     Int      @default(1)
+  checksumSha256 String?  // integrity check
+  metadata       Json?
+  expiresAt      DateTime?
+  createdById    String?
+  createdAt      DateTime @default(now())
+  org            Organization? @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  createdBy      User?    @relation("BlobCreator", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@unique([bucketName, objectKey])
+  @@index([orgId, bucketName])
+  @@index([expiresAt])
+}
+
+// ─── Retention Policies ───────────────────────────────────────────────────
+
+enum RetentionAction {
+  DELETE
+  ARCHIVE
+  ANONYMIZE
+}
+
+model RetentionPolicy {
+  id             String          @id @default(cuid())
+  entityType     String          // e.g. "AuditLog", "UsageEvent", "DataExport"
+  retentionDays  Int             // how long to keep
+  action         RetentionAction @default(DELETE)
+  isActive       Boolean         @default(true)
+  scope          SecretScope     @default(PLATFORM) // PLATFORM or ORGANIZATION
+  orgId          String?
+  description    String?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  org            Organization?   @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  executions     RetentionExecution[]
+
+  @@unique([entityType, scope, orgId])
+  @@index([isActive])
+}
+
+model RetentionExecution {
+  id            String          @id @default(cuid())
+  policyId      String
+  startedAt     DateTime        @default(now())
+  completedAt   DateTime?
+  recordsAffected Int           @default(0)
+  error         String?
+  policy        RetentionPolicy @relation(fields: [policyId], references: [id], onDelete: Cascade)
+
+  @@index([policyId, startedAt])
+}
+
+// ─── Data Deletion (GDPR Erasure) ─────────────────────────────────────────
+
+enum DeletionStatus {
+  REQUESTED
+  APPROVED
+  IN_PROGRESS
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+model DataDeletionRequest {
+  id            String         @id @default(cuid())
+  orgId         String
+  requestedById String
+  subjectEmail  String         // data subject
+  subjectUserId String?
+  scope         String         @default("full") // "full" | "partial"
+  categories    String[]       // e.g. ["audit", "usage", "billing", "personal"]
+  status        DeletionStatus @default(REQUESTED)
+  reason        String?
+  approvedById  String?
+  approvedAt    DateTime?
+  executedAt    DateTime?
+  completedAt   DateTime?
+  certHash      String?        // SHA-256 of deletion certificate
+  metadata      Json?
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  org           Organization   @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  requestedBy   User           @relation("DeletionRequester", fields: [requestedById], references: [id])
+  approvedBy    User?          @relation("DeletionApprover", fields: [approvedById], references: [id])
+
+  @@index([orgId, status])
+  @@index([subjectEmail])
+}
+
+// ─── Access Review ────────────────────────────────────────────────────────
+
+enum AccessReviewStatus {
+  OPEN
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum AccessReviewDecision {
+  KEEP
+  REVOKE
+  DOWNGRADE
+  PENDING
+}
+
+model AccessReview {
+  id           String             @id @default(cuid())
+  orgId        String
+  title        String
+  description  String?
+  initiatedById String
+  status       AccessReviewStatus @default(OPEN)
+  dueDate      DateTime
+  completedAt  DateTime?
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+  org          Organization       @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  initiatedBy  User               @relation("AccessReviewInitiator", fields: [initiatedById], references: [id])
+  entries      AccessReviewEntry[]
+
+  @@index([orgId, status])
+}
+
+model AccessReviewEntry {
+  id          String               @id @default(cuid())
+  reviewId    String
+  userId      String               // user whose access is reviewed
+  membershipId String?
+  currentRole String
+  decision    AccessReviewDecision @default(PENDING)
+  decidedById String?
+  decidedAt   DateTime?
+  notes       String?
+  createdAt   DateTime             @default(now())
+  review      AccessReview         @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+  user        User                 @relation("AccessReviewSubject", fields: [userId], references: [id])
+  decidedBy   User?                @relation("AccessReviewDecider", fields: [decidedById], references: [id])
+
+  @@unique([reviewId, userId])
+  @@index([reviewId, decision])
+}
+
+// ─── Immutable Audit Trail Rules ──────────────────────────────────────────
+
+model AuditRetentionRule {
+  id                String   @id @default(cuid())
+  name              String
+  description       String?
+  entityType        String   @default("AuditLog")
+  minRetentionDays  Int      @default(365) // immutable minimum
+  preventDeletion   Boolean  @default(true)
+  preventModification Boolean @default(true)
+  requireApproval   Boolean  @default(false) // require dual-approval for changes
+  isActive          Boolean  @default(true)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@unique([entityType, name])
+}
+
+// ─── Environment Separation ───────────────────────────────────────────────
+
+enum EnvironmentTier {
+  PRODUCTION
+  STAGING
+  DEVELOPMENT
+  TESTING
+}
+
+model EnvironmentConfig {
+  id           String          @id @default(cuid())
+  tier         EnvironmentTier @default(PRODUCTION)
+  name         String          // e.g. "production-us-east"
+  description  String?
+  configJson   Json            // non-sensitive environment config
+  allowedOrgIds String[]       // orgs allowed in this env (empty = all)
+  isDefault    Boolean         @default(false)
+  isActive     Boolean         @default(true)
+  isolationLevel String        @default("logical") // "logical" | "physical"
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+
+  @@unique([tier, name])
+  @@index([isActive, tier])
+}
+
+// ─── Backup / Restore Validation ──────────────────────────────────────────
+
+enum BackupStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  FAILED
+  VERIFIED
+  EXPIRED
+}
+
+model BackupRecord {
+  id               String       @id @default(cuid())
+  orgId            String?
+  backupType       String       // "database" | "files" | "config" | "full"
+  status           BackupStatus @default(PENDING)
+  storagePath      String?
+  sizeBytes        BigInt?
+  checksumSha256   String?
+  encryptionKeyVer Int          @default(1)
+  retentionDays    Int          @default(30)
+  expiresAt        DateTime?
+  initiatedById    String?
+  startedAt        DateTime?
+  completedAt      DateTime?
+  errorMessage     String?
+  metadata         Json?
+  createdAt        DateTime     @default(now())
+  org              Organization? @relation(fields: [orgId], references: [id], onDelete: SetNull)
+  initiatedBy      User?        @relation("BackupInitiator", fields: [initiatedById], references: [id], onDelete: SetNull)
+  validations      BackupValidation[]
+
+  @@index([orgId, backupType])
+  @@index([status, expiresAt])
+}
+
+model BackupValidation {
+  id            String       @id @default(cuid())
+  backupId      String
+  validationType String     // "integrity" | "restore_test" | "checksum"
+  passed        Boolean
+  details       Json?
+  validatedById String?
+  validatedAt   DateTime     @default(now())
+  backup        BackupRecord @relation(fields: [backupId], references: [id], onDelete: Cascade)
+  validatedBy   User?        @relation("BackupValidator", fields: [validatedById], references: [id], onDelete: SetNull)
+
+  @@index([backupId])
+}
+
+// ─── Compliance Runbooks & Incidents ──────────────────────────────────────
+
+enum IncidentSeverity {
+  SEV1
+  SEV2
+  SEV3
+  SEV4
+}
+
+enum IncidentStatus {
+  OPEN
+  INVESTIGATING
+  MITIGATED
+  RESOLVED
+  POST_MORTEM
+  CLOSED
+}
+
+model ComplianceRunbook {
+  id           String   @id @default(cuid())
+  title        String
+  slug         String   @unique
+  category     String   // "security" | "data" | "infrastructure" | "incident"
+  content      String   // markdown content
+  version      Int      @default(1)
+  isPublished  Boolean  @default(false)
+  lastReviewAt DateTime?
+  nextReviewAt DateTime?
+  ownerId      String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  owner        User?    @relation("RunbookOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+  incidents    IncidentRecord[]
+
+  @@index([category, isPublished])
+}
+
+model IncidentRecord {
+  id             String           @id @default(cuid())
+  orgId          String?
+  title          String
+  severity       IncidentSeverity
+  status         IncidentStatus   @default(OPEN)
+  runbookId      String?
+  description    String?
+  impact         String?
+  rootCause      String?
+  timeline       Json?            // array of timestamped events
+  mitigationSteps String?
+  postMortemUrl  String?
+  reportedById   String?
+  assignedToId   String?
+  detectedAt     DateTime         @default(now())
+  mitigatedAt    DateTime?
+  resolvedAt     DateTime?
+  closedAt       DateTime?
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+  org            Organization?    @relation(fields: [orgId], references: [id], onDelete: SetNull)
+  runbook        ComplianceRunbook? @relation(fields: [runbookId], references: [id], onDelete: SetNull)
+  reportedBy     User?            @relation("IncidentReporter", fields: [reportedById], references: [id], onDelete: SetNull)
+  assignedTo     User?            @relation("IncidentAssignee", fields: [assignedToId], references: [id], onDelete: SetNull)
+
+  @@index([orgId, severity, status])
+  @@index([status])
+}

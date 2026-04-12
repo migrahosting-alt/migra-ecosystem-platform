@@ -38,8 +38,8 @@ while [[ $# -gt 0 ]]; do
 done
 
 # Configuration
-PANEL_API_HOST="root@100.119.105.93"
-PANEL_API_ENV="/opt/MigraPanel/apps/panel-api/.env"
+PANEL_API_HOST="${PANEL_API_HOST:-root@migrapanel-core}"
+PANEL_API_ENV="${PANEL_API_ENV:-/opt/MigraPanel/apps/panel-api/.env}"
 POSTFIX_CONFIG_DIR="/etc/postfix/sql"
 DOVECOT_CONFIG="/etc/dovecot/dovecot-sql.conf.ext"
 

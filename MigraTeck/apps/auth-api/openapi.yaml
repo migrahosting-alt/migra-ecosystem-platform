@@ -1,0 +1,1234 @@
+openapi: "3.1.0"
+info:
+  title: MigraAuth API
+  version: "1.0.0"
+  description: >
+    Centralized identity platform for the MigraTeck ecosystem.
+    OAuth 2.1 + PKCE, session-based auth, MFA (TOTP), OIDC discovery.
+  contact:
+    name: MigraTeck
+    url: https://migrateck.com
+
+servers:
+  - url: https://auth.migrateck.com
+    description: Production
+  - url: http://localhost:4000
+    description: Local development
+
+tags:
+  - name: Discovery
+    description: OIDC discovery and JWKS endpoints
+  - name: OAuth
+    description: OAuth 2.1 authorization, token, revoke
+  - name: Account
+    description: Signup, login, logout, email verification, password reset
+  - name: MFA
+    description: TOTP enrollment, verification, disable
+  - name: Sessions
+    description: Session listing and revocation
+  - name: Organizations
+    description: Organization and member management
+  - name: Admin
+    description: Admin user management and audit log access
+
+paths:
+  # ─── Discovery ─────────────────────────────────────────────────
+  /.well-known/openid-configuration:
+    get:
+      tags: [Discovery]
+      operationId: getOpenIDConfiguration
+      summary: OIDC discovery document
+      responses:
+        "200":
+          description: OpenID Connect discovery metadata
+          content:
+            application/json:
+              schema:
+                type: object
+
+  /.well-known/jwks.json:
+    get:
+      tags: [Discovery]
+      operationId: getJWKS
+      summary: JSON Web Key Set
+      responses:
+        "200":
+          description: JWKS
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  keys:
+                    type: array
+                    items:
+                      type: object
+
+  /health:
+    get:
+      tags: [Discovery]
+      operationId: healthCheck
+      summary: Health check
+      responses:
+        "200":
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+                  service:
+                    type: string
+                    example: migraauth-api
+
+  # ─── OAuth ─────────────────────────────────────────────────────
+  /authorize:
+    get:
+      tags: [OAuth]
+      operationId: authorize
+      summary: Authorization endpoint (redirect-based)
+      parameters:
+        - name: response_type
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [code]
+        - name: client_id
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: redirect_uri
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uri
+        - name: state
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: code_challenge
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: code_challenge_method
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [S256]
+        - name: scope
+          in: query
+          schema:
+            type: string
+            default: openid
+        - name: nonce
+          in: query
+          schema:
+            type: string
+        - name: prompt
+          in: query
+          schema:
+            type: string
+            enum: [none, login, consent]
+        - name: login_hint
+          in: query
+          schema:
+            type: string
+        - name: return_to
+          in: query
+          schema:
+            type: string
+            format: uri
+      responses:
+        "302":
+          description: Redirect to login or back to client with auth code
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
+  /authorize/complete:
+    post:
+      tags: [OAuth]
+      operationId: authorizeComplete
+      summary: Issue auth code after login (called by auth-web)
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AuthorizeCompleteRequest"
+      responses:
+        "200":
+          description: Auth code issued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthorizeCompleteResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
+  /token:
+    post:
+      tags: [OAuth]
+      operationId: exchangeToken
+      summary: Token exchange (authorization_code or refresh_token)
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: "#/components/schemas/TokenRequest"
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TokenRequest"
+      responses:
+        "200":
+          description: Token set
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TokenResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
+  /revoke:
+    post:
+      tags: [OAuth]
+      operationId: revokeToken
+      summary: Revoke a refresh token (RFC 7009)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RevokeRequest"
+      responses:
+        "200":
+          description: Token revoked
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GenericRevokedResponse"
+
+  /userinfo:
+    get:
+      tags: [OAuth]
+      operationId: getUserInfo
+      summary: OIDC UserInfo
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      responses:
+        "200":
+          description: User claims
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserInfoResponse"
+
+  # ─── Account ───────────────────────────────────────────────────
+  /v1/signup:
+    post:
+      tags: [Account]
+      operationId: signup
+      summary: Create a new account
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SignupRequest"
+      responses:
+        "201":
+          description: Account created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SignupResponse"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /v1/login:
+    post:
+      tags: [Account]
+      operationId: login
+      summary: Authenticate with email + password
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "200":
+          description: Login result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /v1/logout:
+    post:
+      tags: [Account]
+      operationId: logout
+      summary: End the current session (or all sessions)
+      security:
+        - cookieAuth: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LogoutRequest"
+      responses:
+        "200":
+          description: Logged out
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LogoutResponse"
+
+  /v1/verify-email:
+    post:
+      tags: [Account]
+      operationId: verifyEmail
+      summary: Verify email address with token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VerifyEmailRequest"
+      responses:
+        "200":
+          description: Email verified
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GenericSuccessResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
+  /v1/resend-verification:
+    post:
+      tags: [Account]
+      operationId: resendVerification
+      summary: Resend email verification link
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ResendVerificationRequest"
+      responses:
+        "200":
+          description: Sent (if applicable)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GenericSentResponse"
+
+  /v1/forgot-password:
+    post:
+      tags: [Account]
+      operationId: forgotPassword
+      summary: Request a password reset link
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ForgotPasswordRequest"
+      responses:
+        "200":
+          description: Sent (if applicable)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GenericSentResponse"
+
+  /v1/reset-password:
+    post:
+      tags: [Account]
+      operationId: resetPassword
+      summary: Reset password with token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ResetPasswordRequest"
+      responses:
+        "200":
+          description: Password reset
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GenericSuccessResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
+  # ─── MFA ───────────────────────────────────────────────────────
+  /v1/mfa/totp/enroll:
+    post:
+      tags: [MFA]
+      operationId: enrollTotp
+      summary: Start TOTP enrollment
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Enrollment started
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TotpEnrollResponse"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /v1/mfa/totp/verify:
+    post:
+      tags: [MFA]
+      operationId: verifyTotp
+      summary: Verify a TOTP code (enrollment confirmation or login MFA)
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TotpVerifyRequest"
+      responses:
+        "200":
+          description: TOTP verified
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TotpVerifyResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /v1/mfa/disable:
+    post:
+      tags: [MFA]
+      operationId: disableMfa
+      summary: Disable MFA (requires password confirmation)
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MfaDisableRequest"
+      responses:
+        "200":
+          description: MFA disabled
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GenericSuccessResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  # ─── Sessions ──────────────────────────────────────────────────
+  /v1/sessions:
+    get:
+      tags: [Sessions]
+      operationId: listSessions
+      summary: List active sessions for the current user
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Session list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionListResponse"
+
+  /v1/sessions/{id}:
+    delete:
+      tags: [Sessions]
+      operationId: revokeSession
+      summary: Revoke a specific session
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Session revoked
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GenericRevokedResponse"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  # ─── Organizations ─────────────────────────────────────────────
+  /v1/organizations:
+    get:
+      tags: [Organizations]
+      operationId: listOrganizations
+      summary: List organizations the current user belongs to
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Organization list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrganizationListResponse"
+    post:
+      tags: [Organizations]
+      operationId: createOrganization
+      summary: Create a new organization
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateOrganizationRequest"
+      responses:
+        "201":
+          description: Organization created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrganizationResponse"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /v1/organizations/{org_id}/members:
+    post:
+      tags: [Organizations]
+      operationId: addOrganizationMember
+      summary: Add a member to an organization
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: org_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AddMemberRequest"
+      responses:
+        "201":
+          description: Member added
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MemberResponse"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  # ─── Admin ─────────────────────────────────────────────────────
+  /v1/admin/users/{id}:
+    get:
+      tags: [Admin]
+      operationId: adminGetUser
+      summary: Get a user by ID
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: User details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminUserResponse"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /v1/admin/users/{id}/lock:
+    post:
+      tags: [Admin]
+      operationId: adminLockUser
+      summary: Lock a user account
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminActionRequest"
+      responses:
+        "200":
+          description: User locked
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GenericSuccessResponse"
+
+  /v1/admin/users/{id}/unlock:
+    post:
+      tags: [Admin]
+      operationId: adminUnlockUser
+      summary: Unlock a user account
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminActionRequest"
+      responses:
+        "200":
+          description: User unlocked
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GenericSuccessResponse"
+
+  /v1/admin/users/{id}/disable:
+    post:
+      tags: [Admin]
+      operationId: adminDisableUser
+      summary: Disable a user account
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminActionRequest"
+      responses:
+        "200":
+          description: User disabled
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GenericSuccessResponse"
+
+  /v1/admin/audit:
+    get:
+      tags: [Admin]
+      operationId: adminGetAuditLogs
+      summary: Query audit logs
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: user_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: event_type
+          in: query
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+            maximum: 200
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+      responses:
+        "200":
+          description: Audit log entries
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuditLogListResponse"
+
+components:
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: migraauth_session
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  responses:
+    BadRequest:
+      description: Bad request
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+    Unauthorized:
+      description: Unauthorized
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+    Forbidden:
+      description: Forbidden
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+    NotFound:
+      description: Not found
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+    Conflict:
+      description: Conflict
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+
+  schemas:
+    # ── Error ──────────────────────────────────────────────────
+    ErrorEnvelope:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              example: invalid_credentials
+            message:
+              type: string
+              example: Invalid email or password.
+
+    # ── Generic responses ──────────────────────────────────────
+    GenericSuccessResponse:
+      type: object
+      required: [success, message]
+      properties:
+        success:
+          type: boolean
+          example: true
+        message:
+          type: string
+
+    GenericSentResponse:
+      type: object
+      required: [sent, message]
+      properties:
+        sent:
+          type: boolean
+          example: true
+        message:
+          type: string
+
+    GenericRevokedResponse:
+      type: object
+      required: [revoked]
+      properties:
+        revoked:
+          type: boolean
+          example: true
+
+    # ── Account schemas ────────────────────────────────────────
+    SignupRequest:
+      type: object
+      required: [email, password, client_id, redirect_uri]
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          minLength: 10
+        display_name:
+          type: string
+          maxLength: 120
+        client_id:
+          type: string
+        redirect_uri:
+          type: string
+          format: uri
+
+    SignupResponse:
+      type: object
+      required: [user, message]
+      properties:
+        user:
+          $ref: "#/components/schemas/UserSummary"
+        message:
+          type: string
+
+    LoginRequest:
+      type: object
+      required: [email, password, client_id]
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+        client_id:
+          type: string
+
+    LoginResponse:
+      type: object
+      required: [authenticated]
+      properties:
+        authenticated:
+          type: boolean
+        requires_mfa:
+          type: boolean
+        user:
+          $ref: "#/components/schemas/UserSummary"
+
+    LogoutRequest:
+      type: object
+      properties:
+        global:
+          type: boolean
+          default: false
+
+    LogoutResponse:
+      type: object
+      required: [logged_out]
+      properties:
+        logged_out:
+          type: boolean
+
+    VerifyEmailRequest:
+      type: object
+      required: [token]
+      properties:
+        token:
+          type: string
+
+    ResendVerificationRequest:
+      type: object
+      required: [email]
+      properties:
+        email:
+          type: string
+          format: email
+
+    ForgotPasswordRequest:
+      type: object
+      required: [email]
+      properties:
+        email:
+          type: string
+          format: email
+
+    ResetPasswordRequest:
+      type: object
+      required: [token, password]
+      properties:
+        token:
+          type: string
+        password:
+          type: string
+          minLength: 10
+
+    UserSummary:
+      type: object
+      required: [id, email, status, email_verified]
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+        status:
+          type: string
+        email_verified:
+          type: boolean
+        display_name:
+          type: string
+
+    # ── OAuth schemas ──────────────────────────────────────────
+    AuthorizeCompleteRequest:
+      type: object
+      required: [client_id, redirect_uri, state, code_challenge, code_challenge_method]
+      properties:
+        client_id:
+          type: string
+        redirect_uri:
+          type: string
+          format: uri
+        state:
+          type: string
+        code_challenge:
+          type: string
+        code_challenge_method:
+          type: string
+          enum: [S256]
+        scope:
+          type: string
+        nonce:
+          type: string
+
+    AuthorizeCompleteResponse:
+      type: object
+      required: [redirect_uri, code, state]
+      properties:
+        redirect_uri:
+          type: string
+        code:
+          type: string
+        state:
+          type: string
+
+    TokenRequest:
+      type: object
+      required: [grant_type, client_id]
+      properties:
+        grant_type:
+          type: string
+          enum: [authorization_code, refresh_token]
+        client_id:
+          type: string
+        code:
+          type: string
+        code_verifier:
+          type: string
+        redirect_uri:
+          type: string
+        refresh_token:
+          type: string
+
+    TokenResponse:
+      type: object
+      required: [access_token, token_type, expires_in]
+      properties:
+        access_token:
+          type: string
+        token_type:
+          type: string
+          example: Bearer
+        expires_in:
+          type: integer
+        refresh_token:
+          type: string
+        id_token:
+          type: string
+        scope:
+          type: string
+
+    RevokeRequest:
+      type: object
+      required: [token]
+      properties:
+        token:
+          type: string
+
+    UserInfoResponse:
+      type: object
+      properties:
+        sub:
+          type: string
+          format: uuid
+        email:
+          type: string
+        email_verified:
+          type: boolean
+        name:
+          type: string
+        given_name:
+          type: string
+        family_name:
+          type: string
+        picture:
+          type: string
+        locale:
+          type: string
+
+    # ── MFA schemas ────────────────────────────────────────────
+    TotpEnrollResponse:
+      type: object
+      required: [challenge_id, secret, otpauth_uri, recovery_codes]
+      properties:
+        challenge_id:
+          type: string
+          format: uuid
+        secret:
+          type: string
+        otpauth_uri:
+          type: string
+        recovery_codes:
+          type: array
+          items:
+            type: string
+
+    TotpVerifyRequest:
+      type: object
+      required: [code]
+      properties:
+        code:
+          type: string
+          minLength: 6
+          maxLength: 6
+        challenge_id:
+          type: string
+          format: uuid
+
+    TotpVerifyResponse:
+      type: object
+      required: [verified]
+      properties:
+        verified:
+          type: boolean
+
+    MfaDisableRequest:
+      type: object
+      required: [password]
+      properties:
+        password:
+          type: string
+
+    # ── Session schemas ────────────────────────────────────────
+    SessionListResponse:
+      type: object
+      required: [sessions]
+      properties:
+        sessions:
+          type: array
+          items:
+            $ref: "#/components/schemas/SessionEntry"
+
+    SessionEntry:
+      type: object
+      required: [id, session_type, created_at, expires_at, current]
+      properties:
+        id:
+          type: string
+          format: uuid
+        session_type:
+          type: string
+        client_id:
+          type: string
+        device_name:
+          type: string
+        ip_address:
+          type: string
+        user_agent:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        expires_at:
+          type: string
+          format: date-time
+        last_seen_at:
+          type: string
+          format: date-time
+        current:
+          type: boolean
+
+    # ── Organization schemas ───────────────────────────────────
+    OrganizationListResponse:
+      type: object
+      required: [organizations]
+      properties:
+        organizations:
+          type: array
+          items:
+            $ref: "#/components/schemas/OrganizationSummary"
+
+    OrganizationSummary:
+      type: object
+      required: [id, name, slug, role]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        slug:
+          type: string
+        role:
+          type: string
+
+    CreateOrganizationRequest:
+      type: object
+      required: [name, slug]
+      properties:
+        name:
+          type: string
+          maxLength: 160
+        slug:
+          type: string
+          maxLength: 120
+
+    OrganizationResponse:
+      type: object
+      required: [organization]
+      properties:
+        organization:
+          $ref: "#/components/schemas/OrganizationSummary"
+
+    AddMemberRequest:
+      type: object
+      required: [email, role]
+      properties:
+        email:
+          type: string
+          format: email
+        role:
+          type: string
+          enum: [admin, billing_admin, member]
+
+    MemberResponse:
+      type: object
+      required: [member]
+      properties:
+        member:
+          type: object
+          required: [id, user_id, role, status]
+          properties:
+            id:
+              type: string
+              format: uuid
+            user_id:
+              type: string
+              format: uuid
+            role:
+              type: string
+            status:
+              type: string
+
+    # ── Admin schemas ──────────────────────────────────────────
+    AdminActionRequest:
+      type: object
+      required: [reason]
+      properties:
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 500
+
+    AdminUserResponse:
+      type: object
+      required: [user]
+      properties:
+        user:
+          type: object
+          required: [id, email, status, email_verified, created_at]
+          properties:
+            id:
+              type: string
+              format: uuid
+            email:
+              type: string
+            status:
+              type: string
+            email_verified:
+              type: boolean
+            display_name:
+              type: string
+            created_at:
+              type: string
+              format: date-time
+            last_login_at:
+              type: string
+              format: date-time
+            locked_at:
+              type: string
+              format: date-time
+            disabled_at:
+              type: string
+              format: date-time
+
+    AuditLogListResponse:
+      type: object
+      required: [audit_logs]
+      properties:
+        audit_logs:
+          type: array
+          items:
+            $ref: "#/components/schemas/AuditLogEntry"
+
+    AuditLogEntry:
+      type: object
+      required: [id, event_type, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        actor_user_id:
+          type: string
+          format: uuid
+        actor_type:
+          type: string
+        target_user_id:
+          type: string
+          format: uuid
+        client_id:
+          type: string
+        event_type:
+          type: string
+        event_data:
+          type: object
+        ip_address:
+          type: string
+        user_agent:
+          type: string
+        created_at:
+          type: string
+          format: date-time

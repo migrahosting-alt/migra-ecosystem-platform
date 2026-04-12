@@ -11,7 +11,7 @@
 - migradrive.migrahosting.com
 - migrahosting.com
 - migramail.com
+- control.migrahosting.com
 - migrapanel.com
 - migravoice.com
-- mpanel.migrahosting.com
 - panel.migrahosting.com

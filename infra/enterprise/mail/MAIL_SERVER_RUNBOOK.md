@@ -1,6 +1,6 @@
 # Mail Server Operational Runbook
 
-**Server:** vps-core (100.81.76.39)  
+**Server:** dns-mail-core (100.81.76.39)  
 **Hostname:** dns-mail-core.migrahosting.com  
 **Services:** Postfix (SMTP/Submission), Dovecot (IMAP/LMTP)  
 **Database:** PostgreSQL at db-core (100.98.54.45:5432)
@@ -14,7 +14,7 @@
 │                     Mail Flow                            │
 ├─────────────────────────────────────────────────────────┤
 │                                                          │
-│  Internet ──► NGINX (srv1-web) ──► vps-core            │
+│  Internet ──► NGINX (srv1-web) ──► dns-mail-core       │
 │                                      │                   │
 │                                      ├─► Postfix         │
 │                                      │   (SMTP/Submit)   │
@@ -374,7 +374,7 @@ systemctl status postgresql
 ping 100.98.54.45
 telnet 100.98.54.45 5432
 
-# 3. Check pg_hba.conf allows vps-core
+# 3. Check pg_hba.conf allows dns-mail-core
 # On db-core:
 cat /etc/postgresql/*/main/pg_hba.conf | grep 100.81.76.39
 

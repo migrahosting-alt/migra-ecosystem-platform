@@ -1,7 +1,7 @@
 # Mail Server Guardrails - Deployment Summary
 
 **Date:** 2026-02-04  
-**Server:** vps-core (100.81.76.39)  
+**Server:** dns-mail-core (100.81.76.39)  
 **Status:** ✅ DEPLOYED & ACTIVE
 
 ---
@@ -120,7 +120,7 @@ All guardrails tested and verified:
 ✅ Sync script: Dry-run test successful  
 ✅ Systemd timers: Both active and scheduled  
 ✅ Config files: All match panel-api DATABASE_URL  
-✅ Database connectivity: Verified from vps-core to db-core  
+✅ Database connectivity: Verified from dns-mail-core to db-core  
 
 **Current Status:**
 ```
@@ -144,7 +144,7 @@ Wed 2026-02-04 12:00:00 CET    4h 43min  Wed 2026-02-04 07:05:25 CET 10m ago mai
 │                    ▲                                            │
 │                    │ SSH fetch                                  │
 │                    │                                            │
-│  vps-core (100.81.76.39)                                       │
+│  dns-mail-core (100.81.76.39)                                 │
 │    ├─► validate-mail-configs.sh ◄─── systemd timer (6h)       │
 │    │   ├─► Checks Postfix configs                             │
 │    │   ├─► Checks Dovecot config                              │
@@ -211,7 +211,7 @@ vi /opt/MigraPanel/apps/panel-api/.env
 # Change DATABASE_URL password
 systemctl restart migrapanel-panel-api.service
 
-# 2. Sync mail configs on vps-core
+# 2. Sync mail configs on dns-mail-core
 ssh root@100.81.76.39 /opt/migra/scripts/sync-mail-configs.sh
 
 # 3. Validate
@@ -231,7 +231,7 @@ ssh root@100.81.76.39 "/opt/migra/scripts/validate-mail-configs.sh --fix && syst
 
 ## Files Created
 
-### On vps-core:
+### On dns-mail-core:
 - `/opt/migra/scripts/validate-mail-configs.sh` - Validation script
 - `/opt/migra/scripts/monitor-mail-auth.sh` - Monitor script
 - `/opt/migra/scripts/sync-mail-configs.sh` - Sync script

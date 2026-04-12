@@ -1,0 +1,412 @@
+{
+  "app": {
+    "name": "MigraPilot",
+    "taglines": {
+      "internalHero": "The operating system for your ecosystem.",
+      "internalSub": "Verified actions. Proof-backed results. Autonomous reliability."
+    },
+    "badges": {
+      "proofBacked": "Proof-backed",
+      "guardrailedAutonomy": "Autonomy with guardrails",
+      "tieredExecution": "Tiered execution",
+      "auditFirst": "Audit-first",
+      "zeroGuessOps": "Zero-guess operations"
+    }
+  },
+
+  "console": {
+    "statusBrief": {
+      "title": "System Brief",
+      "autonomyOn": "Autonomy ON",
+      "autonomyOff": "Autonomy OFF",
+      "lastRelease": "Last release",
+      "drift": "Drift",
+      "incidents": "Incidents",
+      "nextMissions": "Next missions",
+      "view": "view",
+      "summary": "Autonomy is {autonomy} for {env}. State: {state}.",
+      "sections": {
+        "lastRelease": "Last Release",
+        "drift": "Drift",
+        "incidents": "Incidents",
+        "nextMissions": "Next Missions"
+      },
+      "fields": {
+        "lastReleaseValue": "{status} · {runIdShort} · {finishedAt}",
+        "driftValue": "{driftStatus}",
+        "incidentsValue": "{openCount} open",
+        "nextMissionsValue": "{missionA} in {etaA} · {missionB} in {etaB}"
+      },
+      "actions": {
+        "runCanary": "Run Canary Smoke",
+        "viewReleases": "View Releases",
+        "viewIncidents": "View Incidents",
+        "viewDrift": "View Drift",
+        "requestUnlock": "Request Prod Unlock"
+      },
+      "empty": {
+        "allGreen": "All core checks are green. No action required.",
+        "noIncidents": "No open incidents."
+      },
+      "stateNotes": {
+        "caution": "Some checks are degraded. Autonomy is operating in safe mode.",
+        "readOnly": "Production is locked to read-only to prevent unsafe changes. Review incidents and unlock with approval."
+      }
+    },
+
+    "reasoningCard": {
+      "title": "Plan & Proof",
+      "labels": {
+        "intent": "Intent",
+        "confidence": "Confidence",
+        "mode": "Mode",
+        "plan": "Plan",
+        "proofs": "Proofs required",
+        "runId": "Run ID"
+      },
+      "values": {
+        "planLine": "I will run {stepCount} steps with verification.",
+        "proofsLine": "Proofs required: {proofList}.",
+        "noProofRule": "No proof = treated as failed."
+      },
+      "modes": {
+        "planOnly": "Plan-only",
+        "executeT0T1": "Execute T0/T1",
+        "t2Approval": "T2 Approval"
+      },
+      "tiers": {
+        "t0": "T0",
+        "t1": "T1",
+        "t2": "T2"
+      },
+      "tierTooltips": {
+        "t0": "Read-only checks. Always safe to run.",
+        "t1": "Reversible actions with verification.",
+        "t2": "High impact. Requires approval in production."
+      },
+      "approvalNotice": "Some steps require approval. I'll prepare an approval card instead of executing.",
+      "buttons": {
+        "viewReport": "View Report",
+        "viewReleaseLedger": "View Release Ledger",
+        "viewActivityProof": "View Activity Proof"
+      }
+    },
+
+    "behavior": {
+      "vagueInputTitle": "Quick Status",
+      "vagueInputHint": "Ask me to deploy, investigate an issue, or check system health."
+    }
+  },
+
+  "autonomy": {
+    "page": {
+      "title": "Autonomy Control",
+      "subtitle": "Autonomy runs missions to keep systems healthy, verified, and auditable."
+    },
+    "env": {
+      "label": "Environment",
+      "dev": "Dev",
+      "staging": "Staging",
+      "prod": "Prod"
+    },
+    "toggle": {
+      "label": "Autonomy",
+      "onHelp": "Scheduled missions will run automatically.",
+      "offHelp": "No scheduled missions will run."
+    },
+    "state": {
+      "label": "State",
+      "normal": {
+        "title": "Normal",
+        "body": "Autonomy is operating normally."
+      },
+      "caution": {
+        "title": "Caution",
+        "body": "Autonomy is limited to safe operations until stability improves."
+      },
+      "readOnly": {
+        "title": "Read-only",
+        "body": "Production changes are blocked. Approvals required to unlock."
+      }
+    },
+    "controls": {
+      "runTickNow": "Run Tick Now",
+      "runTickTooltip": "Runs all due missions within blast radius limits.",
+      "unlockProd": "Unlock Prod",
+      "unlockProdTooltip": "Creates an approval request to unlock production."
+    },
+    "missions": {
+      "columns": {
+        "mission": "Mission",
+        "schedule": "Schedule",
+        "lastRun": "Last Run",
+        "successRate": "Success Rate",
+        "nextDue": "Next Due",
+        "actions": "Actions"
+      },
+      "actions": {
+        "runNow": "Run Now",
+        "viewRuns": "View Runs",
+        "viewProofs": "View Proofs"
+      },
+      "empty": {
+        "title": "No missions configured yet.",
+        "cta": "Add default mission pack"
+      }
+    }
+  },
+
+  "releases": {
+    "page": {
+      "title": "Releases",
+      "subtitle": "Proof-backed deployment ledger with stage timings and reports."
+    },
+    "table": {
+      "columns": {
+        "time": "Time",
+        "env": "Env",
+        "status": "Status",
+        "runId": "Run ID",
+        "commit": "Commit",
+        "duration": "Duration",
+        "proofs": "Proofs"
+      }
+    },
+    "status": {
+      "ok": "Verified",
+      "failed": "Failed",
+      "partial": "Needs Review",
+      "blocked": "Approval Required"
+    },
+    "detail": {
+      "sections": {
+        "summary": "Summary",
+        "stages": "Stages",
+        "reports": "Reports",
+        "activityProof": "Activity Proof"
+      },
+      "summaryCopy": "This release is backed by structured proofs and timed stages.",
+      "runIdCopy": "Run ID ties all artifacts together.",
+      "stagesCopy": "Stages are executed with strict timeouts and exit normalization.",
+      "stagesFailCopy": "Any failed stage requires investigation before proceeding."
+    },
+    "empty": {
+      "none": "No releases found for this environment."
+    }
+  },
+
+  "incidents": {
+    "page": {
+      "title": "Ops Incidents",
+      "subtitle": "Deduped, evidence-backed incidents with runbooks and proofs."
+    },
+    "filters": {
+      "env": "Environment",
+      "status": "Status",
+      "severity": "Severity",
+      "serviceTenant": "Service / Tenant"
+    },
+    "status": {
+      "open": "Open",
+      "ack": "Ack",
+      "resolved": "Resolved"
+    },
+    "severity": {
+      "info": "Info",
+      "warn": "Warn",
+      "error": "Error",
+      "critical": "Critical"
+    },
+    "labels": {
+      "severity": "Severity",
+      "status": "Status",
+      "firstSeen": "First seen",
+      "lastUpdate": "Last update",
+      "dedupe": "Dedupe",
+      "evidence": "Evidence"
+    },
+    "titles": {
+      "healthDegraded": "Health Degraded: {service}",
+      "releaseFailed": "Release Failed: {env}",
+      "driftDetected": "Drift Detected: {env}",
+      "slaImpact": "SLA Impact: {tenantName}"
+    },
+    "actions": {
+      "ack": "Acknowledge",
+      "resolve": "Resolve",
+      "viewEvidence": "View Evidence",
+      "openRunbook": "Open Runbook"
+    },
+    "runbook": {
+      "title": "Recommended next actions:",
+      "steps": {
+        "s1": "Check current state: Health, Drift, Releases",
+        "s2": "Review latest proofs linked below",
+        "s3": "If production is read-only, request unlock approval",
+        "s4": "Re-run canary smoke after mitigation"
+      }
+    },
+    "empty": {
+      "noneOpen": "No open incidents. Systems are stable."
+    }
+  },
+
+  "approvals": {
+    "page": {
+      "title": "Approvals",
+      "subtitle": "High-impact actions require explicit approval in production."
+    },
+    "fields": {
+      "title": "Title",
+      "why": "Why",
+      "impact": "Impact",
+      "tier": "Tier",
+      "scope": "Scope",
+      "expires": "Expires",
+      "verificationPlan": "Verification Plan",
+      "rollbackPlan": "Rollback Plan"
+    },
+    "actions": {
+      "approveOnce": "Approve Once",
+      "approveAlways": "Approve Always",
+      "reject": "Reject",
+      "execute": "Execute"
+    },
+    "approveOnce": "Approve Once",
+    "approveAlways": "Approve Always",
+    "reject": "Reject",
+    "why": "Reason",
+    "impact": "Impact",
+    "verifyPlan": "Verification Plan",
+    "rollbackPlan": "Rollback Plan",
+    "payload": "Payload",
+    "expires": "Expires",
+    "executingHint": "This request is currently executing. Actions are temporarily disabled.",
+    "status": {
+      "executing": "EXECUTING"
+    },
+    "alwaysHelp": {
+      "line1": "Approves this action in the same environment under the same scope.",
+      "line2": "You can revoke always-approvals at any time."
+    },
+    "warnings": {
+      "prod": "This action changes production. Proofs are required after execution."
+    },
+    "empty": {
+      "none": "No approvals needed right now."
+    }
+  },
+
+  "brands": {
+    "page": {
+      "title": "Brands",
+      "subtitle": "Your ecosystem brands and client brands — assets, domains, socials, and launch kits in one place."
+    },
+    "filters": {
+      "type": "Type",
+      "status": "Status"
+    },
+    "types": {
+      "internal": "Internal",
+      "client": "Client"
+    },
+    "status": {
+      "healthy": "Healthy",
+      "needsAttention": "Needs attention"
+    },
+    "card": {
+      "domains": "Domains: {count}",
+      "socials": "Socials: {count}",
+      "templates": "Templates: {count}",
+      "lastCheck": "Last check: {relativeTime}"
+    },
+    "empty": {
+      "none": "No brands added yet.",
+      "cta": "Add Migra ecosystem brands"
+    },
+    "detail": {
+      "tabs": {
+        "identity": "Identity",
+        "assets": "Assets",
+        "domains": "Domains",
+        "socials": "Socials",
+        "templates": "Templates",
+        "launchKit": "Launch Kit"
+      },
+      "identity": {
+        "name": "Brand Name",
+        "slug": "Slug",
+        "type": "Type",
+        "helper": "Internal brands power the Migra ecosystem. Client brands are isolated and tenant-scoped."
+      },
+      "assets": {
+        "logoSet": "Logo Set",
+        "logoHelper": "Upload primary logo, icon mark, and monochrome variants.",
+        "colorSystem": "Color System",
+        "colorHelper": "Define primary, secondary, neutrals, and accent colors.",
+        "typography": "Typography",
+        "typographyHelper": "Set font stack for headings and body."
+      },
+      "domains": {
+        "helper": "Domains are verified daily for DNS resolution and TLS health.",
+        "runCheck": "Run Domain Check",
+        "labels": {
+          "dnsOk": "DNS OK",
+          "tlsOk": "TLS OK",
+          "expiringSoon": "Expiring Soon",
+          "failing": "Failing"
+        }
+      },
+      "socials": {
+        "helper": "Store profile links and verify they remain reachable.",
+        "verify": "Verify Social Links",
+        "empty": "No socials configured."
+      },
+      "templates": {
+        "helper": "Generate banners and post templates from brand assets.",
+        "createBanner": "Create Banner Template",
+        "createPost": "Create Post Template",
+        "empty": "No templates yet."
+      },
+      "launchKit": {
+        "helper": "A ready-to-share press kit: logos, colors, boilerplate, and links.",
+        "generate": "Generate Launch Kit",
+        "preview": "Preview",
+        "publish": "Publish Internal Page",
+        "empty": "No launch kit generated yet."
+      }
+    }
+  },
+
+  "global": {
+    "env": {
+      "dev": "Dev",
+      "staging": "Staging",
+      "prod": "Prod"
+    },
+    "autonomy": {
+      "on": "ON",
+      "off": "OFF"
+    },
+    "states": {
+      "normal": "NORMAL",
+      "caution": "CAUTION",
+      "readOnly": "READ_ONLY"
+    },
+    "tooltips": {
+      "proof": "Evidence captured for audit and verification.",
+      "runId": "Unique ID tying logs, reports, and activity together.",
+      "dedupe": "Prevents repeated incidents for the same issue."
+    },
+    "toasts": {
+      "saved": "Saved.",
+      "verifiedWithProof": "Verified with proof.",
+      "degradedSafeMode": "Degraded. Autonomy limited to safe mode.",
+      "failedEvidenceIncident": "Failed. Evidence recorded and incident created.",
+      "approvalRequiredProd": "Approval required for production changes."
+    },
+    "security": {
+      "opsRoutesProtected": "Ops routes are protected. Machine access requires OPS_API_TOKEN."
+    }
+  }
+}

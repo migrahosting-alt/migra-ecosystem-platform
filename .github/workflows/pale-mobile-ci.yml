@@ -1,0 +1,48 @@
+name: Pale — Mobile CI
+
+on:
+  push:
+    paths:
+      - "Software/Pale/mobile/**"
+      - "Software/Pale/packages/**"
+      - "Software/Pale/pnpm-lock.yaml"
+      - "Software/Pale/tsconfig.base.json"
+  pull_request:
+    paths:
+      - "Software/Pale/mobile/**"
+      - "Software/Pale/packages/**"
+
+defaults:
+  run:
+    working-directory: Software/Pale
+
+jobs:
+  ci:
+    name: Typecheck & Lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: "10"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "pnpm"
+          cache-dependency-path: Software/Pale/pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck (mobile)
+        run: pnpm --filter @pale/mobile typecheck
+
+      - name: Lint (mobile)
+        run: pnpm --filter @pale/mobile lint

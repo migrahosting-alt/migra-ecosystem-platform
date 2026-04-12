@@ -1,7 +1,7 @@
 migrahosting.com
 panel.migrahosting.com
-mpanel.migrahosting.com
 migrapanel.com
+control.migrahosting.com
 migramail.com
 migravoice.com
 migradrive.com

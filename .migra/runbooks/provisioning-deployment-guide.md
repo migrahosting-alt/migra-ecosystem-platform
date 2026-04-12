@@ -29,9 +29,9 @@
 - Returns admin URL and credentials
 
 #### Email (`POST /email/provision`)
- - Creates email domain on vps-core (mail)
+ - Creates email domain on dns-mail-core
  - Generates DKIM keys
- - Configures DNS (MX, SPF, DMARC) on vps-core (PowerDNS)
+ - Configures DNS (MX, SPF, DMARC) on dns-mail-core (PowerDNS)
  - Creates initial mailboxes
 
 #### VPS (`POST /vps/provision`)

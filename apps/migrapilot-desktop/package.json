@@ -1,0 +1,73 @@
+{
+  "name": "migrapilot-desktop",
+  "version": "0.1.0",
+  "description": "MigraPilot Desktop — local Brain API + service manager",
+  "author": "MigraTeck <hello@migrateck.com>",
+  "private": true,
+  "type": "module",
+  "main": "dist/main.js",
+  "scripts": {
+    "dev": "npm run dev:desktop",
+    "dev:desktop": "npm run build && electron .",
+    "build": "npm run build:main && npm run build:renderer",
+    "build:main": "tsc -p tsconfig.main.json",
+    "build:renderer": "node scripts/build-renderer.mjs",
+    "start": "electron .",
+    "dist:desktop": "npm run build && electron-builder --win nsis",
+    "dist:mac": "npm run build && electron-builder --mac dmg",
+    "dist:linux": "npm run build && electron-builder --linux AppImage deb",
+    "dist:all": "npm run build && electron-builder --win nsis --mac dmg --linux AppImage deb",
+    "smoke:brain": "node scripts/smoke-brain.mjs",
+    "smoke:services": "node scripts/smoke-services.mjs"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.5",
+    "@types/node": "^24.10.1",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "electron": "^34.3.0",
+    "electron-builder": "^26.0.12",
+    "esbuild": "^0.25.0",
+    "typescript": "^5.9.3"
+  },
+  "build": {
+    "appId": "com.migrateck.migrapilot",
+    "productName": "MigraPilot",
+    "files": [
+      "dist/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    },
+    "mac": {
+      "target": [
+        { "target": "dmg", "arch": ["x64", "arm64"] }
+      ],
+      "category": "public.app-category.developer-tools",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false
+    },
+    "dmg": {
+      "contents": [
+        { "x": 130, "y": 220 },
+        { "x": 410, "y": 220, "type": "link", "path": "/Applications" }
+      ]
+    },
+    "linux": {
+      "target": ["AppImage", "deb"],
+      "category": "Development"
+    }
+  }
+}

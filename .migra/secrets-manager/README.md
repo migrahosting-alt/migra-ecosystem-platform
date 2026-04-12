@@ -19,10 +19,10 @@ Single source of truth for:
 │  Location: mpanel-core:/opt/secrets-vault/              │
 └─────────────────────────────────────────────────────────┘
                         ↓ Pull every 10s
-┌─────────────┬─────────────┬─────────────┬──────────────┐
-│ mpanel-api  │  srv1-web   │  vps-core   │  vps-core    │
-│ (Express)   │  (NGINX)    │ (Mail)      │  (PowerDNS)  │
-└─────────────┴─────────────┴─────────────┴──────────────┘
+┌─────────────┬─────────────┬────────────────────────────┐
+│ mpanel-api  │  srv1-web   │      dns-mail-core         │
+│ (Express)   │  (NGINX)    │      (Mail + PowerDNS)     │
+└─────────────┴─────────────┴────────────────────────────┘
 ```
 
 ## Structure
@@ -82,7 +82,7 @@ pm2 start /opt/secrets-vault/sync/sync-agent.js --name secrets-sync
 ## Environment Variables (Bootstrap Only)
 
 ```bash
-SECRETS_VAULT_URL=redis://100.97.213.11:6379
+SECRETS_VAULT_URL=redis://100.119.105.93:6379
 SECRETS_VAULT_KEY=<32-byte-hex-encryption-key>
 SECRETS_FALLBACK_FILE=/opt/secrets-vault/cache/fallback.json
 SECRETS_SYNC_INTERVAL=10000  # 10 seconds

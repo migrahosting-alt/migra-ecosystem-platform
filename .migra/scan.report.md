@@ -1,18 +1,11 @@
-# Migra Scan Report (2026-01-09)
+# Migra Inspect-Only Scan (20260217T090039Z)
 
-## Executive Summary
-Infrastructure is **Healthy**. All core nodes and tenant pods designated as 'running' are active.
+Scope: pve, srv1-web, migrapanel-core
+Mode: inspect-only
 
-## Findings
-1.  **mpanel-core:** API is stable with 7 hours of uptime.
-2.  **srv1-web:** Nginx is active with no reload errors in the last 24 hours. Protocol warnings detected for `migrapanel.com` and `migravoice.com` (non-critical).
-3.  **pve:** LXCs `pod-lituationdjs` (10.1.10.53) and `pod-premtint` (10.1.10.54) are active and correctly routed.
-4.  **Core Connectivity:** Tailscale links to all nodes are verified.
-5.  **Config Export:** Imported a sanitized `/etc/nginx` tree from `srv1-web` into `infra/nginx/` for CI validation (keys/certs excluded).
-
-## Warnings
-- **Nginx protocol redefinition:** `protocol options redefined for 0.0.0.0:443` in `/etc/nginx/sites-enabled/migrapanel.com.conf`.
-- **SSL Stapling:** Ignored for several domains (missing responder URL).
-
----
-*End of Report.*
+## pve — Host + Proxmox version
+```
+pve.migrahosting.com
+pve-manager/9.1.1/42db4a6cf33dac83 (running kernel: 6.17.2-2-pve)
+Linux pve.migrahosting.com 6.17.2-2-pve #1 SMP PREEMPT_DYNAMIC PMX 6.17.2-2 (2025-11-26T12:33Z) x86_64 GNU/Linux
+```

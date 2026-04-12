@@ -23,20 +23,20 @@ log "===== MigraHosting Cleanup Started ====="
 log "Cleaning logs older than 7 days..."
 find /var/log/migra-guardian/ -name "*.log" -mtime +7 -delete 2>/dev/null || true
 find /var/log/nginx/ -name "*.log.*" -mtime +7 -delete 2>/dev/null || true
-find /opt/mpanel/logs/ -name "*.log" -mtime +7 -delete 2>/dev/null || true
+find /opt/MigraPanel/ -path "*/logs/*.log" -mtime +7 -delete 2>/dev/null || true
 
 # ============================================
 # 2. Clean PM2 logs (keep 3 days)
 # ============================================
 log "Rotating PM2 logs..."
-pm2 flush mpanel-api 2>/dev/null || true
+pm2 flush migrapanel-panel-api 2>/dev/null || true
 
 # ============================================
 # 3. Clean old deployment backups (keep 7)
 # ============================================
 log "Cleaning old deployment backups..."
 cd /srv/web/ || exit 1
-ls -dt mpanel-frontend-backup-* 2>/dev/null | tail -n +8 | xargs rm -rf || true
+ls -dt migrapanel-frontend-backup-* 2>/dev/null | tail -n +8 | xargs rm -rf || true
 
 # ============================================
 # 4. Clean npm cache

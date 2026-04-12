@@ -3,7 +3,7 @@
 
 set -e
 
-HOST="root@100.97.213.11"
+HOST="root@100.119.105.93"
 DIST="/opt/mpanel/dist"
 
 echo "=== Scanning for tenantId issues in all modules ==="

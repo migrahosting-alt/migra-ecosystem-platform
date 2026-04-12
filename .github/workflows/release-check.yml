@@ -1,0 +1,41 @@
+name: Release Check
+
+on:
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  release-check:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run release check
+        id: release_check
+        shell: bash
+        run: |
+          set +e
+          RELEASE_STRICT_PLACEHOLDERS=true npm run release-check | tee release-check-output.txt
+          EXIT_CODE=${PIPESTATUS[0]}
+          echo "exit_code=$EXIT_CODE" >> "$GITHUB_OUTPUT"
+          exit $EXIT_CODE
+
+      - name: Upload release check output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-check-output
+          path: release-check-output.txt

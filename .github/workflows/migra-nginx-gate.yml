@@ -48,7 +48,7 @@ jobs:
           REQUIRED=(
             ".migra/runbooks/nginx-hardening-apply-pack.md"
             ".migra/runbooks/nginx-tls.md"
-            ".migra/runbooks/mpanel-security.md"
+            ".migra/runbooks/migrapanel-security.md"
             ".migra/infra.snapshot.json"
             ".migra/infra.snapshot.md"
             ".migra/scan.report.md"
@@ -67,11 +67,11 @@ jobs:
           HEAD="${{ github.event.pull_request.head.sha }}"
           git diff --name-only "$BASE" "$HEAD" | tee /tmp/changed_files.txt
 
-          if ! grep -E -q '(^\.migra/runbooks/nginx-|^\.migra/runbooks/mpanel-security\.md$|^\.migra/infra\.snapshot\.(json|md)$|^\.migra/scan\.report\.md$)' /tmp/changed_files.txt; then
+          if ! grep -E -q '(^\.migra/runbooks/nginx-|^\.migra/runbooks/migrapanel-security\.md$|^\.migra/infra\.snapshot\.(json|md)$|^\.migra/scan\.report\.md$)' /tmp/changed_files.txt; then
             echo "❌ NGINX-related changes detected, but runbooks/snapshots were not updated."
             echo "Update at least one of:"
             echo " - .migra/runbooks/nginx-tls.md"
-            echo " - .migra/runbooks/mpanel-security.md"
+            echo " - .migra/runbooks/migrapanel-security.md"
             echo " - .migra/infra.snapshot.json / .md"
             echo " - .migra/scan.report.md"
             exit 1
