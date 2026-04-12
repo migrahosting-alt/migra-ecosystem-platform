@@ -5,12 +5,12 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import type { VpsFleetProviderStatus } from "@/lib/vps/types";
 
-const buttonBase = "rounded-lg border px-3.5 py-2 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50";
+const buttonBase = "rounded-full border px-5 py-2.5 text-sm font-semibold shadow-sm transition disabled:cursor-not-allowed disabled:opacity-50";
 
 const tones = {
-  primary: "border-[var(--brand-600)] bg-[var(--brand-600)] text-white hover:opacity-90",
-  neutral: "border-[var(--line)] bg-white text-[var(--ink)] hover:bg-[var(--surface-2)]",
-  muted: "border-slate-200 bg-slate-100 text-slate-700 hover:bg-slate-200",
+  primary: "border-teal-700 bg-teal-700 text-white hover:bg-teal-800",
+  neutral: "border-slate-300 bg-white text-slate-900 hover:bg-slate-50",
+  muted: "border-slate-300 bg-slate-100 text-slate-700 hover:bg-slate-200",
 } as const;
 
 function buttonClass(tone: keyof typeof tones) {
@@ -88,24 +88,24 @@ export function VpsFleetActionsClient({
   }
 
   return (
-    <div className="w-full max-w-[560px] space-y-3 lg:text-right">
-      <div id="vps-fleet-actions" className="flex flex-wrap justify-start gap-2 lg:justify-end">
-        <button
-          className={buttonClass("primary")}
-          disabled={!canManage || !canImportFromProviders || busyAction !== null}
-          onClick={() => void runFleetAction("Import")}
-        >
-          {busyAction === "Import" ? "Importing..." : "Import"}
-        </button>
-        <Link href={deployHref} className={buttonClass("neutral")}>
+    <div className="w-full max-w-[620px] space-y-3 lg:text-right">
+      <div id="vps-fleet-actions" className="flex flex-wrap justify-start gap-3 lg:justify-end">
+        <Link href={deployHref} className={buttonClass("primary")}>
           Deploy
         </Link>
         <button
           className={buttonClass("neutral")}
           disabled={!canManage || !canImportFromProviders || busyAction !== null}
+          onClick={() => void runFleetAction("Import")}
+        >
+          {busyAction === "Import" ? "Importing..." : "Import"}
+        </button>
+        <button
+          className={buttonClass("neutral")}
+          disabled={!canManage || !canImportFromProviders || busyAction !== null}
           onClick={() => void runFleetAction("Sync")}
         >
-          {busyAction === "Sync" ? "Syncing..." : "Sync"}
+          {busyAction === "Sync" ? "Syncing..." : "Sync now"}
         </button>
         <button
           className={buttonClass(showProviderGuide ? "primary" : "muted")}
@@ -116,10 +116,10 @@ export function VpsFleetActionsClient({
       </div>
 
       {showProviderGuide ? (
-        <div className="rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-left shadow-sm">
+        <div className="rounded-2xl border border-slate-200 bg-white px-4 py-4 text-left shadow-sm">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
-              <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--ink-muted)]">Provider onboarding</p>
+              <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--ink-muted)]">Provider onboarding</p>
               <p className="mt-1 text-sm font-semibold text-[var(--ink)]">Connect runtime credentials to turn this workspace into a live control plane.</p>
             </div>
             <a href="#vps-provider-fabric" className="text-xs font-semibold uppercase tracking-[0.14em] text-[var(--brand-600)]">
@@ -128,7 +128,7 @@ export function VpsFleetActionsClient({
           </div>
           <div className="mt-3 grid gap-2 md:grid-cols-3">
             {providers.map((provider) => (
-              <div key={provider.slug} className="rounded-lg border border-[var(--line)] bg-[var(--surface-2)] px-3 py-3">
+              <div key={provider.slug} className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-3">
                 <div className="flex items-center justify-between gap-2">
                   <p className="text-sm font-semibold text-[var(--ink)]">{provider.label}</p>
                   <span className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.14em] ${provider.configured ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-slate-200 bg-slate-100 text-slate-700"}`}>

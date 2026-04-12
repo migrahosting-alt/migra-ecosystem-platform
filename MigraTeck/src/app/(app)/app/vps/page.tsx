@@ -44,51 +44,73 @@ export default async function VpsFleetPage() {
   const deployHref = buildMigraHostingRequestAccessHref();
 
   return (
-    <section className="mx-auto max-w-[1280px] space-y-4">
-      <VpsCloudControlBar fleet={fleet}>
-        <VpsFleetActionsClient
-          canManage={canManageFleet}
-          canImportFromProviders={fleet.canImportFromProviders}
-          deployHref={deployHref}
-          providers={fleet.providers}
-        />
-      </VpsCloudControlBar>
+    <div className="min-h-screen bg-slate-50">
+      <section className="mx-auto max-w-[1440px] px-4 py-4 sm:px-6 sm:py-6">
+        <VpsCloudControlBar fleet={fleet}>
+          <VpsFleetActionsClient
+            canManage={canManageFleet}
+            canImportFromProviders={fleet.canImportFromProviders}
+            deployHref={deployHref}
+            providers={fleet.providers}
+          />
+        </VpsCloudControlBar>
 
-      {fleet.banner ? <VpsFleetAttentionBanner banner={fleet.banner} lastSyncedAt={fleet.sync.lastSyncedAt} /> : null}
+        <div className="mt-4">
+          <VpsGlobalStatusStrip fleet={fleet} />
+        </div>
 
-      <VpsGlobalStatusStrip fleet={fleet} />
+        {fleet.banner ? (
+          <div className="mt-4">
+            <VpsFleetAttentionBanner banner={fleet.banner} lastSyncedAt={fleet.sync.lastSyncedAt} />
+          </div>
+        ) : null}
 
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,1.7fr)_360px]">
-        <div className="space-y-4">
-          {fleet.servers.length ? (
-            <section id="vps-fleet-inventory" className="space-y-3">
-              <div className="flex flex-wrap items-end justify-between gap-3 rounded-[1.4rem] border border-[var(--line)] bg-white px-5 py-4 shadow-sm">
-                <div>
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--ink-muted)]">Compute inventory</p>
-                  <h2 className="mt-1 text-2xl font-black tracking-tight text-[var(--ink)]">Fleet Inventory</h2>
-                  <p className="mt-1 text-sm text-[var(--ink-muted)]">Servers first: status, provider authority, drift posture, alerts, and operator access.</p>
+        <div className="mt-6 grid grid-cols-12 gap-6">
+          <main className="col-span-12 xl:col-span-8">
+            {fleet.servers.length ? (
+              <section id="vps-fleet-inventory" className="overflow-hidden rounded-3xl border border-[var(--line)] bg-white shadow-sm">
+                <div className="flex flex-col gap-4 border-b border-[var(--line)] px-6 py-5 lg:flex-row lg:items-center lg:justify-between">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[var(--ink-muted)]">Fleet inventory</p>
+                    <h2 className="mt-2 text-2xl font-semibold tracking-tight text-[var(--ink)]">Servers</h2>
+                    <p className="mt-1 text-sm text-[var(--ink-muted)]">Live server inventory, provider association, sync posture, and quick operator actions.</p>
+                  </div>
+                  <div className="flex flex-col gap-3 sm:flex-row">
+                    <input
+                      className="h-11 rounded-xl border border-slate-300 bg-white px-4 text-sm text-[var(--ink)] outline-none placeholder:text-slate-400 focus:border-slate-400"
+                      placeholder="Search servers, IPs, plans..."
+                    />
+                    <button className="rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-[var(--ink)] transition hover:bg-slate-50">
+                      Filters
+                    </button>
+                  </div>
                 </div>
-                <p className="text-sm font-semibold text-[var(--ink-muted)]">{fleet.summary.running} running / {fleet.summary.total} total</p>
-              </div>
-              <VpsFleetTable servers={fleet.servers} />
-            </section>
-          ) : (
-            <section id="vps-fleet-inventory">
-              <VpsOperationalEmptyState
-                providers={fleet.providers}
-                canImportFromProviders={fleet.canImportFromProviders}
-                deployHref={deployHref}
-              />
-            </section>
-          )}
+                <VpsFleetTable servers={fleet.servers} />
+              </section>
+            ) : (
+              <section id="vps-fleet-inventory">
+                <VpsOperationalEmptyState
+                  providers={fleet.providers}
+                  canImportFromProviders={fleet.canImportFromProviders}
+                  deployHref={deployHref}
+                />
+              </section>
+            )}
+          </main>
 
+          <aside className="col-span-12 xl:col-span-4">
+            <VpsFleetOpsSidebar fleet={fleet} />
+          </aside>
+        </div>
+
+        <div className="mt-6">
           <VpsOperationsPanel fleet={fleet} />
         </div>
 
-        <VpsFleetOpsSidebar fleet={fleet} />
-      </div>
-
-      <VpsPlatformPosture fleet={fleet} />
-    </section>
+        <div className="mt-6">
+          <VpsPlatformPosture fleet={fleet} />
+        </div>
+      </section>
+    </div>
   );
 }

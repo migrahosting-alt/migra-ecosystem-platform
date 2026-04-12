@@ -569,16 +569,16 @@ export function VpsCloudControlBar({
   const connectedProviders = fleet.providers.filter((provider) => provider.configured).length;
 
   return (
-    <section className="rounded-[1.5rem] border border-[var(--line)] bg-white px-5 py-4 shadow-sm">
-      <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+    <section className="rounded-3xl border border-slate-200 bg-white px-6 py-5 shadow-sm">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <div>
-          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--ink-muted)]">Cloud Control</p>
-          <h1 className="mt-1 text-[2rem] font-black tracking-tight text-[var(--ink)]">VPS Cloud Control</h1>
-          <p className="mt-1 text-sm text-[var(--ink-muted)]">
+          <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">Cloud control</p>
+          <h1 className="mt-2 text-3xl font-semibold tracking-tight text-slate-950">VPS Cloud Control</h1>
+          <p className="mt-2 text-sm text-slate-600">
             {fleet.summary.total} {fleet.summary.total === 1 ? "server" : "servers"} · {connectedProviders} {connectedProviders === 1 ? "provider" : "providers"} connected · last sync {formatDateTime(fleet.sync.lastSyncedAt)}
           </p>
         </div>
-        <div className="xl:min-w-[460px]">{children}</div>
+        <div className="lg:min-w-[520px]">{children}</div>
       </div>
     </section>
   );
@@ -588,54 +588,66 @@ export function VpsGlobalStatusStrip({ fleet }: { fleet: VpsFleetWorkspace }) {
   const healthyProviders = fleet.providers.filter((provider) => provider.healthState === "HEALTHY" && provider.runtimeConfigured).length;
   const offlineProviders = fleet.providers.filter((provider) => !provider.runtimeConfigured || provider.state === "OFFLINE").length;
   const degradedProviders = Math.max(fleet.providers.length - healthyProviders - offlineProviders, 0);
+  const toneClass = {
+    success: "border-emerald-200 bg-emerald-50 text-emerald-700",
+    warning: "border-amber-200 bg-amber-50 text-amber-700",
+    danger: "border-rose-200 bg-rose-50 text-rose-700",
+    neutral: "border-slate-200 bg-slate-100 text-slate-700",
+  } as const;
 
   const items = [
     {
       label: "Fleet sync",
-      value: fleet.sync.status === "HEALTHY" ? "Synced" : fleet.sync.status === "STALE" ? "Attention" : fleet.sync.status === "PENDING_IMPORT" ? "Pending" : "Offline",
-      helper: fleet.sync.staleServerCount > 0 ? `${fleet.sync.staleServerCount} stale` : "No stale servers",
-      tone: fleet.sync.status === "HEALTHY" ? "border-emerald-200 bg-emerald-50 text-emerald-700" : fleet.sync.status === "STALE" ? "border-amber-200 bg-amber-50 text-amber-800" : "border-slate-200 bg-slate-100 text-slate-700",
+      value: fleet.sync.status === "HEALTHY" ? "Healthy" : fleet.sync.status === "STALE" ? "Attention" : fleet.sync.status === "PENDING_IMPORT" ? "Pending import" : "Offline",
+      helper: fleet.sync.lastSyncedAt ? `Last fleet sync ${formatDateTime(fleet.sync.lastSyncedAt)}` : "No fleet sync recorded yet",
+      badge: fleet.sync.staleServerCount > 0 ? `${fleet.sync.staleServerCount} stale` : fleet.sync.status === "HEALTHY" ? "Fresh" : "Pending",
+      tone: fleet.sync.status === "HEALTHY" ? "success" : fleet.sync.status === "STALE" ? "warning" : "neutral",
     },
     {
       label: "Provider health",
-      value: `${healthyProviders} healthy`,
-      helper: offlineProviders > 0 ? `${offlineProviders} offline${degradedProviders > 0 ? ` · ${degradedProviders} degraded` : ""}` : degradedProviders > 0 ? `${degradedProviders} degraded` : "All active",
-      tone: offlineProviders > 0 ? "border-rose-200 bg-rose-50 text-rose-800" : degradedProviders > 0 ? "border-amber-200 bg-amber-50 text-amber-800" : "border-emerald-200 bg-emerald-50 text-emerald-700",
+      value: `${healthyProviders} healthy / ${offlineProviders} offline`,
+      helper: degradedProviders > 0 ? `${degradedProviders} degraded provider links require review` : "Provider fabric visible across the fleet",
+      badge: offlineProviders > 0 ? "Attention" : degradedProviders > 0 ? "Degraded" : "Healthy",
+      tone: offlineProviders > 0 ? "warning" : degradedProviders > 0 ? "warning" : "success",
     },
     {
       label: "Incidents",
-      value: String(fleet.summary.incidentOpen),
-      helper: fleet.summary.incidentOpen === 1 ? "Open incident" : "Open incidents",
-      tone: fleet.summary.incidentOpen > 0 ? "border-rose-200 bg-rose-50 text-rose-800" : "border-emerald-200 bg-emerald-50 text-emerald-700",
+      value: `${fleet.summary.incidentOpen} open`,
+      helper: fleet.summary.incidentOpen > 0 ? "Escalations are active in the visible fleet" : "No active operational incidents",
+      badge: fleet.summary.incidentOpen > 0 ? "Open" : "Clear",
+      tone: fleet.summary.incidentOpen > 0 ? "danger" : "success",
     },
     {
       label: "Drift",
-      value: String(fleet.summary.drifted),
-      helper: fleet.summary.drifted === 1 ? "Server drifted" : "Servers drifted",
-      tone: fleet.summary.drifted > 0 ? "border-amber-200 bg-amber-50 text-amber-800" : "border-emerald-200 bg-emerald-50 text-emerald-700",
+      value: `${fleet.summary.drifted} detected`,
+      helper: fleet.sync.staleServerCount > 0 ? `${fleet.sync.staleServerCount} server${fleet.sync.staleServerCount === 1 ? " is" : "s are"} outside freshness window` : "No stale reconciliation signals",
+      badge: fleet.summary.drifted > 0 ? "Review" : "Stable",
+      tone: fleet.summary.drifted > 0 || fleet.sync.staleServerCount > 0 ? "warning" : "success",
     },
     {
       label: "Protection",
-      value: `${fleet.summary.protected}/${fleet.summary.total || 0}`,
-      helper: fleet.summary.total ? "Servers protected" : "No servers yet",
-      tone: fleet.summary.total > 0 && fleet.summary.protected === fleet.summary.total ? "border-emerald-200 bg-emerald-50 text-emerald-700" : fleet.summary.protected > 0 ? "border-amber-200 bg-amber-50 text-amber-800" : "border-slate-200 bg-slate-100 text-slate-700",
+      value: `${fleet.summary.protected}/${fleet.summary.total || 0} protected`,
+      helper: fleet.summary.total ? `${fleet.summary.monitored}/${fleet.summary.total} monitored across the visible fleet` : "No servers yet",
+      badge: fleet.summary.total > 0 && fleet.summary.protected === fleet.summary.total ? "Covered" : fleet.summary.protected > 0 ? "Partial" : "Unprotected",
+      tone: fleet.summary.total > 0 && fleet.summary.protected === fleet.summary.total ? "success" : fleet.summary.protected > 0 ? "warning" : "neutral",
     },
   ];
 
   return (
-    <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+    <section className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-5">
       {items.map((item) => (
-        <div key={item.label} className="rounded-xl border border-[var(--line)] bg-white px-4 py-3 shadow-sm">
-          <div className="flex items-center justify-between gap-3">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--ink-muted)]">{item.label}</p>
-            <span className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.14em] ${item.tone}`}>
-              {item.value}
+        <div key={item.label} className="rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">{item.label}</p>
+          <div className="mt-2 flex items-center justify-between gap-3">
+            <p className="text-sm font-semibold text-slate-950">{item.value}</p>
+            <span className={`inline-flex rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] ${toneClass[item.tone]}`}>
+              {item.badge}
             </span>
           </div>
-          <p className="mt-2 text-xs text-[var(--ink-muted)]">{item.helper}</p>
+          <p className="mt-2 text-xs text-slate-500">{item.helper}</p>
         </div>
       ))}
-    </div>
+    </section>
   );
 }
 
@@ -653,56 +665,63 @@ export function VpsFleetAttentionBanner({
       : "border-sky-200 bg-sky-50 text-sky-900";
 
   return (
-    <div className={`flex flex-wrap items-center justify-between gap-3 rounded-xl border px-4 py-3 shadow-sm ${toneClass}`}>
+    <section className={`flex flex-col gap-3 rounded-2xl border px-4 py-3 shadow-sm lg:flex-row lg:items-center lg:justify-between ${toneClass}`}>
       <div>
-        <p className="text-sm font-semibold">{banner.title}</p>
-        <p className="text-sm opacity-90">{banner.description}</p>
+        <p className="text-[11px] font-semibold uppercase tracking-[0.18em] opacity-80">Operational alert</p>
+        <p className="mt-1 text-sm font-semibold">{banner.title}</p>
+        <p className="mt-1 text-sm opacity-90">{banner.description}</p>
       </div>
-      <div className="flex flex-wrap items-center gap-2 text-sm font-semibold">
-        <a href="#vps-fleet-actions" className="rounded-lg border border-current/20 bg-white/70 px-3 py-1.5 text-current transition hover:bg-white">
+      <div className="flex flex-wrap items-center gap-3">
+        <span className="text-xs opacity-80">Last fleet sync {formatDateTime(lastSyncedAt)}</span>
+        <a href="#vps-fleet-actions" className="rounded-full bg-current px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:opacity-90">
           Sync now
         </a>
-        <a href="#vps-fleet-inventory" className="rounded-lg border border-current/20 bg-white/70 px-3 py-1.5 text-current transition hover:bg-white">
-          View fleet
+        <a href="#vps-fleet-inventory" className="rounded-full border border-current/20 bg-white px-4 py-2 text-sm font-semibold transition hover:bg-white/70">
+          View servers
         </a>
-        <span className="text-xs font-medium opacity-75">Last sync {formatDateTime(lastSyncedAt)}</span>
       </div>
-    </div>
+    </section>
   );
 }
 
 export function VpsProviderFabricPanel({ providers }: { providers: VpsFleetProviderStatus[] }) {
   return (
-    <VpsSectionCard title="Provider fabric" description="Runtime authority and health across connected VPS providers.">
-      <div id="vps-provider-fabric" className="space-y-3">
+    <section id="vps-provider-fabric" className="rounded-3xl border border-slate-200 bg-white px-5 py-5 shadow-sm">
+      <div className="mb-4 flex items-start justify-between gap-3">
+        <div>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Provider fabric</p>
+          <h3 className="mt-2 text-lg font-semibold tracking-tight text-slate-950">Infrastructure providers</h3>
+        </div>
+        <a href="#vps-fleet-actions" className="text-sm font-semibold text-slate-700 hover:text-slate-900">
+          Manage
+        </a>
+      </div>
+      <div className="space-y-3">
         {providers.map((provider) => {
           const fabricStatus = providerFabricStatus(provider);
 
           return (
-            <div key={provider.slug} className="rounded-xl border border-[var(--line)] bg-[var(--surface-2)] px-4 py-3">
+            <div key={provider.slug} className="rounded-2xl border border-slate-200 px-4 py-3">
               <div className="flex items-start justify-between gap-3">
                 <div>
-                  <p className="text-sm font-semibold text-[var(--ink)]">{provider.label}</p>
-                  <p className="mt-1 text-xs uppercase tracking-[0.14em] text-[var(--ink-muted)]">{provider.slug}</p>
+                  <p className="text-sm font-semibold text-slate-950">{provider.label}</p>
+                  <p className="mt-1 text-sm text-slate-600">
+                    {provider.healthDetail || provider.detail}
+                  </p>
+                  <p className="mt-1 text-xs text-slate-500">
+                    {provider.serverCount} connected {provider.serverCount === 1 ? "server" : "servers"}
+                    {provider.healthCheckedAt || provider.lastSyncedAt ? ` · last check ${formatDateTime(provider.healthCheckedAt || provider.lastSyncedAt)}` : ""}
+                  </p>
                 </div>
-                <span className={`inline-flex rounded-full border px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.14em] ${fabricStatus.className}`}>
+                <span className={`inline-flex rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] ${fabricStatus.className}`}>
                   {fabricStatus.label}
                 </span>
-              </div>
-              <p className="mt-3 text-sm text-[var(--ink-muted)]">{provider.healthDetail}</p>
-              <div className="mt-3 flex flex-wrap gap-2 text-xs text-[var(--ink-muted)]">
-                <span className="rounded-full border border-[var(--line)] bg-white px-2.5 py-1">{provider.serverCount} {provider.serverCount === 1 ? "server" : "servers"}</span>
-                <span className="rounded-full border border-[var(--line)] bg-white px-2.5 py-1">{provider.runtimeConfigured ? "Runtime ready" : "Runtime missing"}</span>
-                <span className="rounded-full border border-[var(--line)] bg-white px-2.5 py-1">Last check {formatDateTime(provider.healthCheckedAt || provider.lastSyncedAt)}</span>
               </div>
             </div>
           );
         })}
-        <a href="#vps-fleet-actions" className="inline-flex text-xs font-semibold uppercase tracking-[0.14em] text-[var(--brand-600)]">
-          Manage providers
-        </a>
       </div>
-    </VpsSectionCard>
+    </section>
   );
 }
 
@@ -717,51 +736,61 @@ export function VpsFleetOpsSidebar({
     <div className="space-y-4">
       <VpsProviderFabricPanel providers={fleet.providers} />
 
-      <VpsSectionCard title="Active incidents" description="Current operational issues that need direct attention.">
+      <section className="rounded-3xl border border-slate-200 bg-white px-5 py-5 shadow-sm">
+        <div className="mb-4">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Incidents</p>
+          <h3 className="mt-2 text-lg font-semibold tracking-tight text-slate-950">Active incidents</h3>
+        </div>
         <div className="space-y-3">
           {fleet.summary.incidentOpen > 0 ? (
-            <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3">
+            <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3">
               <p className="text-sm font-semibold text-rose-900">{fleet.summary.incidentOpen} {fleet.summary.incidentOpen === 1 ? "incident is" : "incidents are"} open</p>
-              <p className="mt-1 text-sm text-rose-800">Review impacted servers in the fleet and open the server workspace to inspect the alert queue.</p>
+              <p className="mt-1 text-sm text-rose-800">Critical alerts and SLA risks are active in the visible fleet.</p>
             </div>
           ) : (
-            <p className="text-sm text-[var(--ink-muted)]">No open incidents are currently attached to the visible fleet.</p>
+            <div className="rounded-2xl border border-dashed border-slate-300 px-4 py-6 text-center">
+              <p className="text-sm font-semibold text-slate-950">No open incidents</p>
+              <p className="mt-1 text-sm text-slate-600">Critical alerts and SLA risks will appear here.</p>
+            </div>
           )}
-          <a href="#vps-fleet-inventory" className="inline-flex text-xs font-semibold uppercase tracking-[0.14em] text-[var(--brand-600)]">
-            View servers
-          </a>
         </div>
-      </VpsSectionCard>
+      </section>
 
-      <VpsSectionCard title="Reconciliation" description="Sync freshness and drift posture across the control plane.">
-        <div className="space-y-3 text-sm text-[var(--ink-muted)]">
-          <div className="rounded-xl border border-[var(--line)] bg-[var(--surface-2)] px-4 py-3">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.14em]">Last fleet sync</p>
-            <p className="mt-1 font-semibold text-[var(--ink)]">{formatDateTime(fleet.sync.lastSyncedAt)}</p>
-          </div>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <div className="rounded-xl border border-[var(--line)] bg-[var(--surface-2)] px-4 py-3">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.14em]">Stale servers</p>
-              <p className="mt-1 font-semibold text-[var(--ink)]">{fleet.sync.staleServerCount}</p>
-            </div>
-            <div className="rounded-xl border border-[var(--line)] bg-[var(--surface-2)] px-4 py-3">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.14em]">Drift detected</p>
-              <p className="mt-1 font-semibold text-[var(--ink)]">{fleet.summary.drifted}</p>
-            </div>
-          </div>
-          <a href="#vps-fleet-actions" className="inline-flex text-xs font-semibold uppercase tracking-[0.14em] text-[var(--brand-600)]">
-            Run reconciliation
-          </a>
+      <section className="rounded-3xl border border-slate-200 bg-white px-5 py-5 shadow-sm">
+        <div className="mb-4">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Reconciliation</p>
+          <h3 className="mt-2 text-lg font-semibold tracking-tight text-slate-950">Fleet state</h3>
         </div>
-      </VpsSectionCard>
+        <dl className="space-y-3 text-sm">
+          <div className="flex items-center justify-between">
+            <dt className="text-slate-600">Last fleet sync</dt>
+            <dd className="font-semibold text-slate-950">{formatDateTime(fleet.sync.lastSyncedAt)}</dd>
+          </div>
+          <div className="flex items-center justify-between">
+            <dt className="text-slate-600">Stale servers</dt>
+            <dd className={`font-semibold ${fleet.sync.staleServerCount > 0 ? "text-amber-700" : "text-slate-950"}`}>{fleet.sync.staleServerCount}</dd>
+          </div>
+          <div className="flex items-center justify-between">
+            <dt className="text-slate-600">Drift detected</dt>
+            <dd className={`font-semibold ${fleet.summary.drifted > 0 ? "text-amber-700" : "text-slate-950"}`}>{fleet.summary.drifted}</dd>
+          </div>
+        </dl>
+        <a href="#vps-fleet-actions" className="mt-4 inline-flex w-full items-center justify-center rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-900 transition hover:bg-slate-50">
+          Run reconciliation
+        </a>
+      </section>
 
-      <VpsSectionCard title="Monthly spend" description="Visible recurring infrastructure spend in this workspace.">
-        <div className="space-y-3">
-          <p className="text-3xl font-black tracking-tight text-[var(--ink)]">{formatMoney(fleet.summary.monthlyTotalCents)}</p>
-          <p className="text-sm text-[var(--ink-muted)]">{fleet.summary.total} active plans · {healthyProviders} healthy provider links</p>
-          <LinkButton href="/app/billing" variant="secondary">View billing</LinkButton>
+      <section className="rounded-3xl border border-slate-200 bg-white px-5 py-5 shadow-sm">
+        <div className="mb-4">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Spend</p>
+          <h3 className="mt-2 text-lg font-semibold tracking-tight text-slate-950">Monthly total</h3>
         </div>
-      </VpsSectionCard>
+        <p className="text-3xl font-semibold tracking-tight text-slate-950">{formatMoney(fleet.summary.monthlyTotalCents)}</p>
+        <p className="mt-1 text-sm text-slate-600">Visible recurring infrastructure spend · {healthyProviders} healthy provider links</p>
+        <Link href="/app/billing" className="mt-4 inline-flex w-full items-center justify-center rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-900 transition hover:bg-slate-50">
+          View billing
+        </Link>
+      </section>
     </div>
   );
 }
@@ -815,25 +844,28 @@ export function VpsOperationsPanel({
   ] as const;
 
   return (
-    <VpsSectionCard title="Operations" description="Primary module shortcuts for managing the fleet.">
-      <div className="grid gap-3 lg:grid-cols-5">
+    <section className="rounded-3xl border border-slate-200 bg-white px-6 py-5 shadow-sm">
+      <div className="mb-4">
+        <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">Operations</p>
+        <h2 className="mt-2 text-2xl font-semibold tracking-tight text-slate-950">Infrastructure modules</h2>
+      </div>
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-5">
         {cards.map((card) => (
-          <article key={card.title} className="rounded-xl border border-[var(--line)] bg-[var(--surface-2)] px-4 py-3">
+          <article key={card.title} className="rounded-2xl border border-slate-200 px-4 py-4">
             <div className="flex items-start justify-between gap-3">
-              <p className="text-sm font-semibold text-[var(--ink)]">{card.title}</p>
-              <span className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.14em] ${moduleStatusTone(card.status)}`}>
+              <p className="text-sm font-semibold text-slate-950">{card.title}</p>
+              <span className={`inline-flex rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] ${moduleStatusTone(card.status)}`}>
                 {card.status}
               </span>
             </div>
-            <p className="mt-3 text-lg font-black tracking-tight text-[var(--ink)]">{card.metric}</p>
-            <p className="mt-1 text-xs leading-5 text-[var(--ink-muted)]">{card.detail}</p>
-            <a href={card.href} className="mt-3 inline-flex text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--brand-600)]">
+            <p className="mt-4 text-sm text-slate-600">{card.metric}</p>
+            <a href={card.href} className="mt-5 inline-flex text-xs font-semibold uppercase tracking-[0.16em] text-slate-900 transition hover:text-slate-700">
               {card.actionLabel}
             </a>
           </article>
         ))}
       </div>
-    </VpsSectionCard>
+    </section>
   );
 }
 
@@ -851,41 +883,50 @@ export function VpsPlatformPosture({
   ].filter(Boolean).slice(0, 4) as string[];
 
   return (
-    <div className="grid gap-4 lg:grid-cols-2">
-      <VpsSectionCard title="Platform posture" description="Current operating posture across provider authority, protection, and observability.">
-        <div className="grid gap-3 sm:grid-cols-2">
-          <div className="rounded-xl border border-[var(--line)] bg-[var(--surface-2)] px-4 py-3">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--ink-muted)]">Provider orchestration</p>
-            <p className="mt-1 text-sm font-semibold text-[var(--ink)]">{fleet.providers.filter((provider) => provider.runtimeConfigured).length} runtime-connected</p>
+    <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
+      <section className="rounded-3xl border border-slate-200 bg-white px-5 py-5 shadow-sm">
+        <div className="mb-4">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Platform posture</p>
+          <h3 className="mt-2 text-lg font-semibold tracking-tight text-slate-950">Operating posture</h3>
+        </div>
+        <div className="space-y-3">
+          <div className="flex items-center justify-between rounded-2xl border border-slate-200 px-4 py-3">
+            <span className="text-sm text-slate-600">Provider orchestration</span>
+            <span className="text-sm font-semibold text-slate-950">{fleet.providers.filter((provider) => provider.runtimeConfigured).length > 0 ? "Connected" : "Not connected"}</span>
           </div>
-          <div className="rounded-xl border border-[var(--line)] bg-[var(--surface-2)] px-4 py-3">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--ink-muted)]">Fleet reconciliation</p>
-            <p className="mt-1 text-sm font-semibold text-[var(--ink)]">{cloudSyncLabel(fleet.sync.status)}</p>
+          <div className="flex items-center justify-between rounded-2xl border border-slate-200 px-4 py-3">
+            <span className="text-sm text-slate-600">Fleet reconciliation</span>
+            <span className="text-sm font-semibold text-slate-950">{cloudSyncLabel(fleet.sync.status)}</span>
           </div>
-          <div className="rounded-xl border border-[var(--line)] bg-[var(--surface-2)] px-4 py-3">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--ink-muted)]">Protection coverage</p>
-            <p className="mt-1 text-sm font-semibold text-[var(--ink)]">{fleet.summary.protected}/{fleet.summary.total || 0} nodes</p>
+          <div className="flex items-center justify-between rounded-2xl border border-slate-200 px-4 py-3">
+            <span className="text-sm text-slate-600">Protection coverage</span>
+            <span className="text-sm font-semibold text-slate-950">{fleet.summary.protected}/{fleet.summary.total || 0} nodes</span>
           </div>
-          <div className="rounded-xl border border-[var(--line)] bg-[var(--surface-2)] px-4 py-3">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--ink-muted)]">Monitoring coverage</p>
-            <p className="mt-1 text-sm font-semibold text-[var(--ink)]">{fleet.summary.monitored}/{fleet.summary.total || 0} nodes</p>
+          <div className="flex items-center justify-between rounded-2xl border border-slate-200 px-4 py-3">
+            <span className="text-sm text-slate-600">Monitoring coverage</span>
+            <span className="text-sm font-semibold text-slate-950">{fleet.summary.monitored}/{fleet.summary.total || 0} nodes</span>
           </div>
         </div>
-      </VpsSectionCard>
+      </section>
 
-      <VpsSectionCard title="Recommended next steps" description="Direct actions to keep the fleet healthy and authoritative.">
+      <section className="rounded-3xl border border-slate-200 bg-white px-5 py-5 shadow-sm">
+        <div className="mb-4">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Recommendations</p>
+          <h3 className="mt-2 text-lg font-semibold tracking-tight text-slate-950">Next steps</h3>
+        </div>
         {recommendations.length ? (
-          <div className="space-y-3">
+          <div className="space-y-3 text-sm text-slate-700">
             {recommendations.map((item) => (
-              <div key={item} className="rounded-xl border border-[var(--line)] bg-[var(--surface-2)] px-4 py-3 text-sm font-semibold text-[var(--ink)]">
-                {item}
+              <div key={item} className="flex items-start gap-3">
+                <div className="mt-1 h-2.5 w-2.5 rounded-full bg-slate-400" />
+                <p>{item}</p>
               </div>
             ))}
           </div>
         ) : (
-          <p className="text-sm text-[var(--ink-muted)]">The fleet is stable. Open a server workspace or provider fabric card for deeper operations.</p>
+          <p className="text-sm text-slate-600">The fleet is stable. Open a server workspace or provider fabric card for deeper operations.</p>
         )}
-      </VpsSectionCard>
+      </section>
     </div>
   );
 }
@@ -1245,48 +1286,48 @@ export function VpsOperationalEmptyState({
   const configuredProviders = providers.filter((provider) => provider.configured).length;
 
   return (
-    <div className="rounded-[1.4rem] border border-[var(--line)] bg-white px-5 py-5 shadow-sm">
+    <div className="rounded-3xl border border-slate-200 bg-white px-6 py-5 shadow-sm">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--ink-muted)]">Fleet inventory</p>
-          <h2 className="mt-1 text-2xl font-black tracking-tight text-[var(--ink)]">No imported VPS inventory yet</h2>
-          <p className="mt-2 max-w-2xl text-sm text-[var(--ink-muted)]">
+          <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">Fleet inventory</p>
+          <h2 className="mt-2 text-2xl font-semibold tracking-tight text-slate-950">No imported VPS inventory yet</h2>
+          <p className="mt-2 max-w-2xl text-sm text-slate-600">
             Import provider inventory or deploy the first node to activate the fleet table and server workspaces.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <a href="#vps-fleet-actions" className="rounded-lg border border-[var(--line)] bg-white px-3 py-2 text-sm font-semibold text-[var(--ink)] transition hover:bg-[var(--surface-2)]">
+          <a href="#vps-fleet-actions" className="rounded-full border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-900 transition hover:bg-slate-50">
             Open actions
           </a>
           <LinkButton href={deployHref} variant="secondary">Deploy</LinkButton>
         </div>
       </div>
       <div className="mt-4 grid gap-3 md:grid-cols-3">
-          <div className="rounded-xl border border-[var(--line)] bg-[var(--surface-2)] px-4 py-3">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--ink-muted)]">Connected providers</p>
-            <p className="mt-1 text-lg font-bold text-[var(--ink)]">{configuredProviders}</p>
+          <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">Connected providers</p>
+            <p className="mt-1 text-lg font-semibold text-slate-950">{configuredProviders}</p>
           </div>
-          <div className="rounded-xl border border-[var(--line)] bg-[var(--surface-2)] px-4 py-3">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--ink-muted)]">Discovery readiness</p>
-            <p className="mt-1 text-lg font-bold text-[var(--ink)]">{canImportFromProviders ? "Ready" : "Blocked"}</p>
+          <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">Discovery readiness</p>
+            <p className="mt-1 text-lg font-semibold text-slate-950">{canImportFromProviders ? "Ready" : "Blocked"}</p>
           </div>
-          <div className="rounded-xl border border-[var(--line)] bg-[var(--surface-2)] px-4 py-3">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--ink-muted)]">Next milestone</p>
-            <p className="mt-1 text-lg font-bold text-[var(--ink)]">First server import</p>
+          <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">Next milestone</p>
+            <p className="mt-1 text-lg font-semibold text-slate-950">First server import</p>
           </div>
       </div>
       <div className="mt-4 grid gap-3 lg:grid-cols-3">
-          <div className="rounded-xl border border-[var(--line)] bg-white px-4 py-3">
-            <p className="font-semibold text-[var(--ink)]">1. Import current estate</p>
-            <p className="mt-1">Use the fleet action row to discover existing provider inventory and attach it to this org.</p>
+          <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
+            <p className="font-semibold text-slate-950">1. Import current estate</p>
+            <p className="mt-1 text-sm text-slate-600">Use the fleet action row to discover existing provider inventory and attach it to this org.</p>
           </div>
-          <div className="rounded-xl border border-[var(--line)] bg-white px-4 py-3">
-            <p className="font-semibold text-[var(--ink)]">2. Verify provider connectivity</p>
-            <p className="mt-1">Review the provider strip above to confirm which APIs are configured in the runtime.</p>
+          <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
+            <p className="font-semibold text-slate-950">2. Verify provider connectivity</p>
+            <p className="mt-1 text-sm text-slate-600">Review the provider strip above to confirm which APIs are configured in the runtime.</p>
           </div>
-          <div className="rounded-xl border border-[var(--line)] bg-white px-4 py-3">
-            <p className="font-semibold text-[var(--ink)]">3. Deploy new capacity</p>
-            <p className="mt-1">Open the MigraHosting request flow if you need the first VPS provisioned for this workspace.</p>
+          <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
+            <p className="font-semibold text-slate-950">3. Deploy new capacity</p>
+            <p className="mt-1 text-sm text-slate-600">Open the MigraHosting request flow if you need the first VPS provisioned for this workspace.</p>
           </div>
       </div>
     </div>
@@ -1295,53 +1336,61 @@ export function VpsOperationalEmptyState({
 
 export function VpsFleetTable({ servers }: { servers: VpsFleetItem[] }) {
   return (
-    <div className="overflow-hidden rounded-2xl border border-[var(--line)] bg-white shadow-sm">
-      <table className="min-w-full border-collapse text-sm">
-        <thead className="bg-[var(--surface-2)] text-left text-[var(--ink-muted)]">
-          <tr>
-            <th className="px-4 py-2.5 font-semibold">Server</th>
-            <th className="px-4 py-2.5 font-semibold">Status</th>
-            <th className="px-4 py-2.5 font-semibold">Public IPv4</th>
-            <th className="px-4 py-2.5 font-semibold">Region</th>
-            <th className="px-4 py-2.5 font-semibold">OS</th>
-            <th className="px-4 py-2.5 font-semibold">Plan</th>
-            <th className="px-4 py-2.5 font-semibold">Renewal</th>
-            <th className="px-4 py-2.5 font-semibold">Cost</th>
-            <th className="px-4 py-2.5 font-semibold">Actions</th>
+    <div className="overflow-x-auto">
+      <table className="min-w-full border-separate border-spacing-0 text-sm">
+        <thead>
+          <tr className="bg-slate-50">
+            <th className="border-b border-[var(--line)] px-6 py-4 text-left text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Server</th>
+            <th className="border-b border-[var(--line)] px-6 py-4 text-left text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Status</th>
+            <th className="border-b border-[var(--line)] px-6 py-4 text-left text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Public IPv4</th>
+            <th className="border-b border-[var(--line)] px-6 py-4 text-left text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Region</th>
+            <th className="border-b border-[var(--line)] px-6 py-4 text-left text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">OS</th>
+            <th className="border-b border-[var(--line)] px-6 py-4 text-left text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Plan</th>
+            <th className="border-b border-[var(--line)] px-6 py-4 text-left text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Renewal</th>
+            <th className="border-b border-[var(--line)] px-6 py-4 text-left text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Cost</th>
+            <th className="border-b border-[var(--line)] px-6 py-4 text-right text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Actions</th>
           </tr>
         </thead>
         <tbody>
           {servers.map((server) => (
             <tr key={server.id} className="border-t border-[var(--line)] align-top">
-              <td className="px-4 py-3">
-                <p className="font-semibold text-[var(--ink)]">{server.name}</p>
-                <p className="mt-1 text-xs text-[var(--ink-muted)]">{server.hostname}</p>
-                <p className="mt-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--ink-muted)]">
-                  Provider {server.providerSlug} · Last sync {formatDateTime(server.lastSyncedAt)}
-                </p>
-                <p className="mt-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--ink-muted)]">
-                  {providerHealthLabel(server.providerHealthState)}{server.driftType ? ` · Drift ${server.driftType}` : ""}
-                </p>
-                {server.openAlertCount > 0 ? <p className="mt-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-amber-700">{server.openAlertCount} Open Alert{server.openAlertCount === 1 ? "" : "s"}</p> : null}
-                {server.incidentOpen ? <p className="mt-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-rose-700">Incident Open</p> : null}
+              <td className="px-6 py-5 align-top">
+                <p className="text-sm font-semibold text-slate-950">{server.name}</p>
+                <p className="mt-1 text-sm text-slate-600">{server.hostname}</p>
+                <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-500">
+                  <span className="font-medium uppercase tracking-[0.16em]">Provider {server.providerSlug.toUpperCase()}</span>
+                  <span>·</span>
+                  <span>Last sync {formatDateTime(server.lastSyncedAt)}</span>
+                </div>
+                {server.openAlertCount > 0 || server.incidentOpen || server.driftType ? (
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {server.openAlertCount > 0 ? <span className="inline-flex rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-amber-700">{server.openAlertCount} open alert{server.openAlertCount === 1 ? "" : "s"}</span> : null}
+                    {server.incidentOpen ? <span className="inline-flex rounded-full border border-rose-200 bg-rose-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-rose-700">Incident open</span> : null}
+                    {server.driftType ? <span className="inline-flex rounded-full border border-slate-200 bg-slate-100 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-700">Drift {server.driftType}</span> : null}
+                  </div>
+                ) : null}
               </td>
-              <td className="px-4 py-3">
+              <td className="px-6 py-5 align-top">
                 <VpsStatusBadge status={server.status} />
-                <p className="mt-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--ink-muted)]">Power {server.powerState}</p>
+                <p className="mt-2 text-xs font-medium uppercase tracking-[0.16em] text-slate-600">Power {server.powerState}</p>
               </td>
-              <td className="px-4 py-3 font-medium text-[var(--ink)]">{server.publicIpv4}</td>
-              <td className="px-4 py-3 text-[var(--ink-muted)]">{server.region}</td>
-              <td className="px-4 py-3 text-[var(--ink-muted)]">{server.osName}</td>
-              <td className="px-4 py-3 text-[var(--ink-muted)]">
-                <p>{server.planLabel}</p>
-                <p className="mt-1 text-xs">{server.cpuRamLabel}</p>
+              <td className="px-6 py-5 align-top text-sm text-slate-900">{server.publicIpv4}</td>
+              <td className="px-6 py-5 align-top text-sm text-slate-900">{server.region}</td>
+              <td className="px-6 py-5 align-top text-sm text-slate-900">{server.osName}</td>
+              <td className="px-6 py-5 align-top">
+                <p className="text-sm text-slate-900">{server.planLabel}</p>
+                <p className="mt-1 text-xs text-slate-500">{server.cpuRamLabel}</p>
               </td>
-              <td className="px-4 py-3 text-[var(--ink-muted)]">{formatDate(server.renewalAt)}</td>
-              <td className="px-4 py-3 font-semibold text-[var(--ink)]">{formatMoney(server.monthlyPriceCents, server.billingCurrency)}/mo</td>
-              <td className="px-4 py-3">
-                <div className="flex flex-wrap gap-2">
-                  <LinkButton href={`/app/vps/${server.id}`} variant="secondary">Open</LinkButton>
-                  <LinkButton href={`/app/vps/${server.id}/console`} variant="ghost">Console</LinkButton>
+              <td className="px-6 py-5 align-top text-sm text-slate-900">{formatDate(server.renewalAt)}</td>
+              <td className="px-6 py-5 align-top text-sm font-semibold text-slate-950">{formatMoney(server.monthlyPriceCents, server.billingCurrency)}/mo</td>
+              <td className="px-6 py-5 align-top">
+                <div className="flex justify-end gap-2">
+                  <Link href={`/app/vps/${server.id}`} className="rounded-full border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-900 transition hover:bg-slate-50">
+                    Open
+                  </Link>
+                  <Link href={`/app/vps/${server.id}/console`} className="rounded-full border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-900 transition hover:bg-slate-50">
+                    Console
+                  </Link>
                 </div>
               </td>
             </tr>
