@@ -1,4 +1,4 @@
-import { ProductKey, type Membership, type Organization } from "@prisma/client";
+import { Prisma, ProductKey, type Membership, type Organization } from "@prisma/client";
 import { isEntitlementRuntimeAllowed } from "@/lib/entitlements";
 import { prisma } from "@/lib/prisma";
 import { getControlPlaneRestriction, getVpsCapabilities } from "@/lib/vps/access";
@@ -65,35 +65,63 @@ function buildActivityMessage(eventType: string, payloadJson: unknown): string {
     .replace(/^\w/, (char) => char.toUpperCase());
 }
 
-async function listOpenVpsIncidentServerIds(orgId: string) {
-  const incidents = await prisma.vpsIncident.findMany({
-    where: {
-      orgId,
-      state: { in: ["OPEN", "ACKNOWLEDGED", "MITIGATING"] },
-    },
-    select: {
-      serverId: true,
-    },
-  });
+function isMissingTableError(error: unknown, tableName: string) {
+  return error instanceof Prisma.PrismaClientKnownRequestError
+    && error.code === "P2021"
+    && error.meta?.table === tableName;
+}
 
-  return new Set(incidents.map((incident) => incident.serverId));
+function isMissingColumnError(error: unknown, columnName: string) {
+  return error instanceof Prisma.PrismaClientKnownRequestError
+    && error.code === "P2022"
+    && error.meta?.column === columnName;
+}
+
+async function listOpenVpsIncidentServerIds(orgId: string) {
+  try {
+    const incidents = await prisma.vpsIncident.findMany({
+      where: {
+        orgId,
+        state: { in: ["OPEN", "ACKNOWLEDGED", "MITIGATING"] },
+      },
+      select: {
+        serverId: true,
+      },
+    });
+
+    return new Set(incidents.map((incident) => incident.serverId));
+  } catch (error) {
+    if (isMissingTableError(error, "public.VpsIncident")) {
+      return new Set<string>();
+    }
+
+    throw error;
+  }
 }
 
 async function listOpenVpsAlertCounts(orgId: string) {
-  const events = await prisma.vpsAlertEvent.findMany({
-    where: {
-      orgId,
-      status: { in: ["ACTIVE", "ACKNOWLEDGED"] },
-    },
-    select: {
-      serverId: true,
-    },
-  });
+  try {
+    const events = await prisma.vpsAlertEvent.findMany({
+      where: {
+        orgId,
+        status: { in: ["ACTIVE", "ACKNOWLEDGED"] },
+      },
+      select: {
+        serverId: true,
+      },
+    });
 
-  return events.reduce<Map<string, number>>((counts, event) => {
-    counts.set(event.serverId, (counts.get(event.serverId) || 0) + 1);
-    return counts;
-  }, new Map());
+    return events.reduce<Map<string, number>>((counts, event) => {
+      counts.set(event.serverId, (counts.get(event.serverId) || 0) + 1);
+      return counts;
+    }, new Map());
+  } catch (error) {
+    if (isMissingTableError(error, "public.VpsAlertEvent")) {
+      return new Map<string, number>();
+    }
+
+    throw error;
+  }
 }
 
 export async function orgPrefersVpsWorkspace(membership: MembershipWithOrg): Promise<boolean> {
@@ -117,49 +145,103 @@ export async function orgPrefersVpsWorkspace(membership: MembershipWithOrg): Pro
 }
 
 async function listVpsServerRowsForOrg(orgId: string) {
-  return prisma.vpsServer.findMany({
-    where: { orgId },
-    orderBy: [{ createdAt: "asc" }],
-    select: {
-      id: true,
-      providerSlug: true,
-      providerServerId: true,
-      name: true,
-      hostname: true,
-      status: true,
-      powerState: true,
-      publicIpv4: true,
-      region: true,
-      osName: true,
-      planName: true,
-      vcpu: true,
-      memoryMb: true,
-      diskGb: true,
-      bandwidthTb: true,
-      renewalAt: true,
-      monthlyPriceCents: true,
-      billingCurrency: true,
-      backupsEnabled: true,
-      firewallEnabled: true,
-      providerHealthState: true,
-      driftDetectedAt: true,
-      driftType: true,
-      lastSyncedAt: true,
-      monitoringStatus: true,
-      providerBindings: {
-        orderBy: { updatedAt: "desc" },
-        select: {
-          providerSlug: true,
-          providerServerId: true,
-          providerRegionId: true,
-          providerPlanId: true,
-          metadataJson: true,
-          lastSyncedAt: true,
-          updatedAt: true,
+  try {
+    return await prisma.vpsServer.findMany({
+      where: { orgId },
+      orderBy: [{ createdAt: "asc" }],
+      select: {
+        id: true,
+        providerSlug: true,
+        providerServerId: true,
+        name: true,
+        hostname: true,
+        status: true,
+        powerState: true,
+        publicIpv4: true,
+        region: true,
+        osName: true,
+        planName: true,
+        vcpu: true,
+        memoryMb: true,
+        diskGb: true,
+        bandwidthTb: true,
+        renewalAt: true,
+        monthlyPriceCents: true,
+        billingCurrency: true,
+        backupsEnabled: true,
+        firewallEnabled: true,
+        providerHealthState: true,
+        driftDetectedAt: true,
+        driftType: true,
+        lastSyncedAt: true,
+        monitoringStatus: true,
+        providerBindings: {
+          orderBy: { updatedAt: "desc" },
+          select: {
+            providerSlug: true,
+            providerServerId: true,
+            providerRegionId: true,
+            providerPlanId: true,
+            metadataJson: true,
+            lastSyncedAt: true,
+            updatedAt: true,
+          },
         },
       },
-    },
-  });
+    });
+  } catch (error) {
+    if (!isMissingColumnError(error, "VpsServer.providerHealthState")) {
+      throw error;
+    }
+
+    const legacyRows = await prisma.vpsServer.findMany({
+      where: { orgId },
+      orderBy: [{ createdAt: "asc" }],
+      select: {
+        id: true,
+        providerSlug: true,
+        providerServerId: true,
+        name: true,
+        hostname: true,
+        status: true,
+        powerState: true,
+        publicIpv4: true,
+        region: true,
+        osName: true,
+        planName: true,
+        vcpu: true,
+        memoryMb: true,
+        diskGb: true,
+        bandwidthTb: true,
+        renewalAt: true,
+        monthlyPriceCents: true,
+        billingCurrency: true,
+        backupsEnabled: true,
+        firewallEnabled: true,
+        lastSyncedAt: true,
+        monitoringStatus: true,
+        providerBindings: {
+          orderBy: { updatedAt: "desc" },
+          select: {
+            providerSlug: true,
+            providerServerId: true,
+            providerRegionId: true,
+            providerPlanId: true,
+            metadataJson: true,
+            lastSyncedAt: true,
+            updatedAt: true,
+          },
+        },
+      },
+    });
+
+    return legacyRows.map((row) => ({
+      ...row,
+      providerHealthState: "UNKNOWN" as const,
+      driftDetectedAt: null,
+      driftType: null,
+    }));
+  }
 }
 
 function mapFleetItems(
