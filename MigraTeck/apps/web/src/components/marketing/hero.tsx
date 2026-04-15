@@ -6,8 +6,9 @@ export default function MigraTeckHero() {
     { name: "MigraMail",    label: "Messaging",       accent: "from-cyan-400/80 via-sky-400/70 to-blue-400/70",        logo: "/brands/products/migramail.png"     },
     { name: "MigraIntake",  label: "Onboarding",      accent: "from-lime-300/80 via-emerald-400/70 to-cyan-400/70",    logo: "/brands/products/migraintake.png"   },
     { name: "MigraDrive",   label: "Storage",         accent: "from-emerald-400/80 via-teal-400/70 to-blue-400/70",    logo: "/brands/products/migradrive.png"    },
-    { name: "MigraPilot",   label: "Automation",      accent: "from-amber-300/80 via-orange-400/70 to-yellow-400/70",  logo: "/brands/products/migrapilot.png"    },
-    { name: "MigraInvoice", label: "Billing",         accent: "from-violet-400/80 via-purple-400/70 to-fuchsia-400/70",logo: "/brands/products/migrainvoice.png"  },
+    { name: "MigraPilot",     label: "Automation",      accent: "from-amber-300/80 via-orange-400/70 to-yellow-400/70",    logo: "/brands/products/migrapilot.png"      },
+    { name: "MigraInvoice",   label: "Billing",         accent: "from-violet-400/80 via-purple-400/70 to-fuchsia-400/70",  logo: "/brands/products/migrainvoice.png"    },
+    { name: "MigraMarketing", label: "Growth",          accent: "from-rose-400/80 via-pink-400/70 to-fuchsia-400/70",      logo: "/brands/products/migramarketing.png" },
   ];
 
   const proofItems = ["MigraHosting", "MigraPanel", "MigraPilot", "MigraMail", "MigraDrive"];
@@ -96,7 +97,7 @@ export default function MigraTeckHero() {
                     </div>
                     <div className="flex items-center gap-1.5 rounded-full border border-emerald-400/20 bg-emerald-400/10 px-3 py-1">
                       <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" style={{ animation: "migrateckPulse 2.5s ease-in-out infinite" }} />
-                      <span className="text-[11px] font-medium uppercase tracking-[0.18em] text-emerald-200/90">10 products</span>
+                      <span className="text-[11px] font-medium uppercase tracking-[0.18em] text-emerald-200/90">9 products</span>
                     </div>
                   </div>
 
@@ -126,8 +127,8 @@ export default function MigraTeckHero() {
                     {ecosystem.map((product) => (
                       <a
                         key={product.name}
-                        href={`/products/${product.name.toLowerCase().replace("migra", "migra")}`}
-                        className="group relative overflow-hidden rounded-2xl border border-white/10 bg-white/[0.04] px-3.5 py-3.5 transition duration-300 hover:z-20 hover:border-white/20 hover:bg-white/[0.08]"
+                        href={`/products/${product.name.toLowerCase()}`}
+                        className="group relative overflow-hidden rounded-2xl border border-white/10 bg-white/[0.04] px-3.5 py-3.5 transition duration-300 hover:z-20 hover:border-white/20 hover:bg-white/[0.08] last:col-span-2"
                       >
                         <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/20 to-transparent opacity-60" />
                         <div className="absolute inset-0 opacity-0 transition duration-300 group-hover:opacity-100">
