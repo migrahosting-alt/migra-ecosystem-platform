@@ -13,10 +13,10 @@
   --brand-yellow:  #fbbf24;
   --brand-green:   #10b981;
 
-  --foreground:    #0f172a;
-  --muted:         #64748b;
-  --surface:       #ffffff;
-  --line:          #e2e8f0;
+  --foreground:    #f1f5f9;
+  --muted:         #94a3b8;
+  --surface:       #0B1220;
+  --line:          rgba(255,255,255,0.08);
 }
 
 * { box-sizing: border-box; }

@@ -36,9 +36,9 @@ export default function HomePage() {
     <>
       <MigraTeckHero />
 
-      <section className="relative -mt-4 pb-20 pt-4">
+      <section className="relative pb-20 pt-8">
         <div className={ui.maxW}>
-          <p className="text-center text-sm font-medium text-slate-500">
+          <p className="text-center text-sm font-medium text-slate-400">
             {products.length} products spanning the entire platform
           </p>
           <div className="mt-8 flex flex-wrap items-center justify-center gap-4">
@@ -48,13 +48,13 @@ export default function HomePage() {
                 href={`/products/${product.slug}`}
                 className={cn(
                   ui.card,
-                  "flex items-center gap-3 px-4 py-3 transition-all duration-200 hover:border-slate-300 hover:shadow-md",
+                  "flex items-center gap-3 px-4 py-3 transition-all duration-200 hover:border-white/20",
                 )}
               >
                 <div className="relative h-8 w-8">
                   <Image src={product.logo} alt={product.name} fill sizes="32px" className="object-contain" />
                 </div>
-                <span className="text-sm font-medium text-slate-700">{product.name}</span>
+                <span className="text-sm font-medium text-white/80">{product.name}</span>
               </Link>
             ))}
           </div>
@@ -77,8 +77,8 @@ export default function HomePage() {
                 <Link key={offer.title} href={offer.href} className={cn(ui.card, ui.cardHover, "block p-6")}>
                   <p className={ui.eyebrowBrand}>{offer.badge}</p>
                   <h3 className={cn(ui.h3, "mt-3")}>{offer.title}</h3>
-                  <p className="mt-3 text-sm leading-6 text-slate-600">{offer.description}</p>
-                  <p className="mt-5 text-sm font-semibold text-blue-600">Explore service →</p>
+                  <p className="mt-3 text-sm leading-6 text-slate-400">{offer.description}</p>
+                  <p className="mt-5 text-sm font-semibold text-blue-400">Explore service →</p>
                 </Link>
               ))}
             </div>
@@ -86,15 +86,15 @@ export default function HomePage() {
         </div>
       </section>
 
-      <section className={cn("border-t border-slate-100 bg-slate-50/50", ui.sectionPy)}>
+      <section className={cn("border-t border-white/10", ui.sectionPy)}>
         <div className={ui.maxW}>
           <p className={ui.eyebrowBrand}>Architecture overview</p>
           <h2 className={cn(ui.h2, "mt-4")}>Platform layers that explain how the business works.</h2>
           <div className="mt-12 grid gap-6 md:grid-cols-2 xl:grid-cols-5">
             {architectureLayers.map((layer) => (
               <div key={layer.title} className={cn(ui.card, "p-6")}>
-                <h3 className="font-[var(--font-display)] text-lg font-semibold tracking-tight text-slate-950">{layer.title}</h3>
-                <p className="mt-3 text-sm leading-6 text-slate-600">{layer.desc}</p>
+                <h3 className="font-[var(--font-display)] text-lg font-semibold tracking-tight text-white">{layer.title}</h3>
+                <p className="mt-3 text-sm leading-6 text-slate-400">{layer.desc}</p>
               </div>
             ))}
           </div>

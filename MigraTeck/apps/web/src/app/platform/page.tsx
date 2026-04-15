@@ -58,7 +58,6 @@ export default function PlatformPage() {
             </div>
           </div>
         </div>
-        <div className="absolute bottom-0 left-0 right-0 h-32 bg-gradient-to-t from-white to-transparent" />
       </section>
 
       <section className={ui.sectionPy}>
@@ -70,10 +69,10 @@ export default function PlatformPage() {
               <div key={layer.name} className={cn(ui.card, "p-6")}>
                 <div className={ui.depthNum}>{i + 1}</div>
                 <div>
-                  <h3 className="mt-4 font-[var(--font-display)] text-lg font-semibold tracking-tight text-slate-950">
+                  <h3 className="mt-4 font-[var(--font-display)] text-lg font-semibold tracking-tight text-white">
                     {layer.name}
                   </h3>
-                  <p className="mt-1.5 text-sm leading-6 text-slate-600">{layer.desc}</p>
+                  <p className="mt-1.5 text-sm leading-6 text-slate-400">{layer.desc}</p>
                 </div>
               </div>
             ))}
@@ -81,7 +80,7 @@ export default function PlatformPage() {
         </div>
       </section>
 
-      <section className={cn("border-t border-slate-100 bg-slate-50/50", ui.sectionPy)}>
+      <section className={cn("border-t border-white/10", ui.sectionPy)}>
         <div className={ui.maxW}>
           <div className="grid gap-12 lg:grid-cols-2">
             <div>
@@ -97,10 +96,10 @@ export default function PlatformPage() {
             <div className="space-y-4">
               {transaction.map((step, i) => (
                 <div key={i} className="flex items-start gap-4">
-                  <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-blue-50 text-xs font-bold text-blue-600">
+                  <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-blue-500/20 text-xs font-bold text-blue-400">
                     {i + 1}
                   </div>
-                  <p className="text-sm leading-6 text-slate-700">{step}</p>
+                  <p className="text-sm leading-6 text-slate-300">{step}</p>
                 </div>
               ))}
             </div>

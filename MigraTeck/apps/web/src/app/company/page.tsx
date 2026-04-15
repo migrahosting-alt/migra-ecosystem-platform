@@ -43,7 +43,6 @@ export default function CompanyPage() {
             </p>
           </div>
         </div>
-        <div className="absolute bottom-0 left-0 right-0 h-32 bg-gradient-to-t from-white to-transparent" />
       </section>
 
       <section className={ui.sectionPy}>
@@ -53,7 +52,7 @@ export default function CompanyPage() {
               <div key={section.title} className={cn(ui.card, ui.cardHover, "p-6")}>
                 <p className={ui.eyebrowBrand}>Company view 0{index + 1}</p>
                 <h2 className={cn(ui.h3, "mt-3")}>{section.title}</h2>
-                <p className="mt-3 text-sm leading-6 text-slate-600">{section.desc}</p>
+                <p className="mt-3 text-sm leading-6 text-slate-400">{section.desc}</p>
               </div>
             ))}
           </div>
@@ -80,7 +79,7 @@ export default function CompanyPage() {
         </div>
       </section>
 
-      <section className={cn(ui.sectionPy, "bg-slate-50/50")}>
+      <section className={cn(ui.sectionPy, "border-t border-white/10")}>
         <div className={ui.maxW}>
           <p className={ui.eyebrowBrand}>How we operate</p>
           <h2 className={cn(ui.h2, "mt-3")}>Operating principles</h2>
@@ -89,7 +88,7 @@ export default function CompanyPage() {
               <div key={p.title} className={cn(ui.card, "p-6")}>
                 <span className={ui.depthNum}>0{i + 1}</span>
                 <h3 className={cn(ui.h3, "mt-3")}>{p.title}</h3>
-                <p className="mt-2 text-sm leading-6 text-slate-600">{p.desc}</p>
+                <p className="mt-2 text-sm leading-6 text-slate-400">{p.desc}</p>
               </div>
             ))}
           </div>
@@ -105,8 +104,8 @@ export default function CompanyPage() {
               ["1", "Unified identity backbone"],
             ] as const).map(([num, label]) => (
               <div key={label}>
-                <p className="font-[var(--font-display)] text-5xl font-bold text-blue-600">{num}</p>
-                <p className="mt-2 text-sm text-slate-500">{label}</p>
+                <p className="font-[var(--font-display)] text-5xl font-bold text-blue-400">{num}</p>
+                <p className="mt-2 text-sm text-slate-400">{label}</p>
               </div>
             ))}
           </div>

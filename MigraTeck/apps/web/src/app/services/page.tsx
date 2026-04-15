@@ -68,7 +68,6 @@ export default function ServicesPage() {
             </div>
           </div>
         </div>
-        <div className="absolute bottom-0 left-0 right-0 h-32 bg-gradient-to-t from-white to-transparent" />
       </section>
 
       <section className={ui.sectionPy}>
@@ -78,15 +77,15 @@ export default function ServicesPage() {
               <div key={s.title} id={s.id} className={cn(ui.card, "flex flex-col p-6 sm:p-8")}>
                 <p className={ui.eyebrowBrand}>Service track</p>
                 <h3 className={cn(ui.h3, "mt-3")}>{s.title}</h3>
-                <p className="mt-3 text-sm leading-6 text-slate-600">{s.desc}</p>
-                <div className="mt-auto pt-6 space-y-4 border-t border-slate-100">
+                <p className="mt-3 text-sm leading-6 text-slate-400">{s.desc}</p>
+                <div className="mt-auto pt-6 space-y-4 border-t border-white/10">
                   <div>
                     <p className="text-[11px] font-semibold uppercase tracking-[0.15em] text-slate-400">Who it is for</p>
-                    <p className="mt-1 text-sm text-slate-600">{s.audience}</p>
+                    <p className="mt-1 text-sm text-slate-400">{s.audience}</p>
                   </div>
                   <div>
                     <p className="text-[11px] font-semibold uppercase tracking-[0.15em] text-slate-400">Intended outcome</p>
-                    <p className="mt-1 text-sm text-slate-600">{s.outcome}</p>
+                    <p className="mt-1 text-sm text-slate-400">{s.outcome}</p>
                   </div>
                 </div>
               </div>
@@ -95,7 +94,7 @@ export default function ServicesPage() {
         </div>
       </section>
 
-      <section className={cn("border-t border-slate-100 bg-slate-50/50", ui.sectionPy)}>
+      <section className={cn("border-t border-white/10", ui.sectionPy)}>
         <div className={ui.maxW}>
           <div className="grid gap-6 lg:grid-cols-[0.9fr_1.1fr]">
             <div className={cn(ui.card, "p-8")}>
@@ -111,9 +110,9 @@ export default function ServicesPage() {
               <h2 className={cn(ui.h2, "mt-3")}>Recommended delivery phases</h2>
               <div className="mt-6 space-y-4">
                 {deliveryPhases.map((phase) => (
-                  <div key={phase.title} className="rounded-2xl border border-slate-200 bg-slate-50 px-5 py-5">
-                    <h3 className="text-lg font-semibold text-slate-950">{phase.title}</h3>
-                    <p className="mt-2 text-sm leading-6 text-slate-600">{phase.description}</p>
+                  <div key={phase.title} className="rounded-2xl border border-white/10 bg-white/5 px-5 py-5">
+                    <h3 className="text-lg font-semibold text-white">{phase.title}</h3>
+                    <p className="mt-2 text-sm leading-6 text-slate-400">{phase.description}</p>
                   </div>
                 ))}
               </div>

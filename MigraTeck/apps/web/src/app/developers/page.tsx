@@ -46,7 +46,6 @@ export default function DevelopersPage() {
             </div>
           </div>
         </div>
-        <div className="absolute bottom-0 left-0 right-0 h-32 bg-gradient-to-t from-white to-transparent" />
       </section>
 
       <section className={ui.sectionPy}>
@@ -57,10 +56,10 @@ export default function DevelopersPage() {
             {devPillars.map((p, i) => (
               <div key={p.title} className={cn(ui.card, ui.cardHover, "p-6")}>
                 <div className={ui.depthNum}>{i + 1}</div>
-                <h3 className="mt-4 font-[var(--font-display)] text-lg font-semibold tracking-tight text-slate-950">
+                <h3 className="mt-4 font-[var(--font-display)] text-lg font-semibold tracking-tight text-white">
                   {p.title}
                 </h3>
-                <p className="mt-3 text-sm leading-6 text-slate-600">{p.desc}</p>
+                <p className="mt-3 text-sm leading-6 text-slate-400">{p.desc}</p>
               </div>
             ))}
           </div>
@@ -110,7 +109,7 @@ export default function DevelopersPage() {
         </div>
       </section>
 
-      <section className={cn("border-t border-slate-100 bg-slate-50/50", ui.sectionPy)}>
+      <section className={cn("border-t border-white/10", ui.sectionPy)}>
         <div className={ui.maxW}>
           <p className={ui.eyebrowBrand}>Start building</p>
           <h2 className={cn(ui.h2, "mt-4")}>Three paths into the platform.</h2>
@@ -121,11 +120,11 @@ export default function DevelopersPage() {
               { title: "Check the security model", desc: "Review the trust posture, protection layers, and responsible disclosure expectations for the site and platform.", href: "/security", label: "View security" },
             ].map((a) => (
               <div key={a.title} className={cn(ui.card, "flex flex-col p-6")}>
-                <h3 className="font-[var(--font-display)] text-lg font-semibold tracking-tight text-slate-950">
+                <h3 className="font-[var(--font-display)] text-lg font-semibold tracking-tight text-white">
                   {a.title}
                 </h3>
-                <p className="mt-3 flex-1 text-sm leading-6 text-slate-600">{a.desc}</p>
-                <Link href={a.href} className="mt-5 text-sm font-medium text-blue-600 hover:text-blue-700">
+                <p className="mt-3 flex-1 text-sm leading-6 text-slate-400">{a.desc}</p>
+                <Link href={a.href} className="mt-5 text-sm font-medium text-blue-400 hover:text-blue-300">
                   {a.label} →
                 </Link>
               </div>

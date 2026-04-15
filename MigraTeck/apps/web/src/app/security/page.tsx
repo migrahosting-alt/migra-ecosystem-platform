@@ -58,7 +58,6 @@ export default function SecurityPage() {
             </p>
           </div>
         </div>
-        <div className="absolute bottom-0 left-0 right-0 h-32 bg-gradient-to-t from-white to-transparent" />
       </section>
 
       {/* principles */}
@@ -74,7 +73,7 @@ export default function SecurityPage() {
               <div key={p.title} className={cn(ui.card, "p-6")}>
                 <span className={ui.depthNum}>0{i + 1}</span>
                 <h3 className={cn(ui.h3, "mt-3")}>{p.title}</h3>
-                <p className="mt-2 text-sm leading-6 text-slate-600">{p.desc}</p>
+                <p className="mt-2 text-sm leading-6 text-slate-400">{p.desc}</p>
               </div>
             ))}
           </div>
@@ -101,17 +100,17 @@ export default function SecurityPage() {
       </section>
 
       {/* account security */}
-      <section className={cn(ui.sectionPy, "bg-slate-50/50")}>
+      <section className={cn(ui.sectionPy, "border-t border-white/10")}>
         <div className={ui.maxW}>
           <p className={ui.eyebrowBrand}>Per-account</p>
           <h2 className={cn(ui.h2, "mt-3")}>Account security</h2>
           <div className="mt-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {accountSecurity.map((s) => (
               <div key={s} className={cn(ui.card, "flex items-start gap-3 p-4")}>
-                <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-blue-600/10 text-blue-600">
+                <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-blue-400/20 text-blue-400">
                   <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
                 </span>
-                <p className="text-sm leading-6 text-slate-700">{s}</p>
+                <p className="text-sm leading-6 text-slate-300">{s}</p>
               </div>
             ))}
           </div>

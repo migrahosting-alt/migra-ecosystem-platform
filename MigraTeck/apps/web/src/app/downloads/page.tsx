@@ -12,10 +12,10 @@ export const metadata = buildPageMetadata({
 });
 
 const releaseStatuses: Record<string, { label: string; className: string }> = {
-  planned: { label: "Planned", className: "border-slate-200 bg-slate-50 text-slate-600" },
-  preview: { label: "Preview", className: "border-amber-200 bg-amber-50 text-amber-700" },
-  managed: { label: "Managed", className: "border-sky-200 bg-sky-50 text-sky-700" },
-  internal: { label: "Internal", className: "border-purple-200 bg-purple-50 text-purple-700" },
+  planned: { label: "Planned", className: "border-white/10 bg-white/5 text-slate-400" },
+  preview: { label: "Preview", className: "border-amber-400/20 bg-amber-400/10 text-amber-300" },
+  managed: { label: "Managed", className: "border-sky-400/20 bg-sky-400/10 text-sky-300" },
+  internal: { label: "Internal", className: "border-purple-400/20 bg-purple-400/10 text-purple-300" },
 };
 
 export default function DownloadsPage() {
@@ -39,33 +39,32 @@ export default function DownloadsPage() {
             </p>
           </div>
         </div>
-        <div className="absolute bottom-0 left-0 right-0 h-24 bg-gradient-to-t from-white to-transparent" />
       </section>
 
       {/* download groups */}
       {downloadGroups.map((group) => (
-        <section key={group.title} className={cn("border-b border-slate-100", ui.sectionPySmall)}>
+          <section key={group.title} className={cn("border-b border-white/10", ui.sectionPySmall)}>
           <div className={ui.maxW}>
             <p className={ui.eyebrowBrand}>{group.title}</p>
-            <p className="mt-2 max-w-xl text-sm leading-6 text-slate-600">{group.description}</p>
+            <p className="mt-2 max-w-xl text-sm leading-6 text-slate-400">{group.description}</p>
             <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
               {group.items.map((item) => {
-                const fallback = { label: "Planned", className: "border-slate-200 bg-slate-50 text-slate-600" };
+                const fallback = { label: "Planned", className: "border-white/10 bg-white/5 text-slate-400" };
                 const status = releaseStatuses[item.releaseState] ?? fallback;
                 return (
                   <div key={item.name} className={cn(ui.card, "flex flex-col p-5")}>
                     <div className="flex items-start justify-between gap-3">
-                      <h3 className="font-semibold text-slate-950">{item.name}</h3>
+                      <h3 className="font-semibold text-white">{item.name}</h3>
                       <span className={cn("shrink-0 rounded-full border px-2.5 py-0.5 text-[11px] font-semibold", status.className)}>
                         {status.label}
                       </span>
                     </div>
-                    <p className="mt-3 flex-1 text-sm leading-6 text-slate-600">{item.description}</p>
-                    <div className="mt-4 border-t border-slate-100 pt-3 text-xs text-slate-500">
-                      <p><span className="font-medium text-slate-700">Platform:</span> {item.platform}</p>
-                      <p className="mt-1"><span className="font-medium text-slate-700">Availability:</span> {item.availability}</p>
+                    <p className="mt-3 flex-1 text-sm leading-6 text-slate-400">{item.description}</p>
+                    <div className="mt-4 border-t border-white/10 pt-3 text-xs text-slate-400">
+                      <p><span className="font-medium text-slate-300">Platform:</span> {item.platform}</p>
+                      <p className="mt-1"><span className="font-medium text-slate-300">Availability:</span> {item.availability}</p>
                       {item.verifiedSource && (
-                        <p className="mt-1 font-medium text-emerald-600">✓ Verified source</p>
+                        <p className="mt-1 font-medium text-emerald-400">✓ Verified source</p>
                       )}
                     </div>
                   </div>

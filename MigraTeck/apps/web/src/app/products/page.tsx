@@ -75,11 +75,10 @@ export default function ProductsPage() {
             ))}
           </div>
         </div>
-        <div className="absolute bottom-0 left-0 right-0 h-24 bg-gradient-to-t from-white to-transparent" />
       </section>
 
       {productsGroupedByCategory.map(({ category, products: catProducts }) => (
-        <section key={category} id={category} className={cn("scroll-mt-20 border-b border-slate-100", ui.sectionPySmall)}>
+        <section key={category} id={category} className={cn("scroll-mt-20 border-b border-white/10", ui.sectionPySmall)}>
           <div className={ui.maxW}>
             <p className={ui.eyebrowBrand}>{category.replace(/-/g, " ")}</p>
             <div className="mt-8 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
@@ -94,17 +93,17 @@ export default function ProductsPage() {
                       <Image src={p.logo} alt={p.name} fill sizes="40px" className="object-contain p-1" />
                     </div>
                     <div>
-                      <h3 className="font-semibold text-slate-950">{p.name}</h3>
+                      <h3 className="font-semibold text-white">{p.name}</h3>
                       <span className={ui.statusBadge}>official</span>
                     </div>
                   </div>
-                  <p className="mt-4 text-sm leading-6 text-slate-600">{p.shortDescription}</p>
+                  <p className="mt-4 text-sm leading-6 text-slate-400">{p.shortDescription}</p>
                   <div className="mt-4 flex flex-wrap gap-1.5">
                     {p.capabilities.slice(0, 3).map((c) => (
                       <span key={c} className={ui.pill}>{c}</span>
                     ))}
                   </div>
-                  <p className="mt-4 text-sm font-medium text-blue-600 opacity-0 transition-opacity group-hover:opacity-100">
+                  <p className="mt-4 text-sm font-medium text-blue-400 opacity-0 transition-opacity group-hover:opacity-100">
                     View details →
                   </p>
                 </Link>

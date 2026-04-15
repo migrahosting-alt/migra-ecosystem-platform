@@ -67,7 +67,6 @@ export default function PortfolioPage() {
             </div>
           </div>
         </div>
-        <div className="absolute bottom-0 left-0 right-0 h-32 bg-gradient-to-t from-white to-transparent" />
       </section>
 
       <section className={ui.sectionPy}>
@@ -77,14 +76,14 @@ export default function PortfolioPage() {
               <div key={item.title} className={cn(ui.card, ui.cardHover, "p-6")}>
                 <div className={ui.depthNum}>{index + 1}</div>
                 <h2 className={cn(ui.h3, "mt-4")}>{item.title}</h2>
-                <p className="mt-3 text-sm leading-6 text-slate-600">{item.description}</p>
+                <p className="mt-3 text-sm leading-6 text-slate-400">{item.description}</p>
               </div>
             ))}
           </div>
         </div>
       </section>
 
-      <section className={cn("border-t border-slate-100 bg-slate-50/50", ui.sectionPy)}>
+      <section className={cn("border-t border-white/10", ui.sectionPy)}>
         <div className={ui.maxW}>
           <div className="grid gap-6 lg:grid-cols-[0.9fr_1.1fr] lg:items-start">
             <div className={cn(ui.card, "p-8")}>
@@ -98,9 +97,9 @@ export default function PortfolioPage() {
               <p className={ui.eyebrowBrand}>Stable public URLs</p>
               <div className="mt-5 space-y-4">
                 {stableUrls.map((item) => (
-                  <div key={item.href} className="rounded-2xl border border-slate-200 bg-slate-50 px-5 py-4">
-                    <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">{item.label}</p>
-                    <Link href={item.href} className="mt-2 block text-sm font-semibold text-slate-950 hover:text-blue-600">
+                  <div key={item.href} className="rounded-2xl border border-white/10 bg-white/5 px-5 py-4">
+                    <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">{item.label}</p>
+                    <Link href={item.href} className="mt-2 block text-sm font-semibold text-white/90 hover:text-blue-400">
                       {item.href}
                     </Link>
                   </div>
