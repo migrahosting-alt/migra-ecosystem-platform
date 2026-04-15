@@ -2,7 +2,7 @@ import { z } from "zod";
 import {
   emailSchema,
   passwordSchema,
-} from "./shared";
+} from "./shared.js";
 
 export const signupSchema = z.object({
   email: emailSchema,

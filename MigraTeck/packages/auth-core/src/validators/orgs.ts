@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { emailSchema, uuidSchema } from "./shared";
+import { emailSchema, uuidSchema } from "./shared.js";
 
 export const createOrganizationSchema = z.object({
   name: z.string().trim().min(1).max(160),

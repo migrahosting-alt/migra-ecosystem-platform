@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { uuidSchema } from "./shared";
+import { uuidSchema } from "./shared.js";
 
 export const enrollTotpSchema = z.object({});
 

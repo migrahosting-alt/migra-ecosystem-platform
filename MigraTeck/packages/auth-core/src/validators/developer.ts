@@ -2,7 +2,7 @@ import { z } from "zod";
 import {
   uuidSchema,
   urlSchema,
-} from "./shared";
+} from "./shared.js";
 
 const developerClientTypeSchema = z.enum(["web", "spa", "native", "service"]);
 const developerTokenAuthMethodSchema = z.enum(["none", "client_secret_basic", "client_secret_post"]);

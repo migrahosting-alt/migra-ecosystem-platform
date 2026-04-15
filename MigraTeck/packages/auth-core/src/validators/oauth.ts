@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { urlSchema } from "./shared";
+import { urlSchema } from "./shared.js";
 
 export const authorizeQuerySchema = z.object({
   response_type: z.literal("code"),

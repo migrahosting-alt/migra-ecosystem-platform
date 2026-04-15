@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { cuidSchema } from "./shared";
+import { cuidSchema } from "./shared.js";
 
 export const passkeyRegisterOptionsSchema = z.object({
   nickname: z.string().trim().min(1).max(120).optional(),

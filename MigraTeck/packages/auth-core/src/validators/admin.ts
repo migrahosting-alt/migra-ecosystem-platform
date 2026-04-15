@@ -4,7 +4,7 @@ import {
   pageOffsetSchema,
   reasonSchema,
   uuidSchema,
-} from "./shared";
+} from "./shared.js";
 
 export const adminUserIdSchema = z.object({
   id: uuidSchema,
