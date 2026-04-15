@@ -2,8 +2,8 @@
  * Worker: Reconcile subscriptions between Stripe and platform.
  * Runs daily or on-demand. Finds drift and fixes it.
  */
-import type { BillingContext } from "../context";
-import { syncSubscriptionFromStripe } from "../subscriptions/index";
+import type { BillingContext } from "../context.js";
+import { syncSubscriptionFromStripe } from "../subscriptions/index.js";
 
 export async function reconcileSubscriptions(
   ctx: BillingContext,

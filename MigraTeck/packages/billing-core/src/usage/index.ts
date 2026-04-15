@@ -1,5 +1,5 @@
-import type { BillingContext } from "../context";
-import type { BillingUsageEvent, UsageSource, ProductFamily } from "../types";
+import type { BillingContext } from "../context.js";
+import type { BillingUsageEvent, UsageSource, ProductFamily } from "../types.js";
 
 export interface RecordUsageInput {
   orgId: string;

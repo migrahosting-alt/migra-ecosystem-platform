@@ -1,8 +1,8 @@
 /**
  * Worker: Recover failed webhook events by re-fetching from Stripe.
  */
-import type { BillingContext } from "../context";
-import { retryFailedWebhooks } from "../support-actions/index";
+import type { BillingContext } from "../context.js";
+import { retryFailedWebhooks } from "../support-actions/index.js";
 
 export async function recoverFailedWebhooks(
   ctx: BillingContext,

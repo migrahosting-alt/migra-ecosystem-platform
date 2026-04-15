@@ -2,8 +2,8 @@
  * Worker: Enforce entitlements based on current billing state.
  * Runs periodically to catch any drift between subscriptions and entitlements.
  */
-import type { BillingContext } from "../context";
-import { resolveAndSnapshotEntitlements } from "../entitlements/index";
+import type { BillingContext } from "../context.js";
+import { resolveAndSnapshotEntitlements } from "../entitlements/index.js";
 
 export async function enforceEntitlements(
   ctx: BillingContext,

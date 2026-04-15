@@ -1,4 +1,4 @@
-import type { BillingContext } from "../context";
+import type { BillingContext } from "../context.js";
 
 /**
  * Tax is primarily handled by Stripe Tax (automatic_tax: { enabled: true }).

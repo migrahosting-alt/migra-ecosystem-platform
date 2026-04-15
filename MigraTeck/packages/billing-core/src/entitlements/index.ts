@@ -1,9 +1,9 @@
-import type { BillingContext } from "../context";
-import { findCatalogPlan } from "../catalog/index";
-import type { ProductFamily, PlanCode } from "../types";
-import type { OrgEntitlements } from "./types";
+import type { BillingContext } from "../context.js";
+import { findCatalogPlan } from "../catalog/index.js";
+import type { ProductFamily, PlanCode } from "../types.js";
+import type { OrgEntitlements } from "./types.js";
 
-export type { OrgEntitlements, EntitlementKey } from "./types";
+export type { OrgEntitlements, EntitlementKey } from "./types.js";
 
 /**
  * Resolve the effective entitlements for an org by merging:

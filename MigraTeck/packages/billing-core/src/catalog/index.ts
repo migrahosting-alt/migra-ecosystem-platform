@@ -1,4 +1,4 @@
-import type { ProductFamily, PlanCode, BillingComponentType, BillingInterval } from "../types";
+import type { ProductFamily, PlanCode, BillingComponentType, BillingInterval } from "../types.js";
 
 export interface CatalogEntitlements {
   [key: string]: string | number | boolean;

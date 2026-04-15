@@ -4,8 +4,8 @@
  *
  * Internal usage ledger → Stripe usage reporting.
  */
-import type { BillingContext } from "../context";
-import { getUnreportedUsage, markUsageReported } from "../usage/index";
+import type { BillingContext } from "../context.js";
+import { getUnreportedUsage, markUsageReported } from "../usage/index.js";
 
 export async function emitUsage(ctx: BillingContext): Promise<{ reported: number; errors: number }> {
   const events = await getUnreportedUsage(ctx, 200);

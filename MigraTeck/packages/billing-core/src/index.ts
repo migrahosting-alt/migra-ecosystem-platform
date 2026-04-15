@@ -17,7 +17,7 @@ export type {
   AdjustmentKind,
   UsageSource,
   EntitlementSourceType,
-} from "./types";
+} from "./types.js";
 
 export type {
   BillingAccount,
@@ -30,10 +30,10 @@ export type {
   BillingQuote,
   BillingWebhookEvent,
   BillingAdjustment,
-} from "./types";
+} from "./types.js";
 
-export type { EntitlementKey, OrgEntitlements } from "./entitlements/types";
+export type { EntitlementKey, OrgEntitlements } from "./entitlements/types.js";
 
-export { createBillingContext, type BillingContext } from "./context";
-export { PRODUCT_CATALOG, type CatalogProduct, type CatalogPlan } from "./catalog/index";
-export { BILLING_PERMISSIONS, type BillingPermission } from "./permissions";
+export { createBillingContext, type BillingContext } from "./context.js";
+export { PRODUCT_CATALOG, type CatalogProduct, type CatalogPlan } from "./catalog/index.js";
+export { BILLING_PERMISSIONS, type BillingPermission } from "./permissions.js";

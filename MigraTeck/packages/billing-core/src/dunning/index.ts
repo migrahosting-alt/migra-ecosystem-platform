@@ -1,6 +1,6 @@
-import type { BillingContext } from "../context";
-import type { DunningState } from "../types";
-import { resolveAndSnapshotEntitlements } from "../entitlements/index";
+import type { BillingContext } from "../context.js";
+import type { DunningState } from "../types.js";
+import { resolveAndSnapshotEntitlements } from "../entitlements/index.js";
 
 /**
  * Dunning state machine:

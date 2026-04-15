@@ -1,6 +1,6 @@
 import type Stripe from "stripe";
-import type { BillingContext } from "../context";
-import type { BillingQuote } from "../types";
+import type { BillingContext } from "../context.js";
+import type { BillingQuote } from "../types.js";
 
 export interface CreateQuoteInput {
   orgId: string;

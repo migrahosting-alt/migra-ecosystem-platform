@@ -1,7 +1,7 @@
-import type { BillingContext } from "../context";
-import type { BillingAdjustment, AdjustmentKind } from "../types";
-import type { OrgEntitlements } from "../entitlements/types";
-import { resolveAndSnapshotEntitlements } from "../entitlements/index";
+import type { BillingContext } from "../context.js";
+import type { BillingAdjustment, AdjustmentKind } from "../types.js";
+import type { OrgEntitlements } from "../entitlements/types.js";
+import { resolveAndSnapshotEntitlements } from "../entitlements/index.js";
 
 // ─── Credits / Adjustments ──────────────────────────────────────────
 

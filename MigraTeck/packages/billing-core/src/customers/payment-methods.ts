@@ -1,5 +1,5 @@
 import type Stripe from "stripe";
-import type { BillingContext } from "../context";
+import type { BillingContext } from "../context.js";
 
 /**
  * Sync a payment method from Stripe (webhook-driven).

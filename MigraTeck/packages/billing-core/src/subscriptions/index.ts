@@ -1,8 +1,8 @@
 import type Stripe from "stripe";
-import type { BillingContext } from "../context";
-import type { BillingSubscription, ProductFamily, PlanCode, SubscriptionStatus } from "../types";
-import { findCatalogPlan } from "../catalog/index";
-import { resolveAndSnapshotEntitlements } from "../entitlements/index";
+import type { BillingContext } from "../context.js";
+import type { BillingSubscription, ProductFamily, PlanCode, SubscriptionStatus } from "../types.js";
+import { findCatalogPlan } from "../catalog/index.js";
+import { resolveAndSnapshotEntitlements } from "../entitlements/index.js";
 
 // ─── Helpers ────────────────────────────────────────────────────────
 

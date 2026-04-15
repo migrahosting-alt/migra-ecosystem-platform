@@ -1,11 +1,11 @@
 import type Stripe from "stripe";
-import type { BillingContext } from "../context";
-import { syncSubscriptionFromStripe } from "../subscriptions/index";
-import { syncInvoiceFromStripe } from "../invoices/index";
-import { syncPaymentMethodFromStripe } from "../customers/payment-methods";
-import { resolveAndSnapshotEntitlements } from "../entitlements/index";
-import { updateDunningState } from "../dunning/index";
-import type { WebhookEventStatus } from "../types";
+import type { BillingContext } from "../context.js";
+import { syncSubscriptionFromStripe } from "../subscriptions/index.js";
+import { syncInvoiceFromStripe } from "../invoices/index.js";
+import { syncPaymentMethodFromStripe } from "../customers/payment-methods.js";
+import { resolveAndSnapshotEntitlements } from "../entitlements/index.js";
+import { updateDunningState } from "../dunning/index.js";
+import type { WebhookEventStatus } from "../types.js";
 
 // ─── Supported Webhook Events ───────────────────────────────────────
 

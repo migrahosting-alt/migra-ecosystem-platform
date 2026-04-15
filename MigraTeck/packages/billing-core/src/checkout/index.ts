@@ -1,8 +1,8 @@
 import type Stripe from "stripe";
-import type { BillingContext } from "../context";
-import { findCatalogPlan } from "../catalog/index";
-import { getOrCreateBillingAccount } from "../customers/index";
-import type { ProductFamily, PlanCode, BillingInterval } from "../types";
+import type { BillingContext } from "../context.js";
+import { findCatalogPlan } from "../catalog/index.js";
+import { getOrCreateBillingAccount } from "../customers/index.js";
+import type { ProductFamily, PlanCode, BillingInterval } from "../types.js";
 
 export interface CreateCheckoutSessionInput {
   orgId: string;

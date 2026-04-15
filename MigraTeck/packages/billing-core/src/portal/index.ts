@@ -1,4 +1,4 @@
-import type { BillingContext } from "../context";
+import type { BillingContext } from "../context.js";
 
 /**
  * Create a Stripe Customer Portal session for self-service management.

@@ -1,6 +1,6 @@
 import type Stripe from "stripe";
-import type { BillingContext } from "../context";
-import type { BillingInvoice, InvoiceStatus } from "../types";
+import type { BillingContext } from "../context.js";
+import type { BillingInvoice, InvoiceStatus } from "../types.js";
 
 function mapStripeInvoiceStatus(status: string | null): InvoiceStatus {
   const map: Record<string, InvoiceStatus> = {
