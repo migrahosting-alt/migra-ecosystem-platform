@@ -6,21 +6,6 @@ import { cn } from "@/lib/cn";
 import ui from "@/lib/ui";
 import MigraTeckHero from "@/components/marketing/hero";
 
-const pillars = [
-  { title: "Enterprise governance layer", desc: "Policy controls, organization boundaries, risk-tier enforcement, and auditable access decisions." },
-  { title: "Developer-capable platform", desc: "API-ready foundations with deterministic workflows, product routing, and extensible service contracts." },
-  { title: "Infrastructure orchestration core", desc: "Signed job execution, replay-safe queues, and deterministic workflow behavior across provisioning flows." },
-  { title: "Product launch surface", desc: "Entitlement-aware distribution for products, downloads, and launches through centralized organization context." },
-] as const;
-
-const executionEngine = [
-  "Tier-aware access control",
-  "Signed workflow execution",
-  "Deterministic provisioning",
-  "Shared identity context",
-  "Verified distribution channels",
-] as const;
-
 const architectureLayers = [
   { title: "Identity layer", desc: "Sessions, organization context, and account trust boundaries." },
   { title: "Governance layer", desc: "RBAC, policies, entitlement checks, and mutation control." },
@@ -71,60 +56,6 @@ export default function HomePage() {
                 </div>
                 <span className="text-sm font-medium text-slate-700">{product.name}</span>
               </Link>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      <section className={cn("border-t border-slate-100 bg-slate-50/50", ui.sectionPy)}>
-        <div className={ui.maxW}>
-          <div className="mx-auto max-w-2xl text-center">
-            <p className={ui.eyebrowBrand}>Platform architecture</p>
-            <h2 className={cn(ui.h2, "mt-4")}>Five platform pillars, one sharper public site.</h2>
-            <p className={cn(ui.body, "mt-4")}>
-              The public experience now lines up products, services, pricing, and developer entry around the same core platform model.
-            </p>
-          </div>
-          <div className="mt-16 grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
-            {pillars.map((pillar, index) => (
-              <div key={pillar.title} className={cn(ui.card, ui.cardHover, "p-6")}>
-                <div className={ui.depthNum}>{index + 1}</div>
-                <h3 className="mt-4 font-[var(--font-display)] text-lg font-semibold tracking-tight text-slate-950">
-                  {pillar.title}
-                </h3>
-                <p className="mt-3 text-sm leading-6 text-slate-600">{pillar.desc}</p>
-              </div>
-            ))}
-          </div>
-          <div className="mt-12 text-center">
-            <Link href="/platform" className={ui.btnPrimary}>
-              View full architecture
-              <span aria-hidden="true">→</span>
-            </Link>
-          </div>
-        </div>
-      </section>
-
-      <section className="section-dark relative overflow-hidden">
-        <div className="pointer-events-none absolute right-0 top-0 h-[500px] w-[400px] rounded-full bg-blue-600/15 blur-[100px]" />
-        <div className="pointer-events-none absolute bottom-0 left-0 h-[400px] w-[300px] rounded-full bg-cyan-500/10 blur-[80px]" />
-
-        <div className={cn(ui.maxW, "relative py-24 sm:py-32")}>
-          <div className="flex items-end justify-between gap-6">
-            <div>
-              <p className={ui.eyebrowDark}>Execution engine</p>
-              <h2 className={cn(ui.h2Dark, "mt-4")}>Production-safe systems, explained clearly.</h2>
-              <p className={cn(ui.bodyDark, "mt-4 max-w-xl")}>
-                The site should communicate the platform as an operating system, not a loose set of product pages.
-              </p>
-            </div>
-          </div>
-
-          <div className="mt-12 grid gap-4 md:grid-cols-2 xl:grid-cols-5">
-            {executionEngine.map((item) => (
-              <div key={item} className={cn(ui.cardDark, "p-5 text-center text-sm font-semibold text-white")}>
-                {item}
-              </div>
             ))}
           </div>
         </div>

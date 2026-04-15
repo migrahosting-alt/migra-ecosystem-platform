@@ -44,15 +44,19 @@ export default function MigraTeckHero() {
       <div className="relative mx-auto flex min-h-screen max-w-[1280px] flex-col px-6 pb-14 pt-6 md:px-8 lg:px-10">
         <header className="rounded-full border border-white/10 bg-white/5 px-4 backdrop-blur-xl md:px-6">
           <div className="flex h-16 items-center justify-between gap-4">
-            <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-gradient-to-br from-fuchsia-500 via-violet-500 to-blue-500 text-sm font-semibold shadow-lg shadow-fuchsia-500/20">
-                MT
+            <a href="/" className="flex items-center gap-3">
+              <div className="relative h-10 w-10 overflow-hidden rounded-full border border-white/15 bg-white/10 p-1">
+                <img
+                  src="/brands/products/migrateck-official.png"
+                  alt="MigraTeck"
+                  className="h-full w-full object-contain"
+                />
               </div>
               <div className="leading-tight">
                 <div className="text-sm font-semibold tracking-[0.18em] text-white/95">MIGRATECK</div>
                 <div className="text-[10px] uppercase tracking-[0.28em] text-white/45">Unified ecosystem</div>
               </div>
-            </div>
+            </a>
 
             <nav className="hidden items-center gap-7 lg:flex">
               {navItems.map((item) => (
