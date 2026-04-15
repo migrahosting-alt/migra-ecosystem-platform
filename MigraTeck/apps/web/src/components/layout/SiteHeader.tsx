@@ -36,9 +36,9 @@ export function SiteHeader({ accountLinks }: { accountLinks: AccountLinks }) {
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <div className="flex items-center justify-between gap-3">
               <Link href="/" className="flex min-w-0 items-center gap-3 transition-opacity hover:opacity-80">
-                <div className="relative h-10 w-10 overflow-hidden rounded-2xl border border-white/10 bg-white/10 p-1 sm:h-11 sm:w-11">
+                <div className="relative h-10 w-10 overflow-hidden rounded-2xl border border-white/15 bg-white/10 p-1 shadow-[0_8px_16px_rgba(0,0,0,0.18)] sm:h-11 sm:w-11">
                   <Image
-                    src="/brands/products/migrateck.png"
+                    src="/brands/products/migrateck-official.png"
                     alt="MigraTeck"
                     fill
                     sizes="44px"
@@ -47,10 +47,10 @@ export function SiteHeader({ accountLinks }: { accountLinks: AccountLinks }) {
                   />
                 </div>
                 <span className="flex min-w-0 flex-col">
-                  <span className="text-[10px] font-semibold uppercase tracking-[0.26em] text-slate-400 sm:text-[11px]">
+                  <span className="text-[10px] font-semibold uppercase tracking-[0.26em] text-white/40 sm:text-[11px]">
                     Enterprise systems
                   </span>
-                  <span className="mt-1 truncate font-[var(--font-display)] text-base font-bold tracking-tight text-white sm:text-lg">
+                  <span className="mt-0.5 truncate font-[var(--font-display)] text-base font-bold tracking-tight text-white sm:text-lg">
                     MigraTeck
                   </span>
                 </span>

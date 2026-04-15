@@ -7,7 +7,7 @@ import type { AccountLinks } from "@/lib/account-links";
 
 const INTERNAL_PREFIXES = ["/dashboard", "/platform", "/builder", "/hosting", "/intake", "/app"];
 
-const NO_HEADER_PATHS = ["/"];
+const NO_HEADER_PATHS: string[] = [];
 
 function isInternalPath(pathname: string | null) {
   if (!pathname) {

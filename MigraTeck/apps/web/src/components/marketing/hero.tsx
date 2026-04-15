@@ -1,23 +1,16 @@
 export default function MigraTeckHero() {
-  const modules = [
-    { label: "Identity", code: "MI", accent: "from-fuchsia-400/75 via-violet-400/70 to-blue-400/70" },
-    { label: "Products", code: "MP", accent: "from-blue-400/75 via-sky-400/70 to-cyan-400/70" },
-    { label: "Hosting", code: "MH", accent: "from-indigo-400/75 via-violet-400/70 to-blue-400/70" },
-    { label: "Billing", code: "MB", accent: "from-emerald-400/75 via-teal-400/70 to-blue-400/70" },
-    { label: "Voice", code: "MV", accent: "from-fuchsia-400/75 via-pink-400/70 to-violet-400/70" },
-    { label: "Email", code: "MM", accent: "from-cyan-400/75 via-sky-400/70 to-blue-400/70" },
-    { label: "Intake", code: "MI", accent: "from-lime-300/75 via-emerald-400/70 to-cyan-400/70" },
-    { label: "Access", code: "AUTH", accent: "from-blue-400/75 via-indigo-400/70 to-violet-400/70" },
+  const ecosystem = [
+    { name: "MigraHosting",  label: "Infrastructure",  accent: "from-indigo-400/80 via-violet-400/70 to-blue-400/70",   logo: "/brands/products/migrahosting.png"  },
+    { name: "MigraPanel",   label: "Control plane",   accent: "from-blue-400/80 via-sky-400/70 to-cyan-400/70",        logo: "/brands/products/migrapanel.png"    },
+    { name: "MigraVoice",   label: "Communications",  accent: "from-fuchsia-400/80 via-pink-400/70 to-violet-400/70",  logo: "/brands/products/migravoice.png"    },
+    { name: "MigraMail",    label: "Messaging",       accent: "from-cyan-400/80 via-sky-400/70 to-blue-400/70",        logo: "/brands/products/migramail.png"     },
+    { name: "MigraIntake",  label: "Onboarding",      accent: "from-lime-300/80 via-emerald-400/70 to-cyan-400/70",    logo: "/brands/products/migraintake.png"   },
+    { name: "MigraDrive",   label: "Storage",         accent: "from-emerald-400/80 via-teal-400/70 to-blue-400/70",    logo: "/brands/products/migradrive.png"    },
+    { name: "MigraPilot",   label: "Automation",      accent: "from-amber-300/80 via-orange-400/70 to-yellow-400/70",  logo: "/brands/products/migrapilot.png"    },
+    { name: "MigraInvoice", label: "Billing",         accent: "from-violet-400/80 via-purple-400/70 to-fuchsia-400/70",logo: "/brands/products/migrainvoice.png"  },
   ];
 
-  const navItems = [
-    { label: "Platform", href: "/platform" },
-    { label: "Products", href: "/products" },
-    { label: "Pricing", href: "/pricing" },
-    { label: "Developers", href: "/developers" },
-    { label: "Downloads", href: "/downloads" },
-  ];
-  const proofItems = ["Products", "Identity", "Hosting", "Billing", "Delivery"];
+  const proofItems = ["MigraHosting", "MigraPanel", "MigraPilot", "MigraMail", "MigraDrive"];
 
   return (
     <section className="relative overflow-hidden bg-[#0B1220] text-white">
@@ -27,7 +20,7 @@ export default function MigraTeckHero() {
           50% { transform: translateY(-8px); }
         }
         @keyframes migrateckPulse {
-          0%, 100% { opacity: 0.7; transform: scale(1); }
+          0%, 100% { opacity: 0.6; transform: scale(1); }
           50% { opacity: 1; transform: scale(1.06); }
         }
         @keyframes migrateckDrift {
@@ -41,43 +34,10 @@ export default function MigraTeckHero() {
       <div className="absolute -left-24 top-24 h-72 w-72 rounded-full bg-blue-500/10 blur-3xl" />
       <div className="absolute right-0 top-1/3 h-80 w-80 rounded-full bg-indigo-500/10 blur-3xl" />
 
-      <div className="relative mx-auto flex min-h-screen max-w-[1280px] flex-col px-6 pb-14 pt-6 md:px-8 lg:px-10">
-        <header className="rounded-full border border-white/10 bg-white/5 px-4 backdrop-blur-xl md:px-6">
-          <div className="flex h-16 items-center justify-between gap-4">
-            <a href="/" className="flex items-center gap-3">
-              <div className="relative h-10 w-10 overflow-hidden rounded-full border border-white/15 bg-white/10 p-1">
-                <img
-                  src="/brands/products/migrateck-official.png"
-                  alt="MigraTeck"
-                  className="h-full w-full object-contain"
-                />
-              </div>
-              <div className="leading-tight">
-                <div className="text-sm font-semibold tracking-[0.18em] text-white/95">MIGRATECK</div>
-                <div className="text-[10px] uppercase tracking-[0.28em] text-white/45">Unified ecosystem</div>
-              </div>
-            </a>
+      <div className="relative mx-auto flex min-h-screen max-w-[1280px] flex-col px-6 pb-14 pt-0 md:px-8 lg:px-10">
 
-            <nav className="hidden items-center gap-7 lg:flex">
-              {navItems.map((item) => (
-                <a key={item.label} href={item.href} className="text-sm text-white/68 transition hover:text-white">
-                  {item.label}
-                </a>
-              ))}
-            </nav>
 
-            <div className="flex items-center gap-2 md:gap-3">
-              <a href="/login" className="hidden rounded-full px-4 py-2 text-sm text-white/70 transition hover:bg-white/5 hover:text-white sm:inline-flex">
-                Log in
-              </a>
-              <a href="/signup" className="inline-flex items-center rounded-full bg-white px-4 py-2 text-sm font-medium text-black transition hover:bg-white/90 md:px-5">
-                Start
-                <span className="ml-2">→</span>
-              </a>
-            </div>
-          </div>
-        </header>
-
+        {/* ── Main content ─────────────────────────────────────── */}
         <div className="grid flex-1 items-center gap-14 py-12 lg:grid-cols-12 lg:gap-8 lg:py-20">
           <div className="lg:col-span-6">
             <div className="inline-flex items-center rounded-full border border-blue-400/20 bg-blue-400/10 px-4 py-2 text-[11px] font-medium uppercase tracking-[0.28em] text-blue-200/90">
@@ -113,17 +73,10 @@ export default function MigraTeckHero() {
             </div>
           </div>
 
+          {/* ── Right panel — ecosystem composition ────────────── */}
           <div className="lg:col-span-6 lg:pl-6">
             <div className="relative mx-auto max-w-[560px]" style={{ animation: "migrateckFloat 6.5s ease-in-out infinite" }}>
               <div className="absolute -inset-10 bg-blue-500/10 blur-3xl" />
-              <div className="absolute inset-y-0 right-[-10%] z-0 flex items-center justify-center opacity-[0.14] blur-[1px]">
-                <img
-                  src="/logos/MigraTeck_Official_logo.png"
-                  alt="MigraTeck logo watermark"
-                  className="h-[420px] w-[420px] object-contain"
-                  style={{ animation: "migrateckDrift 12s ease-in-out infinite" }}
-                />
-              </div>
 
               <div className="relative z-10 rounded-[32px] border border-white/10 bg-white/[0.045] p-5 shadow-[0_24px_80px_rgba(0,0,0,0.42)] backdrop-blur-2xl md:p-6">
                 <div className="absolute inset-0 rounded-[32px] bg-[linear-gradient(135deg,rgba(255,255,255,0.10),rgba(255,255,255,0.02)_30%,rgba(59,130,246,0.08)_100%)] pointer-events-none" />
@@ -131,63 +84,77 @@ export default function MigraTeckHero() {
                 <div className="relative overflow-hidden rounded-[26px] border border-white/10 bg-[#0F172A]/80 p-5 md:p-6">
                   <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(59,130,246,0.14),transparent_36%),radial-gradient(circle_at_bottom_right,rgba(168,85,247,0.10),transparent_30%)]" />
                   <div
-                    className="absolute left-1/2 top-[48%] h-56 w-56 -translate-x-1/2 -translate-y-1/2 rounded-full bg-[radial-gradient(circle,rgba(99,102,241,0.28),rgba(59,130,246,0.16),transparent_68%)] blur-2xl"
+                    className="absolute left-1/2 top-[48%] h-56 w-56 -translate-x-1/2 -translate-y-1/2 rounded-full bg-[radial-gradient(circle,rgba(99,102,241,0.22),rgba(59,130,246,0.12),transparent_68%)] blur-2xl"
                     style={{ animation: "migrateckPulse 5.5s ease-in-out infinite" }}
                   />
 
-                  <svg className="pointer-events-none absolute inset-0 h-full w-full opacity-20" viewBox="0 0 100 100" preserveAspectRatio="none">
-                    <path d="M30 32 C40 38, 46 40, 50 50" stroke="rgba(139,92,246,0.45)" strokeWidth="0.4" fill="none" />
-                    <path d="M70 32 C60 38, 54 40, 50 50" stroke="rgba(56,189,248,0.45)" strokeWidth="0.4" fill="none" />
-                    <path d="M30 50 C40 50, 44 50, 50 50" stroke="rgba(96,165,250,0.35)" strokeWidth="0.35" fill="none" />
-                    <path d="M70 50 C60 50, 56 50, 50 50" stroke="rgba(45,212,191,0.35)" strokeWidth="0.35" fill="none" />
-                    <path d="M30 68 C40 62, 46 58, 50 50" stroke="rgba(168,85,247,0.42)" strokeWidth="0.4" fill="none" />
-                    <path d="M70 68 C60 62, 54 58, 50 50" stroke="rgba(34,211,238,0.42)" strokeWidth="0.4" fill="none" />
-                  </svg>
-
+                  {/* panel header */}
                   <div className="relative flex items-start justify-between gap-4 border-b border-white/8 pb-5">
                     <div>
-                      <p className="text-xs uppercase tracking-[0.28em] text-white/38">Platform overview</p>
-                      <h2 className="mt-2 text-2xl font-semibold tracking-[-0.03em] text-white">MigraTeck Platform</h2>
+                      <p className="text-[10px] uppercase tracking-[0.30em] text-white/35">Connected product system</p>
+                      <h2 className="mt-2 text-xl font-semibold tracking-[-0.03em] text-white">MigraTeck Ecosystem</h2>
                     </div>
-                    <div className="rounded-full border border-emerald-400/20 bg-emerald-400/10 px-3 py-1 text-[11px] font-medium uppercase tracking-[0.2em] text-emerald-200/90">
-                      Unified
+                    <div className="flex items-center gap-1.5 rounded-full border border-emerald-400/20 bg-emerald-400/10 px-3 py-1">
+                      <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" style={{ animation: "migrateckPulse 2.5s ease-in-out infinite" }} />
+                      <span className="text-[11px] font-medium uppercase tracking-[0.18em] text-emerald-200/90">10 products</span>
                     </div>
                   </div>
 
-                  <div className="relative mt-6 grid grid-cols-2 gap-3 md:gap-4">
-                    {modules.map((module) => (
-                      <div
-                        key={module.label}
-                        className="group relative overflow-hidden rounded-2xl border border-white/10 bg-white/[0.045] px-4 py-4 transition duration-300 hover:z-20 hover:scale-[1.02] hover:border-white/20 hover:bg-white/[0.08]"
-                      >
-                        <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/25 to-transparent opacity-60" />
-                        <div className="absolute inset-0 opacity-0 transition duration-300 group-hover:opacity-100">
-                          <div className={`absolute inset-0 bg-gradient-to-br ${module.accent} opacity-[0.08]`} />
+                  {/* anchor card — MigraTeck */}
+                  <div className="relative mt-5 overflow-hidden rounded-2xl border border-white/15 bg-white/[0.07] px-5 py-4">
+                    <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/30 to-transparent" />
+                    <div className="flex items-center justify-between gap-4">
+                      <div className="flex items-center gap-3">
+                        <div className="relative h-11 w-11 overflow-hidden rounded-2xl border border-white/15 bg-white/10 p-1.5 shadow-lg">
+                          <img src="/brands/products/migrateck-official.png" alt="MigraTeck" className="h-full w-full object-contain" />
                         </div>
-                        <div className="relative flex items-center justify-between gap-3">
-                          <div>
-                            <p className="text-[11px] uppercase tracking-[0.26em] text-white/34">Module</p>
-                            <p className="mt-2 text-sm font-medium text-white/88 md:text-[15px]">{module.label}</p>
-                          </div>
-                          <div className="flex h-10 min-w-10 items-center justify-center rounded-xl border border-white/10 bg-white/5 px-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-white/55">
-                            {module.code}
-                          </div>
+                        <div>
+                          <p className="text-[11px] uppercase tracking-[0.24em] text-white/40">Platform</p>
+                          <p className="mt-0.5 text-base font-semibold tracking-[-0.02em] text-white">MigraTeck</p>
                         </div>
-                        <div className={`mt-4 h-1.5 rounded-full bg-gradient-to-r ${module.accent} opacity-85`} />
                       </div>
+                      <div className="text-right">
+                        <p className="text-[10px] uppercase tracking-[0.22em] text-white/35">Unified</p>
+                        <p className="mt-0.5 text-xs text-white/60">One identity layer</p>
+                      </div>
+                    </div>
+                    <div className="mt-3.5 h-px w-full bg-gradient-to-r from-blue-400/60 via-indigo-400/50 via-violet-400/40 to-fuchsia-400/30" />
+                  </div>
+
+                  {/* product grid */}
+                  <div className="relative mt-3 grid grid-cols-2 gap-2.5 md:gap-3">
+                    {ecosystem.map((product) => (
+                      <a
+                        key={product.name}
+                        href={`/products/${product.name.toLowerCase().replace("migra", "migra")}`}
+                        className="group relative overflow-hidden rounded-2xl border border-white/10 bg-white/[0.04] px-3.5 py-3.5 transition duration-300 hover:z-20 hover:border-white/20 hover:bg-white/[0.08]"
+                      >
+                        <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/20 to-transparent opacity-60" />
+                        <div className="absolute inset-0 opacity-0 transition duration-300 group-hover:opacity-100">
+                          <div className={`absolute inset-0 bg-gradient-to-br ${product.accent} opacity-[0.07]`} />
+                        </div>
+                        <div className="relative flex items-center gap-2.5">
+                          <div className="relative h-7 w-7 shrink-0 overflow-hidden rounded-lg border border-white/12 bg-white/8">
+                            <img src={product.logo} alt={product.name} className="h-full w-full object-contain p-0.5" />
+                          </div>
+                          <div className="min-w-0">
+                            <p className="truncate text-[13px] font-medium leading-tight text-white/88">{product.name}</p>
+                            <p className="mt-0.5 text-[10px] uppercase tracking-[0.22em] text-white/35">{product.label}</p>
+                          </div>
+                        </div>
+                        <div className={`mt-3 h-1 rounded-full bg-gradient-to-r ${product.accent} opacity-80`} />
+                      </a>
                     ))}
                   </div>
 
-                  <div className="relative mt-6 rounded-2xl border border-white/10 bg-white/[0.035] p-4">
-                    <div className="flex flex-wrap items-center justify-between gap-3">
-                      <div>
-                        <p className="text-[11px] uppercase tracking-[0.24em] text-white/36">Coordination layer</p>
-                        <p className="mt-2 text-sm text-white/74">
-                          Identity, billing, hosting, delivery, communication, and intake work as one connected operating layer.
-                        </p>
-                      </div>
-                      <div className="rounded-full border border-blue-400/20 bg-blue-400/10 px-3 py-1 text-[11px] uppercase tracking-[0.2em] text-blue-200/85">
-                        System ready
+                  {/* footer */}
+                  <div className="relative mt-4 rounded-2xl border border-white/8 bg-white/[0.03] px-4 py-3.5">
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="text-sm leading-snug text-white/60">
+                        One company. Connected products.
+                      </p>
+                      <div className="shrink-0 rounded-full border border-blue-400/20 bg-blue-400/10 px-3 py-1 text-[10px] uppercase tracking-[0.2em] text-blue-200/80">
+                        Live
                       </div>
                     </div>
                   </div>
