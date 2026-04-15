@@ -1,10 +1,9 @@
 /**
  * MigraAuth — Environment configuration.
  * Single source for all environment-derived settings.
+ * Dev: loaded via `tsx watch --env-file .env`
+ * Prod: loaded via systemd EnvironmentFile
  */
-import { config as dotenvConfig } from "dotenv";
-dotenvConfig();
-
 function env(key: string, fallback?: string): string {
   const v = process.env[key] ?? fallback;
   if (v === undefined) throw new Error(`Missing env: ${key}`);
