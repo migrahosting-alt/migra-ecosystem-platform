@@ -4,12 +4,7 @@ import { products, featuredProducts } from "@/data/products";
 import { getAccountLinks } from "@/lib/account-links";
 import { cn } from "@/lib/cn";
 import ui from "@/lib/ui";
-
-const stats = [
-  { value: "10", label: "Official products" },
-  { value: "5", label: "Architecture layers" },
-  { value: "1", label: "Unified platform" },
-] as const;
+import MigraTeckHero from "@/components/marketing/hero";
 
 const pillars = [
   { title: "Enterprise governance layer", desc: "Policy controls, organization boundaries, risk-tier enforcement, and auditable access decisions." },
@@ -24,30 +19,6 @@ const executionEngine = [
   "Deterministic provisioning",
   "Shared identity context",
   "Verified distribution channels",
-] as const;
-
-const heroReadout = [
-  {
-    label: "Access model",
-    title: "One front door into products and accounts",
-    value: "Discovery, login, signup, and product entry all feel like parts of one coordinated system.",
-  },
-  {
-    label: "Platform model",
-    title: "Commercial pages stay tied to real control",
-    value: "Pricing, services, access, and launch routes all point back to the same platform backbone.",
-  },
-  {
-    label: "Buyer signal",
-    title: "The company reads as organized and credible",
-    value: "The first fold now communicates trust, scope, and direction instead of disconnected marketing fragments.",
-  },
-] as const;
-
-const heroReadoutStats = [
-  ["Entry", "Products and pricing paths"],
-  ["Control", "Identity and access flow"],
-  ["Outcome", "Account-ready buyer journey"],
 ] as const;
 
 const architectureLayers = [
@@ -78,139 +49,7 @@ export default function HomePage() {
 
   return (
     <>
-      <section className="hero-gradient hero-mesh hero-system relative -mt-28 overflow-hidden pt-24 sm:-mt-32 sm:pt-28 lg:-mt-36 lg:pt-32">
-        <div className="pointer-events-none absolute -left-40 top-16 h-[600px] w-[600px] rounded-full bg-blue-500/20 blur-[120px] animate-glow-pulse" />
-        <div className="pointer-events-none absolute -right-32 top-24 h-[500px] w-[500px] rounded-full bg-cyan-400/15 blur-[100px] animate-glow-pulse" style={{ animationDelay: "2s" }} />
-        <div className="pointer-events-none absolute bottom-0 left-1/3 h-[300px] w-[400px] rounded-full bg-pink-500/10 blur-[80px]" />
-        <div className="pointer-events-none absolute inset-x-0 top-0 h-56 bg-[linear-gradient(180deg,rgba(255,255,255,0.18),transparent)]" />
-
-        <div className={cn(ui.maxW, "relative pb-24 pt-24 sm:pb-32 sm:pt-28 lg:pb-40 lg:pt-32")}>
-          <div className="hero-toprail animate-fade-in mb-8 rounded-[28px] border border-white/14 bg-white/[0.06] p-3 backdrop-blur-xl sm:p-4">
-            <div className="grid gap-3 text-white/88 sm:grid-cols-[1.2fr_0.8fr] sm:items-center">
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="rounded-full border border-sky-300/25 bg-sky-300/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.22em] text-sky-100">
-                  Unified front door
-                </span>
-                <span className="rounded-full border border-white/12 bg-white/8 px-3 py-1 text-[11px] font-medium uppercase tracking-[0.16em] text-white/78">
-                  Products, pricing, services, identity
-                </span>
-              </div>
-              <div className="grid gap-2 text-xs font-medium uppercase tracking-[0.18em] text-white/64 sm:grid-cols-3 sm:text-right">
-                <span>Route clarity</span>
-                <span>Enterprise polish</span>
-                <span>Live deployment path</span>
-              </div>
-            </div>
-          </div>
-
-          <div className="grid gap-8 md:grid-cols-[1.08fr_0.92fr] md:items-center lg:gap-10">
-            <div>
-              <p className="animate-fade-up text-sm font-semibold uppercase tracking-[0.2em] text-sky-400/90">
-                Enterprise control plane
-              </p>
-              <h1 className="animate-fade-up-d1 mt-6 max-w-[11ch] font-[var(--font-display)] text-5xl font-bold tracking-[-0.04em] text-white sm:text-6xl lg:text-7xl">
-                The public surface for products, access, and launch control.
-              </h1>
-              <p className="animate-fade-up-d2 mt-6 max-w-2xl text-lg leading-8 text-slate-300/90">
-                MigraTeck connects identity, governance, product access, pricing, services,
-                and software distribution into one coordinated front door for the ecosystem.
-              </p>
-              <div className="animate-fade-up-d2 mt-6 grid max-w-2xl gap-3 sm:grid-cols-3">
-                {[
-                  ["Trust layer", "Sticky control rail with product-aware access paths"],
-                  ["Commercial layer", "Pricing, services, and portfolio aligned from the first fold"],
-                  ["Launch layer", "Sharper routing into products, downloads, and enterprise pages"],
-                ].map(([title, copy]) => (
-                  <div key={title} className="rounded-[22px] border border-white/10 bg-white/[0.06] px-4 py-4 backdrop-blur-sm">
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-sky-200/88">{title}</p>
-                    <p className="mt-2 text-sm leading-6 text-slate-200/86">{copy}</p>
-                  </div>
-                ))}
-              </div>
-              <div className="animate-fade-up-d3 mt-10 flex flex-wrap gap-4">
-                <Link href="/products" className={ui.btnPrimaryLight}>
-                  Browse products
-                  <span aria-hidden="true">→</span>
-                </Link>
-                <Link href="/platform" className={ui.btnSecondaryDark}>
-                  Explore architecture
-                </Link>
-              </div>
-              <div className="animate-fade-up-d4 mt-10 flex max-w-xl divide-x divide-white/10 rounded-[26px] border border-white/10 bg-white/[0.04] px-2 py-3 text-center backdrop-blur-sm">
-                {stats.map((s) => (
-                  <div key={s.label} className="flex-1 px-4 first:pl-0 last:pr-0">
-                    <p className="font-[var(--font-display)] text-3xl font-bold text-white sm:text-4xl">
-                      {s.value}
-                    </p>
-                    <p className="mt-1 text-xs font-medium text-slate-400">{s.label}</p>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div className="hero-side-panel animate-fade-up-d2 relative overflow-hidden rounded-[2rem] border border-white/12 bg-white/[0.08] p-6 backdrop-blur-xl sm:p-7">
-              <div className="pointer-events-none absolute -right-20 top-0 h-44 w-44 rounded-full bg-sky-300/10 blur-3xl" />
-              <div className="flex items-start justify-between gap-4">
-                <div>
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-sky-100/90">Executive readout</p>
-                  <h2 className="mt-3 max-w-[14ch] font-[var(--font-display)] text-[2rem] font-semibold leading-tight tracking-[-0.04em] text-white sm:text-[2.25rem]">
-                    What this first screen tells a serious buyer.
-                  </h2>
-                </div>
-                <span className="rounded-full border border-white/12 bg-white/[0.08] px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-sky-100 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]">
-                  Board view
-                </span>
-              </div>
-              <div className="mt-5 rounded-[1.55rem] border border-white/10 bg-[linear-gradient(135deg,rgba(255,255,255,0.09),rgba(255,255,255,0.04))] px-5 py-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]">
-                <p className="text-sm leading-6 text-slate-200/90">
-                  The homepage should explain the business in one glance: where people enter, what the platform controls, and why the whole experience feels unified.
-                </p>
-              </div>
-              <div className="mt-5 grid gap-3 sm:grid-cols-2">
-                {heroReadoutStats.map(([label, value], index) => (
-                  <div
-                    key={label}
-                    className={cn(
-                      "rounded-[1.2rem] border border-white/10 bg-white/[0.05] px-4 py-4 text-left shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]",
-                      index === heroReadoutStats.length - 1 ? "sm:col-span-2" : "",
-                    )}
-                  >
-                    <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-400">{label}</p>
-                    <p className="mt-2 text-sm font-semibold leading-6 text-white">{value}</p>
-                  </div>
-                ))}
-              </div>
-              <div className="mt-5 space-y-3.5">
-                {heroReadout.map((item, index) => (
-                  <div
-                    key={item.label}
-                    className="rounded-[1.45rem] border border-white/10 bg-[linear-gradient(135deg,rgba(255,255,255,0.09),rgba(255,255,255,0.04))] p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]"
-                  >
-                    <div className="flex items-start gap-4">
-                      <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-sky-200/20 bg-sky-300/12 text-sm font-bold text-sky-100 shadow-[0_10px_24px_rgba(14,165,233,0.12)]">
-                        0{index + 1}
-                      </div>
-                      <div className="min-w-0">
-                        <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-400">{item.label}</p>
-                        <p className="mt-1 text-[1.02rem] font-semibold leading-6 text-white">{item.title}</p>
-                        <p className="mt-2 max-w-md text-sm leading-6 text-slate-300/82">{item.value}</p>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-              <div className="mt-5 rounded-[1.45rem] border border-sky-200/16 bg-[linear-gradient(135deg,rgba(125,211,252,0.12),rgba(255,255,255,0.05))] px-5 py-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]">
-                <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-sky-100">In plain English</p>
-                <p className="mt-2 text-sm font-medium leading-6 text-slate-100/92">
-                  MigraTeck should feel like one coordinated platform company from the first scroll, not a stack of unrelated pages dressed in the same colors.
-                </p>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div className="absolute bottom-0 left-0 right-0 h-32 bg-gradient-to-t from-white to-transparent" />
-      </section>
+      <MigraTeckHero />
 
       <section className="relative -mt-4 pb-20 pt-4">
         <div className={ui.maxW}>
