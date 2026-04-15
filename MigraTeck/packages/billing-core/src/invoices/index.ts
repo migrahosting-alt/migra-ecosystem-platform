@@ -33,10 +33,10 @@ export async function syncInvoiceFromStripe(
   }
 
   const status = mapStripeInvoiceStatus(stripeInvoice.status).toUpperCase();
-  const subscriptionParent = stripeInvoice.parent?.subscription_details?.subscription;
-  const subscriptionId = typeof subscriptionParent === "string"
-    ? subscriptionParent
-    : subscriptionParent?.id ?? null;
+  const subscriptionRef = stripeInvoice.subscription;
+  const subscriptionId = typeof subscriptionRef === "string"
+    ? subscriptionRef
+    : (subscriptionRef?.id ?? null);
 
   const invoice = await ctx.db.billingInvoice.upsert({
     where: { stripeInvoiceId: stripeInvoice.id },
@@ -48,7 +48,7 @@ export async function syncInvoiceFromStripe(
       status,
       currency: stripeInvoice.currency ?? "usd",
       subtotal: stripeInvoice.subtotal ?? 0,
-      tax: (stripeInvoice.total_taxes ?? []).reduce((sum, t) => sum + t.amount, 0),
+      tax: (stripeInvoice.total_tax_amounts ?? []).reduce((sum: number, t: { amount: number }) => sum + t.amount, 0),
       total: stripeInvoice.total ?? 0,
       amountPaid: stripeInvoice.amount_paid ?? 0,
       amountRemaining: stripeInvoice.amount_remaining ?? 0,
@@ -64,7 +64,7 @@ export async function syncInvoiceFromStripe(
     update: {
       status,
       subtotal: stripeInvoice.subtotal ?? 0,
-      tax: (stripeInvoice.total_taxes ?? []).reduce((sum, t) => sum + t.amount, 0),
+      tax: (stripeInvoice.total_tax_amounts ?? []).reduce((sum: number, t: { amount: number }) => sum + t.amount, 0),
       total: stripeInvoice.total ?? 0,
       amountPaid: stripeInvoice.amount_paid ?? 0,
       amountRemaining: stripeInvoice.amount_remaining ?? 0,

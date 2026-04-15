@@ -158,7 +158,7 @@ async function routeEvent(ctx: BillingContext, event: Stripe.Event): Promise<voi
 
       // Failed payment triggers dunning
       if (event.type === "invoice.payment_failed") {
-        const orgId = invoice.metadata?.org_id ?? invoice.parent?.subscription_details?.metadata?.org_id;
+        const orgId = invoice.metadata?.org_id;
         if (orgId) {
           await updateDunningState(ctx, orgId, "past_due");
         }

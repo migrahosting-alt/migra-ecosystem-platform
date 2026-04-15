@@ -125,8 +125,8 @@ export async function createSubscription(
       planCode: input.planCode,
       status: mapStripeStatus(stripeSubscription.status).toUpperCase(),
       billingInterval: input.billingInterval === "year" ? "YEAR" : "MONTH",
-      currentPeriodStart: new Date((stripeSubscription.items.data[0]?.current_period_start ?? 0) * 1000),
-      currentPeriodEnd: new Date((stripeSubscription.items.data[0]?.current_period_end ?? 0) * 1000),
+      currentPeriodStart: new Date((stripeSubscription.current_period_start ?? 0) * 1000),
+      currentPeriodEnd: new Date((stripeSubscription.current_period_end ?? 0) * 1000),
       trialEndsAt: stripeSubscription.trial_end
         ? new Date(stripeSubscription.trial_end * 1000)
         : null,
@@ -178,8 +178,8 @@ export async function syncSubscriptionFromStripe(
       planCode: stripeSubscription.metadata?.plan_code ?? "unknown",
       status,
       billingInterval: "MONTH",
-      currentPeriodStart: new Date((stripeSubscription.items.data[0]?.current_period_start ?? 0) * 1000),
-      currentPeriodEnd: new Date((stripeSubscription.items.data[0]?.current_period_end ?? 0) * 1000),
+      currentPeriodStart: new Date((stripeSubscription.current_period_start ?? 0) * 1000),
+      currentPeriodEnd: new Date((stripeSubscription.current_period_end ?? 0) * 1000),
       cancelAtPeriodEnd: stripeSubscription.cancel_at_period_end,
       trialEndsAt: stripeSubscription.trial_end
         ? new Date(stripeSubscription.trial_end * 1000)
@@ -193,8 +193,8 @@ export async function syncSubscriptionFromStripe(
     },
     update: {
       status,
-      currentPeriodStart: new Date((stripeSubscription.items.data[0]?.current_period_start ?? 0) * 1000),
-      currentPeriodEnd: new Date((stripeSubscription.items.data[0]?.current_period_end ?? 0) * 1000),
+      currentPeriodStart: new Date((stripeSubscription.current_period_start ?? 0) * 1000),
+      currentPeriodEnd: new Date((stripeSubscription.current_period_end ?? 0) * 1000),
       cancelAtPeriodEnd: stripeSubscription.cancel_at_period_end,
       trialEndsAt: stripeSubscription.trial_end
         ? new Date(stripeSubscription.trial_end * 1000)
