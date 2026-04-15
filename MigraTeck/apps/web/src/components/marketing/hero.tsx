@@ -10,7 +10,13 @@ export default function MigraTeckHero() {
     { label: "Access", code: "AUTH", accent: "from-blue-400/75 via-indigo-400/70 to-violet-400/70" },
   ];
 
-  const navItems = ["Platform", "Products", "Pricing", "Developers", "Downloads"];
+  const navItems = [
+    { label: "Platform", href: "/platform" },
+    { label: "Products", href: "/products" },
+    { label: "Pricing", href: "/pricing" },
+    { label: "Developers", href: "/developers" },
+    { label: "Downloads", href: "/downloads" },
+  ];
   const proofItems = ["Products", "Identity", "Hosting", "Billing", "Delivery"];
 
   return (
@@ -50,17 +56,17 @@ export default function MigraTeckHero() {
 
             <nav className="hidden items-center gap-7 lg:flex">
               {navItems.map((item) => (
-                <a key={item} href="#" className="text-sm text-white/68 transition hover:text-white">
-                  {item}
+                <a key={item.label} href={item.href} className="text-sm text-white/68 transition hover:text-white">
+                  {item.label}
                 </a>
               ))}
             </nav>
 
             <div className="flex items-center gap-2 md:gap-3">
-              <a href="#" className="hidden rounded-full px-4 py-2 text-sm text-white/70 transition hover:bg-white/5 hover:text-white sm:inline-flex">
+              <a href="/login" className="hidden rounded-full px-4 py-2 text-sm text-white/70 transition hover:bg-white/5 hover:text-white sm:inline-flex">
                 Log in
               </a>
-              <a href="#" className="inline-flex items-center rounded-full bg-white px-4 py-2 text-sm font-medium text-black transition hover:bg-white/90 md:px-5">
+              <a href="/signup" className="inline-flex items-center rounded-full bg-white px-4 py-2 text-sm font-medium text-black transition hover:bg-white/90 md:px-5">
                 Start
                 <span className="ml-2">→</span>
               </a>
@@ -83,10 +89,10 @@ export default function MigraTeckHero() {
             </p>
 
             <div className="mt-9 flex flex-col gap-3 sm:flex-row">
-              <a href="#" className="inline-flex items-center justify-center rounded-full bg-blue-500 px-6 py-3.5 text-sm font-medium text-white shadow-lg shadow-blue-500/20 transition hover:bg-blue-400">
+              <a href="/products" className="inline-flex items-center justify-center rounded-full bg-blue-500 px-6 py-3.5 text-sm font-medium text-white shadow-lg shadow-blue-500/20 transition hover:bg-blue-400">
                 Start building
               </a>
-              <a href="#" className="inline-flex items-center justify-center rounded-full border border-white/12 bg-white/[0.03] px-6 py-3.5 text-sm font-medium text-white/82 transition hover:bg-white/8">
+              <a href="/platform" className="inline-flex items-center justify-center rounded-full border border-white/12 bg-white/[0.03] px-6 py-3.5 text-sm font-medium text-white/82 transition hover:bg-white/8">
                 See platform
               </a>
             </div>
