@@ -111,13 +111,13 @@ export async function createBundleCheckout(input: BundleCheckoutInput) {
       data: {
         orgId: input.orgId,
         provider: "STRIPE",
-        externalCustomerId: customer.id,
+        stripeCustomerId: customer.id,
       },
     });
   }
 
   const session = await stripe.checkout.sessions.create({
-    customer: billingCustomer.externalCustomerId,
+    customer: billingCustomer.stripeCustomerId,
     line_items: [{ price: bundle.stripePriceId, quantity: 1 }],
     mode: "subscription",
     success_url: input.successUrl,

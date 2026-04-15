@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
+    "@migrateck/auth-client": "workspace:*",
     "@migrateck/lib": "workspace:*",
     "@migrateck/ui": "workspace:*",
     "clsx": "^2.1.1",

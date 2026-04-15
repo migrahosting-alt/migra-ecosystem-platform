@@ -10,7 +10,7 @@ const organizationStructuredData = {
   url: "https://migrateck.com",
   logo: "https://migrateck.com/icon.png",
   description:
-    "MigraTeck account access, organization control, product launch, and platform operations.",
+    "MigraTeck enterprise control plane — centralized identity, governance, and product launch surface.",
 };
 
 const websiteStructuredData = {
@@ -19,7 +19,7 @@ const websiteStructuredData = {
   name: "MigraTeck",
   url: "https://migrateck.com",
   description:
-    "MigraTeck account access, organization control, product launch, and platform operations.",
+    "MigraTeck enterprise control plane — centralized identity, governance, and product launch surface.",
 };
 
 const sora = Sora({
@@ -41,7 +41,7 @@ export const metadata: Metadata = {
     template: "%s | MigraTeck",
   },
   description:
-    "MigraTeck account access, organization control, product launch, and platform operations.",
+    "MigraTeck enterprise control plane — centralized identity, governance, and product launch surface.",
   metadataBase: new URL("https://migrateck.com"),
   manifest: "/manifest.webmanifest",
   alternates: {
@@ -61,7 +61,7 @@ export const metadata: Metadata = {
   openGraph: {
     title: "MigraTeck",
     description:
-      "MigraTeck account access, organization control, product launch, and platform operations.",
+      "MigraTeck enterprise control plane — centralized identity, governance, and product launch surface.",
     url: "https://migrateck.com",
     siteName: "MigraTeck",
     type: "website",
@@ -78,7 +78,7 @@ export const metadata: Metadata = {
     card: "summary_large_image",
     title: "MigraTeck",
     description:
-      "MigraTeck account access, organization control, product launch, and platform operations.",
+      "MigraTeck enterprise control plane — centralized identity, governance, and product launch surface.",
     images: ["/icon.png"],
   },
   icons: {

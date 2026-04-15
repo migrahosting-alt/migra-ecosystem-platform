@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { getCurrentIdentityContext } from "@migrateck/auth-core";
-import { requireAccessToken, requireApiSession } from "@/lib/auth/api-auth";
+import { requireApiSession } from "@/lib/auth/api-auth";
 import { ACTIVE_ORG_COOKIE } from "@/lib/constants";
 import { jsonError, jsonFromError, jsonSuccess } from "@/lib/http/v1-response";
 
@@ -8,22 +8,6 @@ export const dynamic = "force-dynamic";
 
 export async function GET(request: NextRequest) {
   try {
-    const authorization = request.headers.get("authorization") || "";
-    if (authorization.toLowerCase().startsWith("bearer ")) {
-      const authResult = await requireAccessToken(request);
-      if (!authResult.ok) {
-        return jsonError("UNAUTHORIZED", "Unauthorized.", 401);
-      }
-
-      const token = authorization.replace(/^Bearer\s+/i, "").trim();
-      const data = await getCurrentIdentityContext({
-        userId: authResult.auth.userId,
-        preferredOrgId: authResult.auth.orgId,
-        accessToken: token,
-      });
-      return jsonSuccess(data);
-    }
-
     const authResult = await requireApiSession();
     if (!authResult.ok) {
       return jsonError("UNAUTHORIZED", "Unauthorized.", 401);

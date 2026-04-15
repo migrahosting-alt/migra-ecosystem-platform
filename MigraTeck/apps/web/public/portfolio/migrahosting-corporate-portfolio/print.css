@@ -1,0 +1,76 @@
+@page {
+  size: A4 landscape;
+  margin: 10mm;
+}
+
+html,
+body {
+  background: #ffffff !important;
+}
+
+body {
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+
+.deck {
+  width: auto;
+  margin: 0;
+  padding: 0;
+}
+
+.page {
+  width: 277mm;
+  min-height: 190mm;
+  margin: 0 0 10mm;
+  padding: 14mm;
+  border-radius: 0;
+  box-shadow: none;
+  break-after: page;
+  page-break-after: always;
+}
+
+.page:last-child {
+  break-after: auto;
+  page-break-after: auto;
+}
+
+.page::before {
+  opacity: 0.18;
+}
+
+.hero-visual img {
+  min-height: 0;
+  max-height: 120mm;
+}
+
+.page-number {
+  top: 8mm;
+  right: 10mm;
+}
+
+p,
+li,
+span {
+  font-size: 11pt;
+}
+
+.lede {
+  font-size: 14pt;
+}
+
+h1 {
+  font-size: 31pt;
+}
+
+h2 {
+  font-size: 22pt;
+}
+
+h3 {
+  font-size: 15pt;
+}
+
+.logo.migrahosting {
+  height: 18mm;
+}

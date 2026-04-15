@@ -33,6 +33,60 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
+.site-header {
+  isolation: isolate;
+}
+
+.site-header::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  height: 140px;
+  pointer-events: none;
+  background: linear-gradient(180deg, rgba(8, 11, 32, 0.12), transparent 82%);
+}
+
+.site-header-shell::after,
+.site-header-panel::before {
+  content: "";
+  position: absolute;
+  inset: auto 12% 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(14, 165, 233, 0.6), transparent);
+  pointer-events: none;
+}
+
+.hero-system::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.14) 0%, transparent 16%),
+    radial-gradient(circle at 50% 0%, rgba(186,230,253,0.22), transparent 38%);
+}
+
+.hero-toprail,
+.hero-side-panel {
+  box-shadow: 0 26px 90px rgba(3, 7, 18, 0.18);
+}
+
+.hero-side-panel {
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.14), rgba(255,255,255,0.06)),
+    radial-gradient(circle at top right, rgba(125,211,252,0.14), transparent 30%);
+  border-color: rgba(255,255,255,0.16);
+}
+
+.hero-side-panel::before {
+  content: "";
+  position: absolute;
+  inset: 1px;
+  border-radius: inherit;
+  border: 1px solid rgba(255,255,255,0.06);
+  pointer-events: none;
+}
+
 main { position: relative; isolation: isolate; }
 
 @layer base {
@@ -149,5 +203,23 @@ p, li { text-wrap: pretty; }
   .animate-fade-up-d3, .animate-fade-up-d4, .animate-fade-in,
   .animate-float, .animate-glow-pulse {
     animation: none !important;
+  }
+}
+
+@media (max-width: 1023px) {
+  .site-header {
+    top: 0;
+  }
+
+  .site-header::before {
+    height: 120px;
+    background: linear-gradient(180deg, rgba(8, 11, 32, 0.16), transparent 78%);
+  }
+}
+
+@media (max-width: 767px) {
+  .hero-system {
+    margin-top: -6.5rem;
+    padding-top: 5.5rem;
   }
 }

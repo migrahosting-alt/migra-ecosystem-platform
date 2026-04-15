@@ -1,6 +1,5 @@
 import { EntitlementStatus, MembershipStatus, OrgRole, ProductKey, type Prisma, type User } from "@prisma/client";
 import { getDefaultMigraDrivePlanConfig, resolveMigraDrivePlanConfig } from "@/lib/drive/drive-plan-config";
-import { hashPassword } from "@/lib/security/password";
 import { hashToken } from "@/lib/tokens";
 import { prisma } from "./prisma";
 
@@ -59,9 +58,12 @@ export async function resetDatabase(): Promise<void> {
   await prisma.userTotpFactor.deleteMany();
   await prisma.billingWebhookEvent.deleteMany();
   await prisma.provisioningTask.deleteMany();
+  await prisma.billingEntitlement.deleteMany();
   await prisma.billingSubscription.deleteMany();
   await prisma.billingCustomer.deleteMany();
   await prisma.billingEntitlementBinding.deleteMany();
+  await prisma.billingPrice.deleteMany();
+  await prisma.billingProduct.deleteMany();
   await prisma.migraMarketPublishValidation.deleteMany();
   await prisma.migraMarketOgSnapshot.deleteMany();
   await prisma.migraMarketContentJob.deleteMany();
@@ -114,11 +116,14 @@ interface CreateUserInput {
 }
 
 export async function createUser(input: CreateUserInput): Promise<User> {
+  const email = input.email.trim().toLowerCase();
+
   return prisma.user.create({
     data: {
-      email: input.email.toLowerCase(),
+      email,
+      emailNormalized: email,
+      authUserId: `test:${email}`,
       name: input.name || "Integration User",
-      passwordHash: await hashPassword(input.password),
       emailVerified: input.emailVerified ? new Date() : null,
     },
   });

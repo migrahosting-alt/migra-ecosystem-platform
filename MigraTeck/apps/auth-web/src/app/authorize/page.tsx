@@ -59,17 +59,21 @@ function AuthorizeInner() {
 
   if (error) {
     return (
-      <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm text-center">
-        <h1 className="text-xl font-semibold text-slate-900">Authorization error</h1>
-        <p className="mt-2 text-sm text-red-600">{error}</p>
+      <div className="mx-auto w-full max-w-md">
+        <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm text-center">
+          <h1 className="text-xl font-semibold text-slate-900">Authorization error</h1>
+          <p className="mt-2 text-sm text-red-600">{error}</p>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm text-center">
-      <div className="mx-auto h-6 w-6 animate-spin rounded-full border-2 border-slate-200 border-t-blue-600" />
-      <p className="mt-3 text-sm text-slate-500">Authorizing…</p>
+    <div className="mx-auto w-full max-w-md">
+      <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm text-center">
+        <div className="mx-auto h-6 w-6 animate-spin rounded-full border-2 border-slate-200 border-t-blue-600" />
+        <p className="mt-3 text-sm text-slate-500">Authorizing…</p>
+      </div>
     </div>
   );
 }

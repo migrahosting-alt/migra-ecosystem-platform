@@ -1,13 +1,17 @@
 /**
  * Prisma client singleton for MigraAuth.
  */
-import { PrismaClient } from ".prisma/auth-client";
+import { config } from "../config/env.js";
+import { createAuthPrismaAdapter, PrismaClient } from "../prisma-client.js";
 
-const globalForPrisma = globalThis as unknown as { __authPrisma?: PrismaClient };
+type AuthPrismaClient = InstanceType<typeof PrismaClient>;
+
+const globalForPrisma = globalThis as unknown as { __authPrisma?: AuthPrismaClient };
 
 export const db =
   globalForPrisma.__authPrisma ??
   new PrismaClient({
+    adapter: createAuthPrismaAdapter(config.databaseUrl),
     log: process.env["NODE_ENV"] === "development" ? ["warn", "error"] : ["error"],
   });
 

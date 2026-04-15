@@ -71,6 +71,28 @@ enum BillingWebhookEventStatus {
   FAILED
 }
 
+enum BillingInterval {
+  MONTH
+  YEAR
+  ONE_TIME
+}
+
+enum BillingInvoiceStatus {
+  DRAFT
+  OPEN
+  PAID
+  VOID
+  UNCOLLECTIBLE
+  FAILED
+}
+
+enum BillingEntitlementStatus {
+  ACTIVE
+  INACTIVE
+  GRACE
+  SUSPENDED
+}
+
 enum StepUpMethod {
   NONE
   REAUTH
@@ -378,8 +400,10 @@ enum SupportTier {
 
 model User {
   id                       String                   @id @default(cuid())
+  authUserId               String?
   name                     String?
   email                    String?                  @unique
+  emailNormalized          String?
   emailVerified            DateTime?
   phoneE164                String?                  @unique
   phoneVerifiedAt          DateTime?
@@ -432,6 +456,10 @@ model User {
   runbooksOwned            ComplianceRunbook[]   @relation("RunbookOwner")
   incidentsReported        IncidentRecord[]      @relation("IncidentReporter")
   incidentsAssigned        IncidentRecord[]      @relation("IncidentAssignee")
+  billingAlertAcks         BillingAlertAck[]     @relation("BillingAlertAcks")
+
+  @@index([authUserId])
+  @@index([emailNormalized])
 }
 
 
@@ -1520,38 +1548,53 @@ model DownloadArtifact {
 }
 
 model BillingCustomer {
-  id                 String          @id @default(cuid())
-  orgId              String
-  provider           BillingProvider @default(STRIPE)
-  externalCustomerId String          @unique
-  email              String?
-  metadata           Json?
-  createdAt          DateTime        @default(now())
-  updatedAt          DateTime        @updatedAt
-  org                Organization    @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  id                     String          @id @default(cuid())
+  orgId                  String
+  provider               BillingProvider @default(STRIPE)
+  stripeCustomerId       String          @unique
+  stripeAccountId        String?
+  userId                 String?         @unique
+  email                  String?
+  defaultPaymentMethodId String?
+  metadata               Json?
+  createdAt              DateTime        @default(now())
+  updatedAt              DateTime        @updatedAt
+  org                    Organization    @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  paymentMethods         BillingPaymentMethod[]
+  invoices               BillingInvoice[]
+  customerSubscriptions  BillingSubscription[] @relation("BillingSubscriptionCustomer")
 
   @@unique([orgId, provider])
-  @@index([provider, externalCustomerId])
+  @@index([provider, stripeCustomerId])
 }
 
 model BillingSubscription {
-  id                     String                    @id @default(cuid())
-  orgId                  String
-  provider               BillingProvider           @default(STRIPE)
-  externalSubscriptionId String                    @unique
-  externalCustomerId     String?
-  status                 BillingSubscriptionStatus
-  currentPeriodStart     DateTime?
-  currentPeriodEnd       DateTime?
-  cancelAtPeriodEnd      Boolean                   @default(false)
-  canceledAt             DateTime?
-  metadata               Json?
-  createdAt              DateTime                  @default(now())
-  updatedAt              DateTime                  @updatedAt
-  org                    Organization              @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  id                   String                    @id @default(cuid())
+  orgId                String
+  billingCustomerId    String?
+  billingPriceId       String?
+  provider             BillingProvider           @default(STRIPE)
+  stripeSubscriptionId String                    @unique
+  stripeCustomerId     String?
+  stripeAccountId      String?
+  status               BillingSubscriptionStatus
+  currentPeriodStart   DateTime?
+  currentPeriodEnd     DateTime?
+  cancelAtPeriodEnd    Boolean                   @default(false)
+  trialStart           DateTime?
+  trialEnd             DateTime?
+  canceledAt           DateTime?
+  metadata             Json?
+  createdAt            DateTime                  @default(now())
+  updatedAt            DateTime                  @updatedAt
+  org                  Organization              @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  billingCustomer      BillingCustomer?          @relation("BillingSubscriptionCustomer", fields: [billingCustomerId], references: [id], onDelete: SetNull)
+  billingPrice         BillingPrice?             @relation(fields: [billingPriceId], references: [id], onDelete: SetNull)
 
   @@index([orgId, status])
-  @@index([provider, externalCustomerId])
+  @@index([provider, stripeCustomerId])
+  @@index([billingCustomerId])
+  @@index([billingPriceId])
 }
 
 model BillingWebhookEvent {
@@ -1563,12 +1606,59 @@ model BillingWebhookEvent {
   livemode     Boolean?
   status       BillingWebhookEventStatus @default(RECEIVED)
   reason       String?
+  retryCount   Int                       @default(0)
+  rawPayload   Json?
   processedAt  DateTime?
   receivedAt   DateTime                  @default(now())
   updatedAt    DateTime                  @updatedAt
 
   @@index([provider, receivedAt])
   @@index([status, receivedAt])
+}
+
+/**
+ * Operator acknowledgment of a billing alert.  Suppresses the alert from
+ * appearing in the diagnostics UI until snoozeUntil has passed (or forever
+ * if snoozeUntil is null — a permanent dismiss).
+ */
+model BillingAlertAck {
+  id               String    @id @default(cuid())
+  /// BillingAlertCode value — null means platform-wide
+  alertCode        String
+  /// null = platform-wide; set = scoped to a single org
+  orgId            String?
+  acknowledgedById String
+  acknowledgedAt   DateTime  @default(now())
+  /// null = dismiss permanently; set = suppress until this time
+  snoozeUntil      DateTime?
+  note             String?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  acknowledgedBy   User      @relation("BillingAlertAcks", fields: [acknowledgedById], references: [id], onDelete: Cascade)
+
+  @@index([alertCode, orgId])
+  @@index([snoozeUntil])
+}
+
+/// Persisted record of every alert dispatch attempt — audit trail for the notification system itself.
+model BillingAlertDispatch {
+  id              String    @id @default(cuid())
+  /// BillingAlertCode value
+  alertCode       String
+  /// null = platform-wide; set = org-scoped
+  orgId           String?
+  severity        String    // "critical" | "warning"
+  dedupKey        String    // RateLimitEvent.key used for this dispatch
+  deliveryTarget  String    // webhook URL hostname (not full URL — no secrets in DB)
+  dispatchedAt    DateTime  @default(now())
+  success         Boolean
+  failureReason   String?   // HTTP status or exception message when success=false
+  metadata        Json      @default("{}")
+
+  @@index([alertCode, orgId])
+  @@index([dispatchedAt])
+  @@index([success, dispatchedAt])
 }
 
 model BillingEntitlementBinding {
@@ -3340,4 +3430,102 @@ model IncidentRecord {
 
   @@index([orgId, severity, status])
   @@index([status])
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Native Billing Layer — Product Catalog + Invoices + PaymentMethods
+// ═══════════════════════════════════════════════════════════════════════
+
+model BillingProduct {
+  id          String         @id @default(cuid())
+  orgId       String?
+  code        String         @unique
+  name        String
+  description String?
+  active      Boolean        @default(true)
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+  prices      BillingPrice[]
+}
+
+model BillingPrice {
+  id              String          @id @default(cuid())
+  productId       String
+  code            String          @unique
+  currency        String
+  unitAmount      Int
+  interval        BillingInterval
+  trialDays       Int?
+  active          Boolean         @default(true)
+  stripeProductId String?
+  stripePriceId   String?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  product         BillingProduct  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  subscriptions   BillingSubscription[]
+
+  @@index([productId])
+}
+
+model BillingInvoice {
+  id                    String               @id @default(cuid())
+  orgId                 String
+  billingCustomerId     String
+  billingSubscriptionId String?
+  provider              BillingProvider      @default(STRIPE)
+  stripeInvoiceId       String?              @unique
+  stripePaymentIntentId String?
+  invoiceNumber         String?
+  currency              String
+  subtotal              Int
+  total                 Int
+  amountPaid            Int                  @default(0)
+  amountDue             Int                  @default(0)
+  status                BillingInvoiceStatus
+  hostedInvoiceUrl      String?
+  invoicePdfUrl         String?
+  periodStart           DateTime?
+  periodEnd             DateTime?
+  paidAt                DateTime?
+  dueAt                 DateTime?
+  createdAt             DateTime             @default(now())
+  updatedAt             DateTime             @updatedAt
+  billingCustomer       BillingCustomer      @relation(fields: [billingCustomerId], references: [id], onDelete: Cascade)
+
+  @@index([orgId])
+  @@index([billingCustomerId])
+}
+
+model BillingPaymentMethod {
+  id                    String          @id @default(cuid())
+  billingCustomerId     String
+  provider              BillingProvider @default(STRIPE)
+  stripePaymentMethodId String          @unique
+  brand                 String?
+  last4                 String?
+  expMonth              Int?
+  expYear               Int?
+  isDefault             Boolean         @default(false)
+  createdAt             DateTime        @default(now())
+  updatedAt             DateTime        @updatedAt
+  billingCustomer       BillingCustomer @relation(fields: [billingCustomerId], references: [id], onDelete: Cascade)
+
+  @@index([billingCustomerId])
+}
+
+model BillingEntitlement {
+  id                   String                   @id @default(cuid())
+  orgId                String
+  productCode          String
+  sourceSubscriptionId String?
+  status               BillingEntitlementStatus @default(INACTIVE)
+  seats                Int?
+  startsAt             DateTime?
+  endsAt               DateTime?
+  metadataJson         Json?
+  createdAt            DateTime                 @default(now())
+  updatedAt            DateTime                 @updatedAt
+
+  @@index([orgId])
+  @@unique([orgId, productCode])
 }

@@ -13,11 +13,11 @@ import {
 } from "../modules/mfa/index.js";
 import { verifyUserPassword } from "../modules/users/index.js";
 import { logAuditEvent } from "../modules/audit/index.js";
-import { requireSession, getClientIp } from "../middleware/session.js";
+import { requireAuthenticatedUser, getClientIp } from "../middleware/session.js";
 
 export async function mfaRoutes(app: FastifyInstance): Promise<void> {
   // ── POST /v1/mfa/totp/enroll ──────────────────────────────────────
-  app.post("/v1/mfa/totp/enroll", { preHandler: requireSession }, async (request, reply) => {
+  app.post("/v1/mfa/totp/enroll", { preHandler: requireAuthenticatedUser }, async (request, reply) => {
     const user = request.authUser!;
 
     try {
@@ -40,7 +40,7 @@ export async function mfaRoutes(app: FastifyInstance): Promise<void> {
   });
 
   // ── POST /v1/mfa/totp/verify ─────────────────────────────────────
-  app.post("/v1/mfa/totp/verify", { preHandler: requireSession }, async (request, reply) => {
+  app.post("/v1/mfa/totp/verify", { preHandler: requireAuthenticatedUser }, async (request, reply) => {
     const user = request.authUser!;
     const body = totpVerifySchema.parse(request.body);
     const ip = getClientIp(request);
@@ -76,7 +76,7 @@ export async function mfaRoutes(app: FastifyInstance): Promise<void> {
   });
 
   // ── POST /v1/mfa/disable ─────────────────────────────────────────
-  app.post("/v1/mfa/disable", { preHandler: requireSession }, async (request, reply) => {
+  app.post("/v1/mfa/disable", { preHandler: requireAuthenticatedUser }, async (request, reply) => {
     const user = request.authUser!;
     const body = mfaDisableSchema.parse(request.body);
     const ip = getClientIp(request);

@@ -96,7 +96,7 @@ export async function POST(request: NextRequest) {
       data: {
         orgId: activeOrg.orgId,
         provider: "STRIPE",
-        externalCustomerId: stripeCustomer.id,
+        stripeCustomerId: stripeCustomer.id,
         email: user?.email || null,
         metadata: { source: "checkout" },
       },
@@ -106,7 +106,7 @@ export async function POST(request: NextRequest) {
   const baseUrl = env.NEXTAUTH_URL || "https://migrateck.com";
 
   const session = await stripe.checkout.sessions.create({
-    customer: customer.externalCustomerId,
+    customer: customer.stripeCustomerId,
     mode: "subscription",
     line_items: [{ price: priceId, quantity: 1 }],
     success_url: `${baseUrl}/app/billing?checkout=success&session_id={CHECKOUT_SESSION_ID}`,

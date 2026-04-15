@@ -1,26 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { processStripeEvent } from "@/lib/billing/subscription-sync";
-import { parseStripeEvent, verifyStripeWebhookSignature } from "@/lib/billing/stripe";
+import { processStripeWebhookSdk } from "@/lib/billing/webhooks";
 import { writeAuditLog } from "@/lib/audit";
-import { env, stripeBillingEnabled } from "@/lib/env";
+import { stripeBillingEnabled, env } from "@/lib/env";
 import { getClientIp, getUserAgent } from "@/lib/request";
 import { assertRateLimit } from "@/lib/security/rate-limit";
-
-function stripeKeyMode(secretKey: string | undefined): "test" | "live" | null {
-  if (!secretKey) {
-    return null;
-  }
-
-  if (secretKey.startsWith("sk_test_")) {
-    return "test";
-  }
-
-  if (secretKey.startsWith("sk_live_")) {
-    return "live";
-  }
-
-  return null;
-}
 
 export async function POST(request: NextRequest) {
   const ip = getClientIp(request);
@@ -47,7 +30,7 @@ export async function POST(request: NextRequest) {
   const signatureHeader = request.headers.get("stripe-signature");
   const rawBody = await request.text();
 
-  if (!signatureHeader || !verifyStripeWebhookSignature(rawBody, signatureHeader, env.STRIPE_WEBHOOK_SECRET)) {
+  if (!signatureHeader) {
     await writeAuditLog({
       action: "BILLING_EVENT_REJECTED",
       resourceType: "billing_webhook",
@@ -55,17 +38,15 @@ export async function POST(request: NextRequest) {
       ip,
       userAgent,
       riskTier: 1,
-      metadata: {
-        reason: "invalid_signature",
-      },
+      metadata: { reason: "missing_signature" },
     });
-
     return NextResponse.json({ error: "Invalid signature." }, { status: 400 });
   }
 
-  const event = parseStripeEvent(rawBody);
-
-  if (!event) {
+  try {
+    await processStripeWebhookSdk(rawBody, signatureHeader);
+  } catch (err: unknown) {
+    const reason = err instanceof Error ? err.message : "unknown_error";
     await writeAuditLog({
       action: "BILLING_EVENT_REJECTED",
       resourceType: "billing_webhook",
@@ -73,41 +54,10 @@ export async function POST(request: NextRequest) {
       ip,
       userAgent,
       riskTier: 1,
-      metadata: {
-        reason: "invalid_payload",
-      },
+      metadata: { reason },
     });
-
-    return NextResponse.json({ error: "Invalid payload." }, { status: 400 });
+    return NextResponse.json({ error: "Webhook processing failed." }, { status: 400 });
   }
 
-  const keyMode = stripeKeyMode(env.STRIPE_SECRET_KEY);
-  if (keyMode && typeof event.livemode === "boolean") {
-    const eventMode = event.livemode ? "live" : "test";
-    if (keyMode !== eventMode) {
-      await writeAuditLog({
-        action: "BILLING_EVENT_REJECTED",
-        resourceType: "billing_webhook",
-        resourceId: event.id,
-        ip,
-        userAgent,
-        riskTier: 1,
-        metadata: {
-          reason: "mode_mismatch",
-          keyMode,
-          eventMode,
-        },
-      });
-
-      return NextResponse.json({ error: "Invalid payload." }, { status: 400 });
-    }
-  }
-
-  const result = await processStripeEvent(event);
-
-  return NextResponse.json({
-    received: true,
-    handled: result.handled,
-    reason: result.reason || null,
-  });
+  return NextResponse.json({ received: true });
 }

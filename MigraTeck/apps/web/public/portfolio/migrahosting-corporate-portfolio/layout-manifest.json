@@ -1,0 +1,99 @@
+{
+  "project": "MigraHosting Corporate Portfolio",
+  "version": 1,
+  "format": {
+    "web": true,
+    "print": "A4 landscape",
+    "editableSource": "HTML + CSS + JSON manifest"
+  },
+  "pages": [
+    {
+      "id": "page-01",
+      "title": "Cover",
+      "modules": ["brand lockup", "hero statement", "commercial metrics", "live brand visual"]
+    },
+    {
+      "id": "page-02",
+      "title": "Company Overview",
+      "modules": ["company facts", "product scope", "positioning quote"]
+    },
+    {
+      "id": "page-03",
+      "title": "Executive Summary",
+      "modules": ["three-pillar summary", "capability stats"]
+    },
+    {
+      "id": "page-04",
+      "title": "Ecosystem Map",
+      "modules": ["commercial layer", "control plane", "infrastructure layer"]
+    },
+    {
+      "id": "page-05",
+      "title": "Cloud Pods",
+      "modules": ["performance", "developer experience", "security and reliability"]
+    },
+    {
+      "id": "page-06",
+      "title": "MigaPanel + MigraPanel",
+      "modules": ["stylized dashboard", "operator instrumentation"]
+    },
+    {
+      "id": "page-07",
+      "title": "MigraMail",
+      "modules": ["product positioning", "business value grid"]
+    },
+    {
+      "id": "page-08",
+      "title": "MigraVoice",
+      "modules": ["cloud PBX summary", "feature stack", "commercial implication"]
+    },
+    {
+      "id": "page-09",
+      "title": "Expansion Products and Services",
+      "modules": ["MigraDrive", "MigraMarket", "MigraPilot", "AI Website Builder", "AI Content Generator", "professional services"]
+    },
+    {
+      "id": "page-10",
+      "title": "Platform Stack",
+      "modules": ["stack grid", "architecture caption"]
+    },
+    {
+      "id": "page-11",
+      "title": "Security and Reliability",
+      "modules": ["security controls", "reliability controls", "commercial implication"]
+    },
+    {
+      "id": "page-12",
+      "title": "Migration Playbook",
+      "modules": ["three-step migration story", "operational proof note"]
+    },
+    {
+      "id": "page-13",
+      "title": "Proof and Adoption",
+      "modules": ["customer references", "market signal copy"]
+    },
+    {
+      "id": "page-14",
+      "title": "Competitive Story",
+      "modules": ["comparison table", "commercial framing"]
+    },
+    {
+      "id": "page-15",
+      "title": "Delivery Model",
+      "modules": ["engagement models", "ideal buyer summary"]
+    },
+    {
+      "id": "page-16",
+      "title": "Closing",
+      "modules": ["closing statement", "contact panel"]
+    }
+  ],
+  "assetPolicy": {
+    "fullyBundled": true,
+    "notes": [
+      "MigraHosting logo and OG image are copied from live site URLs referenced in repository code.",
+      "MigraTeck and MigraPilot marks are copied from existing repository assets.",
+      "Dashboard visuals are intentionally built as editable layout components rather than frozen screenshots."
+    ]
+  }
+}

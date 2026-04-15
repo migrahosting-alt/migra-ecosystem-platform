@@ -5,13 +5,13 @@ import type { FastifyInstance } from "fastify";
 import { sessionIdSchema } from "../lib/schemas.js";
 import { listUserSessions, revokeSession } from "../modules/sessions/index.js";
 import { logAuditEvent } from "../modules/audit/index.js";
-import { requireSession, getClientIp } from "../middleware/session.js";
+import { requireAuthenticatedUser, getClientIp } from "../middleware/session.js";
 
 export async function sessionRoutes(app: FastifyInstance): Promise<void> {
   // ── GET /v1/sessions ──────────────────────────────────────────────
-  app.get("/v1/sessions", { preHandler: requireSession }, async (request, reply) => {
+  app.get("/v1/sessions", { preHandler: requireAuthenticatedUser }, async (request, reply) => {
     const user = request.authUser!;
-    const currentSessionId = request.authSession!.id;
+    const currentSessionId = request.authSession?.id ?? null;
     const sessions = await listUserSessions(user.id);
 
     return reply.code(200).send({
@@ -25,13 +25,13 @@ export async function sessionRoutes(app: FastifyInstance): Promise<void> {
         ip_address: s.ipAddress,
         user_agent: s.userAgent,
         device_name: s.deviceName,
-        current: s.id === currentSessionId,
+        current: currentSessionId !== null && s.id === currentSessionId,
       })),
     });
   });
 
   // ── DELETE /v1/sessions/:id ───────────────────────────────────────
-  app.delete("/v1/sessions/:id", { preHandler: requireSession }, async (request, reply) => {
+  app.delete("/v1/sessions/:id", { preHandler: requireAuthenticatedUser }, async (request, reply) => {
     const { id } = sessionIdSchema.parse(request.params);
     const user = request.authUser!;
     const ip = getClientIp(request);

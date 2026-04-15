@@ -21,6 +21,7 @@
 - Preserve response headers from the application middleware through any reverse proxy or CDN layer.
 - Current edge host: `srv1-web` (`100.68.239.94`)
 - Current live service: `migrateck.service` on `127.0.0.1:3111`, serving `apps/web`
+- Current live runtime should start `apps/web/node_modules/next/dist/bin/next` so the service uses the same Next.js version that builds the app.
 - Current staging service: `migrateck-staging.service` on `127.0.0.1:3112`
 - Current staging nginx vhost: `/etc/nginx/sites-available/staging.migrateck.com.conf`
 - Current staging backup snapshot: `/root/backups/migrateck-staging-edge-20260410T100750Z`

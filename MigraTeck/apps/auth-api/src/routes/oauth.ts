@@ -3,12 +3,30 @@
  */
 import type { FastifyInstance } from "fastify";
 import { authorizeQuerySchema, tokenExchangeSchema, revokeSchema } from "../lib/schemas.js";
-import { findClientById, validateRedirectUri, validateScopes } from "../modules/clients/index.js";
+import { findClientById, isConfidentialClient, validateRedirectUri, validateScopes, verifyRegisteredClientSecret } from "../modules/clients/index.js";
 import { createAuthCode, exchangeAuthCode, rotateRefreshToken, revokeRefreshTokenFamily } from "../modules/tokens/index.js";
 import { logAuditEvent } from "../modules/audit/index.js";
 import { getJWKS, getOpenIDConfiguration } from "../lib/jwt.js";
 import { config } from "../config/env.js";
-import { requireSession, optionalSession, getClientIp } from "../middleware/session.js";
+import { requireAuthenticatedUser, requireSession, optionalSession, getClientIp } from "../middleware/session.js";
+
+function parseBasicClientAuth(authorization?: string) {
+  if (!authorization?.startsWith("Basic ")) {
+    return null;
+  }
+
+  const encoded = authorization.slice(6).trim();
+  const decoded = Buffer.from(encoded, "base64").toString("utf8");
+  const separatorIndex = decoded.indexOf(":");
+  if (separatorIndex === -1) {
+    return null;
+  }
+
+  return {
+    clientId: decoded.slice(0, separatorIndex),
+    clientSecret: decoded.slice(separatorIndex + 1),
+  };
+}
 
 export async function oauthRoutes(app: FastifyInstance): Promise<void> {
 
@@ -110,6 +128,29 @@ export async function oauthRoutes(app: FastifyInstance): Promise<void> {
     const body = tokenExchangeSchema.parse(request.body);
     const ip = getClientIp(request);
     const ua = request.headers["user-agent"];
+    const basicAuth = parseBasicClientAuth(request.headers.authorization);
+
+    if (basicAuth?.clientId && basicAuth.clientId !== body.client_id) {
+      return reply.code(401).send({
+        error: { code: "invalid_client", message: "Client authentication did not match client_id." },
+      });
+    }
+
+    const client = await findClientById(body.client_id);
+    if (!client || !client.isActive) {
+      return reply.code(401).send({
+        error: { code: "invalid_client", message: "Unknown or inactive client_id." },
+      });
+    }
+
+    if (isConfidentialClient(client)) {
+      const presentedSecret = body.client_secret ?? basicAuth?.clientSecret;
+      if (!verifyRegisteredClientSecret(client, presentedSecret)) {
+        return reply.code(401).send({
+          error: { code: "invalid_client", message: "Client authentication failed." },
+        });
+      }
+    }
 
     if (body.grant_type === "authorization_code") {
       if (!body.code || !body.code_verifier || !body.redirect_uri) {
@@ -193,7 +234,7 @@ export async function oauthRoutes(app: FastifyInstance): Promise<void> {
   });
 
   // ── GET /userinfo ─────────────────────────────────────────────────
-  app.get("/userinfo", { preHandler: requireSession }, async (request, reply) => {
+  app.get("/userinfo", { preHandler: requireAuthenticatedUser }, async (request, reply) => {
     const user = request.authUser!;
     return reply.code(200).send({
       sub: user.id,

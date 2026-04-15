@@ -2,6 +2,8 @@
  * MigraAuth — Environment configuration.
  * Single source for all environment-derived settings.
  */
+import { config as dotenvConfig } from "dotenv";
+dotenvConfig();
 
 function env(key: string, fallback?: string): string {
   const v = process.env[key] ?? fallback;
@@ -54,9 +56,12 @@ export const config = {
   /** Email / SMTP */
   smtpHost: env("SMTP_HOST", "localhost"),
   smtpPort: envInt("SMTP_PORT", 587),
-  smtpUser: process.env["SMTP_USER"] ?? undefined,
-  smtpPass: process.env["SMTP_PASS"] ?? undefined,
-  emailFrom: env("AUTH_EMAIL_FROM", "MigraTeck Account <noreply@auth.migrateck.com>"),
+  smtpUser: process.env["SMTP_USER"] ?? process.env["SMTP_USERNAME"] ?? undefined,
+  smtpPass: process.env["SMTP_PASS"] ?? process.env["SMTP_PASSWORD"] ?? undefined,
+  emailFrom:
+    process.env["AUTH_EMAIL_FROM"] ??
+    process.env["SMTP_FROM"] ??
+    "MigraTeck Account <noreply@auth.migrateck.com>",
 
   /** Rate limits */
   loginRateLimit: envInt("AUTH_LOGIN_RATE_LIMIT", 10),         // per minute
@@ -70,4 +75,11 @@ export const config = {
   /** Environment */
   nodeEnv: env("NODE_ENV", "development"),
   isDev: env("NODE_ENV", "development") === "development",
+
+  /** Billing (Stripe) */
+  billing: {
+    stripeSecretKey: process.env["STRIPE_SECRET_KEY"] ?? undefined,
+    stripeWebhookSecret: process.env["STRIPE_WEBHOOK_SECRET"] ?? undefined,
+    stripePriceCatalogVersion: env("STRIPE_PRICE_CATALOG_VERSION", "v1"),
+  },
 } as const;

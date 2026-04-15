@@ -6,25 +6,9 @@ import { stripeBillingEnabled } from "@/lib/env";
 import { PRODUCT_CATALOG } from "@/lib/constants";
 import { buildMigraHostingRequestAccessHref, MIGRAHOSTING_PRICING_POSITIONING, MIGRAHOSTING_VPS_PLANS } from "@/lib/migrahosting-pricing";
 import { ManageSubscriptionButton, SubscribeButton } from "@/components/billing/billing-actions";
+import { SubscriptionStatusBadge, SubscriptionStatusBanner } from "@/components/billing/subscription-status-banner";
+import type { BillingSubscriptionStatus } from "@prisma/client";
 import Link from "next/link";
-
-function statusBadge(status: string) {
-  const colors: Record<string, string> = {
-    ACTIVE: "bg-green-100 text-green-700",
-    TRIALING: "bg-blue-100 text-blue-700",
-    PAST_DUE: "bg-yellow-100 text-yellow-700",
-    CANCELED: "bg-red-100 text-red-700",
-    INCOMPLETE: "bg-gray-100 text-gray-500",
-    UNPAID: "bg-red-100 text-red-700",
-    PAUSED: "bg-gray-100 text-gray-500",
-  };
-
-  return (
-    <span className={`inline-block rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${colors[status] || "bg-gray-100 text-gray-500"}`}>
-      {status}
-    </span>
-  );
-}
 
 const priceFormatter = new Intl.NumberFormat("en-US", {
   minimumFractionDigits: 0,
@@ -74,7 +58,7 @@ export default async function BillingPage({ searchParams }: { searchParams: Prom
     );
   }
 
-  const [subscriptions, bindings, entitlements] = await Promise.all([
+  const [subscriptions, bindings, entitlements, failedWebhookCount] = await Promise.all([
     prisma.billingSubscription.findMany({
       where: { orgId: membership.orgId },
       orderBy: { createdAt: "desc" },
@@ -85,6 +69,7 @@ export default async function BillingPage({ searchParams }: { searchParams: Prom
     prisma.orgEntitlement.findMany({
       where: { orgId: membership.orgId },
     }),
+    prisma.billingWebhookEvent.count({ where: { status: "FAILED" } }),
   ]);
 
   const hasActiveSubscription = subscriptions.some(
@@ -143,6 +128,14 @@ export default async function BillingPage({ searchParams }: { searchParams: Prom
       )}
 
       {/* Checkout Result */}
+      {params.checkout === "activated" && (
+        <article className="rounded-2xl border border-green-200 bg-green-50 p-5">
+          <h2 className="text-lg font-bold text-green-800">Subscription Activated!</h2>
+          <p className="mt-1 text-sm text-green-700">
+            Your subscription is active. Entitlements are being applied and will appear below shortly.
+          </p>
+        </article>
+      )}
       {params.checkout === "success" && (
         <article className="rounded-2xl border border-green-200 bg-green-50 p-5">
           <h2 className="text-lg font-bold text-green-800">Subscription Created!</h2>
@@ -159,6 +152,18 @@ export default async function BillingPage({ searchParams }: { searchParams: Prom
         </article>
       )}
 
+      {/* Failed webhook notice — shown to platform admins only */}
+      {failedWebhookCount > 0 && can(membership.role, "platform:config:manage") && (
+        <article className="rounded-2xl border border-yellow-200 bg-yellow-50 p-4 text-sm text-yellow-800">
+          ⚠ {failedWebhookCount} billing webhook event{failedWebhookCount !== 1 ? "s" : ""} failed to
+          process. Visit{" "}
+          <a href="/app/platform/billing" className="font-semibold underline">
+            Billing Diagnostics
+          </a>{" "}
+          to replay them.
+        </article>
+      )}
+
       {/* Active Subscriptions */}
       <article className="rounded-2xl border border-[var(--line)] bg-white p-5">
         <h2 className="text-lg font-bold">Active Subscriptions</h2>
@@ -167,15 +172,31 @@ export default async function BillingPage({ searchParams }: { searchParams: Prom
         ) : (
           <div className="mt-3 space-y-3">
             {subscriptions.map((row) => {
+              const showBanner = ["PAST_DUE", "UNPAID", "INCOMPLETE", "TRIALING", "PAUSED", "CANCELED"].includes(row.status);
               return (
-                <div key={row.id} className="rounded-xl border border-[var(--line)] p-4">
+                <div key={row.id} className="rounded-xl border border-[var(--line)] p-4 space-y-3">
                   <div className="flex items-center justify-between">
-                    <p className="font-semibold text-sm">{row.externalSubscriptionId}</p>
-                    {statusBadge(row.status)}
+                    <p className="font-semibold text-sm font-mono">{row.stripeSubscriptionId}</p>
+                    <SubscriptionStatusBadge status={row.status as BillingSubscriptionStatus} />
                   </div>
-                  <div className="mt-2 flex flex-wrap gap-4 text-xs text-[var(--ink-muted)]">
-                    <span>Period: {row.currentPeriodStart?.toLocaleDateString() || "-"} — {row.currentPeriodEnd?.toLocaleDateString() || "-"}</span>
-                    {row.cancelAtPeriodEnd && <span className="text-red-600 font-semibold">Cancels at period end</span>}
+                  {showBanner && (
+                    <SubscriptionStatusBanner
+                      status={row.status as BillingSubscriptionStatus}
+                      trialEnd={row.trialEnd}
+                      currentPeriodEnd={row.currentPeriodEnd}
+                      cancelAtPeriodEnd={row.cancelAtPeriodEnd}
+                    />
+                  )}
+                  {row.status === "ACTIVE" && row.cancelAtPeriodEnd && (
+                    <SubscriptionStatusBanner
+                      status="ACTIVE"
+                      currentPeriodEnd={row.currentPeriodEnd}
+                      cancelAtPeriodEnd={row.cancelAtPeriodEnd}
+                    />
+                  )}
+                  <div className="flex flex-wrap gap-4 text-xs text-[var(--ink-muted)]">
+                    <span>Period: {row.currentPeriodStart?.toLocaleDateString() || "—"} — {row.currentPeriodEnd?.toLocaleDateString() || "—"}</span>
+                    {row.trialEnd && <span>Trial ends: {row.trialEnd.toLocaleDateString()}</span>}
                   </div>
                 </div>
               );
@@ -194,7 +215,14 @@ export default async function BillingPage({ searchParams }: { searchParams: Prom
               return (
                 <div key={ent.id} className="rounded-xl border border-[var(--line)] p-3">
                   <p className="font-semibold text-sm">{product?.name || ent.product}</p>
-                  <div className="mt-1">{statusBadge(ent.status)}</div>
+                  <div className="mt-1">
+                    <span className={`inline-block rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${
+                      ent.status === "ACTIVE" ? "bg-green-100 text-green-700"
+                      : ent.status === "TRIAL" ? "bg-blue-100 text-blue-700"
+                      : ent.status === "RESTRICTED" ? "bg-yellow-100 text-yellow-700"
+                      : "bg-gray-100 text-gray-500"
+                    }`}>{ent.status}</span>
+                  </div>
                 </div>
               );
             })}

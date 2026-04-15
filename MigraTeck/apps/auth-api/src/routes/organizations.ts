@@ -2,14 +2,20 @@
  * Organization routes — create orgs, manage members.
  */
 import type { FastifyInstance } from "fastify";
-import { createOrganizationSchema, addMemberSchema, orgIdSchema } from "../lib/schemas.js";
+import {
+  createOrganizationSchema,
+  addMemberSchema,
+  orgIdSchema,
+  orgMemberIdSchema,
+  updateOrganizationMemberRoleSchema,
+} from "../lib/schemas.js";
 import { db } from "../lib/db.js";
 import { logAuditEvent } from "../modules/audit/index.js";
-import { requireSession, getClientIp } from "../middleware/session.js";
+import { requireAuthenticatedUser, getClientIp } from "../middleware/session.js";
 
 export async function organizationRoutes(app: FastifyInstance): Promise<void> {
   // ── GET /v1/organizations ─────────────────────────────────────────
-  app.get("/v1/organizations", { preHandler: requireSession }, async (request, reply) => {
+  app.get("/v1/organizations", { preHandler: requireAuthenticatedUser }, async (request, reply) => {
     const user = request.authUser!;
 
     const memberships = await db.organizationMember.findMany({
@@ -29,7 +35,7 @@ export async function organizationRoutes(app: FastifyInstance): Promise<void> {
   });
 
   // ── POST /v1/organizations ────────────────────────────────────────
-  app.post("/v1/organizations", { preHandler: requireSession }, async (request, reply) => {
+  app.post("/v1/organizations", { preHandler: requireAuthenticatedUser }, async (request, reply) => {
     const user = request.authUser!;
     const body = createOrganizationSchema.parse(request.body);
     const ip = getClientIp(request);
@@ -71,8 +77,53 @@ export async function organizationRoutes(app: FastifyInstance): Promise<void> {
     });
   });
 
+  // ── GET /v1/organizations/:org_id/members ───────────────────────
+  app.get("/v1/organizations/:org_id/members", { preHandler: requireAuthenticatedUser }, async (request, reply) => {
+    const user = request.authUser!;
+    const { org_id } = orgIdSchema.parse(request.params);
+
+    const membership = await db.organizationMember.findFirst({
+      where: { organizationId: org_id, userId: user.id, status: "ACTIVE" },
+    });
+
+    if (!membership) {
+      return reply.code(403).send({ error: { code: "forbidden", message: "Not authorized to view this organization." } });
+    }
+
+    const members = await db.organizationMember.findMany({
+      where: { organizationId: org_id },
+      include: {
+        user: {
+          select: {
+            id: true,
+            email: true,
+            displayName: true,
+          },
+        },
+      },
+      orderBy: [
+        { createdAt: "asc" },
+        { role: "asc" },
+      ],
+    });
+
+    return reply.code(200).send({
+      members: members.map((member) => ({
+        id: member.id,
+        role: member.role,
+        status: member.status,
+        joined_at: member.createdAt.toISOString(),
+        user: {
+          id: member.user.id,
+          email: member.user.email,
+          display_name: member.user.displayName,
+        },
+      })),
+    });
+  });
+
   // ── POST /v1/organizations/:org_id/members ────────────────────────
-  app.post("/v1/organizations/:org_id/members", { preHandler: requireSession }, async (request, reply) => {
+  app.post("/v1/organizations/:org_id/members", { preHandler: requireAuthenticatedUser }, async (request, reply) => {
     const user = request.authUser!;
     const { org_id } = orgIdSchema.parse(request.params);
     const body = addMemberSchema.parse(request.body);
@@ -119,9 +170,125 @@ export async function organizationRoutes(app: FastifyInstance): Promise<void> {
     });
 
     return reply.code(201).send({
-      member_id: member.id,
-      user_id: targetUser.id,
-      role: body.role,
+      member: {
+        id: member.id,
+        role: member.role,
+        status: member.status,
+        joined_at: member.createdAt.toISOString(),
+        user: {
+          id: targetUser.id,
+          email: targetUser.email,
+          display_name: targetUser.displayName,
+        },
+      },
     });
+  });
+
+  app.patch("/v1/organizations/:org_id/members/:member_id", { preHandler: requireAuthenticatedUser }, async (request, reply) => {
+    const user = request.authUser!;
+    const { org_id, member_id } = orgMemberIdSchema.parse(request.params);
+    const body = updateOrganizationMemberRoleSchema.parse(request.body);
+    const ip = getClientIp(request);
+    const ua = request.headers["user-agent"];
+
+    const callerMembership = await db.organizationMember.findFirst({
+      where: { organizationId: org_id, userId: user.id, status: "ACTIVE", role: { in: ["OWNER", "ADMIN"] } },
+    });
+    if (!callerMembership) {
+      return reply.code(403).send({ error: { code: "forbidden", message: "Not authorized to manage this organization." } });
+    }
+
+    const member = await db.organizationMember.findFirst({
+      where: { id: member_id, organizationId: org_id },
+      include: {
+        user: {
+          select: {
+            id: true,
+            email: true,
+            displayName: true,
+          },
+        },
+      },
+    });
+    if (!member) {
+      return reply.code(404).send({ error: { code: "member_not_found", message: "Member not found." } });
+    }
+    if (member.role === "OWNER") {
+      return reply.code(409).send({ error: { code: "owner_locked", message: "Organization ownership cannot be reassigned here." } });
+    }
+
+    const updated = await db.organizationMember.update({
+      where: { id: member.id },
+      data: { role: body.role.toUpperCase() as "ADMIN" | "BILLING_ADMIN" | "MEMBER" },
+    });
+
+    await logAuditEvent({
+      actorUserId: user.id,
+      eventType: "ORG_MEMBER_ROLE_UPDATED",
+      eventData: { orgId: org_id, targetUserId: member.user.id, role: body.role },
+      ipAddress: ip,
+      userAgent: ua,
+    });
+
+    return reply.code(200).send({
+      member: {
+        id: updated.id,
+        role: updated.role,
+        status: updated.status,
+        joined_at: updated.createdAt.toISOString(),
+        user: {
+          id: member.user.id,
+          email: member.user.email,
+          display_name: member.user.displayName,
+        },
+      },
+    });
+  });
+
+  app.delete("/v1/organizations/:org_id/members/:member_id", { preHandler: requireAuthenticatedUser }, async (request, reply) => {
+    const user = request.authUser!;
+    const { org_id, member_id } = orgMemberIdSchema.parse(request.params);
+    const ip = getClientIp(request);
+    const ua = request.headers["user-agent"];
+
+    const callerMembership = await db.organizationMember.findFirst({
+      where: { organizationId: org_id, userId: user.id, status: "ACTIVE", role: { in: ["OWNER", "ADMIN"] } },
+    });
+    if (!callerMembership) {
+      return reply.code(403).send({ error: { code: "forbidden", message: "Not authorized to manage this organization." } });
+    }
+
+    const member = await db.organizationMember.findFirst({
+      where: { id: member_id, organizationId: org_id },
+      include: {
+        user: {
+          select: {
+            id: true,
+            email: true,
+            displayName: true,
+          },
+        },
+      },
+    });
+    if (!member) {
+      return reply.code(404).send({ error: { code: "member_not_found", message: "Member not found." } });
+    }
+    if (member.role === "OWNER") {
+      return reply.code(409).send({ error: { code: "owner_locked", message: "Organization ownership cannot be removed here." } });
+    }
+
+    await db.organizationMember.delete({
+      where: { id: member.id },
+    });
+
+    await logAuditEvent({
+      actorUserId: user.id,
+      eventType: "ORG_MEMBER_REMOVED",
+      eventData: { orgId: org_id, targetUserId: member.user.id },
+      ipAddress: ip,
+      userAgent: ua,
+    });
+
+    return reply.code(200).send({ removed: true, memberId: member.id });
   });
 }

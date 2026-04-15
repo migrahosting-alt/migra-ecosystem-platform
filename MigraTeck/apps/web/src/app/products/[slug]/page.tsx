@@ -3,13 +3,11 @@ import Image from "next/image";
 import Link from "next/link";
 import type { Metadata } from "next";
 import { cn } from "@/lib/cn";
+import { getProductLegalHref } from "@/content/legal";
 import ui from "@/lib/ui";
 import { products, productCategories } from "@/data/products";
 
-/* ---------- static params ---------- */
-export function generateStaticParams() {
-  return products.map((p) => ({ slug: p.slug }));
-}
+export const dynamic = "force-dynamic";
 
 /* ---------- metadata ---------- */
 type Props = { params: Promise<{ slug: string }> };
@@ -34,6 +32,7 @@ export default async function ProductDetailPage({ params }: Props) {
   const related = products.filter(
     (p) => p.category === product.category && p.slug !== product.slug,
   );
+  const productLegalHref = getProductLegalHref(product.slug);
 
   return (
     <>
@@ -78,6 +77,35 @@ export default async function ProductDetailPage({ params }: Props) {
         </div>
         <div className="absolute bottom-0 left-0 right-0 h-32 bg-gradient-to-t from-white to-transparent" />
       </section>
+
+      {productLegalHref ? (
+        <section className="relative -mt-4 pb-8 pt-4">
+          <div className={ui.maxW}>
+            <div className={cn(ui.card, "p-5 sm:p-6")}>
+              <p className={ui.eyebrowBrand}>Legal notice</p>
+              <p className="mt-3 text-sm leading-7 text-slate-700">
+                This service is subject to the{" "}
+                <Link href="/legal/terms" className="font-semibold text-blue-600">
+                  MigraTeck Terms of Service
+                </Link>
+                ,{" "}
+                <Link href="/legal/payment" className="font-semibold text-blue-600">
+                  Payment Policy
+                </Link>
+                ,{" "}
+                <Link href="/legal/privacy" className="font-semibold text-blue-600">
+                  Privacy Policy
+                </Link>
+                , and the{" "}
+                <Link href={productLegalHref} className="font-semibold text-blue-600">
+                  {product.name} service terms
+                </Link>
+                .
+              </p>
+            </div>
+          </div>
+        </section>
+      ) : null}
 
       {/* about */}
       <section className={ui.sectionPy}>

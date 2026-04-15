@@ -2,17 +2,12 @@ import { StepUpMethod } from "@prisma/client";
 import { writeAuditLog } from "@/lib/audit";
 import { prisma } from "@/lib/prisma";
 import { hashCanonicalPayload } from "@/lib/security/canonical";
-import { verifyPassword } from "@/lib/security/password";
-import { decryptTotpSecret, verifyTotpCodeWithReplayGuard } from "@/lib/security/totp";
-import { stepUpPasskeyEnabled, stepUpTier2Method, stepUpTier2TtlSeconds } from "@/lib/env";
+import { stepUpTier2TtlSeconds } from "@/lib/env";
 
 function currentStepUpMethod(): "NONE" | "REAUTH" | "TOTP" | "PASSKEY" {
-  const runtime = process.env.STEP_UP_TIER2;
-  if (runtime === "NONE" || runtime === "REAUTH" || runtime === "TOTP" || runtime === "PASSKEY") {
-    return runtime;
-  }
-
-  return stepUpTier2Method;
+  // Product-local password, TOTP, and passkey step-up are disabled.
+  // MigraAuth owns step-up authentication and MFA for this application.
+  return "NONE";
 }
 
 function currentIntentTtlSeconds(): number {
@@ -53,97 +48,11 @@ interface ResolveStepUpVerificationResult {
 }
 
 async function resolveStepUpVerification(input: ResolveStepUpVerificationInput): Promise<ResolveStepUpVerificationResult> {
+  void input;
   const method = currentStepUpMethod();
 
   if (method === "NONE") {
     return { stepUpMethod: StepUpMethod.NONE, stepUpVerifiedAt: null };
-  }
-
-  if (method === "REAUTH") {
-    const password = input.stepUp?.password;
-    if (!password) {
-      throw new MutationIntentError("STEP_UP_REQUIRED", "Re-authentication is required.", 401);
-    }
-
-    const user = await prisma.user.findUnique({
-      where: { id: input.actorId },
-      select: {
-        passwordHash: true,
-      },
-    });
-
-    if (!user?.passwordHash || !(await verifyPassword(user.passwordHash, password))) {
-      throw new MutationIntentError("STEP_UP_FAILED", "Step-up verification failed.", 401);
-    }
-
-    return {
-      stepUpMethod: StepUpMethod.REAUTH,
-      stepUpVerifiedAt: new Date(),
-    };
-  }
-
-  if (method === "TOTP") {
-    const totpCode = input.stepUp?.totpCode;
-    if (!totpCode) {
-      throw new MutationIntentError("STEP_UP_REQUIRED", "TOTP code is required.", 401);
-    }
-
-    const factor = await prisma.userTotpFactor.findUnique({
-      where: { userId: input.actorId },
-      select: {
-        id: true,
-        secretCiphertext: true,
-      },
-    });
-
-    if (!factor) {
-      throw new MutationIntentError("STEP_UP_NOT_CONFIGURED", "TOTP is not configured for this actor.", 403);
-    }
-
-    const secret = decryptTotpSecret(factor.secretCiphertext);
-    const valid = await verifyTotpCodeWithReplayGuard(input.actorId, secret, totpCode);
-
-    if (!valid) {
-      throw new MutationIntentError("STEP_UP_FAILED", "Step-up verification failed.", 401);
-    }
-
-    await prisma.userTotpFactor.update({
-      where: { id: factor.id },
-      data: { lastUsedAt: new Date() },
-    });
-
-    return {
-      stepUpMethod: StepUpMethod.TOTP,
-      stepUpVerifiedAt: new Date(),
-    };
-  }
-
-  if (method === "PASSKEY") {
-    if (!stepUpPasskeyEnabled) {
-      throw new MutationIntentError("STEP_UP_NOT_AVAILABLE", "Passkey step-up is not enabled.", 503);
-    }
-
-    if (!input.stepUp?.passkeyAssertion) {
-      throw new MutationIntentError("STEP_UP_REQUIRED", "Passkey assertion is required.", 401);
-    }
-
-    // Verify the passkey assertion via WebAuthn
-    const { finishAuthentication } = await import("@/lib/security/webauthn");
-    try {
-      const assertion = JSON.parse(input.stepUp.passkeyAssertion);
-      const result = await finishAuthentication(input.actorId, assertion);
-      if (result.userId !== input.actorId) {
-        throw new MutationIntentError("STEP_UP_FAILED", "Passkey does not belong to actor.", 401);
-      }
-    } catch (error) {
-      if (error instanceof MutationIntentError) throw error;
-      throw new MutationIntentError("STEP_UP_FAILED", "Passkey step-up verification failed.", 401);
-    }
-
-    return {
-      stepUpMethod: StepUpMethod.PASSKEY,
-      stepUpVerifiedAt: new Date(),
-    };
   }
 
   throw new MutationIntentError("STEP_UP_POLICY_INVALID", "Invalid step-up policy.", 500);

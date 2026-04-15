@@ -1,13 +1,12 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import argon2 from "argon2";
+import { randomBytes } from "node:crypto";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
-import { PrismaClient, EntitlementStatus, OrgRole, ProductKey, ServerPowerState, VpsBillingCycle, VpsStatus } from "@prisma/client";
+import { PrismaClient, EntitlementStatus, OrgRole, ProductKey, ServerPowerState, VpsBillingCycle, VpsStatus, BillingSubscriptionStatus } from "@prisma/client";
 import { createTestDatabaseContext, dropTestDatabase, isPostgresUrl, prepareTestDatabase } from "../setup/db";
 import { startAppServer, type AppServerHandle } from "../setup/app";
 
 const TEST_EMAIL = "owner+migramarket-e2e@migrateck.com";
-const TEST_PASSWORD = "ChangeMeImmediately123!";
 const TEST_PORT = Number(process.env.PLAYWRIGHT_APP_PORT || 3209);
 const starterDrivePlan = {
   planCode: "starter",
@@ -138,18 +137,12 @@ export default async function globalSetup() {
     log: ["error"],
   });
 
-  const passwordHash = await argon2.hash(TEST_PASSWORD, {
-    type: argon2.argon2id,
-    memoryCost: 19456,
-    timeCost: 2,
-    parallelism: 1,
-  });
-
   const user = await prisma.user.create({
     data: {
       email: TEST_EMAIL,
+      emailNormalized: TEST_EMAIL,
+      authUserId: `playwright:${TEST_EMAIL}`,
       name: "MigraMarket Playwright Owner",
-      passwordHash,
       emailVerified: new Date(),
     },
   });
@@ -395,7 +388,203 @@ export default async function globalSetup() {
   process.env.PLAYWRIGHT_VPS_SERVER_ID = vpsServer.id;
 
   process.env.PLAYWRIGHT_TEST_EMAIL = TEST_EMAIL;
-  process.env.PLAYWRIGHT_TEST_PASSWORD = TEST_PASSWORD;
+
+  // ── Session for main test user ──────────────────────────────────────────
+  const mainSessionToken = randomBytes(32).toString("hex");
+  await prisma.session.create({
+    data: {
+      sessionToken: mainSessionToken,
+      userId: user.id,
+      expires: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+    },
+  });
+  process.env.PLAYWRIGHT_SESSION_TOKEN = mainSessionToken;
+
+  // ── Billing catalog (shared across billing E2E users) ───────────────────
+  const billingProduct = await prisma.billingProduct.create({
+    data: {
+      code: "playwright-basic-monthly",
+      name: "Playwright Basic (Monthly)",
+      active: true,
+    },
+  });
+
+  const billingPrice = await prisma.billingPrice.create({
+    data: {
+      productId: billingProduct.id,
+      code: "playwright-basic-monthly-price",
+      currency: "usd",
+      unitAmount: 1000,
+      interval: "MONTH",
+      trialDays: 14,
+      active: true,
+      stripePriceId: "price_playwright_monthly",
+      stripeProductId: "prod_playwright_basic",
+    },
+  });
+  process.env.PLAYWRIGHT_BILLING_PRICE_ID = billingPrice.id;
+
+  // ── Helper: create billing test user/org/session ────────────────────────
+  async function createBillingUser(suffix: string) {
+    const email = `owner+billing-${suffix}@migrateck.com`;
+    const u = await prisma.user.create({
+      data: {
+        email,
+        emailNormalized: email,
+        authUserId: `playwright:${email}`,
+        name: `Billing ${suffix} Test User`,
+        emailVerified: new Date(),
+      },
+    });
+    const o = await prisma.organization.create({
+      data: {
+        name: `Billing ${suffix.charAt(0).toUpperCase() + suffix.slice(1)} Org`,
+        slug: `billing-${suffix}-playwright`,
+        createdById: u.id,
+      },
+    });
+    await prisma.membership.create({
+      data: { userId: u.id, orgId: o.id, role: OrgRole.OWNER, status: "ACTIVE" },
+    });
+    await prisma.user.update({ where: { id: u.id }, data: { defaultOrgId: o.id } });
+    const token = randomBytes(32).toString("hex");
+    await prisma.session.create({
+      data: {
+        sessionToken: token,
+        userId: u.id,
+        expires: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+      },
+    });
+    return { user: u, org: o, sessionToken: token };
+  }
+
+  // ── ACTIVE subscription user ─────────────────────────────────────────────
+  const activeCtx = await createBillingUser("active");
+  await prisma.billingCustomer.create({
+    data: {
+      orgId: activeCtx.org.id,
+      stripeCustomerId: "cus_playwright_active",
+      userId: activeCtx.user.id,
+      email: activeCtx.user.email,
+    },
+  });
+  await prisma.billingSubscription.create({
+    data: {
+      orgId: activeCtx.org.id,
+      stripeSubscriptionId: "sub_playwright_active",
+      stripeCustomerId: "cus_playwright_active",
+      billingPriceId: billingPrice.id,
+      status: BillingSubscriptionStatus.ACTIVE,
+      currentPeriodStart: new Date(),
+      currentPeriodEnd: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+    },
+  });
+  process.env.PLAYWRIGHT_BILLING_ACTIVE_SESSION = activeCtx.sessionToken;
+  process.env.PLAYWRIGHT_BILLING_ACTIVE_ORG_ID = activeCtx.org.id;
+
+  // ── PAST_DUE subscription user ───────────────────────────────────────────
+  const pastDueCtx = await createBillingUser("pastdue");
+  await prisma.billingCustomer.create({
+    data: {
+      orgId: pastDueCtx.org.id,
+      stripeCustomerId: "cus_playwright_pastdue",
+      userId: pastDueCtx.user.id,
+      email: pastDueCtx.user.email,
+    },
+  });
+  const pastDuePeriodEnd = new Date(Date.now() + 5 * 24 * 60 * 60 * 1000);
+  await prisma.billingSubscription.create({
+    data: {
+      orgId: pastDueCtx.org.id,
+      stripeSubscriptionId: "sub_playwright_pastdue",
+      stripeCustomerId: "cus_playwright_pastdue",
+      billingPriceId: billingPrice.id,
+      status: BillingSubscriptionStatus.PAST_DUE,
+      currentPeriodStart: new Date(Date.now() - 35 * 24 * 60 * 60 * 1000),
+      currentPeriodEnd: pastDuePeriodEnd,
+    },
+  });
+  process.env.PLAYWRIGHT_BILLING_PASTDUE_SESSION = pastDueCtx.sessionToken;
+  process.env.PLAYWRIGHT_BILLING_PASTDUE_ORG_ID = pastDueCtx.org.id;
+  process.env.PLAYWRIGHT_BILLING_PASTDUE_PERIOD_END = pastDuePeriodEnd.toISOString();
+
+  // ── TRIALING subscription user ────────────────────────────────────────────
+  const trialingCtx = await createBillingUser("trialing");
+  await prisma.billingCustomer.create({
+    data: {
+      orgId: trialingCtx.org.id,
+      stripeCustomerId: "cus_playwright_trialing",
+      userId: trialingCtx.user.id,
+      email: trialingCtx.user.email,
+    },
+  });
+  const trialEnd = new Date(Date.now() + 10 * 24 * 60 * 60 * 1000);
+  await prisma.billingSubscription.create({
+    data: {
+      orgId: trialingCtx.org.id,
+      stripeSubscriptionId: "sub_playwright_trialing",
+      stripeCustomerId: "cus_playwright_trialing",
+      billingPriceId: billingPrice.id,
+      status: BillingSubscriptionStatus.TRIALING,
+      currentPeriodStart: new Date(),
+      currentPeriodEnd: trialEnd,
+      trialStart: new Date(),
+      trialEnd,
+    },
+  });
+  process.env.PLAYWRIGHT_BILLING_TRIALING_SESSION = trialingCtx.sessionToken;
+  process.env.PLAYWRIGHT_BILLING_TRIALING_ORG_ID = trialingCtx.org.id;
+  process.env.PLAYWRIGHT_BILLING_TRIAL_END = trialEnd.toISOString();
+
+  // ── CANCELED subscription user ────────────────────────────────────────────
+  const canceledCtx = await createBillingUser("canceled");
+  await prisma.billingCustomer.create({
+    data: {
+      orgId: canceledCtx.org.id,
+      stripeCustomerId: "cus_playwright_canceled",
+      userId: canceledCtx.user.id,
+      email: canceledCtx.user.email,
+    },
+  });
+  const canceledPeriodEnd = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000); // 3 days remaining
+  await prisma.billingSubscription.create({
+    data: {
+      orgId: canceledCtx.org.id,
+      stripeSubscriptionId: "sub_playwright_canceled",
+      stripeCustomerId: "cus_playwright_canceled",
+      billingPriceId: billingPrice.id,
+      status: BillingSubscriptionStatus.CANCELED,
+      currentPeriodStart: new Date(Date.now() - 27 * 24 * 60 * 60 * 1000),
+      currentPeriodEnd: canceledPeriodEnd,
+      canceledAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000),
+    },
+  });
+  process.env.PLAYWRIGHT_BILLING_CANCELED_SESSION = canceledCtx.sessionToken;
+  process.env.PLAYWRIGHT_BILLING_CANCELED_ORG_ID = canceledCtx.org.id;
+
+  // ── INCOMPLETE subscription user (payment confirmation required) ──────────
+  const incompleteCtx = await createBillingUser("incomplete");
+  await prisma.billingCustomer.create({
+    data: {
+      orgId: incompleteCtx.org.id,
+      stripeCustomerId: "cus_playwright_incomplete",
+      userId: incompleteCtx.user.id,
+      email: incompleteCtx.user.email,
+    },
+  });
+  await prisma.billingSubscription.create({
+    data: {
+      orgId: incompleteCtx.org.id,
+      stripeSubscriptionId: "sub_playwright_incomplete",
+      stripeCustomerId: "cus_playwright_incomplete",
+      billingPriceId: billingPrice.id,
+      status: BillingSubscriptionStatus.INCOMPLETE,
+      currentPeriodStart: new Date(),
+      currentPeriodEnd: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+    },
+  });
+  process.env.PLAYWRIGHT_BILLING_INCOMPLETE_SESSION = incompleteCtx.sessionToken;
+  process.env.PLAYWRIGHT_BILLING_INCOMPLETE_ORG_ID = incompleteCtx.org.id;
 
   return async () => {
     await prisma.$disconnect();

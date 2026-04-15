@@ -1,0 +1,94 @@
+{
+  "name": "@migrateck/billing-core",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./catalog": {
+      "types": "./dist/catalog/index.d.ts",
+      "default": "./dist/catalog/index.js"
+    },
+    "./customers": {
+      "types": "./dist/customers/index.d.ts",
+      "default": "./dist/customers/index.js"
+    },
+    "./checkout": {
+      "types": "./dist/checkout/index.d.ts",
+      "default": "./dist/checkout/index.js"
+    },
+    "./subscriptions": {
+      "types": "./dist/subscriptions/index.d.ts",
+      "default": "./dist/subscriptions/index.js"
+    },
+    "./usage": {
+      "types": "./dist/usage/index.d.ts",
+      "default": "./dist/usage/index.js"
+    },
+    "./invoices": {
+      "types": "./dist/invoices/index.d.ts",
+      "default": "./dist/invoices/index.js"
+    },
+    "./portal": {
+      "types": "./dist/portal/index.d.ts",
+      "default": "./dist/portal/index.js"
+    },
+    "./quotes": {
+      "types": "./dist/quotes/index.d.ts",
+      "default": "./dist/quotes/index.js"
+    },
+    "./webhooks": {
+      "types": "./dist/webhooks/index.d.ts",
+      "default": "./dist/webhooks/index.js"
+    },
+    "./entitlements": {
+      "types": "./dist/entitlements/index.d.ts",
+      "default": "./dist/entitlements/index.js"
+    },
+    "./tax": {
+      "types": "./dist/tax/index.d.ts",
+      "default": "./dist/tax/index.js"
+    },
+    "./dunning": {
+      "types": "./dist/dunning/index.d.ts",
+      "default": "./dist/dunning/index.js"
+    },
+    "./support-actions": {
+      "types": "./dist/support-actions/index.d.ts",
+      "default": "./dist/support-actions/index.js"
+    },
+    "./contracts": {
+      "types": "./dist/contracts/index.d.ts",
+      "default": "./dist/contracts/index.js"
+    },
+    "./schemas": {
+      "types": "./dist/schemas.d.ts",
+      "default": "./dist/schemas.js"
+    },
+    "./permissions": {
+      "types": "./dist/permissions.d.ts",
+      "default": "./dist/permissions.js"
+    },
+    "./customers/payment-methods": {
+      "types": "./dist/customers/payment-methods.d.ts",
+      "default": "./dist/customers/payment-methods.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "lint": "tsc --noEmit -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "stripe": "^17.7.0",
+    "zod": "^4.3.6"
+  },
+  "peerDependencies": {
+    "@prisma/client": "^6.0.0"
+  }
+}

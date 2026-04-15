@@ -47,8 +47,8 @@ export function getAccountLinks(): AccountLinks {
 
   return {
     origin,
-    login: toHref(origin, "/login"),
-    signup: toHref(origin, "/signup"),
+    login: "/login",
+    signup: "/signup",
     forgotPassword: toHref(origin, "/forgot-password"),
     sessions: toHref(origin, "/sessions"),
   };

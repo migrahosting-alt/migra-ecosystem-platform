@@ -1,27 +1,9 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { mapAuthPayload } from "@/lib/auth/auth-payload";
-import { requireAccessToken, requireApiSession } from "@/lib/auth/api-auth";
+import { requireApiSession } from "@/lib/auth/api-auth";
 import { prisma } from "@/lib/prisma";
 
-export async function GET(request: NextRequest) {
-  const accessAuth = await requireAccessToken(request);
-  if (accessAuth.ok) {
-    const driveTenant = await prisma.driveTenant.findUnique({
-      where: { orgId: accessAuth.auth.orgId },
-      select: { id: true, status: true, planCode: true, storageQuotaGb: true },
-    });
-
-    return NextResponse.json({
-      ok: true,
-      data: mapAuthPayload({
-        user: accessAuth.membership.user,
-        organization: accessAuth.membership.org,
-        membership: { role: accessAuth.membership.role },
-        tenant: driveTenant,
-      }),
-    });
-  }
-
+export async function GET() {
   const authResult = await requireApiSession();
   if (!authResult.ok) {
     return authResult.response;

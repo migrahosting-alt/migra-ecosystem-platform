@@ -6,7 +6,7 @@ import { db } from "../../lib/db.js";
 import { hashPassword, verifyPassword } from "../../lib/password.js";
 import { generateToken, hashToken } from "../../lib/crypto.js";
 import { config } from "../../config/env.js";
-import type { User } from ".prisma/auth-client";
+import type { User } from "../../prisma-client.js";
 
 export type { User };
 

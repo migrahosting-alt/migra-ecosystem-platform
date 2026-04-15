@@ -4,7 +4,7 @@
  * actorType distinguishes user / system / admin / service actors.
  */
 import { db } from "../../lib/db.js";
-import type { AuditActorType } from ".prisma/auth-client";
+import type { AuditActorType } from "../../prisma-client.js";
 
 export async function logAuditEvent(params: {
   actorUserId?: string;

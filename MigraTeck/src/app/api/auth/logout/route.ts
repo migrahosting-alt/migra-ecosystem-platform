@@ -1,9 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { ACTIVE_ORG_COOKIE } from "@/lib/constants";
-import { clearRefreshCookie, readRefreshCookie } from "@/lib/auth/refresh-cookie";
-import { revokeRefreshSessionByHash } from "@/lib/auth/refresh-session";
-import { hashRefreshToken } from "@/lib/auth/access-token";
+import { buildCentralLogoutUrl } from "@/lib/auth/migraauth";
 import { SESSION_COOKIE_NAMES } from "@/lib/auth/session-cookie";
+import { prisma } from "@/lib/prisma";
 import { requireSameOrigin } from "@/lib/security/csrf";
 
 export async function POST(request: NextRequest) {
@@ -12,14 +11,17 @@ export async function POST(request: NextRequest) {
     return csrfFailure;
   }
 
-  const refreshToken = readRefreshCookie(request);
-  if (refreshToken) {
-    await revokeRefreshSessionByHash(hashRefreshToken(refreshToken));
+  const sessionToken = SESSION_COOKIE_NAMES.map((name) => request.cookies.get(name)?.value).find(Boolean);
+  if (sessionToken) {
+    await prisma.session.deleteMany({
+      where: { sessionToken },
+    });
   }
 
-  const response = NextResponse.json({ ok: true });
-  clearRefreshCookie(response);
-  clearRefreshCookie(response, "/api");
+  const response = NextResponse.json({
+    ok: true,
+    redirectTo: buildCentralLogoutUrl(),
+  });
 
   for (const cookieName of SESSION_COOKIE_NAMES) {
     response.cookies.set(cookieName, "", {
@@ -33,7 +35,8 @@ export async function POST(request: NextRequest) {
   }
 
   response.cookies.set(ACTIVE_ORG_COOKIE, "", {
-    secure: true,
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
     sameSite: "lax",
     path: "/",
     maxAge: 0,

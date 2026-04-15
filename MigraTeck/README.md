@@ -208,7 +208,31 @@ Note: The harness seeds DB-backed session cookies for authenticated endpoint tes
 
 ## Production Service
 
-The tracked production unit for `srv1-web` lives at [deploy/migrateck.service](/home/bonex/workspace/active/MigraTeck-Ecosystem/dev/MigraTeck/deploy/migrateck.service). It runs the compiled public `apps/web` Next.js app directly with `node .../next start` on `127.0.0.1:3111`, loads `/etc/migrateck/migrateck.env` when present, and avoids the extra `npm` wrapper process that makes shutdown and restart behavior noisier under systemd.
+The tracked production unit for `srv1-web` lives at [deploy/migrateck.service](/home/bonex/workspace/active/MigraTeck-Ecosystem/dev/MigraTeck/deploy/migrateck.service). It runs the compiled public `apps/web` Next.js app from `/opt/migra/repos/migrateck/app/apps/web` with the package-local Next.js binary on `127.0.0.1:3111`, loads `/etc/migrateck/migrateck.env` when present, and avoids the extra `npm` wrapper process that makes shutdown and restart behavior noisier under systemd.
+
+Important: `migrateck.com` is served from `apps/web`. The repo-root Next.js app under `src/` is not the tracked public-site deployment target, so do not validate live-site changes with `npx next dev` from the repo root.
+
+Local public-site workflow:
+
+```bash
+npm run dev:web
+npm run build:web
+```
+
+Remote sync, rebuild, and restart on `srv1-web`:
+
+```bash
+DEPLOY_SYNC_REMOTE=true DEPLOY_HOST=srv1-web npm run ops:deploy:production
+```
+
+Useful flags:
+
+- `DEPLOY_USER=root`
+- `DEPLOY_SSH_PORT=22`
+- `DEPLOY_REMOTE_DIR=/opt/migra/repos/migrateck/app`
+- `DEPLOY_SERVICE=migrateck`
+- `DEPLOY_RSYNC_DELETE=true`
+- `DEPLOY_RUN_SMOKE=true DEPLOY_SMOKE_URL=https://migrateck.com`
 
 ## Security Defaults
 

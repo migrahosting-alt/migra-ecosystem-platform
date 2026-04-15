@@ -1,14 +1,14 @@
 [Unit]
-Description=MigraTeck Next.js App
+Description=MigraTeck Public Web App
 After=network.target
 
 [Service]
 Type=simple
 User=root
-WorkingDirectory=/opt/migra/repos/migrateck/app
+WorkingDirectory=/opt/migra/repos/migrateck/app/apps/web
 EnvironmentFile=-/etc/migrateck/migrateck.env
 Environment=NODE_ENV=production
-ExecStart=/usr/bin/node /opt/migra/repos/migrateck/app/node_modules/next/dist/bin/next start --hostname 127.0.0.1 --port 3111
+ExecStart=/usr/bin/node /opt/migra/repos/migrateck/app/apps/web/node_modules/next/dist/bin/next start --hostname 127.0.0.1 --port 3111
 Restart=always
 RestartSec=5
 StandardOutput=journal

@@ -6,7 +6,8 @@ import type { FastifyRequest, FastifyReply } from "fastify";
 import { validateSession } from "../modules/sessions/index.js";
 import { findUserById } from "../modules/users/index.js";
 import { config } from "../config/env.js";
-import type { User, Session } from ".prisma/auth-client";
+import { verifyAccessToken } from "../lib/jwt.js";
+import type { User, Session } from "../prisma-client.js";
 
 declare module "fastify" {
   interface FastifyRequest {
@@ -43,6 +44,62 @@ export async function requireSession(
 
   request.authSession = session;
   request.authUser = user;
+}
+
+function getBearerToken(authorization?: string): string | null {
+  if (!authorization?.startsWith("Bearer ")) {
+    return null;
+  }
+
+  const token = authorization.slice("Bearer ".length).trim();
+  return token || null;
+}
+
+async function authenticateWithBearerToken(request: FastifyRequest): Promise<User | null> {
+  const token = getBearerToken(request.headers.authorization);
+  if (!token) {
+    return null;
+  }
+
+  try {
+    const payload = await verifyAccessToken(token);
+    const user = await findUserById(payload.sub);
+
+    if (!user || user.status === "DISABLED") {
+      return null;
+    }
+
+    request.authUser = user;
+    return user;
+  } catch {
+    return null;
+  }
+}
+
+export async function requireAuthenticatedUser(
+  request: FastifyRequest,
+  reply: FastifyReply,
+): Promise<void> {
+  const sessionSecret = request.cookies[config.sessionCookieName];
+
+  if (sessionSecret) {
+    const session = await validateSession(sessionSecret);
+    if (session) {
+      const user = await findUserById(session.userId);
+      if (user && user.status !== "DISABLED") {
+        request.authSession = session;
+        request.authUser = user;
+        return;
+      }
+    }
+  }
+
+  const bearerUser = await authenticateWithBearerToken(request);
+  if (bearerUser) {
+    return;
+  }
+
+  reply.code(401).send({ error: "unauthorized", message: "Authentication required" });
 }
 
 /**

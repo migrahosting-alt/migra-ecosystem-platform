@@ -16,12 +16,13 @@ import { mfaRoutes } from "./routes/mfa.js";
 import { sessionRoutes } from "./routes/sessions.js";
 import { adminRoutes } from "./routes/admin.js";
 import { organizationRoutes } from "./routes/organizations.js";
+import { clientRoutes } from "./routes/clients.js";
+import { billingRoutes } from "./routes/billing.js";
 
 async function main() {
   const app = Fastify({
     logger: {
       level: config.isDev ? "info" : "warn",
-      transport: config.isDev ? { target: "pino-pretty" } : undefined,
     },
     trustProxy: true,
   });
@@ -83,6 +84,8 @@ async function main() {
   await app.register(sessionRoutes);
   await app.register(adminRoutes);
   await app.register(organizationRoutes);
+  await app.register(clientRoutes);
+  await app.register(billingRoutes);
 
   // Health check
   app.get("/health", async () => ({ status: "ok", service: "migraauth-api" }));

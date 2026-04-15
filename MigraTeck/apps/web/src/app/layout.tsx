@@ -1,7 +1,6 @@
 import type { Metadata } from "next";
 import { Manrope, Space_Grotesk } from "next/font/google";
-import { SiteFooter } from "@/components/layout/SiteFooter";
-import { SiteHeader } from "@/components/layout/SiteHeader";
+import { PublicChrome } from "@/components/layout/PublicChrome";
 import { getAccountLinks } from "@/lib/account-links";
 import { absoluteUrl, allowIndexing, defaultPageDescription, siteUrl } from "@/lib/metadata";
 import "./globals.css";
@@ -100,9 +99,7 @@ export default function RootLayout({
             __html: JSON.stringify(websiteStructuredData),
           }}
         />
-        <SiteHeader accountLinks={accountLinks} />
-        <main>{children}</main>
-        <SiteFooter accountLinks={accountLinks} />
+        <PublicChrome accountLinks={accountLinks}>{children}</PublicChrome>
       </body>
     </html>
   );

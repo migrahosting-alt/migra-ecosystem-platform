@@ -4,7 +4,7 @@
     "lib": ["ES2022"],
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
-    "rootDir": "src",
+    "rootDir": "../..",
     "outDir": "dist",
     "declaration": true,
     "declarationMap": true,
@@ -12,5 +12,5 @@
     "types": ["node"],
     "exactOptionalPropertyTypes": false
   },
-  "include": ["src/**/*.ts"]
+  "include": ["src/**/*.ts", "../../packages/auth-core/src/validators/**/*.ts"]
 }

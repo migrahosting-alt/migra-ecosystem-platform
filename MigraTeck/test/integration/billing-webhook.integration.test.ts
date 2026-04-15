@@ -76,7 +76,7 @@ describe("Billing webhook integration", () => {
 
     const subscription = await prisma.billingSubscription.findUnique({
       where: {
-        externalSubscriptionId: "sub_migrateck_1",
+        stripeSubscriptionId: "sub_migrateck_1",
       },
     });
 

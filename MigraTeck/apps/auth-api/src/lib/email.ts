@@ -51,9 +51,13 @@ export async function sendVerificationEmail(
 export async function sendPasswordResetEmail(
   to: string,
   token: string,
+  clientId?: string,
 ): Promise<void> {
   const resetUrl = new URL("/reset-password", config.webUrl);
   resetUrl.searchParams.set("token", token);
+  if (clientId) {
+    resetUrl.searchParams.set("client_id", clientId);
+  }
 
   await getTransporter().sendMail({
     from: config.emailFrom,

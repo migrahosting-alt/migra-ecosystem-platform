@@ -22,9 +22,19 @@
         "name": "next"
       }
     ],
+    "baseUrl": "../..",
     "paths": {
       "@/*": [
-        "./src/*"
+        "./apps/auth-web/src/*"
+      ],
+      "@migrateck/auth-ui": [
+        "./packages/auth-ui/src/index.ts"
+      ],
+      "@migrateck/api-contracts": [
+        "./packages/api-contracts/src/index.ts"
+      ],
+      "@migrateck/auth-core": [
+        "./packages/auth-core/src/index.ts"
       ]
     }
   },

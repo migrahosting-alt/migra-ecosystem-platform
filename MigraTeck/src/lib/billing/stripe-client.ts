@@ -10,9 +10,16 @@ export function getStripe(): Stripe {
 
   if (!_stripe) {
     _stripe = new Stripe(env.STRIPE_SECRET_KEY, {
+      apiVersion: "2025-02-24.acacia" as Stripe.LatestApiVersion,
       typescript: true,
     });
   }
 
   return _stripe;
 }
+
+/**
+ * Convenience export — the Stripe client instance.
+ * Must only be called from server-side code when STRIPE_BILLING_ENABLED=true.
+ */
+export { getStripe as stripe };

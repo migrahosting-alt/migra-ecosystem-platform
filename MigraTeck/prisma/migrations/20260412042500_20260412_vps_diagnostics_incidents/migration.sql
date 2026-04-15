@@ -1,4 +1,71 @@
 -- CreateEnum
+CREATE TYPE "AlertSeverity" AS ENUM ('INFO', 'WARNING', 'CRITICAL');
+
+-- CreateEnum
+CREATE TYPE "AlertStatus" AS ENUM ('ACTIVE', 'ACKNOWLEDGED', 'RESOLVED', 'SILENCED');
+
+-- CreateEnum
+CREATE TYPE "AlertRuleStatus" AS ENUM ('ENABLED', 'DISABLED', 'SNOOZED');
+
+-- CreateTable
+CREATE TABLE "AlertRule" (
+    "id" TEXT NOT NULL,
+    "name" TEXT NOT NULL,
+    "description" TEXT,
+    "status" "AlertRuleStatus" NOT NULL DEFAULT 'ENABLED',
+    "eventType" TEXT NOT NULL,
+    "condition" JSONB NOT NULL,
+    "severity" "AlertSeverity" NOT NULL DEFAULT 'WARNING',
+    "cooldownMinutes" INTEGER NOT NULL DEFAULT 60,
+    "notifyChannels" JSONB NOT NULL,
+    "notifyRoleMin" TEXT,
+    "lastFiredAt" TIMESTAMP(3),
+    "snoozedUntil" TIMESTAMP(3),
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "AlertRule_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "Alert" (
+    "id" TEXT NOT NULL,
+    "ruleId" TEXT,
+    "orgId" TEXT,
+    "severity" "AlertSeverity" NOT NULL DEFAULT 'WARNING',
+    "status" "AlertStatus" NOT NULL DEFAULT 'ACTIVE',
+    "title" TEXT NOT NULL,
+    "message" TEXT NOT NULL,
+    "source" TEXT NOT NULL,
+    "entityType" TEXT,
+    "entityId" TEXT,
+    "metadata" JSONB,
+    "acknowledgedAt" TIMESTAMP(3),
+    "acknowledgedBy" TEXT,
+    "resolvedAt" TIMESTAMP(3),
+    "resolvedBy" TEXT,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "Alert_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateIndex
+CREATE INDEX "AlertRule_eventType_status_idx" ON "AlertRule"("eventType", "status");
+
+-- CreateIndex
+CREATE INDEX "Alert_status_severity_createdAt_idx" ON "Alert"("status", "severity", "createdAt");
+
+-- CreateIndex
+CREATE INDEX "Alert_orgId_status_idx" ON "Alert"("orgId", "status");
+
+-- CreateIndex
+CREATE INDEX "Alert_ruleId_idx" ON "Alert"("ruleId");
+
+-- AddForeignKey
+ALTER TABLE "Alert" ADD CONSTRAINT "Alert_ruleId_fkey" FOREIGN KEY ("ruleId") REFERENCES "AlertRule"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- CreateEnum
 CREATE TYPE "VpsIncidentState" AS ENUM ('OPEN', 'ACKNOWLEDGED', 'MITIGATING', 'RESOLVED');
 
 -- CreateTable

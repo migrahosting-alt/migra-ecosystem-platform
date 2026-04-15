@@ -9,7 +9,6 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-  url      = env("AUTH_DATABASE_URL")
 }
 
 // ─── Enums ──────────────────────────────────────────────────────────
@@ -103,6 +102,7 @@ model User {
   mfaChallenges      MfaChallenge[]
   orgMemberships     OrganizationMember[]
   organizationsOwned Organization[]
+  ownedOAuthClients  OAuthClient[] @relation("OAuthClientOwner")
   auditLogs          AuditLog[] @relation("AuditActor")
   auditTargets       AuditLog[] @relation("AuditTarget")
 
@@ -167,6 +167,7 @@ model OAuthClient {
   id                     String   @id @default(uuid()) @db.Uuid
   clientId               String   @unique @map("client_id") @db.VarChar(100)
   clientName             String   @map("client_name") @db.VarChar(120)
+  description            String?  @db.VarChar(500)
   clientSecretHash       String?  @map("client_secret_hash")
   clientType             String   @map("client_type") @db.VarChar(20)
   redirectUris           Json     @map("redirect_uris")
@@ -176,9 +177,16 @@ model OAuthClient {
   tokenAuthMethod        String   @default("none") @map("token_auth_method") @db.VarChar(40)
   isFirstParty           Boolean  @default(true) @map("is_first_party")
   isActive               Boolean  @default(true) @map("is_active")
+  ownerUserId            String?  @map("owner_user_id") @db.Uuid
+  ownerOrganizationId    String?  @map("owner_organization_id") @db.Uuid
   createdAt              DateTime @default(now()) @map("created_at") @db.Timestamptz
   updatedAt              DateTime @updatedAt @map("updated_at") @db.Timestamptz
 
+  ownerUser         User?         @relation("OAuthClientOwner", fields: [ownerUserId], references: [id], onDelete: SetNull)
+  ownerOrganization Organization? @relation("OAuthClientOrganization", fields: [ownerOrganizationId], references: [id], onDelete: SetNull)
+
+  @@index([ownerUserId])
+  @@index([ownerOrganizationId])
   @@map("oauth_clients")
 }
 
@@ -268,6 +276,7 @@ model Organization {
 
   owner   User                 @relation(fields: [ownerUserId], references: [id])
   members OrganizationMember[]
+  oauthClients OAuthClient[]   @relation("OAuthClientOrganization")
 
   @@map("organizations")
 }
@@ -325,4 +334,314 @@ model AuditLog {
   @@index([eventType])
   @@index([createdAt])
   @@map("audit_logs")
+}
+
+// ─── Billing Enums ───────────────────────────────────────────────────
+
+enum BillingAccountStatus {
+  ACTIVE    @map("active")
+  SUSPENDED @map("suspended")
+  CLOSED    @map("closed")
+
+  @@map("billing_account_status")
+}
+
+enum SubscriptionStatus {
+  ACTIVE             @map("active")
+  TRIALING           @map("trialing")
+  PAST_DUE           @map("past_due")
+  PAUSED             @map("paused")
+  CANCELED           @map("canceled")
+  INCOMPLETE         @map("incomplete")
+  INCOMPLETE_EXPIRED @map("incomplete_expired")
+  UNPAID             @map("unpaid")
+
+  @@map("subscription_status")
+}
+
+enum BillingComponentType {
+  BASE       @map("base")
+  SEAT       @map("seat")
+  USAGE      @map("usage")
+  ONBOARDING @map("onboarding")
+
+  @@map("billing_component_type")
+}
+
+enum BillingInterval {
+  MONTH @map("month")
+  YEAR  @map("year")
+
+  @@map("billing_interval")
+}
+
+enum InvoiceStatus {
+  DRAFT         @map("draft")
+  OPEN          @map("open")
+  PAID          @map("paid")
+  VOID          @map("void")
+  UNCOLLECTIBLE @map("uncollectible")
+
+  @@map("invoice_status")
+}
+
+enum QuoteStatus {
+  DRAFT    @map("draft")
+  OPEN     @map("open")
+  ACCEPTED @map("accepted")
+  CANCELED @map("canceled")
+
+  @@map("quote_status")
+}
+
+enum DunningState {
+  ACTIVE       @map("active")
+  PAST_DUE     @map("past_due")
+  GRACE_PERIOD @map("grace_period")
+  RESTRICTED   @map("restricted")
+  SUSPENDED    @map("suspended")
+  CANCELED     @map("canceled")
+
+  @@map("dunning_state")
+}
+
+enum WebhookEventStatus {
+  PENDING   @map("pending")
+  PROCESSED @map("processed")
+  FAILED    @map("failed")
+  SKIPPED   @map("skipped")
+
+  @@map("webhook_event_status")
+}
+
+enum AdjustmentKind {
+  CREDIT         @map("credit")
+  SERVICE_CREDIT @map("service_credit")
+  GOODWILL       @map("goodwill")
+  REFUND         @map("refund")
+  PROMO          @map("promo")
+
+  @@map("adjustment_kind")
+}
+
+enum UsageSource {
+  API    @map("api")
+  WORKER @map("worker")
+  SYSTEM @map("system")
+  MANUAL @map("manual")
+
+  @@map("usage_source")
+}
+
+enum EntitlementSourceType {
+  SUBSCRIPTION    @map("subscription")
+  TRIAL           @map("trial")
+  MANUAL_OVERRIDE @map("manual_override")
+  PROMOTIONAL     @map("promotional")
+
+  @@map("entitlement_source_type")
+}
+
+// ─── Billing Models ──────────────────────────────────────────────────
+
+model BillingAccount {
+  id                 String               @id @default(uuid()) @db.Uuid
+  orgId              String               @unique @map("org_id") @db.Uuid
+  stripeCustomerId   String?              @unique @map("stripe_customer_id") @db.VarChar(255)
+  defaultCurrency    String               @default("usd") @map("default_currency") @db.VarChar(3)
+  billingEmail       String?              @map("billing_email") @db.VarChar(255)
+  billingContactName String?              @map("billing_contact_name") @db.VarChar(255)
+  taxCountry         String?              @map("tax_country") @db.VarChar(2)
+  taxState           String?              @map("tax_state") @db.VarChar(80)
+  taxId              String?              @map("tax_id") @db.VarChar(80)
+  status             BillingAccountStatus @default(ACTIVE)
+  dunningState       DunningState         @default(ACTIVE) @map("dunning_state")
+  createdAt          DateTime             @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt          DateTime             @updatedAt @map("updated_at") @db.Timestamptz
+
+  subscriptions  BillingSubscription[]
+  invoices       BillingInvoice[]
+  paymentMethods BillingPaymentMethod[]
+  adjustments    BillingAdjustment[]
+  quotes         BillingQuote[]
+  usageEvents    BillingUsageEvent[]
+  entitlements   BillingEntitlementSnapshot[]
+
+  @@map("billing_accounts")
+}
+
+model BillingSubscription {
+  id                   String             @id @default(uuid()) @db.Uuid
+  orgId                String             @map("org_id") @db.Uuid
+  billingAccountId     String             @map("billing_account_id") @db.Uuid
+  stripeSubscriptionId String?            @unique @map("stripe_subscription_id") @db.VarChar(255)
+  productFamily        String             @map("product_family") @db.VarChar(40)
+  planCode             String             @map("plan_code") @db.VarChar(40)
+  status               SubscriptionStatus @default(INCOMPLETE)
+  billingInterval      BillingInterval    @default(MONTH) @map("billing_interval")
+  currentPeriodStart   DateTime?          @map("current_period_start") @db.Timestamptz
+  currentPeriodEnd     DateTime?          @map("current_period_end") @db.Timestamptz
+  cancelAtPeriodEnd    Boolean            @default(false) @map("cancel_at_period_end")
+  trialEndsAt          DateTime?          @map("trial_ends_at") @db.Timestamptz
+  pausedAt             DateTime?          @map("paused_at") @db.Timestamptz
+  canceledAt           DateTime?          @map("canceled_at") @db.Timestamptz
+  createdAt            DateTime           @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt            DateTime           @updatedAt @map("updated_at") @db.Timestamptz
+
+  billingAccount BillingAccount           @relation(fields: [billingAccountId], references: [id], onDelete: Cascade)
+  items          BillingSubscriptionItem[]
+
+  @@index([orgId, productFamily])
+  @@index([stripeSubscriptionId])
+  @@map("billing_subscriptions")
+}
+
+model BillingSubscriptionItem {
+  id                       String               @id @default(uuid()) @db.Uuid
+  billingSubscriptionId    String               @map("billing_subscription_id") @db.Uuid
+  stripeSubscriptionItemId String?              @unique @map("stripe_subscription_item_id") @db.VarChar(255)
+  componentType            BillingComponentType @map("component_type")
+  priceLookupKey           String?              @map("price_lookup_key") @db.VarChar(120)
+  quantity                 Int?
+  meterName                String?              @map("meter_name") @db.VarChar(80)
+  createdAt                DateTime             @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt                DateTime             @updatedAt @map("updated_at") @db.Timestamptz
+
+  subscription BillingSubscription @relation(fields: [billingSubscriptionId], references: [id], onDelete: Cascade)
+
+  @@map("billing_subscription_items")
+}
+
+model BillingInvoice {
+  id                   String        @id @default(uuid()) @db.Uuid
+  orgId                String        @map("org_id") @db.Uuid
+  billingAccountId     String        @map("billing_account_id") @db.Uuid
+  stripeInvoiceId      String?       @unique @map("stripe_invoice_id") @db.VarChar(255)
+  stripeSubscriptionId String?       @map("stripe_subscription_id") @db.VarChar(255)
+  status               InvoiceStatus @default(DRAFT)
+  currency             String        @default("usd") @db.VarChar(3)
+  subtotal             Int           @default(0)
+  tax                  Int           @default(0)
+  total                Int           @default(0)
+  amountPaid           Int           @default(0) @map("amount_paid")
+  amountRemaining      Int           @default(0) @map("amount_remaining")
+  hostedInvoiceUrl     String?       @map("hosted_invoice_url")
+  invoicePdf           String?       @map("invoice_pdf")
+  periodStart          DateTime?     @map("period_start") @db.Timestamptz
+  periodEnd            DateTime?     @map("period_end") @db.Timestamptz
+  issuedAt             DateTime?     @map("issued_at") @db.Timestamptz
+  paidAt               DateTime?     @map("paid_at") @db.Timestamptz
+  createdAt            DateTime      @default(now()) @map("created_at") @db.Timestamptz
+
+  billingAccount BillingAccount @relation(fields: [billingAccountId], references: [id], onDelete: Cascade)
+
+  @@index([orgId])
+  @@index([stripeInvoiceId])
+  @@map("billing_invoices")
+}
+
+model BillingPaymentMethod {
+  id                    String   @id @default(uuid()) @db.Uuid
+  orgId                 String   @map("org_id") @db.Uuid
+  billingAccountId      String   @map("billing_account_id") @db.Uuid
+  stripePaymentMethodId String   @unique @map("stripe_payment_method_id") @db.VarChar(255)
+  type                  String   @db.VarChar(40)
+  brand                 String?  @db.VarChar(40)
+  last4                 String?  @db.VarChar(4)
+  expMonth              Int?     @map("exp_month")
+  expYear               Int?     @map("exp_year")
+  isDefault             Boolean  @default(false) @map("is_default")
+  createdAt             DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  billingAccount BillingAccount @relation(fields: [billingAccountId], references: [id], onDelete: Cascade)
+
+  @@index([orgId])
+  @@map("billing_payment_methods")
+}
+
+model BillingUsageEvent {
+  id                 String      @id @default(uuid()) @db.Uuid
+  orgId              String      @map("org_id") @db.Uuid
+  billingAccountId   String      @map("billing_account_id") @db.Uuid
+  productFamily      String      @map("product_family") @db.VarChar(40)
+  meterName          String      @map("meter_name") @db.VarChar(80)
+  quantity           Int
+  windowStart        DateTime    @map("window_start") @db.Timestamptz
+  windowEnd          DateTime    @map("window_end") @db.Timestamptz
+  idempotencyKey     String      @unique @map("idempotency_key") @db.VarChar(255)
+  source             UsageSource @default(API)
+  reportedToStripeAt DateTime?   @map("reported_to_stripe_at") @db.Timestamptz
+  createdAt          DateTime    @default(now()) @map("created_at") @db.Timestamptz
+
+  billingAccount BillingAccount @relation(fields: [billingAccountId], references: [id], onDelete: Cascade)
+
+  @@index([orgId, productFamily, meterName])
+  @@index([reportedToStripeAt])
+  @@map("billing_usage_events")
+}
+
+model BillingEntitlementSnapshot {
+  id               String                @id @default(uuid()) @db.Uuid
+  orgId            String                @map("org_id") @db.Uuid
+  billingAccountId String                @map("billing_account_id") @db.Uuid
+  sourceType       EntitlementSourceType @map("source_type")
+  sourceId         String                @map("source_id") @db.VarChar(255)
+  entitlementsJson Json                  @map("entitlements_json")
+  effectiveAt      DateTime              @map("effective_at") @db.Timestamptz
+  expiresAt        DateTime?             @map("expires_at") @db.Timestamptz
+  createdAt        DateTime              @default(now()) @map("created_at") @db.Timestamptz
+
+  billingAccount BillingAccount @relation(fields: [billingAccountId], references: [id], onDelete: Cascade)
+
+  @@index([orgId])
+  @@map("billing_entitlement_snapshots")
+}
+
+model BillingQuote {
+  id               String      @id @default(uuid()) @db.Uuid
+  orgId            String      @map("org_id") @db.Uuid
+  billingAccountId String      @map("billing_account_id") @db.Uuid
+  stripeQuoteId    String?     @unique @map("stripe_quote_id") @db.VarChar(255)
+  status           QuoteStatus @default(DRAFT)
+  expiresAt        DateTime?   @map("expires_at") @db.Timestamptz
+  acceptedAt       DateTime?   @map("accepted_at") @db.Timestamptz
+  createdAt        DateTime    @default(now()) @map("created_at") @db.Timestamptz
+
+  billingAccount BillingAccount @relation(fields: [billingAccountId], references: [id], onDelete: Cascade)
+
+  @@index([orgId])
+  @@map("billing_quotes")
+}
+
+model BillingWebhookEvent {
+  id            String             @id @default(uuid()) @db.Uuid
+  stripeEventId String             @unique @map("stripe_event_id") @db.VarChar(255)
+  type          String             @db.VarChar(120)
+  processedAt   DateTime?          @map("processed_at") @db.Timestamptz
+  status        WebhookEventStatus @default(PENDING)
+  payloadJson   Json               @map("payload_json")
+  errorMessage  String?            @map("error_message")
+  createdAt     DateTime           @default(now()) @map("created_at") @db.Timestamptz
+
+  @@index([stripeEventId])
+  @@index([status])
+  @@map("billing_webhook_events")
+}
+
+model BillingAdjustment {
+  id                 String         @id @default(uuid()) @db.Uuid
+  orgId              String         @map("org_id") @db.Uuid
+  billingAccountId   String         @map("billing_account_id") @db.Uuid
+  kind               AdjustmentKind
+  amount             Int
+  currency           String         @default("usd") @db.VarChar(3)
+  reason             String
+  stripeCreditNoteId String?        @map("stripe_credit_note_id") @db.VarChar(255)
+  createdByUserId    String         @map("created_by_user_id") @db.Uuid
+  createdAt          DateTime       @default(now()) @map("created_at") @db.Timestamptz
+
+  billingAccount BillingAccount @relation(fields: [billingAccountId], references: [id], onDelete: Cascade)
+
+  @@index([orgId])
+  @@map("billing_adjustments")
 }

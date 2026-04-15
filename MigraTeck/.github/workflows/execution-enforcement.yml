@@ -1,0 +1,60 @@
+name: Execution Enforcement
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  enforce-execution-standard:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect backend changes
+        id: backend
+        run: |
+          if git diff --name-only origin/${{ github.base_ref }}...HEAD | grep -E '(^apps/.*/api/|^app/api/|^packages/|^prisma/|^src/server/|^src/lib/)' > /dev/null; then
+            echo "changed=true" >> $GITHUB_OUTPUT
+          else
+            echo "changed=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Detect UI changes
+        id: ui
+        run: |
+          if git diff --name-only origin/${{ github.base_ref }}...HEAD | grep -E '(^apps/.*/app/|^apps/.*/components/|^app/|^pages/|^components/|^src/components/)' > /dev/null; then
+            echo "changed=true" >> $GITHUB_OUTPUT
+          else
+            echo "changed=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Enforce vertical slice
+        run: |
+          if [[ "${{ steps.backend.outputs.changed }}" == "true" && "${{ steps.ui.outputs.changed }}" == "false" ]]; then
+            echo "Backend/API changes detected without visible UI changes."
+            echo "Every system must ship as a vertical slice: schema + logic + API + UI + navigation + visible state."
+            exit 1
+          fi
+
+      - name: Block placeholders in shipped UI
+        run: |
+          search_paths=()
+          for candidate in apps app pages components src/components; do
+            if [[ -e "$candidate" ]]; then
+              search_paths+=("$candidate")
+            fi
+          done
+
+          if [[ ${#search_paths[@]} -eq 0 ]]; then
+            echo "No UI directories found to scan."
+            exit 0
+          fi
+
+          if grep -RInE "Coming Soon|TODO: UI|Placeholder|TBD" "${search_paths[@]}" --exclude-dir=node_modules; then
+            echo "Placeholder UI detected in shipped surface."
+            exit 1
+          fi

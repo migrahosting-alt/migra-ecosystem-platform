@@ -12,7 +12,7 @@ export interface AppServerHandle {
   stop: () => Promise<void>;
 }
 
-async function waitForServer(baseUrl: string, timeoutMs = 120_000): Promise<void> {
+async function waitForServer(baseUrl: string, timeoutMs = Number(process.env.TEST_SERVER_BOOT_TIMEOUT_MS ?? 300_000)): Promise<void> {
   const startedAt = Date.now();
   const target = `${baseUrl}/api/products/consume`;
 

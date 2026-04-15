@@ -58,14 +58,14 @@ export async function createCheckoutSession(input: CreateCheckoutInput) {
       data: {
         orgId: input.orgId,
         provider: "STRIPE",
-        externalCustomerId: customer.id,
+        stripeCustomerId: customer.id,
         ...(input.customerEmail ? { email: input.customerEmail } : {}),
       },
     });
   }
 
   const session = await stripe.checkout.sessions.create({
-    customer: billingCustomer.externalCustomerId,
+    customer: billingCustomer.stripeCustomerId,
     mode: "subscription",
     line_items: [{ price: plan.stripePriceId, quantity: 1 }],
     success_url: input.successUrl,
@@ -96,7 +96,7 @@ export async function createBillingPortalSession(orgId: string, returnUrl: strin
 
   const stripe = getStripe();
   const portalSession = await stripe.billingPortal.sessions.create({
-    customer: billingCustomer.externalCustomerId,
+    customer: billingCustomer.stripeCustomerId,
     return_url: returnUrl,
   });
 

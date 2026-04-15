@@ -4,12 +4,13 @@
   "version": "0.1.0",
   "scripts": {
     "dev": "next dev -p 4100",
-    "build": "next build",
+    "build": "NODE_ENV=production next build",
     "start": "next start -p 4100",
     "lint": "next lint",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@migrateck/auth-ui": "workspace:*",
     "next": "^16.2.3",
     "react": "^19.2.5",
     "react-dom": "^19.2.5"

@@ -7,27 +7,26 @@ import ui from "@/lib/ui";
 export const metadata = buildPageMetadata({
   title: "Developers",
   description:
-    "Build on the MigraTeck platform with consistent APIs, typed contracts, shared authentication, and documented entry points.",
+    "Build on the MigraTeck platform with deliberate route groups, shared identity, and platform-aware developer entry.",
   path: "/developers",
 });
 
 const devPillars = [
-  { title: "Unified authentication", desc: "One identity surface for every product. Token-based access with organization context and role-aware scoping." },
-  { title: "Typed API contracts", desc: "Versioned endpoints with request validation, structured error responses, and consistent pagination patterns." },
-  { title: "Platform webhooks", desc: "Event-driven notifications for provisioning, billing, and product state changes across the ecosystem." },
-  { title: "Distribution SDKs", desc: "Official packages, CLI tools, and release artifacts delivered through verified distribution channels." },
+  { title: "Security defaults", desc: "Shared authentication, policy-aware access, request validation, and platform-level protections instead of route-by-route improvisation." },
+  { title: "Launch bridge", desc: "A signed handoff path from the public platform surface into downstream product experiences and controlled access flows." },
+  { title: "API domains", desc: "Platform capabilities are grouped by responsibility so the developer surface reads as a deliberate system instead of a mixed route collection." },
+  { title: "Tenant context", desc: "Core account and organization context remain shared across the ecosystem, keeping integrations and access posture consistent." },
 ] as const;
 
-const startActions = [
-  { title: "Read the API reference", desc: "Structured documentation for every platform endpoint with request examples and response schemas.", href: "/developers", label: "View docs" },
-  { title: "Explore the registry", desc: "Browse all 10 products, their capabilities, and access patterns from the canonical product registry.", href: "/products", label: "View products" },
-  { title: "Review security model", desc: "Understand the security architecture, threat protections, and responsible disclosure process.", href: "/security", label: "View security" },
+const systemTracks = [
+  { title: "Shared auth model", desc: "One platform identity layer across products and launch surfaces." },
+  { title: "Versioned routes", desc: "Predictable request patterns for product, account, and platform operations." },
+  { title: "Distribution posture", desc: "Downloads, artifacts, and tooling move through one verified delivery surface." },
 ] as const;
 
 export default function DevelopersPage() {
   return (
     <>
-      {/* hero */}
       <section className="hero-gradient hero-mesh relative overflow-hidden">
         <div className="pointer-events-none absolute -right-40 top-40 h-[500px] w-[500px] rounded-full bg-cyan-400/20 blur-[120px]" />
         <div className={cn(ui.maxW, "relative pb-24 pt-32 sm:pb-32 sm:pt-40")}>
@@ -36,12 +35,10 @@ export default function DevelopersPage() {
               Developer platform
             </p>
             <h1 className="animate-fade-up-d1 mt-6 font-[var(--font-display)] text-5xl font-bold tracking-[-0.03em] text-white sm:text-6xl lg:text-7xl">
-              One platform,{" "}
-              <span className="gradient-text-hero">consistent APIs.</span>
+              A developer surface that looks as deliberate as the backend behind it.
             </h1>
             <p className="animate-fade-up-d2 mt-6 max-w-xl text-lg leading-8 text-slate-300/90">
-              Build on shared identity, typed contracts, and documented entry points
-              across {products.length} connected products.
+              Build on shared identity, deliberate route groups, and platform-aware developer entry across {products.length} connected products.
             </p>
             <div className="animate-fade-up-d3 mt-10 flex flex-wrap gap-4">
               <Link href="/products" className={ui.btnPrimaryLight}>View products</Link>
@@ -52,11 +49,10 @@ export default function DevelopersPage() {
         <div className="absolute bottom-0 left-0 right-0 h-32 bg-gradient-to-t from-white to-transparent" />
       </section>
 
-      {/* developer pillars */}
       <section className={ui.sectionPy}>
         <div className={ui.maxW}>
           <p className={ui.eyebrowBrand}>Developer surface</p>
-          <h2 className={cn(ui.h2, "mt-4")}>Built for integration.</h2>
+          <h2 className={cn(ui.h2, "mt-4")}>Built for integration and control.</h2>
           <div className="mt-12 grid gap-6 sm:grid-cols-2">
             {devPillars.map((p, i) => (
               <div key={p.title} className={cn(ui.card, ui.cardHover, "p-6")}>
@@ -71,18 +67,24 @@ export default function DevelopersPage() {
         </div>
       </section>
 
-      {/* API example */}
       <section className="section-dark relative overflow-hidden">
         <div className="pointer-events-none absolute left-0 top-0 h-[400px] w-[300px] rounded-full bg-blue-600/15 blur-[100px]" />
         <div className={cn(ui.maxW, "relative py-24 sm:py-32")}>
           <div className="grid gap-12 lg:grid-cols-2 lg:items-center">
             <div>
-              <p className={ui.eyebrowDark}>API example</p>
+              <p className={ui.eyebrowDark}>System posture</p>
               <h2 className={cn(ui.h2Dark, "mt-4")}>Predictable request patterns.</h2>
               <p className={cn(ui.bodyDark, "mt-4")}>
-                Every product exposes the same authentication, versioning, and error-handling patterns.
-                Build one integration pattern and reuse it across the ecosystem.
+                The point of the developer page is not just to show endpoints. It should communicate that the platform has a coherent execution model, consistent access posture, and one integration rhythm across products.
               </p>
+              <div className="mt-8 grid gap-3">
+                {systemTracks.map((track) => (
+                  <div key={track.title} className={cn(ui.cardDark, "p-4")}>
+                    <p className="text-sm font-semibold text-white">{track.title}</p>
+                    <p className="mt-1 text-sm leading-6 text-slate-400">{track.desc}</p>
+                  </div>
+                ))}
+              </div>
             </div>
             <div className="overflow-hidden rounded-2xl border border-white/[0.06] bg-[#0a0f1e] shadow-2xl">
               <div className="flex items-center gap-2 border-b border-white/[0.06] px-4 py-3">
@@ -108,13 +110,16 @@ export default function DevelopersPage() {
         </div>
       </section>
 
-      {/* getting started */}
       <section className={cn("border-t border-slate-100 bg-slate-50/50", ui.sectionPy)}>
         <div className={ui.maxW}>
           <p className={ui.eyebrowBrand}>Start building</p>
           <h2 className={cn(ui.h2, "mt-4")}>Three paths into the platform.</h2>
           <div className="mt-12 grid gap-6 sm:grid-cols-3">
-            {startActions.map((a) => (
+            {[
+              { title: "Explore the registry", desc: "Browse the canonical product set and see how access and capability posture vary across the ecosystem.", href: "/products", label: "View products" },
+              { title: "Review platform architecture", desc: "Understand how identity, governance, execution, and distribution sit together as one system.", href: "/platform", label: "View platform" },
+              { title: "Check the security model", desc: "Review the trust posture, protection layers, and responsible disclosure expectations for the site and platform.", href: "/security", label: "View security" },
+            ].map((a) => (
               <div key={a.title} className={cn(ui.card, "flex flex-col p-6")}>
                 <h3 className="font-[var(--font-display)] text-lg font-semibold tracking-tight text-slate-950">
                   {a.title}

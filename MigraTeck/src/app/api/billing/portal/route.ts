@@ -69,7 +69,7 @@ export async function POST(request: NextRequest) {
   const baseUrl = env.NEXTAUTH_URL || "https://migrateck.com";
 
   const portalSession = await stripe.billingPortal.sessions.create({
-    customer: customer.externalCustomerId,
+    customer: customer.stripeCustomerId,
     return_url: `${baseUrl}/app/billing`,
   });
 

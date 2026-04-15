@@ -1,16 +1,46 @@
+@import "../../../../packages/auth-ui/src/styles/theme.css";
 @import "tailwindcss";
 
-:root {
-  --color-brand-deep: #0a0e27;
-  --color-brand-navy: #0f1733;
-  --color-brand-blue: #1e40af;
-  --color-brand-royal: #2563eb;
-  --color-brand-sky: #0ea5e9;
+* {
+  box-sizing: border-box;
 }
 
 body {
-  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
-    Helvetica, Arial, sans-serif;
-  background: linear-gradient(145deg, #f8fafc 0%, #eef2ff 50%, #f0f9ff 100%);
   min-height: 100dvh;
+  /* Override shared theme — align with MigraTeck homepage navy palette */
+  background: linear-gradient(180deg, #080b20 0%, #0f1733 48%, #080b20 100%);
+}
+
+a {
+  text-decoration: none;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus,
+textarea:-webkit-autofill,
+textarea:-webkit-autofill:hover,
+textarea:-webkit-autofill:focus {
+  -webkit-text-fill-color: #f8fafc;
+  caret-color: #f8fafc;
+  border-radius: inherit;
+  -webkit-box-shadow: 0 0 0 1000px rgba(41, 50, 76, 0.92) inset;
+  transition: background-color 9999s ease-out 0s;
+}
+
+.auth-input-shell input:-webkit-autofill,
+.auth-input-shell textarea:-webkit-autofill {
+  border-radius: inherit;
+}
+
+::selection {
+  background: rgba(168, 85, 247, 0.35);
+  color: white;
 }

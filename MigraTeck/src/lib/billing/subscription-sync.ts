@@ -141,7 +141,7 @@ async function resolveOrgId(subscription: StripeSubscriptionObject): Promise<str
 
   const customer = await prisma.billingCustomer.findUnique({
     where: {
-      externalCustomerId: subscription.customer,
+      stripeCustomerId: subscription.customer,
     },
     select: {
       orgId: true,
@@ -192,7 +192,7 @@ export async function syncStripeSubscriptionEvent(event: StripeEvent): Promise<{
 
   const existingSubscription = await prisma.billingSubscription.findUnique({
     where: {
-      externalSubscriptionId: object.id,
+      stripeSubscriptionId: object.id,
     },
     select: {
       metadata: true,
@@ -247,12 +247,12 @@ export async function syncStripeSubscriptionEvent(event: StripeEvent): Promise<{
     if (object.customer) {
       await tx.billingCustomer.upsert({
         where: {
-          externalCustomerId: object.customer,
+          stripeCustomerId: object.customer,
         },
         create: {
           orgId,
           provider: BillingProvider.STRIPE,
-          externalCustomerId: object.customer,
+          stripeCustomerId: object.customer,
           metadata: {
             source: "stripe:webhook",
           },
@@ -268,13 +268,13 @@ export async function syncStripeSubscriptionEvent(event: StripeEvent): Promise<{
 
     await tx.billingSubscription.upsert({
       where: {
-        externalSubscriptionId: object.id,
+        stripeSubscriptionId: object.id,
       },
       create: {
         orgId,
         provider: BillingProvider.STRIPE,
-        externalSubscriptionId: object.id,
-        externalCustomerId: object.customer || null,
+        stripeSubscriptionId: object.id,
+        stripeCustomerId: object.customer || null,
         status: stripeStatus,
         currentPeriodStart: periodStart,
         currentPeriodEnd: periodEnd,
@@ -289,7 +289,7 @@ export async function syncStripeSubscriptionEvent(event: StripeEvent): Promise<{
       },
       update: {
         orgId,
-        externalCustomerId: object.customer || null,
+        stripeCustomerId: object.customer || null,
         status: stripeStatus,
         currentPeriodStart: periodStart,
         currentPeriodEnd: periodEnd,

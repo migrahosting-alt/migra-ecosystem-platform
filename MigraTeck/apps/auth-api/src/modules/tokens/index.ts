@@ -7,7 +7,7 @@ import { generateToken, hashToken, verifyCodeChallenge } from "../../lib/crypto.
 import { issueAccessToken, issueIdToken } from "../../lib/jwt.js";
 import { config } from "../../config/env.js";
 import { randomUUID } from "node:crypto";
-import type { User } from ".prisma/auth-client";
+import type { User } from "../../prisma-client.js";
 
 // ── Auth Code ───────────────────────────────────────────────────────
 

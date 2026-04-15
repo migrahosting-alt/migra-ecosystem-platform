@@ -4,7 +4,7 @@
 import { db } from "../../lib/db.js";
 import { generateToken, hashToken, verifyTokenHash } from "../../lib/crypto.js";
 import { config } from "../../config/env.js";
-import type { Session } from ".prisma/auth-client";
+import type { Session } from "../../prisma-client.js";
 
 export type { Session };
 

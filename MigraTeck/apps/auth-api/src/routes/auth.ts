@@ -265,7 +265,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     const user = await findUserByEmail(body.email);
     if (user) {
       const token = await createPasswordResetToken(user.id, ip, ua);
-      await sendPasswordResetEmail(user.email, token).catch((err) => {
+      await sendPasswordResetEmail(user.email, token, body.client_id).catch((err) => {
         console.error("Failed to send password reset email:", err);
       });
 

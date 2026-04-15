@@ -1,20 +1,22 @@
 "use client";
 
-import { Suspense, useState, useRef, useEffect, type FormEvent, type KeyboardEvent } from "react";
+import { Suspense, useEffect, useMemo, useState, type FormEvent } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import Image from "next/image";
+import {
+  Button,
+  Input,
+  OtpInput,
+  toBrandStyle,
+} from "@migrateck/auth-ui";
 import { authFetch } from "@/lib/api";
+import { buildContinueLabel, resolveAuthBrandTheme } from "@/lib/branding";
+
+type Method = "totp" | "recovery" | "passkey";
 
 function MfaForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const [code, setCode] = useState(["", "", "", "", "", ""]);
-  const [error, setError] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [showRecovery, setShowRecovery] = useState(false);
-  const [recoveryCode, setRecoveryCode] = useState("");
-  const inputRefs = useRef<(HTMLInputElement | null)[]>([]);
-
-  // OAuth flow params
   const clientId = searchParams.get("client_id");
   const redirectUri = searchParams.get("redirect_uri");
   const state = searchParams.get("state");
@@ -22,35 +24,20 @@ function MfaForm() {
   const codeChallengeMethod = searchParams.get("code_challenge_method");
   const scope = searchParams.get("scope");
   const nonce = searchParams.get("nonce");
+  const brand = useMemo(() => resolveAuthBrandTheme(clientId), [clientId]);
+  const brandStyle = useMemo(() => toBrandStyle(brand), [brand]);
+
+  const [method, setMethod] = useState<Method>("totp");
+  const [code, setCode] = useState(["", "", "", "", "", ""]);
+  const [recoveryCode, setRecoveryCode] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    inputRefs.current[0]?.focus();
-  }, []);
-
-  function handleDigitChange(index: number, value: string) {
-    if (!/^\d*$/.test(value)) return;
-    const next = [...code];
-    next[index] = value.slice(-1);
-    setCode(next);
-    if (value && index < 5) {
-      inputRefs.current[index + 1]?.focus();
-    }
-  }
-
-  function handleKeyDown(index: number, e: KeyboardEvent) {
-    if (e.key === "Backspace" && !code[index] && index > 0) {
-      inputRefs.current[index - 1]?.focus();
-    }
-  }
-
-  function handlePaste(e: React.ClipboardEvent) {
-    const pasted = e.clipboardData.getData("text").replace(/\D/g, "").slice(0, 6);
-    if (pasted.length === 6) {
-      e.preventDefault();
-      setCode(pasted.split(""));
-      inputRefs.current[5]?.focus();
-    }
-  }
+    setCode(["", "", "", "", "", ""]);
+    setRecoveryCode("");
+    setError("");
+  }, [method]);
 
   async function completeOAuthFlow() {
     if (!clientId || !redirectUri) {
@@ -58,7 +45,7 @@ function MfaForm() {
       return;
     }
 
-    const res = await authFetch<{ code?: string; error?: string }>("/authorize/complete", {
+    const response = await authFetch<{ code?: string }>("/authorize/complete", {
       method: "POST",
       body: {
         client_id: clientId,
@@ -70,65 +57,52 @@ function MfaForm() {
       },
     });
 
-    if (res.ok && res.data.code) {
-      const url = new URL(redirectUri);
-      url.searchParams.set("code", res.data.code);
-      if (state) url.searchParams.set("state", state);
-      window.location.href = url.toString();
-    } else {
+    if (!response.ok || !response.data.code) {
       router.push("/");
-    }
-  }
-
-  async function handleTotpSubmit(e: FormEvent) {
-    e.preventDefault();
-    setError("");
-    const totpCode = code.join("");
-    if (totpCode.length !== 6) {
-      setError("Enter all 6 digits.");
       return;
     }
 
-    setLoading(true);
-    try {
-      const res = await authFetch<{ message?: string; error?: string }>("/v1/mfa/totp/verify", {
-        method: "POST",
-        body: { code: totpCode },
-      });
+    const url = new URL(redirectUri);
+    url.searchParams.set("code", response.data.code);
+    if (state) {
+      url.searchParams.set("state", state);
+    }
+    window.location.href = url.toString();
+  }
 
-      if (!res.ok) {
-        setError(res.data.message ?? "Invalid code.");
-        setLoading(false);
-        setCode(["", "", "", "", "", ""]);
-        inputRefs.current[0]?.focus();
-        return;
+  async function handleVerify(event: FormEvent) {
+    event.preventDefault();
+    setError("");
+    setLoading(true);
+
+    try {
+      let payload: { code: string } | { recoveryCode: string };
+
+      if (method === "recovery") {
+        const sanitizedRecoveryCode = recoveryCode.trim();
+        if (!sanitizedRecoveryCode) {
+          setError("Enter a recovery code.");
+          setLoading(false);
+          return;
+        }
+        payload = { recoveryCode: sanitizedRecoveryCode };
+      } else {
+        const totpCode = code.join("");
+        if (totpCode.length !== 6) {
+          setError("Enter all 6 digits.");
+          setLoading(false);
+          return;
+        }
+        payload = { code: totpCode };
       }
 
-      await completeOAuthFlow();
-    } catch {
-      setError("Network error. Please try again.");
-      setLoading(false);
-    }
-  }
-
-  async function handleRecoverySubmit(e: FormEvent) {
-    e.preventDefault();
-    setError("");
-
-    if (!recoveryCode.trim()) {
-      setError("Enter a recovery code.");
-      return;
-    }
-
-    setLoading(true);
-    try {
-      const res = await authFetch<{ message?: string; error?: string }>("/v1/mfa/totp/verify", {
+      const response = await authFetch<{ message?: string }>("/v1/mfa/totp/verify", {
         method: "POST",
-        body: { recoveryCode: recoveryCode.trim() },
+        body: payload,
       });
 
-      if (!res.ok) {
-        setError(res.data.message ?? "Invalid recovery code.");
+      if (!response.ok) {
+        setError(response.data.message ?? "Verification failed.");
         setLoading(false);
         return;
       }
@@ -138,106 +112,126 @@ function MfaForm() {
       setError("Network error. Please try again.");
       setLoading(false);
     }
-  }
-
-  if (showRecovery) {
-    return (
-      <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-        <h1 className="text-xl font-semibold text-slate-900">Recovery code</h1>
-        <p className="mt-1 text-sm text-slate-500">
-          Enter one of your backup recovery codes.
-        </p>
-
-        <form onSubmit={handleRecoverySubmit} className="mt-6 space-y-4">
-          {error && (
-            <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-              {error}
-            </div>
-          )}
-
-          <input
-            type="text"
-            autoFocus
-            value={recoveryCode}
-            onChange={(e) => setRecoveryCode(e.target.value)}
-            className="block w-full rounded-lg border border-slate-300 px-3 py-2 text-sm font-mono shadow-sm placeholder:text-slate-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
-            placeholder="xxxx-xxxx"
-          />
-
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-blue-700 disabled:opacity-50"
-          >
-            {loading ? "Verifying…" : "Verify"}
-          </button>
-        </form>
-
-        <p className="mt-4 text-center">
-          <button
-            type="button"
-            onClick={() => { setShowRecovery(false); setError(""); }}
-            className="text-sm font-medium text-blue-600 hover:text-blue-700"
-          >
-            Use authenticator app instead
-          </button>
-        </p>
-      </div>
-    );
   }
 
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-      <h1 className="text-xl font-semibold text-slate-900">Two-factor authentication</h1>
-      <p className="mt-1 text-sm text-slate-500">
-        Enter the 6-digit code from your authenticator app.
-      </p>
+    <div className="min-h-screen text-white" style={brandStyle}>
+      <div className="relative isolate flex min-h-screen items-center justify-center overflow-hidden px-4 py-10 sm:px-6">
+        {/* ── background ─── */}
+        <div className="absolute inset-0 -z-10 bg-[linear-gradient(180deg,#080b20_0%,#0f1733_48%,#080b20_100%)]" />
+        <div className="pointer-events-none absolute -left-40 top-16 h-[500px] w-[500px] rounded-full blur-[120px]" style={{ background: "var(--brand-start)", opacity: 0.18 }} />
+        <div className="pointer-events-none absolute -right-32 bottom-16 h-[400px] w-[400px] rounded-full blur-[100px]" style={{ background: "var(--brand-end)", opacity: 0.14 }} />
+        <div className="absolute inset-0 -z-10 opacity-[0.03] [background-image:linear-gradient(rgba(255,255,255,0.08)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.08)_1px,transparent_1px)] [background-size:40px_40px]" />
+        <div className="pointer-events-none absolute inset-x-0 top-0 h-40 bg-[linear-gradient(180deg,rgba(255,255,255,0.12),transparent)]" />
 
-      <form onSubmit={handleTotpSubmit} className="mt-6 space-y-4">
-        {error && (
-          <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-            {error}
+        <div className="w-full max-w-[440px]">
+          {/* ── glass card ─── */}
+          <div className="relative overflow-hidden rounded-[28px] border border-white/[0.14] bg-white/[0.06] p-8 shadow-[0_26px_90px_rgba(3,7,18,0.38)] backdrop-blur-xl sm:p-9">
+            <div className="absolute inset-x-0 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(255,255,255,0.6),transparent)]" />
+            <div className="pointer-events-none absolute inset-[1px] rounded-[27px] border border-white/[0.06]" />
+
+            <div className="relative space-y-6">
+              {/* ── brand badge ─── */}
+              <div className="flex justify-center">
+                <div className="inline-flex items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 backdrop-blur-sm">
+                  <div className="relative h-11 w-11 shrink-0 overflow-hidden rounded-2xl">
+                    <Image
+                      src="/brands/migrateck-logo.png"
+                      alt={brand.productName}
+                      fill
+                      className="object-contain"
+                      priority
+                    />
+                  </div>
+                  <div className="text-left leading-none">
+                    <div className="text-lg font-semibold tracking-[-0.02em] text-white">
+                      {brand.productName}
+                    </div>
+                    <div className="mt-1.5 text-[10px] font-medium uppercase tracking-[0.26em] text-white/50">
+                      {clientId ? buildContinueLabel(clientId) : "Protected entry"}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* ── heading ─── */}
+              <div className="text-center">
+                <h1 className="text-2xl font-semibold tracking-tight text-white">Two-factor authentication</h1>
+                <p className="mt-2 text-sm text-white/50">
+                  Choose a verification method and continue securely.
+                </p>
+              </div>
+
+              {/* ── method selector ─── */}
+              <div className="grid grid-cols-3 gap-2 rounded-2xl border border-white/10 bg-black/15 p-1">
+                {[
+                  { key: "totp", label: "Authenticator" },
+                  { key: "recovery", label: "Recovery code" },
+                  { key: "passkey", label: "Passkey" },
+                ].map((item) => (
+                  <button
+                    key={item.key}
+                    type="button"
+                    onClick={() => setMethod(item.key as Method)}
+                    className={
+                      method === item.key
+                        ? "rounded-2xl bg-[linear-gradient(135deg,var(--brand-start),var(--brand-end))] px-3 py-3 text-sm font-semibold text-white"
+                        : "rounded-2xl px-3 py-3 text-sm font-medium text-zinc-400 transition hover:text-white"
+                    }
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+
+              {/* ── form ─── */}
+              {method === "passkey" ? (
+                <div className="space-y-4 rounded-2xl border border-white/10 bg-black/15 p-5">
+                  <p className="text-sm text-zinc-300">
+                    Passkey challenge UI is reserved here, but passkey verification is not enabled in this deployment yet.
+                  </p>
+                  <Button type="button" variant="secondary" className="w-full" disabled>
+                    Passkey challenge unavailable
+                  </Button>
+                </div>
+              ) : (
+                <form onSubmit={handleVerify} className="space-y-4">
+                  {method === "totp" ? (
+                    <div className="space-y-4 rounded-2xl border border-white/10 bg-black/15 p-5">
+                      <OtpInput value={code} onChange={setCode} />
+                      <p className="text-center text-sm text-zinc-400">
+                        Enter the 6-digit code from your authenticator app. Codes refresh every 30 seconds.
+                      </p>
+                    </div>
+                  ) : (
+                    <Input
+                      id="recovery-code"
+                      label="Recovery code"
+                      placeholder="xxxx-xxxx"
+                      value={recoveryCode}
+                      onChange={(event) => setRecoveryCode(event.target.value)}
+                    />
+                  )}
+
+                  {error ? <p className="text-sm text-rose-300">{error}</p> : null}
+
+                  <Button type="submit" className="w-full" size="lg" disabled={loading}>
+                    {loading ? "Verifying..." : "Verify and continue"}
+                  </Button>
+                </form>
+              )}
+            </div>
           </div>
-        )}
-
-        <div className="flex justify-center gap-2" onPaste={handlePaste}>
-          {code.map((digit, i) => (
-            <input
-              key={i}
-              ref={(el) => { inputRefs.current[i] = el; }}
-              type="text"
-              inputMode="numeric"
-              maxLength={1}
-              value={digit}
-              onChange={(e) => handleDigitChange(i, e.target.value)}
-              onKeyDown={(e) => handleKeyDown(i, e)}
-              className="h-12 w-10 rounded-lg border border-slate-300 text-center text-lg font-semibold shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
-            />
-          ))}
         </div>
-
-        <button
-          type="submit"
-          disabled={loading}
-          className="w-full rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-blue-700 disabled:opacity-50"
-        >
-          {loading ? "Verifying…" : "Verify"}
-        </button>
-      </form>
-
-      <p className="mt-4 text-center">
-        <button
-          type="button"
-          onClick={() => { setShowRecovery(true); setError(""); }}
-          className="text-sm font-medium text-blue-600 hover:text-blue-700"
-        >
-          Use a recovery code
-        </button>
-      </p>
+      </div>
     </div>
   );
 }
 
 export default function MfaPage() {
-  return <Suspense><MfaForm /></Suspense>;
+  return (
+    <Suspense>
+      <MfaForm />
+    </Suspense>
+  );
 }

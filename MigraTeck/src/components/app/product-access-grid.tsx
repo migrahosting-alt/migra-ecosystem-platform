@@ -25,6 +25,7 @@ interface ProductAccessGridProps {
   orgSlug: string;
   isMigraHostingClient: boolean;
   entitlements: EntitlementsByProduct;
+  visibleProductKeys?: ProductKey[] | undefined;
   driveTenant?: {
     status: DriveTenantStatus;
     restrictionReason?: string | null | undefined;
@@ -141,6 +142,7 @@ export function ProductAccessGrid({
   orgSlug,
   isMigraHostingClient,
   entitlements,
+  visibleProductKeys,
   driveTenant = null,
   driveTenantSummary = null,
   driveOperationPolicy = null,
@@ -149,10 +151,11 @@ export function ProductAccessGrid({
   const internalOrg = isInternalOrg({
     slug: orgSlug,
   });
+  const visibleProductKeySet = visibleProductKeys ? new Set(visibleProductKeys) : null;
 
   return (
     <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-      {PRODUCT_CATALOG.map((product) => {
+      {PRODUCT_CATALOG.filter((product) => !visibleProductKeySet || visibleProductKeySet.has(product.key)).map((product) => {
         const entitlement = entitlements[product.key];
         const driveTenantInput = driveTenant
           ? {

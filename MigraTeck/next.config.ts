@@ -6,19 +6,6 @@ const configDir = path.dirname(fileURLToPath(import.meta.url));
 
 const isProduction = process.env.NODE_ENV === "production";
 
-const retiredPublicRouteDestinations = [
-  "/company",
-  "/developers",
-  "/platform",
-  "/products",
-  "/services",
-] as const;
-
-const retiredMarketingRouteDestinations = {
-  "/portfolio": "/login",
-  "/pricing": "/login",
-} as const;
-
 const cspDirectives = [
   "default-src 'self'",
   "base-uri 'self'",
@@ -59,20 +46,6 @@ const nextConfig: NextConfig = {
         source: "/(.*)",
         headers: securityHeaders,
       },
-    ];
-  },
-  async redirects() {
-    return [
-      ...retiredPublicRouteDestinations.map((route) => ({
-        source: route,
-        destination: "/login",
-        permanent: true,
-      })),
-      ...Object.entries(retiredMarketingRouteDestinations).map(([source, destination]) => ({
-        source,
-        destination,
-        permanent: true,
-      })),
     ];
   },
 };

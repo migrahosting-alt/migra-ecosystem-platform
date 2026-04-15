@@ -1,7 +1,4 @@
 export * from "./errors";
-export * from "./credentials/signup";
-export * from "./credentials/login";
-export * from "./passwords/reset";
 export * from "./security/activity";
 export * from "./tokens/verify-email";
 export * from "./tokens/refresh";
@@ -10,3 +7,4 @@ export * from "./sessions/inventory";
 export * from "./sessions/logout-all";
 export * from "./context/me";
 export * from "./context/views";
+export * from "./validators";

@@ -1,4 +1,3 @@
-import argon2 from "argon2";
 import { PrismaClient, OrgRole, ProductKey, EntitlementStatus } from "@prisma/client";
 
 const prisma = new PrismaClient();
@@ -14,8 +13,9 @@ function slugify(value) {
 
 async function main() {
   const ownerEmail = process.env.MIGRATECK_SEED_OWNER_EMAIL || "owner@migrateck.com";
-  const ownerPassword = process.env.MIGRATECK_SEED_OWNER_PASSWORD || "ChangeMeImmediately123!";
+  const ownerEmailNormalized = ownerEmail.trim().toLowerCase();
   const ownerName = process.env.MIGRATECK_SEED_OWNER_NAME || "MigraTeck Owner";
+  const ownerAuthUserId = process.env.MIGRATECK_SEED_OWNER_AUTH_USER_ID || `seed:${ownerEmailNormalized}`;
   const orgName = process.env.MIGRATECK_SEED_ORG_NAME || "MigraTeck Enterprise";
   const orgSlug = process.env.MIGRATECK_SEED_ORG_SLUG || slugify(orgName);
   const isClient = process.env.MIGRATECK_SEED_IS_CLIENT === "true";
@@ -25,24 +25,19 @@ async function main() {
     throw new Error(`Invalid MIGRATECK_SEED_PRODUCT: ${seedProduct}`);
   }
 
-  const passwordHash = await argon2.hash(ownerPassword, {
-    type: argon2.argon2id,
-    memoryCost: 19456,
-    timeCost: 2,
-    parallelism: 1,
-  });
-
   const user = await prisma.user.upsert({
-    where: { email: ownerEmail.toLowerCase() },
+    where: { email: ownerEmailNormalized },
     update: {
       name: ownerName,
-      passwordHash,
+      authUserId: ownerAuthUserId,
+      emailNormalized: ownerEmailNormalized,
       emailVerified: new Date(),
     },
     create: {
       name: ownerName,
-      email: ownerEmail.toLowerCase(),
-      passwordHash,
+      email: ownerEmailNormalized,
+      emailNormalized: ownerEmailNormalized,
+      authUserId: ownerAuthUserId,
       emailVerified: new Date(),
     },
   });

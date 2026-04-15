@@ -11,6 +11,9 @@
     "jsx": "react-jsx",
     "baseUrl": ".",
     "paths": {
+      "@migrateck/auth-client": [
+        "../../packages/auth-client/src/index.ts"
+      ],
       "@migrateck/lib": [
         "../../packages/lib/src/index.ts"
       ],

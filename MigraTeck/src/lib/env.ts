@@ -4,6 +4,7 @@ const isBrowserRuntime = typeof window !== "undefined";
 
 const envSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
+  BASE_URL: z.string().url().optional(),
   NEXT_PUBLIC_MIGRADRIVE_BRAND_NAME: z.string().optional(),
   NEXT_PUBLIC_MIGRADRIVE_OPERATOR_NAME: z.string().optional(),
   NEXT_PUBLIC_MIGRADRIVE_WEBSITE_URL: z.string().url().optional(),
@@ -17,6 +18,11 @@ const envSchema = z.object({
   DATABASE_URL: z.string().optional(),
   NEXTAUTH_URL: z.string().url().optional(),
   NEXTAUTH_SECRET: z.string().min(32).optional(),
+  MIGRAAUTH_BASE_URL: z.string().url().optional(),
+  MIGRAAUTH_CLIENT_ID_DEFAULT: z.string().optional(),
+  MIGRAAUTH_CLIENT_ID_MIGRATECK: z.string().optional(),
+  MIGRAAUTH_CLIENT_ID_MIGRAHOSTING: z.string().optional(),
+  MIGRAAUTH_CLIENT_SECRET: z.string().optional(),
   AUTH_ACCESS_TOKEN_SECRET: z.string().min(32).optional(),
   AUTH_REFRESH_TOKEN_TTL_DAYS: z.string().optional(),
   AUTH_ACCESS_TOKEN_TTL_SECONDS: z.string().optional(),

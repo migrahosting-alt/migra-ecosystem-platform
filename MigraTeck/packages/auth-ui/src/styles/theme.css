@@ -1,0 +1,44 @@
+:root {
+  --background: 245 247 251;
+  --foreground: 17 24 39;
+  --card: 255 255 255;
+  --card-foreground: 17 24 39;
+  --ring: 168 85 247;
+  --brand-start: #7c3aed;
+  --brand-end: #ec4899;
+  --brand-accent: #a855f7;
+}
+
+html {
+  color-scheme: dark;
+}
+
+html.dark {
+  color-scheme: dark;
+}
+
+body {
+  min-height: 100dvh;
+  background:
+    radial-gradient(circle at top left, rgba(124, 58, 237, 0.16), transparent 28%),
+    radial-gradient(circle at bottom right, rgba(236, 72, 153, 0.12), transparent 30%),
+    linear-gradient(180deg, #090b12 0%, #111827 48%, #090b12 100%);
+  color: rgb(243 244 246);
+}
+
+html:not(.dark) body {
+  background:
+    radial-gradient(circle at top left, rgba(124, 58, 237, 0.1), transparent 24%),
+    radial-gradient(circle at bottom right, rgba(236, 72, 153, 0.09), transparent 24%),
+    linear-gradient(180deg, #f8fafc 0%, #eef2ff 50%, #f5f7fb 100%);
+  color: rgb(17 24 39);
+}
+
+html:not(.dark) {
+  --card: 255 255 255;
+  --card-foreground: 17 24 39;
+}
+
+.font-display {
+  font-feature-settings: "ss01" 1, "ss02" 1;
+}

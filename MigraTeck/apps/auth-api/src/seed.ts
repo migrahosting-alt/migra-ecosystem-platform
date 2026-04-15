@@ -2,11 +2,42 @@
  * MigraAuth seed — Register default first-party OAuth clients.
  * Run: pnpm --filter @migrateck/auth-api db:seed
  */
-import { PrismaClient } from ".prisma/auth-client";
+import { config } from "./config/env.js";
+import { createAuthPrismaAdapter, PrismaClient } from "./prisma-client.js";
 
-const db = new PrismaClient();
+const db = new PrismaClient({
+  adapter: createAuthPrismaAdapter(config.databaseUrl),
+});
 
 const clients = [
+  {
+    clientId: "migrateck_web",
+    clientName: "MigraTeck Web",
+    clientType: "web",
+    redirectUris: [
+      "https://migrateck.com/auth/callback",
+      "http://localhost:3000/auth/callback",
+    ],
+    postLogoutRedirectUris: [
+      "https://migrateck.com/login",
+      "http://localhost:3000/login",
+    ],
+    allowedScopes: ["openid", "profile", "email", "offline_access", "orgs:read"],
+  },
+  {
+    clientId: "migrahosting_web",
+    clientName: "MigraHosting Web",
+    clientType: "web",
+    redirectUris: [
+      "https://vps.migrahosting.com/auth/callback",
+      "http://localhost:3000/auth/callback",
+    ],
+    postLogoutRedirectUris: [
+      "https://vps.migrahosting.com/login",
+      "http://localhost:3000/login",
+    ],
+    allowedScopes: ["openid", "profile", "email", "offline_access", "orgs:read"],
+  },
   {
     clientId: "migradrive_web",
     clientName: "MigraDrive Web",

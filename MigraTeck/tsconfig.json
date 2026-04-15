@@ -24,6 +24,9 @@
       ],
       "@migrateck/events": [
         "./packages/events/src/index.ts"
+      ],
+      "@migrateck/billing-core": [
+        "./packages/billing-core/src/index.ts"
       ]
     },
     "plugins": [

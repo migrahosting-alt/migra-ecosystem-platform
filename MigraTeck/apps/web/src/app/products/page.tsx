@@ -5,6 +5,13 @@ import { buildPageMetadata, absoluteUrl } from "@/lib/metadata";
 import { cn } from "@/lib/cn";
 import ui from "@/lib/ui";
 
+const productBadges = [
+  "Requires organization",
+  "Policy-controlled",
+  "Shared identity",
+  "Verified distribution",
+] as const;
+
 export const metadata = buildPageMetadata({
   title: "Products",
   description:
@@ -33,7 +40,6 @@ export default function ProductsPage() {
         dangerouslySetInnerHTML={{ __html: JSON.stringify(structuredData) }}
       />
 
-      {/* hero */}
       <section className="hero-gradient hero-mesh relative overflow-hidden">
         <div className="pointer-events-none absolute right-0 top-20 h-[500px] w-[400px] rounded-full bg-cyan-400/15 blur-[100px]" />
         <div className={cn(ui.maxW, "relative pb-20 pt-32 sm:pb-28 sm:pt-40")}>
@@ -42,17 +48,22 @@ export default function ProductsPage() {
               Product registry
             </p>
             <h1 className="animate-fade-up-d1 mt-6 font-[var(--font-display)] text-5xl font-bold tracking-[-0.03em] text-white sm:text-6xl lg:text-7xl">
-              {products.length} products,{" "}
-              <span className="gradient-text-hero">one ecosystem.</span>
+              Product ecosystem, centrally managed and easier to scan.
             </h1>
             <p className="animate-fade-up-d2 mt-6 max-w-xl text-lg leading-8 text-slate-300/90">
-              Every product shares identity foundations, governance policies,
-              and distribution channels within the unified MigraTeck platform.
+              Launch and govern every MigraTeck product through one platform story,
+              with access posture, distribution, and product intent visible in a
+              more coherent registry.
             </p>
           </div>
 
-          {/* category anchors */}
           <div className="animate-fade-up-d3 mt-10 flex flex-wrap gap-2">
+            {productBadges.map((badge) => (
+              <span key={badge} className={ui.pillDark}>{badge}</span>
+            ))}
+          </div>
+
+          <div className="animate-fade-up-d3 mt-6 flex flex-wrap gap-2">
             {productsGroupedByCategory.map(({ category }) => (
               <a
                 key={category}
@@ -67,7 +78,6 @@ export default function ProductsPage() {
         <div className="absolute bottom-0 left-0 right-0 h-24 bg-gradient-to-t from-white to-transparent" />
       </section>
 
-      {/* product categories */}
       {productsGroupedByCategory.map(({ category, products: catProducts }) => (
         <section key={category} id={category} className={cn("scroll-mt-20 border-b border-slate-100", ui.sectionPySmall)}>
           <div className={ui.maxW}>
@@ -104,7 +114,6 @@ export default function ProductsPage() {
         </section>
       ))}
 
-      {/* CTA */}
       <section className="section-dark-blue relative overflow-hidden">
         <div className={cn(ui.maxW, "relative py-20 text-center sm:py-24")}>
           <h2 className={ui.h2Dark}>Ready to explore the platform?</h2>

@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { LinkButton } from "@/components/ui/button";
 
-type PlatformModule = {
+export type PlatformModule = {
   href: string;
   title: string;
   description: string;
@@ -17,7 +17,6 @@ interface PlatformCommandCenterProps {
   organizationCount: number;
   activeSessionCount: number;
   productsActive: number;
-  auditCount7d: number;
   lastLoginLabel: string;
   modules: PlatformModule[];
 }
@@ -36,7 +35,6 @@ export function PlatformCommandCenter({
   organizationCount,
   activeSessionCount,
   productsActive,
-  auditCount7d,
   lastLoginLabel,
   modules,
 }: PlatformCommandCenterProps) {
@@ -45,38 +43,38 @@ export function PlatformCommandCenter({
       <article className="overflow-hidden rounded-[2rem] border border-[var(--line)] bg-[radial-gradient(circle_at_top_left,rgba(15,122,216,0.12),transparent_30%),radial-gradient(circle_at_bottom_right,rgba(147,51,234,0.10),transparent_30%),linear-gradient(180deg,#09111d,#122033)] p-6 text-white shadow-[0_24px_70px_rgba(10,22,40,0.25)] sm:p-8">
         <div className="grid gap-8 xl:grid-cols-[1.15fr_0.85fr] xl:items-end">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-sky-300/80">Control plane</p>
-            <h1 className="mt-3 text-4xl font-black tracking-tight sm:text-5xl">One account, one organization graph, one operating surface.</h1>
+            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-sky-300/80">Client workspace</p>
+            <h1 className="mt-3 text-4xl font-black tracking-tight sm:text-5xl">Welcome back to {orgName}.</h1>
             <p className="mt-4 max-w-3xl text-sm leading-7 text-slate-300">
-              MigraTeck should feel like the authority layer for identity, entitlements, billing, launches, audit, and product operations. This workspace is the shared control plane for {orgName}.
+              Review your available services, organization access, billing posture, and account security from one calmer workspace.
             </p>
             <div className="mt-6 flex flex-wrap gap-3">
-              <LinkButton href="/app/products">Open product catalog</LinkButton>
+              <LinkButton href="/app/products">View services</LinkButton>
               <LinkButton href="/app/orgs" variant="secondary" className="border-white/15 bg-white/10 text-white shadow-none hover:bg-white/15 hover:text-white">
-                Manage organization
+                Organization
               </LinkButton>
               <LinkButton href="/app/billing" variant="secondary" className="border-white/15 bg-white/10 text-white shadow-none hover:bg-white/15 hover:text-white">
-                Review billing
+                Billing
               </LinkButton>
             </div>
           </div>
 
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
             <div className="rounded-2xl border border-white/10 bg-white/5 p-4 backdrop-blur-sm">
-              <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400">Identity context</p>
+              <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400">Account</p>
               <p className="mt-2 text-lg font-semibold">{email || "No email available"}</p>
               <p className="mt-1 text-sm text-slate-400">{orgName} · {role}</p>
               <p className="mt-1 text-xs text-slate-500">Org slug {orgSlug}</p>
             </div>
             <div className="rounded-2xl border border-white/10 bg-white/5 p-4 backdrop-blur-sm">
-              <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400">Operator posture</p>
+              <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400">Workspace status</p>
               <dl className="mt-3 grid gap-2 text-sm text-slate-300 sm:grid-cols-2 xl:grid-cols-2">
                 <div>
                   <dt className="text-[10px] uppercase tracking-[0.14em] text-slate-500">Organizations</dt>
                   <dd className="mt-1 text-lg font-semibold text-white">{organizationCount}</dd>
                 </div>
                 <div>
-                  <dt className="text-[10px] uppercase tracking-[0.14em] text-slate-500">Launch-ready products</dt>
+                  <dt className="text-[10px] uppercase tracking-[0.14em] text-slate-500">Active services</dt>
                   <dd className="mt-1 text-lg font-semibold text-white">{productsActive}</dd>
                 </div>
                 <div>
@@ -84,17 +82,17 @@ export function PlatformCommandCenter({
                   <dd className="mt-1 text-lg font-semibold text-white">{activeSessionCount}</dd>
                 </div>
                 <div>
-                  <dt className="text-[10px] uppercase tracking-[0.14em] text-slate-500">Audit events 7d</dt>
-                  <dd className="mt-1 text-lg font-semibold text-white">{auditCount7d}</dd>
+                  <dt className="text-[10px] uppercase tracking-[0.14em] text-slate-500">Role</dt>
+                  <dd className="mt-1 text-lg font-semibold text-white">{role}</dd>
                 </div>
               </dl>
-              <p className="mt-3 text-xs text-slate-500">Last login {lastLoginLabel}</p>
+              <p className="mt-3 text-xs text-slate-500">Last sign-in {lastLoginLabel}</p>
             </div>
           </div>
         </div>
       </article>
 
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {modules.map((module) => (
           <Link
             key={module.href}

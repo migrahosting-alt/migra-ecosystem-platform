@@ -554,6 +554,42 @@ paths:
           $ref: "#/components/responses/Conflict"
 
   # ─── Admin ─────────────────────────────────────────────────────
+  /v1/admin/users:
+    get:
+      tags: [Admin]
+      operationId: adminListUsers
+      summary: List users for admin operations
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: q
+          in: query
+          schema:
+            type: string
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [PENDING, ACTIVE, LOCKED, DISABLED]
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 25
+            maximum: 100
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+      responses:
+        "200":
+          description: User directory
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminUserListResponse"
+
   /v1/admin/users/{id}:
     get:
       tags: [Admin]
@@ -577,6 +613,41 @@ paths:
                 $ref: "#/components/schemas/AdminUserResponse"
         "404":
           $ref: "#/components/responses/NotFound"
+
+  /v1/admin/clients:
+    get:
+      tags: [Admin]
+      operationId: adminListClients
+      summary: List OAuth clients for admin operations
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: q
+          in: query
+          schema:
+            type: string
+        - name: is_active
+          in: query
+          schema:
+            type: boolean
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 25
+            maximum: 100
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+      responses:
+        "200":
+          description: OAuth client directory
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminClientListResponse"
 
   /v1/admin/users/{id}/lock:
     post:

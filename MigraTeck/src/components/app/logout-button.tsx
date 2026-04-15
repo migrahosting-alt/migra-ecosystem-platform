@@ -12,9 +12,19 @@ export function LogoutButton() {
       variant="secondary"
       onClick={async () => {
         clearAccessToken();
-        await fetch("/api/auth/logout", {
+        const response = await fetch("/api/auth/logout", {
           method: "POST",
-        }).catch(() => undefined);
+        }).catch(() => null);
+
+        const payload = response
+          ? (await response.json().catch(() => null)) as { redirectTo?: string } | null
+          : null;
+
+        if (payload?.redirectTo) {
+          window.location.href = payload.redirectTo;
+          return;
+        }
+
         router.push("/login");
         router.refresh();
       }}
