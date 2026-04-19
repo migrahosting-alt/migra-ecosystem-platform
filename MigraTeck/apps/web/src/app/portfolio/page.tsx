@@ -5,7 +5,7 @@ import { buildPageMetadata } from "@/lib/metadata";
 export const metadata = buildPageMetadata({
   title: "Ecosystem",
   description:
-    "Explore the MigraTeck ecosystem: 10 connected products organized across platform, infrastructure, communications, workflow, and growth.",
+    "Explore the MigraTeck ecosystem across platform, infrastructure, communications, workflow, and growth.",
   path: "/portfolio",
 });
 
@@ -193,8 +193,6 @@ export default function MigraTeckPortfolioPage() {
       <div className="absolute right-[-8rem] top-[24rem] h-[28rem] w-[28rem] rounded-full bg-violet-500/10 blur-3xl" />
 
       <div className="relative mx-auto max-w-[1280px] px-6 pb-24 pt-24 md:px-8 lg:px-10">
-
-        {/* ── Hero ─────────────────────────────────────────────── */}
         <section className="grid items-center gap-16 pb-24 pt-8 lg:grid-cols-12 lg:gap-10 lg:pb-32">
           <div className="lg:col-span-6">
             <div className="inline-flex items-center rounded-full border border-blue-400/20 bg-blue-400/10 px-4 py-2 text-[11px] font-medium uppercase tracking-[0.28em] text-blue-200/90">
@@ -238,7 +236,6 @@ export default function MigraTeckPortfolioPage() {
             </div>
           </div>
 
-          {/* Hero right panel */}
           <div className="lg:col-span-6 lg:pl-4">
             <div className="relative mx-auto max-w-[580px]">
               <div className="absolute -inset-10 bg-blue-500/10 blur-3xl" />
@@ -258,7 +255,6 @@ export default function MigraTeckPortfolioPage() {
                     </div>
                   </div>
 
-                  {/* MigraTeck anchor */}
                   <div className="relative mt-5 overflow-hidden rounded-[20px] border border-white/12 bg-white/[0.06] px-4 py-4">
                     <div className="flex items-center gap-3">
                       <div className="relative h-10 w-10 overflow-hidden rounded-xl border border-white/15 bg-white/10 p-1.5">
@@ -272,7 +268,6 @@ export default function MigraTeckPortfolioPage() {
                     <div className="mt-3 h-px w-full bg-gradient-to-r from-blue-400/60 via-indigo-400/40 to-fuchsia-400/30" />
                   </div>
 
-                  {/* Product grid in panel */}
                   <div className="relative mt-3 grid grid-cols-2 gap-2.5">
                     {panelProducts.map((product) => (
                       <div
@@ -298,7 +293,6 @@ export default function MigraTeckPortfolioPage() {
           </div>
         </section>
 
-        {/* ── Products ─────────────────────────────────────────── */}
         <section id="products" className="border-t border-white/8 py-24">
           <SectionIntro
             eyebrow="Products"
@@ -313,7 +307,6 @@ export default function MigraTeckPortfolioPage() {
           </div>
         </section>
 
-        {/* ── Platform ─────────────────────────────────────────── */}
         <section id="platform" className="border-t border-white/8 py-24">
           <SectionIntro
             eyebrow="Platform"
@@ -339,7 +332,6 @@ export default function MigraTeckPortfolioPage() {
           </div>
         </section>
 
-        {/* ── Why it matters ───────────────────────────────────── */}
         <section className="border-t border-white/8 py-24">
           <SectionIntro
             eyebrow="Why it matters"
@@ -364,7 +356,6 @@ export default function MigraTeckPortfolioPage() {
           </div>
         </section>
 
-        {/* ── CTA ──────────────────────────────────────────────── */}
         <section className="border-t border-white/8 pt-24">
           <div className="rounded-[36px] border border-white/10 bg-white/[0.05] px-6 py-12 text-center backdrop-blur-2xl md:px-10 md:py-16">
             <p className="text-[11px] font-medium uppercase tracking-[0.28em] text-blue-200/85">Get started</p>
