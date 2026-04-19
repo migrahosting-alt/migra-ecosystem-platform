@@ -1,6 +1,6 @@
 import Link from "next/link";
 import Image from "next/image";
-import { products, officialProductUrls } from "@/data/products";
+import { products } from "@/data/products";
 import { buildPageMetadata, absoluteUrl } from "@/lib/metadata";
 
 export const metadata = buildPageMetadata({
@@ -51,7 +51,6 @@ const useCases = [
 // Products to feature prominently at the top (exclude the platform "migrateck" entry itself)
 const ecosystemProducts = products.filter((p) => p.key !== "migrateck");
 const featuredProducts = ecosystemProducts.filter((p) => p.featured);
-const remainingProducts = ecosystemProducts.filter((p) => !p.featured);
 
 export default function ProductsPage() {
   const structuredData = {
@@ -79,8 +78,6 @@ export default function ProductsPage() {
       <div className="absolute right-[-6rem] top-[20rem] h-[26rem] w-[26rem] rounded-full bg-violet-500/10 blur-3xl" />
 
       <div className="relative mx-auto max-w-[1280px] px-6 pb-24 pt-24 md:px-8 lg:px-10">
-
-        {/* ── Hero ─────────────────────────────────────────────── */}
         <section className="pb-20 pt-8">
           <div className="inline-flex items-center rounded-full border border-blue-400/20 bg-blue-400/10 px-4 py-2 text-[11px] font-medium uppercase tracking-[0.28em] text-blue-200/90">
             Products
@@ -110,7 +107,6 @@ export default function ProductsPage() {
           </div>
         </section>
 
-        {/* ── Featured products ────────────────────────────────── */}
         {featuredProducts.length > 0 && (
           <section className="border-t border-white/8 py-16">
             <p className="text-[11px] font-medium uppercase tracking-[0.28em] text-blue-200/85">Featured</p>
@@ -148,7 +144,6 @@ export default function ProductsPage() {
           </section>
         )}
 
-        {/* ── All products grid ────────────────────────────────── */}
         <section id="all-products" className="border-t border-white/8 py-16">
           <div className="flex items-end justify-between gap-4">
             <div>
@@ -186,7 +181,6 @@ export default function ProductsPage() {
           </div>
         </section>
 
-        {/* ── How products connect ─────────────────────────────── */}
         <section className="border-t border-white/8 py-16">
           <div className="grid gap-12 lg:grid-cols-[1fr_1.1fr] lg:items-center">
             <div>
@@ -221,7 +215,6 @@ export default function ProductsPage() {
           </div>
         </section>
 
-        {/* ── Use cases ────────────────────────────────────────── */}
         <section className="border-t border-white/8 py-16">
           <p className="text-[11px] font-medium uppercase tracking-[0.28em] text-blue-200/85">Use cases</p>
           <h2 className="mt-4 text-3xl font-semibold tracking-[-0.04em] text-white md:text-4xl">
@@ -238,7 +231,6 @@ export default function ProductsPage() {
           </div>
         </section>
 
-        {/* ── CTA ──────────────────────────────────────────────── */}
         <section className="border-t border-white/8 pt-16">
           <div className="rounded-[36px] border border-white/10 bg-white/[0.05] px-6 py-12 text-center backdrop-blur-2xl md:px-10 md:py-16">
             <p className="text-[11px] font-medium uppercase tracking-[0.28em] text-blue-200/85">Get started</p>
@@ -264,7 +256,6 @@ export default function ProductsPage() {
             </div>
           </div>
         </section>
-
       </div>
     </main>
   );
