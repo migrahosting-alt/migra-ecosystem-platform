@@ -6,9 +6,9 @@ import { cn } from "@/lib/cn";
 import ui from "@/lib/ui";
 
 export const metadata = buildPageMetadata({
-  title: "Platform Architecture",
+  title: "Platform",
   description:
-    "MigraTeck presents one platform model across the public surface, authenticated systems, execution services, and verified distribution.",
+    "The MigraTeck platform connects public entry, account access, governance, execution, and software distribution into one shared operating model.",
   path: "/platform",
 });
 
@@ -46,11 +46,13 @@ export default function PlatformPage() {
               Platform architecture
             </p>
             <h1 className="animate-fade-up-d1 mt-6 font-[var(--font-display)] text-5xl font-bold tracking-[-0.03em] text-white sm:text-6xl lg:text-7xl">
-              Platform architecture that explains how the business actually works.
+              The shared platform behind the MigraTeck ecosystem.
             </h1>
             <p className="animate-fade-up-d2 mt-6 max-w-xl text-lg leading-8 text-slate-300/90">
-              The public site should show how marketing, developer entry, product access,
-              execution systems, and distribution all fit inside one platform model.
+              MigraTeck provides the common identity, governance, execution, and distribution
+              systems that connect every product in the ecosystem. Instead of rebuilding
+              platform concerns product by product, downstream services inherit one
+              coordinated backbone.
             </p>
             <div className="animate-fade-up-d3 mt-10 flex flex-wrap gap-4">
               <Link href="/products" className={ui.btnPrimaryLight}>View products</Link>
@@ -63,7 +65,7 @@ export default function PlatformPage() {
       <section className={ui.sectionPy}>
         <div className={ui.maxW}>
           <p className={ui.eyebrowBrand}>Architecture layers</p>
-          <h2 className={cn(ui.h2, "mt-4")}>From public surface to expansion path.</h2>
+          <h2 className={cn(ui.h2, "mt-4")}>From entry point to connected platform.</h2>
           <div className="mt-12 grid gap-4 md:grid-cols-2 xl:grid-cols-5">
             {layers.map((layer, i) => (
               <div key={layer.name} className={cn(ui.card, "p-6")}>
@@ -86,11 +88,10 @@ export default function PlatformPage() {
             <div>
               <p className={ui.eyebrowBrand}>Platform transaction</p>
               <h2 className={cn(ui.h2, "mt-4")}>
-                A real request path, not abstract language.
+                How the platform operates across the ecosystem.
               </h2>
               <p className={cn(ui.body, "mt-4")}>
-                This is the operating sequence the rest of the site describes. It turns
-                the control plane from positioning into a concrete execution model.
+                This operating flow shows how identity, governance, execution, and delivery work together through one shared platform.
               </p>
             </div>
             <div className="space-y-4">

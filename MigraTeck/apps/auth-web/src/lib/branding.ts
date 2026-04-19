@@ -130,3 +130,20 @@ export function buildContinueLabel(clientId: string | null | undefined) {
     ? "Continue into MigraAuth"
     : `Continue to ${theme.productName}`;
 }
+
+const productHomeUrls: Record<string, string> = {
+  migrateck: "https://migrateck.com",
+  migrahosting: "https://migrahosting.com",
+  migradrive: "https://migradrive.com",
+  migramail: "https://migrahosting.com",
+  migrapanel: "https://migrateck.com",
+  migravoice: "https://migravoice.com",
+  migrainvoice: "https://migrateck.com",
+  migrabuilder: "https://migrateck.com",
+};
+
+export function resolveProductHomeUrl(clientId: string | null | undefined): string {
+  const normalized = normalizeClientId(clientId);
+  const match = Object.entries(productHomeUrls).find(([key]) => normalized.includes(key));
+  return match?.[1] ?? "https://migrateck.com";
+}

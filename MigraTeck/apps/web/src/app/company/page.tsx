@@ -6,14 +6,14 @@ import ui from "@/lib/ui";
 export const metadata = buildPageMetadata({
   title: "Company",
   description:
-    "MigraTeck builds integrated platform products with centralized identity, access governance, commercial control, and operational scale.",
+    "MigraTeck builds connected software products for identity, hosting, communications, workflow, billing, storage, automation, and distribution.",
   path: "/company",
 });
 
 const companySections = [
-  { title: "Platform-first posture", desc: "MigraTeck is presented as an operating system for products, access, pricing, and execution instead of a loose collection of web properties." },
-  { title: "Disciplined system design", desc: "Identity, permissions, billing, and orchestration are treated as shared primitives so product surfaces can scale without drifting apart." },
-  { title: "Commercial clarity", desc: "The public site now aligns products, pricing, and services under one narrative structure that is easier for buyers and operators to understand." },
+  { title: "Platform-first by design", desc: "MigraTeck operates as a connected company system where products, services, access, and delivery fit into the same operating model instead of running as separate properties." },
+  { title: "Clear product roles", desc: "Each product in the ecosystem has a defined responsibility. Identity, governance, billing, and distribution are shared foundations, not rebuilt per product." },
+  { title: "Commercial and technical alignment", desc: "Products, pricing, and services are organized under one narrative structure so the public story matches the actual platform model behind it." },
 ] as const;
 
 const operatingPrinciples = [
@@ -34,12 +34,13 @@ export default function CompanyPage() {
               Company
             </p>
             <h1 className="animate-fade-up-d1 mt-6 font-[var(--font-display)] text-5xl font-bold tracking-[-0.03em] text-white sm:text-6xl lg:text-7xl">
-              A cleaner company story for a serious platform business.
+              MigraTeck builds connected software products for operations, access, communications, and delivery.
             </h1>
             <p className="animate-fade-up-d2 mt-6 max-w-xl text-lg leading-8 text-slate-300/90">
-              MigraTeck builds integrated platform products with centralized identity,
-              access governance, commercial control, and operational scale. The public
-              site should reflect that with tighter narrative discipline.
+              What began with infrastructure delivery expanded into a broader ecosystem of
+              connected products. Today MigraTeck operates as a platform-first business
+              that brings identity, governance, hosting, communications, workflow, billing,
+              storage, automation, and distribution into one organized system.
             </p>
           </div>
         </div>
@@ -63,17 +64,16 @@ export default function CompanyPage() {
         <div className="pointer-events-none absolute top-0 left-0 h-[300px] w-[300px] rounded-full bg-blue-500/10 blur-[80px]" />
         <div className={cn(ui.maxWNarrow, "relative py-20 sm:py-24")}>
           <p className={ui.eyebrowDark}>Origin</p>
-          <h2 className={cn(ui.h2Dark, "mt-3")}>Started with hosting, grew into a platform.</h2>
+          <h2 className={cn(ui.h2Dark, "mt-3")}>Infrastructure first. Platform second. Built to serve modern software businesses.</h2>
           <div className="mt-10 space-y-6">
             <p className="text-base leading-8 text-slate-300">
-              MigraTeck began with managed infrastructure delivery under MigraHosting.
-              As the ecosystem expanded into communications, operations, automation,
-              storage, and control-plane tooling, the business needed one coherent
-              public posture instead of several disconnected stories.
+              MigraTeck began with managed infrastructure delivery through MigraHosting
+              and expanded into a broader ecosystem spanning communications, automation,
+              storage, billing, onboarding, and operational control.
             </p>
             <p className="text-base leading-8 text-slate-300">
-              The public site is now being aligned around that reality: platform-first,
-              operationally credible, and commercially easier to scan.
+              As the platform grew, the business adopted a shared backbone so products
+              could operate together instead of as disconnected systems.
             </p>
           </div>
         </div>

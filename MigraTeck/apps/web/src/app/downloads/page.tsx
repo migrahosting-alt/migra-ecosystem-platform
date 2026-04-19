@@ -5,9 +5,9 @@ import { cn } from "@/lib/cn";
 import ui from "@/lib/ui";
 
 export const metadata = buildPageMetadata({
-  title: "Downloads & Distribution",
+  title: "Downloads",
   description:
-    "Access official MigraTeck applications, developer tools, plugins, and software assets through the centralized distribution system.",
+    "MigraTeck publishes software, tooling, and release assets through verified distribution channels with clear release-state labeling.",
   path: "/downloads",
 });
 
@@ -27,15 +27,15 @@ export default function DownloadsPage() {
         <div className={cn(ui.maxW, "relative pb-20 pt-32 sm:pb-28 sm:pt-40")}>
           <div className="max-w-3xl">
             <p className="animate-fade-up text-sm font-semibold uppercase tracking-[0.2em] text-sky-400/90">
-              Distribution system
+              Verified distribution
             </p>
             <h1 className="animate-fade-up-d1 mt-6 font-[var(--font-display)] text-5xl font-bold tracking-[-0.03em] text-white sm:text-6xl lg:text-7xl">
-              Official software{" "}
-              <span className="gradient-text-hero">delivery.</span>
+              Official software delivery through verified distribution channels.
             </h1>
             <p className="animate-fade-up-d2 mt-6 max-w-xl text-lg leading-8 text-slate-300/90">
-              Applications, developer tools, plugins, and scripts — all through
-              verified distribution channels with release integrity tracking.
+              MigraTeck publishes applications, tooling, extensions, and release assets
+              through controlled distribution paths with clear release-state labeling.
+              Availability is shown as it actually stands.
             </p>
           </div>
         </div>

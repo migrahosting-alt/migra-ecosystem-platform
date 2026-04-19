@@ -6,7 +6,7 @@ import ui from "@/lib/ui";
 export const metadata = buildPageMetadata({
   title: "Pricing",
   description:
-    "Public commercial pricing for MigraTeck launch services and platform entry offers.",
+    "MigraTeck pricing includes fast website launch packages, recurring AI content retainers, and custom commercial scopes for broader projects.",
   path: "/pricing",
 });
 
@@ -66,8 +66,9 @@ export default function PricingPage() {
               Straightforward launch pricing with room for larger scopes.
             </h1>
             <p className="animate-fade-up-d2 mt-6 max-w-2xl text-lg leading-8 text-slate-300/90">
-              The public site now has a clear commercial path: fast launch packages,
-              recurring AI content retainers, and a visible route into custom work.
+              MigraTeck pricing is built around practical entry points: fast launch packages
+              for businesses that need a credible digital presence quickly, recurring content
+              retainers for ongoing publishing, and custom scopes for broader operational work.
             </p>
           </div>
         </div>
@@ -77,7 +78,7 @@ export default function PricingPage() {
         <div className={ui.maxW}>
           <div className="mx-auto max-w-2xl text-center">
             <p className={ui.eyebrowBrand}>Website launch packages</p>
-            <h2 className={cn(ui.h2, "mt-4")}>Fast commercial entry for businesses that need to look legitimate now.</h2>
+            <h2 className={cn(ui.h2, "mt-4")}>Fast commercial entry for businesses that need a credible presence now.</h2>
           </div>
           <div className="mt-12 grid gap-6 lg:grid-cols-3">
             {websitePlans.map((plan) => (

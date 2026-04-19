@@ -7,7 +7,7 @@ import { coreLegalDocuments, productLegalDocuments } from "@/content/legal";
 export const metadata = buildPageMetadata({
   title: "Legal",
   description:
-    "Centralized MigraTeck legal policies and product-specific addenda for the ecosystem.",
+    "MigraTeck legal policies provide a shared legal foundation across accounts, privacy, billing, security, acceptable use, and product-specific addenda.",
   path: "/legal",
 });
 
@@ -20,14 +20,13 @@ export default function LegalIndexPage() {
         <div className={cn(ui.maxW, "relative pb-24 pt-32 sm:pb-28 sm:pt-40")}>
           <div className="max-w-4xl">
             <p className="text-sm font-semibold uppercase tracking-[0.2em] text-sky-400/90">
-              Legal center
+              Legal framework
             </p>
             <h1 className="mt-6 font-[var(--font-display)] text-5xl font-bold tracking-[-0.03em] text-white sm:text-6xl lg:text-7xl">
-              One legal system for the entire MigraTeck ecosystem.
+              One legal system for the MigraTeck ecosystem.
             </h1>
             <p className="mt-6 max-w-3xl text-lg leading-8 text-slate-300/90">
-              MigraTeck is the legal entity. Products operate under shared platform policies,
-              with modular addenda only where service-specific rules are needed.
+              MigraTeck is the legal entity behind the ecosystem. Shared platform policies set the baseline for accounts, privacy, billing, acceptable use, and security, while product-specific addenda only appear where service-specific obligations are actually needed.
             </p>
           </div>
         </div>
@@ -42,7 +41,7 @@ export default function LegalIndexPage() {
               <h2 className={cn(ui.h2, "mt-3 text-3xl sm:text-4xl")}>Platform policies</h2>
               <p className="mt-4 text-base leading-8 text-slate-600">
                 These documents are the source of truth for accounts, privacy, billing,
-                acceptable use, and security across every product.
+                acceptable use, and security across every product and service.
               </p>
               <div className="mt-8 grid gap-4">
                 {coreLegalDocuments.map((document) => (
@@ -63,8 +62,9 @@ export default function LegalIndexPage() {
               <p className={ui.eyebrowBrand}>Product extensions</p>
               <h2 className={cn(ui.h2, "mt-3 text-3xl sm:text-4xl")}>Service addenda</h2>
               <p className="mt-4 text-base leading-8 text-slate-600">
-                Addenda cover product-specific billing, compliance, content, and operational
-                obligations without duplicating the full legal stack per product.
+                Addenda extend the shared legal surface without duplicating it. Use them for
+                infrastructure-specific billing, communications compliance, publishing
+                responsibilities, or similar service-specific obligations.
               </p>
               <div className="mt-8 grid gap-4">
                 {productLegalDocuments.map((document) => (

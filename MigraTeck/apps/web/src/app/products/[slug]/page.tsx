@@ -17,7 +17,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const product = products.find((p) => p.slug === slug);
   if (!product) return {};
   return {
-    title: `${product.name} — MigraTeck`,
+    title: `${product.name} | ${product.tagline}`,
     description: product.shortDescription,
   };
 }
@@ -29,9 +29,9 @@ export default async function ProductDetailPage({ params }: Props) {
   if (!product) notFound();
 
   const cat = productCategories[product.category];
-  const related = products.filter(
-    (p) => p.category === product.category && p.slug !== product.slug,
-  );
+  const related = product.relatedProducts
+    .map((slug) => products.find((p) => p.slug === slug))
+    .filter((p): p is NonNullable<typeof p> => p !== undefined);
   const productLegalHref = getProductLegalHref(product.slug);
 
   return (
@@ -177,8 +177,8 @@ export default async function ProductDetailPage({ params }: Props) {
       {related.length > 0 && (
         <section className={ui.sectionPy}>
           <div className={ui.maxW}>
-            <p className={ui.eyebrowBrand}>Same category</p>
-            <h2 className={cn(ui.h2, "mt-3")}>Related products</h2>
+            <p className={ui.eyebrowBrand}>Related products</p>
+            <h2 className={cn(ui.h2, "mt-3")}>Connected in the ecosystem</h2>
             <div className="mt-10 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
               {related.map((r) => (
                 <Link

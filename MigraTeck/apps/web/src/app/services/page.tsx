@@ -6,7 +6,7 @@ import ui from "@/lib/ui";
 export const metadata = buildPageMetadata({
   title: "Services",
   description:
-    "Commercial service packages for fast website launch and recurring AI content production, presented inside the broader MigraTeck platform story.",
+    "MigraTeck services include a fast website launch offer and recurring AI-assisted content operations for businesses that need practical execution.",
   path: "/services",
 });
 
@@ -57,10 +57,12 @@ export default function ServicesPage() {
               Services
             </p>
             <h1 className="animate-fade-up-d1 mt-6 font-[var(--font-display)] text-5xl font-bold tracking-[-0.03em] text-white sm:text-6xl lg:text-7xl">
-              Commercial offers with a stronger pitch and cleaner frame.
+              Launch services built for speed, clarity, and real delivery.
             </h1>
             <p className="animate-fade-up-d2 mt-6 max-w-xl text-lg leading-8 text-slate-300/90">
-              MigraTeck now leads with a fast launch offer for businesses that need a real site quickly, while keeping recurring AI content operations visible as a second growth service.
+              MigraTeck offers two practical commercial service tracks: a fast website
+              launch service for businesses that need a credible digital presence now,
+              and a recurring content system for teams that need ongoing publishing support.
             </p>
             <div className="animate-fade-up-d3 mt-10 flex flex-wrap gap-4">
               <Link href="#service-cards" className={ui.btnPrimaryLight}>View service packages</Link>
@@ -98,10 +100,13 @@ export default function ServicesPage() {
         <div className={ui.maxW}>
           <div className="grid gap-6 lg:grid-cols-[0.9fr_1.1fr]">
             <div className={cn(ui.card, "p-8")}>
-              <p className={ui.eyebrowBrand}>Why this matters</p>
-              <h2 className={cn(ui.h2, "mt-3")}>The public site now supports a real launch offer.</h2>
+              <p className={ui.eyebrowBrand}>Why these services</p>
+              <h2 className={cn(ui.h2, "mt-3")}>Practical entry points for real launch outcomes.</h2>
               <p className={cn(ui.bodySmall, "mt-4")}>
-                When someone arrives from a campaign or sales conversation, the service page should confirm the same promise they already saw elsewhere. That means faster trust and less confusion between platform products and commercial services.
+                These service tracks are designed for businesses that need execution, not
+                just advice. Whether the goal is getting a credible site live this week or
+                keeping content moving every month, both tracks deliver a defined outcome
+                inside a managed process.
               </p>
             </div>
 

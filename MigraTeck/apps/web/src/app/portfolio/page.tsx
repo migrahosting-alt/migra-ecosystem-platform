@@ -5,7 +5,7 @@ import { buildPageMetadata } from "@/lib/metadata";
 export const metadata = buildPageMetadata({
   title: "Ecosystem",
   description:
-    "Explore the MigraTeck ecosystem — products, infrastructure, and services working as one unified platform.",
+    "Explore the MigraTeck ecosystem: 10 connected products organized across platform, infrastructure, communications, workflow, and growth.",
   path: "/portfolio",
 });
 

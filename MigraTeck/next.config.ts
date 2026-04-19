@@ -22,7 +22,9 @@ const cspDirectives = [
 ].join("; ");
 
 const securityHeaders = [
-  { key: "Content-Security-Policy", value: cspDirectives },
+  // CSP is set at the nginx proxy layer to avoid conflicts with Next.js 16's
+  // automatic nonce-based CSP generation (which overrides headers() with
+  // strict-dynamic and blocks script loading).
   { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
   { key: "X-Content-Type-Options", value: "nosniff" },
   { key: "X-Frame-Options", value: "DENY" },

@@ -6,7 +6,7 @@ import ui from "@/lib/ui";
 export const metadata = buildPageMetadata({
   title: "Security",
   description:
-    "Security model, protections, and responsible disclosure for the MigraTeck platform.",
+    "MigraTeck security is built around least privilege, defense in depth, fail-closed behavior, and a narrow data surface across the ecosystem.",
   path: "/security",
 });
 
@@ -49,12 +49,12 @@ export default function SecurityPage() {
               Security
             </p>
             <h1 className="animate-fade-up-d1 mt-6 font-[var(--font-display)] text-5xl font-bold tracking-[-0.03em] text-white sm:text-6xl lg:text-7xl">
-              Security is{" "}
-              <span className="gradient-text-hero">a constraint, not a feature.</span>
+              Security is built into the platform, not added later.
             </h1>
             <p className="animate-fade-up-d2 mt-6 max-w-xl text-lg leading-8 text-slate-300/90">
-              The platform is designed so that safe behaviour is the default path,
-              not an opt-in upgrade.
+              MigraTeck is designed so the safer path is the default path. Security is
+              treated as a platform discipline that shapes identity, access, execution,
+              and delivery across the ecosystem.
             </p>
           </div>
         </div>

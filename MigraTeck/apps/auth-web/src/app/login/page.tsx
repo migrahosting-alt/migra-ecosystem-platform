@@ -11,7 +11,7 @@ import {
   toBrandStyle,
 } from "@migrateck/auth-ui";
 import { authFetch } from "@/lib/api";
-import { resolveAuthBrandTheme } from "@/lib/branding";
+import { resolveAuthBrandTheme, resolveProductHomeUrl } from "@/lib/branding";
 
 function LoginForm() {
   const router = useRouter();
@@ -31,6 +31,7 @@ function LoginForm() {
   const effectiveClientId = clientId ?? "migraauth_web";
   const brand = useMemo(() => resolveAuthBrandTheme(clientId), [clientId]);
   const brandStyle = useMemo(() => toBrandStyle(brand), [brand]);
+  const productHomeUrl = useMemo(() => resolveProductHomeUrl(clientId), [clientId]);
 
   const isOAuthFlow = !!(clientId && redirectUri && state && codeChallenge);
   const queryString = searchParams.toString();
@@ -221,6 +222,18 @@ function LoginForm() {
               >
                 Create one
               </Link>
+            </div>
+
+            <div className="mt-4 text-center">
+              <a
+                href={productHomeUrl}
+                className="inline-flex items-center gap-1.5 text-xs text-white/35 transition hover:text-white/70"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-3.5 w-3.5">
+                  <path fillRule="evenodd" d="M17 10a.75.75 0 0 1-.75.75H5.612l4.158 3.96a.75.75 0 1 1-1.04 1.08l-5.5-5.25a.75.75 0 0 1 0-1.08l5.5-5.25a.75.75 0 1 1 1.04 1.08L5.612 9.25H16.25A.75.75 0 0 1 17 10Z" clipRule="evenodd" />
+                </svg>
+                Back to {brand.productName}
+              </a>
             </div>
           </div>
         </div>

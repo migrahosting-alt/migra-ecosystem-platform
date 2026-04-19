@@ -36,12 +36,14 @@ export type ProductRecord = {
   name: string;
   slug: string;
   logo: string;
+  tagline: string;
   shortDescription: string;
   longDescription: string;
   category: ProductCategory;
   status: "official";
   featured?: boolean;
   capabilities: string[];
+  relatedProducts: string[];
   links: ProductLinkSet;
 };
 
@@ -104,10 +106,11 @@ export const products: ProductRecord[] = [
     name: "MigraTeck",
     slug: "migrateck",
     logo: "/brands/products/migrateck.png",
+    tagline: "Shared platform for identity, governance, and distribution",
     shortDescription:
-      "Unified enterprise platform for identity, governance, product access, and ecosystem orchestration.",
+      "The shared platform layer and flagship control surface behind the MigraTeck ecosystem.",
     longDescription:
-      "MigraTeck is the parent platform and control surface that centralizes identity, access governance, product routing, developer systems, and software distribution across the ecosystem.",
+      "MigraTeck centralizes identity, governance, product routing, developer entry, and software distribution across the ecosystem. It is both the company platform and the layer that makes the rest of the products feel connected instead of separate.",
     category: "platform-core",
     status: "official",
     featured: true,
@@ -117,6 +120,7 @@ export const products: ProductRecord[] = [
       "Governance and platform routing",
       "Developer and distribution entry",
     ],
+    relatedProducts: ["migrapanel", "migrapilot"],
     links: {
       officialWebsite: officialProductUrls.migrateck,
       docsUrl: "/developers",
@@ -129,10 +133,11 @@ export const products: ProductRecord[] = [
     name: "MigraHosting",
     slug: "migrahosting",
     logo: "/brands/products/migrahosting.png",
+    tagline: "Managed hosting and infrastructure delivery",
     shortDescription:
-      "Managed hosting and infrastructure delivery platform for modern business and application workloads.",
+      "Managed hosting and infrastructure delivery for modern business and application workloads.",
     longDescription:
-      "MigraHosting provides managed hosting environments, deployment-ready infrastructure, and service delivery systems integrated into the MigraTeck platform.",
+      "MigraHosting provides managed hosting environments, deployment-ready infrastructure, and service delivery systems integrated into the broader MigraTeck platform.",
     category: "infrastructure-delivery",
     status: "official",
     featured: true,
@@ -142,6 +147,7 @@ export const products: ProductRecord[] = [
       "Business workload deployment",
       "Platform-integrated operations",
     ],
+    relatedProducts: ["migradrive", "migrateck"],
     links: {
       officialWebsite: officialProductUrls.migrahosting,
       docsUrl: "/developers",
@@ -153,8 +159,9 @@ export const products: ProductRecord[] = [
     name: "MigraIntake",
     slug: "migraintake",
     logo: "/brands/products/migraintake.png",
+    tagline: "Structured intake and onboarding workflows",
     shortDescription:
-      "Operational intake and structured workflow capture system for organizations and service pipelines.",
+      "Structured intake and workflow capture for onboarding, submissions, and operational routing.",
     longDescription:
       "MigraIntake standardizes data collection, request intake, onboarding workflows, and operational handoff into consistent enterprise-ready intake flows.",
     category: "operations-workflow",
@@ -165,6 +172,7 @@ export const products: ProductRecord[] = [
       "Onboarding workflows",
       "Operational handoff standardization",
     ],
+    relatedProducts: ["migrainvoice", "migravoice"],
     links: {
       officialWebsite: officialProductUrls.migraintake,
       docsUrl: "/developers",
@@ -176,10 +184,11 @@ export const products: ProductRecord[] = [
     name: "MigraMail",
     slug: "migramail",
     logo: "/brands/products/migramail.png",
+    tagline: "Business mail, routing, and deliverability",
     shortDescription:
-      "Business mail, routing, and deliverability platform integrated with the MigraTeck ecosystem.",
+      "Business mail, routing, and deliverability services aligned with the MigraTeck platform.",
     longDescription:
-      "MigraMail provides organization-grade mailbox services, routing systems, deliverability operations, and communication infrastructure aligned with the MigraTeck authority layer.",
+      "MigraMail provides organization-grade mailbox services, routing systems, deliverability operations, and communications infrastructure aligned with the MigraTeck authority layer.",
     category: "communications",
     status: "official",
     featured: true,
@@ -189,6 +198,7 @@ export const products: ProductRecord[] = [
       "Deliverability operations",
       "Platform-aligned communication infrastructure",
     ],
+    relatedProducts: ["migravoice", "migramarketing"],
     links: {
       officialWebsite: officialProductUrls.migramail,
       docsUrl: "/developers",
@@ -201,6 +211,7 @@ export const products: ProductRecord[] = [
     name: "MigraMarketing",
     slug: "migramarketing",
     logo: "/brands/products/migramarketing.png",
+    tagline: "Campaign execution and publishing workflows",
     shortDescription:
       "Marketing operations platform for campaign execution, publishing, and growth workflows.",
     longDescription:
@@ -213,6 +224,7 @@ export const products: ProductRecord[] = [
       "Growth operations",
       "Structured marketing systems",
     ],
+    relatedProducts: ["migramail", "migraintake"],
     links: {
       officialWebsite: officialProductUrls.migramarketing,
       docsUrl: "/developers",
@@ -224,10 +236,11 @@ export const products: ProductRecord[] = [
     name: "MigraPanel",
     slug: "migrapanel",
     logo: "/brands/products/migrapanel.png",
+    tagline: "Operational control surface for platform resources",
     shortDescription:
       "Administrative and operational control panel for platform resources, product access, and service workflows.",
     longDescription:
-      "MigraPanel acts as an operational management surface for provisioning, product administration, governance controls, and cross-system platform actions.",
+      "MigraPanel is the operational management surface for provisioning, product administration, governance controls, and cross-system platform actions.",
     category: "platform-core",
     status: "official",
     featured: true,
@@ -237,6 +250,7 @@ export const products: ProductRecord[] = [
       "Governance actions",
       "Cross-system product administration",
     ],
+    relatedProducts: ["migrateck", "migrapilot"],
     links: {
       officialWebsite: officialProductUrls.migrapanel,
       docsUrl: "/developers",
@@ -249,10 +263,11 @@ export const products: ProductRecord[] = [
     name: "MigraPilot",
     slug: "migrapilot",
     logo: "/brands/products/migrapilot.png",
+    tagline: "Workflow automation and execution control",
     shortDescription:
-      "Automation and command platform for agents, tasks, execution workflows, and operational tooling.",
+      "Automation and command platform for workflows, tasks, execution control, and agent-capable operations.",
     longDescription:
-      "MigraPilot provides workflow automation, execution control, task orchestration, and agent-capable tooling for product and operations workflows.",
+      "MigraPilot provides workflow automation, execution control, task orchestration, and agent-capable tooling for product and operations workflows across the ecosystem.",
     category: "platform-core",
     status: "official",
     capabilities: [
@@ -261,6 +276,7 @@ export const products: ProductRecord[] = [
       "Task orchestration",
       "Agent-capable operational tooling",
     ],
+    relatedProducts: ["migrateck", "migrapanel"],
     links: {
       officialWebsite: officialProductUrls.migrapilot,
       docsUrl: "/developers",
@@ -273,10 +289,11 @@ export const products: ProductRecord[] = [
     name: "MigraVoice",
     slug: "migravoice",
     logo: "/brands/products/migravoice.png",
+    tagline: "Voice infrastructure and telephony workflows",
     shortDescription:
       "Voice and communications platform for calling, routing, telephony workflows, and business interaction systems.",
     longDescription:
-      "MigraVoice delivers voice infrastructure, call handling systems, communication workflows, and business-facing telephony services within the MigraTeck ecosystem.",
+      "MigraVoice delivers voice infrastructure, call handling systems, communication workflows, and business-facing telephony services inside the MigraTeck ecosystem.",
     category: "communications",
     status: "official",
     featured: true,
@@ -286,6 +303,7 @@ export const products: ProductRecord[] = [
       "Telephony workflows",
       "Business communication services",
     ],
+    relatedProducts: ["migramail", "migraintake"],
     links: {
       officialWebsite: officialProductUrls.migravoice,
       docsUrl: "/developers",
@@ -298,8 +316,9 @@ export const products: ProductRecord[] = [
     name: "MigraDrive",
     slug: "migradrive",
     logo: "/brands/products/migradrive.png",
+    tagline: "Secure storage, file access, and controlled distribution",
     shortDescription:
-      "Secure file, object, and document storage platform with managed access and ecosystem integration.",
+      "Secure storage, file access, and document distribution integrated with the MigraTeck platform.",
     longDescription:
       "MigraDrive provides storage, file management, access control, and document-oriented platform services connected to the MigraTeck control surface.",
     category: "infrastructure-delivery",
@@ -311,6 +330,7 @@ export const products: ProductRecord[] = [
       "Managed access controls",
       "Ecosystem-integrated storage layer",
     ],
+    relatedProducts: ["migrahosting", "migrateck"],
     links: {
       officialWebsite: officialProductUrls.migradrive,
       docsUrl: "/developers",
@@ -323,8 +343,9 @@ export const products: ProductRecord[] = [
     name: "MigraInvoice",
     slug: "migrainvoice",
     logo: "/brands/products/migrainvoice.png",
+    tagline: "Invoicing, quotes, and payment workflows",
     shortDescription:
-      "Professional invoicing, quoting, and payment workflow platform for business operations.",
+      "Professional invoicing, quoting, and payment workflow coordination for business operations.",
     longDescription:
       "MigraInvoice provides structured invoicing, quote generation, payment workflow support, and business document operations as part of the broader MigraTeck ecosystem.",
     category: "operations-workflow",
@@ -335,6 +356,7 @@ export const products: ProductRecord[] = [
       "Payment support",
       "Business document operations",
     ],
+    relatedProducts: ["migraintake", "migrateck"],
     links: {
       officialWebsite: officialProductUrls.migrainvoice,
       docsUrl: "/developers",

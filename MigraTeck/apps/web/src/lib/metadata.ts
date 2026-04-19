@@ -8,7 +8,7 @@ const configuredSiteUrl =
 export const siteUrl = configuredSiteUrl.replace(/\/+$/, "");
 export const allowIndexing = siteUrl === defaultSiteUrl;
 export const defaultPageDescription =
-  "MigraTeck is the unified enterprise platform surface for identity, governance, product access, developer systems, and verified distribution across the ecosystem.";
+  "MigraTeck connects identity, hosting, communications, workflow, billing, and software distribution into one coordinated platform for modern software businesses.";
 export const defaultOgImage = "/brands/products/migrateck.png";
 
 export function absoluteUrl(path: string): string {

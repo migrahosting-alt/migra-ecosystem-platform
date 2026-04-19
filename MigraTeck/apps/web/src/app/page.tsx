@@ -1,10 +1,19 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import Image from "next/image";
 import { products, featuredProducts } from "@/data/products";
 import { getAccountLinks } from "@/lib/account-links";
+import { buildPageMetadata } from "@/lib/metadata";
 import { cn } from "@/lib/cn";
 import ui from "@/lib/ui";
 import MigraTeckHero from "@/components/marketing/hero";
+
+export const metadata: Metadata = buildPageMetadata({
+  title: "MigraTeck — Connected software platform for identity, hosting, and delivery",
+  description:
+    "MigraTeck connects identity, hosting, communications, workflow, billing, and software distribution into one coordinated platform for modern software businesses.",
+  path: "/",
+});
 
 const architectureLayers = [
   { title: "Identity layer", desc: "Sessions, organization context, and account trust boundaries." },
@@ -66,9 +75,12 @@ export default function HomePage() {
           <div className="grid gap-12 lg:grid-cols-2 lg:items-center">
             <div>
               <p className={ui.eyebrowBrand}>Commercial service tracks</p>
-              <h2 className={cn(ui.h2, "mt-4")}>New offers that fit the same platform story.</h2>
+              <h2 className={cn(ui.h2, "mt-4")}>Two commercial tracks, one platform story.</h2>
               <p className={cn(ui.body, "mt-4")}>
-                MigraTeck now presents launch services and recurring content operations as deliberate commercial entry points instead of disconnected side offers.
+                MigraTeck offers a fast website launch service for businesses that need a
+                credible digital presence quickly, and a recurring content system for teams
+                that need ongoing publishing support — both connected to the same platform
+                behind the products.
               </p>
             </div>
 
@@ -88,8 +100,8 @@ export default function HomePage() {
 
       <section className={cn("border-t border-white/10", ui.sectionPy)}>
         <div className={ui.maxW}>
-          <p className={ui.eyebrowBrand}>Architecture overview</p>
-          <h2 className={cn(ui.h2, "mt-4")}>Platform layers that explain how the business works.</h2>
+          <p className={ui.eyebrowBrand}>Platform architecture</p>
+          <h2 className={cn(ui.h2, "mt-4")}>One system from public entry to operational execution.</h2>
           <div className="mt-12 grid gap-6 md:grid-cols-2 xl:grid-cols-5">
             {architectureLayers.map((layer) => (
               <div key={layer.title} className={cn(ui.card, "p-6")}>
@@ -103,9 +115,9 @@ export default function HomePage() {
 
       <section className="section-dark-blue relative overflow-hidden">
         <div className={cn(ui.maxW, "relative py-20 text-center sm:py-24")}>
-          <h2 className={ui.h2Dark}>The flagship products.</h2>
+          <h2 className={ui.h2Dark}>Featured products.</h2>
           <p className={cn(ui.bodyDark, "mx-auto mt-4 max-w-lg")}>
-            Core products now sit inside a clearer public shell with pricing, services, developer context, and launch positioning aligned.
+            Core products organized across platform, infrastructure, communications, and workflow — each with a clear role in the ecosystem.
           </p>
           <div className="mt-10 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
             {featuredProducts.map((product) => (

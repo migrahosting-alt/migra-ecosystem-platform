@@ -7,7 +7,7 @@ import ui from "@/lib/ui";
 export const metadata = buildPageMetadata({
   title: "Developers",
   description:
-    "Build on the MigraTeck platform with deliberate route groups, shared identity, and platform-aware developer entry.",
+    "Build on the MigraTeck platform with shared identity, organization-aware access, predictable API structure, and verified software distribution.",
   path: "/developers",
 });
 
@@ -35,10 +35,11 @@ export default function DevelopersPage() {
               Developer platform
             </p>
             <h1 className="animate-fade-up-d1 mt-6 font-[var(--font-display)] text-5xl font-bold tracking-[-0.03em] text-white sm:text-6xl lg:text-7xl">
-              A developer surface that looks as deliberate as the backend behind it.
+              Developer access to the shared MigraTeck platform.
             </h1>
             <p className="animate-fade-up-d2 mt-6 max-w-xl text-lg leading-8 text-slate-300/90">
-              Build on shared identity, deliberate route groups, and platform-aware developer entry across {products.length} connected products.
+              Build on shared identity, predictable request patterns, and platform-aware
+              access across the MigraTeck ecosystem.
             </p>
             <div className="animate-fade-up-d3 mt-10 flex flex-wrap gap-4">
               <Link href="/products" className={ui.btnPrimaryLight}>View products</Link>
@@ -74,7 +75,10 @@ export default function DevelopersPage() {
               <p className={ui.eyebrowDark}>System posture</p>
               <h2 className={cn(ui.h2Dark, "mt-4")}>Predictable request patterns.</h2>
               <p className={cn(ui.bodyDark, "mt-4")}>
-                The point of the developer page is not just to show endpoints. It should communicate that the platform has a coherent execution model, consistent access posture, and one integration rhythm across products.
+                The developer surface is designed so integrations do not have to guess at
+                identity, account context, or security posture across products. Capabilities
+                are grouped by responsibility, access is scoped to the organization, and
+                distribution follows the same trust boundary as the rest of the platform.
               </p>
               <div className="mt-8 grid gap-3">
                 {systemTracks.map((track) => (

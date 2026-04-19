@@ -1,3 +1,5 @@
+import { products } from "@/data/products";
+
 export default function MigraTeckHero() {
   const ecosystem = [
     { name: "MigraHosting",  label: "Infrastructure",  accent: "from-indigo-400/80 via-violet-400/70 to-blue-400/70",   logo: "/brands/products/migrahosting.png"  },
@@ -97,7 +99,7 @@ export default function MigraTeckHero() {
                     </div>
                     <div className="flex items-center gap-1.5 rounded-full border border-emerald-400/20 bg-emerald-400/10 px-3 py-1">
                       <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" style={{ animation: "migrateckPulse 2.5s ease-in-out infinite" }} />
-                      <span className="text-[11px] font-medium uppercase tracking-[0.18em] text-emerald-200/90">9 products</span>
+                      <span className="text-[11px] font-medium uppercase tracking-[0.18em] text-emerald-200/90">{products.length} products</span>
                     </div>
                   </div>
 

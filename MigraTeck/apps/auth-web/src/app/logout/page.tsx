@@ -1,24 +1,29 @@
 "use client";
 
 import { useEffect, useMemo } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import Image from "next/image";
 import { toBrandStyle } from "@migrateck/auth-ui";
 import { authFetch } from "@/lib/api";
-import { resolveAuthBrandTheme } from "@/lib/branding";
+import { resolveAuthBrandTheme, resolveProductHomeUrl } from "@/lib/branding";
 
-export default function LogoutPage() {
+function LogoutContent() {
   const router = useRouter();
-  const brand = useMemo(() => resolveAuthBrandTheme(null), []);
+  const searchParams = useSearchParams();
+  const clientId = searchParams.get("client_id");
+  const postLogoutRedirectUri = searchParams.get("post_logout_redirect_uri");
+  const brand = useMemo(() => resolveAuthBrandTheme(clientId), [clientId]);
   const brandStyle = useMemo(() => toBrandStyle(brand), [brand]);
+  const productHomeUrl = useMemo(() => resolveProductHomeUrl(clientId), [clientId]);
 
   useEffect(() => {
     authFetch("/v1/logout", { method: "POST" })
       .catch(() => {})
       .finally(() => {
-        router.replace("/login");
+        const destination = postLogoutRedirectUri ?? productHomeUrl;
+        window.location.href = destination;
       });
-  }, [router]);
+  }, [router, postLogoutRedirectUri, productHomeUrl]);
 
   return (
     <div className="min-h-screen text-white" style={brandStyle}>
@@ -52,5 +57,15 @@ export default function LogoutPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+import { Suspense } from "react";
+
+export default function LogoutPage() {
+  return (
+    <Suspense>
+      <LogoutContent />
+    </Suspense>
   );
 }
