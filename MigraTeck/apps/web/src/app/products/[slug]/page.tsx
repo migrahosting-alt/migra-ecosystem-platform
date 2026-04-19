@@ -1,9 +1,9 @@
 import { notFound } from "next/navigation";
 import Image from "next/image";
 import Link from "next/link";
-import type { Metadata } from "next";
 import { cn } from "@/lib/cn";
 import { getProductLegalHref } from "@/content/legal";
+import { buildPageMetadata } from "@/lib/metadata";
 import ui from "@/lib/ui";
 import { products, productCategories } from "@/data/products";
 
@@ -12,14 +12,18 @@ export const dynamic = "force-dynamic";
 /* ---------- metadata ---------- */
 type Props = { params: Promise<{ slug: string }> };
 
-export async function generateMetadata({ params }: Props): Promise<Metadata> {
+export async function generateMetadata({ params }: Props) {
   const { slug } = await params;
   const product = products.find((p) => p.slug === slug);
   if (!product) return {};
-  return {
+
+  return buildPageMetadata({
     title: `${product.name} | ${product.tagline}`,
     description: product.shortDescription,
-  };
+    path: `/products/${product.slug}`,
+    imagePath: product.logo,
+    imageAlt: `${product.name} official logo`,
+  });
 }
 
 /* ---------- page ---------- */
@@ -33,6 +37,10 @@ export default async function ProductDetailPage({ params }: Props) {
     .map((slug) => products.find((p) => p.slug === slug))
     .filter((p): p is NonNullable<typeof p> => p !== undefined);
   const productLegalHref = getProductLegalHref(product.slug);
+  const ecosystemCtaCopy =
+    product.slug === "migrateck"
+      ? "MigraTeck is the shared platform layer that connects the rest of the ecosystem."
+      : `${product.name} is one of ${products.length} products on the MigraTeck ecosystem.`;
 
   return (
     <>
@@ -209,7 +217,7 @@ export default async function ProductDetailPage({ params }: Props) {
         <div className={cn(ui.maxW, "relative py-20 text-center sm:py-24")}>
           <h2 className={ui.h2Dark}>See the full platform.</h2>
           <p className={cn(ui.bodyDark, "mx-auto mt-4 max-w-lg")}>
-            {product.name} is one of ten products on the MigraTeck ecosystem.
+            {ecosystemCtaCopy}
           </p>
           <div className="mt-8 flex justify-center gap-4">
             <Link href="/platform" className={ui.btnPrimaryLight}>Platform architecture</Link>
