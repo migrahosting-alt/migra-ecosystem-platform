@@ -19,14 +19,25 @@ type PageMetadataOptions = {
   title: string;
   description: string;
   path: string;
+  imagePath?: string;
+  imageAlt?: string;
 };
+
+function buildSocialTitle(title: string): string {
+  return title.toLowerCase().includes(siteName.toLowerCase())
+    ? title
+    : `${title} | ${siteName}`;
+}
 
 export function buildPageMetadata({
   title,
   description,
   path,
+  imagePath = defaultOgImage,
+  imageAlt = "MigraTeck official logo",
 }: PageMetadataOptions): Metadata {
   const canonical = absoluteUrl(path);
+  const socialTitle = buildSocialTitle(title);
 
   return {
     title,
@@ -41,25 +52,25 @@ export function buildPageMetadata({
       canonical,
     },
     openGraph: {
-      title: `${title} | ${siteName}`,
+      title: socialTitle,
       description,
       url: canonical,
       siteName,
       type: "website",
       images: [
         {
-          url: defaultOgImage,
+          url: imagePath,
           width: 1200,
           height: 1200,
-          alt: "MigraTeck official logo",
+          alt: imageAlt,
         },
       ],
     },
     twitter: {
       card: "summary_large_image",
-      title: `${title} | ${siteName}`,
+      title: socialTitle,
       description,
-      images: [defaultOgImage],
+      images: [imagePath],
     },
   };
 }
