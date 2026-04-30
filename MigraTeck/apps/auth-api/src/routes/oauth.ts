@@ -238,8 +238,10 @@ export async function oauthRoutes(app: FastifyInstance): Promise<void> {
     const user = request.authUser!;
     return reply.code(200).send({
       sub: user.id,
-      email: user.email,
+      email: user.email ?? undefined,
       email_verified: !!user.emailVerifiedAt,
+      phone_number: user.phoneE164 ?? undefined,
+      phone_number_verified: !!user.phoneVerifiedAt,
       name: user.displayName,
       given_name: user.givenName,
       family_name: user.familyName,

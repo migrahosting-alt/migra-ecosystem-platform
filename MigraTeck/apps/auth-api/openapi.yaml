@@ -240,7 +240,7 @@ paths:
     post:
       tags: [Account]
       operationId: signup
-      summary: Create a new account
+      summary: Create a new account with email or phone plus password
       requestBody:
         required: true
         content:
@@ -249,7 +249,7 @@ paths:
               $ref: "#/components/schemas/SignupRequest"
       responses:
         "201":
-          description: Account created
+          description: Account created and verification challenge issued
           content:
             application/json:
               schema:
@@ -257,11 +257,36 @@ paths:
         "409":
           $ref: "#/components/responses/Conflict"
 
+  /v1/signup/verify:
+    post:
+      tags: [Account]
+      operationId: verifySignup
+      summary: Verify signup with a 6-digit email or SMS code
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SignupVerifyRequest"
+      responses:
+        "200":
+          description: Signup verified and authenticated session established
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SignupVerifyResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/BadRequest"
+
   /v1/login:
     post:
       tags: [Account]
       operationId: login
-      summary: Authenticate with email + password
+      summary: Authenticate with email or phone plus password
       requestBody:
         required: true
         content:
@@ -279,6 +304,38 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+
+  /v1/refresh:
+    post:
+      tags: [Account]
+      operationId: refresh
+      summary: Rotate the first-party refresh token and session secret
+      responses:
+        "200":
+          description: Session refreshed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RefreshResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /v1/me:
+    get:
+      tags: [Account]
+      operationId: me
+      summary: Return the canonical authenticated user and current session
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Current authenticated user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MeResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
 
   /v1/logout:
     post:
@@ -325,7 +382,7 @@ paths:
     post:
       tags: [Account]
       operationId: resendVerification
-      summary: Resend email verification link
+      summary: Resend a verification code for email or phone
       requestBody:
         required: true
         content:
@@ -338,13 +395,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/GenericSentResponse"
+                $ref: "#/components/schemas/ResendVerificationResponse"
 
   /v1/forgot-password:
     post:
       tags: [Account]
       operationId: forgotPassword
-      summary: Request a password reset link
+      summary: Request password recovery by verified email or phone
       requestBody:
         required: true
         content:
@@ -357,13 +414,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/GenericSentResponse"
+                $ref: "#/components/schemas/ForgotPasswordResponse"
 
   /v1/reset-password:
     post:
       tags: [Account]
       operationId: resetPassword
-      summary: Reset password with token
+      summary: Reset password with a reset link or SMS verification code
       requestBody:
         required: true
         content:
@@ -376,7 +433,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/GenericSuccessResponse"
+                $ref: "#/components/schemas/ResetPasswordResponse"
         "400":
           $ref: "#/components/responses/BadRequest"
 
@@ -861,11 +918,11 @@ components:
     # ── Account schemas ────────────────────────────────────────
     SignupRequest:
       type: object
-      required: [email, password, client_id, redirect_uri]
+      required: [identifier, password, client_id, redirect_uri]
       properties:
-        email:
+        identifier:
           type: string
-          format: email
+          description: Email address or E.164 phone number
         password:
           type: string
           minLength: 10
@@ -880,35 +937,143 @@ components:
 
     SignupResponse:
       type: object
-      required: [user, message]
+      required:
+        [user, challenge_id, channel, masked_destination, expires_in_seconds, resend_after_seconds, message]
       properties:
         user:
           $ref: "#/components/schemas/UserSummary"
+        challenge_id:
+          type: string
+          format: uuid
+        channel:
+          type: string
+          enum: [email, sms]
+        masked_destination:
+          type: string
+        expires_in_seconds:
+          type: integer
+        resend_after_seconds:
+          type: integer
         message:
           type: string
 
+    SignupVerifyRequest:
+      type: object
+      required: [challenge_id, code]
+      properties:
+        challenge_id:
+          type: string
+          format: uuid
+        code:
+          type: string
+          pattern: "^[0-9]{6}$"
+
+    SignupVerifyResponse:
+      type: object
+      required: [authenticated, user, session]
+      properties:
+        authenticated:
+          type: boolean
+          enum: [true]
+        user:
+          $ref: "#/components/schemas/UserSummary"
+        session:
+          $ref: "#/components/schemas/SessionSummary"
+
     LoginRequest:
       type: object
-      required: [email, password, client_id]
+      required: [identifier, password, client_id]
       properties:
-        email:
+        identifier:
           type: string
-          format: email
+          description: Email address or E.164 phone number
         password:
           type: string
         client_id:
           type: string
 
-    LoginResponse:
+    LoginSuccessResponse:
       type: object
-      required: [authenticated]
+      required: [authenticated, requires_mfa, user, session]
       properties:
         authenticated:
           type: boolean
+          enum: [true]
         requires_mfa:
           type: boolean
+          enum: [false]
         user:
           $ref: "#/components/schemas/UserSummary"
+        session:
+          $ref: "#/components/schemas/SessionSummary"
+
+    LoginVerificationRequiredResponse:
+      type: object
+      required: [status, challenge_id, channel, masked_destination, message]
+      properties:
+        status:
+          type: string
+          enum: [verification_required]
+        challenge_id:
+          type: string
+          format: uuid
+        channel:
+          type: string
+          enum: [email, sms]
+        masked_destination:
+          type: string
+        message:
+          type: string
+
+    LoginMfaResponse:
+      type: object
+      required: [authenticated, requires_mfa]
+      properties:
+        authenticated:
+          type: boolean
+          enum: [false]
+        requires_mfa:
+          type: boolean
+          enum: [true]
+
+    LoginResponse:
+      oneOf:
+        - $ref: "#/components/schemas/LoginSuccessResponse"
+        - $ref: "#/components/schemas/LoginVerificationRequiredResponse"
+        - $ref: "#/components/schemas/LoginMfaResponse"
+
+    RefreshResponse:
+      type: object
+      required: [authenticated, access_token, token_type, expires_in, user, session]
+      properties:
+        authenticated:
+          type: boolean
+          enum: [true]
+        access_token:
+          type: string
+        token_type:
+          type: string
+          enum: [Bearer]
+        expires_in:
+          type: integer
+        user:
+          $ref: "#/components/schemas/UserSummary"
+        session:
+          $ref: "#/components/schemas/SessionSummary"
+
+    MeResponse:
+      type: object
+      required: [authenticated, user, session]
+      properties:
+        authenticated:
+          type: boolean
+          enum: [true]
+        user:
+          $ref: "#/components/schemas/UserSummary"
+        session:
+          allOf:
+            - $ref: "#/components/schemas/SessionSummary"
+          nullable: true
 
     LogoutRequest:
       type: object
@@ -933,45 +1098,133 @@ components:
 
     ResendVerificationRequest:
       type: object
-      required: [email]
       properties:
-        email:
+        challenge_id:
           type: string
-          format: email
+          format: uuid
+        identifier:
+          type: string
+          description: Email address or E.164 phone number
+
+    ResendVerificationResponse:
+      type: object
+      required: [sent, message]
+      properties:
+        sent:
+          type: boolean
+          example: true
+        message:
+          type: string
+        challenge_id:
+          type: string
+          format: uuid
+        channel:
+          type: string
+          enum: [email, sms]
+        masked_destination:
+          type: string
+        resend_after_seconds:
+          type: integer
 
     ForgotPasswordRequest:
       type: object
-      required: [email]
+      required: [identifier]
       properties:
-        email:
+        identifier:
           type: string
-          format: email
+          description: Email address or E.164 phone number
+        client_id:
+          type: string
+
+    ForgotPasswordResponse:
+      type: object
+      required: [sent, message]
+      properties:
+        sent:
+          type: boolean
+          example: true
+        message:
+          type: string
+        challenge_id:
+          type: string
+          format: uuid
+        channel:
+          type: string
+          enum: [sms]
+        masked_destination:
+          type: string
 
     ResetPasswordRequest:
       type: object
-      required: [token, password]
+      required: [password]
       properties:
         token:
           type: string
+        challenge_id:
+          type: string
+          format: uuid
+        code:
+          type: string
+          pattern: "^[0-9]{6}$"
         password:
           type: string
           minLength: 10
 
+    ResetPasswordResponse:
+      type: object
+      required: [success, message]
+      properties:
+        success:
+          type: boolean
+          example: true
+        message:
+          type: string
+
     UserSummary:
       type: object
-      required: [id, email, status, email_verified]
+      required: [id, email, phone_e164, status, email_verified, phone_verified]
       properties:
         id:
           type: string
           format: uuid
         email:
           type: string
+          nullable: true
+        phone_e164:
+          type: string
+          nullable: true
         status:
           type: string
         email_verified:
           type: boolean
+        phone_verified:
+          type: boolean
         display_name:
           type: string
+    
+    SessionSummary:
+      type: object
+      required: [id, created_at, expires_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        created_at:
+          type: string
+          format: date-time
+        expires_at:
+          type: string
+          format: date-time
+        last_seen_at:
+          type: string
+          format: date-time
+          nullable: true
+        ip_address:
+          type: string
+          nullable: true
+        user_agent:
+          type: string
+          nullable: true
 
     # ── OAuth schemas ──────────────────────────────────────────
     AuthorizeCompleteRequest:

@@ -1,6 +1,6 @@
 import type { MetadataRoute } from "next";
 
-const baseUrl = "https://migradrive.com";
+const baseUrl = "https://migrateck.com";
 
 export default function sitemap(): MetadataRoute.Sitemap {
   const routes = ["", "/platform", "/products", "/pricing", "/developers", "/company", "/portfolio", "/request-access", "/signup", "/privacy", "/terms"];

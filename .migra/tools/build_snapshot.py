@@ -122,9 +122,9 @@ def main():
         "pve_vms": raw / "pve.pve.vms.txt",
         "pve_lxcs": raw / "pve.pve.lxcs.txt",
         "pve_lxc_iphost": raw / "pve.pve.lxc.iphost.txt",
-        "srv1_nginx_test": raw / "srv1-web.nginx.test.txt",
-        "srv1_nginx_hints": raw / "srv1-web.nginx.hints.txt",
-        "srv1_nginx_dump": raw / "srv1-web.nginx.dump.txt",
+        "nginx_proxy_test": raw / "nginx-proxy-core.nginx.test.txt",
+        "nginx_proxy_hints": raw / "nginx-proxy-core.nginx.hints.txt",
+        "nginx_proxy_dump": raw / "nginx-proxy-core.nginx.dump.txt",
         "migrapanel_panel_api_listeners": raw / "mpanel-core.mpanel.listeners.txt",
         "migrapanel_panel_api_services": raw / "mpanel-core.mpanel.services.txt",
         "migrapanel_panel_api_pm2": raw / "mpanel-core.mpanel.pm2.status.txt",
@@ -141,8 +141,8 @@ def main():
             "lxc_iphost": parse_lxc_iphost(read_text(files["pve_lxc_iphost"])),
         },
         "nginx": {
-            "nginx_test": redact(read_text(files["srv1_nginx_test"]).strip()),
-            "routing_hints": parse_nginx_hints(read_text(files["srv1_nginx_hints"])),
+            "nginx_test": redact(read_text(files["nginx_proxy_test"]).strip()),
+            "routing_hints": parse_nginx_hints(read_text(files["nginx_proxy_hints"])),
             "notes": "Full nginx -T captured in raw; snapshot only stores extracted hints to avoid secrets/noise.",
         },
         "migrapanel_panel_api": {
@@ -182,13 +182,13 @@ def main():
 
     (runbooks / "ssh-access.md").write_text(
         "# SSH Access Runbook\n\n"
-        "- Use host aliases: `pve`, `srv1-web`, `migrapanel-core`, `db-core`, `dns-core`, `mail-core`, `cloud-core`, `voip-core`\n"
+        "- Use host aliases: `pve`, `nginx-proxy-core`, `app-core`, `migrapanel-core`, `db-core`, `dns-core`, `mail-core`, `cloud-core`, `voip-core`\n"
         "- Validate: `ssh pve 'hostname; pveversion'`\n"
     )
     (runbooks / "nginx-routing.md").write_text(
         "# NGINX Routing Runbook\n\n"
-        "- Verify config: `ssh srv1-web 'nginx -t'`\n"
-        "- Inspect routing: `ssh srv1-web \"grep -R --line-number -E 'server_name|proxy_pass|upstream' /etc/nginx | head\"`\n"
+        "- Verify config: `ssh nginx-proxy-core 'nginx -t'`\n"
+        "- Inspect routing: `ssh nginx-proxy-core \"grep -R --line-number -E 'server_name|proxy_pass|upstream' /etc/nginx | head\"`\n"
         "- No reloads/restarts without explicit approval.\n"
     )
     (runbooks / "migrapanel-ops.md").write_text(

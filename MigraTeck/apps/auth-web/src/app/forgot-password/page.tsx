@@ -1,21 +1,23 @@
 "use client";
 
 import { Suspense, useMemo, useState, type FormEvent } from "react";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
 import { Button, Input, toBrandStyle } from "@migrateck/auth-ui";
 import { authFetch } from "@/lib/api";
-import { resolveAuthBrandTheme } from "@/lib/branding";
+import { resolveAuthBrandTheme, resolveProductDisplayDomain } from "@/lib/branding";
 
 function ForgotPasswordInner() {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const clientId = searchParams.get("client_id");
   const brand = useMemo(() => resolveAuthBrandTheme(clientId), [clientId]);
+  const productDisplayDomain = useMemo(() => resolveProductDisplayDomain(clientId), [clientId]);
   const brandStyle = useMemo(() => toBrandStyle(brand), [brand]);
   const queryString = searchParams.toString();
 
-  const [email, setEmail] = useState("");
+  const [identifier, setIdentifier] = useState("");
   const [sent, setSent] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -26,10 +28,14 @@ function ForgotPasswordInner() {
     setLoading(true);
 
     try {
-      const response = await authFetch<{ message?: string }>("/v1/forgot-password", {
+      const response = await authFetch<{
+        message?: string;
+        challenge_id?: string;
+        masked_destination?: string;
+      }>("/v1/forgot-password", {
         method: "POST",
         body: {
-          email,
+          identifier,
           client_id: clientId ?? undefined,
         },
       });
@@ -37,6 +43,22 @@ function ForgotPasswordInner() {
       if (!response.ok) {
         setError(response.data.message ?? "Could not send a reset link right now.");
         setLoading(false);
+        return;
+      }
+
+      if (response.data.challenge_id) {
+        const resetUrl = new URL("/reset-password", window.location.origin);
+        resetUrl.searchParams.set("challenge_id", response.data.challenge_id);
+        resetUrl.searchParams.set("identifier", identifier);
+        if (response.data.masked_destination) {
+          resetUrl.searchParams.set("masked_destination", response.data.masked_destination);
+        }
+        if (queryString) {
+          new URLSearchParams(queryString).forEach((value, key) => {
+            resetUrl.searchParams.set(key, value);
+          });
+        }
+        router.push(resetUrl.pathname + resetUrl.search);
         return;
       }
 
@@ -67,7 +89,7 @@ function ForgotPasswordInner() {
                 <div className="inline-flex items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 backdrop-blur-sm">
                   <div className="relative h-11 w-11 shrink-0 overflow-hidden rounded-2xl">
                     <Image
-                      src="/brands/migrateck-logo.png"
+                      src={brand.productKey === "annoupale" ? "/brands/products/annoupale-official_logo.png" : "/brands/migrateck-logo.png"}
                       alt={brand.productName}
                       fill
                       className="object-contain"
@@ -91,8 +113,8 @@ function ForgotPasswordInner() {
 
               <p className="mx-auto mt-2 max-w-[300px] text-sm leading-6 text-slate-300/80">
                 {sent
-                  ? `If an account exists for ${email}, a reset link is on the way.`
-                  : "Enter your email and we will send you a secure reset link."}
+                  ? `If an account exists for ${identifier}, recovery instructions are on the way.`
+                  : "Enter your email or phone number and we will send secure recovery instructions."}
               </p>
             </div>
 
@@ -118,14 +140,14 @@ function ForgotPasswordInner() {
             ) : (
               <form onSubmit={handleSubmit} className="space-y-4">
                 <Input
-                  id="forgot-password-email"
-                  label="Email"
-                  type="email"
-                  autoComplete="email"
+                  id="forgot-password-identifier"
+                  label="Email or phone"
+                  type="text"
+                  autoComplete="username"
                   autoFocus
-                  placeholder="you@company.com"
-                  value={email}
-                  onChange={(event) => setEmail(event.target.value)}
+                  placeholder="you@company.com or +1 555 555 0123"
+                  value={identifier}
+                  onChange={(event) => setIdentifier(event.target.value)}
                   error={error}
                 />
 
@@ -137,7 +159,7 @@ function ForgotPasswordInner() {
 
             <div className="mt-6 rounded-2xl border border-white/[0.08] bg-white/[0.025] px-4 py-3">
               <p className="text-center text-xs leading-5 text-white/45">
-                Secure authentication powered by MigraTeck.
+                Secure authentication for {productDisplayDomain}.
               </p>
             </div>
 

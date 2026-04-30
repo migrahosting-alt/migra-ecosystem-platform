@@ -95,7 +95,7 @@ export async function exchangeAuthCode(
   // Issue tokens
   const access_token = await issueAccessToken({
     sub: user.id,
-    email: user.email,
+    email: user.email ?? undefined,
     email_verified: !!user.emailVerifiedAt,
     scope: scopeStr,
     client_id: clientId,
@@ -108,7 +108,7 @@ export async function exchangeAuthCode(
     id_token = await issueIdToken(
       {
         sub: user.id,
-        email: user.email,
+        email: user.email ?? undefined,
         email_verified: !!user.emailVerifiedAt,
         name: user.displayName ?? undefined,
         given_name: user.givenName ?? undefined,
@@ -140,6 +140,7 @@ async function createRefreshToken(
   scope?: string,
   ipAddress?: string,
   userAgent?: string,
+  deviceId?: string,
 ): Promise<string> {
   const token = generateToken(48);
   const tokenHash = hashToken(token);
@@ -159,15 +160,51 @@ async function createRefreshToken(
       expiresAt,
       ipAddress: ipAddress ?? null,
       userAgent: userAgent ?? null,
+      deviceId: deviceId ?? null,
     },
   });
 
   return token;
 }
 
+export async function findRefreshToken(
+  token: string,
+  clientId: string,
+) {
+  const tokenHash = hashToken(token);
+  return db.oAuthRefreshToken.findFirst({
+    where: { tokenHash, clientId },
+  });
+}
+
+export async function issueFirstPartyRefreshToken(input: {
+  userId: string;
+  sessionId: string;
+  clientId?: string;
+  ipAddress?: string;
+  userAgent?: string;
+  scope?: string;
+}): Promise<string> {
+  return createRefreshToken(
+    input.userId,
+    input.clientId ?? config.firstPartyRefreshClientId,
+    undefined,
+    undefined,
+    input.scope ?? "openid profile email offline_access",
+    input.ipAddress,
+    input.userAgent,
+    input.sessionId,
+  );
+}
+
 export async function rotateRefreshToken(
   oldToken: string,
   clientId: string,
+  options?: {
+    ipAddress?: string;
+    userAgent?: string;
+    deviceId?: string;
+  },
 ): Promise<TokenSet | null> {
   const tokenHash = hashToken(oldToken);
   const existing = await db.oAuthRefreshToken.findFirst({
@@ -206,7 +243,7 @@ export async function rotateRefreshToken(
 
   const access_token = await issueAccessToken({
     sub: user.id,
-    email: user.email,
+    email: user.email ?? undefined,
     email_verified: !!user.emailVerifiedAt,
     scope: scopeStr,
     client_id: clientId,
@@ -218,12 +255,15 @@ export async function rotateRefreshToken(
     existing.familyId,
     existing.id,
     scopeStr,
+    options?.ipAddress ?? existing.ipAddress ?? undefined,
+    options?.userAgent ?? existing.userAgent ?? undefined,
+    options?.deviceId ?? existing.deviceId ?? undefined,
   );
 
   const id_token = await issueIdToken(
     {
       sub: user.id,
-      email: user.email,
+      email: user.email ?? undefined,
       email_verified: !!user.emailVerifiedAt,
       name: user.displayName ?? undefined,
       given_name: user.givenName ?? undefined,
@@ -241,6 +281,26 @@ export async function rotateRefreshToken(
     id_token,
     scope: scopeStr,
   };
+}
+
+export async function rotateFirstPartyRefreshToken(
+  oldToken: string,
+  input?: {
+    sessionId?: string;
+    ipAddress?: string;
+    userAgent?: string;
+    clientId?: string;
+  },
+): Promise<TokenSet | null> {
+  return rotateRefreshToken(
+    oldToken,
+    input?.clientId ?? config.firstPartyRefreshClientId,
+    {
+      deviceId: input?.sessionId,
+      ipAddress: input?.ipAddress,
+      userAgent: input?.userAgent,
+    },
+  );
 }
 
 export async function revokeRefreshTokenFamily(

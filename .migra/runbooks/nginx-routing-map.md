@@ -87,7 +87,7 @@ Generated from `.migra/nginx.routing.map.json` (parsed from `nginx -T` + hints).
 - www.migrahosting.com
 
 ### http://127.0.0.1:4300
-- Owner: srv1-web local service (`migra-market.service`)
+- Owner: app-core local service (`migra-market.service`)
 - marketing.migrahosting.com
 
 ### https://10.1.10.240

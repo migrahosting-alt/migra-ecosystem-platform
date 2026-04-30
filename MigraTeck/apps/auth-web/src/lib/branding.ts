@@ -22,6 +22,21 @@ export const migraAuthBrand: AuthBrandTheme = {
 };
 
 const productBrands: Record<string, AuthBrandTheme> = {
+  annoupale: {
+    ...migraAuthBrand,
+    productKey: "annoupale",
+    productName: "AnnouPale",
+    securityLabel: "Community access",
+    monogram: "AP",
+    eyebrow: "Community identity",
+    headline: "Sign in to your AnnouPale account",
+    helperCopy: "Use your AnnouPale identity to continue.",
+    supportCopy: "Secure authentication for annoupale.com.",
+    trustBullets: [],
+    gradientStart: "#9b44f6",
+    gradientEnd: "#ff3e9a",
+    accent: "#b14dff",
+  },
   migrateck: {
     ...migraAuthBrand,
     productKey: "migrateck",
@@ -107,10 +122,58 @@ const productBrands: Record<string, AuthBrandTheme> = {
     headline: "Secure access to your MigraBuilder workspace",
     supportCopy: "Brand-matched sign-in for Builder while all identity, sessions, and MFA stay inside MigraAuth.",
   },
+  migramarket: {
+    ...migraAuthBrand,
+    productKey: "migramarket",
+    productName: "MigraMarket",
+    securityLabel: "Marketing access",
+    monogram: "MK",
+    eyebrow: "Marketing operations",
+    headline: "Sign in to your standalone MigraMarket workspace",
+    helperCopy: "Use your MigraTeck account to continue.",
+    supportCopy: "This workspace is the standalone MigraMarket product surface for marketing.migrahosting.com and migramarket.com.",
+    trustBullets: [],
+    gradientStart: "#7e22ce",
+    gradientEnd: "#db2777",
+    accent: "#a21caf",
+  },
 };
 
 function normalizeClientId(clientId: string | null | undefined) {
-  return (clientId ?? "").toLowerCase();
+  const normalized = (clientId ?? "").trim().toLowerCase();
+  if (normalized) {
+    return normalized;
+  }
+
+  if (typeof window !== "undefined") {
+    const host = window.location.hostname;
+
+    // Staging auth host currently powers AnnouPale flows; default branding accordingly
+    // when client_id is omitted in query params.
+    if (host === "staging-auth.migrateck.com") {
+      return "annoupale_web";
+    }
+
+    // Direct auth host entry (all main routes) should default to AnnouPale experience.
+    if (
+      host === "auth.migrateck.com" &&
+      ["/login", "/signup", "/forgot-password", "/reset-password"].includes(window.location.pathname)
+    ) {
+      return "annoupale_web";
+    }
+
+    // Token/code verify links often arrive without client_id. Force AnnouPale branding
+    // for verify-email flows on auth hosts to preserve product-consistent UX.
+    if (host === "auth.migrateck.com" && window.location.pathname === "/verify-email") {
+      const params = new URLSearchParams(window.location.search);
+      const hasVerifyContext = params.has("token") || params.has("challenge_id") || params.has("identifier");
+      if (hasVerifyContext) {
+        return "annoupale_web";
+      }
+    }
+  }
+
+  return "";
 }
 
 export function resolveAuthBrandTheme(clientId: string | null | undefined) {
@@ -132,6 +195,7 @@ export function buildContinueLabel(clientId: string | null | undefined) {
 }
 
 const productHomeUrls: Record<string, string> = {
+  annoupale: "https://annoupale.com",
   migrateck: "https://migrateck.com",
   migrahosting: "https://migrahosting.com",
   migradrive: "https://migradrive.com",
@@ -140,10 +204,19 @@ const productHomeUrls: Record<string, string> = {
   migravoice: "https://migravoice.com",
   migrainvoice: "https://migrateck.com",
   migrabuilder: "https://migrateck.com",
+  migramarket: "https://migramarket.com",
 };
 
 export function resolveProductHomeUrl(clientId: string | null | undefined): string {
   const normalized = normalizeClientId(clientId);
   const match = Object.entries(productHomeUrls).find(([key]) => normalized.includes(key));
   return match?.[1] ?? "https://migrateck.com";
+}
+
+export function resolveProductDisplayDomain(clientId: string | null | undefined): string {
+  try {
+    return new URL(resolveProductHomeUrl(clientId)).hostname.replace(/^www\./, "");
+  } catch {
+    return "migrateck.com";
+  }
 }

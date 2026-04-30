@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { buildPageMetadata } from "@/lib/metadata";
+import { buildPageMetadata, absoluteUrl } from "@/lib/metadata";
+import { buildBreadcrumbList, SITE_ROOT } from "@/lib/structured-data";
 import { cn } from "@/lib/cn";
 import ui from "@/lib/ui";
 
@@ -24,8 +25,17 @@ const operatingPrinciples = [
 ] as const;
 
 export default function CompanyPage() {
+  const breadcrumb = buildBreadcrumbList([
+    SITE_ROOT,
+    { name: "Company", url: absoluteUrl("/company") },
+  ]);
+
   return (
     <>
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumb) }}
+      />
       <section className="hero-gradient hero-mesh relative overflow-hidden">
         <div className="pointer-events-none absolute right-1/4 bottom-0 h-[380px] w-[380px] rounded-full bg-cyan-500/10 blur-[100px]" />
         <div className={cn(ui.maxW, "relative pb-24 pt-32 sm:pb-32 sm:pt-40")}>
@@ -114,13 +124,13 @@ export default function CompanyPage() {
 
       <section className="section-dark-blue relative overflow-hidden">
         <div className={cn(ui.maxW, "relative py-20 text-center sm:py-24")}>
-          <h2 className={ui.h2Dark}>Explore the ecosystem.</h2>
+          <h2 className={ui.h2Dark}>Work with MigraTeck.</h2>
           <p className={cn(ui.bodyDark, "mx-auto mt-4 max-w-lg")}>
-            See how identity, operations, and distribution connect across every product.
+            Whether you need a fast website launch, ongoing content operations, or a fuller platform scope — start here.
           </p>
           <div className="mt-8 flex justify-center gap-4">
-            <Link href="/platform" className={ui.btnPrimaryLight}>Platform architecture</Link>
-            <Link href="/products" className={ui.btnSecondaryDark}>All products</Link>
+            <Link href="/services" className={ui.btnPrimaryLight}>View service tracks</Link>
+            <Link href="/platform" className={ui.btnSecondaryDark}>Explore platform</Link>
           </div>
         </div>
       </section>

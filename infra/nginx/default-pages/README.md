@@ -28,17 +28,17 @@ rewrite ^(.*)$ /index.html?status=suspended break;
 ```
 Access: `https://domain.com/` → Shows "Account Suspended"
 
-## Installation on srv1-web
+## Installation on nginx-proxy-core
 
 ```bash
 # Create directory
-ssh root@100.68.239.94 "mkdir -p /var/www/default-pages"
+ssh root@100.101.106.88 "mkdir -p /var/www/default-pages"
 
 # Copy file
-scp index.html root@100.68.239.94:/var/www/default-pages/
+scp index.html root@100.101.106.88:/var/www/default-pages/
 
 # Set permissions
-ssh root@100.68.239.94 "chown -R www-data:www-data /var/www/default-pages"
+ssh root@100.101.106.88 "chown -R www-data:www-data /var/www/default-pages"
 ```
 
 ## Nginx Configuration Examples

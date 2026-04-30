@@ -1,5 +1,7 @@
 import Link from "next/link";
-import { buildPageMetadata } from "@/lib/metadata";
+import { buildPageMetadata, absoluteUrl } from "@/lib/metadata";
+import { buildBreadcrumbList, SITE_ROOT } from "@/lib/structured-data";
+import { pricingInquiries } from "@/lib/inquiry";
 import { cn } from "@/lib/cn";
 import ui from "@/lib/ui";
 
@@ -17,6 +19,7 @@ const websitePlans = [
     detail: "Single-page conversion website delivered fast.",
     features: ["48-hour turnaround", "Mobile-first responsive design", "Domain connection support", "Basic SEO setup"],
     featured: false,
+    inquiryHref: pricingInquiries.starterLaunch,
   },
   {
     title: "Business Launch",
@@ -24,6 +27,7 @@ const websitePlans = [
     detail: "Multi-section site with stronger commercial framing.",
     features: ["Up to five core sections", "Business email setup", "Contact funnel wiring", "Content assistance"],
     featured: true,
+    inquiryHref: pricingInquiries.businessLaunch,
   },
   {
     title: "Scale Launch",
@@ -31,30 +35,43 @@ const websitePlans = [
     detail: "A fuller presence for businesses with more moving parts.",
     features: ["Expanded IA and copy shaping", "Lead capture and routing", "Advanced SEO structure", "Post-launch support handoff"],
     featured: false,
+    inquiryHref: pricingInquiries.scaleLaunch,
   },
-] as const;
+];
 
 const serviceRetainers = [
   {
     title: "AI Content Engine",
     price: "$350/mo",
     description: "Recurring blogs, campaign content, landing-page support, and product copy generation.",
+    inquiryHref: pricingInquiries.aiContentEngine,
   },
   {
     title: "Content Ops Plus",
     price: "$700/mo",
     description: "Higher output volume, review loops, campaign batching, and publishing coordination.",
+    inquiryHref: pricingInquiries.contentOpsPlus,
   },
   {
     title: "Custom Commercial Scope",
     price: "Custom",
     description: "For mixed launch, content, and platform-positioning packages that do not fit a standard box.",
+    inquiryHref: pricingInquiries.customScope,
   },
-] as const;
+];
 
 export default function PricingPage() {
+  const breadcrumb = buildBreadcrumbList([
+    SITE_ROOT,
+    { name: "Pricing", url: absoluteUrl("/pricing") },
+  ]);
+
   return (
     <>
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumb) }}
+      />
       <section className="hero-gradient hero-mesh relative overflow-hidden">
         <div className="pointer-events-none absolute left-0 top-10 h-[420px] w-[420px] rounded-full bg-blue-500/15 blur-[120px]" />
         <div className={cn(ui.maxW, "relative pb-24 pt-32 sm:pb-32 sm:pt-40")}>
@@ -92,6 +109,19 @@ export default function PricingPage() {
                     <p key={feature} className="text-sm text-slate-300">{feature}</p>
                   ))}
                 </div>
+                <div className="mt-6">
+                  <a
+                    href={plan.inquiryHref}
+                    className={cn(
+                      "inline-flex w-full items-center justify-center rounded-full px-5 py-3 text-sm font-medium transition",
+                      plan.featured
+                        ? "bg-blue-500 text-white shadow-lg shadow-blue-500/20 hover:bg-blue-400"
+                        : "border border-white/15 bg-white/5 text-white/80 hover:bg-white/10",
+                    )}
+                  >
+                    Get started
+                  </a>
+                </div>
               </div>
             ))}
           </div>
@@ -116,6 +146,14 @@ export default function PricingPage() {
                     <span className="text-lg font-semibold text-blue-400">{service.price}</span>
                   </div>
                   <p className="mt-3 text-sm leading-6 text-slate-400">{service.description}</p>
+                  <div className="mt-4">
+                    <a
+                      href={service.inquiryHref}
+                      className="text-sm font-medium text-blue-400 transition hover:text-blue-300"
+                    >
+                      Inquire about this plan →
+                    </a>
+                  </div>
                 </div>
               ))}
             </div>
@@ -125,14 +163,21 @@ export default function PricingPage() {
 
       <section className="section-dark-blue relative overflow-hidden">
         <div className={cn(ui.maxW, "relative py-20 text-center sm:py-24")}>
-          <h2 className={ui.h2Dark}>Need a larger scope?</h2>
+          <h2 className={ui.h2Dark}>Ready to move forward?</h2>
           <p className={cn(ui.bodyDark, "mx-auto mt-4 max-w-lg")}>
-            Custom projects can combine website launch, recurring content, platform positioning, and downstream product integration.
+            Email us with your project details and we will respond within one business day.
+            Custom scopes, bundled packages, and platform work are all available.
           </p>
-          <div className="mt-8 flex justify-center gap-4">
-            <Link href="/services" className={ui.btnPrimaryLight}>Review service tracks</Link>
-            <Link href="/company" className={ui.btnSecondaryDark}>Company overview</Link>
+          <div className="mt-8 flex flex-col items-center justify-center gap-4 sm:flex-row">
+            <a
+              href={pricingInquiries.generalPricing}
+              className={ui.btnPrimaryLight}
+            >
+              Send project inquiry
+            </a>
+            <Link href="/services" className={ui.btnSecondaryDark}>Review service tracks</Link>
           </div>
+          <p className="mt-6 text-sm text-slate-400">Or reach us directly at <a href="mailto:services@migrateck.com" className="text-blue-400 hover:text-blue-300">services@migrateck.com</a></p>
         </div>
       </section>
     </>

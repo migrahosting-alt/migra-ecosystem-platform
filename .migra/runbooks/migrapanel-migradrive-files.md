@@ -1,13 +1,13 @@
 # Runbook: MigraPanel Files to MigraDrive
 
-Scope: `srv1-web` file plane for MigraPanel tenant content
+Scope: `app-core` file plane for MigraPanel tenant content
 Risk: HIGH if cut over directly, MED when using a staged hybrid bridge
 
 ## Current Live State
 
-- The live files plane is the `migrapanel-files-agent.service` systemd unit on `srv1-web`.
+- The live files plane is the `migrapanel-files-agent.service` systemd unit on `app-core`.
 - The agent runs from `/opt/MigraPanel/apps/files-agent/server.js`.
-- The repo-tracked source now lives at `migra-infra/servers/srv1-web/apps/migrapanel-files-agent`.
+- The repo-tracked source now lives at `migra-infra/servers/app-core/apps/migrapanel-files-agent`.
 - The backend is live in `hybrid` mode:
   - base path: `/srv/web/clients`
   - service user: `www-data`
@@ -96,13 +96,13 @@ Risk: HIGH if cut over directly, MED when using a staged hybrid bridge
 - monitor active backfill with:
 
 ```bash
-ssh srv1-web 'sudo tail -f /var/log/migrapanel-files-agent/backfill-*.out'
+ssh app-core 'sudo tail -f /var/log/migrapanel-files-agent/backfill-*.out'
 ```
 
 - inspect the latest manifest summary with:
 
 ```bash
-ssh srv1-web 'sudo tail -n 5 /var/log/migrapanel-files-agent/backfill-*.out'
+ssh app-core 'sudo tail -n 5 /var/log/migrapanel-files-agent/backfill-*.out'
 ```
 
 ## Rollback

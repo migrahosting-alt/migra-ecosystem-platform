@@ -11,7 +11,53 @@ import {
   toBrandStyle,
 } from "@migrateck/auth-ui";
 import { authFetch } from "@/lib/api";
-import { resolveAuthBrandTheme } from "@/lib/branding";
+import { resolveAuthBrandTheme, resolveProductHomeUrl } from "@/lib/branding";
+
+function extractApiErrorMessage(payload: unknown, fallback: string): string {
+  if (!payload || typeof payload !== "object") {
+    return fallback;
+  }
+
+  const maybe = payload as {
+    message?: unknown;
+    error?: {
+      message?: unknown;
+      details?: Array<{ message?: unknown; path?: unknown }>;
+    } | unknown;
+  };
+
+  if (typeof maybe.message === "string" && maybe.message.trim()) {
+    return maybe.message;
+  }
+
+  if (
+    maybe.error
+    && typeof maybe.error === "object"
+    && "message" in maybe.error
+    && typeof (maybe.error as { message?: unknown }).message === "string"
+    && (maybe.error as { message: string }).message.trim()
+  ) {
+    return (maybe.error as { message: string }).message;
+  }
+
+  if (
+    maybe.error
+    && typeof maybe.error === "object"
+    && "details" in maybe.error
+    && Array.isArray((maybe.error as { details?: unknown }).details)
+  ) {
+    const details = (maybe.error as { details: Array<{ message?: unknown; path?: unknown }> }).details;
+    const first = details[0];
+    if (first && typeof first.message === "string" && first.message.trim()) {
+      if (Array.isArray(first.path) && first.path.length > 0) {
+        return `${String(first.path[0])}: ${first.message}`;
+      }
+      return first.message;
+    }
+  }
+
+  return fallback;
+}
 
 function SignupForm() {
   const router = useRouter();
@@ -21,13 +67,25 @@ function SignupForm() {
   const queryString = searchParams.toString();
   const effectiveClientId = clientId ?? "migraauth_web";
   const brand = useMemo(() => resolveAuthBrandTheme(clientId), [clientId]);
+  const isAnnouPale = brand.productKey === "annoupale";
   const brandStyle = useMemo(() => toBrandStyle(brand), [brand]);
-  const legalTermsUrl = "https://migrateck.com/legal/terms";
-  const legalPaymentUrl = "https://migrateck.com/legal/payment";
+  const productHomeUrl = useMemo(() => resolveProductHomeUrl(clientId), [clientId]);
+  const legalTermsUrl = useMemo(() => {
+    if (brand.productKey === "annoupale") {
+      return "https://annoupale.com/terms";
+    }
+    return "https://migrateck.com/legal/terms";
+  }, [brand.productKey]);
+  const legalPaymentUrl = useMemo(() => {
+    if (brand.productKey === "annoupale") {
+      return "https://annoupale.com/payment-policy";
+    }
+    return "https://migrateck.com/legal/payment";
+  }, [brand.productKey]);
 
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
-  const [email, setEmail] = useState("");
+  const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [acceptedTerms, setAcceptedTerms] = useState(false);
@@ -53,10 +111,19 @@ function SignupForm() {
     try {
       const response = await authFetch<{
         message?: string;
+        error?: {
+          message?: string;
+          details?: Array<{ message?: string; path?: Array<string | number> }>;
+        };
+        challenge_id?: string;
+        channel?: string;
+        masked_destination?: string;
       }>("/v1/signup", {
         method: "POST",
         body: {
-          email,
+          identifier: identifier.trim(),
+          // Backward compatibility for staging auth-api revisions that still require `email`.
+          email: identifier.trim(),
           password,
           display_name: [firstName, lastName].filter(Boolean).join(" ") || undefined,
           client_id: effectiveClientId,
@@ -65,12 +132,29 @@ function SignupForm() {
       });
 
       if (!response.ok) {
-        setError(response.data.message ?? "Signup failed.");
+        setError(extractApiErrorMessage(response.data, "Signup failed. Please check your details and try again."));
         setLoading(false);
         return;
       }
 
-      router.push(`/verify-email?email=${encodeURIComponent(email)}${queryString ? `&${queryString}` : ""}`);
+      const verifyUrl = new URL("/verify-email", window.location.origin);
+      if (response.data.challenge_id) {
+        verifyUrl.searchParams.set("challenge_id", response.data.challenge_id);
+      }
+      verifyUrl.searchParams.set("identifier", identifier);
+      if (response.data.channel) {
+        verifyUrl.searchParams.set("channel", response.data.channel);
+      }
+      if (response.data.masked_destination) {
+        verifyUrl.searchParams.set("masked_destination", response.data.masked_destination);
+      }
+      if (queryString) {
+        new URLSearchParams(queryString).forEach((value, key) => {
+          verifyUrl.searchParams.set(key, value);
+        });
+      }
+
+      router.push(verifyUrl.pathname + verifyUrl.search);
     } catch {
       setError("Network error. Please try again.");
       setLoading(false);
@@ -104,13 +188,13 @@ function SignupForm() {
             <div className="relative mb-6 text-center">
               {/* ── brand badge ──────────────────────────────────── */}
               <div className="mb-5 flex justify-center">
-                <div className="inline-flex items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 backdrop-blur-sm">
-                  <div className="relative h-11 w-11 shrink-0 overflow-hidden rounded-2xl">
+                <div className="inline-flex items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.05] px-4 py-3 backdrop-blur-sm">
+                  <div className={isAnnouPale ? "relative h-16 w-16 shrink-0 overflow-hidden rounded-2xl" : "relative h-11 w-11 shrink-0 overflow-hidden rounded-2xl"}>
                     <Image
-                      src="/brands/migrateck-logo.png"
+                      src={brand.productKey === "annoupale" ? "/brands/products/annoupale-official_logo.png" : "/brands/migrateck-logo.png"}
                       alt={brand.productName}
                       fill
-                      className="object-contain"
+                      className={isAnnouPale ? "object-contain scale-[1.22]" : "object-contain"}
                       priority
                     />
                   </div>
@@ -155,13 +239,13 @@ function SignupForm() {
               </div>
 
               <Input
-                id="signup-email"
-                label="Email"
-                type="email"
-                autoComplete="email"
-                placeholder="you@company.com"
-                value={email}
-                onChange={(event) => setEmail(event.target.value)}
+                id="signup-identifier"
+                label="Email or phone"
+                type="text"
+                autoComplete="username"
+                placeholder="you@company.com or +1 555 555 0123"
+                value={identifier}
+                onChange={(event) => setIdentifier(event.target.value)}
               />
 
               <PasswordInput
@@ -169,7 +253,7 @@ function SignupForm() {
                 label="Password"
                 autoComplete="new-password"
                 placeholder="Create a password"
-                hint="At least 8 characters. MFA and passkeys can be added after signup."
+                hint="At least 10 characters. MFA and passkeys can be added after signup."
                 value={password}
                 onChange={(event) => setPassword(event.target.value)}
               />
@@ -210,7 +294,7 @@ function SignupForm() {
                   >
                     Payment Policy
                   </Link>{" "}
-                  and understand this account will be used across the MigraTeck ecosystem.
+                  and understand this account will be used for {new URL(productHomeUrl).hostname.replace(/^www\./, "")}.
                 </span>
               </label>
 

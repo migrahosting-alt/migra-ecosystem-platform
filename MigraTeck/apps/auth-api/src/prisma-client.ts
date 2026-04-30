@@ -6,6 +6,8 @@ import type {
   OAuthClient,
   Session,
   User,
+  UserIdentifier,
+  VerificationChallenge,
   PrismaClient as PrismaClientType,
 } from "../node_modules/.prisma/auth-client/index.js";
 
@@ -43,4 +45,12 @@ export function createAuthPrismaAdapter(connectionString: string) {
   return new PrismaPg({ connectionString });
 }
 
-export type { AuditActorType, MemberRole, OAuthClient, Session, User };
+export type {
+  AuditActorType,
+  MemberRole,
+  OAuthClient,
+  Session,
+  User,
+  UserIdentifier,
+  VerificationChallenge,
+};

@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { buildPageMetadata } from "@/lib/metadata";
+import { buildPageMetadata, absoluteUrl } from "@/lib/metadata";
+import { buildBreadcrumbList, SITE_ROOT } from "@/lib/structured-data";
 import { cn } from "@/lib/cn";
 import ui from "@/lib/ui";
 import { coreLegalDocuments, productLegalDocuments } from "@/content/legal";
@@ -12,8 +13,17 @@ export const metadata = buildPageMetadata({
 });
 
 export default function LegalIndexPage() {
+  const breadcrumb = buildBreadcrumbList([
+    SITE_ROOT,
+    { name: "Legal", url: absoluteUrl("/legal") },
+  ]);
+
   return (
     <>
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumb) }}
+      />
       <section className="hero-gradient hero-mesh relative overflow-hidden">
         <div className="pointer-events-none absolute left-1/4 top-10 h-[360px] w-[360px] rounded-full bg-sky-500/10 blur-[100px]" />
         <div className="pointer-events-none absolute right-0 bottom-0 h-[320px] w-[320px] rounded-full bg-fuchsia-500/10 blur-[90px]" />

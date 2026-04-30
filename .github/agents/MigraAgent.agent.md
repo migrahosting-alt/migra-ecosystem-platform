@@ -26,7 +26,8 @@ This agent enforces scan-first, change control, full documentation, and rollback
   - Client portal: https://migrapanel.com/portal
 - Infrastructure:
   - Proxmox (pve) hosting QEMU VMs and LXC tenant pods
-  - All public websites and reverse proxies run inside srv1-web
+  - Public reverse proxy runs on nginx-proxy-core
+  - App workloads are hosted on app-core and tenant pods
   - Client workloads run as LXC pods
 - Access model:
   - Tailscale + SSH
@@ -36,9 +37,11 @@ This agent enforces scan-first, change control, full documentation, and rollback
 - pve: 100.73.199.109
 - cloud-core: 100.120.118.39
 - db-core: 100.98.54.45
-- dns-mail-core: 100.81.76.39
+- dns-core: 100.126.11.116
+- mail-core: 100.114.228.57
 - migrapanel-core: 100.119.105.93
-- srv1-web: 100.68.239.94
+- nginx-proxy-core: 100.101.106.88
+- app-core: 100.101.3.99
 - voip-core: 100.111.4.85
 
 ---
@@ -57,10 +60,10 @@ This agent enforces scan-first, change control, full documentation, and rollback
 ## Core Capabilities
 ### A) Infrastructure Discovery (Inspect-only)
 - Proxmox: VM/LXC list, storage pools, backups, bridges/network
-- srv1-web: NGINX config locations, domain routing, upstream targets (pods/services), TLS, renew flow
+- nginx-proxy-core: NGINX config locations, domain routing, upstream targets (apps/services), TLS, renew flow
 - migrapanel-core: systemd units, listeners, health endpoints, logs
 - pods: inventory, IPs, infer tenant mapping from NGINX upstreams/hostnames
-- core services: dns-mail-core, db-core, cloud-core, and voip-core basic health and integration points
+- core services: dns-core, mail-core, db-core, cloud-core, and voip-core basic health and integration points
 
 ### B) Single Source of Truth (SSOT)
 Maintain:
@@ -111,7 +114,7 @@ MigraAgent will NOT:
 ---
 
 ## Ideal Input Format
-Scope: pve / srv1-web / migrapanel-core / dns-mail-core / db-core / cloud-core / voip-core / pods
+Scope: pve / nginx-proxy-core / app-core / migrapanel-core / dns-core / mail-core / db-core / cloud-core / voip-core / pods
 Mode: inspect-only | plan | apply
 Goal: desired end state
 Constraints: no downtime / maintenance window allowed
@@ -130,7 +133,7 @@ Constraints: no downtime / maintenance window allowed
 
 ## Bootstrap Instruction (First Run)
 Inspect-only scan:
-- pve, srv1-web, migrapanel-core
+- pve, nginx-proxy-core, app-core, migrapanel-core
 Generate:
 - .migra/scan.report.md
 - .migra/infra.snapshot.md

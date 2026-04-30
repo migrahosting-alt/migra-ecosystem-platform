@@ -31,6 +31,13 @@ enum CredentialType {
   @@map("credential_type")
 }
 
+enum IdentifierKind {
+  EMAIL @map("email")
+  PHONE @map("phone")
+
+  @@map("identifier_kind")
+}
+
 enum TokenStatus {
   ACTIVE  @map("active")
   USED    @map("used")
@@ -64,6 +71,23 @@ enum SessionType {
   @@map("session_type")
 }
 
+enum VerificationChallengeKind {
+  SIGNUP_VERIFY    @map("signup_verify")
+  LOGIN_STEPUP     @map("login_stepup")
+  RESET_PASSWORD   @map("reset_password")
+  ADD_IDENTIFIER   @map("add_identifier")
+  CHANGE_IDENTIFIER @map("change_identifier")
+
+  @@map("verification_challenge_kind")
+}
+
+enum VerificationChannel {
+  EMAIL @map("email")
+  SMS   @map("sms")
+
+  @@map("verification_channel")
+}
+
 enum AuditActorType {
   USER    @map("user")
   SYSTEM  @map("system")
@@ -77,9 +101,11 @@ enum AuditActorType {
 
 model User {
   id              String     @id @default(uuid()) @db.Uuid
-  email           String     @unique @db.Citext
+  email           String?    @unique @db.Citext
+  phoneE164       String?    @unique @map("phone_e164") @db.VarChar(20)
   status          UserStatus @default(PENDING)
   emailVerifiedAt DateTime?  @map("email_verified_at") @db.Timestamptz
+  phoneVerifiedAt DateTime?  @map("phone_verified_at") @db.Timestamptz
   displayName     String?    @map("display_name") @db.VarChar(120)
   givenName       String?    @map("given_name") @db.VarChar(120)
   familyName      String?    @map("family_name") @db.VarChar(120)
@@ -94,6 +120,8 @@ model User {
   deletedAt       DateTime?  @map("deleted_at") @db.Timestamptz
 
   credentials        UserCredential[]
+  identifiers        UserIdentifier[]
+  verificationChallenges VerificationChallenge[]
   emailVerifications EmailVerification[]
   passwordResets     PasswordReset[]
   authCodes          OAuthAuthorizationCode[]
@@ -105,8 +133,29 @@ model User {
   ownedOAuthClients  OAuthClient[] @relation("OAuthClientOwner")
   auditLogs          AuditLog[] @relation("AuditActor")
   auditTargets       AuditLog[] @relation("AuditTarget")
+  authEvents         AuthEvent[]
 
   @@map("users")
+}
+
+model UserIdentifier {
+  id              String         @id @default(uuid()) @db.Uuid
+  userId          String         @map("user_id") @db.Uuid
+  kind            IdentifierKind
+  normalizedValue String         @map("normalized_value") @db.VarChar(320)
+  displayValue    String?        @map("display_value") @db.VarChar(320)
+  isVerified      Boolean        @default(false) @map("is_verified")
+  isPrimary       Boolean        @default(false) @map("is_primary")
+  verifiedAt      DateTime?      @map("verified_at") @db.Timestamptz
+  createdAt       DateTime       @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt       DateTime       @updatedAt @map("updated_at") @db.Timestamptz
+
+  user        User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  challenges  VerificationChallenge[]
+
+  @@unique([kind, normalizedValue])
+  @@index([userId, kind])
+  @@map("user_identifiers")
 }
 
 // ─── Credentials ────────────────────────────────────────────────────
@@ -159,6 +208,30 @@ model PasswordReset {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("password_resets")
+}
+
+model VerificationChallenge {
+  id           String                    @id @default(uuid()) @db.Uuid
+  userId       String?                   @map("user_id") @db.Uuid
+  identifierId String?                   @map("identifier_id") @db.Uuid
+  kind         VerificationChallengeKind
+  channel      VerificationChannel
+  codeHash     String                    @map("code_hash")
+  expiresAt    DateTime                  @map("expires_at") @db.Timestamptz
+  attempts     Int                       @default(0)
+  maxAttempts  Int                       @default(5) @map("max_attempts")
+  consumedAt   DateTime?                 @map("consumed_at") @db.Timestamptz
+  createdAt    DateTime                  @default(now()) @map("created_at") @db.Timestamptz
+  ipAddress    String?                   @map("ip_address") @db.Inet
+  userAgent    String?                   @map("user_agent")
+  riskScore    Int                       @default(0) @map("risk_score")
+
+  user       User?          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  identifier UserIdentifier? @relation(fields: [identifierId], references: [id], onDelete: Cascade)
+
+  @@index([identifierId, kind, createdAt])
+  @@index([userId, kind, createdAt])
+  @@map("verification_challenges")
 }
 
 // ─── OAuth Clients ──────────────────────────────────────────────────
@@ -334,6 +407,26 @@ model AuditLog {
   @@index([eventType])
   @@index([createdAt])
   @@map("audit_logs")
+}
+
+model AuthEvent {
+  id           String   @id @default(uuid()) @db.Uuid
+  userId       String?  @map("user_id") @db.Uuid
+  identifier   String?  @db.VarChar(320)
+  eventType    String   @map("event_type") @db.VarChar(80)
+  success      Boolean
+  metadataJson Json     @default("{}") @map("metadata_json")
+  ipAddress    String?  @map("ip_address") @db.Inet
+  userAgent    String?  @map("user_agent")
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt])
+  @@index([identifier, createdAt])
+  @@index([eventType, createdAt])
+  @@index([createdAt])
+  @@map("auth_events")
 }
 
 // ─── Billing Enums ───────────────────────────────────────────────────

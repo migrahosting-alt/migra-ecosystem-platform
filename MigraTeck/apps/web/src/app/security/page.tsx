@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { buildPageMetadata } from "@/lib/metadata";
+import { buildPageMetadata, absoluteUrl } from "@/lib/metadata";
+import { buildBreadcrumbList, SITE_ROOT } from "@/lib/structured-data";
 import { cn } from "@/lib/cn";
 import ui from "@/lib/ui";
 
@@ -38,8 +39,17 @@ const accountSecurity = [
 ] as const;
 
 export default function SecurityPage() {
+  const breadcrumb = buildBreadcrumbList([
+    SITE_ROOT,
+    { name: "Security", url: absoluteUrl("/security") },
+  ]);
+
   return (
     <>
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumb) }}
+      />
       {/* hero */}
       <section className="hero-gradient hero-mesh relative overflow-hidden">
         <div className="pointer-events-none absolute left-0 bottom-0 h-[350px] w-[350px] rounded-full bg-green-500/10 blur-[100px]" />

@@ -15,6 +15,12 @@ function envInt(key: string, fallback: number): number {
   return v ? parseInt(v, 10) : fallback;
 }
 
+function envList(key: string): string[] {
+  const value = process.env[key];
+  if (!value) return [];
+  return value.split(",").map((item) => item.trim()).filter(Boolean);
+}
+
 export const config = {
   /** Server */
   port: envInt("AUTH_PORT", 4000),
@@ -43,11 +49,16 @@ export const config = {
   emailVerifyTtl: envInt("AUTH_EMAIL_VERIFY_TTL", 3600),       // 1 hour
   passwordResetTtl: envInt("AUTH_PASSWORD_RESET_TTL", 1800),   // 30 min
   sessionTtl: envInt("AUTH_SESSION_TTL", 604800),              // 7 days
+  verificationCodeTtl: envInt("AUTH_VERIFICATION_CODE_TTL", 600),
+  verificationCodeMaxAttempts: envInt("AUTH_VERIFICATION_CODE_MAX_ATTEMPTS", 5),
+  verificationResendCooldownSec: envInt("AUTH_VERIFICATION_RESEND_COOLDOWN", 30),
 
   /** Cookie */
   cookieDomain: process.env["AUTH_COOKIE_DOMAIN"] ?? undefined,
   cookieSecure: env("AUTH_COOKIE_SECURE", "false") === "true",
   sessionCookieName: env("AUTH_SESSION_COOKIE", "migraauth_session"),
+  refreshCookieName: env("AUTH_REFRESH_COOKIE", "migraauth_refresh"),
+  firstPartyRefreshClientId: env("AUTH_FIRST_PARTY_REFRESH_CLIENT_ID", "migraauth_web"),
 
   /** CORS */
   corsOrigins: env("AUTH_CORS_ORIGINS", "http://localhost:4100,http://localhost:3000,http://localhost:3200").split(","),
@@ -61,6 +72,25 @@ export const config = {
     process.env["AUTH_EMAIL_FROM"] ??
     process.env["SMTP_FROM"] ??
     "MigraTeck Account <noreply@auth.migrateck.com>",
+  smsProvider: env("AUTH_SMS_PROVIDER", "console"),
+  sms: {
+    console: {
+      logBody: env("AUTH_SMS_CONSOLE_LOG_BODY", "false") === "true",
+    },
+    twilio: {
+      accountSid: process.env["AUTH_SMS_TWILIO_ACCOUNT_SID"] ?? undefined,
+      authToken: process.env["AUTH_SMS_TWILIO_AUTH_TOKEN"] ?? undefined,
+      fromNumber: process.env["AUTH_SMS_TWILIO_FROM_NUMBER"] ?? undefined,
+      messagingServiceSid: process.env["AUTH_SMS_TWILIO_MESSAGING_SERVICE_SID"] ?? undefined,
+      statusCallbackUrl: process.env["AUTH_SMS_TWILIO_STATUS_CALLBACK_URL"] ?? undefined,
+    },
+    testLane: {
+      url: process.env["AUTH_SMS_TEST_LANE_URL"] ?? undefined,
+      apiKey: process.env["AUTH_SMS_TEST_LANE_API_KEY"] ?? undefined,
+      label: process.env["AUTH_SMS_TEST_LANE_LABEL"] ?? "migraauth-staging",
+      allowedNumbers: envList("AUTH_SMS_TEST_LANE_ALLOWED_NUMBERS"),
+    },
+  },
 
   /** Rate limits */
   loginRateLimit: envInt("AUTH_LOGIN_RATE_LIMIT", 10),         // per minute

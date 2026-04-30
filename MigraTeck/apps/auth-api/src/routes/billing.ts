@@ -200,7 +200,7 @@ export async function billingRoutes(app: FastifyInstance): Promise<void> {
     const account = await getOrCreateBillingAccount(billingCtx, {
       orgId,
       orgName: org.name,
-      billingEmail: user.email,
+      billingEmail: user.email ?? `${user.id}@users.auth.migrateck.local`,
     });
 
     await logAuditEvent({

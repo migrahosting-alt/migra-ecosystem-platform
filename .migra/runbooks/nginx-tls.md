@@ -5,7 +5,7 @@
 - No duplicated TLS directives inside vhost server blocks
 - Explicit OCSP policy per SSL vhost (on/off)
 
-## Standard Snippets (srv1-web)
+## Standard Snippets (nginx-proxy-core)
 - /etc/nginx/snippets/tls-common.conf
 - /etc/nginx/snippets/ocsp-on.conf
 - /etc/nginx/snippets/ocsp-off.conf

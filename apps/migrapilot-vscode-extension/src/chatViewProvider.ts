@@ -322,6 +322,43 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       : `I found likely project paths:\n${roots.join("\n")}`;
   }
 
+  private buildGroundedWorkspacePrompt(input: {
+    originalRequest: string;
+    query: string;
+    matchedQuery: string;
+    matches: any[];
+    formattedMatches: string;
+    searchMode: "remote" | "local" | "local-path";
+  }): string {
+    const queryNote = input.matchedQuery.toLowerCase() === input.query.toLowerCase()
+      ? ""
+      : `Resolved workspace query variant: "${input.matchedQuery}".`;
+    const roots = this.inferWorkspaceRootPaths(input.matches, input.query, 3);
+    const rootHint = roots.length > 0
+      ? `Likely project root${roots.length === 1 ? "" : "s"}: ${roots.join(", ")}.`
+      : "";
+    const modeHint = input.searchMode === "local-path"
+      ? "Workspace evidence came from a local path scan."
+      : "Workspace evidence came from verified repo search.";
+
+    return [
+      "Original operator request:",
+      input.originalRequest,
+      "",
+      "Verified workspace context:",
+      `Search target: "${input.query}".`,
+      queryNote,
+      modeHint,
+      rootHint,
+      "```",
+      input.formattedMatches,
+      "```",
+      "",
+      "Act on the original request. Use the verified paths above as grounding; do not replace the task with a search summary.",
+      "If the request asks to implement, fix, migrate, or finish work, inspect the relevant files with tools, make the required edits, verify them, and report only completed work and remaining blockers.",
+    ].filter(Boolean).join("\n");
+  }
+
   private scoreWorkspaceMatch(match: any, query: string): number {
     const file = String(match?.file || match?.path || "").toLowerCase();
     const content = String(match?.text || match?.content || "").toLowerCase();
@@ -389,6 +426,12 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       "audit",
       "explore",
       "inspect",
+      "start",
+      "return",
+      "workstream",
+      "operational",
+      "launch",
+      "gates",
       "software",
       "system",
       "folder",
@@ -408,6 +451,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       "with",
       "way",
       "done",
+      "finish",
       "need",
       "needs",
       "now",
@@ -687,15 +731,14 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
               await this.postAssistantMessage(webviewView, deterministicMatchReply);
               return;
             }
-            text = [
-              `Workspace search results for "${query}" (${matches.length} matches${searchMode === "local-path" ? " via local path scan" : ""}):`,
-              queryNote,
-              "```",
-              formatted,
-              "```",
-              "Use only these verified file paths/results when answering.",
-              "If more precision is needed, ask one focused clarifying question."
-            ].filter(Boolean).join("\n\n");
+            text = this.buildGroundedWorkspacePrompt({
+              originalRequest: text,
+              query,
+              matchedQuery,
+              matches: rankedMatches,
+              formattedMatches: formatted,
+              searchMode,
+            });
           } else {
             await this.postAssistantMessage(webviewView, this.buildDeterministicNoMatchReply(query, candidateQueries));
             return;

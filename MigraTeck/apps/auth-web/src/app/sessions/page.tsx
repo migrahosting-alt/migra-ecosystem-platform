@@ -49,6 +49,7 @@ export default function SessionsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [revoking, setRevoking] = useState<string | null>(null);
+  const [revokingOthers, setRevokingOthers] = useState(false);
 
   const currentSession = useMemo(() => sessions.find((session) => session.current) ?? null, [sessions]);
 
@@ -87,6 +88,23 @@ export default function SessionsPage() {
     }
   }
 
+  async function revokeOtherSessions() {
+    setRevokingOthers(true);
+    try {
+      const response = await authFetch<{ revoked?: boolean }>("/v1/sessions/others", { method: "DELETE" });
+      if (!response.ok) {
+        setError("Failed to revoke other sessions.");
+        return;
+      }
+
+      setSessions((current) => current.filter((session) => session.current));
+    } catch {
+      setError("Network error.");
+    } finally {
+      setRevokingOthers(false);
+    }
+  }
+
   return (
     <div className="min-h-screen text-white" style={brandStyle}>
       <div className="relative isolate flex min-h-screen items-center justify-center overflow-hidden px-4 py-10 sm:px-6">
@@ -109,7 +127,7 @@ export default function SessionsPage() {
                 <div className="inline-flex items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 backdrop-blur-sm">
                   <div className="relative h-11 w-11 shrink-0 overflow-hidden rounded-2xl">
                     <Image
-                      src="/brands/migrateck-logo.png"
+                      src={brand.productKey === "annoupale" ? "/brands/products/annoupale-official_logo.png" : "/brands/migrateck-logo.png"}
                       alt={brand.productName}
                       fill
                       className="object-contain"
@@ -150,6 +168,14 @@ export default function SessionsPage() {
                   <p className="mt-1 text-[11px] text-white/40">Latest sign-in</p>
                 </div>
               </div>
+
+              {sessions.length > 1 ? (
+                <div className="flex justify-end">
+                  <Button type="button" variant="secondary" size="sm" onClick={revokeOtherSessions} disabled={revokingOthers}>
+                    {revokingOthers ? "Revoking others…" : "Revoke other sessions"}
+                  </Button>
+                </div>
+              ) : null}
 
               {/* ── error ─── */}
               {error ? (

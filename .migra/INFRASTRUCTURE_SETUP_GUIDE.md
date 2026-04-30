@@ -346,15 +346,18 @@ If automated monitoring fails, contact:
 3. **Phone**: Emergency on-call rotation
 
 **Critical Services Priority:**
-1. Database (db-core: 100.98.54.45)
-2. Backend API (migrapanel-core: 100.119.105.93)
-3. NGINX (srv1-web: 100.68.239.94)
-4. Mail + DNS (dns-mail-core: 100.81.76.39)
-5. Cloud services (cloud-core: 100.120.118.39)
-6. Voice (voip-core: 100.111.4.85)
-7. Proxmox (pve: 100.73.199.109)
+1. Database (`db-core`: `100.77.51.91`)
+2. Backend API (`migrapanel-core`: `100.68.175.27`)
+3. Edge NGINX and reverse proxy (`nginx-proxy-core`: `100.101.106.88`)
+4. Dedicated mail (`mail-core`: `100.114.228.57`, public `138.201.255.45`)
+5. Primary DNS (`dns-core`: `100.126.11.116`)
+6. Secondary DNS (`ns2-dns`: public `138.201.255.35`)
+7. Cloud services (`cloud-core`: `100.113.190.42`)
+8. Application runtime (`app-core`: `100.101.3.99`)
+9. Voice (`voip-core`: `100.111.4.85`)
+10. Proxmox (`pve`: `100.73.199.109`, public `138.201.255.55`)
 
 ---
 
-**Last Updated:** 2026-01-11 15:35:00 UTC  
-**Next Review:** 2026-01-18 15:00:00 UTC
+**Last Updated:** 2026-04-17 02:05:00 UTC  
+**Next Review:** 2026-04-24 15:00:00 UTC

@@ -1,4 +1,4 @@
-# Runbook: NGINX Domain Sync (srv1-web)
+# Runbook: NGINX Domain Sync (nginx-proxy-core)
 
 Scope: Align migrahosting.com ↔ MigraPanel domains safely
 Risk: MED (requires NGINX reload)
@@ -28,15 +28,15 @@ Cons: slightly more config.
 
 1) Backup current vhost:
 
-- `ssh srv1-web "sudo cp -a /etc/nginx/sites-available/migrapanel.com.conf /etc/nginx/sites-available/migrapanel.com.conf.$(date +%F_%H%M%S).bak"`
+- `ssh nginx-proxy-core "sudo cp -a /etc/nginx/sites-available/migrapanel.com.conf /etc/nginx/sites-available/migrapanel.com.conf.$(date +%F_%H%M%S).bak"`
 
 2) Validate config syntax:
 
-- `ssh srv1-web "sudo nginx -t"`
+- `ssh nginx-proxy-core "sudo nginx -t"`
 
 3) Reload (ONLY with approval):
 
-- `ssh srv1-web "sudo systemctl reload nginx"`
+- `ssh nginx-proxy-core "sudo systemctl reload nginx"`
 
 ## Rollback
 

@@ -171,7 +171,53 @@ const MIGRADRIVE_AUTH_PATHS = new Set([
   "/verify-email",
 ]);
 
+export const MIGRAMARKET_SITE_URL = "https://migramarket.com";
+
+export const migramarketAuthPortalBranding: AuthPortalBranding = {
+  host: MIGRAMARKET_SITE_URL,
+  productName: "MigraMarket",
+  shortName: "MigraMarket",
+  sectionLabel: "MigraMarket workspace access",
+  headerLabel: "Marketing operations",
+  siteUrl: MIGRAMARKET_SITE_URL,
+  appLandingPath: "/app/migramarket",
+  siteLabel: "MigraMarket Home",
+  heading: "Sign in to your standalone MigraMarket workspace",
+  description:
+    "Manage daily marketing execution across social, content, SEO, email, analytics, and autopilot workflows without bouncing through another product shell.",
+  featureBullets: [
+    "Password login gives you direct access to your MigraMarket campaign workspace and publishing controls.",
+    "Magic links and SMS codes reduce friction for marketing teams signing in fast from any device.",
+  ],
+  recoveryLabel: "MigraMarket account recovery",
+  recoveryHeading: "Reset your MigraMarket password",
+  recoveryDescription:
+    "Send a recovery link to the email address tied to your MigraMarket workspace so you can regain access safely.",
+  resetHeading: "Set a new MigraMarket password",
+  resetDescription:
+    "Choose a new password for your MigraMarket workspace to restore access to your campaigns and publishing tools.",
+  verifyLabel: "MigraMarket account setup",
+  verifyHeading: "Verify your MigraMarket email",
+  verifyDescription:
+    "Confirm your email address to activate your MigraMarket workspace and continue into the marketing console.",
+  signInLabel: "Sign in to MigraMarket",
+  invalidCredentialsMessage: "Invalid MigraMarket credentials.",
+  verifyEmailMessage: "Verify your email before logging in to MigraMarket.",
+  magicLinkMessage: "Magic link sent. Check your inbox for MigraMarket access.",
+  smsHeading: "Or sign in with a text message",
+  smsDescription:
+    "Use the mobile number saved on your account to receive a six-digit MigraMarket sign-in code.",
+  footerLabel: "MigraMarket workspace",
+  footerHeading: "Standalone marketing operations and account recovery from one secure surface.",
+  footerDescription:
+    "Use this portal to create accounts, verify access, recover credentials, and reach MigraMarket support.",
+  supportEmail: "support@migramarketing.com",
+  cookieDescription:
+    "MigraMarket uses essential storage for secure authentication, session continuity, and consent preferences. Optional analytics or preference storage should only run after consent.",
+};
+
 export const VPS_PORTAL_HOST = "vps.migrahosting.com";
+const MIGRAMARKET_HOSTS = new Set(["migramarket.com", "www.migramarket.com"]);
 const MIGRATECK_ACCOUNT_HOSTS = new Set([
   "migrateck.com",
   "www.migrateck.com",
@@ -204,6 +250,10 @@ export function resolveAuthPortalBranding(hostname: string | null | undefined): 
 
   if (normalizedHost === VPS_PORTAL_HOST) {
     return vpsAuthPortalBranding;
+  }
+
+  if (MIGRAMARKET_HOSTS.has(normalizedHost)) {
+    return migramarketAuthPortalBranding;
   }
 
   if (MIGRATECK_ACCOUNT_HOSTS.has(normalizedHost)) {

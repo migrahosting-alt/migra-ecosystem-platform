@@ -1,36 +1,109 @@
 /**
- * Users module — account creation, lookup, status management.
- * Passwords live in user_credentials (not on the user row).
+ * Users module — account creation, lookup, identifiers, verification, recovery.
  */
 import { db } from "../../lib/db.js";
 import { hashPassword, verifyPassword } from "../../lib/password.js";
-import { generateToken, hashToken } from "../../lib/crypto.js";
+import { generateNumericCode, generateToken, hashToken } from "../../lib/crypto.js";
 import { config } from "../../config/env.js";
-import type { User } from "../../prisma-client.js";
+import type { ParsedIdentifier } from "../../lib/identifier.js";
+import type {
+  User,
+  UserIdentifier,
+  VerificationChallenge,
+} from "../../prisma-client.js";
 
-export type { User };
+export type { User, UserIdentifier, VerificationChallenge };
+
+function buildUserIdentityPatch(identifier: ParsedIdentifier) {
+  if (identifier.kind === "EMAIL") {
+    return {
+      email: identifier.normalized,
+      phoneE164: null,
+    };
+  }
+
+  return {
+    email: null,
+    phoneE164: identifier.normalized,
+  };
+}
 
 export async function createUser(
-  email: string,
+  identifier: ParsedIdentifier,
   password: string,
   displayName?: string,
-): Promise<User> {
+): Promise<{ user: User; identifier: UserIdentifier }> {
   const secretHash = await hashPassword(password);
-  return db.user.create({
-    data: {
-      email,
-      displayName: displayName ?? null,
-      status: "PENDING",
-      credentials: {
-        create: {
-          type: "PASSWORD",
-          secretHash,
-          priority: 0,
-          isEnabled: true,
+
+  return db.$transaction(async (tx) => {
+    const user = await tx.user.create({
+      data: {
+        ...buildUserIdentityPatch(identifier),
+        displayName: displayName ?? null,
+        status: "PENDING",
+        credentials: {
+          create: {
+            type: "PASSWORD",
+            secretHash,
+            priority: 0,
+            isEnabled: true,
+          },
         },
+      },
+    });
+
+    const createdIdentifier = await tx.userIdentifier.create({
+      data: {
+        userId: user.id,
+        kind: identifier.kind,
+        normalizedValue: identifier.normalized,
+        displayValue: identifier.display,
+        isPrimary: true,
+      },
+    });
+
+    return { user, identifier: createdIdentifier };
+  });
+}
+
+export async function findIdentifierByParsedValue(
+  identifier: ParsedIdentifier,
+): Promise<UserIdentifier | null> {
+  return db.userIdentifier.findUnique({
+    where: {
+      kind_normalizedValue: {
+        kind: identifier.kind,
+        normalizedValue: identifier.normalized,
       },
     },
   });
+}
+
+export async function findIdentifierById(id: string): Promise<UserIdentifier | null> {
+  return db.userIdentifier.findUnique({ where: { id } });
+}
+
+export async function findUserByIdentifier(
+  identifier: ParsedIdentifier,
+): Promise<{ user: User; identifier: UserIdentifier } | null> {
+  const match = await db.userIdentifier.findUnique({
+    where: {
+      kind_normalizedValue: {
+        kind: identifier.kind,
+        normalizedValue: identifier.normalized,
+      },
+    },
+    include: { user: true },
+  });
+
+  if (!match) {
+    return null;
+  }
+
+  return {
+    user: match.user,
+    identifier: match,
+  };
 }
 
 export async function findUserByEmail(email: string): Promise<User | null> {
@@ -54,12 +127,78 @@ export async function verifyUserPassword(
 }
 
 export async function markEmailVerified(userId: string): Promise<User> {
-  return db.user.update({
-    where: { id: userId },
-    data: {
-      emailVerifiedAt: new Date(),
-      status: "ACTIVE",
-    },
+  return db.$transaction(async (tx) => {
+    const user = await tx.user.update({
+      where: { id: userId },
+      data: {
+        emailVerifiedAt: new Date(),
+        status: "ACTIVE",
+      },
+    });
+
+    if (user.email) {
+      await tx.userIdentifier.updateMany({
+        where: {
+          userId,
+          kind: "EMAIL",
+          normalizedValue: user.email,
+        },
+        data: {
+          isVerified: true,
+          verifiedAt: new Date(),
+          isPrimary: true,
+        },
+      });
+    }
+
+    return user;
+  });
+}
+
+export async function markIdentifierVerified(identifierId: string): Promise<{
+  user: User;
+  identifier: UserIdentifier;
+}> {
+  return db.$transaction(async (tx) => {
+    const identifier = await tx.userIdentifier.update({
+      where: { id: identifierId },
+      data: {
+        isVerified: true,
+        verifiedAt: new Date(),
+      },
+    });
+
+    const user = await tx.user.update({
+      where: { id: identifier.userId },
+      data: {
+        status: "ACTIVE",
+        ...(identifier.kind === "EMAIL"
+          ? {
+              email: identifier.normalizedValue,
+              emailVerifiedAt: new Date(),
+            }
+          : {
+              phoneE164: identifier.normalizedValue,
+              phoneVerifiedAt: new Date(),
+            }),
+      },
+    });
+
+    await tx.userIdentifier.updateMany({
+      where: {
+        userId: identifier.userId,
+        kind: identifier.kind,
+        id: { not: identifier.id },
+      },
+      data: { isPrimary: false },
+    });
+
+    const primaryIdentifier = await tx.userIdentifier.update({
+      where: { id: identifier.id },
+      data: { isPrimary: true },
+    });
+
+    return { user, identifier: primaryIdentifier };
   });
 }
 
@@ -144,6 +283,102 @@ export async function consumeEmailVerification(
   });
 
   return { userId: record.userId };
+}
+
+export async function createVerificationChallenge(input: {
+  userId?: string | null;
+  identifierId: string;
+  kind: "SIGNUP_VERIFY" | "LOGIN_STEPUP" | "RESET_PASSWORD" | "ADD_IDENTIFIER" | "CHANGE_IDENTIFIER";
+  channel: "EMAIL" | "SMS";
+  ipAddress?: string;
+  userAgent?: string;
+  maxAttempts?: number;
+}): Promise<{ challenge: VerificationChallenge; code: string }> {
+  const code = generateNumericCode();
+  const codeHash = hashToken(code);
+  const expiresAt = new Date(Date.now() + config.verificationCodeTtl * 1000);
+
+  const challenge = await db.verificationChallenge.create({
+    data: {
+      userId: input.userId ?? null,
+      identifierId: input.identifierId,
+      kind: input.kind,
+      channel: input.channel,
+      codeHash,
+      expiresAt,
+      maxAttempts: input.maxAttempts ?? config.verificationCodeMaxAttempts,
+      ipAddress: input.ipAddress ?? null,
+      userAgent: input.userAgent ?? null,
+    },
+  });
+
+  return { challenge, code };
+}
+
+export async function getVerificationChallenge(
+  challengeId: string,
+): Promise<(VerificationChallenge & { identifier: UserIdentifier | null }) | null> {
+  return db.verificationChallenge.findUnique({
+    where: { id: challengeId },
+    include: { identifier: true },
+  });
+}
+
+export async function getLatestVerificationChallengeForIdentifier(input: {
+  identifierId: string;
+  kind: "SIGNUP_VERIFY" | "LOGIN_STEPUP" | "RESET_PASSWORD" | "ADD_IDENTIFIER" | "CHANGE_IDENTIFIER";
+}): Promise<VerificationChallenge | null> {
+  return db.verificationChallenge.findFirst({
+    where: {
+      identifierId: input.identifierId,
+      kind: input.kind,
+    },
+    orderBy: { createdAt: "desc" },
+  });
+}
+
+export async function consumeVerificationChallenge(input: {
+  challengeId: string;
+  code: string;
+  expectedKind?: "SIGNUP_VERIFY" | "LOGIN_STEPUP" | "RESET_PASSWORD" | "ADD_IDENTIFIER" | "CHANGE_IDENTIFIER";
+}): Promise<
+  | { ok: true; challenge: VerificationChallenge }
+  | { ok: false; reason: "not_found" | "expired" | "max_attempts" | "invalid_code" }
+> {
+  const challenge = await db.verificationChallenge.findUnique({
+    where: { id: input.challengeId },
+  });
+
+  if (!challenge || challenge.consumedAt) {
+    return { ok: false, reason: "not_found" };
+  }
+  if (input.expectedKind && challenge.kind !== input.expectedKind) {
+    return { ok: false, reason: "not_found" };
+  }
+  if (challenge.expiresAt <= new Date()) {
+    return { ok: false, reason: "expired" };
+  }
+  if (challenge.attempts >= challenge.maxAttempts) {
+    return { ok: false, reason: "max_attempts" };
+  }
+
+  if (hashToken(input.code) !== challenge.codeHash) {
+    await db.verificationChallenge.update({
+      where: { id: challenge.id },
+      data: { attempts: { increment: 1 } },
+    });
+    return { ok: false, reason: "invalid_code" };
+  }
+
+  const consumed = await db.verificationChallenge.update({
+    where: { id: challenge.id },
+    data: {
+      consumedAt: new Date(),
+      attempts: { increment: 1 },
+    },
+  });
+
+  return { ok: true, challenge: consumed };
 }
 
 export async function createPasswordResetToken(

@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { downloadGroups } from "@/content/downloads";
-import { buildPageMetadata } from "@/lib/metadata";
+import { buildPageMetadata, absoluteUrl } from "@/lib/metadata";
+import { buildBreadcrumbList, SITE_ROOT } from "@/lib/structured-data";
 import { cn } from "@/lib/cn";
 import ui from "@/lib/ui";
 
@@ -19,8 +20,17 @@ const releaseStatuses: Record<string, { label: string; className: string }> = {
 };
 
 export default function DownloadsPage() {
+  const breadcrumb = buildBreadcrumbList([
+    SITE_ROOT,
+    { name: "Downloads", url: absoluteUrl("/downloads") },
+  ]);
+
   return (
     <>
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumb) }}
+      />
       {/* hero */}
       <section className="hero-gradient hero-mesh relative overflow-hidden">
         <div className="pointer-events-none absolute -left-32 top-40 h-[400px] w-[400px] rounded-full bg-cyan-400/15 blur-[100px]" />

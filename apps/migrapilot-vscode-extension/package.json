@@ -43,6 +43,373 @@
         }
       ]
     },
+    "chatParticipants": [
+      {
+        "id": "migrateck.migrapilot",
+        "name": "migrapilot",
+        "fullName": "MigraPilot",
+        "description": "Operate on this workspace with MigraPilot",
+        "isSticky": true
+      }
+    ],
+    "mcpServerDefinitionProviders": [
+      {
+        "id": "migrateck.migrapilot.mcp",
+        "label": "MigraPilot MCP"
+      }
+    ],
+    "languageModelTools": [
+      {
+        "name": "migrapilot_searchWorkspace",
+        "displayName": "MigraPilot Search Workspace",
+        "canBeReferencedInPrompt": true,
+        "toolReferenceName": "migrapilotSearch",
+        "icon": "$(search)",
+        "userDescription": "Search workspace text with ripgrep.",
+        "modelDescription": "Search the open workspace for text matches. Use before answering questions about unknown files, symbols, routes, copy, or implementations. Returns verified file paths, line numbers, and matching text.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "query": { "type": "string", "description": "Text or regex to search for." },
+            "include": { "type": "string", "description": "Optional glob include pattern, for example **/*.ts." },
+            "maxResults": { "type": "number", "description": "Maximum matches to return." }
+          },
+          "required": ["query"]
+        }
+      },
+      {
+        "name": "migrapilot_listFiles",
+        "displayName": "MigraPilot List Files",
+        "canBeReferencedInPrompt": true,
+        "toolReferenceName": "migrapilotFiles",
+        "icon": "$(files)",
+        "userDescription": "List files in the open workspace.",
+        "modelDescription": "List workspace files using include/exclude globs. Use to discover project structure before reading or editing files.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "include": { "type": "string", "description": "Glob include pattern, defaults to **/*." },
+            "exclude": { "type": "string", "description": "Glob exclude pattern." },
+            "maxResults": { "type": "number", "description": "Maximum files to return." }
+          }
+        }
+      },
+      {
+        "name": "migrapilot_readFile",
+        "displayName": "MigraPilot Read File",
+        "canBeReferencedInPrompt": true,
+        "toolReferenceName": "migrapilotRead",
+        "icon": "$(file-code)",
+        "userDescription": "Read a workspace file.",
+        "modelDescription": "Read a file from the open workspace. Use with verified paths only. Supports line ranges and truncation.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "path": { "type": "string", "description": "Workspace-relative file path." },
+            "startLine": { "type": "number", "description": "1-based start line." },
+            "endLine": { "type": "number", "description": "1-based end line." },
+            "maxChars": { "type": "number", "description": "Maximum characters to return." }
+          },
+          "required": ["path"]
+        }
+      },
+      {
+        "name": "migrapilot_diagnostics",
+        "displayName": "MigraPilot Diagnostics",
+        "canBeReferencedInPrompt": true,
+        "toolReferenceName": "migrapilotDiagnostics",
+        "icon": "$(warning)",
+        "userDescription": "Read VS Code diagnostics.",
+        "modelDescription": "Return current VS Code diagnostics for one file or the whole workspace. Use before and after edits to understand TypeScript, lint, and language-server errors.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "path": { "type": "string", "description": "Optional workspace-relative file path." }
+          }
+        }
+      },
+      {
+        "name": "migrapilot_gitDiff",
+        "displayName": "MigraPilot Git Diff",
+        "canBeReferencedInPrompt": true,
+        "toolReferenceName": "migrapilotDiff",
+        "icon": "$(diff)",
+        "userDescription": "Read git diff.",
+        "modelDescription": "Read current git diff, optionally for one path or staged changes. Use for review, summary, and avoiding overwrite of user edits.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "path": { "type": "string", "description": "Optional workspace-relative path." },
+            "staged": { "type": "boolean", "description": "Read staged diff instead of unstaged diff." },
+            "maxChars": { "type": "number", "description": "Maximum characters to return." }
+          }
+        }
+      },
+      {
+        "name": "migrapilot_runCommand",
+        "displayName": "MigraPilot Run Command",
+        "canBeReferencedInPrompt": true,
+        "toolReferenceName": "migrapilotRun",
+        "icon": "$(terminal)",
+        "userDescription": "Run a workspace shell command after confirmation.",
+        "modelDescription": "Run a command in the workspace shell. Use for tests, builds, formatters, and diagnostics. This has side effects and requires user confirmation.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "command": { "type": "string", "description": "Shell command to run." },
+            "cwd": { "type": "string", "description": "Optional workspace-relative working directory." },
+            "timeoutMs": { "type": "number", "description": "Timeout in milliseconds." },
+            "maxChars": { "type": "number", "description": "Maximum output characters." }
+          },
+          "required": ["command"]
+        }
+      },
+      {
+        "name": "migrapilot_replaceInFile",
+        "displayName": "MigraPilot Replace In File",
+        "canBeReferencedInPrompt": true,
+        "toolReferenceName": "migrapilotReplace",
+        "icon": "$(replace)",
+        "userDescription": "Replace exact text in a workspace file after confirmation.",
+        "modelDescription": "Apply a precise single-file replacement. Use only after reading the target file and matching exact old text. Requires user confirmation.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "path": { "type": "string", "description": "Workspace-relative file path." },
+            "oldText": { "type": "string", "description": "Exact existing text to replace." },
+            "newText": { "type": "string", "description": "Replacement text." }
+          },
+          "required": ["path", "oldText", "newText"]
+        }
+      },
+      {
+        "name": "migrapilot_createFile",
+        "displayName": "MigraPilot Create File",
+        "canBeReferencedInPrompt": true,
+        "toolReferenceName": "migrapilotCreateFile",
+        "icon": "$(new-file)",
+        "userDescription": "Create or overwrite a workspace file after confirmation.",
+        "modelDescription": "Create a new file or overwrite an existing file when overwrite is true. Requires user confirmation.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "path": { "type": "string", "description": "Workspace-relative file path." },
+            "content": { "type": "string", "description": "Full file content." },
+            "overwrite": { "type": "boolean", "description": "Whether to overwrite if the file exists." }
+          },
+          "required": ["path", "content"]
+        }
+      },
+      {
+        "name": "migrapilot_batchWriteFiles",
+        "displayName": "MigraPilot Batch Write Files",
+        "canBeReferencedInPrompt": true,
+        "toolReferenceName": "migrapilotBatchWrite",
+        "icon": "$(files)",
+        "userDescription": "Write multiple workspace files after confirmation.",
+        "modelDescription": "Create or overwrite multiple files in one confirmed operation. Use for multi-file website/app implementation after planning exact file contents.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "files": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "path": { "type": "string" },
+                  "content": { "type": "string" },
+                  "overwrite": { "type": "boolean" }
+                },
+                "required": ["path", "content"]
+              }
+            }
+          },
+          "required": ["files"]
+        }
+      },
+      {
+        "name": "migrapilot_moveFile",
+        "displayName": "MigraPilot Move File",
+        "canBeReferencedInPrompt": true,
+        "toolReferenceName": "migrapilotMove",
+        "icon": "$(move)",
+        "userDescription": "Move or rename a workspace file after confirmation.",
+        "modelDescription": "Move or rename a workspace file. Use when restructuring a site or app. Requires user confirmation.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "from": { "type": "string" },
+            "to": { "type": "string" },
+            "overwrite": { "type": "boolean" }
+          },
+          "required": ["from", "to"]
+        }
+      },
+      {
+        "name": "migrapilot_deleteFile",
+        "displayName": "MigraPilot Delete File",
+        "canBeReferencedInPrompt": true,
+        "toolReferenceName": "migrapilotDelete",
+        "icon": "$(trash)",
+        "userDescription": "Move a workspace file or folder to trash after confirmation.",
+        "modelDescription": "Delete a workspace file or folder by moving it to trash. Use only when clearly required. Requires user confirmation.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "path": { "type": "string" },
+            "recursive": { "type": "boolean" }
+          },
+          "required": ["path"]
+        }
+      },
+      {
+        "name": "migrapilot_applyPatch",
+        "displayName": "MigraPilot Apply Patch",
+        "canBeReferencedInPrompt": true,
+        "toolReferenceName": "migrapilotPatch",
+        "icon": "$(git-pull-request)",
+        "userDescription": "Check or apply a unified git patch after confirmation.",
+        "modelDescription": "Use git apply to check or apply a unified patch across files. Prefer checkOnly first for risky patches. Applying requires user confirmation.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "patch": { "type": "string" },
+            "checkOnly": { "type": "boolean" }
+          },
+          "required": ["patch"]
+        }
+      },
+      {
+        "name": "migrapilot_scaffoldWebsite",
+        "displayName": "MigraPilot Scaffold Website",
+        "canBeReferencedInPrompt": true,
+        "toolReferenceName": "migrapilotScaffoldSite",
+        "icon": "$(globe)",
+        "userDescription": "Create a Vite React TypeScript website starter after confirmation.",
+        "modelDescription": "Scaffold a polished Vite React TypeScript website starter with package.json, index.html, source files, and responsive CSS. Use to start a new website/app. Can optionally run npm install.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "path": { "type": "string" },
+            "name": { "type": "string" },
+            "framework": { "type": "string", "enum": ["vite-react-ts"] },
+            "install": { "type": "boolean" }
+          },
+          "required": ["path"]
+        }
+      },
+      {
+        "name": "migrapilot_startDevServer",
+        "displayName": "MigraPilot Start Dev Server",
+        "canBeReferencedInPrompt": true,
+        "toolReferenceName": "migrapilotStartServer",
+        "icon": "$(debug-start)",
+        "userDescription": "Start a local dev server after confirmation.",
+        "modelDescription": "Start a long-running local dev server and capture output plus detected localhost URL. Use before previewing or browser-auditing a website.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "command": { "type": "string" },
+            "cwd": { "type": "string" },
+            "id": { "type": "string" }
+          }
+        }
+      },
+      {
+        "name": "migrapilot_stopDevServer",
+        "displayName": "MigraPilot Stop Dev Server",
+        "canBeReferencedInPrompt": true,
+        "toolReferenceName": "migrapilotStopServer",
+        "icon": "$(debug-stop)",
+        "userDescription": "Stop MigraPilot-managed dev servers after confirmation.",
+        "modelDescription": "Stop one or all dev servers previously started by MigraPilot.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "id": { "type": "string" }
+          }
+        }
+      },
+      {
+        "name": "migrapilot_listDevServers",
+        "displayName": "MigraPilot List Dev Servers",
+        "canBeReferencedInPrompt": true,
+        "toolReferenceName": "migrapilotServers",
+        "icon": "$(server-process)",
+        "userDescription": "List MigraPilot-managed dev servers.",
+        "modelDescription": "Return running MigraPilot-managed dev server ids, commands, detected URLs, and recent output.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {}
+        }
+      },
+      {
+        "name": "migrapilot_openPreview",
+        "displayName": "MigraPilot Open Preview",
+        "canBeReferencedInPrompt": true,
+        "toolReferenceName": "migrapilotPreview",
+        "icon": "$(preview)",
+        "userDescription": "Open a URL in VS Code Simple Browser or externally.",
+        "modelDescription": "Open a website preview URL for the user. Use after starting a dev server.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "url": { "type": "string" },
+            "external": { "type": "boolean" }
+          },
+          "required": ["url"]
+        }
+      },
+      {
+        "name": "migrapilot_browserAudit",
+        "displayName": "MigraPilot Browser Audit",
+        "canBeReferencedInPrompt": true,
+        "toolReferenceName": "migrapilotBrowserAudit",
+        "icon": "$(device-camera)",
+        "userDescription": "Use Playwright on demand to screenshot and audit desktop/mobile layouts.",
+        "modelDescription": "Run an on-demand Playwright audit against a URL. Captures desktop and mobile screenshots, console/page errors, horizontal overflow, text overflow, links, and a JSON report.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "url": { "type": "string" },
+            "outDir": { "type": "string" },
+            "waitMs": { "type": "number" }
+          },
+          "required": ["url"]
+        }
+      },
+      {
+        "name": "migrapilot_websiteTask",
+        "displayName": "MigraPilot Website Task",
+        "canBeReferencedInPrompt": true,
+        "toolReferenceName": "migrapilotWebsiteTask",
+        "icon": "$(checklist)",
+        "userDescription": "Prepare a full website/app build loop with files, diagnostics, and recommended next steps.",
+        "modelDescription": "Use at the start of a website/app task. Returns discovered app files, diagnostics, and the recommended edit-build-preview-audit loop.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "goal": { "type": "string" },
+            "projectPath": { "type": "string" },
+            "url": { "type": "string" }
+          },
+          "required": ["goal"]
+        }
+      },
+      {
+        "name": "migrapilot_activeContext",
+        "displayName": "MigraPilot Active Context",
+        "canBeReferencedInPrompt": true,
+        "toolReferenceName": "migrapilotContext",
+        "icon": "$(symbol-keyword)",
+        "userDescription": "Read active editor context.",
+        "modelDescription": "Return open workspace folders, active file, visible files, and selected text. Use to ground requests like 'fix this' or 'explain this'.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {}
+        }
+      }
+    ],
     "commands": [
       {
         "command": "migrapilot.openChat",
@@ -231,6 +598,42 @@
           "type": "string",
           "default": "",
           "markdownDescription": "Bearer JWT used for pilot-api requests. Required for remote or production brain URLs."
+        },
+        "migrapilot.nativeChat.provider": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "local",
+            "haiku",
+            "sonnet",
+            "opus"
+          ],
+          "default": "auto",
+          "description": "Preferred model provider for the native @migrapilot chat participant. Auto lets pilot-api route by task; Sonnet is best for coding-agent work."
+        },
+        "migrapilot.nativeChat.vscodeToolBridge.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Allow @migrapilot to use VS Code registered chat tools and MCP tools before calling the MigraPilot backend."
+        },
+        "migrapilot.nativeChat.vscodeToolBridge.maxTools": {
+          "type": "number",
+          "default": 128,
+          "minimum": 1,
+          "maximum": 256,
+          "description": "Maximum VS Code tools to expose to the @migrapilot tool bridge."
+        },
+        "migrapilot.nativeChat.vscodeToolBridge.maxRounds": {
+          "type": "number",
+          "default": 4,
+          "minimum": 1,
+          "maximum": 8,
+          "description": "Maximum VS Code tool-calling rounds before @migrapilot sends results to the MigraPilot backend."
+        },
+        "migrapilot.mcp.enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Expose MigraPilot as a standalone MCP server. Disabled by default because @migrapilot can already use VS Code and MCP tools through the native tool bridge."
         },
         "migrapilot.completions.enabled": {
           "type": "boolean",

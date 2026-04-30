@@ -1,6 +1,7 @@
 import Image from "next/image";
 import Link from "next/link";
-import { buildPageMetadata } from "@/lib/metadata";
+import { buildPageMetadata, absoluteUrl } from "@/lib/metadata";
+import { buildBreadcrumbList, SITE_ROOT } from "@/lib/structured-data";
 
 export const metadata = buildPageMetadata({
   title: "Ecosystem",
@@ -184,9 +185,17 @@ function ProductCard({
 
 export default function MigraTeckPortfolioPage() {
   const panelProducts = allProducts.slice(0, 8);
+  const breadcrumb = buildBreadcrumbList([
+    SITE_ROOT,
+    { name: "Ecosystem", url: absoluteUrl("/portfolio") },
+  ]);
 
   return (
     <main className="relative overflow-hidden bg-[#071121] text-white">
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumb) }}
+      />
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_18%_12%,rgba(59,130,246,0.24),transparent_32%),radial-gradient(circle_at_84%_20%,rgba(99,102,241,0.16),transparent_26%),linear-gradient(180deg,rgba(20,50,132,0.30),rgba(7,17,33,1)_24%,rgba(5,10,20,1)_100%)]" />
       <div className="absolute inset-0 bg-[linear-gradient(to_bottom,rgba(255,255,255,0.02),transparent_12%,transparent_88%,rgba(255,255,255,0.02))]" />
       <div className="absolute left-[-10rem] top-32 h-[30rem] w-[30rem] rounded-full bg-blue-500/10 blur-3xl" />

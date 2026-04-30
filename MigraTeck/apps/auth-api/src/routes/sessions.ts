@@ -3,7 +3,7 @@
  */
 import type { FastifyInstance } from "fastify";
 import { sessionIdSchema } from "../lib/schemas.js";
-import { listUserSessions, revokeSession } from "../modules/sessions/index.js";
+import { listUserSessions, revokeOtherUserSessions, revokeSession } from "../modules/sessions/index.js";
 import { logAuditEvent } from "../modules/audit/index.js";
 import { requireAuthenticatedUser, getClientIp } from "../middleware/session.js";
 
@@ -55,5 +55,29 @@ export async function sessionRoutes(app: FastifyInstance): Promise<void> {
     });
 
     return reply.code(200).send({ revoked: true });
+  });
+
+  // ── DELETE /v1/sessions/others ────────────────────────────────────
+  app.delete("/v1/sessions/others", { preHandler: requireAuthenticatedUser }, async (request, reply) => {
+    const user = request.authUser!;
+    const currentSessionId = request.authSession?.id;
+    const ip = getClientIp(request);
+    const ua = request.headers["user-agent"];
+
+    if (!currentSessionId) {
+      return reply.code(400).send({ error: { code: "session_required", message: "Current session is unavailable." } });
+    }
+
+    const revokedCount = await revokeOtherUserSessions(user.id, currentSessionId);
+
+    await logAuditEvent({
+      actorUserId: user.id,
+      eventType: "SESSION_REVOKE_OTHERS",
+      eventData: { revokedCount },
+      ipAddress: ip,
+      userAgent: ua,
+    });
+
+    return reply.code(200).send({ revoked: true, revoked_count: revokedCount });
   });
 }

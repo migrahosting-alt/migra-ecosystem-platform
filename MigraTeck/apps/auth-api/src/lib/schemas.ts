@@ -5,6 +5,7 @@ export {
   forgotPasswordSchema,
   resetPasswordSchema,
   verifyEmailSchema,
+  signupVerifySchema,
   resendVerificationSchema,
   authorizeQuerySchema,
   tokenExchangeSchema,

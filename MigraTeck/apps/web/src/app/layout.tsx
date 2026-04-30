@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Manrope, Space_Grotesk } from "next/font/google";
 import { PublicChrome } from "@/components/layout/PublicChrome";
+import { GoogleAnalytics } from "@/components/analytics/GoogleAnalytics";
 import { getAccountLinks } from "@/lib/account-links";
 import { absoluteUrl, allowIndexing, defaultPageDescription, siteUrl } from "@/lib/metadata";
 import "./globals.css";
@@ -100,6 +101,7 @@ export default function RootLayout({
           }}
         />
         <PublicChrome accountLinks={accountLinks}>{children}</PublicChrome>
+        <GoogleAnalytics />
       </body>
     </html>
   );

@@ -43,7 +43,7 @@ function LogoutContent() {
               <div className="mb-6 flex justify-center">
                 <div className="relative h-11 w-11 overflow-hidden rounded-2xl">
                   <Image
-                    src="/brands/migrateck-logo.png"
+                    src={brand.productKey === "annoupale" ? "/brands/products/annoupale-official_logo.png" : "/brands/migrateck-logo.png"}
                     alt={brand.productName}
                     fill
                     className="object-contain"

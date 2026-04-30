@@ -32,11 +32,13 @@ Use this agent when the task is broader than a single app and needs ecosystem aw
 
 ## Infrastructure Baseline
 - pve: 100.73.199.109
-- cloud-core: 100.120.118.39
-- db-core: 100.98.54.45
-- dns-mail-core: 100.81.76.39
-- migrapanel-core: 100.119.105.93
-- srv1-web: 100.68.239.94
+- cloud-core: 100.113.190.42
+- db-core: 100.77.51.91
+- dns-core: 100.126.11.116
+- mail-core: 100.114.228.57
+- migrapanel-core: 100.68.175.27
+- nginx-proxy-core: 100.101.106.88
+- app-core: 100.101.3.99
 - voip-core: 100.111.4.85
 
 ## Workspace Baseline
@@ -47,7 +49,7 @@ Use this agent when the task is broader than a single app and needs ecosystem aw
 
 ## Operating Rules
 1. Distinguish internal MigaPanel from public MigraPanel in all active docs and code comments.
-2. Prefer current server names: `migrapanel-core` and `dns-mail-core` over older aliases.
+2. Prefer current server names: `nginx-proxy-core`, `app-core`, `dns-core`, and `mail-core` over retired aliases.
 3. Preserve historical records unless the task is explicitly to rewrite archival material.
 4. No downtime actions without explicit approval.
 5. No secrets in output, docs, or generated files.

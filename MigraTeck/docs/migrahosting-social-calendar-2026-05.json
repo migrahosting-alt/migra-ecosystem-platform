@@ -1,0 +1,110 @@
+[
+  {
+    "title": "MigraHosting website trust post",
+    "platform": "linkedin",
+    "format": "post",
+    "publishMode": "api",
+    "scheduledAt": "2026-05-01T10:30:00-04:00",
+    "destinationUrl": "https://migrahosting.com/services",
+    "useLinkPreview": true,
+    "assetUrls": [
+      "/content/marketing/assets/website_48h_launch/landscape/website-offer-landscape-v1.svg"
+    ],
+    "caption": "Your website should not be the reason a buyer hesitates.\n\nMigraHosting helps businesses go live with a polished website in 48 hours, with domain setup, business email, and SEO-ready structure already built in.\n\nIf speed matters but credibility matters more, this is the offer to start with.\n\nLaunch today: https://migrahosting.com/services\n\nPowered by MigraTeck",
+    "internalNotes": "Approved offer. Matches live services positioning."
+  },
+  {
+    "title": "MigraHosting Instagram launch offer",
+    "platform": "instagram",
+    "format": "post",
+    "publishMode": "api",
+    "scheduledAt": "2026-05-04T09:15:00-04:00",
+    "destinationUrl": "https://migrahosting.com/services",
+    "useLinkPreview": false,
+    "assetUrls": [
+      "/content/marketing/assets/website_48h_launch/instagram/website-offer-instagram-v1.svg"
+    ],
+    "caption": "Still waiting weeks to launch a business website?\n\nMigraHosting can get your site live in 48 hours with custom design, domain connection, business email, and SEO-ready structure included.\n\nBuilt for businesses that want to look established from day one.\n\nLaunch today.\n\n#MigraHosting #BusinessWebsite #SmallBusinessGrowth #WebsiteLaunch #PoweredByMigraTeck",
+    "internalNotes": "Instagram feed post."
+  },
+  {
+    "title": "MigraHosting complete-offer Facebook post",
+    "platform": "facebook",
+    "format": "post",
+    "publishMode": "api",
+    "scheduledAt": "2026-05-06T11:00:00-04:00",
+    "destinationUrl": "https://migrahosting.com/services",
+    "useLinkPreview": true,
+    "assetUrls": [
+      "/content/marketing/assets/website_48h_launch/landscape/website-offer-landscape-v1.svg"
+    ],
+    "caption": "Need a real website without dragging the process out for weeks?\n\nMigraHosting can launch a premium business website in 48 hours with:\n- custom design\n- domain setup\n- business email\n- SEO-ready delivery\n\nOne clear offer. One fast launch path.\n\nStart here: https://migrahosting.com/services",
+    "internalNotes": "Facebook image plus landing link."
+  },
+  {
+    "title": "MigraHosting X speed-and-credibility post",
+    "platform": "x",
+    "format": "post",
+    "publishMode": "api",
+    "scheduledAt": "2026-05-08T12:30:00-04:00",
+    "destinationUrl": "https://migrahosting.com/services",
+    "useLinkPreview": false,
+    "assetUrls": [
+      "/content/marketing/assets/migrahosting_social_pack/landscape/mh-website-launch-landscape-v1.png"
+    ],
+    "caption": "Fast is only useful if the result still looks credible.\n\nMigraHosting launches premium business websites in 48 hours with domain setup, business email, and SEO-ready structure included.\n\nhttps://migrahosting.com/services",
+    "internalNotes": "Use the PNG asset for X."
+  },
+  {
+    "title": "MigraHosting dedicated VPS LinkedIn post",
+    "platform": "linkedin",
+    "format": "post",
+    "publishMode": "api",
+    "scheduledAt": "2026-05-12T10:00:00-04:00",
+    "destinationUrl": "https://migrahosting.com/request-access?product=migrahosting",
+    "useLinkPreview": true,
+    "assetUrls": [],
+    "caption": "Not every workload belongs on oversold shared hosting.\n\nMigraHosting is positioned around dedicated VPS capacity with full root access, NVMe storage, and support that fits serious projects.\n\nIf you need cleaner isolation, stronger control, and room to grow, start the conversation here:\nhttps://migrahosting.com/request-access?product=migrahosting\n\nPowered by MigraTeck",
+    "internalNotes": "Text-first post to avoid legacy asset claims that conflict with live pricing posture."
+  },
+  {
+    "title": "MigraHosting VPS X text post",
+    "platform": "x",
+    "format": "post",
+    "publishMode": "api",
+    "scheduledAt": "2026-05-14T11:45:00-04:00",
+    "destinationUrl": "https://migrahosting.com/request-access?product=migrahosting",
+    "useLinkPreview": false,
+    "assetUrls": [],
+    "caption": "MigraHosting is not pushing a generic shared-hosting ladder.\n\nThe offer is dedicated VPS capacity with full root access, NVMe storage, and support options that scale with the project.\n\nRequest access: https://migrahosting.com/request-access?product=migrahosting",
+    "internalNotes": "Text-only post."
+  },
+  {
+    "title": "MigraHosting all-in-one setup LinkedIn post",
+    "platform": "linkedin",
+    "format": "post",
+    "publishMode": "api",
+    "scheduledAt": "2026-05-18T09:30:00-04:00",
+    "destinationUrl": "https://migrahosting.com/services",
+    "useLinkPreview": true,
+    "assetUrls": [
+      "/content/marketing/assets/website_48h_launch/landscape/website-offer-landscape-v1.svg"
+    ],
+    "caption": "Most small businesses do not need more digital confusion.\n\nThey need a website that looks real, a domain connected correctly, business email that works, and a launch process that does not stall.\n\nThat is exactly why MigraHosting leads with a 48-hour website offer.\n\nSee the service: https://migrahosting.com/services\n\nPowered by MigraTeck",
+    "internalNotes": "Trust and clarity angle."
+  },
+  {
+    "title": "MigraHosting Instagram story CTA",
+    "platform": "instagram",
+    "format": "story",
+    "publishMode": "api",
+    "scheduledAt": "2026-05-20T13:00:00-04:00",
+    "destinationUrl": "https://migrahosting.com/services",
+    "useLinkPreview": false,
+    "assetUrls": [
+      "/content/marketing/assets/website_48h_launch/story/website-offer-story-v1.svg"
+    ],
+    "caption": "Your business website can be live in 48 hours.\n\nCustom design. Domain setup. Business email. SEO-ready launch.\n\nTap through and start today.",
+    "internalNotes": "Instagram story slot."
+  }
+]

@@ -4,22 +4,48 @@ import { Suspense, useEffect, useMemo, useState, type FormEvent } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
-import { Button, toBrandStyle } from "@migrateck/auth-ui";
+import { Button, Input, toBrandStyle } from "@migrateck/auth-ui";
 import { authFetch } from "@/lib/api";
-import { resolveAuthBrandTheme } from "@/lib/branding";
+import { resolveAuthBrandTheme, resolveProductDisplayDomain, resolveProductHomeUrl } from "@/lib/branding";
 
 function VerifyEmailInner() {
   const searchParams = useSearchParams();
   const clientId = searchParams.get("client_id");
   const token = searchParams.get("token");
-  const email = searchParams.get("email");
-  const brand = useMemo(() => resolveAuthBrandTheme(clientId), [clientId]);
-  const brandStyle = useMemo(() => toBrandStyle(brand), [brand]);
+  const challengeId = searchParams.get("challenge_id");
+  const identifier = searchParams.get("identifier");
+  const maskedDestination = searchParams.get("masked_destination");
   const queryString = searchParams.toString();
+  const brand = useMemo(() => resolveAuthBrandTheme(clientId), [clientId]);
+  const isAnnouPale = brand.productKey === "annoupale";
+  const productHomeUrl = useMemo(() => resolveProductHomeUrl(clientId), [clientId]);
+  const postVerifySignInUrl = useMemo(() => {
+    if (isAnnouPale) {
+      return `${productHomeUrl.replace(/\/$/, "")}/signin`;
+    }
+    return `/login${queryString ? `?${queryString}` : ""}`;
+  }, [isAnnouPale, productHomeUrl, queryString]);
+  const brandStyle = useMemo(() => toBrandStyle(brand), [brand]);
+  const productDisplayDomain = useMemo(() => resolveProductDisplayDomain(clientId), [clientId]);
 
   const [status, setStatus] = useState<"idle" | "verifying" | "success" | "error">(token ? "verifying" : "idle");
   const [message, setMessage] = useState("");
   const [resending, setResending] = useState(false);
+  const [code, setCode] = useState("");
+
+  useEffect(() => {
+    if (status !== "success" || !isAnnouPale) {
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      window.location.href = postVerifySignInUrl;
+    }, 1200);
+
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [status, isAnnouPale, postVerifySignInUrl]);
 
   useEffect(() => {
     if (!token) {
@@ -48,41 +74,85 @@ function VerifyEmailInner() {
 
   async function handleResend(event: FormEvent) {
     event.preventDefault();
-    if (!email) {
+    if (!challengeId && !identifier) {
       return;
     }
 
     setResending(true);
     try {
-      await authFetch("/v1/resend-verification", {
+      const response = await authFetch<{
+        challenge_id?: string;
+        message?: string;
+      }>("/v1/resend-verification", {
         method: "POST",
-        body: { email },
+        body: {
+          challenge_id: challengeId ?? undefined,
+          identifier: identifier ?? undefined,
+        },
       });
-      setMessage("A new verification email has been sent.");
+
+      if (!response.ok) {
+        setMessage(response.data.message ?? "Could not resend the code right now.");
+        return;
+      }
+
+      setMessage(response.data.message ?? "A new verification code has been sent.");
     } catch {
-      setMessage("Could not resend the email. Please try again later.");
+      setMessage("Could not resend the code. Please try again later.");
     } finally {
       setResending(false);
     }
   }
 
+  async function handleCodeVerify(event: FormEvent) {
+    event.preventDefault();
+    if (!challengeId) {
+      setStatus("error");
+      setMessage("Verification challenge is missing.");
+      return;
+    }
+
+    setStatus("verifying");
+    try {
+      const response = await authFetch<{ message?: string }>("/v1/signup/verify", {
+        method: "POST",
+        body: {
+          challenge_id: challengeId,
+          code,
+        },
+      });
+
+      if (!response.ok) {
+        setStatus("error");
+        setMessage(response.data.message ?? "Verification failed or the code expired.");
+        return;
+      }
+
+      setStatus("success");
+      setMessage("Your account is verified. You can continue securely now.");
+    } catch {
+      setStatus("error");
+      setMessage("Network error. Please try again.");
+    }
+  }
+
   const heading =
     status === "success"
-      ? "Email verified"
+      ? "Verification complete"
       : status === "error"
         ? "Verification failed"
         : token
           ? "Verifying your email"
-          : "Check your inbox";
+          : "Verify your account";
 
   const subtitle =
     status === "success"
-      ? "Your identity is confirmed. You can now access MigraTeck products."
+      ? `Your identity is confirmed. You can now access ${brand.productName} securely.`
       : status === "error"
-        ? "The verification link is invalid or has expired."
+        ? "The verification code or link is invalid, expired, or unavailable."
         : token
           ? "We are validating this verification link now."
-          : `We sent a verification link to ${email ?? "your inbox"}.`;
+          : `Enter the code sent to ${maskedDestination ?? identifier ?? "your contact method"}.`;
 
   return (
     <div className="min-h-screen text-white" style={brandStyle}>
@@ -108,13 +178,13 @@ function VerifyEmailInner() {
             <div className="relative mb-8 text-center">
               {/* ── brand badge ──────────────────────────────────── */}
               <div className="mb-6 flex justify-center">
-                <div className="inline-flex items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 backdrop-blur-sm">
-                  <div className="relative h-11 w-11 shrink-0 overflow-hidden rounded-2xl">
+                <div className="inline-flex items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.05] px-4 py-3 backdrop-blur-sm">
+                  <div className={isAnnouPale ? "relative h-16 w-16 shrink-0 overflow-hidden rounded-2xl" : "relative h-11 w-11 shrink-0 overflow-hidden rounded-2xl"}>
                     <Image
-                      src="/brands/migrateck-logo.png"
+                      src={brand.productKey === "annoupale" ? "/brands/products/annoupale-official_logo.png" : "/brands/migrateck-logo.png"}
                       alt={brand.productName}
                       fill
-                      className="object-contain"
+                      className={isAnnouPale ? "object-contain scale-[1.22]" : "object-contain"}
                       priority
                     />
                   </div>
@@ -155,10 +225,10 @@ function VerifyEmailInner() {
                   className="w-full"
                   size="lg"
                   onClick={() => {
-                    window.location.href = `/login${queryString ? `?${queryString}` : ""}`;
+                    window.location.href = postVerifySignInUrl;
                   }}
                 >
-                  Continue to sign in
+                  {isAnnouPale ? "Continue to AnnouPale sign in" : "Continue"}
                 </Button>
               </div>
             ) : status === "error" ? (
@@ -182,7 +252,7 @@ function VerifyEmailInner() {
             ) : (
               <div className="space-y-4">
                 <div className="rounded-2xl border border-white/10 bg-white/[0.025] px-4 py-4 text-sm leading-6 text-white/70">
-                  Open the link in your email to activate your account. If you need another copy, request a resend below.
+                  Enter the latest 6-digit verification code to activate your account. If you need another copy, request a resend below.
                 </div>
 
                 {message ? (
@@ -191,10 +261,28 @@ function VerifyEmailInner() {
                   </div>
                 ) : null}
 
-                {email ? (
+                {challengeId ? (
+                  <form onSubmit={handleCodeVerify} className="space-y-4">
+                    <Input
+                      id="verification-code"
+                      label="Verification code"
+                      type="text"
+                      inputMode="numeric"
+                      autoComplete="one-time-code"
+                      placeholder="123456"
+                      value={code}
+                      onChange={(event) => setCode(event.target.value.replace(/\D/g, "").slice(0, 6))}
+                    />
+                    <Button type="submit" className="w-full" size="lg">
+                      Verify account
+                    </Button>
+                  </form>
+                ) : null}
+
+                {challengeId || identifier ? (
                   <form onSubmit={handleResend}>
                     <Button type="submit" variant="secondary" className="w-full" size="lg" disabled={resending}>
-                      {resending ? "Sending..." : "Resend verification email"}
+                      {resending ? "Sending..." : "Resend verification code"}
                     </Button>
                   </form>
                 ) : null}
@@ -203,13 +291,13 @@ function VerifyEmailInner() {
 
             <div className="mt-6 rounded-2xl border border-white/[0.08] bg-white/[0.025] px-4 py-3">
               <p className="text-center text-xs leading-5 text-white/45">
-                Secure authentication powered by MigraTeck.
+                Secure authentication for {productDisplayDomain}.
               </p>
             </div>
 
             <div className="mt-6 text-center text-sm text-white/55">
               <Link
-                href={`/login${queryString ? `?${queryString}` : ""}`}
+                href={postVerifySignInUrl}
                 className="font-semibold text-white transition hover:text-[var(--brand-accent)]"
               >
                 Back to sign in

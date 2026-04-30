@@ -7,7 +7,8 @@ import {
   legalAliases,
   resolveLegalSlug,
 } from "@/content/legal";
-import { buildPageMetadata } from "@/lib/metadata";
+import { buildPageMetadata, absoluteUrl } from "@/lib/metadata";
+import { buildBreadcrumbList, SITE_ROOT } from "@/lib/structured-data";
 
 type Props = {
   params: Promise<{ slug: string }>;
@@ -49,5 +50,19 @@ export default async function LegalDocumentRoute({ params }: Props) {
     notFound();
   }
 
-  return <LegalDocumentPage document={document} />;
+  const breadcrumb = buildBreadcrumbList([
+    SITE_ROOT,
+    { name: "Legal", url: absoluteUrl("/legal") },
+    { name: document.title, url: absoluteUrl(`/legal/${canonicalSlug}`) },
+  ]);
+
+  return (
+    <>
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumb) }}
+      />
+      <LegalDocumentPage document={document} />
+    </>
+  );
 }

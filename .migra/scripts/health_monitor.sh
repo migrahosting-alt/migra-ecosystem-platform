@@ -31,9 +31,14 @@ SERVICES=(
 # Hosts to ping
 HOSTS=(
     "pve:100.73.199.109"
-    "srv1-web:100.68.239.94"
-    "migrapanel-core:100.119.105.93"
-    "db-core:100.98.54.45"
+    "nginx-proxy-core:100.101.106.88"
+    "cloud-core:100.113.190.42"
+    "db-core:100.77.51.91"
+    "migrapanel-core:100.68.175.27"
+    "mail-core:100.114.228.57"
+    "dns-core:100.126.11.116"
+    "app-core:100.101.3.99"
+    "voip-core:100.111.4.85"
 )
 
 # ============================================

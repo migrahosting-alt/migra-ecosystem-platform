@@ -21,7 +21,7 @@ export async function mfaRoutes(app: FastifyInstance): Promise<void> {
     const user = request.authUser!;
 
     try {
-      const result = await enrollTotp(user.id, user.email);
+      const result = await enrollTotp(user.id, user.email ?? user.phoneE164 ?? user.id);
 
       return reply.code(200).send({
         challenge_id: result.challengeId,

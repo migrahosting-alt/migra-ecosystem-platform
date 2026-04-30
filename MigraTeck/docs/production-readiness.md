@@ -19,7 +19,8 @@
 - Deploy the Next.js web app in a Node-capable environment that supports Next.js 16 App Router runtime behavior.
 - Serve the public site over HTTPS in front of the application runtime.
 - Preserve response headers from the application middleware through any reverse proxy or CDN layer.
-- Current edge host: `srv1-web` (`100.68.239.94`)
+- Current edge host: `nginx-proxy-core` (`100.101.106.88`)
+- Current app host: `app-core` (`100.101.3.99`)
 - Current live service: `migrateck.service` on `127.0.0.1:3111`, serving `apps/web`
 - Current live runtime should start `apps/web/node_modules/next/dist/bin/next` so the service uses the same Next.js version that builds the app.
 - Current staging service: `migrateck-staging.service` on `127.0.0.1:3112`
@@ -32,6 +33,16 @@
 - Deploy major releases to a staging hostname first, validate there, and keep the current live runtime intact until staging passes.
 - Prepare rollback commands and backup paths before any live cutover.
 - Only schedule live cutover after staging smoke tests, header validation, and manual route checks pass.
+
+## Auth Staging Readiness
+
+- Treat auth staging validation as a release gate, not a nice-to-have.
+- Start with provider-backed staging email because the auth service already supports SMTP delivery.
+- Do not treat staging SMS as complete while `AUTH_SMS_PROVIDER=console` or any console-only fallback remains in use.
+- Keep at least one stable non-admin smoke account and one moderator smoke account in team-managed secret storage.
+- Require a repeatable staging auth pass for signup, verify, login, `/v1/me`, `/v1/refresh`, logout, and refresh-after-logout failure.
+- Require confirmation that `auth_events` rows persist in staging for the smoke flow.
+- Use the dedicated runbook at `docs/annoupale-auth-staging-validation-checklist.md` for exact pass/fail steps and evidence capture.
 
 ## Security Header Expectations
 
@@ -55,7 +66,7 @@
 ## Rollback Notes
 
 - Keep a copy of the pre-cutover `migrateck.service` unit before changing the live working directory or `ExecStart` target.
-- To roll back the staging release on `srv1-web`:
+- To roll back the staging release on `app-core` + `nginx-proxy-core`:
   - `systemctl stop migrateck-staging`
   - `systemctl disable migrateck-staging`
   - `rm -f /etc/nginx/sites-enabled/staging.migrateck.com.conf`
@@ -68,7 +79,7 @@
 ## Current Validation Notes
 
 - Local validation completed with `pnpm lint`, `pnpm typecheck`, `pnpm build`, and `pnpm --filter @migrateck/web build`.
-- Staging deployment remains active at `https://staging.migrateck.com` on `srv1-web` for regression comparison against the live `apps/web` runtime.
+- Staging deployment remains active at `https://staging.migrateck.com` on `app-core` behind `nginx-proxy-core` for regression comparison against the live `apps/web` runtime.
 - Manual staging browser screenshots were captured for homepage desktop/mobile, products, developers, and downloads.
 - Staging metadata now renders with staging-host canonical URLs and `noindex,nofollow` behavior.
 - Local and staging Lighthouse execution still returned `FAILED_DOCUMENT_REQUEST (net::ERR_ABORTED)` from the available runner, despite successful browser rendering and direct HTTPS responses. Treat Lighthouse score collection as still blocked until a stable runner environment is available.

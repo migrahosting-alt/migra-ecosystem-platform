@@ -2,6 +2,7 @@ import Link from "next/link";
 import Image from "next/image";
 import { products } from "@/data/products";
 import { buildPageMetadata, absoluteUrl } from "@/lib/metadata";
+import { buildBreadcrumbList, SITE_ROOT } from "@/lib/structured-data";
 
 export const metadata = buildPageMetadata({
   title: "Products",
@@ -66,11 +67,20 @@ export default function ProductsPage() {
     })),
   };
 
+  const breadcrumb = buildBreadcrumbList([
+    SITE_ROOT,
+    { name: "Products", url: absoluteUrl("/products") },
+  ]);
+
   return (
     <main className="relative overflow-hidden bg-[#071121] text-white">
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(structuredData) }}
+      />
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumb) }}
       />
 
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_18%_12%,rgba(59,130,246,0.22),transparent_30%),radial-gradient(circle_at_84%_18%,rgba(99,102,241,0.14),transparent_26%),linear-gradient(180deg,rgba(16,45,120,0.28),rgba(7,17,33,1)_22%,rgba(5,10,20,1)_100%)]" />

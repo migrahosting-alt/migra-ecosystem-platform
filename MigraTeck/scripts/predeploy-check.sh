@@ -162,6 +162,29 @@ if (parsed.protocol !== "https:") {
 NODE
 }
 
+validate_http_or_https_url() {
+  local value="$1"
+  local label="$2"
+
+  node - "${value}" "${label}" <<'NODE'
+const raw = process.argv[2] || "";
+const label = process.argv[3] || "URL";
+
+let parsed;
+try {
+  parsed = new URL(raw);
+} catch {
+  console.error(`${label} is not a valid URL: ${raw}`);
+  process.exit(2);
+}
+
+if (!(parsed.protocol === "http:" || parsed.protocol === "https:")) {
+  console.error(`${label} must use http:// or https:// (${raw})`);
+  process.exit(3);
+}
+NODE
+}
+
 check_db_indexes() {
   if [[ "${SKIP_DB_INDEX_CHECK:-false}" == "true" ]]; then
     warn "Skipping database index check (SKIP_DB_INDEX_CHECK=true)"
@@ -395,6 +418,117 @@ else
   else
     pass "Magic links disabled and SMTP values not required"
   fi
+fi
+
+auth_env_present=false
+if [[ -n "${AUTH_PUBLIC_URL:-}${AUTH_WEB_URL:-}${AUTH_DATABASE_URL:-}${AUTH_CORS_ORIGINS:-}${AUTH_SESSION_COOKIE:-}" ]]; then
+  auth_env_present=true
+fi
+
+if [[ "${auth_env_present}" == "true" ]]; then
+  if [[ -z "${AUTH_PUBLIC_URL:-}" ]]; then
+    fail "AUTH_PUBLIC_URL must be set when auth deployment variables are present"
+  elif [[ "${NODE_ENV:-}" == "production" ]]; then
+    if validate_https_url "${AUTH_PUBLIC_URL}" "AUTH_PUBLIC_URL"; then
+      pass "AUTH_PUBLIC_URL is valid"
+    else
+      fail "AUTH_PUBLIC_URL must be a valid https URL"
+    fi
+  elif validate_http_or_https_url "${AUTH_PUBLIC_URL}" "AUTH_PUBLIC_URL"; then
+    pass "AUTH_PUBLIC_URL is valid"
+  else
+    fail "AUTH_PUBLIC_URL must be a valid http or https URL"
+  fi
+
+  if [[ -z "${AUTH_WEB_URL:-}" ]]; then
+    fail "AUTH_WEB_URL must be set when auth deployment variables are present"
+  elif [[ "${NODE_ENV:-}" == "production" ]]; then
+    if validate_https_url "${AUTH_WEB_URL}" "AUTH_WEB_URL"; then
+      pass "AUTH_WEB_URL is valid"
+    else
+      fail "AUTH_WEB_URL must be a valid https URL"
+    fi
+  elif validate_http_or_https_url "${AUTH_WEB_URL}" "AUTH_WEB_URL"; then
+    pass "AUTH_WEB_URL is valid"
+  else
+    fail "AUTH_WEB_URL must be a valid http or https URL"
+  fi
+
+  if [[ -z "${AUTH_CORS_ORIGINS:-}" ]]; then
+    fail "AUTH_CORS_ORIGINS must be set when auth deployment variables are present"
+  elif validate_origins "${AUTH_CORS_ORIGINS}"; then
+    pass "AUTH_CORS_ORIGINS is valid"
+  else
+    fail "AUTH_CORS_ORIGINS is invalid"
+  fi
+
+  if [[ "${NODE_ENV:-}" != "development" ]]; then
+    if [[ "${AUTH_COOKIE_SECURE:-false}" != "true" ]]; then
+      fail "AUTH_COOKIE_SECURE must be true outside development"
+    else
+      pass "AUTH_COOKIE_SECURE is enabled"
+    fi
+  fi
+
+  missing_auth_smtp=0
+  for smtp_var in SMTP_HOST SMTP_PORT SMTP_USER SMTP_PASSWORD; do
+    if [[ -z "${!smtp_var:-}" ]]; then
+      fail "${smtp_var} must be set for auth email delivery"
+      missing_auth_smtp=1
+    fi
+  done
+
+  if [[ -z "${AUTH_EMAIL_FROM:-${SMTP_FROM:-}}" ]]; then
+    fail "AUTH_EMAIL_FROM or SMTP_FROM must be set for auth email delivery"
+    missing_auth_smtp=1
+  fi
+
+  if [[ ${missing_auth_smtp} -eq 0 ]]; then
+    pass "Auth email delivery configuration is complete"
+  fi
+
+  auth_sms_provider="${AUTH_SMS_PROVIDER:-console}"
+  case "${auth_sms_provider}" in
+    console)
+      if [[ "${NODE_ENV:-}" == "development" ]]; then
+        pass "AUTH_SMS_PROVIDER uses console in development"
+      else
+        fail "AUTH_SMS_PROVIDER=console is not allowed for staging or production auth validation"
+      fi
+      ;;
+    twilio)
+      if [[ -z "${AUTH_SMS_TWILIO_ACCOUNT_SID:-}" ]]; then
+        fail "AUTH_SMS_TWILIO_ACCOUNT_SID must be set when AUTH_SMS_PROVIDER=twilio"
+      fi
+      if [[ -z "${AUTH_SMS_TWILIO_AUTH_TOKEN:-}" ]]; then
+        fail "AUTH_SMS_TWILIO_AUTH_TOKEN must be set when AUTH_SMS_PROVIDER=twilio"
+      fi
+      if [[ -z "${AUTH_SMS_TWILIO_FROM_NUMBER:-}${AUTH_SMS_TWILIO_MESSAGING_SERVICE_SID:-}" ]]; then
+        fail "AUTH_SMS_TWILIO_FROM_NUMBER or AUTH_SMS_TWILIO_MESSAGING_SERVICE_SID must be set when AUTH_SMS_PROVIDER=twilio"
+      else
+        pass "AUTH_SMS_PROVIDER is set (twilio)"
+      fi
+      ;;
+    test-lane)
+      if [[ -z "${AUTH_SMS_TEST_LANE_URL:-}" ]]; then
+        fail "AUTH_SMS_TEST_LANE_URL must be set when AUTH_SMS_PROVIDER=test-lane"
+      fi
+      if [[ -z "${AUTH_SMS_TEST_LANE_API_KEY:-}" ]]; then
+        fail "AUTH_SMS_TEST_LANE_API_KEY must be set when AUTH_SMS_PROVIDER=test-lane"
+      fi
+      if [[ -z "${AUTH_SMS_TEST_LANE_ALLOWED_NUMBERS:-}" ]]; then
+        fail "AUTH_SMS_TEST_LANE_ALLOWED_NUMBERS must be set when AUTH_SMS_PROVIDER=test-lane"
+      else
+        pass "AUTH_SMS_PROVIDER is set (test-lane)"
+      fi
+      ;;
+    vonage|messagebird)
+      pass "AUTH_SMS_PROVIDER is set (${auth_sms_provider})"
+      ;;
+    *)
+      warn "AUTH_SMS_PROVIDER uses an unrecognized provider label (${auth_sms_provider}); verify provider-backed delivery manually"
+      ;;
+  esac
 fi
 
 download_provider="${DOWNLOAD_STORAGE_PROVIDER:-}"

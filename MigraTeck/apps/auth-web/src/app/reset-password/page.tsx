@@ -4,20 +4,25 @@ import { Suspense, useMemo, useState, type FormEvent } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
-import { Button, PasswordInput, toBrandStyle } from "@migrateck/auth-ui";
+import { Button, Input, PasswordInput, toBrandStyle } from "@migrateck/auth-ui";
 import { authFetch } from "@/lib/api";
-import { resolveAuthBrandTheme } from "@/lib/branding";
+import { resolveAuthBrandTheme, resolveProductDisplayDomain } from "@/lib/branding";
 
 function ResetPasswordForm() {
   const searchParams = useSearchParams();
   const clientId = searchParams.get("client_id");
   const token = searchParams.get("token");
+  const challengeId = searchParams.get("challenge_id");
+  const maskedDestination = searchParams.get("masked_destination");
   const brand = useMemo(() => resolveAuthBrandTheme(clientId), [clientId]);
+  const productDisplayDomain = useMemo(() => resolveProductDisplayDomain(clientId), [clientId]);
   const brandStyle = useMemo(() => toBrandStyle(brand), [brand]);
   const queryString = searchParams.toString();
 
+  const resetMode = token ? "link" : challengeId ? "code" : "missing";
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [code, setCode] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [done, setDone] = useState(false);
@@ -31,8 +36,8 @@ function ResetPasswordForm() {
       return;
     }
 
-    if (!token) {
-      setError("Reset link is invalid or expired.");
+    if (resetMode === "missing") {
+      setError("Reset request is invalid or expired.");
       return;
     }
 
@@ -41,7 +46,9 @@ function ResetPasswordForm() {
     try {
       const response = await authFetch<{ message?: string }>("/v1/reset-password", {
         method: "POST",
-        body: { token, password },
+        body: resetMode === "link"
+          ? { token, password }
+          : { challenge_id: challengeId, code, password },
       });
 
       if (!response.ok) {
@@ -77,7 +84,7 @@ function ResetPasswordForm() {
                 <div className="inline-flex items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 backdrop-blur-sm">
                   <div className="relative h-11 w-11 shrink-0 overflow-hidden rounded-2xl">
                     <Image
-                      src="/brands/migrateck-logo.png"
+                      src={brand.productKey === "annoupale" ? "/brands/products/annoupale-official_logo.png" : "/brands/migrateck-logo.png"}
                       alt={brand.productName}
                       fill
                       className="object-contain"
@@ -96,22 +103,24 @@ function ResetPasswordForm() {
               </div>
 
               <h1 className="font-[var(--font-display)] text-[30px] font-bold tracking-[-0.03em] text-white sm:text-[32px]">
-                {!token ? "Reset link unavailable" : done ? "Password updated" : "Set a new password"}
+                {resetMode === "missing" ? "Reset unavailable" : done ? "Password updated" : "Set a new password"}
               </h1>
 
               <p className="mx-auto mt-2 max-w-[300px] text-sm leading-6 text-slate-300/80">
-                {!token
-                  ? "The reset link is invalid or has expired. Request a new one to continue."
+                {resetMode === "missing"
+                  ? "The reset request is invalid or has expired. Request a new one to continue."
                   : done
                     ? "Your password has been updated. You can sign in again now."
-                    : "Choose a new password for your MigraTeck account."}
+                    : resetMode === "code"
+                      ? `Enter the code sent to ${maskedDestination ?? "your phone"}, then choose a new password.`
+                      : `Choose a new password for your ${brand.productName} account.`}
               </p>
             </div>
 
-            {!token ? (
+            {resetMode === "missing" ? (
               <div className="space-y-4">
                 <div className="rounded-2xl border border-white/10 bg-white/[0.025] px-4 py-4 text-sm leading-6 text-white/70">
-                  Password reset links are time-limited for your account’s safety. Start over to receive a fresh link.
+                  Password reset requests are time-limited for your account’s safety. Start over to receive a fresh one.
                 </div>
 
                 <Button
@@ -144,11 +153,25 @@ function ResetPasswordForm() {
               </div>
             ) : (
               <form onSubmit={handleSubmit} className="space-y-4">
+                {resetMode === "code" ? (
+                  <Input
+                    id="reset-password-code"
+                    label="Reset code"
+                    type="text"
+                    inputMode="numeric"
+                    autoComplete="one-time-code"
+                    autoFocus
+                    placeholder="123456"
+                    value={code}
+                    onChange={(event) => setCode(event.target.value.replace(/\D/g, "").slice(0, 6))}
+                  />
+                ) : null}
+
                 <PasswordInput
                   id="reset-password"
                   label="New password"
                   autoComplete="new-password"
-                  autoFocus
+                  autoFocus={resetMode !== "code"}
                   placeholder="Create a new password"
                   value={password}
                   onChange={(event) => setPassword(event.target.value)}
@@ -176,7 +199,7 @@ function ResetPasswordForm() {
 
             <div className="mt-6 rounded-2xl border border-white/[0.08] bg-white/[0.025] px-4 py-3">
               <p className="text-center text-xs leading-5 text-white/45">
-                Secure authentication powered by MigraTeck.
+                Secure authentication for {productDisplayDomain}.
               </p>
             </div>
 

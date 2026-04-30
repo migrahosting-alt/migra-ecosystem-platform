@@ -20,8 +20,8 @@ Single source of truth for:
 └─────────────────────────────────────────────────────────┘
                         ↓ Pull every 10s
 ┌─────────────┬─────────────┬────────────────────────────┐
-│ mpanel-api  │  srv1-web   │      dns-mail-core         │
-│ (Express)   │  (NGINX)    │      (Mail + PowerDNS)     │
+│ mpanel-api  │  app-core   │   dns-core + mail-core     │
+│ (Express)   │  (App Host) │ (PowerDNS + Mail Services) │
 └─────────────┴─────────────┴────────────────────────────┘
 ```
 

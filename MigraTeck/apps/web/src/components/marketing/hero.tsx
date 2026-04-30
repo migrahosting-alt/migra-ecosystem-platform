@@ -56,11 +56,11 @@ export default function MigraTeckHero() {
             </p>
 
             <div className="mt-9 flex flex-col gap-3 sm:flex-row">
-              <a href="/products" className="inline-flex items-center justify-center rounded-full bg-blue-500 px-6 py-3.5 text-sm font-medium text-white shadow-lg shadow-blue-500/20 transition hover:bg-blue-400">
-                Start building
+              <a href="/services" className="inline-flex items-center justify-center rounded-full bg-blue-500 px-6 py-3.5 text-sm font-medium text-white shadow-lg shadow-blue-500/20 transition hover:bg-blue-400">
+                Get started
               </a>
-              <a href="/platform" className="inline-flex items-center justify-center rounded-full border border-white/12 bg-white/[0.03] px-6 py-3.5 text-sm font-medium text-white/82 transition hover:bg-white/8">
-                See platform
+              <a href="/products" className="inline-flex items-center justify-center rounded-full border border-white/12 bg-white/[0.03] px-6 py-3.5 text-sm font-medium text-white/82 transition hover:bg-white/8">
+                Explore products
               </a>
             </div>
 

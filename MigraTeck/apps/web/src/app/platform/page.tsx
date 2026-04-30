@@ -1,7 +1,8 @@
 import Link from "next/link";
 import Image from "next/image";
 import { productsByKey } from "@/data/products";
-import { buildPageMetadata } from "@/lib/metadata";
+import { buildPageMetadata, absoluteUrl } from "@/lib/metadata";
+import { buildBreadcrumbList, SITE_ROOT } from "@/lib/structured-data";
 import { cn } from "@/lib/cn";
 import ui from "@/lib/ui";
 
@@ -36,8 +37,17 @@ const coreProducts = [
 ] as const;
 
 export default function PlatformPage() {
+  const breadcrumb = buildBreadcrumbList([
+    SITE_ROOT,
+    { name: "Platform", url: absoluteUrl("/platform") },
+  ]);
+
   return (
     <>
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumb) }}
+      />
       <section className="hero-gradient hero-mesh relative overflow-hidden">
         <div className="pointer-events-none absolute -left-40 top-32 h-[500px] w-[500px] rounded-full bg-blue-500/20 blur-[120px]" />
         <div className={cn(ui.maxW, "relative pb-24 pt-32 sm:pb-32 sm:pt-40")}>
@@ -126,6 +136,17 @@ export default function PlatformPage() {
                 <p className="mt-3 text-sm font-medium text-sky-400">Learn more →</p>
               </Link>
             ))}
+          </div>
+
+          <div className="mt-16 border-t border-white/10 pt-16 text-center">
+            <h3 className="font-[var(--font-display)] text-2xl font-semibold text-white">Ready to deploy the platform for your business?</h3>
+            <p className="mx-auto mt-4 max-w-md text-sm leading-7 text-slate-400">
+              MigraTeck services bring the platform to production. Start with a website launch or a content system — both integrate into the broader stack.
+            </p>
+            <div className="mt-6 flex justify-center gap-4">
+              <Link href="/services" className={ui.btnPrimaryLight}>View service tracks</Link>
+              <Link href="/pricing" className={ui.btnSecondaryDark}>See pricing</Link>
+            </div>
           </div>
         </div>
       </section>

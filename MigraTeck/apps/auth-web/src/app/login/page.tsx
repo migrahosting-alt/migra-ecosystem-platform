@@ -11,12 +11,62 @@ import {
   toBrandStyle,
 } from "@migrateck/auth-ui";
 import { authFetch } from "@/lib/api";
-import { resolveAuthBrandTheme, resolveProductHomeUrl } from "@/lib/branding";
+import {
+  resolveAuthBrandTheme,
+  resolveProductDisplayDomain,
+  resolveProductHomeUrl,
+} from "@/lib/branding";
+
+function extractApiErrorMessage(payload: unknown, fallback: string): string {
+  if (!payload || typeof payload !== "object") {
+    return fallback;
+  }
+
+  const maybe = payload as {
+    message?: unknown;
+    error?: {
+      message?: unknown;
+      details?: Array<{ message?: unknown; path?: unknown }>;
+    } | unknown;
+  };
+
+  if (typeof maybe.message === "string" && maybe.message.trim()) {
+    return maybe.message;
+  }
+
+  if (
+    maybe.error
+    && typeof maybe.error === "object"
+    && "message" in maybe.error
+    && typeof (maybe.error as { message?: unknown }).message === "string"
+    && (maybe.error as { message: string }).message.trim()
+  ) {
+    return (maybe.error as { message: string }).message;
+  }
+
+  if (
+    maybe.error
+    && typeof maybe.error === "object"
+    && "details" in maybe.error
+    && Array.isArray((maybe.error as { details?: unknown }).details)
+  ) {
+    const details = (maybe.error as { details: Array<{ message?: unknown; path?: unknown }> }).details;
+    const first = details[0];
+    if (first && typeof first.message === "string" && first.message.trim()) {
+      if (Array.isArray(first.path) && first.path.length > 0) {
+        return `${String(first.path[0])}: ${first.message}`;
+      }
+      return first.message;
+    }
+  }
+
+  return fallback;
+}
 
 function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const [email, setEmail] = useState("");
+  const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -32,6 +82,7 @@ function LoginForm() {
   const brand = useMemo(() => resolveAuthBrandTheme(clientId), [clientId]);
   const brandStyle = useMemo(() => toBrandStyle(brand), [brand]);
   const productHomeUrl = useMemo(() => resolveProductHomeUrl(clientId), [clientId]);
+  const productDisplayDomain = useMemo(() => resolveProductDisplayDomain(clientId), [clientId]);
 
   const isOAuthFlow = !!(clientId && redirectUri && state && codeChallenge);
   const queryString = searchParams.toString();
@@ -45,18 +96,47 @@ function LoginForm() {
       const response = await authFetch<{
         mfa_required?: boolean;
         requires_mfa?: boolean;
+        status?: string;
+        challenge_id?: string;
+        channel?: string;
+        masked_destination?: string;
         message?: string;
+        error?: {
+          message?: string;
+          details?: Array<{ message?: string; path?: Array<string | number> }>;
+        };
       }>("/v1/login", {
         method: "POST",
         body: {
-          email,
+          identifier: identifier.trim(),
+          // Backward compatibility for auth-api revisions expecting `email`.
+          email: identifier.trim(),
           password,
           client_id: effectiveClientId,
         },
       });
 
+      if (response.data.status === "verification_required" && response.data.challenge_id) {
+        const verifyUrl = new URL("/verify-email", window.location.origin);
+        verifyUrl.searchParams.set("challenge_id", response.data.challenge_id);
+        verifyUrl.searchParams.set("identifier", identifier);
+        if (response.data.channel) {
+          verifyUrl.searchParams.set("channel", response.data.channel);
+        }
+        if (response.data.masked_destination) {
+          verifyUrl.searchParams.set("masked_destination", response.data.masked_destination);
+        }
+        if (queryString) {
+          new URLSearchParams(queryString).forEach((value, key) => {
+            verifyUrl.searchParams.set(key, value);
+          });
+        }
+        router.push(verifyUrl.pathname + verifyUrl.search);
+        return;
+      }
+
       if (!response.ok) {
-        setError(response.data.message ?? "Login failed.");
+        setError(extractApiErrorMessage(response.data, "Login failed. Please check your credentials and try again."));
         setLoading(false);
         return;
       }
@@ -143,7 +223,7 @@ function LoginForm() {
                 <div className="inline-flex items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 backdrop-blur-sm">
                   <div className="relative h-11 w-11 shrink-0 overflow-hidden rounded-2xl">
                     <Image
-                      src="/brands/migrateck-logo.png"
+                      src={brand.productKey === "annoupale" ? "/brands/products/annoupale-official_logo.png" : "/brands/migrateck-logo.png"}
                       alt={brand.productName}
                       fill
                       className="object-contain"
@@ -166,21 +246,21 @@ function LoginForm() {
               </h1>
 
               <p className="mx-auto mt-2 max-w-[300px] text-sm leading-6 text-slate-300/80">
-                Use your MigraTeck account to continue.
+                {brand.helperCopy ?? `Use your ${brand.productName} account to continue.`}
               </p>
             </div>
 
             <form onSubmit={handleSubmit} className="space-y-4">
               <div className="space-y-4">
                 <Input
-                  id="login-email"
-                  label="Email"
-                  type="email"
-                  autoComplete="email"
+                  id="login-identifier"
+                  label="Email or phone"
+                  type="text"
+                  autoComplete="username"
                   autoFocus
-                  placeholder="you@company.com"
-                  value={email}
-                  onChange={(event) => setEmail(event.target.value)}
+                  placeholder="you@company.com or +1 555 555 0123"
+                  value={identifier}
+                  onChange={(event) => setIdentifier(event.target.value)}
                 />
 
                 <PasswordInput
@@ -210,7 +290,7 @@ function LoginForm() {
 
             <div className="mt-6 rounded-2xl border border-white/[0.08] bg-white/[0.025] px-4 py-3">
               <p className="text-center text-xs leading-5 text-white/45">
-                Secure authentication powered by MigraTeck.
+                Secure authentication for {productDisplayDomain}.
               </p>
             </div>
 

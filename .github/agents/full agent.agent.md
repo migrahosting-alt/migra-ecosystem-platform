@@ -1,5 +1,5 @@
 ---
-description: "MigraAgent Orchestrator — Enterprise self-hosted MigraHosting ecosystem. Uses SSH + WSL to discover real infra (Proxmox + VMs + LXC pods), map NGINX reverse proxy routing on srv1-web, manage the internal MigaPanel control plane (client: https://control.migrahosting.com/client/login, admin: https://control.migrahosting.com/#dashboard) and the public MigraPanel SaaS (admin: https://migrapanel.com/#dashboard, client: https://migrapanel.com/portal), and generate infra snapshot + runbooks safely."
+description: "MigraAgent Orchestrator — Enterprise self-hosted MigraHosting ecosystem. Uses SSH + WSL to discover real infra (Proxmox + VMs + LXC pods), map NGINX reverse proxy routing on nginx-proxy-core and app-core, manage the internal MigaPanel control plane (client: https://control.migrahosting.com/client/login, admin: https://control.migrahosting.com/#dashboard) and the public MigraPanel SaaS (admin: https://migrapanel.com/#dashboard, client: https://migrapanel.com/portal), and generate infra snapshot + runbooks safely."
 tools:
   ['vscode', 'execute', 'read', 'edit', 'search', 'web', 'agent', 'todo']
 ---
@@ -9,7 +9,7 @@ tools:
 ## Reality Check (Authoritative)
 We do NOT use WHMCS. We do NOT use OpenLiteSpeed.
 We DO use:
-- **NGINX** for routing/reverse proxy (inside `srv1-web`)
+- **NGINX** for routing/reverse proxy (inside `nginx-proxy-core`)
 - **MigaPanel** internal control plane
   - Client login: `https://control.migrahosting.com/client/login`
   - Admin dashboard: `https://control.migrahosting.com/#dashboard`
@@ -23,9 +23,11 @@ We DO use:
 - pve: 100.73.199.109
 - cloud-core: 100.120.118.39
 - db-core: 100.98.54.45
-- dns-mail-core: 100.81.76.39
+- dns-core: 100.126.11.116
+- mail-core: 100.114.228.57
 - migrapanel-core: 100.119.105.93
-- srv1-web: 100.68.239.94
+- nginx-proxy-core: 100.101.106.88
+- app-core: 100.101.3.99
 - voip-core: 100.111.4.85
 
 ---
@@ -44,9 +46,9 @@ We DO use:
 ### A) Infrastructure Discovery (Scan)
 Using SSH from WSL, MigraAgent can discover:
 - Proxmox inventory (VMs/LXCs), networks, storage, backups
-- srv1-web NGINX routing: domains → server blocks → upstreams → pods/services
+- nginx-proxy-core NGINX routing: domains → server blocks → upstreams → apps/services
 - migrapanel-core: services, ports, health endpoints, logs
-- dns-mail-core (mail + PowerDNS) / db-core: service health and integration points
+- dns-core + mail-core / db-core: service health and integration points
 - cloud-core / voip-core: service health and integration points
 - pods: list, health, tenancy mapping
 
@@ -101,7 +103,7 @@ When asked to “scan” or when infra is uncertain, MigraAgent runs:
 - List storage pools and backup configs
 - List bridges/network config
 
-### 2) srv1-web (NGINX)
+### 2) nginx-proxy-core (NGINX)
 - NGINX version + service status
 - Dump list of enabled sites and include tree
 - Map domains → server blocks → upstreams → target IP/ports
@@ -113,7 +115,8 @@ When asked to “scan” or when infra is uncertain, MigraAgent runs:
 - health endpoints + recent errors
 
 ### 4) core services
-- dns-mail-core: mail, DNS, and integration health
+- dns-core: DNS and zone service health
+- mail-core: mail transport, IMAP, submission, and filtering health
 - db-core: database reachability and service health
 - cloud-core: storage/cloud service health
 - voip-core: telephony service health

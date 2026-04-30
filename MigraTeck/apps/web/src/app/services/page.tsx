@@ -1,5 +1,7 @@
 import Link from "next/link";
-import { buildPageMetadata } from "@/lib/metadata";
+import { buildPageMetadata, absoluteUrl } from "@/lib/metadata";
+import { buildBreadcrumbList, SITE_ROOT } from "@/lib/structured-data";
+import { serviceInquiries } from "@/lib/inquiry";
 import { cn } from "@/lib/cn";
 import ui from "@/lib/ui";
 
@@ -17,6 +19,7 @@ const services = [
     desc: "A premium small-business website offer built to go live fast without looking rushed or generic.",
     audience: "Businesses that need a credible web presence quickly and want one offer that already covers launch essentials.",
     outcome: "A live website, connected domain, business email, and SEO-ready launch posture in one managed package.",
+    inquiryHref: serviceInquiries.websiteLaunch,
   },
   {
     id: "ai-content-generator",
@@ -24,6 +27,7 @@ const services = [
     desc: "Recurring content operations for blogs, product copy, landing pages, emails, and campaigns.",
     audience: "Teams that need publishing velocity and want MigraTeck to turn business inputs into usable marketing assets.",
     outcome: "A managed content system that keeps campaigns, landing pages, and product messaging moving without starting from zero each time.",
+    inquiryHref: serviceInquiries.aiContentGenerator,
   },
 ] as const;
 
@@ -47,8 +51,17 @@ const deliveryPhases = [
 ] as const;
 
 export default function ServicesPage() {
+  const breadcrumb = buildBreadcrumbList([
+    SITE_ROOT,
+    { name: "Services", url: absoluteUrl("/services") },
+  ]);
+
   return (
     <>
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumb) }}
+      />
       <section className="hero-gradient hero-mesh relative overflow-hidden">
         <div className="pointer-events-none absolute right-0 bottom-0 h-[400px] w-[400px] rounded-full bg-pink-500/10 blur-[100px]" />
         <div className={cn(ui.maxW, "relative pb-24 pt-32 sm:pb-32 sm:pt-40")}>
@@ -89,6 +102,11 @@ export default function ServicesPage() {
                     <p className="text-[11px] font-semibold uppercase tracking-[0.15em] text-slate-400">Intended outcome</p>
                     <p className="mt-1 text-sm text-slate-400">{s.outcome}</p>
                   </div>
+                  <div className="pt-2">
+                    <a href={s.inquiryHref} className={cn(ui.btnPrimaryLight, "inline-flex")}>
+                      Start with this track
+                    </a>
+                  </div>
                 </div>
               </div>
             ))}
@@ -123,6 +141,25 @@ export default function ServicesPage() {
               </div>
             </div>
           </div>
+        </div>
+      </section>
+
+      <section className="section-dark-blue relative overflow-hidden">
+        <div className={cn(ui.maxW, "relative py-20 text-center sm:py-24")}>
+          <h2 className={ui.h2Dark}>Start your engagement.</h2>
+          <p className={cn(ui.bodyDark, "mx-auto mt-4 max-w-lg")}>
+            Tell us which track fits your situation and we will scope it out. No commitment required to start the conversation.
+          </p>
+          <div className="mt-8 flex flex-col items-center justify-center gap-4 sm:flex-row">
+            <a
+              href={serviceInquiries.general}
+              className={ui.btnPrimaryLight}
+            >
+              Send inquiry
+            </a>
+            <Link href="/pricing" className={ui.btnSecondaryDark}>View pricing</Link>
+          </div>
+          <p className="mt-6 text-sm text-slate-400">Or reach us directly at <a href="mailto:services@migrateck.com" className="text-blue-400 hover:text-blue-300">services@migrateck.com</a></p>
         </div>
       </section>
     </>

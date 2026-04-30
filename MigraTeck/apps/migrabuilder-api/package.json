@@ -1,0 +1,28 @@
+{
+  "name": "@migrateck/migrabuilder-api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/server.js",
+    "dev": "tsx watch src/server.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "db:migrate": "node --input-type=module < src/db/migrate.mjs"
+  },
+  "dependencies": {
+    "@fastify/cors": "^11.0.0",
+    "@fastify/formbody": "^8.0.2",
+    "fastify": "^5.6.1",
+    "jose": "^6.0.11",
+    "nanoid": "^5.1.5",
+    "pg": "^8.13.3",
+    "zod": "^3.24.4"
+  },
+  "devDependencies": {
+    "@types/node": "^22.18.0",
+    "@types/pg": "^8.11.10",
+    "tsx": "^4.20.3",
+    "typescript": "^5.9.3"
+  }
+}

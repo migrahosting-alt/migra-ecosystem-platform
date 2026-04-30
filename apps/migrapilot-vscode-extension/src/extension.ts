@@ -13,6 +13,9 @@ import {
 } from "./brainClient.js";
 import { ChatViewProvider } from "./chatViewProvider.js";
 import { MigraCompletionProvider } from "./completionProvider.js";
+import { registerLanguageModelTools } from "./languageModelTools.js";
+import { registerMcpServerProvider } from "./mcpServerProvider.js";
+import { registerNativeChatParticipant } from "./nativeChatParticipant.js";
 
 interface LastPatchState {
   missionId: string;
@@ -952,6 +955,9 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider(ChatViewProvider.viewType, chatProvider)
   );
+  registerLanguageModelTools(context, output);
+  registerMcpServerProvider(context, output);
+  registerNativeChatParticipant(context, output);
 
   context.subscriptions.push(
     vscode.commands.registerCommand("migrapilot.checkHealth", async () => {

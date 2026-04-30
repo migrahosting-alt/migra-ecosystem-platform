@@ -38,7 +38,7 @@ async function ensureKeys(): Promise<void> {
 
 export interface AccessTokenPayload {
   sub: string;
-  email: string;
+  email?: string;
   email_verified: boolean;
   scope: string;
   client_id: string;
@@ -46,7 +46,7 @@ export interface AccessTokenPayload {
 
 export interface IdTokenPayload {
   sub: string;
-  email: string;
+  email?: string;
   email_verified: boolean;
   name?: string;
   given_name?: string;

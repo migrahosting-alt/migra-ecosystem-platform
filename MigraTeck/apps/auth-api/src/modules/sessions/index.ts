@@ -2,7 +2,7 @@
  * Sessions module — central auth sessions (cookie-backed, server-side).
  */
 import { db } from "../../lib/db.js";
-import { generateToken, hashToken, verifyTokenHash } from "../../lib/crypto.js";
+import { generateToken, hashToken } from "../../lib/crypto.js";
 import { config } from "../../config/env.js";
 import type { Session } from "../../prisma-client.js";
 
@@ -37,6 +37,10 @@ export async function createAuthSession(
   return { session, sessionSecret };
 }
 
+export async function getSessionById(sessionId: string): Promise<Session | null> {
+  return db.session.findUnique({ where: { id: sessionId } });
+}
+
 export async function validateSession(
   sessionSecret: string,
 ): Promise<Session | null> {
@@ -60,6 +64,41 @@ export async function validateSession(
   return session;
 }
 
+export async function rotateAuthSession(
+  sessionId: string,
+  ipAddress?: string,
+  userAgent?: string,
+): Promise<SessionCreateResult | null> {
+  const current = await db.session.findFirst({
+    where: {
+      id: sessionId,
+      revokedAt: null,
+      expiresAt: { gt: new Date() },
+    },
+  });
+
+  if (!current) {
+    return null;
+  }
+
+  const sessionSecret = generateToken(32);
+  const sessionSecretHash = hashToken(sessionSecret);
+  const expiresAt = new Date(Date.now() + config.sessionTtl * 1000);
+
+  const session = await db.session.update({
+    where: { id: current.id },
+    data: {
+      sessionSecretHash,
+      expiresAt,
+      lastSeenAt: new Date(),
+      ipAddress: ipAddress ?? current.ipAddress ?? null,
+      userAgent: userAgent ?? current.userAgent ?? null,
+    },
+  });
+
+  return { session, sessionSecret };
+}
+
 export async function revokeSession(sessionId: string): Promise<void> {
   await db.session.update({
     where: { id: sessionId },
@@ -70,6 +109,21 @@ export async function revokeSession(sessionId: string): Promise<void> {
 export async function revokeAllUserSessions(userId: string): Promise<number> {
   const result = await db.session.updateMany({
     where: { userId, revokedAt: null },
+    data: { revokedAt: new Date() },
+  });
+  return result.count;
+}
+
+export async function revokeOtherUserSessions(
+  userId: string,
+  currentSessionId: string,
+): Promise<number> {
+  const result = await db.session.updateMany({
+    where: {
+      userId,
+      revokedAt: null,
+      id: { not: currentSessionId },
+    },
     data: { revokedAt: new Date() },
   });
   return result.count;

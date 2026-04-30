@@ -6,7 +6,7 @@
 
 ## Root Cause (Multi-layer)
 A 413 can be enforced at multiple layers. For MigraHosting, the usual layers are:
-1) **Edge NGINX on `srv1-web`** (vhost `client_max_body_size`)
+1) **Edge NGINX on `nginx-proxy-core`** (vhost `client_max_body_size`)
 2) **Pod NGINX inside the CloudPod** (often defaults to a small limit if not set)
 3) **PHP-FPM inside the CloudPod** (`upload_max_filesize`, `post_max_size`)
 
@@ -24,9 +24,9 @@ Set these values to **256M**:
 - PHP-FPM drop-in (all installed PHP versions):
   - `/etc/php/<version>/fpm/conf.d/99-migra-upload.ini`
 
-### B) Edge vhosts on `srv1-web`
+### B) Edge vhosts on `nginx-proxy-core`
 - Add `client_max_body_size 256M;` to the relevant `server {}` blocks.
-  - This is required for sites served directly by `srv1-web` and for maintenance vhosts.
+  - This is required for sites served directly by `nginx-proxy-core` and for maintenance vhosts.
 
 ## Provisioning (Future Pods)
 New CloudPods created via `pve:/usr/local/sbin/cloudpod-create.sh` apply the upload defaults automatically (best-effort) after netplan is configured.

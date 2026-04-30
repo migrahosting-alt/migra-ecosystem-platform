@@ -3,7 +3,9 @@ import Image from "next/image";
 import Link from "next/link";
 import { cn } from "@/lib/cn";
 import { getProductLegalHref } from "@/content/legal";
-import { buildPageMetadata } from "@/lib/metadata";
+import { buildPageMetadata, absoluteUrl } from "@/lib/metadata";
+import { buildBreadcrumbList, buildSoftwareApplication, SITE_ROOT } from "@/lib/structured-data";
+import { buildInquiryHref } from "@/lib/inquiry";
 import ui from "@/lib/ui";
 import { products, productCategories } from "@/data/products";
 
@@ -42,8 +44,34 @@ export default async function ProductDetailPage({ params }: Props) {
       ? "MigraTeck is the shared platform layer that connects the rest of the ecosystem."
       : `${product.name} is one of ${products.length} products on the MigraTeck ecosystem.`;
 
+  const productInquiryHref = buildInquiryHref({
+    plan: product.name,
+    source: `Product — ${product.name}`,
+    bodyLines: [
+      "Business name:",
+      "How you plan to use this product:",
+      "Current setup:",
+      "Timeline:",
+    ],
+  });
+
+  const breadcrumb = buildBreadcrumbList([
+    SITE_ROOT,
+    { name: "Products", url: absoluteUrl("/products") },
+    { name: product.name, url: absoluteUrl(`/products/${product.slug}`) },
+  ]);
+  const softwareApp = buildSoftwareApplication(product);
+
   return (
     <>
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumb) }}
+      />
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(softwareApp) }}
+      />
       {/* hero */}
       <section className="hero-gradient hero-mesh relative overflow-hidden">
         <div className="pointer-events-none absolute right-0 bottom-0 h-[350px] w-[350px] rounded-full bg-pink-500/10 blur-[100px]" />
@@ -215,13 +243,13 @@ export default async function ProductDetailPage({ params }: Props) {
       {/* CTA */}
       <section className="section-dark-blue relative overflow-hidden">
         <div className={cn(ui.maxW, "relative py-20 text-center sm:py-24")}>
-          <h2 className={ui.h2Dark}>See the full platform.</h2>
+          <h2 className={ui.h2Dark}>Ready to get started?</h2>
           <p className={cn(ui.bodyDark, "mx-auto mt-4 max-w-lg")}>
-            {ecosystemCtaCopy}
+            {ecosystemCtaCopy} Send us a note and we will scope the right entry point for your situation.
           </p>
-          <div className="mt-8 flex justify-center gap-4">
-            <Link href="/platform" className={ui.btnPrimaryLight}>Platform architecture</Link>
-            <Link href="/products" className={ui.btnSecondaryDark}>All products</Link>
+          <div className="mt-8 flex flex-col items-center justify-center gap-4 sm:flex-row">
+            <a href={productInquiryHref} className={ui.btnPrimaryLight}>Send inquiry</a>
+            <Link href="/services" className={ui.btnSecondaryDark}>View service tracks</Link>
           </div>
         </div>
       </section>
