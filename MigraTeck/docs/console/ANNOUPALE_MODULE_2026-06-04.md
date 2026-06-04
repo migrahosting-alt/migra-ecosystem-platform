@@ -101,21 +101,41 @@ building, which installs the pinned 16.2.6 — so the pipeline builds green. The
 local-only fix is to resync deps (`npm/pnpm install`) so `npx` stops resolving
 the stale 16.2.2 binary.
 
-## Deployment status
+## Deployment (2026-06-04) — DEPLOYED to production
 
-- **Build:** ✅ green on Next 16.2.6 (Turbopack), includes `/console/annoupale`.
-- **Typecheck / lint (changed files):** ✅ pass.
-- **Production deploy:** ⏸ **pending authorization.** Blocked on two safety items,
-  not on the build:
-  1. The `apps/web` working tree is heavily dirty — modified `package.json`,
-     `PublicChrome.tsx`, `SiteFooter.tsx`, `sitemap.ts`, `legal.ts`, brand/portfolio
-     assets, `packages/*/package.json`, plus the **entire untracked** `console/`,
-     `api/console/`, `product/`, `request-access/` surfaces. `deploy-production.sh`
-     rsyncs the whole tree, so a deploy ships all of this, not just AnnouPale.
-  2. `deploy-production.sh` needs `DEPLOY_HOST` + SSH and runs `systemctl restart
-     migrateck` on production — a prod operation requiring explicit go-ahead and a
-     confirmed host.
-- **Production QA:** ⏸ not yet performed (deploy pending).
+- **Production commit:** `534e36d` (branch `feat/console-foundation` → merged to local
+  `main` via fast-forward). Console foundation committed in A `60448a0` / B `eec3dc2` /
+  C `523be47` (AnnouPale) / dep `534e36d`.
+- **DB migration gate:** `001_client_management` confirmed **already applied** to the prod
+  migrapanel DB (2026-05-28); not reapplied.
+- **Deployment method (clean, minimal):** app-core's `/opt/migra/repos/migrateck/app` is
+  **rsync-fed, not a git checkout**, so the `deploy-production.sh` path (which uses `npm ci`
+  and rsyncs the dirty tree) was **not** used. Instead:
+  1. Built a clean `main@534e36d` worktree (never the dirty local tree).
+  2. Checksum dry-run → confirmed the prod delta is exactly the AnnouPale files
+     (`annoupale/page.tsx`, `lib/annoupale.ts`, `lib/ecosystem.ts` tile, `ecosystem/page.tsx`
+     route, `lib/modules/stripe-links.ts` comment fix, `annoupale.png`).
+  3. `rsync -rlc` (content-only, **no `--delete`**) of `console/` + the logo asset to app-core
+     — no unrelated/dirty files transferred.
+  4. **Build-only** (`pnpm -F @migrateck/web build`) with prod's existing `node_modules`.
+     `pnpm install --frozen-lockfile` was **skipped** because AnnouPale adds no new deps and
+     prod has a **pre-existing** `pnpm.overrides`/lockfile mismatch (unrelated to this change —
+     see Deferred). Build EXIT 0, `/console/annoupale` present.
+  5. `systemctl restart migrateck` → service `active (running)`, no errors in logs.
+- **Production QA — server/asset level (verified):**
+  - `https://console.migrateck.com/console` → 307 (auth gate, healthy).
+  - `https://console.migrateck.com/console/annoupale` → 307 (route live, not 404/500).
+  - `https://console.migrateck.com/brands/products/annoupale.png` → 200 `image/png` (logo serves).
+  - No `www.annoupale` in served output; source uses apex `https://annoupale.com` only,
+    Admin `…/admin`, Compliance `…/admin/compliance/cases`.
+  - Server logs clean since restart.
+- **Production QA — authenticated visual (PENDING, needs a logged-in browser):** tile appears
+  in the Ecosystem Control Grid, tile logo renders, Open → `/console/annoupale`, existing
+  modules still present, no dead buttons, no horizontal overflow, browser console clean. I
+  could not perform these headlessly (the console is single-admin auth-gated and I do not use
+  the admin credential).
+- **Not pushed:** local `main` is ahead of `origin/main`; prod is served from the rsync'd
+  files, independent of git remote.
 
 ## Deferred (explicitly NOT started)
 
@@ -124,4 +144,10 @@ the stale 16.2.2 binary.
 - Live AnnouPale metrics (requires an AnnouPale read API / panel data feed).
 - Mail TLS monitoring widget.
 - Admin API / streaming health probes (need safe AnnouPale health endpoints).
-- Pre-existing `/legal/payment` build fix.
+- Pre-existing `/legal/payment` build fix (was a stale-toolchain artifact; clean on Next 16.2.6).
+- **Prod dependency drift (ops cleanup):** app-core's `/opt/migra/repos/migrateck/app` is
+  rsync-fed (not git) and its `package.json`/`pnpm-lock.yaml` are inconsistent
+  (`ERR_PNPM_LOCKFILE_CONFIG_MISMATCH` on `overrides`), plus it carries leftover dirty files
+  (Windows-path junk, `packages/auth-*` drift). Frozen-lockfile installs will fail until this
+  is reconciled. Recommend converting the prod app dir to a clean git checkout (or a clean
+  artifact pipeline) and regenerating a consistent lockfile.
