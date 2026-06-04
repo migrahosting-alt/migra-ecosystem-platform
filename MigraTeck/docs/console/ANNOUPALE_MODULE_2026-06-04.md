@@ -137,13 +137,45 @@ the stale 16.2.2 binary.
 - **Not pushed:** local `main` is ahead of `origin/main`; prod is served from the rsync'd
   files, independent of git remote.
 
+## Health-probe fix + QA (2026-06-04, second pass) — commit `72b926a`
+
+- **Problem:** the page ran a server-side HEAD probe of `https://annoupale.com` and showed
+  **"Web reachability: Unreachable"** even though the site is publicly live.
+- **Root cause:** the probe runs on the console host (app-core), which **cannot reach**
+  `annoupale.com` (resolves to `138.201.255.55` but every TCP connection **times out** —
+  app-core has no egress/hairpin to that public IP). So the probe always returned a *false*
+  `Unreachable`. The site itself is up (verified externally).
+- **Fix:** removed the unreliable network probe entirely (`lib/annoupale.ts` →
+  `getAnnoupaleLinkStatus()`). The page now shows an honest **"External link"** status —
+  no false downtime, no fake "operational". Header shows the module as `Operational` (the
+  console surface) + `Production`; the hero shows `Link status: External link · uptime
+  monitored in AnnouPale`; Platform Health shows `Web app (annoupale.com): External link`
+  with a note that a console-side probe is pending a reachable AnnouPale health endpoint.
+- **Deployed:** same clean targeted sync (clean worktree → `rsync -rlc`, no `--delete`, 2
+  files) → `pnpm -F @migrateck/web build` (build-only, EXIT 0) → `systemctl restart migrateck`
+  → `active`, logs clean.
+- **QA — server/asset level (verified):** `/console` & `/console/annoupale` → 307 (live,
+  auth-gated); logo asset 200 `image/png`; no `www.annoupale` in served output; apex links
+  only; deployed source has no `probeAnnoupaleWeb`/`Unreachable` so the false status cannot
+  render. Links in source: Admin `https://annoupale.com/admin`, Compliance
+  `…/admin/compliance/cases`, Legal `…/legal`, intake `…/legal/contact` + the 8 deep links.
+- **QA — authenticated visual (STILL PENDING, your browser):** AnnouPale tile in the Ecosystem
+  Control Grid, tile logo render, Open → `/console/annoupale`, all cards render, deep links
+  clickable, existing tiles intact, no horizontal overflow, clean browser console. Not doable
+  headlessly (single-admin auth gate; admin credential not used).
+
 ## Deferred (explicitly NOT started)
 
 - Orchestration Map AnnouPale node (SVG layout).
 - Shared staff SSO / central cross-product RBAC.
 - Live AnnouPale metrics (requires an AnnouPale read API / panel data feed).
 - Mail TLS monitoring widget.
-- Admin API / streaming health probes (need safe AnnouPale health endpoints).
+- Admin API / streaming health probes (need safe AnnouPale health endpoints) — including a
+  real AnnouPale web/health probe once a target reachable from the console host exists.
+- **Repo / remote cleanup:** local `main` carries 26+ unrelated pre-existing commits + committed
+  Windows-path junk + excluded paths; `origin/main` predates the entire web app; the web app's
+  real remote is `web` (`MigraTeck-web.git`). Settle the canonical remote and curate `main`
+  before publishing the console as a clean PR. (Push intentionally on hold.)
 - Pre-existing `/legal/payment` build fix (was a stale-toolchain artifact; clean on Next 16.2.6).
 - **Prod dependency drift (ops cleanup):** app-core's `/opt/migra/repos/migrateck/app` is
   rsync-fed (not git) and its `package.json`/`pnpm-lock.yaml` are inconsistent
