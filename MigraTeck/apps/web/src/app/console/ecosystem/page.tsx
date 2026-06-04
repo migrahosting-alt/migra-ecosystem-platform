@@ -32,6 +32,7 @@ const ROUTE_FOR: Record<string, string> = {
   intake: "/console/intake",
   marketing: "/console/marketing",
   automation: "/console/automation",
+  annoupale: "/console/annoupale",
 };
 
 export default async function EcosystemPage() {
