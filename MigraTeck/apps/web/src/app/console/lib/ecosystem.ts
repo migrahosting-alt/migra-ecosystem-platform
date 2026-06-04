@@ -64,6 +64,31 @@ const fallback = (id: string, name: string, subtitle: string, initials: string, 
   accent,
 });
 
+/**
+ * AnnouPale Trust & Operations.
+ *
+ * Unlike the eight tiles above, AnnouPale is an external product with its own
+ * admin surface and database, so it has no panel-DB usage metric. We therefore
+ * report an honest 0.0% activity (the panel can't measure it) and a live
+ * "operational" status. The primary action opens the native in-console module
+ * (/console/annoupale); the secondary deep-links to the AnnouPale compliance
+ * queue. Neither grants any AnnouPale permission — annoupale.com/admin still
+ * enforces its own platform_admin / trust_safety_admin roles. Apex URLs only.
+ */
+const annoupaleTile = (): ProductTile => ({
+  id: "annoupale",
+  initials: "AP",
+  name: "AnnouPale",
+  subtitle: "Social & Community Platform",
+  logoSrc: "/brands/products/annoupale.png",
+  logoAlt: "AnnouPale logo",
+  usagePct: 0,
+  status: "operational",
+  primaryAction: { label: "Open", href: "/console/annoupale" },
+  secondaryAction: { label: "Compliance", href: "https://annoupale.com/admin/compliance/cases" },
+  accent: "from-fuchsia-500 to-amber-400",
+});
+
 export const loadEcosystem = async (): Promise<ProductTile[]> => {
   const tiles: ProductTile[] = [
     fallback("migrateck", "MigraTeck", "Core Platform", "MT", ACCENTS.migrateck!),
@@ -76,7 +101,9 @@ export const loadEcosystem = async (): Promise<ProductTile[]> => {
     fallback("automation", "Automation", "Workflows", "AU", ACCENTS.automation!),
   ];
 
-  if (!isPanelDbConfigured()) return tiles;
+  // External products (deep-linked, no panel-DB metric) are appended after the
+  // eight internal modules so the indexed usage `apply()` below stays aligned.
+  if (!isPanelDbConfigured()) return [...tiles, annoupaleTile()];
 
   const usage = await Promise.all([
     // MigraTeck Core: % of users who logged in within the last 7 days
@@ -183,5 +210,5 @@ export const loadEcosystem = async (): Promise<ProductTile[]> => {
     t.status = t.usagePct >= 100 ? "degraded" : "operational";
   }
 
-  return tiles;
+  return [...tiles, annoupaleTile()];
 };
