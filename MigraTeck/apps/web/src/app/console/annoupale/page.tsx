@@ -6,7 +6,7 @@ import { ShieldCheck, ExternalLink, Gavel, ArrowUpRight, Scale, Inbox, Lock, Mai
 import { getSession } from "../lib/auth";
 import { ConsolePageShell } from "../components/ConsolePageShell";
 import { SectionCard } from "../components/SectionCard";
-import { ANNOUPALE_LINKS, probeAnnoupaleWeb, type WebProbe } from "../lib/annoupale";
+import { ANNOUPALE_LINKS, getAnnoupaleLinkStatus } from "../lib/annoupale";
 
 export const dynamic = "force-dynamic";
 
@@ -58,9 +58,6 @@ const StatusBadge = ({ tone, label }: { tone: Tone; label?: string | undefined }
     </span>
   );
 };
-
-const probeTone = (p: WebProbe): Tone =>
-  p.status === "operational" ? "live" : p.status === "degraded" ? "recommended" : "off";
 
 /** External deep link card (opens in a new tab, no token, no iframe). */
 const ActionCard = ({
@@ -128,8 +125,7 @@ export default async function AnnoupalePage() {
   const session = await getSession();
   if (!session) redirect("/console/login");
 
-  const web = await probeAnnoupaleWeb();
-  const headerTone = probeTone(web);
+  const link = getAnnoupaleLinkStatus();
 
   return (
     <ConsolePageShell
@@ -139,7 +135,7 @@ export default async function AnnoupalePage() {
       subtitle="Operational control surface for AnnouPale and Pale compliance, safety, moderation, and platform health."
       actions={
         <>
-          <StatusBadge tone={headerTone} label={headerTone === "live" ? "Operational" : web.label} />
+          <StatusBadge tone="live" label="Operational" />
           <span className="inline-flex items-center gap-1.5 rounded-md border border-violet-400/20 bg-violet-500/10 px-2 py-0.5 text-[10px] font-medium text-violet-300">
             <span className="h-1.5 w-1.5 rounded-full bg-violet-400" />
             Production
@@ -166,16 +162,9 @@ export default async function AnnoupalePage() {
             </div>
           </div>
           <div className="text-right">
-            <p className="text-[10px] uppercase tracking-wider text-slate-500">Web reachability</p>
-            <p className="text-sm font-semibold text-white">
-              {web.label}
-              {web.latencyMs != null && web.status !== "unreachable" && (
-                <span className="ml-1 font-mono text-[11px] font-normal text-slate-400">
-                  {web.latencyMs} ms
-                </span>
-              )}
-            </p>
-            <p className="text-[10px] text-slate-500">Live HEAD probe · annoupale.com</p>
+            <p className="text-[10px] uppercase tracking-wider text-slate-500">Link status</p>
+            <p className="text-sm font-semibold text-white">{link.label}</p>
+            <p className="text-[10px] text-slate-500">{link.detail}</p>
           </div>
         </div>
       </SectionCard>
@@ -249,17 +238,14 @@ export default async function AnnoupalePage() {
 
         <SectionCard title="Platform Health">
           <div className="-mt-1 divide-y divide-white/5">
-            <OpsRow
-              label="Web app (annoupale.com)"
-              tone={probeTone(web)}
-              badgeLabel={web.label}
-            />
+            <OpsRow label="Web app (annoupale.com)" tone="configured" badgeLabel="External link" />
             <OpsRow label="Admin API health" tone="off" />
             <OpsRow label="Live / streaming" tone="off" />
           </div>
           <p className="mt-3 text-[10px] leading-relaxed text-slate-500">
-            Web status is a live HEAD probe. Deeper health signals require an AnnouPale health
-            endpoint (deferred).
+            AnnouPale runs on separate infrastructure not reachable from the console host, so
+            uptime is monitored inside AnnouPale. A console-side health probe is pending a
+            reachable AnnouPale health endpoint.
           </p>
         </SectionCard>
 
