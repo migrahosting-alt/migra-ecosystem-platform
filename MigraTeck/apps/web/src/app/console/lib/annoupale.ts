@@ -2,11 +2,20 @@
  * AnnouPale Trust & Operations module data.
  *
  * AnnouPale is an external product with its own database and admin surface, so
- * the MigraPanel console has no panel-DB metrics for it. This module therefore
- * shows qualitative operational statuses (Live / Configured / Pending / Not
- * connected yet) and a single REAL web reachability probe — never fabricated
- * counts. All links are canonical apex URLs (annoupale.com, never www) and are
- * verified to exist in the AnnouPale web app (apps/pale-platform/apps/web).
+ * the MigraPanel console has no panel-DB metrics for it. This module shows
+ * qualitative operational statuses (Live / Configured / Pending / Not connected
+ * yet) — never fabricated counts.
+ *
+ * Reachability note: AnnouPale runs on separate infrastructure
+ * (annoupale.com → 138.201.255.55) that is NOT routable from the console host
+ * (app-core has no egress/hairpin to it — every connection times out). A
+ * server-side probe therefore always times out and falsely reports a down
+ * site, so we do NOT probe. We present an honest "External link" status instead
+ * (no false downtime, no fake "operational"). A real console-side probe is
+ * deferred until a reachable AnnouPale health endpoint exists.
+ *
+ * All links are canonical apex URLs (annoupale.com, never www) and are verified
+ * to exist in the AnnouPale web app (apps/pale-platform/apps/web).
  */
 
 export const ANNOUPALE_BASE = "https://annoupale.com" as const;
@@ -28,37 +37,21 @@ export const ANNOUPALE_LINKS = {
   accountDeletion: url("/help/account-deletion"),
 } as const;
 
-export type WebProbe = {
-  status: "operational" | "degraded" | "unreachable";
+export type LinkStatus = {
+  /** "external" = we link out but do not (cannot) measure uptime from here. */
+  status: "external";
   label: string;
-  latencyMs: number | null;
+  detail: string;
 };
 
 /**
- * Real HEAD probe of the AnnouPale web app. Runs server-side per request (the
- * page is force-dynamic, so this never runs at build time). Honest by design:
- * a network failure reports "unreachable", not a fake "operational".
+ * Honest link status for AnnouPale. No network probe is performed (the console
+ * host cannot reach annoupale.com — see the file header), so this never reports
+ * false downtime and never fakes "operational". It states plainly that the
+ * console deep-links to AnnouPale and that uptime is monitored in AnnouPale.
  */
-export const probeAnnoupaleWeb = async (): Promise<WebProbe> => {
-  const start = Date.now();
-  try {
-    const controller = new AbortController();
-    const t = setTimeout(() => controller.abort(), 4_000);
-    const res = await fetch(ANNOUPALE_BASE, {
-      method: "HEAD",
-      cache: "no-store",
-      signal: controller.signal,
-      redirect: "follow",
-    });
-    clearTimeout(t);
-    const latencyMs = Date.now() - start;
-    const ok = res.status < 500;
-    return {
-      status: ok ? "operational" : "degraded",
-      label: ok ? "Operational" : "Degraded",
-      latencyMs,
-    };
-  } catch {
-    return { status: "unreachable", label: "Unreachable", latencyMs: Date.now() - start };
-  }
-};
+export const getAnnoupaleLinkStatus = (): LinkStatus => ({
+  status: "external",
+  label: "External link",
+  detail: "Opens annoupale.com · uptime monitored in AnnouPale",
+});
