@@ -3,6 +3,10 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
+  "dependencies": {
+    "eslint": "^9.39.4",
+    "eslint-config-next": "16.2.6"
+  },
   "exports": {
     "./tsconfig/base": "./tsconfig.base.json",
     "./eslint/base": "./eslint/base.mjs",
