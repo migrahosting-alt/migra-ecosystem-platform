@@ -33,6 +33,7 @@ const ROUTE_FOR: Record<string, string> = {
   marketing: "/console/marketing",
   automation: "/console/automation",
   annoupale: "/console/annoupale",
+  pale: "/console/pale",
 };
 
 export default async function EcosystemPage() {

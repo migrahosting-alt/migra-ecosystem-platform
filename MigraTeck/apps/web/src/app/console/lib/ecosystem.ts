@@ -50,7 +50,16 @@ const ACCENTS: Record<string, string> = {
   automation: "from-blue-500 to-indigo-500",
 };
 
-const fallback = (id: string, name: string, subtitle: string, initials: string, accent: string): ProductTile => ({
+const fallback = (
+  id: string,
+  name: string,
+  subtitle: string,
+  initials: string,
+  accent: string,
+  primaryHref: string,
+  secondaryHref: string,
+  secondaryLabel = "Reports",
+): ProductTile => ({
   id,
   initials,
   name,
@@ -59,8 +68,8 @@ const fallback = (id: string, name: string, subtitle: string, initials: string, 
   logoAlt: PRODUCT_LOGOS[id]?.alt ?? `${name} logo`,
   usagePct: 0,
   status: "unknown",
-  primaryAction: { label: "Open", href: `https://${id}.migrahosting.com` },
-  secondaryAction: { label: "Reports", href: `/console/${id}/reports` },
+  primaryAction: { label: "Open", href: primaryHref },
+  secondaryAction: { label: secondaryLabel, href: secondaryHref },
   accent,
 });
 
@@ -89,21 +98,47 @@ const annoupaleTile = (): ProductTile => ({
   accent: "from-fuchsia-500 to-amber-400",
 });
 
+/**
+ * Pale — phone-first mobile messaging app of the AnnouPale ecosystem
+ * (com.migrateck.pale). Like AnnouPale it has no panel-DB usage metric, so it
+ * reports an honest 0.0% activity. But its backend (pale-api) is colocated on
+ * app-core with the console, so the native /console/pale module performs a real
+ * live health probe (see lib/pale.ts). The secondary action deep-links to the
+ * Google Play listing. Status is "operational" by default; the live backend
+ * state is shown inside the module rather than faked on the tile.
+ */
+const paleTile = (): ProductTile => ({
+  id: "pale",
+  initials: "PA",
+  name: "Pale",
+  subtitle: "Phone-First Messaging App",
+  logoSrc: "/brands/products/pale.png",
+  logoAlt: "Pale logo",
+  usagePct: 0,
+  status: "operational",
+  primaryAction: { label: "Open", href: "/console/pale" },
+  secondaryAction: {
+    label: "Play Store",
+    href: "https://play.google.com/store/apps/details?id=com.migrateck.pale",
+  },
+  accent: "from-sky-500 to-violet-500",
+});
+
 export const loadEcosystem = async (): Promise<ProductTile[]> => {
   const tiles: ProductTile[] = [
-    fallback("migrateck", "MigraTeck", "Core Platform", "MT", ACCENTS.migrateck!),
-    fallback("hosting", "Hosting", "Web Hosting", "MH", ACCENTS.hosting!),
-    fallback("panel", "MigraPanel", "Client Portal", "MP", ACCENTS.panel!),
-    fallback("voice", "Voice", "VoIP System", "MV", ACCENTS.voice!),
-    fallback("email", "Email", "Email Services", "MM", ACCENTS.email!),
-    fallback("intake", "Intake", "Intake Forms", "MI", ACCENTS.intake!),
-    fallback("marketing", "Marketing", "Marketing Suite", "MK", ACCENTS.marketing!),
-    fallback("automation", "Automation", "Workflows", "AU", ACCENTS.automation!),
+    fallback("migrateck", "MigraTeck", "Core Platform", "MT", ACCENTS.migrateck!, "/console/ecosystem", "/console/activity", "Operations"),
+    fallback("hosting", "Hosting", "Web Hosting", "MH", ACCENTS.hosting!, "/console/hosting", "/console/domains", "Domains"),
+    fallback("panel", "MigraPanel", "Client Portal", "MP", ACCENTS.panel!, "/console/clients", "/console/team", "Staff"),
+    fallback("voice", "Voice", "VoIP System", "MV", ACCENTS.voice!, "/console/voice", "/console/support", "Tickets"),
+    fallback("email", "Email", "Email Services", "MM", ACCENTS.email!, "/console/email", "/console/mail", "Inbox"),
+    fallback("intake", "Intake", "Intake Forms", "MI", ACCENTS.intake!, "/console/intake", "/console/analytics", "Analytics"),
+    fallback("marketing", "Marketing", "Marketing Suite", "MK", ACCENTS.marketing!, "/console/marketing", "/console/analytics", "Analytics"),
+    fallback("automation", "Automation", "Workflows", "AU", ACCENTS.automation!, "/console/automation", "/console/activity?failures=1", "Failures"),
   ];
 
   // External products (deep-linked, no panel-DB metric) are appended after the
   // eight internal modules so the indexed usage `apply()` below stays aligned.
-  if (!isPanelDbConfigured()) return [...tiles, annoupaleTile()];
+  if (!isPanelDbConfigured()) return [...tiles, annoupaleTile(), paleTile()];
 
   const usage = await Promise.all([
     // MigraTeck Core: % of users who logged in within the last 7 days
@@ -203,12 +238,9 @@ export const loadEcosystem = async (): Promise<ProductTile[]> => {
   tiles[6]!.usagePct = apply(6);
   tiles[7]!.usagePct = apply(7);
 
-  // When the DB is reachable all services are considered operational — usagePct
-  // reflects activity level, not service health.  A new / empty module is still
-  // "operational"; only a fully saturated one (≥ 100 %) is flagged as degraded.
   for (const t of tiles) {
-    t.status = t.usagePct >= 100 ? "degraded" : "operational";
+    t.status = "operational";
   }
 
-  return [...tiles, annoupaleTile()];
+  return [...tiles, annoupaleTile(), paleTile()];
 };
