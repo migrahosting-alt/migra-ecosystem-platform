@@ -1,156 +1,179 @@
 /**
- * Pale Control Center — overview dashboard data.
+ * Pale Control Center — overview view model (Phase 1, live read-only).
  *
- * This drives the `/console/pale` overview exactly as designed in the approved
- * mockup. It is the SINGLE data source for the page, so each section can be
- * swapped from sample → live pale-api data independently once the Phase-0 staff
- * auth bridge + `/v1/admin/*` wiring land (see the Pale Control Center blueprint).
+ * Assembles the dashboard from live read-only Pale-DB queries (lib/pale-live.ts)
+ * with HONEST states: when the Pale DB is not configured, panels report
+ * "Not configured"; panels with no backend model yet (tickets, appeals, OTP
+ * delivery) report "No live endpoint connected yet". NOTHING is fabricated.
+ * Phone numbers are masked here before they reach the page.
  *
- * HONESTY: every value below is **sample/draft data** matching the mockup, EXCEPT
- * `release.backendHealth`, which is a real live probe of pale-api. Phone numbers
- * are masked (as in the mockup) and no OTP codes / tokens are ever present.
- * Replace the SAMPLE_* constants with live admin-API reads section by section.
+ * Reads only. All mutations are deferred to Phase 2 (pale-api audited endpoints).
  */
 
 import { getPaleBackendHealth } from "./pale";
+import { maskPhone } from "./pale-rbac";
+import {
+  getPaleOverview,
+  getPaleUsers,
+  getPaleReports,
+  getPaleAudit,
+  getPaleReportQueue,
+  getPaleClientVersion,
+} from "./pale-live";
+import { isPaleDbConfigured } from "./pale-db";
 
-/* --------------------------------------------------------------- KPI row (6) */
+export type Variant = "violet" | "fuchsia" | "amber" | "rose" | "blue" | "emerald";
 
-export type PaleKpi = {
+export type KpiView = {
   key: string;
   label: string;
-  value: string;
-  deltaPct: number;
-  deltaDir: "up" | "down" | "flat";
+  variant: Variant;
   period: string;
-  variant: "violet" | "fuchsia" | "amber" | "rose" | "blue" | "emerald";
+  value: string;
+  notConfigured: boolean;
+  deltaPct: number | null;
+  deltaDir: "up" | "down" | "flat";
   spark: ReadonlyArray<number>;
 };
 
-const SAMPLE_KPIS: ReadonlyArray<PaleKpi> = [
-  { key: "users", label: "Total Users", value: "128,452", deltaPct: 6.8, deltaDir: "up", period: "vs last 7 days", variant: "violet", spark: [42, 45, 44, 48, 51, 50, 55, 58, 60, 63] },
-  { key: "active", label: "Active Today", value: "18,746", deltaPct: 7.4, deltaDir: "up", period: "vs yesterday", variant: "fuchsia", spark: [30, 34, 31, 38, 42, 40, 47, 44, 52, 56] },
-  { key: "reports", label: "Pending Reports", value: "312", deltaPct: 12.3, deltaDir: "up", period: "vs yesterday", variant: "amber", spark: [20, 24, 22, 28, 26, 32, 30, 36, 34, 40] },
-  { key: "tickets", label: "Open Tickets", value: "156", deltaPct: 4.1, deltaDir: "up", period: "vs yesterday", variant: "rose", spark: [48, 44, 46, 42, 45, 41, 44, 40, 43, 45] },
-  { key: "appeals", label: "Pending Appeals", value: "48", deltaPct: 9.1, deltaDir: "up", period: "vs yesterday", variant: "blue", spark: [18, 20, 19, 23, 21, 25, 24, 28, 30, 33] },
-  { key: "otp", label: "OTP Health", value: "99.42%", deltaPct: 0.6, deltaDir: "up", period: "vs yesterday", variant: "emerald", spark: [60, 58, 61, 59, 62, 60, 63, 61, 64, 65] },
-];
+export type QueueView = { label: string; icon: string; count: number; oldest: string };
+export type UserView = { name: string; phone: string; status: string; lastActive: string };
+export type AuditView = { time: string; admin: string; action: string; tone: "danger" | "ok" | "warn"; target: string; details: string };
+export type ReleaseRow = { label: string; value: string; badge?: { text: string; tone: "latest" | "internal" } | undefined; ok?: boolean | undefined; pending?: boolean | undefined };
 
-/* ----------------------------------------------- 1. Trust & Safety queue */
-
-export type QueueRow = { type: string; icon: string; count: number; priority: "High" | "Medium" | "Reviewing"; oldest: string };
-
-const SAMPLE_QUEUE: ReadonlyArray<QueueRow> = [
-  { type: "Reported Messages", icon: "message", count: 98, priority: "High", oldest: "2h ago" },
-  { type: "Harassment", icon: "alert", count: 64, priority: "High", oldest: "1h ago" },
-  { type: "Impersonation", icon: "user-x", count: 42, priority: "Medium", oldest: "4h ago" },
-  { type: "Spam / Scam", icon: "ban", count: 57, priority: "Medium", oldest: "3h ago" },
-  { type: "Abusive Calls", icon: "phone", count: 21, priority: "High", oldest: "1h ago" },
-  { type: "Status / Media Reports", icon: "image", count: 30, priority: "Reviewing", oldest: "6h ago" },
-];
-
-/* ------------------------------------------------------- 2. Support tickets */
-
-export type TicketRow = { subject: string; user: string; status: "Open" | "Pending"; updated: string };
-
-const SAMPLE_TICKETS: ReadonlyArray<TicketRow> = [
-  { subject: "OTP not received", user: "+234 803 **** 1122", status: "Open", updated: "10m ago" },
-  { subject: "Login issue", user: "+91 98765 **** 21", status: "Open", updated: "23m ago" },
-  { subject: "Delete account request", user: "+1 415 **** 6677", status: "Pending", updated: "41m ago" },
-  { subject: "Account recovery", user: "+234 902 **** 7788", status: "Open", updated: "1h ago" },
-  { subject: "Blocked account appeal", user: "+254 712 **** 334", status: "Pending", updated: "2h ago" },
-];
-
-/* ------------------------------------------------------------ 3. User control */
-
-export type UserRow = { name: string; phone: string; status: "Active" | "Suspended"; lastActive: string };
-
-const SAMPLE_USERS: ReadonlyArray<UserRow> = [
-  { name: "Jane Doe", phone: "+1 415 **** 6677", status: "Active", lastActive: "2m ago" },
-  { name: "Ahmed Bello", phone: "+234 803 **** 1122", status: "Active", lastActive: "5m ago" },
-  { name: "Priya Sharma", phone: "+91 98765 **** 21", status: "Active", lastActive: "12m ago" },
-  { name: "Carlos Mendez", phone: "+52 55 **** 8899", status: "Suspended", lastActive: "1d ago" },
-  { name: "Fatima Ali", phone: "+971 50 **** 4433", status: "Active", lastActive: "1h ago" },
-];
-
-/* --------------------------------------------------------- 4. Appeals & claims */
-
-export type AppealRow = { type: string; user: string; status: "Under Review" | "Pending Info"; updated: string };
-
-const SAMPLE_APPEALS: ReadonlyArray<AppealRow> = [
-  { type: "Ban appeal", user: "+234 701 **** 8890", status: "Under Review", updated: "2h ago" },
-  { type: "Ownership claim", user: "+1 206 **** 7789", status: "Pending Info", updated: "5h ago" },
-  { type: "Content restoration", user: "+91 91234 **** 56", status: "Under Review", updated: "6h ago" },
-  { type: "Phone ownership issue", user: "+44 7700 **** 123", status: "Pending Info", updated: "1d ago" },
-];
-
-/* ------------------------------------------------------------ 5. OTP delivery */
-
-export type OtpRouteRow = { route: string; region: string; successRate: string; latency: string; status: "Healthy" | "Degraded" | "Down" };
-
-const SAMPLE_OTP_ROUTES: ReadonlyArray<OtpRouteRow> = [
-  { route: "SMS", region: "Global", successRate: "98.67%", latency: "1.25s", status: "Healthy" },
-  { route: "Voice Fallback", region: "Global", successRate: "96.31%", latency: "2.84s", status: "Healthy" },
-  { route: "WhatsApp OTP", region: "Global", successRate: "97.89%", latency: "1.63s", status: "Healthy" },
-];
-
-/* ----------------------------------------------- 6. Release & security status */
-
-export type ReleaseRow = { label: string; value: string; badge?: { text: string; tone: "latest" | "internal" } | undefined; ok?: boolean | undefined };
-
-/* ------------------------------------------------------------- 7. Audit log */
-
-export type AuditRow = { time: string; admin: string; action: string; actionTone: "danger" | "ok" | "warn"; target: string; details: string };
-
-const SAMPLE_AUDIT: ReadonlyArray<AuditRow> = [
-  { time: "May 12, 2025 10:42 AM", admin: "admin", action: "Suspended user", actionTone: "danger", target: "Carlos Mendez (+52 55 **** 8899)", details: "Reason: Policy violation – Spam" },
-  { time: "May 12, 2025 10:31 AM", admin: "safety.officer", action: "Resolved report", actionTone: "ok", target: "Report #R-89231", details: "Type: Harassment · Status: No violation" },
-  { time: "May 12, 2025 10:15 AM", admin: "support.lead", action: "Restored account", actionTone: "ok", target: "Aisha Khan (+971 50 **** 4433)", details: "Appeal approved" },
-  { time: "May 12, 2025 09:58 AM", admin: "review.team", action: "Reviewed appeal", actionTone: "warn", target: "Ban appeal – +234 701 **** 8890", details: "Decision: Upheld" },
-];
-
-export type PaleDashboard = {
-  kpis: ReadonlyArray<PaleKpi>;
-  queue: ReadonlyArray<QueueRow>;
-  tickets: ReadonlyArray<TicketRow>;
-  users: ReadonlyArray<UserRow>;
-  appeals: ReadonlyArray<AppealRow>;
-  otpRoutes: ReadonlyArray<OtpRouteRow>;
+export type PaleDashboardView = {
+  dbConfigured: boolean;
+  kpis: ReadonlyArray<KpiView>;
+  queue: { live: boolean; rows: ReadonlyArray<QueueView> };
+  users: { live: boolean; rows: ReadonlyArray<UserView> };
+  audit: { live: boolean; rows: ReadonlyArray<AuditView> };
   release: ReadonlyArray<ReleaseRow>;
-  audit: ReadonlyArray<AuditRow>;
 };
 
-/**
- * Build the dashboard. All sample sections are static; `release.backendHealth`
- * is resolved from a live pale-api probe so at least one row is always truthful.
- */
-export const getPaleDashboard = async (): Promise<PaleDashboard> => {
-  const health = await getPaleBackendHealth();
-  const backendValue =
-    health.status === "live"
-      ? "All Systems Operational"
-      : health.status === "down"
-        ? "Backend degraded"
-        : "Backend unreachable";
-  const backendOk = health.status === "live";
+const fmtNum = (n: number | null): { value: string; notConfigured: boolean } =>
+  n == null ? { value: "Not configured", notConfigured: true } : { value: n.toLocaleString("en-US"), notConfigured: false };
 
-  const release: ReadonlyArray<ReleaseRow> = [
-    { label: "Android App Version", value: "v1.8.3 (458)", badge: { text: "Latest", tone: "latest" } },
-    { label: "Play Internal Testing", value: "v1.9.0-beta.2 (512)", badge: { text: "Internal", tone: "internal" } },
-    { label: "Private Media Enforcement", value: "Enabled", ok: true },
-    { label: "Backend Health", value: backendValue, ok: backendOk },
-    { label: "Last Release", value: "May 11, 2025 · 10:21 AM" },
-    { label: "Vulnerability Scan", value: "No critical issues", ok: true },
+const dir = (p: number | null): "up" | "down" | "flat" => (p == null ? "flat" : p > 0 ? "up" : p < 0 ? "down" : "flat");
+
+const relative = (iso: string | null): string => {
+  if (!iso) return "—";
+  const then = new Date(iso).getTime();
+  const s = Math.max(0, Math.floor((Date.now() - then) / 1000));
+  if (s < 60) return `${s}s ago`;
+  if (s < 3600) return `${Math.floor(s / 60)}m ago`;
+  if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
+  return `${Math.floor(s / 86400)}d ago`;
+};
+
+const absolute = (iso: string | null): string => {
+  if (!iso) return "—";
+  return new Date(iso).toLocaleString("en-US", {
+    month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit",
+  });
+};
+
+const QUEUE_MAP: Record<string, { label: string; icon: string }> = {
+  message: { label: "Reported Messages", icon: "message" },
+  user: { label: "Profile Reports", icon: "user-x" },
+  profile: { label: "Profile Reports", icon: "user-x" },
+  group: { label: "Group Reports", icon: "alert" },
+  status: { label: "Status Reports", icon: "image" },
+  media: { label: "Media Reports", icon: "image" },
+  call: { label: "Abusive Calls", icon: "phone" },
+};
+
+const queueLabel = (t: string) =>
+  QUEUE_MAP[t] ?? { label: t.charAt(0).toUpperCase() + t.slice(1) + " Reports", icon: "alert" };
+
+const auditTone = (action: string): "danger" | "ok" | "warn" => {
+  const a = action.toUpperCase();
+  if (a.includes("BAN") || a.includes("SUSPEND") || a.includes("DELETE")) return "danger";
+  if (a.includes("RESTORE") || a.includes("RESOLVE") || a.includes("APPROVE")) return "ok";
+  return "warn";
+};
+
+const prettyAction = (action: string) =>
+  action.toLowerCase().replace(/_/g, " ").replace(/^\w/, (c) => c.toUpperCase());
+
+const shortId = (id: string | null) => (id ? id.slice(0, 8) : "");
+
+export const getPaleDashboardView = async (): Promise<PaleDashboardView> => {
+  const dbConfigured = isPaleDbConfigured();
+
+  const [overview, health, users, queueRows, audit, clientVersion] = await Promise.all([
+    getPaleOverview(),
+    getPaleBackendHealth(),
+    getPaleUsers(8),
+    getPaleReportQueue(),
+    getPaleAudit(8),
+    getPaleClientVersion(),
+  ]);
+  // Reports list is also read for masking parity / future detail wiring.
+  await getPaleReports(1).catch(() => []);
+
+  const kpis: KpiView[] = [
+    {
+      key: "users", label: "Total Users", variant: "violet", period: "vs last 7 days",
+      ...fmtNum(overview.totalUsers),
+      deltaPct: overview.totalUsersDeltaPct, deltaDir: dir(overview.totalUsersDeltaPct), spark: overview.totalUsersSpark,
+    },
+    {
+      key: "active", label: "Active Today", variant: "fuchsia", period: "vs yesterday",
+      ...fmtNum(overview.activeToday),
+      deltaPct: overview.activeTodayDeltaPct, deltaDir: dir(overview.activeTodayDeltaPct), spark: overview.activeTodaySpark,
+    },
+    {
+      key: "reports", label: "Pending Reports", variant: "amber", period: "vs yesterday",
+      ...fmtNum(overview.pendingReports),
+      deltaPct: overview.pendingReportsDeltaPct, deltaDir: dir(overview.pendingReportsDeltaPct), spark: overview.pendingReportsSpark,
+    },
+    // No backend model yet — honest "Not configured", never a fake number.
+    { key: "tickets", label: "Open Tickets", variant: "rose", period: "requires endpoint", value: "Not configured", notConfigured: true, deltaPct: null, deltaDir: "flat", spark: [] },
+    { key: "appeals", label: "Pending Appeals", variant: "blue", period: "requires endpoint", value: "Not configured", notConfigured: true, deltaPct: null, deltaDir: "flat", spark: [] },
+    { key: "otp", label: "OTP Health", variant: "emerald", period: "requires endpoint", value: "Not configured", notConfigured: true, deltaPct: null, deltaDir: "flat", spark: [] },
+  ];
+
+  const queue: QueueView[] = queueRows.map((q) => {
+    const m = queueLabel(q.targetType);
+    return { label: m.label, icon: m.icon, count: q.count, oldest: relative(q.oldest) };
+  });
+
+  const userRows: UserView[] = users.map((u) => ({
+    name: u.name || u.username || "—",
+    phone: maskPhone(u.phone),
+    status: u.status === "active" ? "Active" : u.status === "suspended" ? "Suspended" : u.status === "banned" ? "Banned" : u.status,
+    lastActive: relative(u.lastActive),
+  }));
+
+  const auditRows: AuditView[] = audit.map((a) => ({
+    time: absolute(a.createdAt),
+    admin: a.actor,
+    action: prettyAction(a.action),
+    tone: auditTone(a.action),
+    target: a.targetType ? `${a.targetType} ${shortId(a.targetId)}`.trim() : shortId(a.targetId),
+    details: a.reason ?? (a.actorRole ? `Role: ${a.actorRole}` : "—"),
+  }));
+
+  const backendValue =
+    health.status === "live" ? "All Systems Operational" : health.status === "down" ? "Backend degraded" : "Backend unreachable";
+
+  const release: ReleaseRow[] = [
+    clientVersion
+      ? { label: "Most-seen Android Version", value: clientVersion, ok: true }
+      : { label: "Android App Version", value: "Requires endpoint", pending: true },
+    { label: "Play Internal Testing", value: "Requires endpoint", pending: true },
+    { label: "Private Media Enforcement", value: "Requires endpoint", pending: true },
+    { label: "Backend Health", value: backendValue, ok: health.status === "live" },
+    { label: "Last Release", value: "Requires endpoint", pending: true },
+    { label: "Vulnerability Scan", value: "Requires endpoint", pending: true },
   ];
 
   return {
-    kpis: SAMPLE_KPIS,
-    queue: SAMPLE_QUEUE,
-    tickets: SAMPLE_TICKETS,
-    users: SAMPLE_USERS,
-    appeals: SAMPLE_APPEALS,
-    otpRoutes: SAMPLE_OTP_ROUTES,
+    dbConfigured,
+    kpis,
+    queue: { live: dbConfigured, rows: queue },
+    users: { live: dbConfigured, rows: userRows },
+    audit: { live: dbConfigured, rows: auditRows },
     release,
-    audit: SAMPLE_AUDIT,
   };
 };
