@@ -6,6 +6,7 @@ import {
   Server,
   Globe,
   Mail,
+  Inbox,
   Phone,
   FileText,
   Megaphone,
@@ -24,7 +25,8 @@ import {
 type NavItem = {
   label: string;
   href: string;
-  icon: React.ComponentType<{ className?: string }>;
+  icon?: React.ComponentType<{ className?: string }>;
+  logoSrc?: string;
 };
 
 const NAV: ReadonlyArray<NavItem> = [
@@ -33,6 +35,7 @@ const NAV: ReadonlyArray<NavItem> = [
   { label: "Hosting", href: "/console/hosting", icon: Server },
   { label: "Domains", href: "/console/domains", icon: Globe },
   { label: "Email", href: "/console/email", icon: Mail },
+  { label: "Mail", href: "/console/mail", icon: Inbox },
   { label: "Voice", href: "/console/voice", icon: Phone },
   { label: "Intake", href: "/console/intake", icon: FileText },
   { label: "Marketing", href: "/console/marketing", icon: Megaphone },
@@ -44,6 +47,7 @@ const NAV: ReadonlyArray<NavItem> = [
   { label: "Analytics", href: "/console/analytics", icon: BarChart3 },
   { label: "Security", href: "/console/security", icon: Shield },
   { label: "Team", href: "/console/team", icon: UsersRound },
+  { label: "Pale", href: "/console/pale", logoSrc: "/brands/products/pale.png" },
   { label: "Settings", href: "/console/settings", icon: Settings },
 ];
 
@@ -84,6 +88,7 @@ export const Sidebar = ({ activePath }: { activePath: string }) => {
               <li key={item.href}>
                 <Link
                   href={item.href}
+                  prefetch
                   className={[
                     "group flex items-center gap-3 rounded-lg px-3 py-2 transition",
                     active
@@ -91,12 +96,18 @@ export const Sidebar = ({ activePath }: { activePath: string }) => {
                       : "text-slate-400 hover:bg-white/5 hover:text-slate-100",
                   ].join(" ")}
                 >
-                  <Icon
-                    className={[
-                      "h-4 w-4 shrink-0 transition",
-                      active ? "text-fuchsia-300" : "text-slate-500 group-hover:text-slate-300",
-                    ].join(" ")}
-                  />
+                  {item.logoSrc ? (
+                    <span className="relative inline-flex h-4 w-4 shrink-0 items-center justify-center overflow-hidden rounded">
+                      <Image src={item.logoSrc} alt="" fill sizes="16px" className="object-contain" />
+                    </span>
+                  ) : Icon ? (
+                    <Icon
+                      className={[
+                        "h-4 w-4 shrink-0 transition",
+                        active ? "text-fuchsia-300" : "text-slate-500 group-hover:text-slate-300",
+                      ].join(" ")}
+                    />
+                  ) : null}
                   <span className="truncate">{item.label}</span>
                 </Link>
               </li>
@@ -125,6 +136,7 @@ export const Sidebar = ({ activePath }: { activePath: string }) => {
         </p>
         <Link
           href="/console/settings/plan"
+          prefetch
           className="mt-3 inline-flex w-full items-center justify-between rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-[11px] font-medium text-slate-200 transition hover:border-fuchsia-400/40 hover:bg-white/10"
         >
           View Plan Details

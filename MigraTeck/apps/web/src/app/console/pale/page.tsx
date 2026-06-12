@@ -1,265 +1,376 @@
 import { redirect } from "next/navigation";
-import Image from "next/image";
+import Link from "next/link";
 import type { ReactNode } from "react";
 import {
-  Smartphone,
+  Users,
+  Activity,
+  ShieldAlert,
+  Ticket,
+  Scale,
   ShieldCheck,
-  Fingerprint,
   MessageSquare,
-  Globe,
-  ExternalLink,
-  ArrowUpRight,
-  Lock,
-  Server,
+  AlertTriangle,
+  UserX,
+  Ban,
+  Phone,
+  Image as ImageIcon,
+  Search,
+  Eye,
+  ShieldOff,
+  LogOut,
+  ChevronDown,
+  Download,
+  ArrowRight,
+  Check,
+  TrendingUp,
+  TrendingDown,
+  Minus,
 } from "lucide-react";
 
 import { getSession } from "../lib/auth";
 import { ConsolePageShell } from "../components/ConsolePageShell";
 import { SectionCard } from "../components/SectionCard";
-import {
-  getPaleBackendHealth,
-  formatUptime,
-  PALE_PLAY_URL,
-} from "../lib/pale";
-import { ANNOUPALE_LINKS } from "../lib/annoupale";
+import { getPaleDashboard } from "../lib/pale-dashboard";
+import type {
+  PaleKpi,
+  QueueRow,
+  AuditRow,
+  ReleaseRow,
+} from "../lib/pale-dashboard";
 
 export const dynamic = "force-dynamic";
 
-/* ------------------------------------------------------------------ helpers */
+/* ------------------------------------------------------------- KPI card */
 
-type Tone = "live" | "enforced" | "configured" | "pending" | "off";
-
-const TONE: Record<Tone, { dot: string; badge: string; text: string }> = {
-  live: { dot: "bg-emerald-400", badge: "border-emerald-400/20 bg-emerald-500/10 text-emerald-300", text: "Live" },
-  enforced: { dot: "bg-emerald-400", badge: "border-emerald-400/20 bg-emerald-500/10 text-emerald-300", text: "Enforced" },
-  configured: { dot: "bg-sky-400", badge: "border-sky-400/20 bg-sky-500/10 text-sky-300", text: "Configured" },
-  pending: { dot: "bg-amber-400", badge: "border-amber-400/20 bg-amber-500/10 text-amber-300", text: "Pending" },
-  off: { dot: "bg-slate-500", badge: "border-slate-400/20 bg-slate-500/10 text-slate-400", text: "Not connected yet" },
+const KPI_VARIANTS: Record<PaleKpi["variant"], { iconBg: string; spark: string; ring: string }> = {
+  violet: { iconBg: "from-violet-500 to-purple-500", spark: "stroke-violet-400 text-violet-400", ring: "from-violet-500/40" },
+  fuchsia: { iconBg: "from-fuchsia-500 to-pink-500", spark: "stroke-fuchsia-400 text-fuchsia-400", ring: "from-fuchsia-500/40" },
+  amber: { iconBg: "from-amber-500 to-orange-500", spark: "stroke-amber-400 text-amber-400", ring: "from-amber-500/40" },
+  rose: { iconBg: "from-rose-500 to-red-500", spark: "stroke-rose-400 text-rose-400", ring: "from-rose-500/40" },
+  blue: { iconBg: "from-blue-500 to-cyan-500", spark: "stroke-blue-400 text-blue-400", ring: "from-blue-500/40" },
+  emerald: { iconBg: "from-emerald-500 to-teal-500", spark: "stroke-emerald-400 text-emerald-400", ring: "from-emerald-500/40" },
 };
 
-const StatusBadge = ({ tone, label }: { tone: Tone; label?: string | undefined }) => {
-  const t = TONE[tone];
+const KPI_ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
+  users: Users,
+  active: Activity,
+  reports: ShieldAlert,
+  tickets: Ticket,
+  appeals: Scale,
+  otp: ShieldCheck,
+};
+
+const sparkPath = (values: ReadonlyArray<number>, width = 240, height = 40) => {
+  if (values.length < 2) return null;
+  const max = Math.max(...values);
+  const min = Math.min(...values);
+  const range = Math.max(max - min, 1);
+  const stepX = width / (values.length - 1);
+  const pts = values.map((v, i) => [i * stepX, height - ((v - min) / range) * (height - 6) - 3] as const);
+  const line = pts.map((p, i) => `${i === 0 ? "M" : "L"}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(" ");
+  const fill = `M0,${height} ${line.replace("M", "L")} L${width},${height} Z`;
+  return { line, fill };
+};
+
+const KpiCard = ({ kpi }: { kpi: PaleKpi }) => {
+  const v = KPI_VARIANTS[kpi.variant];
+  const Icon = KPI_ICONS[kpi.key] ?? Activity;
+  const spark = sparkPath(kpi.spark);
+  const DeltaIcon = kpi.deltaDir === "up" ? TrendingUp : kpi.deltaDir === "down" ? TrendingDown : Minus;
+  const deltaColor = kpi.deltaDir === "down" ? "text-rose-400" : "text-emerald-400";
   return (
-    <span className={`inline-flex items-center gap-1.5 rounded-md border px-2 py-0.5 text-[10px] font-medium ${t.badge}`}>
-      <span className={`h-1.5 w-1.5 rounded-full ${t.dot}`} />
-      {label ?? t.text}
-    </span>
+    <div className="group relative overflow-hidden rounded-2xl border border-white/10 bg-white/[0.03] p-5 shadow-xl shadow-slate-950/30 backdrop-blur-md transition hover:border-white/20 hover:bg-white/[0.05]">
+      <div className={`pointer-events-none absolute -right-12 -top-12 h-32 w-32 rounded-full bg-gradient-to-br ${v.ring} via-transparent to-transparent blur-2xl`} />
+      <div className="relative flex items-start gap-3">
+        <span className={`inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br ${v.iconBg} shadow-lg shadow-slate-950/30`}>
+          <Icon className="h-5 w-5 text-white" />
+        </span>
+        <div className="min-w-0">
+          <p className="text-xs font-medium text-slate-400">{kpi.label}</p>
+          <p className="mt-0.5 text-2xl font-bold tracking-tight text-white">{kpi.value}</p>
+        </div>
+      </div>
+      <div className="relative mt-2 flex items-center gap-1.5 text-[11px]">
+        <DeltaIcon className={`h-3 w-3 ${deltaColor}`} />
+        <span className={`font-semibold ${deltaColor}`}>{kpi.deltaPct.toFixed(1)}%</span>
+        <span className="text-slate-500">{kpi.period}</span>
+      </div>
+      {spark && (
+        <svg viewBox="0 0 240 40" className={`relative mt-2 h-9 w-full ${v.spark}`} preserveAspectRatio="none">
+          <path d={spark.fill} className="fill-current opacity-15" stroke="none" />
+          <path d={spark.line} fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      )}
+    </div>
   );
 };
 
-const OpsRow = ({ label, tone, badgeLabel }: { label: string; tone: Tone; badgeLabel?: string | undefined }) => (
-  <div className="flex items-center justify-between gap-3 py-1.5">
-    <span className="text-[12px] text-slate-300">{label}</span>
-    <StatusBadge tone={tone} label={badgeLabel} />
-  </div>
+/* ------------------------------------------------------------- primitives */
+
+const BADGE: Record<string, string> = {
+  High: "border-rose-400/20 bg-rose-500/10 text-rose-300",
+  Medium: "border-amber-400/20 bg-amber-500/10 text-amber-300",
+  Reviewing: "border-sky-400/20 bg-sky-500/10 text-sky-300",
+  Open: "border-violet-400/20 bg-violet-500/10 text-violet-300",
+  Pending: "border-amber-400/20 bg-amber-500/10 text-amber-300",
+  Active: "border-emerald-400/20 bg-emerald-500/10 text-emerald-300",
+  Suspended: "border-rose-400/20 bg-rose-500/10 text-rose-300",
+  "Under Review": "border-sky-400/20 bg-sky-500/10 text-sky-300",
+  "Pending Info": "border-amber-400/20 bg-amber-500/10 text-amber-300",
+  Latest: "border-emerald-400/20 bg-emerald-500/10 text-emerald-300",
+  Internal: "border-sky-400/20 bg-sky-500/10 text-sky-300",
+};
+
+const Badge = ({ label }: { label: string }) => (
+  <span className={`inline-flex items-center rounded-md border px-2 py-0.5 text-[10px] font-medium ${BADGE[label] ?? "border-slate-400/20 bg-slate-500/10 text-slate-300"}`}>
+    {label}
+  </span>
 );
 
-const ActionCard = ({ icon, title, description, href }: { icon: ReactNode; title: string; description: string; href: string }) => (
-  <a
-    href={href}
-    target="_blank"
-    rel="noopener noreferrer"
-    className="group flex flex-col rounded-xl border border-white/10 bg-white/[0.02] p-4 transition hover:border-sky-400/40 hover:bg-white/[0.04]"
-  >
-    <div className="flex items-start justify-between gap-2">
-      <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-gradient-to-br from-sky-500/20 to-violet-500/20 text-sky-200">
-        {icon}
-      </span>
-      <ArrowUpRight className="h-4 w-4 text-slate-500 transition group-hover:text-sky-300" />
-    </div>
-    <p className="mt-3 text-sm font-semibold text-white">{title}</p>
-    <p className="mt-0.5 text-[11px] leading-relaxed text-slate-400">{description}</p>
-  </a>
+const HealthPill = ({ label }: { label: string }) => (
+  <span className="inline-flex items-center gap-1.5 rounded-md border border-emerald-400/20 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-medium text-emerald-300">
+    <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+    {label}
+  </span>
 );
 
-const DeepLink = ({ label, path, href }: { label: string; path: string; href: string }) => (
-  <a
-    href={href}
-    target="_blank"
-    rel="noopener noreferrer"
-    className="group flex items-center justify-between gap-3 rounded-lg border border-white/10 bg-white/[0.02] px-3 py-2 transition hover:border-sky-400/40 hover:bg-white/[0.05]"
-  >
-    <span className="min-w-0">
-      <span className="block truncate text-[12px] font-medium text-slate-200">{label}</span>
-      <span className="block truncate font-mono text-[10px] text-slate-500">{path}</span>
-    </span>
-    <ExternalLink className="h-3.5 w-3.5 shrink-0 text-slate-500 transition group-hover:text-sky-300" />
-  </a>
+const Th = ({ children, right }: { children: ReactNode; right?: boolean }) => (
+  <th className={`px-2 pb-2 text-[10px] font-medium uppercase tracking-wider text-slate-500 ${right ? "text-right" : "text-left"}`}>{children}</th>
 );
+const Td = ({ children, right, className = "" }: { children: ReactNode; right?: boolean; className?: string }) => (
+  <td className={`px-2 py-2.5 align-middle text-[12px] ${right ? "text-right" : "text-left"} ${className}`}>{children}</td>
+);
+
+const SectionLink = ({ href, label }: { href: string; label: string }) => (
+  <Link href={href} className="mt-1 flex items-center justify-center gap-1.5 border-t border-white/5 pt-3 text-[11px] font-medium text-fuchsia-300 transition hover:text-fuchsia-200">
+    {label} <ArrowRight className="h-3.5 w-3.5" />
+  </Link>
+);
+
+const HeaderBtn = ({ href, children }: { href: string; children: ReactNode }) => (
+  <Link href={href} className="rounded-md border border-white/10 bg-white/5 px-2.5 py-1 text-[11px] font-medium text-slate-200 transition hover:border-fuchsia-400/40 hover:bg-white/10">
+    {children}
+  </Link>
+);
+
+const QUEUE_ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
+  message: MessageSquare,
+  alert: AlertTriangle,
+  "user-x": UserX,
+  ban: Ban,
+  phone: Phone,
+  image: ImageIcon,
+};
+
+const ACTION_TONE: Record<AuditRow["actionTone"], string> = {
+  danger: "bg-rose-400",
+  ok: "bg-emerald-400",
+  warn: "bg-amber-400",
+};
 
 /* --------------------------------------------------------------------- page */
 
-export default async function PalePage() {
+export default async function PaleControlCenter() {
   const session = await getSession();
   if (!session) redirect("/console/login");
 
-  const health = await getPaleBackendHealth();
-  const backendTone: Tone =
-    health.status === "live" ? "live" : health.status === "down" ? "off" : "pending";
-  const backendLabel =
-    health.status === "live"
-      ? "Live"
-      : health.status === "down"
-        ? "Down"
-        : "Unreachable";
-  const uptimeText =
-    health.status === "live" ? formatUptime(health.uptimeSeconds) : "—";
+  const d = await getPaleDashboard();
 
   return (
     <ConsolePageShell
       session={session}
       activePath="/console/pale"
-      title="Pale"
-      subtitle="Phone-first mobile messaging app of the AnnouPale ecosystem — backend health, identity model, and OTP delivery."
+      title="Pale Control Center"
+      subtitle="Trust, safety, support, and operational control for the Pale app."
       actions={
         <>
-          <StatusBadge tone={backendTone} label={`Backend ${backendLabel}`} />
-          <span className="inline-flex items-center gap-1.5 rounded-md border border-violet-400/20 bg-violet-500/10 px-2 py-0.5 text-[10px] font-medium text-violet-300">
-            <span className="h-1.5 w-1.5 rounded-full bg-violet-400" />
-            Production
+          <span className="inline-flex items-center gap-1.5 rounded-md border border-white/10 bg-white/5 px-2.5 py-1 text-[11px] font-medium text-slate-200">
+            <span className="inline-flex h-4 w-4 items-center justify-center rounded bg-gradient-to-br from-sky-500 to-violet-500 text-[8px] font-bold text-white">P</span>
+            Pale App <ChevronDown className="h-3 w-3 text-slate-400" />
+          </span>
+          <span className="inline-flex items-center gap-1.5 rounded-md border border-white/10 bg-white/5 px-2.5 py-1 text-[11px] font-medium text-slate-200">
+            <Download className="h-3 w-3 text-slate-400" /> Export Report
           </span>
         </>
       }
     >
-      {/* Branded hero */}
-      <SectionCard className="border-sky-400/15 bg-gradient-to-br from-sky-500/[0.06] via-violet-500/[0.04] to-fuchsia-500/[0.06]">
-        <div className="flex flex-wrap items-center justify-between gap-4">
-          <div className="flex items-center gap-4">
-            <span className="relative inline-flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-2xl border border-white/10 bg-white/[0.04]">
-              <Image src="/brands/products/pale.png" alt="Pale logo" fill sizes="56px" className="object-contain p-1.5" />
+      {/* Breadcrumb */}
+      <div className="-mt-2 flex items-center gap-1.5 text-[11px] text-slate-500">
+        <Link href="/console/ecosystem" className="hover:text-slate-300">Apps</Link>
+        <span>/</span>
+        <span className="text-slate-300">Pale</span>
+      </div>
+
+      {/* 6 KPI cards */}
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+        {d.kpis.map((k) => <KpiCard key={k.key} kpi={k} />)}
+      </div>
+
+      {/* Row: Trust & Safety / Support Tickets / User Control */}
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
+        {/* 1. Trust & Safety Queue */}
+        <SectionCard
+          title="1. Trust & Safety Queue"
+          actions={<HeaderBtn href="/console/pale/reports">Review Reports</HeaderBtn>}
+        >
+          <table className="w-full border-collapse">
+            <thead><tr><Th>Type</Th><Th>Count</Th><Th>Priority</Th><Th right>Oldest</Th></tr></thead>
+            <tbody className="divide-y divide-white/5">
+              {d.queue.map((r: QueueRow) => {
+                const QIcon = QUEUE_ICONS[r.icon] ?? MessageSquare;
+                return (
+                  <tr key={r.type}>
+                    <Td><span className="flex items-center gap-2 text-slate-200"><QIcon className="h-3.5 w-3.5 text-slate-500" />{r.type}</span></Td>
+                    <Td className="font-mono text-slate-300">{r.count}</Td>
+                    <Td><Badge label={r.priority} /></Td>
+                    <Td right className="text-slate-500">{r.oldest}</Td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+          <SectionLink href="/console/pale/reports" label="Open Queue" />
+        </SectionCard>
+
+        {/* 2. Support Tickets */}
+        <SectionCard
+          title="2. Support Tickets"
+          actions={<HeaderBtn href="/console/pale/tickets">Create Case</HeaderBtn>}
+        >
+          <table className="w-full border-collapse">
+            <thead><tr><Th>Ticket</Th><Th>User</Th><Th>Status</Th><Th right>Updated</Th></tr></thead>
+            <tbody className="divide-y divide-white/5">
+              {d.tickets.map((t) => (
+                <tr key={t.subject}>
+                  <Td className="text-slate-200">{t.subject}</Td>
+                  <Td className="font-mono text-slate-400">{t.user}</Td>
+                  <Td><Badge label={t.status} /></Td>
+                  <Td right className="text-slate-500">{t.updated}</Td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <SectionLink href="/console/pale/tickets" label="View All Tickets" />
+        </SectionCard>
+
+        {/* 3. User Control */}
+        <SectionCard
+          title="3. User Control"
+          actions={
+            <span className="flex items-center gap-1.5 rounded-md border border-white/10 bg-white/5 px-2 py-1 text-[11px] text-slate-500">
+              <Search className="h-3 w-3" /> Search by name or phone...
             </span>
-            <div>
-              <p className="text-lg font-semibold text-white">Pale</p>
-              <p className="text-[12px] text-slate-400">Phone-First Messaging App · com.migrateck.pale</p>
-            </div>
-          </div>
-          <div className="text-right">
-            <p className="text-[10px] uppercase tracking-wider text-slate-500">Backend (pale-api)</p>
-            <p className="text-sm font-semibold text-white">{backendLabel}</p>
-            <p className="text-[10px] text-slate-500">
-              {health.status === "live" ? `uptime ${uptimeText} · ${health.detail}` : health.detail}
-            </p>
-          </div>
-        </div>
-      </SectionCard>
-
-      {/* Action cards */}
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <ActionCard
-          icon={<Smartphone className="h-5 w-5" />}
-          title="Google Play Listing"
-          description="Pale Android app (com.migrateck.pale)."
-          href={PALE_PLAY_URL}
-        />
-        <ActionCard
-          icon={<ShieldCheck className="h-5 w-5" />}
-          title="Trust &amp; Safety Admin"
-          description="Pale moderation runs through AnnouPale admin."
-          href={ANNOUPALE_LINKS.admin}
-        />
-        <ActionCard
-          icon={<MessageSquare className="h-5 w-5" />}
-          title="Compliance Cases"
-          description="Privacy, safety, security &amp; IP requests."
-          href={ANNOUPALE_LINKS.complianceCases}
-        />
-        <ActionCard
-          icon={<Globe className="h-5 w-5" />}
-          title="Legal Center"
-          description="Shared AnnouPale policies &amp; data rights."
-          href={ANNOUPALE_LINKS.legal}
-        />
-      </div>
-
-      {/* Operations cards */}
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-3">
-        <SectionCard title="Backend Health">
-          <div className="-mt-1 divide-y divide-white/5">
-            <OpsRow label="pale-api service" tone={backendTone} badgeLabel={backendLabel} />
-            <OpsRow label="Uptime" tone={health.status === "live" ? "live" : "off"} badgeLabel={uptimeText} />
-            <OpsRow label="Health endpoint" tone="configured" badgeLabel="/api/health" />
-          </div>
-          <div className="mt-3 flex items-start gap-2 rounded-lg border border-white/10 bg-white/[0.02] p-2.5">
-            <Server className="mt-0.5 h-3.5 w-3.5 shrink-0 text-slate-400" />
-            <p className="text-[10px] leading-relaxed text-slate-500">
-              Live server-side probe of pale-api on app-core. No fabricated metrics — if the
-              endpoint is unreachable this reports it honestly.
-            </p>
-          </div>
-        </SectionCard>
-
-        <SectionCard title="Identity &amp; Access">
-          <div className="-mt-1 divide-y divide-white/5">
-            <OpsRow label="Phone-first OTP login" tone="enforced" />
-            <OpsRow label="One account per number" tone="enforced" badgeLabel="E.164 + unique" />
-            <OpsRow label="One active device per number" tone="enforced" badgeLabel="Latest wins" />
-            <OpsRow label="Age gate (13+)" tone="enforced" />
-            <OpsRow label="No email OTP" tone="configured" badgeLabel="By design" />
-          </div>
-          <p className="mt-3 text-[10px] leading-relaxed text-slate-500">
-            A fresh login revokes other sessions, so a number can be live on only one device at a
-            time. Enforced server-side in pale-api.
-          </p>
-        </SectionCard>
-
-        <SectionCard title="OTP Delivery">
-          <div className="-mt-1 divide-y divide-white/5">
-            <OpsRow label="Provider: Telnyx Verify" tone="live" />
-            <OpsRow label="SMS channel" tone="live" />
-            <OpsRow label="Voice-call fallback" tone="configured" />
-            <OpsRow label="Global incl. Haiti (+509)" tone="live" />
-            <OpsRow label="6-digit branded code" tone="enforced" badgeLabel="Pale-AnnouPale" />
-            <OpsRow label="Android zero-tap autofill" tone="pending" badgeLabel="Template pending" />
-          </div>
-          <p className="mt-3 text-[10px] leading-relaxed text-slate-500">
-            One-tap autofill is live; zero-tap (SMS Retriever) activates once the Telnyx hash
-            template is created — currently waiting on a Telnyx review-engine outage.
-          </p>
+          }
+        >
+          <table className="w-full border-collapse">
+            <thead><tr><Th>Name</Th><Th>Phone</Th><Th>Status</Th><Th>Last Active</Th><Th right>Action</Th></tr></thead>
+            <tbody className="divide-y divide-white/5">
+              {d.users.map((u) => (
+                <tr key={u.name}>
+                  <Td className="text-slate-200">{u.name}</Td>
+                  <Td className="font-mono text-slate-400">{u.phone}</Td>
+                  <Td><Badge label={u.status} /></Td>
+                  <Td className="text-slate-500">{u.lastActive}</Td>
+                  <Td right>
+                    <span className="inline-flex items-center justify-end gap-1.5 text-slate-500">
+                      <Eye className="h-3.5 w-3.5 transition hover:text-sky-300" />
+                      <ShieldOff className="h-3.5 w-3.5 transition hover:text-rose-300" />
+                      <LogOut className="h-3.5 w-3.5 transition hover:text-amber-300" />
+                    </span>
+                  </Td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <SectionLink href="/console/pale/users" label="View All Users" />
         </SectionCard>
       </div>
 
-      {/* Platform */}
+      {/* Row: Appeals / OTP Delivery / Release & Security */}
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
+        {/* 4. Appeals & Claims */}
+        <SectionCard
+          title="4. Appeals & Claims"
+          actions={<HeaderBtn href="/console/pale/appeals">View All</HeaderBtn>}
+        >
+          <table className="w-full border-collapse">
+            <thead><tr><Th>Type</Th><Th>User</Th><Th>Status</Th><Th right>Updated</Th></tr></thead>
+            <tbody className="divide-y divide-white/5">
+              {d.appeals.map((a) => (
+                <tr key={a.type}>
+                  <Td className="text-slate-200">{a.type}</Td>
+                  <Td className="font-mono text-slate-400">{a.user}</Td>
+                  <Td><Badge label={a.status} /></Td>
+                  <Td right className="text-slate-500">{a.updated}</Td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <SectionLink href="/console/pale/appeals" label="Review Appeals" />
+        </SectionCard>
+
+        {/* 5. OTP Delivery */}
+        <SectionCard title="5. OTP Delivery">
+          <table className="w-full border-collapse">
+            <thead><tr><Th>Route</Th><Th>Region</Th><Th>Success Rate</Th><Th>Latency</Th><Th right>Status</Th></tr></thead>
+            <tbody className="divide-y divide-white/5">
+              {d.otpRoutes.map((o) => (
+                <tr key={o.route}>
+                  <Td className="text-slate-200">{o.route}</Td>
+                  <Td className="text-slate-400">{o.region}</Td>
+                  <Td className="font-mono text-slate-300">{o.successRate}</Td>
+                  <Td className="font-mono text-slate-400">{o.latency}</Td>
+                  <Td right><HealthPill label={o.status} /></Td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <SectionLink href="/console/pale/otp" label="View Delivery Dashboard" />
+        </SectionCard>
+
+        {/* 6. Release & Security Status */}
+        <SectionCard title="6. Release & Security Status">
+          <div className="divide-y divide-white/5">
+            {d.release.map((r: ReleaseRow) => (
+              <div key={r.label} className="flex items-center justify-between gap-3 py-2">
+                <span className="text-[12px] text-slate-400">{r.label}</span>
+                <span className="flex items-center gap-2">
+                  <span className="text-[12px] font-medium text-slate-200">{r.value}</span>
+                  {r.badge && <Badge label={r.badge.text} />}
+                  {r.ok && <Check className="h-3.5 w-3.5 text-emerald-400" />}
+                </span>
+              </div>
+            ))}
+          </div>
+          <SectionLink href="/console/pale/releases" label="View Release Center" />
+        </SectionCard>
+      </div>
+
+      {/* 7. Audit Log */}
       <SectionCard
-        title="App &amp; Platform"
-        subtitle="Distribution and client status for the Pale mobile app."
+        title={<>7. Audit Log <span className="font-normal text-slate-500">(Latest Activity)</span></>}
+        actions={<HeaderBtn href="/console/pale/audit-logs">View Full Audit Log</HeaderBtn>}
       >
-        <div className="grid grid-cols-1 gap-x-8 gap-y-1 sm:grid-cols-2">
-          <OpsRow label="Android app (com.migrateck.pale)" tone="live" badgeLabel="Built &amp; signed" />
-          <OpsRow label="Release signing key" tone="enforced" badgeLabel="MigraTeck LLC" />
-          <OpsRow label="iOS app" tone="pending" badgeLabel="Planned" />
-          <OpsRow label="WhatsApp OTP channel" tone="off" />
-        </div>
+        <table className="w-full border-collapse">
+          <thead><tr><Th>Time</Th><Th>Admin</Th><Th>Action</Th><Th>Target</Th><Th>Details</Th></tr></thead>
+          <tbody className="divide-y divide-white/5">
+            {d.audit.map((a, i) => (
+              <tr key={i}>
+                <Td className="text-slate-500">{a.time}</Td>
+                <Td className="font-mono text-slate-300">{a.admin}</Td>
+                <Td>
+                  <span className="flex items-center gap-2 text-slate-200">
+                    <span className={`h-1.5 w-1.5 rounded-full ${ACTION_TONE[a.actionTone]}`} />
+                    {a.action}
+                  </span>
+                </Td>
+                <Td className="text-slate-300">{a.target}</Td>
+                <Td className="text-slate-500">{a.details}</Td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </SectionCard>
-
-      {/* Deep links */}
-      <SectionCard
-        title="Deep Links"
-        subtitle="Pale distribution + the shared AnnouPale trust surface (opens in a new tab)."
-      >
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-3">
-          <DeepLink label="Google Play" path="store/apps/details?id=com.migrateck.pale" href={PALE_PLAY_URL} />
-          <DeepLink label="AnnouPale Admin" path="/admin" href={ANNOUPALE_LINKS.admin} />
-          <DeepLink label="Compliance Cases" path="/admin/compliance/cases" href={ANNOUPALE_LINKS.complianceCases} />
-          <DeepLink label="Safety Report" path="/safety/report" href={ANNOUPALE_LINKS.safetyReport} />
-          <DeepLink label="Privacy Request" path="/privacy/request" href={ANNOUPALE_LINKS.privacyRequest} />
-          <DeepLink label="Account Deletion Help" path="/help/account-deletion" href={ANNOUPALE_LINKS.accountDeletion} />
-        </div>
-      </SectionCard>
-
-      {/* Security note */}
-      <div className="flex items-start gap-3 rounded-xl border border-white/10 bg-white/[0.02] p-4">
-        <Lock className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" />
-        <p className="text-[11px] leading-relaxed text-slate-400">
-          This module reads pale-api health and deep-links to Pale&apos;s distribution and the
-          shared AnnouPale trust surface. It embeds no admin, passes no tokens in URLs, and grants
-          no permissions — every linked surface enforces its own access controls.
-        </p>
-      </div>
-
-      <p className="pt-1 text-center text-[10px] text-slate-600">
-        <Fingerprint className="mr-1 inline h-3 w-3 align-[-1px]" />
-        Phone-first identity · one account &amp; one device per number · MigraPanel Control Center
-      </p>
     </ConsolePageShell>
   );
 }
