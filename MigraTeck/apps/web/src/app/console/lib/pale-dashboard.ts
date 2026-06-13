@@ -97,6 +97,28 @@ const prettyAction = (action: string) =>
 
 const shortId = (id: string | null) => (id ? id.slice(0, 8) : "");
 
+/**
+ * Pale defaults `display_name` (and sometimes username) to the user's raw phone
+ * number when they haven't set a name. Such values must NEVER render unmasked in
+ * the Name column. Treat a value as phone-like when it's composed only of phone
+ * punctuation/digits and carries 7+ digits.
+ */
+const looksLikePhone = (s: string | null | undefined): boolean => {
+  if (!s) return false;
+  return /^[+\d\s().-]+$/.test(s) && s.replace(/\D/g, "").length >= 7;
+};
+
+/** Display name that is safe to show: a real name, else the masked phone. */
+const safeDisplayName = (
+  name: string | null,
+  username: string | null,
+  phone: string | null,
+): string => {
+  if (name && !looksLikePhone(name)) return name;
+  if (username && !looksLikePhone(username)) return username;
+  return maskPhone(phone);
+};
+
 export const getPaleDashboardView = async (): Promise<PaleDashboardView> => {
   const dbConfigured = isPaleDbConfigured();
 
@@ -139,7 +161,7 @@ export const getPaleDashboardView = async (): Promise<PaleDashboardView> => {
   });
 
   const userRows: UserView[] = users.map((u) => ({
-    name: u.name || u.username || "—",
+    name: safeDisplayName(u.name, u.username, u.phone),
     phone: maskPhone(u.phone),
     status: u.status === "active" ? "Active" : u.status === "suspended" ? "Suspended" : u.status === "banned" ? "Banned" : u.status,
     lastActive: relative(u.lastActive),
