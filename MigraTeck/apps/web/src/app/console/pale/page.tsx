@@ -21,6 +21,7 @@ import {
   Download,
   Check,
   Lock,
+  ArrowRight,
   TrendingUp,
   TrendingDown,
   Minus,
@@ -264,7 +265,9 @@ export default async function PaleControlCenter() {
           ) : (
             <EmptyPanel text={d.queue.live ? "No open reports in the queue." : "Pale DB not configured — no live report queue."} />
           )}
-          <FooterDisabled label="Open Queue" />
+          <Link href="/console/pale/reports" className="mt-1 flex items-center justify-center gap-1.5 border-t border-white/5 pt-3 text-[11px] font-medium text-fuchsia-300 transition hover:text-fuchsia-200">
+            Open Queue <ArrowRight className="h-3.5 w-3.5" />
+          </Link>
         </SectionCard>
 
         {/* 2. Support Tickets (no model yet) */}

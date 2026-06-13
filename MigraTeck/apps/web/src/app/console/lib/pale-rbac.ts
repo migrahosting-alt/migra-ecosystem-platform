@@ -36,6 +36,48 @@ export const PALE_READ_ROLES: ReadonlyArray<PaleRole> = [
 /** Roles allowed to see full (unmasked) phone numbers. None in Phase 1. */
 export const PALE_UNMASK_ROLES: ReadonlyArray<PaleRole> = [];
 
+/** Roles allowed to view the Reports surface (Phase 2A: + moderator). */
+export const PALE_REPORT_VIEW_ROLES: ReadonlyArray<PaleRole> = [
+  "owner",
+  "admin",
+  "trust_safety_manager",
+  "moderator",
+  "auditor",
+];
+
+/**
+ * Roles allowed to perform Phase-2A report-review mutations ("Mark reviewing").
+ * Auditor and support_agent are read-only here. pale-api's RolesGuard is the
+ * source of truth; this is the console-side pre-gate.
+ */
+export const PALE_REPORT_MUTATE_ROLES: ReadonlyArray<PaleRole> = [
+  "owner",
+  "admin",
+  "trust_safety_manager",
+  "moderator",
+];
+
+export const canViewReports = (role: PaleRole | null): role is PaleRole =>
+  role != null && PALE_REPORT_VIEW_ROLES.includes(role);
+
+export const canMutateReports = (role: PaleRole | null): role is PaleRole =>
+  role != null && PALE_REPORT_MUTATE_ROLES.includes(role);
+
+/** Map a console Pale role → the pale-api staff role for the bridge header. */
+export const paleApiRoleFor = (role: PaleRole): string | null => {
+  switch (role) {
+    case "owner":
+    case "admin":
+      return "platform_admin";
+    case "trust_safety_manager":
+      return "trust_safety_admin";
+    case "moderator":
+      return "moderator";
+    default:
+      return null; // auditor, support_agent: no mutation role
+  }
+};
+
 const parseStaffRoles = (): Record<string, PaleRole> => {
   const raw = process.env.PALE_STAFF_ROLES ?? "";
   const map: Record<string, PaleRole> = {};
