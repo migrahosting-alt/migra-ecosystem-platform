@@ -108,14 +108,35 @@ const looksLikePhone = (s: string | null | undefined): boolean => {
   return /^[+\d\s().-]+$/.test(s) && s.replace(/\D/g, "").length >= 7;
 };
 
-/** Display name that is safe to show: a real name, else the masked phone. */
+/**
+ * Pale auto-generates usernames from the phone number (e.g. `pale52236581`,
+ * which embeds the phone's trailing digits). Even though usernames are public in
+ * the app, the admin surface must not surface phone-derived digits as a name.
+ * Treat a value as phone-derived when it matches the `pale<digits>` generator
+ * pattern OR embeds a 6+ digit run that appears in the user's phone number.
+ */
+const isPhoneDerived = (value: string, phone: string | null): boolean => {
+  const v = value.trim();
+  if (/^pale\d{4,}$/i.test(v)) return true;
+  const userDigits = v.replace(/\D/g, "");
+  const phoneDigits = (phone ?? "").replace(/\D/g, "");
+  return userDigits.length >= 6 && phoneDigits.length > 0 && phoneDigits.includes(userDigits);
+};
+
+/**
+ * Display name that is safe to show on the admin surface: a real user-chosen
+ * name/username, else the masked phone. Rejects both phone-like values and
+ * phone-derived auto-usernames so no phone digits leak through the Name column.
+ */
 const safeDisplayName = (
   name: string | null,
   username: string | null,
   phone: string | null,
 ): string => {
-  if (name && !looksLikePhone(name)) return name;
-  if (username && !looksLikePhone(username)) return username;
+  const ok = (s: string | null): s is string =>
+    !!s && !looksLikePhone(s) && !isPhoneDerived(s, phone);
+  if (ok(name)) return name;
+  if (ok(username)) return username;
   return maskPhone(phone);
 };
 
