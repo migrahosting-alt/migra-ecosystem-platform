@@ -140,6 +140,21 @@ const safeDisplayName = (
   return maskPhone(phone);
 };
 
+/**
+ * Audit-log actor label. Audit actors are usernames/roles; Pale's auto-generated
+ * usernames (`pale<digits>`) embed phone digits, so never show them directly.
+ * Phone-derived handles render as "Pale user ••••NNNN" (last 4 digits only —
+ * never a 6+ digit run). Real admin handles/roles (no long digit run) pass through.
+ */
+const maskActor = (actor: string): string => {
+  const a = actor.trim();
+  const digits = a.replace(/\D/g, "");
+  const phoneDerived = /^pale\d{4,}$/i.test(a) || digits.length >= 6;
+  if (!phoneDerived) return a;
+  const last4 = digits.slice(-4);
+  return last4 ? `Pale user ••••${last4}` : "Pale user";
+};
+
 export const getPaleDashboardView = async (): Promise<PaleDashboardView> => {
   const dbConfigured = isPaleDbConfigured();
 
@@ -190,7 +205,7 @@ export const getPaleDashboardView = async (): Promise<PaleDashboardView> => {
 
   const auditRows: AuditView[] = audit.map((a) => ({
     time: absolute(a.createdAt),
-    admin: a.actor,
+    admin: maskActor(a.actor),
     action: prettyAction(a.action),
     tone: auditTone(a.action),
     target: a.targetType ? `${a.targetType} ${shortId(a.targetId)}`.trim() : shortId(a.targetId),
