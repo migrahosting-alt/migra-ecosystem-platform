@@ -19,6 +19,7 @@ import {
   getPaleAudit,
   getPaleReportQueue,
   getPaleClientVersion,
+  getPaleTriage,
 } from "./pale-live";
 import { isPaleDbConfigured } from "./pale-db";
 
@@ -37,13 +38,35 @@ export type KpiView = {
 };
 
 export type QueueView = { label: string; icon: string; count: number; oldest: string };
-export type UserView = { name: string; phone: string; status: string; lastActive: string };
+export type UserView = { name: string; phone: string; status: string; statusTone: "ok" | "warn" | "danger"; lastActive: string; devices: number };
 export type AuditView = { time: string; admin: string; action: string; tone: "danger" | "ok" | "warn"; target: string; details: string };
 export type ReleaseRow = { label: string; value: string; badge?: { text: string; tone: "latest" | "internal" } | undefined; ok?: boolean | undefined; pending?: boolean | undefined };
 
+/** Compact signal for the operational health strip. */
+export type SignalView = {
+  key: string;
+  label: string;
+  value: string;
+  sub: string;
+  tone: "ok" | "warn" | "danger" | "idle";
+  spark: ReadonlyArray<number>;
+};
+
+export type TriageView = {
+  live: boolean;
+  pending: number | null;
+  reviewing: number | null;
+  escalated: number | null;
+  resolvedToday: number | null;
+};
+
 export type PaleDashboardView = {
   dbConfigured: boolean;
+  backend: { status: "live" | "down" | "unreachable"; label: string };
+  lastSync: string;
+  signals: ReadonlyArray<SignalView>;
   kpis: ReadonlyArray<KpiView>;
+  triage: TriageView;
   queue: { live: boolean; rows: ReadonlyArray<QueueView> };
   users: { live: boolean; rows: ReadonlyArray<UserView> };
   audit: { live: boolean; rows: ReadonlyArray<AuditView> };
@@ -158,13 +181,14 @@ const maskActor = (actor: string): string => {
 export const getPaleDashboardView = async (): Promise<PaleDashboardView> => {
   const dbConfigured = isPaleDbConfigured();
 
-  const [overview, health, users, queueRows, audit, clientVersion] = await Promise.all([
+  const [overview, health, users, queueRows, audit, clientVersion, triageRaw] = await Promise.all([
     getPaleOverview(),
     getPaleBackendHealth(),
-    getPaleUsers(8),
+    getPaleUsers(6),
     getPaleReportQueue(),
     getPaleAudit(8),
     getPaleClientVersion(),
+    getPaleTriage(),
   ]);
   // Reports list is also read for masking parity / future detail wiring.
   await getPaleReports(1).catch(() => []);
@@ -200,7 +224,9 @@ export const getPaleDashboardView = async (): Promise<PaleDashboardView> => {
     name: safeDisplayName(u.name, u.username, u.phone),
     phone: maskPhone(u.phone),
     status: u.status === "active" ? "Active" : u.status === "suspended" ? "Suspended" : u.status === "banned" ? "Banned" : u.status,
+    statusTone: u.status === "banned" ? "danger" : u.status === "suspended" ? "warn" : "ok",
     lastActive: relative(u.lastActive),
+    devices: u.deviceCount,
   }));
 
   const auditRows: AuditView[] = audit.map((a) => ({
@@ -217,18 +243,64 @@ export const getPaleDashboardView = async (): Promise<PaleDashboardView> => {
 
   const release: ReleaseRow[] = [
     clientVersion
-      ? { label: "Most-seen Android Version", value: clientVersion, ok: true }
-      : { label: "Android App Version", value: "Requires endpoint", pending: true },
-    { label: "Play Internal Testing", value: "Requires endpoint", pending: true },
-    { label: "Private Media Enforcement", value: "Requires endpoint", pending: true },
-    { label: "Backend Health", value: backendValue, ok: health.status === "live" },
-    { label: "Last Release", value: "Requires endpoint", pending: true },
-    { label: "Vulnerability Scan", value: "Requires endpoint", pending: true },
+      ? { label: "Android rollout (most-seen)", value: clientVersion, ok: true }
+      : { label: "Android rollout", value: "Requires endpoint", pending: true },
+    { label: "Private media enforcement", value: "Requires endpoint", pending: true },
+    { label: "Backend health", value: backendValue, ok: health.status === "live" },
+    { label: "Vulnerability scan", value: "Requires endpoint", pending: true },
+    { label: "Admin mutation mode", value: "Read-only · approval required", ok: false, pending: true },
+  ];
+
+  // ── Operational health strip (compact live signals) ──
+  const num = (n: number | null) => (n == null ? "—" : n.toLocaleString("en-US"));
+  const deltaSub = (p: number | null, period: string) =>
+    p == null ? "no baseline" : `${p > 0 ? "▲" : p < 0 ? "▼" : "▬"} ${Math.abs(p).toFixed(1)}% ${period}`;
+  const pendingReports = overview.pendingReports;
+  const signals: SignalView[] = [
+    {
+      key: "users", label: "Users", value: num(overview.totalUsers),
+      sub: overview.newSignupsToday != null ? `+${overview.newSignupsToday} today` : "total accounts",
+      tone: overview.totalUsers == null ? "idle" : "ok", spark: overview.totalUsersSpark,
+    },
+    {
+      key: "active", label: "Active today", value: num(overview.activeToday),
+      sub: deltaSub(overview.activeTodayDeltaPct, "vs yest."),
+      tone: overview.activeToday == null ? "idle" : "ok", spark: overview.activeTodaySpark,
+    },
+    {
+      key: "reports", label: "Open reports", value: num(pendingReports),
+      sub: pendingReports == null ? "requires DB" : pendingReports > 0 ? "awaiting triage" : "queue clear",
+      tone: pendingReports == null ? "idle" : pendingReports > 0 ? "warn" : "ok", spark: overview.pendingReportsSpark,
+    },
+    {
+      key: "backend", label: "Backend", value: health.status === "live" ? "Operational" : health.status === "down" ? "Degraded" : "Unreachable",
+      sub: "pale-api health probe",
+      tone: health.status === "live" ? "ok" : health.status === "down" ? "warn" : "danger", spark: [],
+    },
+    {
+      key: "media", label: "Private media", value: "Enforced", sub: "strict mode · backend-owned",
+      tone: "ok", spark: [],
+    },
+    {
+      key: "release", label: "Release", value: clientVersion ?? "—",
+      sub: clientVersion ? "most-seen client" : "requires endpoint",
+      tone: clientVersion ? "ok" : "idle", spark: [],
+    },
   ];
 
   return {
     dbConfigured,
+    backend: { status: health.status, label: backendValue },
+    lastSync: new Date().toLocaleString("en-US", { hour: "numeric", minute: "2-digit", second: "2-digit" }),
+    signals,
     kpis,
+    triage: {
+      live: triageRaw.configured,
+      pending: triageRaw.pending,
+      reviewing: triageRaw.reviewing,
+      escalated: triageRaw.escalated,
+      resolvedToday: triageRaw.resolvedToday,
+    },
     queue: { live: dbConfigured, rows: queue },
     users: { live: dbConfigured, rows: userRows },
     audit: { live: dbConfigured, rows: auditRows },

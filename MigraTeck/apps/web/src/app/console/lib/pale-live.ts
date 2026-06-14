@@ -22,6 +22,15 @@ export type LiveUser = {
   ageOk: boolean;
   createdAt: string | null;
   lastActive: string | null;
+  deviceCount: number;
+};
+
+export type PaleTriage = {
+  configured: boolean;
+  pending: number | null;
+  reviewing: number | null;
+  escalated: number | null;
+  resolvedToday: number | null;
 };
 
 export type LiveReport = {
@@ -118,10 +127,12 @@ export const getPaleUsers = async (limit = 8): Promise<LiveUser[]> => {
     id: string; phone_number: string | null; display_name: string | null;
     username: string | null; account_status: string; country_code: string | null;
     age_ok: boolean; created_at: Date | null; last_active: Date | null;
+    device_count: string | number;
   }>(
     `SELECT u.id, u.phone_number, u.display_name, u.username, u.account_status,
             u.country_code, (u.age_confirmed_at IS NOT NULL) AS age_ok, u.created_at,
-            (SELECT max(s.last_seen_at) FROM sessions s WHERE s.user_id = u.id) AS last_active
+            (SELECT max(s.last_seen_at) FROM sessions s WHERE s.user_id = u.id) AS last_active,
+            (SELECT count(*)::int FROM devices d WHERE d.user_id = u.id) AS device_count
        FROM users u
       WHERE u.deleted_at IS NULL
       ORDER BY u.created_at DESC
@@ -138,7 +149,22 @@ export const getPaleUsers = async (limit = 8): Promise<LiveUser[]> => {
     ageOk: Boolean(r.age_ok),
     createdAt: r.created_at ? new Date(r.created_at).toISOString() : null,
     lastActive: r.last_active ? new Date(r.last_active).toISOString() : null,
+    deviceCount: Number(r.device_count) || 0,
   }));
+};
+
+/** Trust & Safety triage counts by status (read-only; nulls when not configured). */
+export const getPaleTriage = async (): Promise<PaleTriage> => {
+  if (!isPaleDbConfigured()) {
+    return { configured: false, pending: null, reviewing: null, escalated: null, resolvedToday: null };
+  }
+  const [pending, reviewing, escalated, resolvedToday] = await Promise.all([
+    paleScalar("SELECT count(*)::int v FROM reports WHERE status = 'pending'"),
+    paleScalar("SELECT count(*)::int v FROM reports WHERE status = 'reviewing'"),
+    paleScalar("SELECT count(*)::int v FROM reports WHERE status = 'escalated'"),
+    paleScalar("SELECT count(*)::int v FROM reports WHERE status IN ('reviewed','dismissed','actioned') AND reviewed_at >= date_trunc('day', now())"),
+  ]);
+  return { configured: true, pending, reviewing, escalated, resolvedToday };
 };
 
 export const getPaleReports = async (limit = 8): Promise<LiveReport[]> => {
