@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@migrateck/auth-client": "workspace:*",
+    "@migrateck/portal-auth-bridge": "workspace:*",
     "@migrateck/lib": "workspace:*",
     "@migrateck/ui": "workspace:*",
     "clsx": "^2.1.1",

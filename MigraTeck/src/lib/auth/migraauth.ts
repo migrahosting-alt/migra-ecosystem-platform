@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import { cookies } from "next/headers";
+import { resolvePortalAuthTarget } from "@migrateck/portal-auth-bridge";
 import { env } from "@/lib/env";
 import { isVpsPortalHost } from "@/lib/migradrive-auth-branding";
 
@@ -69,6 +70,16 @@ export function resolveMigraAuthBaseUrl(): string {
 }
 
 export function resolveMigraAuthClientId(host: string | null | undefined): string {
+  const portalTarget = resolvePortalAuthTarget(host);
+  if (portalTarget?.key === "migrahosting-client-portal") {
+    return env.MIGRAAUTH_CLIENT_ID_MIGRAHOSTING_CLIENT_PORTAL
+      || env.MIGRAAUTH_CLIENT_ID_MIGRAHOSTING
+      || portalTarget.clientId;
+  }
+  if (portalTarget) {
+    return portalTarget.clientId;
+  }
+
   if (isVpsPortalHost(host) || normalizeHost(host).includes("migrahosting")) {
     return env.MIGRAAUTH_CLIENT_ID_MIGRAHOSTING || "migrahosting_web";
   }
@@ -78,6 +89,10 @@ export function resolveMigraAuthClientId(host: string | null | undefined): strin
   }
 
   return env.MIGRAAUTH_CLIENT_ID_DEFAULT || "migradrive_web";
+}
+
+export function resolveMigraAuthRedirectPath(host: string | null | undefined): string {
+  return resolvePortalAuthTarget(host)?.redirectPath || "/auth/callback";
 }
 
 export function resolveAppBaseUrl(input: {
@@ -97,6 +112,10 @@ export function resolveAppBaseUrl(input: {
 }
 
 export function resolveDefaultPostLoginPath(host: string | null | undefined): string {
+  const portalTarget = resolvePortalAuthTarget(host);
+  if (portalTarget?.key === "migrahosting-client-portal") {
+    return "/client/dashboard";
+  }
   return isVpsPortalHost(host) ? "/app/vps" : "/app";
 }
 
@@ -106,7 +125,7 @@ export async function buildAuthorizeUrl(input: {
   nextPath?: string | null | undefined;
 }) {
   const clientId = resolveMigraAuthClientId(input.host);
-  const redirectUri = `${resolveAppBaseUrl(input)}/auth/callback`;
+  const redirectUri = `${resolveAppBaseUrl(input)}${resolveMigraAuthRedirectPath(input.host)}`;
   const nextPath = sanitizeNextPath(input.nextPath || resolveDefaultPostLoginPath(input.host));
   const state = createState();
   const verifier = createCodeVerifier();
@@ -162,7 +181,7 @@ export function buildSignupUrl(input: {
   forwardedProto?: string | null | undefined;
 }) {
   const clientId = resolveMigraAuthClientId(input.host);
-  const redirectUri = `${resolveAppBaseUrl(input)}/auth/callback`;
+  const redirectUri = `${resolveAppBaseUrl(input)}${resolveMigraAuthRedirectPath(input.host)}`;
   const params = new URLSearchParams({
     client_id: clientId,
     return_to: redirectUri,
