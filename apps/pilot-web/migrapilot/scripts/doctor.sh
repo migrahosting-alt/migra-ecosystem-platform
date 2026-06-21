@@ -73,15 +73,22 @@ else
 fi
 echo
 
-echo "Lockfiles:"
+echo "Lockfiles relevant to this app:"
 repo_root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
-lock_count="$(find "$repo_root" -name package-lock.json -not -path '*/node_modules/*' | wc -l | tr -d ' ')"
-echo "package-lock.json count: $lock_count"
-if [[ "$lock_count" -gt 1 ]]; then
-  check_warn "Multiple package-lock.json files detected"
-  find "$repo_root" -name package-lock.json -not -path '*/node_modules/*'
+app_lock="$(pwd)/package-lock.json"
+workspace_lock="$(cd ../.. && pwd)/package-lock.json"
+
+if [[ -f "$app_lock" ]]; then
+  check_pass "App package-lock.json found: $app_lock"
 else
-  check_pass "Single package-lock.json detected"
+  check_warn "App package-lock.json missing: $app_lock"
+fi
+
+if [[ -f "$workspace_lock" ]]; then
+  check_warn "Parent workspace package-lock.json also found: $workspace_lock"
+  echo "This can trigger Next.js workspace root warnings."
+else
+  check_pass "No parent package-lock.json found at expected workspace level"
 fi
 echo
 
