@@ -7,8 +7,12 @@ echo "Directory:"
 pwd
 echo
 
-echo "Git status:"
-git status --short || true
+echo "Git branch:"
+git branch --show-current || true
+echo
+
+echo "MigraPilot git status only:"
+git status --short apps/pilot-web/migrapilot 2>/dev/null || git status --short migrapilot || true
 echo
 
 echo "Node version:"
@@ -24,7 +28,11 @@ node -e "const p=require('./package.json'); console.log(p.scripts || {})" || tru
 echo
 
 echo "Ollama models:"
-ollama list || true
+if command -v ollama >/dev/null 2>&1; then
+  ollama list || true
+else
+  echo "Ollama command not found in this shell. If using WSL, Ollama may be installed on Windows only."
+fi
 echo
 
 echo "Port 3399:"

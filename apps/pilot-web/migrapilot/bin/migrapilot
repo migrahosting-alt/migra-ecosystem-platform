@@ -1,0 +1,79 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+PROJECT_DIR="$(cd "$ROOT_DIR/.." && pwd)"
+
+cmd="${1:-help}"
+arg="${2:-}"
+
+case "$cmd" in
+  help|-h|--help)
+    cat <<HELP
+MigraPilot CLI
+
+Usage:
+  migrapilot status
+  migrapilot verify
+  migrapilot port [port]
+  migrapilot rules
+  migrapilot memory
+  migrapilot prompt <inspect|plan|execute|verify|review>
+
+Commands:
+  status      Show project status, git status, Node/NPM versions, scripts, Ollama models, and port 3399 state
+  verify      Run Node/Next.js verification: build, audit, and port check
+  port        Check a port. Defaults to 3399
+  rules       Print MigraPilot master rules
+  memory      Print project memory
+  prompt      Print a MigraPilot prompt
+HELP
+    ;;
+
+  status)
+    cd "$PROJECT_DIR"
+    "$ROOT_DIR/scripts/project-status.sh"
+    ;;
+
+  verify)
+    cd "$PROJECT_DIR"
+    "$ROOT_DIR/scripts/verify-node.sh"
+    ;;
+
+  port)
+    cd "$PROJECT_DIR"
+    "$ROOT_DIR/scripts/check-port.sh" "${arg:-3399}"
+    ;;
+
+  rules)
+    cat "$ROOT_DIR/rules.md"
+    ;;
+
+  memory)
+    cat "$ROOT_DIR/memory/project.md"
+    ;;
+
+  prompt)
+    if [[ -z "$arg" ]]; then
+      echo "Missing prompt name."
+      echo "Usage: migrapilot prompt <inspect|plan|execute|verify|review>"
+      exit 1
+    fi
+
+    prompt_file="$ROOT_DIR/prompts/${arg}.md"
+
+    if [[ ! -f "$prompt_file" ]]; then
+      echo "Unknown prompt: $arg"
+      echo "Available prompts: inspect, plan, execute, verify, review"
+      exit 1
+    fi
+
+    cat "$prompt_file"
+    ;;
+
+  *)
+    echo "Unknown command: $cmd"
+    echo "Run: migrapilot help"
+    exit 1
+    ;;
+esac
