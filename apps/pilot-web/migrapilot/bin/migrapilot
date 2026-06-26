@@ -16,6 +16,7 @@ Usage:
   migrapilot status
   migrapilot verify
   migrapilot doctor
+  migrapilot dev [port]
   migrapilot port [port]
   migrapilot rules
   migrapilot memory
@@ -25,6 +26,7 @@ Commands:
   status      Show project status, git status, Node/NPM versions, scripts, Ollama models, and port 3399 state
   verify      Run Node/Next.js verification: build, audit, and port check
   doctor      Run MigraPilot health checks
+  dev         Start the Next.js dev server only if the port is free. Defaults to 3399
   port        Check a port. Defaults to 3399
   rules       Print MigraPilot master rules
   memory      Print project memory
@@ -45,6 +47,11 @@ HELP
   doctor)
     cd "$PROJECT_DIR"
     "$ROOT_DIR/scripts/doctor.sh"
+    ;;
+
+  dev)
+    cd "$PROJECT_DIR"
+    "$ROOT_DIR/scripts/dev.sh" "${arg:-3399}"
     ;;
 
   port)
