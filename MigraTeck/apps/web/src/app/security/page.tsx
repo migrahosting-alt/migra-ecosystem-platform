@@ -7,35 +7,49 @@ import ui from "@/lib/ui";
 export const metadata = buildPageMetadata({
   title: "Security",
   description:
-    "MigraTeck security is built around least privilege, defense in depth, fail-closed behavior, and a narrow data surface across the ecosystem.",
+    "See how MigraHosting approaches account security, billing protection, secure sign-in, and responsible support.",
   path: "/security",
 });
 
-const principles = [
-  { title: "Least privilege by default", desc: "Every access grant starts from zero and is scoped to the minimum required for a given role, action, or integration." },
-  { title: "Defence in depth", desc: "No single layer is trusted alone. Authentication, session controls, transport encryption, and runtime isolation all reinforce each other." },
-  { title: "Fail closed", desc: "Ambiguous state defaults to denial. If a token, session, or permission check cannot be resolved, access is withheld." },
-  { title: "Minimal data surface", desc: "Data collection stays as narrow as possible. Platform APIs expose only the fields needed for the operation at hand." },
-] as const;
-
 const protections = [
-  "TLS 1.2+ on all public endpoints",
-  "Bcrypt password hashing with per-user salt",
-  "Session tokens with server-side revocation",
-  "CSRF protection on all state-changing routes",
-  "Rate limiting on authentication and API endpoints",
-  "Strict Content-Security-Policy headers",
-  "Role-scoped API keys with optional IP binding",
-  "Automated dependency auditing in CI",
+  {
+    title: "Secure sign-in",
+    description: "Login routes, sessions, and account access are built to keep customer entry points protected.",
+  },
+  {
+    title: "Billing protection",
+    description: "Billing and account workflows are handled through controlled routes instead of scattered customer tools.",
+  },
+  {
+    title: "Customer data care",
+    description: "The goal is to keep the customer-facing data surface narrow and the support path clearer.",
+  },
+  {
+    title: "Support visibility",
+    description: "When something needs attention, customers still have a direct portal and support route to work from.",
+  },
 ] as const;
 
-const accountSecurity = [
-  "Unique password per account enforced",
-  "Session listing and forced sign-out",
-  "Audit log of administrative actions",
-  "Failed login attempt limits",
-  "API key rotation without downtime",
-  "IP allowlist support for sensitive routes",
+const customerChecks = [
+  "Use a unique password for your account",
+  "Review your client portal sessions regularly",
+  "Keep billing and account messages inside your official support path",
+  "Contact support if access or billing behavior looks unusual",
+] as const;
+
+const faqItems = [
+  {
+    question: "Where should I manage account access?",
+    answer: "Use the client portal and official login routes rather than relying on old bookmarks or scattered service entry points.",
+  },
+  {
+    question: "How should I report a security concern?",
+    answer: "Email the security contact directly so the issue can be reviewed through the correct support path.",
+  },
+  {
+    question: "Does security apply to billing and support too?",
+    answer: "Yes. Secure account access matters just as much for invoices, support, and service management as it does for login itself.",
+  },
 ] as const;
 
 export default function SecurityPage() {
@@ -50,97 +64,115 @@ export default function SecurityPage() {
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumb) }}
       />
-      {/* hero */}
-      <section className="hero-gradient hero-mesh relative overflow-hidden">
-        <div className="pointer-events-none absolute left-0 bottom-0 h-[350px] w-[350px] rounded-full bg-green-500/10 blur-[100px]" />
-        <div className={cn(ui.maxW, "relative pb-24 pt-32 sm:pb-32 sm:pt-40")}>
-          <div className="max-w-3xl">
-            <p className="animate-fade-up text-sm font-semibold uppercase tracking-[0.2em] text-sky-400/90">
-              Security
-            </p>
-            <h1 className="animate-fade-up-d1 mt-6 font-[var(--font-display)] text-5xl font-bold tracking-[-0.03em] text-white sm:text-6xl lg:text-7xl">
-              Security is built into the platform, not added later.
-            </h1>
-            <p className="animate-fade-up-d2 mt-6 max-w-xl text-lg leading-8 text-slate-300/90">
-              MigraTeck is designed so the safer path is the default path. Security is
-              treated as a platform discipline that shapes identity, access, execution,
-              and delivery across the ecosystem.
-            </p>
+
+      <section className="hero-gradient hero-mesh relative overflow-hidden px-5 pb-14 pt-10 sm:px-6 sm:pb-16">
+        <div className="gradient-orb gradient-orb-violet left-[-3rem] top-16 h-40 w-40 sm:h-52 sm:w-52" />
+        <div className="gradient-orb gradient-orb-peach right-[-2rem] top-4 h-36 w-36 sm:h-44 sm:w-44" />
+        <div className={cn(ui.maxW, "relative")}>
+          <div className="grid gap-8 lg:grid-cols-[1.02fr_0.98fr] lg:items-center">
+            <div>
+              <p className={ui.eyebrowBrand}>Security</p>
+              <h1 className={cn(ui.h1, "mt-4 max-w-3xl")}>Security should feel clear and dependable, not complicated.</h1>
+              <p className={cn(ui.body, "mt-6 max-w-2xl")}>
+                This page exists so customers can understand how account access, billing, and support are treated, without needing to decode internal platform terms.
+              </p>
+              <div className="mt-8 flex flex-col gap-3 sm:flex-row">
+                <Link href="/login" className={ui.btnPrimary}>
+                  Open client portal
+                </Link>
+                <a href="mailto:security@migrateck.com" className={ui.btnSecondary}>
+                  Contact security
+                </a>
+              </div>
+            </div>
+
+            <div className={cn(ui.cardStrong, "p-6 sm:p-7")}>
+              <p className={ui.eyebrowBrand}>What matters most</p>
+              <div className="mt-5 space-y-4">
+                {protections.slice(0, 2).map((item) => (
+                  <div key={item.title} className={cn(ui.cardMuted, "p-4")}>
+                    <h2 className="text-lg font-semibold text-[var(--brand-ink)]">{item.title}</h2>
+                    <p className="mt-2 text-sm leading-6 text-[var(--brand-muted)]">{item.description}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
           </div>
         </div>
       </section>
 
-      {/* principles */}
-      <section className={ui.sectionPy}>
+      <section className={ui.sectionPySmall}>
         <div className={ui.maxW}>
-          <p className={ui.eyebrowBrand}>Principles</p>
-          <h2 className={cn(ui.h2, "mt-3")}>Foundation</h2>
-          <p className={cn(ui.body, "mt-4 max-w-xl")}>
-            Four ideas underpin every security decision made across the ecosystem.
-          </p>
-          <div className="mt-10 grid gap-6 sm:grid-cols-2">
-            {principles.map((p, i) => (
-              <div key={p.title} className={cn(ui.card, "p-6")}>
-                <span className={ui.depthNum}>0{i + 1}</span>
-                <h3 className={cn(ui.h3, "mt-3")}>{p.title}</h3>
-                <p className="mt-2 text-sm leading-6 text-slate-400">{p.desc}</p>
+          <div className="mx-auto max-w-3xl text-center">
+            <p className={ui.eyebrowBrand}>Security overview</p>
+            <h2 className={cn(ui.h2, "mt-3")}>How MigraHosting approaches customer-facing security.</h2>
+          </div>
+          <div className="mt-10 grid gap-5 sm:grid-cols-2">
+            {protections.map((item, index) => (
+              <div key={item.title} className={cn(ui.card, "p-6")}>
+                <div className={ui.depthNum}>{index + 1}</div>
+                <h3 className="mt-4 text-xl font-semibold text-[var(--brand-ink)]">{item.title}</h3>
+                <p className="mt-2 text-sm leading-7 text-[var(--brand-muted)]">{item.description}</p>
               </div>
             ))}
           </div>
         </div>
       </section>
 
-      {/* protections – dark */}
-      <section className="section-dark relative overflow-hidden">
-        <div className="pointer-events-none absolute top-0 right-0 h-[300px] w-[300px] rounded-full bg-blue-500/10 blur-[80px]" />
-        <div className={cn(ui.maxW, "relative py-20 sm:py-24")}>
-          <p className={ui.eyebrowDark}>Implemented</p>
-          <h2 className={cn(ui.h2Dark, "mt-3")}>Platform protections</h2>
-          <div className="mt-10 grid gap-4 sm:grid-cols-2">
-            {protections.map((t) => (
-              <div key={t} className={cn(ui.cardDark, "flex items-start gap-3 p-4")}>
-                <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-green-500/20 text-green-400">
-                  <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
-                </span>
-                <p className="text-sm leading-6 text-slate-300">{t}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* account security */}
-      <section className={cn(ui.sectionPy, "border-t border-white/10")}>
+      <section className={ui.sectionPySmall}>
         <div className={ui.maxW}>
-          <p className={ui.eyebrowBrand}>Per-account</p>
-          <h2 className={cn(ui.h2, "mt-3")}>Account security</h2>
-          <div className="mt-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {accountSecurity.map((s) => (
-              <div key={s} className={cn(ui.card, "flex items-start gap-3 p-4")}>
-                <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-blue-400/20 text-blue-400">
-                  <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
-                </span>
-                <p className="text-sm leading-6 text-slate-300">{s}</p>
-              </div>
-            ))}
+          <div className="grid gap-5 lg:grid-cols-[0.9fr_1.1fr]">
+            <div className={cn(ui.cardStrong, "p-6 sm:p-7")}>
+              <p className={ui.eyebrowBrand}>What customers should do</p>
+              <h2 className={cn(ui.h2, "mt-3")}>Good habits that help keep the account secure.</h2>
+            </div>
+
+            <div className="grid gap-4">
+              {customerChecks.map((item) => (
+                <div key={item} className={cn(ui.card, "flex items-start gap-3 p-4")}>
+                  <span className={ui.depthNum}>✓</span>
+                  <p className="text-sm leading-6 text-[var(--brand-muted)]">{item}</p>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
       </section>
 
-      {/* disclosure */}
-      <section className="section-dark-blue relative overflow-hidden">
-        <div className={cn(ui.maxW, "relative py-20 text-center sm:py-24")}>
-          <h2 className={ui.h2Dark}>Responsible disclosure</h2>
-          <p className={cn(ui.bodyDark, "mx-auto mt-4 max-w-lg")}>
-            If you believe you have found a vulnerability, report it to{" "}
-            <a href="mailto:security@migrateck.com" className="text-sky-400 underline underline-offset-2">
-              security@migrateck.com
-            </a>
-            . We will respond within 48 hours and keep you updated on resolution.
-          </p>
-          <div className="mt-8 flex justify-center gap-4">
-            <Link href="/platform" className={ui.btnPrimaryLight}>Platform overview</Link>
-            <Link href="/products" className={ui.btnSecondaryDark}>All products</Link>
+      <section className={cn(ui.sectionPy, "pt-10")}>
+        <div className={ui.maxW}>
+          <div className="grid gap-5 lg:grid-cols-[1fr_0.95fr]">
+            <div className={cn(ui.cardStrong, "p-6 sm:p-7")}>
+              <p className={ui.eyebrowBrand}>Questions and trust notes</p>
+              <div className="mt-5 space-y-4">
+                {faqItems.map((item) => (
+                  <div key={item.question} className={cn(ui.cardMuted, "p-4")}>
+                    <h3 className="text-base font-semibold text-[var(--brand-ink)]">{item.question}</h3>
+                    <p className="mt-2 text-sm leading-6 text-[var(--brand-muted)]">{item.answer}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="page-glow overflow-hidden rounded-[36px] border border-white/80 bg-[linear-gradient(135deg,rgba(247,239,255,0.92),rgba(255,255,255,0.96)_52%,rgba(255,244,236,0.96))] px-6 py-10 shadow-[var(--shadow-lg)] sm:px-8 sm:py-12">
+              <p className={ui.eyebrowBrand}>Responsible disclosure</p>
+              <h2 className={cn(ui.h2, "mt-3")}>Report a security concern directly.</h2>
+              <p className="mt-4 text-base leading-8 text-[var(--brand-muted)]">
+                If you believe you found a vulnerability or suspicious account behavior, email{" "}
+                <a href="mailto:security@migrateck.com" className="font-semibold text-[var(--brand-violet)]">
+                  security@migrateck.com
+                </a>
+                .
+              </p>
+              <div className="mt-8 flex flex-col gap-3">
+                <Link href="/login" className={ui.btnPrimary}>
+                  Open client portal
+                </Link>
+                <Link href="/products" className={ui.btnSecondary}>
+                  Back to products
+                </Link>
+              </div>
+            </div>
           </div>
         </div>
       </section>

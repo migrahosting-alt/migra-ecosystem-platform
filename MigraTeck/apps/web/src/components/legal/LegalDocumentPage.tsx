@@ -7,27 +7,24 @@ export function LegalDocumentPage({ document }: { document: LegalDocument }) {
   return (
     <>
       <section className="hero-gradient hero-mesh relative overflow-hidden">
-        <div className="pointer-events-none absolute left-0 top-0 h-[320px] w-[320px] rounded-full bg-cyan-500/10 blur-[90px]" />
-        <div className="pointer-events-none absolute right-0 bottom-0 h-[320px] w-[320px] rounded-full bg-fuchsia-500/10 blur-[90px]" />
-        <div className={cn(ui.maxW, "relative pb-24 pt-32 sm:pb-28 sm:pt-40")}>
+        <div className="pointer-events-none absolute left-[-4rem] top-20 h-72 w-72 rounded-full bg-violet-300/25 blur-[90px]" />
+        <div className="pointer-events-none absolute right-[-5rem] bottom-0 h-80 w-80 rounded-full bg-orange-200/35 blur-[100px]" />
+        <div className={cn(ui.maxW, "relative pb-20 pt-28 sm:pb-24 sm:pt-36")}>
           <div className="max-w-4xl">
-            <p className="text-sm font-semibold uppercase tracking-[0.2em] text-sky-400/90">
+            <p className={ui.eyebrowBrand}>
               {document.category === "core" ? "Legal policy" : "Product addendum"}
             </p>
-            <h1 className="mt-6 font-[var(--font-display)] text-5xl font-bold tracking-[-0.03em] text-white sm:text-6xl">
+            <h1 className={cn(ui.h1, "mt-5 max-w-3xl text-4xl sm:text-5xl lg:text-6xl")}>
               {document.title}
             </h1>
-            <p className="mt-6 max-w-3xl text-lg leading-8 text-slate-300/90">
-              {document.summary}
-            </p>
+            <p className={cn(ui.body, "mt-6 max-w-3xl")}>{document.summary}</p>
             <div className="mt-8 flex flex-wrap gap-3">
-              <span className={ui.pillDark}>Last updated {document.lastUpdated}</span>
-              <span className={ui.pillDark}>{document.version}</span>
-              <span className={ui.pillDark}>Entity: MigraTeck</span>
+              <span className={ui.pill}>Last updated {document.lastUpdated}</span>
+              <span className={ui.pill}>{document.version}</span>
+              <span className={ui.pill}>Entity: MigraTeck</span>
             </div>
           </div>
         </div>
-        <div className="absolute bottom-0 left-0 right-0 h-32 bg-gradient-to-t from-white to-transparent" />
       </section>
 
       <section className={ui.sectionPy}>
@@ -35,9 +32,7 @@ export function LegalDocumentPage({ document }: { document: LegalDocument }) {
           <article className="space-y-6">
             <div className={cn(ui.card, "p-6 sm:p-8")}>
               <p className={ui.eyebrowBrand}>Overview</p>
-              <p className="mt-4 text-base leading-8 text-slate-700">
-                {document.description}
-              </p>
+              <p className="mt-4 text-base leading-8 text-slate-700">{document.description}</p>
             </div>
 
             {document.sections.map((section) => (
@@ -52,7 +47,7 @@ export function LegalDocumentPage({ document }: { document: LegalDocument }) {
                   <ul className="mt-5 space-y-3">
                     {section.bullets.map((bullet) => (
                       <li key={bullet} className="flex items-start gap-3">
-                        <span className="mt-1.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-blue-600/10 text-blue-600">
+                        <span className="mt-1.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-fuchsia-100 text-fuchsia-600">
                           <svg
                             className="h-3 w-3"
                             fill="none"
@@ -95,7 +90,7 @@ export function LegalDocumentPage({ document }: { document: LegalDocument }) {
                   <Link
                     key={link.href}
                     href={link.href}
-                    className="block text-sm font-semibold text-blue-600 transition-colors hover:text-blue-700"
+                    className="block text-sm font-semibold text-fuchsia-700 transition-colors hover:text-fuchsia-800"
                   >
                     {link.label} →
                   </Link>
@@ -106,9 +101,9 @@ export function LegalDocumentPage({ document }: { document: LegalDocument }) {
             <div className={cn(ui.card, "p-6")}>
               <p className={ui.eyebrowBrand}>Notice</p>
               <p className="mt-4 text-sm leading-6 text-slate-600">
-                These policy pages provide the current public legal surface for the MigraTeck
-                ecosystem. Product-specific addenda supplement, and do not replace, the shared
-                MigraTeck policies.
+                These pages present the current public legal surface for MigraTeck and
+                MigraHosting. Product-specific addenda supplement the shared policies and do
+                not replace them.
               </p>
             </div>
           </aside>

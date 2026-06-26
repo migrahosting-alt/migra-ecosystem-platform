@@ -8,46 +8,59 @@ import ui from "@/lib/ui";
 export const metadata = buildPageMetadata({
   title: "Services",
   description:
-    "MigraTeck services include a fast website launch offer and recurring AI-assisted content operations for businesses that need practical execution.",
+    "Request website launch, migration support, and ongoing website help through simple MigraHosting service packages.",
   path: "/services",
 });
 
 const services = [
   {
-    id: "website-launch-48h",
-    title: "48-Hour Website Launch",
-    desc: "A premium small-business website offer built to go live fast without looking rushed or generic.",
-    audience: "Businesses that need a credible web presence quickly and want one offer that already covers launch essentials.",
-    outcome: "A live website, connected domain, business email, and SEO-ready launch posture in one managed package.",
+    id: "website-launch",
+    title: "Website Launch",
+    desc: "A polished business website package for companies that need a stronger online presence without dragging the project out.",
+    audience: "Businesses starting fresh or replacing an outdated site.",
+    outcome: "A live website, connected domain, basic setup support, and a cleaner handoff into hosting and portal access.",
     inquiryHref: serviceInquiries.websiteLaunch,
+    cta: "Request a website",
   },
   {
-    id: "ai-content-generator",
-    title: "AI Content Generator",
-    desc: "Recurring content operations for blogs, product copy, landing pages, emails, and campaigns.",
-    audience: "Teams that need publishing velocity and want MigraTeck to turn business inputs into usable marketing assets.",
-    outcome: "A managed content system that keeps campaigns, landing pages, and product messaging moving without starting from zero each time.",
+    id: "website-refresh",
+    title: "Website Refresh and Updates",
+    desc: "Ongoing help for content updates, section changes, landing pages, and general website cleanup after launch.",
+    audience: "Teams that already have a site but need consistent updates without hiring in-house right away.",
+    outcome: "A manageable support path for website improvements, copy changes, and launch follow-up work.",
     inquiryHref: serviceInquiries.aiContentGenerator,
+    cta: "Request website help",
+  },
+  {
+    id: "migration-support",
+    title: "Migration and Setup Support",
+    desc: "Help moving domains, hosting, or business email into a cleaner setup when your current stack feels scattered.",
+    audience: "Businesses moving from another provider or consolidating multiple services.",
+    outcome: "A simpler migration plan with clearer next steps for hosting, email, and account access.",
+    inquiryHref: serviceInquiries.general,
+    cta: "Request migration help",
   },
 ] as const;
 
 const deliveryPhases = [
   {
-    title: "Phase 1: Intake and brand setup",
-    description: "Collect business context, offer details, tone, ICP, target keywords, preferred layouts, and publishing goals.",
+    title: "Review the starting point",
+    description: "We look at your domain, current site, email needs, and what should happen first.",
   },
   {
-    title: "Phase 2: Guided generation engine",
-    description: "Turn structured prompts and reusable templates into launch pages, content drafts, and reusable marketing assets.",
+    title: "Build the right package",
+    description: "We shape the service around launch, migration, or updates instead of forcing a one-size-fits-all path.",
   },
   {
-    title: "Phase 3: Human review and fulfillment",
-    description: "Route outputs through MigraTeck review, approval, edits, and publish-ready packaging before client delivery.",
+    title: "Launch with support",
+    description: "Once the service is ready, you keep a clear portal and support path for what comes next.",
   },
-  {
-    title: "Phase 4: Client dashboard integration",
-    description: "Expose requests, approvals, revisions, and delivery history inside the broader platform over time.",
-  },
+] as const;
+
+const trustNotes = [
+  "Website work tied to hosting and account setup",
+  "Migration help when domains, hosting, or email need to move together",
+  "Clear request paths instead of vague service bundles",
 ] as const;
 
 export default function ServicesPage() {
@@ -62,104 +75,107 @@ export default function ServicesPage() {
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumb) }}
       />
-      <section className="hero-gradient hero-mesh relative overflow-hidden">
-        <div className="pointer-events-none absolute right-0 bottom-0 h-[400px] w-[400px] rounded-full bg-pink-500/10 blur-[100px]" />
-        <div className={cn(ui.maxW, "relative pb-24 pt-32 sm:pb-32 sm:pt-40")}>
-          <div className="max-w-3xl">
-            <p className="animate-fade-up text-sm font-semibold uppercase tracking-[0.2em] text-sky-400/90">
-              Services
-            </p>
-            <h1 className="animate-fade-up-d1 mt-6 font-[var(--font-display)] text-5xl font-bold tracking-[-0.03em] text-white sm:text-6xl lg:text-7xl">
-              Launch services built for speed, clarity, and real delivery.
-            </h1>
-            <p className="animate-fade-up-d2 mt-6 max-w-xl text-lg leading-8 text-slate-300/90">
-              MigraTeck offers two practical commercial service tracks: a fast website
-              launch service for businesses that need a credible digital presence now,
-              and a recurring content system for teams that need ongoing publishing support.
-            </p>
-            <div className="animate-fade-up-d3 mt-10 flex flex-wrap gap-4">
-              <Link href="#service-cards" className={ui.btnPrimaryLight}>View service packages</Link>
-              <Link href="/pricing" className={ui.btnSecondaryDark}>View pricing</Link>
+
+      <section className="hero-gradient hero-mesh relative overflow-hidden px-5 pb-14 pt-10 sm:px-6 sm:pb-16">
+        <div className="gradient-orb gradient-orb-violet left-[-3rem] top-16 h-40 w-40 sm:h-52 sm:w-52" />
+        <div className="gradient-orb gradient-orb-peach right-[-2rem] top-4 h-36 w-36 sm:h-44 sm:w-44" />
+        <div className={cn(ui.maxW, "relative")}>
+          <div className="grid gap-8 lg:grid-cols-[1.05fr_0.95fr] lg:items-center">
+            <div>
+              <p className={ui.eyebrowBrand}>Services</p>
+              <h1 className={cn(ui.h1, "mt-4 max-w-3xl")}>Website and migration services built around real launch needs.</h1>
+              <p className={cn(ui.body, "mt-6 max-w-2xl")}>
+                If you need a website, a cleaner move from another provider, or help getting the basics aligned, these are the service paths designed for that work.
+              </p>
+              <div className="mt-8 flex flex-col gap-3 sm:flex-row">
+                <Link href="#service-cards" className={ui.btnPrimary}>
+                  View service packages
+                </Link>
+                <Link href="/pricing" className={ui.btnSecondary}>
+                  View pricing
+                </Link>
+              </div>
+            </div>
+
+            <div className="grid gap-4 sm:grid-cols-3 lg:grid-cols-1">
+              {trustNotes.map((note, index) => (
+                <div key={note} className={cn(ui.cardStrong, "p-5")}>
+                  <div className={ui.depthNum}>{index + 1}</div>
+                  <p className="mt-4 text-sm leading-7 text-[var(--brand-muted)]">{note}</p>
+                </div>
+              ))}
             </div>
           </div>
         </div>
       </section>
 
-      <section className={ui.sectionPy}>
+      <section className={ui.sectionPySmall}>
         <div className={ui.maxW}>
-          <div id="service-cards" className="grid gap-6 xl:grid-cols-2">
-            {services.map((s) => (
-              <div key={s.title} id={s.id} className={cn(ui.card, "flex flex-col p-6 sm:p-8")}>
-                <p className={ui.eyebrowBrand}>Service track</p>
-                <h3 className={cn(ui.h3, "mt-3")}>{s.title}</h3>
-                <p className="mt-3 text-sm leading-6 text-slate-400">{s.desc}</p>
-                <div className="mt-auto pt-6 space-y-4 border-t border-white/10">
+          <div id="service-cards" className="grid gap-5 xl:grid-cols-3">
+            {services.map((service) => (
+              <div key={service.title} id={service.id} className={cn(ui.cardStrong, "flex flex-col p-6 sm:p-7")}>
+                <p className={ui.eyebrowBrand}>Service package</p>
+                <h2 className="mt-3 text-2xl font-semibold tracking-[-0.04em] text-[var(--brand-ink)]">{service.title}</h2>
+                <p className="mt-3 text-sm leading-7 text-[var(--brand-muted)]">{service.desc}</p>
+                <div className="mt-6 space-y-4 border-t border-[var(--line)] pt-6">
                   <div>
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.15em] text-slate-400">Who it is for</p>
-                    <p className="mt-1 text-sm text-slate-400">{s.audience}</p>
+                    <p className={ui.eyebrow}>Best for</p>
+                    <p className="mt-2 text-sm leading-6 text-[var(--brand-muted)]">{service.audience}</p>
                   </div>
                   <div>
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.15em] text-slate-400">Intended outcome</p>
-                    <p className="mt-1 text-sm text-slate-400">{s.outcome}</p>
-                  </div>
-                  <div className="pt-2">
-                    <a href={s.inquiryHref} className={cn(ui.btnPrimaryLight, "inline-flex")}>
-                      Start with this track
-                    </a>
+                    <p className={ui.eyebrow}>Result</p>
+                    <p className="mt-2 text-sm leading-6 text-[var(--brand-muted)]">{service.outcome}</p>
                   </div>
                 </div>
+                <a href={service.inquiryHref} className={cn(ui.btnPrimary, "mt-6")}>
+                  {service.cta}
+                </a>
               </div>
             ))}
           </div>
         </div>
       </section>
 
-      <section className={cn("border-t border-white/10", ui.sectionPy)}>
+      <section className={ui.sectionPySmall}>
         <div className={ui.maxW}>
-          <div className="grid gap-6 lg:grid-cols-[0.9fr_1.1fr]">
-            <div className={cn(ui.card, "p-8")}>
-              <p className={ui.eyebrowBrand}>Why these services</p>
-              <h2 className={cn(ui.h2, "mt-3")}>Practical entry points for real launch outcomes.</h2>
-              <p className={cn(ui.bodySmall, "mt-4")}>
-                These service tracks are designed for businesses that need execution, not
-                just advice. Whether the goal is getting a credible site live this week or
-                keeping content moving every month, both tracks deliver a defined outcome
-                inside a managed process.
+          <div className="grid gap-5 lg:grid-cols-[0.9fr_1.1fr]">
+            <div className={cn(ui.cardStrong, "p-6 sm:p-7")}>
+              <p className={ui.eyebrowBrand}>How it works</p>
+              <h2 className={cn(ui.h2, "mt-3")}>A simpler service path from first request to launch.</h2>
+              <p className={cn(ui.bodySmall, "mt-4 text-base")}>
+                These services are meant to reduce confusion, not add more of it. The goal is to make the next step obvious.
               </p>
             </div>
 
-            <div className={cn(ui.card, "p-8")}>
-              <p className={ui.eyebrowBrand}>System build path</p>
-              <h2 className={cn(ui.h2, "mt-3")}>Recommended delivery phases</h2>
-              <div className="mt-6 space-y-4">
-                {deliveryPhases.map((phase) => (
-                  <div key={phase.title} className="rounded-2xl border border-white/10 bg-white/5 px-5 py-5">
-                    <h3 className="text-lg font-semibold text-white">{phase.title}</h3>
-                    <p className="mt-2 text-sm leading-6 text-slate-400">{phase.description}</p>
-                  </div>
-                ))}
-              </div>
+            <div className="grid gap-4">
+              {deliveryPhases.map((phase) => (
+                <div key={phase.title} className={cn(ui.card, "p-5")}>
+                  <h3 className="text-lg font-semibold text-[var(--brand-ink)]">{phase.title}</h3>
+                  <p className="mt-2 text-sm leading-6 text-[var(--brand-muted)]">{phase.description}</p>
+                </div>
+              ))}
             </div>
           </div>
         </div>
       </section>
 
-      <section className="section-dark-blue relative overflow-hidden">
-        <div className={cn(ui.maxW, "relative py-20 text-center sm:py-24")}>
-          <h2 className={ui.h2Dark}>Start your engagement.</h2>
-          <p className={cn(ui.bodyDark, "mx-auto mt-4 max-w-lg")}>
-            Tell us which track fits your situation and we will scope it out. No commitment required to start the conversation.
-          </p>
-          <div className="mt-8 flex flex-col items-center justify-center gap-4 sm:flex-row">
-            <a
-              href={serviceInquiries.general}
-              className={ui.btnPrimaryLight}
-            >
-              Send inquiry
-            </a>
-            <Link href="/pricing" className={ui.btnSecondaryDark}>View pricing</Link>
+      <section className={cn(ui.sectionPy, "pt-10")}>
+        <div className={ui.maxW}>
+          <div className="page-glow overflow-hidden rounded-[36px] border border-white/80 bg-[linear-gradient(135deg,rgba(247,239,255,0.92),rgba(255,255,255,0.96)_52%,rgba(255,244,236,0.96))] px-6 py-10 text-center shadow-[var(--shadow-lg)] sm:px-10 sm:py-12">
+            <p className={ui.eyebrowBrand}>Need a launch plan?</p>
+            <h2 className={cn(ui.h2, "mt-3")}>Tell us what you need and we will scope the right service.</h2>
+            <p className="mx-auto mt-4 max-w-2xl text-base leading-8 text-[var(--brand-muted)]">
+              Whether you need a new website, a migration, or ongoing help, the goal is to get you online with less friction.
+            </p>
+            <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
+              <a href={serviceInquiries.general} className={ui.btnPrimary}>
+                Send inquiry
+              </a>
+              <Link href="/login" className={ui.btnSecondary}>
+                Open client portal
+              </Link>
+            </div>
           </div>
-          <p className="mt-6 text-sm text-slate-400">Or reach us directly at <a href="mailto:services@migrateck.com" className="text-blue-400 hover:text-blue-300">services@migrateck.com</a></p>
         </div>
       </section>
     </>

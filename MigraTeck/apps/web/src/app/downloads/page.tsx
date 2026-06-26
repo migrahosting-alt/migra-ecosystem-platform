@@ -8,16 +8,37 @@ import ui from "@/lib/ui";
 export const metadata = buildPageMetadata({
   title: "Downloads",
   description:
-    "MigraTeck publishes software, tooling, and release assets through verified distribution channels with clear release-state labeling.",
+    "Official MigraTeck and MigraHosting downloads, release assets, and verified distribution channels.",
   path: "/downloads",
 });
 
 const releaseStatuses: Record<string, { label: string; className: string }> = {
-  planned: { label: "Planned", className: "border-white/10 bg-white/5 text-slate-400" },
-  preview: { label: "Preview", className: "border-amber-400/20 bg-amber-400/10 text-amber-300" },
-  managed: { label: "Managed", className: "border-sky-400/20 bg-sky-400/10 text-sky-300" },
-  internal: { label: "Internal", className: "border-purple-400/20 bg-purple-400/10 text-purple-300" },
+  planned: {
+    label: "Planned",
+    className: "border-stone-200 bg-stone-50 text-stone-600",
+  },
+  preview: {
+    label: "Preview",
+    className: "border-amber-200 bg-amber-50 text-amber-700",
+  },
+  managed: {
+    label: "Managed",
+    className: "border-fuchsia-200 bg-fuchsia-50 text-fuchsia-700",
+  },
+  internal: {
+    label: "Internal",
+    className: "border-violet-200 bg-violet-50 text-violet-700",
+  },
 };
+
+function getReleaseStatus(state: string) {
+  return (
+    releaseStatuses[state as keyof typeof releaseStatuses] ?? {
+      label: "Planned",
+      className: "border-stone-200 bg-stone-50 text-stone-600",
+    }
+  );
+}
 
 export default function DownloadsPage() {
   const breadcrumb = buildBreadcrumbList([
@@ -31,51 +52,59 @@ export default function DownloadsPage() {
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumb) }}
       />
-      {/* hero */}
+
       <section className="hero-gradient hero-mesh relative overflow-hidden">
-        <div className="pointer-events-none absolute -left-32 top-40 h-[400px] w-[400px] rounded-full bg-cyan-400/15 blur-[100px]" />
-        <div className={cn(ui.maxW, "relative pb-20 pt-32 sm:pb-28 sm:pt-40")}>
+        <div className="pointer-events-none absolute left-[-4rem] top-24 h-72 w-72 rounded-full bg-violet-300/25 blur-[90px]" />
+        <div className="pointer-events-none absolute right-[-5rem] bottom-0 h-80 w-80 rounded-full bg-orange-200/35 blur-[100px]" />
+        <div className={cn(ui.maxW, "relative pb-20 pt-28 sm:pb-24 sm:pt-36")}>
           <div className="max-w-3xl">
-            <p className="animate-fade-up text-sm font-semibold uppercase tracking-[0.2em] text-sky-400/90">
-              Verified distribution
-            </p>
-            <h1 className="animate-fade-up-d1 mt-6 font-[var(--font-display)] text-5xl font-bold tracking-[-0.03em] text-white sm:text-6xl lg:text-7xl">
-              Official software delivery through verified distribution channels.
+            <p className={ui.eyebrowBrand}>Downloads</p>
+            <h1 className={cn(ui.h1, "mt-5 max-w-2xl")}>
+              Official software and release assets from verified sources.
             </h1>
-            <p className="animate-fade-up-d2 mt-6 max-w-xl text-lg leading-8 text-slate-300/90">
-              MigraTeck publishes applications, tooling, extensions, and release assets
-              through controlled distribution paths with clear release-state labeling.
-              Availability is shown as it actually stands.
+            <p className={cn(ui.body, "mt-6 max-w-2xl")}>
+              Use this page to find public downloads, release channels, and availability details.
+              Status labels are shown as they actually stand so customers and operators can see
+              what is ready, planned, managed, or internal.
             </p>
           </div>
         </div>
       </section>
 
-      {/* download groups */}
       {downloadGroups.map((group) => (
-          <section key={group.title} className={cn("border-b border-white/10", ui.sectionPySmall)}>
+        <section key={group.title} className={ui.sectionPySmall}>
           <div className={ui.maxW}>
             <p className={ui.eyebrowBrand}>{group.title}</p>
-            <p className="mt-2 max-w-xl text-sm leading-6 text-slate-400">{group.description}</p>
+            <h2 className={cn(ui.h3, "mt-3 text-[1.6rem]")}>{group.description}</h2>
             <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
               {group.items.map((item) => {
-                const fallback = { label: "Planned", className: "border-white/10 bg-white/5 text-slate-400" };
-                const status = releaseStatuses[item.releaseState] ?? fallback;
+                const status = getReleaseStatus(item.releaseState);
+
                 return (
                   <div key={item.name} className={cn(ui.card, "flex flex-col p-5")}>
                     <div className="flex items-start justify-between gap-3">
-                      <h3 className="font-semibold text-white">{item.name}</h3>
-                      <span className={cn("shrink-0 rounded-full border px-2.5 py-0.5 text-[11px] font-semibold", status.className)}>
+                      <h3 className="text-base font-semibold text-[var(--brand-ink)]">{item.name}</h3>
+                      <span
+                        className={cn(
+                          "shrink-0 rounded-full border px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-[0.14em]",
+                          status.className,
+                        )}
+                      >
                         {status.label}
                       </span>
                     </div>
-                    <p className="mt-3 flex-1 text-sm leading-6 text-slate-400">{item.description}</p>
-                    <div className="mt-4 border-t border-white/10 pt-3 text-xs text-slate-400">
-                      <p><span className="font-medium text-slate-300">Platform:</span> {item.platform}</p>
-                      <p className="mt-1"><span className="font-medium text-slate-300">Availability:</span> {item.availability}</p>
-                      {item.verifiedSource && (
-                        <p className="mt-1 font-medium text-emerald-400">✓ Verified source</p>
-                      )}
+                    <p className="mt-3 flex-1 text-sm leading-6 text-slate-600">{item.description}</p>
+                    <div className="mt-4 border-t border-[var(--line)] pt-3 text-xs text-slate-500">
+                      <p>
+                        <span className="font-semibold text-slate-700">Platform:</span> {item.platform}
+                      </p>
+                      <p className="mt-1">
+                        <span className="font-semibold text-slate-700">Availability:</span>{" "}
+                        {item.availability}
+                      </p>
+                      {item.verifiedSource ? (
+                        <p className="mt-2 font-semibold text-emerald-700">Verified source</p>
+                      ) : null}
                     </div>
                   </div>
                 );
@@ -85,19 +114,22 @@ export default function DownloadsPage() {
         </section>
       ))}
 
-      {/* integrity note */}
-      <section className={ui.sectionPySmall}>
+      <section className={cn(ui.sectionPySmall, "pt-4 sm:pt-6")}>
         <div className={ui.maxWNarrow}>
-          <div className={cn(ui.card, "p-6 sm:p-8 text-center")}>
-            <p className={ui.eyebrowBrand}>Release integrity</p>
-            <h2 className={cn(ui.h3, "mt-4")}>Every artifact ships from verified source.</h2>
-            <p className={cn(ui.bodySmall, "mx-auto mt-3 max-w-lg")}>
-              MigraTeck distribution channels enforce verified-source validation,
-              access-aware visibility, and honest release-state communication for every asset.
+          <div className={cn(ui.card, "p-6 text-center sm:p-8")}>
+            <p className={ui.eyebrowBrand}>Need the next step?</p>
+            <h2 className={cn(ui.h3, "mt-3")}>Check product details or review the security model.</h2>
+            <p className={cn(ui.bodySmall, "mx-auto mt-3 max-w-2xl")}>
+              Downloads are only one part of the customer path. Use the product and security
+              pages if you need more context before installing or requesting access.
             </p>
-            <div className="mt-6 flex justify-center gap-3">
-              <Link href="/products" className={ui.btnPrimary}>Products</Link>
-              <Link href="/security" className={ui.btnSecondary}>Security model</Link>
+            <div className="mt-6 flex flex-wrap justify-center gap-3">
+              <Link href="/products" className={ui.btnPrimary}>
+                Browse products
+              </Link>
+              <Link href="/security" className={ui.btnSecondary}>
+                View security
+              </Link>
             </div>
           </div>
         </div>

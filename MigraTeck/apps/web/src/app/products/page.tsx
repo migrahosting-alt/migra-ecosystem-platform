@@ -3,67 +3,80 @@ import Image from "next/image";
 import { products } from "@/data/products";
 import { buildPageMetadata, absoluteUrl } from "@/lib/metadata";
 import { buildBreadcrumbList, SITE_ROOT } from "@/lib/structured-data";
+import { cn } from "@/lib/cn";
+import ui from "@/lib/ui";
 
 export const metadata = buildPageMetadata({
   title: "Products",
   description:
-    "Explore the MigraTeck product ecosystem across platform core, infrastructure, communications, workflow, billing, and growth.",
+    "Choose domains, hosting, business email, websites, security, and client access through a simpler MigraHosting product catalog.",
   path: "/products",
 });
 
-const howItWorksItems = [
+const priorityFlows = [
   {
-    title: "Shared identity",
-    description: "One login, one access layer, one permission model across every product you use.",
+    title: "Domains",
+    description: "Start with the name your business needs and connect it to hosting, email, and your website.",
+    href: "/products/migrahosting",
+    cta: "Start with a domain",
   },
   {
-    title: "Shared infrastructure",
-    description: "Hosting, delivery, and distribution run on the same underlying system — no silos.",
+    title: "Hosting",
+    description: "Choose hosting plans built for clean launches, reliable uptime, and easier growth.",
+    href: "/products/migrahosting",
+    cta: "Choose hosting",
   },
   {
-    title: "Shared workflows",
-    description: "Intake, billing, messaging, and operations connect instead of running in separate tools.",
+    title: "Business Email",
+    description: "Set up branded inboxes that match your domain and keep everyday communication professional.",
+    href: "/products/migramail",
+    cta: "Get business email",
   },
   {
-    title: "Shared platform",
-    description: "Every product is part of MigraTeck — one company, one ecosystem, one place to manage it all.",
+    title: "Websites",
+    description: "Request a business website package when you want a real launch instead of a patchwork setup.",
+    href: "/services",
+    cta: "Request a website",
+  },
+  {
+    title: "Security",
+    description: "Review the safeguards around sign-in, billing, and account protection before you buy.",
+    href: "/security",
+    cta: "Review security",
+  },
+  {
+    title: "Client Portal",
+    description: "Open the portal to manage services, invoices, and support after signup.",
+    href: "/login",
+    cta: "Open client portal",
   },
 ] as const;
 
-const useCases = [
-  {
-    label: "SaaS platforms",
-    description: "Host, manage access, bill subscribers, and run support — all inside one ecosystem.",
-  },
-  {
-    label: "Service businesses",
-    description: "Capture clients, onboard them, communicate, invoice, and deliver through connected tools.",
-  },
-  {
-    label: "Digital product companies",
-    description: "Distribute software, manage downloads, handle licensing, and coordinate communication.",
-  },
-  {
-    label: "Communication-heavy operations",
-    description: "Run voice, email, messaging, and intake in coordination with your infrastructure.",
-  },
+const trustNotes = [
+  "Clear product entry points instead of vague bundles",
+  "Simple sign-in, billing, and support paths",
+  "Hosting, email, and websites that can be bought or requested quickly",
 ] as const;
 
-// Products to feature prominently at the top (exclude the platform "migrateck" entry itself)
-const ecosystemProducts = products.filter((p) => p.key !== "migrateck");
-const featuredProducts = ecosystemProducts.filter((p) => p.featured);
+const catalogProducts = products.filter((product) => product.slug !== "migrateck");
+const infrastructureProducts = catalogProducts.filter((product) =>
+  ["migrahosting", "migramail", "migrapanel", "migradrive"].includes(product.slug),
+);
+const supportingProducts = catalogProducts.filter((product) =>
+  !["migrahosting", "migramail", "migrapanel", "migradrive"].includes(product.slug),
+);
 
 export default function ProductsPage() {
   const structuredData = {
     "@context": "https://schema.org",
     "@type": "ItemList",
-    name: "MigraTeck Products",
-    numberOfItems: ecosystemProducts.length,
-    itemListElement: ecosystemProducts.map((p, i) => ({
+    name: "MigraHosting Products",
+    numberOfItems: catalogProducts.length,
+    itemListElement: catalogProducts.map((product, index) => ({
       "@type": "ListItem",
-      position: i + 1,
-      name: p.name,
-      url: absoluteUrl(`/products/${p.slug}`),
+      position: index + 1,
+      name: product.name,
+      url: absoluteUrl(`/products/${product.slug}`),
     })),
   };
 
@@ -73,7 +86,7 @@ export default function ProductsPage() {
   ]);
 
   return (
-    <main className="relative overflow-hidden bg-[#071121] text-white">
+    <>
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(structuredData) }}
@@ -83,190 +96,159 @@ export default function ProductsPage() {
         dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumb) }}
       />
 
-      <div className="absolute inset-0 bg-[radial-gradient(circle_at_18%_12%,rgba(59,130,246,0.22),transparent_30%),radial-gradient(circle_at_84%_18%,rgba(99,102,241,0.14),transparent_26%),linear-gradient(180deg,rgba(16,45,120,0.28),rgba(7,17,33,1)_22%,rgba(5,10,20,1)_100%)]" />
-      <div className="absolute left-[-8rem] top-28 h-96 w-96 rounded-full bg-blue-500/10 blur-3xl" />
-      <div className="absolute right-[-6rem] top-[20rem] h-[26rem] w-[26rem] rounded-full bg-violet-500/10 blur-3xl" />
+      <section className="hero-gradient hero-mesh relative overflow-hidden px-5 pb-14 pt-10 sm:px-6 sm:pb-16">
+        <div className="gradient-orb gradient-orb-violet left-[-3rem] top-20 h-40 w-40 sm:h-52 sm:w-52" />
+        <div className="gradient-orb gradient-orb-peach right-[-2rem] top-4 h-36 w-36 sm:h-44 sm:w-44" />
+        <div className={cn(ui.maxW, "relative")}>
+          <div className="grid gap-8 lg:grid-cols-[1.02fr_0.98fr] lg:items-center">
+            <div>
+              <p className={ui.eyebrowBrand}>Products</p>
+              <h1 className={cn(ui.h1, "mt-4 max-w-3xl")}>
+                Pick what you need first, then add the rest when you are ready.
+              </h1>
+              <p className={cn(ui.body, "mt-6 max-w-2xl")}>
+                Start with hosting, a domain, business email, or a website package. Every next step should feel clear, not buried under platform language.
+              </p>
+              <div className="mt-8 flex flex-col gap-3 sm:flex-row">
+                <Link href="/products/migrahosting" className={ui.btnPrimary}>
+                  Choose hosting
+                </Link>
+                <Link href="/pricing" className={ui.btnSecondary}>
+                  View pricing
+                </Link>
+              </div>
+            </div>
 
-      <div className="relative mx-auto max-w-[1280px] px-6 pb-24 pt-24 md:px-8 lg:px-10">
-        <section className="pb-20 pt-8">
-          <div className="inline-flex items-center rounded-full border border-blue-400/20 bg-blue-400/10 px-4 py-2 text-[11px] font-medium uppercase tracking-[0.28em] text-blue-200/90">
-            Products
+            <div className="grid gap-4 sm:grid-cols-2">
+              {trustNotes.map((note, index) => (
+                <div key={note} className={cn(ui.cardStrong, "p-5")}>
+                  <div className={ui.depthNum}>{index + 1}</div>
+                  <p className="mt-4 text-sm leading-7 text-[var(--brand-muted)]">{note}</p>
+                </div>
+              ))}
+              <div className={cn(ui.cardStrong, "p-5 sm:col-span-2")}>
+                <p className={ui.eyebrowBrand}>Quick path</p>
+                <p className="mt-3 text-lg font-semibold tracking-[-0.03em] text-[var(--brand-ink)]">
+                  Domains, hosting, business email, websites, security, and one client portal.
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section className={ui.sectionPySmall}>
+        <div className={ui.maxW}>
+          <div className="mx-auto max-w-3xl text-center">
+            <p className={ui.eyebrowBrand}>Priority buying flows</p>
+            <h2 className={cn(ui.h2, "mt-3")}>Start with the essentials.</h2>
+            <p className={cn(ui.bodySmall, "mx-auto mt-4 max-w-2xl text-base")}>
+              These are the pages most visitors need first when they are choosing a hosting company.
+            </p>
           </div>
 
-          <h1 className="mt-6 max-w-[820px] text-5xl font-semibold leading-[0.98] tracking-[-0.05em] text-white md:text-6xl lg:text-7xl">
-            Products built to work together — and stand on their own.
-          </h1>
-
-          <p className="mt-6 max-w-[620px] text-base leading-8 text-white/68 md:text-lg">
-            Each MigraTeck product is a complete solution. Together, they form one coordinated platform for businesses that need hosting, communication, billing, automation, and operations to move as one.
-          </p>
-
-          <div className="mt-9 flex flex-col gap-3 sm:flex-row">
-            <Link
-              href="/portfolio"
-              className="inline-flex items-center justify-center rounded-full bg-blue-500 px-6 py-3.5 text-sm font-medium text-white shadow-lg shadow-blue-500/20 transition hover:bg-blue-400"
-            >
-              Explore ecosystem
-            </Link>
-            <Link
-              href="/platform"
-              className="inline-flex items-center justify-center rounded-full border border-white/12 bg-white/[0.03] px-6 py-3.5 text-sm font-medium text-white/82 transition hover:bg-white/8"
-            >
-              View platform
-            </Link>
+          <div className="mt-10 grid gap-5 md:grid-cols-2 xl:grid-cols-3">
+            {priorityFlows.map((flow) => (
+              <Link key={flow.title} href={flow.href} className={cn(ui.card, ui.cardHover, "flex flex-col p-6 sm:p-7")}>
+                <p className={ui.eyebrowBrand}>{flow.title}</p>
+                <h3 className="mt-3 text-2xl font-semibold tracking-[-0.04em] text-[var(--brand-ink)]">{flow.title}</h3>
+                <p className="mt-3 flex-1 text-sm leading-7 text-[var(--brand-muted)]">{flow.description}</p>
+                <p className="mt-5 text-sm font-semibold text-[var(--brand-violet)]">{flow.cta}</p>
+              </Link>
+            ))}
           </div>
-        </section>
+        </div>
+      </section>
 
-        {featuredProducts.length > 0 && (
-          <section className="border-t border-white/8 py-16">
-            <p className="text-[11px] font-medium uppercase tracking-[0.28em] text-blue-200/85">Featured</p>
-            <div className="mt-8 grid gap-5 md:grid-cols-2 lg:grid-cols-3">
-              {featuredProducts.map((product) => (
-                <Link
-                  key={product.key}
-                  href={`/products/${product.slug}`}
-                  className="group relative flex flex-col overflow-hidden rounded-[28px] border border-white/12 bg-white/[0.05] p-7 no-underline backdrop-blur-xl transition duration-300 hover:-translate-y-1 hover:border-white/22 hover:bg-white/[0.08]"
-                >
-                  <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/30 to-transparent opacity-70" />
-                  <div className="flex items-start justify-between gap-4">
-                    <div className="relative h-14 w-14 overflow-hidden rounded-2xl border border-white/12 bg-white/8 p-2.5">
-                      <Image src={product.logo} alt={product.name} fill sizes="56px" className="object-contain p-0.5" />
-                    </div>
-                    <span className="rounded-full border border-emerald-400/20 bg-emerald-400/10 px-3 py-1 text-[10px] font-medium uppercase tracking-[0.2em] text-emerald-200/80">
-                      Featured
-                    </span>
-                  </div>
-                  <h3 className="mt-5 text-2xl font-semibold tracking-[-0.03em] text-white">{product.name}</h3>
-                  <p className="mt-3 flex-1 text-sm leading-7 text-white/65">{product.shortDescription}</p>
-                  <div className="mt-6 flex flex-wrap gap-2">
-                    {product.capabilities.slice(0, 2).map((cap) => (
-                      <span key={cap} className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-[11px] text-white/55">
-                        {cap}
+      <section className={ui.sectionPySmall}>
+        <div className={ui.maxW}>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <p className={ui.eyebrowBrand}>Core catalog</p>
+              <h2 className={cn(ui.h2, "mt-3")}>Products most closely tied to buying and managing service.</h2>
+            </div>
+            <span className={ui.pill}>{infrastructureProducts.length} core products</span>
+          </div>
+
+          <div className="mt-10 grid gap-5 md:grid-cols-2">
+            {infrastructureProducts.map((product) => (
+              <Link key={product.slug} href={`/products/${product.slug}`} className={cn(ui.cardStrong, ui.cardHover, "flex gap-4 p-6")}>
+                <div className={ui.logoBadgeLg}>
+                  <Image src={product.logo} alt={product.name} fill sizes="56px" className="object-contain" />
+                </div>
+                <div className="min-w-0">
+                  <p className={ui.eyebrowBrand}>{product.tagline}</p>
+                  <h3 className="mt-2 text-2xl font-semibold tracking-[-0.04em] text-[var(--brand-ink)]">{product.name}</h3>
+                  <p className="mt-3 text-sm leading-7 text-[var(--brand-muted)]">{product.shortDescription}</p>
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    {product.capabilities.slice(0, 2).map((capability) => (
+                      <span key={capability} className={ui.pill}>
+                        {capability}
                       </span>
                     ))}
                   </div>
-                  <p className="mt-5 text-sm font-medium text-blue-400 opacity-0 transition-opacity duration-200 group-hover:opacity-100">
-                    View product →
-                  </p>
+                </div>
+              </Link>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <section className={ui.sectionPySmall}>
+        <div className={ui.maxW}>
+          <div className="grid gap-5 lg:grid-cols-[0.9fr_1.1fr]">
+            <div className={cn(ui.cardStrong, "p-6 sm:p-7")}>
+              <p className={ui.eyebrowBrand}>More products</p>
+              <h2 className={cn(ui.h2, "mt-3")}>Additional tools around communication, automation, and operations.</h2>
+              <p className={cn(ui.bodySmall, "mt-4 text-base")}>
+                If you need more than hosting and email, these products extend the same account, billing, and support story.
+              </p>
+              <div className="mt-6 flex flex-col gap-3 sm:flex-row">
+                <Link href="/services" className={ui.btnSecondary}>
+                  Request a website
+                </Link>
+                <Link href="/login" className={ui.btnGhost}>
+                  Open client portal
+                </Link>
+              </div>
+            </div>
+
+            <div className="grid gap-4 sm:grid-cols-2">
+              {supportingProducts.map((product) => (
+                <Link key={product.slug} href={`/products/${product.slug}`} className={cn(ui.card, ui.cardHover, "p-5")}>
+                  <div className="flex items-center gap-3">
+                    <div className={ui.logoBadge}>
+                      <Image src={product.logo} alt={product.name} fill sizes="44px" className="object-contain" />
+                    </div>
+                    <p className="font-semibold text-[var(--brand-ink)]">{product.name}</p>
+                  </div>
+                  <p className="mt-3 text-sm leading-6 text-[var(--brand-muted)]">{product.shortDescription}</p>
                 </Link>
               ))}
             </div>
-          </section>
-        )}
-
-        <section id="all-products" className="border-t border-white/8 py-16">
-          <div className="flex items-end justify-between gap-4">
-            <div>
-              <p className="text-[11px] font-medium uppercase tracking-[0.28em] text-blue-200/85">All products</p>
-              <h2 className="mt-3 text-3xl font-semibold tracking-[-0.04em] text-white md:text-4xl">
-                The full MigraTeck ecosystem
-              </h2>
-            </div>
-            <span className="shrink-0 rounded-full border border-white/10 bg-white/[0.05] px-4 py-2 text-sm text-white/50">
-              {ecosystemProducts.length} products
-            </span>
           </div>
+        </div>
+      </section>
 
-          <div className="mt-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {ecosystemProducts.map((product) => (
-              <Link
-                key={product.key}
-                href={`/products/${product.slug}`}
-                className="group relative flex flex-col overflow-hidden rounded-[22px] border border-white/10 bg-white/[0.04] p-5 no-underline backdrop-blur-xl transition duration-300 hover:-translate-y-0.5 hover:border-white/18 hover:bg-white/[0.07]"
-              >
-                <div className="flex items-center gap-3.5">
-                  <div className="relative h-10 w-10 shrink-0 overflow-hidden rounded-xl border border-white/12 bg-white/8 p-1.5">
-                    <Image src={product.logo} alt={product.name} fill sizes="40px" className="object-contain p-0.5" />
-                  </div>
-                  <div className="min-w-0">
-                    <p className="font-semibold leading-tight text-white">{product.name}</p>
-                  </div>
-                </div>
-                <p className="mt-3.5 flex-1 text-sm leading-6 text-white/58">{product.shortDescription}</p>
-                <p className="mt-4 text-sm font-medium text-blue-400 opacity-0 transition-opacity duration-200 group-hover:opacity-100">
-                  View product →
-                </p>
-              </Link>
-            ))}
-          </div>
-        </section>
-
-        <section className="border-t border-white/8 py-16">
-          <div className="grid gap-12 lg:grid-cols-[1fr_1.1fr] lg:items-center">
-            <div>
-              <p className="text-[11px] font-medium uppercase tracking-[0.28em] text-blue-200/85">How it works</p>
-              <h2 className="mt-4 text-3xl font-semibold tracking-[-0.04em] text-white md:text-4xl">
-                Designed to work together
-              </h2>
-              <p className="mt-5 text-base leading-8 text-white/65">
-                Identity, hosting, communication, and workflows stay connected across every product, so your business operates as one system instead of disconnected tools.
-              </p>
-              <Link
-                href="/platform"
-                className="mt-8 inline-flex items-center justify-center rounded-full border border-white/12 bg-white/[0.04] px-5 py-3 text-sm font-medium text-white/80 transition hover:bg-white/8"
-              >
-                See how the platform works →
-              </Link>
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              {howItWorksItems.map((item) => (
-                <div key={item.title} className="rounded-[22px] border border-white/10 bg-white/[0.04] p-5 backdrop-blur-xl">
-                  <div className="flex h-8 w-8 items-center justify-center rounded-full border border-blue-400/20 bg-blue-400/10">
-                    <svg className="h-4 w-4 text-blue-300/80" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
-                    </svg>
-                  </div>
-                  <h3 className="mt-4 text-base font-semibold tracking-[-0.02em] text-white">{item.title}</h3>
-                  <p className="mt-2 text-sm leading-6 text-white/58">{item.description}</p>
-                </div>
-              ))}
-            </div>
-          </div>
-        </section>
-
-        <section className="border-t border-white/8 py-16">
-          <p className="text-[11px] font-medium uppercase tracking-[0.28em] text-blue-200/85">Use cases</p>
-          <h2 className="mt-4 text-3xl font-semibold tracking-[-0.04em] text-white md:text-4xl">
-            What you can build with MigraTeck
-          </h2>
-
-          <div className="mt-10 grid gap-4 sm:grid-cols-2">
-            {useCases.map((item) => (
-              <div key={item.label} className="rounded-[22px] border border-white/10 bg-white/[0.04] p-6 backdrop-blur-xl">
-                <h3 className="text-lg font-semibold tracking-[-0.02em] text-white">{item.label}</h3>
-                <p className="mt-3 text-sm leading-7 text-white/62">{item.description}</p>
-              </div>
-            ))}
-          </div>
-        </section>
-
-        <section className="border-t border-white/8 pt-16">
-          <div className="rounded-[36px] border border-white/10 bg-white/[0.05] px-6 py-12 text-center backdrop-blur-2xl md:px-10 md:py-16">
-            <p className="text-[11px] font-medium uppercase tracking-[0.28em] text-blue-200/85">Get started</p>
-            <h2 className="mx-auto mt-4 max-w-[720px] text-4xl font-semibold tracking-[-0.04em] text-white md:text-5xl">
-              Start building with MigraTeck.
-            </h2>
-            <p className="mx-auto mt-5 max-w-[600px] text-base leading-8 text-white/65">
-              Pick the products you need. Use them independently or together. Everything runs on the same platform.
+      <section className={cn(ui.sectionPy, "pt-10")}>
+        <div className={ui.maxW}>
+          <div className="page-glow overflow-hidden rounded-[36px] border border-white/80 bg-[linear-gradient(135deg,rgba(247,239,255,0.92),rgba(255,255,255,0.96)_52%,rgba(255,244,236,0.96))] px-6 py-10 text-center shadow-[var(--shadow-lg)] sm:px-10 sm:py-12">
+            <p className={ui.eyebrowBrand}>Ready to choose</p>
+            <h2 className={cn(ui.h2, "mt-3")}>Choose the product that gets you online fastest.</h2>
+            <p className="mx-auto mt-4 max-w-2xl text-base leading-8 text-[var(--brand-muted)]">
+              Start with hosting, add email, request a website, and use the client portal to keep billing and support in one place.
             </p>
             <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
-              <Link
-                href="/signup"
-                className="inline-flex items-center justify-center rounded-full bg-blue-500 px-6 py-3.5 text-sm font-medium text-white shadow-lg shadow-blue-500/20 transition hover:bg-blue-400"
-              >
-                Create account
+              <Link href="/products/migrahosting" className={ui.btnPrimary}>
+                Choose hosting
               </Link>
-              <Link
-                href="/platform"
-                className="inline-flex items-center justify-center rounded-full border border-white/12 bg-white/[0.03] px-6 py-3.5 text-sm font-medium text-white/82 transition hover:bg-white/8"
-              >
-                Explore platform
+              <Link href="/login" className={ui.btnSecondary}>
+                Open client portal
               </Link>
             </div>
           </div>
-        </section>
-      </div>
-    </main>
+        </div>
+      </section>
+    </>
   );
 }

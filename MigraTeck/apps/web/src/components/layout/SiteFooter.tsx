@@ -7,21 +7,30 @@ import { cn } from "@/lib/cn";
 function buildColumns(accountLinks: AccountLinks) {
   return [
     {
-      title: "Public site",
+      title: "Products",
       links: [
-        { href: "/portfolio", label: "Portfolio" },
+        { href: "/products/migrahosting", label: "Hosting" },
+        { href: "/products/migramail", label: "Business Email" },
+        { href: "/services", label: "Website Services" },
         { href: "/pricing", label: "Pricing" },
-        { href: "/products", label: "All products" },
-        { href: "/services", label: "Services" },
       ],
     },
     {
-      title: "Platform",
+      title: "Support",
       links: [
-        { href: "/platform", label: "Architecture" },
-        { href: "/developers", label: "Documentation" },
-        { href: "/downloads", label: "Downloads" },
+        { href: accountLinks.login, label: "Client Portal" },
+        { href: "/support/elize-foundation-mail", label: "Email Setup Help" },
         { href: "/security", label: "Security" },
+        { href: "mailto:support@migrateck.com", label: "Contact Support" },
+      ],
+    },
+    {
+      title: "Company",
+      links: [
+        { href: "/company", label: "Company" },
+        { href: "/products", label: "All Products" },
+        { href: "/services", label: "Services" },
+        { href: "/portfolio", label: "Portfolio" },
       ],
     },
     {
@@ -31,24 +40,7 @@ function buildColumns(accountLinks: AccountLinks) {
         { href: "/legal/privacy", label: "Privacy Policy" },
         { href: "/legal/payment", label: "Payment Policy" },
         { href: "/legal/acceptable-use", label: "Acceptable Use" },
-      ],
-    },
-    {
-      title: "Company",
-      links: [
-        { href: "/company", label: "Company" },
-        { href: "/legal", label: "Legal center" },
-        { href: "/.well-known/security.txt", label: "security.txt" },
-        { href: "mailto:support@migrateck.com", label: "Support" },
-      ],
-    },
-    {
-      title: "Account",
-      links: [
-        { href: accountLinks.login, label: "Log in" },
-        { href: accountLinks.signup, label: "Create account" },
-        { href: accountLinks.forgotPassword, label: "Reset password" },
-        { href: accountLinks.sessions, label: "Sessions" },
+        { href: "/legal/sms-terms", label: "SMS Terms" },
       ],
     },
   ] as const;
@@ -58,63 +50,73 @@ export function SiteFooter({ accountLinks }: { accountLinks: AccountLinks }) {
   const columns = buildColumns(accountLinks);
 
   return (
-    <footer className="px-6 pb-12 pt-4 sm:pb-14">
-      <div className="mx-auto max-w-7xl overflow-hidden rounded-[2rem] border border-slate-700 bg-[radial-gradient(circle_at_top_left,rgba(26,168,188,0.18),transparent_30%),radial-gradient(circle_at_top_right,rgba(251,191,36,0.14),transparent_24%),linear-gradient(180deg,#080b20,#122033)] text-white shadow-[0_30px_80px_rgba(10,22,40,0.3)]">
-      <div className={cn(ui.maxW, "pb-12 pt-16 sm:pb-16 sm:pt-20")}>
-        <div className="grid gap-12 lg:grid-cols-[1.5fr_2fr]">
-          <div>
-            <Link href="/" className="inline-flex items-center gap-3">
-              <div className="relative h-10 w-10 overflow-hidden rounded-xl border border-white/10 bg-white/10 p-1">
-                <Image
-                  src="/brands/products/migrateck.png"
-                  alt="MigraTeck"
-                  fill
-                  sizes="40px"
-                  className="object-contain"
-                />
-              </div>
-              <span className="font-[var(--font-display)] text-lg font-bold tracking-tight text-white">
-                MigraTeck
-              </span>
-            </Link>
-            <p className="mt-5 max-w-sm text-sm leading-6 text-slate-400">
-              One platform story across products, services, pricing, developer entry,
-              and verified software distribution.
-            </p>
-          </div>
-
-          <div className="grid grid-cols-2 gap-8 sm:grid-cols-3 lg:grid-cols-5">
-            {columns.map((col) => (
-              <div key={col.title}>
-                <p className={ui.eyebrowDarkMuted}>{col.title}</p>
-                <ul className="mt-4 space-y-3">
-                  {col.links.map((item) => (
-                    <li key={item.href}>
-                      <Link
-                        href={item.href}
-                        className="text-sm text-slate-400 transition-colors duration-150 hover:text-white"
-                      >
-                        {item.label}
-                      </Link>
-                    </li>
+    <footer className="px-5 pb-10 pt-2 sm:px-6 sm:pb-14">
+      <div className="mx-auto max-w-7xl">
+        <div className="page-glow overflow-hidden rounded-[34px] border border-white/80 bg-[linear-gradient(180deg,rgba(255,255,255,0.84),rgba(250,244,255,0.84)_58%,rgba(255,247,241,0.88))] shadow-[var(--shadow-lg)] backdrop-blur-xl">
+          <div className={cn(ui.maxW, "pb-10 pt-12 sm:pb-12 sm:pt-14")}>
+            <div className="grid gap-10 lg:grid-cols-[1.1fr_1.9fr]">
+              <div>
+                <Link href="/" className="inline-flex items-center gap-3">
+                  <div className={ui.logoBadge}>
+                    <Image
+                      src="/brands/products/migrateck.png"
+                      alt="MigraHosting"
+                      fill
+                      sizes="40px"
+                      className="object-contain"
+                    />
+                  </div>
+                  <span className="font-[var(--font-display)] text-lg font-semibold tracking-[-0.03em] text-[var(--brand-ink)]">
+                    MigraHosting
+                  </span>
+                </Link>
+                <p className="mt-5 max-w-md text-sm leading-7 text-[var(--brand-muted)]">
+                  Domains, hosting, email, websites, billing, and support in one clean client experience.
+                </p>
+                <div className="mt-6 flex flex-wrap gap-2">
+                  {["Hosting", "Email", "Websites", "Client Portal"].map((tag) => (
+                    <span key={tag} className={ui.pill}>
+                      {tag}
+                    </span>
                   ))}
-                </ul>
+                </div>
               </div>
-            ))}
-          </div>
-        </div>
 
-        <div className="mt-12 flex items-center justify-between border-t border-white/[0.06] pt-8">
-          <p className="text-xs text-slate-500">
-            © {new Date().getFullYear()} MigraTeck. All rights reserved.
-          </p>
-          <div className="flex gap-2">
-            {["Platform", "Commercial", "Verified distribution"].map((tag) => (
-              <span key={tag} className={ui.pillDark}>{tag}</span>
-            ))}
+              <div className="grid grid-cols-2 gap-8 sm:grid-cols-4">
+                {columns.map((column) => (
+                  <div key={column.title}>
+                    <p className={ui.eyebrowBrand}>{column.title}</p>
+                    <ul className="mt-4 space-y-3">
+                      {column.links.map((item) => (
+                        <li key={item.href}>
+                          <Link
+                            href={item.href}
+                            className="text-sm text-[var(--brand-muted)] transition duration-150 hover:text-[var(--brand-ink)]"
+                          >
+                            {item.label}
+                          </Link>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="mt-10 flex flex-col gap-3 border-t border-[var(--line)] pt-6 text-sm text-[var(--brand-soft)] sm:flex-row sm:items-center sm:justify-between">
+              <p>© {new Date().getFullYear()} MigraHosting. All rights reserved.</p>
+              <div className="flex flex-wrap gap-3">
+                <Link href={accountLinks.login} className="font-medium text-[var(--brand-ink)]">
+                  Client Portal
+                </Link>
+                <span aria-hidden="true">|</span>
+                <Link href={accountLinks.forgotPassword} className="font-medium text-[var(--brand-ink)]">
+                  Forgot password
+                </Link>
+              </div>
+            </div>
           </div>
         </div>
-      </div>
       </div>
     </footer>
   );

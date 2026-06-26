@@ -1,5 +1,7 @@
 import { siteUrl } from "@/lib/metadata";
 
+const DEFAULT_AUTH_WEB_URL = "https://auth.migrateck.com";
+
 export type AccountLinks = {
   origin: string | null;
   login: string;
@@ -42,7 +44,8 @@ export function getAccountLinks(): AccountLinks {
       ?? process.env.AUTH_WEB_URL
       ?? process.env.NEXT_PUBLIC_ACCOUNT_URL
       ?? process.env.NEXT_PUBLIC_AUTH_WEB_URL
-      ?? process.env.NEXT_PUBLIC_AUTH_URL,
+      ?? process.env.NEXT_PUBLIC_AUTH_URL
+      ?? DEFAULT_AUTH_WEB_URL,
   );
 
   return {

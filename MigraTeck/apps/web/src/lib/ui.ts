@@ -1,132 +1,140 @@
 /* ──────────────────────────────────────────────────────────────
-   MigraTeck — UI Token Map (Stripe-inspired, brand-aligned)
+   MigraHosting public-site token map
    ────────────────────────────────────────────────────────────── */
 
-/* ── layout ─────────────────────────────────────────────────── */
 export const maxW = "mx-auto max-w-7xl px-5 sm:px-6 lg:px-8";
 export const maxWNarrow = "mx-auto max-w-5xl px-5 sm:px-6 lg:px-8";
 
-/* ── section spacing ────────────────────────────────────────── */
-export const sectionPy = "py-24 sm:py-32";
-export const sectionPySmall = "py-16 sm:py-24";
+export const sectionPy = "py-20 sm:py-24";
+export const sectionPySmall = "py-14 sm:py-18";
 
-/* ── cards ──────────────────────────────────────────────────── */
 export const card =
-  "rounded-2xl border border-white/[0.08] bg-white/[0.04]";
+  "surface-card rounded-[28px]";
 
 export const cardHover =
-  "transition-all duration-300 hover:-translate-y-0.5 hover:bg-white/[0.07] hover:border-white/[0.12]";
+  "transition duration-300 hover:-translate-y-1 hover:shadow-[0_24px_56px_rgba(109,40,217,0.12)]";
 
-export const cardDark =
-  "rounded-2xl border border-white/[0.08] bg-white/[0.04]";
+export const cardMuted =
+  "rounded-[24px] border border-[var(--line)] bg-[rgba(255,255,255,0.78)]";
 
-export const cardDarkHover =
-  "transition-all duration-300 hover:-translate-y-0.5 hover:bg-white/[0.07] hover:border-white/[0.12]";
+export const cardStrong =
+  "surface-card-solid rounded-[30px]";
 
-/* ── typography — light backgrounds ─────────────────────────── */
+export const cardDark = cardStrong;
+
+export const cardDarkHover = cardHover;
+
 export const eyebrow =
-  "text-xs font-semibold uppercase tracking-[0.18em] text-slate-400";
+  "text-xs font-semibold uppercase tracking-[0.22em] text-[var(--brand-soft)]";
+
 export const eyebrowBrand =
-  "text-xs font-semibold uppercase tracking-[0.18em] text-blue-400";
+  "text-xs font-semibold uppercase tracking-[0.22em] text-[var(--brand-violet)]";
 
 export const h1 =
-  "font-[var(--font-display)] text-5xl font-bold tracking-[-0.03em] text-white sm:text-6xl lg:text-7xl";
+  "font-[var(--font-display)] text-5xl font-semibold tracking-[-0.05em] text-[var(--brand-ink)] sm:text-6xl lg:text-7xl";
+
 export const h2 =
-  "font-[var(--font-display)] text-3xl font-bold tracking-[-0.025em] text-white sm:text-4xl lg:text-[3.25rem]";
+  "font-[var(--font-display)] text-3xl font-semibold tracking-[-0.04em] text-[var(--brand-ink)] sm:text-4xl lg:text-[3rem]";
+
 export const h3 =
-  "font-[var(--font-display)] text-xl font-semibold tracking-[-0.02em] text-white sm:text-2xl";
+  "font-[var(--font-display)] text-xl font-semibold tracking-[-0.03em] text-[var(--brand-ink)] sm:text-2xl";
 
 export const body =
-  "text-base leading-7 text-slate-300 sm:text-lg sm:leading-8";
+  "text-base leading-7 text-[var(--brand-muted)] sm:text-lg sm:leading-8";
+
 export const bodySmall =
-  "text-sm leading-6 text-slate-400";
+  "text-sm leading-6 text-[var(--brand-muted)]";
 
-/* ── typography — dark backgrounds ──────────────────────────── */
-export const eyebrowDark =
-  "text-xs font-semibold uppercase tracking-[0.18em] text-sky-400";
-export const eyebrowDarkMuted =
-  "text-xs font-semibold uppercase tracking-[0.18em] text-slate-400";
+export const eyebrowDark = eyebrowBrand;
 
-export const h1Dark =
-  "font-[var(--font-display)] text-5xl font-bold tracking-[-0.03em] text-white sm:text-6xl lg:text-7xl";
-export const h2Dark =
-  "font-[var(--font-display)] text-3xl font-bold tracking-[-0.025em] text-white sm:text-4xl lg:text-[3.25rem]";
-export const h3Dark =
-  "font-[var(--font-display)] text-xl font-semibold tracking-[-0.02em] text-white sm:text-2xl";
+export const eyebrowDarkMuted = eyebrow;
 
-export const bodyDark =
-  "text-base leading-7 text-slate-400 sm:text-lg sm:leading-8";
-export const bodyDarkMuted =
-  "text-sm leading-6 text-slate-500";
+export const h1Dark = h1;
 
-/* ── buttons — light ────────────────────────────────────────── */
+export const h2Dark = h2;
+
+export const h3Dark = h3;
+
+export const bodyDark = body;
+
+export const bodyDarkMuted = bodySmall;
+
 export const btnPrimary =
-  "inline-flex items-center justify-center gap-2 rounded-full bg-blue-500 px-6 py-3 text-sm font-semibold text-white shadow-lg shadow-blue-500/20 transition-all duration-200 hover:bg-blue-400";
+  "inline-flex items-center justify-center gap-2 rounded-full bg-[linear-gradient(135deg,#7c3aed,#d946ef_58%,#fb923c)] px-6 py-3 text-sm font-semibold text-white shadow-[0_18px_40px_rgba(160,88,224,0.28)] transition duration-200 hover:-translate-y-0.5 hover:shadow-[0_22px_48px_rgba(160,88,224,0.34)]";
 
 export const btnSecondary =
-  "inline-flex items-center justify-center gap-2 rounded-full border border-white/15 bg-white/[0.04] px-6 py-3 text-sm font-semibold text-white/80 transition-all duration-200 hover:bg-white/[0.08] hover:border-white/25";
+  "inline-flex items-center justify-center gap-2 rounded-full border border-[var(--line-strong)] bg-white/90 px-6 py-3 text-sm font-semibold text-[var(--brand-ink)] shadow-[0_8px_24px_rgba(109,40,217,0.08)] transition duration-200 hover:-translate-y-0.5 hover:bg-white";
 
 export const btnGhost =
-  "inline-flex items-center justify-center gap-2 rounded-full px-5 py-2.5 text-sm font-medium text-slate-300 transition-colors duration-200 hover:text-white hover:bg-white/5";
+  "inline-flex items-center justify-center gap-2 rounded-full px-5 py-2.5 text-sm font-medium text-[var(--brand-muted)] transition duration-200 hover:bg-white/75 hover:text-[var(--brand-ink)]";
 
-/* ── buttons — dark ─────────────────────────────────────────── */
-export const btnPrimaryLight =
-  "inline-flex items-center justify-center gap-2 rounded-full bg-white px-6 py-3 text-sm font-semibold text-slate-950 shadow-sm transition-all duration-200 hover:bg-blue-50";
+export const btnPrimaryLight = btnPrimary;
 
-export const btnSecondaryDark =
-  "inline-flex items-center justify-center gap-2 rounded-full border border-white/15 bg-white/5 px-6 py-3 text-sm font-semibold text-white/90 transition-all duration-200 hover:bg-white/10 hover:border-white/25";
+export const btnSecondaryDark = btnSecondary;
 
-export const btnGhostDark =
-  "inline-flex items-center justify-center gap-2 rounded-full px-5 py-2.5 text-sm font-medium text-slate-400 transition-colors duration-200 hover:text-white";
+export const btnGhostDark = btnGhost;
 
-/* ── logo containers ────────────────────────────────────────── */
 export const logoBadge =
-  "relative flex h-10 w-10 items-center justify-center rounded-xl border border-white/10 bg-white/10";
+  "relative flex h-11 w-11 items-center justify-center overflow-hidden rounded-2xl border border-white/80 bg-white p-1 shadow-[0_10px_28px_rgba(109,40,217,0.12)]";
 
 export const logoBadgeLg =
-  "relative flex h-14 w-14 items-center justify-center rounded-2xl border border-white/10 bg-white/10";
+  "relative flex h-14 w-14 items-center justify-center overflow-hidden rounded-[24px] border border-white/80 bg-white p-2 shadow-[0_14px_34px_rgba(109,40,217,0.12)]";
 
-export const logoBadgeDark =
-  "relative flex h-10 w-10 items-center justify-center rounded-xl border border-white/10 bg-white/10";
+export const logoBadgeDark = logoBadge;
 
-/* ── pills / badges ─────────────────────────────────────────── */
 export const pill =
-  "rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-medium text-slate-300";
+  "inline-flex items-center rounded-full border border-[var(--line)] bg-white/82 px-3 py-1 text-xs font-medium text-[var(--brand-muted)]";
 
-export const pillDark =
-  "rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-medium text-slate-300";
+export const pillDark = pill;
 
 export const statusBadge =
-  "rounded-full bg-emerald-500/15 px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-emerald-400 border border-emerald-500/20";
+  "inline-flex items-center rounded-full border border-fuchsia-200 bg-fuchsia-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-fuchsia-700";
 
-/* ── depth numbers ──────────────────────────────────────────── */
 export const depthNum =
-  "flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-blue-600 text-xs font-bold text-white";
+  "flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[linear-gradient(135deg,#7c3aed,#fb7185)] text-xs font-bold text-white";
 
-export const depthNumDark =
-  "flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-white/15 bg-white/5 text-xs font-semibold text-white";
-
-/* ── nav ────────────────────────────────────────────────────── */
 export const navLink =
-  "px-3 py-2 text-sm font-medium text-white/70 transition-colors duration-150 hover:text-white";
+  "rounded-full px-3 py-2 text-sm font-medium text-[var(--brand-muted)] transition duration-150 hover:bg-white/78 hover:text-[var(--brand-ink)]";
 
-export const navLinkDark =
-  "px-3 py-2 text-sm font-medium text-white/70 transition-colors duration-150 hover:text-white";
-
-/* ── namespace export ───────────────────────────────────────── */
 const ui = {
-  maxW, maxWNarrow,
-  sectionPy, sectionPySmall,
-  card, cardHover, cardDark, cardDarkHover,
-  eyebrow, eyebrowBrand, eyebrowDark, eyebrowDarkMuted,
-  h1, h2, h3, h1Dark, h2Dark, h3Dark,
-  body, bodySmall, bodyDark, bodyDarkMuted,
-  btnPrimary, btnSecondary, btnGhost,
-  btnPrimaryLight, btnSecondaryDark, btnGhostDark,
-  logoBadge, logoBadgeLg, logoBadgeDark,
-  pill, pillDark, statusBadge,
-  depthNum, depthNumDark,
-  navLink, navLinkDark,
+  maxW,
+  maxWNarrow,
+  sectionPy,
+  sectionPySmall,
+  card,
+  cardHover,
+  cardMuted,
+  cardStrong,
+  cardDark,
+  cardDarkHover,
+  eyebrow,
+  eyebrowBrand,
+  eyebrowDark,
+  eyebrowDarkMuted,
+  h1,
+  h2,
+  h3,
+  h1Dark,
+  h2Dark,
+  h3Dark,
+  body,
+  bodySmall,
+  bodyDark,
+  bodyDarkMuted,
+  btnPrimary,
+  btnSecondary,
+  btnGhost,
+  btnPrimaryLight,
+  btnSecondaryDark,
+  btnGhostDark,
+  logoBadge,
+  logoBadgeLg,
+  logoBadgeDark,
+  pill,
+  pillDark,
+  statusBadge,
+  depthNum,
+  navLink,
 };
 
 export default ui;

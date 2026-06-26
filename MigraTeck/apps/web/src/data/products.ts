@@ -133,11 +133,11 @@ export const products: ProductRecord[] = [
     name: "MigraHosting",
     slug: "migrahosting",
     logo: "/brands/products/migrahosting.png",
-    tagline: "Managed hosting and infrastructure delivery",
+    tagline: "Domains, hosting, and launch-ready infrastructure",
     shortDescription:
-      "Managed hosting and infrastructure delivery for modern business and application workloads.",
+      "Domains, hosting, billing, and support in one simpler path for businesses getting online.",
     longDescription:
-      "MigraHosting provides managed hosting environments, deployment-ready infrastructure, and service delivery systems integrated into the broader MigraTeck platform.",
+      "MigraHosting helps businesses get online with managed hosting, domain coordination, portal access, and a cleaner support path instead of a scattered provider stack.",
     category: "infrastructure-delivery",
     status: "official",
     featured: true,
@@ -184,11 +184,11 @@ export const products: ProductRecord[] = [
     name: "MigraMail",
     slug: "migramail",
     logo: "/brands/products/migramail.png",
-    tagline: "Business mail, routing, and deliverability",
+    tagline: "Business email that fits your domain and your launch",
     shortDescription:
-      "Business mail, routing, and deliverability services aligned with the MigraTeck platform.",
+      "Business email with your domain, setup help, and a cleaner customer-facing support path.",
     longDescription:
-      "MigraMail provides organization-grade mailbox services, routing systems, deliverability operations, and communications infrastructure aligned with the MigraTeck authority layer.",
+      "MigraMail gives businesses branded inboxes, practical mailbox setup, and dependable email support tied to the same account path as the rest of their services.",
     category: "communications",
     status: "official",
     featured: true,
@@ -236,19 +236,19 @@ export const products: ProductRecord[] = [
     name: "MigraPanel",
     slug: "migrapanel",
     logo: "/brands/products/migrapanel.png",
-    tagline: "Operational control surface for platform resources",
+    tagline: "Client portal for services, billing, and support",
     shortDescription:
-      "Administrative and operational control panel for platform resources, product access, and service workflows.",
+      "Client-facing portal for reviewing services, invoices, account access, and support activity.",
     longDescription:
-      "MigraPanel is the operational management surface for provisioning, product administration, governance controls, and cross-system platform actions.",
+      "MigraPanel is the place customers use to review services, billing, support, and account activity once they are inside the MigraHosting experience.",
     category: "platform-core",
     status: "official",
     featured: true,
     capabilities: [
-      "Operational management surface",
-      "Provisioning controls",
-      "Governance actions",
-      "Cross-system product administration",
+      "Service overview",
+      "Invoice and billing access",
+      "Support activity",
+      "Customer account management",
     ],
     relatedProducts: ["migrateck", "migrapilot"],
     links: {
