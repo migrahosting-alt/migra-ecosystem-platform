@@ -261,6 +261,19 @@ export default function MigraPilotCommandCenterMock() {
           </aside>
         </div>
       </section>
+      <style jsx global>{`
+        @media (max-width: 1280px) {
+          main {
+            overflow-x: auto;
+          }
+        }
+
+        @media (max-width: 1100px) {
+          main {
+            min-width: 1100px;
+          }
+        }
+      `}</style>
     </main>
   );
 }
@@ -323,10 +336,10 @@ const S: Record<string, React.CSSProperties> = {
     fontFamily: "Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif",
   },
   sidebar: {
-    width: 286,
+    width: 272,
     flexShrink: 0,
     minHeight: "100vh",
-    padding: 18,
+    padding: 16,
     display: "flex",
     flexDirection: "column",
     borderRight: "1px solid rgba(148,163,184,.14)",
@@ -334,7 +347,7 @@ const S: Record<string, React.CSSProperties> = {
   },
   brandRow: { display: "flex", alignItems: "center", gap: 12, marginBottom: 18 },
   logo: { width: 42, height: 42, borderRadius: 14, boxShadow: "0 0 28px rgba(56,189,248,.35)" },
-  brand: { fontSize: 13, fontWeight: 900, letterSpacing: 1.7 },
+  brand: { fontSize: 13, fontWeight: 800, letterSpacing: 1.7 },
   brandSub: { fontSize: 11, color: "#7dd3fc", marginTop: 2 },
   newButton: {
     height: 42,
@@ -364,9 +377,9 @@ const S: Record<string, React.CSSProperties> = {
     alignItems: "center",
     justifyContent: "space-between",
   },
-  nav: { marginTop: 20, flex: 1, overflow: "auto" },
+  nav: { marginTop: 18, flex: 1, overflow: "auto", paddingRight: 2 },
   navGroup: { marginBottom: 18 },
-  navTitle: { fontSize: 10, color: "#64748b", textTransform: "uppercase", fontWeight: 900, letterSpacing: 1.2, marginBottom: 7 },
+  navTitle: { fontSize: 10, color: "#64748b", textTransform: "uppercase", fontWeight: 800, letterSpacing: 1.2, marginBottom: 7 },
   navItem: {
     height: 34,
     display: "flex",
@@ -376,7 +389,7 @@ const S: Record<string, React.CSSProperties> = {
     borderRadius: 11,
     color: "#cbd5e1",
     fontSize: 13,
-    fontWeight: 650,
+    fontWeight: 600,
   },
   navItemActive: {
     color: "#eff6ff",
@@ -384,7 +397,7 @@ const S: Record<string, React.CSSProperties> = {
     border: "1px solid rgba(59,130,246,.22)",
   },
   navDot: { width: 7, height: 7, borderRadius: 999, background: "#38bdf8", boxShadow: "0 0 12px rgba(56,189,248,.8)" },
-  sidebarBottom: { borderTop: "1px solid rgba(148,163,184,.12)", paddingTop: 12 },
+  sidebarBottom: { borderTop: "1px solid rgba(148,163,184,.12)", paddingTop: 10, flexShrink: 0 },
   operatorCard: {
     marginTop: 10,
     display: "flex",
@@ -402,15 +415,15 @@ const S: Record<string, React.CSSProperties> = {
     background: "linear-gradient(135deg, #2563eb, #06b6d4)",
     display: "grid",
     placeItems: "center",
-    fontWeight: 900,
+    fontWeight: 800,
     fontSize: 12,
   },
   operatorName: { fontSize: 13, fontWeight: 800 },
   operatorEmail: { fontSize: 11, color: "#64748b" },
   shell: { flex: 1, minWidth: 0, display: "flex", flexDirection: "column" },
   topbar: {
-    minHeight: 70,
-    padding: "14px 18px",
+    minHeight: 64,
+    padding: "12px 16px",
     display: "flex",
     alignItems: "center",
     justifyContent: "space-between",
@@ -444,17 +457,17 @@ const S: Record<string, React.CSSProperties> = {
     background: "rgba(22,101,52,.12)",
   },
   greenDot: { width: 9, height: 9, borderRadius: 999, background: "#22c55e", boxShadow: "0 0 14px rgba(34,197,94,.9)" },
-  healthTitle: { fontSize: 11, fontWeight: 900 },
+  healthTitle: { fontSize: 11, fontWeight: 800 },
   healthSub: { fontSize: 10, color: "#86efac" },
-  topAvatar: { width: 30, height: 30, borderRadius: 999, background: "#0f172a", display: "grid", placeItems: "center", fontSize: 11, fontWeight: 900, border: "1px solid rgba(148,163,184,.22)" },
-  contentGrid: { flex: 1, minHeight: 0, display: "grid", gridTemplateColumns: "minmax(0, 1fr) 360px", gap: 18, padding: 18 },
+  topAvatar: { width: 30, height: 30, borderRadius: 999, background: "#0f172a", display: "grid", placeItems: "center", fontSize: 11, fontWeight: 800, border: "1px solid rgba(148,163,184,.22)" },
+  contentGrid: { flex: 1, minHeight: 0, display: "grid", gridTemplateColumns: "minmax(0, 1fr) 348px", gap: 16, padding: 16 },
   center: { minWidth: 0, overflow: "auto", paddingRight: 2 },
-  hero: { textAlign: "center", padding: "28px 0 20px" },
+  hero: { textAlign: "center", padding: "20px 0 16px" },
   heroLogoWrap: { display: "inline-grid", placeItems: "center", width: 82, height: 82, borderRadius: 26, background: "rgba(14,165,233,.10)", border: "1px solid rgba(56,189,248,.24)", boxShadow: "0 0 60px rgba(56,189,248,.24)" },
   heroLogo: { width: 62, height: 62, borderRadius: 20 },
-  h1: { margin: "14px 0 4px", fontSize: 46, lineHeight: 1, letterSpacing: -1.5 },
-  subtitle: { margin: 0, color: "#93c5fd", fontSize: 16 },
-  capabilityGrid: { display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 12 },
+  h1: { margin: "12px 0 4px", fontSize: 42, lineHeight: 1, letterSpacing: -1.2, fontWeight: 800 },
+  subtitle: { margin: 0, color: "#93c5fd", fontSize: 15 },
+  capabilityGrid: { display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 10 },
   capCard: {
     display: "flex",
     alignItems: "center",
@@ -466,35 +479,35 @@ const S: Record<string, React.CSSProperties> = {
     boxShadow: "0 18px 40px rgba(0,0,0,.20)",
   },
   capIcon: { width: 34, height: 34, borderRadius: 12, display: "grid", placeItems: "center", color: "#67e8f9", background: "rgba(14,165,233,.13)" },
-  capTitle: { fontSize: 13, fontWeight: 900 },
+  capTitle: { fontSize: 13, fontWeight: 800 },
   capSub: { marginTop: 3, fontSize: 11, color: "#94a3b8" },
-  starterGrid: { marginTop: 14, display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 12 },
-  starterCard: { padding: 15, minHeight: 128, borderRadius: 18, background: "rgba(2,6,23,.58)", border: "1px solid rgba(148,163,184,.13)" },
-  starterTag: { display: "inline-block", padding: "3px 8px", borderRadius: 999, background: "rgba(37,99,235,.16)", color: "#93c5fd", fontSize: 10, fontWeight: 900 },
+  starterGrid: { marginTop: 12, display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 10 },
+  starterCard: { padding: 14, minHeight: 112, borderRadius: 18, background: "rgba(2,6,23,.58)", border: "1px solid rgba(148,163,184,.13)", boxShadow: "0 14px 34px rgba(0,0,0,.16)" },
+  starterTag: { display: "inline-block", padding: "3px 8px", borderRadius: 999, background: "rgba(37,99,235,.16)", color: "#93c5fd", fontSize: 10, fontWeight: 800 },
   starterTitle: { margin: "10px 0 6px", fontSize: 14 },
   starterBody: { margin: 0, color: "#94a3b8", fontSize: 12, lineHeight: 1.45 },
-  composer: { marginTop: 16, padding: 16, borderRadius: 22, background: "rgba(15,23,42,.74)", border: "1px solid rgba(56,189,248,.18)", boxShadow: "0 22px 70px rgba(8,145,178,.13)" },
-  composerHeader: { fontSize: 13, fontWeight: 900, marginBottom: 10 },
-  inputRow: { height: 54, borderRadius: 16, background: "rgba(2,6,23,.78)", border: "1px solid rgba(148,163,184,.14)", display: "flex", alignItems: "center", gap: 10, padding: "0 10px 0 14px" },
+  composer: { marginTop: 14, padding: 14, borderRadius: 22, background: "rgba(15,23,42,.74)", border: "1px solid rgba(56,189,248,.18)", boxShadow: "0 22px 70px rgba(8,145,178,.13)" },
+  composerHeader: { fontSize: 13, fontWeight: 800, marginBottom: 10 },
+  inputRow: { height: 50, borderRadius: 16, background: "rgba(2,6,23,.78)", border: "1px solid rgba(148,163,184,.14)", display: "flex", alignItems: "center", gap: 10, padding: "0 10px 0 14px" },
   promptIcon: { color: "#38bdf8", fontSize: 24 },
   placeholder: { flex: 1, color: "#64748b", fontSize: 13 },
-  sendButton: { width: 38, height: 38, borderRadius: 13, border: 0, background: "linear-gradient(135deg, #2563eb, #06b6d4)", color: "white", fontWeight: 900 },
+  sendButton: { width: 38, height: 38, borderRadius: 13, border: 0, background: "linear-gradient(135deg, #2563eb, #06b6d4)", color: "white", fontWeight: 800 },
   actionRow: { display: "grid", gridTemplateColumns: "repeat(5, minmax(0, 1fr))", gap: 9, marginTop: 10 },
   actionChip: { textAlign: "left", padding: 10, borderRadius: 14, border: "1px solid rgba(148,163,184,.14)", background: "rgba(2,6,23,.46)", color: "#e2e8f0", display: "flex", flexDirection: "column", gap: 3 },
-  lowerGrid: { marginTop: 16, display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 12 },
-  rightPanel: { minHeight: 0, overflow: "auto", padding: 14, borderRadius: 24, background: "rgba(2,6,23,.62)", border: "1px solid rgba(148,163,184,.14)" },
-  tabs: { display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12 },
+  lowerGrid: { marginTop: 14, display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 10 },
+  rightPanel: { minHeight: 0, overflow: "auto", padding: 12, borderRadius: 24, background: "rgba(2,6,23,.62)", border: "1px solid rgba(148,163,184,.14)" },
+  tabs: { display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10 },
   tab: { padding: "6px 8px", borderRadius: 999, fontSize: 11, color: "#94a3b8", background: "rgba(15,23,42,.62)" },
   tabActive: { color: "#e0f2fe", background: "rgba(14,165,233,.18)", border: "1px solid rgba(56,189,248,.24)" },
-  panel: { padding: 14, borderRadius: 18, background: "rgba(15,23,42,.66)", border: "1px solid rgba(148,163,184,.13)", marginBottom: 12 },
+  panel: { padding: 12, borderRadius: 18, background: "rgba(15,23,42,.66)", border: "1px solid rgba(148,163,184,.13)", marginBottom: 10 },
   panelHeader: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 },
-  panelTitle: { margin: 0, fontSize: 13, fontWeight: 900 },
-  panelAction: { fontSize: 10, color: "#38bdf8", fontWeight: 900 },
+  panelTitle: { margin: 0, fontSize: 13, fontWeight: 800 },
+  panelAction: { fontSize: 10, color: "#38bdf8", fontWeight: 800 },
   panelBody: { display: "flex", flexDirection: "column", gap: 8 },
   row: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, fontSize: 12 },
   rowLeft: { color: "#cbd5e1", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
   rowRight: { color: "#94a3b8", fontWeight: 800, flexShrink: 0 },
-  runName: { fontSize: 13, fontWeight: 900, color: "#e0f2fe" },
+  runName: { fontSize: 13, fontWeight: 800, color: "#e0f2fe" },
   progressTrack: { width: "100%", height: 8, borderRadius: 999, background: "rgba(30,41,59,.9)", overflow: "hidden", marginTop: 10 },
   progressFill: { width: "65%", height: "100%", background: "linear-gradient(90deg, #2563eb, #22d3ee)", borderRadius: 999 },
   muted: { marginTop: 8, fontSize: 11, color: "#94a3b8" },
