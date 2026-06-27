@@ -72,7 +72,7 @@ const models = [
 
 export default function MigraPilotCommandCenterMock() {
   return (
-    <main style={S.page}>
+    <main className="migrapilot-command-center" style={S.page}>
       <aside style={S.sidebar}>
         <div style={S.brandRow}>
           <img src={logo} alt="MigraPilot" style={S.logo} />
@@ -82,7 +82,7 @@ export default function MigraPilotCommandCenterMock() {
           </div>
         </div>
 
-        <button style={S.newButton}>+ New Session <span style={S.keyHint}>⌘K</span></button>
+        <button style={S.newButton} onMouseEnter={(e) => { e.currentTarget.style.transform = "translateY(-1px)"; }} onMouseLeave={(e) => { e.currentTarget.style.transform = "translateY(0)"; }}>+ New Session <span style={S.keyHint}>⌘K</span></button>
 
         <div style={S.search}>Search conversations... <span>⌘/</span></div>
 
@@ -130,7 +130,7 @@ export default function MigraPilotCommandCenterMock() {
           </div>
 
           <div style={S.health}>
-            <span style={S.greenDot} />
+            <span style={{ ...S.greenDot, ...S.livePulse }} />
             <div>
               <div style={S.healthTitle}>System Health</div>
               <div style={S.healthSub}>All Systems Operational</div>
@@ -151,7 +151,7 @@ export default function MigraPilotCommandCenterMock() {
 
             <section style={S.capabilityGrid}>
               {capabilities.map(([title, subtitle]) => (
-                <article key={title} style={S.capCard}>
+                <article key={title} style={S.capCard} onMouseEnter={(e) => { e.currentTarget.style.borderColor = "rgba(56,189,248,.34)"; e.currentTarget.style.transform = "translateY(-2px)"; }} onMouseLeave={(e) => { e.currentTarget.style.borderColor = "rgba(148,163,184,.14)"; e.currentTarget.style.transform = "translateY(0)"; }}>
                   <div style={S.capIcon}>✦</div>
                   <div>
                     <div style={S.capTitle}>{title}</div>
@@ -163,7 +163,7 @@ export default function MigraPilotCommandCenterMock() {
 
             <section style={S.starterGrid}>
               {starters.map(([title, body, tag]) => (
-                <article key={title} style={S.starterCard}>
+                <article key={title} style={S.starterCard} onMouseEnter={(e) => { e.currentTarget.style.borderColor = "rgba(59,130,246,.36)"; e.currentTarget.style.transform = "translateY(-2px)"; }} onMouseLeave={(e) => { e.currentTarget.style.borderColor = "rgba(148,163,184,.13)"; e.currentTarget.style.transform = "translateY(0)"; }}>
                   <div style={S.starterTag}>{tag}</div>
                   <h3 style={S.starterTitle}>{title}</h3>
                   <p style={S.starterBody}>{body}</p>
@@ -186,7 +186,7 @@ export default function MigraPilotCommandCenterMock() {
                   ["Verify", "Validate results"],
                   ["Review", "Post-run analysis"],
                 ].map(([title, sub]) => (
-                  <button key={title} style={S.actionChip}>
+                  <button key={title} style={{ ...S.actionChip, ...(title === "Plan" ? S.actionChipActive : {}) }}>
                     <strong>{title}</strong>
                     <span>{sub}</span>
                   </button>
@@ -236,7 +236,7 @@ export default function MigraPilotCommandCenterMock() {
             </Panel>
 
             <Panel title="Active Run">
-              <div style={S.runName}>api-latency-investigation</div>
+              <div style={S.runName}><span style={{ ...S.tinyPulse, marginRight: 8 }} />api-latency-investigation</div>
               <div style={S.progressTrack}><div style={S.progressFill} /></div>
               <div style={S.muted}>65% complete · running safely</div>
             </Panel>
@@ -262,16 +262,26 @@ export default function MigraPilotCommandCenterMock() {
         </div>
       </section>
       <style jsx global>{`
+        .migrapilot-command-center * {
+          box-sizing: border-box;
+        }
+
         @media (max-width: 1280px) {
-          main {
+          .migrapilot-command-center {
             overflow-x: auto;
           }
         }
 
         @media (max-width: 1100px) {
-          main {
+          .migrapilot-command-center {
             min-width: 1100px;
           }
+        }
+
+        @keyframes migrapilotPulse {
+          0% { opacity: .55; transform: scale(.92); }
+          50% { opacity: 1; transform: scale(1.08); }
+          100% { opacity: .55; transform: scale(.92); }
         }
       `}</style>
     </main>
@@ -362,6 +372,7 @@ const S: Record<string, React.CSSProperties> = {
     alignItems: "center",
     gap: 12,
     boxShadow: "0 16px 36px rgba(37,99,235,.32)",
+    transition: "transform .16s ease, box-shadow .16s ease",
   },
   keyHint: { opacity: 0.75, fontSize: 11 },
   search: {
@@ -457,6 +468,8 @@ const S: Record<string, React.CSSProperties> = {
     background: "rgba(22,101,52,.12)",
   },
   greenDot: { width: 9, height: 9, borderRadius: 999, background: "#22c55e", boxShadow: "0 0 14px rgba(34,197,94,.9)" },
+  livePulse: { animation: "migrapilotPulse 1.8s ease-in-out infinite" },
+  tinyPulse: { display: "inline-block", width: 8, height: 8, borderRadius: 999, background: "#22d3ee", boxShadow: "0 0 14px rgba(34,211,238,.8)", animation: "migrapilotPulse 1.6s ease-in-out infinite" },
   healthTitle: { fontSize: 11, fontWeight: 800 },
   healthSub: { fontSize: 10, color: "#86efac" },
   topAvatar: { width: 30, height: 30, borderRadius: 999, background: "#0f172a", display: "grid", placeItems: "center", fontSize: 11, fontWeight: 800, border: "1px solid rgba(148,163,184,.22)" },
@@ -477,12 +490,14 @@ const S: Record<string, React.CSSProperties> = {
     background: "linear-gradient(180deg, rgba(15,23,42,.82), rgba(15,23,42,.48))",
     border: "1px solid rgba(148,163,184,.14)",
     boxShadow: "0 18px 40px rgba(0,0,0,.20)",
+    transition: "transform .16s ease, border-color .16s ease, box-shadow .16s ease",
+    cursor: "pointer",
   },
   capIcon: { width: 34, height: 34, borderRadius: 12, display: "grid", placeItems: "center", color: "#67e8f9", background: "rgba(14,165,233,.13)" },
   capTitle: { fontSize: 13, fontWeight: 800 },
   capSub: { marginTop: 3, fontSize: 11, color: "#94a3b8" },
   starterGrid: { marginTop: 12, display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 10 },
-  starterCard: { padding: 14, minHeight: 112, borderRadius: 18, background: "rgba(2,6,23,.58)", border: "1px solid rgba(148,163,184,.13)", boxShadow: "0 14px 34px rgba(0,0,0,.16)" },
+  starterCard: { padding: 14, minHeight: 112, borderRadius: 18, background: "rgba(2,6,23,.58)", border: "1px solid rgba(148,163,184,.13)", boxShadow: "0 14px 34px rgba(0,0,0,.16)", transition: "transform .16s ease, border-color .16s ease, box-shadow .16s ease", cursor: "pointer" },
   starterTag: { display: "inline-block", padding: "3px 8px", borderRadius: 999, background: "rgba(37,99,235,.16)", color: "#93c5fd", fontSize: 10, fontWeight: 800 },
   starterTitle: { margin: "10px 0 6px", fontSize: 14 },
   starterBody: { margin: 0, color: "#94a3b8", fontSize: 12, lineHeight: 1.45 },
@@ -493,7 +508,8 @@ const S: Record<string, React.CSSProperties> = {
   placeholder: { flex: 1, color: "#64748b", fontSize: 13 },
   sendButton: { width: 38, height: 38, borderRadius: 13, border: 0, background: "linear-gradient(135deg, #2563eb, #06b6d4)", color: "white", fontWeight: 800 },
   actionRow: { display: "grid", gridTemplateColumns: "repeat(5, minmax(0, 1fr))", gap: 9, marginTop: 10 },
-  actionChip: { textAlign: "left", padding: 10, borderRadius: 14, border: "1px solid rgba(148,163,184,.14)", background: "rgba(2,6,23,.46)", color: "#e2e8f0", display: "flex", flexDirection: "column", gap: 3 },
+  actionChip: { textAlign: "left", padding: 10, borderRadius: 14, border: "1px solid rgba(148,163,184,.14)", background: "rgba(2,6,23,.46)", color: "#e2e8f0", display: "flex", flexDirection: "column", gap: 3, cursor: "pointer", transition: "border-color .16s ease, background .16s ease, transform .16s ease" },
+  actionChipActive: { borderColor: "rgba(56,189,248,.44)", background: "linear-gradient(135deg, rgba(37,99,235,.20), rgba(8,145,178,.10))", boxShadow: "0 0 0 1px rgba(56,189,248,.06), 0 16px 38px rgba(8,145,178,.12)" },
   lowerGrid: { marginTop: 14, display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 10 },
   rightPanel: { minHeight: 0, overflow: "auto", padding: 12, borderRadius: 24, background: "rgba(2,6,23,.62)", border: "1px solid rgba(148,163,184,.14)" },
   tabs: { display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10 },
