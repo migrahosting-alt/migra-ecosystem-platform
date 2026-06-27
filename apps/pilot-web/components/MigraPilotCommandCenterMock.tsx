@@ -72,6 +72,85 @@ const models = [
   ["Claude/OpenAI", "Fallback"],
 ];
 
+type RichRow = { title: string; sub: string; status: string; tone: string };
+
+const sectionSubtitles: Record<string, string> = {
+  Agents: "Specialized AI agents available to operate your systems.",
+  Playbooks: "Reusable, guardrailed automation procedures.",
+  Runs: "Recent and in-flight executions across your environments.",
+  Incidents: "Active and recent incidents requiring attention.",
+  Executions: "Detailed execution history with status and timing.",
+  Schedules: "Scheduled jobs and recurring automation windows.",
+  "Audit Trail": "Immutable record of every action taken in the platform.",
+  Policy: "Guardrails enforced before any execution runs.",
+  Sources: "Connected knowledge the assistant uses for grounded answers.",
+  Models: "Model routing and roles for safe, cost-aware execution.",
+  Admin: "Workspace administration and access controls.",
+};
+
+const agentMeta: Record<string, { status: string; tone: string; scope: string; action: string }> = {
+  "Coding Agent": { status: "Ready", tone: "green", scope: "Engineering", action: "Configure" },
+  "Ops Playbooks": { status: "Ready", tone: "green", scope: "Operations", action: "Open" },
+  "Run Orchestration": { status: "Active", tone: "cyan", scope: "Execution", action: "Open" },
+  "Audit Trail": { status: "Monitoring", tone: "blue", scope: "Governance", action: "Open" },
+  "Model Routing": { status: "Ready", tone: "green", scope: "Platform", action: "Configure" },
+  "Policy Enforcement": { status: "Enforced", tone: "purple", scope: "Security", action: "Configure" },
+};
+
+const playbookMeta: Record<string, { safety: string; safetyTone: string; lastRun: string; status: string; statusTone: string }> = {
+  "Deploy Service": { safety: "Guarded", safetyTone: "amber", lastRun: "2m ago", status: "Ready", statusTone: "green" },
+  "Database Failover": { safety: "High-risk", safetyTone: "red", lastRun: "15m ago", status: "Ready", statusTone: "green" },
+  "Incident Triage": { safety: "Standard", safetyTone: "blue", lastRun: "1h ago", status: "Idle", statusTone: "slate" },
+  "Rollback Release": { safety: "Guarded", safetyTone: "amber", lastRun: "3h ago", status: "Ready", statusTone: "green" },
+};
+
+const runTone: Record<string, string> = { Succeeded: "green", Running: "cyan", Failed: "red" };
+const runProgress: Record<string, number> = { Succeeded: 100, Running: 65, Failed: 100 };
+
+const knowledgeSources: string[][] = [
+  ["GitHub", "Code & pull requests", "Live", "green"],
+  ["Docs", "Confluence space", "Synced", "blue"],
+  ["Run History", "128 indexed records", "Indexed", "cyan"],
+  ["Policies", "Active guardrail set", "Active", "purple"],
+];
+
+const opsData: Record<string, RichRow[]> = {
+  Incidents: [
+    { title: "API gateway latency", sub: "p95 elevated · us-east-1", status: "Investigating", tone: "amber" },
+    { title: "DB connection exhaustion", sub: "primary pool · contained", status: "Mitigated", tone: "green" },
+    { title: "Cache eviction storm", sub: "redis-prod-02", status: "Monitoring", tone: "blue" },
+  ],
+  Schedules: [
+    { title: "Nightly DB backup", sub: "Daily · 02:00 UTC", status: "Scheduled", tone: "blue" },
+    { title: "Weekly dependency audit", sub: "Mon · 06:00 UTC", status: "Scheduled", tone: "blue" },
+    { title: "Hourly health sweep", sub: "Every 60 minutes", status: "Active", tone: "green" },
+  ],
+  "Audit Trail": [
+    { title: "Deployed checkout-service", sub: "operator@migrateck.com", status: "2m ago", tone: "slate" },
+    { title: "PROD guardrails passed", sub: "policy engine", status: "2m ago", tone: "green" },
+    { title: "Opened api-latency-investigation", sub: "operator@migrateck.com", status: "1h ago", tone: "slate" },
+  ],
+};
+
+const govPolicies: RichRow[] = [
+  { title: "PROD change approval", sub: "Requires operator confirmation", status: "Enforced", tone: "green" },
+  { title: "Destructive action block", sub: "Drops & deletes require review", status: "Enforced", tone: "green" },
+  { title: "Secret access scope", sub: "Least-privilege by default", status: "Enforced", tone: "green" },
+];
+
+const adminStats: string[][] = [
+  ["4 active", "Members"],
+  ["3 defined", "Roles"],
+  ["90 days", "Audit retention"],
+  ["Enabled", "SSO"],
+];
+
+const adminRows: RichRow[] = [
+  { title: "Operator", sub: "operator@migrateck.com", status: "Owner", tone: "blue" },
+  { title: "Engineering", sub: "team · 2 members", status: "Member", tone: "slate" },
+  { title: "Access policy", sub: "Least-privilege enforced", status: "Active", tone: "green" },
+];
+
 export default function MigraPilotCommandCenterMock() {
   const [activeSection, setActiveSection] = useState("Conversations");
   const [activeCapability, setActiveCapability] = useState<string[] | null>(null);
@@ -159,6 +238,8 @@ export default function MigraPilotCommandCenterMock() {
 
         <div style={S.contentGrid}>
           <section style={S.center}>
+            {activeSection === "Conversations" ? (
+              <>
             <section style={S.hero}>
               <div style={S.heroLogoWrap}>
                 <img src={logo} alt="MigraPilot" style={S.heroLogo} />
@@ -245,6 +326,10 @@ export default function MigraPilotCommandCenterMock() {
                 ))}
               </Panel>
             </section>
+              </>
+            ) : (
+              <SectionView section={activeSection} activeCapability={activeCapability} onSelectCapability={setActiveCapability} />
+            )}
           </section>
 
           <aside style={S.rightPanel}>
@@ -330,6 +415,25 @@ export default function MigraPilotCommandCenterMock() {
           color: #64748b;
         }
 
+        .migrapilot-command-center .mp-card {
+          transition: transform .16s ease, border-color .16s ease, box-shadow .16s ease;
+          cursor: pointer;
+        }
+
+        .migrapilot-command-center .mp-card:hover {
+          transform: translateY(-2px);
+          border-color: rgba(56,189,248,.34);
+          box-shadow: 0 22px 50px rgba(8,145,178,.20);
+        }
+
+        .migrapilot-command-center .mp-richrow {
+          transition: background .16s ease;
+        }
+
+        .migrapilot-command-center .mp-richrow:hover {
+          background: rgba(56,189,248,.06);
+        }
+
         @media (max-width: 1280px) {
           .migrapilot-command-center {
             overflow-x: auto;
@@ -349,6 +453,149 @@ export default function MigraPilotCommandCenterMock() {
         }
       `}</style>
     </main>
+  );
+}
+
+function StatusPill({ label, tone }: { label: string; tone: string }) {
+  return (
+    <span style={{ ...S.pill, ...toneStyle(tone) }}>
+      <span style={{ ...S.pillDot, background: toneDot(tone) }} />
+      {label}
+    </span>
+  );
+}
+
+function RichPanel({ title, rows }: { title: string; rows: RichRow[] }) {
+  return (
+    <article style={S.richPanel}>
+      <div style={S.panelHeader}>
+        <h3 style={S.panelTitle}>{title}</h3>
+        <span style={S.panelAction}>View all</span>
+      </div>
+      <div style={S.richBody}>
+        {rows.map((r) => (
+          <div key={r.title} className="mp-richrow" style={S.richRow}>
+            <span style={{ ...S.richDot, background: toneDot(r.tone), boxShadow: `0 0 12px ${toneDot(r.tone)}` }} />
+            <div style={S.richMain}>
+              <div style={S.richTitle}>{r.title}</div>
+              <div style={S.richSub}>{r.sub}</div>
+            </div>
+            <StatusPill label={r.status} tone={r.tone} />
+          </div>
+        ))}
+      </div>
+    </article>
+  );
+}
+
+function SectionView({ section, activeCapability, onSelectCapability }: { section: string; activeCapability: string[] | null; onSelectCapability: (cap: string[]) => void }) {
+  const richMap: Record<string, { title: string; rows: RichRow[] }> = {
+    Incidents: { title: "Incidents", rows: opsData.Incidents },
+    Schedules: { title: "Schedules", rows: opsData.Schedules },
+    "Audit Trail": { title: "Activity", rows: opsData["Audit Trail"] },
+    Executions: { title: "Executions", rows: recentRuns.map(([name, status, time]) => ({ title: name, sub: `PROD · ${time}`, status, tone: runTone[status] ?? "slate" })) },
+    Policy: { title: "Policies", rows: govPolicies },
+    Sources: { title: "Knowledge Sources", rows: knowledgeSources.map(([name, type, status, tone]) => ({ title: name, sub: type, status, tone })) },
+    Models: { title: "Models", rows: models.map(([name, role], i) => ({ title: name, sub: `${role} model`, status: i === 0 ? "Primary" : "Available", tone: i === 0 ? "green" : "slate" })) },
+  };
+
+  return (
+    <>
+      <section style={S.sectionHead}>
+        <h2 style={S.sectionTitle}>{section}</h2>
+        <p style={S.sectionSub}>{sectionSubtitles[section] ?? "Part of the MigraPilot command center."}</p>
+      </section>
+
+      {section === "Agents" && (
+        <section style={S.cardGrid3}>
+          {capabilities.map(([name, purpose]) => {
+            const meta = agentMeta[name];
+            const selected = activeCapability?.[0] === name;
+            return (
+              <article key={name} className="mp-card" onClick={() => onSelectCapability([name, purpose])} style={{ ...S.agentCard, ...(selected ? S.capCardActive : {}) }}>
+                <div style={S.agentTop}>
+                  <div style={S.capIcon}>✦</div>
+                  <StatusPill label={meta?.status ?? "Ready"} tone={meta?.tone ?? "green"} />
+                </div>
+                <div style={S.agentName}>{name}</div>
+                <div style={S.agentPurpose}>{purpose}</div>
+                <div style={S.agentFoot}>
+                  <span style={S.scopeTag}>{meta?.scope ?? "General"}</span>
+                  <span style={S.cardAction}>{meta?.action ?? "Open"} →</span>
+                </div>
+              </article>
+            );
+          })}
+        </section>
+      )}
+
+      {section === "Playbooks" && (
+        <section style={S.cardGrid2}>
+          {playbooks.map(([name, category]) => {
+            const m = playbookMeta[name];
+            return (
+              <article key={name} className="mp-card" style={S.agentCard}>
+                <div style={S.agentTop}>
+                  <span style={S.scopeTag}>{category}</span>
+                  <StatusPill label={m?.status ?? "Ready"} tone={m?.statusTone ?? "green"} />
+                </div>
+                <div style={S.agentName}>{name}</div>
+                <div style={S.pbMetaRow}>
+                  <div style={S.pbMeta}><span style={S.pbMetaLabel}>Safety</span><StatusPill label={m?.safety ?? "Standard"} tone={m?.safetyTone ?? "blue"} /></div>
+                  <div style={S.pbMeta}><span style={S.pbMetaLabel}>Last run</span><span style={S.pbMetaVal}>{m?.lastRun ?? "—"}</span></div>
+                </div>
+                <div style={S.agentFoot}>
+                  <span style={S.cardAction}>Open playbook →</span>
+                </div>
+              </article>
+            );
+          })}
+        </section>
+      )}
+
+      {section === "Runs" && (
+        <section style={S.runList}>
+          {recentRuns.map(([name, status, time]) => {
+            const tone = runTone[status] ?? "slate";
+            const pct = runProgress[status] ?? 50;
+            return (
+              <article key={name} className="mp-card" style={S.runCard}>
+                <div style={S.runCardTop}>
+                  <div>
+                    <div style={S.agentName}>{name}</div>
+                    <div style={S.runMeta}>PROD · {time}</div>
+                  </div>
+                  <StatusPill label={status} tone={tone} />
+                </div>
+                <div style={S.progressTrack}><div style={{ ...S.progressFill, width: `${pct}%`, background: `linear-gradient(90deg, ${toneDot(tone)}, #22d3ee)` }} /></div>
+              </article>
+            );
+          })}
+        </section>
+      )}
+
+      {section === "Admin" && (
+        <>
+          <section style={S.statGrid}>
+            {adminStats.map(([value, label]) => (
+              <div key={label} style={S.statTile}>
+                <div style={S.statValue}>{value}</div>
+                <div style={S.statLabel}>{label}</div>
+              </div>
+            ))}
+          </section>
+          <section style={S.sectionGrid}>
+            <RichPanel title="Access & Roles" rows={adminRows} />
+          </section>
+        </>
+      )}
+
+      {richMap[section] && (
+        <section style={S.sectionGrid}>
+          <RichPanel title={richMap[section].title} rows={richMap[section].rows} />
+        </section>
+      )}
+    </>
   );
 }
 
@@ -577,6 +824,38 @@ const S: Record<string, React.CSSProperties> = {
   actionChip: { textAlign: "left", padding: 10, borderRadius: 14, border: "1px solid rgba(148,163,184,.14)", background: "rgba(2,6,23,.46)", color: "#e2e8f0", display: "flex", flexDirection: "column", gap: 3, cursor: "pointer", transition: "border-color .16s ease, background .16s ease, transform .16s ease" },
   actionChipActive: { borderColor: "rgba(56,189,248,.44)", background: "linear-gradient(135deg, rgba(37,99,235,.20), rgba(8,145,178,.10))", boxShadow: "0 0 0 1px rgba(56,189,248,.06), 0 16px 38px rgba(8,145,178,.12)" },
   lowerGrid: { marginTop: 14, display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 10 },
+  sectionHead: { padding: "8px 0 18px" },
+  sectionTitle: { margin: "0 0 6px", fontSize: 30, fontWeight: 800, letterSpacing: -0.6, color: "#eaf2ff" },
+  sectionSub: { margin: 0, color: "#93c5fd", fontSize: 14 },
+  sectionGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 10, alignItems: "start" },
+  cardGrid3: { display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 10 },
+  cardGrid2: { display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 10 },
+  agentCard: { display: "flex", flexDirection: "column", gap: 9, padding: 16, minHeight: 156, borderRadius: 18, background: "linear-gradient(180deg, rgba(15,23,42,.82), rgba(15,23,42,.48))", border: "1px solid rgba(148,163,184,.14)", boxShadow: "0 18px 40px rgba(0,0,0,.20)" },
+  agentTop: { display: "flex", alignItems: "center", justifyContent: "space-between" },
+  agentName: { fontSize: 15, fontWeight: 800, color: "#eaf2ff" },
+  agentPurpose: { fontSize: 12, color: "#94a3b8", lineHeight: 1.45, flex: 1 },
+  agentFoot: { display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: "auto" },
+  scopeTag: { padding: "3px 9px", borderRadius: 999, background: "rgba(37,99,235,.16)", color: "#93c5fd", fontSize: 10, fontWeight: 800 },
+  cardAction: { fontSize: 11, color: "#38bdf8", fontWeight: 800 },
+  pbMetaRow: { display: "flex", gap: 22, marginTop: 2 },
+  pbMeta: { display: "flex", flexDirection: "column", gap: 6, alignItems: "flex-start" },
+  pbMetaLabel: { fontSize: 10, color: "#64748b", fontWeight: 800, textTransform: "uppercase", letterSpacing: 0.8 },
+  pbMetaVal: { fontSize: 12, color: "#cbd5e1", fontWeight: 700 },
+  runList: { display: "flex", flexDirection: "column", gap: 10 },
+  runCard: { padding: 14, borderRadius: 18, background: "rgba(15,23,42,.66)", border: "1px solid rgba(148,163,184,.13)" },
+  runCardTop: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 },
+  runMeta: { fontSize: 11, color: "#94a3b8", marginTop: 3 },
+  richPanel: { padding: 14, borderRadius: 18, background: "rgba(15,23,42,.66)", border: "1px solid rgba(148,163,184,.13)" },
+  richBody: { display: "flex", flexDirection: "column" },
+  richRow: { display: "flex", alignItems: "center", gap: 12, padding: "11px 6px", borderRadius: 12 },
+  richDot: { width: 8, height: 8, borderRadius: 999, flexShrink: 0 },
+  richMain: { flex: 1, minWidth: 0 },
+  richTitle: { fontSize: 13, fontWeight: 700, color: "#e5eefc", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
+  richSub: { fontSize: 11, color: "#94a3b8", marginTop: 2 },
+  statGrid: { display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 10, marginBottom: 12 },
+  statTile: { padding: 14, borderRadius: 16, background: "linear-gradient(180deg, rgba(15,23,42,.82), rgba(15,23,42,.48))", border: "1px solid rgba(148,163,184,.14)" },
+  statValue: { fontSize: 20, fontWeight: 800, color: "#eaf2ff" },
+  statLabel: { fontSize: 11, color: "#94a3b8", marginTop: 4 },
   rightPanel: { minHeight: 0, overflow: "auto", padding: 12, borderRadius: 24, background: "rgba(2,6,23,.62)", border: "1px solid rgba(148,163,184,.14)" },
   tabs: { display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10 },
   tab: { padding: "6px 8px", borderRadius: 999, fontSize: 11, color: "#94a3b8", background: "rgba(15,23,42,.62)" },
