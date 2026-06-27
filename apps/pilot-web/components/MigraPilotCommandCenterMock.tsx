@@ -1,5 +1,7 @@
 "use client";
 
+import { useState } from "react";
+
 const logo = "/assets/MigraPilot_official_logo.png";
 
 const navGroups = [
@@ -71,6 +73,20 @@ const models = [
 ];
 
 export default function MigraPilotCommandCenterMock() {
+  const [activeSection, setActiveSection] = useState("Conversations");
+  const [activeCapability, setActiveCapability] = useState<string[] | null>(null);
+  const [activeMode, setActiveMode] = useState("Plan");
+  const [activeTab, setActiveTab] = useState("Context");
+  const [composerText, setComposerText] = useState("");
+
+  const resetSession = () => {
+    setActiveSection("Conversations");
+    setActiveCapability(null);
+    setActiveMode("Plan");
+    setActiveTab("Context");
+    setComposerText("");
+  };
+
   return (
     <main className="migrapilot-command-center" style={S.page}>
       <aside style={S.sidebar}>
@@ -82,7 +98,7 @@ export default function MigraPilotCommandCenterMock() {
           </div>
         </div>
 
-        <button style={S.newButton} onMouseEnter={(e) => { e.currentTarget.style.transform = "translateY(-1px)"; }} onMouseLeave={(e) => { e.currentTarget.style.transform = "translateY(0)"; }}>+ New Session <span style={S.keyHint}>⌘K</span></button>
+        <button style={S.newButton} onClick={resetSession} onMouseEnter={(e) => { e.currentTarget.style.transform = "translateY(-1px)"; }} onMouseLeave={(e) => { e.currentTarget.style.transform = "translateY(0)"; }}>+ New Session <span style={S.keyHint}>⌘K</span></button>
 
         <div style={S.search}>Search conversations... <span>⌘/</span></div>
 
@@ -90,12 +106,14 @@ export default function MigraPilotCommandCenterMock() {
           {navGroups.map((group) => (
             <section key={group.title} style={S.navGroup}>
               <div style={S.navTitle}>{group.title}</div>
-              {group.items.map((item, index) => (
+              {group.items.map((item) => (
                 <div
                   key={item}
+                  onClick={() => setActiveSection(item)}
                   style={{
                     ...S.navItem,
-                    ...(group.title === "Workspace" && index === 0 ? S.navItemActive : {}),
+                    cursor: "pointer",
+                    ...(item === activeSection ? S.navItemActive : {}),
                   }}
                 >
                   <span style={S.navDot} />
@@ -150,20 +168,23 @@ export default function MigraPilotCommandCenterMock() {
             </section>
 
             <section style={S.capabilityGrid}>
-              {capabilities.map(([title, subtitle]) => (
-                <article key={title} style={S.capCard} onMouseEnter={(e) => { e.currentTarget.style.borderColor = "rgba(56,189,248,.34)"; e.currentTarget.style.transform = "translateY(-2px)"; }} onMouseLeave={(e) => { e.currentTarget.style.borderColor = "rgba(148,163,184,.14)"; e.currentTarget.style.transform = "translateY(0)"; }}>
-                  <div style={S.capIcon}>✦</div>
-                  <div>
-                    <div style={S.capTitle}>{title}</div>
-                    <div style={S.capSub}>{subtitle}</div>
-                  </div>
-                </article>
-              ))}
+              {capabilities.map(([title, subtitle]) => {
+                const selected = activeCapability?.[0] === title;
+                return (
+                  <article key={title} onClick={() => setActiveCapability([title, subtitle])} style={{ ...S.capCard, ...(selected ? S.capCardActive : {}) }} onMouseEnter={(e) => { e.currentTarget.style.borderColor = "rgba(56,189,248,.34)"; e.currentTarget.style.transform = "translateY(-2px)"; }} onMouseLeave={(e) => { e.currentTarget.style.borderColor = selected ? "rgba(56,189,248,.5)" : "rgba(148,163,184,.14)"; e.currentTarget.style.transform = "translateY(0)"; }}>
+                    <div style={S.capIcon}>✦</div>
+                    <div>
+                      <div style={S.capTitle}>{title}</div>
+                      <div style={S.capSub}>{subtitle}</div>
+                    </div>
+                  </article>
+                );
+              })}
             </section>
 
             <section style={S.starterGrid}>
               {starters.map(([title, body, tag]) => (
-                <article key={title} style={S.starterCard} onMouseEnter={(e) => { e.currentTarget.style.borderColor = "rgba(59,130,246,.36)"; e.currentTarget.style.transform = "translateY(-2px)"; }} onMouseLeave={(e) => { e.currentTarget.style.borderColor = "rgba(148,163,184,.13)"; e.currentTarget.style.transform = "translateY(0)"; }}>
+                <article key={title} onClick={() => setComposerText(body)} style={S.starterCard} onMouseEnter={(e) => { e.currentTarget.style.borderColor = "rgba(59,130,246,.36)"; e.currentTarget.style.transform = "translateY(-2px)"; }} onMouseLeave={(e) => { e.currentTarget.style.borderColor = "rgba(148,163,184,.13)"; e.currentTarget.style.transform = "translateY(0)"; }}>
                   <div style={S.starterTag}>{tag}</div>
                   <h3 style={S.starterTitle}>{title}</h3>
                   <p style={S.starterBody}>{body}</p>
@@ -175,7 +196,12 @@ export default function MigraPilotCommandCenterMock() {
               <div style={S.composerHeader}>Ask MigraPilot anything...</div>
               <div style={S.inputRow}>
                 <span style={S.promptIcon}>›</span>
-                <span style={S.placeholder}>Type a command, ask a question, or run a playbook...</span>
+                <textarea
+                  value={composerText}
+                  onChange={(e) => setComposerText(e.target.value)}
+                  placeholder="Type a command, ask a question, or run a playbook..."
+                  style={S.composerInput}
+                />
                 <button style={S.sendButton}>↗</button>
               </div>
               <div style={S.actionRow}>
@@ -186,7 +212,7 @@ export default function MigraPilotCommandCenterMock() {
                   ["Verify", "Validate results"],
                   ["Review", "Post-run analysis"],
                 ].map(([title, sub]) => (
-                  <button key={title} style={{ ...S.actionChip, ...(title === "Plan" ? S.actionChipActive : {}) }}>
+                  <button key={title} onClick={() => setActiveMode(title)} style={{ ...S.actionChip, ...(title === activeMode ? S.actionChipActive : {}) }}>
                     <strong>{title}</strong>
                     <span>{sub}</span>
                   </button>
@@ -223,47 +249,85 @@ export default function MigraPilotCommandCenterMock() {
 
           <aside style={S.rightPanel}>
             <div style={S.tabs}>
-              {["Context", "Run Details", "Steps", "Logs", "Memory"].map((tab, index) => (
-                <span key={tab} style={{ ...S.tab, ...(index === 0 ? S.tabActive : {}) }}>{tab}</span>
+              {["Context", "Run Details", "Steps", "Logs", "Memory"].map((tab) => (
+                <span key={tab} onClick={() => setActiveTab(tab)} style={{ ...S.tab, cursor: "pointer", ...(tab === activeTab ? S.tabActive : {}) }}>{tab}</span>
               ))}
             </div>
 
-            <Panel title="Live Context">
-              <Row left="Environment" right="PROD" tone="Failed" />
-              <Row left="Region" right="us-east-1" />
-              <Row left="Cluster" right="eks-prod-01" />
-              <Row left="User" right="operator@migrateck.com" />
-            </Panel>
+            {activeTab === "Context" && (
+              <>
+                <Panel title="Live Context">
+                  <Row left="Environment" right="PROD" tone="Failed" />
+                  <Row left="Region" right="us-east-1" />
+                  <Row left="Cluster" right="eks-prod-01" />
+                  <Row left="User" right="operator@migrateck.com" />
+                </Panel>
 
-            <Panel title="Active Run">
-              <div style={S.runName}><span style={{ ...S.tinyPulse, marginRight: 8 }} />api-latency-investigation</div>
-              <div style={S.progressTrack}><div style={S.progressFill} /></div>
-              <div style={S.muted}>65% complete · running safely</div>
-            </Panel>
+                <Panel title="Capability Focus">
+                  {activeCapability ? (
+                    <>
+                      <Row left={activeCapability[0]} right="Selected" tone="Running" />
+                      <div style={S.muted}>{activeCapability[1]}</div>
+                    </>
+                  ) : (
+                    <div style={S.muted}>Select a capability above to focus its context.</div>
+                  )}
+                </Panel>
 
-            <Panel title="Execution Steps">
-              {["Collect metrics", "Analyze latency drivers", "Correlate deployments", "Identify root cause", "Recommend mitigations"].map((step, index) => (
-                <Row key={step} left={`${index + 1}. ${step}`} right={index < 2 ? "Done" : index === 2 ? "Running" : "Pending"} />
-              ))}
-            </Panel>
+                <Panel title="Knowledge Sources">
+                  <Row left="GitHub" right="Live" />
+                  <Row left="Docs" right="Synced" />
+                  <Row left="Run History" right="128" />
+                  <Row left="Policies" right="Active" />
+                </Panel>
+              </>
+            )}
 
-            <Panel title="Knowledge Sources">
-              <Row left="GitHub" right="Live" />
-              <Row left="Docs" right="Synced" />
-              <Row left="Run History" right="128" />
-              <Row left="Policies" right="Active" />
-            </Panel>
+            {activeTab === "Run Details" && (
+              <Panel title="Active Run">
+                <div style={S.runName}><span style={{ ...S.tinyPulse, marginRight: 8 }} />api-latency-investigation</div>
+                <div style={S.progressTrack}><div style={S.progressFill} /></div>
+                <div style={S.muted}>65% complete · running safely</div>
+              </Panel>
+            )}
 
-            <Panel title="Memory">
-              <div style={S.progressTrack}><div style={{ ...S.progressFill, width: "12%" }} /></div>
-              <div style={S.muted}>12% of project context used</div>
-            </Panel>
+            {activeTab === "Steps" && (
+              <Panel title="Execution Steps">
+                {["Collect metrics", "Analyze latency drivers", "Correlate deployments", "Identify root cause", "Recommend mitigations"].map((step, index) => (
+                  <Row key={step} left={`${index + 1}. ${step}`} right={index < 2 ? "Done" : index === 2 ? "Running" : "Pending"} />
+                ))}
+              </Panel>
+            )}
+
+            {activeTab === "Logs" && (
+              <Panel title="Logs">
+                {[
+                  ["10:42:01", "Run started: api-latency-investigation"],
+                  ["10:42:04", "Collected gateway metrics (last 1h)"],
+                  ["10:42:09", "Analyzing latency drivers"],
+                  ["10:42:15", "Correlating recent deployments"],
+                ].map(([time, msg]) => (
+                  <Row key={time} left={msg} right={time} />
+                ))}
+              </Panel>
+            )}
+
+            {activeTab === "Memory" && (
+              <Panel title="Memory">
+                <div style={S.progressTrack}><div style={{ ...S.progressFill, width: "12%" }} /></div>
+                <div style={S.muted}>12% of project context used</div>
+              </Panel>
+            )}
           </aside>
         </div>
       </section>
       <style jsx global>{`
         .migrapilot-command-center * {
           box-sizing: border-box;
+        }
+
+        .migrapilot-command-center textarea::placeholder {
+          color: #64748b;
         }
 
         @media (max-width: 1280px) {
@@ -493,6 +557,7 @@ const S: Record<string, React.CSSProperties> = {
     transition: "transform .16s ease, border-color .16s ease, box-shadow .16s ease",
     cursor: "pointer",
   },
+  capCardActive: { borderColor: "rgba(56,189,248,.5)", boxShadow: "0 0 0 1px rgba(56,189,248,.18), 0 18px 40px rgba(8,145,178,.18)" },
   capIcon: { width: 34, height: 34, borderRadius: 12, display: "grid", placeItems: "center", color: "#67e8f9", background: "rgba(14,165,233,.13)" },
   capTitle: { fontSize: 13, fontWeight: 800 },
   capSub: { marginTop: 3, fontSize: 11, color: "#94a3b8" },
@@ -506,6 +571,7 @@ const S: Record<string, React.CSSProperties> = {
   inputRow: { height: 50, borderRadius: 16, background: "rgba(2,6,23,.78)", border: "1px solid rgba(148,163,184,.14)", display: "flex", alignItems: "center", gap: 10, padding: "0 10px 0 14px" },
   promptIcon: { color: "#38bdf8", fontSize: 24 },
   placeholder: { flex: 1, color: "#64748b", fontSize: 13 },
+  composerInput: { flex: 1, background: "transparent", border: 0, outline: "none", color: "#e2e8f0", fontSize: 13, fontFamily: "inherit", resize: "none", height: 22, lineHeight: "22px", padding: 0 },
   sendButton: { width: 38, height: 38, borderRadius: 13, border: 0, background: "linear-gradient(135deg, #2563eb, #06b6d4)", color: "white", fontWeight: 800 },
   actionRow: { display: "grid", gridTemplateColumns: "repeat(5, minmax(0, 1fr))", gap: 9, marginTop: 10 },
   actionChip: { textAlign: "left", padding: 10, borderRadius: 14, border: "1px solid rgba(148,163,184,.14)", background: "rgba(2,6,23,.46)", color: "#e2e8f0", display: "flex", flexDirection: "column", gap: 3, cursor: "pointer", transition: "border-color .16s ease, background .16s ease, transform .16s ease" },
