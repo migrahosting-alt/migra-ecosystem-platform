@@ -1106,9 +1106,37 @@ function SectionView({ section, activeCapability, onSelectCapability }: { sectio
       {richMap[section] && (
         <section style={S.sectionGrid}>
           <RichPanel title={richMap[section].title} rows={richMap[section].rows} />
+          {section === "Policy" && <RecentApprovals />}
         </section>
       )}
     </>
+  );
+}
+
+type ApprovalSummary = { id: string; toolName: string; risk: string; status: string; reason?: string; createdAt: string; executedAt?: string; detail?: string };
+
+function RecentApprovals() {
+  const [store, setStore] = useState<string>("");
+  const [rows, setRows] = useState<ApprovalSummary[] | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    fetch("/api/pilot/approvals?limit=10")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (active && d) { setStore(d.store); setRows(d.approvals ?? []); } })
+      .catch(() => { if (active) setRows([]); });
+    return () => { active = false; };
+  }, []);
+
+  const tone = (s: string) => (s === "executed" ? "Succeeded" : s === "blocked" || s === "cancelled" || s === "expired" ? "Failed" : undefined);
+
+  return (
+    <Panel title="Recent approvals">
+      {store && <Row left="Store" right={store === "postgres" ? "postgres (durable)" : "in-memory (resets on restart)"} />}
+      {rows === null && <div style={S.muted}>Loading…</div>}
+      {rows?.length === 0 && <div style={S.muted}>No approvals recorded yet.</div>}
+      {rows?.map((a) => <Row key={a.id} left={a.toolName} right={a.status} tone={tone(a.status)} />)}
+    </Panel>
   );
 }
 

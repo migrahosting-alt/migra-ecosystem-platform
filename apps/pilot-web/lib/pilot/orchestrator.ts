@@ -5,7 +5,8 @@
 import { chatOnce, type ChatMessage, type ToolCall } from "./gateway";
 import { KNOWN_TOOL_NAMES, runTool, toolSpecsForModel } from "./tools";
 import { classifyPilotAction } from "./policy";
-import { addAudit, id, saveApproval, saveMessage, saveRun, setRunConvo, store } from "./store";
+import { addAudit, id, saveMessage, saveRun, setRunConvo, store } from "./store";
+import { createApproval } from "./approval-store";
 import type { ApprovalRequest, Message, PilotEvent, Run, RunStep } from "./types";
 
 const now = () => new Date().toISOString();
@@ -127,11 +128,12 @@ export async function streamPilotRun(run: Run, convo: ChatMessage[], send: (e: P
 
   if (result.status === "paused") {
     setRunConvo(run.id, convo);
-    saveApproval(result.approval);
+    // Persist via the approval store: sanitizes args, stamps TTL/lifecycle fields.
+    const stored = await createApproval(result.approval);
     run.status = "needs_approval";
-    run.pendingApprovalId = result.approval.id;
+    run.pendingApprovalId = stored.id;
     saveRun(run);
-    send({ type: "approval.required", approval: result.approval });
+    send({ type: "approval.required", approval: stored });
     return;
   }
 

@@ -56,19 +56,27 @@ export interface Run {
   endedAt?: string;
 }
 
+// Lifecycle: pending → approved (claimed) → executed | blocked, or pending → cancelled | expired.
+export type ApprovalStatus = "pending" | "approved" | "cancelled" | "executed" | "expired" | "blocked";
+
 export interface ApprovalRequest {
   id: string;
   runId: string;
   stepId?: string;
   toolName: string;
-  args: Record<string, unknown>;
+  args: Record<string, unknown>; // SANITIZED — secret-looking keys are stripped before storage
+  argsDigest?: string;
   risk: string; // PilotRiskLevel (safe_write | requires_approval)
   reason?: string;
   summary?: string;
   expectedEffect?: string;
-  status: "pending" | "approved" | "denied";
+  status: ApprovalStatus;
   createdAt: string;
+  updatedAt?: string;
+  expiresAt?: string;
   decidedAt?: string;
+  executedAt?: string;
+  detail?: string; // sanitized status detail (e.g. truncated tool output / block reason)
 }
 
 export interface AuditEvent {
