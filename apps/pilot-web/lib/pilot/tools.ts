@@ -297,7 +297,10 @@ export const TOOLS: Record<string, ToolDef> = {
       // SDXL provider path (when enabled). Submits the approved request to the configured endpoint.
       if (imageProviderMode() === "sdxl") {
         const r = await submitImageJob(a);
-        return clip(`[provider:sdxl] ${r.status}: ${r.message}${r.result ? " " + JSON.stringify(r.result).slice(0, 300) : ""}`);
+        if (!r.ok) return clip(`[provider:sdxl] ${r.status}: ${r.message}`);
+        if (r.status === "queued") return clip(`[provider:sdxl] queued job ${r.jobId ?? "(no id)"}`);
+        const refs = r.images.map((im, i) => im.url ?? (im.base64 ? `image ${i + 1} (base64 ${im.mimeType ?? "image"}, ${im.base64.length} bytes)` : "image")).join(", ");
+        return clip(`[provider:sdxl] generated ${r.images.length} image(s): ${refs}`);
       }
       // Local Stable Diffusion path (default / provider disabled) — unchanged.
       const py = resolve(REPO_ROOT, ".pilot-sd/venv/bin/python");

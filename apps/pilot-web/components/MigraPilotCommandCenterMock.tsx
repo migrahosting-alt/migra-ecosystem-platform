@@ -703,7 +703,7 @@ type BatchCandidate = { path: string; bytes: number };
 type BatchRejected = { path: string; reason: string };
 type BatchPreview = { candidateCount: number; rejectedCount: number; candidates: BatchCandidate[]; rejected: BatchRejected[]; truncated: boolean };
 
-type ImageHealth = { provider: string; status: string; endpointConfigured: boolean; reachable?: boolean; detail: string };
+type ImageHealth = { provider: string; status: string; endpointConfigured: boolean; endpoint?: string; timeoutMs?: number; outputBaseConfigured?: boolean; reachable?: boolean; detail: string };
 
 function ImageSection() {
   const [health, setHealth] = useState<ImageHealth | null>(null);
@@ -743,6 +743,9 @@ function ImageSection() {
         <Row left="Provider" right={health?.provider ?? "…"} />
         <Row left="Status" right={health?.status ?? "…"} tone={statusTone} />
         <Row left="Endpoint configured" right={health ? (health.endpointConfigured ? "yes" : "no") : "…"} />
+        {health?.endpoint && <Row left="Endpoint" right={health.endpoint} />}
+        {health?.timeoutMs !== undefined && <Row left="Timeout" right={`${health.timeoutMs} ms`} />}
+        {health?.outputBaseConfigured !== undefined && <Row left="Output base URL" right={health.outputBaseConfigured ? "set" : "not set"} />}
         {health?.reachable !== undefined && <Row left="Reachable" right={health.reachable ? "yes" : "no"} tone={health.reachable ? "Succeeded" : "Failed"} />}
         {health && <div style={S.muted}>{health.detail}</div>}
       </Panel>

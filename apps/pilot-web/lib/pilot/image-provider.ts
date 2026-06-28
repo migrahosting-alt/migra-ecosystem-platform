@@ -91,9 +91,132 @@ export function imagePreview(a: Record<string, unknown>): { ok: true; normalized
   }
 }
 
-export async function imageHealth(): Promise<{ provider: string; status: ImageProviderStatus; endpointConfigured: boolean; reachable?: boolean; detail: string }> {
+// ---- Response compatibility (Phase 9.8) ------------------------------------
+// A stable internal image shape, independent of whatever the provider returns.
+export interface NormalizedImage {
+  url?: string;
+  base64?: string;
+  mimeType?: string;
+  seed?: number;
+  metadata?: Record<string, unknown>;
+}
+
+export type ImageJobStatus = "completed" | "queued" | "incompatible" | "error" | "rejected" | "disabled" | "unavailable";
+
+export interface ImageJobResult {
+  ok: boolean;
+  status: ImageJobStatus;
+  message: string;
+  images: NormalizedImage[];
+  jobId?: string;
+}
+
+export interface ImageHealth {
+  provider: string;
+  status: ImageProviderStatus;
+  endpointConfigured: boolean;
+  endpoint?: string; // sanitized origin+path only — never userinfo/query/key
+  timeoutMs: number;
+  outputBaseConfigured: boolean;
+  reachable?: boolean;
+  detail: string;
+}
+
+// Show only protocol+host+path; drop any userinfo, query string, or fragment that could carry a token.
+function sanitizeEndpoint(raw: string): string | undefined {
+  if (!raw) return undefined;
+  try {
+    const u = new URL(raw);
+    return `${u.protocol}//${u.host}${u.pathname}`;
+  } catch {
+    return undefined;
+  }
+}
+
+// Scrub anything secret-bearing from a free-text error before it reaches a result/log/UI:
+// the configured endpoint (which may embed userinfo/token), the API key, plus generic
+// userinfo and common secret query params in any URL the message might contain.
+function scrubSecrets(s: string): string {
+  let out = s;
+  if (ENDPOINT) out = out.split(ENDPOINT).join("<endpoint>");
+  if (API_KEY) out = out.split(API_KEY).join("<redacted>");
+  out = out.replace(/(https?:\/\/)[^@\s/]*@/gi, "$1<redacted>@").replace(/([?&](?:token|key|api[_-]?key|password|secret)=)[^&\s]+/gi, "$1<redacted>");
+  return out;
+}
+
+function withBase(url: string): string {
+  if (/^https?:\/\//i.test(url) || url.startsWith("data:")) return url;
+  if (OUTPUT_BASE) return `${OUTPUT_BASE.replace(/\/$/, "")}/${url.replace(/^\//, "")}`;
+  return url;
+}
+
+function coerceImage(item: unknown): NormalizedImage | null {
+  if (item == null) return null;
+  if (typeof item === "string") {
+    const s = item.trim();
+    if (!s) return null;
+    if (/^https?:\/\//i.test(s)) return { url: withBase(s) };
+    if (s.startsWith("data:")) {
+      const m = /^data:([^;,]+)?[^,]*,(.*)$/s.exec(s);
+      return m ? { base64: m[2], mimeType: m[1] || undefined } : { base64: s };
+    }
+    if (/^[\/.\w-]+\.(png|jpe?g|webp|gif)$/i.test(s)) return { url: withBase(s) };
+    return { base64: s };
+  }
+  if (typeof item === "object") {
+    const o = item as Record<string, unknown>;
+    const urlRaw = typeof o.url === "string" ? o.url : typeof o.image === "string" && /^https?:\/\//i.test(o.image) ? (o.image as string) : undefined;
+    const b64 =
+      typeof o.base64 === "string" ? o.base64 :
+      typeof o.b64_json === "string" ? o.b64_json :
+      typeof o.b64 === "string" ? o.b64 :
+      typeof o.image === "string" && !/^https?:\/\//i.test(o.image) ? (o.image as string) : undefined;
+    const img: NormalizedImage = {
+      url: urlRaw ? withBase(urlRaw) : undefined,
+      base64: b64,
+      mimeType: typeof o.mimeType === "string" ? o.mimeType : typeof o.content_type === "string" ? (o.content_type as string) : undefined,
+      seed: typeof o.seed === "number" ? o.seed : undefined,
+      metadata: o.metadata && typeof o.metadata === "object" ? (o.metadata as Record<string, unknown>) : undefined,
+    };
+    return img.url || img.base64 ? img : null;
+  }
+  return null;
+}
+
+// Tolerate common SDXL / diffusers response shapes. NEVER fabricates an image.
+export function normalizeImages(body: unknown): NormalizedImage[] {
+  if (!body || typeof body !== "object") return [];
+  const b = body as Record<string, unknown>;
+  const container =
+    Array.isArray(b.images) ? b.images :
+    Array.isArray(b.output) ? b.output :
+    Array.isArray(b.outputs) ? b.outputs :
+    Array.isArray(b.artifacts) ? b.artifacts :
+    Array.isArray(b.data) ? b.data :
+    null;
+  const items: unknown[] = container ?? (b.image != null ? [b.image] : b.url != null ? [b.url] : []);
+  return items.map(coerceImage).filter((x): x is NormalizedImage => x != null);
+}
+
+function extractJobId(body: unknown): string | undefined {
+  if (!body || typeof body !== "object") return undefined;
+  const b = body as Record<string, unknown>;
+  for (const k of ["id", "job_id", "jobId", "task_id", "taskId", "request_id"]) {
+    if (typeof b[k] === "string") return b[k] as string;
+  }
+  return undefined;
+}
+
+export async function imageHealth(): Promise<ImageHealth> {
   const status = imageProviderStatus();
-  const base = { provider: imageProviderMode(), status, endpointConfigured: !!ENDPOINT };
+  const base = {
+    provider: imageProviderMode(),
+    status,
+    endpointConfigured: !!ENDPOINT,
+    endpoint: sanitizeEndpoint(ENDPOINT),
+    timeoutMs: TIMEOUT_MS,
+    outputBaseConfigured: !!OUTPUT_BASE,
+  };
   if (status === "disabled") return { ...base, detail: "image provider disabled (set PILOT_IMAGE_PROVIDER=sdxl + PILOT_IMAGE_ENDPOINT to enable)" };
   if (status === "unavailable") return { ...base, detail: "sdxl selected but PILOT_IMAGE_ENDPOINT is not set" };
   let reachable: boolean | undefined;
@@ -105,22 +228,23 @@ export async function imageHealth(): Promise<{ provider: string; status: ImagePr
   } catch {
     reachable = false;
   }
-  return { ...base, reachable, detail: reachable ? "provider endpoint configured and reachable" : "provider endpoint configured but not reachable" };
+  return { ...base, reachable, detail: reachable ? "endpoint reachable — POST an approved image.generate to verify response compatibility" : "endpoint configured but not reachable" };
 }
 
-// Submit a generation job. Returns a safe result; never throws on unavailable, never exposes keys.
-export async function submitImageJob(a: Record<string, unknown>): Promise<{ ok: boolean; status: string; message: string; result?: unknown }> {
+// Submit a generation job. Returns a safe, normalized result; never throws on
+// unavailable, never exposes keys, never fabricates an image.
+export async function submitImageJob(a: Record<string, unknown>): Promise<ImageJobResult> {
   const status = imageProviderStatus();
   if (status !== "configured") {
-    return { ok: false, status, message: status === "disabled" ? "image provider is disabled" : "image provider endpoint not configured (PILOT_IMAGE_ENDPOINT unset)" };
+    return { ok: false, status: status === "disabled" ? "disabled" : "unavailable", images: [], message: status === "disabled" ? "image provider is disabled" : "image provider endpoint not configured (PILOT_IMAGE_ENDPOINT unset)" };
   }
   let req: ImageRequest;
   try {
     req = normalizeImageRequest(a);
   } catch (e) {
-    return { ok: false, status: "rejected", message: e instanceof Error ? e.message : "invalid request" };
+    return { ok: false, status: "rejected", images: [], message: e instanceof Error ? e.message : "invalid request" };
   }
-  const headers: Record<string, string> = { "content-type": "application/json" };
+  const headers: Record<string, string> = { "content-type": "application/json", accept: "application/json" };
   if (API_KEY) headers.authorization = `Bearer ${API_KEY}`;
   try {
     const res = await fetch(ENDPOINT, { method: "POST", headers, body: JSON.stringify(req), signal: AbortSignal.timeout(TIMEOUT_MS) });
@@ -129,11 +253,20 @@ export async function submitImageJob(a: Record<string, unknown>): Promise<{ ok: 
     try {
       body = JSON.parse(text);
     } catch {
-      body = text.slice(0, 500);
+      body = text;
     }
-    if (!res.ok) return { ok: false, status: "error", message: `provider returned HTTP ${res.status}`, result: body };
-    return { ok: true, status: "submitted", message: `image job submitted to provider${OUTPUT_BASE ? ` (outputs under ${OUTPUT_BASE})` : ""}`, result: body };
+    if (!res.ok) {
+      const detail = typeof body === "string" ? ` ${scrubSecrets(body.slice(0, 200))}` : "";
+      return { ok: false, status: "error", images: [], message: `provider returned HTTP ${res.status}${detail}` };
+    }
+    const images = normalizeImages(body);
+    if (images.length > 0) return { ok: true, status: "completed", images, message: `provider returned ${images.length} image(s)` };
+    const jobId = extractJobId(body);
+    if (jobId) return { ok: true, status: "queued", images: [], jobId, message: `provider queued job ${jobId}` };
+    return { ok: false, status: "incompatible", images: [], message: "provider responded 200 but no recognizable image fields (images / image / output / url / artifacts)" };
   } catch (e) {
-    return { ok: false, status: "error", message: `provider request failed: ${e instanceof Error ? e.message : "unknown"}` };
+    const timedOut = e instanceof Error && e.name === "TimeoutError";
+    const safe = scrubSecrets(e instanceof Error ? e.message : "unknown");
+    return { ok: false, status: "error", images: [], message: timedOut ? `provider request timed out after ${TIMEOUT_MS}ms` : `provider request failed: ${safe}` };
   }
 }
