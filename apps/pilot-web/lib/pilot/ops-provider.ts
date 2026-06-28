@@ -116,6 +116,148 @@ export async function knownTopology(): Promise<{ available: boolean; source?: st
   return { available: true, source: "migrapilot/ecosystem/01-server-topology.md", content: content.slice(0, 6000), detail: "topology summarized from grounded ecosystem docs" };
 }
 
+// ---- Dry-run ops action PLANS (Phase 10.5) — generate-only, executes nothing ----
+export interface OpsPlan {
+  actionType: string;
+  target: string;
+  dryRun: true;
+  riskLevel: "low" | "medium" | "high";
+  summary: string;
+  prerequisites: string[];
+  proposedSteps: string[];
+  hazards: string[];
+  rollbackConsiderations: string[];
+  requiredHumanConfirmation: string[];
+  citations: string[];
+  generatedAt: string;
+}
+
+type PlanTemplate = {
+  risk: "low" | "medium" | "high";
+  keyword: string;
+  summary: (t: string) => string;
+  prerequisites: string[];
+  steps: (t: string) => string[];
+  rollback: string[];
+  confirm: string[];
+};
+
+// Planning scaffolding ONLY. Concrete facts (hazards, citations) are injected from the grounded
+// ecosystem docs at runtime — these templates assert no infrastructure specifics themselves.
+const PLAN_TEMPLATES: Record<string, PlanTemplate> = {
+  restart: {
+    risk: "high", keyword: "restart",
+    summary: (t) => `Controlled restart of "${t || "(unspecified service/host)"}"`,
+    prerequisites: [
+      "Confirm the exact host/service and that it is internal (never a customer tenant).",
+      "Run read-only health checks (ops.health / ops.check_url) to capture current state.",
+      "Confirm no active in-flight work (e.g. live calls for voip services) and a maintenance window.",
+    ],
+    steps: (t) => [
+      "1. Capture current health and process state (read-only).",
+      `2. Review the grounded hazards for ${t || "this service"} (see hazards + citations).`,
+      "3. Use ONLY the service's documented safe restart procedure (never an unsafe raw restart).",
+      "4. Re-verify health/transports after restart.",
+      "5. If unhealthy, execute the documented rollback.",
+    ],
+    rollback: ["Keep prior known-good config/backups available before restarting.", "Have the documented recovery/start command ready for an operator to run."],
+    confirm: ["Operator must confirm the exact host, the safe procedure, and an idle state before any real execution.", "Real execution is NOT performed in this phase (dry-run only)."],
+  },
+  deploy: {
+    risk: "high", keyword: "deploy",
+    summary: (t) => `Deployment plan for "${t || "(unspecified app/service)"}"`,
+    prerequisites: [
+      "Identify the CANONICAL source for this service (frequently on-host or a non-obvious branch — verify, do not assume local/origin).",
+      "Confirm the working tree is scoped/clean for this change (no unrelated files).",
+      "Build cleanly and verify build integrity (matching BUILD_ID / asset hashes) before shipping.",
+    ],
+    steps: (t) => [
+      "1. Confirm the deploy model + canonical source for this target (see citations).",
+      "2. Build in isolation; capture the build identity.",
+      `3. Back up the current on-host state for ${t || "the target"}.`,
+      "4. Ship only the intended artifact; verify deployed bytes == built bytes.",
+      "5. Health-check the live service; roll back from backup if unhealthy.",
+    ],
+    rollback: ["Snapshot/back up the current release before deploy.", "Keep the previous release available for an instant symlink/restore by an operator."],
+    confirm: ["Operator must confirm canonical source, a clean scoped tree, and build integrity before any real deploy.", "Real execution is NOT performed in this phase (dry-run only)."],
+  },
+  dns: {
+    risk: "high", keyword: "dns",
+    summary: (t) => `DNS change plan for "${t || "(unspecified domain/record)"}"`,
+    prerequisites: [
+      "Confirm the exact zone/record and current values (read-only) before proposing a change.",
+      "Confirm ownership and that the change will not break existing routing/edge/NAT behavior.",
+      "Validate from an off-net resolver (no NAT hairpin internally).",
+    ],
+    steps: (t) => [
+      `1. Read current DNS for ${t || "the target"} (read-only).`,
+      "2. Document the exact proposed record delta (type/name/value/TTL).",
+      "3. Stage the change with a low TTL where appropriate.",
+      "4. Verify resolution from an external resolver.",
+      "5. Restore the prior record if anything regresses.",
+    ],
+    rollback: ["Record the exact prior values before any change.", "Keep TTLs low enough to revert quickly."],
+    confirm: ["Operator must confirm zone, exact delta, and external verification plan before any real DNS edit.", "Real execution is NOT performed in this phase (dry-run only)."],
+  },
+  billing: {
+    risk: "high", keyword: "billing",
+    summary: (t) => `Billing/invoice change plan for "${t || "(unspecified account/invoice)"}"`,
+    prerequisites: [
+      "Confirm the canonical billing source for this account (MigraPay/auth-api is canonical; panel proxies it).",
+      "Confirm exact amounts/customer; never guess money values.",
+      "Confirm no live customer communication is triggered by the change.",
+    ],
+    steps: (t) => [
+      `1. Read the current billing/invoice state for ${t || "the account"} (read-only).`,
+      "2. Document the exact proposed change and its customer impact.",
+      "3. Route the change through the canonical billing system (not a side store).",
+      "4. Verify the resulting state and that no unintended customer comms fired.",
+      "5. Reverse/credit per policy if incorrect.",
+    ],
+    rollback: ["Capture the prior invoice/billing state before any change.", "Know the documented credit/reversal path for an operator."],
+    confirm: ["Operator must confirm canonical source, exact amounts, and customer-impact before any real billing change.", "Real execution is NOT performed in this phase (dry-run only)."],
+  },
+};
+
+export async function buildOpsPlan(actionType: string, target: string): Promise<OpsPlan> {
+  const at = String(actionType || "").toLowerCase().trim();
+  const tgt = String(target || "").trim();
+  const tpl = PLAN_TEMPLATES[at];
+  // Pull grounded hazards for the target + the action keyword from the ecosystem docs.
+  const hz1 = await hazardLookup(tgt);
+  const hz2 = await hazardLookup(tpl ? tpl.keyword : at);
+  const seen = new Set<string>();
+  const merged = [...hz1.matches, ...hz2.matches].filter((m) => {
+    const k = m.doc + "|" + m.heading;
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
+  const hazards = merged.map((m) => `[${m.doc}] ${m.heading}`);
+  const citations = [...new Set(merged.map((m) => m.doc))];
+
+  if (!tpl) {
+    return {
+      actionType: at || "(unspecified)", target: tgt || "(unspecified)", dryRun: true, riskLevel: "high",
+      summary: `DRY RUN / PLAN ONLY — unsupported action type "${at}". Supported: restart, deploy, dns, billing.`,
+      prerequisites: [], proposedSteps: [], hazards: hazards.length ? hazards : ["(no grounded hazard matched)"],
+      rollbackConsiderations: [], requiredHumanConfirmation: ["Real execution is NOT performed in this phase (dry-run only)."],
+      citations: citations.length ? citations : ["(none)"], generatedAt: new Date().toISOString(),
+    };
+  }
+  return {
+    actionType: at, target: tgt || "(unspecified)", dryRun: true, riskLevel: tpl.risk,
+    summary: `DRY RUN / PLAN ONLY — ${tpl.summary(tgt)}. No external change is performed.`,
+    prerequisites: tpl.prerequisites,
+    proposedSteps: tpl.steps(tgt),
+    hazards: hazards.length ? hazards : ["(no grounded hazard matched — verify manually before acting)"],
+    rollbackConsiderations: tpl.rollback,
+    requiredHumanConfirmation: tpl.confirm,
+    citations: citations.length ? citations : ["(target not found in ecosystem docs — verify before acting)"],
+    generatedAt: new Date().toISOString(),
+  };
+}
+
 export interface HazardMatch {
   doc: string;
   heading: string;

@@ -725,6 +725,61 @@ function OpsSection() {
   const [busy, setBusy] = useState(false);
   const [q, setQ] = useState("");
   const [matches, setMatches] = useState<HazardMatch[] | null>(null);
+  const [planType, setPlanType] = useState("restart");
+  const [planTarget, setPlanTarget] = useState("");
+  const [planBusy, setPlanBusy] = useState(false);
+  const [planStatus, setPlanStatus] = useState("");
+  const [planPending, setPlanPending] = useState<{ runId: string; approvalId: string; tool: string; risk: string } | null>(null);
+  const [planResult, setPlanResult] = useState<string | null>(null);
+
+  const streamNdjson = async (url: string, body: unknown, onEvent: (ev: { type: string; approval?: { runId: string; id: string; toolName: string; risk: string }; delta?: string; message?: { content?: string } }) => void) => {
+    const res = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+    if (!res.ok || !res.body) throw new Error(`request failed (${res.status})`);
+    const reader = res.body.getReader();
+    const dec = new TextDecoder();
+    let buf = "";
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      let i;
+      while ((i = buf.indexOf("\n")) >= 0) {
+        const line = buf.slice(0, i).trim();
+        buf = buf.slice(i + 1);
+        if (line) { try { onEvent(JSON.parse(line)); } catch { /* ignore partial */ } }
+      }
+    }
+  };
+
+  const requestPlan = async () => {
+    if (!planTarget.trim() || planBusy) return;
+    setPlanBusy(true); setPlanResult(null); setPlanPending(null); setPlanStatus("requesting approval…");
+    try {
+      let pending: { runId: string; approvalId: string; tool: string; risk: string } | null = null;
+      await streamNdjson("/api/pilot/chat", { message: `Call ops.${planType}.plan with target "${planTarget.replace(/"/g, "")}".` }, (ev) => {
+        if (ev.type === "approval.required" && ev.approval) pending = { runId: ev.approval.runId, approvalId: ev.approval.id, tool: ev.approval.toolName, risk: ev.approval.risk };
+      });
+      if (pending) { setPlanPending(pending); setPlanStatus("⏸ dry-run plan needs approval"); }
+      else setPlanStatus("no approval was requested — try rephrasing");
+    } catch (e) { setPlanStatus("error: " + (e as Error).message); }
+    finally { setPlanBusy(false); }
+  };
+
+  const decidePlan = async (decision: "approve" | "deny") => {
+    if (!planPending || planBusy) return;
+    setPlanBusy(true);
+    const p = planPending; setPlanPending(null);
+    try {
+      let msg = ""; let tokens = "";
+      await streamNdjson(`/api/pilot/runs/${p.runId}/approve`, { approvalId: p.approvalId, decision }, (ev) => {
+        if (ev.type === "token") tokens += ev.delta ?? "";
+        if (ev.type === "message") msg = ev.message?.content ?? msg;
+      });
+      if (decision === "deny") setPlanStatus("cancelled — no plan generated");
+      else { setPlanResult(msg || tokens || "(plan generated — see chat)"); setPlanStatus("✓ dry-run plan generated (nothing executed)"); }
+    } catch (e) { setPlanStatus("error: " + (e as Error).message); }
+    finally { setPlanBusy(false); }
+  };
 
   const loadHealth = () => {
     setBusy(true);
@@ -771,6 +826,28 @@ function OpsSection() {
           </div>
         ))}
         <div style={S.muted}>Grounded from Phase 10.2 ecosystem docs. Read-only — no restart/deploy/SSH.</div>
+      </Panel>
+      <Panel title="Dry-run ops plans">
+        <div style={S.blockedBadge}>DRY RUN — no real ops mutation is executed in Phase 10.5</div>
+        <div style={S.inputRow}>
+          <select value={planType} onChange={(e) => setPlanType(e.target.value)} style={{ ...S.composerInput, flex: "0 0 110px", cursor: "pointer" }}>
+            <option value="restart">restart</option>
+            <option value="deploy">deploy</option>
+            <option value="dns">dns</option>
+            <option value="billing">billing</option>
+          </select>
+          <input value={planTarget} onChange={(e) => setPlanTarget(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") requestPlan(); }} placeholder="target (e.g. voip-core, panel-api)" style={S.composerInput} />
+          <button onClick={requestPlan} disabled={planBusy} style={{ ...S.sendButton, width: "auto", padding: "0 12px", fontSize: 12, opacity: planBusy ? 0.6 : 1, cursor: planBusy ? "default" : "pointer" }}>{planBusy ? "…" : "Generate plan"}</button>
+        </div>
+        {planStatus && <div style={S.muted}>{planStatus}</div>}
+        {planPending && (
+          <div style={S.approvalActions}>
+            <button onClick={() => decidePlan("approve")} disabled={planBusy} style={S.approveBtn}>Approve (plan only)</button>
+            <button onClick={() => decidePlan("deny")} disabled={planBusy} style={S.denyBtn}>Cancel</button>
+          </div>
+        )}
+        {planResult && <pre style={S.approvalArgs}>{planResult}</pre>}
+        <div style={S.muted}>Plan generation itself requires approval. Real mutations (ops.restart, ops.deploy, ops.dns.update, ops.invoice.update, ops.ssh…) stay blocked.</div>
       </Panel>
     </section>
   );

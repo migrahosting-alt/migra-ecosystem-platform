@@ -11,7 +11,7 @@ import { existsSync } from "node:fs";
 import { visionAnalyze } from "./gateway";
 import { formatHits, ingestBatch, searchKnowledge } from "./knowledge";
 import { imageHealth, imagePreview, imageProviderMode, submitImageJob } from "./image-provider";
-import { checkUrl, hazardLookup, knownTopology, opsHealth } from "./ops-provider";
+import { buildOpsPlan, checkUrl, hazardLookup, knownTopology, opsHealth } from "./ops-provider";
 
 const execFileP = promisify(execFile);
 
@@ -474,6 +474,34 @@ export const TOOLS: Record<string, ToolDef> = {
       if (!r.matches.length) return `${r.detail} for "${r.query}"`;
       return clip(`${r.detail} for "${r.query}":\n` + r.matches.map((m) => `• [${m.doc}] ${m.heading}: ${m.snippet}`).join("\n"));
     },
+  },
+  "ops.restart.plan": {
+    name: "ops.restart.plan",
+    description: "DRY RUN / PLAN ONLY (requires approval). Generate a structured, grounded restart PLAN for a target service/host. Restarts NOTHING, runs no commands. Output is a plan for operator review.",
+    risk: "high",
+    parameters: { type: "object", properties: { target: { type: "string" } }, required: ["target"] },
+    run: async (a) => clip(JSON.stringify(await buildOpsPlan("restart", String(a.target ?? "")), null, 2)),
+  },
+  "ops.deploy.plan": {
+    name: "ops.deploy.plan",
+    description: "DRY RUN / PLAN ONLY (requires approval). Generate a structured, grounded deployment PLAN for a target app/service. Deploys NOTHING, runs no commands. Output is a plan for operator review.",
+    risk: "high",
+    parameters: { type: "object", properties: { target: { type: "string" } }, required: ["target"] },
+    run: async (a) => clip(JSON.stringify(await buildOpsPlan("deploy", String(a.target ?? "")), null, 2)),
+  },
+  "ops.dns.plan": {
+    name: "ops.dns.plan",
+    description: "DRY RUN / PLAN ONLY (requires approval). Generate a structured, grounded DNS-change PLAN for a target domain/record. Edits NO DNS, runs no commands. Output is a plan for operator review.",
+    risk: "high",
+    parameters: { type: "object", properties: { target: { type: "string" } }, required: ["target"] },
+    run: async (a) => clip(JSON.stringify(await buildOpsPlan("dns", String(a.target ?? "")), null, 2)),
+  },
+  "ops.billing.plan": {
+    name: "ops.billing.plan",
+    description: "DRY RUN / PLAN ONLY (requires approval). Generate a structured, grounded billing/invoice-change PLAN for a target account/invoice. Changes NO billing, runs no commands. Output is a plan for operator review.",
+    risk: "high",
+    parameters: { type: "object", properties: { target: { type: "string" } }, required: ["target"] },
+    run: async (a) => clip(JSON.stringify(await buildOpsPlan("billing", String(a.target ?? "")), null, 2)),
   },
   "repo.command": {
     name: "repo.command",
