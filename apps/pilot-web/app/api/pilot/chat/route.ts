@@ -89,8 +89,22 @@ export async function POST(req: Request) {
         setStep(1, "running"); setStep(1, "done");
         setStep(2, "running");
         // Auto-retrieval (RAG): inject confident knowledge matches as a system message before the loop.
-        const memoryContext = await retrieveContext(message).catch(() => null);
-        if (memoryContext) convo.splice(1, 0, { role: "system", content: memoryContext });
+        const memory = await retrieveContext(message).catch(() => null);
+        if (memory && memory.sources.length > 0) {
+          convo.splice(1, 0, { role: "system", content: memory.text });
+          run.recalled = { count: memory.sources.length, sources: memory.sources };
+          const memStep = {
+            id: id("step"),
+            index: run.steps.length,
+            title: `🧠 Recalled ${memory.sources.length} source(s) from memory`,
+            status: "done" as const,
+            startedAt: now(),
+            endedAt: now(),
+          };
+          run.steps.push(memStep);
+          saveRun(run);
+          send({ type: "step", step: memStep });
+        }
         await streamPilotRun(run, convo, send);
       } catch (err) {
         run.status = "failed";

@@ -79,7 +79,7 @@ type RichRow = { title: string; sub: string; status: string; tone: string };
 // Phase 1b — local shapes mirroring /api/pilot (runtime fetch only; intentionally
 // NOT imported from lib/pilot so the committed mock builds on a fresh checkout).
 type PilotStep = { id: string; index: number; title: string; status: string; startedAt?: string; endedAt?: string };
-type PilotRun = { id: string; conversationId: string; agentName: string; mode: string; status: string; userMessage: string; summary?: string; model?: string; tier?: string; steps: PilotStep[]; createdAt: string; endedAt?: string };
+type PilotRun = { id: string; conversationId: string; agentName: string; mode: string; status: string; userMessage: string; summary?: string; model?: string; tier?: string; recalled?: { count: number; sources: { title: string; path: string }[] }; steps: PilotStep[]; createdAt: string; endedAt?: string };
 type ChatMsg = { id: string; role: string; content: string };
 type ApprovalReq = { id: string; runId: string; toolName: string; args: Record<string, unknown>; risk: string; status: string };
 
@@ -467,6 +467,9 @@ export default function MigraPilotCommandCenterMock() {
                     )}
                   </div>
                 ))}
+                {liveRun?.recalled && liveRun.recalled.count > 0 && (
+                  <div style={S.memoryBadge} title={liveRun.recalled.sources.map((s) => s.path).join("\n")}>🧠 Memory: {liveRun.recalled.count} source{liveRun.recalled.count === 1 ? "" : "s"}</div>
+                )}
                 {sending && !pendingApproval && !messages.some((m) => m.id === "__streaming__") && (
                   <div style={S.bubbleAssistantWrap}>
                     <div style={{ ...S.bubble, ...S.bubbleAssistant }}>{liveRun ? `${liveRun.agentName} · ${liveRun.model ?? "model"} thinking…` : "Thinking…"}</div>
@@ -696,19 +699,23 @@ function SourcesSection() {
   const [q, setQ] = useState("");
   const [hits, setHits] = useState<SearchHitRow[] | null>(null);
   const [searching, setSearching] = useState(false);
+  const [expanded, setExpanded] = useState<number | null>(null);
+  const [ingestPath, setIngestPath] = useState("");
+  const [ingesting, setIngesting] = useState(false);
+  const [ingestMsg, setIngestMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
-  useEffect(() => {
-    let active = true;
+  const load = () => {
     fetch("/api/pilot/sources")
       .then((r) => (r.ok ? r.json() : null))
-      .then((d) => { if (active && d) setStats(d); })
+      .then((d) => { if (d) setStats(d); })
       .catch(() => {});
-    return () => { active = false; };
-  }, []);
+  };
+  useEffect(load, []);
 
   const runSearch = async () => {
     if (!q.trim() || searching) return;
     setSearching(true);
+    setExpanded(null);
     try {
       const r = await fetch("/api/pilot/sources/search", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ query: q, k: 5 }) });
       const d = await r.json();
@@ -720,12 +727,43 @@ function SourcesSection() {
     }
   };
 
+  const ingest = async () => {
+    const path = ingestPath.trim();
+    if (!path || ingesting) return;
+    setIngesting(true);
+    setIngestMsg(null);
+    try {
+      const r = await fetch("/api/pilot/sources/ingest", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ path }) });
+      const d = await r.json();
+      if (r.ok && d.ok) {
+        setIngestMsg({ ok: true, text: `✓ Ingested ${d.source.title} (${d.source.chunkCount} chunks)` });
+        setIngestPath("");
+        load();
+      } else {
+        setIngestMsg({ ok: false, text: `✗ ${d.error ?? "ingest failed"}` });
+      }
+    } catch (err) {
+      setIngestMsg({ ok: false, text: `✗ ${(err as Error).message}` });
+    } finally {
+      setIngesting(false);
+    }
+  };
+
   return (
     <section style={S.sectionGrid}>
       <Panel title="Knowledge Store">
         <Row left="Sources" right={String(stats?.sourceCount ?? 0)} />
         <Row left="Chunks" right={String(stats?.chunkCount ?? 0)} />
         <Row left="Last ingest" right={stats?.lastIngest ? pilotTimeAgo(stats.lastIngest) : "—"} />
+      </Panel>
+
+      <Panel title="Add source">
+        <div style={S.inputRow}>
+          <span style={S.promptIcon}>+</span>
+          <input value={ingestPath} onChange={(e) => setIngestPath(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") ingest(); }} placeholder="relative path, e.g. lib/pilot/agent.ts" style={S.composerInput} />
+          <button onClick={ingest} disabled={ingesting} style={{ ...S.sendButton, width: "auto", padding: "0 12px", fontSize: 12, opacity: ingesting ? 0.6 : 1, cursor: ingesting ? "default" : "pointer" }}>{ingesting ? "…" : "Ingest"}</button>
+        </div>
+        {ingestMsg && <div style={{ ...S.muted, color: ingestMsg.ok ? "#86efac" : "#fca5a5" }}>{ingestMsg.text}</div>}
       </Panel>
 
       <Panel title="Search knowledge">
@@ -736,9 +774,9 @@ function SourcesSection() {
         </div>
         {hits && hits.length === 0 && <div style={S.muted}>No matches.</div>}
         {hits && hits.map((h, i) => (
-          <div key={i} style={{ marginTop: 8 }}>
-            <Row left={h.title} right={`score ${h.score.toFixed(2)}`} tone="Running" />
-            <div style={S.muted}>{h.snippet}</div>
+          <div key={i} style={{ marginTop: 8, cursor: "pointer" }} onClick={() => setExpanded(expanded === i ? null : i)}>
+            <Row left={`${expanded === i ? "▾" : "▸"} ${h.title}`} right={`score ${h.score.toFixed(2)}`} tone="Running" />
+            <div style={expanded === i ? S.muted : { ...S.muted, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{expanded === i ? `${h.path} — ${h.snippet}` : h.snippet}</div>
           </div>
         ))}
       </Panel>
@@ -747,7 +785,7 @@ function SourcesSection() {
         {stats && stats.sources.length > 0 ? (
           stats.sources.map((s) => <Row key={s.id} left={s.path} right={`${s.chunkCount} chunks`} />)
         ) : (
-          <div style={S.muted}>No sources yet. Ingest a file via POST /api/pilot/sources/ingest.</div>
+          <div style={S.muted}>No sources yet — add one above.</div>
         )}
       </Panel>
     </section>
@@ -1115,6 +1153,7 @@ const S: Record<string, React.CSSProperties> = {
   bubble: { maxWidth: "82%", padding: "10px 12px", borderRadius: 14, fontSize: 13, lineHeight: 1.5, whiteSpace: "pre-wrap" },
   bubbleUser: { background: "linear-gradient(135deg, rgba(37,99,235,.30), rgba(8,145,178,.18))", border: "1px solid rgba(59,130,246,.34)", color: "#eaf2ff" },
   bubbleAssistant: { background: "rgba(15,23,42,.7)", border: "1px solid rgba(148,163,184,.16)", color: "#cbd5e1" },
+  memoryBadge: { alignSelf: "flex-start", display: "inline-flex", alignItems: "center", gap: 6, padding: "4px 10px", borderRadius: 999, fontSize: 11, fontWeight: 800, color: "#d8b4fe", background: "rgba(126,34,206,.16)", border: "1px solid rgba(168,85,247,.34)" },
   approvalCard: { padding: 14, borderRadius: 16, background: "linear-gradient(135deg, rgba(217,119,6,.14), rgba(2,6,23,.5))", border: "1px solid rgba(245,158,11,.4)", display: "flex", flexDirection: "column", gap: 8 },
   approvalTitle: { fontSize: 13, fontWeight: 800, color: "#fde68a" },
   approvalText: { fontSize: 13, color: "#e2e8f0" },

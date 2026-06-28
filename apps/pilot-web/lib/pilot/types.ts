@@ -50,6 +50,7 @@ export interface Run {
   model?: string;
   tier?: string;
   pendingApprovalId?: string;
+  recalled?: { count: number; sources: { title: string; path: string }[] };
   steps: RunStep[];
   createdAt: string;
   endedAt?: string;

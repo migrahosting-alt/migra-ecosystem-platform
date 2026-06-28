@@ -175,8 +175,8 @@ export async function searchKnowledge(query: string, k = 5): Promise<SearchHit[]
   return scored.slice(0, Math.max(1, Math.min(k, 20)));
 }
 
-// Auto-retrieval: bounded context string for injection, or null when nothing is confident enough.
-export async function retrieveContext(query: string): Promise<string | null> {
+// Auto-retrieval: bounded context + the sources actually injected, or null when nothing is confident enough.
+export async function retrieveContext(query: string): Promise<{ text: string; sources: { title: string; path: string }[] } | null> {
   if (kb.loaded && kb.sources.length === 0) return null;
   await ensureLoaded();
   if (kb.sources.length === 0) return null;
@@ -185,12 +185,18 @@ export async function retrieveContext(query: string): Promise<string | null> {
   if (hits.length === 0) return null;
 
   let context = "Relevant context from the user's knowledge sources (cite the source path when you use it):\n";
+  const seen = new Set<string>();
+  const sources: { title: string; path: string }[] = [];
   for (const h of hits) {
     const line = `\n[${h.title} — ${h.path}] ${h.snippet}\n`;
     if (context.length + line.length > CONTEXT_CAP) break;
     context += line;
+    if (!seen.has(h.path)) {
+      seen.add(h.path);
+      sources.push({ title: h.title, path: h.path });
+    }
   }
-  return context;
+  return { text: context, sources };
 }
 
 export function formatHits(hits: SearchHit[]): string {
