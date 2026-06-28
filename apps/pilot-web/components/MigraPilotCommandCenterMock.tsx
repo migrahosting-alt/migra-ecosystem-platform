@@ -17,7 +17,7 @@ const navGroups = [
   },
   {
     title: "Governance",
-    items: ["Policy", "Sources", "Models"],
+    items: ["Policy", "Sources", "Models", "Image"],
   },
   {
     title: "Admin",
@@ -121,6 +121,7 @@ const sectionSubtitles: Record<string, string> = {
   "Audit Trail": "Immutable record of every action taken in the platform.",
   Policy: "Guardrails enforced before any execution runs.",
   Sources: "Connected knowledge the assistant uses for grounded answers.",
+  Image: "Image generation provider — approval-gated, disabled until configured.",
   Models: "Model routing and roles for safe, cost-aware execution.",
   Admin: "Workspace administration and access controls.",
 };
@@ -702,6 +703,63 @@ type BatchCandidate = { path: string; bytes: number };
 type BatchRejected = { path: string; reason: string };
 type BatchPreview = { candidateCount: number; rejectedCount: number; candidates: BatchCandidate[]; rejected: BatchRejected[]; truncated: boolean };
 
+type ImageHealth = { provider: string; status: string; endpointConfigured: boolean; reachable?: boolean; detail: string };
+
+function ImageSection() {
+  const [health, setHealth] = useState<ImageHealth | null>(null);
+  const [prompt, setPrompt] = useState("");
+  const [preview, setPreview] = useState<{ ok: boolean; text: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    fetch("/api/pilot/image/health")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (active && d) setHealth(d); })
+      .catch(() => {});
+    return () => { active = false; };
+  }, []);
+
+  const runPreview = async () => {
+    if (!prompt.trim() || busy) return;
+    setBusy(true);
+    setPreview(null);
+    try {
+      const r = await fetch("/api/pilot/image/preview", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ prompt }) });
+      const d = await r.json();
+      setPreview(d.ok ? { ok: true, text: `${d.summary}` } : { ok: false, text: d.error ?? "invalid" });
+    } catch (err) {
+      setPreview({ ok: false, text: (err as Error).message });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const statusTone = health?.status === "configured" ? "Succeeded" : health?.status === "unavailable" ? "Failed" : undefined;
+
+  return (
+    <section style={S.sectionGrid}>
+      <Panel title="Image provider">
+        <Row left="Provider" right={health?.provider ?? "…"} />
+        <Row left="Status" right={health?.status ?? "…"} tone={statusTone} />
+        <Row left="Endpoint configured" right={health ? (health.endpointConfigured ? "yes" : "no") : "…"} />
+        {health?.reachable !== undefined && <Row left="Reachable" right={health.reachable ? "yes" : "no"} tone={health.reachable ? "Succeeded" : "Failed"} />}
+        {health && <div style={S.muted}>{health.detail}</div>}
+      </Panel>
+
+      <Panel title="Preview a request">
+        <div style={S.inputRow}>
+          <span style={S.promptIcon}>🖼</span>
+          <input value={prompt} onChange={(e) => setPrompt(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") runPreview(); }} placeholder="prompt to validate (no image is generated)" style={S.composerInput} />
+          <button onClick={runPreview} disabled={busy} style={{ ...S.sendButton, width: "auto", padding: "0 12px", fontSize: 12, opacity: busy ? 0.6 : 1, cursor: busy ? "default" : "pointer" }}>{busy ? "…" : "Preview"}</button>
+        </div>
+        {preview && <div style={{ ...S.muted, color: preview.ok ? "#86efac" : "#fca5a5" }}>{preview.ok ? `✓ ${preview.text}` : `✗ ${preview.text}`}</div>}
+        <div style={S.muted}>Generation runs via chat (image.generate) and always asks for approval. No images are created here.</div>
+      </Panel>
+    </section>
+  );
+}
+
 function SourcesSection() {
   const [stats, setStats] = useState<SourceStats | null>(null);
   const [q, setQ] = useState("");
@@ -1039,6 +1097,8 @@ function SectionView({ section, activeCapability, onSelectCapability }: { sectio
       )}
 
       {section === "Sources" && <SourcesSection />}
+
+      {section === "Image" && <ImageSection />}
 
       {richMap[section] && (
         <section style={S.sectionGrid}>

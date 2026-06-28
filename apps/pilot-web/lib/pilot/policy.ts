@@ -27,6 +27,9 @@ const BLOCKED_RE = /(shell|\bexec\b|spawn|deploy|restart|reboot|\brm\b|rmrf|trun
 // Memory-changing tools => safe_write (still gated, but a clearly bounded memory-only change).
 const MEMORY_WRITE = new Set(["memory.ingest", "memory.delete", "memory.reingest"]);
 
+// Read-only image provider ops (also covered by risk:"read"; pinned explicitly per Phase 9.7).
+const IMAGE_SAFE_READ = new Set(["image.health", "image.preview"]);
+
 // Sandbox file writers => requires_approval.
 const FILE_WRITE_RE = /^(scratch\.write|image\.(resize|convert|crop|annotate|generate))/;
 
@@ -67,6 +70,7 @@ export function classifyPilotAction(name: string, args: Record<string, unknown> 
 
   const tool = TOOLS[name];
   if (!tool) return mk("blocked", "unknown tool — not in the allowlisted registry");
+  if (IMAGE_SAFE_READ.has(name)) return mk("safe_read", "read-only image provider operation");
   if (tool.risk === "read") return mk("safe_read", "read-only operation");
   if (MEMORY_WRITE.has(name)) return mk("safe_write", "changes MigraPilot memory");
   if (FILE_WRITE_RE.test(name)) return mk("requires_approval", "writes a file in the sandbox");

@@ -10,6 +10,7 @@ import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { visionAnalyze } from "./gateway";
 import { formatHits, ingestBatch, searchKnowledge } from "./knowledge";
+import { imageHealth, imagePreview, imageProviderMode, submitImageJob } from "./image-provider";
 
 const execFileP = promisify(execFile);
 
@@ -193,6 +194,23 @@ export const TOOLS: Record<string, ToolDef> = {
       return clip(`Ingested ${r.ingestedCount} file(s), ${r.chunkCount} chunk(s); ${r.rejectedCount} rejected. Memory now: ${r.sourceCount} sources / ${r.totalChunks} chunks.${r.truncated ? " (batch truncated at cap)" : ""}`);
     },
   },
+  "image.health": {
+    name: "image.health",
+    description: "Check the image-generation provider status (disabled / configured / unavailable) and reachability (read-only). Creates nothing.",
+    risk: "read",
+    parameters: { type: "object", properties: {} },
+    run: async () => clip(JSON.stringify(await imageHealth())),
+  },
+  "image.preview": {
+    name: "image.preview",
+    description: "Validate and normalize an image-generation request WITHOUT submitting it (read-only). Provide 'prompt' and optional negativePrompt/width/height/steps/seed/stylePreset/count.",
+    risk: "read",
+    parameters: { type: "object", properties: { prompt: { type: "string" }, negativePrompt: { type: "string" }, width: { type: "number" }, height: { type: "number" }, steps: { type: "number" }, seed: { type: "number" }, stylePreset: { type: "string" }, count: { type: "number" } }, required: ["prompt"] },
+    run: async (a) => {
+      const r = imagePreview(a);
+      return clip(r.ok ? `valid → ${r.summary}\n${JSON.stringify(r.normalized)}` : `invalid → ${r.error}`);
+    },
+  },
   "image.analyze": {
     name: "image.analyze",
     description: "Look at an image and answer a question about it using the vision model (read-only). Provide 'path' (a repo image) and optional 'question' (default: describe it). Use this whenever the user wants you to SEE, describe, read, or critique an image, screenshot, or design.",
@@ -272,10 +290,16 @@ export const TOOLS: Record<string, ToolDef> = {
   },
   "image.generate": {
     name: "image.generate",
-    description: "Generate a NEW image from a text prompt using the local Stable Diffusion model, saved into .pilot-scratch. Provide 'prompt' and 'out' (file name, e.g. 'art.png'). Optional 'width','height' (default 512), 'steps' (default 2). Use this when the user asks you to CREATE/draw/generate a picture.",
+    description: "Generate a NEW image from a text prompt (REQUIRES APPROVAL). Uses the configured SDXL provider when PILOT_IMAGE_PROVIDER=sdxl; otherwise the local Stable Diffusion model saved into .pilot-scratch. Provide 'prompt'; optional 'out' (local file name), width/height/steps/seed/stylePreset/count/negativePrompt.",
     risk: "low",
-    parameters: { type: "object", properties: { prompt: { type: "string" }, out: { type: "string" }, width: { type: "number" }, height: { type: "number" }, steps: { type: "number" } }, required: ["prompt", "out"] },
+    parameters: { type: "object", properties: { prompt: { type: "string" }, out: { type: "string" }, width: { type: "number" }, height: { type: "number" }, steps: { type: "number" }, seed: { type: "number" }, stylePreset: { type: "string" }, count: { type: "number" }, negativePrompt: { type: "string" } }, required: ["prompt"] },
     run: async (a) => {
+      // SDXL provider path (when enabled). Submits the approved request to the configured endpoint.
+      if (imageProviderMode() === "sdxl") {
+        const r = await submitImageJob(a);
+        return clip(`[provider:sdxl] ${r.status}: ${r.message}${r.result ? " " + JSON.stringify(r.result).slice(0, 300) : ""}`);
+      }
+      // Local Stable Diffusion path (default / provider disabled) — unchanged.
       const py = resolve(REPO_ROOT, ".pilot-sd/venv/bin/python");
       const script = resolve(REPO_ROOT, ".pilot-sd/generate.py");
       if (!existsSync(py) || !existsSync(script)) throw new Error("image-generation backend not installed (.pilot-sd venv missing on this machine)");
