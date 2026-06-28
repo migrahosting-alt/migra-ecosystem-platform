@@ -11,6 +11,7 @@ import { existsSync } from "node:fs";
 import { visionAnalyze } from "./gateway";
 import { formatHits, ingestBatch, searchKnowledge } from "./knowledge";
 import { imageHealth, imagePreview, imageProviderMode, submitImageJob } from "./image-provider";
+import { checkUrl, hazardLookup, knownTopology, opsHealth } from "./ops-provider";
 
 const execFileP = promisify(execFile);
 
@@ -437,6 +438,41 @@ export const TOOLS: Record<string, ToolDef> = {
         out += `\nvalidation [${cmd}]: ${res.ok ? "PASS ✓" : "FAIL ✗"}\n${res.output.slice(0, 1500)}`;
       }
       return clip(out);
+    },
+  },
+  "ops.health": {
+    name: "ops.health",
+    description: "Read-only ops diagnostics: returns the ops provider status, the allowlisted health-check URLs (sanitized), and a pass/fail summary if checks ran. Creates/changes nothing.",
+    risk: "read",
+    parameters: { type: "object", properties: {} },
+    run: async () => clip(JSON.stringify(await opsHealth())),
+  },
+  "ops.check_url": {
+    name: "ops.check_url",
+    description: "Read-only health check of ONE URL — allowed ONLY if it is in the PILOT_OPS_ALLOWED_HEALTH_URLS allowlist. Returns status code, latency, ok/fail, and a sanitized URL (no query/credentials). Refuses non-allowlisted URLs.",
+    risk: "read",
+    parameters: { type: "object", properties: { url: { type: "string" } }, required: ["url"] },
+    run: async (a) => clip(JSON.stringify(await checkUrl(String(a.url ?? "")))),
+  },
+  "ops.known_topology": {
+    name: "ops.known_topology",
+    description: "Read-only: returns the MigraTeck/MigraHosting server topology summarized from the grounded ecosystem docs (not hardcoded). Use to answer 'which server runs X / what is its IP'.",
+    risk: "read",
+    parameters: { type: "object", properties: {} },
+    run: async () => {
+      const t = await knownTopology();
+      return clip(t.available ? `${t.detail} (source: ${t.source})\n\n${t.content}` : t.detail);
+    },
+  },
+  "ops.hazard_lookup": {
+    name: "ops.hazard_lookup",
+    description: "Read-only: search the grounded ecosystem docs/hazards for a service/app/server name (e.g. 'voip-core', 'panel-api', 'deploy'). Returns matching hazard/source sections. Use before suggesting any operational action.",
+    risk: "read",
+    parameters: { type: "object", properties: { query: { type: "string" } }, required: ["query"] },
+    run: async (a) => {
+      const r = await hazardLookup(String(a.query ?? ""));
+      if (!r.matches.length) return `${r.detail} for "${r.query}"`;
+      return clip(`${r.detail} for "${r.query}":\n` + r.matches.map((m) => `• [${m.doc}] ${m.heading}: ${m.snippet}`).join("\n"));
     },
   },
   "repo.command": {

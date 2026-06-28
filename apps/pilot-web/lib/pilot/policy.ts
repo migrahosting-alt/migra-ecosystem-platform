@@ -30,6 +30,9 @@ const MEMORY_WRITE = new Set(["memory.ingest", "memory.delete", "memory.reingest
 // Read-only image provider ops (also covered by risk:"read"; pinned explicitly per Phase 9.7).
 const IMAGE_SAFE_READ = new Set(["image.health", "image.preview"]);
 
+// Ops MUTATIONS are NOT enabled (Phase 10.4 is read-only). These are blocked, never approval-gated.
+const OPS_BLOCKED = new Set(["ops.restart", "ops.deploy", "ops.suspend", "ops.resume", "ops.restore", "ops.dns.update", "ops.invoice.update", "ops.db.migrate", "ops.ssh", "ops.shell"]);
+
 // Sandbox file writers => requires_approval.
 const FILE_WRITE_RE = /^(scratch\.write|image\.(resize|convert|crop|annotate|generate))/;
 
@@ -66,6 +69,7 @@ export function classifyPilotAction(name: string, args: Record<string, unknown> 
     expectedEffect: effect ?? effectFor(risk),
   });
 
+  if (OPS_BLOCKED.has(name)) return mk("blocked", "ops mutations are not enabled in this phase (read-only ops only)");
   if (BLOCKED_RE.test(name)) return mk("blocked", "matches a blocked pattern (shell/deploy/db/install/secret/destructive/prod)");
 
   const tool = TOOLS[name];

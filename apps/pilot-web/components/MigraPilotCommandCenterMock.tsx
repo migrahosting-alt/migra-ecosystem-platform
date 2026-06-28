@@ -17,7 +17,7 @@ const navGroups = [
   },
   {
     title: "Governance",
-    items: ["Policy", "Sources", "Models", "Image", "Repo"],
+    items: ["Policy", "Sources", "Models", "Image", "Repo", "Ops"],
   },
   {
     title: "Admin",
@@ -123,6 +123,7 @@ const sectionSubtitles: Record<string, string> = {
   Sources: "Connected knowledge the assistant uses for grounded answers.",
   Image: "Image generation provider — approval-gated, disabled until configured.",
   Repo: "Coding hand — preview diffs, apply approved patches, run allowlisted checks.",
+  Ops: "Ops read hand — allowlisted health checks + grounded hazard lookup. Read-only.",
   Models: "Model routing and roles for safe, cost-aware execution.",
   Admin: "Workspace administration and access controls.",
 };
@@ -716,6 +717,65 @@ type BatchPreview = { candidateCount: number; rejectedCount: number; candidates:
 
 type ImageHealth = { provider: string; status: string; endpointConfigured: boolean; endpoint?: string; timeoutMs?: number; outputBaseConfigured?: boolean; reachable?: boolean; detail: string };
 
+type OpsHealth = { provider: string; status: string; allowedCount: number; allowed: string[]; detail: string; results: { url: string; ok: boolean; status?: number; latencyMs?: number; error?: string }[]; okCount: number };
+type HazardMatch = { doc: string; heading: string; snippet: string };
+
+function OpsSection() {
+  const [health, setHealth] = useState<OpsHealth | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [q, setQ] = useState("");
+  const [matches, setMatches] = useState<HazardMatch[] | null>(null);
+
+  const loadHealth = () => {
+    setBusy(true);
+    fetch("/api/pilot/ops/health")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (d) setHealth(d); })
+      .catch(() => {})
+      .finally(() => setBusy(false));
+  };
+  useEffect(() => { loadHealth(); }, []);
+
+  const lookup = async () => {
+    if (!q.trim()) return;
+    setMatches(null);
+    try {
+      const r = await fetch("/api/pilot/ops/hazard", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ query: q }) });
+      const d = await r.json();
+      setMatches(d.matches ?? []);
+    } catch { setMatches([]); }
+  };
+
+  return (
+    <section style={S.sectionGrid}>
+      <Panel title="Ops provider">
+        <Row left="Provider" right={health?.provider ?? "…"} tone={health?.status === "local" ? "Succeeded" : undefined} />
+        <Row left="Allowlisted checks" right={health ? String(health.allowedCount) : "…"} />
+        {health?.allowed?.map((u) => <Row key={u} left="check" right={u} />)}
+        {health && health.results.length > 0 && <Row left="Health" right={`${health.okCount}/${health.results.length} ok`} tone={health.okCount === health.results.length ? "Succeeded" : "Failed"} />}
+        {health?.results?.map((r) => <Row key={r.url} left={r.url} right={r.ok ? `${r.status ?? "ok"} · ${r.latencyMs}ms` : (r.error ?? "fail")} tone={r.ok ? "Succeeded" : "Failed"} />)}
+        {health && <div style={S.muted}>{health.detail}</div>}
+        <button onClick={loadHealth} disabled={busy} style={{ ...S.sendButton, width: "auto", padding: "0 12px", fontSize: 12, opacity: busy ? 0.6 : 1, cursor: busy ? "default" : "pointer" }}>{busy ? "…" : "Run diagnostics"}</button>
+      </Panel>
+      <Panel title="Hazard / service lookup">
+        <div style={S.inputRow}>
+          <span style={S.promptIcon}>🔎</span>
+          <input value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") lookup(); }} placeholder="service / server / app (e.g. voip-core, panel-api)" style={S.composerInput} />
+          <button onClick={lookup} style={{ ...S.sendButton, width: "auto", padding: "0 12px", fontSize: 12 }}>Look up</button>
+        </div>
+        {matches?.length === 0 && <div style={S.muted}>No grounded match in the ecosystem docs.</div>}
+        {matches?.map((m, i) => (
+          <div key={i} style={{ marginTop: 8 }}>
+            <div style={S.rowLeft}>[{m.doc}] {m.heading}</div>
+            <div style={S.muted}>{m.snippet}</div>
+          </div>
+        ))}
+        <div style={S.muted}>Grounded from Phase 10.2 ecosystem docs. Read-only — no restart/deploy/SSH.</div>
+      </Panel>
+    </section>
+  );
+}
+
 function RepoSection() {
   const [repo, setRepo] = useState<{ head: string; status: string } | null>(null);
 
@@ -1147,6 +1207,8 @@ function SectionView({ section, activeCapability, onSelectCapability }: { sectio
       {section === "Image" && <ImageSection />}
 
       {section === "Repo" && <RepoSection />}
+
+      {section === "Ops" && <OpsSection />}
 
       {richMap[section] && (
         <section style={S.sectionGrid}>
