@@ -11,22 +11,15 @@ export type ChatMessage = { role: string; content: string; tool_calls?: ToolCall
 
 // Logical tiers -> concrete local models. Kept here so routing is one edit away.
 export const MODELS = {
-  fast: "llama3.1:8b", // general instruct, quick first token
-  code: "qwen2.5-coder:7b", // fast coding
-  codeDeep: "qwen3-coder:30b", // deeper coding / tools (slower)
-  reason: "deepseek-r1:14b", // reasoning (emits <think>; not default-routed yet)
-  cloud: "gpt-oss:120b-cloud", // cloud-hosted fallback tier
+  primary: "gpt-oss:120b-cloud", // fast cloud 120B — best quality, ~1s latency, supports tools
+  local: "llama3.1:8b", // local fallback if the cloud model is unavailable
+  codeDeep: "qwen3-coder:30b", // deep local coding (slower)
+  reason: "deepseek-r1:14b", // local reasoning
 };
 
-export function selectModel(agentId: AgentProfileId): { model: string; tier: string } {
-  switch (agentId) {
-    case "coding":
-    case "deploy":
-    case "database":
-      return { model: MODELS.code, tier: "code" };
-    default:
-      return { model: MODELS.fast, tier: "fast" };
-  }
+// gpt-oss:120b-cloud is fast and strong across every agent type, so route everything to it.
+export function selectModel(_agentId: AgentProfileId): { model: string; tier: string } {
+  return { model: MODELS.primary, tier: "cloud-120b" };
 }
 
 export async function listModels(): Promise<string[]> {
@@ -56,22 +49,31 @@ export async function chatOnce(opts: {
   tools?: unknown[];
   temperature?: number;
   signal?: AbortSignal;
-}): Promise<{ content: string; toolCalls: ToolCall[] }> {
-  const res = await fetch(`${MODEL_BASE}/api/chat`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      model: opts.model,
-      messages: opts.messages,
-      tools: opts.tools,
-      stream: false,
-      options: { temperature: opts.temperature ?? 0.3 },
-    }),
-    signal: opts.signal,
-  });
-  if (!res.ok) throw new Error(`model gateway error ${res.status}`);
-  const data = (await res.json()) as { message?: { content?: string; tool_calls?: ToolCall[] } };
-  return { content: data.message?.content ?? "", toolCalls: data.message?.tool_calls ?? [] };
+}): Promise<{ content: string; toolCalls: ToolCall[]; model: string }> {
+  const call = async (model: string) => {
+    const res = await fetch(`${MODEL_BASE}/api/chat`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        model,
+        messages: opts.messages,
+        tools: opts.tools,
+        stream: false,
+        options: { temperature: opts.temperature ?? 0.3 },
+      }),
+      signal: opts.signal,
+    });
+    if (!res.ok) throw new Error(`model gateway error ${res.status} for ${model}`);
+    const data = (await res.json()) as { message?: { content?: string; tool_calls?: ToolCall[] } };
+    return { content: data.message?.content ?? "", toolCalls: data.message?.tool_calls ?? [], model };
+  };
+  try {
+    return await call(opts.model);
+  } catch (e) {
+    // Cloud model unavailable? Fall back once to the local model.
+    if (opts.model !== MODELS.local) return await call(MODELS.local);
+    throw e;
+  }
 }
 
 // Streams assistant token deltas from the local model.

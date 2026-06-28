@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 const logo = "/assets/MigraPilot_official_logo.png";
 
@@ -456,7 +458,13 @@ export default function MigraPilotCommandCenterMock() {
               <section style={S.thread}>
                 {messages.map((m) => (
                   <div key={m.id} style={m.role === "user" ? S.bubbleUserWrap : S.bubbleAssistantWrap}>
-                    <div style={{ ...S.bubble, ...(m.role === "user" ? S.bubbleUser : S.bubbleAssistant) }}>{m.content.replace(/\*\*/g, "")}</div>
+                    {m.role === "user" ? (
+                      <div style={{ ...S.bubble, ...S.bubbleUser }}>{m.content}</div>
+                    ) : (
+                      <div className="mp-md" style={{ ...S.bubble, ...S.bubbleAssistant }}>
+                        <ReactMarkdown remarkPlugins={[remarkGfm]}>{m.content}</ReactMarkdown>
+                      </div>
+                    )}
                   </div>
                 ))}
                 {sending && !pendingApproval && !messages.some((m) => m.id === "__streaming__") && (
@@ -629,6 +637,24 @@ export default function MigraPilotCommandCenterMock() {
         .migrapilot-command-center .mp-richrow:hover {
           background: rgba(56,189,248,.06);
         }
+
+        .migrapilot-command-center .mp-md { white-space: normal; }
+        .migrapilot-command-center .mp-md > :first-child { margin-top: 0; }
+        .migrapilot-command-center .mp-md > :last-child { margin-bottom: 0; }
+        .migrapilot-command-center .mp-md p { margin: 0 0 8px; }
+        .migrapilot-command-center .mp-md ul,
+        .migrapilot-command-center .mp-md ol { margin: 0 0 8px; padding-left: 18px; }
+        .migrapilot-command-center .mp-md li { margin: 3px 0; }
+        .migrapilot-command-center .mp-md code { background: rgba(2,6,23,.7); padding: 1px 5px; border-radius: 5px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+        .migrapilot-command-center .mp-md pre { background: rgba(2,6,23,.92); border: 1px solid rgba(148,163,184,.16); border-radius: 10px; padding: 10px 12px; overflow-x: auto; margin: 8px 0; }
+        .migrapilot-command-center .mp-md pre code { background: none; padding: 0; font-size: 12px; line-height: 1.5; }
+        .migrapilot-command-center .mp-md h1,
+        .migrapilot-command-center .mp-md h2,
+        .migrapilot-command-center .mp-md h3 { margin: 12px 0 6px; font-size: 14px; font-weight: 800; }
+        .migrapilot-command-center .mp-md a { color: #7dd3fc; }
+        .migrapilot-command-center .mp-md table { border-collapse: collapse; margin: 8px 0; }
+        .migrapilot-command-center .mp-md th,
+        .migrapilot-command-center .mp-md td { border: 1px solid rgba(148,163,184,.2); padding: 4px 8px; font-size: 12px; }
 
         @media (max-width: 1280px) {
           .migrapilot-command-center {

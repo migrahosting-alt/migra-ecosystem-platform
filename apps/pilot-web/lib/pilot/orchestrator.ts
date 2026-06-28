@@ -9,6 +9,7 @@ import type { ApprovalRequest, Message, PilotEvent, Run, RunStep } from "./types
 
 const now = () => new Date().toISOString();
 const MAX_ITERS = 6;
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 function safeParse(s: string): Record<string, unknown> {
   try {
@@ -117,7 +118,10 @@ export async function streamPilotRun(run: Run, convo: ChatMessage[], send: (e: P
   }
 
   const text = result.assistantText.trim() || "(empty response)";
-  for (const chunk of chunkText(text)) send({ type: "token", delta: chunk });
+  for (const chunk of chunkText(text)) {
+    send({ type: "token", delta: chunk });
+    await sleep(8); // light typing-stream feel
+  }
 
   const gen = run.steps.find((s) => s.title === "Generate response");
   if (gen && gen.status !== "done") {
