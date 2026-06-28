@@ -98,8 +98,8 @@ const AGENT_SYSTEM_PROMPTS: Record<AgentProfileId, string> = {
 
 const TOOLS_NOTE = [
   "",
-  "Tools (use only when needed): git.status, git.log, git.diff, repo.search, repo.read_file, repo.list_files, image.info, image.analyze (read-only) and scratch.write_file, image.resize, image.convert, image.crop, image.annotate (these write a file into the sandbox).",
-  "- Use a read tool only when the user asks about the repo, git, code, an image's details, or to look at / describe / critique an image. Use a write/image tool only when the user explicitly asks to create or edit a file or image.",
+  "Tools (use only when needed): git.status, git.log, git.diff, repo.search, repo.read_file, repo.list_files, image.info, image.analyze (read-only) and scratch.write_file, image.resize, image.convert, image.crop, image.annotate, image.generate (these write a file into the sandbox).",
+  "- Use a read tool only when the user asks about the repo, git, code, an image's details, or to look at / describe / critique an image. Use a write/image tool only when the user explicitly asks to create, edit, or generate a file or image (image.generate makes a brand-new picture from a text prompt).",
   "- Do NOT call tools for greetings or chit-chat — just reply. After a tool returns, answer concisely. Never invent file paths.",
 ].join("\n");
 

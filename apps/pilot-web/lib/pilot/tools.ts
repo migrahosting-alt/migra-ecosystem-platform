@@ -7,6 +7,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { resolve, relative, isAbsolute, basename } from "node:path";
 import { readFile, writeFile, mkdir } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { visionAnalyze } from "./gateway";
 
 const execFileP = promisify(execFile);
@@ -229,6 +230,30 @@ export const TOOLS: Record<string, ToolDef> = {
       const color = /^[#a-zA-Z0-9]+$/.test(String(a.color ?? "")) ? String(a.color) : "white";
       await execFileP("convert", [input, "-gravity", gravity, "-pointsize", String(size), "-fill", color, "-annotate", "+0+24", String(a.text ?? ""), output], { cwd: REPO_ROOT, timeout: TIMEOUT });
       return `annotated -> .pilot-scratch/${basename(output)}`;
+    },
+  },
+  "image.generate": {
+    name: "image.generate",
+    description: "Generate a NEW image from a text prompt using the local Stable Diffusion model, saved into .pilot-scratch. Provide 'prompt' and 'out' (file name, e.g. 'art.png'). Optional 'width','height' (default 512), 'steps' (default 2). Use this when the user asks you to CREATE/draw/generate a picture.",
+    risk: "low",
+    parameters: { type: "object", properties: { prompt: { type: "string" }, out: { type: "string" }, width: { type: "number" }, height: { type: "number" }, steps: { type: "number" } }, required: ["prompt", "out"] },
+    run: async (a) => {
+      const py = resolve(REPO_ROOT, ".pilot-sd/venv/bin/python");
+      const script = resolve(REPO_ROOT, ".pilot-sd/generate.py");
+      if (!existsSync(py) || !existsSync(script)) throw new Error("image-generation backend not installed (.pilot-sd venv missing on this machine)");
+      if (!a.prompt) throw new Error("prompt required");
+      const output = scratchOut(String(a.out || "generated.png"));
+      await mkdir(SCRATCH_DIR, { recursive: true });
+      const args = [
+        script,
+        "--prompt", String(a.prompt),
+        "--out", output,
+        "--width", String(Number(a.width) || 512),
+        "--height", String(Number(a.height) || 512),
+        "--steps", String(Number(a.steps) || 2),
+      ];
+      const { stdout } = await execFileP(py, args, { cwd: REPO_ROOT, timeout: 180000, maxBuffer: 8 * 1024 * 1024 });
+      return `generated -> .pilot-scratch/${basename(output)} (${stdout.trim().slice(-100)})`;
     },
   },
 };
