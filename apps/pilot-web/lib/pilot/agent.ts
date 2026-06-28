@@ -1,0 +1,107 @@
+// MigraPilot — mock agent (Phase 1).
+// Classifies intent, picks an agent profile, and produces a read-only plan.
+// NO tools are executed and NO system state is changed. Real model gateway,
+// tools, and approval gates arrive in later phases.
+
+import type { AgentProfile, AgentProfileId } from "./types";
+
+export const AGENT_PROFILES: Record<AgentProfileId, AgentProfile> = {
+  operator: { id: "operator", name: "Operator Agent", purpose: "General command-center assistant", scope: "General" },
+  coding: { id: "coding", name: "Coding Agent", purpose: "Reads repos, suggests patches, prepares PRs", scope: "Engineering" },
+  deploy: { id: "deploy", name: "Deploy Agent", purpose: "Checks builds, deploy status, rollback plans", scope: "Execution" },
+  billing: { id: "billing", name: "Billing Agent", purpose: "Invoices, subscriptions, payment issues", scope: "Billing" },
+  hosting: { id: "hosting", name: "Hosting Agent", purpose: "Domains, DNS, hosting, email, SSL, VPS", scope: "Hosting" },
+  security: { id: "security", name: "Security Agent", purpose: "Audits, policies, suspicious changes", scope: "Security" },
+  support: { id: "support", name: "Support Agent", purpose: "Client tickets, email drafts, follow-ups", scope: "Support" },
+  database: { id: "database", name: "Database Agent", purpose: "Migrations, backups, query diagnostics", scope: "Data" },
+};
+
+// Order matters: more specific / stronger-signal intents are matched first.
+const CLASSIFY_RULES: [AgentProfileId, RegExp][] = [
+  ["coding", /\b(code|coding|refactor|patch|pr|pull request|repo|function|class|bug|unit test|typescript|javascript|python)\b/],
+  ["deploy", /\b(deploy|rollback|release|build|pipeline|ci\/?cd)\b/],
+  ["database", /\b(database|migration|backup|sql|query|postgres|schema|index)\b/],
+  ["billing", /\b(invoice|subscription|payment|stripe|billing|charge|refund|renewal)\b/],
+  ["security", /\b(security|audit|policy|vulnerab|breach|suspicious|secret|exploit)\b/],
+  ["hosting", /\b(dns|domain|ssl|certificate|hosting|vps|mailbox|nameserver|email)\b/],
+  ["support", /\b(ticket|support|client|customer|reply|follow[- ]?up)\b/],
+];
+
+export function classifyAgent(message: string): AgentProfileId {
+  const m = message.toLowerCase();
+  for (const [agent, re] of CLASSIFY_RULES) {
+    if (re.test(m)) return agent;
+  }
+  return "operator";
+}
+
+const AGENT_INSPECT_STEP: Partial<Record<AgentProfileId, string>> = {
+  deploy: "Check branch, build status, and recent deploys",
+  coding: "Search repository and read related files",
+  billing: "Look up customer, invoices, and subscription state",
+  hosting: "Check DNS, SSL, and hosting records",
+  security: "Review recent changes and policy posture",
+  support: "Pull related tickets and conversation history",
+  database: "Inspect schema, migrations, and backup status",
+};
+
+export function buildPlan(agent: AgentProfileId, _message: string): string[] {
+  const steps = [
+    "Understand request and gather context",
+    "Read relevant system state (read-only)",
+    "Analyze findings",
+    "Prepare a safe plan",
+    "Summarize recommendation",
+  ];
+  const inspect = AGENT_INSPECT_STEP[agent];
+  if (inspect) steps[1] = inspect;
+  return steps;
+}
+
+export function buildSummary(agent: AgentProfile, message: string): string {
+  return [
+    `**${agent.name}** reviewed your request: "${message.trim()}".`,
+    "",
+    "This is a read-only planning response — no tools were executed and no system state was changed. Based on the request I would:",
+    `1. Gather the relevant ${agent.scope.toLowerCase()} context.`,
+    "2. Inspect current system state without making changes.",
+    "3. Propose a safe, reviewable plan before any action.",
+    "",
+    "Approval gates, the model gateway, and real (read-only first) tools arrive in the next phases.",
+  ].join("\n");
+}
+
+// Guardrails applied to every agent (the safety layer, baked into the system prompt).
+const GUARDRAILS = [
+  "You are MigraPilot, the internal AI operations assistant for MigraTeck / MigraHosting.",
+  "",
+  "Operating rules:",
+  "- Be concise, direct, and technical — a senior engineer's tone. Prefer short paragraphs and tight lists.",
+  "- You can use tools. Read-only tools run automatically; mutating tools (e.g. writing a file) are automatically held by the system for human approval BEFORE they run. So when the user asks for an action, CALL the appropriate tool directly — do not refuse or claim you are unable; the system enforces safety, not you.",
+  "- Do not claim an action succeeded until a tool result confirms it.",
+  "- Never reveal, guess, or invent secrets, API keys, passwords, tokens, or credentials.",
+  "- For any risky operation, present a safe, reviewable plan and state that human approval is required before execution.",
+  "- If you lack real data, say so plainly instead of fabricating specifics (hostnames, amounts, IDs).",
+].join("\n");
+
+const AGENT_SYSTEM_PROMPTS: Record<AgentProfileId, string> = {
+  operator: "Role: Operator Agent — the general command-center assistant. Help with any MigraTeck/MigraHosting operational question and route the user's intent.",
+  coding: "Role: Coding Agent — you read repositories, propose patches, and prepare PRs. Give precise, idiomatic, minimal-diff code guidance.",
+  deploy: "Role: Deploy Agent — you reason about builds, deploy status, and rollback plans. Always emphasise safe, staged rollout and verification.",
+  billing: "Role: Billing Agent — invoices, subscriptions, Stripe, payments, renewals. Be precise about money and never guess amounts.",
+  hosting: "Role: Hosting Agent — domains, DNS, SSL, hosting, email, VPS. Give concrete, correct infrastructure guidance.",
+  security: "Role: Security Agent — audits, policy, suspicious changes. Be cautious, flag risks explicitly, and prefer least-privilege.",
+  support: "Role: Support Agent — client tickets, email drafts, follow-ups. Be clear, empathetic, and customer-appropriate.",
+  database: "Role: Database Agent — migrations, backups, query diagnostics. Prioritise data safety, reversibility, and read-only checks first.",
+};
+
+const TOOLS_NOTE = [
+  "",
+  "Tools available: git.status, git.log, git.diff, repo.search, repo.read_file, repo.list_files (read-only, auto-run) and scratch.write_file (writes a file in a sandbox; the system will ask the user to approve it before it runs).",
+  "- Call a tool whenever the user asks about the repo/git state, or asks you to write a scratch file. Don't guess and don't refuse — just call the tool.",
+  "- After a tool returns its result, answer concisely citing what you found or did.",
+].join("\n");
+
+export function buildSystemPrompt(agentId: AgentProfileId): string {
+  return `${GUARDRAILS}\n\n${AGENT_SYSTEM_PROMPTS[agentId]}\n${TOOLS_NOTE}`;
+}

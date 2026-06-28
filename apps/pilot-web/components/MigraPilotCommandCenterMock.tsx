@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 const logo = "/assets/MigraPilot_official_logo.png";
 
@@ -73,6 +73,41 @@ const models = [
 ];
 
 type RichRow = { title: string; sub: string; status: string; tone: string };
+
+// Phase 1b — local shapes mirroring /api/pilot (runtime fetch only; intentionally
+// NOT imported from lib/pilot so the committed mock builds on a fresh checkout).
+type PilotStep = { id: string; index: number; title: string; status: string; startedAt?: string; endedAt?: string };
+type PilotRun = { id: string; conversationId: string; agentName: string; mode: string; status: string; userMessage: string; summary?: string; model?: string; tier?: string; steps: PilotStep[]; createdAt: string; endedAt?: string };
+type ChatMsg = { id: string; role: string; content: string };
+type ApprovalReq = { id: string; runId: string; toolName: string; args: Record<string, unknown>; risk: string; status: string };
+
+function pilotRunPct(run: PilotRun): number {
+  if (!run.steps.length) return 0;
+  return Math.round((run.steps.filter((s) => s.status === "done").length / run.steps.length) * 100);
+}
+function pilotRunTone(status: string): string {
+  return status === "succeeded" ? "Succeeded" : status === "failed" ? "Failed" : "Running";
+}
+function pilotTruncate(text: string, max = 30): string {
+  return text.length > max ? text.slice(0, max - 1) + "…" : text;
+}
+function pilotTimeAgo(iso: string): string {
+  const s = (Date.now() - new Date(iso).getTime()) / 1000;
+  if (s < 60) return "just now";
+  if (s < 3600) return `${Math.floor(s / 60)}m ago`;
+  if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
+  return new Date(iso).toLocaleDateString();
+}
+function pilotRunLogs(run: PilotRun): { time: string; msg: string }[] {
+  const fmt = (iso?: string) => (iso ? new Date(iso).toLocaleTimeString() : "");
+  const lines: { time: string; msg: string }[] = [{ time: fmt(run.createdAt), msg: `Run started · ${run.agentName}` }];
+  for (const s of run.steps) {
+    if (s.startedAt) lines.push({ time: fmt(s.startedAt), msg: `▶ ${s.title}` });
+    if (s.endedAt) lines.push({ time: fmt(s.endedAt), msg: `✓ ${s.title}` });
+  }
+  if (run.endedAt) lines.push({ time: fmt(run.endedAt), msg: `Run ${run.status}` });
+  return lines;
+}
 
 const sectionSubtitles: Record<string, string> = {
   Agents: "Specialized AI agents available to operate your systems.",
@@ -157,6 +192,116 @@ export default function MigraPilotCommandCenterMock() {
   const [activeMode, setActiveMode] = useState("Plan");
   const [activeTab, setActiveTab] = useState("Context");
   const [composerText, setComposerText] = useState("");
+  const [liveRun, setLiveRun] = useState<PilotRun | null>(null);
+  const [runs, setRuns] = useState<PilotRun[]>([]);
+  const [messages, setMessages] = useState<ChatMsg[]>([]);
+  const [sending, setSending] = useState(false);
+  const [conversationId, setConversationId] = useState<string | null>(null);
+  const [pendingApproval, setPendingApproval] = useState<ApprovalReq | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    fetch("/api/pilot/runs")
+      .then((r) => (r.ok ? r.json() : { runs: [] }))
+      .then((d) => { if (active) setRuns(Array.isArray(d.runs) ? d.runs : []); })
+      .catch(() => { /* API not running (e.g. fresh checkout) — keep static fallback */ });
+    return () => { active = false; };
+  }, []);
+
+  const handleEvent = (ev: { type: string; run?: PilotRun; step?: PilotStep; message?: ChatMsg; delta?: string; approval?: ApprovalReq; error?: string }) => {
+    if (ev.type === "run.created" && ev.run) {
+      setLiveRun(ev.run);
+      setConversationId(ev.run.conversationId);
+    } else if (ev.type === "step" && ev.step) {
+      const step = ev.step;
+      setLiveRun((r) => {
+        if (!r) return r;
+        const exists = r.steps.some((s) => s.id === step.id);
+        return { ...r, steps: exists ? r.steps.map((s) => (s.id === step.id ? step : s)) : [...r.steps, step] };
+      });
+    } else if (ev.type === "token" && ev.delta) {
+      const delta = ev.delta;
+      setMessages((m) => {
+        const last = m[m.length - 1];
+        if (last && last.id === "__streaming__") {
+          return [...m.slice(0, -1), { ...last, content: last.content + delta }];
+        }
+        return [...m, { id: "__streaming__", role: "assistant", content: delta }];
+      });
+    } else if (ev.type === "message" && ev.message) {
+      const msg = ev.message;
+      setMessages((m) => [...m.filter((x) => x.id !== "__streaming__"), { id: msg.id, role: msg.role, content: msg.content }]);
+    } else if (ev.type === "approval.required" && ev.approval) {
+      setPendingApproval(ev.approval);
+    } else if (ev.type === "run.completed" && ev.run) {
+      const run = ev.run;
+      setLiveRun(run);
+      setPendingApproval(null);
+      setRuns((rs) => [run, ...rs.filter((x) => x.id !== run.id)]);
+    } else if (ev.type === "error") {
+      setMessages((m) => [...m.filter((x) => x.id !== "__streaming__"), { id: `err_${m.length}`, role: "assistant", content: `⚠ ${ev.error ?? "error"}` }]);
+    }
+  };
+
+  const consumeStream = async (res: Response) => {
+    if (!res.ok || !res.body) throw new Error(`request failed (${res.status})`);
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        try { handleEvent(JSON.parse(line)); } catch { /* ignore partial line */ }
+      }
+    }
+  };
+
+  const sendMessage = async () => {
+    const text = composerText.trim();
+    if (!text || sending) return;
+    setSending(true);
+    setActiveSection("Conversations");
+    setActiveTab("Run Details");
+    setMessages((m) => [...m, { id: `u_${m.length}_${Date.now()}`, role: "user", content: text }]);
+    setComposerText("");
+    try {
+      const res = await fetch("/api/pilot/chat", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ message: text, mode: activeMode, conversationId }),
+      });
+      await consumeStream(res);
+    } catch (err) {
+      setMessages((m) => [...m, { id: `e_${m.length}`, role: "assistant", content: `⚠ Could not reach Pilot API (${(err as Error).message}). The chat backend may not be running.` }]);
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const decideApproval = async (decision: "approve" | "deny") => {
+    if (!pendingApproval || !liveRun || sending) return;
+    const approval = pendingApproval;
+    setPendingApproval(null);
+    setSending(true);
+    setActiveTab("Steps");
+    try {
+      const res = await fetch(`/api/pilot/runs/${liveRun.id}/approve`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ approvalId: approval.id, decision }),
+      });
+      await consumeStream(res);
+    } catch (err) {
+      setMessages((m) => [...m, { id: `e_${m.length}`, role: "assistant", content: `⚠ Approval request failed (${(err as Error).message}).` }]);
+    } finally {
+      setSending(false);
+    }
+  };
 
   const resetSession = () => {
     setActiveSection("Conversations");
@@ -164,6 +309,11 @@ export default function MigraPilotCommandCenterMock() {
     setActiveMode("Plan");
     setActiveTab("Context");
     setComposerText("");
+    setLiveRun(null);
+    setMessages([]);
+    setConversationId(null);
+    setPendingApproval(null);
+    setSending(false);
   };
 
   return (
@@ -280,10 +430,11 @@ export default function MigraPilotCommandCenterMock() {
                 <textarea
                   value={composerText}
                   onChange={(e) => setComposerText(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); } }}
                   placeholder="Type a command, ask a question, or run a playbook..."
                   style={S.composerInput}
                 />
-                <button style={S.sendButton}>↗</button>
+                <button onClick={() => sendMessage()} disabled={sending} style={{ ...S.sendButton, opacity: sending ? 0.6 : 1, cursor: sending ? "default" : "pointer" }}>{sending ? "…" : "↗"}</button>
               </div>
               <div style={S.actionRow}>
                 {[
@@ -301,11 +452,43 @@ export default function MigraPilotCommandCenterMock() {
               </div>
             </section>
 
+            {messages.length > 0 && (
+              <section style={S.thread}>
+                {messages.map((m) => (
+                  <div key={m.id} style={m.role === "user" ? S.bubbleUserWrap : S.bubbleAssistantWrap}>
+                    <div style={{ ...S.bubble, ...(m.role === "user" ? S.bubbleUser : S.bubbleAssistant) }}>{m.content.replace(/\*\*/g, "")}</div>
+                  </div>
+                ))}
+                {sending && !pendingApproval && !messages.some((m) => m.id === "__streaming__") && (
+                  <div style={S.bubbleAssistantWrap}>
+                    <div style={{ ...S.bubble, ...S.bubbleAssistant }}>{liveRun ? `${liveRun.agentName} · ${liveRun.model ?? "model"} thinking…` : "Thinking…"}</div>
+                  </div>
+                )}
+                {pendingApproval && (
+                  <div style={S.approvalCard}>
+                    <div style={S.approvalTitle}>⏸ Approval required</div>
+                    <div style={S.approvalText}>The agent wants to run <strong>{pendingApproval.toolName}</strong><span style={S.approvalRisk}>risk: {pendingApproval.risk}</span></div>
+                    <pre style={S.approvalArgs}>{JSON.stringify(pendingApproval.args, null, 2)}</pre>
+                    <div style={S.approvalActions}>
+                      <button onClick={() => decideApproval("approve")} disabled={sending} style={S.approveBtn}>Approve &amp; run</button>
+                      <button onClick={() => decideApproval("deny")} disabled={sending} style={S.denyBtn}>Deny</button>
+                    </div>
+                  </div>
+                )}
+              </section>
+            )}
+
             <section style={S.lowerGrid}>
               <Panel title="Recent Runs">
-                {recentRuns.map(([name, status, time]) => (
-                  <Row key={name} left={name} right={`${status} · ${time}`} tone={status} />
-                ))}
+                {runs.length > 0 ? (
+                  runs.slice(0, 6).map((r) => (
+                    <Row key={r.id} left={pilotTruncate(r.userMessage)} right={`${r.status} · ${pilotTimeAgo(r.createdAt)}`} tone={pilotRunTone(r.status)} />
+                  ))
+                ) : (
+                  recentRuns.map(([name, status, time]) => (
+                    <Row key={name} left={name} right={`${status} · ${time}`} tone={status} />
+                  ))
+                )}
               </Panel>
 
               <Panel title="Playbooks">
@@ -370,30 +553,43 @@ export default function MigraPilotCommandCenterMock() {
 
             {activeTab === "Run Details" && (
               <Panel title="Active Run">
-                <div style={S.runName}><span style={{ ...S.tinyPulse, marginRight: 8 }} />api-latency-investigation</div>
-                <div style={S.progressTrack}><div style={S.progressFill} /></div>
-                <div style={S.muted}>65% complete · running safely</div>
+                {liveRun ? (
+                  <>
+                    <div style={S.runName}><span style={{ ...S.tinyPulse, marginRight: 8 }} />{liveRun.agentName}</div>
+                    <div style={S.muted}>{pilotTruncate(liveRun.userMessage, 48)}</div>
+                    <div style={S.progressTrack}><div style={{ ...S.progressFill, width: `${pilotRunPct(liveRun)}%` }} /></div>
+                    <div style={S.muted}>{pilotRunPct(liveRun)}% · {liveRun.status} · {liveRun.model ?? "—"} · mode {liveRun.mode}</div>
+                  </>
+                ) : (
+                  <>
+                    <div style={S.runName}><span style={{ ...S.tinyPulse, marginRight: 8 }} />No active run</div>
+                    <div style={S.muted}>Send a message in the composer to start a run.</div>
+                  </>
+                )}
               </Panel>
             )}
 
             {activeTab === "Steps" && (
               <Panel title="Execution Steps">
-                {["Collect metrics", "Analyze latency drivers", "Correlate deployments", "Identify root cause", "Recommend mitigations"].map((step, index) => (
-                  <Row key={step} left={`${index + 1}. ${step}`} right={index < 2 ? "Done" : index === 2 ? "Running" : "Pending"} />
-                ))}
+                {liveRun ? (
+                  liveRun.steps.map((s) => (
+                    <Row key={s.id} left={`${s.index + 1}. ${s.title}`} right={s.status === "done" ? "Done" : s.status === "running" ? "Running" : "Pending"} tone={s.status === "done" ? "Succeeded" : s.status === "running" ? "Running" : undefined} />
+                  ))
+                ) : (
+                  <div style={S.muted}>No run yet. Steps appear here as a run executes.</div>
+                )}
               </Panel>
             )}
 
             {activeTab === "Logs" && (
               <Panel title="Logs">
-                {[
-                  ["10:42:01", "Run started: api-latency-investigation"],
-                  ["10:42:04", "Collected gateway metrics (last 1h)"],
-                  ["10:42:09", "Analyzing latency drivers"],
-                  ["10:42:15", "Correlating recent deployments"],
-                ].map(([time, msg]) => (
-                  <Row key={time} left={msg} right={time} />
-                ))}
+                {liveRun ? (
+                  pilotRunLogs(liveRun).map((l, i) => (
+                    <Row key={i} left={l.msg} right={l.time} />
+                  ))
+                ) : (
+                  <div style={S.muted}>No run yet. Live logs stream here during a run.</div>
+                )}
               </Panel>
             )}
 
@@ -819,6 +1015,20 @@ const S: Record<string, React.CSSProperties> = {
   promptIcon: { color: "#38bdf8", fontSize: 24 },
   placeholder: { flex: 1, color: "#64748b", fontSize: 13 },
   composerInput: { flex: 1, background: "transparent", border: 0, outline: "none", color: "#e2e8f0", fontSize: 13, fontFamily: "inherit", resize: "none", height: 22, lineHeight: "22px", padding: 0 },
+  thread: { marginTop: 14, padding: 14, borderRadius: 22, background: "rgba(2,6,23,.5)", border: "1px solid rgba(148,163,184,.13)", display: "flex", flexDirection: "column", gap: 10, maxHeight: 360, overflowY: "auto" },
+  bubbleUserWrap: { display: "flex", justifyContent: "flex-end" },
+  bubbleAssistantWrap: { display: "flex", justifyContent: "flex-start" },
+  bubble: { maxWidth: "82%", padding: "10px 12px", borderRadius: 14, fontSize: 13, lineHeight: 1.5, whiteSpace: "pre-wrap" },
+  bubbleUser: { background: "linear-gradient(135deg, rgba(37,99,235,.30), rgba(8,145,178,.18))", border: "1px solid rgba(59,130,246,.34)", color: "#eaf2ff" },
+  bubbleAssistant: { background: "rgba(15,23,42,.7)", border: "1px solid rgba(148,163,184,.16)", color: "#cbd5e1" },
+  approvalCard: { padding: 14, borderRadius: 16, background: "linear-gradient(135deg, rgba(217,119,6,.14), rgba(2,6,23,.5))", border: "1px solid rgba(245,158,11,.4)", display: "flex", flexDirection: "column", gap: 8 },
+  approvalTitle: { fontSize: 13, fontWeight: 800, color: "#fde68a" },
+  approvalText: { fontSize: 13, color: "#e2e8f0" },
+  approvalRisk: { marginLeft: 8, fontSize: 11, color: "#fca5a5", fontWeight: 800 },
+  approvalArgs: { margin: 0, padding: 10, borderRadius: 10, background: "rgba(2,6,23,.7)", border: "1px solid rgba(148,163,184,.14)", color: "#cbd5e1", fontSize: 11, whiteSpace: "pre-wrap", overflowX: "auto" },
+  approvalActions: { display: "flex", gap: 8 },
+  approveBtn: { padding: "8px 14px", borderRadius: 10, border: "1px solid rgba(34,197,94,.5)", background: "linear-gradient(135deg, #16a34a, #22c55e)", color: "white", fontWeight: 800, cursor: "pointer" },
+  denyBtn: { padding: "8px 14px", borderRadius: 10, border: "1px solid rgba(148,163,184,.3)", background: "rgba(2,6,23,.5)", color: "#e2e8f0", fontWeight: 800, cursor: "pointer" },
   sendButton: { width: 38, height: 38, borderRadius: 13, border: 0, background: "linear-gradient(135deg, #2563eb, #06b6d4)", color: "white", fontWeight: 800 },
   actionRow: { display: "grid", gridTemplateColumns: "repeat(5, minmax(0, 1fr))", gap: 9, marginTop: 10 },
   actionChip: { textAlign: "left", padding: 10, borderRadius: 14, border: "1px solid rgba(148,163,184,.14)", background: "rgba(2,6,23,.46)", color: "#e2e8f0", display: "flex", flexDirection: "column", gap: 3, cursor: "pointer", transition: "border-color .16s ease, background .16s ease, transform .16s ease" },
