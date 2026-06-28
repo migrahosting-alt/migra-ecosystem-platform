@@ -4,7 +4,7 @@
 // If pg is missing / the DB is unreachable / the table is absent, init() throws and the
 // dispatcher falls back to in-memory (unless PILOT_APPROVAL_FAIL_CLOSED is set).
 //
-// Schema: see migrations/0002_pilot_approvals.sql. NOT live-verified in this environment.
+// Schema: see migrations/0002_pilot_approvals.sql. Verified Phase 10.0 against dev PostgreSQL 16.
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 import type { ApprovalRequest } from "./types";
@@ -86,7 +86,7 @@ export const pgApprovalStore: ApprovalStore & { init(): Promise<void> } = {
     const p = await getPool();
     await expireStale(p, approvalId);
     const { rows } = await p.query(
-      "UPDATE pilot_approvals SET status='approved', decided_at=now(), updated_at=now() WHERE id=$1 AND status='pending' AND (expires_at IS NULL OR expires_at > now()) RETURNING *",
+      "UPDATE pilot_approvals SET status='approved', updated_at=now() WHERE id=$1 AND status='pending' AND (expires_at IS NULL OR expires_at > now()) RETURNING *",
       [approvalId],
     );
     return rows[0] ? rowToRec(rows[0]) : null;
@@ -95,7 +95,7 @@ export const pgApprovalStore: ApprovalStore & { init(): Promise<void> } = {
   async cancel(approvalId) {
     const p = await getPool();
     const { rows } = await p.query(
-      "UPDATE pilot_approvals SET status='cancelled', decided_at=now(), updated_at=now() WHERE id=$1 AND status='pending' RETURNING *",
+      "UPDATE pilot_approvals SET status='cancelled', updated_at=now() WHERE id=$1 AND status='pending' RETURNING *",
       [approvalId],
     );
     return rows[0] ? rowToRec(rows[0]) : null;

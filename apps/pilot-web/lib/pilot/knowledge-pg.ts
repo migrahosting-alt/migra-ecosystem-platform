@@ -4,7 +4,7 @@
 // If pg is missing / DB is unreachable / the extension or tables are absent, init() throws
 // and the dispatcher falls back to file-backed memory.
 //
-// Schema: see migrations/0001_pilot_pgvector.sql. NOT live-verified in this environment.
+// Schema: see migrations/0001_pilot_pgvector.sql. Verified Phase 10.0 against dev PG16 + pgvector 0.6.
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 import type { Chunk, Embedding, MemoryStorage, SearchHit, Source } from "./types";
@@ -107,23 +107,39 @@ export const pgStorage: MemoryStorage = {
   async searchVectors(qv: number[], k: number): Promise<SearchHit[]> {
     const p = await getPool();
     const limit = Math.max(1, Math.min(k, 20));
-    const r = await p.query(
-      `SELECT c.id AS chunk_id, c.source_id, s.title, s.path, c.text,
-              1 - (e.embedding <=> $1) AS score
-         FROM pilot_embeddings e
-         JOIN pilot_chunks c ON c.id = e.chunk_id
-         JOIN pilot_sources s ON s.id = c.source_id
-        ORDER BY e.embedding <=> $1 ASC
-        LIMIT $2`,
-      [toVector(qv), limit],
-    );
-    return r.rows.map((row: any) => ({
-      chunkId: row.chunk_id,
-      sourceId: row.source_id,
-      title: row.title,
-      path: row.path,
-      score: Number(row.score),
-      snippet: String(row.text).replace(/\s+/g, " ").slice(0, 300),
-    } satisfies SearchHit));
+    // ivfflat defaults to probes=1, which silently misses on small or list-misaligned data
+    // (a query vector can land in a different list than the only matching doc). Probe all lists
+    // — pgvector caps probes at `lists`, so this yields EXACT recall, correctness over raw speed
+    // at MigraPilot's memory scale. For very large corpora, prefer an HNSW index (see
+    // migrations/0001_pilot_pgvector.sql). SET LOCAL requires an explicit transaction.
+    const client = await p.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query("SET LOCAL ivfflat.probes = 1000");
+      const r = await client.query(
+        `SELECT c.id AS chunk_id, c.source_id, s.title, s.path, c.text,
+                1 - (e.embedding <=> $1) AS score
+           FROM pilot_embeddings e
+           JOIN pilot_chunks c ON c.id = e.chunk_id
+           JOIN pilot_sources s ON s.id = c.source_id
+          ORDER BY e.embedding <=> $1 ASC
+          LIMIT $2`,
+        [toVector(qv), limit],
+      );
+      await client.query("COMMIT");
+      return r.rows.map((row: any) => ({
+        chunkId: row.chunk_id,
+        sourceId: row.source_id,
+        title: row.title,
+        path: row.path,
+        score: Number(row.score),
+        snippet: String(row.text).replace(/\s+/g, " ").slice(0, 300),
+      } satisfies SearchHit));
+    } catch (e) {
+      await client.query("ROLLBACK").catch(() => {});
+      throw e;
+    } finally {
+      client.release();
+    }
   },
 };

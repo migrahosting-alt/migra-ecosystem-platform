@@ -86,5 +86,7 @@ pending ──approve(claim)──▶ approved ──run──▶ executed
 - If a process crashes after claiming but before executing, the approval is left `approved`
   (not `executed`) and is **not** retried — a safe direction (no double execution).
 - `expired` is enforced lazily (on read / claim), not by a background sweeper.
-- The Postgres backend is **scaffolded and compiles** but is **not live-verified** in this
-  environment (no database available).
+- The Postgres backend was **verified (Phase 10.0)** against a dev PostgreSQL 16 target:
+  persisted row, exact-once claim, cancel, TTL expiry, blocked-never-executes, and sanitized
+  args (no secrets stored). See [`../migrations/README.md`](../migrations/README.md) for the
+  apply order and production checklist. It has not yet been run against a production database.
