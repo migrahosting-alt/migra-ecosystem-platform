@@ -20,9 +20,11 @@ const SECRET_KEY_RE = /secret|token|password|key|credential|authorization|cookie
 // tools never legitimately take such keys, so dropping them keeps stored == executed.
 export function sanitizeApprovalArgs(args: Record<string, unknown> = {}): Record<string, unknown> {
   const out: Record<string, unknown> = {};
+  // Cap matches the code/file content limit (256KB) so an approved code.apply / file write is
+  // stored and executed EXACTLY (exact-once binding); secret-looking keys are still dropped.
   for (const [k, v] of Object.entries(args)) {
     if (SECRET_KEY_RE.test(k)) continue;
-    out[k] = typeof v === "string" && v.length > 8000 ? v.slice(0, 8000) : v;
+    out[k] = typeof v === "string" && v.length > 262144 ? v.slice(0, 262144) : v;
   }
   return out;
 }

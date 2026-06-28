@@ -6,7 +6,7 @@
 //   blocked           -> refused, never executed, no approval offered
 // This is the guardrail layer only — it adds NO operational/destructive tools.
 
-import { TOOLS } from "./tools";
+import { TOOLS, repoCommandRisk } from "./tools";
 
 export type PilotRiskLevel = "safe_read" | "safe_write" | "requires_approval" | "blocked";
 
@@ -56,20 +56,31 @@ function effectFor(risk: PilotRiskLevel): string {
 
 export function classifyPilotAction(name: string, args: Record<string, unknown> = {}): PilotActionDecision {
   const summary = summarize(name, args);
-  const mk = (risk: PilotRiskLevel, reason: string): PilotActionDecision => ({
+  const mk = (risk: PilotRiskLevel, reason: string, effect?: string): PilotActionDecision => ({
     action: name,
     risk,
     reason,
     requiresApproval: risk === "safe_write" || risk === "requires_approval",
     blocked: risk === "blocked",
     summary,
-    expectedEffect: effectFor(risk),
+    expectedEffect: effect ?? effectFor(risk),
   });
 
   if (BLOCKED_RE.test(name)) return mk("blocked", "matches a blocked pattern (shell/deploy/db/install/secret/destructive/prod)");
 
   const tool = TOOLS[name];
   if (!tool) return mk("blocked", "unknown tool — not in the allowlisted registry");
+
+  // Coding hand (Phase 10.3): repo.command risk is per-command; code.apply edits a repo file.
+  if (name === "repo.command") {
+    const cmd = typeof args.command === "string" ? args.command : "";
+    const r = repoCommandRisk(cmd);
+    if (r === "blocked") return mk("blocked", "command is not in the repo allowlist");
+    if (r === "read") return mk("safe_read", "allowlisted read-only repo command");
+    return mk("requires_approval", "allowlisted build / typecheck command", "Will run a build/typecheck command in the repo (no commit).");
+  }
+  if (name === "code.apply") return mk("requires_approval", "applies a change to a repository file", "Will create or modify a repository file (no commit).");
+
   if (IMAGE_SAFE_READ.has(name)) return mk("safe_read", "read-only image provider operation");
   if (tool.risk === "read") return mk("safe_read", "read-only operation");
   if (MEMORY_WRITE.has(name)) return mk("safe_write", "changes MigraPilot memory");

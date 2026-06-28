@@ -17,7 +17,7 @@ const navGroups = [
   },
   {
     title: "Governance",
-    items: ["Policy", "Sources", "Models", "Image"],
+    items: ["Policy", "Sources", "Models", "Image", "Repo"],
   },
   {
     title: "Admin",
@@ -122,6 +122,7 @@ const sectionSubtitles: Record<string, string> = {
   Policy: "Guardrails enforced before any execution runs.",
   Sources: "Connected knowledge the assistant uses for grounded answers.",
   Image: "Image generation provider — approval-gated, disabled until configured.",
+  Repo: "Coding hand — preview diffs, apply approved patches, run allowlisted checks.",
   Models: "Model routing and roles for safe, cost-aware execution.",
   Admin: "Workspace administration and access controls.",
 };
@@ -485,7 +486,17 @@ export default function MigraPilotCommandCenterMock() {
                     <div style={S.approvalText}>The agent wants to run <strong>{pendingApproval.toolName}</strong><span style={S.approvalRisk}>{pendingApproval.risk}</span></div>
                     {pendingApproval.reason && <div style={S.muted}>Why: {pendingApproval.reason}</div>}
                     {pendingApproval.expectedEffect && <div style={S.muted}>Effect: {pendingApproval.expectedEffect}</div>}
-                    <pre style={S.approvalArgs}>{JSON.stringify(pendingApproval.args, null, 2)}</pre>
+                    {pendingApproval.toolName === "code.apply" ? (
+                      <pre style={S.approvalArgs}>{(() => {
+                        const a = pendingApproval.args as { path?: string; content?: string; validate?: string };
+                        const content = typeof a.content === "string" ? a.content : "";
+                        const lines = content.split("\n");
+                        const head = lines.slice(0, 16).map((l) => "+ " + l).join("\n");
+                        return `path: ${a.path ?? "(?)"}\n${content.length} bytes · ${lines.length} lines${a.validate ? ` · validate: ${a.validate}` : ""}\n${head}${lines.length > 16 ? "\n  …" : ""}`;
+                      })()}</pre>
+                    ) : (
+                      <pre style={S.approvalArgs}>{JSON.stringify(pendingApproval.args, null, 2)}</pre>
+                    )}
                     <div style={S.approvalActions}>
                       <button onClick={() => decideApproval("approve")} disabled={sending} style={S.approveBtn}>Approve</button>
                       <button onClick={() => decideApproval("deny")} disabled={sending} style={S.denyBtn}>Cancel</button>
@@ -704,6 +715,38 @@ type BatchRejected = { path: string; reason: string };
 type BatchPreview = { candidateCount: number; rejectedCount: number; candidates: BatchCandidate[]; rejected: BatchRejected[]; truncated: boolean };
 
 type ImageHealth = { provider: string; status: string; endpointConfigured: boolean; endpoint?: string; timeoutMs?: number; outputBaseConfigured?: boolean; reachable?: boolean; detail: string };
+
+function RepoSection() {
+  const [repo, setRepo] = useState<{ head: string; status: string } | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    fetch("/api/pilot/repo/status")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (active && d) setRepo(d); })
+      .catch(() => {});
+    return () => { active = false; };
+  }, []);
+
+  const statusLines = repo?.status && repo.status !== "(no output)" ? repo.status.split("\n").slice(0, 12) : [];
+
+  return (
+    <section style={S.sectionGrid}>
+      <Panel title="Working tree">
+        <Row left="HEAD" right={repo?.head ?? "…"} />
+        <Row left="Tracked changes" right={repo ? (statusLines.length ? `${statusLines.length}${repo.status.split("\n").length > 12 ? "+" : ""} file(s)` : "clean") : "…"} />
+        {statusLines.length > 0 && <pre style={S.approvalArgs}>{statusLines.join("\n")}</pre>}
+      </Panel>
+      <Panel title="Coding hand">
+        <div style={S.muted}>Edits run through chat with the approval gate:</div>
+        <Row left="code.preview" right="read-only diff" />
+        <Row left="code.apply" right="needs approval" tone="Failed" />
+        <Row left="repo.command" right="allowlist only" />
+        <div style={S.muted}>Allowlisted: git status/diff/rev-parse (auto) · npx tsc --noEmit, npm run build (approval). No shell, deploy, installs, or commits.</div>
+      </Panel>
+    </section>
+  );
+}
 
 function ImageSection() {
   const [health, setHealth] = useState<ImageHealth | null>(null);
@@ -1102,6 +1145,8 @@ function SectionView({ section, activeCapability, onSelectCapability }: { sectio
       {section === "Sources" && <SourcesSection />}
 
       {section === "Image" && <ImageSection />}
+
+      {section === "Repo" && <RepoSection />}
 
       {richMap[section] && (
         <section style={S.sectionGrid}>

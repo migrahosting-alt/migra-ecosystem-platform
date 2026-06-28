@@ -53,6 +53,86 @@ async function git(args: string[]): Promise<string> {
   return stdout.trim() || "(no output)";
 }
 
+// ---- Coding hand (Phase 10.3) ----------------------------------------------
+const MAX_CODE_BYTES = 256 * 1024; // 256KB max per-file content
+const CODE_EXT_ALLOW = new Set([".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".json", ".md", ".mdx", ".css", ".scss", ".html", ".txt", ".yml", ".yaml", ".sql", ".sh", ".toml"]);
+const LOCKFILE_RE = /^(package-lock\.json|yarn\.lock|pnpm-lock\.yaml)$/i;
+
+// Resolve + guard a path for code edits: relative, inside repo root, not secrets/env/keys/lockfiles/.git,
+// not the pilot's own data dirs, and only code/text extensions.
+function safeCodePath(p: string): { abs: string; rel: string } {
+  if (typeof p !== "string" || !p.trim()) throw new Error("path required");
+  if (isAbsolute(p)) throw new Error("absolute paths are not allowed");
+  const abs = resolve(REPO_ROOT, p);
+  const rel = relative(REPO_ROOT, abs);
+  if (rel.startsWith("..") || isAbsolute(rel)) throw new Error("path escapes repo root");
+  const base = basename(abs);
+  if (SECRET_RE.test(base)) throw new Error("editing secret/env/key files is blocked");
+  if (LOCKFILE_RE.test(base)) throw new Error("editing lockfiles is blocked");
+  if (/(^|[/\\])\.git([/\\]|$)/.test(rel)) throw new Error("editing .git is blocked");
+  if (/^(\.pilot-data|\.pilot-scratch|\.pilot-sd|node_modules|\.next)([/\\]|$)/.test(rel)) throw new Error("editing this directory is blocked");
+  const ext = base.includes(".") ? base.slice(base.lastIndexOf(".")).toLowerCase() : "";
+  if (!CODE_EXT_ALLOW.has(ext)) throw new Error(`editing '${ext || "(no extension)"}' files is not allowed — code/text files only`);
+  return { abs, rel };
+}
+
+// Minimal LCS line diff for human-readable previews. Bounded; never writes anything.
+function lineDiff(oldText: string, newText: string): { added: number; removed: number; patch: string } {
+  const a = oldText.length ? oldText.split("\n") : [];
+  const b = newText.length ? newText.split("\n") : [];
+  const N = a.length, M = b.length;
+  if (N * M > 4_000_000) return { added: M, removed: N, patch: `(files too large for an inline diff: -${N}/+${M} lines)` };
+  const dp: number[][] = Array.from({ length: N + 1 }, () => new Array(M + 1).fill(0));
+  for (let i = N - 1; i >= 0; i--)
+    for (let j = M - 1; j >= 0; j--)
+      dp[i][j] = a[i] === b[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+  const out: string[] = [];
+  let added = 0, removed = 0, i = 0, j = 0;
+  while (i < N && j < M) {
+    if (a[i] === b[j]) { out.push("  " + a[i]); i++; j++; }
+    else if (dp[i + 1][j] >= dp[i][j + 1]) { out.push("- " + a[i]); removed++; i++; }
+    else { out.push("+ " + b[j]); added++; j++; }
+  }
+  while (i < N) { out.push("- " + a[i++]); removed++; }
+  while (j < M) { out.push("+ " + b[j++]); added++; }
+  return { added, removed, patch: out.slice(0, 400).join("\n") };
+}
+
+// Allowlisted repo commands (normalized key -> argv + risk). NO shell, pipes, or redirects.
+const REPO_COMMANDS: Record<string, { argv: string[]; risk: "read" | "approval" }> = {
+  "git status --short": { argv: ["git", "status", "--short"], risk: "read" },
+  "git diff --stat": { argv: ["git", "diff", "--stat"], risk: "read" },
+  "git diff": { argv: ["git", "diff"], risk: "read" },
+  "git rev-parse --short head": { argv: ["git", "rev-parse", "--short", "HEAD"], risk: "read" },
+  "npx tsc --noemit": { argv: ["npx", "tsc", "--noEmit"], risk: "approval" },
+  "npm run build": { argv: ["npm", "run", "build"], risk: "approval" },
+};
+function normCmd(c: string): string {
+  return String(c || "").trim().replace(/\s+/g, " ").toLowerCase();
+}
+export function repoCommandRisk(command: string): "read" | "approval" | "blocked" {
+  const e = REPO_COMMANDS[normCmd(command)];
+  return e ? e.risk : "blocked";
+}
+async function runRepoCommand(command: string): Promise<{ ok: boolean; output: string }> {
+  const e = REPO_COMMANDS[normCmd(command)];
+  if (!e) return { ok: false, output: `command not in allowlist (blocked): ${String(command).slice(0, 80)}` };
+  try {
+    const { stdout, stderr } = await execFileP(e.argv[0], e.argv.slice(1), { cwd: REPO_ROOT, timeout: 300000, maxBuffer: 8 * 1024 * 1024 });
+    return { ok: true, output: (stdout + (stderr ? "\n" + stderr : "")).trim() || "(no output)" };
+  } catch (err) {
+    const e2 = err as { stdout?: string; stderr?: string; message?: string };
+    const out = [e2.stdout, e2.stderr, e2.message].filter(Boolean).join("\n").trim();
+    return { ok: false, output: out || "command failed" };
+  }
+}
+// Read-only repo status for the UI (HEAD + working tree), via the same allowlist.
+export async function repoStatus(): Promise<{ head: string; status: string }> {
+  const head = await runRepoCommand("git rev-parse --short HEAD");
+  const status = await runRepoCommand("git status --short");
+  return { head: head.ok ? head.output : "(unknown)", status: status.ok ? status.output : "(unavailable)" };
+}
+
 export const TOOLS: Record<string, ToolDef> = {
   "git.status": {
     name: "git.status",
@@ -321,6 +401,54 @@ export const TOOLS: Record<string, ToolDef> = {
       return `generated -> .pilot-scratch/${basename(output)} (${stdout.trim().slice(-100)})`;
     },
   },
+
+  "code.preview": {
+    name: "code.preview",
+    description: "Preview a proposed change to a repository file as a unified-style diff WITHOUT writing anything (read-only). Provide 'path' (relative repo code/text file) and 'content' (the full proposed new file content). Use this before code.apply so the user can review the diff.",
+    risk: "read",
+    parameters: { type: "object", properties: { path: { type: "string" }, content: { type: "string" } }, required: ["path", "content"] },
+    run: async (a) => {
+      const { rel, abs } = safeCodePath(String(a.path ?? ""));
+      const content = String(a.content ?? "");
+      if (Buffer.byteLength(content) > MAX_CODE_BYTES) throw new Error(`content too large (max ${MAX_CODE_BYTES} bytes)`);
+      const exists = existsSync(abs);
+      const current = exists ? await readFile(abs, "utf8") : "";
+      const d = lineDiff(current, content);
+      return clip(`${exists ? "modify" : "create"} ${rel}\n+${d.added} -${d.removed} lines\n--- a/${rel}\n+++ b/${rel}\n${d.patch}`);
+    },
+  },
+  "code.apply": {
+    name: "code.apply",
+    description: "Apply an APPROVED change to a repository file. Writes the exact proposed 'content' to 'path' (relative repo code/text file). Optional 'validate' = 'tsc' or 'build' runs that allowlisted check after writing. NEVER edits secrets/env/keys/lockfiles/.git/node_modules. Does NOT commit. Requires human approval.",
+    risk: "high",
+    parameters: { type: "object", properties: { path: { type: "string" }, content: { type: "string" }, validate: { type: "string", enum: ["tsc", "build"] } }, required: ["path", "content"] },
+    run: async (a) => {
+      const { rel, abs } = safeCodePath(String(a.path ?? ""));
+      const content = String(a.content ?? "");
+      if (Buffer.byteLength(content) > MAX_CODE_BYTES) throw new Error(`content too large (max ${MAX_CODE_BYTES} bytes)`);
+      const existed = existsSync(abs);
+      await mkdir(resolve(abs, ".."), { recursive: true });
+      await writeFile(abs, content, "utf8");
+      let out = `${existed ? "modified" : "created"} ${rel} (${Buffer.byteLength(content)} bytes)`;
+      const v = a.validate ? String(a.validate) : "";
+      if (v === "tsc" || v === "build") {
+        const cmd = v === "tsc" ? "npx tsc --noEmit" : "npm run build";
+        const res = await runRepoCommand(cmd);
+        out += `\nvalidation [${cmd}]: ${res.ok ? "PASS ✓" : "FAIL ✗"}\n${res.output.slice(0, 1500)}`;
+      }
+      return clip(out);
+    },
+  },
+  "repo.command": {
+    name: "repo.command",
+    description: "Run ONE allowlisted repo command. Read-only (auto): 'git status --short', 'git diff --stat', 'git diff', 'git rev-parse --short HEAD'. Validation (needs approval): 'npx tsc --noEmit', 'npm run build'. Anything else is blocked. No shell, pipes, redirects, or arbitrary commands.",
+    risk: "high",
+    parameters: { type: "object", properties: { command: { type: "string" } }, required: ["command"] },
+    run: async (a) => {
+      const res = await runRepoCommand(String(a.command ?? ""));
+      return clip(res.output);
+    },
+  },
 };
 
 export function isMutating(name: string): boolean {
@@ -340,7 +468,12 @@ export function toolSpecsForModel() {
 export async function runTool(name: string, args: Record<string, unknown>, opts?: { approved?: boolean }): Promise<{ ok: boolean; output: string }> {
   const tool = TOOLS[name];
   if (!tool) return { ok: false, output: `unknown tool: ${name}` };
-  if (tool.risk !== "read" && !opts?.approved) {
+  if (name === "repo.command") {
+    // Dynamic per-command gate (the static tool risk is a backstop only).
+    const r = repoCommandRisk(String((args || {}).command ?? ""));
+    if (r === "blocked") return { ok: false, output: `command not in allowlist (blocked): ${String((args || {}).command ?? "").slice(0, 80)}` };
+    if (r === "approval" && !opts?.approved) return { ok: false, output: `command requires human approval — blocked` };
+  } else if (tool.risk !== "read" && !opts?.approved) {
     return { ok: false, output: `tool ${name} is mutating and requires human approval — blocked` };
   }
   try {
