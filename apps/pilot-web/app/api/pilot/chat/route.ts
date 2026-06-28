@@ -6,6 +6,7 @@
 import { AGENT_PROFILES, classifyAgent, buildSystemPrompt } from "../../../../lib/pilot/agent";
 import { selectModel, type ChatMessage } from "../../../../lib/pilot/gateway";
 import { streamPilotRun } from "../../../../lib/pilot/orchestrator";
+import { retrieveContext } from "../../../../lib/pilot/knowledge";
 import { getOrCreateConversation, id, saveMessage, saveRun, store } from "../../../../lib/pilot/store";
 import type { Message, PilotEvent, Run } from "../../../../lib/pilot/types";
 
@@ -87,6 +88,9 @@ export async function POST(req: Request) {
         setStep(0, "running"); setStep(0, "done");
         setStep(1, "running"); setStep(1, "done");
         setStep(2, "running");
+        // Auto-retrieval (RAG): inject confident knowledge matches as a system message before the loop.
+        const memoryContext = await retrieveContext(message).catch(() => null);
+        if (memoryContext) convo.splice(1, 0, { role: "system", content: memoryContext });
         await streamPilotRun(run, convo, send);
       } catch (err) {
         run.status = "failed";

@@ -83,6 +83,38 @@ export interface Conversation {
   runIds: string[];
 }
 
+// --- Knowledge / memory (Phase 9) ---
+export interface Source {
+  id: string;
+  path: string; // repo-relative
+  title: string;
+  hash: string; // sha256 of content
+  bytes: number;
+  chunkCount: number;
+  createdAt: string;
+}
+
+export interface Chunk {
+  id: string;
+  sourceId: string;
+  index: number;
+  text: string;
+}
+
+export interface Embedding {
+  chunkId: string;
+  vector: number[];
+}
+
+export interface SearchHit {
+  chunkId: string;
+  sourceId: string;
+  title: string;
+  path: string;
+  score: number;
+  snippet: string;
+}
+
 // Events streamed to the UI over NDJSON (one JSON object per line).
 export type PilotEvent =
   | { type: "run.created"; run: Run }

@@ -6,6 +6,7 @@ import type { AgentProfileId } from "./types";
 
 const MODEL_BASE = process.env.PILOT_MODEL_BASE ?? "http://localhost:11434";
 const VISION_MODEL = process.env.PILOT_VISION_MODEL ?? "llava";
+const EMBED_MODEL = process.env.PILOT_EMBED_MODEL ?? "nomic-embed-text";
 
 export type ToolCall = { function: { name: string; arguments: Record<string, unknown> | string } };
 export type ChatMessage = { role: string; content: string; tool_calls?: ToolCall[]; tool_name?: string };
@@ -41,6 +42,19 @@ export async function gatewayHealthy(): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+// Embeddings: nomic-embed-text. Use the task prefixes the model expects.
+export async function embed(text: string, kind: "document" | "query" = "document"): Promise<number[]> {
+  const prefix = kind === "query" ? "search_query: " : "search_document: ";
+  const res = await fetch(`${MODEL_BASE}/api/embeddings`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ model: EMBED_MODEL, prompt: prefix + text }),
+  });
+  if (!res.ok) throw new Error(`embed model error ${res.status} (is "${EMBED_MODEL}" pulled?)`);
+  const data = (await res.json()) as { embedding?: number[] };
+  return data.embedding ?? [];
 }
 
 // Vision: send a base64 image + prompt to the local vision model and return its description.

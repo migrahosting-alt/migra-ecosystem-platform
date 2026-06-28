@@ -687,6 +687,73 @@ function StatusPill({ label, tone }: { label: string; tone: string }) {
   );
 }
 
+type SourceRow = { id: string; path: string; title: string; chunkCount: number; createdAt: string };
+type SourceStats = { sourceCount: number; chunkCount: number; lastIngest: string | null; sources: SourceRow[] };
+type SearchHitRow = { title: string; path: string; score: number; snippet: string };
+
+function SourcesSection() {
+  const [stats, setStats] = useState<SourceStats | null>(null);
+  const [q, setQ] = useState("");
+  const [hits, setHits] = useState<SearchHitRow[] | null>(null);
+  const [searching, setSearching] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    fetch("/api/pilot/sources")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (active && d) setStats(d); })
+      .catch(() => {});
+    return () => { active = false; };
+  }, []);
+
+  const runSearch = async () => {
+    if (!q.trim() || searching) return;
+    setSearching(true);
+    try {
+      const r = await fetch("/api/pilot/sources/search", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ query: q, k: 5 }) });
+      const d = await r.json();
+      setHits(Array.isArray(d.hits) ? d.hits : []);
+    } catch {
+      setHits([]);
+    } finally {
+      setSearching(false);
+    }
+  };
+
+  return (
+    <section style={S.sectionGrid}>
+      <Panel title="Knowledge Store">
+        <Row left="Sources" right={String(stats?.sourceCount ?? 0)} />
+        <Row left="Chunks" right={String(stats?.chunkCount ?? 0)} />
+        <Row left="Last ingest" right={stats?.lastIngest ? pilotTimeAgo(stats.lastIngest) : "—"} />
+      </Panel>
+
+      <Panel title="Search knowledge">
+        <div style={S.inputRow}>
+          <span style={S.promptIcon}>⌕</span>
+          <input value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") runSearch(); }} placeholder="Search your sources…" style={S.composerInput} />
+          <button onClick={runSearch} disabled={searching} style={{ ...S.sendButton, opacity: searching ? 0.6 : 1, cursor: searching ? "default" : "pointer" }}>{searching ? "…" : "↗"}</button>
+        </div>
+        {hits && hits.length === 0 && <div style={S.muted}>No matches.</div>}
+        {hits && hits.map((h, i) => (
+          <div key={i} style={{ marginTop: 8 }}>
+            <Row left={h.title} right={`score ${h.score.toFixed(2)}`} tone="Running" />
+            <div style={S.muted}>{h.snippet}</div>
+          </div>
+        ))}
+      </Panel>
+
+      <Panel title="Ingested sources">
+        {stats && stats.sources.length > 0 ? (
+          stats.sources.map((s) => <Row key={s.id} left={s.path} right={`${s.chunkCount} chunks`} />)
+        ) : (
+          <div style={S.muted}>No sources yet. Ingest a file via POST /api/pilot/sources/ingest.</div>
+        )}
+      </Panel>
+    </section>
+  );
+}
+
 function RichPanel({ title, rows }: { title: string; rows: RichRow[] }) {
   return (
     <article style={S.richPanel}>
@@ -717,7 +784,6 @@ function SectionView({ section, activeCapability, onSelectCapability }: { sectio
     "Audit Trail": { title: "Activity", rows: opsData["Audit Trail"] },
     Executions: { title: "Executions", rows: recentRuns.map(([name, status, time]) => ({ title: name, sub: `PROD · ${time}`, status, tone: runTone[status] ?? "slate" })) },
     Policy: { title: "Policies", rows: govPolicies },
-    Sources: { title: "Knowledge Sources", rows: knowledgeSources.map(([name, type, status, tone]) => ({ title: name, sub: type, status, tone })) },
     Models: { title: "Models", rows: models.map(([name, role], i) => ({ title: name, sub: `${role} model`, status: i === 0 ? "Primary" : "Available", tone: i === 0 ? "green" : "slate" })) },
   };
 
@@ -811,6 +877,8 @@ function SectionView({ section, activeCapability, onSelectCapability }: { sectio
           </section>
         </>
       )}
+
+      {section === "Sources" && <SourcesSection />}
 
       {richMap[section] && (
         <section style={S.sectionGrid}>

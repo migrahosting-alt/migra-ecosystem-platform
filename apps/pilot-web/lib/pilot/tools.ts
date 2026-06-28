@@ -9,6 +9,7 @@ import { resolve, relative, isAbsolute, basename } from "node:path";
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { visionAnalyze } from "./gateway";
+import { formatHits, searchKnowledge } from "./knowledge";
 
 const execFileP = promisify(execFile);
 
@@ -153,6 +154,17 @@ export const TOOLS: Record<string, ToolDef> = {
       const abs = safePath(String(a.path));
       const { stdout } = await execFileP("identify", ["-format", "%wx%h %m %b", abs], { cwd: REPO_ROOT, timeout: TIMEOUT });
       return clip(`${relative(REPO_ROOT, abs)}: ${stdout.trim()}`);
+    },
+  },
+  "memory.search": {
+    name: "memory.search",
+    description: "Semantically search the user's ingested knowledge sources and return the most relevant snippets (read-only). Provide 'query'. Use this when the user asks about their docs, runbooks, or anything they've added to MigraPilot's knowledge.",
+    risk: "read",
+    parameters: { type: "object", properties: { query: { type: "string" }, k: { type: "number" } }, required: ["query"] },
+    run: async (a) => {
+      if (!a.query) throw new Error("query required");
+      const hits = await searchKnowledge(String(a.query), Number(a.k) || 5);
+      return clip(formatHits(hits));
     },
   },
   "image.analyze": {
