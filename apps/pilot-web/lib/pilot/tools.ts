@@ -36,6 +36,14 @@ function safePath(p: string): string {
   return abs;
 }
 
+// Resolve a safe OUTPUT path inside the .pilot-scratch sandbox (mutating tools write here only).
+function scratchOut(name: string): string {
+  const safe = String(name).replace(/[^a-zA-Z0-9._-]/g, "_") || "out.png";
+  const abs = resolve(SCRATCH_DIR, safe);
+  if (abs !== SCRATCH_DIR && !abs.startsWith(SCRATCH_DIR + "/")) throw new Error("path escapes scratch sandbox");
+  return abs;
+}
+
 async function git(args: string[]): Promise<string> {
   const { stdout } = await execFileP("git", args, { cwd: REPO_ROOT, timeout: TIMEOUT, maxBuffer: 4 * 1024 * 1024 });
   return stdout.trim() || "(no output)";
@@ -130,6 +138,81 @@ export const TOOLS: Record<string, ToolDef> = {
       const content = String(a.content ?? "");
       await writeFile(abs, content, "utf8");
       return `wrote ${content.length} chars to .pilot-scratch/${name}`;
+    },
+  },
+  // --- Image tools (ImageMagick). image.info is read-only; the rest write to the sandbox (approval-gated). ---
+  "image.info": {
+    name: "image.info",
+    description: "Get an image's dimensions, format, and size (read-only). Provide 'path' relative to the app root.",
+    risk: "read",
+    parameters: { type: "object", properties: { path: { type: "string" } }, required: ["path"] },
+    run: async (a) => {
+      if (!a.path) throw new Error("path required");
+      const abs = safePath(String(a.path));
+      const { stdout } = await execFileP("identify", ["-format", "%wx%h %m %b", abs], { cwd: REPO_ROOT, timeout: TIMEOUT });
+      return clip(`${relative(REPO_ROOT, abs)}: ${stdout.trim()}`);
+    },
+  },
+  "image.resize": {
+    name: "image.resize",
+    description: "Resize an image and save into the .pilot-scratch sandbox. Provide 'path' (input), 'out' (output name) and one of 'width'/'height' (px) or 'scale' (e.g. '50%'). Aspect ratio is kept unless both width and height are given.",
+    risk: "low",
+    parameters: { type: "object", properties: { path: { type: "string" }, out: { type: "string" }, width: { type: "number" }, height: { type: "number" }, scale: { type: "string" } }, required: ["path", "out"] },
+    run: async (a) => {
+      const input = safePath(String(a.path));
+      const output = scratchOut(String(a.out));
+      await mkdir(SCRATCH_DIR, { recursive: true });
+      let geom: string;
+      if (a.scale) geom = String(a.scale);
+      else if (a.width && a.height) geom = `${Number(a.width)}x${Number(a.height)}`;
+      else if (a.width) geom = `${Number(a.width)}x`;
+      else if (a.height) geom = `x${Number(a.height)}`;
+      else throw new Error("provide width, height, or scale");
+      await execFileP("convert", [input, "-resize", geom, output], { cwd: REPO_ROOT, timeout: TIMEOUT });
+      return `resized -> .pilot-scratch/${basename(output)} (${geom})`;
+    },
+  },
+  "image.convert": {
+    name: "image.convert",
+    description: "Convert an image to another format (chosen by the output extension) and save into .pilot-scratch. Provide 'path' (input) and 'out' (e.g. 'logo.webp').",
+    risk: "low",
+    parameters: { type: "object", properties: { path: { type: "string" }, out: { type: "string" } }, required: ["path", "out"] },
+    run: async (a) => {
+      const input = safePath(String(a.path));
+      const output = scratchOut(String(a.out));
+      await mkdir(SCRATCH_DIR, { recursive: true });
+      await execFileP("convert", [input, output], { cwd: REPO_ROOT, timeout: TIMEOUT });
+      return `converted -> .pilot-scratch/${basename(output)}`;
+    },
+  },
+  "image.crop": {
+    name: "image.crop",
+    description: "Crop a WxH region at offset X,Y and save into .pilot-scratch. Provide 'path','out','width','height' and optional 'x','y' (default 0,0).",
+    risk: "low",
+    parameters: { type: "object", properties: { path: { type: "string" }, out: { type: "string" }, width: { type: "number" }, height: { type: "number" }, x: { type: "number" }, y: { type: "number" } }, required: ["path", "out", "width", "height"] },
+    run: async (a) => {
+      const input = safePath(String(a.path));
+      const output = scratchOut(String(a.out));
+      await mkdir(SCRATCH_DIR, { recursive: true });
+      const w = Number(a.width), h = Number(a.height), x = Number(a.x || 0), y = Number(a.y || 0);
+      await execFileP("convert", [input, "-crop", `${w}x${h}+${x}+${y}`, "+repage", output], { cwd: REPO_ROOT, timeout: TIMEOUT });
+      return `cropped ${w}x${h}+${x}+${y} -> .pilot-scratch/${basename(output)}`;
+    },
+  },
+  "image.annotate": {
+    name: "image.annotate",
+    description: "Overlay caption text on an image (e.g. a social/brand card) and save into .pilot-scratch. Provide 'path','out','text'; optional 'gravity' (north/center/south, default south), 'size' (font px, default 36), 'color' (default white).",
+    risk: "low",
+    parameters: { type: "object", properties: { path: { type: "string" }, out: { type: "string" }, text: { type: "string" }, gravity: { type: "string" }, size: { type: "number" }, color: { type: "string" } }, required: ["path", "out", "text"] },
+    run: async (a) => {
+      const input = safePath(String(a.path));
+      const output = scratchOut(String(a.out));
+      await mkdir(SCRATCH_DIR, { recursive: true });
+      const gravity = ["north", "center", "south", "northwest", "northeast", "southwest", "southeast", "west", "east"].includes(String(a.gravity)) ? String(a.gravity) : "south";
+      const size = Number(a.size) || 36;
+      const color = /^[#a-zA-Z0-9]+$/.test(String(a.color ?? "")) ? String(a.color) : "white";
+      await execFileP("convert", [input, "-gravity", gravity, "-pointsize", String(size), "-fill", color, "-annotate", "+0+24", String(a.text ?? ""), output], { cwd: REPO_ROOT, timeout: TIMEOUT });
+      return `annotated -> .pilot-scratch/${basename(output)}`;
     },
   },
 };
