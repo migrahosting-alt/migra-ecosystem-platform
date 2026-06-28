@@ -5,6 +5,7 @@
 import type { AgentProfileId } from "./types";
 
 const MODEL_BASE = process.env.PILOT_MODEL_BASE ?? "http://localhost:11434";
+const VISION_MODEL = process.env.PILOT_VISION_MODEL ?? "llava";
 
 export type ToolCall = { function: { name: string; arguments: Record<string, unknown> | string } };
 export type ChatMessage = { role: string; content: string; tool_calls?: ToolCall[]; tool_name?: string };
@@ -40,6 +41,24 @@ export async function gatewayHealthy(): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+// Vision: send a base64 image + prompt to the local vision model and return its description.
+export async function visionAnalyze(opts: { imageBase64: string; prompt: string; signal?: AbortSignal }): Promise<string> {
+  const res = await fetch(`${MODEL_BASE}/api/generate`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      model: VISION_MODEL,
+      prompt: opts.prompt,
+      images: [opts.imageBase64],
+      stream: false,
+    }),
+    signal: opts.signal,
+  });
+  if (!res.ok) throw new Error(`vision model error ${res.status} (is "${VISION_MODEL}" pulled?)`);
+  const data = (await res.json()) as { response?: string };
+  return (data.response ?? "").trim();
 }
 
 // Single non-streamed turn — used for the tool-calling loop (returns tool_calls reliably).

@@ -7,6 +7,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { resolve, relative, isAbsolute, basename } from "node:path";
 import { readFile, writeFile, mkdir } from "node:fs/promises";
+import { visionAnalyze } from "./gateway";
 
 const execFileP = promisify(execFile);
 
@@ -151,6 +152,21 @@ export const TOOLS: Record<string, ToolDef> = {
       const abs = safePath(String(a.path));
       const { stdout } = await execFileP("identify", ["-format", "%wx%h %m %b", abs], { cwd: REPO_ROOT, timeout: TIMEOUT });
       return clip(`${relative(REPO_ROOT, abs)}: ${stdout.trim()}`);
+    },
+  },
+  "image.analyze": {
+    name: "image.analyze",
+    description: "Look at an image and answer a question about it using the vision model (read-only). Provide 'path' (a repo image) and optional 'question' (default: describe it). Use this whenever the user wants you to SEE, describe, read, or critique an image, screenshot, or design.",
+    risk: "read",
+    parameters: { type: "object", properties: { path: { type: "string" }, question: { type: "string" } }, required: ["path"] },
+    run: async (a) => {
+      if (!a.path) throw new Error("path required");
+      const abs = safePath(String(a.path));
+      const buf = await readFile(abs);
+      if (buf.length > 8 * 1024 * 1024) throw new Error("image too large (>8MB)");
+      const prompt = (a.question ? String(a.question) : "") || "Describe this image in detail.";
+      const out = await visionAnalyze({ imageBase64: buf.toString("base64"), prompt });
+      return clip(out || "(no description)");
     },
   },
   "image.resize": {
