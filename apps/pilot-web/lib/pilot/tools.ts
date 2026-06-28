@@ -9,7 +9,7 @@ import { resolve, relative, isAbsolute, basename } from "node:path";
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { visionAnalyze } from "./gateway";
-import { formatHits, searchKnowledge } from "./knowledge";
+import { formatHits, ingestBatch, searchKnowledge } from "./knowledge";
 
 const execFileP = promisify(execFile);
 
@@ -165,6 +165,32 @@ export const TOOLS: Record<string, ToolDef> = {
       if (!a.query) throw new Error("query required");
       const hits = await searchKnowledge(String(a.query), Number(a.k) || 5);
       return clip(formatHits(hits));
+    },
+  },
+  "memory.preview": {
+    name: "memory.preview",
+    description: "Dry-run a directory/glob ingest: list candidate files and rejected files WITHOUT writing anything to memory (read-only). Provide 'path' (a directory or file) and optional 'glob'. Call this BEFORE proposing memory.ingest.",
+    risk: "read",
+    parameters: { type: "object", properties: { path: { type: "string" }, glob: { type: "string" } }, required: ["path"] },
+    run: async (a) => {
+      if (!a.path) throw new Error("path required");
+      const r = await ingestBatch(String(a.path), a.glob ? String(a.glob) : undefined, true);
+      if (!r.dryRun) return "preview failed";
+      const cands = r.candidates.slice(0, 20).map((c) => `  + ${c.path} (${c.bytes}b)`).join("\n");
+      const rej = r.rejected.slice(0, 20).map((x) => `  - ${x.path}: ${x.reason}`).join("\n");
+      return clip(`Preview of ${a.path}${a.glob ? ` (glob ${a.glob})` : ""}: ${r.candidateCount} candidate(s), ${r.rejectedCount} rejected${r.truncated ? " (truncated)" : ""}\nCandidates:\n${cands || "  (none)"}\nRejected:\n${rej || "  (none)"}`);
+    },
+  },
+  "memory.ingest": {
+    name: "memory.ingest",
+    description: "Ingest a directory or glob of safe text files into memory (MUTATING — requires human approval). Provide 'path' (a directory or file) and optional 'glob'. Prefer calling memory.preview first so you and the user can see what will be ingested.",
+    risk: "low",
+    parameters: { type: "object", properties: { path: { type: "string" }, glob: { type: "string" } }, required: ["path"] },
+    run: async (a) => {
+      if (!a.path) throw new Error("path required");
+      const r = await ingestBatch(String(a.path), a.glob ? String(a.glob) : undefined, false);
+      if (r.dryRun) return "ingest skipped";
+      return clip(`Ingested ${r.ingestedCount} file(s), ${r.chunkCount} chunk(s); ${r.rejectedCount} rejected. Memory now: ${r.sourceCount} sources / ${r.totalChunks} chunks.${r.truncated ? " (batch truncated at cap)" : ""}`);
     },
   },
   "image.analyze": {

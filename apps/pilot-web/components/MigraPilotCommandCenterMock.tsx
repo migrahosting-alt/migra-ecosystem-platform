@@ -693,6 +693,9 @@ function StatusPill({ label, tone }: { label: string; tone: string }) {
 type SourceRow = { id: string; path: string; title: string; chunkCount: number; createdAt: string };
 type SourceStats = { sourceCount: number; chunkCount: number; lastIngest: string | null; sources: SourceRow[] };
 type SearchHitRow = { title: string; path: string; score: number; snippet: string };
+type BatchCandidate = { path: string; bytes: number };
+type BatchRejected = { path: string; reason: string };
+type BatchPreview = { candidateCount: number; rejectedCount: number; candidates: BatchCandidate[]; rejected: BatchRejected[]; truncated: boolean };
 
 function SourcesSection() {
   const [stats, setStats] = useState<SourceStats | null>(null);
@@ -703,6 +706,11 @@ function SourcesSection() {
   const [ingestPath, setIngestPath] = useState("");
   const [ingesting, setIngesting] = useState(false);
   const [ingestMsg, setIngestMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [batchPath, setBatchPath] = useState("");
+  const [batchGlob, setBatchGlob] = useState("");
+  const [batchPreview, setBatchPreview] = useState<BatchPreview | null>(null);
+  const [batchBusy, setBatchBusy] = useState(false);
+  const [batchMsg, setBatchMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
   const load = () => {
     fetch("/api/pilot/sources")
@@ -749,6 +757,46 @@ function SourcesSection() {
     }
   };
 
+  const preview = async () => {
+    const path = batchPath.trim();
+    if (!path || batchBusy) return;
+    setBatchBusy(true);
+    setBatchMsg(null);
+    setBatchPreview(null);
+    try {
+      const r = await fetch("/api/pilot/sources/ingest-batch", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ path, glob: batchGlob.trim() || undefined, dryRun: true }) });
+      const d = await r.json();
+      if (r.ok && d.dryRun) setBatchPreview(d);
+      else setBatchMsg({ ok: false, text: `✗ ${d.error ?? "preview failed"}` });
+    } catch (err) {
+      setBatchMsg({ ok: false, text: `✗ ${(err as Error).message}` });
+    } finally {
+      setBatchBusy(false);
+    }
+  };
+
+  const ingestBatchNow = async () => {
+    const path = batchPath.trim();
+    if (!path || batchBusy) return;
+    setBatchBusy(true);
+    setBatchMsg(null);
+    try {
+      const r = await fetch("/api/pilot/sources/ingest-batch", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ path, glob: batchGlob.trim() || undefined, dryRun: false }) });
+      const d = await r.json();
+      if (r.ok && d.dryRun === false) {
+        setBatchMsg({ ok: true, text: `✓ Ingested ${d.ingestedCount} file(s), ${d.chunkCount} chunks; ${d.rejectedCount} rejected${d.truncated ? " (truncated)" : ""}` });
+        setBatchPreview(null);
+        load();
+      } else {
+        setBatchMsg({ ok: false, text: `✗ ${d.error ?? "ingest failed"}` });
+      }
+    } catch (err) {
+      setBatchMsg({ ok: false, text: `✗ ${(err as Error).message}` });
+    } finally {
+      setBatchBusy(false);
+    }
+  };
+
   return (
     <section style={S.sectionGrid}>
       <Panel title="Knowledge Store">
@@ -764,6 +812,28 @@ function SourcesSection() {
           <button onClick={ingest} disabled={ingesting} style={{ ...S.sendButton, width: "auto", padding: "0 12px", fontSize: 12, opacity: ingesting ? 0.6 : 1, cursor: ingesting ? "default" : "pointer" }}>{ingesting ? "…" : "Ingest"}</button>
         </div>
         {ingestMsg && <div style={{ ...S.muted, color: ingestMsg.ok ? "#86efac" : "#fca5a5" }}>{ingestMsg.text}</div>}
+      </Panel>
+
+      <Panel title="Batch ingest (folder / glob)">
+        <div style={S.inputRow}>
+          <span style={S.promptIcon}>⛁</span>
+          <input value={batchPath} onChange={(e) => setBatchPath(e.target.value)} placeholder="folder, e.g. migrapilot" style={S.composerInput} />
+        </div>
+        <div style={{ ...S.inputRow, marginTop: 6 }}>
+          <span style={S.promptIcon}>*</span>
+          <input value={batchGlob} onChange={(e) => setBatchGlob(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") preview(); }} placeholder="optional glob, e.g. **/*.md" style={S.composerInput} />
+          <button onClick={preview} disabled={batchBusy} style={{ ...S.sendButton, width: "auto", padding: "0 12px", fontSize: 12, opacity: batchBusy ? 0.6 : 1, cursor: batchBusy ? "default" : "pointer" }}>{batchBusy ? "…" : "Preview"}</button>
+        </div>
+        {batchPreview && (
+          <div style={{ marginTop: 8 }}>
+            <Row left={`${batchPreview.candidateCount} candidate(s)`} right={`${batchPreview.rejectedCount} rejected${batchPreview.truncated ? " · truncated" : ""}`} tone="Running" />
+            {batchPreview.candidates.slice(0, 8).map((c) => <div key={c.path} style={{ ...S.muted, color: "#86efac" }}>+ {c.path}</div>)}
+            {batchPreview.candidateCount > 8 && <div style={S.muted}>…and {batchPreview.candidateCount - 8} more</div>}
+            {batchPreview.rejected.slice(0, 5).map((x) => <div key={x.path} style={{ ...S.muted, color: "#fca5a5" }}>− {x.path}: {x.reason}</div>)}
+            <button onClick={ingestBatchNow} disabled={batchBusy || batchPreview.candidateCount === 0} style={{ ...S.sendButton, width: "auto", height: 30, padding: "0 14px", fontSize: 12, marginTop: 10, opacity: batchBusy || batchPreview.candidateCount === 0 ? 0.5 : 1, cursor: batchBusy || batchPreview.candidateCount === 0 ? "default" : "pointer" }}>Ingest these ({batchPreview.candidateCount})</button>
+          </div>
+        )}
+        {batchMsg && <div style={{ ...S.muted, color: batchMsg.ok ? "#86efac" : "#fca5a5" }}>{batchMsg.text}</div>}
       </Panel>
 
       <Panel title="Search knowledge">

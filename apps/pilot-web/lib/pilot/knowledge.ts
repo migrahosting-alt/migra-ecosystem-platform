@@ -2,7 +2,7 @@
 // File-backed (.pilot-data/*.json), local-first, no DB. Embeddings via nomic-embed-text.
 // globalThis-cached so we don't re-read files every call; write-through on mutation.
 
-import { readFile, writeFile, mkdir, stat } from "node:fs/promises";
+import { readFile, writeFile, mkdir, stat, readdir } from "node:fs/promises";
 import { resolve, relative, isAbsolute, basename, extname } from "node:path";
 import { createHash } from "node:crypto";
 import { embed } from "./gateway";
@@ -104,7 +104,7 @@ function cosine(a: number[], b: number[]): number {
   return dot / (Math.sqrt(na) * Math.sqrt(nb));
 }
 
-export async function ingestSource(relPath: string): Promise<Source> {
+export async function ingestSource(relPath: string, persistAfter = true): Promise<Source> {
   await ensureLoaded();
   const { abs, rel } = validatePath(relPath);
 
@@ -143,8 +143,161 @@ export async function ingestSource(relPath: string): Promise<Source> {
   }
 
   kb.sources.push(source);
-  await persist();
+  if (persistAfter) await persist();
   return source;
+}
+
+// --- Batch / directory / glob ingest (Phase 9.3) ---
+const MAX_SCAN = 5000; // directory entries scanned per batch
+const MAX_CANDIDATES = 100; // files ingested per batch
+
+type Candidate = { path: string; bytes: number };
+type Rejected = { path: string; reason: string };
+
+// Validate a base path that may be a directory (no extension check — that's per-file).
+function validateBase(relPath: string): { abs: string; rel: string } {
+  if (typeof relPath !== "string" || !relPath.trim()) throw new Error("path required");
+  if (isAbsolute(relPath)) throw new Error("only relative repo paths are allowed");
+  const abs = resolve(REPO_ROOT, relPath);
+  const rel = relative(REPO_ROOT, abs);
+  if (rel.startsWith("..") || isAbsolute(rel)) throw new Error("path escapes repo root");
+  const segments = rel.split(/[\\/]/).filter(Boolean);
+  if (segments.some((s) => DENY_DIR.includes(s))) throw new Error("path is in a denied directory");
+  return { abs, rel };
+}
+
+// Non-throwing per-file guardrail check; returns a rejection reason or null.
+function fileRejectReason(rel: string): string | null {
+  const ext = extname(rel).toLowerCase();
+  if (!ALLOW_EXT.has(ext)) return `file type '${ext || "none"}' not allowed`;
+  if (SECRET_RE.test(basename(rel))) return "secret-bearing / lockfile";
+  return null;
+}
+
+// Minimal glob: ** = any (incl. /), * = within a path segment, ? = one char. Applied to path under base.
+function globToRegExp(glob: string): RegExp {
+  let re = "";
+  for (let i = 0; i < glob.length; i++) {
+    const c = glob[i];
+    if (c === "*") {
+      if (glob[i + 1] === "*") {
+        re += ".*";
+        i++;
+        if (glob[i + 1] === "/") i++;
+      } else {
+        re += "[^/]*";
+      }
+    } else if (c === "?") {
+      re += "[^/]";
+    } else if (".+^${}()|[]\\".includes(c)) {
+      re += "\\" + c;
+    } else {
+      re += c;
+    }
+  }
+  return new RegExp("^" + re + "$");
+}
+
+async function collectCandidates(inputRel: string, glob?: string): Promise<{ candidates: Candidate[]; rejected: Rejected[]; truncated: boolean }> {
+  const base = validateBase(inputRel);
+  const candidates: Candidate[] = [];
+  const rejected: Rejected[] = [];
+  const globRe = glob && glob.trim() ? globToRegExp(glob.trim()) : null;
+  let scanned = 0;
+  let truncated = false;
+
+  const consider = async (abs: string) => {
+    const rel = relative(REPO_ROOT, abs);
+    const relToBase = relative(base.abs, abs);
+    if (globRe && !globRe.test(relToBase)) return; // filtered out — not a rejection
+    const reason = fileRejectReason(rel);
+    if (reason) {
+      rejected.push({ path: rel, reason });
+      return;
+    }
+    let size = 0;
+    try {
+      size = (await stat(abs)).size;
+    } catch {
+      rejected.push({ path: rel, reason: "unreadable" });
+      return;
+    }
+    if (size > MAX_BYTES) {
+      rejected.push({ path: rel, reason: `too large (${size} bytes, max ${MAX_BYTES})` });
+      return;
+    }
+    if (candidates.length >= MAX_CANDIDATES) {
+      truncated = true;
+      return;
+    }
+    candidates.push({ path: rel, bytes: size });
+  };
+
+  const baseInfo = await stat(base.abs);
+  if (baseInfo.isFile()) {
+    await consider(base.abs);
+    return { candidates, rejected, truncated };
+  }
+
+  const walk = async (dirAbs: string): Promise<void> => {
+    if (scanned >= MAX_SCAN || candidates.length >= MAX_CANDIDATES) {
+      truncated = true;
+      return;
+    }
+    let entries;
+    try {
+      entries = await readdir(dirAbs, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      if (scanned >= MAX_SCAN) { truncated = true; break; }
+      scanned++;
+      if (entry.isSymbolicLink()) continue; // never follow symlinks
+      const childAbs = resolve(dirAbs, entry.name);
+      if (entry.isDirectory()) {
+        if (DENY_DIR.includes(entry.name)) continue;
+        await walk(childAbs);
+      } else if (entry.isFile()) {
+        await consider(childAbs);
+      }
+    }
+  };
+
+  await walk(base.abs);
+  return { candidates, rejected, truncated };
+}
+
+export async function ingestBatch(inputRel: string, glob: string | undefined, dryRun: boolean) {
+  await ensureLoaded();
+  const { candidates, rejected, truncated } = await collectCandidates(inputRel, glob);
+
+  if (dryRun) {
+    return { dryRun: true as const, candidateCount: candidates.length, rejectedCount: rejected.length, candidates, rejected, truncated };
+  }
+
+  const ingested: { path: string; chunkCount: number }[] = [];
+  for (const c of candidates) {
+    try {
+      const src = await ingestSource(c.path, false); // persist once at the end
+      ingested.push({ path: c.path, chunkCount: src.chunkCount });
+    } catch (e) {
+      rejected.push({ path: c.path, reason: e instanceof Error ? e.message : "ingest failed" });
+    }
+  }
+  await persist();
+
+  return {
+    dryRun: false as const,
+    ingestedCount: ingested.length,
+    chunkCount: ingested.reduce((a, b) => a + b.chunkCount, 0),
+    ingested,
+    rejected,
+    rejectedCount: rejected.length,
+    sourceCount: kb.sources.length,
+    totalChunks: kb.chunks.length,
+    truncated,
+  };
 }
 
 export async function searchKnowledge(query: string, k = 5): Promise<SearchHit[]> {
