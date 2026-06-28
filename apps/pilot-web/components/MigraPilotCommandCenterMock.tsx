@@ -731,6 +731,28 @@ function OpsSection() {
   const [planStatus, setPlanStatus] = useState("");
   const [planPending, setPlanPending] = useState<{ runId: string; approvalId: string; tool: string; risk: string } | null>(null);
   const [planResult, setPlanResult] = useState<string | null>(null);
+  const [vType, setVType] = useState("url");
+  const [vAction, setVAction] = useState("restart");
+  const [vTarget, setVTarget] = useState("");
+  const [vUrl, setVUrl] = useState("");
+  const [vText, setVText] = useState("");
+  const [vBuild, setVBuild] = useState("");
+  const [vBusy, setVBusy] = useState(false);
+  const [vResult, setVResult] = useState<{ error?: string; verificationType?: string; target?: string; status?: string; summary?: string; checks?: { name: string; status: string; evidence: string; sanitizedUrl?: string }[]; hazards?: string[]; recommendedNextReadOnlyChecks?: string[]; humanActionRequired?: boolean; citations?: string[] } | null>(null);
+
+  const runVerify = async () => {
+    if (vBusy) return;
+    setVBusy(true); setVResult(null);
+    try {
+      const r = await fetch("/api/pilot/ops/verify", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ verificationType: vType, target: vTarget, actionType: vType === "plan" ? vAction : undefined, healthUrl: vUrl || undefined, expectedText: vText || undefined, expectedBuildId: vBuild || undefined }),
+      });
+      setVResult(await r.json());
+    } catch (e) { setVResult({ error: (e as Error).message }); }
+    finally { setVBusy(false); }
+  };
+  const vTone = (s?: string) => (s === "pass" ? "Succeeded" : s === "fail" ? "Failed" : undefined);
 
   const streamNdjson = async (url: string, body: unknown, onEvent: (ev: { type: string; approval?: { runId: string; id: string; toolName: string; risk: string }; delta?: string; message?: { content?: string } }) => void) => {
     const res = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
@@ -848,6 +870,46 @@ function OpsSection() {
         )}
         {planResult && <pre style={S.approvalArgs}>{planResult}</pre>}
         <div style={S.muted}>Plan generation itself requires approval. Real mutations (ops.restart, ops.deploy, ops.dns.update, ops.invoice.update, ops.ssh…) stay blocked.</div>
+      </Panel>
+      <Panel title="Verify a performed action">
+        <div style={S.muted}>Read-only verification of an action you (or someone) already performed. No mutation.</div>
+        <div style={S.inputRow}>
+          <select value={vType} onChange={(e) => setVType(e.target.value)} style={{ ...S.composerInput, flex: "0 0 100px", cursor: "pointer" }}>
+            <option value="url">url</option>
+            <option value="service">service</option>
+            <option value="deploy">deploy</option>
+            <option value="plan">plan</option>
+          </select>
+          {vType === "plan" && (
+            <select value={vAction} onChange={(e) => setVAction(e.target.value)} style={{ ...S.composerInput, flex: "0 0 100px", cursor: "pointer" }}>
+              <option value="restart">restart</option>
+              <option value="deploy">deploy</option>
+              <option value="dns">dns</option>
+              <option value="billing">billing</option>
+            </select>
+          )}
+          <input value={vTarget} onChange={(e) => setVTarget(e.target.value)} placeholder={vType === "url" ? "(use URL field)" : "target (e.g. panel-api)"} style={S.composerInput} />
+        </div>
+        {vType !== "plan" && <div style={S.inputRow}><span style={S.promptIcon}>🌐</span><input value={vUrl} onChange={(e) => setVUrl(e.target.value)} placeholder="allowlisted health URL (optional)" style={S.composerInput} /></div>}
+        {vType === "deploy" && (
+          <div style={S.inputRow}>
+            <input value={vText} onChange={(e) => setVText(e.target.value)} placeholder="expected text (optional)" style={S.composerInput} />
+            <input value={vBuild} onChange={(e) => setVBuild(e.target.value)} placeholder="expected build id (optional)" style={S.composerInput} />
+          </div>
+        )}
+        <div style={S.inputRow}>
+          <button onClick={runVerify} disabled={vBusy} style={{ ...S.sendButton, width: "auto", padding: "0 12px", fontSize: 12, opacity: vBusy ? 0.6 : 1, cursor: vBusy ? "default" : "pointer" }}>{vBusy ? "…" : "Run verification"}</button>
+        </div>
+        {vResult && (vResult.error ? <div style={S.muted}>error: {vResult.error}</div> : (
+          <div style={{ marginTop: 6 }}>
+            <Row left={`${vResult.verificationType} · ${vResult.target}`} right={vResult.status ?? "?"} tone={vTone(vResult.status)} />
+            <div style={S.muted}>{vResult.summary}</div>
+            {vResult.checks?.map((c, i) => <Row key={i} left={c.name} right={`${c.status} — ${c.evidence}`} tone={vTone(c.status)} />)}
+            {(vResult.hazards?.length ?? 0) > 0 && <div style={S.muted}>hazards: {vResult.hazards!.join("; ")}</div>}
+            {vResult.humanActionRequired && <div style={S.blockedBadge}>human action required — verify before relying on this</div>}
+          </div>
+        ))}
+        <div style={S.muted}>Read-only evidence only — verifies nothing by changing it. URLs allowlisted + sanitized.</div>
       </Panel>
     </section>
   );

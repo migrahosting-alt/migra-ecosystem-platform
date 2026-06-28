@@ -11,7 +11,7 @@ import { existsSync } from "node:fs";
 import { visionAnalyze } from "./gateway";
 import { formatHits, ingestBatch, searchKnowledge } from "./knowledge";
 import { imageHealth, imagePreview, imageProviderMode, submitImageJob } from "./image-provider";
-import { buildOpsPlan, checkUrl, hazardLookup, knownTopology, opsHealth } from "./ops-provider";
+import { buildOpsPlan, checkUrl, hazardLookup, knownTopology, opsHealth, verifyDeploy, verifyPlan, verifyService, verifyUrl } from "./ops-provider";
 
 const execFileP = promisify(execFile);
 
@@ -474,6 +474,34 @@ export const TOOLS: Record<string, ToolDef> = {
       if (!r.matches.length) return `${r.detail} for "${r.query}"`;
       return clip(`${r.detail} for "${r.query}":\n` + r.matches.map((m) => `• [${m.doc}] ${m.heading}: ${m.snippet}`).join("\n"));
     },
+  },
+  "ops.verify.url": {
+    name: "ops.verify.url",
+    description: "READ-ONLY. Verify an allowlisted URL is healthy (GET): returns status code, latency, ok/fail, sanitized URL, timestamp. Refuses non-allowlisted URLs. Performs no mutation.",
+    risk: "read",
+    parameters: { type: "object", properties: { url: { type: "string" } }, required: ["url"] },
+    run: async (a) => clip(JSON.stringify(await verifyUrl(String(a.url ?? "")), null, 2)),
+  },
+  "ops.verify.service": {
+    name: "ops.verify.service",
+    description: "READ-ONLY. Verify a service/app by name using grounded ecosystem docs/hazards plus an optional allowlisted health URL. Returns a structured verification result. No mutation.",
+    risk: "read",
+    parameters: { type: "object", properties: { name: { type: "string" }, healthUrl: { type: "string" } }, required: ["name"] },
+    run: async (a) => clip(JSON.stringify(await verifyService(String(a.name ?? ""), a.healthUrl ? String(a.healthUrl) : undefined), null, 2)),
+  },
+  "ops.verify.deploy": {
+    name: "ops.verify.deploy",
+    description: "READ-ONLY. Verify a deployment from read-only evidence: optional allowlisted health URL, optional expected route/status text, optional expected build id/version, plus the grounded deploy model. Deploys NOTHING.",
+    risk: "read",
+    parameters: { type: "object", properties: { target: { type: "string" }, healthUrl: { type: "string" }, expectedText: { type: "string" }, expectedBuildId: { type: "string" } }, required: ["target"] },
+    run: async (a) => clip(JSON.stringify(await verifyDeploy(String(a.target ?? ""), { healthUrl: a.healthUrl ? String(a.healthUrl) : undefined, expectedText: a.expectedText ? String(a.expectedText) : undefined, expectedBuildId: a.expectedBuildId ? String(a.expectedBuildId) : undefined }), null, 2)),
+  },
+  "ops.verify.plan": {
+    name: "ops.verify.plan",
+    description: "READ-ONLY. Given a prior dry-run plan's action type + target, returns a checklist of read-only verification steps to run AFTER the human performs the action. Mutates nothing.",
+    risk: "read",
+    parameters: { type: "object", properties: { actionType: { type: "string" }, target: { type: "string" } }, required: ["actionType", "target"] },
+    run: async (a) => clip(JSON.stringify(await verifyPlan(String(a.actionType ?? ""), String(a.target ?? "")), null, 2)),
   },
   "ops.restart.plan": {
     name: "ops.restart.plan",

@@ -258,6 +258,164 @@ export async function buildOpsPlan(actionType: string, target: string): Promise<
   };
 }
 
+// ---- Post-action verification (Phase 10.6) — READ-ONLY evidence only ----
+export type VerifyStatus = "pass" | "fail" | "partial" | "unknown";
+export interface VerificationCheck {
+  name: string;
+  status: VerifyStatus;
+  evidence: string;
+  latencyMs?: number;
+  sanitizedUrl?: string;
+}
+export interface VerificationResult {
+  verificationType: string;
+  target: string;
+  status: VerifyStatus;
+  summary: string;
+  checks: VerificationCheck[];
+  hazards: string[];
+  recommendedNextReadOnlyChecks: string[];
+  humanActionRequired: boolean;
+  generatedAt: string;
+  citations: string[];
+}
+
+// Allowlisted GET that also captures a body snippet (used only to test expected text/build id;
+// the body is NEVER returned to callers — only match booleans/evidence strings are).
+async function fetchEvidence(rawUrl: string): Promise<{ ok: boolean; status?: number; latencyMs?: number; url: string; body?: string; error?: string }> {
+  const url = sanitizeUrl(rawUrl);
+  if (opsProviderMode() !== "local") return { ok: false, url, error: "ops provider disabled (set PILOT_OPS_PROVIDER=local)" };
+  if (!isAllowedUrl(rawUrl)) return { ok: false, url, error: "URL not in PILOT_OPS_ALLOWED_HEALTH_URLS allowlist" };
+  const t0 = Date.now();
+  try {
+    const res = await fetch(rawUrl, { method: "GET", redirect: "manual", signal: AbortSignal.timeout(TIMEOUT_MS) });
+    const body = (await res.text()).slice(0, 20000);
+    return { ok: res.status < 500, status: res.status, latencyMs: Date.now() - t0, url, body };
+  } catch (e) {
+    return { ok: false, url, latencyMs: Date.now() - t0, error: scrub(e instanceof Error ? e.message : "request failed", rawUrl) };
+  }
+}
+
+async function groundedFor(target: string, extraKeyword?: string): Promise<{ hazards: string[]; citations: string[] }> {
+  const a = await hazardLookup(target);
+  const b = extraKeyword ? await hazardLookup(extraKeyword) : { matches: [] as HazardMatch[] };
+  const seen = new Set<string>();
+  const merged = [...a.matches, ...b.matches].filter((m) => {
+    const k = m.doc + "|" + m.heading;
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
+  return { hazards: merged.map((m) => `[${m.doc}] ${m.heading}`), citations: [...new Set(merged.map((m) => m.doc))] };
+}
+
+const nowIso = () => new Date().toISOString();
+
+export async function verifyUrl(rawUrl: string): Promise<VerificationResult> {
+  const c = await checkUrl(rawUrl);
+  const unknown = !!c.error && (c.error.includes("disabled") || c.error.includes("allowlist"));
+  const status: VerifyStatus = c.ok ? "pass" : unknown ? "unknown" : "fail";
+  return {
+    verificationType: "url",
+    target: c.url,
+    status,
+    summary: c.ok ? `URL responded HTTP ${c.status} in ${c.latencyMs}ms` : c.error ?? "URL check failed",
+    checks: [{ name: "http", status, evidence: c.ok ? `HTTP ${c.status} in ${c.latencyMs}ms` : c.error ?? "failed", latencyMs: c.latencyMs, sanitizedUrl: c.url }],
+    hazards: [],
+    recommendedNextReadOnlyChecks: c.ok ? [] : ["Confirm PILOT_OPS_PROVIDER=local and the URL is in PILOT_OPS_ALLOWED_HEALTH_URLS."],
+    humanActionRequired: !c.ok,
+    generatedAt: nowIso(),
+    citations: [],
+  };
+}
+
+export async function verifyService(name: string, healthUrl?: string): Promise<VerificationResult> {
+  const g = await groundedFor(name);
+  const checks: VerificationCheck[] = [];
+  let healthStatus: VerifyStatus | null = null;
+  if (healthUrl) {
+    const c = await checkUrl(healthUrl);
+    healthStatus = c.ok ? "pass" : c.error && (c.error.includes("disabled") || c.error.includes("allowlist")) ? "unknown" : "fail";
+    checks.push({ name: "health-url", status: healthStatus, evidence: c.ok ? `HTTP ${c.status} in ${c.latencyMs}ms` : c.error ?? "failed", latencyMs: c.latencyMs, sanitizedUrl: c.url });
+  }
+  checks.push({ name: "grounded-knowledge", status: g.citations.length ? "pass" : "unknown", evidence: g.citations.length ? `${g.hazards.length} grounded reference(s) in ecosystem docs` : "no grounded reference found" });
+  const status: VerifyStatus = healthStatus ? (healthStatus === "pass" ? "pass" : healthStatus === "fail" ? "fail" : "partial") : "unknown";
+  return {
+    verificationType: "service",
+    target: name || "(unspecified)",
+    status,
+    summary: healthStatus ? (healthStatus === "pass" ? `${name} health OK; ${g.hazards.length} hazard(s) noted` : `${name} health check did not pass`) : `No health URL provided — grounded knowledge only for ${name || "service"}`,
+    checks,
+    hazards: g.hazards,
+    recommendedNextReadOnlyChecks: healthStatus ? [] : ["Provide an allowlisted health URL for a live check, or run ops.health."],
+    humanActionRequired: status !== "pass",
+    generatedAt: nowIso(),
+    citations: g.citations,
+  };
+}
+
+export async function verifyDeploy(target: string, opts: { healthUrl?: string; expectedText?: string; expectedBuildId?: string } = {}): Promise<VerificationResult> {
+  const g = await groundedFor(target, "deploy");
+  const checks: VerificationCheck[] = [];
+  if (opts.healthUrl) {
+    const ev = await fetchEvidence(opts.healthUrl);
+    const hStatus: VerifyStatus = ev.ok ? "pass" : ev.error && (ev.error.includes("disabled") || ev.error.includes("allowlist")) ? "unknown" : "fail";
+    checks.push({ name: "health-url", status: hStatus, evidence: ev.ok ? `HTTP ${ev.status} in ${ev.latencyMs}ms` : ev.error ?? "failed", latencyMs: ev.latencyMs, sanitizedUrl: ev.url });
+    if (opts.expectedText) {
+      const found = !!ev.body && ev.body.includes(opts.expectedText);
+      checks.push({ name: "expected-text", status: ev.body ? (found ? "pass" : "fail") : "unknown", evidence: ev.body ? (found ? "expected text present in response" : "expected text NOT found in response") : "no response body to match" });
+    }
+    if (opts.expectedBuildId) {
+      const found = !!ev.body && ev.body.includes(opts.expectedBuildId);
+      checks.push({ name: "expected-build-id", status: ev.body ? (found ? "pass" : "fail") : "unknown", evidence: ev.body ? (found ? "expected build id present" : "expected build id NOT found") : "no response body to match" });
+    }
+  } else {
+    checks.push({ name: "health-url", status: "unknown", evidence: "no allowlisted health URL provided — cannot verify the live deployment" });
+  }
+  checks.push({ name: "deploy-model", status: g.citations.length ? "pass" : "unknown", evidence: g.citations.length ? `grounded deploy model available (${g.citations.join(", ")})` : "no grounded deploy model found" });
+  const evidenceChecks = checks.filter((c) => c.name !== "deploy-model").map((c) => c.status);
+  const status: VerifyStatus = evidenceChecks.length && evidenceChecks.every((s) => s === "pass") ? "pass" : evidenceChecks.some((s) => s === "fail") ? "fail" : evidenceChecks.some((s) => s === "pass") ? "partial" : "unknown";
+  return {
+    verificationType: "deploy",
+    target: target || "(unspecified)",
+    status,
+    summary: `Read-only deploy verification for ${target || "(unspecified)"} — ${status.toUpperCase()} from available evidence (NO deploy was performed).`,
+    checks,
+    hazards: g.hazards,
+    recommendedNextReadOnlyChecks: status === "pass" ? ["Spot-check a real user request and confirm logs are clean (read-only)."] : ["Provide an allowlisted health URL + expected build id / route text for stronger evidence.", "Verify deployed bytes match the built artifact per the build-integrity guard."],
+    humanActionRequired: status !== "pass",
+    generatedAt: nowIso(),
+    citations: g.citations,
+  };
+}
+
+const VERIFY_CHECKLISTS: Record<string, (t: string) => string[]> = {
+  restart: (t) => [`Confirm ${t || "the service"} process is running (read-only).`, "Health endpoint returns OK / expected status.", "Required transports/ports are bound.", "No error spike in recent logs.", "Spot-check one real request end-to-end."],
+  deploy: (t) => [`Health endpoint for ${t || "the service"} returns OK.`, "Deployed build id / version matches the intended release.", "A known route returns the expected content.", "No 5xx / error spike after rollout.", "Confirm deployed bytes == built artifact (build-integrity)."],
+  dns: (t) => [`Resolve ${t || "the record"} from an external resolver (no internal hairpin).`, "Returned value matches the intended record.", "TTL is as expected.", "Dependent services still route correctly."],
+  billing: (t) => [`Read current billing/invoice state for ${t || "the account"} (read-only).`, "Resulting amounts/state match the intended change.", "No unintended customer communication fired.", "Canonical billing source reflects the change."],
+  generic: (t) => [`Read current state of ${t || "the target"} (read-only).`, "Confirm the observed state matches the intended outcome.", "Check for errors/regressions in dependent systems."],
+};
+
+export async function verifyPlan(actionType: string, target: string): Promise<VerificationResult> {
+  const at = String(actionType || "").toLowerCase().trim();
+  const tgt = String(target || "").trim();
+  const g = await groundedFor(tgt, at);
+  const checklist = (VERIFY_CHECKLISTS[at] ?? VERIFY_CHECKLISTS.generic)(tgt);
+  return {
+    verificationType: "plan",
+    target: `${at || "action"}:${tgt || "(unspecified)"}`,
+    status: "unknown",
+    summary: `Read-only verification checklist for a "${at || "generic"}" action on ${tgt || "(unspecified)"} — run these AFTER the human performs the action. No mutation is implied.`,
+    checks: checklist.map((step) => ({ name: "verify-step", status: "unknown" as VerifyStatus, evidence: step })),
+    hazards: g.hazards,
+    recommendedNextReadOnlyChecks: checklist,
+    humanActionRequired: true,
+    generatedAt: nowIso(),
+    citations: g.citations,
+  };
+}
+
 export interface HazardMatch {
   doc: string;
   heading: string;

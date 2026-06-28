@@ -37,6 +37,10 @@ const OPS_BLOCKED = new Set(["ops.restart", "ops.deploy", "ops.suspend", "ops.re
 // FIRST so the "restart"/"deploy" substrings in their names don't trip OPS_BLOCKED / BLOCKED_RE.
 const OPS_PLAN = new Set(["ops.restart.plan", "ops.deploy.plan", "ops.dns.plan", "ops.billing.plan"]);
 
+// Read-only post-action VERIFY tools (Phase 10.6): safe_read. Classified first so "ops.verify.deploy"
+// (contains "deploy") is not caught by BLOCKED_RE. These never mutate and never create approval cards.
+const OPS_VERIFY = new Set(["ops.verify.url", "ops.verify.service", "ops.verify.deploy", "ops.verify.plan"]);
+
 // Sandbox file writers => requires_approval.
 const FILE_WRITE_RE = /^(scratch\.write|image\.(resize|convert|crop|annotate|generate))/;
 
@@ -73,6 +77,7 @@ export function classifyPilotAction(name: string, args: Record<string, unknown> 
     expectedEffect: effect ?? effectFor(risk),
   });
 
+  if (OPS_VERIFY.has(name)) return mk("safe_read", "read-only post-action verification (no mutation)");
   if (OPS_PLAN.has(name)) return mk("requires_approval", "DRY RUN / PLAN ONLY — generates a grounded ops plan; executes nothing", "Generate plan only; no external changes.");
   if (OPS_BLOCKED.has(name)) return mk("blocked", "ops mutations are not enabled in this phase (read-only / dry-run only)");
   if (BLOCKED_RE.test(name)) return mk("blocked", "matches a blocked pattern (shell/deploy/db/install/secret/destructive/prod)");
