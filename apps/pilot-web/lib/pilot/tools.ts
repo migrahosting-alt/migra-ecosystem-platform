@@ -11,7 +11,7 @@ import { existsSync } from "node:fs";
 import { visionAnalyze } from "./gateway";
 import { formatHits, ingestBatch, searchKnowledge } from "./knowledge";
 import { imageHealth, imagePreview, imageProviderMode, submitImageJob } from "./image-provider";
-import { buildOpsPlan, checkUrl, hazardLookup, knownTopology, opsHealth, verifyDeploy, verifyPlan, verifyService, verifyUrl } from "./ops-provider";
+import { buildOpsPlan, buildRunbook, checkUrl, hazardLookup, knownTopology, opsHealth, previewRunbook, verifyDeploy, verifyPlan, verifyService, verifyUrl } from "./ops-provider";
 
 const execFileP = promisify(execFile);
 
@@ -474,6 +474,20 @@ export const TOOLS: Record<string, ToolDef> = {
       if (!r.matches.length) return `${r.detail} for "${r.query}"`;
       return clip(`${r.detail} for "${r.query}":\n` + r.matches.map((m) => `• [${m.doc}] ${m.heading}: ${m.snippet}`).join("\n"));
     },
+  },
+  "ops.runbook.preview": {
+    name: "ops.runbook.preview",
+    description: "READ-ONLY. Validate runbook inputs and return a preview summary/checklist (which sections will be included, whether the action/target are known). Generates NO runbook and executes nothing.",
+    risk: "read",
+    parameters: { type: "object", properties: { actionType: { type: "string" }, target: { type: "string" }, objective: { type: "string" }, includeCommands: { type: "boolean" }, includeRollback: { type: "boolean" }, includeVerification: { type: "boolean" } }, required: ["actionType", "target"] },
+    run: async (a) => clip(JSON.stringify(previewRunbook({ actionType: String(a.actionType ?? ""), target: String(a.target ?? ""), objective: a.objective ? String(a.objective) : undefined, includeCommands: a.includeCommands as boolean | undefined, includeRollback: a.includeRollback as boolean | undefined, includeVerification: a.includeVerification as boolean | undefined }), null, 2)),
+  },
+  "ops.runbook.generate": {
+    name: "ops.runbook.generate",
+    description: "Generate a HUMAN-ONLY operator runbook (command pack + hazards + rollback + verification) grounded in ecosystem docs. Requires approval. Commands are TEXT ONLY and are NEVER executed by MigraPilot. actionType: restart|deploy|dns|billing|verify|incident|custom.",
+    risk: "high",
+    parameters: { type: "object", properties: { actionType: { type: "string" }, target: { type: "string" }, objective: { type: "string" }, riskLevel: { type: "string" }, includeCommands: { type: "boolean" }, includeRollback: { type: "boolean" }, includeVerification: { type: "boolean" } }, required: ["actionType", "target"] },
+    run: async (a) => clip(JSON.stringify(await buildRunbook({ actionType: String(a.actionType ?? ""), target: String(a.target ?? ""), objective: a.objective ? String(a.objective) : undefined, riskLevel: a.riskLevel ? String(a.riskLevel) : undefined, includeCommands: a.includeCommands as boolean | undefined, includeRollback: a.includeRollback as boolean | undefined, includeVerification: a.includeVerification as boolean | undefined }), null, 2)),
   },
   "ops.verify.url": {
     name: "ops.verify.url",

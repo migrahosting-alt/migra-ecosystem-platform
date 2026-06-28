@@ -416,6 +416,220 @@ export async function verifyPlan(actionType: string, target: string): Promise<Ve
   };
 }
 
+// ---- Operator runbooks (Phase 10.7) — human-executable command packs, NEVER executed ----
+export interface CommandPackItem {
+  label: string;
+  commandText: string;
+  purpose: string;
+  riskNote: string;
+  requiresHumanConfirmation: true;
+}
+export interface Runbook {
+  runbookId: string;
+  actionType: string;
+  target: string;
+  objective: string;
+  dryRun: true;
+  executionMode: "human_only";
+  riskLevel: "low" | "medium" | "high";
+  summary: string;
+  prerequisites: string[];
+  commandPack: CommandPackItem[];
+  hazards: string[];
+  rollbackSteps: string[];
+  verificationSteps: string[];
+  stopConditions: string[];
+  requiredHumanConfirmation: string[];
+  citations: string[];
+  generatedAt: string;
+}
+
+export interface RunbookInput {
+  actionType: string;
+  target: string;
+  objective?: string;
+  riskLevel?: string;
+  includeCommands?: boolean;
+  includeRollback?: boolean;
+  includeVerification?: boolean;
+}
+
+const cmd = (label: string, commandText: string, purpose: string, riskNote: string): CommandPackItem => ({ label, commandText, purpose, riskNote, requiresHumanConfirmation: true });
+
+type RunbookTemplate = {
+  risk: "low" | "medium" | "high";
+  prerequisites: string[];
+  commands: (t: string) => CommandPackItem[];
+  rollback: string[];
+  stops: (t: string) => string[];
+};
+
+// Command text uses placeholders (<target>, <documented procedure>) and references grounded practice —
+// it never invents private IPs/paths/credentials/endpoints. Specifics come from the grounded hazards/citations.
+const RUNBOOK_TEMPLATES: Record<string, RunbookTemplate> = {
+  restart: {
+    risk: "high",
+    prerequisites: ["Confirm <target> is the correct INTERNAL host/service (never a customer tenant).", "Capture current health (read-only) and confirm no active in-flight work / a maintenance window."],
+    commands: (t) => [
+      cmd("1. Pre-flight (read-only)", `# capture current health/process state for ${t || "<target>"} before touching it`, "Baseline to compare against after restart", "Skipping this hides whether the restart actually fixed anything"),
+      cmd("2. Safe restart", `# use ${t || "<target>"}'s DOCUMENTED safe restart procedure (see hazards). For voip-core use the documented safe wrapper — NEVER 'fwconsole restart'.`, "Restart without duplicate-process / transport-bind hazards", "An unsafe restart can spawn duplicate processes and drop live traffic"),
+      cmd("3. Post-verify", `# re-run health checks for ${t || "<target>"}; confirm required transports/ports are bound`, "Confirm real recovery, not just a running process", "A green process is NOT a healthy service"),
+    ],
+    rollback: ["Keep the last known-good config/backup ready before restarting.", "If unhealthy after restart, follow the documented recovery/start procedure (operator-run)."],
+    stops: (t) => [`If ${t || "the target"} has active in-flight work, STOP and reschedule.`, "If the safe procedure is unknown, STOP and confirm it from the runbook hazards/citations first."],
+  },
+  deploy: {
+    risk: "high",
+    prerequisites: ["Identify the CANONICAL source for <target> (frequently on-host or a non-obvious branch — verify, do not assume local/origin).", "Confirm a clean, scoped working tree and a clean isolated build."],
+    commands: (t) => [
+      cmd("1. Confirm canonical source", `# verify the real source repo/branch/path for ${t || "<target>"} (NOT necessarily local or origin/main)`, "Avoid deploying a divergent/stale codebase", "Deploying the wrong source has caused prod outages"),
+      cmd("2. Back up current state", `# back up the current on-host release/state for ${t || "<target>"}`, "Enable instant rollback", "No backup = no safe rollback"),
+      cmd("3. Build + integrity check", `# build cleanly in isolation, record the build id, then verify deployed bytes == built bytes`, "Defeat the build-integrity hazard", "A green health gate does NOT prove correct bytes shipped"),
+      cmd("4. Health + rollback-ready", `# health-check ${t || "<target>"} live; restore the backup if unhealthy`, "Confirm the deploy and stay reversible", "Declaring success on HTTP 200 alone is unsafe"),
+    ],
+    rollback: ["Snapshot/back up the current release before deploy.", "Keep the previous release available for an instant restore (operator-run)."],
+    stops: (t) => [`If the canonical source for ${t || "the target"} is uncertain, STOP and confirm it.`, "If unrelated files would ship, STOP and scope the change first."],
+  },
+  dns: {
+    risk: "high",
+    prerequisites: ["Confirm the exact zone/record and current values (read-only).", "Confirm the change will not break existing routing/edge/NAT behavior."],
+    commands: (t) => [
+      cmd("1. Read current record", `# read current DNS for ${t || "<record>"} (read-only) and record exact prior values`, "Know the exact rollback target", "Changing DNS without recording prior values blocks rollback"),
+      cmd("2. Stage the change", `# apply the exact intended record delta for ${t || "<record>"} with a low TTL where appropriate`, "Make a precise, reversible change", "Broad/incorrect records can break routing widely"),
+      cmd("3. Verify externally", `# resolve ${t || "<record>"} from an OFF-NET resolver (no internal hairpin)`, "Confirm real external resolution", "Internal hosts can't validate the public path (no NAT hairpin)"),
+    ],
+    rollback: ["Restore the recorded prior record values.", "Keep TTLs low enough to revert quickly."],
+    stops: (t) => [`If ${t || "the record"}'s current values are unknown, STOP and read them first.`, "If dependent services rely on the record, STOP and coordinate."],
+  },
+  billing: {
+    risk: "high",
+    prerequisites: ["Confirm the CANONICAL billing source for <target> (MigraPay/auth-api is canonical; panel proxies it).", "Confirm exact amounts/customer; never guess money values."],
+    commands: (t) => [
+      cmd("1. Read current state", `# read current billing/invoice state for ${t || "<account>"} (read-only)`, "Baseline before any change", "Acting on assumed state risks customer-facing errors"),
+      cmd("2. Apply via canonical system", `# make the exact intended change through the canonical billing system (not a side store)`, "Keep one source of truth", "Editing a non-canonical store causes drift"),
+      cmd("3. Verify + no-comms", `# verify resulting amounts/state and that NO unintended customer communication fired`, "Confirm correctness + no spam", "Billing changes can trigger live customer comms"),
+    ],
+    rollback: ["Capture the prior invoice/billing state before any change.", "Use the documented credit/reversal path if incorrect (operator-run)."],
+    stops: (t) => [`If exact amounts/customer for ${t || "the account"} are uncertain, STOP.`, "If the change would email/charge a customer unexpectedly, STOP."],
+  },
+  verify: {
+    risk: "low",
+    prerequisites: ["Identify what outcome you are verifying for <target>."],
+    commands: (t) => [
+      cmd("1. Read-only checks", `# run read-only health/state checks for ${t || "<target>"} (use ops.verify.* / ops.health)`, "Gather evidence without changing anything", "None — read-only"),
+      cmd("2. Compare to expected", `# compare observed state/build id/route text for ${t || "<target>"} against the intended outcome`, "Decide pass/fail/partial from evidence", "Do not assume success without evidence"),
+    ],
+    rollback: ["N/A — verification is read-only."],
+    stops: (t) => [`If evidence for ${t || "the target"} is inconclusive, mark UNKNOWN and request the missing read-only input.`],
+  },
+  incident: {
+    risk: "high",
+    prerequisites: ["Confirm scope/impact of the incident for <target> (read-only).", "Do not mutate prod under pressure without the gating rules."],
+    commands: (t) => [
+      cmd("1. Triage (read-only)", `# capture current health, recent changes, and error signals for ${t || "<target>"}`, "Understand before acting", "Acting before triage often worsens incidents"),
+      cmd("2. Identify likely cause", `# correlate with grounded hazards/recent deploys for ${t || "<target>"}`, "Focus remediation", "Guessing wastes time and risks new breakage"),
+      cmd("3. Plan remediation (dry-run)", `# draft the remediation as a dry-run plan (ops.*.plan) for human approval — do NOT execute here`, "Stay on the safe rails", "Live remediation without a plan/approval is high-risk"),
+    ],
+    rollback: ["Document each step taken so it can be reversed.", "Keep backups/snapshots of anything touched."],
+    stops: (t) => [`If impact for ${t || "the target"} is unclear or growing, STOP and escalate.`, "If remediation would touch prod without approval, STOP."],
+  },
+};
+
+function knownHazardWarnings(action: string, target: string): string[] {
+  const t = target.toLowerCase();
+  const a = action.toLowerCase();
+  const w: string[] = [];
+  if ((a === "restart" || a === "incident") && (t.includes("voip") || t.includes("asterisk") || t.includes("pbx") || t.includes("freepbx"))) w.push("⚠ voip-core: NEVER run `fwconsole restart` — it can spawn a duplicate Asterisk and fail to bind transports. Use the documented safe wrapper.");
+  if (a === "deploy" || t.includes("panel-api") || t.includes("panel")) w.push("⚠ panel-api source-of-truth is ON-HOST (not local git). NEVER deploy a local repo onto it; back up each on-host file first.");
+  if (a === "deploy") w.push("⚠ Build-integrity: a green health gate ≠ correct bytes — verify deployed BUILD_ID / asset hashes match the build.");
+  w.push("⚠ Canonical-source trap: confirm the real source repo/branch/path before editing/deploying (often on-host or a non-obvious branch, not origin/main).");
+  return w;
+}
+
+let rbCounter = 0;
+function runbookId(): string {
+  rbCounter += 1;
+  return `rbk_${Date.now().toString(36)}_${rbCounter.toString(36)}`;
+}
+
+function normalizeRiskLevel(v: string | undefined, fallback: "low" | "medium" | "high"): "low" | "medium" | "high" {
+  const s = String(v ?? "").toLowerCase();
+  return s === "low" || s === "medium" || s === "high" ? s : fallback;
+}
+
+export async function buildRunbook(input: RunbookInput): Promise<Runbook> {
+  const at = String(input.actionType ?? "").toLowerCase().trim() || "custom";
+  const tgt = String(input.target ?? "").trim();
+  const objective = String(input.objective ?? "").trim() || "(no objective provided)";
+  const tpl = RUNBOOK_TEMPLATES[at];
+  const g = await groundedFor(tgt, tpl ? at : undefined);
+  // targetKnown must reflect the TARGET specifically (not the action keyword), so an unknown
+  // target with a known action ("restart") still triggers the conservative path.
+  const targetHits = await hazardLookup(tgt);
+  const known = knownHazardWarnings(at, tgt);
+  const hazards = [...known, ...g.hazards];
+  const targetKnown = tgt.length > 0 && targetHits.matches.length > 0;
+
+  const includeCommands = input.includeCommands !== false;
+  const includeRollback = input.includeRollback !== false;
+  const includeVerification = input.includeVerification !== false;
+
+  // Conservative runbook when the action is unsupported/custom or the target is unknown.
+  if (!tpl || !targetKnown) {
+    const reason = !tpl ? `unsupported/custom action "${at}"` : `target "${tgt || "(unspecified)"}" not found in grounded ecosystem docs`;
+    return {
+      runbookId: runbookId(), actionType: at, target: tgt || "(unspecified)", objective, dryRun: true, executionMode: "human_only",
+      riskLevel: normalizeRiskLevel(input.riskLevel, "high"),
+      summary: `HUMAN ONLY / NOT EXECUTED — CONSERVATIVE runbook (${reason}). No facts were invented; confirm specifics before acting.`,
+      prerequisites: ["Confirm the exact target, its canonical source, and the documented procedure from a trusted source.", "Do not proceed on assumptions — gather read-only evidence first."],
+      commandPack: includeCommands ? [cmd("1. Establish facts (read-only)", `# identify the real host/service/source for ${tgt || "<target>"} from trusted docs (no guessing)`, "Avoid acting on unknowns", "Acting on unknown infra is high-risk")] : [],
+      hazards: hazards.length ? hazards : ["(no grounded hazard matched — treat as unknown and verify manually)"],
+      rollbackSteps: includeRollback ? ["Define a concrete rollback BEFORE any change; if none exists, do not proceed."] : [],
+      verificationSteps: includeVerification ? ["Verify the outcome with read-only checks once the human acts (ops.verify.*)."] : [],
+      stopConditions: ["Target/procedure is unknown — STOP and confirm real facts before any execution.", "If a step would touch production without a backup/approval, STOP."],
+      requiredHumanConfirmation: ["This runbook is HUMAN-ONLY and was NOT executed.", "Operator must confirm every command against trusted sources before running anything."],
+      citations: g.citations.length ? g.citations : ["(none — target not in ecosystem docs)"],
+      generatedAt: nowIso(),
+    };
+  }
+
+  const mappedVerify = VERIFY_CHECKLISTS[at] ? at : "generic";
+  return {
+    runbookId: runbookId(), actionType: at, target: tgt, objective, dryRun: true, executionMode: "human_only",
+    riskLevel: normalizeRiskLevel(input.riskLevel, tpl.risk),
+    summary: `HUMAN ONLY / NOT EXECUTED — operator runbook for "${at}" on ${tgt}. ${objective}. Every command requires human confirmation; nothing here is executed.`,
+    prerequisites: tpl.prerequisites,
+    commandPack: includeCommands ? tpl.commands(tgt) : [],
+    hazards,
+    rollbackSteps: includeRollback ? tpl.rollback : [],
+    verificationSteps: includeVerification ? (VERIFY_CHECKLISTS[mappedVerify](tgt)) : [],
+    stopConditions: tpl.stops(tgt),
+    requiredHumanConfirmation: ["This runbook is HUMAN-ONLY and was NOT executed by MigraPilot.", "Operator must review and confirm each command before running it.", "Real ops mutations remain blocked in MigraPilot."],
+    citations: g.citations.length ? g.citations : ["(target not found in ecosystem docs — verify before acting)"],
+    generatedAt: nowIso(),
+  };
+}
+
+export function previewRunbook(input: RunbookInput): { valid: boolean; actionType: string; target: string; objective: string; sections: { commands: boolean; rollback: boolean; verification: boolean }; supportedAction: boolean; summary: string; checklist: string[] } {
+  const at = String(input.actionType ?? "").toLowerCase().trim() || "custom";
+  const tgt = String(input.target ?? "").trim();
+  const supported = !!RUNBOOK_TEMPLATES[at];
+  const sections = { commands: input.includeCommands !== false, rollback: input.includeRollback !== false, verification: input.includeVerification !== false };
+  const checklist: string[] = [];
+  if (!tgt) checklist.push("No target provided — runbook will be conservative with stop conditions.");
+  if (!supported) checklist.push(`Action "${at}" is custom/unsupported — runbook will be conservative.`);
+  if (sections.commands) checklist.push("Will include a human-only command pack (text only, never executed).");
+  if (sections.rollback) checklist.push("Will include rollback steps.");
+  if (sections.verification) checklist.push("Will include read-only verification steps.");
+  checklist.push("Generation requires approval; output is HUMAN-ONLY and not executed.");
+  return {
+    valid: true, actionType: at, target: tgt || "(unspecified)", objective: String(input.objective ?? "").trim() || "(no objective provided)",
+    sections, supportedAction: supported,
+    summary: `Preview: "${at}" runbook for ${tgt || "(unspecified)"} — ${supported ? "supported template" : "conservative"} · sections: ${[sections.commands && "commands", sections.rollback && "rollback", sections.verification && "verification"].filter(Boolean).join(", ") || "summary only"}.`,
+    checklist,
+  };
+}
+
 export interface HazardMatch {
   doc: string;
   heading: string;

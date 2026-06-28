@@ -754,6 +754,53 @@ function OpsSection() {
   };
   const vTone = (s?: string) => (s === "pass" ? "Succeeded" : s === "fail" ? "Failed" : undefined);
 
+  const [rbAction, setRbAction] = useState("restart");
+  const [rbTarget, setRbTarget] = useState("");
+  const [rbObjective, setRbObjective] = useState("");
+  const [rbCmds, setRbCmds] = useState(true);
+  const [rbRollback, setRbRollback] = useState(true);
+  const [rbVerify, setRbVerify] = useState(true);
+  const [rbBusy, setRbBusy] = useState(false);
+  const [rbStatus, setRbStatus] = useState("");
+  const [rbPreview, setRbPreview] = useState<string | null>(null);
+  const [rbPending, setRbPending] = useState<{ runId: string; approvalId: string } | null>(null);
+  const [rbResult, setRbResult] = useState<string | null>(null);
+
+  const previewRb = async () => {
+    if (!rbTarget.trim() || rbBusy) return;
+    setRbBusy(true); setRbPreview(null);
+    try {
+      const r = await fetch("/api/pilot/ops/runbook/preview", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ actionType: rbAction, target: rbTarget, objective: rbObjective || undefined, includeCommands: rbCmds, includeRollback: rbRollback, includeVerification: rbVerify }) });
+      const d = await r.json();
+      setRbPreview(`${d.summary}\n- ${(d.checklist ?? []).join("\n- ")}`);
+    } catch (e) { setRbPreview("error: " + (e as Error).message); }
+    finally { setRbBusy(false); }
+  };
+  const requestRb = async () => {
+    if (!rbTarget.trim() || rbBusy) return;
+    setRbBusy(true); setRbResult(null); setRbPending(null); setRbStatus("requesting approval…");
+    try {
+      let pending: { runId: string; approvalId: string } | null = null;
+      const msg = `Call ops.runbook.generate with actionType ${rbAction} target "${rbTarget.replace(/"/g, "")}" objective "${rbObjective.replace(/"/g, "")}" includeCommands ${rbCmds} includeRollback ${rbRollback} includeVerification ${rbVerify}.`;
+      await streamNdjson("/api/pilot/chat", { message: msg }, (ev) => { if (ev.type === "approval.required" && ev.approval) pending = { runId: ev.approval.runId, approvalId: ev.approval.id }; });
+      if (pending) { setRbPending(pending); setRbStatus("⏸ runbook needs approval (HUMAN ONLY / not executed)"); }
+      else setRbStatus("no approval was requested — try again");
+    } catch (e) { setRbStatus("error: " + (e as Error).message); }
+    finally { setRbBusy(false); }
+  };
+  const decideRb = async (decision: "approve" | "deny") => {
+    if (!rbPending || rbBusy) return;
+    setRbBusy(true);
+    const p = rbPending; setRbPending(null);
+    try {
+      let msg = ""; let tokens = "";
+      await streamNdjson(`/api/pilot/runs/${p.runId}/approve`, { approvalId: p.approvalId, decision }, (ev) => { if (ev.type === "token") tokens += ev.delta ?? ""; if (ev.type === "message") msg = ev.message?.content ?? msg; });
+      if (decision === "deny") setRbStatus("cancelled — no runbook generated");
+      else { setRbResult(msg || tokens || "(runbook generated — see chat)"); setRbStatus("✓ runbook generated (HUMAN ONLY — nothing executed)"); }
+    } catch (e) { setRbStatus("error: " + (e as Error).message); }
+    finally { setRbBusy(false); }
+  };
+
   const streamNdjson = async (url: string, body: unknown, onEvent: (ev: { type: string; approval?: { runId: string; id: string; toolName: string; risk: string }; delta?: string; message?: { content?: string } }) => void) => {
     const res = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
     if (!res.ok || !res.body) throw new Error(`request failed (${res.status})`);
@@ -910,6 +957,35 @@ function OpsSection() {
           </div>
         ))}
         <div style={S.muted}>Read-only evidence only — verifies nothing by changing it. URLs allowlisted + sanitized.</div>
+      </Panel>
+      <Panel title="Operator runbooks">
+        <div style={S.blockedBadge}>HUMAN ONLY — runbooks are NOT executed by MigraPilot</div>
+        <div style={S.inputRow}>
+          <select value={rbAction} onChange={(e) => setRbAction(e.target.value)} style={{ ...S.composerInput, flex: "0 0 100px", cursor: "pointer" }}>
+            {["restart", "deploy", "dns", "billing", "verify", "incident", "custom"].map((a) => <option key={a} value={a}>{a}</option>)}
+          </select>
+          <input value={rbTarget} onChange={(e) => setRbTarget(e.target.value)} placeholder="target (e.g. voip-core)" style={S.composerInput} />
+        </div>
+        <div style={S.inputRow}><input value={rbObjective} onChange={(e) => setRbObjective(e.target.value)} placeholder="objective (optional)" style={S.composerInput} /></div>
+        <div style={{ ...S.inputRow, gap: 12, fontSize: 12, color: "#9aa4b2" }}>
+          <label style={{ cursor: "pointer" }}><input type="checkbox" checked={rbCmds} onChange={(e) => setRbCmds(e.target.checked)} /> commands</label>
+          <label style={{ cursor: "pointer" }}><input type="checkbox" checked={rbRollback} onChange={(e) => setRbRollback(e.target.checked)} /> rollback</label>
+          <label style={{ cursor: "pointer" }}><input type="checkbox" checked={rbVerify} onChange={(e) => setRbVerify(e.target.checked)} /> verification</label>
+        </div>
+        <div style={S.inputRow}>
+          <button onClick={previewRb} disabled={rbBusy} style={{ ...S.sendButton, width: "auto", padding: "0 12px", fontSize: 12, opacity: rbBusy ? 0.6 : 1, cursor: rbBusy ? "default" : "pointer" }}>Preview</button>
+          <button onClick={requestRb} disabled={rbBusy} style={{ ...S.sendButton, width: "auto", padding: "0 12px", fontSize: 12, opacity: rbBusy ? 0.6 : 1, cursor: rbBusy ? "default" : "pointer" }}>Generate runbook</button>
+        </div>
+        {rbPreview && <pre style={S.approvalArgs}>{rbPreview}</pre>}
+        {rbStatus && <div style={S.muted}>{rbStatus}</div>}
+        {rbPending && (
+          <div style={S.approvalActions}>
+            <button onClick={() => decideRb("approve")} disabled={rbBusy} style={S.approveBtn}>Approve (runbook only)</button>
+            <button onClick={() => decideRb("deny")} disabled={rbBusy} style={S.denyBtn}>Cancel</button>
+          </div>
+        )}
+        {rbResult && <pre style={S.approvalArgs}>{rbResult}</pre>}
+        <div style={S.muted}>Generation requires approval. Commands are text only — confirm each before running. Real mutations stay blocked.</div>
       </Panel>
     </section>
   );
