@@ -126,6 +126,8 @@ export interface MemoryStorage {
   // Persist pending writes (file backend writes JSON here; pg backend is a no-op — it commits per replaceSource).
   flush(): Promise<void>;
   searchVectors(queryVector: number[], k: number): Promise<SearchHit[]>;
+  // Remove a source (and its chunks/embeddings) from MEMORY ONLY by path. Never touches files. Returns true if found.
+  deleteSourceByPath(path: string): Promise<boolean>;
 }
 
 // Events streamed to the UI over NDJSON (one JSON object per line).

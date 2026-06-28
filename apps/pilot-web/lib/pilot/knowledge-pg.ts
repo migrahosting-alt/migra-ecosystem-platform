@@ -97,6 +97,13 @@ export const pgStorage: MemoryStorage = {
     // pg commits per replaceSource transaction — nothing to flush.
   },
 
+  // Memory-only delete by path; the ON DELETE CASCADE removes chunks + embeddings. Never touches files.
+  async deleteSourceByPath(path: string): Promise<boolean> {
+    const p = await getPool();
+    const r = await p.query("DELETE FROM pilot_sources WHERE path = $1", [path]);
+    return (r.rowCount ?? 0) > 0;
+  },
+
   async searchVectors(qv: number[], k: number): Promise<SearchHit[]> {
     const p = await getPool();
     const limit = Math.max(1, Math.min(k, 20));

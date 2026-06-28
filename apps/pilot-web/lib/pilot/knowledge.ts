@@ -41,25 +41,29 @@ function kid(prefix: string): string {
 }
 
 // --- Backend selection (cached on globalThis) ---
-const gb = globalThis as unknown as { __migrapilotBackend?: MemoryStorage; __migrapilotBackendName?: "file" | "pgvector" };
+// Cache only the DECISION (name + resolved flag) on globalThis — never the storage object,
+// so hot-reloads always use the freshly-imported module objects (avoids stale-method bugs).
+const gb = globalThis as unknown as { __migrapilotBackendName?: "file" | "pgvector"; __migrapilotResolved?: boolean };
 function pgConfigured(): boolean {
   return process.env.PILOT_MEMORY_BACKEND === "pgvector" && !!process.env.DATABASE_URL;
 }
 async function backend(): Promise<MemoryStorage> {
-  if (gb.__migrapilotBackend) return gb.__migrapilotBackend;
+  if (gb.__migrapilotResolved) {
+    return gb.__migrapilotBackendName === "pgvector" ? pgStorage : fileStorage;
+  }
   if (pgConfigured()) {
     try {
       await pgStorage.init();
-      gb.__migrapilotBackend = pgStorage;
       gb.__migrapilotBackendName = "pgvector";
+      gb.__migrapilotResolved = true;
       return pgStorage;
     } catch (e) {
       console.warn(`[pilot-memory] pgvector backend unavailable, falling back to file: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
   await fileStorage.init();
-  gb.__migrapilotBackend = fileStorage;
   gb.__migrapilotBackendName = "file";
+  gb.__migrapilotResolved = true;
   return fileStorage;
 }
 export async function memoryBackendName(): Promise<"file" | "pgvector"> {
@@ -321,6 +325,20 @@ export function formatHits(hits: SearchHit[]): string {
 
 export async function listSources(): Promise<Source[]> {
   return (await backend()).listSources();
+}
+
+// Memory-only delete by path (the source's stable unique key). Never deletes the file on disk.
+export async function deleteSource(path: string): Promise<boolean> {
+  if (typeof path !== "string" || !path.trim()) throw new Error("path required");
+  const storage = await backend();
+  const deleted = await storage.deleteSourceByPath(path);
+  if (deleted) await storage.flush();
+  return deleted;
+}
+
+// Reingest = re-run the guarded single-file ingest (replaceSource drops the old source first, so no duplicate chunks).
+export async function reingestSource(path: string): Promise<Source> {
+  return ingestSource(path, true);
 }
 
 export async function knowledgeStats(): Promise<{ sourceCount: number; chunkCount: number; lastIngest: string | null }> {

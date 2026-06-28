@@ -77,6 +77,16 @@ export const fileStorage: MemoryStorage = {
     await writeFile(EMB_FILE, JSON.stringify(kb.embeddings));
   },
 
+  async deleteSourceByPath(path: string): Promise<boolean> {
+    const prior = kb.sources.find((s) => s.path === path);
+    if (!prior) return false;
+    const dropIds = new Set(kb.chunks.filter((c) => c.sourceId === prior.id).map((c) => c.id));
+    kb.chunks = kb.chunks.filter((c) => c.sourceId !== prior.id);
+    kb.embeddings = kb.embeddings.filter((e) => !dropIds.has(e.chunkId));
+    kb.sources = kb.sources.filter((s) => s.id !== prior.id);
+    return true;
+  },
+
   async searchVectors(qv: number[], k: number): Promise<SearchHit[]> {
     if (kb.embeddings.length === 0) return [];
     const chunkById = new Map(kb.chunks.map((c) => [c.id, c]));

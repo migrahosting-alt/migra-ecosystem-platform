@@ -711,6 +711,40 @@ function SourcesSection() {
   const [batchPreview, setBatchPreview] = useState<BatchPreview | null>(null);
   const [batchBusy, setBatchBusy] = useState(false);
   const [batchMsg, setBatchMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [opBusy, setOpBusy] = useState(false);
+  const [opMsg, setOpMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
+  const reingestOne = async (path: string) => {
+    if (opBusy) return;
+    setOpBusy(true);
+    setOpMsg(null);
+    try {
+      const r = await fetch("/api/pilot/sources/ingest", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ path }) });
+      const d = await r.json();
+      if (r.ok && d.ok) { setOpMsg({ ok: true, text: `✓ Reingested ${path} (${d.source.chunkCount} chunks)` }); load(); }
+      else setOpMsg({ ok: false, text: `✗ ${d.error ?? "reingest failed"}` });
+    } catch (err) {
+      setOpMsg({ ok: false, text: `✗ ${(err as Error).message}` });
+    } finally {
+      setOpBusy(false);
+    }
+  };
+
+  const deleteOne = async (path: string) => {
+    if (opBusy) return;
+    setOpBusy(true);
+    setOpMsg(null);
+    try {
+      const r = await fetch("/api/pilot/sources/delete", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ path }) });
+      const d = await r.json();
+      if (r.ok && d.ok) { setOpMsg({ ok: true, text: d.deleted ? `✓ Removed ${path} from memory (file untouched)` : `(not found) ${path}` }); load(); }
+      else setOpMsg({ ok: false, text: `✗ ${d.error ?? "delete failed"}` });
+    } catch (err) {
+      setOpMsg({ ok: false, text: `✗ ${(err as Error).message}` });
+    } finally {
+      setOpBusy(false);
+    }
+  };
 
   const load = () => {
     fetch("/api/pilot/sources")
@@ -853,8 +887,20 @@ function SourcesSection() {
       </Panel>
 
       <Panel title="Ingested sources">
+        {opMsg && <div style={{ ...S.muted, color: opMsg.ok ? "#86efac" : "#fca5a5", marginBottom: 6 }}>{opMsg.text}</div>}
         {stats && stats.sources.length > 0 ? (
-          stats.sources.map((s) => <Row key={s.id} left={s.path} right={`${s.chunkCount} chunks`} />)
+          stats.sources.map((s) => (
+            <div key={s.id} style={S.srcRow}>
+              <div style={S.srcMain}>
+                <div style={S.srcPath} title={s.path}>{s.path}</div>
+                <div style={S.muted}>{s.chunkCount} chunks · {pilotTimeAgo(s.createdAt)}</div>
+              </div>
+              <div style={S.srcActions}>
+                <button onClick={() => reingestOne(s.path)} disabled={opBusy} style={{ ...S.srcBtn, opacity: opBusy ? 0.5 : 1 }}>Reingest</button>
+                <button onClick={() => deleteOne(s.path)} disabled={opBusy} style={{ ...S.srcBtnDanger, opacity: opBusy ? 0.5 : 1 }}>Delete</button>
+              </div>
+            </div>
+          ))
         ) : (
           <div style={S.muted}>No sources yet — add one above.</div>
         )}
@@ -1225,6 +1271,12 @@ const S: Record<string, React.CSSProperties> = {
   bubbleUser: { background: "linear-gradient(135deg, rgba(37,99,235,.30), rgba(8,145,178,.18))", border: "1px solid rgba(59,130,246,.34)", color: "#eaf2ff" },
   bubbleAssistant: { background: "rgba(15,23,42,.7)", border: "1px solid rgba(148,163,184,.16)", color: "#cbd5e1" },
   memoryBadge: { alignSelf: "flex-start", display: "inline-flex", alignItems: "center", gap: 6, padding: "4px 10px", borderRadius: 999, fontSize: 11, fontWeight: 800, color: "#d8b4fe", background: "rgba(126,34,206,.16)", border: "1px solid rgba(168,85,247,.34)" },
+  srcRow: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, padding: "7px 0", borderBottom: "1px solid rgba(148,163,184,.08)" },
+  srcMain: { minWidth: 0, flex: 1 },
+  srcPath: { fontSize: 12, color: "#cbd5e1", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
+  srcActions: { display: "flex", gap: 6, flexShrink: 0 },
+  srcBtn: { padding: "4px 10px", borderRadius: 8, border: "1px solid rgba(56,189,248,.3)", background: "rgba(2,6,23,.5)", color: "#7dd3fc", fontSize: 11, fontWeight: 800, cursor: "pointer" },
+  srcBtnDanger: { padding: "4px 10px", borderRadius: 8, border: "1px solid rgba(239,68,68,.4)", background: "rgba(2,6,23,.5)", color: "#fca5a5", fontSize: 11, fontWeight: 800, cursor: "pointer" },
   approvalCard: { padding: 14, borderRadius: 16, background: "linear-gradient(135deg, rgba(217,119,6,.14), rgba(2,6,23,.5))", border: "1px solid rgba(245,158,11,.4)", display: "flex", flexDirection: "column", gap: 8 },
   approvalTitle: { fontSize: 13, fontWeight: 800, color: "#fde68a" },
   approvalText: { fontSize: 13, color: "#e2e8f0" },
