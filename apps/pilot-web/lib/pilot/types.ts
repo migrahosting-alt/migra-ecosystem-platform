@@ -116,6 +116,18 @@ export interface SearchHit {
   snippet: string;
 }
 
+// Pluggable persistence for memory (Phase 9.4). file-backed is default; pgvector is dormant/env-gated.
+export interface MemoryStorage {
+  init(): Promise<void>;
+  getStats(): Promise<{ sourceCount: number; chunkCount: number; lastIngest: string | null }>;
+  listSources(): Promise<Source[]>;
+  // Upsert a source by path: remove any prior source for the same path (no duplicate chunks), then insert.
+  replaceSource(source: Source, chunks: Chunk[], embeddings: Embedding[]): Promise<void>;
+  // Persist pending writes (file backend writes JSON here; pg backend is a no-op — it commits per replaceSource).
+  flush(): Promise<void>;
+  searchVectors(queryVector: number[], k: number): Promise<SearchHit[]>;
+}
+
 // Events streamed to the UI over NDJSON (one JSON object per line).
 export type PilotEvent =
   | { type: "run.created"; run: Run }

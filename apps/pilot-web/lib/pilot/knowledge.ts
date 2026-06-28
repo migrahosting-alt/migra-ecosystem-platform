@@ -1,18 +1,18 @@
-// MigraPilot — knowledge / memory store (Phase 9.1).
-// File-backed (.pilot-data/*.json), local-first, no DB. Embeddings via nomic-embed-text.
-// globalThis-cached so we don't re-read files every call; write-through on mutation.
+// MigraPilot — knowledge / memory public API + backend dispatcher (Phase 9.4).
+// Backend is file-backed by default; pgvector is used only when PILOT_MEMORY_BACKEND=pgvector
+// AND DATABASE_URL are set (and the DB is reachable with the migration applied). On any
+// pg failure it logs a warning and falls back to file-backed memory. Guardrails, chunking,
+// directory/glob walk, and embedding are shared here so both backends apply identical safety.
 
-import { readFile, writeFile, mkdir, stat, readdir } from "node:fs/promises";
+import { readFile, stat, readdir } from "node:fs/promises";
 import { resolve, relative, isAbsolute, basename, extname } from "node:path";
 import { createHash } from "node:crypto";
 import { embed } from "./gateway";
-import type { Chunk, Embedding, SearchHit, Source } from "./types";
+import { fileStorage } from "./knowledge-file";
+import { pgStorage } from "./knowledge-pg";
+import type { Chunk, Embedding, MemoryStorage, SearchHit, Source } from "./types";
 
 const REPO_ROOT = process.cwd();
-const DATA_DIR = resolve(REPO_ROOT, ".pilot-data");
-const SOURCES_FILE = resolve(DATA_DIR, "sources.json");
-const CHUNKS_FILE = resolve(DATA_DIR, "chunks.json");
-const EMB_FILE = resolve(DATA_DIR, "embeddings.json");
 
 // --- Guardrails ---
 const MAX_BYTES = 256 * 1024;
@@ -23,46 +23,51 @@ const ALLOW_EXT = new Set([
 const DENY_DIR = ["node_modules", ".git", ".next", ".pilot-scratch", ".pilot-data", ".pilot-sd", "dist", "build", "coverage"];
 const SECRET_RE = /(^\.env|\.env$|\.env\.|\.key$|\.pem$|\.crt$|\.cert$|secret|credential|\.p12$|id_rsa|-lock\.json$|lock\.yaml$|yarn\.lock$)/i;
 
-// --- Chunking ---
+// --- Chunking / retrieval ---
 const CHUNK_SIZE = 1000;
 const CHUNK_OVERLAP = 150;
 const SCORE_THRESHOLD = 0.55;
 const CONTEXT_CAP = 2200;
 
-type KnowledgeStore = { sources: Source[]; chunks: Chunk[]; embeddings: Embedding[]; loaded: boolean; counter: number };
-const g = globalThis as unknown as { __migrapilotKnowledge?: KnowledgeStore };
-const kb: KnowledgeStore =
-  g.__migrapilotKnowledge ?? (g.__migrapilotKnowledge = { sources: [], chunks: [], embeddings: [], loaded: false, counter: 0 });
+// --- Batch caps ---
+const MAX_SCAN = 5000;
+const MAX_CANDIDATES = 100;
 
+// --- ID generation (backend-agnostic) ---
+const gc = globalThis as unknown as { __migrapilotKid?: number };
 function kid(prefix: string): string {
-  kb.counter += 1;
-  return `${prefix}_${Date.now().toString(36)}_${kb.counter.toString(36)}`;
+  gc.__migrapilotKid = (gc.__migrapilotKid ?? 0) + 1;
+  return `${prefix}_${Date.now().toString(36)}_${gc.__migrapilotKid.toString(36)}`;
 }
 
-async function readJson<T>(file: string, fallback: T): Promise<T> {
-  try {
-    return JSON.parse(await readFile(file, "utf8")) as T;
-  } catch {
-    return fallback;
+// --- Backend selection (cached on globalThis) ---
+const gb = globalThis as unknown as { __migrapilotBackend?: MemoryStorage; __migrapilotBackendName?: "file" | "pgvector" };
+function pgConfigured(): boolean {
+  return process.env.PILOT_MEMORY_BACKEND === "pgvector" && !!process.env.DATABASE_URL;
+}
+async function backend(): Promise<MemoryStorage> {
+  if (gb.__migrapilotBackend) return gb.__migrapilotBackend;
+  if (pgConfigured()) {
+    try {
+      await pgStorage.init();
+      gb.__migrapilotBackend = pgStorage;
+      gb.__migrapilotBackendName = "pgvector";
+      return pgStorage;
+    } catch (e) {
+      console.warn(`[pilot-memory] pgvector backend unavailable, falling back to file: ${e instanceof Error ? e.message : String(e)}`);
+    }
   }
+  await fileStorage.init();
+  gb.__migrapilotBackend = fileStorage;
+  gb.__migrapilotBackendName = "file";
+  return fileStorage;
+}
+export async function memoryBackendName(): Promise<"file" | "pgvector"> {
+  await backend();
+  return gb.__migrapilotBackendName ?? "file";
 }
 
-async function ensureLoaded(): Promise<void> {
-  if (kb.loaded) return;
-  kb.sources = await readJson<Source[]>(SOURCES_FILE, []);
-  kb.chunks = await readJson<Chunk[]>(CHUNKS_FILE, []);
-  kb.embeddings = await readJson<Embedding[]>(EMB_FILE, []);
-  kb.loaded = true;
-}
-
-async function persist(): Promise<void> {
-  await mkdir(DATA_DIR, { recursive: true });
-  await writeFile(SOURCES_FILE, JSON.stringify(kb.sources));
-  await writeFile(CHUNKS_FILE, JSON.stringify(kb.chunks));
-  await writeFile(EMB_FILE, JSON.stringify(kb.embeddings));
-}
-
-// Validate + resolve a repo-relative path under all ingestion guardrails. Throws on violation.
+// --- Guardrail helpers (shared) ---
 function validatePath(relPath: string): { abs: string; rel: string } {
   if (typeof relPath !== "string" || !relPath.trim()) throw new Error("path required");
   if (isAbsolute(relPath)) throw new Error("only relative repo paths are allowed");
@@ -77,84 +82,6 @@ function validatePath(relPath: string): { abs: string; rel: string } {
   return { abs, rel };
 }
 
-function chunkText(text: string): string[] {
-  const clean = text.replace(/\r\n/g, "\n");
-  const out: string[] = [];
-  for (let i = 0; i < clean.length; i += CHUNK_SIZE - CHUNK_OVERLAP) {
-    const piece = clean.slice(i, i + CHUNK_SIZE).trim();
-    if (piece) out.push(piece);
-    if (i + CHUNK_SIZE >= clean.length) break;
-  }
-  if (out.length === 0) {
-    const t = clean.trim();
-    if (t) out.push(t);
-  }
-  return out;
-}
-
-function cosine(a: number[], b: number[]): number {
-  let dot = 0, na = 0, nb = 0;
-  const n = Math.min(a.length, b.length);
-  for (let i = 0; i < n; i++) {
-    dot += a[i] * b[i];
-    na += a[i] * a[i];
-    nb += b[i] * b[i];
-  }
-  if (na === 0 || nb === 0) return 0;
-  return dot / (Math.sqrt(na) * Math.sqrt(nb));
-}
-
-export async function ingestSource(relPath: string, persistAfter = true): Promise<Source> {
-  await ensureLoaded();
-  const { abs, rel } = validatePath(relPath);
-
-  const info = await stat(abs);
-  if (!info.isFile()) throw new Error("path is not a file");
-  if (info.size > MAX_BYTES) throw new Error(`file too large: ${info.size} bytes (max ${MAX_BYTES})`);
-
-  const content = await readFile(abs, "utf8");
-  const hash = createHash("sha256").update(content).digest("hex");
-
-  // Re-ingest: drop any prior source for this path (+ its chunks/embeddings).
-  const prior = kb.sources.find((s) => s.path === rel);
-  if (prior) {
-    const dropIds = new Set(kb.chunks.filter((c) => c.sourceId === prior.id).map((c) => c.id));
-    kb.chunks = kb.chunks.filter((c) => c.sourceId !== prior.id);
-    kb.embeddings = kb.embeddings.filter((e) => !dropIds.has(e.chunkId));
-    kb.sources = kb.sources.filter((s) => s.id !== prior.id);
-  }
-
-  const pieces = chunkText(content);
-  const source: Source = {
-    id: kid("src"),
-    path: rel,
-    title: basename(rel),
-    hash,
-    bytes: info.size,
-    chunkCount: pieces.length,
-    createdAt: new Date().toISOString(),
-  };
-
-  for (let i = 0; i < pieces.length; i++) {
-    const chunk: Chunk = { id: kid("chk"), sourceId: source.id, index: i, text: pieces[i] };
-    const vector = await embed(pieces[i], "document");
-    kb.chunks.push(chunk);
-    kb.embeddings.push({ chunkId: chunk.id, vector });
-  }
-
-  kb.sources.push(source);
-  if (persistAfter) await persist();
-  return source;
-}
-
-// --- Batch / directory / glob ingest (Phase 9.3) ---
-const MAX_SCAN = 5000; // directory entries scanned per batch
-const MAX_CANDIDATES = 100; // files ingested per batch
-
-type Candidate = { path: string; bytes: number };
-type Rejected = { path: string; reason: string };
-
-// Validate a base path that may be a directory (no extension check — that's per-file).
 function validateBase(relPath: string): { abs: string; rel: string } {
   if (typeof relPath !== "string" || !relPath.trim()) throw new Error("path required");
   if (isAbsolute(relPath)) throw new Error("only relative repo paths are allowed");
@@ -166,7 +93,6 @@ function validateBase(relPath: string): { abs: string; rel: string } {
   return { abs, rel };
 }
 
-// Non-throwing per-file guardrail check; returns a rejection reason or null.
 function fileRejectReason(rel: string): string | null {
   const ext = extname(rel).toLowerCase();
   if (!ALLOW_EXT.has(ext)) return `file type '${ext || "none"}' not allowed`;
@@ -174,7 +100,6 @@ function fileRejectReason(rel: string): string | null {
   return null;
 }
 
-// Minimal glob: ** = any (incl. /), * = within a path segment, ? = one char. Applied to path under base.
 function globToRegExp(glob: string): RegExp {
   let re = "";
   for (let i = 0; i < glob.length; i++) {
@@ -198,6 +123,61 @@ function globToRegExp(glob: string): RegExp {
   return new RegExp("^" + re + "$");
 }
 
+function chunkText(text: string): string[] {
+  const clean = text.replace(/\r\n/g, "\n");
+  const out: string[] = [];
+  for (let i = 0; i < clean.length; i += CHUNK_SIZE - CHUNK_OVERLAP) {
+    const piece = clean.slice(i, i + CHUNK_SIZE).trim();
+    if (piece) out.push(piece);
+    if (i + CHUNK_SIZE >= clean.length) break;
+  }
+  if (out.length === 0) {
+    const t = clean.trim();
+    if (t) out.push(t);
+  }
+  return out;
+}
+
+// --- Ingestion / search orchestration (backend-agnostic) ---
+export async function ingestSource(relPath: string, flushAfter = true): Promise<Source> {
+  const storage = await backend();
+  const { abs, rel } = validatePath(relPath);
+
+  const info = await stat(abs);
+  if (!info.isFile()) throw new Error("path is not a file");
+  if (info.size > MAX_BYTES) throw new Error(`file too large: ${info.size} bytes (max ${MAX_BYTES})`);
+
+  const content = await readFile(abs, "utf8");
+  const hash = createHash("sha256").update(content).digest("hex");
+  const pieces = chunkText(content);
+
+  const source: Source = {
+    id: kid("src"),
+    path: rel,
+    title: basename(rel),
+    hash,
+    bytes: info.size,
+    chunkCount: pieces.length,
+    createdAt: new Date().toISOString(),
+  };
+
+  const chunks: Chunk[] = [];
+  const embeddings: Embedding[] = [];
+  for (let i = 0; i < pieces.length; i++) {
+    const chunk: Chunk = { id: kid("chk"), sourceId: source.id, index: i, text: pieces[i] };
+    const vector = await embed(pieces[i], "document");
+    chunks.push(chunk);
+    embeddings.push({ chunkId: chunk.id, vector });
+  }
+
+  await storage.replaceSource(source, chunks, embeddings);
+  if (flushAfter) await storage.flush();
+  return source;
+}
+
+type Candidate = { path: string; bytes: number };
+type Rejected = { path: string; reason: string };
+
 async function collectCandidates(inputRel: string, glob?: string): Promise<{ candidates: Candidate[]; rejected: Rejected[]; truncated: boolean }> {
   const base = validateBase(inputRel);
   const candidates: Candidate[] = [];
@@ -209,7 +189,7 @@ async function collectCandidates(inputRel: string, glob?: string): Promise<{ can
   const consider = async (abs: string) => {
     const rel = relative(REPO_ROOT, abs);
     const relToBase = relative(base.abs, abs);
-    if (globRe && !globRe.test(relToBase)) return; // filtered out — not a rejection
+    if (globRe && !globRe.test(relToBase)) return;
     const reason = fileRejectReason(rel);
     if (reason) {
       rejected.push({ path: rel, reason });
@@ -269,7 +249,7 @@ async function collectCandidates(inputRel: string, glob?: string): Promise<{ can
 }
 
 export async function ingestBatch(inputRel: string, glob: string | undefined, dryRun: boolean) {
-  await ensureLoaded();
+  const storage = await backend();
   const { candidates, rejected, truncated } = await collectCandidates(inputRel, glob);
 
   if (dryRun) {
@@ -279,13 +259,14 @@ export async function ingestBatch(inputRel: string, glob: string | undefined, dr
   const ingested: { path: string; chunkCount: number }[] = [];
   for (const c of candidates) {
     try {
-      const src = await ingestSource(c.path, false); // persist once at the end
+      const src = await ingestSource(c.path, false);
       ingested.push({ path: c.path, chunkCount: src.chunkCount });
     } catch (e) {
       rejected.push({ path: c.path, reason: e instanceof Error ? e.message : "ingest failed" });
     }
   }
-  await persist();
+  await storage.flush();
+  const stats = await storage.getStats();
 
   return {
     dryRun: false as const,
@@ -294,45 +275,26 @@ export async function ingestBatch(inputRel: string, glob: string | undefined, dr
     ingested,
     rejected,
     rejectedCount: rejected.length,
-    sourceCount: kb.sources.length,
-    totalChunks: kb.chunks.length,
+    sourceCount: stats.sourceCount,
+    totalChunks: stats.chunkCount,
     truncated,
   };
 }
 
 export async function searchKnowledge(query: string, k = 5): Promise<SearchHit[]> {
-  await ensureLoaded();
-  if (kb.embeddings.length === 0 || !query.trim()) return [];
-
+  if (!query.trim()) return [];
+  const storage = await backend();
+  const stats = await storage.getStats();
+  if (stats.chunkCount === 0) return [];
   const qv = await embed(query, "query");
-  const chunkById = new Map(kb.chunks.map((c) => [c.id, c]));
-  const sourceById = new Map(kb.sources.map((s) => [s.id, s]));
-
-  const scored = kb.embeddings
-    .map((e) => {
-      const chunk = chunkById.get(e.chunkId);
-      if (!chunk) return null;
-      const source = sourceById.get(chunk.sourceId);
-      return {
-        chunkId: chunk.id,
-        sourceId: chunk.sourceId,
-        title: source?.title ?? "(unknown)",
-        path: source?.path ?? "(unknown)",
-        score: cosine(qv, e.vector),
-        snippet: chunk.text.replace(/\s+/g, " ").slice(0, 300),
-      } satisfies SearchHit;
-    })
-    .filter((h): h is SearchHit => h !== null)
-    .sort((a, b) => b.score - a.score);
-
-  return scored.slice(0, Math.max(1, Math.min(k, 20)));
+  return storage.searchVectors(qv, k);
 }
 
 // Auto-retrieval: bounded context + the sources actually injected, or null when nothing is confident enough.
 export async function retrieveContext(query: string): Promise<{ text: string; sources: { title: string; path: string }[] } | null> {
-  if (kb.loaded && kb.sources.length === 0) return null;
-  await ensureLoaded();
-  if (kb.sources.length === 0) return null;
+  const storage = await backend();
+  const stats = await storage.getStats();
+  if (stats.sourceCount === 0) return null;
 
   const hits = (await searchKnowledge(query, 4)).filter((h) => h.score >= SCORE_THRESHOLD);
   if (hits.length === 0) return null;
@@ -358,12 +320,9 @@ export function formatHits(hits: SearchHit[]): string {
 }
 
 export async function listSources(): Promise<Source[]> {
-  await ensureLoaded();
-  return [...kb.sources].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  return (await backend()).listSources();
 }
 
 export async function knowledgeStats(): Promise<{ sourceCount: number; chunkCount: number; lastIngest: string | null }> {
-  await ensureLoaded();
-  const lastIngest = kb.sources.reduce<string | null>((acc, s) => (acc && acc > s.createdAt ? acc : s.createdAt), null);
-  return { sourceCount: kb.sources.length, chunkCount: kb.chunks.length, lastIngest };
+  return (await backend()).getStats();
 }

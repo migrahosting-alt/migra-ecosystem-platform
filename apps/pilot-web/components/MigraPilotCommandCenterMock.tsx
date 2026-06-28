@@ -691,7 +691,7 @@ function StatusPill({ label, tone }: { label: string; tone: string }) {
 }
 
 type SourceRow = { id: string; path: string; title: string; chunkCount: number; createdAt: string };
-type SourceStats = { sourceCount: number; chunkCount: number; lastIngest: string | null; sources: SourceRow[] };
+type SourceStats = { sourceCount: number; chunkCount: number; lastIngest: string | null; sources: SourceRow[]; backend?: "file" | "pgvector" };
 type SearchHitRow = { title: string; path: string; score: number; snippet: string };
 type BatchCandidate = { path: string; bytes: number };
 type BatchRejected = { path: string; reason: string };
@@ -800,6 +800,7 @@ function SourcesSection() {
   return (
     <section style={S.sectionGrid}>
       <Panel title="Knowledge Store">
+        <Row left="Backend" right={stats?.backend === "pgvector" ? "pgvector" : "file"} tone={stats?.backend === "pgvector" ? "Succeeded" : undefined} />
         <Row left="Sources" right={String(stats?.sourceCount ?? 0)} />
         <Row left="Chunks" right={String(stats?.chunkCount ?? 0)} />
         <Row left="Last ingest" right={stats?.lastIngest ? pilotTimeAgo(stats.lastIngest) : "—"} />
