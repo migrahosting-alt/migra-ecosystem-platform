@@ -81,7 +81,7 @@ type RichRow = { title: string; sub: string; status: string; tone: string };
 type PilotStep = { id: string; index: number; title: string; status: string; startedAt?: string; endedAt?: string };
 type PilotRun = { id: string; conversationId: string; agentName: string; mode: string; status: string; userMessage: string; summary?: string; model?: string; tier?: string; recalled?: { count: number; sources: { title: string; path: string }[] }; steps: PilotStep[]; createdAt: string; endedAt?: string };
 type ChatMsg = { id: string; role: string; content: string };
-type ApprovalReq = { id: string; runId: string; toolName: string; args: Record<string, unknown>; risk: string; status: string };
+type ApprovalReq = { id: string; runId: string; toolName: string; args: Record<string, unknown>; risk: string; status: string; reason?: string; summary?: string; expectedEffect?: string };
 
 function pilotRunPct(run: PilotRun): number {
   if (!run.steps.length) return 0;
@@ -475,14 +475,19 @@ export default function MigraPilotCommandCenterMock() {
                     <div style={{ ...S.bubble, ...S.bubbleAssistant }}>{liveRun ? `${liveRun.agentName} · ${liveRun.model ?? "model"} thinking…` : "Thinking…"}</div>
                   </div>
                 )}
+                {liveRun?.steps?.some((s) => s.title.startsWith("🚫 blocked")) && (
+                  <div style={S.blockedBadge}>🚫 {liveRun.steps.filter((s) => s.title.startsWith("🚫 blocked")).length} action(s) blocked — not permitted</div>
+                )}
                 {pendingApproval && (
                   <div style={S.approvalCard}>
                     <div style={S.approvalTitle}>⏸ Approval required</div>
-                    <div style={S.approvalText}>The agent wants to run <strong>{pendingApproval.toolName}</strong><span style={S.approvalRisk}>risk: {pendingApproval.risk}</span></div>
+                    <div style={S.approvalText}>The agent wants to run <strong>{pendingApproval.toolName}</strong><span style={S.approvalRisk}>{pendingApproval.risk}</span></div>
+                    {pendingApproval.reason && <div style={S.muted}>Why: {pendingApproval.reason}</div>}
+                    {pendingApproval.expectedEffect && <div style={S.muted}>Effect: {pendingApproval.expectedEffect}</div>}
                     <pre style={S.approvalArgs}>{JSON.stringify(pendingApproval.args, null, 2)}</pre>
                     <div style={S.approvalActions}>
-                      <button onClick={() => decideApproval("approve")} disabled={sending} style={S.approveBtn}>Approve &amp; run</button>
-                      <button onClick={() => decideApproval("deny")} disabled={sending} style={S.denyBtn}>Deny</button>
+                      <button onClick={() => decideApproval("approve")} disabled={sending} style={S.approveBtn}>Approve</button>
+                      <button onClick={() => decideApproval("deny")} disabled={sending} style={S.denyBtn}>Cancel</button>
                     </div>
                   </div>
                 )}
@@ -1271,6 +1276,7 @@ const S: Record<string, React.CSSProperties> = {
   bubbleUser: { background: "linear-gradient(135deg, rgba(37,99,235,.30), rgba(8,145,178,.18))", border: "1px solid rgba(59,130,246,.34)", color: "#eaf2ff" },
   bubbleAssistant: { background: "rgba(15,23,42,.7)", border: "1px solid rgba(148,163,184,.16)", color: "#cbd5e1" },
   memoryBadge: { alignSelf: "flex-start", display: "inline-flex", alignItems: "center", gap: 6, padding: "4px 10px", borderRadius: 999, fontSize: 11, fontWeight: 800, color: "#d8b4fe", background: "rgba(126,34,206,.16)", border: "1px solid rgba(168,85,247,.34)" },
+  blockedBadge: { alignSelf: "flex-start", display: "inline-flex", alignItems: "center", gap: 6, padding: "4px 10px", borderRadius: 999, fontSize: 11, fontWeight: 800, color: "#fca5a5", background: "rgba(185,28,28,.16)", border: "1px solid rgba(239,68,68,.4)" },
   srcRow: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, padding: "7px 0", borderBottom: "1px solid rgba(148,163,184,.08)" },
   srcMain: { minWidth: 0, flex: 1 },
   srcPath: { fontSize: 12, color: "#cbd5e1", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },

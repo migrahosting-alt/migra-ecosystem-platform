@@ -62,7 +62,10 @@ export interface ApprovalRequest {
   stepId?: string;
   toolName: string;
   args: Record<string, unknown>;
-  risk: string;
+  risk: string; // PilotRiskLevel (safe_write | requires_approval)
+  reason?: string;
+  summary?: string;
+  expectedEffect?: string;
   status: "pending" | "approved" | "denied";
   createdAt: string;
   decidedAt?: string;

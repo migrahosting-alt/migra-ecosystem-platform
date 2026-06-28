@@ -3,6 +3,7 @@
 // approval), audits the decision, and resumes the agent loop (streamed NDJSON).
 
 import { runTool } from "../../../../../../lib/pilot/tools";
+import { classifyPilotAction } from "../../../../../../lib/pilot/policy";
 import { streamPilotRun } from "../../../../../../lib/pilot/orchestrator";
 import { addAudit, getApproval, getRun, getRunConvo, id, saveApproval, saveRun } from "../../../../../../lib/pilot/store";
 import type { PilotEvent } from "../../../../../../lib/pilot/types";
@@ -42,7 +43,16 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
       const step = run.steps.find((s) => s.id === approval.stepId);
 
       try {
-        if (decision === "approve") {
+        // Re-classify the EXACT stored action/args at execution time. Never run a blocked action even if approved.
+        const recheck = classifyPilotAction(approval.toolName, approval.args);
+        if (decision === "approve" && recheck.blocked) {
+          if (step) { step.title = `🚫 blocked: ${approval.toolName}`; step.status = "failed"; step.endedAt = now(); step.detail = recheck.reason; }
+          approval.status = "denied";
+          approval.decidedAt = now();
+          addAudit({ id: id("aud"), runId, ts: now(), kind: "action.blocked", detail: `${approval.toolName}: ${recheck.reason}` });
+          convo.push({ role: "tool", content: `BLOCKED on execution: ${recheck.reason}. Not permitted.`, tool_name: approval.toolName });
+          if (step) send({ type: "step", step });
+        } else if (decision === "approve") {
           const res = await runTool(approval.toolName, approval.args, { approved: true });
           if (step) {
             step.title = `🔧 ${approval.toolName}`;

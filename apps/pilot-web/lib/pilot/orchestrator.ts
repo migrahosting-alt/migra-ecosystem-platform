@@ -3,7 +3,8 @@
 // for human approval. streamPilotRun() finalizes (stream answer) or pauses.
 
 import { chatOnce, type ChatMessage, type ToolCall } from "./gateway";
-import { KNOWN_TOOL_NAMES, isMutating, runTool, toolSpecsForModel } from "./tools";
+import { KNOWN_TOOL_NAMES, runTool, toolSpecsForModel } from "./tools";
+import { classifyPilotAction } from "./policy";
 import { addAudit, id, saveApproval, saveMessage, saveRun, setRunConvo, store } from "./store";
 import type { ApprovalRequest, Message, PilotEvent, Run, RunStep } from "./types";
 
@@ -73,18 +74,35 @@ export async function runAgentLoop(run: Run, convo: ChatMessage[], send: (e: Pil
       const args = argsOf(tc);
       assistantMsg.tool_calls!.push(tc);
 
-      if (isMutating(name)) {
+      const decision = classifyPilotAction(name, args);
+
+      if (decision.blocked) {
+        // REFUSE — never execute, never offer approval. Tell the model and move on.
+        const step: RunStep = { id: id("step"), index: run.steps.length, title: `🚫 blocked: ${name}`, status: "failed", startedAt: now(), endedAt: now(), detail: decision.reason };
+        run.steps.push(step);
+        saveRun(run);
+        send({ type: "step", step });
+        addAudit({ id: id("aud"), runId: run.id, ts: now(), kind: "action.blocked", detail: `${name}: ${decision.reason}` });
+        convo.push({ role: "tool", content: `BLOCKED: ${decision.reason}. This action is not permitted; do not attempt it again.`, tool_name: name });
+        continue;
+      }
+
+      if (decision.requiresApproval) {
         // PAUSE — surface for human approval; do not execute.
         const step: RunStep = { id: id("step"), index: run.steps.length, title: `⏸ approval: ${name}`, status: "running", startedAt: now() };
         run.steps.push(step);
-        const approval: ApprovalRequest = { id: id("apr"), runId: run.id, stepId: step.id, toolName: name, args, risk: "low", status: "pending", createdAt: now() };
+        const approval: ApprovalRequest = {
+          id: id("apr"), runId: run.id, stepId: step.id, toolName: name, args,
+          risk: decision.risk, reason: decision.reason, summary: decision.summary, expectedEffect: decision.expectedEffect,
+          status: "pending", createdAt: now(),
+        };
         saveRun(run);
         send({ type: "step", step });
-        addAudit({ id: id("aud"), runId: run.id, ts: now(), kind: "approval.requested", detail: `${name} ${JSON.stringify(args)}` });
+        addAudit({ id: id("aud"), runId: run.id, ts: now(), kind: "approval.requested", detail: `${name} [${decision.risk}] ${JSON.stringify(args)}` });
         return { status: "paused", approval };
       }
 
-      // read-only tool: auto-run
+      // safe_read: auto-run
       const step: RunStep = { id: id("step"), index: run.steps.length, title: `🔧 ${name}`, status: "running", startedAt: now() };
       run.steps.push(step);
       saveRun(run);
