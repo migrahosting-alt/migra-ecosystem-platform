@@ -11,7 +11,7 @@ import { existsSync } from "node:fs";
 import { visionAnalyze } from "./gateway";
 import { formatHits, ingestBatch, searchKnowledge } from "./knowledge";
 import { imageHealth, imagePreview, imageProviderMode, submitImageJob } from "./image-provider";
-import { buildHealthBundle, buildOpsPlan, buildReport, buildRunbook, checkUrl, executeNoop, hazardLookup, knownTopology, listStatusMarkers, opsHealth, previewHealthBundle, previewReport, previewRunbook, previewWebhookSim, sendWebhookSim, setStatusMarker, verifyDeploy, verifyNoop, verifyPlan, verifyService, verifyStatusMarker, verifyUrl, verifyWebhookSim } from "./ops-provider";
+import { buildHealthBundle, buildOpsPlan, buildReport, buildRunbook, checkUrl, executeNoop, hazardLookup, knownTopology, listStatusMarkers, opsHealth, previewHealthBundle, previewReport, previewRunbook, previewWebhookSim, sendWebhookSim, setStatusMarker, statusMarkerHistory, transitionStatusMarker, verifyDeploy, verifyNoop, verifyPlan, verifyService, verifyStatusMarker, verifyUrl, verifyWebhookSim } from "./ops-provider";
 import { listOpsActions } from "./ops-action-registry";
 
 const execFileP = promisify(execFile);
@@ -503,6 +503,20 @@ export const TOOLS: Record<string, ToolDef> = {
     risk: "read",
     parameters: { type: "object", properties: { url: { type: "string" }, recordId: { type: "string" } } },
     run: async (a) => clip(JSON.stringify(await verifyWebhookSim({ url: a.url ? String(a.url) : undefined, recordId: a.recordId ? String(a.recordId) : undefined }), null, 2)),
+  },
+  "ops.status_marker.transition": {
+    name: "ops.status_marker.transition",
+    description: "Transition an internal ops status marker to a new state (requires approval). INTERNAL JOURNAL ONLY — mutated:true, externalMutation:false. Appends one transition record; invalid transitions are refused and write nothing. Provide 'markerId' or 'target' (+ optional 'currentStatus'), 'nextStatus' (planned|in_progress|verifying|completed|failed|blocked|acknowledged), 'reason'; optional 'metadata'. Performs NO infrastructure mutation.",
+    risk: "high",
+    parameters: { type: "object", properties: { markerId: { type: "string" }, target: { type: "string" }, currentStatus: { type: "string" }, nextStatus: { type: "string", enum: ["planned", "in_progress", "verifying", "completed", "failed", "blocked", "acknowledged"] }, reason: { type: "string" }, metadata: { type: "object" } }, required: ["nextStatus", "reason"] },
+    run: async (a) => clip(JSON.stringify(await transitionStatusMarker({ markerId: a.markerId ? String(a.markerId) : undefined, target: a.target ? String(a.target) : undefined, currentStatus: a.currentStatus ? String(a.currentStatus) : undefined, nextStatus: String(a.nextStatus ?? ""), reason: String(a.reason ?? ""), metadata: a.metadata }), null, 2)),
+  },
+  "ops.status_marker.history": {
+    name: "ops.status_marker.history",
+    description: "READ-ONLY. Return the internal status marker history (set + transitions) for a target or markerId. Sanitized; mutates nothing.",
+    risk: "read",
+    parameters: { type: "object", properties: { target: { type: "string" }, markerId: { type: "string" } } },
+    run: async (a) => clip(JSON.stringify(await statusMarkerHistory({ target: a.target ? String(a.target) : undefined, markerId: a.markerId ? String(a.markerId) : undefined }), null, 2)),
   },
   "ops.status_marker.set": {
     name: "ops.status_marker.set",

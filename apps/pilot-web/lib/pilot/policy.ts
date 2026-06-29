@@ -84,7 +84,8 @@ export function classifyPilotAction(name: string, args: Record<string, unknown> 
   if (name === "ops.webhook_sim.send") return mk("requires_approval", "DEV WEBHOOK SIMULATION — sends one sanitized POST to an allowlisted dev URL; no infrastructure mutation", "Send one sanitized POST to an explicitly allowlisted dev simulation endpoint; no infrastructure mutation.");
   if (name === "ops.webhook_sim.preview" || name === "ops.webhook_sim.verify") return mk("safe_read", "webhook simulation preview/verify (read-only); sends nothing");
   if (name === "ops.status_marker.set") return mk("requires_approval", "INTERNAL JOURNAL ONLY — records an ops status marker; no infrastructure mutation, no command, no external API", "Record an internal ops status marker only; no infrastructure mutation.");
-  if (name === "ops.status_marker.list" || name === "ops.status_marker.verify") return mk("safe_read", "reads ops status markers (read-only); mutates nothing");
+  if (name === "ops.status_marker.transition") return mk("requires_approval", "INTERNAL JOURNAL ONLY — records a status marker transition; no infrastructure mutation", "Record an internal status transition only; no infrastructure mutation.");
+  if (name === "ops.status_marker.list" || name === "ops.status_marker.verify" || name === "ops.status_marker.history") return mk("safe_read", "reads ops status markers (read-only); mutates nothing");
   if (name === "ops.noop.execute") return mk("requires_approval", "NO-OP ACTION — records a controlled no-op; no external mutation, no command, no API call", "Record a controlled no-op execution only; no external changes.");
   if (name === "ops.noop.verify") return mk("safe_read", "verifies a no-op record (read-only); mutates nothing");
   if (name === "ops.health_bundle.preview") return mk("safe_read", "validates a health re-check bundle; runs nothing");

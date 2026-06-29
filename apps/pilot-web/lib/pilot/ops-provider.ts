@@ -1131,6 +1131,141 @@ export async function verifyStatusMarker(input: { target: string; status?: strin
   };
 }
 
+// ---- Status marker lifecycle transitions (Phase 11.5) — INTERNAL JOURNAL ONLY, append-only ----
+const MARKER_TRANSITIONS: Record<MarkerStatus, MarkerStatus[]> = {
+  planned: ["in_progress", "blocked", "acknowledged"],
+  in_progress: ["verifying", "failed", "blocked"],
+  verifying: ["completed", "failed", "blocked"],
+  failed: ["acknowledged", "in_progress"],
+  blocked: ["acknowledged", "planned"],
+  completed: ["acknowledged"],
+  acknowledged: ["planned"],
+};
+function strictMarkerStatus(s: string): { ok: boolean; value: MarkerStatus } {
+  const v = String(s ?? "").trim();
+  return (MARKER_STATUSES as readonly string[]).includes(v) ? { ok: true, value: v as MarkerStatus } : { ok: false, value: "planned" };
+}
+function isValidTransition(from: string, to: string): boolean {
+  return (MARKER_TRANSITIONS[from as MarkerStatus] ?? []).includes(to as MarkerStatus);
+}
+
+export interface MarkerTransitionInput {
+  markerId?: string;
+  target?: string;
+  currentStatus?: string;
+  nextStatus: string;
+  reason: string;
+  metadata?: unknown;
+  approvalId?: string;
+  runId?: string;
+}
+export interface MarkerTransitionResult {
+  actionName: "ops.status_marker.transition";
+  markerId?: string;
+  target: string;
+  fromStatus: string;
+  toStatus: string;
+  mutated: boolean;
+  mutationScope: "internal_journal_only";
+  externalMutation: false;
+  transitionValid: boolean;
+  summary: string;
+  recordId?: string;
+  generatedAt: string;
+}
+
+// Appends ONE internal transition record (never overwrites history). Invalid transitions are
+// REFUSED and write nothing. No infrastructure / external mutation.
+export async function transitionStatusMarker(input: MarkerTransitionInput): Promise<MarkerTransitionResult> {
+  const next = strictMarkerStatus(input.nextStatus);
+  const recent = await listRecentActionRecords(200);
+  const markerRecs = recent.filter((r) => r.actionName === "ops.status_marker.set" || r.actionName === "ops.status_marker.transition");
+  const mid = input.markerId;
+  const tt = input.target?.trim();
+  const base = mid
+    ? markerRecs.find((r) => r.id === mid || r.metadata?.markerId === mid)
+    : tt
+      ? markerRecs.find((r) => r.target === tt)
+      : undefined;
+  const target = tt || base?.target || "(unspecified)";
+  const fromStatus = (input.currentStatus ?? "").trim() || (typeof base?.metadata?.markerStatus === "string" ? (base.metadata.markerStatus as string) : "planned");
+
+  const mk = (valid: boolean, rec: ActionRecord | undefined, summary: string): MarkerTransitionResult => ({
+    actionName: "ops.status_marker.transition",
+    markerId: input.markerId,
+    target,
+    fromStatus,
+    toStatus: next.value,
+    mutated: !!rec,
+    mutationScope: "internal_journal_only",
+    externalMutation: false,
+    transitionValid: valid,
+    summary,
+    recordId: rec?.id,
+    generatedAt: rec?.createdAt ?? nowIso(),
+  });
+
+  if (!next.ok) return mk(false, undefined, `REFUSED: "${input.nextStatus}" is not a valid marker state. No record written.`);
+  if (!isValidTransition(fromStatus, next.value)) {
+    return mk(false, undefined, `REFUSED: invalid transition ${fromStatus} → ${next.value}. Allowed from ${fromStatus}: ${(MARKER_TRANSITIONS[fromStatus as MarkerStatus] ?? []).join(", ") || "none"}. No record written.`);
+  }
+  const meta: Record<string, unknown> = {
+    ...(input.metadata && typeof input.metadata === "object" ? (input.metadata as Record<string, unknown>) : {}),
+    markerStatus: next.value,
+    fromStatus,
+    toStatus: next.value,
+    mutationScope: "internal_journal_only",
+    externalMutation: false,
+    ...(input.markerId ? { markerId: input.markerId } : {}),
+  };
+  const rec = await createActionRecord({
+    actionName: "ops.status_marker.transition",
+    category: "verification",
+    executionMode: "internal_journal",
+    target,
+    reason: String(input.reason ?? "").trim() || "(none provided)",
+    mutated: true,
+    dryRun: false,
+    executed: true,
+    status: "recorded",
+    metadata: meta,
+    approvalId: input.approvalId,
+    runId: input.runId,
+    summary: `Internal status marker transition ${fromStatus} → ${next.value} for "${target}" — mutationScope=internal_journal_only, externalMutation=false. NO infrastructure changed.`,
+  });
+  return mk(true, rec, `Transitioned ${fromStatus} → ${next.value} (internal journal only).`);
+}
+
+export interface MarkerHistoryEntry {
+  recordId: string;
+  actionName: string;
+  target: string;
+  status: string;
+  fromStatus?: string;
+  toStatus?: string;
+  mutationScope: string;
+  externalMutation: boolean;
+  createdAt: string;
+}
+export async function statusMarkerHistory(input: { target?: string; markerId?: string }, limit = 50): Promise<MarkerHistoryEntry[]> {
+  const recent = await listRecentActionRecords(200);
+  const target = (input.target ?? "").trim();
+  return recent
+    .filter((r) => (r.actionName === "ops.status_marker.set" || r.actionName === "ops.status_marker.transition") && (!target || r.target === target) && (!input.markerId || r.id === input.markerId || r.metadata?.markerId === input.markerId))
+    .slice(0, Math.max(0, Math.min(limit, 100)))
+    .map((r) => ({
+      recordId: r.id,
+      actionName: r.actionName,
+      target: r.target,
+      status: typeof r.metadata?.markerStatus === "string" ? (r.metadata.markerStatus as string) : "(unknown)",
+      fromStatus: typeof r.metadata?.fromStatus === "string" ? (r.metadata.fromStatus as string) : undefined,
+      toStatus: typeof r.metadata?.toStatus === "string" ? (r.metadata.toStatus as string) : undefined,
+      mutationScope: typeof r.metadata?.mutationScope === "string" ? (r.metadata.mutationScope as string) : "internal_journal_only",
+      externalMutation: r.metadata?.externalMutation === true,
+      createdAt: r.createdAt,
+    }));
+}
+
 // ---- Dev-only webhook simulation harness (Phase 11.4) — DISABLED by default, no infra mutation ----
 // Sends ONE sanitized POST only to an explicitly allowlisted dev URL when explicitly enabled.
 // externalMutation:false, simulated:true. Never returns response bodies; never logs/stores secrets.

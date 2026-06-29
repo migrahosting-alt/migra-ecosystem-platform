@@ -990,6 +990,39 @@ function OpsSection() {
     catch (e) { setWhVerify({ summary: (e as Error).message }); } finally { setWhBusy(false); }
   };
 
+  const [mtFrom, setMtFrom] = useState("planned");
+  const [mtTo, setMtTo] = useState("in_progress");
+  const [mtBusy, setMtBusy] = useState(false);
+  const [mtMsg, setMtMsg] = useState("");
+  const [mtPending, setMtPending] = useState<{ runId: string; approvalId: string } | null>(null);
+  const [mtResult, setMtResult] = useState<string | null>(null);
+  const [mtHistory, setMtHistory] = useState<{ recordId: string; actionName: string; status: string; fromStatus?: string; toStatus?: string }[] | null>(null);
+
+  const requestTransition = async () => {
+    if (!smTarget.trim() || !smReason.trim() || mtBusy) return;
+    setMtBusy(true); setMtResult(null); setMtPending(null); setMtMsg("requesting approval…");
+    try {
+      let pending: { runId: string; approvalId: string } | null = null;
+      const msg = `Call ops.status_marker.transition with target "${smTarget.replace(/"/g, "")}" currentStatus ${mtFrom} nextStatus ${mtTo} reason "${smReason.replace(/"/g, "")}".`;
+      await streamNdjson("/api/pilot/chat", { message: msg }, (ev) => { if (ev.type === "approval.required" && ev.approval) pending = { runId: ev.approval.runId, approvalId: ev.approval.id }; });
+      if (pending) { setMtPending(pending); setMtMsg(`⏸ transition ${mtFrom} → ${mtTo} needs approval (INTERNAL JOURNAL ONLY)`); } else setMtMsg("no approval requested — try again");
+    } catch (e) { setMtMsg("error: " + (e as Error).message); } finally { setMtBusy(false); }
+  };
+  const decideTransition = async (decision: "approve" | "deny") => {
+    if (!mtPending || mtBusy) return;
+    setMtBusy(true); const p = mtPending; setMtPending(null);
+    try {
+      let m = ""; let t = "";
+      await streamNdjson(`/api/pilot/runs/${p.runId}/approve`, { approvalId: p.approvalId, decision }, (ev) => { if (ev.type === "token") t += ev.delta ?? ""; if (ev.type === "message") m = ev.message?.content ?? m; });
+      if (decision === "deny") setMtMsg("cancelled — no transition recorded");
+      else { setMtResult(m || t || "(transition recorded — see chat)"); setMtMsg("✓ transition recorded (internal journal only)"); loadMarkers(); }
+    } catch (e) { setMtMsg("error: " + (e as Error).message); } finally { setMtBusy(false); }
+  };
+  const loadHistory = async () => {
+    if (!smTarget.trim()) return;
+    try { const r = await fetch("/api/pilot/ops/markers/history", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ target: smTarget }) }); const d = await r.json(); setMtHistory(d.history); } catch { setMtHistory([]); }
+  };
+
   const streamNdjson = async (url: string, body: unknown, onEvent: (ev: { type: string; approval?: { runId: string; id: string; toolName: string; risk: string }; delta?: string; message?: { content?: string } }) => void) => {
     const res = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
     if (!res.ok || !res.body) throw new Error(`request failed (${res.status})`);
@@ -1325,7 +1358,33 @@ function OpsSection() {
           <button onClick={verifyMarker} disabled={smBusy} style={{ ...S.sendButton, width: "auto", padding: "0 12px", fontSize: 12 }}>Verify marker</button>
         </div>
         {smVerify && <div style={S.muted}>verify: {smVerify.found ? `found (${smVerify.markerStatus})` : "not found"} — {smVerify.summary}</div>}
-        <div style={S.muted}>Setting a marker requires approval + runs exactly once. mutated:true but externalMutation:false — journal only, no infrastructure change.</div>
+        <div style={{ ...S.muted, marginTop: 8 }}>Transition (uses the target + reason above):</div>
+        <div style={S.inputRow}>
+          <select value={mtFrom} onChange={(e) => setMtFrom(e.target.value)} style={{ ...S.composerInput, flex: "1 1 0", cursor: "pointer" }}>
+            {["planned", "in_progress", "verifying", "completed", "failed", "blocked", "acknowledged"].map((s) => <option key={s} value={s}>from: {s}</option>)}
+          </select>
+          <select value={mtTo} onChange={(e) => setMtTo(e.target.value)} style={{ ...S.composerInput, flex: "1 1 0", cursor: "pointer" }}>
+            {["planned", "in_progress", "verifying", "completed", "failed", "blocked", "acknowledged"].map((s) => <option key={s} value={s}>to: {s}</option>)}
+          </select>
+          <button onClick={requestTransition} disabled={mtBusy} style={{ ...S.sendButton, width: "auto", padding: "0 12px", fontSize: 12, opacity: mtBusy ? 0.6 : 1, cursor: mtBusy ? "default" : "pointer" }}>Transition</button>
+          <button onClick={loadHistory} disabled={mtBusy} style={{ ...S.sendButton, width: "auto", padding: "0 12px", fontSize: 12 }}>History</button>
+        </div>
+        {mtMsg && <div style={S.muted}>{mtMsg}</div>}
+        {mtPending && (
+          <div style={S.approvalActions}>
+            <button onClick={() => decideTransition("approve")} disabled={mtBusy} style={S.approveBtn}>Approve (transition)</button>
+            <button onClick={() => decideTransition("deny")} disabled={mtBusy} style={S.denyBtn}>Cancel</button>
+          </div>
+        )}
+        {mtResult && <pre style={S.approvalArgs}>{mtResult}</pre>}
+        {mtHistory && (
+          <div style={{ marginTop: 6 }}>
+            <div style={S.rowLeft}>History ({mtHistory.length})</div>
+            {mtHistory.length === 0 && <div style={S.muted}>no history for this target</div>}
+            {mtHistory.map((h) => <Row key={h.recordId} left={h.actionName.split(".").pop() ?? h.actionName} right={h.fromStatus ? `${h.fromStatus} → ${h.toStatus}` : h.status} />)}
+          </div>
+        )}
+        <div style={S.muted}>Set + transition require approval + run exactly once. Invalid transitions are refused (no record). mutated:true but externalMutation:false — journal only, no infrastructure change.</div>
       </Panel>
       <Panel title="Dev webhook simulation">
         <div style={S.blockedBadge}>DEV SIMULATION ONLY — NO INFRASTRUCTURE MUTATION{whEnabled === false ? " · disabled" : ""}</div>
