@@ -11,7 +11,7 @@ import { existsSync } from "node:fs";
 import { visionAnalyze } from "./gateway";
 import { formatHits, ingestBatch, searchKnowledge } from "./knowledge";
 import { imageHealth, imagePreview, imageProviderMode, submitImageJob } from "./image-provider";
-import { buildOpsPlan, buildReport, buildRunbook, checkUrl, hazardLookup, knownTopology, opsHealth, previewReport, previewRunbook, verifyDeploy, verifyPlan, verifyService, verifyUrl } from "./ops-provider";
+import { buildHealthBundle, buildOpsPlan, buildReport, buildRunbook, checkUrl, hazardLookup, knownTopology, opsHealth, previewHealthBundle, previewReport, previewRunbook, verifyDeploy, verifyPlan, verifyService, verifyUrl } from "./ops-provider";
 
 const execFileP = promisify(execFile);
 
@@ -474,6 +474,20 @@ export const TOOLS: Record<string, ToolDef> = {
       if (!r.matches.length) return `${r.detail} for "${r.query}"`;
       return clip(`${r.detail} for "${r.query}":\n` + r.matches.map((m) => `• [${m.doc}] ${m.heading}: ${m.snippet}`).join("\n"));
     },
+  },
+  "ops.health_bundle.preview": {
+    name: "ops.health_bundle.preview",
+    description: "READ-ONLY. Validate a health re-check bundle and list the planned read-only checks (URL health, grounded hazards/topology, report summary). Executes no checks, writes nothing.",
+    risk: "read",
+    parameters: { type: "object", properties: { target: { type: "string" }, serviceName: { type: "string" }, healthUrls: { type: "array", items: { type: "string" } }, expectedText: { type: "string" }, expectedBuildId: { type: "string" }, includeHazards: { type: "boolean" }, includeTopology: { type: "boolean" }, includeReportSummary: { type: "boolean" }, audience: { type: "string" } }, required: ["target"] },
+    run: async (a) => clip(JSON.stringify(previewHealthBundle(a as unknown as Parameters<typeof previewHealthBundle>[0]), null, 2)),
+  },
+  "ops.health_bundle.run": {
+    name: "ops.health_bundle.run",
+    description: "READ-ONLY. Run a post-change health re-check bundle: allowlisted URL health checks + grounded hazards/topology + optional report summary. URLs must be allowlisted; URLs are sanitized and response bodies are NEVER returned. Returns a structured bundle result. Executes no infrastructure command, writes nothing, mutates nothing.",
+    risk: "read",
+    parameters: { type: "object", properties: { target: { type: "string" }, serviceName: { type: "string" }, healthUrls: { type: "array", items: { type: "string" } }, expectedText: { type: "string" }, expectedBuildId: { type: "string" }, includeHazards: { type: "boolean" }, includeTopology: { type: "boolean" }, includeReportSummary: { type: "boolean" }, audience: { type: "string" } }, required: ["target"] },
+    run: async (a) => clip(JSON.stringify(await buildHealthBundle(a as unknown as Parameters<typeof buildHealthBundle>[0]), null, 2)),
   },
   "ops.report.preview": {
     name: "ops.report.preview",

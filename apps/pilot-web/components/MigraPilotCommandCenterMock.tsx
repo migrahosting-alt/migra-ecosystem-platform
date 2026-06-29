@@ -824,6 +824,31 @@ function OpsSection() {
     catch (e) { setRptResult({ error: (e as Error).message }); } finally { setRptBusy(false); }
   };
 
+  const [hbTarget, setHbTarget] = useState("");
+  const [hbService, setHbService] = useState("");
+  const [hbUrls, setHbUrls] = useState("");
+  const [hbText, setHbText] = useState("");
+  const [hbBuild, setHbBuild] = useState("");
+  const [hbAudience, setHbAudience] = useState("internal");
+  const [hbInc, setHbInc] = useState({ hazards: true, topology: true, report: false });
+  const [hbBusy, setHbBusy] = useState(false);
+  const [hbPreview, setHbPreview] = useState<string | null>(null);
+  const [hbResult, setHbResult] = useState<{ error?: string; status?: string; target?: string; serviceName?: string; checks?: { type: string; name: string; status: string; evidence: string; sanitizedUrl?: string }[]; hazards?: string[]; topologySummary?: string; verificationSummary?: string; reportSummary?: string; recommendations?: string[]; limitations?: string[] } | null>(null);
+
+  const hbBody = () => ({ target: hbTarget, serviceName: hbService || undefined, healthUrls: hbUrls.split(/[\n,]+/).map((s) => s.trim()).filter(Boolean), expectedText: hbText || undefined, expectedBuildId: hbBuild || undefined, includeHazards: hbInc.hazards, includeTopology: hbInc.topology, includeReportSummary: hbInc.report, audience: hbAudience });
+  const previewBundle = async () => {
+    if (!hbTarget.trim() || hbBusy) return;
+    setHbBusy(true); setHbPreview(null);
+    try { const r = await fetch("/api/pilot/ops/bundle/preview", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(hbBody()) }); const d = await r.json(); setHbPreview(`${d.summary}\n- ${(d.plannedChecks ?? []).join("\n- ")}\n${d.note}`); }
+    catch (e) { setHbPreview("error: " + (e as Error).message); } finally { setHbBusy(false); }
+  };
+  const runBundle = async () => {
+    if (!hbTarget.trim() || hbBusy) return;
+    setHbBusy(true); setHbResult(null);
+    try { const r = await fetch("/api/pilot/ops/bundle/run", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(hbBody()) }); setHbResult(await r.json()); }
+    catch (e) { setHbResult({ error: (e as Error).message }); } finally { setHbBusy(false); }
+  };
+
   const streamNdjson = async (url: string, body: unknown, onEvent: (ev: { type: string; approval?: { runId: string; id: string; toolName: string; risk: string }; delta?: string; message?: { content?: string } }) => void) => {
     const res = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
     if (!res.ok || !res.body) throw new Error(`request failed (${res.status})`);
@@ -1042,6 +1067,42 @@ function OpsSection() {
           </div>
         ))}
         <div style={S.muted}>Read-only evidence report — grounded docs + your inputs only. Unknowns are marked, not invented. Client/executive views redact internal detail.</div>
+      </Panel>
+      <Panel title="Health re-check bundle">
+        <div style={S.blockedBadge}>READ-ONLY HEALTH RE-CHECK — no action executed</div>
+        <div style={S.inputRow}>
+          <input value={hbTarget} onChange={(e) => setHbTarget(e.target.value)} placeholder="target (e.g. panel-api)" style={S.composerInput} />
+          <input value={hbService} onChange={(e) => setHbService(e.target.value)} placeholder="service (optional)" style={S.composerInput} />
+        </div>
+        <div style={S.inputRow}><span style={S.promptIcon}>🌐</span><input value={hbUrls} onChange={(e) => setHbUrls(e.target.value)} placeholder="allowlisted health URL(s), comma-separated" style={S.composerInput} /></div>
+        <div style={S.inputRow}>
+          <input value={hbText} onChange={(e) => setHbText(e.target.value)} placeholder="expected text (optional)" style={S.composerInput} />
+          <input value={hbBuild} onChange={(e) => setHbBuild(e.target.value)} placeholder="expected build id (optional)" style={S.composerInput} />
+        </div>
+        <div style={{ ...S.inputRow, gap: 10, fontSize: 12, color: "#9aa4b2", flexWrap: "wrap" }}>
+          {(["hazards", "topology", "report"] as const).map((k) => (
+            <label key={k} style={{ cursor: "pointer" }}><input type="checkbox" checked={hbInc[k]} onChange={(e) => setHbInc({ ...hbInc, [k]: e.target.checked })} /> {k}</label>
+          ))}
+          <select value={hbAudience} onChange={(e) => setHbAudience(e.target.value)} style={{ ...S.composerInput, flex: "0 0 110px", cursor: "pointer" }}>
+            {["internal", "technical", "executive", "client"].map((a) => <option key={a} value={a}>{a}</option>)}
+          </select>
+        </div>
+        <div style={S.inputRow}>
+          <button onClick={previewBundle} disabled={hbBusy} style={{ ...S.sendButton, width: "auto", padding: "0 12px", fontSize: 12, opacity: hbBusy ? 0.6 : 1, cursor: hbBusy ? "default" : "pointer" }}>Preview bundle</button>
+          <button onClick={runBundle} disabled={hbBusy} style={{ ...S.sendButton, width: "auto", padding: "0 12px", fontSize: 12, opacity: hbBusy ? 0.6 : 1, cursor: hbBusy ? "default" : "pointer" }}>Run bundle</button>
+        </div>
+        {hbPreview && <pre style={S.approvalArgs}>{hbPreview}</pre>}
+        {hbResult && (hbResult.error ? <div style={S.muted}>error: {hbResult.error}</div> : (
+          <div style={{ marginTop: 6 }}>
+            <Row left={`${hbResult.target}${hbResult.serviceName ? " · " + hbResult.serviceName : ""}`} right={hbResult.status ?? "?"} tone={hbResult.status === "pass" ? "Succeeded" : hbResult.status === "fail" ? "Failed" : undefined} />
+            {hbResult.checks?.map((c, i) => <Row key={i} left={`${c.type} · ${c.name}`} right={`${c.status} — ${c.evidence}`} tone={c.status === "pass" ? "Succeeded" : c.status === "fail" ? "Failed" : undefined} />)}
+            {hbResult.topologySummary && <div style={S.muted}>topology: {hbResult.topologySummary}</div>}
+            {hbResult.verificationSummary && <div style={S.muted}>{hbResult.verificationSummary}</div>}
+            {hbResult.reportSummary && <div style={S.muted}>report: {hbResult.reportSummary}</div>}
+            {(hbResult.hazards?.length ?? 0) > 0 && <div style={S.muted}>hazards: {hbResult.hazards!.join("; ")}</div>}
+          </div>
+        ))}
+        <div style={S.muted}>URLs must be allowlisted (PILOT_OPS_ALLOWED_HEALTH_URLS) + are sanitized. Response bodies are never returned. Read-only — nothing executed.</div>
       </Panel>
     </section>
   );

@@ -796,6 +796,157 @@ export async function buildReport(input: ReportInput): Promise<OpsReport> {
   };
 }
 
+// ---- Health re-check bundles (Phase 10.9) — READ-ONLY, composes existing read checks ----
+export interface BundleCheck {
+  type: string;
+  name: string;
+  status: VerifyStatus;
+  evidence: string;
+  latencyMs?: number;
+  sanitizedUrl?: string;
+}
+export interface HealthBundle {
+  bundleId: string;
+  target: string;
+  serviceName?: string;
+  status: VerifyStatus;
+  generatedAt: string;
+  checks: BundleCheck[];
+  hazards: string[];
+  topologySummary: string;
+  verificationSummary: string;
+  reportSummary?: string;
+  recommendations: string[];
+  nextReadOnlyChecks: string[];
+  limitations: string[];
+  citations: string[];
+}
+export interface HealthBundleInput {
+  target: string;
+  serviceName?: string;
+  healthUrls?: string[];
+  expectedText?: string;
+  expectedBuildId?: string;
+  includeHazards?: boolean;
+  includeTopology?: boolean;
+  includeReportSummary?: boolean;
+  audience?: string;
+}
+
+let bundleCounter = 0;
+function bundleId(): string {
+  bundleCounter += 1;
+  return `hb_${Date.now().toString(36)}_${bundleCounter.toString(36)}`;
+}
+
+export function previewHealthBundle(input: HealthBundleInput): { valid: boolean; target: string; serviceName?: string; plannedChecks: string[]; allowlistedUrlCount: number; clientSafe: boolean; summary: string; note: string } {
+  const target = String(input.target ?? "").trim();
+  const aud = REPORT_AUDIENCES.has(String(input.audience ?? "").toLowerCase()) ? String(input.audience).toLowerCase() : "internal";
+  const isClient = aud === "client" || aud === "executive";
+  const urls = Array.isArray(input.healthUrls) ? input.healthUrls.filter((u) => typeof u === "string" && u.trim()) : [];
+  const planned: string[] = [];
+  if (urls.length) planned.push(`${urls.length} allowlisted URL health check(s) (GET, sanitized, no body returned)`);
+  else planned.push("no health URLs provided — URL checks will be skipped/unknown");
+  if (input.expectedText) planned.push("expected-text match (internal only — body never exposed)");
+  if (input.expectedBuildId) planned.push("expected-build-id match (internal only — body never exposed)");
+  if (input.includeHazards !== false) planned.push("grounded hazard lookup for target");
+  if (input.includeTopology !== false) planned.push("grounded topology summary for target");
+  if (input.includeReportSummary) planned.push(`report-style summary (audience ${aud}${isClient ? ", internal detail redacted" : ""})`);
+  planned.push("grounded-knowledge presence check");
+  return { valid: true, target: target || "(unspecified)", serviceName: input.serviceName ? String(input.serviceName).trim() : undefined, plannedChecks: planned, allowlistedUrlCount: urls.length, clientSafe: isClient, summary: `Preview: health re-check bundle for ${target || "(unspecified)"} — ${planned.length} planned read-only check(s).`, note: "PREVIEW ONLY — no checks are executed here; run the bundle to gather evidence. Nothing is ever mutated." };
+}
+
+export async function buildHealthBundle(input: HealthBundleInput): Promise<HealthBundle> {
+  const target = String(input.target ?? "").trim();
+  const serviceName = input.serviceName ? String(input.serviceName).trim() : undefined;
+  const aud = REPORT_AUDIENCES.has(String(input.audience ?? "").toLowerCase()) ? String(input.audience).toLowerCase() : "internal";
+  const isClient = aud === "client" || aud === "executive";
+  const sc = (s: string) => reportScrub(s, isClient);
+  const urls = (Array.isArray(input.healthUrls) ? input.healthUrls : []).filter((u) => typeof u === "string" && u.trim()).slice(0, 20);
+
+  const checks: BundleCheck[] = [];
+
+  // 1. Allowlisted URL health (sanitized; never returns body)
+  for (const u of urls) {
+    const c = await checkUrl(u);
+    const st: VerifyStatus = c.ok ? "pass" : c.error && (c.error.includes("disabled") || c.error.includes("allowlist")) ? "unknown" : "fail";
+    checks.push({ type: "url-health", name: c.url, status: st, evidence: c.ok ? `HTTP ${c.status} in ${c.latencyMs}ms` : c.error ?? "failed", latencyMs: c.latencyMs, sanitizedUrl: c.url });
+  }
+
+  // 2. expectedText / expectedBuildId — matched INTERNALLY against the first allowlisted URL; body never exposed
+  if ((input.expectedText || input.expectedBuildId) && urls.length) {
+    const ev = await fetchEvidence(urls[0]);
+    if (input.expectedText) {
+      const found = !!ev.body && ev.body.includes(input.expectedText);
+      checks.push({ type: "expected-text", name: "expected text", status: ev.body ? (found ? "pass" : "fail") : "unknown", evidence: ev.body ? (found ? "expected text present in response" : "expected text NOT found") : ev.error ?? "no response body to match", sanitizedUrl: ev.url });
+    }
+    if (input.expectedBuildId) {
+      const found = !!ev.body && ev.body.includes(input.expectedBuildId);
+      checks.push({ type: "expected-build-id", name: "expected build id", status: ev.body ? (found ? "pass" : "fail") : "unknown", evidence: ev.body ? (found ? "expected build id present" : "expected build id NOT found") : ev.error ?? "no response body to match", sanitizedUrl: ev.url });
+    }
+  } else if (input.expectedText || input.expectedBuildId) {
+    checks.push({ type: "expected-text", name: "expected text/build id", status: "unknown", evidence: "no allowlisted health URL provided to match against" });
+  }
+
+  // 3. Grounded knowledge
+  const hits = await hazardLookup(target);
+  const g = await groundedFor(target);
+  const targetKnown = target.length > 0 && hits.matches.length > 0;
+  checks.push({ type: "grounded-knowledge", name: "ecosystem docs", status: targetKnown ? "pass" : "unknown", evidence: targetKnown ? `${hits.matches.length} grounded reference(s) for ${target}` : "target not found in ecosystem docs" });
+
+  const hazards = input.includeHazards !== false ? [...knownHazardWarnings("verify", target), ...g.hazards].map(sc) : [];
+
+  let topologySummary = "(topology omitted)";
+  if (input.includeTopology !== false) {
+    const topoHits = hits.matches.filter((m) => m.doc.toLowerCase().includes("topology"));
+    topologySummary = targetKnown
+      ? sc(topoHits.length ? `Grounded topology references: ${topoHits.map((m) => m.heading).join("; ")}` : "Grounded references found (no topology-specific section)")
+      : "Topology not found for target — verify before relying on this.";
+  }
+
+  // Overall status from the evidence-bearing checks (URL + expected matches)
+  const evChecks = checks.filter((c) => c.type === "url-health" || c.type === "expected-text" || c.type === "expected-build-id").map((c) => c.status);
+  const status: VerifyStatus = evChecks.length === 0 ? "unknown" : evChecks.every((s) => s === "pass") ? "pass" : evChecks.some((s) => s === "fail") ? "fail" : evChecks.some((s) => s === "pass") ? "partial" : "unknown";
+
+  const okUrls = checks.filter((c) => c.type === "url-health" && c.status === "pass").length;
+  const verificationSummary = urls.length
+    ? `${okUrls}/${urls.length} allowlisted health URL(s) OK. Read-only — verified by observation, nothing was changed.`
+    : "No allowlisted health URL provided — set PILOT_OPS_ALLOWED_HEALTH_URLS entries for live evidence (currently unknown).";
+
+  let reportSummary: string | undefined;
+  if (input.includeReportSummary) {
+    const r = await buildReport({ reportType: "verification", title: `Health re-check: ${target || "(unspecified)"}`, target, audience: aud, objective: `Post-change health re-check for ${serviceName || target || "the target"}` });
+    reportSummary = r.executiveSummary;
+  }
+
+  return {
+    bundleId: bundleId(),
+    target: target || "(unspecified)",
+    serviceName,
+    status,
+    generatedAt: nowIso(),
+    checks,
+    hazards,
+    topologySummary,
+    verificationSummary,
+    reportSummary,
+    recommendations: [
+      status === "pass" ? "Checks look healthy from available evidence — still spot-check one real user request." : "Do not assume healthy — resolve the failing/unknown checks below first.",
+      targetKnown ? "Mind the grounded hazards before any follow-up change." : "Confirm the real target/source from trusted docs.",
+    ],
+    nextReadOnlyChecks: [
+      urls.length ? "Re-run after a short delay to confirm stability." : "Provide allowlisted health URL(s) for live evidence.",
+      "Check logs for errors (read-only) and confirm dependent services still route correctly.",
+    ],
+    limitations: [
+      "Read-only: composed of GET health checks + grounded docs only; no command executed, no file written, nothing mutated.",
+      "Response bodies are NEVER returned — only match results and status codes are reported.",
+      isClient ? "Client/executive view — internal infrastructure detail is redacted." : "Internal/technical view — includes infrastructure detail; do not share externally.",
+    ],
+    citations: g.citations.length ? g.citations : ["(target not found in ecosystem docs — verify before relying on this bundle)"],
+  };
+}
+
 export interface HazardMatch {
   doc: string;
   heading: string;
