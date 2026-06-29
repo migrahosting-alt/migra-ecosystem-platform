@@ -183,10 +183,37 @@ function coerceImage(item: unknown): NormalizedImage | null {
   return null;
 }
 
-// Tolerate common SDXL / diffusers response shapes. NEVER fabricates an image.
+// ComfyUI image descriptor → a /view URL (relative; absolutized via PILOT_IMAGE_OUTPUT_BASE_URL).
+// ComfyUI returns {filename, subfolder, type} and serves bytes at <base>/view?filename=...&subfolder=...&type=...
+function comfyImage(item: unknown): NormalizedImage | null {
+  if (!item || typeof item !== "object") return null;
+  const o = item as Record<string, unknown>;
+  if (typeof o.filename !== "string") return null;
+  const p = new URLSearchParams();
+  p.set("filename", o.filename);
+  if (typeof o.subfolder === "string") p.set("subfolder", o.subfolder);
+  if (typeof o.type === "string") p.set("type", o.type);
+  return { url: withBase(`/view?${p.toString()}`), metadata: { filename: o.filename, subfolder: typeof o.subfolder === "string" ? o.subfolder : undefined, type: typeof o.type === "string" ? o.type : undefined } };
+}
+
+// Tolerate common SDXL / ComfyUI / A1111 / diffusers response shapes. NEVER fabricates an image.
 export function normalizeImages(body: unknown): NormalizedImage[] {
   if (!body || typeof body !== "object") return [];
   const b = body as Record<string, unknown>;
+  // ComfyUI history shape: { outputs: { <nodeId>: { images: [{filename,subfolder,type}, ...] } } }
+  if (b.outputs && typeof b.outputs === "object" && !Array.isArray(b.outputs)) {
+    const out: NormalizedImage[] = [];
+    for (const node of Object.values(b.outputs as Record<string, unknown>)) {
+      const imgs = node && typeof node === "object" ? (node as Record<string, unknown>).images : undefined;
+      if (Array.isArray(imgs)) {
+        for (const img of imgs) {
+          const c = comfyImage(img) ?? coerceImage(img);
+          if (c) out.push(c);
+        }
+      }
+    }
+    if (out.length) return out;
+  }
   const container =
     Array.isArray(b.images) ? b.images :
     Array.isArray(b.output) ? b.output :

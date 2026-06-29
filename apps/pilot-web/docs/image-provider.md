@@ -65,8 +65,8 @@ On HTTP `2xx` the adapter tolerates the common SDXL / diffusers response shapes 
 normalizes them into a stable internal shape. It **never fabricates** an image — if it
 cannot find a recognizable image field it reports `incompatible`.
 
-Accepted container shapes (first match wins): `images[]`, `output[]`, `outputs[]`,
-`artifacts[]`, `data[]`, or a single `image` / `url`.
+Accepted container shapes (first match wins): the **ComfyUI** `outputs` object (see below),
+then `images[]`, `output[]`, `outputs[]` (array), `artifacts[]`, `data[]`, or a single `image` / `url`.
 
 Each item may be:
 
@@ -76,6 +76,13 @@ Each item may be:
 - a **base64 string**
 - an **object** with any of: `url`, `image`, `base64` / `b64_json` / `b64`,
   `mimeType` / `content_type`, `seed`, `metadata`
+- a **ComfyUI image descriptor** `{ filename, subfolder, type }` → normalized to a
+  `/view?filename=…&subfolder=…&type=…` URL, absolutized with `PILOT_IMAGE_OUTPUT_BASE_URL`
+  (set it to the ComfyUI base, e.g. `http://comfyui-host:8188`).
+
+**ComfyUI** (`GET /history/{prompt_id}`) returns a nested `outputs` object keyed by node id; the
+adapter walks every node's `images[]`. **A1111** (`/sdapi/v1/txt2img`) returns `{ images: [base64…] }`
+— handled as base64 items.
 
 Examples that all normalize successfully:
 
@@ -85,6 +92,7 @@ Examples that all normalize successfully:
 { "output": [{ "url": "/img/x.png", "seed": 42 }] }
 { "artifacts": [{ "base64": "iVBORw0...", "content_type": "image/png" }] }
 { "url": "https://cdn.example/single.png" }
+{ "outputs": { "9": { "images": [{ "filename": "ComfyUI_00001_.png", "subfolder": "", "type": "output" }] } } }
 ```
 
 ### Normalized internal image shape
