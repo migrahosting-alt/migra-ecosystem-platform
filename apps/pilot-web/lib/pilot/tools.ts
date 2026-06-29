@@ -11,7 +11,7 @@ import { existsSync } from "node:fs";
 import { visionAnalyze } from "./gateway";
 import { formatHits, ingestBatch, searchKnowledge } from "./knowledge";
 import { imageHealth, imagePreview, imageProviderMode, submitImageJob } from "./image-provider";
-import { buildOpsPlan, buildRunbook, checkUrl, hazardLookup, knownTopology, opsHealth, previewRunbook, verifyDeploy, verifyPlan, verifyService, verifyUrl } from "./ops-provider";
+import { buildOpsPlan, buildReport, buildRunbook, checkUrl, hazardLookup, knownTopology, opsHealth, previewReport, previewRunbook, verifyDeploy, verifyPlan, verifyService, verifyUrl } from "./ops-provider";
 
 const execFileP = promisify(execFile);
 
@@ -474,6 +474,20 @@ export const TOOLS: Record<string, ToolDef> = {
       if (!r.matches.length) return `${r.detail} for "${r.query}"`;
       return clip(`${r.detail} for "${r.query}":\n` + r.matches.map((m) => `• [${m.doc}] ${m.heading}: ${m.snippet}`).join("\n"));
     },
+  },
+  "ops.report.preview": {
+    name: "ops.report.preview",
+    description: "READ-ONLY. Validate ops-report inputs and show which sections will be included (and whether internal detail is redacted for the audience). Generates no report, writes nothing.",
+    risk: "read",
+    parameters: { type: "object", properties: { reportType: { type: "string" }, title: { type: "string" }, target: { type: "string" }, audience: { type: "string" }, includeDiagnostics: { type: "boolean" }, includeHazards: { type: "boolean" }, includeRunbook: { type: "boolean" }, includeVerification: { type: "boolean" }, includeTimeline: { type: "boolean" } }, required: ["reportType", "target"] },
+    run: async (a) => clip(JSON.stringify(previewReport(a as unknown as Parameters<typeof previewReport>[0]), null, 2)),
+  },
+  "ops.report.generate": {
+    name: "ops.report.generate",
+    description: "READ-ONLY. Compile a structured ops evidence report (incident/maintenance/deployment/verification/client_summary/custom) from grounded ecosystem docs + provided inputs. Returns report content only — writes NO file, executes nothing, mutates nothing. Redacts internal detail for client/executive audiences and marks unavailable data instead of inventing it.",
+    risk: "read",
+    parameters: { type: "object", properties: { reportType: { type: "string" }, title: { type: "string" }, target: { type: "string" }, objective: { type: "string" }, audience: { type: "string" }, notes: { type: "string" }, includeDiagnostics: { type: "boolean" }, includeHazards: { type: "boolean" }, includeRunbook: { type: "boolean" }, includeVerification: { type: "boolean" }, includeTimeline: { type: "boolean" } }, required: ["reportType", "target"] },
+    run: async (a) => clip(JSON.stringify(await buildReport(a as unknown as Parameters<typeof buildReport>[0]), null, 2)),
   },
   "ops.runbook.preview": {
     name: "ops.runbook.preview",

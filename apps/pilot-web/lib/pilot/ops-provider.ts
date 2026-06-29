@@ -630,6 +630,172 @@ export function previewRunbook(input: RunbookInput): { valid: boolean; actionTyp
   };
 }
 
+// ---- Ops evidence reports (Phase 10.8) — READ-ONLY, response-only, writes nothing ----
+export interface ReportEvidence {
+  type: string;
+  title: string;
+  summary: string;
+  source?: string;
+}
+export interface OpsReport {
+  reportId: string;
+  reportType: string;
+  title: string;
+  target: string;
+  audience: string;
+  status: "draft";
+  generatedAt: string;
+  executiveSummary: string;
+  scope: string;
+  evidence: ReportEvidence[];
+  diagnosticsSummary: string;
+  hazards: string[];
+  actionsTakenOrPlanned: string[];
+  verificationSummary: string;
+  timeline: string[];
+  recommendations: string[];
+  limitations: string[];
+  nextSteps: string[];
+  citations: string[];
+}
+export interface ReportInput {
+  reportType: string;
+  title: string;
+  target: string;
+  objective?: string;
+  includeDiagnostics?: boolean;
+  includeHazards?: boolean;
+  includeRunbook?: boolean;
+  includeVerification?: boolean;
+  includeTimeline?: boolean;
+  audience?: string;
+  notes?: string;
+}
+
+// Always strip URL userinfo + secret query params. For client/executive audiences also redact
+// internal infrastructure detail (IPs, /opt|/etc paths, *-core hostnames).
+function stripUrlSecrets(s: string): string {
+  return String(s).replace(/(https?:\/\/)[^@\s/]*@/gi, "$1<redacted>@").replace(/([?&](?:token|key|api[_-]?key|password|secret)=)[^&\s]+/gi, "$1<redacted>");
+}
+function redactInternal(s: string): string {
+  return s
+    .replace(/\b\d{1,3}(?:\.\d{1,3}){3}\b/g, "<ip>") // full IPv4
+    .replace(/\b(?:10|172|192)\.[\dx]{1,3}(?:\.[\dx]{1,3}){1,2}\b/gi, "<internal-net>") // partial/wildcard private subnets (e.g. 10.10.0.x)
+    .replace(/\/(?:opt|etc|var|root|home)\/[\w./-]+/g, "<internal-path>")
+    .replace(/\b[\w-]+-core\b/g, "<internal-host>");
+}
+function reportScrub(s: string, isClient: boolean): string {
+  const base = stripUrlSecrets(s);
+  return isClient ? redactInternal(base) : base;
+}
+
+let reportCounter = 0;
+function reportId(): string {
+  reportCounter += 1;
+  return `rpt_${Date.now().toString(36)}_${reportCounter.toString(36)}`;
+}
+
+const REPORT_TYPES = new Set(["incident", "maintenance", "deployment", "verification", "client_summary", "custom"]);
+const REPORT_AUDIENCES = new Set(["internal", "client", "executive", "technical"]);
+
+export function previewReport(input: ReportInput): { valid: boolean; reportType: string; supportedType: boolean; audience: string; target: string; sections: string[]; clientSafe: boolean; summary: string; checklist: string[] } {
+  const rt = String(input.reportType ?? "").toLowerCase().trim() || "custom";
+  const aud = REPORT_AUDIENCES.has(String(input.audience ?? "").toLowerCase()) ? String(input.audience).toLowerCase() : "internal";
+  const tgt = String(input.target ?? "").trim();
+  const isClient = aud === "client" || aud === "executive" || rt === "client_summary";
+  const sections = [
+    input.includeDiagnostics !== false && "diagnostics",
+    input.includeHazards !== false && "hazards",
+    input.includeRunbook !== false && "actions/runbook",
+    input.includeVerification !== false && "verification",
+    input.includeTimeline !== false && "timeline",
+  ].filter(Boolean) as string[];
+  const checklist = [
+    REPORT_TYPES.has(rt) ? `Supported report type: ${rt}.` : `Custom/unsupported type "${rt}" — generic report.`,
+    `Audience: ${aud}${isClient ? " (internal infrastructure detail will be redacted)" : ""}.`,
+    tgt ? `Target: ${tgt}.` : "No target — report will mark target as unspecified.",
+    "READ-ONLY: returns report content only; writes no file and executes nothing.",
+  ];
+  return { valid: true, reportType: rt, supportedType: REPORT_TYPES.has(rt), audience: aud, target: tgt || "(unspecified)", sections, clientSafe: isClient, summary: `Preview: "${rt}" report for ${tgt || "(unspecified)"} · audience ${aud} · sections: ${sections.join(", ") || "summary only"}.`, checklist };
+}
+
+export async function buildReport(input: ReportInput): Promise<OpsReport> {
+  const rt = String(input.reportType ?? "").toLowerCase().trim() || "custom";
+  const title = String(input.title ?? "").trim() || `${rt} report`;
+  const tgt = String(input.target ?? "").trim();
+  const objective = String(input.objective ?? "").trim();
+  const notes = String(input.notes ?? "").trim();
+  const aud = REPORT_AUDIENCES.has(String(input.audience ?? "").toLowerCase()) ? String(input.audience).toLowerCase() : "internal";
+  const isClient = aud === "client" || aud === "executive" || rt === "client_summary";
+  const sc = (s: string) => reportScrub(s, isClient);
+
+  const hits = await hazardLookup(tgt);
+  const g = await groundedFor(tgt, rt === "deployment" ? "deploy" : rt === "incident" ? "restart" : undefined);
+  const targetKnown = tgt.length > 0 && hits.matches.length > 0;
+
+  // Evidence is grounded-doc-derived (real) or explicitly marked unavailable — never invented.
+  const evidence: ReportEvidence[] = targetKnown
+    ? hits.matches.slice(0, 8).map((m) => ({ type: "grounded-doc", title: sc(m.heading), summary: sc(m.snippet), source: m.doc }))
+    : [{ type: "unavailable", title: "No grounded evidence for target", summary: `Target "${tgt || "(unspecified)"}" was not found in the ecosystem docs. Gather read-only evidence before relying on this report — do not assume.` }];
+
+  const knownHaz = input.includeHazards !== false ? [...knownHazardWarnings(rt === "deployment" ? "deploy" : rt, tgt), ...g.hazards].map(sc) : [];
+
+  const opsState = opsStatus();
+  const diagnosticsSummary = input.includeDiagnostics === false
+    ? "(diagnostics section omitted)"
+    : opsState.status === "local"
+      ? `Ops diagnostics enabled (${opsState.allowedCount} allowlisted check(s)). Run ops.health / ops.verify.* for live read-only evidence.`
+      : "Live diagnostics UNAVAILABLE — ops provider is disabled by default. Enable read-only checks to populate (no data was invented).";
+
+  const verificationSummary = input.includeVerification === false
+    ? "(verification section omitted)"
+    : "Read-only verification is available via ops.verify.* — run AFTER the action; results are not yet collected, so mark pass/fail with evidence. Nothing here was verified by changing it.";
+
+  const actionsTakenOrPlanned = input.includeRunbook === false ? [] : [
+    objective ? `Objective: ${sc(objective)}` : "Objective: (not provided)",
+    "Dry-run plans (ops.*.plan) and a HUMAN-ONLY runbook (ops.runbook.generate) can be produced under approval — MigraPilot executes no infrastructure action.",
+    notes ? `Operator notes: ${sc(notes)}` : "No operator notes provided.",
+  ];
+
+  const timeline = input.includeTimeline === false ? [] : [
+    `${nowIso()} — report generated (status: draft, read-only).`,
+    "(timeline to be populated by the operator with actual action/verification timestamps)",
+  ];
+
+  return {
+    reportId: reportId(),
+    reportType: rt,
+    title,
+    target: tgt || "(unspecified)",
+    audience: aud,
+    status: "draft",
+    generatedAt: nowIso(),
+    executiveSummary: sc(`READ-ONLY DRAFT — ${title}. ${objective || `Ops evidence report for ${tgt || "(unspecified)"}.`} Compiled from grounded ecosystem documentation and provided inputs; no action was executed and no system was changed.${isClient ? " (Audience: " + aud + " — internal detail redacted.)" : ""}`),
+    scope: sc(`${rt} report for ${tgt || "(unspecified)"}, audience ${aud}.`),
+    evidence,
+    diagnosticsSummary: sc(diagnosticsSummary),
+    hazards: knownHaz,
+    actionsTakenOrPlanned,
+    verificationSummary,
+    timeline,
+    recommendations: [
+      "Treat grounded-doc evidence as authoritative; treat anything marked unavailable/unknown as TODO, not fact.",
+      targetKnown ? "Follow the documented safe procedure and hazards for this target before acting." : "Establish the real target/source/procedure from trusted docs before acting.",
+      "Use dry-run plans + the human-only runbook (approval-gated) for any change; verify with read-only checks afterward.",
+    ],
+    limitations: [
+      "Compiled from grounded ecosystem docs + provided inputs; contains NO live system data unless the ops provider is configured.",
+      "Read-only: no command was executed, no file was written, and no external system was changed.",
+      isClient ? "Client/executive view — internal infrastructure detail is intentionally redacted." : "Internal/technical view — includes infrastructure detail; do not share externally.",
+    ],
+    nextSteps: [
+      objective ? "Confirm the objective's prerequisites (read-only) before any action." : "Define the objective and target precisely.",
+      "Generate the dry-run plan + runbook (approval-gated) and collect verification evidence after the human acts.",
+    ],
+    citations: g.citations.length ? g.citations : ["(target not found in ecosystem docs — verify before relying on this report)"],
+  };
+}
+
 export interface HazardMatch {
   doc: string;
   heading: string;

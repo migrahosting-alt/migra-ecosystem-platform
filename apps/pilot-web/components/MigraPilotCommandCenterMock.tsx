@@ -801,6 +801,29 @@ function OpsSection() {
     finally { setRbBusy(false); }
   };
 
+  const [rptType, setRptType] = useState("incident");
+  const [rptTitle, setRptTitle] = useState("");
+  const [rptTarget, setRptTarget] = useState("");
+  const [rptAudience, setRptAudience] = useState("internal");
+  const [rptInc, setRptInc] = useState({ diagnostics: true, hazards: true, runbook: true, verification: true, timeline: true });
+  const [rptBusy, setRptBusy] = useState(false);
+  const [rptPreview, setRptPreview] = useState<string | null>(null);
+  const [rptResult, setRptResult] = useState<{ error?: string; title?: string; target?: string; audience?: string; status?: string; executiveSummary?: string; evidence?: { type: string; title: string; summary: string; source?: string }[]; hazards?: string[]; recommendations?: string[]; limitations?: string[]; citations?: string[] } | null>(null);
+
+  const rptBody = () => ({ reportType: rptType, title: rptTitle, target: rptTarget, audience: rptAudience, includeDiagnostics: rptInc.diagnostics, includeHazards: rptInc.hazards, includeRunbook: rptInc.runbook, includeVerification: rptInc.verification, includeTimeline: rptInc.timeline });
+  const previewReportUi = async () => {
+    if (!rptTarget.trim() || rptBusy) return;
+    setRptBusy(true); setRptPreview(null);
+    try { const r = await fetch("/api/pilot/ops/report/preview", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(rptBody()) }); const d = await r.json(); setRptPreview(`${d.summary}\n- ${(d.checklist ?? []).join("\n- ")}`); }
+    catch (e) { setRptPreview("error: " + (e as Error).message); } finally { setRptBusy(false); }
+  };
+  const generateReportUi = async () => {
+    if (!rptTarget.trim() || rptBusy) return;
+    setRptBusy(true); setRptResult(null);
+    try { const r = await fetch("/api/pilot/ops/report/generate", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(rptBody()) }); setRptResult(await r.json()); }
+    catch (e) { setRptResult({ error: (e as Error).message }); } finally { setRptBusy(false); }
+  };
+
   const streamNdjson = async (url: string, body: unknown, onEvent: (ev: { type: string; approval?: { runId: string; id: string; toolName: string; risk: string }; delta?: string; message?: { content?: string } }) => void) => {
     const res = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
     if (!res.ok || !res.body) throw new Error(`request failed (${res.status})`);
@@ -986,6 +1009,39 @@ function OpsSection() {
         )}
         {rbResult && <pre style={S.approvalArgs}>{rbResult}</pre>}
         <div style={S.muted}>Generation requires approval. Commands are text only — confirm each before running. Real mutations stay blocked.</div>
+      </Panel>
+      <Panel title="Evidence report">
+        <div style={S.blockedBadge}>READ-ONLY REPORT — no action executed, no file written</div>
+        <div style={S.inputRow}>
+          <select value={rptType} onChange={(e) => setRptType(e.target.value)} style={{ ...S.composerInput, flex: "1 1 0", cursor: "pointer" }}>
+            {["incident", "maintenance", "deployment", "verification", "client_summary", "custom"].map((t) => <option key={t} value={t}>{t}</option>)}
+          </select>
+          <select value={rptAudience} onChange={(e) => setRptAudience(e.target.value)} style={{ ...S.composerInput, flex: "0 0 110px", cursor: "pointer" }}>
+            {["internal", "client", "executive", "technical"].map((a) => <option key={a} value={a}>{a}</option>)}
+          </select>
+        </div>
+        <div style={S.inputRow}><input value={rptTitle} onChange={(e) => setRptTitle(e.target.value)} placeholder="title" style={S.composerInput} /></div>
+        <div style={S.inputRow}><input value={rptTarget} onChange={(e) => setRptTarget(e.target.value)} placeholder="target (e.g. voip-core)" style={S.composerInput} /></div>
+        <div style={{ ...S.inputRow, gap: 10, fontSize: 12, color: "#9aa4b2", flexWrap: "wrap" }}>
+          {(["diagnostics", "hazards", "runbook", "verification", "timeline"] as const).map((k) => (
+            <label key={k} style={{ cursor: "pointer" }}><input type="checkbox" checked={rptInc[k]} onChange={(e) => setRptInc({ ...rptInc, [k]: e.target.checked })} /> {k}</label>
+          ))}
+        </div>
+        <div style={S.inputRow}>
+          <button onClick={previewReportUi} disabled={rptBusy} style={{ ...S.sendButton, width: "auto", padding: "0 12px", fontSize: 12, opacity: rptBusy ? 0.6 : 1, cursor: rptBusy ? "default" : "pointer" }}>Preview report</button>
+          <button onClick={generateReportUi} disabled={rptBusy} style={{ ...S.sendButton, width: "auto", padding: "0 12px", fontSize: 12, opacity: rptBusy ? 0.6 : 1, cursor: rptBusy ? "default" : "pointer" }}>Generate report</button>
+        </div>
+        {rptPreview && <pre style={S.approvalArgs}>{rptPreview}</pre>}
+        {rptResult && (rptResult.error ? <div style={S.muted}>error: {rptResult.error}</div> : (
+          <div style={{ marginTop: 6 }}>
+            <Row left={`${rptResult.title} · ${rptResult.audience}`} right={rptResult.status ?? "draft"} />
+            <div style={S.muted}>{rptResult.executiveSummary}</div>
+            {rptResult.evidence?.map((ev, i) => <div key={i} style={{ marginTop: 6 }}><div style={S.rowLeft}>[{ev.type}{ev.source ? ` · ${ev.source}` : ""}] {ev.title}</div><div style={S.muted}>{ev.summary}</div></div>)}
+            {(rptResult.hazards?.length ?? 0) > 0 && <div style={S.muted}>hazards: {rptResult.hazards!.join("; ")}</div>}
+            {(rptResult.limitations?.length ?? 0) > 0 && <div style={S.muted}>limitations: {rptResult.limitations!.join(" · ")}</div>}
+          </div>
+        ))}
+        <div style={S.muted}>Read-only evidence report — grounded docs + your inputs only. Unknowns are marked, not invented. Client/executive views redact internal detail.</div>
       </Panel>
     </section>
   );
