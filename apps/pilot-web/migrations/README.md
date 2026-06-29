@@ -65,35 +65,51 @@ manually if you want, but the migration never drops anything.)
 
 ---
 
-# Database backends — apply order & production checklist (Phase 10.0)
+# Database backends — apply order & production checklist (Phase 10.0, updated 12.1)
 
-MigraPilot has **two** optional, independent Postgres-backed systems. Both default OFF.
+MigraPilot has **three** optional, independent Postgres-backed systems. All default OFF.
 
 | System | Migration | Enable with | Default when unset |
 |---|---|---|---|
 | pgvector memory | `0001_pilot_pgvector.sql` | `PILOT_MEMORY_BACKEND=pgvector` | file (`.pilot-data`) |
 | approval store | `0002_pilot_approvals.sql` | `PILOT_APPROVAL_STORE=postgres` | in-memory |
+| ops action journal | `0003_pilot_ops_action_journal.sql` | `PILOT_OPS_ACTION_JOURNAL=postgres` | in-memory |
 
 See [`../docs/approvals.md`](../docs/approvals.md) for the approval store env vars and lifecycle.
 
+> ✅ **Verified (Phase 12.1)** — all three backends were applied to a fresh dev PostgreSQL 16 +
+> pgvector 0.6 database and exercised end-to-end (ingest/search/reingest-no-dup/delete-keeps-file;
+> persisted approval + exact-once claim + cancel + TTL expiry + blocked-refusal + sanitized args;
+> no-op/status-marker/transition/webhook journal records, append-only, secrets stripped), plus
+> combined mode and fallback-to-default when env is unset. NOT yet run against a production DB.
+
 ## Apply order (manual only — the app never auto-migrates)
 ```bash
-psql "$DATABASE_URL" -f apps/pilot-web/migrations/0001_pilot_pgvector.sql   # memory (needs `vector` ext)
-psql "$DATABASE_URL" -f apps/pilot-web/migrations/0002_pilot_approvals.sql  # approvals
+psql "$DATABASE_URL" -f apps/pilot-web/migrations/0001_pilot_pgvector.sql            # memory (needs `vector` ext)
+psql "$DATABASE_URL" -f apps/pilot-web/migrations/0002_pilot_approvals.sql           # approvals
+psql "$DATABASE_URL" -f apps/pilot-web/migrations/0003_pilot_ops_action_journal.sql  # ops action journal
 ```
 `CREATE EXTENSION vector` requires a superuser (or a role with `CREATE` on the DB) — run the
 extension/migration as such, then `GRANT` table privileges to the app role.
 
+## Env vars
+| Var | Default | Purpose |
+|---|---|---|
+| `PILOT_MEMORY_BACKEND` | _(unset → file)_ | `pgvector` to enable Postgres memory |
+| `PILOT_APPROVAL_STORE` | _(unset → memory)_ | `postgres` to persist approvals (+ `PILOT_APPROVAL_TTL_MS`, `PILOT_APPROVAL_FAIL_CLOSED`) |
+| `PILOT_OPS_ACTION_JOURNAL` | _(unset → memory)_ | `postgres` to persist the ops action journal (+ `PILOT_OPS_ACTION_JOURNAL_FAIL_CLOSED`) |
+| `DATABASE_URL` | _(unset)_ | required by any `postgres`/`pgvector` mode; never commit it |
+
 ## Production enablement checklist
 1. Use a **dedicated, non-production** database first; verify the steps above.
-2. Apply `0001` then `0002` to the target DB. Confirm: `\d pilot_sources`, `\d pilot_approvals`.
+2. Apply `0001` → `0002` → `0003` to the target DB. Confirm: `\d pilot_sources`, `\d pilot_approvals`, `\d pilot_ops_action_journal`.
 3. Install the driver: `npm install pg` (lazily imported; only needed when a backend is enabled).
-4. Set `DATABASE_URL` (never commit it) + the enable flag(s). Optionally
-   `PILOT_APPROVAL_TTL_MS`, `PILOT_APPROVAL_FAIL_CLOSED`.
-5. Restart; confirm `GET /api/pilot/sources` → `backend: pgvector` and
-   `GET /api/pilot/approvals` → `store: postgres`.
-6. Verify one ingest + search and one approve/cancel before relying on it.
+4. Set `DATABASE_URL` (never commit it) + the enable flag(s).
+5. Restart; confirm `GET /api/pilot/sources` → `backend: pgvector`, `GET /api/pilot/approvals` → `store: postgres`, and `GET /api/pilot/ops/actions/journal` → `store: postgres`.
+6. Verify one ingest + search, one approve/cancel, and one approved no-op/marker before relying on it.
 
 ## Rollback / disable
-Unset `PILOT_MEMORY_BACKEND` and `PILOT_APPROVAL_STORE` (and/or `DATABASE_URL`) and restart —
-MigraPilot returns to file memory + in-memory approvals. Tables are left intact (no DROP).
+Unset `PILOT_MEMORY_BACKEND`, `PILOT_APPROVAL_STORE`, and `PILOT_OPS_ACTION_JOURNAL` (and/or
+`DATABASE_URL`) and restart — MigraPilot returns to file memory + in-memory approvals + in-memory
+ops journal. Each backend also falls back to its in-memory default automatically if Postgres is
+unreachable (unless its `*_FAIL_CLOSED` flag is set). Tables are left intact (no DROP).

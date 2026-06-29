@@ -4,7 +4,7 @@
 // DB is unreachable / the table is absent, init() throws and the dispatcher falls back to in-memory
 // (unless PILOT_OPS_ACTION_JOURNAL_FAIL_CLOSED is set).
 //
-// Schema: see migrations/0003_pilot_ops_action_journal.sql. NOT live-verified in this environment.
+// Schema: see migrations/0003_pilot_ops_action_journal.sql. Verified Phase 12.1 against dev PostgreSQL 16.
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 import type { ActionJournal, ActionRecord } from "./ops-action-journal";
