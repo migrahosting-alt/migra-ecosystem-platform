@@ -890,6 +890,9 @@ function OpsSection() {
     catch (e) { setNoopVerify({ status: "error", summary: (e as Error).message }); } finally { setNoopBusy(false); }
   };
 
+  const [regActions, setRegActions] = useState<{ actionName: string; category: string; enabled: boolean; executionMode: string; riskLevel: string; description: string; allowedTargets: string[]; prerequisites: string[]; verificationRecommendations: string[]; blockedReason?: string }[] | null>(null);
+  useEffect(() => { fetch("/api/pilot/ops/actions").then((r) => (r.ok ? r.json() : null)).then((d) => { if (d) setRegActions(d.actions); }).catch(() => {}); }, []);
+
   const streamNdjson = async (url: string, body: unknown, onEvent: (ev: { type: string; approval?: { runId: string; id: string; toolName: string; risk: string }; delta?: string; message?: { content?: string } }) => void) => {
     const res = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
     if (!res.ok || !res.body) throw new Error(`request failed (${res.status})`);
@@ -1178,6 +1181,21 @@ function OpsSection() {
           </div>
         )}
         <div style={S.muted}>Execution requires approval + runs exactly once. Records a controlled no-op only — no command, deploy, restart, DNS/billing/DB, SSH, or external API. Real mutations stay blocked.</div>
+      </Panel>
+      <Panel title="Controlled actions registry">
+        <div style={S.muted}>Future ops verbs are promoted one at a time from disabled → approval-gated. Read-only — disabled actions cannot execute or create approval cards.</div>
+        {regActions === null && <div style={S.muted}>Loading…</div>}
+        {regActions?.map((a) => (
+          <div key={a.actionName} style={{ marginTop: 8 }}>
+            <Row left={a.actionName} right={a.enabled ? `ENABLED · ${a.executionMode}` : "DISABLED"} tone={a.enabled ? "Succeeded" : "Failed"} />
+            <div style={S.muted}>{a.enabled ? `ENABLED NO-OP · risk ${a.riskLevel}` : `REAL ACTION NOT ENABLED · risk ${a.riskLevel}`} — {a.description}</div>
+            {a.allowedTargets.length > 0 && <div style={S.muted}>targets: {a.allowedTargets.join(", ")}</div>}
+            {a.prerequisites.length > 0 && <div style={S.muted}>prereqs: {a.prerequisites.join("; ")}</div>}
+            {a.verificationRecommendations.length > 0 && <div style={S.muted}>verify: {a.verificationRecommendations.join(", ")}</div>}
+            {a.blockedReason && <div style={S.blockedBadge}>{a.blockedReason}</div>}
+          </div>
+        ))}
+        <div style={S.muted}>No execute buttons are offered for disabled actions. Only the controlled no-op above is enabled.</div>
       </Panel>
     </section>
   );

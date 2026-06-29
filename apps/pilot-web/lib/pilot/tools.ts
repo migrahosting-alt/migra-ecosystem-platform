@@ -12,6 +12,7 @@ import { visionAnalyze } from "./gateway";
 import { formatHits, ingestBatch, searchKnowledge } from "./knowledge";
 import { imageHealth, imagePreview, imageProviderMode, submitImageJob } from "./image-provider";
 import { buildHealthBundle, buildOpsPlan, buildReport, buildRunbook, checkUrl, executeNoop, hazardLookup, knownTopology, opsHealth, previewHealthBundle, previewReport, previewRunbook, verifyDeploy, verifyNoop, verifyPlan, verifyService, verifyUrl } from "./ops-provider";
+import { listOpsActions } from "./ops-action-registry";
 
 const execFileP = promisify(execFile);
 
@@ -474,6 +475,13 @@ export const TOOLS: Record<string, ToolDef> = {
       if (!r.matches.length) return `${r.detail} for "${r.query}"`;
       return clip(`${r.detail} for "${r.query}":\n` + r.matches.map((m) => `• [${m.doc}] ${m.heading}: ${m.snippet}`).join("\n"));
     },
+  },
+  "ops.actions.list": {
+    name: "ops.actions.list",
+    description: "READ-ONLY. List the controlled ops action registry: which actions are enabled (only the no-op) vs DISABLED future verbs, with risk level, execution mode, prerequisites, hazards, and verification recommendations. No secrets, no execution.",
+    risk: "read",
+    parameters: { type: "object", properties: {} },
+    run: async () => clip(JSON.stringify(listOpsActions(), null, 2)),
   },
   "ops.noop.execute": {
     name: "ops.noop.execute",

@@ -7,6 +7,7 @@
 // This is the guardrail layer only — it adds NO operational/destructive tools.
 
 import { TOOLS, repoCommandRisk } from "./tools";
+import { isRegistryDisabledAction, registryDisabledReason } from "./ops-action-registry";
 
 export type PilotRiskLevel = "safe_read" | "safe_write" | "requires_approval" | "blocked";
 
@@ -78,6 +79,8 @@ export function classifyPilotAction(name: string, args: Record<string, unknown> 
   });
 
   if (OPS_VERIFY.has(name)) return mk("safe_read", "read-only post-action verification (no mutation)");
+  if (isRegistryDisabledAction(name)) return mk("blocked", registryDisabledReason(name) ?? "registered but DISABLED in the controlled action registry — cannot execute");
+  if (name === "ops.actions.list") return mk("safe_read", "lists the controlled action registry (read-only)");
   if (name === "ops.noop.execute") return mk("requires_approval", "NO-OP ACTION — records a controlled no-op; no external mutation, no command, no API call", "Record a controlled no-op execution only; no external changes.");
   if (name === "ops.noop.verify") return mk("safe_read", "verifies a no-op record (read-only); mutates nothing");
   if (name === "ops.health_bundle.preview") return mk("safe_read", "validates a health re-check bundle; runs nothing");
