@@ -947,6 +947,119 @@ export async function buildHealthBundle(input: HealthBundleInput): Promise<Healt
   };
 }
 
+// ---- Controlled NO-OP ops actions (Phase 11.0) — proves the execution rails, mutates NOTHING ----
+export interface NoopRecord {
+  id: string;
+  actionType: "noop";
+  target: string;
+  reason: string;
+  executed: true;
+  mutated: false;
+  dryRun: false;
+  summary: string;
+  approvalId?: string;
+  runId?: string;
+  expectedVerificationUrl?: string; // sanitized
+  metadata?: Record<string, unknown>;
+  generatedAt: string;
+}
+export interface NoopExecuteInput {
+  target: string;
+  reason: string;
+  expectedVerificationUrl?: string;
+  metadata?: unknown;
+  approvalId?: string;
+  runId?: string;
+}
+export interface NoopVerifyResult {
+  verificationType: "noop";
+  target: string;
+  recordId?: string;
+  mutated: false;
+  status: VerifyStatus;
+  checks: BundleCheck[];
+  summary: string;
+  generatedAt: string;
+}
+
+// In-memory only (globalThis-pinned, hot-reload safe). NO file is written.
+const gj = globalThis as unknown as { __migrapilotNoopJournal?: NoopRecord[] };
+function noopJournal(): NoopRecord[] {
+  return (gj.__migrapilotNoopJournal ??= []);
+}
+let noopCounter = 0;
+function noopId(): string {
+  noopCounter += 1;
+  return `noop_${Date.now().toString(36)}_${noopCounter.toString(36)}`;
+}
+function sanitizeMeta(m: unknown): Record<string, unknown> | undefined {
+  if (!m || typeof m !== "object") return undefined;
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(m as Record<string, unknown>)) {
+    if (/secret|token|password|key|credential|authorization|cookie|api[_-]?key/i.test(k)) continue;
+    out[k] = typeof v === "string" && v.length > 500 ? v.slice(0, 500) : v;
+  }
+  return Object.keys(out).length ? out : undefined;
+}
+
+// Records a controlled NO-OP. Performs NO infrastructure mutation and calls NO external API.
+export function executeNoop(input: NoopExecuteInput): NoopRecord {
+  const target = String(input.target ?? "").trim();
+  const reason = String(input.reason ?? "").trim();
+  const rec: NoopRecord = {
+    id: noopId(),
+    actionType: "noop",
+    target: target || "(unspecified)",
+    reason: reason || "(none provided)",
+    executed: true,
+    mutated: false,
+    dryRun: false,
+    summary: `Controlled NO-OP recorded for "${target || "(unspecified)"}". NO external system was changed, no command ran, no API was called — this proves the approval/audit/exact-once rails only.`,
+    approvalId: input.approvalId ? String(input.approvalId) : undefined,
+    runId: input.runId ? String(input.runId) : undefined,
+    expectedVerificationUrl: input.expectedVerificationUrl ? sanitizeUrl(input.expectedVerificationUrl) : undefined,
+    metadata: sanitizeMeta(input.metadata),
+    generatedAt: nowIso(),
+  };
+  const j = noopJournal();
+  j.unshift(rec);
+  if (j.length > 100) j.length = 100;
+  return rec;
+}
+
+export function listNoopRecords(limit = 20): NoopRecord[] {
+  return noopJournal().slice(0, Math.max(0, Math.min(limit, 100)));
+}
+
+// Read-only: confirms a no-op record exists and optionally runs ONE allowlisted health check.
+export async function verifyNoop(input: { target: string; healthUrl?: string }): Promise<NoopVerifyResult> {
+  const target = String(input.target ?? "").trim();
+  const j = noopJournal();
+  const rec = (target ? j.find((r) => r.target === target) : undefined) ?? j[0];
+  const checks: BundleCheck[] = [{
+    type: "noop-record",
+    name: "controlled no-op record",
+    status: rec ? "pass" : "unknown",
+    evidence: rec ? `record ${rec.id} found — executed:true, mutated:false, dryRun:false` : "no no-op record found for target",
+  }];
+  if (input.healthUrl) {
+    const c = await checkUrl(input.healthUrl);
+    checks.push({ type: "health-url", name: "allowlisted health check", status: c.ok ? "pass" : c.error && (c.error.includes("disabled") || c.error.includes("allowlist")) ? "unknown" : "fail", evidence: c.ok ? `HTTP ${c.status} in ${c.latencyMs}ms` : c.error ?? "failed", latencyMs: c.latencyMs, sanitizedUrl: c.url });
+  }
+  const evStatuses = checks.map((c) => c.status);
+  const status: VerifyStatus = evStatuses.every((s) => s === "pass") ? "pass" : evStatuses.some((s) => s === "fail") ? "fail" : evStatuses.some((s) => s === "pass") ? "partial" : "unknown";
+  return {
+    verificationType: "noop",
+    target: target || "(unspecified)",
+    recordId: rec?.id,
+    mutated: false,
+    status,
+    checks,
+    summary: rec ? `No-op record verified (mutated:false). ${input.healthUrl ? "Health check included." : "No health URL provided."}` : "No matching no-op record found — nothing was executed for this target.",
+    generatedAt: nowIso(),
+  };
+}
+
 export interface HazardMatch {
   doc: string;
   heading: string;

@@ -849,6 +849,47 @@ function OpsSection() {
     catch (e) { setHbResult({ error: (e as Error).message }); } finally { setHbBusy(false); }
   };
 
+  const [noopTarget, setNoopTarget] = useState("");
+  const [noopReason, setNoopReason] = useState("");
+  const [noopUrl, setNoopUrl] = useState("");
+  const [noopBusy, setNoopBusy] = useState(false);
+  const [noopStatus, setNoopStatus] = useState("");
+  const [noopPending, setNoopPending] = useState<{ runId: string; approvalId: string } | null>(null);
+  const [noopResult, setNoopResult] = useState<string | null>(null);
+  const [noopRecent, setNoopRecent] = useState<{ id: string; target: string; reason: string; mutated: boolean }[] | null>(null);
+  const [noopVerify, setNoopVerify] = useState<{ status?: string; summary?: string; checks?: { name: string; status: string; evidence: string }[] } | null>(null);
+
+  const loadNoopRecent = () => { fetch("/api/pilot/ops/noop/recent").then((r) => (r.ok ? r.json() : null)).then((d) => { if (d) setNoopRecent(d.records); }).catch(() => {}); };
+  useEffect(() => { loadNoopRecent(); }, []);
+
+  const requestNoop = async () => {
+    if (!noopTarget.trim() || !noopReason.trim() || noopBusy) return;
+    setNoopBusy(true); setNoopResult(null); setNoopPending(null); setNoopStatus("requesting approval…");
+    try {
+      let pending: { runId: string; approvalId: string } | null = null;
+      const msg = `Call ops.noop.execute with target "${noopTarget.replace(/"/g, "")}" reason "${noopReason.replace(/"/g, "")}"${noopUrl ? ` expectedVerificationUrl "${noopUrl.replace(/"/g, "")}"` : ""}.`;
+      await streamNdjson("/api/pilot/chat", { message: msg }, (ev) => { if (ev.type === "approval.required" && ev.approval) pending = { runId: ev.approval.runId, approvalId: ev.approval.id }; });
+      if (pending) { setNoopPending(pending); setNoopStatus("⏸ controlled no-op needs approval (no mutation)"); }
+      else setNoopStatus("no approval was requested — try again");
+    } catch (e) { setNoopStatus("error: " + (e as Error).message); } finally { setNoopBusy(false); }
+  };
+  const decideNoop = async (decision: "approve" | "deny") => {
+    if (!noopPending || noopBusy) return;
+    setNoopBusy(true); const p = noopPending; setNoopPending(null);
+    try {
+      let msg = ""; let tokens = "";
+      await streamNdjson(`/api/pilot/runs/${p.runId}/approve`, { approvalId: p.approvalId, decision }, (ev) => { if (ev.type === "token") tokens += ev.delta ?? ""; if (ev.type === "message") msg = ev.message?.content ?? msg; });
+      if (decision === "deny") setNoopStatus("cancelled — no no-op recorded");
+      else { setNoopResult(msg || tokens || "(no-op recorded — see chat)"); setNoopStatus("✓ controlled no-op executed (mutated:false)"); loadNoopRecent(); }
+    } catch (e) { setNoopStatus("error: " + (e as Error).message); } finally { setNoopBusy(false); }
+  };
+  const verifyNoopUi = async () => {
+    if (!noopTarget.trim() || noopBusy) return;
+    setNoopBusy(true); setNoopVerify(null);
+    try { const r = await fetch("/api/pilot/ops/noop/verify", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ target: noopTarget, healthUrl: noopUrl || undefined }) }); setNoopVerify(await r.json()); }
+    catch (e) { setNoopVerify({ status: "error", summary: (e as Error).message }); } finally { setNoopBusy(false); }
+  };
+
   const streamNdjson = async (url: string, body: unknown, onEvent: (ev: { type: string; approval?: { runId: string; id: string; toolName: string; risk: string }; delta?: string; message?: { content?: string } }) => void) => {
     const res = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
     if (!res.ok || !res.body) throw new Error(`request failed (${res.status})`);
@@ -1103,6 +1144,40 @@ function OpsSection() {
           </div>
         ))}
         <div style={S.muted}>URLs must be allowlisted (PILOT_OPS_ALLOWED_HEALTH_URLS) + are sanitized. Response bodies are never returned. Read-only — nothing executed.</div>
+      </Panel>
+      <Panel title="Controlled no-op action">
+        <div style={S.blockedBadge}>CONTROLLED NO-OP — NO INFRASTRUCTURE MUTATION</div>
+        <div style={S.inputRow}>
+          <input value={noopTarget} onChange={(e) => setNoopTarget(e.target.value)} placeholder="target (e.g. voip-core)" style={S.composerInput} />
+          <input value={noopReason} onChange={(e) => setNoopReason(e.target.value)} placeholder="reason" style={S.composerInput} />
+        </div>
+        <div style={S.inputRow}><span style={S.promptIcon}>🌐</span><input value={noopUrl} onChange={(e) => setNoopUrl(e.target.value)} placeholder="allowlisted verification URL (optional)" style={S.composerInput} /></div>
+        <div style={S.inputRow}>
+          <button onClick={requestNoop} disabled={noopBusy} style={{ ...S.sendButton, width: "auto", padding: "0 12px", fontSize: 12, opacity: noopBusy ? 0.6 : 1, cursor: noopBusy ? "default" : "pointer" }}>Execute no-op</button>
+          <button onClick={verifyNoopUi} disabled={noopBusy} style={{ ...S.sendButton, width: "auto", padding: "0 12px", fontSize: 12, opacity: noopBusy ? 0.6 : 1, cursor: noopBusy ? "default" : "pointer" }}>Verify no-op</button>
+        </div>
+        {noopStatus && <div style={S.muted}>{noopStatus}</div>}
+        {noopPending && (
+          <div style={S.approvalActions}>
+            <button onClick={() => decideNoop("approve")} disabled={noopBusy} style={S.approveBtn}>Approve (no-op)</button>
+            <button onClick={() => decideNoop("deny")} disabled={noopBusy} style={S.denyBtn}>Cancel</button>
+          </div>
+        )}
+        {noopResult && <pre style={S.approvalArgs}>{noopResult}</pre>}
+        {noopVerify && (
+          <div style={{ marginTop: 6 }}>
+            <Row left="verify" right={noopVerify.status ?? "?"} tone={noopVerify.status === "pass" ? "Succeeded" : noopVerify.status === "fail" ? "Failed" : undefined} />
+            <div style={S.muted}>{noopVerify.summary}</div>
+            {noopVerify.checks?.map((c, i) => <Row key={i} left={c.name} right={`${c.status} — ${c.evidence}`} tone={c.status === "pass" ? "Succeeded" : c.status === "fail" ? "Failed" : undefined} />)}
+          </div>
+        )}
+        {(noopRecent?.length ?? 0) > 0 && (
+          <div style={{ marginTop: 8 }}>
+            <div style={S.rowLeft}>Recent no-ops (in-memory)</div>
+            {noopRecent!.slice(0, 5).map((r) => <Row key={r.id} left={r.target} right={`mutated:${r.mutated}`} />)}
+          </div>
+        )}
+        <div style={S.muted}>Execution requires approval + runs exactly once. Records a controlled no-op only — no command, deploy, restart, DNS/billing/DB, SSH, or external API. Real mutations stay blocked.</div>
       </Panel>
     </section>
   );

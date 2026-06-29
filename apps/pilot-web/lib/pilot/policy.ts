@@ -78,6 +78,8 @@ export function classifyPilotAction(name: string, args: Record<string, unknown> 
   });
 
   if (OPS_VERIFY.has(name)) return mk("safe_read", "read-only post-action verification (no mutation)");
+  if (name === "ops.noop.execute") return mk("requires_approval", "NO-OP ACTION — records a controlled no-op; no external mutation, no command, no API call", "Record a controlled no-op execution only; no external changes.");
+  if (name === "ops.noop.verify") return mk("safe_read", "verifies a no-op record (read-only); mutates nothing");
   if (name === "ops.health_bundle.preview") return mk("safe_read", "validates a health re-check bundle; runs nothing");
   if (name === "ops.health_bundle.run") return mk("safe_read", "runs read-only health checks (allowlisted URLs, no bodies, no mutation)");
   if (name === "ops.report.preview") return mk("safe_read", "validates report inputs; generates nothing");

@@ -11,7 +11,7 @@ import { existsSync } from "node:fs";
 import { visionAnalyze } from "./gateway";
 import { formatHits, ingestBatch, searchKnowledge } from "./knowledge";
 import { imageHealth, imagePreview, imageProviderMode, submitImageJob } from "./image-provider";
-import { buildHealthBundle, buildOpsPlan, buildReport, buildRunbook, checkUrl, hazardLookup, knownTopology, opsHealth, previewHealthBundle, previewReport, previewRunbook, verifyDeploy, verifyPlan, verifyService, verifyUrl } from "./ops-provider";
+import { buildHealthBundle, buildOpsPlan, buildReport, buildRunbook, checkUrl, executeNoop, hazardLookup, knownTopology, opsHealth, previewHealthBundle, previewReport, previewRunbook, verifyDeploy, verifyNoop, verifyPlan, verifyService, verifyUrl } from "./ops-provider";
 
 const execFileP = promisify(execFile);
 
@@ -474,6 +474,20 @@ export const TOOLS: Record<string, ToolDef> = {
       if (!r.matches.length) return `${r.detail} for "${r.query}"`;
       return clip(`${r.detail} for "${r.query}":\n` + r.matches.map((m) => `• [${m.doc}] ${m.heading}: ${m.snippet}`).join("\n"));
     },
+  },
+  "ops.noop.execute": {
+    name: "ops.noop.execute",
+    description: "Execute a CONTROLLED NO-OP ops action (requires approval). Records a controlled execution to prove the approval/audit/exact-once rails. Performs NO infrastructure mutation, runs NO command, calls NO external API. Provide 'target' and 'reason'; optional 'expectedVerificationUrl', 'metadata'. Returns an execution record with mutated:false.",
+    risk: "high",
+    parameters: { type: "object", properties: { target: { type: "string" }, reason: { type: "string" }, expectedVerificationUrl: { type: "string" }, metadata: { type: "object" } }, required: ["target", "reason"] },
+    run: async (a) => clip(JSON.stringify(executeNoop({ target: String(a.target ?? ""), reason: String(a.reason ?? ""), expectedVerificationUrl: a.expectedVerificationUrl ? String(a.expectedVerificationUrl) : undefined, metadata: a.metadata }), null, 2)),
+  },
+  "ops.noop.verify": {
+    name: "ops.noop.verify",
+    description: "READ-ONLY. Verify a controlled no-op action record (mutated:false) and optionally run ONE allowlisted health check if a URL is provided. Mutates nothing; URLs allowlisted + sanitized; no response body returned.",
+    risk: "read",
+    parameters: { type: "object", properties: { target: { type: "string" }, healthUrl: { type: "string" } }, required: ["target"] },
+    run: async (a) => clip(JSON.stringify(await verifyNoop({ target: String(a.target ?? ""), healthUrl: a.healthUrl ? String(a.healthUrl) : undefined }), null, 2)),
   },
   "ops.health_bundle.preview": {
     name: "ops.health_bundle.preview",
