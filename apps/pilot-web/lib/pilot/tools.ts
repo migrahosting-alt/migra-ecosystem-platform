@@ -11,7 +11,7 @@ import { existsSync } from "node:fs";
 import { visionAnalyze } from "./gateway";
 import { formatHits, ingestBatch, searchKnowledge } from "./knowledge";
 import { imageHealth, imagePreview, imageProviderMode, submitImageJob } from "./image-provider";
-import { buildHealthBundle, buildOpsPlan, buildReport, buildRunbook, checkUrl, executeNoop, hazardLookup, knownTopology, opsHealth, previewHealthBundle, previewReport, previewRunbook, verifyDeploy, verifyNoop, verifyPlan, verifyService, verifyUrl } from "./ops-provider";
+import { buildHealthBundle, buildOpsPlan, buildReport, buildRunbook, checkUrl, executeNoop, hazardLookup, knownTopology, listStatusMarkers, opsHealth, previewHealthBundle, previewReport, previewRunbook, setStatusMarker, verifyDeploy, verifyNoop, verifyPlan, verifyService, verifyStatusMarker, verifyUrl } from "./ops-provider";
 import { listOpsActions } from "./ops-action-registry";
 
 const execFileP = promisify(execFile);
@@ -482,6 +482,27 @@ export const TOOLS: Record<string, ToolDef> = {
     risk: "read",
     parameters: { type: "object", properties: {} },
     run: async () => clip(JSON.stringify(listOpsActions(), null, 2)),
+  },
+  "ops.status_marker.set": {
+    name: "ops.status_marker.set",
+    description: "Record an INTERNAL ops status marker in the action journal (requires approval). INTERNAL JOURNAL ONLY — mutated:true but externalMutation:false; performs NO infrastructure mutation, command, deploy, restart, DNS/billing/DB, SSH, or external API. Provide 'target', 'status' (planned|in_progress|verifying|completed|failed|blocked|acknowledged), 'reason'; optional 'metadata'.",
+    risk: "high",
+    parameters: { type: "object", properties: { target: { type: "string" }, status: { type: "string", enum: ["planned", "in_progress", "verifying", "completed", "failed", "blocked", "acknowledged"] }, reason: { type: "string" }, metadata: { type: "object" } }, required: ["target", "status", "reason"] },
+    run: async (a) => clip(JSON.stringify(await setStatusMarker({ target: String(a.target ?? ""), status: String(a.status ?? ""), reason: String(a.reason ?? ""), metadata: a.metadata }), null, 2)),
+  },
+  "ops.status_marker.list": {
+    name: "ops.status_marker.list",
+    description: "READ-ONLY. List recent internal ops status markers from the action journal (sanitized). Mutates nothing.",
+    risk: "read",
+    parameters: { type: "object", properties: { limit: { type: "number" } } },
+    run: async (a) => clip(JSON.stringify(await listStatusMarkers(Number(a.limit) || 20), null, 2)),
+  },
+  "ops.status_marker.verify": {
+    name: "ops.status_marker.verify",
+    description: "READ-ONLY. Verify whether an internal status marker exists for a target (and optional status). Mutates nothing.",
+    risk: "read",
+    parameters: { type: "object", properties: { target: { type: "string" }, status: { type: "string" } }, required: ["target"] },
+    run: async (a) => clip(JSON.stringify(await verifyStatusMarker({ target: String(a.target ?? ""), status: a.status ? String(a.status) : undefined }), null, 2)),
   },
   "ops.noop.execute": {
     name: "ops.noop.execute",

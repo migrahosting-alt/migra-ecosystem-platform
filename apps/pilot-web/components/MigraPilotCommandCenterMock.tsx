@@ -894,6 +894,49 @@ function OpsSection() {
   const [regActions, setRegActions] = useState<{ actionName: string; category: string; enabled: boolean; executionMode: string; riskLevel: string; description: string; allowedTargets: string[]; prerequisites: string[]; verificationRecommendations: string[]; blockedReason?: string }[] | null>(null);
   useEffect(() => { fetch("/api/pilot/ops/actions").then((r) => (r.ok ? r.json() : null)).then((d) => { if (d) setRegActions(d.actions); }).catch(() => {}); }, []);
 
+  const [smTarget, setSmTarget] = useState("");
+  const [smStatus, setSmStatus] = useState("planned");
+  const [smReason, setSmReason] = useState("");
+  const [smBusy, setSmBusy] = useState(false);
+  const [smMsg, setSmMsg] = useState("");
+  const [smPending, setSmPending] = useState<{ runId: string; approvalId: string } | null>(null);
+  const [smResult, setSmResult] = useState<string | null>(null);
+  const [smRecent, setSmRecent] = useState<{ recordId: string; target: string; status: string; externalMutation: boolean; mutationScope: string }[] | null>(null);
+  const [smStore, setSmStore] = useState("");
+  const [smVerifyTarget, setSmVerifyTarget] = useState("");
+  const [smVerify, setSmVerify] = useState<{ found?: boolean; markerStatus?: string; summary?: string; status?: string } | null>(null);
+
+  const loadMarkers = () => { fetch("/api/pilot/ops/markers/recent").then((r) => (r.ok ? r.json() : null)).then((d) => { if (d) { setSmRecent(d.markers); setSmStore(d.store); } }).catch(() => {}); };
+  useEffect(() => { loadMarkers(); }, []);
+
+  const requestMarker = async () => {
+    if (!smTarget.trim() || !smReason.trim() || smBusy) return;
+    setSmBusy(true); setSmResult(null); setSmPending(null); setSmMsg("requesting approval…");
+    try {
+      let pending: { runId: string; approvalId: string } | null = null;
+      const msg = `Call ops.status_marker.set with target "${smTarget.replace(/"/g, "")}" status ${smStatus} reason "${smReason.replace(/"/g, "")}".`;
+      await streamNdjson("/api/pilot/chat", { message: msg }, (ev) => { if (ev.type === "approval.required" && ev.approval) pending = { runId: ev.approval.runId, approvalId: ev.approval.id }; });
+      if (pending) { setSmPending(pending); setSmMsg("⏸ status marker needs approval (INTERNAL JOURNAL ONLY)"); }
+      else setSmMsg("no approval was requested — try again");
+    } catch (e) { setSmMsg("error: " + (e as Error).message); } finally { setSmBusy(false); }
+  };
+  const decideMarker = async (decision: "approve" | "deny") => {
+    if (!smPending || smBusy) return;
+    setSmBusy(true); const p = smPending; setSmPending(null);
+    try {
+      let msg = ""; let tokens = "";
+      await streamNdjson(`/api/pilot/runs/${p.runId}/approve`, { approvalId: p.approvalId, decision }, (ev) => { if (ev.type === "token") tokens += ev.delta ?? ""; if (ev.type === "message") msg = ev.message?.content ?? msg; });
+      if (decision === "deny") setSmMsg("cancelled — no marker recorded");
+      else { setSmResult(msg || tokens || "(marker recorded — see chat)"); setSmMsg("✓ status marker recorded (internal journal only)"); loadMarkers(); }
+    } catch (e) { setSmMsg("error: " + (e as Error).message); } finally { setSmBusy(false); }
+  };
+  const verifyMarker = async () => {
+    if (!smVerifyTarget.trim() || smBusy) return;
+    setSmBusy(true); setSmVerify(null);
+    try { const r = await fetch("/api/pilot/ops/markers/verify", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ target: smVerifyTarget }) }); setSmVerify(await r.json()); }
+    catch (e) { setSmVerify({ summary: (e as Error).message }); } finally { setSmBusy(false); }
+  };
+
   const streamNdjson = async (url: string, body: unknown, onEvent: (ev: { type: string; approval?: { runId: string; id: string; toolName: string; risk: string }; delta?: string; message?: { content?: string } }) => void) => {
     const res = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
     if (!res.ok || !res.body) throw new Error(`request failed (${res.status})`);
@@ -1197,6 +1240,39 @@ function OpsSection() {
           </div>
         ))}
         <div style={S.muted}>No execute buttons are offered for disabled actions. Only the controlled no-op above is enabled.</div>
+      </Panel>
+      <Panel title="Internal status marker">
+        <div style={S.blockedBadge}>INTERNAL JOURNAL ONLY — NO INFRASTRUCTURE MUTATION</div>
+        <div style={S.inputRow}>
+          <input value={smTarget} onChange={(e) => setSmTarget(e.target.value)} placeholder="target (e.g. voip-core)" style={S.composerInput} />
+          <select value={smStatus} onChange={(e) => setSmStatus(e.target.value)} style={{ ...S.composerInput, flex: "0 0 130px", cursor: "pointer" }}>
+            {["planned", "in_progress", "verifying", "completed", "failed", "blocked", "acknowledged"].map((s) => <option key={s} value={s}>{s}</option>)}
+          </select>
+        </div>
+        <div style={S.inputRow}><input value={smReason} onChange={(e) => setSmReason(e.target.value)} placeholder="reason" style={S.composerInput} /></div>
+        <div style={S.inputRow}>
+          <button onClick={requestMarker} disabled={smBusy} style={{ ...S.sendButton, width: "auto", padding: "0 12px", fontSize: 12, opacity: smBusy ? 0.6 : 1, cursor: smBusy ? "default" : "pointer" }}>Set marker</button>
+        </div>
+        {smMsg && <div style={S.muted}>{smMsg}</div>}
+        {smPending && (
+          <div style={S.approvalActions}>
+            <button onClick={() => decideMarker("approve")} disabled={smBusy} style={S.approveBtn}>Approve (marker)</button>
+            <button onClick={() => decideMarker("deny")} disabled={smBusy} style={S.denyBtn}>Cancel</button>
+          </div>
+        )}
+        {smResult && <pre style={S.approvalArgs}>{smResult}</pre>}
+        {(smRecent?.length ?? 0) > 0 && (
+          <div style={{ marginTop: 8 }}>
+            <div style={S.rowLeft}>Recent markers (journal: {smStore || "memory"})</div>
+            {smRecent!.slice(0, 5).map((m) => <Row key={m.recordId} left={`${m.target} · ${m.status}`} right={`external:${m.externalMutation}`} tone={m.externalMutation ? "Failed" : "Succeeded"} />)}
+          </div>
+        )}
+        <div style={{ ...S.inputRow, marginTop: 8 }}>
+          <input value={smVerifyTarget} onChange={(e) => setSmVerifyTarget(e.target.value)} placeholder="verify marker for target…" style={S.composerInput} />
+          <button onClick={verifyMarker} disabled={smBusy} style={{ ...S.sendButton, width: "auto", padding: "0 12px", fontSize: 12 }}>Verify marker</button>
+        </div>
+        {smVerify && <div style={S.muted}>verify: {smVerify.found ? `found (${smVerify.markerStatus})` : "not found"} — {smVerify.summary}</div>}
+        <div style={S.muted}>Setting a marker requires approval + runs exactly once. mutated:true but externalMutation:false — journal only, no infrastructure change.</div>
       </Panel>
     </section>
   );

@@ -1022,6 +1022,115 @@ export async function verifyNoop(input: { target: string; healthUrl?: string }):
   };
 }
 
+// ---- Internal ops status markers (Phase 11.3) — INTERNAL JOURNAL ONLY, no infra mutation ----
+export const MARKER_STATUSES = ["planned", "in_progress", "verifying", "completed", "failed", "blocked", "acknowledged"] as const;
+export type MarkerStatus = (typeof MARKER_STATUSES)[number];
+
+export interface StatusMarkerResult {
+  actionName: "ops.status_marker.set";
+  target: string;
+  status: MarkerStatus;
+  mutated: true;
+  mutationScope: "internal_journal_only";
+  externalMutation: false;
+  summary: string;
+  recordId: string;
+  generatedAt: string;
+}
+export interface StatusMarkerSummary {
+  recordId: string;
+  target: string;
+  status: string;
+  reason: string;
+  mutationScope: string;
+  externalMutation: boolean;
+  createdAt: string;
+}
+export interface StatusMarkerInput {
+  target: string;
+  status: string;
+  reason: string;
+  metadata?: unknown;
+  approvalId?: string;
+  runId?: string;
+}
+
+function coerceMarkerStatus(s: string): MarkerStatus {
+  return (MARKER_STATUSES as readonly string[]).includes(s) ? (s as MarkerStatus) : "planned";
+}
+
+// Writes an INTERNAL status marker to the action journal. mutated:true but externalMutation:false —
+// the scope is the journal only. Performs NO infrastructure mutation and calls NO external API.
+export async function setStatusMarker(input: StatusMarkerInput): Promise<StatusMarkerResult> {
+  const target = String(input.target ?? "").trim() || "(unspecified)";
+  const markerStatus = coerceMarkerStatus(String(input.status ?? "").trim());
+  const reason = String(input.reason ?? "").trim() || "(none provided)";
+  const userMeta = input.metadata && typeof input.metadata === "object" ? (input.metadata as Record<string, unknown>) : {};
+  const metadata: Record<string, unknown> = { ...userMeta, markerStatus, mutationScope: "internal_journal_only", externalMutation: false };
+  const rec = await createActionRecord({
+    actionName: "ops.status_marker.set",
+    category: "verification",
+    executionMode: "internal_journal",
+    target,
+    reason,
+    mutated: true,
+    dryRun: false,
+    executed: true,
+    status: "recorded",
+    metadata,
+    approvalId: input.approvalId,
+    runId: input.runId,
+    summary: `Internal ops status marker "${markerStatus}" recorded for "${target}" — mutationScope=internal_journal_only, externalMutation=false. NO infrastructure was changed, no command/deploy/restart/DNS/billing/DB/SSH/external-API.`,
+  });
+  return {
+    actionName: "ops.status_marker.set",
+    target,
+    status: markerStatus,
+    mutated: true,
+    mutationScope: "internal_journal_only",
+    externalMutation: false,
+    summary: rec.summary ?? "",
+    recordId: rec.id,
+    generatedAt: rec.createdAt,
+  };
+}
+
+export async function listStatusMarkers(limit = 20): Promise<StatusMarkerSummary[]> {
+  const recent = await listRecentActionRecords(200);
+  return recent
+    .filter((r) => r.actionName === "ops.status_marker.set")
+    .slice(0, Math.max(0, Math.min(limit, 100)))
+    .map((r) => ({
+      recordId: r.id,
+      target: r.target,
+      status: typeof r.metadata?.markerStatus === "string" ? (r.metadata.markerStatus as string) : "(unknown)",
+      reason: r.reason,
+      mutationScope: typeof r.metadata?.mutationScope === "string" ? (r.metadata.mutationScope as string) : "internal_journal_only",
+      externalMutation: r.metadata?.externalMutation === true,
+      createdAt: r.createdAt,
+    }));
+}
+
+export async function verifyStatusMarker(input: { target: string; status?: string }): Promise<{ verificationType: "status_marker"; target: string; requestedStatus?: string; found: boolean; recordId?: string; markerStatus?: string; mutated: false; externalMutation: false; status: VerifyStatus; summary: string; generatedAt: string }> {
+  const target = String(input.target ?? "").trim();
+  const status = input.status ? String(input.status).trim() : undefined;
+  const recent = await listRecentActionRecords(200);
+  const rec = recent.find((r) => r.actionName === "ops.status_marker.set" && (!target || r.target === target) && (!status || r.metadata?.markerStatus === status));
+  return {
+    verificationType: "status_marker",
+    target: target || "(unspecified)",
+    requestedStatus: status,
+    found: !!rec,
+    recordId: rec?.id,
+    markerStatus: typeof rec?.metadata?.markerStatus === "string" ? (rec.metadata.markerStatus as string) : undefined,
+    mutated: false,
+    externalMutation: false,
+    status: rec ? "pass" : "unknown",
+    summary: rec ? `Status marker found (status "${rec.metadata?.markerStatus}", internal_journal_only, externalMutation:false).` : "No matching status marker found — nothing was recorded for this target/status.",
+    generatedAt: nowIso(),
+  };
+}
+
 export interface HazardMatch {
   doc: string;
   heading: string;

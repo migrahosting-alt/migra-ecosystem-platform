@@ -8,7 +8,7 @@
 // Entries are pure data (no secrets). `requiredEnv` lists env var NAMES only — never values.
 
 export type OpsActionCategory = "noop" | "service" | "deploy" | "dns" | "billing" | "database" | "verification" | "custom";
-export type OpsExecutionMode = "noop" | "dry_run" | "disabled" | "real";
+export type OpsExecutionMode = "noop" | "dry_run" | "disabled" | "internal_journal" | "real";
 
 export interface OpsActionEntry {
   actionName: string;
@@ -46,6 +46,21 @@ export const OPS_ACTION_REGISTRY: readonly OpsActionEntry[] = [
     prerequisites: ["A target and a reason."],
     hazards: [],
     verificationRecommendations: ["ops.noop.verify (confirms the record, mutated:false)"],
+  },
+  {
+    actionName: "ops.status_marker.set",
+    category: "verification",
+    enabled: true,
+    executionMode: "internal_journal",
+    riskLevel: "low",
+    requiresApproval: true,
+    description: "Record an INTERNAL ops status marker (planned/in_progress/verifying/completed/failed/blocked/acknowledged) in the action journal. Internal state only — NO infrastructure mutation.",
+    expectedEffect: "Record an internal ops status marker only; no infrastructure mutation.",
+    allowedTargets: ["*"],
+    requiredEnv: [],
+    prerequisites: ["A target, a marker status, and a reason."],
+    hazards: [],
+    verificationRecommendations: ["ops.status_marker.verify", "ops.status_marker.list"],
   },
   {
     actionName: "ops.service.restart",
