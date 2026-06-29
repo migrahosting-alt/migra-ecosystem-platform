@@ -1038,6 +1038,23 @@ function OpsSection() {
     catch (e) { setTgResult({ reason: (e as Error).message }); } finally { setTgBusy(false); }
   };
 
+  const [pfTarget, setPfTarget] = useState("dev-sample-service");
+  const [pfAction, setPfAction] = useState("ops.service.restart");
+  const [pfService, setPfService] = useState("");
+  const [pfHealthUrl, setPfHealthUrl] = useState("");
+  const [pfExpected, setPfExpected] = useState("");
+  const [pfBuildId, setPfBuildId] = useState("");
+  const [pfResult, setPfResult] = useState<{ status?: string; eligibleForFutureExecution?: boolean; preflightId?: string; checks?: { name: string; status: string; evidence: string; required: boolean }[]; hazards?: string[]; requiredPrechecks?: string[]; requiredPostchecks?: string[]; rollbackConsiderations?: string[]; missingRequirements?: string[]; recommendations?: string[]; plannedChecks?: string[]; note?: string } | null>(null);
+  const [pfBusy, setPfBusy] = useState(false);
+  const runPreflight = async (mode: "preview" | "run") => {
+    if (pfBusy) return;
+    setPfBusy(true); setPfResult(null);
+    try {
+      const r = await fetch(`/api/pilot/ops/preflight${mode === "preview" ? "?mode=preview" : ""}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ targetId: pfTarget, actionName: pfAction, serviceName: pfService || undefined, healthUrl: pfHealthUrl || undefined, expectedText: pfExpected || undefined, expectedBuildId: pfBuildId || undefined }) });
+      setPfResult(await r.json());
+    } catch (e) { setPfResult({ note: (e as Error).message }); } finally { setPfBusy(false); }
+  };
+
   const streamNdjson = async (url: string, body: unknown, onEvent: (ev: { type: string; approval?: { runId: string; id: string; toolName: string; risk: string }; delta?: string; message?: { content?: string } }) => void) => {
     const res = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
     if (!res.ok || !res.body) throw new Error(`request failed (${res.status})`);
@@ -1366,6 +1383,40 @@ function OpsSection() {
           </div>
         )}
         <div style={S.muted}>Read-only gate — no real action executes. Real verbs stay disabled in the registry.</div>
+      </Panel>
+      <Panel title="Service preflight (read-only)">
+        <div style={S.blockedBadge}>READ-ONLY PREFLIGHT — NO ACTION EXECUTED</div>
+        <div style={S.muted}>Composes the target gate + action registry + environment + grounded hazards + an optional allowlisted health check into one verdict. eligibleForFutureExecution is always false; production/unknown/disabled targets and real actions fail.</div>
+        <div style={S.inputRow}>
+          <input value={pfTarget} onChange={(e) => setPfTarget(e.target.value)} placeholder="targetId" style={S.composerInput} />
+          <input value={pfAction} onChange={(e) => setPfAction(e.target.value)} placeholder="actionName" style={S.composerInput} />
+        </div>
+        <div style={S.inputRow}>
+          <input value={pfService} onChange={(e) => setPfService(e.target.value)} placeholder="serviceName (optional)" style={S.composerInput} />
+          <input value={pfHealthUrl} onChange={(e) => setPfHealthUrl(e.target.value)} placeholder="allowlisted health URL (optional)" style={S.composerInput} />
+        </div>
+        <div style={S.inputRow}>
+          <input value={pfExpected} onChange={(e) => setPfExpected(e.target.value)} placeholder="expected text (optional)" style={S.composerInput} />
+          <input value={pfBuildId} onChange={(e) => setPfBuildId(e.target.value)} placeholder="expected build id (optional)" style={S.composerInput} />
+        </div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button onClick={() => runPreflight("preview")} disabled={pfBusy} style={{ ...S.sendButton, width: "auto", padding: "0 12px", fontSize: 12, opacity: pfBusy ? 0.6 : 1, cursor: pfBusy ? "default" : "pointer" }}>Preview preflight</button>
+          <button onClick={() => runPreflight("run")} disabled={pfBusy} style={{ ...S.sendButton, width: "auto", padding: "0 12px", fontSize: 12, opacity: pfBusy ? 0.6 : 1, cursor: pfBusy ? "default" : "pointer" }}>Run preflight</button>
+        </div>
+        {pfResult && (
+          <div style={{ marginTop: 6 }}>
+            {pfResult.plannedChecks && <div style={S.muted}>planned checks: {pfResult.plannedChecks.join("; ")}</div>}
+            {pfResult.status && <Row left="status" right={pfResult.status} tone={pfResult.status === "pass" ? "Healthy" : "Failed"} />}
+            <Row left="eligibleForFutureExecution" right={String(pfResult.eligibleForFutureExecution ?? false)} tone="Failed" />
+            {pfResult.checks?.map((c, i) => (
+              <div key={i} style={S.muted}>{c.required ? "• " : "◦ "}{c.name}: <strong>{c.status}</strong> — {c.evidence}</div>
+            ))}
+            {(pfResult.missingRequirements?.length ?? 0) > 0 && <div style={S.muted}>missing: {pfResult.missingRequirements!.join("; ")}</div>}
+            {(pfResult.rollbackConsiderations?.length ?? 0) > 0 && <div style={S.muted}>rollback: {pfResult.rollbackConsiderations!.join("; ")}</div>}
+            {pfResult.note && <div style={S.muted}>{pfResult.note}</div>}
+          </div>
+        )}
+        <div style={S.muted}>Read-only — composes existing gates, executes nothing. Real ops verbs stay blocked.</div>
       </Panel>
       <Panel title="Internal status marker">
         <div style={S.blockedBadge}>INTERNAL JOURNAL ONLY — NO INFRASTRUCTURE MUTATION</div>

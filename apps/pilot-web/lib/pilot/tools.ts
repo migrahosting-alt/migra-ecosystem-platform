@@ -14,6 +14,7 @@ import { imageHealth, imagePreview, imageProviderMode, submitImageJob } from "./
 import { buildHealthBundle, buildOpsPlan, buildReport, buildRunbook, checkUrl, executeNoop, hazardLookup, knownTopology, listStatusMarkers, opsHealth, previewHealthBundle, previewReport, previewRunbook, previewWebhookSim, sendWebhookSim, setStatusMarker, statusMarkerHistory, transitionStatusMarker, verifyDeploy, verifyNoop, verifyPlan, verifyService, verifyStatusMarker, verifyUrl, verifyWebhookSim } from "./ops-provider";
 import { listOpsActions } from "./ops-action-registry";
 import { checkOpsTarget, listOpsTargets } from "./ops-target-allowlist";
+import { previewServicePreflight, runServicePreflight } from "./ops-service-preflight";
 
 const execFileP = promisify(execFile);
 
@@ -497,6 +498,20 @@ export const TOOLS: Record<string, ToolDef> = {
     risk: "read",
     parameters: { type: "object", properties: {} },
     run: async () => clip(JSON.stringify(listOpsActions(), null, 2)),
+  },
+  "ops.service_preflight.preview": {
+    name: "ops.service_preflight.preview",
+    description: "READ-ONLY. Preview a dev-only service preflight: lists the read-only checks that would run for a target+action. Executes NO health check and mutates nothing. eligibleForFutureExecution is always false.",
+    risk: "read",
+    parameters: { type: "object", properties: { targetId: { type: "string" }, actionName: { type: "string" }, serviceName: { type: "string" }, healthUrl: { type: "string" } }, required: ["targetId", "actionName"] },
+    run: async (a) => clip(JSON.stringify(previewServicePreflight({ targetId: String(a.targetId ?? ""), actionName: String(a.actionName ?? ""), serviceName: a.serviceName ? String(a.serviceName) : undefined, healthUrl: a.healthUrl ? String(a.healthUrl) : undefined }), null, 2)),
+  },
+  "ops.service_preflight.run": {
+    name: "ops.service_preflight.run",
+    description: "READ-ONLY. Run a dev-only service preflight: composes the target allowlist gate + action registry + environment + grounded hazards + an OPTIONAL allowlisted health check (sanitized, no body) + readiness into one verdict. Production/unknown/disabled targets and real actions FAIL. eligibleForFutureExecution is ALWAYS false. Mutates nothing.",
+    risk: "read",
+    parameters: { type: "object", properties: { targetId: { type: "string" }, actionName: { type: "string" }, serviceName: { type: "string" }, healthUrl: { type: "string" }, expectedText: { type: "string" }, expectedBuildId: { type: "string" }, operatorIntent: { type: "string" }, audience: { type: "string", enum: ["internal", "technical", "executive", "client"] } }, required: ["targetId", "actionName"] },
+    run: async (a) => clip(JSON.stringify(await runServicePreflight({ targetId: String(a.targetId ?? ""), actionName: String(a.actionName ?? ""), serviceName: a.serviceName ? String(a.serviceName) : undefined, healthUrl: a.healthUrl ? String(a.healthUrl) : undefined, expectedText: a.expectedText ? String(a.expectedText) : undefined, expectedBuildId: a.expectedBuildId ? String(a.expectedBuildId) : undefined, operatorIntent: a.operatorIntent ? String(a.operatorIntent) : undefined, audience: a.audience as ("internal" | "technical" | "executive" | "client" | undefined) }, new Date().toISOString()), null, 2)),
   },
   "ops.webhook_sim.preview": {
     name: "ops.webhook_sim.preview",
