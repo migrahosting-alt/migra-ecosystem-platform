@@ -10,6 +10,7 @@
 
 import { readFile, readdir } from "node:fs/promises";
 import { resolve } from "node:path";
+import { createActionRecord, listRecentActionRecords, type ActionRecord } from "./ops-action-journal";
 
 const PROVIDER = (process.env.PILOT_OPS_PROVIDER ?? "disabled").toLowerCase();
 const ALLOWED_RAW = (process.env.PILOT_OPS_ALLOWED_HEALTH_URLS ?? "").split(",").map((s) => s.trim()).filter(Boolean);
@@ -947,22 +948,7 @@ export async function buildHealthBundle(input: HealthBundleInput): Promise<Healt
   };
 }
 
-// ---- Controlled NO-OP ops actions (Phase 11.0) — proves the execution rails, mutates NOTHING ----
-export interface NoopRecord {
-  id: string;
-  actionType: "noop";
-  target: string;
-  reason: string;
-  executed: true;
-  mutated: false;
-  dryRun: false;
-  summary: string;
-  approvalId?: string;
-  runId?: string;
-  expectedVerificationUrl?: string; // sanitized
-  metadata?: Record<string, unknown>;
-  generatedAt: string;
-}
+// ---- Controlled NO-OP ops actions (Phase 11.0, journal-backed Phase 11.2) — mutates NOTHING ----
 export interface NoopExecuteInput {
   target: string;
   reason: string;
@@ -982,65 +968,41 @@ export interface NoopVerifyResult {
   generatedAt: string;
 }
 
-// In-memory only (globalThis-pinned, hot-reload safe). NO file is written.
-const gj = globalThis as unknown as { __migrapilotNoopJournal?: NoopRecord[] };
-function noopJournal(): NoopRecord[] {
-  return (gj.__migrapilotNoopJournal ??= []);
-}
-let noopCounter = 0;
-function noopId(): string {
-  noopCounter += 1;
-  return `noop_${Date.now().toString(36)}_${noopCounter.toString(36)}`;
-}
-function sanitizeMeta(m: unknown): Record<string, unknown> | undefined {
-  if (!m || typeof m !== "object") return undefined;
-  const out: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(m as Record<string, unknown>)) {
-    if (/secret|token|password|key|credential|authorization|cookie|api[_-]?key/i.test(k)) continue;
-    out[k] = typeof v === "string" && v.length > 500 ? v.slice(0, 500) : v;
-  }
-  return Object.keys(out).length ? out : undefined;
-}
-
-// Records a controlled NO-OP. Performs NO infrastructure mutation and calls NO external API.
-export function executeNoop(input: NoopExecuteInput): NoopRecord {
-  const target = String(input.target ?? "").trim();
-  const reason = String(input.reason ?? "").trim();
-  const rec: NoopRecord = {
-    id: noopId(),
-    actionType: "noop",
-    target: target || "(unspecified)",
-    reason: reason || "(none provided)",
-    executed: true,
+// Records a controlled NO-OP via the action journal. Performs NO infrastructure mutation and calls
+// NO external API. Exact-once is enforced upstream by the approval system (double approval → 409
+// before this runs), so the journal never receives a duplicate create for one execution.
+export async function executeNoop(input: NoopExecuteInput): Promise<ActionRecord> {
+  const target = String(input.target ?? "").trim() || "(unspecified)";
+  const reason = String(input.reason ?? "").trim() || "(none provided)";
+  const metadata: Record<string, unknown> = { ...(input.metadata && typeof input.metadata === "object" ? (input.metadata as Record<string, unknown>) : {}) };
+  if (input.expectedVerificationUrl) metadata.verificationUrl = sanitizeUrl(input.expectedVerificationUrl);
+  return createActionRecord({
+    actionName: "ops.noop.execute",
+    category: "noop",
+    executionMode: "noop",
+    target,
+    reason,
     mutated: false,
     dryRun: false,
-    summary: `Controlled NO-OP recorded for "${target || "(unspecified)"}". NO external system was changed, no command ran, no API was called — this proves the approval/audit/exact-once rails only.`,
-    approvalId: input.approvalId ? String(input.approvalId) : undefined,
-    runId: input.runId ? String(input.runId) : undefined,
-    expectedVerificationUrl: input.expectedVerificationUrl ? sanitizeUrl(input.expectedVerificationUrl) : undefined,
-    metadata: sanitizeMeta(input.metadata),
-    generatedAt: nowIso(),
-  };
-  const j = noopJournal();
-  j.unshift(rec);
-  if (j.length > 100) j.length = 100;
-  return rec;
+    executed: true,
+    status: "recorded",
+    approvalId: input.approvalId,
+    runId: input.runId,
+    metadata,
+    summary: `Controlled NO-OP recorded for "${target}". NO external system was changed, no command ran, no API was called — this proves the approval/audit/exact-once rails only.`,
+  });
 }
 
-export function listNoopRecords(limit = 20): NoopRecord[] {
-  return noopJournal().slice(0, Math.max(0, Math.min(limit, 100)));
-}
-
-// Read-only: confirms a no-op record exists and optionally runs ONE allowlisted health check.
+// Read-only: confirms a no-op record exists (from the journal) and optionally runs ONE allowlisted health check.
 export async function verifyNoop(input: { target: string; healthUrl?: string }): Promise<NoopVerifyResult> {
   const target = String(input.target ?? "").trim();
-  const j = noopJournal();
-  const rec = (target ? j.find((r) => r.target === target) : undefined) ?? j[0];
+  const recent = await listRecentActionRecords(100);
+  const rec = (target ? recent.find((r) => r.target === target && r.actionName === "ops.noop.execute") : undefined) ?? recent.find((r) => r.actionName === "ops.noop.execute");
   const checks: BundleCheck[] = [{
     type: "noop-record",
     name: "controlled no-op record",
     status: rec ? "pass" : "unknown",
-    evidence: rec ? `record ${rec.id} found — executed:true, mutated:false, dryRun:false` : "no no-op record found for target",
+    evidence: rec ? `record ${rec.id} found — executed:${rec.executed}, mutated:${rec.mutated}, dryRun:${rec.dryRun}` : "no no-op record found for target",
   }];
   if (input.healthUrl) {
     const c = await checkUrl(input.healthUrl);

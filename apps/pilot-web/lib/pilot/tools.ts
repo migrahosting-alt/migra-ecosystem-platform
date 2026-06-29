@@ -488,7 +488,7 @@ export const TOOLS: Record<string, ToolDef> = {
     description: "Execute a CONTROLLED NO-OP ops action (requires approval). Records a controlled execution to prove the approval/audit/exact-once rails. Performs NO infrastructure mutation, runs NO command, calls NO external API. Provide 'target' and 'reason'; optional 'expectedVerificationUrl', 'metadata'. Returns an execution record with mutated:false.",
     risk: "high",
     parameters: { type: "object", properties: { target: { type: "string" }, reason: { type: "string" }, expectedVerificationUrl: { type: "string" }, metadata: { type: "object" } }, required: ["target", "reason"] },
-    run: async (a) => clip(JSON.stringify(executeNoop({ target: String(a.target ?? ""), reason: String(a.reason ?? ""), expectedVerificationUrl: a.expectedVerificationUrl ? String(a.expectedVerificationUrl) : undefined, metadata: a.metadata }), null, 2)),
+    run: async (a) => clip(JSON.stringify(await executeNoop({ target: String(a.target ?? ""), reason: String(a.reason ?? ""), expectedVerificationUrl: a.expectedVerificationUrl ? String(a.expectedVerificationUrl) : undefined, metadata: a.metadata }), null, 2)),
   },
   "ops.noop.verify": {
     name: "ops.noop.verify",

@@ -1,5 +1,5 @@
-// GET /api/pilot/ops/noop/recent — Phase 11.0/11.2. READ-ONLY recent controlled action records,
-// via the journal abstraction (in-memory default; dormant Postgres when env-gated). No mutation.
+// GET /api/pilot/ops/actions/journal — Phase 11.2. READ-ONLY recent controlled action records
+// from the journal abstraction, with the active storage mode (memory | postgres). No mutation.
 
 import { actionJournalStoreName, listRecentActionRecords } from "../../../../../../lib/pilot/ops-action-journal";
 

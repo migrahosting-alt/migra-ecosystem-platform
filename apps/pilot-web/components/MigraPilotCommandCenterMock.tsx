@@ -857,9 +857,10 @@ function OpsSection() {
   const [noopPending, setNoopPending] = useState<{ runId: string; approvalId: string } | null>(null);
   const [noopResult, setNoopResult] = useState<string | null>(null);
   const [noopRecent, setNoopRecent] = useState<{ id: string; target: string; reason: string; mutated: boolean }[] | null>(null);
+  const [noopStore, setNoopStore] = useState("");
   const [noopVerify, setNoopVerify] = useState<{ status?: string; summary?: string; checks?: { name: string; status: string; evidence: string }[] } | null>(null);
 
-  const loadNoopRecent = () => { fetch("/api/pilot/ops/noop/recent").then((r) => (r.ok ? r.json() : null)).then((d) => { if (d) setNoopRecent(d.records); }).catch(() => {}); };
+  const loadNoopRecent = () => { fetch("/api/pilot/ops/noop/recent").then((r) => (r.ok ? r.json() : null)).then((d) => { if (d) { setNoopRecent(d.records); setNoopStore(d.store); } }).catch(() => {}); };
   useEffect(() => { loadNoopRecent(); }, []);
 
   const requestNoop = async () => {
@@ -1176,7 +1177,7 @@ function OpsSection() {
         )}
         {(noopRecent?.length ?? 0) > 0 && (
           <div style={{ marginTop: 8 }}>
-            <div style={S.rowLeft}>Recent no-ops (in-memory)</div>
+            <div style={S.rowLeft}>Recent no-ops (journal: {noopStore || "memory"})</div>
             {noopRecent!.slice(0, 5).map((r) => <Row key={r.id} left={r.target} right={`mutated:${r.mutated}`} />)}
           </div>
         )}
