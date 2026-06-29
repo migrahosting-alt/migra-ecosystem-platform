@@ -15,6 +15,7 @@ import { buildHealthBundle, buildOpsPlan, buildReport, buildRunbook, checkUrl, e
 import { listOpsActions } from "./ops-action-registry";
 import { checkOpsTarget, listOpsTargets } from "./ops-target-allowlist";
 import { previewServicePreflight, runServicePreflight } from "./ops-service-preflight";
+import { previewEligibility, checkEligibility } from "./ops-eligibility-policy";
 
 const execFileP = promisify(execFile);
 
@@ -512,6 +513,20 @@ export const TOOLS: Record<string, ToolDef> = {
     risk: "read",
     parameters: { type: "object", properties: { targetId: { type: "string" }, actionName: { type: "string" }, serviceName: { type: "string" }, healthUrl: { type: "string" }, expectedText: { type: "string" }, expectedBuildId: { type: "string" }, operatorIntent: { type: "string" }, audience: { type: "string", enum: ["internal", "technical", "executive", "client"] } }, required: ["targetId", "actionName"] },
     run: async (a) => clip(JSON.stringify(await runServicePreflight({ targetId: String(a.targetId ?? ""), actionName: String(a.actionName ?? ""), serviceName: a.serviceName ? String(a.serviceName) : undefined, healthUrl: a.healthUrl ? String(a.healthUrl) : undefined, expectedText: a.expectedText ? String(a.expectedText) : undefined, expectedBuildId: a.expectedBuildId ? String(a.expectedBuildId) : undefined, operatorIntent: a.operatorIntent ? String(a.operatorIntent) : undefined, audience: a.audience as ("internal" | "technical" | "executive" | "client" | undefined) }, new Date().toISOString()), null, 2)),
+  },
+  "ops.eligibility.preview": {
+    name: "ops.eligibility.preview",
+    description: "READ-ONLY. Preview the dev-only action eligibility policy: lists the gates a future real action must satisfy for a target+action. Evaluates nothing, mutates nothing. eligibleForExecution is always false.",
+    risk: "read",
+    parameters: { type: "object", properties: { targetId: { type: "string" }, actionName: { type: "string" } }, required: ["targetId", "actionName"] },
+    run: async (a) => clip(JSON.stringify(previewEligibility({ targetId: String(a.targetId ?? ""), actionName: String(a.actionName ?? "") }), null, 2)),
+  },
+  "ops.eligibility.check": {
+    name: "ops.eligibility.check",
+    description: "READ-ONLY. Evaluate a target+action against the eligibility policy. Returns gates, blockers, warnings, required code-promotion steps / runtime env (NAMES only) / approval policy. eligibleForExecution is ALWAYS false; eligibleForFuturePromotion (separate) is true only when every structural gate passes. Production/unknown/disabled targets and real verbs never promote. No approval card, mutates nothing.",
+    risk: "read",
+    parameters: { type: "object", properties: { targetId: { type: "string" }, actionName: { type: "string" }, serviceName: { type: "string" }, intendedEnvironment: { type: "string" }, requirePostgresBackends: { type: "boolean" }, requireHealthCheck: { type: "boolean" } }, required: ["targetId", "actionName"] },
+    run: async (a) => clip(JSON.stringify(await checkEligibility({ targetId: String(a.targetId ?? ""), actionName: String(a.actionName ?? ""), serviceName: a.serviceName ? String(a.serviceName) : undefined, intendedEnvironment: a.intendedEnvironment ? String(a.intendedEnvironment) : undefined, requirePostgresBackends: a.requirePostgresBackends === true, requireHealthCheck: a.requireHealthCheck === true }, new Date().toISOString()), null, 2)),
   },
   "ops.webhook_sim.preview": {
     name: "ops.webhook_sim.preview",

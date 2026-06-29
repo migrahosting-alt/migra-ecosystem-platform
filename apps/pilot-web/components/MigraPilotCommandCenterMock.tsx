@@ -1055,6 +1055,21 @@ function OpsSection() {
     } catch (e) { setPfResult({ note: (e as Error).message }); } finally { setPfBusy(false); }
   };
 
+  const [elTarget, setElTarget] = useState("dev-sample-service");
+  const [elAction, setElAction] = useState("ops.noop.execute");
+  const [elRequirePg, setElRequirePg] = useState(false);
+  const [elRequireHealth, setElRequireHealth] = useState(false);
+  const [elResult, setElResult] = useState<{ eligibleForExecution?: boolean; eligibleForFuturePromotion?: boolean; status?: string; gates?: ({ name: string; status: string; required: boolean; evidence: string } | string)[]; blockers?: string[]; warnings?: string[]; requiredCodePromotionSteps?: string[]; requiredRuntimeEnv?: string[]; note?: string } | null>(null);
+  const [elBusy, setElBusy] = useState(false);
+  const runEligibility = async (mode: "preview" | "check") => {
+    if (elBusy) return;
+    setElBusy(true); setElResult(null);
+    try {
+      const r = await fetch(`/api/pilot/ops/eligibility${mode === "preview" ? "?mode=preview" : ""}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ targetId: elTarget, actionName: elAction, requirePostgresBackends: elRequirePg, requireHealthCheck: elRequireHealth }) });
+      setElResult(await r.json());
+    } catch (e) { setElResult({ note: (e as Error).message }); } finally { setElBusy(false); }
+  };
+
   const streamNdjson = async (url: string, body: unknown, onEvent: (ev: { type: string; approval?: { runId: string; id: string; toolName: string; risk: string }; delta?: string; message?: { content?: string } }) => void) => {
     const res = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
     if (!res.ok || !res.body) throw new Error(`request failed (${res.status})`);
@@ -1417,6 +1432,36 @@ function OpsSection() {
           </div>
         )}
         <div style={S.muted}>Read-only — composes existing gates, executes nothing. Real ops verbs stay blocked.</div>
+      </Panel>
+      <Panel title="Action eligibility (policy design)">
+        <div style={S.blockedBadge}>POLICY DESIGN ONLY — NO ACTION EXECUTED</div>
+        <div style={S.muted}>Defines when a future dev-only action could be promoted in CODE. eligibleForExecution is always false (no executor). eligibleForFuturePromotion is structural readiness only — never runtime. Production/unknown/disabled targets and real verbs never promote.</div>
+        <div style={S.inputRow}>
+          <input value={elTarget} onChange={(e) => setElTarget(e.target.value)} placeholder="targetId" style={S.composerInput} />
+          <input value={elAction} onChange={(e) => setElAction(e.target.value)} placeholder="actionName" style={S.composerInput} />
+        </div>
+        <div style={{ display: "flex", gap: 12, flexWrap: "wrap", margin: "4px 0" }}>
+          <label style={{ ...S.muted, cursor: "pointer", display: "flex", gap: 6, alignItems: "center" }}><input type="checkbox" checked={elRequirePg} onChange={(e) => setElRequirePg(e.target.checked)} /> require Postgres backends</label>
+          <label style={{ ...S.muted, cursor: "pointer", display: "flex", gap: 6, alignItems: "center" }}><input type="checkbox" checked={elRequireHealth} onChange={(e) => setElRequireHealth(e.target.checked)} /> require health check</label>
+        </div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button onClick={() => runEligibility("preview")} disabled={elBusy} style={{ ...S.sendButton, width: "auto", padding: "0 12px", fontSize: 12, opacity: elBusy ? 0.6 : 1, cursor: elBusy ? "default" : "pointer" }}>Preview eligibility</button>
+          <button onClick={() => runEligibility("check")} disabled={elBusy} style={{ ...S.sendButton, width: "auto", padding: "0 12px", fontSize: 12, opacity: elBusy ? 0.6 : 1, cursor: elBusy ? "default" : "pointer" }}>Check eligibility</button>
+        </div>
+        {elResult && (
+          <div style={{ marginTop: 6 }}>
+            <Row left="eligibleForExecution" right={String(elResult.eligibleForExecution ?? false)} tone="Failed" />
+            {typeof elResult.eligibleForFuturePromotion === "boolean" && <Row left="eligibleForFuturePromotion (future code only)" right={String(elResult.eligibleForFuturePromotion)} tone={elResult.eligibleForFuturePromotion ? "Healthy" : "Failed"} />}
+            {elResult.status && <div style={S.muted}>status: {elResult.status}</div>}
+            {elResult.gates?.map((g, i) => (
+              <div key={i} style={S.muted}>{typeof g === "string" ? `· ${g}` : `${g.required ? "• " : "◦ "}${g.name}: `}{typeof g === "string" ? "" : <><strong>{g.status}</strong> — {g.evidence}</>}</div>
+            ))}
+            {(elResult.blockers?.length ?? 0) > 0 && <div style={S.muted}>blockers: {elResult.blockers!.join("; ")}</div>}
+            {(elResult.requiredCodePromotionSteps?.length ?? 0) > 0 && <div style={S.muted}>code promotion steps: {elResult.requiredCodePromotionSteps!.join("; ")}</div>}
+            {elResult.note && <div style={S.muted}>{elResult.note}</div>}
+          </div>
+        )}
+        <div style={S.muted}>Read-only policy design — no executor, no approval card. Promotion readiness ≠ runtime execution.</div>
       </Panel>
       <Panel title="Internal status marker">
         <div style={S.blockedBadge}>INTERNAL JOURNAL ONLY — NO INFRASTRUCTURE MUTATION</div>
