@@ -11,7 +11,7 @@ import { existsSync } from "node:fs";
 import { visionAnalyze } from "./gateway";
 import { formatHits, ingestBatch, searchKnowledge } from "./knowledge";
 import { imageHealth, imagePreview, imageProviderMode, submitImageJob } from "./image-provider";
-import { buildHealthBundle, buildOpsPlan, buildReport, buildRunbook, checkUrl, executeNoop, hazardLookup, knownTopology, listStatusMarkers, opsHealth, previewHealthBundle, previewReport, previewRunbook, setStatusMarker, verifyDeploy, verifyNoop, verifyPlan, verifyService, verifyStatusMarker, verifyUrl } from "./ops-provider";
+import { buildHealthBundle, buildOpsPlan, buildReport, buildRunbook, checkUrl, executeNoop, hazardLookup, knownTopology, listStatusMarkers, opsHealth, previewHealthBundle, previewReport, previewRunbook, previewWebhookSim, sendWebhookSim, setStatusMarker, verifyDeploy, verifyNoop, verifyPlan, verifyService, verifyStatusMarker, verifyUrl, verifyWebhookSim } from "./ops-provider";
 import { listOpsActions } from "./ops-action-registry";
 
 const execFileP = promisify(execFile);
@@ -482,6 +482,27 @@ export const TOOLS: Record<string, ToolDef> = {
     risk: "read",
     parameters: { type: "object", properties: {} },
     run: async () => clip(JSON.stringify(listOpsActions(), null, 2)),
+  },
+  "ops.webhook_sim.preview": {
+    name: "ops.webhook_sim.preview",
+    description: "READ-ONLY. Validate a dev webhook simulation: checks enabled state, URL allowlist + userinfo, and sanitizes the payload. SENDS NOTHING. Returns a sanitized preview.",
+    risk: "read",
+    parameters: { type: "object", properties: { url: { type: "string" }, payload: { type: "object" } }, required: ["url"] },
+    run: async (a) => clip(JSON.stringify(previewWebhookSim({ url: String(a.url ?? ""), payload: a.payload }), null, 2)),
+  },
+  "ops.webhook_sim.send": {
+    name: "ops.webhook_sim.send",
+    description: "DEV WEBHOOK SIMULATION (requires approval). Sends ONE sanitized POST only if simulation is enabled (PILOT_WEBHOOK_SIM_ENABLED=1) AND the URL is in PILOT_WEBHOOK_SIM_ALLOWED_URLS. externalMutation:false, simulated:true, mutationScope:dev_webhook_simulation — NO infrastructure mutation, no command, no deploy. Secret-like payload keys are stripped; URLs with userinfo refused; response bodies are NEVER returned. Records the result in the action journal.",
+    risk: "high",
+    parameters: { type: "object", properties: { url: { type: "string" }, payload: { type: "object" } }, required: ["url"] },
+    run: async (a) => clip(JSON.stringify(await sendWebhookSim({ url: String(a.url ?? ""), payload: a.payload }), null, 2)),
+  },
+  "ops.webhook_sim.verify": {
+    name: "ops.webhook_sim.verify",
+    description: "READ-ONLY. Verify a dev webhook simulation journal record (by url or recordId) and report its result status. SENDS NOTHING; no response body exposed.",
+    risk: "read",
+    parameters: { type: "object", properties: { url: { type: "string" }, recordId: { type: "string" } } },
+    run: async (a) => clip(JSON.stringify(await verifyWebhookSim({ url: a.url ? String(a.url) : undefined, recordId: a.recordId ? String(a.recordId) : undefined }), null, 2)),
   },
   "ops.status_marker.set": {
     name: "ops.status_marker.set",

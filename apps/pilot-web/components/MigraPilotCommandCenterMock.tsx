@@ -937,6 +937,59 @@ function OpsSection() {
     catch (e) { setSmVerify({ summary: (e as Error).message }); } finally { setSmBusy(false); }
   };
 
+  const [whUrl, setWhUrl] = useState("");
+  const [whPayload, setWhPayload] = useState('{"event":"test"}');
+  const [whBusy, setWhBusy] = useState(false);
+  const [whMsg, setWhMsg] = useState("");
+  const [whPreview, setWhPreview] = useState<string | null>(null);
+  const [whPending, setWhPending] = useState<{ runId: string; approvalId: string } | null>(null);
+  const [whResult, setWhResult] = useState<string | null>(null);
+  const [whRecent, setWhRecent] = useState<{ recordId: string; url: string; status: string; resultStatus?: number; simulated: boolean; externalMutation: boolean }[] | null>(null);
+  const [whEnabled, setWhEnabled] = useState<boolean | null>(null);
+  const [whVerifyUrl, setWhVerifyUrl] = useState("");
+  const [whVerify, setWhVerify] = useState<{ found?: boolean; resultStatus?: number; summary?: string } | null>(null);
+
+  const loadWhRecent = () => { fetch("/api/pilot/ops/webhook/recent").then((r) => (r.ok ? r.json() : null)).then((d) => { if (d) { setWhRecent(d.records); setWhEnabled(d.enabled); } }).catch(() => {}); };
+  useEffect(() => { loadWhRecent(); }, []);
+
+  const parseWhPayload = () => { try { return whPayload.trim() ? JSON.parse(whPayload) : {}; } catch { return null; } };
+  const previewWh = async () => {
+    if (!whUrl.trim() || whBusy) return;
+    const p = parseWhPayload();
+    if (p === null) { setWhPreview("invalid JSON payload"); return; }
+    setWhBusy(true); setWhPreview(null);
+    try { const r = await fetch("/api/pilot/ops/webhook/preview", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ url: whUrl, payload: p }) }); const d = await r.json(); setWhPreview(`url: ${d.url}\nenabled: ${d.enabled} · allowed: ${d.allowed} · willSend: ${d.willSend}\nurlValid: ${d.urlValid}${d.urlReason ? " (" + d.urlReason + ")" : ""}\npayloadValid: ${d.payloadValid} · keys: ${(d.payloadKeys || []).join(", ")} · ${d.payloadBytes}B\n${d.note}`); }
+    catch (e) { setWhPreview("error: " + (e as Error).message); } finally { setWhBusy(false); }
+  };
+  const requestWh = async () => {
+    if (!whUrl.trim() || whBusy) return;
+    const p = parseWhPayload();
+    if (p === null) { setWhMsg("invalid JSON payload"); return; }
+    setWhBusy(true); setWhResult(null); setWhPending(null); setWhMsg("requesting approval…");
+    try {
+      let pending: { runId: string; approvalId: string } | null = null;
+      const msg = `Call ops.webhook_sim.send with url "${whUrl.replace(/"/g, "")}" and payload ${JSON.stringify(p)}.`;
+      await streamNdjson("/api/pilot/chat", { message: msg }, (ev) => { if (ev.type === "approval.required" && ev.approval) pending = { runId: ev.approval.runId, approvalId: ev.approval.id }; });
+      if (pending) { setWhPending(pending); setWhMsg("⏸ webhook simulation needs approval (DEV SIMULATION ONLY)"); } else setWhMsg("no approval was requested — try again");
+    } catch (e) { setWhMsg("error: " + (e as Error).message); } finally { setWhBusy(false); }
+  };
+  const decideWh = async (decision: "approve" | "deny") => {
+    if (!whPending || whBusy) return;
+    setWhBusy(true); const p = whPending; setWhPending(null);
+    try {
+      let m = ""; let t = "";
+      await streamNdjson(`/api/pilot/runs/${p.runId}/approve`, { approvalId: p.approvalId, decision }, (ev) => { if (ev.type === "token") t += ev.delta ?? ""; if (ev.type === "message") m = ev.message?.content ?? m; });
+      if (decision === "deny") setWhMsg("cancelled — nothing sent");
+      else { setWhResult(m || t || "(simulation result — see chat)"); setWhMsg("✓ webhook simulation executed (externalMutation:false)"); loadWhRecent(); }
+    } catch (e) { setWhMsg("error: " + (e as Error).message); } finally { setWhBusy(false); }
+  };
+  const verifyWh = async () => {
+    if (!whVerifyUrl.trim() || whBusy) return;
+    setWhBusy(true); setWhVerify(null);
+    try { const r = await fetch("/api/pilot/ops/webhook/verify", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ url: whVerifyUrl }) }); setWhVerify(await r.json()); }
+    catch (e) { setWhVerify({ summary: (e as Error).message }); } finally { setWhBusy(false); }
+  };
+
   const streamNdjson = async (url: string, body: unknown, onEvent: (ev: { type: string; approval?: { runId: string; id: string; toolName: string; risk: string }; delta?: string; message?: { content?: string } }) => void) => {
     const res = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
     if (!res.ok || !res.body) throw new Error(`request failed (${res.status})`);
@@ -1273,6 +1326,36 @@ function OpsSection() {
         </div>
         {smVerify && <div style={S.muted}>verify: {smVerify.found ? `found (${smVerify.markerStatus})` : "not found"} — {smVerify.summary}</div>}
         <div style={S.muted}>Setting a marker requires approval + runs exactly once. mutated:true but externalMutation:false — journal only, no infrastructure change.</div>
+      </Panel>
+      <Panel title="Dev webhook simulation">
+        <div style={S.blockedBadge}>DEV SIMULATION ONLY — NO INFRASTRUCTURE MUTATION{whEnabled === false ? " · disabled" : ""}</div>
+        <div style={S.inputRow}><span style={S.promptIcon}>🌐</span><input value={whUrl} onChange={(e) => setWhUrl(e.target.value)} placeholder="allowlisted dev webhook URL" style={S.composerInput} /></div>
+        <textarea value={whPayload} onChange={(e) => setWhPayload(e.target.value)} placeholder='{"event":"test"}' style={{ ...S.composerInput, minHeight: 56, fontFamily: "monospace", resize: "vertical", padding: 8 }} />
+        <div style={S.inputRow}>
+          <button onClick={previewWh} disabled={whBusy} style={{ ...S.sendButton, width: "auto", padding: "0 12px", fontSize: 12, opacity: whBusy ? 0.6 : 1, cursor: whBusy ? "default" : "pointer" }}>Preview</button>
+          <button onClick={requestWh} disabled={whBusy} style={{ ...S.sendButton, width: "auto", padding: "0 12px", fontSize: 12, opacity: whBusy ? 0.6 : 1, cursor: whBusy ? "default" : "pointer" }}>Send simulation</button>
+        </div>
+        {whPreview && <pre style={S.approvalArgs}>{whPreview}</pre>}
+        {whMsg && <div style={S.muted}>{whMsg}</div>}
+        {whPending && (
+          <div style={S.approvalActions}>
+            <button onClick={() => decideWh("approve")} disabled={whBusy} style={S.approveBtn}>Approve (simulate)</button>
+            <button onClick={() => decideWh("deny")} disabled={whBusy} style={S.denyBtn}>Cancel</button>
+          </div>
+        )}
+        {whResult && <pre style={S.approvalArgs}>{whResult}</pre>}
+        {(whRecent?.length ?? 0) > 0 && (
+          <div style={{ marginTop: 8 }}>
+            <div style={S.rowLeft}>Recent simulations</div>
+            {whRecent!.slice(0, 5).map((r) => <Row key={r.recordId} left={r.url} right={`${r.status}${r.resultStatus ? " · " + r.resultStatus : ""} · ext:${r.externalMutation}`} tone={r.externalMutation ? "Failed" : r.status === "recorded" ? "Succeeded" : undefined} />)}
+          </div>
+        )}
+        <div style={{ ...S.inputRow, marginTop: 8 }}>
+          <input value={whVerifyUrl} onChange={(e) => setWhVerifyUrl(e.target.value)} placeholder="verify simulation by URL…" style={S.composerInput} />
+          <button onClick={verifyWh} disabled={whBusy} style={{ ...S.sendButton, width: "auto", padding: "0 12px", fontSize: 12 }}>Verify</button>
+        </div>
+        {whVerify && <div style={S.muted}>verify: {whVerify.found ? `found (${whVerify.resultStatus ?? "n/a"})` : "not found"} — {whVerify.summary}</div>}
+        <div style={S.muted}>Disabled by default. Allowlisted URLs only (PILOT_WEBHOOK_SIM_ALLOWED_URLS), userinfo rejected, secrets stripped, response bodies never returned. externalMutation:false.</div>
       </Panel>
     </section>
   );

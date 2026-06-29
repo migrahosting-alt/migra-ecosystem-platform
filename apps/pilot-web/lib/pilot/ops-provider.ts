@@ -10,7 +10,7 @@
 
 import { readFile, readdir } from "node:fs/promises";
 import { resolve } from "node:path";
-import { createActionRecord, listRecentActionRecords, type ActionRecord } from "./ops-action-journal";
+import { createActionRecord, listRecentActionRecords, type ActionRecord, type ActionStatus } from "./ops-action-journal";
 
 const PROVIDER = (process.env.PILOT_OPS_PROVIDER ?? "disabled").toLowerCase();
 const ALLOWED_RAW = (process.env.PILOT_OPS_ALLOWED_HEALTH_URLS ?? "").split(",").map((s) => s.trim()).filter(Boolean);
@@ -1127,6 +1127,188 @@ export async function verifyStatusMarker(input: { target: string; status?: strin
     externalMutation: false,
     status: rec ? "pass" : "unknown",
     summary: rec ? `Status marker found (status "${rec.metadata?.markerStatus}", internal_journal_only, externalMutation:false).` : "No matching status marker found — nothing was recorded for this target/status.",
+    generatedAt: nowIso(),
+  };
+}
+
+// ---- Dev-only webhook simulation harness (Phase 11.4) — DISABLED by default, no infra mutation ----
+// Sends ONE sanitized POST only to an explicitly allowlisted dev URL when explicitly enabled.
+// externalMutation:false, simulated:true. Never returns response bodies; never logs/stores secrets.
+function webhookSimEnabled(): boolean {
+  const v = process.env.PILOT_WEBHOOK_SIM_ENABLED;
+  return v === "1" || v === "true";
+}
+function webhookTimeoutMs(): number {
+  return Number(process.env.PILOT_WEBHOOK_SIM_TIMEOUT_MS) || 10000;
+}
+function webhookAllowedList(): string[] {
+  return (process.env.PILOT_WEBHOOK_SIM_ALLOWED_URLS ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+}
+function normWebhookUrl(u: string): string {
+  return String(u).trim().replace(/\/+$/, "").toLowerCase();
+}
+function isWebhookAllowed(url: string): boolean {
+  return new Set(webhookAllowedList().map(normWebhookUrl)).has(normWebhookUrl(url));
+}
+function validateWebhookUrl(url: string): { ok: boolean; reason?: string } {
+  let u: URL;
+  try { u = new URL(url); } catch { return { ok: false, reason: "invalid URL" }; }
+  if (u.username || u.password) return { ok: false, reason: "URL must not contain userinfo (user:pass@)" };
+  if (!isWebhookAllowed(url)) return { ok: false, reason: "URL not in PILOT_WEBHOOK_SIM_ALLOWED_URLS allowlist" };
+  return { ok: true };
+}
+
+const WEBHOOK_SECRET_KEY_RE = /password|token|api[_-]?key|secret|authorization|credential|private[_-]?key|cookie/i;
+function deepStripSecrets(v: unknown, depth = 0): unknown {
+  if (depth > 6) return "[depth-capped]";
+  if (Array.isArray(v)) return v.slice(0, 200).map((x) => deepStripSecrets(x, depth + 1));
+  if (v && typeof v === "object") {
+    const o: Record<string, unknown> = {};
+    for (const [k, val] of Object.entries(v as Record<string, unknown>)) {
+      if (WEBHOOK_SECRET_KEY_RE.test(k)) continue;
+      o[k] = deepStripSecrets(val, depth + 1);
+    }
+    return o;
+  }
+  if (typeof v === "string") return v.length > 4000 ? v.slice(0, 4000) + "…" : v;
+  return v;
+}
+function sanitizeWebhookPayload(payload: unknown): { ok: boolean; payload?: Record<string, unknown> | unknown[]; error?: string } {
+  if (payload === undefined || payload === null) return { ok: true, payload: {} };
+  if (typeof payload !== "object") return { ok: false, error: "payload must be a JSON object/array" };
+  if (ArrayBuffer.isView(payload) || payload instanceof ArrayBuffer) return { ok: false, error: "binary/blob payloads are not allowed" };
+  const stripped = deepStripSecrets(payload) as Record<string, unknown> | unknown[];
+  const size = Buffer.byteLength(JSON.stringify(stripped));
+  if (size > 16384) return { ok: false, error: `payload too large (${size} bytes, max 16384)` };
+  return { ok: true, payload: stripped };
+}
+
+export interface WebhookSimResult {
+  actionName: "ops.webhook_sim.send";
+  url: string; // sanitized
+  simulated: true;
+  externalMutation: false;
+  mutationScope: "dev_webhook_simulation";
+  ok: boolean;
+  status: string; // disabled | refused | sent | error
+  resultStatus?: number;
+  latencyMs?: number;
+  summary: string;
+  recordId?: string;
+  generatedAt: string;
+}
+
+async function recordWebhook(url: string, status: ActionStatus, resultSummary: string, extra: { resultStatus?: number; latencyMs?: number; payloadKeys?: string[] }): Promise<ActionRecord> {
+  return createActionRecord({
+    actionName: "ops.webhook_sim.send",
+    category: "custom",
+    executionMode: "dev_simulation",
+    target: url,
+    reason: resultSummary,
+    mutated: true,
+    dryRun: false,
+    executed: true,
+    status,
+    metadata: { url, simulated: true, externalMutation: false, mutationScope: "dev_webhook_simulation", ...extra },
+    summary: `DEV webhook simulation → ${url}: ${resultSummary}. simulated:true, externalMutation:false, mutationScope:dev_webhook_simulation. NO infrastructure changed; no response body stored.`,
+  });
+}
+
+export function previewWebhookSim(input: { url: string; payload?: unknown }): { url: string; enabled: boolean; allowed: boolean; urlValid: boolean; urlReason?: string; payloadValid: boolean; payloadError?: string; payloadKeys: string[]; payloadBytes: number; willSend: boolean; note: string } {
+  const url = sanitizeUrl(input.url);
+  const enabled = webhookSimEnabled();
+  const v = validateWebhookUrl(input.url);
+  const san = sanitizeWebhookPayload(input.payload);
+  const payloadKeys = san.ok ? (Array.isArray(san.payload) ? [] : Object.keys(san.payload as Record<string, unknown>).slice(0, 50)) : [];
+  return {
+    url, enabled, allowed: isWebhookAllowed(input.url), urlValid: v.ok, urlReason: v.reason,
+    payloadValid: san.ok, payloadError: san.error, payloadKeys,
+    payloadBytes: san.ok ? Buffer.byteLength(JSON.stringify(san.payload)) : 0,
+    willSend: enabled && v.ok && san.ok,
+    note: "PREVIEW ONLY — validates URL allowlist + sanitizes payload; SENDS NOTHING.",
+  };
+}
+
+export async function sendWebhookSim(input: { url: string; payload?: unknown; approvalId?: string; runId?: string }): Promise<WebhookSimResult> {
+  const sanitizedUrl = sanitizeUrl(input.url);
+  const mk = (ok: boolean, status: string, summary: string, rec?: ActionRecord, resultStatus?: number, latencyMs?: number): WebhookSimResult => ({
+    actionName: "ops.webhook_sim.send", url: sanitizedUrl, simulated: true, externalMutation: false, mutationScope: "dev_webhook_simulation",
+    ok, status, resultStatus, latencyMs, summary, recordId: rec?.id, generatedAt: rec?.createdAt ?? nowIso(),
+  });
+  if (!webhookSimEnabled()) {
+    const rec = await recordWebhook(sanitizedUrl, "blocked", "refused: simulation disabled", {});
+    return mk(false, "disabled", "webhook simulation is disabled (set PILOT_WEBHOOK_SIM_ENABLED=1)", rec);
+  }
+  const v = validateWebhookUrl(input.url);
+  if (!v.ok) {
+    const rec = await recordWebhook(sanitizedUrl, "blocked", `refused: ${v.reason}`, {});
+    return mk(false, "refused", v.reason ?? "refused", rec);
+  }
+  const san = sanitizeWebhookPayload(input.payload);
+  if (!san.ok) {
+    const rec = await recordWebhook(sanitizedUrl, "blocked", `refused: ${san.error}`, {});
+    return mk(false, "refused", san.error ?? "payload rejected", rec);
+  }
+  const payloadKeys = Array.isArray(san.payload) ? [] : Object.keys(san.payload as Record<string, unknown>).slice(0, 50);
+  const t0 = Date.now();
+  try {
+    const res = await fetch(input.url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(san.payload), redirect: "manual", signal: AbortSignal.timeout(webhookTimeoutMs()) });
+    await res.text().catch(() => ""); // consume + DISCARD — no response body is ever returned/stored
+    const latencyMs = Date.now() - t0;
+    const okHttp = res.status < 500;
+    const rec = await recordWebhook(sanitizedUrl, okHttp ? "recorded" : "failed", `HTTP ${res.status}`, { resultStatus: res.status, latencyMs, payloadKeys });
+    return mk(okHttp, okHttp ? "sent" : "error", `simulated POST → HTTP ${res.status} in ${latencyMs}ms`, rec, res.status, latencyMs);
+  } catch (e) {
+    const latencyMs = Date.now() - t0;
+    const msg = scrub(e instanceof Error ? e.message : "request failed", input.url);
+    const rec = await recordWebhook(sanitizedUrl, "failed", `request failed: ${msg}`, { latencyMs });
+    return mk(false, "error", `simulated POST failed: ${msg}`, rec, undefined, latencyMs);
+  }
+}
+
+export interface WebhookSimSummary {
+  recordId: string;
+  url: string;
+  status: string;
+  resultStatus?: number;
+  simulated: boolean;
+  externalMutation: boolean;
+  createdAt: string;
+}
+export async function listWebhookSimRecords(limit = 20): Promise<WebhookSimSummary[]> {
+  const recent = await listRecentActionRecords(200);
+  return recent
+    .filter((r) => r.actionName === "ops.webhook_sim.send")
+    .slice(0, Math.max(0, Math.min(limit, 100)))
+    .map((r) => ({
+      recordId: r.id,
+      url: r.target,
+      status: r.status,
+      resultStatus: typeof r.metadata?.resultStatus === "number" ? (r.metadata.resultStatus as number) : undefined,
+      simulated: r.metadata?.simulated === true,
+      externalMutation: r.metadata?.externalMutation === true,
+      createdAt: r.createdAt,
+    }));
+}
+
+export async function verifyWebhookSim(input: { url?: string; recordId?: string }): Promise<{ verificationType: "webhook_sim"; found: boolean; recordId?: string; url?: string; resultStatus?: number; simulated: true; externalMutation: false; status: VerifyStatus; summary: string; generatedAt: string }> {
+  const recent = await listRecentActionRecords(200);
+  const webhooks = recent.filter((r) => r.actionName === "ops.webhook_sim.send");
+  const rec = input.recordId
+    ? webhooks.find((r) => r.id === input.recordId)
+    : input.url
+      ? webhooks.find((r) => r.target === sanitizeUrl(input.url as string))
+      : webhooks[0];
+  return {
+    verificationType: "webhook_sim",
+    found: !!rec,
+    recordId: rec?.id,
+    url: rec?.target,
+    resultStatus: typeof rec?.metadata?.resultStatus === "number" ? (rec.metadata.resultStatus as number) : undefined,
+    simulated: true,
+    externalMutation: false,
+    status: rec ? "pass" : "unknown",
+    summary: rec ? `Webhook simulation record found (${rec.metadata?.resultStatus ?? rec.status}, simulated:true, externalMutation:false). No response body stored.` : "No webhook simulation record found.",
     generatedAt: nowIso(),
   };
 }

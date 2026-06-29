@@ -8,7 +8,7 @@
 // Entries are pure data (no secrets). `requiredEnv` lists env var NAMES only — never values.
 
 export type OpsActionCategory = "noop" | "service" | "deploy" | "dns" | "billing" | "database" | "verification" | "custom";
-export type OpsExecutionMode = "noop" | "dry_run" | "disabled" | "internal_journal" | "real";
+export type OpsExecutionMode = "noop" | "dry_run" | "disabled" | "internal_journal" | "dev_simulation" | "real";
 
 export interface OpsActionEntry {
   actionName: string;
@@ -61,6 +61,21 @@ export const OPS_ACTION_REGISTRY: readonly OpsActionEntry[] = [
     prerequisites: ["A target, a marker status, and a reason."],
     hazards: [],
     verificationRecommendations: ["ops.status_marker.verify", "ops.status_marker.list"],
+  },
+  {
+    actionName: "ops.webhook_sim.send",
+    category: "custom",
+    enabled: true,
+    executionMode: "dev_simulation",
+    riskLevel: "medium",
+    requiresApproval: true,
+    description: "DEV WEBHOOK SIMULATION — send one sanitized POST to an explicitly allowlisted dev endpoint (disabled by default). Proves the outbound rail; performs NO infrastructure mutation. externalMutation:false, simulated:true.",
+    expectedEffect: "Send one sanitized POST to an explicitly allowlisted dev simulation endpoint; no infrastructure mutation.",
+    allowedTargets: ["(allowlisted URLs via PILOT_WEBHOOK_SIM_ALLOWED_URLS)"],
+    requiredEnv: ["PILOT_WEBHOOK_SIM_ENABLED", "PILOT_WEBHOOK_SIM_ALLOWED_URLS"],
+    prerequisites: ["PILOT_WEBHOOK_SIM_ENABLED=1 and the target URL present in PILOT_WEBHOOK_SIM_ALLOWED_URLS."],
+    hazards: ["Disabled by default; non-allowlisted URLs and URLs with userinfo are refused; response bodies and secrets are never stored."],
+    verificationRecommendations: ["ops.webhook_sim.verify", "ops.webhook_sim.preview"],
   },
   {
     actionName: "ops.service.restart",
