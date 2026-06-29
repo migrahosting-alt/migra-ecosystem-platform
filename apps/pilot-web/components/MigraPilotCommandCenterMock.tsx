@@ -1023,6 +1023,21 @@ function OpsSection() {
     try { const r = await fetch("/api/pilot/ops/markers/history", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ target: smTarget }) }); const d = await r.json(); setMtHistory(d.history); } catch { setMtHistory([]); }
   };
 
+  const [tgMode, setTgMode] = useState("");
+  const [tgTargets, setTgTargets] = useState<{ targetId: string; label: string; environment: string; enabled: boolean; riskLevel: string; allowedActionNames: string[] }[] | null>(null);
+  const [tgCheckTarget, setTgCheckTarget] = useState("dev-sample-service");
+  const [tgCheckAction, setTgCheckAction] = useState("ops.service.restart");
+  const [tgResult, setTgResult] = useState<{ eligible?: boolean; reason?: string; environment?: string; isRealAction?: boolean; requiredPrechecks?: string[]; requiredPostchecks?: string[]; hazards?: string[] } | null>(null);
+  const [tgBusy, setTgBusy] = useState(false);
+
+  useEffect(() => { fetch("/api/pilot/ops/targets").then((r) => (r.ok ? r.json() : null)).then((d) => { if (d) { setTgTargets(d.targets); setTgMode(d.mode); } }).catch(() => {}); }, []);
+  const checkTargetUi = async () => {
+    if (tgBusy) return;
+    setTgBusy(true); setTgResult(null);
+    try { const r = await fetch("/api/pilot/ops/targets/check", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ targetId: tgCheckTarget, actionName: tgCheckAction }) }); setTgResult(await r.json()); }
+    catch (e) { setTgResult({ reason: (e as Error).message }); } finally { setTgBusy(false); }
+  };
+
   const streamNdjson = async (url: string, body: unknown, onEvent: (ev: { type: string; approval?: { runId: string; id: string; toolName: string; risk: string }; delta?: string; message?: { content?: string } }) => void) => {
     const res = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
     if (!res.ok || !res.body) throw new Error(`request failed (${res.status})`);
@@ -1326,6 +1341,31 @@ function OpsSection() {
           </div>
         ))}
         <div style={S.muted}>No execute buttons are offered for disabled actions. Only the controlled no-op above is enabled.</div>
+      </Panel>
+      <Panel title="Target allowlist (eligibility gate)">
+        <div style={S.blockedBadge}>TARGET GATE ONLY — NO ACTION EXECUTED{tgMode ? ` · mode: ${tgMode}` : ""}</div>
+        <div style={S.muted}>The hard gate every future real ops action must pass. eligible is always false in this phase; production targets are never eligible; unknown/disabled targets are ineligible.</div>
+        {tgTargets === null && <div style={S.muted}>Loading…</div>}
+        {tgTargets?.map((t) => (
+          <div key={t.targetId} style={{ marginTop: 8 }}>
+            <Row left={t.targetId} right={`${t.environment} · ${t.enabled ? "enabled" : "disabled"}`} tone={t.enabled ? undefined : "Failed"} />
+            <div style={S.muted}>{t.label} · risk {t.riskLevel} · allowed: {t.allowedActionNames.length ? t.allowedActionNames.join(", ") : "(none)"}</div>
+          </div>
+        ))}
+        <div style={S.inputRow}>
+          <input value={tgCheckTarget} onChange={(e) => setTgCheckTarget(e.target.value)} placeholder="targetId" style={S.composerInput} />
+          <input value={tgCheckAction} onChange={(e) => setTgCheckAction(e.target.value)} placeholder="actionName" style={S.composerInput} />
+          <button onClick={checkTargetUi} disabled={tgBusy} style={{ ...S.sendButton, width: "auto", padding: "0 12px", fontSize: 12, opacity: tgBusy ? 0.6 : 1, cursor: tgBusy ? "default" : "pointer" }}>Check eligibility</button>
+        </div>
+        {tgResult && (
+          <div style={{ marginTop: 6 }}>
+            <Row left="eligible" right={String(tgResult.eligible)} tone="Failed" />
+            <div style={S.muted}>{tgResult.reason}</div>
+            {(tgResult.requiredPrechecks?.length ?? 0) > 0 && <div style={S.muted}>prechecks: {tgResult.requiredPrechecks!.join("; ")}</div>}
+            {(tgResult.hazards?.length ?? 0) > 0 && <div style={S.muted}>hazards: {tgResult.hazards!.join("; ")}</div>}
+          </div>
+        )}
+        <div style={S.muted}>Read-only gate — no real action executes. Real verbs stay disabled in the registry.</div>
       </Panel>
       <Panel title="Internal status marker">
         <div style={S.blockedBadge}>INTERNAL JOURNAL ONLY — NO INFRASTRUCTURE MUTATION</div>

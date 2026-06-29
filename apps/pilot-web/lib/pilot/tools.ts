@@ -13,6 +13,7 @@ import { formatHits, ingestBatch, searchKnowledge } from "./knowledge";
 import { imageHealth, imagePreview, imageProviderMode, submitImageJob } from "./image-provider";
 import { buildHealthBundle, buildOpsPlan, buildReport, buildRunbook, checkUrl, executeNoop, hazardLookup, knownTopology, listStatusMarkers, opsHealth, previewHealthBundle, previewReport, previewRunbook, previewWebhookSim, sendWebhookSim, setStatusMarker, statusMarkerHistory, transitionStatusMarker, verifyDeploy, verifyNoop, verifyPlan, verifyService, verifyStatusMarker, verifyUrl, verifyWebhookSim } from "./ops-provider";
 import { listOpsActions } from "./ops-action-registry";
+import { checkOpsTarget, listOpsTargets } from "./ops-target-allowlist";
 
 const execFileP = promisify(execFile);
 
@@ -475,6 +476,20 @@ export const TOOLS: Record<string, ToolDef> = {
       if (!r.matches.length) return `${r.detail} for "${r.query}"`;
       return clip(`${r.detail} for "${r.query}":\n` + r.matches.map((m) => `• [${m.doc}] ${m.heading}: ${m.snippet}`).join("\n"));
     },
+  },
+  "ops.targets.list": {
+    name: "ops.targets.list",
+    description: "READ-ONLY. List the dev-only ops target allowlist (the eligibility gate future real actions must pass): targets, environment, enabled, allowed/denied actions, prechecks/postchecks, hazards. Sanitized; production targets are never eligible; nothing executes.",
+    risk: "read",
+    parameters: { type: "object", properties: {} },
+    run: async () => clip(JSON.stringify(listOpsTargets(), null, 2)),
+  },
+  "ops.targets.check": {
+    name: "ops.targets.check",
+    description: "READ-ONLY. Check whether a target + action would pass the eligibility gate. Returns found/enabled/environment, allowed/denied, missing preconditions, prechecks/postchecks, hazards, and eligibility — which is ALWAYS eligible:false in this phase (no real action executes).",
+    risk: "read",
+    parameters: { type: "object", properties: { targetId: { type: "string" }, actionName: { type: "string" } }, required: ["targetId", "actionName"] },
+    run: async (a) => clip(JSON.stringify(checkOpsTarget(String(a.targetId ?? ""), String(a.actionName ?? ""), new Date().toISOString()), null, 2)),
   },
   "ops.actions.list": {
     name: "ops.actions.list",

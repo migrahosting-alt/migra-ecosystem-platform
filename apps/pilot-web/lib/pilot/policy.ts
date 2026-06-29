@@ -81,6 +81,7 @@ export function classifyPilotAction(name: string, args: Record<string, unknown> 
   if (OPS_VERIFY.has(name)) return mk("safe_read", "read-only post-action verification (no mutation)");
   if (isRegistryDisabledAction(name)) return mk("blocked", registryDisabledReason(name) ?? "registered but DISABLED in the controlled action registry — cannot execute");
   if (name === "ops.actions.list") return mk("safe_read", "lists the controlled action registry (read-only)");
+  if (name === "ops.targets.list" || name === "ops.targets.check") return mk("safe_read", "reads the dev ops target allowlist gate (read-only); executes nothing");
   if (name === "ops.webhook_sim.send") return mk("requires_approval", "DEV WEBHOOK SIMULATION — sends one sanitized POST to an allowlisted dev URL; no infrastructure mutation", "Send one sanitized POST to an explicitly allowlisted dev simulation endpoint; no infrastructure mutation.");
   if (name === "ops.webhook_sim.preview" || name === "ops.webhook_sim.verify") return mk("safe_read", "webhook simulation preview/verify (read-only); sends nothing");
   if (name === "ops.status_marker.set") return mk("requires_approval", "INTERNAL JOURNAL ONLY — records an ops status marker; no infrastructure mutation, no command, no external API", "Record an internal ops status marker only; no infrastructure mutation.");
