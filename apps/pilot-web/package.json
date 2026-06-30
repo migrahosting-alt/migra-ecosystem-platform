@@ -1,0 +1,25 @@
+{
+  "name": "pilot-web",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev -p 3399",
+    "build": "next build",
+    "start": "next start -p 3399",
+    "pilot:redaction:test": "npx --yes tsx scripts/pilot/verify-redaction.ts"
+  },
+  "dependencies": {
+    "next": "^15.5.19",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "react-markdown": "^10.1.0",
+    "react-syntax-highlighter": "^16.1.0",
+    "remark-gfm": "^4.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.1",
+    "@types/react": "^18.3.12",
+    "@types/react-syntax-highlighter": "^15.5.13",
+    "typescript": "^5.9.3"
+  }
+}
