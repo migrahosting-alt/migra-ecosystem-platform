@@ -6,7 +6,8 @@
     "dev": "next dev -p 3399",
     "build": "next build",
     "start": "next start -p 3399",
-    "pilot:redaction:test": "npx --yes tsx scripts/pilot/verify-redaction.ts"
+    "pilot:redaction:test": "npx --yes tsx scripts/pilot/verify-redaction.ts",
+    "pilot:safety:verify": "npx --yes tsx scripts/pilot/verify-safety-invariants.ts"
   },
   "dependencies": {
     "next": "^15.5.19",
