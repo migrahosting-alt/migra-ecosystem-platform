@@ -170,6 +170,7 @@ Until all 13 are cleared, `eligibleForExecution` stays hard-`false` and no execu
 
 - **12.6 — Executor lock design** (push ops-safety depth): design the per-target/action lock storage +
   acquisition/expiry semantics referenced in §2 step 9 and §7 promotion gate 7.
+  → Now specified in [`ops-executor-lock-design-phase-12-6.md`](./ops-executor-lock-design-phase-12-6.md).
 - **Real SDXL endpoint live test** (push image generation): wire the already-hardened image adapter to a
   real endpoint (separate track from ops execution).
 
