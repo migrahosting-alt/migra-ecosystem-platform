@@ -3,6 +3,7 @@
 // Run: npx --yes tsx scripts/pilot/verify-redaction.ts   (or: npm run pilot:redaction:test)
 
 import { redactPilotValue, redactPilotJson, redactString, isSensitiveKey } from "../../lib/pilot/redaction";
+import { buildReportExportPreview } from "../../lib/pilot/report-export";
 
 // --- FAKE values only — never real secrets ---
 const FAKE = {
@@ -105,6 +106,20 @@ const redDiag: any = redactPilotValue(diagShaped);
 ok(redDiag.apiKey === "[REDACTED]", "diagnostics-shaped: apiKey redacted");
 ok(redDiag.status === "disabled" && redDiag.provider === "sdxl" && redDiag.timeoutMs === 60000 && redDiag.reachable === false, "diagnostics-shaped: non-sensitive diagnostic fields readable");
 ok(!redactPilotJson(diagShaped).includes("fakepass") && !redactPilotJson(diagShaped).includes(FAKE.stripe), "diagnostics-shaped: no fake-secret literal in serialized diagnostics");
+
+// 16. Phase 12.10 — report export preview is copy-safe and fully redacted in every format
+const exportReport = { title: "incident", target: "voip-core", status: "draft",
+  evidence: [{ type: "diag", title: "db", summary: `connect ${FAKE.dbUrl}`, apiKey: FAKE.stripe }],
+  authorization: FAKE.bearer, privateKey: FAKE_PEM };
+for (const fmt of ["markdown", "json", "text"] as const) {
+  const ex = buildReportExportPreview({ report: exportReport, format: fmt, title: "incident" }, new Date(0).toISOString());
+  const leaks = [FAKE.stripe, "fakepass", "fake_bearer_token_123", FAKE.pemBody].filter((s) => ex.content.includes(s));
+  ok(ex.copySafe === true && ex.executed === false && ex.eligibleForExecution === false && ex.content.length > 0 && leaks.length === 0,
+    `export(${fmt}): copySafe, no executor, no secret literal in content`);
+}
+const exMd = buildReportExportPreview({ report: exportReport, format: "markdown", title: "incident" }, new Date(0).toISOString());
+ok(exMd.content.includes("# incident") && exMd.content.includes("voip-core") && exMd.redactions.sensitiveFieldsRemoved > 0,
+  "export(markdown): readable title/target retained + redaction counts recorded");
 
 console.log("");
 if (failures.length) { console.error(`REDACTION TESTS FAILED (${failures.length}/${checks}):`); failures.forEach((f) => console.error("  FAIL  " + f)); process.exit(1); }

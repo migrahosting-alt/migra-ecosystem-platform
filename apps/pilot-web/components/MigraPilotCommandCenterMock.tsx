@@ -823,6 +823,17 @@ function OpsSection() {
     try { const r = await fetch("/api/pilot/ops/report/generate", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(rptBody()) }); setRptResult(await r.json()); }
     catch (e) { setRptResult({ error: (e as Error).message }); } finally { setRptBusy(false); }
   };
+  const [rptExportFmt, setRptExportFmt] = useState("markdown");
+  const [rptExport, setRptExport] = useState<{ copySafe?: boolean; content?: string; blockedReason?: string; redactions?: { sensitiveFieldsRemoved?: number; urlCredsRedacted?: number; riskPatternsDetected?: number; unsafeOutputBlocked?: boolean } } | null>(null);
+  const exportReportUi = async () => {
+    if (!rptTarget.trim() || rptBusy) return;
+    setRptBusy(true); setRptExport(null);
+    try {
+      const body = rptResult && !rptResult.error ? { report: rptResult, format: rptExportFmt, title: rptTitle || rptTarget } : { ...rptBody(), format: rptExportFmt };
+      const r = await fetch("/api/pilot/ops/report/export/preview", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+      setRptExport(await r.json());
+    } catch (e) { setRptExport({ blockedReason: (e as Error).message }); } finally { setRptBusy(false); }
+  };
 
   const [hbTarget, setHbTarget] = useState("");
   const [hbService, setHbService] = useState("");
@@ -1287,7 +1298,26 @@ function OpsSection() {
             {(rptResult.limitations?.length ?? 0) > 0 && <div style={S.muted}>limitations: {rptResult.limitations!.join(" · ")}</div>}
           </div>
         ))}
-        <div style={S.muted}>Read-only evidence report — grounded docs + your inputs only. Unknowns are marked, not invented. Client/executive views redact internal detail.</div>
+        <div style={{ marginTop: 6, borderTop: "1px solid #1e293b", paddingTop: 6 }}>
+          <div style={S.blockedBadge}>EXPORT PREVIEW ONLY — REDACTED · NO FILE WRITTEN</div>
+          <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
+            <select value={rptExportFmt} onChange={(e) => setRptExportFmt(e.target.value)} style={{ ...S.composerInput, flex: "0 0 110px", cursor: "pointer" }}>
+              <option value="markdown">markdown</option>
+              <option value="json">json</option>
+              <option value="text">text</option>
+            </select>
+            <button onClick={exportReportUi} disabled={rptBusy} style={{ ...S.sendButton, width: "auto", padding: "0 12px", fontSize: 12, opacity: rptBusy ? 0.6 : 1, cursor: rptBusy ? "default" : "pointer" }}>Export preview</button>
+          </div>
+          {rptExport && (
+            <div style={{ marginTop: 6 }}>
+              <Row left="copySafe" right={String(rptExport.copySafe ?? false)} tone={rptExport.copySafe ? "Healthy" : "Failed"} />
+              <div style={S.muted}>redactions — fields:{rptExport.redactions?.sensitiveFieldsRemoved ?? 0} · urlCreds:{rptExport.redactions?.urlCredsRedacted ?? 0} · patterns:{rptExport.redactions?.riskPatternsDetected ?? 0} · blocked:{String(rptExport.redactions?.unsafeOutputBlocked ?? false)}</div>
+              {rptExport.blockedReason && <div style={S.muted}>blocked: {rptExport.blockedReason}</div>}
+              {rptExport.content ? <pre style={S.approvalArgs}>{rptExport.content}</pre> : <div style={S.muted}>(no content — export blocked or empty)</div>}
+            </div>
+          )}
+        </div>
+        <div style={S.muted}>Read-only evidence report — grounded docs + your inputs only. Unknowns are marked, not invented. Client/executive views redact internal detail. Export is preview-only + fully redacted; fails closed if any secret survives.</div>
       </Panel>
       <Panel title="Health re-check bundle">
         <div style={S.blockedBadge}>READ-ONLY HEALTH RE-CHECK — no action executed</div>

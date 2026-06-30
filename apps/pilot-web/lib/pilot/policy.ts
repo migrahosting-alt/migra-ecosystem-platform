@@ -95,6 +95,7 @@ export function classifyPilotAction(name: string, args: Record<string, unknown> 
   if (name === "ops.health_bundle.run") return mk("safe_read", "runs read-only health checks (allowlisted URLs, no bodies, no mutation)");
   if (name === "ops.report.preview") return mk("safe_read", "validates report inputs; generates nothing");
   if (name === "ops.report.generate") return mk("safe_read", "compiles a read-only evidence report (response-only; writes no file, executes nothing)");
+  if (name === "ops.report.export_preview") return mk("safe_read", "renders a copy-safe, fully-redacted report export PREVIEW (markdown/json/text); writes no file, executes nothing, fails closed on residual secrets");
   if (name === "ops.runbook.preview") return mk("safe_read", "validates runbook inputs; generates nothing");
   if (name === "ops.runbook.generate") return mk("requires_approval", "generates a HUMAN-ONLY operator runbook (may contain sensitive steps); executes nothing", "Generate operator runbook only; no external changes.");
   if (OPS_PLAN.has(name)) return mk("requires_approval", "DRY RUN / PLAN ONLY — generates a grounded ops plan; executes nothing", "Generate plan only; no external changes.");

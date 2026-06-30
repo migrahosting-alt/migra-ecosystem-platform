@@ -16,6 +16,7 @@ import { listOpsActions } from "./ops-action-registry";
 import { checkOpsTarget, listOpsTargets } from "./ops-target-allowlist";
 import { previewServicePreflight, runServicePreflight } from "./ops-service-preflight";
 import { previewEligibility, checkEligibility } from "./ops-eligibility-policy";
+import { buildReportExportPreview } from "./report-export";
 
 const execFileP = promisify(execFile);
 
@@ -625,6 +626,17 @@ export const TOOLS: Record<string, ToolDef> = {
     risk: "read",
     parameters: { type: "object", properties: { reportType: { type: "string" }, title: { type: "string" }, target: { type: "string" }, objective: { type: "string" }, audience: { type: "string" }, notes: { type: "string" }, includeDiagnostics: { type: "boolean" }, includeHazards: { type: "boolean" }, includeRunbook: { type: "boolean" }, includeVerification: { type: "boolean" }, includeTimeline: { type: "boolean" } }, required: ["reportType", "target"] },
     run: async (a) => clip(JSON.stringify(await buildReport(a as unknown as Parameters<typeof buildReport>[0]), null, 2)),
+  },
+  "ops.report.export_preview": {
+    name: "ops.report.export_preview",
+    description: "READ-ONLY / PREVIEW-ONLY. Compile a safe-read ops report and render an EXPORT PREVIEW (markdown | json | text) — copy-safe, fully redacted via lib/pilot/redaction.ts, with a redaction summary. Writes NO file, executes nothing, mutates nothing. Fails closed (no content) if any secret survives redaction.",
+    risk: "read",
+    parameters: { type: "object", properties: { reportType: { type: "string" }, title: { type: "string" }, target: { type: "string" }, objective: { type: "string" }, audience: { type: "string" }, notes: { type: "string" }, includeDiagnostics: { type: "boolean" }, includeHazards: { type: "boolean" }, includeRunbook: { type: "boolean" }, includeVerification: { type: "boolean" }, includeTimeline: { type: "boolean" }, format: { type: "string", enum: ["markdown", "json", "text"] } }, required: ["reportType", "target"] },
+    run: async (a) => {
+      const report = await buildReport(a as unknown as Parameters<typeof buildReport>[0]);
+      const preview = buildReportExportPreview({ report, format: a.format as ("markdown" | "json" | "text" | undefined), title: a.title ? String(a.title) : undefined }, new Date().toISOString());
+      return clip(JSON.stringify(preview, null, 2));
+    },
   },
   "ops.runbook.preview": {
     name: "ops.runbook.preview",
