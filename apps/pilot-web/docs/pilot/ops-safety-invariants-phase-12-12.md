@@ -12,6 +12,7 @@
 
 ```bash
 npm run pilot:safety:verify     # checks the manifest against the live policy/registry/tool/route posture
+npm run pilot:verify            # unified gate (Phase 12.13): runs pilot:redaction:test + pilot:safety:verify, fails closed
 ```
 The verifier is **read-only**: no env, no network, no DB, no external services — it reads only in-repo source + pure functions. It exits non-zero on any violation (a CI/regression gate).
 
