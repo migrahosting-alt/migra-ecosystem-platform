@@ -152,4 +152,5 @@ force-release UX reviewed · redaction tested · CI green · **no production tar
 
 ## 13. Next safe forks (after 12.6)
 - **12.7 — Redaction policy test harness** (verify the "secrets never logged / reports redact" guarantees in 12.5 §3.19 and 12.6 §10).
+- **12.8 — Audit report schema** — the report contract every action emits: [`ops-executor-audit-report-schema-phase-12-8.md`](./ops-executor-audit-report-schema-phase-12-8.md).
 - **Real SDXL endpoint live test** (image track — independent of ops execution).

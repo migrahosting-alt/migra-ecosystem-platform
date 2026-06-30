@@ -30,7 +30,8 @@ const fixture = {
 };
 
 const failures: string[] = [];
-const ok = (cond: boolean, label: string) => { if (!cond) failures.push(label); else console.log(`  PASS  ${label}`); };
+let checks = 0;
+const ok = (cond: boolean, label: string) => { checks++; if (!cond) failures.push(label); else console.log(`  PASS  ${label}`); };
 
 const red = redactPilotValue(fixture) as any;
 const serialized = redactPilotJson(fixture);
@@ -68,6 +69,25 @@ const circ: any = { a: 1 }; circ.self = circ;
 let circOk = true; try { JSON.stringify(redactPilotValue(circ)); } catch { circOk = false; }
 ok(circOk, "circular reference handled without throwing");
 
+// 13. Phase 12.8 — report-shaped payload (PilotExecutorAuditReport-like) is fully redacted
+const reportShaped = {
+  schemaVersion: "0.0-design", reportId: "rep_1", actionName: "ops.noop.execute", environment: "dev",
+  status: "blocked", eligibleForExecution: false,
+  sections: {
+    target: { name: "target", status: "fail", data: { endpointSummary: `db ${FAKE.dbUrl}`, productionBlocked: true } },
+    approval: { name: "approval", status: "fail", data: { token: FAKE.stripe, payloadHashMatched: false } },
+    execution: { name: "execution", status: "not_applicable", data: { actionExecuted: false, steps: [{ name: "s1", redactedDetail: `auth ${FAKE.bearer}` }] } },
+  },
+  redactions: { redactionHelper: "lib/pilot/redaction.ts", sensitiveFieldsRemoved: 0, unsafeOutputBlocked: false },
+};
+const redReport: any = redactPilotValue(reportShaped);
+const reportJson = redactPilotJson(reportShaped);
+ok(redReport.sections.approval.data.token === "[REDACTED]", "report-shaped: nested sensitive key redacted");
+ok(redReport.sections.target.data.endpointSummary.includes("127.0.0.1:5432/fakedb") && !redReport.sections.target.data.endpointSummary.includes("fakepass"), "report-shaped: URL creds redacted, host/db kept");
+ok(redReport.sections.execution.data.steps[0].redactedDetail.includes("Bearer [REDACTED]"), "report-shaped: bearer in nested step redacted");
+ok(redReport.redactions.redactionHelper === "lib/pilot/redaction.ts" && redReport.status === "blocked" && redReport.eligibleForExecution === false, "report-shaped: non-sensitive report fields preserved");
+ok([FAKE.stripe, "fakepass", "fake_bearer_token_123"].filter((s) => reportJson.includes(s)).length === 0, "report-shaped: no fake-secret literal in serialized report");
+
 console.log("");
-if (failures.length) { console.error(`REDACTION TESTS FAILED (${failures.length}):`); failures.forEach((f) => console.error("  FAIL  " + f)); process.exit(1); }
-console.log(`REDACTION TESTS PASSED (all ${12} checks). No fake-secret literal leaked.`);
+if (failures.length) { console.error(`REDACTION TESTS FAILED (${failures.length}/${checks}):`); failures.forEach((f) => console.error("  FAIL  " + f)); process.exit(1); }
+console.log(`REDACTION TESTS PASSED (all ${checks} checks). No fake-secret literal leaked.`);
