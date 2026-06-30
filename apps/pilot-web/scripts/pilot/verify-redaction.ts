@@ -88,6 +88,24 @@ ok(redReport.sections.execution.data.steps[0].redactedDetail.includes("Bearer [R
 ok(redReport.redactions.redactionHelper === "lib/pilot/redaction.ts" && redReport.status === "blocked" && redReport.eligibleForExecution === false, "report-shaped: non-sensitive report fields preserved");
 ok([FAKE.stripe, "fakepass", "fake_bearer_token_123"].filter((s) => reportJson.includes(s)).length === 0, "report-shaped: no fake-secret literal in serialized report");
 
+// 14. Phase 12.9 — journal-read-shaped payload (safeJson({store,count,records})) is redacted
+const journalShaped = { store: "memory", count: 1, records: [
+  { id: "rec_1", actionName: "ops.noop.execute", target: "voip-core", status: "verified", createdAt: "2026-01-01T00:00:00Z",
+    metadata: { reason: "ok", password: FAKE.password, note: `db=${FAKE.dbUrl}` } },
+]};
+const redJournal: any = redactPilotValue(journalShaped);
+const journalJson = redactPilotJson(journalShaped);
+ok(redJournal.records[0].metadata.password === "[REDACTED]", "journal-shaped: nested metadata secret redacted");
+ok(redJournal.records[0].actionName === "ops.noop.execute" && redJournal.records[0].target === "voip-core" && redJournal.records[0].status === "verified" && redJournal.records[0].createdAt === "2026-01-01T00:00:00Z" && redJournal.store === "memory" && redJournal.count === 1, "journal-shaped: actionName/target/status/timestamps/store/count readable");
+ok(!journalJson.includes(FAKE.password) && !journalJson.includes("fakepass"), "journal-shaped: no fake-secret literal in serialized journal");
+
+// 15. Phase 12.9 — diagnostics-shaped payload (image/health-like) is redacted
+const diagShaped = { status: "disabled", provider: "sdxl", endpoint: FAKE.dbUrl, apiKey: FAKE.stripe, timeoutMs: 60000, reachable: false };
+const redDiag: any = redactPilotValue(diagShaped);
+ok(redDiag.apiKey === "[REDACTED]", "diagnostics-shaped: apiKey redacted");
+ok(redDiag.status === "disabled" && redDiag.provider === "sdxl" && redDiag.timeoutMs === 60000 && redDiag.reachable === false, "diagnostics-shaped: non-sensitive diagnostic fields readable");
+ok(!redactPilotJson(diagShaped).includes("fakepass") && !redactPilotJson(diagShaped).includes(FAKE.stripe), "diagnostics-shaped: no fake-secret literal in serialized diagnostics");
+
 console.log("");
 if (failures.length) { console.error(`REDACTION TESTS FAILED (${failures.length}/${checks}):`); failures.forEach((f) => console.error("  FAIL  " + f)); process.exit(1); }
 console.log(`REDACTION TESTS PASSED (all ${checks} checks). No fake-secret literal leaked.`);

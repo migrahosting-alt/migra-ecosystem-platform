@@ -2,6 +2,7 @@
 // from the action journal (sanitized; no response bodies), with the active storage mode.
 
 import { actionJournalStoreName } from "../../../../../../lib/pilot/ops-action-journal";
+import { safeJson } from "../../../../../../lib/pilot/safe-output";
 import { listWebhookSimRecords } from "../../../../../../lib/pilot/ops-provider";
 
 export const runtime = "nodejs";
@@ -11,5 +12,5 @@ export async function GET(req: Request) {
   const raw = Number(new URL(req.url).searchParams.get("limit"));
   const limit = Number.isFinite(raw) && raw > 0 ? Math.min(50, Math.floor(raw)) : 20;
   const records = await listWebhookSimRecords(limit);
-  return Response.json({ store: actionJournalStoreName(), enabled: process.env.PILOT_WEBHOOK_SIM_ENABLED === "1" || process.env.PILOT_WEBHOOK_SIM_ENABLED === "true", count: records.length, records });
+  return safeJson({ store: actionJournalStoreName(), enabled: process.env.PILOT_WEBHOOK_SIM_ENABLED === "1" || process.env.PILOT_WEBHOOK_SIM_ENABLED === "true", count: records.length, records });
 }
