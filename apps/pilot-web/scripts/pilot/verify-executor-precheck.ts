@@ -10,7 +10,7 @@ import { EXECUTOR_PRECHECKS, EXECUTOR_PRECHECK_VERSION, MANIFEST_VERSION_REF, EX
 import { SAFETY_INVARIANTS, SAFETY_INVARIANTS_VERSION } from "../../lib/pilot/safety-invariants";
 import { buildPromotionStatus } from "../../lib/pilot/promotion-status";
 import { buildReportExportPreview } from "../../lib/pilot/report-export";
-import { buildPromotionEvidenceBundle } from "../../lib/pilot/promotion-evidence";
+import { buildPromotionEvidenceBundle, CI_POSTURE } from "../../lib/pilot/promotion-evidence";
 
 const ROOT = process.cwd();
 const failures: string[] = [];
@@ -80,6 +80,13 @@ ok(EXECUTOR_PRECHECKS.find((p) => p.id === "explicit-human-approval")?.status ==
   try { bparsed = JSON.parse(bex.content); } catch { /* fails below */ }
   ok(bparsed.executorReady === false && bparsed.eligibleForExecutionExpected === false && bparsed.precheckTotals?.total === EXECUTOR_PRECHECKS.length && bparsed.pendingPromotionGates?.length === st.pendingPromotionPrechecks && (bparsed.blockingFailures?.length ?? -1) === 0,
     `evidence export reflects bundle totals (total ${bparsed.precheckTotals?.total}, pending ${bparsed.pendingPromotionGates?.length}, blockingFailures ${bparsed.blockingFailures?.length})`);
+
+  // 11. CI posture (12.24): the evidence bundle's ciPosture matches the ACTUAL applied workflow file
+  ok(bundle.ciPosture.gateCommand === "npm run pilot:ci" && bundle.ciPosture.applied === true && bundle.ciPosture.externalDependencies === false, "evidence bundle ciPosture: gate=pilot:ci, applied, no external deps");
+  const wf = (() => { try { return readFileSync(resolve(ROOT, "..", "..", CI_POSTURE.workflowPath), "utf8"); } catch { return ""; } })();
+  ok(wf.length > 0, `CI workflow file exists at ${CI_POSTURE.workflowPath}`);
+  ok(wf.includes(CI_POSTURE.installCommand) && wf.includes(CI_POSTURE.gateCommand) && wf.includes(CI_POSTURE.workingDirectory) && wf.includes(CI_POSTURE.pathFilter),
+    "CI workflow file matches ciPosture (install cmd, gate cmd, working-directory, path filter all present)");
 }
 
 console.log("");

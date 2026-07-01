@@ -45,7 +45,8 @@ npm run pilot:ci                 # tsc --noEmit && pilot:verify  ← canonical p
 ### Invariant manifest & gates (implemented)
 - **Safety invariant manifest** — [`ops-safety-invariants-phase-12-12.md`](./ops-safety-invariants-phase-12-12.md) (12.12) · `lib/pilot/safety-invariants.ts` (`SAFETY_INVARIANTS`, v12.12.0) · verifier `scripts/pilot/verify-safety-invariants.ts` (10 machine-checked + 1 documented).
 - **Unified gate** — `scripts/pilot/verify-all.mjs` (12.13) → `npm run pilot:verify` (fail-closed composition).
-- **Local CI gate** — [`ci-verification-phase-12-14.md`](./ci-verification-phase-12-14.md) (12.14) → `npm run pilot:ci`. (Shared monorepo CI/hooks intentionally not modified.)
+- **Local CI gate** — [`ci-verification-phase-12-14.md`](./ci-verification-phase-12-14.md) (12.14) → `npm run pilot:ci`.
+- **Repo-root CI (applied)** — proposal [`ci-scoped-repo-root-proposal-phase-12-21.md`](./ci-scoped-repo-root-proposal-phase-12-21.md) (12.21); **applied** `.github/workflows/migrapilot-pilot-web-gate.yml` (12.22) with deterministic `npm ci` (12.23). Path-filtered to `apps/pilot-web/**`, `permissions: contents: read`, `working-directory: apps/pilot-web`, runs `npm ci --no-audit --no-fund` → `npm run pilot:ci`. Read-only, no secrets, touches no other app's CI. Static CI posture is also exposed in the evidence bundle (`CI_POSTURE` / `ciPosture`, 12.24).
 
 ### Executor precheck contract (implemented)
 - **Pre-implementation checklist** — [`executor-preimplementation-checklist-phase-12-15.md`](./executor-preimplementation-checklist-phase-12-15.md) (12.15) · `lib/pilot/executor-precheck.ts` (`EXECUTOR_PRECHECKS`, `EXECUTOR_READY=false`, v12.15.0) · drift-guard `scripts/pilot/verify-executor-precheck.ts` (`npm run pilot:precheck:verify`). **24 blocking prechecks: 12 standing satisfied, 12 promotion pending.**

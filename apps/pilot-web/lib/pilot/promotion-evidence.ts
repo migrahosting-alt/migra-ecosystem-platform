@@ -20,6 +20,31 @@ export const VERIFICATION_COMMANDS = [
   "pilot:ci",
 ] as const;
 
+export interface CiPosture {
+  workflowPath: string;
+  workingDirectory: string;
+  installCommand: string;
+  gateCommand: string;
+  pathFilter: string;
+  permissions: string;
+  applied: boolean;
+  externalDependencies: false;
+}
+
+// Static CI posture metadata (Phase 12.22/12.23/12.24). Describes the scoped repo-root workflow that
+// enforces the local gate in CI. NOT a live GitHub/CI query — pure declared metadata, mirrored by the
+// verifier against the actual workflow file.
+export const CI_POSTURE: CiPosture = {
+  workflowPath: ".github/workflows/migrapilot-pilot-web-gate.yml",
+  workingDirectory: "apps/pilot-web",
+  installCommand: "npm ci --no-audit --no-fund",
+  gateCommand: "npm run pilot:ci",
+  pathFilter: "apps/pilot-web/**",
+  permissions: "contents: read",
+  applied: true,
+  externalDependencies: false,
+};
+
 export interface PromotionEvidenceBundle {
   bundleVersion: string;
   generatedAt: string;
@@ -39,6 +64,7 @@ export interface PromotionEvidenceBundle {
   verificationCommands: readonly string[];
   standingGaps: string[];
   blockingFailures: string[];
+  ciPosture: CiPosture;
   noExecutionAttestation: string;
   summary: string;
 }
@@ -70,6 +96,7 @@ export function buildPromotionEvidenceBundle(nowIso: string): PromotionEvidenceB
     verificationCommands: VERIFICATION_COMMANDS,
     standingGaps,
     blockingFailures: status.blockingFailures,
+    ciPosture: CI_POSTURE,
     noExecutionAttestation:
       `No executor exists and none was invoked. EXECUTOR_READY=${EXECUTOR_READY}; eligibleForExecution is hard-false; ` +
       `all ${EXECUTOR_PRECHECKS.filter((p) => p.category === "promotion").length} promotion prechecks remain pending. ` +
