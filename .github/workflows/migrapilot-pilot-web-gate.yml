@@ -1,0 +1,45 @@
+# MigraPilot pilot-web safety gate (Phase 12.22).
+# Scoped, read-only CI: runs apps/pilot-web's `npm run pilot:ci` (tsc + redaction + safety-invariant
+# verifiers) on changes to apps/pilot-web only. Approved per docs/pilot/ci-scoped-repo-root-proposal-phase-12-21.md.
+# Self-contained: no secrets, no deploy, no external services (only dependency install). Does not touch
+# any other app's CI. NOTE: apps/pilot-web has no committed lockfile (the app dir is gitignored and
+# force-added), so this uses `npm install` rather than `npm ci`.
+name: MigraPilot pilot-web safety gate
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - "apps/pilot-web/**"
+      - ".github/workflows/migrapilot-pilot-web-gate.yml"
+  pull_request:
+    paths:
+      - "apps/pilot-web/**"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: migrapilot-pilot-web-gate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pilot-ci:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/pilot-web
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install dependencies (no committed lockfile → npm install)
+        run: npm install --no-audit --no-fund
+
+      - name: MigraPilot safety gate (tsc + redaction + safety invariants)
+        run: npm run pilot:ci
