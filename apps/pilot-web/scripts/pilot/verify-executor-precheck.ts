@@ -72,6 +72,14 @@ ok(EXECUTOR_PRECHECKS.find((p) => p.id === "explicit-human-approval")?.status ==
   ok(bundle.precheckTotals.total === EXECUTOR_PRECHECKS.length && bundle.pendingPromotionGates.length === st.pendingPromotionPrechecks && bundle.blockingFailures.length === 0,
     `evidence bundle reflects totals (total ${bundle.precheckTotals.total}, pending ${bundle.pendingPromotionGates.length}, blockingFailures ${bundle.blockingFailures.length})`);
   ok(bundle.safetyInvariantVersion === SAFETY_INVARIANTS_VERSION && bundle.manifestInSync === true && bundle.verificationCommands.length >= 5, "evidence bundle: manifest version in sync + verification commands present");
+
+  // 10. evidence bundle export preview (12.19) is copy-safe, preview-only, and reflects the same totals
+  const bex = buildReportExportPreview({ report: bundle, format: "json", title: "evidence" }, new Date(0).toISOString());
+  ok(bex.copySafe === true && bex.executed === false && bex.written === false && bex.eligibleForExecution === false, "evidence export preview is copy-safe + preview-only (executed/written/eligibleForExecution false)");
+  let bparsed: any = {};
+  try { bparsed = JSON.parse(bex.content); } catch { /* fails below */ }
+  ok(bparsed.executorReady === false && bparsed.eligibleForExecutionExpected === false && bparsed.precheckTotals?.total === EXECUTOR_PRECHECKS.length && bparsed.pendingPromotionGates?.length === st.pendingPromotionPrechecks && (bparsed.blockingFailures?.length ?? -1) === 0,
+    `evidence export reflects bundle totals (total ${bparsed.precheckTotals?.total}, pending ${bparsed.pendingPromotionGates?.length}, blockingFailures ${bparsed.blockingFailures?.length})`);
 }
 
 console.log("");

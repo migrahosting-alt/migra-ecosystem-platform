@@ -496,6 +496,18 @@ export const TOOLS: Record<string, ToolDef> = {
     parameters: { type: "object", properties: {} },
     run: async () => clip(JSON.stringify(buildPromotionEvidenceBundle(new Date().toISOString()), null, 2)),
   },
+  "ops.promotion.evidence_export_preview": {
+    name: "ops.promotion.evidence_export_preview",
+    description: "READ-ONLY / PREVIEW-ONLY. Export the promotion evidence bundle (12.18) as a copy-safe, fully-redacted preview (markdown | json | text) via the existing report-export engine. executed:false, written:false, eligibleForExecution:false; fails closed on residual secrets. Enables nothing, writes no file.",
+    risk: "read",
+    parameters: { type: "object", properties: { format: { type: "string", enum: ["markdown", "json", "text"] }, title: { type: "string" } } },
+    run: async (a) => {
+      const now = new Date().toISOString();
+      const bundle = buildPromotionEvidenceBundle(now);
+      const preview = buildReportExportPreview({ report: bundle, format: a.format as ("markdown" | "json" | "text" | undefined), title: a.title ? String(a.title) : "MigraPilot Promotion Evidence Bundle" }, now);
+      return clip(JSON.stringify(preview, null, 2));
+    },
+  },
   "ops.promotion.export_preview": {
     name: "ops.promotion.export_preview",
     description: "READ-ONLY / PREVIEW-ONLY. Export the executor promotion-gate status (12.16) as a copy-safe, fully-redacted preview (markdown | json | text) via the existing report-export engine. executed:false, written:false, eligibleForExecution:false; fails closed on residual secrets. Enables nothing, writes no file.",

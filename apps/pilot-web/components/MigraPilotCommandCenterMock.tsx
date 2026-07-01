@@ -1092,6 +1092,13 @@ function OpsSection() {
     try { const r = await fetch("/api/pilot/ops/promotion-status/export/preview", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ format: promoExportFmt }) }); setPromoExport(await r.json()); }
     catch (e) { setPromoExport({ blockedReason: (e as Error).message }); } finally { setPromoBusy(false); }
   };
+  const [evidExport, setEvidExport] = useState<{ copySafe?: boolean; content?: string; blockedReason?: string } | null>(null);
+  const exportEvidenceUi = async () => {
+    if (promoBusy) return;
+    setPromoBusy(true); setEvidExport(null);
+    try { const r = await fetch("/api/pilot/ops/promotion-evidence/export/preview", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ format: promoExportFmt }) }); setEvidExport(await r.json()); }
+    catch (e) { setEvidExport({ blockedReason: (e as Error).message }); } finally { setPromoBusy(false); }
+  };
 
   const streamNdjson = async (url: string, body: unknown, onEvent: (ev: { type: string; approval?: { runId: string; id: string; toolName: string; risk: string }; delta?: string; message?: { content?: string } }) => void) => {
     const res = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
@@ -1528,13 +1535,21 @@ function OpsSection() {
               <option value="json">json</option>
               <option value="text">text</option>
             </select>
-            <button onClick={exportPromoUi} disabled={promoBusy} style={{ ...S.sendButton, width: "auto", padding: "0 12px", fontSize: 12, opacity: promoBusy ? 0.6 : 1, cursor: promoBusy ? "default" : "pointer" }}>Export preview</button>
+            <button onClick={exportPromoUi} disabled={promoBusy} style={{ ...S.sendButton, width: "auto", padding: "0 12px", fontSize: 12, opacity: promoBusy ? 0.6 : 1, cursor: promoBusy ? "default" : "pointer" }}>Export status</button>
+            <button onClick={exportEvidenceUi} disabled={promoBusy} style={{ ...S.sendButton, width: "auto", padding: "0 12px", fontSize: 12, opacity: promoBusy ? 0.6 : 1, cursor: promoBusy ? "default" : "pointer" }}>Export evidence bundle</button>
           </div>
           {promoExport && (
             <div style={{ marginTop: 6 }}>
               <Row left="copySafe" right={String(promoExport.copySafe ?? false)} tone={promoExport.copySafe ? "Healthy" : "Failed"} />
               {promoExport.blockedReason && <div style={S.muted}>blocked: {promoExport.blockedReason}</div>}
               {promoExport.content ? <pre style={S.approvalArgs}>{promoExport.content}</pre> : <div style={S.muted}>(no content)</div>}
+            </div>
+          )}
+          {evidExport && (
+            <div style={{ marginTop: 6 }}>
+              <Row left="evidence copySafe" right={String(evidExport.copySafe ?? false)} tone={evidExport.copySafe ? "Healthy" : "Failed"} />
+              {evidExport.blockedReason && <div style={S.muted}>blocked: {evidExport.blockedReason}</div>}
+              {evidExport.content ? <pre style={S.approvalArgs}>{evidExport.content}</pre> : <div style={S.muted}>(no content)</div>}
             </div>
           )}
         </div>
