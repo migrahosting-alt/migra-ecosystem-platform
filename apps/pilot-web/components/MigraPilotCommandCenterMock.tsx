@@ -1083,6 +1083,15 @@ function OpsSection() {
 
   const [promo, setPromo] = useState<{ executorReady?: boolean; executorBlocked?: boolean; blockedReason?: string; precheckVersion?: string; manifestVersion?: string; manifestVersionRef?: string; manifestInSync?: boolean; satisfiedStandingPrechecks?: number; pendingPromotionPrechecks?: number; totals?: { total?: number; standing?: { total?: number; satisfied?: number }; promotion?: { total?: number; pending?: number } }; blockingFailures?: string[]; summary?: string; prechecks?: { id: string; category: string; status: string }[] } | null>(null);
   useEffect(() => { fetch("/api/pilot/ops/promotion-status").then((r) => (r.ok ? r.json() : null)).then((d) => { if (d) setPromo(d); }).catch(() => {}); }, []);
+  const [promoExportFmt, setPromoExportFmt] = useState("markdown");
+  const [promoExport, setPromoExport] = useState<{ copySafe?: boolean; content?: string; blockedReason?: string } | null>(null);
+  const [promoBusy, setPromoBusy] = useState(false);
+  const exportPromoUi = async () => {
+    if (promoBusy) return;
+    setPromoBusy(true); setPromoExport(null);
+    try { const r = await fetch("/api/pilot/ops/promotion-status/export/preview", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ format: promoExportFmt }) }); setPromoExport(await r.json()); }
+    catch (e) { setPromoExport({ blockedReason: (e as Error).message }); } finally { setPromoBusy(false); }
+  };
 
   const streamNdjson = async (url: string, body: unknown, onEvent: (ev: { type: string; approval?: { runId: string; id: string; toolName: string; risk: string }; delta?: string; message?: { content?: string } }) => void) => {
     const res = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
@@ -1511,7 +1520,25 @@ function OpsSection() {
             <div style={S.muted}>pending → {(promo.prechecks ?? []).filter((p) => p.category === "promotion" && p.status === "pending").map((p) => p.id).join(", ")}</div>
           </div>
         )}
-        <div style={S.muted}>Read-only status of the 12.15 executor pre-implementation checklist. No executor exists; EXECUTOR_READY stays false until every promotion precheck is satisfied in a future approved phase.</div>
+        <div style={{ marginTop: 6, borderTop: "1px solid #1e293b", paddingTop: 6 }}>
+          <div style={S.blockedBadge}>EXPORT PREVIEW ONLY — REDACTED · NO FILE WRITTEN · EXECUTOR BLOCKED</div>
+          <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
+            <select value={promoExportFmt} onChange={(e) => setPromoExportFmt(e.target.value)} style={{ ...S.composerInput, flex: "0 0 110px", cursor: "pointer" }}>
+              <option value="markdown">markdown</option>
+              <option value="json">json</option>
+              <option value="text">text</option>
+            </select>
+            <button onClick={exportPromoUi} disabled={promoBusy} style={{ ...S.sendButton, width: "auto", padding: "0 12px", fontSize: 12, opacity: promoBusy ? 0.6 : 1, cursor: promoBusy ? "default" : "pointer" }}>Export preview</button>
+          </div>
+          {promoExport && (
+            <div style={{ marginTop: 6 }}>
+              <Row left="copySafe" right={String(promoExport.copySafe ?? false)} tone={promoExport.copySafe ? "Healthy" : "Failed"} />
+              {promoExport.blockedReason && <div style={S.muted}>blocked: {promoExport.blockedReason}</div>}
+              {promoExport.content ? <pre style={S.approvalArgs}>{promoExport.content}</pre> : <div style={S.muted}>(no content)</div>}
+            </div>
+          )}
+        </div>
+        <div style={S.muted}>Read-only status of the 12.15 executor pre-implementation checklist. No executor exists; EXECUTOR_READY stays false until every promotion precheck is satisfied in a future approved phase. Export is preview-only + fully redacted; no file is written.</div>
       </Panel>
       <Panel title="Internal status marker">
         <div style={S.blockedBadge}>INTERNAL JOURNAL ONLY — NO INFRASTRUCTURE MUTATION</div>

@@ -488,6 +488,18 @@ export const TOOLS: Record<string, ToolDef> = {
     parameters: { type: "object", properties: {} },
     run: async () => clip(JSON.stringify(buildPromotionStatus(new Date().toISOString()), null, 2)),
   },
+  "ops.promotion.export_preview": {
+    name: "ops.promotion.export_preview",
+    description: "READ-ONLY / PREVIEW-ONLY. Export the executor promotion-gate status (12.16) as a copy-safe, fully-redacted preview (markdown | json | text) via the existing report-export engine. executed:false, written:false, eligibleForExecution:false; fails closed on residual secrets. Enables nothing, writes no file.",
+    risk: "read",
+    parameters: { type: "object", properties: { format: { type: "string", enum: ["markdown", "json", "text"] }, title: { type: "string" } } },
+    run: async (a) => {
+      const now = new Date().toISOString();
+      const status = buildPromotionStatus(now);
+      const preview = buildReportExportPreview({ report: status, format: a.format as ("markdown" | "json" | "text" | undefined), title: a.title ? String(a.title) : "MigraPilot Promotion Gate Status" }, now);
+      return clip(JSON.stringify(preview, null, 2));
+    },
+  },
   "ops.targets.list": {
     name: "ops.targets.list",
     description: "READ-ONLY. List the dev-only ops target allowlist (the eligibility gate future real actions must pass): targets, environment, enabled, allowed/denied actions, prechecks/postchecks, hazards. Sanitized; production targets are never eligible; nothing executes.",

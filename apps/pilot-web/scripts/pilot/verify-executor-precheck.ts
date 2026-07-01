@@ -9,6 +9,7 @@ import { resolve } from "node:path";
 import { EXECUTOR_PRECHECKS, EXECUTOR_PRECHECK_VERSION, MANIFEST_VERSION_REF, EXECUTOR_READY, pendingPromotionPrechecks } from "../../lib/pilot/executor-precheck";
 import { SAFETY_INVARIANTS, SAFETY_INVARIANTS_VERSION } from "../../lib/pilot/safety-invariants";
 import { buildPromotionStatus } from "../../lib/pilot/promotion-status";
+import { buildReportExportPreview } from "../../lib/pilot/report-export";
 
 const ROOT = process.cwd();
 const failures: string[] = [];
@@ -55,6 +56,14 @@ ok(EXECUTOR_PRECHECKS.find((p) => p.id === "explicit-human-approval")?.status ==
   ok(st.totals.total === EXECUTOR_PRECHECKS.length, `promotion-status total (${st.totals.total}) == checklist length (${EXECUTOR_PRECHECKS.length})`);
   ok(st.pendingPromotionPrechecks === pendingPromotionPrechecks().length, `promotion-status pending (${st.pendingPromotionPrechecks}) == pendingPromotionPrechecks (${pendingPromotionPrechecks().length})`);
   ok(st.executorBlocked === true && st.blockingFailures.length === 0, "promotion-status reports executor blocked, no standing regression / manifest drift");
+
+  // 8. promotion-status export preview (12.17) is copy-safe, preview-only, and reflects the same totals
+  const ex = buildReportExportPreview({ report: st, format: "json", title: "promo" }, new Date(0).toISOString());
+  ok(ex.copySafe === true && ex.executed === false && ex.written === false && ex.eligibleForExecution === false, "promotion export preview is copy-safe + preview-only (executed/written/eligibleForExecution false)");
+  let parsed: any = {};
+  try { parsed = JSON.parse(ex.content); } catch { /* leave empty → fails below */ }
+  ok(parsed.executorReady === false && parsed.totals?.total === EXECUTOR_PRECHECKS.length && parsed.totals?.standing?.satisfied === st.totals.standing.satisfied && parsed.totals?.promotion?.pending === st.pendingPromotionPrechecks && (parsed.blockingFailures?.length ?? -1) === 0,
+    `promotion export reflects checklist totals (total ${parsed.totals?.total}, standing satisfied ${parsed.totals?.standing?.satisfied}, promotion pending ${parsed.totals?.promotion?.pending}, blockingFailures ${parsed.blockingFailures?.length})`);
 }
 
 console.log("");
