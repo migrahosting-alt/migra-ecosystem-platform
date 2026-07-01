@@ -17,6 +17,7 @@ import { checkOpsTarget, listOpsTargets } from "./ops-target-allowlist";
 import { previewServicePreflight, runServicePreflight } from "./ops-service-preflight";
 import { previewEligibility, checkEligibility } from "./ops-eligibility-policy";
 import { buildReportExportPreview } from "./report-export";
+import { buildPromotionStatus } from "./promotion-status";
 
 const execFileP = promisify(execFile);
 
@@ -479,6 +480,13 @@ export const TOOLS: Record<string, ToolDef> = {
       if (!r.matches.length) return `${r.detail} for "${r.query}"`;
       return clip(`${r.detail} for "${r.query}":\n` + r.matches.map((m) => `• [${m.doc}] ${m.heading}: ${m.snippet}`).join("\n"));
     },
+  },
+  "ops.promotion.status": {
+    name: "ops.promotion.status",
+    description: "READ-ONLY. Report the executor promotion-gate status from the 12.15 pre-implementation checklist: EXECUTOR_READY (false), precheck/manifest versions, standing prechecks satisfied vs pending, promotion prechecks pending, and any blocking failures. Reflects data only — enables nothing, executes nothing.",
+    risk: "read",
+    parameters: { type: "object", properties: {} },
+    run: async () => clip(JSON.stringify(buildPromotionStatus(new Date().toISOString()), null, 2)),
   },
   "ops.targets.list": {
     name: "ops.targets.list",

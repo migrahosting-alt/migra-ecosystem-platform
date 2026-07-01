@@ -1081,6 +1081,9 @@ function OpsSection() {
     } catch (e) { setElResult({ note: (e as Error).message }); } finally { setElBusy(false); }
   };
 
+  const [promo, setPromo] = useState<{ executorReady?: boolean; executorBlocked?: boolean; blockedReason?: string; precheckVersion?: string; manifestVersion?: string; manifestVersionRef?: string; manifestInSync?: boolean; satisfiedStandingPrechecks?: number; pendingPromotionPrechecks?: number; totals?: { total?: number; standing?: { total?: number; satisfied?: number }; promotion?: { total?: number; pending?: number } }; blockingFailures?: string[]; summary?: string; prechecks?: { id: string; category: string; status: string }[] } | null>(null);
+  useEffect(() => { fetch("/api/pilot/ops/promotion-status").then((r) => (r.ok ? r.json() : null)).then((d) => { if (d) setPromo(d); }).catch(() => {}); }, []);
+
   const streamNdjson = async (url: string, body: unknown, onEvent: (ev: { type: string; approval?: { runId: string; id: string; toolName: string; risk: string }; delta?: string; message?: { content?: string } }) => void) => {
     const res = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
     if (!res.ok || !res.body) throw new Error(`request failed (${res.status})`);
@@ -1492,6 +1495,23 @@ function OpsSection() {
           </div>
         )}
         <div style={S.muted}>Read-only policy design — no executor, no approval card. Promotion readiness ≠ runtime execution.</div>
+      </Panel>
+      <Panel title="Promotion gate status">
+        <div style={S.blockedBadge}>{promo?.executorBlocked === false ? "PROMOTABLE" : "EXECUTOR BLOCKED"} — READ-ONLY · NO ACTION EXECUTED</div>
+        {promo === null && <div style={S.muted}>Loading…</div>}
+        {promo && (
+          <div style={{ marginTop: 4 }}>
+            <Row left="EXECUTOR_READY" right={String(promo.executorReady ?? false)} tone="Failed" />
+            <Row left="executorBlocked" right={String(promo.executorBlocked ?? true)} tone={promo.executorBlocked === false ? "Healthy" : "Failed"} />
+            <div style={S.muted}>{promo.blockedReason}</div>
+            <div style={S.muted}>precheck v{promo.precheckVersion} · manifest v{promo.manifestVersion} (ref {promo.manifestVersionRef}) · in-sync {String(promo.manifestInSync ?? false)}</div>
+            <Row left="standing satisfied" right={`${promo.totals?.standing?.satisfied ?? 0}/${promo.totals?.standing?.total ?? 0}`} tone="Healthy" />
+            <Row left="promotion pending" right={`${promo.pendingPromotionPrechecks ?? promo.totals?.promotion?.pending ?? 0}/${promo.totals?.promotion?.total ?? 0}`} tone="Failed" />
+            {(promo.blockingFailures?.length ?? 0) > 0 && <div style={S.muted}>blocking failures: {promo.blockingFailures!.join("; ")}</div>}
+            <div style={S.muted}>pending → {(promo.prechecks ?? []).filter((p) => p.category === "promotion" && p.status === "pending").map((p) => p.id).join(", ")}</div>
+          </div>
+        )}
+        <div style={S.muted}>Read-only status of the 12.15 executor pre-implementation checklist. No executor exists; EXECUTOR_READY stays false until every promotion precheck is satisfied in a future approved phase.</div>
       </Panel>
       <Panel title="Internal status marker">
         <div style={S.blockedBadge}>INTERNAL JOURNAL ONLY — NO INFRASTRUCTURE MUTATION</div>

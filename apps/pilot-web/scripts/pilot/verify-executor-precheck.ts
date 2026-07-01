@@ -8,6 +8,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { EXECUTOR_PRECHECKS, EXECUTOR_PRECHECK_VERSION, MANIFEST_VERSION_REF, EXECUTOR_READY, pendingPromotionPrechecks } from "../../lib/pilot/executor-precheck";
 import { SAFETY_INVARIANTS, SAFETY_INVARIANTS_VERSION } from "../../lib/pilot/safety-invariants";
+import { buildPromotionStatus } from "../../lib/pilot/promotion-status";
 
 const ROOT = process.cwd();
 const failures: string[] = [];
@@ -45,6 +46,15 @@ ok(EXECUTOR_PRECHECKS.find((p) => p.id === "explicit-human-approval")?.status ==
   const referenced = ["pilot:redaction:test", "pilot:safety:verify", "pilot:verify", "pilot:ci"];
   const missing = referenced.filter((c) => !scripts.has(c));
   ok(missing.length === 0, `referenced pilot commands all present: [missing: ${missing.join(",")}]`);
+}
+
+// 7. promotion-status builder (12.16) accurately reflects the checklist (no drift / no duplication)
+{
+  const st = buildPromotionStatus(new Date(0).toISOString());
+  ok(st.executorReady === EXECUTOR_READY, "promotion-status.executorReady mirrors EXECUTOR_READY");
+  ok(st.totals.total === EXECUTOR_PRECHECKS.length, `promotion-status total (${st.totals.total}) == checklist length (${EXECUTOR_PRECHECKS.length})`);
+  ok(st.pendingPromotionPrechecks === pendingPromotionPrechecks().length, `promotion-status pending (${st.pendingPromotionPrechecks}) == pendingPromotionPrechecks (${pendingPromotionPrechecks().length})`);
+  ok(st.executorBlocked === true && st.blockingFailures.length === 0, "promotion-status reports executor blocked, no standing regression / manifest drift");
 }
 
 console.log("");
