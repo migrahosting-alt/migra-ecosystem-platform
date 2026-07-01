@@ -22,7 +22,8 @@ async function main() {
 
   // executor-absent
   {
-    const execLib = readdirSync(resolve(ROOT, "lib/pilot")).filter((f) => /executor/i.test(f));
+    // A real executor MODULE trips this; design/checklist data files (executor-precheck, *-design) do not.
+    const execLib = readdirSync(resolve(ROOT, "lib/pilot")).filter((f) => /executor/i.test(f) && !/precheck|checklist|manifest|design/i.test(f));
     const execTool = Object.keys(TOOLS).filter((t) => /executor|\.execute_real|real_exec/i.test(t));
     record("executor-absent", execLib.length === 0 && execTool.length === 0, `lib executor files: ${execLib.length}; executor tools: ${execTool.length}`);
   }

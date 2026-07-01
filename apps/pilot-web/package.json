@@ -9,7 +9,8 @@
     "pilot:redaction:test": "npx --yes tsx scripts/pilot/verify-redaction.ts",
     "pilot:safety:verify": "npx --yes tsx scripts/pilot/verify-safety-invariants.ts",
     "pilot:verify": "node scripts/pilot/verify-all.mjs",
-    "pilot:ci": "tsc --noEmit && npm run pilot:verify"
+    "pilot:ci": "tsc --noEmit && npm run pilot:verify",
+    "pilot:precheck:verify": "npx --yes tsx scripts/pilot/verify-executor-precheck.ts"
   },
   "dependencies": {
     "next": "^15.5.19",
