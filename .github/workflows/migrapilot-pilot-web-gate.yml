@@ -2,8 +2,8 @@
 # Scoped, read-only CI: runs apps/pilot-web's `npm run pilot:ci` (tsc + redaction + safety-invariant
 # verifiers) on changes to apps/pilot-web only. Approved per docs/pilot/ci-scoped-repo-root-proposal-phase-12-21.md.
 # Self-contained: no secrets, no deploy, no external services (only dependency install). Does not touch
-# any other app's CI. NOTE: apps/pilot-web has no committed lockfile (the app dir is gitignored and
-# force-added), so this uses `npm install` rather than `npm ci`.
+# any other app's CI. Uses `npm ci` against the committed apps/pilot-web/package-lock.json (force-added
+# despite the app-dir gitignore; Phase 12.23) for deterministic installs.
 name: MigraPilot pilot-web safety gate
 
 on:
@@ -38,8 +38,8 @@ jobs:
         with:
           node-version: "22"
 
-      - name: Install dependencies (no committed lockfile → npm install)
-        run: npm install --no-audit --no-fund
+      - name: Install dependencies (deterministic from committed lockfile)
+        run: npm ci --no-audit --no-fund
 
       - name: MigraPilot safety gate (tsc + redaction + safety invariants)
         run: npm run pilot:ci
