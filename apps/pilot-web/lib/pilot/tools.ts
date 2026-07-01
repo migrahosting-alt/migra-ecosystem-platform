@@ -18,6 +18,7 @@ import { previewServicePreflight, runServicePreflight } from "./ops-service-pref
 import { previewEligibility, checkEligibility } from "./ops-eligibility-policy";
 import { buildReportExportPreview } from "./report-export";
 import { buildPromotionStatus } from "./promotion-status";
+import { buildPromotionEvidenceBundle } from "./promotion-evidence";
 
 const execFileP = promisify(execFile);
 
@@ -487,6 +488,13 @@ export const TOOLS: Record<string, ToolDef> = {
     risk: "read",
     parameters: { type: "object", properties: {} },
     run: async () => clip(JSON.stringify(buildPromotionStatus(new Date().toISOString()), null, 2)),
+  },
+  "ops.promotion.evidence": {
+    name: "ops.promotion.evidence",
+    description: "READ-ONLY. Aggregate the executor promotion evidence into one copy-safe bundle: promotion status, safety-invariant manifest version, executor precheck version/state, precheck totals, pending promotion gates, verification commands, standing gaps (incl. NEEDS_REAL_SD_ENDPOINT), and a no-execution attestation. Consumes existing data; enables nothing, executes nothing.",
+    risk: "read",
+    parameters: { type: "object", properties: {} },
+    run: async () => clip(JSON.stringify(buildPromotionEvidenceBundle(new Date().toISOString()), null, 2)),
   },
   "ops.promotion.export_preview": {
     name: "ops.promotion.export_preview",

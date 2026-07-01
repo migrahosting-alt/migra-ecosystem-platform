@@ -10,6 +10,7 @@ import { EXECUTOR_PRECHECKS, EXECUTOR_PRECHECK_VERSION, MANIFEST_VERSION_REF, EX
 import { SAFETY_INVARIANTS, SAFETY_INVARIANTS_VERSION } from "../../lib/pilot/safety-invariants";
 import { buildPromotionStatus } from "../../lib/pilot/promotion-status";
 import { buildReportExportPreview } from "../../lib/pilot/report-export";
+import { buildPromotionEvidenceBundle } from "../../lib/pilot/promotion-evidence";
 
 const ROOT = process.cwd();
 const failures: string[] = [];
@@ -64,6 +65,13 @@ ok(EXECUTOR_PRECHECKS.find((p) => p.id === "explicit-human-approval")?.status ==
   try { parsed = JSON.parse(ex.content); } catch { /* leave empty → fails below */ }
   ok(parsed.executorReady === false && parsed.totals?.total === EXECUTOR_PRECHECKS.length && parsed.totals?.standing?.satisfied === st.totals.standing.satisfied && parsed.totals?.promotion?.pending === st.pendingPromotionPrechecks && (parsed.blockingFailures?.length ?? -1) === 0,
     `promotion export reflects checklist totals (total ${parsed.totals?.total}, standing satisfied ${parsed.totals?.standing?.satisfied}, promotion pending ${parsed.totals?.promotion?.pending}, blockingFailures ${parsed.blockingFailures?.length})`);
+
+  // 9. promotion evidence bundle (12.18) reflects the same status totals and keeps executorReady false
+  const bundle = buildPromotionEvidenceBundle(new Date(0).toISOString());
+  ok(bundle.executorReady === false && bundle.eligibleForExecutionExpected === false, "evidence bundle: executorReady + eligibleForExecutionExpected false");
+  ok(bundle.precheckTotals.total === EXECUTOR_PRECHECKS.length && bundle.pendingPromotionGates.length === st.pendingPromotionPrechecks && bundle.blockingFailures.length === 0,
+    `evidence bundle reflects totals (total ${bundle.precheckTotals.total}, pending ${bundle.pendingPromotionGates.length}, blockingFailures ${bundle.blockingFailures.length})`);
+  ok(bundle.safetyInvariantVersion === SAFETY_INVARIANTS_VERSION && bundle.manifestInSync === true && bundle.verificationCommands.length >= 5, "evidence bundle: manifest version in sync + verification commands present");
 }
 
 console.log("");

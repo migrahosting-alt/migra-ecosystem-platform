@@ -83,6 +83,7 @@ export function classifyPilotAction(name: string, args: Record<string, unknown> 
   if (name === "ops.actions.list") return mk("safe_read", "lists the controlled action registry (read-only)");
   if (name === "ops.promotion.status") return mk("safe_read", "reports executor promotion-gate status from the pre-implementation checklist (read-only); EXECUTOR_READY stays false, executes nothing");
   if (name === "ops.promotion.export_preview") return mk("safe_read", "preview-only redacted export of the promotion-gate status (reuses the report-export engine); writes no file, executes nothing, fails closed on residual secrets");
+  if (name === "ops.promotion.evidence") return mk("safe_read", "read-only aggregated promotion evidence bundle (status + manifest + precheck + commands); EXECUTOR_READY stays false, executes nothing");
   if (name === "ops.targets.list" || name === "ops.targets.check") return mk("safe_read", "reads the dev ops target allowlist gate (read-only); executes nothing");
   if (name === "ops.service_preflight.preview" || name === "ops.service_preflight.run") return mk("safe_read", "read-only dev service preflight (target/registry/env/hazard/health gates); executes no action, eligibleForFutureExecution stays false");
   if (name === "ops.eligibility.preview" || name === "ops.eligibility.check") return mk("safe_read", "read-only dev action eligibility policy (structural gate evaluation); no executor, eligibleForExecution stays false, no approval card");
