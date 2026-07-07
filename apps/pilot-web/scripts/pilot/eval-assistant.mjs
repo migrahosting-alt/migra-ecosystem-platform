@@ -28,8 +28,16 @@ const SECRET = (process.env.MIGRAPILOT_ASSISTANT_SECRET || "").trim();
 const OUT = process.env.EVAL_OUT || resolve(HERE, "eval-report.json");
 const CONCURRENCY = Math.max(1, Number(process.env.EVAL_CONCURRENCY || 4));
 const PROMPTS_PATH = process.env.EVAL_PROMPTS || resolve(HERE, "eval-prompts.json");
+// Prompt A/B preview mode: when EVAL_SYSTEM_PROMPT_FILE is set, bypass the HTTP
+// endpoint and call the model directly with that system prompt (no RAG), so a
+// prompt change can be scored BEFORE it is deployed. Envelope is synthesized
+// (the endpoint response code is unchanged, so it stays safe-read by construction).
+const DIRECT_SYSTEM = process.env.EVAL_SYSTEM_PROMPT_FILE
+  ? readFileSync(process.env.EVAL_SYSTEM_PROMPT_FILE, "utf8")
+  : null;
+const DIRECT_MODEL = process.env.EVAL_ASSISTANT_MODEL || "gpt-oss:120b-cloud";
 
-if (!SECRET) {
+if (!SECRET && !DIRECT_SYSTEM) {
   console.error("FATAL: MIGRAPILOT_ASSISTANT_SECRET is required (never printed).");
   process.exit(2);
 }
@@ -56,6 +64,24 @@ const looksRefusal = (t) => REFUSAL_RE.test(t);
 // ── HTTP helpers ─────────────────────────────────────────────────────────────
 async function callAssistant(prompt) {
   const t0 = Date.now();
+  if (DIRECT_SYSTEM) {
+    try {
+      const res = await fetch(`${OLLAMA}/api/chat`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          model: DIRECT_MODEL, stream: false, options: { temperature: 0.2 },
+          messages: [{ role: "system", content: DIRECT_SYSTEM }, { role: "user", content: prompt }],
+        }),
+        signal: AbortSignal.timeout(70_000),
+      });
+      const data = await res.json();
+      const reply = data?.message?.content || "";
+      return { httpStatus: 200, json: { reply, mode: "assistant_safe_read", toolsExecuted: false, approvalCardsEmitted: false, executor: "absent" }, raw: reply, ms: Date.now() - t0 };
+    } catch (err) {
+      return { httpStatus: 0, json: null, raw: "", ms: Date.now() - t0, error: String(err?.message || err) };
+    }
+  }
   try {
     const res = await fetch(`${BASE}/api/pilot/assistant`, {
       method: "POST",
