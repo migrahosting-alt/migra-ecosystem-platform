@@ -20,8 +20,21 @@ export interface WorkspaceContext {
   warning: string;
 }
 
+export interface DraftPatchPlan {
+  title: string;
+  problemSummary: string;
+  targetScope: string;
+  filesLikelyInvolved: string[];
+  proposedChanges: string[];
+  riskLevel: "low" | "medium" | "high";
+  manualVerificationCommands: string[];
+  rollbackNotes: string[];
+  safetyBoundary: string;
+}
+
 export interface WebviewMessage {
   command: string;
   prompt?: string;
   context?: WorkspaceContext;
+  patchPlan?: DraftPatchPlan;
 }
