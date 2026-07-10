@@ -63,6 +63,48 @@ All status/export/evidence tools + routes are **`safe_read`**, create **no appro
 
 **`NEEDS_REAL_SD_ENDPOINT`** — SDXL live image generation is unproven until an endpoint is configured (`PILOT_IMAGE_PROVIDER=sdxl` + `PILOT_IMAGE_ENDPOINT`). It is a **separate track**, not an executor promotion gate. The image provider is disabled by default; `image.generate` remains `requires_approval`, `image.health`/`image.preview` remain `safe_read`.
 
+## Customer-facing assistant surface
+
+`POST /api/pilot/assistant` is the reusable customer-facing MigraPilot assistant surface. It is bearer-protected by `MIGRAPILOT_ASSISTANT_SECRET`, runs a single completion with no tools, and stays strictly read-only (`toolsExecuted:false`, `approvalCardsEmitted:false`, executor absent).
+
+`POST /api/pilot/assistant/abigail` is the dedicated Abigail / MigraHosting profile. It has the same safety posture, but uses its own secret and branding config so the MigraHosting customer assistant can be deployed independently from other embeds.
+
+Branding and embed scope are environment-driven so the same surface can power different products without changing code:
+
+- `MIGRAPILOT_ASSISTANT_NAME` — assistant name shown in the system identity, e.g. `Abigail AI Assistant`
+- `MIGRAPILOT_ASSISTANT_ORG_LABEL` — organization label, e.g. `MigraHosting`
+- `MIGRAPILOT_ASSISTANT_PLATFORM` — embed host/product, e.g. `MigraHosting`
+- `MIGRAPILOT_ASSISTANT_CONTEXT` — optional extra plain-text policy for product-specific guidance
+
+Example Abigail/MigraHosting configuration:
+
+```bash
+MIGRAPILOT_ASSISTANT_NAME="Abigail AI Assistant"
+MIGRAPILOT_ASSISTANT_ORG_LABEL="MigraHosting"
+MIGRAPILOT_ASSISTANT_PLATFORM="MigraHosting customer portal"
+MIGRAPILOT_ASSISTANT_CONTEXT="Help customers with hosting, domains, billing, and support questions. Stay read-only and hand off account-changing requests to human/operator flows."
+```
+
+Dedicated Abigail route configuration:
+
+```bash
+MIGRAPILOT_ABIGAIL_ASSISTANT_SECRET="replace-with-strong-bearer-secret"
+MIGRAPILOT_ABIGAIL_ASSISTANT_NAME="Abigail AI Assistant"
+MIGRAPILOT_ABIGAIL_ASSISTANT_ORG_LABEL="MigraHosting"
+MIGRAPILOT_ABIGAIL_ASSISTANT_PLATFORM="MigraHosting customer portal"
+MIGRAPILOT_ABIGAIL_ASSISTANT_CONTEXT="Help customers with hosting, domains, billing, and support questions. Stay read-only and hand off account-changing requests to human/operator flows."
+```
+
+MigraHosting integration target:
+
+```text
+POST /api/pilot/assistant/abigail
+Authorization: Bearer <MIGRAPILOT_ABIGAIL_ASSISTANT_SECRET>
+content-type: application/json
+
+{ "message": "How do I point my domain to my hosting plan?" }
+```
+
 ## Promotion rule
 
 An executor may be implemented **only** in a future, human-approved phase that (1) keeps all standing prechecks green (`npm run pilot:ci`), (2) satisfies **every** promotion precheck in the 12.15 checklist, and (3) flips `EXECUTOR_READY` to `true` as an explicit reviewed change. Until then the perimeter stays cold and the read-only surfaces above are the operator's review path.
