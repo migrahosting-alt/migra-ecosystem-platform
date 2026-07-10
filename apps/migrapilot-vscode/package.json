@@ -1,0 +1,82 @@
+{
+  "name": "migrapilot-vscode",
+  "displayName": "MigraPilot AI Engineer",
+  "description": "AI engineering command center for building, fixing, deploying, and operating the MigraTeck ecosystem.",
+  "version": "0.0.1",
+  "publisher": "migrateck",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "main": "./out/extension.js",
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onView:migrapilot.chatView",
+    "onCommand:migrapilot.openChat",
+    "onCommand:migrapilot.explainCurrentFile",
+    "onCommand:migrapilot.reviewSelection",
+    "onCommand:migrapilot.startAgentTask",
+    "onCommand:migrapilot.openVoiceCommand",
+    "onCommand:migrapilot.openCommandCenter",
+    "onCommand:migrapilot.showCurrentContext"
+  ],
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "migrapilot",
+          "title": "MigraPilot"
+        }
+      ]
+    },
+    "views": {
+      "migrapilot": [
+        {
+          "id": "migrapilot.chatView",
+          "name": "AI Engineer"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "migrapilot.openChat",
+        "title": "Open Chat"
+      },
+      {
+        "command": "migrapilot.explainCurrentFile",
+        "title": "Explain Current File"
+      },
+      {
+        "command": "migrapilot.reviewSelection",
+        "title": "Review Selection"
+      },
+      {
+        "command": "migrapilot.startAgentTask",
+        "title": "Start Agent Task"
+      },
+      {
+        "command": "migrapilot.openVoiceCommand",
+        "title": "Open Voice Command"
+      },
+      {
+        "command": "migrapilot.openCommandCenter",
+        "title": "Open Command Center"
+      },
+      {
+        "command": "migrapilot.showCurrentContext",
+        "title": "Show Current Context"
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./"
+  },
+  "devDependencies": {
+    "@types/node": "^16.18.34",
+    "@types/vscode": "^1.90.0",
+    "typescript": "^5.1.6"
+  }
+}
