@@ -1,8 +1,8 @@
 {
   "name": "migrapilot-vscode",
   "displayName": "MigraPilot AI Engineer",
-  "description": "AI engineering command center for building, fixing, deploying, and operating the MigraTeck ecosystem.",
-  "version": "0.0.1",
+  "description": "AI engineering command center with local read-only file and selection context for the MigraTeck ecosystem.",
+  "version": "0.0.2",
   "publisher": "migrateck",
   "engines": {
     "vscode": "^1.90.0"

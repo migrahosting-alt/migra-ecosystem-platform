@@ -5,6 +5,7 @@ import { WebviewProvider } from "./webviewProvider";
 
 export function activate(context: vscode.ExtensionContext): void {
   console.log("MigraPilot AI Engineer activated");
+
   const webviewProvider = new WebviewProvider(context.extensionUri);
   const contextCollector = new ContextCollector();
 
@@ -20,7 +21,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
   const statusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
   statusBar.text = "MigraPilot: Read-only";
-  statusBar.tooltip = "MigraPilot Phase 1 runs at Action Level 0";
+  statusBar.tooltip = "MigraPilot Phase 2 runs at Action Level 0";
   statusBar.command = "migrapilot.openChat";
   statusBar.show();
 
@@ -35,12 +36,13 @@ export function activate(context: vscode.ExtensionContext): void {
 
   context.subscriptions.push(
     vscode.window.onDidChangeActiveTextEditor(() => postContext()),
-    vscode.window.onDidChangeTextEditorSelection(() => postContext())
+    vscode.window.onDidChangeTextEditorSelection(() => postContext()),
+    vscode.workspace.onDidChangeTextDocument(() => postContext())
   );
 
   postContext();
 }
 
 export function deactivate(): void {
-  // No shutdown work required in Phase 1.
+  // No shutdown work required in Phase 2.
 }

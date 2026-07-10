@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import type { WebviewMessage } from "./types";
+import type { WebviewMessage, WorkspaceContext } from "./types";
 
 export class WebviewProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = "migrapilot.chatView";
@@ -60,13 +60,13 @@ export class WebviewProvider implements vscode.WebviewViewProvider {
       <div>
         <p class="eyebrow">MigraPilot</p>
         <h1>AI Engineer</h1>
-        <p class="subtitle">Your autonomous coding, debugging, deployment, and infrastructure co-pilot for the MigraTeck ecosystem.</p>
+        <p class="subtitle">Local read-only context upgrade for the MigraTeck ecosystem.</p>
       </div>
       <span class="badge">Read-only MVP</span>
     </header>
 
     <section class="warning">
-      Read-only MVP — no file writes, no commands, no deploys.
+      Read-only MVP — no file writes, no commands, no deploys, no backend calls.
     </section>
 
     <section class="mode-grid">
@@ -80,45 +80,48 @@ export class WebviewProvider implements vscode.WebviewViewProvider {
       <h2>Status</h2>
       <div class="kv"><span>MigraPilot</span><strong>Read-only</strong></div>
       <div class="kv"><span>Action level</span><strong>Level 0</strong></div>
-      <div class="kv"><span>Agent mode</span><strong>Planning only in Phase 1</strong></div>
+      <div class="kv"><span>Agent mode</span><strong>Planning only in Phase 2</strong></div>
       <div class="kv"><span>Voice</span><strong>Transcript review will be required before future execution</strong></div>
-      <div class="kv"><span>Command Center</span><strong>Operations are locked in Phase 1</strong></div>
+      <div class="kv"><span>Command Center</span><strong>Operations are locked in Phase 2</strong></div>
     </section>
 
     <section class="card">
       <h2>Workspace Context</h2>
       <div class="kv"><span>Workspace</span><strong id="workspaceName">Unknown</strong></div>
       <div class="kv"><span>Active file</span><strong id="activeFilePath">No active file</strong></div>
+      <div class="kv"><span>Relative path</span><strong id="relativeFilePath">No active file</strong></div>
       <div class="kv"><span>Language</span><strong id="languageId">Unknown</strong></div>
+      <div class="kv"><span>File size</span><strong id="fileSize">0 bytes</strong></div>
+      <div class="kv"><span>File lines</span><strong id="fileLines">0</strong></div>
       <div class="kv"><span>Selection</span><strong id="selectionStatus">No selection</strong></div>
+      <div class="kv"><span>Context warning</span><strong id="contextWarning">None</strong></div>
+    </section>
+
+    <section class="card">
+      <h2>Local File Preview</h2>
+      <pre id="filePreview" class="preview">Open a file to show local read-only preview.</pre>
+    </section>
+
+    <section class="card">
+      <h2>Selected Text Preview</h2>
+      <pre id="selectionPreview" class="preview">Select text to show local read-only preview.</pre>
     </section>
 
     <section class="card">
       <h2>Project Health</h2>
-      <p class="muted">Placeholder only. No scans, commands, network calls, or production checks run in Phase 1.</p>
-    </section>
-
-    <section class="card">
-      <h2>Agent Capabilities</h2>
-      <ul>
-        <li>Explain code and architecture</li>
-        <li>Draft test plans</li>
-        <li>Draft patch plans</li>
-        <li>Prepare deployment plans for review</li>
-        <li>Summarize local context</li>
-      </ul>
+      <p class="muted">Placeholder only. No scans, commands, network calls, or production checks run in Phase 2.</p>
     </section>
 
     <section class="card">
       <h2>Suggested Actions</h2>
       <div class="actions">
-        <button data-prompt="Explain this file using only local editor metadata.">Explain this file</button>
-        <button data-prompt="Review the selected code using metadata only. Do not execute anything.">Review selected code</button>
-        <button data-prompt="Find possible issues from the current context. Draft only.">Find possible issues</button>
+        <button data-prompt="Explain this file using the local read-only file preview.">Explain this file</button>
+        <button data-prompt="Review the selected code using the local read-only selection preview.">Review selected code</button>
+        <button data-prompt="Find possible issues from local context. Draft only.">Find possible issues</button>
         <button data-prompt="Draft tests for this area. Do not write files.">Draft tests</button>
         <button data-prompt="Draft a patch plan. Do not edit files.">Draft patch plan</button>
         <button data-prompt="Prepare a deployment plan for review. Do not deploy.">Prepare deployment plan</button>
-        <button data-prompt="Search project context placeholder. No backend calls in Phase 1.">Search project context</button>
+        <button data-prompt="Search project context placeholder. No backend calls in Phase 2.">Search project context</button>
         <button data-prompt="Summarize terminal error placeholder. User must paste errors manually.">Summarize terminal error</button>
       </div>
     </section>
@@ -126,13 +129,13 @@ export class WebviewProvider implements vscode.WebviewViewProvider {
     <section class="card chat">
       <h2>Chat Transcript</h2>
       <div id="transcript" class="transcript">
-        <div class="message assistant">MigraPilot is online in read-only MVP mode.</div>
+        <div class="message assistant">MigraPilot is online in read-only local context mode.</div>
       </div>
       <div class="composer">
         <input id="promptInput" type="text" placeholder="Ask MigraPilot..." />
         <button id="sendButton">Send</button>
       </div>
-      <div class="voice">🎙 Voice input placeholder — disabled in Phase 1.</div>
+      <div class="voice">🎙 Voice input placeholder — disabled in Phase 2.</div>
     </section>
 
     <footer>Powered by MigraPilot on MigraHosting Support</footer>
@@ -150,14 +153,27 @@ export class WebviewProvider implements vscode.WebviewViewProvider {
       transcript.scrollTop = transcript.scrollHeight;
     }
 
+    function formatBytes(bytes) {
+      if (!bytes) return "0 bytes";
+      if (bytes < 1024) return bytes + " bytes";
+      if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
+      return (bytes / (1024 * 1024)).toFixed(1) + " MB";
+    }
+
     function updateContext(context) {
       if (!context) return;
       document.getElementById("workspaceName").textContent = context.workspaceName || "Unknown";
       document.getElementById("activeFilePath").textContent = context.activeFilePath || "No active file";
+      document.getElementById("relativeFilePath").textContent = context.relativeFilePath || "No active file";
       document.getElementById("languageId").textContent = context.languageId || "Unknown";
+      document.getElementById("fileSize").textContent = formatBytes(context.fileSizeBytes || 0);
+      document.getElementById("fileLines").textContent = String(context.fileLineCount || 0);
       document.getElementById("selectionStatus").textContent = context.hasSelection
-        ? "Selected lines: " + context.selectionLineCount
+        ? "Selected lines: " + context.selectionLineCount + " / chars: " + context.selectedTextLength
         : "No selection";
+      document.getElementById("contextWarning").textContent = context.warning || "None";
+      document.getElementById("filePreview").textContent = context.filePreview || "Open a file to show local read-only preview.";
+      document.getElementById("selectionPreview").textContent = context.selectedTextPreview || "Select text to show local read-only preview.";
     }
 
     document.querySelectorAll("[data-prompt]").forEach((button) => {
@@ -181,6 +197,7 @@ export class WebviewProvider implements vscode.WebviewViewProvider {
       }
       if (message.command === "appendPrompt" && message.prompt) {
         appendMessage("user", message.prompt);
+        updateContext(message.context);
       }
       if (message.command === "appendMessage" && message.prompt) {
         appendMessage("assistant", message.prompt);

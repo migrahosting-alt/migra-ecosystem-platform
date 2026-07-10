@@ -9,12 +9,12 @@ type CommandSpec = {
 
 const COMMANDS: CommandSpec[] = [
   { id: "migrapilot.openChat", prompt: "Open MigraPilot chat." },
-  { id: "migrapilot.explainCurrentFile", prompt: "Explain the current file using local context only." },
-  { id: "migrapilot.reviewSelection", prompt: "Review the selected code. Draft only; no edits." },
-  { id: "migrapilot.startAgentTask", prompt: "Start an agent task draft. Planning only in Phase 1." },
+  { id: "migrapilot.explainCurrentFile", prompt: "Explain the current file using the local read-only file preview." },
+  { id: "migrapilot.reviewSelection", prompt: "Review the selected code using the local read-only selection preview. Draft only; no edits." },
+  { id: "migrapilot.startAgentTask", prompt: "Draft an agent task plan using local context only. Planning only in Phase 2." },
   { id: "migrapilot.openVoiceCommand", prompt: "Open voice command placeholder. Transcript review required before future execution." },
-  { id: "migrapilot.openCommandCenter", prompt: "Open Command Center placeholder. Operations locked in Phase 1." },
-  { id: "migrapilot.showCurrentContext", prompt: "Show the current workspace context." },
+  { id: "migrapilot.openCommandCenter", prompt: "Open Command Center placeholder. Operations locked in Phase 2." },
+  { id: "migrapilot.showCurrentContext", prompt: "Show the current workspace, file, and selection context." },
 ];
 
 export class Commands {
@@ -28,7 +28,7 @@ export class Commands {
         webviewProvider.showView();
         webviewProvider.postMessage({
           command: spec.id === "migrapilot.showCurrentContext" ? "showCurrentContext" : "appendPrompt",
-          prompt: spec.prompt,
+          prompt: buildPrompt(spec.prompt, workspaceContext),
           context: workspaceContext,
         });
       });
@@ -36,4 +36,22 @@ export class Commands {
       context.subscriptions.push(disposable);
     }
   }
+}
+
+function buildPrompt(prompt: string, context: ReturnType<typeof ContextCollector.collect>): string {
+  const target = context.hasSelection ? "selected text" : "current file";
+  const path = context.relativeFilePath || context.activeFilePath || "no active file";
+
+  return [
+    prompt,
+    "",
+    `Target: ${target}`,
+    `File: ${path}`,
+    `Language: ${context.languageId || "unknown"}`,
+    `Lines: ${context.fileLineCount}`,
+    `Selection lines: ${context.selectionLineCount}`,
+    context.warning ? `Warning: ${context.warning}` : "",
+    "",
+    "Do not edit files. Do not run commands. Draft only.",
+  ].filter(Boolean).join("\n");
 }
