@@ -1,6 +1,7 @@
 import * as vscode from "vscode";
 import { ContextCollector } from "./contextCollector";
 import { createDraftPatchPlan } from "./patchPlanner";
+import type { WorkspaceContext } from "./types";
 import { WebviewProvider } from "./webviewProvider";
 
 type CommandSpec = {
@@ -17,22 +18,27 @@ const COMMANDS: CommandSpec[] = [
   { id: "migrapilot.openVoiceCommand", prompt: "Open voice command placeholder. Transcript review required before future execution." },
   { id: "migrapilot.openCommandCenter", prompt: "Open Command Center placeholder. Operations locked in Phase 3." },
   { id: "migrapilot.showCurrentContext", prompt: "Show the current workspace, file, and selection context." },
+  { id: "migrapilot.captureCurrentContext", prompt: "Captured current editor context." },
 ];
 
 export class Commands {
   public static registerCommands(
     context: vscode.ExtensionContext,
-    webviewProvider: WebviewProvider
+    webviewProvider: WebviewProvider,
+    captureContext?: () => WorkspaceContext
   ): void {
     for (const spec of COMMANDS) {
-      const disposable = vscode.commands.registerCommand(spec.id, () => {
-        const workspaceContext = ContextCollector.collect();
+      const disposable = vscode.commands.registerCommand(spec.id, async () => {
+        // Capture before showView(): focusing the webview clears activeTextEditor.
+        const workspaceContext = captureContext
+          ? captureContext()
+          : ContextCollector.collect(vscode.window.activeTextEditor);
         const prompt = buildPrompt(spec.prompt, workspaceContext);
         const patchPlan = spec.patchPlan
           ? createDraftPatchPlan(workspaceContext, spec.prompt)
           : undefined;
 
-        webviewProvider.showView();
+        await webviewProvider.showView();
         webviewProvider.postMessage({
           command: spec.id === "migrapilot.showCurrentContext" ? "showCurrentContext" : "appendPrompt",
           prompt,

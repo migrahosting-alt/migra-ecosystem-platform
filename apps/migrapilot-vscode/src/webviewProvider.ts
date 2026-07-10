@@ -5,11 +5,14 @@ export class WebviewProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = "migrapilot.chatView";
 
   private webviewView?: vscode.WebviewView;
+  private webviewReady = false;
+  private readonly pendingMessages: Array<WebviewMessage | Record<string, unknown>> = [];
 
   public constructor(private readonly extensionUri: vscode.Uri) {}
 
   public resolveWebviewView(webviewView: vscode.WebviewView): void {
     this.webviewView = webviewView;
+    this.webviewReady = false;
 
     webviewView.webview.options = {
       enableScripts: true,
@@ -18,7 +21,20 @@ export class WebviewProvider implements vscode.WebviewViewProvider {
 
     webviewView.webview.html = this.getHtml(webviewView.webview);
 
+    webviewView.onDidDispose(() => {
+      this.webviewView = undefined;
+      this.webviewReady = false;
+    });
+
     webviewView.webview.onDidReceiveMessage((message: WebviewMessage) => {
+      // The webview signals readiness once its message listener is attached.
+      // Anything queued before this point would otherwise be dropped.
+      if (message.command === "ready") {
+        this.webviewReady = true;
+        this.flushPendingMessages();
+        return;
+      }
+
       if (message.command === "localPrompt" && message.prompt) {
         const patchPlan = message.prompt.toLowerCase().includes("patch plan")
           ? undefined
@@ -33,12 +49,34 @@ export class WebviewProvider implements vscode.WebviewViewProvider {
     });
   }
 
-  public showView(): void {
-    vscode.commands.executeCommand("migrapilot.chatView.focus");
+  public async showView(): Promise<void> {
+    await vscode.commands.executeCommand("migrapilot.chatView.focus");
+  }
+
+  public postCapturedContext(context: import("./types").WorkspaceContext): void {
+    this.postMessage({
+      command: "contextUpdate",
+      context,
+    });
   }
 
   public postMessage(message: WebviewMessage | Record<string, unknown>): void {
-    this.webviewView?.webview.postMessage(message);
+    if (this.webviewView && this.webviewReady) {
+      this.webviewView.webview.postMessage(message);
+      return;
+    }
+
+    this.pendingMessages.push(message);
+  }
+
+  private flushPendingMessages(): void {
+    if (!this.webviewView || !this.webviewReady) {
+      return;
+    }
+
+    for (const message of this.pendingMessages.splice(0)) {
+      this.webviewView.webview.postMessage(message);
+    }
   }
 
   private getHtml(webview: vscode.Webview): string {
@@ -278,6 +316,8 @@ export class WebviewProvider implements vscode.WebviewViewProvider {
         }
       }
     });
+
+    vscode.postMessage({ command: "ready" });
   </script>
 </body>
 </html>`;
