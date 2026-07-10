@@ -4,6 +4,7 @@ import { ContextCollector } from "./contextCollector";
 import { WebviewProvider } from "./webviewProvider";
 
 export function activate(context: vscode.ExtensionContext): void {
+  console.log("MigraPilot AI Engineer activated");
   const webviewProvider = new WebviewProvider(context.extensionUri);
   const contextCollector = new ContextCollector();
 

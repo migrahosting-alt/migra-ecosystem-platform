@@ -12,6 +12,7 @@
     "Other"
   ],
   "activationEvents": [
+    "onStartupFinished",
     "onView:migrapilot.chatView",
     "onCommand:migrapilot.openChat",
     "onCommand:migrapilot.explainCurrentFile",
@@ -26,7 +27,8 @@
       "activitybar": [
         {
           "id": "migrapilot",
-          "title": "MigraPilot"
+          "title": "MigraPilot",
+          "icon": "media/icon.svg"
         }
       ]
     },
@@ -34,38 +36,39 @@
       "migrapilot": [
         {
           "id": "migrapilot.chatView",
-          "name": "AI Engineer"
+          "name": "AI Engineer",
+          "type": "webview"
         }
       ]
     },
     "commands": [
       {
         "command": "migrapilot.openChat",
-        "title": "Open Chat"
+        "title": "MigraPilot: Open Chat"
       },
       {
         "command": "migrapilot.explainCurrentFile",
-        "title": "Explain Current File"
+        "title": "MigraPilot: Explain Current File"
       },
       {
         "command": "migrapilot.reviewSelection",
-        "title": "Review Selection"
+        "title": "MigraPilot: Review Selection"
       },
       {
         "command": "migrapilot.startAgentTask",
-        "title": "Start Agent Task"
+        "title": "MigraPilot: Start Agent Task"
       },
       {
         "command": "migrapilot.openVoiceCommand",
-        "title": "Open Voice Command"
+        "title": "MigraPilot: Open Voice Command"
       },
       {
         "command": "migrapilot.openCommandCenter",
-        "title": "Open Command Center"
+        "title": "MigraPilot: Open Command Center"
       },
       {
         "command": "migrapilot.showCurrentContext",
-        "title": "Show Current Context"
+        "title": "MigraPilot: Show Current Context"
       }
     ]
   },
