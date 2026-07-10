@@ -6,8 +6,8 @@ const MAX_SELECTION_CHARS = 12000;
 const WARNING_SIZE_BYTES = 200000;
 
 export class ContextCollector {
-  public static collect(): WorkspaceContext {
-    return new ContextCollector().collectContext(vscode.window.activeTextEditor);
+  public static collect(editor?: vscode.TextEditor): WorkspaceContext {
+    return new ContextCollector().collectContext(editor ?? vscode.window.activeTextEditor);
   }
 
   public collectContext(editor?: vscode.TextEditor): WorkspaceContext {
@@ -86,6 +86,6 @@ export class ContextCollector {
   }
 
   public dispose(): void {
-    // No resources to release in Phase 2.
+    // No resources to release in Phase 3.5.
   }
 }

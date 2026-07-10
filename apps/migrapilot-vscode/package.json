@@ -1,8 +1,8 @@
 {
   "name": "migrapilot-vscode",
   "displayName": "MigraPilot AI Engineer",
-  "description": "AI engineering command center with local read-only context and draft patch planning for the MigraTeck ecosystem.",
-  "version": "0.0.3",
+  "description": "AI engineering command center with reliable local context capture for the MigraTeck ecosystem.",
+  "version": "0.0.3-ctx.1",
   "publisher": "migrateck",
   "engines": {
     "vscode": "^1.90.0"
@@ -20,7 +20,8 @@
     "onCommand:migrapilot.startAgentTask",
     "onCommand:migrapilot.openVoiceCommand",
     "onCommand:migrapilot.openCommandCenter",
-    "onCommand:migrapilot.showCurrentContext"
+    "onCommand:migrapilot.showCurrentContext",
+    "onCommand:migrapilot.captureCurrentContext"
   ],
   "contributes": {
     "viewsContainers": {
@@ -69,6 +70,10 @@
       {
         "command": "migrapilot.showCurrentContext",
         "title": "MigraPilot: Show Current Context"
+      },
+      {
+        "command": "migrapilot.captureCurrentContext",
+        "title": "MigraPilot: Capture Current Context"
       }
     ]
   },
