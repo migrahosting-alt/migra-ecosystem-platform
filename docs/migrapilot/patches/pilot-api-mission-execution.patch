@@ -1,0 +1,611 @@
+--- a/services/pilot-api/src/worker/missionWorker.ts
++++ b/services/pilot-api/src/worker/missionWorker.ts
+@@ -16,6 +16,9 @@
+ import { prisma } from "../db/prisma.js";
+ import * as msn from "../services/engineeringOs/missionService.js";
+ import * as auto from "../services/engineeringOs/autonomyService.js";
++import { executeMissionTask, type ExecContext, type ExecDeps } from "../services/engineeringOs/missionExecutor.js";
++import { getToolRegistry } from "@migra/tooling";
++import { executeToolCall } from "@migra/tool-runner";
+ import { acquireMissionLock, releaseMissionLock } from "./lease.js";
+ import * as activityEmitter from "./activity.js";
+ import { captureMissionSnapshot } from "./driftWorker.js";
+@@ -108,22 +111,74 @@
+         continue;
+       }
+ 
+-      // Check if task is Tier 3 — never auto-execute
+-      const hasTier3 = nextTask.toolCalls.some((tc) => {
+-        // Tier 3 = destructive ops. In absence of tier metadata on toolCall,
+-        // check the mission's tool runs for tier info.
+-        return false; // Worker does NOT auto-execute Tier 3
+-      });
++      // ── Execute the task through the mission executor (Thread 2) ──
++      // Safe by default: the worker never auto-approves. Read/dry-run tasks run;
++      // local writes/commands route to awaiting_approval; remote mutation is
++      // disabled unless explicitly enabled + gated. Cancellation and Tier-3
++      // (remote WRITE/DANGER) are handled inside decideTaskExecution.
++      const registry = getToolRegistry();
++      const ctx: ExecContext = {
++        environment: mission.environment,
++        identityOk: !!mission.operator.operatorId && mission.operator.operatorId !== "unknown",
++        approvalGranted: false, // worker auto-step never self-approves a mutation
++        remoteMutationEnabled: process.env.PILOT_REMOTE_MUTATION_ENABLED === "true",
++        level6GatesMet: false,
++        remoteReadAllowed: process.env.PILOT_REMOTE_READ_DISABLED !== "true",
++        cancelled: mission.status === "canceled",
++        riskOf: (toolName) => registry.tools.find((t) => t.name === toolName)?.risk,
++      };
++      const deps: ExecDeps = {
++        now: () => Date.now(),
++        isCancelled: async () => {
++          const row = await prisma.mission.findUnique({ where: { id: m.id }, select: { status: true } });
++          return row?.status === "canceled";
++        },
++        timeoutMs: 25_000,
++        runTool: async (call, opts) => {
++          const envelope = await executeToolCall({
++            actor: { userId: mission.operator.operatorId, role: mission.operator.role } as any,
++            toolName: call.toolName,
++            args: { ...call.input, dryRun: opts.dryRun, idempotencyKey: opts.idempotencyKey, correlationId: mission.runIdBase },
++          });
++          return {
++            ok: envelope.ok,
++            errorCode: envelope.error?.code,
++            journalEntryId: envelope.journalEntryId,
++            data: envelope.data,
++          };
++        },
++        record: async (entry) => {
++          await msn.addToolRun({
++            missionId: m.id,
++            taskId: entry.taskId,
++            toolName: entry.toolName,
++            runId: `${mission.runIdBase}:${entry.taskId}`,
++            environment: mission.environment,
++            runnerType: "local",
++            baseTier: entry.level,
++            effectiveTier: entry.level,
++            journalEntryId: entry.journalEntryId,
++            ok: entry.ok,
++            errorCode: entry.errorCode,
++          });
++        },
++      };
+ 
+-      // Step: mark running → done (placeholder — real execution via tool-runner)
+       await msn.updateTaskStatus(nextTask.taskId, "running");
+-      // TODO: Execute via tool-runner service, for now mark done
+-      await msn.updateTaskStatus(nextTask.taskId, "done");
++      const result = await executeMissionTask(nextTask, m.id, ctx, deps);
++      await msn.updateTaskStatus(nextTask.taskId, result.status, { attempts: result.attempts });
++
++      if (result.status === "awaiting_approval") {
++        await msn.updateMissionStatus(m.id, "awaiting_approval", {
++          notes: [`Task "${nextTask.title}" requires approval (${result.decision.kind === "await_approval" ? result.decision.reason : "approval"})`],
++        });
++      }
+ 
+       await activityEmitter.emit({
+         type: "mission",
+-        message: `Task stepped: ${nextTask.title}`,
+-        data: { missionId: m.id, taskId: nextTask.taskId },
++        level: result.status === "failed" ? "warn" : "info",
++        message: `Task ${result.status}: ${nextTask.title}`,
++        data: { missionId: m.id, taskId: nextTask.taskId, decision: result.decision.kind, ranToolCalls: result.ranToolCalls },
+       });
+ 
+       missionsStepped++;
+--- a/services/pilot-api/src/services/engineeringOs/missionExecutor.ts
++++ b/services/pilot-api/src/services/engineeringOs/missionExecutor.ts
+@@ -0,0 +1,316 @@
++/**
++ * Mission Executor (Thread 2) — turns a planned mission task into controlled,
++ * auditable execution. Replaces the missionWorker stub that marked tasks done
++ * without running anything.
++ *
++ * Design:
++ *  - Pure decision layer (`decideTaskExecution`, `computeTaskActionLevel`,
++ *    `nextTaskStatus`) with no I/O — fully unit-testable and deterministic.
++ *  - `executeMissionTask` orchestrates the decision → tool-runner execution →
++ *    persistence, with injected dependencies (clock, cancellation, tool runner,
++ *    recorder) so it is testable with fakes and free of hidden side effects.
++ *
++ * SAFETY (action-level model):
++ *   L0 remote/local READ  → execute (reads are safe)
++ *   L1 draft / dry-run    → execute as dry-run
++ *   L2 local WRITE        → requires approval
++ *   L3 local command      → requires approval
++ *   L5 remote READ        → requires policy allow
++ *   L6 remote WRITE/DANGER→ DISABLED unless every Level-6 gate passes AND approved
++ *   Missing identity / config → fail closed (denied).
++ */
++
++import type { ToolRisk } from "@migra/tooling";
++
++export type ActionLevel = 0 | 1 | 2 | 3 | 5 | 6;
++
++export type MissionTaskStatus =
++  | "pending"
++  | "running"
++  | "done"
++  | "failed"
++  | "awaiting_approval"
++  | "skipped";
++
++export interface ExecToolCall {
++  toolName: string;
++  input: Record<string, unknown>;
++  environment?: string; // "local" | "staging" | "prod" | ...
++  nonCritical?: boolean;
++}
++
++export interface ExecTask {
++  taskId: string;
++  toolCalls: ExecToolCall[];
++  retries: number;
++  maxRetries: number;
++  nonCritical?: boolean;
++}
++
++export interface ExecContext {
++  /** resolved mission environment */
++  environment: string;
++  /** operator/mission identity is present and valid */
++  identityOk: boolean;
++  /** an approval has been granted for this mission/task */
++  approvalGranted: boolean;
++  /** remote (Level 6) mutation is enabled by config (default false) */
++  remoteMutationEnabled: boolean;
++  /** every Level-6 gate (target verify, rollback, secrets, etc.) is satisfied */
++  level6GatesMet: boolean;
++  /** policy allows remote reads (Level 5) */
++  remoteReadAllowed: boolean;
++  /** mission/task has been cancelled */
++  cancelled: boolean;
++  /** lookup a tool's declared risk; undefined = unknown tool */
++  riskOf: (toolName: string) => ToolRisk | undefined;
++}
++
++export type Decision =
++  | { kind: "cancel" }
++  | { kind: "skip"; reason: string }
++  | { kind: "await_approval"; level: ActionLevel; reason: string }
++  | { kind: "denied"; code: string; reason: string }
++  | { kind: "execute"; level: ActionLevel; dryRun: boolean };
++
++const REMOTE_ENVS = new Set(["prod", "production", "staging", "remote"]);
++
++export function isRemoteEnv(environment: string | undefined): boolean {
++  return environment != null && REMOTE_ENVS.has(environment.toLowerCase());
++}
++
++/**
++ * The action level required to run this task = the max over its tool calls.
++ * Returns undefined if any tool is unknown (fail closed upstream).
++ */
++export function computeTaskActionLevel(task: ExecTask, ctx: ExecContext): ActionLevel | undefined {
++  let level: ActionLevel = 0;
++  for (const call of task.toolCalls) {
++    const risk = ctx.riskOf(call.toolName);
++    if (risk === undefined) return undefined; // unknown tool → fail closed
++    const remote = isRemoteEnv(call.environment ?? ctx.environment);
++    let callLevel: ActionLevel;
++    if (risk === "READ") {
++      callLevel = remote ? 5 : 0;
++    } else if (risk === "WRITE") {
++      callLevel = remote ? 6 : 2;
++    } else {
++      // DANGER
++      callLevel = remote ? 6 : 3;
++    }
++    if (callLevel > level) level = callLevel;
++  }
++  return level;
++}
++
++/**
++ * Pure execution decision. No I/O.
++ */
++export function decideTaskExecution(task: ExecTask, ctx: ExecContext): Decision {
++  if (ctx.cancelled) return { kind: "cancel" };
++  if (!ctx.identityOk) {
++    return { kind: "denied", code: "IDENTITY_MISSING", reason: "Mission identity is missing or invalid" };
++  }
++  if (task.toolCalls.length === 0) {
++    return { kind: "skip", reason: "No tool calls — draft/read-only task" };
++  }
++
++  const level = computeTaskActionLevel(task, ctx);
++  if (level === undefined) {
++    return { kind: "denied", code: "UNKNOWN_TOOL", reason: "Task references an unknown tool" };
++  }
++
++  switch (level) {
++    case 0:
++      return { kind: "execute", level, dryRun: false }; // local read
++    case 1:
++      return { kind: "execute", level, dryRun: true };
++    case 2:
++    case 3:
++      return ctx.approvalGranted
++        ? { kind: "execute", level, dryRun: false }
++        : { kind: "await_approval", level, reason: "Local write/command requires approval" };
++    case 5:
++      return ctx.remoteReadAllowed
++        ? { kind: "execute", level, dryRun: false }
++        : { kind: "denied", code: "REMOTE_READ_BLOCKED", reason: "Remote read not permitted by policy" };
++    case 6:
++      if (!ctx.remoteMutationEnabled) {
++        return { kind: "denied", code: "REMOTE_MUTATION_DISABLED", reason: "Remote mutation is disabled by default" };
++      }
++      if (!ctx.level6GatesMet) {
++        return { kind: "denied", code: "LEVEL6_GATES_UNMET", reason: "Level-6 gates not satisfied" };
++      }
++      if (!ctx.approvalGranted) {
++        return { kind: "await_approval", level, reason: "Remote mutation requires approval" };
++      }
++      return { kind: "execute", level, dryRun: false };
++    default:
++      return { kind: "denied", code: "UNCLASSIFIED", reason: `Unclassified action level ${level}` };
++  }
++}
++
++/**
++ * Deterministic task state transition given an execution outcome.
++ */
++export type TaskOutcome =
++  | { type: "cancelled" }
++  | { type: "skipped" }
++  | { type: "await_approval" }
++  | { type: "denied" }
++  | { type: "succeeded" }
++  | { type: "failed"; retriable: boolean };
++
++export function nextTaskStatus(
++  task: Pick<ExecTask, "retries" | "maxRetries" | "nonCritical">,
++  outcome: TaskOutcome
++): MissionTaskStatus {
++  switch (outcome.type) {
++    case "cancelled":
++      return "skipped";
++    case "skipped":
++      return "done";
++    case "await_approval":
++      return "awaiting_approval";
++    case "denied":
++      return task.nonCritical ? "skipped" : "failed";
++    case "succeeded":
++      return "done";
++    case "failed":
++      // Retriable and budget remaining → back to pending for another attempt.
++      if (outcome.retriable && task.retries < task.maxRetries) return "pending";
++      return task.nonCritical ? "skipped" : "failed";
++  }
++}
++
++/* ── Orchestration ── */
++
++export interface ExecDeps {
++  now: () => number;
++  isCancelled: () => Promise<boolean>;
++  /** run one tool call; returns ok + optional error/journal */
++  runTool: (call: ExecToolCall, opts: { dryRun: boolean; idempotencyKey: string; timeoutMs: number }) => Promise<{
++    ok: boolean;
++    errorCode?: string;
++    journalEntryId?: string;
++    data?: unknown;
++  }>;
++  /** persist a tool run + emit audit (redacted upstream) */
++  record: (entry: {
++    taskId: string;
++    toolName: string;
++    level: ActionLevel;
++    dryRun: boolean;
++    ok: boolean;
++    errorCode?: string;
++    journalEntryId?: string;
++  }) => Promise<void>;
++  timeoutMs: number;
++}
++
++export interface TaskExecutionResult {
++  status: MissionTaskStatus;
++  decision: Decision;
++  ranToolCalls: number;
++  attempts: number;
++}
++
++/**
++ * Execute a single mission task. Bounded, cancellable, idempotent, audited.
++ */
++export async function executeMissionTask(
++  task: ExecTask,
++  missionId: string,
++  ctx: ExecContext,
++  deps: ExecDeps
++): Promise<TaskExecutionResult> {
++  const decision = decideTaskExecution(task, ctx);
++
++  if (decision.kind === "cancel") {
++    return { status: nextTaskStatus(task, { type: "cancelled" }), decision, ranToolCalls: 0, attempts: task.retries };
++  }
++  if (decision.kind === "skip") {
++    return { status: nextTaskStatus(task, { type: "skipped" }), decision, ranToolCalls: 0, attempts: task.retries };
++  }
++  if (decision.kind === "await_approval") {
++    return { status: nextTaskStatus(task, { type: "await_approval" }), decision, ranToolCalls: 0, attempts: task.retries };
++  }
++  if (decision.kind === "denied") {
++    return { status: nextTaskStatus(task, { type: "denied" }), decision, ranToolCalls: 0, attempts: task.retries };
++  }
++
++  // decision.kind === "execute"
++  const attempt = task.retries + 1;
++  let ranToolCalls = 0;
++  let failed: { retriable: boolean } | null = null;
++
++  for (const call of task.toolCalls) {
++    // Cancellation is checked before every tool call — never mid-mutation.
++    if (await deps.isCancelled()) {
++      return { status: nextTaskStatus(task, { type: "cancelled" }), decision, ranToolCalls, attempts: attempt };
++    }
++
++    const idempotencyKey = `${missionId}:${task.taskId}:${call.toolName}:${attempt}`;
++    let res: Awaited<ReturnType<ExecDeps["runTool"]>>;
++    try {
++      res = await withTimeout(
++        deps.runTool(call, { dryRun: decision.dryRun, idempotencyKey, timeoutMs: deps.timeoutMs }),
++        deps.timeoutMs,
++        deps.now
++      );
++    } catch (err) {
++      res = { ok: false, errorCode: err instanceof TimeoutError ? "TIMEOUT" : "EXECUTION_ERROR" };
++    }
++    ranToolCalls++;
++
++    await deps.record({
++      taskId: task.taskId,
++      toolName: call.toolName,
++      level: decision.level,
++      dryRun: decision.dryRun,
++      ok: res.ok,
++      errorCode: res.errorCode,
++      journalEntryId: res.journalEntryId,
++    });
++
++    if (!res.ok) {
++      // A critical tool failure aborts the task; a nonCritical one is tolerated.
++      if (call.nonCritical) continue;
++      failed = { retriable: res.errorCode === "TIMEOUT" || res.errorCode === "EXECUTION_ERROR" };
++      break;
++    }
++  }
++
++  if (failed) {
++    return { status: nextTaskStatus(task, { type: "failed", retriable: failed.retriable }), decision, ranToolCalls, attempts: attempt };
++  }
++  return { status: nextTaskStatus(task, { type: "succeeded" }), decision, ranToolCalls, attempts: attempt };
++}
++
++/* ── timeout helper ── */
++
++export class TimeoutError extends Error {
++  constructor() {
++    super("tool execution timed out");
++    this.name = "TimeoutError";
++  }
++}
++
++function withTimeout<T>(p: Promise<T>, timeoutMs: number, now: () => number): Promise<T> {
++  return new Promise<T>((resolve, reject) => {
++    let settled = false;
++    const timer = setTimeout(() => {
++      if (!settled) {
++        settled = true;
++        reject(new TimeoutError());
++      }
++    }, timeoutMs);
++    // `now` is accepted for deterministic test injection; unref the timer so it
++    // never keeps the worker process alive.
++    if (typeof (timer as any).unref === "function") (timer as any).unref();
++    p.then(
++      (v) => { if (!settled) { settled = true; clearTimeout(timer); resolve(v); } },
++      (e) => { if (!settled) { settled = true; clearTimeout(timer); reject(e); } }
++    );
++  });
++}
+--- a/services/pilot-api/src/services/engineeringOs/missionExecutor.test.ts
++++ b/services/pilot-api/src/services/engineeringOs/missionExecutor.test.ts
+@@ -0,0 +1,191 @@
++import { describe, expect, it, vi } from "vitest";
++import type { ToolRisk } from "@migra/tooling";
++
++import {
++  computeTaskActionLevel,
++  decideTaskExecution,
++  executeMissionTask,
++  nextTaskStatus,
++  type ExecTask,
++  type ExecContext,
++  type ExecDeps,
++} from "./missionExecutor.js";
++
++const RISK: Record<string, ToolRisk> = {
++  "repo.readFile": "READ",
++  "repo.applyPatch": "WRITE",
++  "repo.command": "WRITE",
++  "pods.delete": "DANGER",
++  "dns.createRecord": "WRITE",
++};
++
++function task(over: Partial<ExecTask> = {}): ExecTask {
++  return { taskId: "t1", toolCalls: [], retries: 0, maxRetries: 2, ...over };
++}
++
++function ctx(over: Partial<ExecContext> = {}): ExecContext {
++  return {
++    environment: "local",
++    identityOk: true,
++    approvalGranted: false,
++    remoteMutationEnabled: false,
++    level6GatesMet: false,
++    remoteReadAllowed: true,
++    cancelled: false,
++    riskOf: (n) => RISK[n],
++    ...over,
++  };
++}
++
++function deps(over: Partial<ExecDeps> = {}): ExecDeps {
++  return {
++    now: () => 1_000,
++    isCancelled: async () => false,
++    timeoutMs: 50,
++    runTool: async () => ({ ok: true }),
++    record: async () => {},
++    ...over,
++  };
++}
++
++describe("action-level classification", () => {
++  it("local read = L0, remote read = L5", () => {
++    expect(computeTaskActionLevel(task({ toolCalls: [{ toolName: "repo.readFile", input: {} }] }), ctx())).toBe(0);
++    expect(computeTaskActionLevel(task({ toolCalls: [{ toolName: "repo.readFile", input: {}, environment: "prod" }] }), ctx())).toBe(5);
++  });
++  it("local write = L2, remote write = L6, danger local = L3", () => {
++    expect(computeTaskActionLevel(task({ toolCalls: [{ toolName: "repo.applyPatch", input: {} }] }), ctx())).toBe(2);
++    expect(computeTaskActionLevel(task({ toolCalls: [{ toolName: "dns.createRecord", input: {}, environment: "prod" }] }), ctx())).toBe(6);
++    expect(computeTaskActionLevel(task({ toolCalls: [{ toolName: "pods.delete", input: {} }] }), ctx())).toBe(3);
++  });
++  it("unknown tool → undefined (fail closed)", () => {
++    expect(computeTaskActionLevel(task({ toolCalls: [{ toolName: "nope.unknown", input: {} }] }), ctx())).toBeUndefined();
++  });
++});
++
++describe("decideTaskExecution — the 16 mission scenarios (decision layer)", () => {
++  it("1. read-only mission → execute (no approval)", () => {
++    const d = decideTaskExecution(task({ toolCalls: [{ toolName: "repo.readFile", input: {} }] }), ctx());
++    expect(d).toEqual({ kind: "execute", level: 0, dryRun: false });
++  });
++  it("2. draft-only mission (no tool calls) → skip", () => {
++    expect(decideTaskExecution(task({ toolCalls: [] }), ctx()).kind).toBe("skip");
++  });
++  it("3. local-write mission with no approval → await_approval", () => {
++    const d = decideTaskExecution(task({ toolCalls: [{ toolName: "repo.applyPatch", input: {} }] }), ctx());
++    expect(d.kind).toBe("await_approval");
++  });
++  it("4. local-command mission with no approval → await_approval", () => {
++    const d = decideTaskExecution(task({ toolCalls: [{ toolName: "pods.delete", input: {} }] }), ctx());
++    expect(d.kind).toBe("await_approval");
++  });
++  it("5. denied remote mutation (disabled by default)", () => {
++    const d = decideTaskExecution(
++      task({ toolCalls: [{ toolName: "dns.createRecord", input: {}, environment: "prod" }] }),
++      ctx({ approvalGranted: true })
++    );
++    expect(d).toMatchObject({ kind: "denied", code: "REMOTE_MUTATION_DISABLED" });
++  });
++  it("6. approved safe local write → execute", () => {
++    const d = decideTaskExecution(task({ toolCalls: [{ toolName: "repo.applyPatch", input: {} }] }), ctx({ approvalGranted: true }));
++    expect(d).toEqual({ kind: "execute", level: 2, dryRun: false });
++  });
++  it("11. stale/absent approval → await_approval (fail safe)", () => {
++    // approvalGranted:false models a stale/expired approval
++    expect(decideTaskExecution(task({ toolCalls: [{ toolName: "repo.command", input: {} }] }), ctx()).kind).toBe("await_approval");
++  });
++  it("12. missing identity/config → denied (fail closed)", () => {
++    const d = decideTaskExecution(task({ toolCalls: [{ toolName: "repo.readFile", input: {} }] }), ctx({ identityOk: false }));
++    expect(d).toMatchObject({ kind: "denied", code: "IDENTITY_MISSING" });
++  });
++  it("13. action-level mismatch — remote write without gates → denied", () => {
++    const d = decideTaskExecution(
++      task({ toolCalls: [{ toolName: "dns.createRecord", input: {}, environment: "prod" }] }),
++      ctx({ remoteMutationEnabled: true, level6GatesMet: false, approvalGranted: true })
++    );
++    expect(d).toMatchObject({ kind: "denied", code: "LEVEL6_GATES_UNMET" });
++  });
++  it("remote write with ALL gates + approval → execute", () => {
++    const d = decideTaskExecution(
++      task({ toolCalls: [{ toolName: "dns.createRecord", input: {}, environment: "prod" }] }),
++      ctx({ remoteMutationEnabled: true, level6GatesMet: true, approvalGranted: true })
++    );
++    expect(d).toEqual({ kind: "execute", level: 6, dryRun: false });
++  });
++});
++
++describe("nextTaskStatus — deterministic state machine", () => {
++  it("cancel → skipped, skip → done, approval → awaiting_approval, success → done", () => {
++    expect(nextTaskStatus(task(), { type: "cancelled" })).toBe("skipped");
++    expect(nextTaskStatus(task(), { type: "skipped" })).toBe("done");
++    expect(nextTaskStatus(task(), { type: "await_approval" })).toBe("awaiting_approval");
++    expect(nextTaskStatus(task(), { type: "succeeded" })).toBe("done");
++  });
++  it("8. retriable failure with budget → pending (retry); exhausted → failed", () => {
++    expect(nextTaskStatus(task({ retries: 0, maxRetries: 2 }), { type: "failed", retriable: true })).toBe("pending");
++    expect(nextTaskStatus(task({ retries: 2, maxRetries: 2 }), { type: "failed", retriable: true })).toBe("failed");
++  });
++  it("non-retriable failure → failed; nonCritical → skipped", () => {
++    expect(nextTaskStatus(task(), { type: "failed", retriable: false })).toBe("failed");
++    expect(nextTaskStatus(task({ nonCritical: true }), { type: "failed", retriable: false })).toBe("skipped");
++    expect(nextTaskStatus(task({ nonCritical: true }), { type: "denied" })).toBe("skipped");
++  });
++});
++
++describe("executeMissionTask — orchestration with fakes", () => {
++  it("16. successful completion runs every tool call and records each", async () => {
++    const record = vi.fn(async () => {});
++    const runTool = vi.fn(async () => ({ ok: true }));
++    const t = task({ toolCalls: [{ toolName: "repo.readFile", input: {} }, { toolName: "repo.readFile", input: {} }] });
++    const r = await executeMissionTask(t, "m1", ctx(), deps({ runTool, record }));
++    expect(r.status).toBe("done");
++    expect(r.ranToolCalls).toBe(2);
++    expect(record).toHaveBeenCalledTimes(2);
++  });
++
++  it("7. cancellation before a tool call → skipped, no execution", async () => {
++    const runTool = vi.fn(async () => ({ ok: true }));
++    const t = task({ toolCalls: [{ toolName: "repo.readFile", input: {} }] });
++    const r = await executeMissionTask(t, "m1", ctx(), deps({ runTool, isCancelled: async () => true }));
++    expect(r.status).toBe("skipped");
++    expect(runTool).not.toHaveBeenCalled();
++  });
++
++  it("9. timeout → failed + retriable", async () => {
++    const t = task({ toolCalls: [{ toolName: "repo.readFile", input: {} }], retries: 0, maxRetries: 2 });
++    const slow = () => new Promise<{ ok: boolean }>((res) => { const h = setTimeout(() => res({ ok: true }), 200); (h as any).unref?.(); });
++    const r = await executeMissionTask(t, "m1", ctx(), deps({ timeoutMs: 10, runTool: slow }));
++    expect(r.status).toBe("pending"); // retriable timeout with budget remaining
++  });
++
++  it("10. resume uses attempt-scoped idempotency keys", async () => {
++    const keys: string[] = [];
++    const runTool = vi.fn(async (_c: any, o: any) => { keys.push(o.idempotencyKey); return { ok: true }; });
++    await executeMissionTask(task({ toolCalls: [{ toolName: "repo.readFile", input: {} }], retries: 1 }), "m1", ctx(), deps({ runTool }));
++    expect(keys[0]).toBe("m1:t1:repo.readFile:2"); // attempt = retries + 1
++  });
++
++  it("14. tool denial (non-retriable) → failed", async () => {
++    const runTool = vi.fn(async () => ({ ok: false, errorCode: "FORBIDDEN" }));
++    const t = task({ toolCalls: [{ toolName: "repo.readFile", input: {} }] });
++    const r = await executeMissionTask(t, "m1", ctx(), deps({ runTool }));
++    expect(r.status).toBe("failed");
++  });
++
++  it("15. partial failure — nonCritical tool fails, critical succeeds → done", async () => {
++    const runTool = vi.fn(async (c: any) => (c.toolName === "flaky.tool" ? { ok: false, errorCode: "X" } : { ok: true }));
++    const localCtx = ctx({ riskOf: (n) => (n === "flaky.tool" ? "READ" : RISK[n]) });
++    const t = task({ toolCalls: [{ toolName: "flaky.tool", input: {}, nonCritical: true }, { toolName: "repo.readFile", input: {} }] });
++    const r = await executeMissionTask(t, "m1", localCtx, deps({ runTool }));
++    expect(r.status).toBe("done");
++    expect(r.ranToolCalls).toBe(2);
++  });
++
++  it("does not run tools for an await_approval decision", async () => {
++    const runTool = vi.fn(async () => ({ ok: true }));
++    const t = task({ toolCalls: [{ toolName: "repo.applyPatch", input: {} }] });
++    const r = await executeMissionTask(t, "m1", ctx(), deps({ runTool }));
++    expect(r.status).toBe("awaiting_approval");
++    expect(runTool).not.toHaveBeenCalled();
++  });
++});
