@@ -1,0 +1,432 @@
+--- a/services/pilot-api/src/services/approvalService.ts
++++ b/services/pilot-api/src/services/approvalService.ts
+@@ -3,10 +3,74 @@
+ import { hashArgs } from "./idempotencyService.js";
+ 
+ const APPROVAL_TTL_MINUTES = Number(process.env.APPROVAL_TTL_MINUTES ?? 30);
++const DEV_SIGNING_SECRET = "dev-approval-secret-change-me";
++
++export class ApprovalError extends Error {
++  constructor(public readonly code: string, public readonly httpStatus: number, message: string) {
++    super(message);
++    this.name = "ApprovalError";
++  }
++}
++
++function isTruthy(value: string | undefined): boolean {
++  return value != null && ["1", "true", "yes", "on"].includes(value.toLowerCase());
++}
++
++function isProdEnv(): boolean {
++  return process.env.APP_ENV === "prod" || process.env.NODE_ENV === "production";
++}
++
++/**
++ * Approval token signing secret. Fails closed in production if
++ * APPROVAL_SIGNING_SECRET is unset — otherwise tokens would be forgeable with a
++ * publicly-known default (finding S2).
++ */
++function resolveSigningSecret(): string {
++  const secret = process.env.APPROVAL_SIGNING_SECRET;
++  if (secret && secret.length > 0) return secret;
++  if (isProdEnv()) {
++    throw new ApprovalError(
++      "SIGNING_SECRET_MISSING",
++      500,
++      "APPROVAL_SIGNING_SECRET must be set in production"
++    );
++  }
++  return DEV_SIGNING_SECRET;
++}
++
++/**
++ * Whether an actor may approve their own request. Separation of duties is
++ * enforced by default; self-approval is permitted only as a dev convenience
++ * (never in production or when auth is required) or via explicit opt-in.
++ */
++export function selfApprovalAllowed(): boolean {
++  if (isTruthy(process.env.PILOT_ALLOW_SELF_APPROVAL)) return true;
++  return !isProdEnv() && !isTruthy(process.env.PILOT_REQUIRE_AUTH);
++}
++
++/**
++ * Pure guard: throws ApprovalError unless the approval can be actioned by this
++ * approver right now. Fixes finding S1 (self-service approval with no status,
++ * expiry, or separation-of-duties checks).
++ */
++export function assertApprovable(
++  approval: { status: string; expiresAt: Date; requestedBy: string },
++  approverId: string,
++  allowSelfApproval: boolean
++): void {
++  if (approval.status !== "PENDING") {
++    throw new ApprovalError("INVALID_STATE", 409, `Approval is ${approval.status}, not PENDING`);
++  }
++  if (approval.expiresAt.getTime() <= Date.now()) {
++    throw new ApprovalError("EXPIRED", 409, "Approval has expired");
++  }
++  if (!allowSelfApproval && approval.requestedBy === approverId) {
++    throw new ApprovalError("SELF_APPROVAL_FORBIDDEN", 403, "Approver must differ from requester");
++  }
++}
+ 
+ function sign(value: string): string {
+-  const secret = process.env.APPROVAL_SIGNING_SECRET ?? "dev-approval-secret-change-me";
+-  return crypto.createHmac("sha256", secret).update(value).digest("hex");
++  return crypto.createHmac("sha256", resolveSigningSecret()).update(value).digest("hex");
+ }
+ 
+ function buildToken(payload: Record<string, unknown>): string {
+@@ -63,3 +127,56 @@
+     argsHash
+   };
+ }
++
++/**
++ * Approve a pending request. Validates state/expiry/separation-of-duties, then
++ * transitions PENDING→APPROVED atomically (CAS via updateMany) so two concurrent
++ * approvals cannot both succeed. Returns the approval and a fresh token.
++ */
++export async function approveApprovalRequest(input: { approvalId: string; approverId: string }) {
++  const approval = await prisma.pilotApproval.findUnique({ where: { id: input.approvalId } });
++  if (!approval) throw new ApprovalError("NOT_FOUND", 404, "Approval not found");
++
++  assertApprovable(approval, input.approverId, selfApprovalAllowed());
++
++  const cas = await prisma.pilotApproval.updateMany({
++    where: { id: approval.id, status: "PENDING" },
++    data: { status: "APPROVED", approvedBy: input.approverId }
++  });
++  if (cas.count !== 1) {
++    throw new ApprovalError("INVALID_STATE", 409, "Approval is no longer PENDING");
++  }
++
++  const approved = await prisma.pilotApproval.findUnique({ where: { id: approval.id } });
++  if (!approved) throw new ApprovalError("NOT_FOUND", 404, "Approval not found");
++
++  const approvalToken = mintApprovalToken({
++    approvalId: approved.id,
++    argsHash: approved.argsHash,
++    expiresAt: approved.expiresAt.toISOString()
++  });
++  return { approval: approved, approvalToken };
++}
++
++/**
++ * Deny a pending request. Only a PENDING request may be denied.
++ */
++export async function denyApprovalRequest(input: { approvalId: string; approverId: string }) {
++  const approval = await prisma.pilotApproval.findUnique({ where: { id: input.approvalId } });
++  if (!approval) throw new ApprovalError("NOT_FOUND", 404, "Approval not found");
++  if (approval.status !== "PENDING") {
++    throw new ApprovalError("INVALID_STATE", 409, `Approval is ${approval.status}, not PENDING`);
++  }
++
++  const cas = await prisma.pilotApproval.updateMany({
++    where: { id: approval.id, status: "PENDING" },
++    data: { status: "DENIED", approvedBy: input.approverId }
++  });
++  if (cas.count !== 1) {
++    throw new ApprovalError("INVALID_STATE", 409, "Approval is no longer PENDING");
++  }
++
++  const denied = await prisma.pilotApproval.findUnique({ where: { id: approval.id } });
++  if (!denied) throw new ApprovalError("NOT_FOUND", 404, "Approval not found");
++  return { approval: denied };
++}
+--- a/services/pilot-api/src/routes/approvals.ts
++++ b/services/pilot-api/src/routes/approvals.ts
+@@ -1,12 +1,23 @@
+ import { Router } from "express";
+ import { z } from "zod";
+-import { prisma } from "../db/prisma.js";
+-import { createApprovalRequest, mintApprovalToken } from "../services/approvalService.js";
++import {
++  ApprovalError,
++  approveApprovalRequest,
++  createApprovalRequest,
++  denyApprovalRequest
++} from "../services/approvalService.js";
+ import { requireAuthOrDev } from "../middleware/authOptional.js";
+ import { appendAuditLog } from "../services/auditService.js";
+ 
+ export const approvalsRouter = Router();
+ 
++function handleApprovalError(res: import("express").Response, err: unknown) {
++  if (err instanceof ApprovalError) {
++    return res.status(err.httpStatus).json({ ok: false, error: { code: err.code, message: err.message } });
++  }
++  return res.status(500).json({ ok: false, error: { code: "INTERNAL_ERROR", message: "Approval action failed" } });
++}
++
+ approvalsRouter.post("/request", requireAuthOrDev, async (req, res) => {
+   const body = z.object({
+     toolName: z.string().min(3),
+@@ -32,49 +43,51 @@
+ });
+ 
+ approvalsRouter.post("/:id/approve", requireAuthOrDev, async (req, res) => {
+-  const approval = await prisma.pilotApproval.update({
+-    where: { id: req.params.id },
+-    data: { status: "APPROVED", approvedBy: req.actor!.userId }
+-  });
+-  const approvalToken = mintApprovalToken({
+-    approvalId: approval.id,
+-    argsHash: approval.argsHash,
+-    expiresAt: approval.expiresAt.toISOString()
+-  });
+-  res.json({ ok: true, approval, approvalToken });
++  try {
++    const { approval, approvalToken } = await approveApprovalRequest({
++      approvalId: req.params.id,
++      approverId: req.actor!.userId
++    });
++    res.json({ ok: true, approval, approvalToken });
++  } catch (err) {
++    handleApprovalError(res, err);
++  }
+ });
+ 
+ approvalsRouter.post("/:id/deny", requireAuthOrDev, async (req, res) => {
+-  const approval = await prisma.pilotApproval.update({
+-    where: { id: req.params.id },
+-    data: { status: "DENIED", approvedBy: req.actor!.userId }
+-  });
+-  res.json({ ok: true, approval });
++  try {
++    const { approval } = await denyApprovalRequest({
++      approvalId: req.params.id,
++      approverId: req.actor!.userId
++    });
++    res.json({ ok: true, approval });
++  } catch (err) {
++    handleApprovalError(res, err);
++  }
+ });
+ 
+ // Compatibility endpoint for console clients posting { action: "approve"|"reject" } to /api/approvals/:id
+ approvalsRouter.post("/:id", requireAuthOrDev, async (req, res) => {
+   const action = String(req.body?.action ?? "").toLowerCase();
+ 
+-  if (action === "approve") {
+-    const approval = await prisma.pilotApproval.update({
+-      where: { id: req.params.id },
+-      data: { status: "APPROVED", approvedBy: req.actor!.userId }
+-    });
+-    const approvalToken = mintApprovalToken({
+-      approvalId: approval.id,
+-      argsHash: approval.argsHash,
+-      expiresAt: approval.expiresAt.toISOString()
+-    });
+-    return res.json({ ok: true, approval, approvalToken });
+-  }
+-
+-  if (action === "reject" || action === "deny") {
+-    const approval = await prisma.pilotApproval.update({
+-      where: { id: req.params.id },
+-      data: { status: "DENIED", approvedBy: req.actor!.userId }
+-    });
+-    return res.json({ ok: true, approval });
++  try {
++    if (action === "approve") {
++      const { approval, approvalToken } = await approveApprovalRequest({
++        approvalId: req.params.id,
++        approverId: req.actor!.userId
++      });
++      return res.json({ ok: true, approval, approvalToken });
++    }
++
++    if (action === "reject" || action === "deny") {
++      const { approval } = await denyApprovalRequest({
++        approvalId: req.params.id,
++        approverId: req.actor!.userId
++      });
++      return res.json({ ok: true, approval });
++    }
++  } catch (err) {
++    return handleApprovalError(res, err);
+   }
+ 
+   return res.status(400).json({
+--- a/services/pilot-api/src/routes/admin.ts
++++ b/services/pilot-api/src/routes/admin.ts
+@@ -12,9 +12,14 @@
+ import { getBreakerStatus, forceState, getProviderHealthTag, getAvailableFallbacks } from "../services/llm/circuitBreaker.js";
+ import type { CircuitState } from "../services/llm/circuitBreaker.js";
+ import type { ProviderTag } from "../services/llm/types.js";
++import { requireAuthOrDev } from "../middleware/authOptional.js";
+ 
+ export const adminRouter = Router();
+ 
++// Finding S3: admin (provider usage + breaker force-flip) was unauthenticated.
++// Require auth (prod-safe dev bypass), matching sibling ops/mission routers.
++adminRouter.use(requireAuthOrDev);
++
+ /* ── Cost estimation helpers ── */
+ const COST_PER_1K: Record<string, { input: number; output: number }> = {
+   local:  { input: 0, output: 0 },
+--- a/services/pilot-api/src/routes/tickets.ts
++++ b/services/pilot-api/src/routes/tickets.ts
+@@ -18,9 +18,14 @@
+   applyChangeTicket,
+   rollbackChangeTicket,
+ } from "../services/changeTicketService.js";
++import { requireAuthOrDev } from "../middleware/authOptional.js";
+ 
+ export const ticketsRouter = Router();
+ 
++// Finding S4: change-ticket approve/apply/rollback was unauthenticated.
++// Require auth (prod-safe dev bypass), matching sibling ops/mission routers.
++ticketsRouter.use(requireAuthOrDev);
++
+ ticketsRouter.get("/", async (_req, res) => {
+   try {
+     const limit = Number(_req.query.limit ?? "20");
+--- a/services/pilot-api/src/services/approvalService.test.ts
++++ b/services/pilot-api/src/services/approvalService.test.ts
+@@ -0,0 +1,145 @@
++import { afterEach, beforeEach, describe, expect, it } from "vitest";
++
++import {
++  ApprovalError,
++  assertApprovable,
++  mintApprovalToken,
++  selfApprovalAllowed,
++  verifyApprovalToken
++} from "./approvalService.js";
++
++const ENV_KEYS = [
++  "APPROVAL_SIGNING_SECRET",
++  "PILOT_ALLOW_SELF_APPROVAL",
++  "PILOT_REQUIRE_AUTH",
++  "APP_ENV",
++  "NODE_ENV"
++] as const;
++
++let saved: Record<string, string | undefined>;
++
++beforeEach(() => {
++  saved = {};
++  for (const k of ENV_KEYS) saved[k] = process.env[k];
++});
++
++afterEach(() => {
++  for (const k of ENV_KEYS) {
++    if (saved[k] === undefined) delete process.env[k];
++    else process.env[k] = saved[k];
++  }
++});
++
++function approval(overrides: Partial<{ status: string; expiresAt: Date; requestedBy: string }> = {}) {
++  return {
++    status: "PENDING",
++    expiresAt: new Date(Date.now() + 60_000),
++    requestedBy: "alice",
++    ...overrides
++  };
++}
++
++describe("assertApprovable (S1: separation of duties + state/expiry)", () => {
++  it("accepts a pending, unexpired approval from a different approver", () => {
++    expect(() => assertApprovable(approval(), "bob", false)).not.toThrow();
++  });
++
++  it("rejects an already-decided approval", () => {
++    expect(() => assertApprovable(approval({ status: "APPROVED" }), "bob", false))
++      .toThrowError(/not PENDING/);
++    try {
++      assertApprovable(approval({ status: "DENIED" }), "bob", false);
++    } catch (e) {
++      expect((e as ApprovalError).code).toBe("INVALID_STATE");
++      expect((e as ApprovalError).httpStatus).toBe(409);
++    }
++  });
++
++  it("rejects an expired approval", () => {
++    try {
++      assertApprovable(approval({ expiresAt: new Date(Date.now() - 1000) }), "bob", false);
++      throw new Error("should have thrown");
++    } catch (e) {
++      expect((e as ApprovalError).code).toBe("EXPIRED");
++    }
++  });
++
++  it("blocks self-approval when not allowed", () => {
++    try {
++      assertApprovable(approval({ requestedBy: "alice" }), "alice", false);
++      throw new Error("should have thrown");
++    } catch (e) {
++      expect((e as ApprovalError).code).toBe("SELF_APPROVAL_FORBIDDEN");
++      expect((e as ApprovalError).httpStatus).toBe(403);
++    }
++  });
++
++  it("permits self-approval when explicitly allowed", () => {
++    expect(() => assertApprovable(approval({ requestedBy: "alice" }), "alice", true)).not.toThrow();
++  });
++});
++
++describe("selfApprovalAllowed", () => {
++  it("is allowed in dev without auth required", () => {
++    delete process.env.APP_ENV;
++    process.env.NODE_ENV = "development";
++    delete process.env.PILOT_REQUIRE_AUTH;
++    delete process.env.PILOT_ALLOW_SELF_APPROVAL;
++    expect(selfApprovalAllowed()).toBe(true);
++  });
++
++  it("is forbidden in production by default", () => {
++    process.env.NODE_ENV = "production";
++    delete process.env.PILOT_ALLOW_SELF_APPROVAL;
++    expect(selfApprovalAllowed()).toBe(false);
++  });
++
++  it("is forbidden when auth is required, even in dev", () => {
++    process.env.NODE_ENV = "development";
++    process.env.PILOT_REQUIRE_AUTH = "true";
++    delete process.env.PILOT_ALLOW_SELF_APPROVAL;
++    expect(selfApprovalAllowed()).toBe(false);
++  });
++
++  it("honors explicit opt-in", () => {
++    process.env.NODE_ENV = "production";
++    process.env.PILOT_ALLOW_SELF_APPROVAL = "true";
++    expect(selfApprovalAllowed()).toBe(true);
++  });
++});
++
++describe("token signing (S2: fail closed on missing secret in prod)", () => {
++  const payload = { approvalId: "a1", argsHash: "h1", expiresAt: new Date(Date.now() + 60_000).toISOString() };
++
++  it("round-trips a token when a secret is configured", () => {
++    process.env.APPROVAL_SIGNING_SECRET = "test-secret";
++    const token = mintApprovalToken(payload);
++    expect(verifyApprovalToken(token)).toMatchObject({ approvalId: "a1", argsHash: "h1" });
++  });
++
++  it("rejects a tampered signature", () => {
++    process.env.APPROVAL_SIGNING_SECRET = "test-secret";
++    const token = mintApprovalToken(payload);
++    const forged = token.split(".")[0] + ".deadbeef";
++    expect(() => verifyApprovalToken(forged)).toThrowError(/Invalid approval signature/);
++  });
++
++  it("throws in production when the signing secret is unset", () => {
++    process.env.NODE_ENV = "production";
++    delete process.env.APP_ENV;
++    delete process.env.APPROVAL_SIGNING_SECRET;
++    try {
++      mintApprovalToken(payload);
++      throw new Error("should have thrown");
++    } catch (e) {
++      expect((e as ApprovalError).code).toBe("SIGNING_SECRET_MISSING");
++    }
++  });
++
++  it("allows the dev fallback secret outside production", () => {
++    process.env.NODE_ENV = "development";
++    delete process.env.APP_ENV;
++    delete process.env.APPROVAL_SIGNING_SECRET;
++    expect(() => mintApprovalToken(payload)).not.toThrow();
++  });
++});
