@@ -1,0 +1,534 @@
+--- a/services/pilot-api/src/services/safetyPolicy.ts
++++ b/services/pilot-api/src/services/safetyPolicy.ts
+@@ -35,25 +35,66 @@
+   code: string;
+   message: string;
+   severity: "block" | "warn";
++  /** set when a privileged role explicitly overrode an otherwise-blocking violation */
++  overridden?: boolean;
++}
++
++/**
++ * Privileged roles that MAY override certain denylist violations — but only
++ * with an explicit, per-call opt-in (`args.policyOverride === true`), and only
++ * for overridable categories. They never get a silent, universal bypass.
++ */
++const PRIVILEGED_ROLES = new Set(["owner", "superadmin"]);
++
++/**
++ * Denylist categories a privileged role may override with explicit intent.
++ * Everything NOT listed here (tenant scoping, the secrets/backups buckets,
++ * unknown tools) is a HARD block for every role, always.
++ */
++const OVERRIDABLE_CODES = new Set(["DENIED_DOMAIN", "DENIED_PATH"]);
++
++export function isPrivilegedRole(role?: string): boolean {
++  return role != null && PRIVILEGED_ROLES.has(role);
+ }
+ 
+ /**
+  * Pre-execution policy check.
+  * Returns violations (empty array = allowed).
++ *
++ * Policy (finding S5): denylists apply to EVERY role. A privileged role
++ * (owner/superadmin) may downgrade an *overridable* block to an audited warn
++ * only when the call carries an explicit `policyOverride: true`. Hard
++ * categories (tenant boundary, secrets/backups buckets, unknown tool) are never
++ * overridable by anyone.
+  */
+ export function checkPolicy(toolName: string, args: Record<string, unknown>, actorTenantId?: string, actorRole?: string): PolicyViolation[] {
+-  const violations: PolicyViolation[] = [];
++  const raw = evaluateDenylist(toolName, args, actorTenantId);
++  return applyPrivilegedOverrides(raw, actorRole, args.policyOverride === true);
++}
+ 
+-  // ── Superadmin bypass: owner / superadmin roles skip all denylists ──
+-  if (actorRole === "owner" || actorRole === "superadmin") {
+-    // Still check unknown tool, but skip all denylist checks
+-    const registry = getToolRegistry();
+-    const tool = registry.tools.find(t => t.name === toolName);
+-    if (!tool) {
+-      violations.push({ code: "UNKNOWN_TOOL", message: `Tool ${toolName} not in registry`, severity: "block" });
+-    }
++/**
++ * Apply privileged overrides to a set of raw violations. Exported for testing.
++ */
++export function applyPrivilegedOverrides(
++  violations: PolicyViolation[],
++  actorRole: string | undefined,
++  overrideRequested: boolean
++): PolicyViolation[] {
++  if (!isPrivilegedRole(actorRole) || !overrideRequested) {
+     return violations;
+   }
++  return violations.map((v) =>
++    v.severity === "block" && OVERRIDABLE_CODES.has(v.code)
++      ? { ...v, severity: "warn" as const, overridden: true }
++      : v
++  );
++}
++
++/**
++ * Raw denylist evaluation — role-independent. Exported for testing.
++ */
++export function evaluateDenylist(toolName: string, args: Record<string, unknown>, actorTenantId?: string): PolicyViolation[] {
++  const violations: PolicyViolation[] = [];
+ 
+   const registry = getToolRegistry();
+   const tool = registry.tools.find(t => t.name === toolName);
+--- a/services/pilot-api/src/services/agentLoop.ts
++++ b/services/pilot-api/src/services/agentLoop.ts
+@@ -21,6 +21,7 @@
+ import { buildOrchestratorPlan, parsePlanFromOutput, parsePatchesFromOutput, parseReviewFromOutput, parseMemoryUpdates } from "./agents/index.js";
+ import type { OrchestratorPlan, AgentPhase } from "./agents/index.js";
+ import { checkPolicy, blastRadiusSummary, rollbackHint, recordChangeTicket } from "./safetyPolicy.js";
++import { resolveExecutionMode, ExecutionModeError } from "./executionMode.js";
+ import { createChangeTicket } from "./changeTicketService.js";
+ import { evaluatePolicyRules, recordPolicyEvent, getPolicyTimeline } from "./policyAsCode.js";
+ import type { PolicyEvalContext } from "./policyAsCode.js";
+@@ -3105,9 +3106,8 @@
+   dryRunDefault: boolean;
+ }) {
+   const args = { ...input.args };
+-  if (typeof args.dryRun !== "boolean") {
+-    args.dryRun = input.dryRunDefault;
+-  }
++  // Execution mode (S6) is resolved once the tool's risk is known, below —
++  // a mutating tool must never silently inherit a live default.
+ 
+   const callRecord = await dbBestEffort(
+     () => prisma.pilotToolCall.create({
+@@ -3223,10 +3223,35 @@
+     return await emitFailure("POLICY_DENY", `Policy denied: ${policyResult.reason}`);
+   }
+ 
+-  const dryRun = args.dryRun === true;
+   const isMutating = risk === "WRITE" || risk === "DANGER";
++
++  // S6: resolve execution mode explicitly — a mutating tool never defaults to live.
++  let mode;
++  try {
++    mode = resolveExecutionMode(args.dryRun, isMutating, input.dryRunDefault);
++  } catch (error) {
++    if (error instanceof ExecutionModeError) {
++      return await emitFailure("EXECUTION_MODE_INVALID", error.message);
++    }
++    throw error;
++  }
++  const dryRun = mode.dryRun;
++  args.dryRun = dryRun; // normalize so the executor receives the resolved mode
+   const isSuperadmin = input.actor.role === "owner" || input.actor.role === "superadmin";
+ 
++  // S5: a privileged role skipping the approval/idempotency gate on a live
++  // mutation is explicit and audited — never silent.
++  if (isMutating && isSuperadmin && !dryRun) {
++    logger.policyViolation({
++      component: "safety",
++      runId: input.runId,
++      toolCallId: call.id,
++      toolName: input.toolName,
++      code: "SUPERADMIN_APPROVAL_BYPASS",
++      severity: "warn",
++    });
++  }
++
+   const argsHash = hashArgs(args);
+   if (isMutating && !isSuperadmin) {
+     if (!args.idempotencyKey || typeof args.idempotencyKey !== "string") {
+--- a/services/pilot-api/src/orchestrator/pilot.ts
++++ b/services/pilot-api/src/orchestrator/pilot.ts
+@@ -140,7 +140,9 @@
+ export async function executeCommand(req: ExecuteRequest): Promise<ExecuteResponse> {
+   const startMs = Date.now();
+   const steps: RunStep[] = [];
+-  const dryRun = req.dryRun ?? false;
++  // S6: never silently default to live. Live execution requires an explicit
++  // dryRun:false opt-in; an omitted mode defaults to a safe dry-run.
++  const dryRun = req.dryRun !== false;
+ 
+   /* ── Step 1: Validate command exists ── */
+   const stepStart1 = Date.now();
+--- a/services/pilot-api/src/routes/pilotV1.ts
++++ b/services/pilot-api/src/routes/pilotV1.ts
+@@ -87,6 +87,12 @@
+     return res.status(400).json({ ok: false, error: "Missing 'command' field" });
+   }
+ 
++  // S6: reject an ambiguous execution mode; a missing mode defaults to dry-run
++  // downstream (never live).
++  if (dryRun !== undefined && typeof dryRun !== "boolean") {
++    return res.status(400).json({ ok: false, error: { code: "EXECUTION_MODE_INVALID", message: "dryRun must be a boolean" } });
++  }
++
+   // Validate command exists before executing
+   const def = getCommand(command);
+   if (!def) {
+@@ -101,7 +107,7 @@
+     actorId: req.actor!.userId,
+     actorRole: req.actor!.role,
+     tenantId: req.actor!.tenantId,
+-    dryRun: dryRun === true,
++    dryRun: typeof dryRun === "boolean" ? dryRun : undefined,
+   });
+ 
+   const httpStatus = result.status === "DENIED" ? 403 : result.ok ? 200 : 500;
+--- a/services/pilot-api/scripts/ops/go-live.mjs
++++ b/services/pilot-api/scripts/ops/go-live.mjs
+@@ -38,6 +38,7 @@
+ import { runCmd, stageHeader, msToHuman } from "./lib/stage.mjs";
+ import { buildReleaseMeta, writeReleaseFiles } from "./lib/release.mjs";
+ import { runStrictChecks, printVerifyResults } from "./lib/verify.mjs";
++import { assertProductionMigrationGates } from "./prod-migration-guard.mjs";
+ 
+ const __dirname = dirname(fileURLToPath(import.meta.url));
+ const ROOT = resolve(__dirname, "../..");
+@@ -283,6 +284,12 @@
+       console.log(`  ✔ Drift check passed (${msToHuman(driftResult.durationMs)})\n`);
+     }
+ 
++    // ── Production migration guard (S7): fail closed before any schema mutation ──
++    // Blocks prisma migrate deploy in production unless every gate is satisfied
++    // (approval, action level, confirmation, target verification, rollback plan,
++    // required secrets). Non-prod environments are not gated.
++    assertProductionMigrationGates(process.env);
++
+     // ── Stage N-1: Prisma migrate deploy ──
+     currentStage++;
+     stageHeader(currentStage, totalStages, "Prisma Migrate Deploy");
+--- a/services/pilot-api/src/services/executionMode.ts
++++ b/services/pilot-api/src/services/executionMode.ts
+@@ -0,0 +1,58 @@
++/**
++ * Execution mode resolution (finding S6).
++ *
++ * Guarantees that a mutating tool can NEVER silently default to live execution.
++ * Live mutation requires the caller to explicitly set `dryRun: false`; a missing
++ * or ambiguous value fails safe (dry-run) for mutating tools, and a malformed
++ * value fails closed.
++ *
++ * This does not replace the approval / action-level gate — it only decides
++ * whether the call is a live mutation or a dry-run preview. Approval still
++ * applies to live mutations downstream.
++ */
++
++export class ExecutionModeError extends Error {
++  public readonly code = "EXECUTION_MODE_INVALID";
++  constructor(message: string) {
++    super(message);
++    this.name = "ExecutionModeError";
++  }
++}
++
++export interface ExecutionMode {
++  dryRun: boolean;
++  /** true when we forced dry-run because a mutating call omitted an explicit mode */
++  defaultedSafe: boolean;
++}
++
++/**
++ * @param rawDryRun   the caller-supplied dryRun value (may be anything)
++ * @param isMutating  whether the tool is WRITE/DANGER
++ * @param dryRunDefault the entry-point default (only consulted for read tools)
++ */
++export function resolveExecutionMode(
++  rawDryRun: unknown,
++  isMutating: boolean,
++  dryRunDefault: boolean
++): ExecutionMode {
++  // Explicit boolean always wins.
++  if (rawDryRun === true) return { dryRun: true, defaultedSafe: false };
++  if (rawDryRun === false) return { dryRun: false, defaultedSafe: false };
++
++  // Present but not a boolean → malformed. Fail closed for mutating tools;
++  // for read tools it is harmless, fall back to the entry-point default.
++  if (rawDryRun !== undefined && rawDryRun !== null) {
++    if (isMutating) {
++      throw new ExecutionModeError(
++        "dryRun must be an explicit boolean for a mutating tool (received " + typeof rawDryRun + ")"
++      );
++    }
++    return { dryRun: dryRunDefault, defaultedSafe: false };
++  }
++
++  // Missing/null: a mutating tool must NEVER inherit a live default.
++  if (isMutating) return { dryRun: true, defaultedSafe: true };
++
++  // Read tool: dryRun is a no-op; inherit the entry-point default.
++  return { dryRun: dryRunDefault, defaultedSafe: false };
++}
+--- a/services/pilot-api/src/services/executionMode.test.ts
++++ b/services/pilot-api/src/services/executionMode.test.ts
+@@ -0,0 +1,30 @@
++import { describe, expect, it } from "vitest";
++
++import { resolveExecutionMode, ExecutionModeError } from "./executionMode.js";
++
++describe("resolveExecutionMode (S6: no silent default to live)", () => {
++  it("honors an explicit dryRun:true", () => {
++    expect(resolveExecutionMode(true, true, false)).toEqual({ dryRun: true, defaultedSafe: false });
++  });
++
++  it("honors an explicit dryRun:false (live opt-in) for a mutating tool", () => {
++    expect(resolveExecutionMode(false, true, true)).toEqual({ dryRun: false, defaultedSafe: false });
++  });
++
++  it("forces dry-run when a mutating tool omits the mode, ignoring a live default", () => {
++    // dryRunDefault=false (live) must NOT leak through for a mutating tool
++    expect(resolveExecutionMode(undefined, true, false)).toEqual({ dryRun: true, defaultedSafe: true });
++    expect(resolveExecutionMode(null, true, false)).toEqual({ dryRun: true, defaultedSafe: true });
++  });
++
++  it("rejects a malformed mode for a mutating tool (fail closed)", () => {
++    expect(() => resolveExecutionMode("false", true, false)).toThrow(ExecutionModeError);
++    expect(() => resolveExecutionMode(0, true, false)).toThrow(ExecutionModeError);
++    expect(() => resolveExecutionMode({}, true, false)).toThrow(/must be an explicit boolean/);
++  });
++
++  it("treats dryRun as a no-op for read tools (inherits entry default)", () => {
++    expect(resolveExecutionMode(undefined, false, false)).toEqual({ dryRun: false, defaultedSafe: false });
++    expect(resolveExecutionMode("nonsense", false, true)).toEqual({ dryRun: true, defaultedSafe: false });
++  });
++});
+--- a/services/pilot-api/src/services/safetyPolicy.test.ts
++++ b/services/pilot-api/src/services/safetyPolicy.test.ts
+@@ -0,0 +1,72 @@
++import { describe, expect, it } from "vitest";
++
++import {
++  applyPrivilegedOverrides,
++  isPrivilegedRole,
++  type PolicyViolation
++} from "./safetyPolicy.js";
++
++const overridableBlock: PolicyViolation = { code: "DENIED_DOMAIN", message: "internal domain", severity: "block" };
++const hardBucketBlock: PolicyViolation = { code: "DENIED_BUCKET", message: "secrets bucket", severity: "block" };
++const hardTenantBlock: PolicyViolation = { code: "TENANT_MISMATCH", message: "cross tenant", severity: "block" };
++
++function codes(vs: PolicyViolation[]) {
++  return vs.map((v) => `${v.code}:${v.severity}${v.overridden ? ":overridden" : ""}`);
++}
++
++describe("isPrivilegedRole (S5)", () => {
++  it("only owner and superadmin are privileged", () => {
++    expect(isPrivilegedRole("owner")).toBe(true);
++    expect(isPrivilegedRole("superadmin")).toBe(true);
++    expect(isPrivilegedRole("admin")).toBe(false);
++    expect(isPrivilegedRole("operator")).toBe(false);
++    expect(isPrivilegedRole(undefined)).toBe(false);
++  });
++});
++
++describe("applyPrivilegedOverrides (S5: no accidental universal bypass)", () => {
++  const all = [overridableBlock, hardBucketBlock, hardTenantBlock];
++
++  it("normal user: overrides are ignored, everything stays blocked", () => {
++    expect(codes(applyPrivilegedOverrides(all, "operator", true))).toEqual([
++      "DENIED_DOMAIN:block",
++      "DENIED_BUCKET:block",
++      "TENANT_MISMATCH:block"
++    ]);
++  });
++
++  it("admin (not privileged): cannot override", () => {
++    expect(codes(applyPrivilegedOverrides(all, "admin", true))).toEqual([
++      "DENIED_DOMAIN:block",
++      "DENIED_BUCKET:block",
++      "TENANT_MISMATCH:block"
++    ]);
++  });
++
++  it("superadmin WITHOUT explicit opt-in: still fully blocked (no silent bypass)", () => {
++    expect(codes(applyPrivilegedOverrides(all, "superadmin", false))).toEqual([
++      "DENIED_DOMAIN:block",
++      "DENIED_BUCKET:block",
++      "TENANT_MISMATCH:block"
++    ]);
++  });
++
++  it("superadmin WITH opt-in: downgrades only overridable categories, audited", () => {
++    expect(codes(applyPrivilegedOverrides(all, "superadmin", true))).toEqual([
++      "DENIED_DOMAIN:warn:overridden",
++      "DENIED_BUCKET:block", // hard category never bypassable
++      "TENANT_MISMATCH:block" // tenant boundary never bypassable
++    ]);
++  });
++
++  it("owner WITH opt-in behaves like superadmin", () => {
++    const out = applyPrivilegedOverrides([overridableBlock], "owner", true);
++    expect(out[0].severity).toBe("warn");
++    expect(out[0].overridden).toBe(true);
++  });
++
++  it("does not touch pre-existing warnings or non-blocking violations", () => {
++    const warn: PolicyViolation = { code: "DENIED_DOMAIN", message: "x", severity: "warn" };
++    expect(applyPrivilegedOverrides([warn], "superadmin", true)).toEqual([warn]);
++  });
++});
+--- a/services/pilot-api/src/ops/prodMigrationGuard.test.ts
++++ b/services/pilot-api/src/ops/prodMigrationGuard.test.ts
+@@ -0,0 +1,75 @@
++import { describe, expect, it } from "vitest";
++
++// Import the runtime guard used by scripts/ops/go-live.mjs.
++import {
++  assertProductionMigrationGates,
++  isProductionEnv,
++  missingProductionGates,
++  REQUIRED_PROD_ACTION_LEVEL
++} from "../../scripts/ops/prod-migration-guard.mjs";
++
++function fullProdEnv(overrides: Record<string, string | undefined> = {}): Record<string, string | undefined> {
++  return {
++    OPS_ENV: "prod",
++    GO_LIVE_APPROVED_BY: "alice@migrateck.com",
++    GO_LIVE_ACTION_LEVEL: REQUIRED_PROD_ACTION_LEVEL,
++    GO_LIVE_CONFIRM: "1",
++    BASE_URL: "https://pilot.migrateck.com",
++    STRICT: "1",
++    GO_LIVE_ROLLBACK_PLAN: "rollback: redeploy previous image; prisma migrate resolve",
++    DATABASE_URL: "postgresql://user:pass@db:5433/migra_core",
++    APPROVAL_SIGNING_SECRET: "prod-secret",
++    ...overrides
++  };
++}
++
++describe("production migration guard (S7)", () => {
++  it("does not enforce in non-production environments", () => {
++    expect(isProductionEnv({ OPS_ENV: "staging" })).toBe(false);
++    expect(assertProductionMigrationGates({ OPS_ENV: "staging" })).toMatchObject({ enforced: false });
++    expect(assertProductionMigrationGates({ OPS_ENV: "dev" })).toMatchObject({ enforced: false });
++    // default (no env vars) is staging → not enforced
++    expect(assertProductionMigrationGates({})).toMatchObject({ enforced: false });
++  });
++
++  it("recognizes prod and production", () => {
++    expect(isProductionEnv({ OPS_ENV: "prod" })).toBe(true);
++    expect(isProductionEnv({ NODE_ENV: "production" })).toBe(true);
++  });
++
++  it("passes when every gate is satisfied in production", () => {
++    expect(missingProductionGates(fullProdEnv())).toEqual([]);
++    expect(assertProductionMigrationGates(fullProdEnv())).toMatchObject({ enforced: true, env: "prod" });
++  });
++
++  it("BLOCKS production migration when any single gate is missing", () => {
++    const gates = [
++      "GO_LIVE_APPROVED_BY",
++      "GO_LIVE_ACTION_LEVEL",
++      "GO_LIVE_CONFIRM",
++      "BASE_URL",
++      "GO_LIVE_ROLLBACK_PLAN",
++      "DATABASE_URL",
++      "APPROVAL_SIGNING_SECRET"
++    ];
++    for (const gate of gates) {
++      const env = fullProdEnv();
++      delete env[gate];
++      expect(() => assertProductionMigrationGates(env), `missing ${gate}`).toThrow(/PRODUCTION MIGRATION BLOCKED/);
++    }
++  });
++
++  it("blocks when action level is wrong", () => {
++    expect(() => assertProductionMigrationGates(fullProdEnv({ GO_LIVE_ACTION_LEVEL: "3" }))).toThrow(/action level/);
++  });
++
++  it("blocks a bare prod invocation with no gates (accidental/default route)", () => {
++    expect(() => assertProductionMigrationGates({ OPS_ENV: "prod" })).toThrow(/PRODUCTION MIGRATION BLOCKED/);
++  });
++
++  it("blocks when preflight (strict/canary) was not run", () => {
++    const env = fullProdEnv();
++    delete env.STRICT;
++    expect(() => assertProductionMigrationGates(env)).toThrow(/preflight/);
++  });
++});
+--- a/services/pilot-api/scripts/ops/prod-migration-guard.mjs
++++ b/services/pilot-api/scripts/ops/prod-migration-guard.mjs
+@@ -0,0 +1,78 @@
++/**
++ * Production migration guard (finding S7).
++ *
++ * `prisma migrate deploy` mutates the production database schema. This guard is
++ * fail-closed: in a production environment the migration is blocked unless every
++ * required gate is satisfied. Non-production environments (dev/staging) are not
++ * gated so normal iteration keeps working.
++ *
++ * Gates required in production:
++ *   - explicit production recognition   (OPS_ENV/NODE_ENV = prod|production)
++ *   - explicit approval                 (GO_LIVE_APPROVED_BY or GO_LIVE_APPROVAL_TOKEN)
++ *   - correct action level              (GO_LIVE_ACTION_LEVEL = 6 — remote mutation)
++ *   - explicit confirmation             (GO_LIVE_CONFIRM = 1 — prevents accidental/default runs)
++ *   - target verification               (BASE_URL set + STRICT or CANARY preflight)
++ *   - rollback plan                     (GO_LIVE_ROLLBACK_PLAN)
++ *   - required secrets/config           (DATABASE_URL, APPROVAL_SIGNING_SECRET)
++ */
++
++export const REQUIRED_PROD_ACTION_LEVEL = "6";
++
++export function isProductionEnv(env = process.env) {
++  const name = (env.OPS_ENV ?? env.NODE_ENV ?? "staging").toLowerCase();
++  return name === "prod" || name === "production";
++}
++
++/**
++ * Returns the list of missing gate descriptions (empty array = all satisfied).
++ * Pure — does not read process.env unless you pass it.
++ */
++export function missingProductionGates(env = process.env) {
++  const missing = [];
++
++  if (!env.GO_LIVE_APPROVED_BY && !env.GO_LIVE_APPROVAL_TOKEN) {
++    missing.push("explicit approval (GO_LIVE_APPROVED_BY or GO_LIVE_APPROVAL_TOKEN)");
++  }
++  if (env.GO_LIVE_ACTION_LEVEL !== REQUIRED_PROD_ACTION_LEVEL) {
++    missing.push(`action level (GO_LIVE_ACTION_LEVEL=${REQUIRED_PROD_ACTION_LEVEL})`);
++  }
++  if (env.GO_LIVE_CONFIRM !== "1") {
++    missing.push("explicit confirmation (GO_LIVE_CONFIRM=1)");
++  }
++  if (!env.BASE_URL) {
++    missing.push("target verification (BASE_URL)");
++  }
++  if (env.STRICT !== "1" && env.OPS_STRICT !== "1" && env.CANARY !== "1") {
++    missing.push("preflight (STRICT=1 or CANARY=1)");
++  }
++  if (!env.GO_LIVE_ROLLBACK_PLAN) {
++    missing.push("rollback plan (GO_LIVE_ROLLBACK_PLAN)");
++  }
++  if (!env.DATABASE_URL) {
++    missing.push("database config (DATABASE_URL)");
++  }
++  if (!env.APPROVAL_SIGNING_SECRET) {
++    missing.push("signing secret (APPROVAL_SIGNING_SECRET)");
++  }
++
++  return missing;
++}
++
++/**
++ * Fail-closed assertion. Throws in production when any gate is missing.
++ * Returns { enforced, env } describing what it decided.
++ */
++export function assertProductionMigrationGates(env = process.env) {
++  const name = (env.OPS_ENV ?? env.NODE_ENV ?? "staging").toLowerCase();
++  if (!isProductionEnv(env)) {
++    return { enforced: false, env: name, missing: [] };
++  }
++
++  const missing = missingProductionGates(env);
++  if (missing.length > 0) {
++    throw new Error(
++      "PRODUCTION MIGRATION BLOCKED (S7) — missing required gates:\n  - " + missing.join("\n  - ")
++    );
++  }
++  return { enforced: true, env: name, missing: [] };
++}
+--- a/services/pilot-api/scripts/ops/prod-migration-guard.d.mts
++++ b/services/pilot-api/scripts/ops/prod-migration-guard.d.mts
+@@ -0,0 +1,6 @@
++export const REQUIRED_PROD_ACTION_LEVEL: string;
++export function isProductionEnv(env?: Record<string, string | undefined>): boolean;
++export function missingProductionGates(env?: Record<string, string | undefined>): string[];
++export function assertProductionMigrationGates(
++  env?: Record<string, string | undefined>
++): { enforced: boolean; env: string; missing: string[] };
