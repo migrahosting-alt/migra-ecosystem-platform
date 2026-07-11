@@ -45,6 +45,11 @@
 !/apps/migrapilot-desktop/**
 !/apps/migrapilot-vscode-extension/
 !/apps/migrapilot-vscode-extension/**
+# Canonical MigraPilot VS Code extension — track its source. Build output
+# (out/, *.js), node_modules, logs, .env are re-excluded by its own
+# apps/migrapilot-vscode/.gitignore.
+!/apps/migrapilot-vscode/
+!/apps/migrapilot-vscode/**
 !/apps/**/package.json
 !/apps/**/package-lock.json
 !/apps/**/pnpm-lock.yaml
@@ -101,3 +106,6 @@ logs/
 backups/
 _tools/
 _security_scan_outputs/
+
+# Claude Code local (uncommitted) personal settings
+.claude/settings.local.json

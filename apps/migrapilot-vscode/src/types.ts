@@ -32,9 +32,18 @@ export interface DraftPatchPlan {
   safetyBoundary: string;
 }
 
+export interface DraftDiff {
+  title: string;
+  filePath: string;
+  unifiedDiff: string;
+  notes: string[];
+  safetyBoundary: string;
+}
+
 export interface WebviewMessage {
   command: string;
   prompt?: string;
   context?: WorkspaceContext;
   patchPlan?: DraftPatchPlan;
+  draftDiff?: DraftDiff;
 }

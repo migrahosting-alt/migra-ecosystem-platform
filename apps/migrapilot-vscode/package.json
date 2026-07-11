@@ -1,27 +1,19 @@
 {
   "name": "migrapilot-vscode",
-  "displayName": "MigraPilot AI Engineer",
-  "description": "AI engineering command center with reliable local context capture for the MigraTeck ecosystem.",
-  "version": "0.0.3-ctx.1",
+  "displayName": "MigraPilot Chat",
+  "description": "MigraPilot — an AI engineering chat assistant for the MigraTeck ecosystem, with live editor context.",
+  "version": "0.18.0",
   "publisher": "migrateck",
   "engines": {
-    "vscode": "^1.90.0"
+    "vscode": "^1.95.0"
   },
   "main": "./out/extension.js",
   "categories": [
-    "Other"
+    "Other",
+    "Machine Learning"
   ],
   "activationEvents": [
-    "onStartupFinished",
-    "onView:migrapilot.chatView",
-    "onCommand:migrapilot.openChat",
-    "onCommand:migrapilot.explainCurrentFile",
-    "onCommand:migrapilot.reviewSelection",
-    "onCommand:migrapilot.startAgentTask",
-    "onCommand:migrapilot.openVoiceCommand",
-    "onCommand:migrapilot.openCommandCenter",
-    "onCommand:migrapilot.showCurrentContext",
-    "onCommand:migrapilot.captureCurrentContext"
+    "onStartupFinished"
   ],
   "contributes": {
     "viewsContainers": {
@@ -36,8 +28,8 @@
     "views": {
       "migrapilot": [
         {
-          "id": "migrapilot.chatView",
-          "name": "AI Engineer",
+          "id": "migrapilot.chat",
+          "name": "MigraPilot",
           "type": "webview"
         }
       ]
@@ -48,6 +40,10 @@
         "title": "MigraPilot: Open Chat"
       },
       {
+        "command": "migrapilot.newChat",
+        "title": "MigraPilot: New Chat"
+      },
+      {
         "command": "migrapilot.explainCurrentFile",
         "title": "MigraPilot: Explain Current File"
       },
@@ -56,26 +52,53 @@
         "title": "MigraPilot: Review Selection"
       },
       {
-        "command": "migrapilot.startAgentTask",
-        "title": "MigraPilot: Start Agent Task"
-      },
-      {
-        "command": "migrapilot.openVoiceCommand",
-        "title": "MigraPilot: Open Voice Command"
-      },
-      {
-        "command": "migrapilot.openCommandCenter",
-        "title": "MigraPilot: Open Command Center"
-      },
-      {
-        "command": "migrapilot.showCurrentContext",
-        "title": "MigraPilot: Show Current Context"
-      },
-      {
-        "command": "migrapilot.captureCurrentContext",
-        "title": "MigraPilot: Capture Current Context"
+        "command": "migrapilot.attachFile",
+        "title": "MigraPilot: Attach File"
       }
-    ]
+    ],
+    "configuration": {
+      "title": "MigraPilot",
+      "properties": {
+        "migrapilot.backend": {
+          "type": "string",
+          "enum": [
+            "pilot-web",
+            "pilot-api"
+          ],
+          "enumDescriptions": [
+            "Simple local Ollama engine (:3399) — read-only tools, in-memory.",
+            "Full engine (:3377) — multi-provider model routing, missions, cryptographic approvals, durable state."
+          ],
+          "default": "pilot-api",
+          "description": "Which MigraPilot backend the chat talks to. Default is the canonical pilot-api (full engine). 'pilot-web' is an explicit temporary fallback only."
+        },
+        "migrapilot.pilotApiUrl": {
+          "type": "string",
+          "default": "http://127.0.0.1:3377",
+          "description": "Base URL of the full pilot-api backend (used when migrapilot.backend = pilot-api)."
+        },
+        "migrapilot.apiUrl": {
+          "type": "string",
+          "default": "http://127.0.0.1:3399",
+          "description": "Base URL of the pilot-web backend (used when migrapilot.backend = pilot-web). Also serves the voice recorder page."
+        },
+        "migrapilot.apiToken": {
+          "type": "string",
+          "default": "",
+          "description": "Optional bearer token for the pilot-api backend."
+        },
+        "migrapilot.ollamaUrl": {
+          "type": "string",
+          "default": "http://127.0.0.1:11434",
+          "description": "Ollama base URL used to list selectable models."
+        },
+        "migrapilot.visionModel": {
+          "type": "string",
+          "default": "llava:latest",
+          "description": "Local Ollama vision model used to analyze attached images/screenshots (e.g. llava:latest, llama3.2-vision:11b)."
+        }
+      }
+    }
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",

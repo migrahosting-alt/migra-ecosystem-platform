@@ -23,8 +23,14 @@ jspm_packages/
 
 # Build artifacts
 out/
+out.retired-hold/
 *.js
 *.js.map
+
+# Design mockup drafts (not source; keep media/ icons)
+/MigraPilot_Vs_code_Mockup-Draft.png
+/Pilot mockup draft.png
+*.vsix
 
 # Environment variables
 .env

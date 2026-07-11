@@ -213,3 +213,62 @@ footer {
   opacity: 0.65;
   cursor: not-allowed;
 }
+
+
+.draft-diff-meta {
+  color: var(--muted);
+  font-size: 12px;
+  margin-bottom: 8px;
+}
+
+.draft-diff {
+  min-height: 100px;
+  max-height: 260px;
+  overflow: auto;
+  white-space: pre;
+  word-break: normal;
+  border: 1px solid rgba(167, 139, 250, 0.18);
+  border-radius: 12px;
+  padding: 10px;
+  background: rgba(0, 0, 0, 0.22);
+  color: #e5e7eb;
+  font-size: 12px;
+}
+
+.draft-diff.empty {
+  color: var(--muted);
+}
+
+.draft-diff-notes ul {
+  margin: 8px 0 4px;
+  padding-left: 20px;
+  font-size: 12px;
+}
+
+.draft-diff-notes .safety {
+  color: var(--muted);
+  font-size: 11px;
+  margin: 4px 0 0;
+}
+
+.draft-diff-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.draft-diff-actions .locked {
+  margin-top: 0;
+}
+
+#copyDiffButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.copy-status {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--muted);
+  min-height: 16px;
+}
