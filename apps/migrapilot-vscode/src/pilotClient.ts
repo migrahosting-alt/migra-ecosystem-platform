@@ -1,0 +1,240 @@
+import * as vscode from "vscode";
+
+export interface ChatTurn {
+  role: "user" | "assistant";
+  text: string;
+}
+
+export interface ChatRequestContext {
+  file?: string;
+  languageId?: string;
+  selection?: string;
+  preview?: string;
+}
+
+export interface StreamHandlers {
+  onDelta: (text: string) => void;
+  onStep?: (title: string) => void;
+  onDone: (fullText: string) => void;
+  onError: (message: string) => void;
+}
+
+/**
+ * Streaming client for a pilot-api / pilot-web backend. The chat endpoint
+ * returns an NDJSON event stream: run.created → step* → token* → message →
+ * run.completed. We surface tokens live and the final message as authoritative.
+ */
+export class PilotClient {
+  private cfg() { return vscode.workspace.getConfiguration("migrapilot"); }
+  /** "pilot-web" (simple Ollama engine, NDJSON) | "pilot-api" (full engine, SSE). */
+  public backend(): string { return this.cfg().get<string>("backend") || "pilot-web"; }
+  public baseUrl(): string | undefined {
+    if (this.backend() === "pilot-api") {
+      const u = this.cfg().get<string>("pilotApiUrl");
+      return u && u.trim() ? u.replace(/\/+$/, "") : "http://127.0.0.1:3377";
+    }
+    const u = this.cfg().get<string>("apiUrl");
+    return u && u.trim() ? u.replace(/\/+$/, "") : undefined;
+  }
+  private token(): string | undefined {
+    const t = this.cfg().get<string>("apiToken");
+    return t && t.trim() ? t : undefined;
+  }
+  private ollamaUrl(): string {
+    const u = this.cfg().get<string>("ollamaUrl");
+    return (u && u.trim() ? u : "http://127.0.0.1:11434").replace(/\/+$/, "");
+  }
+  public isConfigured(): boolean { return !!this.baseUrl(); }
+
+  /** List selectable Ollama models (excludes embedding-only models). */
+  public async listModels(): Promise<string[]> {
+    try {
+      const res = await fetch(`${this.ollamaUrl()}/api/tags`);
+      if (!res.ok) return [];
+      const data = (await res.json()) as any;
+      return (data.models ?? [])
+        .filter((m: any) => !(Array.isArray(m.capabilities) && m.capabilities.includes("embedding")) && !/embed/i.test(m.name ?? ""))
+        .map((m: any) => String(m.name))
+        .sort();
+    } catch {
+      return [];
+    }
+  }
+
+  /** Local, private speech-to-text. Sends a recorded audio data-URI to the
+   *  backend's whisper worker and returns the transcript (or throws with a
+   *  human-readable reason the caller can surface). */
+  public async transcribe(dataUri: string, mime: string): Promise<string> {
+    const base = this.baseUrl();
+    if (!base) throw new Error("No MigraPilot backend configured — set migrapilot.apiUrl to enable voice.");
+    let res: Awaited<ReturnType<typeof fetch>>;
+    try {
+      res = await fetch(`${base}/api/pilot/transcribe`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...(this.token() ? { Authorization: `Bearer ${this.token()}` } : {}) },
+        body: JSON.stringify({ audio: dataUri, mime }),
+      });
+    } catch (err: any) {
+      throw new Error(`Could not reach MigraPilot at ${base} (${err?.message ?? "network error"}).`);
+    }
+    const data = (await res.json().catch(() => ({}))) as { text?: string; error?: string };
+    if (!res.ok || data.error) throw new Error(data.error || `Backend responded ${res.status}.`);
+    return (data.text ?? "").trim();
+  }
+
+  /** Analyze an image locally with a vision model (Ollama), returning a text description.
+   *  Runs extension-side so it works with any chat backend. */
+  public async analyzeImage(dataUri: string, userPrompt: string): Promise<string> {
+    const base = this.ollamaUrl();
+    const model = this.cfg().get<string>("visionModel") || "llava:latest";
+    const b64 = dataUri.includes(",") ? dataUri.slice(dataUri.indexOf(",") + 1) : dataUri;
+    const prompt = userPrompt && userPrompt.trim()
+      ? `The user asked: "${userPrompt.trim()}". Describe this image in detail relevant to that request — include any UI, code, error messages, diagrams, or visible text.`
+      : "Describe this image in detail — include any UI, code, error messages, diagrams, or visible text.";
+    const res = await fetch(`${base}/api/generate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model, prompt, images: [b64], stream: false }),
+    });
+    if (!res.ok) throw new Error(`vision model ${model} responded ${res.status}`);
+    const data = (await res.json()) as { response?: string };
+    return (data.response ?? "").trim();
+  }
+
+  /** URL of the external-browser voice recorder page for a capture session.
+   *  VS Code webviews cannot use the mic, so recording happens in the real browser. */
+  public voicePageUrl(session: string): string | undefined {
+    const base = this.baseUrl();
+    return base ? `${base}/pilot-voice.html?session=${encodeURIComponent(session)}` : undefined;
+  }
+
+  /** Poll the per-session voice mailbox. `ready:false` = keep polling; `ready:true` = transcript delivered. */
+  public async pollVoiceInbox(session: string): Promise<{ ready: boolean; text: string }> {
+    const base = this.baseUrl();
+    if (!base) return { ready: false, text: "" };
+    try {
+      const res = await fetch(`${base}/api/pilot/voice-inbox?session=${encodeURIComponent(session)}`);
+      if (!res.ok) return { ready: false, text: "" };
+      const data = (await res.json()) as { text?: string; pending?: boolean };
+      if (data.pending) return { ready: false, text: "" };
+      return { ready: true, text: (data.text ?? "").trim() };
+    } catch {
+      return { ready: false, text: "" };
+    }
+  }
+
+  /** pilot-api backend: POST /api/pilot/chat/stream (SSE). Events: conversation/provider/
+   *  usage/token/tool/warning/error/done. Runs dryRun (safe: no real mutations). */
+  private async streamChatPilotApi(message: string, h: StreamHandlers, model?: string, history?: ChatTurn[]): Promise<void> {
+    const base = this.baseUrl();
+    if (!base) { h.onDone("⚙️ No pilot-api URL configured. Set `migrapilot.pilotApiUrl`."); return; }
+    const body: Record<string, unknown> = { message, dryRun: true };
+    if (model && model !== "auto") body.model = model;
+    if (history && history.length) body.history = history.slice(-20).map((t) => ({ role: t.role, text: t.text }));
+    let res: Awaited<ReturnType<typeof fetch>>;
+    try {
+      res = await fetch(`${base}/api/pilot/chat/stream`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...(this.token() ? { Authorization: `Bearer ${this.token()}` } : {}) },
+        body: JSON.stringify(body),
+      });
+    } catch (err: any) {
+      h.onError(`Could not reach pilot-api at ${base} (${err?.message ?? "network error"}). Is it running on :3377?`);
+      return;
+    }
+    if (!res.ok || !res.body) {
+      let msg = `pilot-api responded ${res.status}.`;
+      try { const t = await res.text(); if (t) msg += ` ${t.slice(0, 300)}`; } catch { /* ignore */ }
+      h.onError(msg);
+      return;
+    }
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let full = "";
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        let sep: number;
+        while ((sep = buffer.indexOf("\n\n")) >= 0) {
+          const frame = buffer.slice(0, sep);
+          buffer = buffer.slice(sep + 2);
+          let evName = "message";
+          let dataStr = "";
+          for (const line of frame.split("\n")) {
+            if (line.startsWith("event:")) evName = line.slice(6).trim();
+            else if (line.startsWith("data:")) dataStr += line.slice(5).trim();
+          }
+          if (!dataStr) continue;
+          let data: any;
+          try { data = JSON.parse(dataStr); } catch { continue; }
+          if (evName === "token" && typeof data.text === "string") { full += data.text; h.onDelta(data.text); }
+          else if (evName === "provider" && h.onStep) { h.onStep(`Model: ${data.model ?? "?"}${data.reason ? ` (${data.reason})` : ""}`); }
+          else if (evName === "tool" && h.onStep) {
+            const tool = data.toolName ?? data.name ?? data.tool ?? "tool";
+            const status = data.status ? ` · ${data.status}` : "";
+            const appr = data.payload && data.payload.approvalRequest;
+            if (appr) h.onStep(`⚠️ Approval required for ${appr.toolName ?? tool} (enable live execution to allow)`);
+            else h.onStep(`🔧 ${tool}${status}`);
+          }
+          else if (evName === "error") { h.onError(String(data.message ?? data.error ?? "backend error")); return; }
+        }
+      }
+    } catch (err: any) {
+      h.onError(`Stream interrupted (${err?.message ?? "error"}).`);
+      return;
+    }
+    h.onDone(full || "…(no response text)");
+  }
+
+  public async streamChat(message: string, context: ChatRequestContext | undefined, h: StreamHandlers, model?: string, history?: ChatTurn[]): Promise<void> {
+    if (this.backend() === "pilot-api") { await this.streamChatPilotApi(message, h, model, history); return; }
+    const base = this.baseUrl();
+    if (!base) {
+      h.onDone("⚙️ No MigraPilot backend configured. Set `migrapilot.apiUrl` (e.g. http://127.0.0.1:3399) to connect.");
+      return;
+    }
+    let res: Awaited<ReturnType<typeof fetch>>;
+    try {
+      res = await fetch(`${base}/api/pilot/chat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...(this.token() ? { Authorization: `Bearer ${this.token()}` } : {}) },
+        body: JSON.stringify({ message, context, ...(model ? { model } : {}) }),
+      });
+    } catch (err: any) {
+      h.onError(`Could not reach MigraPilot at ${base} (${err?.message ?? "network error"}).`);
+      return;
+    }
+    if (!res.ok || !res.body) { h.onError(`Backend responded ${res.status}.`); return; }
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let full = "";
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        let nl: number;
+        while ((nl = buffer.indexOf("\n")) >= 0) {
+          const line = buffer.slice(0, nl).trim();
+          buffer = buffer.slice(nl + 1);
+          if (!line) continue;
+          let ev: any;
+          try { ev = JSON.parse(line); } catch { continue; }
+          if (ev.type === "token" && typeof ev.delta === "string") { full += ev.delta; h.onDelta(ev.delta); }
+          else if (ev.type === "message" && ev.message?.content) { full = ev.message.content; }
+          else if (ev.type === "step" && h.onStep && ev.step?.title) { h.onStep(ev.step.title); }
+          else if (ev.type === "error") { h.onError(String(ev.message ?? ev.error ?? "backend error")); return; }
+        }
+      }
+    } catch (err: any) {
+      h.onError(`Stream interrupted (${err?.message ?? "error"}).`);
+      return;
+    }
+    h.onDone(full || "…(no response text)");
+  }
+}

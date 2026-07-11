@@ -1,0 +1,42 @@
+# Logs
+logs
+*.log
+npm-debug.log
+yarn-debug.log
+yarn-error.log
+
+# Runtime data
+pids
+*.pid
+*.seed
+*.pid.lock
+
+# Dependency directories
+node_modules/
+jspm_packages/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Build artifacts
+out/
+out.retired-hold/
+*.js
+*.js.map
+
+# Design mockup drafts (not source; keep media/ icons)
+/MigraPilot_Vs_code_Mockup-Draft.png
+/Pilot mockup draft.png
+*.vsix
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# OS
+.DS_Store
+Thumbs.db

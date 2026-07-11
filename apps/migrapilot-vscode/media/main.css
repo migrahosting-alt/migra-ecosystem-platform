@@ -1,0 +1,274 @@
+:root {
+  color-scheme: dark;
+  --bg: #09090f;
+  --card: rgba(22, 18, 38, 0.92);
+  --card-border: rgba(167, 139, 250, 0.22);
+  --text: #f8fafc;
+  --muted: #a1a1aa;
+  --accent: #a78bfa;
+  --accent-strong: #7c3aed;
+  --warning: #fbbf24;
+}
+
+body {
+  margin: 0;
+  background: radial-gradient(circle at top, rgba(124, 58, 237, 0.28), transparent 34%), var(--bg);
+  color: var(--text);
+  font-family: var(--vscode-font-family, system-ui, sans-serif);
+}
+
+.shell {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+}
+
+.hero,
+.card,
+.warning,
+footer {
+  border: 1px solid var(--card-border);
+  border-radius: 18px;
+  background: var(--card);
+  padding: 14px;
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.28);
+}
+
+.hero {
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  align-items: flex-start;
+}
+
+.eyebrow,
+.subtitle,
+.muted,
+footer {
+  color: var(--muted);
+}
+
+.eyebrow {
+  margin: 0 0 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  font-size: 11px;
+}
+
+h1,
+h2 {
+  margin: 0 0 8px;
+}
+
+h1 {
+  font-size: 24px;
+}
+
+h2 {
+  font-size: 15px;
+  color: #ddd6fe;
+}
+
+.badge,
+.mode,
+.actions button,
+#sendButton {
+  border: 1px solid rgba(167, 139, 250, 0.35);
+  border-radius: 999px;
+  background: rgba(124, 58, 237, 0.22);
+  color: var(--text);
+  padding: 7px 10px;
+}
+
+.warning {
+  border-color: rgba(251, 191, 36, 0.4);
+  color: var(--warning);
+}
+
+.mode-grid,
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.mode.active {
+  background: var(--accent-strong);
+}
+
+.kv {
+  display: grid;
+  grid-template-columns: 0.8fr 1.2fr;
+  gap: 10px;
+  padding: 7px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.kv span {
+  color: var(--muted);
+}
+
+.kv strong {
+  word-break: break-word;
+}
+
+.transcript {
+  min-height: 120px;
+  max-height: 220px;
+  overflow: auto;
+  border: 1px solid rgba(167, 139, 250, 0.18);
+  border-radius: 12px;
+  padding: 10px;
+  background: rgba(0, 0, 0, 0.18);
+}
+
+.message {
+  margin: 0 0 8px;
+  padding: 9px 10px;
+  border-radius: 12px;
+}
+
+.message.assistant {
+  background: rgba(124, 58, 237, 0.2);
+}
+
+.message.user {
+  background: rgba(30, 64, 175, 0.22);
+}
+
+.composer {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+#promptInput {
+  min-width: 0;
+  flex: 1;
+  border: 1px solid rgba(167, 139, 250, 0.28);
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.22);
+  color: var(--text);
+  padding: 9px 12px;
+}
+
+.voice {
+  margin-top: 10px;
+  color: var(--muted);
+}
+
+button {
+  cursor: pointer;
+}
+
+button:hover {
+  border-color: var(--accent);
+}
+
+footer {
+  text-align: center;
+  font-size: 12px;
+}
+
+
+.preview {
+  min-height: 120px;
+  max-height: 260px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  border: 1px solid rgba(167, 139, 250, 0.18);
+  border-radius: 12px;
+  padding: 10px;
+  background: rgba(0, 0, 0, 0.22);
+  color: #e5e7eb;
+  font-size: 12px;
+}
+
+
+.patch-plan {
+  border: 1px solid rgba(167, 139, 250, 0.18);
+  border-radius: 12px;
+  padding: 12px;
+  background: rgba(0, 0, 0, 0.22);
+  color: #e5e7eb;
+}
+
+.patch-plan.empty {
+  color: var(--muted);
+}
+
+.patch-plan h3 {
+  margin-top: 0;
+  color: #ddd6fe;
+}
+
+.patch-plan ul {
+  margin: 8px 0 12px;
+  padding-left: 20px;
+}
+
+.locked {
+  margin-top: 10px;
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
+
+.draft-diff-meta {
+  color: var(--muted);
+  font-size: 12px;
+  margin-bottom: 8px;
+}
+
+.draft-diff {
+  min-height: 100px;
+  max-height: 260px;
+  overflow: auto;
+  white-space: pre;
+  word-break: normal;
+  border: 1px solid rgba(167, 139, 250, 0.18);
+  border-radius: 12px;
+  padding: 10px;
+  background: rgba(0, 0, 0, 0.22);
+  color: #e5e7eb;
+  font-size: 12px;
+}
+
+.draft-diff.empty {
+  color: var(--muted);
+}
+
+.draft-diff-notes ul {
+  margin: 8px 0 4px;
+  padding-left: 20px;
+  font-size: 12px;
+}
+
+.draft-diff-notes .safety {
+  color: var(--muted);
+  font-size: 11px;
+  margin: 4px 0 0;
+}
+
+.draft-diff-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.draft-diff-actions .locked {
+  margin-top: 0;
+}
+
+#copyDiffButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.copy-status {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--muted);
+  min-height: 16px;
+}
