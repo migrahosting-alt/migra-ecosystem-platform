@@ -5,7 +5,7 @@
  * VS Code uses — against a controllable local SSE server. The client is never
  * reimplemented here.
  */
-import { PilotClient, StreamHandlers, ChatTurn, ChatRequestContext } from "../../src/pilotClient";
+import { PilotClient, StreamHandlers, ChatTurn, ChatRequestContext, ProposalCardData } from "../../src/pilotClient";
 import { __setConfig, __resetConfig } from "./vscodeMock";
 
 export interface TranscriptEvent {
@@ -15,6 +15,7 @@ export interface TranscriptEvent {
 
 export class Transcript {
   public readonly events: TranscriptEvent[] = [];
+  public readonly proposals: ProposalCardData[] = [];
   public get deltas(): string[] { return this.events.filter((e) => e.kind === "delta").map((e) => e.value!); }
   public get steps(): string[] { return this.events.filter((e) => e.kind === "step").map((e) => e.value!); }
   public get fullText(): string | undefined { return this.events.find((e) => e.kind === "done")?.value; }
@@ -25,6 +26,7 @@ export class Transcript {
     return {
       onDelta: (t) => this.events.push({ kind: "delta", value: t }),
       onStep: (t) => this.events.push({ kind: "step", value: t }),
+      onProposal: (card) => this.proposals.push(card),
       onDone: (t) => this.events.push({ kind: "done", value: t }),
       onError: (m) => this.events.push({ kind: "error", value: m }),
       onAborted: () => this.events.push({ kind: "aborted" }),
@@ -42,10 +44,10 @@ export function makeClient(config: Record<string, unknown> = {}): PilotClient {
 export async function runChat(
   client: PilotClient,
   message: string,
-  opts: { model?: string; history?: ChatTurn[]; context?: ChatRequestContext; signal?: AbortSignal } = {}
+  opts: { model?: string; history?: ChatTurn[]; context?: ChatRequestContext; signal?: AbortSignal; workspaceId?: string } = {}
 ): Promise<Transcript> {
   const t = new Transcript();
-  await client.streamChat(message, opts.context, t.handlers(), opts.model, opts.history, opts.signal);
+  await client.streamChat(message, opts.context, t.handlers(), opts.model, opts.history, opts.signal, opts.workspaceId);
   return t;
 }
 
