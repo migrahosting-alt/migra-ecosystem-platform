@@ -1,0 +1,52 @@
+name: MigraPilot VS Code Extension
+
+# Validates the canonical MigraPilot VS Code extension: typecheck, compile, and
+# the PilotClient behavior + context + attachment + smoke test suites. The
+# NGINX gate does NOT cover the extension — this job is the extension's gate.
+
+on:
+  push:
+    branches: [main, "phase-*/**"]
+    paths:
+      - "apps/migrapilot-vscode/**"
+      - ".github/workflows/migrapilot-extension.yml"
+  pull_request:
+    paths:
+      - "apps/migrapilot-vscode/**"
+      - ".github/workflows/migrapilot-extension.yml"
+
+jobs:
+  extension:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/migrapilot-vscode
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install dependencies
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci
+          else
+            npm install
+          fi
+
+      - name: Typecheck (tsc --noEmit)
+        run: npm run typecheck
+
+      - name: Compile (tsc -> out/)
+        run: npm run compile
+
+      - name: Client behavior tests
+        run: npm run test:client
+
+      - name: Editor context tests
+        run: npm run test:context
+
+      - name: Full test suite (client + context + smoke)
+        run: npm run test:all

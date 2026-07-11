@@ -54,6 +54,30 @@
       {
         "command": "migrapilot.attachFile",
         "title": "MigraPilot: Attach File"
+      },
+      {
+        "command": "migrapilot.cancelResponse",
+        "title": "MigraPilot: Cancel Response"
+      },
+      {
+        "command": "migrapilot.reviewProposedEdit",
+        "title": "MigraPilot: Review Proposed Edit"
+      },
+      {
+        "command": "migrapilot.approveProposedEdit",
+        "title": "MigraPilot: Approve Proposed Edit"
+      },
+      {
+        "command": "migrapilot.rejectProposedEdit",
+        "title": "MigraPilot: Reject Proposed Edit"
+      },
+      {
+        "command": "migrapilot.applyProposedEdit",
+        "title": "MigraPilot: Apply Proposed Edit"
+      },
+      {
+        "command": "migrapilot.rollbackProposedEdit",
+        "title": "MigraPilot: Roll Back Proposed Edit"
       }
     ],
     "configuration": {
@@ -103,11 +127,18 @@
   "scripts": {
     "vscode:prepublish": "npm run compile",
     "compile": "tsc -p ./",
-    "watch": "tsc -watch -p ./"
+    "watch": "tsc -watch -p ./",
+    "typecheck": "tsc -p ./ --noEmit",
+    "test": "vitest run",
+    "test:client": "vitest run test/client",
+    "test:context": "vitest run test/context",
+    "test:smoke": "vitest run test/smoke",
+    "test:all": "vitest run"
   },
   "devDependencies": {
     "@types/node": "^16.18.34",
     "@types/vscode": "^1.90.0",
-    "typescript": "^5.1.6"
+    "typescript": "^5.1.6",
+    "vitest": "^2.1.9"
   }
 }
