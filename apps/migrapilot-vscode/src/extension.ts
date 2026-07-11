@@ -5,10 +5,32 @@ import { ChatPanelViewProvider } from "./chatPanelView";
 import { PilotClient } from "./pilotClient";
 import type { WorkspaceContext } from "./types";
 
-type AttachKind = "file" | "selection" | "image" | "symbol";
-interface Attachment { id: string; label: string; kind: AttachKind; content?: string; dataUri?: string; }
+export type AttachKind = "file" | "selection" | "image" | "symbol";
+export interface Attachment { id: string; label: string; kind: AttachKind; content?: string; dataUri?: string; }
 
-const IMAGE_EXT = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".ico"]);
+export const IMAGE_EXT = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".ico"]);
+
+/** Extension-side attachment validation used by the attach flow and tested
+ *  directly. Mirrors the constraints the composer enforces before an
+ *  attachment is allowed to reach pilot-api. */
+export const MAX_ATTACHMENT_BYTES = 5 * 1024 * 1024; // 5 MB
+export type AttachmentVerdict = { ok: true; kind: "image" | "text" } | { ok: false; reason: string };
+
+/** Decide whether a picked file may become an attachment. Rejects unsupported
+ *  binary types, oversized files, and path-traversal escapes from the workspace. */
+export function classifyAttachment(opts: { fileName: string; ext: string; byteLength: number; relativePath: string }): AttachmentVerdict {
+  const { ext, byteLength, relativePath } = opts;
+  if (relativePath.startsWith("..") || relativePath.includes("/../") || relativePath.includes("\\..\\")) {
+    return { ok: false, reason: "path escapes the workspace" };
+  }
+  if (byteLength > MAX_ATTACHMENT_BYTES) {
+    return { ok: false, reason: "file exceeds the 5 MB attachment limit" };
+  }
+  if (IMAGE_EXT.has(ext)) return { ok: true, kind: "image" };
+  const BINARY_EXT = new Set([".exe", ".dll", ".so", ".bin", ".zip", ".gz", ".tar", ".pdf", ".mp4", ".mov", ".wasm", ".class"]);
+  if (BINARY_EXT.has(ext)) return { ok: false, reason: `unsupported binary type ${ext}` };
+  return { ok: true, kind: "text" };
+}
 
 export function activate(context: vscode.ExtensionContext): void {
   const collector = new ContextCollector();
@@ -18,6 +40,7 @@ export function activate(context: vscode.ExtensionContext): void {
   let attachments: Attachment[] = [];
   let attachSeq = 0;
   let history: { role: "user" | "assistant"; text: string }[] = [];
+  let activeAbort: AbortController | undefined;
 
   const chat = new ChatPanelViewProvider(context.extensionUri, {
     onUserMessage: (text) => handleUserMessage(text),
@@ -88,8 +111,9 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand("migrapilot.openChat", () => chat.focus()),
     vscode.commands.registerCommand("migrapilot.explainCurrentFile", () => { addCurrentFile(); handleUserMessage("Explain the current file."); }),
     vscode.commands.registerCommand("migrapilot.reviewSelection", () => { addCurrentSelection(); handleUserMessage("Review the selected code."); }),
-    vscode.commands.registerCommand("migrapilot.newChat", () => { attachments = []; history = []; chat.clearChips(); chat.reset(); chat.focus(); }),
-    vscode.commands.registerCommand("migrapilot.attachFile", () => attachFiles())
+    vscode.commands.registerCommand("migrapilot.newChat", () => { activeAbort?.abort(); attachments = []; history = []; chat.clearChips(); chat.reset(); chat.focus(); }),
+    vscode.commands.registerCommand("migrapilot.attachFile", () => attachFiles()),
+    vscode.commands.registerCommand("migrapilot.cancelResponse", () => { activeAbort?.abort(); })
   );
 
   /* ── attachment engine ── */
@@ -132,14 +156,19 @@ export function activate(context: vscode.ExtensionContext): void {
     for (const uri of uris) {
       const ext = path.extname(uri.fsPath).toLowerCase();
       const base = path.basename(uri.fsPath);
-      if (IMAGE_EXT.has(ext)) {
+      const relativePath = vscode.workspace.asRelativePath(uri, false);
+      let byteLength = 0;
+      try { byteLength = (await vscode.workspace.fs.stat(uri)).size; } catch { /* size unknown */ }
+      const verdict = classifyAttachment({ fileName: base, ext, byteLength, relativePath });
+      if (!verdict.ok) { vscode.window.showWarningMessage(`MigraPilot: cannot attach ${base} — ${verdict.reason}.`); continue; }
+      if (verdict.kind === "image") {
         const bytes = await vscode.workspace.fs.readFile(uri);
         const mime = ext === ".jpg" ? "image/jpeg" : `image/${ext.slice(1)}`;
         addAttachment({ kind: "image", label: base, dataUri: `data:${mime};base64,${Buffer.from(bytes).toString("base64")}` });
       } else {
         try {
           const doc = await vscode.workspace.openTextDocument(uri);
-          addAttachment({ kind: "file", label: vscode.workspace.asRelativePath(uri), content: doc.getText() });
+          addAttachment({ kind: "file", label: relativePath, content: doc.getText() });
         } catch {
           addAttachment({ kind: "file", label: `${base} (binary — text extraction not available)`, content: undefined });
         }
@@ -168,6 +197,9 @@ export function activate(context: vscode.ExtensionContext): void {
     attachments = [];
     chat.clearChips();
     const priorHistory = history.slice(-18); // prior turns only; current message sent separately
+    activeAbort?.abort();               // cancel any still-running prior turn
+    const abort = new AbortController();
+    activeAbort = abort;
     await client.streamChat(backendMessage, toContext(captured), {
       onStep: (title) => chat.stepAssistant(id, title),
       onDelta: (d) => chat.streamDelta(id, d),
@@ -178,7 +210,10 @@ export function activate(context: vscode.ExtensionContext): void {
         if (history.length > 20) history = history.slice(-20);
       },
       onError: (m) => chat.completeAssistant(id, "⚠️ " + m),
-    }, selectedModel, priorHistory);
+      // Cancelled turns render as stopped and are NOT recorded to history — no
+      // false completion is appended when the user aborts an in-flight response.
+      onAborted: () => chat.completeAssistant(id, "⏹️ Response cancelled."),
+    }, selectedModel, priorHistory, abort.signal);
   }
 }
 
@@ -186,12 +221,12 @@ export function deactivate(): void { /* no teardown required */ }
 
 /* ── context + attachment message building ── */
 
-function toContext(c: WorkspaceContext) {
+export function toContext(c: WorkspaceContext) {
   return { file: c.relativeFilePath || c.activeFilePath || undefined, languageId: c.languageId || undefined, selection: c.hasSelection ? c.selectedTextPreview : undefined };
 }
-function truncate(s: string, n: number): string { return s.length > n ? s.slice(0, n) + "\n… (truncated)" : s; }
+export function truncate(s: string, n: number): string { return s.length > n ? s.slice(0, n) + "\n… (truncated)" : s; }
 
-function buildBackendMessage(text: string, c: WorkspaceContext, attachments: Attachment[]): string {
+export function buildBackendMessage(text: string, c: WorkspaceContext, attachments: Attachment[]): string {
   let msg = text;
   const file = c.relativeFilePath || c.activeFilePath;
   if (file && !attachments.some((a) => a.kind === "file" || a.kind === "selection")) {

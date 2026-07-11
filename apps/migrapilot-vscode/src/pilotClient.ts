@@ -17,6 +17,16 @@ export interface StreamHandlers {
   onStep?: (title: string) => void;
   onDone: (fullText: string) => void;
   onError: (message: string) => void;
+  /** Called once when the request is aborted via signal. Neither onDone nor
+   *  onError fire on abort — this prevents a false "completion" being appended
+   *  to the transcript when the user cancels an in-flight response. */
+  onAborted?: () => void;
+}
+
+/** True when an error/DOMException represents an AbortController abort. */
+function isAbortError(err: unknown): boolean {
+  const e = err as { name?: string } | null;
+  return !!e && e.name === "AbortError";
 }
 
 /**
@@ -125,9 +135,10 @@ export class PilotClient {
 
   /** pilot-api backend: POST /api/pilot/chat/stream (SSE). Events: conversation/provider/
    *  usage/token/tool/warning/error/done. Runs dryRun (safe: no real mutations). */
-  private async streamChatPilotApi(message: string, h: StreamHandlers, model?: string, history?: ChatTurn[]): Promise<void> {
+  private async streamChatPilotApi(message: string, h: StreamHandlers, model?: string, history?: ChatTurn[], signal?: AbortSignal): Promise<void> {
     const base = this.baseUrl();
     if (!base) { h.onDone("⚙️ No pilot-api URL configured. Set `migrapilot.pilotApiUrl`."); return; }
+    if (signal?.aborted) { h.onAborted?.(); return; }
     const body: Record<string, unknown> = { message, dryRun: true };
     if (model && model !== "auto") body.model = model;
     if (history && history.length) body.history = history.slice(-20).map((t) => ({ role: t.role, text: t.text }));
@@ -137,8 +148,10 @@ export class PilotClient {
         method: "POST",
         headers: { "Content-Type": "application/json", ...(this.token() ? { Authorization: `Bearer ${this.token()}` } : {}) },
         body: JSON.stringify(body),
+        signal,
       });
     } catch (err: any) {
+      if (isAbortError(err)) { h.onAborted?.(); return; }
       h.onError(`Could not reach pilot-api at ${base} (${err?.message ?? "network error"}). Is it running on :3377?`);
       return;
     }
@@ -183,27 +196,31 @@ export class PilotClient {
         }
       }
     } catch (err: any) {
+      if (isAbortError(err)) { h.onAborted?.(); return; }
       h.onError(`Stream interrupted (${err?.message ?? "error"}).`);
       return;
     }
     h.onDone(full || "…(no response text)");
   }
 
-  public async streamChat(message: string, context: ChatRequestContext | undefined, h: StreamHandlers, model?: string, history?: ChatTurn[]): Promise<void> {
-    if (this.backend() === "pilot-api") { await this.streamChatPilotApi(message, h, model, history); return; }
+  public async streamChat(message: string, context: ChatRequestContext | undefined, h: StreamHandlers, model?: string, history?: ChatTurn[], signal?: AbortSignal): Promise<void> {
+    if (this.backend() === "pilot-api") { await this.streamChatPilotApi(message, h, model, history, signal); return; }
     const base = this.baseUrl();
     if (!base) {
       h.onDone("⚙️ No MigraPilot backend configured. Set `migrapilot.apiUrl` (e.g. http://127.0.0.1:3399) to connect.");
       return;
     }
+    if (signal?.aborted) { h.onAborted?.(); return; }
     let res: Awaited<ReturnType<typeof fetch>>;
     try {
       res = await fetch(`${base}/api/pilot/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json", ...(this.token() ? { Authorization: `Bearer ${this.token()}` } : {}) },
         body: JSON.stringify({ message, context, ...(model ? { model } : {}) }),
+        signal,
       });
     } catch (err: any) {
+      if (isAbortError(err)) { h.onAborted?.(); return; }
       h.onError(`Could not reach MigraPilot at ${base} (${err?.message ?? "network error"}).`);
       return;
     }
@@ -232,6 +249,7 @@ export class PilotClient {
         }
       }
     } catch (err: any) {
+      if (isAbortError(err)) { h.onAborted?.(); return; }
       h.onError(`Stream interrupted (${err?.message ?? "error"}).`);
       return;
     }
