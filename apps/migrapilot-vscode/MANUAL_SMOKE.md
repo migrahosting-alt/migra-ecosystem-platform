@@ -39,3 +39,40 @@
 - No `pilot-web` request while backend = pilot-api (rows 3-4, 15).
 - Mutating requests remain dry-run (row 11).
 - Cancel produces no false completion (row 9).
+
+---
+
+# Phase C — Proposed-Edit Review / Apply / Rollback (OPERATOR-TO-RUN)
+
+> The proposal contract, path/secret/stale/dirty/symlink safety, the real
+> WorkspaceEdit apply path, partial-failure reporting, and rollback are all proven
+> headlessly by `test/edits/*` (36 tests) against the in-memory vscode mock, and by
+> pilot-api `test/behavior/proposedEdits.behavior.test.ts` (29 tests). These GUI
+> steps prove the rendered diff/approve/apply/rollback wiring. Do NOT claim GUI
+> completion unless you personally performed them.
+
+## Preconditions
+- pilot-api running: `GET http://127.0.0.1:3377/health` → `{"ok":true}` (migration `add_proposed_edits` applied).
+- A trusted, single-root workspace open in the Extension Development Host.
+
+## Checklist
+| # | Step | Expected |
+|---|------|----------|
+| C1 | Ask MigraPilot to modify one test file; it emits a `proposed_edit` tool result | A proposal appears (status *received*); no file changes yet |
+| C2 | Run **MigraPilot: Review Proposed Edit** (or click the file) | Native side-by-side diff opens; "after" side is exactly the proposed content |
+| C3 | **Reject Proposed Edit** | Status *rejected*; Apply is unavailable |
+| C4 | Ask again → **Approve Proposed Edit** | Status *approved*; Apply becomes available |
+| C5 | **Apply Proposed Edit** | File content changes to the proposed content; info toast "applied … Rollback is available" |
+| C6 | Inspect `git status` in a terminal | The file is modified in the working tree; **no** stage/commit/push occurred |
+| C7 | **Roll Back Proposed Edit** | Original content restored; status *rolled_back* |
+| C8 | Edit the applied file by hand, then re-apply a fresh approved proposal and **Roll Back** | Rollback is **blocked** ("changed_since_apply"); your hand edits are preserved |
+| C9 | Leave a target file dirty (unsaved) and try **Apply** | Blocked with a "dirty" reason; nothing written |
+| C10 | Externally change a target file after approval, then **Apply** | Blocked with a "stale" reason; nothing written |
+| C11 | Multi-file proposal (create+modify+delete+rename) → review each → approve → apply | All four apply; each shows correct operation badge; delete/rename show destructive warning |
+| C12 | Try to review/apply a `.env` (or `*.pem`) proposal | Proposed content is withheld; apply blocked (secret-file protection) |
+
+## Pass criteria
+- No plain chat reply ever mutates a file (only an explicit approved proposal can).
+- Apply requires approval AND passes the fail-closed preflight (trust, containment, symlink, dirty, hash).
+- Rollback never overwrites newer user work.
+- No git stage/commit/push happens on any apply/rollback path.

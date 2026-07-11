@@ -3,6 +3,7 @@ import * as path from "path";
 import { ContextCollector } from "./contextCollector";
 import { ChatPanelViewProvider } from "./chatPanelView";
 import { PilotClient } from "./pilotClient";
+import { registerProposedEdits } from "./proposedEdits/register";
 import type { WorkspaceContext } from "./types";
 
 export type AttachKind = "file" | "selection" | "image" | "symbol";
@@ -115,6 +116,13 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand("migrapilot.attachFile", () => attachFiles()),
     vscode.commands.registerCommand("migrapilot.cancelResponse", () => { activeAbort?.abort(); })
   );
+
+  /* ── proposed-edit review/apply/rollback (Phase C) ──
+   * Model tool results become strictly-typed proposals reviewed as native diffs;
+   * nothing writes to disk without explicit approval + a fail-closed apply gate. */
+  registerProposedEdits(context, {
+    onStatus: (id, status, detail) => chat.stepAssistant(chat.beginAssistant(), `Proposed edit ${id}: ${status}${detail ? ` — ${detail}` : ""}`),
+  });
 
   /* ── attachment engine ── */
 
