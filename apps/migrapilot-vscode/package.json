@@ -58,6 +58,26 @@
       {
         "command": "migrapilot.cancelResponse",
         "title": "MigraPilot: Cancel Response"
+      },
+      {
+        "command": "migrapilot.reviewProposedEdit",
+        "title": "MigraPilot: Review Proposed Edit"
+      },
+      {
+        "command": "migrapilot.approveProposedEdit",
+        "title": "MigraPilot: Approve Proposed Edit"
+      },
+      {
+        "command": "migrapilot.rejectProposedEdit",
+        "title": "MigraPilot: Reject Proposed Edit"
+      },
+      {
+        "command": "migrapilot.applyProposedEdit",
+        "title": "MigraPilot: Apply Proposed Edit"
+      },
+      {
+        "command": "migrapilot.rollbackProposedEdit",
+        "title": "MigraPilot: Roll Back Proposed Edit"
       }
     ],
     "configuration": {

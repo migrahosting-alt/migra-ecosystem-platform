@@ -9,6 +9,23 @@ const SUGGESTIONS: Array<{ ic: string; label: string }> = [
   { ic: "🔌", label: "Create an API endpoint" },
 ];
 
+export type ProposalAction = "review" | "approve" | "reject" | "apply" | "rollback";
+
+/** Proposal card metadata rendered as a first-class card in the transcript. */
+export interface ProposalCard {
+  proposalId: string;
+  title: string;
+  model: string;
+  filesAffected: number;
+  linesAdded: number;
+  linesRemoved: number;
+  risk: string;
+  summary: string;
+  expiresAt: string;
+  destructive: boolean;
+  sensitive: boolean;
+}
+
 export interface ChatHandlers {
   onUserMessage: (text: string) => void;
   onSetModel: (model: string) => void;
@@ -19,6 +36,8 @@ export interface ChatHandlers {
   onPasteImage: (dataUri: string, mime: string) => void;
   onUploadFile: (name: string, kind: string, content?: string, dataUri?: string) => void;
   onVoiceCapture: () => void;
+  /** A proposal card button was clicked (Review Diff / Approve / Reject / Apply / Rollback). */
+  onProposalAction: (action: ProposalAction, proposalId: string) => void;
 }
 
 /**
@@ -59,6 +78,7 @@ export class ChatPanelViewProvider implements vscode.WebviewViewProvider {
         case "pasteImage": if (m.dataUri) this.h.onPasteImage(String(m.dataUri), String(m.mime ?? "image/png")); return;
         case "uploadFile": this.h.onUploadFile(String(m.name ?? "file"), String(m.kind ?? "file"), m.content, m.dataUri); return;
         case "voiceCapture": this.h.onVoiceCapture(); return;
+        case "proposalAction": if (m.action && m.id) this.h.onProposalAction(String(m.action) as ProposalAction, String(m.id)); return;
       }
     });
   }
@@ -81,6 +101,10 @@ export class ChatPanelViewProvider implements vscode.WebviewViewProvider {
   public completeAssistant(id: string, markdown: string): void {
     this.post({ command: "completeAssistant", id, text: markdown });
   }
+  /** Render a first-class proposed-edit card in the transcript. */
+  public proposalCard(card: ProposalCard): void { this.post({ command: "proposalCard", card }); }
+  /** Reflect the Phase C state machine on an existing proposal card. */
+  public proposalStatus(id: string, status: string, detail?: string): void { this.post({ command: "proposalStatus", id, status, detail }); }
   /** Drop a finished voice transcript into the composer for the user to review/edit. */
   public insertTranscript(text: string): void { this.post({ command: "transcript", text }); }
   /** Reflect voice state in the composer: "transcribing" | "idle" | "error". */
@@ -182,6 +206,81 @@ export class ChatPanelViewProvider implements vscode.WebviewViewProvider {
     }
     function send(){ const v = input.value.trim(); if (!v) return; input.value=""; vscode.postMessage({ command:"send", text:v }); }
 
+    // ── Proposed-edit cards (Phase C.5) ──
+    // Card lifecycle mirrors the backend state machine: received → reviewing →
+    // approved/rejected → applying → applied → rollback_available → rolled_back.
+    // Apply is disabled until approved; Rollback until applied. All mutation runs
+    // through the existing Phase C commands (approval-before-apply preserved).
+    function riskBadge(risk){
+      const r = String(risk||"LOW").toUpperCase();
+      const label = r === "HIGH" ? "High" : r === "MEDIUM" ? "Medium" : "Low";
+      return '<span class="pe-risk pe-risk-'+r.toLowerCase()+'">⚠ Risk: '+label+'</span>';
+    }
+    function expiresLabel(iso){
+      const t = Date.parse(iso); if (!t) return "";
+      const mins = Math.round((t - Date.now())/60000);
+      if (mins <= 0) return "⏱ Expired";
+      if (mins < 60) return "⏱ Expires in "+mins+" min";
+      return "⏱ Expires in "+Math.round(mins/60)+" h";
+    }
+    function renderProposalCard(card){
+      hideWelcome();
+      const wrap = document.createElement("div");
+      wrap.className = "pe-card"; wrap.dataset.pid = card.proposalId;
+      const flags = [];
+      if (card.destructive) flags.push('<span class="pe-flag pe-flag-danger">🗑 Destructive (delete/rename)</span>');
+      if (card.sensitive) flags.push('<span class="pe-flag pe-flag-secret">🔒 Affects a protected/secret file</span>');
+      wrap.innerHTML =
+        '<div class="pe-title">📝 '+esc(card.title)+'</div>' +
+        '<div class="pe-meta">' +
+          '<span>🤖 '+esc(card.model)+'</span>' +
+          '<span>📁 Files affected: '+esc(card.filesAffected)+'</span>' +
+          '<span class="pe-add">➕ '+esc(card.linesAdded)+'</span>' +
+          '<span class="pe-rem">➖ '+esc(card.linesRemoved)+'</span>' +
+          riskBadge(card.risk) +
+        '</div>' +
+        (flags.length ? '<div class="pe-flags">'+flags.join(" ")+'</div>' : '') +
+        '<div class="pe-summary">📋 '+esc(card.summary||"")+'</div>' +
+        '<div class="pe-actions">' +
+          '<button class="pe-btn" data-act="review">🔍 Review Diff</button>' +
+          '<button class="pe-btn pe-approve" data-act="approve">✅ Approve</button>' +
+          '<button class="pe-btn pe-reject" data-act="reject">❌ Reject</button>' +
+          '<button class="pe-btn pe-apply" data-act="apply" disabled>⚙ Apply</button>' +
+          '<button class="pe-btn pe-rollback" data-act="rollback" disabled>↩ Rollback</button>' +
+        '</div>' +
+        '<div class="pe-foot"><span class="pe-expire">'+expiresLabel(card.expiresAt)+'</span>' +
+          '<span class="pe-rollnote">🔁 Rollback available after apply</span></div>' +
+        '<div class="pe-status" hidden></div>';
+      wrap.querySelectorAll(".pe-btn").forEach(function(b){
+        b.addEventListener("click", function(){
+          if (b.disabled) return;
+          vscode.postMessage({ command:"proposalAction", action: b.dataset.act, id: card.proposalId });
+        });
+      });
+      transcript.appendChild(wrap); transcript.scrollTop = transcript.scrollHeight;
+    }
+    function setProposalStatus(id, status, detail){
+      const card = transcript.querySelector('.pe-card[data-pid="'+id+'"]'); if (!card) return;
+      const st = card.querySelector(".pe-status");
+      const s = String(status||"");
+      const blocked = s === "blocked";
+      const applied = s === "applied" || s === "rollback_available" || s === "partially_applied";
+      const done = s === "rejected" || s === "rolled_back" || s === "expired";
+      const q = function(sel){ return card.querySelector(sel); };
+      // enable/disable per state
+      const approveBtn = q(".pe-approve"), rejectBtn = q(".pe-reject"), applyBtn = q(".pe-apply"), rollBtn = q(".pe-rollback");
+      if (s === "approved"){ applyBtn.disabled = false; approveBtn.disabled = true; }
+      if (applied){ applyBtn.disabled = true; approveBtn.disabled = true; rejectBtn.disabled = true; rollBtn.disabled = !(s === "rollback_available" || s === "applied"); }
+      if (done){ approveBtn.disabled = true; rejectBtn.disabled = true; applyBtn.disabled = true; rollBtn.disabled = true; }
+      if (s === "rolled_back") rollBtn.disabled = true;
+      card.classList.toggle("pe-card-blocked", blocked);
+      if (st){
+        st.hidden = false;
+        const icon = blocked ? "⛔" : done ? "•" : applied ? "✅" : "•";
+        st.textContent = icon + " " + s.replace(/_/g," ") + (detail ? " — " + detail : "");
+      }
+    }
+
     document.getElementById("send").addEventListener("click", send);
     input.addEventListener("keydown", (e)=>{ if (e.key==="Enter") send(); });
     document.getElementById("newChat").addEventListener("click", ()=> vscode.postMessage({ command:"send", text:"__new_chat__" }) );
@@ -256,6 +355,8 @@ export class ChatPanelViewProvider implements vscode.WebviewViewProvider {
       const m = e.data;
       if (m.command === "addChip"){ addChip(m.id, m.label, m.kind); return; }
       if (m.command === "clearChips"){ chipsEl.innerHTML = ""; return; }
+      if (m.command === "proposalCard"){ renderProposalCard(m.card); return; }
+      if (m.command === "proposalStatus"){ setProposalStatus(m.id, m.status, m.detail); return; }
       if (m.command === "transcript"){
         endVoice(); input.placeholder = DEFAULT_PH;
         const t = String(m.text||"").trim();

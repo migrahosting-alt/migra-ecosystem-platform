@@ -205,3 +205,36 @@ body.chatbody { display: flex; flex-direction: column; height: 100vh; padding: 1
 .attach-chip .cl { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .attach-chip .rm { cursor: pointer; color: var(--muted); margin-left: 2px; font-weight: 700; }
 .attach-chip .rm:hover { color: var(--danger); }
+
+/* ── Proposed-edit review cards (Phase C.5) ── */
+.pe-card {
+  margin: 10px 0; padding: 12px 13px; border: 1px solid var(--border);
+  border-radius: var(--radius); background: var(--card);
+  border-left: 3px solid var(--accent);
+}
+.pe-card.pe-card-blocked { border-left-color: var(--danger); }
+.pe-title { font-size: 13px; font-weight: 600; margin-bottom: 7px; }
+.pe-meta { display: flex; flex-wrap: wrap; gap: 6px 12px; font-size: 11.5px; color: var(--muted); margin-bottom: 6px; }
+.pe-meta .pe-add { color: var(--add); font-weight: 600; }
+.pe-meta .pe-rem { color: var(--del); font-weight: 600; }
+.pe-risk { font-weight: 600; }
+.pe-risk-low { color: var(--ok); }
+.pe-risk-medium { color: var(--warn); }
+.pe-risk-high { color: var(--danger); }
+.pe-flags { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
+.pe-flag { font-size: 11px; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--border-soft); }
+.pe-flag-danger { color: var(--danger); border-color: rgba(248,113,113,.4); }
+.pe-flag-secret { color: var(--warn); border-color: rgba(251,191,36,.4); }
+.pe-summary { font-size: 12px; color: var(--text); margin-bottom: 9px; line-height: 1.5; }
+.pe-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.pe-btn {
+  font-size: 11.5px; padding: 4px 10px; border-radius: 8px; cursor: pointer;
+  border: 1px solid var(--border); background: var(--card-2); color: var(--text);
+}
+.pe-btn:hover:not(:disabled) { border-color: var(--accent); }
+.pe-btn:disabled { opacity: .4; cursor: not-allowed; }
+.pe-btn.pe-approve { border-color: rgba(52,211,153,.4); }
+.pe-btn.pe-reject { border-color: rgba(248,113,113,.4); }
+.pe-foot { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; margin-top: 8px; font-size: 11px; color: var(--muted-2); }
+.pe-status { margin-top: 8px; font-size: 11.5px; color: var(--muted); }
+.pe-card-blocked .pe-status { color: var(--danger); }
