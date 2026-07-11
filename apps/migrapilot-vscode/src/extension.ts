@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 import * as path from "path";
 import { ContextCollector } from "./contextCollector";
-import { ChatPanelViewProvider } from "./chatPanelView";
+import { ChatPanelViewProvider, type ProposalAction } from "./chatPanelView";
 import { PilotClient } from "./pilotClient";
 import { registerProposedEdits } from "./proposedEdits/register";
 import type { WorkspaceContext } from "./types";
@@ -33,6 +33,17 @@ export function classifyAttachment(opts: { fileName: string; ext: string; byteLe
   return { ok: true, kind: "text" };
 }
 
+/** Map a proposal card button to its registered Phase C command. Exported for tests. */
+export function proposalCommandFor(action: ProposalAction): string | undefined {
+  return {
+    review: "migrapilot.reviewProposedEdit",
+    approve: "migrapilot.approveProposedEdit",
+    reject: "migrapilot.rejectProposedEdit",
+    apply: "migrapilot.applyProposedEdit",
+    rollback: "migrapilot.rollbackProposedEdit",
+  }[action];
+}
+
 export function activate(context: vscode.ExtensionContext): void {
   const collector = new ContextCollector();
   const client = new PilotClient();
@@ -57,6 +68,12 @@ export function activate(context: vscode.ExtensionContext): void {
       else addAttachment({ kind: "file", label: name, content });
     },
     onVoiceCapture: () => startBrowserVoiceCapture(),
+    // Proposal card buttons run the EXISTING Phase C commands — approval-before-apply,
+    // fail-closed preflight, and single-use nonce are all preserved.
+    onProposalAction: (action, id) => {
+      const cmd = proposalCommandFor(action);
+      if (cmd) vscode.commands.executeCommand(cmd, id);
+    },
   });
 
   /* ── voice capture (external browser — VS Code webviews can't use the mic) ── */
@@ -117,11 +134,14 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand("migrapilot.cancelResponse", () => { activeAbort?.abort(); })
   );
 
-  /* ── proposed-edit review/apply/rollback (Phase C) ──
-   * Model tool results become strictly-typed proposals reviewed as native diffs;
-   * nothing writes to disk without explicit approval + a fail-closed apply gate. */
-  registerProposedEdits(context, {
-    onStatus: (id, status, detail) => chat.stepAssistant(chat.beginAssistant(), `Proposed edit ${id}: ${status}${detail ? ` — ${detail}` : ""}`),
+  /* ── proposed-edit review/apply/rollback (Phase C + C.5) ──
+   * The model generates strictly-typed proposals from chat; they surface as
+   * first-class cards, are reviewed as native diffs, and never write to disk
+   * without explicit approval + a fail-closed apply gate. Card status reflects
+   * the Phase C state machine. */
+  const edits = registerProposedEdits(context, {
+    onStatus: (id, status, detail) => chat.proposalStatus(id, status, detail),
+    onBlocked: (id, reasons) => chat.proposalStatus(id, "blocked", reasons.join(", ")),
   });
 
   /* ── attachment engine ── */
@@ -211,6 +231,13 @@ export function activate(context: vscode.ExtensionContext): void {
     await client.streamChat(backendMessage, toContext(captured), {
       onStep: (title) => chat.stepAssistant(id, title),
       onDelta: (d) => chat.streamDelta(id, d),
+      // A model-generated proposal → first-class review card in the transcript.
+      onProposal: (card) => chat.proposalCard({
+        proposalId: card.proposalId, title: card.title, model: card.model,
+        filesAffected: card.filesAffected, linesAdded: card.linesAdded, linesRemoved: card.linesRemoved,
+        risk: card.risk, summary: card.summary, expiresAt: card.expiresAt,
+        destructive: card.destructive, sensitive: card.sensitive,
+      }),
       onDone: (full) => {
         chat.completeAssistant(id, full);
         // Record the turn for multi-turn context (store raw user text, not the context-augmented message).
@@ -221,7 +248,7 @@ export function activate(context: vscode.ExtensionContext): void {
       // Cancelled turns render as stopped and are NOT recorded to history — no
       // false completion is appended when the user aborts an in-flight response.
       onAborted: () => chat.completeAssistant(id, "⏹️ Response cancelled."),
-    }, selectedModel, priorHistory, abort.signal);
+    }, selectedModel, priorHistory, abort.signal, edits.workspaceId);
   }
 }
 
