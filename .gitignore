@@ -26,6 +26,13 @@
 !infra/nginx/
 !infra/nginx/**
 
+# Allow the canonical MigraPilot VS Code extension (source only). Build output
+# (out/, *.js), node_modules, .env, logs are re-excluded by the global rules
+# below and by apps/migrapilot-vscode/.gitignore.
+!/apps/
+!/apps/migrapilot-vscode/
+!/apps/migrapilot-vscode/**
+
 # ---- Never commit secrets/keys ----
 *.key
 *.pem
