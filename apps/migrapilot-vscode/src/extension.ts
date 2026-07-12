@@ -1,6 +1,7 @@
 import * as vscode from "vscode";
 import * as path from "path";
-import { ContextCollector, sliceAtLineBoundary } from "./contextCollector";
+import { ContextCollector, sliceAtLineBoundary, resolveScope } from "./contextCollector";
+import { classifyContextScope } from "./contextScope";
 import { ChatPanelViewProvider, type ProposalAction } from "./chatPanelView";
 import { PilotClient } from "./pilotClient";
 import { registerProposedEdits } from "./proposedEdits/register";
@@ -223,7 +224,9 @@ export function activate(context: vscode.ExtensionContext): void {
         catch { /* leave without analysis; buildBackendMessage notes it */ }
       }
     }
-    const backendMessage = buildBackendMessage(text, captured, attachments);
+    // Phase C.7: resolve the region from what the operator ASKED, not from where their
+    // cursor happens to sit. "Explain this file" overrides a stray selection.
+    const backendMessage = await buildScopedBackendMessage(text, attachments);
     // attachments consumed by this turn
     attachments = [];
     chat.clearChips();
@@ -259,6 +262,29 @@ export function activate(context: vscode.ExtensionContext): void {
       onAborted: () => chat.completeAssistant(id, "⏹️ Response cancelled."),
     }, selectedModel, priorHistory, abort.signal, edits.workspaceId);
   }
+
+  /** Build the outgoing message with an intent-resolved editor context (Phase C.7). */
+  async function buildScopedBackendMessage(text: string, atts: Attachment[]): Promise<string> {
+    const editor = vscode.window.activeTextEditor;
+    const explicit = atts.some((a) => a.kind === "file" || a.kind === "selection");
+    if (!editor || explicit) return buildBackendMessage(text, captured, atts);
+
+    const file = vscode.workspace.asRelativePath(editor.document.uri, false) || editor.document.fileName;
+    // A secret-like file is still withheld — resolveScope must never see its bytes.
+    if (!captured.filePreview && captured.warning.startsWith("Secret-like")) {
+      return buildBackendMessage(text, captured, atts);
+    }
+
+    const decision = classifyContextScope(text, !editor.selection.isEmpty);
+    try {
+      const resolved = await resolveScope(editor, decision);
+      let msg = text + renderScopedContext(file, editor.document.languageId, resolved);
+      msg = appendAttachments(msg, atts);
+      return msg;
+    } catch {
+      return buildBackendMessage(text, captured, atts); // never fail a turn over context
+    }
+  }
 }
 
 export function deactivate(): void { /* no teardown required */ }
@@ -280,6 +306,47 @@ export function truncate(s: string, n: number): string { return s.length > n ? s
 const MAX_CONTEXT_CHARS = 12000;
 
 const num = (n: number) => n.toLocaleString("en-US");
+
+/**
+ * Render a scope-resolved region (Phase C.7).
+ *
+ * Two things the old renderer got wrong, both fixed here:
+ *  - it ALWAYS preferred the selection, so "Explain this file in detail" with a stray
+ *    `for` loop highlighted returned a review of that one loop. `Scope:` now states what
+ *    was resolved and WHY, and the region actually matches the request.
+ *  - "the excerpt ends mid-file" read as if the FILE were incomplete. The declaration is
+ *    now arithmetic: transmitted vs not transmitted, in characters.
+ *
+ * Deliberately reuses the existing three fence labels — no new wire vocabulary — so it
+ * cannot strand an older pilot-api the way introducing `File (complete)` did.
+ */
+export function renderScopedContext(
+  file: string,
+  languageId: string,
+  s: {
+    scope: string; reason: string; label: string; code: string; truncated: boolean;
+    totalChars: number; totalLines: number; diagnostics: string[];
+  },
+): string {
+  const lang = languageId || "";
+  let out = `\n\n--- Editor context ---\nFile: ${file}${languageId ? ` (${languageId})` : ""}`;
+  out += `\nScope: ${s.label} — ${s.reason}.`;
+
+  const shown = s.code.length;
+  out += s.truncated
+    ? `\nContent: TRUNCATED — you were sent the first ${num(shown)} of ${num(s.totalChars)} characters. ` +
+      `The remaining ${num(s.totalChars - shown)} characters were NOT transmitted, so your findings apply ONLY to the transmitted portion. ` +
+      `The transmission was cut at a LINE BOUNDARY, so every line you can see is whole. The file itself is intact — it is NOT incomplete.`
+    : `\nContent: COMPLETE — all ${num(s.totalChars)} characters (${num(s.totalLines)} lines) were transmitted. Nothing was omitted.`;
+
+  if (s.diagnostics.length) {
+    out += `\nReported problems (${s.diagnostics.length}):\n${s.diagnostics.map((d) => `  - ${d}`).join("\n")}`;
+  }
+
+  const label = s.scope === "file" ? (s.truncated ? "File (truncated)" : "File (complete)") : "Selected code";
+  out += `\n${label}:\n\`\`\`${lang}\n${s.code}\n\`\`\``;
+  return out;
+}
 
 /**
  * Render the editor context with an explicit, honest `Content:` line.
@@ -333,12 +400,8 @@ export function renderEditorContext(c: WorkspaceContext): string {
   return out;
 }
 
-export function buildBackendMessage(text: string, c: WorkspaceContext, attachments: Attachment[]): string {
-  let msg = text;
-  const file = c.relativeFilePath || c.activeFilePath;
-  if (file && !attachments.some((a) => a.kind === "file" || a.kind === "selection")) {
-    msg += renderEditorContext(c);
-  }
+/** Attachment rendering, shared by the legacy and the scope-resolved message paths. */
+export function appendAttachments(msg: string, attachments: Attachment[]): string {
   for (const a of attachments) {
     if (a.kind === "image") {
       if (a.content) msg += `\n\n[Image "${a.label}" — visual analysis]\n\`\`\`\n${truncate(a.content, 3000)}\n\`\`\``;
@@ -348,4 +411,13 @@ export function buildBackendMessage(text: string, c: WorkspaceContext, attachmen
     else msg += `\n\n[Attached (binary): ${a.label}]`;
   }
   return msg;
+}
+
+export function buildBackendMessage(text: string, c: WorkspaceContext, attachments: Attachment[]): string {
+  let msg = text;
+  const file = c.relativeFilePath || c.activeFilePath;
+  if (file && !attachments.some((a) => a.kind === "file" || a.kind === "selection")) {
+    msg += renderEditorContext(c);
+  }
+  return appendAttachments(msg, attachments);
 }
