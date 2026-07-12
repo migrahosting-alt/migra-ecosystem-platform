@@ -8,9 +8,6 @@
       "runtimeExecutable": "${execPath}",
       "args": [
         "--extensionDevelopmentPath=${workspaceFolder}",
-        // Open the smoke workspace AUTOMATICALLY. With no folder open MigraPilot cannot read
-        // files, cannot run tests, and cannot persist a conversation — and it used to look
-        // like a perfectly healthy chat panel while failing all three.
         "/home/bonex/workspace/migrapilot-smoke-workspace"
       ],
       "outFiles": ["${workspaceFolder}/out/**/*.js"],

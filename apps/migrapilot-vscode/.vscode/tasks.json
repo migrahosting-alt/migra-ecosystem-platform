@@ -2,7 +2,6 @@
   "version": "2.0.0",
   "tasks": [
     {
-      // F5 runs this first, so the dev host can NEVER load a stale build.
       "type": "npm",
       "script": "compile",
       "group": { "kind": "build", "isDefault": true },
