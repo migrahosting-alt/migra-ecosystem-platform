@@ -202,3 +202,33 @@ With any file open, ask: **"Provision blog.migrateck.com and host a Next.js site
 - No end-of-file defect is ever inferred from where an excerpt stops.
 - Intent and domains come from the operator's **prose**, never from the code in the buffer.
 - A real provisioning request still plans, and the posture stays **dry-run only**.
+
+---
+
+## G — Intent-aware context scope (C.7)
+
+MigraPilot used to be a context **forwarder**: whatever was selected won, always. So with
+a stray `for` loop highlighted, *"Explain this file in detail"* returned a review of that
+one loop, headed *"File fragment under review"*. Scope now comes from what you **asked**,
+not from where the cursor happens to sit.
+
+For each check below, **leave a small selection active** (e.g. highlight one line) — the
+whole point is that the selection must be *overridden* when the request names a wider scope.
+
+| # | Ask | Expect |
+|---|---|---|
+| **G1** | "Explain this file in detail" | The **whole file** — every function, not just the selection. Header must **not** say *"fragment"*. |
+| **G2** | "Find bugs in this file" | Whole file. |
+| **G3** | "Review the selection" | **Only** the selected lines. |
+| **G4** | "Explain this function" (cursor inside a function) | **Only** that function — `Scope:` names it, e.g. *the enclosing function `cartTotal` (lines 1-9)*. |
+| **G5** | "Fix this error" (with a red squiggle present) | The enclosing symbol **plus the reported problems**, quoted back from VS Code's diagnostics. |
+| **G6** | "What does this do?" (no scope named, selection active) | The selection — the old default is preserved when you name no scope. |
+| **G7** | "What does this do?" (no scope named, nothing selected) | The active file. |
+| **G8** | Open a large file (> 12,000 chars), ask "review this file" | Reply states *"the remaining N characters were not transmitted"* and that findings apply only to the transmitted portion. ❌ **FAIL** on wording that implies the **file** is incomplete/corrupt. |
+
+### Pass criteria
+- An explicit "**this file**" **overrides** an active selection. This is the headline fix.
+- A named symbol scopes to that symbol; a named selection scopes to the selection.
+- When no scope is named, behaviour is unchanged (selection if present, else file).
+- Truncation is described as **arithmetic** (transmitted vs not), never as a broken file.
+- If no symbol provider answers, MigraPilot **says so** and sends the file — it never invents a range.
