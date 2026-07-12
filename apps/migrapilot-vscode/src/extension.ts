@@ -46,7 +46,17 @@ export function proposalCommandFor(action: ProposalAction): string | undefined {
   }[action];
 }
 
-export function activate(context: vscode.ExtensionContext): void {
+/** What `activate()` returns. Test-only surface: it exposes state, it does not add behaviour. */
+export interface MigraPilotApi {
+  /** The thread the extension believes is active right now. */
+  getConversationId(): string | undefined;
+  /** What is actually PERSISTED — the value a reload would read back. */
+  getPersistedConversationId(): string | undefined;
+  /** Resolves once the pending workspaceState write has landed. */
+  whenPersisted(): Promise<void>;
+}
+
+export function activate(context: vscode.ExtensionContext): MigraPilotApi {
   const collector = new ContextCollector();
   const client = new PilotClient();
   let captured: WorkspaceContext = collector.collectContext(vscode.window.activeTextEditor);
@@ -69,9 +79,22 @@ export function activate(context: vscode.ExtensionContext): void {
    * inconvenience, losing the assistant is an outage. */
   const memento = context.workspaceState as vscode.Memento | undefined;
   let conversationId: string | undefined = memento?.get<string>(CONVO_KEY);
-  const setConversation = async (id: string | undefined) => {
+  /** Pending persistence, so a caller (and a test) can await the write actually landing. */
+  let convoWrite: Thenable<void> | undefined;
+  const setConversation = async (id: string | undefined): Promise<void> => {
     conversationId = id;
-    try { await memento?.update(CONVO_KEY, id); } catch { /* history is best-effort */ }
+    if (!memento) return;
+    convoWrite = memento.update(CONVO_KEY, id);
+    try {
+      await convoWrite;
+    } catch (err) {
+      // Do NOT swallow this. A silently-dropped write is exactly how the conversation was
+      // being lost across reloads while every in-session test passed.
+      console.error("[migrapilot] failed to persist active conversation:", err);
+      vscode.window.showWarningMessage(
+        `MigraPilot could not save this conversation: ${(err as Error)?.message ?? err}`,
+      );
+    }
   };
   /** The plan for the current turn; phase events fold into it. */
   let livePlan: ExecutionPlan | undefined;
@@ -141,6 +164,14 @@ export function activate(context: vscode.ExtensionContext): void {
     collector
   );
 
+  /* D.1 — announce a restored thread. The bug the operator hit (asked "what is my test
+   * color?" after a reload and got "I'm not sure what you're referring to") was impossible
+   * to diagnose from the UI, because a resumed conversation and a brand-new one looked
+   * IDENTICAL. Say which one this is. */
+  if (conversationId) {
+    chat.stepAssistant(chat.beginAssistant(), `↻ Continuing your previous conversation (${conversationId.slice(0, 10)}…)`);
+  }
+
   const status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
   status.text = "$(comment-discussion) MigraPilot";
   status.tooltip = "Open MigraPilot chat";
@@ -154,6 +185,18 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand("migrapilot.reviewSelection", () => { addCurrentSelection(); handleUserMessage("Review the selected code."); }),
     vscode.commands.registerCommand("migrapilot.newChat", () => { activeAbort?.abort(); attachments = []; history = []; void setConversation(undefined); chat.clearChips(); chat.reset(); chat.focus(); }),
     vscode.commands.registerCommand("migrapilot.history", () => openHistory()),
+    vscode.commands.registerCommand("migrapilot.conversationState", async () => {
+      const persisted = memento?.get<string>(CONVO_KEY);
+      const msg = [
+        `active (in memory): ${conversationId ?? "— none —"}`,
+        `persisted (workspaceState): ${persisted ?? "— none —"}`,
+        `workspaceState available: ${memento ? "yes" : "NO"}`,
+        `these must MATCH, and must survive a window reload.`,
+      ].join("\n");
+      const COPY = "Copy";
+      const pick = await vscode.window.showInformationMessage("MigraPilot conversation state", { modal: true, detail: msg }, COPY);
+      if (pick === COPY) await vscode.env.clipboard.writeText(msg);
+    }),
     vscode.commands.registerCommand("migrapilot.attachFile", () => attachFiles()),
     vscode.commands.registerCommand("migrapilot.cancelResponse", () => { activeAbort?.abort(); })
   );
@@ -374,6 +417,12 @@ export function activate(context: vscode.ExtensionContext): void {
       return buildBackendMessage(text, captured, atts); // never fail a turn over context
     }
   }
+
+  return {
+    getConversationId: () => conversationId,
+    getPersistedConversationId: () => memento?.get<string>(CONVO_KEY),
+    whenPersisted: async () => { await convoWrite; },
+  };
 }
 
 export function deactivate(): void { /* no teardown required */ }

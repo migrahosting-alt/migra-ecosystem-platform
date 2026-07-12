@@ -24,18 +24,19 @@ describe("extension activation (scenario 1)", () => {
     expect(() => activate(fakeContext())).not.toThrow();
     const ids = [...commands._registered.keys()].sort();
     expect(ids).toEqual([
-      "migrapilot.applyProposedEdit",
-      "migrapilot.approveProposedEdit",
-      "migrapilot.attachFile",
-      "migrapilot.cancelResponse",
-      "migrapilot.explainCurrentFile",
-      "migrapilot.history",
-    "migrapilot.newChat",
-      "migrapilot.openChat",
-      "migrapilot.rejectProposedEdit",
-      "migrapilot.reviewProposedEdit",
-      "migrapilot.reviewSelection",
-      "migrapilot.rollbackProposedEdit",
+        "migrapilot.applyProposedEdit",
+        "migrapilot.approveProposedEdit",
+        "migrapilot.attachFile",
+        "migrapilot.cancelResponse",
+        "migrapilot.conversationState",
+        "migrapilot.explainCurrentFile",
+        "migrapilot.history",
+        "migrapilot.newChat",
+        "migrapilot.openChat",
+        "migrapilot.rejectProposedEdit",
+        "migrapilot.reviewProposedEdit",
+        "migrapilot.reviewSelection",
+        "migrapilot.rollbackProposedEdit",
     ]);
   });
 

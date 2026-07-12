@@ -83,6 +83,11 @@
         "command": "migrapilot.history",
         "title": "MigraPilot: Conversation History",
         "category": "MigraPilot"
+      },
+      {
+        "command": "migrapilot.conversationState",
+        "title": "MigraPilot: Show Conversation State (diagnostic)",
+        "category": "MigraPilot"
       }
     ],
     "configuration": {
