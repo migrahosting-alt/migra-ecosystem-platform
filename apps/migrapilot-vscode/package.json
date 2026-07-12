@@ -78,6 +78,11 @@
       {
         "command": "migrapilot.rollbackProposedEdit",
         "title": "MigraPilot: Roll Back Proposed Edit"
+      },
+      {
+        "command": "migrapilot.history",
+        "title": "MigraPilot: Conversation History",
+        "category": "MigraPilot"
       }
     ],
     "configuration": {

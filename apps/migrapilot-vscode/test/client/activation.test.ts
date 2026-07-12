@@ -3,7 +3,18 @@ import { activate } from "../../src/extension";
 import { commands, Uri } from "../harness/vscodeMock";
 
 function fakeContext(): any {
-  return { subscriptions: [] as any[], extensionUri: Uri.file("/ext") };
+  // Mirror the real ExtensionContext: VS Code always supplies workspaceState. Omitting it
+  // let a crash-on-activate slip through (D.1 reads it for the active conversation id).
+  const store = new Map<string, unknown>();
+  return {
+    subscriptions: [] as any[],
+    extensionUri: Uri.file("/ext"),
+    workspaceState: {
+      get: (k: string) => store.get(k),
+      update: async (k: string, v: unknown) => { v === undefined ? store.delete(k) : store.set(k, v); },
+      keys: () => [...store.keys()],
+    },
+  };
 }
 
 describe("extension activation (scenario 1)", () => {
@@ -18,7 +29,8 @@ describe("extension activation (scenario 1)", () => {
       "migrapilot.attachFile",
       "migrapilot.cancelResponse",
       "migrapilot.explainCurrentFile",
-      "migrapilot.newChat",
+      "migrapilot.history",
+    "migrapilot.newChat",
       "migrapilot.openChat",
       "migrapilot.rejectProposedEdit",
       "migrapilot.reviewProposedEdit",

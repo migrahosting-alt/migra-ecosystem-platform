@@ -280,3 +280,32 @@ This is the largest behavioural change in the product and the one with real teet
 - A chained/redirected/substituted command (`&&`, `|`, `>`, `` ` ``, `$( )`) is **never** auto-run.
 - Nothing outside the workspace root is ever read. Secret files stay withheld.
 - Declining a tool is a normal outcome: the assistant reports it and adapts, it does not loop or hang.
+
+---
+
+# D.1 — Durable Conversations (OPERATOR-TO-RUN)
+
+MigraPilot used to forget everything. Not because persistence was missing — `PilotConversation`
+and `PilotMessage` have existed all along — but because the extension sends `dryRun: true` on
+every turn, and the server read that as *"do not remember this"*: it minted an ephemeral
+`dryrun-…` id, created no row, and every message then failed a foreign key **silently**.
+`dryRun` means *do not mutate infrastructure*. It never meant *do not remember*.
+
+| # | Step | Expected |
+|---|------|----------|
+| **I1** | Send a message, e.g. "My favourite colour is teal — remember that." | Answers normally. |
+| **I2** | Ask a follow-up in the same thread: "What's my favourite colour?" | **teal** — it remembers within the session. |
+| **I3** | **Developer: Reload Window**, then reopen MigraPilot and ask again: "What's my favourite colour?" | **teal.** ❌ **FAIL** if the thread is lost — that is the whole point of D.1. |
+| **I4** | Run **MigraPilot: Conversation History** | A list of past conversations, each titled by **what you typed**, with a message count and a date. |
+| **I5** | Check the titles | ❌ **FAIL** if any title shows the *contents of a file you had open* — the title must come from your prompt, never from the editor-context block. |
+| **I6** | Pick an older conversation | Its transcript is replayed into the panel, and the next message continues **that** thread (not a new one). |
+| **I7** | Click the 🗑 icon on a conversation | It is deleted and disappears from the list. Re-opening History does not show it. |
+| **I8** | Run **MigraPilot: New Chat**, then ask "What's my favourite colour?" | It does **not** know — New Chat starts a genuinely new thread. |
+| **I9** | Open a *different* project folder, run History | The active thread does not leak across projects (`workspaceState`, not global). |
+| **I10** | Stop pilot-api, send a message | Chat still answers, degraded — it does not refuse. The turn is simply not saved. |
+
+## Pass criteria
+- A conversation **survives a window reload** (I3). This is the acceptance test.
+- History lists real, titled, resumable threads; a title never leaks file contents.
+- Resuming continues the same thread; New Chat starts a new one; delete really deletes.
+- A dead database makes MigraPilot **forgetful, never broken** (I10).
