@@ -120,3 +120,35 @@
 - Apply requires approval AND passes the fail-closed preflight; Rollback never overwrites newer user work.
 - No git stage/commit/push happens on any apply/rollback path.
 - Destructive (delete/rename) and secret-affecting proposals are clearly flagged.
+
+# Phase C.6.1 — Ecosystem Resolution, Execution Plan & Phased Progress (OPERATOR-TO-RUN)
+
+Covers the grounding/resolution and plan-UX work merged after C.5. Backend
+(pilot-api) must be on `main` (>= f70c84c) and running; extension on `main`
+(>= f20cef9). Posture is **dry-run only** — no real infrastructure is provisioned.
+
+> Note: local first-party resolution (e.g. `migrateck.com` → MigraTeck LLC) works
+> via the static entity registry even without `PANEL_INTERNAL_TOKEN`. To exercise
+> the live customer-tenant path, set `PANEL_INTERNAL_TOKEN` in the pilot-api `.env`.
+
+## Checklist
+
+| # | Step | Expected |
+|---|------|----------|
+| E1 | In chat: "Build a personal blog for Bonex Petit-Frere using `bonepetitfrere.migrateck.com`." | MigraPilot **never asks for a tenant ID** (or any pod/zone/resource ID). It states the owning **organization by name** (e.g. "…belongs to **MigraTeck LLC**"). |
+| E2 | Read the resolution line | It shows an **organization name**, never a raw identifier; a subdomain resolves via its parent (`bonepetitfrere.migrateck.com` → `migrateck.com`). |
+| E3 | Observe the first tool activity | It does **not** start with `repo.listFiles` / `repo.search`. Infrastructure intent routes to inventory/DNS tools (e.g. `inventory.domains.map`). |
+| E4 | Watch the transcript | An **Execution Plan card** renders: 📋 title, resolution line, numbered steps (Create Next.js app · Provision subdomain · Configure NGINX · Configure SSL · Register in MigraPanel · Configure deployment). |
+| E5 | Read the plan's status | Shows **Status: Dry Run** and an explicit "No infrastructure changes until you approve" note. **No files or infra changed.** |
+| E6 | Watch the plan while the turn runs | The plan **survives tool execution** — it is not erased when the first tool starts. Steps show live ☐ → ▶ → ✓ progress (planning → execution → completion phases). |
+| E7 | Try an ambiguous domain (one owned by >1 org, if available) | MigraPilot asks a disambiguation question listing **organization names** (never IDs); it does not guess. |
+| E8 | Try an unresolvable/unknown domain | MigraPilot says honestly it could not determine the owner; it **never fabricates** a tenant ID or proceeds silently. |
+| E9 | Ask a normal code question (e.g. "explain this file") | Intent routes to **Software Engineering** tools (repo/git) — the router does not misclassify a code task as infrastructure. |
+| E10 | Scan any user-facing text across E1–E9 | No internal identifier (tenantId / podId / zoneId / resourceId) ever appears in what the user sees. |
+
+## Pass criteria
+- MigraPilot resolves internal identifiers itself and speaks in **organization names** — it never asks the user for a tenant/pod/zone ID.
+- Infrastructure requests route to inventory/DNS/provisioning tools, **not** repository search, as the first chain.
+- The execution plan renders before any tool runs, stays **Dry Run**, and is **not lost** once tools execute; phase progress updates live.
+- Ambiguity is surfaced by organization name; unresolvable domains fail honestly; **no identifier is ever fabricated**.
+- Posture remains dry-run only — nothing is provisioned, and no DNS/SSL/MigraPanel write occurs.
