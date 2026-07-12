@@ -91,6 +91,31 @@ function isAbortError(err: unknown): boolean {
  * returns an NDJSON event stream: run.created → step* → token* → message →
  * run.completed. We surface tokens live and the final message as authoritative.
  */
+/**
+ * The UI surface this extension ACTUALLY has, read from its own live manifest.
+ *
+ * MigraPilot told the operator to run "MigraPilot: Show Panel" and to look in the Explorer
+ * sidebar. Neither exists. It had already been taught its real HTTP routes, but nothing had
+ * ever told it its own COMMAND names — so it invented them, exactly as it had invented
+ * `GET /api/v1/conversations`.
+ *
+ * Read from `packageJSON` at runtime rather than hardcoded on the server: a hardcoded list
+ * drifts the moment a command is added, and a stale list is just a slower lie.
+ */
+export function readUiSurface(): { commands: string[]; views: string[] } {
+  try {
+    const pkg = (vscode.extensions.getExtension("migrateck.migrapilot-vscode") as any)?.packageJSON;
+    const contributes = pkg?.contributes ?? {};
+    const commands: string[] = (contributes.commands ?? []).map((c: any) => String(c.title));
+    const views: string[] = Object.values(contributes.views ?? {})
+      .flat()
+      .map((v: any) => `${v.name} (${v.id})`);
+    return { commands, views };
+  } catch {
+    return { commands: [], views: [] };
+  }
+}
+
 export class PilotClient {
   /** Set by the extension: resolves the current workspace/repo/branch. */
   public provenance?: () => WorkspaceProvenance | undefined;
@@ -207,6 +232,9 @@ export class PilotClient {
     // an undifferentiated pile.
     const prov = this.provenance?.();
     if (prov && (prov.workspace || prov.repository || prov.branch)) body.workspaceContext = prov;
+    // Tell the model the UI it actually has, so it stops inventing commands and views.
+    const ui = readUiSurface();
+    if (ui.commands.length) body.uiSurface = ui;
     if (model && model !== "auto") body.model = model;
     if (history && history.length) body.history = history.slice(-20).map((t) => ({ role: t.role, text: t.text }));
     // Bind any proposal generated this turn to the local workspace identity so
