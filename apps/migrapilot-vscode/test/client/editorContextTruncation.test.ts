@@ -18,6 +18,7 @@
 
 import { describe, it, expect } from "vitest";
 import { buildBackendMessage, renderEditorContext } from "../../src/extension";
+import { sliceAtLineBoundary } from "../../src/contextCollector";
 import type { WorkspaceContext } from "../../src/types";
 
 const MAX_PREVIEW_CHARS = 12000;
@@ -208,5 +209,57 @@ describe("degenerate inputs", () => {
     expect(msg).not.toContain("```");
     expect(msg).not.toContain("COMPLETE");
     expect(msg).not.toContain("TRUNCATED");
+  });
+});
+
+/**
+ * E-CTX-01b — a mid-token cut manufactures a defect that isn't there.
+ *
+ * With the truncation declared, the model stopped claiming the FILE was malformed —
+ * but it still flagged the half-written last line as a "Malformed JSON fragment ...
+ * the key is present without a colon/value, which makes the JSON invalid EVEN BEFORE
+ * the file cut-off". Sound reasoning; the premise was manufactured by our own slice().
+ * Cutting at a line boundary removes the artifact instead of arguing with it.
+ */
+describe("E-CTX-01b — the cut never lands mid-token", () => {
+  it("drops the partial trailing line", () => {
+    const text = "line one\nline two\nline three is long";
+    const cut = sliceAtLineBoundary(text, 20); // lands inside "line three is long"
+    expect(cut).toBe("line one\nline two");
+    expect(cut.endsWith("line")).toBe(false);
+  });
+
+  it("returns the text untouched when it fits", () => {
+    expect(sliceAtLineBoundary("short", 100)).toBe("short");
+  });
+
+  it("falls back to a hard cut when one line exceeds the whole budget", () => {
+    const oneLine = "x".repeat(500);
+    expect(sliceAtLineBoundary(oneLine, 100)).toHaveLength(100); // no boundary exists
+  });
+
+  it("the lockfile excerpt now ends on a WHOLE line — no dangling key", () => {
+    const { full } = lockfile();
+    const cut = sliceAtLineBoundary(full, MAX_PREVIEW_CHARS);
+    const last = cut.split("\n").pop()!;
+    expect(cut.length).toBeLessThanOrEqual(MAX_PREVIEW_CHARS);
+    // The exact failure: the old slice ended on `      "dev` — a key with no colon.
+    expect(last).not.toMatch(/"[a-z]+$/);
+    expect(last.trim()).toMatch(/[,{}\[\]]$|":\s.+$/); // a complete JSON line
+    // and every line the model sees is one the file really contains
+    for (const line of cut.split("\n")) expect(full).toContain(line);
+  });
+
+  it("the message declares the cut is line-aligned", () => {
+    const { full, preview } = lockfile();
+    const msg = buildBackendMessage("Review this file.", ctx({
+      relativeFilePath: "package-lock.json", languageId: "json",
+      filePreview: sliceAtLineBoundary(full, MAX_PREVIEW_CHARS),
+      filePreviewTruncated: true, fileCharCount: full.length,
+      fileLineCount: full.split("\n").length,
+    }), []);
+    expect(msg).toContain("cut at a LINE BOUNDARY");
+    expect(msg).toContain("every line shown is whole");
+    void preview;
   });
 });

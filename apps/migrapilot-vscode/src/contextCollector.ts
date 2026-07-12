@@ -22,6 +22,25 @@ export function isSecretLikePath(filePath: string): boolean {
   return SECRET_FILE_PATTERNS.some((re) => re.test(p));
 }
 
+/**
+ * Cut at a LINE BOUNDARY, never mid-token.
+ *
+ * A raw `slice(0, N)` lands in the middle of whatever happens to be at offset N —
+ * `      "dev` — and the model cannot distinguish that half-written line from a real
+ * defect. It reported exactly this as a "Malformed JSON fragment ... the key is present
+ * without a colon/value, which makes the JSON invalid EVEN BEFORE the file cut-off":
+ * sound reasoning, wrong premise. Telling the model "this is truncated" is not enough,
+ * because the corruption looks like it sits BEFORE the cut. So don't manufacture it:
+ * drop the partial trailing line and hand over only whole lines.
+ */
+export function sliceAtLineBoundary(text: string, max: number): string {
+  if (text.length <= max) return text;
+  const head = text.slice(0, max);
+  const lastNewline = head.lastIndexOf("\n");
+  // A single line longer than the whole budget has no boundary to fall back to.
+  return lastNewline > 0 ? head.slice(0, lastNewline) : head;
+}
+
 export class ContextCollector {
   public static collect(editor?: vscode.TextEditor): WorkspaceContext {
     return new ContextCollector().collectContext(editor ?? vscode.window.activeTextEditor);
@@ -88,7 +107,7 @@ export class ContextCollector {
       }
 
       if (fullText.length > MAX_PREVIEW_CHARS) {
-        filePreview = fullText.slice(0, MAX_PREVIEW_CHARS);
+        filePreview = sliceAtLineBoundary(fullText, MAX_PREVIEW_CHARS);
         filePreviewTruncated = true;
         truncated = true;
       } else {
@@ -102,7 +121,7 @@ export class ContextCollector {
           Math.abs(activeEditor.selection.end.line - activeEditor.selection.start.line) + 1;
 
         if (selectedText.length > MAX_SELECTION_CHARS) {
-          selectedTextPreview = selectedText.slice(0, MAX_SELECTION_CHARS);
+          selectedTextPreview = sliceAtLineBoundary(selectedText, MAX_SELECTION_CHARS);
           selectionTruncated = true;
           truncated = true;
         } else {

@@ -1,6 +1,6 @@
 import * as vscode from "vscode";
 import * as path from "path";
-import { ContextCollector } from "./contextCollector";
+import { ContextCollector, sliceAtLineBoundary } from "./contextCollector";
 import { ChatPanelViewProvider, type ProposalAction } from "./chatPanelView";
 import { PilotClient } from "./pilotClient";
 import { registerProposedEdits } from "./proposedEdits/register";
@@ -299,7 +299,7 @@ export function renderEditorContext(c: WorkspaceContext): string {
   let out = `\n\n--- Editor context ---\nFile: ${file}${c.languageId ? ` (${c.languageId})` : ""}`;
 
   if (c.hasSelection && c.selectedTextPreview) {
-    const code = truncate(c.selectedTextPreview, MAX_CONTEXT_CHARS);
+    const code = sliceAtLineBoundary(c.selectedTextPreview, MAX_CONTEXT_CHARS);
     const cut = c.selectionTruncated || c.selectedTextPreview.length > MAX_CONTEXT_CHARS;
     const total = c.selectedTextLength || c.selectedTextPreview.length;
     out += cut
@@ -310,7 +310,7 @@ export function renderEditorContext(c: WorkspaceContext): string {
   }
 
   if (c.filePreview) {
-    const code = truncate(c.filePreview, MAX_CONTEXT_CHARS);
+    const code = sliceAtLineBoundary(c.filePreview, MAX_CONTEXT_CHARS);
     const cut = c.filePreviewTruncated || c.filePreview.length > MAX_CONTEXT_CHARS;
     const shown = Math.min(c.filePreview.length, MAX_CONTEXT_CHARS);
     const total = c.fileCharCount || c.filePreview.length;
@@ -320,6 +320,7 @@ export function renderEditorContext(c: WorkspaceContext): string {
         `\nContent: TRUNCATED EXCERPT — the first ${num(shown)} of ${num(total)} characters` +
         `${c.fileLineCount ? ` (roughly lines 1-${num(shownLines)} of ${num(c.fileLineCount)})` : ""}.` +
         ` The rest of the file was NOT sent and this excerpt ends MID-FILE.` +
+        ` It was cut at a LINE BOUNDARY, so every line shown is whole — but the file's structure is not closed.` +
         ` Unclosed brackets, braces or quotes at the end are an artifact of the cut, NOT a defect in the file.`;
       out += `\nFile (truncated):\n\`\`\`${lang}\n${code}\n\`\`\``;
     } else {

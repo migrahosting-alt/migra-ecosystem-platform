@@ -169,9 +169,13 @@ open file and find bugs."**
   package-lock.json; the file was truncated for context"*).
 - ✅ It reviews only what is visible and says it **cannot speak to the rest**.
 - ❌ **FAIL** if it claims the file is *malformed / invalid JSON / corrupt*, or reports
-  *missing closing braces* or *unterminated strings*. The cut lands mid-token, so the
-  excerpt really is unparseable on its own — that is an artifact of the cut, never a
-  defect in the operator's file. Verify with `node -e "JSON.parse(require('fs').readFileSync('package-lock.json','utf8'))"`.
+  *missing closing braces* or *unterminated strings*. The excerpt really is unparseable
+  on its own — that is an artifact of the cut, never a defect in the operator's file.
+  Verify with `node -e "JSON.parse(require('fs').readFileSync('package-lock.json','utf8'))"`.
+- ❌ **FAIL** if it flags the **last construct** in the excerpt (e.g. *"this key has no
+  value, so the JSON is invalid even before the cut-off"*). The cut is exactly where the
+  excerpt stops. The buffer is now sliced at a **line boundary**, so every line shown is
+  whole — if you see a half-written line reach the model, that is a regression.
 
 **F2 — A small file is not falsely called truncated.**
 Open a short source file (< 12,000 chars). Ask for a review.
