@@ -36,6 +36,14 @@ export interface ProposalCardData {
   conversationId?: string | null;
 }
 
+export interface ConversationSummary {
+  id: string;
+  title: string;
+  createdAt: string;
+  messageCount: number;
+  pinned?: boolean;
+}
+
 export interface StreamHandlers {
   onDelta: (text: string) => void;
   onStep?: (title: string) => void;
@@ -47,6 +55,8 @@ export interface StreamHandlers {
   onPhase?: (update: PhaseUpdate) => void;
   onDone: (fullText: string) => void;
   onError: (message: string) => void;
+  /** D.1 — the server's conversation id for this turn. Send it back to keep the thread. */
+  onConversation?: (conversationId: string) => void;
   /** Called once when the request is aborted via signal. Neither onDone nor
    *  onError fire on abort — this prevents a false "completion" being appended
    *  to the transcript when the user cancels an in-flight response. */
@@ -165,11 +175,14 @@ export class PilotClient {
 
   /** pilot-api backend: POST /api/pilot/chat/stream (SSE). Events: conversation/provider/
    *  usage/token/tool/warning/error/done. Runs dryRun (safe: no real mutations). */
-  private async streamChatPilotApi(message: string, h: StreamHandlers, model?: string, history?: ChatTurn[], signal?: AbortSignal, workspaceId?: string): Promise<void> {
+  private async streamChatPilotApi(message: string, h: StreamHandlers, model?: string, history?: ChatTurn[], signal?: AbortSignal, workspaceId?: string, conversationId?: string): Promise<void> {
     const base = this.baseUrl();
     if (!base) { h.onDone("⚙️ No pilot-api URL configured. Set `migrapilot.pilotApiUrl`."); return; }
     if (signal?.aborted) { h.onAborted?.(); return; }
     const body: Record<string, unknown> = { message, dryRun: true };
+    // D.1 — continue the SAME conversation. Omitting this is what made every turn a new
+    // thread; the server then had no history to persist against.
+    if (conversationId) body.conversationId = conversationId;
     if (model && model !== "auto") body.model = model;
     if (history && history.length) body.history = history.slice(-20).map((t) => ({ role: t.role, text: t.text }));
     // Bind any proposal generated this turn to the local workspace identity so
@@ -223,7 +236,12 @@ export class PilotClient {
           if (!dataStr) continue;
           let data: any;
           try { data = JSON.parse(dataStr); } catch { continue; }
-          if (evName === "token" && typeof data.text === "string") { full += data.text; h.onDelta(data.text); }
+          if (evName === "conversation" && typeof data.conversationId === "string") {
+            // The server has always sent this. Nothing ever listened, so every turn
+            // started a brand-new thread and the last one was orphaned.
+            h.onConversation?.(data.conversationId);
+          }
+          else if (evName === "token" && typeof data.text === "string") { full += data.text; h.onDelta(data.text); }
           else if (evName === "provider" && h.onStep) { h.onStep(`Model: ${data.model ?? "?"}${data.reason ? ` (${data.reason})` : ""}`); }
           else if (evName === "tool" && h.onStep) {
             const tool = data.toolName ?? data.name ?? data.tool ?? "tool";
@@ -272,6 +290,35 @@ export class PilotClient {
       return;
     }
     h.onDone(full || "…(no response text)");
+  }
+
+  /* ── D.1: conversation history ───────────────────────────────────────────────── */
+
+  public async listConversations(): Promise<ConversationSummary[]> {
+    const base = this.baseUrl();
+    if (!base) return [];
+    const res = await fetch(`${base}/api/pilot/conversations`);
+    if (!res.ok) throw new Error(`History unavailable (HTTP ${res.status}).`);
+    const data = (await res.json()) as { conversations?: ConversationSummary[] };
+    return Array.isArray(data.conversations) ? data.conversations : [];
+  }
+
+  public async getConversation(id: string): Promise<ChatTurn[]> {
+    const base = this.baseUrl();
+    if (!base) return [];
+    const res = await fetch(`${base}/api/pilot/conversations/${encodeURIComponent(id)}`);
+    if (!res.ok) throw new Error(`Could not open that conversation (HTTP ${res.status}).`);
+    const data = (await res.json()) as { conversation?: { messages?: Array<{ role: string; contentJson?: { text?: string } }> } };
+    return (data.conversation?.messages ?? [])
+      .map((m) => ({ role: m.role === "assistant" ? "assistant" as const : "user" as const, text: m.contentJson?.text ?? "" }))
+      .filter((t) => t.text.trim().length > 0);
+  }
+
+  public async deleteConversation(id: string): Promise<void> {
+    const base = this.baseUrl();
+    if (!base) return;
+    const res = await fetch(`${base}/api/pilot/conversations/${encodeURIComponent(id)}`, { method: "DELETE" });
+    if (!res.ok) throw new Error(`Could not delete that conversation (HTTP ${res.status}).`);
   }
 
   /* ── Phase E: workspace execution ───────────────────────────────────────────── */
@@ -342,8 +389,8 @@ export class PilotClient {
     }
   }
 
-  public async streamChat(message: string, context: ChatRequestContext | undefined, h: StreamHandlers, model?: string, history?: ChatTurn[], signal?: AbortSignal, workspaceId?: string): Promise<void> {
-    if (this.backend() === "pilot-api") { await this.streamChatPilotApi(message, h, model, history, signal, workspaceId); return; }
+  public async streamChat(message: string, context: ChatRequestContext | undefined, h: StreamHandlers, model?: string, history?: ChatTurn[], signal?: AbortSignal, workspaceId?: string, conversationId?: string): Promise<void> {
+    if (this.backend() === "pilot-api") { await this.streamChatPilotApi(message, h, model, history, signal, workspaceId, conversationId); return; }
     const base = this.baseUrl();
     if (!base) {
       h.onDone("⚙️ No MigraPilot backend configured. Set `migrapilot.apiUrl` (e.g. http://127.0.0.1:3399) to connect.");

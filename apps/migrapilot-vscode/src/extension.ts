@@ -54,6 +54,25 @@ export function activate(context: vscode.ExtensionContext): void {
   let attachments: Attachment[] = [];
   let attachSeq = 0;
   let history: { role: "user" | "assistant"; text: string }[] = [];
+  /* D.1 — the active thread, remembered ACROSS RELOADS.
+   *
+   * pilot-api has always persisted conversations (PilotConversation/PilotMessage) and has
+   * always sent back a conversationId. The extension never listened and never sent one
+   * back, so every turn opened a NEW thread — and because it also sends dryRun:true, the
+   * server minted an ephemeral `dryrun-...` id, created no row, and silently dropped every
+   * message on a foreign-key failure. Nothing you ever said in this editor was saved.
+   *
+   * workspaceState (not globalState): a conversation belongs to the project it was about. */
+  const CONVO_KEY = "migrapilot.activeConversationId";
+  /* Degrade, never crash. VS Code always supplies workspaceState, but an extension that
+   * FAILS TO ACTIVATE is far worse than one that forgets: losing history is an
+   * inconvenience, losing the assistant is an outage. */
+  const memento = context.workspaceState as vscode.Memento | undefined;
+  let conversationId: string | undefined = memento?.get<string>(CONVO_KEY);
+  const setConversation = async (id: string | undefined) => {
+    conversationId = id;
+    try { await memento?.update(CONVO_KEY, id); } catch { /* history is best-effort */ }
+  };
   /** The plan for the current turn; phase events fold into it. */
   let livePlan: ExecutionPlan | undefined;
   let activeAbort: AbortController | undefined;
@@ -133,7 +152,8 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand("migrapilot.openChat", () => chat.focus()),
     vscode.commands.registerCommand("migrapilot.explainCurrentFile", () => { addCurrentFile(); handleUserMessage("Explain the current file."); }),
     vscode.commands.registerCommand("migrapilot.reviewSelection", () => { addCurrentSelection(); handleUserMessage("Review the selected code."); }),
-    vscode.commands.registerCommand("migrapilot.newChat", () => { activeAbort?.abort(); attachments = []; history = []; chat.clearChips(); chat.reset(); chat.focus(); }),
+    vscode.commands.registerCommand("migrapilot.newChat", () => { activeAbort?.abort(); attachments = []; history = []; void setConversation(undefined); chat.clearChips(); chat.reset(); chat.focus(); }),
+    vscode.commands.registerCommand("migrapilot.history", () => openHistory()),
     vscode.commands.registerCommand("migrapilot.attachFile", () => attachFiles()),
     vscode.commands.registerCommand("migrapilot.cancelResponse", () => { activeAbort?.abort(); })
   );
@@ -211,7 +231,7 @@ export function activate(context: vscode.ExtensionContext): void {
   /* ── send ── */
 
   async function handleUserMessage(text: string): Promise<void> {
-    if (text === "__new_chat__") { attachments = []; history = []; livePlan = undefined; chat.clearChips(); chat.reset(); return; }
+    if (text === "__new_chat__") { attachments = []; history = []; livePlan = undefined; void setConversation(undefined); chat.clearChips(); chat.reset(); return; }
     chat.focus();
     chat.appendUser(attachments.length ? `${text}  ·  ${attachments.length} attachment(s)` : text);
     const id = chat.beginAssistant();
@@ -260,7 +280,76 @@ export function activate(context: vscode.ExtensionContext): void {
       // Cancelled turns render as stopped and are NOT recorded to history — no
       // false completion is appended when the user aborts an in-flight response.
       onAborted: () => chat.completeAssistant(id, "⏹️ Response cancelled."),
-    }, selectedModel, priorHistory, abort.signal, edits.workspaceId);
+      onConversation: (cid) => { if (cid !== conversationId) void setConversation(cid); },
+    }, selectedModel, priorHistory, abort.signal, edits.workspaceId, conversationId);
+  }
+
+  /** D.1 — browse and resume past conversations. */
+  async function openHistory(): Promise<void> {
+    let items;
+    try {
+      items = await client.listConversations();
+    } catch (err) {
+      vscode.window.showWarningMessage(`MigraPilot: ${(err as Error).message}`);
+      return;
+    }
+    if (!items.length) {
+      vscode.window.showInformationMessage("MigraPilot: no saved conversations yet.");
+      return;
+    }
+
+    const DELETE = "$(trash) Delete";
+    const picks = items.map((c) => ({
+      label: c.title,
+      description: `${c.messageCount} message${c.messageCount === 1 ? "" : "s"}`,
+      detail: new Date(c.createdAt).toLocaleString(),
+      id: c.id,
+      buttons: [{ iconPath: new vscode.ThemeIcon("trash"), tooltip: DELETE }],
+    }));
+
+    const qp = vscode.window.createQuickPick<(typeof picks)[number]>();
+    qp.items = picks;
+    qp.placeholder = "Resume a conversation (or delete one)";
+    qp.matchOnDescription = true;
+
+    const chosen = await new Promise<(typeof picks)[number] | undefined>((resolve) => {
+      qp.onDidTriggerItemButton(async (e) => {
+        try {
+          await client.deleteConversation(e.item.id);
+          qp.items = qp.items.filter((i) => i.id !== e.item.id);
+          if (e.item.id === conversationId) await setConversation(undefined);
+          if (!qp.items.length) { qp.hide(); resolve(undefined); }
+        } catch (err) {
+          vscode.window.showWarningMessage(`MigraPilot: ${(err as Error).message}`);
+        }
+      });
+      qp.onDidAccept(() => { resolve(qp.selectedItems[0]); qp.hide(); });
+      qp.onDidHide(() => { resolve(undefined); qp.dispose(); });
+      qp.show();
+    });
+    if (!chosen) return;
+
+    let turns;
+    try {
+      turns = await client.getConversation(chosen.id);
+    } catch (err) {
+      vscode.window.showWarningMessage(`MigraPilot: ${(err as Error).message}`);
+      return;
+    }
+
+    activeAbort?.abort();
+    attachments = [];
+    livePlan = undefined;
+    chat.clearChips();
+    chat.reset();
+    history = turns.slice(-20);
+    await setConversation(chosen.id);
+    chat.focus();
+    // Replay the transcript so the operator sees what they are resuming, not an empty box.
+    for (const t of turns) {
+      if (t.role === "user") chat.appendUser(t.text);
+      else { const id = chat.beginAssistant(); chat.completeAssistant(id, t.text); }
+    }
   }
 
   /** Build the outgoing message with an intent-resolved editor context (Phase C.7). */
