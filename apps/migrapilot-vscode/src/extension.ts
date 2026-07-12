@@ -5,6 +5,7 @@ import { ChatPanelViewProvider, type ProposalAction } from "./chatPanelView";
 import { PilotClient } from "./pilotClient";
 import { registerProposedEdits } from "./proposedEdits/register";
 import type { WorkspaceContext } from "./types";
+import { applyPhaseToPlan, type ExecutionPlan } from "./planStream";
 
 export type AttachKind = "file" | "selection" | "image" | "symbol";
 export interface Attachment { id: string; label: string; kind: AttachKind; content?: string; dataUri?: string; }
@@ -52,6 +53,8 @@ export function activate(context: vscode.ExtensionContext): void {
   let attachments: Attachment[] = [];
   let attachSeq = 0;
   let history: { role: "user" | "assistant"; text: string }[] = [];
+  /** The plan for the current turn; phase events fold into it. */
+  let livePlan: ExecutionPlan | undefined;
   let activeAbort: AbortController | undefined;
 
   const chat = new ChatPanelViewProvider(context.extensionUri, {
@@ -207,7 +210,7 @@ export function activate(context: vscode.ExtensionContext): void {
   /* ── send ── */
 
   async function handleUserMessage(text: string): Promise<void> {
-    if (text === "__new_chat__") { attachments = []; history = []; chat.clearChips(); chat.reset(); return; }
+    if (text === "__new_chat__") { attachments = []; history = []; livePlan = undefined; chat.clearChips(); chat.reset(); return; }
     chat.focus();
     chat.appendUser(attachments.length ? `${text}  ·  ${attachments.length} attachment(s)` : text);
     const id = chat.beginAssistant();
@@ -232,6 +235,12 @@ export function activate(context: vscode.ExtensionContext): void {
       onStep: (title) => chat.stepAssistant(id, title),
       onDelta: (d) => chat.streamDelta(id, d),
       // A model-generated proposal → first-class review card in the transcript.
+      onPlan: (plan) => { livePlan = plan; chat.planCard(plan); },
+      onPhase: (update) => {
+        if (!livePlan) return;
+        livePlan = applyPhaseToPlan(livePlan, update);
+        chat.planPhase(livePlan);
+      },
       onProposal: (card) => chat.proposalCard({
         proposalId: card.proposalId, title: card.title, model: card.model,
         filesAffected: card.filesAffected, linesAdded: card.linesAdded, linesRemoved: card.linesRemoved,

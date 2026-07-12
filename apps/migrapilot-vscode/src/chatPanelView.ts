@@ -105,6 +105,10 @@ export class ChatPanelViewProvider implements vscode.WebviewViewProvider {
   public proposalCard(card: ProposalCard): void { this.post({ command: "proposalCard", card }); }
   /** Reflect the Phase C state machine on an existing proposal card. */
   public proposalStatus(id: string, status: string, detail?: string): void { this.post({ command: "proposalStatus", id, status, detail }); }
+  /** Render the server-authored execution plan (Phase C.6.1), before any tool runs. */
+  public planCard(plan: unknown): void { this.post({ command: "planCard", plan }); }
+  /** Advance the plan card as planning \u2192 execution \u2192 completion phases stream in. */
+  public planPhase(plan: unknown): void { this.post({ command: "planPhase", plan }); }
   /** Drop a finished voice transcript into the composer for the user to review/edit. */
   public insertTranscript(text: string): void { this.post({ command: "transcript", text }); }
   /** Reflect voice state in the composer: "transcribing" | "idle" | "error". */
@@ -222,6 +226,41 @@ export class ChatPanelViewProvider implements vscode.WebviewViewProvider {
       if (mins <= 0) return "⏱ Expired";
       if (mins < 60) return "⏱ Expires in "+mins+" min";
       return "⏱ Expires in "+Math.round(mins/60)+" h";
+    }
+    function planGlyph(status){
+      return status === "done" ? "\u2713" : status === "running" ? "\u25B6"
+        : status === "failed" ? "\u2717" : status === "skipped" ? "\u2298" : "\u2610";
+    }
+    function planStatusLabel(status){
+      return status === "dry_run" ? "Dry Run" : status === "executing" ? "Executing"
+        : status === "complete" ? "Complete" : status === "failed" ? "Failed"
+        : status === "approved" ? "Approved" : String(status || "");
+    }
+    function planCardHtml(plan){
+      const steps = (plan.steps || []).map(function(s){
+        return '<li class="plan-step plan-'+esc(s.status)+'"><span class="plan-glyph">'+planGlyph(s.status)+'</span>'+esc(s.text)+'</li>';
+      }).join("");
+      const resolution = plan.resolution ? '<div class="plan-resolution">'+esc(plan.resolution)+'</div>' : '';
+      const note = plan.note ? '<div class="plan-note">'+esc(plan.note)+'</div>' : '';
+      const dry = plan.status === "dry_run";
+      return '<div class="plan-title">\uD83D\uDCCB '+esc(plan.title || "Execution Plan")+'</div>' +
+        resolution +
+        '<ol class="plan-steps">'+steps+'</ol>' +
+        '<div class="plan-foot">' +
+          '<span class="plan-status plan-status-'+esc(plan.status)+'">Status: '+esc(planStatusLabel(plan.status))+'</span>' +
+          (dry ? '<span class="plan-gate">\u26A0 No infrastructure changes until you approve.</span>' : '') +
+        '</div>' + note;
+    }
+    function renderPlanCard(plan){
+      hideWelcome();
+      let wrap = document.querySelector(".plan-card[data-live='1']");
+      if (!wrap){
+        wrap = document.createElement("div");
+        wrap.className = "plan-card"; wrap.dataset.live = "1";
+        transcript.appendChild(wrap);
+      }
+      wrap.innerHTML = planCardHtml(plan);
+      transcript.scrollTop = transcript.scrollHeight;
     }
     function renderProposalCard(card){
       hideWelcome();
@@ -355,6 +394,8 @@ export class ChatPanelViewProvider implements vscode.WebviewViewProvider {
       const m = e.data;
       if (m.command === "addChip"){ addChip(m.id, m.label, m.kind); return; }
       if (m.command === "clearChips"){ chipsEl.innerHTML = ""; return; }
+      if (m.command === "planCard"){ renderPlanCard(m.plan); return; }
+      if (m.command === "planPhase"){ renderPlanCard(m.plan); return; }
       if (m.command === "proposalCard"){ renderProposalCard(m.card); return; }
       if (m.command === "proposalStatus"){ setProposalStatus(m.id, m.status, m.detail); return; }
       if (m.command === "transcript"){
