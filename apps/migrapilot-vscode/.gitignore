@@ -40,3 +40,5 @@ out.retired-hold/
 # OS
 .DS_Store
 Thumbs.db
+out-int/
+.vscode-test/

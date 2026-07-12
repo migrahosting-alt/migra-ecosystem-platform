@@ -148,11 +148,16 @@
     "test:client": "vitest run test/client",
     "test:context": "vitest run test/context",
     "test:smoke": "vitest run test/smoke",
-    "test:all": "vitest run"
+    "test:all": "vitest run",
+    "test:integration": "tsc -p tsconfig.integration.json && node out-int/test/integration/runTest.js"
   },
   "devDependencies": {
+    "@types/mocha": "^10.0.10",
     "@types/node": "^16.18.34",
     "@types/vscode": "^1.90.0",
+    "@vscode/test-electron": "^2.5.2",
+    "glob": "^10.5.0",
+    "mocha": "^10.8.2",
     "typescript": "^5.1.6",
     "vitest": "^2.1.9"
   }
