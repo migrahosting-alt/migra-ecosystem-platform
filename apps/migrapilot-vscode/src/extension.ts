@@ -7,6 +7,7 @@ import { PilotClient } from "./pilotClient";
 import { registerProposedEdits } from "./proposedEdits/register";
 import type { WorkspaceContext } from "./types";
 import { applyPhaseToPlan, type ExecutionPlan } from "./planStream";
+import { ConversationsProvider } from "./conversationsView";
 
 export type AttachKind = "file" | "selection" | "image" | "symbol";
 export interface Attachment { id: string; label: string; kind: AttachKind; content?: string; dataUri?: string; }
@@ -74,6 +75,8 @@ export function activate(context: vscode.ExtensionContext): MigraPilotApi {
    *
    * workspaceState (not globalState): a conversation belongs to the project it was about. */
   const CONVO_KEY = "migrapilot.activeConversationId";
+  /** Forward reference: the tree is constructed after setConversation is defined. */
+  let conversationsRef: ConversationsProvider | undefined;
   /* Degrade, never crash. VS Code always supplies workspaceState, but an extension that
    * FAILS TO ACTIVATE is far worse than one that forgets: losing history is an
    * inconvenience, losing the assistant is an outage. */
@@ -98,6 +101,7 @@ export function activate(context: vscode.ExtensionContext): MigraPilotApi {
   let convoWrite: Thenable<void> | undefined;
   const setConversation = async (id: string | undefined): Promise<void> => {
     conversationId = id;
+    conversationsRef?.setActive(id);
     if (!memento) return;
     convoWrite = memento.update(CONVO_KEY, id);
     try {
@@ -114,6 +118,32 @@ export function activate(context: vscode.ExtensionContext): MigraPilotApi {
   /** The plan for the current turn; phase events fold into it. */
   let livePlan: ExecutionPlan | undefined;
   let activeAbort: AbortController | undefined;
+
+  /* D.2 — where this conversation is happening. Sent with every turn so the history list
+   * can be grouped by project, which is how an engineer actually scans it. The git branch
+   * is read from VS Code's own git extension when it is available; we never shell out. */
+  client.provenance = () => {
+    const folder = vscode.workspace.workspaceFolders?.[0];
+    if (!folder) return undefined;
+    let branch: string | undefined;
+    try {
+      const git = vscode.extensions.getExtension("vscode.git")?.exports?.getAPI?.(1);
+      const repo = git?.repositories?.find((r: any) => folder.uri.fsPath.startsWith(r.rootUri.fsPath));
+      branch = repo?.state?.HEAD?.name;
+    } catch { /* the git extension is optional — a missing branch is not an error */ }
+    return {
+      workspace: vscode.workspace.name ?? folder.name,
+      repository: folder.name,
+      branch,
+    };
+  };
+
+  const conversations = new ConversationsProvider(client);
+  conversationsRef = conversations;
+  context.subscriptions.push(
+    vscode.window.registerTreeDataProvider("migrapilot.conversations", conversations),
+  );
+  void conversations.refresh();
 
   const chat = new ChatPanelViewProvider(context.extensionUri, {
     onUserMessage: (text) => handleUserMessage(text),
@@ -209,6 +239,46 @@ export function activate(context: vscode.ExtensionContext): MigraPilotApi {
     vscode.commands.registerCommand("migrapilot.reviewSelection", () => { addCurrentSelection(); handleUserMessage("Review the selected code."); }),
     vscode.commands.registerCommand("migrapilot.newChat", () => { activeAbort?.abort(); attachments = []; history = []; void setConversation(undefined); chat.clearChips(); chat.reset(); chat.focus(); }),
     vscode.commands.registerCommand("migrapilot.history", () => openHistory()),
+
+    /* ── D.2 — Conversations panel ─────────────────────────────────────────── */
+    vscode.commands.registerCommand("migrapilot.conversations.refresh", () => conversations.refresh()),
+    vscode.commands.registerCommand("migrapilot.resumeConversation", (id: string) => resumeConversation(id)),
+    vscode.commands.registerCommand("migrapilot.conversations.search", async () => {
+      const q = await vscode.window.showInputBox({
+        prompt: "Search conversations",
+        placeHolder: "title, message, workspace, branch, model or tag",
+        value: conversations.currentFilter,
+      });
+      if (q !== undefined) conversations.setFilter(q);
+    }),
+    vscode.commands.registerCommand("migrapilot.conversations.clearSearch", () => conversations.setFilter("")),
+    vscode.commands.registerCommand("migrapilot.conversations.pin", (node: any) =>
+      mutate(node, { pinned: true }, "Pinned")),
+    vscode.commands.registerCommand("migrapilot.conversations.unpin", (node: any) =>
+      mutate(node, { pinned: false }, "Unpinned")),
+    vscode.commands.registerCommand("migrapilot.conversations.rename", async (node: any) => {
+      const c = node?.item;
+      if (!c) return;
+      const title = await vscode.window.showInputBox({ prompt: "Rename conversation", value: c.title });
+      if (title?.trim()) await mutate(node, { title: title.trim() }, "Renamed");
+    }),
+    vscode.commands.registerCommand("migrapilot.conversations.delete", async (node: any) => {
+      const c = node?.item;
+      if (!c) return;
+      const DELETE = "Delete";
+      const pick = await vscode.window.showWarningMessage(
+        `Delete "${c.title}"? This cannot be undone.`, { modal: true }, DELETE,
+      );
+      if (pick !== DELETE) return;
+      try {
+        await client.deleteConversation(c.id);
+        if (c.id === conversationId) await setConversation(undefined);
+        await conversations.refresh();
+      } catch (err) {
+        vscode.window.showWarningMessage(`MigraPilot: ${(err as Error).message}`);
+      }
+    }),
+
     vscode.commands.registerCommand("migrapilot.conversationState", async () => {
       const persisted = memento?.get<string>(CONVO_KEY);
       const msg = [
@@ -339,6 +409,7 @@ export function activate(context: vscode.ExtensionContext): MigraPilotApi {
         destructive: card.destructive, sensitive: card.sensitive,
       }),
       onDone: (full) => {
+        void conversations.refresh(); // title, preview and recency all change on every turn
         chat.completeAssistant(id, full);
         // Record the turn for multi-turn context (store raw user text, not the context-augmented message).
         history.push({ role: "user", text }, { role: "assistant", text: full });
@@ -350,6 +421,43 @@ export function activate(context: vscode.ExtensionContext): MigraPilotApi {
       onAborted: () => chat.completeAssistant(id, "⏹️ Response cancelled."),
       onConversation: (cid) => { if (cid !== conversationId) void setConversation(cid); },
     }, selectedModel, priorHistory, abort.signal, edits.workspaceId, conversationId);
+  }
+
+  /** Apply a change to a conversation, then re-read the list. Never mutate the tree locally:
+   *  the server is the source of truth, and a locally-faked state is how UIs start lying. */
+  async function mutate(node: any, patch: Record<string, unknown>, verb: string): Promise<void> {
+    const c = node?.item;
+    if (!c) return;
+    try {
+      await client.updateConversation(c.id, patch as any);
+      await conversations.refresh();
+      chat.stepAssistant(chat.beginAssistant(), `${verb} "${c.title}".`);
+    } catch (err) {
+      vscode.window.showWarningMessage(`MigraPilot: ${(err as Error).message}`);
+    }
+  }
+
+  /** Open a stored conversation in the chat panel and continue THAT thread. */
+  async function resumeConversation(id: string): Promise<void> {
+    let turns;
+    try {
+      turns = await client.getConversation(id);
+    } catch (err) {
+      vscode.window.showWarningMessage(`MigraPilot: ${(err as Error).message}`);
+      return;
+    }
+    activeAbort?.abort();
+    attachments = [];
+    livePlan = undefined;
+    chat.clearChips();
+    chat.reset();
+    history = turns.slice(-20);
+    await setConversation(id);
+    chat.focus();
+    for (const t of turns) {
+      if (t.role === "user") chat.appendUser(t.text);
+      else { const mid = chat.beginAssistant(); chat.completeAssistant(mid, t.text); }
+    }
   }
 
   /** D.1 — browse and resume past conversations. */
