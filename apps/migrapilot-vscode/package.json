@@ -31,6 +31,12 @@
           "id": "migrapilot.chat",
           "name": "MigraPilot",
           "type": "webview"
+        },
+        {
+          "id": "migrapilot.conversations",
+          "name": "Conversations",
+          "icon": "$(comment-discussion)",
+          "contextualTitle": "MigraPilot Conversations"
         }
       ]
     },
@@ -88,6 +94,53 @@
         "command": "migrapilot.conversationState",
         "title": "MigraPilot: Show Conversation State (diagnostic)",
         "category": "MigraPilot"
+      },
+      {
+        "command": "migrapilot.conversations.refresh",
+        "title": "Refresh Conversations",
+        "category": "MigraPilot",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "migrapilot.conversations.search",
+        "title": "Search Conversations",
+        "category": "MigraPilot",
+        "icon": "$(search)"
+      },
+      {
+        "command": "migrapilot.conversations.clearSearch",
+        "title": "Clear Conversation Search",
+        "category": "MigraPilot",
+        "icon": "$(clear-all)"
+      },
+      {
+        "command": "migrapilot.conversations.pin",
+        "title": "Pin Conversation",
+        "category": "MigraPilot",
+        "icon": "$(pin)"
+      },
+      {
+        "command": "migrapilot.conversations.unpin",
+        "title": "Unpin Conversation",
+        "category": "MigraPilot",
+        "icon": "$(pinned)"
+      },
+      {
+        "command": "migrapilot.conversations.rename",
+        "title": "Rename Conversation",
+        "category": "MigraPilot",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "migrapilot.conversations.delete",
+        "title": "Delete Conversation",
+        "category": "MigraPilot",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "migrapilot.resumeConversation",
+        "title": "Resume Conversation",
+        "category": "MigraPilot"
       }
     ],
     "configuration": {
@@ -142,7 +195,76 @@
           "description": "Run known build/test/lint commands (npm test, tsc --noEmit, eslint, read-only git) without asking, so MigraPilot can run your tests, read the failure and fix it. Anything not on that list \u2014 and anything that chains, redirects or substitutes commands \u2014 always asks. Turn this off to be prompted for every command."
         }
       }
-    }
+    },
+    "menus": {
+      "view/title": [
+        {
+          "command": "migrapilot.conversations.search",
+          "when": "view == migrapilot.conversations",
+          "group": "navigation@1"
+        },
+        {
+          "command": "migrapilot.conversations.clearSearch",
+          "when": "view == migrapilot.conversations",
+          "group": "navigation@2"
+        },
+        {
+          "command": "migrapilot.conversations.refresh",
+          "when": "view == migrapilot.conversations",
+          "group": "navigation@3"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "migrapilot.conversations.pin",
+          "when": "view == migrapilot.conversations && viewItem == migrapilot.conversation",
+          "group": "inline@1"
+        },
+        {
+          "command": "migrapilot.conversations.unpin",
+          "when": "view == migrapilot.conversations && viewItem == migrapilot.conversation.pinned",
+          "group": "inline@1"
+        },
+        {
+          "command": "migrapilot.conversations.rename",
+          "when": "view == migrapilot.conversations && viewItem =~ /migrapilot.conversation/",
+          "group": "1_modify@1"
+        },
+        {
+          "command": "migrapilot.conversations.delete",
+          "when": "view == migrapilot.conversations && viewItem =~ /migrapilot.conversation/",
+          "group": "9_danger@1"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "migrapilot.resumeConversation",
+          "when": "false"
+        },
+        {
+          "command": "migrapilot.conversations.pin",
+          "when": "false"
+        },
+        {
+          "command": "migrapilot.conversations.unpin",
+          "when": "false"
+        },
+        {
+          "command": "migrapilot.conversations.rename",
+          "when": "false"
+        },
+        {
+          "command": "migrapilot.conversations.delete",
+          "when": "false"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "migrapilot.conversations",
+        "contents": "No conversations yet.\\n\\nAsk MigraPilot something and it will appear here \u2014 every thread is stored and resumable.\\n[Open MigraPilot](command:migrapilot.openChat)"
+      }
+    ]
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",

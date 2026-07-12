@@ -40,8 +40,25 @@ export interface ConversationSummary {
   id: string;
   title: string;
   createdAt: string;
+  /** D.2 — history is scanned by RECENCY, not by creation date. */
+  lastActiveAt: string;
+  preview?: string;
   messageCount: number;
   pinned?: boolean;
+  archived?: boolean;
+  tags?: string[];
+  /** Where the conversation happened. A conversation is about a PROJECT. */
+  workspace?: string | null;
+  repository?: string | null;
+  branch?: string | null;
+  model?: string | null;
+}
+
+/** Where this chat is happening — sent so the history list can be grouped by project. */
+export interface WorkspaceProvenance {
+  workspace?: string;
+  repository?: string;
+  branch?: string;
 }
 
 export interface StreamHandlers {
@@ -75,6 +92,9 @@ function isAbortError(err: unknown): boolean {
  * run.completed. We surface tokens live and the final message as authoritative.
  */
 export class PilotClient {
+  /** Set by the extension: resolves the current workspace/repo/branch. */
+  public provenance?: () => WorkspaceProvenance | undefined;
+
   private cfg() { return vscode.workspace.getConfiguration("migrapilot"); }
   /** "pilot-web" (simple Ollama engine, NDJSON) | "pilot-api" (full engine, SSE). */
   public backend(): string { return this.cfg().get<string>("backend") || "pilot-web"; }
@@ -183,6 +203,10 @@ export class PilotClient {
     // D.1 — continue the SAME conversation. Omitting this is what made every turn a new
     // thread; the server then had no history to persist against.
     if (conversationId) body.conversationId = conversationId;
+    // D.2 — record WHERE this is happening, so history groups by project rather than being
+    // an undifferentiated pile.
+    const prov = this.provenance?.();
+    if (prov && (prov.workspace || prov.repository || prov.branch)) body.workspaceContext = prov;
     if (model && model !== "auto") body.model = model;
     if (history && history.length) body.history = history.slice(-20).map((t) => ({ role: t.role, text: t.text }));
     // Bind any proposal generated this turn to the local workspace identity so
@@ -312,6 +336,20 @@ export class PilotClient {
     return (data.conversation?.messages ?? [])
       .map((m) => ({ role: m.role === "assistant" ? "assistant" as const : "user" as const, text: m.contentJson?.text ?? "" }))
       .filter((t) => t.text.trim().length > 0);
+  }
+
+  public async updateConversation(
+    id: string,
+    patch: { title?: string; pinned?: boolean; archived?: boolean; tags?: string[] },
+  ): Promise<void> {
+    const base = this.baseUrl();
+    if (!base) return;
+    const res = await fetch(`${base}/api/pilot/conversations/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(patch),
+    });
+    if (!res.ok) throw new Error(`Could not update that conversation (HTTP ${res.status}).`);
   }
 
   public async deleteConversation(id: string): Promise<void> {

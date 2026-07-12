@@ -167,6 +167,11 @@ export const window: any = {
   onDidChangeTextEditorSelection: (_cb: any) => ({ dispose() {} }),
   createStatusBarItem: () => ({ text: "", tooltip: "", command: "", show() {}, hide() {}, dispose() {} }),
   registerWebviewViewProvider: () => ({ dispose() {} }),
+  // D.2 — the Conversations tree. Omitting it made activate() throw, and the activation
+  // test caught it: a mock that is missing an API the extension uses is not a mock, it is a
+  // false pass waiting to happen.
+  registerTreeDataProvider: () => ({ dispose() {} }),
+  createTreeView: () => ({ dispose() {}, reveal: async () => undefined }),
   showQuickPick: async () => undefined,
   showOpenDialog: async () => undefined,
   showWarningMessage: (..._a: any[]) => Promise.resolve(undefined),
@@ -228,3 +233,36 @@ export default {
   FileType,
   FileSystemError,
 };
+
+/* ── D.2: TreeView primitives ──────────────────────────────────────────────────
+ * The Conversations panel needs these. The mock is meant to be FAITHFUL, not minimal:
+ * omitting EventEmitter made activate() throw, and the activation test caught it. */
+
+export class EventEmitter<T> {
+  private readonly listeners: Array<(e: T) => void> = [];
+  readonly event = (listener: (e: T) => void) => {
+    this.listeners.push(listener);
+    return { dispose: () => { const i = this.listeners.indexOf(listener); if (i >= 0) this.listeners.splice(i, 1); } };
+  };
+  fire(e?: T): void { for (const l of [...this.listeners]) l(e as T); }
+  dispose(): void { this.listeners.length = 0; }
+}
+
+export enum TreeItemCollapsibleState { None = 0, Collapsed = 1, Expanded = 2 }
+
+export class TreeItem {
+  id?: string;
+  description?: string;
+  tooltip?: unknown;
+  iconPath?: unknown;
+  contextValue?: string;
+  command?: unknown;
+  constructor(public label: string, public collapsibleState: TreeItemCollapsibleState = TreeItemCollapsibleState.None) {}
+}
+
+export class ThemeIcon { constructor(public id: string, public color?: unknown) {} }
+export class ThemeColor { constructor(public id: string) {} }
+export class MarkdownString {
+  constructor(public value = "") {}
+  appendMarkdown(v: string) { this.value += v; return this; }
+}
