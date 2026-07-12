@@ -12,12 +12,33 @@ export interface ChatRequestContext {
   preview?: string;
 }
 
+/* ── Execution plan + phased streaming (pilot-api Phase C.6.1) ────────────────────
+ * pilot-api emits the infrastructure execution plan as a FIRST-CLASS `plan` SSE event
+ * before any provisioning tool runs, plus `phase` events (planning → execution →
+ * completion) that carry per-step progress. Rendering the plan from the structured event
+ * — rather than scraping it out of the token prose — is what makes the plan deterministic
+ * on the client: it cannot be garbled by streaming chunk boundaries or lost mid-stream.
+ *
+ * The pure logic lives in planStream.ts (no vscode import) so it can be unit-tested. */
+
+import { consumePlanProse } from "./planStream";
+export type {
+  PlanStepStatus, PlanStep, ExecutionPlan, StreamPhase, PhaseUpdate,
+} from "./planStream";
+export { consumePlanProse, applyPhaseToPlan, planGlyph, parseSseFrame } from "./planStream";
+import type { ExecutionPlan, PhaseUpdate } from "./planStream";
+
 export interface StreamHandlers {
   onDelta: (text: string) => void;
   onStep?: (title: string) => void;
+  /** A structured execution plan arrived (before any tool ran). */
+  onPlan?: (plan: ExecutionPlan) => void;
+  /** Phase transition, or per-step progress within the execution phase. */
+  onPhase?: (update: PhaseUpdate) => void;
   onDone: (fullText: string) => void;
   onError: (message: string) => void;
 }
+
 
 /**
  * Streaming client for a pilot-api / pilot-web backend. The chat endpoint
@@ -152,6 +173,8 @@ export class PilotClient {
     const decoder = new TextDecoder();
     let buffer = "";
     let full = "";
+    /** Plan prose still awaiting suppression (we render the structured card instead). */
+    let planProse = "";
     try {
       for (;;) {
         const { done, value } = await reader.read();
@@ -170,7 +193,22 @@ export class PilotClient {
           if (!dataStr) continue;
           let data: any;
           try { data = JSON.parse(dataStr); } catch { continue; }
-          if (evName === "token" && typeof data.text === "string") { full += data.text; h.onDelta(data.text); }
+          if (evName === "plan" && data.plan) {
+            h.onPlan?.(data.plan as ExecutionPlan);
+            // The same plan follows as prose tokens; we render the card instead.
+            planProse = typeof data.text === "string" ? `${data.text}\n\n` : "";
+          }
+          else if (evName === "phase") {
+            h.onPhase?.({
+              phase: data.phase, label: data.label,
+              step: data.step, stepText: data.stepText, status: data.status,
+            });
+          }
+          else if (evName === "token" && typeof data.text === "string") {
+            const { pending, visible } = consumePlanProse(planProse, data.text);
+            planProse = pending;
+            if (visible) { full += visible; h.onDelta(visible); }
+          }
           else if (evName === "provider" && h.onStep) { h.onStep(`Model: ${data.model ?? "?"}${data.reason ? ` (${data.reason})` : ""}`); }
           else if (evName === "tool" && h.onStep) {
             const tool = data.toolName ?? data.name ?? data.tool ?? "tool";

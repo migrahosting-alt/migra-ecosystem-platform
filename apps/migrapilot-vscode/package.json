@@ -103,7 +103,9 @@
   "scripts": {
     "vscode:prepublish": "npm run compile",
     "compile": "tsc -p ./",
-    "watch": "tsc -watch -p ./"
+    "watch": "tsc -watch -p ./",
+    "test": "node --test \"out/test/*.test.js\"",
+    "test:all": "npm run compile && node --test \"out/test/*.test.js\""
   },
   "devDependencies": {
     "@types/node": "^16.18.34",

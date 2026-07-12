@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import type { ExecutionPlan, PhaseUpdate } from "./pilotClient";
 
 const SUGGESTIONS: Array<{ ic: string; label: string }> = [
   { ic: "📄", label: "Explain this file" },
@@ -77,6 +78,10 @@ export class ChatPanelViewProvider implements vscode.WebviewViewProvider {
     return id;
   }
   public stepAssistant(id: string, title: string): void { this.post({ command: "step", id, title }); }
+  /** Render the structured execution plan (pilot-api C.6.1) above the assistant's reply. */
+  public planAssistant(id: string, plan: ExecutionPlan): void { this.post({ command: "plan", id, plan }); }
+  /** Phase transition, or a per-step ✓ within the execution phase. */
+  public phaseAssistant(id: string, update: PhaseUpdate): void { this.post({ command: "phase", id, update }); }
   public streamDelta(id: string, delta: string): void { this.post({ command: "streamDelta", id, delta }); }
   public completeAssistant(id: string, markdown: string): void {
     this.post({ command: "completeAssistant", id, text: markdown });
@@ -154,6 +159,31 @@ export class ChatPanelViewProvider implements vscode.WebviewViewProvider {
     const welcome = document.getElementById("welcome");
 
     function esc(s){ return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+
+    /* Render the execution plan card from the structured plan object.
+     * Glyphs are honest: ☐ pending, ▶ running, ✓ done, ✗ failed. A ✓ appears only when
+     * the backend reports that step actually completed. */
+    function planGlyph(status){
+      if (status === "done") return "\\u2713";
+      if (status === "running") return "\\u25b6";
+      if (status === "failed") return "\\u2717";
+      if (status === "skipped") return "\\u2013";
+      return "\\u2610";
+    }
+    function renderPlan(card, plan){
+      let h = "";
+      if (plan.resolution) h += '<div class="plan-res">' + esc(plan.resolution).replace(/\\n/g,"<br>") + '</div>';
+      h += '<div class="plan-title">' + esc(plan.title || "Execution Plan") + '</div>';
+      h += '<ul class="plan-steps">';
+      for (const s of (plan.steps || [])){
+        h += '<li class="plan-step ' + esc(s.status) + '"><span class="g">' + planGlyph(s.status) + '</span> ' + esc(s.text) + '</li>';
+      }
+      h += '</ul>';
+      if (plan.status === "dry_run"){
+        h += '<div class="plan-foot"><span class="plan-badge">Dry Run</span> ' + esc(plan.note || "") + '</div>';
+      }
+      card.innerHTML = h;
+    }
 
     // Minimal markdown: fenced code blocks + inline code + line breaks.
     function renderMarkdown(md){
@@ -277,23 +307,49 @@ export class ChatPanelViewProvider implements vscode.WebviewViewProvider {
       }
       if (m.command === "reset"){ transcript.innerHTML=""; if(welcome) welcome.style.display=""; return; }
       if (m.command === "appendUser"){ hideWelcome(); bubble("user").innerHTML = renderMarkdown(m.text); }
-      if (m.command === "beginAssistant"){ hideWelcome(); const c = bubble("assistant", m.id); c.dataset.raw=""; c.innerHTML = '<div class="step-line"></div><div class="text typing"><i></i><i></i><i></i></div>'; }
+      if (m.command === "beginAssistant"){ hideWelcome(); const c = bubble("assistant", m.id); c.dataset.raw=""; c.innerHTML = '<div class="step-line"></div><div class="plan-card" hidden></div><div class="text typing"><i></i><i></i><i></i></div>'; }
       if (m.command === "step"){
         const sl = transcript.querySelector('.msg[data-id="'+m.id+'"] .content .step-line');
         if (sl) sl.textContent = "· " + m.title;
+      }
+      /* ── Execution plan (pilot-api C.6.1) ──────────────────────────────────────
+       * Rendered from the STRUCTURED plan event, not scraped from the prose, so the
+       * steps are exact and each one can be ticked independently as it completes. */
+      if (m.command === "plan"){
+        const card = transcript.querySelector('.msg[data-id="'+m.id+'"] .content .plan-card');
+        if (card && m.plan){ card.dataset.plan = JSON.stringify(m.plan); card.hidden = false; renderPlan(card, m.plan); }
+      }
+      if (m.command === "phase"){
+        const el = transcript.querySelector('.msg[data-id="'+m.id+'"] .content');
+        if (!el) return;
+        const sl = el.querySelector(".step-line");
+        const u = m.update || {};
+        if (sl && u.label && !u.step) sl.textContent = "· " + u.label + (u.phase === "completion" ? "" : "…");
+        const card = el.querySelector(".plan-card");
+        if (card && card.dataset.plan && u.step){
+          const plan = JSON.parse(card.dataset.plan);
+          const step = (plan.steps || []).find(function(s){ return s.index === u.step; });
+          // Only a real progress report may tick a step — never a guess.
+          if (step && u.status){ step.status = u.status; card.dataset.plan = JSON.stringify(plan); renderPlan(card, plan); }
+        }
       }
       if (m.command === "streamDelta"){
         const el = transcript.querySelector('.msg[data-id="'+m.id+'"] .content');
         if (el){
           el.dataset.raw = (el.dataset.raw||"") + m.delta;
           const sl = el.querySelector(".step-line"); const slHtml = sl ? sl.outerHTML : "";
-          el.innerHTML = slHtml + '<div class="text">' + esc(el.dataset.raw).replace(/\\n/g,"<br>") + '</div>';
+          const pc = el.querySelector(".plan-card"); const pcHtml = pc ? pc.outerHTML : "";
+          el.innerHTML = slHtml + pcHtml + '<div class="text">' + esc(el.dataset.raw).replace(/\\n/g,"<br>") + '</div>';
           transcript.scrollTop = transcript.scrollHeight;
         }
       }
       if (m.command === "completeAssistant"){
         const el = transcript.querySelector('.msg[data-id="'+m.id+'"] .content');
-        if (el){ el.innerHTML = renderMarkdown(m.text); } else { bubble("assistant").innerHTML = renderMarkdown(m.text); }
+        if (el){
+          // Keep the plan card — the final summary must not erase the plan the user approved against.
+          const pc = el.querySelector(".plan-card"); const pcHtml = pc && !pc.hidden ? pc.outerHTML : "";
+          el.innerHTML = pcHtml + renderMarkdown(m.text);
+        } else { bubble("assistant").innerHTML = renderMarkdown(m.text); }
         transcript.scrollTop = transcript.scrollHeight;
       }
     });

@@ -170,6 +170,10 @@ export function activate(context: vscode.ExtensionContext): void {
     const priorHistory = history.slice(-18); // prior turns only; current message sent separately
     await client.streamChat(backendMessage, toContext(captured), {
       onStep: (title) => chat.stepAssistant(id, title),
+      // Execution plan + phased progress (pilot-api C.6.1). The plan arrives BEFORE any
+      // tool runs and is rendered from the structured event, so it survives the run.
+      onPlan: (plan) => chat.planAssistant(id, plan),
+      onPhase: (update) => chat.phaseAssistant(id, update),
       onDelta: (d) => chat.streamDelta(id, d),
       onDone: (full) => {
         chat.completeAssistant(id, full);
