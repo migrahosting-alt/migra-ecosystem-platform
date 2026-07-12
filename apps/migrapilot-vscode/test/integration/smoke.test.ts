@@ -231,7 +231,19 @@ suite("MigraPilot smoke — real VS Code extension host", () => {
   });
 
   /* ── I1–I3 — durable conversations ──────────────────────────────────────── */
-  test("I1-I3: the conversation survives, and can be resumed by id", async function () {
+  /**
+   * NOTE — this is NOT I3.
+   *
+   * It proves the SERVER persists a thread and rehydrates it from a conversationId. It does
+   * NOT prove the EXTENSION restores that id across a window reload, because this test hands
+   * the id over itself. Calling it "I1-I3" was overclaiming: the GUI then failed exactly in
+   * the untested half — after a reload the model no longer knew the test color.
+   *
+   * The extension's reload path cannot be tested here: VS Code runs with IN-MEMORY storage
+   * under @vscode/test-electron ("Initializing fallback application storage (path: in-memory)"),
+   * so workspaceState can never survive a restart in this harness. It stays a human step.
+   */
+  test("I1-I2 (server half only): the thread persists and rehydrates from a conversationId", async function () {
     this.timeout(300_000);
     const first = await chat("Remember that my test color is teal.");
     assert.ok(first.conversationId, "no conversationId was issued");

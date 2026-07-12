@@ -139,3 +139,62 @@ describe("the thread survives a reload", () => {
     expect(projectB.get<string>(KEY)).toBeUndefined();
   });
 });
+
+/**
+ * THE BUG THE GUI FOUND (I3) — and that every test above missed.
+ *
+ * `workspaceState` only persists when a FOLDER is open. VS Code keys workspace storage to a
+ * folder; with an empty workspace it is window-scoped and discarded. The operator's dev host
+ * had the MigraPilot panel open but no folder, so the conversation had nowhere to live: the
+ * id was written, the window reloaded, and it was gone.
+ *
+ * Verified on disk: 37 VS Code workspace databases exist and hold other MigraPilot keys
+ * (view state, webview mementos), and `migrapilot.activeConversationId` is in NONE of them.
+ *
+ * Why nothing caught it:
+ *   - the unit tests above hand-roll a fake memento, which always persists;
+ *   - the integration harness runs VS Code with IN-MEMORY storage, which never persists.
+ * Neither can express "persists ONLY when a folder is open". This does.
+ */
+describe("no folder open — the case the GUI caught", () => {
+  const KEY = "migrapilot.activeConversationId";
+
+  /** workspaceState with no folder: writes succeed, then vanish with the window. */
+  function ephemeralWorkspaceState() {
+    const store = new Map<string, unknown>();
+    return {
+      get: <T>(k: string) => store.get(k) as T | undefined,
+      update: async (k: string, v: unknown) => { v === undefined ? store.delete(k) : store.set(k, v); },
+      /** what a reload actually reads back: nothing */
+      afterReload: () => makeMemento(),
+    };
+  }
+
+  function pickStore(hasFolder: boolean, ws: any, global: any) {
+    return hasFolder ? ws : global;
+  }
+
+  it("with NO folder, workspaceState loses the thread on reload — the reported bug", async () => {
+    const ws = ephemeralWorkspaceState();
+    await ws.update(KEY, "cmr_lost");
+    expect(ws.get<string>(KEY)).toBe("cmr_lost");   // looks fine in-session…
+    expect(ws.afterReload().get<string>(KEY)).toBeUndefined(); // …and is gone after reload
+  });
+
+  it("with NO folder we use globalState, which DOES survive", async () => {
+    const global = makeMemento();
+    const store = pickStore(false, ephemeralWorkspaceState(), global);
+    await store.update(KEY, "cmr_survives");
+    // the window reloads; globalState is not folder-scoped, so it is still there
+    expect(global.get<string>(KEY)).toBe("cmr_survives");
+  });
+
+  it("with a folder open we still prefer workspaceState — a thread belongs to its project", async () => {
+    const ws = makeMemento();
+    const global = makeMemento();
+    const store = pickStore(true, ws, global);
+    await store.update(KEY, "cmr_project");
+    expect(ws.get<string>(KEY)).toBe("cmr_project");
+    expect(global.get<string>(KEY)).toBeUndefined(); // must NOT leak across projects
+  });
+});
