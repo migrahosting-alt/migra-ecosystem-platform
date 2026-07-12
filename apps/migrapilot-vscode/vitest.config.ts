@@ -10,6 +10,10 @@ import * as path from "path";
 export default defineConfig({
   test: {
     include: ["test/**/*.test.ts"],
+    // test/integration runs inside a REAL VS Code (@vscode/test-electron): it imports the
+    // genuine `vscode` module and needs a display. vitest's in-memory mock cannot load it,
+    // and CI has no VS Code. Run it with `npm run test:integration`, never with vitest.
+    exclude: ["node_modules/**", "test/integration/**"],
     environment: "node",
     globals: false,
     hookTimeout: 20000,
