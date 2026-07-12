@@ -270,13 +270,73 @@ export function toContext(c: WorkspaceContext) {
 }
 export function truncate(s: string, n: number): string { return s.length > n ? s.slice(0, n) + "\n… (truncated)" : s; }
 
+/**
+ * Hard ceiling on the code we put in one message. Matches ContextCollector's
+ * MAX_PREVIEW_CHARS so the buffer is cut EXACTLY ONCE, by the collector, which is
+ * the only layer that knows the original size. Cutting a second time here (the old
+ * code re-sliced an already-truncated 12,000-char preview down to 1,800) destroyed
+ * that knowledge and made honest reporting impossible.
+ */
+const MAX_CONTEXT_CHARS = 12000;
+
+const num = (n: number) => n.toLocaleString("en-US");
+
+/**
+ * Render the editor context with an explicit, honest `Content:` line.
+ *
+ * E-CTX-01: the model must never have to GUESS whether it is holding a whole file
+ * or a fragment. A clean mid-file cut looks exactly like corruption — that is how a
+ * perfectly valid 287 KB package-lock.json got reported as malformed JSON. State the
+ * excerpt's true extent, and the model can reason correctly about what it cannot see.
+ *
+ * Exported for tests; the fence LABELS (`Selected code`, `File (truncated)`,
+ * `File (complete)`) are a wire contract with pilot-api's parseEditorContext.
+ */
+export function renderEditorContext(c: WorkspaceContext): string {
+  const file = c.relativeFilePath || c.activeFilePath;
+  if (!file) return "";
+  const lang = c.languageId || "";
+  let out = `\n\n--- Editor context ---\nFile: ${file}${c.languageId ? ` (${c.languageId})` : ""}`;
+
+  if (c.hasSelection && c.selectedTextPreview) {
+    const code = truncate(c.selectedTextPreview, MAX_CONTEXT_CHARS);
+    const cut = c.selectionTruncated || c.selectedTextPreview.length > MAX_CONTEXT_CHARS;
+    const total = c.selectedTextLength || c.selectedTextPreview.length;
+    out += cut
+      ? `\nContent: TRUNCATED SELECTION — the first ${num(Math.min(c.selectedTextPreview.length, MAX_CONTEXT_CHARS))} of ${num(total)} selected characters. The rest of the selection was NOT sent.`
+      : `\nContent: the operator's complete selection (${num(c.selectionLineCount)} line(s), ${num(total)} characters). This is the region they pointed at.`;
+    out += `\nSelected code:\n\`\`\`${lang}\n${code}\n\`\`\``;
+    return out;
+  }
+
+  if (c.filePreview) {
+    const code = truncate(c.filePreview, MAX_CONTEXT_CHARS);
+    const cut = c.filePreviewTruncated || c.filePreview.length > MAX_CONTEXT_CHARS;
+    const shown = Math.min(c.filePreview.length, MAX_CONTEXT_CHARS);
+    const total = c.fileCharCount || c.filePreview.length;
+    if (cut) {
+      const shownLines = code.split("\n").length;
+      out +=
+        `\nContent: TRUNCATED EXCERPT — the first ${num(shown)} of ${num(total)} characters` +
+        `${c.fileLineCount ? ` (roughly lines 1-${num(shownLines)} of ${num(c.fileLineCount)})` : ""}.` +
+        ` The rest of the file was NOT sent and this excerpt ends MID-FILE.` +
+        ` Unclosed brackets, braces or quotes at the end are an artifact of the cut, NOT a defect in the file.`;
+      out += `\nFile (truncated):\n\`\`\`${lang}\n${code}\n\`\`\``;
+    } else {
+      out +=
+        `\nContent: the COMPLETE file (${num(c.fileLineCount || code.split("\n").length)} lines, ` +
+        `${num(total)} characters). Nothing was omitted.`;
+      out += `\nFile (complete):\n\`\`\`${lang}\n${code}\n\`\`\``;
+    }
+  }
+  return out;
+}
+
 export function buildBackendMessage(text: string, c: WorkspaceContext, attachments: Attachment[]): string {
   let msg = text;
   const file = c.relativeFilePath || c.activeFilePath;
   if (file && !attachments.some((a) => a.kind === "file" || a.kind === "selection")) {
-    msg += `\n\n--- Editor context ---\nFile: ${file}${c.languageId ? ` (${c.languageId})` : ""}`;
-    if (c.hasSelection && c.selectedTextPreview) msg += `\nSelected code:\n\`\`\`${c.languageId || ""}\n${truncate(c.selectedTextPreview, 2000)}\n\`\`\``;
-    else if (c.filePreview) msg += `\nFile (truncated):\n\`\`\`${c.languageId || ""}\n${truncate(c.filePreview, 1800)}\n\`\`\``;
+    msg += renderEditorContext(c);
   }
   for (const a of attachments) {
     if (a.kind === "image") {

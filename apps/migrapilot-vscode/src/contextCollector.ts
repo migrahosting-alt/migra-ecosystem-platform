@@ -43,6 +43,9 @@ export class ContextCollector {
     let selectedTextLength = 0;
     let truncated = false;
     let warning = "";
+    let filePreviewTruncated = false;
+    let selectionTruncated = false;
+    let fileCharCount = 0;
 
     if (activeEditor) {
       const document = activeEditor.document;
@@ -55,6 +58,7 @@ export class ContextCollector {
       const secret = isSecretLikePath(activeFilePath) || isSecretLikePath(relativeFilePath);
       const fullText = secret ? "" : document.getText();
       fileSizeBytes = Buffer.byteLength(fullText, "utf8");
+      fileCharCount = fullText.length;
 
       if (secret) {
         // Report the file exists, but withhold its bytes entirely.
@@ -77,11 +81,15 @@ export class ContextCollector {
           selectedTextLength: 0,
           truncated: false,
           warning: "Secret-like file detected — contents withheld from MigraPilot context.",
+          filePreviewTruncated: false,
+          selectionTruncated: false,
+          fileCharCount: 0,
         };
       }
 
       if (fullText.length > MAX_PREVIEW_CHARS) {
         filePreview = fullText.slice(0, MAX_PREVIEW_CHARS);
+        filePreviewTruncated = true;
         truncated = true;
       } else {
         filePreview = fullText;
@@ -95,6 +103,7 @@ export class ContextCollector {
 
         if (selectedText.length > MAX_SELECTION_CHARS) {
           selectedTextPreview = selectedText.slice(0, MAX_SELECTION_CHARS);
+          selectionTruncated = true;
           truncated = true;
         } else {
           selectedTextPreview = selectedText;
@@ -124,6 +133,9 @@ export class ContextCollector {
       selectedTextLength,
       truncated,
       warning,
+      filePreviewTruncated,
+      selectionTruncated,
+      fileCharCount,
     };
   }
 
