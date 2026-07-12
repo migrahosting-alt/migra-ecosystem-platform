@@ -1,7 +1,7 @@
 {
   "name": "migrapilot-vscode",
   "displayName": "MigraPilot Chat",
-  "description": "MigraPilot — an AI engineering chat assistant for the MigraTeck ecosystem, with live editor context.",
+  "description": "MigraPilot \u2014 an AI engineering chat assistant for the MigraTeck ecosystem, with live editor context.",
   "version": "0.18.0",
   "publisher": "migrateck",
   "engines": {
@@ -90,8 +90,8 @@
             "pilot-api"
           ],
           "enumDescriptions": [
-            "Simple local Ollama engine (:3399) — read-only tools, in-memory.",
-            "Full engine (:3377) — multi-provider model routing, missions, cryptographic approvals, durable state."
+            "Simple local Ollama engine (:3399) \u2014 read-only tools, in-memory.",
+            "Full engine (:3377) \u2014 multi-provider model routing, missions, cryptographic approvals, durable state."
           ],
           "default": "pilot-api",
           "description": "Which MigraPilot backend the chat talks to. Default is the canonical pilot-api (full engine). 'pilot-web' is an explicit temporary fallback only."
@@ -120,6 +120,16 @@
           "type": "string",
           "default": "llava:latest",
           "description": "Local Ollama vision model used to analyze attached images/screenshots (e.g. llava:latest, llama3.2-vision:11b)."
+        },
+        "migrapilot.workspace.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Let MigraPilot read and act on THIS workspace. Without it, pilot-api's repo/git tools run against the server's filesystem, where your files do not exist \u2014 so the assistant cannot actually see your code. Reads are automatic; writes always show a diff first; shell commands follow the auto-run list below."
+        },
+        "migrapilot.workspace.autoRunCommands": {
+          "type": "boolean",
+          "default": true,
+          "description": "Run known build/test/lint commands (npm test, tsc --noEmit, eslint, read-only git) without asking, so MigraPilot can run your tests, read the failure and fix it. Anything not on that list \u2014 and anything that chains, redirects or substitutes commands \u2014 always asks. Turn this off to be prompted for every command."
         }
       }
     }

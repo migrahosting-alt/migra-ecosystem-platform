@@ -1,4 +1,6 @@
 import * as vscode from "vscode";
+import { executeWorkspaceTool, SUPPORTED_WORKSPACE_TOOLS } from "./workspace/executor";
+import { decide } from "./workspace/policy";
 import { parsePlanEvent, parsePhaseEvent, type ExecutionPlan, type PhaseUpdate } from "./planStream";
 
 export type { ExecutionPlan, PlanStep, PhaseUpdate, PlanStepStatus, PlanStatus, StreamPhase } from "./planStream";
@@ -173,6 +175,13 @@ export class PilotClient {
     // Bind any proposal generated this turn to the local workspace identity so
     // approvals cannot cross workspaces (matches the approve/apply workspaceId).
     if (workspaceId && workspaceId.trim()) body.workspaceId = workspaceId;
+    /* Phase E — tell pilot-api which tools this machine can execute. Every repo/git tool
+     * it registers acts on ITS filesystem, where the operator's code does not exist. When
+     * we advertise, it delegates them here instead and the tools finally reach real files.
+     * Omit the block and everything runs server-side exactly as before. */
+    if (this.workspaceExecutionEnabled()) {
+      body.workspace = { tools: SUPPORTED_WORKSPACE_TOOLS };
+    }
     let res: Awaited<ReturnType<typeof fetch>>;
     try {
       res = await fetch(`${base}/api/pilot/chat/stream`, {
@@ -223,6 +232,11 @@ export class PilotClient {
             if (appr) h.onStep(`⚠️ Approval required for ${appr.toolName ?? tool} (enable live execution to allow)`);
             else h.onStep(`🔧 ${tool}${status}`);
           }
+          else if (evName === "workspace_tool_request" && typeof data.callId === "string") {
+            // Do NOT await: the agent loop is blocked on this result, and the SSE reader
+            // must keep draining or the very stream carrying the answer would stall.
+            void this.serveWorkspaceTool(base, data.callId, String(data.toolName ?? ""), data.args ?? {}, h);
+          }
           else if (evName === "proposal" && typeof data.proposalId === "string") {
             h.onProposal?.({
               proposalId: data.proposalId,
@@ -258,6 +272,74 @@ export class PilotClient {
       return;
     }
     h.onDone(full || "…(no response text)");
+  }
+
+  /* ── Phase E: workspace execution ───────────────────────────────────────────── */
+
+  private workspaceExecutionEnabled(): boolean {
+    const cfg = vscode.workspace.getConfiguration("migrapilot");
+    return cfg.get<boolean>("workspace.enabled", true) && !!vscode.workspace.workspaceFolders?.length;
+  }
+
+  /**
+   * pilot-api asked this machine to run a tool. Decide, execute, answer.
+   *
+   * The agent loop is BLOCKED on this call, so it must always answer — a refusal, a
+   * failure and a timeout are all real answers the model can act on. Silence is the one
+   * outcome that would hang the run, so every path below posts something back.
+   */
+  private async serveWorkspaceTool(
+    base: string,
+    callId: string,
+    toolName: string,
+    args: Record<string, unknown>,
+    h: StreamHandlers,
+  ): Promise<void> {
+    const cfg = vscode.workspace.getConfiguration("migrapilot");
+    const verdict = decide(toolName, args, {
+      enabled: cfg.get<boolean>("workspace.enabled", true),
+      allowShell: cfg.get<boolean>("workspace.autoRunCommands", true),
+    });
+
+    let result: { ok: boolean; data?: unknown; error?: { code: string; message: string } };
+
+    if (verdict.verdict === "deny") {
+      result = { ok: false, error: { code: "DENIED_BY_POLICY", message: verdict.reason } };
+    } else if (verdict.verdict === "ask") {
+      h.onStep?.(`⏸️ Waiting for your approval: ${toolName}`);
+      const APPROVE = "Approve";
+      const choice = await vscode.window.showWarningMessage(
+        verdict.reason,
+        { modal: true, detail: `MigraPilot wants to run ${toolName} in this workspace.` },
+        APPROVE,
+      );
+      if (choice !== APPROVE) {
+        h.onStep?.(`🚫 Declined: ${toolName}`);
+        result = {
+          ok: false,
+          error: {
+            code: "DENIED_BY_OPERATOR",
+            message: `The operator declined ${toolName}. Do not retry it — explain what you needed it for, or find another way.`,
+          },
+        };
+      } else {
+        h.onStep?.(`🔧 ${toolName} (approved)`);
+        result = await executeWorkspaceTool(toolName, args);
+      }
+    } else {
+      h.onStep?.(`🔧 ${toolName}`);
+      result = await executeWorkspaceTool(toolName, args);
+    }
+
+    try {
+      await fetch(`${base}/api/pilot/workspace/tool-result`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ callId, ok: result.ok, data: result.data, error: result.error }),
+      });
+    } catch {
+      // The stream is gone; the server-side call will time out and fail closed on its own.
+    }
   }
 
   public async streamChat(message: string, context: ChatRequestContext | undefined, h: StreamHandlers, model?: string, history?: ChatTurn[], signal?: AbortSignal, workspaceId?: string): Promise<void> {
