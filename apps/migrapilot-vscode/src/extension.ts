@@ -77,7 +77,22 @@ export function activate(context: vscode.ExtensionContext): MigraPilotApi {
   /* Degrade, never crash. VS Code always supplies workspaceState, but an extension that
    * FAILS TO ACTIVATE is far worse than one that forgets: losing history is an
    * inconvenience, losing the assistant is an outage. */
-  const memento = context.workspaceState as vscode.Memento | undefined;
+  /* THE BUG THE GUI FOUND (I3): `workspaceState` only persists when a FOLDER is open.
+   * VS Code keys workspace storage to a folder; with an empty workspace it is
+   * window-scoped and thrown away. The operator's dev host had the panel open but no
+   * folder, so the conversation had nowhere to live — the id was written, the window
+   * reloaded, and it was simply gone. Verified on disk: 37 workspace databases exist and
+   * hold other MigraPilot keys, and `migrapilot.activeConversationId` is in NONE of them.
+   *
+   * Every test missed it: the unit test used a fake memento, and the integration harness
+   * runs VS Code with in-memory storage. Only a human with no folder open could see it.
+   *
+   * So: use workspaceState when there IS a folder (a thread belongs to its project), and
+   * fall back to globalState when there is not — forgetting is not an acceptable default. */
+  const hasFolder = (vscode.workspace.workspaceFolders?.length ?? 0) > 0;
+  const memento: vscode.Memento | undefined = hasFolder
+    ? (context.workspaceState as vscode.Memento | undefined)
+    : (context.globalState as vscode.Memento | undefined);
   let conversationId: string | undefined = memento?.get<string>(CONVO_KEY);
   /** Pending persistence, so a caller (and a test) can await the write actually landing. */
   let convoWrite: Thenable<void> | undefined;
@@ -171,6 +186,15 @@ export function activate(context: vscode.ExtensionContext): MigraPilotApi {
   if (conversationId) {
     chat.stepAssistant(chat.beginAssistant(), `↻ Continuing your previous conversation (${conversationId.slice(0, 10)}…)`);
   }
+  /* No folder open is not a small thing: MigraPilot cannot read your files, cannot run your
+   * tests, and (before this fix) could not even remember the conversation. It used to look
+   * like a perfectly healthy chat panel. Say it out loud. */
+  if (!hasFolder) {
+    chat.stepAssistant(
+      chat.beginAssistant(),
+      "⚠️ No folder is open. MigraPilot can't read your files or run your tests until you open one (File → Open Folder). Your conversation will still be remembered.",
+    );
+  }
 
   const status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
   status.text = "$(comment-discussion) MigraPilot";
@@ -190,7 +214,8 @@ export function activate(context: vscode.ExtensionContext): MigraPilotApi {
       const msg = [
         `active (in memory): ${conversationId ?? "— none —"}`,
         `persisted (workspaceState): ${persisted ?? "— none —"}`,
-        `workspaceState available: ${memento ? "yes" : "NO"}`,
+        `store: ${hasFolder ? "workspaceState (folder open)" : "globalState (NO FOLDER OPEN)"}`,
+        `folder open: ${hasFolder ? "yes" : "NO — MigraPilot cannot read files or run tests"}`,
         `these must MATCH, and must survive a window reload.`,
       ].join("\n");
       const COPY = "Copy";
