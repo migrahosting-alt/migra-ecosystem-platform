@@ -5,6 +5,7 @@ import { classifyContextScope } from "./contextScope";
 import { ChatPanelViewProvider, type ProposalAction } from "./chatPanelView";
 import { PilotClient } from "./pilotClient";
 import { registerProposedEdits } from "./proposedEdits/register";
+import { ApprovalController } from "./approvals/controller";
 import type { WorkspaceContext } from "./types";
 import { applyPhaseToPlan, type ExecutionPlan } from "./planStream";
 import { ConversationsProvider } from "./conversationsView";
@@ -165,6 +166,14 @@ export function activate(context: vscode.ExtensionContext): MigraPilotApi {
       const cmd = proposalCommandFor(action);
       if (cmd) vscode.commands.executeCommand(cmd, id);
     },
+    /* Phase D — Approve runs the action EXACTLY ONCE, server-side, against the exact call that
+     * was captured when approval was requested. The model is not consulted again. */
+    onApprovalAction: (action, id) => { void approvals.handle(action, id); },
+  });
+
+  const approvals = new ApprovalController({
+    baseUrl: () => client.baseUrl(),
+    sink: { status: (id, status, detail) => chat.approvalStatus(id, status, detail) },
   });
 
   /* ── voice capture (external browser — VS Code webviews can't use the mic) ── */
@@ -402,6 +411,10 @@ export function activate(context: vscode.ExtensionContext): MigraPilotApi {
         livePlan = applyPhaseToPlan(livePlan, update);
         chat.planPhase(livePlan);
       },
+      /* Phase D — a live mutation is waiting for a human. Render the EXACT action: the tool, the
+       * real arguments, the tenant, and whether this is live. Before this, the operator got
+       * "⚠️ Approval required (enable live execution to allow)" and nothing to click. */
+      onApprovalRequest: (card) => chat.approvalCard(card),
       onProposal: (card) => chat.proposalCard({
         proposalId: card.proposalId, title: card.title, model: card.model,
         filesAffected: card.filesAffected, linesAdded: card.linesAdded, linesRemoved: card.linesRemoved,

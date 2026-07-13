@@ -8,6 +8,7 @@
 import { PilotClient, StreamHandlers, ChatTurn, ChatRequestContext, ProposalCardData } from "../../src/pilotClient";
 import { __setConfig, __resetConfig } from "./vscodeMock";
 import type { ExecutionPlan, PhaseUpdate } from "../../src/planStream";
+import type { ApprovalCardData } from "../../src/pilotClient";
 
 export interface TranscriptEvent {
   kind: "delta" | "step" | "done" | "error" | "aborted";
@@ -17,6 +18,8 @@ export interface TranscriptEvent {
 export class Transcript {
   public readonly events: TranscriptEvent[] = [];
   public readonly proposals: ProposalCardData[] = [];
+  /** Phase D — approval cards: a live mutation waiting for a human. */
+  public readonly approvals: ApprovalCardData[] = [];
   public readonly plans: ExecutionPlan[] = [];
   public readonly phases: PhaseUpdate[] = [];
   public get deltas(): string[] { return this.events.filter((e) => e.kind === "delta").map((e) => e.value!); }
@@ -30,6 +33,7 @@ export class Transcript {
       onDelta: (t) => this.events.push({ kind: "delta", value: t }),
       onStep: (t) => this.events.push({ kind: "step", value: t }),
       onProposal: (card) => this.proposals.push(card),
+      onApprovalRequest: (card) => this.approvals.push(card),
       onPlan: (plan) => this.plans.push(plan),
       onPhase: (update) => this.phases.push(update),
       onDone: (t) => this.events.push({ kind: "done", value: t }),

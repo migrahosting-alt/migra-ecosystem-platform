@@ -33,6 +33,35 @@ describe("streaming, tool/usage events, errors, malformed frames (7-9, 11, 30)",
     expect(t.fullText).toBe("ABCD");
   });
 
+  /**
+   * Phase D. Before this, a live mutation ended the turn with a message and no way to proceed.
+   * The card is the whole feature: it must carry the EXACT action — tool, real args, tenant, and
+   * whether this is LIVE — because that is what the operator is consenting to.
+   */
+  it("Phase D: an approval_request renders a card carrying the EXACT action", async () => {
+    server.respondWith({
+      frames: [
+        { event: "approval_request", data: {
+            pendingActionId: "pa-1", approvalId: "ap-1", toolName: "dns.deleteRecord",
+            summary: "Delete record: example.com — THIS CANNOT BE UNDONE",
+            args: { tenantId: "t1", domain: "example.com", type: "A" },
+            mode: "live", tenantScope: "t1", expiresAt: "2030-01-01T00:00:00.000Z",
+        } },
+        { event: "done", data: {} },
+      ],
+    });
+    const c = makeClient({ "migrapilot.pilotApiUrl": base });
+    const t = await runChat(c, "delete it");
+
+    expect(t.approvals).toHaveLength(1);
+    const card = t.approvals[0]!;
+    expect(card.pendingActionId).toBe("pa-1");
+    expect(card.toolName).toBe("dns.deleteRecord");
+    expect(card.mode).toBe("live");                       // never silently a dry run
+    expect(card.summary).toMatch(/CANNOT BE UNDONE/);     // destructive, said out loud
+    expect(card.args).toEqual({ tenantId: "t1", domain: "example.com", type: "A" }); // the REAL args
+  });
+
   it("S8: tool-state events render, including an approval-required tool", async () => {
     server.respondWith({
       frames: [
@@ -45,7 +74,11 @@ describe("streaming, tool/usage events, errors, malformed frames (7-9, 11, 30)",
     const c = makeClient({ "migrapilot.pilotApiUrl": base });
     const t = await runChat(c, "do it");
     expect(t.steps.some((s) => s.includes("test.searchWorkspace") && s.includes("running"))).toBe(true);
-    expect(t.steps.some((s) => s.includes("Approval required") && s.includes("test.liveMutation"))).toBe(true);
+    /* The step must still name the tool that needs approval. It used to read "Approval required
+     * … (enable live execution to allow)" — a dead end, with nothing to click. It now points at
+     * the approval CARD, which carries the exact action and the buttons. The intent of this
+     * assertion is unchanged; only the wording it pinned was the defect. */
+    expect(t.steps.some((s) => /approval/i.test(s) && s.includes("test.liveMutation"))).toBe(true);
   });
 
   it("S9: usage metadata frame does not corrupt the stream (captured, non-fatal)", async () => {
