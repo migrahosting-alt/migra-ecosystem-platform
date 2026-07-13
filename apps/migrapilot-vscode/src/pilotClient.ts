@@ -238,7 +238,17 @@ export class PilotClient {
     const base = this.baseUrl();
     if (!base) { h.onDone("⚙️ No pilot-api URL configured. Set `migrapilot.pilotApiUrl`."); return; }
     if (signal?.aborted) { h.onAborted?.(); return; }
-    const body: Record<string, unknown> = { message, dryRun: true };
+    /* Dry-run is the default and stays the default.
+     *
+     * It was also HARDCODED, which made the entire Phase D approval path unreachable: the server
+     * only asks for approval on a live mutation, so with dryRun pinned true the approval card
+     * could never fire and the feature would have been dead code shipped as a capability.
+     *
+     * Turning `migrapilot.execution.live` on does NOT mean "just do it". It means a mutating tool
+     * STOPS and asks: the operator gets a card with the exact action and nothing runs until they
+     * approve it, once. Off by default. */
+    const live = this.cfg().get<boolean>("execution.live", false) === true;
+    const body: Record<string, unknown> = { message, dryRun: !live };
     // D.1 — continue the SAME conversation. Omitting this is what made every turn a new
     // thread; the server then had no history to persist against.
     if (conversationId) body.conversationId = conversationId;
