@@ -23,21 +23,19 @@ async function createVoiceNumber(formData: FormData) {
     redirect(`/console/voice/new?error=${encodeURIComponent("Area code must be 3 digits")}`);
   }
 
-  try {
-    // Queue the request via provisioning_tasks; a worker calls the upstream provider
-    // and then INSERTs into business_phone_numbers on success.
-    const trackingId = randomUUID();
-    await panelExec(
-      `INSERT INTO provisioning_tasks (id, "tenantId", "serviceInstanceId", type, status, "idempotencyKey", "createdAt")
-       VALUES ($1, $2, $3, 'voice.number.purchase', 'queued', $4, NOW())`,
-      [randomUUID(), tenantId, trackingId, randomUUID()],
-    );
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : "create_failed";
-    redirect(`/console/voice/new?error=${encodeURIComponent(msg)}`);
-  }
-
-  redirect(`/console/voice`);
+  // DISABLED until `voice.number.purchase` exists in the operation contract.
+  //
+  // This INSERTed a provisioning_tasks row that nothing consumes, then redirected to
+  // /console/voice as success. It also passed a freshly generated randomUUID() as the
+  // "serviceInstanceId" — an id referencing no service instance at all — so even a
+  // working worker could not have resolved a target.
+  //
+  // Purchasing a number is a paid, irreversible upstream action. It must not be faked.
+  redirect(
+    `/console/voice/new?error=${encodeURIComponent(
+      "Phone number provisioning is temporarily unavailable from the Control Center. No number was ordered. (The previous flow reported success but never contacted the provider.)",
+    )}`,
+  );
 }
 
 export default async function NewVoiceNumberPage({

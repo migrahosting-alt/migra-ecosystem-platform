@@ -20,27 +20,19 @@ async function createHostingAccount(formData: FormData) {
   }
 
   const id = randomUUID();
-  try {
-    // 1. Create the website row in pending state
-    await panelExec(
-      `INSERT INTO websites (id, "tenantId", "primaryDomain", status, "createdAt", "updatedAt")
-       VALUES ($1, $2, $3, 'pending', NOW(), NOW())`,
-      [id, tenantId, primaryDomain],
-    );
-
-    // 2. Queue a provisioning_task — backend workers pick this up to actually
-    //    allocate a cloud_pod, set up nginx vhost, issue SSL cert, etc.
-    await panelExec(
-      `INSERT INTO provisioning_tasks (id, "tenantId", "serviceInstanceId", type, status, "idempotencyKey", "createdAt")
-       VALUES ($1, $2, $3, 'hosting.provision', 'queued', $4, NOW())`,
-      [randomUUID(), tenantId, id, randomUUID()],
-    );
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : "create_failed";
-    redirect(`/console/hosting/new?error=${encodeURIComponent(msg)}`);
-  }
-
-  redirect(`/console/hosting`);
+  // DISABLED until `hosting.create` exists in the operation contract.
+  //
+  // This used to create a `websites` row in 'pending' and then INSERT a
+  // provisioning_tasks row that nothing consumes. The site was therefore created and
+  // then stranded in 'pending' forever, while the UI redirected as success.
+  //
+  // The guard runs BEFORE any write: creating a website record we cannot provision is
+  // worse than refusing, because it leaves a permanently pending site behind.
+  redirect(
+    `/console/hosting/new?error=${encodeURIComponent(
+      "Hosting provisioning is temporarily unavailable from the Control Center. No site was created. (The previous flow reported success but never provisioned anything.)",
+    )}`,
+  );
 }
 
 export default async function NewHostingPage({
