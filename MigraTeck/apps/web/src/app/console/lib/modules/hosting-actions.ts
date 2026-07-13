@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import { auditLog } from "../audit";
 import { panelExec, panelQuery } from "../db";
+import { provisioningCommandUnavailable } from "./provisioning";
 
 export const AVAILABLE_HOSTING_RUNTIMES = [
   "node-18",
@@ -30,25 +31,21 @@ type QueueProvisioningTaskInput = {
   payload?: Record<string, unknown>;
 };
 
-const queueProvisioningTask = async ({ tenantId, websiteId, type, payload }: QueueProvisioningTaskInput) => {
-  const taskId = randomUUID();
-  const idempotencyKey = randomUUID();
-
-  if (payload) {
-    await panelExec(
-      `INSERT INTO provisioning_tasks (id, "tenantId", "serviceInstanceId", type, status, "idempotencyKey", "createdAt", "payloadJson")
-       VALUES ($1, $2, $3, $4, 'queued', $5, NOW(), $6::jsonb)`,
-      [taskId, tenantId, websiteId, type, idempotencyKey, JSON.stringify(payload)],
-    );
-  } else {
-    await panelExec(
-      `INSERT INTO provisioning_tasks (id, "tenantId", "serviceInstanceId", type, status, "idempotencyKey", "createdAt")
-       VALUES ($1, $2, $3, $4, 'queued', $5, NOW())`,
-      [taskId, tenantId, websiteId, type, idempotencyKey],
-    );
-  }
-
-  return { taskId, idempotencyKey };
+/**
+ * DISABLED — this was inert, and doubly broken.
+ *
+ * It INSERTed into `provisioning_tasks`, which nothing consumes: the provisioning
+ * worker is a BullMQ worker woken only by a Redis job, and the console has no Redis
+ * client. On top of that, the payload branch wrote a `"payloadJson"` column that does
+ * not exist on the table, and it passed a `websiteId` into `"serviceInstanceId"`,
+ * which expects a `service_instances` id.
+ *
+ * So these controls reported success and did nothing. Rather than keep the inert
+ * implementation, callers now fail loudly — BEFORE any database mutation — until the
+ * website-scoped commands are defined in the operation contract.
+ */
+const queueProvisioningTask = async ({ type }: QueueProvisioningTaskInput): Promise<never> => {
+  return provisioningCommandUnavailable(type);
 };
 
 const logWebsiteAudit = async (
