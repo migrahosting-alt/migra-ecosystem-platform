@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import Link from "next/link";
+import { Plus, Settings } from "lucide-react";
 
 import { getSession } from "../lib/auth";
 import { loadAllClients, loadDistinctClientStatuses } from "../lib/modules/clients";
@@ -96,9 +97,17 @@ export default async function ClientsPage({
               header: "",
               align: "right" as const,
               render: (c) => (
-                <Link href={`/console/clients/${c.id}`} className="rounded-md border border-white/10 bg-white/5 px-2.5 py-1 text-[10px] font-medium text-slate-300 transition hover:bg-white/10 hover:text-white">
-                  View
-                </Link>
+                <div className="inline-flex items-center gap-1">
+                  <Link href={`/console/clients/${c.id}`} className="rounded-md border border-white/10 bg-white/5 px-2.5 py-1 text-[10px] font-medium text-slate-300 transition hover:bg-white/10 hover:text-white">
+                    View
+                  </Link>
+                  <Link href={`/console/clients/${c.id}/add-service`} className="rounded-md border border-fuchsia-400/30 bg-fuchsia-500/10 px-2 py-1 text-[10px] font-medium text-fuchsia-200 transition hover:bg-fuchsia-500/20">
+                    <Plus className="inline h-3 w-3" /> Service
+                  </Link>
+                  <Link href={`/console/clients/${c.id}/edit`} className="rounded-md border border-white/10 bg-white/5 px-2 py-1 text-[10px] font-medium text-slate-300 transition hover:bg-white/10 hover:text-white">
+                    <Settings className="inline h-3 w-3" />
+                  </Link>
+                </div>
               ),
             },
           ]}

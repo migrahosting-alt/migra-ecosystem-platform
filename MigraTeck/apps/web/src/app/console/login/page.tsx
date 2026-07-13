@@ -24,14 +24,17 @@ export default async function ConsoleLoginPage({
         <div className="mb-6">
           <div className="mx-auto flex max-w-[240px] flex-col items-center">
             <Image
-              src="/brands/products/migrapanel-control-center.png"
+              src="/brands/products/migrapanel-official.png"
               alt="MigraPanel"
-              width={240}
-              height={180}
+              width={132}
+              height={132}
               priority
-              className="h-auto w-full object-contain"
+              className="h-auto w-[132px] object-contain"
             />
-            <p className="mt-3 text-[10px] uppercase tracking-[0.32em] text-slate-500">Control Center</p>
+            <div className="mt-4 text-center">
+              <p className="text-2xl font-semibold tracking-tight text-white">MigraPanel</p>
+              <p className="mt-2 text-[10px] uppercase tracking-[0.32em] text-slate-500">Control Center</p>
+            </div>
           </div>
         </div>
 

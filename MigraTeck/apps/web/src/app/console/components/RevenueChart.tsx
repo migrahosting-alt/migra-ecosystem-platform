@@ -1,3 +1,5 @@
+import Link from "next/link";
+
 export type RevenueDay = {
   date: string; // YYYY-MM-DD
   revenue: number;
@@ -54,11 +56,13 @@ export const RevenueChart = ({ data }: { data: RevenueData }) => {
     <section className="rounded-2xl border border-white/10 bg-white/[0.03] p-5 shadow-xl shadow-slate-950/30 backdrop-blur">
       <div className="mb-4 flex items-center justify-between">
         <h2 className="text-base font-semibold text-white">Revenue, Billing &amp; Collections</h2>
-        <select className="rounded-md border border-white/10 bg-white/5 px-2 py-1 text-[11px] text-slate-300">
-          <option>This Month</option>
-          <option>Last Month</option>
-          <option>This Quarter</option>
-        </select>
+        <Link
+          href="/console/billing"
+          prefetch
+          className="text-[11px] font-medium text-fuchsia-300 hover:text-fuchsia-200"
+        >
+          Open Billing
+        </Link>
       </div>
 
       <div className="grid grid-cols-2 gap-3 md:grid-cols-5">

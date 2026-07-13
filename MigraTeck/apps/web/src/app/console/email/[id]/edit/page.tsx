@@ -1,6 +1,7 @@
 import { redirect, notFound } from "next/navigation";
 import { getSession } from "../../../lib/auth";
 import { panelExec, panelQuery } from "../../../lib/db";
+import { ensureMailboxMaildir, hashMailboxPassword } from "../../../lib/mailbox-provisioning";
 import { ConsolePageShell } from "../../../components/ConsolePageShell";
 import { FormShell, Field } from "../../../components/FormShell";
 
@@ -10,9 +11,31 @@ async function updateMailbox(formData: FormData) {
   "use server";
   const id = String(formData.get("id") || "");
   const status = String(formData.get("status") || "active");
+  const password = String(formData.get("password") || "").trim();
   if (!id) redirect("/console/email");
+
+  const rows = await panelQuery<{ address: string; passwordhash: string | null }>(
+    `SELECT address, passwordhash FROM mailboxes WHERE id = $1 LIMIT 1`,
+    [id],
+  );
+  const mailbox = rows[0];
+  if (!mailbox) redirect("/console/email");
+
+  if (status === "active" && !password && !mailbox.passwordhash) {
+    redirect(`/console/email/${id}/edit?error=${encodeURIComponent("Set a password before activating this mailbox")}`);
+  }
+
   try {
-    await panelExec(`UPDATE mailboxes SET status = $2 WHERE id = $1`, [id, status]);
+    if (password) {
+      const passwordHash = await hashMailboxPassword(password);
+      await panelExec(`UPDATE mailboxes SET status = $2, passwordhash = $3 WHERE id = $1`, [id, status, passwordHash]);
+      await ensureMailboxMaildir(mailbox.address);
+    } else {
+      await panelExec(`UPDATE mailboxes SET status = $2 WHERE id = $1`, [id, status]);
+      if (status === "active") {
+        await ensureMailboxMaildir(mailbox.address);
+      }
+    }
   } catch (err) {
     redirect(`/console/email/${id}/edit?error=${encodeURIComponent(err instanceof Error ? err.message : "update_failed")}`);
   }
@@ -54,7 +77,7 @@ export default async function EditMailboxPage({
         backHref="/console/email"
         backLabel="Back to Email"
         title={m.address}
-        description="Mailbox address is immutable. Edit status only — password changes happen on mail-core via doveadm."
+        description="Mailbox address is immutable. Update status here, and optionally rotate the mailbox password."
         error={sp.error || null}
         action={updateMailbox}
         submitLabel="Save Changes"
@@ -71,6 +94,12 @@ export default async function EditMailboxPage({
             { value: "suspended", label: "Suspended (no auth, mail still delivered)" },
             { value: "disabled", label: "Disabled (auth fails, mail rejected)" },
           ]}
+        />
+        <Field
+          label="New Password"
+          name="password"
+          type="password"
+          hint="Optional. Enter a new password to rotate credentials and ensure the Maildir exists on mail-core."
         />
       </FormShell>
 

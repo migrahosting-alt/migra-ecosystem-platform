@@ -17,7 +17,7 @@ export const loadHostingKpis = async (): Promise<HostingKpis> => {
   const [sites, active, ssl, deploys, tasks] = await Promise.all([
     panelQuery<{ count: string }>(`SELECT COUNT(*)::int::text AS count FROM websites WHERE COALESCE(status, '') NOT IN ('deleted')`),
     panelQuery<{ count: string }>(`SELECT COUNT(*)::int::text AS count FROM websites WHERE status = 'active'`),
-    panelQuery<{ count: string }>(`SELECT COUNT(*)::int::text AS count FROM ssl_certificates WHERE expires_at IS NOT NULL AND expires_at < NOW() + INTERVAL '30 days' AND expires_at > NOW()`),
+    panelQuery<{ count: string }>(`SELECT COUNT(*)::int::text AS count FROM ssl_certificates WHERE "expiresAt" IS NOT NULL AND "expiresAt" < NOW() + INTERVAL '30 days' AND "expiresAt" > NOW()`),
     panelQuery<{ count: string }>(`SELECT COUNT(*)::int::text AS count FROM deployments WHERE created_at >= NOW() - INTERVAL '7 days'`),
     panelQuery<{ count: string }>(`SELECT COUNT(*)::int::text AS count FROM provisioning_tasks WHERE type LIKE 'hosting.%' AND status NOT IN ('completed','succeeded')`),
   ]);

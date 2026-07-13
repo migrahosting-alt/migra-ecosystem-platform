@@ -74,8 +74,18 @@ export {
 export type { TenantStatus, SubscriptionStatus, OrderStatus } from "./status";
 
 // Cross-module helpers
-export { enqueueProvisioningTask } from "./provisioning";
-export type { EnqueueProvisioningTask } from "./provisioning";
+export {
+  enqueueProvisioningTask,
+  submitProvisioningOperation,
+  getOperation,
+  isProvisioningBoundaryConfigured,
+} from "./provisioning";
+export type {
+  LegacyEnqueueInput,
+  SubmitOperationInput,
+  SubmitOperationResult,
+  OperationStatus,
+} from "./provisioning";
 
 export { withAuditedAction } from "./action-runner";
 export type {

@@ -34,11 +34,13 @@ async function createCampaign(formData: FormData) {
         [id, tenantId, listingId, postType, title, body || null],
       );
     } else {
-      // Other campaign types queue a provisioning task for the marketing worker
-      await panelExec(
-        `INSERT INTO provisioning_tasks (id, "tenantId", "serviceInstanceId", type, status, "idempotencyKey", "createdAt")
-         VALUES ($1, $2, $3, 'marketing.campaign.launch', 'queued', $4, NOW())`,
-        [randomUUID(), tenantId, id, randomUUID()],
+      // DISABLED until `marketing.provision` exists in the operation contract.
+      //
+      // This INSERTed a provisioning_tasks row that nothing consumes, then redirected
+      // as success — the campaign was never launched. The gbp_post branch above is a
+      // real draft record and is unaffected.
+      throw new Error(
+        "Campaign launch is temporarily unavailable from the Control Center. Nothing was launched. (The previous flow reported success but never queued any work.)",
       );
     }
   } catch (err) {

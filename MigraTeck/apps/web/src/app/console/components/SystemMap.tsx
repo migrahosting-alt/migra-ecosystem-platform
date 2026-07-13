@@ -13,6 +13,7 @@
  *                      at x = 120, 300, 500, 680 (180 px apart, no overlap)
  */
 
+import Link from "next/link";
 import Image from "next/image";
 
 export type SystemMapNodes = {
@@ -41,6 +42,18 @@ const CARD_H = 60;
 
 // Bottom row positions (180 px apart — no overlap with card width 130)
 const BOTTOM_Y = 460;
+
+const NODE_LINKS = [
+  { href: "/console/clients", label: "Clients", x: 50, y: 8 },
+  { href: "/console/domains", label: "Domains", x: 4, y: 33 },
+  { href: "/console/hosting", label: "Hosting", x: 79, y: 33 },
+  { href: "/console/email", label: "Email", x: 4, y: 58 },
+  { href: "/console/voice", label: "Voice", x: 79, y: 58 },
+  { href: "/console/intake", label: "Intake", x: 0, y: 81 },
+  { href: "/console/automation", label: "Automation", x: 24, y: 81 },
+  { href: "/console/marketing", label: "Marketing", x: 49, y: 81 },
+  { href: "/console/billing", label: "Billing", x: 74, y: 81 },
+] as const;
 
 export const SystemMap = ({ nodes }: { nodes: SystemMapNodes }) => {
   return (
@@ -108,6 +121,23 @@ export const SystemMap = ({ nodes }: { nodes: SystemMapNodes }) => {
           <p className="mt-1 text-[11px] font-semibold text-white">MigraPanel</p>
           <p className="text-[10px] text-slate-400">Core</p>
         </div>
+
+        {NODE_LINKS.map((node) => (
+          <Link
+            key={node.href}
+            href={node.href}
+            prefetch
+            aria-label={`Open ${node.label}`}
+            className="absolute block rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-fuchsia-400/60"
+            style={{
+              left: `${node.x}%`,
+              top: `${node.y}%`,
+              width: "16%",
+              height: "11.5%",
+              transform: "translate(-50%, -50%)",
+            }}
+          />
+        ))}
       </div>
     </section>
   );

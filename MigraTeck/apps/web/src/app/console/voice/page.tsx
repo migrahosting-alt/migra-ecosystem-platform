@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import Link from "next/link";
 import { getSession } from "../lib/auth";
 import { loadVoiceData } from "../lib/modules/voice";
 import { ConsolePageShell } from "../components/ConsolePageShell";
@@ -22,12 +23,12 @@ export default async function VoicePage() {
       title="Voice"
       subtitle={`${numbers.length} number(s) · ${extensions.length} extension(s) · ${ivrs.length} IVR(s)`}
       actions={
-        <a
+        <Link
           href="/console/voice/new"
           className="rounded-full bg-gradient-to-r from-rose-500 to-orange-500 px-4 py-1.5 text-xs font-semibold text-white shadow-lg shadow-rose-500/30 transition hover:shadow-rose-500/50"
         >
           + Add Number
-        </a>
+        </Link>
       }
     >
       <StatsRow

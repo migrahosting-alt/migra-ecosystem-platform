@@ -10,7 +10,27 @@ export type BillingInvoice = {
   createdAt: string | null;
   dueAt: string | null;
 };
-export type BillingPayment = { id: string; amount: number; status: string; createdAt: string | null; tenantName: string | null };
+export type BillingPayment = {
+  id: string;
+  amount: number;
+  status: string;
+  createdAt: string | null;
+  tenantName: string | null;
+  tenantId: string | null;
+  invoiceId: string | null;
+  provider: string | null;
+  providerRef: string | null;
+};
+export type BillingPaymentMethod = {
+  id: string;
+  provider: string | null;
+  type: string;
+  brand: string | null;
+  last4: string | null;
+  expMonth: number | null;
+  expYear: number | null;
+  status: string;
+};
 export type BillingSubscription = {
   id: string;
   tenantId: string | null;
@@ -21,12 +41,28 @@ export type BillingSubscription = {
   renewalRate: number | null;
 };
 
-export const loadBillingData = async () => {
+export type BillingQuery = {
+  tenantId?: string;
+};
+
+export const loadBillingData = async (query: BillingQuery = {}) => {
   if (!isPanelDbConfigured()) {
-    return { invoices: [], payments: [], subscriptions: [] };
+    return { invoices: [], payments: [], subscriptions: [], paymentMethods: [] };
   }
 
-  const [invoiceRows, paymentRows, subRows] = await Promise.all([
+  const where: string[] = [];
+  const params: Array<string> = [];
+  if (query.tenantId) {
+    params.push(query.tenantId);
+    where.push(`tenantid = $${params.length}`);
+  }
+  const invoiceWhere = where.length ? `WHERE ${where.join(" AND ")}` : "";
+  const paymentWhere = where.length ? `WHERE ${where.join(" AND ")}` : "";
+  const subWhere = where.length ? `WHERE ${where.map((clause) => clause.replaceAll("tenantid", "s.tenantid")).join(" AND ")}` : "";
+
+  const paymentMethodWhere = query.tenantId ? `WHERE pm.tenantid::text = $1` : "";
+
+  const [invoiceRows, paymentRows, subRows, paymentMethodRows] = await Promise.all([
     panelQuery<{
       id: string; status: string; total: string; currency: string | null;
       tenantid: string | null; tenantname: string | null; createdat: string | null; dueat: string | null;
@@ -36,16 +72,24 @@ export const loadBillingData = async () => {
               i.createdat::text AS createdat, i.dueat::text AS dueat
          FROM invoices i
          LEFT JOIN tenants t ON t.id = i.tenantid
+        ${invoiceWhere}
         ORDER BY i.createdat DESC NULLS LAST
         LIMIT 50`,
+      params,
     ),
-    panelQuery<{ id: string; amount: string; status: string; createdat: string | null; tenantname: string | null }>(
+    panelQuery<{
+      id: string; amount: string; status: string; createdat: string | null; tenantname: string | null;
+      tenantid: string | null; invoiceid: string | null; provider: string | null; providerref: string | null;
+    }>(
       `SELECT p.id, COALESCE(p.amount::text, '0') AS amount, COALESCE(p.status, 'unknown') AS status,
-              p.createdat::text AS createdat, t.name AS tenantname
+              p.createdat::text AS createdat, t.name AS tenantname, p.tenantid, p.invoiceid,
+              p.provider, p.providerref
          FROM payments p
          LEFT JOIN tenants t ON t.id = p.tenantid
+        ${paymentWhere.replaceAll("tenantid", "p.tenantid")}
         ORDER BY p.createdat DESC NULLS LAST
         LIMIT 50`,
+      params,
     ),
     panelQuery<{
       id: string; tenantid: string | null; tenantname: string | null;
@@ -57,8 +101,27 @@ export const loadBillingData = async () => {
               s.renewal_rate::text AS renewalrate
          FROM subscriptions s
          LEFT JOIN tenants t ON t.id = s.tenantid
+        ${subWhere}
         ORDER BY s.createdat DESC NULLS LAST
         LIMIT 50`,
+      params,
+    ),
+    panelQuery<{
+      id: string;
+      provider: string | null;
+      type: string;
+      brand: string | null;
+      last4: string | null;
+      expmonth: number | null;
+      expyear: number | null;
+      status: string;
+    }>(
+      `SELECT pm.id, pm.provider, pm.type, pm.brand, pm.last4, pm.expmonth, pm.expyear, pm.status
+         FROM payment_methods pm
+         ${paymentMethodWhere}
+        ORDER BY pm.createdat DESC NULLS LAST
+        LIMIT 20`,
+      query.tenantId ? [query.tenantId] : [],
     ),
   ]);
 
@@ -67,7 +130,15 @@ export const loadBillingData = async () => {
     tenantId: r.tenantid, tenantName: r.tenantname, createdAt: r.createdat, dueAt: r.dueat,
   }));
   const payments: BillingPayment[] = paymentRows.map((r) => ({
-    id: r.id, amount: Number(r.amount) || 0, status: r.status, createdAt: r.createdat, tenantName: r.tenantname,
+    id: r.id,
+    amount: Number(r.amount) || 0,
+    status: r.status,
+    createdAt: r.createdat,
+    tenantName: r.tenantname,
+    tenantId: r.tenantid,
+    invoiceId: r.invoiceid,
+    provider: r.provider,
+    providerRef: r.providerref,
   }));
   const subscriptions: BillingSubscription[] = subRows.map((r) => ({
     id: r.id, tenantId: r.tenantid, tenantName: r.tenantname, status: r.status,
@@ -75,5 +146,15 @@ export const loadBillingData = async () => {
     originalRate: r.originalrate == null ? null : Number(r.originalrate),
     renewalRate: r.renewalrate == null ? null : Number(r.renewalrate),
   }));
-  return { invoices, payments, subscriptions };
+  const paymentMethods: BillingPaymentMethod[] = paymentMethodRows.map((r) => ({
+    id: r.id,
+    provider: r.provider,
+    type: r.type,
+    brand: r.brand,
+    last4: r.last4,
+    expMonth: r.expmonth,
+    expYear: r.expyear,
+    status: r.status,
+  }));
+  return { invoices, payments, subscriptions, paymentMethods };
 };

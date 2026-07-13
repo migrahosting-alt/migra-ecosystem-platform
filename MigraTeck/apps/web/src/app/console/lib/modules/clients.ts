@@ -18,7 +18,7 @@ export type ClientDetail = {
   status: string;
   tenantType: string;
   createdAt: string | null;
-  domains: ReadonlyArray<{ id: string; domain: string; status: string }>;
+  domains: ReadonlyArray<{ id: string; domain: string; status: string; autorenew: boolean }>;
   subscriptions: ReadonlyArray<{
     id: string;
     status: string;
@@ -28,7 +28,7 @@ export type ClientDetail = {
     createdAt: string | null;
   }>;
   invoices: ReadonlyArray<{ id: string; status: string; total: number; createdAt: string | null }>;
-  mailboxes: ReadonlyArray<{ id: string; address: string; status: string }>;
+  mailboxes: ReadonlyArray<{ id: string; address: string; status: string; hasPassword: boolean }>;
   websites: ReadonlyArray<{ id: string; domain: string | null; status: string }>;
 };
 
@@ -150,8 +150,9 @@ export const loadClientDetail = async (id: string): Promise<ClientDetail | null>
   const base = baseRows[0]!;
 
   const [domains, subs, invoices, mailboxes, websites] = await Promise.all([
-    panelQuery<{ id: string; domain: string; status: string }>(
-      `SELECT id, domain, status FROM domains WHERE "tenantId" = $1 ORDER BY "createdAt" DESC`,
+    panelQuery<{ id: string; domain: string; status: string; autorenew: boolean | null }>(
+      `SELECT id, domain, status, COALESCE(autorenew, FALSE) AS autorenew
+         FROM domains WHERE "tenantId" = $1 ORDER BY "createdAt" DESC`,
       [id],
     ),
     panelQuery<{
@@ -174,8 +175,9 @@ export const loadClientDetail = async (id: string): Promise<ClientDetail | null>
          FROM invoices WHERE tenantid = $1 ORDER BY createdat DESC LIMIT 20`,
       [id],
     ),
-    panelQuery<{ id: string; address: string; status: string }>(
-      `SELECT id, address, COALESCE(status, 'active') AS status
+    panelQuery<{ id: string; address: string; status: string; haspassword: boolean }>(
+      `SELECT id, address, COALESCE(status, 'active') AS status,
+              CASE WHEN passwordhash IS NOT NULL AND LENGTH(TRIM(passwordhash)) > 0 THEN TRUE ELSE FALSE END AS haspassword
          FROM mailboxes WHERE tenantid = $1`,
       [id],
     ),
@@ -192,7 +194,12 @@ export const loadClientDetail = async (id: string): Promise<ClientDetail | null>
     status: base.status,
     tenantType: base.tenanttype,
     createdAt: base.createdat,
-    domains,
+    domains: domains.map((domain) => ({
+      id: domain.id,
+      domain: domain.domain,
+      status: domain.status,
+      autorenew: !!domain.autorenew,
+    })),
     subscriptions: subs.map((s) => ({
       id: s.id,
       status: s.status,
@@ -207,7 +214,12 @@ export const loadClientDetail = async (id: string): Promise<ClientDetail | null>
       total: Number(i.total) || 0,
       createdAt: i.createdat,
     })),
-    mailboxes,
+    mailboxes: mailboxes.map((mailbox) => ({
+      id: mailbox.id,
+      address: mailbox.address,
+      status: mailbox.status,
+      hasPassword: mailbox.haspassword,
+    })),
     websites,
   };
 };

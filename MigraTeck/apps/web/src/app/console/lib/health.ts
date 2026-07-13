@@ -3,10 +3,11 @@
  *
  * These are run server-side from the Command Center's API route. We probe a
  * known health endpoint or root URL per service and measure response. Uptime
- * percentages come from the panel DB `module_health_status` table (rolling
- * 30-day) if present; otherwise we fall back to the live probe's pass/fail.
+ * percentages come from the panel DB `integration_health_checks` table when
+ * recent checks exist; otherwise we fall back to the live probe's pass/fail.
  */
 
+import { unstable_cache } from "next/cache";
 import { panelQuery, isPanelDbConfigured } from "./db";
 
 export type ServiceHealth = {
@@ -16,6 +17,7 @@ export type ServiceHealth = {
   uptime: number | null; // percentage 0..100
   status: "ok" | "degraded" | "down" | "unknown";
   endpoint: string;
+  href: string;
   lastCheckMs?: number;
 };
 
@@ -24,15 +26,16 @@ const SERVICES: Array<{
   shortCode: string;
   label: string;
   endpoint: string;
+  href: string;
 }> = [
-  { id: "migrateck-core", shortCode: "MT", label: "MigraTeck Core", endpoint: "https://migrateck.com/api/health" },
-  { id: "hosting", shortCode: "MH", label: "Hosting (MH)", endpoint: "https://migrahosting.com" },
-  { id: "panel", shortCode: "MP", label: "MigraPanel (MP)", endpoint: "https://panel.migrahosting.com" },
-  { id: "voice", shortCode: "MV", label: "Voice Services (MV)", endpoint: "https://voice.migrahosting.com" },
-  { id: "email", shortCode: "MM", label: "Email Services (MM)", endpoint: "https://mail.migrahosting.com" },
-  { id: "intake", shortCode: "MI", label: "Intake (MI)", endpoint: "https://intake.migrahosting.com" },
-  { id: "marketing", shortCode: "MK", label: "Marketing (MK)", endpoint: "https://marketing.migrahosting.com" },
-  { id: "automation", shortCode: "AU", label: "Automation (AU)", endpoint: "https://migrateck.com" },
+  { id: "migrateck-core", shortCode: "MT", label: "MigraTeck Core", endpoint: "https://migrateck.com/api/health", href: "/console/ecosystem" },
+  { id: "hosting", shortCode: "MH", label: "Hosting (MH)", endpoint: "https://migrahosting.com", href: "/console/hosting" },
+  { id: "panel", shortCode: "MP", label: "MigraPanel (MP)", endpoint: "https://panel.migrahosting.com", href: "/console/clients" },
+  { id: "voice", shortCode: "MV", label: "Voice Services (MV)", endpoint: "https://voice.migrahosting.com", href: "/console/voice" },
+  { id: "email", shortCode: "MM", label: "Email Services (MM)", endpoint: "https://mail.migrahosting.com", href: "/console/email" },
+  { id: "intake", shortCode: "MI", label: "Intake (MI)", endpoint: "https://intake.migrahosting.com", href: "/console/intake" },
+  { id: "marketing", shortCode: "MK", label: "Marketing (MK)", endpoint: "https://marketing.migrahosting.com", href: "/console/marketing" },
+  { id: "automation", shortCode: "AU", label: "Automation (AU)", endpoint: "https://migrateck.com", href: "/console/automation" },
 ];
 
 const probeOne = async (s: (typeof SERVICES)[number]): Promise<ServiceHealth> => {
@@ -56,6 +59,7 @@ const probeOne = async (s: (typeof SERVICES)[number]): Promise<ServiceHealth> =>
       uptime: null,
       status: ok ? "ok" : "degraded",
       endpoint: s.endpoint,
+      href: s.href,
       lastCheckMs: ms,
     };
   } catch {
@@ -66,28 +70,51 @@ const probeOne = async (s: (typeof SERVICES)[number]): Promise<ServiceHealth> =>
       uptime: null,
       status: "down",
       endpoint: s.endpoint,
+      href: s.href,
       lastCheckMs: Date.now() - start,
     };
   }
 };
 
-export const loadServiceHealth = async (): Promise<ServiceHealth[]> => {
+const loadServiceHealthUncached = async (): Promise<ServiceHealth[]> => {
   const probes = await Promise.all(SERVICES.map(probeOne));
 
-  // Merge rolling 30d uptime from DB if available.
+  // Merge the most recent integration health signal when recent checks exist.
   if (isPanelDbConfigured()) {
-    const rows = await panelQuery<{ moduleid: string; uptime: string }>(
-      `SELECT moduleid, uptime_30d AS uptime FROM module_health_status`,
+    const rows = await panelQuery<{ integrationkey: string; status: string }>(
+      `SELECT DISTINCT ON (integration_key)
+              integration_key AS integrationkey,
+              LOWER(status) AS status
+         FROM integration_health_checks
+        WHERE checked_at >= NOW() - INTERVAL '7 days'
+        ORDER BY integration_key, checked_at DESC`,
     );
-    const map = new Map(rows.map((r) => [r.moduleid, Number(r.uptime)]));
+    const map = new Map(
+      rows.map((row) => [row.integrationkey, row.status] as const),
+    );
+    const integrationKeysByService = new Map<string, string[]>([
+      ["panel", ["stripe", "powerdns"]],
+      ["email", ["mailcore"]],
+    ]);
     for (const p of probes) {
-      const v = map.get(p.id);
-      if (typeof v === "number" && Number.isFinite(v)) p.uptime = v;
+      const keys = integrationKeysByService.get(p.id) ?? [];
+      const statuses = keys
+        .map((key) => map.get(key))
+        .filter((status): status is string => Boolean(status));
+      if (statuses.length === 0) continue;
+      const healthyCount = statuses.filter((status) => status === "healthy" || status === "ok").length;
+      p.uptime = Math.round((healthyCount / statuses.length) * 100);
     }
   }
 
   return probes;
 };
+
+export const loadServiceHealth = unstable_cache(
+  loadServiceHealthUncached,
+  ["console-service-health"],
+  { revalidate: 60 },
+);
 
 export const aggregateHealth = (services: ReadonlyArray<ServiceHealth>) => {
   const allOk = services.every((s) => s.status === "ok");
