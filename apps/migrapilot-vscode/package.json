@@ -193,6 +193,11 @@
           "type": "boolean",
           "default": true,
           "description": "Run known build/test/lint commands (npm test, tsc --noEmit, eslint, read-only git) without asking, so MigraPilot can run your tests, read the failure and fix it. Anything not on that list \u2014 and anything that chains, redirects or substitutes commands \u2014 always asks. Turn this off to be prompted for every command."
+        },
+        "migrapilot.execution.live": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "**Off by default, and it should stay off unless you mean it.**\n\nWhen off, MigraPilot runs in dry-run: it can inspect, plan and propose, but no infrastructure is provisioned, no DNS is written, and nothing is deployed.\n\nWhen **on**, a mutating tool does not just run \u2014 it **stops and asks you**. You get an approval card showing the exact action (tool, real arguments, tenant, LIVE), and nothing happens until you click Approve. The approval is bound to that one action, is single-use, and is revalidated against policy at the moment it executes. It is not a session grant.\n\nCode changes are unaffected: they always go through the proposed-edit review, never this."
         }
       }
     },

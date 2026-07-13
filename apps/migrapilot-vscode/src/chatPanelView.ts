@@ -38,6 +38,8 @@ export interface ChatHandlers {
   onVoiceCapture: () => void;
   /** A proposal card button was clicked (Review Diff / Approve / Reject / Apply / Rollback). */
   onProposalAction: (action: ProposalAction, proposalId: string) => void;
+  /** Phase D: an approval card button was clicked (Approve / Reject). */
+  onApprovalAction?: (action: "approve" | "reject", pendingActionId: string) => void;
 }
 
 /**
@@ -79,6 +81,7 @@ export class ChatPanelViewProvider implements vscode.WebviewViewProvider {
         case "uploadFile": this.h.onUploadFile(String(m.name ?? "file"), String(m.kind ?? "file"), m.content, m.dataUri); return;
         case "voiceCapture": this.h.onVoiceCapture(); return;
         case "proposalAction": if (m.action && m.id) this.h.onProposalAction(String(m.action) as ProposalAction, String(m.id)); return;
+        case "approvalAction": if (m.action && m.id) this.h.onApprovalAction?.(String(m.action) as "approve" | "reject", String(m.id)); return;
       }
     });
   }
@@ -105,6 +108,10 @@ export class ChatPanelViewProvider implements vscode.WebviewViewProvider {
   public proposalCard(card: ProposalCard): void { this.post({ command: "proposalCard", card }); }
   /** Reflect the Phase C state machine on an existing proposal card. */
   public proposalStatus(id: string, status: string, detail?: string): void { this.post({ command: "proposalStatus", id, status, detail }); }
+  /** Phase D — a live mutation is waiting for a human. */
+  public approvalCard(card: unknown): void { this.post({ command: "approvalCard", card }); }
+  /** Reflect the server's pending-action state machine. Never invent an intermediate state. */
+  public approvalStatus(id: string, status: string, detail?: string): void { this.post({ command: "approvalStatus", id, status, detail }); }
   /** Render the server-authored execution plan (Phase C.6.1), before any tool runs. */
   public planCard(plan: unknown): void { this.post({ command: "planCard", plan }); }
   /** Advance the plan card as planning \u2192 execution \u2192 completion phases stream in. */
@@ -298,6 +305,70 @@ export class ChatPanelViewProvider implements vscode.WebviewViewProvider {
       });
       transcript.appendChild(wrap); transcript.scrollTop = transcript.scrollHeight;
     }
+    /* ── Phase D: the approval card ──────────────────────────────────────────────────────────
+     *
+     * The one thing a human reads before a LIVE mutation runs. It shows the action, not a
+     * paraphrase: the tool, the real arguments, the tenant, and whether this is live. The
+     * summary is written server-side by describeAction() — never by the model — and a
+     * destructive tool says so in capital letters, because a comfortable verb is how someone
+     * approves the wrong thing. */
+    function renderApprovalCard(card){
+      hideWelcome();
+      const wrap = document.createElement("div");
+      wrap.className = "ap-card"; wrap.dataset.aid = card.pendingActionId;
+      const live = card.mode === "live";
+      const destructive = /CANNOT BE UNDONE/.test(String(card.summary||""));
+      const rows = Object.keys(card.args||{}).map(function(k){
+        var v = card.args[k];
+        var s = (typeof v === "string") ? v : JSON.stringify(v);
+        return '<div class="ap-arg"><span class="ap-k">'+esc(k)+'</span><span class="ap-v">'+esc(s)+'</span></div>';
+      }).join("");
+      wrap.innerHTML =
+        '<div class="ap-title">'+(destructive ? "🛑" : "🔐")+' Approval required</div>' +
+        '<div class="ap-meta">' +
+          '<span class="ap-badge '+(live ? "ap-live" : "ap-dry")+'">'+(live ? "⚡ LIVE — this really happens" : "🧪 Dry run")+'</span>' +
+          '<span>🔧 '+esc(card.toolName)+'</span>' +
+          (card.tenantScope ? '<span>🏷 '+esc(card.tenantScope)+'</span>' : '') +
+        '</div>' +
+        (destructive ? '<div class="ap-flags"><span class="ap-flag-danger">🗑 THIS CANNOT BE UNDONE</span></div>' : '') +
+        '<div class="ap-summary">'+esc(card.summary||"")+'</div>' +
+        /* The args in full. The summary is a summary — never a substitute for what will run. */
+        '<div class="ap-args">'+rows+'</div>' +
+        '<div class="ap-actions">' +
+          '<button class="ap-btn ap-approve" data-act="approve">✅ Approve &amp; run once</button>' +
+          '<button class="ap-btn ap-reject" data-act="reject">❌ Reject</button>' +
+        '</div>' +
+        '<div class="ap-foot"><span class="ap-expire">'+expiresLabel(card.expiresAt)+'</span>' +
+          '<span class="ap-note">Single-use · runs exactly once · not a standing permission</span></div>' +
+        '<div class="ap-status" hidden></div>';
+      wrap.querySelectorAll(".ap-btn").forEach(function(b){
+        b.addEventListener("click", function(){
+          if (b.disabled) return;
+          wrap.querySelectorAll(".ap-btn").forEach(function(x){ x.disabled = true; });
+          setApprovalStatus(card.pendingActionId, b.dataset.act === "approve" ? "EXECUTING" : "REJECTED");
+          vscode.postMessage({ command:"approvalAction", action: b.dataset.act, id: card.pendingActionId });
+        });
+      });
+      transcript.appendChild(wrap); transcript.scrollTop = transcript.scrollHeight;
+    }
+    function setApprovalStatus(id, status, detail){
+      const card = transcript.querySelector('.ap-card[data-aid="'+id+'"]'); if (!card) return;
+      const st = card.querySelector(".ap-status");
+      const s = String(status||"");
+      /* A failed live mutation must LOOK failed. The most dangerous possible bug in this card is
+       * a tidy green tick over an action that did not happen — or worse, half happened. */
+      /* REFUSED and FAILED are different facts and must look different. After a refusal nothing
+       * ran and there is nothing to check. After a failure the action EXECUTED and may have
+       * partially landed on real infrastructure. Blurring the two is how an operator walks away
+       * believing nothing happened when something half did. */
+      const bad = (s === "FAILED" || s === "REJECTED" || s === "EXPIRED" || s === "CANCELLED" || s === "REFUSED" || s === "UNKNOWN");
+      const icons = { EXECUTING:"⏳", EXECUTED:"✅", FAILED:"⚠️ RAN AND FAILED —", REFUSED:"🚫 refused, nothing ran —",
+                      UNKNOWN:"❓ outcome unknown —", REJECTED:"❌", EXPIRED:"⌛", CANCELLED:"🚫", APPROVED:"👍" };
+      st.hidden = false;
+      st.className = "ap-status" + (bad ? " ap-status-bad" : "");
+      st.textContent = (icons[s] || "•") + " " + s.toLowerCase() + (detail ? " — " + detail : "");
+      if (s !== "PENDING") card.querySelectorAll(".ap-btn").forEach(function(b){ b.disabled = true; });
+    }
     function setProposalStatus(id, status, detail){
       const card = transcript.querySelector('.pe-card[data-pid="'+id+'"]'); if (!card) return;
       const st = card.querySelector(".pe-status");
@@ -396,6 +467,8 @@ export class ChatPanelViewProvider implements vscode.WebviewViewProvider {
       if (m.command === "clearChips"){ chipsEl.innerHTML = ""; return; }
       if (m.command === "planCard"){ renderPlanCard(m.plan); return; }
       if (m.command === "planPhase"){ renderPlanCard(m.plan); return; }
+      if (m.command === "approvalCard"){ renderApprovalCard(m.card); return; }
+      if (m.command === "approvalStatus"){ setApprovalStatus(m.id, m.status, m.detail); return; }
       if (m.command === "proposalCard"){ renderProposalCard(m.card); return; }
       if (m.command === "proposalStatus"){ setProposalStatus(m.id, m.status, m.detail); return; }
       if (m.command === "transcript"){

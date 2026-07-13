@@ -257,3 +257,55 @@ body.chatbody { display: flex; flex-direction: column; height: 100vh; padding: 1
 .plan-status-failed { background: rgba(229,72,77,.15); color: var(--danger, #e5484d); }
 .plan-gate { font-size: 11px; color: var(--muted-2); }
 .plan-note { font-size: 11px; color: var(--muted-2); margin-top: 6px; }
+
+/* ── Phase D: the approval card ───────────────────────────────────────────────────────────────
+ *
+ * The last thing a human sees before a LIVE mutation runs on real infrastructure. Every visual
+ * decision here is a safety decision: LIVE is red and stated in words ("this really happens"),
+ * a destructive action is shouted rather than mentioned, and the arguments are shown in full
+ * because a summary is a summary — never a substitute for what will actually execute.
+ *
+ * The failure state is styled as loudly as the success state. A tidy green tick over an action
+ * that did not happen (or half happened) is the most dangerous thing this card could render.
+ */
+.ap-card {
+  border: 1px solid var(--vscode-inputValidation-warningBorder, #c93);
+  border-left: 3px solid var(--vscode-inputValidation-warningBorder, #c93);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin: 10px 0;
+  background: var(--vscode-editorWidget-background);
+}
+.ap-title { font-weight: 600; margin-bottom: 6px; }
+.ap-meta { display: flex; flex-wrap: wrap; gap: 10px; font-size: 12px; opacity: .9; margin-bottom: 6px; }
+.ap-badge { padding: 1px 6px; border-radius: 4px; font-weight: 600; }
+.ap-live { background: #c0392b; color: #fff; }          /* impossible to mistake for a dry run */
+.ap-dry  { background: #2d6a4f; color: #fff; }
+.ap-flags { margin: 4px 0; }
+.ap-flag-danger { background: #c0392b; color: #fff; padding: 2px 6px; border-radius: 4px; font-weight: 700; font-size: 12px; }
+.ap-summary { margin: 6px 0; font-size: 13px; }
+.ap-args {
+  font-family: var(--vscode-editor-font-family);
+  font-size: 12px;
+  background: var(--vscode-textCodeBlock-background);
+  border-radius: 5px;
+  padding: 6px 8px;
+  margin: 6px 0;
+}
+.ap-arg { display: flex; gap: 8px; }
+.ap-k { opacity: .7; min-width: 110px; }
+.ap-v { word-break: break-all; }
+.ap-actions { display: flex; gap: 8px; margin-top: 8px; }
+.ap-btn {
+  cursor: pointer;
+  border: 1px solid var(--vscode-button-border, transparent);
+  border-radius: 4px;
+  padding: 4px 10px;
+  font-size: 12px;
+}
+.ap-btn:disabled { opacity: .45; cursor: default; }
+.ap-approve { background: var(--vscode-button-background); color: var(--vscode-button-foreground); }
+.ap-reject  { background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); }
+.ap-foot { display: flex; justify-content: space-between; font-size: 11px; opacity: .75; margin-top: 8px; gap: 10px; }
+.ap-status { margin-top: 8px; font-size: 12px; }
+.ap-status-bad { color: var(--vscode-errorForeground, #f14c4c); font-weight: 600; }
