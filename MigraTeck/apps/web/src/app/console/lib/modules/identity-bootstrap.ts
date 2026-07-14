@@ -1,6 +1,5 @@
 import { randomUUID } from "node:crypto";
 
-import { auditLog } from "../audit";
 import { panelExec, panelQuery, isPanelDbConfigured } from "../db";
 
 /**
@@ -65,15 +64,13 @@ export const bootstrapEnvironmentAdminIdentity = async (): Promise<BootstrapResu
   );
   const resolvedId = created[0]?.id ?? id;
 
-  await auditLog({
-    tenantId: null,
-    actorUserId: resolvedId,
-    actionKey: "identity.environment_admin.provisioned",
-    resourceType: "user",
-    resourceId: resolvedId,
-    decision: "allow",
-    afterJson: { email, role: "admin", source: "CONSOLE_ADMIN_EMAIL" },
-  });
+  // System-level event: there is no tenant. auditLog() requires one, so write the
+  // audit row directly with a NULL tenant rather than inventing a tenant id.
+  await panelExec(
+    `INSERT INTO audit_logs (id, tenantid, actoruserid, action, targettype, targetid, metajson, createdat)
+     VALUES ($1, NULL, $2, 'identity.environment_admin.provisioned', 'user', $2, $3::jsonb, NOW())`,
+    [randomUUID(), resolvedId, JSON.stringify({ email, role: "admin", source: "CONSOLE_ADMIN_EMAIL" })],
+  );
 
   return { status: "created", email, id: resolvedId };
 };
