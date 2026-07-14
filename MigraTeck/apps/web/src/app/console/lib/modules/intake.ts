@@ -19,10 +19,18 @@ export const loadIntakeData = async () => {
     ),
     panelQuery<{ id: string; formname: string | null; status: string; submissions: string; provider: string | null }>(
       `SELECT bfb.id,
-              COALESCE(w."primaryDomain", w."customDomain", bfb."siteId") AS formname,
+              COALESCE(w."primaryDomain", bfb."siteId") AS formname,
               'active'::text AS status,
               COALESCE(
-                (SELECT COUNT(*)::text FROM growth_leads gl WHERE gl.siteid = bfb."siteId"),
+                (
+                  SELECT COUNT(*)::text
+                    FROM growth_leads gl
+                   WHERE split_part(
+                     regexp_replace(LOWER(COALESCE(gl.website, '')), '^https?://(www\\.)?', ''),
+                     '/',
+                     1
+                   ) = LOWER(COALESCE(w."primaryDomain", ''))
+                ),
                 '0'
               ) AS submissions,
               bfb.provider::text AS provider
