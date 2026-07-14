@@ -36,11 +36,11 @@ export const loadTeamMembers = async (): Promise<ReadonlyArray<TeamMember>> => {
               WHEN u.last_login_at >= NOW() - INTERVAL '1 day' THEN 'away'
               ELSE 'offline'
             END AS status
-       FROM users u
+      FROM users u
        LEFT JOIN task_counts tc ON tc.assigned_to = u.id
        CROSS JOIN max_tasks mt
       WHERE COALESCE(u.is_active, TRUE) = TRUE
-        AND u.role IN ('admin','support','agent','sales','engineer','manager','staff','operations','customer')
+        AND u.role IN ('admin','support','agent','sales','engineer','manager','staff','operations')
       ORDER BY u.last_login_at DESC NULLS LAST, u.createdat DESC
       LIMIT 10`,
   );

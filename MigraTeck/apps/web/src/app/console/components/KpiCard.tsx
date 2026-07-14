@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { TrendingUp, TrendingDown, Minus } from "lucide-react";
 import type { Kpi } from "../lib/kpis";
 
@@ -62,8 +63,8 @@ export const KpiCard = ({ kpi, variant, icon: Icon, sparkline = [] }: KpiCardPro
         ? "text-rose-400"
         : "text-slate-400";
 
-  return (
-    <div className="group relative overflow-hidden rounded-2xl border border-white/10 bg-white/[0.03] p-5 shadow-xl shadow-slate-950/30 backdrop-blur-md transition hover:border-white/20">
+  const content = (
+    <div className="group relative overflow-hidden rounded-2xl border border-white/10 bg-white/[0.03] p-5 shadow-xl shadow-slate-950/30 backdrop-blur-md transition hover:border-white/20 hover:bg-white/[0.05]">
       <div
         className={`pointer-events-none absolute -right-12 -top-12 h-32 w-32 rounded-full bg-gradient-to-br ${v.ring} via-transparent to-transparent blur-2xl`}
       />
@@ -113,6 +114,19 @@ export const KpiCard = ({ kpi, variant, icon: Icon, sparkline = [] }: KpiCardPro
           />
         </svg>
       )}
+      {kpi.href && (
+        <p className="relative mt-2 text-[11px] font-medium text-fuchsia-300">
+          Open module
+        </p>
+      )}
     </div>
+  );
+
+  if (!kpi.href) return content;
+
+  return (
+    <Link href={kpi.href} prefetch className="block rounded-2xl outline-none focus-visible:ring-2 focus-visible:ring-fuchsia-400/60">
+      {content}
+    </Link>
   );
 };

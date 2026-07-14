@@ -162,13 +162,20 @@ export const loadEcosystem = async (): Promise<ProductTile[]> => {
     ),
     // MigraPanel: audit_events last 24h vs trailing 7d daily avg
     panelQuery<{ pct: string }>(
-      `SELECT CASE WHEN trailing = 0 THEN 0
-                   ELSE LEAST(100, ROUND((recent::numeric / trailing) * 100, 1)) END AS pct
+      `SELECT CASE WHEN trailing_avg = 0 THEN 0
+                   ELSE LEAST(100, ROUND((recent_count::numeric / trailing_avg) * 100, 1)) END AS pct
          FROM (
            SELECT
-             (SELECT COUNT(*) FROM audit_events WHERE createdat >= NOW() - INTERVAL '1 day')::numeric AS recent,
-             GREATEST(((SELECT COUNT(*) FROM audit_events WHERE createdat >= NOW() - INTERVAL '7 days') / 7.0), 1) AS trailing
-         ) t`,
+             (SELECT COUNT(*) FROM audit_events WHERE createdat >= NOW() - INTERVAL '1 day')::numeric AS recent_count,
+             GREATEST(
+               (
+                 SELECT COUNT(*)::numeric / 7.0
+                   FROM audit_events
+                  WHERE createdat >= NOW() - INTERVAL '7 days'
+               ),
+               1
+             ) AS trailing_avg
+         ) metrics`,
     ),
     // Voice: % of phone extensions that are enabled
     panelQuery<{ pct: string }>(

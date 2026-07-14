@@ -33,18 +33,29 @@ export const ServiceHealthPanel = ({ services }: { services: ReadonlyArray<Servi
       <ul className="space-y-3">
         {services.map((s) => (
           <li key={s.id}>
-            <div className="mb-1 flex items-center justify-between text-xs">
-              <span className="font-medium text-slate-200">{s.label}</span>
-              <span className="font-mono text-slate-400">
-                {s.uptime == null ? STATUS_LABEL[s.status] : `${s.uptime.toFixed(2)}%`}
-              </span>
-            </div>
-            <div className="h-1.5 overflow-hidden rounded-full bg-white/5">
-              <div
-                className={`h-full rounded-full bg-gradient-to-r ${STATUS_COLOR[s.status]} transition-all`}
-                style={{ width: s.uptime == null ? (s.status === "ok" ? "100%" : "50%") : `${s.uptime}%` }}
-              />
-            </div>
+            <Link
+              href={s.href}
+              prefetch
+              className="block rounded-lg px-2 py-1.5 transition hover:bg-white/[0.03]"
+            >
+              <div className="mb-1 flex items-center justify-between gap-3 text-xs">
+                <div className="min-w-0">
+                  <span className="block truncate font-medium text-slate-200">{s.label}</span>
+                  <span className="text-[10px] text-slate-500">
+                    {s.lastCheckMs == null ? "Health status" : `Last probe ${s.lastCheckMs}ms`}
+                  </span>
+                </div>
+                <span className="shrink-0 font-mono text-slate-400">
+                  {s.uptime == null ? STATUS_LABEL[s.status] : `${s.uptime.toFixed(2)}%`}
+                </span>
+              </div>
+              <div className="h-1.5 overflow-hidden rounded-full bg-white/5">
+                <div
+                  className={`h-full rounded-full bg-gradient-to-r ${STATUS_COLOR[s.status]} transition-all`}
+                  style={{ width: s.uptime == null ? (s.status === "ok" ? "100%" : "50%") : `${s.uptime}%` }}
+                />
+              </div>
+            </Link>
           </li>
         ))}
       </ul>

@@ -23,22 +23,30 @@ export const loadSecurityCompliance = async (): Promise<SecurityComplianceData> 
          FROM failed_login_attempts
         WHERE last_attempt >= NOW() - INTERVAL '7 days'`,
     ),
-    // backup_runs not in migrapanel — return 0 so the metric shows as unavailable
-    Promise.resolve([{ pct: "0" }] as Array<{ pct: string }>),
+    panelQuery<{ pct: string; total: string }>(
+      `SELECT CASE WHEN COUNT(*) = 0 THEN 0
+                   ELSE ROUND((COUNT(*) FILTER (WHERE status = 'success')::numeric / COUNT(*)) * 100, 1)
+              END AS pct,
+              COUNT(*)::text AS total
+         FROM backup_runs
+        WHERE started_at >= NOW() - INTERVAL '7 days'`,
+    ),
     panelQuery<{ pct: string }>(
       `SELECT COALESCE(ROUND(
-                 (COUNT(*) FILTER (WHERE LOWER(status) IN ('active','verified','live'))::numeric / NULLIF(COUNT(*), 0)) * 100,
+                 (COUNT(*) FILTER (WHERE LOWER(status) IN ('active','issued','valid'))::numeric / NULLIF(COUNT(*), 0)) * 100,
                  1
                ), 0) AS pct
-         FROM domains`,
+         FROM ssl_certificates`,
     ),
     panelQuery<{ active: string }>(
-      `SELECT BOOL_OR(enabled = TRUE)::text AS active FROM firewall_rules`,
+      `SELECT CASE WHEN COUNT(*) FILTER (WHERE enabled = TRUE) > 0 THEN 'true' ELSE 'false' END AS active
+         FROM firewall_rules`,
     ),
   ]);
 
   const anomalyCount = anomalies[0] ? Number(anomalies[0].count) : 0;
   const backupPct = backups[0] ? Number(backups[0].pct) : 0;
+  const backupTotal = backups[0] ? Number(backups[0].total) : 0;
   const sslPct = sslDomains[0] ? Number(sslDomains[0].pct) : 0;
   const fwActive = firewall[0] ? firewall[0].active === "true" : false;
 
@@ -56,9 +64,9 @@ export const loadSecurityCompliance = async (): Promise<SecurityComplianceData> 
 
   return {
     loginAnomalies: { count: anomalyCount, period: "This Week" },
-    backups: { successPct: Math.round(backupPct), period: "Successful" },
+    backups: { successPct: Math.round(backupPct), period: backupTotal === 0 ? "No recent runs" : "Last 7d" },
     sslCoverage: { coveredPct: sslPct, status: sslPct >= 95 ? "Secure" : sslPct >= 80 ? "Mostly Secure" : "Needs Attention" },
-    firewall: { active: fwActive, period: fwActive ? "Protected" : "Not Protected" },
+    firewall: { active: fwActive, period: fwActive ? "Protected" : "No rules tracked" },
     riskScore: risk,
   };
 };

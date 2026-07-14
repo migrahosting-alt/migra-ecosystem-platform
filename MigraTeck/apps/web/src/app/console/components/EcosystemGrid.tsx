@@ -23,6 +23,7 @@ export const EcosystemGrid = ({ tiles }: { tiles: ReadonlyArray<ProductTile> }) 
         <h2 className="text-base font-semibold text-white">Ecosystem Control Grid</h2>
         <Link
           href="/console/ecosystem"
+          prefetch
           className="rounded-md border border-white/10 bg-white/5 px-3 py-1 text-[11px] font-medium text-slate-300 transition hover:bg-white/10 hover:text-white"
         >
           Manage Ecosystem
@@ -39,38 +40,55 @@ export const EcosystemGrid = ({ tiles }: { tiles: ReadonlyArray<ProductTile> }) 
 };
 
 const EcosystemTile = ({ tile }: { tile: ProductTile }) => {
+  const primaryExternal = /^https?:\/\//i.test(tile.primaryAction.href);
+  const secondaryExternal = /^https?:\/\//i.test(tile.secondaryAction.href);
+
   return (
-    <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4 transition hover:border-white/20">
-      <div className="flex items-start gap-3">
-        <ProductLogo src={tile.logoSrc} alt={tile.logoAlt} />
-        <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-semibold text-white">{tile.name}</p>
-          <p className="truncate text-[11px] text-slate-400">{tile.subtitle}</p>
+    <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4 transition hover:border-white/20 hover:bg-white/[0.04]">
+      <Link
+        href={tile.primaryAction.href}
+        prefetch={!primaryExternal}
+        target={primaryExternal ? "_blank" : undefined}
+        rel={primaryExternal ? "noopener noreferrer" : undefined}
+        className="block rounded-lg outline-none transition focus-visible:ring-2 focus-visible:ring-fuchsia-400/60"
+      >
+        <div className="flex items-start gap-3">
+          <ProductLogo src={tile.logoSrc} alt={tile.logoAlt} />
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-sm font-semibold text-white">{tile.name}</p>
+            <p className="truncate text-[11px] text-slate-400">{tile.subtitle}</p>
+          </div>
         </div>
-      </div>
 
-      <div className="mt-3 flex items-center gap-1.5 text-[11px]">
-        <span className={`h-1.5 w-1.5 rounded-full ${STATUS_DOT[tile.status]}`} />
-        <span className="text-slate-300">{STATUS_LABEL[tile.status]}</span>
-      </div>
+        <div className="mt-3 flex items-center gap-1.5 text-[11px]">
+          <span className={`h-1.5 w-1.5 rounded-full ${STATUS_DOT[tile.status]}`} />
+          <span className="text-slate-300">{STATUS_LABEL[tile.status]}</span>
+        </div>
 
-      <div className="mt-3">
-        <p className="text-xl font-bold text-white">
-          {tile.usagePct.toFixed(1)}
-          <span className="text-base font-medium text-slate-400">%</span>
-        </p>
-        <p className="text-[10px] uppercase tracking-wider text-slate-500">Usage</p>
-      </div>
+        <div className="mt-3">
+          <p className="text-xl font-bold text-white">
+            {tile.usagePct.toFixed(1)}
+            <span className="text-base font-medium text-slate-400">%</span>
+          </p>
+          <p className="text-[10px] uppercase tracking-wider text-slate-500">Usage</p>
+        </div>
+      </Link>
 
       <div className="mt-4 flex gap-2">
         <Link
           href={tile.primaryAction.href}
+          prefetch={!primaryExternal}
+          target={primaryExternal ? "_blank" : undefined}
+          rel={primaryExternal ? "noopener noreferrer" : undefined}
           className="flex-1 rounded-md border border-fuchsia-400/30 bg-fuchsia-500/10 py-1.5 text-center text-[11px] font-semibold text-fuchsia-200 transition hover:bg-fuchsia-500/20"
         >
           {tile.primaryAction.label}
         </Link>
         <Link
           href={tile.secondaryAction.href}
+          prefetch={!secondaryExternal}
+          target={secondaryExternal ? "_blank" : undefined}
+          rel={secondaryExternal ? "noopener noreferrer" : undefined}
           className="flex-1 rounded-md border border-white/10 bg-white/5 py-1.5 text-center text-[11px] font-medium text-slate-300 transition hover:bg-white/10"
         >
           {tile.secondaryAction.label}
