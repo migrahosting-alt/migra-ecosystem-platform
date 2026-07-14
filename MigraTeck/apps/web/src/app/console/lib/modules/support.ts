@@ -1,4 +1,5 @@
-import { panelQuery, isPanelDbConfigured } from "../db";
+import { randomUUID } from "node:crypto";
+import { panelQuery, isPanelDbConfigured, panelExec } from "../db";
 
 export type SupportTicket = {
   id: string;
@@ -252,11 +253,35 @@ export const loadSupportTicketDetail = async (id: string): Promise<SupportTicket
  * Returning null means "identity not established" and every caller must deny
  * the action rather than substitute anyone.
  */
+/**
+ * Resolve the signed-in employee to a real staff identity. FAIL CLOSED.
+ *
+ * PRODUCTION DEFECT THIS CLOSES
+ * -----------------------------
+ * The resolver running in production has NO email predicate in its WHERE clause.
+ * It selected from all active staff and used ORDER BY merely to *prefer* the
+ * matching email, falling back to `admin@migrahosting.com` and then to any admin:
+ *
+ *     ORDER BY CASE WHEN LOWER(email) = LOWER($1)                 THEN 0
+ *                   WHEN LOWER(email) = 'admin@migrahosting.com'  THEN 1
+ *                   WHEN role IN ('admin','super_admin')          THEN 2
+ *                   ELSE 3 END
+ *     LIMIT 1
+ *
+ * The console's own administrator signs in as CONSOLE_ADMIN_EMAIL
+ * (admin@migrateck.com), which has NO row in `users`. So the fallback fired on
+ * every support action, and claim/accept/transfer/resolve/reopen/notes were all
+ * recorded against admin@migrahosting.com — a different person. That is an
+ * audit-integrity defect, not a convenience.
+ *
+ * Returning null means "identity not established": every caller must deny the
+ * action rather than substitute anyone.
+ */
 export const loadSupportActor = async (email: string): Promise<{ id: string; name: string } | null> => {
   if (!isPanelDbConfigured() || !email) return null;
   const rows = await panelQuery<{ id: string; name: string }>(
     `SELECT id,
-            COALESCE(display_name, NULLIF(TRIM(CONCAT_WS(' ', first_name, last_name)), ''), 'Support') AS name
+            COALESCE(display_name, NULLIF(TRIM(CONCAT_WS(' ', first_name, last_name)), ''), email) AS name
        FROM users
       WHERE LOWER(email) = LOWER($1)
         AND role IN ('admin','support','agent','super_admin','ops')
@@ -264,53 +289,73 @@ export const loadSupportActor = async (email: string): Promise<{ id: string; nam
       LIMIT 1`,
     [email],
   );
-  return rows[0] || null;
+  return rows[0] ?? null;
 };
 
 /**
- * Why an actor could not be resolved. Lets the caller tell an unmapped-but-real
- * employee ("link your identity") apart from a genuine outsider ("denied").
+ * The console's environment administrator (CONSOLE_ADMIN_EMAIL) is a legitimate
+ * authenticated identity, but it has no `users` row — support writes reference
+ * users.id, so it cannot act, and a strict fail-closed rule would lock the only
+ * operator out of Support entirely.
+ *
+ * This resolves that administrator AS ITSELF by provisioning its own canonical
+ * staff identity, keyed on the authenticated email. It is idempotent, and it is
+ * NOT a fallback: it can only ever produce an identity for the exact email that
+ * actually authenticated. It never selects, substitutes or invents another
+ * employee.
+ *
+ * The email is read from the environment, never hardcoded in source.
  */
-export type SupportActorDenial =
-  | "no_session"
-  | "not_staff"
-  | "staff_not_linked" // exists in mail_staff_user (legacy console identity) but has no `users` row
-  | "inactive";
+const ensureEnvironmentAdminIdentity = async (
+  email: string,
+): Promise<{ id: string; name: string } | null> => {
+  const configured = (process.env.CONSOLE_ADMIN_EMAIL ?? "").trim();
+  if (!configured || configured.toLowerCase() !== email.trim().toLowerCase()) return null;
+
+  const displayName = (process.env.CONSOLE_ADMIN_NAME ?? "").trim() || configured;
+
+  await panelExec(
+    `INSERT INTO users (id, email, role, display_name, is_active)
+     SELECT $1, $2, 'admin', $3, TRUE
+      WHERE NOT EXISTS (SELECT 1 FROM users WHERE LOWER(email) = LOWER($2))`,
+    [randomUUID(), configured, displayName],
+  );
+
+  return loadSupportActor(configured);
+};
+
+/** Why an actor could not be resolved. */
+export type SupportActorDenial = "no_session" | "not_staff" | "inactive" | "unavailable";
 
 export type SupportActorResult =
-  | { ok: true; actor: { id: string; name: string } }
+  | { ok: true; actor: { id: string; name: string }; actorType: "staff" | "environment_admin" }
   | { ok: false; reason: SupportActorDenial };
 
 /**
- * Compatibility resolver for the legacy `mail_staff_user` console identity.
- *
- * `mail_staff_user` is the console's own staff table (1 row in production);
- * panel-api's identity lives in `users` + `memberships`. Support actions write
- * `chat_*.authorUserId`, which references `users`, so a mail_staff_user record
- * alone CANNOT act — there is no user id to attribute the action to.
- *
- * This resolver exists to explain that state, NOT to invent an actor. If a
- * legacy staff record has no linked `users` row we return `staff_not_linked`
- * and the action is denied.
+ * The single entry point for support actor resolution. Exact match, or denial.
  */
-export const resolveSupportActor = async (email: string | null | undefined): Promise<SupportActorResult> => {
+export const resolveSupportActor = async (
+  email: string | null | undefined,
+): Promise<SupportActorResult> => {
   if (!email) return { ok: false, reason: "no_session" };
 
-  const actor = await loadSupportActor(email);
-  if (actor) return { ok: true, actor };
+  const staff = await loadSupportActor(email);
+  if (staff) return { ok: true, actor: staff, actorType: "staff" };
 
-  // No usable `users` identity. Distinguish an unlinked legacy staff member
-  // from someone who is not staff at all, so the denial is actionable.
-  const legacy = await panelQuery<{ status: string | null }>(
-    `SELECT status FROM mail_staff_user WHERE LOWER(email) = LOWER($1) LIMIT 1`,
+  const envAdmin = await ensureEnvironmentAdminIdentity(email);
+  if (envAdmin) return { ok: true, actor: envAdmin, actorType: "environment_admin" };
+
+  // Distinguish an inactive/known staff member from an outsider, so the denial
+  // is actionable. Never resolves to anyone.
+  const known = await panelQuery<{ active: boolean }>(
+    `SELECT COALESCE(is_active, TRUE) AS active FROM users WHERE LOWER(email) = LOWER($1) LIMIT 1`,
     [email],
   );
-  if (legacy[0]) {
-    return { ok: false, reason: legacy[0].status === "active" ? "staff_not_linked" : "inactive" };
-  }
+  if (known[0]) return { ok: false, reason: "inactive" };
 
   return { ok: false, reason: "not_staff" };
 };
+
 
 export const loadSupportReplyMacros = async (limit = 8): Promise<SupportReplyMacro[]> => {
   if (!isPanelDbConfigured()) return [];
