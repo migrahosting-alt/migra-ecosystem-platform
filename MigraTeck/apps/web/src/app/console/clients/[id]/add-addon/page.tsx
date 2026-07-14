@@ -220,15 +220,15 @@ async function addAddon(formData: FormData) {
     try {
       await panelExec(
         `INSERT INTO orders
-           (id, tenantid, status, currency, subtotal, total, createdat, updated_at)
-         VALUES ($1, $2, 'pending', 'USD', $3, $3, NOW(), NOW())`,
+           (id, tenantid, status, currency, subtotal, total, createdat)
+         VALUES ($1, $2, 'pending', 'USD', $3, $3, NOW())`,
         [orderId, tenantId, proration.prorated],
       );
       await panelExec(
         `INSERT INTO order_items
-           (id, orderid, productid, qty, unitprice, total, createdat)
-         VALUES ($1, $2, $3, $4, $5, $6, NOW())`,
-        [randomUUID(), orderId, productId, qty, +(proration.prorated / qty).toFixed(2), proration.prorated],
+           (id, orderid, productid, qty, unitprice, createdat)
+         VALUES ($1, $2, $3, $4, $5, NOW())`,
+        [randomUUID(), orderId, productId, qty, +(proration.prorated / qty).toFixed(2)],
       );
       await logClientEvent({
         tenantId, actorEmail: actor, action: "order.add",

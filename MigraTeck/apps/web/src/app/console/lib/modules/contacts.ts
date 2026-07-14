@@ -115,6 +115,16 @@ export const updateClientContact = async (input: {
   );
 };
 
+export const setDefaultClientContact = async (tenantId: string, id: string): Promise<void> => {
+  await panelExec(
+    `UPDATE client_contacts
+        SET is_default = CASE WHEN id = $2 THEN TRUE ELSE FALSE END,
+            updated_at = NOW()
+      WHERE tenant_id = $1 AND deleted_at IS NULL`,
+    [tenantId, id],
+  );
+};
+
 export const deleteClientContact = async (id: string): Promise<void> => {
   await panelExec(
     `UPDATE client_contacts SET deleted_at = NOW(), updated_at = NOW() WHERE id = $1`,

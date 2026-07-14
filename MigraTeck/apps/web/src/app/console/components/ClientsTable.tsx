@@ -15,6 +15,7 @@ export const ClientsTable = ({ clients }: { clients: ReadonlyArray<ClientAccount
         <h2 className="text-base font-semibold text-white">Client Accounts / Recent Accounts</h2>
         <Link
           href="/console/clients"
+          prefetch
           className="text-[11px] font-medium text-fuchsia-300 hover:text-fuchsia-200"
         >
           View All Clients
@@ -36,14 +37,17 @@ export const ClientsTable = ({ clients }: { clients: ReadonlyArray<ClientAccount
                 <th className="px-4 py-2 font-medium">Account Manager</th>
                 <th className="px-4 py-2 font-medium">Last Activity</th>
                 <th className="px-4 py-2 font-medium">Status</th>
+                <th className="px-4 py-2 font-medium text-right">Open</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-white/5">
               {clients.map((c) => (
                 <tr key={c.id} className="transition hover:bg-white/[0.02]">
                   <td className="px-4 py-2.5">
-                    <p className="font-semibold text-white">{c.name}</p>
-                    {c.domain && <p className="text-[10px] text-slate-500">{c.domain}</p>}
+                    <Link href={`/console/clients/${c.id}`} prefetch className="block hover:text-fuchsia-200">
+                      <p className="font-semibold text-white">{c.name}</p>
+                      {c.domain && <p className="text-[10px] text-slate-500">{c.domain}</p>}
+                    </Link>
                   </td>
                   <td className="px-4 py-2.5">
                     <div className="flex flex-wrap items-center gap-0.5">
@@ -72,6 +76,15 @@ export const ClientsTable = ({ clients }: { clients: ReadonlyArray<ClientAccount
                     >
                       {c.status}
                     </span>
+                  </td>
+                  <td className="px-4 py-2.5 text-right">
+                    <Link
+                      href={`/console/clients/${c.id}`}
+                      prefetch
+                      className="text-[11px] font-medium text-fuchsia-300 transition hover:text-fuchsia-200"
+                    >
+                      View
+                    </Link>
                   </td>
                 </tr>
               ))}
