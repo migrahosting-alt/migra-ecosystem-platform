@@ -5,6 +5,7 @@ import { ConsolePageShell } from "../components/ConsolePageShell";
 import { SectionCard } from "../components/SectionCard";
 import { DataTable, StatusPill } from "../components/DataTable";
 import { StatsRow } from "../components/StatsRow";
+import Link from "next/link";
 
 export const dynamic = "force-dynamic";
 
@@ -22,12 +23,12 @@ export default async function EmailPage() {
       title="Email"
       subtitle={`${domains.length} domain(s) · ${mailboxes.length} mailbox(es) · ${aliases.length} alias(es)`}
       actions={
-        <a
+        <Link
           href="/console/email/new"
           className="rounded-full bg-gradient-to-r from-emerald-500 to-teal-500 px-4 py-1.5 text-xs font-semibold text-white shadow-lg shadow-emerald-500/30 transition hover:shadow-emerald-500/50"
         >
           + New Mailbox
-        </a>
+        </Link>
       }
     >
       <StatsRow
@@ -59,6 +60,16 @@ export default async function EmailPage() {
             { key: "client", header: "Client", render: (m) => m.tenantName || "—" },
             { key: "status", header: "Status", render: (m) => <StatusPill status={m.status} /> },
             { key: "created", header: "Created", render: (m) => m.createdAt ? new Date(m.createdAt).toLocaleDateString() : "—" },
+            {
+              key: "actions",
+              header: "Actions",
+              align: "right",
+              render: (m) => (
+                <Link href={`/console/email/${m.id}/edit`} className="text-[11px] font-medium text-fuchsia-300 transition hover:text-fuchsia-200">
+                  Edit
+                </Link>
+              ),
+            },
           ]}
           rows={mailboxes}
           rowKey={(m) => m.id}
