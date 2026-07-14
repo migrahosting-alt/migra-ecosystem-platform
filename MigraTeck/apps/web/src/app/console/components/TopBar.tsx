@@ -22,7 +22,7 @@ export const TopBar = ({
   messages: number;
 }) => {
   return (
-    <header className="sticky top-0 z-30 border-b border-white/5 bg-slate-950/85 px-6 py-4 backdrop-blur-xl">
+    <header className="sticky top-0 z-30 border-b border-white/5 bg-slate-950/85 px-5 py-3 backdrop-blur-xl">
       <div className="flex items-center gap-3">
         <div className="flex flex-1 items-center gap-3">
           <Link
@@ -38,11 +38,11 @@ export const TopBar = ({
               className="object-contain p-0.5"
             />
           </Link>
-          <div>
-            <h1 className="text-xl font-bold tracking-tight text-white">
+          <div className="min-w-0">
+            <h1 className="truncate whitespace-nowrap text-lg font-bold tracking-tight text-white xl:text-xl">
               MigraPanel Control Center
             </h1>
-            <p className="text-xs text-slate-500">
+            <p className="hidden text-xs text-slate-500 xl:block">
               Operational control surface for the MigraTeck ecosystem
             </p>
           </div>
@@ -57,10 +57,11 @@ export const TopBar = ({
         {/* Create New dropdown */}
         <CreateNewMenu />
 
-        {/* Notification bell → support tickets */}
+        {/* Notification bell → activity feed */}
         <Link
-          href="/console/support"
-          aria-label={`Support tickets${notifications > 0 ? ` (${notifications} open)` : ""}`}
+          href="/console/activity"
+          prefetch
+          aria-label={`Activity feed${notifications > 0 ? ` (${notifications} recent)` : ""}`}
           className="relative inline-flex h-9 w-9 items-center justify-center rounded-full border border-white/10 bg-white/5 text-slate-300 transition hover:bg-white/10 hover:text-white"
         >
           <Bell className="h-4 w-4" />
@@ -71,10 +72,11 @@ export const TopBar = ({
           )}
         </Link>
 
-        {/* Message icon → team page */}
+        {/* Message icon → support tickets */}
         <Link
-          href="/console/team"
-          aria-label={`Team${messages > 0 ? ` (${messages})` : ""}`}
+          href="/console/support"
+          prefetch
+          aria-label={`Support tickets${messages > 0 ? ` (${messages} open)` : ""}`}
           className="relative inline-flex h-9 w-9 items-center justify-center rounded-full border border-white/10 bg-white/5 text-slate-300 transition hover:bg-white/10 hover:text-white"
         >
           <MessageCircle className="h-4 w-4" />

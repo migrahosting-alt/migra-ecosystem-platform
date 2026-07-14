@@ -27,6 +27,9 @@ export const ConsolePageShell = async ({
   title,
   subtitle,
   actions,
+  showPageHeader = true,
+  viewportLocked = false,
+  mainClassName,
   children,
 }: {
   session: ShellSession;
@@ -34,13 +37,16 @@ export const ConsolePageShell = async ({
   title: string;
   subtitle?: string | undefined;
   actions?: ReactNode;
+  showPageHeader?: boolean;
+  viewportLocked?: boolean;
+  mainClassName?: string;
   children: ReactNode;
 }) => {
   const display = session.email.split("@")[0] || "Admin";
   const counts = await loadCounts();
 
   return (
-    <div className="flex min-h-screen">
+    <div className={viewportLocked ? "flex h-screen overflow-hidden" : "flex min-h-screen"}>
       <Sidebar activePath={activePath} />
       <div className="flex flex-1 flex-col">
         <TopBar
@@ -53,8 +59,15 @@ export const ConsolePageShell = async ({
           notifications={counts.notifications}
           messages={counts.messages}
         />
-        <main className="flex-1 space-y-4 p-6 lg:p-8">
-          <PageHeader title={title} subtitle={subtitle} actions={actions} />
+        <main
+          className={
+            mainClassName ||
+            (viewportLocked
+              ? "flex min-h-0 flex-1 flex-col overflow-hidden p-6 lg:p-8"
+              : "flex-1 space-y-4 p-6 lg:p-8")
+          }
+        >
+          {showPageHeader ? <PageHeader title={title} subtitle={subtitle} actions={actions} /> : null}
           {children}
         </main>
       </div>

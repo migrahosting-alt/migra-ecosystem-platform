@@ -20,6 +20,9 @@ import {
   Settings,
   ChevronLeft,
   Activity,
+  BookOpen,
+  Sparkles,
+  Bell,
 } from "lucide-react";
 
 type NavItem = {
@@ -52,6 +55,14 @@ const NAV: ReadonlyArray<NavItem> = [
 ];
 
 export const Sidebar = ({ activePath }: { activePath: string }) => {
+  const supportActive = activePath.startsWith("/console/support");
+  const supportSubnav = [
+    { label: "Abigail Chat", href: "/console/support" },
+    { label: "Tickets", href: "/console/support/new" },
+    { label: "Knowledge Base", href: "/console/support?panel=knowledge" },
+    { label: "Announcements", href: "/console/support?panel=announcements" },
+  ];
+
   return (
     <aside className="hidden w-64 shrink-0 flex-col border-r border-white/5 bg-slate-950/95 backdrop-blur lg:flex">
       <div className="flex items-center justify-between px-5 py-5">
@@ -110,39 +121,96 @@ export const Sidebar = ({ activePath }: { activePath: string }) => {
                   ) : null}
                   <span className="truncate">{item.label}</span>
                 </Link>
+                {supportActive && item.href === "/console/support" ? (
+                  <div className="mt-2 space-y-1 rounded-2xl border border-fuchsia-500/15 bg-[linear-gradient(180deg,rgba(79,30,127,0.16),rgba(17,24,39,0.12))] p-2">
+                    {supportSubnav.map((sub) => {
+                      const active = activePath === "/console/support" && sub.href === "/console/support";
+                      return (
+                        <Link
+                          key={sub.label}
+                          href={sub.href}
+                          className={[
+                            "flex items-center justify-between rounded-xl px-3 py-2 text-xs transition",
+                            active
+                              ? "bg-fuchsia-500/15 text-fuchsia-100 shadow-[inset_0_0_0_1px_rgba(217,70,239,0.25)]"
+                              : "text-slate-400 hover:bg-white/5 hover:text-slate-200",
+                          ].join(" ")}
+                        >
+                          <span className="inline-flex items-center gap-2">
+                            {sub.label === "Abigail Chat" ? <Sparkles className="h-3.5 w-3.5" /> : null}
+                            {sub.label === "Tickets" ? <Inbox className="h-3.5 w-3.5" /> : null}
+                            {sub.label === "Knowledge Base" ? <BookOpen className="h-3.5 w-3.5" /> : null}
+                            {sub.label === "Announcements" ? <Bell className="h-3.5 w-3.5" /> : null}
+                            {sub.label}
+                          </span>
+                          {sub.label === "Abigail Chat" ? (
+                            <span className="rounded-full bg-fuchsia-500 px-1.5 py-0.5 text-[9px] font-semibold text-white">Live</span>
+                          ) : null}
+                        </Link>
+                      );
+                    })}
+                  </div>
+                ) : null}
               </li>
             );
           })}
         </ul>
       </nav>
 
-      <div className="mx-3 mb-3 rounded-2xl border border-white/10 bg-gradient-to-br from-purple-600/10 via-fuchsia-600/10 to-pink-600/10 p-4 text-sm">
-        <div className="mb-1 flex items-center gap-2">
-          <span className="relative inline-flex h-6 w-6 items-center justify-center overflow-hidden rounded-md border border-white/10 bg-white/10">
-            <Image
-              src="/brands/products/migrapanel-mark.png"
-              alt="MigraPanel"
-              fill
-              sizes="24px"
-              className="object-contain p-0.5"
-            />
-          </span>
-          <span className="text-xs font-semibold text-white">MigraPanel Enterprise</span>
+      {supportActive ? (
+        <div className="mx-3 mb-3 rounded-2xl border border-fuchsia-400/20 bg-[linear-gradient(135deg,rgba(98,49,191,0.28),rgba(217,70,239,0.18))] p-4 text-sm">
+          <div className="flex items-center gap-3">
+            <span className="relative inline-flex h-12 w-12 items-center justify-center overflow-hidden rounded-2xl border border-white/15 bg-white/10">
+              <Image
+                src="/brands/products/abigail-chat-logo.png"
+                alt="Abigail"
+                fill
+                sizes="48px"
+                className="object-cover"
+              />
+            </span>
+            <div>
+              <p className="text-base font-semibold text-white">Abigail AI Assistant</p>
+              <p className="text-[11px] text-fuchsia-100/70">Your 24/7 support co-pilot</p>
+            </div>
+          </div>
+          <Link
+            href="/console/support"
+            prefetch
+            className="mt-4 inline-flex w-full items-center justify-center rounded-xl bg-gradient-to-r from-violet-500 to-fuchsia-500 px-3 py-2 text-[13px] font-semibold text-white transition hover:brightness-110"
+          >
+            Open Abigail
+          </Link>
         </div>
-        <p className="text-[11px] leading-relaxed text-slate-400">
-          Enterprise Plan
-          <br />
-          Unlimited Everything
-        </p>
-        <Link
-          href="/console/settings/plan"
-          prefetch
-          className="mt-3 inline-flex w-full items-center justify-between rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-[11px] font-medium text-slate-200 transition hover:border-fuchsia-400/40 hover:bg-white/10"
-        >
-          View Plan Details
-          <span aria-hidden>›</span>
-        </Link>
-      </div>
+      ) : (
+        <div className="mx-3 mb-3 rounded-2xl border border-white/10 bg-gradient-to-br from-purple-600/10 via-fuchsia-600/10 to-pink-600/10 p-4 text-sm">
+          <div className="mb-1 flex items-center gap-2">
+            <span className="relative inline-flex h-6 w-6 items-center justify-center overflow-hidden rounded-md border border-white/10 bg-white/10">
+              <Image
+                src="/brands/products/migrapanel-mark.png"
+                alt="MigraPanel"
+                fill
+                sizes="24px"
+                className="object-contain p-0.5"
+              />
+            </span>
+            <span className="text-xs font-semibold text-white">MigraPanel Enterprise</span>
+          </div>
+          <p className="text-[11px] leading-relaxed text-slate-400">
+            Enterprise Plan
+            <br />
+            Unlimited Everything
+          </p>
+          <Link
+            href="/console/settings/plan"
+            prefetch
+            className="mt-3 inline-flex w-full items-center justify-between rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-[11px] font-medium text-slate-200 transition hover:border-fuchsia-400/40 hover:bg-white/10"
+          >
+            View Plan Details
+            <span aria-hidden>›</span>
+          </Link>
+        </div>
+      )}
 
       <div className="mx-3 mb-4 flex items-center justify-between rounded-lg border border-white/5 bg-white/5 px-3 py-2 text-[11px] text-slate-400">
         <span className="inline-flex items-center gap-2">
