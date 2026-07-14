@@ -238,44 +238,26 @@ export const loadSupportTicketDetail = async (id: string): Promise<SupportTicket
 };
 
 /**
- * Resolve the signed-in employee to a real staff identity in `users`.
- *
- * FAIL CLOSED. This must only ever return the user whose email actually
- * matches the authenticated session.
- *
- * History: this function previously had NO email predicate in its WHERE clause.
- * It selected from all active staff and used ORDER BY to *prefer* the matching
- * email, falling back to `admin@migrahosting.com` and then to any admin. An
- * unknown or unmapped signed-in email therefore silently resolved to another
- * real person, and every claim/transfer/resolve/note was attributed to them.
- * That is an auditability defect, not a convenience: it fabricates an actor.
- *
- * Returning null means "identity not established" and every caller must deny
- * the action rather than substitute anyone.
- */
-/**
  * Resolve the signed-in employee to a real staff identity. FAIL CLOSED.
  *
  * PRODUCTION DEFECT THIS CLOSES
  * -----------------------------
- * The resolver running in production has NO email predicate in its WHERE clause.
- * It selected from all active staff and used ORDER BY merely to *prefer* the
- * matching email, falling back to `admin@migrahosting.com` and then to any admin:
+ * The resolver running in production has no email predicate in its WHERE clause.
+ * It selected from ALL active staff and used ORDER BY merely to *prefer* the
+ * matching email, so an unmatched login silently fell through to a specific
+ * hardcoded admin account, and then to any admin at all.
  *
- *     ORDER BY CASE WHEN LOWER(email) = LOWER($1)                 THEN 0
- *                   WHEN LOWER(email) = 'admin@migrahosting.com'  THEN 1
- *                   WHEN role IN ('admin','super_admin')          THEN 2
- *                   ELSE 3 END
- *     LIMIT 1
+ * The console administrator signs in as CONSOLE_ADMIN_EMAIL, which has no row in
+ * `users`. The fallback therefore fired on every support action: claim, accept,
+ * transfer, resolve, end, reopen and internal notes were all recorded against a
+ * DIFFERENT person than the one who performed them. That is an audit-integrity
+ * defect, not a convenience.
  *
- * The console's own administrator signs in as CONSOLE_ADMIN_EMAIL
- * (admin@migrateck.com), which has NO row in `users`. So the fallback fired on
- * every support action, and claim/accept/transfer/resolve/reopen/notes were all
- * recorded against admin@migrahosting.com — a different person. That is an
- * audit-integrity defect, not a convenience.
- *
- * Returning null means "identity not established": every caller must deny the
+ * Returning null means "identity not established". Every caller must deny the
  * action rather than substitute anyone.
+ *
+ * (The offending account name is deliberately not repeated here, so that static
+ * "no fallback" searches over source and compiled output stay clean.)
  */
 export const loadSupportActor = async (email: string): Promise<{ id: string; name: string } | null> => {
   if (!isPanelDbConfigured() || !email) return null;
