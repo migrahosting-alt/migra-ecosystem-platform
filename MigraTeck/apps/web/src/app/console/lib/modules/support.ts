@@ -1,5 +1,4 @@
-import { randomUUID } from "node:crypto";
-import { panelQuery, isPanelDbConfigured, panelExec } from "../db";
+import { panelQuery, isPanelDbConfigured } from "../db";
 
 export type SupportTicket = {
   id: string;
@@ -274,38 +273,6 @@ export const loadSupportActor = async (email: string): Promise<{ id: string; nam
   return rows[0] ?? null;
 };
 
-/**
- * The console's environment administrator (CONSOLE_ADMIN_EMAIL) is a legitimate
- * authenticated identity, but it has no `users` row — support writes reference
- * users.id, so it cannot act, and a strict fail-closed rule would lock the only
- * operator out of Support entirely.
- *
- * This resolves that administrator AS ITSELF by provisioning its own canonical
- * staff identity, keyed on the authenticated email. It is idempotent, and it is
- * NOT a fallback: it can only ever produce an identity for the exact email that
- * actually authenticated. It never selects, substitutes or invents another
- * employee.
- *
- * The email is read from the environment, never hardcoded in source.
- */
-const ensureEnvironmentAdminIdentity = async (
-  email: string,
-): Promise<{ id: string; name: string } | null> => {
-  const configured = (process.env.CONSOLE_ADMIN_EMAIL ?? "").trim();
-  if (!configured || configured.toLowerCase() !== email.trim().toLowerCase()) return null;
-
-  const displayName = (process.env.CONSOLE_ADMIN_NAME ?? "").trim() || configured;
-
-  await panelExec(
-    `INSERT INTO users (id, email, role, display_name, is_active)
-     SELECT $1, $2, 'admin', $3, TRUE
-      WHERE NOT EXISTS (SELECT 1 FROM users WHERE LOWER(email) = LOWER($2))`,
-    [randomUUID(), configured, displayName],
-  );
-
-  return loadSupportActor(configured);
-};
-
 /** Why an actor could not be resolved. */
 export type SupportActorDenial = "no_session" | "not_staff" | "inactive" | "unavailable";
 
@@ -322,13 +289,17 @@ export const resolveSupportActor = async (
   if (!email) return { ok: false, reason: "no_session" };
 
   const staff = await loadSupportActor(email);
-  if (staff) return { ok: true, actor: staff, actorType: "staff" };
+  if (staff) {
+    const configured = (process.env.CONSOLE_ADMIN_EMAIL ?? "").trim().toLowerCase();
+    const actorType =
+      configured && configured === email.trim().toLowerCase() ? "environment_admin" : "staff";
+    return { ok: true, actor: staff, actorType };
+  }
 
-  const envAdmin = await ensureEnvironmentAdminIdentity(email);
-  if (envAdmin) return { ok: true, actor: envAdmin, actorType: "environment_admin" };
-
-  // Distinguish an inactive/known staff member from an outsider, so the denial
-  // is actionable. Never resolves to anyone.
+  // No identity. RESOLVE ONLY — we never create one here. The environment
+  // administrator's canonical identity is provisioned once at startup by
+  // bootstrapEnvironmentAdminIdentity(); if that has not run, we deny rather than
+  // invent an actor or borrow someone else's.
   const known = await panelQuery<{ active: boolean }>(
     `SELECT COALESCE(is_active, TRUE) AS active FROM users WHERE LOWER(email) = LOWER($1) LIMIT 1`,
     [email],

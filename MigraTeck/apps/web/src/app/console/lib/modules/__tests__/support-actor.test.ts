@@ -20,6 +20,8 @@ vi.mock("../../db", () => ({
   isPanelDbConfigured: () => true,
 }));
 
+vi.mock("../../audit", () => ({ auditLog: vi.fn() }));
+
 const load = async () => await import("../support");
 
 const STAFF = { id: "u-real", name: "Real Agent" };
@@ -103,14 +105,11 @@ describe("resolveSupportActor — fail closed", () => {
   });
 });
 
-describe("environment admin resolves AS ITSELF", () => {
-  it("provisions a canonical identity for CONSOLE_ADMIN_EMAIL and returns it", async () => {
+describe("environment admin resolves AS ITSELF (no runtime creation)", () => {
+  it("resolves the bootstrapped env admin, tagged environment_admin", async () => {
     process.env.CONSOLE_ADMIN_EMAIL = "admin@migrateck.com";
     const ENV_ADMIN = { id: "u-envadmin", name: "admin@migrateck.com" };
-
-    panelQuery.mockResolvedValueOnce([]); // first exact lookup: no users row (the live situation)
-    panelExec.mockResolvedValueOnce(undefined); // idempotent insert
-    panelQuery.mockResolvedValueOnce([ENV_ADMIN]); // re-read after insert
+    panelQuery.mockResolvedValueOnce([ENV_ADMIN]); // bootstrap already provisioned it
 
     const { resolveSupportActor } = await load();
     await expect(resolveSupportActor("admin@migrateck.com")).resolves.toEqual({
@@ -118,22 +117,72 @@ describe("environment admin resolves AS ITSELF", () => {
       actor: ENV_ADMIN,
       actorType: "environment_admin",
     });
+  });
 
-    // Identity is keyed on the AUTHENTICATED email, never another account.
+  it("NEVER creates an identity at request time — not even for the env admin", async () => {
+    process.env.CONSOLE_ADMIN_EMAIL = "admin@migrateck.com";
+    panelQuery.mockResolvedValueOnce([]); // not yet bootstrapped
+    panelQuery.mockResolvedValueOnce([]); // unknown
+
+    const { resolveSupportActor } = await load();
+    const result = await resolveSupportActor("admin@migrateck.com");
+
+    // Fails closed rather than provisioning mid-request.
+    expect(result).toEqual({ ok: false, reason: "not_staff" });
+    expect(panelExec).not.toHaveBeenCalled();
+  });
+
+  it("a foreign email causes NO insert and resolves to nobody", async () => {
+    process.env.CONSOLE_ADMIN_EMAIL = "admin@migrateck.com";
+    panelQuery.mockResolvedValueOnce([]);
+    panelQuery.mockResolvedValueOnce([]);
+
+    const { resolveSupportActor } = await load();
+    const result = await resolveSupportActor("attacker@evil.example");
+
+    expect(result).toEqual({ ok: false, reason: "not_staff" });
+    expect(panelExec).not.toHaveBeenCalled();
+    expect(JSON.stringify(result)).not.toContain("u-envadmin");
+  });
+});
+
+describe("identity bootstrap — startup only, env-driven", () => {
+  it("provisions the env admin exactly once, keyed on CONSOLE_ADMIN_EMAIL", async () => {
+    process.env.CONSOLE_ADMIN_EMAIL = "admin@migrateck.com";
+    panelQuery.mockResolvedValueOnce([]); // absent
+    panelExec.mockResolvedValueOnce(undefined);
+    panelQuery.mockResolvedValueOnce([{ id: "u-envadmin" }]); // re-read
+
+    const { bootstrapEnvironmentAdminIdentity } = await import("../identity-bootstrap");
+    const r = await bootstrapEnvironmentAdminIdentity();
+
+    expect(r).toEqual({ status: "created", email: "admin@migrateck.com", id: "u-envadmin" });
     const [, params] = panelExec.mock.calls[0] as [string, unknown[]];
     expect(params).toContain("admin@migrateck.com");
   });
 
-  it("does NOT treat the env admin as a fallback for someone else", async () => {
+  it("is idempotent when the identity already exists", async () => {
     process.env.CONSOLE_ADMIN_EMAIL = "admin@migrateck.com";
-    panelQuery.mockResolvedValueOnce([]); // stranger has no staff row
-    panelQuery.mockResolvedValueOnce([]); // and is unknown
+    panelQuery.mockResolvedValueOnce([{ id: "u-envadmin" }]);
 
-    const { resolveSupportActor } = await load();
-    const result = await resolveSupportActor("stranger@example.com");
+    const { bootstrapEnvironmentAdminIdentity } = await import("../identity-bootstrap");
+    const r = await bootstrapEnvironmentAdminIdentity();
 
-    expect(result).toEqual({ ok: false, reason: "not_staff" });
-    // Crucially: no identity was provisioned for the stranger.
+    expect(r).toEqual({ status: "exists", email: "admin@migrateck.com", id: "u-envadmin" });
+    expect(panelExec).not.toHaveBeenCalled();
+  });
+
+  it("takes no arguments — it cannot be driven by request input", async () => {
+    const { bootstrapEnvironmentAdminIdentity } = await import("../identity-bootstrap");
+    expect(bootstrapEnvironmentAdminIdentity.length).toBe(0);
+  });
+
+  it("skips cleanly when CONSOLE_ADMIN_EMAIL is not configured", async () => {
+    const { bootstrapEnvironmentAdminIdentity } = await import("../identity-bootstrap");
+    await expect(bootstrapEnvironmentAdminIdentity()).resolves.toEqual({
+      status: "skipped",
+      reason: "not_configured",
+    });
     expect(panelExec).not.toHaveBeenCalled();
   });
 });
