@@ -13,6 +13,7 @@ export const loadSupportSla = async (): Promise<SupportSlaData> => {
 
   const [
     totals,
+    priorTotals,
     byPri,
     agents,
   ] = await Promise.all([
@@ -29,6 +30,20 @@ export const loadSupportSla = async (): Promise<SupportSlaData> => {
          FROM chat_tickets
         WHERE created_at >= NOW() - INTERVAL '7 days'`,
     ),
+    panelQuery<{
+      total: string;
+      open: string;
+      avgresponse: string | null;
+      compliance: string | null;
+    }>(
+      `SELECT COUNT(*)::int AS total,
+              COUNT(*) FILTER (WHERE status NOT IN ('closed','resolved'))::int AS open,
+              ROUND(AVG(EXTRACT(EPOCH FROM (first_response_at - created_at)) / 60))::int AS avgresponse,
+              ROUND((COUNT(*) FILTER (WHERE sla_breached = FALSE)::numeric / NULLIF(COUNT(*), 0)) * 100, 1) AS compliance
+         FROM chat_tickets
+        WHERE created_at >= NOW() - INTERVAL '14 days'
+          AND created_at < NOW() - INTERVAL '7 days'`,
+    ),
     panelQuery<{ priority: string; count: string }>(
       `SELECT LOWER(priority) AS priority, COUNT(*)::int AS count
          FROM chat_tickets
@@ -42,7 +57,8 @@ export const loadSupportSla = async (): Promise<SupportSlaData> => {
               ) x), 0)) * 100)::int AS workload
          FROM users u
          LEFT JOIN chat_tickets t ON t.assigned_to = u.id AND t.status NOT IN ('closed','resolved')
-        WHERE u.role IN ('support','admin','agent')
+        WHERE u.role IN ('support','admin','agent','operations','manager')
+          AND COALESCE(u.is_active, TRUE) = TRUE
         GROUP BY u.id, u.display_name, u.email
         ORDER BY workload DESC NULLS LAST
         LIMIT 5`,
@@ -50,17 +66,40 @@ export const loadSupportSla = async (): Promise<SupportSlaData> => {
   ]);
 
   const t = totals[0];
+  const p = priorTotals[0];
   const priMap: Record<string, number> = {};
   for (const r of byPri) priMap[r.priority] = Number(r.count);
+  const deltaPct = (current: number | null, previous: number | null) => {
+    const safeCurrent = current ?? 0;
+    const safePrevious = previous ?? 0;
+    if (safePrevious === 0) {
+      return safeCurrent === 0 ? 0 : 100;
+    }
+    return Number((((safeCurrent - safePrevious) / safePrevious) * 100).toFixed(1));
+  };
+
+  const totalTickets = t ? Number(t.total) : 0;
+  const openTickets = t ? Number(t.open) : 0;
+  const avgResponseMinutes = t && t.avgresponse != null ? Number(t.avgresponse) : null;
+  const slaCompliancePct = t && t.compliance != null ? Number(t.compliance) : null;
+  const priorTotalTickets = p ? Number(p.total) : 0;
+  const priorOpenTickets = p ? Number(p.open) : 0;
+  const priorAvgResponseMinutes = p && p.avgresponse != null ? Number(p.avgresponse) : null;
+  const priorSlaCompliancePct = p && p.compliance != null ? Number(p.compliance) : null;
 
   return {
     totals: {
-      totalTickets: t ? Number(t.total) : 0,
-      openTickets: t ? Number(t.open) : 0,
-      avgResponseMinutes: t && t.avgresponse != null ? Number(t.avgresponse) : null,
-      slaCompliancePct: t && t.compliance != null ? Number(t.compliance) : null,
+      totalTickets,
+      openTickets,
+      avgResponseMinutes,
+      slaCompliancePct,
     },
-    delta: { totalPct: 0, openPct: 0, responsePct: 0, compliancePct: 0 },
+    delta: {
+      totalPct: deltaPct(totalTickets, priorTotalTickets),
+      openPct: deltaPct(openTickets, priorOpenTickets),
+      responsePct: deltaPct(avgResponseMinutes, priorAvgResponseMinutes),
+      compliancePct: deltaPct(slaCompliancePct, priorSlaCompliancePct),
+    },
     byPriority: {
       critical: priMap.critical || 0,
       high: priMap.high || 0,
