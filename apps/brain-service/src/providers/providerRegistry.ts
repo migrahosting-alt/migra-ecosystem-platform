@@ -18,11 +18,19 @@ export class StubProvider implements ProviderAdapter {
   }
 
   async complete(request: ChatTurnRequest): Promise<ChatTurnResponse> {
-    const content = [
-      `Stub provider response for profile: ${this.profile}.`,
-      `Feature: ${request.feature}.`,
-      'Wire a real model provider here next.',
-    ].join(' ');
+    // Engineer-protocol turns get a deterministic protocol-compliant reply so
+    // the loop is integration-testable without a real model: first turn reads a
+    // file, subsequent turns finalize.
+    const isEngineer = request.userPrompt.includes('MigraPilot workspace engineer');
+    const content = isEngineer
+      ? request.userPrompt.includes('Result of ') || request.userPrompt.includes('FAILED')
+        ? '{"final":"Stub engineer inspected the workspace and finished."}'
+        : '{"action":{"tool":"git.status","input":{}}}'
+      : [
+          `Stub provider response for profile: ${this.profile}.`,
+          `Feature: ${request.feature}.`,
+          'Wire a real model provider here next.',
+        ].join(' ');
 
     return {
       modelProfile: this.profile,

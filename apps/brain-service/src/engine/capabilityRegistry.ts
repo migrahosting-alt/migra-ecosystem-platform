@@ -26,7 +26,9 @@ import {
   EditPreviewRequestSchema,
   EditApplyRequestSchema,
   DiagnosticsGetRequestSchema,
+  CommandRunRequestSchema,
 } from '@migrapilot/protocol';
+import { commandRun } from '../tools/commandRun.js';
 import { workspaceSearch } from '../tools/workspaceSearch.js';
 import { fileReadRange } from '../tools/fileReadRange.js';
 import { fileReadSymbol } from '../tools/fileReadSymbol.js';
@@ -78,7 +80,7 @@ interface RunnableCapability {
 /** Grants held by the local engine deployment. The read/write/git grants make the
  * eight brain tools available; `terminal.exec` / `deployment.*` are intentionally
  * NOT granted, so those future capabilities register as unavailable. */
-export const LOCAL_GRANTS: ReadonlySet<string> = new Set(['workspace.read', 'workspace.write', 'git.read']);
+export const LOCAL_GRANTS: ReadonlySet<string> = new Set(['workspace.read', 'workspace.write', 'git.read', 'command.run']);
 
 const TOOLS: RunnableCapability[] = [
   {
@@ -127,6 +129,17 @@ const TOOLS: RunnableCapability[] = [
     handler: (i) => editApply(i as never),
     // Dry-run / approval preview shares the edit.preview implementation (same input).
     preview: (i) => editPreview(i as never),
+  },
+  {
+    // Policy-allowlisted argv execution (build/test/debug). NOT free shell —
+    // argv[0] must be on the server allowlist, cwd is contained, no shell is
+    // spawned. Distinct from terminal.exec (below), which stays ungranted.
+    descriptor: meta('command.run', 'Run Command', 'Run an allowlisted build/test command in the workspace.', 'terminal', ['command.run'], {
+      readOnly: false,
+      approvalRequired: false,
+    }),
+    inputSchema: CommandRunRequestSchema,
+    handler: (i) => commandRun(i as never),
   },
   {
     // Future capability — registered but UNAVAILABLE (grant not held), so it

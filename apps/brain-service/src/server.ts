@@ -17,6 +17,7 @@ import { decideRoute } from './router/policy.js';
 import { registerToolRoutes } from './tools/index.js';
 import { registerAiRoutes } from './engine/aiRoutes.js';
 import { registerToolExecutionRoutes } from './engine/toolRoutes.js';
+import { registerEngineerRoutes } from './engine/engineerRoutes.js';
 import { registerAgentRoutes } from './engine/agentRoutes.js';
 import { AgentRegistry } from './engine/agentRegistry.js';
 import { AgentService } from './engine/agentRuntime.js';
@@ -230,6 +231,11 @@ async function main(): Promise<void> {
   // tool validation, availability, dispatch, and the approval lifecycle. Additive
   // — the legacy /tools/* routes remain for compatibility.
   const toolDeps = registerToolExecutionRoutes(app);
+  // MigraAI workspace engineer (/api/ai/engineer): the model-in-the-loop LOCAL
+  // engineering agent (Slice 2). Runs through the SAME tool boundary; never
+  // mutates (edit.apply is substituted with preview proposals) and never touches
+  // the pilot runtime — disabled delegation cannot block local work.
+  registerEngineerRoutes(app, env, modelRegistry, toolDeps);
   // MigraAI Engine agent orchestration (/api/ai/agents): the engine owns the
   // public agent contract; runs execute through the SAME tool boundary + approval
   // store above, so agent tool calls are validated + audited identically.
