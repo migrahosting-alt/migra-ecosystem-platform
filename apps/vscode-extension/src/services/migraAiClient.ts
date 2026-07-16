@@ -514,11 +514,17 @@ export class MigraAiClient {
   }
 
   /** Map an engine tool-boundary error → correlated PilotError, preferring the
-   * structured `code` over the HTTP status. Never surfaces raw provider bodies. */
+   * structured `code` over the HTTP status. Never surfaces raw provider bodies —
+   * only the engine's own sanitized error text and schema issues are relayed. */
   private async toolHttpError(res: Response, requestId: string): Promise<PilotError> {
     let serverCode: string | undefined;
+    let serverError: string | undefined;
+    let issues: Array<{ path?: string; message?: string }> | undefined;
     try {
-      serverCode = ((await res.json()) as { code?: string }).code;
+      const body = (await res.json()) as { code?: string; error?: string; issues?: Array<{ path?: string; message?: string }> };
+      serverCode = body.code;
+      serverError = typeof body.error === 'string' ? body.error : undefined;
+      issues = Array.isArray(body.issues) ? body.issues : undefined;
     } catch {
       /* non-JSON */
     }
@@ -531,7 +537,20 @@ export class MigraAiClient {
       case 'INVALID_STATE':
         code = 'INVALID_STATE';
         break;
-      case 'INVALID_INPUT':
+      case 'INVALID_INPUT': {
+        // Truthful validation failure: relay the engine's message + schema
+        // issues (engine-authored zod paths/messages, sanitized by construction)
+        // instead of collapsing to a generic SERVER_ERROR.
+        const detail = (issues ?? [])
+          .map((i) => [i.path, i.message].filter(Boolean).join(': '))
+          .filter(Boolean)
+          .join('; ')
+          .slice(0, 500);
+        return new PilotError('INVALID_INPUT', `${serverError ?? 'The request input was invalid.'}${detail ? ` (${detail})` : ''}`, {
+          httpStatus: res.status,
+          requestId,
+        });
+      }
       case 'TOOL_FAILED':
         code = 'SERVER_ERROR';
         break;

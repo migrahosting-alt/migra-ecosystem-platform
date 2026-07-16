@@ -97,6 +97,22 @@ before(async () => {
         res.end(JSON.stringify({ ok: false, code: 'CAPABILITY_DENIED', requestId }));
         return;
       }
+      if (body.tool === 'bad.input') {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          ok: false,
+          code: 'INVALID_INPUT',
+          error: 'Agent input failed schema validation.',
+          issues: [{ path: 'rootPath', message: 'Required' }, { path: 'path', message: 'Required' }],
+          requestId,
+        }));
+        return;
+      }
+      if (body.tool === 'explode.tool') {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, code: 'TOOL_FAILED', requestId }));
+        return;
+      }
       if (body.approvalId === 'used') {
         res.writeHead(409, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ ok: false, code: 'INVALID_STATE', requestId }));
@@ -201,6 +217,24 @@ test('unknown tool → CAPABILITY_MISSING; denied → CAPABILITY_MISSING; replay
   await assert.rejects(
     () => client().executeTool({ tool: 'edit.apply', input: {}, approvalId: 'used' }),
     (e: unknown) => e instanceof PilotError && e.code === 'INVALID_STATE',
+  );
+});
+
+test('schema validation failure → INVALID_INPUT with the engine issues, never a generic SERVER_ERROR', async () => {
+  await assert.rejects(
+    () => client().executeTool({ tool: 'bad.input', input: {} }),
+    (e: unknown) =>
+      e instanceof PilotError &&
+      e.code === 'INVALID_INPUT' &&
+      /Agent input failed schema validation/.test(e.message) &&
+      /rootPath: Required; path: Required/.test(e.message),
+  );
+});
+
+test('unexpected tool failure stays SERVER_ERROR (TOOL_FAILED is not a validation error)', async () => {
+  await assert.rejects(
+    () => client().executeTool({ tool: 'explode.tool', input: {} }),
+    (e: unknown) => e instanceof PilotError && e.code === 'SERVER_ERROR',
   );
 });
 

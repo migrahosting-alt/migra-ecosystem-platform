@@ -14,6 +14,7 @@ export type PilotErrorCode =
   | 'CAPABILITY_MALFORMED'
   | 'CAPABILITY_INCOMPATIBLE'
   | 'INVALID_STATE'
+  | 'INVALID_INPUT'
   | 'NETWORK'
   | 'SERVER_ERROR'
   | 'CANCELLED';
@@ -69,6 +70,8 @@ export function toUserMessage(code: PilotErrorCode): string {
       return 'The Pilot service speaks an incompatible protocol version.';
     case 'INVALID_STATE':
       return 'This action can no longer be changed — it was already decided or has expired.';
+    case 'INVALID_INPUT':
+      return 'The request input was invalid.';
     case 'NETWORK':
       return 'Could not reach the Pilot service.';
     case 'SERVER_ERROR':
@@ -96,6 +99,7 @@ export function suggestedAction(code: PilotErrorCode): 'set-token' | 'retry' | '
     case 'CAPABILITY_MALFORMED':
     case 'CAPABILITY_INCOMPATIBLE':
     case 'INVALID_STATE':
+    case 'INVALID_INPUT':
     case 'CANCELLED':
       return 'none';
   }
