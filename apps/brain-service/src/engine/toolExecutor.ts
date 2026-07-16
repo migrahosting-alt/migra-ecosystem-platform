@@ -76,6 +76,20 @@ export async function executeToolCore(deps: ToolExecDeps, req: ToolExecInput): P
     }
   }
 
+  // Mutating-class tools that DECLARE approvalRequired: false (e.g. command.run,
+  // whose own policy layer — allowlist/containment/kill-switch — is the control)
+  // execute immediately, exactly as the catalog advertises. Approval remains
+  // mandatory for every tool that declares it (edit.apply).
+  if (runnable.descriptor.approvalRequired === false) {
+    try {
+      const result = await runnable.handler(input);
+      audit.record({ requestId, tool: toolId, action: 'executed', readOnly: false, outcome: 'ok' });
+      return { ok: true, httpStatus: 200, status: 'executed', tool: toolId, requestId, result };
+    } catch (error) {
+      return failed(audit, requestId, toolId, false, error);
+    }
+  }
+
   const inputHash = hashInput(input);
 
   if (req.dryRun) {

@@ -16,7 +16,7 @@ const TASK_VERBS =
   /^(build|create|implement|add|fix|refactor|write|generate|scaffold|make|set\s*up|run|install|debug|investigate|diagnose|instrument|update|rename|convert|migrate|optimize|remove|delete)\b/i;
 
 const CODE_OBJECTS =
-  /\b(app|application|file|files|function|class|component|module|test|tests|bug|error|errors|script|page|endpoint|route|api|package|dependency|dependencies|project|folder|repo|json|config|build|lint|type ?error|latency|stage|pipeline)\b/i;
+  /\b(app|application|file|files|function|class|component|module|test|tests|bug|error|errors|script|page|endpoint|route|api|package|dependency|dependencies|project|folder|repo|json|config|build|lint|type ?error|latency|stage|pipeline|utility|tool|cli|database|schema|service|library|server)\b/i;
 
 /** A file-ish token: something/with/slashes or name.ext */
 const FILEISH = /(\.[a-z]{1,5}\b|\/[\w.-]+)/i;

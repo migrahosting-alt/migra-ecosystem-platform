@@ -127,6 +127,11 @@ export function registerEngineerRoutes(
         executeTool: async (tool, input) => {
           const outcome = await executeToolCore(toolDeps, { tool, input, requestId: `eng-${Date.now().toString(36)}` });
           if (!outcome.ok) throw new Error(`${outcome.code}: ${outcome.error}`);
+          // The loop never holds approvals — if a tool unexpectedly parks, that
+          // is explicit feedback to the model, never a silent null result.
+          if (outcome.status === 'approval_required') {
+            throw new Error('APPROVAL_REQUIRED: this tool needs operator approval and cannot run inside the loop.');
+          }
           return outcome.result ?? outcome.preview;
         },
         tools: loopTools(),

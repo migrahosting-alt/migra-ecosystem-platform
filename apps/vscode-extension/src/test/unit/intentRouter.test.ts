@@ -13,6 +13,9 @@ test('general engineering requests route to the workspace agent', () => {
   assert.equal(classifyIntent('fix the type error in src/chat/chatEngine.ts'), 'workspace-task');
   assert.equal(classifyIntent('run the tests and debug the failures'), 'workspace-task');
   assert.equal(classifyIntent('Investigate why the ordinary-chat request path has high latency stages'), 'workspace-task');
+  // From owner physical test 4: creating a utility/database IS engineering
+  // (even though "migration" must not trip the ecosystem markers).
+  assert.equal(classifyIntent('Create a migration utility for this SQLite database.'), 'workspace-task');
 });
 
 test('conversational questions remain on the lightweight chat path', () => {

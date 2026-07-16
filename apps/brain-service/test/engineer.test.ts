@@ -10,6 +10,9 @@ import * as path from 'node:path';
 import { commandRun, commandAllowlist, commandRunEnabled } from '../src/tools/commandRun.js';
 import { runEngineerTask, parseStep, type EngineerEvent, type EngineerToolInfo } from '../src/engine/engineerRuntime.js';
 import { CapabilityRegistry } from '../src/engine/capabilityRegistry.js';
+import { ToolApprovalStore } from '../src/engine/toolApprovalStore.js';
+import { ToolAudit } from '../src/engine/toolAudit.js';
+import { executeToolCore } from '../src/engine/toolExecutor.js';
 
 function ws(): string {
   const root = mkdtempSync(path.join(tmpdir(), 'migra-engineer-'));
@@ -87,6 +90,22 @@ test('command.run is registered available; terminal.exec stays denied', () => {
   assert.ok(cmd && cmd.available, 'command.run must be granted');
   const term = registry.get('terminal.exec');
   assert.ok(term && !term.available, 'terminal.exec must stay ungranted');
+});
+
+test('executor honors approvalRequired:false — command.run executes immediately; edit.apply still parks', async () => {
+  const deps = { registry: new CapabilityRegistry(), approvals: new ToolApprovalStore(), audit: new ToolAudit() };
+  const root = ws();
+  const ran = await executeToolCore(deps, { tool: 'command.run', input: { rootPath: root, command: ['node', 'hello.js'] }, requestId: 'r1' });
+  assert.ok(ran.ok, 'command.run must not park for approval');
+  assert.equal(ran.ok && ran.status, 'executed');
+  assert.match(String((ran.ok && (ran.result as { stdout: string }).stdout) ?? ''), /hi from ws/);
+
+  const parked = await executeToolCore(deps, {
+    tool: 'edit.apply',
+    input: { rootPath: root, changes: [{ path: 'hello.js', startLine: 1, endLine: 1, replacement: '// x' }] },
+    requestId: 'r2',
+  });
+  assert.ok(parked.ok && parked.status === 'approval_required', 'edit.apply must STILL require approval');
 });
 
 // ── engineer runtime (scripted model, real semantics) ──────────────────────────
