@@ -1,0 +1,104 @@
+{
+  "_comment": "MigraAI model qualification manifest — the record of truth for the Capability Router. mode=enforced serves ONLY approved models in production; rejected AND deprecated models are never served (a retired model never silently returns); unlisted installed models are evaluation-only. Vision models form the Vision Registry (GET /api/ai/vision-registry) and follow the same discipline: a vision model becomes the default only after it is licensed, measured (scripts/benchmark-vision.mjs vs eval/migraai-vision-eval-set.json), and proven. See docs/migraai-model-catalog.md + docs/migraai-vision-registry.md. Benchmarks: eval/results/. Edit here + restart brain-service (or reload) to change routing.",
+  "mode": "enforced",
+  "models": {
+    "qwen2.5-coder:7b": {
+      "state": "approved",
+      "tier": "fast",
+      "license": "Apache-2.0",
+      "commercial": true,
+      "benchmarkedAt": "2026-07-15",
+      "reason": "127 tok/s, 100% GPU, eval 7/9 (strong coding; refusal cases weaker)"
+    },
+    "qwen2.5-coder:14b": {
+      "state": "approved",
+      "tier": "balanced",
+      "license": "Apache-2.0",
+      "commercial": true,
+      "reason": "grandfathered production coder; ~100% GPU on 12GB"
+    },
+    "qwen3-coder:30b": {
+      "state": "approved",
+      "tier": "deep",
+      "license": "Apache-2.0",
+      "commercial": true,
+      "benchmarkedAt": "2026-07-15",
+      "reason": "66 tok/s (MoE 30B-A3B, 56% GPU offload), eval 9/9 — strongest all-rounder"
+    },
+    "deepseek-r1:14b": {
+      "state": "approved",
+      "tier": "balanced",
+      "license": "MIT (R1) over Apache-2.0 (Qwen distill base)",
+      "commercial": true,
+      "benchmarkedAt": "2026-07-15",
+      "evaluation": { "initial": "3/9 — invalid (reasoning-mode benchmark mismatch)", "reevaluation": "8/9 reasoning-aware final-answer-only (disabled 8/9, enabled 8/9)" },
+      "reason": "reasoning; 38 tok/s, 100% GPU. Passes the same 7/9 threshold under the corrected reasoning-aware eval. Chain-of-thought never surfaced."
+    },
+    "llava:latest": {
+      "state": "deprecated",
+      "license": "code Apache-2.0; weights Vicuna/Llama-derived",
+      "commercial": "review-required",
+      "benchmarkedAt": "2026-07-15",
+      "evaluation": { "vision": "79% overall, FAILED the OCR exact-text gate — misread invoice 'MG-4471'->'MG-471' and '$1,284.50'->'$1,936'" },
+      "reason": "DEPRECATED — superseded by qwen2.5vl:7b (qualified 2026-07-15). Retired for two reasons: (1) cannot reliably OCR (fabricated invoice digits under the deterministic OCR fixture), and (2) commercial license UNRESOLVED (Vicuna/Llama-derived weights). Never served again (retired, fail-closed)."
+    },
+    "qwen2.5vl:7b": {
+      "state": "approved",
+      "tier": "vision",
+      "license": "Apache-2.0",
+      "commercial": true,
+      "benchmarkedAt": "2026-07-15",
+      "evaluation": { "vision": "94% overall, PASS. OCR exact-gate ✓ (read 'MG-4471' + '$1,284.50' verbatim); UI/code/diagram/chart/screenshot all 100%; 62.9 tok/s" },
+      "reason": "QUALIFIED vision default. Apache-2.0 (unambiguous commercial use). Proven via scripts/benchmark-vision.mjs against deterministic ground truth — NOT grandfathered. Supersedes llava, which failed the OCR gate."
+    },
+    "minicpm-v:8b": {
+      "state": "restricted",
+      "tier": "vision",
+      "license": "MiniCPM Model License (commercial use permitted after registration)",
+      "commercial": "review-required",
+      "benchmarkedAt": "2026-07-15",
+      "evaluation": { "vision": "94% overall, PASS. OCR exact-gate ✓ (read 'MG-4471' + '$1,284.50' verbatim); UI/code/diagram/chart/screenshot all 100%; 69.8 tok/s; 5.47GB" },
+      "reason": "QUALIFIED BACKUP — passed the identical bar (94%, OCR ✓, same as qwen2.5vl:7b). Held `restricted` (evaluation-only, NOT the production default) because it shows no concrete advantage over the default (accuracy tie; latency +9% and size -8% are marginal/within variance) AND its commercial license requires registration (review-required) vs the default's clean Apache-2.0. Promote to `approved` + demote qwen2.5vl only on a demonstrated advantage."
+    },
+    "nomic-embed-text:latest": {
+      "state": "approved",
+      "tier": "embedding",
+      "license": "Apache-2.0",
+      "commercial": true,
+      "reason": "embeddings"
+    },
+    "llama3.2-vision:11b": {
+      "state": "rejected",
+      "license": "Meta Llama Community",
+      "commercial": "conditional",
+      "reason": "fails to load on Ollama 0.32 — unknown model architecture 'mllama' (HTTP 500). Never route to it."
+    },
+    "deepseek-r1:32b": {
+      "state": "installed",
+      "license": "MIT (R1) over Apache-2.0 (Qwen distill base)",
+      "commercial": true,
+      "reason": "dense 32B → ~56% GPU offload, slower than the qwen3-coder MoE; evaluation-only until a latency benchmark justifies production"
+    },
+    "qwen3:14b": {
+      "state": "approved",
+      "tier": "balanced",
+      "license": "Apache-2.0",
+      "commercial": true,
+      "benchmarkedAt": "2026-07-15",
+      "evaluation": { "initial": "2/9 — INVALID for promotion (reasoning-mode benchmark mismatch)", "reevaluation": "9/9 reasoning-aware final-answer-only (disabled 9/9, enabled 9/9)" },
+      "reason": "general/multilingual + tools + thinking, 9.3GB @ 100% GPU, 38.8 tok/s. Promoted on the corrected reasoning-aware eval — passes the SAME 7/9 threshold (no lower bar). Chain-of-thought never surfaced."
+    },
+    "llama3.1:8b": {
+      "state": "installed",
+      "license": "Meta Llama Community",
+      "commercial": "conditional",
+      "reason": "source-available, not OSI; 'Built with Llama' attribution + Meta AUP required. Not needed in production; evaluation-only."
+    },
+    "qwen2.5-coder:1.5b-base": {
+      "state": "installed",
+      "license": "Apache-2.0",
+      "commercial": true,
+      "reason": "base (non-instruct) model — not for chat"
+    }
+  }
+}

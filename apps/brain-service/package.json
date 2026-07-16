@@ -1,0 +1,33 @@
+{
+  "name": "@migrapilot/brain-service",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/src/server.js",
+  "types": "./dist/src/server.d.ts",
+  "scripts": {
+    "clean": "rimraf dist tsconfig.tsbuildinfo",
+    "build": "tsc -b",
+    "dev": "tsx watch src/server.ts",
+    "start": "node dist/src/server.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "npm run build && node --test dist/test/**/*.test.js",
+    "watch": "tsc -b -w"
+  },
+  "dependencies": {
+    "@fastify/cors": "^10.0.1",
+    "@migrapilot/protocol": "0.1.0",
+    "@migrapilot/shared-types": "0.1.0",
+    "dotenv": "^16.4.7",
+    "fastify": "^5.0.0",
+    "typescript": "^5.6.3",
+    "@migrapilot/pilot-client": "0.1.0",
+    "@migrapilot/agent-defs": "0.1.0",
+    "@migrapilot/workspace-tools": "0.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.7.5",
+    "rimraf": "^6.0.1",
+    "tsx": "^4.19.1"
+  }
+}
