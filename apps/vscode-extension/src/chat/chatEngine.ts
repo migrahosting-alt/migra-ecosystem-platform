@@ -6,6 +6,7 @@ import { newRequestId } from '@migrapilot/pilot-client';
 import { isPilotError, toUserMessage } from '@migrapilot/pilot-client';
 import { type AiChatRequest, MigraAiClient } from '../services/migraAiClient.js';
 import { EngineDiagnostics } from '../services/engineDiagnostics.js';
+import { parseAgentCommand, runAgentCommand } from './agentCommand.js';
 import { buildAiRequest } from './intentMapping.js';
 
 /** A backend-agnostic output surface for a chat turn. Both the native chat
@@ -75,6 +76,19 @@ export async function runChatTurn(
   const selectionText = activeEditor
     ? activeEditor.document.getText(activeEditor.selection).trim() || undefined
     : undefined;
+
+  // ── explicit /agent command: the ONLY chat path to the agent runtime ────────
+  // Dispatched straight to the engine's agent-runs contract; the conversational
+  // model is never involved, and any failure renders as a machine-generated
+  // execution error — never an LLM apology, never a silent fallback to chat.
+  const agentCmd = parseAgentCommand(trimmed);
+  if (agentCmd) {
+    await runAgentCommand(deps.migraAiClient, agentCmd, sink, {
+      rootPath: vscode.workspace.workspaceFolders?.[0]?.uri.fsPath,
+      path: activeEditor ? vscode.workspace.asRelativePath(activeEditor.document.uri) : undefined,
+    });
+    return;
+  }
 
   const feature = inferFeature(trimmed);
   const requestId = newRequestId();
