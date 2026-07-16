@@ -1,0 +1,531 @@
+import * as vscode from 'vscode';
+import type { DiagnosticsGetResponse } from '@migrapilot/protocol';
+import { registerMigraPilotParticipant } from './chat/migrapilotParticipant.js';
+import { runExplainSelection } from './commands/explainSelection.js';
+import { runFixDiagnostics } from './commands/fixDiagnostics.js';
+import { type CommitGenResult, runGenerateCommitMessage, runGenerateCommitMessageCommand } from './commands/generateCommitMessage.js';
+import { syncDiagnostics, syncDiagnosticsToPilot } from './diagnostics.js';
+import { type CommandDeps } from './commands/commandRouting.js';
+import { type TestGenDeps, type TestGenResult, runGenerateTests, runGenerateTestsCommand } from './commands/generateTests.js';
+import { runReviewApprovals } from './commands/reviewApprovals.js';
+import { ApprovalsClient } from '@migrapilot/pilot-client';
+import { renderActionConsent } from './services/approvalDelta.js';
+import { BackendRouter, type ResolvedBackend } from './services/backendRouter.js';
+import {
+  BackendDiagnostics,
+  type DiagnosticSnapshot,
+  type LocalProbe,
+  type ResolutionInfo,
+} from './services/backendDiagnostics.js';
+import { BrainLifecycle, type EnsureResult } from './services/brainLifecycle.js';
+import { createRealBrainLauncher } from './services/brainLifecycleVscode.js';
+import { BrainClient } from './services/brainClient.js';
+import { CAP_DIAGNOSTICS_SYNC, evaluateCapability } from './services/commandCapabilities.js';
+import { PilotApiClient } from '@migrapilot/pilot-client';
+import { VscodePilotApiConfig, VscodeSecretTokenStore, getMode } from './services/pilotConfigVscode.js';
+import {
+  ProviderLocalChatBackend,
+  VscodeProviderKeyStore,
+  buildActiveProvider,
+  getProviderKind,
+} from './services/providerConfigVscode.js';
+import { type ModelProvider } from './providers/modelProvider.js';
+import { MigraPilotStatusBar } from './services/statusBar.js';
+import { MigraPilotSidebarProvider } from './panel/sidebarView.js';
+import { MigraPilotChatViewProvider } from './panel/chatView.js';
+import { MigraPilotWorkspaceViewProvider } from './panel/workspaceView.js';
+import { WorkspaceController } from './panel/workspaceController.js';
+import { type WorkspacePanelModel, type RootResolution } from './panel/workspaceViewModel.js';
+import { MigraAiClient } from './services/migraAiClient.js';
+import { EngineDiagnostics, type EngineDiagnosticSnapshot } from './services/engineDiagnostics.js';
+import { type TokenStore } from './services/tokenStore.js';
+
+let outputChannel: vscode.OutputChannel;
+let brainClient: BrainClient;
+let migraAiClient: MigraAiClient;
+let engineDiagnostics: EngineDiagnostics;
+let statusBar: MigraPilotStatusBar;
+let router: BackendRouter;
+let tokenStore: TokenStore;
+let pilotClient: PilotApiClient;
+let commandDeps: CommandDeps;
+let testGenDeps: TestGenDeps;
+let brainLifecycle: BrainLifecycle;
+let providerKeys: VscodeProviderKeyStore;
+let makeProvider: () => ModelProvider;
+let diagnostics: BackendDiagnostics;
+let sidebar: MigraPilotSidebarProvider;
+let chatView: MigraPilotChatViewProvider;
+let workspaceView: MigraPilotWorkspaceViewProvider;
+let workspaceController: WorkspaceController;
+let pendingResolutionInfo: ResolutionInfo | undefined;
+
+/** Public API returned from activate() — used by the Extension Host tests to
+ * drive backend resolution, token storage, and lifecycle without private-state
+ * hacks. */
+export interface MigraPilotApi {
+  router: BackendRouter;
+  resolveBackend(force?: boolean): Promise<ResolvedBackend>;
+  setToken(token: string): Promise<void>;
+  clearToken(): Promise<void>;
+  /** Approval lifecycle client (over the same pilotClient) — used by host tests
+   * to exercise approve/reject/resume/reconcile against server state. */
+  approvals: ApprovalsClient;
+  /** Render the user-facing consent view (filtered delta) for an action's
+   * change — used by host tests to verify no internal material is displayed. */
+  renderConsent(actionId: string): Promise<string>;
+  /** The currently-configured model provider (built from settings + SecretStorage
+   * key) — used by host tests to prove a real provider run. */
+  provider(): ModelProvider;
+  setProviderKey(key: string): Promise<void>;
+  clearProviderKey(): Promise<void>;
+  /** Programmatic test-generation (host tests) — same flow as the command but
+   * with a boolean confirm instead of the modal. */
+  generateTests(targetRelPath: string, confirm: boolean, opts?: { runCommand?: boolean }): Promise<TestGenResult>;
+  /** Read-only commit-message generation (host tests) — never mutates the repo. */
+  generateCommitMessage(opts?: { includeUnstaged?: boolean }): Promise<CommitGenResult>;
+  /** Local brain lifecycle (auto-start / shutdown). LOCAL only. */
+  lifecycle: {
+    ensureRunning(): Promise<EnsureResult>;
+    shutdown(): Promise<void>;
+    ownedPid(): number | undefined;
+  };
+  /** MigraAI Workspace controls (host tests) — the SAME client + mapper the panel
+   * uses, so open/sync/rebuild/approve/delete are exercised end-to-end against the
+   * engine. Approve binds to the exact observed index version. */
+  workspace: {
+    resolveRoot(): RootResolution;
+    open(root?: string, opts?: { memoryMode?: 'off' | 'session' | 'durable' }): Promise<WorkspacePanelModel>;
+    get(id: string): Promise<WorkspacePanelModel>;
+    sync(id: string): Promise<WorkspacePanelModel>;
+    rebuild(id: string): Promise<WorkspacePanelModel>;
+    approve(id: string, indexVersion: number): Promise<WorkspacePanelModel>;
+    setMemoryMode(id: string, mode: 'off' | 'session' | 'durable'): Promise<WorkspacePanelModel>;
+    delete(id: string): Promise<{ ok: boolean }>;
+    list(): Promise<Array<{ id: string; name: string; root: string }>>;
+  };
+  /** Sanitized, local-only backend-selection diagnostics snapshot. */
+  backendDiagnostics(): DiagnosticSnapshot;
+  /** Sanitized, local-only MigraAI Engine routing snapshot (selected model /
+   * provider / tier / reason / failed-over models per chat turn). */
+  engineDiagnostics(): EngineDiagnosticSnapshot;
+}
+
+/** Map a lifecycle result to a coarse local-probe outcome for diagnostics. */
+function localProbeFor(result: EnsureResult): LocalProbe {
+  switch (result) {
+    case 'already-brain':
+    case 'started':
+      return 'ready';
+    case 'conflict':
+      return 'conflict';
+    case 'unable':
+    case 'disabled':
+      return 'down';
+  }
+}
+
+/** Ensure the local brain is running (LOCAL mode only). Reads config for the
+ * brain URL, autoStart flag, and launch command. pilot-api is never touched. */
+async function ensureBrainRunning(): Promise<EnsureResult> {
+  const cfg = vscode.workspace.getConfiguration('migrapilot');
+  const url = String(cfg.get('brainUrl', 'http://127.0.0.1:3988'));
+  const autoStart = cfg.get<boolean>('autoStartBrain', true);
+  const command = cfg.get<string[]>('brainAutoStartCommand', []);
+  const result = await brainLifecycle.ensureRunning({ url, autoStart, command });
+  output(`brain lifecycle: ${result}`);
+  // Observational: attach the local probe outcome to the latest diagnostic event.
+  diagnostics.annotateLocalProbe(localProbeFor(result));
+  return result;
+}
+
+export async function activate(context: vscode.ExtensionContext): Promise<MigraPilotApi> {
+  outputChannel = vscode.window.createOutputChannel('MigraPilot');
+  brainClient = new BrainClient(outputChannel);
+  // MigraAI Engine client — the local chat path streams through /api/ai/chat.
+  // The engine is served by brain-service, so it shares the brain base URL.
+  migraAiClient = new MigraAiClient({
+    baseUrl: () => String(vscode.workspace.getConfiguration('migrapilot').get('brainUrl', 'http://127.0.0.1:3988')),
+    timeoutMs: () => Number(vscode.workspace.getConfiguration('migrapilot').get('requestTimeoutMs', 30000)),
+    log: (message) => output(message),
+    // Memory isolation: one workspace's conversations never leak into another.
+    scope: () => ({ owner: 'local', workspace: vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? 'default' }),
+  });
+  engineDiagnostics = new EngineDiagnostics(() => Date.now());
+  statusBar = new MigraPilotStatusBar();
+
+  tokenStore = new VscodeSecretTokenStore(context.secrets);
+  pilotClient = new PilotApiClient(new VscodePilotApiConfig(tokenStore, outputChannel));
+  providerKeys = new VscodeProviderKeyStore(context.secrets);
+  makeProvider = () => buildActiveProvider(providerKeys, outputChannel);
+  diagnostics = new BackendDiagnostics(() => Date.now());
+  router = new BackendRouter({
+    mode: getMode,
+    // Local chat runs through the configured model provider (default: stub).
+    local: new ProviderLocalChatBackend(makeProvider),
+    pilot: pilotClient,
+    log: output,
+    // Observational only — records why a backend was selected; never affects it.
+    onResolution: (info) => {
+      pendingResolutionInfo = info;
+    },
+  });
+  commandDeps = { brainClient, router, pilot: pilotClient, migraAi: migraAiClient, output: outputChannel };
+  testGenDeps = { ...commandDeps, makeProvider };
+  brainLifecycle = new BrainLifecycle(createRealBrainLauncher(), output);
+
+  registerMigraPilotParticipant(context, brainClient, router, migraAiClient, engineDiagnostics);
+
+  sidebar = new MigraPilotSidebarProvider(context.extensionUri, {
+    brainClient,
+    router,
+    providerKind: getProviderKind,
+  });
+  context.subscriptions.push(
+    vscode.window.registerWebviewViewProvider(MigraPilotSidebarProvider.viewType, sidebar),
+  );
+
+  // Dedicated chat panel (Claude Code / Copilot-style) — its own webview, no
+  // `@migrapilot` mention required. Reuses the same backend turn pipeline as the
+  // native participant. retainContextWhenHidden keeps the transcript alive when
+  // the view is collapsed or hidden.
+  chatView = new MigraPilotChatViewProvider(context.extensionUri, {
+    brainClient,
+    router,
+    migraAiClient,
+    engineDiagnostics,
+    memoryMode: () => {
+      const m = String(vscode.workspace.getConfiguration('migrapilot').get('memoryMode', 'session'));
+      return m === 'off' || m === 'durable' ? m : 'session';
+    },
+    conversationMemento: context.workspaceState,
+    output: outputChannel,
+  });
+  context.subscriptions.push(
+    vscode.window.registerWebviewViewProvider(MigraPilotChatViewProvider.viewType, chatView, {
+      webviewOptions: { retainContextWhenHidden: true },
+    }),
+    vscode.commands.registerCommand('migrapilot.openChat', async () => {
+      await vscode.commands.executeCommand('migrapilot.chatView.focus');
+      chatView.reveal();
+    }),
+  );
+
+  // MigraAI Workspace panel — an operational view of the workspace product object
+  // (semantic index, memory, agents, models, engine) and thin controls over the
+  // engine's `/api/ai/workspaces` endpoints. Read-only until an action is taken;
+  // every action re-reads authoritative engine state.
+  workspaceController = new WorkspaceController(
+    migraAiClient,
+    () => (vscode.workspace.workspaceFolders ?? []).map((f) => ({ name: f.name, fsPath: f.uri.fsPath })),
+  );
+  workspaceView = new MigraPilotWorkspaceViewProvider(context.extensionUri, {
+    controller: workspaceController,
+    output: outputChannel,
+  });
+  context.subscriptions.push(
+    vscode.window.registerWebviewViewProvider(MigraPilotWorkspaceViewProvider.viewType, workspaceView, {
+      webviewOptions: { retainContextWhenHidden: true },
+    }),
+    vscode.commands.registerCommand('migrapilot.openWorkspacePanel', async () => {
+      await vscode.commands.executeCommand('migrapilot.workspace.focus');
+    }),
+  );
+
+  context.subscriptions.push(outputChannel, statusBar.disposable);
+  context.subscriptions.push(
+    vscode.commands.registerCommand('migrapilot.health', checkHealth),
+    vscode.commands.registerCommand('migrapilot.repairConnection', repairConnection),
+    vscode.commands.registerCommand('migrapilot.showLogs', () => outputChannel.show(true)),
+    vscode.commands.registerCommand('migrapilot.showDiagnostics', showDiagnostics),
+    vscode.commands.registerCommand('migrapilot.explainSelection', () => runExplainSelection(commandDeps)),
+    vscode.commands.registerCommand('migrapilot.fixDiagnostics', () => runFixDiagnostics(commandDeps)),
+    vscode.commands.registerCommand('migrapilot.generateTests', () => runGenerateTestsCommand(testGenDeps)),
+    vscode.commands.registerCommand('migrapilot.generateCommit', () => runGenerateCommitMessageCommand(testGenDeps)),
+    vscode.commands.registerCommand('migrapilot.setToken', setToken),
+    vscode.commands.registerCommand('migrapilot.clearToken', clearToken),
+    vscode.commands.registerCommand('migrapilot.reviewApprovals', () => runReviewApprovals(commandDeps)),
+    vscode.commands.registerCommand('migrapilot.setProviderKey', setProviderKey),
+    vscode.commands.registerCommand('migrapilot.clearProviderKey', clearProviderKey),
+    vscode.commands.registerCommand('migrapilot.providerInfo', providerInfo),
+    vscode.commands.registerCommand('migrapilot.showBackendDiagnostics', showBackendDiagnostics),
+  );
+
+  context.subscriptions.push(
+    vscode.languages.onDidChangeDiagnostics(() => {
+      void syncWorkspaceDiagnostics();
+    }),
+  );
+
+  // Resolve the backend ONCE at activation and reflect it in the status bar.
+  const resolved = await resolveBackend(false);
+  // In local mode, best-effort ensure the local brain is running — non-blocking
+  // so activation never waits on the network or a spawn.
+  if (resolved.kind === 'local') {
+    void ensureBrainRunning().then((r) => statusBar.showLocalLifecycle(r));
+  }
+  await syncWorkspaceDiagnostics();
+  output(`Model provider: ${getProviderKind()}.`);
+  output('MigraPilot extension activated.');
+
+  return {
+    router,
+    resolveBackend,
+    setToken: (token: string) => tokenStore.set(token),
+    clearToken: () => tokenStore.delete(),
+    approvals: new ApprovalsClient(pilotClient),
+    renderConsent: async (actionId: string) => {
+      const action = await new ApprovalsClient(pilotClient).get(actionId);
+      return action.change ? renderActionConsent(action.change) : '';
+    },
+    provider: makeProvider,
+    setProviderKey: (key: string) => Promise.resolve(providerKeys.set(key)).then(() => undefined),
+    clearProviderKey: () => Promise.resolve(providerKeys.delete()).then(() => undefined),
+    generateTests: (targetRelPath: string, confirm: boolean, opts?: { runCommand?: boolean }) => {
+      const folder = vscode.workspace.workspaceFolders?.[0];
+      if (!folder) {
+        return Promise.resolve<TestGenResult>({ status: 'error', reason: 'no workspace folder' });
+      }
+      return runGenerateTests(testGenDeps, targetRelPath, folder.uri.fsPath, async () => confirm, opts ?? {});
+    },
+    generateCommitMessage: (opts?: { includeUnstaged?: boolean }) => {
+      const folder = vscode.workspace.workspaceFolders?.[0];
+      if (!folder) {
+        return Promise.resolve<CommitGenResult>({ status: 'error', reason: 'no workspace folder' });
+      }
+      return runGenerateCommitMessage(testGenDeps, folder.uri.fsPath, opts ?? {});
+    },
+    lifecycle: {
+      ensureRunning: ensureBrainRunning,
+      shutdown: () => brainLifecycle.shutdown(),
+      ownedPid: () => brainLifecycle.ownedPid(),
+    },
+    workspace: {
+      resolveRoot: () => workspaceController.resolveRoot(),
+      open: (root, opts) => {
+        let target = root;
+        if (!target) {
+          const res = workspaceController.resolveRoot();
+          if (res.kind === 'root') target = res.root;
+          else throw new Error(res.kind === 'none' ? 'no workspace folder open' : 'multiple folders open — a root must be selected');
+        }
+        return workspaceController.open(target, opts);
+      },
+      get: (id) => workspaceController.get(id),
+      sync: (id) => workspaceController.sync(id),
+      rebuild: (id) => workspaceController.rebuild(id),
+      approve: (id, indexVersion) => workspaceController.approve(id, indexVersion),
+      setMemoryMode: (id, mode) => workspaceController.setMemoryMode(id, mode),
+      delete: (id) => workspaceController.delete(id),
+      list: () => workspaceController.list().then((ws) => ws.map((w) => ({ id: w.id, name: w.name, root: w.root }))),
+    },
+    backendDiagnostics: () => diagnostics.snapshot(),
+    engineDiagnostics: () => engineDiagnostics.snapshot(),
+  };
+}
+
+/** Resolve the backend and reflect it in the status bar. force=true re-resolves
+ * (explicit repair / after mode or token change). Records a sanitized diagnostic
+ * event (observational — never affects the resolution). */
+async function resolveBackend(force: boolean): Promise<ResolvedBackend> {
+  pendingResolutionInfo = undefined;
+  let resolved: ResolvedBackend;
+  try {
+    resolved = await router.resolve(force);
+  } catch (error) {
+    output(`Backend resolution failed: ${error instanceof Error ? error.message : String(error)}`);
+    resolved = { kind: 'local', note: 'resolution-error' };
+  }
+  statusBar.showBackend(resolved);
+  void sidebar?.refresh();
+  if (pendingResolutionInfo) {
+    diagnostics.record(pendingResolutionInfo, {
+      source: getMode() === 'auto' ? 'auto' : 'explicit',
+      trigger: force ? 're-resolve' : 'activation',
+    });
+  }
+  return resolved;
+}
+
+async function setToken(): Promise<void> {
+  const token = await vscode.window.showInputBox({
+    prompt: 'Paste the MigraPilot Pilot service token (stored in SecretStorage).',
+    password: true,
+    ignoreFocusOut: true,
+  });
+  if (!token) {
+    return;
+  }
+  await tokenStore.set(token.trim());
+  // Never log or echo the token value.
+  output('Pilot token stored in SecretStorage.');
+  await resolveBackend(true);
+}
+
+async function clearToken(): Promise<void> {
+  await tokenStore.delete();
+  output('Pilot token cleared from SecretStorage.');
+  await resolveBackend(true);
+}
+
+async function setProviderKey(): Promise<void> {
+  const key = await vscode.window.showInputBox({
+    prompt: 'Paste the model provider API key (stored in SecretStorage).',
+    password: true,
+    ignoreFocusOut: true,
+  });
+  if (!key) {
+    return;
+  }
+  await providerKeys.set(key.trim());
+  output('Model provider API key stored in SecretStorage.'); // never logs the value
+}
+
+async function clearProviderKey(): Promise<void> {
+  await providerKeys.delete();
+  output('Model provider API key cleared from SecretStorage.');
+}
+
+async function showBackendDiagnostics(): Promise<void> {
+  // Render the sanitized snapshots as read-only JSON. Contains no secrets by
+  // construction; opening it never triggers resolution/repair. Includes the
+  // MigraAI Engine routing history (selected model / provider / tier / reason /
+  // failed-over models per chat turn).
+  const snapshot = {
+    backendSelection: diagnostics.snapshot(),
+    engineRouting: engineDiagnostics.snapshot(),
+  };
+  const doc = await vscode.workspace.openTextDocument({
+    language: 'json',
+    content: JSON.stringify(snapshot, null, 2),
+  });
+  await vscode.window.showTextDocument(doc, { preview: true });
+}
+
+async function providerInfo(): Promise<void> {
+  // Identity only — provider id + model, never the key.
+  try {
+    const caps = makeProvider().capabilities();
+    const message = `MigraPilot provider: ${caps.providerId} · model ${caps.model} · streaming ${caps.streaming}`;
+    output(message);
+    await vscode.window.showInformationMessage(message);
+  } catch (error) {
+    const message = `MigraPilot provider: ${getProviderKind()} (not fully configured: ${error instanceof Error ? error.message : String(error)})`;
+    output(message);
+    await vscode.window.showWarningMessage(message);
+  }
+}
+
+export async function deactivate(): Promise<void> {
+  // Kill ONLY the brain process this extension started (adopted brains untouched).
+  await brainLifecycle?.shutdown();
+  output('MigraPilot extension deactivated.');
+}
+
+async function checkHealth(): Promise<void> {
+  try {
+    const health = await brainClient.health();
+    const message = `MigraPilot brain is ${health.status}. Version ${health.version}. Uptime ${health.uptimeSec}s.`;
+    output(message);
+    await vscode.window.showInformationMessage(message, 'Show Logs');
+  } catch (error) {
+    const message = formatError('Health check failed', error);
+    output(message);
+    await vscode.window
+      .showErrorMessage(message, 'Repair Connection', 'Show Logs')
+      .then(async (choice) => {
+        if (choice === 'Repair Connection') {
+          await repairConnection();
+        }
+        if (choice === 'Show Logs') {
+          outputChannel.show(true);
+        }
+      });
+  } finally {
+    await statusBar.refresh(brainClient);
+    void sidebar?.refresh();
+  }
+}
+
+async function repairConnection(): Promise<void> {
+  output('Repair: re-resolving backend.');
+  // Explicit repair is the one place (besides activation) allowed to re-resolve
+  // the backend — mode/token/health may have changed.
+  const resolved = await resolveBackend(true);
+  // In local mode, repair also attempts to (re)start the local brain.
+  if (resolved.kind === 'local') {
+    const life = await ensureBrainRunning();
+    statusBar.showLocalLifecycle(life);
+  }
+  const label =
+    resolved.kind === 'remote'
+      ? 'pilot-api'
+      : resolved.kind === 'remote-unavailable'
+        ? `pilot-api unavailable (${resolved.error.code})`
+        : 'local brain-service';
+  await vscode.window
+    .showInformationMessage(`MigraPilot backend: ${label}.`, 'Open Settings', 'Show Logs')
+    .then(async (choice) => {
+      if (choice === 'Open Settings') {
+        await vscode.commands.executeCommand('workbench.action.openSettings', 'migrapilot');
+      }
+      if (choice === 'Show Logs') {
+        outputChannel.show(true);
+      }
+    });
+
+  await statusBar.refresh(brainClient);
+}
+
+async function showDiagnostics(): Promise<void> {
+  const rootPath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  if (!rootPath) {
+    void vscode.window.showWarningMessage('No workspace folder open.');
+    return;
+  }
+
+  await syncWorkspaceDiagnostics();
+
+  const result = await migraAiClient.runReadOnlyTool<DiagnosticsGetResponse>('diagnostics.get', { rootPath });
+
+  const count = result.items.length;
+  void vscode.window.showInformationMessage(`MigraPilot diagnostics available: ${count}`);
+  output(`Diagnostics fetched: ${count}`);
+}
+
+
+function output(message: string): void {
+  const timestamp = new Date().toISOString();
+  outputChannel.appendLine(`[${timestamp}] ${message}`);
+}
+
+async function syncWorkspaceDiagnostics(): Promise<void> {
+  // Route diagnostics sync to the resolved backend. Remote sync requires the
+  // workspace.read capability; if a remote backend can't prove it (or is
+  // unavailable), skip quietly — this is a background op, not a user command,
+  // so it never surfaces an error or silently mixes backends.
+  try {
+    const backend = router?.current();
+    if (!backend || backend.kind === 'local') {
+      await syncDiagnostics(brainClient.baseUrl);
+      output('Diagnostics synced (local).');
+      return;
+    }
+    const decision = evaluateCapability(backend, CAP_DIAGNOSTICS_SYNC);
+    if (decision.mode === 'remote') {
+      await syncDiagnosticsToPilot(pilotClient);
+      output('Diagnostics synced (pilot-api).');
+      return;
+    }
+    output(
+      `Diagnostics sync skipped: ${decision.mode === 'denied' ? decision.error.code : 'unresolved backend'}.`,
+    );
+  } catch (error) {
+    output(`Diagnostics sync failed: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+function formatError(prefix: string, error: unknown): string {
+  const text = error instanceof Error ? error.message : String(error);
+  return `${prefix}: ${text}`;
+}

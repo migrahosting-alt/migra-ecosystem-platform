@@ -1,0 +1,260 @@
+import * as vscode from 'vscode';
+import type { ChatAttachment, FeatureName } from '@migrapilot/shared-types';
+import { BackendRouter } from '../services/backendRouter.js';
+import { BrainClient } from '../services/brainClient.js';
+import { newRequestId } from '@migrapilot/pilot-client';
+import { isPilotError, toUserMessage } from '@migrapilot/pilot-client';
+import { type AiChatRequest, MigraAiClient } from '../services/migraAiClient.js';
+import { EngineDiagnostics } from '../services/engineDiagnostics.js';
+import { buildAiRequest } from './intentMapping.js';
+
+/** A backend-agnostic output surface for a chat turn. Both the native chat
+ * participant (wrapping a vscode.ChatResponseStream) and the dedicated chat
+ * webview (posting messages to a webview) implement this, so a single turn
+ * pipeline drives both. `progress` renders a transient status line; `markdown`
+ * appends rendered content. */
+export interface ChatSink {
+  progress(text: string): void;
+  markdown(text: string): void;
+}
+
+export interface ChatEngineDeps {
+  /** Legacy brain client — retained for the compatibility `/chat` path and other
+   * brain calls (health/tools). The chat turn no longer routes through it. */
+  brainClient: BrainClient;
+  router: BackendRouter;
+  /** MigraAI Engine client — the local chat path streams through `/api/ai/chat`. */
+  migraAiClient: MigraAiClient;
+  /** Sanitized routing diagnostics recorder (observability only). */
+  engineDiagnostics?: EngineDiagnostics;
+}
+
+
+/** A model profile the user can explicitly request from the chat UI. `local` is
+ * omitted — it is an internal offline-fallback profile, not a user choice. */
+export type SelectableProfile = 'cheap' | 'default' | 'premium';
+
+export interface ChatTurnOptions {
+  /** Explicit model-profile override from the UI model picker. When set, it wins
+   * over the router policy's auto-selected profile. Absent = "auto" (policy
+   * decides). The brain still applies its own effective-profile fallback (e.g.
+   * premium→default when no premium model is configured). */
+  modelProfile?: SelectableProfile;
+  /** User-uploaded attachments (images for vision analysis, documents, …).
+   * Images are forwarded to a vision model; text documents should already be
+   * inlined into `prompt` by the chat surface. */
+  attachments?: ChatAttachment[];
+  /** Server-side conversation memory: when set, the engine owns history — the
+   * client sends only this id and does NOT reconstruct history locally. */
+  conversationId?: string;
+  memoryPolicy?: { mode?: 'off' | 'session' | 'durable'; retrieve?: boolean; store?: boolean };
+}
+
+/** Run a single chat turn through the resolved backend and stream it to `sink`.
+ *
+ * This is the exact pipeline the `@migrapilot` participant used, lifted verbatim
+ * so the webview reuses it byte-for-byte:
+ *  - the backend is the one resolved at activation/repair (never re-resolved
+ *    per turn — `auto` cannot silently switch mid-turn);
+ *  - a remote-pilot failure surfaces a correlated message and is NEVER retried
+ *    on the local stub.
+ *
+ * `conversationSummary` is supplied by the caller (built from whatever history
+ * representation it holds) so the engine stays agnostic of the chat surface. */
+export async function runChatTurn(
+  deps: ChatEngineDeps,
+  sink: ChatSink,
+  prompt: string,
+  conversationSummary: string,
+  token: vscode.CancellationToken,
+  options: ChatTurnOptions = {},
+): Promise<void> {
+  const { brainClient, router } = deps;
+  const trimmed = prompt.trim();
+  const activeEditor = vscode.window.activeTextEditor;
+  const selectionText = activeEditor
+    ? activeEditor.document.getText(activeEditor.selection).trim() || undefined
+    : undefined;
+
+  const feature = inferFeature(trimmed);
+  const requestId = newRequestId();
+
+  // Route through the backend resolved at activation/repair — never re-resolve
+  // per request (auto cannot silently switch mid-turn).
+  const backend = router.current() ?? (await router.resolve());
+
+  if (backend.kind === 'remote-unavailable') {
+    // Surface the correlated error; do NOT fall back to the local stub.
+    sink.markdown(`⚠️ ${toUserMessage(backend.error.code)}\n\n_Request ${requestId}._`);
+    return;
+  }
+
+  if (backend.kind === 'remote') {
+    await streamRemote(router, sink, token, trimmed, requestId, {
+      activeFile: activeEditor?.document.uri.fsPath,
+      selectionText,
+      conversationSummary,
+      modelProfile: options.modelProfile,
+      attachments: options.attachments,
+    });
+    return;
+  }
+
+  // ── local MigraAI Engine path (POST /api/ai/chat) ─────────────────────────
+  // The extension describes the turn's capability needs and streams the engine's
+  // answer. The engine owns model selection + failover; the extension never names
+  // a model and never falls back to the legacy `/chat` endpoint.
+  sink.progress('MigraPilot is analyzing your request…');
+  const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  const aiRequest = buildAiRequest(trimmed, {
+    feature,
+    modelProfile: options.modelProfile,
+    attachments: options.attachments,
+    selectionText,
+    activeFile: activeEditor?.document.uri.fsPath,
+    workspaceRoot,
+    // With a server-side conversation the engine owns history — do NOT send a
+    // locally-reconstructed summary.
+    conversationSummary: options.conversationId ? undefined : conversationSummary,
+  });
+  if (options.conversationId) {
+    aiRequest.conversationId = options.conversationId;
+    aiRequest.memoryPolicy = options.memoryPolicy ?? { mode: 'session', retrieve: true, store: true };
+  }
+  await streamLocalEngine(deps, sink, token, requestId, aiRequest);
+}
+
+/** Stream a chat turn from the local MigraAI Engine. On failure, surface a
+ * correlated PilotError message — NEVER fall back to legacy `/chat`. */
+async function streamLocalEngine(
+  deps: ChatEngineDeps,
+  sink: ChatSink,
+  token: vscode.CancellationToken,
+  requestId: string,
+  request: AiChatRequest,
+): Promise<void> {
+  const signal = tokenToSignal(token);
+  const diag = deps.engineDiagnostics;
+  let sawToken = false;
+  try {
+    for await (const event of deps.migraAiClient.chatStream(request, signal)) {
+      if (event.type === 'route') {
+        diag?.record(event.routing);
+        sink.progress(
+          event.routing.failedOver.length
+            ? `Engine → ${event.routing.model} (failover)`
+            : `Engine → ${event.routing.model}`,
+        );
+      } else if (event.type === 'token') {
+        sawToken = true;
+        sink.markdown(event.text);
+      } else if (event.type === 'done') {
+        diag?.finish('completed', event.usage);
+      }
+    }
+    // Stream closed without a terminal `done` (rare) — still mark completed.
+    if (sawToken) diag?.finish('completed');
+  } catch (err) {
+    const code = isPilotError(err) ? err.code : 'NETWORK';
+    if (code === 'CANCELLED') {
+      diag?.finish('cancelled');
+      return;
+    }
+    diag?.finish('error');
+    sink.markdown(`\n\n⚠️ ${toUserMessage(code)}\n\n_Request ${requestId}._`);
+  }
+}
+
+/** Bridge a VS Code CancellationToken to an AbortSignal so cancellation
+ * propagates through the router into fetch/SSE. */
+function tokenToSignal(token: vscode.CancellationToken): AbortSignal {
+  const controller = new AbortController();
+  if (token.isCancellationRequested) {
+    controller.abort();
+  } else {
+    token.onCancellationRequested(() => controller.abort());
+  }
+  return controller.signal;
+}
+
+/** Stream a chat turn from the remote pilot-api backend. On failure, surface a
+ * correlated message — never fall back to the local stub. */
+async function streamRemote(
+  router: BackendRouter,
+  sink: ChatSink,
+  token: vscode.CancellationToken,
+  prompt: string,
+  requestId: string,
+  context: {
+    activeFile?: string;
+    selectionText?: string;
+    conversationSummary: string;
+    modelProfile?: SelectableProfile;
+    attachments?: ChatAttachment[];
+  },
+): Promise<void> {
+  const signal = tokenToSignal(token);
+  const { modelProfile, ...remoteContext } = context;
+  const turn = {
+    requestId,
+    local: null,
+    remote: {
+      message: prompt,
+      context: remoteContext,
+      // Forward the profile hint; pilot-api may honor or ignore it.
+      ...(modelProfile ? { modelProfile } : {}),
+    },
+  };
+  try {
+    for await (const chunk of router.chat(turn, signal)) {
+      if (chunk.type === 'token') {
+        sink.markdown(chunk.text);
+      } else if (chunk.type === 'plan') {
+        sink.progress('Planning…');
+      }
+      // 'done'/'info' need no rendering here.
+    }
+  } catch (err) {
+    const code = isPilotError(err) ? err.code : 'NETWORK';
+    if (code !== 'CANCELLED') {
+      sink.markdown(`\n\n⚠️ ${toUserMessage(code)}\n\n_Request ${requestId}._`);
+    }
+  }
+}
+
+export function inferFeature(prompt: string): FeatureName {
+  const lower = prompt.toLowerCase();
+  if (lower.includes('test')) return 'test';
+  if (lower.includes('commit')) return 'commit';
+  if (lower.includes('fix') || lower.includes('error') || lower.includes('bug')) return 'fix';
+  if (lower.includes('explain') || lower.includes('what does this do')) return 'explain';
+  if (lower.includes('review')) return 'review';
+  if (lower.includes('search') || lower.includes('find')) return 'search';
+  return 'chat';
+}
+
+/** Summarize the native participant's chat history (VS Code turn objects). */
+export function summarizeChatContext(
+  history: readonly (vscode.ChatRequestTurn | vscode.ChatResponseTurn)[],
+): string {
+  return history
+    .slice(-4)
+    .map((turn) => {
+      if ('prompt' in turn) return `user: ${turn.prompt}`;
+      return 'assistant: previous response';
+    })
+    .join('\n')
+    .slice(0, 1500);
+}
+
+/** Summarize a simple role/text history (the webview's representation) into the
+ * same shape the native participant produces, so the backend sees identical
+ * conversation context regardless of chat surface. */
+export function summarizeTurns(turns: readonly { role: string; text: string }[]): string {
+  return turns
+    .slice(-4)
+    .map((turn) => (turn.role === 'user' ? `user: ${turn.text}` : 'assistant: previous response'))
+    .join('\n')
+    .slice(0, 1500);
+}
+

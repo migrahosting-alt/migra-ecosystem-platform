@@ -1,0 +1,36 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "rootDir": "src",
+    "outDir": "dist",
+    "lib": [
+      "ES2022"
+    ],
+    "types": [
+      "node",
+      "vscode",
+      "mocha"
+    ],
+    "baseUrl": ".",
+    "paths": {
+      "@migrapilot/shared-types": [
+        "../../packages/shared-types/src/contracts.ts"
+      ]
+    }
+  },
+  "include": [
+    "src/**/*.ts"
+  ],
+  "references": [
+    {
+      "path": "../../packages/protocol"
+    },
+    {
+      "path": "../../packages/shared-types"
+    },
+    {
+      "path": "../../packages/pilot-client"
+    }
+  ]
+}
