@@ -1,0 +1,21 @@
+{
+  "name": "@migrapilot/shared-types",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/contracts.js",
+  "types": "./src/contracts.ts",
+  "exports": {
+    ".": {
+      "types": "./src/contracts.ts",
+      "default": "./dist/contracts.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -b",
+    "watch": "tsc -b -w"
+  }
+}
