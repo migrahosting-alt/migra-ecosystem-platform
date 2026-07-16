@@ -1,0 +1,39 @@
+{
+  "name": "migrapilot",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "npm@10.8.2",
+  "workspaces": [
+    "apps/brain-service",
+    "apps/vscode-extension",
+    "packages/protocol",
+    "packages/shared-types",
+    "packages/pilot-client",
+    "packages/agent-defs",
+    "packages/workspace-tools"
+  ],
+  "scripts": {
+    "prepare": "husky",
+    "clean": "node ./scripts/clean.mjs && npm run clean -ws --if-present",
+    "build": "npm run build -ws",
+    "dev": "concurrently -n brain,ext \"npm run dev -w @migrapilot/brain-service\" \"npm run watch -w migrapilot-extension\"",
+    "typecheck": "npm run typecheck -ws --if-present",
+    "lint": "npm run lint -ws --if-present",
+    "test": "npm run test -ws --if-present",
+    "release-check": "node release-check.js ./docs/migrapilot/phase-36 36",
+    "release-check:strict": "RELEASE_STRICT_PLACEHOLDERS=true node release-check.js ./docs/migrapilot/phase-36 36",
+    "release": "node ./scripts/release.js ./docs/migrapilot/phase-36 36",
+    "phase-36:closeout-check": "bash ./scripts/phase-36-closeout.sh",
+    "dev:brain": "npm run dev -w @migrapilot/brain-service",
+    "build:brain": "npm run build -w @migrapilot/brain-service",
+    "dev:extension": "npm run watch -w migrapilot-extension",
+    "build:extension": "npm run build -w migrapilot-extension"
+  },
+  "devDependencies": {
+    "concurrently": "^9.0.1",
+    "husky": "^9.1.7",
+    "lint-staged": "^16.4.0",
+    "rimraf": "^6.0.1",
+    "typescript": "^5.6.3"
+  }
+}
