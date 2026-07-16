@@ -1,0 +1,30 @@
+name: gap2-repro
+# Repeats the fresh-clone reproducibility proof for the MigraAI delegation stack:
+# install → build every workspace → brain suite → extension unit suite.
+# No Docker/Postgres required (deterministic Tier-A tests only); delegation stays
+# OFF by default and nothing here enables or deploys it.
+
+on:
+  pull_request:
+    branches: [phase-1/canonical-vscode-extension, main]
+  push:
+    branches: [gap2/nonprod-agent-delegation-validated]
+
+jobs:
+  fresh-clone-proof:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22 # brain-service uses node:sqlite (Node >= 22)
+      - name: Install (fresh)
+        run: npm install --no-audit --no-fund
+      - name: Build all workspaces
+        run: npm run build -ws
+      - name: Brain suite
+        working-directory: apps/brain-service
+        run: node --test 'dist/test/*.test.js'
+      - name: Extension unit suite
+        working-directory: apps/vscode-extension
+        run: node --test dist/test/unit/*.test.js

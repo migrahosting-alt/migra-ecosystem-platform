@@ -1,0 +1,287 @@
+{
+  "name": "migrapilot-extension",
+  "displayName": "MigraPilot",
+  "version": "0.1.0",
+  "private": true,
+  "publisher": "migrateck",
+  "engines": {
+    "vscode": "^1.96.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished",
+    "onCommand:migrapilot.health",
+    "onCommand:migrapilot.repairConnection",
+    "onCommand:migrapilot.showLogs",
+    "onCommand:migrapilot.showDiagnostics",
+    "onCommand:migrapilot.explainSelection",
+    "onCommand:migrapilot.fixDiagnostics",
+    "onCommand:migrapilot.generateTests",
+    "onCommand:migrapilot.generateCommit",
+    "onChatParticipant:migrapilot.chat"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "migrapilot",
+          "title": "MigraPilot",
+          "icon": "resources/migrapilot-icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "migrapilot": [
+        {
+          "type": "webview",
+          "id": "migrapilot.chatView",
+          "name": "Chat",
+          "icon": "resources/migrapilot-icon.svg"
+        },
+        {
+          "type": "webview",
+          "id": "migrapilot.workspace",
+          "name": "MigraAI Workspace",
+          "icon": "resources/migrapilot-icon.svg"
+        },
+        {
+          "type": "webview",
+          "id": "migrapilot.sidebar",
+          "name": "Status",
+          "icon": "resources/migrapilot-icon.svg"
+        }
+      ]
+    },
+    "chatParticipants": [
+      {
+        "id": "migrapilot.chat",
+        "fullName": "MigraPilot",
+        "name": "migrapilot",
+        "description": "Workspace-aware MigraPilot assistant",
+        "isSticky": true
+      }
+    ],
+    "commands": [
+      {
+        "command": "migrapilot.openChat",
+        "title": "MigraPilot: Open Chat"
+      },
+      {
+        "command": "migrapilot.openWorkspacePanel",
+        "title": "MigraPilot: Open MigraAI Workspace"
+      },
+      {
+        "command": "migrapilot.health",
+        "title": "MigraPilot: Check Health"
+      },
+      {
+        "command": "migrapilot.repairConnection",
+        "title": "MigraPilot: Repair Connection"
+      },
+      {
+        "command": "migrapilot.showLogs",
+        "title": "MigraPilot: Show Logs"
+      },
+      {
+        "command": "migrapilot.showDiagnostics",
+        "title": "MigraPilot: Show Diagnostics"
+      },
+      {
+        "command": "migrapilot.explainSelection",
+        "title": "MigraPilot: Explain Selection"
+      },
+      {
+        "command": "migrapilot.fixDiagnostics",
+        "title": "MigraPilot: Fix Diagnostics"
+      },
+      {
+        "command": "migrapilot.generateTests",
+        "title": "MigraPilot: Generate Tests"
+      },
+      {
+        "command": "migrapilot.generateCommit",
+        "title": "MigraPilot: Generate Commit Message"
+      },
+      {
+        "command": "migrapilot.setToken",
+        "title": "MigraPilot: Set Pilot Service Token"
+      },
+      {
+        "command": "migrapilot.clearToken",
+        "title": "MigraPilot: Clear Pilot Service Token"
+      },
+      {
+        "command": "migrapilot.reviewApprovals",
+        "title": "MigraPilot: Review Pending Actions"
+      },
+      {
+        "command": "migrapilot.setProviderKey",
+        "title": "MigraPilot: Set Model Provider API Key"
+      },
+      {
+        "command": "migrapilot.clearProviderKey",
+        "title": "MigraPilot: Clear Model Provider API Key"
+      },
+      {
+        "command": "migrapilot.providerInfo",
+        "title": "MigraPilot: Show Model Provider"
+      },
+      {
+        "command": "migrapilot.showBackendDiagnostics",
+        "title": "MigraPilot: Show Backend Selection Diagnostics"
+      }
+    ],
+    "configuration": {
+      "title": "MigraPilot",
+      "properties": {
+        "migrapilot.brainUrl": {
+          "type": "string",
+          "default": "http://127.0.0.1:3988",
+          "description": "Base URL for the MigraPilot brain service."
+        },
+        "migrapilot.transcribeUrl": {
+          "type": "string",
+          "default": "http://127.0.0.1:3399/api/pilot/transcribe",
+          "description": "Local speech-to-text endpoint used by the chat mic. Audio recorded in the chat panel is relayed through the extension host to this URL (keeps voice private and on-device)."
+        },
+        "migrapilot.memoryMode": {
+          "type": "string",
+          "enum": [
+            "off",
+            "session",
+            "durable"
+          ],
+          "default": "session",
+          "markdownDescription": "Server-side conversation memory. `off` = stateless turns, nothing retained. `session` = the engine remembers the conversation while it runs (default). `durable` = the engine persists the conversation. History lives in the MigraAI Engine, scoped to this workspace — the extension only carries a conversation id."
+        },
+        "migrapilot.autoStartBrain": {
+          "type": "boolean",
+          "default": true,
+          "description": "In local-brain mode, attempt to auto-start the local brain service when it is unavailable (requires migrapilot.brainAutoStartCommand). Never affects pilot-api."
+        },
+        "migrapilot.brainAutoStartCommand": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "markdownDescription": "argv used to launch the local brain-service when auto-starting (e.g. `[\"node\", \"/path/to/apps/brain-service/dist/src/server.js\"]`). Empty disables spawning — the extension will still adopt an already-running brain but won't start one."
+        },
+        "migrapilot.mode": {
+          "type": "string",
+          "enum": [
+            "local-brain",
+            "remote-pilot",
+            "auto",
+            "hybrid",
+            "offline",
+            "cloud"
+          ],
+          "default": "local-brain",
+          "markdownDescription": "Backend mode. `local-brain` = local brain-service (default). `remote-pilot` = pilot-api (opt-in; requires a token and reachable service). `auto` = use pilot-api when ready+authorized, otherwise local. Legacy values map conservatively so remote stays opt-in: `offline`/`hybrid` → local-brain, `cloud` → remote-pilot."
+        },
+        "migrapilot.pilotApiUrl": {
+          "type": "string",
+          "default": "http://127.0.0.1:3377",
+          "description": "Base URL for the MigraPilot pilot-api service (used in remote-pilot / auto modes)."
+        },
+        "migrapilot.pilotApiAuthMode": {
+          "type": "string",
+          "enum": [
+            "bearer",
+            "none"
+          ],
+          "default": "bearer",
+          "description": "Authentication for pilot-api. 'bearer' sends the token from SecretStorage (set via 'MigraPilot: Set Pilot Service Token'). 'none' is for a local dev pilot-api with auth disabled."
+        },
+        "migrapilot.pilotApiToken": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "**Discouraged.** Non-secret fallback token, used ONLY when SecretStorage is empty (headless/dev). Prefer the 'MigraPilot: Set Pilot Service Token' command, which stores the token in SecretStorage and never writes it to settings."
+        },
+        "migrapilot.requestTimeoutMs": {
+          "type": "number",
+          "default": 30000,
+          "description": "Per-request timeout (ms) for pilot-api and model-provider calls."
+        },
+        "migrapilot.provider": {
+          "type": "string",
+          "enum": [
+            "stub",
+            "openai-compat"
+          ],
+          "default": "stub",
+          "markdownDescription": "Model provider for local chat. `stub` = deterministic built-in response (default; for local/deterministic use). `openai-compat` = a real OpenAI-compatible `/chat/completions` endpoint (OpenAI, Ollama `/v1`, LM Studio, vLLM, …). There is no silent fallback: a configured real provider that fails surfaces an error."
+        },
+        "migrapilot.providerUrl": {
+          "type": "string",
+          "default": "http://127.0.0.1:11434/v1",
+          "description": "Base URL for the openai-compat provider (must expose POST /chat/completions)."
+        },
+        "migrapilot.providerModel": {
+          "type": "string",
+          "default": "gpt-oss:20b",
+          "description": "Model name sent to the openai-compat provider."
+        },
+        "migrapilot.providerApiKey": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "**Discouraged.** Non-secret fallback API key, used ONLY when SecretStorage is empty (headless/dev). Prefer the 'MigraPilot: Set Model Provider API Key' command, which stores the key in SecretStorage and never writes it to settings."
+        },
+        "migrapilot.maxContextChunks": {
+          "type": "number",
+          "default": 8,
+          "description": "Maximum retrieved chunks to include in context."
+        },
+        "migrapilot.enableTelemetry": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable local telemetry for MigraPilot requests."
+        }
+      }
+    },
+    "menus": {
+      "editor/context": [
+        {
+          "command": "migrapilot.explainSelection",
+          "group": "navigation@100"
+        },
+        {
+          "command": "migrapilot.fixDiagnostics",
+          "group": "navigation@101"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "clean": "rimraf dist tsconfig.tsbuildinfo",
+    "build": "tsc -b",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "npm run build && node ./scripts/test-smoke.js",
+    "test:unit": "tsc -b && node --test dist/test/unit/*.test.js",
+    "test:integration": "tsc -b && node ./dist/test/runTest.js",
+    "test:vsix": "tsc -b && node scripts/bundle.mjs && node ./dist/test/runTestVsix.js",
+    "test:ops": "tsc -b && node ./dist/test/runOps.js",
+    "watch": "tsc -b -w",
+    "package": "tsc -b && node scripts/bundle.mjs && vsce package --no-dependencies --allow-missing-repository --skip-license"
+  },
+  "dependencies": {
+    "@migrapilot/protocol": "0.1.0",
+    "@migrapilot/shared-types": "0.1.0",
+    "@migrapilot/pilot-client": "0.1.0"
+  },
+  "devDependencies": {
+    "@types/mocha": "^10.0.10",
+    "@types/node": "^22.7.5",
+    "@types/vscode": "^1.96.0",
+    "@vscode/test-electron": "^2.5.2",
+    "@vscode/vsce": "^3.2.1",
+    "glob": "^11.1.0",
+    "mocha": "^10.8.2",
+    "rimraf": "^6.0.1",
+    "typescript": "^5.6.3"
+  }
+}
