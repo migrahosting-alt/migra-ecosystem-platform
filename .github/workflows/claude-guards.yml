@@ -1,0 +1,28 @@
+name: claude-guards
+# Operational Readiness Slice 1 — prove the durable guard bootstrap installs,
+# verifies (checksum + PreToolUse registration + allow/deny policy matrix), and
+# FAILS CLOSED when the guard is missing, tampered, unregistered, or regressed.
+
+on:
+  pull_request:
+    branches: [phase-1/canonical-vscode-extension, main]
+  push:
+    branches: [operational-readiness/**]
+
+jobs:
+  guard-bootstrap:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Guard bootstrap fail-closed matrix
+        run: bash scripts/dev/test-claude-guards.sh
+      - name: Install + verify guard against a real settings registration
+        run: |
+          # A minimal local settings.json with the PreToolUse registration so the
+          # installer's registration check has something to verify in CI.
+          mkdir -p .claude
+          cat > .claude/settings.json <<'JSON'
+          { "hooks": { "PreToolUse": [ { "matcher": "Bash", "hooks": [ { "type": "command", "command": ".claude/hooks/block-dangerous.sh" } ] } ] } }
+          JSON
+          bash scripts/dev/install-claude-guards.sh
+          bash scripts/dev/install-claude-guards.sh --verify
