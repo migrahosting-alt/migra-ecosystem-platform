@@ -16,6 +16,8 @@ import { newCorrelationId, makeStageLogger, jsonLineSink, type StageLogger } fro
 import { runEngineerTask, type EngineerToolInfo } from './engineerRuntime.js';
 import { changesetProposals } from './capabilityRegistry.js';
 import { telemetryHub } from './telemetryHub.js';
+import { auditStore, auditHash } from './auditLog.js';
+import { incidentManager } from './incidents.js';
 
 const EngineerBodySchema = z.object({
   rootPath: z.string().min(1),
@@ -112,9 +114,38 @@ export function registerEngineerRoutes(
     return {
       status: overall,
       stores: { proposal, approval },
+      audit: auditStore.healthSnapshot(),
+      incidents: incidentManager.health(),
       evictions: telemetryHub.evictionStats(),
       recent: telemetryHub.recentEvents(50).map((e) => ({ event: e.event, at: e.at, correlationId: e.correlationId, ...e.fields })),
     };
+  });
+
+  // Read-only durable audit chain for one correlation id (Slice 3). Records are
+  // already redacted metadata; bounded + stable-ordered by per-correlation seq.
+  app.get('/api/ai/engineer/audit', async (request, reply) => {
+    const q = request.query as { correlationId?: string; limit?: string };
+    if (!q.correlationId) {
+      reply.code(400);
+      return { ok: false, code: 'INVALID_INPUT', error: 'correlationId is required' };
+    }
+    const limit = Math.min(Number(q.limit ?? 500) || 500, 1000);
+    return { correlationId: q.correlationId, records: auditStore.byCorrelation(q.correlationId, limit) };
+  });
+
+  // Read-only incident list + detail. Safe metadata only (no bodies/tokens/paths).
+  app.get('/api/ai/engineer/incidents', async (request) => {
+    const q = request.query as { limit?: string };
+    const limit = Math.min(Number(q.limit ?? 200) || 200, 500);
+    return { incidents: incidentManager.list(limit), health: incidentManager.health() };
+  });
+  app.get<{ Params: { id: string } }>('/api/ai/engineer/incidents/:id', async (request, reply) => {
+    const inc = incidentManager.get(request.params.id);
+    if (!inc) {
+      reply.code(404);
+      return { ok: false, code: 'NOT_FOUND', error: 'unknown incident' };
+    }
+    return inc;
   });
 
   app.post('/api/ai/engineer', async (request, reply) => {
@@ -137,6 +168,7 @@ export function registerEngineerRoutes(
     const correlationId = headerId || newCorrelationId();
     const stage: StageLogger = makeStageLogger(correlationId, jsonLineSink((line) => request.log.info(line)));
     stage.log('request', { rootPath: body.rootPath, ecosystem: Boolean(body.ecosystem) });
+    auditStore.append({ correlationId, type: 'execution.started', component: 'engineer', requestId: headerId || undefined, fields: { workspace: auditHash(body.rootPath), ecosystem: Boolean(body.ecosystem) } });
 
     const decision = await selectModel(modelRegistry, {
       preferCoding: true,
@@ -149,6 +181,7 @@ export function registerEngineerRoutes(
     }
     const provider = providerFor(decision.model);
     stage.log('route', { model: decision.model.id, provider: decision.model.provider });
+    auditStore.append({ correlationId, type: 'execution.routed', component: 'engineer', fields: { model: decision.model.id, provider: decision.model.provider } });
 
     reply.hijack();
     const raw = reply.raw;
@@ -206,15 +239,25 @@ export function registerEngineerRoutes(
       { rootPath: body.rootPath, task: body.task, ecosystem: body.ecosystem },
     );
 
+    auditStore.append({ correlationId, type: 'loop.started', component: 'engineer' });
+    let terminal: 'completed' | 'failed' = 'failed';
     try {
       for await (const ev of events) {
         if (closed) break; // client went away — stop driving the model
+        if (ev.type === 'final') terminal = 'completed';
         send(ev.type, ev);
       }
     } catch (err) {
       send('error', { type: 'error', code: 'ENGINE_FAILURE', message: err instanceof Error ? err.message : String(err) });
     }
-    send('done', {});
+    if (terminal === 'completed') {
+      auditStore.append({ correlationId, type: 'loop.completed', component: 'engineer' });
+      auditStore.append({ correlationId, type: 'execution.completed', component: 'engineer', outcome: 'ok' });
+    } else {
+      auditStore.append({ correlationId, type: 'loop.failed', component: 'engineer' });
+      auditStore.append({ correlationId, type: 'execution.failed', component: 'engineer', outcome: 'error' });
+    }
+    send('done', { correlationId });
     raw.end();
   });
 }
