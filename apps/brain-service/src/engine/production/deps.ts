@@ -91,31 +91,31 @@ export interface Prober {
  * health: infra checks report unreachable/unknown rather than "healthy". The real
  * network probers (DNS/TLS/HTTP) are provided in the network prober (commit 2). */
 export class NullProber implements Prober {
-  async serviceStatus(): Promise<ServiceStatus> {
+  async serviceStatus(_target: ProductionTarget, _endpoint?: ApprovedEndpoint): Promise<ServiceStatus> {
     return { exists: false, state: 'unknown' };
   }
-  async readLogs(): Promise<string[]> {
+  async readLogs(_target: ProductionTarget, _opts: { windowMinutes: number; maxLines: number }): Promise<string[]> {
     return [];
   }
-  async readMetrics(): Promise<MetricsSnapshot> {
+  async readMetrics(_target: ProductionTarget): Promise<MetricsSnapshot> {
     return {};
   }
-  async databaseHealth(): Promise<DatabaseHealth> {
+  async databaseHealth(_target: ProductionTarget): Promise<DatabaseHealth> {
     return { reachable: false };
   }
-  async resolveDns(): Promise<DnsResult> {
+  async resolveDns(_endpoint: ApprovedEndpoint): Promise<DnsResult> {
     return { reachable: false, records: [] };
   }
-  async inspectTls(): Promise<TlsResult> {
+  async inspectTls(_endpoint: ApprovedEndpoint): Promise<TlsResult> {
     return { reachable: false };
   }
-  async httpProbe(): Promise<HttpResult> {
+  async httpProbe(_endpoint: ApprovedEndpoint): Promise<HttpResult> {
     return { reachable: false };
   }
-  async mailHealth(): Promise<MailHealth> {
+  async mailHealth(_target: ProductionTarget, _endpoint?: ApprovedEndpoint): Promise<MailHealth> {
     return { reachable: false };
   }
-  async storageHealth(): Promise<StorageHealth> {
+  async storageHealth(_target: ProductionTarget, _endpoint?: ApprovedEndpoint): Promise<StorageHealth> {
     return { reachable: false };
   }
 }
