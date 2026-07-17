@@ -32,6 +32,7 @@ import { ConversationStore } from './engine/memory/conversationStore.js';
 import { QualificationStore } from './engine/qualificationStore.js';
 import { SqliteDurableStore } from './engine/persistence/sqliteStore.js';
 import { engineVersion } from './engine/version.js';
+import { sanitizeError } from './engine/redaction.js';
 import { IndexService } from './engine/rag/indexService.js';
 import { FsFileSource } from './engine/rag/fsFileSource.js';
 import { OllamaEmbedder, CachedEmbedder, FakeEmbedder } from './engine/rag/embedder.js';
@@ -167,11 +168,15 @@ async function main(): Promise<void> {
   /* ── Error handler: prevent stack trace leaks ── */
   app.setErrorHandler((error: Error, _request, reply) => {
     app.log.error(error, 'Unhandled route error');
+    // Never leak a raw message into an API response — sanitize through the
+    // canonical redactor. Raw development detail is opt-in via an explicit debug
+    // flag only (NODE_ENV does not gate secret exposure).
+    const safe = sanitizeError(error);
     reply.status(500).send({
       ok: false,
-      error: process.env.NODE_ENV === 'production'
-        ? 'Internal server error'
-        : error.message,
+      error: 'Internal server error',
+      detail: safe,
+      ...(process.env.MIGRAPILOT_DEBUG_ERRORS === 'true' ? { debug: { name: error.name, message: safe.message } } : {}),
     });
   });
 

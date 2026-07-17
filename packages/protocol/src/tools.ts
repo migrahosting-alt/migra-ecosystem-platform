@@ -351,6 +351,8 @@ export const CommandRunResponseSchema = z.object({
   stderr: z.string(),
   /** True when stdout/stderr were capped to the server limit. */
   truncated: z.boolean(),
+  /** True when a secret pattern was redacted from stdout/stderr before return. */
+  redacted: z.boolean(),
   durationMs: z.number(),
 });
 

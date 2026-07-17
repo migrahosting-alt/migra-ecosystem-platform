@@ -9,6 +9,7 @@
 
 import { createHash, randomUUID } from 'node:crypto';
 import { StoreHealth, type StoreHealthSnapshot } from './storeTelemetry.js';
+import { redactString } from './redaction.js';
 
 export type AuditEventType =
   | 'execution.started'
@@ -40,7 +41,14 @@ export type AuditEventType =
   | 'application.rollback_failed'
   | 'validation.started'
   | 'validation.completed'
-  | 'validation.failed';
+  | 'validation.failed'
+  | 'recovery.started'
+  | 'recovery.plan_created'
+  | 'recovery.approved'
+  | 'recovery.applied'
+  | 'recovery.validation_completed'
+  | 'recovery.completed'
+  | 'recovery.failed';
 
 /** Event types whose loss is security/operationally critical — if these cannot
  * be persisted, the caller must fail closed before starting a new mutation. */
@@ -73,13 +81,21 @@ export interface AuditRecord {
 /** Fields never allowed in an audit record (defense in depth over caller care). */
 const FIELD_DENYLIST = new Set(['content', 'before', 'after', 'diff', 'patch', 'token', 'approvalId', 'rootPath', 'path', 'stdout', 'stderr', 'output', 'env', 'secret', 'password', 'replacement', 'command']);
 
+/** Apply the canonical value-pattern redactor to any string that survives the
+ * key denylist — so a secret hiding inside an outcome/reason string can never be
+ * persisted even if its field name looked innocuous. */
+function scrub(s: string): string {
+  return redactString(s, { redactPaths: true }).value;
+}
+
 function redact(fields: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(fields)) {
     if (FIELD_DENYLIST.has(k)) continue;
     // Only primitives + small arrays of primitives survive — never nested bodies.
-    if (v === null || typeof v === 'number' || typeof v === 'boolean' || typeof v === 'string') out[k] = v;
-    else if (Array.isArray(v) && v.every((x) => typeof x === 'string' || typeof x === 'number')) out[k] = v.slice(0, 20);
+    if (v === null || typeof v === 'number' || typeof v === 'boolean') out[k] = v;
+    else if (typeof v === 'string') out[k] = scrub(v);
+    else if (Array.isArray(v) && v.every((x) => typeof x === 'string' || typeof x === 'number')) out[k] = v.slice(0, 20).map((x) => (typeof x === 'string' ? scrub(x) : x));
     else if (typeof v === 'object') out[k] = '[object]'; // never serialize nested bodies
   }
   return out;
