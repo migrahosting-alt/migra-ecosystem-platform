@@ -73,7 +73,7 @@ export async function executeToolCore(deps: ToolExecDeps, req: ToolExecInput): P
   // Read-only → execute immediately.
   if (runnable.descriptor.readOnly) {
     try {
-      const result = await runnable.handler(input);
+      const result = await runnable.handler(input, { correlationId: stage.correlationId });
       audit.record({ requestId, tool: toolId, action: 'executed', readOnly: true, outcome: 'ok' });
       return { ok: true, httpStatus: 200, status: 'ok', tool: toolId, requestId, result };
     } catch (error) {
@@ -87,7 +87,7 @@ export async function executeToolCore(deps: ToolExecDeps, req: ToolExecInput): P
   // mandatory for every tool that declares it (edit.apply).
   if (runnable.descriptor.approvalRequired === false) {
     try {
-      const result = await runnable.handler(input);
+      const result = await runnable.handler(input, { correlationId: stage.correlationId });
       audit.record({ requestId, tool: toolId, action: 'executed', readOnly: false, outcome: 'ok' });
       return { ok: true, httpStatus: 200, status: 'executed', tool: toolId, requestId, result };
     } catch (error) {
@@ -99,7 +99,7 @@ export async function executeToolCore(deps: ToolExecDeps, req: ToolExecInput): P
 
   if (req.dryRun) {
     try {
-      const preview = runnable.preview ? await runnable.preview(input) : null;
+      const preview = runnable.preview ? await runnable.preview(input, { correlationId: stage.correlationId }) : null;
       audit.record({ requestId, tool: toolId, action: 'dry_run', readOnly: false, outcome: 'ok' });
       return { ok: true, httpStatus: 200, status: 'dry_run', tool: toolId, requestId, preview };
     } catch (error) {
@@ -110,11 +110,11 @@ export async function executeToolCore(deps: ToolExecDeps, req: ToolExecInput): P
   if (!req.approvalId) {
     let preview: unknown = null;
     try {
-      preview = runnable.preview ? await runnable.preview(input) : null;
+      preview = runnable.preview ? await runnable.preview(input, { correlationId: stage.correlationId }) : null;
     } catch (error) {
       return failed(audit, requestId, toolId, false, error);
     }
-    const record = approvals.mint({ tool: toolId, inputHash, requestId });
+    const record = approvals.mint({ tool: toolId, inputHash, requestId, correlationId: stage.correlationId });
     audit.record({ requestId, tool: toolId, action: 'approval_required', readOnly: false, approvalId: record.id, outcome: 'ok' });
     // Correlation: approval MINTED (metadata only — never the token).
     stage.log('approval', { tool: toolId, status: 'required' });
@@ -122,7 +122,7 @@ export async function executeToolCore(deps: ToolExecDeps, req: ToolExecInput): P
   }
 
   // approvalId present → single-use, bound consume → execute
-  const consumed = approvals.consume(req.approvalId, { tool: toolId, inputHash });
+  const consumed = approvals.consume(req.approvalId, { tool: toolId, inputHash, correlationId: stage.correlationId });
   if (!consumed.ok) {
     audit.record({ requestId, tool: toolId, action: 'replay_refused', readOnly: false, approvalId: req.approvalId, outcome: 'refused' });
     stage.log('approval', { tool: toolId, status: 'refused', reason: consumed.reason });
@@ -130,7 +130,7 @@ export async function executeToolCore(deps: ToolExecDeps, req: ToolExecInput): P
   }
   try {
     const applyStarted = Date.now();
-    const result = await runnable.handler(input);
+    const result = await runnable.handler(input, { correlationId: stage.correlationId });
     audit.record({ requestId, tool: toolId, action: 'executed', readOnly: false, approvalId: req.approvalId, outcome: 'ok' });
     // Correlation: approved APPLY executed.
     stage.log('apply', { tool: toolId, durationMs: Date.now() - applyStarted, outcome: 'ok' });
