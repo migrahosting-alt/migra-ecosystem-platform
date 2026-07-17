@@ -41,7 +41,14 @@ export type AuditEventType =
   | 'application.rollback_failed'
   | 'validation.started'
   | 'validation.completed'
-  | 'validation.failed';
+  | 'validation.failed'
+  | 'recovery.started'
+  | 'recovery.plan_created'
+  | 'recovery.approved'
+  | 'recovery.applied'
+  | 'recovery.validation_completed'
+  | 'recovery.completed'
+  | 'recovery.failed';
 
 /** Event types whose loss is security/operationally critical — if these cannot
  * be persisted, the caller must fail closed before starting a new mutation. */

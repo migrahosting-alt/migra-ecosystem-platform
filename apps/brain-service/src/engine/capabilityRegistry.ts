@@ -36,6 +36,7 @@ import { nodeChangesetFs } from '../tools/changesetFs.js';
 import { telemetryHub } from './telemetryHub.js';
 import { auditStore, auditHash } from './auditLog.js';
 import { incidentManager } from './incidents.js';
+import { recoveryManager } from './recovery.js';
 import { workspaceSearch } from '../tools/workspaceSearch.js';
 import { fileReadRange } from '../tools/fileReadRange.js';
 import { fileReadSymbol } from '../tools/fileReadSymbol.js';
@@ -137,7 +138,7 @@ async function applyChangesetAudited(input: unknown, correlationId?: string): Pr
         durationMs: Date.now() - started,
         fields: { workspace, proposal, appliedFileCount: d.appliedFileCount, affectedPathCount: d.affectedPathCount, rollbackFailureCount: d.rollbackFailureCount, failureStage: d.failureStage },
       });
-      incidentManager.raiseInconsistentState({
+      const raised = incidentManager.raiseInconsistentState({
         correlationId: cid,
         workspaceIdentityHash: workspace,
         proposalHashPrefix: proposal,
@@ -146,6 +147,11 @@ async function applyChangesetAudited(input: unknown, correlationId?: string): Pr
         rollbackFailureCount: d.rollbackFailureCount,
         failureStage: d.failureStage,
       });
+      // Stash server-side reverse material (content lives here only, never
+      // audited) so an approval-gated recovery can restore the workspace.
+      if (err.reverseMaterial && req.rootPath) {
+        recoveryManager.stashReverseMaterial(cid, req.rootPath, err.reverseMaterial, raised.incident.incidentId);
+      }
     } else if (err instanceof ChangesetError && err.code === 'PARTIAL_WRITE') {
       auditStore.append({ correlationId: cid, type: 'application.rollback_completed', component: 'changeset', outcome: 'rolled_back', durationMs: Date.now() - started, fields: { workspace, proposal } });
     } else {

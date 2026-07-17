@@ -39,7 +39,7 @@ export interface Incident {
     failure_stage: string;
   };
   lastDeliveryStatus: 'delivered' | 'failed' | 'none';
-  resolution?: { at: number; note: string };
+  resolution?: { at: number; note: string; recoveryCorrelationId?: string; validationEvidence?: { checked: number; ok: boolean } };
 }
 
 /** Pluggable alert transport. The default local sink records deliveries; a
@@ -173,6 +173,22 @@ export class IncidentManager {
       inc.state = 'resolved';
       inc.resolution = { at: this.now(), note };
     }
+    return inc;
+  }
+
+  /** Resolve REQUIRING validation evidence + a recovery correlation id — an
+   * incident can never be closed merely because rollback tooling returned ok. */
+  resolveWithEvidence(
+    incidentId: string,
+    proof: { recoveryCorrelationId: string; validationEvidence: { checked: number; ok: boolean }; note: string },
+  ): Incident | undefined {
+    const inc = this.byId.get(incidentId);
+    if (!inc) return undefined;
+    if (!proof.validationEvidence || proof.validationEvidence.ok !== true || proof.validationEvidence.checked < 1 || !proof.recoveryCorrelationId) {
+      throw new Error('resolveWithEvidence requires passing validation evidence and a recovery correlation id');
+    }
+    inc.state = 'resolved';
+    inc.resolution = { at: this.now(), note: proof.note, recoveryCorrelationId: proof.recoveryCorrelationId, validationEvidence: proof.validationEvidence };
     return inc;
   }
 

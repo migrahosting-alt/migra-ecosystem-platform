@@ -205,6 +205,9 @@ export class ChangesetError extends Error {
     message: string,
     /** Safe, bounded counts for audit/incident (never paths or content). */
     readonly details?: { appliedFileCount: number; affectedPathCount: number; rollbackFailureCount: number; failureStage: string },
+    /** Server-side ONLY reverse material for recovery (path + prior content).
+     * NEVER audited/logged; used solely to build an approval-gated restoration. */
+    readonly reverseMaterial?: Array<{ path: string; previousContent: string | null }>,
   ) {
     super(message);
     this.name = 'ChangesetError';
@@ -502,6 +505,7 @@ export function applyChangeset(input: unknown, fs: ChangesetFs, store: Changeset
         'INCONSISTENT_STATE',
         `apply failed (${detail}) AND rollback failed (${undoDetail}) — workspace may be in a PARTIAL state; manual recovery required. applied-so-far: created=[${created.join(',')}] modified=[${modified.join(',')}] deleted=[${deleted.join(',')}]`,
         { appliedFileCount, affectedPathCount: rollback.length, rollbackFailureCount: 1, failureStage: 'rollback' },
+        rollback.map((r) => ({ path: r.path, previousContent: r.previousContent })),
       );
     }
     throw new ChangesetError('PARTIAL_WRITE', `apply failed and was rolled back cleanly: ${detail}`, {
