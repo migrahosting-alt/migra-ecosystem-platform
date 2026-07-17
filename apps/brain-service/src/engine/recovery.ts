@@ -101,17 +101,30 @@ export class RecoveryManager {
     return { ...plan, changeset: undefined } as unknown as RecoveryPlan;
   }
 
+  /** The changeset to actually apply, resolved against the CURRENT workspace: a
+   * reverse-material "delete" (a file that was to be newly created) is dropped
+   * when that file does not currently exist — e.g. an INCONSISTENT_STATE where
+   * the create's write faulted, so the file was never written. Deleting an
+   * absent file would fail the all-or-nothing engine; the goal (file absent) is
+   * already met. Mirrors the engine's own tolerant undo(). Never adds writes. */
+  private effective(b: RecoveryBundle, fs: ChangesetFs): ChangesetRequest {
+    const ops = b.changeset.ops.filter((o) => o.op !== 'delete' || fs.exists(fs.resolve(b.changeset.rootPath, o.path)));
+    const needsDelete = ops.some((o) => o.op === 'delete');
+    return { rootPath: b.changeset.rootPath, ops, ...(needsDelete ? { allowDelete: true } : {}) };
+  }
+
   /** SIMULATE — read-only preview of what a recovery WOULD write. Zero writes. */
   simulate(recoveryId: string, fs: ChangesetFs): { fileCount: number; wouldRestore: number; wouldRemove: number } {
     const b = this.bundles.get(recoveryId);
     if (!b) throw new RecoveryError('UNKNOWN_RECOVERY', 'unknown recovery id');
+    const changeset = this.effective(b, fs);
     // Dry-run through the changeset previewer (never mutates).
     const store = new ChangesetProposalStore(this.now);
-    proposeChangeset(b.changeset, fs, store, b.recoveryCorrelationId);
+    proposeChangeset(changeset, fs, store, b.recoveryCorrelationId);
     return {
-      fileCount: b.fileCount,
-      wouldRestore: b.changeset.ops.filter((o) => o.op !== 'delete').length,
-      wouldRemove: b.changeset.ops.filter((o) => o.op === 'delete').length,
+      fileCount: changeset.ops.length,
+      wouldRestore: changeset.ops.filter((o) => o.op !== 'delete').length,
+      wouldRemove: changeset.ops.filter((o) => o.op === 'delete').length,
     };
   }
 
@@ -126,10 +139,11 @@ export class RecoveryManager {
     auditStore.append({ correlationId: b.recoveryCorrelationId, type: 'recovery.approved', component: 'recovery', fields: { fileCount: b.fileCount } });
     // Apply through the standard changeset engine: propose (stores) → apply by
     // hash. Containment + atomic write + rollback are enforced there.
+    const changeset = this.effective(b, fs);
     const store = new ChangesetProposalStore(this.now);
-    const proposal = proposeChangeset(b.changeset, fs, store, b.recoveryCorrelationId);
+    const proposal = proposeChangeset(changeset, fs, store, b.recoveryCorrelationId);
     try {
-      const res = applyChangeset({ rootPath: b.changeset.rootPath, proposalHash: proposal.proposalHash }, fs, store, b.recoveryCorrelationId);
+      const res = applyChangeset({ rootPath: changeset.rootPath, proposalHash: proposal.proposalHash }, fs, store, b.recoveryCorrelationId);
       auditStore.append({ correlationId: b.recoveryCorrelationId, type: 'recovery.applied', component: 'recovery', outcome: 'ok', fields: { created: res.created.length, modified: res.modified.length, deleted: res.deleted.length } });
       return { created: res.created, modified: res.modified, deleted: res.deleted };
     } catch (err) {

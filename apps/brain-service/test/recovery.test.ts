@@ -122,6 +122,34 @@ test('recovery audit chain links to the original incident + execution, no conten
   assert.ok(!flat.includes('ORIG') && !flat.includes(root));
 });
 
+test('recovery tolerates reverse material for a create whose write never landed (delete of an absent file)', () => {
+  // The exact INCONSISTENT_STATE case: an apply pushed a `create` to the rollback
+  // list, then its write faulted — so the file was never written. Reverse material
+  // carries {previousContent:null} for it, but the file does not exist on disk.
+  const root = mkdtempSync(path.join(tmpdir(), 'recovery-'));
+  writeFileSync(path.join(root, 'keep.txt'), 'DAMAGED\n');
+  // NOTE: never.txt is intentionally NOT created on disk.
+  const reverse: ReverseEntry[] = [
+    { path: 'keep.txt', previousContent: 'ORIG\n' },
+    { path: 'never.txt', previousContent: null },
+  ];
+  const { rec } = managers();
+  rec.stashReverseMaterial('corr_orig', root, reverse, 'inc1');
+  const plan = rec.plan('corr_orig');
+  // simulate prunes the delete of the absent file (would-remove drops to 0).
+  const sim = rec.simulate(plan.recoveryId, fs);
+  assert.equal(sim.wouldRemove, 0);
+  assert.equal(sim.wouldRestore, 1);
+  // apply succeeds (no "delete target does not exist") and restores keep.txt.
+  const res = rec.apply(plan.recoveryId, plan.approvalToken, fs);
+  assert.deepEqual(res.modified, ['keep.txt']);
+  assert.deepEqual(res.deleted, []);
+  assert.equal(readFileSync(path.join(root, 'keep.txt'), 'utf8'), 'ORIG\n');
+  assert.equal(existsSync(path.join(root, 'never.txt')), false);
+  // verify still passes: the absent file is already in the desired state.
+  assert.equal(rec.verify(plan.recoveryId, fs).ok, true);
+});
+
 test('resolveWithEvidence throws without evidence (incident manager guard)', () => {
   const sink = new LocalAlertSink();
   const inc = new IncidentManager(sink.sink, () => 1);
