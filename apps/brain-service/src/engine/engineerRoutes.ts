@@ -12,6 +12,7 @@ import { selectModel, tierFromHints } from './capabilityRouter.js';
 import { StubProvider, type ProviderAdapter } from '../providers/providerRegistry.js';
 import { OpenAiCompatProvider } from '../providers/openAiCompatProvider.js';
 import { executeToolCore, type ToolExecDeps } from './toolExecutor.js';
+import { newCorrelationId, makeStageLogger, jsonLineSink, type StageLogger } from './correlation.js';
 import { runEngineerTask, type EngineerToolInfo } from './engineerRuntime.js';
 
 const EngineerBodySchema = z.object({
@@ -107,15 +108,25 @@ export function registerEngineerRoutes(
     }
     const body = parsed.data;
 
+    // Correlation id for the WHOLE execution (accept a caller-supplied id via
+    // header for cross-service tracing, else mint one). Emits one structured
+    // line per stage: request → route → loop-step → tool/proposal → apply → …
+    const headerId = String((request.headers['x-correlation-id'] as string | undefined) ?? '').trim();
+    const correlationId = headerId || newCorrelationId();
+    const stage: StageLogger = makeStageLogger(correlationId, jsonLineSink((line) => request.log.info(line)));
+    stage.log('request', { rootPath: body.rootPath, ecosystem: Boolean(body.ecosystem) });
+
     const decision = await selectModel(modelRegistry, {
       preferCoding: true,
       tier: tierFromHints({ tier: body.tier }),
     });
     if (!decision) {
+      stage.log('error', { code: 'NO_MODEL' });
       reply.code(503);
       return { ok: false, code: 'NO_MODEL', error: 'No model available for the engineer loop.' };
     }
     const provider = providerFor(decision.model);
+    stage.log('route', { model: decision.model.id, provider: decision.model.provider });
 
     reply.hijack();
     const raw = reply.raw;
@@ -138,7 +149,8 @@ export function registerEngineerRoutes(
       }
     };
 
-    send('route', { model: decision.model.id, provider: decision.model.provider, reason: decision.reason });
+    // Surface the correlation id to the client so it can be quoted in support.
+    send('route', { model: decision.model.id, provider: decision.model.provider, reason: decision.reason, correlationId });
 
     const events = runEngineerTask(
       {
@@ -154,7 +166,9 @@ export function registerEngineerRoutes(
           return res.content;
         },
         executeTool: async (tool, input) => {
-          const outcome = await executeToolCore(toolDeps, { tool, input, requestId: `eng-${Date.now().toString(36)}` });
+          // Thread the same correlation logger into the tool boundary so
+          // proposal/approval/apply stages share this execution's id.
+          const outcome = await executeToolCore(toolDeps, { tool, input, requestId: `eng-${Date.now().toString(36)}`, stage });
           if (!outcome.ok) throw new Error(`${outcome.code}: ${outcome.error}`);
           // The loop never holds approvals — if a tool unexpectedly parks, that
           // is explicit feedback to the model, never a silent null result.
@@ -164,6 +178,7 @@ export function registerEngineerRoutes(
           return outcome.result ?? outcome.preview;
         },
         listFiles: async (root) => listWorkspaceFiles(root),
+        stage,
         tools: loopTools(),
       },
       { rootPath: body.rootPath, task: body.task, ecosystem: body.ecosystem },

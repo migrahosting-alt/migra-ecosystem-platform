@@ -10,6 +10,7 @@
 import { CapabilityRegistry } from './capabilityRegistry.js';
 import { ToolApprovalStore, hashInput } from './toolApprovalStore.js';
 import { ToolAudit } from './toolAudit.js';
+import { NOOP_STAGE_LOGGER, type StageLogger } from './correlation.js';
 
 export interface ToolExecInput {
   tool?: string;
@@ -17,6 +18,9 @@ export interface ToolExecInput {
   dryRun?: boolean;
   approvalId?: string;
   requestId: string;
+  /** Optional per-call correlation logger — emits approval/apply stage lines
+   * (metadata only). Absent for uncorrelated direct calls. */
+  stage?: StageLogger;
 }
 
 /** Discriminated execution outcome. `httpStatus` lets the HTTP route map 1:1;
@@ -34,6 +38,7 @@ export interface ToolExecDeps {
 export async function executeToolCore(deps: ToolExecDeps, req: ToolExecInput): Promise<ToolExecOutcome> {
   const { registry, approvals, audit } = deps;
   const { requestId } = req;
+  const stage = req.stage ?? NOOP_STAGE_LOGGER;
   const toolId = req.tool;
 
   if (!toolId || typeof toolId !== 'string') {
@@ -111,6 +116,8 @@ export async function executeToolCore(deps: ToolExecDeps, req: ToolExecInput): P
     }
     const record = approvals.mint({ tool: toolId, inputHash, requestId });
     audit.record({ requestId, tool: toolId, action: 'approval_required', readOnly: false, approvalId: record.id, outcome: 'ok' });
+    // Correlation: approval MINTED (metadata only — never the token).
+    stage.log('approval', { tool: toolId, status: 'required' });
     return { ok: true, httpStatus: 200, status: 'approval_required', tool: toolId, requestId, approvalId: record.id, expiresAt: record.expiresAt, preview };
   }
 
@@ -118,11 +125,15 @@ export async function executeToolCore(deps: ToolExecDeps, req: ToolExecInput): P
   const consumed = approvals.consume(req.approvalId, { tool: toolId, inputHash });
   if (!consumed.ok) {
     audit.record({ requestId, tool: toolId, action: 'replay_refused', readOnly: false, approvalId: req.approvalId, outcome: 'refused' });
+    stage.log('approval', { tool: toolId, status: 'refused', reason: consumed.reason });
     return { ok: false, httpStatus: 409, code: 'INVALID_STATE', tool: toolId, requestId, error: `Approval ${consumed.reason}.`, reason: consumed.reason };
   }
   try {
+    const applyStarted = Date.now();
     const result = await runnable.handler(input);
     audit.record({ requestId, tool: toolId, action: 'executed', readOnly: false, approvalId: req.approvalId, outcome: 'ok' });
+    // Correlation: approved APPLY executed.
+    stage.log('apply', { tool: toolId, durationMs: Date.now() - applyStarted, outcome: 'ok' });
     return { ok: true, httpStatus: 200, status: 'executed', tool: toolId, requestId, result, approvalId: req.approvalId };
   } catch (error) {
     return failed(audit, requestId, toolId, false, error);

@@ -27,6 +27,8 @@
 // it is substituted with edit.preview and surfaced as a PROPOSAL. command.run
 // side effects (npm install, etc.) are permitted, contained, and reported.
 
+import { NOOP_STAGE_LOGGER, type StageLogger } from './correlation.js';
+
 export interface EngineerToolInfo {
   id: string;
   description: string;
@@ -45,6 +47,9 @@ export interface EngineerDeps {
   /** Optional workspace file lister — enables command side-effect reporting and
    * the "new files" progress signal. Absent in pure unit contexts. */
   listFiles?(rootPath: string): Promise<string[]>;
+  /** Correlation logger — emits a structured line per loop stage. Defaults to
+   * no-op so pure unit contexts need not supply one. */
+  stage?: StageLogger;
   maxSteps?: number;
   /** Cap for tool results fed back to the model (chars). */
   resultCap?: number;
@@ -278,6 +283,7 @@ export async function* runEngineerTask(deps: EngineerDeps, input: EngineerInput)
   let toolStepCount = 0;
   let finalCorrected = false;
   let proposalsEmitted = 0;
+  const stage = deps.stage ?? NOOP_STAGE_LOGGER;
 
   // Machine-authored truth footer: the model's prose can wrongly claim it
   // "applied" edits — the loop is preview-only, so we append the ground truth
@@ -292,6 +298,7 @@ export async function* runEngineerTask(deps: EngineerDeps, input: EngineerInput)
       reply = await deps.complete(transcript.join('\n\n'));
       step = parseStep(reply);
       if (step.kind === 'malformed') {
+        stage.log('error', { code: 'MALFORMED_MODEL_OUTPUT', n });
         yield { type: 'error', code: 'MALFORMED_MODEL_OUTPUT', message: `step ${n}: ${step.reason}` };
         return;
       }
@@ -304,6 +311,7 @@ export async function* runEngineerTask(deps: EngineerDeps, input: EngineerInput)
         continue; // exactly one corrective retry
       }
       const markdown = proposalsEmitted > 0 ? step.markdown + APPLIED_FOOTER : step.markdown;
+      stage.log('final', { steps: toolStepCount, proposals: proposalsEmitted, replans });
       yield { type: 'final', markdown, steps: toolStepCount };
       return;
     }
@@ -349,9 +357,14 @@ export async function* runEngineerTask(deps: EngineerDeps, input: EngineerInput)
         } else {
           yield { type: 'step', n, tool, summary: summarize(toolInput) };
           toolStepCount++;
+          // loop-step + tool stages (metadata only — never the tool input/result).
+          stage.log('loop-step', { n, tool });
           const before = tool === 'command.run' && deps.listFiles ? await deps.listFiles(input.rootPath).catch(() => []) : null;
+          const toolStarted = Date.now();
           try {
             const result = await deps.executeTool(tool, toolInput);
+            const stageName = tool === 'fs.proposeChangeset' || tool === 'edit.preview' ? 'proposal' : tool === 'command.run' ? 'validation' : 'tool';
+            stage.log(stageName, { n, tool, durationMs: Date.now() - toolStarted, outcome: 'ok' });
             resultCache.set(canonical, result);
             if (isProposal) {
               yield { type: 'proposal', n, preview: result };
@@ -374,6 +387,7 @@ export async function* runEngineerTask(deps: EngineerDeps, input: EngineerInput)
             transcript.push(`Result of ${tool}:\n${cap(stableStringify(result), resultCap)}\n\nContinue with the JSON protocol object.`);
           } catch (err) {
             const message = err instanceof Error ? err.message : String(err);
+            stage.log('tool', { n, tool, durationMs: Date.now() - toolStarted, outcome: 'error', error: err instanceof Error ? err.name : 'error' });
             transcript.push(`Tool ${tool} FAILED: ${cap(message, 500)}\n\nFix the input once or do something different; do not repeat it unchanged.`);
           }
         }
@@ -391,10 +405,12 @@ export async function* runEngineerTask(deps: EngineerDeps, input: EngineerInput)
           `You have made no progress for ${noProgressLimit} steps. Either take a MATERIALLY DIFFERENT action that advances the task, or reply now with {"final":...} summarizing what you did and what remains.`,
         );
       } else {
+        stage.log('error', { code: 'LOOP_NO_PROGRESS', replans });
         yield { type: 'error', code: 'LOOP_NO_PROGRESS', message: `no progress after ${replans} re-plan(s); stopping` };
         return;
       }
     }
   }
+  stage.log('error', { code: 'STEP_LIMIT', steps: toolStepCount });
   yield { type: 'error', code: 'STEP_LIMIT', message: `stopped after ${maxSteps} steps without a final answer` };
 }
