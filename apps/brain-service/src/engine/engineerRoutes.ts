@@ -31,6 +31,7 @@ const INPUT_HINTS: Record<string, string> = {
   'git.diff': '{"rootPath"}',
   'diagnostics.get': '{"rootPath","path"?}',
   'edit.preview': '{"rootPath","changes":[{"path","startLine","endLine","replacement"}]}',
+  'fs.proposeChangeset': '{"rootPath","ops":[{"op":"create","path":"src/x.js","content":"..."}]} (op: create|replace|patch|delete|mkdir)',
   'command.run': '{"rootPath","command":["npm","test"],"cwd"?,"timeoutMs"?}',
 };
 

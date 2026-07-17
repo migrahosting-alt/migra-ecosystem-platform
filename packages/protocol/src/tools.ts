@@ -195,6 +195,77 @@ export const EditApplyResponseSchema = z.object({
 export type EditApplyRequest = z.infer<typeof EditApplyRequestSchema>;
 export type EditApplyResponse = z.infer<typeof EditApplyResponseSchema>;
 
+// ── Changeset (Slice 3B): first-class file create/replace/patch/delete/mkdir with
+// an immutable proposal → single-use approval → atomic, rollback-safe apply ─────
+
+/** One operation in a changeset. `expectedSha` (filled by propose) binds the
+ * proposal to the file's pre-state so a stale source is refused at apply. */
+export const ChangeOpSchema = z.discriminatedUnion('op', [
+  z.object({ op: z.literal('create'), path: z.string().min(1), content: z.string() }),
+  z.object({ op: z.literal('replace'), path: z.string().min(1), content: z.string(), expectedSha: z.string().optional() }),
+  z.object({
+    op: z.literal('patch'),
+    path: z.string().min(1),
+    startLine: z.number().int().min(1),
+    endLine: z.number().int().min(1),
+    replacement: z.string(),
+    expectedSha: z.string().optional(),
+  }),
+  z.object({ op: z.literal('delete'), path: z.string().min(1), expectedSha: z.string().optional() }),
+  z.object({ op: z.literal('mkdir'), path: z.string().min(1) }),
+]);
+
+export const ChangesetRequestSchema = z.object({
+  rootPath: z.string().min(1),
+  ops: z.array(ChangeOpSchema).min(1),
+  /** delete operations are refused unless the caller explicitly opts in. */
+  allowDelete: z.boolean().optional(),
+});
+
+/** Apply references a SERVER-STORED proposal by its hash — the client never
+ * resubmits the changeset body, so it cannot substitute or weaken the proposal. */
+export const ApplyChangesetRequestSchema = z.object({
+  rootPath: z.string().min(1),
+  proposalHash: z.string().min(1),
+});
+export type ApplyChangesetRequest = z.infer<typeof ApplyChangesetRequestSchema>;
+
+export const ChangesetPreviewOpSchema = z.object({
+  op: z.enum(['create', 'replace', 'patch', 'delete', 'mkdir']),
+  path: z.string(),
+  kind: z.enum(['add', 'modify', 'delete', 'mkdir']),
+  preExists: z.boolean(),
+  expectedSha: z.string().nullable(),
+  before: z.string().nullable(),
+  after: z.string().nullable(),
+  bytes: z.number(),
+});
+
+export const ProposeChangesetResponseSchema = z.object({
+  tool: z.literal('fs.proposeChangeset'),
+  proposalHash: z.string(),
+  fileCount: z.number(),
+  totalBytes: z.number(),
+  /** The canonical changeset to apply — echoes ops with expectedSha filled. */
+  changeset: ChangesetRequestSchema,
+  ops: z.array(ChangesetPreviewOpSchema),
+});
+
+export const ApplyChangesetResponseSchema = z.object({
+  tool: z.literal('fs.applyChangeset'),
+  created: z.array(z.string()),
+  modified: z.array(z.string()),
+  deleted: z.array(z.string()),
+  rolledBack: z.boolean(),
+  /** Reverse material: previous content per touched file (null = created → undo = delete). */
+  rollback: z.array(z.object({ path: z.string(), previousContent: z.string().nullable() })),
+});
+
+export type ChangeOp = z.infer<typeof ChangeOpSchema>;
+export type ChangesetRequest = z.infer<typeof ChangesetRequestSchema>;
+export type ProposeChangesetResponse = z.infer<typeof ProposeChangesetResponseSchema>;
+export type ApplyChangesetResponse = z.infer<typeof ApplyChangesetResponseSchema>;
+
 export const DiagnosticSeveritySchema = z.enum([
   'error',
   'warning',

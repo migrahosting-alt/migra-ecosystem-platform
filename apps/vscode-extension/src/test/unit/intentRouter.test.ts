@@ -72,6 +72,27 @@ test('engineer run renders steps, proposals (not applied), and the final answer'
   assert.doesNotMatch(out, /unfortunately|sorry|i can't/i);
 });
 
+test('changeset proposal renders NEW files as additions, not failed edits', async () => {
+  const md: string[] = [];
+  await runEngineerTurn(
+    fakeStream([
+      { event: 'proposal', data: { n: 1, preview: { proposalHash: 'abcdef0123456789', fileCount: 2, ops: [
+        { op: 'create', path: 'src/index.js', kind: 'add', before: null, after: 'const x = 1;\n' },
+        { op: 'mkdir', path: 'test', kind: 'mkdir', before: null, after: null },
+      ] } } },
+      { event: 'final', data: { markdown: 'Proposed a new file and a directory for the app scaffold here.' } },
+    ]),
+    { rootPath: '/w', task: 'build app' },
+    { markdown: (t) => md.push(t) },
+  );
+  const out = md.join('');
+  assert.match(out, /Proposed changeset\*\* \(2 file\(s\), not applied/);
+  assert.match(out, /`src\/index\.js` — \*\*create\*\*/);
+  assert.match(out, /\+ const x = 1;/);
+  assert.match(out, /`test` — \*\*mkdir\*\*/);
+  assert.doesNotMatch(out, /- const x = 1;/, 'a pure addition shows no deletion lines');
+});
+
 test('engineer errors render as machine blocks, never prose', async () => {
   const md: string[] = [];
   await runEngineerTurn(
