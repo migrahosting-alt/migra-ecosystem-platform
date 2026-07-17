@@ -1,0 +1,73 @@
+// Operational Readiness Slice 5 — provider configuration + target loading.
+//
+// Disabled by default. Enablement, the environment allowlist, the operator
+// allowlist, and the target registry are all read from explicit configuration —
+// local coding-agent availability never enables production diagnostics.
+//
+// © MigraTeck LLC.
+
+import { readFileSync } from 'node:fs';
+import type { ProviderConfig } from './provider.js';
+import type { Environment, ProductionTarget } from './targetRegistry.js';
+import { ProductionTargetRegistry } from './targetRegistry.js';
+
+function parseBoolean(v: string | undefined, fallback: boolean): boolean {
+  if (v == null) return fallback;
+  const n = v.trim().toLowerCase();
+  if (n === 'true' || n === '1' || n === 'yes') return true;
+  if (n === 'false' || n === '0' || n === 'no') return false;
+  return fallback;
+}
+
+function parseList(v: string | undefined): string[] {
+  return (v ?? '').split(',').map((s) => s.trim()).filter(Boolean);
+}
+
+function parseEnvironments(v: string | undefined): Environment[] {
+  return parseList(v).filter((e): e is Environment => e === 'production' || e === 'staging');
+}
+
+/** Build the provider config from the environment. FAIL CLOSED: `enabled` defaults
+ * to false, so an unset environment yields a disabled provider. */
+export function readProviderConfig(env: NodeJS.ProcessEnv = process.env): ProviderConfig {
+  return {
+    enabled: parseBoolean(env.MIGRAPILOT_PROD_DIAGNOSTICS_ENABLED, false),
+    approvedEnvironments: parseEnvironments(env.MIGRAPILOT_PROD_DIAGNOSTICS_ENVIRONMENTS),
+    operators: new Set(parseList(env.MIGRAPILOT_PROD_DIAGNOSTICS_OPERATORS)),
+    maxTimeoutMs: Number(env.MIGRAPILOT_PROD_DIAGNOSTICS_MAX_TIMEOUT_MS ?? 10_000) || 10_000,
+  };
+}
+
+/** Load the server-authoritative target registry from an optional JSON file.
+ * When unset or unreadable, the registry is EMPTY — every target then fails closed
+ * as TARGET_NOT_ALLOWED. The file is trusted operator configuration, never a
+ * client input. */
+export function loadTargetRegistry(env: NodeJS.ProcessEnv = process.env): ProductionTargetRegistry {
+  const file = env.MIGRAPILOT_PROD_DIAGNOSTICS_TARGETS_FILE;
+  if (!file) return new ProductionTargetRegistry([]);
+  try {
+    const raw = JSON.parse(readFileSync(file, 'utf8')) as unknown;
+    const arr = Array.isArray(raw) ? raw : Array.isArray((raw as { targets?: unknown }).targets) ? (raw as { targets: unknown[] }).targets : [];
+    const targets = arr.filter(isTargetShape);
+    return new ProductionTargetRegistry(targets);
+  } catch {
+    // Unreadable/malformed config → empty (fail closed), never throw at startup.
+    return new ProductionTargetRegistry([]);
+  }
+}
+
+function isTargetShape(v: unknown): v is ProductionTarget {
+  if (!v || typeof v !== 'object') return false;
+  const t = v as Record<string, unknown>;
+  return (
+    typeof t.targetId === 'string' &&
+    typeof t.tenantId === 'string' &&
+    (t.environment === 'production' || t.environment === 'staging') &&
+    typeof t.serviceType === 'string' &&
+    Array.isArray(t.approvedEndpoints) &&
+    Array.isArray(t.approvedCapabilities) &&
+    typeof t.timeoutMs === 'number' &&
+    typeof t.rateLimitPerMinute === 'number' &&
+    typeof t.enabled === 'boolean'
+  );
+}
