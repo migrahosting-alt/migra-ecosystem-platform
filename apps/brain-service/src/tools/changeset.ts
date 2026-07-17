@@ -30,6 +30,10 @@ import {
 const MAX_OPS = 200;
 const MAX_TOTAL_BYTES = 5 * 1024 * 1024;
 const MAX_FILE_BYTES = 2 * 1024 * 1024;
+// INVARIANT (fail-closed): the proposal TTL MUST be >= the approval-store TTL
+// (ToolApprovalStore DEFAULT_TTL_MS = 5 min) so an approval can never outlive
+// its authoritative proposal — there is no window where a valid approval exists
+// but the proposal it binds has expired. Keep this comfortably larger.
 const PROPOSAL_TTL_MS = 30 * 60_000;
 const MAX_STORED_PROPOSALS = 512;
 
@@ -86,6 +90,7 @@ export class ChangesetError extends Error {
       | 'NOT_FOUND'
       | 'STALE'
       | 'PARTIAL_WRITE'
+      | 'INCONSISTENT_STATE'
       | 'CONFLICT'
       | 'TOO_LARGE'
       | 'UNKNOWN_PROPOSAL',
@@ -161,17 +166,24 @@ function assertWellFormed(cs: ChangesetRequest): void {
   }
 }
 
+/** Deterministic serialization with recursively sorted object keys, so the
+ * proposal identity is canonical — key order, and only key order, can never
+ * produce two different hashes for the same logical proposal (invariant #1).
+ * Op ORDER is preserved (arrays keep order — sequence is semantically relevant). */
+function canonicalStringify(value: unknown): string {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value) ?? 'null';
+  if (Array.isArray(value)) return `[${value.map(canonicalStringify).join(',')}]`;
+  const obj = value as Record<string, unknown>;
+  return `{${Object.keys(obj).sort().map((k) => `${JSON.stringify(k)}:${canonicalStringify(obj[k])}`).join(',')}}`;
+}
+
 /** SHA-256 over ALL security-relevant context (owner review): version, root,
  * allowDelete, and the ordered normalized ops (op / path / expectedSha /
- * content / patch coords). Any edit to any of these changes the hash. */
+ * content / patch coords). Canonical serialization → any content change alters
+ * the hash; key-order alone never does. */
 function proposalHashOf(cs: ChangesetRequest): string {
-  const canonical = {
-    v: 1,
-    rootPath: cs.rootPath,
-    allowDelete: Boolean(cs.allowDelete),
-    ops: cs.ops,
-  };
-  return createHash('sha256').update(JSON.stringify(canonical), 'utf8').digest('hex');
+  const canonical = { v: 1, rootPath: cs.rootPath, allowDelete: Boolean(cs.allowDelete), ops: cs.ops };
+  return createHash('sha256').update(canonicalStringify(canonical), 'utf8').digest('hex');
 }
 
 /** Pure preview compute (no store side effect): validates + previews a changeset
@@ -289,8 +301,18 @@ export function applyChangeset(input: unknown, fs: ChangesetFs, store: Changeset
   if (!cs) {
     throw new ChangesetError('UNKNOWN_PROPOSAL', 'no live proposal for that hash (unknown, expired, or already applied)');
   }
-  if (cs.rootPath !== req.rootPath) {
-    throw new ChangesetError('INVALID_INPUT', 'rootPath does not match the stored proposal');
+  // Root identity is not cosmetic (invariant #4): canonicalize BOTH roots via
+  // realPath and compare, so the same proposal hash cannot be pointed at a
+  // different workspace — while a symlink alias to the SAME real root is accepted.
+  const sameRoot = (() => {
+    try {
+      return fs.realPath(req.rootPath) === fs.realPath(cs.rootPath);
+    } catch {
+      return false;
+    }
+  })();
+  if (!sameRoot) {
+    throw new ChangesetError('INVALID_INPUT', 'rootPath does not resolve to the stored proposal root');
   }
   const resolved = resolveOps(cs, fs); // re-contain every path at apply time
 
@@ -357,9 +379,20 @@ export function applyChangeset(input: unknown, fs: ChangesetFs, store: Changeset
       }
     }
   } catch (err) {
-    undo();
     const detail = err instanceof Error ? err.message : String(err);
-    throw new ChangesetError('PARTIAL_WRITE', `apply failed and was rolled back: ${detail}`);
+    try {
+      undo();
+    } catch (undoErr) {
+      // Invariant #5: rollback itself failed — this is an INCONSISTENT, mixed
+      // state. Surface it as a HIGH-SEVERITY distinct condition; never claim a
+      // clean rollback. Report what we attempted so an operator can recover.
+      const undoDetail = undoErr instanceof Error ? undoErr.message : String(undoErr);
+      throw new ChangesetError(
+        'INCONSISTENT_STATE',
+        `apply failed (${detail}) AND rollback failed (${undoDetail}) — workspace may be in a PARTIAL state; manual recovery required. applied-so-far: created=[${created.join(',')}] modified=[${modified.join(',')}] deleted=[${deleted.join(',')}]`,
+      );
+    }
+    throw new ChangesetError('PARTIAL_WRITE', `apply failed and was rolled back cleanly: ${detail}`);
   }
 
   return { tool: 'fs.applyChangeset', created, modified, deleted, rolledBack: false, rollback };

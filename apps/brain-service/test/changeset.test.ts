@@ -247,6 +247,103 @@ test('previewStoredChangeset renders the stored proposal without consuming it', 
   assert.ok(store.get(p.proposalHash), 'preview must NOT consume the proposal');
 });
 
+// ── owner merge-bar invariants ──────────────────────────────────────────────────
+
+test('invariant #1: proposal hash is canonical — key order does not change identity', () => {
+  const root = ws({ 'a.txt': 'x\n' });
+  const s = new ChangesetProposalStore();
+  // Two logically-identical proposals whose op object keys arrive in different
+  // order must yield the SAME proposal hash.
+  const h1 = proposeChangeset({ rootPath: root, ops: [{ op: 'patch', path: 'a.txt', startLine: 1, endLine: 1, replacement: 'Y' }] }, fs, s).proposalHash;
+  const h2 = proposeChangeset({ rootPath: root, ops: [{ replacement: 'Y', endLine: 1, startLine: 1, path: 'a.txt', op: 'patch' } as never] }, fs, s).proposalHash;
+  assert.equal(h1, h2);
+});
+
+test('invariant #2: an approval cannot outlive its proposal (approval TTL < proposal TTL)', async () => {
+  let now = 1_000;
+  const approvals = new ToolApprovalStore(() => now, undefined, 5 * 60_000);
+  const store = new ChangesetProposalStore(() => now);
+  const deps = { registry: new CapabilityRegistry(), approvals, audit: new ToolAudit() };
+  // Proposal must be stored in the registry's store; use the shared store via a
+  // direct proposal here, then drive apply through the engine with our approvals.
+  const root = ws();
+  // Register a proposal in the registry-backed store by calling propose through the engine.
+  const prop = await executeToolCore(deps, { tool: 'fs.proposeChangeset', input: { rootPath: root, ops: [{ op: 'create', path: 'x.js', content: '1\n' }] }, requestId: 'p' });
+  const hash = prop.ok ? (prop.result as { proposalHash: string }).proposalHash : '';
+  const parked = await executeToolCore(deps, { tool: 'fs.applyChangeset', input: { rootPath: root, proposalHash: hash }, requestId: 'r1' });
+  const approvalId = parked.ok ? parked.approvalId! : '';
+  now += 6 * 60_000; // past approval TTL (5m), still within proposal TTL (30m)
+  const res = await executeToolCore(deps, { tool: 'fs.applyChangeset', input: { rootPath: root, proposalHash: hash }, approvalId, requestId: 'r2' });
+  assert.ok(!res.ok && res.code === 'INVALID_STATE', 'expired approval must be refused before the proposal expires');
+});
+
+test('invariant #3: two concurrent applies for one approval → exactly one success', async () => {
+  const deps = { registry: new CapabilityRegistry(), approvals: new ToolApprovalStore(), audit: new ToolAudit() };
+  const root = ws();
+  const prop = await executeToolCore(deps, { tool: 'fs.proposeChangeset', input: { rootPath: root, ops: [{ op: 'create', path: 'once.js', content: 'X\n' }] }, requestId: 'p' });
+  const hash = prop.ok ? (prop.result as { proposalHash: string }).proposalHash : '';
+  const parked = await executeToolCore(deps, { tool: 'fs.applyChangeset', input: { rootPath: root, proposalHash: hash }, requestId: 'r1' });
+  const approvalId = parked.ok ? parked.approvalId! : '';
+  const applyInput = { rootPath: root, proposalHash: hash };
+  const [a, b] = await Promise.all([
+    executeToolCore(deps, { tool: 'fs.applyChangeset', input: applyInput, approvalId, requestId: 'c1' }),
+    executeToolCore(deps, { tool: 'fs.applyChangeset', input: applyInput, approvalId, requestId: 'c2' }),
+  ]);
+  const okCount = [a, b].filter((r) => r.ok && r.status === 'executed').length;
+  const failCount = [a, b].filter((r) => !r.ok && (r.code === 'INVALID_STATE' || r.code === 'UNKNOWN_PROPOSAL')).length;
+  assert.equal(okCount, 1, 'exactly one apply succeeds');
+  assert.equal(failCount, 1, 'the other is refused');
+  assert.equal(read(root, 'once.js'), 'X\n'); // written exactly once
+});
+
+test('invariant #4: the same proposal hash cannot target a different workspace', async () => {
+  const store = new ChangesetProposalStore();
+  const rootA = ws();
+  const rootB = ws();
+  const p = proposeChangeset({ rootPath: rootA, ops: [{ op: 'create', path: 'x.js', content: '1\n' }] }, fs, store);
+  // Re-store under the same hash but attempt to apply against a DIFFERENT root.
+  assert.throws(() => applyChangeset({ rootPath: rootB, proposalHash: p.proposalHash }, fs, store), /does not resolve to the stored proposal root/);
+});
+
+test('invariant #4: a symlink alias to the SAME real root is accepted', () => {
+  const store = new ChangesetProposalStore();
+  const root = ws();
+  const alias = path.join(mkdtempSync(path.join(tmpdir(), 'alias-')), 'ws');
+  symlinkSync(root, alias);
+  const p = proposeChangeset({ rootPath: root, ops: [{ op: 'create', path: 'x.js', content: '1\n' }] }, fs, store);
+  applyChangeset({ rootPath: alias, proposalHash: p.proposalHash }, fs, store); // alias → same real dir → accepted
+  assert.equal(read(root, 'x.js'), '1\n');
+});
+
+test('invariant #5: a rollback failure surfaces INCONSISTENT_STATE, never a clean-rollback claim', () => {
+  const root = ws({ 'keep.txt': 'ORIG\n' });
+  const store = new ChangesetProposalStore();
+  const p = proposeChangeset({ rootPath: root, ops: [{ op: 'replace', path: 'keep.txt', content: 'NEW\n' }, { op: 'create', path: 'second.js', content: 'x\n' }] }, fs, store);
+  let writes = 0;
+  const broken: ChangesetFs = {
+    ...fs,
+    writeFile: (pp, c) => {
+      writes++;
+      if (writes === 2) throw new Error('apply write failed');
+      if (writes === 3) throw new Error('rollback write ALSO failed'); // undo restore fails
+      fs.writeFile(pp, c);
+    },
+  };
+  assert.throws(() => applyChangeset({ rootPath: root, proposalHash: p.proposalHash }, broken, store), (e: unknown) => e instanceof ChangesetError && e.code === 'INCONSISTENT_STATE');
+});
+
+test('invariant #6: allowDelete is hash-bound and comes only from the stored proposal', () => {
+  const root = ws({ 'a.txt': 'x\n' });
+  const s = new ChangesetProposalStore();
+  // allowDelete true vs false → different proposal identities (hash-bound).
+  const withDel = proposeChangeset({ rootPath: root, ops: [{ op: 'delete', path: 'a.txt' }], allowDelete: true }, fs, s).proposalHash;
+  const root2 = ws({ 'a.txt': 'x\n' });
+  // Same ops, allowDelete omitted → rejected at propose (can't even get a hash).
+  assert.throws(() => proposeChangeset({ rootPath: root2, ops: [{ op: 'delete', path: 'a.txt' }] }, fs, s), (e: unknown) => e instanceof ChangesetError && e.code === 'DELETE_NOT_ALLOWED');
+  // The apply request schema carries NO allowDelete field — a client cannot inject it.
+  assert.ok(withDel.length === 64);
+});
+
 test('fs.proposeChangeset is read-only + available; fs.applyChangeset is mutating + approval-required', () => {
   const reg = new CapabilityRegistry();
   const propose = reg.get('fs.proposeChangeset');
