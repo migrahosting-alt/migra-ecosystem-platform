@@ -24,6 +24,7 @@ import {
   type ProposeChangesetResponse,
   type ApplyChangesetResponse,
 } from '@migrapilot/protocol';
+import { StoreHealth, shortId, safeSink, NOOP_TELEMETRY, type TelemetrySink, type StoreHealthSnapshot } from '../engine/storeTelemetry.js';
 
 // Proposal-size guardrails (owner threat checklist). A proposal exceeding any of
 // these is refused at propose time — before it can be stored or approved.
@@ -37,38 +38,145 @@ const MAX_FILE_BYTES = 2 * 1024 * 1024;
 const PROPOSAL_TTL_MS = 30 * 60_000;
 const MAX_STORED_PROPOSALS = 512;
 
+/** Bounded, non-sensitive metadata about a changeset for telemetry. */
+function changesetMeta(cs: ChangesetRequest): { opCount: number; totalBytes: number; opTypes: Record<string, number> } {
+  const opTypes: Record<string, number> = {};
+  let totalBytes = 0;
+  for (const op of cs.ops) {
+    opTypes[op.op] = (opTypes[op.op] ?? 0) + 1;
+    if (op.op === 'create' || op.op === 'replace') totalBytes += Buffer.byteLength(op.content, 'utf8');
+    else if (op.op === 'patch') totalBytes += Buffer.byteLength(op.replacement, 'utf8');
+  }
+  return { opCount: cs.ops.length, totalBytes, opTypes };
+}
+
 /** Server-side proposal store: the AUTHORITATIVE changeset body lives here,
  * keyed by its SHA-256 proposal hash. Apply looks the proposal up by hash — the
- * client never resubmits the body, so it cannot substitute a weaker changeset. */
+ * client never resubmits the body, so it cannot substitute a weaker changeset.
+ *
+ * Instrumented (Slice 2): every lifecycle transition emits ONE metadata-only
+ * telemetry event, and health() returns a truthful snapshot. Eviction is never
+ * silent and prefers expired entries before evicting an active proposal. */
 export class ChangesetProposalStore {
-  private readonly byHash = new Map<string, { changeset: ChangesetRequest; rootPath: string; expiresAt: number }>();
-  constructor(private readonly now: () => number = () => Date.now()) {}
+  private readonly byHash = new Map<string, { changeset: ChangesetRequest; rootPath: string; createdAt: number; expiresAt: number }>();
+  private readonly telemetry: TelemetrySink;
+  private readonly healthTracker = new StoreHealth('proposal', MAX_STORED_PROPOSALS, () => this.now());
 
-  put(proposalHash: string, changeset: ChangesetRequest): void {
-    if (this.byHash.size >= MAX_STORED_PROPOSALS) {
-      // Evict the oldest to bound memory (a local single-process engine).
-      const oldest = [...this.byHash.entries()].sort((a, b) => a[1].expiresAt - b[1].expiresAt)[0];
-      if (oldest) this.byHash.delete(oldest[0]);
-    }
-    this.byHash.set(proposalHash, { changeset, rootPath: changeset.rootPath, expiresAt: this.now() + PROPOSAL_TTL_MS });
+  constructor(private readonly now: () => number = () => Date.now(), telemetry: TelemetrySink = NOOP_TELEMETRY) {
+    this.telemetry = safeSink(telemetry);
+  }
+
+  private emit(event: Parameters<TelemetrySink>[0]['event'], fields: Record<string, unknown>, correlationId?: string): void {
+    this.telemetry({ event, at: this.now(), correlationId, fields });
+  }
+
+  put(proposalHash: string, changeset: ChangesetRequest, correlationId?: string): void {
+    if (this.byHash.size >= MAX_STORED_PROPOSALS) this.evictForCapacity(correlationId);
+    const createdAt = this.now();
+    this.byHash.set(proposalHash, { changeset, rootPath: changeset.rootPath, createdAt, expiresAt: createdAt + PROPOSAL_TTL_MS });
+    this.healthTracker.onCreated();
+    const meta = changesetMeta(changeset);
+    this.emit(
+      'proposal.created',
+      {
+        proposal: shortId(proposalHash),
+        workspace: shortId(changeset.rootPath),
+        opCount: meta.opCount,
+        totalBytes: meta.totalBytes,
+        opTypes: meta.opTypes,
+        createdAt,
+        expiresAt: createdAt + PROPOSAL_TTL_MS,
+        storeSize: this.byHash.size,
+        capacity: MAX_STORED_PROPOSALS,
+      },
+      correlationId,
+    );
   }
 
   /** Fetch a live proposal; expired entries are treated as absent (and evicted). */
-  get(proposalHash: string): ChangesetRequest | undefined {
+  get(proposalHash: string, correlationId?: string): ChangesetRequest | undefined {
+    const started = this.now();
     const rec = this.byHash.get(proposalHash);
-    if (!rec) return undefined;
-    if (rec.expiresAt <= this.now()) {
-      this.byHash.delete(proposalHash);
+    if (!rec) {
+      this.emit('proposal.unknown', { proposal: shortId(proposalHash), latencyMs: this.now() - started }, correlationId);
       return undefined;
     }
+    if (rec.expiresAt <= this.now()) {
+      this.byHash.delete(proposalHash);
+      this.healthTracker.onExpired();
+      this.emit('proposal.expired', { proposal: shortId(proposalHash), ageMs: this.now() - rec.createdAt, storeSize: this.byHash.size }, correlationId);
+      return undefined;
+    }
+    this.emit('proposal.looked_up', { proposal: shortId(proposalHash), latencyMs: this.now() - started }, correlationId);
     return rec.changeset;
   }
 
   /** Consume (remove) a proposal — a proposal is single-use at application. */
-  take(proposalHash: string): ChangesetRequest | undefined {
-    const cs = this.get(proposalHash);
-    if (cs) this.byHash.delete(proposalHash);
-    return cs;
+  take(proposalHash: string, correlationId?: string): ChangesetRequest | undefined {
+    const rec = this.byHash.get(proposalHash);
+    if (!rec) {
+      this.emit('proposal.unknown', { proposal: shortId(proposalHash) }, correlationId);
+      return undefined;
+    }
+    if (rec.expiresAt <= this.now()) {
+      this.byHash.delete(proposalHash);
+      this.healthTracker.onExpired();
+      this.emit('proposal.expired', { proposal: shortId(proposalHash), ageMs: this.now() - rec.createdAt, storeSize: this.byHash.size }, correlationId);
+      return undefined;
+    }
+    this.byHash.delete(proposalHash);
+    this.healthTracker.onConsumed();
+    this.emit('proposal.consumed', { proposal: shortId(proposalHash), ageMs: this.now() - rec.createdAt, storeSize: this.byHash.size }, correlationId);
+    return rec.changeset;
+  }
+
+  /** Deterministic capacity policy: sweep EXPIRED first (reason=ttl); only if
+   * still full, evict the single oldest ACTIVE proposal (reason=capacity) — an
+   * explicit, auditable policy, never a silent overwrite. */
+  private evictForCapacity(correlationId?: string): void {
+    const started = this.now();
+    const nowT = this.now();
+    const expiredKeys = [...this.byHash.entries()].filter(([, v]) => v.expiresAt <= nowT).map(([k]) => k);
+    if (expiredKeys.length) {
+      for (const k of expiredKeys) this.byHash.delete(k);
+      this.healthTracker.onExpired(expiredKeys.length);
+      this.healthTracker.onEvicted(expiredKeys.length);
+      this.emit('proposal.evicted', { reason: 'ttl', removed: expiredKeys.length, storeSize: this.byHash.size, capacity: MAX_STORED_PROPOSALS }, correlationId);
+    }
+    if (this.byHash.size >= MAX_STORED_PROPOSALS) {
+      const oldest = [...this.byHash.entries()].sort((a, b) => a[1].expiresAt - b[1].expiresAt)[0];
+      if (oldest) {
+        this.byHash.delete(oldest[0]);
+        this.healthTracker.onEvicted(1);
+        this.emit('proposal.evicted', { reason: 'capacity', removed: 1, storeSize: this.byHash.size, capacity: MAX_STORED_PROPOSALS }, correlationId);
+      }
+    }
+    this.healthTracker.onCleanup(this.now() - started);
+  }
+
+  /** Truthful health snapshot (sweeps expired first so counts are accurate). */
+  health(): StoreHealthSnapshot {
+    const started = this.now();
+    const nowT = this.now();
+    let sweptExpired = 0;
+    for (const [k, v] of [...this.byHash.entries()]) {
+      if (v.expiresAt <= nowT) {
+        this.byHash.delete(k);
+        sweptExpired += 1;
+      }
+    }
+    if (sweptExpired) {
+      this.healthTracker.onExpired(sweptExpired);
+      this.emit('proposal.expired', { reason: 'sweep', removed: sweptExpired, storeSize: this.byHash.size });
+    }
+    this.healthTracker.onCleanup(this.now() - started);
+    let oldestAge: number | null = null;
+    let nextExp: number | null = null;
+    for (const v of this.byHash.values()) {
+      oldestAge = oldestAge === null ? nowT - v.createdAt : Math.max(oldestAge, nowT - v.createdAt);
+      nextExp = nextExp === null ? v.expiresAt - nowT : Math.min(nextExp, v.expiresAt - nowT);
+    }
+    return this.healthTracker.snapshot(this.byHash.size, oldestAge, nextExp);
   }
 }
 
@@ -274,18 +382,18 @@ function computeProposal(cs: ChangesetRequest, fs: ChangesetFs): ProposeChangese
 /** PROPOSE: read-only (zero WORKSPACE writes). Computes the proposal and STORES
  * the authoritative changeset so apply can consume it by hash without trusting a
  * client resubmission. */
-export function proposeChangeset(input: unknown, fs: ChangesetFs, store: ChangesetProposalStore): ProposeChangesetResponse {
+export function proposeChangeset(input: unknown, fs: ChangesetFs, store: ChangesetProposalStore, correlationId?: string): ProposeChangesetResponse {
   const cs = ChangesetRequestSchema.parse(input);
   const proposal = computeProposal(cs, fs);
-  store.put(proposal.proposalHash, proposal.changeset);
+  store.put(proposal.proposalHash, proposal.changeset, correlationId);
   return proposal;
 }
 
 /** APPLY-PREVIEW: look up the stored proposal by hash and render it WITHOUT
  * consuming — the executor's approval-required preview for fs.applyChangeset. */
-export function previewStoredChangeset(input: unknown, fs: ChangesetFs, store: ChangesetProposalStore): ProposeChangesetResponse {
+export function previewStoredChangeset(input: unknown, fs: ChangesetFs, store: ChangesetProposalStore, correlationId?: string): ProposeChangesetResponse {
   const req = ApplyChangesetRequestSchema.parse(input);
-  const cs = store.get(req.proposalHash);
+  const cs = store.get(req.proposalHash, correlationId);
   if (!cs) throw new ChangesetError('UNKNOWN_PROPOSAL', 'no live proposal for that hash (unknown or expired)');
   if (cs.rootPath !== req.rootPath) throw new ChangesetError('INVALID_INPUT', 'rootPath does not match the stored proposal');
   return computeProposal(cs, fs);
@@ -295,9 +403,9 @@ export function previewStoredChangeset(input: unknown, fs: ChangesetFs, store: C
  * names {rootPath, proposalHash} — it cannot substitute the body), re-validates
  * + stale-checks, then applies all-or-nothing with atomic writes + rollback.
  * `consume: false` (preview path) looks up without removing. */
-export function applyChangeset(input: unknown, fs: ChangesetFs, store: ChangesetProposalStore): ApplyChangesetResponse {
+export function applyChangeset(input: unknown, fs: ChangesetFs, store: ChangesetProposalStore, correlationId?: string): ApplyChangesetResponse {
   const req = ApplyChangesetRequestSchema.parse(input);
-  const cs = store.take(req.proposalHash); // single-use: consumed on apply
+  const cs = store.take(req.proposalHash, correlationId); // single-use: consumed on apply
   if (!cs) {
     throw new ChangesetError('UNKNOWN_PROPOSAL', 'no live proposal for that hash (unknown, expired, or already applied)');
   }
