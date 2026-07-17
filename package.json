@@ -14,6 +14,9 @@
   ],
   "scripts": {
     "prepare": "husky",
+    "guards:install": "bash ./scripts/dev/install-claude-guards.sh",
+    "guards:verify": "bash ./scripts/dev/install-claude-guards.sh --verify",
+    "guards:test": "bash ./scripts/dev/test-claude-guards.sh",
     "clean": "node ./scripts/clean.mjs && npm run clean -ws --if-present",
     "build": "npm run build -ws",
     "dev": "concurrently -n brain,ext \"npm run dev -w @migrapilot/brain-service\" \"npm run watch -w migrapilot-extension\"",
