@@ -28,9 +28,10 @@ import {
   DiagnosticsGetRequestSchema,
   CommandRunRequestSchema,
   ChangesetRequestSchema,
+  ApplyChangesetRequestSchema,
 } from '@migrapilot/protocol';
 import { commandRun } from '../tools/commandRun.js';
-import { proposeChangeset, applyChangeset } from '../tools/changeset.js';
+import { proposeChangeset, applyChangeset, previewStoredChangeset, ChangesetProposalStore } from '../tools/changeset.js';
 import { nodeChangesetFs } from '../tools/changesetFs.js';
 import { workspaceSearch } from '../tools/workspaceSearch.js';
 import { fileReadRange } from '../tools/fileReadRange.js';
@@ -86,6 +87,8 @@ interface RunnableCapability {
 export const LOCAL_GRANTS: ReadonlySet<string> = new Set(['workspace.read', 'workspace.write', 'git.read', 'command.run']);
 
 const changesetFs = nodeChangesetFs();
+// One proposal store shared by propose (writes) + apply (consumes by hash).
+const changesetProposals = new ChangesetProposalStore();
 
 const TOOLS: RunnableCapability[] = [
   {
@@ -142,19 +145,21 @@ const TOOLS: RunnableCapability[] = [
       readOnly: true,
     }),
     inputSchema: ChangesetRequestSchema,
-    handler: (i) => Promise.resolve(proposeChangeset(i, changesetFs)),
+    handler: (i) => Promise.resolve(proposeChangeset(i, changesetFs, changesetProposals)),
   },
   {
-    // Slice 3B — apply an approved changeset. MUTATING + APPROVAL-REQUIRED; its
-    // dry-run/approval preview is the proposal itself (same read-only compute).
-    descriptor: meta('fs.applyChangeset', 'Apply Changeset', 'Apply an approved changeset atomically with rollback.', 'edit', ['workspace.write'], {
+    // Slice 3B — apply an approved changeset by its server-stored proposal hash
+    // ({rootPath, proposalHash} only — the client never resubmits the body).
+    // MUTATING + APPROVAL-REQUIRED; the approval preview renders the stored
+    // proposal without consuming it.
+    descriptor: meta('fs.applyChangeset', 'Apply Changeset', 'Apply an approved proposal (by hash) atomically with rollback.', 'edit', ['workspace.write'], {
       readOnly: false,
       approvalRequired: true,
       supportsDryRun: true,
     }),
-    inputSchema: ChangesetRequestSchema,
-    handler: (i) => Promise.resolve(applyChangeset(i, changesetFs)),
-    preview: (i) => Promise.resolve(proposeChangeset(i, changesetFs)),
+    inputSchema: ApplyChangesetRequestSchema,
+    handler: (i) => Promise.resolve(applyChangeset(i, changesetFs, changesetProposals)),
+    preview: (i) => Promise.resolve(previewStoredChangeset(i, changesetFs, changesetProposals)),
   },
   {
     // Policy-allowlisted argv execution (build/test/debug). NOT free shell —

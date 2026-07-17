@@ -222,6 +222,14 @@ export const ChangesetRequestSchema = z.object({
   allowDelete: z.boolean().optional(),
 });
 
+/** Apply references a SERVER-STORED proposal by its hash — the client never
+ * resubmits the changeset body, so it cannot substitute or weaken the proposal. */
+export const ApplyChangesetRequestSchema = z.object({
+  rootPath: z.string().min(1),
+  proposalHash: z.string().min(1),
+});
+export type ApplyChangesetRequest = z.infer<typeof ApplyChangesetRequestSchema>;
+
 export const ChangesetPreviewOpSchema = z.object({
   op: z.enum(['create', 'replace', 'patch', 'delete', 'mkdir']),
   path: z.string(),

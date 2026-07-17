@@ -16,6 +16,8 @@
  * swap this for a shared store without changing the route contract.
  */
 
+import { createHash } from 'node:crypto';
+
 export type ApprovalState = 'PENDING' | 'CONSUMED' | 'EXPIRED';
 
 export interface ApprovalRecord {
@@ -111,12 +113,11 @@ function defaultId(): string {
 }
 
 /** Stable structural hash of a tool input, so an approval binds to the exact
- * request it previewed. Key order is normalized. */
+ * request it previewed. Key order is normalized, then SHA-256 — an approval
+ * token is a security binding, so a collision must be cryptographically
+ * infeasible (a 32-bit hash was substitutable). */
 export function hashInput(input: unknown): string {
-  const json = stableStringify(input);
-  let h = 5381;
-  for (let i = 0; i < json.length; i += 1) h = (h * 33) ^ json.charCodeAt(i);
-  return (h >>> 0).toString(16);
+  return createHash('sha256').update(stableStringify(input), 'utf8').digest('hex');
 }
 
 function stableStringify(value: unknown): string {
