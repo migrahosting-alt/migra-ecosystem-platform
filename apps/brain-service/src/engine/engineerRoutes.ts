@@ -3,6 +3,8 @@
 // path, so disabled remote delegation can never block ordinary local work.
 
 import type { FastifyInstance } from 'fastify';
+import { readdir } from 'node:fs/promises';
+import * as path from 'node:path';
 import { z } from 'zod';
 import type { BrainEnv } from '../config/env.js';
 import type { ModelRegistry, ModelDescriptor } from './modelRegistry.js';
@@ -31,6 +33,32 @@ const INPUT_HINTS: Record<string, string> = {
   'edit.preview': '{"rootPath","changes":[{"path","startLine","endLine","replacement"}]}',
   'command.run': '{"rootPath","command":["npm","test"],"cwd"?,"timeoutMs"?}',
 };
+
+/** Shallow-ish workspace file listing for command side-effect detection. Skips
+ * heavy/noisy dirs; bounded so a big install cannot flood the diff. */
+async function listWorkspaceFiles(root: string, limit = 5_000): Promise<string[]> {
+  const skip = new Set(['.git', 'node_modules', '.next', 'dist', '.cache']);
+  const out: string[] = [];
+  async function walk(dir: string, depth: number): Promise<void> {
+    if (out.length >= limit || depth > 6) return;
+    let entries: Array<{ name: string; isDirectory(): boolean }>;
+    try {
+      entries = await readdir(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of entries) {
+      if (out.length >= limit) return;
+      if (e.isDirectory()) {
+        if (!skip.has(e.name)) await walk(path.join(dir, e.name), depth + 1);
+      } else {
+        out.push(path.relative(root, path.join(dir, e.name)));
+      }
+    }
+  }
+  await walk(root, 0);
+  return out;
+}
 
 export function registerEngineerRoutes(
   app: FastifyInstance,
@@ -134,6 +162,7 @@ export function registerEngineerRoutes(
           }
           return outcome.result ?? outcome.preview;
         },
+        listFiles: async (root) => listWorkspaceFiles(root),
         tools: loopTools(),
       },
       { rootPath: body.rootPath, task: body.task, ecosystem: body.ecosystem },

@@ -1,21 +1,31 @@
 // Engineer runtime — the model-in-the-loop workspace agent behind
-// POST /api/ai/engineer (Slice 2: workspace-agent capability routing).
+// POST /api/ai/engineer (Slice 2: workspace-agent capability routing; Slice 3A:
+// loop hardening).
 //
-// This is deliberately a SEPARATE surface from the agent registry: registry
-// agents have DETERMINISTIC fixed plans (replayable, delegable to pilot-api),
-// while this loop is model-driven and local-only. It never touches the pilot
-// runtime, so disabled remote delegation cannot affect ordinary local work.
+// A SEPARATE surface from the agent registry: registry agents have
+// DETERMINISTIC fixed plans (replayable, delegable to pilot-api); this loop is
+// model-driven and local-only. It never touches the pilot runtime, so disabled
+// remote delegation cannot affect ordinary local work.
 //
-// Protocol: the model must reply with ONE JSON object per step —
+// Protocol: the model replies with ONE JSON object per step —
 //   {"action": {"tool": "<id>", "input": {...}}}   execute a tool and continue
 //   {"final": "<markdown answer>"}                 finish the task
-// Malformed output gets exactly one corrective retry per step.
 //
-// Mutation policy (owner, 2026-07-16): the loop NEVER writes. `edit.apply` is
-// auto-substituted with `edit.preview`, surfaced as a PROPOSAL event, and the
-// final answer carries the proposed diffs. Applying remains an explicit,
-// separately-approved act outside this loop. `command.run` is available under
-// its own server-side allowlist policy (builds/tests — matrix default Enabled).
+// Slice 3A hardening (deterministic, policy-preserving):
+//  - duplicate suppression: identical/equivalent calls return the recorded
+//    result instead of re-executing, and the model is told it already ran;
+//  - input normalization + bounded repair: absolute-under-root paths become
+//    relative, out-of-root paths are refused, line coords are normalized to the
+//    1-based contract — only deterministic fixes, never invented arguments;
+//  - no-progress detection: steps that add nothing force a re-plan, then
+//    terminate with an explicit LOOP_NO_PROGRESS failure;
+//  - final-response enforcement: weak/deferral finals get one corrective retry;
+//  - command-write policy: workspace-local side effects are permitted and
+//    reported; publish/deploy/release/push-style commands are refused.
+//
+// Mutation policy (owner, 2026-07-16): the loop NEVER writes via edit.apply —
+// it is substituted with edit.preview and surfaced as a PROPOSAL. command.run
+// side effects (npm install, etc.) are permitted, contained, and reported.
 
 export interface EngineerToolInfo {
   id: string;
@@ -32,9 +42,16 @@ export interface EngineerDeps {
   executeTool(tool: string, input: unknown): Promise<unknown>;
   /** The tool catalog the loop may use (already filtered by the caller). */
   tools: EngineerToolInfo[];
+  /** Optional workspace file lister — enables command side-effect reporting and
+   * the "new files" progress signal. Absent in pure unit contexts. */
+  listFiles?(rootPath: string): Promise<string[]>;
   maxSteps?: number;
   /** Cap for tool results fed back to the model (chars). */
   resultCap?: number;
+  /** Consecutive no-progress steps before forcing a re-plan / terminating. */
+  noProgressLimit?: number;
+  /** How many times the loop may force a re-plan before LOOP_NO_PROGRESS. */
+  maxReplans?: number;
 }
 
 export interface EngineerInput {
@@ -44,14 +61,19 @@ export interface EngineerInput {
   ecosystem?: boolean;
 }
 
+export type EngineerNoteKind = 'normalized' | 'duplicate' | 'command-effect' | 'replan' | 'policy';
+
 export type EngineerEvent =
   | { type: 'step'; n: number; tool: string; summary: string }
   | { type: 'proposal'; n: number; preview: unknown }
+  | { type: 'note'; n: number; kind: EngineerNoteKind; message: string }
   | { type: 'final'; markdown: string; steps: number }
-  | { type: 'error'; code: 'MALFORMED_MODEL_OUTPUT' | 'UNKNOWN_TOOL' | 'STEP_LIMIT' | 'TOOL_FAILED'; message: string };
+  | { type: 'error'; code: 'MALFORMED_MODEL_OUTPUT' | 'STEP_LIMIT' | 'LOOP_NO_PROGRESS'; message: string };
 
-const DEFAULT_MAX_STEPS = 12;
+const DEFAULT_MAX_STEPS = 14;
 const DEFAULT_RESULT_CAP = 6_000;
+const DEFAULT_NO_PROGRESS_LIMIT = 3;
+const DEFAULT_MAX_REPLANS = 1;
 
 const ECOSYSTEM_BLOCK = [
   'ECOSYSTEM CONTEXT: this workspace belongs to the MigraTeck/MigraHosting ecosystem.',
@@ -76,18 +98,20 @@ function protocolPrompt(input: EngineerInput, tools: EngineerToolInfo[]): string
     '- Reply with ONLY one JSON object, no prose, no code fences.',
     '- {"action":{"tool":"<id>","input":{...}}} to use a tool; {"final":"<markdown>"} to finish.',
     '- Every tool input must include "rootPath" set to the workspace root above.',
+    '- Paths are WORKSPACE-RELATIVE (e.g. "src/index.js"), never absolute.',
+    '- Line numbers are 1-BASED: startLine and endLine must be >= 1.',
     '- To propose file changes use edit.preview; changes are applied by the operator',
     '  after approval, never by you. Put proposed diffs in your final answer.',
     '- Use command.run (argv array, e.g. ["npm","test"]) for builds/tests; only',
-    '  allowlisted programs run.',
-    '- Line numbers are 1-BASED: startLine and endLine must be >= 1.',
+    '  allowlisted programs run; publish/deploy/release/push are refused.',
     '- NEVER repeat a tool call with identical input — its earlier result stands.',
     '- If a tool input is rejected, fix the input once; do not retry it unchanged.',
     '- Work autonomously: never ask the user for confirmation and never announce',
     '  a plan as your final answer — execute it with tools NOW.',
     '- For build/change tasks, only reply {"final":...} AFTER you have inspected',
-    '  the workspace with tools and produced edit.preview proposals for every',
-    '  file you would create or change.',
+    '  the workspace and produced edit.preview proposals for every file you would',
+    '  create or change. Your final MUST summarize: what you inspected, commands',
+    '  you ran, files proposed/changed, validation evidence, and any limitations.',
     '',
     `TASK: ${input.task}`,
   ].filter((l) => l !== '').join('\n');
@@ -116,6 +140,113 @@ export function parseStep(text: string):
   return { kind: 'malformed', reason: 'neither {"action":...} nor {"final":...}' };
 }
 
+// ── canonicalization + normalization helpers (pure, string-based) ───────────────
+
+/** Deterministic JSON: object keys sorted recursively, so equivalent inputs
+ * (key order aside) canonicalize identically for duplicate detection. */
+export function stableStringify(value: unknown): string {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value) ?? 'null';
+  if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`;
+  const obj = value as Record<string, unknown>;
+  const keys = Object.keys(obj).sort();
+  return `{${keys.map((k) => `${JSON.stringify(k)}:${stableStringify(obj[k])}`).join(',')}}`;
+}
+
+function isAbsolutePath(p: string): boolean {
+  return /^([\\/]|[A-Za-z]:[\\/])/.test(p);
+}
+
+function trimTrailingSep(p: string): string {
+  return p.replace(/[\\/]+$/, '');
+}
+
+function underRoot(p: string, root: string): boolean {
+  const nr = trimTrailingSep(root);
+  return p === nr || p.startsWith(`${nr}/`) || p.startsWith(`${nr}\\`);
+}
+
+function relativize(p: string, root: string): string {
+  const nr = trimTrailingSep(root);
+  return p.slice(nr.length).replace(/^[\\/]+/, '');
+}
+
+type PathFix = { path: string } | { reject: string };
+function fixPath(p: unknown, root: string, notes: string[]): PathFix {
+  if (typeof p !== 'string') return { path: p as string };
+  if (isAbsolutePath(p)) {
+    if (underRoot(p, root)) {
+      const rel = relativize(p, root);
+      notes.push(`normalized absolute path to "${rel}"`);
+      return { path: rel };
+    }
+    return { reject: `path "${p}" is outside the workspace root` };
+  }
+  if (p.split(/[\\/]/).includes('..')) return { reject: `path "${p}" escapes the workspace root` };
+  return { path: p };
+}
+
+function fixLines(o: Record<string, unknown>, notes: string[]): void {
+  if (typeof o.startLine === 'number' && o.startLine < 1) {
+    notes.push('normalized startLine to 1 (line numbers are 1-based)');
+    o.startLine = 1;
+  }
+  if (typeof o.endLine === 'number' && o.endLine < 1) {
+    notes.push('normalized endLine to 1 (line numbers are 1-based)');
+    o.endLine = 1;
+  }
+  if (typeof o.startLine === 'number' && typeof o.endLine === 'number' && o.endLine < o.startLine) {
+    notes.push('normalized endLine up to startLine');
+    o.endLine = o.startLine;
+  }
+}
+
+/** Deterministic, bounded repair. NEVER invents missing arguments — a missing
+ * required field is left for the tool's own schema validation to reject. */
+export function normalizeInput(
+  input: unknown,
+  root: string,
+): { input: Record<string, unknown>; notes: string[] } | { rejection: string } {
+  const notes: string[] = [];
+  const obj: Record<string, unknown> = { ...(input as Record<string, unknown> ?? {}) };
+  if ('path' in obj) {
+    const r = fixPath(obj.path, root, notes);
+    if ('reject' in r) return { rejection: r.reject };
+    obj.path = r.path;
+  }
+  fixLines(obj, notes);
+  if (Array.isArray(obj.changes)) {
+    const changes: unknown[] = [];
+    for (const c of obj.changes) {
+      const cc = { ...(c as Record<string, unknown>) };
+      if ('path' in cc) {
+        const r = fixPath(cc.path, root, notes);
+        if ('reject' in r) return { rejection: r.reject };
+        cc.path = r.path;
+      }
+      fixLines(cc, notes);
+      changes.push(cc);
+    }
+    obj.changes = changes;
+  }
+  return { input: obj, notes };
+}
+
+/** Command-write policy: workspace-local side effects are fine; anything that
+ * publishes, deploys, releases, or pushes off-machine is refused in-loop. */
+const DENIED_COMMAND_TOKENS = /^(publish|deploy|release|push)$/i;
+export function deniedCommandReason(command: unknown): string | null {
+  if (!Array.isArray(command)) return null;
+  const bad = command.find((a) => typeof a === 'string' && DENIED_COMMAND_TOKENS.test(a));
+  return bad ? `command "${bad}" is an external-effect action (publish/deploy/release/push) and is refused in-loop` : null;
+}
+
+/** A final that is empty, trivially short, or a deferral/confirmation request. */
+export function isWeakFinal(markdown: string): boolean {
+  const t = markdown.trim();
+  if (t.length < 40) return true;
+  return /\b(please confirm|let me know|shall i|do you want|should i proceed|i will now|i'll now|continuing setup)\b/i.test(t);
+}
+
 function summarize(input: unknown): string {
   const s = JSON.stringify(input);
   return s.length > 160 ? `${s.slice(0, 160)}…` : s;
@@ -125,18 +256,38 @@ function cap(text: string, limit: number): string {
   return text.length > limit ? `${text.slice(0, limit)}…[truncated]` : text;
 }
 
+const WEAK_FINAL_DIRECTIVE = [
+  'That final was not acceptable — it must be a real completion report, not a plan or a question.',
+  'Reply with {"final":"..."} whose markdown states: what you inspected, which commands you actually',
+  'ran, which files you proposed or changed, any validation evidence, and any unresolved limitations.',
+].join(' ');
+
 /** Run one engineering task as an event stream. Local-only by construction. */
 export async function* runEngineerTask(deps: EngineerDeps, input: EngineerInput): AsyncGenerator<EngineerEvent> {
   const maxSteps = deps.maxSteps ?? DEFAULT_MAX_STEPS;
   const resultCap = deps.resultCap ?? DEFAULT_RESULT_CAP;
+  const noProgressLimit = deps.noProgressLimit ?? DEFAULT_NO_PROGRESS_LIMIT;
+  const maxReplans = deps.maxReplans ?? DEFAULT_MAX_REPLANS;
   const toolIds = new Set(deps.tools.map((t) => t.id));
   const transcript: string[] = [protocolPrompt(input, deps.tools)];
+
+  const resultCache = new Map<string, unknown>(); // canonical call → recorded result
+  const seenResultHashes = new Set<string>();
+  let noProgressStreak = 0;
+  let replans = 0;
+  let toolStepCount = 0;
+  let finalCorrected = false;
+  let proposalsEmitted = 0;
+
+  // Machine-authored truth footer: the model's prose can wrongly claim it
+  // "applied" edits — the loop is preview-only, so we append the ground truth
+  // whenever any proposal was surfaced. Deterministic; never model text.
+  const APPLIED_FOOTER = '\n\n---\n_Proposed edits above were NOT applied — the engineer runs preview-only. Approve them to apply._';
 
   for (let n = 1; n <= maxSteps; n++) {
     let reply = await deps.complete(transcript.join('\n\n'));
     let step = parseStep(reply);
     if (step.kind === 'malformed') {
-      // Exactly one corrective retry per step.
       transcript.push(`Your last reply was invalid (${step.reason}). Reply with ONLY the JSON protocol object.`);
       reply = await deps.complete(transcript.join('\n\n'));
       step = parseStep(reply);
@@ -147,32 +298,95 @@ export async function* runEngineerTask(deps: EngineerDeps, input: EngineerInput)
     }
 
     if (step.kind === 'final') {
-      yield { type: 'final', markdown: step.markdown, steps: n - 1 };
+      if (isWeakFinal(step.markdown) && !finalCorrected) {
+        finalCorrected = true;
+        transcript.push(WEAK_FINAL_DIRECTIVE);
+        continue; // exactly one corrective retry
+      }
+      const markdown = proposalsEmitted > 0 ? step.markdown + APPLIED_FOOTER : step.markdown;
+      yield { type: 'final', markdown, steps: toolStepCount };
       return;
     }
 
-    // Mutation policy: edit.apply is never executed by the loop — substitute
-    // the read-only preview and surface it as a proposal.
+    // Mutation policy: edit.apply is never executed by the loop.
     const isProposal = step.tool === 'edit.apply' || step.tool === 'edit.preview';
     const tool = step.tool === 'edit.apply' ? 'edit.preview' : step.tool;
 
     if (!toolIds.has(tool)) {
       transcript.push(`Tool "${step.tool}" does not exist. Available: ${[...toolIds].join(', ')}. Reply with the JSON protocol object.`);
-      continue; // consumed a step; the cap still bounds the loop
+      noProgressStreak++;
+    } else {
+      // Normalize + bounded repair (server-authoritative root wins regardless).
+      const normalized = normalizeInput(step.input, input.rootPath);
+      let progressed = false;
+      if ('rejection' in normalized) {
+        yield { type: 'note', n, kind: 'normalized', message: normalized.rejection };
+        transcript.push(`Rejected: ${normalized.rejection}. Use a workspace-relative path and retry differently.`);
+        noProgressStreak++;
+      } else {
+        for (const note of normalized.notes) yield { type: 'note', n, kind: 'normalized', message: note };
+        const toolInput = { ...normalized.input, rootPath: input.rootPath };
+        const canonical = `${tool} ${stableStringify(toolInput)}`;
+
+        // Command-write policy (in-loop refusal for external-effect commands).
+        const denied = tool === 'command.run' ? deniedCommandReason((toolInput as { command?: unknown }).command) : null;
+        if (denied) {
+          yield { type: 'note', n, kind: 'policy', message: denied };
+          transcript.push(`Refused: ${denied}. Choose a workspace-local command or continue.`);
+          noProgressStreak++;
+        } else if (resultCache.has(canonical)) {
+          // Duplicate suppression — return the recorded result, do not re-execute.
+          yield { type: 'note', n, kind: 'duplicate', message: `${tool} was already run with these arguments; reusing the earlier result` };
+          transcript.push(`${tool} ALREADY COMPLETED with those arguments; its earlier result stands. Do something different or reply with {"final":...}.`);
+          noProgressStreak++;
+        } else {
+          yield { type: 'step', n, tool, summary: summarize(toolInput) };
+          toolStepCount++;
+          const before = tool === 'command.run' && deps.listFiles ? await deps.listFiles(input.rootPath).catch(() => []) : null;
+          try {
+            const result = await deps.executeTool(tool, toolInput);
+            resultCache.set(canonical, result);
+            if (isProposal) {
+              yield { type: 'proposal', n, preview: result };
+              proposalsEmitted++;
+              progressed = true; // a concrete proposed change is progress
+            }
+            const hash = stableStringify(result);
+            if (!seenResultHashes.has(hash)) {
+              seenResultHashes.add(hash);
+              progressed = true; // a novel observation is progress
+            }
+            if (before) {
+              const after = await deps.listFiles!(input.rootPath).catch(() => []);
+              const created = after.filter((f) => !before.includes(f));
+              if (created.length) {
+                yield { type: 'note', n, kind: 'command-effect', message: `created ${created.length} file(s): ${created.slice(0, 20).join(', ')}` };
+                progressed = true; // command side effect is progress
+              }
+            }
+            transcript.push(`Result of ${tool}:\n${cap(stableStringify(result), resultCap)}\n\nContinue with the JSON protocol object.`);
+          } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            transcript.push(`Tool ${tool} FAILED: ${cap(message, 500)}\n\nFix the input once or do something different; do not repeat it unchanged.`);
+          }
+        }
+        noProgressStreak = progressed ? 0 : noProgressStreak + 1;
+      }
     }
 
-    // Server-authoritative root: whatever the model wrote, the task's root wins.
-    const toolInput = { ...(step.input as Record<string, unknown> ?? {}), rootPath: input.rootPath };
-    yield { type: 'step', n, tool, summary: summarize(toolInput) };
-    try {
-      const result = await deps.executeTool(tool, toolInput);
-      if (isProposal) yield { type: 'proposal', n, preview: result };
-      transcript.push(`Result of ${tool}:\n${cap(JSON.stringify(result), resultCap)}\n\nContinue with the JSON protocol object.`);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      // Tool failures are FEEDBACK, not fatal: the model may adapt (e.g. a
-      // failing build is exactly what a debug task needs to see).
-      transcript.push(`Tool ${tool} FAILED: ${cap(message, 500)}\n\nContinue with the JSON protocol object.`);
+    // No-progress detection → bounded re-plan → explicit termination.
+    if (noProgressStreak >= noProgressLimit) {
+      if (replans < maxReplans) {
+        replans++;
+        noProgressStreak = 0;
+        yield { type: 'note', n, kind: 'replan', message: `no progress for ${noProgressLimit} steps — forcing a re-plan` };
+        transcript.push(
+          `You have made no progress for ${noProgressLimit} steps. Either take a MATERIALLY DIFFERENT action that advances the task, or reply now with {"final":...} summarizing what you did and what remains.`,
+        );
+      } else {
+        yield { type: 'error', code: 'LOOP_NO_PROGRESS', message: `no progress after ${replans} re-plan(s); stopping` };
+        return;
+      }
     }
   }
   yield { type: 'error', code: 'STEP_LIMIT', message: `stopped after ${maxSteps} steps without a final answer` };

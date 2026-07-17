@@ -13,6 +13,7 @@ export interface EngineerSink {
 }
 
 interface StepData { n?: number; tool?: string; summary?: string }
+interface NoteData { n?: number; kind?: string; message?: string }
 interface ProposalData { n?: number; preview?: { files?: Array<{ path?: string; before?: string; after?: string }> } }
 interface FinalData { markdown?: string; steps?: number }
 interface ErrorData { code?: string; message?: string }
@@ -48,6 +49,11 @@ export async function runEngineerTurn(
       } else if (ev.event === 'step') {
         const d = ev.data as StepData;
         sink.markdown(`\n· \`${d.tool ?? 'tool'}\` ${d.summary ?? ''}\n`);
+      } else if (ev.event === 'note') {
+        // Visible reporting of normalization/dedup/command-effects/re-plans.
+        const d = ev.data as NoteData;
+        const icon = d.kind === 'command-effect' ? '📝' : d.kind === 'duplicate' ? '↩︎' : d.kind === 'policy' ? '⛔' : d.kind === 'replan' ? '↻' : 'ℹ︎';
+        sink.markdown(`\n  ${icon} _${d.message ?? d.kind ?? 'note'}_\n`);
       } else if (ev.event === 'proposal') {
         sink.markdown(`\n${renderProposal(ev.data as ProposalData)}\n`);
       } else if (ev.event === 'final') {

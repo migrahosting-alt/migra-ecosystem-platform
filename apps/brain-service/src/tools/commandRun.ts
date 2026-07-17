@@ -24,6 +24,10 @@ const OUTPUT_CAP = 24 * 1024;
 const DEFAULT_TIMEOUT_MS = 120_000;
 const DEFAULT_ALLOWLIST = ['node', 'npm', 'npx', 'tsc', 'tsx'];
 
+// External-effect subcommands refused regardless of allowlist — these publish,
+// deploy, release, or push off-machine (Slice 3A command-write policy).
+const DENIED_SUBCOMMANDS = new Set(['publish', 'deploy', 'release', 'push']);
+
 export function commandAllowlist(env: NodeJS.ProcessEnv = process.env): string[] {
   const raw = env.MIGRAPILOT_COMMAND_ALLOWLIST;
   if (!raw) return DEFAULT_ALLOWLIST;
@@ -73,6 +77,10 @@ export async function commandRun(
   const allow = commandAllowlist(env);
   if (!allow.includes(argv0)) {
     throw new CommandPolicyError(`command "${argv0}" is not on the allowlist (${allow.join(', ')})`);
+  }
+  const denied = req.command.slice(1).find((a) => DENIED_SUBCOMMANDS.has(a.toLowerCase()));
+  if (denied) {
+    throw new CommandPolicyError(`subcommand "${denied}" is an external-effect action (publish/deploy/release/push) and is refused`);
   }
   const cwd = await containedCwd(req.rootPath, req.cwd);
   const timeoutMs = req.timeoutMs ?? DEFAULT_TIMEOUT_MS;

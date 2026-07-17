@@ -205,7 +205,8 @@ test('ecosystem flag injects the ecosystem context block; absent otherwise', asy
   const deps = {
     complete: async (p: string) => {
       prompts.push(p);
-      return '{"final":"ok"}';
+      // A substantive final so weak-final enforcement doesn't add a retry.
+      return '{"final":"Inspected the workspace; nothing to change. No commands run; no files proposed."}';
     },
     executeTool: async () => ({}),
     tools: TOOLS,
