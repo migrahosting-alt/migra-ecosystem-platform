@@ -203,6 +203,8 @@ export class ChangesetError extends Error {
       | 'TOO_LARGE'
       | 'UNKNOWN_PROPOSAL',
     message: string,
+    /** Safe, bounded counts for audit/incident (never paths or content). */
+    readonly details?: { appliedFileCount: number; affectedPathCount: number; rollbackFailureCount: number; failureStage: string },
   ) {
     super(message);
     this.name = 'ChangesetError';
@@ -495,12 +497,19 @@ export function applyChangeset(input: unknown, fs: ChangesetFs, store: Changeset
       // state. Surface it as a HIGH-SEVERITY distinct condition; never claim a
       // clean rollback. Report what we attempted so an operator can recover.
       const undoDetail = undoErr instanceof Error ? undoErr.message : String(undoErr);
+      const appliedFileCount = created.length + modified.length + deleted.length;
       throw new ChangesetError(
         'INCONSISTENT_STATE',
         `apply failed (${detail}) AND rollback failed (${undoDetail}) — workspace may be in a PARTIAL state; manual recovery required. applied-so-far: created=[${created.join(',')}] modified=[${modified.join(',')}] deleted=[${deleted.join(',')}]`,
+        { appliedFileCount, affectedPathCount: rollback.length, rollbackFailureCount: 1, failureStage: 'rollback' },
       );
     }
-    throw new ChangesetError('PARTIAL_WRITE', `apply failed and was rolled back cleanly: ${detail}`);
+    throw new ChangesetError('PARTIAL_WRITE', `apply failed and was rolled back cleanly: ${detail}`, {
+      appliedFileCount: created.length + modified.length + deleted.length,
+      affectedPathCount: rollback.length,
+      rollbackFailureCount: 0,
+      failureStage: 'apply',
+    });
   }
 
   return { tool: 'fs.applyChangeset', created, modified, deleted, rolledBack: false, rollback };
