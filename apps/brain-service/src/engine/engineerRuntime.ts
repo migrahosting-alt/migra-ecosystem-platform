@@ -308,9 +308,16 @@ export async function* runEngineerTask(deps: EngineerDeps, input: EngineerInput)
       return;
     }
 
-    // Mutation policy: edit.apply is never executed by the loop.
-    const isProposal = step.tool === 'edit.apply' || step.tool === 'edit.preview';
-    const tool = step.tool === 'edit.apply' ? 'edit.preview' : step.tool;
+    // Mutation policy: edit.apply / fs.applyChangeset are never executed by the
+    // loop. edit.apply is substituted with its read-only preview; fs.applyChangeset
+    // is substituted with fs.proposeChangeset — the loop only ever PROPOSES.
+    const isProposal =
+      step.tool === 'edit.apply' ||
+      step.tool === 'edit.preview' ||
+      step.tool === 'fs.applyChangeset' ||
+      step.tool === 'fs.proposeChangeset';
+    const tool =
+      step.tool === 'edit.apply' ? 'edit.preview' : step.tool === 'fs.applyChangeset' ? 'fs.proposeChangeset' : step.tool;
 
     if (!toolIds.has(tool)) {
       transcript.push(`Tool "${step.tool}" does not exist. Available: ${[...toolIds].join(', ')}. Reply with the JSON protocol object.`);

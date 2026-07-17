@@ -14,19 +14,47 @@ export interface EngineerSink {
 
 interface StepData { n?: number; tool?: string; summary?: string }
 interface NoteData { n?: number; kind?: string; message?: string }
-interface ProposalData { n?: number; preview?: { files?: Array<{ path?: string; before?: string; after?: string }> } }
+interface PreviewFile { path?: string; before?: string; after?: string }
+interface ChangesetPreviewOp { op?: string; path?: string; kind?: string; before?: string | null; after?: string | null }
+interface ProposalData {
+  n?: number;
+  preview?: {
+    files?: PreviewFile[]; // edit.preview shape
+    ops?: ChangesetPreviewOp[]; // fs.proposeChangeset shape
+    proposalHash?: string;
+    fileCount?: number;
+  };
+}
 interface FinalData { markdown?: string; steps?: number }
 interface ErrorData { code?: string; message?: string }
 
-function renderProposal(data: ProposalData): string {
-  const files = data.preview?.files ?? [];
-  const blocks = files.map((f) => [
-    `**Proposed change — \`${f.path ?? 'unknown'}\`** (not applied; approval required to apply):`,
+function diffBlock(title: string, before: string | null | undefined, after: string | null | undefined): string {
+  return [
+    title,
     '```diff',
-    ...String(f.before ?? '').split('\n').map((l) => `- ${l}`),
-    ...String(f.after ?? '').split('\n').map((l) => `+ ${l}`),
+    ...String(before ?? '').split('\n').filter((_, i, a) => before != null || a.length > 1).map((l) => `- ${l}`),
+    ...String(after ?? '').split('\n').filter((_, i, a) => after != null || a.length > 1).map((l) => `+ ${l}`),
     '```',
-  ].join('\n'));
+  ].join('\n');
+}
+
+function renderProposal(data: ProposalData): string {
+  const p = data.preview;
+  // fs.proposeChangeset shape — new files render as ADDITIONS, not failed edits.
+  if (p?.ops?.length) {
+    const header = `**Proposed changeset** (${p.fileCount ?? p.ops.length} file(s), not applied; approval required)${p.proposalHash ? ` · \`${p.proposalHash.slice(0, 12)}\`` : ''}:`;
+    const blocks = p.ops.map((o) => {
+      const label = o.kind === 'add' ? 'create' : o.kind === 'delete' ? 'delete' : o.kind === 'mkdir' ? 'mkdir' : 'modify';
+      if (o.kind === 'mkdir') return `- \`${o.path}\` — **${label}** (directory)`;
+      return diffBlock(`- \`${o.path}\` — **${label}**:`, o.before, o.after);
+    });
+    return [header, ...blocks].join('\n\n');
+  }
+  // edit.preview shape (line-range edits to existing files).
+  const files = p?.files ?? [];
+  const blocks = files.map((f) =>
+    diffBlock(`**Proposed change — \`${f.path ?? 'unknown'}\`** (not applied; approval required to apply):`, f.before, f.after),
+  );
   return blocks.join('\n\n') || '_Proposal recorded (no file preview supplied)._';
 }
 
