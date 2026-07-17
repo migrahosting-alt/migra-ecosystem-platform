@@ -19,6 +19,8 @@ import { telemetryHub } from './telemetryHub.js';
 import { auditStore, auditHash } from './auditLog.js';
 import { incidentManager } from './incidents.js';
 import { sanitizeError } from './redaction.js';
+import { recoveryManager, RecoveryError } from './recovery.js';
+import { nodeChangesetFs } from '../tools/changesetFs.js';
 
 const EngineerBodySchema = z.object({
   rootPath: z.string().min(1),
@@ -147,6 +149,57 @@ export function registerEngineerRoutes(
       return { ok: false, code: 'NOT_FOUND', error: 'unknown incident' };
     }
     return inc;
+  });
+
+  // ── Operator recovery tooling (Slice 4) — local, explicit, approval-gated ─────
+  const recFs = nodeChangesetFs();
+  const recFail = (reply: import('fastify').FastifyReply, err: unknown) => {
+    reply.code(err instanceof RecoveryError ? 409 : 500);
+    return { ok: false, code: err instanceof RecoveryError ? err.code : 'ERROR', error: sanitizeError(err).message };
+  };
+  // Plan a recovery for an incident (zero writes; mints a single-use token).
+  app.post<{ Params: { id: string } }>('/api/ai/engineer/incidents/:id/recovery/plan', async (request, reply) => {
+    const inc = incidentManager.get(request.params.id);
+    if (!inc) {
+      reply.code(404);
+      return { ok: false, code: 'NOT_FOUND', error: 'unknown incident' };
+    }
+    try {
+      return { ok: true, plan: recoveryManager.plan(inc.correlationId) };
+    } catch (err) {
+      return recFail(reply, err);
+    }
+  });
+  app.post<{ Params: { id: string } }>('/api/ai/engineer/recovery/:id/simulate', async (request, reply) => {
+    try {
+      return { ok: true, simulation: recoveryManager.simulate(request.params.id, recFs) };
+    } catch (err) {
+      return recFail(reply, err);
+    }
+  });
+  app.post<{ Params: { id: string }; Body: { approvalToken?: string } }>('/api/ai/engineer/recovery/:id/apply', async (request, reply) => {
+    try {
+      return { ok: true, applied: recoveryManager.apply(request.params.id, request.body?.approvalToken ?? '', recFs) };
+    } catch (err) {
+      return recFail(reply, err);
+    }
+  });
+  app.post<{ Params: { id: string } }>('/api/ai/engineer/recovery/:id/verify', async (request, reply) => {
+    try {
+      return { ok: true, evidence: recoveryManager.verify(request.params.id, recFs) };
+    } catch (err) {
+      return recFail(reply, err);
+    }
+  });
+  // Resolve requires passing validation evidence (verify is re-run server-side).
+  app.post<{ Params: { id: string } }>('/api/ai/engineer/recovery/:id/resolve', async (request, reply) => {
+    try {
+      const evidence = recoveryManager.verify(request.params.id, recFs);
+      recoveryManager.resolve(request.params.id, evidence);
+      return { ok: true, resolved: true, evidence };
+    } catch (err) {
+      return recFail(reply, err);
+    }
   });
 
   app.post('/api/ai/engineer', async (request, reply) => {
