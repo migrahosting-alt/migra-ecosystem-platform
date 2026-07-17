@@ -258,7 +258,36 @@ export const ToolResponseSchemas = {
   'diagnostics.get': DiagnosticsGetResponseSchema,
 } as const;
 
+// ── command.run — policy-allowlisted argv execution (build/test/debug) ────────
+// The command is an argv ARRAY, never a shell string: no shell is involved, so
+// there is no injection surface. The server enforces its own allowlist on
+// argv[0] and containment on cwd — this schema only shapes the request.
+
+export const CommandRunRequestSchema = z.object({
+  rootPath: z.string().min(1),
+  /** argv array; argv[0] must be a bare program name on the server allowlist. */
+  command: z.array(z.string().min(1)).min(1),
+  /** Optional working directory RELATIVE to rootPath (contained server-side). */
+  cwd: z.string().optional(),
+  timeoutMs: z.number().int().positive().max(600_000).optional(),
+});
+
+export const CommandRunResponseSchema = z.object({
+  tool: z.literal('command.run'),
+  exitCode: z.number().nullable(),
+  timedOut: z.boolean(),
+  stdout: z.string(),
+  stderr: z.string(),
+  /** True when stdout/stderr were capped to the server limit. */
+  truncated: z.boolean(),
+  durationMs: z.number(),
+});
+
+export type CommandRunRequest = z.infer<typeof CommandRunRequestSchema>;
+export type CommandRunResponse = z.infer<typeof CommandRunResponseSchema>;
+
 export type ToolRequestMap = {
+  'command.run': CommandRunRequest;
   'workspace.search': WorkspaceSearchRequest;
   'file.readRange': FileReadRangeRequest;
   'file.readSymbol': FileReadSymbolRequest;
@@ -270,6 +299,7 @@ export type ToolRequestMap = {
 };
 
 export type ToolResponseMap = {
+  'command.run': CommandRunResponse;
   'workspace.search': WorkspaceSearchResponse;
   'file.readRange': FileReadRangeResponse;
   'file.readSymbol': FileReadSymbolResponse;

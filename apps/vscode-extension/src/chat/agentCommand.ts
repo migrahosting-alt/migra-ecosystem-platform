@@ -138,10 +138,13 @@ export async function runAgentCommand(
   } catch (err) {
     const code = isPilotError(err) ? err.code : 'NETWORK';
     const requestId = isPilotError(err) ? err.requestId : undefined;
+    // Relay the engine's sanitized failure detail (e.g. schema issues on
+    // INVALID_INPUT) so the operator sees WHY — still machine-authored.
+    const detail = isPilotError(err) && err.message ? ` — ${err.message}` : '';
     sink.markdown([
       '**Runtime dispatch failed before execution.**',
       '```',
-      `Failure: ${code}`,
+      `Failure: ${code}${detail}`,
       'Tool not executed.',
       ...(requestId ? [`Request: ${requestId}`] : []),
       '```',

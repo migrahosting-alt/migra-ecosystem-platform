@@ -91,6 +91,21 @@ export interface AiModel {
   capabilities: Record<string, boolean>;
 }
 
+/** Request for the local workspace-engineer loop (`POST /api/ai/engineer`). */
+export interface EngineerRequest {
+  rootPath: string;
+  task: string;
+  ecosystem?: boolean;
+  tier?: string;
+}
+
+/** SSE events from the engineer loop, kept loosely typed at the transport —
+ * the chat layer switches on `event` and renders `data`. */
+export interface EngineerStreamEvent {
+  event: string;
+  data: unknown;
+}
+
 /** Sanitized capability metadata from the engine (no implementation details). */
 export interface ToolDescriptor {
   kind: string;
@@ -341,6 +356,66 @@ export class MigraAiClient {
     }
   }
 
+  /**
+   * Stream a LOCAL workspace-engineer run (`POST /api/ai/engineer`) as SSE.
+   * Slice 2: ordinary engineering requests route here — never to the pilot
+   * runtime, so disabled delegation cannot block local work. Events: `route`,
+   * `step`, `proposal`, `final`, `error`, `done`.
+   */
+  async *engineerStream(body: EngineerRequest, signal?: AbortSignal): AsyncGenerator<EngineerStreamEvent> {
+    const requestId = newRequestId();
+    const url = `${this.base()}/api/ai/engineer`;
+    this.cfg.log(`POST ${url} [${requestId}] (sse)`);
+    const { signal: combined, done, timedOut } = this.withTimeout(signal);
+    let res: Response;
+    try {
+      res = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          accept: 'text/event-stream',
+          [REQUEST_ID_HEADER]: requestId,
+          ...this.scopeHeaders(),
+        },
+        body: JSON.stringify(body),
+        signal: combined,
+      });
+    } catch (err) {
+      done();
+      throw this.transportError(err, timedOut(), requestId);
+    }
+    if (!res.ok) {
+      done();
+      throw await this.toolHttpError(res, requestId);
+    }
+    if (!res.body) {
+      done();
+      throw new PilotError('SERVER_ERROR', 'Engineer returned an empty stream.', { requestId });
+    }
+    const decoder = new TextDecoder();
+    let buffer = '';
+    try {
+      for await (const chunk of res.body as unknown as AsyncIterable<Uint8Array>) {
+        buffer += decoder.decode(chunk, { stream: true });
+        let sep: number;
+        while ((sep = buffer.indexOf('\n\n')) !== -1) {
+          const frame = buffer.slice(0, sep);
+          buffer = buffer.slice(sep + 2);
+          const parsed = parseSseFrame(frame);
+          if (!parsed) continue;
+          if (parsed.event === 'done') return;
+          yield { event: parsed.event, data: parsed.data } as EngineerStreamEvent;
+        }
+      }
+    } catch (err) {
+      if (err instanceof PilotError) throw err;
+      if (isAbort(err)) throw this.mapAbort(timedOut(), requestId);
+      throw new PilotError('NETWORK', 'Engineer stream interrupted.', { requestId, cause: err });
+    } finally {
+      done();
+    }
+  }
+
   /** GET /api/ai/tools — the capability catalog (sanitized metadata). */
   async listTools(
     filter: { category?: string; readOnly?: boolean; includeUnavailable?: boolean } = {},
@@ -514,11 +589,17 @@ export class MigraAiClient {
   }
 
   /** Map an engine tool-boundary error → correlated PilotError, preferring the
-   * structured `code` over the HTTP status. Never surfaces raw provider bodies. */
+   * structured `code` over the HTTP status. Never surfaces raw provider bodies —
+   * only the engine's own sanitized error text and schema issues are relayed. */
   private async toolHttpError(res: Response, requestId: string): Promise<PilotError> {
     let serverCode: string | undefined;
+    let serverError: string | undefined;
+    let issues: Array<{ path?: string; message?: string }> | undefined;
     try {
-      serverCode = ((await res.json()) as { code?: string }).code;
+      const body = (await res.json()) as { code?: string; error?: string; issues?: Array<{ path?: string; message?: string }> };
+      serverCode = body.code;
+      serverError = typeof body.error === 'string' ? body.error : undefined;
+      issues = Array.isArray(body.issues) ? body.issues : undefined;
     } catch {
       /* non-JSON */
     }
@@ -531,7 +612,20 @@ export class MigraAiClient {
       case 'INVALID_STATE':
         code = 'INVALID_STATE';
         break;
-      case 'INVALID_INPUT':
+      case 'INVALID_INPUT': {
+        // Truthful validation failure: relay the engine's message + schema
+        // issues (engine-authored zod paths/messages, sanitized by construction)
+        // instead of collapsing to a generic SERVER_ERROR.
+        const detail = (issues ?? [])
+          .map((i) => [i.path, i.message].filter(Boolean).join(': '))
+          .filter(Boolean)
+          .join('; ')
+          .slice(0, 500);
+        return new PilotError('INVALID_INPUT', `${serverError ?? 'The request input was invalid.'}${detail ? ` (${detail})` : ''}`, {
+          httpStatus: res.status,
+          requestId,
+        });
+      }
       case 'TOOL_FAILED':
         code = 'SERVER_ERROR';
         break;

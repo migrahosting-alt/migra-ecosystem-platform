@@ -331,6 +331,41 @@ suite('MigraPilot extension — end to end', () => {
     });
   });
 
+  // ── MigraAI workspace engineer (/api/ai/engineer) — Slice 2 routing ─────────
+  suite('MigraAI workspace engineer (/api/ai/engineer)', () => {
+    const engine = () =>
+      new MigraAiClient({ baseUrl: () => BRAIN_URL, timeoutMs: () => 20_000, log: () => {} });
+
+    test('an ordinary engineering task runs the LOCAL engineer loop end-to-end (delegation is OFF)', async () => {
+      // The suite brain runs with the stub provider and NO pilot delegation —
+      // this passing is itself owner-test #4: a disabled delegated runtime
+      // does not block ordinary local workspace work.
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'migraai-eng-'));
+      fs.writeFileSync(path.join(dir, 'x.txt'), 'x');
+      const events: Array<{ event: string; data: unknown }> = [];
+      for await (const ev of engine().engineerStream({ rootPath: dir, task: 'inspect this workspace' })) {
+        events.push(ev);
+      }
+      const kinds = events.map((e) => e.event);
+      assert.ok(kinds.includes('route'), 'engine selects a model');
+      assert.ok(kinds.includes('step'), 'a real tool step executes');
+      assert.ok(kinds.includes('final'), 'the loop reaches a final answer');
+      const final = events.find((e) => e.event === 'final')!.data as { markdown: string };
+      assert.match(final.markdown, /Stub engineer inspected the workspace/);
+    });
+
+    test('engineer input validation is truthful (INVALID_INPUT, never SERVER_ERROR)', async () => {
+      await assert.rejects(
+        async () => {
+          for await (const _ of engine().engineerStream({ rootPath: '', task: '' })) {
+            /* drain */
+          }
+        },
+        (e: unknown) => isPilotErrorCode(e, 'INVALID_INPUT'),
+      );
+    });
+  });
+
   // ── MigraAI Engine: agent orchestration (/api/ai/agents) ────────────────────
   suite('MigraAI Engine agents (/api/ai/agents)', () => {
     const engine = () =>

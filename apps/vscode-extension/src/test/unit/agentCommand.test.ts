@@ -66,6 +66,23 @@ test('run dispatch: create/approve/status route to the client; output is model-f
   assert.ok(md.every((t) => !/unfortunately|sorry/i.test(t)));
 });
 
+test('INVALID_INPUT surfaces the schema issues in the machine block (truthful, not SERVER_ERROR)', async () => {
+  const md: string[] = [];
+  const fake = {
+    createAgentRun: async () => {
+      throw new PilotError('INVALID_INPUT', 'Agent input failed schema validation. (rootPath: Required; path: Required)', { requestId: 'req_88' });
+    },
+  } as unknown as MigraAiClient;
+  await runAgentCommand(fake, { kind: 'run', agentId: 'workspace.diagnostics.pilot' }, { markdown: (t) => md.push(t) });
+  const out = md.join('\n');
+  assert.match(out, /Runtime dispatch failed before execution/);
+  assert.match(out, /Failure: INVALID_INPUT — Agent input failed schema validation\. \(rootPath: Required; path: Required\)/);
+  assert.match(out, /Tool not executed/);
+  assert.match(out, /req_88/);
+  assert.doesNotMatch(out, /SERVER_ERROR/);
+  assert.doesNotMatch(out, /unfortunately|sorry/i);
+});
+
 test('transport failure → machine dispatch error with the PilotError code (no chat fallback)', async () => {
   const md: string[] = [];
   const fake = {

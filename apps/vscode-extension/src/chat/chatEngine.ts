@@ -7,6 +7,8 @@ import { isPilotError, toUserMessage } from '@migrapilot/pilot-client';
 import { type AiChatRequest, MigraAiClient } from '../services/migraAiClient.js';
 import { EngineDiagnostics } from '../services/engineDiagnostics.js';
 import { parseAgentCommand, runAgentCommand } from './agentCommand.js';
+import { classifyIntent, detectEcosystem } from './intentRouter.js';
+import { runEngineerTurn } from './engineerTurn.js';
 import { buildAiRequest } from './intentMapping.js';
 
 /** A backend-agnostic output surface for a chat turn. Both the native chat
@@ -96,6 +98,27 @@ export async function runChatTurn(
   // Route through the backend resolved at activation/repair — never re-resolve
   // per request (auto cannot silently switch mid-turn).
   const backend = router.current() ?? (await router.resolve());
+
+  // ── workspace-task routing (Slice 2): ordinary engineering requests run the
+  // LOCAL workspace engineer — inspect/edit-propose/build/test in the active
+  // workspace. Local-only by construction (never the pilot runtime, so disabled
+  // delegation cannot block it); conservative classifier keeps conversational
+  // questions on the chat path. Only on the local engine backend — the remote
+  // pilot chat surface keeps its existing behavior.
+  const workspaceRootForTask = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  if (backend.kind === 'local' && workspaceRootForTask && classifyIntent(trimmed) === 'workspace-task') {
+    await runEngineerTurn(
+      deps.migraAiClient,
+      {
+        rootPath: workspaceRootForTask,
+        task: trimmed,
+        ecosystem: detectEcosystem({ rootPath: workspaceRootForTask, prompt: trimmed }),
+      },
+      sink,
+      tokenToSignal(token),
+    );
+    return;
+  }
 
   if (backend.kind === 'remote-unavailable') {
     // Surface the correlated error; do NOT fall back to the local stub.
