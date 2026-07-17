@@ -34,6 +34,7 @@ import { CapabilityRegistry } from './capabilityRegistry.js';
 import { ToolApprovalStore } from './toolApprovalStore.js';
 import { ToolAudit } from './toolAudit.js';
 import { executeToolCore } from './toolExecutor.js';
+import { telemetryHub } from './telemetryHub.js';
 
 export interface ToolRoutesDeps {
   registry?: CapabilityRegistry;
@@ -54,7 +55,9 @@ export function registerToolExecutionRoutes(app: FastifyInstance, deps: ToolRout
   audit: ToolAudit;
 } {
   const registry = deps.registry ?? new CapabilityRegistry();
-  const approvals = deps.approvals ?? new ToolApprovalStore();
+  // Instrument the approval store via the shared telemetry hub (mint/consume/
+  // expiry/eviction events, health snapshot).
+  const approvals = deps.approvals ?? new ToolApprovalStore(undefined, undefined, undefined, telemetryHub.sink);
   const audit = deps.audit ?? new ToolAudit();
 
   app.get('/api/ai/tools', async (request) => {

@@ -33,6 +33,7 @@ import {
 import { commandRun } from '../tools/commandRun.js';
 import { proposeChangeset, applyChangeset, previewStoredChangeset, ChangesetProposalStore } from '../tools/changeset.js';
 import { nodeChangesetFs } from '../tools/changesetFs.js';
+import { telemetryHub } from './telemetryHub.js';
 import { workspaceSearch } from '../tools/workspaceSearch.js';
 import { fileReadRange } from '../tools/fileReadRange.js';
 import { fileReadSymbol } from '../tools/fileReadSymbol.js';
@@ -71,7 +72,12 @@ export interface CapabilityDescriptor {
   available: boolean;
 }
 
-type Handler = (input: unknown) => Promise<unknown>;
+/** Per-call execution context threaded from the tool boundary (Slice 2): lets a
+ * handler correlate its store telemetry to the originating execution. */
+export interface ToolHandlerContext {
+  correlationId?: string;
+}
+type Handler = (input: unknown, ctx?: ToolHandlerContext) => Promise<unknown>;
 
 interface RunnableCapability {
   descriptor: Omit<CapabilityDescriptor, 'available'>;
@@ -88,7 +94,9 @@ export const LOCAL_GRANTS: ReadonlySet<string> = new Set(['workspace.read', 'wor
 
 const changesetFs = nodeChangesetFs();
 // One proposal store shared by propose (writes) + apply (consumes by hash).
-const changesetProposals = new ChangesetProposalStore();
+// Instrumented via the process-wide telemetry hub. Exported so the store-health
+// endpoint can read its truthful health snapshot.
+export const changesetProposals = new ChangesetProposalStore(undefined, telemetryHub.sink);
 
 const TOOLS: RunnableCapability[] = [
   {
@@ -145,7 +153,7 @@ const TOOLS: RunnableCapability[] = [
       readOnly: true,
     }),
     inputSchema: ChangesetRequestSchema,
-    handler: (i) => Promise.resolve(proposeChangeset(i, changesetFs, changesetProposals)),
+    handler: (i, ctx) => Promise.resolve(proposeChangeset(i, changesetFs, changesetProposals, ctx?.correlationId)),
   },
   {
     // Slice 3B — apply an approved changeset by its server-stored proposal hash
@@ -158,8 +166,8 @@ const TOOLS: RunnableCapability[] = [
       supportsDryRun: true,
     }),
     inputSchema: ApplyChangesetRequestSchema,
-    handler: (i) => Promise.resolve(applyChangeset(i, changesetFs, changesetProposals)),
-    preview: (i) => Promise.resolve(previewStoredChangeset(i, changesetFs, changesetProposals)),
+    handler: (i, ctx) => Promise.resolve(applyChangeset(i, changesetFs, changesetProposals, ctx?.correlationId)),
+    preview: (i, ctx) => Promise.resolve(previewStoredChangeset(i, changesetFs, changesetProposals, ctx?.correlationId)),
   },
   {
     // Policy-allowlisted argv execution (build/test/debug). NOT free shell —

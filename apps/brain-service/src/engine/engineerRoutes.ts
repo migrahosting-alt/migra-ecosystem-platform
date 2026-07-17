@@ -14,6 +14,8 @@ import { OpenAiCompatProvider } from '../providers/openAiCompatProvider.js';
 import { executeToolCore, type ToolExecDeps } from './toolExecutor.js';
 import { newCorrelationId, makeStageLogger, jsonLineSink, type StageLogger } from './correlation.js';
 import { runEngineerTask, type EngineerToolInfo } from './engineerRuntime.js';
+import { changesetProposals } from './capabilityRegistry.js';
+import { telemetryHub } from './telemetryHub.js';
 
 const EngineerBodySchema = z.object({
   rootPath: z.string().min(1),
@@ -94,6 +96,26 @@ export function registerEngineerRoutes(
         readOnly: t.readOnly,
         inputHint: INPUT_HINTS[t.id] ?? '{"rootPath",...}',
       }));
+
+  // Read-only store health/telemetry (Slice 2). Aggregate health + counters +
+  // eviction stats + a small recent-events window — NO proposal bodies, approval
+  // tokens, raw paths, or request data. Local, non-production.
+  app.get('/api/ai/engineer/stores/health', async () => {
+    const proposal = changesetProposals.health();
+    const approval = toolDeps.approvals.health();
+    const overall: 'healthy' | 'degraded' | 'unhealthy' =
+      proposal.status === 'unhealthy' || approval.status === 'unhealthy'
+        ? 'unhealthy'
+        : proposal.status === 'degraded' || approval.status === 'degraded'
+          ? 'degraded'
+          : 'healthy';
+    return {
+      status: overall,
+      stores: { proposal, approval },
+      evictions: telemetryHub.evictionStats(),
+      recent: telemetryHub.recentEvents(50).map((e) => ({ event: e.event, at: e.at, correlationId: e.correlationId, ...e.fields })),
+    };
+  });
 
   app.post('/api/ai/engineer', async (request, reply) => {
     const parsed = EngineerBodySchema.safeParse(request.body);
