@@ -7,9 +7,11 @@
 // © MigraTeck LLC.
 
 import { readFileSync } from 'node:fs';
-import type { ProviderConfig } from './provider.js';
+import { ProductionDiagnosticsProvider, type ProviderConfig } from './provider.js';
 import type { Environment, ProductionTarget } from './targetRegistry.js';
 import { ProductionTargetRegistry } from './targetRegistry.js';
+import { defaultCapabilities } from './capabilities.js';
+import { NetworkProber } from './networkProber.js';
 
 function parseBoolean(v: string | undefined, fallback: boolean): boolean {
   if (v == null) return fallback;
@@ -54,6 +56,36 @@ export function loadTargetRegistry(env: NodeJS.ProcessEnv = process.env): Produc
     // Unreadable/malformed config → empty (fail closed), never throw at startup.
     return new ProductionTargetRegistry([]);
   }
+}
+
+/** Operator bearer-token → principal map. This token space is DISTINCT from the
+ * workspace ToolApprovalStore — a workspace approval token can never authorize a
+ * production diagnostic. Format: `principal=token,principal2=token2`. */
+export function readOperatorTokens(env: NodeJS.ProcessEnv = process.env): Map<string, string> {
+  const map = new Map<string, string>(); // token → principal
+  for (const pair of parseList(env.MIGRAPILOT_PROD_DIAGNOSTICS_OPERATOR_TOKENS)) {
+    const eq = pair.indexOf('=');
+    if (eq <= 0) continue;
+    const principal = pair.slice(0, eq).trim();
+    const token = pair.slice(eq + 1).trim();
+    if (principal && token) map.set(token, principal);
+  }
+  return map;
+}
+
+/** Assemble the process-wide provider from the environment. Uses the real
+ * read-only NetworkProber (DNS/TLS/HTTP); infra checks report unknown until a
+ * credentialed read-only backend is wired. Disabled by default. */
+export function buildProductionDiagnosticsProvider(
+  env: NodeJS.ProcessEnv = process.env,
+): { provider: ProductionDiagnosticsProvider; operatorTokens: Map<string, string> } {
+  const provider = new ProductionDiagnosticsProvider(
+    readProviderConfig(env),
+    loadTargetRegistry(env),
+    defaultCapabilities(),
+    new NetworkProber(),
+  );
+  return { provider, operatorTokens: readOperatorTokens(env) };
 }
 
 function isTargetShape(v: unknown): v is ProductionTarget {

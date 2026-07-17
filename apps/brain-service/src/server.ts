@@ -20,6 +20,8 @@ import { registerToolExecutionRoutes } from './engine/toolRoutes.js';
 import { registerEngineerRoutes } from './engine/engineerRoutes.js';
 import { telemetryHub } from './engine/telemetryHub.js';
 import { registerAgentRoutes } from './engine/agentRoutes.js';
+import { registerProductionDiagnosticsRoutes } from './engine/production/routes.js';
+import { buildProductionDiagnosticsProvider } from './engine/production/config.js';
 import { AgentRegistry } from './engine/agentRegistry.js';
 import { AgentService } from './engine/agentRuntime.js';
 import { AgentRunStore } from './engine/agentRunStore.js';
@@ -256,6 +258,13 @@ async function main(): Promise<void> {
   const agentStore = new AgentRunStore();
   const agentService = new AgentService(agentRegistry, agentStore, toolDeps, { pilotClient: pilotRuntimeClient });
   registerAgentRoutes(app, { toolDeps, registry: agentRegistry, store: agentStore, service: agentService });
+  // Read-Only Production Diagnostics (Slice 5): a DEDICATED provider, separate
+  // from the tool boundary + approval store above. Disabled by default; fails
+  // closed; only server-registered targets; no mutation path. Its operator token
+  // space is distinct from the workspace approval store.
+  const { provider: prodDiagnostics, operatorTokens: prodOperatorTokens } = buildProductionDiagnosticsProvider();
+  registerProductionDiagnosticsRoutes(app, prodDiagnostics, prodOperatorTokens);
+  if (prodDiagnostics.isEnabled()) app.log.info('Production Diagnostics ENABLED (read-only).');
   // MigraAI Workspace Manager (/api/ai/workspaces): the object every client uses —
   // a workspace owns its index, memory, agents, models, health. Clients just
   // "Open" / "Sync"; the engine knows the rest. Durable + scope-isolated.

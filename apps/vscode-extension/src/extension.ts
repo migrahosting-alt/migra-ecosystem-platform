@@ -238,6 +238,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<MigraP
     vscode.commands.registerCommand('migrapilot.repairConnection', repairConnection),
     vscode.commands.registerCommand('migrapilot.showLogs', () => outputChannel.show(true)),
     vscode.commands.registerCommand('migrapilot.showDiagnostics', showDiagnostics),
+    vscode.commands.registerCommand('migrapilot.productionDiagnostics', productionDiagnosticsStatus),
     vscode.commands.registerCommand('migrapilot.explainSelection', () => runExplainSelection(commandDeps)),
     vscode.commands.registerCommand('migrapilot.fixDiagnostics', () => runFixDiagnostics(commandDeps)),
     vscode.commands.registerCommand('migrapilot.generateTests', () => runGenerateTestsCommand(testGenDeps)),
@@ -444,6 +445,29 @@ async function checkHealth(): Promise<void> {
   } finally {
     await statusBar.refresh(brainClient);
     void sidebar?.refresh();
+  }
+}
+
+/** Read-Only Production Diagnostics status (Slice 5). Surfaces the brain's
+ * dedicated production-diagnostics provider status, clearly labeled read-only.
+ * This command NEVER mutates production; it only reads the provider's status. */
+async function productionDiagnosticsStatus(): Promise<void> {
+  const cfg = vscode.workspace.getConfiguration('migrapilot');
+  const base = String(cfg.get('brainUrl', 'http://127.0.0.1:3988'));
+  try {
+    const res = await fetch(`${base}/api/ai/production-diagnostics/status`);
+    const s = (await res.json()) as { mode?: string; enabled?: boolean; targetCount?: number; capabilityCount?: number };
+    const label = s.mode ?? 'Production Diagnostics — Read Only';
+    const state = s.enabled ? 'ENABLED (read-only)' : 'DISABLED (fail-closed)';
+    const message = `${label}: ${state}. Targets: ${s.targetCount ?? 0}. Read-only capabilities: ${s.capabilityCount ?? 0}.`;
+    output(message);
+    await vscode.window.showInformationMessage(message, 'Show Logs').then((c) => {
+      if (c === 'Show Logs') outputChannel.show(true);
+    });
+  } catch (error) {
+    const message = formatError('Production Diagnostics status unavailable', error);
+    output(message);
+    await vscode.window.showErrorMessage(message);
   }
 }
 

@@ -16,6 +16,7 @@
     "onCommand:migrapilot.repairConnection",
     "onCommand:migrapilot.showLogs",
     "onCommand:migrapilot.showDiagnostics",
+    "onCommand:migrapilot.productionDiagnostics",
     "onCommand:migrapilot.explainSelection",
     "onCommand:migrapilot.fixDiagnostics",
     "onCommand:migrapilot.generateTests",
@@ -88,6 +89,10 @@
       {
         "command": "migrapilot.showDiagnostics",
         "title": "MigraPilot: Show Diagnostics"
+      },
+      {
+        "command": "migrapilot.productionDiagnostics",
+        "title": "MigraPilot: Production Diagnostics — Read Only"
       },
       {
         "command": "migrapilot.explainSelection",
