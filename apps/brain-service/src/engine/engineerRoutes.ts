@@ -18,6 +18,7 @@ import { changesetProposals } from './capabilityRegistry.js';
 import { telemetryHub } from './telemetryHub.js';
 import { auditStore, auditHash } from './auditLog.js';
 import { incidentManager } from './incidents.js';
+import { sanitizeError } from './redaction.js';
 
 const EngineerBodySchema = z.object({
   rootPath: z.string().min(1),
@@ -248,7 +249,8 @@ export function registerEngineerRoutes(
         send(ev.type, ev);
       }
     } catch (err) {
-      send('error', { type: 'error', code: 'ENGINE_FAILURE', message: err instanceof Error ? err.message : String(err) });
+      // Failure path uses the SAME redaction as success — errors never bypass it.
+      send('error', { type: 'error', code: 'ENGINE_FAILURE', error: sanitizeError(err) });
     }
     if (terminal === 'completed') {
       auditStore.append({ correlationId, type: 'loop.completed', component: 'engineer' });

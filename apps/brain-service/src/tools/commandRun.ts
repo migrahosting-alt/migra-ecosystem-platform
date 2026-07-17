@@ -14,6 +14,7 @@
 import { spawn } from 'node:child_process';
 import { realpath } from 'node:fs/promises';
 import * as path from 'node:path';
+import { redactCommandOutput } from '../engine/redaction.js';
 import {
   CommandRunRequestSchema,
   type CommandRunRequest,
@@ -119,13 +120,18 @@ export async function commandRun(
     });
     child.on('close', (code) => {
       clearTimeout(timer);
+      // Secret-aware handling: redact BEFORE the output leaves the tool, so no
+      // caller (operator display OR any log/audit) ever sees raw credentials.
+      const so = redactCommandOutput(stdout);
+      const se = redactCommandOutput(stderr);
       resolve({
         tool: 'command.run',
         exitCode: code,
         timedOut,
-        stdout,
-        stderr,
+        stdout: so.value,
+        stderr: se.value,
         truncated,
+        redacted: so.redacted || se.redacted,
         durationMs: Date.now() - started,
       });
     });
