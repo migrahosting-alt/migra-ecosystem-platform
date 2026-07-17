@@ -7,6 +7,36 @@
 // The sink never throws into a caller (enforcement must not depend on telemetry).
 
 import type { TelemetryEvent, TelemetrySink } from './storeTelemetry.js';
+import { auditStore, type AuditEventType } from './auditLog.js';
+
+/** Map a store telemetry event to an audit event class (only the durable-worthy
+ * ones; looked_up is a read and unknown maps to rejected). Returns null to skip. */
+function toAuditType(event: string): AuditEventType | null {
+  switch (event) {
+    case 'proposal.created':
+      return 'proposal.created';
+    case 'proposal.consumed':
+      return 'proposal.consumed';
+    case 'proposal.expired':
+      return 'proposal.expired';
+    case 'proposal.evicted':
+      return 'proposal.evicted';
+    case 'proposal.unknown':
+      return 'proposal.rejected';
+    case 'approval.minted':
+      return 'approval.minted';
+    case 'approval.consumed':
+      return 'approval.consumed';
+    case 'approval.expired':
+      return 'approval.expired';
+    case 'approval.replayed':
+      return 'approval.replayed';
+    case 'approval.rejected':
+      return 'approval.rejected';
+    default:
+      return null; // looked_up + anything else → not durably audited
+  }
+}
 
 export interface EvictionStats {
   ttl_total: number;
@@ -32,6 +62,15 @@ export class TelemetryHub {
     this.recent.push(e);
     if (this.recent.length > RECENT_CAP) this.recent.shift();
     this.aggregateEviction(e);
+    // Bridge store lifecycle → durable audit (only when correlated + mappable).
+    const auditType = e.correlationId ? toAuditType(e.event) : null;
+    if (auditType && e.correlationId) {
+      try {
+        auditStore.append({ correlationId: e.correlationId, type: auditType, component: e.event.startsWith('proposal.') ? 'proposal-store' : 'approval-store', outcome: String(e.fields.reason ?? ''), fields: e.fields });
+      } catch {
+        /* non-critical bridge — never break the store operation */
+      }
+    }
   };
 
   private aggregateEviction(e: TelemetryEvent): void {

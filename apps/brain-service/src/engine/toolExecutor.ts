@@ -11,6 +11,7 @@ import { CapabilityRegistry } from './capabilityRegistry.js';
 import { ToolApprovalStore, hashInput } from './toolApprovalStore.js';
 import { ToolAudit } from './toolAudit.js';
 import { NOOP_STAGE_LOGGER, type StageLogger } from './correlation.js';
+import { auditStore, type AuditEventType } from './auditLog.js';
 
 export interface ToolExecInput {
   tool?: string;
@@ -40,6 +41,21 @@ export async function executeToolCore(deps: ToolExecDeps, req: ToolExecInput): P
   const { requestId } = req;
   const stage = req.stage ?? NOOP_STAGE_LOGGER;
   const toolId = req.tool;
+  const cid = stage.correlationId;
+  // Durable audit for tool.* transitions (metadata only). Only correlated calls
+  // are audited; uncorrelated direct calls stay out of the execution chain.
+  const recordAudit = (type: AuditEventType, outcome: string, fields: Record<string, unknown> = {}): void => {
+    if (!cid || cid === 'none') return;
+    try {
+      auditStore.append({ correlationId: cid, type, component: 'tool-executor', outcome, requestId, fields: { tool: toolId, ...fields } });
+    } catch {
+      /* tool.* is non-critical; never break execution */
+    }
+  };
+  const failWith = (readOnly: boolean, error: unknown): ToolExecOutcome => {
+    recordAudit('tool.failed', 'error');
+    return failed(audit, requestId, String(toolId), readOnly, error);
+  };
 
   if (!toolId || typeof toolId !== 'string') {
     return { ok: false, httpStatus: 400, code: 'INVALID_INPUT', tool: String(toolId), requestId, error: 'A `tool` id is required.' };
@@ -52,8 +68,10 @@ export async function executeToolCore(deps: ToolExecDeps, req: ToolExecInput): P
   }
   if (!registry.isAvailable(toolId)) {
     audit.record({ requestId, tool: toolId, action: 'denied', readOnly: runnable.descriptor.readOnly, outcome: 'refused' });
+    recordAudit('tool.denied', 'refused');
     return { ok: false, httpStatus: 403, code: 'CAPABILITY_DENIED', tool: toolId, requestId, error: `Capability not available: ${toolId}`, requiredCapabilities: runnable.descriptor.requiredCapabilities };
   }
+  recordAudit('tool.requested', 'requested', { readOnly: runnable.descriptor.readOnly });
 
   const parsed = runnable.inputSchema.safeParse(req.input);
   if (!parsed.success) {
@@ -75,9 +93,10 @@ export async function executeToolCore(deps: ToolExecDeps, req: ToolExecInput): P
     try {
       const result = await runnable.handler(input, { correlationId: stage.correlationId });
       audit.record({ requestId, tool: toolId, action: 'executed', readOnly: true, outcome: 'ok' });
+      recordAudit('tool.completed', 'ok', { readOnly: true });
       return { ok: true, httpStatus: 200, status: 'ok', tool: toolId, requestId, result };
     } catch (error) {
-      return failed(audit, requestId, toolId, true, error);
+      return failWith(true, error);
     }
   }
 
@@ -89,9 +108,10 @@ export async function executeToolCore(deps: ToolExecDeps, req: ToolExecInput): P
     try {
       const result = await runnable.handler(input, { correlationId: stage.correlationId });
       audit.record({ requestId, tool: toolId, action: 'executed', readOnly: false, outcome: 'ok' });
+      recordAudit('tool.completed', 'ok', { readOnly: false });
       return { ok: true, httpStatus: 200, status: 'executed', tool: toolId, requestId, result };
     } catch (error) {
-      return failed(audit, requestId, toolId, false, error);
+      return failWith(false, error);
     }
   }
 
@@ -103,7 +123,7 @@ export async function executeToolCore(deps: ToolExecDeps, req: ToolExecInput): P
       audit.record({ requestId, tool: toolId, action: 'dry_run', readOnly: false, outcome: 'ok' });
       return { ok: true, httpStatus: 200, status: 'dry_run', tool: toolId, requestId, preview };
     } catch (error) {
-      return failed(audit, requestId, toolId, false, error);
+      return failWith(false, error);
     }
   }
 
@@ -112,7 +132,7 @@ export async function executeToolCore(deps: ToolExecDeps, req: ToolExecInput): P
     try {
       preview = runnable.preview ? await runnable.preview(input, { correlationId: stage.correlationId }) : null;
     } catch (error) {
-      return failed(audit, requestId, toolId, false, error);
+      return failWith(false, error);
     }
     const record = approvals.mint({ tool: toolId, inputHash, requestId, correlationId: stage.correlationId });
     audit.record({ requestId, tool: toolId, action: 'approval_required', readOnly: false, approvalId: record.id, outcome: 'ok' });
@@ -132,11 +152,12 @@ export async function executeToolCore(deps: ToolExecDeps, req: ToolExecInput): P
     const applyStarted = Date.now();
     const result = await runnable.handler(input, { correlationId: stage.correlationId });
     audit.record({ requestId, tool: toolId, action: 'executed', readOnly: false, approvalId: req.approvalId, outcome: 'ok' });
+    recordAudit('tool.completed', 'ok', { approved: true });
     // Correlation: approved APPLY executed.
     stage.log('apply', { tool: toolId, durationMs: Date.now() - applyStarted, outcome: 'ok' });
     return { ok: true, httpStatus: 200, status: 'executed', tool: toolId, requestId, result, approvalId: req.approvalId };
   } catch (error) {
-    return failed(audit, requestId, toolId, false, error);
+    return failWith(false, error);
   }
 }
 

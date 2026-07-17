@@ -35,6 +35,7 @@ import { ToolApprovalStore } from './toolApprovalStore.js';
 import { ToolAudit } from './toolAudit.js';
 import { executeToolCore } from './toolExecutor.js';
 import { telemetryHub } from './telemetryHub.js';
+import { makeStageLogger, jsonLineSink } from './correlation.js';
 
 export interface ToolRoutesDeps {
   registry?: CapabilityRegistry;
@@ -82,12 +83,19 @@ export function registerToolExecutionRoutes(app: FastifyInstance, deps: ToolRout
   app.post<{ Body: ExecuteBody }>('/api/ai/tools', async (request, reply) => {
     const requestId = correlationId(request);
     const body = request.body ?? {};
+    // Resume correlation (Slice 3): an operator apply carries the ORIGINAL
+    // execution correlation id via header, plus this call's own requestId — so
+    // the audit chain links the resumed application to the original execution
+    // without pretending it happened in the original HTTP request.
+    const inbound = String((request.headers['x-correlation-id'] as string | undefined) ?? '').trim();
+    const stage = inbound ? makeStageLogger(inbound, jsonLineSink((line) => request.log.info(line))) : undefined;
     const outcome = await executeToolCore({ registry, approvals, audit }, {
       tool: body.tool,
       input: body.input,
       dryRun: body.dryRun,
       approvalId: body.approvalId,
       requestId,
+      stage,
     });
     if (outcome.ok) {
       const { httpStatus: _s, ok: _o, ...payload } = outcome;

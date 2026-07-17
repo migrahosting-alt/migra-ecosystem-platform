@@ -31,9 +31,11 @@ import {
   ApplyChangesetRequestSchema,
 } from '@migrapilot/protocol';
 import { commandRun } from '../tools/commandRun.js';
-import { proposeChangeset, applyChangeset, previewStoredChangeset, ChangesetProposalStore } from '../tools/changeset.js';
+import { proposeChangeset, applyChangeset, previewStoredChangeset, ChangesetProposalStore, ChangesetError } from '../tools/changeset.js';
 import { nodeChangesetFs } from '../tools/changesetFs.js';
 import { telemetryHub } from './telemetryHub.js';
+import { auditStore, auditHash } from './auditLog.js';
+import { incidentManager } from './incidents.js';
 import { workspaceSearch } from '../tools/workspaceSearch.js';
 import { fileReadRange } from '../tools/fileReadRange.js';
 import { fileReadSymbol } from '../tools/fileReadSymbol.js';
@@ -97,6 +99,61 @@ const changesetFs = nodeChangesetFs();
 // Instrumented via the process-wide telemetry hub. Exported so the store-health
 // endpoint can read its truthful health snapshot.
 export const changesetProposals = new ChangesetProposalStore(undefined, telemetryHub.sink);
+
+/** Apply a changeset with full application.* audit + INCONSISTENT_STATE incident
+ * raising (Slice 3). application.started is CRITICAL — if it cannot be durably
+ * recorded the apply fails closed BEFORE any mutation. */
+async function applyChangesetAudited(input: unknown, correlationId?: string): Promise<unknown> {
+  const cid = correlationId ?? 'none';
+  const req = input as { rootPath?: string; proposalHash?: string };
+  const workspace = req.rootPath ? auditHash(req.rootPath) : 'unknown';
+  const proposal = req.proposalHash ? auditHash(req.proposalHash) : 'unknown';
+  // Critical: this append throws AuditCriticalWriteError → fail closed pre-mutation.
+  auditStore.append({ correlationId: cid, type: 'application.started', component: 'changeset', fields: { workspace, proposal } });
+  const started = Date.now();
+  try {
+    const res = applyChangeset(input, changesetFs, changesetProposals, correlationId) as {
+      created: string[];
+      modified: string[];
+      deleted: string[];
+    };
+    auditStore.append({
+      correlationId: cid,
+      type: 'application.completed',
+      component: 'changeset',
+      outcome: 'ok',
+      durationMs: Date.now() - started,
+      fields: { workspace, proposal, created: res.created.length, modified: res.modified.length, deleted: res.deleted.length },
+    });
+    return res;
+  } catch (err) {
+    if (err instanceof ChangesetError && err.code === 'INCONSISTENT_STATE') {
+      const d = err.details ?? { appliedFileCount: 0, affectedPathCount: 0, rollbackFailureCount: 1, failureStage: 'rollback' };
+      auditStore.append({
+        correlationId: cid,
+        type: 'application.rollback_failed',
+        component: 'changeset',
+        outcome: 'INCONSISTENT_STATE',
+        durationMs: Date.now() - started,
+        fields: { workspace, proposal, appliedFileCount: d.appliedFileCount, affectedPathCount: d.affectedPathCount, rollbackFailureCount: d.rollbackFailureCount, failureStage: d.failureStage },
+      });
+      incidentManager.raiseInconsistentState({
+        correlationId: cid,
+        workspaceIdentityHash: workspace,
+        proposalHashPrefix: proposal,
+        appliedFileCount: d.appliedFileCount,
+        affectedPathCount: d.affectedPathCount,
+        rollbackFailureCount: d.rollbackFailureCount,
+        failureStage: d.failureStage,
+      });
+    } else if (err instanceof ChangesetError && err.code === 'PARTIAL_WRITE') {
+      auditStore.append({ correlationId: cid, type: 'application.rollback_completed', component: 'changeset', outcome: 'rolled_back', durationMs: Date.now() - started, fields: { workspace, proposal } });
+    } else {
+      auditStore.append({ correlationId: cid, type: 'application.failed', component: 'changeset', outcome: err instanceof ChangesetError ? err.code : 'error', durationMs: Date.now() - started, fields: { workspace, proposal } });
+    }
+    throw err;
+  }
+}
 
 const TOOLS: RunnableCapability[] = [
   {
@@ -166,7 +223,7 @@ const TOOLS: RunnableCapability[] = [
       supportsDryRun: true,
     }),
     inputSchema: ApplyChangesetRequestSchema,
-    handler: (i, ctx) => Promise.resolve(applyChangeset(i, changesetFs, changesetProposals, ctx?.correlationId)),
+    handler: (i, ctx) => applyChangesetAudited(i, ctx?.correlationId),
     preview: (i, ctx) => Promise.resolve(previewStoredChangeset(i, changesetFs, changesetProposals, ctx?.correlationId)),
   },
   {
