@@ -123,9 +123,127 @@ export interface WorkspacePersistence {
   loadWorkspaces(): PersistedWorkspace[];
 }
 
+// ── Operational data foundation (durable metadata only — NEVER prompts,
+//    completions, source, diffs, tokens, secrets, credentials, or raw paths) ────
+
+export interface DurableAuditEvent {
+  eventId: string;
+  correlationId: string;
+  causationId: string | null;
+  seq: number;
+  type: string;
+  at: number;
+  durationMs?: number;
+  component: string;
+  outcome?: string;
+  requestId?: string;
+  /** Bounded, already-redacted metadata (JSON). */
+  fieldsJson: string;
+}
+
+export interface DurableUsageRecord {
+  usageId: string;
+  correlationId: string;
+  providerId: string;
+  modelId: string;
+  executionMode: string;
+  policy: string;
+  localOrCloud: string;
+  at: number;
+  outcome: string;
+  costUsd?: number;
+  costStatus: string;
+  escalationReason?: string;
+  /** Remaining already-redacted metadata (JSON). */
+  fieldsJson: string;
+}
+
+export interface DurableIncident {
+  incidentId: string;
+  deduplicationKey: string;
+  correlationId: string;
+  firstSeenAt: number;
+  lastSeenAt: number;
+  occurrenceCount: number;
+  state: string;
+  severity: string;
+  affectedJson: string;
+  lastDeliveryStatus: string;
+  resolutionJson?: string;
+}
+
+export interface DurableRecoveryEvent {
+  id: string;
+  recoveryId: string;
+  correlationId: string;
+  incidentId?: string;
+  type: string;
+  at: number;
+  outcome?: string;
+  fieldsJson: string;
+}
+
+export interface DurableBudgetScope {
+  scopeId: string;
+  kind: string;
+  scopeKeyName: string;
+  hardLimitUsd: number;
+  spentUsd: number;
+  reservedUsd: number;
+  periodStart: number;
+  updatedAt: number;
+}
+
+export interface DurableReservation {
+  reservationId: string;
+  amountUsd: number;
+  scopeIdsJson: string;
+  correlationId: string;
+  providerId: string;
+  modelId: string;
+  createdAt: number;
+  expiresAt: number;
+  status: string;
+}
+
+export interface OperationalCounts {
+  auditEvents: number;
+  usageRecords: number;
+  incidents: number;
+  recoveryEvents: number;
+  reservations: number;
+}
+
+/** Durable persistence for operational metadata. Append-only where noted; incident
+ * + budget rows are mutable-by-key. Retention prunes by age. */
+export interface OperationalPersistence {
+  appendAuditEvent(e: DurableAuditEvent): void; // idempotent by eventId
+  recentAuditEvents(limit: number): DurableAuditEvent[];
+  auditByCorrelation(correlationId: string, limit?: number): DurableAuditEvent[];
+
+  appendUsageRecord(r: DurableUsageRecord): void;
+  recentUsageRecords(limit: number): DurableUsageRecord[];
+
+  upsertIncident(i: DurableIncident): void;
+  listIncidents(limit: number): DurableIncident[];
+
+  appendRecoveryEvent(e: DurableRecoveryEvent): void;
+
+  saveBudgetScope(s: DurableBudgetScope): void;
+  loadBudgetScopes(): DurableBudgetScope[];
+  saveReservation(r: DurableReservation): void;
+  removeReservation(reservationId: string): void;
+  loadReservations(): DurableReservation[];
+
+  /** Age-based retention per store; returns rows deleted per table. */
+  pruneOperational(cutoffs: { auditBefore: number; usageBefore: number; incidentsBefore: number; recoveryBefore: number }): { audit: number; usage: number; incidents: number; recovery: number };
+  operationalCounts(): OperationalCounts;
+}
+
 /** A composite durable store exposing every persistence facet + health. */
-export interface DurableStore extends ConversationPersistence, MemoryItemPersistence, RagIndexPersistence, EmbeddingCachePersistence, WorkspacePersistence {
+export interface DurableStore extends ConversationPersistence, MemoryItemPersistence, RagIndexPersistence, EmbeddingCachePersistence, WorkspacePersistence, OperationalPersistence {
   health(): PersistenceHealth;
+  integrityCheck(): string;
   close(): void;
 }
 

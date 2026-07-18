@@ -82,11 +82,31 @@ export class IncidentManager {
   private notificationsFailed = 0;
   private lastDelivery: 'delivered' | 'failed' | 'none' = 'none';
 
+  private persistFn: ((i: Incident) => void) | null = null;
+
   constructor(
     private readonly sink: AlertSink,
     private readonly now: () => number = () => Date.now(),
     private readonly mkId: () => string = randomUUID,
   ) {}
+
+  /** Attach a durable persistence hook (called on every incident mutation). */
+  setPersist(fn: ((i: Incident) => void) | null): void {
+    this.persistFn = fn;
+  }
+  private persist(i: Incident): void {
+    if (this.persistFn) { try { this.persistFn(i); } catch { /* durable failure never drops the incident */ } }
+  }
+
+  /** Restore incidents from durable storage on startup (open incidents survive a
+   * restart; a repeat occurrence still dedups to the restored incident). */
+  hydrate(incidents: Incident[]): void {
+    for (const i of incidents) {
+      if (this.byId.has(i.incidentId)) continue;
+      this.byId.set(i.incidentId, i);
+      this.byKey.set(i.deduplicationKey, i);
+    }
+  }
 
   /** Deterministic dedup: same workspace + proposal + failure stage = one
    * incident (repeat occurrences increment, do NOT re-notify). */
@@ -104,6 +124,7 @@ export class IncidentManager {
       existing.lastSeenAt = at;
       // A repeat on a resolved incident reopens it (do not auto-resolve).
       if (existing.state === 'resolved') existing.state = 'open';
+      this.persist(existing);
       return { incident: existing, notified: false };
     }
     const incident: Incident = {
@@ -128,6 +149,7 @@ export class IncidentManager {
     this.byKey.set(key, incident);
     this.byId.set(incident.incidentId, incident);
     this.notify(incident);
+    this.persist(incident);
     return { incident, notified: true };
   }
 
@@ -162,7 +184,7 @@ export class IncidentManager {
 
   acknowledge(incidentId: string): Incident | undefined {
     const inc = this.byId.get(incidentId);
-    if (inc && (inc.state === 'open' || inc.state === 'notification_failed')) inc.state = 'acknowledged';
+    if (inc && (inc.state === 'open' || inc.state === 'notification_failed')) { inc.state = 'acknowledged'; this.persist(inc); }
     return inc;
   }
 
@@ -172,6 +194,7 @@ export class IncidentManager {
     if (inc) {
       inc.state = 'resolved';
       inc.resolution = { at: this.now(), note };
+      this.persist(inc);
     }
     return inc;
   }
@@ -189,6 +212,7 @@ export class IncidentManager {
     }
     inc.state = 'resolved';
     inc.resolution = { at: this.now(), note: proof.note, recoveryCorrelationId: proof.recoveryCorrelationId, validationEvidence: proof.validationEvidence };
+    this.persist(inc);
     return inc;
   }
 

@@ -62,11 +62,27 @@ export type UsageInput = Omit<UsageRecord, 'usageId' | 'timestamp'> & { usageId?
 
 export class UsageLedger {
   private readonly records: UsageRecord[] = [];
+  private writer: ((r: UsageRecord) => void) | null = null;
 
   constructor(
     private readonly now: () => number = () => Date.now(),
     private readonly mkId: () => string = randomUUID,
   ) {}
+
+  /** Attach a durable writer (records are already metadata-only + redacted). A
+   * writer failure never blocks the in-memory append (accounting is not weakened
+   * by a telemetry/persistence failure). */
+  setWriter(writer: ((r: UsageRecord) => void) | null): void {
+    this.writer = writer;
+  }
+
+  /** Restore recent records from durable storage on startup so summary()/query()
+   * reflect history across a restart. Records are already redacted; the durable
+   * writer is NOT invoked (this is a load, not a new append). Newest-last input. */
+  hydrate(records: UsageRecord[]): void {
+    for (const r of records) this.records.push(r);
+    if (this.records.length > MAX_RECORDS) this.records.splice(0, this.records.length - MAX_RECORDS);
+  }
 
   /** Append a metadata-only usage record. Forbidden keys are dropped; every string
    * is redacted. Returns the stored record. */
@@ -83,6 +99,7 @@ export class UsageLedger {
     };
     this.records.push(record);
     if (this.records.length > MAX_RECORDS) this.records.splice(0, this.records.length - MAX_RECORDS);
+    if (this.writer) { try { this.writer(record); } catch { /* durable failure never weakens accounting */ } }
     return record;
   }
 
