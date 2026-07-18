@@ -27,21 +27,48 @@ export interface ExecutionPolicyDef {
   description: string;
 }
 
+// Local-first is the ARCHITECTURE, not a policy: the Migra-powered local engine is
+// always attempted first, followed by a bounded assessment, and cloud is the last
+// resort reached only through an explicit, consented, budget-gated escalation. A
+// policy is a per-request PREFERENCE that shapes escalation eligibility/ranking —
+// it never permits bypassing local-first, consent, privacy, health, or budget.
 export const EXECUTION_POLICIES: Record<ExecutionPolicyId, ExecutionPolicyDef> = {
-  auto: { id: 'auto', displayName: 'Auto', description: 'Prefer local when it can satisfy the request; consider cloud otherwise.' },
-  'local-first': { id: 'local-first', displayName: 'Local First', description: 'Rank local providers above cloud; cloud only as lower-ranked fallback.' },
-  'local-only': { id: 'local-only', displayName: 'Local Only', description: 'Use local providers exclusively; cloud is excluded.' },
-  'cloud-first': { id: 'cloud-first', displayName: 'Cloud First', description: 'Rank cloud providers above local.' },
-  'best-quality': { id: 'best-quality', displayName: 'Best Quality', description: 'Rank by capability + model tier, regardless of location.' },
-  'lowest-cost': { id: 'lowest-cost', displayName: 'Lowest Cost', description: 'Rank by lowest estimated cost; local (free) wins ties.' },
-  'privacy-first': { id: 'privacy-first', displayName: 'Privacy First', description: 'Keep data on-device; external providers excluded without explicit consent.' },
-  custom: { id: 'custom', displayName: 'Custom', description: 'Operator-defined weighting (configured in a later slice; uses Auto defaults for now).' },
+  auto: { id: 'auto', displayName: 'Auto', description: 'Use the best eligible provider under current capability, privacy, consent, health, and budget rules. Local is attempted first; cloud only as a justified, approved fallback.' },
+  'local-first': { id: 'local-first', displayName: 'Local First', description: 'Try the best eligible local model first. Offer cloud escalation only when a defined fallback condition occurs and policy permits it.' },
+  'local-only': { id: 'local-only', displayName: 'Local Only', description: 'Never send the request to a cloud provider. No cloud fallback is ever offered.' },
+  'cloud-first': { id: 'cloud-first', displayName: 'Cloud Preferred Fallback', description: 'Local is still attempted first; cloud is the PREFERRED fallback provider once local insufficiency is established — never a silent bypass. Consent, privacy, health, and budget still apply.' },
+  'best-quality': { id: 'best-quality', displayName: 'Best Quality', description: 'Prefer the strongest eligible provider; may escalate sooner after a bounded local assessment. Local runs first; hard privacy and budget limits still apply; no hidden cloud execution.' },
+  'lowest-cost': { id: 'lowest-cost', displayName: 'Lowest Cost', description: 'Prefer the lowest expected successful cost. Unknown-cost paid providers are excluded when hard budget enforcement applies. Local (free) wins ties.' },
+  'privacy-first': { id: 'privacy-first', displayName: 'Privacy First', description: 'Keep data local unless the configured privacy policy explicitly permits a reviewed, approved cloud escalation.' },
+  custom: { id: 'custom', displayName: 'Custom', description: 'Use a bounded, server-defined custom policy. Uses Auto defaults until owner-configured custom fields are exposed.' },
 };
 
 export const DEFAULT_POLICY: ExecutionPolicyId = 'auto';
 
 export function isExecutionPolicyId(v: string): v is ExecutionPolicyId {
   return v in EXECUTION_POLICIES;
+}
+
+export interface PolicyResolution {
+  /** The requested policy (falls back to the server default if invalid/absent). */
+  requested: ExecutionPolicyId;
+  /** The policy the server WILL apply. Never a silent substitution — when it
+   * differs from requested, `reason` explains why. */
+  effective: ExecutionPolicyId;
+  reason?: string;
+}
+
+/** Resolve a client-requested policy against server reality. A per-request policy
+ * is a PREFERENCE — it never bypasses local-first, consent, privacy, or budget.
+ * When a cloud-capable policy is requested but no cloud provider is usable, the
+ * effective policy truthfully downgrades to local-only with a reason. */
+export function resolveEffectivePolicy(requestedRaw: string | undefined, defaultPolicy: ExecutionPolicyId, opts: { cloudUsable: boolean }): PolicyResolution {
+  const requested: ExecutionPolicyId = requestedRaw && isExecutionPolicyId(requestedRaw) ? requestedRaw : defaultPolicy;
+  const cloudCapable = requested !== 'local-only' && requested !== 'privacy-first';
+  if (cloudCapable && !opts.cloudUsable) {
+    return { requested, effective: 'local-only', reason: 'Cloud providers are disabled or unavailable' };
+  }
+  return { requested, effective: requested };
 }
 
 /** What a turn needs. Hard flags exclude a provider that cannot satisfy them;

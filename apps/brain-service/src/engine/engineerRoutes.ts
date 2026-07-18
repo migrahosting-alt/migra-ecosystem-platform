@@ -10,6 +10,7 @@ import type { BrainEnv } from '../config/env.js';
 import type { ModelRegistry, ModelDescriptor } from './modelRegistry.js';
 import { selectModel, tierFromHints } from './capabilityRouter.js';
 import { selectLocalCoding, type LocalRoutingDeps } from './providers/localCodingRouter.js';
+import { resolveEffectivePolicy } from './providers/executionPolicy.js';
 import { assessCodingOutcome } from './providers/codingAssessment.js';
 import type { EscalationController } from './providers/escalationController.js';
 import type { ChatTurnRequest } from '@migrapilot/shared-types';
@@ -31,6 +32,9 @@ const EngineerBodySchema = z.object({
   task: z.string().min(1),
   ecosystem: z.boolean().optional(),
   tier: z.string().optional(),
+  /** Slice 5: a per-request execution-policy PREFERENCE (server resolves to an
+   * effective policy; never bypasses local-first / consent / privacy / budget). */
+  policy: z.string().optional(),
 });
 
 /** One-line input hints shown to the model per tool (kept beside the route so
@@ -243,16 +247,19 @@ export function registerEngineerRoutes(
     // The normalized coding request used to bind + re-run an escalation (Slice 3).
     const escRequest: ChatTurnRequest = { feature: 'chat', modelProfile: 'default', systemPromptId: 'engineer-v1', userPrompt: body.task, context: {}, outputMode: 'markdown' };
     let decision: { model: ModelDescriptor; reason: string };
-    let routing: { policy?: string; fallbackRecommended: boolean; fallbackReasons: string[] } = { fallbackRecommended: false, fallbackReasons: [] };
-    if (providerRouting) {
-      const local = await selectLocalCoding(providerRouting, { preferCoding: true, needsTools: true, tier: tierFromHints({ tier: body.tier }) });
-      routing = { policy: local.policy, fallbackRecommended: local.fallbackRecommended, fallbackReasons: local.fallbackReasons };
+    let routing: { policy?: string; requestedPolicy?: string; effectivePolicy?: string; policyReason?: string; fallbackRecommended: boolean; fallbackReasons: string[] } = { fallbackRecommended: false, fallbackReasons: [] };
+    // Slice 5: resolve the per-request policy preference to an effective policy.
+    const resolved = providerRouting ? resolveEffectivePolicy(body.policy, providerRouting.policy, { cloudUsable: await providerRouting.fleet.hasUsableCloud() }) : undefined;
+    const effectiveRouting = providerRouting && resolved ? { ...providerRouting, policy: resolved.effective } : providerRouting;
+    if (providerRouting && effectiveRouting && resolved) {
+      const local = await selectLocalCoding(effectiveRouting, { preferCoding: true, needsTools: true, tier: tierFromHints({ tier: body.tier }) });
+      routing = { policy: resolved.effective, requestedPolicy: resolved.requested, effectivePolicy: resolved.effective, policyReason: resolved.reason, fallbackRecommended: local.fallbackRecommended, fallbackReasons: local.fallbackReasons };
       if (!local.localModel) {
         // No local model. Slice 3: a DEFINED reason (LOCAL_UNSUPPORTED_CAPABILITY)
         // may mint a cloud-escalation OFFER — but no cloud is called here (approval
         // is a separate request). Impossible under local-only / privacy.
         if (escalation) {
-          const off = await escalation.offer({ correlationId, policy: providerRouting.policy, outcome: { hadLocalModel: false, terminal: 'failed', output: '' }, request: escRequest, requiredCaps: { coding: true } });
+          const off = await escalation.offer({ correlationId, policy: resolved.effective, outcome: { hadLocalModel: false, terminal: 'failed', output: '' }, request: escRequest, requiredCaps: { coding: true } });
           if (off.offered) {
             stage.log('route', { escalationOffered: true, reason: off.reason });
             reply.code(200);
@@ -299,7 +306,7 @@ export function registerEngineerRoutes(
     };
 
     // Surface the correlation id to the client so it can be quoted in support.
-    send('route', { model: decision.model.id, provider: decision.model.provider, reason: decision.reason, correlationId, policy: routing.policy, fallbackRecommended: routing.fallbackRecommended });
+    send('route', { model: decision.model.id, provider: decision.model.provider, reason: decision.reason, correlationId, policy: routing.policy, requestedPolicy: routing.requestedPolicy, effectivePolicy: routing.effectivePolicy, policyReason: routing.policyReason, fallbackRecommended: routing.fallbackRecommended });
 
     const events = runEngineerTask(
       {
@@ -372,7 +379,7 @@ export function registerEngineerRoutes(
     }
     let escalationOffer: Record<string, unknown> | undefined;
     if (escalation && providerRouting && terminal === 'failed') {
-      const off = await escalation.offer({ correlationId, policy: providerRouting.policy, outcome: { hadLocalModel: true, terminal: 'failed', output: finalText, errorMessage: 'local engineer loop failed' }, request: escRequest, requiredCaps: { coding: true } });
+      const off = await escalation.offer({ correlationId, policy: resolved?.effective ?? providerRouting.policy, outcome: { hadLocalModel: true, terminal: 'failed', output: finalText, errorMessage: 'local engineer loop failed' }, request: escRequest, requiredCaps: { coding: true } });
       if (off.offered) {
         escalationOffer = { offerId: off.offerId, token: off.token, reason: off.reason, target: off.target, estimatedCostUsd: off.estimate?.estimatedCostUsd, worstCaseCostUsd: off.worstCaseCostUsd, costCeilingUsd: off.costCeilingUsd, remainingBudgetUsd: off.remainingBudgetUsd, dataLeavesLocal: off.dataLeavesLocal, expiresAt: off.expiresAt, request: escRequest };
         send('escalation_offer', escalationOffer);
@@ -380,7 +387,7 @@ export function registerEngineerRoutes(
     }
     send('done', {
       correlationId,
-      routing: { policy: routing.policy, model: decision.model.id, providerId: decision.model.provider, fallbackRecommended, reasons: [...routing.fallbackReasons, ...assessment.reasons] },
+      routing: { policy: routing.policy, requestedPolicy: routing.requestedPolicy, effectivePolicy: routing.effectivePolicy, policyReason: routing.policyReason, model: decision.model.id, providerId: decision.model.provider, fallbackRecommended, reasons: [...routing.fallbackReasons, ...assessment.reasons] },
       ...(escalationOffer ? { escalationOffer } : {}),
       ...(localSavings ? { localSavings } : {}),
     });

@@ -43,6 +43,9 @@ export interface ChatTurnOptions {
    * decides). The brain still applies its own effective-profile fallback (e.g.
    * premium→default when no premium model is configured). */
   modelProfile?: SelectableProfile;
+  /** Slice 5: the active execution-policy preference (server resolves + is
+   * authoritative). */
+  policy?: string;
   /** User-uploaded attachments (images for vision analysis, documents, …).
    * Images are forwarded to a vision model; text documents should already be
    * inlined into `prompt` by the chat surface. */
@@ -153,6 +156,7 @@ export async function runChatTurn(
     // With a server-side conversation the engine owns history — do NOT send a
     // locally-reconstructed summary.
     conversationSummary: options.conversationId ? undefined : conversationSummary,
+    policy: options.policy,
   });
   if (options.conversationId) {
     aiRequest.conversationId = options.conversationId;

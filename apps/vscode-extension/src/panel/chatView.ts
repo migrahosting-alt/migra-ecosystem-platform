@@ -62,6 +62,8 @@ export interface ChatViewDeps {
   engineDiagnostics?: EngineDiagnostics;
   /** Current server-side memory mode (from settings). */
   memoryMode: () => 'off' | 'session' | 'durable';
+  /** Slice 5: the active execution-policy preference (server-authoritative). */
+  executionPolicy?: () => string;
   /** Workspace-scoped store for the active conversation id (survives reloads). */
   conversationMemento: vscode.Memento;
   output: vscode.OutputChannel;
@@ -281,6 +283,7 @@ export class MigraPilotChatViewProvider implements vscode.WebviewViewProvider {
         {
           modelProfile,
           attachments,
+          ...(this.deps.executionPolicy ? { policy: this.deps.executionPolicy() } : {}),
           ...(conversationId ? { conversationId, memoryPolicy: { mode, retrieve: true, store: true } } : {}),
         },
       );
