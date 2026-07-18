@@ -58,7 +58,18 @@ export type AuditEventType =
   | 'escalation.approved'
   | 'escalation.attempted'
   | 'escalation.completed'
-  | 'escalation.failed';
+  | 'escalation.failed'
+  | 'budget.reservation_created'
+  | 'budget.reservation_denied'
+  | 'budget.reservation_consumed'
+  | 'budget.reservation_released'
+  | 'budget.reconciled'
+  | 'budget.overrun_detected'
+  | 'budget.warning_threshold_reached'
+  | 'budget.hard_limit_reached'
+  | 'budget.reservation_pressure'
+  | 'budget.pricing_unknown'
+  | 'budget.reconciliation_mismatch';
 
 /** Event types whose loss is security/operationally critical — if these cannot
  * be persisted, the caller must fail closed before starting a new mutation. */

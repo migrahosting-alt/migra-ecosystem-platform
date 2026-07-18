@@ -33,6 +33,8 @@ import { EscalationController } from './engine/providers/escalationController.js
 import { EscalationOfferStore } from './engine/providers/escalationStore.js';
 import { CloudEscalationExecutor } from './engine/providers/cloudEscalationExecutor.js';
 import { registerEscalationRoutes } from './engine/providers/escalationRoutes.js';
+import { buildPricingBook, buildBudgetManager, buildUsageLedger } from './engine/providers/budget/config.js';
+import { registerBudgetRoutes } from './engine/providers/budget/budgetRoutes.js';
 import { AgentRegistry } from './engine/agentRegistry.js';
 import { AgentService } from './engine/agentRuntime.js';
 import { AgentRunStore } from './engine/agentRunStore.js';
@@ -258,9 +260,16 @@ async function main(): Promise<void> {
   // coding failure with a DEFINED reason may mint an offer; a separate approve
   // call runs exactly ONE attributed cloud attempt. Impossible under local-only /
   // privacy; cloud disabled by default. Budget cap per request (Slice 4 extends).
-  const cloudBudgetCapUsd = Number(process.env.MIGRAPILOT_CLOUD_MAX_COST_PER_REQUEST_USD ?? 1) || 1;
-  const escalation = new EscalationController(new EscalationOfferStore(), new CloudEscalationExecutor(), providerFleet, providerRegistry, cloudBudgetCapUsd);
+  // Slice 4 — cost & budget governance. Pricing (owner-configured), fail-closed
+  // budget scopes, and an append-only usage ledger back the escalation flow: a
+  // paid cloud attempt cannot begin without an atomic budget reservation.
+  const pricingBook = buildPricingBook(providerRegistry.list());
+  const budgetManager = buildBudgetManager();
+  const usageLedger = buildUsageLedger();
+  const cloudMaxOutputTokens = Number(process.env.MIGRAPILOT_CLOUD_MAX_OUTPUT_TOKENS ?? 2000) || 2000;
+  const escalation = new EscalationController(new EscalationOfferStore(), new CloudEscalationExecutor(), providerFleet, providerRegistry, pricingBook, budgetManager, usageLedger, cloudMaxOutputTokens);
   registerEscalationRoutes(app, escalation);
+  registerBudgetRoutes(app, { budget: budgetManager, ledger: usageLedger, pricing: pricingBook, maxOutputTokens: cloudMaxOutputTokens });
   // Slice 2: coding turns route local-first (cloud NEVER invoked inline). Slice 3
   // adds the offer path (still no inline cloud — approval is a separate call).
   registerAiRoutes(app, env, modelRegistry, memoryStore, undefined, qualStore, indexService, providerRouting, escalation);

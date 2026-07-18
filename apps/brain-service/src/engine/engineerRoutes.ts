@@ -256,7 +256,7 @@ export function registerEngineerRoutes(
           if (off.offered) {
             stage.log('route', { escalationOffered: true, reason: off.reason });
             reply.code(200);
-            return { ok: false, code: 'LOCAL_UNSUPPORTED_CAPABILITY', fallbackRecommended: true, escalationOffer: { offerId: off.offerId, token: off.token, reason: off.reason, target: off.target, estCostUsd: off.estCostUsd, expiresAt: off.expiresAt, request: escRequest } };
+            return { ok: false, code: 'LOCAL_UNSUPPORTED_CAPABILITY', fallbackRecommended: true, escalationOffer: { offerId: off.offerId, token: off.token, reason: off.reason, target: off.target, estimatedCostUsd: off.estimate?.estimatedCostUsd, worstCaseCostUsd: off.worstCaseCostUsd, costCeilingUsd: off.costCeilingUsd, remainingBudgetUsd: off.remainingBudgetUsd, dataLeavesLocal: off.dataLeavesLocal, expiresAt: off.expiresAt, request: escRequest } };
           }
         }
         stage.log('error', { code: 'NO_LOCAL_MODEL' });
@@ -364,11 +364,17 @@ export function registerEngineerRoutes(
     // Slice 3 — on a genuine local FAILURE with a defined reason, mint a cloud
     // escalation OFFER (no cloud call; approval is a separate /escalation/approve
     // request). Impossible under local-only / privacy; only defined reasons qualify.
+    // Slice 4 — a successful LOCAL coding turn records a metadata-only usage entry
+    // with a clearly-estimated avoided cloud cost.
+    let localSavings: { equivalentCloudCostUsd?: number; estimatedSavingsUsd?: number; localCostStatus: 'estimated' | 'unknown' } | undefined;
+    if (escalation && providerRouting && terminal === 'completed') {
+      localSavings = escalation.recordLocalUsage({ correlationId, providerId: decision.model.provider, modelId: decision.model.id, mode: 'engineer', policy: String(routing.policy ?? 'auto'), outcome: 'ok', request: escRequest });
+    }
     let escalationOffer: Record<string, unknown> | undefined;
     if (escalation && providerRouting && terminal === 'failed') {
       const off = await escalation.offer({ correlationId, policy: providerRouting.policy, outcome: { hadLocalModel: true, terminal: 'failed', output: finalText, errorMessage: 'local engineer loop failed' }, request: escRequest, requiredCaps: { coding: true } });
       if (off.offered) {
-        escalationOffer = { offerId: off.offerId, token: off.token, reason: off.reason, target: off.target, estCostUsd: off.estCostUsd, expiresAt: off.expiresAt, request: escRequest };
+        escalationOffer = { offerId: off.offerId, token: off.token, reason: off.reason, target: off.target, estimatedCostUsd: off.estimate?.estimatedCostUsd, worstCaseCostUsd: off.worstCaseCostUsd, costCeilingUsd: off.costCeilingUsd, remainingBudgetUsd: off.remainingBudgetUsd, dataLeavesLocal: off.dataLeavesLocal, expiresAt: off.expiresAt, request: escRequest };
         send('escalation_offer', escalationOffer);
       }
     }
@@ -376,6 +382,7 @@ export function registerEngineerRoutes(
       correlationId,
       routing: { policy: routing.policy, model: decision.model.id, providerId: decision.model.provider, fallbackRecommended, reasons: [...routing.fallbackReasons, ...assessment.reasons] },
       ...(escalationOffer ? { escalationOffer } : {}),
+      ...(localSavings ? { localSavings } : {}),
     });
     raw.end();
   });

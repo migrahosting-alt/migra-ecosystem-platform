@@ -18,6 +18,9 @@ export interface EscalationOffer {
   reason: EscalationReason;
   target: EscalationTarget;
   estCostUsd: number;
+  /** Consent binds this WORST-CASE cost ceiling — approval is refused if the
+   * re-estimated cost exceeds it. */
+  costCeilingUsd: number;
   createdAt: number;
   expiresAt: number;
   used: boolean;
@@ -45,7 +48,7 @@ export class EscalationOfferStore {
     private readonly ttlMs = DEFAULT_TTL_MS,
   ) {}
 
-  mint(input: { requestHash: string; reason: EscalationReason; target: EscalationTarget; estCostUsd: number }): EscalationOffer {
+  mint(input: { requestHash: string; reason: EscalationReason; target: EscalationTarget; estCostUsd: number; costCeilingUsd: number }): EscalationOffer {
     const at = this.now();
     const offer: EscalationOffer = {
       offerId: `esc_${this.mkId()}`,
@@ -54,6 +57,7 @@ export class EscalationOfferStore {
       reason: input.reason,
       target: input.target,
       estCostUsd: input.estCostUsd,
+      costCeilingUsd: input.costCeilingUsd,
       createdAt: at,
       expiresAt: at + this.ttlMs,
       used: false,

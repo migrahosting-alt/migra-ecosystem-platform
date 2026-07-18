@@ -13,6 +13,9 @@ import { registerAiRoutes } from '../src/engine/aiRoutes.js';
 import { EscalationController } from '../src/engine/providers/escalationController.js';
 import { EscalationOfferStore } from '../src/engine/providers/escalationStore.js';
 import { CloudEscalationExecutor, type CloudProviderFactory } from '../src/engine/providers/cloudEscalationExecutor.js';
+import { PricingBook } from '../src/engine/providers/budget/pricing.js';
+import { BudgetManager } from '../src/engine/providers/budget/budgetManager.js';
+import { UsageLedger } from '../src/engine/providers/budget/usageLedger.js';
 import { FleetRegistry } from '../src/engine/providers/fleetRegistry.js';
 import { ProviderRegistry } from '../src/engine/providers/providerRegistry.js';
 import { PolicyEngine, type ExecutionPolicyId } from '../src/engine/providers/executionPolicy.js';
@@ -43,9 +46,12 @@ function build(policy: ExecutionPolicyId, providers: Provider[], models: ModelDe
   const env = { ANTHROPIC_API_KEY: 'present' } as NodeJS.ProcessEnv;
   const registry = new ProviderRegistry(providers, (n) => env[n]);
   const fleet = new FleetRegistry(registry, new ModelRegistry({ sources: [], staticModels: models }), { now: () => 1 });
-  const controller = new EscalationController(new EscalationOfferStore(), new CloudEscalationExecutor(cloudFactory, env), fleet, registry, 1);
+  const pricing = new PricingBook([{ providerId: 'anthropic', modelId: '*', inputCostPerMillion: 3, outputCostPerMillion: 15, source: 'test', pricingStatus: 'configured' }]);
+  const budget = new BudgetManager(true, [{ kind: 'monthly', key: 'global', enabled: true, currency: 'USD', hardLimitUsd: 100, warningThreshold: 0.8, periodStart: 0, spentUsd: 0, reservedUsd: 0 }], () => 1);
+  const ledger = new UsageLedger(() => 1);
+  const controller = new EscalationController(new EscalationOfferStore(), new CloudEscalationExecutor(cloudFactory, env), fleet, registry, pricing, budget, ledger, 2000);
   const routing: LocalRoutingDeps = { fleet, engine: new PolicyEngine(), policy };
-  return { registry, fleet, controller, routing };
+  return { registry, fleet, controller, routing, budget, ledger };
 }
 
 function frames(body: string) {
