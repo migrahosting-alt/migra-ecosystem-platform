@@ -22,6 +22,11 @@ import { telemetryHub } from './engine/telemetryHub.js';
 import { registerAgentRoutes } from './engine/agentRoutes.js';
 import { registerProductionDiagnosticsRoutes } from './engine/production/routes.js';
 import { buildProductionDiagnosticsProvider } from './engine/production/config.js';
+import { registerProviderRoutes } from './engine/providers/routes.js';
+import { buildProviderRegistry } from './engine/providers/config.js';
+import { FleetRegistry } from './engine/providers/fleetRegistry.js';
+import { PolicyEngine } from './engine/providers/executionPolicy.js';
+import { makeReachabilityProbe } from './engine/providers/health.js';
 import { AgentRegistry } from './engine/agentRegistry.js';
 import { AgentService } from './engine/agentRuntime.js';
 import { AgentRunStore } from './engine/agentRunStore.js';
@@ -235,6 +240,15 @@ async function main(): Promise<void> {
   // the memory store above for server-side context + commit, and semantic RAG
   // from an APPROVED index when one exists for the workspace.
   const modelRegistry = registerAiRoutes(app, env, undefined, memoryStore, undefined, qualStore, indexService);
+  // Intelligent Provider Router — Slice 1 (/api/ai/providers): a read-only,
+  // dry-run inspection surface over a first-class provider fleet + execution
+  // policy engine, layered on the SAME modelRegistry. Changes NO live routing;
+  // cloud providers ship disabled by default.
+  {
+    const providerRegistry = buildProviderRegistry();
+    const fleet = new FleetRegistry(providerRegistry, modelRegistry, { probe: makeReachabilityProbe() });
+    registerProviderRoutes(app, { fleet, engine: new PolicyEngine(), defaultPolicy: process.env.MIGRAPILOT_EXECUTION_POLICY });
+  }
   // MigraAI Engine capability execution boundary (/api/ai/tools): the engine owns
   // tool validation, availability, dispatch, and the approval lifecycle. Additive
   // — the legacy /tools/* routes remain for compatibility.
