@@ -77,9 +77,16 @@ function scopeId(kind: BudgetScopeKind, key: string): string {
   return `${kind}:${key}`;
 }
 
+export interface BudgetPersistHooks {
+  onScope(s: BudgetScope): void;
+  onReservation(r: Reservation): void;
+  onReservationRemoved(reservationId: string): void;
+}
+
 export class BudgetManager {
   private readonly scopes = new Map<string, BudgetScope>();
   private readonly reservations = new Map<string, Reservation>();
+  private persistHooks: BudgetPersistHooks | null = null;
 
   constructor(
     private readonly enabled: boolean,
@@ -93,6 +100,45 @@ export class BudgetManager {
 
   isEnabled(): boolean {
     return this.enabled;
+  }
+
+  /** Attach durable persistence (scope running totals + reservations). */
+  setPersist(hooks: BudgetPersistHooks | null): void {
+    this.persistHooks = hooks;
+  }
+  private saveScope(s: BudgetScope): void {
+    if (this.persistHooks) { try { this.persistHooks.onScope(s); } catch { /* durable failure never weakens enforcement */ } }
+  }
+  private saveReservation(r: Reservation): void {
+    if (this.persistHooks) { try { this.persistHooks.onReservation(r); } catch { /* ignore */ } }
+  }
+  private dropReservation(id: string): void {
+    if (this.persistHooks) { try { this.persistHooks.onReservationRemoved(id); } catch { /* ignore */ } }
+  }
+
+  /** Restore persisted running totals + active reservations on startup. Scope
+   * DEFINITIONS (hard limit, threshold, period length) come from the current env
+   * config; only the running spent/reserved/periodStart are reconciled from
+   * durable, and only for a scope that still exists (a removed scope's history is
+   * dropped, never silently applied to a different scope). */
+  hydrate(persisted: { scopes: Array<{ scopeId: string; spentUsd: number; reservedUsd: number; periodStart: number }>; reservations: Reservation[] }): void {
+    for (const p of persisted.scopes) {
+      const s = this.scopes.get(p.scopeId);
+      if (!s) continue; // config changed — do not resurrect a removed scope
+      s.spentUsd = p.spentUsd;
+      s.reservedUsd = p.reservedUsd;
+      s.periodStart = p.periodStart;
+    }
+    for (const r of persisted.reservations) if (r.status === 'active') this.reservations.set(r.reservationId, r);
+    // Roll any elapsed periods immediately (a long downtime may span a window).
+    for (const s of this.scopes.values()) this.roll(s);
+  }
+
+  scopeIdOf(s: BudgetScope): string {
+    return scopeId(s.kind, s.key);
+  }
+  allScopes(): BudgetScope[] {
+    return [...this.scopes.values()];
   }
 
   /** Roll a period window forward if elapsed (resets spent + reserved). */
@@ -174,6 +220,7 @@ export class BudgetManager {
     // …then increment reserved on every scope (synchronous → atomic).
     for (const s of accumulating) {
       s.reservedUsd = round(s.reservedUsd + cost);
+      this.saveScope(s);
       const used = (s.spentUsd + s.reservedUsd) / s.hardLimitUsd;
       if (used >= s.warningThreshold) auditStore.append({ correlationId: ctx.correlationId, type: 'budget.warning_threshold_reached', component: 'budget', fields: { scope: s.kind, usedPercent: Math.round(used * 100) } });
       if (used >= 1) auditStore.append({ correlationId: ctx.correlationId, type: 'budget.hard_limit_reached', component: 'budget', fields: { scope: s.kind } });
@@ -191,6 +238,7 @@ export class BudgetManager {
       status: 'active',
     };
     this.reservations.set(reservation.reservationId, reservation);
+    this.saveReservation(reservation);
     auditStore.append({ correlationId: ctx.correlationId, type: 'budget.reservation_created', component: 'budget', fields: { provider: ctx.providerId, model: ctx.modelId, amountUsd: cost } });
     return { ok: true, reservation };
   }
@@ -207,8 +255,10 @@ export class BudgetManager {
       if (!s) continue;
       s.reservedUsd = round(Math.max(0, s.reservedUsd - r.amountUsd));
       s.spentUsd = round(s.spentUsd + actual);
+      this.saveScope(s);
     }
     r.status = 'consumed';
+    this.dropReservation(r.reservationId);
     const overrun = actual > r.amountUsd;
     auditStore.append({ correlationId: r.correlationId, type: 'budget.reservation_consumed', component: 'budget', fields: { provider: r.providerId, reservedUsd: r.amountUsd, actualUsd: actual } });
     auditStore.append({ correlationId: r.correlationId, type: 'budget.reconciled', component: 'budget', outcome: overrun ? 'overrun' : 'ok', fields: { reservedUsd: r.amountUsd, actualUsd: actual } });
@@ -222,9 +272,10 @@ export class BudgetManager {
     if (!r || r.status !== 'active') return false;
     for (const id of r.scopeIds) {
       const s = this.scopes.get(id);
-      if (s) s.reservedUsd = round(Math.max(0, s.reservedUsd - r.amountUsd));
+      if (s) { s.reservedUsd = round(Math.max(0, s.reservedUsd - r.amountUsd)); this.saveScope(s); }
     }
     r.status = 'released';
+    this.dropReservation(r.reservationId);
     auditStore.append({ correlationId: r.correlationId, type: 'budget.reservation_released', component: 'budget', fields: { provider: r.providerId, releasedUsd: r.amountUsd } });
     return true;
   }
@@ -237,9 +288,10 @@ export class BudgetManager {
       if (r.status === 'active' && now > r.expiresAt) {
         for (const id of r.scopeIds) {
           const s = this.scopes.get(id);
-          if (s) s.reservedUsd = round(Math.max(0, s.reservedUsd - r.amountUsd));
+          if (s) { s.reservedUsd = round(Math.max(0, s.reservedUsd - r.amountUsd)); this.saveScope(s); }
         }
         r.status = 'expired';
+        this.dropReservation(r.reservationId);
         auditStore.append({ correlationId: r.correlationId, type: 'budget.reservation_released', component: 'budget', outcome: 'expired', fields: { provider: r.providerId, releasedUsd: r.amountUsd } });
         n += 1;
       }

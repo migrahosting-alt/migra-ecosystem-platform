@@ -46,6 +46,9 @@ import { registerMemoryRoutes } from './engine/memory/memoryRoutes.js';
 import { ConversationStore } from './engine/memory/conversationStore.js';
 import { QualificationStore } from './engine/qualificationStore.js';
 import { SqliteDurableStore } from './engine/persistence/sqliteStore.js';
+import { wireOperationalPersistence } from './engine/persistence/operationalBridge.js';
+import { auditStore } from './engine/auditLog.js';
+import { incidentManager } from './engine/incidents.js';
 import { engineVersion } from './engine/version.js';
 import { sanitizeError } from './engine/redaction.js';
 import { IndexService } from './engine/rag/indexService.js';
@@ -266,6 +269,14 @@ async function main(): Promise<void> {
   const pricingBook = buildPricingBook(providerRegistry.list());
   const budgetManager = buildBudgetManager();
   const usageLedger = buildUsageLedger();
+  // Operational Data Foundation (Slice 1): make operational evidence durable across
+  // restarts. Hydrate the audit/usage/incident/budget stores from the durable store,
+  // then attach durable writers so new evidence persists. Metadata only — the stores
+  // already redact at their append boundary; recovery history rides the audit writer.
+  if (durable) {
+    wireOperationalPersistence(durable, { auditStore, usageLedger, incidentManager, budgetManager });
+    app.log.info('Operational persistence WIRED (audit/usage/incidents/budget durable across restarts).');
+  }
   const cloudMaxOutputTokens = Number(process.env.MIGRAPILOT_CLOUD_MAX_OUTPUT_TOKENS ?? 2000) || 2000;
   const escalation = new EscalationController(new EscalationOfferStore(), new CloudEscalationExecutor(), providerFleet, providerRegistry, pricingBook, budgetManager, usageLedger, cloudMaxOutputTokens);
   registerEscalationRoutes(app, escalation);

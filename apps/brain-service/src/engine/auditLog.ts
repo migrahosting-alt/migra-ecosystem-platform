@@ -160,10 +160,30 @@ export class AuditStore {
 
   constructor(
     private readonly now: () => number = () => Date.now(),
-    private readonly writer: AuditWriter | null = null,
+    private writer: AuditWriter | null = null,
     private readonly maxRecords = DEFAULT_MAX_RECORDS,
     private readonly mkId: () => string = randomUUID,
   ) {}
+
+  /** Attach a durable writer after construction (the global store is created at
+   * import time, before the durable store exists). */
+  setWriter(writer: AuditWriter | null): void {
+    this.writer = writer;
+  }
+
+  /** Seed the in-memory ring + per-correlation seq/causation from durable history
+   * on startup, so recent audit is queryable and seq continuity survives a
+   * restart. Newest-last input. */
+  hydrate(records: AuditRecord[]): void {
+    for (const r of records) {
+      if (this.seen.has(r.eventId)) continue;
+      this.records.push(r);
+      this.seen.add(r.eventId);
+      if ((this.seqByCorrelation.get(r.correlationId) ?? 0) < r.seq) this.seqByCorrelation.set(r.correlationId, r.seq);
+      this.lastByCorrelation.set(r.correlationId, r.eventId);
+    }
+    while (this.records.length > this.maxRecords) this.records.shift();
+  }
 
   /** Append an event. Returns the record. Auto-assigns causation to the prior
    * event for this correlation and a monotonic per-correlation sequence.
