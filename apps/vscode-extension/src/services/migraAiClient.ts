@@ -56,6 +56,8 @@ export interface AiChatRequest {
   needsReasoning?: boolean;
   preferCoding?: boolean;
   needsTools?: boolean;
+  /** Slice 5: per-request execution-policy preference (server resolves). */
+  policy?: string;
   conversationSummary?: string;
   selectionText?: string;
   activeFile?: string;
@@ -97,6 +99,8 @@ export interface EngineerRequest {
   task: string;
   ecosystem?: boolean;
   tier?: string;
+  /** Slice 5: per-request execution-policy preference (server resolves). */
+  policy?: string;
 }
 
 /** SSE events from the engineer loop, kept loosely typed at the transport —

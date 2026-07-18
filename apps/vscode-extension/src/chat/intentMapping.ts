@@ -41,6 +41,8 @@ export interface TurnContext {
   activeFile?: string;
   workspaceRoot?: string;
   conversationSummary?: string;
+  /** Slice 5: per-request execution-policy preference (server-authoritative). */
+  policy?: string;
 }
 
 /** Translate an extension chat turn into an engine capability spec.
@@ -67,5 +69,6 @@ export function buildAiRequest(prompt: string, ctx: TurnContext): AiChatRequest 
     ...(ctx.activeFile ? { activeFile: ctx.activeFile } : {}),
     ...(ctx.workspaceRoot ? { workspaceRoot: ctx.workspaceRoot } : {}),
     ...(ctx.conversationSummary ? { conversationSummary: ctx.conversationSummary } : {}),
+    ...(ctx.policy ? { policy: ctx.policy } : {}),
   };
 }

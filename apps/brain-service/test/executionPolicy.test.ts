@@ -3,7 +3,7 @@
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { PolicyEngine, EXECUTION_POLICIES, isExecutionPolicyId, DEFAULT_POLICY } from '../src/engine/providers/executionPolicy.js';
+import { PolicyEngine, EXECUTION_POLICIES, isExecutionPolicyId, DEFAULT_POLICY, resolveEffectivePolicy } from '../src/engine/providers/executionPolicy.js';
 import type { FleetProvider, FleetSnapshot } from '../src/engine/providers/fleetRegistry.js';
 import type { ProviderCapabilities, ProviderHealth, ProviderKind } from '../src/engine/providers/types.js';
 
@@ -27,6 +27,27 @@ function snap(...providers: FleetProvider[]): FleetSnapshot {
   return { providers, generatedAt: 1 };
 }
 const engine = new PolicyEngine();
+
+test('Slice 5: Cloud First is renamed to Cloud Preferred Fallback; descriptions convey local-first', () => {
+  assert.equal(EXECUTION_POLICIES['cloud-first'].displayName, 'Cloud Preferred Fallback');
+  assert.match(EXECUTION_POLICIES['cloud-first'].description, /Local is still attempted first/);
+  assert.match(EXECUTION_POLICIES['local-only'].description, /Never send the request to a cloud provider/);
+});
+
+test('Slice 5: resolveEffectivePolicy applies a valid preference, downgrades cloud-capable when no usable cloud', () => {
+  // valid + cloud usable → applied as-is
+  assert.deepEqual(resolveEffectivePolicy('cloud-first', 'auto', { cloudUsable: true }), { requested: 'cloud-first', effective: 'cloud-first' });
+  // invalid → default (no silent arbitrary policy)
+  assert.equal(resolveEffectivePolicy('nonsense', 'auto', { cloudUsable: true }).effective, 'auto');
+  // cloud-capable requested, no usable cloud → truthful downgrade to local-only + reason
+  const d = resolveEffectivePolicy('best-quality', 'auto', { cloudUsable: false });
+  assert.equal(d.requested, 'best-quality');
+  assert.equal(d.effective, 'local-only');
+  assert.match(String(d.reason), /disabled or unavailable/);
+  // local-only / privacy-first are unaffected by cloud availability
+  assert.equal(resolveEffectivePolicy('local-only', 'auto', { cloudUsable: false }).effective, 'local-only');
+  assert.equal(resolveEffectivePolicy('privacy-first', 'auto', { cloudUsable: false }).effective, 'privacy-first');
+});
 
 test('policy catalog has all seven named policies + custom, and a default', () => {
   assert.deepEqual(Object.keys(EXECUTION_POLICIES).sort(), ['auto', 'best-quality', 'cloud-first', 'custom', 'local-first', 'local-only', 'lowest-cost', 'privacy-first'].sort());

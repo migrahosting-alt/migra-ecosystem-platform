@@ -88,6 +88,17 @@ export class FleetRegistry {
     }
   }
 
+  /** Is any cloud provider actually usable (enabled + credentialed + reachable)?
+   * Drives the truthful effective-policy downgrade to local-only. */
+  async hasUsableCloud(): Promise<boolean> {
+    const health = this.healthById();
+    return this.providers.list().some((p) => {
+      if (p.kind !== 'cloud' || !p.enabled || !this.providers.hasCredential(p)) return false;
+      const h = health.get(p.id);
+      return !h || h.status !== 'unreachable';
+    });
+  }
+
   healthById(): Map<string, ProviderHealth> {
     const out = new Map<string, ProviderHealth>();
     for (const p of this.providers.list()) {

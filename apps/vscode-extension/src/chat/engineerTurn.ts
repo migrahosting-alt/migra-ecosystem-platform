@@ -10,6 +10,10 @@ import { isPilotError } from '@migrapilot/pilot-client';
 export interface EngineerSink {
   markdown(text: string): void;
   progress?(text: string): void;
+  /** Slice 5: a server-issued cloud escalation offer needs explicit consent. */
+  onEscalation?(offer: unknown): Promise<void> | void;
+  /** Slice 5: provider attribution for the completed run (from the done frame). */
+  onAttribution?(routing: unknown): void;
 }
 
 interface StepData { n?: number; tool?: string; summary?: string }
@@ -84,6 +88,12 @@ export async function runEngineerTurn(
         sink.markdown(`\n  ${icon} _${d.message ?? d.kind ?? 'note'}_\n`);
       } else if (ev.event === 'proposal') {
         sink.markdown(`\n${renderProposal(ev.data as ProposalData)}\n`);
+      } else if (ev.event === 'escalation_offer') {
+        // A defined local failure produced a cloud escalation OFFER. Consent is
+        // handled by the caller (a modal) — no cloud call happens without it.
+        await sink.onEscalation?.(ev.data);
+      } else if (ev.event === 'done') {
+        sink.onAttribution?.((ev.data as { routing?: unknown }).routing);
       } else if (ev.event === 'final') {
         const d = ev.data as FinalData;
         sink.markdown(`\n${d.markdown ?? ''}\n`);

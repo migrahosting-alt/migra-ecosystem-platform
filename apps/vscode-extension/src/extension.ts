@@ -33,6 +33,10 @@ import { type ModelProvider } from './providers/modelProvider.js';
 import { MigraPilotStatusBar } from './services/statusBar.js';
 import { MigraPilotSidebarProvider } from './panel/sidebarView.js';
 import { MigraPilotChatViewProvider } from './panel/chatView.js';
+import { ProviderRouterClient } from './services/providerRouterClient.js';
+import { ExecutionPolicyState } from './services/executionPolicyState.js';
+import { setEscalationDispatch, runEscalationConsent } from './services/escalationConsent.js';
+import { policyPickItems, policyStatusLabel, providerRows, budgetRows } from './panel/providerRouterViewModel.js';
 import { MigraPilotWorkspaceViewProvider } from './panel/workspaceView.js';
 import { WorkspaceController } from './panel/workspaceController.js';
 import { type WorkspacePanelModel, type RootResolution } from './panel/workspaceViewModel.js';
@@ -58,6 +62,9 @@ let sidebar: MigraPilotSidebarProvider;
 let chatView: MigraPilotChatViewProvider;
 let workspaceView: MigraPilotWorkspaceViewProvider;
 let workspaceController: WorkspaceController;
+let routerClient: ProviderRouterClient;
+let policyState: ExecutionPolicyState;
+let policyStatusBar: vscode.StatusBarItem;
 let pendingResolutionInfo: ResolutionInfo | undefined;
 
 /** Public API returned from activate() — used by the Extension Host tests to
@@ -174,6 +181,34 @@ export async function activate(context: vscode.ExtensionContext): Promise<MigraP
   testGenDeps = { ...commandDeps, makeProvider };
   brainLifecycle = new BrainLifecycle(createRealBrainLauncher(), output);
 
+  // Intelligent Provider Router — Slice 5: read-only client + policy preference.
+  routerClient = new ProviderRouterClient({
+    baseUrl: () => String(vscode.workspace.getConfiguration('migrapilot').get('brainUrl', 'http://127.0.0.1:3988')),
+    timeoutMs: () => Number(vscode.workspace.getConfiguration('migrapilot').get('requestTimeoutMs', 30000)),
+    log: (m) => output(m),
+  });
+  policyState = new ExecutionPolicyState(context.workspaceState);
+  // Slice 5: the cloud-escalation consent modal. Nothing is approved silently —
+  // only "Approve once" submits the server-issued offer reference for one call.
+  setEscalationDispatch(async (offer, render) => {
+    const outcome = await runEscalationConsent(offer as never, routerClient, {
+      pickAction: async (card) => {
+        const choice = await vscode.window.showWarningMessage([card.title, '', ...card.lines].join('\n'), { modal: true }, 'Approve once', 'Stay local');
+        return choice === 'Approve once' ? 'Approve once' : 'Stay local';
+      },
+      info: (m) => void vscode.window.showInformationMessage(m),
+      error: (m) => void vscode.window.showWarningMessage(m),
+    });
+    if (outcome.kind === 'approved' && outcome.result.ok && outcome.result.content) render(`\n\n${outcome.result.content}`);
+  });
+  context.subscriptions.push({ dispose: () => setEscalationDispatch(undefined) });
+  policyStatusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 99);
+  policyStatusBar.command = 'migrapilot.executionPolicy';
+  policyStatusBar.tooltip = 'MigraPilot execution policy (local-first; cloud is a gated fallback)';
+  refreshPolicyStatusBar();
+  policyStatusBar.show();
+  context.subscriptions.push(policyStatusBar);
+
   registerMigraPilotParticipant(context, brainClient, router, migraAiClient, engineDiagnostics);
 
   sidebar = new MigraPilotSidebarProvider(context.extensionUri, {
@@ -198,6 +233,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<MigraP
       const m = String(vscode.workspace.getConfiguration('migrapilot').get('memoryMode', 'session'));
       return m === 'off' || m === 'durable' ? m : 'session';
     },
+    executionPolicy: () => policyState.get(),
     conversationMemento: context.workspaceState,
     output: outputChannel,
   });
@@ -239,6 +275,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<MigraP
     vscode.commands.registerCommand('migrapilot.showLogs', () => outputChannel.show(true)),
     vscode.commands.registerCommand('migrapilot.showDiagnostics', showDiagnostics),
     vscode.commands.registerCommand('migrapilot.productionDiagnostics', productionDiagnosticsStatus),
+    vscode.commands.registerCommand('migrapilot.executionPolicy', chooseExecutionPolicy),
+    vscode.commands.registerCommand('migrapilot.providerStatus', showProviderStatus),
+    vscode.commands.registerCommand('migrapilot.aiUsage', showAiUsage),
     vscode.commands.registerCommand('migrapilot.explainSelection', () => runExplainSelection(commandDeps)),
     vscode.commands.registerCommand('migrapilot.fixDiagnostics', () => runFixDiagnostics(commandDeps)),
     vscode.commands.registerCommand('migrapilot.generateTests', () => runGenerateTestsCommand(testGenDeps)),
@@ -445,6 +484,57 @@ async function checkHealth(): Promise<void> {
   } finally {
     await statusBar.refresh(brainClient);
     void sidebar?.refresh();
+  }
+}
+
+function refreshPolicyStatusBar(): void {
+  if (!policyStatusBar) return;
+  policyStatusBar.text = `$(server-process) ${policyState.get()}`;
+}
+
+/** Execution-policy selector (Slice 5). Reads policy definitions from the server
+ * (authoritative) and lets the user pick a per-request PREFERENCE. Never grants
+ * permission to bypass local-first, consent, privacy, or budget. */
+async function chooseExecutionPolicy(): Promise<void> {
+  let policies;
+  try {
+    policies = (await routerClient.getPolicies()).policies;
+  } catch (error) {
+    await vscode.window.showErrorMessage(formatError('Could not load execution policies from the engine', error));
+    return;
+  }
+  const items = policyPickItems(policies, policyState.get() as never).map((it) => ({ label: it.label, description: it.description, id: it.id }));
+  const picked = await vscode.window.showQuickPick(items, {
+    title: 'MigraPilot — Execution Policy',
+    placeHolder: 'Local-first is always the architecture; cloud is a gated, consented fallback.',
+    matchOnDescription: true,
+  });
+  if (!picked) return;
+  await policyState.set(picked.id);
+  refreshPolicyStatusBar();
+  const label = policyStatusLabel(policies, picked.id as never);
+  await vscode.window.showInformationMessage(`${label}. This is a per-request preference — the engine resolves the effective policy and enforces routing, consent, privacy, and budget.`);
+}
+
+/** Read-only provider status (Slice 5). Shows the fleet without credential values. */
+async function showProviderStatus(): Promise<void> {
+  try {
+    const { providers } = await routerClient.getProviders();
+    const items = providerRows(providers).map((r) => ({ label: `${r.name} · ${r.type}`, description: `${r.health}${r.note ? ` — ${r.note}` : ''}`, detail: `Capabilities: ${r.capabilities}${r.model ? ` · Model: ${r.model}` : ''}` }));
+    await vscode.window.showQuickPick(items, { title: 'MigraPilot — Providers (read-only)', placeHolder: 'Provider status. No credentials or endpoints are shown.' });
+  } catch (error) {
+    await vscode.window.showErrorMessage(formatError('Could not load provider status', error));
+  }
+}
+
+/** Read-only AI usage + budget (Slice 5). */
+async function showAiUsage(): Promise<void> {
+  try {
+    const [budget, usage] = await Promise.all([routerClient.getBudget(), routerClient.getUsage({ limit: 1 })]);
+    const rows = budgetRows(budget, usage).map((r) => `${r.label}: ${r.value}`);
+    await vscode.window.showInformationMessage(`AI Usage — ${rows.join(' · ')}`, 'OK');
+  } catch (error) {
+    await vscode.window.showErrorMessage(formatError('Could not load AI usage', error));
   }
 }
 

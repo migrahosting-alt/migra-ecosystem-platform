@@ -17,6 +17,9 @@
     "onCommand:migrapilot.showLogs",
     "onCommand:migrapilot.showDiagnostics",
     "onCommand:migrapilot.productionDiagnostics",
+    "onCommand:migrapilot.executionPolicy",
+    "onCommand:migrapilot.providerStatus",
+    "onCommand:migrapilot.aiUsage",
     "onCommand:migrapilot.explainSelection",
     "onCommand:migrapilot.fixDiagnostics",
     "onCommand:migrapilot.generateTests",
@@ -93,6 +96,18 @@
       {
         "command": "migrapilot.productionDiagnostics",
         "title": "MigraPilot: Production Diagnostics — Read Only"
+      },
+      {
+        "command": "migrapilot.executionPolicy",
+        "title": "MigraPilot: Execution Policy"
+      },
+      {
+        "command": "migrapilot.providerStatus",
+        "title": "MigraPilot: Providers (Read-Only)"
+      },
+      {
+        "command": "migrapilot.aiUsage",
+        "title": "MigraPilot: AI Usage & Budget"
       },
       {
         "command": "migrapilot.explainSelection",

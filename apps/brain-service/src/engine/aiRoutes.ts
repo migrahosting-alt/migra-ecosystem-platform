@@ -26,6 +26,7 @@ import { retrieveContext } from '../retrieval/retrieve.js';
 import { ModelRegistry, type ModelDescriptor, type ProviderSource } from './modelRegistry.js';
 import { selectModel, tierFromHints, type RouteSpec } from './capabilityRouter.js';
 import { selectLocalCoding, type LocalRoutingDeps } from './providers/localCodingRouter.js';
+import { resolveEffectivePolicy } from './providers/executionPolicy.js';
 import type { EscalationController } from './providers/escalationController.js';
 import { QualificationStore } from './qualificationStore.js';
 import { ConversationStore, type Scope } from './memory/conversationStore.js';
@@ -51,6 +52,8 @@ interface AiChatBody {
   needsTools?: boolean;
   needsReasoning?: boolean;
   preferCoding?: boolean;
+  /** Slice 5: per-request execution-policy preference (server resolves). */
+  policy?: string;
   conversationSummary?: string;
   selectionText?: string;
   activeFile?: string;
@@ -231,15 +234,18 @@ export function registerAiRoutes(
     // signal when the active policy would prefer cloud. Non-coding turns and the
     // unwired case are unchanged. Preserves the capability router's ordering +
     // qualification gating; only removes non-local candidates.
-    let fallback: { policy?: string; fallbackRecommended: boolean; reasons: string[] } = { fallbackRecommended: false, reasons: [] };
-    if (spec.preferCoding && providerRouting) {
-      const local = await selectLocalCoding(providerRouting, { preferCoding: true, needsVision: spec.needsVision, needsTools: spec.needsTools, needsReasoning: spec.needsReasoning, tier: spec.tier });
+    let fallback: { policy?: string; requestedPolicy?: string; effectivePolicy?: string; policyReason?: string; fallbackRecommended: boolean; reasons: string[] } = { fallbackRecommended: false, reasons: [] };
+    // Slice 5: resolve the per-request policy preference (server-authoritative).
+    const resolved = providerRouting ? resolveEffectivePolicy(body.policy, providerRouting.policy, { cloudUsable: await providerRouting.fleet.hasUsableCloud() }) : undefined;
+    const effectiveRouting = providerRouting && resolved ? { ...providerRouting, policy: resolved.effective } : providerRouting;
+    if (spec.preferCoding && effectiveRouting && resolved) {
+      const local = await selectLocalCoding(effectiveRouting, { preferCoding: true, needsVision: spec.needsVision, needsTools: spec.needsTools, needsReasoning: spec.needsReasoning, tier: spec.tier });
       const localIds = new Set(local.rankedLocalModels.map((m) => m.id));
       const localRanked = decision.ranked.filter((m) => localIds.has(m.id));
       if (localRanked.length > 0) {
-        decision = { model: localRanked[0]!, reason: `local-first (${local.policy})`, alternatives: localRanked.slice(1).map((m) => m.id), ranked: localRanked };
+        decision = { model: localRanked[0]!, reason: `local-first (${resolved.effective})`, alternatives: localRanked.slice(1).map((m) => m.id), ranked: localRanked };
       }
-      fallback = { policy: local.policy, fallbackRecommended: local.fallbackRecommended, reasons: local.fallbackReasons };
+      fallback = { policy: resolved.effective, requestedPolicy: resolved.requested, effectivePolicy: resolved.effective, policyReason: resolved.reason, fallbackRecommended: local.fallbackRecommended, reasons: local.fallbackReasons };
     }
 
     // ── Conversation memory: the engine decides what prior context enters the
@@ -317,7 +323,7 @@ export function registerAiRoutes(
             reason: candidate.id === decision.model.id ? decision.reason : `failover → ${candidate.id}`,
             alternatives: decision.alternatives,
             failedOver: failed,
-            ...(fallback.policy ? { policy: fallback.policy, fallbackRecommended: fallback.fallbackRecommended, fallbackReasons: fallback.reasons } : {}),
+            ...(fallback.policy ? { policy: fallback.policy, requestedPolicy: fallback.requestedPolicy, effectivePolicy: fallback.effectivePolicy, policyReason: fallback.policyReason, fallbackRecommended: fallback.fallbackRecommended, fallbackReasons: fallback.reasons } : {}),
           },
           content: result.content,
           usage: { inputTokens: result.telemetry.inputTokens, outputTokens: result.telemetry.outputTokens, latencyMs: result.telemetry.latencyMs },
@@ -333,7 +339,7 @@ export function registerAiRoutes(
     // here; approval is a separate /escalation/approve request). Impossible under
     // local-only / privacy.
     if (spec.preferCoding && providerRouting && escalation) {
-      const off = await escalation.offer({ correlationId: requestId, policy: providerRouting.policy, outcome: { hadLocalModel: true, terminal: 'failed', output: '', errorMessage: 'local completion failed' }, request: chatRequest, requiredCaps: { coding: true, vision: spec.needsVision, tools: spec.needsTools } });
+      const off = await escalation.offer({ correlationId: requestId, policy: resolved?.effective ?? providerRouting.policy, outcome: { hadLocalModel: true, terminal: 'failed', output: '', errorMessage: 'local completion failed' }, request: chatRequest, requiredCaps: { coding: true, vision: spec.needsVision, tools: spec.needsTools } });
       if (off.offered) {
         return { ok: false, code: 'LOCAL_COMPLETION_FAILED', failedOver: failed, escalationOffer: { offerId: off.offerId, token: off.token, reason: off.reason, target: off.target, estimatedCostUsd: off.estimate?.estimatedCostUsd, worstCaseCostUsd: off.worstCaseCostUsd, costCeilingUsd: off.costCeilingUsd, remainingBudgetUsd: off.remainingBudgetUsd, dataLeavesLocal: off.dataLeavesLocal, expiresAt: off.expiresAt, request: chatRequest } };
       }
@@ -424,7 +430,7 @@ async function streamChat(
   primaryReason: string,
   providerFor: (m: ModelDescriptor) => StreamingProvider,
   chatRequest: ChatTurnRequest,
-  memory: { contextDiagnostics?: ContextDiagnostics; commit?: (text: string, modelId: string, providerId: string) => void; fallback?: { policy?: string; fallbackRecommended: boolean; reasons: string[] } } = {},
+  memory: { contextDiagnostics?: ContextDiagnostics; commit?: (text: string, modelId: string, providerId: string) => void; fallback?: { policy?: string; requestedPolicy?: string; effectivePolicy?: string; policyReason?: string; fallbackRecommended: boolean; reasons: string[] } } = {},
 ): Promise<void> {
   reply.hijack();
   const raw = reply.raw;
@@ -484,7 +490,7 @@ async function streamChat(
       // Successful completion → commit the assistant message to memory (only here,
       // never on a partial/cancelled/failed stream).
       memory.commit?.(fullText, candidate.id, candidate.provider);
-      send('done', { model: candidate.id, provider: candidate.provider, tier: candidate.tier, usage, failedOver: failed, ...(memory.fallback?.policy ? { policy: memory.fallback.policy, fallbackRecommended: memory.fallback.fallbackRecommended, fallbackReasons: memory.fallback.reasons } : {}) });
+      send('done', { model: candidate.id, provider: candidate.provider, tier: candidate.tier, usage, failedOver: failed, ...(memory.fallback?.policy ? { policy: memory.fallback.policy, requestedPolicy: memory.fallback.requestedPolicy, effectivePolicy: memory.fallback.effectivePolicy, policyReason: memory.fallback.policyReason, fallbackRecommended: memory.fallback.fallbackRecommended, fallbackReasons: memory.fallback.reasons } : {}) });
       raw.end();
       return;
     } catch (error) {

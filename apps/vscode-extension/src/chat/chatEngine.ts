@@ -9,6 +9,8 @@ import { EngineDiagnostics } from '../services/engineDiagnostics.js';
 import { parseAgentCommand, runAgentCommand } from './agentCommand.js';
 import { classifyIntent, detectEcosystem } from './intentRouter.js';
 import { runEngineerTurn } from './engineerTurn.js';
+import { getEscalationDispatch } from '../services/escalationConsent.js';
+import { attributionView, type RoutingView } from '../panel/providerRouterViewModel.js';
 import { buildAiRequest } from './intentMapping.js';
 
 /** A backend-agnostic output surface for a chat turn. Both the native chat
@@ -43,6 +45,9 @@ export interface ChatTurnOptions {
    * decides). The brain still applies its own effective-profile fallback (e.g.
    * premium→default when no premium model is configured). */
   modelProfile?: SelectableProfile;
+  /** Slice 5: the active execution-policy preference (server resolves + is
+   * authoritative). */
+  policy?: string;
   /** User-uploaded attachments (images for vision analysis, documents, …).
    * Images are forwarded to a vision model; text documents should already be
    * inlined into `prompt` by the chat surface. */
@@ -113,8 +118,22 @@ export async function runChatTurn(
         rootPath: workspaceRootForTask,
         task: trimmed,
         ecosystem: detectEcosystem({ rootPath: workspaceRootForTask, prompt: trimmed }),
+        ...(options.policy ? { policy: options.policy } : {}),
       },
-      sink,
+      {
+        markdown: (t) => sink.markdown(t),
+        progress: (t) => sink.progress?.(t),
+        // Slice 5: cloud escalation needs explicit consent (a modal); the approved
+        // cloud result is rendered back into the response.
+        onEscalation: async (offer) => {
+          const d = getEscalationDispatch();
+          if (d) await d(offer, (md) => sink.markdown(md));
+        },
+        onAttribution: (routing) => {
+          const a = attributionView((routing ?? {}) as RoutingView);
+          sink.markdown(`\n\n— _${a.headline}_${a.lines.length ? '\n' + a.lines.map((l) => `_${l}_`).join('  ·  ') : ''}\n`);
+        },
+      },
       tokenToSignal(token),
     );
     return;
@@ -153,6 +172,7 @@ export async function runChatTurn(
     // With a server-side conversation the engine owns history — do NOT send a
     // locally-reconstructed summary.
     conversationSummary: options.conversationId ? undefined : conversationSummary,
+    policy: options.policy,
   });
   if (options.conversationId) {
     aiRequest.conversationId = options.conversationId;

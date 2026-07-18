@@ -54,7 +54,21 @@ test('a CODING chat turn under local-first has no fallback recommendation', asyn
   const app = appWith(routing('local-first'));
   const j = (await app.inject({ method: 'POST', url: '/api/ai/chat', payload: { prompt: 'refactor this', feature: 'refactor' } })).json();
   assert.equal(j.routing.fallbackRecommended, false);
-  assert.equal(j.routing.policy, 'local-first');
+  // Slice 5: requested local-first; with no usable cloud provider the effective
+  // policy truthfully downgrades to local-only (never a silent substitution).
+  assert.equal(j.routing.requestedPolicy, 'local-first');
+  assert.equal(j.routing.effectivePolicy, 'local-only');
+  assert.match(String(j.routing.policyReason), /disabled or unavailable/);
+  await app.close();
+});
+
+test('Slice 5: a per-request policy is applied by the server and reported requested-vs-effective', async () => {
+  // cloud-first WITH a usable cloud credential stays cloud-first (still local-first architecture).
+  const app = appWith(routing('local-first', { ANTHROPIC_API_KEY: 'present' }));
+  const j = (await app.inject({ method: 'POST', url: '/api/ai/chat', payload: { prompt: 'fix this', feature: 'fix', policy: 'cloud-first' } })).json();
+  assert.equal(j.routing.requestedPolicy, 'cloud-first');
+  assert.equal(j.routing.effectivePolicy, 'cloud-first');
+  assert.equal(j.provider, 'local', 'local still runs first regardless of policy');
   await app.close();
 });
 
