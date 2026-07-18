@@ -66,7 +66,7 @@ test('POST /providers/plan returns a DRY-RUN plan; unknown policy → 400', asyn
   await app.close();
 });
 
-test('INVARIANT: the providers module issues NO completion and touches NO routing', () => {
+test('INVARIANT: the provider control plane issues NO completion and touches NO routing', () => {
   const dir = path.join(process.cwd(), 'src', 'engine', 'providers');
   const stripComments = (s: string): string => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
   const forbidden = [
@@ -78,7 +78,12 @@ test('INVARIANT: the providers module issues NO completion and touches NO routin
     /\bdecideRoute\b/,
     /child_process/,
   ];
-  for (const file of readdirSync(dir).filter((f) => f.endsWith('.ts'))) {
+  // The registry / fleet / policy / local-first-selection control plane never
+  // completes. cloudEscalationExecutor.ts is the SINGLE sanctioned cloud executor
+  // (approval-gated, one-shot) and is intentionally exempt — it has its own tests
+  // and Slice-3 no-silent-cloud invariants.
+  const SANCTIONED_EXECUTOR = 'cloudEscalationExecutor.ts';
+  for (const file of readdirSync(dir).filter((f) => f.endsWith('.ts') && f !== SANCTIONED_EXECUTOR)) {
     const src = stripComments(readFileSync(path.join(dir, file), 'utf8'));
     for (const re of forbidden) assert.ok(!re.test(src), `${file} must not contain ${re}`);
   }
