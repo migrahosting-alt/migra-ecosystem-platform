@@ -22,6 +22,36 @@ export interface ProbeOutcome {
  * completion or mutate anything — a discovery/list call only. */
 export type ProviderProbe = (provider: Provider) => Promise<ProbeOutcome>;
 
+/** Default read-only reachability probe: a discovery/list GET only. It sends NO
+ * credential (any HTTP response — even 401 — proves the endpoint is reachable),
+ * so it never handles a secret. Stub providers are reachable by definition. */
+export function makeReachabilityProbe(fetchImpl: typeof fetch = fetch, timeoutMs = 3000): ProviderProbe {
+  return async (provider: Provider): Promise<ProbeOutcome> => {
+    if (provider.protocol === 'stub') return { reachable: true, modelCount: 1 };
+    if (!provider.baseUrl) return { reachable: false, detail: 'no base url' };
+    const url = provider.baseUrl.replace(/\/$/, '') + '/models';
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    const started = Date.now();
+    try {
+      const res = await fetchImpl(url, { method: 'GET', signal: controller.signal });
+      const latencyMs = Date.now() - started;
+      let modelCount: number | undefined;
+      if (res.ok) {
+        const body = (await res.json().catch(() => undefined)) as { data?: unknown[]; models?: unknown[] } | undefined;
+        const arr = body?.data ?? body?.models;
+        modelCount = Array.isArray(arr) ? arr.length : undefined;
+      }
+      // Any HTTP response = endpoint reachable (unauthenticated list may be 401).
+      return { reachable: true, latencyMs, modelCount, detail: res.ok ? undefined : 'reachable (authenticated list not attempted)' };
+    } catch (err) {
+      return { reachable: false, latencyMs: Date.now() - started, detail: err instanceof Error ? err.name : 'unreachable' };
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+}
+
 /** Derive health from a provider + optional probe outcome, without ever guessing
  * "healthy". `hasCredential` reflects env presence (never the value). */
 export function deriveHealth(
