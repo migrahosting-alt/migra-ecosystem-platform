@@ -100,11 +100,18 @@ export class FleetRegistry {
    * reconciled capabilities. Read-only; no completion is ever issued. */
   async snapshot(): Promise<FleetSnapshot> {
     const models = await this.models.list().catch(() => [] as ModelDescriptor[]);
+    const providerIds = new Set(this.providers.list().map((p) => p.id));
+    // Discovered models whose source id is a declared provider attach to it; any
+    // other discovered model (e.g. the stub's `stub` source, or an ollama-named
+    // source) is a LOCAL discovery and attaches to the local provider.
+    const localFallbackId = this.providers.list().find((p) => p.kind === 'local')?.id;
     const byProvider = new Map<string, ModelDescriptor[]>();
     for (const m of models) {
-      const list = byProvider.get(m.provider) ?? [];
+      const target = providerIds.has(m.provider) ? m.provider : localFallbackId;
+      if (!target) continue;
+      const list = byProvider.get(target) ?? [];
       list.push(m);
-      byProvider.set(m.provider, list);
+      byProvider.set(target, list);
     }
     const healthById = this.healthById();
     const summaries = new Map(this.providers.summaries(healthById).map((s) => [s.id, s]));

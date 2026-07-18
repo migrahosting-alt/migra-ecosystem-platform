@@ -9,6 +9,8 @@ import { z } from 'zod';
 import type { BrainEnv } from '../config/env.js';
 import type { ModelRegistry, ModelDescriptor } from './modelRegistry.js';
 import { selectModel, tierFromHints } from './capabilityRouter.js';
+import { selectLocalCoding, type LocalRoutingDeps } from './providers/localCodingRouter.js';
+import { assessCodingOutcome } from './providers/codingAssessment.js';
 import { StubProvider, type ProviderAdapter } from '../providers/providerRegistry.js';
 import { OpenAiCompatProvider } from '../providers/openAiCompatProvider.js';
 import { executeToolCore, type ToolExecDeps } from './toolExecutor.js';
@@ -75,6 +77,10 @@ export function registerEngineerRoutes(
   modelRegistry: ModelRegistry,
   toolDeps: ToolExecDeps,
   providerOverride?: (model: ModelDescriptor) => ProviderAdapter,
+  /** Slice 2: when provided, coding turns select the highest-ranked eligible
+   * LOCAL model under the active policy (never invokes cloud). Absent → the prior
+   * capability-router selection is used unchanged. */
+  providerRouting?: LocalRoutingDeps,
 ): void {
   const real = env.localProvider === 'openai-compat';
   const providerFor = (model: ModelDescriptor): ProviderAdapter => {
@@ -224,18 +230,34 @@ export function registerEngineerRoutes(
     stage.log('request', { rootPath: body.rootPath, ecosystem: Boolean(body.ecosystem) });
     auditStore.append({ correlationId, type: 'execution.started', component: 'engineer', requestId: headerId || undefined, fields: { workspace: auditHash(body.rootPath), ecosystem: Boolean(body.ecosystem) } });
 
-    const decision = await selectModel(modelRegistry, {
-      preferCoding: true,
-      tier: tierFromHints({ tier: body.tier }),
-    });
-    if (!decision) {
-      stage.log('error', { code: 'NO_MODEL' });
-      reply.code(503);
-      return { ok: false, code: 'NO_MODEL', error: 'No model available for the engineer loop.' };
+    // Slice 2 — local-first coding routing. When provider routing is wired, the
+    // engineer selects the highest-ranked eligible LOCAL model under the active
+    // policy and NEVER invokes cloud; if the policy would prefer cloud (or no
+    // local model qualifies) it records fallbackRecommended (advisory only).
+    let decision: { model: ModelDescriptor; reason: string };
+    let routing: { policy?: string; fallbackRecommended: boolean; fallbackReasons: string[] } = { fallbackRecommended: false, fallbackReasons: [] };
+    if (providerRouting) {
+      const local = await selectLocalCoding(providerRouting, { preferCoding: true, needsTools: true, tier: tierFromHints({ tier: body.tier }) });
+      routing = { policy: local.policy, fallbackRecommended: local.fallbackRecommended, fallbackReasons: local.fallbackReasons };
+      if (!local.localModel) {
+        // No local model, and cloud is not invoked in this slice → fail closed.
+        stage.log('error', { code: 'NO_LOCAL_MODEL' });
+        reply.code(503);
+        return { ok: false, code: 'NO_LOCAL_MODEL', error: 'No local model available for the engineer loop; cloud fallback is recommended but not enabled in this slice.', fallbackRecommended: true, fallbackReasons: local.fallbackReasons };
+      }
+      decision = { model: local.localModel, reason: `local-first (${local.policy})` };
+    } else {
+      const d = await selectModel(modelRegistry, { preferCoding: true, tier: tierFromHints({ tier: body.tier }) });
+      if (!d) {
+        stage.log('error', { code: 'NO_MODEL' });
+        reply.code(503);
+        return { ok: false, code: 'NO_MODEL', error: 'No model available for the engineer loop.' };
+      }
+      decision = { model: d.model, reason: d.reason };
     }
     const provider = providerFor(decision.model);
-    stage.log('route', { model: decision.model.id, provider: decision.model.provider });
-    auditStore.append({ correlationId, type: 'execution.routed', component: 'engineer', fields: { model: decision.model.id, provider: decision.model.provider } });
+    stage.log('route', { model: decision.model.id, provider: decision.model.provider, fallbackRecommended: routing.fallbackRecommended });
+    auditStore.append({ correlationId, type: 'execution.routed', component: 'engineer', fields: { model: decision.model.id, provider: decision.model.provider, ...(routing.policy ? { policy: routing.policy, fallbackRecommended: routing.fallbackRecommended } : {}) } });
 
     reply.hijack();
     const raw = reply.raw;
@@ -259,7 +281,7 @@ export function registerEngineerRoutes(
     };
 
     // Surface the correlation id to the client so it can be quoted in support.
-    send('route', { model: decision.model.id, provider: decision.model.provider, reason: decision.reason, correlationId });
+    send('route', { model: decision.model.id, provider: decision.model.provider, reason: decision.reason, correlationId, policy: routing.policy, fallbackRecommended: routing.fallbackRecommended });
 
     const events = runEngineerTask(
       {
@@ -295,10 +317,15 @@ export function registerEngineerRoutes(
 
     auditStore.append({ correlationId, type: 'loop.started', component: 'engineer' });
     let terminal: 'completed' | 'failed' = 'failed';
+    let finalText = '';
     try {
       for await (const ev of events) {
         if (closed) break; // client went away — stop driving the model
-        if (ev.type === 'final') terminal = 'completed';
+        if (ev.type === 'final') {
+          terminal = 'completed';
+          const f = ev as { content?: string; summary?: string; text?: string };
+          finalText = String(f.content ?? f.summary ?? f.text ?? '');
+        }
         send(ev.type, ev);
       }
     } catch (err) {
@@ -312,7 +339,14 @@ export function registerEngineerRoutes(
       auditStore.append({ correlationId, type: 'loop.failed', component: 'engineer' });
       auditStore.append({ correlationId, type: 'execution.failed', component: 'engineer', outcome: 'error' });
     }
-    send('done', { correlationId });
+    // Slice 2 — advisory fallback signal: policy-preferred-cloud OR a low-quality
+    // local outcome. NEVER triggers cloud in this slice (Slice 3 adds escalation).
+    const assessment = assessCodingOutcome({ output: finalText, failed: terminal === 'failed' });
+    const fallbackRecommended = routing.fallbackRecommended || assessment.fallbackRecommended;
+    send('done', {
+      correlationId,
+      routing: { policy: routing.policy, model: decision.model.id, providerId: decision.model.provider, fallbackRecommended, reasons: [...routing.fallbackReasons, ...assessment.reasons] },
+    });
     raw.end();
   });
 }

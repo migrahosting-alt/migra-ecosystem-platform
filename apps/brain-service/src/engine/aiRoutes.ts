@@ -25,6 +25,7 @@ import { OpenAiCompatProvider } from '../providers/openAiCompatProvider.js';
 import { retrieveContext } from '../retrieval/retrieve.js';
 import { ModelRegistry, type ModelDescriptor, type ProviderSource } from './modelRegistry.js';
 import { selectModel, tierFromHints, type RouteSpec } from './capabilityRouter.js';
+import { selectLocalCoding, type LocalRoutingDeps } from './providers/localCodingRouter.js';
 import { QualificationStore } from './qualificationStore.js';
 import { ConversationStore, type Scope } from './memory/conversationStore.js';
 import { buildContext, type ContextDiagnostics } from './memory/contextBuilder.js';
@@ -92,6 +93,19 @@ export function sourcesFromEnv(env: BrainEnv): ProviderSource[] {
   return [{ id: 'local', baseUrl: env.providerBaseUrl, apiKey: env.openAiApiKey }];
 }
 
+/** Build the engine ModelRegistry exactly as {@link registerAiRoutes} would, so a
+ * caller can share ONE registry across the AI facade, the engineer route, and the
+ * provider fleet. */
+export function buildEngineModelRegistry(env: BrainEnv, qualStore?: QualificationStore): ModelRegistry {
+  const real = env.localProvider === 'openai-compat';
+  const qual = qualStore ?? new QualificationStore();
+  return new ModelRegistry(
+    real
+      ? { sources: sourcesFromEnv(env), qualify: (id) => qual.get(id) }
+      : { sources: [], staticModels: [STUB_MODEL], qualify: (id) => qual.get(id) },
+  );
+}
+
 export function registerAiRoutes(
   app: FastifyInstance,
   env: BrainEnv,
@@ -100,6 +114,10 @@ export function registerAiRoutes(
   providerOverride?: (model: ModelDescriptor) => StreamingProvider,
   qualStore?: QualificationStore,
   indexService?: IndexService,
+  /** Slice 2: when provided, CODING chat turns are routed local-first (ranked
+   * restricted to local models; never invokes cloud) with a fallback signal.
+   * Absent → chat selection is unchanged. */
+  providerRouting?: LocalRoutingDeps,
 ): ModelRegistry {
   const real = env.localProvider === 'openai-compat';
   const qual = qualStore ?? new QualificationStore();
@@ -192,7 +210,7 @@ export function registerAiRoutes(
       mode: body.evaluation ? 'evaluation' : 'production',
     };
 
-    const decision = await selectModel(reg, spec);
+    let decision = await selectModel(reg, spec);
     if (!decision) {
       reply.code(503);
       return {
@@ -202,6 +220,22 @@ export function registerAiRoutes(
           ? 'No qualified vision-capable model is available. Install and qualify one (e.g. `ollama pull qwen2.5vl:7b`).'
           : 'No suitable model is available from any configured provider.',
       };
+    }
+
+    // ── Slice 2 — local-first coding routing. For a CODING chat turn, restrict the
+    // failover set to LOCAL models (never invoke cloud) and surface a fallback
+    // signal when the active policy would prefer cloud. Non-coding turns and the
+    // unwired case are unchanged. Preserves the capability router's ordering +
+    // qualification gating; only removes non-local candidates.
+    let fallback: { policy?: string; fallbackRecommended: boolean; reasons: string[] } = { fallbackRecommended: false, reasons: [] };
+    if (spec.preferCoding && providerRouting) {
+      const local = await selectLocalCoding(providerRouting, { preferCoding: true, needsVision: spec.needsVision, needsTools: spec.needsTools, needsReasoning: spec.needsReasoning, tier: spec.tier });
+      const localIds = new Set(local.rankedLocalModels.map((m) => m.id));
+      const localRanked = decision.ranked.filter((m) => localIds.has(m.id));
+      if (localRanked.length > 0) {
+        decision = { model: localRanked[0]!, reason: `local-first (${local.policy})`, alternatives: localRanked.slice(1).map((m) => m.id), ranked: localRanked };
+      }
+      fallback = { policy: local.policy, fallbackRecommended: local.fallbackRecommended, reasons: local.fallbackReasons };
     }
 
     // ── Conversation memory: the engine decides what prior context enters the
@@ -252,7 +286,7 @@ export function registerAiRoutes(
     const chatRequest = await buildChatRequest(body, userPrompt, effectiveSummary, ragChunks);
 
     if (body.stream) {
-      await streamChat(request, reply, decision.ranked, decision.reason, providerFor, chatRequest, { contextDiagnostics, commit });
+      await streamChat(request, reply, decision.ranked, decision.reason, providerFor, chatRequest, { contextDiagnostics, commit, fallback });
       return reply; // response already sent via raw stream
     }
 
@@ -274,6 +308,7 @@ export function registerAiRoutes(
             reason: candidate.id === decision.model.id ? decision.reason : `failover → ${candidate.id}`,
             alternatives: decision.alternatives,
             failedOver: failed,
+            ...(fallback.policy ? { policy: fallback.policy, fallbackRecommended: fallback.fallbackRecommended, fallbackReasons: fallback.reasons } : {}),
           },
           content: result.content,
           usage: { inputTokens: result.telemetry.inputTokens, outputTokens: result.telemetry.outputTokens, latencyMs: result.telemetry.latencyMs },
@@ -369,7 +404,7 @@ async function streamChat(
   primaryReason: string,
   providerFor: (m: ModelDescriptor) => StreamingProvider,
   chatRequest: ChatTurnRequest,
-  memory: { contextDiagnostics?: ContextDiagnostics; commit?: (text: string, modelId: string, providerId: string) => void } = {},
+  memory: { contextDiagnostics?: ContextDiagnostics; commit?: (text: string, modelId: string, providerId: string) => void; fallback?: { policy?: string; fallbackRecommended: boolean; reasons: string[] } } = {},
 ): Promise<void> {
   reply.hijack();
   const raw = reply.raw;
@@ -429,7 +464,7 @@ async function streamChat(
       // Successful completion → commit the assistant message to memory (only here,
       // never on a partial/cancelled/failed stream).
       memory.commit?.(fullText, candidate.id, candidate.provider);
-      send('done', { model: candidate.id, provider: candidate.provider, tier: candidate.tier, usage, failedOver: failed });
+      send('done', { model: candidate.id, provider: candidate.provider, tier: candidate.tier, usage, failedOver: failed, ...(memory.fallback?.policy ? { policy: memory.fallback.policy, fallbackRecommended: memory.fallback.fallbackRecommended, fallbackReasons: memory.fallback.reasons } : {}) });
       raw.end();
       return;
     } catch (error) {
