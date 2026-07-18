@@ -47,7 +47,7 @@ import { ConversationStore } from './engine/memory/conversationStore.js';
 import { QualificationStore } from './engine/qualificationStore.js';
 import { SqliteDurableStore } from './engine/persistence/sqliteStore.js';
 import { wireOperationalPersistence } from './engine/persistence/operationalBridge.js';
-import { OperationalMaintenance, DEFAULT_RETENTION } from './engine/persistence/operationalMaintenance.js';
+import { OperationalMaintenance, buildRetentionConfig } from './engine/persistence/operationalMaintenance.js';
 import { auditStore } from './engine/auditLog.js';
 import { incidentManager } from './engine/incidents.js';
 import { engineVersion } from './engine/version.js';
@@ -286,7 +286,7 @@ async function main(): Promise<void> {
     // Retention + integrity + health. Verify integrity on startup (reported via
     // health, never a crash — the engine continues with whatever survived), then
     // start the age-based retention worker.
-    opMaintenance = new OperationalMaintenance(durable, DEFAULT_RETENTION, () => Date.now(), dbPath);
+    opMaintenance = new OperationalMaintenance(durable, buildRetentionConfig(process.env), () => Date.now(), dbPath);
     const integrity = opMaintenance.verifyIntegrity();
     if (integrity !== 'ok') app.log.error({ integrity }, 'durable operational store integrity check FAILED — continuing in degraded state');
     opMaintenance.start();

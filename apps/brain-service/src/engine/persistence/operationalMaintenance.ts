@@ -33,6 +33,31 @@ export const DEFAULT_RETENTION: OperationalRetentionConfig = {
   writeLatencyDegradedMs: 250,
 };
 
+/** Read the retention policy from env, falling back to {@link DEFAULT_RETENTION}.
+ * A non-positive or unparseable value keeps the default (retention is never
+ * silently disabled by a typo). Knobs:
+ *   MIGRAPILOT_OPERATIONAL_RETENTION_USAGE_DAYS
+ *   MIGRAPILOT_OPERATIONAL_RETENTION_AUDIT_DAYS
+ *   MIGRAPILOT_OPERATIONAL_RETENTION_INCIDENT_DAYS
+ *   MIGRAPILOT_OPERATIONAL_RETENTION_RECOVERY_DAYS
+ *   MIGRAPILOT_OPERATIONAL_RETENTION_INTERVAL_MINUTES
+ *   MIGRAPILOT_OPERATIONAL_WRITE_LATENCY_DEGRADED_MS
+ */
+export function buildRetentionConfig(env: NodeJS.ProcessEnv = process.env): OperationalRetentionConfig {
+  const posInt = (raw: string | undefined, fallback: number): number => {
+    const n = Number(raw);
+    return Number.isFinite(n) && n > 0 ? Math.floor(n) : fallback;
+  };
+  return {
+    usageDays: posInt(env.MIGRAPILOT_OPERATIONAL_RETENTION_USAGE_DAYS, DEFAULT_RETENTION.usageDays),
+    auditDays: posInt(env.MIGRAPILOT_OPERATIONAL_RETENTION_AUDIT_DAYS, DEFAULT_RETENTION.auditDays),
+    incidentDays: posInt(env.MIGRAPILOT_OPERATIONAL_RETENTION_INCIDENT_DAYS, DEFAULT_RETENTION.incidentDays),
+    recoveryDays: posInt(env.MIGRAPILOT_OPERATIONAL_RETENTION_RECOVERY_DAYS, DEFAULT_RETENTION.recoveryDays),
+    intervalMs: posInt(env.MIGRAPILOT_OPERATIONAL_RETENTION_INTERVAL_MINUTES, DEFAULT_RETENTION.intervalMs / 60000) * 60000,
+    writeLatencyDegradedMs: posInt(env.MIGRAPILOT_OPERATIONAL_WRITE_LATENCY_DEGRADED_MS, DEFAULT_RETENTION.writeLatencyDegradedMs),
+  };
+}
+
 /** The durable surface this maintenance needs (a narrow view of DurableStore). */
 export interface MaintenanceStore extends OperationalPersistence {
   integrityCheck(): string;
