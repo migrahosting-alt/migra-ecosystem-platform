@@ -35,6 +35,7 @@ import { MigraPilotSidebarProvider } from './panel/sidebarView.js';
 import { MigraPilotChatViewProvider } from './panel/chatView.js';
 import { ProviderRouterClient } from './services/providerRouterClient.js';
 import { ExecutionPolicyState } from './services/executionPolicyState.js';
+import { setEscalationDispatch, runEscalationConsent } from './services/escalationConsent.js';
 import { policyPickItems, policyStatusLabel, providerRows, budgetRows } from './panel/providerRouterViewModel.js';
 import { MigraPilotWorkspaceViewProvider } from './panel/workspaceView.js';
 import { WorkspaceController } from './panel/workspaceController.js';
@@ -187,6 +188,20 @@ export async function activate(context: vscode.ExtensionContext): Promise<MigraP
     log: (m) => output(m),
   });
   policyState = new ExecutionPolicyState(context.workspaceState);
+  // Slice 5: the cloud-escalation consent modal. Nothing is approved silently —
+  // only "Approve once" submits the server-issued offer reference for one call.
+  setEscalationDispatch(async (offer, render) => {
+    const outcome = await runEscalationConsent(offer as never, routerClient, {
+      pickAction: async (card) => {
+        const choice = await vscode.window.showWarningMessage([card.title, '', ...card.lines].join('\n'), { modal: true }, 'Approve once', 'Stay local');
+        return choice === 'Approve once' ? 'Approve once' : 'Stay local';
+      },
+      info: (m) => void vscode.window.showInformationMessage(m),
+      error: (m) => void vscode.window.showWarningMessage(m),
+    });
+    if (outcome.kind === 'approved' && outcome.result.ok && outcome.result.content) render(`\n\n${outcome.result.content}`);
+  });
+  context.subscriptions.push({ dispose: () => setEscalationDispatch(undefined) });
   policyStatusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 99);
   policyStatusBar.command = 'migrapilot.executionPolicy';
   policyStatusBar.tooltip = 'MigraPilot execution policy (local-first; cloud is a gated fallback)';

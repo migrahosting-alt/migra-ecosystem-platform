@@ -11,6 +11,18 @@ import type { PolicyDef, PolicyId, ProviderView, BudgetResponse, UsageResponse }
 
 export type Tone = 'ok' | 'warn' | 'error' | 'info' | 'muted';
 
+// ── Escalation reason wording (defined reasons only) ───────────────────────────
+
+const REASON_TEXT: Record<string, string> = {
+  LOCAL_TIMEOUT: 'The local model timed out',
+  LOCAL_MALFORMED_OUTPUT: 'The local model returned malformed or empty output',
+  LOCAL_CONTEXT_LIMIT: 'The local model hit its context limit',
+  LOCAL_UNSUPPORTED_CAPABILITY: 'No local model can satisfy this request',
+};
+export function escalationReasonText(reason: string): string {
+  return REASON_TEXT[reason] ?? reason;
+}
+
 // ── Policy selector ──────────────────────────────────────────────────────────
 
 export interface PolicyPickItem {
@@ -126,4 +138,135 @@ export function budgetRows(budget: BudgetResponse | undefined, usage: UsageRespo
     });
   }
   return rows;
+}
+
+// ── Cloud escalation consent card (Slice 3 offer → user consent surface) ───────
+
+export interface EscalationOfferView {
+  offerId: string;
+  token: string;
+  reason: string;
+  target?: { providerId: string; modelId: string };
+  estimatedCostUsd?: number;
+  worstCaseCostUsd?: number;
+  remainingBudgetUsd?: number;
+  dataLeavesLocal?: boolean;
+  request?: unknown;
+}
+
+export interface EscalationCard {
+  title: string;
+  lines: string[];
+  actions: ['Approve once', 'Decline', 'Stay local'];
+}
+
+/** Build the consent-card content from a SERVER-issued offer. The UI shows exactly
+ * this before any cloud call; it never reconstructs provider/model/reason/ceiling. */
+export function escalationCardContent(offer: EscalationOfferView): EscalationCard {
+  const lines = [
+    `Reason: ${escalationReasonText(offer.reason)}`,
+    `Provider: ${offer.target?.providerId ?? 'unknown'}`,
+    `Model: ${offer.target?.modelId ?? 'unknown'}`,
+    `Data leaving this device: ${offer.dataLeavesLocal ? 'current prompt and selected workspace context' : 'none'}`,
+    `Estimated cost: ${usd(offer.estimatedCostUsd, 'estimated')}`,
+    `Worst-case cost: ${usd(offer.worstCaseCostUsd, 'estimated')}`,
+    `Remaining budget: ${offer.remainingBudgetUsd === undefined ? 'unknown' : usd(offer.remainingBudgetUsd, 'calculated')}`,
+  ];
+  return { title: 'Cloud fallback requested', lines, actions: ['Approve once', 'Decline', 'Stay local'] };
+}
+
+/** True only when the offer carries everything needed to approve (defense against
+ * a malformed / partial offer that must not be actionable). */
+export function offerIsApprovable(offer: Partial<EscalationOfferView> | undefined): boolean {
+  return !!offer && typeof offer.offerId === 'string' && typeof offer.token === 'string' && !!offer.target && offer.request !== undefined;
+}
+
+export const OFFER_EXPIRED_MESSAGE = 'This cloud offer expired. Request a new evaluation.';
+
+// ── Provider attribution (how a completed response was handled) ────────────────
+
+export interface RoutingView {
+  provider?: string;
+  model?: string;
+  requestedPolicy?: string;
+  effectivePolicy?: string;
+  policyReason?: string;
+  fallbackRecommended?: boolean;
+  viaEscalation?: boolean;
+  escalationReason?: string;
+  costUsd?: number;
+  costStatus?: 'actual' | 'calculated' | 'estimated' | 'unknown';
+  approvedCeilingUsd?: number;
+}
+
+export interface Attribution {
+  headline: string;
+  lines: string[];
+}
+
+/** Truthful attribution — never implies "local" merely because local started
+ * first. Distinguishes local success, cloud fallback used, and fallback
+ * recommended-but-not-approved. */
+export function attributionView(r: RoutingView): Attribution {
+  const policyLine = r.effectivePolicy
+    ? r.requestedPolicy && r.requestedPolicy !== r.effectivePolicy
+      ? `Policy: ${r.requestedPolicy} → ${r.effectivePolicy}${r.policyReason ? ` (${r.policyReason})` : ''}`
+      : `Policy: ${r.effectivePolicy}`
+    : undefined;
+  if (r.viaEscalation) {
+    return {
+      headline: `Cloud fallback used · ${r.provider ?? '?'}${r.model ? ` · ${r.model}` : ''}`,
+      lines: [
+        ...(r.escalationReason ? [`Reason: ${escalationReasonText(r.escalationReason)}`] : []),
+        ...(r.approvedCeilingUsd !== undefined ? [`Approved cost ceiling: ${usd(r.approvedCeilingUsd, 'estimated')}`] : []),
+        `Actual estimated cost: ${usd(r.costUsd, r.costStatus ?? 'estimated')}`,
+        ...(policyLine ? [policyLine] : []),
+      ],
+    };
+  }
+  if (r.fallbackRecommended) {
+    return { headline: 'Local result returned', lines: ['Cloud fallback recommended but not approved', ...(policyLine ? [policyLine] : [])] };
+  }
+  return {
+    headline: `Handled locally${r.provider ? ` · ${r.provider}` : ''}${r.model ? ` · ${r.model}` : ''}`,
+    lines: policyLine ? [policyLine] : [],
+  };
+}
+
+// ── Failure/blocked-state mapping (message + machine code preserved) ───────────
+
+const FAILURE_TEXT: Record<string, string> = {
+  LOCAL_UNSUPPORTED_CAPABILITY: 'No local model can handle this request.',
+  NO_LOCAL_MODEL: 'No local model is available.',
+  LOCAL_CAPABILITY_LIMIT: 'The local engine could not complete this to the required standard.',
+  CLOUD_CONSENT_REQUIRED: 'A cloud provider could continue this task, but explicit approval is required.',
+  BUDGET_EXCEEDED: 'Cloud execution was blocked because the approved budget is insufficient.',
+  REQUEST_COST_LIMIT_EXCEEDED: 'Cloud execution was blocked: the estimated cost exceeds the per-request limit.',
+  PROVIDER_COST_LIMIT_EXCEEDED: 'Cloud execution was blocked: the provider budget is insufficient.',
+  BUDGET_DISABLED: 'Cloud execution is disabled (budget enforcement is off).',
+  BUDGET_NOT_CONFIGURED: 'Cloud execution is blocked: no budget is configured.',
+  COST_ESTIMATE_UNAVAILABLE: 'Cloud execution was blocked because a trustworthy cost estimate is unavailable.',
+  CEILING_EXCEEDED: 'Cloud execution was blocked: the estimated cost exceeds the approved ceiling.',
+  TARGET_INELIGIBLE: 'The selected provider is no longer eligible.',
+  PROVIDER_UNAVAILABLE: 'The selected provider is currently unavailable.',
+  OFFER_INVALID: OFFER_EXPIRED_MESSAGE,
+  CLOUD_DATA_TRANSFER_NOT_ALLOWED: 'The current privacy policy does not allow this data to leave the local environment.',
+  ESCALATION_FAILED: 'The cloud attempt failed.',
+};
+
+export interface FailureView {
+  message: string;
+  code: string;
+}
+/** Map a server failure code to a clear message while KEEPING the machine code. */
+export function failureView(code: string | undefined): FailureView {
+  const c = code ?? 'UNKNOWN';
+  return { message: FAILURE_TEXT[c] ?? 'The request could not be completed.', code: c };
+}
+
+// ── Task-level execution details (safe metadata only) ──────────────────────────
+
+export function shortCorrelation(id: string | undefined): string {
+  if (!id) return '—';
+  return id.length > 14 ? `${id.slice(0, 6)}…${id.slice(-4)}` : id;
 }
