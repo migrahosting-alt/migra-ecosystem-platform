@@ -13,6 +13,9 @@ import { CloudEscalationExecutor } from '../src/engine/providers/cloudEscalation
 import { FleetRegistry } from '../src/engine/providers/fleetRegistry.js';
 import { ProviderRegistry } from '../src/engine/providers/providerRegistry.js';
 import { evaluateEscalation } from '../src/engine/providers/escalation.js';
+import { PricingBook } from '../src/engine/providers/budget/pricing.js';
+import { BudgetManager } from '../src/engine/providers/budget/budgetManager.js';
+import { UsageLedger } from '../src/engine/providers/budget/usageLedger.js';
 import { ModelRegistry } from '../src/engine/modelRegistry.js';
 import type { Provider } from '../src/engine/providers/types.js';
 import type { ExecutionPolicyId } from '../src/engine/providers/executionPolicy.js';
@@ -38,7 +41,9 @@ test('INVARIANT: the approve endpoint refuses without an offer token — no clou
   const fleet = new FleetRegistry(registry, new ModelRegistry({ sources: [], staticModels: [] }), { now: () => 1 });
   let cloudCalls = 0;
   const exec = new CloudEscalationExecutor(() => ({ name: 'c', async complete() { cloudCalls++; return { content: 'x', telemetry: { inputTokens: 1, outputTokens: 1 } } as never; }, async *stream() {}, async isAvailable() { return true; } } as never), env);
-  const controller = new EscalationController(new EscalationOfferStore(), exec, fleet, registry, 1);
+  const pricing = new PricingBook([{ providerId: 'anthropic', modelId: '*', inputCostPerMillion: 3, outputCostPerMillion: 15, source: 'test', pricingStatus: 'configured' }]);
+  const budget = new BudgetManager(true, [{ kind: 'monthly', key: 'global', enabled: true, currency: 'USD', hardLimitUsd: 100, warningThreshold: 0.8, periodStart: 0, spentUsd: 0, reservedUsd: 0 }], () => 1);
+  const controller = new EscalationController(new EscalationOfferStore(), exec, fleet, registry, pricing, budget, new UsageLedger(() => 1), 2000);
   const app = Fastify({ logger: false });
   registerEscalationRoutes(app, controller);
 

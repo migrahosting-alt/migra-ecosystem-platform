@@ -301,6 +301,11 @@ export function registerAiRoutes(
       try {
         const result = await providerFor(candidate).complete(chatRequest);
         commit?.(result.content, candidate.id, candidate.provider);
+        // Slice 4 — a successful LOCAL coding turn records metadata-only usage with
+        // a clearly-estimated avoided cloud cost.
+        const localSavings = spec.preferCoding && providerRouting && escalation
+          ? escalation.recordLocalUsage({ correlationId: requestId, providerId: candidate.provider, modelId: candidate.id, mode: 'chat', policy: String(fallback.policy ?? 'auto'), outcome: 'ok', request: chatRequest })
+          : undefined;
         return {
           ok: true,
           model: candidate.id,
@@ -316,6 +321,7 @@ export function registerAiRoutes(
           },
           content: result.content,
           usage: { inputTokens: result.telemetry.inputTokens, outputTokens: result.telemetry.outputTokens, latencyMs: result.telemetry.latencyMs },
+          ...(localSavings ? { localSavings } : {}),
         };
       } catch (error) {
         request.log.warn({ model: candidate.id, err: errText(error) }, 'ai/chat model failed; trying next');
@@ -329,7 +335,7 @@ export function registerAiRoutes(
     if (spec.preferCoding && providerRouting && escalation) {
       const off = await escalation.offer({ correlationId: requestId, policy: providerRouting.policy, outcome: { hadLocalModel: true, terminal: 'failed', output: '', errorMessage: 'local completion failed' }, request: chatRequest, requiredCaps: { coding: true, vision: spec.needsVision, tools: spec.needsTools } });
       if (off.offered) {
-        return { ok: false, code: 'LOCAL_COMPLETION_FAILED', failedOver: failed, escalationOffer: { offerId: off.offerId, token: off.token, reason: off.reason, target: off.target, estCostUsd: off.estCostUsd, expiresAt: off.expiresAt, request: chatRequest } };
+        return { ok: false, code: 'LOCAL_COMPLETION_FAILED', failedOver: failed, escalationOffer: { offerId: off.offerId, token: off.token, reason: off.reason, target: off.target, estimatedCostUsd: off.estimate?.estimatedCostUsd, worstCaseCostUsd: off.worstCaseCostUsd, costCeilingUsd: off.costCeilingUsd, remainingBudgetUsd: off.remainingBudgetUsd, dataLeavesLocal: off.dataLeavesLocal, expiresAt: off.expiresAt, request: chatRequest } };
       }
     }
     reply.code(502);

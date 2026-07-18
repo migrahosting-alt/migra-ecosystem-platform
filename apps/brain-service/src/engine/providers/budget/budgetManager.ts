@@ -123,6 +123,24 @@ export class BudgetManager {
     return ids.map((id) => this.scopes.get(id)).filter((s): s is BudgetScope => !!s && s.enabled);
   }
 
+  /** Non-mutating affordability check for the OFFER stage (truthful, but NOT a
+   * guarantee — the atomic gate is reserve() at approval). Returns the minimum
+   * remaining across applicable scopes. */
+  preflight(ctx: ReserveContext): { affordable: boolean; code?: BudgetFailureCode; remainingUsd: number; perRequestRemainingUsd?: number } {
+    if (!this.enabled) return { affordable: false, code: 'BUDGET_DISABLED', remainingUsd: 0 };
+    if (ctx.estimate.costUnavailable) return { affordable: false, code: 'COST_ESTIMATE_UNAVAILABLE', remainingUsd: 0 };
+    const cost = ctx.estimate.worstCaseCostUsd;
+    const perReq = this.scopes.get(scopeId('per_request', 'global'));
+    if (perReq?.enabled && cost > perReq.hardLimitUsd) return { affordable: false, code: 'REQUEST_COST_LIMIT_EXCEEDED', remainingUsd: perReq.hardLimitUsd, perRequestRemainingUsd: perReq.hardLimitUsd };
+    const accumulating = this.applicable(ctx);
+    if (accumulating.length === 0) return { affordable: false, code: 'BUDGET_NOT_CONFIGURED', remainingUsd: 0 };
+    const remaining = Math.min(...accumulating.map((s) => this.remaining(s)));
+    for (const s of accumulating) {
+      if (cost > this.remaining(s)) return { affordable: false, code: s.kind === 'provider' ? 'PROVIDER_COST_LIMIT_EXCEEDED' : 'BUDGET_EXCEEDED', remainingUsd: remaining, perRequestRemainingUsd: perReq?.enabled ? perReq.hardLimitUsd : undefined };
+    }
+    return { affordable: true, remainingUsd: remaining, perRequestRemainingUsd: perReq?.enabled ? perReq.hardLimitUsd : undefined };
+  }
+
   /** ATOMIC reserve. The check + increment below run with NO await between them —
    * that synchronous critical section is what prevents concurrent overspend. */
   reserve(ctx: ReserveContext): ReserveResult {

@@ -79,7 +79,7 @@ test('offer store: single-use, request-bound, token-bound, expiring', () => {
   let t = 1000;
   const store = new EscalationOfferStore(() => t, (() => { let n = 0; return () => `id${n++}`; })(), 5000);
   const reqHash = hashRequest({ task: 'fix', rootPath: '/w' });
-  const offer = store.mint({ requestHash: reqHash, reason: 'LOCAL_TIMEOUT', target: { providerId: 'anthropic', modelId: 'claude-sonnet-5' }, estCostUsd: 0.01 });
+  const offer = store.mint({ requestHash: reqHash, reason: 'LOCAL_TIMEOUT', target: { providerId: 'anthropic', modelId: 'claude-sonnet-5' }, estCostUsd: 0.01, costCeilingUsd: 0.02 });
   assert.ok(offer.offerId.startsWith('esc_') && offer.token.startsWith('escok_'));
   // wrong token
   assert.deepEqual(store.consume(offer.offerId, 'nope', reqHash), { ok: false, reason: 'TOKEN_MISMATCH' });
@@ -90,7 +90,7 @@ test('offer store: single-use, request-bound, token-bound, expiring', () => {
   // replay refused
   assert.deepEqual(store.consume(offer.offerId, offer.token, reqHash), { ok: false, reason: 'ALREADY_USED' });
   // get() never leaks the token
-  const o2 = store.mint({ requestHash: reqHash, reason: 'LOCAL_TIMEOUT', target: { providerId: 'anthropic', modelId: 'claude-sonnet-5' }, estCostUsd: 0.01 });
+  const o2 = store.mint({ requestHash: reqHash, reason: 'LOCAL_TIMEOUT', target: { providerId: 'anthropic', modelId: 'claude-sonnet-5' }, estCostUsd: 0.01, costCeilingUsd: 0.02 });
   assert.ok(!('token' in (store.get(o2.offerId) as object)));
   // expiry
   t = 100000;
