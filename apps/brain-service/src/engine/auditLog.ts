@@ -52,7 +52,13 @@ export type AuditEventType =
   | 'production.diagnostics.requested'
   | 'production.diagnostics.completed'
   | 'production.diagnostics.failed'
-  | 'production.diagnostics.denied';
+  | 'production.diagnostics.denied'
+  | 'escalation.offered'
+  | 'escalation.denied'
+  | 'escalation.approved'
+  | 'escalation.attempted'
+  | 'escalation.completed'
+  | 'escalation.failed';
 
 /** Event types whose loss is security/operationally critical — if these cannot
  * be persisted, the caller must fail closed before starting a new mutation. */
