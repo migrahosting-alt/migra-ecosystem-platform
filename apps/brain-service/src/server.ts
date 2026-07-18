@@ -25,8 +25,10 @@ import { buildProductionDiagnosticsProvider } from './engine/production/config.j
 import { registerProviderRoutes } from './engine/providers/routes.js';
 import { buildProviderRegistry } from './engine/providers/config.js';
 import { FleetRegistry } from './engine/providers/fleetRegistry.js';
-import { PolicyEngine } from './engine/providers/executionPolicy.js';
+import { PolicyEngine, DEFAULT_POLICY, isExecutionPolicyId, type ExecutionPolicyId } from './engine/providers/executionPolicy.js';
 import { makeReachabilityProbe } from './engine/providers/health.js';
+import { buildEngineModelRegistry } from './engine/aiRoutes.js';
+import type { LocalRoutingDeps } from './engine/providers/localCodingRouter.js';
 import { AgentRegistry } from './engine/agentRegistry.js';
 import { AgentService } from './engine/agentRuntime.js';
 import { AgentRunStore } from './engine/agentRunStore.js';
@@ -239,16 +241,20 @@ async function main(): Promise<void> {
   // capability-routed model selection, model catalog, embeddings. Chat consumes
   // the memory store above for server-side context + commit, and semantic RAG
   // from an APPROVED index when one exists for the workspace.
-  const modelRegistry = registerAiRoutes(app, env, undefined, memoryStore, undefined, qualStore, indexService);
-  // Intelligent Provider Router — Slice 1 (/api/ai/providers): a read-only,
-  // dry-run inspection surface over a first-class provider fleet + execution
-  // policy engine, layered on the SAME modelRegistry. Changes NO live routing;
-  // cloud providers ship disabled by default.
-  {
-    const providerRegistry = buildProviderRegistry();
-    const fleet = new FleetRegistry(providerRegistry, modelRegistry, { probe: makeReachabilityProbe() });
-    registerProviderRoutes(app, { fleet, engine: new PolicyEngine(), defaultPolicy: process.env.MIGRAPILOT_EXECUTION_POLICY });
-  }
+  // Build ONE model registry + provider fleet + policy engine, shared across the
+  // AI facade, the provider inspection routes (Slice 1), and — as of Slice 2 —
+  // local-first coding routing on the chat + engineer paths.
+  const modelRegistry = buildEngineModelRegistry(env, qualStore);
+  const providerFleet = new FleetRegistry(buildProviderRegistry(), modelRegistry, { probe: makeReachabilityProbe() });
+  const policyEngine = new PolicyEngine();
+  const activePolicy = isExecutionPolicyId(process.env.MIGRAPILOT_EXECUTION_POLICY ?? '') ? (process.env.MIGRAPILOT_EXECUTION_POLICY as ExecutionPolicyId) : DEFAULT_POLICY;
+  const providerRouting: LocalRoutingDeps = { fleet: providerFleet, engine: policyEngine, policy: activePolicy };
+  // Slice 2: coding turns route local-first (cloud NEVER invoked; fallback is
+  // advisory only until Slice 3 adds escalation + consent).
+  registerAiRoutes(app, env, modelRegistry, memoryStore, undefined, qualStore, indexService, providerRouting);
+  // Intelligent Provider Router — Slice 1 (/api/ai/providers): read-only, dry-run
+  // inspection over the SAME fleet + policy engine. Cloud disabled by default.
+  registerProviderRoutes(app, { fleet: providerFleet, engine: policyEngine, defaultPolicy: process.env.MIGRAPILOT_EXECUTION_POLICY });
   // MigraAI Engine capability execution boundary (/api/ai/tools): the engine owns
   // tool validation, availability, dispatch, and the approval lifecycle. Additive
   // — the legacy /tools/* routes remain for compatibility.
@@ -259,7 +265,7 @@ async function main(): Promise<void> {
   // engineering agent (Slice 2). Runs through the SAME tool boundary; never
   // mutates (edit.apply is substituted with preview proposals) and never touches
   // the pilot runtime — disabled delegation cannot block local work.
-  registerEngineerRoutes(app, env, modelRegistry, toolDeps);
+  registerEngineerRoutes(app, env, modelRegistry, toolDeps, undefined, providerRouting);
   // MigraAI Engine agent orchestration (/api/ai/agents): the engine owns the
   // public agent contract; runs execute through the SAME tool boundary + approval
   // store above, so agent tool calls are validated + audited identically.

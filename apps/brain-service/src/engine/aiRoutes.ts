@@ -93,6 +93,19 @@ export function sourcesFromEnv(env: BrainEnv): ProviderSource[] {
   return [{ id: 'local', baseUrl: env.providerBaseUrl, apiKey: env.openAiApiKey }];
 }
 
+/** Build the engine ModelRegistry exactly as {@link registerAiRoutes} would, so a
+ * caller can share ONE registry across the AI facade, the engineer route, and the
+ * provider fleet. */
+export function buildEngineModelRegistry(env: BrainEnv, qualStore?: QualificationStore): ModelRegistry {
+  const real = env.localProvider === 'openai-compat';
+  const qual = qualStore ?? new QualificationStore();
+  return new ModelRegistry(
+    real
+      ? { sources: sourcesFromEnv(env), qualify: (id) => qual.get(id) }
+      : { sources: [], staticModels: [STUB_MODEL], qualify: (id) => qual.get(id) },
+  );
+}
+
 export function registerAiRoutes(
   app: FastifyInstance,
   env: BrainEnv,
