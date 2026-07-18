@@ -48,7 +48,11 @@ export type AuditEventType =
   | 'recovery.applied'
   | 'recovery.validation_completed'
   | 'recovery.completed'
-  | 'recovery.failed';
+  | 'recovery.failed'
+  | 'production.diagnostics.requested'
+  | 'production.diagnostics.completed'
+  | 'production.diagnostics.failed'
+  | 'production.diagnostics.denied';
 
 /** Event types whose loss is security/operationally critical — if these cannot
  * be persisted, the caller must fail closed before starting a new mutation. */
