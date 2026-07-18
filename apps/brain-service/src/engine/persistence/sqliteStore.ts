@@ -15,10 +15,11 @@ import { DatabaseSync } from 'node:sqlite';
 import type {
   ConversationPersistence, MemoryItemPersistence, RagIndexPersistence, EmbeddingCachePersistence,
   DurableStore, PersistenceHealth, PersistedChunk, PersistedIndexRecord,
+  DurableAuditEvent, DurableUsageRecord, DurableIncident, DurableRecoveryEvent, DurableBudgetScope, DurableReservation, OperationalCounts,
 } from './types.js';
 import type { Conversation, Message, Summary, MemoryItem } from '../memory/conversationStore.js';
 
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS schema_meta (key TEXT PRIMARY KEY, value TEXT);
@@ -53,6 +54,35 @@ CREATE TABLE IF NOT EXISTS workspaces (
   git_repo TEXT, git_branch TEXT, memory_mode TEXT, index_id TEXT, provider_preferences TEXT,
   permissions TEXT, last_sync_at INTEGER, created_at INTEGER, updated_at INTEGER);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_ws_scope ON workspaces(owner_scope, workspace_scope);
+
+-- Operational Data Foundation (v2): durable METADATA only (never prompts,
+-- completions, source, diffs, tokens, secrets, or raw paths).
+CREATE TABLE IF NOT EXISTS op_audit_events (
+  event_id TEXT PRIMARY KEY, correlation_id TEXT, causation_id TEXT, seq INTEGER,
+  type TEXT, at INTEGER, duration_ms INTEGER, component TEXT, outcome TEXT, request_id TEXT, fields_json TEXT);
+CREATE INDEX IF NOT EXISTS idx_op_audit_corr ON op_audit_events(correlation_id, seq);
+CREATE INDEX IF NOT EXISTS idx_op_audit_at ON op_audit_events(at);
+CREATE TABLE IF NOT EXISTS op_usage_records (
+  usage_id TEXT PRIMARY KEY, correlation_id TEXT, provider_id TEXT, model_id TEXT,
+  execution_mode TEXT, policy TEXT, local_or_cloud TEXT, at INTEGER, outcome TEXT,
+  cost_usd REAL, cost_status TEXT, escalation_reason TEXT, fields_json TEXT);
+CREATE INDEX IF NOT EXISTS idx_op_usage_at ON op_usage_records(at);
+CREATE INDEX IF NOT EXISTS idx_op_usage_lc ON op_usage_records(local_or_cloud, at);
+CREATE TABLE IF NOT EXISTS op_incidents (
+  incident_id TEXT PRIMARY KEY, dedup_key TEXT, correlation_id TEXT, first_seen_at INTEGER,
+  last_seen_at INTEGER, occurrence_count INTEGER, state TEXT, severity TEXT,
+  affected_json TEXT, last_delivery_status TEXT, resolution_json TEXT);
+CREATE INDEX IF NOT EXISTS idx_op_incident_seen ON op_incidents(last_seen_at);
+CREATE TABLE IF NOT EXISTS op_recovery_events (
+  id TEXT PRIMARY KEY, recovery_id TEXT, correlation_id TEXT, incident_id TEXT,
+  type TEXT, at INTEGER, outcome TEXT, fields_json TEXT);
+CREATE INDEX IF NOT EXISTS idx_op_recovery_at ON op_recovery_events(at);
+CREATE TABLE IF NOT EXISTS op_budget_scopes (
+  scope_id TEXT PRIMARY KEY, kind TEXT, scope_key TEXT, hard_limit_usd REAL,
+  spent_usd REAL, reserved_usd REAL, period_start INTEGER, updated_at INTEGER);
+CREATE TABLE IF NOT EXISTS op_reservations (
+  reservation_id TEXT PRIMARY KEY, amount_usd REAL, scope_ids_json TEXT, correlation_id TEXT,
+  provider_id TEXT, model_id TEXT, created_at INTEGER, expires_at INTEGER, status TEXT);
 `;
 
 function toBlob(vec: number[]): Uint8Array {
@@ -61,6 +91,31 @@ function toBlob(vec: number[]): Uint8Array {
 function fromBlob(buf: Uint8Array): number[] {
   const f = new Float32Array(buf.buffer, buf.byteOffset, Math.floor(buf.byteLength / 4));
   return Array.from(f);
+}
+
+function clampLimit(n: number): number {
+  return Math.max(1, Math.min(Math.floor(n) || 1, 5000));
+}
+// Row shapes + mappers for the operational tables (snake_case → typed record).
+interface AuditRow { event_id: string; correlation_id: string; causation_id: string | null; seq: number; type: string; at: number; duration_ms: number | null; component: string; outcome: string | null; request_id: string | null; fields_json: string }
+interface UsageRow { usage_id: string; correlation_id: string; provider_id: string; model_id: string; execution_mode: string; policy: string; local_or_cloud: string; at: number; outcome: string; cost_usd: number | null; cost_status: string; escalation_reason: string | null; fields_json: string }
+interface IncidentRow { incident_id: string; dedup_key: string; correlation_id: string; first_seen_at: number; last_seen_at: number; occurrence_count: number; state: string; severity: string; affected_json: string; last_delivery_status: string; resolution_json: string | null }
+interface BudgetScopeRow { scope_id: string; kind: string; scope_key: string; hard_limit_usd: number; spent_usd: number; reserved_usd: number; period_start: number; updated_at: number }
+interface ReservationRow { reservation_id: string; amount_usd: number; scope_ids_json: string; correlation_id: string; provider_id: string; model_id: string; created_at: number; expires_at: number; status: string }
+function rowToAudit(r: AuditRow): DurableAuditEvent {
+  return { eventId: r.event_id, correlationId: r.correlation_id, causationId: r.causation_id, seq: r.seq, type: r.type, at: r.at, durationMs: r.duration_ms ?? undefined, component: r.component, outcome: r.outcome ?? undefined, requestId: r.request_id ?? undefined, fieldsJson: r.fields_json };
+}
+function rowToUsage(r: UsageRow): DurableUsageRecord {
+  return { usageId: r.usage_id, correlationId: r.correlation_id, providerId: r.provider_id, modelId: r.model_id, executionMode: r.execution_mode, policy: r.policy, localOrCloud: r.local_or_cloud, at: r.at, outcome: r.outcome, costUsd: r.cost_usd ?? undefined, costStatus: r.cost_status, escalationReason: r.escalation_reason ?? undefined, fieldsJson: r.fields_json };
+}
+function rowToIncident(r: IncidentRow): DurableIncident {
+  return { incidentId: r.incident_id, deduplicationKey: r.dedup_key, correlationId: r.correlation_id, firstSeenAt: r.first_seen_at, lastSeenAt: r.last_seen_at, occurrenceCount: r.occurrence_count, state: r.state, severity: r.severity, affectedJson: r.affected_json, lastDeliveryStatus: r.last_delivery_status, resolutionJson: r.resolution_json ?? undefined };
+}
+function rowToBudgetScope(r: BudgetScopeRow): DurableBudgetScope {
+  return { scopeId: r.scope_id, kind: r.kind, scopeKeyName: r.scope_key, hardLimitUsd: r.hard_limit_usd, spentUsd: r.spent_usd, reservedUsd: r.reserved_usd, periodStart: r.period_start, updatedAt: r.updated_at };
+}
+function rowToReservation(r: ReservationRow): DurableReservation {
+  return { reservationId: r.reservation_id, amountUsd: r.amount_usd, scopeIdsJson: r.scope_ids_json, correlationId: r.correlation_id, providerId: r.provider_id, modelId: r.model_id, createdAt: r.created_at, expiresAt: r.expires_at, status: r.status };
 }
 
 export class SqliteDurableStore implements DurableStore {
@@ -275,6 +330,88 @@ export class SqliteDurableStore implements DurableStore {
   backupTo(destPath: string): void {
     // VACUUM INTO produces a consistent single-file snapshot.
     this.db.exec(`VACUUM INTO '${destPath.replace(/'/g, "''")}'`);
+  }
+
+  // ── OperationalPersistence (v2) ──────────────────────────────────────────────
+
+  appendAuditEvent(e: DurableAuditEvent): void {
+    // Idempotent by eventId — a replayed append is a no-op (never double-counts).
+    this.db.prepare(
+      `INSERT OR IGNORE INTO op_audit_events(event_id,correlation_id,causation_id,seq,type,at,duration_ms,component,outcome,request_id,fields_json)
+       VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
+    ).run(e.eventId, e.correlationId, e.causationId, e.seq, e.type, e.at, e.durationMs ?? null, e.component, e.outcome ?? null, e.requestId ?? null, e.fieldsJson);
+  }
+  recentAuditEvents(limit: number): DurableAuditEvent[] {
+    return (this.db.prepare('SELECT * FROM op_audit_events ORDER BY at DESC, seq DESC LIMIT ?').all(clampLimit(limit)) as unknown as AuditRow[]).map(rowToAudit);
+  }
+  auditByCorrelation(correlationId: string, limit = 500): DurableAuditEvent[] {
+    return (this.db.prepare('SELECT * FROM op_audit_events WHERE correlation_id = ? ORDER BY seq ASC LIMIT ?').all(correlationId, clampLimit(limit)) as unknown as AuditRow[]).map(rowToAudit);
+  }
+
+  appendUsageRecord(r: DurableUsageRecord): void {
+    this.db.prepare(
+      `INSERT OR IGNORE INTO op_usage_records(usage_id,correlation_id,provider_id,model_id,execution_mode,policy,local_or_cloud,at,outcome,cost_usd,cost_status,escalation_reason,fields_json)
+       VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+    ).run(r.usageId, r.correlationId, r.providerId, r.modelId, r.executionMode, r.policy, r.localOrCloud, r.at, r.outcome, r.costUsd ?? null, r.costStatus, r.escalationReason ?? null, r.fieldsJson);
+  }
+  recentUsageRecords(limit: number): DurableUsageRecord[] {
+    return (this.db.prepare('SELECT * FROM op_usage_records ORDER BY at DESC LIMIT ?').all(clampLimit(limit)) as unknown as UsageRow[]).map(rowToUsage);
+  }
+
+  upsertIncident(i: DurableIncident): void {
+    this.db.prepare(
+      `INSERT INTO op_incidents(incident_id,dedup_key,correlation_id,first_seen_at,last_seen_at,occurrence_count,state,severity,affected_json,last_delivery_status,resolution_json)
+       VALUES(?,?,?,?,?,?,?,?,?,?,?)
+       ON CONFLICT(incident_id) DO UPDATE SET last_seen_at=excluded.last_seen_at, occurrence_count=excluded.occurrence_count, state=excluded.state, last_delivery_status=excluded.last_delivery_status, resolution_json=excluded.resolution_json`,
+    ).run(i.incidentId, i.deduplicationKey, i.correlationId, i.firstSeenAt, i.lastSeenAt, i.occurrenceCount, i.state, i.severity, i.affectedJson, i.lastDeliveryStatus, i.resolutionJson ?? null);
+  }
+  listIncidents(limit: number): DurableIncident[] {
+    return (this.db.prepare('SELECT * FROM op_incidents ORDER BY last_seen_at DESC LIMIT ?').all(clampLimit(limit)) as unknown as IncidentRow[]).map(rowToIncident);
+  }
+
+  appendRecoveryEvent(e: DurableRecoveryEvent): void {
+    this.db.prepare(
+      `INSERT OR IGNORE INTO op_recovery_events(id,recovery_id,correlation_id,incident_id,type,at,outcome,fields_json) VALUES(?,?,?,?,?,?,?,?)`,
+    ).run(e.id, e.recoveryId, e.correlationId, e.incidentId ?? null, e.type, e.at, e.outcome ?? null, e.fieldsJson);
+  }
+
+  saveBudgetScope(s: DurableBudgetScope): void {
+    this.db.prepare(
+      `INSERT INTO op_budget_scopes(scope_id,kind,scope_key,hard_limit_usd,spent_usd,reserved_usd,period_start,updated_at)
+       VALUES(?,?,?,?,?,?,?,?)
+       ON CONFLICT(scope_id) DO UPDATE SET hard_limit_usd=excluded.hard_limit_usd, spent_usd=excluded.spent_usd, reserved_usd=excluded.reserved_usd, period_start=excluded.period_start, updated_at=excluded.updated_at`,
+    ).run(s.scopeId, s.kind, s.scopeKeyName, s.hardLimitUsd, s.spentUsd, s.reservedUsd, s.periodStart, s.updatedAt);
+  }
+  loadBudgetScopes(): DurableBudgetScope[] {
+    return (this.db.prepare('SELECT * FROM op_budget_scopes').all() as unknown as BudgetScopeRow[]).map(rowToBudgetScope);
+  }
+  saveReservation(r: DurableReservation): void {
+    this.db.prepare(
+      `INSERT INTO op_reservations(reservation_id,amount_usd,scope_ids_json,correlation_id,provider_id,model_id,created_at,expires_at,status)
+       VALUES(?,?,?,?,?,?,?,?,?)
+       ON CONFLICT(reservation_id) DO UPDATE SET status=excluded.status`,
+    ).run(r.reservationId, r.amountUsd, r.scopeIdsJson, r.correlationId, r.providerId, r.modelId, r.createdAt, r.expiresAt, r.status);
+  }
+  removeReservation(reservationId: string): void {
+    this.db.prepare('DELETE FROM op_reservations WHERE reservation_id = ?').run(reservationId);
+  }
+  loadReservations(): DurableReservation[] {
+    return (this.db.prepare('SELECT * FROM op_reservations').all() as unknown as ReservationRow[]).map(rowToReservation);
+  }
+
+  pruneOperational(cutoffs: { auditBefore: number; usageBefore: number; incidentsBefore: number; recoveryBefore: number }): { audit: number; usage: number; incidents: number; recovery: number } {
+    const del = (sql: string, arg: number): number => Number(this.db.prepare(sql).run(arg).changes ?? 0);
+    return {
+      audit: del('DELETE FROM op_audit_events WHERE at < ?', cutoffs.auditBefore),
+      usage: del('DELETE FROM op_usage_records WHERE at < ?', cutoffs.usageBefore),
+      // Only resolved incidents past the cutoff are pruned — open incidents persist.
+      incidents: del("DELETE FROM op_incidents WHERE last_seen_at < ? AND state = 'resolved'", cutoffs.incidentsBefore),
+      recovery: del('DELETE FROM op_recovery_events WHERE at < ?', cutoffs.recoveryBefore),
+    };
+  }
+  operationalCounts(): OperationalCounts {
+    const c = (t: string): number => (this.db.prepare(`SELECT count(*) c FROM ${t}`).get() as { c: number }).c;
+    return { auditEvents: c('op_audit_events'), usageRecords: c('op_usage_records'), incidents: c('op_incidents'), recoveryEvents: c('op_recovery_events'), reservations: c('op_reservations') };
   }
 
   private tx(fn: () => void): void {
