@@ -47,6 +47,7 @@ import { ConversationStore } from './engine/memory/conversationStore.js';
 import { QualificationStore } from './engine/qualificationStore.js';
 import { SqliteDurableStore } from './engine/persistence/sqliteStore.js';
 import { wireOperationalPersistence } from './engine/persistence/operationalBridge.js';
+import { OperationalMaintenance, DEFAULT_RETENTION } from './engine/persistence/operationalMaintenance.js';
 import { auditStore } from './engine/auditLog.js';
 import { incidentManager } from './engine/incidents.js';
 import { engineVersion } from './engine/version.js';
@@ -67,6 +68,9 @@ const providerRegistry = new ProviderRegistry(env);
  * memory/indexes do NOT silently appear empty-as-ready. */
 let durable: SqliteDurableStore | undefined;
 let durableError: string | undefined;
+/** Operational retention + integrity + health (ODF Slice 1). Present only when a
+ * durable store is present; owns the retention worker + shutdown of it. */
+let opMaintenance: OperationalMaintenance | undefined;
 
 /* ── Production-safe CORS origins ── */
 const ALLOWED_ORIGINS = [
@@ -150,7 +154,10 @@ async function getHealth(): Promise<HealthResponse> {
     },
     // Precise compatibility contract for clients (see GET /api/ai/version).
     engine: engineVersion(persistence.schemaVersion),
-  } as HealthResponse & { readiness: unknown; engine: unknown };
+    // Operational Data Foundation (Slice 1): durable operational evidence health —
+    // reachable, schema-current, integrity, retention worker, write latency, storage.
+    operational: opMaintenance ? opMaintenance.health() : { status: memoryDisabled ? 'disabled' : 'unavailable' },
+  } as HealthResponse & { readiness: unknown; engine: unknown; operational: unknown };
 }
 
 function checkBudget(input: BudgetCheckRequest): BudgetCheckResponse {
@@ -276,6 +283,16 @@ async function main(): Promise<void> {
   if (durable) {
     wireOperationalPersistence(durable, { auditStore, usageLedger, incidentManager, budgetManager });
     app.log.info('Operational persistence WIRED (audit/usage/incidents/budget durable across restarts).');
+    // Retention + integrity + health. Verify integrity on startup (reported via
+    // health, never a crash — the engine continues with whatever survived), then
+    // start the age-based retention worker.
+    opMaintenance = new OperationalMaintenance(durable, DEFAULT_RETENTION, () => Date.now(), dbPath);
+    const integrity = opMaintenance.verifyIntegrity();
+    if (integrity !== 'ok') app.log.error({ integrity }, 'durable operational store integrity check FAILED — continuing in degraded state');
+    opMaintenance.start();
+    app.log.info('Operational retention worker STARTED (age-based; open incidents never pruned).');
+    // Shutdown: stop the retention worker + close the durable store cleanly.
+    app.addHook('onClose', async () => { opMaintenance?.close(); durable?.close(); });
   }
   const cloudMaxOutputTokens = Number(process.env.MIGRAPILOT_CLOUD_MAX_OUTPUT_TOKENS ?? 2000) || 2000;
   const escalation = new EscalationController(new EscalationOfferStore(), new CloudEscalationExecutor(), providerFleet, providerRegistry, pricingBook, budgetManager, usageLedger, cloudMaxOutputTokens);
@@ -399,6 +416,19 @@ async function canReuseExistingServer(error: unknown): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+/* ── Graceful shutdown ── close Fastify (runs the onClose hook: stops the
+ * retention worker + closes the durable store cleanly, so durable state is
+ * flushed and not left mid-write on a restart). ── */
+let shuttingDown = false;
+for (const signal of ['SIGTERM', 'SIGINT'] as const) {
+  process.on(signal, () => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    app.log.info({ signal }, 'Shutting down MigraPilot brain — closing durable store');
+    void app.close().finally(() => process.exit(0));
+  });
 }
 
 /* ── Crash safety ── */

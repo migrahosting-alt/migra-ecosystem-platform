@@ -326,6 +326,15 @@ export class SqliteDurableStore implements DurableStore {
     return rows[0]?.integrity_check ?? 'unknown';
   }
 
+  /** Time a real (idempotent) write to gauge durable write latency. Uses a
+   * dedicated schema_meta heartbeat key — never touches operational data. Timed
+   * with a monotonic clock so it is independent of any injected wall clock. */
+  probeWriteLatencyMs(): number {
+    const t0 = process.hrtime.bigint();
+    this.db.prepare('INSERT INTO schema_meta(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').run('op_heartbeat', 'ping');
+    return Number(process.hrtime.bigint() - t0) / 1e6;
+  }
+
   /** Online backup to a file path (safe while the engine runs). */
   backupTo(destPath: string): void {
     // VACUUM INTO produces a consistent single-file snapshot.
