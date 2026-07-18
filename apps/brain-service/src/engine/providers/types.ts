@@ -61,6 +61,9 @@ export interface Provider {
   baseUrl?: string;
   /** ENV VAR NAME supplying the credential (never the value). Absent for local. */
   credentialEnv?: string;
+  /** Configured model id to use when this provider has no discovered catalog
+   * (cloud providers). Used as the escalation target model. */
+  defaultModel?: string;
   capabilities: ProviderCapabilities;
   /** Preference weight within a tie (higher = preferred). Policies may override. */
   priority: number;
@@ -84,6 +87,7 @@ export interface ProviderSummary {
   dataLocality: DataLocality;
   enabled: boolean;
   credentialEnv?: string;
+  defaultModel?: string;
   /** True when the referenced env var is present — never the value itself. */
   hasCredential: boolean;
   health: ProviderHealth;

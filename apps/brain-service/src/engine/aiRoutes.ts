@@ -26,6 +26,7 @@ import { retrieveContext } from '../retrieval/retrieve.js';
 import { ModelRegistry, type ModelDescriptor, type ProviderSource } from './modelRegistry.js';
 import { selectModel, tierFromHints, type RouteSpec } from './capabilityRouter.js';
 import { selectLocalCoding, type LocalRoutingDeps } from './providers/localCodingRouter.js';
+import type { EscalationController } from './providers/escalationController.js';
 import { QualificationStore } from './qualificationStore.js';
 import { ConversationStore, type Scope } from './memory/conversationStore.js';
 import { buildContext, type ContextDiagnostics } from './memory/contextBuilder.js';
@@ -118,6 +119,9 @@ export function registerAiRoutes(
    * restricted to local models; never invokes cloud) with a fallback signal.
    * Absent → chat selection is unchanged. */
   providerRouting?: LocalRoutingDeps,
+  /** Slice 3: when provided, a CODING chat turn that fails locally with a DEFINED
+   * reason may mint a cloud-escalation OFFER (no cloud call here). */
+  escalation?: EscalationController,
 ): ModelRegistry {
   const real = env.localProvider === 'openai-compat';
   const qual = qualStore ?? new QualificationStore();
@@ -316,6 +320,16 @@ export function registerAiRoutes(
       } catch (error) {
         request.log.warn({ model: candidate.id, err: errText(error) }, 'ai/chat model failed; trying next');
         failed.push(candidate.id);
+      }
+    }
+    // Slice 3 — every LOCAL candidate failed. For a coding turn, a defined reason
+    // (LOCAL_MALFORMED_OUTPUT) may mint a cloud-escalation OFFER (no cloud call
+    // here; approval is a separate /escalation/approve request). Impossible under
+    // local-only / privacy.
+    if (spec.preferCoding && providerRouting && escalation) {
+      const off = await escalation.offer({ correlationId: requestId, policy: providerRouting.policy, outcome: { hadLocalModel: true, terminal: 'failed', output: '', errorMessage: 'local completion failed' }, request: chatRequest, requiredCaps: { coding: true, vision: spec.needsVision, tools: spec.needsTools } });
+      if (off.offered) {
+        return { ok: false, code: 'LOCAL_COMPLETION_FAILED', failedOver: failed, escalationOffer: { offerId: off.offerId, token: off.token, reason: off.reason, target: off.target, estCostUsd: off.estCostUsd, expiresAt: off.expiresAt, request: chatRequest } };
       }
     }
     reply.code(502);

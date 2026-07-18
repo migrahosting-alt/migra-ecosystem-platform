@@ -62,6 +62,7 @@ export class ProviderRegistry {
       dataLocality: p.dataLocality,
       enabled: p.enabled,
       credentialEnv: p.credentialEnv,
+      defaultModel: p.defaultModel,
       hasCredential: this.hasCredential(p),
       health: healthById.get(p.id) ?? { status: p.enabled ? 'unknown' : 'disabled', reachable: false, lastCheckedAt: null },
     }));

@@ -11,6 +11,8 @@ import type { ModelRegistry, ModelDescriptor } from './modelRegistry.js';
 import { selectModel, tierFromHints } from './capabilityRouter.js';
 import { selectLocalCoding, type LocalRoutingDeps } from './providers/localCodingRouter.js';
 import { assessCodingOutcome } from './providers/codingAssessment.js';
+import type { EscalationController } from './providers/escalationController.js';
+import type { ChatTurnRequest } from '@migrapilot/shared-types';
 import { StubProvider, type ProviderAdapter } from '../providers/providerRegistry.js';
 import { OpenAiCompatProvider } from '../providers/openAiCompatProvider.js';
 import { executeToolCore, type ToolExecDeps } from './toolExecutor.js';
@@ -81,6 +83,10 @@ export function registerEngineerRoutes(
    * LOCAL model under the active policy (never invokes cloud). Absent → the prior
    * capability-router selection is used unchanged. */
   providerRouting?: LocalRoutingDeps,
+  /** Slice 3: when provided, a local coding failure with a DEFINED reason may mint
+   * a cloud-escalation OFFER (no cloud call here — approval is a separate request).
+   * Requires providerRouting for the active policy. */
+  escalation?: EscalationController,
 ): void {
   const real = env.localProvider === 'openai-compat';
   const providerFor = (model: ModelDescriptor): ProviderAdapter => {
@@ -234,13 +240,25 @@ export function registerEngineerRoutes(
     // engineer selects the highest-ranked eligible LOCAL model under the active
     // policy and NEVER invokes cloud; if the policy would prefer cloud (or no
     // local model qualifies) it records fallbackRecommended (advisory only).
+    // The normalized coding request used to bind + re-run an escalation (Slice 3).
+    const escRequest: ChatTurnRequest = { feature: 'chat', modelProfile: 'default', systemPromptId: 'engineer-v1', userPrompt: body.task, context: {}, outputMode: 'markdown' };
     let decision: { model: ModelDescriptor; reason: string };
     let routing: { policy?: string; fallbackRecommended: boolean; fallbackReasons: string[] } = { fallbackRecommended: false, fallbackReasons: [] };
     if (providerRouting) {
       const local = await selectLocalCoding(providerRouting, { preferCoding: true, needsTools: true, tier: tierFromHints({ tier: body.tier }) });
       routing = { policy: local.policy, fallbackRecommended: local.fallbackRecommended, fallbackReasons: local.fallbackReasons };
       if (!local.localModel) {
-        // No local model, and cloud is not invoked in this slice → fail closed.
+        // No local model. Slice 3: a DEFINED reason (LOCAL_UNSUPPORTED_CAPABILITY)
+        // may mint a cloud-escalation OFFER — but no cloud is called here (approval
+        // is a separate request). Impossible under local-only / privacy.
+        if (escalation) {
+          const off = await escalation.offer({ correlationId, policy: providerRouting.policy, outcome: { hadLocalModel: false, terminal: 'failed', output: '' }, request: escRequest, requiredCaps: { coding: true } });
+          if (off.offered) {
+            stage.log('route', { escalationOffered: true, reason: off.reason });
+            reply.code(200);
+            return { ok: false, code: 'LOCAL_UNSUPPORTED_CAPABILITY', fallbackRecommended: true, escalationOffer: { offerId: off.offerId, token: off.token, reason: off.reason, target: off.target, estCostUsd: off.estCostUsd, expiresAt: off.expiresAt, request: escRequest } };
+          }
+        }
         stage.log('error', { code: 'NO_LOCAL_MODEL' });
         reply.code(503);
         return { ok: false, code: 'NO_LOCAL_MODEL', error: 'No local model available for the engineer loop; cloud fallback is recommended but not enabled in this slice.', fallbackRecommended: true, fallbackReasons: local.fallbackReasons };
@@ -340,12 +358,24 @@ export function registerEngineerRoutes(
       auditStore.append({ correlationId, type: 'execution.failed', component: 'engineer', outcome: 'error' });
     }
     // Slice 2 — advisory fallback signal: policy-preferred-cloud OR a low-quality
-    // local outcome. NEVER triggers cloud in this slice (Slice 3 adds escalation).
+    // local outcome.
     const assessment = assessCodingOutcome({ output: finalText, failed: terminal === 'failed' });
     const fallbackRecommended = routing.fallbackRecommended || assessment.fallbackRecommended;
+    // Slice 3 — on a genuine local FAILURE with a defined reason, mint a cloud
+    // escalation OFFER (no cloud call; approval is a separate /escalation/approve
+    // request). Impossible under local-only / privacy; only defined reasons qualify.
+    let escalationOffer: Record<string, unknown> | undefined;
+    if (escalation && providerRouting && terminal === 'failed') {
+      const off = await escalation.offer({ correlationId, policy: providerRouting.policy, outcome: { hadLocalModel: true, terminal: 'failed', output: finalText, errorMessage: 'local engineer loop failed' }, request: escRequest, requiredCaps: { coding: true } });
+      if (off.offered) {
+        escalationOffer = { offerId: off.offerId, token: off.token, reason: off.reason, target: off.target, estCostUsd: off.estCostUsd, expiresAt: off.expiresAt, request: escRequest };
+        send('escalation_offer', escalationOffer);
+      }
+    }
     send('done', {
       correlationId,
       routing: { policy: routing.policy, model: decision.model.id, providerId: decision.model.provider, fallbackRecommended, reasons: [...routing.fallbackReasons, ...assessment.reasons] },
+      ...(escalationOffer ? { escalationOffer } : {}),
     });
     raw.end();
   });

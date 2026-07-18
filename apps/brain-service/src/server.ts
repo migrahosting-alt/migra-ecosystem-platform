@@ -29,6 +29,10 @@ import { PolicyEngine, DEFAULT_POLICY, isExecutionPolicyId, type ExecutionPolicy
 import { makeReachabilityProbe } from './engine/providers/health.js';
 import { buildEngineModelRegistry } from './engine/aiRoutes.js';
 import type { LocalRoutingDeps } from './engine/providers/localCodingRouter.js';
+import { EscalationController } from './engine/providers/escalationController.js';
+import { EscalationOfferStore } from './engine/providers/escalationStore.js';
+import { CloudEscalationExecutor } from './engine/providers/cloudEscalationExecutor.js';
+import { registerEscalationRoutes } from './engine/providers/escalationRoutes.js';
 import { AgentRegistry } from './engine/agentRegistry.js';
 import { AgentService } from './engine/agentRuntime.js';
 import { AgentRunStore } from './engine/agentRunStore.js';
@@ -245,13 +249,21 @@ async function main(): Promise<void> {
   // AI facade, the provider inspection routes (Slice 1), and — as of Slice 2 —
   // local-first coding routing on the chat + engineer paths.
   const modelRegistry = buildEngineModelRegistry(env, qualStore);
-  const providerFleet = new FleetRegistry(buildProviderRegistry(), modelRegistry, { probe: makeReachabilityProbe() });
+  const providerRegistry = buildProviderRegistry();
+  const providerFleet = new FleetRegistry(providerRegistry, modelRegistry, { probe: makeReachabilityProbe() });
   const policyEngine = new PolicyEngine();
   const activePolicy = isExecutionPolicyId(process.env.MIGRAPILOT_EXECUTION_POLICY ?? '') ? (process.env.MIGRAPILOT_EXECUTION_POLICY as ExecutionPolicyId) : DEFAULT_POLICY;
   const providerRouting: LocalRoutingDeps = { fleet: providerFleet, engine: policyEngine, policy: activePolicy };
-  // Slice 2: coding turns route local-first (cloud NEVER invoked; fallback is
-  // advisory only until Slice 3 adds escalation + consent).
-  registerAiRoutes(app, env, modelRegistry, memoryStore, undefined, qualStore, indexService, providerRouting);
+  // Slice 3 — cloud escalation control plane. Two-step approval-gated: a local
+  // coding failure with a DEFINED reason may mint an offer; a separate approve
+  // call runs exactly ONE attributed cloud attempt. Impossible under local-only /
+  // privacy; cloud disabled by default. Budget cap per request (Slice 4 extends).
+  const cloudBudgetCapUsd = Number(process.env.MIGRAPILOT_CLOUD_MAX_COST_PER_REQUEST_USD ?? 1) || 1;
+  const escalation = new EscalationController(new EscalationOfferStore(), new CloudEscalationExecutor(), providerFleet, providerRegistry, cloudBudgetCapUsd);
+  registerEscalationRoutes(app, escalation);
+  // Slice 2: coding turns route local-first (cloud NEVER invoked inline). Slice 3
+  // adds the offer path (still no inline cloud — approval is a separate call).
+  registerAiRoutes(app, env, modelRegistry, memoryStore, undefined, qualStore, indexService, providerRouting, escalation);
   // Intelligent Provider Router — Slice 1 (/api/ai/providers): read-only, dry-run
   // inspection over the SAME fleet + policy engine. Cloud disabled by default.
   registerProviderRoutes(app, { fleet: providerFleet, engine: policyEngine, defaultPolicy: process.env.MIGRAPILOT_EXECUTION_POLICY });
@@ -265,7 +277,7 @@ async function main(): Promise<void> {
   // engineering agent (Slice 2). Runs through the SAME tool boundary; never
   // mutates (edit.apply is substituted with preview proposals) and never touches
   // the pilot runtime — disabled delegation cannot block local work.
-  registerEngineerRoutes(app, env, modelRegistry, toolDeps, undefined, providerRouting);
+  registerEngineerRoutes(app, env, modelRegistry, toolDeps, undefined, providerRouting, escalation);
   // MigraAI Engine agent orchestration (/api/ai/agents): the engine owns the
   // public agent contract; runs execute through the SAME tool boundary + approval
   // store above, so agent tool calls are validated + audited identically.
