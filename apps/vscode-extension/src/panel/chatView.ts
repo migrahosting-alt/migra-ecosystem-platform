@@ -1525,25 +1525,56 @@ export class MigraPilotChatViewProvider implements vscode.WebviewViewProvider {
         return html;
       }
 
+      /** Resilient clipboard write. In a VS Code webview the async Clipboard API
+       * frequently REJECTS (the iframe lacks clipboard-write permission / transient
+       * activation), and the old code had no catch, so copy silently did nothing.
+       * Try the async API, then fall back to a hidden-textarea execCommand copy.
+       * Returns a Promise<boolean> for success. */
+      function copyToClipboard(text) {
+        text = text == null ? '' : String(text);
+        const fallback = () => {
+          try {
+            const ta = document.createElement('textarea');
+            ta.value = text;
+            ta.setAttribute('readonly', '');
+            ta.style.position = 'fixed';
+            ta.style.top = '-1000px';
+            ta.style.opacity = '0';
+            document.body.appendChild(ta);
+            ta.select();
+            ta.setSelectionRange(0, text.length);
+            const ok = document.execCommand('copy');
+            document.body.removeChild(ta);
+            return ok;
+          } catch (e) {
+            return false;
+          }
+        };
+        try {
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            return navigator.clipboard.writeText(text).then(() => true, () => fallback());
+          }
+        } catch (e) { /* fall through */ }
+        return Promise.resolve(fallback());
+      }
+
       /** Copy code block content */
       window.copyCode = function(btn) {
         const pre = btn.parentElement;
         const code = pre.querySelector('code');
-        if (code) {
-          navigator.clipboard.writeText(code.textContent).then(() => {
-            btn.textContent = 'Copied!';
-            setTimeout(() => { btn.textContent = 'Copy'; }, 1500);
-          });
-        }
+        if (!code) return;
+        copyToClipboard(code.textContent).then((ok) => {
+          btn.textContent = ok ? 'Copied!' : 'Copy failed';
+          setTimeout(() => { btn.textContent = 'Copy'; }, 1500);
+        });
       };
 
       // ── Enterprise: Message action callbacks ──
       window.copyMsg = function(idx) {
-        if (messages[idx]) {
-          navigator.clipboard.writeText(messages[idx].text).then(() => {
-            vscode.postMessage({ type: 'info', text: 'Message copied to clipboard' });
-          });
-        }
+        if (!messages[idx]) return;
+        copyToClipboard(messages[idx].text).then((ok) => {
+          vscode.postMessage({ type: 'info', text: ok ? 'Message copied to clipboard' : 'Copy failed — clipboard unavailable' });
+        });
       };
       window.toggleReactPicker = function(idx) {
         const existing = document.getElementById('react-picker-' + idx);
