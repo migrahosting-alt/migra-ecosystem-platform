@@ -7,7 +7,7 @@ import { test } from 'node:test';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { retrieveContext } from '../src/retrieval/retrieve.js';
+import { retrieveContext, salientTermsWeighted } from '../src/retrieval/retrieve.js';
 
 function tmpWorkspace(): string {
   const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'migra-retrieve-')));
@@ -19,6 +19,77 @@ function tmpWorkspace(): string {
   fs.writeFileSync(path.join(dir, 'src', 'noise.ts'), 'export const unrelated = 1;\n');
   return dir;
 }
+
+test('salientTermsWeighted ranks identifiers above generic words and drops filler', () => {
+  const terms = salientTermsWeighted('What does computeInvoiceTotal do? Cite the file.');
+  assert.equal(terms[0]?.term, 'computeInvoiceTotal', 'the identifier is the top term');
+  assert.ok(terms[0]!.weight >= 3, 'identifier weight is high');
+  const words = terms.map((t) => t.term.toLowerCase());
+  for (const filler of ['cite', 'file', 'does', 'what', 'the']) {
+    assert.ok(!words.includes(filler), `filler word "${filler}" must be dropped`);
+  }
+});
+
+test('salientTermsWeighted inherits the subject identifier from prior conversation', () => {
+  // A subject-less follow-up: no identifier of its own.
+  const bare = salientTermsWeighted('What operations does it support?');
+  assert.ok(!bare.some((t) => t.term === 'registerInspectRoutes'), 'no subject without context');
+  // With prior context, the earlier identifier is inherited and ranks top.
+  const withCtx = salientTermsWeighted('What operations does it support?', 'user: What does registerInspectRoutes do?');
+  assert.equal(withCtx[0]?.term, 'registerInspectRoutes', 'follow-up anchors on the prior subject');
+  // But a generic word from history is NOT inherited (only identifiers).
+  const noGeneric = salientTermsWeighted('summarize this', 'the operations were interesting and colorful');
+  assert.ok(!noGeneric.some((t) => t.term === 'operations'), 'generic history words are not inherited');
+});
+
+test('retrieveContext ranks the DEFINING file first and captures its body', async () => {
+  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'migra-retrieve-def-')));
+  fs.mkdirSync(path.join(dir, 'src'));
+  // The definition + body (what actually answers "what does X do").
+  fs.writeFileSync(
+    path.join(dir, 'src', 'inspect.ts'),
+    ['// header', 'export function registerInspectRoutes(app) {', "  app.post('/api/ai/inspect', handler);", '  return app;', '}', ''].join('\n'),
+  );
+  // A different file that only CALLS it (a reference, not a definition).
+  fs.writeFileSync(path.join(dir, 'src', 'server.ts'), ['import { registerInspectRoutes } from "./inspect";', 'registerInspectRoutes(app);', ''].join('\n'));
+
+  const res = await retrieveContext({ query: 'What does registerInspectRoutes do? Cite the file.', workspaceRoot: dir, feature: 'chat', maxChunks: 6 });
+  const grep = res.chunks.filter((c) => c.source === 'grep');
+  assert.ok(grep.length >= 1, 'at least one grep chunk');
+  assert.ok(grep[0]!.path.endsWith('inspect.ts'), 'the DEFINING file ranks first, not the caller');
+  assert.match(grep[0]!.snippet, /app\.post\('\/api\/ai\/inspect'/, 'the snippet captures the function BODY, not just the signature');
+});
+
+test('retrieveContext finds the function definition even when schemas/types crowd the name', async () => {
+  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'migra-retrieve-crowd-')));
+  fs.mkdirSync(path.join(dir, 'src'));
+  fs.mkdirSync(path.join(dir, 'types'));
+  // The real implementation.
+  fs.writeFileSync(path.join(dir, 'src', 'compute.ts'), ['export function computeThing(x: number) {', '  return x * 2;', '}', ''].join('\n'));
+  // Many files sharing the substring but NOT defining the function.
+  fs.writeFileSync(path.join(dir, 'types', 'schema.ts'), ['export const ComputeThingSchema = 1;', 'export interface ComputeThingRequest {}', 'export type ComputeThingResponse = number;', ''].join('\n'));
+  fs.writeFileSync(path.join(dir, 'types', 'more.ts'), 'export const AlsoComputeThingThing = 2;\n');
+
+  const res = await retrieveContext({ query: 'What does computeThing do? Cite the file.', workspaceRoot: dir, feature: 'chat', maxChunks: 6 });
+  const grep = res.chunks.filter((c) => c.source === 'grep');
+  assert.ok(grep[0]!.path.endsWith('compute.ts'), 'the function-DEFINING file ranks first, not the schema/type files');
+  assert.match(grep[0]!.snippet, /function computeThing/);
+});
+
+test('retrieveContext drops noise files that only matched a generic word', async () => {
+  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'migra-retrieve-noise-')));
+  fs.mkdirSync(path.join(dir, 'src'));
+  // The real answer: defines the distinctive identifier.
+  fs.writeFileSync(path.join(dir, 'src', 'auth.ts'), ['export function verifyAuthToken() {', '  return true; // cite', '}', ''].join('\n'));
+  // Noise: contains the generic word "cite" but NOT the identifier.
+  fs.writeFileSync(path.join(dir, 'src', 'unrelated1.ts'), 'const x = 1; // please cite this\n');
+  fs.writeFileSync(path.join(dir, 'src', 'unrelated2.ts'), 'const y = 2; // cite me too\n');
+
+  const res = await retrieveContext({ query: 'What does verifyAuthToken do? Cite the file.', workspaceRoot: dir, feature: 'chat', maxChunks: 6 });
+  const grep = res.chunks.filter((c) => c.source === 'grep').map((c) => path.basename(c.path));
+  assert.ok(grep.includes('auth.ts'), 'the file defining the identifier is retrieved');
+  assert.ok(!grep.includes('unrelated1.ts') && !grep.includes('unrelated2.ts'), 'generic-word-only noise files are dropped');
+});
 
 test('retrieveContext returns real workspace snippets grounded on the query term', async () => {
   const dir = tmpWorkspace();

@@ -60,7 +60,11 @@ import { OllamaEmbedder, CachedEmbedder, FakeEmbedder } from './engine/rag/embed
 import { registerRagRoutes } from './engine/rag/ragRoutes.js';
 import path from 'node:path';
 
-const app = Fastify({ logger: true });
+// A code assistant's chat/retrieve requests legitimately carry large payloads —
+// multi-file context, retrieved snippets, and base64 VISION image attachments —
+// which routinely exceed Fastify's 1 MB default (surfacing as a confusing
+// 413→500 on /chat). Raise the ceiling to comfortably fit image attachments.
+const app = Fastify({ logger: true, bodyLimit: 32 * 1024 * 1024 });
 const startedAt = Date.now();
 const env = readEnv();
 const providerRegistry = new ProviderRegistry(env);
