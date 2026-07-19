@@ -182,14 +182,17 @@ export async function retrieveContext(input: RetrieveRequest): Promise<RetrieveR
     });
 
     const alreadyHave = new Set(chunks.map((c) => c.path));
-    const candidates: Array<{ chunk: RetrievedChunk; isDef: boolean; score: number; rank: number }> = [];
+    const candidates: Array<{ chunk: RetrievedChunk; isDef: boolean; isTest: boolean; score: number; rank: number }> = [];
     for (const [relPath, info] of preRanked.slice(0, Math.max(maxChunks * 2, 8))) {
       if (alreadyHave.has(path.resolve(input.workspaceRoot, relPath))) continue;
       const built = await readWindow(input.workspaceRoot, relPath, [...info.lines], info.bestTerm, info.score, topWeight);
-      if (built) candidates.push({ chunk: built.chunk, isDef: built.isDef, score: info.score, rank: sourceRank(relPath) });
+      if (built) candidates.push({ chunk: built.chunk, isDef: built.isDef, isTest: isTestFile(relPath), score: info.score, rank: sourceRank(relPath) });
     }
-    // Definition first, then weighted score, then source-kind.
+    // REAL source before test fixtures (a `function foo` inside a *.test.ts is
+    // fixture data, not the answer to "what does foo do"), then definition-first,
+    // then weighted score, then source-kind.
     candidates.sort((a, b) => {
+      if (a.isTest !== b.isTest) return a.isTest ? 1 : -1;
       if (a.isDef !== b.isDef) return a.isDef ? -1 : 1;
       if (b.score !== a.score) return b.score - a.score;
       return a.rank - b.rank;
@@ -207,6 +210,11 @@ export async function retrieveContext(input: RetrieveRequest): Promise<RetrieveR
     chunks,
     tokenEstimate: chunks.reduce((n, c) => n + Math.ceil(c.snippet.length / 4), 0),
   };
+}
+
+/** Test/spec/fixture files — their inline code is fixture data, not the answer. */
+function isTestFile(relPath: string): boolean {
+  return /(\.(test|spec)\.[jt]sx?$)|(^|[\\/])(tests?|__tests__|__mocks__|fixtures?)[\\/]/i.test(relPath);
 }
 
 /** Lower rank = preferred. Source code beats config/data/docs. */
