@@ -63,6 +63,13 @@ test('the inspection plan maps prompts to concrete read-only ops', () => {
   assert.equal(buildInspectionPlan('find files named config.ts').find((s) => s.op === 'find')?.kind, 'file');
   assert.ok(buildInspectionPlan('search for the text TODO inside the code').some((s) => s.op === 'search'), 'explicit content search maps to `search`');
   assert.equal(buildInspectionPlan('which package manager does this repo use?')[0]!.op, 'pkg_manager');
+  // list sub-path: real paths are captured; English idioms after "in" are NOT
+  // mistaken for a directory (regression: "in accordance" → list[accordance]).
+  assert.equal(buildInspectionPlan('list files under src').find((s) => s.op === 'list')?.path, 'src');
+  assert.equal(buildInspectionPlan('list files inside apps/api/src').find((s) => s.op === 'list')?.path, 'apps/api/src');
+  const idiom = buildInspectionPlan('list the api modules in accordance with the spec').find((s) => s.op === 'list');
+  assert.equal(idiom?.path, undefined, 'an "in accordance" idiom must not become a bogus list sub-path');
+  assert.equal(buildInspectionPlan('list files in general and check the modules').find((s) => s.op === 'list')?.path, undefined);
   // A generic inspection never yields an empty plan.
   assert.ok(buildInspectionPlan('inspect the workspace').length >= 1);
 });
