@@ -76,6 +76,19 @@ test('retrieveContext finds the function definition even when schemas/types crow
   assert.match(grep[0]!.snippet, /function computeThing/);
 });
 
+test('retrieveContext ranks REAL source above a test file that has the same symbol', async () => {
+  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'migra-retrieve-test-')));
+  fs.mkdirSync(path.join(dir, 'src'));
+  fs.mkdirSync(path.join(dir, 'test'));
+  fs.writeFileSync(path.join(dir, 'src', 'auth.ts'), ['export function verifyBadge(x: string) {', '  return x.length > 0;', '}', ''].join('\n'));
+  // A test file whose fixture literal defines the same symbol — must NOT outrank real source.
+  fs.writeFileSync(path.join(dir, 'test', 'auth.test.ts'), ["fs.writeFileSync('f', 'export function verifyBadge(x) { return true; }');", 'assert.ok(verifyBadge);', ''].join('\n'));
+
+  const res = await retrieveContext({ query: 'What does verifyBadge do? Cite the file.', workspaceRoot: dir, feature: 'chat', maxChunks: 6 });
+  const grep = res.chunks.filter((c) => c.source === 'grep');
+  assert.ok(grep[0]!.path.endsWith('src/auth.ts'), 'real source ranks first, not the test fixture');
+});
+
 test('retrieveContext drops noise files that only matched a generic word', async () => {
   const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'migra-retrieve-noise-')));
   fs.mkdirSync(path.join(dir, 'src'));
