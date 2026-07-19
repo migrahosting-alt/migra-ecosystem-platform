@@ -211,12 +211,18 @@ export class OpenAiCompatProvider implements ProviderAdapter {
     request: ChatTurnRequest,
     images: ReadonlyArray<{ name: string; mimeType: string; dataBase64: string }>,
   ): ChatMessage[] {
+    const hasWorkspaceContext =
+      (request.context.retrievedChunks?.length ?? 0) > 0 || Boolean(request.context.selectionText);
+
     const parts: ChatMessage[] = [];
     parts.push({
       role: 'system',
       content:
         'You are MigraPilot, a workspace-aware coding assistant. Answer concisely and use Markdown. ' +
         `Task feature: ${request.feature}.` +
+        (hasWorkspaceContext
+          ? ' Workspace code is provided below as evidence. Ground your answer in that code — cite the source as `path:line` when you state a repository fact, and do NOT invent APIs, files, or behaviour. If the provided evidence does not answer the question, say so plainly instead of guessing.'
+          : '') +
         (images.length ? ' The user attached one or more images — analyze them and answer about their contents.' : ''),
     });
 
