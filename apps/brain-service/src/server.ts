@@ -17,6 +17,7 @@ import { decideRoute } from './router/policy.js';
 import { registerToolRoutes } from './tools/index.js';
 import { registerAiRoutes } from './engine/aiRoutes.js';
 import { registerToolExecutionRoutes } from './engine/toolRoutes.js';
+import { registerInspectRoutes } from './engine/inspectRoutes.js';
 import { registerEngineerRoutes } from './engine/engineerRoutes.js';
 import { telemetryHub } from './engine/telemetryHub.js';
 import { registerAgentRoutes } from './engine/agentRoutes.js';
@@ -212,6 +213,11 @@ async function main(): Promise<void> {
   app.post<{ Body: ChatTurnRequest }>('/chat', async (request) => handleChat(request.body));
   app.post<{ Body: BudgetCheckRequest }>('/budget/check', async (request) => checkBudget(request.body));
   registerToolRoutes(app);
+  // Read-only workspace inspection (model-free local runner): lets the chat answer
+  // "workspace root / list / search / read / git status·branch·head·remotes /
+  // package manager" with real evidence instead of a false "can't access local"
+  // refusal. Read-only + workspace-contained + typed errors.
+  registerInspectRoutes(app);
   // ── Durable state (MigraAI Durable State): embedded SQLite adapter. Fail-
   // closed — if the DB can't open or the schema is incompatible, `durable` stays
   // undefined and /health reports persistence degraded/unavailable rather than
