@@ -48,6 +48,22 @@ test('retrieveContext ranks the DEFINING file first and captures its body', asyn
   assert.match(grep[0]!.snippet, /app\.post\('\/api\/ai\/inspect'/, 'the snippet captures the function BODY, not just the signature');
 });
 
+test('retrieveContext finds the function definition even when schemas/types crowd the name', async () => {
+  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'migra-retrieve-crowd-')));
+  fs.mkdirSync(path.join(dir, 'src'));
+  fs.mkdirSync(path.join(dir, 'types'));
+  // The real implementation.
+  fs.writeFileSync(path.join(dir, 'src', 'compute.ts'), ['export function computeThing(x: number) {', '  return x * 2;', '}', ''].join('\n'));
+  // Many files sharing the substring but NOT defining the function.
+  fs.writeFileSync(path.join(dir, 'types', 'schema.ts'), ['export const ComputeThingSchema = 1;', 'export interface ComputeThingRequest {}', 'export type ComputeThingResponse = number;', ''].join('\n'));
+  fs.writeFileSync(path.join(dir, 'types', 'more.ts'), 'export const AlsoComputeThingThing = 2;\n');
+
+  const res = await retrieveContext({ query: 'What does computeThing do? Cite the file.', workspaceRoot: dir, feature: 'chat', maxChunks: 6 });
+  const grep = res.chunks.filter((c) => c.source === 'grep');
+  assert.ok(grep[0]!.path.endsWith('compute.ts'), 'the function-DEFINING file ranks first, not the schema/type files');
+  assert.match(grep[0]!.snippet, /function computeThing/);
+});
+
 test('retrieveContext drops noise files that only matched a generic word', async () => {
   const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'migra-retrieve-noise-')));
   fs.mkdirSync(path.join(dir, 'src'));

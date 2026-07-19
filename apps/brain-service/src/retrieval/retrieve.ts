@@ -17,7 +17,9 @@ const TEXT_EXTENSIONS = new Set([
 ]);
 const CONTEXT_RADIUS = 8; // lines of context above/below a matched line
 const MAX_TERMS = 4; // distinct query terms searched
-const PER_TERM_LIMIT = 6; // matches requested per term
+const PER_TERM_LIMIT = 24; // matches per term — enough that a common identifier's
+// actual definition is in scope (not crowded out by references/schemas), so the
+// definition-first ranking can promote the file that truly answers the question.
 const DEFAULT_MAX_CHUNKS = 6;
 
 // Question/filler/instruction words that carry no retrieval signal. Searching
@@ -114,6 +116,40 @@ export async function retrieveContext(input: RetrieveRequest): Promise<RetrieveR
       }
     }
 
+    // Direct DEFINITION search for the top identifier: a plain substring search
+    // for a common name is saturated by schema/type/test files, so the actual
+    // `function <name>` may never be returned. Searching the definition forms
+    // finds the implementing file directly and pins it to the top.
+    const ident = terms.find((t) => t.weight >= 3)?.term;
+    if (ident) {
+      const defQueries = [`function ${ident}`, `const ${ident}`, `class ${ident}`, `interface ${ident}`, `type ${ident}`];
+      for (const q of defQueries) {
+        try {
+          const res = await workspaceSearch({
+            rootPath: input.workspaceRoot, query: q, limit: 4, includeGlobs: [],
+            excludeGlobs: ['**/node_modules/**', '**/dist/**', '**/.git/**', '**/coverage/**', '**/eval/results/**', '**/results/**', '**/*-acceptance.json'],
+          });
+          for (const m of res.matches) {
+            const entry = perFile.get(m.path) ?? { lines: new Set<number>(), score: 0, bestTerm: ident, bestWeight: 3 };
+            entry.lines.add(m.line);
+            entry.score += 8; // a real definition is the strongest possible signal
+            entry.bestWeight = Math.max(entry.bestWeight, 3);
+            perFile.set(m.path, entry);
+          }
+        } catch { /* best-effort */ }
+      }
+    }
+
+    // Filename signal: a file NAMED after the identifier (workspaceSearch.ts for
+    // `workspaceSearch`) almost always DEFINES it — a strong prior that lifts the
+    // implementation above the many schema/type/test files sharing the substring.
+    for (const [relPath, info] of perFile) {
+      const base = path.basename(relPath).replace(/\.[^.]+$/, '').toLowerCase();
+      const t = info.bestTerm.toLowerCase();
+      if (base === t) info.score += 6;
+      else if (base.includes(t) || t.includes(base)) info.score += 3;
+    }
+
     // Drop NOISE: when the query has a distinctive identifier (weight ≥ 3), keep
     // only files that a distinctive term actually hit. This removes files that
     // merely contain a leftover common word — the cause of grounding on noise.
@@ -191,12 +227,19 @@ async function readWindow(
         `|\\bexport\\b[^\\n]*\\b(function|class|const|interface|type|enum)\\b[^\\n]*\\b${esc}\\b` +
         `|\\b${esc}\\s*[:=](?!=)`,
     );
-    // Among the matched lines, prefer one that DEFINES `term` over a reference.
+    // Find the DEFINITION line. Prefer a matched line that is a definition; if the
+    // returned matches are only references, scan the WHOLE file — the actual
+    // definition may not have been among the (capped) match lines.
     const sorted = [...new Set(candidateLines)].sort((a, b) => a - b);
     let line = sorted[0]!;
     let isDef = false;
     for (const ln of sorted) {
       if (defRe.test(lines[ln - 1] ?? '')) { line = ln; isDef = true; break; }
+    }
+    if (!isDef) {
+      for (let i = 0; i < lines.length; i += 1) {
+        if (defRe.test(lines[i]!)) { line = i + 1; isDef = true; break; }
+      }
     }
     // For a definition, bias the window to capture the BODY (what it actually
     // does) — a few lines above for the signature, more below for the impl.
