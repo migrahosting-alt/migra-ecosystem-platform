@@ -51,6 +51,11 @@ const DEFAULT_EXCLUDE_GLOBS = [
   '**/.old/**',
   '**/*.Zone.Identifier',
   '**/*Zone.Identifier',
+  // Generated evaluation output / run logs — a model's own recorded runs must
+  // never pollute its own search (it would "find" its past queries as evidence).
+  '**/eval/results/**',
+  '**/*-acceptance.json',
+  '**/*-evidence*.json',
 ];
 const MAX_FILE_BYTES = 2 * 1024 * 1024; // skip files larger than 2 MiB
 const BINARY_SNIFF_BYTES = 8_192; // prefix read to detect binary content
