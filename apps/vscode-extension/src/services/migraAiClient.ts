@@ -93,6 +93,32 @@ export interface AiModel {
   capabilities: Record<string, boolean>;
 }
 
+/** Read-only inspection op (mirror of the brain's inspect op set). `find` is a
+ * filesystem name/path search; `search` is content (grep) search. */
+export type InspectOp =
+  | 'workspace_root' | 'list' | 'find' | 'search' | 'read'
+  | 'git_status' | 'git_branch' | 'git_head' | 'git_remotes' | 'pkg_manager';
+
+export type InspectErrorCode =
+  | 'workspace_not_open' | 'scope_not_authorized' | 'tool_not_available'
+  | 'policy_denied' | 'tool_execution_failed' | 'tool_execution_timed_out';
+
+export interface InspectRequest {
+  rootPath: string;
+  op: InspectOp;
+  path?: string;
+  query?: string;
+  /** `find` filter: only files, only directories, or any (default). */
+  kind?: 'file' | 'dir' | 'any';
+  limit?: number;
+  startLine?: number;
+  endLine?: number;
+}
+
+export type InspectResponse =
+  | { ok: true; op: InspectOp; runner: 'local'; executionScope: 'local'; traceId: string; data: unknown }
+  | { ok: false; op?: InspectOp; runner: 'local'; executionScope: 'local'; traceId: string; code: InspectErrorCode; error: string; remediation?: string };
+
 /** Request for the local workspace-engineer loop (`POST /api/ai/engineer`). */
 export interface EngineerRequest {
   rootPath: string;
@@ -289,6 +315,37 @@ export class MigraAiClient {
     done();
     if (!res.ok) throw this.httpError(res.status, requestId);
     return (await res.json()) as { count: number; providers: string[]; models: AiModel[] };
+  }
+
+  /** POST /api/ai/inspect — a MODEL-FREE, read-only local-runner inspection.
+   * Returns the typed result/error envelope (does NOT throw on a typed error like
+   * scope_not_authorized — the caller renders it). Throws a PilotError only on a
+   * TRANSPORT failure (the local runner is unreachable → local_runner_unavailable). */
+  async inspect(body: InspectRequest, signal?: AbortSignal): Promise<InspectResponse> {
+    const requestId = newRequestId();
+    const { signal: combined, done, timedOut } = this.withTimeout(signal);
+    const url = `${this.base()}/api/ai/inspect`;
+    this.cfg.log(`POST ${url} [${requestId}] (${body.op})`);
+    let res: Response;
+    try {
+      res = await fetch(url, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', [REQUEST_ID_HEADER]: requestId, ...this.scopeHeaders() },
+        body: JSON.stringify(body),
+        signal: combined,
+      });
+    } catch (err) {
+      done();
+      // A transport failure is the local runner being unreachable — surface it as
+      // such so the chat renders `local_runner_unavailable`, never a generic refusal.
+      throw this.transportError(err, timedOut(), requestId);
+    }
+    done();
+    try {
+      return (await res.json()) as InspectResponse;
+    } catch {
+      throw new PilotError('SERVER_ERROR', 'The local runner returned an unreadable inspection response.', { requestId });
+    }
   }
 
   /**

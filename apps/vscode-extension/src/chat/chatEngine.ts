@@ -7,7 +7,8 @@ import { isPilotError, toUserMessage } from '@migrapilot/pilot-client';
 import { type AiChatRequest, MigraAiClient } from '../services/migraAiClient.js';
 import { EngineDiagnostics } from '../services/engineDiagnostics.js';
 import { parseAgentCommand, runAgentCommand } from './agentCommand.js';
-import { classifyIntent, detectEcosystem } from './intentRouter.js';
+import { classifyIntent, detectEcosystem, buildInspectionPlan } from './intentRouter.js';
+import { runInspectionTurn, renderRoutingError } from './inspectionTurn.js';
 import { runEngineerTurn } from './engineerTurn.js';
 import { getEscalationDispatch } from '../services/escalationConsent.js';
 import { attributionView, type RoutingView } from '../panel/providerRouterViewModel.js';
@@ -99,6 +100,23 @@ export async function runChatTurn(
 
   const feature = inferFeature(trimmed);
   const requestId = newRequestId();
+
+  // ── read-only workspace INSPECTION → LOCAL runner (model-free) ──────────────
+  // A request to see the actual workspace/repo state (root, files, git status,
+  // …) must run on the local runner's read-only tools and return real evidence —
+  // it must NEVER be answered by the conversational model (which falsely claims
+  // it "cannot access your local environment"). Independent of the chat backend:
+  // inspection is always local + read-only. A missing workspace or an unreachable
+  // runner returns a TRUTHFUL TYPED error, never a generic refusal.
+  if (classifyIntent(trimmed) === 'inspection') {
+    const inspectRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    if (!inspectRoot) {
+      renderRoutingError(sink, 'workspace_not_open', { operation: 'workspace inspection', traceId: requestId });
+      return;
+    }
+    await runInspectionTurn(deps.migraAiClient, inspectRoot, buildInspectionPlan(trimmed), sink, tokenToSignal(token));
+    return;
+  }
 
   // Route through the backend resolved at activation/repair — never re-resolve
   // per request (auto cannot silently switch mid-turn).
