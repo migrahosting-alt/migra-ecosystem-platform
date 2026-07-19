@@ -1,0 +1,23 @@
+# brain-service (MigraAI Engine) — re-exclude generated/runtime content.
+# The root .gitignore allowlists this package's SOURCE; these rules keep build
+# output, local state, secrets, and evaluation artifacts out of git.
+
+node_modules/
+dist/
+coverage/
+
+# TypeScript incremental build cache
+*.tsbuildinfo
+
+# Secrets / local env
+.env
+.env.*
+
+# Durable state DB (SQLite) and its WAL sidecars
+*.db
+*.db-shm
+*.db-wal
+
+# Evaluation run outputs and generated fixtures
+eval/results/
+eval/vision-fixtures/

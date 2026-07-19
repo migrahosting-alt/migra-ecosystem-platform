@@ -50,6 +50,16 @@
 # apps/migrapilot-vscode/.gitignore.
 !/apps/migrapilot-vscode/
 !/apps/migrapilot-vscode/**
+# Canonical brain-service (MigraAI Engine) — track its source. Build output
+# (dist/), node_modules, .env, *.db and eval artifacts are re-excluded by its
+# own apps/brain-service/.gitignore.
+!/apps/brain-service/
+!/apps/brain-service/**
+# Canonical VS Code extension — track its source. Build output (dist/, out/),
+# node_modules, *.vsix and .env are re-excluded by its own
+# apps/vscode-extension/.gitignore.
+!/apps/vscode-extension/
+!/apps/vscode-extension/**
 !/apps/**/package.json
 !/apps/**/package-lock.json
 !/apps/**/pnpm-lock.yaml
