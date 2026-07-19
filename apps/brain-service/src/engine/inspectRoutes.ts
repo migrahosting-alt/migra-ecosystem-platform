@@ -129,7 +129,10 @@ async function git(realRoot: string, args: string[]): Promise<string> {
   }
 }
 
-const FIND_IGNORE = new Set(['node_modules', '.git', 'dist', 'coverage', '.next', '.turbo']);
+const FIND_IGNORE = new Set(['node_modules', '.git', 'dist', 'coverage', '.next', '.turbo', 'build', 'out', '.cache']);
+// Archived/backup/legacy/temp trees are pruned too, so `find` never surfaces a
+// stale copy an assistant could then read and describe as if it were current.
+const FIND_IGNORE_PATTERN = /^(\.archived.*|\.archive|backups?|.*-legacy|.*legacy.*|\.tmp.*|\.trash|\.old)$/i;
 function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
@@ -143,12 +146,17 @@ function findByName(realRoot: string, query: string, kind: 'file' | 'dir' | 'any
   const rx = query.includes('*') ? new RegExp('^' + query.split('*').map(escapeRegExp).join('.*') + '$', 'i') : null;
   const matches: Array<{ path: string; type: string }> = [];
   const stack: string[] = [realRoot];
-  while (stack.length && matches.length < limit) {
+  // Hard node cap so a huge tree (a checked-in cache, etc.) can never make a
+  // non-matching search walk unbounded and block the runner's event loop.
+  const FIND_MAX_ENTRIES = 200_000;
+  let visited = 0;
+  while (stack.length && matches.length < limit && visited < FIND_MAX_ENTRIES) {
     const dir = stack.pop()!;
     let entries: fs.Dirent[];
     try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { continue; }
     for (const e of entries) {
-      if (matches.length >= limit) break;
+      if (matches.length >= limit || visited >= FIND_MAX_ENTRIES) break;
+      visited += 1;
       const abs = path.join(dir, e.name);
       const rel = path.relative(realRoot, abs);
       const isDir = e.isDirectory();
@@ -157,8 +165,9 @@ function findByName(realRoot: string, query: string, kind: 'file' | 'dir' | 'any
       const nameMatch = rx ? rx.test(e.name) || rx.test(rel) : e.name.toLowerCase().includes(q) || rel.toLowerCase().includes(q);
       const kindOk = kind === 'any' || (kind === 'dir' && isDir) || (kind === 'file' && !isDir && !isSym);
       if (nameMatch && kindOk) matches.push({ path: rel, type });
-      // Recurse into REAL directories only — never a symlinked dir (escape guard).
-      if (isDir && !isSym && !FIND_IGNORE.has(e.name)) stack.push(abs);
+      // Recurse into REAL directories only — never a symlinked dir (escape guard),
+      // and never into heavy/archived/backup/legacy trees.
+      if (isDir && !isSym && !FIND_IGNORE.has(e.name) && !FIND_IGNORE_PATTERN.test(e.name)) stack.push(abs);
     }
   }
   return matches;
