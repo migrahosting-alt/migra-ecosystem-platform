@@ -120,21 +120,31 @@ export async function retrieveContext(input: RetrieveRequest): Promise<RetrieveR
     const entries = [...perFile.entries()];
     const filtered = topWeight >= 3 ? entries.filter(([, v]) => v.bestWeight >= 3) : entries;
 
-    // Rank: higher weighted score first, then source files over data/docs.
-    const ranked = filtered.sort((a, b) => {
+    // Pre-rank by weighted score, then materialise the top candidates. Reading
+    // the window tells us whether a file DEFINES the term (vs merely references
+    // it) — the file with the definition is what actually answers the question,
+    // so it is promoted above references and its snippet captures the body.
+    const preRanked = filtered.sort((a, b) => {
       if (b[1].score !== a[1].score) return b[1].score - a[1].score;
       return sourceRank(a[0]) - sourceRank(b[0]);
     });
 
     const alreadyHave = new Set(chunks.map((c) => c.path));
-    for (const [relPath, info] of ranked) {
-      if (chunks.length >= maxChunks) break;
+    const candidates: Array<{ chunk: RetrievedChunk; isDef: boolean; score: number; rank: number }> = [];
+    for (const [relPath, info] of preRanked.slice(0, Math.max(maxChunks * 2, 8))) {
       if (alreadyHave.has(path.resolve(input.workspaceRoot, relPath))) continue;
-      const chunk = await readWindow(input.workspaceRoot, relPath, [...info.lines], info.bestTerm, info.score, topWeight);
-      if (chunk) {
-        chunks.push(chunk);
-        alreadyHave.add(chunk.path);
-      }
+      const built = await readWindow(input.workspaceRoot, relPath, [...info.lines], info.bestTerm, info.score, topWeight);
+      if (built) candidates.push({ chunk: built.chunk, isDef: built.isDef, score: info.score, rank: sourceRank(relPath) });
+    }
+    // Definition first, then weighted score, then source-kind.
+    candidates.sort((a, b) => {
+      if (a.isDef !== b.isDef) return a.isDef ? -1 : 1;
+      if (b.score !== a.score) return b.score - a.score;
+      return a.rank - b.rank;
+    });
+    for (const c of candidates) {
+      if (chunks.length >= maxChunks) break;
+      chunks.push(c.chunk);
     }
   }
 
@@ -166,32 +176,44 @@ async function readWindow(
   term: string,
   score: number,
   topWeight: number,
-): Promise<RetrievedChunk | null> {
+): Promise<{ chunk: RetrievedChunk; isDef: boolean } | null> {
   try {
     const abs = path.resolve(workspaceRoot, relPath);
     const content = await fs.readFile(abs, 'utf8');
     const lines = content.split(/\r?\n/);
     const esc = term.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&');
+    // A DEFINITION, not a call: a declaration keyword followed by the term, OR
+    // the term as an assignment/property target (`term:` / `term =`). Crucially
+    // NOT `term(` — that is a call site (e.g. `registerInspectRoutes(app)`).
     const defRe = new RegExp(
-      `\\b(function|const|let|var|class|interface|type|enum|export|async|def|func)\\b[^\\n]*\\b${esc}\\b|\\b${esc}\\s*[:=(]`,
+      `\\b(function|class|interface|type|enum|def|func)\\s+${esc}\\b` +
+        `|\\b(const|let|var)\\s+${esc}\\b` +
+        `|\\bexport\\b[^\\n]*\\b(function|class|const|interface|type|enum)\\b[^\\n]*\\b${esc}\\b` +
+        `|\\b${esc}\\s*[:=](?!=)`,
     );
-    // Among the matched lines, prefer one that looks like a definition of `term`.
+    // Among the matched lines, prefer one that DEFINES `term` over a reference.
     const sorted = [...new Set(candidateLines)].sort((a, b) => a - b);
     let line = sorted[0]!;
+    let isDef = false;
     for (const ln of sorted) {
-      if (defRe.test(lines[ln - 1] ?? '')) { line = ln; break; }
+      if (defRe.test(lines[ln - 1] ?? '')) { line = ln; isDef = true; break; }
     }
-    const startLine = Math.max(1, line - CONTEXT_RADIUS);
-    const endLine = Math.min(lines.length, line + CONTEXT_RADIUS);
+    // For a definition, bias the window to capture the BODY (what it actually
+    // does) — a few lines above for the signature, more below for the impl.
+    const startLine = Math.max(1, line - (isDef ? 3 : CONTEXT_RADIUS));
+    const endLine = Math.min(lines.length, line + (isDef ? CONTEXT_RADIUS * 3 : CONTEXT_RADIUS));
     const snippet = lines.slice(startLine - 1, endLine).join('\n');
     return {
-      path: abs,
-      startLine,
-      endLine,
-      snippet,
-      // Score reflects the weighted match strength (distinctive terms dominate).
-      score: Math.min(0.99, 0.5 + 0.1 * Math.min(score, 5) * (topWeight >= 3 ? 1 : 0.6)),
-      source: 'grep',
+      isDef,
+      chunk: {
+        path: abs,
+        startLine,
+        endLine,
+        snippet,
+        // A definition scores highest; references/imports lower.
+        score: Math.min(0.99, (isDef ? 0.85 : 0.55) + 0.03 * Math.min(score, 5) * (topWeight >= 3 ? 1 : 0.6)),
+        source: 'grep',
+      },
     };
   } catch {
     return null;

@@ -30,6 +30,24 @@ test('salientTermsWeighted ranks identifiers above generic words and drops fille
   }
 });
 
+test('retrieveContext ranks the DEFINING file first and captures its body', async () => {
+  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'migra-retrieve-def-')));
+  fs.mkdirSync(path.join(dir, 'src'));
+  // The definition + body (what actually answers "what does X do").
+  fs.writeFileSync(
+    path.join(dir, 'src', 'inspect.ts'),
+    ['// header', 'export function registerInspectRoutes(app) {', "  app.post('/api/ai/inspect', handler);", '  return app;', '}', ''].join('\n'),
+  );
+  // A different file that only CALLS it (a reference, not a definition).
+  fs.writeFileSync(path.join(dir, 'src', 'server.ts'), ['import { registerInspectRoutes } from "./inspect";', 'registerInspectRoutes(app);', ''].join('\n'));
+
+  const res = await retrieveContext({ query: 'What does registerInspectRoutes do? Cite the file.', workspaceRoot: dir, feature: 'chat', maxChunks: 6 });
+  const grep = res.chunks.filter((c) => c.source === 'grep');
+  assert.ok(grep.length >= 1, 'at least one grep chunk');
+  assert.ok(grep[0]!.path.endsWith('inspect.ts'), 'the DEFINING file ranks first, not the caller');
+  assert.match(grep[0]!.snippet, /app\.post\('\/api\/ai\/inspect'/, 'the snippet captures the function BODY, not just the signature');
+});
+
 test('retrieveContext drops noise files that only matched a generic word', async () => {
   const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'migra-retrieve-noise-')));
   fs.mkdirSync(path.join(dir, 'src'));
