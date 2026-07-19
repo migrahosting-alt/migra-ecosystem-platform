@@ -7,7 +7,7 @@ import { test } from 'node:test';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { retrieveContext } from '../src/retrieval/retrieve.js';
+import { retrieveContext, salientTermsWeighted } from '../src/retrieval/retrieve.js';
 
 function tmpWorkspace(): string {
   const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'migra-retrieve-')));
@@ -19,6 +19,31 @@ function tmpWorkspace(): string {
   fs.writeFileSync(path.join(dir, 'src', 'noise.ts'), 'export const unrelated = 1;\n');
   return dir;
 }
+
+test('salientTermsWeighted ranks identifiers above generic words and drops filler', () => {
+  const terms = salientTermsWeighted('What does computeInvoiceTotal do? Cite the file.');
+  assert.equal(terms[0]?.term, 'computeInvoiceTotal', 'the identifier is the top term');
+  assert.ok(terms[0]!.weight >= 3, 'identifier weight is high');
+  const words = terms.map((t) => t.term.toLowerCase());
+  for (const filler of ['cite', 'file', 'does', 'what', 'the']) {
+    assert.ok(!words.includes(filler), `filler word "${filler}" must be dropped`);
+  }
+});
+
+test('retrieveContext drops noise files that only matched a generic word', async () => {
+  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'migra-retrieve-noise-')));
+  fs.mkdirSync(path.join(dir, 'src'));
+  // The real answer: defines the distinctive identifier.
+  fs.writeFileSync(path.join(dir, 'src', 'auth.ts'), ['export function verifyAuthToken() {', '  return true; // cite', '}', ''].join('\n'));
+  // Noise: contains the generic word "cite" but NOT the identifier.
+  fs.writeFileSync(path.join(dir, 'src', 'unrelated1.ts'), 'const x = 1; // please cite this\n');
+  fs.writeFileSync(path.join(dir, 'src', 'unrelated2.ts'), 'const y = 2; // cite me too\n');
+
+  const res = await retrieveContext({ query: 'What does verifyAuthToken do? Cite the file.', workspaceRoot: dir, feature: 'chat', maxChunks: 6 });
+  const grep = res.chunks.filter((c) => c.source === 'grep').map((c) => path.basename(c.path));
+  assert.ok(grep.includes('auth.ts'), 'the file defining the identifier is retrieved');
+  assert.ok(!grep.includes('unrelated1.ts') && !grep.includes('unrelated2.ts'), 'generic-word-only noise files are dropped');
+});
 
 test('retrieveContext returns real workspace snippets grounded on the query term', async () => {
   const dir = tmpWorkspace();

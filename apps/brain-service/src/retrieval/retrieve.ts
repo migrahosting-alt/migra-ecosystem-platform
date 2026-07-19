@@ -20,35 +20,52 @@ const MAX_TERMS = 4; // distinct query terms searched
 const PER_TERM_LIMIT = 6; // matches requested per term
 const DEFAULT_MAX_CHUNKS = 6;
 
-// Common question/filler words that carry no retrieval signal.
+// Question/filler/instruction words that carry no retrieval signal. Searching
+// these (e.g. "cite", "file", "explain") pulls in unrelated files and drowns the
+// real match, so a weak model then grounds on noise or hallucinates.
 const STOPWORDS = new Set([
-  'the', 'and', 'for', 'with', 'this', 'that', 'these', 'those', 'what', 'why',
-  'how', 'does', 'did', 'are', 'was', 'were', 'has', 'have', 'had', 'can',
+  'the', 'and', 'for', 'with', 'this', 'that', 'these', 'those', 'what', 'whats',
+  'why', 'how', 'does', 'did', 'are', 'was', 'were', 'has', 'have', 'had', 'can',
   'could', 'should', 'would', 'repo', 'repository', 'code', 'codebase', 'file',
-  'files', 'function', 'functions', 'class', 'method', 'explain', 'tell', 'show',
-  'about', 'inside', 'used', 'use', 'uses', 'using', 'work', 'works', 'working',
-  'handle', 'handled', 'handles', 'implement', 'implemented', 'where', 'when',
-  'which', 'here', 'there', 'get', 'set', 'from', 'into', 'your', 'our',
+  'files', 'function', 'functions', 'class', 'method', 'methods', 'explain',
+  'tell', 'show', 'about', 'inside', 'used', 'use', 'uses', 'using', 'work',
+  'works', 'working', 'handle', 'handled', 'handles', 'implement', 'implemented',
+  'implementation', 'where', 'when', 'which', 'here', 'there', 'get', 'set',
+  'from', 'into', 'your', 'our', 'its', 'do', 'doing', 'done', 'within',
+  // instruction words users add ("...cite the file", "the actual name", …)
+  'cite', 'cites', 'cited', 'citation', 'name', 'named', 'names', 'specific',
+  'specifically', 'actual', 'actually', 'exactly', 'exact', 'purpose', 'mean',
+  'means', 'responsible', 'related', 'various', 'kinds', 'kind', 'thing', 'things',
+  'part', 'parts', 'stuff', 'please', 'need', 'want', 'give', 'find', 'look',
 ]);
 
-/** Pull distinctive, searchable tokens out of a natural-language query. Prefers
- * identifiers (camelCase / snake_case / dotted / PascalCase), filenames, and
- * longer words over generic prose. */
-function salientTerms(query: string): string[] {
+export interface WeightedTerm {
+  term: string;
+  weight: number;
+}
+
+/** Pull distinctive, searchable tokens out of a natural-language query, WEIGHTED
+ * so an identifier ranks far above a leftover common word. Identifiers
+ * (camelCase / snake_case / dotted / PascalCase / filenames) are the strong
+ * signal; a plain lowercase word is weak and only used if nothing better. */
+export function salientTermsWeighted(query: string): WeightedTerm[] {
   const raw = query.match(/[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)+|[\w-]+\.[A-Za-z0-9]{1,6}|[A-Za-z_$][\w$]{2,}/g) ?? [];
   const seen = new Set<string>();
-  const scored: Array<{ term: string; weight: number }> = [];
+  const scored: WeightedTerm[] = [];
   for (const tok of raw) {
     const term = tok.trim();
     const low = term.toLowerCase();
     if (term.length < 3 || seen.has(low) || STOPWORDS.has(low)) continue;
     seen.add(low);
-    const distinctive =
-      (/[A-Z]/.test(term) && /[a-z]/.test(term)) || /[._/\d]/.test(term) || term.length >= 8;
-    scored.push({ term, weight: distinctive ? 2 : 1 });
+    const isIdentifier =
+      (/[a-z]/.test(term) && /[A-Z]/.test(term)) || // camelCase / PascalCase
+      /[._/]/.test(term) || // dotted / path / filename
+      /_/.test(term); // snake_case
+    const weight = isIdentifier ? 3 : term.length >= 9 ? 2 : 1;
+    scored.push({ term, weight });
   }
   scored.sort((a, b) => b.weight - a.weight || b.term.length - a.term.length);
-  return scored.slice(0, MAX_TERMS).map((s) => s.term);
+  return scored.slice(0, MAX_TERMS);
 }
 
 export async function retrieveContext(input: RetrieveRequest): Promise<RetrieveResponse> {
@@ -62,11 +79,13 @@ export async function retrieveContext(input: RetrieveRequest): Promise<RetrieveR
   }
 
   // 2) Lexical search of the working tree for the query's salient terms.
-  const terms = salientTerms(input.query ?? '');
+  const terms = salientTermsWeighted(input.query ?? '');
+  const topWeight = terms[0]?.weight ?? 0;
   if (terms.length > 0) {
-    // Aggregate hits per file so a file matched by several terms ranks highest.
-    const perFile = new Map<string, { lines: Set<number>; termHits: number }>();
-    for (const term of terms) {
+    // Aggregate per file: WEIGHTED score (sum of matched-term weights) + the best
+    // "distinctive" term that hit it (so we can put its definition in the snippet).
+    const perFile = new Map<string, { lines: Set<number>; score: number; bestTerm: string; bestWeight: number }>();
+    for (const { term, weight } of terms) {
       let matches: Array<{ path: string; line: number }> = [];
       try {
         const res = await workspaceSearch({
@@ -74,7 +93,9 @@ export async function retrieveContext(input: RetrieveRequest): Promise<RetrieveR
           query: term,
           limit: PER_TERM_LIMIT,
           includeGlobs: [],
-          excludeGlobs: ['**/node_modules/**', '**/dist/**', '**/.git/**', '**/coverage/**'],
+          // Exclude deps/build AND generated artifacts (eval output, results) so a
+          // model's own recorded runs never pollute grounding evidence.
+          excludeGlobs: ['**/node_modules/**', '**/dist/**', '**/.git/**', '**/coverage/**', '**/eval/results/**', '**/results/**', '**/*-acceptance.json'],
         });
         matches = res.matches;
       } catch {
@@ -82,19 +103,26 @@ export async function retrieveContext(input: RetrieveRequest): Promise<RetrieveR
       }
       const filesThisTerm = new Set<string>();
       for (const m of matches) {
-        const entry = perFile.get(m.path) ?? { lines: new Set<number>(), termHits: 0 };
+        const entry = perFile.get(m.path) ?? { lines: new Set<number>(), score: 0, bestTerm: term, bestWeight: 0 };
         entry.lines.add(m.line);
         if (!filesThisTerm.has(m.path)) {
-          entry.termHits += 1;
+          entry.score += weight;
           filesThisTerm.add(m.path);
         }
+        if (weight > entry.bestWeight) { entry.bestWeight = weight; entry.bestTerm = term; }
         perFile.set(m.path, entry);
       }
     }
 
-    // Rank: more distinct terms matched first, then source files over data files.
-    const ranked = [...perFile.entries()].sort((a, b) => {
-      if (b[1].termHits !== a[1].termHits) return b[1].termHits - a[1].termHits;
+    // Drop NOISE: when the query has a distinctive identifier (weight ≥ 3), keep
+    // only files that a distinctive term actually hit. This removes files that
+    // merely contain a leftover common word — the cause of grounding on noise.
+    const entries = [...perFile.entries()];
+    const filtered = topWeight >= 3 ? entries.filter(([, v]) => v.bestWeight >= 3) : entries;
+
+    // Rank: higher weighted score first, then source files over data/docs.
+    const ranked = filtered.sort((a, b) => {
+      if (b[1].score !== a[1].score) return b[1].score - a[1].score;
       return sourceRank(a[0]) - sourceRank(b[0]);
     });
 
@@ -102,8 +130,7 @@ export async function retrieveContext(input: RetrieveRequest): Promise<RetrieveR
     for (const [relPath, info] of ranked) {
       if (chunks.length >= maxChunks) break;
       if (alreadyHave.has(path.resolve(input.workspaceRoot, relPath))) continue;
-      const line = [...info.lines].sort((a, b) => a - b)[0]!;
-      const chunk = await readWindow(input.workspaceRoot, relPath, line, info.termHits, terms.length);
+      const chunk = await readWindow(input.workspaceRoot, relPath, [...info.lines], info.bestTerm, info.score, topWeight);
       if (chunk) {
         chunks.push(chunk);
         alreadyHave.add(chunk.path);
@@ -129,18 +156,31 @@ function sourceRank(relPath: string): number {
   return 3; // .json / .yaml / other
 }
 
-/** Read a context window around a matched line. */
+/** Read a context window. Prefers the line where `term` is DEFINED (function /
+ * const / class / export …) over a mere reference, so the snippet the model
+ * grounds on actually shows what the symbol is — not an import line. */
 async function readWindow(
   workspaceRoot: string,
   relPath: string,
-  line: number,
-  termHits: number,
-  totalTerms: number,
+  candidateLines: number[],
+  term: string,
+  score: number,
+  topWeight: number,
 ): Promise<RetrievedChunk | null> {
   try {
     const abs = path.resolve(workspaceRoot, relPath);
     const content = await fs.readFile(abs, 'utf8');
     const lines = content.split(/\r?\n/);
+    const esc = term.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&');
+    const defRe = new RegExp(
+      `\\b(function|const|let|var|class|interface|type|enum|export|async|def|func)\\b[^\\n]*\\b${esc}\\b|\\b${esc}\\s*[:=(]`,
+    );
+    // Among the matched lines, prefer one that looks like a definition of `term`.
+    const sorted = [...new Set(candidateLines)].sort((a, b) => a - b);
+    let line = sorted[0]!;
+    for (const ln of sorted) {
+      if (defRe.test(lines[ln - 1] ?? '')) { line = ln; break; }
+    }
     const startLine = Math.max(1, line - CONTEXT_RADIUS);
     const endLine = Math.min(lines.length, line + CONTEXT_RADIUS);
     const snippet = lines.slice(startLine - 1, endLine).join('\n');
@@ -149,8 +189,8 @@ async function readWindow(
       startLine,
       endLine,
       snippet,
-      // Score reflects how many of the query's terms this file matched.
-      score: Math.min(0.99, 0.5 + 0.5 * (termHits / Math.max(1, totalTerms))),
+      // Score reflects the weighted match strength (distinctive terms dominate).
+      score: Math.min(0.99, 0.5 + 0.1 * Math.min(score, 5) * (topWeight >= 3 ? 1 : 0.6)),
       source: 'grep',
     };
   } catch {
