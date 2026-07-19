@@ -69,6 +69,12 @@ export interface InspectionStep {
 
 const FILENAME = /([\w./-]+\.[a-z0-9]{1,6})\b/i;
 
+/** Words that commonly follow "in" as an English idiom, NOT a directory name
+ * ("in accordance with", "in order to", "in general", …). A bare token matching
+ * this is never treated as a `list` sub-path. */
+const NON_DIRECTORY_WORD =
+  /^(accordance|order|general|particular|addition|fact|terms|place|case|contrast|line|response|sync|progress|question|common|mind|part|parts|detail|details|favor|charge|short|front|return|effect|practice|practices|principle|principles|theory|reality|summary|total|full|use|other|which|this|that|these|those|all|any|some|each|both|the|a|an|it|them|here|there)$/i;
+
 /** Deterministically translate an inspection prompt into concrete read-only ops.
  * A request that mentions several facets (e.g. "git state") expands to a small
  * bundle. Never returns an empty plan for an inspection intent — a generic
@@ -119,10 +125,18 @@ export function buildInspectionPlan(prompt: string): InspectionStep[] {
     }
   }
 
-  // directory listing
+  // directory listing — extract a sub-path CONSERVATIVELY so an English idiom
+  // ("in accordance/order/general…") is never mistaken for a directory. Accept a
+  // path-like token (contains a slash) anywhere; accept a bare name only when it
+  // sits at a clause boundary AND is not a common non-directory word after "in".
   if (/\b(list|ls|directory\s+listing|what\s+files|which\s+files|files\s+(in|under|are))\b/i.test(p)) {
-    const inDir = /\b(?:in|under|inside)\s+["'`]?([\w.\-/]+)["'`]?/i.exec(p)?.[1];
-    add('list', inDir && inDir !== 'the' ? { path: inDir } : {});
+    const slashDir = /\b(?:in|under|inside)\s+(?:the\s+)?["'`]?(\.?\/?[\w.\-]+(?:\/[\w.\-]+)+\/?|\.\/[\w.\-/]+)["'`]?/i.exec(p)?.[1];
+    let listDir = slashDir;
+    if (!listDir) {
+      const bare = /\b(?:under|inside|in)\s+(?:the\s+)?(?:director(?:y|ies)\s+|folder\s+(?:named\s+|called\s+)?)?["'`]?([\w\-][\w.\-]*[\w\-]|[\w\-]{2})["'`]?\s*(?:$|[.,;:!?]|\s+(?:folder|director))/i.exec(p)?.[1];
+      if (bare && !NON_DIRECTORY_WORD.test(bare)) listDir = bare;
+    }
+    add('list', listDir && listDir !== 'the' ? { path: listDir } : {});
   }
 
   // Generic inspection with no specific facet → safe overview.
