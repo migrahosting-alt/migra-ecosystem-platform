@@ -361,7 +361,7 @@ export class MigraAiClient {
     const requestId = newRequestId();
     const url = `${this.base()}${CHAT_PATH}`;
     this.cfg.log(`POST ${url} [${requestId}] (sse)`);
-    const { signal: combined, done, timedOut } = this.withTimeout(signal);
+    const { signal: combined, reset, done, timedOut } = this.withTimeout(signal);
 
     let res: Response;
     try {
@@ -393,6 +393,7 @@ export class MigraAiClient {
     let buffer = '';
     try {
       for await (const chunk of res.body as unknown as AsyncIterable<Uint8Array>) {
+        reset(); // stream activity → push the inactivity deadline forward
         buffer += decoder.decode(chunk, { stream: true });
         let sep: number;
         while ((sep = buffer.indexOf('\n\n')) !== -1) {
@@ -427,7 +428,7 @@ export class MigraAiClient {
     const requestId = newRequestId();
     const url = `${this.base()}/api/ai/engineer`;
     this.cfg.log(`POST ${url} [${requestId}] (sse)`);
-    const { signal: combined, done, timedOut } = this.withTimeout(signal);
+    const { signal: combined, reset, done, timedOut } = this.withTimeout(signal);
     let res: Response;
     try {
       res = await fetch(url, {
@@ -457,6 +458,7 @@ export class MigraAiClient {
     let buffer = '';
     try {
       for await (const chunk of res.body as unknown as AsyncIterable<Uint8Array>) {
+        reset(); // stream activity → push the inactivity deadline forward
         buffer += decoder.decode(chunk, { stream: true });
         let sep: number;
         while ((sep = buffer.indexOf('\n\n')) !== -1) {
@@ -702,13 +704,17 @@ export class MigraAiClient {
     });
   }
 
-  private withTimeout(signal: AbortSignal | undefined): { signal: AbortSignal; done: () => void; timedOut: () => boolean } {
+  private withTimeout(signal: AbortSignal | undefined): { signal: AbortSignal; reset: () => void; done: () => void; timedOut: () => boolean } {
     const controller = new AbortController();
     let timedOut = false;
-    const timer = setTimeout(() => {
-      timedOut = true;
-      controller.abort();
-    }, this.cfg.timeoutMs());
+    let timer: ReturnType<typeof setTimeout>;
+    const arm = () => {
+      timer = setTimeout(() => {
+        timedOut = true;
+        controller.abort();
+      }, this.cfg.timeoutMs());
+    };
+    arm();
     const onAbort = () => controller.abort();
     if (signal) {
       if (signal.aborted) controller.abort();
@@ -716,6 +722,16 @@ export class MigraAiClient {
     }
     return {
       signal: controller.signal,
+      // Reset the deadline on stream activity: for an SSE response the timeout must
+      // measure SILENCE from the Pilot service, not the total time to finish. Each
+      // received chunk proves the service is alive, so a long-but-active answer must
+      // never be aborted as a spurious "didn't respond in time".
+      reset: () => {
+        if (!timedOut) {
+          clearTimeout(timer);
+          arm();
+        }
+      },
       done: () => {
         clearTimeout(timer);
         signal?.removeEventListener('abort', onAbort);

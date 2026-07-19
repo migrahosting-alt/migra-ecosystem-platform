@@ -40,6 +40,29 @@ before(async () => {
         sse(res, [{ event: 'error', data: { code: 'NO_MODEL', message: 'x' } }]);
         return;
       }
+      if (lastChatBody.markerDrip) {
+        // Emit tokens spaced UNDER the client timeout, with a TOTAL duration OVER
+        // it — a legitimately long-but-active stream. A correct inactivity timeout
+        // resets on each token and lets this complete; a total-duration timeout
+        // would spuriously abort it as "didn't respond in time".
+        res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+        res.write(`event: route\ndata: ${JSON.stringify({ model: 'm1', provider: 'local', tier: 'fast', reason: 'r', failedOver: [] })}\n\n`);
+        let i = 0;
+        const tick = (): void => {
+          if (i < 6) {
+            res.write(`event: token\ndata: ${JSON.stringify({ text: 't' + i })}\n\n`);
+            i += 1;
+            const timer = setTimeout(tick, 60);
+            req.on('close', () => clearTimeout(timer));
+          } else {
+            res.write(`event: done\ndata: ${JSON.stringify({ model: 'm1' })}\n\n`);
+            res.end();
+          }
+        };
+        const t0 = setTimeout(tick, 60);
+        req.on('close', () => clearTimeout(t0));
+        return;
+      }
       if (lastChatBody.markerSlow) {
         // Emit route + one token, then stall — lets a test abort mid-stream.
         res.writeHead(200, { 'Content-Type': 'text/event-stream' });
@@ -235,6 +258,28 @@ test('unexpected tool failure stays SERVER_ERROR (TOOL_FAILED is not a validatio
   await assert.rejects(
     () => client().executeTool({ tool: 'explode.tool', input: {} }),
     (e: unknown) => e instanceof PilotError && e.code === 'SERVER_ERROR',
+  );
+});
+
+test('a long-but-active stream completes: the timeout is inactivity-based, not total-duration', async () => {
+  // Client timeout 150ms; the server drips 6 tokens ~60ms apart (total ~420ms).
+  // Each token must reset the deadline, so the stream finishes with `done` and
+  // NEVER surfaces a spurious TIMEOUT ("didn't respond in time").
+  const c = new MigraAiClient({ baseUrl: () => baseUrl, timeoutMs: () => 150, log: () => {} });
+  const events = (await collect(c.chatStream({ prompt: 'hi', markerDrip: true } as unknown as AiChatRequest))) as Array<{ type: string }>;
+  const types = events.map((e) => e.type);
+  assert.equal(types[0], 'route');
+  assert.equal(types.filter((t) => t === 'token').length, 6, 'all 6 dripped tokens arrive');
+  assert.equal(types[types.length - 1], 'done', 'stream completes, no TIMEOUT');
+});
+
+test('a genuinely idle stream still times out (inactivity detection intact)', async () => {
+  // Client timeout 150ms; markerSlow emits route+token then stalls 2000ms. With no
+  // further activity past the deadline, the inactivity timer must still fire TIMEOUT.
+  const c = new MigraAiClient({ baseUrl: () => baseUrl, timeoutMs: () => 150, log: () => {} });
+  await assert.rejects(
+    async () => { for await (const _ of c.chatStream({ prompt: 'hi', markerSlow: true } as unknown as AiChatRequest)) { /* drain */ } },
+    (err: unknown) => err instanceof PilotError && err.code === 'TIMEOUT',
   );
 });
 
