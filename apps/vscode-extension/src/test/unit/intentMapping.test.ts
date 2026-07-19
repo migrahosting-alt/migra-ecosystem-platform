@@ -18,6 +18,16 @@ test('normal chat requests no coding/reasoning and never names a model', () => {
   assert.equal('model' in req, false, 'extension must not name a concrete model');
 });
 
+test('an explicitly pinned model id is passed through verbatim (picker override)', () => {
+  const req = buildAiRequest('hi', { feature: 'chat', modelId: 'deepseek-r1:14b' });
+  assert.equal(req.model, 'deepseek-r1:14b', 'a user-pinned model reaches the engine as `model`');
+});
+
+test('without an explicit pin the request still names no model (engine decides)', () => {
+  const req = buildAiRequest('hi', { feature: 'chat', modelProfile: 'default' });
+  assert.equal('model' in req, false);
+});
+
 test('code explanation reaches the engine with coding capability requested', () => {
   const req = buildAiRequest('explain this function', { feature: 'explain', modelProfile: 'cheap' });
   assert.equal(req.preferCoding, true);
