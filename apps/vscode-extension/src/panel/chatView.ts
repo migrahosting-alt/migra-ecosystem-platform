@@ -153,6 +153,7 @@ export class MigraPilotChatViewProvider implements vscode.WebviewViewProvider {
         history?: ChatMsg[];
         messages?: ChatMsg[];
         provider?: string;
+        modelId?: string;
         format?: string;
         data?: string;
         messageIdx?: number;
@@ -174,6 +175,9 @@ export class MigraPilotChatViewProvider implements vscode.WebviewViewProvider {
           for (const text of this.pendingInjections.splice(0)) {
             void this.view?.webview.postMessage({ type: 'injectMessage', text });
           }
+          // Populate the model picker from the live engine catalog (real Ollama
+          // models), so the user isn't limited to the abstract Auto/tier options.
+          void this.postModelCatalog();
           return;
         case 'saveState':
           this.savedMessages = msg.messages ?? [];
@@ -211,12 +215,37 @@ export class MigraPilotChatViewProvider implements vscode.WebviewViewProvider {
             msg.history ?? [],
             toProfile(msg.provider),
             toAttachments(msg.files),
+            typeof msg.modelId === 'string' && msg.modelId ? msg.modelId : undefined,
           );
           return;
         default:
           return;
       }
     });
+  }
+
+  /** Fetch the live model catalog from the engine and hand it to the webview so
+   * the picker lists the real installed models (Ollama), grouped by qualification.
+   * Best-effort: a fetch failure leaves the static Auto/tier options in place. */
+  private async postModelCatalog(): Promise<void> {
+    if (!this.view) return;
+    try {
+      const { models } = await this.deps.migraAiClient.getModels();
+      const slim = models
+        // Only chat-capable models are pinnable here — embedding-only models can't
+        // answer a chat turn (pinning one would silently fall back to auto-select).
+        .filter((m) => m.capabilities?.chat !== false)
+        .map((m) => ({
+          id: m.id,
+          tier: m.tier,
+          paramCount: m.paramCount,
+          state: m.qualification?.state,
+          vision: Boolean(m.capabilities?.vision),
+        }));
+      void this.view.webview.postMessage({ type: 'models', models: slim });
+    } catch (err) {
+      this.deps.output.appendLine(`[chat] model catalog unavailable: ${err instanceof Error ? err.message : String(err)}`);
+    }
   }
 
   /** Reveal the chat panel (used by the "Open MigraPilot Chat" command/button). */
@@ -239,6 +268,7 @@ export class MigraPilotChatViewProvider implements vscode.WebviewViewProvider {
     history: ChatMsg[],
     modelProfile: SelectableProfile | undefined,
     attachments: ChatAttachment[] = [],
+    modelId?: string,
   ): Promise<void> {
     const text = rawText.trim();
     // A turn is valid if there's text OR at least one attachment to analyze.
@@ -282,6 +312,7 @@ export class MigraPilotChatViewProvider implements vscode.WebviewViewProvider {
         this.cts.token,
         {
           modelProfile,
+          ...(modelId ? { modelId } : {}),
           attachments,
           ...(this.deps.executionPolicy ? { policy: this.deps.executionPolicy() } : {}),
           ...(conversationId ? { conversationId, memoryPolicy: { mode, retrieve: true, store: true } } : {}),
@@ -1261,9 +1292,9 @@ export class MigraPilotChatViewProvider implements vscode.WebviewViewProvider {
         <span id="status-text">Ready</span>
         <select id="model-picker" title="Model for next message">
           <option value="auto" selected>Auto</option>
-          <option value="cheap">⚡ Fast · 7B</option>
-          <option value="default">⚖️ Balanced · 14B</option>
-          <option value="premium">💎 Deep · 30B</option>
+          <option value="cheap">⚡ Fast</option>
+          <option value="default">⚖️ Balanced</option>
+          <option value="premium">💎 Deep</option>
         </select>
         <button id="new-chat-btn">New chat</button>
       </div>
@@ -2198,7 +2229,12 @@ export class MigraPilotChatViewProvider implements vscode.WebviewViewProvider {
 
         // Only images travel as binary attachments (base64 data URLs).
         const fileData = imageFiles.map(f => ({ name: f.name, type: f.type, dataUrl: f.dataUrl }));
-        const selectedProvider = modelPicker ? modelPicker.value : 'auto';
+        // Picker value is either 'auto', a tier ('cheap'|'default'|'premium'), or a
+        // pinned model id ('model:<id>'). A pinned model travels as modelId; a tier
+        // travels as provider; auto sends neither (engine decides).
+        const pickerValue = modelPicker ? modelPicker.value : 'auto';
+        const pinnedModelId = pickerValue.indexOf('model:') === 0 ? pickerValue.slice('model:'.length) : undefined;
+        const selectedProvider = pinnedModelId ? 'auto' : pickerValue;
         const history = messages
           .slice(Math.max(0, messages.length - 12), Math.max(0, messages.length - 1))
           .filter(m => m && (m.role === 'user' || m.role === 'assistant') && typeof m.text === 'string' && m.text.trim())
@@ -2208,6 +2244,7 @@ export class MigraPilotChatViewProvider implements vscode.WebviewViewProvider {
           text: promptForBackend,
           files: fileData.length > 0 ? fileData : undefined,
           provider: selectedProvider !== 'auto' ? selectedProvider : undefined,
+          modelId: pinnedModelId,
           history,
         });
         input.value = '';
@@ -2253,6 +2290,39 @@ export class MigraPilotChatViewProvider implements vscode.WebviewViewProvider {
         if (!msg) return;
 
         switch (msg.type) {
+          case 'models': {
+            // Rebuild the model picker from the live engine catalog (real installed
+            // models, e.g. Ollama). Keep 'Auto' + size-tier shortcuts, then list the
+            // concrete models (approved first) so the user can pin a specific one.
+            if (!modelPicker || !Array.isArray(msg.models)) break;
+            const prev = modelPicker.value;
+            const tierEmoji = { fast: '⚡', balanced: '⚖️', deep: '💎' };
+            let html = '<option value="auto">Auto</option>';
+            html += '<optgroup label="Auto by size">';
+            html += '<option value="cheap">⚡ Fast</option>';
+            html += '<option value="default">⚖️ Balanced</option>';
+            html += '<option value="premium">💎 Deep</option>';
+            html += '</optgroup>';
+            const models = msg.models.slice().sort((a, b) => {
+              const ap = a.state === 'approved' ? 0 : 1, bp = b.state === 'approved' ? 0 : 1;
+              return ap - bp || (b.paramCount || 0) - (a.paramCount || 0);
+            });
+            if (models.length) {
+              html += '<optgroup label="Local models">';
+              models.forEach((m) => {
+                const emoji = tierEmoji[m.tier] || '•';
+                const size = m.paramCount ? ' · ' + m.paramCount + 'B' : '';
+                const vis = m.vision ? ' 👁' : '';
+                const badge = m.state && m.state !== 'approved' ? ' (' + m.state + ')' : '';
+                html += '<option value="model:' + escapeHtml(m.id) + '">' + emoji + ' ' + escapeHtml(m.id) + size + vis + badge + '</option>';
+              });
+              html += '</optgroup>';
+            }
+            modelPicker.innerHTML = html;
+            const keep = Array.prototype.some.call(modelPicker.options, (o) => o.value === prev);
+            modelPicker.value = keep ? prev : 'auto';
+            break;
+          }
           case 'statusUpdate':
             if (typeof msg.text === 'string' && msg.text.trim()) {
               statusText.textContent = msg.text;

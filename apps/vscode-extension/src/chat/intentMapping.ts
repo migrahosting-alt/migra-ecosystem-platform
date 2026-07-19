@@ -36,6 +36,10 @@ export function turnNeedsVision(attachments: ChatAttachment[] | undefined): bool
 export interface TurnContext {
   feature: FeatureName;
   modelProfile?: SelectableProfile;
+  /** Explicit model id pinned in the picker (power-user override). Auto/tier
+   * selection stays the default; when set, the engine uses this id verbatim if it
+   * is registered and qualifies for the turn. */
+  modelId?: string;
   attachments?: ChatAttachment[];
   selectionText?: string;
   activeFile?: string;
@@ -62,6 +66,7 @@ export function buildAiRequest(prompt: string, ctx: TurnContext): AiChatRequest 
     feature: ctx.feature,
     profile: ctx.modelProfile,
     tier,
+    ...(ctx.modelId ? { model: ctx.modelId } : {}),
     preferCoding:
       ctx.feature === 'explain' || ctx.feature === 'fix' || ctx.feature === 'review' || ctx.feature === 'test',
     needsReasoning: tier === 'deep',

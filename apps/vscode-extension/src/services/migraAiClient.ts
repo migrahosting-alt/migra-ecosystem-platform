@@ -49,6 +49,10 @@ export interface AiChatRequest {
   attachments?: Array<{ name: string; mimeType: string; dataBase64: string; sizeBytes?: number }>;
   /** Size tier hint: fast | balanced | deep. */
   tier?: 'fast' | 'balanced' | 'deep';
+  /** Explicit model id the user pinned in the picker. The engine uses it verbatim
+   * when it exists in the registry and meets the turn's hard requirements
+   * (qualification-gated); otherwise it falls back to tier/capability selection. */
+  model?: string;
   /** Legacy hints the engine also understands. */
   feature?: string;
   profile?: string;
@@ -91,6 +95,10 @@ export interface AiModel {
   provider: string;
   tier: string;
   capabilities: Record<string, boolean>;
+  /** Parameter count in billions (for a human-readable size label). */
+  paramCount?: number;
+  /** Qualification lifecycle — only `approved` models are served under enforcement. */
+  qualification?: { state?: string };
 }
 
 /** Read-only inspection op (mirror of the brain's inspect op set). `find` is a

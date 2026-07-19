@@ -46,6 +46,9 @@ export interface ChatTurnOptions {
    * decides). The brain still applies its own effective-profile fallback (e.g.
    * premium→default when no premium model is configured). */
   modelProfile?: SelectableProfile;
+  /** Explicit model id pinned in the picker (power-user override of Auto/tier).
+   * Local engine path only; the engine uses it verbatim when registered + qualified. */
+  modelId?: string;
   /** Slice 5: the active execution-policy preference (server resolves + is
    * authoritative). */
   policy?: string;
@@ -183,6 +186,7 @@ export async function runChatTurn(
   const aiRequest = buildAiRequest(trimmed, {
     feature,
     modelProfile: options.modelProfile,
+    modelId: options.modelId,
     attachments: options.attachments,
     selectionText,
     activeFile: activeEditor?.document.uri.fsPath,
