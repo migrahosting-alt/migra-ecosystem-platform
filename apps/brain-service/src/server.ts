@@ -18,6 +18,7 @@ import { registerToolRoutes } from './tools/index.js';
 import { registerAiRoutes } from './engine/aiRoutes.js';
 import { registerToolExecutionRoutes } from './engine/toolRoutes.js';
 import { registerInspectRoutes } from './engine/inspectRoutes.js';
+import { registerAnswerRoutes } from './engine/answerRoutes.js';
 import { registerEngineerRoutes } from './engine/engineerRoutes.js';
 import { telemetryHub } from './engine/telemetryHub.js';
 import { registerAgentRoutes } from './engine/agentRoutes.js';
@@ -218,6 +219,14 @@ async function main(): Promise<void> {
   // package manager" with real evidence instead of a false "can't access local"
   // refusal. Read-only + workspace-contained + typed errors.
   registerInspectRoutes(app);
+  // ── Agentic answer path (`POST /api/ai/answer`): the model gathers real
+  // workspace evidence with read-only tools before answering — Copilot-style,
+  // grounded + cited. Read-only by construction. Uses a tool-capable local model.
+  registerAnswerRoutes(app, {
+    providerBaseUrl: env.providerBaseUrl,
+    defaultModel: process.env.MIGRAPILOT_AGENT_MODEL ?? 'qwen3-coder:30b',
+    cloudModel: process.env.MIGRAPILOT_AGENT_CLOUD_MODEL ?? 'gpt-oss:120b-cloud',
+  });
   // ── Durable state (MigraAI Durable State): embedded SQLite adapter. Fail-
   // closed — if the DB can't open or the schema is incompatible, `durable` stays
   // undefined and /health reports persistence degraded/unavailable rather than

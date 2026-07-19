@@ -90,6 +90,30 @@ export type AiStreamEvent =
   | { type: 'token'; text: string }
   | { type: 'done'; model?: string; provider?: string; tier?: string; usage?: AiUsage; failedOver?: string[] };
 
+/** A single read-only tool step taken by the agentic answer loop. */
+export interface AgenticStep {
+  tool: string;
+  args: Record<string, unknown>;
+  ok: boolean;
+  summary: string;
+}
+
+/** Streamed events from the agentic answer loop (`POST /api/ai/answer`, SSE). */
+export type AnswerStreamEvent =
+  | { type: 'route'; model: string }
+  | { type: 'step'; step: AgenticStep }
+  | { type: 'token'; text: string }
+  | { type: 'done'; stepsUsed: number; model: string };
+
+export interface AnswerRequest {
+  prompt: string;
+  workspaceRoot: string;
+  /** `cloud` escalates to a faster/stronger model (opt-in). */
+  tier?: 'local' | 'cloud';
+  model?: string;
+  maxSteps?: number;
+}
+
 export interface AiModel {
   id: string;
   provider: string;
@@ -423,6 +447,66 @@ export class MigraAiClient {
       throw new PilotError('NETWORK', 'Engine stream interrupted.', { requestId, cause: err });
     } finally {
       done();
+    }
+  }
+
+  /**
+   * Stream the AGENTIC ANSWER loop (`POST /api/ai/answer`, SSE). The model
+   * gathers real workspace evidence with read-only tools before answering
+   * (Copilot "agent mode"). Yields `route`, `step` (each tool call), `token`
+   * (the streamed answer), then `done`. Uses ONLY the caller's abort signal —
+   * no short client timeout — because a local multi-hop run can take minutes.
+   */
+  async *answerStream(body: AnswerRequest, signal?: AbortSignal): AsyncGenerator<AnswerStreamEvent> {
+    const requestId = newRequestId();
+    const url = `${this.base()}/api/ai/answer`;
+    this.cfg.log(`POST ${url} [${requestId}] (agentic sse)`);
+    let res: Response;
+    try {
+      res = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          accept: 'text/event-stream',
+          [REQUEST_ID_HEADER]: requestId,
+          ...this.scopeHeaders(),
+        },
+        body: JSON.stringify({ ...body, stream: true }),
+        signal,
+      });
+    } catch (err) {
+      if (isAbort(err)) throw new PilotError('CANCELLED', 'Agent run cancelled.', { requestId });
+      throw new PilotError('NETWORK', 'The local runner is unreachable.', { requestId, retriable: true, cause: err });
+    }
+    if (!res.ok) throw this.httpError(res.status, requestId);
+    if (!res.body) throw new PilotError('SERVER_ERROR', 'Agent run returned an empty stream.', { requestId });
+
+    const decoder = new TextDecoder();
+    let buffer = '';
+    try {
+      for await (const chunk of res.body as unknown as AsyncIterable<Uint8Array>) {
+        buffer += decoder.decode(chunk, { stream: true });
+        let sep: number;
+        while ((sep = buffer.indexOf('\n\n')) !== -1) {
+          const frame = buffer.slice(0, sep);
+          buffer = buffer.slice(sep + 2);
+          const parsed = parseSseFrame(frame);
+          if (!parsed) continue;
+          if (parsed.event === 'error') {
+            const data = parsed.data as { message?: string };
+            throw new PilotError('SERVER_ERROR', data.message ?? 'The agent run failed.', { requestId });
+          }
+          const d = parsed.data as Record<string, unknown>;
+          if (parsed.event === 'route') yield { type: 'route', model: String(d.model ?? '') };
+          else if (parsed.event === 'step') yield { type: 'step', step: d.step as AgenticStep };
+          else if (parsed.event === 'token') yield { type: 'token', text: String(d.text ?? '') };
+          else if (parsed.event === 'done') yield { type: 'done', stepsUsed: Number(d.stepsUsed ?? 0), model: String(d.model ?? '') };
+        }
+      }
+    } catch (err) {
+      if (err instanceof PilotError) throw err;
+      if (isAbort(err)) throw new PilotError('CANCELLED', 'Agent run cancelled.', { requestId });
+      throw new PilotError('NETWORK', 'Agent stream interrupted.', { requestId, cause: err });
     }
   }
 

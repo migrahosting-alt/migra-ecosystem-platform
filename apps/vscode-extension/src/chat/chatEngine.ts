@@ -7,6 +7,7 @@ import { isPilotError, toUserMessage } from '@migrapilot/pilot-client';
 import { type AiChatRequest, MigraAiClient } from '../services/migraAiClient.js';
 import { EngineDiagnostics } from '../services/engineDiagnostics.js';
 import { parseAgentCommand, runAgentCommand } from './agentCommand.js';
+import { parseDeepCommand, runDeepCommand } from './deepCommand.js';
 import { classifyIntent, detectEcosystem, buildInspectionPlan } from './intentRouter.js';
 import { runInspectionTurn, renderRoutingError } from './inspectionTurn.js';
 import { runEngineerTurn } from './engineerTurn.js';
@@ -98,6 +99,22 @@ export async function runChatTurn(
       rootPath: vscode.workspace.workspaceFolders?.[0]?.uri.fsPath,
       path: activeEditor ? vscode.workspace.asRelativePath(activeEditor.document.uri) : undefined,
     });
+    return;
+  }
+
+  // ── explicit /deep command: AGENT MODE (Copilot-style) ──────────────────────
+  // Runs the engine's agentic answer loop — the model iteratively calls read-only
+  // workspace tools to gather real evidence, then answers with citations. Live
+  // tool steps render as progress. Read-only; never edits; never a silent fallback.
+  const deepCmd = parseDeepCommand(trimmed);
+  if (deepCmd) {
+    await runDeepCommand(
+      deps.migraAiClient,
+      deepCmd,
+      vscode.workspace.workspaceFolders?.[0]?.uri.fsPath,
+      sink,
+      tokenToSignal(token),
+    );
     return;
   }
 
