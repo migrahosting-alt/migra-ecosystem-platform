@@ -1,0 +1,26 @@
+# Canonical VS Code extension — re-exclude generated/runtime content.
+# The root .gitignore allowlists this package's SOURCE; these rules keep build
+# output, packaged bundles, secrets, and local state out of git.
+
+node_modules/
+dist/
+out/
+coverage/
+
+# TypeScript incremental build cache
+*.tsbuildinfo
+
+# VS Code integration-test harness (downloaded editor build)
+.vscode-test/
+
+# Packaged extension bundles
+*.vsix
+
+# Runtime state DB (SQLite) and its WAL sidecars
+*.db
+*.db-shm
+*.db-wal
+
+# Secrets / local env
+.env
+.env.*
