@@ -46,12 +46,9 @@ export interface WeightedTerm {
   weight: number;
 }
 
-/** Pull distinctive, searchable tokens out of a natural-language query, WEIGHTED
- * so an identifier ranks far above a leftover common word. Identifiers
- * (camelCase / snake_case / dotted / PascalCase / filenames) are the strong
- * signal; a plain lowercase word is weak and only used if nothing better. */
-export function salientTermsWeighted(query: string): WeightedTerm[] {
-  const raw = query.match(/[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)+|[\w-]+\.[A-Za-z0-9]{1,6}|[A-Za-z_$][\w$]{2,}/g) ?? [];
+/** Raw weighted-token extraction from a single piece of text. */
+function rawTerms(text: string): WeightedTerm[] {
+  const raw = text.match(/[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)+|[\w-]+\.[A-Za-z0-9]{1,6}|[A-Za-z_$][\w$]{2,}/g) ?? [];
   const seen = new Set<string>();
   const scored: WeightedTerm[] = [];
   for (const tok of raw) {
@@ -66,8 +63,26 @@ export function salientTermsWeighted(query: string): WeightedTerm[] {
     const weight = isIdentifier ? 3 : term.length >= 9 ? 2 : 1;
     scored.push({ term, weight });
   }
-  scored.sort((a, b) => b.weight - a.weight || b.term.length - a.term.length);
-  return scored.slice(0, MAX_TERMS);
+  return scored;
+}
+
+/** Pull distinctive, searchable tokens out of a query, WEIGHTED so an identifier
+ * ranks far above a leftover common word. When `conversationContext` is given,
+ * IDENTIFIERS from prior turns are inherited (so a follow-up like "what ops does
+ * it support?" still anchors on the earlier subject) — but ranked AFTER the
+ * current query's own terms, and never generic words from history. */
+export function salientTermsWeighted(query: string, conversationContext = ''): WeightedTerm[] {
+  const q = rawTerms(query);
+  const have = new Set(q.map((t) => t.term.toLowerCase()));
+  // Only inherit strong identifiers (weight 3) from history, deduped vs the query.
+  const ctx = conversationContext
+    ? rawTerms(conversationContext).filter((t) => t.weight >= 3 && !have.has(t.term.toLowerCase()))
+    : [];
+  // Stable sort by weight keeps query terms ahead of context terms at equal
+  // weight (V8 sort is stable), while a context identifier (w3) still outranks a
+  // generic query word (w1/w2) — exactly what a subject-less follow-up needs.
+  const combined = [...q, ...ctx].sort((a, b) => b.weight - a.weight);
+  return combined.slice(0, MAX_TERMS);
 }
 
 export async function retrieveContext(input: RetrieveRequest): Promise<RetrieveResponse> {
@@ -80,8 +95,9 @@ export async function retrieveContext(input: RetrieveRequest): Promise<RetrieveR
     if (active) chunks.push(active);
   }
 
-  // 2) Lexical search of the working tree for the query's salient terms.
-  const terms = salientTermsWeighted(input.query ?? '');
+  // 2) Lexical search of the working tree for the query's salient terms — plus
+  // any subject identifier inherited from the conversation so follow-ups anchor.
+  const terms = salientTermsWeighted(input.query ?? '', input.conversationContext ?? '');
   const topWeight = terms[0]?.weight ?? 0;
   if (terms.length > 0) {
     // Aggregate per file: WEIGHTED score (sum of matched-term weights) + the best

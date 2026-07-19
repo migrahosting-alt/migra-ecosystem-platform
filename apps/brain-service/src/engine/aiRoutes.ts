@@ -394,6 +394,9 @@ export function registerAiRoutes(
           feature: 'chat',
           activeFile: body.activeFile,
           selectionText: body.selectionText,
+          // Prior turns let a follow-up ("what ops does IT support?") anchor on
+          // the earlier subject instead of drifting to unrelated files.
+          conversationContext: summary || undefined,
           maxChunks: 6,
         };
         const r = await retrieveContext(retrieveReq);

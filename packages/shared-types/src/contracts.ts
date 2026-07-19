@@ -79,6 +79,11 @@ export interface RetrieveRequest {
   includeGlobs?: string[];
   excludeGlobs?: string[];
   maxChunks?: number;
+  /** Prior-conversation text (summary / recent turns). Lets a follow-up question
+   * inherit the SUBJECT identifier from earlier turns (e.g. "what ops does it
+   * support?" after "what does registerInspectRoutes do?") so grounding still
+   * anchors on the right symbol instead of drifting to unrelated files. */
+  conversationContext?: string;
 }
 
 export interface RetrieveResponse {

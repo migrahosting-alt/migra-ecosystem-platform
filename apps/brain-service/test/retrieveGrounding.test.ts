@@ -30,6 +30,18 @@ test('salientTermsWeighted ranks identifiers above generic words and drops fille
   }
 });
 
+test('salientTermsWeighted inherits the subject identifier from prior conversation', () => {
+  // A subject-less follow-up: no identifier of its own.
+  const bare = salientTermsWeighted('What operations does it support?');
+  assert.ok(!bare.some((t) => t.term === 'registerInspectRoutes'), 'no subject without context');
+  // With prior context, the earlier identifier is inherited and ranks top.
+  const withCtx = salientTermsWeighted('What operations does it support?', 'user: What does registerInspectRoutes do?');
+  assert.equal(withCtx[0]?.term, 'registerInspectRoutes', 'follow-up anchors on the prior subject');
+  // But a generic word from history is NOT inherited (only identifiers).
+  const noGeneric = salientTermsWeighted('summarize this', 'the operations were interesting and colorful');
+  assert.ok(!noGeneric.some((t) => t.term === 'operations'), 'generic history words are not inherited');
+});
+
 test('retrieveContext ranks the DEFINING file first and captures its body', async () => {
   const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'migra-retrieve-def-')));
   fs.mkdirSync(path.join(dir, 'src'));
