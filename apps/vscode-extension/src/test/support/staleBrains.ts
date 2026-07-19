@@ -1,5 +1,5 @@
 import { execSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readlinkSync } from 'node:fs';
 
 // Deterministic stale-brain cleanup for the test harness. A lifecycle host test
 // auto-starts a brain on a fixed port; if an Extension Host run is interrupted
@@ -13,6 +13,28 @@ import { readFileSync } from 'node:fs';
 
 /** Ports the test suites use for spawned brains (3991 = manual, 3988 = lifecycle). */
 export const TEST_BRAIN_PORTS = [3988, 3991];
+
+/** Confirm a PID is a brain-service process before killing it. A brain launched
+ * with an ABSOLUTE path has "brain-service" in argv; one launched RELATIVELY
+ * (`node dist/src/server.js` run from the brain-service dir — what a developer
+ * or a manual test does) does NOT, so we also confirm via the process's cwd. In
+ * both cases the match is exact enough to never collateral-kill another service. */
+export function isBrainService(pid: number): boolean {
+  try {
+    const cmdline = readFileSync(`/proc/${pid}/cmdline`, 'utf8');
+    if (cmdline.includes('brain-service')) return true;
+    // argv is NUL-separated; a relative launch is one arg that IS (or ends with)
+    // `server.js` — confirm the process is the brain via its working directory.
+    const args = cmdline.split('\0').filter(Boolean);
+    if (args.some((a) => a === 'server.js' || a.endsWith('/server.js') || a.endsWith('\\server.js'))) {
+      const cwd = readlinkSync(`/proc/${pid}/cwd`);
+      if (cwd.includes('brain-service')) return true;
+    }
+  } catch {
+    /* can't confirm identity → leave it alone */
+  }
+  return false;
+}
 
 export function killStaleBrains(ports: number[] = TEST_BRAIN_PORTS): void {
   let listing = '';
@@ -33,13 +55,7 @@ export function killStaleBrains(ports: number[] = TEST_BRAIN_PORTS): void {
         continue;
       }
       const pid = Number(match[1]);
-      let cmdline = '';
-      try {
-        cmdline = readFileSync(`/proc/${pid}/cmdline`, 'utf8');
-      } catch {
-        continue; // can't confirm identity → leave it alone
-      }
-      if (cmdline.includes('brain-service')) {
+      if (isBrainService(pid)) {
         try {
           process.kill(pid, 'SIGKILL');
         } catch {
