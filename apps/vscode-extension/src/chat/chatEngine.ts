@@ -189,6 +189,7 @@ export async function runChatTurn(
     // APPLY afterwards. The engineer loop is preview-only by owner policy — it
     // proposes, it never writes; applying is an explicit operator action here.
     const changesetProposals: ChangesetProposal[] = [];
+    const taskSignal = tokenToSignal(token);
     await runEngineerTurn(
       deps.migraAiClient,
       {
@@ -217,18 +218,19 @@ export async function runChatTurn(
           }
         },
       },
-      tokenToSignal(token),
+      taskSignal,
     );
     // Offer to apply the final (most complete) proposed changeset — user-confirmed,
     // via the engine's approval boundary. Non-fatal: a decline/failure just leaves
-    // the proposal unapplied.
+    // the proposal unapplied. Passes the abort signal so the chat Stop button can
+    // dismiss the apply prompt (a pending notification must not block the turn).
     const finalChangeset = changesetProposals.at(-1);
     if (finalChangeset && !token.isCancellationRequested) {
       // Opt-in auto-approve: when on, apply without the interactive prompt. Default
       // off keeps the owner's preview-only behavior (review + click Apply).
       const autoApply = vscode.workspace.getConfiguration('migrapilot').get<boolean>('autoApplyChangeset', false);
       try {
-        await previewAndMaybeApplyChangeset(deps.migraAiClient, workspaceRootForTask, finalChangeset, 'MigraPilot proposal', { autoApply });
+        await previewAndMaybeApplyChangeset(deps.migraAiClient, workspaceRootForTask, finalChangeset, 'MigraPilot proposal', { autoApply, signal: taskSignal });
       } catch {
         /* apply UI failure never breaks the chat turn */
       }
