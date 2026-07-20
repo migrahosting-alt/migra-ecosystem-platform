@@ -11,6 +11,7 @@ import { parseDeepCommand, runDeepCommand } from './deepCommand.js';
 import { classifyIntent, detectEcosystem, buildInspectionPlan } from './intentRouter.js';
 import { runInspectionTurn, renderRoutingError } from './inspectionTurn.js';
 import { runEngineerTurn } from './engineerTurn.js';
+import { previewAndMaybeApplyChangeset, type ChangesetProposal, type ChangesetOp } from '../services/proposedChangeset.js';
 import { getEscalationDispatch } from '../services/escalationConsent.js';
 import { attributionView, type RoutingView } from '../panel/providerRouterViewModel.js';
 import { buildAiRequest } from './intentMapping.js';
@@ -150,6 +151,10 @@ export async function runChatTurn(
   // pilot chat surface keeps its existing behavior.
   const workspaceRootForTask = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   if (backend.kind === 'local' && workspaceRootForTask && classifyIntent(trimmed) === 'workspace-task') {
+    // Collect changeset proposals during the run so we can offer a user-confirmed
+    // APPLY afterwards. The engineer loop is preview-only by owner policy — it
+    // proposes, it never writes; applying is an explicit operator action here.
+    const changesetProposals: ChangesetProposal[] = [];
     await runEngineerTurn(
       deps.migraAiClient,
       {
@@ -171,9 +176,26 @@ export async function runChatTurn(
           const a = attributionView((routing ?? {}) as RoutingView);
           sink.markdown(`\n\n— _${a.headline}_${a.lines.length ? '\n' + a.lines.map((l) => `_${l}_`).join('  ·  ') : ''}\n`);
         },
+        onProposal: (p) => {
+          const pv = (p as { preview?: { ops?: ChangesetOp[]; proposalHash?: string; fileCount?: number } }).preview;
+          if (pv?.proposalHash && pv.ops?.length) {
+            changesetProposals.push({ proposalHash: pv.proposalHash, ops: pv.ops, ...(pv.fileCount != null ? { fileCount: pv.fileCount } : {}) });
+          }
+        },
       },
       tokenToSignal(token),
     );
+    // Offer to apply the final (most complete) proposed changeset — user-confirmed,
+    // via the engine's approval boundary. Non-fatal: a decline/failure just leaves
+    // the proposal unapplied.
+    const finalChangeset = changesetProposals.at(-1);
+    if (finalChangeset && !token.isCancellationRequested) {
+      try {
+        await previewAndMaybeApplyChangeset(deps.migraAiClient, workspaceRootForTask, finalChangeset, 'MigraPilot proposal');
+      } catch {
+        /* apply UI failure never breaks the chat turn */
+      }
+    }
     return;
   }
 
