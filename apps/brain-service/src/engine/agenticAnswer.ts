@@ -124,7 +124,7 @@ const SYSTEM_PROMPT =
   'search (content grep), read (file lines), find (filenames), list (directory), git_status. ' +
   'Gather real evidence with the tools BEFORE answering a question about the code — do not answer repository questions from memory or assumption. ' +
   'Efficient flow: use `find` to locate a file by name, or `search` to find where a symbol is used; then ALWAYS `read` the specific file you identified before drawing a conclusion. ' +
-  'Do NOT repeat a search that returned nothing — change tactic (try `find`, or read the file you already located). ' +
+  'SEARCH STRATEGY: the question is written in plain English, but code uses IDENTIFIERS. Do NOT just search the question\'s literal phrase (e.g. "deep agent mode" or "gather evidence") — those rarely appear verbatim in code. Instead search LIKELY CODE NAMES for the feature: single distinctive words ("agentic", "answer", "retrieve", "inspect"), camelCase/snake_case function names, route paths ("/api/ai/"), and file-name guesses via `find`. If a search returns 0 hits, PIVOT to a different related word or a `find` by filename — never repeat near-identical phrases. ' +
   'Crucially: if you have identified the file that answers the question, READ it — never conclude "I would need to read X" when you can just read X. ' +
   '\n\nSTRICT ANTI-FABRICATION RULES (a wrong confident answer is worse than "not found"):\n' +
   '1. ONLY name or cite a file AFTER you have actually READ it in this session. Never cite a file you only saw in a search result list but did not read.\n' +
