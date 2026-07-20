@@ -9,6 +9,7 @@ import { EngineDiagnostics } from '../services/engineDiagnostics.js';
 import { parseAgentCommand, runAgentCommand } from './agentCommand.js';
 import { parseDeepCommand, runDeepCommand } from './deepCommand.js';
 import { classifyIntent, detectEcosystem, buildInspectionPlan } from './intentRouter.js';
+import { resolveTaskRoot } from './taskRoot.js';
 import { runInspectionTurn, renderRoutingError } from './inspectionTurn.js';
 import { runEngineerTurn } from './engineerTurn.js';
 import { previewAndMaybeApplyChangeset, type ChangesetProposal, type ChangesetOp } from '../services/proposedChangeset.js';
@@ -149,8 +150,41 @@ export async function runChatTurn(
   // delegation cannot block it); conservative classifier keeps conversational
   // questions on the chat path. Only on the local engine backend — the remote
   // pilot chat surface keeps its existing behavior.
-  const workspaceRootForTask = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-  if (backend.kind === 'local' && workspaceRootForTask && classifyIntent(trimmed) === 'workspace-task') {
+  if (backend.kind === 'local' && classifyIntent(trimmed) === 'workspace-task') {
+    // Resolve WHICH folder to build in: an explicit path in the message, else the
+    // open workspace, else ASK via a folder picker — so MigraPilot can work on any
+    // folder on the machine, not only the one open in VS Code.
+    const resolved = await resolveTaskRoot(trimmed, {
+      openWorkspace: vscode.workspace.workspaceFolders?.[0]?.uri.fsPath,
+      isDirectory: async (p) => {
+        try {
+          const stat = await vscode.workspace.fs.stat(vscode.Uri.file(p));
+          return (stat.type & vscode.FileType.Directory) !== 0;
+        } catch {
+          return false;
+        }
+      },
+      pickFolder: async (near) => {
+        const picked = await vscode.window.showOpenDialog({
+          canSelectFolders: true,
+          canSelectFiles: false,
+          canSelectMany: false,
+          openLabel: 'Build here',
+          title: 'Choose a folder for MigraPilot to build in',
+          ...(near ? { defaultUri: vscode.Uri.file(near) } : {}),
+        });
+        return picked?.[0]?.fsPath;
+      },
+    });
+    if (!resolved) {
+      sink.markdown('No folder selected. Open a folder, or include a path in your message (e.g. `build … in C:\\\\path\\\\to\\\\project`), and try again.');
+      return;
+    }
+    const workspaceRootForTask = resolved.root;
+    if (resolved.source !== 'workspace') {
+      const why = resolved.missingNamed ? ` (\`${resolved.missingNamed}\` was not found)` : '';
+      sink.markdown(`\n_Building in \`${workspaceRootForTask}\`${why}._\n`);
+    }
     // Collect changeset proposals during the run so we can offer a user-confirmed
     // APPLY afterwards. The engineer loop is preview-only by owner policy — it
     // proposes, it never writes; applying is an explicit operator action here.
