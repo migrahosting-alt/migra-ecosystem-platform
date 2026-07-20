@@ -182,6 +182,11 @@
           "default": true,
           "description": "In local-brain mode, attempt to auto-start the local brain service when it is unavailable (requires migrapilot.brainAutoStartCommand). Never affects pilot-api."
         },
+        "migrapilot.autoApplyChangeset": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Auto-approve build changes. When ON, a changeset the workspace engineer proposes is applied to your workspace immediately, with no Apply/Review prompt (an auto-accept / 'YOLO' mode, like Cursor's). When OFF (default), you review and click Apply first. Changes are still applied through the engine's approval boundary (atomic, rollback-on-failure) and a notification reports what was written. Only affects the LOCAL workspace engineer — never production."
+        },
         "migrapilot.brainAutoStartCommand": {
           "type": "array",
           "items": {

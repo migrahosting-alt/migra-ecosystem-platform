@@ -37,6 +37,7 @@ export async function previewAndMaybeApplyChangeset(
   rootPath: string,
   proposal: ChangesetProposal,
   title: string,
+  options: { autoApply?: boolean } = {},
 ): Promise<boolean> {
   const fileOps = proposal.ops.filter((o) => o.kind !== 'mkdir' && o.path);
   if (!proposal.proposalHash || fileOps.length === 0) return false;
@@ -45,23 +46,28 @@ export async function previewAndMaybeApplyChangeset(
   const summary =
     names.length <= 5 ? names.join(', ') : `${names.slice(0, 5).join(', ')} +${names.length - 5} more`;
 
-  const choice = await vscode.window.showInformationMessage(
-    `MigraPilot proposed ${fileOps.length} file change${fileOps.length === 1 ? '' : 's'}: ${summary}. Apply to the workspace?`,
-    'Apply',
-    'Review diffs',
-    'Dismiss',
-  );
-
-  if (choice === 'Review diffs') {
-    await showChangesetDiffs(rootPath, title, fileOps);
-    const confirm = await vscode.window.showInformationMessage(
-      `Apply ${fileOps.length} proposed file change${fileOps.length === 1 ? '' : 's'}?`,
+  // Auto-approve mode (opt-in): skip the interactive prompt and apply straight
+  // away. Still goes through the engine's approval boundary below; only the
+  // user's click is skipped, and the result is reported (never silent).
+  if (!options.autoApply) {
+    const choice = await vscode.window.showInformationMessage(
+      `MigraPilot proposed ${fileOps.length} file change${fileOps.length === 1 ? '' : 's'}: ${summary}. Apply to the workspace?`,
       'Apply',
+      'Review diffs',
       'Dismiss',
     );
-    if (confirm !== 'Apply') return false;
-  } else if (choice !== 'Apply') {
-    return false;
+
+    if (choice === 'Review diffs') {
+      await showChangesetDiffs(rootPath, title, fileOps);
+      const confirm = await vscode.window.showInformationMessage(
+        `Apply ${fileOps.length} proposed file change${fileOps.length === 1 ? '' : 's'}?`,
+        'Apply',
+        'Dismiss',
+      );
+      if (confirm !== 'Apply') return false;
+    } else if (choice !== 'Apply') {
+      return false;
+    }
   }
 
   // Confirmed → run the engine approval sequence (mint token, then consume it to
@@ -79,7 +85,7 @@ export async function previewAndMaybeApplyChangeset(
   }
 
   await vscode.window.showInformationMessage(
-    `MigraPilot applied ${fileOps.length} file change${fileOps.length === 1 ? '' : 's'} to the workspace.`,
+    `MigraPilot ${options.autoApply ? 'auto-applied' : 'applied'} ${fileOps.length} file change${fileOps.length === 1 ? '' : 's'} to the workspace: ${summary}.`,
   );
   return true;
 }

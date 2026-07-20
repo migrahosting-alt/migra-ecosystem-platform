@@ -190,8 +190,11 @@ export async function runChatTurn(
     // the proposal unapplied.
     const finalChangeset = changesetProposals.at(-1);
     if (finalChangeset && !token.isCancellationRequested) {
+      // Opt-in auto-approve: when on, apply without the interactive prompt. Default
+      // off keeps the owner's preview-only behavior (review + click Apply).
+      const autoApply = vscode.workspace.getConfiguration('migrapilot').get<boolean>('autoApplyChangeset', false);
       try {
-        await previewAndMaybeApplyChangeset(deps.migraAiClient, workspaceRootForTask, finalChangeset, 'MigraPilot proposal');
+        await previewAndMaybeApplyChangeset(deps.migraAiClient, workspaceRootForTask, finalChangeset, 'MigraPilot proposal', { autoApply });
       } catch {
         /* apply UI failure never breaks the chat turn */
       }
