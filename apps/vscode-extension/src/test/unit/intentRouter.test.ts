@@ -49,6 +49,25 @@ test('non-sentence-initial build directives route to the workspace agent', () =>
   }
 });
 
+// Regression: a user pasting a QUOTED or bulleted build directive ("build the
+// system" with surrounding quotes, or "- build the app") must still route — the
+// leading quote/marker was defeating the anchored verb match and dropping it to
+// chat, which then just asked "what do you want me to build?".
+test('leading quotes / list markers do not block build-directive routing', () => {
+  for (const p of [
+    '"build the system"',
+    '"build the system" → engineer inspects your workspace, proposes real files',
+    '- build the app',
+    '* scaffold the project',
+    '1. create the files',
+    '`implement the health poller`',
+  ]) {
+    assert.equal(classifyIntent(p), 'workspace-task', `should build: ${p}`);
+  }
+  // A quoted QUESTION is still a question.
+  assert.equal(classifyIntent('"what is a monad?"'), 'conversation');
+});
+
 test('the lead-in stripper does not hijack genuine questions or chit-chat', () => {
   assert.equal(classifyIntent('can you explain the build system?'), 'conversation');
   assert.equal(classifyIntent('please tell me how the router works'), 'conversation');
