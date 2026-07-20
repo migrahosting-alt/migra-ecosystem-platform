@@ -14,6 +14,9 @@ export interface EngineerSink {
   onEscalation?(offer: unknown): Promise<void> | void;
   /** Slice 5: provider attribution for the completed run (from the done frame). */
   onAttribution?(routing: unknown): void;
+  /** A changeset/edit proposal was surfaced — the host may offer to apply it
+   * (user-confirmed) after the run. Called in addition to the markdown render. */
+  onProposal?(proposal: unknown): void;
 }
 
 interface StepData { n?: number; tool?: string; summary?: string }
@@ -88,6 +91,7 @@ export async function runEngineerTurn(
         sink.markdown(`\n  ${icon} _${d.message ?? d.kind ?? 'note'}_\n`);
       } else if (ev.event === 'proposal') {
         sink.markdown(`\n${renderProposal(ev.data as ProposalData)}\n`);
+        sink.onProposal?.(ev.data);
       } else if (ev.event === 'escalation_offer') {
         // A defined local failure produced a cloud escalation OFFER. Consent is
         // handled by the caller (a modal) — no cloud call happens without it.
