@@ -168,6 +168,33 @@ test('edit.apply is NEVER executed: substituted with edit.preview and surfaced a
   assert.ok(calls.every((c) => c.tool !== 'edit.apply'));
 });
 
+test('a recorded proposal is never reported as a failure ("create files manually")', async () => {
+  // The model proposes a change, then WRONGLY declares failure and tells the user
+  // to create the files by hand — twice. The loop corrects once, then overrides
+  // deterministically so the user never sees a false failure for a real proposal.
+  const { deps } = scriptedDeps([
+    '{"action":{"tool":"edit.preview","input":{"changes":[{"path":"a.ts","startLine":1,"endLine":1,"replacement":"y"}]}}}',
+    '{"final":"Failed to create files using edit.preview. Please manually create the following files: a.ts."}',
+    '{"final":"I was unable to create the file. Create it manually yourself."}',
+  ]);
+  const events = await drain(runEngineerTask(deps, { rootPath: '/r', task: 'build a.ts' }));
+  const final = events.find((e) => e.type === 'final') as { markdown: string };
+  assert.ok(final, 'a final is emitted');
+  assert.doesNotMatch(final.markdown, /manually|failed to create|unable to create/i, 'no false-failure language');
+  assert.match(final.markdown, /approve to apply/i, 'presents the proposal as approvable');
+});
+
+test('a recorded proposal + honest final passes through with the preview-only footer', async () => {
+  const { deps } = scriptedDeps([
+    '{"action":{"tool":"edit.preview","input":{"changes":[{"path":"a.ts","startLine":1,"endLine":1,"replacement":"y"}]}}}',
+    '{"final":"Proposed an edit to a.ts that renames the handler. Review and approve to apply."}',
+  ]);
+  const events = await drain(runEngineerTask(deps, { rootPath: '/r', task: 'edit a.ts' }));
+  const final = events.find((e) => e.type === 'final') as { markdown: string };
+  assert.match(final.markdown, /Proposed an edit to a\.ts/);
+  assert.match(final.markdown, /NOT applied/i, 'preview-only footer appended');
+});
+
 test('malformed output gets exactly one retry, then an honest machine error', async () => {
   const { deps } = scriptedDeps(['prose, not JSON', 'still prose']);
   const events = await drain(runEngineerTask(deps, { rootPath: '/r', task: 't' }));
