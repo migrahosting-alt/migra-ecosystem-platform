@@ -253,7 +253,16 @@ export function registerAiRoutes(
     const requestId = engineCorrelationId(request);
     const scope: Scope = scopeFrom(request);
     const policy = { mode: body.memoryPolicy?.mode ?? 'session', retrieve: body.memoryPolicy?.retrieve ?? true, store: body.memoryPolicy?.store ?? true };
-    const conv = memoryStore && body.conversationId ? memoryStore.getConversation(body.conversationId, scope) : undefined;
+    let conv = memoryStore && body.conversationId ? memoryStore.getConversation(body.conversationId, scope) : undefined;
+    // Self-heal a stale conversationId: `session` memory is in-memory, so a brain
+    // restart clears it while a client keeps a now-unknown id. Rather than silently
+    // degrade to amnesia, recreate the conversation so forward storage/retrieval
+    // resume. This turn's lost context is still recovered from the client-provided
+    // summary (which the client always sends as a fallback). No recreation when the
+    // client opted out of memory (mode 'off').
+    if (!conv && memoryStore && body.conversationId && policy.mode !== 'off') {
+      conv = memoryStore.createConversation(scope, { memoryMode: policy.mode === 'durable' ? 'durable' : 'session', id: body.conversationId });
+    }
     const memoryActive = Boolean(conv && conv.memoryMode !== 'off');
 
     let effectiveSummary = summary;

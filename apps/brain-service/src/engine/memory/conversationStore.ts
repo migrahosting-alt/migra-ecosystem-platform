@@ -134,10 +134,15 @@ export class ConversationStore {
   }
 
   // ── Conversations ────────────────────────────────────────────────────────
-  createConversation(scope: Scope, params: { title?: string; memoryMode: MemoryMode }): Conversation {
+  createConversation(scope: Scope, params: { title?: string; memoryMode: MemoryMode; id?: string }): Conversation {
     const t = this.now();
+    // An explicit id lets the engine RE-ADOPT a client's still-referenced
+    // conversationId after in-memory `session` state was lost (e.g. a brain
+    // restart), so the client's stored id stays valid and forward turns accumulate
+    // memory. Only honoured when the id is unused and shaped like our own ids.
+    const reuse = params.id && /^conv_[a-z0-9]{6,}$/i.test(params.id) && !this.conversations.has(params.id) ? params.id : undefined;
     const c: Conversation = {
-      id: this.mkId('conv'),
+      id: reuse ?? this.mkId('conv'),
       ownerScope: scope.owner,
       workspaceScope: scope.workspace,
       title: params.title ?? 'New conversation',

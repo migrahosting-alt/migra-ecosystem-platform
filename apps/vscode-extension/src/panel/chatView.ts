@@ -290,11 +290,15 @@ export class MigraPilotChatViewProvider implements vscode.WebviewViewProvider {
       markdown: (t) => void webview.postMessage({ type: 'token', text: t }),
     };
 
-    // Server-side memory: for session/durable the engine owns history — the client
-    // carries only a conversationId and sends NO locally-reconstructed history.
+    // Server-side memory: for session/durable the engine owns history and, when
+    // present, its own retrieved context wins. But `session` memory is in-memory
+    // on the brain — a brain restart wipes it while the client keeps a now-stale
+    // conversationId, which would silently degrade to amnesia. So we ALWAYS carry
+    // a client-side history summary as a fallback: the engine uses it only when it
+    // has no memory of its own, making a restart non-fatal (client-authoritative
+    // history, the way Copilot/Claude behave).
     const mode = this.deps.memoryMode();
     const conversationId = mode === 'off' ? undefined : await this.ensureConversation(mode);
-    const useMemory = mode !== 'off';
 
     try {
       await runChatTurn(
@@ -306,9 +310,9 @@ export class MigraPilotChatViewProvider implements vscode.WebviewViewProvider {
         },
         sink,
         text || 'Analyze the attached file(s).',
-        // Never reconstruct history locally when memory is active — the engine
-        // retrieves it. In off mode, turns are stateless.
-        useMemory ? '' : summarizeTurns(history),
+        // Always a real fallback: the engine prefers its own memory when it has
+        // any, and falls back to this only when its memory is empty/stale.
+        summarizeTurns(history),
         this.cts.token,
         {
           modelProfile,
