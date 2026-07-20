@@ -45,7 +45,20 @@ const INSPECT_OBJECTS =
 const STRONG_INSPECT_OBJECTS =
   /\b(package\s*manager|package-?manager|workspace\s*root|current\s*(?:working\s*)?director(?:y|ies)|working\s*director(?:y|ies)|cwd)\b/i;
 
+/** Build/design/proposal framing — these are REQUESTS TO THE MODEL ("wire it
+ * up", "design a system", "propose"), never a read-only inspection of the
+ * current workspace, even if they mention files or use a verb like "show". */
+const BUILD_DESIGN_SIGNAL =
+  /\b(propos\w+|design|architect\w*|build|implement|create|scaffold|wire\s*(it|this|them)?\s*up|set\s*up|generate|write|refactor|add\s+a|should\s+(be|have|use|support)|would\s+(be|need)|plan\s+(a|for|out)|spec(ification)?|requirements?|dashboard|feature|integrat\w+|deploy\w*|roadmap|mvp)\b/i;
+
 export function isInspectionIntent(p: string): boolean {
+  // Inspection is for SHORT, explicit "what's my workspace state" queries. A long
+  // message or one with build/design framing is a real request for the model —
+  // route it to chat (which is grounded) so it is answered, never dead-ended in a
+  // read-only inspection that can't help. Claude/Copilot never gate this away.
+  const words = p.split(/\s+/).filter(Boolean).length;
+  if (words > 40 || p.length > 320) return false;
+  if (BUILD_DESIGN_SIGNAL.test(p)) return false;
   if (GIT_INSPECT.test(p)) return true;
   if (STRONG_INSPECT_OBJECTS.test(p)) return true;
   if (READONLY_SIGNAL.test(p) && (INSPECT_OBJECTS.test(p) || /\bgit\b|\bcommand/i.test(p))) return true;
