@@ -194,14 +194,17 @@ export function classifyIntent(prompt: string): ChatRoute {
   // question heuristic so "what is the git status?" inspects rather than being
   // answered (and refused) by the tool-less conversational model.
   if (isInspectionIntent(p)) return 'inspection';
-  // Strip a leading imperative lead-in so a build directive that is not
-  // sentence-initial ("you can now build the system", "go ahead and create the
-  // files") is still recognised as a task rather than falling through to chat.
-  const core = p.replace(ACTION_LEAD, '').trim() || p;
+  // Strip leading noise (surrounding quote/backtick, bullet or numbered-list
+  // marker, stray punctuation) THEN an imperative lead-in, so a quoted or
+  // bulleted build directive ('"build the system"', '- build the app',
+  // '1. create the files') routes like a bare one instead of the leading quote
+  // defeating the anchored verb match.
+  const deNoised = p.replace(/^(?:["'`*_>()\[\].:;,\s–—•·-]|\d+[.)])+/, '').trim() || p;
+  const core = deNoised.replace(ACTION_LEAD, '').trim() || deNoised;
   const isTask = TASK_VERBS.test(core) && (CODE_OBJECTS.test(core) || FILEISH.test(core));
   // Questions stay conversational — but a polite "can you build X" whose core is a
   // real task ("build X") is a directive, not a question, so it is NOT diverted.
-  if (QUESTION_LEAD.test(p) && !isTask) return 'conversation';
+  if (QUESTION_LEAD.test(deNoised) && !isTask) return 'conversation';
   if (isTask) return 'workspace-task';
   return 'conversation';
 }
