@@ -329,28 +329,8 @@ export function inferFeature(prompt: string): FeatureName {
   return 'chat';
 }
 
-/** Summarize the native participant's chat history (VS Code turn objects). */
-export function summarizeChatContext(
-  history: readonly (vscode.ChatRequestTurn | vscode.ChatResponseTurn)[],
-): string {
-  return history
-    .slice(-4)
-    .map((turn) => {
-      if ('prompt' in turn) return `user: ${turn.prompt}`;
-      return 'assistant: previous response';
-    })
-    .join('\n')
-    .slice(0, 1500);
-}
-
-/** Summarize a simple role/text history (the webview's representation) into the
- * same shape the native participant produces, so the backend sees identical
- * conversation context regardless of chat surface. */
-export function summarizeTurns(turns: readonly { role: string; text: string }[]): string {
-  return turns
-    .slice(-4)
-    .map((turn) => (turn.role === 'user' ? `user: ${turn.text}` : 'assistant: previous response'))
-    .join('\n')
-    .slice(0, 1500);
-}
+// Conversation-summary construction lives in a vscode-free module so it is
+// unit-testable under `node --test`. Re-exported here to keep the public API
+// (`summarizeChatContext`, `summarizeTurns`) stable for existing importers.
+export { summarizeChatContext, summarizeTurns } from './conversationSummary.js';
 

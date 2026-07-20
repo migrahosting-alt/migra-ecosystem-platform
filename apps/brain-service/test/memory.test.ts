@@ -34,6 +34,19 @@ test('create/read/delete conversation + deleted cannot be reopened', () => {
   assert.equal(s.getConversation(c.id, A), undefined, 'deleted conversation cannot be reopened');
 });
 
+test('createConversation re-adopts a well-shaped, unused client id (restart recovery)', () => {
+  const s = new ConversationStore();
+  // A client id whose in-memory conversation was lost (brain restart) is re-adopted
+  // verbatim, so the client's stored id stays valid and forward turns accumulate.
+  const readopted = s.createConversation(A, { memoryMode: 'session', id: 'conv_stale123abc' });
+  assert.equal(readopted.id, 'conv_stale123abc');
+  assert.ok(s.getConversation('conv_stale123abc', A), 're-adopted id is retrievable');
+  // A malformed id is ignored (a fresh id is minted instead).
+  assert.notEqual(s.createConversation(A, { memoryMode: 'session', id: 'not-a-conv-id' }).id, 'not-a-conv-id');
+  // A colliding id is never hijacked — a fresh id is minted.
+  assert.notEqual(s.createConversation(A, { memoryMode: 'session', id: 'conv_stale123abc' }).id, 'conv_stale123abc');
+});
+
 test('workspace + tenant isolation at the store layer', () => {
   const s = new ConversationStore();
   const c = s.createConversation(A, { memoryMode: 'session' });
@@ -173,6 +186,25 @@ test('chat commits user+assistant once and redacts secrets; retrieval diagnostic
   // Retry same requestId → idempotent (still 2 messages).
   await app.inject({ method: 'POST', url: '/api/ai/chat', headers: { ...H(A), 'x-request-id': 'turn-1' }, payload: { prompt: 'x', conversationId: id, memoryPolicy: { mode: 'session', retrieve: true, store: true } } });
   assert.equal(store.getMessages(id, A).length, 2, 'retry does not duplicate');
+  await app.close();
+});
+
+test('chat self-heals a stale conversationId instead of degrading to amnesia', async () => {
+  const store = new ConversationStore();
+  const app = memApp(store);
+  // The client holds a conversationId whose server-side session memory was lost
+  // (brain restart). It was never created here — getConversation returns undefined.
+  const staleId = 'conv_lostafterrestart1';
+  assert.equal(store.getConversation(staleId, A), undefined, 'precondition: id unknown to the store');
+  const chat = await app.inject({
+    method: 'POST', url: '/api/ai/chat', headers: { ...H(A), 'x-request-id': 'heal-1' },
+    payload: { prompt: 'continue with the plan', conversationId: staleId, conversationSummary: 'user: build MigraWatch\nassistant: here is the plan', memoryPolicy: { mode: 'session', retrieve: true, store: true } },
+  });
+  assert.equal(chat.statusCode, 200);
+  // Self-healed under the SAME id → the client's stored id stays valid, and this
+  // turn is committed so subsequent turns accumulate real server memory.
+  assert.equal((chat.json() as { conversationId?: string }).conversationId, staleId, 'echoes the re-adopted id');
+  assert.equal(store.getMessages(staleId, A).length, 2, 'user + assistant committed under the re-adopted id');
   await app.close();
 });
 
