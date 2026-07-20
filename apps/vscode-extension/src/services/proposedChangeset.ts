@@ -37,29 +37,45 @@ export async function previewAndMaybeApplyChangeset(
   rootPath: string,
   proposal: ChangesetProposal,
   title: string,
-  options: { autoApply?: boolean } = {},
+  options: { autoApply?: boolean; signal?: AbortSignal } = {},
 ): Promise<boolean> {
   const fileOps = proposal.ops.filter((o) => o.kind !== 'mkdir' && o.path);
   if (!proposal.proposalHash || fileOps.length === 0) return false;
+  if (options.signal?.aborted) return false;
 
   const names = fileOps.map((o) => o.path!).filter(Boolean);
   const summary =
     names.length <= 5 ? names.join(', ') : `${names.slice(0, 5).join(', ')} +${names.length - 5} more`;
 
+  // The apply prompt must honor cancellation (the chat Stop button): a VS Code
+  // notification cannot be dismissed programmatically, so race it against the
+  // abort signal — if the user stops the turn, resolve to ABORTED and bail rather
+  // than leaving the turn (and its "thinking" indicator) blocked on an open dialog.
+  const ABORTED = Symbol('aborted');
+  const onAbort = new Promise<typeof ABORTED>((resolve) => {
+    const s = options.signal;
+    if (!s) return; // never resolves → no effect on the race
+    if (s.aborted) resolve(ABORTED);
+    else s.addEventListener('abort', () => resolve(ABORTED), { once: true });
+  });
+  const prompt = <T extends string>(msg: string, ...actions: T[]): Promise<T | undefined | typeof ABORTED> =>
+    Promise.race([Promise.resolve(vscode.window.showInformationMessage(msg, ...actions)), onAbort]);
+
   // Auto-approve mode (opt-in): skip the interactive prompt and apply straight
   // away. Still goes through the engine's approval boundary below; only the
   // user's click is skipped, and the result is reported (never silent).
   if (!options.autoApply) {
-    const choice = await vscode.window.showInformationMessage(
+    const choice = await prompt(
       `MigraPilot proposed ${fileOps.length} file change${fileOps.length === 1 ? '' : 's'}: ${summary}. Apply to the workspace?`,
       'Apply',
       'Review diffs',
       'Dismiss',
     );
+    if (choice === ABORTED) return false;
 
     if (choice === 'Review diffs') {
       await showChangesetDiffs(rootPath, title, fileOps);
-      const confirm = await vscode.window.showInformationMessage(
+      const confirm = await prompt(
         `Apply ${fileOps.length} proposed file change${fileOps.length === 1 ? '' : 's'}?`,
         'Apply',
         'Dismiss',
@@ -69,6 +85,7 @@ export async function previewAndMaybeApplyChangeset(
       return false;
     }
   }
+  if (options.signal?.aborted) return false;
 
   // Confirmed → run the engine approval sequence (mint token, then consume it to
   // apply exactly once, atomically with rollback on failure).
