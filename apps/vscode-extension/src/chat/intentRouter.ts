@@ -45,7 +45,20 @@ const INSPECT_OBJECTS =
 const STRONG_INSPECT_OBJECTS =
   /\b(package\s*manager|package-?manager|workspace\s*root|current\s*(?:working\s*)?director(?:y|ies)|working\s*director(?:y|ies)|cwd)\b/i;
 
+/** Build/design/proposal framing — these are REQUESTS TO THE MODEL ("wire it
+ * up", "design a system", "propose"), never a read-only inspection of the
+ * current workspace, even if they mention files or use a verb like "show". */
+const BUILD_DESIGN_SIGNAL =
+  /\b(propos\w+|design|architect\w*|build|implement|create|scaffold|wire\s*(it|this|them)?\s*up|set\s*up|generate|write|refactor|add\s+a|should\s+(be|have|use|support)|would\s+(be|need)|plan\s+(a|for|out)|spec(ification)?|requirements?|dashboard|feature|integrat\w+|deploy\w*|roadmap|mvp)\b/i;
+
 export function isInspectionIntent(p: string): boolean {
+  // Inspection is for SHORT, explicit "what's my workspace state" queries. A long
+  // message or one with build/design framing is a real request for the model —
+  // route it to chat (which is grounded) so it is answered, never dead-ended in a
+  // read-only inspection that can't help. Claude/Copilot never gate this away.
+  const words = p.split(/\s+/).filter(Boolean).length;
+  if (words > 40 || p.length > 320) return false;
+  if (BUILD_DESIGN_SIGNAL.test(p)) return false;
   if (GIT_INSPECT.test(p)) return true;
   if (STRONG_INSPECT_OBJECTS.test(p)) return true;
   if (READONLY_SIGNAL.test(p) && (INSPECT_OBJECTS.test(p) || /\bgit\b|\bcommand/i.test(p))) return true;
@@ -68,6 +81,18 @@ export interface InspectionStep {
 }
 
 const FILENAME = /([\w./-]+\.[a-z0-9]{1,6})\b/i;
+
+/** Common domain TLDs — a bare token ending in one of these (e.g.
+ * `compassionfuneralchapel.com`) is a DOMAIN NAME, not a file to read. */
+const DOMAIN_TLD =
+  /\.(com|org|net|io|co|dev|app|ai|gov|edu|info|biz|me|us|uk|ca|xyz|online|site|store|tech|cloud|email|link|live|news|shop|blog|page|host)$/i;
+
+/** A token is a file reference if it is a path (has a slash) or has a real file
+ * extension — but NOT a bare domain name. Prevents planning a read of a domain. */
+function looksLikeFile(token: string): boolean {
+  if (token.includes('/')) return true; // a workspace-relative path
+  return !DOMAIN_TLD.test(token); // bare `foo.com` is a domain, not a file
+}
 
 /** Words that commonly follow "in" as an English idiom, NOT a directory name
  * ("in accordance with", "in order to", "in general", …). A bare token matching
@@ -98,10 +123,10 @@ export function buildInspectionPlan(prompt: string): InspectionStep[] {
   // package manager
   if (/\bpackage\s*manager\b|\bpackage-?manager\b|\bwhich\s+(pm|package)\b|\bdependenc/i.test(p)) add('pkg_manager');
 
-  // read a specific file
+  // read a specific file (but not a bare domain name that merely looks file-ish)
   if (/\b(read|open|show|cat|display|print)\b/i.test(p)) {
     const f = FILENAME.exec(p);
-    if (f) add('read', { path: f[1] });
+    if (f?.[1] && looksLikeFile(f[1])) add('read', { path: f[1] });
   }
 
   // search — extract the target token: prefer "named/called X", then "for … X",

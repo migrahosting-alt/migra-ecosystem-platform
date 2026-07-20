@@ -221,7 +221,13 @@ export async function runInspection(req: InspectRequest): Promise<{ op: InspectO
         const res = await fileReadRange({ rootPath: realRoot, path: req.path, startLine: req.startLine ?? 1, endLine: req.endLine ?? 400 });
         return { op: req.op, data: res };
       } catch (err) {
-        throw new InspectError('tool_execution_failed', (err instanceof Error ? err.message : String(err)).slice(0, 500));
+        const msg = err instanceof Error ? err.message : String(err);
+        // A missing file is a clear, common case — give a readable message
+        // instead of a raw `ENOENT: no such file or directory, open '…'`.
+        if (/ENOENT|no such file/i.test(msg)) {
+          throw new InspectError('tool_execution_failed', `File not found in the workspace: ${req.path}. It may be a domain, a URL, or a path outside the workspace — check the name.`);
+        }
+        throw new InspectError('tool_execution_failed', msg.slice(0, 500));
       }
     }
     case 'git_status': {

@@ -48,6 +48,31 @@ test('conversational + engineering intents are NOT hijacked by the inspection cl
   assert.equal(classifyIntent('fix the type error in src/chat/chatEngine.ts'), 'workspace-task');
 });
 
+test('a design/build/proposal prompt is NOT treated as a workspace inspection', () => {
+  // Regression: a long design prompt mentioning files/domains was classified as
+  // inspection and dead-ended on a read of a domain, instead of being answered.
+  const design =
+    'Proposed system: MigraWatch Mobile dashboard. It should show a live status feed, ' +
+    'read tenant config, and wire up compassionfuneralchapel.com as the first tenant with SSL and DNS.';
+  assert.notEqual(classifyIntent(design), 'inspection');
+  assert.notEqual(classifyIntent('design a dashboard that displays the repo files'), 'inspection');
+  assert.notEqual(classifyIntent('wire it up so the app can read config files'), 'inspection');
+  // Genuine short inspection requests STILL route to inspection.
+  assert.equal(classifyIntent('what is the git status?'), 'inspection');
+  assert.equal(classifyIntent('list the files in src'), 'inspection');
+  assert.equal(classifyIntent('show me the workspace root'), 'inspection');
+});
+
+test('a bare domain name is NOT planned as a file read', () => {
+  // Regression: "compassionfuneralchapel.com" was read as a file → ENOENT.
+  const plan = buildInspectionPlan('Proposed system: MigraWatch. Show the compassionfuneralchapel.com dashboard');
+  assert.ok(!plan.some((s) => s.op === 'read'), 'a domain must not become a read op');
+  // A real file path IS still planned.
+  const readReal = buildInspectionPlan('open src/server.ts');
+  assert.equal(readReal.find((s) => s.op === 'read')?.path, 'src/server.ts');
+  assert.equal(buildInspectionPlan('show package.json').find((s) => s.op === 'read')?.path, 'package.json');
+});
+
 test('the inspection plan maps prompts to concrete read-only ops', () => {
   assert.deepEqual(buildInspectionPlan('report the current workspace root').map((s) => s.op), ['workspace_root']);
   assert.ok(buildInspectionPlan('run read-only git commands').some((s) => s.op === 'git_status'));
