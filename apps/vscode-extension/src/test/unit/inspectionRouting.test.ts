@@ -48,6 +48,16 @@ test('conversational + engineering intents are NOT hijacked by the inspection cl
   assert.equal(classifyIntent('fix the type error in src/chat/chatEngine.ts'), 'workspace-task');
 });
 
+test('a bare domain name is NOT planned as a file read', () => {
+  // Regression: "compassionfuneralchapel.com" was read as a file → ENOENT.
+  const plan = buildInspectionPlan('Proposed system: MigraWatch. Show the compassionfuneralchapel.com dashboard');
+  assert.ok(!plan.some((s) => s.op === 'read'), 'a domain must not become a read op');
+  // A real file path IS still planned.
+  const readReal = buildInspectionPlan('open src/server.ts');
+  assert.equal(readReal.find((s) => s.op === 'read')?.path, 'src/server.ts');
+  assert.equal(buildInspectionPlan('show package.json').find((s) => s.op === 'read')?.path, 'package.json');
+});
+
 test('the inspection plan maps prompts to concrete read-only ops', () => {
   assert.deepEqual(buildInspectionPlan('report the current workspace root').map((s) => s.op), ['workspace_root']);
   assert.ok(buildInspectionPlan('run read-only git commands').some((s) => s.op === 'git_status'));

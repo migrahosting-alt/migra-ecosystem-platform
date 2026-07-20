@@ -69,6 +69,18 @@ export interface InspectionStep {
 
 const FILENAME = /([\w./-]+\.[a-z0-9]{1,6})\b/i;
 
+/** Common domain TLDs — a bare token ending in one of these (e.g.
+ * `compassionfuneralchapel.com`) is a DOMAIN NAME, not a file to read. */
+const DOMAIN_TLD =
+  /\.(com|org|net|io|co|dev|app|ai|gov|edu|info|biz|me|us|uk|ca|xyz|online|site|store|tech|cloud|email|link|live|news|shop|blog|page|host)$/i;
+
+/** A token is a file reference if it is a path (has a slash) or has a real file
+ * extension — but NOT a bare domain name. Prevents planning a read of a domain. */
+function looksLikeFile(token: string): boolean {
+  if (token.includes('/')) return true; // a workspace-relative path
+  return !DOMAIN_TLD.test(token); // bare `foo.com` is a domain, not a file
+}
+
 /** Words that commonly follow "in" as an English idiom, NOT a directory name
  * ("in accordance with", "in order to", "in general", …). A bare token matching
  * this is never treated as a `list` sub-path. */
@@ -98,10 +110,10 @@ export function buildInspectionPlan(prompt: string): InspectionStep[] {
   // package manager
   if (/\bpackage\s*manager\b|\bpackage-?manager\b|\bwhich\s+(pm|package)\b|\bdependenc/i.test(p)) add('pkg_manager');
 
-  // read a specific file
+  // read a specific file (but not a bare domain name that merely looks file-ish)
   if (/\b(read|open|show|cat|display|print)\b/i.test(p)) {
     const f = FILENAME.exec(p);
-    if (f) add('read', { path: f[1] });
+    if (f?.[1] && looksLikeFile(f[1])) add('read', { path: f[1] });
   }
 
   // search — extract the target token: prefer "named/called X", then "for … X",
