@@ -13,7 +13,7 @@
 export type ChatRoute = 'workspace-task' | 'inspection' | 'conversation';
 
 const TASK_VERBS =
-  /^(build|create|implement|add|fix|refactor|write|generate|scaffold|make|set\s*up|run|install|debug|investigate|diagnose|instrument|update|rename|convert|migrate|optimize|remove|delete)\b/i;
+  /^(build|create|implement|add|fix|refactor|write|generate|scaffold|make|set\s*up|run|install|debug|investigate|diagnose|instrument|update|rename|convert|migrate|optimize|remove|delete|building|creating|implementing|adding|fixing|refactoring|writing|generating|scaffolding|making|setting\s*up|running|installing|debugging|updating|renaming|converting|migrating|optimizing|removing|deleting)\b/i;
 
 // ── Read-only INSPECTION intent ────────────────────────────────────────────────
 // A request to SEE something about the ACTUAL workspace/repo (root, files, git
@@ -170,12 +170,22 @@ export function buildInspectionPlan(prompt: string): InspectionStep[] {
 }
 
 const CODE_OBJECTS =
-  /\b(app|application|file|files|function|class|component|module|test|tests|bug|error|errors|script|page|endpoint|route|api|package|dependency|dependencies|project|folder|repo|json|config|build|lint|type ?error|latency|stage|pipeline|utility|tool|cli|database|schema|service|library|server)\b/i;
+  /\b(app|apps|application|applications|file|files|function|functions|class|classes|component|components|module|modules|test|tests|bug|error|errors|script|scripts|page|pages|endpoint|endpoints|route|routes|api|apis|package|dependency|dependencies|project|folder|repo|json|config|build|lint|type ?error|latency|stage|pipeline|pipelines|utility|tool|tools|cli|database|schema|service|services|library|libraries|server|servers|system|systems|feature|features|functionality|prototype|mvp|boilerplate|scaffold|skeleton|structure|integration|dashboard|monitor|monitoring|poller|worker|handler|middleware|hook|hooks|store|model|models|controller|controllers|view|views|widget|screen|screens|form|forms|pwa|ui|frontend|backend|thing|things|it|this|that|them|everything)\b/i;
 
 /** A file-ish token: something/with/slashes or name.ext */
 const FILEISH = /(\.[a-z]{1,5}\b|\/[\w.-]+)/i;
 
 const QUESTION_LEAD = /^(what|why|how|when|where|who|which|is|are|does|do|can|could|should|explain|describe|tell me|compare)\b/i;
+
+/** Imperative lead-ins that precede an action directive without changing it into a
+ * question: "you can now build …", "go ahead and create …", "please implement …",
+ * "let's scaffold …", "now build it". Stripped before the task-verb test so a build
+ * DIRECTIVE that is not sentence-initial still routes to the engineer — the way
+ * Copilot/Claude act on "you can now build the system". A polite "can you build …"
+ * / "could you create …" is a directive too (not a real question), so those leads
+ * are absorbed here as well. */
+const ACTION_LEAD =
+  /^(?:(?:you\s+can\s+(?:now\s+)?|go\s+ahead(?:\s+and)?\s+|please\s+|now\s+|ok(?:ay)?[,!.\s]+|alright[,!.\s]+|sure[,!.\s]+|yes[,!.\s]+|let'?s\s+|lets\s+|i\s+(?:want|need)\s+(?:you\s+to\s+)?|i'?d\s+like\s+(?:you\s+to\s+)?|time\s+to\s+|proceed\s+(?:to|and|with)\s+|start\s+|begin\s+|can\s+you\s+(?:please\s+)?|could\s+you\s+(?:please\s+)?)\s*)+/i;
 
 export function classifyIntent(prompt: string): ChatRoute {
   const p = prompt.trim();
@@ -184,9 +194,15 @@ export function classifyIntent(prompt: string): ChatRoute {
   // question heuristic so "what is the git status?" inspects rather than being
   // answered (and refused) by the tool-less conversational model.
   if (isInspectionIntent(p)) return 'inspection';
-  // Questions stay conversational — advice is the chat path's job.
-  if (QUESTION_LEAD.test(p)) return 'conversation';
-  if (TASK_VERBS.test(p) && (CODE_OBJECTS.test(p) || FILEISH.test(p))) return 'workspace-task';
+  // Strip a leading imperative lead-in so a build directive that is not
+  // sentence-initial ("you can now build the system", "go ahead and create the
+  // files") is still recognised as a task rather than falling through to chat.
+  const core = p.replace(ACTION_LEAD, '').trim() || p;
+  const isTask = TASK_VERBS.test(core) && (CODE_OBJECTS.test(core) || FILEISH.test(core));
+  // Questions stay conversational — but a polite "can you build X" whose core is a
+  // real task ("build X") is a directive, not a question, so it is NOT diverted.
+  if (QUESTION_LEAD.test(p) && !isTask) return 'conversation';
+  if (isTask) return 'workspace-task';
   return 'conversation';
 }
 

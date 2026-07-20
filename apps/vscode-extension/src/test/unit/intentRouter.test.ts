@@ -26,6 +26,36 @@ test('conversational questions remain on the lightweight chat path', () => {
   assert.equal(classifyIntent('can you compare React and Vue?'), 'conversation');
 });
 
+// Regression: a build DIRECTIVE that is not sentence-initial (after a design
+// conversation, the user says "you can now build the system") must reach the
+// engineer — not fall through to a chat guide. This was the "instead of building
+// the app" defect.
+test('non-sentence-initial build directives route to the workspace agent', () => {
+  for (const p of [
+    'you can now build the system',
+    'you can now build the whole system',
+    'go ahead and build the app',
+    'go ahead and create the files',
+    'please implement the health poller',
+    "let's scaffold the project",
+    'now build it',
+    'proceed with building the dashboard',
+    'i want you to build the backend',
+    'can you build the app',       // polite directive, not a real question
+    'could you create the service',
+    'ok, build the system now',
+  ]) {
+    assert.equal(classifyIntent(p), 'workspace-task', `should build: ${p}`);
+  }
+});
+
+test('the lead-in stripper does not hijack genuine questions or chit-chat', () => {
+  assert.equal(classifyIntent('can you explain the build system?'), 'conversation');
+  assert.equal(classifyIntent('please tell me how the router works'), 'conversation');
+  assert.equal(classifyIntent("let's talk about architecture"), 'conversation');
+  assert.equal(classifyIntent('now, what do you think of this design?'), 'conversation');
+});
+
 test('slash commands are not workspace tasks (handled earlier by /agent)', () => {
   // parseAgentCommand intercepts before classifyIntent ever runs; even if it
   // reached the classifier, a bare /agent command must not classify as a task.

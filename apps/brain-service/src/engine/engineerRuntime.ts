@@ -105,8 +105,11 @@ function protocolPrompt(input: EngineerInput, tools: EngineerToolInfo[]): string
     '- Every tool input must include "rootPath" set to the workspace root above.',
     '- Paths are WORKSPACE-RELATIVE (e.g. "src/index.js"), never absolute.',
     '- Line numbers are 1-BASED: startLine and endLine must be >= 1.',
-    '- To propose file changes use edit.preview; changes are applied by the operator',
-    '  after approval, never by you. Put proposed diffs in your final answer.',
+    '- To create or change files use fs.proposeChangeset (op create/replace/patch/',
+    '  delete) or edit.preview. A RECORDED PROPOSAL IS SUCCESS: it is the intended,',
+    '  preview-only outcome — the operator applies it after approval, never you.',
+    '  NEVER report a recorded proposal as a failure and NEVER tell the user to',
+    '  create files manually; treat "proposal recorded" as the task being done.',
     '- Use command.run (argv array, e.g. ["npm","test"]) for builds/tests; only',
     '  allowlisted programs run; publish/deploy/release/push are refused.',
     '- NEVER repeat a tool call with identical input — its earlier result stands.',
@@ -267,6 +270,20 @@ const WEAK_FINAL_DIRECTIVE = [
   'ran, which files you proposed or changed, any validation evidence, and any unresolved limitations.',
 ].join(' ');
 
+/** A final that falsely reports failure when proposals were in fact recorded —
+ * the model mistakes the preview-only outcome for an error and tells the user to
+ * create files by hand. Detected only when >=1 proposal was emitted. */
+const FALSE_FAILURE_FINAL =
+  /\b(fail(?:ed|ure)?\s+to\s+(?:create|apply|write|generate)|could\s+not\s+(?:create|apply|write|generate)|un(?:able|successful)\s+to\s+(?:create|apply|write|generate)|creat(?:e|ing)\s+(?:the\s+)?(?:following\s+)?files?\s+(?:manually|yourself|by\s+hand)|manually\s+creat|do\s+it\s+manually|by\s+hand)\b/i;
+
+const FALSE_FAILURE_DIRECTIVE = [
+  'That final is WRONG. Your fs.proposeChangeset / edit.preview calls SUCCEEDED —',
+  'they recorded an approvable proposal, which is the intended preview-only outcome',
+  '(the operator applies it after approval, not you). Do NOT report it as a failure',
+  'and do NOT tell the user to create files manually. Reply with {"final":"..."} that',
+  'presents the proposed file(s) as ready to apply and summarizes what you proposed.',
+].join(' ');
+
 /** Run one engineering task as an event stream. Local-only by construction. */
 export async function* runEngineerTask(deps: EngineerDeps, input: EngineerInput): AsyncGenerator<EngineerEvent> {
   const maxSteps = deps.maxSteps ?? DEFAULT_MAX_STEPS;
@@ -310,7 +327,20 @@ export async function* runEngineerTask(deps: EngineerDeps, input: EngineerInput)
         transcript.push(WEAK_FINAL_DIRECTIVE);
         continue; // exactly one corrective retry
       }
-      const markdown = proposalsEmitted > 0 ? step.markdown + APPLIED_FOOTER : step.markdown;
+      // A recorded proposal is success — if the model still reports failure or tells
+      // the user to create files manually, correct it once…
+      if (proposalsEmitted > 0 && FALSE_FAILURE_FINAL.test(step.markdown) && !finalCorrected) {
+        finalCorrected = true;
+        transcript.push(FALSE_FAILURE_DIRECTIVE);
+        continue;
+      }
+      // …and if it STILL does, override deterministically: the user must never be
+      // told a proposal failed when it did not.
+      let markdown = step.markdown;
+      if (proposalsEmitted > 0 && FALSE_FAILURE_FINAL.test(markdown)) {
+        markdown = `Proposed ${proposalsEmitted} change${proposalsEmitted === 1 ? '' : 's'} for your approval. Review the proposed file(s) above and approve to apply them to the workspace.`;
+      }
+      markdown = proposalsEmitted > 0 ? markdown + APPLIED_FOOTER : markdown;
       stage.log('final', { steps: toolStepCount, proposals: proposalsEmitted, replans });
       yield { type: 'final', markdown, steps: toolStepCount };
       return;
@@ -384,7 +414,14 @@ export async function* runEngineerTask(deps: EngineerDeps, input: EngineerInput)
                 progressed = true; // command side effect is progress
               }
             }
-            transcript.push(`Result of ${tool}:\n${cap(stableStringify(result), resultCap)}\n\nContinue with the JSON protocol object.`);
+            // For a proposal, prefix an explicit SUCCESS signal — the raw result
+            // object alone led models to mistake the preview-only outcome for a
+            // failure and tell the user to create files manually.
+            transcript.push(
+              isProposal
+                ? `Result of ${tool}: PROPOSAL RECORDED SUCCESSFULLY (preview-only; the operator approves and applies it, not you). This is the intended outcome — do NOT call it a failure and do NOT ask the user to create files manually. Propose any remaining files, then reply {"final":...} presenting the proposed file(s) as ready to apply.\n${cap(stableStringify(result), resultCap)}`
+                : `Result of ${tool}:\n${cap(stableStringify(result), resultCap)}\n\nContinue with the JSON protocol object.`,
+            );
           } catch (err) {
             const message = err instanceof Error ? err.message : String(err);
             stage.log('tool', { n, tool, durationMs: Date.now() - toolStarted, outcome: 'error', error: err instanceof Error ? err.name : 'error' });
