@@ -78,7 +78,7 @@ test('labelled build orders (MISSION:/TASK:/GOAL:/TODO:) route to the workspace 
     'GOAL: create the dashboard',
     'TODO: fix the login bug',
     'Task: implement the export pipeline',
-    'Objective — refactor the audio mixer',
+    'Objective — refactor the export pipeline',
   ]) {
     assert.equal(classifyIntent(p), 'workspace-task', `should build: ${p}`);
   }
