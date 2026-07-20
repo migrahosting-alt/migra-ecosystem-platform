@@ -1459,8 +1459,10 @@ export class MigraPilotChatViewProvider implements vscode.WebviewViewProvider {
         for (let i = 0; i < lines.length; i++) {
           let line = lines[i];
 
-          // Code block placeholders
-          const cbMatch = line.match(/^%%CODEBLOCK_(\\d+)%%$/);
+          // Code block placeholders. Trim first so a placeholder indented under a
+          // list item (e.g. a fenced block nested in a bullet) still restores as a
+          // proper block instead of leaking the raw %%CODEBLOCK_n%% token.
+          const cbMatch = line.trim().match(/^%%CODEBLOCK_(\\d+)%%$/);
           if (cbMatch) {
             if (inList) { html += '</' + listType + '>'; inList = false; }
             html += codeBlocks[parseInt(cbMatch[1])];
@@ -1538,6 +1540,10 @@ export class MigraPilotChatViewProvider implements vscode.WebviewViewProvider {
         }
 
         if (inList) html += '</' + listType + '>';
+        // Safety net: restore any code-block placeholder the line-based pass did
+        // not consume (e.g. one left inline after other text). A placeholder token
+        // must never survive into the rendered output.
+        html = html.replace(/%%CODEBLOCK_(\\d+)%%/g, (m, n) => codeBlocks[parseInt(n)] || m);
         return html;
       }
 
