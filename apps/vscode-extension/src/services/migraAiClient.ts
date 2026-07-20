@@ -520,7 +520,13 @@ export class MigraAiClient {
     const requestId = newRequestId();
     const url = `${this.base()}/api/ai/engineer`;
     this.cfg.log(`POST ${url} [${requestId}] (sse)`);
-    const { signal: combined, reset, done, timedOut } = this.withTimeout(signal);
+    // Uses ONLY the caller's abort signal — NO short client timeout — because a
+    // local build is a multi-step, model-in-the-loop run that can take MINUTES
+    // (the first tool step alone can exceed the 30s default on a large local
+    // coding model, which spuriously aborted with "Engine request timed out"
+    // before any tool ran). The user cancels via the chat Stop button; a
+    // slow-but-active build must never be killed as a false timeout. Same
+    // rationale as the /deep answer stream.
     let res: Response;
     try {
       res = await fetch(url, {
@@ -532,25 +538,22 @@ export class MigraAiClient {
           ...this.scopeHeaders(),
         },
         body: JSON.stringify(body),
-        signal: combined,
+        signal,
       });
     } catch (err) {
-      done();
-      throw this.transportError(err, timedOut(), requestId);
+      if (isAbort(err)) throw new PilotError('CANCELLED', 'Engineer run cancelled.', { requestId });
+      throw this.transportError(err, false, requestId);
     }
     if (!res.ok) {
-      done();
       throw await this.toolHttpError(res, requestId);
     }
     if (!res.body) {
-      done();
       throw new PilotError('SERVER_ERROR', 'Engineer returned an empty stream.', { requestId });
     }
     const decoder = new TextDecoder();
     let buffer = '';
     try {
       for await (const chunk of res.body as unknown as AsyncIterable<Uint8Array>) {
-        reset(); // stream activity → push the inactivity deadline forward
         buffer += decoder.decode(chunk, { stream: true });
         let sep: number;
         while ((sep = buffer.indexOf('\n\n')) !== -1) {
@@ -564,10 +567,8 @@ export class MigraAiClient {
       }
     } catch (err) {
       if (err instanceof PilotError) throw err;
-      if (isAbort(err)) throw this.mapAbort(timedOut(), requestId);
+      if (isAbort(err)) throw new PilotError('CANCELLED', 'Engineer run cancelled.', { requestId });
       throw new PilotError('NETWORK', 'Engineer stream interrupted.', { requestId, cause: err });
-    } finally {
-      done();
     }
   }
 
