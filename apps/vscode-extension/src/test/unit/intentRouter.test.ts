@@ -68,6 +68,25 @@ test('leading quotes / list markers do not block build-directive routing', () =>
   assert.equal(classifyIntent('"what is a monad?"'), 'conversation');
 });
 
+// Regression: a build order prefixed with a directive LABEL ("MISSION: Build
+// the final Assembler…", "TASK: implement X") dead-ended in chat because the
+// label defeated the anchored verb match. It must reach the engineer.
+test('labelled build orders (MISSION:/TASK:/GOAL:/TODO:) route to the workspace agent', () => {
+  for (const p of [
+    'MISSION:\nBuild the final MigraAI Studio Enterprise Assembler exactly as shown in the packaged Windows application.',
+    'MISSION: build the app',
+    'GOAL: create the dashboard',
+    'TODO: fix the login bug',
+    'Task: implement the export pipeline',
+    'Objective — refactor the audio mixer',
+  ]) {
+    assert.equal(classifyIntent(p), 'workspace-task', `should build: ${p}`);
+  }
+  // A labelled QUESTION is still a question.
+  assert.equal(classifyIntent('Question: what is a monad?'), 'conversation');
+  assert.equal(classifyIntent('Context: the app is slow. how do i profile it?'), 'conversation');
+});
+
 test('the lead-in stripper does not hijack genuine questions or chit-chat', () => {
   assert.equal(classifyIntent('can you explain the build system?'), 'conversation');
   assert.equal(classifyIntent('please tell me how the router works'), 'conversation');

@@ -200,11 +200,18 @@ export function classifyIntent(prompt: string): ChatRoute {
   // '1. create the files') routes like a bare one instead of the leading quote
   // defeating the anchored verb match.
   const deNoised = p.replace(/^(?:["'`*_>()\[\].:;,\s–—•·-]|\d+[.)])+/, '').trim() || p;
-  const core = deNoised.replace(ACTION_LEAD, '').trim() || deNoised;
+  // Strip a leading directive LABEL ("MISSION:", "TASK:", "GOAL:", "TODO:",
+  // "OBJECTIVE - …") so a labelled build order still routes to the engineer — a
+  // spec that opens "MISSION: Build the …" was dead-ending in chat because the
+  // label defeated the anchored verb match.
+  const deLabelled = deNoised
+    .replace(/^(?:mission|task|goal|objective|directive|prompt|todo|to-?do|request|ask|instruction|order|deliverable|spec(?:ification)?|requirements?|feature|ticket|story|epic|user\s*story|acceptance\s*criteria|context|background)s?\b\s*[:\-–—]\s*/i, '')
+    .trim() || deNoised;
+  const core = deLabelled.replace(ACTION_LEAD, '').trim() || deLabelled;
   const isTask = TASK_VERBS.test(core) && (CODE_OBJECTS.test(core) || FILEISH.test(core));
   // Questions stay conversational — but a polite "can you build X" whose core is a
   // real task ("build X") is a directive, not a question, so it is NOT diverted.
-  if (QUESTION_LEAD.test(deNoised) && !isTask) return 'conversation';
+  if (QUESTION_LEAD.test(deLabelled) && !isTask) return 'conversation';
   if (isTask) return 'workspace-task';
   return 'conversation';
 }
