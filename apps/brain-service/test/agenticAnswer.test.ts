@@ -62,3 +62,24 @@ test('tryParseContentToolCall parses a JSON tool call but rejects prose', () => 
   assert.equal(tryParseContentToolCall('The login function verifies a token.'), null, 'prose is not a tool call');
   assert.equal(tryParseContentToolCall('{"name":"not_a_tool","arguments":{}}'), null, 'unknown tool name rejected');
 });
+
+// Regression: qwen3-coder:30b (and other Qwen/Hermes models) emit tool calls as
+// XML text in `content` instead of native `tool_calls`. Without parsing this,
+// /deep executed NO tools and leaked the raw call text as the answer.
+test('tryParseContentToolCall parses Qwen/Hermes <function=…><parameter=…> XML', () => {
+  const call = tryParseContentToolCall('I will read the file.\n<function=read>\n<parameter=path>\nsrc/calc.js\n</parameter>\n</function>\n</tool_call>');
+  assert.deepEqual(call, { name: 'read', args: { path: 'src/calc.js' } });
+
+  // numeric params are coerced (e.g. search limit)
+  assert.deepEqual(
+    tryParseContentToolCall('<function=search><parameter=query>login</parameter><parameter=limit>5</parameter></function>'),
+    { name: 'search', args: { query: 'login', limit: 5 } },
+  );
+  // JSON args inside the function tag also work
+  assert.deepEqual(
+    tryParseContentToolCall('<function=find>{"query":"calc.js"}</function>'),
+    { name: 'find', args: { query: 'calc.js' } },
+  );
+  // an XML call to an UNKNOWN tool is not accepted
+  assert.equal(tryParseContentToolCall('<function=rm><parameter=path>/</parameter></function>'), null);
+});

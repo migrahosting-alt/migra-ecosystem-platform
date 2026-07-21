@@ -224,19 +224,45 @@ function parseArgs(raw: unknown): Record<string, unknown> {
   return {};
 }
 
-/** Some models emit `{"name":"search","arguments":{...}}` as the whole content
- * instead of populating `tool_calls`. Accept that ONLY when the entire content
- * is such an object naming a known tool (never treat a prose answer as a call). */
+/** Some local models emit a tool call in `content` instead of populating the
+ * native `tool_calls` field. Two shapes are accepted:
+ *   1. whole-content JSON  — {"name":"search","arguments":{...}}
+ *   2. Qwen/Hermes XML text — <function=read><parameter=path>src/x.js</parameter></function>
+ *      (qwen3-coder:30b does exactly this; without it, /deep never executes a
+ *      tool and leaks the raw call text as the "answer"). Prose is never treated
+ *      as a call — the tag must name a KNOWN tool. */
 export function tryParseContentToolCall(content: string): { name: string; args: Record<string, unknown> } | null {
   const trimmed = content.trim();
-  if (!trimmed.startsWith('{') || !trimmed.endsWith('}')) return null;
-  try {
-    const o = JSON.parse(trimmed) as { name?: string; arguments?: unknown; parameters?: unknown };
-    if (typeof o.name === 'string' && TOOL_NAMES.has(o.name)) {
-      return { name: o.name, args: parseArgs(o.arguments ?? o.parameters) };
+  // (1) Whole-content JSON object naming a known tool.
+  if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+    try {
+      const o = JSON.parse(trimmed) as { name?: string; arguments?: unknown; parameters?: unknown };
+      if (typeof o.name === 'string' && TOOL_NAMES.has(o.name)) {
+        return { name: o.name, args: parseArgs(o.arguments ?? o.parameters) };
+      }
+    } catch {
+      /* not JSON — fall through to XML */
     }
-  } catch {
-    /* not a tool call */
+  }
+  // (2) Qwen/Hermes XML-style tool call anywhere in the content (optionally
+  //     wrapped in <tool_call>…</tool_call>). Parse the FIRST call to a known tool.
+  const fn = /<function\s*=\s*["']?([A-Za-z_][\w-]*)["']?\s*>([\s\S]*?)<\/function>/i.exec(content);
+  if (fn && TOOL_NAMES.has(fn[1]!)) {
+    const name = fn[1]!;
+    const body = fn[2]!;
+    const args: Record<string, unknown> = {};
+    const paramRe = /<parameter\s*=\s*["']?([A-Za-z_][\w-]*)["']?\s*>([\s\S]*?)<\/parameter>/gi;
+    let m: RegExpExecArray | null;
+    while ((m = paramRe.exec(body)) !== null) {
+      const val = m[2]!.trim();
+      args[m[1]!] = /^-?\d+$/.test(val) ? Number(val) : val; // coerce ints (e.g. limit)
+    }
+    // Some models put JSON args directly inside <function=…>{...}</function>.
+    if (Object.keys(args).length === 0) {
+      const inner = body.trim();
+      if (inner.startsWith('{') && inner.endsWith('}')) return { name, args: parseArgs(inner) };
+    }
+    return { name, args };
   }
   return null;
 }
