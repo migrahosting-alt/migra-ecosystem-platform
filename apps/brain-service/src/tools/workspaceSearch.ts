@@ -51,6 +51,23 @@ const DEFAULT_EXCLUDE_GLOBS = [
   '**/.old/**',
   '**/*.Zone.Identifier',
   '**/*Zone.Identifier',
+  // DEPENDENCY trees for non-JS ecosystems. `node_modules` is excluded by name,
+  // but a Python virtualenv is often named `.venv-playwright` / `foo-venv`, so an
+  // exact-name rule misses it and pip's vendored sources (site-packages) end up
+  // grounding answers — a real defect: a "where is X?" query returned
+  // pip/_vendor/*.py instead of the component. Match by PATTERN, and exclude
+  // `site-packages` outright (nothing under it is ever this repo's source).
+  '**/site-packages/**',
+  '**/*venv*/**',
+  '**/__pycache__/**',
+  '**/.tox/**',
+  '**/.mypy_cache/**',
+  '**/.pytest_cache/**',
+  '**/.eggs/**',
+  '**/*.egg-info/**',
+  '**/.gradle/**',
+  '**/Pods/**',
+  '**/.terraform/**',
   // Generated evaluation output / run logs — a model's own recorded runs must
   // never pollute its own search (it would "find" its past queries as evidence).
   '**/eval/results/**',
