@@ -32,10 +32,15 @@ test('auto-apply that did not complete is reported honestly (not a false success
   assert.doesNotMatch(r, /Applied to the workspace/);
 });
 
-test('a run with no file changes says so, and reports Done', () => {
+test('a run with no file changes states the fact and claims no success', () => {
+  // Regression: this used to report "✅ Done". A green tick under "none proposed"
+  // reads as success, and the owner saw exactly that after a build order that
+  // produced nothing at all. Neutral wording is right for both cases — a task
+  // like "run the tests" legitimately writes no files.
   const r = buildWorkReport({ task: 'run the tests', root: '/w', proposedFiles: [], applied: false, cancelled: false });
   assert.match(r, /none proposed/);
-  assert.match(r, /✅ Done/);
+  assert.match(r, /No files were created or changed/);
+  assert.doesNotMatch(r, /✅/, 'never a success tick when nothing was produced');
 });
 
 test('a cancelled run reports Stopped and no changes', () => {

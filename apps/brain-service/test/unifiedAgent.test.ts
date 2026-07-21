@@ -299,7 +299,7 @@ test('the correction is safe when the question did NOT need the workspace', asyn
   ]);
   const events = await drain(runEngineerTask(h.deps, { rootPath: '/w', task: 'what is a monad?' }));
 
-  assert.match(h.prompts[1]!, /If it does not depend on the workspace, just/);
+  assert.match(h.prompts[1]!, /does not depend on the workspace, answer from your own/);
   assert.deepEqual(h.calls, [], 'no pointless search for a general question');
   const final = events.find((e) => e.type === 'final') as { markdown: string };
   assert.match(final.markdown, /Promise\.then/);
@@ -591,4 +591,40 @@ test('with nothing seeded the citation check never fires', async () => {
   assert.equal(ignoredSeededContext('any answer at all', []), false);
   assert.equal(ignoredSeededContext('see src/tools/changesetLint.ts', SEEDED), false);
   assert.equal(ignoredSeededContext('I could not find anything', SEEDED), true);
+});
+
+// ── a build order must never become a search ─────────────────────────────────
+// Observed by the owner: "build thesystem" made the agent run
+// workspace.search("build thesystem"), find nothing, and reply "I did not find
+// any files matching… Please provide more details." Nothing was built. The
+// thing it searched for does not exist YET — that is why it was asked for.
+
+test('the prompt forbids searching for something it is being asked to create', async () => {
+  const h = harness(['{"final":"a sufficiently long direct answer for the agent to accept it"}']);
+  await drain(runEngineerTask(h.deps, { rootPath: '/w', task: 'hi' }));
+  const prompt = h.prompts[0]!;
+  assert.match(prompt, /DO NOT SEARCH FOR SOMETHING YOU ARE BEING ASKED TO CREATE/);
+  assert.match(prompt, /is never a valid answer/);
+});
+
+test('the deferral correction tells a BUILD request to build, not to search', async () => {
+  const h = harness([
+    '{"final":"I did not find any files matching \'thesystem\' in your workspace. Please provide more details."}',
+    '{"action":{"tool":"fs.proposeChangeset","input":{"rootPath":"/w","ops":[{"op":"create","path":"index.html","content":"<!doctype html>"}]}}}',
+    '{"final":"Proposed index.html as the starting point for the system; review and apply it."}',
+  ]);
+  const events = await drain(runEngineerTask(h.deps, { rootPath: '/w', task: 'build thesystem' }));
+
+  const directive = h.prompts[1]!;
+  assert.match(directive, /searching for it is the\s+WRONG move/);
+  assert.match(directive, /Call fs\.proposeChangeset NOW/);
+  assert.deepEqual(h.calls, ['fs.proposeChangeset'], 'it builds instead of searching again');
+  const final = events.find((e) => e.type === 'final') as { markdown: string };
+  assert.match(final.markdown, /Proposed index\.html/);
+});
+
+test('seeded excerpts are declared BACKGROUND for a build request', async () => {
+  const h = harness(['{"final":"a sufficiently long direct answer for the agent to accept it"}']);
+  await drain(runEngineerTask(h.deps, { rootPath: '/w', task: 'build it', context: SEEDED }));
+  assert.match(h.prompts[0]!, /these excerpts are BACKGROUND\s+ONLY/);
 });

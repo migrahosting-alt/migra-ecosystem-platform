@@ -37,8 +37,12 @@ export function buildWorkReport(input: WorkReportInput): string {
 
   const files = input.proposedFiles.filter((f) => f.path);
   if (files.length === 0) {
-    lines.push('- **Changes:** none proposed — no files to write.');
-    lines.push('- **Status:** ✅ Done.');
+    // NEVER a green tick here. "✅ Done" under "none proposed" reads as success,
+    // and the owner saw exactly that after a build order produced nothing. The
+    // wording stays NEUTRAL rather than alarmed, because a task like "run the
+    // tests" legitimately changes no files — state the fact, claim nothing.
+    lines.push('- **Changes:** none proposed — no files were written.');
+    lines.push('- **Status:** No files were created or changed.');
     return lines.join('\n') + '\n';
   }
 
