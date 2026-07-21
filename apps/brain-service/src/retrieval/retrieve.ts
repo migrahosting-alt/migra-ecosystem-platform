@@ -111,7 +111,14 @@ export async function retrieveContext(input: RetrieveRequest): Promise<RetrieveR
   if (terms.length > 0) {
     // Aggregate per file: WEIGHTED score (sum of matched-term weights) + the best
     // "distinctive" term that hit it (so we can put its definition in the snippet).
-    const perFile = new Map<string, { lines: Set<number>; score: number; bestTerm: string; bestWeight: number }>();
+    const perFile = new Map<string, { lines: Set<number>; score: number; bestTerm: string; bestWeight: number; hitPrimary: boolean }>();
+    // The PRIMARY term is the question's subject (highest weight, earliest in the
+    // query). A verbose question ("locate MigraCMS … its path, package name,
+    // routes, README or architecture documentation") otherwise lets generic
+    // filler words outvote it: files matching README/architecture/documentation
+    // crowded out the ONE thing actually asked about. Files that match the
+    // primary term get a decisive bonus so the SUBJECT dominates grounding.
+    const primaryTerm = terms[0]?.term;
     for (const { term, weight } of terms) {
       let matches: Array<{ path: string; line: number }> = [];
       try {
@@ -130,12 +137,13 @@ export async function retrieveContext(input: RetrieveRequest): Promise<RetrieveR
       }
       const filesThisTerm = new Set<string>();
       for (const m of matches) {
-        const entry = perFile.get(m.path) ?? { lines: new Set<number>(), score: 0, bestTerm: term, bestWeight: 0 };
+        const entry = perFile.get(m.path) ?? { lines: new Set<number>(), score: 0, bestTerm: term, bestWeight: 0, hitPrimary: false };
         entry.lines.add(m.line);
         if (!filesThisTerm.has(m.path)) {
           entry.score += weight;
           filesThisTerm.add(m.path);
         }
+        if (term === primaryTerm) entry.hitPrimary = true;
         if (weight > entry.bestWeight) { entry.bestWeight = weight; entry.bestTerm = term; }
         perFile.set(m.path, entry);
       }
@@ -155,10 +163,11 @@ export async function retrieveContext(input: RetrieveRequest): Promise<RetrieveR
             excludeGlobs: ['**/node_modules/**', '**/dist/**', '**/.git/**', '**/coverage/**', '**/eval/results/**', '**/results/**', '**/*-acceptance.json'],
           });
           for (const m of res.matches) {
-            const entry = perFile.get(m.path) ?? { lines: new Set<number>(), score: 0, bestTerm: ident, bestWeight: 3 };
+            const entry = perFile.get(m.path) ?? { lines: new Set<number>(), score: 0, bestTerm: ident, bestWeight: 3, hitPrimary: ident === primaryTerm };
             entry.lines.add(m.line);
             entry.score += 8; // a real definition is the strongest possible signal
             entry.bestWeight = Math.max(entry.bestWeight, 3);
+            if (ident === primaryTerm) entry.hitPrimary = true;
             perFile.set(m.path, entry);
           }
         } catch { /* best-effort */ }
@@ -173,6 +182,10 @@ export async function retrieveContext(input: RetrieveRequest): Promise<RetrieveR
       const t = info.bestTerm.toLowerCase();
       if (base === t) info.score += 6;
       else if (base.includes(t) || t.includes(base)) info.score += 3;
+      // The question's SUBJECT wins: a file that actually mentions the primary
+      // term outranks one that merely matched generic filler ("README",
+      // "architecture", "documentation") from the same sentence.
+      if (info.hitPrimary) info.score += 8;
       // Deprioritize NON-CANONICAL copies: a `-starter`/template scaffold, a
       // backup/archive, a vendored or `.bak`/`-old` copy, or an extracted zip. In
       // a monorepo the same component often exists as both the real source AND a
