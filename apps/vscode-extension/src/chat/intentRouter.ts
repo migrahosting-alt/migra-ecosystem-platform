@@ -1,14 +1,21 @@
-// Intent routing for ordinary chat text (Slice 2 — workspace-agent capability
-// routing). Runs AFTER the explicit /agent interception, BEFORE model routing:
+// Intent heuristics for ordinary chat text.
 //
-//   /agent …            → delegated runtime (explicit-only; unchanged)
-//   workspace intent    → local workspace engineer (may attach ecosystem context)
-//   everything else     → lightweight conversational chat
+// ⚠️ THIS NO LONGER DECIDES WHETHER A TURN MAY USE TOOLS. On the local engine
+// every ordinary turn runs the unified workspace agent, which holds the tools and
+// decides for itself whether to answer or to act (see chatEngine.ts). That change
+// exists BECAUSE this classifier was the bug: it made PHRASING decide capability,
+// so a build order that missed the regex landed on a tool-less path and — asked
+// for a completion report it could not produce — invented one. Four separate
+// fixes here were four regexes on that one bug. Do not add a fifth: if the agent
+// mishandles a request, fix the AGENT's judgment, not this file's keywords.
 //
-// The classifier is DETERMINISTIC (keyword heuristics, unit-tested) and
-// CONSERVATIVE: it routes to the engineer only on a strong engineering signal,
-// so conversational questions stay on the chat path. It never influences the
-// delegated runtime — NL inference remains banned there.
+// What still uses it, where a wrong guess is harmless:
+//   isInspectionIntent  → read-only workspace evidence on a NON-local backend,
+//                         where the unified agent is unavailable;
+//   classifyIntent      → only when NO folder is open and none is named, to
+//                         decide whether prompting for a folder is warranted.
+//
+// It never influences the delegated runtime — NL inference remains banned there.
 
 export type ChatRoute = 'workspace-task' | 'inspection' | 'conversation';
 

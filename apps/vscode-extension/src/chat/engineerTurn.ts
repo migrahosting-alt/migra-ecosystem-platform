@@ -75,12 +75,13 @@ export async function runEngineerTurn(
   sink: EngineerSink,
   signal?: AbortSignal,
 ): Promise<void> {
-  sink.progress?.('Engineer is working on your task…');
+  // Role-neutral: this one path now serves questions as well as build work.
+  sink.progress?.('MigraPilot is working…');
   try {
     for await (const ev of client.engineerStream(req, signal)) {
       if (ev.event === 'route') {
         const d = ev.data as { model?: string };
-        sink.progress?.(`Engineer → ${d.model ?? 'model'}`);
+        sink.progress?.(`MigraPilot → ${d.model ?? 'model'}`);
       } else if (ev.event === 'step') {
         const d = ev.data as StepData;
         sink.markdown(`\n· \`${d.tool ?? 'tool'}\` ${d.summary ?? ''}\n`);

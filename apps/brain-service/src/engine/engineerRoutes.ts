@@ -31,6 +31,12 @@ const EngineerBodySchema = z.object({
   rootPath: z.string().min(1),
   task: z.string().min(1),
   ecosystem: z.boolean().optional(),
+  /** Prior turns (oldest first). The unified agent serves ordinary chat too, so
+   * it carries the conversation the chat path used to hold. */
+  history: z
+    .array(z.object({ role: z.enum(['user', 'assistant']), text: z.string() }))
+    .max(40)
+    .optional(),
   tier: z.string().optional(),
   /** Slice 5: a per-request execution-policy PREFERENCE (server resolves to an
    * effective policy; never bypasses local-first / consent / privacy / budget). */
@@ -337,7 +343,7 @@ export function registerEngineerRoutes(
         stage,
         tools: loopTools(),
       },
-      { rootPath: body.rootPath, task: body.task, ecosystem: body.ecosystem },
+      { rootPath: body.rootPath, task: body.task, ecosystem: body.ecosystem, history: body.history },
     );
 
     auditStore.append({ correlationId, type: 'loop.started', component: 'engineer' });

@@ -66,6 +66,25 @@ export function summarizeChatContext(history: readonly unknown[]): string {
   return capToBudget(lines, TOTAL_SUMMARY_CHARS);
 }
 
+/** Re-expand a rendered summary into role-tagged turns.
+ *
+ * The unified workspace agent takes STRUCTURED history (`{role,text}[]`) while
+ * every chat surface already produces the budgeted `user:/assistant:` summary
+ * above. Parsing it back keeps ONE budgeting policy instead of two divergent
+ * history representations. Continuation lines belong to the turn above them. */
+export function parseSummaryTurns(summary: string): Array<{ role: 'user' | 'assistant'; text: string }> {
+  const turns: Array<{ role: 'user' | 'assistant'; text: string }> = [];
+  for (const line of summary.split('\n')) {
+    const m = line.match(/^(user|assistant): ([\s\S]*)$/);
+    if (m) {
+      turns.push({ role: m[1] as 'user' | 'assistant', text: m[2]! });
+    } else if (turns.length && line.trim()) {
+      turns[turns.length - 1]!.text += `\n${line}`;
+    }
+  }
+  return turns.filter((t) => t.text.trim());
+}
+
 /** Summarize a simple role/text history (the webview's representation) into the
  * same shape the native participant produces, so the backend sees identical
  * conversation context regardless of chat surface. */

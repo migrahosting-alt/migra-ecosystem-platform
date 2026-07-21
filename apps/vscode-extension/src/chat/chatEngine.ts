@@ -18,6 +18,7 @@ import { previewAndMaybeApplyChangeset, type ChangesetProposal, type ChangesetOp
 import { getEscalationDispatch } from '../services/escalationConsent.js';
 import { attributionView, type RoutingView } from '../panel/providerRouterViewModel.js';
 import { buildAiRequest } from './intentMapping.js';
+import { parseSummaryTurns } from './conversationSummary.js';
 
 /** A backend-agnostic output surface for a chat turn. Both the native chat
  * participant (wrapping a vscode.ChatResponseStream) and the dedicated chat
@@ -44,6 +45,15 @@ export interface ChatEngineDeps {
 /** A model profile the user can explicitly request from the chat UI. `local` is
  * omitted — it is an internal offline-fallback profile, not a user choice. */
 export type SelectableProfile = 'cheap' | 'default' | 'premium';
+
+/** The chat picker speaks in profiles; the workspace agent selects by tier. Same
+ * mapping the engine applies internally (`tierFromHints`), so Fast/Balanced/Deep
+ * keeps meaning the same thing on both paths. */
+const PROFILE_TIER: Record<SelectableProfile, string> = {
+  cheap: 'fast',
+  default: 'balanced',
+  premium: 'deep',
+};
 
 export interface ChatTurnOptions {
   /** Explicit model-profile override from the UI model picker. When set, it wins
@@ -125,14 +135,16 @@ export async function runChatTurn(
   const feature = inferFeature(trimmed);
   const requestId = newRequestId();
 
+  // Route through the backend resolved at activation/repair — never re-resolve
+  // per request (auto cannot silently switch mid-turn).
+  const backend = router.current() ?? (await router.resolve());
+
   // ── read-only workspace INSPECTION → LOCAL runner (model-free) ──────────────
-  // A request to see the actual workspace/repo state (root, files, git status,
-  // …) must run on the local runner's read-only tools and return real evidence —
-  // it must NEVER be answered by the conversational model (which falsely claims
-  // it "cannot access your local environment"). Independent of the chat backend:
-  // inspection is always local + read-only. A missing workspace or an unreachable
-  // runner returns a TRUTHFUL TYPED error, never a generic refusal.
-  if (classifyIntent(trimmed) === 'inspection') {
+  // Only on a NON-local backend, where the unified agent below is unavailable: a
+  // request to see real workspace state must still return real evidence rather
+  // than a conversational model's guess. On the local backend the unified agent
+  // owns this — it holds the same read-only tools (git.status, search, read).
+  if (backend.kind !== 'local' && classifyIntent(trimmed) === 'inspection') {
     const inspectRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
     if (!inspectRoot) {
       renderRoutingError(sink, 'workspace_not_open', { operation: 'workspace inspection', traceId: requestId });
@@ -142,22 +154,37 @@ export async function runChatTurn(
     return;
   }
 
-  // Route through the backend resolved at activation/repair — never re-resolve
-  // per request (auto cannot silently switch mid-turn).
-  const backend = router.current() ?? (await router.resolve());
-
-  // ── workspace-task routing (Slice 2): ordinary engineering requests run the
-  // LOCAL workspace engineer — inspect/edit-propose/build/test in the active
-  // workspace. Local-only by construction (never the pilot runtime, so disabled
-  // delegation cannot block it); conservative classifier keeps conversational
-  // questions on the chat path. Only on the local engine backend — the remote
-  // pilot chat surface keeps its existing behavior.
-  if (backend.kind === 'local' && classifyIntent(trimmed) === 'workspace-task') {
-    // Resolve WHICH folder to build in: an explicit path in the message, else the
+  // ── UNIFIED WORKSPACE AGENT — one path, tools always available ──────────────
+  // Every ordinary turn on the local engine runs the agent that HOLDS THE TOOLS,
+  // and the model itself decides whether to answer or to act. There is no longer
+  // a keyword classifier deciding whether a turn is ALLOWED to touch the
+  // workspace.
+  //
+  // WHY: the old fork ("workspace-task" → engineer, else → tool-less chat) made
+  // PHRASING decide capability. A build order that didn't match the regex landed
+  // in a path that cannot read, write or run anything — and the model, asked for
+  // a completion report it could not produce, invented one (fabricated paths,
+  // SHAs and command output). Four separate fixes were four regexes on that one
+  // bug. With a single tool-capable path, no phrasing can strand a request, and
+  // a claim of work is backed by a tool call that actually ran.
+  //
+  // Two deliberate exceptions remain, and NEITHER is a guess about wording:
+  //  1. image attachments → the vision chat path (the agent loop has no vision);
+  //  2. no folder open AND no path named in the message → chat, since there is
+  //     no workspace to act in. (When the message DOES name a folder, or the
+  //     user wants to work outside the open one, the resolver below asks.)
+  const hasImageAttachment = (options.attachments ?? []).some((a) => /^image\//i.test(a.mimeType ?? ''));
+  const openWorkspace = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  // Only a turn with nowhere to act may consult the legacy classifier, and only
+  // to decide whether prompting for a folder is warranted — a wrong guess here
+  // cannot strand real work, because there is no workspace to strand it in.
+  const mayPromptForFolder = Boolean(openWorkspace) || classifyIntent(trimmed) === 'workspace-task';
+  if (backend.kind === 'local' && !hasImageAttachment && mayPromptForFolder) {
+    // Resolve WHICH folder to work in: an explicit path in the message, else the
     // open workspace, else ASK via a folder picker — so MigraPilot can work on any
     // folder on the machine, not only the one open in VS Code.
     const resolved = await resolveTaskRoot(trimmed, {
-      openWorkspace: vscode.workspace.workspaceFolders?.[0]?.uri.fsPath,
+      openWorkspace,
       isDirectory: async (p) => {
         try {
           const stat = await vscode.workspace.fs.stat(vscode.Uri.file(p));
@@ -185,7 +212,7 @@ export async function runChatTurn(
     const workspaceRootForTask = resolved.root;
     if (resolved.source !== 'workspace') {
       const why = resolved.missingNamed ? ` (\`${resolved.missingNamed}\` was not found)` : '';
-      sink.markdown(`\n_Building in \`${workspaceRootForTask}\`${why}._\n`);
+      sink.markdown(`\n_Working in \`${workspaceRootForTask}\`${why}._\n`);
     }
     // Collect changeset proposals during the run so we can offer a user-confirmed
     // APPLY afterwards. The engineer loop is preview-only by owner policy — it
@@ -198,6 +225,15 @@ export async function runChatTurn(
         rootPath: workspaceRootForTask,
         task: trimmed,
         ecosystem: detectEcosystem({ rootPath: workspaceRootForTask, prompt: trimmed }),
+        // The agent now serves ordinary conversation too, so it must carry the
+        // same memory the chat path held — otherwise "now build it" loses what
+        // "it" refers to. Server-owned conversations keep history server-side.
+        ...(options.conversationId ? {} : { history: parseSummaryTurns(conversationSummary) }),
+        // Honor the chat model picker on this path too. Ordinary turns used to
+        // reach the chat endpoint (which reads modelProfile); now that they run
+        // the agent, the picker would silently stop working unless its choice is
+        // carried across as the agent's tier.
+        ...(options.modelProfile ? { tier: PROFILE_TIER[options.modelProfile] } : {}),
         ...(options.policy ? { policy: options.policy } : {}),
       },
       {
@@ -240,16 +276,20 @@ export async function runChatTurn(
     }
     // Consistent machine-authored work report after every build task — the user
     // always gets the same clear "what I did" summary, not the model's varying prose.
-    sink.markdown(
-      buildWorkReport({
-        task: trimmed,
-        root: workspaceRootForTask,
-        proposedFiles: (finalChangeset?.ops ?? []).map((o) => ({ path: o.path ?? '', ...(o.kind ? { kind: o.kind } : {}) })),
-        applied,
-        cancelled: token.isCancellationRequested,
-        autoApply,
-      }),
-    );
+    // Suppressed when the turn produced no work (a question answered, nothing
+    // proposed): a "0 files" report under a plain answer is noise, not a summary.
+    if (finalChangeset || token.isCancellationRequested) {
+      sink.markdown(
+        buildWorkReport({
+          task: trimmed,
+          root: workspaceRootForTask,
+          proposedFiles: (finalChangeset?.ops ?? []).map((o) => ({ path: o.path ?? '', ...(o.kind ? { kind: o.kind } : {}) })),
+          applied,
+          cancelled: token.isCancellationRequested,
+          autoApply,
+        }),
+      );
+    }
     return;
   }
 

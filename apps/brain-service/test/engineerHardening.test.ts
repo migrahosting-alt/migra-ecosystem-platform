@@ -154,11 +154,15 @@ test('repeated no-progress forces one re-plan then terminates with LOOP_NO_PROGR
 });
 
 test('weak final receives exactly one correction, then the improved final is accepted', async () => {
+  // The corrector applies to WORK turns — a turn that used tools owes a real
+  // completion report. (A question answered on step 1 with no tools is exempt;
+  // see unifiedAgent.test.ts.) So the script does one tool step first.
   let completions = 0;
   const deps = {
     complete: async () => {
       completions++;
-      return completions === 1
+      if (completions === 1) return '{"action":{"tool":"file.readRange","input":{"rootPath":"/ws","path":"a.ts","startLine":1,"endLine":2}}}';
+      return completions === 2
         ? '{"final":"Continuing setup."}'
         : '{"final":"Inspected the workspace, ran npm install (ok), proposed src/index.js; no tests present yet."}';
     },
@@ -166,7 +170,7 @@ test('weak final receives exactly one correction, then the improved final is acc
     tools: TOOLS,
   };
   const events = await drain(runEngineerTask(deps, { rootPath: '/ws', task: 't' }));
-  assert.equal(completions, 2, 'exactly one corrective retry');
+  assert.equal(completions, 3, 'one tool step, then exactly one corrective retry');
   const final = events.find((e) => e.type === 'final') as { markdown: string };
   assert.match(final.markdown, /Inspected the workspace/);
 });

@@ -21,7 +21,9 @@ export class StubProvider implements ProviderAdapter {
     // Engineer-protocol turns get a deterministic protocol-compliant reply so
     // the loop is integration-testable without a real model: first turn reads a
     // file, subsequent turns finalize.
-    const isEngineer = request.userPrompt.includes('MigraPilot workspace engineer');
+    // Detect the PROTOCOL, not the persona wording — the agent's system prompt
+    // is edited often, and keying off its opening line silently broke this stub.
+    const isEngineer = request.userPrompt.includes('{"action":{"tool"');
     const content = isEngineer
       ? request.userPrompt.includes('Result of ') || request.userPrompt.includes('FAILED')
         ? '{"final":"Stub engineer inspected the workspace and finished."}'

@@ -5,7 +5,7 @@
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { summarizeTurns, summarizeChatContext } from '../../chat/conversationSummary.js';
+import { summarizeChatContext, summarizeTurns, parseSummaryTurns } from '../../chat/conversationSummary.js';
 
 test('summarizeTurns carries the assistant\'s ACTUAL text (never a blanked placeholder)', () => {
   const s = summarizeTurns([
@@ -46,4 +46,30 @@ test('a single very long turn is clipped, not allowed to blow the budget', () =>
   const s = summarizeTurns([{ role: 'assistant', text: 'A'.repeat(50_000) }]);
   assert.ok(s.length < 2_000, `clipped (${s.length} chars)`);
   assert.match(s, /…$/, 'clip marker present');
+});
+
+// ── unified agent: the summary is re-expanded into structured turns ───────────
+// The workspace agent takes `{role,text}[]`, while every chat surface produces the
+// budgeted `user:/assistant:` summary above. Parsing it back keeps ONE budgeting
+// policy rather than two history representations that can drift apart.
+
+test('parseSummaryTurns round-trips a rendered summary into role-tagged turns', () => {
+  const turns = [
+    { role: 'user', text: 'design a health poller' },
+    { role: 'assistant', text: 'It polls /health every 30s.' },
+    { role: 'user', text: 'now build it' },
+  ];
+  assert.deepEqual(parseSummaryTurns(summarizeTurns(turns)), turns);
+});
+
+test('parseSummaryTurns keeps multi-line assistant text with its own turn', () => {
+  const parsed = parseSummaryTurns('user: build it\nassistant: Step 1\nStep 2\nStep 3');
+  assert.equal(parsed.length, 2);
+  assert.equal(parsed[1]!.role, 'assistant');
+  assert.equal(parsed[1]!.text, 'Step 1\nStep 2\nStep 3');
+});
+
+test('parseSummaryTurns yields nothing for an empty summary', () => {
+  assert.deepEqual(parseSummaryTurns(''), []);
+  assert.deepEqual(parseSummaryTurns('   '), []);
 });
