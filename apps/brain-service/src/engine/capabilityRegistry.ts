@@ -38,6 +38,7 @@ import { auditStore, auditHash } from './auditLog.js';
 import { incidentManager } from './incidents.js';
 import { recoveryManager } from './recovery.js';
 import { workspaceSearch } from '../tools/workspaceSearch.js';
+import { workspaceList, WorkspaceListRequestSchema } from '../tools/workspaceList.js';
 import { fileReadRange } from '../tools/fileReadRange.js';
 import { fileReadSymbol } from '../tools/fileReadSymbol.js';
 import { gitStatus } from '../tools/gitStatus.js';
@@ -166,6 +167,13 @@ const TOOLS: RunnableCapability[] = [
     descriptor: meta('workspace.search', 'Workspace Search', 'Search workspace files for a query.', 'workspace', ['workspace.read'], { readOnly: true }),
     inputSchema: WorkspaceSearchRequestSchema,
     handler: (i) => workspaceSearch(i as never),
+  },
+  {
+    // Without this the agent has no instrument for "what files exist?" — it
+    // searched content, read ranges and asked git, then GUESSED the listing.
+    descriptor: meta('workspace.list', 'List Directory', 'List the files and directories that actually exist at a workspace path.', 'workspace', ['workspace.read'], { readOnly: true }),
+    inputSchema: WorkspaceListRequestSchema,
+    handler: (i) => workspaceList(i as never),
   },
   {
     descriptor: meta('file.readRange', 'Read File Range', 'Read a line range from a workspace file.', 'file', ['workspace.read'], { readOnly: true }),

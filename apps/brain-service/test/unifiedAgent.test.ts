@@ -19,6 +19,7 @@ const TOOLS: EngineerToolInfo[] = [
   { id: 'diagnostics.get', description: 'compiler diagnostics', readOnly: true, inputHint: '{}' },
   { id: 'git.status', description: 'git status', readOnly: true, inputHint: '{}' },
   { id: 'command.run', description: 'run an allowlisted command', readOnly: false, inputHint: '{}' },
+  { id: 'workspace.list', description: 'list a directory', readOnly: true, inputHint: '{}' },
   { id: 'fs.proposeChangeset', description: 'propose', readOnly: false, inputHint: '{}' },
 ];
 
@@ -721,4 +722,50 @@ test('results reported AFTER a real command.run are accepted', async () => {
   const events = await drain(runEngineerTask(h.deps, { rootPath: '/w', task: 'run the tests' }));
   const final = events.find((e) => e.type === 'final') as { markdown: string };
   assert.doesNotMatch(final.markdown, /No commands were run/, 'a real run must not be contradicted');
+});
+
+// ── an agent may not assert what it never observed ───────────────────────────
+// Live: asked to audit a repository containing package.json, README.md and
+// .gitignore, the agent answered "the root directory is empty, and there is no
+// package.json file". It had no listing instrument at all, so it guessed.
+
+test('claiming a directory is empty without listing it is challenged', async () => {
+  const h = harness([
+    '{"action":{"tool":"git.status","input":{"rootPath":"/w"}}}',
+    '{"final":"The current branch is main. The root directory is empty, and there is no package.json file."}',
+    '{"action":{"tool":"workspace.list","input":{"rootPath":"/w"}}}',
+    '{"final":"The root contains package.json, README.md and .gitignore; there is no apps/ directory."}',
+  ]);
+  const events = await drain(runEngineerTask(h.deps, { rootPath: '/w', task: 'audit this repository' }));
+
+  assert.match(h.prompts[2]!, /without having listed it/);
+  assert.ok(h.calls.includes('workspace.list'), 'it lists instead of guessing');
+  const final = events.find((e) => e.type === 'final') as { markdown: string };
+  assert.match(final.markdown, /README\.md/);
+});
+
+test('asserting a missing file without listing is challenged too', async () => {
+  const h = harness([
+    '{"final":"There is no docker-compose file in this repository."}',
+    '{"action":{"tool":"workspace.list","input":{"rootPath":"/w"}}}',
+    '{"final":"Listed the root: package.json and README.md only, so no docker-compose file is present."}',
+  ]);
+  await drain(runEngineerTask(h.deps, { rootPath: '/w', task: 'is there a docker compose file?' }));
+  assert.ok(h.calls.includes('workspace.list'), 'absence must be observed, not assumed');
+});
+
+test('the same claim AFTER listing is accepted', async () => {
+  const h = harness([
+    '{"action":{"tool":"workspace.list","input":{"rootPath":"/w"}}}',
+    '{"final":"I listed the root: it contains no package.json file and there is no apps directory."}',
+  ]);
+  await drain(runEngineerTask(h.deps, { rootPath: '/w', task: 'audit this repository' }));
+  assert.equal(h.prompts.length, 2, 'an observed listing needs no corrective round');
+});
+
+test('the prompt names workspace.list as the only way to see what exists', async () => {
+  const h = harness(['{"final":"a sufficiently long direct answer for the agent to accept it"}']);
+  await drain(runEngineerTask(h.deps, { rootPath: '/w', task: 'hi' }));
+  assert.match(h.prompts[0]!, /To see WHAT FILES EXIST use workspace\.list/);
+  assert.match(h.prompts[0]!, /Guessing a listing is a serious error/);
 });

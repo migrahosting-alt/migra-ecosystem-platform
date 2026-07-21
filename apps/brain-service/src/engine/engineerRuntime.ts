@@ -155,6 +155,11 @@ function protocolPrompt(input: EngineerInput, tools: EngineerToolInfo[]): string
     '  to build does not exist yet — that is WHY they asked — so "I could not find it in',
     '  the workspace" is never a valid answer, and neither is asking which files it lives',
     '  in. Pick sensible defaults and propose complete, runnable files immediately.',
+    '- To see WHAT FILES EXIST use workspace.list. It is the only tool that can answer',
+    '  "what is in this repo/folder" — searching content cannot, and git.status shows',
+    '  only CHANGES, not contents. NEVER state that a directory is empty, that a file is',
+    '  absent, or that the repo lacks apps/packages/services/prisma/docker/tests unless',
+    '  workspace.list actually showed you that. Guessing a listing is a serious error.',
     '- To FIND code use workspace.search, then file.readRange on the best hit.',
     '  diagnostics.get reports COMPILER ERRORS and never locates code — it is the wrong',
     '  tool for "where is X" or "what does Y do", and finding nothing with it proves nothing.',
@@ -698,6 +703,32 @@ const NO_COMMAND_DIRECTIVE = [
   'that makes no claim about any command and says plainly which checks were not run.',
 ].join(' ');
 
+/** A claim about what EXISTS on disk — a listing, or an assertion of absence.
+ *
+ * The agent had no listing instrument at all, so asked what a repository
+ * contained it guessed, and reported "the root directory is empty, and there is
+ * no package.json file" about a repo holding package.json, README.md and
+ * .gitignore. With workspace.list available, such a claim is only credible if
+ * that tool actually ran. */
+const CLAIMS_FILESYSTEM_CONTENTS = new RegExp(
+  [
+    // "the root directory is empty", "the repo is empty"
+    /\b(?:root directory|repository|repo|workspace|folder|directory)\b[^.\n]{0,40}\bis empty\b/.source,
+    // "there is no package.json", "contains no files", "has no apps/ directory".
+    // The object must be a FILE or DIRECTORY — "has no build step configured" is a
+    // statement about configuration, not a listing, and must not be flagged.
+    /\b(?:contains? no|has no|there (?:is|are) no|found no|without any)\s+(?:such\s+)?(?:files?|directories|directory|sub-?director\w+|package\.json|package-lock\.json|tsconfig[\w.]*|docker-?compose[\w.]*|dockerfile|readme[\w.]*|\.gitignore|prisma(?:\s+(?:schema|files?))?|apps?\b|packages?\b|services?\b|tests?\s+(?:folder|director\w+))/.source,
+  ].join('|'),
+  'i',
+);
+
+const LIST_FIRST_DIRECTIVE = [
+  'You are stating what does or does not exist on disk without having listed it.',
+  'Call workspace.list on the path in question NOW and report exactly what it returns.',
+  'Content search and git.status cannot tell you what a directory contains — only',
+  'workspace.list can, and an invented listing is worse than no answer at all.',
+].join(' ');
+
 /** Run one engineering task as an event stream. Local-only by construction. */
 export async function* runEngineerTask(deps: EngineerDeps, input: EngineerInput): AsyncGenerator<EngineerEvent> {
   const maxSteps = deps.maxSteps ?? DEFAULT_MAX_STEPS;
@@ -831,6 +862,12 @@ export async function* runEngineerTask(deps: EngineerDeps, input: EngineerInput)
       if (producedNothing && claimsPhantomWork(step.markdown) && !finalCorrected) {
         finalCorrected = true;
         transcript.push(PHANTOM_WORK_DIRECTIVE);
+        continue;
+      }
+      // Asserting what exists on disk without ever listing it.
+      if (!executedTools.has('workspace.list') && CLAIMS_FILESYSTEM_CONTENTS.test(step.markdown) && !finalCorrected) {
+        finalCorrected = true;
+        transcript.push(LIST_FIRST_DIRECTIVE);
         continue;
       }
       // Claiming a COMMAND result when no command ever executed.
