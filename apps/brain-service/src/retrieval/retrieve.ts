@@ -50,6 +50,22 @@ const STOPWORDS = new Set([
   'part', 'parts', 'stuff', 'please', 'need', 'want', 'give', 'find', 'look',
 ]);
 
+/** Paths that are never useful GROUNDING evidence: dependency/build output,
+ * generated clients, and recorded eval runs. A generated Prisma client ranked
+ * above real source in a live probe. */
+// Post-filter for the filename-targeted pass. ripgrep applies globs in ORDER and
+// the LAST match wins, so a filename include re-includes paths the exclude list
+// already dropped (a node_modules eslint plugin came back that way). Filtering
+// the results ourselves is order-independent.
+
+const NOISE_PATH = /(?:^|\/)(?:node_modules|\.turbo|\.next|dist|build|coverage|generated|\.vscode-test)(?:\/|$)|\.log$|\.min\.[a-z]+$/i;
+
+const RETRIEVAL_EXCLUDES = [
+  '**/node_modules/**', '**/dist/**', '**/.git/**', '**/coverage/**',
+  '**/eval/results/**', '**/results/**', '**/*-acceptance.json',
+  '**/generated/**', '**/*.generated.*', '**/.next/**', '**/build/**',
+];
+
 export interface WeightedTerm {
   term: string;
   weight: number;
@@ -80,6 +96,23 @@ function rawTerms(text: string): WeightedTerm[] {
  * IDENTIFIERS from prior turns are inherited (so a follow-up like "what ops does
  * it support?" still anchors on the earlier subject) — but ranked AFTER the
  * current query's own terms, and never generic words from history. */
+/** Adjacent word pairs from the query, joined camelCase.
+ *
+ * People ask about "the changeset lint" but the code is named `changesetLint`.
+ * Searching the words separately drowns in every eslint config in the tree,
+ * while the joined identifier hits the one file that implements it. Cheap and
+ * high-precision: a match on `changesetLint` is almost never a coincidence. */
+export function camelCandidates(query: string): string[] {
+  const words = (query.match(/[A-Za-z][A-Za-z0-9]{2,}/g) ?? []).filter((w) => !STOPWORDS.has(w.toLowerCase()));
+  const out: string[] = [];
+  for (let i = 0; i < words.length - 1; i += 1) {
+    const a = words[i]!.toLowerCase();
+    const b = words[i + 1]!;
+    out.push(a + b.charAt(0).toUpperCase() + b.slice(1).toLowerCase());
+  }
+  return [...new Set(out)].slice(0, 4);
+}
+
 export function salientTermsWeighted(query: string, conversationContext = ''): WeightedTerm[] {
   const q = rawTerms(query);
   const have = new Set(q.map((t) => t.term.toLowerCase()));
@@ -129,7 +162,7 @@ export async function retrieveContext(input: RetrieveRequest): Promise<RetrieveR
           includeGlobs: [],
           // Exclude deps/build AND generated artifacts (eval output, results) so a
           // model's own recorded runs never pollute grounding evidence.
-          excludeGlobs: ['**/node_modules/**', '**/dist/**', '**/.git/**', '**/coverage/**', '**/eval/results/**', '**/results/**', '**/*-acceptance.json'],
+          excludeGlobs: RETRIEVAL_EXCLUDES,
         });
         matches = res.matches;
       } catch {
@@ -160,7 +193,7 @@ export async function retrieveContext(input: RetrieveRequest): Promise<RetrieveR
         try {
           const res = await workspaceSearch({
             rootPath: input.workspaceRoot, query: q, limit: 4, includeGlobs: [],
-            excludeGlobs: ['**/node_modules/**', '**/dist/**', '**/.git/**', '**/coverage/**', '**/eval/results/**', '**/results/**', '**/*-acceptance.json'],
+            excludeGlobs: RETRIEVAL_EXCLUDES,
           });
           for (const m of res.matches) {
             const entry = perFile.get(m.path) ?? { lines: new Set<number>(), score: 0, bestTerm: ident, bestWeight: 3, hitPrimary: ident === primaryTerm };
@@ -172,6 +205,43 @@ export async function retrieveContext(input: RetrieveRequest): Promise<RetrieveR
           }
         } catch { /* best-effort */ }
       }
+    }
+
+    // FILENAME-TARGETED CANDIDATES. The per-term content search is capped at
+    // PER_TERM_LIMIT and returns matches in traversal order, so in a large
+    // monorepo the RIGHT file can be truncated away before scoring ever sees it
+    // — no ranking can rescue a file that never became a candidate. Observed:
+    // "what does the changeset lint check?" never surfaced changesetLint.ts,
+    // because "changeset" and "lint" each matched 24 other files first.
+    //
+    // So search each term again, restricted to files whose PATH contains it.
+    // Tiny result set, very high precision: a file named after the thing asked
+    // about is almost always the thing that implements it.
+    for (const term of [...terms.map((t) => t.term), ...camelCandidates(input.query ?? '')]) {
+      if (term.length < 4) continue; // too generic to name a file usefully
+      const capped = term.charAt(0).toUpperCase() + term.slice(1);
+      try {
+        const res = await workspaceSearch({
+          rootPath: input.workspaceRoot,
+          query: term,
+          // Counts match LINES, not files: one chatty file ate an entire
+          // 8-line budget in a live probe and hid every other candidate. The
+          // glob already restricts this to a handful of files, so allow plenty.
+          limit: 200,
+          // Globs are case-sensitive; cover the two casings that actually name
+          // files (`changesetLint.ts`, `ChangesetLint.ts`).
+          includeGlobs: [`**/*${term}*`, `**/*${capped}*`],
+          excludeGlobs: RETRIEVAL_EXCLUDES,
+        });
+        for (const m of res.matches) {
+          if (NOISE_PATH.test(m.path)) continue;
+          const entry = perFile.get(m.path) ?? { lines: new Set<number>(), score: 0, bestTerm: term, bestWeight: 1, hitPrimary: term === primaryTerm };
+          entry.lines.add(m.line);
+          entry.score += 7; // named after the subject — as strong as a definition hit
+          if (term === primaryTerm) entry.hitPrimary = true;
+          perFile.set(m.path, entry);
+        }
+      } catch { /* best-effort */ }
     }
 
     // Filename signal: a file NAMED after the identifier (workspaceSearch.ts for
