@@ -22,6 +22,15 @@ const PER_TERM_LIMIT = 24; // matches per term — enough that a common identifi
 // definition-first ranking can promote the file that truly answers the question.
 const DEFAULT_MAX_CHUNKS = 6;
 
+/** Path markers for a NON-CANONICAL copy of code — a `-starter` scaffold, a
+ * backup/archive, or a `-old`/`-copy`/`.bak`/`.orig`/`-deprecated` duplicate.
+ * Files under these are deprioritized so grounding prefers the real source over
+ * a duplicate (e.g. `migracms-enterprise/` over `Clients/migracms-enterprise-
+ * starter/`). Deliberately conservative — NO `template`/`example`/`sample`,
+ * which routinely name real source (email-template.ts, examples/). */
+const COPY_PATH =
+  /(?:[-_](?:starter|backup|bak|orig|deprecated))(?:[-_/.]|$)|[-_]old(?:[-_/.]|$)|[-_]copy(?:[-_/.]|$)|(?:^|\/)(?:backups?|archives?|\.backups?)\//i;
+
 // Question/filler/instruction words that carry no retrieval signal. Searching
 // these (e.g. "cite", "file", "explain") pulls in unrelated files and drowns the
 // real match, so a weak model then grounds on noise or hallucinates.
@@ -164,6 +173,16 @@ export async function retrieveContext(input: RetrieveRequest): Promise<RetrieveR
       const t = info.bestTerm.toLowerCase();
       if (base === t) info.score += 6;
       else if (base.includes(t) || t.includes(base)) info.score += 3;
+      // Deprioritize NON-CANONICAL copies: a `-starter`/template scaffold, a
+      // backup/archive, a vendored or `.bak`/`-old` copy, or an extracted zip. In
+      // a monorepo the same component often exists as both the real source AND a
+      // client copy; the canonical source should ground the answer, not the copy
+      // (a query for "MigraCMS" was landing on Clients/…-starter/ instead of the
+      // real migracms-enterprise/).
+      // Rank a copy a clear notch below its canonical twin (roughly a
+      // definition-signal's worth) — but never so hard that a copy vanishes when
+      // it is the only match (a copy still beats nothing).
+      if (COPY_PATH.test(relPath)) info.score -= 7;
     }
 
     // Drop NOISE: when the query has a distinctive identifier (weight ≥ 3), keep
