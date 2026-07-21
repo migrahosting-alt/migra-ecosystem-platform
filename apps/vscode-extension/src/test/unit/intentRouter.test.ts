@@ -253,3 +253,19 @@ test('without streaming the final still renders in full (buffered providers)', a
   );
   assert.match(md.join(''), /A complete buffered answer\./);
 });
+
+test('a plan note renders as a readable block, not a squeezed one-liner', async () => {
+  const md: string[] = [];
+  await runEngineerTurn(
+    fakeStream([
+      { event: 'note', data: { n: 1, kind: 'plan', message: 'PLAN (0/2 done):\n  [ ] 1. audit the repo\n  [ ] 2. build the route' } },
+      { event: 'final', data: { markdown: 'Audited the repo and proposed the route files.' } },
+    ]),
+    { rootPath: '/w', task: 'audit then build' },
+    { markdown: (t) => md.push(t) },
+  );
+  const out = md.join('');
+  assert.match(out, /PLAN \(0\/2 done\)/);
+  assert.match(out, /\[ \] 1\. audit the repo/);
+  assert.match(out, /```text/, 'multi-line plan is a block');
+});

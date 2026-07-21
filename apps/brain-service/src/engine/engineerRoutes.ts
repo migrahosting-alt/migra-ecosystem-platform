@@ -56,6 +56,7 @@ const EngineerBodySchema = z.object({
 const INPUT_HINTS: Record<string, string> = {
   'workspace.search': '{"rootPath","query"}',
   'workspace.list': '{"rootPath","path"?,"depth"?,"limit"?} — the ONLY way to see what files exist',
+  'plan.update': '{"steps":["first","second",...]} to set a plan, {"complete":[1,2]} to tick steps off',
   'workspace.find': '{"rootPath","query","kind"?,"limit"?} — find files by NAME or glob',
   'file.read': '{"rootPath","path","maxBytes"?} — read a WHOLE file (no line numbers needed)',
   'file.readRange': '{"rootPath","path","startLine","endLine"}',
@@ -131,8 +132,8 @@ export function registerEngineerRoutes(
   /** The loop's tool surface: read-only capabilities + the two policy-gated
    * extras (edit.preview for proposals, command.run under its allowlist).
    * edit.apply is deliberately ABSENT — the loop never mutates. */
-  const loopTools = (): EngineerToolInfo[] =>
-    toolDeps.registry
+  const loopTools = (): EngineerToolInfo[] => [
+    ...toolDeps.registry
       .list({ includeUnavailable: false })
       .filter((t) => t.kind === 'tool' && t.id !== 'edit.apply' && (t.readOnly || t.id === 'command.run'))
       .map((t) => ({
@@ -140,7 +141,17 @@ export function registerEngineerRoutes(
         description: t.description,
         readOnly: t.readOnly,
         inputHint: INPUT_HINTS[t.id] ?? '{"rootPath",...}',
-      }));
+      })),
+    // Not a registry capability: plan state belongs to the LOOP, because it must
+    // survive every step and be re-shown to the model. A stateless tool cannot
+    // remember what the agent set out to do.
+    {
+      id: 'plan.update',
+      description: 'Record your plan for a multi-step task and tick steps off as you finish them.',
+      readOnly: true,
+      inputHint: INPUT_HINTS['plan.update'] as string,
+    },
+  ];
 
   // Read-only store health/telemetry (Slice 2). Aggregate health + counters +
   // eviction stats + a small recent-events window — NO proposal bodies, approval
