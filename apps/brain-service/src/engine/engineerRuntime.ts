@@ -29,6 +29,7 @@
 
 import { NOOP_STAGE_LOGGER, type StageLogger } from './correlation.js';
 import { lintChangeset, summarizeDefects } from '../tools/changesetLint.js';
+import { FinalAnswerStreamer } from './finalAnswerStream.js';
 
 export interface EngineerToolInfo {
   id: string;
@@ -41,6 +42,11 @@ export interface EngineerToolInfo {
 export interface EngineerDeps {
   /** One buffered completion (prompt → text) on an engine-selected coding model. */
   complete(prompt: string): Promise<string>;
+  /** Optional token-streaming completion. When present the loop uses it and
+   * reports the final ANSWER as it is generated, so the user is not left
+   * watching nothing during a long local generation. Falls back to `complete`
+   * wherever it is absent, so every existing caller is unaffected. */
+  completeStream?(prompt: string): AsyncIterable<string>;
   /** Execute a tool through the capability registry (validated + audited). */
   executeTool(tool: string, input: unknown): Promise<unknown>;
   /** The tool catalog the loop may use (already filtered by the caller). */
@@ -86,7 +92,8 @@ export type EngineerEvent =
   | { type: 'step'; n: number; tool: string; summary: string }
   | { type: 'proposal'; n: number; preview: unknown }
   | { type: 'note'; n: number; kind: EngineerNoteKind; message: string }
-  | { type: 'final'; markdown: string; steps: number }
+  | { type: 'token'; text: string }
+  | { type: 'final'; markdown: string; steps: number; streamedPrefix?: boolean }
   | { type: 'error'; code: 'MALFORMED_MODEL_OUTPUT' | 'STEP_LIMIT' | 'LOOP_NO_PROGRESS'; message: string };
 
 const DEFAULT_MAX_STEPS = 14;
@@ -264,7 +271,7 @@ export function repairJsonEscapes(text: string): string {
 }
 
 /** Parse the model's step reply. Tolerates surrounding whitespace/fences. */
-export function parseStep(text: string):
+export function parseStep(text: string, opts: { lenient?: boolean } = {}):
   | { kind: 'action'; tool: string; input: unknown }
   | { kind: 'final'; markdown: string }
   | { kind: 'malformed'; reason: string } {
@@ -290,11 +297,32 @@ export function parseStep(text: string):
       return { kind: 'malformed', reason: 'not valid JSON' };
     }
   }
+  // A bare JSON string IS the answer, just without its wrapper — models emit
+  // `"Monads are …"` verbatim. Accepted only as a LAST RESORT (see below).
+  if (typeof parsed === 'string') {
+    return opts.lenient
+      ? { kind: 'final', markdown: parsed }
+      : { kind: 'malformed', reason: 'a bare string, not the protocol object' };
+  }
   const obj = parsed as Record<string, unknown>;
   if (typeof obj.final === 'string') return { kind: 'final', markdown: obj.final };
   const action = obj.action as { tool?: unknown; input?: unknown } | undefined;
   if (action && typeof action.tool === 'string') {
     return { kind: 'action', tool: action.tool, input: action.input ?? {} };
+  }
+  // LAST RESORT ONLY: the same answer under a different key (`response`,
+  // `answer`, `markdown`, …), e.g. the live `{"response":"…"}`.
+  //
+  // Deliberately gated behind `lenient`, which only the post-retry parse sets.
+  // Accepting an alias on the FIRST parse made the agent stop early: a chatty
+  // `{"response":"I'll build it"}` was taken as the finished answer, and a build
+  // that used to propose three files proposed nothing. Demanding the protocol
+  // first (the retry usually complies) and falling back only when the run would
+  // otherwise DIE keeps both properties.
+  if (!opts.lenient) return { kind: 'malformed', reason: 'neither {"action":...} nor {"final":...}' };
+  for (const alias of ['response', 'answer', 'markdown', 'text', 'final_answer', 'output']) {
+    const value = obj[alias];
+    if (typeof value === 'string' && value.trim()) return { kind: 'final', markdown: value };
   }
   return { kind: 'malformed', reason: 'neither {"action":...} nor {"final":...}' };
 }
@@ -637,13 +665,48 @@ export async function* runEngineerTask(deps: EngineerDeps, input: EngineerInput)
   const NO_WORK_FOOTER =
     '\n\n---\n**⚠️ Nothing was created or changed.** No tool ran during this turn, so any files named above do not exist. Ask again to have them actually built.';
 
+  // One completion, reported as it arrives. The streamer emits nothing until the
+  // reply is confirmed to be a final answer, so a tool call never leaks protocol
+  // text into the chat. `holder` carries the raw reply back out of the generator.
+  async function* completing(prompt: string, holder: { reply: string; streamed: string }): AsyncGenerator<EngineerEvent> {
+    holder.streamed = '';
+    if (!deps.completeStream) {
+      holder.reply = await deps.complete(prompt);
+      return;
+    }
+    const streamer = new FinalAnswerStreamer();
+    let raw = '';
+    for await (const delta of deps.completeStream(prompt)) {
+      raw += delta;
+      const text = streamer.push(delta);
+      if (text) yield { type: 'token', text };
+    }
+    holder.reply = raw;
+    holder.streamed = streamer.text;
+  }
+
+  const held = { reply: '', streamed: '' };
+  let lastStreamed = '';
   for (let n = 1; n <= maxSteps; n++) {
-    let reply = await deps.complete(transcript.join('\n\n'));
+    // Reaching the top of the loop with streamed text behind us means a final
+    // answer was shown and then REJECTED by a quality correction. Say so, rather
+    // than letting a second answer silently appear under the first.
+    if (lastStreamed) {
+      yield { type: 'note', n, kind: 'replan', message: 'revising that answer' };
+      lastStreamed = '';
+    }
+    yield* completing(transcript.join('\n\n'), held);
+    let reply = held.reply;
+    let streamedThisAttempt = held.streamed;
+    lastStreamed = streamedThisAttempt;
     let step = parseStep(reply);
     if (step.kind === 'malformed') {
       transcript.push(`Your last reply was invalid (${step.reason}). Reply with ONLY the JSON protocol object.`);
-      reply = await deps.complete(transcript.join('\n\n'));
-      step = parseStep(reply);
+      yield* completing(transcript.join('\n\n'), held);
+      reply = held.reply;
+      streamedThisAttempt = held.streamed;
+      lastStreamed = streamedThisAttempt;
+      step = parseStep(reply, { lenient: true });
       if (step.kind === 'malformed') {
         // Record a capped sample of what the model actually said. Without it a
         // protocol break is undiagnosable — the run just dies with "not valid
@@ -735,7 +798,11 @@ export async function* runEngineerTask(deps: EngineerDeps, input: EngineerInput)
       }
       markdown = proposalsEmitted > 0 ? markdown + APPLIED_FOOTER : markdown;
       stage.log('final', { steps: toolStepCount, proposals: proposalsEmitted, replans });
-      yield { type: 'final', markdown, steps: toolStepCount };
+      // The client has already rendered `streamedThisAttempt`. Tell it whether
+      // that text is still a prefix of what we are sending, so it can append the
+      // remainder instead of repeating the whole answer.
+      const streamedPrefix = streamedThisAttempt.length > 0 && markdown.startsWith(streamedThisAttempt);
+      yield { type: 'final', markdown, steps: toolStepCount, streamedPrefix };
       return;
     }
 

@@ -84,6 +84,13 @@ async function listWorkspaceFiles(root: string, limit = 5_000): Promise<string[]
   return out;
 }
 
+/** A provider adapter that can also stream token deltas (OpenAI-compatible
+ * backends do; the stub does not). Feature-detected so non-streaming adapters
+ * keep the buffered path. */
+type StreamingProvider = ProviderAdapter & {
+  stream(request: ChatTurnRequest, signal?: AbortSignal): AsyncGenerator<{ delta?: string }>;
+};
+
 export function registerEngineerRoutes(
   app: FastifyInstance,
   env: BrainEnv,
@@ -326,7 +333,13 @@ export function registerEngineerRoutes(
       feature: 'chat',
       ...(body.history?.length ? { conversationContext: body.history.map((h) => h.text).join('\n') } : {}),
     })
-      .then((r) => r.chunks.map((c) => ({ path: c.path, startLine: c.startLine, endLine: c.endLine, snippet: c.snippet })))
+      // Seed only DEFINITION-grade evidence. Scores encode this directly: a
+      // definition scores >=0.85, a passing reference ~0.55. Seeding everything
+      // fed VS Code language-extension configs into "what is a monad?", and the
+      // model then answered that the excerpts did not cover monads instead of
+      // just answering. No strong hit => seed nothing and let the agent decide.
+      .then((r) => r.chunks.filter((c) => c.score >= 0.8))
+      .then((cs) => cs.map((c) => ({ path: c.path, startLine: c.startLine, endLine: c.endLine, snippet: c.snippet })))
       .catch(() => [] as Array<{ path: string; startLine: number; endLine: number; snippet: string }>);
     stage.log('request', { seededChunks: seededContext.length });
 
@@ -343,6 +356,27 @@ export function registerEngineerRoutes(
           });
           return res.content;
         },
+        // Stream when the resolved provider supports it, so the answer appears as
+        // it is written instead of after the whole generation. Feature-detected:
+        // the stub provider (and any adapter without `stream`) keeps the buffered
+        // path, so tests and non-streaming backends are unaffected.
+        ...(typeof (provider as Partial<StreamingProvider>).stream === 'function'
+          ? {
+              completeStream: async function* (prompt: string): AsyncGenerator<string> {
+                const frames = (provider as StreamingProvider).stream({
+                  feature: 'chat',
+                  modelProfile: 'default',
+                  systemPromptId: 'engineer-v1',
+                  userPrompt: prompt,
+                  outputMode: 'markdown',
+                  context: {},
+                });
+                for await (const frame of frames) {
+                  if (frame.delta) yield frame.delta;
+                }
+              },
+            }
+          : {}),
         executeTool: async (tool, input) => {
           // Thread the same correlation logger into the tool boundary so
           // proposal/approval/apply stages share this execution's id.
