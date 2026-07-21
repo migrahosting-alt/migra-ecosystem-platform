@@ -35,7 +35,24 @@ export function extractPathCandidates(prompt: string): string[] {
   return [...new Set(out)];
 }
 
-export type RootSource = 'explicit-path' | 'workspace' | 'picked';
+/** Same folder, written the other host's way.
+ *
+ * The extension host and the folder do not have to agree on path style: in WSL
+ * the picker browses the LINUX tree, so a Windows path like `T:\MigraWatch` is
+ * simply "a path that does not exist" — the owner hit exactly that, typing
+ * `t:/MigraWatch/migrawatch` into a dialog listing `/bin`, `/boot`, `/dev`.
+ * Translating both ways lets either spelling resolve; the caller still verifies
+ * each candidate really is a directory, so a wrong guess costs nothing. */
+export function pathAlternatives(p: string): string[] {
+  const out = [p];
+  const win = /^([A-Za-z]):[\\/](.*)$/.exec(p);
+  if (win) out.push(`/mnt/${win[1]!.toLowerCase()}/${win[2]!.replace(/\\/g, '/')}`);
+  const wsl = /^\/mnt\/([A-Za-z])\/(.*)$/.exec(p);
+  if (wsl) out.push(`${wsl[1]!.toUpperCase()}:\\${wsl[2]!.replace(/\//g, '\\')}`);
+  return [...new Set(out.filter(Boolean))];
+}
+
+export type RootSource = 'explicit-path' | 'workspace' | 'picked' | 'created';
 
 export interface ResolveRootDeps {
   /** The first open workspace folder path, if any. */
@@ -45,6 +62,10 @@ export interface ResolveRootDeps {
   /** Ask the user to pick a folder; returns its path or undefined if cancelled.
    * `near` is a hint (e.g. a named-but-missing path) to open the dialog at. */
   pickFolder(near?: string): Promise<string | undefined>;
+  /** Ask whether to CREATE a folder the user named that does not exist yet. */
+  confirmCreate?(path: string): Promise<boolean>;
+  /** Create a directory (and any missing parents). */
+  createDirectory?(path: string): Promise<void>;
 }
 
 export interface ResolvedRoot {
@@ -52,20 +73,29 @@ export interface ResolvedRoot {
   source: RootSource;
   /** A path the user named that did not exist — surfaced so the caller can note it. */
   missingNamed?: string;
+  /** Set when the folder was created for this task. */
+  created?: boolean;
 }
 
 /** Resolve the target folder for a task. Returns undefined only if a picker was
  * needed and the user cancelled. */
 export async function resolveTaskRoot(prompt: string, deps: ResolveRootDeps): Promise<ResolvedRoot | undefined> {
-  const candidates = extractPathCandidates(prompt);
+  const candidates = extractPathCandidates(prompt).flatMap(pathAlternatives);
   let missingNamed: string | undefined;
   for (const c of candidates) {
     if (await deps.isDirectory(c)) return { root: c, source: 'explicit-path' };
     missingNamed ??= c; // remember the first named-but-missing path
   }
-  // A path was named but doesn't exist → ASK (don't silently use a different
-  // folder than the one the user pointed at).
+  // A path was named but doesn't exist. Starting a NEW project is the common
+  // case here — the folder is supposed to be new — and the picker can only
+  // select folders that already exist, so it dead-ends: the owner could not
+  // begin a new app without first creating the directory by hand. Offer to
+  // create it, and only fall back to the picker if that is declined.
   if (missingNamed) {
+    if (deps.confirmCreate && deps.createDirectory && (await deps.confirmCreate(missingNamed))) {
+      await deps.createDirectory(missingNamed);
+      return { root: missingNamed, source: 'created', created: true };
+    }
     const picked = await deps.pickFolder(missingNamed);
     return picked ? { root: picked, source: 'picked', missingNamed } : undefined;
   }

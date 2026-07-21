@@ -4,7 +4,7 @@
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { extractPathCandidates, resolveTaskRoot, type ResolveRootDeps } from '../../chat/taskRoot.js';
+import { extractPathCandidates, resolveTaskRoot, type ResolveRootDeps, pathAlternatives } from '../../chat/taskRoot.js';
 
 test('extractPathCandidates finds Windows, POSIX, UNC, home, and quoted paths', () => {
   assert.deepEqual(extractPathCandidates('build an app in C:\\Users\\me\\proj now'), ['C:\\Users\\me\\proj']);
@@ -69,4 +69,64 @@ test('a NAMED-but-missing path asks (near it) rather than silently using the wor
 test('cancelling the picker resolves to undefined (caller aborts the turn)', async () => {
   const r = await resolveTaskRoot('build me a todo app', deps({ openWorkspace: undefined, pickFolder: async () => undefined }));
   assert.equal(r, undefined);
+});
+
+// ── cross-host paths and brand-new project folders ───────────────────────────
+// Reported from real use: the owner typed `t:/MigraWatch/migrawatch` into the
+// folder picker and got "Please enter a path that exists" — the dialog was
+// browsing the WSL tree (/bin, /boot, /dev), where that Windows path is
+// meaningless. And the folder did not exist yet, because the whole point was to
+// START a new project there.
+
+test('a Windows path resolves to its WSL mount', async () => {
+  const seen: string[] = [];
+  const r = await resolveTaskRoot('build a watcher app in T:\\MigraWatch\\migrawatch', {
+    isDirectory: async (p) => {
+      seen.push(p);
+      return p === '/mnt/t/MigraWatch/migrawatch';
+    },
+    pickFolder: async () => undefined,
+  });
+  assert.equal(r?.root, '/mnt/t/MigraWatch/migrawatch');
+  assert.equal(r?.source, 'explicit-path');
+  assert.ok(seen.includes('T:\\MigraWatch\\migrawatch'), 'the literal spelling is tried first');
+});
+
+test('a WSL mount path resolves to its Windows spelling', () => {
+  assert.deepEqual(pathAlternatives('/mnt/t/MigraWatch/app'), ['/mnt/t/MigraWatch/app', 'T:\\MigraWatch\\app']);
+  assert.deepEqual(pathAlternatives('t:/MigraWatch/app'), ['t:/MigraWatch/app', '/mnt/t/MigraWatch/app']);
+  assert.deepEqual(pathAlternatives('/home/me/app'), ['/home/me/app'], 'a plain POSIX path gains nothing');
+});
+
+test('a named folder that does not exist yet is CREATED on confirmation', async () => {
+  const created: string[] = [];
+  const r = await resolveTaskRoot('build a countdown app in /mnt/t/MigraWatch/migrawatch', {
+    isDirectory: async () => false,
+    confirmCreate: async () => true,
+    createDirectory: async (p) => {
+      created.push(p);
+    },
+    pickFolder: async () => {
+      throw new Error('must not fall back to a picker after the user agreed to create');
+    },
+  });
+  assert.equal(r?.root, '/mnt/t/MigraWatch/migrawatch');
+  assert.equal(r?.source, 'created');
+  assert.equal(r?.created, true);
+  assert.deepEqual(created, ['/mnt/t/MigraWatch/migrawatch']);
+});
+
+test('declining the creation still offers the picker, and creates nothing', async () => {
+  const created: string[] = [];
+  const r = await resolveTaskRoot('build it in /mnt/t/Nope/here', {
+    isDirectory: async () => false,
+    confirmCreate: async () => false,
+    createDirectory: async (p) => {
+      created.push(p);
+    },
+    pickFolder: async () => '/mnt/t/Existing',
+  });
+  assert.equal(r?.root, '/mnt/t/Existing');
+  assert.equal(r?.source, 'picked');
+  assert.deepEqual(created, [], 'nothing is created without consent');
 });

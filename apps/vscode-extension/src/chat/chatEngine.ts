@@ -193,6 +193,22 @@ export async function runChatTurn(
           return false;
         }
       },
+      // Starting a NEW project means the folder does not exist yet. Offer to
+      // create it rather than dead-ending in a picker that can only choose
+      // folders that already exist.
+      confirmCreate: async (target) => {
+        const yes = 'Create and build here';
+        const choice = await vscode.window.showWarningMessage(
+          `\`${target}\` does not exist. Create it and build there?`,
+          { modal: true },
+          yes,
+          'Choose another folder…',
+        );
+        return choice === yes;
+      },
+      createDirectory: async (target) => {
+        await vscode.workspace.fs.createDirectory(vscode.Uri.file(target));
+      },
       pickFolder: async (near) => {
         const picked = await vscode.window.showOpenDialog({
           canSelectFolders: true,
@@ -211,7 +227,11 @@ export async function runChatTurn(
     }
     const workspaceRootForTask = resolved.root;
     if (resolved.source !== 'workspace') {
-      const why = resolved.missingNamed ? ` (\`${resolved.missingNamed}\` was not found)` : '';
+      const why = resolved.created
+        ? ' (created for this task)'
+        : resolved.missingNamed
+          ? ` (\`${resolved.missingNamed}\` was not found)`
+          : '';
       sink.markdown(`\n_Working in \`${workspaceRootForTask}\`${why}._\n`);
     }
     // Collect changeset proposals during the run so we can offer a user-confirmed
