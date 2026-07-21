@@ -87,6 +87,24 @@ test('labelled build orders (MISSION:/TASK:/GOAL:/TODO:) route to the workspace 
   assert.equal(classifyIntent('Context: the app is slow. how do i profile it?'), 'conversation');
 });
 
+// Regression (fabrication root cause): "Slice 0: create the standalone MigraWatch
+// repository…" fell to CHAT because the numbered label defeated the verb match.
+// Chat cannot build, so the model invented a completion report (fake repo path,
+// fake HEAD, fake command output). A numbered label must never hide a build order.
+test('numbered section labels (Slice 0:/Step 3 -/Phase 1:) still route to the engineer', () => {
+  for (const p of [
+    'Slice 0: create the standalone MigraWatch repository with pnpm workspaces and packages core, api, worker',
+    'Step 3 - build the auth service',
+    'Phase 1: scaffold the dashboard app',
+    'Milestone 2 — implement the export pipeline',
+    'Sprint 4: refactor the export module',
+  ]) {
+    assert.equal(classifyIntent(p), 'workspace-task', `should build: ${p}`);
+  }
+  // A labelled QUESTION is still a question.
+  assert.equal(classifyIntent('Slice 0: what is the difference between a monorepo and polyrepo?'), 'conversation');
+});
+
 test('the lead-in stripper does not hijack genuine questions or chit-chat', () => {
   assert.equal(classifyIntent('can you explain the build system?'), 'conversation');
   assert.equal(classifyIntent('please tell me how the router works'), 'conversation');

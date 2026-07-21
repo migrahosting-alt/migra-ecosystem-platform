@@ -205,7 +205,13 @@ export function classifyIntent(prompt: string): ChatRoute {
   // spec that opens "MISSION: Build the …" was dead-ending in chat because the
   // label defeated the anchored verb match.
   const deLabelled = deNoised
+    // Plain labels, plus NUMBERED section labels ("Slice 0:", "Step 3 -",
+    // "Phase 1:", "Milestone 2:"). A real build order opened "Slice 0: create the
+    // standalone MigraWatch repository…" and the label kept it out of the
+    // engineer — it fell to chat, which cannot build and instead FABRICATED a
+    // completion report. Numbered labels must not hide a build directive.
     .replace(/^(?:mission|task|goal|objective|directive|prompt|todo|to-?do|request|ask|instruction|order|deliverable|spec(?:ification)?|requirements?|feature|ticket|story|epic|user\s*story|acceptance\s*criteria|context|background)s?\b\s*[:\-–—]\s*/i, '')
+    .replace(/^(?:slice|step|phase|milestone|stage|part|chapter|section|sprint|iteration|item)\s*#?\d*[a-z]?\b\s*[:\-–—.)]\s*/i, '')
     .trim() || deNoised;
   const core = deLabelled.replace(ACTION_LEAD, '').trim() || deLabelled;
   const isTask = TASK_VERBS.test(core) && (CODE_OBJECTS.test(core) || FILEISH.test(core));
