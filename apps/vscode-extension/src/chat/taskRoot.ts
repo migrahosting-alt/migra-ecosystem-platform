@@ -24,8 +24,23 @@ export function extractPathCandidates(prompt: string): string[] {
     const c = m[1];
     if (c && (/^[A-Za-z]:[\\/]/.test(c) || c.startsWith('/') || c.startsWith('~/') || c.startsWith('\\\\'))) push(c);
   }
-  // Windows drive paths: C:\Users\me\proj or C:/Users/me/proj
-  for (const m of prompt.matchAll(/\b[A-Za-z]:[\\/][^\s"'`<>|?*\n]+/g)) push(m[0]);
+  // Windows drive paths: C:\Users\me\proj or C:/Users/me/proj.
+  //
+  // Spaces are ALLOWED and then progressively trimmed: `T:\MigraAccess Command`
+  // is a real folder, but stopping at the first space silently truncated it to
+  // `T:\MigraAccess` and the run reported that folder "was not found". Emitting
+  // the longest form first and shorter prefixes after lets the existence check
+  // decide, which is what it is there for.
+  for (const m of prompt.matchAll(/\b[A-Za-z]:[\\/][^\n"'`<>|?*]+/g)) {
+    const full = m[0].trimEnd();
+    push(full);
+    // …then drop trailing words, so prose after the path cannot swallow it.
+    let rest = full;
+    while (/\s/.test(rest)) {
+      rest = rest.replace(/\s+\S*$/, '');
+      if (/^[A-Za-z]:[\\/].+/.test(rest)) push(rest);
+    }
+  }
   // UNC paths: \\server\share\proj
   for (const m of prompt.matchAll(/\\\\[^\s"'`<>|?*\n]+/g)) push(m[0]);
   // Home paths: ~/projects/app
@@ -96,10 +111,25 @@ export async function resolveTaskRoot(prompt: string, deps: ResolveRootDeps): Pr
       await deps.createDirectory(missingNamed);
       return { root: missingNamed, source: 'created', created: true };
     }
-    const picked = await deps.pickFolder(missingNamed);
+    const picked = await pickExisting(deps, missingNamed);
     return picked ? { root: picked, source: 'picked', missingNamed } : undefined;
   }
   if (deps.openWorkspace) return { root: deps.openWorkspace, source: 'workspace' };
-  const picked = await deps.pickFolder();
+  const picked = await pickExisting(deps);
   return picked ? { root: picked, source: 'picked' } : undefined;
+}
+
+/** A PICKED path still has to exist on this host before we build in it.
+ *
+ * The owner ended up "Working in `t:\`" — a Windows drive root, which does not
+ * exist from the WSL extension host, so every tool call in that run was doomed
+ * and it looked as though the agent had no build tools at all. A picked path is
+ * now translated the same way a typed one is, and rejected if nothing resolves. */
+async function pickExisting(deps: ResolveRootDeps, near?: string): Promise<string | undefined> {
+  const picked = await deps.pickFolder(near);
+  if (!picked) return undefined;
+  for (const c of pathAlternatives(picked)) {
+    if (await deps.isDirectory(c)) return c;
+  }
+  return undefined;
 }

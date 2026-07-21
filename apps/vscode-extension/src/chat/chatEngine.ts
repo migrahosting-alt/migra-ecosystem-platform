@@ -222,7 +222,20 @@ export async function runChatTurn(
       },
     });
     if (!resolved) {
-      sink.markdown('No folder selected. Open a folder, or include a path in your message (e.g. `build … in C:\\\\path\\\\to\\\\project`), and try again.');
+      // Also reached when a folder WAS chosen but is not reachable from the host
+      // running the agent — picking `T:\` from the WSL host looked like it worked
+      // and then every tool call failed, which read as "it has no build tools".
+      sink.markdown(
+        [
+          '**No usable folder.** Nothing was built.',
+          '',
+          'Either no folder was chosen, or the chosen one is not reachable from where MigraPilot runs.',
+          'Put the path in your message and I will use it (creating it if you confirm) — for example:',
+          '`build a todo app in /mnt/t/MigraWatch/migrawatch`.',
+          '',
+          '_Running under WSL, a Windows drive `T:\\…` lives at `/mnt/t/…`; if `/mnt/t` is empty or errors, the drive is not mounted in WSL._',
+        ].join('\n'),
+      );
       return;
     }
     const workspaceRootForTask = resolved.root;

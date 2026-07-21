@@ -7,7 +7,11 @@ import { test } from 'node:test';
 import { extractPathCandidates, resolveTaskRoot, type ResolveRootDeps, pathAlternatives } from '../../chat/taskRoot.js';
 
 test('extractPathCandidates finds Windows, POSIX, UNC, home, and quoted paths', () => {
-  assert.deepEqual(extractPathCandidates('build an app in C:\\Users\\me\\proj now'), ['C:\\Users\\me\\proj']);
+  // Windows paths may contain spaces, so the greedy match can swallow trailing
+  // prose ("… proj now"). That is deliberate: the longest form is offered first
+  // and shorter prefixes after it, and the caller's existence check decides.
+  const win = extractPathCandidates('build an app in C:\\Users\\me\\proj now');
+  assert.ok(win.includes('C:\\Users\\me\\proj'), `real path missing: ${JSON.stringify(win)}`);
   assert.deepEqual(extractPathCandidates('scaffold it under /home/me/apps/todo'), ['/home/me/apps/todo']);
   assert.ok(extractPathCandidates('put it in ~/projects/site').includes('~/projects/site'));
   assert.ok(extractPathCandidates('build in "P:\\AI Studio\\Petit-Frere-Trio"').includes('P:\\AI Studio\\Petit-Frere-Trio'));
@@ -50,6 +54,7 @@ test('no path + open workspace → uses the workspace (no picker)', async () => 
 test('no path + no workspace → ASKS for a folder', async () => {
   const r = await resolveTaskRoot('build me a todo app', deps({
     openWorkspace: undefined,
+    isDirectory: async (p) => p === '/picked/here', // a picked folder must be real
     pickFolder: async () => '/picked/here',
   }));
   assert.deepEqual(r, { root: '/picked/here', source: 'picked' });
@@ -59,7 +64,7 @@ test('a NAMED-but-missing path asks (near it) rather than silently using the wor
   let nearArg: string | undefined;
   const r = await resolveTaskRoot('build in /does/not/exist', deps({
     openWorkspace: '/open/ws',
-    isDirectory: async () => false,
+    isDirectory: async (p) => p === '/chosen', // the named path is missing; the pick is real
     pickFolder: async (near) => { nearArg = near; return '/chosen'; },
   }));
   assert.deepEqual(r, { root: '/chosen', source: 'picked', missingNamed: '/does/not/exist' });
@@ -119,7 +124,7 @@ test('a named folder that does not exist yet is CREATED on confirmation', async 
 test('declining the creation still offers the picker, and creates nothing', async () => {
   const created: string[] = [];
   const r = await resolveTaskRoot('build it in /mnt/t/Nope/here', {
-    isDirectory: async () => false,
+    isDirectory: async (p) => p === '/mnt/t/Existing',
     confirmCreate: async () => false,
     createDirectory: async (p) => {
       created.push(p);
@@ -129,4 +134,33 @@ test('declining the creation still offers the picker, and creates nothing', asyn
   assert.equal(r?.root, '/mnt/t/Existing');
   assert.equal(r?.source, 'picked');
   assert.deepEqual(created, [], 'nothing is created without consent');
+});
+
+test('a Windows path containing spaces is not truncated at the first space', () => {
+  // Reported: `T:\MigraAccess Command` is a real folder, but the run said
+  // "`T:\MigraAccess` was not found" — the extractor stopped at the space.
+  const c = extractPathCandidates('build it in T:\\MigraAccess Command please');
+  assert.ok(c.includes('T:\\MigraAccess Command'), `full path missing: ${JSON.stringify(c)}`);
+  assert.ok(c.indexOf('T:\\MigraAccess Command') < c.indexOf('T:\\MigraAccess'), 'longest form is tried first');
+  assert.ok(c.includes('T:\\MigraAccess'), 'shorter prefixes remain as fallbacks');
+});
+
+test('a picked folder that does not exist on this host is rejected, not built in', async () => {
+  // The owner ended up "Working in `t:\`" — a Windows drive root, which does not
+  // exist from the WSL host, so every tool call in that run was doomed and it
+  // looked as though the agent had no build tools at all.
+  const r = await resolveTaskRoot('build the app', {
+    isDirectory: async () => false,
+    pickFolder: async () => 't:\\',
+  });
+  assert.equal(r, undefined, 'a non-existent picked root must not start a run');
+});
+
+test('a picked Windows folder is accepted via its WSL mount', async () => {
+  const r = await resolveTaskRoot('build the app', {
+    isDirectory: async (p) => p === '/mnt/t/MigraAccess Command',
+    pickFolder: async () => 'T:\\MigraAccess Command',
+  });
+  assert.equal(r?.root, '/mnt/t/MigraAccess Command');
+  assert.equal(r?.source, 'picked');
 });
