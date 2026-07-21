@@ -456,3 +456,31 @@ test('camelCandidates joins adjacent query words the way code is actually named'
   assert.deepEqual(camelCandidates('what is this'), []);
   assert.ok(!camelCandidates('what does the changeset lint check for?').some((c) => /^the|^does|^what/.test(c)));
 });
+
+// ── protocol tolerance: the answer is the answer, whatever it is wrapped in ───
+
+test('a final under a different key is still a final, not a dead end', async () => {
+  // Observed live: `{"response":"…"}` and a bare JSON string. Both parse fine as
+  // JSON, so the run died with "neither action nor final" and lost the answer.
+  for (const reply of [
+    '{"response":"A monad sequences computations and handles effects."}',
+    '{"answer":"A monad sequences computations and handles effects."}',
+    '"A monad sequences computations and handles effects."',
+  ]) {
+    // Strict first: the protocol is demanded, and the retry usually complies.
+    assert.equal((parseStep(reply) as { kind: string }).kind, 'malformed', `strict rejects: ${reply.slice(0, 30)}…`);
+    const step = parseStep(reply, { lenient: true }) as { kind: string; markdown: string };
+    assert.equal(step.kind, 'final', `lenient rescues: ${reply.slice(0, 30)}…`);
+    assert.match(step.markdown, /A monad sequences computations/);
+  }
+});
+
+test('an alias key never overrides a real action', async () => {
+  const step = parseStep('{"action":{"tool":"workspace.search","input":{}},"response":"searching now"}', { lenient: true }) as { kind: string; tool: string };
+  assert.equal(step.kind, 'action');
+  assert.equal(step.tool, 'workspace.search');
+});
+
+test('an empty alias value does not count as an answer', async () => {
+  assert.equal((parseStep('{"response":"   "}', { lenient: true }) as { kind: string }).kind, 'malformed');
+});

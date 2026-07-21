@@ -32,7 +32,8 @@ interface ProposalData {
     fileCount?: number;
   };
 }
-interface FinalData { markdown?: string; steps?: number }
+interface FinalData { markdown?: string; steps?: number; streamedPrefix?: boolean }
+interface TokenData { text?: string }
 interface ErrorData { code?: string; message?: string }
 
 function diffBlock(title: string, before: string | null | undefined, after: string | null | undefined): string {
@@ -77,6 +78,10 @@ export async function runEngineerTurn(
 ): Promise<void> {
   // Role-neutral: this one path now serves questions as well as build work.
   sink.progress?.('MigraPilot is working…');
+  // Text already rendered from `token` events. The agent streams its answer as
+  // it is written, so the `final` event usually repeats what the user can
+  // already see — we append only the remainder.
+  let streamed = '';
   try {
     for await (const ev of client.engineerStream(req, signal)) {
       if (ev.event === 'route') {
@@ -86,6 +91,7 @@ export async function runEngineerTurn(
         const d = ev.data as StepData;
         sink.markdown(`\n· \`${d.tool ?? 'tool'}\` ${d.summary ?? ''}\n`);
       } else if (ev.event === 'note') {
+        streamed = ''; // a note breaks the run of streamed text
         // Visible reporting of normalization/dedup/command-effects/re-plans.
         const d = ev.data as NoteData;
         const icon = d.kind === 'command-effect' ? '📝' : d.kind === 'duplicate' ? '↩︎' : d.kind === 'policy' ? '⛔' : d.kind === 'replan' ? '↻' : d.kind === 'quality' ? '⚠️' : 'ℹ︎';
@@ -99,9 +105,25 @@ export async function runEngineerTurn(
         await sink.onEscalation?.(ev.data);
       } else if (ev.event === 'done') {
         sink.onAttribution?.((ev.data as { routing?: unknown }).routing);
+      } else if (ev.event === 'token') {
+        const text = (ev.data as TokenData).text ?? '';
+        if (text) {
+          streamed += text;
+          sink.markdown(text);
+        }
       } else if (ev.event === 'final') {
         const d = ev.data as FinalData;
-        sink.markdown(`\n${d.markdown ?? ''}\n`);
+        const markdown = d.markdown ?? '';
+        if (d.streamedPrefix && streamed && markdown.startsWith(streamed)) {
+          // Append only what has not been shown (footers, machine-authored
+          // truth notes) instead of repeating the whole answer.
+          const rest = markdown.slice(streamed.length);
+          if (rest) sink.markdown(rest);
+        } else {
+          // Not a continuation — a correction replaced the streamed text, so
+          // separate the two rather than running them together.
+          sink.markdown(`${streamed ? '\n\n---\n' : '\n'}${markdown}\n`);
+        }
         return;
       } else if (ev.event === 'error') {
         const d = ev.data as ErrorData;

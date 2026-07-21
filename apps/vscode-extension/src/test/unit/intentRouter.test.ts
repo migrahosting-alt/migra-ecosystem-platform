@@ -205,3 +205,51 @@ test('engineer transport failure is an honest machine block with the PilotError 
   assert.match(out, /Failure: NOT_READY/);
   assert.match(out, /req_e1/);
 });
+
+// ── streamed answers ─────────────────────────────────────────────────────────
+// The agent streams its final answer as it is written (a buffered reply left the
+// user watching nothing during a long local generation). The `final` event then
+// repeats that text, so the renderer must append only the remainder.
+
+test('a streamed answer is rendered once, with only the remainder appended', async () => {
+  const md: string[] = [];
+  await runEngineerTurn(
+    fakeStream([
+      { event: 'token', data: { text: 'The loop lives in ' } },
+      { event: 'token', data: { text: '`engineerRuntime.ts:410`.' } },
+      { event: 'final', data: { markdown: 'The loop lives in `engineerRuntime.ts:410`.\n\n---\n_footer_', streamedPrefix: true } },
+    ]),
+    { rootPath: '/w', task: 'where is the loop?' },
+    { markdown: (t) => md.push(t) },
+  );
+  const out = md.join('');
+  assert.equal(out.match(/engineerRuntime\.ts:410/g)?.length, 1, 'the answer appears exactly once');
+  assert.match(out, /_footer_/, 'the machine-authored footer is still appended');
+});
+
+test('a corrected answer is separated from the streamed text it replaces', async () => {
+  const md: string[] = [];
+  await runEngineerTurn(
+    fakeStream([
+      { event: 'token', data: { text: 'I have created index.html.' } },
+      { event: 'note', data: { n: 1, kind: 'replan', message: 'revising that answer' } },
+      { event: 'token', data: { text: 'Nothing was created yet.' } },
+      { event: 'final', data: { markdown: 'Nothing was created yet.', streamedPrefix: true } },
+    ]),
+    { rootPath: '/w', task: 'build it' },
+    { markdown: (t) => md.push(t) },
+  );
+  const out = md.join('');
+  assert.match(out, /revising that answer/, 'the user is told why the answer changed');
+  assert.equal(out.match(/Nothing was created yet\./g)?.length, 1, 'the corrected answer is not doubled');
+});
+
+test('without streaming the final still renders in full (buffered providers)', async () => {
+  const md: string[] = [];
+  await runEngineerTurn(
+    fakeStream([{ event: 'final', data: { markdown: 'A complete buffered answer.' } }]),
+    { rootPath: '/w', task: 'q' },
+    { markdown: (t) => md.push(t) },
+  );
+  assert.match(md.join(''), /A complete buffered answer\./);
+});
