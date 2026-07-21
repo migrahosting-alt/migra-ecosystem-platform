@@ -116,12 +116,18 @@ function protocolPrompt(input: EngineerInput, tools: EngineerToolInfo[]): string
     '  answer it IMMEDIATELY with {"final":"<markdown>"}. Do NOT call any tool and do',
     '  NOT propose files — a tool call here only wastes the user\'s time.',
     '- A QUESTION ABOUT THIS WORKSPACE (how does X work here, where is Y, what does this',
-    '  repo do, what changed): use the read-only tools to find the real answer FIRST,',
-    '  then answer citing `path:line`. Do NOT propose file changes for a question.',
+    '  repo do, what changed): your FIRST reply MUST be a tool call, never a final —',
+    '  start with workspace.search on the most distinctive keywords in their message,',
+    '  then file.readRange on the best hit — and only then answer, citing `path:line`.',
+    '  A large or unfamiliar repository is NORMAL: search it, do not ask the user where',
+    '  to look and do not ask them to name a file. Do NOT propose changes for a question.',
     '- A REQUEST TO BUILD, CHANGE, FIX, REFACTOR, SCAFFOLD or RUN something: do the work',
     '  with the tools below, ending in a proposed changeset. This includes requests that',
     '  are phrased as a plan, a mission, a numbered slice, a quoted instruction, or an',
     '  aside like "you can now build it" — the WORDING never decides; the INTENT does.',
+    '- To FIND code use workspace.search, then file.readRange on the best hit.',
+    '  diagnostics.get reports COMPILER ERRORS and never locates code — it is the wrong',
+    '  tool for "where is X" or "what does Y do", and finding nothing with it proves nothing.',
     '- When the intent is genuinely ambiguous, prefer DOING the work over asking.',
     '- WRITING ABOUT A FILE IS NOT CREATING IT. If your final says anything was created,',
     '  added, implemented, proposed or recorded, you MUST have called fs.proposeChangeset',
@@ -182,6 +188,42 @@ function protocolPrompt(input: EngineerInput, tools: EngineerToolInfo[]): string
  * or shell content into a string field often emits `\'`, which makes the WHOLE
  * step unparseable and fails the run. Applied only after a genuine parse
  * failure, so it can never alter text that was already valid JSON. */
+/** Escape raw control characters that appear INSIDE a JSON string.
+ *
+ * JSON forbids a literal newline in a string, but models write multi-line
+ * markdown straight into `{"final":"…"}` all the time. Observed live: a correct,
+ * fully-cited answer to a repository question was discarded as malformed purely
+ * because its bullet list used real newlines instead of `\n`. */
+export function repairJsonControlChars(text: string): string {
+  const ESCAPES: Record<string, string> = { '\n': '\\n', '\r': '\\r', '\t': '\\t', '\b': '\\b', '\f': '\\f' };
+  let out = '';
+  let inString = false;
+  let escaped = false;
+  for (const ch of text) {
+    if (escaped) {
+      out += ch;
+      escaped = false;
+      continue;
+    }
+    if (ch === '\\' && inString) {
+      out += ch;
+      escaped = true;
+      continue;
+    }
+    if (ch === '"') {
+      inString = !inString;
+      out += ch;
+      continue;
+    }
+    if (inString && ch < ' ') {
+      out += ESCAPES[ch] ?? `\\u${ch.charCodeAt(0).toString(16).padStart(4, '0')}`;
+      continue;
+    }
+    out += ch;
+  }
+  return out;
+}
+
 export function repairJsonEscapes(text: string): string {
   // Scan escape PAIRS left to right so a legitimate `\\` is consumed as one unit
   // and its partner is never mistaken for the start of another escape.
@@ -212,7 +254,7 @@ export function parseStep(text: string):
     // proposed .js file killed an entire otherwise-perfect build run. The text is
     // already unparseable, so dropping the stray backslash can only improve it.
     try {
-      parsed = JSON.parse(repairJsonEscapes(body));
+      parsed = JSON.parse(repairJsonEscapes(repairJsonControlChars(body)));
     } catch {
       return { kind: 'malformed', reason: 'not valid JSON' };
     }
@@ -464,20 +506,66 @@ const PHANTOM_WORK_DIRECTIVE = [
   'done the work and asks nothing.',
 ].join(' ');
 
-/** A refusal or a request for more information, produced WITHOUT looking. The
- * agent holds read-only workspace tools, so "I don't have enough information"
- * before using them is a punt — the same dead-end as the old chat path claiming
- * it could not access the workspace. */
-const REFUSED_WITHOUT_LOOKING =
-  /\b(?:sorry|i (?:do not|don't) have|i (?:cannot|can't|am unable to)|unable to (?:provide|determine|report)|(?:not|don't have) enough (?:information|context)|need more (?:information|details|context)|could you (?:please )?(?:specify|clarify|provide))\b/i;
+/** The turn ended by putting the work back on the USER — refusing for lack of
+ * information, asking them to supply context, or announcing an inspection it
+ * never performed. Checked only when ZERO tools ran, where all three are the
+ * same failure: the agent holds the tools that would have settled it.
+ *
+ * Observed live on the real monorepo: "I need to inspect the code to answer
+ * accurately… Please guide me on where to look so I can fulfill your request."
+ * That is the old tool-less dead-end wearing a politer sentence, and an earlier
+ * refusal-only pattern did not catch it — which is why the trigger is about the
+ * SHAPE of the ending (deferring to the user) rather than any one phrase. */
+const DEFERRED_TO_USER =
+  /\b(?:sorry|i (?:do not|don't) have|i (?:cannot|can't|am unable to)|unable to (?:provide|determine|report)|(?:not|don't have) enough (?:information|context)|need more (?:information|details|context)|(?:could|can|would) you (?:please )?(?:specify|clarify|provide|tell|point|share|guide|confirm)|please (?:guide|tell|let me know|provide|specify|clarify|point|share|confirm)|if you can provide|i need to (?:inspect|check|look|see|search|examine|review)|where (?:should|can) i (?:look|start)|let me know (?:where|which|what|the))\b/i;
 
+/** Safe whichever way the turn actually should have gone: it tells the model to
+ * use its tools IF the answer depends on the workspace, and to answer directly
+ * if it does not — so a false positive costs one round, never a wrong answer. */
 const LOOK_FIRST_DIRECTIVE = [
-  'You have read-only workspace tools and you used none of them, so you cannot yet know',
-  'what is or is not there. Do NOT say you lack information and do NOT ask the user to',
-  'supply it: inspect the workspace first (git.status, workspace.search, file.readRange)',
-  'and answer from what you actually find. If a specific fact genuinely is not present,',
-  'say exactly that fact is absent and what you checked — never a blanket refusal.',
+  'You called NO tools this turn, and that final puts the work back on the user.',
+  'Never ask the user to look something up, name a file, or supply context you can',
+  'obtain yourself — and never merely announce that you need to inspect something.',
+  'If answering depends on THIS workspace, call a read-only tool NOW (start with',
+  'workspace.search using the most distinctive keywords from their message, then',
+  'file.readRange on the best hit). If it does not depend on the workspace, just',
+  'answer from your own knowledge. If a specific fact genuinely is not there, say',
+  'exactly which fact is missing and what you checked — never a blanket refusal.',
 ].join(' ');
+
+/** Name a tool the final CLAIMS a result from but which never actually ran.
+ *
+ * Observed live: after calling only `diagnostics.get`, the agent answered "the
+ * workspace search did not find any specific information…" — reporting the
+ * outcome of a search it never performed, then giving up. Unlike prose claims,
+ * this is exactly checkable: the loop knows which tools it executed. Matches the
+ * dotted id and its spoken form ("workspace.search" / "workspace search"). */
+export function claimedUnrunTool(
+  markdown: string,
+  executed: ReadonlySet<string>,
+  available: ReadonlyArray<string>,
+): string | null {
+  for (const id of available) {
+    if (executed.has(id)) continue;
+    const [group, verb] = id.split('.');
+    if (!group || !verb) continue;
+    const spoken = new RegExp(`\\b${group}[.\\s]${verb}\\b`, 'i');
+    if (spoken.test(markdown)) return id;
+  }
+  return null;
+}
+
+/** Is this unparseable reply simply the ANSWER, written as prose instead of in
+ * the protocol? Substantial text with no half-formed tool call in it. Kept
+ * strict: a fragment of protocol means the model was trying to act, and acting
+ * on a guess would be far worse than reporting the protocol break. */
+export function looksLikeProseAnswer(reply: string): boolean {
+  const t = reply.trim();
+  if (t.length < 80) return false;
+  if (/"(?:action|tool|input)"\s*:/.test(t)) return false;
+  if (/<function\s*=/i.test(t)) return false;
+  return true;
+}
 
 /** Machine-authored close-out when the model cannot produce a usable final but
  * real proposals were recorded. Never claims more than the loop actually did. */
@@ -502,6 +590,7 @@ export async function* runEngineerTask(deps: EngineerDeps, input: EngineerInput)
   let noProgressStreak = 0;
   let replans = 0;
   let toolStepCount = 0;
+  const executedTools = new Set<string>(); // for cross-checking claims made in the final
   let finalCorrected = false;
   let proposalsEmitted = 0;
   let lintCorrections = 0;
@@ -529,6 +618,17 @@ export async function* runEngineerTask(deps: EngineerDeps, input: EngineerInput)
         // protocol break is undiagnosable — the run just dies with "not valid
         // JSON" and no evidence of which shape the model emitted.
         stage.log('error', { code: 'MALFORMED_MODEL_OUTPUT', n, reply: cap(reply.trim(), 400) });
+        // Very often the "malformed" reply IS the answer — the model wrote its
+        // markdown directly instead of wrapping it in the protocol. After real
+        // tool work, discarding that means throwing away a correct, cited answer
+        // and showing a failure instead (observed: a 45s repo question died this
+        // way). Accept substantial prose as the final rather than dead-ending.
+        if (toolStepCount > 0 && looksLikeProseAnswer(reply)) {
+          const salvaged = reply.trim() + (proposalsEmitted > 0 ? APPLIED_FOOTER : '');
+          stage.log('final', { steps: toolStepCount, proposals: proposalsEmitted, salvaged: 'prose' });
+          yield { type: 'final', markdown: salvaged, steps: toolStepCount };
+          return;
+        }
         // Work already recorded must not be thrown away because the model's NEXT
         // reply was unusable. Observed live: a build proposed all three files,
         // then broke protocol on the summary step — and the whole run surfaced as
@@ -564,9 +664,22 @@ export async function* runEngineerTask(deps: EngineerDeps, input: EngineerInput)
         transcript.push(PHANTOM_WORK_DIRECTIVE);
         continue;
       }
-      // The opposite failure, same root cause: declining for lack of information
-      // without having looked, while holding the tools that would settle it.
-      if (answeredDirectly && REFUSED_WITHOUT_LOOKING.test(step.markdown) && !finalCorrected) {
+      // Claiming the OUTCOME of a tool that never ran — "the workspace search did
+      // not find…" after calling only diagnostics.get. Exactly checkable, since
+      // the loop knows what it executed.
+      const unrun = claimedUnrunTool(step.markdown, executedTools, deps.tools.map((t) => t.id));
+      if (unrun && !finalCorrected) {
+        finalCorrected = true;
+        transcript.push(
+          `You did NOT call ${unrun} in this turn, so you cannot report what it did or did not find. ` +
+            `Either call ${unrun} now and answer from its real result, or write a final that makes no claim about it.`,
+        );
+        continue;
+      }
+      // The opposite failure, same root cause: handing the work back to the user
+      // — refusing, asking for context, or announcing an inspection never done —
+      // while holding the tools that would have settled it.
+      if (answeredDirectly && DEFERRED_TO_USER.test(step.markdown) && !finalCorrected) {
         finalCorrected = true;
         transcript.push(LOOK_FIRST_DIRECTIVE);
         continue;
@@ -636,6 +749,7 @@ export async function* runEngineerTask(deps: EngineerDeps, input: EngineerInput)
         } else {
           yield { type: 'step', n, tool, summary: summarize(toolInput) };
           toolStepCount++;
+          executedTools.add(tool);
           // loop-step + tool stages (metadata only — never the tool input/result).
           stage.log('loop-step', { n, tool });
           const before = tool === 'command.run' && deps.listFiles ? await deps.listFiles(input.rootPath).catch(() => []) : null;

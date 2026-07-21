@@ -10,10 +10,12 @@
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { runEngineerTask, parseStep, repairJsonEscapes, type EngineerEvent, type EngineerToolInfo } from '../src/engine/engineerRuntime.js';
+import { runEngineerTask, parseStep, claimedUnrunTool, repairJsonEscapes, repairJsonControlChars, type EngineerEvent, type EngineerToolInfo } from '../src/engine/engineerRuntime.js';
 
 const TOOLS: EngineerToolInfo[] = [
   { id: 'workspace.search', description: 'search', readOnly: true, inputHint: '{}' },
+  { id: 'file.readRange', description: 'read', readOnly: true, inputHint: '{}' },
+  { id: 'diagnostics.get', description: 'compiler diagnostics', readOnly: true, inputHint: '{}' },
   { id: 'fs.proposeChangeset', description: 'propose', readOnly: false, inputHint: '{}' },
 ];
 
@@ -250,7 +252,7 @@ test('a malformed run with NO proposals still fails honestly (nothing to salvage
   assert.equal(err.code, 'MALFORMED_MODEL_OUTPUT');
 });
 
-test('"I don\'t have enough information" without using a tool is challenged, not delivered', async () => {
+test('handing the work back to the user without looking is challenged, not delivered', async () => {
   const h = harness([
     '{"final":"Sorry, but I don\'t have the necessary information. Could you please specify which commands were executed?"}',
     '{"action":{"tool":"workspace.search","input":{"rootPath":"/w","query":"x"}}}',
@@ -258,8 +260,137 @@ test('"I don\'t have enough information" without using a tool is challenged, not
   ]);
   const events = await drain(runEngineerTask(h.deps, { rootPath: '/w', task: 'report what is in this repo' }));
 
-  assert.match(h.prompts[1]!, /you used none of them/);
+  assert.match(h.prompts[1]!, /puts the work back on the user/);
   assert.deepEqual(h.calls, ['workspace.search'], 'it looks instead of punting');
   const final = events.find((e) => e.type === 'final') as { markdown: string };
   assert.match(final.markdown, /The workspace is empty/);
+});
+
+test('the agent never asks the user to do its looking (observed on the real monorepo)', async () => {
+  // Verbatim shapes that ended a turn with zero tool calls. The middle one is the
+  // one that slipped past a refusal-only check: it ANNOUNCES an inspection it
+  // never performs, which reads as helpful and is the same dead-end.
+  for (const punt of [
+    'Please guide me on where to look so I can fulfill your request.',
+    'I need to inspect the code to answer accurately. If you can provide the specific path, I can search it.',
+    'Could you tell me which file defines the loop?',
+    'Let me know which directory holds the engine and I will take it from there.',
+  ]) {
+    const h = harness([
+      JSON.stringify({ final: punt }),
+      '{"action":{"tool":"workspace.search","input":{"rootPath":"/w","query":"engineer loop"}}}',
+      '{"final":"The loop lives in src/engine/engineerRuntime.ts:410 and drives a JSON action/final protocol."}',
+    ]);
+    const events = await drain(runEngineerTask(h.deps, { rootPath: '/w', task: 'where is the engineer loop?' }));
+
+    assert.deepEqual(h.calls, ['workspace.search'], `should look instead of asking: ${punt.slice(0, 40)}…`);
+    const final = events.find((e) => e.type === 'final') as { markdown: string };
+    assert.match(final.markdown, /engineerRuntime\.ts/);
+  }
+});
+
+test('the correction is safe when the question did NOT need the workspace', async () => {
+  // A false positive must cost one round, never a wrong answer — so the directive
+  // explicitly permits answering directly when the workspace is irrelevant.
+  const h = harness([
+    '{"final":"Could you tell me which language you mean, so I can answer precisely?"}',
+    '{"final":"A monad wraps a value and defines bind; Promise.then is the classic example of that shape."}',
+  ]);
+  const events = await drain(runEngineerTask(h.deps, { rootPath: '/w', task: 'what is a monad?' }));
+
+  assert.match(h.prompts[1]!, /If it does not depend on the workspace, just/);
+  assert.deepEqual(h.calls, [], 'no pointless search for a general question');
+  const final = events.find((e) => e.type === 'final') as { markdown: string };
+  assert.match(final.markdown, /Promise\.then/);
+});
+
+test('the workspace-question rule tells the model to search rather than ask', async () => {
+  const h = harness(['{"final":"a sufficiently long direct answer for the agent to accept it"}']);
+  await drain(runEngineerTask(h.deps, { rootPath: '/w', task: 'hi' }));
+  const prompt = h.prompts[0]!;
+  assert.match(prompt, /your FIRST reply MUST be a tool call/);
+  assert.match(prompt, /do not ask the user where/);
+});
+
+// ── a correct answer must never be discarded over JSON formatting ─────────────
+
+test('multi-line markdown with RAW newlines inside the JSON string still parses', () => {
+  // Verbatim shape from a live repo question: a fully-cited answer whose bullet
+  // list used real newlines instead of \n. JSON forbids that, so the whole
+  // 45-second run was reported as a failure and the answer thrown away.
+  const reply = '```json\n{"final":"**The engineer loop is here:**\n\n- `src/engine/engineerRuntime.ts` (line 410)\n"}\n```';
+  assert.throws(() => JSON.parse(reply.replace(/^```json\n|\n```$/g, '')), 'precondition: really invalid JSON');
+
+  const step = parseStep(reply) as { kind: string; markdown: string };
+  assert.equal(step.kind, 'final');
+  assert.match(step.markdown, /engineerRuntime\.ts` \(line 410\)/);
+  assert.match(step.markdown, /\n\n- /, 'the line structure is preserved, not flattened');
+});
+
+test('control-char repair leaves already-valid JSON byte-identical', () => {
+  const valid = JSON.stringify({ final: 'line one\nline two\ttabbed "quoted" \\ backslash' });
+  assert.equal(repairJsonControlChars(valid), valid);
+  assert.deepEqual(JSON.parse(repairJsonControlChars(valid)), JSON.parse(valid));
+});
+
+test('prose written instead of the protocol is accepted as the answer after real work', async () => {
+  const h = harness([
+    '{"action":{"tool":"workspace.search","input":{"rootPath":"/w","query":"engineer loop"}}}',
+    'The engineer loop lives in `src/engine/engineerRuntime.ts:410`. It drives a JSON protocol where each step is either an action or a final, and it never applies edits itself.',
+  ]);
+  const events = await drain(runEngineerTask(h.deps, { rootPath: '/w', task: 'where is the engineer loop?' }));
+
+  assert.equal(events.find((e) => e.type === 'error'), undefined, 'a good answer is not a failure');
+  const final = events.find((e) => e.type === 'final') as { markdown: string };
+  assert.match(final.markdown, /engineerRuntime\.ts:410/);
+});
+
+test('a half-formed tool call is NOT mistaken for an answer', async () => {
+  // Acting on a guess is far worse than reporting the protocol break.
+  const h = harness([
+    '{"action":{"tool":"workspace.search","input":{"rootPath":"/w","query":"x"}}}',
+    'I will now run {"tool": "command.run", "input": {"command": ["rm", "-rf", "dist"]}} to clean the build output for you.',
+    'still not protocol',
+  ]);
+  const events = await drain(runEngineerTask(h.deps, { rootPath: '/w', task: 'clean the build' }));
+  const err = events.find((e) => e.type === 'error') as { code: string } | undefined;
+  assert.equal(err?.code, 'MALFORMED_MODEL_OUTPUT');
+  assert.deepEqual(h.calls, ['workspace.search'], 'the guessed command never ran');
+});
+
+// ── never report the result of a tool that never ran ─────────────────────────
+
+test('claiming a search result after calling a different tool is challenged', async () => {
+  // Observed live: called only diagnostics.get, then answered "the workspace
+  // search did not find any specific information…" and gave up.
+  const h = harness([
+    '{"action":{"tool":"diagnostics.get","input":{"rootPath":"/w"}}}',
+    '{"final":"The workspace search did not find any information about the changeset lint in this repository."}',
+    '{"action":{"tool":"workspace.search","input":{"rootPath":"/w","query":"lintChangeset"}}}',
+    '{"final":"changesetLint.ts flags empty content, merge markers, leaked tool-call markup, invalid JSON and duplicate definitions."}',
+  ]);
+  const events = await drain(runEngineerTask(h.deps, { rootPath: '/w', task: 'what does the changeset lint check?' }));
+
+  assert.match(h.prompts[2]!, /You did NOT call workspace\.search/);
+  assert.deepEqual(h.calls, ['diagnostics.get', 'workspace.search'], 'it runs the search it claimed');
+  const final = events.find((e) => e.type === 'final') as { markdown: string };
+  assert.match(final.markdown, /merge markers/);
+});
+
+test('reporting a tool it DID call is left alone', async () => {
+  const h = harness([
+    '{"action":{"tool":"workspace.search","input":{"rootPath":"/w","query":"lintChangeset"}}}',
+    '{"final":"The workspace search found lintChangeset in src/tools/changesetLint.ts, which flags merge markers and empty content."}',
+  ]);
+  await drain(runEngineerTask(h.deps, { rootPath: '/w', task: 'what does the changeset lint check?' }));
+  assert.equal(h.prompts.length, 2, 'no wasted corrective round');
+});
+
+test('claimedUnrunTool matches the spoken form as well as the dotted id', () => {
+  const available = ['workspace.search', 'file.readRange', 'diagnostics.get'];
+  const ran = new Set(['diagnostics.get']);
+  assert.equal(claimedUnrunTool('the workspace search found nothing', ran, available), 'workspace.search');
+  assert.equal(claimedUnrunTool('workspace.search returned no hits', ran, available), 'workspace.search');
+  assert.equal(claimedUnrunTool('diagnostics.get returned no items', ran, available), null, 'it really ran');
+  assert.equal(claimedUnrunTool('I read the file and found the answer', ran, available), null, 'no tool named');
 });
