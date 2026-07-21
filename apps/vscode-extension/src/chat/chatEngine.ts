@@ -10,6 +10,7 @@ import { parseAgentCommand, runAgentCommand } from './agentCommand.js';
 import { parseDeepCommand, runDeepCommand } from './deepCommand.js';
 import { classifyIntent, detectEcosystem, buildInspectionPlan } from './intentRouter.js';
 import { resolveTaskRoot } from './taskRoot.js';
+import { resolveChatScope } from './chatScope.js';
 import { buildWorkReport } from './workReport.js';
 import { runInspectionTurn, renderRoutingError } from './inspectionTurn.js';
 import { runEngineerTurn } from './engineerTurn.js';
@@ -274,7 +275,39 @@ export async function runChatTurn(
   // answer. The engine owns model selection + failover; the extension never names
   // a model and never falls back to the legacy `/chat` endpoint.
   sink.progress('MigraPilot is analyzing your request…');
-  const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  const openRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  // Folder-scoped grounding: if the question names a folder (an absolute path or
+  // a distinctive directory like `migracms-enterprise`), scope retrieval to THAT
+  // folder so a large monorepo doesn't ground the answer on an unrelated copy.
+  let workspaceRoot = openRoot;
+  if (openRoot) {
+    const scope = await resolveChatScope(trimmed, {
+      isDirectory: async (p) => {
+        try {
+          const s = await vscode.workspace.fs.stat(vscode.Uri.file(p));
+          return (s.type & vscode.FileType.Directory) !== 0;
+        } catch {
+          return false;
+        }
+      },
+      findDirs: async (name) => {
+        try {
+          const res = await deps.migraAiClient.inspect({ rootPath: openRoot, op: 'find', query: name, kind: 'dir', limit: 30 });
+          if (!res.ok) return [];
+          const matches = (res.data as { matches?: Array<{ path?: string }> }).matches ?? [];
+          return matches
+            .filter((m) => m.path && m.path.split('/').pop() === name)
+            .map((m) => `${openRoot}/${m.path!}`);
+        } catch {
+          return [];
+        }
+      },
+    });
+    if (scope && scope.root !== openRoot) {
+      workspaceRoot = scope.root;
+      sink.markdown(`\n_Scoped to \`${scope.label}\` (\`${scope.root}\`)._\n`);
+    }
+  }
   const aiRequest = buildAiRequest(trimmed, {
     feature,
     modelProfile: options.modelProfile,
