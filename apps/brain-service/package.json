@@ -16,14 +16,15 @@
   },
   "dependencies": {
     "@fastify/cors": "^10.0.1",
+    "@migrapilot/agent-defs": "0.1.0",
+    "@migrapilot/pilot-client": "0.1.0",
     "@migrapilot/protocol": "0.1.0",
     "@migrapilot/shared-types": "0.1.0",
+    "@migrapilot/workspace-tools": "0.1.0",
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "dotenv": "^16.4.7",
     "fastify": "^5.0.0",
-    "typescript": "^5.6.3",
-    "@migrapilot/pilot-client": "0.1.0",
-    "@migrapilot/agent-defs": "0.1.0",
-    "@migrapilot/workspace-tools": "0.1.0"
+    "typescript": "^5.6.3"
   },
   "devDependencies": {
     "@types/node": "^22.7.5",
