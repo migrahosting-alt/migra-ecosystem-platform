@@ -195,6 +195,28 @@ test('a recorded proposal + honest final passes through with the preview-only fo
   assert.match(final.markdown, /NOT applied/i, 'preview-only footer appended');
 });
 
+test('a defective proposal (duplicate def) triggers a quality note + self-correction', async () => {
+  const replies = [
+    // 1) botched proposal — a.js defines f() twice (classic sloppy edit)
+    '{"action":{"tool":"fs.proposeChangeset","input":{"ops":[{"op":"create","path":"a.js","content":"function f(){return 1;}\\nfunction f(){return 2;}\\n"}]}}}',
+    // 2) after the fed-back defect, the model re-proposes a clean file
+    '{"action":{"tool":"fs.proposeChangeset","input":{"ops":[{"op":"create","path":"a.js","content":"function f(){return 2;}\\n"}]}}}',
+    '{"final":"Proposed a.js."}',
+  ];
+  let i = 0;
+  const deps = {
+    complete: async () => replies[Math.min(i++, replies.length - 1)]!,
+    executeTool: async (tool: string, input: unknown) => ({ tool, input, ok: true }),
+    tools: [{ id: 'fs.proposeChangeset', description: 'propose', readOnly: false, inputHint: '{}' }] as EngineerToolInfo[],
+  };
+  const events = await drain(runEngineerTask(deps, { rootPath: '/w', task: 'build a.js' }));
+  const qNote = events.find((e) => e.type === 'note' && (e as { kind?: string }).kind === 'quality') as { message: string } | undefined;
+  assert.ok(qNote, 'a quality note is emitted for the defective proposal');
+  assert.match(qNote.message, /defines 'f'/);
+  // the loop kept going (re-proposed) rather than accepting the botch as final
+  assert.ok(events.some((e) => e.type === 'final'), 'still reaches a final after correcting');
+});
+
 test('malformed output gets exactly one retry, then an honest machine error', async () => {
   const { deps } = scriptedDeps(['prose, not JSON', 'still prose']);
   const events = await drain(runEngineerTask(deps, { rootPath: '/r', task: 't' }));
