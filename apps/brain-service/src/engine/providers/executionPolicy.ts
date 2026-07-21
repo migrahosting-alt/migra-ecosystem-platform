@@ -83,6 +83,9 @@ export interface PlanHints {
   needsReasoning?: boolean;
   tier?: ModelTier;
   consentExternal?: boolean;
+  /** A model id the USER pinned in the picker. When it is eligible it wins
+   * outright — tier ranking must not quietly override an explicit choice. */
+  model?: string;
 }
 
 export interface PlanCandidate {

@@ -234,6 +234,8 @@ export async function runChatTurn(
         // the agent, the picker would silently stop working unless its choice is
         // carried across as the agent's tier.
         ...(options.modelProfile ? { tier: PROFILE_TIER[options.modelProfile] } : {}),
+        // An explicitly pinned model outranks the profile — same as the chat path.
+        ...(options.modelId ? { model: options.modelId } : {}),
         ...(options.policy ? { policy: options.policy } : {}),
       },
       {

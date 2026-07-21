@@ -39,6 +39,9 @@ const EngineerBodySchema = z.object({
     .max(40)
     .optional(),
   tier: z.string().optional(),
+  /** A model id pinned in the chat picker. Ordinary turns used to reach the chat
+   * endpoint, which honors it; routing them to the agent silently dropped it. */
+  model: z.string().optional(),
   /** Slice 5: a per-request execution-policy PREFERENCE (server resolves to an
    * effective policy; never bypasses local-first / consent / privacy / budget). */
   policy: z.string().optional(),
@@ -266,7 +269,7 @@ export function registerEngineerRoutes(
     const resolved = providerRouting ? resolveEffectivePolicy(body.policy, providerRouting.policy, { cloudUsable: await providerRouting.fleet.hasUsableCloud() }) : undefined;
     const effectiveRouting = providerRouting && resolved ? { ...providerRouting, policy: resolved.effective } : providerRouting;
     if (providerRouting && effectiveRouting && resolved) {
-      const local = await selectLocalCoding(effectiveRouting, { preferCoding: true, needsTools: true, tier: tierFromHints({ tier: body.tier }) });
+      const local = await selectLocalCoding(effectiveRouting, { preferCoding: true, needsTools: true, tier: tierFromHints({ tier: body.tier }), ...(body.model ? { model: body.model } : {}) });
       routing = { policy: resolved.effective, requestedPolicy: resolved.requested, effectivePolicy: resolved.effective, policyReason: resolved.reason, fallbackRecommended: local.fallbackRecommended, fallbackReasons: local.fallbackReasons };
       if (!local.localModel) {
         // No local model. Slice 3: a DEFINED reason (LOCAL_UNSUPPORTED_CAPABILITY)
@@ -286,7 +289,7 @@ export function registerEngineerRoutes(
       }
       decision = { model: local.localModel, reason: `local-first (${local.policy})` };
     } else {
-      const d = await selectModel(modelRegistry, { preferCoding: true, tier: tierFromHints({ tier: body.tier }) });
+      const d = await selectModel(modelRegistry, { preferCoding: true, tier: tierFromHints({ tier: body.tier }), ...(body.model ? { model: body.model } : {}) });
       if (!d) {
         stage.log('error', { code: 'NO_MODEL' });
         reply.code(503);
