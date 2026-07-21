@@ -151,6 +151,10 @@ function protocolPrompt(input: EngineerInput, tools: EngineerToolInfo[]): string
     '  with the tools below, ending in a proposed changeset. This includes requests that',
     '  are phrased as a plan, a mission, a numbered slice, a quoted instruction, or an',
     '  aside like "you can now build it" — the WORDING never decides; the INTENT does.',
+    '  DO NOT SEARCH FOR SOMETHING YOU ARE BEING ASKED TO CREATE. A thing you are told',
+    '  to build does not exist yet — that is WHY they asked — so "I could not find it in',
+    '  the workspace" is never a valid answer, and neither is asking which files it lives',
+    '  in. Pick sensible defaults and propose complete, runnable files immediately.',
     '- To FIND code use workspace.search, then file.readRange on the best hit.',
     '  diagnostics.get reports COMPILER ERRORS and never locates code — it is the wrong',
     '  tool for "where is X" or "what does Y do", and finding nothing with it proves nothing.',
@@ -209,9 +213,12 @@ function protocolPrompt(input: EngineerInput, tools: EngineerToolInfo[]): string
           'by relevance — this is a SAMPLE, not the whole repo):',
           excerpts,
           '',
-          'If these excerpts answer the question, answer NOW from them and cite `path:line`',
+          'If these excerpts answer the QUESTION, answer NOW from them and cite `path:line`',
           '— no search needed. If the specific fact you need is not in them, THEN search for',
           'it; never claim the repo lacks something merely because these excerpts omit it.',
+          'If the user asked you to BUILD or CHANGE something, these excerpts are BACKGROUND',
+          'ONLY: they are never a reason to search, to ask which system is meant, or to say',
+          'you could not find it. Build it.',
           '',
         ].join('\n')
       : '',
@@ -582,14 +589,18 @@ const DEFERRED_TO_USER =
  * use its tools IF the answer depends on the workspace, and to answer directly
  * if it does not — so a false positive costs one round, never a wrong answer. */
 const LOOK_FIRST_DIRECTIVE = [
-  'You called NO tools this turn, and that final puts the work back on the user.',
-  'Never ask the user to look something up, name a file, or supply context you can',
-  'obtain yourself — and never merely announce that you need to inspect something.',
-  'If answering depends on THIS workspace, call a read-only tool NOW (start with',
-  'workspace.search using the most distinctive keywords from their message, then',
-  'file.readRange on the best hit). If it does not depend on the workspace, just',
-  'answer from your own knowledge. If a specific fact genuinely is not there, say',
-  'exactly which fact is missing and what you checked — never a blanket refusal.',
+  'That final puts the work back on the user. Never ask them to look something up,',
+  'name a file, or supply context you can obtain yourself, and never merely announce',
+  'that you need to inspect something.',
+  'If they asked you to BUILD, CREATE or CHANGE something, searching for it is the',
+  'WRONG move and "I could not find it" is not a valid answer — the thing does not',
+  'exist yet, that is why they asked. Call fs.proposeChangeset NOW with complete,',
+  'runnable file contents, choosing sensible defaults instead of asking which ones.',
+  'If they asked a QUESTION about this workspace, call a read-only tool NOW (start',
+  'with workspace.search on the most distinctive keywords, then file.readRange on the',
+  'best hit). If the question does not depend on the workspace, answer from your own',
+  'knowledge. If a specific fact genuinely is not there, say which fact is missing and',
+  'what you checked — never a blanket refusal.',
 ].join(' ');
 
 /** Name a tool the final CLAIMS a result from but which never actually ran.
@@ -935,7 +946,17 @@ export async function* runEngineerTask(deps: EngineerDeps, input: EngineerInput)
             }
           } catch (err) {
             const message = err instanceof Error ? err.message : String(err);
-            stage.log('tool', { n, tool, durationMs: Date.now() - toolStarted, outcome: 'error', error: err instanceof Error ? err.name : 'error' });
+            // `err.name` alone is always "Error" — useless. The first line carries
+            // the actual code and reason ("INVALID_INPUT: …"), which is what makes
+            // a failed build diagnosable at all. First line only, capped, so the
+            // metadata-only logging contract still holds (no file content/diffs).
+            stage.log('tool', {
+              n,
+              tool,
+              durationMs: Date.now() - toolStarted,
+              outcome: 'error',
+              reason: message.split('\n')[0]!.slice(0, 200),
+            });
             transcript.push(`Tool ${tool} FAILED: ${cap(message, 500)}\n\nFix the input once or do something different; do not repeat it unchanged.`);
           }
         }

@@ -402,7 +402,13 @@ export function registerEngineerRoutes(
           // Thread the same correlation logger into the tool boundary so
           // proposal/approval/apply stages share this execution's id.
           const outcome = await executeToolCore(toolDeps, { tool, input, requestId: `eng-${Date.now().toString(36)}`, stage });
-          if (!outcome.ok) throw new Error(`${outcome.code}: ${outcome.error}`);
+          if (!outcome.ok) {
+            // Record WHY. A failed tool previously logged only outcome:"error",
+            // so a build that called fs.proposeChangeset and produced nothing was
+            // undiagnosable — the run just ended with the model apologising.
+            stage.log('error', { tool, code: outcome.code, detail: String(outcome.error ?? '').slice(0, 300) });
+            throw new Error(`${outcome.code}: ${outcome.error}`);
+          }
           // The loop never holds approvals — if a tool unexpectedly parks, that
           // is explicit feedback to the model, never a silent null result.
           if (outcome.status === 'approval_required') {
