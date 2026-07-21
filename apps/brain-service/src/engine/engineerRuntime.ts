@@ -635,6 +635,26 @@ function salvagedFinal(proposals: number, why: string): string {
   ].join(' ');
 }
 
+/** Did the final actually USE the code it was handed?
+ *
+ * Structural, not phrase-based: we know exactly which files were seeded, so we
+ * can check whether the answer cites any of them. A turn that was given
+ * definition-grade evidence, called no tools, and cited none of it has neither
+ * used the evidence nor gathered any — it is a non-answer by construction.
+ *
+ * This replaces an earlier phrase-matching guard for "the excerpts do not cover
+ * it", which slipped on every rewording. Wording varies; citations do not. */
+export function ignoredSeededContext(
+  markdown: string,
+  seeded: ReadonlyArray<{ path: string }>,
+): boolean {
+  if (seeded.length === 0) return false;
+  return !seeded.some((c) => {
+    const base = c.path.split(/[\\/]/).pop() ?? '';
+    return base.length > 0 && markdown.includes(base);
+  });
+}
+
 /** Run one engineering task as an event stream. Local-only by construction. */
 export async function* runEngineerTask(deps: EngineerDeps, input: EngineerInput): AsyncGenerator<EngineerEvent> {
   const maxSteps = deps.maxSteps ?? DEFAULT_MAX_STEPS;
@@ -767,6 +787,18 @@ export async function* runEngineerTask(deps: EngineerDeps, input: EngineerInput)
         transcript.push(
           `You did NOT call ${unrun} in this turn, so you cannot report what it did or did not find. ` +
             `Either call ${unrun} now and answer from its real result, or write a final that makes no claim about it.`,
+        );
+        continue;
+      }
+      // Given real code, used none of it, and called no tools — a non-answer.
+      // Checked by CITATION rather than wording: the loop knows what it seeded.
+      if (answeredDirectly && ignoredSeededContext(step.markdown, input.context ?? []) && !finalCorrected) {
+        finalCorrected = true;
+        transcript.push(
+          'You were handed the code above and your answer cites none of it. Those excerpts are real ' +
+            'source from this workspace: answer from them and cite `path:line`. If they genuinely do not ' +
+            'cover the question, call workspace.search now instead of saying so — the excerpts are a ' +
+            'SAMPLE of the repository, never proof that something is absent from it.',
         );
         continue;
       }

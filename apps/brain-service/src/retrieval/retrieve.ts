@@ -21,6 +21,9 @@ const PER_TERM_LIMIT = 24; // matches per term — enough that a common identifi
 // actual definition is in scope (not crowded out by references/schemas), so the
 // definition-first ranking can promote the file that truly answers the question.
 const DEFAULT_MAX_CHUNKS = 6;
+// How far a definition may be followed before we give up and keep the radius —
+// a bound on both cost and the damage a miscounted brace can do.
+const MAX_DEFINITION_SPAN = 120;
 
 /** Path markers for a NON-CANONICAL copy of code — a `-starter` scaffold, a
  * backup/archive, or a `-old`/`-copy`/`.bak`/`.orig`/`-deprecated` duplicate.
@@ -331,6 +334,46 @@ function sourceRank(relPath: string): number {
 /** Read a context window. Prefers the line where `term` is DEFINED (function /
  * const / class / export …) over a mere reference, so the snippet the model
  * grounds on actually shows what the symbol is — not an import line. */
+/** Last line of the definition that starts at `defLine` (1-based).
+ *
+ * A fixed radius truncates real symbols: `lintChangeset` runs past a 24-line
+ * window, so the retrieved excerpt omitted its duplicate-definition check and
+ * the answer was correct but INCOMPLETE. Following the braces instead means the
+ * model sees the whole function.
+ *
+ * Brace counting is deliberately simple — it only has to find the end of a
+ * definition, and an unbalanced count just falls back to the radius. Braces in
+ * strings or comments can skew it, so the result is always clamped. */
+export function definitionEndLine(lines: string[], defLine: number, maxSpan: number): number {
+  let depth = 0;
+  let opened = false;
+  const limit = Math.min(lines.length, defLine + maxSpan);
+  for (let i = defLine - 1; i < limit; i += 1) {
+    for (const ch of lines[i] ?? '') {
+      if (ch === '{') { depth += 1; opened = true; }
+      else if (ch === '}') depth -= 1;
+    }
+    if (opened && depth <= 0) return i + 1;
+  }
+  return 0; // unbalanced or too long — caller keeps its default window
+}
+
+/** Python and friends have no closing brace: the definition ends at the next
+ * non-empty line indented no further than the `def` itself. */
+export function indentedBlockEndLine(lines: string[], defLine: number, maxSpan: number): number {
+  const indentOf = (l: string): number => l.length - l.trimStart().length;
+  const base = indentOf(lines[defLine - 1] ?? '');
+  const limit = Math.min(lines.length, defLine + maxSpan);
+  let lastInBlock = 0;
+  for (let i = defLine; i < limit; i += 1) {
+    const l = lines[i] ?? '';
+    if (!l.trim()) continue; // blank lines belong to neither side
+    if (indentOf(l) <= base) return lastInBlock; // dedent — the block ended above
+    lastInBlock = i + 1; // 1-based, and never a trailing blank
+  }
+  return 0;
+}
+
 async function readWindow(
   workspaceRoot: string,
   relPath: string,
@@ -370,7 +413,16 @@ async function readWindow(
     // For a definition, bias the window to capture the BODY (what it actually
     // does) — a few lines above for the signature, more below for the impl.
     const startLine = Math.max(1, line - (isDef ? 3 : CONTEXT_RADIUS));
-    const endLine = Math.min(lines.length, line + (isDef ? CONTEXT_RADIUS * 3 : CONTEXT_RADIUS));
+    // A definition is read to its END rather than cut at a fixed radius, so the
+    // model sees the whole symbol it is being asked about.
+    let endLine = Math.min(lines.length, line + (isDef ? CONTEXT_RADIUS * 3 : CONTEXT_RADIUS));
+    if (isDef) {
+      const indented = /\.(?:py|rb|yaml|yml)$/i.test(relPath);
+      const found = indented
+        ? indentedBlockEndLine(lines, line, MAX_DEFINITION_SPAN)
+        : definitionEndLine(lines, line, MAX_DEFINITION_SPAN);
+      if (found > endLine) endLine = Math.min(lines.length, found);
+    }
     const snippet = lines.slice(startLine - 1, endLine).join('\n');
     return {
       isDef,

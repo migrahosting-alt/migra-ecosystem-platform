@@ -28,6 +28,10 @@ import { sanitizeError } from './redaction.js';
 import { recoveryManager, RecoveryError } from './recovery.js';
 import { nodeChangesetFs } from '../tools/changesetFs.js';
 
+/** Total characters of seeded code the agent is given. Enough for a few whole
+ * definitions; beyond that a small local model loses the question itself. */
+const SEEDED_CONTEXT_CHARS = 6_000;
+
 const EngineerBodySchema = z.object({
   rootPath: z.string().min(1),
   task: z.string().min(1),
@@ -342,6 +346,20 @@ export function registerEngineerRoutes(
       // model then answered that the excerpts did not cover monads instead of
       // just answering. No strong hit => seed nothing and let the agent decide.
       .then((r) => r.chunks.filter((c) => c.score >= 0.8))
+      // Budget the seeded context. Reading each definition to its END made the
+      // excerpts complete but much longer, and six long excerpts buried the
+      // question: the same query that had answered correctly started replying
+      // that the excerpts did not cover it. Keep the best few, whole.
+      .then((cs) => {
+        const kept: typeof cs = [];
+        let budget = SEEDED_CONTEXT_CHARS;
+        for (const c of cs) {
+          if (kept.length > 0 && c.snippet.length > budget) break;
+          kept.push(c);
+          budget -= c.snippet.length;
+        }
+        return kept;
+      })
       .then((cs) => cs.map((c) => ({ path: c.path, startLine: c.startLine, endLine: c.endLine, snippet: c.snippet })))
       .catch(() => [] as Array<{ path: string; startLine: number; endLine: number; snippet: string }>);
     stage.log('request', { seededChunks: seededContext.length });
