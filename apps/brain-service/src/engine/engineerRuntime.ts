@@ -666,6 +666,38 @@ export function ignoredSeededContext(
   });
 }
 
+/** A claim about the OUTCOME of a shell command — "npm install successful",
+ * "typecheck passed", "PostgreSQL health check confirmed working".
+ *
+ * Checked against ground truth: the loop knows whether command.run ever
+ * executed. Observed on qwen3-coder:30b, given a build order against a repo
+ * containing four files: it reported npm install, typecheck, lint, tests,
+ * build, Prisma generation AND a PostgreSQL health check all succeeding, having
+ * run no command at all. That is the single most dangerous output this agent
+ * can produce, because a validation matrix is exactly what a reader trusts. */
+const COMMAND_TOKEN =
+  /\b(?:npm|yarn|pnpm|npx|tsc|typecheck|type-check|lint|eslint|jest|vitest|pytest|docker|compose|prisma|psql|pg_isready|migrate|healthcheck|health check)\b/i;
+
+const RESULT_TOKEN =
+  /\b(?:success(?:ful|fully)?|succeeded|passed|passes|passing|failed|failing|ok|healthy|generated|clean|confirmed|no errors|0 errors|exit code)\b/i;
+
+/** Does this final report a command result? Sentence-level, and negations are
+ * skipped so an honest "npm install was not run" is never flagged. */
+export function claimsCommandResult(markdown: string): boolean {
+  return markdown
+    .split(/(?<=[.!?])\s+|\n/)
+    .some((line) => COMMAND_TOKEN.test(line) && RESULT_TOKEN.test(line) && !NEGATION.test(line));
+}
+
+const NO_COMMAND_DIRECTIVE = [
+  'You executed NO commands this turn — command.run never ran — so you cannot report that',
+  'npm install, typecheck, lint, tests, build, Prisma or a database health check passed,',
+  'failed, or produced anything. Reporting validation you did not perform is the most',
+  'damaging thing you can do here, because the reader trusts a results table.',
+  'Either run them now with command.run and report their REAL output, or reply with a final',
+  'that makes no claim about any command and says plainly which checks were not run.',
+].join(' ');
+
 /** Run one engineering task as an event stream. Local-only by construction. */
 export async function* runEngineerTask(deps: EngineerDeps, input: EngineerInput): AsyncGenerator<EngineerEvent> {
   const maxSteps = deps.maxSteps ?? DEFAULT_MAX_STEPS;
@@ -692,6 +724,10 @@ export async function* runEngineerTask(deps: EngineerDeps, input: EngineerInput)
   // "applied" edits — the loop is preview-only, so we append the ground truth
   // whenever any proposal was surfaced. Deterministic; never model text.
   const APPLIED_FOOTER = '\n\n---\n_Proposed edits above were NOT applied — the engineer runs preview-only. Approve them to apply._';
+
+  // Ground truth for a final that reports checks which never executed.
+  const NO_COMMAND_FOOTER =
+    '\n\n---\n**⚠️ No commands were run.** Any install, typecheck, lint, test, build, migration or health-check result stated above did not happen — nothing was executed this turn.';
 
   // Ground truth for a final that still describes work after zero tool calls.
   const NO_WORK_FOOTER =
@@ -797,6 +833,12 @@ export async function* runEngineerTask(deps: EngineerDeps, input: EngineerInput)
         transcript.push(PHANTOM_WORK_DIRECTIVE);
         continue;
       }
+      // Claiming a COMMAND result when no command ever executed.
+      if (!executedTools.has('command.run') && claimsCommandResult(step.markdown) && !finalCorrected) {
+        finalCorrected = true;
+        transcript.push(NO_COMMAND_DIRECTIVE);
+        continue;
+      }
       // Claiming the OUTCOME of a tool that never ran — "the workspace search did
       // not find…" after calling only diagnostics.get. Exactly checkable, since
       // the loop knows what it executed.
@@ -846,6 +888,9 @@ export async function* runEngineerTask(deps: EngineerDeps, input: EngineerInput)
       // state the ground truth deterministically rather than let the prose stand.
       if (producedNothing && claimsPhantomWork(markdown)) {
         markdown += NO_WORK_FOOTER;
+      }
+      if (!executedTools.has('command.run') && claimsCommandResult(markdown)) {
+        markdown += NO_COMMAND_FOOTER;
       }
       markdown = proposalsEmitted > 0 ? markdown + APPLIED_FOOTER : markdown;
       stage.log('final', { steps: toolStepCount, proposals: proposalsEmitted, replans });

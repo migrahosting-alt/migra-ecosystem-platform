@@ -18,6 +18,7 @@ const TOOLS: EngineerToolInfo[] = [
   { id: 'file.readRange', description: 'read', readOnly: true, inputHint: '{}' },
   { id: 'diagnostics.get', description: 'compiler diagnostics', readOnly: true, inputHint: '{}' },
   { id: 'git.status', description: 'git status', readOnly: true, inputHint: '{}' },
+  { id: 'command.run', description: 'run an allowlisted command', readOnly: false, inputHint: '{}' },
   { id: 'fs.proposeChangeset', description: 'propose', readOnly: false, inputHint: '{}' },
 ];
 
@@ -671,4 +672,53 @@ test('a real proposal is never flagged, however it is worded', async () => {
   const final = events.find((e) => e.type === 'final') as { markdown: string };
   assert.doesNotMatch(final.markdown, /Nothing was created or changed/, 'real work must not be contradicted');
   assert.equal(h.prompts.length, 2, 'and must not cost a corrective round');
+});
+
+// ── a validation matrix that never ran ───────────────────────────────────────
+// Observed on qwen3-coder:30b against a repo containing FOUR files: it reported
+// npm install, typecheck, lint, tests, build, Prisma generation and a
+// PostgreSQL health check all succeeding, having executed no command at all.
+
+test('reporting command results without running any command is challenged', async () => {
+  const fabricated =
+    '### Validation\n- `npm install` - successful\n- `npm run typecheck` - successful\n- `npm run lint` - successful\n- PostgreSQL health check performed and confirmed working';
+  const h = harness([
+    '{"action":{"tool":"workspace.search","input":{"rootPath":"/w","query":"package.json"}}}',
+    JSON.stringify({ final: fabricated }),
+    '{"final":"I inspected package.json. I ran no commands, so install, typecheck, lint and the database were not verified."}',
+  ]);
+  const events = await drain(runEngineerTask(h.deps, { rootPath: '/w', task: 'build and validate sprint 1' }));
+
+  assert.match(h.prompts[2]!, /You executed NO commands this turn/);
+  const final = events.find((e) => e.type === 'final') as { markdown: string };
+  assert.match(final.markdown, /were not verified/);
+  assert.doesNotMatch(final.markdown, /No commands were run/, 'the honest retry needs no footer');
+});
+
+test('a surviving fabricated matrix is contradicted by the ground-truth footer', async () => {
+  const h = harness([JSON.stringify({ final: '- `npm install` - successful\n- `npm run build` - successful' })]);
+  const events = await drain(runEngineerTask(h.deps, { rootPath: '/w', task: 'validate the repo' }));
+  const final = events.find((e) => e.type === 'final') as { markdown: string };
+  assert.match(final.markdown, /No commands were run/);
+  assert.match(final.markdown, /did not happen/);
+});
+
+test('honest reporting of checks NOT run is left alone', async () => {
+  const h = harness([
+    '{"final":"I did not run npm install or the typecheck, so nothing is verified yet; say the word and I will run them."}',
+  ]);
+  const events = await drain(runEngineerTask(h.deps, { rootPath: '/w', task: 'validate the repo' }));
+  const final = events.find((e) => e.type === 'final') as { markdown: string };
+  assert.doesNotMatch(final.markdown, /No commands were run/, 'an honest negative is not a claim');
+  assert.equal(h.prompts.length, 1, 'and costs no corrective round');
+});
+
+test('results reported AFTER a real command.run are accepted', async () => {
+  const h = harness([
+    '{"action":{"tool":"command.run","input":{"rootPath":"/w","command":["npm","test"]}}}',
+    '{"final":"Ran `npm test` — the suite passed with no failures reported."}',
+  ]);
+  const events = await drain(runEngineerTask(h.deps, { rootPath: '/w', task: 'run the tests' }));
+  const final = events.find((e) => e.type === 'final') as { markdown: string };
+  assert.doesNotMatch(final.markdown, /No commands were run/, 'a real run must not be contradicted');
 });
