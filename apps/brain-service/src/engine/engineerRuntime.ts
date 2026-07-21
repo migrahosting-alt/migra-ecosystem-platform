@@ -666,6 +666,38 @@ export function ignoredSeededContext(
   });
 }
 
+/** A claim about the OUTCOME of a shell command — "npm install successful",
+ * "typecheck passed", "PostgreSQL health check confirmed working".
+ *
+ * Checked against ground truth: the loop knows whether command.run ever
+ * executed. Observed on qwen3-coder:30b, given a build order against a repo
+ * containing four files: it reported npm install, typecheck, lint, tests,
+ * build, Prisma generation AND a PostgreSQL health check all succeeding, having
+ * run no command at all. That is the single most dangerous output this agent
+ * can produce, because a validation matrix is exactly what a reader trusts. */
+const COMMAND_TOKEN =
+  /\b(?:npm|yarn|pnpm|npx|tsc|typecheck|type-check|lint|eslint|jest|vitest|pytest|docker|compose|prisma|psql|pg_isready|migrate|healthcheck|health check)\b/i;
+
+const RESULT_TOKEN =
+  /\b(?:success(?:ful|fully)?|succeeded|passed|passes|passing|failed|failing|ok|healthy|generated|clean|confirmed|no errors|0 errors|exit code)\b/i;
+
+/** Does this final report a command result? Sentence-level, and negations are
+ * skipped so an honest "npm install was not run" is never flagged. */
+export function claimsCommandResult(markdown: string): boolean {
+  return markdown
+    .split(/(?<=[.!?])\s+|\n/)
+    .some((line) => COMMAND_TOKEN.test(line) && RESULT_TOKEN.test(line) && !NEGATION.test(line));
+}
+
+const NO_COMMAND_DIRECTIVE = [
+  'You executed NO commands this turn — command.run never ran — so you cannot report that',
+  'npm install, typecheck, lint, tests, build, Prisma or a database health check passed,',
+  'failed, or produced anything. Reporting validation you did not perform is the most',
+  'damaging thing you can do here, because the reader trusts a results table.',
+  'Either run them now with command.run and report their REAL output, or reply with a final',
+  'that makes no claim about any command and says plainly which checks were not run.',
+].join(' ');
+
 /** Run one engineering task as an event stream. Local-only by construction. */
 export async function* runEngineerTask(deps: EngineerDeps, input: EngineerInput): AsyncGenerator<EngineerEvent> {
   const maxSteps = deps.maxSteps ?? DEFAULT_MAX_STEPS;
@@ -683,6 +715,7 @@ export async function* runEngineerTask(deps: EngineerDeps, input: EngineerInput)
   const executedTools = new Set<string>(); // for cross-checking claims made in the final
   let finalCorrected = false;
   let proposalsEmitted = 0;
+  let filesCreatedByCommand = false; // command.run side effects are real work too
   let lintCorrections = 0;
   const MAX_LINT_CORRECTIONS = 2; // bounded self-correction on defective proposals
   const stage = deps.stage ?? NOOP_STAGE_LOGGER;
@@ -691,6 +724,10 @@ export async function* runEngineerTask(deps: EngineerDeps, input: EngineerInput)
   // "applied" edits — the loop is preview-only, so we append the ground truth
   // whenever any proposal was surfaced. Deterministic; never model text.
   const APPLIED_FOOTER = '\n\n---\n_Proposed edits above were NOT applied — the engineer runs preview-only. Approve them to apply._';
+
+  // Ground truth for a final that reports checks which never executed.
+  const NO_COMMAND_FOOTER =
+    '\n\n---\n**⚠️ No commands were run.** Any install, typecheck, lint, test, build, migration or health-check result stated above did not happen — nothing was executed this turn.';
 
   // Ground truth for a final that still describes work after zero tool calls.
   const NO_WORK_FOOTER =
@@ -781,12 +818,25 @@ export async function* runEngineerTask(deps: EngineerDeps, input: EngineerInput)
         transcript.push(answeredDirectly ? EMPTY_FINAL_DIRECTIVE : WEAK_FINAL_DIRECTIVE);
         continue; // exactly one corrective retry
       }
-      // The inverse of the false-FAILURE case below: a claim of work with ZERO
-      // tool calls behind it. Structurally impossible to be true, so it is caught
-      // here rather than left to the user to notice.
-      if (answeredDirectly && claimsPhantomWork(step.markdown) && !finalCorrected) {
+      // The inverse of the false-FAILURE case below: a claim that files were
+      // created when NOTHING was produced.
+      //
+      // This keys on OUTPUT, not on whether a tool ran. Keying on "zero tools"
+      // left a wide hole: handed a full Sprint-1 build order, the agent ran
+      // git.status + file.readRange + workspace.search, proposed NOTHING, and
+      // then reported "Generated apps/demo-forced-door … Created index.ts,
+      // routes.ts … Ran npm install: Failed". Three read-only calls were enough
+      // to skip the guard entirely. Reading files is not producing them.
+      const producedNothing = proposalsEmitted === 0 && !filesCreatedByCommand;
+      if (producedNothing && claimsPhantomWork(step.markdown) && !finalCorrected) {
         finalCorrected = true;
         transcript.push(PHANTOM_WORK_DIRECTIVE);
+        continue;
+      }
+      // Claiming a COMMAND result when no command ever executed.
+      if (!executedTools.has('command.run') && claimsCommandResult(step.markdown) && !finalCorrected) {
+        finalCorrected = true;
+        transcript.push(NO_COMMAND_DIRECTIVE);
         continue;
       }
       // Claiming the OUTCOME of a tool that never ran — "the workspace search did
@@ -836,8 +886,11 @@ export async function* runEngineerTask(deps: EngineerDeps, input: EngineerInput)
       }
       // …and the same for a phantom claim of work that survived its correction:
       // state the ground truth deterministically rather than let the prose stand.
-      if (answeredDirectly && claimsPhantomWork(markdown)) {
+      if (producedNothing && claimsPhantomWork(markdown)) {
         markdown += NO_WORK_FOOTER;
+      }
+      if (!executedTools.has('command.run') && claimsCommandResult(markdown)) {
+        markdown += NO_COMMAND_FOOTER;
       }
       markdown = proposalsEmitted > 0 ? markdown + APPLIED_FOOTER : markdown;
       stage.log('final', { steps: toolStepCount, proposals: proposalsEmitted, replans });
@@ -915,6 +968,7 @@ export async function* runEngineerTask(deps: EngineerDeps, input: EngineerInput)
               const created = after.filter((f) => !before.includes(f));
               if (created.length) {
                 yield { type: 'note', n, kind: 'command-effect', message: `created ${created.length} file(s): ${created.slice(0, 20).join(', ')}` };
+                filesCreatedByCommand = true;
                 progressed = true; // command side effect is progress
               }
             }

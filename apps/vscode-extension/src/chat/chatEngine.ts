@@ -193,6 +193,22 @@ export async function runChatTurn(
           return false;
         }
       },
+      // Starting a NEW project means the folder does not exist yet. Offer to
+      // create it rather than dead-ending in a picker that can only choose
+      // folders that already exist.
+      confirmCreate: async (target) => {
+        const yes = 'Create and build here';
+        const choice = await vscode.window.showWarningMessage(
+          `\`${target}\` does not exist. Create it and build there?`,
+          { modal: true },
+          yes,
+          'Choose another folder…',
+        );
+        return choice === yes;
+      },
+      createDirectory: async (target) => {
+        await vscode.workspace.fs.createDirectory(vscode.Uri.file(target));
+      },
       pickFolder: async (near) => {
         const picked = await vscode.window.showOpenDialog({
           canSelectFolders: true,
@@ -206,12 +222,29 @@ export async function runChatTurn(
       },
     });
     if (!resolved) {
-      sink.markdown('No folder selected. Open a folder, or include a path in your message (e.g. `build … in C:\\\\path\\\\to\\\\project`), and try again.');
+      // Also reached when a folder WAS chosen but is not reachable from the host
+      // running the agent — picking `T:\` from the WSL host looked like it worked
+      // and then every tool call failed, which read as "it has no build tools".
+      sink.markdown(
+        [
+          '**No usable folder.** Nothing was built.',
+          '',
+          'Either no folder was chosen, or the chosen one is not reachable from where MigraPilot runs.',
+          'Put the path in your message and I will use it (creating it if you confirm) — for example:',
+          '`build a todo app in /mnt/t/MigraWatch/migrawatch`.',
+          '',
+          '_Running under WSL, a Windows drive `T:\\…` lives at `/mnt/t/…`; if `/mnt/t` is empty or errors, the drive is not mounted in WSL._',
+        ].join('\n'),
+      );
       return;
     }
     const workspaceRootForTask = resolved.root;
     if (resolved.source !== 'workspace') {
-      const why = resolved.missingNamed ? ` (\`${resolved.missingNamed}\` was not found)` : '';
+      const why = resolved.created
+        ? ' (created for this task)'
+        : resolved.missingNamed
+          ? ` (\`${resolved.missingNamed}\` was not found)`
+          : '';
       sink.markdown(`\n_Working in \`${workspaceRootForTask}\`${why}._\n`);
     }
     // Collect changeset proposals during the run so we can offer a user-confirmed
