@@ -55,6 +55,7 @@ const EngineerBodySchema = z.object({
  * the protocol prompt stays in sync with what this deployment exposes). */
 const INPUT_HINTS: Record<string, string> = {
   'workspace.search': '{"rootPath","query"}',
+  'workspace.list': '{"rootPath","path"?,"depth"?,"limit"?} — the ONLY way to see what files exist',
   'file.readRange': '{"rootPath","path","startLine","endLine"}',
   'file.readSymbol': '{"rootPath","path","symbol"}',
   'git.status': '{"rootPath"}',
