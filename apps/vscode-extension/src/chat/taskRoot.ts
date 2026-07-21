@@ -108,8 +108,20 @@ export async function resolveTaskRoot(prompt: string, deps: ResolveRootDeps): Pr
   // create it, and only fall back to the picker if that is declined.
   if (missingNamed) {
     if (deps.confirmCreate && deps.createDirectory && (await deps.confirmCreate(missingNamed))) {
-      await deps.createDirectory(missingNamed);
-      return { root: missingNamed, source: 'created', created: true };
+      // Creating can FAIL for reasons that have nothing to do with consent: the
+      // owner's T: drive was mounted in WSL but stale ("Invalid argument"), so
+      // every write to it errored. An unhandled throw here would take down the
+      // whole chat turn, and a silent success would hand the agent a root that
+      // still does not exist — which is how a run ends up making eight tool
+      // calls that all fail. Verify, and fall through to the picker otherwise.
+      try {
+        await deps.createDirectory(missingNamed);
+        if (await deps.isDirectory(missingNamed)) {
+          return { root: missingNamed, source: 'created', created: true };
+        }
+      } catch {
+        /* unreachable drive / permissions — handled by the fallback below */
+      }
     }
     const picked = await pickExisting(deps, missingNamed);
     return picked ? { root: picked, source: 'picked', missingNamed } : undefined;

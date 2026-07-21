@@ -106,7 +106,8 @@ test('a WSL mount path resolves to its Windows spelling', () => {
 test('a named folder that does not exist yet is CREATED on confirmation', async () => {
   const created: string[] = [];
   const r = await resolveTaskRoot('build a countdown app in /mnt/t/MigraWatch/migrawatch', {
-    isDirectory: async () => false,
+    // Missing at first, present once created — the creation is then verified.
+    isDirectory: async (p) => created.includes(p),
     confirmCreate: async () => true,
     createDirectory: async (p) => {
       created.push(p);
@@ -163,4 +164,37 @@ test('a picked Windows folder is accepted via its WSL mount', async () => {
   });
   assert.equal(r?.root, '/mnt/t/MigraAccess Command');
   assert.equal(r?.source, 'picked');
+});
+
+test('a folder that cannot be created does not crash the turn', async () => {
+  // The owner's T: drive was mounted but STALE ("Invalid argument"), so writes
+  // to it threw. An unhandled throw would take down the whole chat turn.
+  const r = await resolveTaskRoot('build it in /mnt/t/MigraAccess', {
+    isDirectory: async () => false,
+    confirmCreate: async () => true,
+    createDirectory: async () => {
+      throw new Error('EINVAL: invalid argument');
+    },
+    pickFolder: async () => undefined, // user cancels the fallback picker
+  });
+  assert.equal(r, undefined, 'resolves to "no usable folder" instead of throwing');
+});
+
+test('a create that silently does not appear is not accepted as the root', async () => {
+  // Worse than throwing: handing the agent a root that still does not exist is
+  // how a run ends up making eight tool calls that every one of them fails.
+  let picked = false;
+  const r = await resolveTaskRoot('build it in /mnt/t/MigraAccess', {
+    isDirectory: async () => false, // never appears, even after "creating"
+    confirmCreate: async () => true,
+    createDirectory: async () => {
+      /* reports success, creates nothing */
+    },
+    pickFolder: async () => {
+      picked = true;
+      return undefined;
+    },
+  });
+  assert.equal(r, undefined);
+  assert.equal(picked, true, 'falls through to the picker rather than trusting the create');
 });
