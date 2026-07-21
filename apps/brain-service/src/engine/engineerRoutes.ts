@@ -56,6 +56,8 @@ const EngineerBodySchema = z.object({
 const INPUT_HINTS: Record<string, string> = {
   'workspace.search': '{"rootPath","query"}',
   'workspace.list': '{"rootPath","path"?,"depth"?,"limit"?} — the ONLY way to see what files exist',
+  'workspace.find': '{"rootPath","query","kind"?,"limit"?} — find files by NAME or glob',
+  'file.read': '{"rootPath","path","maxBytes"?} — read a WHOLE file (no line numbers needed)',
   'file.readRange': '{"rootPath","path","startLine","endLine"}',
   'file.readSymbol': '{"rootPath","path","symbol"}',
   'git.status': '{"rootPath"}',

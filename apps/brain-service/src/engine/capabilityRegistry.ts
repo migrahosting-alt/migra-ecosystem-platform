@@ -39,6 +39,8 @@ import { incidentManager } from './incidents.js';
 import { recoveryManager } from './recovery.js';
 import { workspaceSearch } from '../tools/workspaceSearch.js';
 import { workspaceList, WorkspaceListRequestSchema } from '../tools/workspaceList.js';
+import { fileRead, FileReadRequestSchema } from '../tools/fileRead.js';
+import { workspaceFind, WorkspaceFindRequestSchema } from '../tools/workspaceFind.js';
 import { fileReadRange } from '../tools/fileReadRange.js';
 import { fileReadSymbol } from '../tools/fileReadSymbol.js';
 import { gitStatus } from '../tools/gitStatus.js';
@@ -174,6 +176,20 @@ const TOOLS: RunnableCapability[] = [
     descriptor: meta('workspace.list', 'List Directory', 'List the files and directories that actually exist at a workspace path.', 'workspace', ['workspace.read'], { readOnly: true }),
     inputSchema: WorkspaceListRequestSchema,
     handler: (i) => workspaceList(i as never),
+  },
+  {
+    // Finding a file by NAME. Content search answers "where is tsconfig.json?"
+    // badly: it matches everything that merely mentions the string.
+    descriptor: meta('workspace.find', 'Find Files By Name', 'Find files or directories by name or glob.', 'workspace', ['workspace.read'], { readOnly: true }),
+    inputSchema: WorkspaceFindRequestSchema,
+    handler: (i) => workspaceFind(i as never),
+  },
+  {
+    // Reading a whole file. file.readRange REQUIRES line numbers, so reading
+    // package.json meant GUESSING a range and reasoning about a truncated file.
+    descriptor: meta('file.read', 'Read File', 'Read a whole workspace file (bounded; reports truncation).', 'file', ['workspace.read'], { readOnly: true }),
+    inputSchema: FileReadRequestSchema,
+    handler: (i) => fileRead(i as never),
   },
   {
     descriptor: meta('file.readRange', 'Read File Range', 'Read a line range from a workspace file.', 'file', ['workspace.read'], { readOnly: true }),
