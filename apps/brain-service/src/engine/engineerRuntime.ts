@@ -69,6 +69,15 @@ export interface EngineerInput {
    * ordinary chat too, so it must carry the same memory the chat path had —
    * otherwise "now build it" loses what "it" refers to. */
   history?: Array<{ role: 'user' | 'assistant'; text: string }>;
+  /** Code excerpts retrieved for this message BEFORE the loop starts.
+   *
+   * The agent can search, but a naive keyword search over a large monorepo finds
+   * the wrong "lint" (observed: matched allowed-scripts config and a deployment
+   * doc instead of changesetLint.ts). The chat path had tuned lexical ranking —
+   * definition-first, filename bonus, copy-path penalty — and routing ordinary
+   * turns here dropped it. Seeding those excerpts restores the grounding AND
+   * usually saves a search round. */
+  context?: Array<{ path: string; startLine: number; endLine: number; snippet: string }>;
 }
 
 export type EngineerNoteKind = 'normalized' | 'duplicate' | 'command-effect' | 'replan' | 'policy' | 'quality';
@@ -96,6 +105,9 @@ function protocolPrompt(input: EngineerInput, tools: EngineerToolInfo[]): string
   const catalog = tools
     .map((t) => `- ${t.id}${t.readOnly ? ' (read-only)' : ''}: ${t.description} Input: ${t.inputHint}`)
     .join('\n');
+  const excerpts = (input.context ?? [])
+    .map((c) => `--- ${c.path}:${c.startLine}-${c.endLine}\n${c.snippet}`)
+    .join('\n\n');
   const history = (input.history ?? [])
     .map((m) => `${m.role === 'user' ? 'User' : 'You'}: ${m.text}`)
     .join('\n');
@@ -116,11 +128,18 @@ function protocolPrompt(input: EngineerInput, tools: EngineerToolInfo[]): string
     '  answer it IMMEDIATELY with {"final":"<markdown>"}. Do NOT call any tool and do',
     '  NOT propose files — a tool call here only wastes the user\'s time.',
     '- A QUESTION ABOUT THIS WORKSPACE (how does X work here, where is Y, what does this',
-    '  repo do, what changed): your FIRST reply MUST be a tool call, never a final —',
-    '  start with workspace.search on the most distinctive keywords in their message,',
-    '  then file.readRange on the best hit — and only then answer, citing `path:line`.',
-    '  A large or unfamiliar repository is NORMAL: search it, do not ask the user where',
-    '  to look and do not ask them to name a file. Do NOT propose changes for a question.',
+    '  repo do, what changed): answer ONLY from real code, citing `path:line`.',
+    excerpts
+      ? '  Excerpts were already retrieved for this message below — read them FIRST and answer'
+      : '  Your FIRST reply MUST be a tool call, never a final:',
+    excerpts
+      ? '  from them if they suffice; search only for what they genuinely do not cover.'
+      : '  start with workspace.search on the most distinctive keywords in their message,',
+    excerpts
+      ? '  A large repository is NORMAL: never ask the user where to look or to name a file.'
+      : '  then file.readRange on the best hit — and only then answer. A large or unfamiliar',
+    excerpts ? '' : '  repository is NORMAL: search it, never ask the user where to look.',
+    '  Do NOT propose file changes for a question.',
     '- A REQUEST TO BUILD, CHANGE, FIX, REFACTOR, SCAFFOLD or RUN something: do the work',
     '  with the tools below, ending in a proposed changeset. This includes requests that',
     '  are phrased as a plan, a mission, a numbered slice, a quoted instruction, or an',
@@ -177,6 +196,18 @@ function protocolPrompt(input: EngineerInput, tools: EngineerToolInfo[]): string
     '  that is the files you CREATED, never an inspection report or an apology about an',
     '  empty workspace. (For a question, finishing immediately is correct.)',
     '',
+    excerpts
+      ? [
+          'CODE RETRIEVED FOR THIS MESSAGE (real excerpts from this workspace, ranked',
+          'by relevance — this is a SAMPLE, not the whole repo):',
+          excerpts,
+          '',
+          'If these excerpts answer the question, answer NOW from them and cite `path:line`',
+          '— no search needed. If the specific fact you need is not in them, THEN search for',
+          'it; never claim the repo lacks something merely because these excerpts omit it.',
+          '',
+        ].join('\n')
+      : '',
     history ? `CONVERSATION SO FAR:\n${history}\n` : '',
     `THE USER'S CURRENT MESSAGE: ${input.task}`,
   ].filter((l) => l !== '').join('\n');

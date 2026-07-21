@@ -10,6 +10,7 @@
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { camelCandidates } from '../src/retrieval/retrieve.js';
 import { runEngineerTask, parseStep, claimedUnrunTool, repairJsonEscapes, repairJsonControlChars, type EngineerEvent, type EngineerToolInfo } from '../src/engine/engineerRuntime.js';
 
 const TOOLS: EngineerToolInfo[] = [
@@ -308,8 +309,8 @@ test('the workspace-question rule tells the model to search rather than ask', as
   const h = harness(['{"final":"a sufficiently long direct answer for the agent to accept it"}']);
   await drain(runEngineerTask(h.deps, { rootPath: '/w', task: 'hi' }));
   const prompt = h.prompts[0]!;
-  assert.match(prompt, /your FIRST reply MUST be a tool call/);
-  assert.match(prompt, /do not ask the user where/);
+  assert.match(prompt, /Your FIRST reply MUST be a tool call/);
+  assert.match(prompt, /never ask the user where to look/);
 });
 
 // ── a correct answer must never be discarded over JSON formatting ─────────────
@@ -393,4 +394,65 @@ test('claimedUnrunTool matches the spoken form as well as the dotted id', () => 
   assert.equal(claimedUnrunTool('workspace.search returned no hits', ran, available), 'workspace.search');
   assert.equal(claimedUnrunTool('diagnostics.get returned no items', ran, available), null, 'it really ran');
   assert.equal(claimedUnrunTool('I read the file and found the answer', ran, available), null, 'no tool named');
+});
+
+// ── seeded grounding ─────────────────────────────────────────────────────────
+// Routing ordinary turns to this loop dropped the chat path's tuned lexical
+// retrieval in favour of a naive keyword search. On the real monorepo that made
+// "what does the changeset lint check?" match allowed-scripts config and a
+// deployment doc instead of changesetLint.ts. The excerpts are seeded back in.
+
+const SEEDED = [
+  { path: 'src/tools/changesetLint.ts', startLine: 20, endLine: 24, snippet: "defects.push({ path, issue: 'contains merge-conflict markers' });" },
+];
+
+test('seeded excerpts are shown to the model with their real path:line', async () => {
+  const h = harness(['{"final":"changesetLint.ts:20 flags merge-conflict markers in proposed content."}']);
+  await drain(runEngineerTask(h.deps, { rootPath: '/w', task: 'what does the changeset lint check?', context: SEEDED }));
+
+  const prompt = h.prompts[0]!;
+  assert.match(prompt, /CODE RETRIEVED FOR THIS MESSAGE/);
+  assert.match(prompt, /--- src\/tools\/changesetLint\.ts:20-24/);
+  assert.match(prompt, /merge-conflict markers/);
+});
+
+test('with excerpts the agent may answer immediately; without them it must search first', async () => {
+  const withCtx = harness(['{"final":"changesetLint.ts:20 flags merge-conflict markers in proposed content."}']);
+  await drain(runEngineerTask(withCtx.deps, { rootPath: '/w', task: 'what does the lint check?', context: SEEDED }));
+  assert.match(withCtx.prompts[0]!, /read them FIRST and answer/);
+  assert.doesNotMatch(withCtx.prompts[0]!, /Your FIRST reply MUST be a tool call/);
+  assert.deepEqual(withCtx.calls, [], 'a sufficient excerpt saves a search round');
+
+  const noCtx = harness(['{"final":"a sufficiently long direct answer for the agent to accept it"}']);
+  await drain(runEngineerTask(noCtx.deps, { rootPath: '/w', task: 'what does the lint check?' }));
+  assert.match(noCtx.prompts[0]!, /Your FIRST reply MUST be a tool call/);
+});
+
+test('seeded excerpts are framed as a SAMPLE, so absence is never proof', async () => {
+  const h = harness(['{"final":"changesetLint.ts:20 flags merge-conflict markers in proposed content."}']);
+  await drain(runEngineerTask(h.deps, { rootPath: '/w', task: 'what does the lint check?', context: SEEDED }));
+  const prompt = h.prompts[0]!;
+  assert.match(prompt, /a SAMPLE, not the whole repo/);
+  assert.match(prompt, /never claim the repo lacks something merely because these excerpts omit it/);
+});
+
+test('no excerpts means no empty section in the prompt', async () => {
+  const h = harness(['{"final":"a sufficiently long direct answer for the agent to accept it"}']);
+  await drain(runEngineerTask(h.deps, { rootPath: '/w', task: 'hi', context: [] }));
+  assert.doesNotMatch(h.prompts[0]!, /CODE RETRIEVED FOR THIS MESSAGE/);
+});
+
+
+
+// ── retrieval: the candidate pool is what actually decides the answer ─────────
+
+test('camelCandidates joins adjacent query words the way code is actually named', () => {
+  // "what does the changeset lint check?" must reach `changesetLint.ts`. Searching
+  // the words separately drowned in every eslint config in the tree; the joined
+  // identifier hits the one file that implements it.
+  assert.ok(camelCandidates('what defects does the changeset lint check for?').includes('changesetLint'));
+  assert.ok(camelCandidates('where is the workspace search implemented').includes('workspaceSearch'));
+  // Filler words are dropped, so no `theChangeset` / `doesThe` noise.
+  assert.deepEqual(camelCandidates('what is this'), []);
+  assert.ok(!camelCandidates('what does the changeset lint check for?').some((c) => /^the|^does|^what/.test(c)));
 });

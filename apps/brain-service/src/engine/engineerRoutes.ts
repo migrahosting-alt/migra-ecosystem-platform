@@ -10,6 +10,7 @@ import type { BrainEnv } from '../config/env.js';
 import type { ModelRegistry, ModelDescriptor } from './modelRegistry.js';
 import { selectModel, tierFromHints } from './capabilityRouter.js';
 import { selectLocalCoding, type LocalRoutingDeps } from './providers/localCodingRouter.js';
+import { retrieveContext } from '../retrieval/retrieve.js';
 import { resolveEffectivePolicy } from './providers/executionPolicy.js';
 import { assessCodingOutcome } from './providers/codingAssessment.js';
 import type { EscalationController } from './providers/escalationController.js';
@@ -314,6 +315,21 @@ export function registerEngineerRoutes(
     // Surface the correlation id to the client so it can be quoted in support.
     send('route', { model: decision.model.id, provider: decision.model.provider, reason: decision.reason, correlationId, policy: routing.policy, requestedPolicy: routing.requestedPolicy, effectivePolicy: routing.effectivePolicy, policyReason: routing.policyReason, fallbackRecommended: routing.fallbackRecommended });
 
+    // Seed the agent with the SAME tuned lexical grounding the chat path used
+    // (definition-first ranking, filename bonus, copy-path penalty). Routing
+    // ordinary turns to this loop replaced that with a naive keyword search,
+    // which on a large monorepo found the wrong "lint" entirely. Bounded and
+    // best-effort: retrieval must never slow down or fail a turn.
+    const seededContext = await retrieveContext({
+      query: body.task,
+      workspaceRoot: body.rootPath,
+      feature: 'chat',
+      ...(body.history?.length ? { conversationContext: body.history.map((h) => h.text).join('\n') } : {}),
+    })
+      .then((r) => r.chunks.map((c) => ({ path: c.path, startLine: c.startLine, endLine: c.endLine, snippet: c.snippet })))
+      .catch(() => [] as Array<{ path: string; startLine: number; endLine: number; snippet: string }>);
+    stage.log('request', { seededChunks: seededContext.length });
+
     const events = runEngineerTask(
       {
         complete: async (prompt) => {
@@ -343,7 +359,7 @@ export function registerEngineerRoutes(
         stage,
         tools: loopTools(),
       },
-      { rootPath: body.rootPath, task: body.task, ecosystem: body.ecosystem, history: body.history },
+      { rootPath: body.rootPath, task: body.task, ecosystem: body.ecosystem, history: body.history, context: seededContext },
     );
 
     auditStore.append({ correlationId, type: 'loop.started', component: 'engineer' });
