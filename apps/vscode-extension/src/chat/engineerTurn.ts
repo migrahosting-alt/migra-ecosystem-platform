@@ -87,7 +87,7 @@ export async function runEngineerTurn(
       } else if (ev.event === 'note') {
         // Visible reporting of normalization/dedup/command-effects/re-plans.
         const d = ev.data as NoteData;
-        const icon = d.kind === 'command-effect' ? '📝' : d.kind === 'duplicate' ? '↩︎' : d.kind === 'policy' ? '⛔' : d.kind === 'replan' ? '↻' : 'ℹ︎';
+        const icon = d.kind === 'command-effect' ? '📝' : d.kind === 'duplicate' ? '↩︎' : d.kind === 'policy' ? '⛔' : d.kind === 'replan' ? '↻' : d.kind === 'quality' ? '⚠️' : 'ℹ︎';
         sink.markdown(`\n  ${icon} _${d.message ?? d.kind ?? 'note'}_\n`);
       } else if (ev.event === 'proposal') {
         sink.markdown(`\n${renderProposal(ev.data as ProposalData)}\n`);

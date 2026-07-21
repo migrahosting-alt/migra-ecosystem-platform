@@ -28,6 +28,7 @@
 // side effects (npm install, etc.) are permitted, contained, and reported.
 
 import { NOOP_STAGE_LOGGER, type StageLogger } from './correlation.js';
+import { lintChangeset, summarizeDefects } from '../tools/changesetLint.js';
 
 export interface EngineerToolInfo {
   id: string;
@@ -66,7 +67,7 @@ export interface EngineerInput {
   ecosystem?: boolean;
 }
 
-export type EngineerNoteKind = 'normalized' | 'duplicate' | 'command-effect' | 'replan' | 'policy';
+export type EngineerNoteKind = 'normalized' | 'duplicate' | 'command-effect' | 'replan' | 'policy' | 'quality';
 
 export type EngineerEvent =
   | { type: 'step'; n: number; tool: string; summary: string }
@@ -319,6 +320,8 @@ export async function* runEngineerTask(deps: EngineerDeps, input: EngineerInput)
   let toolStepCount = 0;
   let finalCorrected = false;
   let proposalsEmitted = 0;
+  let lintCorrections = 0;
+  const MAX_LINT_CORRECTIONS = 2; // bounded self-correction on defective proposals
   const stage = deps.stage ?? NOOP_STAGE_LOGGER;
 
   // Machine-authored truth footer: the model's prose can wrongly claim it
@@ -436,11 +439,29 @@ export async function* runEngineerTask(deps: EngineerDeps, input: EngineerInput)
             // For a proposal, prefix an explicit SUCCESS signal — the raw result
             // object alone led models to mistake the preview-only outcome for a
             // failure and tell the user to create files manually.
-            transcript.push(
-              isProposal
-                ? `Result of ${tool}: PROPOSAL RECORDED SUCCESSFULLY (preview-only; the operator approves and applies it, not you). This is the intended outcome — do NOT call it a failure and do NOT ask the user to create files manually. Propose any remaining files, then reply {"final":...} presenting the proposed file(s) as ready to apply.\n${cap(stableStringify(result), resultCap)}`
-                : `Result of ${tool}:\n${cap(stableStringify(result), resultCap)}\n\nContinue with the JSON protocol object.`,
-            );
+            // Sanity-check a proposed changeset for OBVIOUS defects (duplicate
+            // definitions, leaked tool-call markup, merge markers, broken JSON) and
+            // feed them back so the model self-corrects BEFORE the botch reaches the
+            // user's files. Bounded, so it can never loop.
+            const lintOps =
+              tool === 'fs.proposeChangeset'
+                ? ((toolInput as { ops?: Array<{ op?: string; path?: string; content?: string | null }> }).ops ?? [])
+                : [];
+            const defects = lintOps.length ? lintChangeset(lintOps) : [];
+            if (defects.length > 0 && lintCorrections < MAX_LINT_CORRECTIONS) {
+              lintCorrections += 1;
+              progressed = true; // a correction round is progress, not a stall
+              yield { type: 'note', n, kind: 'quality', message: `proposed change looks broken — ${summarizeDefects(defects)}; asking the model to fix it` };
+              transcript.push(
+                `Your fs.proposeChangeset proposal has DEFECTS that would break the code: ${summarizeDefects(defects)}. Re-propose the COMPLETE, corrected file(s) with fs.proposeChangeset — replace the whole file content, remove any duplicated definitions or leaked markup, and make sure it parses. Do this now.`,
+              );
+            } else {
+              transcript.push(
+                isProposal
+                  ? `Result of ${tool}: PROPOSAL RECORDED SUCCESSFULLY (preview-only; the operator approves and applies it, not you). This is the intended outcome — do NOT call it a failure and do NOT ask the user to create files manually. Propose any remaining files, then reply {"final":...} presenting the proposed file(s) as ready to apply.\n${cap(stableStringify(result), resultCap)}`
+                  : `Result of ${tool}:\n${cap(stableStringify(result), resultCap)}\n\nContinue with the JSON protocol object.`,
+              );
+            }
           } catch (err) {
             const message = err instanceof Error ? err.message : String(err);
             stage.log('tool', { n, tool, durationMs: Date.now() - toolStarted, outcome: 'error', error: err instanceof Error ? err.name : 'error' });
