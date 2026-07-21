@@ -94,6 +94,13 @@ export async function runEngineerTurn(
         streamed = ''; // a note breaks the run of streamed text
         // Visible reporting of normalization/dedup/command-effects/re-plans.
         const d = ev.data as NoteData;
+        // A plan is multi-line and is the agent's stated intent — render it as a
+        // block rather than squeezing it onto an italic one-liner.
+        if (d.kind === 'plan') {
+          streamed = '';
+          sink.markdown(`\n\n\`\`\`text\n${d.message ?? ''}\n\`\`\`\n`);
+          continue;
+        }
         const icon = d.kind === 'command-effect' ? '📝' : d.kind === 'duplicate' ? '↩︎' : d.kind === 'policy' ? '⛔' : d.kind === 'replan' ? '↻' : d.kind === 'quality' ? '⚠️' : 'ℹ︎';
         sink.markdown(`\n  ${icon} _${d.message ?? d.kind ?? 'note'}_\n`);
       } else if (ev.event === 'proposal') {

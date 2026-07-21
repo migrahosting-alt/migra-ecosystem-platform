@@ -86,7 +86,7 @@ export interface EngineerInput {
   context?: Array<{ path: string; startLine: number; endLine: number; snippet: string }>;
 }
 
-export type EngineerNoteKind = 'normalized' | 'duplicate' | 'command-effect' | 'replan' | 'policy' | 'quality';
+export type EngineerNoteKind = 'normalized' | 'duplicate' | 'command-effect' | 'replan' | 'policy' | 'quality' | 'plan';
 
 export type EngineerEvent =
   | { type: 'step'; n: number; tool: string; summary: string }
@@ -160,9 +160,20 @@ function protocolPrompt(input: EngineerInput, tools: EngineerToolInfo[]): string
     '  only CHANGES, not contents. NEVER state that a directory is empty, that a file is',
     '  absent, or that the repo lacks apps/packages/services/prisma/docker/tests unless',
     '  workspace.list actually showed you that. Guessing a listing is a serious error.',
-    '- To FIND code use workspace.search, then file.readRange on the best hit.',
+    '- To read a file, use file.read — it takes no line numbers. Use file.readRange only',
+    '  when you already know the exact lines you want from a large file.',
+    '- To locate a file BY NAME ("is there a tsconfig/docker-compose/prisma schema?") use',
+    '  workspace.find. Content search answers that badly: it matches every file that',
+    '  merely mentions the word.',
+    '- To FIND code by its CONTENT use workspace.search, then file.read on the best hit.',
     '  diagnostics.get reports COMPILER ERRORS and never locates code — it is the wrong',
     '  tool for "where is X" or "what does Y do", and finding nothing with it proves nothing.',
+    '- A REQUEST WITH SEVERAL PARTS (a numbered list, a mission, "audit then build"):',
+    '  call plan.update FIRST with one short step per part, then work the steps in order',
+    '  and tick each off with {"complete":[n]} as you finish it. Your plan is shown back',
+    '  to you every step — it is the only memory you have of what you set out to do, and',
+    '  without it long tasks drift into repeated searches and a summary instead of work.',
+    '  A plan is NOT the deliverable: never finish with only a plan.',
     '- When the intent is genuinely ambiguous, prefer DOING the work over asking.',
     '- WRITING ABOUT A FILE IS NOT CREATING IT. If your final says anything was created,',
     '  added, implemented, proposed or recorded, you MUST have called fs.proposeChangeset',
@@ -729,6 +740,51 @@ const LIST_FIRST_DIRECTIVE = [
   'workspace.list can, and an invented listing is worse than no answer at all.',
 ].join(' ');
 
+/** The agent's own plan for a multi-part task.
+ *
+ * The loop hands the model a fresh prompt each step, so across a long task it
+ * had no memory of its own INTENT — only a transcript to re-read. Given a
+ * fourteen-part build order it wandered: repeated searches, duplicate calls, no
+ * progress, then a summary instead of the work. Plan state lives in the LOOP
+ * (not a stateless tool) so it survives every step and is rendered back into
+ * each prompt. */
+export interface PlanStep {
+  text: string;
+  done: boolean;
+}
+
+const MAX_PLAN_STEPS = 12;
+
+/** Apply a `plan.update` payload to the current plan. Setting steps REPLACES the
+ * plan; completing marks by 1-based index. Bounded, and never throws on junk. */
+export function applyPlanUpdate(plan: PlanStep[], input: unknown): PlanStep[] {
+  const req = (input ?? {}) as { steps?: unknown; complete?: unknown };
+  let next = plan;
+  if (Array.isArray(req.steps)) {
+    next = req.steps
+      .filter((t): t is string => typeof t === 'string' && t.trim().length > 0)
+      .slice(0, MAX_PLAN_STEPS)
+      .map((t) => ({ text: t.trim().slice(0, 200), done: false }));
+  }
+  const completed = Array.isArray(req.complete)
+    ? req.complete
+    : typeof req.complete === 'number'
+      ? [req.complete]
+      : [];
+  next = next.map((s, i) => (completed.includes(i + 1) ? { ...s, done: true } : s));
+  return next;
+}
+
+/** One-line-per-step rendering shown to the model and the user. */
+export function renderPlan(plan: PlanStep[]): string {
+  if (plan.length === 0) return '(no plan)';
+  const done = plan.filter((s) => s.done).length;
+  return [
+    `PLAN (${done}/${plan.length} done):`,
+    ...plan.map((s, i) => `  ${s.done ? '[x]' : '[ ]'} ${i + 1}. ${s.text}`),
+  ].join('\n');
+}
+
 /** Run one engineering task as an event stream. Local-only by construction. */
 export async function* runEngineerTask(deps: EngineerDeps, input: EngineerInput): AsyncGenerator<EngineerEvent> {
   const maxSteps = deps.maxSteps ?? DEFAULT_MAX_STEPS;
@@ -747,6 +803,7 @@ export async function* runEngineerTask(deps: EngineerDeps, input: EngineerInput)
   let finalCorrected = false;
   let proposalsEmitted = 0;
   let filesCreatedByCommand = false; // command.run side effects are real work too
+  let plan: PlanStep[] = []; // the agent's own plan, carried across steps
   let lintCorrections = 0;
   const MAX_LINT_CORRECTIONS = 2; // bounded self-correction on defective proposals
   const stage = deps.stage ?? NOOP_STAGE_LOGGER;
@@ -937,6 +994,18 @@ export async function* runEngineerTask(deps: EngineerDeps, input: EngineerInput)
       const streamedPrefix = streamedThisAttempt.length > 0 && markdown.startsWith(streamedThisAttempt);
       yield { type: 'final', markdown, steps: toolStepCount, streamedPrefix };
       return;
+    }
+
+    // PLAN state is the loop's own, not the registry's: it must persist across
+    // steps and be re-shown to the model every time, which a stateless tool
+    // cannot do. Intercepted here, before dispatch.
+    if (step.tool === 'plan.update') {
+      plan = applyPlanUpdate(plan, step.input);
+      const rendered = renderPlan(plan);
+      yield { type: 'note', n, kind: 'plan', message: rendered };
+      transcript.push(`${rendered}\n\nWork the next unchecked step. Mark steps done as you finish them.`);
+      noProgressStreak = 0; // recording intent is progress
+      continue;
     }
 
     // Mutation policy: edit.apply / fs.applyChangeset are never executed by the
