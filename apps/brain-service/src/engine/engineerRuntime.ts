@@ -65,6 +65,10 @@ export interface EngineerInput {
   task: string;
   /** Attach the MigraTeck ecosystem context block (detected by the caller). */
   ecosystem?: boolean;
+  /** Prior turns of the conversation, oldest first. The unified agent handles
+   * ordinary chat too, so it must carry the same memory the chat path had —
+   * otherwise "now build it" loses what "it" refers to. */
+  history?: Array<{ role: 'user' | 'assistant'; text: string }>;
 }
 
 export type EngineerNoteKind = 'normalized' | 'duplicate' | 'command-effect' | 'replan' | 'policy' | 'quality';
@@ -92,13 +96,33 @@ function protocolPrompt(input: EngineerInput, tools: EngineerToolInfo[]): string
   const catalog = tools
     .map((t) => `- ${t.id}${t.readOnly ? ' (read-only)' : ''}: ${t.description} Input: ${t.inputHint}`)
     .join('\n');
+  const history = (input.history ?? [])
+    .map((m) => `${m.role === 'user' ? 'User' : 'You'}: ${m.text}`)
+    .join('\n');
   return [
-    'You are the MigraPilot workspace engineer. You complete local software-engineering',
-    `tasks inside the workspace rooted at: ${input.rootPath}`,
+    'You are MigraPilot, a workspace agent on the user\'s own machine, working in the',
+    `workspace rooted at: ${input.rootPath}`,
+    'You handle EVERY kind of request in this conversation — questions, explanations,',
+    'discussion and planning as well as building and changing code. You have tools, so',
+    'you never have to guess about this workspace and you never lack access to it.',
     input.ecosystem ? ECOSYSTEM_BLOCK : '',
     '',
     'TOOLS:',
     catalog,
+    '',
+    'DECIDE WHAT THE USER ACTUALLY WANTS, THEN ACT:',
+    '- A QUESTION or a request to explain/compare/discuss/plan that does NOT depend on',
+    '  the code in this workspace (general programming, concepts, advice, chit-chat):',
+    '  answer it IMMEDIATELY with {"final":"<markdown>"}. Do NOT call any tool and do',
+    '  NOT propose files — a tool call here only wastes the user\'s time.',
+    '- A QUESTION ABOUT THIS WORKSPACE (how does X work here, where is Y, what does this',
+    '  repo do, what changed): use the read-only tools to find the real answer FIRST,',
+    '  then answer citing `path:line`. Do NOT propose file changes for a question.',
+    '- A REQUEST TO BUILD, CHANGE, FIX, REFACTOR, SCAFFOLD or RUN something: do the work',
+    '  with the tools below, ending in a proposed changeset. This includes requests that',
+    '  are phrased as a plan, a mission, a numbered slice, a quoted instruction, or an',
+    '  aside like "you can now build it" — the WORDING never decides; the INTENT does.',
+    '- When the intent is genuinely ambiguous, prefer DOING the work over asking.',
     '',
     'RULES:',
     '- Reply with ONLY one JSON object, no prose, no code fences.',
@@ -134,15 +158,32 @@ function protocolPrompt(input: EngineerInput, tools: EngineerToolInfo[]): string
     '  update or remove every reference you found.',
     '- NEVER repeat a tool call with identical input — its earlier result stands.',
     '- If a tool input is rejected, fix the input once; do not retry it unchanged.',
-    '- Work autonomously: never ask the user for confirmation and never announce',
-    '  a plan as your final answer — execute it with tools NOW.',
-    '- Reply {"final":...} only AFTER you have proposed (via fs.proposeChangeset or',
-    '  edit.preview) every file the task needs. Your final MUST summarize the files',
-    '  you proposed and any validation — for a build-new task that is the files you',
-    '  CREATED, never an inspection report or an apology about an empty workspace.',
+    '- Work autonomously: when the user asked for WORK, never ask for confirmation and',
+    '  never announce a plan as your final answer — execute it with tools NOW. (When the',
+    '  user asked a question or asked FOR a plan, the answer itself is the deliverable.)',
+    '- For a BUILD/CHANGE request, reply {"final":...} only AFTER you have proposed',
+    '  (via fs.proposeChangeset or edit.preview) every file the task needs. That final',
+    '  MUST summarize the files you proposed and any validation — for a build-new task',
+    '  that is the files you CREATED, never an inspection report or an apology about an',
+    '  empty workspace. (For a question, finishing immediately is correct.)',
     '',
-    `TASK: ${input.task}`,
+    history ? `CONVERSATION SO FAR:\n${history}\n` : '',
+    `THE USER'S CURRENT MESSAGE: ${input.task}`,
   ].filter((l) => l !== '').join('\n');
+}
+
+/** Drop backslashes that JSON does not permit as escapes.
+ *
+ * JSON allows only `\" \\ \/ \b \f \n \r \t \uXXXX`. A model writing JavaScript
+ * or shell content into a string field often emits `\'`, which makes the WHOLE
+ * step unparseable and fails the run. Applied only after a genuine parse
+ * failure, so it can never alter text that was already valid JSON. */
+export function repairJsonEscapes(text: string): string {
+  // Scan escape PAIRS left to right so a legitimate `\\` is consumed as one unit
+  // and its partner is never mistaken for the start of another escape.
+  return text.replace(/\\(u[0-9a-fA-F]{4}|[\s\S])/g, (match, escaped: string) =>
+    escaped.length > 1 || '"\\/bfnrt'.includes(escaped) ? match : escaped,
+  );
 }
 
 /** Parse the model's step reply. Tolerates surrounding whitespace/fences. */
@@ -162,7 +203,15 @@ export function parseStep(text: string):
     // /deep. Accept it here too rather than failing the whole run as malformed.
     const xml = parseXmlToolCall(text);
     if (xml) return xml;
-    return { kind: 'malformed', reason: 'not valid JSON' };
+    // Last resort: repair invalid escapes. Models routinely write file CONTENT
+    // with source-language escapes that JSON forbids — `"Time\'s up!"` inside a
+    // proposed .js file killed an entire otherwise-perfect build run. The text is
+    // already unparseable, so dropping the stray backslash can only improve it.
+    try {
+      parsed = JSON.parse(repairJsonEscapes(body));
+    } catch {
+      return { kind: 'malformed', reason: 'not valid JSON' };
+    }
   }
   const obj = parsed as Record<string, unknown>;
   if (typeof obj.final === 'string') return { kind: 'final', markdown: obj.final };
@@ -335,6 +384,11 @@ function cap(text: string, limit: number): string {
   return text.length > limit ? `${text.slice(0, limit)}…[truncated]` : text;
 }
 
+/** The agent finished without using any tool (an ordinary answer) but produced
+ * no text at all. Ask for the answer itself — NOT for a completion report. */
+const EMPTY_FINAL_DIRECTIVE =
+  'Your final was empty. Reply with {"final":"..."} containing your actual answer to the user\'s message.';
+
 const WEAK_FINAL_DIRECTIVE = [
   'That final was not acceptable — it must be a real completion report, not a plan or a question.',
   'Reply with {"final":"..."} whose markdown states: what you inspected, which commands you actually',
@@ -388,16 +442,27 @@ export async function* runEngineerTask(deps: EngineerDeps, input: EngineerInput)
       reply = await deps.complete(transcript.join('\n\n'));
       step = parseStep(reply);
       if (step.kind === 'malformed') {
-        stage.log('error', { code: 'MALFORMED_MODEL_OUTPUT', n });
+        // Record a capped sample of what the model actually said. Without it a
+        // protocol break is undiagnosable — the run just dies with "not valid
+        // JSON" and no evidence of which shape the model emitted.
+        stage.log('error', { code: 'MALFORMED_MODEL_OUTPUT', n, reply: cap(reply.trim(), 400) });
         yield { type: 'error', code: 'MALFORMED_MODEL_OUTPUT', message: `step ${n}: ${step.reason}` };
         return;
       }
     }
 
     if (step.kind === 'final') {
-      if (isWeakFinal(step.markdown) && !finalCorrected) {
+      // The weak-final check enforces a real COMPLETION REPORT — it only applies
+      // once the agent has actually done work. This agent also answers ordinary
+      // questions, where finishing on step 1 with a short direct answer is the
+      // CORRECT behavior; demanding "which commands you ran" there would badger
+      // the model into padding a plain answer with work it never did.
+      // An EMPTY final is never acceptable on either path.
+      const answeredDirectly = toolStepCount === 0;
+      const weak = answeredDirectly ? step.markdown.trim().length === 0 : isWeakFinal(step.markdown);
+      if (weak && !finalCorrected) {
         finalCorrected = true;
-        transcript.push(WEAK_FINAL_DIRECTIVE);
+        transcript.push(answeredDirectly ? EMPTY_FINAL_DIRECTIVE : WEAK_FINAL_DIRECTIVE);
         continue; // exactly one corrective retry
       }
       // A recorded proposal is success — if the model still reports failure or tells

@@ -156,6 +156,9 @@ export interface EngineerRequest {
   rootPath: string;
   task: string;
   ecosystem?: boolean;
+  /** Prior turns (oldest first) — the unified agent serves ordinary chat too,
+   * so it carries the conversation the chat path used to hold. */
+  history?: Array<{ role: 'user' | 'assistant'; text: string }>;
   tier?: string;
   /** Slice 5: per-request execution-policy preference (server resolves). */
   policy?: string;
