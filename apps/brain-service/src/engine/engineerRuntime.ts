@@ -683,6 +683,7 @@ export async function* runEngineerTask(deps: EngineerDeps, input: EngineerInput)
   const executedTools = new Set<string>(); // for cross-checking claims made in the final
   let finalCorrected = false;
   let proposalsEmitted = 0;
+  let filesCreatedByCommand = false; // command.run side effects are real work too
   let lintCorrections = 0;
   const MAX_LINT_CORRECTIONS = 2; // bounded self-correction on defective proposals
   const stage = deps.stage ?? NOOP_STAGE_LOGGER;
@@ -781,10 +782,17 @@ export async function* runEngineerTask(deps: EngineerDeps, input: EngineerInput)
         transcript.push(answeredDirectly ? EMPTY_FINAL_DIRECTIVE : WEAK_FINAL_DIRECTIVE);
         continue; // exactly one corrective retry
       }
-      // The inverse of the false-FAILURE case below: a claim of work with ZERO
-      // tool calls behind it. Structurally impossible to be true, so it is caught
-      // here rather than left to the user to notice.
-      if (answeredDirectly && claimsPhantomWork(step.markdown) && !finalCorrected) {
+      // The inverse of the false-FAILURE case below: a claim that files were
+      // created when NOTHING was produced.
+      //
+      // This keys on OUTPUT, not on whether a tool ran. Keying on "zero tools"
+      // left a wide hole: handed a full Sprint-1 build order, the agent ran
+      // git.status + file.readRange + workspace.search, proposed NOTHING, and
+      // then reported "Generated apps/demo-forced-door … Created index.ts,
+      // routes.ts … Ran npm install: Failed". Three read-only calls were enough
+      // to skip the guard entirely. Reading files is not producing them.
+      const producedNothing = proposalsEmitted === 0 && !filesCreatedByCommand;
+      if (producedNothing && claimsPhantomWork(step.markdown) && !finalCorrected) {
         finalCorrected = true;
         transcript.push(PHANTOM_WORK_DIRECTIVE);
         continue;
@@ -836,7 +844,7 @@ export async function* runEngineerTask(deps: EngineerDeps, input: EngineerInput)
       }
       // …and the same for a phantom claim of work that survived its correction:
       // state the ground truth deterministically rather than let the prose stand.
-      if (answeredDirectly && claimsPhantomWork(markdown)) {
+      if (producedNothing && claimsPhantomWork(markdown)) {
         markdown += NO_WORK_FOOTER;
       }
       markdown = proposalsEmitted > 0 ? markdown + APPLIED_FOOTER : markdown;
@@ -915,6 +923,7 @@ export async function* runEngineerTask(deps: EngineerDeps, input: EngineerInput)
               const created = after.filter((f) => !before.includes(f));
               if (created.length) {
                 yield { type: 'note', n, kind: 'command-effect', message: `created ${created.length} file(s): ${created.slice(0, 20).join(', ')}` };
+                filesCreatedByCommand = true;
                 progressed = true; // command side effect is progress
               }
             }

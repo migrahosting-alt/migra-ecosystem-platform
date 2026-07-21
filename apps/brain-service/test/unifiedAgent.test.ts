@@ -17,6 +17,7 @@ const TOOLS: EngineerToolInfo[] = [
   { id: 'workspace.search', description: 'search', readOnly: true, inputHint: '{}' },
   { id: 'file.readRange', description: 'read', readOnly: true, inputHint: '{}' },
   { id: 'diagnostics.get', description: 'compiler diagnostics', readOnly: true, inputHint: '{}' },
+  { id: 'git.status', description: 'git status', readOnly: true, inputHint: '{}' },
   { id: 'fs.proposeChangeset', description: 'propose', readOnly: false, inputHint: '{}' },
 ];
 
@@ -627,4 +628,47 @@ test('seeded excerpts are declared BACKGROUND for a build request', async () => 
   const h = harness(['{"final":"a sufficiently long direct answer for the agent to accept it"}']);
   await drain(runEngineerTask(h.deps, { rootPath: '/w', task: 'build it', context: SEEDED }));
   assert.match(h.prompts[0]!, /these excerpts are BACKGROUND\s+ONLY/);
+});
+
+// ── reading files is not producing them ──────────────────────────────────────
+// From a real stress test: handed a full Sprint-1 build order, the agent ran
+// git.status + file.readRange + workspace.search, proposed NOTHING, then
+// reported "Generated apps/demo-forced-door … Created index.ts, routes.ts …
+// Ran npm install: Failed". Three read-only calls were enough to skip the
+// zero-tool phantom guard entirely.
+
+test('a claim of created files after only READ-ONLY tools is challenged', async () => {
+  const h = harness([
+    '{"action":{"tool":"workspace.search","input":{"rootPath":"/w","query":"package.json"}}}',
+    '{"final":"I have created apps/demo-forced-door/index.ts and routes.ts, and ran npm install."}',
+    '{"action":{"tool":"fs.proposeChangeset","input":{"rootPath":"/w","ops":[{"op":"create","path":"apps/demo/index.ts","content":"export {};"}]}}}',
+    '{"final":"Proposed apps/demo/index.ts for the demo route; review and apply it."}',
+  ]);
+  const events = await drain(runEngineerTask(h.deps, { rootPath: '/w', task: 'build the sprint 1 slice' }));
+
+  assert.match(h.prompts[2]!, /You called NO tools this turn|nothing was created/i);
+  assert.deepEqual(h.calls, ['workspace.search', 'fs.proposeChangeset'], 'the correction leads to real work');
+  const final = events.find((e) => e.type === 'final') as { markdown: string };
+  assert.match(final.markdown, /Proposed apps\/demo\/index\.ts/);
+});
+
+test('a phantom claim after read-only tools still gets the ground-truth footer', async () => {
+  const h = harness([
+    '{"action":{"tool":"git.status","input":{"rootPath":"/w"}}}',
+    '{"final":"I have created apps/demo-forced-door/index.ts and routes.ts for the demo route."}',
+  ]);
+  const events = await drain(runEngineerTask(h.deps, { rootPath: '/w', task: 'build the slice' }));
+  const final = events.find((e) => e.type === 'final') as { markdown: string };
+  assert.match(final.markdown, /Nothing was created or changed/);
+});
+
+test('a real proposal is never flagged, however it is worded', async () => {
+  const h = harness([
+    '{"action":{"tool":"fs.proposeChangeset","input":{"rootPath":"/w","ops":[{"op":"create","path":"a.ts","content":"export {};"}]}}}',
+    '{"final":"I have created a.ts with the demo route wiring."}',
+  ]);
+  const events = await drain(runEngineerTask(h.deps, { rootPath: '/w', task: 'build it' }));
+  const final = events.find((e) => e.type === 'final') as { markdown: string };
+  assert.doesNotMatch(final.markdown, /Nothing was created or changed/, 'real work must not be contradicted');
+  assert.equal(h.prompts.length, 2, 'and must not cost a corrective round');
 });
