@@ -160,6 +160,8 @@ export interface EngineerRequest {
    * so it carries the conversation the chat path used to hold. */
   history?: Array<{ role: 'user' | 'assistant'; text: string }>;
   tier?: string;
+  /** Model id pinned in the chat picker (power-user override of Auto/tier). */
+  model?: string;
   /** Slice 5: per-request execution-policy preference (server resolves). */
   policy?: string;
 }

@@ -484,3 +484,35 @@ test('an alias key never overrides a real action', async () => {
 test('an empty alias value does not count as an answer', async () => {
   assert.equal((parseStep('{"response":"   "}', { lenient: true }) as { kind: string }).kind, 'malformed');
 });
+
+// ── the model picker must reach the agent ────────────────────────────────────
+// Ordinary turns used to hit the chat endpoint, which honors a pinned model id.
+// Routing them to the agent silently dropped the pin: the picker still looked
+// like it worked while the engine quietly chose by tier.
+
+test('a pinned model wins over tier ranking when it is eligible', async () => {
+  const { rankLocalModels } = await import('../src/engine/providers/localCodingRouter.js');
+  const providers = [
+    {
+      provider: { id: 'local', kind: 'local', enabled: true, health: { status: 'ok' } },
+      models: [
+        { id: 'qwen2.5-coder:7b', tier: 'fast', capabilities: { chat: true, tools: true, coding: true } },
+        { id: 'qwen2.5-coder:14b', tier: 'balanced', capabilities: { chat: true, tools: true, coding: true } },
+        { id: 'qwen3-coder:30b', tier: 'deep', capabilities: { chat: true, tools: true, coding: true } },
+      ],
+    },
+  ] as unknown as Parameters<typeof rankLocalModels>[0];
+
+  // Without a pin, the requested tier decides.
+  assert.equal(rankLocalModels(providers, { tier: 'balanced', needsTools: true })[0]!.id, 'qwen2.5-coder:14b');
+  // With a pin, the user's explicit choice wins even against the tier.
+  assert.equal(
+    rankLocalModels(providers, { tier: 'balanced', needsTools: true, model: 'qwen3-coder:30b' })[0]!.id,
+    'qwen3-coder:30b',
+  );
+  // A pin that is not eligible must not empty the list — fall back to ranking.
+  assert.equal(
+    rankLocalModels(providers, { tier: 'fast', needsTools: true, model: 'not-installed:70b' })[0]!.id,
+    'qwen2.5-coder:7b',
+  );
+});

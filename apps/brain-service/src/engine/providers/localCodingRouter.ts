@@ -51,6 +51,12 @@ export function rankLocalModels(localProviders: FleetProvider[], hints: PlanHint
       eligible.push(m);
     }
   }
+  // An explicitly PINNED model wins outright when it is eligible — the user
+  // chose it in the picker, so tier ranking must not quietly override them.
+  if (hints.model) {
+    const pinned = eligible.filter((m) => m.id === hints.model);
+    if (pinned.length > 0) return pinned;
+  }
   return eligible
     .map((m) => ({ m, s: -Math.abs(TIER_RANK[m.tier] - TIER_RANK[want]) + (hints.preferCoding && m.capabilities.coding ? 0.5 : 0) + (hints.needsReasoning && m.capabilities.reasoning ? 0.5 : 0) }))
     .sort((a, b) => b.s - a.s || a.m.id.localeCompare(b.m.id))
