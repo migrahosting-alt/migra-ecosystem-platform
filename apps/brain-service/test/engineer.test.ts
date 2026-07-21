@@ -146,6 +146,33 @@ test('parseStep tolerates fences and rejects junk', () => {
   assert.equal(parseStep('{"other":1}').kind, 'malformed');
 });
 
+// Regression: qwen3-coder:30b emits NATIVE XML tool calls instead of the JSON
+// protocol (the same behaviour that broke /deep). The engineer must accept it
+// rather than killing the run with MALFORMED_MODEL_OUTPUT.
+test('parseStep accepts a Qwen/Hermes XML tool call as a fallback', () => {
+  const s = parseStep('<function=file.readRange>\n<parameter=path>src/a.ts</parameter>\n<parameter=startLine>1</parameter>\n<parameter=endLine>20</parameter>\n</function>');
+  assert.equal(s.kind, 'action');
+  assert.equal(s.kind === 'action' && s.tool, 'file.readRange');
+  assert.deepEqual(s.kind === 'action' && s.input, { path: 'src/a.ts', startLine: 1, endLine: 20 });
+
+  // JSON-valued parameters (e.g. a changeset ops array) are parsed, not stringified.
+  const cs = parseStep('<function=fs.proposeChangeset><parameter=ops>[{"op":"create","path":"a.js","content":"x"}]</parameter></function>');
+  assert.deepEqual(
+    cs.kind === 'action' && cs.input,
+    { ops: [{ op: 'create', path: 'a.js', content: 'x' }] },
+  );
+
+  // JSON args directly inside the tag also work.
+  assert.deepEqual(
+    (() => { const r = parseStep('<function=git.status>{"rootPath":"/w"}</function>'); return r.kind === 'action' && r.input; })(),
+    { rootPath: '/w' },
+  );
+
+  // Real JSON still wins, and genuine prose is still malformed.
+  assert.equal(parseStep('{"final":"done"}').kind, 'final');
+  assert.equal(parseStep('I will now inspect the file').kind, 'malformed');
+});
+
 test('happy path: read tool then final answer; server-authoritative rootPath', async () => {
   const { deps, calls } = scriptedDeps([
     '{"action":{"tool":"file.readRange","input":{"rootPath":"/model-lies","path":"a.ts","startLine":1,"endLine":5}}}',

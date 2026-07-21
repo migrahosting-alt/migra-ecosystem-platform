@@ -157,6 +157,11 @@ export function parseStep(text: string):
   try {
     parsed = JSON.parse(body);
   } catch {
+    // Some local models (qwen3-coder:30b) ignore the JSON protocol and emit their
+    // NATIVE XML tool-call syntax instead — the same behaviour that silently broke
+    // /deep. Accept it here too rather than failing the whole run as malformed.
+    const xml = parseXmlToolCall(text);
+    if (xml) return xml;
     return { kind: 'malformed', reason: 'not valid JSON' };
   }
   const obj = parsed as Record<string, unknown>;
@@ -166,6 +171,52 @@ export function parseStep(text: string):
     return { kind: 'action', tool: action.tool, input: action.input ?? {} };
   }
   return { kind: 'malformed', reason: 'neither {"action":...} nor {"final":...}' };
+}
+
+/** Qwen/Hermes-style tool call emitted as XML text instead of the JSON protocol:
+ *   <function=file.readRange><parameter=path>a.ts</parameter>
+ *                            <parameter=startLine>1</parameter></function>
+ * Parameter values are coerced (ints, and JSON when the value is an object/array
+ * — e.g. fs.proposeChangeset's `ops`). JSON args directly inside the tag also
+ * work. Returns null when the text is not such a call. */
+export function parseXmlToolCall(
+  text: string,
+): { kind: 'action'; tool: string; input: unknown } | { kind: 'final'; markdown: string } | null {
+  const fn = /<function\s*=\s*["']?([\w.$-]+)["']?\s*>([\s\S]*?)<\/function>/i.exec(text);
+  if (!fn) return null;
+  const tool = fn[1]!;
+  const inner = fn[2]!;
+  // A model sometimes wraps its finish this way; treat it as a final answer.
+  if (/^final$/i.test(tool)) return { kind: 'final', markdown: inner.trim() };
+
+  const input: Record<string, unknown> = {};
+  const paramRe = /<parameter\s*=\s*["']?([\w$-]+)["']?\s*>([\s\S]*?)<\/parameter>/gi;
+  let m: RegExpExecArray | null;
+  while ((m = paramRe.exec(inner)) !== null) {
+    const raw = m[2]!.trim();
+    let value: unknown = raw;
+    if (/^-?\d+$/.test(raw)) value = Number(raw);
+    else if (/^(?:true|false)$/i.test(raw)) value = raw.toLowerCase() === 'true';
+    else if (/^[[{]/.test(raw)) {
+      try {
+        value = JSON.parse(raw);
+      } catch {
+        /* keep the raw string */
+      }
+    }
+    input[m[1]!] = value;
+  }
+  if (Object.keys(input).length === 0) {
+    const t = inner.trim();
+    if (/^[[{]/.test(t)) {
+      try {
+        return { kind: 'action', tool, input: JSON.parse(t) };
+      } catch {
+        /* fall through with empty input */
+      }
+    }
+  }
+  return { kind: 'action', tool, input };
 }
 
 // ── canonicalization + normalization helpers (pure, string-based) ───────────────
