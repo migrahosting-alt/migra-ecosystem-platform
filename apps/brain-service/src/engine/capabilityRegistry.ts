@@ -57,7 +57,8 @@ export type CapabilityCategory =
   | 'diagnostics'
   | 'edit'
   | 'terminal'
-  | 'deployment';
+  | 'deployment'
+  | 'mcp';
 
 /** Client-facing capability metadata — safe to serialize; no implementation. */
 export interface CapabilityDescriptor {
@@ -292,7 +293,7 @@ const TOOLS: RunnableCapability[] = [
   },
 ];
 
-function meta(
+export function meta(
   id: string,
   displayName: string,
   description: string,
@@ -327,8 +328,54 @@ export interface CapabilityFilter {
 export class CapabilityRegistry {
   private readonly byId = new Map<string, RunnableCapability>();
 
-  constructor(private readonly grants: ReadonlySet<string> = LOCAL_GRANTS) {
+  private readonly grants: Set<string>;
+  constructor(grants: ReadonlySet<string> = LOCAL_GRANTS) {
+    this.grants = new Set(grants);
     for (const cap of TOOLS) this.byId.set(cap.descriptor.id, cap);
+  }
+
+  /** Register a capability discovered at runtime (an MCP tool). Structural, so
+   * the MCP layer need not import the registry's internals. A built-in id can
+   * never be overwritten — the static catalog is authoritative. */
+  register(cap: RunnableCapability): boolean {
+    if (this.byId.has(cap.descriptor.id)) return false;
+    this.byId.set(cap.descriptor.id, cap);
+    return true;
+  }
+
+  /** Register a set of MCP tool capabilities (structural), filling the descriptor
+   * fields the registry requires. Read-only tools run in-loop; mutating ones are
+   * visible but approval-gated. Returns the count actually registered. */
+  registerMcp(caps: ReadonlyArray<{
+    descriptor: { id: string; displayName: string; description: string; readOnly: boolean; approvalRequired: boolean; requiredCapabilities: string[] };
+    inputSchema: ZodType;
+    handler: (input: unknown) => Promise<unknown>;
+  }>): number {
+    let n = 0;
+    for (const c of caps) {
+      const ok = this.register({
+        descriptor: meta(c.descriptor.id, c.descriptor.displayName, c.descriptor.description, 'mcp', c.descriptor.requiredCapabilities, {
+          readOnly: c.descriptor.readOnly,
+          approvalRequired: c.descriptor.approvalRequired,
+        }),
+        inputSchema: c.inputSchema,
+        handler: c.handler,
+      });
+      if (ok) n += 1;
+    }
+    return n;
+  }
+
+  /** Add a grant token at runtime (e.g. mcp.call once MCP servers connect). */
+  grant(token: string): void {
+    this.grants.add(token);
+  }
+
+  /** Drop every capability in a category (used to refresh MCP tools on reconnect). */
+  clearCategory(category: CapabilityCategory): void {
+    for (const [id, cap] of this.byId) {
+      if (cap.descriptor.category === category) this.byId.delete(id);
+    }
   }
 
   private available(cap: RunnableCapability): boolean {

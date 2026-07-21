@@ -140,7 +140,8 @@ export function registerEngineerRoutes(
         id: t.id,
         description: t.description,
         readOnly: t.readOnly,
-        inputHint: INPUT_HINTS[t.id] ?? '{"rootPath",...}',
+        // MCP tools take their OWN arguments and no rootPath — never imply one.
+        inputHint: INPUT_HINTS[t.id] ?? (t.id.startsWith('mcp.') ? '{ ...arguments for this tool; NO rootPath }' : '{"rootPath",...}'),
       })),
     // Not a registry capability: plan state belongs to the LOOP, because it must
     // survive every step and be re-shown to the model. A stateless tool cannot

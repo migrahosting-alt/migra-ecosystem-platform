@@ -20,6 +20,7 @@ import { registerToolExecutionRoutes } from './engine/toolRoutes.js';
 import { registerInspectRoutes } from './engine/inspectRoutes.js';
 import { registerAnswerRoutes } from './engine/answerRoutes.js';
 import { registerEngineerRoutes } from './engine/engineerRoutes.js';
+import { startMcp } from './mcp/mcpRuntime.js';
 import { telemetryHub } from './engine/telemetryHub.js';
 import { registerAgentRoutes } from './engine/agentRoutes.js';
 import { registerProductionDiagnosticsRoutes } from './engine/production/routes.js';
@@ -327,6 +328,10 @@ async function main(): Promise<void> {
   // tool validation, availability, dispatch, and the approval lifecycle. Additive
   // — the legacy /tools/* routes remain for compatibility.
   const toolDeps = registerToolExecutionRoutes(app);
+  // Connect configured MCP servers and register their tools (best-effort; the
+  // brain runs fine with none). Fire-and-forget so a slow server never delays
+  // startup — tools appear in the catalog as each server connects.
+  void startMcp(toolDeps.registry, env.mcpConfigPath, { log: (m) => app.log.info(m) }).catch(() => {});
   // Route store telemetry (Slice 2) to the app log as structured lines.
   telemetryHub.setWriter((line) => app.log.info(line));
   // MigraAI workspace engineer (/api/ai/engineer): the model-in-the-loop LOCAL

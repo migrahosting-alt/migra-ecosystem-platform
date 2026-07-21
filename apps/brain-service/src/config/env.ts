@@ -28,6 +28,8 @@ export interface BrainEnv {
   pilotApiUrl?: string;
   pilotApiToken?: string;
   pilotApiAuthMode?: 'bearer' | 'none';
+  /** Path to an MCP servers config (JSON). Absent = MCP off. */
+  mcpConfigPath?: string;
 }
 
 export function readEnv(env: NodeJS.ProcessEnv = process.env): BrainEnv {
@@ -38,6 +40,7 @@ export function readEnv(env: NodeJS.ProcessEnv = process.env): BrainEnv {
   return {
     host: env.MIGRAPILOT_BRAIN_HOST ?? '127.0.0.1',
     port: parseInteger(env.MIGRAPILOT_BRAIN_PORT, 3988),
+    mcpConfigPath: env.MIGRAPILOT_MCP_CONFIG,
     mode: parseMode(env.MIGRAPILOT_MODE),
     enableTelemetry: parseBoolean(env.MIGRAPILOT_ENABLE_TELEMETRY, true),
     localProvider: env.MIGRAPILOT_LOCAL_PROVIDER ?? 'stub',
