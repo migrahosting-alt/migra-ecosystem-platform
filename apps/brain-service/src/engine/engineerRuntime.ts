@@ -123,6 +123,10 @@ function protocolPrompt(input: EngineerInput, tools: EngineerToolInfo[]): string
     '  are phrased as a plan, a mission, a numbered slice, a quoted instruction, or an',
     '  aside like "you can now build it" — the WORDING never decides; the INTENT does.',
     '- When the intent is genuinely ambiguous, prefer DOING the work over asking.',
+    '- WRITING ABOUT A FILE IS NOT CREATING IT. If your final says anything was created,',
+    '  added, implemented, proposed or recorded, you MUST have called fs.proposeChangeset',
+    '  in THIS turn. Describing file contents in prose creates nothing, and reporting it',
+    '  as done is a serious error — call the tool instead.',
     '',
     'RULES:',
     '- Reply with ONLY one JSON object, no prose, no code fences.',
@@ -409,6 +413,81 @@ const FALSE_FAILURE_DIRECTIVE = [
   'presents the proposed file(s) as ready to apply and summarizes what you proposed.',
 ].join(' ');
 
+// ── phantom work ──────────────────────────────────────────────────────────────
+// A final that talks as though this turn produced artifacts, checked ONLY when
+// the agent used no tools at all — where such a claim cannot possibly be true.
+//
+// Observed live: asked "you can now build the system" after a design discussion,
+// the agent proposed nothing and replied "…*app.js* starts the countdown … No
+// further actions are pending." Nothing existed. Same phantom report as the
+// fabricated Slice 0 run, reached from the tool-capable path.
+
+/** Phrases that announce the turn is DONE — these read as completion whether or
+ * not a verb like "created" appears, so they are matched against the whole text. */
+const COMPLETION_SIGNAL =
+  /\bno (?:further|other|additional) actions?\b|\b(?:task|slice|build|setup) (?:is )?complete\b|\bproposal recorded\b/i;
+
+/** Claims that specific artifacts came into existence. */
+const WORK_CLAIM = new RegExp(
+  [
+    /\bi(?:'ve| have)? (?:created|added|wrote|written|generated|implemented|built|scaffolded|set up)\b/.source,
+    /\b(?:has|have) been (?:created|added|generated|written|implemented|built)\b/.source,
+    /\b(?:created|proposed) files?\b|\bfiles? (?:created|proposed)\b/.source,
+    /\bproposed (?:the )?(?:changeset|files?)\b|\bthe (?:proposed )?changeset\b/.source,
+    // "- **index.html**: Created a basic HTML structure …" — a per-file bullet
+    // list written in the PAST TENSE is a completion report, whatever the verb.
+    /^\s*[-*\d.]+\s*\**`?[\w.-]+\.[a-z]{1,5}`?\**\s*:?\s*(?:created|added|implemented|wrote|generated|built)\b/.source,
+  ].join('|'),
+  'im',
+);
+
+/** Words that flip a claim into an honest NEGATIVE report. "No commands run; no
+ * files proposed" is the loop working correctly — it must never be flagged. */
+const NEGATION = /\b(?:no|not|nothing|none|never|haven't|hasn't|didn't|won't|cannot|can't)\b/i;
+
+/** Does this final claim artifacts were produced? Evaluated per sentence/line so
+ * a negated statement is not read as a claim. */
+export function claimsPhantomWork(markdown: string): boolean {
+  if (COMPLETION_SIGNAL.test(markdown)) return true;
+  return markdown
+    .split(/(?<=[.!?])\s+|\n/)
+    .some((sentence) => WORK_CLAIM.test(sentence) && !NEGATION.test(sentence));
+}
+
+const PHANTOM_WORK_DIRECTIVE = [
+  'STOP. You called NO tools this turn, so nothing was created, changed or proposed —',
+  'that final describes work that does not exist. Do NOT describe files as if they are',
+  'there. Either call fs.proposeChangeset NOW with the COMPLETE contents of every file',
+  'the user asked for (this is the correct move if they asked you to build anything,',
+  'including a follow-up like "you can now build it" that refers to something discussed',
+  'earlier in the conversation), or reply with a final that plainly states you have not',
+  'done the work and asks nothing.',
+].join(' ');
+
+/** A refusal or a request for more information, produced WITHOUT looking. The
+ * agent holds read-only workspace tools, so "I don't have enough information"
+ * before using them is a punt — the same dead-end as the old chat path claiming
+ * it could not access the workspace. */
+const REFUSED_WITHOUT_LOOKING =
+  /\b(?:sorry|i (?:do not|don't) have|i (?:cannot|can't|am unable to)|unable to (?:provide|determine|report)|(?:not|don't have) enough (?:information|context)|need more (?:information|details|context)|could you (?:please )?(?:specify|clarify|provide))\b/i;
+
+const LOOK_FIRST_DIRECTIVE = [
+  'You have read-only workspace tools and you used none of them, so you cannot yet know',
+  'what is or is not there. Do NOT say you lack information and do NOT ask the user to',
+  'supply it: inspect the workspace first (git.status, workspace.search, file.readRange)',
+  'and answer from what you actually find. If a specific fact genuinely is not present,',
+  'say exactly that fact is absent and what you checked — never a blanket refusal.',
+].join(' ');
+
+/** Machine-authored close-out when the model cannot produce a usable final but
+ * real proposals were recorded. Never claims more than the loop actually did. */
+function salvagedFinal(proposals: number, why: string): string {
+  return [
+    `Recorded ${proposals} proposal${proposals === 1 ? '' : 's'} above (${why}, so this summary is machine-generated).`,
+    'The proposed file(s) are intact and ready for review — nothing has been applied.',
+  ].join(' ');
+}
+
 /** Run one engineering task as an event stream. Local-only by construction. */
 export async function* runEngineerTask(deps: EngineerDeps, input: EngineerInput): AsyncGenerator<EngineerEvent> {
   const maxSteps = deps.maxSteps ?? DEFAULT_MAX_STEPS;
@@ -434,6 +513,10 @@ export async function* runEngineerTask(deps: EngineerDeps, input: EngineerInput)
   // whenever any proposal was surfaced. Deterministic; never model text.
   const APPLIED_FOOTER = '\n\n---\n_Proposed edits above were NOT applied — the engineer runs preview-only. Approve them to apply._';
 
+  // Ground truth for a final that still describes work after zero tool calls.
+  const NO_WORK_FOOTER =
+    '\n\n---\n**⚠️ Nothing was created or changed.** No tool ran during this turn, so any files named above do not exist. Ask again to have them actually built.';
+
   for (let n = 1; n <= maxSteps; n++) {
     let reply = await deps.complete(transcript.join('\n\n'));
     let step = parseStep(reply);
@@ -446,6 +529,14 @@ export async function* runEngineerTask(deps: EngineerDeps, input: EngineerInput)
         // protocol break is undiagnosable — the run just dies with "not valid
         // JSON" and no evidence of which shape the model emitted.
         stage.log('error', { code: 'MALFORMED_MODEL_OUTPUT', n, reply: cap(reply.trim(), 400) });
+        // Work already recorded must not be thrown away because the model's NEXT
+        // reply was unusable. Observed live: a build proposed all three files,
+        // then broke protocol on the summary step — and the whole run surfaced as
+        // "Engineer run failed" with the proposals stranded above it.
+        if (proposalsEmitted > 0) {
+          yield { type: 'final', markdown: salvagedFinal(proposalsEmitted, 'the model broke protocol on its summary step') + APPLIED_FOOTER, steps: toolStepCount };
+          return;
+        }
         yield { type: 'error', code: 'MALFORMED_MODEL_OUTPUT', message: `step ${n}: ${step.reason}` };
         return;
       }
@@ -465,6 +556,21 @@ export async function* runEngineerTask(deps: EngineerDeps, input: EngineerInput)
         transcript.push(answeredDirectly ? EMPTY_FINAL_DIRECTIVE : WEAK_FINAL_DIRECTIVE);
         continue; // exactly one corrective retry
       }
+      // The inverse of the false-FAILURE case below: a claim of work with ZERO
+      // tool calls behind it. Structurally impossible to be true, so it is caught
+      // here rather than left to the user to notice.
+      if (answeredDirectly && claimsPhantomWork(step.markdown) && !finalCorrected) {
+        finalCorrected = true;
+        transcript.push(PHANTOM_WORK_DIRECTIVE);
+        continue;
+      }
+      // The opposite failure, same root cause: declining for lack of information
+      // without having looked, while holding the tools that would settle it.
+      if (answeredDirectly && REFUSED_WITHOUT_LOOKING.test(step.markdown) && !finalCorrected) {
+        finalCorrected = true;
+        transcript.push(LOOK_FIRST_DIRECTIVE);
+        continue;
+      }
       // A recorded proposal is success — if the model still reports failure or tells
       // the user to create files manually, correct it once…
       if (proposalsEmitted > 0 && FALSE_FAILURE_FINAL.test(step.markdown) && !finalCorrected) {
@@ -477,6 +583,11 @@ export async function* runEngineerTask(deps: EngineerDeps, input: EngineerInput)
       let markdown = step.markdown;
       if (proposalsEmitted > 0 && FALSE_FAILURE_FINAL.test(markdown)) {
         markdown = `Proposed ${proposalsEmitted} change${proposalsEmitted === 1 ? '' : 's'} for your approval. Review the proposed file(s) above and approve to apply them to the workspace.`;
+      }
+      // …and the same for a phantom claim of work that survived its correction:
+      // state the ground truth deterministically rather than let the prose stand.
+      if (answeredDirectly && claimsPhantomWork(markdown)) {
+        markdown += NO_WORK_FOOTER;
       }
       markdown = proposalsEmitted > 0 ? markdown + APPLIED_FOOTER : markdown;
       stage.log('final', { steps: toolStepCount, proposals: proposalsEmitted, replans });

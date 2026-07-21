@@ -155,3 +155,111 @@ test('repair never eats the partner of an escaped backslash', () => {
   assert.equal(parsed.p, String.raw`C:\dir\file`);
   assert.equal(parsed.bad, "it's");
 });
+
+// ── phantom work: a claim of work with ZERO tool calls behind it ──────────────
+// Observed live: after a design discussion, "you can now build the system" made
+// the agent reply "…*app.js* starts the countdown … No further actions are
+// pending" — having proposed nothing at all. Same phantom report as the
+// fabricated Slice 0 run, reached from the tool-capable path.
+
+test('a claim of work with no tool calls is challenged, and the retry can do the work', async () => {
+  const h = harness([
+    '{"final":"index.html holds the markup and app.js starts the countdown. No further actions are pending."}',
+    '{"action":{"tool":"fs.proposeChangeset","input":{"rootPath":"/w","ops":[{"op":"create","path":"app.js","content":"x"}]}}}',
+    '{"final":"Proposed app.js implementing the countdown; review and apply it."}',
+  ]);
+  const events = await drain(runEngineerTask(h.deps, { rootPath: '/w', task: 'you can now build the system' }));
+
+  assert.match(h.prompts[1]!, /You called NO tools this turn/);
+  assert.deepEqual(h.calls, ['fs.proposeChangeset'], 'the correction leads to real work');
+  const final = events.find((e) => e.type === 'final') as { markdown: string };
+  assert.doesNotMatch(final.markdown, /Nothing was created or changed/, 'real work needs no warning');
+});
+
+test('a phantom claim that survives its correction is overridden with the ground truth', async () => {
+  const h = harness(['{"final":"I have created index.html, styles.css and app.js for the countdown timer."}']);
+  const events = await drain(runEngineerTask(h.deps, { rootPath: '/w', task: 'build the timer' }));
+
+  assert.deepEqual(h.calls, [], 'the model never actually did anything');
+  const final = events.find((e) => e.type === 'final') as { markdown: string };
+  assert.match(final.markdown, /Nothing was created or changed/);
+  assert.match(final.markdown, /do not exist/);
+});
+
+test('an ordinary answer that merely discusses code is not flagged as phantom work', async () => {
+  const h = harness([
+    '{"final":"A monad wraps a value and defines bind. In JavaScript, Promise.then is the classic example of that shape."}',
+  ]);
+  const events = await drain(runEngineerTask(h.deps, { rootPath: '/w', task: 'what is a monad?' }));
+  const final = events.find((e) => e.type === 'final') as { markdown: string };
+  assert.doesNotMatch(final.markdown, /Nothing was created or changed/, 'no false alarm on a plain answer');
+  assert.equal(h.prompts.length, 1, 'and no corrective retry');
+});
+
+test('the observed phantom shapes are all caught (past-tense file bullets, "Proposal Recorded")', async () => {
+  // Both taken verbatim from live runs that claimed work after zero tool calls.
+  for (const phantom of [
+    '**Proposal Recorded**.\n\n- **index.html**: Created a basic HTML structure with an input.\n- **app.js**: Implemented the countdown logic.',
+    'index.html holds the markup and app.js starts the countdown. No further actions are pending.',
+  ]) {
+    const h = harness([JSON.stringify({ final: phantom })]);
+    const events = await drain(runEngineerTask(h.deps, { rootPath: '/w', task: 'you can now build the system' }));
+    const final = events.find((e) => e.type === 'final') as { markdown: string };
+    assert.match(final.markdown, /Nothing was created or changed/, `should be caught: ${phantom.slice(0, 40)}…`);
+  }
+});
+
+test('advice and explanation are not mistaken for a completion report', async () => {
+  for (const benign of [
+    'You could start by creating index.html, then add app.js for the countdown logic.',
+    'In React, index.js imports App.js and renders it into the DOM node in index.html.',
+    'The repository has no build step configured, so `npm test` is the only gate here.',
+  ]) {
+    const h = harness([JSON.stringify({ final: benign })]);
+    const events = await drain(runEngineerTask(h.deps, { rootPath: '/w', task: 'how does this work?' }));
+    const final = events.find((e) => e.type === 'final') as { markdown: string };
+    assert.doesNotMatch(final.markdown, /Nothing was created or changed/, `false alarm on: ${benign.slice(0, 40)}…`);
+    assert.equal(h.prompts.length, 1, 'and no wasted corrective retry');
+  }
+});
+
+// ── never throw away real work, never punt without looking ────────────────────
+
+test('proposals survive a model that breaks protocol on its summary step', async () => {
+  // Observed live: a build proposed index.html/styles.css/app.js, then emitted
+  // prose instead of JSON — and the entire run surfaced as "Engineer run failed"
+  // with the finished proposals stranded above the error.
+  const h = harness([
+    '{"action":{"tool":"fs.proposeChangeset","input":{"rootPath":"/w","ops":[{"op":"create","path":"app.js","content":"x"}]}}}',
+    'Great — the countdown timer is all set!',
+    'Still not JSON, sorry.',
+  ]);
+  const events = await drain(runEngineerTask(h.deps, { rootPath: '/w', task: 'build the timer' }));
+
+  assert.equal(events.find((e) => e.type === 'error'), undefined, 'a completed build is not reported as a failure');
+  const final = events.find((e) => e.type === 'final') as { markdown: string };
+  assert.match(final.markdown, /Recorded 1 proposal/);
+  assert.match(final.markdown, /machine-generated/, 'the summary is honest about its origin');
+  assert.match(final.markdown, /NOT applied/, 'and still carries the preview-only truth');
+});
+
+test('a malformed run with NO proposals still fails honestly (nothing to salvage)', async () => {
+  const h = harness(['not json', 'still not json']);
+  const events = await drain(runEngineerTask(h.deps, { rootPath: '/w', task: 'build the timer' }));
+  const err = events.find((e) => e.type === 'error') as { code: string };
+  assert.equal(err.code, 'MALFORMED_MODEL_OUTPUT');
+});
+
+test('"I don\'t have enough information" without using a tool is challenged, not delivered', async () => {
+  const h = harness([
+    '{"final":"Sorry, but I don\'t have the necessary information. Could you please specify which commands were executed?"}',
+    '{"action":{"tool":"workspace.search","input":{"rootPath":"/w","query":"x"}}}',
+    '{"final":"The workspace is empty: no files, no commits, and no commands were run in this session."}',
+  ]);
+  const events = await drain(runEngineerTask(h.deps, { rootPath: '/w', task: 'report what is in this repo' }));
+
+  assert.match(h.prompts[1]!, /you used none of them/);
+  assert.deepEqual(h.calls, ['workspace.search'], 'it looks instead of punting');
+  const final = events.find((e) => e.type === 'final') as { markdown: string };
+  assert.match(final.markdown, /The workspace is empty/);
+});

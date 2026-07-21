@@ -46,6 +46,15 @@ export interface ChatEngineDeps {
  * omitted — it is an internal offline-fallback profile, not a user choice. */
 export type SelectableProfile = 'cheap' | 'default' | 'premium';
 
+/** The chat picker speaks in profiles; the workspace agent selects by tier. Same
+ * mapping the engine applies internally (`tierFromHints`), so Fast/Balanced/Deep
+ * keeps meaning the same thing on both paths. */
+const PROFILE_TIER: Record<SelectableProfile, string> = {
+  cheap: 'fast',
+  default: 'balanced',
+  premium: 'deep',
+};
+
 export interface ChatTurnOptions {
   /** Explicit model-profile override from the UI model picker. When set, it wins
    * over the router policy's auto-selected profile. Absent = "auto" (policy
@@ -220,6 +229,11 @@ export async function runChatTurn(
         // same memory the chat path held — otherwise "now build it" loses what
         // "it" refers to. Server-owned conversations keep history server-side.
         ...(options.conversationId ? {} : { history: parseSummaryTurns(conversationSummary) }),
+        // Honor the chat model picker on this path too. Ordinary turns used to
+        // reach the chat endpoint (which reads modelProfile); now that they run
+        // the agent, the picker would silently stop working unless its choice is
+        // carried across as the agent's tier.
+        ...(options.modelProfile ? { tier: PROFILE_TIER[options.modelProfile] } : {}),
         ...(options.policy ? { policy: options.policy } : {}),
       },
       {
