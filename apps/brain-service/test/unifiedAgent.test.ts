@@ -516,3 +516,79 @@ test('a pinned model wins over tier ranking when it is eligible', async () => {
     'qwen2.5-coder:7b',
   );
 });
+
+// ── retrieval depth: a definition is read to its END ─────────────────────────
+// A fixed radius truncated real symbols: `lintChangeset` runs past a 24-line
+// window, so the excerpt omitted its duplicate-definition check and the answer
+// was correct but INCOMPLETE.
+
+test('definitionEndLine follows braces to the end of the symbol', async () => {
+  const { definitionEndLine } = await import('../src/retrieval/retrieve.js');
+  const lines = [
+    'export function lint(ops) {', //  1
+    '  const defects = [];',       //  2
+    '  for (const op of ops) {',   //  3
+    '    if (op.empty) {',         //  4
+    '      defects.push(1);',      //  5
+    '    }',                       //  6
+    '  }',                         //  7
+    '  return defects;',           //  8
+    '}',                           //  9  <- the real end
+    'const after = 1;',            // 10
+  ];
+  assert.equal(definitionEndLine(lines, 1, 120), 9);
+});
+
+test('an unbalanced or oversized definition falls back to the default window', async () => {
+  const { definitionEndLine } = await import('../src/retrieval/retrieve.js');
+  assert.equal(definitionEndLine(['function broken() {', '  return 1;'], 1, 120), 0, 'never closed');
+  assert.equal(definitionEndLine(['function big() {', '  a();', '  b();', '}'], 1, 1), 0, 'beyond the span cap');
+});
+
+test('indented languages end at the next line that dedents', async () => {
+  const { indentedBlockEndLine } = await import('../src/retrieval/retrieve.js');
+  const lines = [
+    'def lint(ops):',      // 1
+    '    defects = []',    // 2
+    '    for op in ops:',  // 3
+    '        pass',        // 4
+    '    return defects',  // 5  <- last line of the def
+    '',                    // 6
+    'def other():',        // 7
+  ];
+  assert.equal(indentedBlockEndLine(lines, 1, 120), 5);
+});
+
+// ── the seeded code must actually be used ────────────────────────────────────
+// Checked by CITATION, not wording. An earlier phrase-matching guard for "the
+// excerpts do not cover it" slipped on every rewording and was deleted; wording
+// varies endlessly, citations do not.
+
+test('an answer that ignores the code it was handed is sent back', async () => {
+  const h = harness([
+    '{"final":"The provided excerpts do not include specific details. I would need to search the repository."}',
+    '{"final":"changesetLint.ts:21 flags empty content, merge markers, leaked tool-call markup and invalid JSON."}',
+  ]);
+  const events = await drain(
+    runEngineerTask(h.deps, { rootPath: '/w', task: 'what does the changeset lint check?', context: SEEDED }),
+  );
+
+  assert.match(h.prompts[1]!, /your answer cites none of it/);
+  const final = events.find((e) => e.type === 'final') as { markdown: string };
+  assert.match(final.markdown, /merge markers/);
+});
+
+test('an answer that cites the seeded file is accepted as-is', async () => {
+  const h = harness([
+    '{"final":"changesetLint.ts:20 flags merge-conflict markers before a proposal is shown."}',
+  ]);
+  await drain(runEngineerTask(h.deps, { rootPath: '/w', task: 'what does the lint check?', context: SEEDED }));
+  assert.equal(h.prompts.length, 1, 'no wasted corrective round');
+});
+
+test('with nothing seeded the citation check never fires', async () => {
+  const { ignoredSeededContext } = await import('../src/engine/engineerRuntime.js');
+  assert.equal(ignoredSeededContext('any answer at all', []), false);
+  assert.equal(ignoredSeededContext('see src/tools/changesetLint.ts', SEEDED), false);
+  assert.equal(ignoredSeededContext('I could not find anything', SEEDED), true);
+});
