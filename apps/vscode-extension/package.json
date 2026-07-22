@@ -187,6 +187,11 @@
           "default": false,
           "markdownDescription": "Auto-approve build changes. When ON, a changeset the workspace engineer proposes is applied to your workspace immediately, with no Apply/Review prompt (an auto-accept / 'YOLO' mode, like Cursor's). When OFF (default), you review and click Apply first. Changes are still applied through the engine's approval boundary (atomic, rollback-on-failure) and a notification reports what was written. Only affects the LOCAL workspace engineer — never production."
         },
+        "migrapilot.enableWorkspaceAgent": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Enable the local tool-capable workspace engineer for ordinary chat turns. Disabled by default during the controlled restart: ordinary chat is tool-free and uses `/api/ai/chat`. Explicit agent commands remain separate. Do not enable until tool approval and command-execution policies pass their enterprise safety gates."
+        },
         "migrapilot.brainAutoStartCommand": {
           "type": "array",
           "items": {

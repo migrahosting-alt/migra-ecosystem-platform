@@ -35,6 +35,7 @@ import { redactSecrets } from './memory/redaction.js';
 import { scopeFrom } from './memory/memoryRoutes.js';
 import { engineCorrelationId } from './toolRoutes.js';
 import type { IndexService } from './rag/indexService.js';
+import { auditStore } from './auditLog.js';
 
 interface AiChatMessage {
   role: 'system' | 'user' | 'assistant';
@@ -205,6 +206,15 @@ export function registerAiRoutes(
       return { ok: false, code: 'BAD_REQUEST', error: 'Provide `prompt`, `messages`, or `attachments`.' };
     }
 
+    const requestId = engineCorrelationId(request);
+    auditStore.append({
+      correlationId: requestId,
+      requestId,
+      type: 'execution.started',
+      component: 'chat',
+      fields: { streaming: Boolean(body.stream), toolsRequested: Boolean(body.needsTools) },
+    });
+
     const hasImage = (body.attachments ?? []).some((a) => IMAGE_MIME.test(a.mimeType));
     const spec: RouteSpec = {
       needsVision: hasImage,
@@ -219,6 +229,13 @@ export function registerAiRoutes(
 
     let decision = await selectModel(reg, spec);
     if (!decision) {
+      auditStore.append({
+        correlationId: requestId,
+        requestId,
+        type: 'execution.failed',
+        component: 'chat',
+        outcome: 'NO_MODEL',
+      });
       reply.code(503);
       return {
         ok: false,
@@ -250,7 +267,6 @@ export function registerAiRoutes(
 
     // ── Conversation memory: the engine decides what prior context enters the
     // window and commits the completed assistant message. Opt-in by policy. ──
-    const requestId = engineCorrelationId(request);
     const scope: Scope = scopeFrom(request);
     const policy = { mode: body.memoryPolicy?.mode ?? 'session', retrieve: body.memoryPolicy?.retrieve ?? true, store: body.memoryPolicy?.store ?? true };
     let conv = memoryStore && body.conversationId ? memoryStore.getConversation(body.conversationId, scope) : undefined;
@@ -303,9 +319,20 @@ export function registerAiRoutes(
     }
 
     const chatRequest = await buildChatRequest(body, userPrompt, effectiveSummary, ragChunks);
+    auditStore.append({
+      correlationId: requestId,
+      requestId,
+      type: 'execution.routed',
+      component: 'chat',
+      fields: {
+        model: decision.model.id,
+        provider: decision.model.provider,
+        toolsRequested: spec.needsTools,
+      },
+    });
 
     if (body.stream) {
-      await streamChat(request, reply, decision.ranked, decision.reason, providerFor, chatRequest, { contextDiagnostics, commit, fallback });
+      await streamChat(request, reply, requestId, decision.ranked, decision.reason, providerFor, chatRequest, { contextDiagnostics, commit, fallback });
       return reply; // response already sent via raw stream
     }
 
@@ -316,6 +343,14 @@ export function registerAiRoutes(
       try {
         const result = await providerFor(candidate).complete(chatRequest);
         commit?.(result.content, candidate.id, candidate.provider);
+        auditStore.append({
+          correlationId: requestId,
+          requestId,
+          type: 'execution.completed',
+          component: 'chat',
+          outcome: 'ok',
+          fields: { model: candidate.id, provider: candidate.provider, toolCalls: 0 },
+        });
         // Slice 4 — a successful LOCAL coding turn records metadata-only usage with
         // a clearly-estimated avoided cloud cost.
         const localSavings = spec.preferCoding && providerRouting && escalation
@@ -350,9 +385,11 @@ export function registerAiRoutes(
     if (spec.preferCoding && providerRouting && escalation) {
       const off = await escalation.offer({ correlationId: requestId, policy: resolved?.effective ?? providerRouting.policy, outcome: { hadLocalModel: true, terminal: 'failed', output: '', errorMessage: 'local completion failed' }, request: chatRequest, requiredCaps: { coding: true, vision: spec.needsVision, tools: spec.needsTools } });
       if (off.offered) {
+        auditStore.append({ correlationId: requestId, requestId, type: 'execution.failed', component: 'chat', outcome: 'ESCALATION_OFFERED' });
         return { ok: false, code: 'LOCAL_COMPLETION_FAILED', failedOver: failed, escalationOffer: { offerId: off.offerId, token: off.token, reason: off.reason, target: off.target, estimatedCostUsd: off.estimate?.estimatedCostUsd, worstCaseCostUsd: off.worstCaseCostUsd, costCeilingUsd: off.costCeilingUsd, remainingBudgetUsd: off.remainingBudgetUsd, dataLeavesLocal: off.dataLeavesLocal, expiresAt: off.expiresAt, request: chatRequest } };
       }
     }
+    auditStore.append({ correlationId: requestId, requestId, type: 'execution.failed', component: 'chat', outcome: 'COMPLETION_FAILED' });
     reply.code(502);
     return { ok: false, code: 'COMPLETION_FAILED', error: 'The engine could not complete the request.', failedOver: failed };
   });
@@ -438,6 +475,7 @@ export function registerAiRoutes(
 async function streamChat(
   request: FastifyRequest,
   reply: FastifyReply,
+  requestId: string,
   ranked: ModelDescriptor[],
   primaryReason: string,
   providerFor: (m: ModelDescriptor) => StreamingProvider,
@@ -453,7 +491,14 @@ async function streamChat(
     'X-Accel-Buffering': 'no',
   });
   const ac = new AbortController();
-  request.raw.on('close', () => ac.abort());
+  const cancelUpstream = (): void => ac.abort();
+  request.raw.once('aborted', cancelUpstream);
+  raw.once('close', () => {
+    // A normal raw.end() also closes the response; only a premature close is a
+    // cancellation signal. This is the event that observes an SSE client
+    // disconnect after the inbound request body has already been consumed.
+    if (!raw.writableEnded) cancelUpstream();
+  });
   const send = (event: string, data: unknown): void => {
     try {
       raw.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
@@ -481,7 +526,7 @@ async function streamChat(
         // Pull the first frame: this forces the upstream connection to open, so an
         // open/HTTP failure happens BEFORE we commit and can still fail over.
         const first = await gen.next();
-        send('route', routeFrame(candidate, primaryId, primaryReason, failed));
+        send('route', routeFrame(requestId, candidate, primaryId, primaryReason, failed));
         committed = true;
         if (!first.done && first.value) {
           if (first.value.delta) { fullText += first.value.delta; send('token', { text: first.value.delta }); }
@@ -493,7 +538,7 @@ async function streamChat(
         }
       } else {
         const r = await provider.complete(chatRequest);
-        send('route', routeFrame(candidate, primaryId, primaryReason, failed));
+        send('route', routeFrame(requestId, candidate, primaryId, primaryReason, failed));
         committed = true;
         fullText = r.content;
         send('token', { text: r.content });
@@ -502,12 +547,21 @@ async function streamChat(
       // Successful completion → commit the assistant message to memory (only here,
       // never on a partial/cancelled/failed stream).
       memory.commit?.(fullText, candidate.id, candidate.provider);
-      send('done', { model: candidate.id, provider: candidate.provider, tier: candidate.tier, usage, failedOver: failed, ...(memory.fallback?.policy ? { policy: memory.fallback.policy, requestedPolicy: memory.fallback.requestedPolicy, effectivePolicy: memory.fallback.effectivePolicy, policyReason: memory.fallback.policyReason, fallbackRecommended: memory.fallback.fallbackRecommended, fallbackReasons: memory.fallback.reasons } : {}) });
+      auditStore.append({
+        correlationId: requestId,
+        requestId,
+        type: 'execution.completed',
+        component: 'chat',
+        outcome: 'ok',
+        fields: { model: candidate.id, provider: candidate.provider, toolCalls: 0 },
+      });
+      send('done', { requestId, model: candidate.id, provider: candidate.provider, tier: candidate.tier, usage, failedOver: failed, ...(memory.fallback?.policy ? { policy: memory.fallback.policy, requestedPolicy: memory.fallback.requestedPolicy, effectivePolicy: memory.fallback.effectivePolicy, policyReason: memory.fallback.policyReason, fallbackRecommended: memory.fallback.fallbackRecommended, fallbackReasons: memory.fallback.reasons } : {}) });
       raw.end();
       return;
     } catch (error) {
       if (ac.signal.aborted) {
         // Client cancelled — no `done`, no false answer.
+        auditStore.append({ correlationId: requestId, requestId, type: 'execution.failed', component: 'chat', outcome: 'cancelled', fields: { toolCalls: 0 } });
         raw.end();
         return;
       }
@@ -515,6 +569,7 @@ async function streamChat(
         // Already streaming this model when it broke — surface a sanitized error;
         // do NOT fail over mid-stream (tokens already emitted).
         request.log.warn({ model: candidate.id, err: errText(error) }, 'ai/chat stream broke mid-turn');
+        auditStore.append({ correlationId: requestId, requestId, type: 'execution.failed', component: 'chat', outcome: 'STREAM_INTERRUPTED', fields: { model: candidate.id, toolCalls: 0 } });
         send('error', { code: 'COMPLETION_FAILED', message: 'The engine stream was interrupted.' });
         raw.end();
         return;
@@ -523,12 +578,14 @@ async function streamChat(
       failed.push(candidate.id);
     }
   }
+  auditStore.append({ correlationId: requestId, requestId, type: 'execution.failed', component: 'chat', outcome: 'COMPLETION_FAILED', fields: { toolCalls: 0 } });
   send('error', { code: 'COMPLETION_FAILED', message: 'The engine could not complete the request.', failedOver: failed });
   raw.end();
 }
 
-function routeFrame(candidate: ModelDescriptor, primaryId: string | undefined, primaryReason: string, failed: string[]) {
+function routeFrame(requestId: string, candidate: ModelDescriptor, primaryId: string | undefined, primaryReason: string, failed: string[]) {
   return {
+    requestId,
     model: candidate.id,
     provider: candidate.provider,
     tier: candidate.tier,

@@ -86,9 +86,9 @@ export interface AiUsage {
 }
 
 export type AiStreamEvent =
-  | { type: 'route'; routing: AiRouting }
+  | { type: 'route'; requestId: string; routing: AiRouting }
   | { type: 'token'; text: string }
-  | { type: 'done'; model?: string; provider?: string; tier?: string; usage?: AiUsage; failedOver?: string[] };
+  | { type: 'done'; requestId: string; model?: string; provider?: string; tier?: string; usage?: AiUsage; failedOver?: string[] };
 
 /** A single read-only tool step taken by the agentic answer loop. */
 export interface AgenticStep {
@@ -394,8 +394,7 @@ export class MigraAiClient {
    * Any engine failure throws a correlated {@link PilotError} — there is NO
    * silent fallback to the legacy `/chat` endpoint.
    */
-  async *chatStream(body: AiChatRequest, signal?: AbortSignal): AsyncGenerator<AiStreamEvent> {
-    const requestId = newRequestId();
+  async *chatStream(body: AiChatRequest, signal?: AbortSignal, requestId = newRequestId()): AsyncGenerator<AiStreamEvent> {
     const url = `${this.base()}${CHAT_PATH}`;
     this.cfg.log(`POST ${url} [${requestId}] (sse)`);
     const { signal: combined, reset, done, timedOut } = this.withTimeout(signal);
@@ -877,6 +876,7 @@ function toStreamEvent(frame: { event: string; data: unknown }): AiStreamEvent |
   if (frame.event === 'route') {
     return {
       type: 'route',
+      requestId: String(d.requestId ?? ''),
       routing: {
         model: String(d.model ?? ''),
         provider: String(d.provider ?? ''),
@@ -892,6 +892,7 @@ function toStreamEvent(frame: { event: string; data: unknown }): AiStreamEvent |
   if (frame.event === 'done') {
     return {
       type: 'done',
+      requestId: String(d.requestId ?? ''),
       model: d.model as string | undefined,
       provider: d.provider as string | undefined,
       tier: d.tier as string | undefined,

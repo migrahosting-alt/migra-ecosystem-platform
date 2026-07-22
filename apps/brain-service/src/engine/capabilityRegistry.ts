@@ -30,7 +30,7 @@ import {
   ChangesetRequestSchema,
   ApplyChangesetRequestSchema,
 } from '@migrapilot/protocol';
-import { commandRun } from '../tools/commandRun.js';
+import { commandRun, previewCommandRun } from '../tools/commandRun.js';
 import { proposeChangeset, applyChangeset, previewStoredChangeset, ChangesetProposalStore, ChangesetError } from '../tools/changeset.js';
 import { nodeChangesetFs } from '../tools/changesetFs.js';
 import { telemetryHub } from './telemetryHub.js';
@@ -263,10 +263,12 @@ const TOOLS: RunnableCapability[] = [
     // spawned. Distinct from terminal.exec (below), which stays ungranted.
     descriptor: meta('command.run', 'Run Command', 'Run an allowlisted build/test command in the workspace.', 'terminal', ['command.run'], {
       readOnly: false,
-      approvalRequired: false,
+      approvalRequired: true,
+      supportsDryRun: true,
     }),
     inputSchema: CommandRunRequestSchema,
     handler: (i) => commandRun(i as never),
+    preview: (i) => previewCommandRun(i as never),
   },
   {
     // Future capability — registered but UNAVAILABLE (grant not held), so it

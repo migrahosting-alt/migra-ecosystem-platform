@@ -39,6 +39,14 @@ export function commandRunEnabled(env: NodeJS.ProcessEnv = process.env): boolean
   return env.MIGRAPILOT_COMMAND_RUN !== 'off';
 }
 
+export interface CommandRunPreview {
+  tool: 'command.run';
+  command: string[];
+  cwd: string;
+  timeoutMs: number;
+  shell: false;
+}
+
 class CommandPolicyError extends Error {
   constructor(message: string) {
     super(message);
@@ -136,4 +144,37 @@ export async function commandRun(
       });
     });
   });
+}
+
+/** Validate the exact command policy and return bounded operator-facing consent
+ * material without spawning a process. The approval token is bound to the full
+ * input hash by the shared executor, so the command cannot change after review. */
+export async function previewCommandRun(
+  input: CommandRunRequest,
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<CommandRunPreview> {
+  const req = CommandRunRequestSchema.parse(input);
+  if (!commandRunEnabled(env)) {
+    throw new CommandPolicyError('command.run is disabled (MIGRAPILOT_COMMAND_RUN=off)');
+  }
+  const argv0 = req.command[0]!;
+  if (argv0.includes('/') || argv0.includes('\\')) {
+    throw new CommandPolicyError('argv[0] must be a bare program name (no paths)');
+  }
+  const allow = commandAllowlist(env);
+  if (!allow.includes(argv0)) {
+    throw new CommandPolicyError(`command "${argv0}" is not on the allowlist (${allow.join(', ')})`);
+  }
+  const denied = req.command.slice(1).find((arg) => DENIED_SUBCOMMANDS.has(arg.toLowerCase()));
+  if (denied) {
+    throw new CommandPolicyError(`subcommand "${denied}" is an external-effect action (publish/deploy/release/push) and is refused`);
+  }
+  await containedCwd(req.rootPath, req.cwd);
+  return {
+    tool: 'command.run',
+    command: req.command.map((arg) => redactCommandOutput(arg).value),
+    cwd: req.cwd ?? '.',
+    timeoutMs: req.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+    shell: false,
+  };
 }

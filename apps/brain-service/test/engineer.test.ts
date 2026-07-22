@@ -88,16 +88,21 @@ test('command.run is registered available; terminal.exec stays denied', () => {
   const registry = new CapabilityRegistry();
   const cmd = registry.get('command.run');
   assert.ok(cmd && cmd.available, 'command.run must be granted');
+  assert.equal(cmd.approvalRequired, true, 'command.run must require explicit approval');
+  assert.equal(cmd.supportsDryRun, true, 'command.run must expose consent preview material');
   const term = registry.get('terminal.exec');
   assert.ok(term && !term.available, 'terminal.exec must stay ungranted');
 });
 
-test('executor honors approvalRequired:false — command.run executes immediately; edit.apply still parks', async () => {
+test('executor requires explicit single-use approval for command.run and edit.apply', async () => {
   const deps = { registry: new CapabilityRegistry(), approvals: new ToolApprovalStore(), audit: new ToolAudit() };
   const root = ws();
-  const ran = await executeToolCore(deps, { tool: 'command.run', input: { rootPath: root, command: ['node', 'hello.js'] }, requestId: 'r1' });
-  assert.ok(ran.ok, 'command.run must not park for approval');
-  assert.equal(ran.ok && ran.status, 'executed');
+  const input = { rootPath: root, command: ['node', 'hello.js'] };
+  const parkedCommand = await executeToolCore(deps, { tool: 'command.run', input, requestId: 'r1' });
+  assert.ok(parkedCommand.ok && parkedCommand.status === 'approval_required', 'command.run must park for approval');
+  const commandApproval = parkedCommand.ok && parkedCommand.status === 'approval_required' ? parkedCommand.approvalId : '';
+  const ran = await executeToolCore(deps, { tool: 'command.run', input, approvalId: commandApproval, requestId: 'r1-resume' });
+  assert.ok(ran.ok && ran.status === 'executed');
   assert.match(String((ran.ok && (ran.result as { stdout: string }).stdout) ?? ''), /hi from ws/);
 
   const parked = await executeToolCore(deps, {

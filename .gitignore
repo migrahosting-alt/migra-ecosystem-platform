@@ -14,6 +14,9 @@
 # Always keep gitignore
 !.gitignore
 
+# Canonical npm workspace lockfile — required for reproducible enterprise builds.
+!/package-lock.json
+
 # Allow .github (agents + workflows)
 !.github/
 !.github/**

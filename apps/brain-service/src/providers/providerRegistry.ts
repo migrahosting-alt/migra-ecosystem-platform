@@ -6,6 +6,10 @@ export interface ProviderAdapter {
   profile: Exclude<ModelProfile, 'none'>;
   isAvailable(): Promise<boolean>;
   complete(request: ChatTurnRequest): Promise<ChatTurnResponse>;
+  stream?(
+    request: ChatTurnRequest,
+    signal?: AbortSignal,
+  ): AsyncGenerator<{ delta?: string; usage?: { inputTokens: number; outputTokens: number } }>;
 }
 
 type Profile = Exclude<ModelProfile, 'none'>;
@@ -49,6 +53,36 @@ export class StubProvider implements ProviderAdapter {
       },
     };
   }
+
+  /** Deterministic progressive stream used by the controlled local foundation.
+   * The event-loop yield between chunks makes cancellation observable without
+   * adding nondeterministic wall-clock sleeps. No network provider is consulted. */
+  async *stream(
+    request: ChatTurnRequest,
+    signal?: AbortSignal,
+  ): AsyncGenerator<{ delta?: string; usage?: { inputTokens: number; outputTokens: number } }> {
+    const result = await this.complete(request);
+    const words = result.content.split(' ');
+    for (let i = 0; i < words.length; i += 1) {
+      throwIfAborted(signal);
+      await new Promise<void>((resolve) => setTimeout(resolve, 5));
+      throwIfAborted(signal);
+      yield { delta: `${words[i]}${i === words.length - 1 ? '' : ' '}` };
+    }
+    yield {
+      usage: {
+        inputTokens: result.telemetry.inputTokens,
+        outputTokens: result.telemetry.outputTokens,
+      },
+    };
+  }
+}
+
+function throwIfAborted(signal?: AbortSignal): void {
+  if (!signal?.aborted) return;
+  const error = new Error('Stub generation cancelled.');
+  error.name = 'AbortError';
+  throw error;
 }
 
 export class ProviderRegistry {
