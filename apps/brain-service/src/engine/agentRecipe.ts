@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from 'node:child_process';
-import { createHash } from 'node:crypto';
+import { createHash, timingSafeEqual } from 'node:crypto';
 import { constants } from 'node:fs';
 import { access, chmod, cp, lstat, mkdir, readFile, readdir, readlink, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -63,12 +63,34 @@ export interface AgentRecipeResolverLike {
 export interface AgentRecipeProcessManagerLike {
   availability(): Promise<{ ok: true; policy: string } | { ok: false; code: 'UNSUPPORTED_PLATFORM' | 'CONTAINMENT_UNAVAILABLE'; message: string }>;
   activeCount(): number;
-  execute(runId: string, plan: AgentRecipePlan, hooks: { onSpawned(): void }, signal?: AbortSignal): Promise<AgentRecipeExecutionOutcome>;
+  execute(runId: string, plan: AgentRecipePlan, hooks: { onSpawned(identity: AgentContainmentIdentity): void }, signal?: AbortSignal): Promise<AgentRecipeExecutionOutcome>;
+  reconcileRun?(runId: string, identity: AgentContainmentReconciliationIdentity): Promise<AgentContainmentReconcileOutcome>;
   shutdown(): Promise<void>;
 }
 
+export interface AgentContainmentIdentity {
+  policy: 'systemd-user-service-v2';
+  unit: string;
+  binding: string;
+}
+
+export interface AgentContainmentReconciliationIdentity extends AgentContainmentIdentity {
+  workspaceIdentity: string;
+  recipeId: AgentModeRecipeId;
+  proposalFingerprint: string;
+  snapshotManifestDigest: string;
+  executableDigest: string;
+  recipePolicyVersion: string;
+}
+
+export type AgentContainmentReconcileOutcome =
+  | { code: 'RESTART_NO_CONTAINMENT_FOUND' | 'RESTART_CONTAINMENT_ALREADY_EXITED'; terminated: false; cgroupEmpty: true }
+  | { code: 'RESTART_CONTAINMENT_TERMINATED'; terminated: true; cgroupEmpty: true }
+  | { code: 'RESTART_TERMINATION_FAILED'; terminated: false; cgroupEmpty: false }
+  | { code: 'RESTART_CONTAINMENT_IDENTITY_MISMATCH'; terminated: false; cgroupEmpty: false };
+
 export class AgentRecipePolicyError extends Error {
-  constructor(readonly code: 'INVALID_WORKSPACE' | 'RECIPE_UNAVAILABLE' | 'STALE' | 'OVERLOADED' | 'START_FAILED' | 'TERMINATION_FAILED' | 'SNAPSHOT_FAILED' | 'UNSUPPORTED_PLATFORM' | 'CONTAINMENT_UNAVAILABLE', message: string) {
+  constructor(readonly code: 'INVALID_WORKSPACE' | 'RECIPE_UNAVAILABLE' | 'STALE' | 'OVERLOADED' | 'START_FAILED' | 'TERMINATION_FAILED' | 'SNAPSHOT_FAILED' | 'UNSUPPORTED_PLATFORM' | 'CONTAINMENT_UNAVAILABLE' | 'SPAWNED_IDENTITY_PERSISTENCE_FAILED', message: string) {
     super(message);
     this.name = 'AgentRecipePolicyError';
   }
@@ -255,6 +277,12 @@ export class SystemdContainmentController {
       return missing && (values.ActiveState === 'inactive' || values.ActiveState === 'failed');
     }
   }
+
+  async unitExists(unit: string): Promise<boolean> {
+    const shown = await this.adapter.capture('/usr/bin/systemctl', ['--user', 'show', '--property=LoadState', unit], systemdClientEnvironment(process.env), 2_000).catch(() => undefined);
+    if (!shown || shown.code !== 0) return false;
+    return parseSystemdProperties(shown.stdout).LoadState !== 'not-found';
+  }
 }
 
 /** Linux Stage 2B containment. No PID/process-group fallback exists. Other
@@ -277,11 +305,12 @@ export class AgentRecipeProcessManager implements AgentRecipeProcessManagerLike 
     return { ok: false, code: 'CONTAINMENT_UNAVAILABLE', message: 'A delegated user systemd/cgroup containment manager is unavailable.' };
   }
 
-  async execute(runId: string, plan: AgentRecipePlan, hooks: { onSpawned(): void }, signal?: AbortSignal): Promise<AgentRecipeExecutionOutcome> {
+  async execute(runId: string, plan: AgentRecipePlan, hooks: { onSpawned(identity: AgentContainmentIdentity): void }, signal?: AbortSignal): Promise<AgentRecipeExecutionOutcome> {
     if (this.active.size >= this.maxConcurrent) throw new AgentRecipePolicyError('OVERLOADED', 'The Agent execution containment limit is reached.');
     const available = await this.availability();
     if (!available.ok) throw new AgentRecipePolicyError(available.code, available.message);
-    const unit = `migrapilot-agent-${runId.replace(/[^a-zA-Z0-9_-]/g, '').slice(-48)}.service`;
+    const unit = containmentUnitForRun(runId);
+    const identity = containmentIdentityForPlan(runId, plan, unit);
     const properties = [
       'Type=exec',
       'KillMode=control-group',
@@ -337,7 +366,7 @@ export class AgentRecipeProcessManager implements AgentRecipeProcessManagerLike 
         launcher.once('spawn', () => {
           void this.containment.waitForAcquisition(unit).then((acquired) => {
             if (!acquired) throw new AgentRecipePolicyError('START_FAILED', 'The systemd service did not acquire the recipe process.');
-            hooks.onSpawned();
+            hooks.onSpawned(identity);
             resolve();
           }).catch((error) => { void terminate('cancel'); reject(error); });
         });
@@ -375,6 +404,86 @@ export class AgentRecipeProcessManager implements AgentRecipeProcessManagerLike 
     }));
   }
 
+  async reconcileRun(runId: string, identity: AgentContainmentReconciliationIdentity): Promise<AgentContainmentReconcileOutcome> {
+    const expectedUnit = containmentUnitForRun(runId);
+    const expectedIdentity = containmentIdentityForTrustedRun({ runId, ...identity });
+    if (
+      !validContainmentRunId(runId) ||
+      identity.policy !== 'systemd-user-service-v2' ||
+      identity.unit !== expectedUnit ||
+      identity.binding.length !== 64 ||
+      !/^[a-f0-9]{64}$/.test(identity.binding) ||
+      !/^migrapilot-agent-[a-zA-Z0-9_-]{1,48}\.service$/.test(identity.unit) ||
+      !constantTimeEqual(identity.binding, expectedIdentity.binding)
+    ) {
+      return { code: 'RESTART_CONTAINMENT_IDENTITY_MISMATCH', terminated: false, cgroupEmpty: false };
+    }
+    const exists = await this.containment.unitExists(identity.unit);
+    if (!exists) return { code: 'RESTART_NO_CONTAINMENT_FOUND', terminated: false, cgroupEmpty: true };
+    if (await this.containment.unitEmpty(identity.unit)) return { code: 'RESTART_CONTAINMENT_ALREADY_EXITED', terminated: false, cgroupEmpty: true };
+    const terminated = await this.containment.terminateUnit(identity.unit);
+    if (terminated && await this.containment.unitEmpty(identity.unit)) return { code: 'RESTART_CONTAINMENT_TERMINATED', terminated: true, cgroupEmpty: true };
+    return { code: 'RESTART_TERMINATION_FAILED', terminated: false, cgroupEmpty: false };
+  }
+
+}
+
+export function containmentUnitForRun(runId: string): string {
+  return `migrapilot-agent-${runId.replace(/[^a-zA-Z0-9_-]/g, '').slice(-48)}.service`;
+}
+
+export function containmentIdentityForPlan(runId: string, plan: AgentRecipePlan, unit = containmentUnitForRun(runId)): AgentContainmentIdentity {
+  return containmentIdentityForTrustedRun({
+    runId,
+    unit,
+    workspaceIdentity: plan.identity.sourceWorkspaceIdentity,
+    recipeId: plan.identity.recipe,
+    proposalFingerprint: hashInput(plan.identity).slice(0, 16),
+    snapshotManifestDigest: plan.identity.workspaceMaterialIdentity,
+    executableDigest: plan.identity.executableDigest,
+    recipePolicyVersion: plan.identity.policyVersion,
+  });
+}
+
+const CONTAINMENT_BINDING_DOMAIN = 'migrapilot.agent.containment.v3';
+
+export function containmentIdentityForTrustedRun(input: {
+  runId: string;
+  unit?: string;
+  workspaceIdentity: string;
+  recipeId: AgentModeRecipeId;
+  proposalFingerprint: string;
+  snapshotManifestDigest: string;
+  executableDigest: string;
+  recipePolicyVersion: string;
+}): AgentContainmentIdentity {
+  const unit = input.unit ?? containmentUnitForRun(input.runId);
+  return {
+    policy: 'systemd-user-service-v2',
+    unit,
+    binding: hashInput({
+      domain: CONTAINMENT_BINDING_DOMAIN,
+      runId: input.runId,
+      workspaceIdentity: input.workspaceIdentity,
+      recipeId: input.recipeId,
+      proposalFingerprint: input.proposalFingerprint,
+      snapshotManifestDigest: input.snapshotManifestDigest,
+      executableDigest: input.executableDigest,
+      recipePolicyVersion: input.recipePolicyVersion,
+      unit,
+    }),
+  };
+}
+
+function validContainmentRunId(runId: string): boolean {
+  return /^agentcmd_[a-zA-Z0-9_-]{1,80}$/.test(runId);
+}
+
+function constantTimeEqual(a: string, b: string): boolean {
+  if (!/^[a-f0-9]{64}$/.test(a) || !/^[a-f0-9]{64}$/.test(b)) return false;
+  const left = Buffer.from(a, 'hex');
+  const right = Buffer.from(b, 'hex');
+  return left.length === right.length && timingSafeEqual(left, right);
 }
 
 async function resolveExecutable(name: string, env: NodeJS.ProcessEnv, platform: NodeJS.Platform): Promise<string> {

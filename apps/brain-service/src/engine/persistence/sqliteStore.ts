@@ -16,10 +16,11 @@ import type {
   ConversationPersistence, MemoryItemPersistence, RagIndexPersistence, EmbeddingCachePersistence,
   DurableStore, PersistenceHealth, PersistedChunk, PersistedIndexRecord,
   DurableAuditEvent, DurableUsageRecord, DurableIncident, DurableRecoveryEvent, DurableBudgetScope, DurableReservation, OperationalCounts,
+  DurableAgentRun, DurableAgentRunEvent, AgentRunTransitionInput, DurableAgentRunState, AgentRunReconciliationClaim, DurableAgentRunTombstone, AgentRunFencedEventInput,
 } from './types.js';
 import type { Conversation, Message, Summary, MemoryItem } from '../memory/conversationStore.js';
 
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 4;
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS schema_meta (key TEXT PRIMARY KEY, value TEXT);
@@ -83,6 +84,89 @@ CREATE TABLE IF NOT EXISTS op_budget_scopes (
 CREATE TABLE IF NOT EXISTS op_reservations (
   reservation_id TEXT PRIMARY KEY, amount_usd REAL, scope_ids_json TEXT, correlation_id TEXT,
   provider_id TEXT, model_id TEXT, created_at INTEGER, expires_at INTEGER, status TEXT);
+
+-- Agent Mode durable run journal (v3): sanitized authoritative state +
+-- append-only lifecycle events. Never stores bootstrap secrets, activation
+-- capabilities, raw approval tokens, raw stdout/stderr, process handles, DBus
+-- handles, private keys, or production-review data.
+CREATE TABLE IF NOT EXISTS agent_runs (
+  run_id TEXT PRIMARY KEY,
+  correlation_id TEXT NOT NULL,
+  external_request_ref TEXT,
+  activation_ref TEXT NOT NULL,
+  workspace_identity TEXT NOT NULL,
+  workspace_ref TEXT NOT NULL,
+  recipe_id TEXT NOT NULL,
+  recipe_policy_version TEXT NOT NULL,
+  proposal_fingerprint TEXT NOT NULL,
+  proposal_hash TEXT NOT NULL,
+  snapshot_id TEXT NOT NULL,
+  snapshot_manifest_digest TEXT NOT NULL,
+  executable_digest TEXT NOT NULL,
+  containment_unit TEXT,
+  containment_binding TEXT,
+  state TEXT NOT NULL,
+  requested_at INTEGER NOT NULL,
+  proposal_at INTEGER,
+  approval_displayed_at INTEGER,
+  approval_decision_at INTEGER,
+  execution_started_at INTEGER,
+  terminal_at INTEGER,
+  expires_at INTEGER NOT NULL,
+  timeout_ms INTEGER NOT NULL,
+  output_limit_bytes INTEGER NOT NULL,
+  mutation_classification TEXT NOT NULL,
+  network_policy TEXT NOT NULL,
+  expected_effects_json TEXT NOT NULL,
+  preview_json TEXT,
+  result_json TEXT,
+  error_json TEXT,
+  exit_code INTEGER,
+  signal TEXT,
+  failure_code TEXT,
+  interruption_classification TEXT,
+  audit_seq INTEGER NOT NULL DEFAULT 0,
+  schema_version INTEGER NOT NULL,
+  version INTEGER NOT NULL DEFAULT 1,
+  reconciliation_owner TEXT,
+  reconciliation_lease_until INTEGER,
+  reconciliation_fence INTEGER NOT NULL DEFAULT 0,
+  updated_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_agent_runs_state ON agent_runs(state, updated_at);
+CREATE INDEX IF NOT EXISTS idx_agent_runs_workspace ON agent_runs(workspace_identity, updated_at);
+CREATE INDEX IF NOT EXISTS idx_agent_runs_terminal ON agent_runs(terminal_at, state);
+CREATE INDEX IF NOT EXISTS idx_agent_runs_nonterminal ON agent_runs(state, reconciliation_lease_until, updated_at);
+CREATE INDEX IF NOT EXISTS idx_agent_runs_reconciliation ON agent_runs(reconciliation_owner, reconciliation_fence, version, reconciliation_lease_until);
+CREATE TABLE IF NOT EXISTS agent_run_events (
+  event_id TEXT PRIMARY KEY,
+  run_id TEXT NOT NULL REFERENCES agent_runs(run_id) ON DELETE CASCADE,
+  seq INTEGER NOT NULL,
+  at INTEGER NOT NULL,
+  type TEXT NOT NULL,
+  prior_state TEXT,
+  next_state TEXT NOT NULL,
+  reason TEXT,
+  correlation_id TEXT NOT NULL,
+  source TEXT NOT NULL,
+  schema_version INTEGER NOT NULL,
+  UNIQUE(run_id, seq)
+);
+CREATE INDEX IF NOT EXISTS idx_agent_run_events_run ON agent_run_events(run_id, seq);
+CREATE TABLE IF NOT EXISTS agent_run_tombstones (
+  tombstone_id TEXT PRIMARY KEY,
+  run_id TEXT NOT NULL,
+  workspace_identity TEXT NOT NULL,
+  recipe_id TEXT NOT NULL,
+  final_state TEXT NOT NULL,
+  terminal_at INTEGER NOT NULL,
+  deleted_at INTEGER NOT NULL,
+  deletion_reason TEXT NOT NULL,
+  final_audit_seq INTEGER NOT NULL,
+  event_count INTEGER NOT NULL,
+  schema_version INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_agent_run_tombstones_deleted ON agent_run_tombstones(deleted_at);
 `;
 
 function toBlob(vec: number[]): Uint8Array {
@@ -102,6 +186,106 @@ interface UsageRow { usage_id: string; correlation_id: string; provider_id: stri
 interface IncidentRow { incident_id: string; dedup_key: string; correlation_id: string; first_seen_at: number; last_seen_at: number; occurrence_count: number; state: string; severity: string; affected_json: string; last_delivery_status: string; resolution_json: string | null }
 interface BudgetScopeRow { scope_id: string; kind: string; scope_key: string; hard_limit_usd: number; spent_usd: number; reserved_usd: number; period_start: number; updated_at: number }
 interface ReservationRow { reservation_id: string; amount_usd: number; scope_ids_json: string; correlation_id: string; provider_id: string; model_id: string; created_at: number; expires_at: number; status: string }
+interface AgentRunRow {
+  run_id: string; correlation_id: string; external_request_ref: string | null; activation_ref: string; workspace_identity: string; workspace_ref: string; recipe_id: string; recipe_policy_version: string; proposal_fingerprint: string; proposal_hash: string; snapshot_id: string; snapshot_manifest_digest: string; executable_digest: string; containment_unit: string | null; containment_binding: string | null; state: string; requested_at: number; proposal_at: number | null; approval_displayed_at: number | null; approval_decision_at: number | null; execution_started_at: number | null; terminal_at: number | null; expires_at: number; timeout_ms: number; output_limit_bytes: number; mutation_classification: string; network_policy: string; expected_effects_json: string; preview_json: string | null; result_json: string | null; error_json: string | null; exit_code: number | null; signal: string | null; failure_code: string | null; interruption_classification: string | null; audit_seq: number; schema_version: number; version: number; reconciliation_owner: string | null; reconciliation_lease_until: number | null; reconciliation_fence: number; updated_at: number;
+}
+interface AgentRunEventRow { event_id: string; run_id: string; seq: number; at: number; type: string; prior_state: string | null; next_state: string; reason: string | null; correlation_id: string; source: DurableAgentRunEvent['source']; schema_version: number }
+interface AgentRunTombstoneRow { tombstone_id: string; run_id: string; workspace_identity: string; recipe_id: string; final_state: string; terminal_at: number; deleted_at: number; deletion_reason: string; final_audit_seq: number; event_count: number; schema_version: number }
+interface ExpectedColumn { type: string; notnull?: number; pk?: number; dflt?: string }
+interface ExpectedIndex { name: string; table: string; columns: string[]; unique: boolean; partial?: string }
+interface ExpectedForeignKey { table: string; foreignTable: string; columns: string[]; foreignColumns: string[]; onDelete: string }
+
+const EXPECTED_SCHEMA_META_COLUMNS: Record<string, ExpectedColumn> = Object.freeze({
+  key: { type: 'TEXT', pk: 1 },
+  value: { type: 'TEXT' },
+});
+
+const EXPECTED_AGENT_TABLES: Record<string, Record<string, ExpectedColumn>> = Object.freeze({
+  agent_runs: Object.freeze({
+    run_id: { type: 'TEXT', pk: 1 },
+    correlation_id: { type: 'TEXT', notnull: 1 },
+    external_request_ref: { type: 'TEXT' },
+    activation_ref: { type: 'TEXT', notnull: 1 },
+    workspace_identity: { type: 'TEXT', notnull: 1 },
+    workspace_ref: { type: 'TEXT', notnull: 1 },
+    recipe_id: { type: 'TEXT', notnull: 1 },
+    recipe_policy_version: { type: 'TEXT', notnull: 1 },
+    proposal_fingerprint: { type: 'TEXT', notnull: 1 },
+    proposal_hash: { type: 'TEXT', notnull: 1 },
+    snapshot_id: { type: 'TEXT', notnull: 1 },
+    snapshot_manifest_digest: { type: 'TEXT', notnull: 1 },
+    executable_digest: { type: 'TEXT', notnull: 1 },
+    containment_unit: { type: 'TEXT' },
+    containment_binding: { type: 'TEXT' },
+    state: { type: 'TEXT', notnull: 1 },
+    requested_at: { type: 'INTEGER', notnull: 1 },
+    proposal_at: { type: 'INTEGER' },
+    approval_displayed_at: { type: 'INTEGER' },
+    approval_decision_at: { type: 'INTEGER' },
+    execution_started_at: { type: 'INTEGER' },
+    terminal_at: { type: 'INTEGER' },
+    expires_at: { type: 'INTEGER', notnull: 1 },
+    timeout_ms: { type: 'INTEGER', notnull: 1 },
+    output_limit_bytes: { type: 'INTEGER', notnull: 1 },
+    mutation_classification: { type: 'TEXT', notnull: 1 },
+    network_policy: { type: 'TEXT', notnull: 1 },
+    expected_effects_json: { type: 'TEXT', notnull: 1 },
+    preview_json: { type: 'TEXT' },
+    result_json: { type: 'TEXT' },
+    error_json: { type: 'TEXT' },
+    exit_code: { type: 'INTEGER' },
+    signal: { type: 'TEXT' },
+    failure_code: { type: 'TEXT' },
+    interruption_classification: { type: 'TEXT' },
+    audit_seq: { type: 'INTEGER', notnull: 1, dflt: '0' },
+    schema_version: { type: 'INTEGER', notnull: 1 },
+    version: { type: 'INTEGER', notnull: 1, dflt: '1' },
+    reconciliation_owner: { type: 'TEXT' },
+    reconciliation_lease_until: { type: 'INTEGER' },
+    reconciliation_fence: { type: 'INTEGER', notnull: 1, dflt: '0' },
+    updated_at: { type: 'INTEGER', notnull: 1 },
+  }),
+  agent_run_events: Object.freeze({
+    event_id: { type: 'TEXT', pk: 1 },
+    run_id: { type: 'TEXT', notnull: 1 },
+    seq: { type: 'INTEGER', notnull: 1 },
+    at: { type: 'INTEGER', notnull: 1 },
+    type: { type: 'TEXT', notnull: 1 },
+    prior_state: { type: 'TEXT' },
+    next_state: { type: 'TEXT', notnull: 1 },
+    reason: { type: 'TEXT' },
+    correlation_id: { type: 'TEXT', notnull: 1 },
+    source: { type: 'TEXT', notnull: 1 },
+    schema_version: { type: 'INTEGER', notnull: 1 },
+  }),
+  agent_run_tombstones: Object.freeze({
+    tombstone_id: { type: 'TEXT', pk: 1 },
+    run_id: { type: 'TEXT', notnull: 1 },
+    workspace_identity: { type: 'TEXT', notnull: 1 },
+    recipe_id: { type: 'TEXT', notnull: 1 },
+    final_state: { type: 'TEXT', notnull: 1 },
+    terminal_at: { type: 'INTEGER', notnull: 1 },
+    deleted_at: { type: 'INTEGER', notnull: 1 },
+    deletion_reason: { type: 'TEXT', notnull: 1 },
+    final_audit_seq: { type: 'INTEGER', notnull: 1 },
+    event_count: { type: 'INTEGER', notnull: 1 },
+    schema_version: { type: 'INTEGER', notnull: 1 },
+  }),
+});
+
+const EXPECTED_AGENT_INDEXES: readonly ExpectedIndex[] = Object.freeze([
+  { table: 'agent_runs', name: 'idx_agent_runs_state', columns: ['state', 'updated_at'], unique: false },
+  { table: 'agent_runs', name: 'idx_agent_runs_workspace', columns: ['workspace_identity', 'updated_at'], unique: false },
+  { table: 'agent_runs', name: 'idx_agent_runs_terminal', columns: ['terminal_at', 'state'], unique: false },
+  { table: 'agent_runs', name: 'idx_agent_runs_nonterminal', columns: ['state', 'reconciliation_lease_until', 'updated_at'], unique: false },
+  { table: 'agent_runs', name: 'idx_agent_runs_reconciliation', columns: ['reconciliation_owner', 'reconciliation_fence', 'version', 'reconciliation_lease_until'], unique: false },
+  { table: 'agent_run_events', name: 'idx_agent_run_events_run', columns: ['run_id', 'seq'], unique: false },
+  { table: 'agent_run_tombstones', name: 'idx_agent_run_tombstones_deleted', columns: ['deleted_at'], unique: false },
+]);
+
+const EXPECTED_AGENT_FOREIGN_KEYS: readonly ExpectedForeignKey[] = Object.freeze([
+  { table: 'agent_run_events', foreignTable: 'agent_runs', columns: ['run_id'], foreignColumns: ['run_id'], onDelete: 'CASCADE' },
+]);
 function rowToAudit(r: AuditRow): DurableAuditEvent {
   return { eventId: r.event_id, correlationId: r.correlation_id, causationId: r.causation_id, seq: r.seq, type: r.type, at: r.at, durationMs: r.duration_ms ?? undefined, component: r.component, outcome: r.outcome ?? undefined, requestId: r.request_id ?? undefined, fieldsJson: r.fields_json };
 }
@@ -116,6 +300,44 @@ function rowToBudgetScope(r: BudgetScopeRow): DurableBudgetScope {
 }
 function rowToReservation(r: ReservationRow): DurableReservation {
   return { reservationId: r.reservation_id, amountUsd: r.amount_usd, scopeIdsJson: r.scope_ids_json, correlationId: r.correlation_id, providerId: r.provider_id, modelId: r.model_id, createdAt: r.created_at, expiresAt: r.expires_at, status: r.status };
+}
+function rowToAgentRun(r: AgentRunRow): DurableAgentRun {
+  return {
+    runId: r.run_id, correlationId: r.correlation_id, externalRequestRef: r.external_request_ref ?? undefined,
+    activationRef: r.activation_ref, workspaceIdentity: r.workspace_identity, workspaceRef: r.workspace_ref,
+    recipeId: r.recipe_id, recipePolicyVersion: r.recipe_policy_version, proposalFingerprint: r.proposal_fingerprint,
+    proposalHash: r.proposal_hash, snapshotId: r.snapshot_id, snapshotManifestDigest: r.snapshot_manifest_digest,
+    executableDigest: r.executable_digest, containmentUnit: r.containment_unit ?? undefined,
+    containmentBinding: r.containment_binding ?? undefined, state: r.state as DurableAgentRunState,
+    requestedAt: r.requested_at, proposalAt: r.proposal_at ?? undefined, approvalDisplayedAt: r.approval_displayed_at ?? undefined,
+    approvalDecisionAt: r.approval_decision_at ?? undefined, executionStartedAt: r.execution_started_at ?? undefined,
+    terminalAt: r.terminal_at ?? undefined, expiresAt: r.expires_at, timeoutMs: r.timeout_ms, outputLimitBytes: r.output_limit_bytes,
+    mutationClassification: r.mutation_classification, networkPolicy: r.network_policy, expectedEffectsJson: r.expected_effects_json,
+    previewJson: r.preview_json ?? undefined, resultJson: r.result_json ?? undefined, errorJson: r.error_json ?? undefined,
+    exitCode: r.exit_code ?? undefined, signal: r.signal ?? undefined, failureCode: r.failure_code ?? undefined,
+    interruptionClassification: r.interruption_classification ?? undefined, auditSeq: r.audit_seq, schemaVersion: r.schema_version,
+    version: r.version, reconciliationOwner: r.reconciliation_owner ?? undefined, reconciliationLeaseUntil: r.reconciliation_lease_until ?? undefined,
+    reconciliationFence: r.reconciliation_fence,
+    updatedAt: r.updated_at,
+  };
+}
+function rowToAgentRunTombstone(r: AgentRunTombstoneRow): DurableAgentRunTombstone {
+  return {
+    tombstoneId: r.tombstone_id, runId: r.run_id, workspaceIdentity: r.workspace_identity, recipeId: r.recipe_id,
+    finalState: r.final_state as DurableAgentRunState, terminalAt: r.terminal_at, deletedAt: r.deleted_at,
+    deletionReason: r.deletion_reason, finalAuditSeq: r.final_audit_seq, eventCount: r.event_count, schemaVersion: r.schema_version,
+  };
+}
+function rowToAgentRunEvent(r: AgentRunEventRow): DurableAgentRunEvent {
+  return {
+    eventId: r.event_id, runId: r.run_id, seq: r.seq, at: r.at, type: r.type,
+    priorState: r.prior_state ? (r.prior_state as DurableAgentRunState) : undefined,
+    nextState: r.next_state as DurableAgentRunState, reason: r.reason ?? undefined,
+    correlationId: r.correlation_id, source: r.source, schemaVersion: r.schema_version,
+  };
+}
+function isAgentTerminal(state: DurableAgentRunState): boolean {
+  return state === 'COMPLETED' || state === 'REJECTED' || state === 'EXPIRED' || state === 'STALE' || state === 'FAILED' || state === 'CANCELLED';
 }
 
 export class SqliteDurableStore implements DurableStore {
@@ -134,9 +356,21 @@ export class SqliteDurableStore implements DurableStore {
   }
 
   private migrate(): void {
-    this.db.exec(SCHEMA);
+    this.db.exec('CREATE TABLE IF NOT EXISTS schema_meta (key TEXT PRIMARY KEY, value TEXT);');
     const row = this.db.prepare('SELECT value FROM schema_meta WHERE key = ?').get('schema_version') as { value?: string } | undefined;
     const existing = row?.value ? Number(row.value) : 0;
+    if (!row && this.hasDurableObjects()) {
+      this.migrationState = 'mismatch';
+      this.healthy = 'unavailable';
+      this.detail = 'db schema metadata missing for non-empty database';
+      throw new Error(this.detail);
+    }
+    if (!Number.isInteger(existing) || existing < 0) {
+      this.migrationState = 'mismatch';
+      this.healthy = 'unavailable';
+      this.detail = `invalid db schema version ${row?.value ?? '<missing>'}`;
+      throw new Error(this.detail);
+    }
     if (existing > SCHEMA_VERSION) {
       // Schema is newer than this build — incompatible. Fail closed.
       this.migrationState = 'mismatch';
@@ -144,10 +378,18 @@ export class SqliteDurableStore implements DurableStore {
       this.detail = `db schema v${existing} > engine v${SCHEMA_VERSION}`;
       throw new Error(this.detail);
     }
-    // (No intermediate migrations for v1.) Record the current version.
-    this.db.prepare('INSERT INTO schema_meta(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').run('schema_version', String(SCHEMA_VERSION));
+    this.tx(() => {
+      if (existing < SCHEMA_VERSION) {
+        this.db.exec(SCHEMA);
+        const hasFence = this.tableColumns('agent_runs').some((column) => column.name === 'reconciliation_fence');
+        if (!hasFence) this.db.exec('ALTER TABLE agent_runs ADD COLUMN reconciliation_fence INTEGER NOT NULL DEFAULT 0;');
+        this.db.prepare('INSERT INTO schema_meta(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').run('schema_version', String(SCHEMA_VERSION));
+      }
+    });
+    this.assertSchemaMeta();
+    this.assertAgentRunSchema();
     this.schemaVersion = SCHEMA_VERSION;
-    this.migrationState = 'applied';
+    this.migrationState = existing === SCHEMA_VERSION ? 'current' : 'applied';
     this.healthy = 'ready';
   }
 
@@ -420,7 +662,196 @@ export class SqliteDurableStore implements DurableStore {
   }
   operationalCounts(): OperationalCounts {
     const c = (t: string): number => (this.db.prepare(`SELECT count(*) c FROM ${t}`).get() as { c: number }).c;
-    return { auditEvents: c('op_audit_events'), usageRecords: c('op_usage_records'), incidents: c('op_incidents'), recoveryEvents: c('op_recovery_events'), reservations: c('op_reservations') };
+    return { auditEvents: c('op_audit_events'), usageRecords: c('op_usage_records'), incidents: c('op_incidents'), recoveryEvents: c('op_recovery_events'), reservations: c('op_reservations'), agentRuns: c('agent_runs'), agentRunEvents: c('agent_run_events'), agentRunTombstones: c('agent_run_tombstones') };
+  }
+
+  // ── Agent Mode durable run journal (v3) ─────────────────────────────────────
+
+  insertAgentRun(run: DurableAgentRun, createdEvent: DurableAgentRunEvent): void {
+    this.tx(() => {
+      this.db.prepare(
+        `INSERT INTO agent_runs(run_id,correlation_id,external_request_ref,activation_ref,workspace_identity,workspace_ref,recipe_id,recipe_policy_version,proposal_fingerprint,proposal_hash,snapshot_id,snapshot_manifest_digest,executable_digest,containment_unit,containment_binding,state,requested_at,proposal_at,approval_displayed_at,approval_decision_at,execution_started_at,terminal_at,expires_at,timeout_ms,output_limit_bytes,mutation_classification,network_policy,expected_effects_json,preview_json,result_json,error_json,exit_code,signal,failure_code,interruption_classification,audit_seq,schema_version,version,reconciliation_owner,reconciliation_lease_until,reconciliation_fence,updated_at)
+         VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      ).run(
+        run.runId, run.correlationId, run.externalRequestRef ?? null, run.activationRef, run.workspaceIdentity, run.workspaceRef,
+        run.recipeId, run.recipePolicyVersion, run.proposalFingerprint, run.proposalHash, run.snapshotId, run.snapshotManifestDigest,
+        run.executableDigest, run.containmentUnit ?? null, run.containmentBinding ?? null, run.state, run.requestedAt, run.proposalAt ?? null,
+        run.approvalDisplayedAt ?? null, run.approvalDecisionAt ?? null, run.executionStartedAt ?? null, run.terminalAt ?? null,
+        run.expiresAt, run.timeoutMs, run.outputLimitBytes, run.mutationClassification, run.networkPolicy, run.expectedEffectsJson,
+        run.previewJson ?? null, run.resultJson ?? null, run.errorJson ?? null, run.exitCode ?? null, run.signal ?? null, run.failureCode ?? null,
+        run.interruptionClassification ?? null, 0, run.schemaVersion, run.version, run.reconciliationOwner ?? null, run.reconciliationLeaseUntil ?? null, run.reconciliationFence ?? 0, run.updatedAt,
+      );
+      this.appendAgentRunEventInside({ ...createdEvent, seq: 1 });
+      this.db.prepare('UPDATE agent_runs SET audit_seq = 1 WHERE run_id = ?').run(run.runId);
+    });
+  }
+
+  appendAgentRunEvent(event: Omit<DurableAgentRunEvent, 'seq'>): void {
+    this.tx(() => {
+      const row = this.db.prepare('SELECT audit_seq FROM agent_runs WHERE run_id = ?').get(event.runId) as { audit_seq: number } | undefined;
+      if (!row) throw new Error(`unknown Agent run ${event.runId}`);
+      this.appendAgentRunEventInside({ ...event, seq: row.audit_seq + 1 });
+      this.db.prepare('UPDATE agent_runs SET audit_seq = audit_seq + 1, updated_at = ? WHERE run_id = ?').run(event.at, event.runId);
+    });
+  }
+
+  appendAgentRunEventUnderFence(input: AgentRunFencedEventInput): AgentRunReconciliationClaim | undefined {
+    let claim: AgentRunReconciliationClaim | undefined;
+    this.tx(() => {
+      const row = this.db.prepare('SELECT * FROM agent_runs WHERE run_id = ?').get(input.runId) as AgentRunRow | undefined;
+      if (!row) return;
+      const state = row.state as DurableAgentRunState;
+      if (isAgentTerminal(state)) return;
+      if (input.expectedState && state !== input.expectedState) return;
+      if (row.reconciliation_owner !== input.reconciliation.owner) return;
+      if (row.reconciliation_fence !== input.reconciliation.fence) return;
+      if ((row.reconciliation_lease_until ?? -1) < input.reconciliation.leaseValidAt) return;
+      if (row.version !== input.reconciliation.expectedVersion) return;
+      const eventId = input.eventId ?? `${input.runId}:${row.audit_seq + 1}:${input.eventType}`;
+      const inserted = this.db.prepare(
+        `INSERT OR IGNORE INTO agent_run_events(event_id,run_id,seq,at,type,prior_state,next_state,reason,correlation_id,source,schema_version)
+         VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
+      ).run(eventId, input.runId, row.audit_seq + 1, input.at, input.eventType, state, state, input.reason ?? null, row.correlation_id, input.source, 1);
+      if (Number(inserted.changes ?? 0) !== 1) return;
+      const updated = this.db.prepare(
+        `UPDATE agent_runs SET audit_seq=audit_seq+1, version=version+1, updated_at=?
+         WHERE run_id=? AND state=? AND reconciliation_owner=? AND reconciliation_fence=? AND reconciliation_lease_until>=? AND version=?`,
+      ).run(input.at, input.runId, state, input.reconciliation.owner, input.reconciliation.fence, input.reconciliation.leaseValidAt, input.reconciliation.expectedVersion);
+      if (Number(updated.changes ?? 0) !== 1) throw new Error('fenced Agent event append lost its CAS after insert');
+      claim = this.loadReconciliationClaim(input.runId, input.reconciliation.owner);
+    });
+    return claim;
+  }
+
+  transitionAgentRun(input: AgentRunTransitionInput): boolean {
+    let changed = false;
+    this.tx(() => {
+      const row = this.db.prepare('SELECT * FROM agent_runs WHERE run_id = ?').get(input.runId) as AgentRunRow | undefined;
+      if (!row) return;
+      const prior = row.state as DurableAgentRunState;
+      if (isAgentTerminal(prior)) return;
+      if (input.expectedState && prior !== input.expectedState) return;
+      const nextTerminal = isAgentTerminal(input.nextState);
+      if (input.reconciliation) {
+        if (row.reconciliation_owner !== input.reconciliation.owner) return;
+        if (row.reconciliation_fence !== input.reconciliation.fence) return;
+        if ((row.reconciliation_lease_until ?? -1) < input.reconciliation.leaseValidAt) return;
+        if (input.reconciliation.expectedVersion !== undefined && row.version !== input.reconciliation.expectedVersion) return;
+      }
+      const terminalAt = input.patch?.terminalAt ?? (nextTerminal ? input.at : row.terminal_at);
+      const result = this.db.prepare(
+        `UPDATE agent_runs SET
+          state=?, approval_displayed_at=COALESCE(?, approval_displayed_at), approval_decision_at=COALESCE(?, approval_decision_at),
+          execution_started_at=COALESCE(?, execution_started_at), terminal_at=COALESCE(?, terminal_at),
+          result_json=COALESCE(?, result_json), error_json=COALESCE(?, error_json), exit_code=COALESCE(?, exit_code),
+          signal=COALESCE(?, signal), failure_code=COALESCE(?, failure_code), interruption_classification=COALESCE(?, interruption_classification),
+          containment_unit=COALESCE(?, containment_unit), containment_binding=COALESCE(?, containment_binding),
+          reconciliation_owner=?, reconciliation_lease_until=?,
+          audit_seq=audit_seq+1, version=version+1, updated_at=?
+         WHERE run_id=? AND state=?${input.reconciliation ? ' AND reconciliation_owner=? AND reconciliation_fence=? AND reconciliation_lease_until>=?' : ''}${input.reconciliation?.expectedVersion !== undefined ? ' AND version=?' : ''}`,
+      ).run(
+        input.nextState, input.patch?.approvalDisplayedAt ?? null, input.patch?.approvalDecisionAt ?? null,
+        input.patch?.executionStartedAt ?? null, terminalAt ?? null, input.patch?.resultJson ?? null, input.patch?.errorJson ?? null,
+        input.patch && 'exitCode' in input.patch ? input.patch.exitCode ?? null : null, input.patch?.signal ?? null, input.patch?.failureCode ?? null,
+        input.patch?.interruptionClassification ?? null, input.patch?.containmentUnit ?? null, input.patch?.containmentBinding ?? null,
+        nextTerminal ? null : row.reconciliation_owner, nextTerminal ? null : row.reconciliation_lease_until,
+        input.at, input.runId, prior,
+        ...(input.reconciliation ? [input.reconciliation.owner, input.reconciliation.fence, input.reconciliation.leaseValidAt] : []),
+        ...(input.reconciliation?.expectedVersion !== undefined ? [input.reconciliation.expectedVersion] : []),
+      );
+      if (Number(result.changes ?? 0) !== 1) return;
+      this.appendAgentRunEventInside({
+        eventId: input.eventId ?? `${input.runId}:${row.audit_seq + 1}:${input.eventType}`,
+        runId: input.runId,
+        seq: row.audit_seq + 1,
+        at: input.at,
+        type: input.eventType,
+        priorState: prior,
+        nextState: input.nextState,
+        reason: input.reason,
+        correlationId: row.correlation_id,
+        source: input.source,
+        schemaVersion: 1,
+      });
+      changed = true;
+    });
+    return changed;
+  }
+
+  loadAgentRuns(limit = 5000): DurableAgentRun[] {
+    return (this.db.prepare('SELECT * FROM agent_runs ORDER BY updated_at DESC LIMIT ?').all(clampLimit(limit)) as unknown as AgentRunRow[]).map(rowToAgentRun);
+  }
+
+  loadAgentRun(runId: string): DurableAgentRun | undefined {
+    const row = this.db.prepare('SELECT * FROM agent_runs WHERE run_id = ?').get(runId) as AgentRunRow | undefined;
+    return row ? rowToAgentRun(row) : undefined;
+  }
+
+  loadAgentRunEvents(runId: string, limit = 500): DurableAgentRunEvent[] {
+    return (this.db.prepare('SELECT * FROM agent_run_events WHERE run_id = ? ORDER BY seq ASC LIMIT ?').all(runId, clampLimit(limit)) as unknown as AgentRunEventRow[]).map(rowToAgentRunEvent);
+  }
+
+  claimAgentRunReconciliation(runId: string, owner: string, leaseUntil: number, now: number): AgentRunReconciliationClaim | undefined {
+    const result = this.db.prepare(
+      `UPDATE agent_runs SET reconciliation_owner=?, reconciliation_lease_until=?, reconciliation_fence=reconciliation_fence+1, version=version+1, updated_at=?
+       WHERE run_id=? AND state NOT IN ('COMPLETED','REJECTED','EXPIRED','STALE','FAILED','CANCELLED')
+       AND (reconciliation_owner IS NULL OR reconciliation_lease_until IS NULL OR reconciliation_lease_until < ?)`,
+    ).run(owner, leaseUntil, now, runId, now);
+    if (Number(result.changes ?? 0) !== 1) return undefined;
+    return this.loadReconciliationClaim(runId, owner);
+  }
+
+  renewAgentRunReconciliation(runId: string, owner: string, fence: number, leaseUntil: number, now: number): AgentRunReconciliationClaim | undefined {
+    const result = this.db.prepare(
+      `UPDATE agent_runs SET reconciliation_lease_until=?, version=version+1, updated_at=?
+       WHERE run_id=? AND reconciliation_owner=? AND reconciliation_fence=? AND reconciliation_lease_until>=?
+       AND state NOT IN ('COMPLETED','REJECTED','EXPIRED','STALE','FAILED','CANCELLED')`,
+    ).run(leaseUntil, now, runId, owner, fence, now);
+    if (Number(result.changes ?? 0) !== 1) return undefined;
+    return this.loadReconciliationClaim(runId, owner);
+  }
+
+  pruneAgentRuns(cutoff: number, batchSize: number, now: number): { runs: number; events: number } {
+    const limit = clampLimit(batchSize);
+    let runs = 0;
+    let events = 0;
+    this.tx(() => {
+      const candidates = (this.db.prepare(
+        `SELECT run_id, version, audit_seq, state, workspace_identity, recipe_id, terminal_at FROM agent_runs
+         WHERE terminal_at IS NOT NULL AND terminal_at < ?
+         AND state IN ('COMPLETED','REJECTED','EXPIRED','STALE','FAILED','CANCELLED')
+         AND (reconciliation_owner IS NULL OR reconciliation_lease_until IS NULL OR reconciliation_lease_until < ?)
+         ORDER BY terminal_at ASC LIMIT ?`,
+      ).all(cutoff, now, limit) as Array<{ run_id: string; version: number; audit_seq: number; state: DurableAgentRunState; workspace_identity: string; recipe_id: string; terminal_at: number }>);
+      for (const candidate of candidates) {
+        const runId = candidate.run_id;
+        const eventCount = (this.db.prepare('SELECT count(*) c FROM agent_run_events WHERE run_id = ?').get(runId) as { c: number }).c;
+        this.db.prepare(
+          `INSERT INTO agent_run_tombstones(tombstone_id,run_id,workspace_identity,recipe_id,final_state,terminal_at,deleted_at,deletion_reason,final_audit_seq,event_count,schema_version)
+           VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
+        ).run(`tombstone_${runId}_${now}`, runId, candidate.workspace_identity, candidate.recipe_id, candidate.state, candidate.terminal_at, now, 'RETENTION_EXPIRED', candidate.audit_seq, eventCount, 1);
+        const delEvents = this.db.prepare('DELETE FROM agent_run_events WHERE run_id = ?').run(runId);
+        events += Number(delEvents.changes ?? 0);
+        const delRun = this.db.prepare(
+          `DELETE FROM agent_runs WHERE run_id = ? AND version = ?
+           AND (reconciliation_owner IS NULL OR reconciliation_lease_until IS NULL OR reconciliation_lease_until < ?)`,
+        ).run(runId, candidate.version, now);
+        if (Number(delRun.changes ?? 0) !== 1) throw new Error(`Agent run ${runId} became retention-ineligible during cleanup`);
+        runs += Number(delRun.changes ?? 0);
+      }
+    });
+    return { runs, events };
+  }
+
+  loadAgentRunTombstones(limit = 500): DurableAgentRunTombstone[] {
+    return (this.db.prepare('SELECT * FROM agent_run_tombstones ORDER BY deleted_at DESC LIMIT ?').all(clampLimit(limit)) as unknown as AgentRunTombstoneRow[]).map(rowToAgentRunTombstone);
+  }
+
+  private appendAgentRunEventInside(e: DurableAgentRunEvent): void {
+    this.db.prepare(
+      `INSERT OR IGNORE INTO agent_run_events(event_id,run_id,seq,at,type,prior_state,next_state,reason,correlation_id,source,schema_version)
+       VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
+    ).run(e.eventId, e.runId, e.seq, e.at, e.type, e.priorState ?? null, e.nextState, e.reason ?? null, e.correlationId, e.source, e.schemaVersion);
   }
 
   private tx(fn: () => void): void {
@@ -432,6 +863,98 @@ export class SqliteDurableStore implements DurableStore {
       try { this.db.exec('ROLLBACK'); } catch { /* ignore */ }
       throw e;
     }
+  }
+
+  private tableColumns(table: string): Array<{ name: string; type: string; notnull: number; pk: number; dflt_value: string | null }> {
+    return this.db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string; type: string; notnull: number; pk: number; dflt_value: string | null }>;
+  }
+
+  private hasDurableObjects(): boolean {
+    const row = this.db.prepare(
+      `SELECT name FROM sqlite_master
+       WHERE type IN ('table','index','trigger','view')
+       AND name NOT LIKE 'sqlite_%'
+       AND name != 'schema_meta'
+       LIMIT 1`,
+    ).get() as { name: string } | undefined;
+    return row !== undefined;
+  }
+
+  private assertAgentRunSchema(): void {
+    for (const [table, columns] of Object.entries(EXPECTED_AGENT_TABLES)) this.assertColumns(table, columns, true);
+    for (const index of EXPECTED_AGENT_INDEXES) this.assertIndex(index.table, index.name, index.columns, index.unique, index.partial);
+    this.assertUniqueIndex('agent_run_events', ['run_id', 'seq']);
+    for (const key of EXPECTED_AGENT_FOREIGN_KEYS) this.assertForeignKey(key.table, key.foreignTable, key.columns, key.foreignColumns, key.onDelete);
+  }
+
+  private assertSchemaMeta(): void {
+    this.assertColumns('schema_meta', EXPECTED_SCHEMA_META_COLUMNS);
+    const rows = this.db.prepare('SELECT value FROM schema_meta WHERE key = ?').all('schema_version') as Array<{ value: string }>;
+    if (rows.length !== 1) throw new Error(`db schema v${SCHEMA_VERSION} schema_meta must contain exactly one schema_version row`);
+    if (rows[0]?.value !== String(SCHEMA_VERSION)) throw new Error(`db schema v${SCHEMA_VERSION} schema_meta has incompatible schema_version`);
+  }
+
+  private assertColumns(table: string, expected: Record<string, ExpectedColumn>, exact = false): void {
+    const columns = this.tableColumns(table);
+    const actual = new Map(columns.map((column) => [column.name, column]));
+    if (actual.size === 0) throw new Error(`db schema v${SCHEMA_VERSION} missing table ${table}`);
+    for (const [name, requirement] of Object.entries(expected)) {
+      const column = actual.get(name);
+      if (!column) throw new Error(`db schema v${SCHEMA_VERSION} missing ${table}.${name}`);
+      if (column.type.toUpperCase() !== requirement.type) throw new Error(`db schema v${SCHEMA_VERSION} has incompatible ${table}.${name} type`);
+      if (requirement.notnull && column.notnull !== 1) throw new Error(`db schema v${SCHEMA_VERSION} has nullable ${table}.${name}`);
+      if (requirement.pk !== undefined && column.pk !== requirement.pk) throw new Error(`db schema v${SCHEMA_VERSION} missing primary key on ${table}.${name}`);
+      if (requirement.dflt !== undefined && column.dflt_value !== requirement.dflt) throw new Error(`db schema v${SCHEMA_VERSION} has incompatible default on ${table}.${name}`);
+    }
+    if (exact) {
+      const expectedNames = new Set(Object.keys(expected));
+      for (const column of columns) if (!expectedNames.has(column.name)) throw new Error(`db schema v${SCHEMA_VERSION} has unexpected ${table}.${column.name}`);
+    }
+  }
+
+  private assertIndex(table: string, indexName: string, columns: string[], unique: boolean, partial?: string): void {
+    const indexes = this.db.prepare(`PRAGMA index_list(${table})`).all() as Array<{ name: string; unique: number; partial: number }>;
+    const found = indexes.find((index) => index.name === indexName);
+    if (!found) throw new Error(`db schema v${SCHEMA_VERSION} missing index ${indexName}`);
+    if (Boolean(found.unique) !== unique) throw new Error(`db schema v${SCHEMA_VERSION} has incompatible uniqueness for ${indexName}`);
+    const actual = (this.db.prepare(`PRAGMA index_info(${indexName})`).all() as Array<{ name: string }>).map((row) => row.name);
+    if (actual.join('\0') !== columns.join('\0')) throw new Error(`db schema v${SCHEMA_VERSION} has incompatible columns for ${indexName}`);
+    if (partial !== undefined) {
+      const row = this.db.prepare("SELECT sql FROM sqlite_master WHERE type='index' AND name=?").get(indexName) as { sql?: string } | undefined;
+      if (!row?.sql?.includes(partial)) throw new Error(`db schema v${SCHEMA_VERSION} has incompatible partial predicate for ${indexName}`);
+    } else if (found.partial !== 0) {
+      throw new Error(`db schema v${SCHEMA_VERSION} has unexpected partial predicate for ${indexName}`);
+    }
+  }
+
+  private assertUniqueIndex(table: string, columns: string[]): void {
+    const indexes = this.db.prepare(`PRAGMA index_list(${table})`).all() as Array<{ name: string; unique: number }>;
+    for (const index of indexes.filter((candidate) => candidate.unique === 1)) {
+      const actual = (this.db.prepare(`PRAGMA index_info(${index.name})`).all() as Array<{ name: string }>).map((row) => row.name);
+      if (actual.join('\0') === columns.join('\0')) return;
+    }
+    throw new Error(`db schema v${SCHEMA_VERSION} missing unique index on ${table}(${columns.join(',')})`);
+  }
+
+  private assertForeignKey(table: string, foreignTable: string, columns: string[], foreignColumns: string[], onDelete: string): void {
+    const keys = this.db.prepare(`PRAGMA foreign_key_list(${table})`).all() as Array<{ table: string; from: string; to: string; on_delete: string; id: number; seq: number }>;
+    const grouped = new Map<number, Array<{ table: string; from: string; to: string; on_delete: string; seq: number }>>();
+    for (const key of keys) grouped.set(key.id, [...(grouped.get(key.id) ?? []), key]);
+    for (const group of grouped.values()) {
+      const ordered = group.sort((a, b) => a.seq - b.seq);
+      if (
+        ordered[0]?.table === foreignTable &&
+        ordered[0]?.on_delete.toUpperCase() === onDelete &&
+        ordered.map((key) => key.from).join('\0') === columns.join('\0') &&
+        ordered.map((key) => key.to).join('\0') === foreignColumns.join('\0')
+      ) return;
+    }
+    throw new Error(`db schema v${SCHEMA_VERSION} missing foreign key ${table}(${columns.join(',')}) -> ${foreignTable}(${foreignColumns.join(',')})`);
+  }
+
+  private loadReconciliationClaim(runId: string, owner: string): AgentRunReconciliationClaim | undefined {
+    const row = this.db.prepare('SELECT run_id,reconciliation_owner,reconciliation_fence,reconciliation_lease_until,version FROM agent_runs WHERE run_id=? AND reconciliation_owner=?').get(runId, owner) as { run_id: string; reconciliation_owner: string; reconciliation_fence: number; reconciliation_lease_until: number; version: number } | undefined;
+    return row ? { runId: row.run_id, owner: row.reconciliation_owner, fence: row.reconciliation_fence, leaseUntil: row.reconciliation_lease_until, version: row.version } : undefined;
   }
 }
 

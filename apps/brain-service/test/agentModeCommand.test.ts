@@ -9,7 +9,7 @@ import { AgentActivationAuthority } from '../src/engine/agentActivation.js';
 import { auditStore } from '../src/engine/auditLog.js';
 import { AgentModeCommandService, type AgentModeRequestContext } from '../src/engine/agentModeCommandService.js';
 import { registerAgentModeCommandRoutes } from '../src/engine/agentModeCommandRoutes.js';
-import { AGENT_RECIPE_OUTPUT_CAP_BYTES, AGENT_RECIPE_POLICY_VERSION, AgentRecipePolicyError, AgentRecipeResolver, sanitizeAgentRecipeOutput, SystemdContainmentController, type AgentRecipeExecutionOutcome, type AgentRecipePlan, type AgentRecipeProcessManagerLike, type AgentRecipeResolverLike, type SystemdControlAdapter } from '../src/engine/agentRecipe.js';
+import { AGENT_RECIPE_OUTPUT_CAP_BYTES, AGENT_RECIPE_POLICY_VERSION, AgentRecipePolicyError, AgentRecipeResolver, containmentIdentityForPlan, sanitizeAgentRecipeOutput, SystemdContainmentController, type AgentContainmentIdentity, type AgentContainmentReconcileOutcome, type AgentRecipeExecutionOutcome, type AgentRecipePlan, type AgentRecipeProcessManagerLike, type AgentRecipeResolverLike, type SystemdControlAdapter } from '../src/engine/agentRecipe.js';
 import { CapabilityRegistry } from '../src/engine/capabilityRegistry.js';
 import { ToolApprovalStore, hashInput } from '../src/engine/toolApprovalStore.js';
 import { ToolAudit } from '../src/engine/toolAudit.js';
@@ -73,11 +73,13 @@ class FakeProcesses implements AgentRecipeProcessManagerLike {
   wake?: () => void;
   async availability() { return this.available ? ({ ok: true, policy: 'fake' } as const) : ({ ok: false, code: 'CONTAINMENT_UNAVAILABLE', message: 'no cgroup' } as const); }
   activeCount(): number { return this.active; }
-  async execute(_runId: string, value: AgentRecipePlan, hooks: { onSpawned(): void }, signal?: AbortSignal): Promise<AgentRecipeExecutionOutcome> {
+  reconcileOutcome?: AgentContainmentReconcileOutcome;
+  reconcileCalls = 0;
+  async execute(runId: string, value: AgentRecipePlan, hooks: { onSpawned(identity: AgentContainmentIdentity): void }, signal?: AbortSignal): Promise<AgentRecipeExecutionOutcome> {
     if (this.failureCode === 'START_FAILED') throw new AgentRecipePolicyError('START_FAILED', 'injected start failure');
     this.starts += 1;
     this.active += 1;
-    hooks.onSpawned();
+    hooks.onSpawned(containmentIdentityForPlan(runId, value));
     await new Promise<void>((resolve) => {
       const timer = setTimeout(resolve, this.delayMs);
       this.wake = () => { clearTimeout(timer); resolve(); };
@@ -87,6 +89,10 @@ class FakeProcesses implements AgentRecipeProcessManagerLike {
     if (this.failureCode) throw new AgentRecipePolicyError(this.failureCode, 'injected containment failure');
     const disposition = this.shutdownRequested ? 'shutdown' : signal?.aborted ? 'cancelled' : this.forcedDisposition ?? 'completed';
     return { disposition, result: { recipe: value.identity.recipe, exitCode: disposition === 'completed' ? 0 : null, timedOut: disposition === 'timed_out', stdout: '', stderr: '', truncated: false, redacted: false, durationMs: this.delayMs } };
+  }
+  async reconcileRun(): Promise<AgentContainmentReconcileOutcome> {
+    this.reconcileCalls += 1;
+    return this.reconcileOutcome ?? { code: 'RESTART_NO_CONTAINMENT_FOUND', terminated: false, cgroupEmpty: true };
   }
   async shutdown(): Promise<void> { this.shutdownRequested = true; this.wake?.(); }
 }
