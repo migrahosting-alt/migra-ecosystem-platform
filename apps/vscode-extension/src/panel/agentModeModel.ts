@@ -37,3 +37,15 @@ export function renderPreviewLines(preview: AgentModeCommandPreview): string[] {
     ...preview.warnings.map((warning) => `Warning: ${warning}`),
   ];
 }
+
+export function agentModeControlState(state: AgentModeState): { approve: boolean; reject: boolean; cancel: boolean; reconcile: boolean; resume: false; restartLabel?: string } {
+  const interrupted = state === 'STALE' || state === 'FAILED' || state === 'EXPIRED';
+  return {
+    approve: state === 'AWAITING_APPROVAL',
+    reject: state === 'AWAITING_APPROVAL',
+    cancel: state === 'PLANNING' || state === 'AWAITING_APPROVAL' || state === 'APPROVED' || state === 'EXECUTING',
+    reconcile: true,
+    resume: false,
+    ...(interrupted ? { restartLabel: 'Interrupted or stale Agent run — create a new proposal to continue.' } : {}),
+  };
+}

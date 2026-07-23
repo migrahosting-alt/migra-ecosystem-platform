@@ -54,7 +54,7 @@ test('verifyIntegrity reports ok and health is healthy on a fresh store', () => 
   const h = maint.health();
   assert.equal(h.reachable, true);
   assert.equal(h.schemaCurrent, true);
-  assert.equal(h.schemaVersion, 2);
+  assert.equal(h.schemaVersion, 4);
   assert.equal(h.integrity, 'ok');
   assert.equal(h.status, 'healthy');
   assert.ok(typeof h.writeLatencyMs === 'number' && h.writeLatencyMs >= 0);

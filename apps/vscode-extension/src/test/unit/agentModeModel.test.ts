@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { AgentModeSessionGate, agentModeStatusText, renderPreviewLines } from '../../panel/agentModeModel.js';
+import { AgentModeSessionGate, agentModeControlState, agentModeStatusText, renderPreviewLines } from '../../panel/agentModeModel.js';
 
 test('Agent Mode session gate resets OFF on view recreation/disposal', () => {
   const gate = new AgentModeSessionGate();
@@ -49,4 +49,16 @@ test('preview renderer displays exact authoritative argv and redacted environmen
   assert.ok(lines.includes('Arg 1: --no-pager'));
   assert.ok(lines.includes('Environment API_TOKEN: [REDACTED]'));
   assert.doesNotMatch(lines.join('\n'), /npm test --if-present/);
+});
+
+test('restart-restored Agent runs are view/reconcile only: no hidden resume or approval controls', () => {
+  for (const state of ['STALE', 'FAILED', 'EXPIRED', 'CANCELLED', 'COMPLETED'] as const) {
+    const controls = agentModeControlState(state);
+    assert.equal(controls.resume, false);
+    assert.equal(controls.approve, false);
+    assert.equal(controls.reject, false);
+    assert.equal(controls.reconcile, true);
+  }
+  assert.match(agentModeControlState('FAILED').restartLabel ?? '', /new proposal/);
+  assert.equal(agentModeControlState('AWAITING_APPROVAL').approve, true);
 });

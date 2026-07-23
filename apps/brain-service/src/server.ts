@@ -40,6 +40,7 @@ import { registerBudgetRoutes } from './engine/providers/budget/budgetRoutes.js'
 import { AgentRegistry } from './engine/agentRegistry.js';
 import { registerAgentModeCommandRoutes } from './engine/agentModeCommandRoutes.js';
 import { AgentActivationAuthority } from './engine/agentActivation.js';
+import { buildAgentModeCommandService } from './engine/agentModeCommandService.js';
 import { AgentService } from './engine/agentRuntime.js';
 import { AgentRunStore } from './engine/agentRunStore.js';
 import { buildPilotRuntimeClient } from './engine/pilot/pilotApiRuntimeClient.js';
@@ -321,7 +322,10 @@ async function main(): Promise<void> {
   // Stage 2: explicit local Agent Mode command lifecycle. This dedicated route
   // renders server-authoritative proposals and resumes by run id; ordinary chat
   // has no reference to it and cannot approve or execute commands.
-  const agentModeCommands = registerAgentModeCommandRoutes(app, toolDeps, agentActivation);
+  const agentModeCommands = buildAgentModeCommandService(toolDeps, durable ?? undefined);
+  registerAgentModeCommandRoutes(app, toolDeps, agentActivation, agentModeCommands);
+  const agentModeReconciliation = await agentModeCommands.reconcileOnStartup();
+  if (agentModeReconciliation.scanned > 0) app.log.info({ agentModeReconciliation }, 'Agent Mode durable run reconciliation completed');
   app.addHook('onClose', async () => { await agentModeCommands.shutdown(); agentActivation.shutdown(); });
   // Connect configured MCP servers and register their tools (best-effort; the
   // brain runs fine with none). Fire-and-forget so a slow server never delays
