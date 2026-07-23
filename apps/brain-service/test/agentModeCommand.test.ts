@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
@@ -9,8 +9,10 @@ import { AgentActivationAuthority } from '../src/engine/agentActivation.js';
 import { auditStore } from '../src/engine/auditLog.js';
 import { AgentModeCommandService, type AgentModeRequestContext } from '../src/engine/agentModeCommandService.js';
 import { registerAgentModeCommandRoutes } from '../src/engine/agentModeCommandRoutes.js';
+import { AgentRunJournal } from '../src/engine/agentRunJournal.js';
 import { AGENT_RECIPE_OUTPUT_CAP_BYTES, AGENT_RECIPE_POLICY_VERSION, AgentRecipePolicyError, AgentRecipeResolver, containmentIdentityForPlan, sanitizeAgentRecipeOutput, SystemdContainmentController, type AgentContainmentIdentity, type AgentContainmentReconcileOutcome, type AgentRecipeExecutionOutcome, type AgentRecipePlan, type AgentRecipeProcessManagerLike, type AgentRecipeResolverLike, type SystemdControlAdapter } from '../src/engine/agentRecipe.js';
 import { CapabilityRegistry } from '../src/engine/capabilityRegistry.js';
+import { SqliteDurableStore } from '../src/engine/persistence/sqliteStore.js';
 import { ToolApprovalStore, hashInput } from '../src/engine/toolApprovalStore.js';
 import { ToolAudit } from '../src/engine/toolAudit.js';
 import { registerMigraPilotCors } from '../src/http/corsPolicy.js';
@@ -56,7 +58,12 @@ function plan(workspace: string, runId = 'agentcmd_1'): AgentRecipePlan {
 class FakeResolver implements AgentRecipeResolverLike {
   valid = true;
   releases = 0;
-  async prepare(_recipe: 'git.status' | 'git.diff', workspace: string, input: { runId: string }): Promise<AgentRecipePlan> { return plan(workspace, input.runId); }
+  envSecret?: string;
+  async prepare(_recipe: 'git.status' | 'git.diff', workspace: string, input: { runId: string }): Promise<AgentRecipePlan> {
+    const prepared = plan(workspace, input.runId);
+    if (this.envSecret) prepared.environment.MIGRAPILOT_SENTINEL_SECRET = this.envSecret;
+    return prepared;
+  }
   async verify(): Promise<boolean> { return this.valid; }
   async release(): Promise<void> { this.releases += 1; }
   binding(value: AgentRecipePlan): string { return hashInput(value.identity); }
@@ -70,6 +77,8 @@ class FakeProcesses implements AgentRecipeProcessManagerLike {
   shutdownRequested = false;
   failureCode?: 'TERMINATION_FAILED' | 'START_FAILED';
   forcedDisposition?: AgentRecipeExecutionOutcome['disposition'];
+  stdout = '';
+  stderr = '';
   wake?: () => void;
   async availability() { return this.available ? ({ ok: true, policy: 'fake' } as const) : ({ ok: false, code: 'CONTAINMENT_UNAVAILABLE', message: 'no cgroup' } as const); }
   activeCount(): number { return this.active; }
@@ -88,7 +97,7 @@ class FakeProcesses implements AgentRecipeProcessManagerLike {
     this.active -= 1;
     if (this.failureCode) throw new AgentRecipePolicyError(this.failureCode, 'injected containment failure');
     const disposition = this.shutdownRequested ? 'shutdown' : signal?.aborted ? 'cancelled' : this.forcedDisposition ?? 'completed';
-    return { disposition, result: { recipe: value.identity.recipe, exitCode: disposition === 'completed' ? 0 : null, timedOut: disposition === 'timed_out', stdout: '', stderr: '', truncated: false, redacted: false, durationMs: this.delayMs } };
+    return { disposition, result: { recipe: value.identity.recipe, exitCode: disposition === 'completed' ? 0 : null, timedOut: disposition === 'timed_out', stdout: this.stdout, stderr: this.stderr, truncated: false, redacted: false, durationMs: this.delayMs } };
   }
   async reconcileRun(): Promise<AgentContainmentReconcileOutcome> {
     this.reconcileCalls += 1;
@@ -296,12 +305,118 @@ test('HTTP Agent routes reject every Origin-bearing request at the boundary with
   assert.equal(hostileReject.statusCode, 403);
   const hostileCancel = await app.inject({ method: 'POST', url: `/api/ai/agent-mode/commands/${run.runId}/cancel`, headers: { ...authHeaders, ...hostileHeaders }, payload: {} });
   assert.equal(hostileCancel.statusCode, 403);
+  const hostileRecovery = await app.inject({ method: 'GET', url: `/api/ai/agent-mode/commands/${run.runId}/recovery`, headers: { ...authHeaders, ...hostileHeaders } });
+  assert.equal(hostileRecovery.statusCode, 403);
+  const hostileReproposal = await app.inject({ method: 'POST', url: `/api/ai/agent-mode/commands/${run.runId}/repropose`, headers: { ...authHeaders, ...hostileHeaders }, payload: { requestId: 'stage3b-hostile-recovery' } });
+  assert.equal(hostileReproposal.statusCode, 403);
   assert.equal(processes.starts, 0);
   assert.equal((service.get(run.runId, context(workspace)) as { ok: true; view: { state: string } }).view.state, 'AWAITING_APPROVAL');
 
   await app.close();
   authority.shutdown();
   await service.shutdown();
+});
+
+test('dynamic sentinel matrix redacts reusable authority across Agent HTTP, audit, durable recovery, and retention surfaces', async () => {
+  let now = 10_000;
+  let sequence = 0;
+  const unique = `stage3b_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+  const sentinels = {
+    bootstrap: `bootstrap-secret-${unique}`.padEnd(48, 'b'),
+    capability: `agentcap_${unique}_server_authority_123456789`,
+    approval: `appr_private_${unique}_single_use_123456789`,
+    authorization: `Bearer ghp_${'A'.repeat(32)}_${unique}`,
+    operator: `operator confirmation contains ghp_${'B'.repeat(32)} ${unique}`,
+    env: `env_secret_${unique}`,
+    stdout: `stdout has ghp_${'C'.repeat(32)} ${unique}`,
+    stderr: `stderr has sk-${'D'.repeat(48)} ${unique}`,
+    exception: `sqlite locked at /home/bonex/${unique} with token ghp_${'E'.repeat(32)}`,
+    privateKey: `-----BEGIN PRIVATE KEY-----\n${'F'.repeat(64)}\n-----END PRIVATE KEY-----`,
+  };
+  const workspace = root();
+  const dbPath = path.join(workspace, 'agent.sqlite');
+  const persistence = new SqliteDurableStore(dbPath);
+  const approvals = new ToolApprovalStore(() => now, () => sentinels.approval, 100);
+  const deps = { registry: new CapabilityRegistry(), approvals, audit: new ToolAudit() };
+  const resolver = new FakeResolver();
+  resolver.envSecret = sentinels.env;
+  const processes = new FakeProcesses();
+  processes.stdout = `${sentinels.stdout}\n${sentinels.privateKey}`;
+  processes.stderr = sentinels.stderr;
+  const journal = new AgentRunJournal(persistence, { terminalRetentionMs: 1, retentionBatchSize: 10, reconciliationLeaseMs: 30_000 }, () => `sentinel_event_${++sequence}`);
+  let service = new AgentModeCommandService(deps, () => now, () => `agentcmd_sentinel_${++sequence}`, resolver, processes, journal, `svc_sentinel_${++sequence}`);
+  const authority = new AgentActivationAuthority(sentinels.bootstrap, () => now, () => sentinels.capability, process.pid);
+  const app = Fastify({ logger: false });
+  registerAgentModeCommandRoutes(app, deps, authority, service);
+  await app.ready();
+
+  const bootstrapPayload = { bootstrapSecret: sentinels.bootstrap, activationId: ACTIVATION, extensionProcessId: process.pid, bootstrapMode: 'inherited' as const, workspaceRoot: workspace };
+  const boot = await app.inject({ method: 'POST', url: '/api/ai/agent-mode/bootstrap', payload: bootstrapPayload });
+  assert.equal(boot.statusCode, 200);
+  const capability = (boot.json() as { activationCapability: string }).activationCapability;
+  const authHeaders = { authorization: sentinels.authorization, 'x-migrapilot-agent-capability': capability, 'x-migrapilot-workspace-root': workspace };
+  const proposeBody = { rootPath: workspace, recipe: 'git.status', reason: `${sentinels.operator}\n${sentinels.privateKey}` };
+
+  const rejectedProposal = await app.inject({ method: 'POST', url: '/api/ai/agent-mode/commands', headers: authHeaders, payload: proposeBody });
+  assert.equal(rejectedProposal.statusCode, 200);
+  const rejected = rejectedProposal.json() as { runId: string; preview: { fingerprint: string } };
+  const displayed = await app.inject({ method: 'POST', url: `/api/ai/agent-mode/commands/${rejected.runId}/displayed`, headers: authHeaders, payload: { fingerprint: rejected.preview.fingerprint } });
+  assert.equal(displayed.statusCode, 200, displayed.body);
+  const reject = await app.inject({ method: 'POST', url: `/api/ai/agent-mode/commands/${rejected.runId}/decision`, headers: authHeaders, payload: { decision: 'reject', fingerprint: rejected.preview.fingerprint } });
+  assert.equal(reject.statusCode, 200);
+
+  const completedProposal = await app.inject({ method: 'POST', url: '/api/ai/agent-mode/commands', headers: authHeaders, payload: proposeBody });
+  assert.equal(completedProposal.statusCode, 200);
+  const completed = completedProposal.json() as { runId: string; preview: { fingerprint: string } };
+  await app.inject({ method: 'POST', url: `/api/ai/agent-mode/commands/${completed.runId}/displayed`, headers: authHeaders, payload: { fingerprint: completed.preview.fingerprint } });
+  const approved = await app.inject({ method: 'POST', url: `/api/ai/agent-mode/commands/${completed.runId}/decision`, headers: authHeaders, payload: { decision: 'approve', fingerprint: completed.preview.fingerprint } });
+  assert.equal(approved.statusCode, 200);
+  const completedView = await terminal(service, completed.runId, context(workspace));
+  assert.equal(completedView.state, 'COMPLETED');
+
+  const restartProposal = await app.inject({ method: 'POST', url: '/api/ai/agent-mode/commands', headers: authHeaders, payload: proposeBody });
+  assert.equal(restartProposal.statusCode, 200);
+  const restart = restartProposal.json() as { runId: string };
+  await app.close();
+  await service.shutdown();
+
+  service = new AgentModeCommandService(deps, () => now, () => `agentcmd_sentinel_${++sequence}`, resolver, processes, journal, `svc_sentinel_${++sequence}`);
+  const restartSummary = await service.reconcileOnStartup();
+  assert.equal(restartSummary.outcomes.RESTART_AUTHORIZATION_LOST, 1);
+  const recoveryContext = { ...context(workspace), workspaceIdentity: persistence.loadAgentRun(restart.runId)!.workspaceIdentity };
+  const recoveryStatus = service.getRunRecoveryStatus(restart.runId, recoveryContext);
+  assert.equal(recoveryStatus.ok, true);
+  const successor = await service.reproposeFromRun(restart.runId, { requestId: 'stage3b-dynamic-sentinel' }, recoveryContext);
+  assert.equal(successor.ok, true);
+  const duplicate = await service.reproposeFromRun(restart.runId, { requestId: 'stage3b-dynamic-sentinel' }, recoveryContext);
+  assert.equal(duplicate.ok, true);
+  const policyDenied = await service.reproposeFromRun(restart.runId, { requestId: 'stage3b-dynamic-policy-denied' }, { ...recoveryContext, allowedRecipes: ['git.diff'] });
+  assert.equal(policyDenied.ok, false);
+  const forgedStatus = service.getRunRecoveryStatus('agentcmd_forged_unknown', recoveryContext);
+  assert.equal(forgedStatus.ok, false);
+
+  now += 10_000;
+  journal.prune(now);
+  await service.shutdown();
+  authority.shutdown();
+  persistence.close();
+
+  const nonBootstrapResponses = [rejectedProposal.body, displayed.body, reject.body, completedProposal.body, approved.body, JSON.stringify(completedView), JSON.stringify(recoveryStatus), JSON.stringify(successor), JSON.stringify(duplicate), JSON.stringify(policyDenied), JSON.stringify(forgedStatus)].join('\n');
+  const durableBytes = [dbPath, `${dbPath}-wal`, `${dbPath}-shm`].filter((file) => existsSync(file)).map((file) => readFileSync(file, 'utf8')).join('\n');
+  const reopened = new SqliteDurableStore(dbPath);
+  const reopenedRuns = reopened.loadAgentRuns();
+  const durableRows = JSON.stringify({
+    runs: reopenedRuns,
+    events: reopenedRuns.flatMap((run) => reopened.loadAgentRunEvents(run.runId)),
+    tombstones: reopened.loadAgentRunTombstones(),
+    audit: auditStore.byCorrelation(completedView.requestId),
+    toolAudit: deps.audit.recent(),
+  });
+  reopened.close();
+  const scanned = `${nonBootstrapResponses}\n${durableBytes}\n${durableRows}`;
+  for (const raw of Object.values(sentinels)) {
+    assert.doesNotMatch(scanned, new RegExp(raw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), raw);
+  }
 });
 
 test('Agent output strips ANSI and redacts before cap truncation across chunk-equivalent boundaries', () => {

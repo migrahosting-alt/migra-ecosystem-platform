@@ -16,11 +16,30 @@ import type {
   ConversationPersistence, MemoryItemPersistence, RagIndexPersistence, EmbeddingCachePersistence,
   DurableStore, PersistenceHealth, PersistedChunk, PersistedIndexRecord,
   DurableAuditEvent, DurableUsageRecord, DurableIncident, DurableRecoveryEvent, DurableBudgetScope, DurableReservation, OperationalCounts,
-  DurableAgentRun, DurableAgentRunEvent, AgentRunTransitionInput, DurableAgentRunState, AgentRunReconciliationClaim, DurableAgentRunTombstone, AgentRunFencedEventInput,
+  DurableAgentRun, DurableAgentRunEvent, AgentRunTransitionInput, DurableAgentRunState, AgentRunReconciliationClaim, DurableAgentRunTombstone, AgentRunFencedEventInput, AgentRunReproposalInput, AgentRunReproposalResult,
 } from './types.js';
 import type { Conversation, Message, Summary, MemoryItem } from '../memory/conversationStore.js';
+import { validateRecoverySourceProvenance } from '../recoverySourceProvenance.js';
 
-export const SCHEMA_VERSION = 4;
+export const SCHEMA_VERSION = 5;
+
+export type AgentRunReproposalFaultPhase =
+  | 'recovery-status source read'
+  | 'source event read'
+  | 'provenance revalidation'
+  | 'idempotency lookup'
+  | 'successor run insert'
+  | 'successor proposal/event insert'
+  | 'source lineage update'
+  | 'source recovery event insert'
+  | 'successor lineage event insert'
+  | 'transaction commit';
+
+class AgentRunReproposalFault extends Error {
+  constructor(readonly phase: AgentRunReproposalFaultPhase) {
+    super(`injected agent reproposal sqlite fault: ${phase}`);
+  }
+}
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS schema_meta (key TEXT PRIMARY KEY, value TEXT);
@@ -125,6 +144,22 @@ CREATE TABLE IF NOT EXISTS agent_runs (
   signal TEXT,
   failure_code TEXT,
   interruption_classification TEXT,
+  approval_lifecycle_version INTEGER NOT NULL DEFAULT 1,
+  approval_lifecycle TEXT NOT NULL DEFAULT 'NOT_REQUESTED',
+  approval_requested_at INTEGER,
+  approval_expires_at INTEGER,
+  approval_decision_type TEXT,
+  approval_invalidation_reason TEXT,
+  approval_actor_ref TEXT,
+  recovery_class TEXT NOT NULL DEFAULT 'NONE',
+  recovery_eligible INTEGER NOT NULL DEFAULT 0,
+  recovery_reason TEXT,
+  recovery_source_run_id TEXT,
+  successor_run_id TEXT,
+  reproposal_at INTEGER,
+  recovery_attempt_count INTEGER NOT NULL DEFAULT 0,
+  last_recovery_request_id TEXT,
+  recovery_terminal_reason TEXT,
   audit_seq INTEGER NOT NULL DEFAULT 0,
   schema_version INTEGER NOT NULL,
   version INTEGER NOT NULL DEFAULT 1,
@@ -164,6 +199,8 @@ CREATE TABLE IF NOT EXISTS agent_run_tombstones (
   deletion_reason TEXT NOT NULL,
   final_audit_seq INTEGER NOT NULL,
   event_count INTEGER NOT NULL,
+  recovery_source_run_id TEXT,
+  successor_run_id TEXT,
   schema_version INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_agent_run_tombstones_deleted ON agent_run_tombstones(deleted_at);
@@ -187,10 +224,10 @@ interface IncidentRow { incident_id: string; dedup_key: string; correlation_id: 
 interface BudgetScopeRow { scope_id: string; kind: string; scope_key: string; hard_limit_usd: number; spent_usd: number; reserved_usd: number; period_start: number; updated_at: number }
 interface ReservationRow { reservation_id: string; amount_usd: number; scope_ids_json: string; correlation_id: string; provider_id: string; model_id: string; created_at: number; expires_at: number; status: string }
 interface AgentRunRow {
-  run_id: string; correlation_id: string; external_request_ref: string | null; activation_ref: string; workspace_identity: string; workspace_ref: string; recipe_id: string; recipe_policy_version: string; proposal_fingerprint: string; proposal_hash: string; snapshot_id: string; snapshot_manifest_digest: string; executable_digest: string; containment_unit: string | null; containment_binding: string | null; state: string; requested_at: number; proposal_at: number | null; approval_displayed_at: number | null; approval_decision_at: number | null; execution_started_at: number | null; terminal_at: number | null; expires_at: number; timeout_ms: number; output_limit_bytes: number; mutation_classification: string; network_policy: string; expected_effects_json: string; preview_json: string | null; result_json: string | null; error_json: string | null; exit_code: number | null; signal: string | null; failure_code: string | null; interruption_classification: string | null; audit_seq: number; schema_version: number; version: number; reconciliation_owner: string | null; reconciliation_lease_until: number | null; reconciliation_fence: number; updated_at: number;
+  run_id: string; correlation_id: string; external_request_ref: string | null; activation_ref: string; workspace_identity: string; workspace_ref: string; recipe_id: string; recipe_policy_version: string; proposal_fingerprint: string; proposal_hash: string; snapshot_id: string; snapshot_manifest_digest: string; executable_digest: string; containment_unit: string | null; containment_binding: string | null; state: string; requested_at: number; proposal_at: number | null; approval_displayed_at: number | null; approval_decision_at: number | null; execution_started_at: number | null; terminal_at: number | null; expires_at: number; timeout_ms: number; output_limit_bytes: number; mutation_classification: string; network_policy: string; expected_effects_json: string; preview_json: string | null; result_json: string | null; error_json: string | null; exit_code: number | null; signal: string | null; failure_code: string | null; interruption_classification: string | null; approval_lifecycle_version: number; approval_lifecycle: string; approval_requested_at: number | null; approval_expires_at: number | null; approval_decision_type: string | null; approval_invalidation_reason: string | null; approval_actor_ref: string | null; recovery_class: string; recovery_eligible: number; recovery_reason: string | null; recovery_source_run_id: string | null; successor_run_id: string | null; reproposal_at: number | null; recovery_attempt_count: number; last_recovery_request_id: string | null; recovery_terminal_reason: string | null; audit_seq: number; schema_version: number; version: number; reconciliation_owner: string | null; reconciliation_lease_until: number | null; reconciliation_fence: number; updated_at: number;
 }
 interface AgentRunEventRow { event_id: string; run_id: string; seq: number; at: number; type: string; prior_state: string | null; next_state: string; reason: string | null; correlation_id: string; source: DurableAgentRunEvent['source']; schema_version: number }
-interface AgentRunTombstoneRow { tombstone_id: string; run_id: string; workspace_identity: string; recipe_id: string; final_state: string; terminal_at: number; deleted_at: number; deletion_reason: string; final_audit_seq: number; event_count: number; schema_version: number }
+interface AgentRunTombstoneRow { tombstone_id: string; run_id: string; workspace_identity: string; recipe_id: string; final_state: string; terminal_at: number; deleted_at: number; deletion_reason: string; final_audit_seq: number; event_count: number; recovery_source_run_id: string | null; successor_run_id: string | null; schema_version: number }
 interface ExpectedColumn { type: string; notnull?: number; pk?: number; dflt?: string }
 interface ExpectedIndex { name: string; table: string; columns: string[]; unique: boolean; partial?: string }
 interface ExpectedForeignKey { table: string; foreignTable: string; columns: string[]; foreignColumns: string[]; onDelete: string }
@@ -237,6 +274,22 @@ const EXPECTED_AGENT_TABLES: Record<string, Record<string, ExpectedColumn>> = Ob
     signal: { type: 'TEXT' },
     failure_code: { type: 'TEXT' },
     interruption_classification: { type: 'TEXT' },
+    approval_lifecycle_version: { type: 'INTEGER', notnull: 1, dflt: '1' },
+    approval_lifecycle: { type: 'TEXT', notnull: 1, dflt: "'NOT_REQUESTED'" },
+    approval_requested_at: { type: 'INTEGER' },
+    approval_expires_at: { type: 'INTEGER' },
+    approval_decision_type: { type: 'TEXT' },
+    approval_invalidation_reason: { type: 'TEXT' },
+    approval_actor_ref: { type: 'TEXT' },
+    recovery_class: { type: 'TEXT', notnull: 1, dflt: "'NONE'" },
+    recovery_eligible: { type: 'INTEGER', notnull: 1, dflt: '0' },
+    recovery_reason: { type: 'TEXT' },
+    recovery_source_run_id: { type: 'TEXT' },
+    successor_run_id: { type: 'TEXT' },
+    reproposal_at: { type: 'INTEGER' },
+    recovery_attempt_count: { type: 'INTEGER', notnull: 1, dflt: '0' },
+    last_recovery_request_id: { type: 'TEXT' },
+    recovery_terminal_reason: { type: 'TEXT' },
     audit_seq: { type: 'INTEGER', notnull: 1, dflt: '0' },
     schema_version: { type: 'INTEGER', notnull: 1 },
     version: { type: 'INTEGER', notnull: 1, dflt: '1' },
@@ -269,6 +322,8 @@ const EXPECTED_AGENT_TABLES: Record<string, Record<string, ExpectedColumn>> = Ob
     deletion_reason: { type: 'TEXT', notnull: 1 },
     final_audit_seq: { type: 'INTEGER', notnull: 1 },
     event_count: { type: 'INTEGER', notnull: 1 },
+    recovery_source_run_id: { type: 'TEXT' },
+    successor_run_id: { type: 'TEXT' },
     schema_version: { type: 'INTEGER', notnull: 1 },
   }),
 });
@@ -279,6 +334,8 @@ const EXPECTED_AGENT_INDEXES: readonly ExpectedIndex[] = Object.freeze([
   { table: 'agent_runs', name: 'idx_agent_runs_terminal', columns: ['terminal_at', 'state'], unique: false },
   { table: 'agent_runs', name: 'idx_agent_runs_nonterminal', columns: ['state', 'reconciliation_lease_until', 'updated_at'], unique: false },
   { table: 'agent_runs', name: 'idx_agent_runs_reconciliation', columns: ['reconciliation_owner', 'reconciliation_fence', 'version', 'reconciliation_lease_until'], unique: false },
+  { table: 'agent_runs', name: 'idx_agent_runs_recovery_source', columns: ['recovery_source_run_id', 'updated_at'], unique: false },
+  { table: 'agent_runs', name: 'idx_agent_runs_active_successor', columns: ['recovery_source_run_id'], unique: true, partial: "recovery_source_run_id IS NOT NULL AND state NOT IN ('COMPLETED','REJECTED','EXPIRED','STALE','FAILED','CANCELLED')" },
   { table: 'agent_run_events', name: 'idx_agent_run_events_run', columns: ['run_id', 'seq'], unique: false },
   { table: 'agent_run_tombstones', name: 'idx_agent_run_tombstones_deleted', columns: ['deleted_at'], unique: false },
 ]);
@@ -315,7 +372,24 @@ function rowToAgentRun(r: AgentRunRow): DurableAgentRun {
     mutationClassification: r.mutation_classification, networkPolicy: r.network_policy, expectedEffectsJson: r.expected_effects_json,
     previewJson: r.preview_json ?? undefined, resultJson: r.result_json ?? undefined, errorJson: r.error_json ?? undefined,
     exitCode: r.exit_code ?? undefined, signal: r.signal ?? undefined, failureCode: r.failure_code ?? undefined,
-    interruptionClassification: r.interruption_classification ?? undefined, auditSeq: r.audit_seq, schemaVersion: r.schema_version,
+    interruptionClassification: r.interruption_classification ?? undefined,
+    approvalLifecycleVersion: r.approval_lifecycle_version,
+    approvalLifecycle: r.approval_lifecycle as DurableAgentRun['approvalLifecycle'],
+    approvalRequestedAt: r.approval_requested_at ?? undefined,
+    approvalExpiresAt: r.approval_expires_at ?? undefined,
+    approvalDecisionType: (r.approval_decision_type as DurableAgentRun['approvalDecisionType']) ?? undefined,
+    approvalInvalidationReason: r.approval_invalidation_reason ?? undefined,
+    approvalActorRef: r.approval_actor_ref ?? undefined,
+    recoveryClass: r.recovery_class as DurableAgentRun['recoveryClass'],
+    recoveryEligible: r.recovery_eligible === 1,
+    recoveryReason: r.recovery_reason ?? undefined,
+    recoverySourceRunId: r.recovery_source_run_id ?? undefined,
+    successorRunId: r.successor_run_id ?? undefined,
+    reproposalAt: r.reproposal_at ?? undefined,
+    recoveryAttemptCount: r.recovery_attempt_count,
+    lastRecoveryRequestId: r.last_recovery_request_id ?? undefined,
+    recoveryTerminalReason: r.recovery_terminal_reason ?? undefined,
+    auditSeq: r.audit_seq, schemaVersion: r.schema_version,
     version: r.version, reconciliationOwner: r.reconciliation_owner ?? undefined, reconciliationLeaseUntil: r.reconciliation_lease_until ?? undefined,
     reconciliationFence: r.reconciliation_fence,
     updatedAt: r.updated_at,
@@ -325,7 +399,9 @@ function rowToAgentRunTombstone(r: AgentRunTombstoneRow): DurableAgentRunTombsto
   return {
     tombstoneId: r.tombstone_id, runId: r.run_id, workspaceIdentity: r.workspace_identity, recipeId: r.recipe_id,
     finalState: r.final_state as DurableAgentRunState, terminalAt: r.terminal_at, deletedAt: r.deleted_at,
-    deletionReason: r.deletion_reason, finalAuditSeq: r.final_audit_seq, eventCount: r.event_count, schemaVersion: r.schema_version,
+    deletionReason: r.deletion_reason, finalAuditSeq: r.final_audit_seq, eventCount: r.event_count,
+    recoverySourceRunId: r.recovery_source_run_id ?? undefined, successorRunId: r.successor_run_id ?? undefined,
+    schemaVersion: r.schema_version,
   };
 }
 function rowToAgentRunEvent(r: AgentRunEventRow): DurableAgentRunEvent {
@@ -340,12 +416,38 @@ function isAgentTerminal(state: DurableAgentRunState): boolean {
   return state === 'COMPLETED' || state === 'REJECTED' || state === 'EXPIRED' || state === 'STALE' || state === 'FAILED' || state === 'CANCELLED';
 }
 
+class RecoveryEventInsertError extends Error {
+  constructor(readonly code: Extract<AgentRunReproposalResult, { ok: false }>['code']) {
+    super(code);
+  }
+}
+
+function recoveryInsertFailure(error: unknown): AgentRunReproposalResult {
+  if (error instanceof RecoveryEventInsertError) return { ok: false, code: error.code };
+  return { ok: false, code: 'PARTIAL_FAILURE' };
+}
+
+function eventEquivalent(a: DurableAgentRunEvent, b: DurableAgentRunEvent): boolean {
+  return a.eventId === b.eventId
+    && a.runId === b.runId
+    && a.seq === b.seq
+    && a.at === b.at
+    && a.type === b.type
+    && (a.priorState ?? null) === (b.priorState ?? null)
+    && a.nextState === b.nextState
+    && (a.reason ?? null) === (b.reason ?? null)
+    && a.correlationId === b.correlationId
+    && a.source === b.source
+    && a.schemaVersion === b.schemaVersion;
+}
+
 export class SqliteDurableStore implements DurableStore {
   private readonly db: DatabaseSync;
   private schemaVersion = 0;
   private migrationState = 'pending';
   private healthy: 'ready' | 'degraded' | 'unavailable' = 'unavailable';
   private detail?: string;
+  private agentRunReproposalFaultPhase?: AgentRunReproposalFaultPhase;
 
   constructor(path: string) {
     // Open + migrate up front. A failure here throws — the engine treats that as a
@@ -353,6 +455,10 @@ export class SqliteDurableStore implements DurableStore {
     this.db = new DatabaseSync(path);
     this.db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;');
     this.migrate();
+  }
+
+  injectAgentRunReproposalFaultForTest(phase?: AgentRunReproposalFaultPhase): void {
+    this.agentRunReproposalFaultPhase = phase;
   }
 
   private migrate(): void {
@@ -383,6 +489,26 @@ export class SqliteDurableStore implements DurableStore {
         this.db.exec(SCHEMA);
         const hasFence = this.tableColumns('agent_runs').some((column) => column.name === 'reconciliation_fence');
         if (!hasFence) this.db.exec('ALTER TABLE agent_runs ADD COLUMN reconciliation_fence INTEGER NOT NULL DEFAULT 0;');
+        this.addColumnIfMissing('agent_runs', 'approval_lifecycle_version', "INTEGER NOT NULL DEFAULT 1");
+        this.addColumnIfMissing('agent_runs', 'approval_lifecycle', "TEXT NOT NULL DEFAULT 'NOT_REQUESTED'");
+        this.addColumnIfMissing('agent_runs', 'approval_requested_at', 'INTEGER');
+        this.addColumnIfMissing('agent_runs', 'approval_expires_at', 'INTEGER');
+        this.addColumnIfMissing('agent_runs', 'approval_decision_type', 'TEXT');
+        this.addColumnIfMissing('agent_runs', 'approval_invalidation_reason', 'TEXT');
+        this.addColumnIfMissing('agent_runs', 'approval_actor_ref', 'TEXT');
+        this.addColumnIfMissing('agent_runs', 'recovery_class', "TEXT NOT NULL DEFAULT 'NONE'");
+        this.addColumnIfMissing('agent_runs', 'recovery_eligible', 'INTEGER NOT NULL DEFAULT 0');
+        this.addColumnIfMissing('agent_runs', 'recovery_reason', 'TEXT');
+        this.addColumnIfMissing('agent_runs', 'recovery_source_run_id', 'TEXT');
+        this.addColumnIfMissing('agent_runs', 'successor_run_id', 'TEXT');
+        this.addColumnIfMissing('agent_runs', 'reproposal_at', 'INTEGER');
+        this.addColumnIfMissing('agent_runs', 'recovery_attempt_count', 'INTEGER NOT NULL DEFAULT 0');
+        this.addColumnIfMissing('agent_runs', 'last_recovery_request_id', 'TEXT');
+        this.addColumnIfMissing('agent_runs', 'recovery_terminal_reason', 'TEXT');
+        this.addColumnIfMissing('agent_run_tombstones', 'recovery_source_run_id', 'TEXT');
+        this.addColumnIfMissing('agent_run_tombstones', 'successor_run_id', 'TEXT');
+        this.db.exec("CREATE INDEX IF NOT EXISTS idx_agent_runs_recovery_source ON agent_runs(recovery_source_run_id, updated_at);");
+        this.db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_runs_active_successor ON agent_runs(recovery_source_run_id) WHERE recovery_source_run_id IS NOT NULL AND state NOT IN ('COMPLETED','REJECTED','EXPIRED','STALE','FAILED','CANCELLED');");
         this.db.prepare('INSERT INTO schema_meta(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').run('schema_version', String(SCHEMA_VERSION));
       }
     });
@@ -669,18 +795,7 @@ export class SqliteDurableStore implements DurableStore {
 
   insertAgentRun(run: DurableAgentRun, createdEvent: DurableAgentRunEvent): void {
     this.tx(() => {
-      this.db.prepare(
-        `INSERT INTO agent_runs(run_id,correlation_id,external_request_ref,activation_ref,workspace_identity,workspace_ref,recipe_id,recipe_policy_version,proposal_fingerprint,proposal_hash,snapshot_id,snapshot_manifest_digest,executable_digest,containment_unit,containment_binding,state,requested_at,proposal_at,approval_displayed_at,approval_decision_at,execution_started_at,terminal_at,expires_at,timeout_ms,output_limit_bytes,mutation_classification,network_policy,expected_effects_json,preview_json,result_json,error_json,exit_code,signal,failure_code,interruption_classification,audit_seq,schema_version,version,reconciliation_owner,reconciliation_lease_until,reconciliation_fence,updated_at)
-         VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-      ).run(
-        run.runId, run.correlationId, run.externalRequestRef ?? null, run.activationRef, run.workspaceIdentity, run.workspaceRef,
-        run.recipeId, run.recipePolicyVersion, run.proposalFingerprint, run.proposalHash, run.snapshotId, run.snapshotManifestDigest,
-        run.executableDigest, run.containmentUnit ?? null, run.containmentBinding ?? null, run.state, run.requestedAt, run.proposalAt ?? null,
-        run.approvalDisplayedAt ?? null, run.approvalDecisionAt ?? null, run.executionStartedAt ?? null, run.terminalAt ?? null,
-        run.expiresAt, run.timeoutMs, run.outputLimitBytes, run.mutationClassification, run.networkPolicy, run.expectedEffectsJson,
-        run.previewJson ?? null, run.resultJson ?? null, run.errorJson ?? null, run.exitCode ?? null, run.signal ?? null, run.failureCode ?? null,
-        run.interruptionClassification ?? null, 0, run.schemaVersion, run.version, run.reconciliationOwner ?? null, run.reconciliationLeaseUntil ?? null, run.reconciliationFence ?? 0, run.updatedAt,
-      );
+      this.insertAgentRunInside(run);
       this.appendAgentRunEventInside({ ...createdEvent, seq: 1 });
       this.db.prepare('UPDATE agent_runs SET audit_seq = 1 WHERE run_id = ?').run(run.runId);
     });
@@ -746,6 +861,13 @@ export class SqliteDurableStore implements DurableStore {
           result_json=COALESCE(?, result_json), error_json=COALESCE(?, error_json), exit_code=COALESCE(?, exit_code),
           signal=COALESCE(?, signal), failure_code=COALESCE(?, failure_code), interruption_classification=COALESCE(?, interruption_classification),
           containment_unit=COALESCE(?, containment_unit), containment_binding=COALESCE(?, containment_binding),
+          approval_lifecycle=COALESCE(?, approval_lifecycle), approval_requested_at=COALESCE(?, approval_requested_at),
+          approval_expires_at=COALESCE(?, approval_expires_at), approval_decision_type=COALESCE(?, approval_decision_type),
+          approval_invalidation_reason=COALESCE(?, approval_invalidation_reason), approval_actor_ref=COALESCE(?, approval_actor_ref),
+          recovery_class=COALESCE(?, recovery_class), recovery_eligible=COALESCE(?, recovery_eligible),
+          recovery_reason=COALESCE(?, recovery_reason), successor_run_id=COALESCE(?, successor_run_id),
+          reproposal_at=COALESCE(?, reproposal_at), recovery_attempt_count=COALESCE(?, recovery_attempt_count),
+          last_recovery_request_id=COALESCE(?, last_recovery_request_id), recovery_terminal_reason=COALESCE(?, recovery_terminal_reason),
           reconciliation_owner=?, reconciliation_lease_until=?,
           audit_seq=audit_seq+1, version=version+1, updated_at=?
          WHERE run_id=? AND state=?${input.reconciliation ? ' AND reconciliation_owner=? AND reconciliation_fence=? AND reconciliation_lease_until>=?' : ''}${input.reconciliation?.expectedVersion !== undefined ? ' AND version=?' : ''}`,
@@ -754,6 +876,11 @@ export class SqliteDurableStore implements DurableStore {
         input.patch?.executionStartedAt ?? null, terminalAt ?? null, input.patch?.resultJson ?? null, input.patch?.errorJson ?? null,
         input.patch && 'exitCode' in input.patch ? input.patch.exitCode ?? null : null, input.patch?.signal ?? null, input.patch?.failureCode ?? null,
         input.patch?.interruptionClassification ?? null, input.patch?.containmentUnit ?? null, input.patch?.containmentBinding ?? null,
+        input.patch?.approvalLifecycle ?? null, input.patch?.approvalRequestedAt ?? null, input.patch?.approvalExpiresAt ?? null,
+        input.patch?.approvalDecisionType ?? null, input.patch?.approvalInvalidationReason ?? null, input.patch?.approvalActorRef ?? null,
+        input.patch?.recoveryClass ?? null, input.patch?.recoveryEligible === undefined ? null : input.patch.recoveryEligible ? 1 : 0,
+        input.patch?.recoveryReason ?? null, input.patch?.successorRunId ?? null, input.patch?.reproposalAt ?? null,
+        input.patch?.recoveryAttemptCount ?? null, input.patch?.lastRecoveryRequestId ?? null, input.patch?.recoveryTerminalReason ?? null,
         nextTerminal ? null : row.reconciliation_owner, nextTerminal ? null : row.reconciliation_lease_until,
         input.at, input.runId, prior,
         ...(input.reconciliation ? [input.reconciliation.owner, input.reconciliation.fence, input.reconciliation.leaseValidAt] : []),
@@ -776,6 +903,99 @@ export class SqliteDurableStore implements DurableStore {
       changed = true;
     });
     return changed;
+  }
+
+  reproposeAgentRun(input: AgentRunReproposalInput): AgentRunReproposalResult {
+    let outcome: AgentRunReproposalResult = { ok: false, code: 'UNKNOWN_SOURCE' };
+    try {
+      this.tx(() => {
+      this.failAgentRunReproposalPhase('recovery-status source read');
+      const source = this.db.prepare('SELECT * FROM agent_runs WHERE run_id = ?').get(input.sourceRunId) as AgentRunRow | undefined;
+      if (!source) { outcome = { ok: false, code: 'UNKNOWN_SOURCE' }; return; }
+      this.failAgentRunReproposalPhase('idempotency lookup');
+      if (source.last_recovery_request_id === input.requestId && source.successor_run_id) {
+        const successor = this.loadAgentRun(source.successor_run_id);
+        outcome = successor ? { ok: true, created: false, successor } : { ok: false, code: 'PARTIAL_FAILURE' };
+        return;
+      }
+      const state = source.state as DurableAgentRunState;
+      if (!isAgentTerminal(state)) { outcome = { ok: false, code: 'SOURCE_NOT_TERMINAL' }; return; }
+      if (source.version !== input.sourceExpectedVersion) { outcome = { ok: false, code: 'SOURCE_VERSION_CHANGED' }; return; }
+      if (source.reconciliation_owner && (source.reconciliation_lease_until ?? 0) >= input.at) { outcome = { ok: false, code: 'SOURCE_UNDER_RECONCILIATION' }; return; }
+      if (source.successor_run_id) { outcome = { ok: false, code: 'ACTIVE_SUCCESSOR_EXISTS' }; return; }
+      const active = this.db.prepare(
+        `SELECT run_id FROM agent_runs WHERE recovery_source_run_id = ?
+         AND state NOT IN ('COMPLETED','REJECTED','EXPIRED','STALE','FAILED','CANCELLED') LIMIT 1`,
+      ).get(input.sourceRunId) as { run_id: string } | undefined;
+      if (active) { outcome = { ok: false, code: 'ACTIVE_SUCCESSOR_EXISTS' }; return; }
+      const sourceRun = rowToAgentRun(source);
+      this.failAgentRunReproposalPhase('source event read');
+      const sourceEvents = this.loadAgentRunEventsInside(input.sourceRunId);
+      this.failAgentRunReproposalPhase('provenance revalidation');
+      const provenance = validateRecoverySourceProvenance({
+        run: sourceRun,
+        events: sourceEvents,
+        workspaceIdentity: input.provenance.workspaceIdentity,
+        allowedRecipes: input.provenance.allowedRecipes,
+        now: input.at,
+      });
+      if (!provenance.trusted || provenance.digest !== input.provenance.eventDigest || provenance.highestSeq !== input.provenance.highestSeq) {
+        outcome = { ok: false, code: 'SOURCE_PROVENANCE_FAILED' };
+        return;
+      }
+
+      this.failAgentRunReproposalPhase('successor run insert');
+      this.insertAgentRunInside(input.successor);
+      this.failAgentRunReproposalPhase('successor proposal/event insert');
+      this.appendAgentRunEventInside({ ...input.createdEvent, seq: 1 }, 'strict');
+      this.appendAgentRunEventInside({ ...input.proposalEvent, seq: 2 }, 'strict');
+      this.db.prepare('UPDATE agent_runs SET audit_seq = 2 WHERE run_id = ?').run(input.successor.runId);
+
+      this.failAgentRunReproposalPhase('source recovery event insert');
+      this.appendAgentRunEventInside({
+        eventId: `${input.sourceRunId}:reproposal:${input.requestId}:requested`,
+        runId: input.sourceRunId,
+        seq: source.audit_seq + 1,
+        at: input.at,
+        type: 'recovery.reproposal_requested',
+        priorState: state,
+        nextState: state,
+        reason: input.requestId,
+        correlationId: source.correlation_id,
+        source: 'RECOVERY',
+        schemaVersion: 1,
+      }, 'strict');
+      this.failAgentRunReproposalPhase('successor lineage event insert');
+      this.appendAgentRunEventInside({
+        eventId: `${input.sourceRunId}:reproposal:${input.requestId}:linked`,
+        runId: input.sourceRunId,
+        seq: source.audit_seq + 2,
+        at: input.at,
+        type: 'recovery.successor_linked',
+        priorState: state,
+        nextState: state,
+        reason: input.successor.runId,
+        correlationId: source.correlation_id,
+        source: 'RECOVERY',
+        schemaVersion: 1,
+      }, 'strict');
+      this.failAgentRunReproposalPhase('source lineage update');
+      const linked = this.db.prepare(
+        `UPDATE agent_runs SET successor_run_id=?, reproposal_at=?, recovery_attempt_count=recovery_attempt_count+1,
+          last_recovery_request_id=?, recovery_terminal_reason=?, audit_seq=audit_seq+2, version=version+1, updated_at=?
+         WHERE run_id=? AND version=? AND state IN ('COMPLETED','REJECTED','EXPIRED','STALE','FAILED','CANCELLED')
+         AND successor_run_id IS NULL
+         AND (reconciliation_owner IS NULL OR reconciliation_lease_until IS NULL OR reconciliation_lease_until < ?)`,
+      ).run(input.successor.runId, input.at, input.requestId, 'SUCCESSOR_CREATED', input.at, input.sourceRunId, input.sourceExpectedVersion, input.at);
+      if (Number(linked.changes ?? 0) !== 1) throw new Error('Agent reproposal source linkage lost its CAS');
+      this.failAgentRunReproposalPhase('transaction commit');
+      outcome = { ok: true, created: true, successor: input.successor };
+      });
+    } catch (error) {
+      if (error instanceof AgentRunReproposalFault) this.agentRunReproposalFaultPhase = undefined;
+      outcome = recoveryInsertFailure(error);
+    }
+    return outcome;
   }
 
   loadAgentRuns(limit = 5000): DurableAgentRun[] {
@@ -817,19 +1037,27 @@ export class SqliteDurableStore implements DurableStore {
     let events = 0;
     this.tx(() => {
       const candidates = (this.db.prepare(
-        `SELECT run_id, version, audit_seq, state, workspace_identity, recipe_id, terminal_at FROM agent_runs
+        `SELECT run_id, version, audit_seq, state, workspace_identity, recipe_id, terminal_at, recovery_source_run_id, successor_run_id FROM agent_runs
          WHERE terminal_at IS NOT NULL AND terminal_at < ?
          AND state IN ('COMPLETED','REJECTED','EXPIRED','STALE','FAILED','CANCELLED')
          AND (reconciliation_owner IS NULL OR reconciliation_lease_until IS NULL OR reconciliation_lease_until < ?)
+         AND (successor_run_id IS NULL OR NOT EXISTS (
+           SELECT 1 FROM agent_runs child WHERE child.run_id = agent_runs.successor_run_id
+           AND child.state NOT IN ('COMPLETED','REJECTED','EXPIRED','STALE','FAILED','CANCELLED')
+         ))
+         AND NOT EXISTS (
+           SELECT 1 FROM agent_runs child WHERE child.recovery_source_run_id = agent_runs.run_id
+           AND child.state NOT IN ('COMPLETED','REJECTED','EXPIRED','STALE','FAILED','CANCELLED')
+         )
          ORDER BY terminal_at ASC LIMIT ?`,
-      ).all(cutoff, now, limit) as Array<{ run_id: string; version: number; audit_seq: number; state: DurableAgentRunState; workspace_identity: string; recipe_id: string; terminal_at: number }>);
+      ).all(cutoff, now, limit) as Array<{ run_id: string; version: number; audit_seq: number; state: DurableAgentRunState; workspace_identity: string; recipe_id: string; terminal_at: number; recovery_source_run_id: string | null; successor_run_id: string | null }>);
       for (const candidate of candidates) {
         const runId = candidate.run_id;
         const eventCount = (this.db.prepare('SELECT count(*) c FROM agent_run_events WHERE run_id = ?').get(runId) as { c: number }).c;
         this.db.prepare(
-          `INSERT INTO agent_run_tombstones(tombstone_id,run_id,workspace_identity,recipe_id,final_state,terminal_at,deleted_at,deletion_reason,final_audit_seq,event_count,schema_version)
-           VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
-        ).run(`tombstone_${runId}_${now}`, runId, candidate.workspace_identity, candidate.recipe_id, candidate.state, candidate.terminal_at, now, 'RETENTION_EXPIRED', candidate.audit_seq, eventCount, 1);
+          `INSERT INTO agent_run_tombstones(tombstone_id,run_id,workspace_identity,recipe_id,final_state,terminal_at,deleted_at,deletion_reason,final_audit_seq,event_count,recovery_source_run_id,successor_run_id,schema_version)
+           VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        ).run(`tombstone_${runId}_${now}`, runId, candidate.workspace_identity, candidate.recipe_id, candidate.state, candidate.terminal_at, now, 'RETENTION_EXPIRED', candidate.audit_seq, eventCount, candidate.recovery_source_run_id, candidate.successor_run_id, 1);
         const delEvents = this.db.prepare('DELETE FROM agent_run_events WHERE run_id = ?').run(runId);
         events += Number(delEvents.changes ?? 0);
         const delRun = this.db.prepare(
@@ -847,11 +1075,67 @@ export class SqliteDurableStore implements DurableStore {
     return (this.db.prepare('SELECT * FROM agent_run_tombstones ORDER BY deleted_at DESC LIMIT ?').all(clampLimit(limit)) as unknown as AgentRunTombstoneRow[]).map(rowToAgentRunTombstone);
   }
 
-  private appendAgentRunEventInside(e: DurableAgentRunEvent): void {
-    this.db.prepare(
-      `INSERT OR IGNORE INTO agent_run_events(event_id,run_id,seq,at,type,prior_state,next_state,reason,correlation_id,source,schema_version)
-       VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
-    ).run(e.eventId, e.runId, e.seq, e.at, e.type, e.priorState ?? null, e.nextState, e.reason ?? null, e.correlationId, e.source, e.schemaVersion);
+  private insertAgentRunInside(run: DurableAgentRun): void {
+    const columns = [
+      'run_id', 'correlation_id', 'external_request_ref', 'activation_ref', 'workspace_identity', 'workspace_ref',
+      'recipe_id', 'recipe_policy_version', 'proposal_fingerprint', 'proposal_hash', 'snapshot_id', 'snapshot_manifest_digest',
+      'executable_digest', 'containment_unit', 'containment_binding', 'state', 'requested_at', 'proposal_at',
+      'approval_displayed_at', 'approval_decision_at', 'execution_started_at', 'terminal_at', 'expires_at',
+      'timeout_ms', 'output_limit_bytes', 'mutation_classification', 'network_policy', 'expected_effects_json',
+      'preview_json', 'result_json', 'error_json', 'exit_code', 'signal', 'failure_code', 'interruption_classification',
+      'approval_lifecycle_version', 'approval_lifecycle', 'approval_requested_at', 'approval_expires_at',
+      'approval_decision_type', 'approval_invalidation_reason', 'approval_actor_ref', 'recovery_class',
+      'recovery_eligible', 'recovery_reason', 'recovery_source_run_id', 'successor_run_id', 'reproposal_at',
+      'recovery_attempt_count', 'last_recovery_request_id', 'recovery_terminal_reason',
+      'audit_seq', 'schema_version', 'version', 'reconciliation_owner', 'reconciliation_lease_until',
+      'reconciliation_fence', 'updated_at',
+    ];
+    const values = [
+      run.runId, run.correlationId, run.externalRequestRef ?? null, run.activationRef, run.workspaceIdentity, run.workspaceRef,
+      run.recipeId, run.recipePolicyVersion, run.proposalFingerprint, run.proposalHash, run.snapshotId, run.snapshotManifestDigest,
+      run.executableDigest, run.containmentUnit ?? null, run.containmentBinding ?? null, run.state, run.requestedAt, run.proposalAt ?? null,
+      run.approvalDisplayedAt ?? null, run.approvalDecisionAt ?? null, run.executionStartedAt ?? null, run.terminalAt ?? null, run.expiresAt,
+      run.timeoutMs, run.outputLimitBytes, run.mutationClassification, run.networkPolicy, run.expectedEffectsJson,
+      run.previewJson ?? null, run.resultJson ?? null, run.errorJson ?? null, run.exitCode ?? null, run.signal ?? null, run.failureCode ?? null,
+      run.interruptionClassification ?? null, run.approvalLifecycleVersion, run.approvalLifecycle, run.approvalRequestedAt ?? null,
+      run.approvalExpiresAt ?? null, run.approvalDecisionType ?? null, run.approvalInvalidationReason ?? null, run.approvalActorRef ?? null,
+      run.recoveryClass, run.recoveryEligible ? 1 : 0, run.recoveryReason ?? null, run.recoverySourceRunId ?? null,
+      run.successorRunId ?? null, run.reproposalAt ?? null, run.recoveryAttemptCount, run.lastRecoveryRequestId ?? null,
+      run.recoveryTerminalReason ?? null, run.auditSeq, run.schemaVersion, run.version, run.reconciliationOwner ?? null,
+      run.reconciliationLeaseUntil ?? null, run.reconciliationFence ?? 0, run.updatedAt,
+    ];
+    this.db.prepare(`INSERT INTO agent_runs(${columns.join(',')}) VALUES(${columns.map(() => '?').join(',')})`).run(...values);
+  }
+
+  private appendAgentRunEventInside(e: DurableAgentRunEvent, mode: 'strict' | 'idempotent' = 'idempotent'): void {
+    try {
+      const inserted = this.db.prepare(
+        `INSERT INTO agent_run_events(event_id,run_id,seq,at,type,prior_state,next_state,reason,correlation_id,source,schema_version)
+         VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
+      ).run(e.eventId, e.runId, e.seq, e.at, e.type, e.priorState ?? null, e.nextState, e.reason ?? null, e.correlationId, e.source, e.schemaVersion);
+      if (Number(inserted.changes ?? 0) !== 1) throw new RecoveryEventInsertError('RECOVERY_EVENT_INSERT_FAILED');
+      return;
+    } catch (error) {
+      const existing = this.db.prepare('SELECT * FROM agent_run_events WHERE event_id = ?').get(e.eventId) as AgentRunEventRow | undefined;
+      if (!existing) {
+        const sameSeq = this.db.prepare('SELECT * FROM agent_run_events WHERE run_id = ? AND seq = ?').get(e.runId, e.seq) as AgentRunEventRow | undefined;
+        if (sameSeq) throw new RecoveryEventInsertError('RECOVERY_EVENT_SEQUENCE_CONFLICT');
+        throw new RecoveryEventInsertError('RECOVERY_EVENT_INSERT_FAILED');
+      }
+      if (eventEquivalent(rowToAgentRunEvent(existing), e)) {
+        if (mode === 'strict') throw new RecoveryEventInsertError('RECOVERY_EVENT_ID_COLLISION');
+        return;
+      }
+      throw new RecoveryEventInsertError('RECOVERY_EVENT_CONTENT_MISMATCH');
+    }
+  }
+
+  private loadAgentRunEventsInside(runId: string): DurableAgentRunEvent[] {
+    return (this.db.prepare('SELECT * FROM agent_run_events WHERE run_id = ? ORDER BY seq ASC').all(runId) as unknown as AgentRunEventRow[]).map(rowToAgentRunEvent);
+  }
+
+  private failAgentRunReproposalPhase(phase: AgentRunReproposalFaultPhase): void {
+    if (this.agentRunReproposalFaultPhase === phase) throw new AgentRunReproposalFault(phase);
   }
 
   private tx(fn: () => void): void {
@@ -867,6 +1151,10 @@ export class SqliteDurableStore implements DurableStore {
 
   private tableColumns(table: string): Array<{ name: string; type: string; notnull: number; pk: number; dflt_value: string | null }> {
     return this.db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string; type: string; notnull: number; pk: number; dflt_value: string | null }>;
+  }
+
+  private addColumnIfMissing(table: string, column: string, definition: string): void {
+    if (!this.tableColumns(table).some((entry) => entry.name === column)) this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition};`);
   }
 
   private hasDurableObjects(): boolean {

@@ -16,9 +16,12 @@ import { randomUUID } from 'node:crypto';
 import {
   AgentModeBootstrapResponseSchema,
   AgentModeCommandRunViewSchema,
+  AgentModeRunRecoveryStatusSchema,
   type AgentModeBootstrapResponse,
   type AgentModeCommandProposalRequest,
   type AgentModeCommandRunView,
+  type AgentModeReproposalRequest,
+  type AgentModeRunRecoveryStatus,
 } from '@migrapilot/protocol';
 
 export interface MigraAiConfig {
@@ -660,6 +663,20 @@ export class MigraAiClient {
 
   async cancelAgentModeCommand(runId: string, signal?: AbortSignal): Promise<AgentModeCommandRunView> {
     return this.agentRunRequest('POST', `/api/ai/agent-mode/commands/${encodeURIComponent(runId)}/cancel`, {}, runId, signal);
+  }
+
+  async getAgentModeRunRecoveryStatus(runId: string, signal?: AbortSignal): Promise<AgentModeRunRecoveryStatus> {
+    const workspace = this.agentRunWorkspaces.get(runId) ?? this.cfg.scope?.().workspace;
+    if (!workspace) throw new PilotError('INVALID_STATE', 'The Agent Mode run is not owned by this extension session.');
+    const raw = await this.jsonRequest<unknown>('GET', `/api/ai/agent-mode/commands/${encodeURIComponent(runId)}/recovery`, undefined, signal, undefined, this.agentHeaders(workspace));
+    return AgentModeRunRecoveryStatusSchema.parse(raw);
+  }
+
+  async reproposeAgentModeCommand(runId: string, request: AgentModeReproposalRequest, signal?: AbortSignal): Promise<AgentModeCommandRunView> {
+    const view = await this.agentRunRequest('POST', `/api/ai/agent-mode/commands/${encodeURIComponent(runId)}/repropose`, request, runId, signal);
+    const workspace = this.agentRunWorkspaces.get(runId);
+    if (workspace) this.agentRunWorkspaces.set(view.runId, workspace);
+    return view;
   }
 
   private async agentRunRequest(method: 'GET' | 'POST', path: string, body: unknown, runId: string, signal?: AbortSignal): Promise<AgentModeCommandRunView> {

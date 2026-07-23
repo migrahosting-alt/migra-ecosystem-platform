@@ -1,8 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import {
   AgentModeCommandProposalRequestSchema,
+  AgentModeReproposalRequestSchema,
+  type AgentModeRunRecoveryStatus,
   type AgentModeCommandResult,
   type AgentModeCommandRunView,
+  type AgentModeRecoveryClass,
+  type AgentModeRecipeId,
   type AgentModeState,
 } from '@migrapilot/protocol';
 import { auditStore, auditHash } from './auditLog.js';
@@ -22,6 +26,7 @@ import {
 } from './agentRecipe.js';
 import { AgentRunJournal, AGENT_TERMINAL_STATES, buildAgentRunJournalConfig, durableRunToView } from './agentRunJournal.js';
 import type { AgentRunJournalPersistence, AgentRunReconciliationClaim, DurableAgentRun } from './persistence/types.js';
+import { recoveryProductionReasonContracts, validateRecoverySourceProvenance } from './recoverySourceProvenance.js';
 
 const TERMINAL = new Set<AgentModeState>(['COMPLETED', 'REJECTED', 'EXPIRED', 'STALE', 'FAILED', 'CANCELLED']);
 const MAX_RUNS = 200;
@@ -35,6 +40,33 @@ interface ReconciliationFence {
   leaseValidAt: number;
   expectedVersion?: number;
 }
+
+export interface AgentModeRecoveryMetadata {
+  approvalLifecycle?: DurableAgentRun['approvalLifecycle'];
+  approvalInvalidationReason?: string;
+  recoveryClass: AgentModeRecoveryClass;
+  recoveryEligible: boolean;
+  recoveryReason: string;
+}
+
+export interface AgentModeReconciliationTerminalEmitter {
+  readonly branch: string;
+  readonly sourceState: AgentModeState;
+  readonly nextState: AgentModeState;
+  readonly eventType: string;
+  readonly reason: string;
+}
+
+export const AGENT_MODE_RECONCILIATION_TERMINAL_EMITTERS: readonly AgentModeReconciliationTerminalEmitter[] = Object.freeze([
+  { branch: 'pending approval loses restart-local authority', sourceState: 'AWAITING_APPROVAL', nextState: 'EXPIRED', eventType: 'approval.lost_on_restart', reason: 'RESTART_AUTHORIZATION_LOST' },
+  { branch: 'approved before execution loses restart-local authority', sourceState: 'APPROVED', nextState: 'STALE', eventType: 'restart.authorization_lost', reason: 'RESTART_BEFORE_EXECUTION' },
+  { branch: 'executing without durable containment identity', sourceState: 'EXECUTING', nextState: 'FAILED', eventType: 'restart.interrupted_execution', reason: 'INTERRUPTED_BY_RESTART' },
+  { branch: 'executing containment not found', sourceState: 'EXECUTING', nextState: 'FAILED', eventType: 'restart.interrupted_execution', reason: 'RESTART_NO_CONTAINMENT_FOUND' },
+  { branch: 'executing containment already exited', sourceState: 'EXECUTING', nextState: 'FAILED', eventType: 'restart.interrupted_execution', reason: 'RESTART_CONTAINMENT_ALREADY_EXITED' },
+  { branch: 'executing containment termination failed', sourceState: 'EXECUTING', nextState: 'FAILED', eventType: 'containment.termination_failed', reason: 'RESTART_TERMINATION_FAILED' },
+  { branch: 'executing containment identity mismatch', sourceState: 'EXECUTING', nextState: 'FAILED', eventType: 'restart.interrupted_execution', reason: 'RESTART_CONTAINMENT_IDENTITY_MISMATCH' },
+  { branch: 'executing containment terminated', sourceState: 'EXECUTING', nextState: 'CANCELLED', eventType: 'containment.terminated', reason: 'RESTART_CONTAINMENT_TERMINATED' },
+]);
 
 export interface AgentModeRequestContext {
   activationId: string;
@@ -71,7 +103,13 @@ interface CommandRunRecord {
 
 export type AgentModeActionResult =
   | { ok: true; view: AgentModeCommandRunView }
-  | { ok: false; code: 'UNKNOWN_RUN' | 'INVALID_STATE' | 'INVALID_CONTEXT' | 'EXPIRED' | 'STALE' | 'PROPOSAL_FAILED' | 'OVERLOADED' | 'UNSUPPORTED_PLATFORM' | 'CONTAINMENT_UNAVAILABLE'; message: string };
+  | { ok: false; code: 'UNKNOWN_RUN' | 'INVALID_STATE' | 'INVALID_CONTEXT' | 'EXPIRED' | 'STALE' | 'PROPOSAL_FAILED' | 'OVERLOADED' | 'UNSUPPORTED_PLATFORM' | 'CONTAINMENT_UNAVAILABLE' | 'RECOVERY_INELIGIBLE' | 'RECOVERY_CONFLICT'; message: string };
+
+type AgentModeActionErrorCode = Extract<AgentModeActionResult, { ok: false }>['code'];
+
+export type AgentModeRecoveryResult =
+  | { ok: true; status: AgentModeRunRecoveryStatus }
+  | { ok: false; code: AgentModeActionErrorCode; message: string };
 
 export class AgentModeCommandService {
   private readonly runs = new Map<string, CommandRunRecord>();
@@ -215,7 +253,7 @@ export class AgentModeCommandService {
       return { ok: false, code: 'INVALID_STATE', message: 'The authoritative proposal cannot be marked displayed.' };
     }
     if (!run.displayed) {
-      this.journal.transition({ runId: run.runId, expectedState: 'AWAITING_APPROVAL', nextState: 'AWAITING_APPROVAL', at: this.now(), eventType: 'preview.displayed', source: 'API', reason: run.fingerprint, approvalDisplayedAt: this.now() });
+      this.journal.transition({ runId: run.runId, expectedState: 'AWAITING_APPROVAL', nextState: 'AWAITING_APPROVAL', at: this.now(), eventType: 'approval.displayed', source: 'API', reason: run.fingerprint, approvalDisplayedAt: this.now(), approvalLifecycle: 'DISPLAYED' });
       run.displayed = true;
       this.audit(run, 'approval.displayed', 'AWAITING_APPROVAL', { recipe: run.plan.identity.recipe, fingerprint });
     }
@@ -232,6 +270,124 @@ export class AgentModeCommandService {
       return found;
     }
     return { ok: true, view: toView(found.run) };
+  }
+
+  getRunRecoveryStatus(runId: string, context: AgentModeRequestContext): AgentModeRecoveryResult {
+    if (!validContext(context)) return { ok: false, code: 'INVALID_CONTEXT', message: 'The Agent Mode session or workspace context is invalid.' };
+    const run = this.journal.loadRun(runId);
+    if (!run || run.workspaceIdentity !== context.workspaceIdentity) return { ok: false, code: 'UNKNOWN_RUN', message: 'Unknown Agent Mode recipe run.' };
+    return { ok: true, status: this.recoveryStatus(run, context) };
+  }
+
+  async reproposeFromRun(runId: string, raw: unknown, context: AgentModeRequestContext): Promise<AgentModeActionResult> {
+    const parsed = AgentModeReproposalRequestSchema.safeParse(raw);
+    if (!parsed.success) return { ok: false, code: 'PROPOSAL_FAILED', message: 'A valid recovery request id is required.' };
+    if (!validContext(context)) return { ok: false, code: 'INVALID_CONTEXT', message: 'The Agent Mode session or workspace context is invalid.' };
+    this.cleanup();
+    const source = this.journal.loadRun(runId);
+    if (!source || source.workspaceIdentity !== context.workspaceIdentity) return { ok: false, code: 'UNKNOWN_RUN', message: 'Unknown Agent Mode recipe run.' };
+    if (source.successorRunId) {
+      const successor = this.journal.loadRun(source.successorRunId);
+      if (source.lastRecoveryRequestId === parsed.data.requestId && successor) return { ok: true, view: durableRunToView(successor) };
+      return { ok: false, code: 'RECOVERY_CONFLICT', message: 'This run already has an active recovery successor.' };
+    }
+    const sourceEvents = this.journal.events(source.runId);
+    const provenance = validateRecoverySourceProvenance({ run: source, events: sourceEvents, workspaceIdentity: context.workspaceIdentity, allowedRecipes: context.allowedRecipes, now: this.now() });
+    const status = this.recoveryStatus(source, context, sourceEvents);
+    if (!status.eligible) return { ok: false, code: 'RECOVERY_INELIGIBLE', message: status.explanation };
+    if (source.reconciliationOwner && (source.reconciliationLeaseUntil ?? 0) >= this.now()) return { ok: false, code: 'RECOVERY_CONFLICT', message: 'The source run is currently under restart reconciliation.' };
+    const recipe = source.recipeId as AgentModeRecipeId;
+    if (!context.allowedRecipes.includes(recipe)) return { ok: false, code: 'INVALID_CONTEXT', message: 'The selected recipe is no longer allowed.' };
+    const containment = await this.processes.availability();
+    if (!containment.ok) return { ok: false, code: containment.code, message: containment.message };
+    const newRunId = this.newRunId();
+    let plan: AgentRecipePlan;
+    try {
+      plan = await this.resolver.prepare(recipe, context.workspaceRoot, { runId: newRunId, activationId: context.activationId, workspaceIdentity: context.workspaceIdentity });
+    } catch (error) {
+      if (error instanceof AgentRecipePolicyError && (error.code === 'UNSUPPORTED_PLATFORM' || error.code === 'CONTAINMENT_UNAVAILABLE')) return { ok: false, code: error.code, message: error.message };
+      return { ok: false, code: 'PROPOSAL_FAILED', message: 'The server could not prepare a fresh recovery proposal.' };
+    }
+    const requestId = `agentcorr_${randomUUID()}`;
+    const safeReason = redactCommandOutput(parsed.data.reason ?? recoveryReproposalReason(source)).value;
+    const proposalHash = this.binding(plan, safeReason);
+    const fingerprint = proposalHash.slice(0, 16);
+    let approval;
+    try {
+      approval = this.toolDeps.approvals.mint({ tool: 'agent.recipe', inputHash: proposalHash, requestId: newRunId, correlationId: requestId });
+    } catch (error) {
+      await this.resolver.release(plan).catch(() => {});
+      if (error instanceof ApprovalCapacityError) return { ok: false, code: 'OVERLOADED', message: 'The Agent Mode approval limit is currently reached.' };
+      return { ok: false, code: 'PROPOSAL_FAILED', message: 'The server could not prepare a fresh approval.' };
+    }
+    const createdAt = this.now();
+    const preview = this.previewFor(plan, safeReason, requestId, fingerprint, approval.expiresAt);
+    const journalResult = this.journal.createSuccessor({
+      source,
+      provenance: {
+        workspaceIdentity: context.workspaceIdentity,
+        allowedRecipes: context.allowedRecipes,
+        eventDigest: provenance.digest,
+        highestSeq: provenance.highestSeq,
+      },
+      requestId: parsed.data.requestId,
+      run: {
+        runId: newRunId,
+        correlationId: requestId,
+        externalRequestRef: context.externalRequestId ? auditHash(context.externalRequestId) : undefined,
+        activationId: context.activationId,
+        workspaceRoot: plan.identity.sourceWorkspace,
+        workspaceIdentity: context.workspaceIdentity,
+        recipeId: plan.identity.recipe,
+        recipePolicyVersion: plan.identity.policyVersion,
+        proposalFingerprint: fingerprint,
+        proposalHash,
+        snapshotId: plan.identity.snapshotId,
+        snapshotManifestDigest: plan.identity.workspaceMaterialIdentity,
+        executableDigest: plan.identity.executableDigest,
+        requestedAt: createdAt,
+        proposalAt: createdAt,
+        expiresAt: approval.expiresAt,
+        timeoutMs: plan.identity.timeoutMs,
+        outputLimitBytes: plan.identity.outputLimitBytes,
+        mutationClassification: plan.identity.mutationClassification,
+        networkPolicy: plan.identity.networkPolicy,
+        expectedEffects: plan.identity.expectedEffects,
+        preview,
+        recoverySourceRunId: source.runId,
+      },
+    });
+    if (!journalResult.ok) {
+      this.toolDeps.approvals.reject(approval.id, { tool: 'agent.recipe', inputHash: proposalHash, correlationId: requestId });
+      await this.resolver.release(plan).catch(() => {});
+      if (journalResult.code === 'ACTIVE_SUCCESSOR_EXISTS' || journalResult.code === 'SOURCE_VERSION_CHANGED' || journalResult.code === 'SOURCE_UNDER_RECONCILIATION') return { ok: false, code: 'RECOVERY_CONFLICT', message: 'The recovery request conflicted with newer durable state.' };
+      return { ok: false, code: 'PROPOSAL_FAILED', message: 'The server could not durably link the recovery proposal.' };
+    }
+    if (!journalResult.created) {
+      this.toolDeps.approvals.reject(approval.id, { tool: 'agent.recipe', inputHash: proposalHash, correlationId: requestId });
+      await this.resolver.release(plan).catch(() => {});
+      return { ok: true, view: durableRunToView(journalResult.successor) };
+    }
+    const run: CommandRunRecord = {
+      runId: newRunId,
+      requestId,
+      externalRequestRef: context.externalRequestId ? auditHash(context.externalRequestId) : undefined,
+      activationId: context.activationId,
+      workspaceRoot: plan.identity.sourceWorkspace,
+      state: 'AWAITING_APPROVAL',
+      plan,
+      proposalHash,
+      fingerprint,
+      approvalId: approval.id,
+      displayed: false,
+      createdAt,
+      updatedAt: createdAt,
+      expiresAt: approval.expiresAt,
+      preview,
+    };
+    this.runs.set(newRunId, run);
+    this.audit(run, 'recovery.successor_created', 'AWAITING_APPROVAL', { recipe: plan.identity.recipe, source: auditHash(source.runId), fingerprint });
+    return { ok: true, view: toView(run) };
   }
 
   async reconcileOnStartup(): Promise<{ scanned: number; reconciled: number; outcomes: Record<string, number> }> {
@@ -262,7 +418,7 @@ export class AgentModeCommandService {
     if (run.state !== 'AWAITING_APPROVAL') return this.duplicateDecision(run);
     if (decision === 'reject') {
       this.revokeApproval(run);
-      this.journal.transition({ runId, expectedState: 'AWAITING_APPROVAL', nextState: 'REJECTED', at: this.now(), eventType: 'approval.rejected', source: 'APPROVAL', reason: 'HUMAN_REJECTED', approvalDecisionAt: this.now(), terminalAt: this.now(), failureCode: 'REJECTED' });
+      this.journal.transition({ runId, expectedState: 'AWAITING_APPROVAL', nextState: 'REJECTED', at: this.now(), eventType: 'approval.rejected', source: 'APPROVAL', reason: 'HUMAN_REJECTED', approvalDecisionAt: this.now(), terminalAt: this.now(), failureCode: 'REJECTED', approvalLifecycle: 'REJECTED', approvalDecisionType: 'REJECTED', approvalActorRef: auditHash(context.activationId), recoveryClass: 'REPROPOSAL_ALLOWED', recoveryEligible: true, recoveryReason: 'REJECTED_FRESH_PROPOSAL_ALLOWED' });
       this.transition(run, 'REJECTED');
       this.audit(run, 'approval.rejected', 'REJECTED', { recipe: run.plan.identity.recipe });
       void this.resolver.release(run.plan);
@@ -273,7 +429,7 @@ export class AgentModeCommandService {
     if (run.state !== 'AWAITING_APPROVAL') return TERMINAL.has(run.state) ? this.terminalDecision(run) : this.duplicateDecision(run);
     const currentHash = this.binding(run.plan, run.preview.reason);
     if (!currentValid || fingerprint !== run.fingerprint || currentHash !== run.proposalHash || currentHash.slice(0, 16) !== run.fingerprint) return this.stale(run);
-    if (!this.journal.transition({ runId, expectedState: 'AWAITING_APPROVAL', nextState: 'APPROVED', at: this.now(), eventType: 'approval.approved', source: 'APPROVAL', reason: 'HUMAN_APPROVED', approvalDecisionAt: this.now() })) {
+    if (!this.journal.transition({ runId, expectedState: 'AWAITING_APPROVAL', nextState: 'APPROVED', at: this.now(), eventType: 'approval.approved', source: 'APPROVAL', reason: 'HUMAN_APPROVED', approvalDecisionAt: this.now(), approvalLifecycle: 'APPROVED', approvalDecisionType: 'APPROVED', approvalActorRef: auditHash(context.activationId) })) {
       return { ok: false, code: 'STALE', message: 'The durable Agent run could not be approved safely.' };
     }
     // This critical audit write must succeed before the private approval is consumed.
@@ -283,6 +439,7 @@ export class AgentModeCommandService {
     // Consumption is itself a critical, durable boundary. If this append fails,
     // the private token is already revoked and execution remains fail-closed.
     this.audit(run, 'approval.consumed', 'CONSUMED', { recipe: run.plan.identity.recipe, fingerprint: run.fingerprint });
+    this.journal.transition({ runId, expectedState: 'APPROVED', nextState: 'APPROVED', at: this.now(), eventType: 'approval.consumed', source: 'APPROVAL', reason: 'ONE_TIME_AUTHORITY_CONSUMED', approvalLifecycle: 'CONSUMED' });
     this.transition(run, 'APPROVED');
     run.controller = new AbortController();
     queueMicrotask(() => {
@@ -310,7 +467,7 @@ export class AgentModeCommandService {
     if (TERMINAL.has(run.state)) return { ok: false, code: 'INVALID_STATE', message: `The recipe run is already terminal in ${run.state}.` };
     if (run.state === 'AWAITING_APPROVAL' || run.state === 'APPROVED') {
       if (run.state === 'AWAITING_APPROVAL') this.revokeApproval(run);
-      this.journal.transition({ runId, expectedState: run.state, nextState: 'CANCELLED', at: this.now(), eventType: 'cancellation.requested', source: 'API', reason: 'CANCELLED_BEFORE_SPAWN', terminalAt: this.now(), failureCode: 'CANCELLED_BEFORE_SPAWN' });
+      this.journal.transition({ runId, expectedState: run.state, nextState: 'CANCELLED', at: this.now(), eventType: 'cancellation.requested', source: 'API', reason: 'CANCELLED_BEFORE_SPAWN', terminalAt: this.now(), failureCode: 'CANCELLED_BEFORE_SPAWN', approvalLifecycle: run.state === 'AWAITING_APPROVAL' ? 'INVALIDATED' : undefined, approvalInvalidationReason: 'CANCELLED_BEFORE_SPAWN', recoveryClass: 'REPROPOSAL_ALLOWED', recoveryEligible: true, recoveryReason: 'CANCELLED_FRESH_PROPOSAL_ALLOWED' });
       this.transition(run, 'CANCELLED');
       run.controller?.abort();
       this.audit(run, 'cancellation.requested', 'CANCELLED_BEFORE_SPAWN', { recipe: run.plan.identity.recipe });
@@ -350,16 +507,17 @@ export class AgentModeCommandService {
         }
         this.audit(run, 'execution.spawned', 'EXECUTING', { recipe: run.plan.identity.recipe, snapshot: run.plan.identity.snapshotId.slice(0, 16) });
       } }, run.controller?.signal);
-      run.result = outcome.result;
+      const result = sanitizeAgentModeCommandResult(outcome.result);
+      run.result = result;
       if (outcome.disposition === 'cancelled') {
-        if (!this.persistTransition({ runId: run.runId, expectedState: 'EXECUTING', nextState: 'CANCELLED', at: this.now(), eventType: 'containment.terminated', source: 'EXECUTION', reason: 'USER_CANCELLED', terminalAt: this.now(), result: outcome.result, exitCode: outcome.result.exitCode, failureCode: 'CANCELLED' })) {
+        if (!this.persistTransition({ runId: run.runId, expectedState: 'EXECUTING', nextState: 'CANCELLED', at: this.now(), eventType: 'containment.terminated', source: 'EXECUTION', reason: 'USER_CANCELLED', terminalAt: this.now(), result, exitCode: result.exitCode, failureCode: 'CANCELLED' })) {
           this.failLocalAfterDurableTerminalLoss(run);
           return;
         }
         this.transition(run, 'CANCELLED');
         this.audit(run, 'containment.terminated', 'CANCELLED', { recipe: run.plan.identity.recipe });
       } else if (outcome.disposition === 'timed_out') {
-        if (!this.persistTransition({ runId: run.runId, expectedState: 'EXECUTING', nextState: 'FAILED', at: this.now(), eventType: 'execution.failed', source: 'EXECUTION', reason: 'TIMED_OUT', terminalAt: this.now(), result: outcome.result, exitCode: outcome.result.exitCode, failureCode: 'TIMED_OUT' })) {
+        if (!this.persistTransition({ runId: run.runId, expectedState: 'EXECUTING', nextState: 'FAILED', at: this.now(), eventType: 'execution.failed', source: 'EXECUTION', reason: 'TIMED_OUT', terminalAt: this.now(), result, exitCode: result.exitCode, failureCode: 'TIMED_OUT' })) {
           this.failLocalAfterDurableTerminalLoss(run);
           return;
         }
@@ -367,19 +525,19 @@ export class AgentModeCommandService {
         run.error = { code: 'TIMED_OUT', message: 'The recipe exceeded its server-owned timeout and its process tree was stopped.' };
         this.audit(run, 'execution.timed_out', 'TIMED_OUT', { recipe: run.plan.identity.recipe });
       } else if (outcome.disposition === 'shutdown') {
-        if (!this.persistTransition({ runId: run.runId, expectedState: 'EXECUTING', nextState: 'CANCELLED', at: this.now(), eventType: 'containment.terminated', source: 'SHUTDOWN', reason: 'SHUTDOWN_TERMINATED', terminalAt: this.now(), result: outcome.result, exitCode: outcome.result.exitCode, failureCode: 'SHUTDOWN_TERMINATED' })) {
+        if (!this.persistTransition({ runId: run.runId, expectedState: 'EXECUTING', nextState: 'CANCELLED', at: this.now(), eventType: 'containment.terminated', source: 'SHUTDOWN', reason: 'SHUTDOWN_TERMINATED', terminalAt: this.now(), result, exitCode: result.exitCode, failureCode: 'SHUTDOWN_TERMINATED' })) {
           this.failLocalAfterDurableTerminalLoss(run);
           return;
         }
         this.transition(run, 'CANCELLED');
         this.audit(run, 'shutdown.terminated', 'CANCELLED', { recipe: run.plan.identity.recipe });
       } else {
-        if (!this.persistTransition({ runId: run.runId, expectedState: 'EXECUTING', nextState: 'COMPLETED', at: this.now(), eventType: 'execution.completed', source: 'EXECUTION', reason: 'PROCESS_EXITED', terminalAt: this.now(), result: outcome.result, exitCode: outcome.result.exitCode })) {
+        if (!this.persistTransition({ runId: run.runId, expectedState: 'EXECUTING', nextState: 'COMPLETED', at: this.now(), eventType: 'execution.completed', source: 'EXECUTION', reason: 'PROCESS_EXITED', terminalAt: this.now(), result, exitCode: result.exitCode })) {
           this.failLocalAfterDurableTerminalLoss(run);
           return;
         }
         this.transition(run, 'COMPLETED');
-        this.audit(run, 'execution.completed', 'COMPLETED', { recipe: run.plan.identity.recipe, exitCode: outcome.result.exitCode, redacted: outcome.result.redacted });
+        this.audit(run, 'execution.completed', 'COMPLETED', { recipe: run.plan.identity.recipe, exitCode: result.exitCode, redacted: result.redacted });
       }
     } catch (error) {
       const code = error instanceof AgentRecipePolicyError ? error.code : 'EXECUTION_FAILED';
@@ -406,7 +564,7 @@ export class AgentModeCommandService {
 
   private stale(run: CommandRunRecord): AgentModeActionResult {
     this.revokeApproval(run);
-    this.journal.transition({ runId: run.runId, nextState: 'STALE', at: this.now(), eventType: 'proposal.stale', source: 'APPROVAL', reason: 'STALE_PROPOSAL', terminalAt: this.now(), failureCode: 'STALE' });
+    this.journal.transition({ runId: run.runId, nextState: 'STALE', at: this.now(), eventType: 'proposal.stale', source: 'APPROVAL', reason: 'STALE_PROPOSAL', terminalAt: this.now(), failureCode: 'STALE', approvalLifecycle: 'INVALIDATED', approvalInvalidationReason: 'SNAPSHOT_CHANGED', recoveryClass: 'SNAPSHOT_CHANGED', recoveryEligible: true, recoveryReason: 'STALE_REQUIRES_FRESH_PROPOSAL' });
     this.transition(run, 'STALE');
     this.audit(run, 'proposal.stale', 'STALE', { recipe: run.plan.identity.recipe });
     void this.resolver.release(run.plan);
@@ -416,7 +574,7 @@ export class AgentModeCommandService {
   private expire(run: CommandRunRecord): void {
     if (run.state !== 'AWAITING_APPROVAL' || run.expiresAt > this.now()) return;
     this.revokeApproval(run);
-    this.journal.transition({ runId: run.runId, expectedState: 'AWAITING_APPROVAL', nextState: 'EXPIRED', at: this.now(), eventType: 'approval.expired', source: 'CLEANUP', reason: 'APPROVAL_TTL_EXPIRED', terminalAt: this.now(), failureCode: 'EXPIRED' });
+    this.journal.transition({ runId: run.runId, expectedState: 'AWAITING_APPROVAL', nextState: 'EXPIRED', at: this.now(), eventType: 'approval.expired', source: 'CLEANUP', reason: 'APPROVAL_TTL_EXPIRED', terminalAt: this.now(), failureCode: 'EXPIRED', approvalLifecycle: 'EXPIRED', approvalInvalidationReason: 'APPROVAL_TTL_EXPIRED', recoveryClass: 'REPROPOSAL_ALLOWED', recoveryEligible: true, recoveryReason: 'EXPIRED_FRESH_PROPOSAL_ALLOWED' });
     this.transition(run, 'EXPIRED');
     this.audit(run, 'approval.expired', 'EXPIRED', { recipe: run.plan.identity.recipe });
     void this.resolver.release(run.plan);
@@ -452,6 +610,59 @@ export class AgentModeCommandService {
     auditStore.append({ correlationId: run.requestId, requestId: run.requestId, type, component: 'agent-mode-recipe', outcome, fields: { ...fields, run: auditHash(run.runId), activation: auditHash(run.activationId), workspace: auditHash(run.workspaceRoot), ...(run.externalRequestRef ? { externalRequest: run.externalRequestRef } : {}) } });
   }
 
+  private previewFor(plan: AgentRecipePlan, safeReason: string, requestId: string, fingerprint: string, expiresAt: number): NonNullable<AgentModeCommandRunView['preview']> {
+    return {
+      recipe: plan.identity.recipe,
+      policyVersion: plan.identity.policyVersion,
+      executionIdentity: hashInput(plan.identity).slice(0, 16),
+      environmentPolicy: plan.identity.environmentPolicy,
+      workspaceMaterialFingerprint: plan.identity.workspaceMaterialIdentity.slice(0, 16),
+      snapshotId: plan.identity.snapshotId,
+      sourceWorkspace: plan.identity.sourceWorkspace,
+      executable: plan.identity.executablePath,
+      arguments: [...plan.identity.arguments],
+      cwd: plan.identity.canonicalCwd,
+      timeoutMs: plan.identity.timeoutMs,
+      outputLimitBytes: plan.identity.outputLimitBytes,
+      mutationClassification: plan.identity.mutationClassification,
+      networkPolicy: plan.identity.networkPolicy,
+      expectedEffects: [...plan.identity.expectedEffects],
+      reason: safeReason,
+      requestId,
+      fingerprint,
+      expiresAt,
+      warnings: [
+        'This is a fixed server-owned recipe; executable and arguments cannot be supplied by the client.',
+        plan.identity.canModifyFiles ? 'This recipe may modify workspace artifacts or caches.' : 'This recipe is declared read-only.',
+        'Approval is single-use and bound to this activation, run, immutable snapshot, executable digest, and recipe policy.',
+      ],
+      environment: Object.keys(plan.environment).sort().map((key) => ({ key, value: '[SERVER CONTROLLED]', redacted: true })),
+      canModifyFiles: plan.identity.canModifyFiles,
+    };
+  }
+
+  private recoveryStatus(run: DurableAgentRun, context: AgentModeRequestContext, events = this.journal.events(run.runId)): AgentModeRunRecoveryStatus {
+    const workspaceMatches = run.workspaceIdentity === context.workspaceIdentity;
+    const currentRecipeAvailable = context.allowedRecipes.includes(run.recipeId as AgentModeRecipeId);
+    const provenance = validateRecoverySourceProvenance({ run, events, workspaceIdentity: context.workspaceIdentity, allowedRecipes: context.allowedRecipes, now: this.now() });
+    const classification = provenance.recoveryClass;
+    const eligible = provenance.trusted;
+    return {
+      runId: run.runId,
+      sourceState: run.state as AgentModeState,
+      approvalLifecycle: run.approvalLifecycle,
+      terminalReason: run.failureCode ?? run.interruptionClassification ?? run.recoveryReason,
+      recoveryClass: classification,
+      eligible,
+      explanation: provenance.explanation,
+      currentRecipeAvailable,
+      workspaceMatches,
+      activeSuccessorRunId: run.successorRunId,
+      recommendedAction: eligible ? 'Create a fresh proposal.' : recoveryRecommendation(classification, run, provenance.code),
+      lineage: { sourceRunId: run.recoverySourceRunId, successorRunId: run.successorRunId },
+    };
+  }
+
   private async reconcileRun(run: DurableAgentRun, claim: AgentRunReconciliationClaim): Promise<string> {
     const reconciliation = { owner: claim.owner, fence: claim.fence, leaseValidAt: this.now(), expectedVersion: claim.version };
     if (run.state === 'AWAITING_APPROVAL') {
@@ -479,7 +690,7 @@ export class AgentModeCommandService {
       const transitioned = this.reconciliationTransition(run, finalReconciliation, 'EXECUTING', nextState, eventType, outcome.code);
       return transitioned === outcome.code ? outcome.code : transitioned;
     }
-    return this.reconciliationTransition(run, reconciliation, run.state as AgentModeState, 'STALE', 'restart.interrupted_execution', 'INTERRUPTED_BY_RESTART');
+    return 'RECONCILIATION_UNSUPPORTED_STATE';
   }
 
   private reconciliationTransition(
@@ -490,7 +701,25 @@ export class AgentModeCommandService {
     eventType: string,
     reason: string,
   ): string {
-    const ok = this.journal.transition({ runId: run.runId, expectedState, nextState, at: this.now(), eventType, source: 'RECONCILIATION', reason, terminalAt: this.now(), failureCode: reason, interruptionClassification: reason, reconciliation });
+    const recovery = agentModeRecoveryMetadataFor(reason, nextState);
+    const ok = this.journal.transition({
+      runId: run.runId,
+      expectedState,
+      nextState,
+      at: this.now(),
+      eventType,
+      source: 'RECONCILIATION',
+      reason,
+      reconciliation,
+      terminalAt: this.now(),
+      failureCode: reason,
+      interruptionClassification: reason,
+      approvalLifecycle: recovery.approvalLifecycle,
+      approvalInvalidationReason: recovery.approvalInvalidationReason,
+      recoveryClass: recovery.recoveryClass,
+      recoveryEligible: recovery.recoveryEligible,
+      recoveryReason: recovery.recoveryReason,
+    });
     return ok ? reason : 'RECONCILIATION_FENCE_LOST';
   }
 
@@ -546,6 +775,80 @@ function validContext(context: AgentModeRequestContext): boolean {
   return typeof context.activationId === 'string' && context.activationId.length >= 16 && Number.isSafeInteger(context.extensionProcessId) && context.extensionProcessId > 0 && typeof context.serverInstanceId === 'string' && context.serverInstanceId.length >= 16 && typeof context.workspaceRoot === 'string' && context.workspaceRoot.length > 0 && context.workspaceRoot.length <= 4096;
 }
 
+const AGENT_MODE_RECOVERY_REASON_POLICY = new Map<string, AgentModeRecoveryMetadata>([
+  ['RESTART_AUTHORIZATION_LOST', { approvalLifecycle: 'LOST_ON_RESTART', approvalInvalidationReason: 'RESTART_AUTHORIZATION_LOST', recoveryClass: 'REPROPOSAL_REQUIRED', recoveryEligible: true, recoveryReason: 'RESTART_AUTHORIZATION_LOST' }],
+  ['RESTART_BEFORE_EXECUTION', { approvalLifecycle: 'INVALIDATED', approvalInvalidationReason: 'RESTART_BEFORE_EXECUTION', recoveryClass: 'REPROPOSAL_REQUIRED', recoveryEligible: true, recoveryReason: 'RESTART_BEFORE_EXECUTION' }],
+  ['INTERRUPTED_BY_RESTART', { approvalLifecycle: 'INVALIDATED', approvalInvalidationReason: 'INTERRUPTED_BY_RESTART', recoveryClass: 'REPROPOSAL_ALLOWED', recoveryEligible: true, recoveryReason: 'INTERRUPTED_BY_RESTART' }],
+  ['RESTART_NO_CONTAINMENT_FOUND', { approvalLifecycle: 'INVALIDATED', approvalInvalidationReason: 'RESTART_NO_CONTAINMENT_FOUND', recoveryClass: 'REPROPOSAL_ALLOWED', recoveryEligible: true, recoveryReason: 'RESTART_NO_CONTAINMENT_FOUND' }],
+  ['RESTART_CONTAINMENT_ALREADY_EXITED', { approvalLifecycle: 'INVALIDATED', approvalInvalidationReason: 'RESTART_CONTAINMENT_ALREADY_EXITED', recoveryClass: 'REPROPOSAL_ALLOWED', recoveryEligible: true, recoveryReason: 'RESTART_CONTAINMENT_ALREADY_EXITED' }],
+  ['RESTART_CONTAINMENT_TERMINATED', { approvalLifecycle: 'INVALIDATED', approvalInvalidationReason: 'RESTART_CONTAINMENT_TERMINATED', recoveryClass: 'REPROPOSAL_ALLOWED', recoveryEligible: true, recoveryReason: 'RESTART_CONTAINMENT_TERMINATED' }],
+  ['RESTART_TERMINATION_FAILED', { approvalLifecycle: 'INVALIDATED', approvalInvalidationReason: 'RESTART_TERMINATION_FAILED', recoveryClass: 'TERMINAL_NO_RECOVERY', recoveryEligible: false, recoveryReason: 'RESTART_TERMINATION_FAILED' }],
+  ['RESTART_CONTAINMENT_IDENTITY_MISMATCH', { approvalLifecycle: 'INVALIDATED', approvalInvalidationReason: 'RESTART_CONTAINMENT_IDENTITY_MISMATCH', recoveryClass: 'POLICY_CHANGED', recoveryEligible: false, recoveryReason: 'RESTART_CONTAINMENT_IDENTITY_MISMATCH' }],
+]);
+
+export function agentModeRecoveryMetadataFor(reason: string, _state: AgentModeState): AgentModeRecoveryMetadata {
+  return AGENT_MODE_RECOVERY_REASON_POLICY.get(reason) ?? { recoveryClass: 'TERMINAL_NO_RECOVERY', recoveryEligible: false, recoveryReason: reason };
+}
+
+export function agentModeRecoveryReasonPolicy(): readonly AgentModeRecoveryMetadata[] {
+  return [...AGENT_MODE_RECOVERY_REASON_POLICY.values()].map((entry) => ({ ...entry }));
+}
+
+export function agentModeReconciliationEmitterContractParity(): readonly { emitter: AgentModeReconciliationTerminalEmitter; contractMatches: number; metadata: AgentModeRecoveryMetadata; contractRecoverable?: boolean; contractRecoveryClass?: AgentModeRecoveryClass }[] {
+  const contracts = recoveryProductionReasonContracts();
+  return AGENT_MODE_RECONCILIATION_TERMINAL_EMITTERS.map((emitter) => {
+    const matches = contracts.filter((contract) => contract.state === emitter.nextState && contract.reason === emitter.reason && contract.terminalEvents.includes(emitter.eventType));
+    return {
+      emitter,
+      contractMatches: matches.length,
+      metadata: agentModeRecoveryMetadataFor(emitter.reason, emitter.nextState),
+      contractRecoverable: matches[0]?.recoverable,
+      contractRecoveryClass: matches[0]?.recoveryClass,
+    };
+  });
+}
+
+function recoveryRecommendation(classification: AgentModeRecoveryClass, run: DurableAgentRun, code?: string): string {
+  if (code === 'MISSING_REQUIRED_EVENT' || code === 'EVENT_SEQUENCE_GAP') return 'Investigate the incomplete durable run history before creating another proposal.';
+  if (code === 'ILLEGAL_STATE_TRANSITION' || code === 'TERMINAL_STATE_MISMATCH' || code === 'AUDIT_SEQUENCE_MISMATCH' || code === 'APPROVAL_LIFECYCLE_MISMATCH' || code === 'SOURCE_INTEGRITY_FAILED') return 'Investigate the inconsistent durable run history before creating another proposal.';
+  if (run.successorRunId) return 'Review the active successor proposal.';
+  if (classification === 'TERMINAL_NO_RECOVERY') return 'No recovery action is available for this run.';
+  if (classification === 'NONE') return 'Wait for the active run to reach a terminal state.';
+  return 'Resolve the ineligible recovery condition before creating a fresh proposal.';
+}
+
+function recoveryReproposalReason(run: DurableAgentRun): string {
+  return `Fresh proposal after ${run.failureCode ?? run.state}`;
+}
+
+function sanitizeAgentModeCommandResult(result: AgentModeCommandResult): AgentModeCommandResult {
+  const stdout = redactCommandOutput(result.stdout);
+  const stderr = redactCommandOutput(result.stderr);
+  return {
+    ...result,
+    stdout: stdout.value,
+    stderr: stderr.value,
+    redacted: result.redacted || stdout.redacted || stderr.redacted,
+  };
+}
+
 function toView(run: CommandRunRecord): AgentModeCommandRunView {
-  return { runId: run.runId, requestId: run.requestId, state: run.state, preview: run.preview, result: run.result, error: run.error, createdAt: run.createdAt, updatedAt: run.updatedAt };
+  const liveRecoveryClass = run.state === 'COMPLETED' ? 'TERMINAL_NO_RECOVERY' : TERMINAL.has(run.state) ? 'REPROPOSAL_ALLOWED' : 'NONE';
+  return {
+    runId: run.runId,
+    requestId: run.requestId,
+    state: run.state,
+    preview: run.preview,
+    result: run.result,
+    error: run.error,
+    approval: {
+      lifecycle: run.state === 'AWAITING_APPROVAL' ? (run.displayed ? 'DISPLAYED' : 'PENDING_DISPLAY') : run.state === 'APPROVED' || run.state === 'EXECUTING' ? 'CONSUMED' : run.state === 'REJECTED' ? 'REJECTED' : run.state === 'EXPIRED' ? 'EXPIRED' : 'INVALIDATED',
+      requestedAt: run.createdAt,
+      displayedAt: run.displayed ? run.updatedAt : undefined,
+      expiresAt: run.expiresAt,
+    },
+    recovery: { classification: liveRecoveryClass, eligible: liveRecoveryClass === 'REPROPOSAL_ALLOWED' },
+    createdAt: run.createdAt,
+    updatedAt: run.updatedAt,
+  };
 }

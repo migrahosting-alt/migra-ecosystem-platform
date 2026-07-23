@@ -2,13 +2,17 @@ import { createHash, randomUUID } from 'node:crypto';
 import type { AgentModeCommandPreview, AgentModeCommandResult, AgentModeCommandRunView, AgentModeState } from '@migrapilot/protocol';
 import { auditHash } from './auditLog.js';
 import { redactValue } from './redaction.js';
+import { validateRecoverySourceProvenance } from './recoverySourceProvenance.js';
 import type {
   AgentRunJournalPersistence,
   AgentRunFencedEventInput,
+  AgentRunReproposalResult,
   AgentRunReconciliationClaim,
   AgentRunTransitionInput,
+  DurableAgentApprovalLifecycle,
   DurableAgentRun,
   DurableAgentRunEvent,
+  DurableAgentRecoveryClass,
   DurableAgentRunState,
   DurableAgentRunTombstone,
 } from './persistence/types.js';
@@ -41,6 +45,7 @@ export interface AgentRunCreateInput {
   networkPolicy: string;
   expectedEffects: readonly string[];
   preview: AgentModeCommandPreview;
+  recoverySourceRunId?: string;
 }
 
 export interface AgentRunTransition {
@@ -63,6 +68,20 @@ export interface AgentRunTransition {
   interruptionClassification?: string;
   containmentUnit?: string;
   containmentBinding?: string;
+  approvalLifecycle?: DurableAgentApprovalLifecycle;
+  approvalRequestedAt?: number;
+  approvalExpiresAt?: number;
+  approvalDecisionType?: 'APPROVED' | 'REJECTED';
+  approvalInvalidationReason?: string;
+  approvalActorRef?: string;
+  recoveryClass?: DurableAgentRecoveryClass;
+  recoveryEligible?: boolean;
+  recoveryReason?: string;
+  successorRunId?: string;
+  reproposalAt?: number;
+  recoveryAttemptCount?: number;
+  lastRecoveryRequestId?: string;
+  recoveryTerminalReason?: string;
   reconciliation?: {
     owner: string;
     fence: number;
@@ -102,36 +121,7 @@ export class AgentRunJournal {
 
   create(input: AgentRunCreateInput): void {
     if (!this.persistence) return;
-    const run: DurableAgentRun = {
-      runId: input.runId,
-      correlationId: input.correlationId,
-      externalRequestRef: input.externalRequestRef,
-      activationRef: auditHash(input.activationId),
-      workspaceIdentity: input.workspaceIdentity,
-      workspaceRef: auditHash(input.workspaceRoot),
-      recipeId: input.recipeId,
-      recipePolicyVersion: input.recipePolicyVersion,
-      proposalFingerprint: input.proposalFingerprint,
-      proposalHash: input.proposalHash,
-      snapshotId: input.snapshotId,
-      snapshotManifestDigest: input.snapshotManifestDigest,
-      executableDigest: input.executableDigest,
-      state: 'AWAITING_APPROVAL',
-      requestedAt: input.requestedAt,
-      proposalAt: input.proposalAt,
-      expiresAt: input.expiresAt,
-      timeoutMs: input.timeoutMs,
-      outputLimitBytes: input.outputLimitBytes,
-      mutationClassification: input.mutationClassification,
-      networkPolicy: input.networkPolicy,
-      expectedEffectsJson: stableJson(input.expectedEffects),
-      previewJson: stableJson(redactValue(input.preview)),
-      auditSeq: 0,
-      schemaVersion: AGENT_RUN_SCHEMA_VERSION,
-      version: 1,
-      reconciliationFence: 0,
-      updatedAt: input.proposalAt,
-    };
+    const run = this.buildRun(input);
     this.persistence.insertAgentRun(run, {
       eventId: this.mkId(),
       runId: input.runId,
@@ -145,6 +135,91 @@ export class AgentRunJournal {
       schemaVersion: AGENT_RUN_SCHEMA_VERSION,
     });
     this.event({ runId: input.runId, at: input.proposalAt, type: 'proposal.created', state: 'AWAITING_APPROVAL', correlationId: input.correlationId, source: 'API', reason: input.recipeId });
+    this.event({ runId: input.runId, at: input.proposalAt, type: 'approval.requested', state: 'AWAITING_APPROVAL', correlationId: input.correlationId, source: 'APPROVAL', reason: 'PENDING_DISPLAY' });
+  }
+
+  createSuccessor(input: {
+    source: DurableAgentRun;
+    provenance: Parameters<AgentRunJournalPersistence['reproposeAgentRun']>[0]['provenance'];
+    requestId: string;
+    run: AgentRunCreateInput;
+  }): AgentRunReproposalResult {
+    if (!this.persistence) return { ok: false, code: 'UNKNOWN_SOURCE' };
+    const successor = this.buildRun(input.run);
+    return this.persistence.reproposeAgentRun({
+      sourceRunId: input.source.runId,
+      sourceExpectedVersion: input.source.version,
+      requestId: input.requestId,
+      at: input.run.proposalAt,
+      provenance: input.provenance,
+      successor,
+      createdEvent: {
+        eventId: this.mkId(),
+        runId: input.run.runId,
+        seq: 1,
+        at: input.run.proposalAt,
+        type: 'run.created',
+        nextState: 'AWAITING_APPROVAL',
+        reason: 'RECOVERY_REPROPOSAL_CREATED',
+        correlationId: input.run.correlationId,
+        source: 'RECOVERY',
+        schemaVersion: AGENT_RUN_SCHEMA_VERSION,
+      },
+      proposalEvent: {
+        eventId: this.mkId(),
+        runId: input.run.runId,
+        seq: 2,
+        at: input.run.proposalAt,
+        type: 'proposal.created',
+        priorState: 'AWAITING_APPROVAL',
+        nextState: 'AWAITING_APPROVAL',
+        reason: input.run.recipeId,
+        correlationId: input.run.correlationId,
+        source: 'RECOVERY',
+        schemaVersion: AGENT_RUN_SCHEMA_VERSION,
+      },
+    });
+  }
+
+  private buildRun(input: AgentRunCreateInput): DurableAgentRun {
+    return {
+      runId: input.runId,
+      correlationId: input.correlationId,
+      externalRequestRef: input.externalRequestRef,
+      activationRef: auditHash(input.activationId),
+      workspaceIdentity: input.workspaceIdentity,
+      workspaceRef: auditHash(input.workspaceRoot),
+      recipeId: input.recipeId,
+      recipePolicyVersion: input.recipePolicyVersion,
+      proposalFingerprint: input.proposalFingerprint,
+      proposalHash: input.proposalHash,
+      snapshotId: input.snapshotId,
+      snapshotManifestDigest: input.snapshotManifestDigest,
+      executableDigest: input.executableDigest,
+      recoverySourceRunId: input.recoverySourceRunId,
+      state: 'AWAITING_APPROVAL',
+      requestedAt: input.requestedAt,
+      proposalAt: input.proposalAt,
+      expiresAt: input.expiresAt,
+      timeoutMs: input.timeoutMs,
+      outputLimitBytes: input.outputLimitBytes,
+      mutationClassification: input.mutationClassification,
+      networkPolicy: input.networkPolicy,
+      expectedEffectsJson: stableJson(input.expectedEffects),
+      previewJson: stableJson(redactValue(input.preview)),
+      approvalLifecycleVersion: 1,
+      approvalLifecycle: 'PENDING_DISPLAY',
+      approvalRequestedAt: input.proposalAt,
+      approvalExpiresAt: input.expiresAt,
+      recoveryClass: 'NONE',
+      recoveryEligible: false,
+      recoveryAttemptCount: 0,
+      auditSeq: 0,
+      schemaVersion: AGENT_RUN_SCHEMA_VERSION,
+      version: 1,
+      reconciliationFence: 0,
+      updatedAt: input.proposalAt,
+    };
   }
 
   event(input: { runId: string; at: number; type: string; state: AgentModeState; correlationId: string; source: AgentRunEventSource; reason?: string }): void {
@@ -198,6 +273,20 @@ export class AgentRunJournal {
       interruptionClassification: input.interruptionClassification,
       containmentUnit: input.containmentUnit,
       containmentBinding: input.containmentBinding,
+      approvalLifecycle: input.approvalLifecycle,
+      approvalRequestedAt: input.approvalRequestedAt,
+      approvalExpiresAt: input.approvalExpiresAt,
+      approvalDecisionType: input.approvalDecisionType,
+      approvalInvalidationReason: input.approvalInvalidationReason,
+      approvalActorRef: input.approvalActorRef,
+      recoveryClass: input.recoveryClass,
+      recoveryEligible: input.recoveryEligible,
+      recoveryReason: input.recoveryReason,
+      successorRunId: input.successorRunId,
+      reproposalAt: input.reproposalAt,
+      recoveryAttemptCount: input.recoveryAttemptCount,
+      lastRecoveryRequestId: input.lastRecoveryRequestId,
+      recoveryTerminalReason: input.recoveryTerminalReason,
     };
     return this.persistence.transitionAgentRun({
       runId: input.runId,
@@ -251,6 +340,26 @@ export function durableRunToView(run: DurableAgentRun): AgentModeCommandRunView 
     preview: parseJson<AgentModeCommandPreview>(run.previewJson),
     result: parseJson<AgentModeCommandResult>(run.resultJson),
     error: parseJson<{ code: string; message: string }>(run.errorJson),
+    approval: {
+      lifecycle: run.approvalLifecycle,
+      requestedAt: run.approvalRequestedAt,
+      displayedAt: run.approvalDisplayedAt,
+      decisionAt: run.approvalDecisionAt,
+      decision: run.approvalDecisionType,
+      expiresAt: run.approvalExpiresAt,
+      invalidationReason: run.approvalInvalidationReason,
+      actorRef: run.approvalActorRef,
+    },
+    recovery: {
+      classification: run.recoveryClass,
+      eligible: run.recoveryEligible,
+      reason: run.recoveryReason,
+      sourceRunId: run.recoverySourceRunId,
+      successorRunId: run.successorRunId,
+      attemptCount: run.recoveryAttemptCount,
+      lastRequestId: run.lastRecoveryRequestId,
+      terminalReason: run.recoveryTerminalReason,
+    },
     createdAt: run.requestedAt,
     updatedAt: run.updatedAt,
   };
@@ -354,6 +463,20 @@ export class MemoryAgentRunJournalPersistence implements AgentRunJournalPersiste
       interruptionClassification: input.patch?.interruptionClassification,
       containmentUnit: input.patch?.containmentUnit,
       containmentBinding: input.patch?.containmentBinding,
+      approvalLifecycle: input.patch?.approvalLifecycle,
+      approvalRequestedAt: input.patch?.approvalRequestedAt,
+      approvalExpiresAt: input.patch?.approvalExpiresAt,
+      approvalDecisionType: input.patch?.approvalDecisionType,
+      approvalInvalidationReason: input.patch?.approvalInvalidationReason,
+      approvalActorRef: input.patch?.approvalActorRef,
+      recoveryClass: input.patch?.recoveryClass,
+      recoveryEligible: input.patch?.recoveryEligible,
+      recoveryReason: input.patch?.recoveryReason,
+      successorRunId: input.patch?.successorRunId,
+      reproposalAt: input.patch?.reproposalAt,
+      recoveryAttemptCount: input.patch?.recoveryAttemptCount,
+      lastRecoveryRequestId: input.patch?.lastRecoveryRequestId,
+      recoveryTerminalReason: input.patch?.recoveryTerminalReason,
       updatedAt: input.at,
       version: run.version + 1,
     }));
@@ -374,6 +497,72 @@ export class MemoryAgentRunJournalPersistence implements AgentRunJournalPersiste
       schemaVersion: AGENT_RUN_SCHEMA_VERSION,
     });
     return true;
+  }
+
+  reproposeAgentRun(input: Parameters<AgentRunJournalPersistence['reproposeAgentRun']>[0]): AgentRunReproposalResult {
+    const source = this.runs.get(input.sourceRunId);
+    if (!source) return { ok: false, code: 'UNKNOWN_SOURCE' };
+    if (source.lastRecoveryRequestId === input.requestId && source.successorRunId) {
+      const successor = this.runs.get(source.successorRunId);
+      if (successor) return { ok: true, created: false, successor: { ...successor } };
+    }
+    if (!AGENT_TERMINAL_STATES.has(source.state as AgentModeState)) return { ok: false, code: 'SOURCE_NOT_TERMINAL' };
+    if (source.version !== input.sourceExpectedVersion) return { ok: false, code: 'SOURCE_VERSION_CHANGED' };
+    if (source.reconciliationOwner && (source.reconciliationLeaseUntil ?? 0) >= input.at) return { ok: false, code: 'SOURCE_UNDER_RECONCILIATION' };
+    if (source.successorRunId) return { ok: false, code: 'ACTIVE_SUCCESSOR_EXISTS' };
+    const activeSuccessor = [...this.runs.values()].find((run) => run.recoverySourceRunId === source.runId && !AGENT_TERMINAL_STATES.has(run.state as AgentModeState));
+    if (activeSuccessor) return { ok: false, code: 'ACTIVE_SUCCESSOR_EXISTS' };
+    const sourceEvents = this.events.get(source.runId) ?? [];
+    const provenance = validateRecoverySourceProvenance({
+      run: source,
+      events: sourceEvents,
+      workspaceIdentity: input.provenance.workspaceIdentity,
+      allowedRecipes: input.provenance.allowedRecipes,
+      now: input.at,
+    });
+    if (!provenance.trusted || provenance.digest !== input.provenance.eventDigest || provenance.highestSeq !== input.provenance.highestSeq) return { ok: false, code: 'SOURCE_PROVENANCE_FAILED' };
+    if (this.runs.has(input.successor.runId)) return { ok: false, code: 'PARTIAL_FAILURE' };
+    const sourceEvent1: DurableAgentRunEvent = {
+      eventId: `${source.runId}:reproposal:${input.requestId}:requested`,
+      runId: source.runId,
+      seq: source.auditSeq + 1,
+      at: input.at,
+      type: 'recovery.reproposal_requested',
+      priorState: source.state,
+      nextState: source.state,
+      reason: input.requestId,
+      correlationId: source.correlationId,
+      source: 'RECOVERY',
+      schemaVersion: AGENT_RUN_SCHEMA_VERSION,
+    };
+    const sourceEvent2: DurableAgentRunEvent = {
+      eventId: `${source.runId}:reproposal:${input.requestId}:linked`,
+      runId: source.runId,
+      seq: source.auditSeq + 2,
+      at: input.at,
+      type: 'recovery.successor_linked',
+      priorState: source.state,
+      nextState: source.state,
+      reason: input.successor.runId,
+      correlationId: source.correlationId,
+      source: 'RECOVERY',
+      schemaVersion: AGENT_RUN_SCHEMA_VERSION,
+    };
+    this.runs.set(input.successor.runId, { ...input.successor });
+    this.events.set(input.successor.runId, [{ ...input.createdEvent }, { ...input.proposalEvent }]);
+    this.runs.get(input.successor.runId)!.auditSeq = 2;
+    this.events.set(source.runId, [...(this.events.get(source.runId) ?? []), sourceEvent1, sourceEvent2]);
+    Object.assign(source, {
+      successorRunId: input.successor.runId,
+      reproposalAt: input.at,
+      recoveryAttemptCount: source.recoveryAttemptCount + 1,
+      lastRecoveryRequestId: input.requestId,
+      recoveryTerminalReason: 'SUCCESSOR_CREATED',
+      auditSeq: source.auditSeq + 2,
+      version: source.version + 1,
+      updatedAt: input.at,
+    });
+    return { ok: true, created: true, successor: { ...input.successor } };
   }
 
   loadAgentRuns(limit = 5000): DurableAgentRun[] { return [...this.runs.values()].slice(0, limit).map((r) => ({ ...r })); }
@@ -403,12 +592,12 @@ export class MemoryAgentRunJournalPersistence implements AgentRunJournalPersiste
   pruneAgentRuns(cutoff: number, batchSize: number, now: number): { runs: number; events: number } {
     let runs = 0;
     let events = 0;
-    const candidates = [...this.runs.values()].filter((r) => r.terminalAt !== undefined && r.terminalAt < cutoff && AGENT_TERMINAL_STATES.has(r.state as AgentModeState) && (!r.reconciliationOwner || (r.reconciliationLeaseUntil ?? 0) < now)).slice(0, batchSize).map((run) => ({ run, version: run.version }));
+    const candidates = [...this.runs.values()].filter((r) => r.terminalAt !== undefined && r.terminalAt < cutoff && AGENT_TERMINAL_STATES.has(r.state as AgentModeState) && (!r.reconciliationOwner || (r.reconciliationLeaseUntil ?? 0) < now) && !activeLineage(this.runs, r)).slice(0, batchSize).map((run) => ({ run, version: run.version }));
     for (const { run, version } of candidates) {
       const current = this.runs.get(run.runId);
       if (!current || current.version !== version || (current.reconciliationOwner && (current.reconciliationLeaseUntil ?? 0) >= now)) continue;
       const eventCount = this.events.get(run.runId)?.length ?? 0;
-      this.tombstones.push({ tombstoneId: `tombstone_${run.runId}_${now}`, runId: run.runId, workspaceIdentity: run.workspaceIdentity, recipeId: run.recipeId, finalState: run.state, terminalAt: run.terminalAt!, deletedAt: now, deletionReason: 'RETENTION_EXPIRED', finalAuditSeq: run.auditSeq, eventCount, schemaVersion: AGENT_RUN_SCHEMA_VERSION });
+      this.tombstones.push({ tombstoneId: `tombstone_${run.runId}_${now}`, runId: run.runId, workspaceIdentity: run.workspaceIdentity, recipeId: run.recipeId, finalState: run.state, terminalAt: run.terminalAt!, deletedAt: now, deletionReason: 'RETENTION_EXPIRED', finalAuditSeq: run.auditSeq, eventCount, recoverySourceRunId: run.recoverySourceRunId, successorRunId: run.successorRunId, schemaVersion: AGENT_RUN_SCHEMA_VERSION });
       events += eventCount;
       this.events.delete(run.runId);
       this.runs.delete(run.runId);
@@ -417,6 +606,14 @@ export class MemoryAgentRunJournalPersistence implements AgentRunJournalPersiste
     return { runs, events };
   }
   loadAgentRunTombstones(limit = 500): DurableAgentRunTombstone[] { return this.tombstones.slice(0, limit).map((t) => ({ ...t })); }
+}
+
+function activeLineage(runs: Map<string, DurableAgentRun>, run: DurableAgentRun): boolean {
+  if (run.successorRunId) {
+    const successor = runs.get(run.successorRunId);
+    if (successor && !AGENT_TERMINAL_STATES.has(successor.state as AgentModeState)) return true;
+  }
+  return [...runs.values()].some((candidate) => candidate.recoverySourceRunId === run.runId && !AGENT_TERMINAL_STATES.has(candidate.state as AgentModeState));
 }
 
 function compact<T extends Record<string, unknown>>(value: T): Partial<T> {

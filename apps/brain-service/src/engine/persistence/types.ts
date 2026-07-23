@@ -230,6 +230,31 @@ export type DurableAgentRunState =
   | 'FAILED'
   | 'CANCELLED';
 
+export type DurableAgentApprovalLifecycle =
+  | 'NOT_REQUESTED'
+  | 'PENDING_DISPLAY'
+  | 'DISPLAYED'
+  | 'APPROVED'
+  | 'REJECTED'
+  | 'EXPIRED'
+  | 'INVALIDATED'
+  | 'LOST_ON_RESTART'
+  | 'CONSUMED';
+
+export type DurableAgentRecoveryClass =
+  | 'NONE'
+  | 'REPROPOSAL_ALLOWED'
+  | 'REPROPOSAL_REQUIRED'
+  | 'TERMINAL_NO_RECOVERY'
+  | 'WORKSPACE_MISMATCH'
+  | 'POLICY_CHANGED'
+  | 'SNAPSHOT_CHANGED'
+  | 'RECIPE_DISABLED'
+  | 'AUTHORIZATION_LOST'
+  | 'INTERRUPTED_EXECUTION'
+  | 'RETENTION_REMOVED'
+  | 'SCHEMA_INCOMPATIBLE';
+
 export interface DurableAgentRun {
   runId: string;
   correlationId: string;
@@ -266,6 +291,22 @@ export interface DurableAgentRun {
   signal?: string;
   failureCode?: string;
   interruptionClassification?: string;
+  approvalLifecycleVersion: number;
+  approvalLifecycle: DurableAgentApprovalLifecycle;
+  approvalRequestedAt?: number;
+  approvalExpiresAt?: number;
+  approvalDecisionType?: 'APPROVED' | 'REJECTED';
+  approvalInvalidationReason?: string;
+  approvalActorRef?: string;
+  recoveryClass: DurableAgentRecoveryClass;
+  recoveryEligible: boolean;
+  recoveryReason?: string;
+  recoverySourceRunId?: string;
+  successorRunId?: string;
+  reproposalAt?: number;
+  recoveryAttemptCount: number;
+  lastRecoveryRequestId?: string;
+  recoveryTerminalReason?: string;
   auditSeq: number;
   schemaVersion: number;
   version: number;
@@ -294,6 +335,8 @@ export interface DurableAgentRunTombstone {
   deletionReason: string;
   finalAuditSeq: number;
   eventCount: number;
+  recoverySourceRunId?: string;
+  successorRunId?: string;
   schemaVersion: number;
 }
 
@@ -307,7 +350,7 @@ export interface DurableAgentRunEvent {
   nextState: DurableAgentRunState;
   reason?: string;
   correlationId: string;
-  source: 'API' | 'APPROVAL' | 'EXECUTION' | 'RECONCILIATION' | 'SHUTDOWN' | 'CLEANUP';
+  source: 'API' | 'APPROVAL' | 'EXECUTION' | 'RECONCILIATION' | 'SHUTDOWN' | 'CLEANUP' | 'RECOVERY';
   schemaVersion: number;
 }
 
@@ -325,9 +368,30 @@ export interface AgentRunTransitionInput {
     leaseValidAt: number;
     expectedVersion?: number;
   };
-  patch?: Partial<Pick<DurableAgentRun, 'approvalDisplayedAt' | 'approvalDecisionAt' | 'executionStartedAt' | 'terminalAt' | 'resultJson' | 'errorJson' | 'exitCode' | 'signal' | 'failureCode' | 'interruptionClassification' | 'containmentUnit' | 'containmentBinding'>>;
+  patch?: Partial<Pick<DurableAgentRun, 'approvalDisplayedAt' | 'approvalDecisionAt' | 'executionStartedAt' | 'terminalAt' | 'resultJson' | 'errorJson' | 'exitCode' | 'signal' | 'failureCode' | 'interruptionClassification' | 'containmentUnit' | 'containmentBinding' | 'approvalLifecycle' | 'approvalRequestedAt' | 'approvalExpiresAt' | 'approvalDecisionType' | 'approvalInvalidationReason' | 'approvalActorRef' | 'recoveryClass' | 'recoveryEligible' | 'recoveryReason' | 'successorRunId' | 'reproposalAt' | 'recoveryAttemptCount' | 'lastRecoveryRequestId' | 'recoveryTerminalReason'>>;
   eventId?: string;
 }
+
+export interface AgentRunReproposalInput {
+  sourceRunId: string;
+  sourceExpectedVersion: number;
+  requestId: string;
+  at: number;
+  provenance: {
+    workspaceIdentity: string;
+    allowedRecipes: readonly string[];
+    eventDigest: string;
+    highestSeq: number;
+  };
+  successor: DurableAgentRun;
+  createdEvent: DurableAgentRunEvent;
+  proposalEvent: DurableAgentRunEvent;
+}
+
+export type AgentRunReproposalResult =
+  | { ok: true; created: true; successor: DurableAgentRun }
+  | { ok: true; created: false; successor: DurableAgentRun }
+  | { ok: false; code: 'UNKNOWN_SOURCE' | 'SOURCE_NOT_TERMINAL' | 'SOURCE_UNDER_RECONCILIATION' | 'ACTIVE_SUCCESSOR_EXISTS' | 'SOURCE_VERSION_CHANGED' | 'SOURCE_PROVENANCE_FAILED' | 'RECOVERY_EVENT_ID_COLLISION' | 'RECOVERY_EVENT_CONTENT_MISMATCH' | 'RECOVERY_EVENT_SEQUENCE_CONFLICT' | 'RECOVERY_EVENT_INSERT_FAILED' | 'PARTIAL_FAILURE' };
 
 export interface AgentRunFencedEventInput {
   runId: string;
@@ -350,6 +414,7 @@ export interface AgentRunJournalPersistence {
   appendAgentRunEvent(event: Omit<DurableAgentRunEvent, 'seq'>): void;
   appendAgentRunEventUnderFence(input: AgentRunFencedEventInput): AgentRunReconciliationClaim | undefined;
   transitionAgentRun(input: AgentRunTransitionInput): boolean;
+  reproposeAgentRun(input: AgentRunReproposalInput): AgentRunReproposalResult;
   loadAgentRuns(limit?: number): DurableAgentRun[];
   loadAgentRun(runId: string): DurableAgentRun | undefined;
   loadAgentRunEvents(runId: string, limit?: number): DurableAgentRunEvent[];
