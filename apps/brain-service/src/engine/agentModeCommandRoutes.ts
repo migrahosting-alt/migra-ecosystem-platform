@@ -1,5 +1,5 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import { AgentModeBootstrapRequestSchema, AgentModeDecisionSchema, AgentModeDisplaySchema, type AgentModeCommandRunView } from '@migrapilot/protocol';
+import { AgentModeBootstrapRequestSchema, AgentModeDecisionSchema, AgentModeDisplaySchema, AgentModeReproposalRequestSchema, type AgentModeCommandRunView, type AgentModeRunRecoveryStatus } from '@migrapilot/protocol';
 import type { ToolExecDeps } from './toolExecutor.js';
 import { engineCorrelationId } from './toolRoutes.js';
 import { AgentActivationAuthority, AgentActivationError, AGENT_CAPABILITY_HEADER } from './agentActivation.js';
@@ -52,6 +52,18 @@ export function registerAgentModeCommandRoutes(
     if (!context) return forbidden(reply);
     return send(reply, service.cancel(request.params.runId, context));
   });
+  app.get<{ Params: { runId: string } }>('/api/ai/agent-mode/commands/:runId/recovery', async (request, reply) => {
+    const context = await requestContext(request, authority);
+    if (!context) return forbidden(reply);
+    return sendRecovery(reply, service.getRunRecoveryStatus(request.params.runId, context));
+  });
+  app.post<{ Params: { runId: string }; Body: unknown }>('/api/ai/agent-mode/commands/:runId/repropose', { bodyLimit: 4 * 1024 }, async (request, reply) => {
+    const context = await requestContext(request, authority);
+    if (!context) return forbidden(reply);
+    const parsed = AgentModeReproposalRequestSchema.safeParse(request.body);
+    if (!parsed.success) return invalid(reply, 'INVALID_INPUT', 'A valid recovery request id is required.');
+    return send(reply, await service.reproposeFromRun(request.params.runId, parsed.data, context));
+  });
   return service;
 }
 
@@ -91,6 +103,13 @@ function invalid(reply: FastifyReply, code: string, error: string): { ok: false;
 function send(reply: FastifyReply, result: AgentModeActionResult): AgentModeCommandRunView | { ok: false; code: string; error: string } {
   if (result.ok) return result.view;
   const status = result.code === 'UNKNOWN_RUN' ? 404 : result.code === 'INVALID_CONTEXT' ? 403 : result.code === 'OVERLOADED' ? 429 : result.code === 'PROPOSAL_FAILED' ? 400 : result.code === 'UNSUPPORTED_PLATFORM' || result.code === 'CONTAINMENT_UNAVAILABLE' ? 503 : 409;
+  reply.code(status);
+  return { ok: false, code: result.code, error: result.message };
+}
+
+function sendRecovery(reply: FastifyReply, result: ReturnType<AgentModeCommandService['getRunRecoveryStatus']>): AgentModeRunRecoveryStatus | { ok: false; code: string; error: string } {
+  if (result.ok) return result.status;
+  const status = result.code === 'UNKNOWN_RUN' ? 404 : result.code === 'INVALID_CONTEXT' ? 403 : 409;
   reply.code(status);
   return { ok: false, code: result.code, error: result.message };
 }

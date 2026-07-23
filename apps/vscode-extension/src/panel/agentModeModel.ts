@@ -1,4 +1,4 @@
-import type { AgentModeCommandPreview, AgentModeState } from '@migrapilot/protocol';
+import type { AgentModeCommandPreview, AgentModeCommandRunView, AgentModeRecoveryClass, AgentModeRunRecoveryStatus, AgentModeState } from '@migrapilot/protocol';
 
 export class AgentModeSessionGate {
   private value = false;
@@ -38,7 +38,7 @@ export function renderPreviewLines(preview: AgentModeCommandPreview): string[] {
   ];
 }
 
-export function agentModeControlState(state: AgentModeState): { approve: boolean; reject: boolean; cancel: boolean; reconcile: boolean; resume: false; restartLabel?: string } {
+export function agentModeControlState(state: AgentModeState): { approve: boolean; reject: boolean; cancel: boolean; reconcile: boolean; resume: false; freshProposal: boolean; restartLabel?: string } {
   const interrupted = state === 'STALE' || state === 'FAILED' || state === 'EXPIRED';
   return {
     approve: state === 'AWAITING_APPROVAL',
@@ -46,6 +46,39 @@ export function agentModeControlState(state: AgentModeState): { approve: boolean
     cancel: state === 'PLANNING' || state === 'AWAITING_APPROVAL' || state === 'APPROVED' || state === 'EXECUTING',
     reconcile: true,
     resume: false,
+    freshProposal: interrupted,
     ...(interrupted ? { restartLabel: 'Interrupted or stale Agent run — create a new proposal to continue.' } : {}),
   };
+}
+
+export function agentModeRecoveryStatusText(status: AgentModeRunRecoveryStatus): string {
+  const label = recoveryClassLabel(status.recoveryClass);
+  const action = status.eligible ? 'Fresh proposal available.' : status.recommendedAction;
+  return `${label}: ${status.explanation} ${action}`;
+}
+
+export function agentModeRecoveryControlState(
+  view: AgentModeCommandRunView,
+  status?: AgentModeRunRecoveryStatus,
+): { freshProposal: boolean; resume: false; label?: string } {
+  const eligible = status?.eligible ?? view.recovery?.eligible ?? false;
+  const label = status ? agentModeRecoveryStatusText(status) : view.recovery?.reason;
+  return { freshProposal: eligible, resume: false, ...(label ? { label } : {}) };
+}
+
+function recoveryClassLabel(value: AgentModeRecoveryClass): string {
+  switch (value) {
+    case 'REPROPOSAL_REQUIRED': return 'Fresh proposal required';
+    case 'REPROPOSAL_ALLOWED': return 'Fresh proposal allowed';
+    case 'SNAPSHOT_CHANGED': return 'Snapshot changed';
+    case 'RECIPE_DISABLED': return 'Recipe disabled';
+    case 'WORKSPACE_MISMATCH': return 'Workspace mismatch';
+    case 'POLICY_CHANGED': return 'Policy changed';
+    case 'AUTHORIZATION_LOST': return 'Authorization lost';
+    case 'INTERRUPTED_EXECUTION': return 'Interrupted execution';
+    case 'RETENTION_REMOVED': return 'Retention removed';
+    case 'SCHEMA_INCOMPATIBLE': return 'Schema incompatible';
+    case 'TERMINAL_NO_RECOVERY': return 'No recovery';
+    case 'NONE': return 'No recovery action';
+  }
 }

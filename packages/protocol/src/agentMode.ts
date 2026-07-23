@@ -19,6 +19,33 @@ export const AgentModeRecipeIdSchema = z.enum([
   'git.diff',
 ]);
 
+export const AgentModeApprovalLifecycleSchema = z.enum([
+  'NOT_REQUESTED',
+  'PENDING_DISPLAY',
+  'DISPLAYED',
+  'APPROVED',
+  'REJECTED',
+  'EXPIRED',
+  'INVALIDATED',
+  'LOST_ON_RESTART',
+  'CONSUMED',
+]);
+
+export const AgentModeRecoveryClassSchema = z.enum([
+  'NONE',
+  'REPROPOSAL_ALLOWED',
+  'REPROPOSAL_REQUIRED',
+  'TERMINAL_NO_RECOVERY',
+  'WORKSPACE_MISMATCH',
+  'POLICY_CHANGED',
+  'SNAPSHOT_CHANGED',
+  'RECIPE_DISABLED',
+  'AUTHORIZATION_LOST',
+  'INTERRUPTED_EXECUTION',
+  'RETENTION_REMOVED',
+  'SCHEMA_INCOMPATIBLE',
+]);
+
 export const AgentModeBootstrapRequestSchema = z.object({
   bootstrapSecret: z.string().min(32).max(512),
   activationId: z.string().uuid(),
@@ -92,6 +119,26 @@ export const AgentModeCommandRunViewSchema = z.object({
   preview: AgentModeCommandPreviewSchema.optional(),
   result: AgentModeCommandResultSchema.optional(),
   error: z.object({ code: z.string(), message: z.string() }).optional(),
+  approval: z.object({
+    lifecycle: AgentModeApprovalLifecycleSchema,
+    requestedAt: z.number().optional(),
+    displayedAt: z.number().optional(),
+    decisionAt: z.number().optional(),
+    decision: z.enum(['APPROVED', 'REJECTED']).optional(),
+    expiresAt: z.number().optional(),
+    invalidationReason: z.string().optional(),
+    actorRef: z.string().optional(),
+  }).optional(),
+  recovery: z.object({
+    classification: AgentModeRecoveryClassSchema,
+    eligible: z.boolean(),
+    reason: z.string().optional(),
+    sourceRunId: z.string().optional(),
+    successorRunId: z.string().optional(),
+    attemptCount: z.number().int().nonnegative().optional(),
+    lastRequestId: z.string().optional(),
+    terminalReason: z.string().optional(),
+  }).optional(),
   createdAt: z.number(),
   updatedAt: z.number(),
 }).strict();
@@ -105,8 +152,33 @@ export const AgentModeDisplaySchema = z.object({
   fingerprint: z.string().min(1),
 }).strict();
 
+export const AgentModeRunRecoveryStatusSchema = z.object({
+  runId: z.string(),
+  sourceState: AgentModeStateSchema,
+  approvalLifecycle: AgentModeApprovalLifecycleSchema,
+  terminalReason: z.string().optional(),
+  recoveryClass: AgentModeRecoveryClassSchema,
+  eligible: z.boolean(),
+  explanation: z.string(),
+  currentRecipeAvailable: z.boolean(),
+  workspaceMatches: z.boolean(),
+  activeSuccessorRunId: z.string().optional(),
+  recommendedAction: z.string(),
+  lineage: z.object({
+    sourceRunId: z.string().optional(),
+    successorRunId: z.string().optional(),
+  }),
+}).strict();
+
+export const AgentModeReproposalRequestSchema = z.object({
+  requestId: z.string().trim().min(8).max(128),
+  reason: z.string().trim().min(1).max(200).optional(),
+}).strict();
+
 export type AgentModeState = z.infer<typeof AgentModeStateSchema>;
 export type AgentModeRecipeId = z.infer<typeof AgentModeRecipeIdSchema>;
+export type AgentModeApprovalLifecycle = z.infer<typeof AgentModeApprovalLifecycleSchema>;
+export type AgentModeRecoveryClass = z.infer<typeof AgentModeRecoveryClassSchema>;
 export type AgentModeBootstrapRequest = z.infer<typeof AgentModeBootstrapRequestSchema>;
 export type AgentModeBootstrapResponse = z.infer<typeof AgentModeBootstrapResponseSchema>;
 export type AgentModeCommandProposalRequest = z.infer<typeof AgentModeCommandProposalRequestSchema>;
@@ -114,3 +186,5 @@ export type AgentModeCommandPreview = z.infer<typeof AgentModeCommandPreviewSche
 export type AgentModeCommandResult = z.infer<typeof AgentModeCommandResultSchema>;
 export type AgentModeCommandRunView = z.infer<typeof AgentModeCommandRunViewSchema>;
 export type AgentModeDecision = z.infer<typeof AgentModeDecisionSchema>;
+export type AgentModeRunRecoveryStatus = z.infer<typeof AgentModeRunRecoveryStatusSchema>;
+export type AgentModeReproposalRequest = z.infer<typeof AgentModeReproposalRequestSchema>;

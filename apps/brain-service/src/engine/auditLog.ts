@@ -59,6 +59,7 @@ export type AuditEventType =
   | 'validation.failed'
   | 'recovery.started'
   | 'recovery.plan_created'
+  | 'recovery.successor_created'
   | 'recovery.approved'
   | 'recovery.applied'
   | 'recovery.validation_completed'
