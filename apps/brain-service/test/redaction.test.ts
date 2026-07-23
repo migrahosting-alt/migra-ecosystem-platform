@@ -23,6 +23,18 @@ test('tokens / approval tokens / JWT / AWS keys are redacted in strings', () => 
   assert.doesNotMatch(redactString(`x ${TOKEN} y`).value, /ghp_ABC/);
 });
 
+test('free-form sensitive assignments are fully redacted', () => {
+  for (const input of [
+    'reason token=short-secret',
+    'password: hunter2',
+    '{"api_key":"compact-value"}',
+  ]) {
+    const result = redactString(input, { redactPaths: false });
+    assert.equal(result.redacted, true);
+    assert.doesNotMatch(result.value, /short-secret|hunter2|compact-value/);
+  }
+});
+
 test('PEM private key + connection string + credential URL are redacted', () => {
   assert.match(redactString(PEM).value, /REDACTED_CREDENTIAL/);
   assert.doesNotMatch(redactString(PEM).value, /MIIE/);

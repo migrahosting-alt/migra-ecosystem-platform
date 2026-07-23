@@ -70,6 +70,13 @@
 !/apps/**/tsconfig.json
 !/apps/**/README.md
 
+# Stage 2B Agent Mode protocol contract. Keep this explicit because the root
+# allowlist otherwise hides a source file exported by the tracked protocol index.
+!/packages/
+!/packages/protocol/
+!/packages/protocol/src/
+!/packages/protocol/src/agentMode.ts
+
 # --- MigraTeck web (allowlist) ---
 !/MigraTeck/
 !/MigraTeck/**

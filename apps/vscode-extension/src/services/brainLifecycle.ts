@@ -19,7 +19,7 @@ export interface SpawnedProcess {
 }
 
 export interface BrainLauncher {
-  spawn(command: readonly string[]): SpawnedProcess;
+  spawn(command: readonly string[], environment?: Readonly<Record<string, string>>): SpawnedProcess;
   /** GET <url>/health → 'brain' (service===migrapilot-brain) | 'foreign' | 'down'. */
   probe(url: string, signal?: AbortSignal): Promise<ProbeResult>;
   sleep(ms: number): Promise<void>;
@@ -37,6 +37,8 @@ export interface EnsureOptions {
   autoStart: boolean;
   /** argv to launch the brain; empty means we cannot spawn one. */
   command: readonly string[];
+  /** Private values inherited only by the child process. Never logged. */
+  environment?: Readonly<Record<string, string>>;
   maxAttempts?: number;
   baseDelayMs?: number;
   maxDelayMs?: number;
@@ -75,7 +77,7 @@ export class BrainLifecycle {
       return 'unable';
     }
 
-    const proc = this.launcher.spawn(opts.command);
+    const proc = this.launcher.spawn(opts.command, opts.environment);
     this.owned = proc;
     proc.onExit(() => {
       if (this.owned === proc) {

@@ -1,5 +1,4 @@
 import Fastify from 'fastify';
-import cors from '@fastify/cors';
 import type {
   BudgetCheckRequest,
   BudgetCheckResponse,
@@ -39,6 +38,8 @@ import { registerEscalationRoutes } from './engine/providers/escalationRoutes.js
 import { buildPricingBook, buildBudgetManager, buildUsageLedger } from './engine/providers/budget/config.js';
 import { registerBudgetRoutes } from './engine/providers/budget/budgetRoutes.js';
 import { AgentRegistry } from './engine/agentRegistry.js';
+import { registerAgentModeCommandRoutes } from './engine/agentModeCommandRoutes.js';
+import { AgentActivationAuthority } from './engine/agentActivation.js';
 import { AgentService } from './engine/agentRuntime.js';
 import { AgentRunStore } from './engine/agentRunStore.js';
 import { buildPilotRuntimeClient } from './engine/pilot/pilotApiRuntimeClient.js';
@@ -60,6 +61,7 @@ import { FsFileSource } from './engine/rag/fsFileSource.js';
 import { OllamaEmbedder, CachedEmbedder, FakeEmbedder } from './engine/rag/embedder.js';
 import { registerRagRoutes } from './engine/rag/ragRoutes.js';
 import path from 'node:path';
+import { registerMigraPilotCors } from './http/corsPolicy.js';
 
 // A code assistant's chat/retrieve requests legitimately carry large payloads —
 // multi-file context, retrieved snippets, and base64 VISION image attachments —
@@ -68,6 +70,9 @@ import path from 'node:path';
 const app = Fastify({ logger: true, bodyLimit: 32 * 1024 * 1024 });
 const startedAt = Date.now();
 const env = readEnv();
+// Consume and delete the inherited one-time bootstrap secret before any request
+// logging or provider construction can observe it.
+const agentActivation = AgentActivationAuthority.fromEnvironment(process.env);
 const providerRegistry = new ProviderRegistry(env);
 
 /** Durable state adapter (SQLite). Undefined ⇒ persistence unavailable/disabled;
@@ -79,23 +84,8 @@ let durableError: string | undefined;
  * durable store is present; owns the retention worker + shutdown of it. */
 let opMaintenance: OperationalMaintenance | undefined;
 
-/* ── Production-safe CORS origins ── */
-const ALLOWED_ORIGINS = [
-  'https://pilot.migrateck.com',
-  'https://migrateck.com',
-  ...(process.env.NODE_ENV !== 'production'
-    ? ['http://localhost:3377', 'http://localhost:3399', 'http://localhost:3000']
-    : []),
-];
-
 async function registerPlugins(): Promise<void> {
-  await app.register(cors, {
-    origin: (origin, cb) => {
-      if (!origin || ALLOWED_ORIGINS.includes(origin)) return cb(null, true);
-      cb(new Error(`CORS blocked: ${origin}`), false);
-    },
-    credentials: true,
-  });
+  await registerMigraPilotCors(app);
 }
 
 async function getHealth(): Promise<HealthResponse> {
@@ -328,6 +318,11 @@ async function main(): Promise<void> {
   // tool validation, availability, dispatch, and the approval lifecycle. Additive
   // — the legacy /tools/* routes remain for compatibility.
   const toolDeps = registerToolExecutionRoutes(app);
+  // Stage 2: explicit local Agent Mode command lifecycle. This dedicated route
+  // renders server-authoritative proposals and resumes by run id; ordinary chat
+  // has no reference to it and cannot approve or execute commands.
+  const agentModeCommands = registerAgentModeCommandRoutes(app, toolDeps, agentActivation);
+  app.addHook('onClose', async () => { await agentModeCommands.shutdown(); agentActivation.shutdown(); });
   // Connect configured MCP servers and register their tools (best-effort; the
   // brain runs fine with none). Fire-and-forget so a slow server never delays
   // startup — tools appear in the catalog as each server connects.

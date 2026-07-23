@@ -24,6 +24,8 @@
     "typecheck": "npm run build:packages && npm run typecheck -ws --if-present",
     "lint": "npm run lint -ws --if-present",
     "test": "npm run build:packages && npm run test -w @migrapilot/brain-service && npm run test -w migrapilot-extension",
+    "audit:prod": "npm audit --omit=dev --audit-level=moderate",
+    "audit:disposition": "node apps/brain-service/scripts/validate-npm-audit.mjs",
     "release-check": "node release-check.js ./docs/migrapilot/phase-36 36",
     "release-check:strict": "RELEASE_STRICT_PLACEHOLDERS=true node release-check.js ./docs/migrapilot/phase-36 36",
     "release": "node ./scripts/release.js ./docs/migrapilot/phase-36 36",

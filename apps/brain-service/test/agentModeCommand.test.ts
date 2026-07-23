@@ -1,0 +1,440 @@
+import assert from 'node:assert/strict';
+import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { test } from 'node:test';
+import Fastify from 'fastify';
+import { AgentModeCommandProposalRequestSchema } from '@migrapilot/protocol';
+import { AgentActivationAuthority } from '../src/engine/agentActivation.js';
+import { auditStore } from '../src/engine/auditLog.js';
+import { AgentModeCommandService, type AgentModeRequestContext } from '../src/engine/agentModeCommandService.js';
+import { registerAgentModeCommandRoutes } from '../src/engine/agentModeCommandRoutes.js';
+import { AGENT_RECIPE_OUTPUT_CAP_BYTES, AGENT_RECIPE_POLICY_VERSION, AgentRecipePolicyError, AgentRecipeResolver, sanitizeAgentRecipeOutput, SystemdContainmentController, type AgentRecipeExecutionOutcome, type AgentRecipePlan, type AgentRecipeProcessManagerLike, type AgentRecipeResolverLike, type SystemdControlAdapter } from '../src/engine/agentRecipe.js';
+import { CapabilityRegistry } from '../src/engine/capabilityRegistry.js';
+import { ToolApprovalStore, hashInput } from '../src/engine/toolApprovalStore.js';
+import { ToolAudit } from '../src/engine/toolAudit.js';
+import { registerMigraPilotCors } from '../src/http/corsPolicy.js';
+
+const SECRET = 'bootstrap-secret-'.padEnd(48, 'x');
+const ACTIVATION = '11111111-1111-4111-8111-111111111111';
+
+function root(): string { return mkdtempSync(path.join(tmpdir(), 'migrapilot-agent-mode-')); }
+function context(workspace: string, activationId = ACTIVATION): AgentModeRequestContext {
+  return { activationId, extensionProcessId: process.pid, serverInstanceId: 'brain-instance-123456789', workspaceRoot: workspace, workspaceIdentity: 'workspace-id', allowedRecipes: ['git.status', 'git.diff'], externalRequestId: 'external' };
+}
+
+function plan(workspace: string, runId = 'agentcmd_1'): AgentRecipePlan {
+  const identity: AgentRecipePlan['identity'] = {
+    recipe: 'git.status' as const,
+    policyVersion: AGENT_RECIPE_POLICY_VERSION,
+    runId,
+    activationId: ACTIVATION,
+    sourceWorkspace: workspace,
+    sourceWorkspaceIdentity: 'workspace-id',
+    snapshotId: 'snapshot-id',
+    snapshotRoot: workspace,
+    canonicalCwd: workspace,
+    executablePath: process.execPath,
+    executableDigest: 'digest',
+    executableIdentity: 'exec-id',
+    arguments: ['--version'],
+    environmentPolicy: 'minimal-git-v2' as const,
+    environmentIdentity: hashInput({ PATH: '/safe' }),
+    workspaceMaterialIdentity: 'material-id',
+    containmentPolicy: 'systemd-user-service-v2' as const,
+    timeoutMs: 5_000,
+    outputLimitBytes: AGENT_RECIPE_OUTPUT_CAP_BYTES,
+    shell: false as const,
+    mutationClassification: 'read-only' as const,
+    canModifyFiles: false as const,
+    networkPolicy: 'not-required' as const,
+    expectedEffects: ['test'],
+  };
+  return { identity, environment: { PATH: '/safe' }, privateRunRoot: workspace };
+}
+
+class FakeResolver implements AgentRecipeResolverLike {
+  valid = true;
+  releases = 0;
+  async prepare(_recipe: 'git.status' | 'git.diff', workspace: string, input: { runId: string }): Promise<AgentRecipePlan> { return plan(workspace, input.runId); }
+  async verify(): Promise<boolean> { return this.valid; }
+  async release(): Promise<void> { this.releases += 1; }
+  binding(value: AgentRecipePlan): string { return hashInput(value.identity); }
+}
+
+class FakeProcesses implements AgentRecipeProcessManagerLike {
+  starts = 0;
+  delayMs = 5;
+  available = true;
+  active = 0;
+  shutdownRequested = false;
+  failureCode?: 'TERMINATION_FAILED' | 'START_FAILED';
+  forcedDisposition?: AgentRecipeExecutionOutcome['disposition'];
+  wake?: () => void;
+  async availability() { return this.available ? ({ ok: true, policy: 'fake' } as const) : ({ ok: false, code: 'CONTAINMENT_UNAVAILABLE', message: 'no cgroup' } as const); }
+  activeCount(): number { return this.active; }
+  async execute(_runId: string, value: AgentRecipePlan, hooks: { onSpawned(): void }, signal?: AbortSignal): Promise<AgentRecipeExecutionOutcome> {
+    if (this.failureCode === 'START_FAILED') throw new AgentRecipePolicyError('START_FAILED', 'injected start failure');
+    this.starts += 1;
+    this.active += 1;
+    hooks.onSpawned();
+    await new Promise<void>((resolve) => {
+      const timer = setTimeout(resolve, this.delayMs);
+      this.wake = () => { clearTimeout(timer); resolve(); };
+      signal?.addEventListener('abort', () => { clearTimeout(timer); resolve(); }, { once: true });
+    });
+    this.active -= 1;
+    if (this.failureCode) throw new AgentRecipePolicyError(this.failureCode, 'injected containment failure');
+    const disposition = this.shutdownRequested ? 'shutdown' : signal?.aborted ? 'cancelled' : this.forcedDisposition ?? 'completed';
+    return { disposition, result: { recipe: value.identity.recipe, exitCode: disposition === 'completed' ? 0 : null, timedOut: disposition === 'timed_out', stdout: '', stderr: '', truncated: false, redacted: false, durationMs: this.delayMs } };
+  }
+  async shutdown(): Promise<void> { this.shutdownRequested = true; this.wake?.(); }
+}
+
+function harness(now: () => number = () => Date.now()) {
+  let sequence = 0;
+  const approvals = new ToolApprovalStore(now, () => `appr_private_${++sequence}`, 100);
+  const deps = { registry: new CapabilityRegistry(), approvals, audit: new ToolAudit() };
+  const resolver = new FakeResolver();
+  const processes = new FakeProcesses();
+  const service = new AgentModeCommandService(deps, now, () => `agentcmd_${++sequence}`, resolver, processes);
+  return { service, deps, resolver, processes };
+}
+
+async function terminal(service: AgentModeCommandService, runId: string, ctx: AgentModeRequestContext) {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const found = service.get(runId, ctx, false);
+    if (found.ok && ['COMPLETED', 'FAILED', 'CANCELLED', 'STALE'].includes(found.view.state)) return found.view;
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  throw new Error('run did not become terminal');
+}
+
+test('bootstrap is server-issued, one-time, expiring, workspace-bound, and token-free in audit', async () => {
+  const workspace = root();
+  const authority = new AgentActivationAuthority(SECRET, () => 1_000, () => 'agentcap_server_issued_value_123456789', process.pid);
+  const request = { activationId: ACTIVATION, extensionProcessId: process.pid, bootstrapMode: 'inherited' as const, workspaceRoot: workspace };
+  await assert.rejects(() => authority.bootstrap({ ...request, bootstrapSecret: 'attacker-value'.padEnd(40, 'x') }));
+  await assert.rejects(() => authority.bootstrap({ ...request, bootstrapSecret: SECRET, extensionProcessId: process.pid + 1 }));
+  const issued = await authority.bootstrap({ ...request, bootstrapSecret: SECRET });
+  assert.match(issued.activationCapability, /^agentcap_/);
+  await assert.rejects(() => authority.bootstrap({ ...request, bootstrapSecret: SECRET }));
+  assert.equal((await authority.authorize(issued.activationCapability, workspace)).activationId, ACTIVATION);
+  await assert.rejects(() => authority.authorize('invented-capability-value-that-is-long-enough', workspace));
+  const activationAudit = JSON.stringify(auditStore.byCorrelation(issued.serverInstanceId));
+  assert.doesNotMatch(activationAudit, new RegExp(SECRET));
+  assert.doesNotMatch(activationAudit, /agentcap_server_issued/);
+  authority.shutdown();
+});
+
+test('activation expiry is enforced and disabled npm recipes fail protocol validation', async () => {
+  let now = 1_000;
+  const workspace = root();
+  const authority = new AgentActivationAuthority(SECRET, () => now, () => 'agentcap_expiring_server_value_123456789', process.pid);
+  const issued = await authority.bootstrap({ bootstrapSecret: SECRET, activationId: ACTIVATION, extensionProcessId: process.pid, bootstrapMode: 'inherited', workspaceRoot: workspace });
+  now = issued.expiresAt + 1;
+  await assert.rejects(() => authority.authorize(issued.activationCapability, workspace));
+  assert.equal(AgentModeCommandProposalRequestSchema.safeParse({ rootPath: workspace, recipe: 'workspace.test', reason: 'attack' }).success, false);
+  authority.shutdown();
+});
+
+test('fixed snapshot proposal is token-free and concurrent approval starts exactly once', async () => {
+  const workspace = root();
+  const { service, processes, deps } = harness();
+  const ctx = context(workspace);
+  const proposal = await service.propose({ rootPath: workspace, recipe: 'git.status', reason: 'inspect' }, ctx);
+  assert.ok(proposal.ok);
+  assert.equal(proposal.view.preview?.snapshotId, 'snapshot-id');
+  assert.doesNotMatch(JSON.stringify(proposal), /appr_private/);
+  assert.ok(service.displayed(proposal.view.runId, proposal.view.preview!.fingerprint, ctx).ok);
+  await Promise.all([
+    service.decide(proposal.view.runId, 'approve', proposal.view.preview!.fingerprint, ctx),
+    service.decide(proposal.view.runId, 'approve', proposal.view.preview!.fingerprint, ctx),
+  ]);
+  assert.equal((await terminal(service, proposal.view.runId, ctx)).state, 'COMPLETED');
+  assert.equal(processes.starts, 1);
+  assert.doesNotMatch(JSON.stringify(deps.audit.recent()), /appr_private/);
+  const requestId = proposal.view.requestId;
+  const beforeGet = auditStore.byCorrelation(requestId).map((event) => event.type);
+  service.get(proposal.view.runId, ctx);
+  assert.deepEqual(auditStore.byCorrelation(requestId).map((event) => event.type), beforeGet, 'GET must not append lifecycle events');
+  assert.deepEqual(beforeGet, ['proposal.created', 'approval.displayed', 'approval.approved', 'approval.consumed', 'execution.spawned', 'execution.completed']);
+  await service.shutdown();
+});
+
+test('snapshot drift before approval and before spawn fails with zero starts', async () => {
+  const workspace = root();
+  const { service, resolver, processes } = harness();
+  const ctx = context(workspace);
+  const proposal = await service.propose({ rootPath: workspace, recipe: 'git.diff', reason: 'inspect' }, ctx);
+  assert.ok(proposal.ok);
+  assert.ok(service.displayed(proposal.view.runId, proposal.view.preview!.fingerprint, ctx).ok);
+  resolver.valid = false;
+  const stale = await service.decide(proposal.view.runId, 'approve', proposal.view.preview!.fingerprint, ctx);
+  assert.equal(stale.ok, false);
+  assert.equal(processes.starts, 0);
+  await service.shutdown();
+});
+
+test('approval fails closed until the authoritative preview is acknowledged as displayed', async () => {
+  const workspace = root();
+  const { service, processes } = harness();
+  const ctx = context(workspace);
+  const proposal = await service.propose({ rootPath: workspace, recipe: 'git.status', reason: 'inspect' }, ctx);
+  assert.ok(proposal.ok);
+  const denied = await service.decide(proposal.view.runId, 'approve', proposal.view.preview!.fingerprint, ctx);
+  assert.equal(denied.ok, false);
+  assert.equal(processes.starts, 0);
+  assert.ok(service.displayed(proposal.view.runId, proposal.view.preview!.fingerprint, ctx).ok);
+  assert.ok((await service.decide(proposal.view.runId, 'approve', proposal.view.preview!.fingerprint, ctx)).ok);
+  assert.equal((await terminal(service, proposal.view.runId, ctx)).state, 'COMPLETED');
+  await service.shutdown();
+});
+
+test('terminal states are immutable and cross-activation access is indistinguishable', async () => {
+  const workspace = root();
+  const { service } = harness();
+  const ctx = context(workspace);
+  const proposal = await service.propose({ rootPath: workspace, recipe: 'git.status', reason: 'inspect' }, ctx);
+  assert.ok(proposal.ok);
+  assert.ok((await service.decide(proposal.view.runId, 'reject', proposal.view.preview!.fingerprint, ctx)).ok);
+  assert.equal((await service.decide(proposal.view.runId, 'approve', 'wrong', ctx)).ok, false);
+  const foreign = context(workspace, '22222222-2222-4222-8222-222222222222');
+  const missing = service.get('does-not-exist', foreign);
+  assert.deepEqual(service.get(proposal.view.runId, foreign), missing);
+  assert.equal((service.get(proposal.view.runId, ctx) as { ok: true; view: { state: string } }).view.state, 'REJECTED');
+  await service.shutdown();
+});
+
+test('expired pending runs are swept before capacity without reconcile', async () => {
+  let now = 1_000;
+  const { service } = harness(() => now);
+  const workspace = root();
+  const ctx = context(workspace);
+  for (let index = 0; index < 10; index += 1) assert.ok((await service.propose({ rootPath: workspace, recipe: 'git.status', reason: `pending ${index}` }, ctx)).ok);
+  assert.equal((await service.propose({ rootPath: workspace, recipe: 'git.status', reason: 'overloaded' }, ctx)).ok, false);
+  now += 101;
+  assert.ok((await service.propose({ rootPath: workspace, recipe: 'git.status', reason: 'after expiry' }, ctx)).ok);
+  await service.shutdown();
+});
+
+test('containment unavailable fails before snapshot creation or approval mint', async () => {
+  const workspace = root();
+  const { service, processes, resolver } = harness();
+  processes.available = false;
+  const outcome = await service.propose({ rootPath: workspace, recipe: 'git.status', reason: 'inspect' }, context(workspace));
+  assert.equal(outcome.ok, false);
+  if (!outcome.ok) assert.equal(outcome.code, 'CONTAINMENT_UNAVAILABLE');
+  assert.equal(resolver.releases, 0);
+  await service.shutdown();
+});
+
+test('HTTP bootstrap rejects Origin and invented capability; valid bootstrap works exactly once', async () => {
+  const workspace = root();
+  const authority = new AgentActivationAuthority(SECRET, () => Date.now(), () => 'agentcap_route_server_value_123456789', process.pid);
+  const { service, deps } = harness();
+  const app = Fastify();
+  registerAgentModeCommandRoutes(app, deps, authority, service);
+  const payload = { bootstrapSecret: SECRET, activationId: ACTIVATION, extensionProcessId: process.pid, bootstrapMode: 'inherited', workspaceRoot: workspace };
+  assert.equal((await app.inject({ method: 'POST', url: '/api/ai/agent-mode/bootstrap', headers: { origin: 'https://pilot.migrateck.com' }, payload })).statusCode, 403);
+  const boot = await app.inject({ method: 'POST', url: '/api/ai/agent-mode/bootstrap', payload });
+  assert.equal(boot.statusCode, 200);
+  const capability = (boot.json() as { activationCapability: string }).activationCapability;
+  assert.equal((await app.inject({ method: 'POST', url: '/api/ai/agent-mode/bootstrap', payload })).statusCode, 400);
+  const body = { rootPath: workspace, recipe: 'git.status', reason: 'inspect' };
+  const attacker = await app.inject({ method: 'POST', url: '/api/ai/agent-mode/commands', headers: { 'x-migrapilot-agent-capability': 'invented-capability-value-that-is-long-enough', 'x-migrapilot-workspace-root': workspace }, payload: body });
+  assert.equal(attacker.statusCode, 403);
+  const browser = await app.inject({ method: 'POST', url: '/api/ai/agent-mode/commands', headers: { origin: 'https://pilot.migrateck.com', 'x-migrapilot-agent-capability': capability, 'x-migrapilot-workspace-root': workspace }, payload: body });
+  assert.equal(browser.statusCode, 403);
+  const valid = await app.inject({ method: 'POST', url: '/api/ai/agent-mode/commands', headers: { 'x-migrapilot-agent-capability': capability, 'x-migrapilot-workspace-root': workspace }, payload: body });
+  assert.equal(valid.statusCode, 200);
+  assert.doesNotMatch(valid.body, /agentcap_|bootstrap-secret|appr_/);
+  await app.close();
+  authority.shutdown();
+});
+
+test('HTTP Agent routes reject every Origin-bearing request at the boundary without consuming bootstrap or starting processes', async () => {
+  const workspace = root();
+  const authority = new AgentActivationAuthority(SECRET, () => Date.now(), () => 'agentcap_boundary_server_value_123456789', process.pid);
+  const { service, deps, processes } = harness();
+  const app = Fastify({ logger: false });
+  await registerMigraPilotCors(app);
+  registerAgentModeCommandRoutes(app, deps, authority, service);
+
+  const payload = { bootstrapSecret: SECRET, activationId: ACTIVATION, extensionProcessId: process.pid, bootstrapMode: 'inherited' as const, workspaceRoot: workspace };
+  const hostileHeaders = { origin: 'https://evil.example.invalid' };
+  const hostileBoot = await app.inject({ method: 'POST', url: '/api/ai/agent-mode/bootstrap', headers: hostileHeaders, payload });
+  assert.equal(hostileBoot.statusCode, 403);
+  assert.deepEqual(hostileBoot.json(), { ok: false, code: 'INVALID_CONTEXT', error: 'Agent authorization was refused.' });
+  assert.doesNotMatch(hostileBoot.body, /stack|CORS blocked|bootstrap-secret|agentcap_|appr_private/);
+
+  const boot = await app.inject({ method: 'POST', url: '/api/ai/agent-mode/bootstrap', payload });
+  assert.equal(boot.statusCode, 200, 'rejected hostile Origin must not consume the one-time bootstrap secret');
+  const capability = (boot.json() as { activationCapability: string }).activationCapability;
+  const authHeaders = { 'x-migrapilot-agent-capability': capability, 'x-migrapilot-workspace-root': workspace };
+  const body = { rootPath: workspace, recipe: 'git.status', reason: 'inspect' };
+
+  const hostilePropose = await app.inject({ method: 'POST', url: '/api/ai/agent-mode/commands', headers: { ...authHeaders, ...hostileHeaders }, payload: body });
+  assert.equal(hostilePropose.statusCode, 403);
+  assert.equal(processes.starts, 0);
+
+  const validProposal = await app.inject({ method: 'POST', url: '/api/ai/agent-mode/commands', headers: authHeaders, payload: body });
+  assert.equal(validProposal.statusCode, 200);
+  const run = validProposal.json() as { runId: string; preview: { fingerprint: string } };
+
+  const hostileReconcile = await app.inject({ method: 'GET', url: `/api/ai/agent-mode/commands/${run.runId}`, headers: { ...authHeaders, ...hostileHeaders } });
+  assert.equal(hostileReconcile.statusCode, 403);
+  const hostileApprove = await app.inject({ method: 'POST', url: `/api/ai/agent-mode/commands/${run.runId}/decision`, headers: { ...authHeaders, ...hostileHeaders }, payload: { decision: 'approve', fingerprint: run.preview.fingerprint } });
+  assert.equal(hostileApprove.statusCode, 403);
+  const hostileReject = await app.inject({ method: 'POST', url: `/api/ai/agent-mode/commands/${run.runId}/decision`, headers: { ...authHeaders, ...hostileHeaders }, payload: { decision: 'reject', fingerprint: run.preview.fingerprint } });
+  assert.equal(hostileReject.statusCode, 403);
+  const hostileCancel = await app.inject({ method: 'POST', url: `/api/ai/agent-mode/commands/${run.runId}/cancel`, headers: { ...authHeaders, ...hostileHeaders }, payload: {} });
+  assert.equal(hostileCancel.statusCode, 403);
+  assert.equal(processes.starts, 0);
+  assert.equal((service.get(run.runId, context(workspace)) as { ok: true; view: { state: string } }).view.state, 'AWAITING_APPROVAL');
+
+  await app.close();
+  authority.shutdown();
+  await service.shutdown();
+});
+
+test('Agent output strips ANSI and redacts before cap truncation across chunk-equivalent boundaries', () => {
+  const secret = 'ghp_' + 'A'.repeat(32);
+  const ansiSplit = `ghp_${'A'.repeat(8)}\u001b[31m${'A'.repeat(24)}\u001b[0m`;
+  const ansi = sanitizeAgentRecipeOutput(ansiSplit, 1024);
+  assert.equal(ansi.redacted, true);
+  assert.doesNotMatch(ansi.value, /ghp_/);
+  const boundary = sanitizeAgentRecipeOutput(`${'x'.repeat(1017)} ${secret}\n`, 1024);
+  assert.equal(boundary.truncated, true);
+  assert.equal(boundary.redacted, true);
+  assert.doesNotMatch(boundary.value, /ghp_|AAAAAAAAAAAAAAAA/);
+});
+
+test('systemd containment tracks detached descendants and escalates the whole cgroup', async () => {
+  const calls: string[][] = [];
+  const memberships = ['202\n', '']; // leader 101 exited; detached child 202 remains until KILL
+  const adapter: SystemdControlAdapter = {
+    async capture(_command, args) {
+      calls.push(args);
+      if (args.includes('show')) return { code: 0, stdout: 'LoadState=loaded\nActiveState=active\nControlGroup=/user.slice/migrapilot.service\n', stderr: '' };
+      return { code: 0, stdout: '', stderr: '' };
+    },
+    async readCgroup() { return memberships.shift() ?? ''; },
+    async delay() {},
+  };
+  const controller = new SystemdContainmentController(adapter);
+  assert.equal(await controller.terminateUnit('migrapilot.service'), true);
+  assert.ok(calls.some((args) => args.includes('--signal=SIGTERM')));
+  assert.ok(calls.some((args) => args.includes('--signal=SIGKILL')));
+});
+
+test('systemd containment never reports cancellation when descendants cannot be terminated', async () => {
+  const adapter: SystemdControlAdapter = {
+    async capture(_command, args) {
+      if (args.includes('show')) return { code: 0, stdout: 'LoadState=loaded\nActiveState=active\nControlGroup=/user.slice/migrapilot.service\n', stderr: '' };
+      return { code: 0, stdout: '', stderr: '' };
+    },
+    async readCgroup() { return '202\n'; },
+    async delay() {},
+  };
+  assert.equal(await new SystemdContainmentController(adapter).terminateUnit('migrapilot.service'), false);
+});
+
+test('shutdown and termination failure produce distinct exact audit endings', async () => {
+  const workspace = root();
+  const first = harness();
+  first.processes.delayMs = 10_000;
+  const ctx = context(workspace);
+  const proposal = await first.service.propose({ rootPath: workspace, recipe: 'git.status', reason: 'shutdown' }, ctx);
+  assert.ok(proposal.ok);
+  first.service.displayed(proposal.view.runId, proposal.view.preview!.fingerprint, ctx);
+  await first.service.decide(proposal.view.runId, 'approve', proposal.view.preview!.fingerprint, ctx);
+  while (first.processes.starts === 0) await new Promise((resolve) => setTimeout(resolve, 1));
+  await first.service.shutdown();
+  const shutdownTypes = auditStore.byCorrelation(proposal.view.requestId).map((event) => event.type);
+  assert.deepEqual(shutdownTypes.slice(-3), ['execution.spawned', 'shutdown.termination_requested', 'shutdown.terminated']);
+
+  const second = harness();
+  second.processes.failureCode = 'TERMINATION_FAILED';
+  const failed = await second.service.propose({ rootPath: workspace, recipe: 'git.diff', reason: 'failure' }, ctx);
+  assert.ok(failed.ok);
+  second.service.displayed(failed.view.runId, failed.view.preview!.fingerprint, ctx);
+  await second.service.decide(failed.view.runId, 'approve', failed.view.preview!.fingerprint, ctx);
+  assert.equal((await terminal(second.service, failed.view.runId, ctx)).state, 'FAILED');
+  assert.equal(auditStore.byCorrelation(failed.view.requestId).at(-1)?.type, 'execution.termination_failed');
+  await second.service.shutdown();
+});
+
+test('rejection, expiry, spawn failure, cancellation, and timeout have exact audit sequences', async () => {
+  const workspace = root();
+  const ctx = context(workspace);
+
+  const rejected = harness();
+  const rejectRun = await rejected.service.propose({ rootPath: workspace, recipe: 'git.status', reason: 'reject' }, ctx);
+  assert.ok(rejectRun.ok);
+  rejected.service.displayed(rejectRun.view.runId, rejectRun.view.preview!.fingerprint, ctx);
+  await rejected.service.decide(rejectRun.view.runId, 'reject', rejectRun.view.preview!.fingerprint, ctx);
+  assert.deepEqual(auditStore.byCorrelation(rejectRun.view.requestId).map((event) => event.type), ['proposal.created', 'approval.displayed', 'approval.rejected']);
+  await rejected.service.shutdown();
+
+  let now = 1_000;
+  const expired = harness(() => now);
+  const expireRun = await expired.service.propose({ rootPath: workspace, recipe: 'git.status', reason: 'expire' }, ctx);
+  assert.ok(expireRun.ok);
+  now += 101;
+  assert.ok((await expired.service.propose({ rootPath: workspace, recipe: 'git.status', reason: 'sweep' }, ctx)).ok);
+  assert.deepEqual(auditStore.byCorrelation(expireRun.view.requestId).map((event) => event.type), ['proposal.created', 'approval.expired']);
+  await expired.service.shutdown();
+
+  const spawnFailed = harness();
+  spawnFailed.processes.failureCode = 'START_FAILED';
+  const spawnRun = await spawnFailed.service.propose({ rootPath: workspace, recipe: 'git.diff', reason: 'spawn failure' }, ctx);
+  assert.ok(spawnRun.ok);
+  spawnFailed.service.displayed(spawnRun.view.runId, spawnRun.view.preview!.fingerprint, ctx);
+  await spawnFailed.service.decide(spawnRun.view.runId, 'approve', spawnRun.view.preview!.fingerprint, ctx);
+  assert.equal((await terminal(spawnFailed.service, spawnRun.view.runId, ctx)).state, 'FAILED');
+  assert.deepEqual(auditStore.byCorrelation(spawnRun.view.requestId).map((event) => event.type), ['proposal.created', 'approval.displayed', 'approval.approved', 'approval.consumed', 'execution.failed']);
+  await spawnFailed.service.shutdown();
+
+  const cancelled = harness();
+  cancelled.processes.delayMs = 10_000;
+  const cancelRun = await cancelled.service.propose({ rootPath: workspace, recipe: 'git.status', reason: 'cancel' }, ctx);
+  assert.ok(cancelRun.ok);
+  cancelled.service.displayed(cancelRun.view.runId, cancelRun.view.preview!.fingerprint, ctx);
+  await cancelled.service.decide(cancelRun.view.runId, 'approve', cancelRun.view.preview!.fingerprint, ctx);
+  while (cancelled.processes.starts === 0) await new Promise((resolve) => setTimeout(resolve, 1));
+  cancelled.service.cancel(cancelRun.view.runId, ctx);
+  assert.equal((await terminal(cancelled.service, cancelRun.view.runId, ctx)).state, 'CANCELLED');
+  assert.deepEqual(auditStore.byCorrelation(cancelRun.view.requestId).map((event) => event.type).slice(-3), ['execution.spawned', 'cancellation.requested', 'containment.terminated']);
+  await cancelled.service.shutdown();
+
+  const timedOut = harness();
+  timedOut.processes.forcedDisposition = 'timed_out';
+  const timeoutRun = await timedOut.service.propose({ rootPath: workspace, recipe: 'git.diff', reason: 'timeout' }, ctx);
+  assert.ok(timeoutRun.ok);
+  timedOut.service.displayed(timeoutRun.view.runId, timeoutRun.view.preview!.fingerprint, ctx);
+  await timedOut.service.decide(timeoutRun.view.runId, 'approve', timeoutRun.view.preview!.fingerprint, ctx);
+  assert.equal((await terminal(timedOut.service, timeoutRun.view.runId, ctx)).state, 'FAILED');
+  assert.equal(auditStore.byCorrelation(timeoutRun.view.requestId).at(-1)?.type, 'execution.timed_out');
+  await timedOut.service.shutdown();
+});
+
+test('real snapshot binds Git digest/material and hardened helper-disabling argv', async () => {
+  const workspace = root();
+  mkdirSync(path.join(workspace, '.git'));
+  writeFileSync(path.join(workspace, '.git', 'config'), '[core]\nrepositoryformatversion=0\n');
+  writeFileSync(path.join(workspace, 'README.md'), 'hello');
+  const info = await import('node:fs/promises').then(({ stat }) => stat(workspace));
+  const workspaceIdentity = `${info.dev}:${info.ino}:${info.birthtimeMs}:${info.ctimeMs}`;
+  const resolver = new AgentRecipeResolver();
+  const prepared = await resolver.prepare('git.diff', workspace, { runId: 'agentcmd_snapshot', activationId: ACTIVATION, workspaceIdentity });
+  assert.equal(await resolver.verify(prepared), true);
+  assert.ok(prepared.identity.arguments.includes('--no-textconv'));
+  assert.ok(prepared.identity.arguments.includes('--no-ext-diff'));
+  assert.ok(prepared.identity.arguments.includes('core.fsmonitor=false'));
+  assert.ok(prepared.identity.arguments.includes('--ignore-submodules=all'));
+  chmodSync(path.join(prepared.identity.snapshotRoot, 'README.md'), 0o600);
+  writeFileSync(path.join(prepared.identity.snapshotRoot, 'README.md'), 'tampered');
+  assert.equal(await resolver.verify(prepared), false);
+  await resolver.release(prepared);
+});

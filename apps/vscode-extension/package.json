@@ -24,6 +24,7 @@
     "onCommand:migrapilot.fixDiagnostics",
     "onCommand:migrapilot.generateTests",
     "onCommand:migrapilot.generateCommit",
+    "onCommand:migrapilot.pairAgentMode",
     "onChatParticipant:migrapilot.chat"
   ],
   "main": "./dist/extension.js",
@@ -53,6 +54,12 @@
         },
         {
           "type": "webview",
+          "id": "migrapilot.agentMode",
+          "name": "Agent Mode",
+          "icon": "resources/migrapilot-icon.svg"
+        },
+        {
+          "type": "webview",
           "id": "migrapilot.sidebar",
           "name": "Status",
           "icon": "resources/migrapilot-icon.svg"
@@ -76,6 +83,14 @@
       {
         "command": "migrapilot.openWorkspacePanel",
         "title": "MigraPilot: Open MigraAI Workspace"
+      },
+      {
+        "command": "migrapilot.openAgentMode",
+        "title": "MigraPilot: Open Agent Mode"
+      },
+      {
+        "command": "migrapilot.pairAgentMode",
+        "title": "MigraPilot: Pair Agent Mode Securely"
       },
       {
         "command": "migrapilot.health",
@@ -296,7 +311,8 @@
     "test:vsix": "tsc -b && node scripts/bundle.mjs && node ./dist/test/runTestVsix.js",
     "test:ops": "tsc -b && node ./dist/test/runOps.js",
     "watch": "tsc -b -w",
-    "package": "tsc -b && node scripts/bundle.mjs && vsce package --no-dependencies --allow-missing-repository --skip-license"
+    "package": "tsc -b && node scripts/bundle.mjs && vsce package --no-dependencies --allow-missing-repository --skip-license",
+    "inspect:vsix": "node scripts/inspect-vsix.mjs migrapilot-extension-0.1.0.vsix"
   },
   "dependencies": {
     "@migrapilot/protocol": "0.1.0",

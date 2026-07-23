@@ -4,7 +4,7 @@ dist/test/**
 dist/**/*.js.map
 dist/**/*.d.ts
 tsconfig.json
-tsconfig.tsbuildinfo
+**/*.tsbuildinfo
 scripts/**
 docs/**
 p6-evidence/**

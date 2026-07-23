@@ -8,7 +8,7 @@
  */
 
 import { CapabilityRegistry } from './capabilityRegistry.js';
-import { ToolApprovalStore, hashInput } from './toolApprovalStore.js';
+import { ApprovalCapacityError, ToolApprovalStore, hashInput } from './toolApprovalStore.js';
 import { ToolAudit } from './toolAudit.js';
 import { NOOP_STAGE_LOGGER, type StageLogger } from './correlation.js';
 import { auditStore, type AuditEventType } from './auditLog.js';
@@ -18,6 +18,7 @@ export interface ToolExecInput {
   input?: unknown;
   dryRun?: boolean;
   approvalId?: string;
+  signal?: AbortSignal;
   requestId: string;
   /** Optional per-call correlation logger — emits approval/apply stage lines
    * (metadata only). Absent for uncorrelated direct calls. */
@@ -91,7 +92,7 @@ export async function executeToolCore(deps: ToolExecDeps, req: ToolExecInput): P
   // Read-only → execute immediately.
   if (runnable.descriptor.readOnly) {
     try {
-      const result = await runnable.handler(input, { correlationId: stage.correlationId });
+      const result = await runnable.handler(input, { correlationId: stage.correlationId, signal: req.signal });
       audit.record({ requestId, tool: toolId, action: 'executed', readOnly: true, outcome: 'ok' });
       recordAudit('tool.completed', 'ok', { readOnly: true });
       return { ok: true, httpStatus: 200, status: 'ok', tool: toolId, requestId, result };
@@ -100,13 +101,12 @@ export async function executeToolCore(deps: ToolExecDeps, req: ToolExecInput): P
     }
   }
 
-  // Mutating-class tools that DECLARE approvalRequired: false (e.g. command.run,
-  // whose own policy layer — allowlist/containment/kill-switch — is the control)
+  // Mutating-class tools that DECLARE approvalRequired: false
   // execute immediately, exactly as the catalog advertises. Approval remains
   // mandatory for every tool that declares it (edit.apply).
   if (runnable.descriptor.approvalRequired === false) {
     try {
-      const result = await runnable.handler(input, { correlationId: stage.correlationId });
+      const result = await runnable.handler(input, { correlationId: stage.correlationId, signal: req.signal });
       audit.record({ requestId, tool: toolId, action: 'executed', readOnly: false, outcome: 'ok' });
       recordAudit('tool.completed', 'ok', { readOnly: false });
       return { ok: true, httpStatus: 200, status: 'executed', tool: toolId, requestId, result };
@@ -134,8 +134,14 @@ export async function executeToolCore(deps: ToolExecDeps, req: ToolExecInput): P
     } catch (error) {
       return failWith(false, error);
     }
-    const record = approvals.mint({ tool: toolId, inputHash, requestId, correlationId: stage.correlationId });
-    audit.record({ requestId, tool: toolId, action: 'approval_required', readOnly: false, approvalId: record.id, outcome: 'ok' });
+    let record;
+    try {
+      record = approvals.mint({ tool: toolId, inputHash, requestId, correlationId: stage.correlationId });
+    } catch (error) {
+      if (error instanceof ApprovalCapacityError) return { ok: false, httpStatus: 429, code: 'OVERLOADED', tool: toolId, requestId, error: 'The approval store is at capacity.' };
+      return failWith(false, error);
+    }
+    audit.record({ requestId, tool: toolId, action: 'approval_required', readOnly: false, outcome: 'ok' });
     // Correlation: approval MINTED (metadata only — never the token).
     stage.log('approval', { tool: toolId, status: 'required' });
     return { ok: true, httpStatus: 200, status: 'approval_required', tool: toolId, requestId, approvalId: record.id, expiresAt: record.expiresAt, preview };
@@ -144,14 +150,14 @@ export async function executeToolCore(deps: ToolExecDeps, req: ToolExecInput): P
   // approvalId present → single-use, bound consume → execute
   const consumed = approvals.consume(req.approvalId, { tool: toolId, inputHash, correlationId: stage.correlationId });
   if (!consumed.ok) {
-    audit.record({ requestId, tool: toolId, action: 'replay_refused', readOnly: false, approvalId: req.approvalId, outcome: 'refused' });
+    audit.record({ requestId, tool: toolId, action: 'replay_refused', readOnly: false, outcome: 'refused' });
     stage.log('approval', { tool: toolId, status: 'refused', reason: consumed.reason });
     return { ok: false, httpStatus: 409, code: 'INVALID_STATE', tool: toolId, requestId, error: `Approval ${consumed.reason}.`, reason: consumed.reason };
   }
   try {
     const applyStarted = Date.now();
-    const result = await runnable.handler(input, { correlationId: stage.correlationId });
-    audit.record({ requestId, tool: toolId, action: 'executed', readOnly: false, approvalId: req.approvalId, outcome: 'ok' });
+    const result = await runnable.handler(input, { correlationId: stage.correlationId, signal: req.signal });
+    audit.record({ requestId, tool: toolId, action: 'executed', readOnly: false, outcome: 'ok' });
     recordAudit('tool.completed', 'ok', { approved: true });
     // Correlation: approved APPLY executed.
     stage.log('apply', { tool: toolId, durationMs: Date.now() - applyStarted, outcome: 'ok' });

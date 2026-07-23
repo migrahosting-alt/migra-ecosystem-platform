@@ -12,10 +12,24 @@ import { StoreHealth, type StoreHealthSnapshot } from './storeTelemetry.js';
 import { redactString } from './redaction.js';
 
 export type AuditEventType =
+  | 'bootstrap.created'
+  | 'bootstrap.consumed'
+  | 'activation.issued'
   | 'execution.started'
   | 'execution.routed'
   | 'execution.completed'
   | 'execution.failed'
+  | 'execution.cancel_requested'
+  | 'execution.reconciled'
+  | 'approval.displayed'
+  | 'proposal.stale'
+  | 'execution.spawned'
+  | 'cancellation.requested'
+  | 'containment.terminated'
+  | 'execution.timed_out'
+  | 'execution.termination_failed'
+  | 'shutdown.termination_requested'
+  | 'shutdown.terminated'
   | 'loop.started'
   | 'loop.completed'
   | 'loop.failed'
@@ -29,6 +43,7 @@ export type AuditEventType =
   | 'proposal.consumed'
   | 'proposal.rejected'
   | 'approval.minted'
+  | 'approval.approved'
   | 'approval.consumed'
   | 'approval.expired'
   | 'approval.replayed'
@@ -75,6 +90,8 @@ export type AuditEventType =
  * be persisted, the caller must fail closed before starting a new mutation. */
 export const CRITICAL_EVENTS: ReadonlySet<AuditEventType> = new Set<AuditEventType>([
   'approval.consumed',
+  'approval.approved',
+  'execution.spawned',
   'application.started',
   'application.rollback_failed',
   'application.failed',

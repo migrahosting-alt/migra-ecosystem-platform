@@ -66,7 +66,6 @@ const INPUT_HINTS: Record<string, string> = {
   'diagnostics.get': '{"rootPath","path"?}',
   'edit.preview': '{"rootPath","changes":[{"path","startLine","endLine","replacement"}]}',
   'fs.proposeChangeset': '{"rootPath","ops":[{"op":"create","path":"src/x.js","content":"..."}]} (op: create|replace|patch|delete|mkdir)',
-  'command.run': '{"rootPath","command":["npm","test"],"cwd"?,"timeoutMs"?}',
 };
 
 /** Shallow-ish workspace file listing for command side-effect detection. Skips
@@ -129,13 +128,12 @@ export function registerEngineerRoutes(
     });
   };
 
-  /** The loop's tool surface: read-only capabilities + the two policy-gated
-   * extras (edit.preview for proposals, command.run under its allowlist).
+  /** The loop's tool surface: read-only capabilities plus edit.preview.
    * edit.apply is deliberately ABSENT — the loop never mutates. */
   const loopTools = (): EngineerToolInfo[] => [
     ...toolDeps.registry
       .list({ includeUnavailable: false })
-      .filter((t) => t.kind === 'tool' && t.id !== 'edit.apply' && (t.readOnly || t.id === 'command.run'))
+      .filter((t) => t.kind === 'tool' && t.id !== 'edit.apply' && t.readOnly)
       .map((t) => ({
         id: t.id,
         description: t.description,

@@ -104,6 +104,19 @@ test('denied capability (ungranted) → 403 CAPABILITY_DENIED', async () => {
   await app.close();
 });
 
+test('generic route cannot list, mint, resume, or execute command capabilities', async () => {
+  const { app, audit } = buildApp();
+  const catalog = (await app.inject({ method: 'GET', url: '/api/ai/tools' })).json() as { tools: Array<{ id: string }> };
+  assert.equal(catalog.tools.some((tool) => tool.id === 'command.run' || tool.id === 'agent.recipe'), false);
+  const attempt = await app.inject({ method: 'POST', url: '/api/ai/tools', payload: { tool: 'command.run', input: { rootPath: process.cwd(), command: ['node', '--version'] } } });
+  assert.equal(attempt.statusCode, 403);
+  assert.equal((attempt.json() as { code: string }).code, 'CAPABILITY_DENIED');
+  const resume = await app.inject({ method: 'POST', url: '/api/ai/tools', payload: { tool: 'agent.recipe', input: {}, approvalId: 'appr_attacker' } });
+  assert.equal(resume.statusCode, 403);
+  assert.equal(audit.recent().some((event) => event.action === 'approval_required' || event.action === 'executed'), false);
+  await app.close();
+});
+
 test('schema validation: bad input → 400 INVALID_INPUT with issues', async () => {
   const { app } = buildApp();
   const res = await app.inject({ method: 'POST', url: '/api/ai/tools', payload: { tool: 'git.diff', input: { staged: 'not-a-bool' } } });
@@ -131,6 +144,7 @@ test('approval-required: mint → consume → executes exactly once', async () =
   const firstBody = first.json() as { status: string; approvalId: string; preview: unknown };
   assert.equal(firstBody.status, 'approval_required');
   assert.ok(firstBody.approvalId && firstBody.preview);
+  assert.doesNotMatch(JSON.stringify((await app.inject({ method: 'GET', url: '/api/ai/audit' })).json()), /appr_/);
   assert.equal(reg.applied.length, 0, 'minting must not execute');
   const second = await app.inject({ method: 'POST', url: '/api/ai/tools', payload: { tool: 'edit.apply', input: EDIT_INPUT, approvalId: firstBody.approvalId } });
   assert.equal((second.json() as { status: string }).status, 'executed');
@@ -184,6 +198,14 @@ test('approval store: idempotent mint, single-use consume, expiry, stable hash',
   t += 200;
   assert.equal(store.consume(exp.id, { tool: 'edit.apply', inputHash: 'h2' }).ok, false);
   assert.equal(hashInput({ a: 1, b: 2 }), hashInput({ b: 2, a: 1 }));
+});
+
+test('approval store: owner rejection terminalizes an exact pending binding', () => {
+  const store = new ToolApprovalStore(() => 1000, () => 'rejectable', 100);
+  const approval = store.mint({ tool: 'command.run', inputHash: 'bound-hash', requestId: 'r-reject' });
+  assert.equal(store.reject(approval.id, { tool: 'command.run', inputHash: 'wrong-hash' }), false);
+  assert.equal(store.reject(approval.id, { tool: 'command.run', inputHash: 'bound-hash' }), true);
+  assert.deepEqual(store.consume(approval.id, { tool: 'command.run', inputHash: 'bound-hash' }), { ok: false, reason: 'rejected' });
 });
 
 test('audit records executions + refusals and never contains inputs', async () => {
