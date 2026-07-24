@@ -168,7 +168,12 @@ export class OperationalMaintenance {
     let counts: OperationalCounts = { auditEvents: 0, usageRecords: 0, incidents: 0, recoveryEvents: 0, reservations: 0 };
     try { counts = this.durable.operationalCounts(); } catch { reachable = false; }
 
-    const schemaCurrent = ph.migrationState === 'applied' && ph.memoryStore === 'ready';
+    // Both states represent an engine-compatible schema:
+    // - applied: this startup migrated the durable store to SCHEMA_VERSION
+    // - current: the durable store was already at SCHEMA_VERSION
+    const schemaCurrent =
+      (ph.migrationState === 'applied' || ph.migrationState === 'current')
+      && ph.memoryStore === 'ready';
     const integrity = this.lastIntegrity;
     const writeLatencyOk = writeLatencyMs !== null && writeLatencyMs < this.config.writeLatencyDegradedMs;
 

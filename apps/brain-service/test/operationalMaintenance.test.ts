@@ -62,6 +62,30 @@ test('verifyIntegrity reports ok and health is healthy on a fresh store', () => 
   d.close();
 });
 
+test('health is healthy when an existing store is already at the current schema', () => {
+  const p = tmpDbPath();
+
+  // First open creates and migrates the store, producing migrationState=applied.
+  const initial = new SqliteDurableStore(p);
+  assert.equal(initial.health().migrationState, 'applied');
+  initial.close();
+
+  // Reopening the same schema-current store produces migrationState=current.
+  const reopened = new SqliteDurableStore(p);
+  assert.equal(reopened.health().migrationState, 'current');
+
+  const maint = new OperationalMaintenance(reopened, DEFAULT_RETENTION, () => 1000, p);
+  assert.equal(maint.verifyIntegrity(), 'ok');
+
+  const h = maint.health();
+  assert.equal(h.schemaCurrent, true);
+  assert.equal(h.schemaVersion, SCHEMA_VERSION);
+  assert.equal(h.migrationState, 'current');
+  assert.equal(h.status, 'healthy');
+
+  reopened.close();
+});
+
 test('health is degraded until integrity has been verified', () => {
   const p = tmpDbPath();
   const d = new SqliteDurableStore(p);
