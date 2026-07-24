@@ -1,0 +1,34 @@
+{
+  "version": 1,
+  "exceptions": [
+    {
+      "id": "STAGE2B-NPM-AUDIT-20260723-MOCHA-SERIALIZE-JAVASCRIPT",
+      "owner": "MigraPilot Stage 2B restart",
+      "reviewBy": "2026-10-31",
+      "package": "serialize-javascript",
+      "installedVersion": "6.0.2",
+      "severity": "high",
+      "advisories": [
+        {
+          "id": 1113686,
+          "url": "https://github.com/advisories/GHSA-5c6j-r48x-rmvq",
+          "patchedVersion": ">7.0.2"
+        },
+        {
+          "id": 1119440,
+          "url": "https://github.com/advisories/GHSA-qj8w-gfj5-8c6v",
+          "patchedVersion": ">=7.0.5"
+        }
+      ],
+      "chain": [
+        "migrapilot-extension@0.1.0",
+        "mocha@10.8.2",
+        "serialize-javascript@6.0.2"
+      ],
+      "classification": "dev-only test dependency",
+      "packagedRuntimeReachability": "absent from production brain dependencies and absent from VSIX because the extension is esbuild-bundled and packaged with --no-dependencies",
+      "auditFixDisposition": "npm audit fix proposes mocha@8.1.3, a semver-major downgrade from the current test runner line; do not apply broad runner churn inside Stage 2B",
+      "justification": "The vulnerable transitive package is used only by the Mocha Extension Host test harness. It is not installed by production dependency audit and is not packaged into the VSIX runtime artifact."
+    }
+  ]
+}

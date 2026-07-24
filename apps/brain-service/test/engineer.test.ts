@@ -7,7 +7,7 @@ import { test } from 'node:test';
 import { mkdtempSync, writeFileSync, readFileSync, mkdirSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
-import { commandRun, commandAllowlist, commandRunEnabled } from '../src/tools/commandRun.js';
+import { commandRun, commandAllowlist, commandRunEnabled, previewCommandRun } from '../src/tools/commandRun.js';
 import { runEngineerTask, parseStep, type EngineerEvent, type EngineerToolInfo } from '../src/engine/engineerRuntime.js';
 import { CapabilityRegistry } from '../src/engine/capabilityRegistry.js';
 import { ToolApprovalStore } from '../src/engine/toolApprovalStore.js';
@@ -67,6 +67,29 @@ test('command.run kill-switch + allowlist env are honored', async () => {
   );
 });
 
+test('command.run refuses environment overrides that can substitute the previewed executable', async () => {
+  const root = ws();
+  await assert.rejects(
+    () => commandRun({ rootPath: root, command: ['node', '-e', 'process.exit(0)'], environment: { PATH: root } }),
+    /alter executable resolution/,
+  );
+  await assert.rejects(
+    () => previewCommandRun({ rootPath: root, command: ['node', '-e', 'process.exit(0)'], environment: { LD_PRELOAD: './payload.so' } }),
+    /alter executable resolution/,
+  );
+});
+
+test('legacy command output scrubs every supplied environment value and preview redacts all keys', async () => {
+  const root = ws();
+  const secret = 'line one\nline/two?x=1';
+  const preview = await previewCommandRun({ rootPath: root, command: ['node', '--version'], environment: { api_token: secret, harmless_name: 'innocent-secret' } });
+  assert.ok(preview.environment.every((entry) => entry.value === '[REDACTED]' && entry.redacted));
+  const code = 'const s=process.env.api_token;console.log(s);console.error(encodeURIComponent(s));console.log(Buffer.from(process.env.harmless_name).toString("base64"))';
+  const result = await commandRun({ rootPath: root, command: ['node', '-e', code], environment: { api_token: secret, harmless_name: 'innocent-secret' } }, {});
+  assert.equal(result.redacted, true);
+  assert.doesNotMatch(`${result.stdout}\n${result.stderr}`, /line one|line%20one|aW5ub2NlbnQtc2VjcmV0|innocent-secret/);
+});
+
 test('command.run caps runaway output and reports truncation + nonzero exit', async () => {
   const root = ws();
   // Write once and exit only after the pipe flushes — avoids losing output on exit.
@@ -84,22 +107,21 @@ test('command.run times out hung commands', async () => {
   assert.equal(res.timedOut, true);
 });
 
-test('command.run is registered available; terminal.exec stays denied', () => {
+test('arbitrary command.run is absent from the generic registry; terminal.exec stays denied', () => {
   const registry = new CapabilityRegistry();
   const cmd = registry.get('command.run');
-  assert.ok(cmd && cmd.available, 'command.run must be granted');
+  assert.equal(cmd, undefined, 'command.run must not be exposed by generic tools');
   const term = registry.get('terminal.exec');
   assert.ok(term && !term.available, 'terminal.exec must stay ungranted');
 });
 
-test('executor honors approvalRequired:false — command.run executes immediately; edit.apply still parks', async () => {
+test('generic executor denies command.run while edit.apply still requires approval', async () => {
   const deps = { registry: new CapabilityRegistry(), approvals: new ToolApprovalStore(), audit: new ToolAudit() };
   const root = ws();
-  const ran = await executeToolCore(deps, { tool: 'command.run', input: { rootPath: root, command: ['node', 'hello.js'] }, requestId: 'r1' });
-  assert.ok(ran.ok, 'command.run must not park for approval');
-  assert.equal(ran.ok && ran.status, 'executed');
-  assert.match(String((ran.ok && (ran.result as { stdout: string }).stdout) ?? ''), /hi from ws/);
-
+  const denied = await executeToolCore(deps, { tool: 'command.run', input: { rootPath: root, command: ['node', 'hello.js'] }, requestId: 'r1' });
+  assert.equal(denied.ok, false);
+  if (!denied.ok) assert.equal(denied.code, 'UNKNOWN_TOOL');
+  assert.equal(deps.audit.recent().some((event) => event.action === 'approval_required'), false, 'generic command denial must mint no approval');
   const parked = await executeToolCore(deps, {
     tool: 'edit.apply',
     input: { rootPath: root, changes: [{ path: 'hello.js', startLine: 1, endLine: 1, replacement: '// x' }] },

@@ -14,7 +14,7 @@
 import { spawn } from 'node:child_process';
 import { realpath } from 'node:fs/promises';
 import * as path from 'node:path';
-import { redactCommandOutput } from '../engine/redaction.js';
+import { MARKERS, redactCommandOutput } from '../engine/redaction.js';
 import {
   CommandRunRequestSchema,
   type CommandRunRequest,
@@ -22,12 +22,48 @@ import {
 } from '@migrapilot/protocol';
 
 const OUTPUT_CAP = 24 * 1024;
+export const COMMAND_OUTPUT_CAP_BYTES = OUTPUT_CAP;
 const DEFAULT_TIMEOUT_MS = 120_000;
 const DEFAULT_ALLOWLIST = ['node', 'npm', 'npx', 'tsc', 'tsx'];
 
 // External-effect subcommands refused regardless of allowlist — these publish,
 // deploy, release, or push off-machine (Slice 3A command-write policy).
 const DENIED_SUBCOMMANDS = new Set(['publish', 'deploy', 'release', 'push']);
+// These variables can substitute the resolved executable or inject native code
+// before argv[0] starts, making the displayed executable materially untruthful.
+const DENIED_ENVIRONMENT_KEYS = new Set([
+  'PATH', 'PATHEXT', 'COMSPEC', 'LD_PRELOAD', 'LD_LIBRARY_PATH',
+  'DYLD_INSERT_LIBRARIES', 'DYLD_LIBRARY_PATH',
+]);
+
+function assertSafeEnvironment(environment: Record<string, string> | undefined): void {
+  const denied = Object.keys(environment ?? {}).find((key) => DENIED_ENVIRONMENT_KEYS.has(key.toUpperCase()));
+  if (denied) throw new CommandPolicyError(`environment variable "${denied}" can alter executable resolution and is refused`);
+}
+
+function redactKnownEnvironmentValues(
+  text: string,
+  environment: Record<string, string> | undefined,
+): { value: string; redacted: boolean } {
+  let value = text;
+  let redacted = false;
+  for (const secret of Object.values(environment ?? {})) {
+    if (secret.length === 0) continue;
+    const variants = new Set([
+      secret,
+      encodeURIComponent(secret),
+      JSON.stringify(secret).slice(1, -1),
+      ...(secret.length >= 4 ? [Buffer.from(secret, 'utf8').toString('base64')] : []),
+    ]);
+    for (const variant of variants) {
+      if (!variant || !value.includes(variant)) continue;
+      value = value.split(variant).join(MARKERS.secret);
+      redacted = true;
+    }
+  }
+  const patternResult = redactCommandOutput(value);
+  return { value: patternResult.value, redacted: redacted || patternResult.redacted };
+}
 
 export function commandAllowlist(env: NodeJS.ProcessEnv = process.env): string[] {
   const raw = env.MIGRAPILOT_COMMAND_ALLOWLIST;
@@ -37,6 +73,15 @@ export function commandAllowlist(env: NodeJS.ProcessEnv = process.env): string[]
 
 export function commandRunEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   return env.MIGRAPILOT_COMMAND_RUN !== 'off';
+}
+
+export interface CommandRunPreview {
+  tool: 'command.run';
+  command: string[];
+  cwd: string;
+  timeoutMs: number;
+  shell: false;
+  environment: Array<{ key: string; value: string; redacted: boolean }>;
 }
 
 class CommandPolicyError extends Error {
@@ -65,8 +110,10 @@ async function containedCwd(rootPath: string, cwd?: string): Promise<string> {
 export async function commandRun(
   input: CommandRunRequest,
   env: NodeJS.ProcessEnv = process.env,
+  signal?: AbortSignal,
 ): Promise<CommandRunResponse> {
   const req = CommandRunRequestSchema.parse(input);
+  assertSafeEnvironment(req.environment);
 
   if (!commandRunEnabled(env)) {
     throw new CommandPolicyError('command.run is disabled (MIGRAPILOT_COMMAND_RUN=off)');
@@ -88,11 +135,18 @@ export async function commandRun(
 
   const started = Date.now();
   return await new Promise<CommandRunResponse>((resolve, reject) => {
-    const child = spawn(argv0, req.command.slice(1), { cwd, shell: false, stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(argv0, req.command.slice(1), {
+      cwd,
+      shell: false,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: { ...process.env, ...env, ...(req.environment ?? {}) },
+    });
     let stdout = '';
     let stderr = '';
     let truncated = false;
     let timedOut = false;
+    let cancelled = false;
+    let settled = false;
 
     const cap = (current: string, chunk: Buffer): string => {
       if (current.length >= OUTPUT_CAP) {
@@ -113,17 +167,35 @@ export async function commandRun(
       timedOut = true;
       child.kill('SIGKILL');
     }, timeoutMs);
+    const onAbort = (): void => {
+      cancelled = true;
+      child.kill('SIGKILL');
+    };
+    if (signal?.aborted) onAbort();
+    else signal?.addEventListener('abort', onAbort, { once: true });
 
     child.on('error', (err) => {
       clearTimeout(timer);
+      signal?.removeEventListener('abort', onAbort);
+      if (settled) return;
+      settled = true;
       reject(new CommandPolicyError(`failed to start "${argv0}": ${err.message}`));
     });
     child.on('close', (code) => {
       clearTimeout(timer);
+      signal?.removeEventListener('abort', onAbort);
+      if (settled) return;
+      settled = true;
+      if (cancelled) {
+        const error = new Error('Command execution cancelled.');
+        error.name = 'AbortError';
+        reject(error);
+        return;
+      }
       // Secret-aware handling: redact BEFORE the output leaves the tool, so no
       // caller (operator display OR any log/audit) ever sees raw credentials.
-      const so = redactCommandOutput(stdout);
-      const se = redactCommandOutput(stderr);
+      const so = redactKnownEnvironmentValues(stdout, req.environment);
+      const se = redactKnownEnvironmentValues(stderr, req.environment);
       resolve({
         tool: 'command.run',
         exitCode: code,
@@ -136,4 +208,39 @@ export async function commandRun(
       });
     });
   });
+}
+
+/** Validate the exact command policy and return bounded operator-facing consent
+ * material without spawning a process. The approval token is bound to the full
+ * input hash by the shared executor, so the command cannot change after review. */
+export async function previewCommandRun(
+  input: CommandRunRequest,
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<CommandRunPreview> {
+  const req = CommandRunRequestSchema.parse(input);
+  assertSafeEnvironment(req.environment);
+  if (!commandRunEnabled(env)) {
+    throw new CommandPolicyError('command.run is disabled (MIGRAPILOT_COMMAND_RUN=off)');
+  }
+  const argv0 = req.command[0]!;
+  if (argv0.includes('/') || argv0.includes('\\')) {
+    throw new CommandPolicyError('argv[0] must be a bare program name (no paths)');
+  }
+  const allow = commandAllowlist(env);
+  if (!allow.includes(argv0)) {
+    throw new CommandPolicyError(`command "${argv0}" is not on the allowlist (${allow.join(', ')})`);
+  }
+  const denied = req.command.slice(1).find((arg) => DENIED_SUBCOMMANDS.has(arg.toLowerCase()));
+  if (denied) {
+    throw new CommandPolicyError(`subcommand "${denied}" is an external-effect action (publish/deploy/release/push) and is refused`);
+  }
+  await containedCwd(req.rootPath, req.cwd);
+  return {
+    tool: 'command.run',
+    command: req.command.map((arg) => redactCommandOutput(arg).value),
+    cwd: req.cwd ?? '.',
+    timeoutMs: req.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+    shell: false,
+    environment: Object.keys(req.environment ?? {}).map((key) => ({ key, value: '[REDACTED]', redacted: true })),
+  };
 }

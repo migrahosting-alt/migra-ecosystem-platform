@@ -6,7 +6,7 @@ import { test } from 'node:test';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { SqliteDurableStore } from '../src/engine/persistence/sqliteStore.js';
+import { SCHEMA_VERSION, SqliteDurableStore } from '../src/engine/persistence/sqliteStore.js';
 import { OperationalMaintenance, DEFAULT_RETENTION } from '../src/engine/persistence/operationalMaintenance.js';
 import type { DurableAuditEvent, DurableIncident } from '../src/engine/persistence/types.js';
 
@@ -54,7 +54,7 @@ test('verifyIntegrity reports ok and health is healthy on a fresh store', () => 
   const h = maint.health();
   assert.equal(h.reachable, true);
   assert.equal(h.schemaCurrent, true);
-  assert.equal(h.schemaVersion, 2);
+  assert.equal(h.schemaVersion, SCHEMA_VERSION);
   assert.equal(h.integrity, 'ok');
   assert.equal(h.status, 'healthy');
   assert.ok(typeof h.writeLatencyMs === 'number' && h.writeLatencyMs >= 0);

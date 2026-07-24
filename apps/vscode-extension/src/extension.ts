@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { randomBytes } from 'node:crypto';
 import type { DiagnosticsGetResponse } from '@migrapilot/protocol';
 import { registerMigraPilotParticipant } from './chat/migrapilotParticipant.js';
 import { runExplainSelection } from './commands/explainSelection.js';
@@ -43,6 +44,8 @@ import { type WorkspacePanelModel, type RootResolution } from './panel/workspace
 import { MigraAiClient } from './services/migraAiClient.js';
 import { EngineDiagnostics, type EngineDiagnosticSnapshot } from './services/engineDiagnostics.js';
 import { type TokenStore } from './services/tokenStore.js';
+import { MigraPilotAgentModeViewProvider } from './panel/agentModeView.js';
+import { agentModeStatusText } from './panel/agentModeModel.js';
 
 let outputChannel: vscode.OutputChannel;
 let brainClient: BrainClient;
@@ -66,6 +69,11 @@ let routerClient: ProviderRouterClient;
 let policyState: ExecutionPolicyState;
 let policyStatusBar: vscode.StatusBarItem;
 let pendingResolutionInfo: ResolutionInfo | undefined;
+let agentModeView: MigraPilotAgentModeViewProvider;
+let agentModeStatusBar: vscode.StatusBarItem;
+let agentBootstrapSecret: string | undefined;
+let inheritedAgentBootstrapSecret: string | undefined;
+let agentActivationPromise: Promise<string> | undefined;
 
 /** Public API returned from activate() — used by the Extension Host tests to
  * drive backend resolution, token storage, and lifecycle without private-state
@@ -139,14 +147,36 @@ async function ensureBrainRunning(): Promise<EnsureResult> {
   const url = String(cfg.get('brainUrl', 'http://127.0.0.1:3988'));
   const autoStart = cfg.get<boolean>('autoStartBrain', true);
   const command = cfg.get<string[]>('brainAutoStartCommand', []);
-  const result = await brainLifecycle.ensureRunning({ url, autoStart, command });
+  agentBootstrapSecret ??= randomBytes(32).toString('base64url');
+  const launchSecret = agentBootstrapSecret;
+  const result = await brainLifecycle.ensureRunning({ url, autoStart, command, environment: { MIGRAPILOT_AGENT_BOOTSTRAP_SECRET: launchSecret, MIGRAPILOT_AGENT_EXTENSION_PID: String(process.pid) } });
   output(`brain lifecycle: ${result}`);
   // Observational: attach the local probe outcome to the latest diagnostic event.
   diagnostics.annotateLocalProbe(localProbeFor(result));
+  const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  if (root && (result === 'started' || inheritedAgentBootstrapSecret)) {
+    void ensureAgentAuthorization(root, result === 'started' ? launchSecret : inheritedAgentBootstrapSecret, 'inherited').catch((error) => output(`Agent authorization unavailable: ${error instanceof Error ? error.message : 'pairing required'}`));
+  }
   return result;
 }
 
+async function ensureAgentAuthorization(root: string, explicitSecret?: string, bootstrapMode: 'inherited' | 'pairing' = 'inherited'): Promise<string> {
+  const existing = migraAiClient.agentActivationWorkspace();
+  if (existing) return existing;
+  const secret = explicitSecret ?? (brainLifecycle.ownedPid() ? agentBootstrapSecret : undefined);
+  if (!secret) throw new Error('Secure Agent pairing is required for the attached brain service.');
+  agentActivationPromise ??= migraAiClient.bootstrapAgentMode(secret, root, bootstrapMode).then((activation) => {
+    if (secret === agentBootstrapSecret) agentBootstrapSecret = undefined;
+    if (secret === inheritedAgentBootstrapSecret) inheritedAgentBootstrapSecret = undefined;
+    return activation.canonicalWorkspace;
+  }).finally(() => { agentActivationPromise = undefined; });
+  return agentActivationPromise;
+}
+
 export async function activate(context: vscode.ExtensionContext): Promise<MigraPilotApi> {
+  agentBootstrapSecret = randomBytes(32).toString('base64url');
+  inheritedAgentBootstrapSecret = process.env.MIGRAPILOT_AGENT_BOOTSTRAP_SECRET;
+  delete process.env.MIGRAPILOT_AGENT_BOOTSTRAP_SECRET;
   outputChannel = vscode.window.createOutputChannel('MigraPilot');
   brainClient = new BrainClient(outputChannel);
   // MigraAI Engine client — the local chat path streams through /api/ai/chat.
@@ -218,6 +248,33 @@ export async function activate(context: vscode.ExtensionContext): Promise<MigraP
   });
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider(MigraPilotSidebarProvider.viewType, sidebar),
+  );
+
+  agentModeStatusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 98);
+  agentModeStatusBar.command = 'migrapilot.openAgentMode';
+  agentModeStatusBar.text = agentModeStatusText(false, 'IDLE');
+  agentModeStatusBar.tooltip = 'Explicit Agent Mode command approval control plane';
+  agentModeStatusBar.show();
+  agentModeView = new MigraPilotAgentModeViewProvider(context.extensionUri, {
+    client: migraAiClient,
+    workspaceRoot: () => vscode.workspace.workspaceFolders?.[0]?.uri.fsPath,
+    authorizeWorkspace: (root) => ensureAgentAuthorization(root),
+    memento: context.workspaceState,
+    output: outputChannel,
+    onMode: (enabled, state) => { agentModeStatusBar.text = agentModeStatusText(enabled, state); },
+  });
+  context.subscriptions.push(
+    agentModeStatusBar,
+    vscode.window.registerWebviewViewProvider(MigraPilotAgentModeViewProvider.viewType, agentModeView, { webviewOptions: { retainContextWhenHidden: true } }),
+    vscode.commands.registerCommand('migrapilot.openAgentMode', async () => agentModeView.reveal()),
+    vscode.commands.registerCommand('migrapilot.pairAgentMode', async () => {
+      const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+      if (!root) return void vscode.window.showWarningMessage('Open a workspace before pairing Agent Mode.');
+      const secret = await vscode.window.showInputBox({ title: 'Pair Agent Mode', prompt: 'Enter the one-time bootstrap secret shown by the local brain operator.', password: true, ignoreFocusOut: true });
+      if (!secret) return;
+      try { await ensureAgentAuthorization(root, secret, 'pairing'); await vscode.window.showInformationMessage('Agent Mode paired for this extension activation and workspace.'); }
+      catch { await vscode.window.showErrorMessage('Agent Mode pairing was refused or expired.'); }
+    }),
   );
 
   // Dedicated chat panel (Claude Code / Copilot-style) — its own webview, no

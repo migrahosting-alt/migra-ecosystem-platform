@@ -46,8 +46,14 @@ const ABSOLUTE_PATH = /(?:\/(?:home|Users|root|etc|var|opt|srv|tmp)\/[^\s"'`:]+|
 /** Keys whose VALUE is fully redacted regardless of content. */
 const SENSITIVE_KEY = /(authorization|cookie|set-cookie|passwd|password|secret|token|api[_-]?key|access[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret|private[_-]?key|credential|session[_-]?id|connection[_-]?string|db[_-]?url|database[_-]?url|dsn)/i;
 
+/** Sensitive key/value assignments embedded in otherwise free-form strings.
+ * Preserve the key for operator context, but never preserve any part of the
+ * assigned value. Covers shell-style and prose assignments such as
+ * `token=value` as well as JSON-like `"password": "value"`. */
+const SENSITIVE_ASSIGNMENT = /(["']?(?:authorization|cookie|set-cookie|passwd|password|secret|token|api[_-]?key|access[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret|private[_-]?key|credential|session[_-]?id|connection[_-]?string|db[_-]?url|database[_-]?url|dsn)["']?\s*[:=]\s*)(?:["'][^"'\r\n]*["']|[^\s,;\]}]+)/gi;
+
 /** Env keys treated as sensitive (value redacted when logged as {key,value}). */
-const SENSITIVE_ENV_KEY = /(SECRET|TOKEN|PASSWORD|KEY|CREDENTIAL|DSN|CONN|AUTH|PRIVATE)/;
+const SENSITIVE_ENV_KEY = /(SECRET|TOKEN|PASSWORD|KEY|CREDENTIAL|DSN|CONN|AUTH|PRIVATE)/i;
 
 export interface RedactOptions {
   /** Redact absolute host paths (metadata surfaces). Default true. */
@@ -62,6 +68,10 @@ export function redactString(input: string, opts: RedactOptions = {}): { value: 
   if (s.length > MAX_STRING) {
     s = s.slice(0, MAX_STRING) + ` ${MARKERS.truncated}`;
   }
+  s = s.replace(SENSITIVE_ASSIGNMENT, (_match, prefix: string) => {
+    redacted = true;
+    return `${prefix}${MARKERS.secret}`;
+  });
   for (const { re, marker } of VALUE_PATTERNS) {
     s = s.replace(re, () => {
       redacted = true;
@@ -157,7 +167,9 @@ export function sanitizeError(err: unknown, opts: RedactOptions = {}): { name: s
  * only (paths in program output are content, not host metadata). Returns
  * whether anything was redacted so callers can flag it. */
 export function redactCommandOutput(text: string): { value: string; redacted: boolean } {
-  return redactString(text, { redactPaths: false });
+  const withoutAnsi = text.replace(/\x1B(?:[@-_][0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1B\\))/g, '');
+  const result = redactString(withoutAnsi, { redactPaths: false });
+  return { value: result.value, redacted: result.redacted || withoutAnsi !== text };
 }
 
 export { SENSITIVE_ENV_KEY };

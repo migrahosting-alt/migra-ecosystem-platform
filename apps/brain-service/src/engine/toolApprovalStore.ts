@@ -16,10 +16,10 @@
  * swap this for a shared store without changing the route contract.
  */
 
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { StoreHealth, shortId, safeSink, NOOP_TELEMETRY, type TelemetrySink, type StoreHealthSnapshot } from './storeTelemetry.js';
 
-export type ApprovalState = 'PENDING' | 'CONSUMED' | 'EXPIRED';
+export type ApprovalState = 'PENDING' | 'CONSUMED' | 'EXPIRED' | 'REJECTED';
 
 export interface ApprovalRecord {
   id: string;
@@ -33,10 +33,14 @@ export interface ApprovalRecord {
 
 export type ConsumeResult =
   | { ok: true; record: ApprovalRecord }
-  | { ok: false; reason: 'unknown' | 'consumed' | 'expired' | 'mismatch' };
+  | { ok: false; reason: 'unknown' | 'consumed' | 'expired' | 'rejected' | 'mismatch' };
 
 const DEFAULT_TTL_MS = 5 * 60_000;
 const MAX_RECORDS = 500;
+
+export class ApprovalCapacityError extends Error {
+  constructor() { super('The approval store is at capacity.'); this.name = 'ApprovalCapacityError'; }
+}
 
 /** Instrumented (Slice 2): every mint/consume/expiry/eviction emits ONE
  * metadata-only telemetry event (never the token or the raw input hash body),
@@ -74,6 +78,8 @@ export class ToolApprovalStore {
         return rec; // idempotent — no second mint event
       }
     }
+    this.removeDeadForCapacity(params.correlationId);
+    if (this.byId.size >= MAX_RECORDS) throw new ApprovalCapacityError();
     const t = this.now();
     const record: ApprovalRecord = {
       id: this.mkId(),
@@ -85,7 +91,6 @@ export class ToolApprovalStore {
       expiresAt: t + this.ttlMs,
     };
     this.byId.set(record.id, record);
-    if (this.byId.size > MAX_RECORDS) this.evictForCapacity(params.correlationId);
     // Redaction: log the binding reference (opaque) + tool — never the token id.
     this.healthTracker.onCreated();
     this.emit('approval.minted', { tool: params.tool, binding: shortId(params.inputHash), createdAt: t, expiresAt: t + this.ttlMs, storeSize: this.byId.size, capacity: MAX_RECORDS }, params.correlationId);
@@ -106,6 +111,11 @@ export class ToolApprovalStore {
       this.emit('approval.replayed', { tool: rec.tool, binding: shortId(rec.inputHash), ageMs: this.now() - rec.createdAt }, correlationId);
       return { ok: false, reason: 'consumed' };
     }
+    if (rec.state === 'REJECTED') {
+      this.healthTracker.onRejected();
+      this.emit('approval.rejected', { tool: rec.tool, reason: 'rejected' }, correlationId);
+      return { ok: false, reason: 'rejected' };
+    }
     if (rec.state === 'EXPIRED' || rec.expiresAt <= this.now()) {
       rec.state = 'EXPIRED';
       this.healthTracker.onExpired();
@@ -121,6 +131,19 @@ export class ToolApprovalStore {
     this.healthTracker.onConsumed();
     this.emit('approval.consumed', { tool: rec.tool, binding: shortId(rec.inputHash), ageMs: this.now() - rec.createdAt, storeSize: this.byId.size }, correlationId);
     return { ok: true, record: rec };
+  }
+
+  /** Invalidate an unconsumed approval when its owning proposal is rejected,
+   * cancelled, or found stale. The binding check prevents one run from
+   * invalidating another run's token. */
+  reject(id: string, binding: { tool: string; inputHash: string; correlationId?: string }): boolean {
+    const rec = this.byId.get(id);
+    if (!rec || rec.state !== 'PENDING') return false;
+    if (rec.tool !== binding.tool || rec.inputHash !== binding.inputHash) return false;
+    rec.state = 'REJECTED';
+    this.healthTracker.onRejected();
+    this.emit('approval.rejected', { tool: rec.tool, binding: shortId(rec.inputHash), reason: 'owner_rejected' }, binding.correlationId);
+    return true;
   }
 
   get(id: string): ApprovalRecord | undefined {
@@ -150,22 +173,13 @@ export class ToolApprovalStore {
     return this.healthTracker.snapshot(this.byId.size, oldestAge, nextExp);
   }
 
-  /** Deterministic capacity policy: drop DEAD (expired/consumed) records first;
-   * only if still over capacity, evict the oldest PENDING — explicit + counted. */
-  private evictForCapacity(correlationId?: string): void {
+  /** Drop only terminal records for capacity. Live approvals are never silently evicted. */
+  private removeDeadForCapacity(correlationId?: string): void {
     const dead = [...this.byId.entries()].filter(([, r]) => r.state !== 'PENDING').map(([k]) => k);
     if (dead.length) {
       for (const k of dead) this.byId.delete(k);
       this.healthTracker.onEvicted(dead.length);
       this.emit('approval.expired', { reason: 'capacity_dead', removed: dead.length, storeSize: this.byId.size }, correlationId);
-    }
-    if (this.byId.size > MAX_RECORDS) {
-      const oldest = this.byId.keys().next().value;
-      if (oldest) {
-        this.byId.delete(oldest);
-        this.healthTracker.onEvicted(1);
-        this.emit('approval.rejected', { reason: 'capacity_evicted', removed: 1, storeSize: this.byId.size }, correlationId);
-      }
     }
   }
 
@@ -186,8 +200,7 @@ export class ToolApprovalStore {
 }
 
 function defaultId(): string {
-  // Non-guessable enough for a local single-use token; not a secret.
-  return `appr_${Math.random().toString(36).slice(2)}${Math.random().toString(36).slice(2)}`.slice(0, 28);
+  return `appr_${randomBytes(24).toString('base64url')}`;
 }
 
 /** Stable structural hash of a tool input, so an approval binds to the exact

@@ -36,6 +36,7 @@ before(async () => {
     }
     if (url === '/api/ai/chat') {
       lastChatBody = await readBody(req);
+      const requestId = String(req.headers['x-request-id'] ?? '');
       if (lastChatBody.markerError) {
         sse(res, [{ event: 'error', data: { code: 'NO_MODEL', message: 'x' } }]);
         return;
@@ -84,10 +85,10 @@ before(async () => {
         return;
       }
       sse(res, [
-        { event: 'route', data: { model: 'm1', provider: 'local', tier: 'fast', reason: 'selected m1', failedOver: [] } },
+        { event: 'route', data: { requestId, model: 'm1', provider: 'local', tier: 'fast', reason: 'selected m1', failedOver: [] } },
         { event: 'token', data: { text: 'Hello' } },
         { event: 'token', data: { text: ' world' } },
-        { event: 'done', data: { model: 'm1', provider: 'local', tier: 'fast', usage: { inputTokens: 3, outputTokens: 2 }, failedOver: [] } },
+        { event: 'done', data: { requestId, model: 'm1', provider: 'local', tier: 'fast', usage: { inputTokens: 3, outputTokens: 2 }, failedOver: [] } },
       ]);
       return;
     }
@@ -179,8 +180,11 @@ test('getModels returns the catalog', async () => {
 });
 
 test('chatStream yields route → tokens → done in order', async () => {
-  const events = (await collect(client().chatStream({ prompt: 'hi' }))) as Array<{ type: string }>;
+  const requestId = 'extension-foundation-1';
+  const events = (await collect(client().chatStream({ prompt: 'hi' }, undefined, requestId))) as Array<{ type: string; requestId?: string }>;
   assert.deepEqual(events.map((e) => e.type), ['route', 'token', 'token', 'done']);
+  assert.equal(events[0]?.requestId, requestId);
+  assert.equal(events.at(-1)?.requestId, requestId);
   const route = events[0] as { type: 'route'; routing: { model: string; reason: string; failedOver: string[] } };
   assert.equal(route.routing.model, 'm1');
 });

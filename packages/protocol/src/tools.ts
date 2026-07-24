@@ -341,6 +341,9 @@ export const CommandRunRequestSchema = z.object({
   /** Optional working directory RELATIVE to rootPath (contained server-side). */
   cwd: z.string().optional(),
   timeoutMs: z.number().int().positive().max(600_000).optional(),
+  /** Explicit environment additions. Values are approval-bound and never
+   * returned unredacted by the server-authoritative preview. */
+  environment: z.record(z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/), z.string().max(4096)).optional(),
 });
 
 export const CommandRunResponseSchema = z.object({

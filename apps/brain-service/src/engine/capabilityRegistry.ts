@@ -26,11 +26,9 @@ import {
   EditPreviewRequestSchema,
   EditApplyRequestSchema,
   DiagnosticsGetRequestSchema,
-  CommandRunRequestSchema,
   ChangesetRequestSchema,
   ApplyChangesetRequestSchema,
 } from '@migrapilot/protocol';
-import { commandRun } from '../tools/commandRun.js';
 import { proposeChangeset, applyChangeset, previewStoredChangeset, ChangesetProposalStore, ChangesetError } from '../tools/changeset.js';
 import { nodeChangesetFs } from '../tools/changesetFs.js';
 import { telemetryHub } from './telemetryHub.js';
@@ -83,6 +81,7 @@ export interface CapabilityDescriptor {
  * handler correlate its store telemetry to the originating execution. */
 export interface ToolHandlerContext {
   correlationId?: string;
+  signal?: AbortSignal;
 }
 type Handler = (input: unknown, ctx?: ToolHandlerContext) => Promise<unknown>;
 
@@ -95,9 +94,9 @@ interface RunnableCapability {
 }
 
 /** Grants held by the local engine deployment. The read/write/git grants make the
- * eight brain tools available; `terminal.exec` / `deployment.*` are intentionally
+ * bounded workspace tools available; `terminal.exec` / `deployment.*` are intentionally
  * NOT granted, so those future capabilities register as unavailable. */
-export const LOCAL_GRANTS: ReadonlySet<string> = new Set(['workspace.read', 'workspace.write', 'git.read', 'command.run']);
+export const LOCAL_GRANTS: ReadonlySet<string> = new Set(['workspace.read', 'workspace.write', 'git.read']);
 
 const changesetFs = nodeChangesetFs();
 // One proposal store shared by propose (writes) + apply (consumes by hash).
@@ -256,17 +255,6 @@ const TOOLS: RunnableCapability[] = [
     inputSchema: ApplyChangesetRequestSchema,
     handler: (i, ctx) => applyChangesetAudited(i, ctx?.correlationId),
     preview: (i, ctx) => Promise.resolve(previewStoredChangeset(i, changesetFs, changesetProposals, ctx?.correlationId)),
-  },
-  {
-    // Policy-allowlisted argv execution (build/test/debug). NOT free shell —
-    // argv[0] must be on the server allowlist, cwd is contained, no shell is
-    // spawned. Distinct from terminal.exec (below), which stays ungranted.
-    descriptor: meta('command.run', 'Run Command', 'Run an allowlisted build/test command in the workspace.', 'terminal', ['command.run'], {
-      readOnly: false,
-      approvalRequired: false,
-    }),
-    inputSchema: CommandRunRequestSchema,
-    handler: (i) => commandRun(i as never),
   },
   {
     // Future capability — registered but UNAVAILABLE (grant not held), so it

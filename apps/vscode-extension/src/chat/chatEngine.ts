@@ -175,11 +175,18 @@ export async function runChatTurn(
   //     user wants to work outside the open one, the resolver below asks.)
   const hasImageAttachment = (options.attachments ?? []).some((a) => /^image\//i.test(a.mimeType ?? ''));
   const openWorkspace = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  // Controlled-restart safety boundary: ordinary chat is tool-free by default.
+  // The existing workspace engineer remains available only after an operator
+  // explicitly enables it. This prevents a normal question from entering the
+  // tool/proposal/apply pipeline before those capabilities pass their gates.
+  const workspaceAgentEnabled = vscode.workspace
+    .getConfiguration('migrapilot')
+    .get<boolean>('enableWorkspaceAgent', false);
   // Only a turn with nowhere to act may consult the legacy classifier, and only
   // to decide whether prompting for a folder is warranted — a wrong guess here
   // cannot strand real work, because there is no workspace to strand it in.
   const mayPromptForFolder = Boolean(openWorkspace) || classifyIntent(trimmed) === 'workspace-task';
-  if (backend.kind === 'local' && !hasImageAttachment && mayPromptForFolder) {
+  if (workspaceAgentEnabled && backend.kind === 'local' && !hasImageAttachment && mayPromptForFolder) {
     // Resolve WHICH folder to work in: an explicit path in the message, else the
     // open workspace, else ASK via a folder picker — so MigraPilot can work on any
     // folder on the machine, not only the one open in VS Code.
@@ -416,7 +423,7 @@ async function streamLocalEngine(
   const diag = deps.engineDiagnostics;
   let sawToken = false;
   try {
-    for await (const event of deps.migraAiClient.chatStream(request, signal)) {
+    for await (const event of deps.migraAiClient.chatStream(request, signal, requestId)) {
       if (event.type === 'route') {
         diag?.record(event.routing);
         sink.progress(
@@ -516,4 +523,3 @@ export function inferFeature(prompt: string): FeatureName {
 // unit-testable under `node --test`. Re-exported here to keep the public API
 // (`summarizeChatContext`, `summarizeTurns`) stable for existing importers.
 export { summarizeChatContext, summarizeTurns } from './conversationSummary.js';
-

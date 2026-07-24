@@ -18,11 +18,14 @@
     "guards:verify": "bash ./scripts/dev/install-claude-guards.sh --verify",
     "guards:test": "bash ./scripts/dev/test-claude-guards.sh",
     "clean": "node ./scripts/clean.mjs && npm run clean -ws --if-present",
-    "build": "npm run build -ws",
+    "build:packages": "npm run build -w @migrapilot/protocol && npm run build -w @migrapilot/shared-types && npm run build -w @migrapilot/pilot-client && npm run build -w @migrapilot/agent-defs && npm run build -w @migrapilot/workspace-tools",
+    "build": "npm run build:packages && npm run build -w @migrapilot/brain-service && npm run build -w migrapilot-extension",
     "dev": "concurrently -n brain,ext \"npm run dev -w @migrapilot/brain-service\" \"npm run watch -w migrapilot-extension\"",
-    "typecheck": "npm run typecheck -ws --if-present",
+    "typecheck": "npm run build:packages && npm run typecheck -ws --if-present",
     "lint": "npm run lint -ws --if-present",
-    "test": "npm run test -ws --if-present",
+    "test": "npm run build:packages && npm run test -w @migrapilot/brain-service && npm run test -w migrapilot-extension",
+    "audit:prod": "npm audit --omit=dev --audit-level=moderate",
+    "audit:disposition": "node apps/brain-service/scripts/validate-npm-audit.mjs",
     "release-check": "node release-check.js ./docs/migrapilot/phase-36 36",
     "release-check:strict": "RELEASE_STRICT_PLACEHOLDERS=true node release-check.js ./docs/migrapilot/phase-36 36",
     "release": "node ./scripts/release.js ./docs/migrapilot/phase-36 36",
@@ -38,5 +41,10 @@
     "lint-staged": "^16.4.0",
     "rimraf": "^6.0.1",
     "typescript": "^5.6.3"
+  },
+  "overrides": {
+    "@modelcontextprotocol/sdk@1.29.0": {
+      "@hono/node-server": "2.0.11"
+    }
   }
 }

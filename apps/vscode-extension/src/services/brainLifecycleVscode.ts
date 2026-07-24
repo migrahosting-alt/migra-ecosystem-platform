@@ -7,9 +7,9 @@ import { type BrainLauncher, type ProbeResult, type SpawnedProcess } from './bra
 
 export function createRealBrainLauncher(): BrainLauncher {
   return {
-    spawn(command: readonly string[]): SpawnedProcess {
+    spawn(command: readonly string[], environment?: Readonly<Record<string, string>>): SpawnedProcess {
       const [cmd, ...args] = command;
-      const child = spawn(cmd!, args, { stdio: 'ignore', detached: false });
+      const child = spawn(cmd!, args, { stdio: 'ignore', detached: false, env: { ...process.env, ...(environment ?? {}) } });
       return {
         pid: child.pid,
         kill: (signal) => {
