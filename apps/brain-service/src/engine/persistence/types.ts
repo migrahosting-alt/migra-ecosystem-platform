@@ -20,7 +20,7 @@ export interface PersistenceHealth {
   memoryStore: StoreHealth;
   ragStore: StoreHealth;
   schemaVersion: number;
-  /** e.g. 'applied', 'pending', 'mismatch', 'failed'. */
+  /** e.g. 'current', 'applied', 'pending', 'mismatch', 'failed'. */
   migrationState: string;
   detail?: string;
 }
