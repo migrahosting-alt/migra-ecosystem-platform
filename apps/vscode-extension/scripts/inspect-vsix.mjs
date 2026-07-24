@@ -22,6 +22,27 @@ if (forbidden.length > 0) {
   throw new Error(`Forbidden files in VSIX:\n${forbidden.join('\n')}`);
 }
 
+
+const forbiddenRuntimeArtifacts = [
+  /(^|\/)\.env(?:\.|$)/i,
+  /(^|\/)migraai-state\.db(?:-shm|-wal)?$/i,
+  /\.sqlite3?$/i,
+  /\.tsbuildinfo$/i,
+];
+
+const forbiddenRuntimeMatches = files.filter((entry) =>
+  forbiddenRuntimeArtifacts.some((pattern) => pattern.test(entry)),
+);
+
+if (forbiddenRuntimeMatches.length > 0) {
+  console.error(JSON.stringify({
+    ok: false,
+    reason: "FORBIDDEN_RUNTIME_ARTIFACTS",
+    files: forbiddenRuntimeMatches,
+  }, null, 2));
+  process.exit(1);
+}
+
 const packageJson = files.includes('extension/package.json');
 const bundledEntry = files.includes('extension/dist/extension.js');
 if (!packageJson || !bundledEntry) {

@@ -10,3 +10,11 @@ docs/**
 p6-evidence/**
 **/*.vsix
 **/*.ts
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+.env
+.env.*
+*.tsbuildinfo
