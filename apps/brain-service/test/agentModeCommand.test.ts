@@ -9,7 +9,7 @@ import { AgentActivationAuthority } from '../src/engine/agentActivation.js';
 import { auditStore } from '../src/engine/auditLog.js';
 import { AgentModeCommandService, type AgentModeRequestContext } from '../src/engine/agentModeCommandService.js';
 import { registerAgentModeCommandRoutes } from '../src/engine/agentModeCommandRoutes.js';
-import { AgentRunJournal } from '../src/engine/agentRunJournal.js';
+import { AgentRunJournal, MemoryAgentRunJournalPersistence } from '../src/engine/agentRunJournal.js';
 import { AGENT_RECIPE_OUTPUT_CAP_BYTES, AGENT_RECIPE_POLICY_VERSION, AgentRecipePolicyError, AgentRecipeResolver, containmentIdentityForPlan, sanitizeAgentRecipeOutput, SystemdContainmentController, type AgentContainmentIdentity, type AgentContainmentReconcileOutcome, type AgentRecipeExecutionOutcome, type AgentRecipePlan, type AgentRecipeProcessManagerLike, type AgentRecipeResolverLike, type SystemdControlAdapter } from '../src/engine/agentRecipe.js';
 import { CapabilityRegistry } from '../src/engine/capabilityRegistry.js';
 import { SqliteDurableStore } from '../src/engine/persistence/sqliteStore.js';
@@ -311,6 +311,68 @@ test('HTTP Agent routes reject every Origin-bearing request at the boundary with
   assert.equal(hostileReproposal.statusCode, 403);
   assert.equal(processes.starts, 0);
   assert.equal((service.get(run.runId, context(workspace)) as { ok: true; view: { state: string } }).view.state, 'AWAITING_APPROVAL');
+
+  await app.close();
+  authority.shutdown();
+  await service.shutdown();
+});
+
+test('HTTP Agent history is authorized, paginated, sanitized evidence and never execution authority', async () => {
+  const workspace = root();
+  const persistence = new MemoryAgentRunJournalPersistence();
+  const journal = new AgentRunJournal(persistence);
+  const authority = new AgentActivationAuthority(SECRET, () => Date.now(), () => 'agentcap_history_server_value_123456789', process.pid);
+  const { deps, resolver, processes } = harness();
+  resolver.envSecret = 'ghp_SHOULD_NOT_APPEAR_IN_HISTORY_123456789012';
+  processes.stdout = 'stdout with sk-' + 'A'.repeat(48);
+  processes.stderr = 'stderr with -----BEGIN PRIVATE KEY----- secret -----END PRIVATE KEY-----';
+  const service = new AgentModeCommandService(deps, undefined, undefined, resolver, processes, journal);
+  const app = Fastify({ logger: false });
+  registerAgentModeCommandRoutes(app, deps, authority, service);
+
+  const payload = { bootstrapSecret: SECRET, activationId: ACTIVATION, extensionProcessId: process.pid, bootstrapMode: 'inherited' as const, workspaceRoot: workspace };
+  const boot = await app.inject({ method: 'POST', url: '/api/ai/agent-mode/bootstrap', payload });
+  assert.equal(boot.statusCode, 200);
+  const capability = (boot.json() as { activationCapability: string }).activationCapability;
+  const headers = { 'x-migrapilot-agent-capability': capability, 'x-migrapilot-workspace-root': workspace };
+  const proposed = await app.inject({ method: 'POST', url: '/api/ai/agent-mode/commands', headers, payload: { rootPath: workspace, recipe: 'git.status', reason: 'history' } });
+  assert.equal(proposed.statusCode, 200);
+  const run = proposed.json() as { runId: string; preview: { fingerprint: string } };
+  await app.inject({ method: 'POST', url: `/api/ai/agent-mode/commands/${run.runId}/displayed`, headers, payload: { fingerprint: run.preview.fingerprint } });
+  await app.inject({ method: 'POST', url: `/api/ai/agent-mode/commands/${run.runId}/decision`, headers, payload: { decision: 'approve', fingerprint: run.preview.fingerprint } });
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const current = await app.inject({ method: 'GET', url: `/api/ai/agent-mode/commands/${run.runId}`, headers });
+    if ((current.json() as { state?: string }).state === 'COMPLETED') break;
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  assert.equal((await app.inject({ method: 'GET', url: `/api/ai/agent-mode/commands/${run.runId}`, headers })).json().state, 'COMPLETED');
+
+  const hostile = await app.inject({ method: 'GET', url: '/api/ai/agent-mode/history/runs', headers: { ...headers, origin: 'https://evil.example.invalid' } });
+  assert.equal(hostile.statusCode, 403);
+  assert.equal(processes.starts, 1);
+
+  const list = await app.inject({ method: 'GET', url: '/api/ai/agent-mode/history/runs?limit=1', headers });
+  assert.equal(list.statusCode, 200, list.body);
+  assert.equal((list.json() as { runs: unknown[]; retention: { governance: string } }).runs.length, 1);
+  assert.equal((list.json() as { retention: { governance: string } }).retention.governance, 'READ_ONLY');
+  assert.doesNotMatch(list.body, /agentcap_|appr_private|SHOULD_NOT_APPEAR|BEGIN PRIVATE KEY|sk-A/);
+
+  const detail = await app.inject({ method: 'GET', url: `/api/ai/agent-mode/history/runs/${run.runId}`, headers });
+  assert.equal(detail.statusCode, 200, detail.body);
+  assert.match(detail.body, /"timeline"/);
+  assert.match(detail.body, /\[REDACTED OUTPUT\]/);
+  assert.doesNotMatch(detail.body, new RegExp(workspace.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  assert.doesNotMatch(detail.body, /agentcap_|appr_private|SHOULD_NOT_APPEAR|BEGIN PRIVATE KEY|sk-A/);
+  assert.doesNotMatch(detail.body, /resume|reuse approval|continue execution/i);
+
+  const exported = await app.inject({ method: 'POST', url: `/api/ai/agent-mode/history/runs/${run.runId}/export`, headers, payload: { includeTimeline: true } });
+  assert.equal(exported.statusCode, 200, exported.body);
+  const manifest = exported.json() as { manifest: { digest: string; redaction: string }; body: { summary: { runId: string } } };
+  assert.equal(manifest.body.summary.runId, run.runId);
+  assert.match(manifest.manifest.digest, /^[a-f0-9]{64}$/);
+  assert.equal(manifest.manifest.redaction, 'sanitized-history-only');
+  assert.doesNotMatch(exported.body, new RegExp(workspace.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  assert.doesNotMatch(exported.body, /agentcap_|appr_private|SHOULD_NOT_APPEAR|BEGIN PRIVATE KEY|sk-A/);
 
   await app.close();
   authority.shutdown();

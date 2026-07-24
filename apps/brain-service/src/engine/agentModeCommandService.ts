@@ -129,6 +129,10 @@ export class AgentModeCommandService {
     this.cleanupTimer.unref();
   }
 
+  agentRunJournal(): AgentRunJournal {
+    return this.journal;
+  }
+
   async propose(raw: unknown, context: AgentModeRequestContext): Promise<AgentModeActionResult> {
     const parsed = AgentModeCommandProposalRequestSchema.safeParse(raw);
     if (!parsed.success) return { ok: false, code: 'PROPOSAL_FAILED', message: 'Recipe proposal input failed validation.' };

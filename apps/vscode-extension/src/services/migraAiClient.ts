@@ -16,10 +16,19 @@ import { randomUUID } from 'node:crypto';
 import {
   AgentModeBootstrapResponseSchema,
   AgentModeCommandRunViewSchema,
+  AgentModeRunHistoryDetailSchema,
+  AgentModeRunHistoryExportRequestSchema,
+  AgentModeRunHistoryExportSchema,
+  AgentModeRunHistoryListSchema,
   AgentModeRunRecoveryStatusSchema,
   type AgentModeBootstrapResponse,
   type AgentModeCommandProposalRequest,
   type AgentModeCommandRunView,
+  type AgentModeRunHistoryDetail,
+  type AgentModeRunHistoryExport,
+  type AgentModeRunHistoryExportRequest,
+  type AgentModeRunHistoryList,
+  type AgentModeRunHistoryQuery,
   type AgentModeReproposalRequest,
   type AgentModeRunRecoveryStatus,
 } from '@migrapilot/protocol';
@@ -677,6 +686,32 @@ export class MigraAiClient {
     const workspace = this.agentRunWorkspaces.get(runId);
     if (workspace) this.agentRunWorkspaces.set(view.runId, workspace);
     return view;
+  }
+
+  async listAgentModeRunHistory(query: Partial<AgentModeRunHistoryQuery> = {}, signal?: AbortSignal): Promise<AgentModeRunHistoryList> {
+    const workspace = this.agentActivationWorkspace() ?? this.cfg.scope?.().workspace;
+    if (!workspace) throw new PilotError('INVALID_STATE', 'A valid Agent Mode activation is required to inspect run history.');
+    const params = new URLSearchParams();
+    for (const [key, value] of Object.entries(query)) {
+      if (value !== undefined) params.set(key, String(value));
+    }
+    const raw = await this.jsonRequest<unknown>('GET', `/api/ai/agent-mode/history/runs${params.size ? `?${params.toString()}` : ''}`, undefined, signal, undefined, this.agentHeaders(workspace));
+    return AgentModeRunHistoryListSchema.parse(raw);
+  }
+
+  async getAgentModeRunHistory(runId: string, signal?: AbortSignal): Promise<AgentModeRunHistoryDetail> {
+    const workspace = this.agentRunWorkspaces.get(runId) ?? this.agentActivationWorkspace() ?? this.cfg.scope?.().workspace;
+    if (!workspace) throw new PilotError('INVALID_STATE', 'A valid Agent Mode activation is required to inspect run history.');
+    const raw = await this.jsonRequest<unknown>('GET', `/api/ai/agent-mode/history/runs/${encodeURIComponent(runId)}`, undefined, signal, undefined, this.agentHeaders(workspace));
+    return AgentModeRunHistoryDetailSchema.parse(raw);
+  }
+
+  async exportAgentModeRunEvidence(runId: string, request: Partial<AgentModeRunHistoryExportRequest> = {}, signal?: AbortSignal): Promise<AgentModeRunHistoryExport> {
+    const workspace = this.agentRunWorkspaces.get(runId) ?? this.agentActivationWorkspace() ?? this.cfg.scope?.().workspace;
+    if (!workspace) throw new PilotError('INVALID_STATE', 'A valid Agent Mode activation is required to export run evidence.');
+    const parsed = AgentModeRunHistoryExportRequestSchema.parse(request);
+    const raw = await this.jsonRequest<unknown>('POST', `/api/ai/agent-mode/history/runs/${encodeURIComponent(runId)}/export`, parsed, signal, undefined, this.agentHeaders(workspace));
+    return AgentModeRunHistoryExportSchema.parse(raw);
   }
 
   private async agentRunRequest(method: 'GET' | 'POST', path: string, body: unknown, runId: string, signal?: AbortSignal): Promise<AgentModeCommandRunView> {

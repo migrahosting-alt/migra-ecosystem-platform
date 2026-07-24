@@ -1,4 +1,4 @@
-import type { AgentModeCommandPreview, AgentModeCommandRunView, AgentModeRecoveryClass, AgentModeRunRecoveryStatus, AgentModeState } from '@migrapilot/protocol';
+import type { AgentModeCommandPreview, AgentModeCommandRunView, AgentModeRecoveryClass, AgentModeRunHistoryDetail, AgentModeRunHistorySummary, AgentModeRunRecoveryStatus, AgentModeState } from '@migrapilot/protocol';
 
 export class AgentModeSessionGate {
   private value = false;
@@ -64,6 +64,33 @@ export function agentModeRecoveryControlState(
   const eligible = status?.eligible ?? view.recovery?.eligible ?? false;
   const label = status ? agentModeRecoveryStatusText(status) : view.recovery?.reason;
   return { freshProposal: eligible, resume: false, ...(label ? { label } : {}) };
+}
+
+export function agentModeHistorySummaryLines(run: AgentModeRunHistorySummary): string[] {
+  return [
+    `${new Date(run.updatedAt).toISOString()} · ${run.state} · ${run.recipe}`,
+    `Run: ${run.runId}`,
+    `Request: ${run.requestId}`,
+    `Approval: ${run.approvalLifecycle}`,
+    `Recovery: ${run.recoveryClass}${run.recoveryEligible ? ' (fresh proposal allowed)' : ''}`,
+    `Integrity: ${run.integrity}${run.integrityIssues.length ? ` — ${run.integrityIssues.join('; ')}` : ''}`,
+  ];
+}
+
+export function agentModeHistoryDetailLines(detail: AgentModeRunHistoryDetail): string[] {
+  const { summary } = detail;
+  const lines = [
+    ...agentModeHistorySummaryLines(summary),
+    `Events: ${detail.timeline.length}`,
+    `Retention: ${detail.retention.reason}`,
+  ];
+  if (detail.lineage.sourceRunId) lines.push(`Source run: ${detail.lineage.sourceRunId}`);
+  if (detail.lineage.successorRunId) lines.push(`Successor run: ${detail.lineage.successorRunId}`);
+  if (detail.recovery) lines.push(`Recovery recommendation: ${detail.recovery.recommendedAction}`);
+  if (detail.preview) lines.push(`Snapshot: ${detail.preview.snapshotId}`, `Fingerprint: ${detail.preview.fingerprint}`);
+  if (detail.result) lines.push(`Exit code: ${detail.result.exitCode}`, `Result redacted: ${detail.result.redacted ? 'yes' : 'no'}`);
+  if (detail.error) lines.push(`Failure: ${detail.error.code}`);
+  return lines;
 }
 
 function recoveryClassLabel(value: AgentModeRecoveryClass): string {
