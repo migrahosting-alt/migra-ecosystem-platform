@@ -12,6 +12,17 @@
 
 import { REQUEST_ID_HEADER, newRequestId } from '@migrapilot/pilot-client';
 import { PilotError, type PilotErrorCode } from '@migrapilot/pilot-client';
+import { randomUUID } from 'node:crypto';
+import {
+  AgentModeBootstrapResponseSchema,
+  AgentModeCommandRunViewSchema,
+  AgentModeRunRecoveryStatusSchema,
+  type AgentModeBootstrapResponse,
+  type AgentModeCommandProposalRequest,
+  type AgentModeCommandRunView,
+  type AgentModeReproposalRequest,
+  type AgentModeRunRecoveryStatus,
+} from '@migrapilot/protocol';
 
 export interface MigraAiConfig {
   /** Base URL of the engine (brain-service), e.g. http://127.0.0.1:3988. */
@@ -86,9 +97,9 @@ export interface AiUsage {
 }
 
 export type AiStreamEvent =
-  | { type: 'route'; routing: AiRouting }
+  | { type: 'route'; requestId: string; routing: AiRouting }
   | { type: 'token'; text: string }
-  | { type: 'done'; model?: string; provider?: string; tier?: string; usage?: AiUsage; failedOver?: string[] };
+  | { type: 'done'; requestId: string; model?: string; provider?: string; tier?: string; usage?: AiUsage; failedOver?: string[] };
 
 /** A single read-only tool step taken by the agentic answer loop. */
 export interface AgenticStep {
@@ -298,6 +309,10 @@ const AGENTS_PATH = '/api/ai/agents';
 const WORKSPACES_PATH = '/api/ai/workspaces';
 
 export class MigraAiClient {
+  private readonly agentActivationId = randomUUID();
+  private agentActivation?: AgentModeBootstrapResponse;
+  private readonly agentRunWorkspaces = new Map<string, string>();
+
   constructor(private readonly cfg: MigraAiConfig) {}
 
   private base(): string {
@@ -394,8 +409,7 @@ export class MigraAiClient {
    * Any engine failure throws a correlated {@link PilotError} — there is NO
    * silent fallback to the legacy `/chat` endpoint.
    */
-  async *chatStream(body: AiChatRequest, signal?: AbortSignal): AsyncGenerator<AiStreamEvent> {
-    const requestId = newRequestId();
+  async *chatStream(body: AiChatRequest, signal?: AbortSignal, requestId = newRequestId()): AsyncGenerator<AiStreamEvent> {
     const url = `${this.base()}${CHAT_PATH}`;
     this.cfg.log(`POST ${url} [${requestId}] (sse)`);
     const { signal: combined, reset, done, timedOut } = this.withTimeout(signal);
@@ -606,6 +620,80 @@ export class MigraAiClient {
     return body as unknown as ToolExecuteResult;
   }
 
+  // ── Explicit Agent Mode command lifecycle ─────────────────────────────────
+
+  async bootstrapAgentMode(bootstrapSecret: string, workspaceRoot: string, bootstrapMode: 'inherited' | 'pairing', signal?: AbortSignal): Promise<AgentModeBootstrapResponse> {
+    const raw = await this.jsonRequest<unknown>('POST', '/api/ai/agent-mode/bootstrap', { bootstrapSecret, activationId: this.agentActivationId, extensionProcessId: process.pid, bootstrapMode, workspaceRoot }, signal);
+    const activation = AgentModeBootstrapResponseSchema.parse(raw);
+    if (activation.activationId !== this.agentActivationId) throw new PilotError('INVALID_STATE', 'The Agent activation identity did not match this extension activation.');
+    this.agentActivation = activation;
+    return activation;
+  }
+
+  agentActivationWorkspace(): string | undefined {
+    return this.agentActivation && this.agentActivation.expiresAt > Date.now() ? this.agentActivation.canonicalWorkspace : undefined;
+  }
+
+  async proposeAgentModeCommand(
+    request: AgentModeCommandProposalRequest,
+    signal?: AbortSignal,
+  ): Promise<AgentModeCommandRunView> {
+    const raw = await this.jsonRequest<unknown>('POST', '/api/ai/agent-mode/commands', request, signal, undefined, this.agentHeaders(request.rootPath));
+    const view = AgentModeCommandRunViewSchema.parse(raw);
+    this.agentRunWorkspaces.set(view.runId, this.agentActivationWorkspace() ?? request.rootPath);
+    return view;
+  }
+
+  async getAgentModeCommand(runId: string, signal?: AbortSignal): Promise<AgentModeCommandRunView> {
+    return this.agentRunRequest('GET', `/api/ai/agent-mode/commands/${encodeURIComponent(runId)}`, undefined, runId, signal);
+  }
+
+  async markAgentModePreviewDisplayed(runId: string, fingerprint: string, signal?: AbortSignal): Promise<AgentModeCommandRunView> {
+    return this.agentRunRequest('POST', `/api/ai/agent-mode/commands/${encodeURIComponent(runId)}/displayed`, { fingerprint }, runId, signal);
+  }
+
+  async decideAgentModeCommand(
+    runId: string,
+    decision: 'approve' | 'reject',
+    fingerprint: string,
+    signal?: AbortSignal,
+  ): Promise<AgentModeCommandRunView> {
+    return this.agentRunRequest('POST', `/api/ai/agent-mode/commands/${encodeURIComponent(runId)}/decision`, { decision, fingerprint }, runId, signal);
+  }
+
+  async cancelAgentModeCommand(runId: string, signal?: AbortSignal): Promise<AgentModeCommandRunView> {
+    return this.agentRunRequest('POST', `/api/ai/agent-mode/commands/${encodeURIComponent(runId)}/cancel`, {}, runId, signal);
+  }
+
+  async getAgentModeRunRecoveryStatus(runId: string, signal?: AbortSignal): Promise<AgentModeRunRecoveryStatus> {
+    const workspace = this.agentRunWorkspaces.get(runId) ?? this.cfg.scope?.().workspace;
+    if (!workspace) throw new PilotError('INVALID_STATE', 'The Agent Mode run is not owned by this extension session.');
+    const raw = await this.jsonRequest<unknown>('GET', `/api/ai/agent-mode/commands/${encodeURIComponent(runId)}/recovery`, undefined, signal, undefined, this.agentHeaders(workspace));
+    return AgentModeRunRecoveryStatusSchema.parse(raw);
+  }
+
+  async reproposeAgentModeCommand(runId: string, request: AgentModeReproposalRequest, signal?: AbortSignal): Promise<AgentModeCommandRunView> {
+    const view = await this.agentRunRequest('POST', `/api/ai/agent-mode/commands/${encodeURIComponent(runId)}/repropose`, request, runId, signal);
+    const workspace = this.agentRunWorkspaces.get(runId);
+    if (workspace) this.agentRunWorkspaces.set(view.runId, workspace);
+    return view;
+  }
+
+  private async agentRunRequest(method: 'GET' | 'POST', path: string, body: unknown, runId: string, signal?: AbortSignal): Promise<AgentModeCommandRunView> {
+    const workspace = this.agentRunWorkspaces.get(runId) ?? this.cfg.scope?.().workspace;
+    if (!workspace) throw new PilotError('INVALID_STATE', 'The Agent Mode run is not owned by this extension session.');
+    const raw = await this.jsonRequest<unknown>(method, path, body, signal, undefined, this.agentHeaders(workspace));
+    return AgentModeCommandRunViewSchema.parse(raw);
+  }
+
+  private agentHeaders(workspace: string): Record<string, string> {
+    const activation = this.agentActivation;
+    if (!activation || activation.expiresAt <= Date.now() || activation.canonicalWorkspace !== workspace) {
+      throw new PilotError('INVALID_STATE', 'A valid server-issued Agent activation is required for this workspace.');
+    }
+    return { 'x-migrapilot-agent-capability': activation.activationCapability, 'x-migrapilot-workspace-root': activation.canonicalWorkspace };
+  }
+
   /** Convenience for read-only tools: execute and return the typed `.result`. */
   async runReadOnlyTool<T>(tool: string, input: unknown, signal?: AbortSignal): Promise<T> {
     const res = await this.executeTool({ tool, input }, signal);
@@ -719,7 +807,7 @@ export class MigraAiClient {
   /** JSON request with correlation, timeout, and PilotError mapping (no auth —
    * the local engine is trusted on loopback). `idempotencyKey` is sent as the
    * Idempotency-Key header when present. */
-  private async jsonRequest<T>(method: 'GET' | 'POST' | 'PATCH' | 'DELETE', path: string, jsonBody: unknown, signal?: AbortSignal, idempotencyKey?: string): Promise<T> {
+  private async jsonRequest<T>(method: 'GET' | 'POST' | 'PATCH' | 'DELETE', path: string, jsonBody: unknown, signal?: AbortSignal, idempotencyKey?: string, extraHeaders: Record<string, string> = {}): Promise<T> {
     const requestId = newRequestId();
     const url = `${this.base()}${path}`;
     this.cfg.log(`${method} ${url} [${requestId}]`);
@@ -733,6 +821,7 @@ export class MigraAiClient {
           ...(hasBody ? { 'content-type': 'application/json' } : {}),
           [REQUEST_ID_HEADER]: requestId,
           ...this.scopeHeaders(),
+          ...extraHeaders,
           ...(idempotencyKey ? { 'idempotency-key': idempotencyKey } : {}),
         },
         body: hasBody ? JSON.stringify(jsonBody ?? {}) : undefined,
@@ -877,6 +966,7 @@ function toStreamEvent(frame: { event: string; data: unknown }): AiStreamEvent |
   if (frame.event === 'route') {
     return {
       type: 'route',
+      requestId: String(d.requestId ?? ''),
       routing: {
         model: String(d.model ?? ''),
         provider: String(d.provider ?? ''),
@@ -892,6 +982,7 @@ function toStreamEvent(frame: { event: string; data: unknown }): AiStreamEvent |
   if (frame.event === 'done') {
     return {
       type: 'done',
+      requestId: String(d.requestId ?? ''),
       model: d.model as string | undefined,
       provider: d.provider as string | undefined,
       tier: d.tier as string | undefined,

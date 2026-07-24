@@ -3,7 +3,7 @@
  *
  * A bounded, in-memory ring of every capability-execution decision the engine
  * made, for observability. SANITIZED BY CONSTRUCTION: it records the tool id,
- * the coarse action/outcome, correlation ids, and the approval id — never tool
+ * the coarse action/outcome and correlation ids — never approval credentials, tool
  * inputs, file contents, prompts, keys, or raw error bodies.
  */
 
@@ -23,7 +23,6 @@ export interface AuditEvent {
   tool: string;
   action: AuditAction;
   readOnly: boolean;
-  approvalId?: string;
   outcome: 'ok' | 'refused' | 'error';
 }
 

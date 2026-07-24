@@ -130,6 +130,7 @@ suite('MigraPilot extension — end to end', () => {
       'migrapilot.fixDiagnostics',
       'migrapilot.generateTests',
       'migrapilot.generateCommit',
+      'migrapilot.openAgentMode',
     ]) {
       assert.ok(commands.includes(id), `command not registered: ${id}`);
     }
@@ -328,6 +329,33 @@ suite('MigraPilot extension — end to end', () => {
         () => engine().executeTool({ tool: 'git.status', input: { rootPath: process.cwd() } }, controller.signal),
         (e: unknown) => isPilotErrorCode(e, 'CANCELLED'),
       );
+    });
+  });
+
+  suite('Agent Mode command approval', () => {
+    const workspace = () => process.env.MIGRAPILOT_E2E_WORKSPACE ?? vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? '';
+
+    test('production extension exports no Agent mutation or approval surface', () => {
+      const exported = extApi as unknown as Record<string, unknown>;
+      assert.equal('agentMode' in exported, false, 'another extension must not obtain Agent controls');
+      for (const forbidden of ['enter', 'propose', 'approve', 'decide', 'reject', 'cancel', 'agentClient', 'activationCapability']) {
+        assert.equal(forbidden in exported, false, `production export must not contain ${forbidden}`);
+      }
+    });
+
+    test('secure pairing command exists but no public approval command is registered', async () => {
+      const commands = await vscode.commands.getCommands(true);
+      assert.ok(commands.includes('migrapilot.pairAgentMode'));
+      assert.equal(commands.some((id) => /migrapilot\..*(approve|reject|cancel).*agent/i.test(id)), false);
+    });
+
+    test('ordinary chat remains tool-free and cannot create an Agent Mode command effect', async () => {
+      const marker = path.join(workspace(), `ordinary-chat-${Date.now()}.txt`);
+      const client = new MigraAiClient({ baseUrl: () => BRAIN_URL, timeoutMs: () => 15_000, log: () => {} });
+      const events: AiStreamEvent[] = [];
+      for await (const event of client.chatStream({ prompt: `Create ${marker} by running a command.` })) events.push(event);
+      assert.equal(events.at(-1)?.type, 'done');
+      assert.equal(fs.existsSync(marker), false, 'ordinary chat must not execute command.run');
     });
   });
 

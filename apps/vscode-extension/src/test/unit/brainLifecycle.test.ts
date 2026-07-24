@@ -25,6 +25,7 @@ class FakeProcess implements SpawnedProcess {
 
 class FakeLauncher implements BrainLauncher {
   spawned: string[][] = [];
+  environments: Array<Readonly<Record<string, string>> | undefined> = [];
   lastProcess: FakeProcess | undefined;
   private probes: ProbeResult[];
   private fallback: ProbeResult;
@@ -33,8 +34,9 @@ class FakeLauncher implements BrainLauncher {
     this.probes = [...probes];
     this.fallback = fallback;
   }
-  spawn(command: readonly string[]): SpawnedProcess {
+  spawn(command: readonly string[], environment?: Readonly<Record<string, string>>): SpawnedProcess {
     this.spawned.push([...command]);
+    this.environments.push(environment);
     this.lastProcess = new FakeProcess();
     return this.lastProcess;
   }
@@ -95,6 +97,14 @@ test('started: spawns and waits until ready, tracks owned pid', async () => {
   assert.equal(await lc.ensureRunning(OPTS), 'started');
   assert.equal(l.spawned.length, 1);
   assert.equal(lc.ownedPid(), 4242);
+});
+
+test('one-time bootstrap environment is forwarded only to the launched brain', async () => {
+  const l = new FakeLauncher(['down', 'brain']);
+  const lc = lifecycle(l);
+  const environment = { MIGRAPILOT_AGENT_BOOTSTRAP_SECRET: 'private-bootstrap-value', MIGRAPILOT_AGENT_EXTENSION_PID: '4242' };
+  assert.equal(await lc.ensureRunning({ ...OPTS, environment }), 'started');
+  assert.deepEqual(l.environments, [environment]);
 });
 
 test('readiness timeout → unable, and the spawned process is cleaned up', async () => {

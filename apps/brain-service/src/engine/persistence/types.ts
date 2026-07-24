@@ -212,6 +212,216 @@ export interface OperationalCounts {
   incidents: number;
   recoveryEvents: number;
   reservations: number;
+  agentRuns?: number;
+  agentRunEvents?: number;
+  agentRunTombstones?: number;
+}
+
+export type DurableAgentRunState =
+  | 'IDLE'
+  | 'PLANNING'
+  | 'AWAITING_APPROVAL'
+  | 'APPROVED'
+  | 'EXECUTING'
+  | 'COMPLETED'
+  | 'REJECTED'
+  | 'EXPIRED'
+  | 'STALE'
+  | 'FAILED'
+  | 'CANCELLED';
+
+export type DurableAgentApprovalLifecycle =
+  | 'NOT_REQUESTED'
+  | 'PENDING_DISPLAY'
+  | 'DISPLAYED'
+  | 'APPROVED'
+  | 'REJECTED'
+  | 'EXPIRED'
+  | 'INVALIDATED'
+  | 'LOST_ON_RESTART'
+  | 'CONSUMED';
+
+export type DurableAgentRecoveryClass =
+  | 'NONE'
+  | 'REPROPOSAL_ALLOWED'
+  | 'REPROPOSAL_REQUIRED'
+  | 'TERMINAL_NO_RECOVERY'
+  | 'WORKSPACE_MISMATCH'
+  | 'POLICY_CHANGED'
+  | 'SNAPSHOT_CHANGED'
+  | 'RECIPE_DISABLED'
+  | 'AUTHORIZATION_LOST'
+  | 'INTERRUPTED_EXECUTION'
+  | 'RETENTION_REMOVED'
+  | 'SCHEMA_INCOMPATIBLE';
+
+export interface DurableAgentRun {
+  runId: string;
+  correlationId: string;
+  externalRequestRef?: string;
+  activationRef: string;
+  workspaceIdentity: string;
+  workspaceRef: string;
+  recipeId: string;
+  recipePolicyVersion: string;
+  proposalFingerprint: string;
+  proposalHash: string;
+  snapshotId: string;
+  snapshotManifestDigest: string;
+  executableDigest: string;
+  containmentUnit?: string;
+  containmentBinding?: string;
+  state: DurableAgentRunState;
+  requestedAt: number;
+  proposalAt?: number;
+  approvalDisplayedAt?: number;
+  approvalDecisionAt?: number;
+  executionStartedAt?: number;
+  terminalAt?: number;
+  expiresAt: number;
+  timeoutMs: number;
+  outputLimitBytes: number;
+  mutationClassification: string;
+  networkPolicy: string;
+  expectedEffectsJson: string;
+  previewJson?: string;
+  resultJson?: string;
+  errorJson?: string;
+  exitCode?: number | null;
+  signal?: string;
+  failureCode?: string;
+  interruptionClassification?: string;
+  approvalLifecycleVersion: number;
+  approvalLifecycle: DurableAgentApprovalLifecycle;
+  approvalRequestedAt?: number;
+  approvalExpiresAt?: number;
+  approvalDecisionType?: 'APPROVED' | 'REJECTED';
+  approvalInvalidationReason?: string;
+  approvalActorRef?: string;
+  recoveryClass: DurableAgentRecoveryClass;
+  recoveryEligible: boolean;
+  recoveryReason?: string;
+  recoverySourceRunId?: string;
+  successorRunId?: string;
+  reproposalAt?: number;
+  recoveryAttemptCount: number;
+  lastRecoveryRequestId?: string;
+  recoveryTerminalReason?: string;
+  auditSeq: number;
+  schemaVersion: number;
+  version: number;
+  reconciliationOwner?: string;
+  reconciliationLeaseUntil?: number;
+  reconciliationFence: number;
+  updatedAt: number;
+}
+
+export interface AgentRunReconciliationClaim {
+  runId: string;
+  owner: string;
+  fence: number;
+  leaseUntil: number;
+  version: number;
+}
+
+export interface DurableAgentRunTombstone {
+  tombstoneId: string;
+  runId: string;
+  workspaceIdentity: string;
+  recipeId: string;
+  finalState: DurableAgentRunState;
+  terminalAt: number;
+  deletedAt: number;
+  deletionReason: string;
+  finalAuditSeq: number;
+  eventCount: number;
+  recoverySourceRunId?: string;
+  successorRunId?: string;
+  schemaVersion: number;
+}
+
+export interface DurableAgentRunEvent {
+  eventId: string;
+  runId: string;
+  seq: number;
+  at: number;
+  type: string;
+  priorState?: DurableAgentRunState;
+  nextState: DurableAgentRunState;
+  reason?: string;
+  correlationId: string;
+  source: 'API' | 'APPROVAL' | 'EXECUTION' | 'RECONCILIATION' | 'SHUTDOWN' | 'CLEANUP' | 'RECOVERY';
+  schemaVersion: number;
+}
+
+export interface AgentRunTransitionInput {
+  runId: string;
+  expectedState?: DurableAgentRunState;
+  nextState: DurableAgentRunState;
+  at: number;
+  source: DurableAgentRunEvent['source'];
+  eventType: string;
+  reason?: string;
+  reconciliation?: {
+    owner: string;
+    fence: number;
+    leaseValidAt: number;
+    expectedVersion?: number;
+  };
+  patch?: Partial<Pick<DurableAgentRun, 'approvalDisplayedAt' | 'approvalDecisionAt' | 'executionStartedAt' | 'terminalAt' | 'resultJson' | 'errorJson' | 'exitCode' | 'signal' | 'failureCode' | 'interruptionClassification' | 'containmentUnit' | 'containmentBinding' | 'approvalLifecycle' | 'approvalRequestedAt' | 'approvalExpiresAt' | 'approvalDecisionType' | 'approvalInvalidationReason' | 'approvalActorRef' | 'recoveryClass' | 'recoveryEligible' | 'recoveryReason' | 'successorRunId' | 'reproposalAt' | 'recoveryAttemptCount' | 'lastRecoveryRequestId' | 'recoveryTerminalReason'>>;
+  eventId?: string;
+}
+
+export interface AgentRunReproposalInput {
+  sourceRunId: string;
+  sourceExpectedVersion: number;
+  requestId: string;
+  at: number;
+  provenance: {
+    workspaceIdentity: string;
+    allowedRecipes: readonly string[];
+    eventDigest: string;
+    highestSeq: number;
+  };
+  successor: DurableAgentRun;
+  createdEvent: DurableAgentRunEvent;
+  proposalEvent: DurableAgentRunEvent;
+}
+
+export type AgentRunReproposalResult =
+  | { ok: true; created: true; successor: DurableAgentRun }
+  | { ok: true; created: false; successor: DurableAgentRun }
+  | { ok: false; code: 'UNKNOWN_SOURCE' | 'SOURCE_NOT_TERMINAL' | 'SOURCE_UNDER_RECONCILIATION' | 'ACTIVE_SUCCESSOR_EXISTS' | 'SOURCE_VERSION_CHANGED' | 'SOURCE_PROVENANCE_FAILED' | 'RECOVERY_EVENT_ID_COLLISION' | 'RECOVERY_EVENT_CONTENT_MISMATCH' | 'RECOVERY_EVENT_SEQUENCE_CONFLICT' | 'RECOVERY_EVENT_INSERT_FAILED' | 'PARTIAL_FAILURE' };
+
+export interface AgentRunFencedEventInput {
+  runId: string;
+  expectedState?: DurableAgentRunState;
+  at: number;
+  source: 'RECONCILIATION';
+  eventType: string;
+  reason?: string;
+  reconciliation: {
+    owner: string;
+    fence: number;
+    leaseValidAt: number;
+    expectedVersion: number;
+  };
+  eventId?: string;
+}
+
+export interface AgentRunJournalPersistence {
+  insertAgentRun(run: DurableAgentRun, createdEvent: DurableAgentRunEvent): void;
+  appendAgentRunEvent(event: Omit<DurableAgentRunEvent, 'seq'>): void;
+  appendAgentRunEventUnderFence(input: AgentRunFencedEventInput): AgentRunReconciliationClaim | undefined;
+  transitionAgentRun(input: AgentRunTransitionInput): boolean;
+  reproposeAgentRun(input: AgentRunReproposalInput): AgentRunReproposalResult;
+  loadAgentRuns(limit?: number): DurableAgentRun[];
+  loadAgentRun(runId: string): DurableAgentRun | undefined;
+  loadAgentRunEvents(runId: string, limit?: number): DurableAgentRunEvent[];
+  claimAgentRunReconciliation(runId: string, owner: string, leaseUntil: number, now: number): AgentRunReconciliationClaim | undefined;
+  renewAgentRunReconciliation(runId: string, owner: string, fence: number, leaseUntil: number, now: number): AgentRunReconciliationClaim | undefined;
+  pruneAgentRuns(cutoff: number, batchSize: number, now: number): { runs: number; events: number };
+  loadAgentRunTombstones(limit?: number): DurableAgentRunTombstone[];
 }
 
 /** Durable persistence for operational metadata. Append-only where noted; incident
@@ -241,7 +451,7 @@ export interface OperationalPersistence {
 }
 
 /** A composite durable store exposing every persistence facet + health. */
-export interface DurableStore extends ConversationPersistence, MemoryItemPersistence, RagIndexPersistence, EmbeddingCachePersistence, WorkspacePersistence, OperationalPersistence {
+export interface DurableStore extends ConversationPersistence, MemoryItemPersistence, RagIndexPersistence, EmbeddingCachePersistence, WorkspacePersistence, OperationalPersistence, AgentRunJournalPersistence {
   health(): PersistenceHealth;
   integrityCheck(): string;
   close(): void;

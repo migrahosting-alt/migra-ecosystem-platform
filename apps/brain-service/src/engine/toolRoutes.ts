@@ -83,6 +83,10 @@ export function registerToolExecutionRoutes(app: FastifyInstance, deps: ToolRout
   app.post<{ Body: ExecuteBody }>('/api/ai/tools', async (request, reply) => {
     const requestId = correlationId(request);
     const body = request.body ?? {};
+    if (body.tool === 'command.run' || body.tool === 'agent.recipe') {
+      reply.code(403);
+      return { ok: false, code: 'CAPABILITY_DENIED', error: 'Command execution is available only through the scoped Agent Mode recipe boundary.' };
+    }
     // Resume correlation (Slice 3): an operator apply carries the ORIGINAL
     // execution correlation id via header, plus this call's own requestId — so
     // the audit chain links the resumed application to the original execution
