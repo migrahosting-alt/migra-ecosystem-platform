@@ -119,3 +119,6 @@ _security_scan_outputs/
 
 # Claude Code local (uncommitted) personal settings
 .claude/settings.local.json
+
+# Generated Lighthouse/Chromium profiles
+MigraTeck/*lighthouse.*/
