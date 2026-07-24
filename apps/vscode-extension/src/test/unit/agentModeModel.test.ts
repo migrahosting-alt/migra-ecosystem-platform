@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { AgentModeSessionGate, agentModeControlState, agentModeRecoveryControlState, agentModeRecoveryStatusText, agentModeStatusText, renderPreviewLines } from '../../panel/agentModeModel.js';
+import type { AgentModeCommandRunView, AgentModeRunHistoryDetail, AgentModeRunHistorySummary, AgentModeRunRecoveryStatus } from '@migrapilot/protocol';
+import { AgentModeSessionGate, agentModeControlState, agentModeHistoryDetailLines, agentModeHistorySummaryLines, agentModeRecoveryControlState, agentModeRecoveryStatusText, agentModeStatusText, renderPreviewLines } from '../../panel/agentModeModel.js';
 
 test('Agent Mode session gate resets OFF on view recreation/disposal', () => {
   const gate = new AgentModeSessionGate();
@@ -64,15 +65,15 @@ test('restart-restored Agent runs are view/reconcile only: no hidden resume or a
 });
 
 test('recovery controls offer fresh proposals only and never resume', () => {
-  const view = {
+  const view: AgentModeCommandRunView = {
     runId: 'agentcmd_1',
     requestId: 'agentcorr_1',
     state: 'EXPIRED',
     recovery: { classification: 'REPROPOSAL_REQUIRED', eligible: true, reason: 'restart lost authorization' },
     createdAt: 1,
     updatedAt: 2,
-  } as const;
-  const status = {
+  };
+  const status: AgentModeRunRecoveryStatus = {
     runId: view.runId,
     sourceState: 'EXPIRED',
     approvalLifecycle: 'LOST_ON_RESTART',
@@ -83,9 +84,54 @@ test('recovery controls offer fresh proposals only and never resume', () => {
     workspaceMatches: true,
     recommendedAction: 'Create a fresh proposal.',
     lineage: {},
-  } as const;
+  };
   const controls = agentModeRecoveryControlState(view, status);
   assert.equal(controls.freshProposal, true);
   assert.equal(controls.resume, false);
   assert.match(agentModeRecoveryStatusText(status), /Fresh proposal required/);
+});
+
+test('history renderers present evidence and governance without resume authority', () => {
+  const summary: AgentModeRunHistorySummary = {
+    runId: 'agentcmd_history',
+    requestId: 'agentcorr_history',
+    state: 'FAILED',
+    recipe: 'git.status',
+    requestedAt: 1_800_000_000_000,
+    updatedAt: 1_800_000_001_000,
+    terminalAt: 1_800_000_001_000,
+    approvalLifecycle: 'INVALIDATED',
+    recoveryClass: 'REPROPOSAL_ALLOWED',
+    recoveryEligible: true,
+    recoveryReason: 'INTERRUPTED_BY_RESTART',
+    snapshotId: 'snapshot-history',
+    mutationClassification: 'read-only',
+    networkPolicy: 'not-required',
+    eventCount: 6,
+    integrity: 'TRUSTED',
+    integrityIssues: [],
+  };
+  const detail: AgentModeRunHistoryDetail = {
+    summary,
+    timeline: [{ eventId: 'event-1', seq: 1, at: summary.requestedAt, type: 'run.created', nextState: 'AWAITING_APPROVAL', source: 'API' }],
+    lineage: {},
+    recovery: {
+      runId: summary.runId,
+      sourceState: 'FAILED',
+      approvalLifecycle: 'INVALIDATED',
+      recoveryClass: 'REPROPOSAL_ALLOWED',
+      eligible: true,
+      explanation: 'A fresh proposal may be created.',
+      currentRecipeAvailable: true,
+      workspaceMatches: true,
+      recommendedAction: 'Create a fresh proposal.',
+      lineage: {},
+    },
+    retention: { eligibleForDeletion: false, reason: 'Terminal run is inside the configured retention window.' },
+  };
+  const rendered = [...agentModeHistorySummaryLines(summary), ...agentModeHistoryDetailLines(detail)].join('\n');
+  assert.match(rendered, /agentcmd_history/);
+  assert.match(rendered, /Integrity: TRUSTED/);
+  assert.match(rendered, /Create a fresh proposal/);
+  assert.doesNotMatch(rendered, /\bresume\b|reuse approval|continue execution/i);
 });

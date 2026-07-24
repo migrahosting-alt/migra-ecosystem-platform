@@ -151,6 +151,64 @@ before(async () => {
       res.end(JSON.stringify({ ok: true, status: 'ok', tool: body.tool, result: { branch: 'main' }, requestId }));
       return;
     }
+    if (url === '/api/ai/agent-mode/bootstrap') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        activationCapability: 'agentcap_client_history_123456789012345678901234',
+        activationId: (await readBody(req)).activationId,
+        serverInstanceId: 'brain_client_history',
+        canonicalWorkspace: '/workspace',
+        allowedRecipes: ['git.status', 'git.diff'],
+        issuedAt: Date.now(),
+        expiresAt: Date.now() + 60_000,
+      }));
+      return;
+    }
+    if (url.startsWith('/api/ai/agent-mode/history/runs')) {
+      assert.equal(req.headers['x-migrapilot-agent-capability'], 'agentcap_client_history_123456789012345678901234');
+      assert.equal(req.headers['x-migrapilot-workspace-root'], '/workspace');
+      const summary = {
+        runId: 'agentcmd_history',
+        requestId: 'agentcorr_history',
+        state: 'COMPLETED',
+        recipe: 'git.status',
+        requestedAt: 1,
+        updatedAt: 2,
+        terminalAt: 2,
+        approvalLifecycle: 'CONSUMED',
+        recoveryClass: 'TERMINAL_NO_RECOVERY',
+        recoveryEligible: false,
+        snapshotId: 'snapshot',
+        mutationClassification: 'read-only',
+        networkPolicy: 'not-required',
+        eventCount: 3,
+        integrity: 'TRUSTED',
+        integrityIssues: [],
+      };
+      const detail = {
+        summary,
+        timeline: [{ eventId: 'event-1', seq: 1, at: 1, type: 'run.created', nextState: 'AWAITING_APPROVAL', source: 'API' }],
+        lineage: {},
+        retention: { eligibleForDeletion: false, reason: 'inside retention' },
+      };
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      if (url.endsWith('/export')) {
+        res.end(JSON.stringify({
+          runId: summary.runId,
+          generatedAt: 3,
+          mediaType: 'application/vnd.migrapilot.agent-run-evidence+json;v=1',
+          manifest: { digest: 'a'.repeat(64), algorithm: 'sha256', canonicalBytes: 123, schemaVersion: 1, redaction: 'sanitized-history-only' },
+          body: detail,
+        }));
+        return;
+      }
+      if (url === '/api/ai/agent-mode/history/runs' || url.startsWith('/api/ai/agent-mode/history/runs?')) {
+        res.end(JSON.stringify({ runs: [summary], query: { sort: 'updatedAt.desc', limit: 1 }, retention: { terminalRetentionMs: 1, retentionBatchSize: 1, tombstoneCount: 0, governance: 'READ_ONLY' } }));
+        return;
+      }
+      res.end(JSON.stringify(detail));
+      return;
+    }
     // Any other path → 404 (engine facade absent / incompatible).
     res.writeHead(404).end('not found');
   });
@@ -263,6 +321,19 @@ test('unexpected tool failure stays SERVER_ERROR (TOOL_FAILED is not a validatio
     () => client().executeTool({ tool: 'explode.tool', input: {} }),
     (e: unknown) => e instanceof PilotError && e.code === 'SERVER_ERROR',
   );
+});
+
+test('Agent Mode history client requires server activation and parses list/detail/export contracts', async () => {
+  const c = client();
+  await c.bootstrapAgentMode('bootstrap-secret-value-that-is-long-enough', '/workspace', 'pairing');
+  const list = await c.listAgentModeRunHistory({ limit: 1 });
+  assert.equal(list.runs[0]?.runId, 'agentcmd_history');
+  assert.equal(list.retention.governance, 'READ_ONLY');
+  const detail = await c.getAgentModeRunHistory('agentcmd_history');
+  assert.equal(detail.timeline[0]?.type, 'run.created');
+  const exported = await c.exportAgentModeRunEvidence('agentcmd_history');
+  assert.equal(exported.manifest.redaction, 'sanitized-history-only');
+  assert.equal(exported.manifest.digest, 'a'.repeat(64));
 });
 
 test('a long-but-active stream completes: the timeout is inactivity-based, not total-duration', async () => {
