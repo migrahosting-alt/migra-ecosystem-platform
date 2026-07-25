@@ -36,6 +36,9 @@ export const AgentModeRecoveryClassSchema = z.enum([
   'REPROPOSAL_ALLOWED',
   'REPROPOSAL_REQUIRED',
   'TERMINAL_NO_RECOVERY',
+  // The recovery opportunity was already consumed by a linked successor. The
+  // source history stays coherent and trusted; only further reproposal is closed.
+  'SUCCESSOR_CREATED',
   'WORKSPACE_MISMATCH',
   'POLICY_CHANGED',
   'SNAPSHOT_CHANGED',

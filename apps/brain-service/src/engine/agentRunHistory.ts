@@ -159,6 +159,13 @@ export class AgentRunHistoryService {
 
   private summary(run: DurableAgentRun, context: AgentModeRequestContext, events = this.journal.events(run.runId)): AgentModeRunHistorySummary {
     const integrity = historyIntegrity(run, events, context, this.now());
+    // Recovery classification is DERIVED from the authoritative contract, not
+    // read back from the stored columns. Rows written before the policy was
+    // corrected — including any still carrying a stale recovery_eligible=1 —
+    // therefore normalize on read without a destructive migration.
+    const derived = AGENT_TERMINAL_STATES.has(run.state as never)
+      ? validateRecoverySourceProvenance({ run, events, workspaceIdentity: context.workspaceIdentity, allowedRecipes: context.allowedRecipes, now: this.now() })
+      : undefined;
     return {
       runId: run.runId,
       requestId: run.correlationId,
@@ -168,8 +175,8 @@ export class AgentRunHistoryService {
       updatedAt: run.updatedAt,
       terminalAt: run.terminalAt,
       approvalLifecycle: run.approvalLifecycle,
-      recoveryClass: run.recoveryClass,
-      recoveryEligible: run.recoveryEligible,
+      recoveryClass: derived ? derived.recoveryClass : run.recoveryClass,
+      recoveryEligible: derived ? derived.eligible : run.recoveryEligible,
       recoveryReason: run.recoveryReason,
       recoverySourceRunId: run.recoverySourceRunId,
       successorRunId: run.successorRunId,
@@ -204,20 +211,29 @@ export class AgentRunHistoryService {
   }
 }
 
+/** Integrity describes whether the durable record is coherent — nothing else.
+ *
+ * It is deliberately independent of recovery eligibility: a run that policy will
+ * not let you recover from (completed, superseded by a successor) has perfectly
+ * intact history and must read TRUSTED. Stored eligibility is never compared
+ * against policy here, because a stale stored flag is a normalization concern,
+ * not evidence of tampering. */
 function historyIntegrity(run: DurableAgentRun, events: DurableAgentRunEvent[], context: AgentModeRequestContext, now: number): { level: 'TRUSTED' | 'WARNING' | 'UNTRUSTED'; issues: string[] } {
   const issues: string[] = [];
-  if (run.workspaceIdentity !== context.workspaceIdentity) issues.push('workspace mismatch');
+  const untrusted: string[] = [];
+  if (run.workspaceIdentity !== context.workspaceIdentity) untrusted.push('workspace mismatch');
   if (!context.allowedRecipes.includes(run.recipeId as never)) issues.push('recipe unavailable');
-  if (events.length !== run.auditSeq) issues.push('event count does not match audit sequence');
+  if (events.length !== run.auditSeq) untrusted.push('event count does not match audit sequence');
   for (let index = 0; index < events.length; index += 1) {
-    if (events[index]?.seq !== index + 1) issues.push('event sequence gap');
+    if (events[index]?.seq !== index + 1) untrusted.push('event sequence gap');
   }
   if (AGENT_TERMINAL_STATES.has(run.state as never)) {
     const provenance = validateRecoverySourceProvenance({ run, events, workspaceIdentity: context.workspaceIdentity, allowedRecipes: context.allowedRecipes, now });
-    if (!provenance.trusted && run.recoveryEligible) issues.push('stored recovery eligibility is not provenance-trusted');
-    if (provenance.code === 'SOURCE_TERMINAL_REASON_INVALID' || provenance.code === 'SOURCE_RECOVERY_CONTRACT_MISSING') issues.push('unknown terminal recovery reason');
+    // provenance.trusted is false only for real incoherence; policy and lineage
+    // outcomes report trusted with eligible=false.
+    if (!provenance.trusted) untrusted.push(`durable history failed provenance validation (${provenance.code})`);
   }
-  return { level: issues.length === 0 ? 'TRUSTED' : issues.some((issue) => issue.includes('mismatch') || issue.includes('unknown') || issue.includes('not provenance')) ? 'UNTRUSTED' : 'WARNING', issues };
+  return { level: untrusted.length > 0 ? 'UNTRUSTED' : issues.length > 0 ? 'WARNING' : 'TRUSTED', issues: [...untrusted, ...issues] };
 }
 
 function historyEvent(event: DurableAgentRunEvent): AgentModeRunHistoryEvent {

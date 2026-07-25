@@ -106,6 +106,7 @@ function recoveryClassLabel(value: AgentModeRecoveryClass): string {
     case 'RETENTION_REMOVED': return 'Retention removed';
     case 'SCHEMA_INCOMPATIBLE': return 'Schema incompatible';
     case 'TERMINAL_NO_RECOVERY': return 'No recovery';
+    case 'SUCCESSOR_CREATED': return 'Successor proposal created';
     case 'NONE': return 'No recovery action';
   }
 }

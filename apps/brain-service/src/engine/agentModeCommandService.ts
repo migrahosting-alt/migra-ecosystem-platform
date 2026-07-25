@@ -663,7 +663,9 @@ export class AgentModeCommandService {
     const currentRecipeAvailable = context.allowedRecipes.includes(run.recipeId as AgentModeRecipeId);
     const provenance = validateRecoverySourceProvenance({ run, events, workspaceIdentity: context.workspaceIdentity, allowedRecipes: context.allowedRecipes, now: this.now() });
     const classification = provenance.recoveryClass;
-    const eligible = provenance.trusted;
+    // Eligibility is a policy verdict, distinct from whether the history is
+    // coherent. A trusted run can still be ineligible.
+    const eligible = provenance.eligible;
     return {
       runId: run.runId,
       sourceState: run.state as AgentModeState,
@@ -829,7 +831,7 @@ function recoveryRecommendation(classification: AgentModeRecoveryClass, run: Dur
   if (code === 'MISSING_REQUIRED_EVENT' || code === 'EVENT_SEQUENCE_GAP') return 'Investigate the incomplete durable run history before creating another proposal.';
   if (code === 'ILLEGAL_STATE_TRANSITION' || code === 'TERMINAL_STATE_MISMATCH' || code === 'AUDIT_SEQUENCE_MISMATCH' || code === 'APPROVAL_LIFECYCLE_MISMATCH' || code === 'SOURCE_INTEGRITY_FAILED') return 'Investigate the inconsistent durable run history before creating another proposal.';
   if (run.successorRunId) return 'Review the active successor proposal.';
-  if (classification === 'TERMINAL_NO_RECOVERY') return 'No recovery action is available for this run.';
+  if (code === 'SOURCE_TERMINAL_NO_RECOVERY' || classification === 'TERMINAL_NO_RECOVERY') return 'No recovery action is available for this run.';
   if (classification === 'NONE') return 'Wait for the active run to reach a terminal state.';
   return 'Resolve the ineligible recovery condition before creating a fresh proposal.';
 }

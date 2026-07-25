@@ -939,7 +939,11 @@ export class SqliteDurableStore implements DurableStore {
         allowedRecipes: input.provenance.allowedRecipes,
         now: input.at,
       });
-      if (!provenance.trusted || provenance.digest !== input.provenance.eventDigest || provenance.highestSeq !== input.provenance.highestSeq) {
+      // Both flags are required: `trusted` proves the history is coherent and
+      // `eligible` proves policy permits recovery. Checking only `trusted` would
+      // let intentionally non-recoverable outcomes (completed, superseded) be
+      // reproposed.
+      if (!provenance.trusted || !provenance.eligible || provenance.digest !== input.provenance.eventDigest || provenance.highestSeq !== input.provenance.highestSeq) {
         outcome = { ok: false, code: 'SOURCE_PROVENANCE_FAILED' };
         return;
       }
@@ -980,9 +984,13 @@ export class SqliteDurableStore implements DurableStore {
         schemaVersion: 1,
       }, 'strict');
       this.failAgentRunReproposalPhase('source lineage update');
+      // The recovery opportunity is consumed here, so stored eligibility is
+      // cleared in the same CAS that records the linkage. Without this the row
+      // would keep asserting it is recoverable after it no longer is.
       const linked = this.db.prepare(
         `UPDATE agent_runs SET successor_run_id=?, reproposal_at=?, recovery_attempt_count=recovery_attempt_count+1,
-          last_recovery_request_id=?, recovery_terminal_reason=?, audit_seq=audit_seq+2, version=version+1, updated_at=?
+          last_recovery_request_id=?, recovery_terminal_reason=?, recovery_eligible=0, recovery_class='SUCCESSOR_CREATED',
+          audit_seq=audit_seq+2, version=version+1, updated_at=?
          WHERE run_id=? AND version=? AND state IN ('COMPLETED','REJECTED','EXPIRED','STALE','FAILED','CANCELLED')
          AND successor_run_id IS NULL
          AND (reconciliation_owner IS NULL OR reconciliation_lease_until IS NULL OR reconciliation_lease_until < ?)`,

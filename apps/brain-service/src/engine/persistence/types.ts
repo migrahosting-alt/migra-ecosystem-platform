@@ -246,6 +246,8 @@ export type DurableAgentRecoveryClass =
   | 'REPROPOSAL_ALLOWED'
   | 'REPROPOSAL_REQUIRED'
   | 'TERMINAL_NO_RECOVERY'
+  // Recovery opportunity consumed by a linked successor; history stays trusted.
+  | 'SUCCESSOR_CREATED'
   | 'WORKSPACE_MISMATCH'
   | 'POLICY_CHANGED'
   | 'SNAPSHOT_CHANGED'
