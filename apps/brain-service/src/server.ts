@@ -41,6 +41,7 @@ import { AgentRegistry } from './engine/agentRegistry.js';
 import { registerAgentModeCommandRoutes } from './engine/agentModeCommandRoutes.js';
 import { AgentActivationAuthority } from './engine/agentActivation.js';
 import { buildAgentModeCommandService } from './engine/agentModeCommandService.js';
+import { scavengeStaleAgentSnapshots } from './engine/agentRecipe.js';
 import { AgentService } from './engine/agentRuntime.js';
 import { AgentRunStore } from './engine/agentRunStore.js';
 import { buildPilotRuntimeClient } from './engine/pilot/pilotApiRuntimeClient.js';
@@ -326,6 +327,11 @@ async function main(): Promise<void> {
   registerAgentModeCommandRoutes(app, toolDeps, agentActivation, agentModeCommands);
   const agentModeReconciliation = await agentModeCommands.reconcileOnStartup();
   if (agentModeReconciliation.scanned > 0) app.log.info({ agentModeReconciliation }, 'Agent Mode durable run reconciliation completed');
+  // Private snapshots are released with their proposal, but a process killed
+  // mid-preparation cannot run its own cleanup. Reclaim only stale, owner-owned
+  // Agent snapshot directories left by such a death.
+  const agentSnapshotScavenge = await scavengeStaleAgentSnapshots();
+  if (agentSnapshotScavenge.removed > 0) app.log.warn({ agentSnapshotScavenge }, 'Reclaimed stale Agent Mode snapshot directories');
   app.addHook('onClose', async () => { await agentModeCommands.shutdown(); agentActivation.shutdown(); });
   // Connect configured MCP servers and register their tools (best-effort; the
   // brain runs fine with none). Fire-and-forget so a slow server never delays

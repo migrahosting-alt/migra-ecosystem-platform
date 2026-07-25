@@ -604,9 +604,24 @@ test('rejection, expiry, spawn failure, cancellation, and timeout have exact aud
 
 test('real snapshot binds Git digest/material and hardened helper-disabling argv', async () => {
   const workspace = root();
-  mkdirSync(path.join(workspace, '.git'));
-  writeFileSync(path.join(workspace, '.git', 'config'), '[core]\nrepositoryformatversion=0\n');
+  // A real repository is required: the snapshot is built from Git-governed
+  // material, so tracked content must actually be tracked.
+  const gitEnv = {
+    PATH: process.env.PATH ?? '/usr/bin:/bin',
+    HOME: '/nonexistent',
+    GIT_CONFIG_NOSYSTEM: '1',
+    GIT_CONFIG_GLOBAL: '/dev/null',
+    GIT_AUTHOR_NAME: 'Snapshot Test',
+    GIT_AUTHOR_EMAIL: 'snapshot@test.invalid',
+    GIT_COMMITTER_NAME: 'Snapshot Test',
+    GIT_COMMITTER_EMAIL: 'snapshot@test.invalid',
+  };
+  const { execFileSync } = await import('node:child_process');
+  const runGit = (...args: string[]): void => { execFileSync('git', args, { cwd: workspace, env: gitEnv, stdio: ['ignore', 'pipe', 'pipe'] }); };
+  runGit('init', '--quiet', '-b', 'main');
   writeFileSync(path.join(workspace, 'README.md'), 'hello');
+  runGit('add', '-A');
+  runGit('commit', '--quiet', '-m', 'initial');
   const info = await import('node:fs/promises').then(({ stat }) => stat(workspace));
   const workspaceIdentity = `${info.dev}:${info.ino}:${info.birthtimeMs}:${info.ctimeMs}`;
   const resolver = new AgentRecipeResolver();
