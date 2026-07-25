@@ -140,6 +140,10 @@ export function shellHtml(options: ShellHtmlOptions): string {
         <div id="audit-trail"></div>
       </section>
 
+      <section class="tabpanel" id="panel-workspace" role="tabpanel" aria-labelledby="tabbtn-workspace" tabindex="0">
+        <div id="workspace-tab"></div>
+      </section>
+
     </main>
 
     <aside id="context" aria-label="Workspace and run context">

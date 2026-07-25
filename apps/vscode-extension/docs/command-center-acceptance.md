@@ -28,13 +28,13 @@ Working tree: uncommitted
 |---|---|
 | Canonical surface | Command Center editor panel (`migrapilot.studio`) |
 | Entry command | `migrapilot.openStudio` — *MigraPilot: Open Command Center* |
-| Also opened by | `migrapilot.openChat`, `migrapilot.openAgentMode` (re-pointed to the Agent Workspace tab) |
+| Also opened by | `migrapilot.openChat`, `migrapilot.openAgentMode` (Agent Workspace tab), `migrapilot.openWorkspacePanel` (Workspace tab) |
 | Sidebar surface | `migrapilot.sidebar` — a compact **navigation/status launcher**, not a second application surface |
-| Tabs | MigraPilot Chat · Agent Workspace · Run Diff · Audit Trail |
+| Tabs | MigraPilot Chat · Agent Workspace · Run Diff · Audit Trail · Workspace |
 | Regions | left navigation (sidebar) · main · right context panel; degrades to drawers at medium/narrow widths |
 
-There is exactly **one** chat composer, **one** Agent Mode approval path and
-**one** run-history surface in the product.
+There is exactly **one** chat composer, **one** Agent Mode approval path,
+**one** run-history surface and **one** workspace lifecycle surface in the product.
 
 ### Sidebar launcher — approved visible action set
 
@@ -66,14 +66,17 @@ unknown" are different facts.
 | View id | Name | Default visible | Gate |
 |---|---|---|---|
 | `migrapilot.sidebar` | MigraPilot | ✅ | — |
-| `migrapilot.workspace` | MigraAI Workspace | ✅ | — (operational panel; no Command Center equivalent — consolidation deferred to a later scoped slice) |
 | `migrapilot.chatView` | Chat (Classic — Developer Only) | ❌ | `config.migrapilot.enableClassicViews` |
 | `migrapilot.agentMode` | Agent Mode (Classic — Developer Only) | ❌ | `config.migrapilot.enableClassicViews` |
+| `migrapilot.workspace` | MigraAI Workspace (Classic — Developer Only) | ❌ | `config.migrapilot.enableClassicViews` |
+
+The compact launcher is the **only** default-visible view.
 
 Restoration is possible **only** through the explicit developer setting
 `migrapilot.enableClassicViews` (boolean, default `false`). The two developer
-commands `migrapilot.dev.openClassicChat` / `migrapilot.dev.openClassicAgentMode`
-are hidden from the Command Palette unless that setting is on
+commands `migrapilot.dev.openClassicChat`, `migrapilot.dev.openClassicAgentMode`
+and `migrapilot.dev.openClassicWorkspace` are hidden from the Command Palette
+unless that setting is on
 (`menus.commandPalette` `when` clauses) and refuse — non-blocking — while it is
 off. Because the view *contributions* are gated by the same context key, a
 non-contributed view cannot be focused: the setting is the single real gate.
@@ -91,10 +94,10 @@ have migrated. No legacy code was deleted.
 |---|---|
 | Root typecheck · build | clean |
 | Root test (brain-service + extension) | 662 pass |
-| Extension unit | 418 pass |
+| Extension unit | 448 pass |
 | Ops validation | 11 pass |
-| Integration — real VS Code, dev host | 61 pass |
-| **Installed acceptance — real VS Code, packaged VSIX** | **61 pass** |
+| Integration — real VS Code, dev host | 63 pass |
+| **Installed acceptance — real VS Code, packaged VSIX** | **63 pass** |
 | VSIX package · inspect | 93 files · 26 commands · `ok: true` |
 | Real `--install-extension` | installed; on-disk manifest re-read and confirmed |
 
@@ -104,7 +107,7 @@ packaged manifest and reports:
 ```json
 {
   "canonicalInterface": "migrapilot.openStudio",
-  "defaultVisibleViews": ["migrapilot.sidebar", "migrapilot.workspace"],
+  "defaultVisibleViews": ["migrapilot.sidebar"],
   "classicViewsGatedBy": "config.migrapilot.enableClassicViews",
   "classicViewsDefaultEnabled": false,
   "duplicateChatSurfaces": 0,
@@ -160,9 +163,87 @@ itself was not photographed. Layout, palette, ARIA roles, keyboard behaviour,
 horizontal-overflow and sanitation sweeps were verified against the real shipped
 assets across 64 page/width combinations.
 
-## Deferred
+## MigraAI Workspace consolidation (2026-07-25)
 
-- Consolidating **MigraAI Workspace** into the Command Center — later scoped slice.
+The standalone `migrapilot.workspace` panel was migrated into the Command Center's
+**Workspace** tab and then retired to the same developer gate.
+
+Migrated in full — six sections (Workspace · Semantic Index · Memory · Agents ·
+Models · Engine) and eight actions (Open · Sync · Rebuild · **Approve Index** ·
+Change Memory Mode · Diagnostics · Refresh · **Delete**). The tab re-dresses the
+ratified `workspaceViewModel` mapper rather than re-implementing it, and the
+lifecycle choreography lives in a shared `workspaceActions.ts`, so both surfaces
+ran identical flows while they coexisted.
+
+Two boundaries preserved verbatim:
+
+- **Index-version binding** — approval binds to the version observed at click
+  time, read from host-held state; the webview never sees it. A stale version is
+  refused by the engine (`INVALID_STATE`) and surfaced as "review the new
+  version". Verified live in the installed-acceptance gate.
+- **Scoped delete** — still confirmed through `deleteScopeFor()`, which states
+  what is removed AND what is kept.
+
+Index promotion renders as its own governed card, distinct from Agent Mode's
+command approval: they are different approval boundaries.
+
+### Branch semantics
+
+The engine's `gitBranch` is the branch recorded at LAST SYNC — a property of the
+index, not of the checkout. Labelling it plain "Branch" beside the live branch in
+Workspace Context made the product look inconsistent when they legitimately
+differ. The tab now shows both facts, neither overwriting the other:
+
+| Row | Source |
+|---|---|
+| Indexed branch | engine `WorkspaceView.workspace.gitBranch` (branch at last sync) |
+| Current branch | live read-only Git inspection |
+| Index freshness | shown only when they diverge — "sync to reindex the current one" |
+
+### Defects found and fixed during this slice
+
+1. **`workspaceController` was `undefined` at shell construction** — `extension.ts`
+   built the shell before assigning it, so every workspace read threw and was
+   reported as "engine unreachable". The Workspace tab could never have worked in
+   the installed extension. Fixed with a lazy accessor; pinned by a unit test.
+2. **`workspaceError` latched** — the tab checked the error before the loaded
+   model and no success path cleared it, so one transient failure pinned the tab
+   to "unreachable" while the engine was healthy.
+3. **Tab reveal did not load** — `showTab` now drives the per-tab read on every
+   path, not only on a strip click.
+4. **The renderer was never called** — the state handler omitted
+   `renderWorkspaceTab`, so the tab painted empty. A guard test now asserts every
+   region has both a renderer and a call.
+
+## Test process ownership (2026-07-25)
+
+`killStaleBrains` swept every brain-service on its port list — which includes
+**3988, the developer's default `migrapilot.brainUrl`** — and so destroyed brains
+the suite never launched.
+
+Identity is no longer sufficient: a process must be provably **test-owned** before
+it can be killed.
+
+- Every brain a run starts carries `MIGRAPILOT_TEST_BRAIN_OWNER`, stamped into
+  `process.env` before the first sweep and forwarded via `extensionTestsEnv`, so
+  brains spawned by the *extension under test* (which inherits the environment)
+  are attributable too.
+- Ownership is proved from `/proc/<pid>/environ`, captured at exec, so it survives
+  reparenting — unlike a PID file, which can go stale and be reused.
+- **Fail closed**: unreadable or unprovable ownership leaves the process running.
+- The sweep reports what it `killed` and what it `spared`, and logs each sparing,
+  because silently sparing looks identical to silently killing.
+- The lifecycle host test moved to its own port (**3992**). It previously asserted
+  "brain not running before auto-start" on 3988 and only passed because the
+  harness had destroyed whatever was there — a test asserting that shutdown stops
+  *only the owned process* was buying its precondition by killing an unowned one.
+
+Regression coverage spawns **real processes**: a decoy brain without the marker
+and one with it. The unmarked brain must survive the sweep; the marked one must be
+swept. Confirmed end-to-end against a live developer brain (pid 1053101), which
+survived every suite run with `[staleBrains] spared pid 1053101 on :3988`.
+
+## Deferred
 - Seven commands that had a pre-redesign sidebar row and are not in the approved
   nine (`explainSelection`, `fixDiagnostics`, `generateTests`, `generateCommit`,
   `reviewApprovals`, `showDiagnostics`, `showBackendDiagnostics`) remain reachable

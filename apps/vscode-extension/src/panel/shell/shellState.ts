@@ -43,6 +43,8 @@ import {
 import { type ProgressStage, type ProposalCard, toProgressStages, toProposalCard } from './proposalCardModel.js';
 import { type RunDetailModel, type RunHistoryListModel, toRunDetail, toRunHistoryList } from './runHistoryModel.js';
 import type { DataState, Panel, Row } from './types.js';
+import { type WorkspaceTabModel, emptyWorkspaceTab, loadingWorkspaceTab, toWorkspaceTab } from './workspaceTabModel.js';
+import type { WorkspacePanelModel } from '../workspaceViewModel.js';
 
 /** Working-tree change list for the Run Diff tab. Produced from the same
  * read-only git allow-list used by commit generation. */
@@ -101,6 +103,8 @@ export interface ShellState {
   history: RunHistoryListModel;
   detail: RunDetailModel;
   diff: RunDiffModel;
+  /** MigraAI Workspace — the consolidated Workspace tab. */
+  workspace: WorkspaceTabModel;
   status: StatusSummaryModel;
   composer: { connected: boolean; voiceSupported: boolean };
 }
@@ -134,6 +138,13 @@ export interface ShellStateInput {
   workingChangesError?: string;
   contextFiles?: readonly ContextFileEntry[];
   activity?: readonly ActivityEntry[];
+  /** Authoritative MigraAI workspace model, or undefined when none is open. */
+  workspaceModel?: WorkspacePanelModel;
+  /** Set while the host has not yet read workspace state. */
+  workspaceLoading?: boolean;
+  workspaceError?: string;
+  /** Why the tab is empty while the engine IS reachable. */
+  workspaceEmptyReason?: string;
   voiceSupported: boolean;
 }
 
@@ -199,6 +210,7 @@ export function buildShellState(input: ShellStateInput): ShellState {
     history: toRunHistoryList(input.history, now, input.historyError),
     detail: toRunDetail(input.detail, now),
     diff: buildDiffModel(input),
+    workspace: buildWorkspaceTab(input),
     status: toStatusSummary({
       ...(git?.branch ? { branch: git.branch } : {}),
       connected,
@@ -299,4 +311,25 @@ function buildDiffModel(input: ShellStateInput): RunDiffModel {
     changes: [...input.workingChanges],
     expectedEffects,
   };
+}
+
+/**
+ * The Workspace tab resolves its own state so an engine outage degrades one tab
+ * rather than the shell: unreadable is `disconnected`, not "no workspace".
+ */
+function buildWorkspaceTab(input: ShellStateInput): WorkspaceTabModel {
+  // An authoritative model in hand WINS over a previous read failure: a transient
+  // error during activation must never latch the tab into "unreachable" while the
+  // engine is healthy and the data is right there.
+  //
+  // The live Git branch is passed in so the tab can distinguish the branch the
+  // INDEX was built from (engine state) from the branch checked out RIGHT NOW.
+  if (input.workspaceModel) {
+    return toWorkspaceTab(input.workspaceModel, {
+      ...(input.git?.branch ? { currentBranch: input.git.branch } : {}),
+    });
+  }
+  if (input.workspaceError) return emptyWorkspaceTab(input.workspaceError, true);
+  if (input.workspaceLoading) return loadingWorkspaceTab();
+  return emptyWorkspaceTab(input.workspaceEmptyReason);
 }

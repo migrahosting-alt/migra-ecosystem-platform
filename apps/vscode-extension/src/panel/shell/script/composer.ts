@@ -388,6 +388,7 @@ window.addEventListener('message', (event) => {
       renderAgentWorkspace(SHELL.agent);
       renderRunDiff(SHELL.diff);
       renderAuditTrail(SHELL.history, SHELL.detail);
+      renderWorkspaceTab(SHELL.workspace);
       renderStatus(SHELL.status);
       applyComposerState(SHELL.composer);
       if (SHELL.tab && SHELL.tab !== activeTab) selectTab(SHELL.tab, { silent: true });

@@ -319,6 +319,9 @@ export const SHELL_TABS = [
   { id: 'agent', label: 'Agent Workspace', icon: 'shield' },
   { id: 'diff', label: 'Run Diff', icon: 'diff' },
   { id: 'audit', label: 'Audit Trail', icon: 'checklist' },
+  // MigraAI Workspace consolidation: the semantic index, memory, agents, models
+  // and engine — previously only reachable from the standalone sidebar view.
+  { id: 'workspace', label: 'Workspace', icon: 'database' },
 ] as const;
 
 export type ShellTabId = (typeof SHELL_TABS)[number]['id'];

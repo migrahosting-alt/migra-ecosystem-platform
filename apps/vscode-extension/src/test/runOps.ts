@@ -3,7 +3,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { runTests } from '@vscode/test-electron';
-import { killStaleBrains } from './support/staleBrains.js';
+import { TEST_BRAIN_OWNER_ENV, killStaleBrains, markTestBrainOwnership } from './support/staleBrains.js';
 
 // Dedicated launcher for the P6 operational-validation matrix. Reuses the same
 // harness pattern as runTest.ts but runs ONLY the ops suite (in isolation) and
@@ -41,6 +41,7 @@ function cleanElectronEnv(): void {
 
 async function main(): Promise<void> {
   cleanElectronEnv();
+  const brainOwnerToken = markTestBrainOwnership();
   killStaleBrains();
   const extensionDevelopmentPath = path.resolve(__dirname, '../..');
   const extensionTestsPath = path.resolve(__dirname, './suite/opsIndex.js');
@@ -64,6 +65,7 @@ async function main(): Promise<void> {
         `--user-data-dir=${path.join(workspace, '.vscode-user')}`,
       ],
       extensionTestsEnv: {
+        [TEST_BRAIN_OWNER_ENV]: brainOwnerToken,
         MIGRAPILOT_E2E_WORKSPACE: workspace,
         MIGRAPILOT_EVIDENCE_DIR: evidenceDir,
       },

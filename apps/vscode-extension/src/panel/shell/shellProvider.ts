@@ -43,6 +43,20 @@ import { toEvidenceExportSummary } from './runHistoryModel.js';
 import { shellHtml } from './shellHtml.js';
 import { shellScript } from './shellScript.js';
 import { buildShellState, type ShellState, type ShellStateInput, type WorkingChange } from './shellState.js';
+import type { WorkspaceController } from '../workspaceController.js';
+import type { WorkspacePanelModel } from '../workspaceViewModel.js';
+import {
+  approveWorkspaceIndex,
+  changeWorkspaceMemory,
+  deleteWorkspace,
+  openWorkspace,
+  rebuildWorkspace,
+  refreshWorkspace,
+  showWorkspaceDiagnostics,
+  syncWorkspace,
+  type WorkspaceActionDeps,
+} from './workspaceActions.js';
+import { isWorkspaceIntent, type WorkspaceIntent } from './workspaceTabModel.js';
 import { findWelcomeAction } from './welcomeModel.js';
 import type { Row } from './types.js';
 
@@ -117,6 +131,14 @@ export interface ShellDeps {
   output: vscode.OutputChannel;
   /** Reports the Agent Mode gate + state so the status bar stays accurate. */
   onAgentMode: (enabled: boolean, state: AgentModeCommandRunView['state'] | 'IDLE') => void;
+  /** MigraAI Workspace controller — the SAME controller the standalone panel
+   * uses, so the consolidated tab shares its authoritative semantics.
+   *
+   * A LAZY accessor, not the instance: the shell is constructed before the
+   * controller is assigned during activation, so capturing the value directly
+   * captures `undefined` and every workspace read fails with a confusing
+   * "engine unreachable". Resolving on use makes construction order irrelevant. */
+  workspaceController: () => WorkspaceController;
   /** Reveal the Studio editor panel (used when the sidebar asks for a tab). */
   revealStudio?: (tab: ShellTabId) => Promise<void>;
   extensionUri: vscode.Uri;
@@ -167,6 +189,15 @@ export class MigraPilotShell {
   private modelsError?: string;
   private attachmentNames: string[] = [];
   private refreshing = false;
+  /** Authoritative MigraAI workspace model. Holds `workspaceId`/`indexVersion`,
+   * which are NEVER posted to a webview — the host binds approvals itself. */
+  private workspaceModel?: WorkspacePanelModel;
+  private workspaceError?: string;
+  /** Why the tab is empty when the engine IS reachable. */
+  private workspaceEmptyReason?: string;
+  private workspaceLoading = false;
+  /** Serializes workspace lifecycle calls (same rationale as `agentBusy`). */
+  private workspaceBusy = false;
   /** Serializes Agent Mode lifecycle calls. A double-click on Approve must not
    * produce two decision requests: the engine consumes the approval exactly
    * once, so the second would fail and only confuse the operator. */
@@ -233,6 +264,18 @@ export class MigraPilotShell {
   showTab(tab: ShellTabId): void {
     this.tab = tab;
     this.post({ type: 'tab', tab });
+    // Revealing a tab must load its data on EVERY path. The webview only reports
+    // `tabChanged` when the operator clicks the strip, so a tab revealed by a
+    // command (`migrapilot.openStudio workspace`) would otherwise paint an
+    // un-loaded empty state that looks like "nothing here".
+    void this.loadForTab(tab);
+  }
+
+  /** The on-demand read each tab needs. Chat/agent render from state already. */
+  private async loadForTab(tab: ShellTabId): Promise<void> {
+    if (tab === 'audit') return this.loadHistory();
+    if (tab === 'diff') return this.loadWorkingChanges();
+    if (tab === 'workspace') return this.loadWorkspace();
   }
 
   private render(webview: vscode.Webview, compact: boolean): string {
@@ -305,6 +348,7 @@ export class MigraPilotShell {
           // Opening the evidence surface reads history on demand.
           if (message.tab === 'audit') await this.loadHistory();
           if (message.tab === 'diff') await this.loadWorkingChanges();
+          if (message.tab === 'workspace') await this.loadWorkspace();
         }
         return;
       case 'openTab':
@@ -315,6 +359,7 @@ export class MigraPilotShell {
           this.showTab(message.tab);
           if (message.tab === 'audit') await this.loadHistory();
           if (message.tab === 'diff') await this.loadWorkingChanges();
+          if (message.tab === 'workspace') await this.loadWorkspace();
         }
         return;
       case 'chat':
@@ -356,6 +401,9 @@ export class MigraPilotShell {
         return;
       case 'agentIntent':
         await this.onAgentIntent(message.intent);
+        return;
+      case 'workspaceIntent':
+        await this.onWorkspaceIntent(message.intent);
         return;
       case 'selectHistoryRun':
         await this.loadRunDetail(message.runId);
@@ -505,6 +553,169 @@ export class MigraPilotShell {
     await this.publish();
   }
 
+  // ── MigraAI Workspace (consolidated tab) ───────────────────────────────────
+
+  /** Deps for the shared action orchestrator. */
+  private workspaceDeps(): WorkspaceActionDeps {
+    return {
+      controller: this.deps.workspaceController(),
+      notice: (text, level) => this.notice(text, level),
+      output: this.deps.output,
+    };
+  }
+
+  /**
+   * Read authoritative workspace state.
+   *
+   * Only ever REFRESHES a workspace that is already open — it never registers
+   * one implicitly, because opening is an explicit operator action that can
+   * choose a root.
+   */
+  private async loadWorkspace(): Promise<void> {
+    if (!this.workspaceModel) {
+      // Nothing open in this session; adopt an already-registered workspace for
+      // the active root if the engine knows one, otherwise stay empty.
+      this.workspaceLoading = true;
+      await this.publish();
+      try {
+        const summaries = await this.deps.workspaceController().list();
+        const root = this.deps.workspaceRoot();
+        const match = root ? summaries.find((summary) => summary.root === root) : undefined;
+        this.workspaceModel = match ? await this.deps.workspaceController().get(match.id) : undefined;
+        // Distinguish "the engine has nothing for THIS root" from "the engine is
+        // unreachable" — the operator needs to know which, because only one of
+        // them is fixed by Repair Connection.
+        this.workspaceError = undefined;
+        this.workspaceEmptyReason = match
+          ? undefined
+          : !root
+            ? 'No folder is open in VS Code, so there is no workspace to register.'
+            : summaries.length === 0
+              ? 'The engine has no registered workspace yet. Open Workspace registers this folder and builds its semantic index.'
+              : `The engine has ${summaries.length} registered workspace(s), but none for this folder. Open Workspace registers it.`;
+      } catch (error) {
+        this.workspaceModel = undefined;
+        this.workspaceEmptyReason = undefined;
+        // Include the bounded engine reason: "could not be reached" is unhelpful
+        // when the real cause is a refused request, and it sends the operator to
+        // Repair Connection for a problem that is not connectivity.
+        this.workspaceError = `Workspace state could not be read from the MigraAI engine — ${this.reason(error)}`;
+        this.deps.output.appendLine(`[shell workspace] list/get failed: ${this.reason(error)}`);
+      } finally {
+        this.workspaceLoading = false;
+      }
+      await this.publish();
+      return;
+    }
+    const result = await refreshWorkspace(this.workspaceDeps(), this.workspaceModel);
+    this.applyWorkspaceResult(result.model);
+    await this.publish();
+  }
+
+  /**
+   * Workspace lifecycle dispatch.
+   *
+   * The webview posts a BARE intent. The workspace id and — critically — the
+   * index version come from host-held authoritative state, so an approval is
+   * always bound to the version the operator actually reviewed.
+   */
+  private async onWorkspaceIntent(intent: string | undefined): Promise<void> {
+    if (!isWorkspaceIntent(intent)) {
+      this.deps.output.appendLine(`[shell workspace] refused unknown intent: ${intent ?? '(none)'}`);
+      return;
+    }
+    if (this.workspaceBusy) {
+      this.deps.output.appendLine(`[shell workspace] ignored duplicate ${intent} while a lifecycle call is in flight`);
+      return;
+    }
+    this.workspaceBusy = true;
+    try {
+      await this.runWorkspaceIntent(intent);
+    } catch (error) {
+      this.notice('The MigraAI engine could not complete the workspace request.', 'error');
+      this.deps.output.appendLine(`[shell workspace] ${intent} failed: ${this.reason(error)}`);
+    } finally {
+      this.workspaceBusy = false;
+      await this.publish();
+    }
+  }
+
+  private async runWorkspaceIntent(intent: WorkspaceIntent): Promise<void> {
+    const deps = this.workspaceDeps();
+    // A successful call proves reachability, so any stale transport error from an
+    // earlier read is cleared by `applyWorkspaceResult` below.
+
+    if (intent === 'open') {
+      const result = await openWorkspace(deps);
+      if (result.model) {
+        this.applyWorkspaceResult(result.model);
+        this.activity.record(`Workspace opened: ${result.model.name}`, 'ok', Date.now());
+      }
+      return;
+    }
+    if (intent === 'diagnostics') {
+      await showWorkspaceDiagnostics(deps, this.workspaceModel);
+      return;
+    }
+    if (intent === 'refreshWorkspace') {
+      await this.loadWorkspace();
+      return;
+    }
+
+    const current = this.workspaceModel;
+    if (!current) {
+      this.notice('Open a workspace before running this action.', 'warn');
+      return;
+    }
+
+    switch (intent) {
+      case 'sync': {
+        const result = await syncWorkspace(deps, current);
+        this.applyWorkspaceResult(result.model);
+        if (!result.cancelled) this.activity.record('Workspace index synced', 'info', Date.now());
+        return;
+      }
+      case 'rebuild': {
+        const result = await rebuildWorkspace(deps, current);
+        this.applyWorkspaceResult(result.model);
+        if (!result.cancelled) this.activity.record('Workspace index rebuilt — approval required', 'warn', Date.now());
+        return;
+      }
+      case 'approve': {
+        const result = await approveWorkspaceIndex(deps, current);
+        this.applyWorkspaceResult(result.model);
+        if (!result.cancelled) this.activity.record('Semantic index approved', 'ok', Date.now());
+        return;
+      }
+      case 'changeMemory': {
+        const result = await changeWorkspaceMemory(deps, current);
+        this.applyWorkspaceResult(result.model);
+        return;
+      }
+      case 'delete': {
+        const result = await deleteWorkspace(deps, current);
+        this.applyWorkspaceResult(result.model);
+        if (!result.model && !result.cancelled) this.activity.record('Workspace registration deleted', 'warn', Date.now());
+        return;
+      }
+      default:
+        return;
+    }
+  }
+
+  /**
+   * Record a workspace result and clear any STALE read failure.
+   *
+   * Reaching this point means a controller call completed, which proves the
+   * engine is reachable — so a previous transport error must not survive and
+   * keep the tab pinned to "unreachable".
+   */
+  private applyWorkspaceResult(model: WorkspacePanelModel | undefined): void {
+    this.workspaceModel = model;
+    this.workspaceError = undefined;
+    if (model) this.workspaceEmptyReason = undefined;
+  }
+
   /** Files currently in context. Derived from the real active editor and the
    * real staged attachments — never a speculative list. */
   private contextFiles(): ContextFileEntry[] {
@@ -561,6 +772,10 @@ export class MigraPilotShell {
       ...(this.detail ? { detail: this.detail } : {}),
       ...(this.workingChanges ? { workingChanges: this.workingChanges } : {}),
       ...(this.workingChangesError ? { workingChangesError: this.workingChangesError } : {}),
+      ...(this.workspaceModel ? { workspaceModel: this.workspaceModel } : {}),
+      ...(this.workspaceError ? { workspaceError: this.workspaceError } : {}),
+      ...(this.workspaceEmptyReason ? { workspaceEmptyReason: this.workspaceEmptyReason } : {}),
+      ...(this.workspaceLoading ? { workspaceLoading: true } : {}),
       contextFiles: this.contextFiles(),
       activity: this.activity.list(),
       voiceSupported: this.voiceSupported(),
@@ -1131,6 +1346,24 @@ export class MigraPilotShell {
 
   // ── Public hooks for the extension host ────────────────────────────────────
 
+  /** The exact state the webview would render. Used by the installed-acceptance
+   * gate to assert what the Command Center actually shows, against a live
+   * engine, without needing UI automation. */
+  currentState(): ShellState {
+    return this.buildState();
+  }
+
+  /** Drive the tab's on-demand read — what clicking the tab does. */
+  async loadTab(tab: ShellTabId): Promise<void> {
+    this.tab = tab;
+    await this.loadForTab(tab);
+  }
+
+  /** Drive a Workspace-tab control — what clicking that button does. */
+  async runWorkspaceIntentForTest(intent: string): Promise<void> {
+    await this.onWorkspaceIntent(intent);
+  }
+
   /** Record a real, observed lifecycle event for the activity feed. */
   recordActivity(text: string, tone: 'ok' | 'info' | 'warn' | 'error'): void {
     this.activity.record(text, tone, Date.now());
@@ -1143,7 +1376,7 @@ export class MigraPilotShell {
 
   /** Bounded, operator-safe reason. Never a stack trace or raw backend body. */
   private reason(error: unknown): string {
-    if (isPilotError(error)) return error.message.slice(0, 300);
+    if (isPilotError(error)) return `${error.code}: ${error.message}`.slice(0, 300);
     if (error instanceof Error) return error.message.slice(0, 300);
     return 'MigraPilot could not complete the request.';
   }

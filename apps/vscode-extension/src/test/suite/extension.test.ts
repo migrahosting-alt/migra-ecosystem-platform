@@ -137,6 +137,7 @@ suite('MigraPilot extension — end to end', () => {
       'migrapilot.openWorkspacePanel',
       'migrapilot.dev.openClassicChat',
       'migrapilot.dev.openClassicAgentMode',
+      'migrapilot.dev.openClassicWorkspace',
     ]) {
       assert.ok(commands.includes(id), `command not registered: ${id}`);
     }
@@ -155,6 +156,99 @@ suite('MigraPilot extension — end to end', () => {
     assert.equal(ext?.isActive, true);
   });
 
+  test('the Command Center Workspace tab drives the real MigraAI workspace lifecycle', async () => {
+    const api = extApi;
+    assert.ok(api, 'extension API unavailable');
+
+    // Opening the Workspace tab must not throw and must leave the host healthy.
+    await vscode.commands.executeCommand('migrapilot.openStudio', 'workspace');
+    const ext = vscode.extensions.getExtension(EXTENSION_ID);
+    assert.equal(ext?.isActive, true, 'the extension must remain active on the Workspace tab');
+
+    // Drive the SAME controller the tab uses, against the live engine, and prove
+    // the migrated workflow still behaves: open → sync → approve(current) → Ready.
+    const opened = await api.workspace.open();
+    assert.ok(opened.name.length > 0);
+    const synced = await api.workspace.sync(opened.workspaceId);
+    assert.ok(synced.indexChunks >= 0);
+
+    if (synced.actions.approve) {
+      // The version binding is the security property: approving a STALE version
+      // must be refused, and the current one must succeed.
+      await assert.rejects(
+        () => api.workspace.approve(synced.workspaceId, synced.indexVersion - 1),
+        (error: unknown) => isPilotErrorCode(error, 'INVALID_STATE'),
+        'a stale index version must be refused',
+      );
+      const approved = await api.workspace.approve(synced.workspaceId, synced.indexVersion);
+      assert.equal(approved.actions.approve, false, 'an approved index needs no further approval');
+    }
+
+    // Every workspace action remains reachable — nothing was lost in the move.
+    const listed = await api.workspace.list();
+    assert.ok(listed.some((entry) => entry.id === opened.workspaceId));
+  });
+
+  test('the Workspace tab renders the CONNECTED state: six sections and eight actions', async () => {
+    const api = extApi;
+    assert.ok(api, 'extension API unavailable');
+    type WsTab = {
+      state: string;
+      name: string;
+      message?: string;
+      status: { text: string };
+      panels: Array<{ title: string; rows: Array<{ label: string; value: string }> }>;
+      approval: { state: string; heading: string; actions: Array<{ id: string }> };
+      actions: Array<{ id: string }>;
+    };
+    const tab = (): WsTab => (api.shell.state() as { workspace: WsTab }).workspace;
+
+    // 1. Loading the tab with nothing registered must be an HONEST empty state
+    //    that explains itself — not a bare "no workspace".
+    await api.shell.loadTab('workspace');
+    if (tab().state === 'empty') {
+      assert.match(tab().message ?? '', /Open Workspace registers|no folder is open/i, 'the empty state must explain itself');
+    }
+
+    // 2. Open Workspace — exactly what clicking the button does.
+    await api.shell.workspaceIntent('open');
+    assert.equal(tab().state, 'ready', `Open Workspace must reach the connected state (got: ${tab().state} — ${tab().message ?? ''})`);
+
+    // 3. All SIX sections, with real engine values.
+    const connected = tab();
+    assert.deepEqual(
+      connected.panels.map((panel) => panel.title),
+      ['Workspace', 'Semantic Index', 'Memory', 'Agents', 'Models', 'Engine'],
+    );
+    for (const panel of connected.panels) {
+      assert.ok(panel.rows.length > 0, `${panel.title} must render rows`);
+    }
+    const index = new Map(connected.panels.find((p) => p.title === 'Semantic Index')!.rows.map((r) => [r.label, r.value]));
+    for (const label of ['State', 'Files', 'Chunks', 'Embedding model', 'Pending approval', 'Last indexed']) {
+      assert.ok(index.has(label), `Semantic Index must report ${label}`);
+    }
+    const engine = new Map(connected.panels.find((p) => p.title === 'Engine')!.rows.map((r) => [r.label, r.value]));
+    assert.match(engine.get('Schema') ?? '', /^v\d+$/, 'Engine must report a real schema version');
+
+    // 4. All EIGHT actions reachable (six lifecycle + approve/diagnostics on the card).
+    const ids = new Set([...connected.actions, ...connected.approval.actions].map((action) => action.id));
+    for (const id of ['sync', 'rebuild', 'changeMemory', 'diagnostics', 'refreshWorkspace', 'delete']) {
+      assert.ok(ids.has(id), `lifecycle action ${id} must be present`);
+    }
+    assert.ok(['required', 'clear', 'not-indexed', 'indexing'].includes(connected.approval.state));
+    if (connected.approval.state === 'required') assert.ok(ids.has('approve'), 'an unapproved index must offer Approve');
+
+    // 5. Sanitation holds against REAL engine data.
+    const serialized = JSON.stringify(connected);
+    assert.doesNotMatch(serialized, /"indexVersion"/, 'the index version stays host-side');
+    assert.doesNotMatch(serialized, /ws_[a-z0-9]{6,}/, 'the workspace id stays host-side');
+    assert.doesNotMatch(serialized, /:\/\/[^/@"]*:[^/@"]*@/, 'no credentials in a git remote');
+
+    // 6. A real lifecycle action still works from the tab.
+    await api.shell.workspaceIntent('sync');
+    assert.equal(tab().state, 'ready', 'the tab stays connected after a sync');
+  });
+
   test('the canonical sidebar launcher is the only default-visible MigraPilot chat surface', async () => {
     const ext = vscode.extensions.getExtension(EXTENSION_ID);
     const views = (ext?.packageJSON?.contributes?.views?.migrapilot ?? []) as Array<{ id: string; name: string; when?: string }>;
@@ -165,7 +259,7 @@ suite('MigraPilot extension — end to end', () => {
     assert.equal(views[0]?.when, undefined);
 
     // The classic views are contributed but NOT default-visible.
-    for (const id of ['migrapilot.chatView', 'migrapilot.agentMode']) {
+    for (const id of ['migrapilot.chatView', 'migrapilot.agentMode', 'migrapilot.workspace']) {
       assert.ok(views.some((view) => view.id === id), `${id} must remain contributed for developer restore`);
       assert.ok(!defaultVisible.some((view) => view.id === id), `${id} must be hidden by default`);
       assert.equal(
@@ -178,6 +272,7 @@ suite('MigraPilot extension — end to end', () => {
     for (const view of defaultVisible) {
       assert.doesNotMatch(view.name, /chat/i, `${view.id} must not be a second chat surface`);
       assert.doesNotMatch(view.name, /agent mode/i, `${view.id} must not be a second Agent Mode surface`);
+      assert.doesNotMatch(view.name, /migraai workspace/i, `${view.id} must not be a second workspace surface`);
     }
     // Focusing the launcher works and keeps the extension healthy.
     await vscode.commands.executeCommand('migrapilot.sidebar.focus');
@@ -978,7 +1073,13 @@ suite('MigraPilot extension — end to end', () => {
 
   // ── P5: local brain lifecycle — auto-start + readiness + graceful shutdown ──
   suite('local-brain lifecycle (auto-start + shutdown)', () => {
-    const LIFE_URL = 'http://127.0.0.1:3988';
+    // A port this test OWNS. It used to use 3988 — the developer's default
+    // `migrapilot.brainUrl` — and only satisfied its "brain not running"
+    // precondition because the harness had destroyed whatever was there. A test
+    // asserting that shutdown stops ONLY the owned process must not buy its own
+    // precondition by killing an unowned one.
+    const LIFE_PORT = 3992;
+    const LIFE_URL = `http://127.0.0.1:${LIFE_PORT}`;
 
     async function brainHealthy(url: string): Promise<boolean> {
       try {
@@ -999,10 +1100,15 @@ suite('MigraPilot extension — end to end', () => {
       await cfg.update('brainUrl', LIFE_URL, vscode.ConfigurationTarget.Global);
       await cfg.update('autoStartBrain', true, vscode.ConfigurationTarget.Global);
       await cfg.update('brainAutoStartCommand', ['node', brainServer], vscode.ConfigurationTarget.Global);
+      // The extension's launcher spreads `process.env` into the child, so this
+      // is how the auto-started brain lands on the port THIS TEST owns instead
+      // of the developer's default 3988.
+      process.env.MIGRAPILOT_BRAIN_PORT = String(LIFE_PORT);
     });
 
     teardown(async () => {
       await extApi!.lifecycle.shutdown();
+      delete process.env.MIGRAPILOT_BRAIN_PORT;
       const cfg = vscode.workspace.getConfiguration('migrapilot');
       await cfg.update('brainUrl', BRAIN_URL, vscode.ConfigurationTarget.Global);
       await cfg.update('brainAutoStartCommand', undefined, vscode.ConfigurationTarget.Global);
@@ -1010,6 +1116,8 @@ suite('MigraPilot extension — end to end', () => {
 
     test('auto-starts the brain, then shutdown stops only the owned process', async function () {
       this.timeout(30_000);
+      // The port is this test's own, so this precondition is established by
+      // choosing an unused port — never by killing someone else's service.
       assert.equal(await brainHealthy(LIFE_URL), false, 'brain not running before auto-start');
 
       const result = await extApi!.lifecycle.ensureRunning();

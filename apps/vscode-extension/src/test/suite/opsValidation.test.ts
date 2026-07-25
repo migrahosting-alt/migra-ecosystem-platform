@@ -44,7 +44,13 @@ async function portState(brainPort: number): Promise<EvidenceRecord['portState']
   return { brainPort, occupied, ownedByExtension: extApi.lifecycle.ownedPid() !== undefined };
 }
 
-async function capture(scenario: string, brainPort = 3988): Promise<EvidenceRecord> {
+/** A port this suite OWNS. 3988 is the developer's default `migrapilot.brainUrl`;
+ * binding a decoy there — or asserting it is free — collides with a real running
+ * service, and previously only "worked" because the harness destroyed it first. */
+const OPS_BRAIN_PORT = 3993;
+const OPS_BRAIN_URL = `http://127.0.0.1:${OPS_BRAIN_PORT}`;
+
+async function capture(scenario: string, brainPort = OPS_BRAIN_PORT): Promise<EvidenceRecord> {
   const cur = extApi.backendDiagnostics().current!;
   const rec: EvidenceRecord = {
     scenario,
@@ -77,7 +83,7 @@ suite('P6 operational validation matrix', function () {
     await cfgUpdate('mode', 'local-brain');
     await cfgUpdate('provider', 'stub');
     await cfgUpdate('pilotApiUrl', undefined);
-    await cfgUpdate('brainUrl', 'http://127.0.0.1:3988');
+    await cfgUpdate('brainUrl', OPS_BRAIN_URL);
     await cfgUpdate('brainAutoStartCommand', undefined);
     await extApi.clearToken();
     await extApi.clearProviderKey();
@@ -93,7 +99,7 @@ suite('P6 operational validation matrix', function () {
     for (const r of records) {
       // eslint-disable-next-line no-console
       console.log(
-        `[OPS] ${r.scenario} | mode=${r.configuredMode} backend=${r.selectedBackend} reason=${r.decisionReason} local=${r.localProbe} remote=${r.remoteProbe} changed=${r.changed} noFallback=${r.noSilentFallback} status="${r.userFacingStatus}" port3988=${r.portState.occupied ? 'occupied' : 'free'} owned=${r.portState.ownedByExtension}`,
+        `[OPS] ${r.scenario} | mode=${r.configuredMode} backend=${r.selectedBackend} reason=${r.decisionReason} local=${r.localProbe} remote=${r.remoteProbe} changed=${r.changed} noFallback=${r.noSilentFallback} status="${r.userFacingStatus}" port${OPS_BRAIN_PORT}=${r.portState.occupied ? 'occupied' : 'free'} owned=${r.portState.ownedByExtension}`,
       );
     }
     // eslint-disable-next-line no-console
@@ -115,7 +121,7 @@ suite('P6 operational validation matrix', function () {
     await extApi.lifecycle.ensureRunning(); // annotate local probe (down)
     const r = await capture('local-brain-unavailable', FREE_PORT_NO_BRAIN);
     assert(r.selectedBackend === 'local' && r.localProbe === 'down');
-    await cfgUpdate('brainUrl', 'http://127.0.0.1:3988');
+    await cfgUpdate('brainUrl', OPS_BRAIN_URL);
   });
 
   test('foreign-process-on-brain-port', async () => {
@@ -123,7 +129,7 @@ suite('P6 operational validation matrix', function () {
       res.writeHead(200, { 'content-type': 'application/json' });
       res.end(JSON.stringify({ ok: true, service: 'pilot-api' })); // NOT a migrapilot-brain
     });
-    await new Promise<void>((r) => foreign.listen(3988, '127.0.0.1', r));
+    await new Promise<void>((r) => foreign.listen(OPS_BRAIN_PORT, '127.0.0.1', r));
     try {
       await cfgUpdate('mode', 'local-brain');
       await cfgUpdate('brainAutoStartCommand', ['node', brainServer]);
@@ -279,20 +285,25 @@ suite('P6 operational validation matrix', function () {
 
   test('auto-start-then-shutdown-port-state', async () => {
     await cfgUpdate('mode', 'local-brain');
-    await cfgUpdate('brainUrl', 'http://127.0.0.1:3988');
+    await cfgUpdate('brainUrl', OPS_BRAIN_URL);
     await cfgUpdate('brainAutoStartCommand', ['node', brainServer]);
+    // The extension's launcher spreads `process.env` into the child, so this puts
+    // the auto-started brain on the port THIS SUITE owns rather than the
+    // developer's default 3988.
+    process.env.MIGRAPILOT_BRAIN_PORT = String(OPS_BRAIN_PORT);
     await extApi.resolveBackend(true);
     const started = await extApi.lifecycle.ensureRunning();
     assert(started === 'started' || started === 'already-brain');
     await extApi.lifecycle.shutdown();
     // Give the OS a moment to release the socket.
     for (let i = 0; i < 20; i++) {
-      const s = await portState(3988);
+      const s = await portState(OPS_BRAIN_PORT);
       if (!s.occupied && !s.ownedByExtension) break;
       await new Promise((r) => setTimeout(r, 200));
     }
     const r = await capture('auto-start-then-shutdown-port-state');
     assert(r.portState.occupied === false && r.portState.ownedByExtension === false, 'port free + not owned after shutdown');
+    delete process.env.MIGRAPILOT_BRAIN_PORT;
     await cfgUpdate('brainAutoStartCommand', undefined);
   });
 });
