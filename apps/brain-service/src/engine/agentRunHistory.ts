@@ -133,10 +133,10 @@ export class AgentRunHistoryService {
     const tombstone = this.journal.tombstones(500).find((entry) => entry.runId === run.runId);
     return {
       summary,
-      preview: safePreview(run.previewJson),
+      preview: safePreview(run.previewJson, run),
       result: safeResult(run.resultJson),
       error: safeJson<{ code: string; message: string }>(run.errorJson),
-      timeline: events.map(historyEvent),
+      timeline: events.map((event) => historyEvent(event, run.proposalFingerprint)),
       lineage: {
         sourceRunId: run.recoverySourceRunId,
         successorRunId: run.successorRunId,
@@ -236,7 +236,7 @@ function historyIntegrity(run: DurableAgentRun, events: DurableAgentRunEvent[], 
   return { level: untrusted.length > 0 ? 'UNTRUSTED' : issues.length > 0 ? 'WARNING' : 'TRUSTED', issues: [...untrusted, ...issues] };
 }
 
-function historyEvent(event: DurableAgentRunEvent): AgentModeRunHistoryEvent {
+function historyEvent(event: DurableAgentRunEvent, proposalFingerprint?: string): AgentModeRunHistoryEvent {
   return {
     eventId: event.eventId,
     seq: event.seq,
@@ -244,7 +244,9 @@ function historyEvent(event: DurableAgentRunEvent): AgentModeRunHistoryEvent {
     type: event.type,
     priorState: event.priorState as AgentModeRunHistoryEvent['priorState'],
     nextState: event.nextState as AgentModeRunHistoryEvent['nextState'],
-    reason: event.reason,
+    // approval.displayed carries the proposal fingerprint as its reason. Replace
+    // it by exact match so unrelated reasons stay legible.
+    reason: proposalFingerprint && event.reason === proposalFingerprint ? REDACTED_AUTHORITY_BINDING : event.reason,
     source: event.source,
   };
 }
@@ -295,11 +297,24 @@ function safeJson<T>(json: string | undefined): T | undefined {
   }
 }
 
-function safePreview(json: string | undefined): AgentModeCommandPreview | undefined {
+/** Marker for values that participate in an authorization-binding comparison.
+ * The durable record keeps them; sanitized evidence must not carry them. */
+export const REDACTED_AUTHORITY_BINDING = '[REDACTED_AUTHORITY_BINDING]';
+
+function safePreview(json: string | undefined, run: DurableAgentRun): AgentModeCommandPreview | undefined {
   const preview = safeJson<AgentModeCommandPreview>(json);
   if (!preview) return undefined;
   return {
     ...preview,
+    // The stored preview was scrubbed by the generic high-entropy redactor at
+    // write time, which also caught this schema-defined field. Re-project it
+    // from the authoritative column so the canonical snapshot identifier is
+    // consistent with summary.snapshotId. This is field-specific and
+    // schema-bound: arbitrary high-entropy values stay redacted.
+    snapshotId: run.snapshotId,
+    // Inert once terminal, but it is compared during approval binding and is not
+    // needed to understand the exported history.
+    fingerprint: REDACTED_AUTHORITY_BINDING,
     sourceWorkspace: '[REDACTED PATH]',
     executable: '[REDACTED PATH]',
     cwd: '[REDACTED PATH]',
