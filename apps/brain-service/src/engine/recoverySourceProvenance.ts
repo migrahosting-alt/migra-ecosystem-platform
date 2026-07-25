@@ -4,6 +4,9 @@ import type { DurableAgentRun, DurableAgentRunEvent, DurableAgentRunState } from
 
 export type RecoverySourceProvenanceCode =
   | 'TRUSTED'
+  /** History is coherent; recovery is intentionally prohibited by policy. Never
+   * an integrity signal. */
+  | 'SOURCE_TERMINAL_NO_RECOVERY'
   | 'SOURCE_NOT_TERMINAL'
   | 'SOURCE_WORKSPACE_MISMATCH'
   | 'SOURCE_RECIPE_DISABLED'
@@ -34,10 +37,15 @@ export interface RecoverySourceProvenanceInput {
 }
 
 export interface RecoverySourceProvenanceResult {
+  /** The durable record and its event chain are internally coherent. False only
+   * for real inconsistency: schema, event chain, transitions, digest, terminal
+   * contract shape, or incomplete durable metadata. */
   trusted: boolean;
   code: RecoverySourceProvenanceCode;
   explanation: string;
   recoveryClass: AgentModeRecoveryClass;
+  /** Policy permits creating a fresh proposal from this source. A trusted run
+   * may still be ineligible (completed, already superseded, policy-excluded). */
   eligible: boolean;
   highestSeq: number;
   digest: string;
@@ -77,6 +85,20 @@ const PROVENANCE_EVENT_TYPES = new Set([
   'recovery.successor_linked',
 ]);
 
+/** Lineage bookkeeping appended to an already-terminal source when a successor
+ * is created. These never change state, so the terminal contract is judged
+ * against the last event before them. */
+const LINEAGE_EVENT_TYPES = new Set(['recovery.reproposal_requested', 'recovery.successor_linked']);
+
+function terminalEventOf(events: readonly DurableAgentRunEvent[]): DurableAgentRunEvent | undefined {
+  const sorted = [...events].sort((a, b) => a.seq - b.seq);
+  for (let index = sorted.length - 1; index >= 0; index -= 1) {
+    const event = sorted[index]!;
+    if (!LINEAGE_EVENT_TYPES.has(event.type)) return event;
+  }
+  return undefined;
+}
+
 interface TerminalContract {
   readonly state: DurableAgentRunState;
   readonly reason: string;
@@ -114,7 +136,10 @@ const CONTRACTS: readonly TerminalContract[] = Object.freeze([
   contract({ state: 'CANCELLED', reason: 'RESTART_CONTAINMENT_TERMINATED', finalEventTypes: ['containment.terminated'], requiredEvents: ['execution.start_requested', 'execution.spawned', 'containment.terminated'], forbiddenEvents: ['execution.completed', 'execution.failed', 'containment.termination_failed'], allowedFinalPriorStates: ['EXECUTING'], approvalLifecycle: 'INVALIDATED', executionRequired: true, containmentRequired: true, recoveryClass: 'REPROPOSAL_ALLOWED', recoverable: true }),
   contract({ state: 'CANCELLED', reason: 'CANCELLED', finalEventTypes: ['containment.terminated'], finalEventReasons: ['USER_CANCELLED'], requiredEvents: ['execution.start_requested', 'execution.spawned', 'containment.terminated'], forbiddenEvents: ['execution.completed', 'execution.failed', 'containment.termination_failed'], allowedFinalPriorStates: ['EXECUTING'], approvalLifecycle: 'CONSUMED', executionRequired: true, containmentRequired: true, recoveryClass: 'TERMINAL_NO_RECOVERY', recoverable: false }),
   contract({ state: 'CANCELLED', reason: 'SHUTDOWN_TERMINATED', finalEventTypes: ['containment.terminated'], requiredEvents: ['execution.start_requested', 'execution.spawned', 'containment.terminated'], forbiddenEvents: ['execution.completed', 'execution.failed', 'containment.termination_failed'], allowedFinalPriorStates: ['EXECUTING'], approvalLifecycle: 'CONSUMED', executionRequired: true, containmentRequired: true, recoveryClass: 'TERMINAL_NO_RECOVERY', recoverable: false }),
-  contract({ state: 'CANCELLED', reason: 'CANCELLED_BEFORE_SPAWN', finalEventTypes: ['cancellation.requested'], requiredEvents: ['cancellation.requested'], forbiddenEvents: EXECUTION_EVENTS, allowedFinalPriorStates: ['AWAITING_APPROVAL', 'APPROVED'], approvalLifecycle: 'INVALIDATED', executionForbidden: true, containmentForbidden: true, recoveryClass: 'TERMINAL_NO_RECOVERY', recoverable: false }),
+  // Cancelling a pending proposal destroys that authorization and snapshot, but
+  // nothing executed and the operator may propose again from scratch. This
+  // matches its REJECTED and EXPIRED peers.
+  contract({ state: 'CANCELLED', reason: 'CANCELLED_BEFORE_SPAWN', finalEventTypes: ['cancellation.requested'], requiredEvents: ['cancellation.requested'], forbiddenEvents: EXECUTION_EVENTS, allowedFinalPriorStates: ['AWAITING_APPROVAL', 'APPROVED'], approvalLifecycle: 'INVALIDATED', executionForbidden: true, containmentForbidden: true, recoveryClass: 'REPROPOSAL_ALLOWED', recoverable: true }),
   contract({ state: 'COMPLETED', reason: 'COMPLETED', finalEventTypes: ['execution.completed'], finalEventReasons: ['PROCESS_EXITED'], requiredEvents: ['execution.start_requested', 'execution.spawned', 'execution.completed'], forbiddenEvents: ['execution.failed', 'containment.terminated', 'containment.termination_failed'], allowedFinalPriorStates: ['EXECUTING'], approvalLifecycle: 'CONSUMED', executionRequired: true, containmentRequired: true, recoveryClass: 'TERMINAL_NO_RECOVERY', recoverable: false }),
 ]);
 const CONTRACT_BY_STATE_REASON = new Map(CONTRACTS.map((entry) => [`${entry.state}:${entry.reason}`, entry]));
@@ -134,22 +159,43 @@ export function validateRecoverySourceProvenance(input: RecoverySourceProvenance
     digest,
   });
 
+  /** Coherent history, but policy or lineage closes recovery. Trusted, so a
+   * history surface must not present it as corruption. */
+  const coherent = (code: RecoverySourceProvenanceCode, recoveryClass: AgentModeRecoveryClass): RecoverySourceProvenanceResult => ({
+    trusted: true,
+    code,
+    explanation: provenanceExplanation(code),
+    recoveryClass,
+    eligible: false,
+    highestSeq: highestSeq(events),
+    digest,
+  });
+
   if (!validRunFields(run)) return fail('SOURCE_SCHEMA_INVALID', 'SCHEMA_INCOMPATIBLE');
   if (run.workspaceIdentity !== workspaceIdentity) return fail('SOURCE_WORKSPACE_MISMATCH', 'WORKSPACE_MISMATCH');
   if (!allowedRecipes.includes(run.recipeId)) return fail('SOURCE_RECIPE_DISABLED', 'RECIPE_DISABLED');
-  if (!TERMINAL.has(run.state)) return fail('SOURCE_NOT_TERMINAL', 'NONE');
-  if (run.successorRunId) return fail('SOURCE_HAS_ACTIVE_SUCCESSOR', 'TERMINAL_NO_RECOVERY');
-  if (run.reconciliationOwner && (run.reconciliationLeaseUntil ?? 0) >= now) return fail('SOURCE_UNDER_RECONCILIATION', classification);
+  // A live run is not corrupt; its terminal contract simply cannot be judged yet.
+  if (!TERMINAL.has(run.state)) return coherent('SOURCE_NOT_TERMINAL', 'NONE');
+
+  // Coherence is proven BEFORE any lineage or policy exemption, so a corrupt
+  // chain can never hide behind "already superseded" or "not recoverable".
   const structural = validateEventChain(run, events);
   if (structural !== 'TRUSTED') return fail(structural, structural === 'AUDIT_SEQUENCE_MISMATCH' ? 'SCHEMA_INCOMPATIBLE' : classification);
 
   const contractResult = validateTerminalContract(run, events);
   if (contractResult.code !== 'TRUSTED') return fail(contractResult.code, contractResult.recoveryClass);
   if (contractResult.contract.integritySensitive) return fail('SOURCE_INTEGRITY_SENSITIVE_FAILURE', contractResult.contract.recoveryClass);
-  if (!contractResult.contract.recoverable || !RECOVERABLE.has(contractResult.contract.recoveryClass)) return fail('SOURCE_INTEGRITY_FAILED', contractResult.contract.recoveryClass);
 
   const metadata = validateStateSpecificMetadata(run, events);
   if (metadata !== 'TRUSTED') return fail(metadata, classification);
+
+  // History is now proven coherent. Everything below is policy/lineage, never
+  // an integrity verdict.
+  if (run.successorRunId) return coherent('SOURCE_HAS_ACTIVE_SUCCESSOR', 'SUCCESSOR_CREATED');
+  if (run.reconciliationOwner && (run.reconciliationLeaseUntil ?? 0) >= now) return coherent('SOURCE_UNDER_RECONCILIATION', classification);
+  if (!contractResult.contract.recoverable || !RECOVERABLE.has(contractResult.contract.recoveryClass)) {
+    return coherent('SOURCE_TERMINAL_NO_RECOVERY', contractResult.contract.recoveryClass);
+  }
 
   return {
     trusted: true,
@@ -208,7 +254,8 @@ function validateEventChain(run: DurableAgentRun, events: readonly DurableAgentR
     priorNext = event.nextState;
   }
   if (!sorted.some((event) => event.type === 'proposal.created')) return 'MISSING_REQUIRED_EVENT';
-  if (!isTerminalEvent(sorted.at(-1)!, run.state)) return 'TERMINAL_STATE_MISMATCH';
+  const terminal = terminalEventOf(sorted);
+  if (!terminal || !isTerminalEvent(terminal, run.state)) return 'TERMINAL_STATE_MISMATCH';
   if (run.auditSeq !== sorted.at(-1)!.seq) return 'AUDIT_SEQUENCE_MISMATCH';
   return 'TRUSTED';
 }
@@ -222,7 +269,7 @@ function validateTerminalContract(run: DurableAgentRun, events: readonly Durable
     return { code: 'SOURCE_RECOVERY_CONTRACT_MISSING', recoveryClass: 'SCHEMA_INCOMPATIBLE' };
   }
   const types = new Set(events.map((event) => event.type));
-  const final = [...events].sort((a, b) => a.seq - b.seq).at(-1);
+  const final = terminalEventOf(events);
   if (!final || !contract.finalEventTypes.includes(final.type) || !terminalEventReasonMatches(contract, final.reason) || final.nextState !== contract.state) return { code: 'SOURCE_TERMINAL_EVENT_INVALID', recoveryClass: contract.recoveryClass };
   if (final.priorState && !contract.allowedFinalPriorStates.includes(final.priorState)) return { code: 'SOURCE_EVENT_CHAIN_IMPOSSIBLE', recoveryClass: contract.recoveryClass };
   for (const required of contract.requiredEvents) if (!types.has(required)) return { code: 'MISSING_REQUIRED_EVENT', recoveryClass: contract.recoveryClass };
@@ -264,7 +311,7 @@ function validRunFields(run: DurableAgentRun): boolean {
 function classifyRecovery(run: DurableAgentRun, workspaceMatches: boolean, recipeAvailable: boolean): AgentModeRecoveryClass {
   if (!workspaceMatches) return 'WORKSPACE_MISMATCH';
   if (!recipeAvailable) return 'RECIPE_DISABLED';
-  if (run.successorRunId) return 'TERMINAL_NO_RECOVERY';
+  if (run.successorRunId) return 'SUCCESSOR_CREATED';
   if (!TERMINAL.has(run.state)) return 'NONE';
   if (run.failureCode === 'RESTART_CONTAINMENT_IDENTITY_MISMATCH') return 'POLICY_CHANGED';
   if (run.failureCode === 'RESTART_AUTHORIZATION_LOST' || run.approvalLifecycle === 'LOST_ON_RESTART') return 'REPROPOSAL_REQUIRED';
@@ -272,6 +319,7 @@ function classifyRecovery(run: DurableAgentRun, workspaceMatches: boolean, recip
   if (run.failureCode === 'INTERRUPTED_BY_RESTART' || run.failureCode === 'RESTART_NO_CONTAINMENT_FOUND' || run.failureCode === 'RESTART_CONTAINMENT_ALREADY_EXITED') return 'REPROPOSAL_ALLOWED';
   if (run.failureCode === 'RESTART_CONTAINMENT_TERMINATED') return 'REPROPOSAL_ALLOWED';
   if (run.state === 'REJECTED' || run.state === 'EXPIRED' || run.state === 'STALE') return run.recoveryClass === 'SNAPSHOT_CHANGED' ? 'SNAPSHOT_CHANGED' : 'REPROPOSAL_ALLOWED';
+  if (run.state === 'CANCELLED' && run.failureCode === 'CANCELLED_BEFORE_SPAWN') return 'REPROPOSAL_ALLOWED';
   if (run.state === 'FAILED' && run.failureCode && !run.failureCode.includes('POLICY') && !run.failureCode.includes('IDENTITY')) return 'REPROPOSAL_ALLOWED';
   return 'TERMINAL_NO_RECOVERY';
 }
@@ -280,9 +328,10 @@ function provenanceExplanation(code: RecoverySourceProvenanceCode): string {
   switch (code) {
     case 'SOURCE_WORKSPACE_MISMATCH': return 'This run belongs to a different workspace.';
     case 'SOURCE_RECIPE_DISABLED': return 'This action is no longer allowed by the current policy.';
-    case 'SOURCE_HAS_ACTIVE_SUCCESSOR': return 'This run already has an active recovery successor.';
+    case 'SOURCE_HAS_ACTIVE_SUCCESSOR': return 'The recovery opportunity for this run was already used to create a successor proposal.';
     case 'SOURCE_UNDER_RECONCILIATION': return 'The source run is currently under restart reconciliation.';
     case 'SOURCE_NOT_TERMINAL': return 'Wait for the active run to reach a terminal state.';
+    case 'SOURCE_TERMINAL_NO_RECOVERY': return 'This run finished in a state that policy does not allow recovering from. Its history is intact.';
     case 'SOURCE_TERMINAL_REASON_INVALID': return 'This run’s terminal reason is not supported for safe recovery.';
     case 'SOURCE_TERMINAL_EVENT_INVALID': return 'This run’s terminal event does not match its terminal reason, so MigraPilot cannot safely create a recovery proposal.';
     case 'SOURCE_EVENT_TYPE_UNSUPPORTED': return 'This run contains an unsupported durable event type, so MigraPilot cannot safely create a recovery proposal.';

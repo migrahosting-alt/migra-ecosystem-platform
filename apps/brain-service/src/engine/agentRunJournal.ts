@@ -520,7 +520,9 @@ export class MemoryAgentRunJournalPersistence implements AgentRunJournalPersiste
       allowedRecipes: input.provenance.allowedRecipes,
       now: input.at,
     });
-    if (!provenance.trusted || provenance.digest !== input.provenance.eventDigest || provenance.highestSeq !== input.provenance.highestSeq) return { ok: false, code: 'SOURCE_PROVENANCE_FAILED' };
+    // `eligible` is required alongside `trusted`; coherent-but-prohibited
+    // outcomes must never be reproposable.
+    if (!provenance.trusted || !provenance.eligible || provenance.digest !== input.provenance.eventDigest || provenance.highestSeq !== input.provenance.highestSeq) return { ok: false, code: 'SOURCE_PROVENANCE_FAILED' };
     if (this.runs.has(input.successor.runId)) return { ok: false, code: 'PARTIAL_FAILURE' };
     const sourceEvent1: DurableAgentRunEvent = {
       eventId: `${source.runId}:reproposal:${input.requestId}:requested`,
@@ -558,6 +560,9 @@ export class MemoryAgentRunJournalPersistence implements AgentRunJournalPersiste
       recoveryAttemptCount: source.recoveryAttemptCount + 1,
       lastRecoveryRequestId: input.requestId,
       recoveryTerminalReason: 'SUCCESSOR_CREATED',
+      // Recovery opportunity consumed: stored eligibility must not outlive it.
+      recoveryClass: 'SUCCESSOR_CREATED',
+      recoveryEligible: false,
       auditSeq: source.auditSeq + 2,
       version: source.version + 1,
       updatedAt: input.at,
