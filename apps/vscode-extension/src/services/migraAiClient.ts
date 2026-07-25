@@ -643,6 +643,30 @@ export class MigraAiClient {
     return this.agentActivation && this.agentActivation.expiresAt > Date.now() ? this.agentActivation.canonicalWorkspace : undefined;
   }
 
+  /**
+   * Sanitized activation STATUS for display surfaces.
+   *
+   * Deliberately omits `activationCapability`, `activationId` and
+   * `serverInstanceId`: a UI needs to know whether an activation is valid and
+   * which recipes it allows, never the capability that authorizes execution.
+   * The return type has no field that could carry it.
+   */
+  agentActivationStatus(): {
+    valid: boolean;
+    canonicalWorkspace?: string;
+    allowedRecipes?: string[];
+    expiresAt?: number;
+  } {
+    const activation = this.agentActivation;
+    if (!activation || activation.expiresAt <= Date.now()) return { valid: false };
+    return {
+      valid: true,
+      canonicalWorkspace: activation.canonicalWorkspace,
+      allowedRecipes: [...activation.allowedRecipes],
+      expiresAt: activation.expiresAt,
+    };
+  }
+
   async proposeAgentModeCommand(
     request: AgentModeCommandProposalRequest,
     signal?: AbortSignal,

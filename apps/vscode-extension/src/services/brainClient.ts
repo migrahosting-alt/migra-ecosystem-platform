@@ -9,6 +9,31 @@ import type {
   RouteResponse,
 } from '@migrapilot/shared-types';
 
+/** `GET /health` as the engine actually serves it. The extra blocks are optional
+ * because an older brain may not report them; consumers must handle absence. */
+export interface BrainHealthDetail extends HealthResponse {
+  readiness?: {
+    process?: string;
+    inferenceProviders?: string;
+    persistence?: string;
+    memory?: string;
+    rag?: string;
+    schemaVersion?: number;
+    migrationState?: string;
+    detail?: string;
+  };
+  operational?: {
+    status?: string;
+    reachable?: boolean;
+    schemaCurrent?: boolean;
+    schemaVersion?: number;
+    integrity?: string;
+    retentionWorker?: string;
+    writeLatencyMs?: number | null;
+    storageBytes?: number | null;
+  };
+}
+
 export class BrainClient {
   constructor(private readonly output: vscode.OutputChannel) {}
 
@@ -19,6 +44,19 @@ export class BrainClient {
 
   async health(): Promise<HealthResponse> {
     return this.request<HealthResponse>('GET', '/health');
+  }
+
+  /**
+   * The SAME `GET /health` payload, typed to include the operational readiness
+   * fields the engine already returns beyond {@link HealthResponse}: persistence
+   * readiness, schema version, durable-store integrity and the retention worker.
+   *
+   * No new endpoint and no new request — the extra fields were always on the
+   * wire; this accessor just stops discarding them so the shell can display
+   * canonical readiness instead of guessing from `status` alone.
+   */
+  async healthDetail(): Promise<BrainHealthDetail> {
+    return this.request<BrainHealthDetail>('GET', '/health');
   }
 
   async route(payload: RouteRequest): Promise<RouteResponse> {

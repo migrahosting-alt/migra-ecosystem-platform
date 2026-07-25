@@ -30,7 +30,17 @@ export class MigraPilotAgentModeViewProvider implements vscode.WebviewViewProvid
 
   constructor(private readonly extensionUri: vscode.Uri, private readonly deps: AgentModeViewDeps) {}
 
+  /** See {@link MigraPilotChatViewProvider.wasResolved} — same guarantee for the
+   * superseded Agent Mode view: on a default install this must stay false, so
+   * there is exactly one Agent Mode approval surface. */
+  public wasResolved(): boolean {
+    return this.resolvedOnce;
+  }
+
+  private resolvedOnce = false;
+
   resolveWebviewView(view: vscode.WebviewView): void {
+    this.resolvedOnce = true;
     this.view = view;
     this.gate.reset();
     this.state = 'IDLE';
