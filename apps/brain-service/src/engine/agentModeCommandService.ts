@@ -133,7 +133,7 @@ export class AgentModeCommandService {
     return this.journal;
   }
 
-  async propose(raw: unknown, context: AgentModeRequestContext): Promise<AgentModeActionResult> {
+  async propose(raw: unknown, context: AgentModeRequestContext, signal?: AbortSignal): Promise<AgentModeActionResult> {
     const parsed = AgentModeCommandProposalRequestSchema.safeParse(raw);
     if (!parsed.success) return { ok: false, code: 'PROPOSAL_FAILED', message: 'Recipe proposal input failed validation.' };
     if (!validContext(context) || parsed.data.rootPath !== context.workspaceRoot || !context.allowedRecipes.includes(parsed.data.recipe)) {
@@ -150,10 +150,17 @@ export class AgentModeCommandService {
     const runId = this.newRunId();
     let plan: AgentRecipePlan;
     try {
-      plan = await this.resolver.prepare(parsed.data.recipe, parsed.data.rootPath, { runId, activationId: context.activationId, workspaceIdentity: context.workspaceIdentity });
+      plan = await this.resolver.prepare(parsed.data.recipe, parsed.data.rootPath, { runId, activationId: context.activationId, workspaceIdentity: context.workspaceIdentity }, signal);
     } catch (error) {
       if (error instanceof AgentRecipePolicyError && (error.code === 'UNSUPPORTED_PLATFORM' || error.code === 'CONTAINMENT_UNAVAILABLE')) return { ok: false, code: error.code, message: error.message };
+      if (error instanceof AgentRecipePolicyError && error.code === 'STALE') return { ok: false, code: 'STALE', message: error.message };
       return { ok: false, code: 'PROPOSAL_FAILED', message: 'The server could not prepare the selected recipe.' };
+    }
+    // A client that disconnected during preparation must not be left with an
+    // executable proposal it never received.
+    if (signal?.aborted) {
+      await this.resolver.release(plan).catch(() => {});
+      return { ok: false, code: 'STALE', message: 'The Agent proposal was abandoned before it reached the client.' };
     }
     const requestId = `agentcorr_${randomUUID()}`;
     const safeReason = redactCommandOutput(parsed.data.reason).value;
@@ -283,7 +290,7 @@ export class AgentModeCommandService {
     return { ok: true, status: this.recoveryStatus(run, context) };
   }
 
-  async reproposeFromRun(runId: string, raw: unknown, context: AgentModeRequestContext): Promise<AgentModeActionResult> {
+  async reproposeFromRun(runId: string, raw: unknown, context: AgentModeRequestContext, signal?: AbortSignal): Promise<AgentModeActionResult> {
     const parsed = AgentModeReproposalRequestSchema.safeParse(raw);
     if (!parsed.success) return { ok: false, code: 'PROPOSAL_FAILED', message: 'A valid recovery request id is required.' };
     if (!validContext(context)) return { ok: false, code: 'INVALID_CONTEXT', message: 'The Agent Mode session or workspace context is invalid.' };
@@ -307,10 +314,15 @@ export class AgentModeCommandService {
     const newRunId = this.newRunId();
     let plan: AgentRecipePlan;
     try {
-      plan = await this.resolver.prepare(recipe, context.workspaceRoot, { runId: newRunId, activationId: context.activationId, workspaceIdentity: context.workspaceIdentity });
+      plan = await this.resolver.prepare(recipe, context.workspaceRoot, { runId: newRunId, activationId: context.activationId, workspaceIdentity: context.workspaceIdentity }, signal);
     } catch (error) {
       if (error instanceof AgentRecipePolicyError && (error.code === 'UNSUPPORTED_PLATFORM' || error.code === 'CONTAINMENT_UNAVAILABLE')) return { ok: false, code: error.code, message: error.message };
+      if (error instanceof AgentRecipePolicyError && error.code === 'STALE') return { ok: false, code: 'STALE', message: error.message };
       return { ok: false, code: 'PROPOSAL_FAILED', message: 'The server could not prepare a fresh recovery proposal.' };
+    }
+    if (signal?.aborted) {
+      await this.resolver.release(plan).catch(() => {});
+      return { ok: false, code: 'STALE', message: 'The Agent recovery proposal was abandoned before it reached the client.' };
     }
     const requestId = `agentcorr_${randomUUID()}`;
     const safeReason = redactCommandOutput(parsed.data.reason ?? recoveryReproposalReason(source)).value;
@@ -639,6 +651,7 @@ export class AgentModeCommandService {
         'This is a fixed server-owned recipe; executable and arguments cannot be supplied by the client.',
         plan.identity.canModifyFiles ? 'This recipe may modify workspace artifacts or caches.' : 'This recipe is declared read-only.',
         'Approval is single-use and bound to this activation, run, immutable snapshot, executable digest, and recipe policy.',
+        ...(plan.identity.snapshotOmissions ?? []),
       ],
       environment: Object.keys(plan.environment).sort().map((key) => ({ key, value: '[SERVER CONTROLLED]', redacted: true })),
       canModifyFiles: plan.identity.canModifyFiles,

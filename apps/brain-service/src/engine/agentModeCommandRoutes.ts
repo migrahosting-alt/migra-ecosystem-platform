@@ -56,7 +56,7 @@ export function registerAgentModeCommandRoutes(
   app.post<{ Body: unknown }>('/api/ai/agent-mode/commands', { bodyLimit: 16 * 1024 }, async (request, reply) => {
     const context = await requestContext(request, authority);
     if (!context) return forbidden(reply);
-    return send(reply, await service.propose(request.body, context));
+    return send(reply, await withClientDisconnect(reply, (signal) => service.propose(request.body, context, signal)));
   });
   app.get<{ Params: { runId: string } }>('/api/ai/agent-mode/commands/:runId', async (request, reply) => {
     const context = await requestContext(request, authority);
@@ -92,7 +92,7 @@ export function registerAgentModeCommandRoutes(
     if (!context) return forbidden(reply);
     const parsed = AgentModeReproposalRequestSchema.safeParse(request.body);
     if (!parsed.success) return invalid(reply, 'INVALID_INPUT', 'A valid recovery request id is required.');
-    return send(reply, await service.reproposeFromRun(request.params.runId, parsed.data, context));
+    return send(reply, await withClientDisconnect(reply, (signal) => service.reproposeFromRun(request.params.runId, parsed.data, context, signal)));
   });
   app.get<{ Querystring: Record<string, unknown> }>('/api/ai/agent-mode/history/runs', async (request, reply) => {
     const context = await requestContext(request, authority);
@@ -120,6 +120,26 @@ export function registerAgentModeCommandRoutes(
     return sendHistory(reply, history.export(request.params.runId, parsed.data, context));
   });
   return service;
+}
+
+/** Aborts server-side proposal preparation when the client goes away.
+ *
+ * The extension enforces its own request timeout by aborting the HTTP request,
+ * which closes the socket. Without this, snapshot planning would keep consuming
+ * CPU and disk for a response nobody will read. */
+async function withClientDisconnect<T>(reply: FastifyReply, run: (signal: AbortSignal) => Promise<T>): Promise<T> {
+  const controller = new AbortController();
+  const onClose = (): void => {
+    // A close before the response is written means the client disconnected or
+    // timed out, not a normally completed request.
+    if (!reply.raw.writableEnded) controller.abort();
+  };
+  reply.raw.once('close', onClose);
+  try {
+    return await run(controller.signal);
+  } finally {
+    reply.raw.removeListener('close', onClose);
+  }
 }
 
 async function requestContext(request: FastifyRequest, authority: AgentActivationAuthority): Promise<AgentModeRequestContext | undefined> {

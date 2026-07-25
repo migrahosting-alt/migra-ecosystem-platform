@@ -7,11 +7,22 @@ import path from 'node:path';
 import type { AgentModeCommandResult, AgentModeRecipeId } from '@migrapilot/protocol';
 import { redactCommandOutput } from './redaction.js';
 import { hashInput } from './toolApprovalStore.js';
+import {
+  materializeGovernedSnapshot,
+  planGovernedSnapshot,
+  SnapshotPlanError,
+  SNAPSHOT_MAX_BYTES,
+  SNAPSHOT_MAX_FILES,
+  type GitPathEnumerator,
+} from './agentSnapshotPlan.js';
 
 export const AGENT_RECIPE_POLICY_VERSION = 'agent-recipes-v2';
 export const AGENT_RECIPE_OUTPUT_CAP_BYTES = 24 * 1024;
-const SNAPSHOT_MAX_FILES = 50_000;
-const SNAPSHOT_MAX_BYTES = 1024 * 1024 * 1024;
+export const AGENT_SNAPSHOT_TEMP_PREFIX = 'migrapilot-agent-snapshot-';
+/** A snapshot older than this cannot belong to an in-flight proposal, whose
+ * planning is bounded far below it. */
+const SNAPSHOT_SCAVENGE_MIN_AGE_MS = 10 * 60 * 1000;
+const SNAPSHOT_SCAVENGE_MAX_REMOVALS = 64;
 const ANSI_ESCAPE = /\x1B(?:[@-_][0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1B\\))/g;
 
 export interface AgentRecipeIdentity {
@@ -39,6 +50,11 @@ export interface AgentRecipeIdentity {
   canModifyFiles: false;
   networkPolicy: 'not-required';
   expectedEffects: string[];
+  /** Bounded governed snapshot accounting. Optional so pre-existing plan
+   * fixtures remain valid. */
+  snapshotFileCount?: number;
+  snapshotByteCount?: number;
+  snapshotOmissions?: readonly string[];
 }
 
 export interface AgentRecipePlan {
@@ -54,7 +70,7 @@ export interface AgentRecipePrepareContext {
 }
 
 export interface AgentRecipeResolverLike {
-  prepare(recipe: AgentModeRecipeId, rootPath: string, context: AgentRecipePrepareContext): Promise<AgentRecipePlan>;
+  prepare(recipe: AgentModeRecipeId, rootPath: string, context: AgentRecipePrepareContext, signal?: AbortSignal): Promise<AgentRecipePlan>;
   verify(plan: AgentRecipePlan): Promise<boolean>;
   release(plan: AgentRecipePlan): Promise<void>;
   binding(plan: AgentRecipePlan): string;
@@ -115,9 +131,13 @@ const RECIPE_ARGUMENTS: Readonly<Record<AgentModeRecipeId, readonly string[]>> =
 });
 
 export class AgentRecipeResolver implements AgentRecipeResolverLike {
-  constructor(private readonly env: NodeJS.ProcessEnv = process.env, private readonly platform = process.platform) {}
+  constructor(
+    private readonly env: NodeJS.ProcessEnv = process.env,
+    private readonly platform = process.platform,
+    private readonly enumerate?: GitPathEnumerator,
+  ) {}
 
-  async prepare(recipe: AgentModeRecipeId, rootPath: string, context: AgentRecipePrepareContext): Promise<AgentRecipePlan> {
+  async prepare(recipe: AgentModeRecipeId, rootPath: string, context: AgentRecipePrepareContext, signal?: AbortSignal): Promise<AgentRecipePlan> {
     if (this.platform !== 'linux') throw new AgentRecipePolicyError('UNSUPPORTED_PLATFORM', 'Stage 2B Agent recipes require Linux systemd containment.');
     const sourceWorkspace = await realpath(rootPath).catch(() => { throw new AgentRecipePolicyError('INVALID_WORKSPACE', 'The workspace root does not exist.'); });
     const sourceStat = await stat(sourceWorkspace);
@@ -127,7 +147,7 @@ export class AgentRecipeResolver implements AgentRecipeResolverLike {
     const dotGit = await lstat(path.join(sourceWorkspace, '.git')).catch(() => undefined);
     if (!dotGit?.isDirectory()) throw new AgentRecipePolicyError('INVALID_WORKSPACE', 'Stage 2B requires a standard Git repository with a local .git directory.');
 
-    const runRoot = await import('node:fs/promises').then(({ mkdtemp }) => mkdtemp(path.join(tmpdir(), 'migrapilot-agent-snapshot-')));
+    const runRoot = await import('node:fs/promises').then(({ mkdtemp }) => mkdtemp(path.join(tmpdir(), AGENT_SNAPSHOT_TEMP_PREFIX)));
     await chmod(runRoot, 0o700);
     const snapshotRoot = path.join(runRoot, 'workspace');
     const binRoot = path.join(runRoot, 'bin');
@@ -135,7 +155,11 @@ export class AgentRecipeResolver implements AgentRecipeResolverLike {
     try {
       await mkdir(binRoot, { recursive: true, mode: 0o700 });
       await mkdir(homeRoot, { recursive: true, mode: 0o700 });
-      await cp(sourceWorkspace, snapshotRoot, { recursive: true, force: false, errorOnExist: true, verbatimSymlinks: true, preserveTimestamps: true });
+      // The physical workspace is never copied recursively. Governed material is
+      // enumerated and bounded first, so an oversized repository is rejected
+      // before any payload byte reaches disk.
+      const governed = await planGovernedSnapshot(sourceWorkspace, { signal, enumerate: this.enumerate });
+      await materializeGovernedSnapshot(sourceWorkspace, snapshotRoot, governed, { signal });
       await hardenGitMetadata(snapshotRoot);
       await assertGitMetadataContained(path.join(snapshotRoot, '.git'));
       const sourceGit = await resolveExecutable('git', this.env, this.platform);
@@ -143,6 +167,7 @@ export class AgentRecipeResolver implements AgentRecipeResolverLike {
       await cp(sourceGit, executablePath, { force: false, errorOnExist: true });
       await chmod(executablePath, 0o500);
       await makeReadOnly(snapshotRoot);
+      throwIfAborted(signal);
       const executableStat = await stat(executablePath);
       const executableDigest = await fileDigest(executablePath);
       const workspaceMaterialIdentity = await snapshotManifest(snapshotRoot);
@@ -176,12 +201,24 @@ export class AgentRecipeResolver implements AgentRecipeResolverLike {
           'Reads a private snapshot of the selected Git workspace; the live workspace is not used as the execution cwd.',
           'Repository and user Git helpers, hooks, pagers, external diff, text conversion, and filesystem monitors are disabled.',
           'Execution requires an OS-owned systemd cgroup and fails closed when containment is unavailable.',
+          'Only Git-governed material is snapshotted; ignored dependencies, caches, generated output, nested repositories, and unrelated worktrees are excluded.',
         ],
+        snapshotFileCount: governed.totalFiles,
+        snapshotByteCount: governed.totalBytes,
+        snapshotOmissions: governed.omissions,
       };
       return { identity, environment, privateRunRoot: runRoot };
     } catch (error) {
+      // Cancellation, limit rejection, and any partial failure must never leave a
+      // snapshot behind.
+      await makeWritable(runRoot).catch(() => {});
       await rm(runRoot, { recursive: true, force: true }).catch(() => {});
       if (error instanceof AgentRecipePolicyError) throw error;
+      if (error instanceof SnapshotPlanError) {
+        throw new AgentRecipePolicyError(error.reason === 'ABORTED' ? 'STALE' : 'SNAPSHOT_FAILED', error.reason === 'LIMIT_EXCEEDED'
+          ? 'The Git-governed material in this workspace exceeds the bounded Stage 2B snapshot limit.'
+          : error.message);
+      }
       throw new AgentRecipePolicyError('SNAPSHOT_FAILED', 'The immutable Agent execution snapshot could not be created.');
     }
   }
@@ -582,7 +619,45 @@ async function makeReadOnly(root: string): Promise<void> {
   if (info.isDirectory()) {
     for (const entry of await readdir(root)) await makeReadOnly(path.join(root, entry));
     await chmod(root, 0o500);
-  } else if (info.isFile()) await chmod(root, 0o400);
+  } else if (info.isFile()) {
+    // The executable bit is part of what Git tracks. Stripping it would make
+    // every executable tracked file report a spurious mode modification, so
+    // read-only hardening removes write access without changing execute access.
+    await chmod(root, info.mode & 0o100 ? 0o500 : 0o400);
+  }
+}
+
+function throwIfAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) throw new AgentRecipePolicyError('STALE', 'Agent snapshot planning was aborted before completion.');
+}
+
+/** Removes stale private snapshot directories left by a previous process that
+ * died between snapshot creation and release. Bounded, owner-scoped, and only
+ * ever touches directories matching the Agent snapshot prefix inside the
+ * temporary directory. */
+export async function scavengeStaleAgentSnapshots(options: { now?: () => number; minAgeMs?: number; root?: string } = {}): Promise<{ removed: number; inspected: number }> {
+  const now = options.now ?? Date.now;
+  const minAgeMs = options.minAgeMs ?? SNAPSHOT_SCAVENGE_MIN_AGE_MS;
+  const root = options.root ?? tmpdir();
+  let removed = 0;
+  let inspected = 0;
+  const entries = await readdir(root, { withFileTypes: true }).catch(() => []);
+  for (const entry of entries) {
+    if (removed >= SNAPSHOT_SCAVENGE_MAX_REMOVALS) break;
+    if (!entry.isDirectory() || !entry.name.startsWith(AGENT_SNAPSHOT_TEMP_PREFIX)) continue;
+    const target = path.join(root, entry.name);
+    const info = await lstat(target).catch(() => undefined);
+    // Never follow a symlink masquerading as a snapshot directory.
+    if (!info?.isDirectory()) continue;
+    if (typeof process.getuid === 'function' && info.uid !== process.getuid()) continue;
+    inspected += 1;
+    // Age gate keeps an in-flight proposal's snapshot untouched.
+    if (now() - info.mtimeMs < minAgeMs) continue;
+    await makeWritable(target).catch(() => {});
+    await rm(target, { recursive: true, force: true }).catch(() => {});
+    removed += 1;
+  }
+  return { removed, inspected };
 }
 
 async function makeWritable(root: string): Promise<void> {
