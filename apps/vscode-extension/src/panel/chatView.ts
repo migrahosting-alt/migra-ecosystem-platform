@@ -137,7 +137,23 @@ export class MigraPilotChatViewProvider implements vscode.WebviewViewProvider {
     }
   }
 
+  /**
+   * Whether VS Code ever asked this (superseded) view to render.
+   *
+   * The Command Center is the canonical chat surface and this view's contribution
+   * is gated behind `migrapilot.enableClassicViews`, so on a default install this
+   * must stay false — that is the factual proof that opening the MigraPilot
+   * activity-bar icon cannot show the old chat UI. Exposed through the extension
+   * API for the installed-acceptance test.
+   */
+  public wasResolved(): boolean {
+    return this.resolvedOnce;
+  }
+
+  private resolvedOnce = false;
+
   resolveWebviewView(webviewView: vscode.WebviewView): void {
+    this.resolvedOnce = true;
     this.view = webviewView;
     this.webviewReady = false;
     webviewView.webview.options = {

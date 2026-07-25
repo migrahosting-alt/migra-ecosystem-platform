@@ -131,8 +131,135 @@ suite('MigraPilot extension — end to end', () => {
       'migrapilot.generateTests',
       'migrapilot.generateCommit',
       'migrapilot.openAgentMode',
+      // Canonical Command Center + the retained developer escape hatches.
+      'migrapilot.openStudio',
+      'migrapilot.openChat',
+      'migrapilot.openWorkspacePanel',
+      'migrapilot.dev.openClassicChat',
+      'migrapilot.dev.openClassicAgentMode',
     ]) {
       assert.ok(commands.includes(id), `command not registered: ${id}`);
+    }
+  });
+
+  test('the Command Center opens as an editor panel and stays open', async () => {
+    // Opening the Command Center must not throw, must be idempotent, and must
+    // leave the extension healthy — the shell renders from posted state, so a
+    // broken provider would surface here as a command failure.
+    await vscode.commands.executeCommand('migrapilot.openStudio');
+    await vscode.commands.executeCommand('migrapilot.openStudio', 'audit');
+    await vscode.commands.executeCommand('migrapilot.openChat');
+    const ext = vscode.extensions.getExtension(EXTENSION_ID);
+    assert.equal(ext?.isActive, true, 'the extension must remain active after opening the Command Center');
+    await vscode.commands.executeCommand('migrapilot.openWorkspacePanel');
+    assert.equal(ext?.isActive, true);
+  });
+
+  test('the canonical sidebar launcher is the only default-visible MigraPilot chat surface', async () => {
+    const ext = vscode.extensions.getExtension(EXTENSION_ID);
+    const views = (ext?.packageJSON?.contributes?.views?.migrapilot ?? []) as Array<{ id: string; name: string; when?: string }>;
+    const defaultVisible = views.filter((view) => !view.when);
+
+    // The launcher is first, so clicking the activity-bar icon focuses it.
+    assert.equal(views[0]?.id, 'migrapilot.sidebar');
+    assert.equal(views[0]?.when, undefined);
+
+    // The classic views are contributed but NOT default-visible.
+    for (const id of ['migrapilot.chatView', 'migrapilot.agentMode']) {
+      assert.ok(views.some((view) => view.id === id), `${id} must remain contributed for developer restore`);
+      assert.ok(!defaultVisible.some((view) => view.id === id), `${id} must be hidden by default`);
+      assert.equal(
+        views.find((view) => view.id === id)?.when,
+        'config.migrapilot.enableClassicViews',
+        `${id} must be gated on the developer setting`,
+      );
+    }
+    // Nothing default-visible reads as a second chat / Agent Mode surface.
+    for (const view of defaultVisible) {
+      assert.doesNotMatch(view.name, /chat/i, `${view.id} must not be a second chat surface`);
+      assert.doesNotMatch(view.name, /agent mode/i, `${view.id} must not be a second Agent Mode surface`);
+    }
+    // Focusing the launcher works and keeps the extension healthy.
+    await vscode.commands.executeCommand('migrapilot.sidebar.focus');
+    assert.equal(ext?.isActive, true);
+  });
+
+  test('opening the MigraPilot activity-bar container never renders the old chat UI', async () => {
+    // Open the container the activity-bar icon opens, then the launcher, then the
+    // Command Center — i.e. the full default user journey.
+    await vscode.commands.executeCommand('workbench.view.extension.migrapilot');
+    await vscode.commands.executeCommand('migrapilot.sidebar.focus');
+    await vscode.commands.executeCommand('migrapilot.openStudio');
+    await vscode.commands.executeCommand('migrapilot.openChat');
+    await vscode.commands.executeCommand('migrapilot.openAgentMode');
+
+    // The decisive assertion: VS Code never asked the superseded views to render,
+    // so no second chat composer and no second Agent Mode approval surface can
+    // have appeared.
+    const api = extApi;
+    assert.ok(api, 'extension API unavailable');
+    assert.equal(api.classicViews.enabled(), false, 'classic views must be disabled by default');
+    assert.equal(api.classicViews.chatResolved(), false, 'the classic chat view must never render by default');
+    assert.equal(api.classicViews.agentModeResolved(), false, 'the classic Agent Mode view must never render by default');
+  });
+
+  test('the explicit developer setting is the ONLY thing that restores a classic view', async () => {
+    const api = extApi;
+    assert.ok(api, 'extension API unavailable');
+    const config = () => vscode.workspace.getConfiguration('migrapilot');
+
+    // Precondition: hidden, and never rendered by the preceding journey.
+    assert.equal(api.classicViews.enabled(), false);
+    assert.equal(api.classicViews.chatResolved(), false);
+
+    try {
+      // Turn the developer gate ON — the ONLY supported restore mechanism.
+      await config().update('enableClassicViews', true, vscode.ConfigurationTarget.Workspace);
+      // The `when` clause is a context key; give VS Code a moment to contribute
+      // the view before focusing it.
+      const deadline = Date.now() + 15_000;
+      while (!api.classicViews.enabled() && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+      assert.equal(api.classicViews.enabled(), true, 'the setting must be observable to the extension');
+
+      await vscode.commands.executeCommand('migrapilot.dev.openClassicChat');
+      while (!api.classicViews.chatResolved() && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+      assert.equal(
+        api.classicViews.chatResolved(),
+        true,
+        'with the developer setting ON the classic view must be restorable — the legacy code is retained, not deleted',
+      );
+    } finally {
+      // Leave the canonical default in place for every later assertion.
+      await config().update('enableClassicViews', undefined, vscode.ConfigurationTarget.Workspace);
+      const reset = Date.now() + 10_000;
+      while (api.classicViews.enabled() && Date.now() < reset) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+      assert.equal(api.classicViews.enabled(), false, 'the gate must return to OFF');
+    }
+  });
+
+  test('classic views stay OFF by default and the dev commands refuse rather than resurrect them', async () => {
+    const config = vscode.workspace.getConfiguration('migrapilot');
+    assert.equal(config.get<boolean>('enableClassicViews'), false, 'classic views must default to OFF');
+
+    // With the gate closed the developer command must not throw and must not
+    // focus a hidden view — it surfaces a refusal instead. In VSIX mode the
+    // packaged extension owns its own dialog API, so only reachability is
+    // asserted there.
+    const before = dialogCalls.length;
+    await vscode.commands.executeCommand('migrapilot.dev.openClassicChat');
+    await vscode.commands.executeCommand('migrapilot.dev.openClassicAgentMode');
+    const ext = vscode.extensions.getExtension(EXTENSION_ID);
+    assert.equal(ext?.isActive, true, 'a refused classic-view command must not destabilise the extension');
+    if (!IS_VSIX) {
+      const refusals = dialogCalls.slice(before).map((call) => call.message).join(' | ');
+      assert.match(refusals, /superseded developer-only view/i, `unexpected dialogs: ${refusals}`);
+      assert.match(refusals, /Command Center/, 'the refusal must point at the canonical interface');
     }
   });
 

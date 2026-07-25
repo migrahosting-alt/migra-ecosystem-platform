@@ -42,8 +42,8 @@
       "migrapilot": [
         {
           "type": "webview",
-          "id": "migrapilot.chatView",
-          "name": "Chat",
+          "id": "migrapilot.sidebar",
+          "name": "MigraPilot",
           "icon": "resources/migrapilot-icon.svg"
         },
         {
@@ -54,15 +54,17 @@
         },
         {
           "type": "webview",
-          "id": "migrapilot.agentMode",
-          "name": "Agent Mode",
-          "icon": "resources/migrapilot-icon.svg"
+          "id": "migrapilot.chatView",
+          "name": "Chat (Classic — Developer Only)",
+          "icon": "resources/migrapilot-icon.svg",
+          "when": "config.migrapilot.enableClassicViews"
         },
         {
           "type": "webview",
-          "id": "migrapilot.sidebar",
-          "name": "Status",
-          "icon": "resources/migrapilot-icon.svg"
+          "id": "migrapilot.agentMode",
+          "name": "Agent Mode (Classic — Developer Only)",
+          "icon": "resources/migrapilot-icon.svg",
+          "when": "config.migrapilot.enableClassicViews"
         }
       ]
     },
@@ -79,6 +81,18 @@
       {
         "command": "migrapilot.openChat",
         "title": "MigraPilot: Open Chat"
+      },
+      {
+        "command": "migrapilot.openStudio",
+        "title": "MigraPilot: Open Command Center"
+      },
+      {
+        "command": "migrapilot.dev.openClassicChat",
+        "title": "MigraPilot (Developer): Open Classic Chat View"
+      },
+      {
+        "command": "migrapilot.dev.openClassicAgentMode",
+        "title": "MigraPilot (Developer): Open Classic Agent Mode View"
       },
       {
         "command": "migrapilot.openWorkspacePanel",
@@ -285,10 +299,25 @@
           "type": "boolean",
           "default": true,
           "description": "Enable local telemetry for MigraPilot requests."
+        },
+        "migrapilot.enableClassicViews": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "**Developer only.** Restore the superseded *Chat (Classic)* and *Agent Mode (Classic)* sidebar views.\n\nThe canonical MigraPilot interface is the **Command Center** (`MigraPilot: Open Command Center`), which owns chat, governed Agent Mode approval, run evidence and workspace context in one governed surface. The classic views are retained only for migration verification and are hidden by default so there is exactly one chat composer, one Agent Mode approval path and one run-history surface.\n\nEnabling this does NOT widen any permission: the classic views use the same server-owned proposal + one-time approval boundary and the same evidence-only history."
         }
       }
     },
     "menus": {
+      "commandPalette": [
+        {
+          "command": "migrapilot.dev.openClassicChat",
+          "when": "config.migrapilot.enableClassicViews"
+        },
+        {
+          "command": "migrapilot.dev.openClassicAgentMode",
+          "when": "config.migrapilot.enableClassicViews"
+        }
+      ],
       "editor/context": [
         {
           "command": "migrapilot.explainSelection",

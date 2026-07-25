@@ -46,6 +46,9 @@ import { EngineDiagnostics, type EngineDiagnosticSnapshot } from './services/eng
 import { type TokenStore } from './services/tokenStore.js';
 import { MigraPilotAgentModeViewProvider } from './panel/agentModeView.js';
 import { agentModeStatusText } from './panel/agentModeModel.js';
+import { MigraPilotShell } from './panel/shell/shellProvider.js';
+import { MigraPilotStudioPanel } from './panel/shell/studioPanel.js';
+import { type ShellTabId } from './panel/shell/navigationModel.js';
 
 let outputChannel: vscode.OutputChannel;
 let brainClient: BrainClient;
@@ -70,6 +73,8 @@ let policyState: ExecutionPolicyState;
 let policyStatusBar: vscode.StatusBarItem;
 let pendingResolutionInfo: ResolutionInfo | undefined;
 let agentModeView: MigraPilotAgentModeViewProvider;
+let shell: MigraPilotShell;
+let studioPanel: MigraPilotStudioPanel;
 let agentModeStatusBar: vscode.StatusBarItem;
 let agentBootstrapSecret: string | undefined;
 let inheritedAgentBootstrapSecret: string | undefined;
@@ -119,11 +124,63 @@ export interface MigraPilotApi {
     delete(id: string): Promise<{ ok: boolean }>;
     list(): Promise<Array<{ id: string; name: string; root: string }>>;
   };
+  /** Superseded-surface observability for the installed-acceptance gate.
+   *
+   * The Command Center is the canonical interface; the classic Chat and Agent
+   * Mode views are retained but their contributions are gated behind
+   * `migrapilot.enableClassicViews`. On a default install both `*Resolved()`
+   * must be false — VS Code never asked them to render — which is what proves
+   * the old chat UI cannot appear from the activity-bar icon. */
+  classicViews: {
+    enabled(): boolean;
+    chatResolved(): boolean;
+    agentModeResolved(): boolean;
+  };
   /** Sanitized, local-only backend-selection diagnostics snapshot. */
   backendDiagnostics(): DiagnosticSnapshot;
   /** Sanitized, local-only MigraAI Engine routing snapshot (selected model /
    * provider / tier / reason / failed-over models per chat turn). */
   engineDiagnostics(): EngineDiagnosticSnapshot;
+}
+
+/** True when the developer opted into the superseded classic sidebar views. */
+function classicViewsEnabled(): boolean {
+  return vscode.workspace.getConfiguration('migrapilot').get<boolean>('enableClassicViews', false) === true;
+}
+
+/**
+ * Guard for the developer-only classic-view commands.
+ *
+ * The view CONTRIBUTIONS are gated on `config.migrapilot.enableClassicViews`, so
+ * focusing them while the setting is off would fail with an opaque VS Code error.
+ * Refuse explicitly instead, and offer the setting — the Command Center remains
+ * the canonical surface either way.
+ *
+ * The refusal notice is dispatched WITHOUT awaiting: a command must never hold
+ * its promise open until a human dismisses a dialog. The follow-up choice is
+ * handled asynchronously.
+ */
+function requireClassicViews(label: string): boolean {
+  if (classicViewsEnabled()) return true;
+  void vscode.window
+    .showWarningMessage(
+      `${label} is a superseded developer-only view. The canonical interface is the MigraPilot Command Center.`,
+      'Open Command Center',
+      'Enable Classic Views',
+    )
+    .then(async (choice) => {
+      if (choice === 'Open Command Center') {
+        await studioPanel.reveal('chat');
+      } else if (choice === 'Enable Classic Views') {
+        await vscode.commands.executeCommand('workbench.action.openSettings', 'migrapilot.enableClassicViews');
+      }
+    });
+  return false;
+}
+
+/** Narrow a loosely-typed command argument to a shell tab id. */
+function isShellTabArg(value: unknown): value is ShellTabId {
+  return value === 'chat' || value === 'agent' || value === 'diff' || value === 'audit';
 }
 
 /** Map a lifecycle result to a coarse local-probe outcome for diagnostics. */
@@ -151,6 +208,11 @@ async function ensureBrainRunning(): Promise<EnsureResult> {
   const launchSecret = agentBootstrapSecret;
   const result = await brainLifecycle.ensureRunning({ url, autoStart, command, environment: { MIGRAPILOT_AGENT_BOOTSTRAP_SECRET: launchSecret, MIGRAPILOT_AGENT_EXTENSION_PID: String(process.pid) } });
   output(`brain lifecycle: ${result}`);
+  // Canonical activity: the shell reports what the lifecycle ACTUALLY returned.
+  shell?.recordActivity(
+    `Brain lifecycle: ${result}`,
+    result === 'started' || result === 'already-brain' ? 'ok' : result === 'disabled' ? 'info' : 'warn',
+  );
   // Observational: attach the local probe outcome to the latest diagnostic event.
   diagnostics.annotateLocalProbe(localProbeFor(result));
   const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
@@ -241,15 +303,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<MigraP
 
   registerMigraPilotParticipant(context, brainClient, router, migraAiClient, engineDiagnostics);
 
-  sidebar = new MigraPilotSidebarProvider(context.extensionUri, {
-    brainClient,
-    router,
-    providerKind: getProviderKind,
-  });
-  context.subscriptions.push(
-    vscode.window.registerWebviewViewProvider(MigraPilotSidebarProvider.viewType, sidebar),
-  );
-
   agentModeStatusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 98);
   agentModeStatusBar.command = 'migrapilot.openAgentMode';
   agentModeStatusBar.text = agentModeStatusText(false, 'IDLE');
@@ -265,8 +318,16 @@ export async function activate(context: vscode.ExtensionContext): Promise<MigraP
   });
   context.subscriptions.push(
     agentModeStatusBar,
+    // The classic Agent Mode view stays REGISTERED but its view contribution is
+    // gated on `migrapilot.enableClassicViews`, so the provider is inert until a
+    // developer opts in. Registering unconditionally means flipping the setting
+    // takes effect immediately, without a window reload.
     vscode.window.registerWebviewViewProvider(MigraPilotAgentModeViewProvider.viewType, agentModeView, { webviewOptions: { retainContextWhenHidden: true } }),
-    vscode.commands.registerCommand('migrapilot.openAgentMode', async () => agentModeView.reveal()),
+    // PRESERVED command id, re-pointed to the canonical surface: the Command
+    // Center's Agent Workspace is now the one governed approval path, so this
+    // command (and the Agent Mode status-bar item) can never target a view that
+    // is hidden by default.
+    vscode.commands.registerCommand('migrapilot.openAgentMode', async () => studioPanel.reveal('agent')),
     vscode.commands.registerCommand('migrapilot.pairAgentMode', async () => {
       const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
       if (!root) return void vscode.window.showWarningMessage('Open a workspace before pairing Agent Mode.');
@@ -277,10 +338,53 @@ export async function activate(context: vscode.ExtensionContext): Promise<MigraP
     }),
   );
 
-  // Dedicated chat panel (Claude Code / Copilot-style) — its own webview, no
-  // `@migrapilot` mention required. Reuses the same backend turn pipeline as the
-  // native participant. retainContextWhenHidden keeps the transcript alive when
-  // the view is collapsed or hidden.
+  // ── MigraPilot Shell — the redesigned command centre ───────────────────────
+  //
+  // One authoritative state drives two surfaces:
+  //   * `migrapilot.sidebar`  → the left navigation region;
+  //   * the Studio editor panel → header, tabs, chat, proposals, run evidence
+  //     and the right-hand context panel.
+  //
+  // It reuses the SAME backend pipeline as the chat participant and the SAME
+  // Agent Mode endpoints as the existing approval view; it introduces no new
+  // execution path and never touches the Brain lifecycle.
+  shell = new MigraPilotShell({
+    brainClient,
+    router,
+    migraAiClient,
+    engineDiagnostics,
+    memoryMode: () => {
+      const m = String(vscode.workspace.getConfiguration('migrapilot').get('memoryMode', 'session'));
+      return m === 'off' || m === 'durable' ? m : 'session';
+    },
+    executionPolicy: () => policyState.get(),
+    workspaceRoot: () => vscode.workspace.workspaceFolders?.[0]?.uri.fsPath,
+    authorizeWorkspace: (root) => ensureAgentAuthorization(root),
+    memento: context.workspaceState,
+    output: outputChannel,
+    onAgentMode: (enabled, state) => {
+      agentModeStatusBar.text = agentModeStatusText(enabled, state);
+    },
+    revealStudio: (tab) => studioPanel.reveal(tab),
+    extensionUri: context.extensionUri,
+  });
+  studioPanel = new MigraPilotStudioPanel(context.extensionUri, shell);
+  sidebar = new MigraPilotSidebarProvider(shell);
+  context.subscriptions.push(
+    { dispose: () => studioPanel.dispose() },
+    vscode.window.registerWebviewViewProvider(MigraPilotSidebarProvider.viewType, sidebar, {
+      webviewOptions: { retainContextWhenHidden: true },
+    }),
+    vscode.commands.registerCommand('migrapilot.openStudio', async (tab?: string) =>
+      studioPanel.reveal(isShellTabArg(tab) ? tab : undefined),
+    ),
+    // Keep the active editor reflected in the shell's context-files panel.
+    vscode.window.onDidChangeActiveTextEditor(() => void shell.refresh()),
+  );
+
+  // Legacy dedicated chat view — PRESERVED. `migrapilot.chatView` stays
+  // registered and fully functional (its own webview, same backend pipeline), so
+  // no existing workflow or focus command is lost by the redesign.
   chatView = new MigraPilotChatViewProvider(context.extensionUri, {
     brainClient,
     router,
@@ -298,9 +402,23 @@ export async function activate(context: vscode.ExtensionContext): Promise<MigraP
     vscode.window.registerWebviewViewProvider(MigraPilotChatViewProvider.viewType, chatView, {
       webviewOptions: { retainContextWhenHidden: true },
     }),
+    // `migrapilot.openChat` opens the canonical Command Center chat surface.
     vscode.commands.registerCommand('migrapilot.openChat', async () => {
+      await studioPanel.reveal('chat');
+    }),
+    // Developer-only escape hatches for the superseded views. They are hidden
+    // from the Command Palette unless `migrapilot.enableClassicViews` is on
+    // (package.json `menus.commandPalette`), and they refuse rather than fail
+    // obscurely when invoked while the setting is off — a non-contributed view
+    // cannot be focused, so the setting is the single real gate.
+    vscode.commands.registerCommand('migrapilot.dev.openClassicChat', async () => {
+      if (!requireClassicViews('Chat (Classic)')) return;
       await vscode.commands.executeCommand('migrapilot.chatView.focus');
       chatView.reveal();
+    }),
+    vscode.commands.registerCommand('migrapilot.dev.openClassicAgentMode', async () => {
+      if (!requireClassicViews('Agent Mode (Classic)')) return;
+      await agentModeView.reveal();
     }),
   );
 
@@ -416,6 +534,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<MigraP
       delete: (id) => workspaceController.delete(id),
       list: () => workspaceController.list().then((ws) => ws.map((w) => ({ id: w.id, name: w.name, root: w.root }))),
     },
+    classicViews: {
+      enabled: classicViewsEnabled,
+      chatResolved: () => chatView.wasResolved(),
+      agentModeResolved: () => agentModeView.wasResolved(),
+    },
     backendDiagnostics: () => diagnostics.snapshot(),
     engineDiagnostics: () => engineDiagnostics.snapshot(),
   };
@@ -434,6 +557,10 @@ async function resolveBackend(force: boolean): Promise<ResolvedBackend> {
     resolved = { kind: 'local', note: 'resolution-error' };
   }
   statusBar.showBackend(resolved);
+  shell?.recordActivity(
+    `Backend resolved: ${resolved.kind === 'remote' ? 'pilot-api' : resolved.kind === 'remote-unavailable' ? 'pilot-api unavailable' : 'local brain-service'}`,
+    resolved.kind === 'remote-unavailable' ? 'warn' : 'info',
+  );
   void sidebar?.refresh();
   if (pendingResolutionInfo) {
     diagnostics.record(pendingResolutionInfo, {
@@ -524,6 +651,7 @@ async function checkHealth(): Promise<void> {
     const health = await brainClient.health();
     const message = `MigraPilot brain is ${health.status}. Version ${health.version}. Uptime ${health.uptimeSec}s.`;
     output(message);
+    shell?.recordActivity(`Health check: brain ${health.status}`, health.status === 'ok' ? 'ok' : 'warn');
     await vscode.window.showInformationMessage(message, 'Show Logs');
   } catch (error) {
     const message = formatError('Health check failed', error);
