@@ -11,6 +11,15 @@ import type { ModelRegistry, ModelDescriptor } from './modelRegistry.js';
 import { selectModel, tierFromHints } from './capabilityRouter.js';
 import { selectLocalCoding, type LocalRoutingDeps } from './providers/localCodingRouter.js';
 import { retrieveContext } from '../retrieval/retrieve.js';
+import type { IndexService, Scope } from './rag/indexService.js';
+import { scopeFrom } from './memory/memoryRoutes.js';
+import {
+  DEFAULT_MIN_APPROVED_SCORE,
+  decideGrounding,
+  groundingAuditFields,
+  refusalMessage,
+  type GroundingDecision,
+} from './grounding/groundingDecision.js';
 import { resolveEffectivePolicy } from './providers/executionPolicy.js';
 import { assessCodingOutcome } from './providers/codingAssessment.js';
 import type { EscalationController } from './providers/escalationController.js';
@@ -36,6 +45,19 @@ const EngineerBodySchema = z.object({
   rootPath: z.string().min(1),
   task: z.string().min(1),
   ecosystem: z.boolean().optional(),
+  /**
+   * Answer ONLY from the approved semantic index.
+   *
+   * An explicit field, never inferred from the prompt: a governance boundary that
+   * depended on phrasing ("using only the approved index...") would be a boundary
+   * in name only. When set, working-tree tools are withheld from the loop and an
+   * insufficiently-grounded request is refused rather than answered from the
+   * checkout. Defaults to false, so existing callers keep today's behaviour — but
+   * their evidence is now LABELLED with its source mode.
+   */
+  requireApproved: z.boolean().optional(),
+  /** Branch of the caller's checkout, for divergence disclosure. */
+  currentBranch: z.string().optional(),
   /** Prior turns (oldest first). The unified agent serves ordinary chat too, so
    * it carries the conversation the chat path used to hold. */
   history: z
@@ -115,6 +137,12 @@ export function registerEngineerRoutes(
    * a cloud-escalation OFFER (no cloud call here — approval is a separate request).
    * Requires providerRouting for the active policy. */
   escalation?: EscalationController,
+  /** The semantic index, so the agent path can ground on APPROVED evidence rather
+   * than a lexical scan of the checkout. Absent → working-tree mode only, and an
+   * approved-only request is refused rather than silently downgraded. */
+  indexService?: IndexService,
+  /** Branch the approved index was built from, per scope (divergence disclosure). */
+  indexedBranch?: (scope: Scope) => string | undefined,
 ): void {
   const real = env.localProvider === 'openai-compat';
   const providerFor = (model: ModelDescriptor): ProviderAdapter => {
@@ -130,8 +158,16 @@ export function registerEngineerRoutes(
 
   /** The loop's tool surface: read-only capabilities plus edit.preview.
    * edit.apply is deliberately ABSENT — the loop never mutates. */
-  const loopTools = (): EngineerToolInfo[] => [
-    ...toolDeps.registry
+  /**
+   * @param approvedOnly Withhold every capability that can read the checkout.
+   *
+   * The loop's own `plan.update` survives because it touches nothing outside the
+   * loop. This is what makes "approved evidence only" enforceable rather than
+   * advisory: a model that cannot call a file tool cannot quietly ground itself in
+   * unapproved code, no matter how the prompt is phrased.
+   */
+  const loopTools = (approvedOnly = false): EngineerToolInfo[] => [
+    ...(approvedOnly ? [] : toolDeps.registry
       .list({ includeUnavailable: false })
       .filter((t) => t.kind === 'tool' && t.id !== 'edit.apply' && t.readOnly)
       .map((t) => ({
@@ -140,7 +176,7 @@ export function registerEngineerRoutes(
         readOnly: t.readOnly,
         // MCP tools take their OWN arguments and no rootPath — never imply one.
         inputHint: INPUT_HINTS[t.id] ?? (t.id.startsWith('mcp.') ? '{ ...arguments for this tool; NO rootPath }' : '{"rootPath",...}'),
-      })),
+      }))),
     // Not a registry capability: plan state belongs to the LOOP, because it must
     // survive every step and be re-shown to the model. A stateless tool cannot
     // remember what the agent set out to do.
@@ -271,6 +307,7 @@ export function registerEngineerRoutes(
     const headerId = String((request.headers['x-correlation-id'] as string | undefined) ?? '').trim();
     const correlationId = headerId || newCorrelationId();
     const stage: StageLogger = makeStageLogger(correlationId, jsonLineSink((line) => request.log.info(line)));
+    const scope: Scope = scopeFrom(request);
     stage.log('request', { rootPath: body.rootPath, ecosystem: Boolean(body.ecosystem) });
     auditStore.append({ correlationId, type: 'execution.started', component: 'engineer', requestId: headerId || undefined, fields: { workspace: auditHash(body.rootPath), ecosystem: Boolean(body.ecosystem) } });
 
@@ -347,7 +384,70 @@ export function registerEngineerRoutes(
     // ordinary turns to this loop replaced that with a naive keyword search,
     // which on a large monorepo found the wrong "lint" entirely. Bounded and
     // best-effort: retrieval must never slow down or fail a turn.
-    const seededContext = await retrieveContext({
+    // ── Where does this turn's evidence come from? ONE decision, both paths. ──
+    // This route used to seed the loop from a LEXICAL retriever over the live
+    // checkout and never consult the approved index at all. Asked about code that
+    // existed only on an unmerged branch, it seeded three `package.json` files and
+    // a `PROVENANCE.md` — high lexical scores, no relevance — and the model cited
+    // them as though they were approved evidence.
+    const requireApproved = Boolean(body.requireApproved);
+    const grounding: GroundingDecision | undefined = indexService
+      ? await decideGrounding(
+          { requireApproved, query: body.task, currentBranch: body.currentBranch },
+          {
+            approvedIndexId: () => indexService.approvedIndexFor(scope),
+            retrieveApproved: async (indexId, query) => {
+              const rag = await indexService.retrieve(indexId, scope, query, { maxChunks: 6, tokenBudget: 2000, requireApproved: true });
+              if (!rag.ok) throw new Error(rag.code);
+              return rag.chunks.map((c) => ({ path: c.filePath, startLine: c.startLine, endLine: c.endLine, snippet: c.snippet, score: c.score }));
+            },
+            indexIdentity: (indexId) => {
+              const rec = indexService.status(indexId, scope);
+              return rec ? { version: rec.version, indexedBranch: indexedBranch?.(scope) } : undefined;
+            },
+            minScore: DEFAULT_MIN_APPROVED_SCORE,
+          },
+        )
+      : undefined;
+
+    if (grounding) {
+      auditStore.append({
+        correlationId,
+        type: 'retrieval.decided',
+        component: 'engineer',
+        requestId: headerId || undefined,
+        fields: groundingAuditFields(grounding, requireApproved, DEFAULT_MIN_APPROVED_SCORE),
+      });
+    }
+
+    // Approved-only and not groundable ⇒ refuse BEFORE the loop starts, so no
+    // working-tree tool is ever reachable for this turn.
+    if (grounding && grounding.mode === 'approved-index' && !grounding.allowed) {
+      send('refusal', { code: 'INSUFFICIENT_APPROVED_EVIDENCE', reason: grounding.reason, sourceMode: 'approved-index', message: refusalMessage(grounding) });
+      send('done', { ok: false, code: 'INSUFFICIENT_APPROVED_EVIDENCE' });
+      raw.end();
+      return;
+    }
+
+    // Tell the host what the evidence source IS, so it can render provenance
+    // deterministically instead of relying on the model to mention it.
+    if (grounding) {
+      send('grounding', {
+        sourceMode: grounding.mode,
+        ...(grounding.mode === 'approved-index' && grounding.allowed
+          ? { indexVersion: grounding.indexVersion, indexedBranch: grounding.indexedBranch, currentBranch: grounding.currentBranch, branchDiverged: grounding.branchDiverged }
+          : {}),
+        ...(grounding.mode === 'working-tree' ? { indexedBranch: grounding.indexedBranch, currentBranch: grounding.currentBranch } : {}),
+      });
+    }
+
+    // Approved evidence, when the decision produced it. The lexical retriever is
+    // reached ONLY in working-tree mode, which is disclosed to the model below.
+    const approvedSeed = grounding && grounding.mode === 'approved-index' && grounding.allowed
+      ? grounding.chunks.map((c) => ({ path: c.path, startLine: c.startLine, endLine: c.endLine, snippet: c.snippet }))
+      : undefined;
+
+    const seededContext = approvedSeed ?? await retrieveContext({
       query: body.task,
       workspaceRoot: body.rootPath,
       feature: 'chat',
@@ -431,9 +531,23 @@ export function registerEngineerRoutes(
         },
         listFiles: async (root) => listWorkspaceFiles(root),
         stage,
-        tools: loopTools(),
+        tools: loopTools(requireApproved),
       },
-      { rootPath: body.rootPath, task: body.task, ecosystem: body.ecosystem, history: body.history, context: seededContext },
+      {
+        rootPath: body.rootPath,
+        task: body.task,
+        ecosystem: body.ecosystem,
+        history: body.history,
+        context: seededContext,
+        // Label the evidence so the answer can state its provenance.
+        contextSource: approvedSeed ? 'approved-index' : 'working-tree',
+        ...(grounding && grounding.mode === 'approved-index' && grounding.allowed
+          ? { contextIndexVersion: grounding.indexVersion }
+          : {}),
+        ...(grounding && grounding.mode === 'approved-index' && grounding.allowed && grounding.branchDiverged
+          ? { contextBranchNotice: `NOTE: this evidence was indexed from branch \`${grounding.indexedBranch}\`, but the checkout is \`${grounding.currentBranch}\` — say so if the answer depends on code that may have changed since.` }
+          : {}),
+      },
     );
 
     auditStore.append({ correlationId, type: 'loop.started', component: 'engineer' });

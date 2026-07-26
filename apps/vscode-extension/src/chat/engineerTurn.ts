@@ -5,6 +5,7 @@
 // the same honesty contract as /agent.
 
 import type { MigraAiClient, EngineerRequest } from '../services/migraAiClient.js';
+import { sourceModeBadge } from '../panel/shell/composerModel.js';
 import { isPilotError } from '@migrapilot/pilot-client';
 
 export interface EngineerSink {
@@ -84,7 +85,17 @@ export async function runEngineerTurn(
   let streamed = '';
   try {
     for await (const ev of client.engineerStream(req, signal)) {
-      if (ev.event === 'route') {
+      if (ev.event === 'grounding') {
+        // HOST-RENDERED provenance. The model does not decide whether this shows:
+        // "say that you used the working tree" is an instruction, not a guarantee.
+        const badge = sourceModeBadge(ev.data as Parameters<typeof sourceModeBadge>[0]);
+        if (badge) sink.markdown(`_${badge}_\n\n`);
+      } else if (ev.event === 'refusal') {
+        // An approved-only turn the Brain could not ground. Rendered verbatim from
+        // the Brain's reason — the loop never started, so there is nothing else.
+        const d = ev.data as { message?: string; reason?: string };
+        sink.markdown(`\n**Insufficient approved evidence.**\n\n${d.message ?? 'The approved semantic index does not support this request.'}\n\n_No working-tree files were consulted._\n`);
+      } else if (ev.event === 'route') {
         const d = ev.data as { model?: string };
         sink.progress?.(`MigraPilot → ${d.model ?? 'model'}`);
       } else if (ev.event === 'step') {

@@ -84,6 +84,17 @@ export interface EngineerInput {
    * turns here dropped it. Seeding those excerpts restores the grounding AND
    * usually saves a search round. */
   context?: Array<{ path: string; startLine: number; endLine: number; snippet: string }>;
+  /**
+   * WHERE {@link context} came from. Unlabelled evidence is how this loop cited
+   * three `package.json` files as though they were approved: the excerpts looked
+   * identical whether they came from the reviewed index or a lexical scan of the
+   * working tree. The prompt states the mode so the answer can too.
+   */
+  contextSource?: 'approved-index' | 'working-tree';
+  /** Approved generation the context came from (approved-index mode only). */
+  contextIndexVersion?: number;
+  /** Set when the approved index was built from a different branch than the checkout. */
+  contextBranchNotice?: string;
 }
 
 export type EngineerNoteKind = 'normalized' | 'duplicate' | 'command-effect' | 'replan' | 'policy' | 'quality' | 'plan';
@@ -227,8 +238,16 @@ function protocolPrompt(input: EngineerInput, tools: EngineerToolInfo[]): string
     '',
     excerpts
       ? [
-          'CODE RETRIEVED FOR THIS MESSAGE (real excerpts from this workspace, ranked',
-          'by relevance — this is a SAMPLE, not the whole repo):',
+          // The SOURCE MODE is stated first. Unlabelled excerpts read identically
+          // whether they were reviewed or scraped from an unmerged checkout, which
+          // is how a lexical hit on `package.json` got cited as approved evidence.
+          input.contextSource === 'approved-index'
+            ? `CODE RETRIEVED FROM THE APPROVED SEMANTIC INDEX${input.contextIndexVersion !== undefined ? ` (approved generation v${input.contextIndexVersion})` : ''} — this is REVIEWED evidence.`
+            : input.contextSource === 'working-tree'
+              ? 'CODE RETRIEVED FROM THE WORKING TREE (the current checkout) — this is UNAPPROVED evidence. If you state a repository fact from it, say that it came from the working tree rather than the approved index.'
+              : 'CODE RETRIEVED FOR THIS MESSAGE:',
+          input.contextBranchNotice ?? '',
+          '(real excerpts from this workspace, ranked by relevance — a SAMPLE, not the whole repo):',
           excerpts,
           '',
           'If these excerpts answer the QUESTION, answer NOW from them and cite `path:line`',

@@ -23,6 +23,13 @@ import type { ProviderAdapter } from '../providers/providerRegistry.js';
 import { StubProvider } from '../providers/providerRegistry.js';
 import { OpenAiCompatProvider } from '../providers/openAiCompatProvider.js';
 import { retrieveContext } from '../retrieval/retrieve.js';
+import {
+  DEFAULT_MIN_APPROVED_SCORE,
+  decideGrounding,
+  groundingAuditFields,
+  refusalMessage,
+  type GroundingDecision,
+} from './grounding/groundingDecision.js';
 import { ModelRegistry, type ModelDescriptor, type ProviderSource } from './modelRegistry.js';
 import { selectModel, tierFromHints, type RouteSpec } from './capabilityRouter.js';
 import { selectLocalCoding, type LocalRoutingDeps } from './providers/localCodingRouter.js';
@@ -60,6 +67,15 @@ interface AiChatBody {
   activeFile?: string;
   /** When set, the engine grounds the turn with repo retrieval (RAG). */
   workspaceRoot?: string;
+  /**
+   * Answer ONLY from the approved semantic index — an explicit field, never
+   * inferred from the prompt. Withholds the working-tree lexical fallback and
+   * refuses an insufficiently-grounded turn instead of substituting unapproved
+   * evidence. Defaults to false so existing callers are unaffected.
+   */
+  requireApproved?: boolean;
+  /** Branch of the caller's checkout, for divergence disclosure. */
+  currentBranch?: string;
   /** SSE token streaming when truthy; otherwise a single JSON response. */
   stream?: boolean;
   /** Server-side conversation memory: the engine owns durable history. */
@@ -126,6 +142,9 @@ export function registerAiRoutes(
   /** Slice 3: when provided, a CODING chat turn that fails locally with a DEFINED
    * reason may mint a cloud-escalation OFFER (no cloud call here). */
   escalation?: EscalationController,
+  /** Branch the APPROVED index was built from, per scope — for divergence
+   * disclosure. Absent → divergence is reported as unknown, never as "same". */
+  indexedBranch?: (scope: { owner: string; workspace: string }) => string | undefined,
 ): ModelRegistry {
   const real = env.localProvider === 'openai-compat';
   const qual = qualStore ?? new QualificationStore();
@@ -306,15 +325,50 @@ export function registerAiRoutes(
     // chat (fail-closed — no approved index ⇒ no RAG). Retrieved chunks are cited
     // and the model is told to distinguish evidence from inference. ──
     let ragChunks: Array<{ path: string; startLine: number; endLine: number; snippet: string; score: number; source: 'embedding' }> | undefined;
+    let grounding: GroundingDecision | undefined;
     if (indexService && userPrompt && policy.retrieve !== false) {
-      const approvedId = indexService.approvedIndexFor(scope);
-      if (approvedId) {
-        const rag = await indexService.retrieve(approvedId, scope, userPrompt, { maxChunks: 6, tokenBudget: 2000, requireApproved: true }).catch(() => null);
-        if (rag && rag.ok && rag.chunks.length) {
-          ragChunks = rag.chunks.map((c) => ({ path: c.filePath, startLine: c.startLine, endLine: c.endLine, snippet: c.snippet, score: c.score, source: 'embedding' as const }));
-          const cites = rag.chunks.map((c) => `${c.filePath}:${c.startLine}-${c.endLine}`).join(', ');
-          effectiveSummary = `Retrieved workspace evidence (cite these when stating repository facts; do NOT claim a repo fact without a cited source; distinguish retrieved evidence from your own inference): ${cites}\n\n${effectiveSummary}`;
-        }
+      grounding = await decideGrounding(
+        { requireApproved: Boolean(body.requireApproved), query: userPrompt, currentBranch: body.currentBranch },
+        {
+          approvedIndexId: () => indexService.approvedIndexFor(scope),
+          retrieveApproved: async (indexId, query) => {
+            const rag = await indexService.retrieve(indexId, scope, query, { maxChunks: 6, tokenBudget: 2000, requireApproved: true });
+            if (!rag.ok) throw new Error(rag.code);
+            return rag.chunks.map((c) => ({ path: c.filePath, startLine: c.startLine, endLine: c.endLine, snippet: c.snippet, score: c.score }));
+          },
+          indexIdentity: (indexId) => {
+            const rec = indexService.status(indexId, scope);
+            // `indexedBranch` is the branch the APPROVED generation was built from.
+            // It is recorded on the workspace, not the index, so a missing lookup
+            // degrades to "unknown" — never to a false "same branch" claim.
+            return rec ? { version: rec.version, indexedBranch: indexedBranch?.(scope) } : undefined;
+          },
+          minScore: DEFAULT_MIN_APPROVED_SCORE,
+        },
+      );
+      auditStore.append({
+        correlationId: requestId,
+        requestId,
+        type: 'retrieval.decided',
+        component: 'chat',
+        fields: groundingAuditFields(grounding, Boolean(body.requireApproved), DEFAULT_MIN_APPROVED_SCORE),
+      });
+
+      // An approved-only request that could not be grounded is REFUSED here. It
+      // must not reach the model, because the model would answer from whatever
+      // else is in context and the caller asked for approved evidence only.
+      if (grounding.mode === 'approved-index' && !grounding.allowed) {
+        reply.code(409);
+        return { ok: false, code: 'INSUFFICIENT_APPROVED_EVIDENCE', error: refusalMessage(grounding), reason: grounding.reason, sourceMode: 'approved-index' };
+      }
+
+      if (grounding.mode === 'approved-index' && grounding.allowed) {
+        ragChunks = grounding.chunks.map((c) => ({ ...c, source: 'embedding' as const }));
+        const cites = grounding.chunks.map((c) => `${c.path}:${c.startLine}-${c.endLine}`).join(', ');
+        const divergence = grounding.branchDiverged
+          ? ` NOTE: this evidence was indexed from branch \`${grounding.indexedBranch}\`, but the checkout is \`${grounding.currentBranch}\` — say so if the answer depends on code that may have changed.`
+          : '';
+        effectiveSummary = `Retrieved workspace evidence from the APPROVED semantic index (version ${grounding.indexVersion}) (cite these when stating repository facts; do NOT claim a repo fact without a cited source; distinguish retrieved evidence from your own inference): ${cites}.${divergence}\n\n${effectiveSummary}`;
       }
     }
 
@@ -432,6 +486,13 @@ export function registerAiRoutes(
     ragChunks?: Array<{ path: string; startLine: number; endLine: number; snippet: string; score: number; source: 'embedding' }>,
   ): Promise<ChatTurnRequest> {
     let retrievedChunks: ChatTurnRequest['context']['retrievedChunks'] = ragChunks;
+    // ── The silent fallback that made "approved index" a preference ───────────
+    // When approved retrieval returned nothing, this quietly replaced it with
+    // WORKING-TREE lexical chunks carrying the same "cite these" instruction — so
+    // an approved-only request could be answered from unapproved, uncommitted code
+    // with no disclosure. An approved-only turn now never reaches here (it was
+    // refused above); this guard makes that structural rather than incidental.
+    if (body.requireApproved) return finishChatRequest(body, userPrompt, summary, retrievedChunks);
     if (!retrievedChunks?.length && body.workspaceRoot) {
       try {
         const retrieveReq: RetrieveRequest = {
@@ -451,6 +512,15 @@ export function registerAiRoutes(
         /* grounding is best-effort — never fail a turn on retrieval */
       }
     }
+    return finishChatRequest(body, userPrompt, summary, retrievedChunks);
+  }
+
+  function finishChatRequest(
+    body: AiChatBody,
+    userPrompt: string,
+    summary: string,
+    retrievedChunks: ChatTurnRequest['context']['retrievedChunks'],
+  ): ChatTurnRequest {
     return {
       feature: 'chat',
       modelProfile: 'default',
