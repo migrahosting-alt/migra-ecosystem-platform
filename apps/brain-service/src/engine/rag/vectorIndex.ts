@@ -66,9 +66,16 @@ export class VectorIndex {
     return n;
   }
 
+  /**
+   * Size estimate. Defensive about `vector` because this ran AFTER the durable
+   * commit and threw on an undefined one, converting a committed sync into a
+   * reported failure. It is now called before the commit, and it also refuses to
+   * be the thing that fails: a missing vector contributes nothing rather than
+   * throwing. Vector VALIDITY is enforced at the persistence boundary, not here.
+   */
   approxBytes(): number {
     let n = 0;
-    for (const list of this.byFile.values()) for (const c of list) n += c.text.length + c.vector.length * 8;
+    for (const list of this.byFile.values()) for (const c of list) n += c.text.length + (c.vector?.length ?? 0) * 8;
     return n;
   }
 

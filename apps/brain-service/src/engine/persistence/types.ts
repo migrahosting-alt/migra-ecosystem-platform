@@ -50,7 +50,10 @@ export interface PersistedIndexRecord {
   ownerScope: string;
   sourceType: string;
   root: string;
+  /** Lifecycle of the LATEST candidate — not what production retrieval serves. */
   state: string;
+  /** Version authorised for production retrieval; undefined when none is. */
+  approvedVersion?: number;
   version: number;
   embeddingModel: string;
   embeddingVersion: string;
@@ -86,8 +89,15 @@ export interface RagIndexPersistence {
    * previous persisted version intact (never a partial write).
    */
   commitSync(indexId: string, version: number, changed: PersistedChunk[], changedFiles: string[], deletedFiles: string[], updatedAt: number): void;
+  /**
+   * Promote (or clear, with `null`) the version authorised for production
+   * retrieval. Independent of `state`: advancing a candidate must never move this
+   * pointer, and demoting a candidate's lifecycle must never revoke it.
+   */
+  setApprovedVersion(id: string, approvedVersion: number | null, updatedAt: number): void;
   loadIndexes(): PersistedIndexRecord[];
-  loadChunks(indexId: string): PersistedChunk[];
+  /** Chunks for ONE version. Never load an index_id across versions. */
+  loadChunks(indexId: string, indexVersion: number): PersistedChunk[];
 }
 
 // ── Embedding cache ──────────────────────────────────────────────────────────
