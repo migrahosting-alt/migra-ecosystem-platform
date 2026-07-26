@@ -350,8 +350,10 @@ test('the activity feed is bounded, newest-first, and empty until something happ
 
 // ── Tabs, welcome actions, icons ─────────────────────────────────────────────
 
-test('the tab set matches the approved mockup exactly and validates', () => {
-  assert.deepEqual(SHELL_TABS.map((tab) => tab.label), ['MigraPilot Chat', 'Agent Workspace', 'Run Diff', 'Audit Trail']);
+test('the tab set matches the approved contract and validates', () => {
+  // Four accepted tabs, plus Workspace from the MigraAI Workspace consolidation.
+  assert.deepEqual(SHELL_TABS.map((tab) => tab.label), ['MigraPilot Chat', 'Agent Workspace', 'Run Diff', 'Audit Trail', 'Workspace']);
+  assert.equal(isShellTab('workspace'), true);
   assert.equal(isShellTab('chat'), true);
   assert.equal(isShellTab('audit'), true);
   assert.equal(isShellTab('nope'), false);

@@ -510,6 +510,12 @@ details.raw pre { max-height: 240px; overflow: auto; }
   overflow: hidden;
   margin: 10px 0;
 }
+/* A non-governed card: same structure, neutral accent — used when the semantic
+ * index needs no approval, so orange stays reserved for governance. */
+.pcard-quiet { border-color: var(--mp-border); }
+.pcard-quiet .pcard-head { background: var(--mp-elevated); }
+.pcard-quiet .pcard-head .ptitle { color: var(--mp-fg-dim); }
+
 .pcard-head {
   display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
   padding: 9px 12px;

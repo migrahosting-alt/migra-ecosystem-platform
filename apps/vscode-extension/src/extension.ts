@@ -136,6 +136,14 @@ export interface MigraPilotApi {
     chatResolved(): boolean;
     agentModeResolved(): boolean;
   };
+  /** Command Center observability for the installed-acceptance gate: the exact
+   * state the shell would render, plus the ability to drive a tab load and a
+   * Workspace-tab control the way a click would. */
+  shell: {
+    state(): unknown;
+    loadTab(tab: string): Promise<void>;
+    workspaceIntent(intent: string): Promise<void>;
+  };
   /** Sanitized, local-only backend-selection diagnostics snapshot. */
   backendDiagnostics(): DiagnosticSnapshot;
   /** Sanitized, local-only MigraAI Engine routing snapshot (selected model /
@@ -180,7 +188,7 @@ function requireClassicViews(label: string): boolean {
 
 /** Narrow a loosely-typed command argument to a shell tab id. */
 function isShellTabArg(value: unknown): value is ShellTabId {
-  return value === 'chat' || value === 'agent' || value === 'diff' || value === 'audit';
+  return value === 'chat' || value === 'agent' || value === 'diff' || value === 'audit' || value === 'workspace';
 }
 
 /** Map a lifecycle result to a coarse local-probe outcome for diagnostics. */
@@ -365,6 +373,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<MigraP
     onAgentMode: (enabled, state) => {
       agentModeStatusBar.text = agentModeStatusText(enabled, state);
     },
+    workspaceController: () => workspaceController,
     revealStudio: (tab) => studioPanel.reveal(tab),
     extensionUri: context.extensionUri,
   });
@@ -438,7 +447,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<MigraP
     vscode.window.registerWebviewViewProvider(MigraPilotWorkspaceViewProvider.viewType, workspaceView, {
       webviewOptions: { retainContextWhenHidden: true },
     }),
+    // PRESERVED command id, re-pointed to the canonical surface: the Command
+    // Center's Workspace tab is now the one MigraAI Workspace surface, so this
+    // command can never target a view that is hidden by default.
     vscode.commands.registerCommand('migrapilot.openWorkspacePanel', async () => {
+      await studioPanel.reveal('workspace');
+    }),
+    vscode.commands.registerCommand('migrapilot.dev.openClassicWorkspace', async () => {
+      if (!requireClassicViews('MigraAI Workspace (Classic)')) return;
       await vscode.commands.executeCommand('migrapilot.workspace.focus');
     }),
   );
@@ -533,6 +549,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<MigraP
       setMemoryMode: (id, mode) => workspaceController.setMemoryMode(id, mode),
       delete: (id) => workspaceController.delete(id),
       list: () => workspaceController.list().then((ws) => ws.map((w) => ({ id: w.id, name: w.name, root: w.root }))),
+    },
+    shell: {
+      state: () => shell.currentState(),
+      loadTab: (tab: string) => (isShellTabArg(tab) ? shell.loadTab(tab) : Promise.resolve()),
+      workspaceIntent: (intent: string) => shell.runWorkspaceIntentForTest(intent),
     },
     classicViews: {
       enabled: classicViewsEnabled,

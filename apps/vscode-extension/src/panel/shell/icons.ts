@@ -61,6 +61,8 @@ export const ICON_PATHS: Record<string, string> = {
   'source-control':
     '<circle cx="5" cy="4" r="1.7" fill="none" stroke="currentColor" stroke-width="1.2"/><circle cx="5" cy="12" r="1.7" fill="none" stroke="currentColor" stroke-width="1.2"/><circle cx="11.4" cy="8" r="1.7" fill="none" stroke="currentColor" stroke-width="1.2"/><path d="M5 5.7v4.6M6.7 8h3" fill="none" stroke="currentColor" stroke-width="1.2"/>',
   sync: '<path d="M2.6 8a5.4 5.4 0 019.2-3.8M13.4 8a5.4 5.4 0 01-9.2 3.8" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><path d="M11.8 2.2v2.4H9.4M4.2 13.8v-2.4h2.4" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>',
+  database:
+    '<ellipse cx="8" cy="4" rx="5" ry="1.9" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M3 4v8c0 1 2.2 1.9 5 1.9s5-.9 5-1.9V4" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M3 8c0 1 2.2 1.9 5 1.9s5-.9 5-1.9" fill="none" stroke="currentColor" stroke-width="1.3"/>',
 };
 
 const FALLBACK = ICON_PATHS.circle!;

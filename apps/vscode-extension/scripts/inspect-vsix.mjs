@@ -77,9 +77,17 @@ try {
   // behind the explicit `migrapilot.enableClassicViews` setting, so a default
   // install can never present two competing experiences.
   const CLASSIC_GATE = 'config.migrapilot.enableClassicViews';
-  const CLASSIC_VIEW_IDS = ['migrapilot.chatView', 'migrapilot.agentMode'];
+  // MigraAI Workspace joined the retired set once the Command Center's Workspace
+  // tab took over the full lifecycle.
+  const CLASSIC_VIEW_IDS = ['migrapilot.chatView', 'migrapilot.agentMode', 'migrapilot.workspace'];
   const sidebarViews = manifest.contributes?.views?.migrapilot ?? [];
   const defaultVisibleViews = sidebarViews.filter((view) => !view.when);
+
+  if (defaultVisibleViews.length !== 1 || defaultVisibleViews[0]?.id !== 'migrapilot.sidebar') {
+    throw new Error(
+      `The compact navigation launcher must be the ONLY default-visible view; got: ${defaultVisibleViews.map((v) => v.id).join(', ') || '(none)'}`,
+    );
+  }
 
   if (sidebarViews[0]?.id !== 'migrapilot.sidebar') {
     throw new Error(
@@ -104,7 +112,7 @@ try {
   }
 
   // A default-visible view must not read as a second chat / Agent Mode surface.
-  const duplicateSurfaces = defaultVisibleViews.filter((view) => /chat|agent mode/i.test(view.name ?? ''));
+  const duplicateSurfaces = defaultVisibleViews.filter((view) => /chat|agent mode|migraai workspace/i.test(view.name ?? ''));
   if (duplicateSurfaces.length > 0) {
     throw new Error(
       `Packaged manifest exposes duplicate chat/Agent Mode surfaces by default: ${duplicateSurfaces.map((view) => `${view.id} ("${view.name}")`).join(', ')}`,
@@ -118,7 +126,7 @@ try {
 
   // The developer escape hatches must be hidden from the palette by default.
   const palette = manifest.contributes?.menus?.commandPalette ?? [];
-  for (const devCommand of ['migrapilot.dev.openClassicChat', 'migrapilot.dev.openClassicAgentMode']) {
+  for (const devCommand of ['migrapilot.dev.openClassicChat', 'migrapilot.dev.openClassicAgentMode', 'migrapilot.dev.openClassicWorkspace']) {
     if (!commands.some((entry) => entry.command === devCommand)) {
       throw new Error(`Missing developer restore command: ${devCommand}`);
     }

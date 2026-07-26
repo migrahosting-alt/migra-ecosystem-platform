@@ -3,7 +3,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { runTests } from '@vscode/test-electron';
-import { killStaleBrains } from './support/staleBrains.js';
+import { TEST_BRAIN_OWNER_ENV, killStaleBrains, markTestBrainOwnership } from './support/staleBrains.js';
 
 // See runTest.ts — strip the parent extension host's env so the child VS Code
 // launches as a real editor rather than plain Node.
@@ -76,6 +76,10 @@ function extractPackagedExtension(vsix: string): string {
 
 async function main(): Promise<void> {
   cleanElectronEnv();
+  // Stamp ownership FIRST: every brain this run starts (harness or extension,
+  // which inherits process.env) carries the marker, so the sweep can tell them
+  // apart from a developer's pre-existing brain on the same port.
+  const brainOwnerToken = markTestBrainOwnership();
   killStaleBrains(); // deterministic: a prior interrupted run can't contaminate this gate
   const extensionRoot = path.resolve(__dirname, '../..');
   const extensionTestsPath = path.resolve(__dirname, './suite/index.js');
@@ -106,6 +110,7 @@ async function main(): Promise<void> {
         `--user-data-dir=${path.join(workspace, '.vscode-user')}`,
       ],
       extensionTestsEnv: {
+        [TEST_BRAIN_OWNER_ENV]: brainOwnerToken,
         MIGRAPILOT_E2E_WORKSPACE: workspace,
         MIGRAPILOT_STATE_DB: 'off',
         MIGRAPILOT_TEST_MODE: 'vsix',

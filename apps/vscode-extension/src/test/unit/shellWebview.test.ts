@@ -6,7 +6,7 @@ import { shellHtml } from '../../panel/shell/shellHtml.js';
 import { shellStyles } from '../../panel/shell/shellStyles.js';
 import { navigationHtml, navigationScript } from '../../panel/shell/navigationHtml.js';
 import { icon, knownIcons } from '../../panel/shell/icons.js';
-import { NAV_ACTIONS, findNavAction, navListActions, navPrimaryAction } from '../../panel/shell/navigationModel.js';
+import { NAV_ACTIONS, SHELL_TABS, findNavAction, navListActions, navPrimaryAction } from '../../panel/shell/navigationModel.js';
 import { SLASH_COMMANDS } from '../../panel/shell/composerModel.js';
 
 const NONCE = 'test-nonce-abcdefgh';
@@ -145,12 +145,12 @@ test('inline event handler attributes are never emitted', () => {
 
 // ── Layout contract ──────────────────────────────────────────────────────────
 
-test('the document declares the three regions, four tabs and six context panels', () => {
+test('the document declares the three regions, every tab and six context panels', () => {
   const document = html();
   for (const id of ['nav-drawer', 'main', 'context', 'composer', 'statusrow', 'tabs', 'hdr']) {
     assert.ok(document.includes(`id="${id}"`), `region #${id} must exist`);
   }
-  for (const tab of ['chat', 'agent', 'diff', 'audit']) {
+  for (const tab of SHELL_TABS.map((entry) => entry.id)) {
     assert.ok(document.includes(`id="panel-${tab}"`), `panel-${tab} must exist`);
     assert.ok(document.includes(`id="tabbtn-${tab}"`), `tabbtn-${tab} must exist`);
   }
@@ -176,10 +176,10 @@ test('the initial tab is reflected in aria-selected and the roving tabindex', ()
   // `[aria-selected="true"]` selectors.
   const strip = document.slice(document.indexOf('<div id="tabs"'), document.indexOf('<div class="body"'));
   assert.equal((strip.match(/aria-selected="true"/g) ?? []).length, 1, 'exactly one tab is selected');
-  assert.equal((strip.match(/aria-selected="false"/g) ?? []).length, 3);
+  assert.equal((strip.match(/aria-selected="false"/g) ?? []).length, SHELL_TABS.length - 1);
   // The roving tabindex puts exactly one tab button in the tab order.
   const tabButtons = strip.match(/role="tab"[\s\S]*?tabindex="(-?\d)"/g) ?? [];
-  assert.equal(tabButtons.length, 4);
+  assert.equal(tabButtons.length, SHELL_TABS.length);
   assert.equal(tabButtons.filter((button) => button.endsWith('tabindex="0"')).length, 1);
 });
 
@@ -188,8 +188,8 @@ test('the initial tab is reflected in aria-selected and the roving tabindex', ()
 test('the tab strip, thread, composer and status row expose the right roles', () => {
   const document = html();
   assert.ok(document.includes('role="tablist"'));
-  assert.equal((document.match(/role="tab"/g) ?? []).length, 4);
-  assert.equal((document.match(/role="tabpanel"/g) ?? []).length, 4);
+  assert.equal((document.match(/role="tab"/g) ?? []).length, SHELL_TABS.length);
+  assert.equal((document.match(/role="tabpanel"/g) ?? []).length, SHELL_TABS.length);
   assert.ok(document.includes('id="thread" role="log"'));
   assert.ok(document.includes('aria-live="polite"'));
   assert.ok(document.includes('role="complementary"') || document.includes('<aside id="context"'));
@@ -294,6 +294,29 @@ test('the navigation surface renders the launcher sections and a footer identity
   assert.equal(document.split('<script').length - 1, 1);
   // The status summary belongs to the Studio panel — not duplicated in the rail.
   assert.ok(!document.includes('id="statusrow"'));
+});
+
+test('every tab panel is actually rendered by the state handler', () => {
+  // A tab whose renderer is never invoked paints an empty panel — the contract
+  // is that each region has both a renderer AND a call from the state handler.
+  const script = shellScript();
+  const handler = script.slice(script.indexOf("case 'state':"), script.indexOf("case 'tab':"));
+  assert.ok(handler.length > 100, 'the state handler was located');
+  for (const call of [
+    'renderNavigation(SHELL.nav)',
+    'renderContext(SHELL.context)',
+    'renderAgentWorkspace(SHELL.agent)',
+    'renderRunDiff(SHELL.diff)',
+    'renderAuditTrail(SHELL.history, SHELL.detail)',
+    'renderWorkspaceTab(SHELL.workspace)',
+    'renderStatus(SHELL.status)',
+  ]) {
+    assert.ok(handler.includes(call), `the state handler must call ${call}`);
+  }
+  // And every renderer it calls must exist.
+  for (const fn of ['renderNavigation', 'renderContext', 'renderAgentWorkspace', 'renderRunDiff', 'renderAuditTrail', 'renderWorkspaceTab', 'renderStatus']) {
+    assert.ok(script.includes(`function ${fn}(`), `${fn} must be defined`);
+  }
 });
 
 test('the launcher bundle excludes the context-panel renderer entirely', () => {

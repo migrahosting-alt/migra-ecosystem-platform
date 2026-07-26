@@ -17,6 +17,7 @@ import { composerScript } from './script/composer.js';
 import { contextPanelsScript } from './script/contextPanels.js';
 import { coreScript } from './script/core.js';
 import { regionsScript } from './script/regions.js';
+import { workspaceScript } from './script/workspace.js';
 
 const SLASH_TOKEN = 'SLASH_COMMANDS_JSON';
 const ICONS_TOKEN = 'ICON_PATHS_JSON';
@@ -37,6 +38,7 @@ export function shellScript(): string {
     contextPanelsScript(),
     chatScript(),
     agentScript(),
+    workspaceScript(),
     composerScript(),
     '})();',
   ];

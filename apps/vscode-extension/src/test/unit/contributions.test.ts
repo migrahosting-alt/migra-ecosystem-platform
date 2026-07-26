@@ -21,7 +21,7 @@ const manifest = JSON.parse(
 
 const views = manifest.contributes.views.migrapilot;
 const commands = manifest.contributes.commands.map((entry) => entry.command);
-const CLASSIC_VIEWS = ['migrapilot.chatView', 'migrapilot.agentMode'];
+const CLASSIC_VIEWS = ['migrapilot.chatView', 'migrapilot.agentMode', 'migrapilot.workspace'];
 const CLASSIC_GATE = 'config.migrapilot.enableClassicViews';
 
 /** Views a user sees with default settings. */
@@ -66,14 +66,15 @@ test('each classic view is gated on the explicit developer setting', () => {
   }
 });
 
-test('the default sidebar contains no duplicate chat / agent-approval surface', () => {
+test('the launcher is the ONLY default-visible view', () => {
   const visible = defaultVisibleViews();
-  // Exactly the launcher plus the MigraAI Workspace operational panel, which has
-  // no Command Center equivalent and is neither a chat nor an approval surface.
-  assert.deepEqual(visible.map((view) => view.id), ['migrapilot.sidebar', 'migrapilot.workspace']);
+  // The MigraAI Workspace panel joined the retired set once the Command Center's
+  // Workspace tab took over the full lifecycle.
+  assert.deepEqual(visible.map((view) => view.id), ['migrapilot.sidebar']);
   for (const view of visible) {
     assert.doesNotMatch(view.name, /chat/i, `${view.id} must not be a second chat surface`);
     assert.doesNotMatch(view.name, /agent mode/i, `${view.id} must not be a second Agent Mode surface`);
+    assert.doesNotMatch(view.name, /migraai workspace/i, `${view.id} must not be a second workspace surface`);
   }
 });
 
@@ -92,7 +93,7 @@ test('the classic-views setting exists, defaults to OFF, and documents the canon
 });
 
 test('the classic-view developer commands exist and are hidden from the palette by default', () => {
-  const devCommands = ['migrapilot.dev.openClassicChat', 'migrapilot.dev.openClassicAgentMode'];
+  const devCommands = ['migrapilot.dev.openClassicChat', 'migrapilot.dev.openClassicAgentMode', 'migrapilot.dev.openClassicWorkspace'];
   const palette = manifest.contributes.menus.commandPalette ?? [];
   for (const command of devCommands) {
     assert.ok(commands.includes(command), `${command} must be contributed`);
