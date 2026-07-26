@@ -6,7 +6,7 @@
 // path for backend material to be baked into the HTML.
 
 import { icon } from './icons.js';
-import { COMPOSER_PLACEHOLDER, ROUTING_OPTIONS } from './composerModel.js';
+import { COMPOSER_PLACEHOLDER, ROUTING_OPTIONS, SOURCE_MODE_OPTIONS } from './composerModel.js';
 import { HEADER_ACTIONS, SHELL_SUBTITLE, SHELL_TITLE, WELCOME_ACTIONS, WELCOME_SUBTITLE } from './welcomeModel.js';
 import { SHELL_TABS, type ShellTabId } from './navigationModel.js';
 import { shellStyles } from './shellStyles.js';
@@ -73,6 +73,16 @@ function welcomeCards(): string {
 
 function routingOptions(): string {
   return ROUTING_OPTIONS.map((option) => `<option value="${option.value}">${escapeHtml(option.label)}</option>`).join('');
+}
+
+/** Evidence-source selector — the visible half of the approved-only boundary.
+ * Without it the mode is reachable only via `/approved`, which is discoverable
+ * but not obvious, and an operator cannot SEE which source the next turn is
+ * held to. */
+function sourceModeOptions(): string {
+  return SOURCE_MODE_OPTIONS.map(
+    (option) => `<option value="${option.value}" title="${escapeHtml(option.hint)}">${escapeHtml(option.label)}</option>`,
+  ).join('');
 }
 
 export function shellHtml(options: ShellHtmlOptions): string {
@@ -170,6 +180,8 @@ export function shellHtml(options: ShellHtmlOptions): string {
         <button class="ctool" id="cmic" title="Voice input">${icon('mic')}<span>Voice</span></button>
         <button class="ctool" id="ccmd" title="Slash commands">${icon('terminal-cmd')}<span>Commands</span></button>
         <span class="spacer"></span>
+        <label class="sr-only" for="csource">Evidence source</label>
+        <select id="csource" title="Where answers may draw evidence from">${sourceModeOptions()}</select>
         <label class="sr-only" for="croute">Model routing</label>
         <select id="croute" title="Model routing for the next message">${routingOptions()}</select>
         <button id="csend" title="Send (Enter)" aria-label="Send message">${icon('send')}</button>

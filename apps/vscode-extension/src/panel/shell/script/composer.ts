@@ -200,6 +200,9 @@ function send() {
     files: images.length ? images.map((f) => ({ name: f.name, type: f.type, dataUrl: f.dataUrl })) : undefined,
     provider: provider,
     modelId: pinned,
+    // Evidence source for THIS turn, read from the selector. Explicit request
+    // state — the boundary must never depend on how the question is worded.
+    sourceMode: ($('csource') ? $('csource').value : 'auto'),
     history: history
   });
 
@@ -397,6 +400,14 @@ window.addEventListener('message', (event) => {
     case 'tab':
       selectTab(message.tab, { silent: true });
       break;
+
+    case 'sourceMode': {
+      // The host owns this state; reflect it so the operator can SEE which source
+      // the next turn is held to, however the mode was set.
+      const select = $('csource');
+      if (select && typeof message.mode === 'string') select.value = message.mode;
+      break;
+    }
 
     case 'models': {
       const route = $('croute');

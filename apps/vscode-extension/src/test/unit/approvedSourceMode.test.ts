@@ -114,3 +114,16 @@ test('the shell keeps the mode sticky on the host side', () => {
   assert.match(shell, /private async currentBranch\(\)/, 'the branch is resolved for disclosure');
   assert.match(shell, /return undefined; \/\/ unknown, not "same"/, 'an unresolved branch stays unknown');
 });
+
+test('the selector is RENDERED, not just defined', () => {
+  // It was defined and never rendered once: the bundler tree-shook the labels out
+  // and the only way to arm the mode was `/approved`. An operator could not see
+  // which evidence source the next turn was held to.
+  const html = source('panel/shell/shellHtml.ts');
+  assert.match(html, /SOURCE_MODE_OPTIONS/, 'the options must reach the markup');
+  assert.match(html, /id="csource"/, 'a real select element');
+
+  const composer = source('panel/shell/script/composer.ts');
+  assert.match(composer, /sourceMode: \(\$\('csource'\)/, 'and its value must be sent with the turn');
+  assert.match(composer, /case 'sourceMode':/, 'host-set modes are reflected back into it');
+});
