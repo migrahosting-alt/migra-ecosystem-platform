@@ -21,7 +21,7 @@ import type {
 import type { Conversation, Message, Summary, MemoryItem } from '../memory/conversationStore.js';
 import { validateRecoverySourceProvenance } from '../recoverySourceProvenance.js';
 
-export const SCHEMA_VERSION = 5;
+export const SCHEMA_VERSION = 6;
 
 export type AgentRunReproposalFaultPhase =
   | 'recovery-status source read'
@@ -57,14 +57,26 @@ CREATE TABLE IF NOT EXISTS conversation_summaries (
 CREATE TABLE IF NOT EXISTS memory_items (
   id TEXT PRIMARY KEY, owner_scope TEXT, workspace_scope TEXT, category TEXT,
   content TEXT, confidence REAL, source_type TEXT, source_id TEXT, expires_at INTEGER, created_at INTEGER);
+-- version = latest successfully committed candidate. approved_version = the exact
+-- version authorised for production retrieval (NULL when none is). They are
+-- INDEPENDENT: a new candidate advances version and must leave the approved
+-- pointer alone, so approved content stays servable while a replacement is
+-- reviewed. Approval was previously the version-agnostic state string, which made
+-- a freshly committed candidate approved the instant it landed.
 CREATE TABLE IF NOT EXISTS workspace_indexes (
   id TEXT PRIMARY KEY, workspace_id TEXT, owner_scope TEXT, source_type TEXT, root TEXT,
-  state TEXT, version INTEGER, embedding_model TEXT, embedding_version TEXT, created_at INTEGER, updated_at INTEGER);
+  state TEXT, version INTEGER, embedding_model TEXT, embedding_version TEXT, created_at INTEGER, updated_at INTEGER,
+  approved_version INTEGER);
+-- Chunks are owned by ONE index_version. Rewriting them in place meant a candidate
+-- sync overwrote the approved content it was meant to replace.
 CREATE TABLE IF NOT EXISTS index_chunks (
   id TEXT PRIMARY KEY, index_id TEXT, workspace_id TEXT, file_path TEXT, language TEXT, symbol TEXT,
   start_line INTEGER, end_line INTEGER, content_hash TEXT, embedding_model TEXT, embedding_version TEXT,
-  indexed_at INTEGER, text TEXT, vector BLOB);
+  indexed_at INTEGER, text TEXT, vector BLOB, index_version INTEGER);
 CREATE INDEX IF NOT EXISTS idx_chunk_file ON index_chunks(index_id, file_path);
+-- idx_index_chunks_index_version is created in the migration, AFTER the column is
+-- added: on a v5 upgrade this table already exists without index_version, and
+-- CREATE TABLE IF NOT EXISTS will not add it, so indexing it here fails outright.
 CREATE TABLE IF NOT EXISTS index_versions (index_id TEXT, version INTEGER, committed_at INTEGER, PRIMARY KEY(index_id, version));
 CREATE TABLE IF NOT EXISTS embedding_cache (
   model TEXT, version TEXT, content_hash TEXT, dims INTEGER, vector BLOB, created_at INTEGER,
@@ -206,12 +218,95 @@ CREATE TABLE IF NOT EXISTS agent_run_tombstones (
 CREATE INDEX IF NOT EXISTS idx_agent_run_tombstones_deleted ON agent_run_tombstones(deleted_at);
 `;
 
-function toBlob(vec: number[]): Uint8Array {
-  return new Uint8Array(new Float32Array(vec).buffer);
+/**
+ * Why a vector was refused. Carried instead of a free-text message so callers can
+ * branch on it and health can report it without ever quoting indexed source.
+ */
+export type VectorFault =
+  | 'not-an-array'
+  | 'empty'
+  | 'non-finite'
+  | 'overflows-float32'
+  | 'wrong-dims'
+  | 'null-blob'
+  | 'empty-blob'
+  | 'misaligned-blob';
+
+/** A vector that must never be written to, or trusted from, the database. */
+export class InvalidVectorError extends Error {
+  constructor(
+    readonly fault: VectorFault,
+    readonly chunkId?: string,
+  ) {
+    super(chunkId ? `invalid vector (${fault}) for chunk ${chunkId}` : `invalid vector (${fault})`);
+    this.name = 'InvalidVectorError';
+  }
 }
-function fromBlob(buf: Uint8Array): number[] {
-  const f = new Float32Array(buf.buffer, buf.byteOffset, Math.floor(buf.byteLength / 4));
+
+/**
+ * Serialize a vector to a `BLOB`, refusing anything that is not a real vector.
+ *
+ * The unguarded version silently accepted `undefined`: `new Float32Array(undefined)`
+ * is length 0, so it produced a 0-byte view — and a 0-length view OVER A 0-LENGTH
+ * BUFFER binds through `node:sqlite` as SQL **NULL**, not as an empty blob.
+ * (`new Uint8Array(0)` binds as `blob(0)`; the distinction is why a guard at the
+ * binding layer alone would have missed this.) That NULL then killed startup in
+ * {@link fromBlob}. Refusing at the boundary is the only place a bad vector can be
+ * stopped before it is durable.
+ *
+ * `expectedDims`, when given, pins every vector in one index to the same width —
+ * a mixed-width index silently corrupts cosine similarity rather than failing.
+ */
+function toBlob(vec: unknown, expectedDims?: number, chunkId?: string): Uint8Array {
+  if (!Array.isArray(vec)) throw new InvalidVectorError('not-an-array', chunkId);
+  if (vec.length === 0) throw new InvalidVectorError('empty', chunkId);
+  if (expectedDims !== undefined && vec.length !== expectedDims) throw new InvalidVectorError('wrong-dims', chunkId);
+  for (const n of vec) {
+    if (typeof n !== 'number' || !Number.isFinite(n)) throw new InvalidVectorError('non-finite', chunkId);
+  }
+  const f32 = new Float32Array(vec as number[]);
+  // A finite double can still overflow float32 (1e39 → Infinity), which would be
+  // stored as a valid-looking blob and poison retrieval silently.
+  for (const n of f32) {
+    if (!Number.isFinite(n)) throw new InvalidVectorError('overflows-float32', chunkId);
+  }
+  return new Uint8Array(f32.buffer);
+}
+
+/**
+ * Decode a stored vector, classifying every way the bytes can be wrong.
+ *
+ * Throws {@link InvalidVectorError} rather than returning junk, so hydration can
+ * quarantine one damaged index instead of crashing the Brain. The original threw a
+ * raw `TypeError` on a NULL blob — an unhandled rejection during startup, which
+ * meant the whole service refused to boot because of a single bad row.
+ */
+function fromBlob(buf: unknown, expectedDims?: number, chunkId?: string): number[] {
+  if (buf === null || buf === undefined) throw new InvalidVectorError('null-blob', chunkId);
+  if (!(buf instanceof Uint8Array)) throw new InvalidVectorError('null-blob', chunkId);
+  if (buf.byteLength === 0) throw new InvalidVectorError('empty-blob', chunkId);
+  if (buf.byteLength % 4 !== 0) throw new InvalidVectorError('misaligned-blob', chunkId);
+  // Copy rather than view: a BLOB's byteOffset need not be 4-byte aligned, which
+  // makes the zero-copy `new Float32Array(buf.buffer, buf.byteOffset, …)` throw.
+  const f = new Float32Array(buf.slice().buffer);
+  if (expectedDims !== undefined && f.length !== expectedDims) throw new InvalidVectorError('wrong-dims', chunkId);
+  for (const n of f) {
+    if (!Number.isFinite(n)) throw new InvalidVectorError('non-finite', chunkId);
+  }
   return Array.from(f);
+}
+
+/**
+ * Version-aware chunk row id.
+ *
+ * The old `${indexId}:${filePath}#${startLine}` COLLIDED across versions, so v6
+ * inserts would have hit the primary key and forced deleting v5's rows to succeed.
+ * Embedding the version keeps `id TEXT PRIMARY KEY` valid — no table rebuild, so
+ * the migration stays a pure ALTER TABLE ADD COLUMN. Existing rows keep their old
+ * ids; the column is opaque.
+ */
+function chunkRowId(indexId: string, version: number, filePath: string, startLine: number): string {
+  return `${indexId}:v${version}:${filePath}#${startLine}`;
 }
 
 function clampLimit(n: number): number {
@@ -484,6 +579,29 @@ export class SqliteDurableStore implements DurableStore {
       this.detail = `db schema v${existing} > engine v${SCHEMA_VERSION}`;
       throw new Error(this.detail);
     }
+    // ── Migration must FAIL CLOSED with a schema fault ─────────────────────
+    // Migrating a structurally invalid database used to surface a bare SQLite
+    // message ("no such column: state") from whichever DDL statement happened to
+    // hit the damage first. That is unreadable as a schema contract and was only
+    // hidden while the newest engine version equalled every stored version, which
+    // skipped this block entirely. Translate it, mark persistence unavailable, and
+    // let the caller degrade — never open a database we could not migrate.
+    try {
+      this.applyMigrations(existing);
+    } catch (error) {
+      this.healthy = 'unavailable';
+      this.detail = `db schema v${SCHEMA_VERSION} cannot migrate from v${existing}: ${error instanceof Error ? error.message : String(error)}`;
+      throw new Error(this.detail);
+    }
+    this.assertSchemaMeta();
+    this.assertAgentRunSchema();
+    this.assertIndexVersionSchema();
+    this.schemaVersion = SCHEMA_VERSION;
+    this.migrationState = existing === SCHEMA_VERSION ? 'current' : 'applied';
+    this.healthy = 'ready';
+  }
+
+  private applyMigrations(existing: number): void {
     this.tx(() => {
       if (existing < SCHEMA_VERSION) {
         this.db.exec(SCHEMA);
@@ -503,6 +621,23 @@ export class SqliteDurableStore implements DurableStore {
         this.addColumnIfMissing('agent_runs', 'successor_run_id', 'TEXT');
         this.addColumnIfMissing('agent_runs', 'reproposal_at', 'INTEGER');
         this.addColumnIfMissing('agent_runs', 'recovery_attempt_count', 'INTEGER NOT NULL DEFAULT 0');
+        // ── v6: separate approved content from candidate content ──────────────
+        // Additive only, so an existing approved index survives untouched — no
+        // re-index. Every existing chunk belongs to the version that index is
+        // currently at, and an index already marked `approved` has that version
+        // approved. A non-approved index keeps `approved_version` NULL.
+        this.addColumnIfMissing('workspace_indexes', 'approved_version', 'INTEGER');
+        this.addColumnIfMissing('index_chunks', 'index_version', 'INTEGER');
+        // Only now can the column be indexed — see the note in SCHEMA.
+        this.db.exec('CREATE INDEX IF NOT EXISTS idx_index_chunks_index_version ON index_chunks(index_id, index_version);');
+        this.db.exec(
+          `UPDATE index_chunks SET index_version = (
+             SELECT wi.version FROM workspace_indexes wi WHERE wi.id = index_chunks.index_id
+           ) WHERE index_version IS NULL;`,
+        );
+        this.db.exec(
+          "UPDATE workspace_indexes SET approved_version = version WHERE state = 'approved' AND approved_version IS NULL;",
+        );
         this.addColumnIfMissing('agent_runs', 'last_recovery_request_id', 'TEXT');
         this.addColumnIfMissing('agent_runs', 'recovery_terminal_reason', 'TEXT');
         this.addColumnIfMissing('agent_run_tombstones', 'recovery_source_run_id', 'TEXT');
@@ -512,11 +647,6 @@ export class SqliteDurableStore implements DurableStore {
         this.db.prepare('INSERT INTO schema_meta(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').run('schema_version', String(SCHEMA_VERSION));
       }
     });
-    this.assertSchemaMeta();
-    this.assertAgentRunSchema();
-    this.schemaVersion = SCHEMA_VERSION;
-    this.migrationState = existing === SCHEMA_VERSION ? 'current' : 'applied';
-    this.healthy = 'ready';
   }
 
   health(): PersistenceHealth {
@@ -603,22 +733,85 @@ export class SqliteDurableStore implements DurableStore {
   }
 
   commitSync(indexId: string, version: number, changed: PersistedChunk[], changedFiles: string[], deletedFiles: string[], updatedAt: number): void {
-    // One transaction: rewrite changed files' chunks, drop deleted files, bump
-    // version. A throw rolls the whole thing back → the previous version stands.
+    // ── Validate the ENTIRE candidate before BEGIN ──────────────────────────
+    // Serializing inside the transaction was not enough: `toBlob` used to accept
+    // `undefined` silently, so the transaction COMMITTED bad rows and the failure
+    // surfaced afterwards — durable damage from a sync the API reported as failed.
+    // Encoding every vector up front means an invalid candidate throws before a
+    // single row is written, and the encoded bytes are reused below.
+    const blobs = new Array<Uint8Array>(changed.length);
+    let dims: number | undefined;
+    for (let i = 0; i < changed.length; i += 1) {
+      const c = changed[i]!;
+      const blob = toBlob(c.vector, dims, chunkRowId(indexId, version, c.filePath, c.startLine));
+      dims ??= blob.byteLength / 4; // one index, one vector width
+      blobs[i] = blob;
+    }
+
+    // The version this candidate replaces, and the one that must survive it.
+    const current = this.db.prepare('SELECT version, approved_version FROM workspace_indexes WHERE id=?').get(indexId) as
+      | { version: number; approved_version: number | null }
+      | undefined;
+    const priorVersion = current?.version ?? 0;
+    const approvedVersion = current?.approved_version ?? null;
+
+    // One transaction: materialise the new version, advance `version`, prune.
+    // A throw rolls the whole thing back → BOTH pointers stand unchanged.
     this.tx(() => {
-      for (const f of [...changedFiles, ...deletedFiles]) {
-        this.db.prepare('DELETE FROM index_chunks WHERE index_id=? AND file_path=?').run(indexId, f);
+      // Re-running a version (retry) must not double-insert.
+      this.db.prepare('DELETE FROM index_chunks WHERE index_id=? AND index_version=?').run(indexId, version);
+      // Carry forward every file this sync did NOT touch, so the new version is
+      // COMPLETE on its own and can be read with a single version-scoped query.
+      // Without this, a version would hold only the files that happened to change.
+      const untouched = new Set([...changedFiles, ...deletedFiles]);
+      const carried = this.db
+        .prepare('SELECT * FROM index_chunks WHERE index_id=? AND index_version=?')
+        .all(indexId, priorVersion) as Array<Record<string, unknown>>;
+      const carry = this.db.prepare(
+        `INSERT INTO index_chunks(id,index_id,workspace_id,file_path,language,symbol,start_line,end_line,content_hash,embedding_model,embedding_version,indexed_at,text,vector,index_version)
+         VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      );
+      for (const r of carried) {
+        if (untouched.has(r.file_path as string)) continue;
+        carry.run(
+          chunkRowId(indexId, version, r.file_path as string, r.start_line as number), indexId,
+          r.workspace_id as string, r.file_path as string, r.language as string, (r.symbol as string | null) ?? null,
+          r.start_line as number, r.end_line as number, r.content_hash as string, r.embedding_model as string,
+          r.embedding_version as string, r.indexed_at as number, r.text as string, r.vector as Uint8Array, version,
+        );
       }
       const ins = this.db.prepare(
-        `INSERT INTO index_chunks(id,index_id,workspace_id,file_path,language,symbol,start_line,end_line,content_hash,embedding_model,embedding_version,indexed_at,text,vector)
-         VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        `INSERT INTO index_chunks(id,index_id,workspace_id,file_path,language,symbol,start_line,end_line,content_hash,embedding_model,embedding_version,indexed_at,text,vector,index_version)
+         VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       );
-      for (const c of changed) {
-        ins.run(`${indexId}:${c.filePath}#${c.startLine}`, indexId, c.workspaceId, c.filePath, c.language, c.symbol ?? null, c.startLine, c.endLine, c.contentHash, c.embeddingModel, c.embeddingVersion, c.indexedAt, c.text, toBlob(c.vector));
+      for (let i = 0; i < changed.length; i += 1) {
+        const c = changed[i]!;
+        // Pre-encoded above — nothing inside this transaction can now reject a vector.
+        ins.run(chunkRowId(indexId, version, c.filePath, c.startLine), indexId, c.workspaceId, c.filePath, c.language, c.symbol ?? null, c.startLine, c.endLine, c.contentHash, c.embeddingModel, c.embeddingVersion, c.indexedAt, c.text, blobs[i]!, version);
       }
       this.db.prepare('INSERT OR REPLACE INTO index_versions(index_id,version,committed_at) VALUES(?,?,?)').run(indexId, version, updatedAt);
+      // Advance the candidate pointer ONLY. `approved_version` is untouched, so
+      // production retrieval keeps serving the reviewed version.
       this.db.prepare('UPDATE workspace_indexes SET version=?, updated_at=? WHERE id=?').run(version, updatedAt, indexId);
+      // A committed candidate is NOT the approved version, so the lifecycle must
+      // stop claiming otherwise — in the SAME transaction, so no fallible step
+      // remains after the commit. `approved_version` is untouched: the reviewed
+      // version keeps serving until someone approves this one.
+      this.db
+        .prepare("UPDATE workspace_indexes SET state='evaluated' WHERE id=? AND state='approved' AND (approved_version IS NULL OR approved_version <> ?)")
+        .run(indexId, version);
+      // Keep exactly the versions that are still reachable — the new candidate and
+      // the approved one — so copy-forward cannot grow the database without bound.
+      const keep = [version, ...(approvedVersion !== null ? [approvedVersion] : [])];
+      this.db
+        .prepare(`DELETE FROM index_chunks WHERE index_id=? AND (index_version IS NULL OR index_version NOT IN (${keep.map(() => '?').join(',')}))`)
+        .run(indexId, ...keep);
     });
+  }
+
+  /** Promote/clear the version authorised for production retrieval. */
+  setApprovedVersion(id: string, approvedVersion: number | null, updatedAt: number): void {
+    this.db.prepare('UPDATE workspace_indexes SET approved_version=?, updated_at=? WHERE id=?').run(approvedVersion, updatedAt, id);
   }
 
   loadIndexes(): PersistedIndexRecord[] {
@@ -626,16 +819,33 @@ export class SqliteDurableStore implements DurableStore {
       id: r.id as string, workspaceId: r.workspace_id as string, ownerScope: r.owner_scope as string, sourceType: r.source_type as string,
       root: r.root as string, state: r.state as string, version: r.version as number, embeddingModel: r.embedding_model as string,
       embeddingVersion: r.embedding_version as string, createdAt: r.created_at as number, updatedAt: r.updated_at as number,
+      approvedVersion: (r.approved_version as number | null) ?? undefined,
     }));
   }
 
-  loadChunks(indexId: string): PersistedChunk[] {
-    return (this.db.prepare('SELECT * FROM index_chunks WHERE index_id=?').all(indexId) as Array<Record<string, unknown>>).map((r) => ({
-      id: r.id as string, indexId: r.index_id as string, workspaceId: r.workspace_id as string, filePath: r.file_path as string,
-      language: r.language as string, symbol: (r.symbol as string) ?? undefined, startLine: r.start_line as number, endLine: r.end_line as number,
-      contentHash: r.content_hash as string, embeddingModel: r.embedding_model as string, embeddingVersion: r.embedding_version as string,
-      indexedAt: r.indexed_at as number, text: r.text as string, vector: fromBlob(r.vector as Uint8Array),
-    }));
+  /**
+   * Load an index's chunks, refusing the WHOLE index if any vector is damaged.
+   *
+   * All-or-nothing is deliberate. Skipping bad rows would return a silently
+   * incomplete index that still reports itself approved — retrieval would just
+   * quietly miss content. Throwing lets {@link IndexService.hydrate} quarantine
+   * this one index, mark it degraded, and keep the Brain running.
+   */
+  loadChunks(indexId: string, indexVersion: number): PersistedChunk[] {
+    // ALWAYS version-scoped: loading every version for an index_id would mix
+    // approved and candidate content into one index.
+    const rows = this.db.prepare('SELECT * FROM index_chunks WHERE index_id=? AND index_version=?').all(indexId, indexVersion) as Array<Record<string, unknown>>;
+    let dims: number | undefined;
+    return rows.map((r) => {
+      const vector = fromBlob(r.vector, dims, r.id as string);
+      dims ??= vector.length; // first row pins the width; the rest must match
+      return {
+        id: r.id as string, indexId: r.index_id as string, workspaceId: r.workspace_id as string, filePath: r.file_path as string,
+        language: r.language as string, symbol: (r.symbol as string) ?? undefined, startLine: r.start_line as number, endLine: r.end_line as number,
+        contentHash: r.content_hash as string, embeddingModel: r.embedding_model as string, embeddingVersion: r.embedding_version as string,
+        indexedAt: r.indexed_at as number, text: r.text as string, vector,
+      };
+    });
   }
 
   // ── EmbeddingCachePersistence ────────────────────────────────────────────
@@ -1181,6 +1391,18 @@ export class SqliteDurableStore implements DurableStore {
     for (const index of EXPECTED_AGENT_INDEXES) this.assertIndex(index.table, index.name, index.columns, index.unique, index.partial);
     this.assertUniqueIndex('agent_run_events', ['run_id', 'seq']);
     for (const key of EXPECTED_AGENT_FOREIGN_KEYS) this.assertForeignKey(key.table, key.foreignTable, key.columns, key.foreignColumns, key.onDelete);
+  }
+
+  /**
+   * v6 contract: candidate/approved isolation must be present, or refuse to open.
+   *
+   * Without these objects the engine cannot tell approved content from a candidate,
+   * and would serve unreviewed chunks as approved — fail closed instead.
+   */
+  private assertIndexVersionSchema(): void {
+    this.assertColumns('workspace_indexes', { approved_version: { type: 'INTEGER' } });
+    this.assertColumns('index_chunks', { index_version: { type: 'INTEGER' } });
+    this.assertIndex('index_chunks', 'idx_index_chunks_index_version', ['index_id', 'index_version'], false);
   }
 
   private assertSchemaMeta(): void {

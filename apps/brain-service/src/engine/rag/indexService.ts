@@ -25,6 +25,11 @@ import type { RagIndexPersistence, PersistedChunk } from '../persistence/types.j
 
 export type IndexState = 'experimental' | 'evaluated' | 'approved' | 'degraded' | 'disabled';
 
+/** Classified failure text for status/health — never indexed source. */
+function faultOf(error: unknown): string {
+  return error instanceof Error ? error.message.slice(0, 120) : String(error);
+}
+
 export interface FileSource {
   /** Workspace-relative files that are candidates for indexing (already bounded). */
   files(): Promise<Array<{ relPath: string; content: string }>>;
@@ -35,9 +40,21 @@ export interface IndexRecord {
   workspaceId: string;
   sourceType: 'workspace' | 'docs';
   root: string;
+  /** Lifecycle of the LATEST candidate. NOT what production retrieval serves. */
   state: IndexState;
   syncing: boolean;
+  /** Latest successfully committed candidate version. */
   version: number;
+  /**
+   * Version authorised for production retrieval, or undefined when none is.
+   *
+   * Independent of {@link state}: a successful candidate sync advances `version`
+   * and leaves this pointing at the reviewed version, so approved content keeps
+   * serving while the replacement is reviewed. Approval used to be the
+   * version-agnostic `state` string, which made a candidate approved the instant
+   * it committed — including a candidate nobody had looked at.
+   */
+  approvedVersion?: number;
   embeddingModel: string;
   embeddingVersion: string;
   createdAt: number;
@@ -52,7 +69,14 @@ export interface Scope {
 
 interface Entry {
   record: IndexRecord;
+  /** The LATEST candidate version's content — what inspection reads. */
   index: VectorIndex;
+  /**
+   * The APPROVED version's content — what `requireApproved` reads. Shares the
+   * object with {@link index} while the approved version IS the latest; they
+   * diverge as soon as a candidate is committed on top of an approved version.
+   */
+  approvedIndex?: VectorIndex;
 }
 
 export class IndexService {
@@ -81,16 +105,58 @@ export class IndexService {
         embeddingVersion: rec.embeddingVersion, createdAt: rec.createdAt, updatedAt: rec.updatedAt,
         stats: { files: 0, chunks: 0, approxBytes: 0, lastSyncMs: 0 },
       };
-      const index = new VectorIndex();
-      const byFile = new Map<string, IndexedChunk[]>();
-      for (const c of this.persistence.loadChunks(rec.id)) {
-        const chunk: IndexedChunk = { ...c, symbol: c.symbol };
-        (byFile.get(c.filePath) ?? byFile.set(c.filePath, []).get(c.filePath)!).push(chunk);
+      record.approvedVersion = rec.approvedVersion;
+
+      // ── The APPROVED version loads independently of the candidate ───────────
+      // A damaged CANDIDATE must not cost the reviewed content its approval, and a
+      // damaged APPROVED version must lose the pointer rather than serve junk.
+      let approvedIndex: VectorIndex | undefined;
+      if (rec.approvedVersion !== undefined) {
+        try {
+          approvedIndex = this.loadVersion(rec.id, rec.approvedVersion);
+        } catch (error) {
+          record.approvedVersion = undefined;
+          record.state = 'degraded';
+          record.stats.lastError = faultOf(error);
+          // Revoke durably: approved content we cannot decode must never be served.
+          this.persistence.setApprovedVersion(rec.id, null, this.now());
+          this.persistence.setIndexState(rec.id, 'degraded', this.now());
+        }
       }
-      for (const [file, chunks] of byFile) index.replaceFile(file, chunks);
-      record.stats = { files: index.files().length, chunks: index.size(), approxBytes: index.approxBytes(), lastSyncMs: 0 };
-      this.byId.set(rec.id, { record, index });
+
+      try {
+        const index = rec.approvedVersion !== undefined && rec.approvedVersion === rec.version && approvedIndex
+          ? approvedIndex // same version — one object, not two copies
+          : this.loadVersion(rec.id, rec.version);
+        record.stats = { files: index.files().length, chunks: index.size(), approxBytes: index.approxBytes(), lastSyncMs: 0, lastError: record.stats.lastError };
+        this.byId.set(rec.id, { record, index, approvedIndex: approvedIndex ?? (record.approvedVersion !== undefined ? index : undefined) });
+      } catch (error) {
+        // ── QUARANTINE, never crash ────────────────────────────────────────────
+        // One damaged vector used to throw a raw TypeError straight out of startup
+        // ("Cannot read properties of null (reading 'buffer')") as an unhandled
+        // rejection — the Brain refused to boot at all until the database was
+        // deleted. The damaged CANDIDATE is demoted and kept EMPTY so it can never
+        // serve partial content, while a healthy approved version keeps serving.
+        // The reason is a classified fault, never indexed source.
+        record.state = 'degraded';
+        record.stats = { files: 0, chunks: 0, approxBytes: 0, lastSyncMs: 0, lastError: faultOf(error) };
+        this.byId.set(rec.id, { record, index: new VectorIndex(), approvedIndex });
+        this.persistence.setIndexState(rec.id, 'degraded', this.now());
+      }
     }
+  }
+
+  /** Build an in-memory index from ONE persisted version. Throws if any vector
+   * in that version is damaged (all-or-nothing — never a partial index). */
+  private loadVersion(indexId: string, indexVersion: number): VectorIndex {
+    const index = new VectorIndex();
+    const byFile = new Map<string, IndexedChunk[]>();
+    for (const c of this.persistence!.loadChunks(indexId, indexVersion)) {
+      const chunk: IndexedChunk = { ...c, symbol: c.symbol };
+      (byFile.get(c.filePath) ?? byFile.set(c.filePath, []).get(c.filePath)!).push(chunk);
+    }
+    for (const [file, chunks] of byFile) index.replaceFile(file, chunks);
+    return index;
   }
 
   createIndex(scope: Scope, params: { sourceType?: 'workspace' | 'docs'; root: string }): IndexRecord {
@@ -117,7 +183,8 @@ export class IndexService {
   private toPersisted(record: IndexRecord, owner: string) {
     return {
       id: record.id, workspaceId: record.workspaceId, ownerScope: owner, sourceType: record.sourceType, root: record.root,
-      state: record.state, version: record.version, embeddingModel: record.embeddingModel, embeddingVersion: record.embeddingVersion,
+      state: record.state, version: record.version, approvedVersion: record.approvedVersion,
+      embeddingModel: record.embeddingModel, embeddingVersion: record.embeddingVersion,
       createdAt: record.createdAt, updatedAt: record.updatedAt,
     };
   }
@@ -146,11 +213,28 @@ export class IndexService {
     return this.byId.delete(id);
   }
 
+  /**
+   * Move the candidate's lifecycle state, and — for `approved` — promote the
+   * approval pointer to the version being approved.
+   *
+   * Promotion is ATOMIC from a reader's perspective: the pointer and the served
+   * content move in the same synchronous step, so `requireApproved` retrieval
+   * switches from the old version to the new one with nothing in between.
+   *
+   * Demoting a candidate (`evaluated`/`experimental`/`degraded`) deliberately does
+   * NOT revoke approval — that is exactly the "v6 committed, v5 still serving"
+   * state. Only damaged approved content or an explicit revoke clears the pointer.
+   */
   setState(id: string, scope: Scope, state: IndexState): IndexRecord | undefined {
     const e = this.entry(id, scope);
     if (!e) return undefined;
     e.record.state = state;
     e.record.updatedAt = this.now();
+    if (state === 'approved') {
+      e.record.approvedVersion = e.record.version;
+      e.approvedIndex = e.index; // the reviewed content becomes the served content
+      this.persistence?.setApprovedVersion(id, e.record.version, e.record.updatedAt);
+    }
     this.persistence?.setIndexState(id, state, e.record.updatedAt);
     return e.record;
   }
@@ -202,33 +286,51 @@ export class IndexService {
       const deletedFiles: string[] = [];
       for (const file of staging.files()) if (!seen.has(file)) { staging.removeFile(file); deletedFiles.push(file); }
 
-      // Durable commit FIRST (one transaction). If it throws, we keep the prior
-      // in-memory index (the catch below marks degraded) — never a partial swap.
+      // ── Everything that can FAIL happens before the commit ─────────────────
+      // `approxBytes()` used to run after `commitSync` and threw on a bad vector,
+      // which turned an already-committed sync into a reported failure: the DB had
+      // the new content while memory kept the old index, and the API still said
+      // "the previous index is unchanged". Computing the stats first leaves nothing
+      // fallible after the durable write.
       const nextVersion = e.record.version + 1;
+      const nextStats = {
+        files: staging.files().length,
+        chunks: staging.size(),
+        approxBytes: staging.approxBytes(),
+        lastSyncMs: 0,
+        lastError: undefined as string | undefined,
+      };
+
+      // Durable commit (one transaction). It validates every vector before BEGIN,
+      // so an invalid candidate throws here having written nothing.
       if (this.persistence) {
         this.persistence.commitSync(e.record.id, nextVersion, changedChunks.map((c) => this.toPersistedChunk(e.record.id, c)), changedFiles, deletedFiles, this.now());
       }
 
-      // Atomic swap — only after the durable commit succeeded.
+      // Atomic swap — only after the durable commit succeeded. Assignments only:
+      // nothing below may throw, or memory and the database diverge again.
       e.index = staging;
       e.record.version = nextVersion;
       e.record.updatedAt = this.now();
       e.record.syncing = false;
       if (e.record.state === 'degraded') e.record.state = 'experimental';
-      e.record.stats = {
-        files: staging.files().length,
-        chunks: staging.size(),
-        approxBytes: staging.approxBytes(),
-        lastSyncMs: this.now() - started,
-        lastError: undefined,
-      };
+      // Mirror the demotion `commitSync` performed durably: a freshly committed
+      // candidate awaits review, even though the approved version keeps serving.
+      if (e.record.state === 'approved' && e.record.approvedVersion !== nextVersion) e.record.state = 'evaluated';
+      nextStats.lastSyncMs = this.now() - started;
+      e.record.stats = nextStats;
       return { ok: true, record: e.record };
     } catch (error) {
-      // Keep the prior valid index; mark degraded.
+      // The prior index really is untouched: validation happens before BEGIN and
+      // the transaction rolls back, so nothing durable changed.
       e.record.syncing = false;
       e.record.state = 'degraded';
       e.record.stats.lastError = error instanceof Error ? error.message.slice(0, 120) : String(error);
       e.record.updatedAt = this.now();
+      // Durable AND honest: without this the database kept the pre-sync state
+      // string (often `approved`) while memory said `degraded`, so a restart
+      // resurrected the index as approved with no record of the failure.
+      this.persistence?.setIndexState(e.record.id, 'degraded', e.record.updatedAt);
       return { ok: false, code: 'SYNC_FAILED', error: 'Indexing failed; the previous index is unchanged.' };
     }
   }
@@ -242,18 +344,25 @@ export class IndexService {
   ): Promise<{ ok: true; chunks: RetrievedRagChunk[]; diagnostics: RetrieveDiagnostics; indexState: IndexState } | { ok: false; code: string; error: string }> {
     const e = this.entry(id, scope);
     if (!e) return { ok: false, code: 'UNKNOWN_INDEX', error: 'Index not found.' };
-    if (opts.requireApproved && e.record.state !== 'approved') {
-      return { ok: false, code: 'NOT_APPROVED', error: 'Index is not approved for production retrieval.' };
-    }
     if (e.record.state === 'disabled') return { ok: false, code: 'DISABLED', error: 'Index is disabled.' };
+    // Production retrieval is bound to the APPROVED VERSION, not to the `state`
+    // string. Gating on state alone served whatever content happened to be latest,
+    // so a candidate committed on top of an approved index was served as approved.
+    let source = e.index;
+    if (opts.requireApproved) {
+      if (e.record.approvedVersion === undefined || !e.approvedIndex) {
+        return { ok: false, code: 'NOT_APPROVED', error: 'Index is not approved for production retrieval.' };
+      }
+      source = e.approvedIndex;
+    }
     const [queryVec] = await this.embedder.embed([queryText]);
-    const { chunks, diagnostics } = await hybridRetrieve(e.index, queryVec!, queryText, opts);
+    const { chunks, diagnostics } = await hybridRetrieve(source, queryVec!, queryText, opts);
     return { ok: true, chunks, diagnostics, indexState: e.record.state };
   }
 
   /** First approved index for a workspace (for chat integration). */
   approvedIndexFor(scope: Scope): string | undefined {
-    for (const [id, e] of this.byId) if (e.record.workspaceId === scope.workspace && e.record.state === 'approved') return id;
+    for (const [id, e] of this.byId) if (e.record.workspaceId === scope.workspace && e.record.approvedVersion !== undefined) return id;
     return undefined;
   }
 
