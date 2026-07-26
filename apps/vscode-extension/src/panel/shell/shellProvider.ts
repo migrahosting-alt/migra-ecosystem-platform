@@ -329,6 +329,8 @@ export class MigraPilotShell {
       level?: string;
       provider?: string;
       modelId?: string;
+    /** Evidence-source selection from the composer (`auto` | `approved`). */
+    sourceMode?: string;
       submit?: boolean;
       history?: ChatMsg[];
       messages?: ChatMsg[];
@@ -369,6 +371,10 @@ export class MigraPilotShell {
           toProfile(message.provider),
           toAttachments(message.files),
           typeof message.modelId === 'string' && message.modelId ? message.modelId : undefined,
+          // Explicit evidence-source selection from the composer. The webview may
+          // send it per turn; the host's sticky value is the fallback so a mode set
+          // via `/approved` survives until it is changed.
+          typeof message.sourceMode === 'string' ? message.sourceMode : this.sourceMode,
         );
         return;
       case 'stop':
@@ -467,6 +473,25 @@ export class MigraPilotShell {
       return;
     }
     this.git = await readGitContext(realGitRunner(root), root);
+  }
+
+  /**
+   * The live checkout branch, or undefined when it cannot be determined.
+   *
+   * Undefined is meaningful: the Brain treats a missing branch as UNKNOWN and will
+   * not claim the index and checkout agree. Never guess a branch here.
+   */
+  private async currentBranch(): Promise<string | undefined> {
+    if (this.git?.branch) return this.git.branch;
+    const root = this.deps.workspaceRoot();
+    if (!root) return undefined;
+    try {
+      const snapshot = await readGitContext(realGitRunner(root), root);
+      this.git = snapshot;
+      return snapshot.branch;
+    } catch {
+      return undefined; // unknown, not "same"
+    }
   }
 
   private async loadWorkingChanges(): Promise<void> {
@@ -833,12 +858,22 @@ export class MigraPilotShell {
     }
   }
 
+  /**
+   * Evidence-source mode for subsequent turns (`auto` | `approved`).
+   *
+   * Host-side so it cannot be lost by a webview reload, and so an approved-only
+   * session stays approved-only until the operator changes it — a governance mode
+   * that silently reverted would be worse than not having one.
+   */
+  private sourceMode = 'auto';
+
   private async handleChat(
     rawText: string,
     history: ChatMsg[],
     modelProfile: SelectableProfile | undefined,
     attachments: ChatAttachment[],
     modelId?: string,
+    sourceMode?: string,
   ): Promise<void> {
     const text = rawText.trim();
     if (!text && attachments.length === 0) return;
@@ -878,6 +913,10 @@ export class MigraPilotShell {
           attachments,
           ...(this.deps.executionPolicy ? { policy: this.deps.executionPolicy() } : {}),
           ...(conversationId ? { conversationId, memoryPolicy: { mode, retrieve: true, store: true } } : {}),
+          ...(sourceMode ? { sourceMode } : {}),
+          // The Brain treats a MISSING branch as unknown, never as "same branch",
+          // so failing to resolve it degrades disclosure rather than faking it.
+          ...(await this.currentBranch().then((b) => (b ? { currentBranch: b } : {}))),
         },
       );
       this.post({ type: 'streamEnd' });
@@ -1007,6 +1046,22 @@ export class MigraPilotShell {
       case 'refreshContext':
         await this.refresh();
         return;
+      case 'sourceMode:approved':
+      case 'sourceMode:auto': {
+        // Explicit, sticky operator choice — reported back so the UI and the user
+        // both know which evidence source the next turn will be held to.
+        this.sourceMode = action === 'sourceMode:approved' ? 'approved' : 'auto';
+        const branch = await this.currentBranch();
+        this.post({ type: 'sourceMode', mode: this.sourceMode });
+        this.post({
+          type: 'token',
+          text:
+            this.sourceMode === 'approved'
+              ? `\n_Evidence source set to **approved index only**${branch ? ` (checkout \`${branch}\`)` : ''}. Requests that the approved index cannot support will be refused rather than answered from working-tree code._\n`
+              : '\n_Evidence source set to **auto**. The source of each answer is stated with it._\n',
+        });
+        return;
+      }
       case 'refreshHistory':
         await this.loadHistory();
         return;

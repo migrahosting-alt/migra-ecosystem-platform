@@ -184,6 +184,18 @@ export interface EngineerRequest {
   model?: string;
   /** Slice 5: per-request execution-policy preference (server resolves). */
   policy?: string;
+  /**
+   * Answer ONLY from the approved semantic index.
+   *
+   * Set from an explicit UI control, never inferred from the prompt. The Brain
+   * withholds every working-tree tool for the turn and refuses when approved
+   * evidence is insufficient, instead of quietly answering from the checkout.
+   */
+  requireApproved?: boolean;
+  /** The live checkout branch, so the Brain can disclose branch divergence.
+   * Omitted when unknown — the Brain treats absence as UNKNOWN, never as
+   * "same branch as the index". */
+  currentBranch?: string;
 }
 
 /** SSE events from the engineer loop, kept loosely typed at the transport —

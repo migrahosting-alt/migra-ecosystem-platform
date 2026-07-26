@@ -97,6 +97,7 @@ export const SLASH_COMMANDS: readonly SlashCommand[] = [
   { name: '/diagnostics', args: '', description: 'Show workspace diagnostics', effect: { kind: 'command', command: 'showDiagnostics' } },
   { name: '/health', args: '', description: 'Check Brain service health', effect: { kind: 'command', command: 'health' } },
   { name: '/policy', args: '', description: 'Choose the execution policy', effect: { kind: 'command', command: 'executionPolicy' } },
+  { name: '/approved', args: '', description: 'Answer only from the approved semantic index', effect: { kind: 'shell', action: 'sourceMode:approved' } },
   { name: '/agent', args: '', description: 'Open the governed Agent Workspace', effect: { kind: 'shell', action: 'tab:agent' } },
   { name: '/history', args: '', description: 'Open the evidence-only Audit Trail', effect: { kind: 'shell', action: 'tab:audit' } },
   { name: '/refactor', args: '<code>', description: 'Refactor the selection', effect: { kind: 'prompt', prefix: 'Refactor this code: ' } },
@@ -110,6 +111,44 @@ export function matchSlashCommands(query: string): SlashCommand[] {
   return SLASH_COMMANDS.filter(
     (command) => command.name.slice(1).toLowerCase().startsWith(needle) || command.description.toLowerCase().includes(needle),
   );
+}
+
+/**
+ * Evidence-source selector — a DETERMINISTIC control, not a phrase the model reads.
+ *
+ * `approved` makes the turn answerable only from the approved semantic index: the
+ * Brain withholds every working-tree tool and refuses rather than substituting
+ * unapproved checkout content. It is a selector rather than a parsed instruction
+ * because a governance boundary that depended on wording ("using only the approved
+ * index...") would be a boundary in name only — that is exactly how a request for
+ * approved-index-only analysis was answered from three `package.json` files.
+ */
+export const SOURCE_MODE_OPTIONS = [
+  { value: 'auto', label: 'Auto', hint: 'Approved index when it fits, working tree otherwise (source is always stated)' },
+  { value: 'approved', label: 'Approved index only', hint: 'Refuse rather than answer from unapproved working-tree code' },
+] as const;
+
+export type SourceMode = (typeof SOURCE_MODE_OPTIONS)[number]['value'];
+
+/** True when the turn must be answered from approved evidence alone. */
+export function requiresApprovedEvidence(mode: string | undefined): boolean {
+  return mode === 'approved';
+}
+
+/** Host-rendered provenance line. The MODEL never decides whether this appears —
+ * an instruction to "say you used the working tree" is not an enforceable
+ * disclosure. Rendered by the host from the decision the Brain reported. */
+export function sourceModeBadge(decision: { sourceMode?: string; indexVersion?: number; indexedBranch?: string; currentBranch?: string } | undefined): string {
+  if (!decision?.sourceMode) return '';
+  if (decision.sourceMode === 'approved-index') {
+    const version = decision.indexVersion !== undefined ? ` v${decision.indexVersion}` : '';
+    const diverged =
+      decision.indexedBranch && decision.currentBranch && decision.indexedBranch !== decision.currentBranch
+        ? ` — indexed from \`${decision.indexedBranch}\`, checkout is \`${decision.currentBranch}\``
+        : '';
+    return `Source mode: Approved index${version}${diverged}`;
+  }
+  return 'Source mode: Working tree';
 }
 
 /** Model/routing selector options. `auto` lets the engine's router decide. */

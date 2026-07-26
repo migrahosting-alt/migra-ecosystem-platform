@@ -17,6 +17,9 @@ export type AuditEventType =
   | 'activation.issued'
   | 'execution.started'
   | 'execution.routed'
+  /** One grounding decision: where this turn's evidence came from, and why.
+   * Metadata only — chunk REFERENCES and scores, never chunk text or prompts. */
+  | 'retrieval.decided'
   | 'execution.completed'
   | 'execution.failed'
   | 'execution.cancel_requested'

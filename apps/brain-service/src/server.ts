@@ -264,6 +264,12 @@ async function main(): Promise<void> {
   const embedder = new CachedEmbedder(baseEmbedder, 20000, durable ?? undefined);
   const indexService = new IndexService(embedder, (rec) => new FsFileSource(rec.root), undefined, undefined, durable ?? undefined);
   if (durable) indexService.hydrate();
+  // The branch an APPROVED generation was built from lives on the workspace record,
+  // not the index. Resolved lazily per request so a later sync is reflected without
+  // a restart; undefined when unknown, which the grounding boundary reports as
+  // "unknown" rather than assuming the branches match.
+  const indexedBranchFor = (scope: { owner: string; workspace: string }): string | undefined =>
+    workspaceManager?.list(scope)[0]?.gitBranch;
   registerRagRoutes(app, indexService);
   // MigraAI Engine unified facade (/api/ai/*): provider-independent chat,
   // capability-routed model selection, model catalog, embeddings. Chat consumes
@@ -312,7 +318,7 @@ async function main(): Promise<void> {
   registerBudgetRoutes(app, { budget: budgetManager, ledger: usageLedger, pricing: pricingBook, maxOutputTokens: cloudMaxOutputTokens });
   // Slice 2: coding turns route local-first (cloud NEVER invoked inline). Slice 3
   // adds the offer path (still no inline cloud — approval is a separate call).
-  registerAiRoutes(app, env, modelRegistry, memoryStore, undefined, qualStore, indexService, providerRouting, escalation);
+  registerAiRoutes(app, env, modelRegistry, memoryStore, undefined, qualStore, indexService, providerRouting, escalation, indexedBranchFor);
   // Intelligent Provider Router — Slice 1 (/api/ai/providers): read-only, dry-run
   // inspection over the SAME fleet + policy engine. Cloud disabled by default.
   registerProviderRoutes(app, { fleet: providerFleet, engine: policyEngine, defaultPolicy: process.env.MIGRAPILOT_EXECUTION_POLICY });
@@ -343,7 +349,10 @@ async function main(): Promise<void> {
   // engineering agent (Slice 2). Runs through the SAME tool boundary; never
   // mutates (edit.apply is substituted with preview proposals) and never touches
   // the pilot runtime — disabled delegation cannot block local work.
-  registerEngineerRoutes(app, env, modelRegistry, toolDeps, undefined, providerRouting, escalation);
+  // The agent path grounds on APPROVED evidence through the shared grounding
+  // boundary; `indexedBranchFor` supplies the branch that generation was built
+  // from, so branch divergence is disclosed instead of silently ignored.
+  registerEngineerRoutes(app, env, modelRegistry, toolDeps, undefined, providerRouting, escalation, indexService, indexedBranchFor);
   // MigraAI Engine agent orchestration (/api/ai/agents): the engine owns the
   // public agent contract; runs execute through the SAME tool boundary + approval
   // store above, so agent tool calls are validated + audited identically.

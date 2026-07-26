@@ -14,6 +14,7 @@ import { resolveChatScope } from './chatScope.js';
 import { buildWorkReport } from './workReport.js';
 import { runInspectionTurn, renderRoutingError } from './inspectionTurn.js';
 import { runEngineerTurn } from './engineerTurn.js';
+import { requiresApprovedEvidence } from '../panel/shell/composerModel.js';
 import { previewAndMaybeApplyChangeset, type ChangesetProposal, type ChangesetOp } from '../services/proposedChangeset.js';
 import { getEscalationDispatch } from '../services/escalationConsent.js';
 import { attributionView, type RoutingView } from '../panel/providerRouterViewModel.js';
@@ -74,6 +75,15 @@ export interface ChatTurnOptions {
   /** Server-side conversation memory: when set, the engine owns history — the
    * client sends only this id and does NOT reconstruct history locally. */
   conversationId?: string;
+  /**
+   * Evidence source mode from the composer's selector — `'approved'` means the
+   * turn may be answered ONLY from the approved semantic index. Explicit UI state,
+   * never parsed from the prompt: the original failure was an approved-index-only
+   * request answered from the working tree because nothing in the request said so.
+   */
+  sourceMode?: string;
+  /** Live checkout branch, for branch-divergence disclosure. Omitted when unknown. */
+  currentBranch?: string;
   memoryPolicy?: { mode?: 'off' | 'session' | 'durable'; retrieve?: boolean; store?: boolean };
 }
 
@@ -277,6 +287,10 @@ export async function runChatTurn(
         // An explicitly pinned model outranks the profile — same as the chat path.
         ...(options.modelId ? { model: options.modelId } : {}),
         ...(options.policy ? { policy: options.policy } : {}),
+        // Approved-only is a REQUEST FIELD, so the boundary is enforced by the
+        // Brain rather than by how the question happens to be worded.
+        ...(requiresApprovedEvidence(options.sourceMode) ? { requireApproved: true } : {}),
+        ...(options.currentBranch ? { currentBranch: options.currentBranch } : {}),
       },
       {
         markdown: (t) => sink.markdown(t),
