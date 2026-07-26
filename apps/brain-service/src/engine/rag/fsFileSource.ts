@@ -35,14 +35,26 @@ export class FsFileSource implements FileSource {
     } catch {
       return;
     }
+    // A per-package `.gitignore` is what actually ignores most build output in a
+    // monorepo. Register it BEFORE filtering or descending: directory verdicts are
+    // memoized, so a layer added afterwards would miss its own subtree.
+    if (rel && entries.some((e) => e.isFile() && e.name === '.gitignore')) {
+      const nested = await fs.readFile(path.join(abs, '.gitignore'), 'utf8').catch(() => '');
+      if (nested) excl.addNested(rel, nested);
+    }
+
     for (const ent of entries) {
       if (out.length >= this.maxFiles) return;
       const childRel = rel ? `${rel}/${ent.name}` : ent.name;
-      if (excl.isExcluded(childRel)) continue;
       const childAbs = path.join(abs, ent.name);
       if (ent.isDirectory()) {
+        // Ask as a DIRECTORY, so a directory-only pattern (`build/`) matches and a
+        // same-named file's rules do not. Pruning here is safe and is what git
+        // does: an excluded directory can never hold a re-included descendant.
+        if (!excl.shouldDescend(childRel)) continue;
         await this.walk(childAbs, childRel, excl, out);
       } else if (ent.isFile()) {
+        if (excl.isExcluded(childRel)) continue;
         try {
           const stat = await fs.stat(childAbs);
           if (stat.size > this.maxFileSize || stat.size === 0) continue;
