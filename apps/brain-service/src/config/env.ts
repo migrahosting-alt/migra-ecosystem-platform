@@ -21,6 +21,12 @@ export interface BrainEnv {
    * it routes vision through the Capability Router + Vision Registry. */
   visionModel?: string;
   openAiApiKey?: string;
+  /** Deadline for a provider to accept a request and return headers. */
+  providerConnectTimeoutMs?: number;
+  /** Max gap between streamed tokens; reset on every chunk. */
+  providerIdleTimeoutMs?: number;
+  /** Final wall-clock guard; 0 = unbounded. */
+  providerAbsoluteTimeoutMs?: number;
   /** Pilot Runtime Adapter (agent runs delegated to pilot-api). Delegation is
    * OFF unless `pilotRuntimeEnabled` is true AND a URL is configured; otherwise a
    * `runtime: 'pilot'` agent FAILS closed (never a local mutating fallback). */
@@ -51,6 +57,14 @@ export function readEnv(env: NodeJS.ProcessEnv = process.env): BrainEnv {
     premiumModel: env.MIGRAPILOT_PREMIUM_MODEL,
     visionModel: env.MIGRAPILOT_VISION_MODEL ?? 'qwen2.5vl:7b',
     openAiApiKey: env.OPENAI_API_KEY,
+    // ── Provider timeout policy (overridable) ────────────────────────────────
+    // A single fixed total deadline killed valid grounded turns on local models,
+    // and it was not configurable at all — there was no escape hatch short of a
+    // code change. Idle is what actually guards liveness; the absolute ceiling is
+    // off by default so a long legitimate generation is never truncated.
+    providerConnectTimeoutMs: parseInteger(env.MIGRAPILOT_PROVIDER_CONNECT_TIMEOUT_MS, 60_000),
+    providerIdleTimeoutMs: parseInteger(env.MIGRAPILOT_PROVIDER_IDLE_TIMEOUT_MS, 120_000),
+    providerAbsoluteTimeoutMs: parseInteger(env.MIGRAPILOT_PROVIDER_ABSOLUTE_TIMEOUT_MS, 0),
     // Fail-closed by default: delegation requires an explicit opt-in AND a URL.
     pilotRuntimeEnabled: parseBoolean(env.MIGRAPILOT_PILOT_RUNTIME_ENABLED, false),
     pilotApiUrl: env.MIGRAPILOT_PILOT_API_URL,

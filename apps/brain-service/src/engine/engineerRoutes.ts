@@ -25,7 +25,7 @@ import { assessCodingOutcome } from './providers/codingAssessment.js';
 import type { EscalationController } from './providers/escalationController.js';
 import type { ChatTurnRequest } from '@migrapilot/shared-types';
 import { StubProvider, type ProviderAdapter } from '../providers/providerRegistry.js';
-import { OpenAiCompatProvider } from '../providers/openAiCompatProvider.js';
+import { OpenAiCompatProvider, classifyProviderFailure, type ProviderFailure } from '../providers/openAiCompatProvider.js';
 import { executeToolCore, type ToolExecDeps } from './toolExecutor.js';
 import { newCorrelationId, makeStageLogger, jsonLineSink, type StageLogger } from './correlation.js';
 import { runEngineerTask, type EngineerToolInfo } from './engineerRuntime.js';
@@ -153,6 +153,9 @@ export function registerEngineerRoutes(
       baseUrl: env.providerBaseUrl,
       model: model.id,
       apiKey: env.openAiApiKey,
+      connectTimeoutMs: env.providerConnectTimeoutMs,
+      idleTimeoutMs: env.providerIdleTimeoutMs,
+      absoluteTimeoutMs: env.providerAbsoluteTimeoutMs,
     });
   };
 
@@ -556,6 +559,7 @@ export function registerEngineerRoutes(
     );
 
     auditStore.append({ correlationId, type: 'loop.started', component: 'engineer' });
+    let failure: ProviderFailure | undefined;
     let terminal: 'completed' | 'failed' = 'failed';
     let finalText = '';
     try {
@@ -570,14 +574,26 @@ export function registerEngineerRoutes(
       }
     } catch (err) {
       // Failure path uses the SAME redaction as success — errors never bypass it.
-      send('error', { type: 'error', code: 'ENGINE_FAILURE', error: sanitizeError(err) });
+      // The CAUSE is named: a bare ENGINE_FAILURE/AbortError could not distinguish
+      // "too slow to start" from "went silent" from "the user pressed Stop", which
+      // made a 60s total-deadline defect look like an unexplained engine fault.
+      failure = classifyProviderFailure(err);
+      send('error', { type: 'error', code: failure.code, cause: failure.cause, ...(failure.limitMs ? { limitMs: failure.limitMs } : {}), error: sanitizeError(err) });
     }
     if (terminal === 'completed') {
       auditStore.append({ correlationId, type: 'loop.completed', component: 'engineer' });
       auditStore.append({ correlationId, type: 'execution.completed', component: 'engineer', outcome: 'ok' });
     } else {
       auditStore.append({ correlationId, type: 'loop.failed', component: 'engineer' });
-      auditStore.append({ correlationId, type: 'execution.failed', component: 'engineer', outcome: 'error' });
+      // Metadata only — the cause CLASS and the limit that expired, never the
+      // provider's text or the prompt.
+      auditStore.append({
+        correlationId,
+        type: 'execution.failed',
+        component: 'engineer',
+        outcome: failure?.cause ?? 'error',
+        ...(failure ? { fields: { cause: failure.cause, ...(failure.limitMs ? { limitMs: failure.limitMs } : {}) } } : {}),
+      });
     }
     // Slice 2 — advisory fallback signal: policy-preferred-cloud OR a low-quality
     // local outcome.

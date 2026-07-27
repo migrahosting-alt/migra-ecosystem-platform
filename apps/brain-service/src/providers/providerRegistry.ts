@@ -109,6 +109,9 @@ export class ProviderRegistry {
           model,
           visionModel: env.visionModel,
           apiKey: env.openAiApiKey,
+          connectTimeoutMs: env.providerConnectTimeoutMs,
+          idleTimeoutMs: env.providerIdleTimeoutMs,
+          absoluteTimeoutMs: env.providerAbsoluteTimeoutMs,
         });
       }
     }

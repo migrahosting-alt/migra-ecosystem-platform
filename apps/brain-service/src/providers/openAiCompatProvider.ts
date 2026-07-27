@@ -13,7 +13,71 @@ export interface OpenAiCompatOptions {
   visionModel?: string;
   /** Optional bearer key. Ollama/LM Studio ignore it; OpenAI requires it. */
   apiKey?: string;
+  /**
+   * @deprecated A single TOTAL deadline for a whole generation. Kept so existing
+   * callers keep compiling; it now seeds {@link connectTimeoutMs} only. A local
+   * 14B model streaming a grounded context routinely runs past any fixed total,
+   * so a total deadline killed valid turns — see {@link StreamTimeoutPolicy}.
+   */
   requestTimeoutMs?: number;
+  /** Deadline for the provider to ACCEPT the request and return headers. */
+  connectTimeoutMs?: number;
+  /** Max gap BETWEEN tokens. Reset on every chunk, so a healthy stream never
+   * expires no matter how long the answer is. */
+  idleTimeoutMs?: number;
+  /** Final safety guard on total wall-clock. `0`/undefined = no ceiling. */
+  absoluteTimeoutMs?: number;
+}
+
+/** Which deadline expired. Distinct from a user abort and from a provider error
+ * so operators can tell "model too slow to start" from "model went silent" from
+ * "someone pressed Stop". */
+export type TimeoutPhase = 'connect' | 'idle' | 'absolute';
+
+export class ProviderTimeoutError extends Error {
+  override readonly name = 'ProviderTimeoutError';
+  constructor(
+    readonly phase: TimeoutPhase,
+    readonly limitMs: number,
+    readonly elapsedMs: number,
+    baseUrl: string,
+  ) {
+    super(
+      phase === 'connect'
+        ? `Model provider ${baseUrl} did not respond within ${limitMs}ms (connect timeout).`
+        : phase === 'idle'
+          ? `Model provider ${baseUrl} sent no output for ${limitMs}ms (idle timeout) after ${elapsedMs}ms.`
+          : `Model provider ${baseUrl} exceeded the ${limitMs}ms absolute ceiling.`,
+    );
+  }
+}
+
+/** Raised when the CALLER aborted — never conflated with a timeout. */
+export class ProviderAbortedError extends Error {
+  override readonly name = 'ProviderAbortedError';
+  constructor(readonly elapsedMs: number) {
+    super(`The request was aborted by the caller after ${elapsedMs}ms.`);
+  }
+}
+
+/**
+ * Streaming-aware timeout policy.
+ *
+ * The provider previously armed ONE `setTimeout(abort, 60_000)` before the fetch
+ * and never reset it, so the whole generation had to finish inside 60 seconds.
+ * A grounded turn on a local 14B model exceeded that after retrieval, gating,
+ * provenance and audit had all already succeeded — the expensive work was paid
+ * for and then thrown away, and the failure surfaced as a bare `AbortError`
+ * indistinguishable from the user pressing Stop.
+ *
+ * Tokens arriving are proof of liveness, so the deadline that matters during a
+ * stream is the GAP between them, not the total.
+ */
+export interface StreamTimeoutPolicy {
+  connectMs: number;
+  idleMs: number;
+  /** 0 = unbounded. */
+  absoluteMs: number;
 }
 
 interface ChatCompletionResponse {
@@ -40,6 +104,11 @@ type ChatMessage =
 
 const IMAGE_MIME = /^image\/(png|jpe?g|webp|gif|bmp)$/i;
 
+/** True for the DOMException/Error an aborted fetch throws. */
+function isAbort(err: unknown): boolean {
+  return err instanceof Error && (err.name === 'AbortError' || err.name === 'TimeoutError');
+}
+
 /** A real model provider over an OpenAI-compatible `/chat/completions` endpoint.
  * There is no silent fallback to a stub: a configured real provider that fails
  * surfaces the error to the caller (mirrors the extension-side provider policy). */
@@ -49,7 +118,7 @@ export class OpenAiCompatProvider implements ProviderAdapter {
   private readonly model: string;
   private readonly visionModel?: string;
   private readonly apiKey?: string;
-  private readonly requestTimeoutMs: number;
+  private readonly timeouts: StreamTimeoutPolicy;
 
   constructor(opts: OpenAiCompatOptions) {
     this.profile = opts.profile;
@@ -57,7 +126,18 @@ export class OpenAiCompatProvider implements ProviderAdapter {
     this.model = opts.model;
     this.visionModel = opts.visionModel;
     this.apiKey = opts.apiKey;
-    this.requestTimeoutMs = opts.requestTimeoutMs ?? 60_000;
+    // `requestTimeoutMs` seeds only the CONNECT deadline: as a total budget it was
+    // the defect. Idle and absolute are independent.
+    this.timeouts = {
+      connectMs: opts.connectTimeoutMs ?? opts.requestTimeoutMs ?? 60_000,
+      idleMs: opts.idleTimeoutMs ?? 120_000,
+      absoluteMs: opts.absoluteTimeoutMs ?? 0,
+    };
+  }
+
+  /** The effective policy, so callers/tests can assert what is enforced. */
+  timeoutPolicy(): StreamTimeoutPolicy {
+    return { ...this.timeouts };
   }
 
   /** Lightweight reachability probe. Prefers GET /models (cheap); treats any
@@ -86,18 +166,28 @@ export class OpenAiCompatProvider implements ProviderAdapter {
   async complete(request: ChatTurnRequest): Promise<ChatTurnResponse> {
     const started = Date.now();
     const { model, messages } = this.prepare(request);
-    const response = await this.fetchWithTimeout(
-      `${this.baseUrl}/chat/completions`,
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(this.apiKey ? { Authorization: `Bearer ${this.apiKey}` } : {}),
+    // Non-streaming: there are no tokens to prove liveness, so the only sensible
+    // bound is the connect deadline (or the absolute ceiling when one is set).
+    const budget = this.timeouts.absoluteMs > 0 ? Math.max(this.timeouts.connectMs, this.timeouts.absoluteMs) : this.timeouts.connectMs;
+    let response: Response;
+    try {
+      response = await this.fetchWithTimeout(
+        `${this.baseUrl}/chat/completions`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(this.apiKey ? { Authorization: `Bearer ${this.apiKey}` } : {}),
+          },
+          body: JSON.stringify({ model, messages, stream: false }),
         },
-        body: JSON.stringify({ model, messages, stream: false }),
-      },
-      this.requestTimeoutMs,
-    );
+        budget,
+      );
+    } catch (err) {
+      // A bare AbortError says nothing about WHY. Name the deadline.
+      if (isAbort(err)) throw new ProviderTimeoutError('connect', budget, Date.now() - started, this.baseUrl);
+      throw err;
+    }
 
     if (!response.ok) {
       const detail = await response.text().catch(() => '');
@@ -142,7 +232,45 @@ export class OpenAiCompatProvider implements ProviderAdapter {
       if (signal.aborted) controller.abort();
       else signal.addEventListener('abort', onAbort, { once: true });
     }
-    const timer = setTimeout(() => controller.abort(), this.requestTimeoutMs);
+    // ── Streaming deadlines ──────────────────────────────────────────────────
+    // Three independent clocks, so a slow-but-alive stream is never killed:
+    //   connect  — until headers arrive, then cancelled
+    //   idle     — armed once streaming starts, RESET on every chunk
+    //   absolute — optional final guard on total wall-clock
+    const started = Date.now();
+    let expired: TimeoutPhase | undefined;
+    let limitMs = 0;
+    const fire = (phase: TimeoutPhase, limit: number) => {
+      expired = phase;
+      limitMs = limit;
+      controller.abort();
+    };
+
+    let connectTimer: ReturnType<typeof setTimeout> | undefined = setTimeout(
+      () => fire('connect', this.timeouts.connectMs),
+      this.timeouts.connectMs,
+    );
+    const absoluteTimer =
+      this.timeouts.absoluteMs > 0 ? setTimeout(() => fire('absolute', this.timeouts.absoluteMs), this.timeouts.absoluteMs) : undefined;
+    let idleTimer: ReturnType<typeof setTimeout> | undefined;
+    /** Every chunk is proof of liveness — restart the only clock that can kill us. */
+    const touch = (): void => {
+      if (idleTimer) clearTimeout(idleTimer);
+      idleTimer = setTimeout(() => fire('idle', this.timeouts.idleMs), this.timeouts.idleMs);
+    };
+    const clearAll = (): void => {
+      if (connectTimer) clearTimeout(connectTimer);
+      if (idleTimer) clearTimeout(idleTimer);
+      if (absoluteTimer) clearTimeout(absoluteTimer);
+    };
+    /** Turn a bare abort into a NAMED cause: our deadline, or the caller's Stop. */
+    const classify = (err: unknown): unknown => {
+      if (!isAbort(err)) return err;
+      if (expired) return new ProviderTimeoutError(expired, limitMs, Date.now() - started, this.baseUrl);
+      if (signal?.aborted) return new ProviderAbortedError(Date.now() - started);
+      return err;
+    };
+
     let res: Response;
     try {
       res = await fetch(`${this.baseUrl}/chat/completions`, {
@@ -156,12 +284,18 @@ export class OpenAiCompatProvider implements ProviderAdapter {
         signal: controller.signal,
       });
     } catch (err) {
-      clearTimeout(timer);
+      clearAll();
       signal?.removeEventListener('abort', onAbort);
-      throw err;
+      throw classify(err);
+    }
+    // Headers are in: the connect deadline has done its job and must not linger as
+    // a total-request deadline — that lingering timer WAS the defect.
+    if (connectTimer) {
+      clearTimeout(connectTimer);
+      connectTimer = undefined;
     }
     if (!res.ok || !res.body) {
-      clearTimeout(timer);
+      clearAll();
       signal?.removeEventListener('abort', onAbort);
       const detail = res.ok ? 'empty stream' : await res.text().catch(() => '');
       throw new Error(`Model provider ${this.baseUrl} stream HTTP ${res.status}${detail ? `: ${detail.slice(0, 200)}` : ''}`);
@@ -170,8 +304,10 @@ export class OpenAiCompatProvider implements ProviderAdapter {
     const decoder = new TextDecoder();
     let buffer = '';
     let outChars = 0;
+    touch(); // arm the idle clock only once the stream is actually open
     try {
       for await (const chunk of res.body as unknown as AsyncIterable<Uint8Array>) {
+        touch(); // liveness: reset, never accumulate toward a total
         buffer += decoder.decode(chunk, { stream: true });
         let nl: number;
         while ((nl = buffer.indexOf('\n')) !== -1) {
@@ -201,8 +337,10 @@ export class OpenAiCompatProvider implements ProviderAdapter {
           }
         }
       }
+    } catch (err) {
+      throw classify(err);
     } finally {
-      clearTimeout(timer);
+      clearAll();
       signal?.removeEventListener('abort', onAbort);
     }
   }
@@ -278,4 +416,37 @@ export class OpenAiCompatProvider implements ProviderAdapter {
       clearTimeout(timer);
     }
   }
+}
+
+/** A named failure class for the SSE frame and the audit record. */
+export interface ProviderFailure {
+  /** Stable machine code for the client. */
+  code: 'PROVIDER_CONNECT_TIMEOUT' | 'PROVIDER_IDLE_TIMEOUT' | 'PROVIDER_ABSOLUTE_TIMEOUT' | 'USER_ABORTED' | 'ENGINE_FAILURE';
+  /** Short cause slug for audit `outcome`/fields. */
+  cause: 'connect-timeout' | 'idle-timeout' | 'absolute-timeout' | 'user-abort' | 'provider-error';
+  /** The deadline that expired, when one did. */
+  limitMs?: number;
+}
+
+/**
+ * Name the cause of a provider failure.
+ *
+ * Everything used to collapse into `ENGINE_FAILURE` carrying a bare `AbortError`,
+ * so a fixed-total-deadline defect was indistinguishable from the user pressing
+ * Stop or from the model crashing. Operators could not tell those apart, and the
+ * audit trail recorded only `outcome: 'error'`.
+ */
+export function classifyProviderFailure(err: unknown): ProviderFailure {
+  if (err instanceof ProviderTimeoutError) {
+    const byPhase = {
+      connect: { code: 'PROVIDER_CONNECT_TIMEOUT', cause: 'connect-timeout' },
+      idle: { code: 'PROVIDER_IDLE_TIMEOUT', cause: 'idle-timeout' },
+      absolute: { code: 'PROVIDER_ABSOLUTE_TIMEOUT', cause: 'absolute-timeout' },
+    } as const;
+    return { ...byPhase[err.phase], limitMs: err.limitMs };
+  }
+  if (err instanceof ProviderAbortedError) return { code: 'USER_ABORTED', cause: 'user-abort' };
+  // An unclassified abort is still more likely a cancellation than an engine bug.
+  if (isAbort(err)) return { code: 'USER_ABORTED', cause: 'user-abort' };
+  return { code: 'ENGINE_FAILURE', cause: 'provider-error' };
 }
