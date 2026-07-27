@@ -79,7 +79,7 @@ test('every slash command maps to a real command, prompt, or shell action', () =
     else if (command.effect.kind === 'prompt') assert.ok(command.effect.prefix.length > 0);
     // `sourceMode:*` is an evidence-source selection — a STRUCTURED action, so the
     // approved-only boundary is armed by a control rather than by prompt wording.
-    else assert.match(command.effect.action, /^(tab:(chat|agent|diff|audit)|newChat|sourceMode:(auto|approved))$/);
+    else assert.match(command.effect.action, /^(tab:(chat|agent|diff|audit)|newChat|sourceMode:(auto|approved|workspace|none))$/);
   }
 });
 

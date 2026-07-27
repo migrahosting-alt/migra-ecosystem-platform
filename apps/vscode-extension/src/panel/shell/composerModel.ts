@@ -98,6 +98,8 @@ export const SLASH_COMMANDS: readonly SlashCommand[] = [
   { name: '/health', args: '', description: 'Check Brain service health', effect: { kind: 'command', command: 'health' } },
   { name: '/policy', args: '', description: 'Choose the execution policy', effect: { kind: 'command', command: 'executionPolicy' } },
   { name: '/approved', args: '', description: 'Answer only from the approved semantic index', effect: { kind: 'shell', action: 'sourceMode:approved' } },
+  { name: '/workspace', args: '', description: 'Answer from the current checkout, not the approved index', effect: { kind: 'shell', action: 'sourceMode:workspace' } },
+  { name: '/noevidence', args: '', description: 'Answer without reading the repository at all', effect: { kind: 'shell', action: 'sourceMode:none' } },
   { name: '/agent', args: '', description: 'Open the governed Agent Workspace', effect: { kind: 'shell', action: 'tab:agent' } },
   { name: '/history', args: '', description: 'Open the evidence-only Audit Trail', effect: { kind: 'shell', action: 'tab:audit' } },
   { name: '/refactor', args: '<code>', description: 'Refactor the selection', effect: { kind: 'prompt', prefix: 'Refactor this code: ' } },
@@ -124,8 +126,31 @@ export function matchSlashCommands(query: string): SlashCommand[] {
  * approved-index-only analysis was answered from three `package.json` files.
  */
 export const SOURCE_MODE_OPTIONS = [
-  { value: 'auto', label: 'Auto evidence', hint: 'Approved index when it fits, working tree otherwise — the source is always stated with the answer' },
-  { value: 'approved', label: 'Approved index', hint: 'Answer only from the approved semantic index; refuse rather than use unapproved working-tree code' },
+  {
+    value: 'auto',
+    label: 'Auto evidence',
+    hint: 'Approved index when it fits, working tree otherwise — the source is always stated with the answer',
+    /** `false` = an ordinary preference; `true` = a governance mode the Brain enforces. */
+    governed: false,
+  },
+  {
+    value: 'approved',
+    label: 'Approved index',
+    hint: 'Answer only from the approved semantic index; refuse rather than use unapproved working-tree code',
+    governed: true,
+  },
+  {
+    value: 'workspace',
+    label: 'Current workspace',
+    hint: 'Force the current checkout as the evidence source; the approved index is not consulted',
+    governed: true,
+  },
+  {
+    value: 'none',
+    label: 'No repository evidence',
+    hint: 'Answer without consulting the repository at all; repository tools are withheld',
+    governed: true,
+  },
 ] as const;
 
 export type SourceMode = (typeof SOURCE_MODE_OPTIONS)[number]['value'];
@@ -135,11 +160,33 @@ export function requiresApprovedEvidence(mode: string | undefined): boolean {
   return mode === 'approved';
 }
 
+/**
+ * The wire value for a selector state.
+ *
+ * Identity by design — the UI label and the protocol value must not drift, so the
+ * selector stores the protocol value itself rather than a display string that has
+ * to be translated. Anything unrecognised degrades to `auto`, which is the only
+ * mode that makes no governance claim.
+ */
+export function groundingModeOf(mode: string | undefined): SourceMode {
+  return SOURCE_MODE_OPTIONS.some((o) => o.value === mode) ? (mode as SourceMode) : 'auto';
+}
+
+/** True when the selected mode is an enforced governance state, not a preference. */
+export function isGovernedMode(mode: string | undefined): boolean {
+  return SOURCE_MODE_OPTIONS.find((o) => o.value === mode)?.governed ?? false;
+}
+
 /** Host-rendered provenance line. The MODEL never decides whether this appears —
  * an instruction to "say you used the working tree" is not an enforceable
  * disclosure. Rendered by the host from the decision the Brain reported. */
-export function sourceModeBadge(decision: { sourceMode?: string; indexVersion?: number; indexedBranch?: string; currentBranch?: string } | undefined): string {
+export function sourceModeBadge(
+  decision:
+    | { sourceMode?: string; requestedMode?: string; forced?: boolean; indexVersion?: number; indexedBranch?: string; currentBranch?: string }
+    | undefined,
+): string {
   if (!decision?.sourceMode) return '';
+  if (decision.sourceMode === 'none') return 'Source mode: No repository evidence';
   if (decision.sourceMode === 'approved-index') {
     const version = decision.indexVersion !== undefined ? ` v${decision.indexVersion}` : '';
     const diverged =
@@ -148,7 +195,12 @@ export function sourceModeBadge(decision: { sourceMode?: string; indexVersion?: 
         : '';
     return `Source mode: Approved index${version}${diverged}`;
   }
-  return 'Source mode: Working tree';
+  // A FALLBACK is not the same statement as a deliberate choice: `auto` landing on
+  // the checkout must not read as though the operator selected it.
+  if (decision.forced === false && decision.requestedMode === 'auto') {
+    return 'Source mode: Working tree (no approved evidence matched)';
+  }
+  return 'Source mode: Current workspace';
 }
 
 /** Model/routing selector options. `auto` lets the engine's router decide. */
@@ -160,3 +212,23 @@ export const ROUTING_OPTIONS = [
   { value: 'default', label: 'Balanced' },
   { value: 'premium', label: 'Deep' },
 ] as const;
+
+/**
+ * Operator confirmation when the evidence mode changes.
+ *
+ * Each mode states what it ENFORCES, not just its name: a governance control the
+ * operator cannot describe back is not a control they can rely on.
+ */
+export function sourceModeConfirmation(mode: string | undefined, branch?: string): string {
+  const where = branch ? ` (checkout \`${branch}\`)` : '';
+  switch (groundingModeOf(mode)) {
+    case 'approved':
+      return `Evidence source set to **approved index only**${where}. Requests the approved index cannot support will be refused rather than answered from working-tree code.`;
+    case 'workspace':
+      return `Evidence source set to **current workspace**${where}. Answers come from the checkout, and the approved index is not consulted — so they are not reviewed evidence.`;
+    case 'none':
+      return 'Evidence source set to **no repository evidence**. The repository will not be read at all and repository tools are withheld; answers come from general knowledge only.';
+    default:
+      return 'Evidence source set to **auto**. The source of each answer is stated with it.';
+  }
+}

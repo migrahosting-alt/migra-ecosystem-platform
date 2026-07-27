@@ -14,7 +14,7 @@ import { resolveChatScope } from './chatScope.js';
 import { buildWorkReport } from './workReport.js';
 import { runInspectionTurn, renderRoutingError } from './inspectionTurn.js';
 import { runEngineerTurn } from './engineerTurn.js';
-import { requiresApprovedEvidence } from '../panel/shell/composerModel.js';
+import { groundingModeOf, requiresApprovedEvidence } from '../panel/shell/composerModel.js';
 import { previewAndMaybeApplyChangeset, type ChangesetProposal, type ChangesetOp } from '../services/proposedChangeset.js';
 import { getEscalationDispatch } from '../services/escalationConsent.js';
 import { attributionView, type RoutingView } from '../panel/providerRouterViewModel.js';
@@ -287,8 +287,14 @@ export async function runChatTurn(
         // An explicitly pinned model outranks the profile — same as the chat path.
         ...(options.modelId ? { model: options.modelId } : {}),
         ...(options.policy ? { policy: options.policy } : {}),
-        // Approved-only is a REQUEST FIELD, so the boundary is enforced by the
-        // Brain rather than by how the question happens to be worded.
+        // The MODE is the request field, so the boundary is enforced by the Brain
+        // rather than by how the question happens to be worded. `auto` is omitted so
+        // the wire shape for existing callers is byte-identical to before.
+        ...(options.sourceMode && groundingModeOf(options.sourceMode) !== 'auto'
+          ? { groundingMode: groundingModeOf(options.sourceMode) }
+          : {}),
+        // Legacy alias kept alongside for older Brains that predate `groundingMode`;
+        // a Brain that understands both prefers the mode.
         ...(requiresApprovedEvidence(options.sourceMode) ? { requireApproved: true } : {}),
         ...(options.currentBranch ? { currentBranch: options.currentBranch } : {}),
       },

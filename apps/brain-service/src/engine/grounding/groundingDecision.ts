@@ -1,3 +1,7 @@
+import {
+  groundingMayUseApprovedIndex as mayUseApprovedIndex,
+  type GroundingMode,
+} from '@migrapilot/protocol';
 /**
  * MigraAI Engine — the ONE grounding boundary.
  *
@@ -50,33 +54,18 @@ export interface GroundingChunk {
   score: number;
 }
 
-/**
- * Where a turn is ALLOWED to draw repository evidence from.
- *
- * Four enforced modes, not four labels. A menu option without enforcement behind
- * it is a false governance guarantee — a control reading "No repository evidence"
- * while retrieval still runs is worse than no control at all.
- *
- *  auto      prefer approved evidence, fall back to the working tree (disclosed)
- *  approved  approved index only; refuse rather than touch the checkout
- *  workspace FORCE the working tree — the approved index is not consulted even
- *            when one exists and would have cleared the floor
- *  none      no repository evidence at all: no retrieval of either kind
- *
- * `approved` and `none` also cause the caller to withhold repo-reading tools, or
- * the agent could re-acquire by hand what the mode forbids.
- */
-export type GroundingMode = 'auto' | 'approved' | 'workspace' | 'none';
-
-/** Modes in which the caller must withhold every repo-reading tool. */
-export function withholdsWorkspaceTools(mode: GroundingMode): boolean {
-  return mode === 'approved' || mode === 'none';
-}
-
-/** Modes that may consult the approved index at all. */
-export function mayUseApprovedIndex(mode: GroundingMode): boolean {
-  return mode === 'auto' || mode === 'approved';
-}
+// The mode union lives in `@migrapilot/protocol` so the extension and the Brain
+// cannot drift: two independent unions that happen to match today would let the UI
+// offer a mode the Brain never enforces. Re-exported here for existing importers.
+export {
+  GROUNDING_MODES,
+  groundingMayUseApprovedIndex as mayUseApprovedIndex,
+  groundingModeFrom,
+  groundingWithholdsTools as withholdsWorkspaceTools,
+  isGroundingMode,
+  parseGroundingMode,
+  type GroundingMode,
+} from '@migrapilot/protocol';
 
 /** Legacy boolean → mode. `requireApproved` predates the mode contract. */
 export function modeFromLegacy(requireApproved: boolean | undefined): GroundingMode {
