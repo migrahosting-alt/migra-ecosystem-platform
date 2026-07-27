@@ -65,6 +65,7 @@ export type LiveSourceType =
   | 'official-api'
   | 'release'
   | 'security-advisory'
+  | 'status-page'
   | 'research'
   | 'news'
   | 'general-web';
@@ -135,6 +136,8 @@ export function freshnessSecondsFor(
   switch (sourceType) {
     case 'security-advisory':
       return policy.securityAdvisorySeconds;
+    case 'status-page':
+      return policy.statusPageSeconds;
     case 'release':
     case 'official-api':
       return policy.packageReleaseSeconds;
@@ -168,6 +171,13 @@ export interface LiveSearchResult {
   title: string;
   url: string;
   domain: string;
+  /**
+   * Which connector produced this result.
+   *
+   * Recorded so a citation can be traced to the component that vouched for it, and so
+   * one connector's failure is attributable instead of appearing as a general outage.
+   */
+  connectorId?: string;
   snippet?: string;
   publishedAt?: string;
   retrievedAt: string;
@@ -209,6 +219,70 @@ export interface LiveKnowledgeConnector {
   fetch(source: LiveSourceReference, signal?: AbortSignal): Promise<LiveDocument>;
 }
 
+/**
+ * How much of the world a connector can actually see.
+ *
+ * `authoritative` connectors answer from first-party APIs — a release from the GitHub
+ * API, a version from the npm registry — and are the only kind `official` may use.
+ * `general-web` is unrestricted search. The distinction is load-bearing for
+ * DISCLOSURE: with only authoritative connectors registered, `web` mode has real
+ * evidence but not broad coverage, and saying otherwise would overstate what was
+ * checked.
+ */
+export type ConnectorCoverage = 'authoritative' | 'general-web';
+
+/**
+ * A credential a connector may use, named but never carried.
+ *
+ * The field is the ENVIRONMENT VARIABLE NAME, so this structure can be logged, audited
+ * and rendered without any handling rules. A connector that stored the value here would
+ * put a token into every record that touches its configuration.
+ */
+export interface ConnectorCredentialRef {
+  envVar: string;
+  /**
+   * `false` means the connector degrades — usually to a lower rate limit — rather than
+   * disappearing. A missing optional credential must disable only that connector, never
+   * collapse the mode.
+   */
+  required: boolean;
+  /** What the credential buys, for an operator deciding whether to set it. */
+  purpose: string;
+}
+
+export type ConnectorUnavailableReason =
+  | 'missing-credential'
+  | 'not-configured'
+  | 'disabled-by-operator';
+
+/**
+ * Whether a connector can run this turn.
+ *
+ * Unavailability is NAMED rather than silent: a connector that vanishes without saying
+ * so is indistinguishable from one that ran and found nothing, which is exactly the
+ * confusion that hides a misconfiguration for months.
+ */
+export type ConnectorAvailability =
+  | { connectorId: string; available: true; coverage: ConnectorCoverage }
+  | {
+      connectorId: string;
+      available: false;
+      coverage: ConnectorCoverage;
+      reason: ConnectorUnavailableReason;
+      /** Names the missing variable — a NAME, never a value. */
+      detail: string;
+    };
+
+/** An authoritative connector, plus the metadata governance needs about it. */
+export interface DescribedConnector extends LiveKnowledgeConnector {
+  readonly coverage: ConnectorCoverage;
+  /** Domains this connector is allowed to reach. Enforced, not documentation. */
+  readonly domains: readonly string[];
+  readonly credentials?: readonly ConnectorCredentialRef[];
+  /** Availability for THIS process, decided from the environment at build time. */
+  availability(): ConnectorAvailability;
+}
+
 // ── Decision model ───────────────────────────────────────────────────────────
 
 /**
@@ -244,4 +318,53 @@ export interface LiveKnowledgeDecision {
   domainsConsulted?: string[];
   /** Coarse failure class; never a provider message and never page content. */
   failureCategory?: 'no-connector' | 'connector-error' | 'timeout' | 'cancelled' | 'all-sources-rejected';
+  /** Per-connector availability, so a misconfiguration is visible rather than inferred. */
+  connectorAvailability?: ConnectorAvailability[];
+  /**
+   * True only when a `general-web` connector actually ran.
+   *
+   * `web` mode with authoritative connectors alone produces real evidence but not broad
+   * coverage, and the disclosure has to say which one happened.
+   */
+  broadWebCoverage?: boolean;
+}
+
+/**
+ * One citation the host may render.
+ *
+ * Produced from the ACCEPTED set by the host, never parsed out of the model's prose.
+ * A citation the model invented has no entry here, so it cannot be rendered — which is
+ * the only way a "sources" list means anything.
+ */
+export interface LiveCitation {
+  sourceId: string;
+  connectorId: string;
+  title: string;
+  /** Origin + path. Never a query string, never a fragment. */
+  safeUrl: string;
+  domain: string;
+  sourceType: LiveSourceType;
+  trustTier: TrustTier;
+  publishedAt?: string;
+  retrievedAt: string;
+  expiresAt?: string;
+  contentHash: string;
+}
+
+/**
+ * The host-rendered live-knowledge frame.
+ *
+ * Built from the decision and the accepted set, so the header line and the citations
+ * cannot disagree with what was actually fetched. The model receives bounded source
+ * CONTENT; the renderer receives this structure separately, which is what makes
+ * provenance unfabricable.
+ */
+export interface LiveKnowledgeFrame {
+  headline: string;
+  checkedAt?: string;
+  sourcesConsulted: number;
+  sourcesAccepted: number;
+  citations: LiveCitation[];
+  /** Named unavailable connectors, for the operator rather than the end user. */
+  unavailable: { connectorId: string; reason: ConnectorUnavailableReason; detail: string }[];
 }

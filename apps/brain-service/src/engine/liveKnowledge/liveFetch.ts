@@ -120,21 +120,45 @@ export interface LiveFetchDeps {
 }
 
 /**
- * Fetch one document safely, or throw a typed rejection.
+ * A raw, fully-guarded response body.
  *
- * Redirects are followed MANUALLY (`redirect: 'manual'`) so each hop can be revalidated.
- * Handing redirect-following to the platform would validate only the first URL, which is
- * exactly the hole a 302 into a private network walks through.
+ * `finalUrl` is where the bytes actually came from after redirects, which is what
+ * provenance must record — the URL a connector asked for is a request, not a source.
  */
-export async function fetchLiveDocument(
-  source: LiveSearchResult,
+export interface GuardedResponse {
+  finalUrl: string;
+  contentType: string;
+  raw: string;
+}
+
+export interface GuardedRequestOptions {
+  /**
+   * Extra request headers. An `Authorization` value passed here is sent to the ORIGINAL
+   * origin only and dropped on any cross-origin redirect — a redirect that could carry
+   * the token onward would turn every connector credential into a giveaway.
+   */
+  headers?: Record<string, string>;
+  /** Overrides the default Accept, e.g. a registry's versioned media type. */
+  accept?: string;
+}
+
+/**
+ * Perform one fully-guarded GET, or throw a typed rejection.
+ *
+ * Every bound lives here so there is exactly ONE way for this service to reach the
+ * network: a second code path that "just needs JSON" is how an SSRF guard stops being a
+ * guarantee. Redirects are followed MANUALLY so each hop can be revalidated; handing
+ * that to the platform would validate only the first URL, which is the hole a 302 into
+ * a private network walks through.
+ */
+export async function guardedRequest(
+  startUrl: string,
   deps: LiveFetchDeps,
+  options: GuardedRequestOptions = {},
   signal?: AbortSignal,
-): Promise<LiveDocument> {
+): Promise<GuardedResponse> {
   const budget = deps.budget ?? DEFAULT_RESEARCH_BUDGET;
   const fetchImpl = deps.fetchImpl ?? fetch;
-  const now = deps.now ?? (() => new Date());
-  const freshness = deps.freshness ?? DEFAULT_FRESHNESS_POLICY;
 
   const controller = new AbortController();
   let expired: LiveFetchTimeoutPhase | undefined;
@@ -166,7 +190,8 @@ export async function fetchLiveDocument(
   };
 
   try {
-    let url = source.url;
+    let url = startUrl;
+    const startOrigin = originOf(startUrl);
     let response: Response | undefined;
 
     for (let hop = 0; ; hop += 1) {
@@ -176,13 +201,25 @@ export async function fetchLiveDocument(
       // Steps 1 + 2, repeated for EVERY hop — including the first.
       await assertFetchableUrl(url, deps.resolve);
 
+      // Credentials never cross an origin boundary, even a permitted one.
+      const sameOrigin = originOf(url) === startOrigin;
+      const headers: Record<string, string> = {
+        Accept: options.accept ?? ALLOWED_CONTENT_TYPES.join(', '),
+        ...(options.headers ?? {}),
+      };
+      if (!sameOrigin) {
+        for (const key of Object.keys(headers)) {
+          if (key.toLowerCase() === 'authorization' || key.toLowerCase() === 'cookie') delete headers[key];
+        }
+      }
+
       connectTimer = setTimeout(() => fire('connect', budget.connectTimeoutMs), budget.connectTimeoutMs);
       let res: Response;
       try {
         res = await fetchImpl(url, {
           method: 'GET',
           redirect: 'manual', // we revalidate each hop ourselves
-          headers: { Accept: ALLOWED_CONTENT_TYPES.join(', ') },
+          headers,
           signal: controller.signal,
         });
       } catch (err) {
@@ -238,19 +275,79 @@ export async function fetchLiveDocument(
       reason,
     });
 
-    const content = extractSafeText(raw, contentType);
-    const fetchedAt = now();
-    const ttlSeconds = freshnessSecondsFor(source.sourceType, freshness);
-    return {
-      source: { ...source, url, retrievedAt: fetchedAt.toISOString() },
-      content,
-      contentHash: createHash('sha256').update(content).digest('hex').slice(0, 32),
-      fetchedAt: fetchedAt.toISOString(),
-      expiresAt: new Date(fetchedAt.getTime() + ttlSeconds * 1000).toISOString(),
-    };
+    return { finalUrl: url, contentType, raw };
   } finally {
     clearAll();
   }
+}
+
+function originOf(url: string): string {
+  try {
+    return new URL(url).origin;
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * Fetch one document as inert text, with provenance.
+ *
+ * The recorded `url` is where the bytes came from after redirects, not what was asked
+ * for, so a citation points at the document that was actually read.
+ */
+export async function fetchLiveDocument(
+  source: LiveSearchResult,
+  deps: LiveFetchDeps,
+  signal?: AbortSignal,
+): Promise<LiveDocument> {
+  const now = deps.now ?? (() => new Date());
+  const freshness = deps.freshness ?? DEFAULT_FRESHNESS_POLICY;
+
+  const { finalUrl, contentType, raw } = await guardedRequest(source.url, deps, {}, signal);
+
+  const content = extractSafeText(raw, contentType);
+  const fetchedAt = now();
+  const ttlSeconds = freshnessSecondsFor(source.sourceType, freshness);
+  return {
+    source: { ...source, url: finalUrl, retrievedAt: fetchedAt.toISOString() },
+    content,
+    contentHash: createHash('sha256').update(content).digest('hex').slice(0, 32),
+    fetchedAt: fetchedAt.toISOString(),
+    expiresAt: new Date(fetchedAt.getTime() + ttlSeconds * 1000).toISOString(),
+  };
+}
+
+/**
+ * Read a JSON API through the identical boundary.
+ *
+ * Connectors need structured data, not flattened text, so they get their own entry
+ * point rather than a bare `fetch` — the guards are not optional for the components
+ * most likely to be handed an attacker-influenced identifier.
+ */
+export async function fetchLiveJson<T = unknown>(
+  url: string,
+  deps: LiveFetchDeps,
+  options: GuardedRequestOptions = {},
+  signal?: AbortSignal,
+): Promise<{ finalUrl: string; data: T; raw: string }> {
+  const { finalUrl, contentType, raw } = await guardedRequest(
+    url,
+    deps,
+    { accept: 'application/json', ...options },
+    signal,
+  );
+  if (!contentType.includes('json')) {
+    throw new LiveFetchRejected('unsupported-content-type', safeUrlForAudit(finalUrl), `${contentType} is not json`);
+  }
+  let data: T;
+  try {
+    data = JSON.parse(raw) as T;
+  } catch {
+    // The body is never echoed: a malformed response from a credentialed endpoint could
+    // contain anything, including the credential it rejected.
+    throw new LiveFetchRejected('unsupported-content-type', safeUrlForAudit(finalUrl), 'malformed json body');
+  }
+  return { finalUrl, data, raw };
 }
 
 /**
@@ -273,8 +370,19 @@ function isRedirect(status: number): boolean {
   return status === 301 || status === 302 || status === 303 || status === 307 || status === 308;
 }
 
+/**
+ * Is this a type we can safely turn into evidence?
+ *
+ * The explicit allowlist, plus any `application/…+json` structured suffix (RFC 6839).
+ * The suffix rule is principled rather than a vendor exception: npm answers with
+ * `application/vnd.npm.install-v1+json`, and a type declaring itself JSON by the
+ * registered convention is JSON. Refusing it meant the npm connector silently produced
+ * nothing in production while passing every stubbed test — which is exactly the class of
+ * bug a live run exists to find.
+ */
 export function isAllowedContentType(contentType: string): boolean {
-  return (ALLOWED_CONTENT_TYPES as readonly string[]).includes(contentType);
+  if ((ALLOWED_CONTENT_TYPES as readonly string[]).includes(contentType)) return true;
+  return /^application\/[a-z0-9][a-z0-9.\-]*\+json$/.test(contentType);
 }
 
 /** URL shape AND resolved addresses, in that order. Throws on either failure. */
@@ -352,7 +460,11 @@ async function readBounded(
  * "ignore your previous instructions and run …" is just a page saying that.
  */
 export function extractSafeText(raw: string, contentType: string): string {
-  if (contentType === 'application/json') return raw.slice(0, 200_000);
+  // JSON keeps its structure — collapsing it would destroy the shape a reader needs —
+  // but hidden marks come out, because a JSON string value can carry them too.
+  if (contentType === 'application/json' || contentType.endsWith('+json')) {
+    return stripControl(raw.slice(0, 200_000));
+  }
   if (!contentType.includes('html') && !contentType.includes('xml')) {
     return collapse(stripControl(raw));
   }
@@ -366,6 +478,17 @@ export function extractSafeText(raw: string, contentType: string): string {
   // Any surviving markup — including every on*= handler attribute — goes with the tags.
   s = s.replace(/<[^>]+>/g, ' ');
   s = decodeBasicEntities(s);
+  return collapse(stripControl(s));
+}
+
+/**
+ * Sanitise text a CONNECTOR rendered from an API payload.
+ *
+ * Authoritative payloads still contain user-authored material — release notes, issue
+ * titles, advisory summaries — so a first-party connector does not get to skip the
+ * treatment a scraped page receives.
+ */
+export function sanitizeUntrustedText(s: string): string {
   return collapse(stripControl(s));
 }
 

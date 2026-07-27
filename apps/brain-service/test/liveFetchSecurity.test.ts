@@ -552,7 +552,7 @@ test('a connector that keeps searching past the budget is refused, not silently 
   // to promise it. A silent empty result would be indistinguishable from "nothing found".
   const c = connector('o', [source()]);
   const registry = new LiveConnectorRegistry().register(c, ['official']);
-  const budgeted = withSearchBudget(registry.select('official')!, 1);
+  const budgeted = withSearchBudget(registry.eligible('official')[0]!, 1);
   await budgeted.search({ query: 'q', mode: 'official', maxResults: 1 });
   await assert.rejects(() => budgeted.search({ query: 'again', mode: 'official', maxResults: 1 }), SearchBudgetExceeded);
   assert.equal(c.searches, 1, 'the refused search never reached the provider');

@@ -363,7 +363,10 @@ test('research budget defaults are bounded', () => {
 });
 
 test('freshness is per source class and configurable', () => {
-  assert.equal(freshnessSecondsFor('status-page' as never, DEFAULT_FRESHNESS_POLICY) ?? undefined, undefined);
+  // `statusPageSeconds` used to be a policy field nothing could select. The status
+  // connector needed it, so `status-page` is now a real source type — and five minutes,
+  // because an hour-old status page answers the wrong question.
+  assert.equal(freshnessSecondsFor('status-page', DEFAULT_FRESHNESS_POLICY), 300);
   assert.equal(freshnessSecondsFor('security-advisory'), 3600);
   assert.equal(freshnessSecondsFor('news'), 1800);
   assert.equal(freshnessSecondsFor('official-docs'), 86_400);
