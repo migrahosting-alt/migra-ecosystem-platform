@@ -655,7 +655,10 @@ details.raw pre { max-height: 240px; overflow: auto; }
 .ctool:hover:not(:disabled) { background: var(--vscode-toolbar-hoverBackground, var(--vscode-list-hoverBackground)); color: var(--mp-fg); }
 .ctool.recording { color: var(--mp-error); animation: mp-pulse 1s ease-in-out infinite; }
 @keyframes mp-pulse { 0%,100% { opacity: 1; } 50% { opacity: .45; } }
-#croute {
+/* Every composer select, not one by id: styling a single id left the evidence
+   selector as a NATIVE WHITE control against the dark shell. Selector-per-id is
+   how that happened, so this rule is deliberately shared. */
+#croute, #csource {
   background: var(--vscode-dropdown-background, var(--vscode-input-background));
   color: var(--vscode-dropdown-foreground, var(--vscode-input-foreground));
   border: 1px solid var(--vscode-dropdown-border, var(--mp-border));
@@ -664,6 +667,19 @@ details.raw pre { max-height: 240px; overflow: auto; }
   font-size: 11px;
   padding: 3px 6px;
   max-width: 190px;
+  /* Suppress the platform chrome that made it read as a foreign widget. */
+  appearance: none;
+  -webkit-appearance: none;
+}
+/* The approved-only mode is a governance state, so it reads as one rather than as
+   a neutral default. */
+#csource[data-mode="approved"] {
+  border-color: var(--mp-accent, var(--vscode-focusBorder));
+  color: var(--vscode-textLink-foreground, var(--vscode-dropdown-foreground));
+}
+#croute:focus-visible, #csource:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: 1px;
 }
 #csend {
   display: inline-flex; align-items: center; justify-content: center;

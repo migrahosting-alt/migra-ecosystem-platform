@@ -1612,8 +1612,11 @@ suite('MigraPilot extension — end to end', () => {
       // defined and never rendered, leaving the mode reachable only via /approved.
       const html = shellHtml({ nonce: 'test-nonce', csp: "default-src 'none'", initialTab: 'chat', script: 'void 0;', compact: false });
       assert.match(html, /id="csource"/, 'the evidence-source select must be present');
-      assert.match(html, /Approved index only/, 'and expose the approved-only option');
-      assert.match(html, /<option value="auto"/, 'with Auto as the default option');
+      assert.match(html, /Approved index/, 'and expose the approved-only option');
+      assert.match(html, /Auto evidence/, 'with an explicitly-named default, not a bare "Auto"');
+      // Both selects must be styled by ONE rule: styling a single id left this one
+      // rendering as a native white control against the dark shell.
+      assert.match(html, /#croute,\s*#csource/, 'both composer selects share the style rule');
       // It sits with the other composer controls, not somewhere unreachable.
       const composer = html.slice(html.indexOf('id="ctools"'), html.indexOf('id="chint"'));
       assert.match(composer, /id="csource"/, 'rendered inside the composer tool row');

@@ -95,5 +95,7 @@ test('slash matching is prefix-first and falls back to description search', () =
 
 test('routing options expose Auto plus the three engine tiers', () => {
   assert.deepEqual(ROUTING_OPTIONS.map((option) => option.value), ['auto', 'cheap', 'default', 'premium']);
-  assert.deepEqual(ROUTING_OPTIONS.map((option) => option.label), ['Auto', 'Fast', 'Balanced', 'Deep']);
+  // "Auto model" is deliberate: the composer now has two selects, and two controls
+  // both reading "Auto" were impossible to tell apart while collapsed.
+  assert.deepEqual(ROUTING_OPTIONS.map((option) => option.label), ['Auto model', 'Fast', 'Balanced', 'Deep']);
 });
