@@ -158,11 +158,12 @@ test('the selector is RENDERED, not just defined', () => {
   assert.match(composer, /case 'sourceMode':/, 'host-set modes are reflected back into it');
 });
 
-test('both composer selects share one style rule and are distinguishable', () => {
+test('every composer select shares one style rule and they stay distinguishable', () => {
   const styles = source('panel/shell/shellStyles.ts');
   // The evidence selector rendered as a NATIVE WHITE control because the rule was
-  // written for a single id. Both must be covered by the same declaration.
-  assert.match(styles, /#croute,\s*#csource\s*\{/, 'one shared rule, not per-id styling');
+  // written for a single id. EVERY select must be covered by the same declaration —
+  // the live-knowledge control joined this row, so it is named here too.
+  assert.match(styles, /#croute,\s*#csource,\s*#clive\s*\{/, 'one shared rule, not per-id styling');
   assert.match(styles, /appearance: none/, 'platform chrome suppressed so it matches the shell');
   // All three governance modes get the deliberate treatment, not just approved.
   for (const mode of ['approved', 'workspace', 'none']) {

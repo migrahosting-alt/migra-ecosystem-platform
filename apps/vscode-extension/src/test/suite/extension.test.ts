@@ -1726,4 +1726,103 @@ suite('MigraPilot extension — end to end', () => {
       assert.ok(version > 0);
     });
   });
+
+  suite('Live knowledge (installed path)', () => {
+    const liveClient = () =>
+      new MigraAiClient({
+        baseUrl: () => BRAIN_URL,
+        timeoutMs: () => 120_000,
+        log: () => {},
+        scope: () => ({ owner: 'local', workspace: 'live-knowledge-proof' }),
+      });
+
+    /** One turn through the extension's OWN transport and renderer. */
+    async function turn(
+      liveMode: 'off' | 'official' | 'web' | undefined,
+      groundingMode?: 'auto' | 'approved' | 'workspace' | 'none',
+    ): Promise<string> {
+      const rendered: string[] = [];
+      await runEngineerTurn(
+        liveClient(),
+        {
+          rootPath: vscode.workspace.workspaceFolders![0]!.uri.fsPath,
+          task: 'Which npm typescript version is current?',
+          // Omitted for `off`, exactly as the composer serializes it.
+          ...(liveMode && liveMode !== 'off' ? { liveKnowledgeMode: liveMode } : {}),
+          ...(groundingMode ? { groundingMode } : {}),
+        },
+        { markdown: (t) => rendered.push(t), progress: () => {} },
+      );
+      return rendered.join('');
+    }
+
+    test('the composer renders the live-knowledge selector with honest labels', () => {
+      // The control must EXIST in the shipped markup. The evidence selector was once
+      // defined and never rendered, so the mode was reachable only by slash command.
+      const html = shellHtml({ nonce: 'test-nonce', csp: "default-src 'none'", initialTab: 'chat', script: 'void 0;', compact: false });
+      assert.match(html, /id="clive"/, 'the live-knowledge select must be present');
+      assert.match(html, /Live knowledge off/, 'the default option names itself');
+      assert.match(html, /Official sources/);
+      assert.match(html, /Web research/);
+      // Every select shares one style rule, or one of them renders as a native white
+      // control against the dark shell — which is how that bug happened before. Read from
+      // the rendered document, so this is what the webview actually receives.
+      const styled = shellHtml({ nonce: 'n', csp: "default-src 'none'", initialTab: 'chat', script: 'void 0;', compact: false });
+      const shellStylesText = () => styled;
+      assert.match(shellStylesText(), /#croute, #csource, #clive \{/);
+    });
+
+    test('all three live modes reach the real Brain and each discloses its own frame', async () => {
+      const outcomes: Array<{ mode: string; text: string }> = [];
+      for (const mode of ['off', 'official', 'web'] as const) {
+        outcomes.push({ mode, text: await turn(mode) });
+      }
+      const byMode = Object.fromEntries(outcomes.map((o) => [o.mode, o.text]));
+
+      // Every turn carries a live-knowledge frame, host-rendered, whatever the outcome.
+      for (const { mode, text } of outcomes) {
+        assert.match(text, /Live knowledge: /, `${mode}: must disclose a live-knowledge frame; got: ${text.slice(0, 300)}`);
+      }
+
+      // `off` says off, and never claims to have consulted anything.
+      assert.match(byMode.off!, /Live knowledge: Off/, `off frame missing; got: ${byMode.off!.slice(0, 300)}`);
+      assert.ok(!/Sources accepted: [1-9]/.test(byMode.off!), 'off must accept no sources');
+
+      // With no provider wired into the running Brain, official reports the OUTAGE
+      // rather than looking like the operator chose off.
+      assert.ok(
+        /Official sources|unavailable \(no-connector\)|no authoritative sources found/.test(byMode.official!),
+        `official: expected an authoritative outcome or a named outage; got: ${byMode.official!.slice(0, 300)}`,
+      );
+      assert.ok(!/Live knowledge: Off/.test(byMode.official!), 'official must never render as off');
+
+      // `web` must never claim broad coverage while no general-web provider exists.
+      assert.ok(
+        !/Live knowledge: Web research\b/.test(byMode.web!),
+        `web must not claim general-web coverage; got: ${byMode.web!.slice(0, 300)}`,
+      );
+    });
+
+    test('the two evidence dimensions are disclosed separately in one turn', async () => {
+      // Repository `none` with live `official`: the combination the two dimensions exist
+      // for. Each must state its own boundary; one line for both would make "no
+      // repository evidence" and "no external evidence" indistinguishable.
+      const text = await turn('official', 'none');
+
+      assert.match(text, /Source mode: No repository evidence/, `missing repository frame; got: ${text.slice(0, 400)}`);
+      assert.match(text, /Live knowledge: /, `missing live frame; got: ${text.slice(0, 400)}`);
+      // And repository provenance comes first, before the live frame and the answer.
+      assert.ok(
+        text.indexOf('Source mode:') < text.indexOf('Live knowledge:'),
+        'the repository frame precedes the live frame',
+      );
+    });
+
+    test('an omitted live mode behaves exactly like off', async () => {
+      // Every request written before this field existed omits it, so absence must mean
+      // off rather than defaulting to a lookup.
+      const omitted = await turn(undefined);
+      assert.match(omitted, /Live knowledge: Off/, `omitted must render as off; got: ${omitted.slice(0, 300)}`);
+    });
+  });
 });

@@ -5,7 +5,7 @@
 // the same honesty contract as /agent.
 
 import type { MigraAiClient, EngineerRequest } from '../services/migraAiClient.js';
-import { sourceModeBadge } from '../panel/shell/composerModel.js';
+import { liveKnowledgeBadge, sourceModeBadge } from '../panel/shell/composerModel.js';
 import { isPilotError } from '@migrapilot/pilot-client';
 
 export interface EngineerSink {
@@ -90,6 +90,12 @@ export async function runEngineerTurn(
         // "say that you used the working tree" is an instruction, not a guarantee.
         const badge = sourceModeBadge(ev.data as Parameters<typeof sourceModeBadge>[0]);
         if (badge) sink.markdown(`_${badge}_\n\n`);
+      } else if (ev.event === 'liveKnowledge') {
+        // The SECOND frame, rendered separately from the repository one. Collapsing them
+        // would make "no repository evidence" and "no external evidence" indistinguishable,
+        // and they are independent statements about entirely different boundaries.
+        const lines = liveKnowledgeBadge(ev.data as Parameters<typeof liveKnowledgeBadge>[0]);
+        if (lines.length) sink.markdown(`${lines.map((l) => `_${l}_`).join('\n')}\n\n`);
       } else if (ev.event === 'refusal') {
         // An approved-only turn the Brain could not ground. Rendered verbatim from
         // the Brain's reason — the loop never started, so there is nothing else.

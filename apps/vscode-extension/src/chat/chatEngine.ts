@@ -14,7 +14,7 @@ import { resolveChatScope } from './chatScope.js';
 import { buildWorkReport } from './workReport.js';
 import { runInspectionTurn, renderRoutingError } from './inspectionTurn.js';
 import { runEngineerTurn } from './engineerTurn.js';
-import { groundingModeOf, requiresApprovedEvidence } from '../panel/shell/composerModel.js';
+import { groundingModeOf, liveModeOf, requiresApprovedEvidence } from '../panel/shell/composerModel.js';
 import { previewAndMaybeApplyChangeset, type ChangesetProposal, type ChangesetOp } from '../services/proposedChangeset.js';
 import { getEscalationDispatch } from '../services/escalationConsent.js';
 import { attributionView, type RoutingView } from '../panel/providerRouterViewModel.js';
@@ -82,6 +82,16 @@ export interface ChatTurnOptions {
    * request answered from the working tree because nothing in the request said so.
    */
   sourceMode?: string;
+  /**
+   * Live-knowledge mode from its own selector — whether this turn may consult
+   * information OUTSIDE the repository, and from which trust class.
+   *
+   * INDEPENDENT of {@link sourceMode}: `none` repository evidence does not disable live
+   * research, and `off` live knowledge does not change repository grounding. Explicit UI
+   * state, never parsed from the prompt — a model that could talk its way onto the
+   * network by phrasing would make the boundary decorative.
+   */
+  liveMode?: string;
   /** Live checkout branch, for branch-divergence disclosure. Omitted when unknown. */
   currentBranch?: string;
   memoryPolicy?: { mode?: 'off' | 'session' | 'durable'; retrieve?: boolean; store?: boolean };
@@ -292,6 +302,13 @@ export async function runChatTurn(
         // the wire shape for existing callers is byte-identical to before.
         ...(options.sourceMode && groundingModeOf(options.sourceMode) !== 'auto'
           ? { groundingMode: groundingModeOf(options.sourceMode) }
+          : {}),
+        // The second dimension, sent as its own field. `off` is OMITTED so the wire
+        // shape for every existing caller stays byte-identical — and because a Brain
+        // that predates the field resolves absence to `off` anyway, which is the same
+        // meaning rather than a lucky coincidence.
+        ...(options.liveMode && liveModeOf(options.liveMode) !== 'off'
+          ? { liveKnowledgeMode: liveModeOf(options.liveMode) }
           : {}),
         // Legacy alias kept alongside for older Brains that predate `groundingMode`;
         // a Brain that understands both prefers the mode.

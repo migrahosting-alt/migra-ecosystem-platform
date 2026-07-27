@@ -34,7 +34,7 @@ import type { BackendRouter } from '../../services/backendRouter.js';
 import type { EngineDiagnostics } from '../../services/engineDiagnostics.js';
 import { MigraAiClient } from '../../services/migraAiClient.js';
 import { readGitContext, readWorkingChanges } from '../../services/gitContext.js';
-import { groundingModeOf, sourceModeConfirmation } from './composerModel.js';
+import { groundingModeOf, liveModeConfirmation, liveModeOf, sourceModeConfirmation } from './composerModel.js';
 import { AgentModeSessionGate } from '../agentModeModel.js';
 import { ActivityRecorder, type ContextFileEntry, type GitContextSnapshot } from './contextPanelModel.js';
 import { navigationHtml } from './navigationHtml.js';
@@ -332,6 +332,8 @@ export class MigraPilotShell {
       modelId?: string;
     /** Evidence-source selection from the composer (`auto` | `approved`). */
     sourceMode?: string;
+    /** Live-knowledge selection from the composer (`off` | `official` | `web`). */
+    liveMode?: string;
       submit?: boolean;
       history?: ChatMsg[];
       messages?: ChatMsg[];
@@ -376,6 +378,10 @@ export class MigraPilotShell {
           // send it per turn; the host's sticky value is the fallback so a mode set
           // via `/approved` survives until it is changed.
           typeof message.sourceMode === 'string' ? message.sourceMode : this.sourceMode,
+          // The second dimension, carried separately. A single combined field would
+          // make it impossible to say "no repository evidence AND official sources",
+          // which is a legitimate and useful combination.
+          typeof message.liveMode === 'string' ? message.liveMode : this.liveMode,
         );
         return;
       case 'stop':
@@ -868,6 +874,14 @@ export class MigraPilotShell {
    */
   private sourceMode = 'auto';
 
+  /**
+   * Live-knowledge mode, sticky and host-side for the same reason as `sourceMode`.
+   *
+   * Defaults to `off`: network egress is never granted by default, and a webview reload
+   * must not be able to turn it on.
+   */
+  private liveMode = 'off';
+
   private async handleChat(
     rawText: string,
     history: ChatMsg[],
@@ -875,6 +889,7 @@ export class MigraPilotShell {
     attachments: ChatAttachment[],
     modelId?: string,
     sourceMode?: string,
+    liveMode?: string,
   ): Promise<void> {
     const text = rawText.trim();
     if (!text && attachments.length === 0) return;
@@ -915,6 +930,7 @@ export class MigraPilotShell {
           ...(this.deps.executionPolicy ? { policy: this.deps.executionPolicy() } : {}),
           ...(conversationId ? { conversationId, memoryPolicy: { mode, retrieve: true, store: true } } : {}),
           ...(sourceMode ? { sourceMode } : {}),
+          ...(liveMode ? { liveMode } : {}),
           // The Brain treats a MISSING branch as unknown, never as "same branch",
           // so failing to resolve it degrades disclosure rather than faking it.
           ...(await this.currentBranch().then((b) => (b ? { currentBranch: b } : {}))),
@@ -1060,6 +1076,18 @@ export class MigraPilotShell {
           type: 'token',
           text: `\n_${sourceModeConfirmation(this.sourceMode, branch)}_\n`,
         });
+        return;
+      }
+      case 'liveMode:off':
+      case 'liveMode:official':
+      case 'liveMode:web': {
+        // Sticky operator choice for the SECOND evidence dimension. Reported back so the
+        // operator can see whether the next turn may reach the network, and confirmed in
+        // words because a governance control nobody can describe back is not one they
+        // can rely on.
+        this.liveMode = liveModeOf(action.slice('liveMode:'.length));
+        this.post({ type: 'liveMode', mode: this.liveMode });
+        this.post({ type: 'token', text: `\n_${liveModeConfirmation(this.liveMode)}_\n` });
         return;
       }
       case 'refreshHistory':

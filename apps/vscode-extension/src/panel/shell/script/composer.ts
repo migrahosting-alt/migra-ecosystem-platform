@@ -187,6 +187,8 @@ function send() {
 
   const source = $('csource');
   if (source) source.setAttribute('data-mode', source.value);
+  const liveSel = $('clive');
+  if (liveSel) liveSel.setAttribute('data-mode', liveSel.value);
   const route = $('croute');
   const value = route ? route.value : 'auto';
   const pinned = value.indexOf('model:') === 0 ? value.slice(6) : undefined;
@@ -205,6 +207,10 @@ function send() {
     // Evidence source for THIS turn, read from the selector. Explicit request
     // state — the boundary must never depend on how the question is worded.
     sourceMode: ($('csource') ? $('csource').value : 'auto'),
+    // Live knowledge for THIS turn, read from its own selector. INDEPENDENT of
+    // sourceMode: neither control may change the other, so they are sent as two
+    // separate fields rather than one combined evidence state.
+    liveMode: ($('clive') ? $('clive').value : 'off'),
     history: history
   });
 
@@ -300,6 +306,14 @@ function initComposer() {
     csource.addEventListener('change', () => {
       csource.setAttribute('data-mode', csource.value);
       vscode.postMessage({ type: 'shellAction', action: 'sourceMode:' + csource.value });
+    });
+  }
+  const clive = $('clive');
+  if (clive) {
+    clive.setAttribute('data-mode', clive.value);
+    clive.addEventListener('change', () => {
+      clive.setAttribute('data-mode', clive.value);
+      vscode.postMessage({ type: 'shellAction', action: 'liveMode:' + clive.value });
     });
   }
   if (context) context.addEventListener('click', () => vscode.postMessage({ type: 'shellAction', action: 'addContext' }));
@@ -418,6 +432,17 @@ window.addEventListener('message', (event) => {
       // The host owns this state; reflect it so the operator can SEE which source
       // the next turn is held to, however the mode was set.
       const select = $('csource');
+      if (select && typeof message.mode === 'string') {
+        select.value = message.mode;
+        select.setAttribute('data-mode', message.mode);
+      }
+      break;
+    }
+
+    case 'liveMode': {
+      // Host-owned, like sourceMode: the operator must SEE whether the next turn may
+      // reach the network, however the mode was set.
+      const select = $('clive');
       if (select && typeof message.mode === 'string') {
         select.value = message.mode;
         select.setAttribute('data-mode', message.mode);

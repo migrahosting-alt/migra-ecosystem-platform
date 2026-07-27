@@ -13,12 +13,14 @@ import { selectLocalCoding, type LocalRoutingDeps } from './providers/localCodin
 import { retrieveContext } from '../retrieval/retrieve.js';
 import type { IndexService, Scope } from './rag/indexService.js';
 import { scopeFrom } from './memory/memoryRoutes.js';
+import { lookup as dnsLookup } from 'node:dns/promises';
+import { parseLiveKnowledgeMode, type LiveKnowledgeConnector } from './liveKnowledge/liveKnowledgeDecision.js';
 import {
-  decideLiveKnowledge,
-  liveKnowledgeAuditFields,
-  parseLiveKnowledgeMode,
-  type LiveKnowledgeConnector,
-} from './liveKnowledge/liveKnowledgeDecision.js';
+  LiveConnectorRegistry,
+  buildLiveKnowledgeFrame,
+  liveResearchAuditFields,
+  researchLive,
+} from './liveKnowledge/liveResearch.js';
 import {
   DEFAULT_MIN_APPROVED_SCORE,
   decideGrounding,
@@ -169,7 +171,33 @@ export function registerEngineerRoutes(
    * `no-connector` rather than silently behaving like `off`.
    */
   liveKnowledgeConnector?: LiveKnowledgeConnector,
+  /**
+   * The connector registry. ABSENT by default: no provider is wired into the running
+   * service yet, so `official`/`web` report `live-research-failed` with `no-connector`
+   * rather than silently behaving like `off` — an outage must not hide behind a setting.
+   *
+   * A single `liveKnowledgeConnector` is still accepted and adapted into a registry, so
+   * existing callers and tests keep working.
+   */
+  liveKnowledgeRegistry?: LiveConnectorRegistry,
 ): void {
+  /**
+   * Real DNS resolution for the fetch layer's address checks.
+   *
+   * Resolved addresses are what get validated, not just the hostname: a name that
+   * answers publicly during validation can answer with 10.0.0.1 a moment later, and
+   * hostname-only checks do not see it.
+   */
+  const resolveHostAddresses = async (hostname: string) => {
+    const records = await dnsLookup(hostname, { all: true });
+    return records.map((r) => ({ address: r.address, family: r.family === 6 ? (6 as const) : (4 as const) }));
+  };
+
+  const liveRegistry =
+    liveKnowledgeRegistry ??
+    (liveKnowledgeConnector
+      ? new LiveConnectorRegistry().register(liveKnowledgeConnector, ['official', 'web'])
+      : new LiveConnectorRegistry());
   const real = env.localProvider === 'openai-compat';
   const providerFor = (model: ModelDescriptor): ProviderAdapter => {
     if (providerOverride) return providerOverride(model);
@@ -450,16 +478,23 @@ export function registerEngineerRoutes(
     // request that omits the field) returns before any connector is touched, so a
     // turn that did not ask for external access performs none.
     const liveMode = parseLiveKnowledgeMode(body.liveKnowledgeMode);
-    const live = await decideLiveKnowledge(
+    const liveStartedAt = new Date().toISOString();
+    const liveT0 = Date.now();
+    const live = await researchLive(
       { mode: liveMode, query: body.task },
-      { ...(liveKnowledgeConnector ? { connector: liveKnowledgeConnector } : {}), now: () => new Date().toISOString() },
+      {
+        registry: liveRegistry,
+        fetch: { resolve: resolveHostAddresses, now: () => new Date() },
+        now: () => new Date().toISOString(),
+      },
     );
     auditStore.append({
       correlationId,
       type: 'liveKnowledge.decided',
       component: 'engineer',
       requestId: headerId || undefined,
-      fields: liveKnowledgeAuditFields(live.decision),
+      // Metadata only. The query, the page bodies and the excerpts have no path in.
+      fields: liveResearchAuditFields(live, { startedAt: liveStartedAt, durationMs: Date.now() - liveT0 }),
     });
 
     if (grounding) {
@@ -493,6 +528,11 @@ export function registerEngineerRoutes(
             : {}),
       });
     }
+
+    // The SECOND provenance frame, emitted whether or not repository grounding ran and
+    // before any answer text — including before a refusal. The host renders it; the model
+    // never sees these labels and so cannot alter them.
+    send('liveKnowledge', buildLiveKnowledgeFrame(live));
 
     // Approved-only and not groundable ⇒ refuse BEFORE the loop starts, so no
     // working-tree tool is ever reachable for this turn.
