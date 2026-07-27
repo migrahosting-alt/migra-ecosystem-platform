@@ -171,6 +171,9 @@ export function registerAiRoutes(
       model: model.id,
       visionModel: model.capabilities.vision ? model.id : undefined,
       apiKey: env.openAiApiKey,
+      connectTimeoutMs: env.providerConnectTimeoutMs,
+      idleTimeoutMs: env.providerIdleTimeoutMs,
+      absoluteTimeoutMs: env.providerAbsoluteTimeoutMs,
     });
   };
 
