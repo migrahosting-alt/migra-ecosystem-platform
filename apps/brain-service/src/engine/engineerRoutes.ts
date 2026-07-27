@@ -420,6 +420,23 @@ export function registerEngineerRoutes(
       });
     }
 
+    // Provenance FIRST, so the badge renders above whatever follows — including a
+    // refusal. Emitting it after the refusal meant a refused turn carried no source
+    // label at all, which is precisely the disclosure this slice exists to enforce.
+    if (grounding) {
+      send('grounding', {
+        sourceMode: grounding.mode,
+        ...(grounding.mode === 'approved-index'
+          ? {
+              indexVersion: grounding.indexVersion,
+              indexedBranch: grounding.indexedBranch,
+              currentBranch: grounding.currentBranch,
+              ...(grounding.allowed ? { branchDiverged: grounding.branchDiverged } : {}),
+            }
+          : { indexedBranch: grounding.indexedBranch, currentBranch: grounding.currentBranch, branchDiverged: grounding.branchDiverged }),
+      });
+    }
+
     // Approved-only and not groundable ⇒ refuse BEFORE the loop starts, so no
     // working-tree tool is ever reachable for this turn.
     if (grounding && grounding.mode === 'approved-index' && !grounding.allowed) {
@@ -427,18 +444,6 @@ export function registerEngineerRoutes(
       send('done', { ok: false, code: 'INSUFFICIENT_APPROVED_EVIDENCE' });
       raw.end();
       return;
-    }
-
-    // Tell the host what the evidence source IS, so it can render provenance
-    // deterministically instead of relying on the model to mention it.
-    if (grounding) {
-      send('grounding', {
-        sourceMode: grounding.mode,
-        ...(grounding.mode === 'approved-index' && grounding.allowed
-          ? { indexVersion: grounding.indexVersion, indexedBranch: grounding.indexedBranch, currentBranch: grounding.currentBranch, branchDiverged: grounding.branchDiverged }
-          : {}),
-        ...(grounding.mode === 'working-tree' ? { indexedBranch: grounding.indexedBranch, currentBranch: grounding.currentBranch } : {}),
-      });
     }
 
     // Approved evidence, when the decision produced it. The lexical retriever is

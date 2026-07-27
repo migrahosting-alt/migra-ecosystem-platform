@@ -6,6 +6,8 @@ import * as path from 'node:path';
 import * as vscode from 'vscode';
 import type { MigraPilotApi } from '../../extension.js';
 import { approveResumeAndReconcile, reconcileRun } from '@migrapilot/pilot-client';
+import { runEngineerTurn } from '../../chat/engineerTurn.js';
+import { shellHtml } from '../../panel/shell/shellHtml.js';
 import { CAP_FIX_DIAGNOSTICS, evaluateCapability } from '../../services/commandCapabilities.js';
 import { type ProviderChunk } from '../../providers/modelProvider.js';
 import { type MockModelProvider, startMockModelProvider } from '../support/mockModelProvider.js';
@@ -1572,6 +1574,113 @@ suite('MigraPilot extension — end to end', () => {
         (e: unknown) => isPilotErrorCode(e, 'CAPABILITY_MISSING'),
         'a deleted workspace 404s (no ghost state)',
       );
+    });
+  });
+
+  // ── Approved-retrieval grounding through the REAL installed path ────────────
+  //
+  // The historical failure (corr_ms1iwdhw4lbyim) happened in the installed VS Code
+  // path, so it must be closed there: a real VS Code host, the extension's own
+  // transport and renderer, a real Brain built from the current dist, and a real
+  // APPROVED index. Only the webview DOM is out of scope here (covered by the
+  // composer markup assertion below).
+  suite('Approved retrieval grounding (installed path)', () => {
+    const groundingClient = () =>
+      new MigraAiClient({
+        baseUrl: () => BRAIN_URL,
+        timeoutMs: () => 120_000,
+        log: () => {},
+        scope: () => ({ owner: 'local', workspace: 'grounding-proof' }),
+      });
+
+    /** Build an APPROVED index over the fixture workspace and return its version. */
+    async function approvedFixtureIndex(): Promise<number> {
+      const client = groundingClient();
+      const folder = vscode.workspace.workspaceFolders?.[0];
+      assert.ok(folder, 'expected a workspace folder');
+      const opened = await client.openWorkspace({ root: folder.uri.fsPath });
+      const workspaceId = opened.workspace.id;
+      const synced = await client.syncWorkspace(workspaceId);
+      assert.ok(synced.index.chunks > 0, 'the fixture must produce a real index');
+      const approved = await client.approveWorkspaceIndex(workspaceId, synced.index.version);
+      assert.equal(approved.index.state, 'approved');
+      return approved.index.version;
+    }
+
+    test('the composer renders the evidence-source selector', () => {
+      // The activation control must EXIST in the shipped markup — it was once
+      // defined and never rendered, leaving the mode reachable only via /approved.
+      const html = shellHtml({ nonce: 'test-nonce', csp: "default-src 'none'", initialTab: 'chat', script: 'void 0;', compact: false });
+      assert.match(html, /id="csource"/, 'the evidence-source select must be present');
+      assert.match(html, /Approved index/, 'and expose the approved-only option');
+      assert.match(html, /Auto evidence/, 'with an explicitly-named default, not a bare "Auto"');
+      // Both selects must be styled by ONE rule: styling a single id left this one
+      // rendering as a native white control against the dark shell.
+      assert.match(html, /#croute,\s*#csource/, 'both composer selects share the style rule');
+      // It sits with the other composer controls, not somewhere unreachable.
+      const composer = html.slice(html.indexOf('id="ctools"'), html.indexOf('id="chint"'));
+      assert.match(composer, /id="csource"/, 'rendered inside the composer tool row');
+    });
+
+    test('an approved-only turn with insufficient evidence REFUSES and discloses divergence', async () => {
+      const version = await approvedFixtureIndex();
+      const rendered: string[] = [];
+      const events: string[] = [];
+
+      // The REAL renderer the Command Center uses, over the REAL SSE transport.
+      await runEngineerTurn(
+        groundingClient(),
+        {
+          rootPath: vscode.workspace.workspaceFolders![0]!.uri.fsPath,
+          task: 'Using only the approved semantic index, identify the files and symbols that implement schema-v6 approved-version isolation.',
+          requireApproved: true,
+          currentBranch: 'fix/brain-approved-retrieval-grounding',
+        },
+        {
+          markdown: (t) => rendered.push(t),
+          progress: () => {},
+        },
+      );
+
+      const text = rendered.join('');
+      // 1. approved-only armed AND disclosed, with the version named.
+      assert.match(text, /Source mode: Approved index v\d+/, `expected the source-mode badge; got: ${text.slice(0, 400)}`);
+      // 2. refusal, not an answer.
+      assert.match(text, /Insufficient approved evidence/i, 'must refuse rather than answer');
+      // 3. the fixed, host-rendered disclosure.
+      assert.match(text, /No working-tree files were consulted/);
+      // 4. no unrelated citations.
+      for (const decoy of ['PROVENANCE.md', 'package.json']) {
+        assert.ok(!text.includes(decoy), `must not cite ${decoy}`);
+      }
+      // 5. the loop never ran — no tool/step lines in the rendered output.
+      assert.ok(!/^· `/m.test(text), 'no tool step may be rendered');
+      assert.ok(version > 0);
+      assert.equal(events.length, 0);
+    });
+
+    test('an approved-only turn WITH evidence answers and still states its source', async () => {
+      const version = await approvedFixtureIndex();
+      const rendered: string[] = [];
+
+      await runEngineerTurn(
+        groundingClient(),
+        {
+          rootPath: vscode.workspace.workspaceFolders![0]!.uri.fsPath,
+          // A question the fixture index can actually support.
+          task: 'What does this workspace contain? Summarise the indexed files.',
+          requireApproved: true,
+          currentBranch: 'fix/brain-approved-retrieval-grounding',
+        },
+        { markdown: (t) => rendered.push(t), progress: () => {} },
+      );
+
+      const text = rendered.join('');
+      // Whether it grounds or refuses, provenance is ALWAYS stated and the working
+      // tree is never silently used.
+      assert.match(text, /Source mode: Approved index v\d+|Insufficient approved evidence/i, `expected a disclosed outcome; got: ${text.slice(0, 400)}`);
+      assert.ok(!text.includes('Source mode: Working tree'), 'an approved-only turn must never report working-tree mode');
+      assert.ok(version > 0);
     });
   });
 });

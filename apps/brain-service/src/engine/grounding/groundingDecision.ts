@@ -75,6 +75,12 @@ export type GroundingDecision =
       reason: GroundingRefusal;
       indexedBranch?: string;
       currentBranch?: string;
+      /**
+       * The approved generation that WAS searched, when one exists. Present on a
+       * relevance/divergence refusal so the disclosure can say which generation
+       * came up short rather than leaving the operator guessing.
+       */
+      indexVersion?: number;
       /** Highest score seen, when the refusal was a relevance decision. */
       bestScore?: number;
     }
@@ -148,7 +154,7 @@ export async function decideGrounding(req: GroundingRequest, deps: GroundingDeps
   }
 
   if (branchDiverged && deps.refuseOnBranchDivergence) {
-    return { mode: 'approved-index', allowed: false, reason: 'branch-diverged', indexedBranch, currentBranch: req.currentBranch };
+    return { mode: 'approved-index', allowed: false, reason: 'branch-diverged', indexedBranch, currentBranch: req.currentBranch, indexVersion: identity.version };
   }
 
   let chunks: GroundingChunk[];
@@ -157,7 +163,7 @@ export async function decideGrounding(req: GroundingRequest, deps: GroundingDeps
   } catch {
     // A retrieval failure is NOT a licence to answer from the checkout.
     return req.requireApproved
-      ? { mode: 'approved-index', allowed: false, reason: 'retrieval-failed', indexedBranch, currentBranch: req.currentBranch }
+      ? { mode: 'approved-index', allowed: false, reason: 'retrieval-failed', indexedBranch, currentBranch: req.currentBranch, indexVersion: identity.version }
       : { mode: 'working-tree', allowed: true, disclosureRequired: true, currentBranch: req.currentBranch, indexedBranch, branchDiverged };
   }
 
@@ -171,6 +177,7 @@ export async function decideGrounding(req: GroundingRequest, deps: GroundingDeps
         reason: 'insufficient-relevance',
         indexedBranch,
         currentBranch: req.currentBranch,
+        indexVersion: identity.version,
         ...(bestScore !== undefined ? { bestScore } : {}),
       };
     }
@@ -209,7 +216,7 @@ export function groundingAuditFields(decision: GroundingDecision, requireApprove
     return { ...base, gateDecision: 'working-tree-disclosed', indexedBranch: decision.indexedBranch, branchDiverged: decision.branchDiverged };
   }
   if (!decision.allowed) {
-    return { ...base, gateDecision: 'refused', refusalReason: decision.reason, indexedBranch: decision.indexedBranch, bestScore: round(decision.bestScore) };
+    return { ...base, gateDecision: 'refused', refusalReason: decision.reason, indexedBranch: decision.indexedBranch, indexVersion: decision.indexVersion, bestScore: round(decision.bestScore) };
   }
   return {
     ...base,

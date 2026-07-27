@@ -124,8 +124,8 @@ export function matchSlashCommands(query: string): SlashCommand[] {
  * approved-index-only analysis was answered from three `package.json` files.
  */
 export const SOURCE_MODE_OPTIONS = [
-  { value: 'auto', label: 'Auto', hint: 'Approved index when it fits, working tree otherwise (source is always stated)' },
-  { value: 'approved', label: 'Approved index only', hint: 'Refuse rather than answer from unapproved working-tree code' },
+  { value: 'auto', label: 'Auto evidence', hint: 'Approved index when it fits, working tree otherwise — the source is always stated with the answer' },
+  { value: 'approved', label: 'Approved index', hint: 'Answer only from the approved semantic index; refuse rather than use unapproved working-tree code' },
 ] as const;
 
 export type SourceMode = (typeof SOURCE_MODE_OPTIONS)[number]['value'];
@@ -153,7 +153,9 @@ export function sourceModeBadge(decision: { sourceMode?: string; indexVersion?: 
 
 /** Model/routing selector options. `auto` lets the engine's router decide. */
 export const ROUTING_OPTIONS = [
-  { value: 'auto', label: 'Auto' },
+  // "Auto model" rather than "Auto": two adjacent selects both reading "Auto" gave
+  // no way to tell the model picker from the evidence picker while collapsed.
+  { value: 'auto', label: 'Auto model' },
   { value: 'cheap', label: 'Fast' },
   { value: 'default', label: 'Balanced' },
   { value: 'premium', label: 'Deep' },

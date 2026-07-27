@@ -185,6 +185,8 @@ function send() {
   currentBody = null;
   setStreaming(true);
 
+  const source = $('csource');
+  if (source) source.setAttribute('data-mode', source.value);
   const route = $('croute');
   const value = route ? route.value : 'auto';
   const pinned = value.indexOf('model:') === 0 ? value.slice(6) : undefined;
@@ -405,7 +407,10 @@ window.addEventListener('message', (event) => {
       // The host owns this state; reflect it so the operator can SEE which source
       // the next turn is held to, however the mode was set.
       const select = $('csource');
-      if (select && typeof message.mode === 'string') select.value = message.mode;
+      if (select && typeof message.mode === 'string') {
+        select.value = message.mode;
+        select.setAttribute('data-mode', message.mode);
+      }
       break;
     }
 
@@ -413,7 +418,7 @@ window.addEventListener('message', (event) => {
       const route = $('croute');
       if (!route || !Array.isArray(message.models)) break;
       const previous = route.value;
-      let html = '<option value="auto">Auto</option>'
+      let html = '<option value="auto">Auto model</option>'
         + '<optgroup label="Auto by size">'
         + '<option value="cheap">Fast</option>'
         + '<option value="default">Balanced</option>'

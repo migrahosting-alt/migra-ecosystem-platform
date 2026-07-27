@@ -127,3 +127,19 @@ test('the selector is RENDERED, not just defined', () => {
   assert.match(composer, /sourceMode: \(\$\('csource'\)/, 'and its value must be sent with the turn');
   assert.match(composer, /case 'sourceMode':/, 'host-set modes are reflected back into it');
 });
+
+test('both composer selects share one style rule and are distinguishable', () => {
+  const styles = source('panel/shell/shellStyles.ts');
+  // The evidence selector rendered as a NATIVE WHITE control because the rule was
+  // written for a single id. Both must be covered by the same declaration.
+  assert.match(styles, /#croute,\s*#csource\s*\{/, 'one shared rule, not per-id styling');
+  assert.match(styles, /appearance: none/, 'platform chrome suppressed so it matches the shell');
+  assert.match(styles, /#csource\[data-mode="approved"\]/, 'approved-only reads as a governance state');
+
+  // Collapsed, each control must say what it selects.
+  assert.deepEqual(SOURCE_MODE_OPTIONS.map((o) => o.label), ['Auto evidence', 'Approved index']);
+  assert.ok(
+    SOURCE_MODE_OPTIONS.every((o) => o.hint.length > 20),
+    'each option carries a tooltip explaining what it does',
+  );
+});

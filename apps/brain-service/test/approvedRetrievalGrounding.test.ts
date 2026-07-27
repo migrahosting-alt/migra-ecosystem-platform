@@ -10,7 +10,16 @@ import { registerToolExecutionRoutes } from '../src/engine/toolRoutes.js';
 import { ModelRegistry, type ModelDescriptor } from '../src/engine/modelRegistry.js';
 import { IndexService, type FileSource, type Scope } from '../src/engine/rag/indexService.js';
 import { FakeEmbedder } from '../src/engine/rag/embedder.js';
-import { auditStore } from '../src/engine/auditLog.js';
+import { AuditStore, auditStore } from '../src/engine/auditLog.js';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { SqliteDurableStore } from '../src/engine/persistence/sqliteStore.js';
+import { wireOperationalPersistence } from '../src/engine/persistence/operationalBridge.js';
+import { UsageLedger } from '../src/engine/providers/budget/usageLedger.js';
+import { IncidentManager, LocalAlertSink } from '../src/engine/incidents.js';
+import { BudgetManager } from '../src/engine/providers/budget/budgetManager.js';
+import { DEFAULT_MIN_APPROVED_SCORE, decideGrounding, groundingAuditFields } from '../src/engine/grounding/groundingDecision.js';
 
 /**
  * An approved-only request must never be answered from the working tree.
@@ -328,4 +337,78 @@ test('HISTORICAL: the exact corr_ms1iwdhw4lbyim request is now refused with disc
   const serialized = JSON.stringify(decided);
   assert.ok(!serialized.includes('Using only the approved semantic index'), 'the prompt must not be audited');
   assert.ok(!serialized.includes('provenance and version history'), 'chunk text must not be audited');
+});
+
+// ── the DURABLE record, not just the in-memory one ───────────────────────────
+
+test('the retrieval decision survives to SQLite as metadata only', async (t) => {
+  // The assertions above read the IN-MEMORY audit store. The operational bridge and
+  // the value redactor sit between that and the durable row, so leakage has to be
+  // proven where the data actually rests: in op_audit_events.
+  const dbPath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'migraai-grounding-')), 'state.db');
+  const durable = new SqliteDurableStore(dbPath);
+  t.after(() => durable.close());
+
+  // The REAL bridge, with the real store set — the redactor and the writer path are
+  // what this test exists to exercise, so none of it is stubbed.
+  const clock = () => 1_700_000_000_000;
+  const store = new AuditStore(clock);
+  wireOperationalPersistence(
+    durable,
+    {
+      auditStore: store,
+      usageLedger: new UsageLedger(clock, () => 'u1'),
+      incidentManager: new IncidentManager(new LocalAlertSink().sink, clock, () => 'i1'),
+      budgetManager: new BudgetManager(false, [], clock, () => 'b1'),
+    },
+    { now: clock, recentLimit: 100 },
+  );
+
+  // A decision shaped exactly like the historical refusal, including a secret-like
+  // string and an absolute path, to prove neither reaches the durable row.
+  const prompt = 'Using only the approved semantic index, identify the files and symbols…';
+  const decision = await decideGrounding(
+    { requireApproved: true, query: prompt, currentBranch: 'fix/brain-approved-retrieval-grounding' },
+    {
+      approvedIndexId: () => 'idx_live',
+      retrieveApproved: async () => [
+        { path: 'services/pilot-api/PROVENANCE.md', startLine: 1, endLine: 4, snippet: 'API_KEY=super-secret in /home/bonex/secret.txt', score: 0.466 },
+      ],
+      indexIdentity: () => ({ version: 5, indexedBranch: 'phase-1/canonical-vscode-extension' }),
+      minScore: DEFAULT_MIN_APPROVED_SCORE,
+    },
+  );
+  assert.equal(decision.allowed, false, 'the 0.466 chunk is below the 0.53 floor');
+
+  store.append({
+    correlationId: 'corr_durable_proof',
+    type: 'retrieval.decided',
+    component: 'engineer',
+    fields: groundingAuditFields(decision, true, DEFAULT_MIN_APPROVED_SCORE),
+  });
+
+  // Read the PERSISTED row back out of SQLite.
+  const rows = durable.recentAuditEvents(50).filter((e) => e.type === 'retrieval.decided');
+  assert.equal(rows.length, 1, 'the decision must be durably persisted');
+  const row = rows[0]!;
+  const raw = JSON.stringify(row); // the exact bytes that rest in SQLite
+  const fields = JSON.parse(row.fieldsJson) as Record<string, unknown>;
+
+  // Metadata IS present.
+  assert.equal(fields.sourceMode, 'approved-index');
+  assert.equal(fields.requireApproved, true);
+  assert.equal(fields.gateDecision, 'refused');
+  assert.equal(fields.refusalReason, 'insufficient-relevance');
+  assert.equal(fields.indexVersion, 5);
+  assert.equal(fields.indexedBranch, 'phase-1/canonical-vscode-extension');
+  assert.equal(fields.currentBranch, 'fix/brain-approved-retrieval-grounding');
+  assert.equal(fields.minScore, DEFAULT_MIN_APPROVED_SCORE);
+  assert.equal(fields.bestScore, 0.466, 'the near-miss score is recorded against the floor');
+
+  // Content is NOT.
+  assert.ok(!raw.includes(prompt), 'the prompt must never be persisted');
+  assert.ok(!raw.includes('API_KEY'), 'chunk text must never be persisted');
+  assert.ok(!raw.includes('super-secret'), 'nor anything inside it');
+  assert.ok(!raw.includes('/home/bonex'), 'nor an absolute path');
+  assert.ok(!raw.includes('snippet'), 'no snippet field at all');
 });
