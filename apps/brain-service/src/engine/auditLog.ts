@@ -20,6 +20,10 @@ export type AuditEventType =
   /** One grounding decision: where this turn's evidence came from, and why.
    * Metadata only — chunk REFERENCES and scores, never chunk text or prompts. */
   | 'retrieval.decided'
+  /** One live-knowledge decision: whether information OUTSIDE the repository was
+   * consulted, from which trust tier, and how many sources were accepted. Metadata
+   * only — never the query, the page body, or a URL with query parameters. */
+  | 'liveKnowledge.decided'
   | 'execution.completed'
   | 'execution.failed'
   | 'execution.cancel_requested'

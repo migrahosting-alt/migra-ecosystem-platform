@@ -14,6 +14,12 @@ import { retrieveContext } from '../retrieval/retrieve.js';
 import type { IndexService, Scope } from './rag/indexService.js';
 import { scopeFrom } from './memory/memoryRoutes.js';
 import {
+  decideLiveKnowledge,
+  liveKnowledgeAuditFields,
+  parseLiveKnowledgeMode,
+  type LiveKnowledgeConnector,
+} from './liveKnowledge/liveKnowledgeDecision.js';
+import {
   DEFAULT_MIN_APPROVED_SCORE,
   decideGrounding,
   groundingAuditFields,
@@ -66,6 +72,12 @@ const EngineerBodySchema = z.object({
   groundingMode: z.enum(['auto', 'approved', 'workspace', 'none']).optional(),
   /** Branch of the caller's checkout, for divergence disclosure. */
   currentBranch: z.string().optional(),
+  /**
+   * May this turn consult information OUTSIDE the repository, and from which trust
+   * class? INDEPENDENT of `groundingMode`: neither implies the other. Absent means
+   * `off` — external access is never granted to a caller that did not ask.
+   */
+  liveKnowledgeMode: z.enum(['off', 'official', 'web']).optional(),
   /** Prior turns (oldest first). The unified agent serves ordinary chat too, so
    * it carries the conversation the chat path used to hold. */
   history: z
@@ -151,6 +163,12 @@ export function registerEngineerRoutes(
   indexService?: IndexService,
   /** Branch the approved index was built from, per scope (divergence disclosure). */
   indexedBranch?: (scope: Scope) => string | undefined,
+  /**
+   * Live-knowledge connector. ABSENT by default: no search provider ships yet, so a
+   * request for `official`/`web` reports `live-research-failed` with
+   * `no-connector` rather than silently behaving like `off`.
+   */
+  liveKnowledgeConnector?: LiveKnowledgeConnector,
 ): void {
   const real = env.localProvider === 'openai-compat';
   const providerFor = (model: ModelDescriptor): ProviderAdapter => {
@@ -426,6 +444,23 @@ export function registerEngineerRoutes(
           },
         )
       : undefined;
+
+    // ── Live knowledge: a SECOND, independent evidence dimension ──────────────
+    // Resolved separately from grounding and audited separately. `off` (including a
+    // request that omits the field) returns before any connector is touched, so a
+    // turn that did not ask for external access performs none.
+    const liveMode = parseLiveKnowledgeMode(body.liveKnowledgeMode);
+    const live = await decideLiveKnowledge(
+      { mode: liveMode, query: body.task },
+      { ...(liveKnowledgeConnector ? { connector: liveKnowledgeConnector } : {}), now: () => new Date().toISOString() },
+    );
+    auditStore.append({
+      correlationId,
+      type: 'liveKnowledge.decided',
+      component: 'engineer',
+      requestId: headerId || undefined,
+      fields: liveKnowledgeAuditFields(live.decision),
+    });
 
     if (grounding) {
       auditStore.append({
