@@ -432,6 +432,8 @@ function classifyFetchFailure(error: unknown): string {
 
 /** Provenance for an accepted document, for disclosure and citation checking. */
 export interface SourceProvenance {
+  /** Which connector vouched for this source, so a citation stays attributable. */
+  connectorId?: string;
   domain: string;
   safePath?: string;
   trustTier: number;
@@ -451,6 +453,7 @@ export interface SourceProvenance {
  */
 export function acceptedProvenance(documents: LiveDocument[]): SourceProvenance[] {
   return documents.map((d) => ({
+    ...(d.source.connectorId ? { connectorId: d.source.connectorId } : {}),
     domain: d.source.domain.toLowerCase(),
     ...(safePath(d.source.url) ? { safePath: safePath(d.source.url) } : {}),
     trustTier: d.source.trustTier,
@@ -487,22 +490,38 @@ export function liveResearchAuditFields(
   timing?: { startedAt?: string; completedAt?: string; durationMs?: number },
 ): Record<string, unknown> {
   const rejectionCount = Object.values(outcome.rejections).reduce((a, b) => a + b, 0);
+  const provenance = acceptedProvenance(outcome.documents);
   return {
     ...liveKnowledgeAuditFields(outcome.decision, timing),
     documentsFetched: outcome.documents.length,
-    ...(rejectionCount > 0 ? { rejections: { ...outcome.rejections }, rejectionCount } : {}),
-    ...(outcome.documents.length > 0
+    // FLAT primitives, one string per entry.
+    //
+    // The audit store collapses any nested object to the literal `[object]` — a
+    // deliberate "never serialize nested bodies" rule. Emitting provenance as objects
+    // therefore honoured that rule by discarding the provenance entirely: the durable
+    // record said `"sources": "[object]"`, which is worse than useless because it looks
+    // like the data is there. Pipe-delimited strings survive the store's primitive
+    // filter, still carry no query string and no page content, and are actually
+    // greppable when someone asks what a turn cited.
+    ...(provenance.length > 0
       ? {
-          sources: acceptedProvenance(outcome.documents).map((p) => ({
-            domain: p.domain,
-            ...(p.safePath ? { path: p.safePath } : {}),
-            trustTier: p.trustTier,
-            sourceType: p.sourceType,
-            contentHash: p.contentHash,
-            fetchedAt: p.fetchedAt,
-            ...(p.expiresAt ? { expiresAt: p.expiresAt } : {}),
-            ...(p.publishedAt ? { publishedAt: p.publishedAt } : {}),
-          })),
+          sources: provenance.map((p) =>
+            [
+              p.connectorId ?? 'unknown',
+              `${p.domain}${p.safePath ?? ''}`,
+              `tier${p.trustTier}`,
+              p.sourceType,
+              p.contentHash,
+              p.publishedAt ?? p.fetchedAt,
+            ].join('|'),
+          ),
+        }
+      : {}),
+    ...(rejectionCount > 0
+      ? {
+          rejectionCount,
+          // Same reason: `{'unsupported-content-type': 2}` would vanish as `[object]`.
+          rejections: Object.entries(outcome.rejections).map(([reason, n]) => `${reason}=${n}`),
         }
       : {}),
   };

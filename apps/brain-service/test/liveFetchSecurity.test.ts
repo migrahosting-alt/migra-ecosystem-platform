@@ -622,8 +622,12 @@ test('the execution audit record carries metadata and nothing else', async () =>
   assert.equal(audit.effectiveMode, 'official');
   assert.equal(audit.documentsFetched, 1);
   assert.equal(audit.durationMs, 42);
-  assert.deepEqual((audit.sources as Array<{ domain: string; path: string }>)[0]!.domain, 'docs.example.com');
-  assert.equal((audit.sources as Array<{ path: string }>)[0]!.path, '/guide');
+  // One flat string per source: the audit store collapses nested objects to `[object]`,
+  // so an object here would have satisfied the no-leak rule by discarding the provenance.
+  const sources = audit.sources as string[];
+  assert.equal(sources.length, 1);
+  assert.match(sources[0]!, /docs\.example\.com\/guide\|tier1\|/);
+  assert.ok(!sources[0]!.includes('?'), 'origin + path only, never a query string');
 
   // And nothing that could leak.
   for (const forbidden of [
