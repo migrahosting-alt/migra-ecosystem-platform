@@ -1659,6 +1659,49 @@ suite('MigraPilot extension — end to end', () => {
       assert.equal(events.length, 0);
     });
 
+    test('all four grounding modes reach the Brain and are enforced there', async () => {
+      const version = await approvedFixtureIndex();
+      assert.ok(version > 0);
+      const root = vscode.workspace.workspaceFolders![0]!.uri.fsPath;
+
+      // Each mode is driven through the extension's OWN transport + renderer against
+      // the real Brain, so the assertion is on enforcement, not on intent.
+      const outcomes: Array<{ mode: string; text: string }> = [];
+      for (const mode of ['auto', 'approved', 'workspace', 'none'] as const) {
+        const rendered: string[] = [];
+        await runEngineerTurn(
+          groundingClient(),
+          {
+            rootPath: root,
+            task: 'What does this workspace contain?',
+            ...(mode === 'auto' ? {} : { groundingMode: mode }),
+            currentBranch: 'phase-1/canonical-vscode-extension',
+          },
+          { markdown: (t) => rendered.push(t), progress: () => {} },
+        );
+        outcomes.push({ mode, text: rendered.join('') });
+      }
+
+      for (const { mode, text } of outcomes) {
+        // Every turn discloses a source mode — none may answer unlabelled.
+        assert.match(
+          text,
+          /Source mode: (Approved index|Current workspace|Working tree|No repository evidence)|Insufficient approved evidence/,
+          `${mode}: must disclose its evidence source; got: ${text.slice(0, 200)}`,
+        );
+      }
+
+      const byMode = Object.fromEntries(outcomes.map((o) => [o.mode, o.text]));
+      // `none` must never claim repository evidence.
+      assert.ok(
+        /No repository evidence/.test(byMode.none!),
+        `none: expected the no-evidence badge; got: ${byMode.none!.slice(0, 200)}`,
+      );
+      assert.ok(!/Approved index/.test(byMode.none!), 'none must not claim approved evidence');
+      // `workspace` must never claim approved evidence either.
+      assert.ok(!/Source mode: Approved index/.test(byMode.workspace!), 'workspace must not claim the approved index');
+    });
+
     test('an approved-only turn WITH evidence answers and still states its source', async () => {
       const version = await approvedFixtureIndex();
       const rendered: string[] = [];

@@ -10,6 +10,7 @@
 // falls back to the legacy `/chat` endpoint — an engine failure surfaces as a
 // correlated PilotError so the caller can show a clear message.
 
+import type { GroundingMode } from '@migrapilot/protocol';
 import { REQUEST_ID_HEADER, newRequestId } from '@migrapilot/pilot-client';
 import { PilotError, type PilotErrorCode } from '@migrapilot/pilot-client';
 import { randomUUID } from 'node:crypto';
@@ -185,11 +186,16 @@ export interface EngineerRequest {
   /** Slice 5: per-request execution-policy preference (server resolves). */
   policy?: string;
   /**
-   * Answer ONLY from the approved semantic index.
+   * Where this turn may draw repository evidence from.
    *
-   * Set from an explicit UI control, never inferred from the prompt. The Brain
-   * withholds every working-tree tool for the turn and refuses when approved
-   * evidence is insufficient, instead of quietly answering from the checkout.
+   * The shared protocol union, so the extension cannot send a value the Brain does
+   * not enforce. Set from an explicit UI control, never inferred from the prompt.
+   * Omitted ⇒ the Brain applies `auto`, i.e. today's behaviour.
+   */
+  groundingMode?: GroundingMode;
+  /**
+   * @deprecated Superseded by {@link groundingMode}, which wins when both are sent.
+   * Retained so older callers keep working: `true` maps to `approved`.
    */
   requireApproved?: boolean;
   /** The live checkout branch, so the Brain can disclose branch divergence.

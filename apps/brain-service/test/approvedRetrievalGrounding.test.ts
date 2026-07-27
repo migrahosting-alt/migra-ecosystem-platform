@@ -205,7 +205,7 @@ test('an ordinary request records working-tree mode explicitly', async (t) => {
   // named. Either way the run must NOT claim approved grounding.
   if (decided) {
     assert.equal(decided.fields.sourceMode, 'working-tree');
-    assert.equal(decided.fields.gateDecision, 'working-tree-disclosed');
+    assert.equal(decided.fields.gateDecision, 'working-tree-fallback');
   }
 });
 
@@ -219,8 +219,8 @@ test('an ordinary request with an approved index but no match discloses working-
 
   assert.ok(decided);
   assert.equal(decided!.fields.sourceMode, 'working-tree');
-  assert.equal(decided!.fields.requireApproved, false);
-  assert.equal(decided!.fields.gateDecision, 'working-tree-disclosed');
+  assert.equal(decided!.fields.requestedMode, 'auto');
+  assert.equal(decided!.fields.gateDecision, 'working-tree-fallback');
 });
 
 // ── 6 + 7: audit metadata present, content absent ───────────────────────────
@@ -239,7 +239,7 @@ test('retrieval metadata is emitted and carries no prompt or source text', async
   assert.ok(!serialized.includes(secretish), 'chunk/source text must never be audited');
   assert.ok(!serialized.includes('exclusion engine negation ancestor rule'), 'the prompt must never be audited');
   assert.ok(!serialized.includes('/tmp/'), 'no absolute paths');
-  for (const key of ['sourceMode', 'requireApproved', 'allowed', 'minScore', 'gateDecision']) {
+  for (const key of ['sourceMode', 'requestedMode', 'allowed', 'minScore', 'gateDecision']) {
     assert.ok(key in (decided!.fields as Record<string, unknown>), `must record ${key}`);
   }
 });
@@ -265,8 +265,9 @@ test('the chat path can no longer silently substitute working-tree chunks', () =
   // The fallback still exists for ordinary turns, but must be guarded by the flag.
   const idx = chat.indexOf('if (!retrievedChunks?.length && body.workspaceRoot)');
   assert.ok(idx > 0, 'the lexical fallback is still present for ordinary turns');
-  const before = chat.slice(Math.max(0, idx - 700), idx);
-  assert.match(before, /if \(body\.requireApproved\) return finishChatRequest/, 'an approved-only turn must return before the fallback');
+  const before = chat.slice(Math.max(0, idx - 900), idx);
+  // Gated on the MODE now: `approved` refuses earlier, `none` gathers nothing.
+  assert.match(before, /requestedMode === 'approved' \|\| requestedMode === 'none'/, 'approved/none must return before the fallback');
 });
 
 /** Read a source file so the two paths can be proven to share ONE gate. Reading the
@@ -303,7 +304,7 @@ test('HISTORICAL: the exact corr_ms1iwdhw4lbyim request is now refused with disc
   const decided = decisionFor(res.correlationId);
 
   // 1. approved-only mode was active
-  assert.equal(decided!.fields.requireApproved, true, 'approved-only mode must be recorded as ACTIVE');
+  assert.equal(decided!.fields.requestedMode, 'approved', 'approved-only mode must be recorded as ACTIVE');
   assert.equal(decided!.fields.sourceMode, 'approved-index');
 
   // 2. branch divergence disclosed
@@ -368,7 +369,7 @@ test('the retrieval decision survives to SQLite as metadata only', async (t) => 
   // string and an absolute path, to prove neither reaches the durable row.
   const prompt = 'Using only the approved semantic index, identify the files and symbols…';
   const decision = await decideGrounding(
-    { requireApproved: true, query: prompt, currentBranch: 'fix/brain-approved-retrieval-grounding' },
+    { mode: 'approved' as const, query: prompt, currentBranch: 'fix/brain-approved-retrieval-grounding' },
     {
       approvedIndexId: () => 'idx_live',
       retrieveApproved: async () => [
@@ -384,7 +385,7 @@ test('the retrieval decision survives to SQLite as metadata only', async (t) => 
     correlationId: 'corr_durable_proof',
     type: 'retrieval.decided',
     component: 'engineer',
-    fields: groundingAuditFields(decision, true, DEFAULT_MIN_APPROVED_SCORE),
+    fields: groundingAuditFields(decision, DEFAULT_MIN_APPROVED_SCORE),
   });
 
   // Read the PERSISTED row back out of SQLite.
@@ -396,7 +397,7 @@ test('the retrieval decision survives to SQLite as metadata only', async (t) => 
 
   // Metadata IS present.
   assert.equal(fields.sourceMode, 'approved-index');
-  assert.equal(fields.requireApproved, true);
+  assert.equal(fields.requestedMode, 'approved');
   assert.equal(fields.gateDecision, 'refused');
   assert.equal(fields.refusalReason, 'insufficient-relevance');
   assert.equal(fields.indexVersion, 5);
@@ -411,4 +412,97 @@ test('the retrieval decision survives to SQLite as metadata only', async (t) => 
   assert.ok(!raw.includes('super-secret'), 'nor anything inside it');
   assert.ok(!raw.includes('/home/bonex'), 'nor an absolute path');
   assert.ok(!raw.includes('snippet'), 'no snippet field at all');
+});
+
+// ── the new modes, enforced through the REAL route ───────────────────────────
+
+test('workspace mode does not consult the approved index and says so', async (t) => {
+  const { svc } = await approvedIndex([
+    { relPath: 'src/exclusions.ts', content: 'exclusion engine gitignore negation ancestor rule\n' },
+  ]);
+  const h = appWith(svc, 'phase-1/canonical-vscode-extension');
+  t.after(() => h.app.close());
+
+  const res = await ask(h, {
+    groundingMode: 'workspace',
+    currentBranch: 'fix/some-branch',
+    task: 'exclusion engine gitignore negation ancestor rule',
+  });
+  const decided = decisionFor(res.correlationId);
+
+  assert.ok(decided, 'the decision is audited');
+  assert.equal(decided!.fields.requestedMode, 'workspace');
+  assert.equal(decided!.fields.sourceMode, 'working-tree');
+  assert.equal(decided!.fields.gateDecision, 'working-tree-forced', 'forced, never reported as a fallback');
+  assert.equal(decided!.fields.forced, true);
+  assert.equal(decided!.fields.chunkRefs, undefined, 'no approved chunks were taken');
+  // Divergence is still disclosed even though the index was not used for evidence.
+  assert.equal(decided!.fields.indexedBranch, 'phase-1/canonical-vscode-extension');
+  assert.equal(decided!.fields.branchDiverged, true);
+});
+
+test('none mode gathers no evidence, keeps no tools, and is audited as such', async (t) => {
+  const { svc } = await approvedIndex([
+    { relPath: 'src/exclusions.ts', content: 'exclusion engine gitignore negation ancestor rule\n' },
+  ]);
+  const h = appWith(svc);
+  t.after(() => h.app.close());
+
+  const res = await ask(h, { groundingMode: 'none', task: 'exclusion engine gitignore negation ancestor rule' });
+  const evs = frames(res.body);
+  const decided = decisionFor(res.correlationId);
+
+  assert.equal(decided!.fields.requestedMode, 'none');
+  assert.equal(decided!.fields.sourceMode, 'none');
+  assert.equal(decided!.fields.gateDecision, 'no-repository-evidence');
+  assert.equal(decided!.fields.chunkRefs, undefined, 'nothing retrieved');
+  assert.equal(decided!.fields.indexId, undefined, 'no index claimed');
+  // Tools are withheld exactly as in approved-only mode.
+  assert.equal(evs.filter((e) => e.event === 'tool').length, 0, 'no tool may run');
+  assert.ok(!res.body.includes('"id":"fs.'), 'no filesystem capability offered');
+  // The grounding frame tells the host which mode to render.
+  const g = evs.find((e) => e.event === 'grounding');
+  assert.equal(g!.data.sourceMode, 'none');
+  assert.equal(g!.data.requestedMode, 'none');
+});
+
+test('the grounding frame always carries requested AND effective mode', async (t) => {
+  const { svc } = await approvedIndex([{ relPath: 'docs/x.md', content: 'billing invoices dunning\n' }]);
+  const h = appWith(svc);
+  t.after(() => h.app.close());
+
+  // `auto` against an index that cannot answer ⇒ a FALLBACK, which must be visible
+  // as a fallback rather than as a working-tree choice.
+  const res = await ask(h, { groundingMode: 'auto', task: 'how does kubernetes autoscaling work' });
+  const g = frames(res.body).find((e) => e.event === 'grounding');
+
+  assert.equal(g!.data.requestedMode, 'auto');
+  assert.equal(g!.data.sourceMode, 'working-tree');
+  assert.equal(g!.data.forced, false, 'a fallback is not a forced choice');
+  assert.equal(decisionFor(res.correlationId)!.fields.gateDecision, 'working-tree-fallback');
+});
+
+test('the legacy requireApproved boolean still maps to approved mode', async (t) => {
+  const { svc } = await approvedIndex([{ relPath: 'docs/x.md', content: 'billing invoices dunning\n' }]);
+  const h = appWith(svc);
+  t.after(() => h.app.close());
+
+  const res = await ask(h, { requireApproved: true, task: 'how does schema v6 isolation work' });
+  const decided = decisionFor(res.correlationId);
+
+  assert.equal(decided!.fields.requestedMode, 'approved', 'the legacy flag maps to the mode');
+  assert.equal(decided!.fields.gateDecision, 'refused', 'and still fails closed');
+});
+
+test('an explicit mode beats the legacy boolean when both are sent', async (t) => {
+  const { svc } = await approvedIndex([{ relPath: 'src/a.ts', content: 'exclusion engine negation ancestor\n' }]);
+  const h = appWith(svc);
+  t.after(() => h.app.close());
+
+  // Contradictory input: the explicit mode must win, and be the one recorded.
+  const res = await ask(h, { requireApproved: true, groundingMode: 'workspace', task: 'exclusion engine negation ancestor' });
+  const decided = decisionFor(res.correlationId);
+
+  assert.equal(decided!.fields.requestedMode, 'workspace');
+  assert.equal(decided!.fields.sourceMode, 'working-tree');
 });

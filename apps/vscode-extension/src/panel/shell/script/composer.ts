@@ -291,6 +291,17 @@ function initComposer() {
   if (stop$) stop$.addEventListener('click', () => vscode.postMessage({ type: 'stop' }));
   if (attach && file) attach.addEventListener('click', () => file.click());
   if (file) file.addEventListener('change', () => { if (file.files) addFiles(file.files); file.value = ''; });
+  // Governance styling must follow the SELECTION immediately: without this the
+  // operator picked "No repository evidence" and the control still looked neutral
+  // until the next turn.
+  const csource = $('csource');
+  if (csource) {
+    csource.setAttribute('data-mode', csource.value);
+    csource.addEventListener('change', () => {
+      csource.setAttribute('data-mode', csource.value);
+      vscode.postMessage({ type: 'shellAction', action: 'sourceMode:' + csource.value });
+    });
+  }
   if (context) context.addEventListener('click', () => vscode.postMessage({ type: 'shellAction', action: 'addContext' }));
   if (cmd) cmd.addEventListener('click', () => { if (!closePalette()) openPalette(''); });
   if (mic) {

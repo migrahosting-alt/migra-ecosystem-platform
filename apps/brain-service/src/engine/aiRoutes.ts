@@ -27,8 +27,10 @@ import {
   DEFAULT_MIN_APPROVED_SCORE,
   decideGrounding,
   groundingAuditFields,
+  modeFromLegacy,
   refusalMessage,
   type GroundingDecision,
+  type GroundingMode,
 } from './grounding/groundingDecision.js';
 import { ModelRegistry, type ModelDescriptor, type ProviderSource } from './modelRegistry.js';
 import { selectModel, tierFromHints, type RouteSpec } from './capabilityRouter.js';
@@ -74,6 +76,8 @@ interface AiChatBody {
    * evidence. Defaults to false so existing callers are unaffected.
    */
   requireApproved?: boolean;
+  /** Explicit evidence-source mode; supersedes `requireApproved`. */
+  groundingMode?: GroundingMode;
   /** Branch of the caller's checkout, for divergence disclosure. */
   currentBranch?: string;
   /** SSE token streaming when truthy; otherwise a single JSON response. */
@@ -331,7 +335,7 @@ export function registerAiRoutes(
     let grounding: GroundingDecision | undefined;
     if (indexService && userPrompt && policy.retrieve !== false) {
       grounding = await decideGrounding(
-        { requireApproved: Boolean(body.requireApproved), query: userPrompt, currentBranch: body.currentBranch },
+        { mode: body.groundingMode ?? modeFromLegacy(body.requireApproved), query: userPrompt, currentBranch: body.currentBranch },
         {
           approvedIndexId: () => indexService.approvedIndexFor(scope),
           retrieveApproved: async (indexId, query) => {
@@ -354,7 +358,7 @@ export function registerAiRoutes(
         requestId,
         type: 'retrieval.decided',
         component: 'chat',
-        fields: groundingAuditFields(grounding, Boolean(body.requireApproved), DEFAULT_MIN_APPROVED_SCORE),
+        fields: groundingAuditFields(grounding, DEFAULT_MIN_APPROVED_SCORE),
       });
 
       // An approved-only request that could not be grounded is REFUSED here. It
@@ -495,7 +499,12 @@ export function registerAiRoutes(
     // an approved-only request could be answered from unapproved, uncommitted code
     // with no disclosure. An approved-only turn now never reaches here (it was
     // refused above); this guard makes that structural rather than incidental.
-    if (body.requireApproved) return finishChatRequest(body, userPrompt, summary, retrievedChunks);
+    // Gate the lexical fallback on the MODE, not on one boolean: `approved` refuses
+    // above, and `none` must gather nothing at all.
+    const requestedMode: GroundingMode = body.groundingMode ?? modeFromLegacy(body.requireApproved);
+    if (requestedMode === 'approved' || requestedMode === 'none') {
+      return finishChatRequest(body, userPrompt, summary, requestedMode === 'none' ? undefined : retrievedChunks);
+    }
     if (!retrievedChunks?.length && body.workspaceRoot) {
       try {
         const retrieveReq: RetrieveRequest = {

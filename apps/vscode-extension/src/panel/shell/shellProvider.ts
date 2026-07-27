@@ -34,6 +34,7 @@ import type { BackendRouter } from '../../services/backendRouter.js';
 import type { EngineDiagnostics } from '../../services/engineDiagnostics.js';
 import { MigraAiClient } from '../../services/migraAiClient.js';
 import { readGitContext, readWorkingChanges } from '../../services/gitContext.js';
+import { groundingModeOf, sourceModeConfirmation } from './composerModel.js';
 import { AgentModeSessionGate } from '../agentModeModel.js';
 import { ActivityRecorder, type ContextFileEntry, type GitContextSnapshot } from './contextPanelModel.js';
 import { navigationHtml } from './navigationHtml.js';
@@ -1047,18 +1048,17 @@ export class MigraPilotShell {
         await this.refresh();
         return;
       case 'sourceMode:approved':
+      case 'sourceMode:workspace':
+      case 'sourceMode:none':
       case 'sourceMode:auto': {
         // Explicit, sticky operator choice — reported back so the UI and the user
         // both know which evidence source the next turn will be held to.
-        this.sourceMode = action === 'sourceMode:approved' ? 'approved' : 'auto';
+        this.sourceMode = groundingModeOf(action.slice('sourceMode:'.length));
         const branch = await this.currentBranch();
         this.post({ type: 'sourceMode', mode: this.sourceMode });
         this.post({
           type: 'token',
-          text:
-            this.sourceMode === 'approved'
-              ? `\n_Evidence source set to **approved index only**${branch ? ` (checkout \`${branch}\`)` : ''}. Requests that the approved index cannot support will be refused rather than answered from working-tree code._\n`
-              : '\n_Evidence source set to **auto**. The source of each answer is stated with it._\n',
+          text: `\n_${sourceModeConfirmation(this.sourceMode, branch)}_\n`,
         });
         return;
       }

@@ -1,3 +1,7 @@
+import {
+  groundingMayUseApprovedIndex as mayUseApprovedIndex,
+  type GroundingMode,
+} from '@migrapilot/protocol';
 /**
  * MigraAI Engine — the ONE grounding boundary.
  *
@@ -50,6 +54,24 @@ export interface GroundingChunk {
   score: number;
 }
 
+// The mode union lives in `@migrapilot/protocol` so the extension and the Brain
+// cannot drift: two independent unions that happen to match today would let the UI
+// offer a mode the Brain never enforces. Re-exported here for existing importers.
+export {
+  GROUNDING_MODES,
+  groundingMayUseApprovedIndex as mayUseApprovedIndex,
+  groundingModeFrom,
+  groundingWithholdsTools as withholdsWorkspaceTools,
+  isGroundingMode,
+  parseGroundingMode,
+  type GroundingMode,
+} from '@migrapilot/protocol';
+
+/** Legacy boolean → mode. `requireApproved` predates the mode contract. */
+export function modeFromLegacy(requireApproved: boolean | undefined): GroundingMode {
+  return requireApproved ? 'approved' : 'auto';
+}
+
 /** Why approved evidence could not be used. */
 export type GroundingRefusal =
   | 'no-approved-index'
@@ -59,6 +81,9 @@ export type GroundingRefusal =
 
 export type GroundingDecision =
   | {
+      /** What was ASKED for — kept alongside the effective mode so a degradation
+       * from `auto` to the working tree is always visible, never silent. */
+      requested: GroundingMode;
       mode: 'approved-index';
       allowed: true;
       indexId: string;
@@ -70,6 +95,7 @@ export type GroundingDecision =
       chunks: GroundingChunk[];
     }
   | {
+      requested: GroundingMode;
       mode: 'approved-index';
       allowed: false;
       reason: GroundingRefusal;
@@ -85,13 +111,25 @@ export type GroundingDecision =
       bestScore?: number;
     }
   | {
+      requested: GroundingMode;
       mode: 'working-tree';
       allowed: true;
       /** ALWAYS true: unapproved evidence may never be presented unlabelled. */
       disclosureRequired: true;
+      /** `true` when `workspace` was requested outright, `false` when `auto` fell
+       * back here. The distinction is the whole point of recording both. */
+      forced: boolean;
       currentBranch?: string;
       indexedBranch?: string;
       branchDiverged: boolean;
+    }
+  | {
+      requested: GroundingMode;
+      mode: 'none';
+      allowed: true;
+      /** No repository evidence of any kind was gathered, and the answer must say so. */
+      disclosureRequired: true;
+      currentBranch?: string;
     };
 
 export interface GroundingRequest {
@@ -100,7 +138,7 @@ export interface GroundingRequest {
    * prompt text. Sniffing prose for "only the approved index" would make the
    * governance boundary depend on phrasing.
    */
-  requireApproved: boolean;
+  mode: GroundingMode;
   query: string;
   /** Branch of the working tree, when the caller knows it. */
   currentBranch?: string;
@@ -133,28 +171,71 @@ export interface GroundingDeps {
 /**
  * Decide where this turn's evidence comes from.
  *
- * `requireApproved` requests fail CLOSED: no approved index, a retrieval failure,
- * or nothing clearing {@link GroundingDeps.minScore} all refuse. They never fall
- * back to the working tree, because a caller that asked for approved-only evidence
- * would otherwise receive unapproved evidence under an approved-sounding answer.
+ * `approved` fails CLOSED: no approved index, a retrieval failure, or nothing
+ * clearing {@link GroundingDeps.minScore} all refuse. It never falls back to the
+ * working tree, because a caller that asked for approved-only evidence would
+ * otherwise receive unapproved evidence under an approved-sounding answer.
  *
- * Ordinary requests keep today's behaviour — approved evidence when it is good
- * enough, working tree otherwise — except that working-tree mode is now LABELLED.
+ * `workspace` and `none` short-circuit BEFORE any approved lookup, so neither can
+ * quietly become the other. `auto` keeps today's behaviour — approved evidence when
+ * it is good enough, the working tree otherwise — but the fallback is recorded as a
+ * fallback (`forced: false`) rather than presented as a choice.
  */
 export async function decideGrounding(req: GroundingRequest, deps: GroundingDeps): Promise<GroundingDecision> {
-  const indexId = deps.approvedIndexId();
+  const requested = req.mode;
+
+  // `none`: no repository evidence of ANY kind. Decided before any lookup, so the
+  // approved index is not even touched — a mode that quietly retrieved "just to
+  // check" would not be the mode it claims to be.
+  if (requested === 'none') {
+    return { requested, mode: 'none', allowed: true, disclosureRequired: true, currentBranch: req.currentBranch };
+  }
+
+  const indexId = mayUseApprovedIndex(requested) ? deps.approvedIndexId() : undefined;
   const identity = indexId ? deps.indexIdentity(indexId) : undefined;
-  const indexedBranch = identity?.indexedBranch;
+  // In `workspace` mode the indexed branch is still reported for context, but it is
+  // NOT consulted for evidence.
+  const contextIndex = requested === 'workspace' ? deps.approvedIndexId() : indexId;
+  const contextIdentity = contextIndex ? deps.indexIdentity(contextIndex) : undefined;
+  const indexedBranch = (identity ?? contextIdentity)?.indexedBranch;
   const branchDiverged = Boolean(indexedBranch && req.currentBranch && indexedBranch !== req.currentBranch);
 
+  // `workspace`: FORCED to the checkout. Never falls through to approved evidence
+  // even when an approved index exists and would have cleared the floor — that is
+  // the difference between this mode and `auto`.
+  if (requested === 'workspace') {
+    return {
+      requested,
+      mode: 'working-tree',
+      allowed: true,
+      disclosureRequired: true,
+      forced: true,
+      currentBranch: req.currentBranch,
+      indexedBranch,
+      branchDiverged,
+    };
+  }
+
+  /** `auto` degrading to the checkout — always labelled as a fallback, not a choice. */
+  const fellBack = (): GroundingDecision => ({
+    requested,
+    mode: 'working-tree',
+    allowed: true,
+    disclosureRequired: true,
+    forced: false,
+    currentBranch: req.currentBranch,
+    indexedBranch,
+    branchDiverged,
+  });
+
   if (!indexId || !identity) {
-    return req.requireApproved
-      ? { mode: 'approved-index', allowed: false, reason: 'no-approved-index', currentBranch: req.currentBranch }
-      : { mode: 'working-tree', allowed: true, disclosureRequired: true, currentBranch: req.currentBranch, branchDiverged: false };
+    return requested === 'approved'
+      ? { requested, mode: 'approved-index', allowed: false, reason: 'no-approved-index', currentBranch: req.currentBranch }
+      : fellBack();
   }
 
   if (branchDiverged && deps.refuseOnBranchDivergence) {
-    return { mode: 'approved-index', allowed: false, reason: 'branch-diverged', indexedBranch, currentBranch: req.currentBranch, indexVersion: identity.version };
+    return { requested, mode: 'approved-index', allowed: false, reason: 'branch-diverged', indexedBranch, currentBranch: req.currentBranch, indexVersion: identity.version };
   }
 
   let chunks: GroundingChunk[];
@@ -162,16 +243,17 @@ export async function decideGrounding(req: GroundingRequest, deps: GroundingDeps
     chunks = await deps.retrieveApproved(indexId, req.query);
   } catch {
     // A retrieval failure is NOT a licence to answer from the checkout.
-    return req.requireApproved
-      ? { mode: 'approved-index', allowed: false, reason: 'retrieval-failed', indexedBranch, currentBranch: req.currentBranch, indexVersion: identity.version }
-      : { mode: 'working-tree', allowed: true, disclosureRequired: true, currentBranch: req.currentBranch, indexedBranch, branchDiverged };
+    return requested === 'approved'
+      ? { requested, mode: 'approved-index', allowed: false, reason: 'retrieval-failed', indexedBranch, currentBranch: req.currentBranch, indexVersion: identity.version }
+      : fellBack();
   }
 
   const relevant = chunks.filter((c) => c.score >= deps.minScore);
   if (relevant.length === 0) {
     const bestScore = chunks.length ? Math.max(...chunks.map((c) => c.score)) : undefined;
-    if (req.requireApproved) {
+    if (requested === 'approved') {
       return {
+        requested,
         mode: 'approved-index',
         allowed: false,
         reason: 'insufficient-relevance',
@@ -181,10 +263,11 @@ export async function decideGrounding(req: GroundingRequest, deps: GroundingDeps
         ...(bestScore !== undefined ? { bestScore } : {}),
       };
     }
-    return { mode: 'working-tree', allowed: true, disclosureRequired: true, currentBranch: req.currentBranch, indexedBranch, branchDiverged };
+    return fellBack();
   }
 
   return {
+    requested,
     mode: 'approved-index',
     allowed: true,
     indexId,
@@ -204,16 +287,28 @@ export async function decideGrounding(req: GroundingRequest, deps: GroundingDeps
  * workspace-relative `path:start-end`, which the redactor passes through unchanged
  * while still stripping any absolute path that slips in.
  */
-export function groundingAuditFields(decision: GroundingDecision, requireApproved: boolean, minScore: number): Record<string, unknown> {
+export function groundingAuditFields(decision: GroundingDecision, minScore: number): Record<string, unknown> {
   const base = {
+    // BOTH modes are recorded. `requestedMode` alone cannot show a degradation and
+    // `sourceMode` alone cannot show what was asked for; only the pair proves that
+    // no mode silently became another.
+    requestedMode: decision.requested,
     sourceMode: decision.mode,
-    requireApproved,
     allowed: decision.allowed,
     minScore,
     currentBranch: decision.currentBranch,
   };
+  if (decision.mode === 'none') {
+    return { ...base, gateDecision: 'no-repository-evidence' };
+  }
   if (decision.mode === 'working-tree') {
-    return { ...base, gateDecision: 'working-tree-disclosed', indexedBranch: decision.indexedBranch, branchDiverged: decision.branchDiverged };
+    return {
+      ...base,
+      gateDecision: decision.forced ? 'working-tree-forced' : 'working-tree-fallback',
+      forced: decision.forced,
+      indexedBranch: decision.indexedBranch,
+      branchDiverged: decision.branchDiverged,
+    };
   }
   if (!decision.allowed) {
     return { ...base, gateDecision: 'refused', refusalReason: decision.reason, indexedBranch: decision.indexedBranch, indexVersion: decision.indexVersion, bestScore: round(decision.bestScore) };

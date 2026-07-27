@@ -671,11 +671,21 @@ details.raw pre { max-height: 240px; overflow: auto; }
   appearance: none;
   -webkit-appearance: none;
 }
-/* The approved-only mode is a governance state, so it reads as one rather than as
-   a neutral default. */
-#csource[data-mode="approved"] {
+/* A GOVERNANCE mode reads as one rather than as an ordinary model preference.
+   workspace and none are governance states too (none withholds repository access
+   entirely), so they get the same deliberate treatment as approved rather than the
+   neutral look of a routing tweak. */
+#csource[data-mode="approved"],
+#csource[data-mode="workspace"],
+#csource[data-mode="none"] {
   border-color: var(--mp-accent, var(--vscode-focusBorder));
   color: var(--vscode-textLink-foreground, var(--vscode-dropdown-foreground));
+  font-weight: 600;
+}
+/* none is the most restrictive state, so it is visually the loudest. */
+#csource[data-mode="none"] {
+  border-color: var(--mp-warn, var(--vscode-editorWarning-foreground, var(--vscode-focusBorder)));
+  color: var(--mp-warn, var(--vscode-editorWarning-foreground, var(--vscode-textLink-foreground)));
 }
 #croute:focus-visible, #csource:focus-visible {
   outline: 1px solid var(--vscode-focusBorder);
