@@ -90,7 +90,7 @@ export interface EngineerInput {
    * identical whether they came from the reviewed index or a lexical scan of the
    * working tree. The prompt states the mode so the answer can too.
    */
-  contextSource?: 'approved-index' | 'working-tree';
+  contextSource?: 'approved-index' | 'working-tree' | 'none';
   /** Approved generation the context came from (approved-index mode only). */
   contextIndexVersion?: number;
   /** Set when the approved index was built from a different branch than the checkout. */
@@ -245,7 +245,9 @@ function protocolPrompt(input: EngineerInput, tools: EngineerToolInfo[]): string
             ? `CODE RETRIEVED FROM THE APPROVED SEMANTIC INDEX${input.contextIndexVersion !== undefined ? ` (approved generation v${input.contextIndexVersion})` : ''} — this is REVIEWED evidence.`
             : input.contextSource === 'working-tree'
               ? 'CODE RETRIEVED FROM THE WORKING TREE (the current checkout) — this is UNAPPROVED evidence. If you state a repository fact from it, say that it came from the working tree rather than the approved index.'
-              : 'CODE RETRIEVED FOR THIS MESSAGE:',
+              : input.contextSource === 'none'
+                ? 'NO REPOSITORY EVIDENCE was gathered for this message. Answer from general knowledge and say plainly that you did not consult the repository; never imply you read the code.'
+                : 'CODE RETRIEVED FOR THIS MESSAGE:',
           input.contextBranchNotice ?? '',
           '(real excerpts from this workspace, ranked by relevance — a SAMPLE, not the whole repo):',
           excerpts,

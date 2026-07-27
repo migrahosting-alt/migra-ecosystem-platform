@@ -17,8 +17,11 @@ import {
   DEFAULT_MIN_APPROVED_SCORE,
   decideGrounding,
   groundingAuditFields,
+  modeFromLegacy,
   refusalMessage,
+  withholdsWorkspaceTools,
   type GroundingDecision,
+  type GroundingMode,
 } from './grounding/groundingDecision.js';
 import { resolveEffectivePolicy } from './providers/executionPolicy.js';
 import { assessCodingOutcome } from './providers/codingAssessment.js';
@@ -56,6 +59,11 @@ const EngineerBodySchema = z.object({
    * their evidence is now LABELLED with its source mode.
    */
   requireApproved: z.boolean().optional(),
+  /**
+   * Explicit evidence-source mode. Supersedes `requireApproved`, which is kept for
+   * older callers and maps to `approved`. Never inferred from the prompt.
+   */
+  groundingMode: z.enum(['auto', 'approved', 'workspace', 'none']).optional(),
   /** Branch of the caller's checkout, for divergence disclosure. */
   currentBranch: z.string().optional(),
   /** Prior turns (oldest first). The unified agent serves ordinary chat too, so
@@ -393,10 +401,16 @@ export function registerEngineerRoutes(
     // existed only on an unmerged branch, it seeded three `package.json` files and
     // a `PROVENANCE.md` — high lexical scores, no relevance — and the model cited
     // them as though they were approved evidence.
-    const requireApproved = Boolean(body.requireApproved);
+    // The mode wins when both are sent; the legacy boolean only fills in for callers
+    // that predate it.
+    const groundingMode: GroundingMode = body.groundingMode ?? modeFromLegacy(body.requireApproved);
+    // Enforcement, not decoration: in `approved`/`none` the loop is handed no
+    // repo-reading capability at all, so it cannot re-acquire by hand what the mode
+    // forbids.
+    const toolsWithheld = withholdsWorkspaceTools(groundingMode);
     const grounding: GroundingDecision | undefined = indexService
       ? await decideGrounding(
-          { requireApproved, query: body.task, currentBranch: body.currentBranch },
+          { mode: groundingMode, query: body.task, currentBranch: body.currentBranch },
           {
             approvedIndexId: () => indexService.approvedIndexFor(scope),
             retrieveApproved: async (indexId, query) => {
@@ -419,7 +433,7 @@ export function registerEngineerRoutes(
         type: 'retrieval.decided',
         component: 'engineer',
         requestId: headerId || undefined,
-        fields: groundingAuditFields(grounding, requireApproved, DEFAULT_MIN_APPROVED_SCORE),
+        fields: groundingAuditFields(grounding, DEFAULT_MIN_APPROVED_SCORE),
       });
     }
 
@@ -427,16 +441,21 @@ export function registerEngineerRoutes(
     // refusal. Emitting it after the refusal meant a refused turn carried no source
     // label at all, which is precisely the disclosure this slice exists to enforce.
     if (grounding) {
+      // The host renders provenance from this frame, so it carries BOTH what was
+      // requested and what was actually used — a fallback must be visible as one.
       send('grounding', {
+        requestedMode: grounding.requested,
         sourceMode: grounding.mode,
+        currentBranch: grounding.currentBranch,
         ...(grounding.mode === 'approved-index'
           ? {
               indexVersion: grounding.indexVersion,
               indexedBranch: grounding.indexedBranch,
-              currentBranch: grounding.currentBranch,
               ...(grounding.allowed ? { branchDiverged: grounding.branchDiverged } : {}),
             }
-          : { indexedBranch: grounding.indexedBranch, currentBranch: grounding.currentBranch, branchDiverged: grounding.branchDiverged }),
+          : grounding.mode === 'working-tree'
+            ? { indexedBranch: grounding.indexedBranch, branchDiverged: grounding.branchDiverged, forced: grounding.forced }
+            : {}),
       });
     }
 
@@ -455,7 +474,11 @@ export function registerEngineerRoutes(
       ? grounding.chunks.map((c) => ({ path: c.path, startLine: c.startLine, endLine: c.endLine, snippet: c.snippet }))
       : undefined;
 
-    const seededContext = approvedSeed ?? await retrieveContext({
+    // `none` must gather NOTHING: not approved chunks, not a lexical scan. Reaching
+    // the lexical retriever here would make the mode a label rather than a rule.
+    const seededContext = groundingMode === 'none'
+      ? []
+      : approvedSeed ?? await retrieveContext({
       query: body.task,
       workspaceRoot: body.rootPath,
       feature: 'chat',
@@ -539,7 +562,7 @@ export function registerEngineerRoutes(
         },
         listFiles: async (root) => listWorkspaceFiles(root),
         stage,
-        tools: loopTools(requireApproved),
+        tools: loopTools(toolsWithheld),
       },
       {
         rootPath: body.rootPath,
@@ -548,7 +571,7 @@ export function registerEngineerRoutes(
         history: body.history,
         context: seededContext,
         // Label the evidence so the answer can state its provenance.
-        contextSource: approvedSeed ? 'approved-index' : 'working-tree',
+        contextSource: groundingMode === 'none' ? 'none' : approvedSeed ? 'approved-index' : 'working-tree',
         ...(grounding && grounding.mode === 'approved-index' && grounding.allowed
           ? { contextIndexVersion: grounding.indexVersion }
           : {}),
