@@ -203,6 +203,118 @@ export function sourceModeBadge(
   return 'Source mode: Current workspace';
 }
 
+/**
+ * Live-knowledge selector options — the SECOND, independent evidence dimension.
+ *
+ * Repository grounding answers "what repository material may be used"; this answers
+ * "may information from outside the repository be consulted, and from which trust
+ * class". Neither implies the other, so the two controls are separate and never
+ * mutate one another.
+ *
+ * `web` is labelled honestly. No general-web provider ships yet, so selecting it
+ * gets authoritative Tier 1 connectors and says so — a control that promised broad
+ * web coverage while delivering seven first-party APIs would be a worse lie than
+ * offering no web mode at all.
+ */
+export const LIVE_MODE_OPTIONS = [
+  {
+    value: 'off',
+    label: 'Live knowledge off',
+    hint: 'No external lookup of any kind; nothing leaves this machine for this turn',
+    governed: false,
+  },
+  {
+    value: 'official',
+    label: 'Official sources',
+    hint: 'Authoritative first-party sources only — official APIs, registries, releases, advisories and vendor documentation',
+    governed: true,
+  },
+  {
+    value: 'web',
+    label: 'Web research',
+    hint: 'Authoritative sources only while no general web provider is configured; the trust of each source is disclosed',
+    governed: true,
+  },
+] as const;
+
+export type LiveMode = (typeof LIVE_MODE_OPTIONS)[number]['value'];
+
+/**
+ * The wire value for a live-knowledge selector state.
+ *
+ * Fails CLOSED to `off`, deliberately unlike {@link groundingModeOf} which defaults to
+ * `auto`. There the default is the prior behaviour; here anything but `off` would grant
+ * network egress to a turn that never asked for it.
+ */
+export function liveModeOf(mode: string | undefined): LiveMode {
+  return LIVE_MODE_OPTIONS.some((o) => o.value === mode) ? (mode as LiveMode) : 'off';
+}
+
+/** True when the live-knowledge selection permits any external lookup. */
+export function permitsLiveLookup(mode: string | undefined): boolean {
+  return liveModeOf(mode) !== 'off';
+}
+
+/**
+ * Host-rendered live-knowledge provenance, built from the Brain's frame.
+ *
+ * A SEPARATE frame from {@link sourceModeBadge}: the two dimensions are independent, so
+ * collapsing them into one line would make "no repository evidence" and "no external
+ * evidence" indistinguishable. The model never sees these labels and cannot alter them.
+ */
+export function liveKnowledgeBadge(
+  frame:
+    | {
+        headline?: string;
+        checkedAt?: string;
+        sourcesConsulted?: number;
+        sourcesAccepted?: number;
+        citations?: Array<{
+          sourceId?: string;
+          title?: string;
+          safeUrl?: string;
+          domain?: string;
+          trustTier?: number;
+          connectorId?: string;
+          publishedAt?: string;
+          retrievedAt?: string;
+          contentHash?: string;
+        }>;
+        unavailable?: Array<{ connectorId?: string; reason?: string; detail?: string }>;
+      }
+    | undefined,
+): string[] {
+  if (!frame?.headline) return [];
+  const lines = [frame.headline];
+  if (frame.checkedAt) lines.push(`Checked: ${frame.checkedAt}`);
+  if (typeof frame.sourcesAccepted === 'number') lines.push(`Sources accepted: ${frame.sourcesAccepted}`);
+  // Broad-web coverage is absent until a general provider exists, and the frame says so
+  // rather than leaving the operator to infer it from a headline.
+  if (/Authoritative sources only/.test(frame.headline)) lines.push('General web provider: Not configured');
+  for (const c of frame.citations ?? []) {
+    if (!c.sourceId || !c.safeUrl) continue;
+    const tier = c.trustTier !== undefined ? ` · tier ${c.trustTier}` : '';
+    const when = c.publishedAt ?? c.retrievedAt;
+    lines.push(`  [${c.sourceId}] ${c.title ?? c.domain ?? c.sourceId} — ${c.safeUrl}${tier}${when ? ` · ${when}` : ''}`);
+  }
+  for (const u of frame.unavailable ?? []) {
+    if (u.connectorId) lines.push(`  unavailable: ${u.connectorId} (${u.reason ?? 'unknown'})${u.detail ? ` — ${u.detail}` : ''}`);
+  }
+  return lines;
+}
+
+/** Operator confirmation when the live-knowledge mode changes. */
+export function liveModeConfirmation(mode: string | undefined): string {
+  switch (liveModeOf(mode)) {
+    case 'official':
+      return 'Live knowledge set to **official sources**. Only authoritative first-party sources are accepted — official APIs, registries, releases, advisories and allowlisted vendor documentation. Nothing else is consulted, and when no authoritative source answers, the turn says so rather than widening.';
+    case 'web':
+      return 'Live knowledge set to **web research**. No general web provider is configured yet, so this currently consults the same authoritative sources as official mode and discloses that broad web coverage is unavailable.';
+    default:
+      return 'Live knowledge set to **off**. No external lookup of any kind will be performed and nothing leaves this machine for the next turn.';
+  }
+}
+
 /** Model/routing selector options. `auto` lets the engine's router decide. */
 export const ROUTING_OPTIONS = [
   // "Auto model" rather than "Auto": two adjacent selects both reading "Auto" gave

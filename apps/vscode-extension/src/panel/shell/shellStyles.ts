@@ -658,7 +658,7 @@ details.raw pre { max-height: 240px; overflow: auto; }
 /* Every composer select, not one by id: styling a single id left the evidence
    selector as a NATIVE WHITE control against the dark shell. Selector-per-id is
    how that happened, so this rule is deliberately shared. */
-#croute, #csource {
+#croute, #csource, #clive {
   background: var(--vscode-dropdown-background, var(--vscode-input-background));
   color: var(--vscode-dropdown-foreground, var(--vscode-input-foreground));
   border: 1px solid var(--vscode-dropdown-border, var(--mp-border));
@@ -667,6 +667,11 @@ details.raw pre { max-height: 240px; overflow: auto; }
   font-size: 11px;
   padding: 3px 6px;
   max-width: 190px;
+  /* Three selectors now share this row. They must SHRINK before the row overflows —
+     a fixed basis pushes the send button off-screen in a narrow side panel. */
+  flex: 0 1 auto;
+  min-width: 0;
+  text-overflow: ellipsis;
   /* Suppress the platform chrome that made it read as a foreign widget. */
   appearance: none;
   -webkit-appearance: none;
@@ -687,7 +692,25 @@ details.raw pre { max-height: 240px; overflow: auto; }
   border-color: var(--mp-warn, var(--vscode-editorWarning-foreground, var(--vscode-focusBorder)));
   color: var(--mp-warn, var(--vscode-editorWarning-foreground, var(--vscode-textLink-foreground)));
 }
-#croute:focus-visible, #csource:focus-visible {
+/* Live knowledge is the NETWORK-EGRESS control, so its states read differently from
+   the repository-evidence states above. The off state stays neutral: it is the default
+   and the safe one, and decorating the safe state trains the operator to ignore the
+   decoration. No backticks in here — this file is one big template literal. */
+#clive[data-mode="official"] {
+  border-color: var(--mp-accent, var(--vscode-focusBorder));
+  color: var(--vscode-textLink-foreground, var(--vscode-dropdown-foreground));
+  font-weight: 600;
+}
+/* The web state gets a distinct research treatment rather than the governance accent,
+   because its coverage claim is incomplete until a general-web provider exists. Sharing
+   the official state's styling would present the two as equally settled. */
+#clive[data-mode="web"] {
+  border-color: var(--mp-warn, var(--vscode-editorWarning-foreground, var(--vscode-focusBorder)));
+  color: var(--mp-warn, var(--vscode-editorWarning-foreground, var(--vscode-textLink-foreground)));
+  font-weight: 600;
+  border-style: dashed;
+}
+#croute:focus-visible, #csource:focus-visible, #clive:focus-visible {
   outline: 1px solid var(--vscode-focusBorder);
   outline-offset: 1px;
 }

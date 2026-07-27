@@ -6,7 +6,7 @@
 // path for backend material to be baked into the HTML.
 
 import { icon } from './icons.js';
-import { COMPOSER_PLACEHOLDER, ROUTING_OPTIONS, SOURCE_MODE_OPTIONS } from './composerModel.js';
+import { COMPOSER_PLACEHOLDER, ROUTING_OPTIONS, LIVE_MODE_OPTIONS, SOURCE_MODE_OPTIONS } from './composerModel.js';
 import { HEADER_ACTIONS, SHELL_SUBTITLE, SHELL_TITLE, WELCOME_ACTIONS, WELCOME_SUBTITLE } from './welcomeModel.js';
 import { SHELL_TABS, type ShellTabId } from './navigationModel.js';
 import { shellStyles } from './shellStyles.js';
@@ -81,6 +81,16 @@ function routingOptions(): string {
  * held to. */
 function sourceModeOptions(): string {
   return SOURCE_MODE_OPTIONS.map(
+    (option) => `<option value="${option.value}" title="${escapeHtml(option.hint)}">${escapeHtml(option.label)}</option>`,
+  ).join('');
+}
+
+/** Live-knowledge selector — the visible half of the network-egress boundary.
+ * Separate from the evidence selector because the two dimensions are independent:
+ * one governs repository material, the other governs whether anything leaves this
+ * machine at all. */
+function liveModeOptions(): string {
+  return LIVE_MODE_OPTIONS.map(
     (option) => `<option value="${option.value}" title="${escapeHtml(option.hint)}">${escapeHtml(option.label)}</option>`,
   ).join('');
 }
@@ -182,6 +192,8 @@ export function shellHtml(options: ShellHtmlOptions): string {
         <span class="spacer"></span>
         <label class="sr-only" for="csource">Evidence source</label>
         <select id="csource" title="Where answers may draw evidence from">${sourceModeOptions()}</select>
+        <label class="sr-only" for="clive">Live knowledge</label>
+        <select id="clive" title="Whether this turn may consult information outside the repository">${liveModeOptions()}</select>
         <label class="sr-only" for="croute">Model routing</label>
         <select id="croute" title="Model routing for the next message">${routingOptions()}</select>
         <button id="csend" title="Send (Enter)" aria-label="Send message">${icon('send')}</button>
