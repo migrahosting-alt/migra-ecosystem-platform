@@ -149,6 +149,56 @@ test('a provider that never returns headers fails with a CONNECT timeout', async
   );
 });
 
+test('a slow NON-STREAMING generation is a response timeout, never a connect timeout', async () => {
+  // Measured against Ollama: on `stream: false` the response headers are withheld until
+  // generation COMPLETES (TTFB 11.57s == total for a 200-token reply, versus TTFB 0.32s
+  // when streaming). One deadline therefore spans connect + prefill + generation, and
+  // `fetch` cannot tell the phases apart.
+  //
+  // Reporting that as `connect` sent an operator to check networking that answers in
+  // 0.6ms while a 14B model spilling 34% to CPU was the real cost. The label has to name
+  // what actually failed.
+  const p = provider({ connectMs: 40 }, sseStream(0, 0, { headerDelayMs: 10_000 }));
+
+  await assert.rejects(
+    () => p.complete(req()),
+    (err: Error) => {
+      assert.ok(err instanceof ProviderTimeoutError, `expected ProviderTimeoutError, got ${err.name}`);
+      assert.equal((err as ProviderTimeoutError).phase, 'response');
+      assert.ok(!/connect timeout/.test(err.message), `must not blame connect: ${err.message}`);
+      assert.match(err.message, /accepted the request but returned no complete response/);
+      assert.match(err.message, /non-streaming/);
+      return true;
+    },
+  );
+});
+
+test('a response timeout classifies distinctly from a connect timeout', () => {
+  const response = classifyProviderFailure(new ProviderTimeoutError('response', 60_000, 60_001, 'http://x'));
+  assert.equal(response.code, 'PROVIDER_RESPONSE_TIMEOUT');
+  assert.equal(response.cause, 'response-timeout');
+  assert.equal(response.limitMs, 60_000);
+
+  // The two must never collapse: an operator acts on them completely differently —
+  // one is a transport problem, the other is model throughput.
+  const connect = classifyProviderFailure(new ProviderTimeoutError('connect', 60_000, 60_001, 'http://x'));
+  assert.notEqual(response.code, connect.code);
+  assert.notEqual(response.cause, connect.cause);
+});
+
+test('the STREAMING path still reports a genuine connect failure as connect', async () => {
+  // The relabel must not blunt the real signal: when headers never arrive on a stream,
+  // connect is the honest phase, because tokens would have proved liveness.
+  const p = provider({ connectMs: 40, idleMs: 5_000 }, sseStream(3, 10, { headerDelayMs: 10_000 }));
+  await assert.rejects(
+    () => drain(p.stream(req())),
+    (err: Error) => {
+      assert.equal((err as ProviderTimeoutError).phase, 'connect');
+      return true;
+    },
+  );
+});
+
 test('a stream that goes silent fails with an IDLE timeout, naming the gap', async () => {
   const p = provider({ connectMs: 500, idleMs: 60 }, sseStream(10, 10, { stallAfter: 3 }));
 
