@@ -269,6 +269,94 @@ test('the durable audit for a route turn carries metadata only', async (t) => {
   assert.match(serialised, /documentsFetched/);
 });
 
+// ── capability authority through the real route ──────────────────────────────
+
+test('the capability frame is emitted and audited for every turn', async (t) => {
+  const { impl } = recordingFetch();
+  const registry = new LiveConnectorRegistry().registerAuthoritative([createNpmConnector(connectorDeps(impl))]);
+  const route = await bootRoute(t, registry);
+  const { auditStore } = await import('../src/engine/auditLog.js');
+
+  const { events, correlationId } = await route.turn({ taskClass: 'code-review' });
+  const frame = events.find((e) => e.event === 'capability')!.data as {
+    taskClass: string; model: string; authority: string; requiredTier: string;
+    routedTier: string; belowRequiredTier: boolean; evidenceBacked: boolean;
+    reason: string; unverified: string[]; disclosure: string[];
+  };
+
+  // The routed model is the harness stub's id, which holds no grant — so the honest answer
+  // is denied, and the frame says which tier the class actually needs.
+  assert.equal(frame.taskClass, 'code-review');
+  assert.equal(frame.authority, 'denied');
+  assert.equal(frame.requiredTier, 'cloud');
+  assert.equal(frame.belowRequiredTier, true);
+  assert.ok(frame.disclosure.length > 0, 'the host renders the disclosure, not the model');
+  assert.ok(frame.unverified.length > 0);
+
+  const rows = auditStore.byCorrelation(correlationId).filter((r) => r.type === 'capability.decided');
+  assert.equal(rows.length, 1);
+  const blob = JSON.stringify(rows[0]!.fields);
+  assert.match(blob, /code-review/);
+  assert.match(blob, /"authority":"denied"/);
+  assert.ok(!blob.includes('[object'), 'audit fields stay flat');
+});
+
+test('an undeclared task class is disclosed as ungoverned, not as approval', async (t) => {
+  const { impl } = recordingFetch();
+  const registry = new LiveConnectorRegistry().registerAuthoritative([createNpmConnector(connectorDeps(impl))]);
+  const route = await bootRoute(t, registry);
+
+  // Every request written before this field existed omits it.
+  const { events } = await route.turn({});
+  const frame = events.find((e) => e.event === 'capability')!.data as { taskClass: string; authority: string; disclosure: string[] };
+
+  assert.equal(frame.taskClass, 'unclassified');
+  assert.equal(frame.authority, 'ungoverned');
+  assert.match(frame.disclosure.join(' '), /ungoverned for unclassified/);
+  assert.ok(!frame.disclosure.join(' ').includes('autonomous'));
+});
+
+test('governance frames are emitted separately and all precede the answer', async (t) => {
+  const { impl } = recordingFetch();
+  const registry = new LiveConnectorRegistry().registerAuthoritative([createNpmConnector(connectorDeps(impl))]);
+  const route = await bootRoute(t, registry);
+
+  const { events, raw } = await route.turn({ liveKnowledgeMode: 'official', groundingMode: 'none', taskClass: 'typed-implementation' });
+  const order = events.map((e) => e.event);
+
+  // Two of the three axes are observable here. The repository frame is guarded by
+  // `indexService`, which this harness deliberately does not boot — so its absence is
+  // correct, not a gap. All three together are proven against the installed Brain, where
+  // an approved index actually exists.
+  for (const ev of ['liveKnowledge', 'capability']) {
+    assert.ok(order.includes(ev), `${ev} frame missing; got ${order.join(' → ')}`);
+  }
+  assert.ok(!order.includes('grounding'), 'no index service, so no repository frame to disclose');
+
+  const last = Math.max(...['liveKnowledge', 'capability'].map((e) => raw.indexOf(`event: ${e}`)));
+  const outcomes = ['token', 'final', 'refusal', 'error'].map((e) => raw.indexOf(`event: ${e}`)).filter((i) => i >= 0);
+  assert.ok(last < Math.min(...outcomes), 'every governance frame precedes the outcome');
+});
+
+test('capability does not alter which model was routed', async (t) => {
+  const { impl } = recordingFetch();
+  const registry = new LiveConnectorRegistry().registerAuthoritative([createNpmConnector(connectorDeps(impl))]);
+  const route = await bootRoute(t, registry);
+
+  // The same turn with a denied class and with no class at all must route identically.
+  // This commit observes and discloses; it does not yet enforce, and conflating the two
+  // would hide a routing regression inside a disclosure change.
+  const denied = await route.turn({ taskClass: 'security-review' });
+  const none = await route.turn({});
+  const modelOf = (evs: Array<{ event: string; data: unknown }>) =>
+    (evs.find((e) => e.event === 'route')!.data as { model: string }).model;
+
+  assert.equal(modelOf(denied.events), modelOf(none.events));
+  // And the denial is still disclosed rather than silently ignored.
+  const frame = denied.events.find((e) => e.event === 'capability')!.data as { authority: string };
+  assert.equal(frame.authority, 'denied');
+});
+
 // ── a rejected source never becomes a citation, end to end ───────────────────
 
 test('a source rejected at the route level is absent from the frame citations', async (t) => {

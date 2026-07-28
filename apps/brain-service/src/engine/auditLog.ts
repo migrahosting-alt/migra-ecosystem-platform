@@ -24,6 +24,8 @@ export type AuditEventType =
    * consulted, from which trust tier, and how many sources were accepted. Metadata
    * only — never the query, the page body, or a URL with query parameters. */
   | 'liveKnowledge.decided'
+  /** Which model acted on which task class, with what measured standing. */
+  | 'capability.decided'
   | 'execution.completed'
   | 'execution.failed'
   | 'execution.cancel_requested'
