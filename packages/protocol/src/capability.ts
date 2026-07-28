@@ -116,6 +116,51 @@ export interface CapabilityEvidence {
   note?: string;
 }
 
+/**
+ * WHY a task class requires the tier it requires.
+ *
+ *  intrinsic-risk   a property of what a wrong answer COSTS, independent of any model.
+ *                   Governance sign-off needs a human because accountability cannot be
+ *                   delegated to software, not because software scored badly.
+ *  measured-policy  derived from measurement, therefore REVOCABLE and re-earnable. "No
+ *                   local model has passed the review benchmark" is a fact about the models
+ *                   evaluated on a date, not a truth about the task.
+ *
+ * The distinction exists because a conservative default becomes doctrine the moment nobody
+ * can tell which kind it was. A `measured-policy` entry must name its evidence and the
+ * trigger that would revisit it.
+ */
+export type TierBasis = 'intrinsic-risk' | 'measured-policy';
+
+/** The measurement behind a `measured-policy` tier requirement. */
+export interface TierPolicyEvidence {
+  /** Benchmark version — the commit whose fixtures and scores produced this. */
+  benchCommit: string;
+  evaluatedModels: readonly string[];
+  /** Cases per model on this class. Small numbers are stated, not hidden. */
+  sampleSize: number;
+  scoringMethod: 'mechanical' | 'reviewed' | 'mixed';
+  decidedAt: string;
+  /** What would cause this requirement to be re-derived. */
+  reevaluationTrigger: string;
+}
+
+/**
+ * A task class's execution requirement, with its basis.
+ *
+ * `approvedLocalCapability` is the operator-facing answer to "can anything here do this
+ * locally today" — an empty list means none, and says so rather than leaving it implied.
+ */
+export interface TierPolicy {
+  taskClass: TaskClass;
+  requiredTier: AuthorityTier;
+  basis: TierBasis;
+  /** Models with standing to serve this class locally. Empty = none today. */
+  approvedLocalCapability: readonly string[];
+  reason: string;
+  evidence?: TierPolicyEvidence;
+}
+
 /** One measured grant: this model, this task class, this much authority. */
 export interface CapabilityGrant {
   model: string;

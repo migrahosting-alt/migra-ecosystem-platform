@@ -26,6 +26,7 @@ import {
   type CapabilityDecision,
   type CapabilityGrant,
   type TaskClass,
+  type TierPolicy,
 } from '@migrapilot/protocol';
 
 /** The benchmark commit these grants derive from. */
@@ -51,27 +52,204 @@ export const ESCALATE_ALWAYS: readonly TaskClass[] = [
 ];
 
 /**
- * The lowest tier each class may be served at.
+ * Why each task class requires the tier it requires.
  *
- * Risk-driven, not capability-driven: a class sits here because of what a wrong answer
- * COSTS, before any model is considered.
+ * Two kinds of entry, deliberately distinguishable:
+ *
+ *   intrinsic-risk   about what a wrong answer costs. No score changes it.
+ *   measured-policy  about what the evaluated models could actually do on a date.
+ *                    REVOCABLE — a future model earns the tier back by passing the
+ *                    expanded, mechanically-scored family.
+ *
+ * "Code review requires cloud" is NOT an intrinsic truth about reviewing code. It is the
+ * present finding that the two local models evaluated on 2026-07-28 failed the review
+ * benchmark. Recording it as measured-policy with its sample size and reevaluation trigger
+ * keeps a conservative default from hardening into doctrine that nobody remembers how to
+ * revisit.
+ *
+ * `sampleSize: 1` is stated honestly. One case per class is enough to REJECT authority and
+ * nowhere near enough to grant it, which is exactly why the trigger names the expanded
+ * family rather than a rerun of the same case.
  */
-const REQUIRED_TIER: Record<TaskClass, AuthorityTier> = {
-  'typed-implementation': 'fast-local',
-  'test-generation': 'fast-local',
-  'regression-repair': 'fast-local',
-  refactoring: 'fast-local',
-  'tool-use-decision': 'fast-local',
-  'repository-diagnosis': 'deep-local',
-  'dependency-analysis': 'deep-local',
-  'multi-file-change': 'deep-local',
-  'code-review': 'cloud',
-  'patch-planning': 'cloud',
-  'security-review': 'cloud',
-  'governance-compliance': 'human-approval',
-  // Undeclared work asserts nothing, so it demands nothing.
-  unclassified: 'fast-local',
-};
+const LOCAL_MODELS = [FAST_LOCAL_MODEL, DEEP_LOCAL_MODEL] as const;
+
+const REVIEW_BENCH_EVIDENCE = {
+  benchCommit: BENCH_COMMIT,
+  evaluatedModels: LOCAL_MODELS,
+  sampleSize: 1,
+  scoringMethod: 'reviewed',
+  decidedAt: MEASURED_AT,
+} as const;
+
+export const TIER_POLICIES: readonly TierPolicy[] = [
+  // ── intrinsic: the cost of being wrong, not a score ──────────────────────
+  {
+    taskClass: 'governance-compliance',
+    requiredTier: 'human-approval',
+    basis: 'intrinsic-risk',
+    approvedLocalCapability: [],
+    reason:
+      'governance sign-off carries accountability, and accountability cannot be delegated to ' +
+      'software however well it scores — no measurement can move this',
+  },
+  // ── measured: revocable, and re-earnable ─────────────────────────────────
+  {
+    taskClass: 'code-review',
+    requiredTier: 'cloud',
+    basis: 'measured-policy',
+    approvedLocalCapability: [],
+    reason: 'evaluated local models failed the current review benchmark',
+    evidence: {
+      ...REVIEW_BENCH_EVIDENCE,
+      reevaluationTrigger:
+        'a local model passes the expanded mechanically-scored code-review family ' +
+        '(planted defects matched by list, not by reading)',
+    },
+  },
+  {
+    taskClass: 'security-review',
+    requiredTier: 'cloud',
+    basis: 'measured-policy',
+    approvedLocalCapability: [],
+    reason:
+      'neither evaluated local model found the planted SSRF defect, and one recommended ' +
+      'retrying a security refusal',
+    evidence: {
+      ...REVIEW_BENCH_EVIDENCE,
+      reevaluationTrigger:
+        'a local model passes the expanded mechanically-scored security-review family with ' +
+        'zero missed planted defects and zero fabrications',
+    },
+  },
+  {
+    taskClass: 'patch-planning',
+    requiredTier: 'cloud',
+    basis: 'measured-policy',
+    approvedLocalCapability: [],
+    reason:
+      'one evaluated model planned edits to two explicitly protected files and stripped the ' +
+      'SSRF address checks; the other invented signatures and addressed 1 of 5 invariants',
+    evidence: {
+      ...REVIEW_BENCH_EVIDENCE,
+      reevaluationTrigger:
+        'a local model passes the expanded patch-planning family with zero protected-surface ' +
+        'violations, scored by matching the declared protected set',
+    },
+  },
+  {
+    taskClass: 'repository-diagnosis',
+    requiredTier: 'deep-local',
+    basis: 'measured-policy',
+    approvedLocalCapability: [DEEP_LOCAL_MODEL],
+    reason: 'the deep local model diagnosed correctly; the fast one misdiagnosed and masked the failure',
+    evidence: {
+      ...REVIEW_BENCH_EVIDENCE,
+      reevaluationTrigger: 'a fast-tier model passes the expanded repository-diagnosis family',
+    },
+  },
+  {
+    taskClass: 'dependency-analysis',
+    requiredTier: 'deep-local',
+    basis: 'measured-policy',
+    approvedLocalCapability: [],
+    reason: 'never measured; held at deep-local until the family exists',
+    evidence: {
+      ...REVIEW_BENCH_EVIDENCE,
+      sampleSize: 0,
+      reevaluationTrigger: 'the dependency-analysis family is added to the benchmark',
+    },
+  },
+  {
+    taskClass: 'multi-file-change',
+    requiredTier: 'deep-local',
+    basis: 'measured-policy',
+    approvedLocalCapability: [],
+    reason: 'never measured; a multi-file edit compounds a single mistake across files',
+    evidence: {
+      ...REVIEW_BENCH_EVIDENCE,
+      sampleSize: 0,
+      reevaluationTrigger: 'the multi-file-change family is added to the benchmark',
+    },
+  },
+  // ── low consequence: a wrong answer is cheap and visible ─────────────────
+  {
+    taskClass: 'typed-implementation',
+    requiredTier: 'fast-local',
+    basis: 'measured-policy',
+    approvedLocalCapability: LOCAL_MODELS,
+    reason: 'both evaluated models passed by execution against stated cases',
+    evidence: {
+      ...REVIEW_BENCH_EVIDENCE,
+      scoringMethod: 'mechanical',
+      reevaluationTrigger: 'the typed-implementation family grows beyond one case',
+    },
+  },
+  {
+    taskClass: 'test-generation',
+    requiredTier: 'fast-local',
+    basis: 'intrinsic-risk',
+    approvedLocalCapability: [],
+    reason: 'a wrong generated test fails loudly and mutates nothing',
+  },
+  {
+    taskClass: 'regression-repair',
+    requiredTier: 'fast-local',
+    basis: 'intrinsic-risk',
+    approvedLocalCapability: [],
+    reason: 'bounded by the failing test it must make pass',
+  },
+  {
+    taskClass: 'refactoring',
+    requiredTier: 'fast-local',
+    basis: 'intrinsic-risk',
+    approvedLocalCapability: [],
+    reason: 'behaviour-preserving by definition, and the test suite is the check',
+  },
+  {
+    taskClass: 'tool-use-decision',
+    requiredTier: 'fast-local',
+    basis: 'intrinsic-risk',
+    approvedLocalCapability: [],
+    reason: 'the tool boundary enforces its own permissions regardless of who chose the tool',
+  },
+  {
+    taskClass: 'unclassified',
+    requiredTier: 'fast-local',
+    basis: 'intrinsic-risk',
+    approvedLocalCapability: [],
+    reason: 'undeclared work asserts nothing, so it demands nothing — and is granted nothing',
+  },
+];
+
+/** Reject a policy set that hides how it was decided. */
+export function assertPoliciesWellFormed(policies: readonly TierPolicy[]): void {
+  const seen = new Set<TaskClass>();
+  for (const p of policies) {
+    if (seen.has(p.taskClass)) throw new Error(`capability: duplicate tier policy for ${p.taskClass}`);
+    seen.add(p.taskClass);
+    if (p.basis === 'measured-policy') {
+      if (!p.evidence) throw new Error(`capability: measured policy for ${p.taskClass} names no evidence`);
+      if (!p.evidence.reevaluationTrigger) {
+        // A revocable decision with no stated trigger is doctrine wearing evidence's coat.
+        throw new Error(`capability: measured policy for ${p.taskClass} has no reevaluation trigger`);
+      }
+    }
+    if (p.basis === 'intrinsic-risk' && p.evidence) {
+      throw new Error(`capability: ${p.taskClass} claims intrinsic risk but cites measurement — pick one`);
+    }
+  }
+}
+
+assertPoliciesWellFormed(TIER_POLICIES);
+
+const REQUIRED_TIER: Record<TaskClass, AuthorityTier> = Object.fromEntries(
+  TIER_POLICIES.map((p) => [p.taskClass, p.requiredTier]),
+) as Record<TaskClass, AuthorityTier>;
+
+/** The policy behind a class's tier requirement, for disclosure and for review. */
+export function tierPolicyFor(taskClass: TaskClass): TierPolicy | undefined {
+  return TIER_POLICIES.find((p) => p.taskClass === taskClass);
+}
 
 /**
  * Measured grants, 2026-07-28, RTX 3060 12 GB.
@@ -340,8 +518,15 @@ export function resolveCapability(
  * `[object]` — the same trap that silently discarded live-knowledge provenance.
  */
 export function capabilityAuditFields(d: CapabilityDecision): Record<string, unknown> {
+  const policy = tierPolicyFor(d.taskClass);
   return {
     taskClass: d.taskClass,
+    // Whether this tier requirement is revocable. Without it, a reader cannot tell a
+    // provisional finding from a permanent rule six months later.
+    ...(policy ? { tierBasis: policy.basis } : {}),
+    ...(policy?.evidence
+      ? { tierEvidence: `${policy.evidence.benchCommit}|n=${policy.evidence.sampleSize}|${policy.evidence.scoringMethod}|${policy.evidence.decidedAt}` }
+      : {}),
     capabilityModel: d.model,
     authority: d.authority,
     requiredTier: d.requiredTier,

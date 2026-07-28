@@ -3,6 +3,9 @@ import test from 'node:test';
 
 import {
   BENCH_COMMIT,
+  TIER_POLICIES,
+  assertPoliciesWellFormed,
+  tierPolicyFor,
   DEEP_LOCAL_MODEL,
   ESCALATE_ALWAYS,
   FAST_LOCAL_MODEL,
@@ -160,6 +163,84 @@ test('every task class has a required tier, so none can slip through unranked', 
   }
 });
 
+// ── tier requirements are policy, not doctrine ───────────────────────────────
+
+test('every task class has exactly one tier policy and none is unranked', () => {
+  assert.doesNotThrow(() => assertPoliciesWellFormed(TIER_POLICIES));
+  const covered = TIER_POLICIES.map((p) => p.taskClass).sort();
+  assert.deepEqual(covered, [...TASK_CLASSES].sort(), 'a class with no policy could slip through');
+});
+
+test('a measured policy MUST name its evidence and its reevaluation trigger', () => {
+  // A revocable decision with no stated trigger is doctrine wearing evidence's coat: nobody
+  // remembers it was provisional, and it never gets revisited.
+  assert.throws(
+    () => assertPoliciesWellFormed([{ taskClass: 'code-review', requiredTier: 'cloud', basis: 'measured-policy', approvedLocalCapability: [], reason: 'x' }]),
+    /names no evidence/,
+  );
+  assert.throws(
+    () =>
+      assertPoliciesWellFormed([
+        {
+          taskClass: 'code-review', requiredTier: 'cloud', basis: 'measured-policy', approvedLocalCapability: [], reason: 'x',
+          evidence: { benchCommit: 'b', evaluatedModels: [], sampleSize: 1, scoringMethod: 'reviewed', decidedAt: 'd', reevaluationTrigger: '' },
+        },
+      ]),
+    /no reevaluation trigger/,
+  );
+});
+
+test('an intrinsic requirement may NOT cite measurement', () => {
+  // Mixing the two is how "we measured this once" becomes "this is inherently true".
+  assert.throws(
+    () =>
+      assertPoliciesWellFormed([
+        {
+          taskClass: 'governance-compliance', requiredTier: 'human-approval', basis: 'intrinsic-risk',
+          approvedLocalCapability: [], reason: 'x',
+          evidence: { benchCommit: 'b', evaluatedModels: [], sampleSize: 1, scoringMethod: 'reviewed', decidedAt: 'd', reevaluationTrigger: 't' },
+        },
+      ]),
+    /claims intrinsic risk but cites measurement/,
+  );
+});
+
+test('code-review at cloud is a REVOCABLE measured finding, not an intrinsic truth', () => {
+  const p = tierPolicyFor('code-review')!;
+  assert.equal(p.requiredTier, 'cloud');
+  assert.equal(p.basis, 'measured-policy', 'reviewing code does not inherently require cloud');
+  assert.deepEqual([...p.approvedLocalCapability], [], 'no local model has standing today');
+  assert.equal(p.reason, 'evaluated local models failed the current review benchmark');
+  // The full provenance an operator needs to re-derive or overturn it.
+  assert.equal(p.evidence!.benchCommit, BENCH_COMMIT);
+  assert.deepEqual([...p.evidence!.evaluatedModels], [FAST_LOCAL_MODEL, DEEP_LOCAL_MODEL]);
+  assert.equal(p.evidence!.sampleSize, 1, 'one case per class — stated, not hidden');
+  assert.equal(p.evidence!.scoringMethod, 'reviewed');
+  assert.equal(p.evidence!.decidedAt, '2026-07-28');
+  assert.match(p.evidence!.reevaluationTrigger, /expanded mechanically-scored code-review family/);
+});
+
+test('only governance-compliance and the low-consequence classes are intrinsic', () => {
+  const intrinsic = TIER_POLICIES.filter((p) => p.basis === 'intrinsic-risk').map((p) => p.taskClass).sort();
+  // Accountability cannot be delegated to software, so governance is intrinsic. Everything
+  // else that sits at fast-local is intrinsic because a wrong answer is cheap and visible.
+  assert.deepEqual(intrinsic, [
+    'governance-compliance', 'refactoring', 'regression-repair', 'test-generation',
+    'tool-use-decision', 'unclassified',
+  ]);
+  assert.equal(tierPolicyFor('governance-compliance')!.requiredTier, 'human-approval');
+});
+
+test('an unmeasured class is held at a cautious tier and says it was never measured', () => {
+  for (const taskClass of ['dependency-analysis', 'multi-file-change'] as const) {
+    const p = tierPolicyFor(taskClass)!;
+    assert.equal(p.basis, 'measured-policy');
+    assert.equal(p.evidence!.sampleSize, 0, 'zero cases, stated as zero');
+    assert.match(p.reason, /never measured/);
+    assert.match(p.evidence!.reevaluationTrigger, /family is added to the benchmark/);
+  }
+});
+
 // ── disclosure ───────────────────────────────────────────────────────────────
 
 test('the disclosure states the model, the authority and what was not verified', () => {
@@ -210,6 +291,10 @@ test('the audit record is flat primitives and traces to the bench commit', () =>
   assert.equal(fields.routedTier, 'fast-local');
   assert.equal(fields.belowRequiredTier, true);
   assert.equal(fields.benchCommit, BENCH_COMMIT);
+  // The basis travels with the decision: an auditor six months from now must be able to
+  // tell a revocable measurement from a permanent rule without reading the source.
+  assert.equal(fields.tierBasis, 'measured-policy');
+  assert.equal(fields.tierEvidence, `${BENCH_COMMIT}|n=1|reviewed|2026-07-28`);
 
   // Flat: the audit store collapses nested objects to `[object]`, which silently discarded
   // live-knowledge provenance once already.
