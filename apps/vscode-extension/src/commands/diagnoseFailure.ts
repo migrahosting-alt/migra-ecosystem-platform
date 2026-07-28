@@ -24,19 +24,23 @@ import { DIAGNOSE_WORKFLOW, buildDiagnosisPrompt, collectFailureEvidence } from 
 export { DIAGNOSE_WORKFLOW, buildDiagnosisPrompt, collectFailureEvidence } from './diagnoseFailureModel.js';
 
 export async function runDiagnoseFailure(deps: CommandDeps): Promise<void> {
+  // These notices are FIRE-AND-FORGET. Awaiting `showInformationMessage` keeps the command
+  // pending until the toast is dismissed, so an operator who ignores it leaves the command
+  // running with nothing to show for it — and an automated run blocks until it times out,
+  // which is how this was found. The result is discarded, so there is nothing to await.
   const editor = vscode.window.activeTextEditor;
   if (!editor) {
-    await vscode.window.showWarningMessage('Open the file you want diagnosed.');
+    void vscode.window.showWarningMessage('Open the file you want diagnosed.');
     return;
   }
   const diagnostics = vscode.languages.getDiagnostics(editor.document.uri);
   if (!diagnostics.some((d) => (d.severity ?? 0) <= 1)) {
-    await vscode.window.showInformationMessage('No errors or warnings in the active file.');
+    void vscode.window.showInformationMessage('No errors or warnings in the active file.');
     return;
   }
   const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   if (!root) {
-    await vscode.window.showWarningMessage('Open a workspace folder to diagnose with repository context.');
+    void vscode.window.showWarningMessage('Open a workspace folder to diagnose with repository context.');
     return;
   }
 
