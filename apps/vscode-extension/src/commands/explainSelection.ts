@@ -14,13 +14,13 @@ export async function runExplainSelection(deps: CommandDeps): Promise<void> {
   const brainClient = deps.brainClient;
   const editor = vscode.window.activeTextEditor;
   if (!editor) {
-    await vscode.window.showWarningMessage('No active editor found.');
+    void vscode.window.showWarningMessage('No active editor found.');
     return;
   }
 
   const selection = editor.document.getText(editor.selection).trim();
   if (!selection) {
-    await vscode.window.showWarningMessage('Select some code first.');
+    void vscode.window.showWarningMessage('Select some code first.');
     return;
   }
 
@@ -37,7 +37,7 @@ export async function runExplainSelection(deps: CommandDeps): Promise<void> {
 
   const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   if (!workspaceRoot) {
-    await vscode.window.showWarningMessage('Open a workspace folder to explain code with repo context.');
+    void vscode.window.showWarningMessage('Open a workspace folder to explain code with repo context.');
     return;
   }
 

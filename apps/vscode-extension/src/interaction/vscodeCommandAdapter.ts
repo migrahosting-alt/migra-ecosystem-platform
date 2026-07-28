@@ -80,6 +80,8 @@ export async function runCommandTrace(trace: InteractionTrace, options: RunOptio
       ...base,
       outcome: 'undiscovered' as InteractionOutcome,
       levelReached: Math.min(options.hostLevel, 2) as 1 | 2,
+      // Never evaluated: the locator failed first, so the context was not consulted.
+      preconditions: { evaluated: [], unmet: [] },
       timing: { elapsedMs: 0, classification: 'completed', budget: trace.budget },
       effects: { observed: [], expected: trace.expected, forbidden: trace.forbidden, unexpected: [], violations: [] },
       correlation: { correlationId: null, auditEventTypes: [], auditMatched: false },
@@ -88,6 +90,38 @@ export async function runCommandTrace(trace: InteractionTrace, options: RunOptio
         `locator: command "${trace.locator.commandId}" is declared but not registered in this host`,
         ...evidenceGaps(before, after),
       ],
+      baselineAfter: after,
+    };
+  }
+
+  // ── preconditions ─────────────────────────────────────────────────────────
+  // Evaluated AFTER the locator resolves and BEFORE invocation. A control that correctly
+  // declines an inapplicable context is behaving properly, so the context is checked here
+  // rather than inferred afterwards from the absence of effects — which would be
+  // indistinguishable from an inert control.
+  const evaluated: string[] = [];
+  const unmet: string[] = [];
+  for (const precondition of trace.preconditions ?? []) {
+    evaluated.push(precondition.id);
+    if (!(await precondition.satisfied())) unmet.push(precondition.id);
+  }
+
+  if (unmet.length > 0) {
+    const after = captureBaseline(options.root);
+    return {
+      ...base,
+      outcome: 'not-applicable' as InteractionOutcome,
+      // The control was found; that much IS proven at the host level.
+      levelReached: Math.min(trace.level, options.hostLevel) as 1 | 2 | 3 | 4 | 5,
+      preconditions: { evaluated, unmet },
+      timing: { elapsedMs: 0, classification: 'completed', budget: trace.budget },
+      effects: { observed: [], expected: trace.expected, forbidden: trace.forbidden, unexpected: [], violations: [] },
+      correlation: { correlationId: null, auditEventTypes: [], auditMatched: false },
+      cleanup: { verified: true, residual: [] },
+      evidenceGaps: [
+        `preconditions: not invoked — unmet ${unmet.join(', ')}`,
+        ...evidenceGaps(before, after),
+      ].sort(),
       baselineAfter: after,
     };
   }
@@ -158,6 +192,7 @@ export async function runCommandTrace(trace: InteractionTrace, options: RunOptio
   return {
     ...base,
     outcome,
+    preconditions: { evaluated, unmet },
     // The trace may ASK for a level; the host decides what it can substantiate.
     levelReached: Math.min(trace.level, options.hostLevel) as 1 | 2 | 3 | 4 | 5,
     timing: { elapsedMs, classification: timing, budget: trace.budget, ...(waitingOn ? { waitingOn } : {}) },

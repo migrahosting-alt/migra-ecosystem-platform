@@ -39,7 +39,6 @@ const UNDECLARED_COMMANDS = new Set([
   'migrapilot.dev.openClassicChat',
   'migrapilot.dev.openClassicWorkspace',
   'migrapilot.executionPolicy',
-  'migrapilot.explainSelection',
   'migrapilot.fixDiagnostics',
   'migrapilot.generateCommit',
   'migrapilot.generateTests',

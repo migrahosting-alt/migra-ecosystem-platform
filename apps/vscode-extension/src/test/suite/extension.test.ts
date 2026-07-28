@@ -9,6 +9,7 @@ import { approveResumeAndReconcile, reconcileRun } from '@migrapilot/pilot-clien
 import { runEngineerTurn } from '../../chat/engineerTurn.js';
 import { runCommandTrace } from '../../interaction/vscodeCommandAdapter.js';
 import { diagnoseFailureControl } from '../../commands/diagnoseFailure.control.js';
+import { explainSelectionControl } from '../../commands/explainSelection.control.js';
 import { shellHtml } from '../../panel/shell/shellHtml.js';
 import { CAP_FIX_DIAGNOSTICS, evaluateCapability } from '../../services/commandCapabilities.js';
 import { type ProviderChunk } from '../../providers/modelProvider.js';
@@ -1986,6 +1987,181 @@ suite('MigraPilot extension — end to end', () => {
       const gapText = report.evidenceGaps.join(' | ');
       assert.match(gapText, /pendingNotifications/, 'the dimension that would name a toast hang is declared missing');
       assert.match(gapText, /workspaceStateDigest/);
+
+      fs.rmSync(file.fsPath, { force: true });
+    });
+
+    test('a second control aggregates and verifies through its own exact locator', async () => {
+      // Generalisation, not duplication: same adapter, different preconditions (a selection
+      // rather than a diagnostic), different surface, different instance scope.
+      const root = vscode.workspace.workspaceFolders![0]!.uri.fsPath;
+      const file = vscode.Uri.file(path.join(root, 'iv-explain.ts'));
+      fs.writeFileSync(file.fsPath, 'export function add(a: number, b: number) {\n  return a + b;\n}\n');
+      const editor = await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(file));
+      editor.selection = new vscode.Selection(0, 0, 2, 1);
+      assert.ok(editor.document.getText(editor.selection).trim().length > 0, 'the trace needs a real selection');
+
+      const report = await runCommandTrace(
+        {
+          trace: 'explain-selection.read-only',
+          level: 3,
+          control: explainSelectionControl,
+          locator: explainSelectionControl.locator,
+          budget: { settleMs: 20_000, ceilingMs: 60_000 },
+          preconditions: [
+            { id: 'active-editor', describe: 'an editor is active', satisfied: () => Boolean(vscode.window.activeTextEditor) },
+            {
+              id: 'non-empty-selection',
+              describe: 'the active editor has a non-empty selection',
+              satisfied: () => {
+                const e = vscode.window.activeTextEditor;
+                return Boolean(e && e.document.getText(e.selection).trim().length > 0);
+              },
+            },
+          ],
+          expected: ['editors.documentOpened', 'editors.activeChanged'],
+          forbidden: ['repository.headChanged', 'repository.filesChanged', 'workspace.configurationChanged', 'editors.preexistingDirtyModified'],
+        },
+        { root, hostLevel: 3, cleanup: async () => {} },
+      );
+
+      assert.equal(report.control.key, 'migrapilot-vscode/editor.selection.context/explain-selection@v1');
+      assert.equal(report.locator.commandId, 'migrapilot.explainSelection', 'its OWN locator, not the first control\'s');
+      assert.equal(report.registration.commandFound, true);
+      assert.deepEqual(report.preconditions.unmet, [], 'both preconditions met');
+      assert.deepEqual(report.preconditions.evaluated, ['active-editor', 'non-empty-selection']);
+      assert.notEqual(report.timing.classification, 'hung');
+      assert.deepEqual(report.effects.violations, []);
+      assert.ok(
+        report.effects.observed.some((e) => e.kind === 'editors.documentOpened'),
+        `expected an output document; observed ${report.effects.observed.map((e) => e.kind).join(', ')}`,
+      );
+
+      fs.rmSync(file.fsPath, { force: true });
+    });
+
+    test('an empty selection is NOT-APPLICABLE — the control exists, the context does not', async () => {
+      // Not `undiscovered` (the command is registered) and not `failed` (declining an
+      // inapplicable context is correct behaviour). Conflating either would train a reader
+      // to ignore the outcome that matters.
+      const root = vscode.workspace.workspaceFolders![0]!.uri.fsPath;
+      const file = vscode.Uri.file(path.join(root, 'iv-empty.ts'));
+      fs.writeFileSync(file.fsPath, 'export const a = 1;\n');
+      const editor = await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(file));
+      editor.selection = new vscode.Selection(0, 0, 0, 0); // collapsed: no selected text
+
+      const openBefore = vscode.workspace.textDocuments.length;
+      const report = await runCommandTrace(
+        {
+          trace: 'explain-selection.empty-selection',
+          level: 3,
+          control: explainSelectionControl,
+          locator: explainSelectionControl.locator,
+          budget: { settleMs: 5_000, ceilingMs: 15_000 },
+          preconditions: [
+            {
+              id: 'non-empty-selection',
+              describe: 'the active editor has a non-empty selection',
+              satisfied: () => {
+                const e = vscode.window.activeTextEditor;
+                return Boolean(e && e.document.getText(e.selection).trim().length > 0);
+              },
+            },
+          ],
+          expected: ['editors.documentOpened'],
+          forbidden: ['repository.filesChanged'],
+        },
+        { root, hostLevel: 3, cleanup: async () => {} },
+      );
+
+      assert.equal(report.outcome, 'not-applicable');
+      assert.equal(report.registration.commandFound, true, 'the control EXISTS');
+      assert.deepEqual(report.preconditions.unmet, ['non-empty-selection']);
+      assert.equal(report.timing.elapsedMs, 0, 'nothing was invoked');
+      assert.equal(vscode.workspace.textDocuments.length, openBefore, 'no document may open');
+      assert.match(report.evidenceGaps.join(' | '), /not invoked — unmet non-empty-selection/);
+
+      fs.rmSync(file.fsPath, { force: true });
+    });
+
+    test('no active editor is NOT-APPLICABLE, and nothing is invoked', async () => {
+      // The other inapplicable context. Same outcome class as an empty selection, different
+      // cause — and the report names WHICH precondition was unmet rather than just failing.
+      await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+      assert.equal(vscode.window.activeTextEditor, undefined, 'the fixture needs no active editor');
+
+      const root = vscode.workspace.workspaceFolders![0]!.uri.fsPath;
+      const report = await runCommandTrace(
+        {
+          trace: 'explain-selection.no-editor',
+          level: 3,
+          control: explainSelectionControl,
+          locator: explainSelectionControl.locator,
+          budget: { settleMs: 5_000, ceilingMs: 15_000 },
+          preconditions: [
+            { id: 'active-editor', describe: 'an editor is active', satisfied: () => Boolean(vscode.window.activeTextEditor) },
+          ],
+          expected: ['editors.documentOpened'],
+          forbidden: ['repository.filesChanged'],
+        },
+        { root, hostLevel: 3, cleanup: async () => {} },
+      );
+
+      assert.equal(report.outcome, 'not-applicable');
+      assert.equal(report.registration.commandFound, true, 'the control exists regardless of context');
+      assert.deepEqual(report.preconditions.unmet, ['active-editor']);
+      assert.equal(report.timing.elapsedMs, 0);
+      assert.deepEqual(report.effects.observed, [], 'an uninvoked control produces no effects');
+    });
+
+    test('two traces in sequence never claim each other\'s document', async () => {
+      // The isolation guarantee: effects come from a baseline diff taken inside each trace,
+      // so a document left open by the previous trace is excluded by construction. An
+      // earlier version of this suite matched "the first untitled markdown found" and
+      // asserted against Explain Selection's output while testing Diagnose Failure.
+      const root = vscode.workspace.workspaceFolders![0]!.uri.fsPath;
+      const file = vscode.Uri.file(path.join(root, 'iv-seq.ts'));
+      fs.writeFileSync(file.fsPath, 'export const seq = 1;\n');
+      const editor = await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(file));
+      editor.selection = new vscode.Selection(0, 0, 0, 19);
+
+      const explain = await runCommandTrace(
+        {
+          trace: 'iso.explain', level: 3,
+          control: explainSelectionControl, locator: explainSelectionControl.locator,
+          budget: { settleMs: 20_000, ceilingMs: 60_000 },
+          expected: ['editors.documentOpened', 'editors.activeChanged'],
+          forbidden: ['repository.filesChanged'],
+        },
+        { root, hostLevel: 3, cleanup: async () => {} },
+      );
+      const explainDocs = explain.effects.observed.filter((e) => e.kind === 'editors.documentOpened').map((e) => e.detail);
+
+      // Second trace, with the first trace's document still open.
+      const diagnostics = vscode.languages.createDiagnosticCollection('iv-seq');
+      diagnostics.set(file, [new vscode.Diagnostic(new vscode.Range(0, 0, 0, 5), 'seq error', vscode.DiagnosticSeverity.Error)]);
+      await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(file));
+
+      const diagnose = await runCommandTrace(
+        {
+          trace: 'iso.diagnose', level: 3,
+          control: diagnoseFailureControl, locator: diagnoseFailureControl.locator,
+          budget: { settleMs: 20_000, ceilingMs: 60_000 },
+          expected: ['editors.documentOpened', 'editors.activeChanged'],
+          forbidden: ['repository.filesChanged'],
+        },
+        { root, hostLevel: 3, cleanup: async () => { diagnostics.dispose(); } },
+      );
+      const diagnoseDocs = diagnose.effects.observed.filter((e) => e.kind === 'editors.documentOpened').map((e) => e.detail);
+
+      assert.ok(explainDocs.length > 0 && diagnoseDocs.length > 0, 'both traces opened a document');
+      for (const d of diagnoseDocs) {
+        assert.ok(!explainDocs.includes(d), `the second trace claimed the first trace's document: ${d}`);
+      }
+      // Correlation ids are per-trace too: the adapter clears before each invocation.
+      if (explain.correlation.correlationId && diagnose.correlation.correlationId) {
+        assert.notEqual(explain.correlation.correlationId, diagnose.correlation.correlationId);
+      }
 
       fs.rmSync(file.fsPath, { force: true });
     });
