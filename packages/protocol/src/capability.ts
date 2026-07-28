@@ -201,6 +201,64 @@ export interface CapabilityDecision {
 }
 
 /**
+ * What KIND of consequence a tool can have.
+ *
+ * Classified by consequence rather than by name, so a newly registered tool inherits a
+ * class instead of slipping through an id allowlist that nobody updated.
+ */
+export const TOOL_AUTHORITY_CLASSES = ['read-only', 'mutation', 'approval', 'production'] as const;
+export type ToolAuthorityClass = (typeof TOOL_AUTHORITY_CLASSES)[number];
+
+/**
+ * Which tool classes an authority level may USE — not merely be told about.
+ *
+ * Advertising a narrower tool list is not enforcement: a model that names an unadvertised
+ * tool will still reach the executor unless the executor checks. So this set gates
+ * EXECUTION, and advertisement is derived from it rather than the other way round.
+ */
+export function permittedToolClasses(authority: CapabilityAuthority): readonly ToolAuthorityClass[] {
+  switch (authority) {
+    case 'autonomous':
+      // Read and mutate within the granted scope. Approval and production remain separate
+      // grants — being trusted to write a file is not being trusted to deploy it.
+      return ['read-only', 'mutation'];
+    case 'advisory':
+      // May analyse and propose. A proposal is read-only work: it produces a reviewable
+      // artifact and changes nothing.
+      return ['read-only'];
+    case 'denied':
+      // Nothing. The governed action is refused before the model is called.
+      return [];
+    case 'ungoverned':
+      // Ordinary conversation and inspection. Consequential tools stay withheld until a
+      // task class is declared, so an unclassified turn cannot bypass governance.
+      return ['read-only'];
+  }
+}
+
+/** May this authority level use a tool of this class? */
+export function toolClassPermitted(authority: CapabilityAuthority, cls: ToolAuthorityClass): boolean {
+  return permittedToolClasses(authority).includes(cls);
+}
+
+/**
+ * A host-owned refusal for a governed action the routed model has no standing for.
+ *
+ * Rendered from the decision with NO model involvement. The point is that a denied
+ * security review produces this instead of model prose — presenting generated analysis as
+ * a security review is the specific dishonesty being prevented.
+ */
+export interface CapabilityRefusal {
+  code: 'CAPABILITY_DENIED';
+  taskClass: TaskClass;
+  availableTier: AuthorityTier;
+  requiredTier: AuthorityTier;
+  basis?: TierBasis;
+  evidence?: string;
+  message: string;
+}
+
+/**
  * Host-rendered capability disclosure.
  *
  * Produced from the decision, never asked of the model — the same rule the repository

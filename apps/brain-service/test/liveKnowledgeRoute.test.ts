@@ -20,6 +20,9 @@ import type { DescribedConnector, LiveSearchResult } from '@migrapilot/protocol'
 /** Module-global so correlation ids stay unique across every route instance in this file. */
 let turnCounter = 0;
 
+/** Every model invocation this harness saw, reset per booted route. */
+const modelCalls: string[] = [];
+
 const CAPS = { chat: true, vision: false, tools: true, embedding: false, reasoning: true, coding: true, insert: false };
 const NPM_DOC = {
   name: 'typescript',
@@ -72,11 +75,15 @@ async function bootRoute(
   const { registerToolExecutionRoutes } = await import('../src/engine/toolRoutes.js');
   const { ModelRegistry } = await import('../src/engine/modelRegistry.js');
 
+  // Counts every model invocation, so "no model call" can be asserted rather than assumed.
+  modelCalls.length = 0;
   const stub = {
     async complete() {
+      modelCalls.push('complete');
       return { content: 'ANSWER: ok', modelId: 'm', providerId: 'local' };
     },
     async *stream() {
+      modelCalls.push('stream');
       yield { delta: 'ANSWER: ok' } as never;
     },
     async isAvailable() {
@@ -294,7 +301,12 @@ test('the capability frame is emitted and audited for every turn', async (t) => 
   assert.ok(frame.unverified.length > 0);
 
   const rows = auditStore.byCorrelation(correlationId).filter((r) => r.type === 'capability.decided');
-  assert.equal(rows.length, 1);
+  assert.equal(rows.length, 1, 'exactly one DECISION row; enforcement actions are separate event types');
+  // code-review is denied, so the enforcement action is recorded distinctly rather than as
+  // a second decision — a decision and the refusal it caused are different events.
+  const refusals = auditStore.byCorrelation(correlationId).filter((r) => r.type === 'capability.refused');
+  assert.equal(refusals.length, 1);
+  assert.equal(refusals[0]!.fields.refusedBeforeModelCall, true);
   const blob = JSON.stringify(rows[0]!.fields);
   assert.match(blob, /code-review/);
   assert.match(blob, /"authority":"denied"/);
@@ -355,6 +367,110 @@ test('capability does not alter which model was routed', async (t) => {
   // And the denial is still disclosed rather than silently ignored.
   const frame = denied.events.find((e) => e.event === 'capability')!.data as { authority: string };
   assert.equal(frame.authority, 'denied');
+});
+
+// ── enforcement: denied refuses before the model, and exposes nothing ─────────
+
+test('a DENIED class makes zero model calls and exposes zero tools', async (t) => {
+  const { impl } = recordingFetch();
+  const registry = new LiveConnectorRegistry().registerAuthoritative([createNpmConnector(connectorDeps(impl))]);
+  const route = await bootRoute(t, registry);
+  const { auditStore } = await import('../src/engine/auditLog.js');
+
+  const { events, correlationId } = await route.turn({ taskClass: 'security-review' });
+  const order = events.map((e) => e.event);
+
+  // The refusal is HOST-owned: no model produced it, so no generated prose can be mistaken
+  // for a security review.
+  assert.deepEqual(modelCalls, [], 'a hard refusal must not call the model at all');
+  const refusal = events.find((e) => e.event === 'refusal')!.data as {
+    code: string; taskClass: string; availableTier: string; requiredTier: string; basis?: string; evidence?: string; message: string;
+  };
+  assert.equal(refusal.code, 'CAPABILITY_DENIED');
+  assert.equal(refusal.taskClass, 'security-review');
+  assert.equal(refusal.requiredTier, 'cloud');
+  assert.equal(refusal.basis, 'measured-policy');
+  assert.match(refusal.evidence!, /benchmark 46806e5a, sample size 1/);
+  for (const line of ['Capability authority: Denied', 'Required tier: cloud', 'Action: escalation required']) {
+    assert.ok(refusal.message.includes(line), `refusal must state: ${line}`);
+  }
+
+  // The capability frame precedes the refusal, so the refusal arrives after its provenance.
+  assert.ok(order.indexOf('capability') < order.indexOf('refusal'));
+  // And the loop never started.
+  assert.ok(!order.includes('step'), 'no tool step can occur for a refused turn');
+
+  const refused = auditStore.byCorrelation(correlationId).filter((r) => r.type === 'capability.refused');
+  assert.equal(refused.length, 1);
+  assert.equal(refused[0]!.fields.refusedBeforeModelCall, true);
+  assert.equal(refused[0]!.fields.requiredTier, 'cloud');
+  // The harness registers the 14B, which is the deep-local tier — still two rungs below the
+  // cloud this class requires.
+  assert.equal(refused[0]!.fields.routedTier, 'deep-local');
+});
+
+test('a permitted class DOES reach the model, so the refusal path is specific', async (t) => {
+  const { impl } = recordingFetch();
+  const registry = new LiveConnectorRegistry().registerAuthoritative([createNpmConnector(connectorDeps(impl))]);
+  const route = await bootRoute(t, registry);
+
+  // The control for the test above: if every turn refused, "zero model calls" would prove
+  // nothing about enforcement.
+  await route.turn({ taskClass: 'typed-implementation' });
+  assert.ok(modelCalls.length > 0, 'a permitted turn must actually invoke the model');
+});
+
+test('the capability audit records authority, tiers, basis and the benchmark reference', async (t) => {
+  const { impl } = recordingFetch();
+  const registry = new LiveConnectorRegistry().registerAuthoritative([createNpmConnector(connectorDeps(impl))]);
+  const route = await bootRoute(t, registry);
+  const { auditStore } = await import('../src/engine/auditLog.js');
+
+  const { correlationId } = await route.turn({
+    taskClass: 'patch-planning',
+    task: 'plan a change for CLIENT_SENTINEL with key SK_SENTINEL',
+  });
+  const row = auditStore.byCorrelation(correlationId).find((r) => r.type === 'capability.decided')!;
+  const f = row.fields;
+
+  assert.equal(f.taskClass, 'patch-planning');
+  assert.equal(f.authority, 'denied');
+  assert.equal(f.requiredTier, 'cloud');
+  assert.equal(f.routedTier, 'deep-local');
+  assert.equal(f.tierBasis, 'measured-policy');
+  assert.equal(f.benchCommit, '46806e5a');
+  assert.match(String(f.tierEvidence), /46806e5a\|n=1\|reviewed/);
+  // The derived principal travels with the decision, ready for the override that does not
+  // exist yet — so when it does, the audit names somebody it did not learn from the caller.
+  assert.match(String(f.operatorId), /^local:[0-9a-f]{16}$/);
+  assert.equal(f.authenticationMethod, 'vscode-host');
+  assert.equal(f.principalTrusted, true);
+
+  const blob = JSON.stringify(f);
+  for (const forbidden of ['CLIENT_SENTINEL', 'SK_SENTINEL', 'plan a change', '[object']) {
+    assert.ok(!blob.includes(forbidden), `audit must not contain ${forbidden}`);
+  }
+});
+
+test('a request cannot spoof the operator principal through the route', async (t) => {
+  const { impl } = recordingFetch();
+  const registry = new LiveConnectorRegistry().registerAuthoritative([createNpmConnector(connectorDeps(impl))]);
+  const route = await bootRoute(t, registry);
+  const { auditStore } = await import('../src/engine/auditLog.js');
+
+  const { correlationId } = await route.turn({
+    taskClass: 'typed-implementation',
+    operatorId: 'admin:root',
+    principal: { operatorId: 'admin:root', roles: ['admin'] },
+    roles: ['admin'],
+  });
+  const f = auditStore.byCorrelation(correlationId).find((r) => r.type === 'capability.decided')!.fields;
+
+  // Body fields are not a source. The derived host identity wins, and nothing the caller
+  // sent appears anywhere in the record.
+  assert.match(String(f.operatorId), /^local:[0-9a-f]{16}$/);
+  assert.ok(!JSON.stringify(f).includes('admin:root'));
+  assert.ok(!JSON.stringify(f).includes('admin'));
 });
 
 // ── a rejected source never becomes a citation, end to end ───────────────────
