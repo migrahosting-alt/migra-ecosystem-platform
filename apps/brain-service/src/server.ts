@@ -18,7 +18,10 @@ import { registerAiRoutes } from './engine/aiRoutes.js';
 import { registerToolExecutionRoutes } from './engine/toolRoutes.js';
 import { registerInspectRoutes } from './engine/inspectRoutes.js';
 import { registerAnswerRoutes } from './engine/answerRoutes.js';
+import { lookup as dnsLookup } from 'node:dns/promises';
 import { registerEngineerRoutes } from './engine/engineerRoutes.js';
+import { LiveConnectorRegistry } from './engine/liveKnowledge/liveResearch.js';
+import { buildAuthoritativeConnectors } from './engine/liveKnowledge/connectors/index.js';
 import { startMcp } from './mcp/mcpRuntime.js';
 import { telemetryHub } from './engine/telemetryHub.js';
 import { registerAgentRoutes } from './engine/agentRoutes.js';
@@ -352,7 +355,49 @@ async function main(): Promise<void> {
   // The agent path grounds on APPROVED evidence through the shared grounding
   // boundary; `indexedBranchFor` supplies the branch that generation was built
   // from, so branch divergence is disclosed instead of silently ignored.
-  registerEngineerRoutes(app, env, modelRegistry, toolDeps, undefined, providerRouting, escalation, indexService, indexedBranchFor);
+  // ── Live-knowledge connectors ─────────────────────────────────────────────
+  // The authoritative set only: seven Tier 1 connectors reading first-party APIs. No
+  // general-web provider is registered, so `web` mode has real evidence and NOT broad
+  // coverage — and the host frame says exactly that rather than implying a web search.
+  //
+  // Registering them grants nothing on its own: live knowledge defaults to `off` and
+  // returns before the registry is touched, so no request is made until an operator
+  // selects a mode for a turn.
+  const liveKnowledgeRegistry = new LiveConnectorRegistry();
+  if (env.liveKnowledgeConnectorsEnabled !== false) {
+    liveKnowledgeRegistry.registerAuthoritative(
+      buildAuthoritativeConnectors({
+        fetch: {
+          // Resolved addresses are what the fetch layer validates, not just the
+          // hostname: a name that answers publicly during validation can answer with a
+          // private address a moment later, and hostname-only checks never see it.
+          resolve: async (hostname: string) => {
+            const records = await dnsLookup(hostname, { all: true });
+            return records.map((r) => ({ address: r.address, family: r.family === 6 ? (6 as const) : (4 as const) }));
+          },
+        },
+        // Credentials are read by NAME from the environment at availability time and
+        // never stored, logged or rendered. Every one is optional, so a deployment with
+        // none configured loses rate limit rather than connectors.
+        env: process.env,
+        now: () => new Date().toISOString(),
+      }),
+    );
+  }
+
+  registerEngineerRoutes(
+    app,
+    env,
+    modelRegistry,
+    toolDeps,
+    undefined,
+    providerRouting,
+    escalation,
+    indexService,
+    indexedBranchFor,
+    undefined,
+    liveKnowledgeRegistry,
+  );
   // MigraAI Engine agent orchestration (/api/ai/agents): the engine owns the
   // public agent contract; runs execute through the SAME tool boundary + approval
   // store above, so agent tool calls are validated + audited identically.

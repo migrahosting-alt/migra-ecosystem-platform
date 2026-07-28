@@ -34,6 +34,16 @@ export interface BrainEnv {
   pilotApiUrl?: string;
   pilotApiToken?: string;
   pilotApiAuthMode?: 'bearer' | 'none';
+  /**
+   * Register the authoritative live-knowledge connectors.
+   *
+   * ON by default and still safe: live knowledge defaults to `off` and returns before
+   * the registry is touched, so registering a connector grants nothing until an operator
+   * explicitly selects `official` or `web` for a turn. This flag is the SERVICE-level
+   * kill switch — with it off, `official` reports `no-connector` (a named outage) rather
+   * than pretending the operator chose `off`.
+   */
+  liveKnowledgeConnectorsEnabled?: boolean;
   /** Path to an MCP servers config (JSON). Absent = MCP off. */
   mcpConfigPath?: string;
 }
@@ -67,6 +77,7 @@ export function readEnv(env: NodeJS.ProcessEnv = process.env): BrainEnv {
     providerAbsoluteTimeoutMs: parseInteger(env.MIGRAPILOT_PROVIDER_ABSOLUTE_TIMEOUT_MS, 0),
     // Fail-closed by default: delegation requires an explicit opt-in AND a URL.
     pilotRuntimeEnabled: parseBoolean(env.MIGRAPILOT_PILOT_RUNTIME_ENABLED, false),
+    liveKnowledgeConnectorsEnabled: parseBoolean(env.MIGRAPILOT_LIVE_CONNECTORS_ENABLED, true),
     pilotApiUrl: env.MIGRAPILOT_PILOT_API_URL,
     pilotApiToken: env.MIGRAPILOT_PILOT_API_TOKEN,
     pilotApiAuthMode: env.MIGRAPILOT_PILOT_API_AUTH_MODE === 'none' ? 'none' : 'bearer',

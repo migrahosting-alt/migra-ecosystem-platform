@@ -649,10 +649,14 @@ test('the audit stays free of query text, bodies, snippets, tokens and sensitive
   ]) {
     assert.ok(!serialised.includes(forbidden), `audit must not contain ${forbidden}: ${serialised}`);
   }
-  // The metadata an operator acts on is still there.
+  // The metadata an operator acts on is still there. Provenance is recorded as flat
+  // pipe-delimited strings, because the audit store collapses nested objects to
+  // `[object]` — so asserting on the KEY name would pass while the data was discarded.
   assert.match(serialised, /registry\.npmjs\.org/);
   assert.match(serialised, /official-sources-used/);
-  assert.match(serialised, /contentHash/);
+  const sources = liveResearchAuditFields(out).sources as string[];
+  assert.ok(Array.isArray(sources) && sources.every((s) => typeof s === 'string'), 'flat strings survive the store');
+  assert.match(sources[0]!, /^npm-registry\|registry\.npmjs\.org\/typescript\/latest\|tier1\|official-api\|[0-9a-f]{32}\|/);
 });
 
 // ── the two evidence dimensions stay independent ─────────────────────────────

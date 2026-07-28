@@ -356,14 +356,29 @@ export function liveKnowledgeAuditFields(
     gateDecision: decision.gateDecision,
     sourcesConsulted: decision.sourcesConsulted,
     sourcesAccepted: decision.sourcesAccepted,
-    ...(decision.trustTierCounts ? { trustTierCounts: decision.trustTierCounts } : {}),
+    // Flattened: the audit store collapses nested objects to `[object]`, so a map here
+    // would record the fact that tiers existed and not which ones.
+    ...(decision.trustTierCounts
+      ? { trustTierCounts: Object.entries(decision.trustTierCounts).map(([tier, n]) => `tier${tier}=${n}`) }
+      : {}),
     ...(decision.domainsConsulted?.length ? { domainsConsulted: decision.domainsConsulted } : {}),
     ...(decision.researchedAt ? { researchedAt: decision.researchedAt } : {}),
     ...(decision.failureCategory ? { failureCategory: decision.failureCategory } : {}),
+    ...(decision.broadWebCoverage !== undefined ? { broadWebCoverage: decision.broadWebCoverage } : {}),
+    // Only when something IS unavailable: an empty array in every record is noise that
+    // trains a reader to skip the field, which is the opposite of the point.
+    ...(unavailableConnectors(decision).length > 0 ? { connectorsUnavailable: unavailableConnectors(decision) } : {}),
     ...(timing?.startedAt ? { startedAt: timing.startedAt } : {}),
     ...(timing?.completedAt ? { completedAt: timing.completedAt } : {}),
     ...(timing?.durationMs !== undefined ? { durationMs: timing.durationMs } : {}),
   };
+}
+
+/** Unavailable connectors as `id=reason` strings — names only, never a credential. */
+function unavailableConnectors(decision: LiveKnowledgeDecision): string[] {
+  return (decision.connectorAvailability ?? [])
+    .filter((a) => !a.available)
+    .map((a) => `${a.connectorId}=${a.available === false ? a.reason : 'unknown'}`);
 }
 
 /**
