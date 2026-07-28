@@ -26,6 +26,10 @@ export type AuditEventType =
   | 'liveKnowledge.decided'
   /** Which model acted on which task class, with what measured standing. */
   | 'capability.decided'
+  /** A governed action refused before any model call, because authority was denied. */
+  | 'capability.refused'
+  /** A tool call blocked at the gate because this authority may not use that class. */
+  | 'capability.tool_denied'
   | 'execution.completed'
   | 'execution.failed'
   | 'execution.cancel_requested'

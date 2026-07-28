@@ -35,6 +35,7 @@ import type { EngineDiagnostics } from '../../services/engineDiagnostics.js';
 import { MigraAiClient } from '../../services/migraAiClient.js';
 import { readGitContext, readWorkingChanges } from '../../services/gitContext.js';
 import { groundingModeOf, liveModeConfirmation, liveModeOf, sourceModeConfirmation } from './composerModel.js';
+import type { GovernedWorkflow } from '../../capability/workflowClassification.js';
 import { AgentModeSessionGate } from '../agentModeModel.js';
 import { ActivityRecorder, type ContextFileEntry, type GitContextSnapshot } from './contextPanelModel.js';
 import { navigationHtml } from './navigationHtml.js';
@@ -890,6 +891,15 @@ export class MigraPilotShell {
     modelId?: string,
     sourceMode?: string,
     liveMode?: string,
+    /**
+     * The host workflow for THIS turn, when one invoked it.
+     *
+     * Passed per call and never stored on the provider. `sourceMode` and `liveMode` are
+     * sticky by design — an operator sets them and they persist — but a task class belongs
+     * to one invocation: carrying it forward would let a Security Review workflow leave its
+     * authority behind for the next ordinary question.
+     */
+    workflow?: GovernedWorkflow,
   ): Promise<void> {
     const text = rawText.trim();
     if (!text && attachments.length === 0) return;
@@ -931,6 +941,8 @@ export class MigraPilotShell {
           ...(conversationId ? { conversationId, memoryPolicy: { mode, retrieve: true, store: true } } : {}),
           ...(sourceMode ? { sourceMode } : {}),
           ...(liveMode ? { liveMode } : {}),
+          // Absent for ordinary chat, which the Brain resolves to `ungoverned`.
+          ...(workflow ? { workflow } : {}),
           // The Brain treats a MISSING branch as unknown, never as "same branch",
           // so failing to resolve it degrades disclosure rather than faking it.
           ...(await this.currentBranch().then((b) => (b ? { currentBranch: b } : {}))),

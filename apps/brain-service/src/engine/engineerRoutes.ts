@@ -9,8 +9,10 @@ import { z } from 'zod';
 import type { BrainEnv } from '../config/env.js';
 import type { ModelRegistry, ModelDescriptor } from './modelRegistry.js';
 import { selectModel, tierFromHints } from './capabilityRouter.js';
-import { capabilityAuditFields, resolveCapability } from './capability/capabilityGrants.js';
-import { capabilityDisclosure } from '@migrapilot/protocol';
+import { capabilityAuditFields, resolveCapability, tierPolicyFor } from './capability/capabilityGrants.js';
+import { ToolGate, permittedTools, toolAuthoritySummary, ToolNotPermittedError } from './capability/capabilityTools.js';
+import { resolveOperatorPrincipal } from './capability/operatorPrincipal.js';
+import { capabilityDisclosure, principalAuditFields } from '@migrapilot/protocol';
 import { selectLocalCoding, type LocalRoutingDeps } from './providers/localCodingRouter.js';
 import { retrieveContext } from '../retrieval/retrieve.js';
 import type { IndexService, Scope } from './rag/indexService.js';
@@ -458,12 +460,23 @@ export function registerEngineerRoutes(
     // observability, including the case where the routed model has no standing for the
     // declared class.
     const capability = resolveCapability({ taskClass: body.taskClass, model: decision.model.id });
+
+    // STEP 4 — the tool gate opens only now. Sealed until this line, so any attempt to
+    // derive or expose a tool earlier throws instead of quietly succeeding. That makes the
+    // ordering invariant structural rather than a matter of nobody reordering two lines.
+    const toolGate = new ToolGate().open(capability);
+
+    // The acting operator, DERIVED at a trusted boundary and never read from the request.
+    // No override exists yet; the principal lands first so that when one does, the audit
+    // names somebody it did not learn from the requester.
+    const principal = resolveOperatorPrincipal({ headers: request.headers as Record<string, string | undefined>, env: process.env });
+
     auditStore.append({
       correlationId,
       type: 'capability.decided',
       component: 'engineer',
       requestId: headerId || undefined,
-      fields: capabilityAuditFields(capability),
+      fields: { ...capabilityAuditFields(capability), ...principalAuditFields(principal) },
     });
 
     // Surface the correlation id to the client so it can be quoted in support.
@@ -583,6 +596,49 @@ export function registerEngineerRoutes(
       disclosure: capabilityDisclosure(capability),
     });
 
+    // ── STEP 6a — DENIED: refuse before the model is called ───────────────────
+    // A host-owned refusal, rendered from the decision with no model involvement. The
+    // point is not politeness: presenting generated prose as a security review is the
+    // dishonesty this exists to prevent, so a denied governed action produces THIS instead
+    // of analysis. The capability frame was already emitted above, so the refusal arrives
+    // after its own provenance.
+    if (capability.authority === 'denied') {
+      const policy = tierPolicyFor(capability.taskClass);
+      const evidence = policy?.evidence
+        ? `benchmark ${policy.evidence.benchCommit}, sample size ${policy.evidence.sampleSize}`
+        : undefined;
+      send('refusal', {
+        code: 'CAPABILITY_DENIED',
+        taskClass: capability.taskClass,
+        availableTier: capability.routedTier,
+        requiredTier: capability.requiredTier,
+        ...(policy ? { basis: policy.basis } : {}),
+        ...(evidence ? { evidence } : {}),
+        message: [
+          'Capability authority: Denied',
+          `Task class: ${capability.taskClass}`,
+          `Available tier: ${capability.routedTier}`,
+          `Required tier: ${capability.requiredTier}`,
+          ...(policy ? [`Basis: ${policy.basis}`] : []),
+          ...(evidence ? [`Evidence: ${evidence}`] : []),
+          'Action: escalation required',
+          '',
+          capability.reason,
+        ].join('\n'),
+      });
+      auditStore.append({
+        correlationId,
+        type: 'capability.refused',
+        component: 'engineer',
+        outcome: 'refused',
+        requestId: headerId || undefined,
+        fields: { ...capabilityAuditFields(capability), refusedBeforeModelCall: true },
+      });
+      send('done', { ok: false, code: 'CAPABILITY_DENIED' });
+      raw.end();
+      return;
+    }
+
     // Approved-only and not groundable ⇒ refuse BEFORE the loop starts, so no
     // working-tree tool is ever reachable for this turn.
     if (grounding && grounding.mode === 'approved-index' && !grounding.allowed) {
@@ -667,6 +723,28 @@ export function registerEngineerRoutes(
             }
           : {}),
         executeTool: async (tool, input) => {
+          // AUTHORITY IS CHECKED HERE, not only in the advertised list. `executeToolCore`
+          // validates that a tool exists, is available and is approved — it never checked
+          // the tool against what THIS turn was shown, so a model naming an unadvertised
+          // tool reached the executor regardless. Withholding from the prompt was a hope;
+          // this is the boundary.
+          const known = toolDeps.registry.list({ includeUnavailable: true }).find((t) => t.id === tool);
+          try {
+            toolGate.assertPermitted(tool, known?.readOnly ?? false);
+          } catch (err) {
+            if (err instanceof ToolNotPermittedError) {
+              stage.log('error', { tool, code: 'CAPABILITY_TOOL_DENIED', detail: err.message.slice(0, 200) });
+              auditStore.append({
+                correlationId,
+                type: 'capability.tool_denied',
+                component: 'engineer',
+                outcome: 'refused',
+                requestId: headerId || undefined,
+                fields: { ...capabilityAuditFields(capability), deniedTool: tool, deniedToolClass: err.toolClass },
+              });
+            }
+            throw err;
+          }
           // Thread the same correlation logger into the tool boundary so
           // proposal/approval/apply stages share this execution's id.
           const outcome = await executeToolCore(toolDeps, { tool, input, requestId: `eng-${Date.now().toString(36)}`, stage });
@@ -686,7 +764,9 @@ export function registerEngineerRoutes(
         },
         listFiles: async (root) => listWorkspaceFiles(root),
         stage,
-        tools: loopTools(toolsWithheld),
+        // Advertised set and executed set are filtered by the SAME gate object, so they
+        // cannot drift apart the way an advertisement-only narrowing did.
+        tools: permittedTools(toolGate, loopTools(toolsWithheld)),
       },
       {
         rootPath: body.rootPath,

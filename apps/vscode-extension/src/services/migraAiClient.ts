@@ -10,7 +10,7 @@
 // falls back to the legacy `/chat` endpoint — an engine failure surfaces as a
 // correlated PilotError so the caller can show a clear message.
 
-import type { GroundingMode, LiveKnowledgeMode } from '@migrapilot/protocol';
+import type { GroundingMode, LiveKnowledgeMode, TaskClass } from '@migrapilot/protocol';
 import { REQUEST_ID_HEADER, newRequestId } from '@migrapilot/pilot-client';
 import { PilotError, type PilotErrorCode } from '@migrapilot/pilot-client';
 import { randomUUID } from 'node:crypto';
@@ -202,6 +202,14 @@ export interface EngineerRequest {
    * here must never grant anything.
    */
   liveKnowledgeMode?: LiveKnowledgeMode;
+  /**
+   * What KIND of work this turn is, for capability authority.
+   *
+   * Set from the HOST WORKFLOW that was invoked, never from prompt wording and never from
+   * `classifyIntent()`. Omitted ⇒ the Brain resolves `ungoverned`: conversation and
+   * inspection permitted, everything consequential withheld.
+   */
+  taskClass?: TaskClass;
   /**
    * @deprecated Superseded by {@link groundingMode}, which wins when both are sent.
    * Retained so older callers keep working: `true` maps to `approved`.
