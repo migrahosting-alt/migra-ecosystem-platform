@@ -1,0 +1,52 @@
+{
+  "generated": "by scripts/aggregate-controls.mjs — DERIVED EVIDENCE, do not edit",
+  "declarations": [
+    {
+      "file": "src/commands/diagnoseFailure.control.ts",
+      "applicationId": "migrapilot-vscode",
+      "surfaceId": "engineer.command-palette",
+      "controlId": "diagnose-failure",
+      "controlVersion": 1,
+      "instanceScope": "workspace",
+      "consequence": "read-only",
+      "locator": {
+        "adapter": "vscode-command",
+        "commandId": "migrapilot.diagnoseFailure",
+        "confidence": "exact"
+      }
+    }
+  ],
+  "coverage": {
+    "contributedCommands": 28,
+    "declaredControls": 1,
+    "knownGaps": [
+      "migrapilot.aiUsage",
+      "migrapilot.clearProviderKey",
+      "migrapilot.clearToken",
+      "migrapilot.dev.openClassicAgentMode",
+      "migrapilot.dev.openClassicChat",
+      "migrapilot.dev.openClassicWorkspace",
+      "migrapilot.executionPolicy",
+      "migrapilot.explainSelection",
+      "migrapilot.fixDiagnostics",
+      "migrapilot.generateCommit",
+      "migrapilot.generateTests",
+      "migrapilot.health",
+      "migrapilot.openAgentMode",
+      "migrapilot.openChat",
+      "migrapilot.openStudio",
+      "migrapilot.openWorkspacePanel",
+      "migrapilot.pairAgentMode",
+      "migrapilot.productionDiagnostics",
+      "migrapilot.providerInfo",
+      "migrapilot.providerStatus",
+      "migrapilot.repairConnection",
+      "migrapilot.reviewApprovals",
+      "migrapilot.setProviderKey",
+      "migrapilot.setToken",
+      "migrapilot.showBackendDiagnostics",
+      "migrapilot.showDiagnostics",
+      "migrapilot.showLogs"
+    ]
+  }
+}

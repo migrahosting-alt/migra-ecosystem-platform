@@ -6,6 +6,7 @@
 
 import type { MigraAiClient, EngineerRequest } from '../services/migraAiClient.js';
 import { liveKnowledgeBadge, sourceModeBadge } from '../panel/shell/composerModel.js';
+import { recordCorrelation } from '../interaction/correlationLog.js';
 import { isPilotError } from '@migrapilot/pilot-client';
 
 export interface EngineerSink {
@@ -117,7 +118,18 @@ export async function runEngineerTurn(
           sink.markdown(`\n**Insufficient approved evidence.**\n\n${d.message ?? 'The approved semantic index does not support this request.'}\n\n_No working-tree files were consulted._\n`);
         }
       } else if (ev.event === 'route') {
-        const d = ev.data as { model?: string };
+        const d = ev.data as { model?: string; correlationId?: string; taskClass?: string; workflow?: string };
+        // Keep the correlation id. The Brain audits under it, and without this the record
+        // for a turn the editor caused is unreachable from the editor that caused it.
+        if (d.correlationId) {
+          recordCorrelation({
+            correlationId: d.correlationId,
+            at: Date.now(),
+            ...(d.model ? { model: d.model } : {}),
+            ...(req.taskClass ? { taskClass: req.taskClass } : {}),
+            ...(req.workflow ? { workflow: req.workflow } : {}),
+          });
+        }
         sink.progress?.(`MigraPilot → ${d.model ?? 'model'}`);
       } else if (ev.event === 'step') {
         const d = ev.data as StepData;

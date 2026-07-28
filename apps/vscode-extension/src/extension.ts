@@ -5,6 +5,7 @@ import { registerMigraPilotParticipant } from './chat/migrapilotParticipant.js';
 import { runExplainSelection } from './commands/explainSelection.js';
 import { runFixDiagnostics } from './commands/fixDiagnostics.js';
 import { runDiagnoseFailure } from './commands/diagnoseFailure.js';
+import { recentCorrelations, type CorrelationEntry } from './interaction/correlationLog.js';
 import { type CommitGenResult, runGenerateCommitMessage, runGenerateCommitMessageCommand } from './commands/generateCommitMessage.js';
 import { syncDiagnostics, syncDiagnosticsToPilot } from './diagnostics.js';
 import { type CommandDeps } from './commands/commandRouting.js';
@@ -86,6 +87,14 @@ let agentActivationPromise: Promise<string> | undefined;
  * hacks. */
 export interface MigraPilotApi {
   router: BackendRouter;
+  /**
+   * Recent engineer-turn correlation ids, newest first.
+   *
+   * Exposed through the extension API rather than a shared module, because a caller may hold
+   * a different copy of the module — the packaged bundle inlines its own — and reading module
+   * state across that boundary silently returns an empty list.
+   */
+  interactionCorrelations(limit?: number): CorrelationEntry[];
   resolveBackend(force?: boolean): Promise<ResolvedBackend>;
   setToken(token: string): Promise<void>;
   clearToken(): Promise<void>;
@@ -504,6 +513,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<MigraP
   output('MigraPilot extension activated.');
 
   return {
+    interactionCorrelations: (limit?: number) => recentCorrelations(limit),
     router,
     resolveBackend,
     setToken: (token: string) => tokenStore.set(token),
