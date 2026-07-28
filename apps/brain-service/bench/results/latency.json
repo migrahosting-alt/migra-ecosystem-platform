@@ -1,0 +1,64 @@
+[
+  {
+    "model": "qwen2.5-coder:14b",
+    "residency": {
+      "loaded": true,
+      "totalGB": 15.75,
+      "vramGB": 10.45,
+      "gpuPct": 66
+    },
+    "cold": {
+      "ttftMs": 11815,
+      "totalMs": 16127,
+      "tokPerSec": 2.1
+    },
+    "warm": {
+      "ttftMs": 378,
+      "totalMs": 5181,
+      "tokPerSec": 6.6
+    },
+    "queued": [
+      {
+        "ttftMs": 421,
+        "totalMs": 5053,
+        "tokPerSec": 6.7
+      },
+      {
+        "ttftMs": 5222,
+        "totalMs": 9666,
+        "tokPerSec": 3.5
+      }
+    ]
+  },
+  {
+    "model": "qwen2.5-coder:7b",
+    "residency": {
+      "loaded": true,
+      "totalGB": 6.59,
+      "vramGB": 6.59,
+      "gpuPct": 100
+    },
+    "cold": {
+      "ttftMs": 5983,
+      "totalMs": 7281,
+      "tokPerSec": 9.5
+    },
+    "warm": {
+      "ttftMs": 190,
+      "totalMs": 1367,
+      "tokPerSec": 46.8
+    },
+    "queued": [
+      {
+        "ttftMs": 237,
+        "totalMs": 1373,
+        "tokPerSec": 46.6
+      },
+      {
+        "ttftMs": 1394,
+        "totalMs": 2544,
+        "tokPerSec": 25.2
+      }
+    ]
+  }
+]
