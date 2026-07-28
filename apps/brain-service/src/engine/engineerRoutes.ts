@@ -9,6 +9,8 @@ import { z } from 'zod';
 import type { BrainEnv } from '../config/env.js';
 import type { ModelRegistry, ModelDescriptor } from './modelRegistry.js';
 import { selectModel, tierFromHints } from './capabilityRouter.js';
+import { capabilityAuditFields, resolveCapability } from './capability/capabilityGrants.js';
+import { capabilityDisclosure } from '@migrapilot/protocol';
 import { selectLocalCoding, type LocalRoutingDeps } from './providers/localCodingRouter.js';
 import { retrieveContext } from '../retrieval/retrieve.js';
 import type { IndexService, Scope } from './rag/indexService.js';
@@ -80,6 +82,21 @@ const EngineerBodySchema = z.object({
    * `off` — external access is never granted to a caller that did not ask.
    */
   liveKnowledgeMode: z.enum(['off', 'official', 'web']).optional(),
+  /**
+   * What KIND of work this turn is, declared by the caller.
+   *
+   * Drives capability authority — whether the routed model has measured standing for this
+   * task class. Absent means `unclassified`, which grants nothing and is disclosed as
+   * outside the capability system; it is NOT inferred from the prompt, because a model
+   * able to widen its own authority by phrasing would make the boundary decorative.
+   */
+  taskClass: z
+    .enum([
+      'repository-diagnosis', 'typed-implementation', 'regression-repair', 'test-generation',
+      'refactoring', 'patch-planning', 'dependency-analysis', 'security-review',
+      'governance-compliance', 'tool-use-decision', 'multi-file-change', 'code-review',
+    ])
+    .optional(),
   /** Prior turns (oldest first). The unified agent serves ordinary chat too, so
    * it carries the conversation the chat path used to hold. */
   history: z
@@ -433,6 +450,22 @@ export function registerEngineerRoutes(
       }
     };
 
+    // ── Capability authority: does this model have STANDING for this work? ─────
+    // Computed from measured benchmark grants, disclosed by the host, and audited. This
+    // commit does NOT change which model was selected — `decision.model` above is
+    // untouched. Enforcement is a separate step on purpose: a routing regression and a
+    // disclosure bug arriving together could not be isolated. What lands here is
+    // observability, including the case where the routed model has no standing for the
+    // declared class.
+    const capability = resolveCapability({ taskClass: body.taskClass, model: decision.model.id });
+    auditStore.append({
+      correlationId,
+      type: 'capability.decided',
+      component: 'engineer',
+      requestId: headerId || undefined,
+      fields: capabilityAuditFields(capability),
+    });
+
     // Surface the correlation id to the client so it can be quoted in support.
     send('route', { model: decision.model.id, provider: decision.model.provider, reason: decision.reason, correlationId, policy: routing.policy, requestedPolicy: routing.requestedPolicy, effectivePolicy: routing.effectivePolicy, policyReason: routing.policyReason, fallbackRecommended: routing.fallbackRecommended });
 
@@ -533,6 +566,22 @@ export function registerEngineerRoutes(
     // before any answer text — including before a refusal. The host renders it; the model
     // never sees these labels and so cannot alter them.
     send('liveKnowledge', buildLiveKnowledgeFrame(live));
+
+    // The THIRD frame: which model acted, with what standing, and what went unverified.
+    // Separate from the other two because it answers a different question — those describe
+    // the EVIDENCE a turn used, this describes the AUTHORITY it had to use it.
+    send('capability', {
+      taskClass: capability.taskClass,
+      model: capability.model,
+      authority: capability.authority,
+      requiredTier: capability.requiredTier,
+      routedTier: capability.routedTier,
+      belowRequiredTier: capability.belowRequiredTier,
+      evidenceBacked: capability.evidenceBacked,
+      reason: capability.reason,
+      unverified: capability.unverified,
+      disclosure: capabilityDisclosure(capability),
+    });
 
     // Approved-only and not groundable ⇒ refuse BEFORE the loop starts, so no
     // working-tree tool is ever reachable for this turn.
