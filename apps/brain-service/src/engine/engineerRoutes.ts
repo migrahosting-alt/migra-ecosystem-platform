@@ -12,7 +12,7 @@ import { selectModel, tierFromHints } from './capabilityRouter.js';
 import { capabilityAuditFields, resolveCapability, tierPolicyFor } from './capability/capabilityGrants.js';
 import { ToolGate, permittedTools, toolAuthoritySummary, ToolNotPermittedError } from './capability/capabilityTools.js';
 import { resolveOperatorPrincipal } from './capability/operatorPrincipal.js';
-import { capabilityDisclosure, principalAuditFields } from '@migrapilot/protocol';
+import { GOVERNED_WORKFLOW_IDS, capabilityDisclosure, principalAuditFields } from '@migrapilot/protocol';
 import { selectLocalCoding, type LocalRoutingDeps } from './providers/localCodingRouter.js';
 import { retrieveContext } from '../retrieval/retrieve.js';
 import type { IndexService, Scope } from './rag/indexService.js';
@@ -99,6 +99,15 @@ const EngineerBodySchema = z.object({
       'governance-compliance', 'tool-use-decision', 'multi-file-change', 'code-review',
     ])
     .optional(),
+  /**
+   * Which host workflow produced `taskClass`. PROVENANCE ONLY.
+   *
+   * Audited so an operator can see WHICH action claimed a class, which is what makes
+   * host-ownership auditable rather than asserted. Authority is resolved from `taskClass`
+   * alone — deriving it from the workflow would create a second, unmeasured path to
+   * authority, and a caller that could name a workflow could then pick its own class.
+   */
+  workflow: z.enum(GOVERNED_WORKFLOW_IDS).optional(),
   /** Prior turns (oldest first). The unified agent serves ordinary chat too, so
    * it carries the conversation the chat path used to hold. */
   history: z
@@ -476,7 +485,12 @@ export function registerEngineerRoutes(
       type: 'capability.decided',
       component: 'engineer',
       requestId: headerId || undefined,
-      fields: { ...capabilityAuditFields(capability), ...principalAuditFields(principal) },
+      fields: {
+        ...capabilityAuditFields(capability),
+        ...principalAuditFields(principal),
+        // Provenance: which host action claimed this class. Never an authority input.
+        ...(body.workflow ? { workflow: body.workflow } : {}),
+      },
     });
 
     // Surface the correlation id to the client so it can be quoted in support.

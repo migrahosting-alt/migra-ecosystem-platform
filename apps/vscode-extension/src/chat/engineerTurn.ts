@@ -96,11 +96,26 @@ export async function runEngineerTurn(
         // and they are independent statements about entirely different boundaries.
         const lines = liveKnowledgeBadge(ev.data as Parameters<typeof liveKnowledgeBadge>[0]);
         if (lines.length) sink.markdown(`${lines.map((l) => `_${l}_`).join('\n')}\n\n`);
+      } else if (ev.event === 'capability') {
+        // The THIRD host-owned frame: which model acted, with what standing, and what went
+        // unverified. Separate from the other two because it answers a different question —
+        // those describe the EVIDENCE a turn used, this describes the AUTHORITY it had.
+        const lines = (ev.data as { disclosure?: string[] }).disclosure ?? [];
+        if (lines.length) sink.markdown(`${lines.map((l) => `_${l}_`).join('\n')}\n\n`);
       } else if (ev.event === 'refusal') {
-        // An approved-only turn the Brain could not ground. Rendered verbatim from
-        // the Brain's reason — the loop never started, so there is nothing else.
-        const d = ev.data as { message?: string; reason?: string };
-        sink.markdown(`\n**Insufficient approved evidence.**\n\n${d.message ?? 'The approved semantic index does not support this request.'}\n\n_No working-tree files were consulted._\n`);
+        // Refusals now come from TWO boundaries and must not wear each other's wording. A
+        // capability denial rendered as "insufficient approved evidence" would send an
+        // operator to re-approve an index that was never the problem.
+        const d = ev.data as { code?: string; message?: string; reason?: string };
+        if (d.code === 'CAPABILITY_DENIED') {
+          sink.markdown(
+            `\n**Capability authority denied.**\n\n${d.message ?? 'This model has no measured standing for this class of work.'}\n\n_No model was called for this request._\n`,
+          );
+        } else {
+          // An approved-only turn the Brain could not ground. Rendered verbatim from
+          // the Brain's reason — the loop never started, so there is nothing else.
+          sink.markdown(`\n**Insufficient approved evidence.**\n\n${d.message ?? 'The approved semantic index does not support this request.'}\n\n_No working-tree files were consulted._\n`);
+        }
       } else if (ev.event === 'route') {
         const d = ev.data as { model?: string };
         sink.progress?.(`MigraPilot → ${d.model ?? 'model'}`);

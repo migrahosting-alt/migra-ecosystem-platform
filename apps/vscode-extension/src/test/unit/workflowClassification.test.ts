@@ -87,7 +87,9 @@ test('each governed flow sends exactly its class', () => {
     ['tests.generate', 'test-generation'],
   ];
   for (const [workflow, taskClass] of expected) {
-    assert.deepEqual(taskClassPayload(workflow), { taskClass }, `${workflow} must send ${taskClass}`);
+    // The workflow travels WITH the class: the audit records which host action claimed it,
+    // which is what makes host-ownership auditable rather than merely asserted.
+    assert.deepEqual(taskClassPayload(workflow), { taskClass, workflow }, `${workflow} must send ${taskClass}`);
   }
 });
 
@@ -106,7 +108,7 @@ test('prompt text CANNOT alter the host-selected class', () => {
     // Ordinary chat: no class, whatever the text claims.
     assert.deepEqual(taskClassPayload(undefined), {}, `"${prompt}" must not grant a class in ordinary chat`);
     // A workflow that IS invoked keeps its own class regardless of the wording.
-    assert.deepEqual(taskClassPayload('diagnose.failure'), { taskClass: 'repository-diagnosis' });
+    assert.deepEqual(taskClassPayload('diagnose.failure'), { taskClass: 'repository-diagnosis', workflow: 'diagnose.failure' });
   }
 });
 
@@ -147,9 +149,9 @@ test('the task class is per-turn state and is never made sticky', () => {
 
 test('a governed turn does not leak its class into the following turn', () => {
   // Pure function, no state: the same call after a governed one returns nothing.
-  assert.deepEqual(taskClassPayload('review.security'), { taskClass: 'security-review' });
+  assert.deepEqual(taskClassPayload('review.security'), { taskClass: 'security-review', workflow: 'review.security' });
   assert.deepEqual(taskClassPayload(undefined), {}, 'the next ordinary turn is ungoverned again');
-  assert.deepEqual(taskClassPayload('review.security'), { taskClass: 'security-review' });
+  assert.deepEqual(taskClassPayload('review.security'), { taskClass: 'security-review', workflow: 'review.security' });
 });
 
 // ── transport fidelity ───────────────────────────────────────────────────────
