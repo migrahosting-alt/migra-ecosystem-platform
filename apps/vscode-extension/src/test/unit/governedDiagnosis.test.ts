@@ -132,6 +132,17 @@ test('cancellation reaches the in-flight turn', () => {
   assert.match(command, /controller\.signal/);
 });
 
+test('informational notices are fire-and-forget, so the command cannot hang on a toast', () => {
+  // Awaiting `showInformationMessage` leaves the command pending until the notification is
+  // dismissed. An operator who ignores the toast has a command that never finishes, and an
+  // automated run blocks until timeout — which is exactly how this was found, in the
+  // packaged VSIX run and not in any unit test.
+  const command = source('commands/diagnoseFailure.ts');
+  assert.ok(!/await vscode\.window\.show(Information|Warning)Message/.test(command),
+    'an early-return notice must not be awaited');
+  assert.equal([...command.matchAll(/void vscode\.window\.show(Information|Warning)Message/g)].length, 3);
+});
+
 // ── the third frame is rendered ──────────────────────────────────────────────
 
 test('the capability frame is rendered by the host, alongside the other two', () => {

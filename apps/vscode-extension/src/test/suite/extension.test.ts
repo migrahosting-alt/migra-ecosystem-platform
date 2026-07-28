@@ -1727,6 +1727,147 @@ suite('MigraPilot extension — end to end', () => {
     });
   });
 
+  suite('Diagnose Failure (command path)', () => {
+    /**
+     * The COMMAND PATH, driven through the real VS Code command registry.
+     *
+     * Everything before this proved the Brain half by calling the API directly, which
+     * cannot see the part that actually broke last time: a frame the Brain emitted and the
+     * extension never rendered. Registration, activation, evidence collection, transport,
+     * document creation and rendering only happen when the command itself runs.
+     *
+     * Diagnostics are injected through `createDiagnosticCollection` rather than waiting for
+     * the TypeScript server, because this harness launches with `--disable-extensions`.
+     * That is not a shortcut: `getDiagnostics()` is exactly what the command reads, so the
+     * real code path is exercised — and deterministically, instead of racing a language
+     * server that may never start.
+     */
+    const SCRATCH = 'scratch-diagnosis.ts';
+    const BAD_LINE = 'const x: number = "a";';
+    let collection: vscode.DiagnosticCollection | undefined;
+
+    teardown(() => {
+      collection?.dispose();
+      collection = undefined;
+    });
+
+    /** Untitled markdown documents currently open, so a NEW one can be told from a leftover. */
+    function untitledMarkdown(): Set<string> {
+      return new Set(
+        vscode.workspace.textDocuments.filter((d) => d.isUntitled && d.languageId === 'markdown').map((d) => d.uri.toString()),
+      );
+    }
+
+    /**
+     * Poll until the streamed diagnosis document stops growing.
+     *
+     * Scoped to documents that did NOT exist before the command ran — earlier tests in this
+     * suite leave their own untitled markdown behind, and matching the first one found made
+     * this assert against Explain Selection's output.
+     */
+    async function settledDiagnosisDocument(before: Set<string>, timeoutMs = 60_000): Promise<vscode.TextDocument> {
+      const started = Date.now();
+      let last = '';
+      let stableFor = 0;
+      for (;;) {
+        const doc = vscode.workspace.textDocuments.find(
+          (d) => d.isUntitled && d.languageId === 'markdown' && !before.has(d.uri.toString()),
+        );
+        const text = doc?.getText() ?? '';
+        if (doc && text.length > 0) {
+          stableFor = text === last ? stableFor + 250 : 0;
+          if (stableFor >= 1_000) return doc;
+        }
+        last = text;
+        if (Date.now() - started > timeoutMs) {
+          throw new Error(`diagnosis document never settled; last content: ${JSON.stringify(last.slice(0, 300))}`);
+        }
+        await new Promise((r) => setTimeout(r, 250));
+      }
+    }
+
+    test('the registered command runs the full chain and renders the capability frame', async () => {
+      const root = vscode.workspace.workspaceFolders![0]!.uri.fsPath;
+      const file = vscode.Uri.file(path.join(root, SCRATCH));
+      fs.writeFileSync(file.fsPath, `${BAD_LINE}\n`);
+
+      const editor = await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(file));
+      assert.equal(editor.document.getText().trim(), BAD_LINE);
+
+      // A real diagnostic, visible to `vscode.languages.getDiagnostics` — the same call the
+      // command makes.
+      collection = vscode.languages.createDiagnosticCollection('migrapilot-e2e');
+      collection.set(file, [
+        new vscode.Diagnostic(
+          new vscode.Range(0, 6, 0, 7),
+          "Type 'string' is not assignable to type 'number'.",
+          vscode.DiagnosticSeverity.Error,
+        ),
+      ]);
+      assert.equal(vscode.languages.getDiagnostics(file).length, 1, 'the command must have a diagnostic to read');
+
+      // The command is REGISTERED and reachable exactly as the Command Palette reaches it.
+      const commands = await vscode.commands.getCommands(true);
+      assert.ok(commands.includes('migrapilot.diagnoseFailure'), 'the palette would not find the command');
+
+      const before = execFileSync('git', ['status', '--porcelain'], { cwd: root, encoding: 'utf8' });
+
+      // INVOKE IT. Not the handler, not the API — the command.
+      const openBefore = untitledMarkdown();
+      await vscode.commands.executeCommand('migrapilot.diagnoseFailure');
+      const doc = await settledDiagnosisDocument(openBefore);
+      const text = doc.getText();
+
+      // ── the document opened, in the editor, as markdown ──────────────────
+      assert.equal(doc.languageId, 'markdown');
+      assert.ok(doc.isUntitled, 'the diagnosis renders into a scratch document, never a repo file');
+
+      // ── the three host-owned frames, in order, before anything else ──────
+      const source = text.indexOf('Source mode:');
+      const live = text.indexOf('Live knowledge:');
+      const capability = text.indexOf('Capability:');
+      assert.ok(source >= 0, `missing repository frame; got: ${text.slice(0, 400)}`);
+      assert.ok(live >= 0, `missing live-knowledge frame; got: ${text.slice(0, 400)}`);
+      assert.ok(capability >= 0, `missing CAPABILITY frame — the exact defect this suite exists to catch; got: ${text.slice(0, 400)}`);
+      assert.ok(source < live && live < capability, 'evidence frames precede authority');
+
+      // ── the declared class reached the Brain and came back ───────────────
+      assert.match(text, /Capability: .* for repository-diagnosis/);
+      // Printed so the rendered artifact is visible in the run log, not merely asserted.
+      console.log('\n      ── diagnosis document (command path) ──');
+      for (const line of text.split('\n').slice(0, 10)) console.log(`      | ${line}`);
+
+      // ── no repository mutation ───────────────────────────────────────────
+      const after = execFileSync('git', ['status', '--porcelain'], { cwd: root, encoding: 'utf8' });
+      const added = after.split('\n').filter((l) => l.trim() && !before.includes(l.trim()));
+      assert.deepEqual(
+        added.filter((l) => !l.includes(SCRATCH)),
+        [],
+        `the command mutated repository files: ${added.join(' | ')}`,
+      );
+
+      fs.rmSync(file.fsPath, { force: true });
+    });
+
+    test('the command refuses cleanly when there is nothing to diagnose', async () => {
+      // The failure path, which a happy-path-only test would leave unproven: no diagnostic
+      // means no turn, no document, and no request to the Brain.
+      const root = vscode.workspace.workspaceFolders![0]!.uri.fsPath;
+      const clean = vscode.Uri.file(path.join(root, 'clean-file.ts'));
+      fs.writeFileSync(clean.fsPath, 'export const ok = 1;\n');
+      await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(clean));
+      assert.equal(vscode.languages.getDiagnostics(clean).length, 0);
+
+      const untitledBefore = vscode.workspace.textDocuments.filter((d) => d.isUntitled && d.languageId === 'markdown').length;
+      await vscode.commands.executeCommand('migrapilot.diagnoseFailure');
+      await new Promise((r) => setTimeout(r, 1_500));
+      const untitledAfter = vscode.workspace.textDocuments.filter((d) => d.isUntitled && d.languageId === 'markdown').length;
+
+      assert.equal(untitledAfter, untitledBefore, 'no diagnosis document may open when there is nothing to diagnose');
+      fs.rmSync(clean.fsPath, { force: true });
+    });
+  });
+
   suite('Live knowledge (installed path)', () => {
     const liveClient = () =>
       new MigraAiClient({
