@@ -144,6 +144,8 @@ export interface InteractionTrace {
   control: ControlIdentity;
   locator: ControlLocator;
   budget: TraceBudget;
+  /** Context this interaction requires. Unmet ⇒ `not-applicable`, with nothing invoked. */
+  preconditions?: TracePrecondition[];
   /** Effects that MAY occur. Anything here is permitted, not required. */
   expected: EffectKind[];
   /** Effects that must NOT occur. One observation fails the trace. */
@@ -163,8 +165,31 @@ export type InteractionOutcome =
   | 'hung'
   /** Declared but not present in the host: registration regression. */
   | 'undiscovered'
-  /** Preconditions for safe execution could not be proven. */
+  /**
+   * The control EXISTS, but the interaction context it needs is absent — no selection, no
+   * active editor, no open workspace.
+   *
+   * Deliberately distinct from `undiscovered` and `failed`. A control that correctly
+   * declines an inapplicable context is behaving properly; calling that a failure would
+   * train readers to ignore failures, and calling it undiscovered would misreport a
+   * registration state that is fine.
+   */
+  | 'not-applicable'
+  /** Preconditions for SAFE execution could not be proven (isolation, authorization). */
   | 'refused';
+
+/**
+ * A condition the interaction context must satisfy before invoking.
+ *
+ * Evaluated after the locator resolves and BEFORE invocation, so an inapplicable context
+ * never reaches the handler — which is what keeps `not-applicable` distinguishable from a
+ * control that ran and did nothing.
+ */
+export interface TracePrecondition {
+  id: string;
+  describe: string;
+  satisfied(): boolean | Promise<boolean>;
+}
 
 export interface EvidenceReport {
   trace: string;
@@ -174,6 +199,8 @@ export interface EvidenceReport {
   control: ControlIdentity & { key: string };
   locator: ControlLocator & { resolved: boolean; downgradedFrom?: LocatorConfidence; downgradeReason?: string };
   registration: { commandFound: boolean; totalCommands: number };
+  /** Which preconditions were evaluated, and which of them were not met. */
+  preconditions: { evaluated: string[]; unmet: string[] };
   timing: { elapsedMs: number; classification: TimingClassification; budget: TraceBudget; waitingOn?: string };
   effects: {
     observed: ObservedEffect[];

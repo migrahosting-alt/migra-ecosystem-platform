@@ -14,11 +14,25 @@
         "commandId": "migrapilot.diagnoseFailure",
         "confidence": "exact"
       }
+    },
+    {
+      "file": "src/commands/explainSelection.control.ts",
+      "applicationId": "migrapilot-vscode",
+      "surfaceId": "editor.selection.context",
+      "controlId": "explain-selection",
+      "controlVersion": 1,
+      "instanceScope": "document",
+      "consequence": "read-only",
+      "locator": {
+        "adapter": "vscode-command",
+        "commandId": "migrapilot.explainSelection",
+        "confidence": "exact"
+      }
     }
   ],
   "coverage": {
     "contributedCommands": 28,
-    "declaredControls": 1,
+    "declaredControls": 2,
     "knownGaps": [
       "migrapilot.aiUsage",
       "migrapilot.clearProviderKey",
@@ -27,7 +41,6 @@
       "migrapilot.dev.openClassicChat",
       "migrapilot.dev.openClassicWorkspace",
       "migrapilot.executionPolicy",
-      "migrapilot.explainSelection",
       "migrapilot.fixDiagnostics",
       "migrapilot.generateCommit",
       "migrapilot.generateTests",
