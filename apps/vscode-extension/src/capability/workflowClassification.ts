@@ -22,7 +22,7 @@
  * behind for the next ordinary question.
  */
 
-import type { TaskClass } from '@migrapilot/protocol';
+import type { GovernedWorkflowId, TaskClass } from '@migrapilot/protocol';
 
 /**
  * Host workflows that carry a capability class.
@@ -50,7 +50,7 @@ export const GOVERNED_WORKFLOWS = {
   'governance.approve': 'governance-compliance',
   /** Generate tests for existing code. */
   'tests.generate': 'test-generation',
-} as const satisfies Record<string, TaskClass>;
+} as const satisfies Record<GovernedWorkflowId, TaskClass>;
 
 export type GovernedWorkflow = keyof typeof GOVERNED_WORKFLOWS;
 
@@ -76,9 +76,14 @@ export function taskClassForWorkflow(workflow: unknown): TaskClass | undefined {
  * Omitted entirely for ordinary chat, so the payload for every existing caller stays
  * byte-identical and absence keeps meaning `ungoverned` rather than becoming a new default.
  */
-export function taskClassPayload(workflow: unknown): { taskClass: TaskClass } | Record<string, never> {
+export function taskClassPayload(
+  workflow: unknown,
+): { taskClass: TaskClass; workflow: GovernedWorkflowId } | Record<string, never> {
   const taskClass = taskClassForWorkflow(workflow);
-  return taskClass ? { taskClass } : {};
+  // The workflow travels WITH the class so the audit can show which host action claimed it.
+  // Sent together or not at all: a class without its provenance is the weaker record, and a
+  // workflow without a class would imply authority nothing granted.
+  return taskClass && isGovernedWorkflow(workflow) ? { taskClass, workflow } : {};
 }
 
 /**

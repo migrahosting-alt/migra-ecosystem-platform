@@ -60,6 +60,34 @@ export function parseTaskClass(value: unknown): TaskClass {
 }
 
 /**
+ * Host workflow ids that may carry a task class.
+ *
+ * Shared so the Brain can VALIDATE and AUDIT which host action produced a class, without a
+ * second copy of the mapping. The mapping itself stays in the extension, because the host
+ * is what knows which action it invoked.
+ *
+ * Provenance only. The Brain resolves authority from `taskClass` alone — deriving it from
+ * the workflow instead would create a second, unmeasured path to authority.
+ */
+export const GOVERNED_WORKFLOW_IDS = [
+  'build.apply',
+  'diagnose.failure',
+  'changeset.propose',
+  'review.diff',
+  'review.security',
+  'dependency.analyze',
+  'change.multifile',
+  'governance.approve',
+  'tests.generate',
+] as const;
+
+export type GovernedWorkflowId = (typeof GOVERNED_WORKFLOW_IDS)[number];
+
+export function isGovernedWorkflowId(value: unknown): value is GovernedWorkflowId {
+  return typeof value === 'string' && (GOVERNED_WORKFLOW_IDS as readonly string[]).includes(value);
+}
+
+/**
  * Execution tiers, ordered by escalating capability and cost.
  *
  * The tier is chosen from task RISK and complexity, not from what happens to be

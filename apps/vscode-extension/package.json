@@ -22,6 +22,7 @@
     "onCommand:migrapilot.aiUsage",
     "onCommand:migrapilot.explainSelection",
     "onCommand:migrapilot.fixDiagnostics",
+    "onCommand:migrapilot.diagnoseFailure",
     "onCommand:migrapilot.generateTests",
     "onCommand:migrapilot.generateCommit",
     "onCommand:migrapilot.pairAgentMode",
@@ -150,6 +151,10 @@
       {
         "command": "migrapilot.fixDiagnostics",
         "title": "MigraPilot: Fix Diagnostics"
+      },
+      {
+        "command": "migrapilot.diagnoseFailure",
+        "title": "MigraPilot: Diagnose Failure"
       },
       {
         "command": "migrapilot.generateTests",

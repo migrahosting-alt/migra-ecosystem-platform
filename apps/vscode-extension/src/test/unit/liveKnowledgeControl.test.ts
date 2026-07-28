@@ -228,12 +228,18 @@ test('the rendered webview document carries every label, value and marker', () =
 });
 
 test('the built bundle carries the labels and mode values when one exists', () => {
-  // Present after `npm run package`. Absent in a bare unit run, and the rendered-document
-  // assertion above already covers that case — so this checks the artifact when there is
-  // one rather than pretending a missing file is a pass.
+  // `dist/extension.js` is written by BOTH `tsc -b` and `scripts/bundle.mjs`, to the same
+  // path. Whichever ran last wins, so the file's identity has to be established before
+  // asserting on it — otherwise this fails whenever a plain `tsc` follows a bundle, which
+  // says nothing about the bundle and everything about build order.
+  //
+  // The esbuild output inlines every module; the tsc output keeps relative `require(...)`
+  // calls. That is the discriminator.
   const bundle = join(__dirname, '..', '..', '..', 'dist', 'extension.js');
   if (!existsSync(bundle)) return;
   const built = readFileSync(bundle, 'utf8');
+  const isBundle = !/require\(["']\.\.?\//.test(built);
+  if (!isBundle) return; // tsc output, not the bundle — the VSIX suite covers the artifact
 
   for (const option of LIVE_MODE_OPTIONS) {
     assert.ok(built.includes(option.label), `"${option.label}" survives bundling`);

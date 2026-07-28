@@ -4,6 +4,7 @@ import type { DiagnosticsGetResponse } from '@migrapilot/protocol';
 import { registerMigraPilotParticipant } from './chat/migrapilotParticipant.js';
 import { runExplainSelection } from './commands/explainSelection.js';
 import { runFixDiagnostics } from './commands/fixDiagnostics.js';
+import { runDiagnoseFailure } from './commands/diagnoseFailure.js';
 import { type CommitGenResult, runGenerateCommitMessage, runGenerateCommitMessageCommand } from './commands/generateCommitMessage.js';
 import { syncDiagnostics, syncDiagnosticsToPilot } from './diagnostics.js';
 import { type CommandDeps } from './commands/commandRouting.js';
@@ -471,6 +472,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<MigraP
     vscode.commands.registerCommand('migrapilot.aiUsage', showAiUsage),
     vscode.commands.registerCommand('migrapilot.explainSelection', () => runExplainSelection(commandDeps)),
     vscode.commands.registerCommand('migrapilot.fixDiagnostics', () => runFixDiagnostics(commandDeps)),
+    // The first GOVERNED surface: an explicit user action that declares its capability
+    // class. Read-only by construction — it explains a failure and cannot apply anything.
+    vscode.commands.registerCommand('migrapilot.diagnoseFailure', () => runDiagnoseFailure(commandDeps)),
     vscode.commands.registerCommand('migrapilot.generateTests', () => runGenerateTestsCommand(testGenDeps)),
     vscode.commands.registerCommand('migrapilot.generateCommit', () => runGenerateCommitMessageCommand(testGenDeps)),
     vscode.commands.registerCommand('migrapilot.setToken', setToken),

@@ -10,7 +10,7 @@
 // falls back to the legacy `/chat` endpoint — an engine failure surfaces as a
 // correlated PilotError so the caller can show a clear message.
 
-import type { GroundingMode, LiveKnowledgeMode, TaskClass } from '@migrapilot/protocol';
+import type { GovernedWorkflowId, GroundingMode, LiveKnowledgeMode, TaskClass } from '@migrapilot/protocol';
 import { REQUEST_ID_HEADER, newRequestId } from '@migrapilot/pilot-client';
 import { PilotError, type PilotErrorCode } from '@migrapilot/pilot-client';
 import { randomUUID } from 'node:crypto';
@@ -210,6 +210,8 @@ export interface EngineerRequest {
    * inspection permitted, everything consequential withheld.
    */
   taskClass?: TaskClass;
+  /** Which host workflow produced {@link taskClass}. Provenance for the audit only. */
+  workflow?: GovernedWorkflowId;
   /**
    * @deprecated Superseded by {@link groundingMode}, which wins when both are sent.
    * Retained so older callers keep working: `true` maps to `approved`.

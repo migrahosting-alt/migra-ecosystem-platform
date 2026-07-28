@@ -1879,6 +1879,87 @@ suite('MigraPilot extension — end to end', () => {
       assert.ok(!/CAPABILITY_DENIED/.test(text), `wording must not promote the turn; got: ${text.slice(0, 300)}`);
     });
 
+    test('the governed diagnosis workflow is advisory: read tools kept, mutation withheld', async () => {
+      // The first governed surface, proven end to end against the real Brain. `advisory`
+      // is the interesting case: the turn RUNS, keeps its read tools, and loses mutation —
+      // a denied class would prove refusal without proving the read path survives.
+      const rendered: string[] = [];
+      await runEngineerTurn(
+        liveClient(),
+        {
+          rootPath: vscode.workspace.workspaceFolders![0]!.uri.fsPath,
+          task: 'Diagnose this failure. Identify the root cause and propose a minimal fix.',
+          taskClass: 'repository-diagnosis',
+          workflow: 'diagnose.failure',
+        },
+        { markdown: (t) => rendered.push(t), progress: () => {} },
+      );
+      const text = rendered.join('');
+
+      // The capability frame is HOST-rendered and names the declared class for this turn.
+      assert.match(text, /Capability: .* for repository-diagnosis/, `missing capability frame; got: ${text.slice(0, 400)}`);
+
+      // This harness routes to a STUB model, which holds no measured grant — so the honest
+      // outcome here is the fail-closed one, and the frame says which tier the class needs.
+      // Asserting `advisory` would require faking a model identity, which would test the
+      // fake rather than the boundary. The advisory path is proven against a real Brain
+      // running the measured 14B, where the grant actually exists.
+      assert.match(text, /denied for repository-diagnosis/, 'an unmeasured model must fail closed');
+      assert.match(text, /this class requires deep-local/, 'the frame names the required tier');
+      assert.match(text, /ran below the tier its task class requires/);
+    });
+
+    test('all three governance frames precede the answer for a governed turn', async () => {
+      const rendered: string[] = [];
+      await runEngineerTurn(
+        liveClient(),
+        {
+          rootPath: vscode.workspace.workspaceFolders![0]!.uri.fsPath,
+          task: 'Diagnose this failure.',
+          taskClass: 'repository-diagnosis',
+          workflow: 'diagnose.failure',
+          groundingMode: 'none',
+          liveKnowledgeMode: 'off',
+        },
+        { markdown: (t) => rendered.push(t), progress: () => {} },
+      );
+      const text = rendered.join('');
+      const source = text.indexOf('Source mode:');
+      const live = text.indexOf('Live knowledge:');
+      const capability = text.indexOf('Capability:');
+      assert.ok(source >= 0 && live >= 0 && capability >= 0, `a frame is missing; got: ${text.slice(0, 400)}`);
+      // Evidence frames first, then authority, then the answer. Three axes, three frames.
+      assert.ok(source < live, 'repository frame precedes live knowledge');
+      assert.ok(live < capability, 'live knowledge precedes capability');
+    });
+
+    test('a governed turn leaves no sticky class on the next ordinary turn', async () => {
+      const client = liveClient();
+      const root = vscode.workspace.workspaceFolders![0]!.uri.fsPath;
+
+      const governed: string[] = [];
+      await runEngineerTurn(
+        client,
+        { rootPath: root, task: 'Diagnose this failure.', taskClass: 'repository-diagnosis', workflow: 'diagnose.failure' },
+        { markdown: (t) => governed.push(t), progress: () => {} },
+      );
+      // Whatever authority the routed model earns, the DECLARED class must appear — that is
+      // what the next assertion proves does not persist.
+      assert.match(governed.join(''), /for repository-diagnosis/);
+
+      // The very next turn declares nothing and must fall back to ungoverned — a class that
+      // survived would let one workflow lend its authority to the next question.
+      const ordinary: string[] = [];
+      await runEngineerTurn(
+        client,
+        { rootPath: root, task: 'What does this workspace contain?' },
+        { markdown: (t) => ordinary.push(t), progress: () => {} },
+      );
+      const text = ordinary.join('');
+      assert.match(text, /ungoverned for unclassified/, `class leaked into the next turn; got: ${text.slice(0, 300)}`);
+      assert.ok(!/repository-diagnosis/.test(text), 'the previous class must not appear');
+    });
+
     test('an omitted live mode behaves exactly like off', async () => {
       // Every request written before this field existed omits it, so absence must mean
       // off rather than defaulting to a lookup.
