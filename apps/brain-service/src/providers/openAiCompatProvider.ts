@@ -32,7 +32,7 @@ export interface OpenAiCompatOptions {
 /** Which deadline expired. Distinct from a user abort and from a provider error
  * so operators can tell "model too slow to start" from "model went silent" from
  * "someone pressed Stop". */
-export type TimeoutPhase = 'connect' | 'idle' | 'absolute';
+export type TimeoutPhase = 'connect' | 'idle' | 'absolute' | 'response';
 
 export class ProviderTimeoutError extends Error {
   override readonly name = 'ProviderTimeoutError';
@@ -44,10 +44,14 @@ export class ProviderTimeoutError extends Error {
   ) {
     super(
       phase === 'connect'
-        ? `Model provider ${baseUrl} did not respond within ${limitMs}ms (connect timeout).`
+        ? `Model provider ${baseUrl} did not accept the connection within ${limitMs}ms (connect timeout).`
         : phase === 'idle'
           ? `Model provider ${baseUrl} sent no output for ${limitMs}ms (idle timeout) after ${elapsedMs}ms.`
-          : `Model provider ${baseUrl} exceeded the ${limitMs}ms absolute ceiling.`,
+          : phase === 'response'
+            ? // The connection SUCCEEDED. Saying "connect timeout" here sent operators to
+              // check networking that answers in under a millisecond.
+              `Model provider ${baseUrl} accepted the request but returned no complete response within ${limitMs}ms (non-streaming request; the model was still generating after ${elapsedMs}ms).`
+            : `Model provider ${baseUrl} exceeded the ${limitMs}ms absolute ceiling.`,
     );
   }
 }
@@ -167,7 +171,15 @@ export class OpenAiCompatProvider implements ProviderAdapter {
     const started = Date.now();
     const { model, messages } = this.prepare(request);
     // Non-streaming: there are no tokens to prove liveness, so the only sensible
-    // bound is the connect deadline (or the absolute ceiling when one is set).
+    // bound is a single deadline covering the whole request.
+    //
+    // Measured against Ollama: on `stream: false` the response HEADERS are withheld
+    // until generation completes (TTFB 11.57s == total 11.57s for a 200-token reply,
+    // versus TTFB 0.32s when streaming). So this budget necessarily spans connect +
+    // prefill + the entire generation, and `fetch` cannot observe the phases apart.
+    // It is therefore reported as `response`, NOT `connect` — TCP connect to this
+    // provider completes in ~0.6ms, so blaming connect pointed operators at healthy
+    // networking while a 14B model spilling 34% to CPU was the actual cost.
     const budget = this.timeouts.absoluteMs > 0 ? Math.max(this.timeouts.connectMs, this.timeouts.absoluteMs) : this.timeouts.connectMs;
     let response: Response;
     try {
@@ -184,8 +196,9 @@ export class OpenAiCompatProvider implements ProviderAdapter {
         budget,
       );
     } catch (err) {
-      // A bare AbortError says nothing about WHY. Name the deadline.
-      if (isAbort(err)) throw new ProviderTimeoutError('connect', budget, Date.now() - started, this.baseUrl);
+      // A bare AbortError says nothing about WHY. Name the deadline HONESTLY: the
+      // connection was accepted, the response never completed.
+      if (isAbort(err)) throw new ProviderTimeoutError('response', budget, Date.now() - started, this.baseUrl);
       throw err;
     }
 
@@ -421,9 +434,16 @@ export class OpenAiCompatProvider implements ProviderAdapter {
 /** A named failure class for the SSE frame and the audit record. */
 export interface ProviderFailure {
   /** Stable machine code for the client. */
-  code: 'PROVIDER_CONNECT_TIMEOUT' | 'PROVIDER_IDLE_TIMEOUT' | 'PROVIDER_ABSOLUTE_TIMEOUT' | 'USER_ABORTED' | 'ENGINE_FAILURE';
+  code:
+    | 'PROVIDER_CONNECT_TIMEOUT'
+    | 'PROVIDER_IDLE_TIMEOUT'
+    | 'PROVIDER_ABSOLUTE_TIMEOUT'
+    /** Non-streaming request accepted, generation never completed. NOT a connect failure. */
+    | 'PROVIDER_RESPONSE_TIMEOUT'
+    | 'USER_ABORTED'
+    | 'ENGINE_FAILURE';
   /** Short cause slug for audit `outcome`/fields. */
-  cause: 'connect-timeout' | 'idle-timeout' | 'absolute-timeout' | 'user-abort' | 'provider-error';
+  cause: 'connect-timeout' | 'idle-timeout' | 'absolute-timeout' | 'response-timeout' | 'user-abort' | 'provider-error';
   /** The deadline that expired, when one did. */
   limitMs?: number;
 }
@@ -442,6 +462,8 @@ export function classifyProviderFailure(err: unknown): ProviderFailure {
       connect: { code: 'PROVIDER_CONNECT_TIMEOUT', cause: 'connect-timeout' },
       idle: { code: 'PROVIDER_IDLE_TIMEOUT', cause: 'idle-timeout' },
       absolute: { code: 'PROVIDER_ABSOLUTE_TIMEOUT', cause: 'absolute-timeout' },
+      // Distinct from connect: the provider answered, the generation did not finish.
+      response: { code: 'PROVIDER_RESPONSE_TIMEOUT', cause: 'response-timeout' },
     } as const;
     return { ...byPhase[err.phase], limitMs: err.limitMs };
   }
