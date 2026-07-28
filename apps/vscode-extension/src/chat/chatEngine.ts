@@ -15,6 +15,7 @@ import { buildWorkReport } from './workReport.js';
 import { runInspectionTurn, renderRoutingError } from './inspectionTurn.js';
 import { runEngineerTurn } from './engineerTurn.js';
 import { groundingModeOf, liveModeOf, requiresApprovedEvidence } from '../panel/shell/composerModel.js';
+import { taskClassPayload, type GovernedWorkflow } from '../capability/workflowClassification.js';
 import { previewAndMaybeApplyChangeset, type ChangesetProposal, type ChangesetOp } from '../services/proposedChangeset.js';
 import { getEscalationDispatch } from '../services/escalationConsent.js';
 import { attributionView, type RoutingView } from '../panel/providerRouterViewModel.js';
@@ -92,6 +93,14 @@ export interface ChatTurnOptions {
    * network by phrasing would make the boundary decorative.
    */
   liveMode?: string;
+  /**
+   * The host workflow that invoked this turn, which determines its capability class.
+   *
+   * NOT derived from the prompt. `classifyIntent()` reads text to pick a chat route and is
+   * deliberately never consulted here — a turn that could talk itself into a stronger class
+   * would make the authority boundary decorative.
+   */
+  workflow?: GovernedWorkflow;
   /** Live checkout branch, for branch-divergence disclosure. Omitted when unknown. */
   currentBranch?: string;
   memoryPolicy?: { mode?: 'off' | 'session' | 'durable'; retrieve?: boolean; store?: boolean };
@@ -303,6 +312,9 @@ export async function runChatTurn(
         ...(options.sourceMode && groundingModeOf(options.sourceMode) !== 'auto'
           ? { groundingMode: groundingModeOf(options.sourceMode) }
           : {}),
+        // Capability class from the HOST WORKFLOW. Omitted for ordinary chat, so an
+        // existing payload is byte-identical and absence still means `ungoverned`.
+        ...taskClassPayload(options.workflow),
         // The second dimension, sent as its own field. `off` is OMITTED so the wire
         // shape for every existing caller stays byte-identical — and because a Brain
         // that predates the field resolves absence to `off` anyway, which is the same
