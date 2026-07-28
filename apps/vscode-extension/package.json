@@ -50,21 +50,21 @@
         {
           "type": "webview",
           "id": "migrapilot.workspace",
-          "name": "MigraAI Workspace (Classic — Developer Only)",
+          "name": "MigraAI Workspace (Classic \u2014 Developer Only)",
           "icon": "resources/migrapilot-icon.svg",
           "when": "config.migrapilot.enableClassicViews"
         },
         {
           "type": "webview",
           "id": "migrapilot.chatView",
-          "name": "Chat (Classic — Developer Only)",
+          "name": "Chat (Classic \u2014 Developer Only)",
           "icon": "resources/migrapilot-icon.svg",
           "when": "config.migrapilot.enableClassicViews"
         },
         {
           "type": "webview",
           "id": "migrapilot.agentMode",
-          "name": "Agent Mode (Classic — Developer Only)",
+          "name": "Agent Mode (Classic \u2014 Developer Only)",
           "icon": "resources/migrapilot-icon.svg",
           "when": "config.migrapilot.enableClassicViews"
         }
@@ -130,7 +130,7 @@
       },
       {
         "command": "migrapilot.productionDiagnostics",
-        "title": "MigraPilot: Production Diagnostics — Read Only"
+        "title": "MigraPilot: Production Diagnostics \u2014 Read Only"
       },
       {
         "command": "migrapilot.executionPolicy",
@@ -214,7 +214,7 @@
             "durable"
           ],
           "default": "session",
-          "markdownDescription": "Server-side conversation memory. `off` = stateless turns, nothing retained. `session` = the engine remembers the conversation while it runs (default). `durable` = the engine persists the conversation. History lives in the MigraAI Engine, scoped to this workspace — the extension only carries a conversation id."
+          "markdownDescription": "Server-side conversation memory. `off` = stateless turns, nothing retained. `session` = the engine remembers the conversation while it runs (default). `durable` = the engine persists the conversation. History lives in the MigraAI Engine, scoped to this workspace \u2014 the extension only carries a conversation id."
         },
         "migrapilot.autoStartBrain": {
           "type": "boolean",
@@ -224,7 +224,7 @@
         "migrapilot.autoApplyChangeset": {
           "type": "boolean",
           "default": false,
-          "markdownDescription": "Auto-approve build changes. When ON, a changeset the workspace engineer proposes is applied to your workspace immediately, with no Apply/Review prompt (an auto-accept / 'YOLO' mode, like Cursor's). When OFF (default), you review and click Apply first. Changes are still applied through the engine's approval boundary (atomic, rollback-on-failure) and a notification reports what was written. Only affects the LOCAL workspace engineer — never production."
+          "markdownDescription": "Auto-approve build changes. When ON, a changeset the workspace engineer proposes is applied to your workspace immediately, with no Apply/Review prompt (an auto-accept / 'YOLO' mode, like Cursor's). When OFF (default), you review and click Apply first. Changes are still applied through the engine's approval boundary (atomic, rollback-on-failure) and a notification reports what was written. Only affects the LOCAL workspace engineer \u2014 never production."
         },
         "migrapilot.enableWorkspaceAgent": {
           "type": "boolean",
@@ -237,7 +237,7 @@
             "type": "string"
           },
           "default": [],
-          "markdownDescription": "argv used to launch the local brain-service when auto-starting (e.g. `[\"node\", \"/path/to/apps/brain-service/dist/src/server.js\"]`). Empty disables spawning — the extension will still adopt an already-running brain but won't start one."
+          "markdownDescription": "argv used to launch the local brain-service when auto-starting (e.g. `[\"node\", \"/path/to/apps/brain-service/dist/src/server.js\"]`). Empty disables spawning \u2014 the extension will still adopt an already-running brain but won't start one."
         },
         "migrapilot.mode": {
           "type": "string",
@@ -250,7 +250,7 @@
             "cloud"
           ],
           "default": "local-brain",
-          "markdownDescription": "Backend mode. `local-brain` = local brain-service (default). `remote-pilot` = pilot-api (opt-in; requires a token and reachable service). `auto` = use pilot-api when ready+authorized, otherwise local. Legacy values map conservatively so remote stays opt-in: `offline`/`hybrid` → local-brain, `cloud` → remote-pilot."
+          "markdownDescription": "Backend mode. `local-brain` = local brain-service (default). `remote-pilot` = pilot-api (opt-in; requires a token and reachable service). `auto` = use pilot-api when ready+authorized, otherwise local. Legacy values map conservatively so remote stays opt-in: `offline`/`hybrid` \u2192 local-brain, `cloud` \u2192 remote-pilot."
         },
         "migrapilot.pilotApiUrl": {
           "type": "string",
@@ -283,7 +283,7 @@
             "openai-compat"
           ],
           "default": "stub",
-          "markdownDescription": "Model provider for local chat. `stub` = deterministic built-in response (default; for local/deterministic use). `openai-compat` = a real OpenAI-compatible `/chat/completions` endpoint (OpenAI, Ollama `/v1`, LM Studio, vLLM, …). There is no silent fallback: a configured real provider that fails surfaces an error."
+          "markdownDescription": "Model provider for local chat. `stub` = deterministic built-in response (default; for local/deterministic use). `openai-compat` = a real OpenAI-compatible `/chat/completions` endpoint (OpenAI, Ollama `/v1`, LM Studio, vLLM, \u2026). There is no silent fallback: a configured real provider that fails surfaces an error."
         },
         "migrapilot.providerUrl": {
           "type": "string",
@@ -349,13 +349,14 @@
     "build": "tsc -b",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "npm run build && node ./scripts/test-smoke.js",
-    "test:unit": "tsc -b && node --test dist/test/unit/*.test.js",
+    "test:unit": "tsc -b && node scripts/aggregate-controls.mjs && node --test dist/test/unit/*.test.js",
     "test:integration": "tsc -b && node ./dist/test/runTest.js",
     "test:vsix": "tsc -b && node scripts/bundle.mjs && node ./dist/test/runTestVsix.js",
     "test:ops": "tsc -b && node ./dist/test/runOps.js",
     "watch": "tsc -b -w",
-    "package": "tsc -b && node scripts/bundle.mjs && vsce package --no-dependencies --allow-missing-repository --skip-license",
-    "inspect:vsix": "node scripts/inspect-vsix.mjs migrapilot-extension-0.1.0.vsix"
+    "package": "tsc -b && node scripts/aggregate-controls.mjs && node scripts/bundle.mjs && vsce package --no-dependencies --allow-missing-repository --skip-license",
+    "inspect:vsix": "node scripts/inspect-vsix.mjs migrapilot-extension-0.1.0.vsix",
+    "controls:aggregate": "node scripts/aggregate-controls.mjs"
   },
   "dependencies": {
     "@migrapilot/protocol": "0.1.0",

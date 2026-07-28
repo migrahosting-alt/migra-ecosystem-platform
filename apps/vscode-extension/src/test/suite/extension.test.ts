@@ -7,6 +7,8 @@ import * as vscode from 'vscode';
 import type { MigraPilotApi } from '../../extension.js';
 import { approveResumeAndReconcile, reconcileRun } from '@migrapilot/pilot-client';
 import { runEngineerTurn } from '../../chat/engineerTurn.js';
+import { runCommandTrace } from '../../interaction/vscodeCommandAdapter.js';
+import { diagnoseFailureControl } from '../../commands/diagnoseFailure.control.js';
 import { shellHtml } from '../../panel/shell/shellHtml.js';
 import { CAP_FIX_DIAGNOSTICS, evaluateCapability } from '../../services/commandCapabilities.js';
 import { type ProviderChunk } from '../../providers/modelProvider.js';
@@ -1865,6 +1867,151 @@ suite('MigraPilot extension — end to end', () => {
 
       assert.equal(untitledAfter, untitledBefore, 'no diagnosis document may open when there is nothing to diagnose');
       fs.rmSync(clean.fsPath, { force: true });
+    });
+  });
+
+  suite('Interaction verification (VS Code command adapter)', () => {
+    /**
+     * The adapter producing one machine-readable evidence report for one real control.
+     *
+     * `migrapilot.diagnoseFailure` is the reference control because its command path,
+     * authority behaviour, rendering and non-mutation constraints already have acceptance
+     * evidence — so the runner can be checked against something known rather than only
+     * against its own output.
+     */
+    test('produces a complete evidence report for migrapilot.diagnoseFailure', async () => {
+      const root = vscode.workspace.workspaceFolders![0]!.uri.fsPath;
+      const file = vscode.Uri.file(path.join(root, 'iv-scratch.ts'));
+      fs.writeFileSync(file.fsPath, 'const x: number = "a";\n');
+      await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(file));
+
+      const diagnostics = vscode.languages.createDiagnosticCollection('iv-e2e');
+      diagnostics.set(file, [
+        new vscode.Diagnostic(
+          new vscode.Range(0, 6, 0, 7),
+          "Type 'string' is not assignable to type 'number'.",
+          vscode.DiagnosticSeverity.Error,
+        ),
+      ]);
+
+      const report = await runCommandTrace(
+        {
+          trace: 'diagnose-failure.read-only',
+          level: 3,
+          control: diagnoseFailureControl,
+          locator: diagnoseFailureControl.locator,
+          budget: { settleMs: 20_000, ceilingMs: 60_000 },
+          // Opening the diagnosis document IS the expected transition, not a mutation
+          // failure — the distinction the baseline design exists to make.
+          expected: ['editors.documentOpened', 'editors.activeChanged'],
+          forbidden: [
+            'repository.headChanged',
+            'repository.filesChanged',
+            'workspace.configurationChanged',
+            'editors.preexistingDirtyModified',
+          ],
+          expectAuditEvents: ['capability.decided'],
+        },
+        {
+          root,
+          hostLevel: 3,
+          // Read through the extension's exported API: the one channel that crosses the
+          // module boundary regardless of how the extension was loaded.
+          readCorrelation: (since) =>
+            (vscode.extensions.getExtension(EXTENSION_ID)?.exports as MigraPilotApi | undefined)
+              ?.interactionCorrelations(8)
+              .find((e) => e.at >= since) ?? null,
+          fetchAudit: async (correlationId) => {
+            const res = await fetch(
+              `${BRAIN_URL}/api/ai/engineer/audit?correlationId=${encodeURIComponent(correlationId)}`,
+              { headers: { 'x-owner-scope': 'local', 'x-workspace-scope': root } },
+            );
+            const body = (await res.json()) as { records?: Array<{ type: string }> };
+            return body.records ?? [];
+          },
+          // Cleanup restores the environment to BASELINE. The scratch file existed when the
+          // baseline was taken, so removing it here would itself register as a deviation —
+          // it is removed after the report instead.
+          cleanup: async () => {
+            diagnostics.dispose();
+          },
+        },
+      );
+
+      console.log(`\n      ── evidence report ──\n${JSON.stringify(
+        {
+          trace: report.trace,
+          outcome: report.outcome,
+          levelReached: report.levelReached,
+          control: report.control.key,
+          locator: { commandId: report.locator.commandId, confidence: report.locator.confidence, resolved: report.locator.resolved },
+          registration: report.registration,
+          timing: { elapsedMs: report.timing.elapsedMs, classification: report.timing.classification },
+          effects: {
+            observed: report.effects.observed.map((e) => e.kind),
+            unexpected: report.effects.unexpected.map((e) => e.kind),
+            violations: report.effects.violations.map((e) => e.kind),
+          },
+          correlation: report.correlation,
+          cleanup: report.cleanup,
+          evidenceGaps: report.evidenceGaps,
+        },
+        null,
+        2,
+      ).split('\n').map((l) => `      ${l}`).join('\n')}`);
+
+      // ── the acceptance list ────────────────────────────────────────────────
+      assert.equal(report.control.key, 'migrapilot-vscode/engineer.command-palette/diagnose-failure@v1', 'identity resolved');
+      assert.equal(report.locator.confidence, 'exact', 'exact locator');
+      assert.equal(report.locator.resolved, true, 'locator found');
+      assert.equal(report.registration.commandFound, true, 'command registered');
+      assert.ok(report.timing.elapsedMs >= 0, 'command invoked and timed');
+      assert.equal(report.timing.classification, 'completed', `expected completed, got ${report.timing.classification}`);
+      assert.ok(
+        report.effects.observed.some((e) => e.kind === 'editors.documentOpened'),
+        `expected the diagnosis document to open; observed ${report.effects.observed.map((e) => e.kind).join(', ')}`,
+      );
+      assert.deepEqual(report.effects.violations, [], 'no forbidden effect');
+      assert.deepEqual(report.effects.unexpected, [], 'no unclassified effect');
+      assert.ok(report.correlation.correlationId, 'correlation id captured');
+      assert.ok(report.correlation.auditEventTypes.includes('capability.decided'), 'audit event correlated');
+      assert.equal(report.correlation.auditMatched, true, 'required audit events present');
+      assert.equal(report.cleanup.verified, true, `cleanup left residue: ${JSON.stringify(report.cleanup.residual)}`);
+      assert.equal(report.levelReached, 3, 'level stated accurately');
+      assert.equal(report.outcome, 'verified');
+
+      // Gaps are MANDATORY and non-empty here: three dimensions genuinely cannot be
+      // captured through the VS Code API, and a report claiming otherwise would be lying.
+      assert.ok(report.evidenceGaps.length >= 3, 'evidence gaps must be listed, not omitted');
+      const gapText = report.evidenceGaps.join(' | ');
+      assert.match(gapText, /pendingNotifications/, 'the dimension that would name a toast hang is declared missing');
+      assert.match(gapText, /workspaceStateDigest/);
+
+      fs.rmSync(file.fsPath, { force: true });
+    });
+
+    test('a declared control that is not registered reports undiscovered, without invoking', async () => {
+      // The tree-shaken-selector defect, detected before anything runs.
+      const root = vscode.workspace.workspaceFolders![0]!.uri.fsPath;
+      const report = await runCommandTrace(
+        {
+          trace: 'phantom.control',
+          level: 3,
+          control: { ...diagnoseFailureControl, controlId: 'phantom-control' },
+          locator: { adapter: 'vscode-command', commandId: 'migrapilot.doesNotExist', confidence: 'exact' },
+          budget: { settleMs: 1_000, ceilingMs: 2_000 },
+          expected: ['editors.documentOpened'],
+          forbidden: ['repository.filesChanged'],
+        },
+        { root, hostLevel: 3 },
+      );
+
+      assert.equal(report.outcome, 'undiscovered');
+      assert.equal(report.registration.commandFound, false);
+      assert.equal(report.timing.elapsedMs, 0, 'nothing was invoked');
+      // It must not claim Level 3: nothing ran in the host, so nothing at that level was proven.
+      assert.ok(report.levelReached <= 2, `must not claim a level it did not reach, got ${report.levelReached}`);
+      assert.match(report.evidenceGaps.join(' | '), /declared but not registered/);
     });
   });
 
