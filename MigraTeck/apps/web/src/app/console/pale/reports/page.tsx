@@ -113,7 +113,16 @@ export default async function PaleReportsPage() {
             <tbody className="divide-y divide-white/5">
               {reports.map((r) => (
                 <tr key={r.id}>
-                  <Td className="font-mono text-slate-400">{r.id.slice(0, 8)}</Td>
+                  <Td className="font-mono">
+                    {/* The list is the only entry point to a report's detail view; without
+                        this link the detail route is reachable only by typing its URL. */}
+                    <Link
+                      href={`/console/pale/reports/${r.id}`}
+                      className="text-fuchsia-300 underline-offset-2 transition hover:text-fuchsia-200 hover:underline"
+                    >
+                      {r.id.slice(0, 8)}
+                    </Link>
+                  </Td>
                   <Td className="text-slate-200">{r.targetType}</Td>
                   <Td className="max-w-[16rem] truncate text-slate-400">{r.reason}</Td>
                   <Td className="font-mono text-slate-400">{maskPhone(r.reporterPhone)}</Td>
