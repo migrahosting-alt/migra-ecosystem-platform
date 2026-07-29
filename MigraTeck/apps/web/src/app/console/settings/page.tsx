@@ -48,7 +48,6 @@ async function editSystemConfig(formData: FormData) {
     if (value === "true") typedValue = true;
     else if (value === "false") typedValue = false;
     await panelExec(
-      // eslint-disable-next-line @typescript-eslint/quotes
       `UPDATE system_control_configs SET "${key}" = $1 WHERE id = $2`,
       [typedValue as string, id],
     );

@@ -364,7 +364,7 @@ export default async function AddAddonPage({
             Charge prorated amount for the remainder of the current period
           </label>
           <p className="text-[10px] text-slate-500">
-            Recommended. Computes the partial-period charge from the parent subscription's start date and billing cycle,
+            Recommended. Computes the partial-period charge from the parent subscription&apos;s start date and billing cycle,
             then creates a one-shot order. Uncheck if the customer should only be charged starting at the next renewal.
           </p>
         </div>

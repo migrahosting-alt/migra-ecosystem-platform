@@ -8,6 +8,21 @@ import { StatsRow } from "../components/StatsRow";
 
 export const dynamic = "force-dynamic";
 
+/**
+ * The certificate rows arrive from an endpoint whose field casing is inconsistent
+ * (`expiresAt` vs `expiresat`) and which may omit `domain` in favour of `cn`. This names the
+ * fields actually read rather than erasing the type with `any` — unknown fields stay optional,
+ * so a missing one is a `undefined` check instead of a silent property access on `any`.
+ */
+type CertLike = {
+  domain?: string;
+  cn?: string;
+  status?: string;
+  expiresAt?: string;
+  expiresat?: string;
+};
+const asCert = (c: unknown): CertLike => (c ?? {}) as CertLike;
+
 export default async function SecurityPage() {
   const session = await getSession();
   if (!session) redirect("/console/login");
@@ -102,13 +117,13 @@ export default async function SecurityPage() {
         <SectionCard title="Certificates">
           <DataTable
             columns={[
-              { key: "domain", header: "Domain", render: (c) => <span className="font-mono text-white">{(c as any).domain || (c as any).cn || c.id}</span> },
-              { key: "status", header: "Status", render: (c) => <StatusPill status={(c as any).status || "active"} /> },
+              { key: "domain", header: "Domain", render: (c) => <span className="font-mono text-white">{asCert(c).domain || asCert(c).cn || c.id}</span> },
+              { key: "status", header: "Status", render: (c) => <StatusPill status={asCert(c).status || "active"} /> },
               {
                 key: "expires",
                 header: "Expires",
                 render: (c) => {
-                  const exp = (c as any).expiresAt ?? (c as any).expiresat;
+                  const exp = asCert(c).expiresAt ?? asCert(c).expiresat;
                   if (!exp) return "—";
                   const days = Math.ceil((new Date(exp).getTime() - Date.now()) / 86_400_000);
                   const cls = days <= 14 ? "text-rose-400" : days <= 30 ? "text-amber-400" : "text-slate-400";

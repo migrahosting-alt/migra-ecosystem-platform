@@ -12,14 +12,9 @@ export const dynamic = "force-dynamic";
 export default async function DomainsPage() {
   const session = await getSession();
   if (!session) redirect("/console/login");
-  const { domains, zones, transfers } = await loadDomainsData();
+  const { domains, zones, transfers, expiringSoon } = await loadDomainsData();
 
   const active = domains.filter((d) => d.status === "active").length;
-  const expiringSoon = domains.filter((d) => {
-    if (!d.expiresAt) return false;
-    const days = (new Date(d.expiresAt).getTime() - Date.now()) / 86_400_000;
-    return days >= 0 && days <= 30;
-  }).length;
 
   return (
     <ConsolePageShell

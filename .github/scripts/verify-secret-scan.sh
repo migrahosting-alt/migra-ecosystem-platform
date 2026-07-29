@@ -13,8 +13,8 @@
 # a clean tree passes, and a planted signature is caught. A configuration that cannot detect
 # fails here rather than silently blessing every future PR.
 #
-# NO REAL CREDENTIAL MATERIAL IS USED. The planted value is AWS's own published documentation
-# example key — the canonical fake, valid in shape, never valid in use. Fixtures are created
+# NO REAL CREDENTIAL MATERIAL IS USED. The planted value is a synthetic PEM block (see below).
+# Fixtures are created
 # in a temp directory OUTSIDE the repository and deleted afterwards, so the repository's own
 # scan never sees them.
 #
