@@ -26,20 +26,6 @@ function refresh(caseId: string): void {
   revalidatePath("/console/annoupale/compliance");
 }
 
-export async function updateCaseStatusAction(
-  _prev: CaseActionState | undefined,
-  formData: FormData,
-): Promise<CaseActionState> {
-  const caseId = String(formData.get("caseId") ?? "");
-  const status = formData.get("status");
-
-  const result = await submitStatusChange(caseId, status);
-  if (result.ok) {
-    refresh(caseId);
-    return { ok: true, message: `Status updated to “${String(status)}”.`, ts: Date.now() };
-  }
-  return { ok: false, message: statusReasonLabel(result.reason), ts: Date.now() };
-}
 
 /** Combined triage save: status and/or priority in one PATCH ("Save Changes"). */
 export async function updateCaseAction(
