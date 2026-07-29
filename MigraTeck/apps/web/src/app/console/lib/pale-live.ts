@@ -11,6 +11,16 @@
  */
 
 import { paleQuery, paleScalar, isPaleDbConfigured } from "./pale-db";
+import {
+  buildReportQuery,
+  buildReportsQuery,
+  REPORT_STATUSES,
+  type ReportFilters,
+} from "./pale-reports-query";
+
+// Re-exported so callers keep a single import site for the reports contract.
+export { buildReportQuery, buildReportsQuery, REPORT_STATUSES };
+export type { ReportFilters };
 
 export type LiveUser = {
   id: string;
@@ -40,7 +50,16 @@ export type LiveReport = {
   status: string;
   reporterPhone: string | null;
   createdAt: string | null;
+  /**
+   * Detail-view fields. OPTIONAL so the canonical result shape is preserved: every
+   * existing consumer reads the six fields above and is unaffected by their presence,
+   * while the report-detail route can rely on them being populated.
+   */
+  targetId?: string;
+  details?: string | null;
 };
+
+
 
 export type LiveAudit = {
   createdAt: string | null;
@@ -167,26 +186,60 @@ export const getPaleTriage = async (): Promise<PaleTriage> => {
   return { configured: true, pending, reviewing, escalated, resolvedToday };
 };
 
-export const getPaleReports = async (limit = 8): Promise<LiveReport[]> => {
-  const rows = await paleQuery<{
-    id: string; target_type: string; reason: string; status: string;
-    reporter_phone: string | null; created_at: Date | null;
-  }>(
-    `SELECT r.id, r.target_type, r.reason, r.status, ru.phone_number AS reporter_phone, r.created_at
-       FROM reports r
-       LEFT JOIN users ru ON ru.id = r.reporter_id
-      ORDER BY r.created_at DESC
-      LIMIT $1`,
-    [limit],
-  );
-  return rows.map((r) => ({
-    id: r.id,
-    targetType: r.target_type,
-    reason: r.reason,
-    status: r.status,
-    reporterPhone: r.reporter_phone,
-    createdAt: r.created_at ? new Date(r.created_at).toISOString() : null,
-  }));
+
+type RawReportRow = {
+  id: string;
+  target_type: string;
+  target_id: string;
+  reason: string;
+  details: string | null;
+  status: string;
+  reporter_phone: string | null;
+  created_at: Date | null;
+};
+
+
+const mapReport = (r: RawReportRow): LiveReport => ({
+  id: r.id,
+  targetType: r.target_type,
+  targetId: r.target_id,
+  reason: r.reason,
+  details: r.details,
+  status: r.status,
+  reporterPhone: r.reporter_phone,
+  createdAt: r.created_at ? new Date(r.created_at).toISOString() : null,
+});
+
+
+
+
+export function getPaleReports(limit?: number): Promise<LiveReport[]>;
+export function getPaleReports(options?: ReportFilters): Promise<LiveReport[]>;
+export async function getPaleReports(arg?: number | ReportFilters): Promise<LiveReport[]> {
+  const { sql, params } = buildReportsQuery(arg);
+  const rows = await paleQuery<RawReportRow>(sql, params);
+  return rows.map(mapReport);
+}
+
+/**
+ * One report by id, or null.
+ *
+ * SCOPING NOTE. The Pale schema exposes no tenant, organization or workspace column —
+ * verified across every pale query in this tree — so there is no scope to filter on at
+ * this layer. `reports` is product-global, the console is a staff surface, and every
+ * other canonical pale reader (getPaleReports, getPaleAudit, getPaleUsers) is likewise
+ * unscoped. Lookup by primary key is therefore consistent with the established data
+ * contract rather than an exception to it.
+ *
+ * If Pale ever gains a tenant column, this function and its siblings must gain the
+ * predicate together; a scoped list beside an unscoped detail read would be worse than
+ * today's uniformly unscoped pair.
+ */
+export const getPaleReport = async (id: string): Promise<LiveReport | null> => {
+  if (!id) return null;
+  const { sql, params } = buildReportQuery(id);
+  const rows = await paleQuery<RawReportRow>(sql, params);
+  return rows[0] ? mapReport(rows[0]) : null;
 };
 
 export type LiveQueueRow = { targetType: string; count: number; oldest: string | null };
@@ -249,4 +302,242 @@ export const getPaleAudit = async (limit = 8): Promise<LiveAudit[]> => {
       reason: reason ?? null,
     };
   });
+};
+export type LiveAuditEvent = {
+  createdAt: string | null;
+  actor: string;
+  actorRole: string | null;
+  action: string;
+  targetType: string | null;
+  targetId: string | null;
+  status: string | null;
+  note: string | null;
+  reason: string | null;
+  onBehalfOf: string | null;
+  requestId: string | null;
+};
+
+type RawAuditEventRow = {
+  created_at: Date | null; actor_role: string | null; action_type: string;
+  target_type: string | null; target_id: string | null; request_id: string | null;
+  actor_username: string | null; metadata: Record<string, unknown> | null;
+};
+
+const metaStr = (m: Record<string, unknown> | null, k: string): string | null => {
+  if (!m || typeof m !== "object") return null;
+  const v = m[k];
+  return typeof v === "string" ? v : v == null ? null : String(v);
+};
+
+const mapAuditEvent = (r: RawAuditEventRow): LiveAuditEvent => ({
+  createdAt: r.created_at ? new Date(r.created_at).toISOString() : null,
+  actor: r.actor_username ?? r.actor_role ?? "system",
+  actorRole: r.actor_role,
+  action: r.action_type,
+  targetType: r.target_type,
+  targetId: r.target_id,
+  status: metaStr(r.metadata, "status"),
+  note: metaStr(r.metadata, "note"),
+  reason: metaStr(r.metadata, "reason"),
+  onBehalfOf: metaStr(r.metadata, "onBehalfOf"),
+  requestId: r.request_id,
+});
+
+const AUDIT_EVENT_SELECT =
+  `a.created_at, a.actor_role, a.action_type, a.target_type, a.target_id,
+   a.request_id, au.username AS actor_username, a.metadata
+     FROM audit_logs a
+     LEFT JOIN users au ON au.id = a.actor_user_id`;
+
+/** Status/action history for one report (REPORT_* audit events). Read-only. */
+export const getReportEvents = async (reportId: string): Promise<LiveAuditEvent[]> => {
+  const rows = await paleQuery<RawAuditEventRow>(
+    `SELECT ${AUDIT_EVENT_SELECT}
+      WHERE a.target_type = 'report' AND a.target_id = $1 AND a.action_type LIKE 'REPORT%'
+      ORDER BY a.created_at DESC
+      LIMIT 100`,
+    [reportId],
+  );
+  return rows.map(mapAuditEvent);
+};
+
+/** Recent moderation activity across reports (REPORT_* audit events). Read-only. */
+export const getModerationActivity = async (limit = 20): Promise<LiveAuditEvent[]> => {
+  const n = Math.min(Math.max(limit, 1), 100);
+  const rows = await paleQuery<RawAuditEventRow>(
+    `SELECT ${AUDIT_EVENT_SELECT}
+      WHERE a.action_type LIKE 'REPORT%'
+      ORDER BY a.created_at DESC
+      LIMIT $1`,
+    [n],
+  );
+  return rows.map(mapAuditEvent);
+};
+
+
+// ─── Account controls (read-only) ───────────────────────────────────────────
+//
+// Reads for the /console/pale/users surface. Mutations (suspend/ban/restore) go
+// ONLY through the audited pale-api bridge (lib/pale-admin.ts) — never this pool.
+// Phone/email are returned RAW here (server-only) and MUST be masked by the
+// caller before rendering (maskPhone / maskEmail / safeAccountName).
+
+/** Valid account statuses (mirrors the AccountStatus enum). */
+export const ACCOUNT_STATUSES = [
+  "active", "suspended", "banned", "deactivated",
+] as const;
+
+export type ManagedUser = {
+  id: string;
+  phone: string | null;
+  name: string | null;
+  username: string | null;
+  email: string | null;
+  status: string;
+  roles: string[];
+  country: string | null;
+  createdAt: string | null;
+  lastActive: string | null;
+};
+
+export type AccountFilters = {
+  status?: string;
+  role?: string;
+  query?: string;
+  from?: string;
+  to?: string;
+  limit?: number;
+};
+
+type RawManagedUser = {
+  id: string; phone_number: string | null; display_name: string | null;
+  username: string | null; email: string | null; account_status: string;
+  country_code: string | null;
+  created_at: Date | null; last_active: Date | null;
+};
+
+const mapManagedUser = (r: RawManagedUser, roles: string[] = []): ManagedUser => ({
+  id: r.id,
+  phone: r.phone_number,
+  name: r.display_name,
+  username: r.username,
+  email: r.email,
+  status: r.account_status,
+  roles,
+  country: r.country_code,
+  createdAt: r.created_at ? new Date(r.created_at).toISOString() : null,
+  lastActive: r.last_active ? new Date(r.last_active).toISOString() : null,
+});
+
+// NOTE: roles are fetched SEPARATELY (fetchRolesByUserId), not joined here. The
+// least-privilege read-only role may lack SELECT on user_roles/roles; keeping that
+// join in the main query made the whole accounts query fail ("permission denied for
+// table user_roles") → empty list. Splitting it lets the list/detail render and
+// roles degrade to empty when not granted.
+const MANAGED_USER_SELECT =
+  `u.id, u.phone_number, u.display_name, u.username, u.email,
+   u.account_status::text AS account_status, u.country_code, u.created_at,
+   (SELECT max(s.last_seen_at) FROM sessions s WHERE s.user_id = u.id) AS last_active
+     FROM users u`;
+
+/**
+ * Best-effort role lookup for a set of user ids. Returns empty roles (never
+ * throws / never fails the caller) when the read-only role can't read
+ * user_roles/roles — paleQuery swallows the error and returns [].
+ */
+const fetchRolesByUserId = async (ids: string[]): Promise<Map<string, string[]>> => {
+  const map = new Map<string, string[]>();
+  if (ids.length === 0) return map;
+  const placeholders = ids.map((_, i) => `$${i + 1}`).join(",");
+  const rows = await paleQuery<{ user_id: string; roles: string[] | null }>(
+    `SELECT ur.user_id, array_agg(ro.key::text) AS roles
+       FROM user_roles ur JOIN roles ro ON ro.id = ur.role_id
+      WHERE ur.revoked_at IS NULL AND ur.user_id IN (${placeholders})
+      GROUP BY ur.user_id`,
+    ids,
+  );
+  for (const r of rows) {
+    map.set(r.user_id, Array.isArray(r.roles) ? r.roles.filter(Boolean) : []);
+  }
+  return map;
+};
+
+/** Filtered, masked-at-display account list for the management surface. */
+export const getPaleAccounts = async (opts: AccountFilters = {}): Promise<ManagedUser[]> => {
+  const where: string[] = ["u.deleted_at IS NULL"];
+  const params: Array<string | number> = [];
+  if (opts.status && (ACCOUNT_STATUSES as readonly string[]).includes(opts.status)) {
+    params.push(opts.status);
+    where.push(`u.account_status::text = $${params.length}`);
+  }
+  if (opts.role) {
+    params.push(opts.role);
+    where.push(
+      `EXISTS (SELECT 1 FROM user_roles ur JOIN roles ro ON ro.id = ur.role_id
+                WHERE ur.user_id = u.id AND ur.revoked_at IS NULL AND ro.key::text = $${params.length})`,
+    );
+  }
+  if (opts.query && opts.query.trim()) {
+    params.push(`%${opts.query.trim()}%`);
+    const i = params.length;
+    where.push(
+      `(u.username ILIKE $${i} OR u.display_name ILIKE $${i} OR u.phone_number ILIKE $${i} OR u.email ILIKE $${i})`,
+    );
+  }
+  if (opts.from) {
+    params.push(opts.from);
+    where.push(`u.created_at >= $${params.length}`);
+  }
+  if (opts.to) {
+    params.push(opts.to);
+    where.push(`u.created_at <= $${params.length}`);
+  }
+  const limit = Math.min(Math.max(opts.limit ?? 50, 1), 100);
+  params.push(limit);
+  const rows = await paleQuery<RawManagedUser>(
+    `SELECT ${MANAGED_USER_SELECT}
+      WHERE ${where.join(" AND ")}
+      ORDER BY u.created_at DESC
+      LIMIT $${params.length}`,
+    params,
+  );
+  const roleMap = await fetchRolesByUserId(rows.map((r) => r.id));
+  return rows.map((r) => mapManagedUser(r, roleMap.get(r.id) ?? []));
+};
+
+/** Single account by id (read-only) for the detail view. */
+export const getPaleAccount = async (id: string): Promise<ManagedUser | null> => {
+  const rows = await paleQuery<RawManagedUser>(
+    `SELECT ${MANAGED_USER_SELECT}
+      WHERE u.id = $1
+      LIMIT 1`,
+    [id],
+  );
+  if (!rows[0]) return null;
+  const roleMap = await fetchRolesByUserId([rows[0].id]);
+  return mapManagedUser(rows[0], roleMap.get(rows[0].id) ?? []);
+};
+
+/** Account-status history for one user (USER_* audit events). Read-only. */
+export const getPaleUserAuditEvents = async (userId: string): Promise<LiveAuditEvent[]> => {
+  const rows = await paleQuery<RawAuditEventRow>(
+    `SELECT ${AUDIT_EVENT_SELECT}
+      WHERE a.target_type = 'user' AND a.target_id = $1 AND a.action_type LIKE 'USER%'
+      ORDER BY a.created_at DESC
+      LIMIT 100`,
+    [userId],
+  );
+  return rows.map(mapAuditEvent);
+};
+
+/** Account-status counts by status (real; 0 when none). Read-only. */
+export const getAccountStatusCounts = async (): Promise<Record<string, number>> => {
+  const rows = await paleQuery<{ status: string; c: string | number }>(
+    `SELECT account_status::text AS status, count(*)::int c
+       FROM users WHERE deleted_at IS NULL GROUP BY account_status`,
+  );
+  const out: Record<string, number> = {};
+  for (const s of ACCOUNT_STATUSES) out[s] = 0;
+  for (const r of rows) out[r.status] = Number(r.c) || 0;
+  return out;
 };

@@ -1,4 +1,5 @@
 import { panelQuery, isPanelDbConfigured } from "../db";
+import { buildClientByEmailQuery } from "./client-lookup-query";
 
 export type ClientListItem = {
   id: string;
@@ -124,6 +125,23 @@ export const loadDistinctClientStatuses = async (): Promise<string[]> => {
   for (const r of rows) if (r.status) seen.add(r.status);
   ["active", "suspended", "paused", "churned"].forEach((s) => seen.add(s));
   return Array.from(seen).sort();
+};
+
+/**
+ * Resolves a customer by an inbound email address — matching either the tenant's
+ * billing email or one of its mailbox addresses — then returns the full detail.
+ * Used by the Mail module's sender → customer context panel. Read-only, reuses
+ * the same migrapanel access as the Clients module (no new cross-DB access).
+ */
+export const loadClientByEmail = async (email: string): Promise<ClientDetail | null> => {
+  if (!isPanelDbConfigured()) return null;
+  // Precedence and tiebreaks live in buildClientByEmailQuery so the rule is testable and
+  // cannot drift into an arbitrary planner-order result again.
+  const built = buildClientByEmailQuery(email);
+  if (!built) return null;
+  const rows = await panelQuery<{ id: string }>(built.sql, built.params);
+  if (rows.length === 0) return null;
+  return loadClientDetail(rows[0]!.id);
 };
 
 export const loadClientDetail = async (id: string): Promise<ClientDetail | null> => {

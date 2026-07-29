@@ -7,7 +7,14 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",
-    "typecheck": "tsc --noEmit -p tsconfig.json"
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test:session": "node --test src/app/console/lib/session-cookie.test.ts",
+    "test:bridge": "node --test src/app/console/lib/annoupale/bridge-core.test.ts",
+    "test:annoupale": "node --test src/app/console/lib/annoupale/bridge-core.test.ts src/app/console/lib/annoupale/compliance-contract.test.ts src/app/console/lib/annoupale/compliance-detail-contract.test.ts src/app/console/lib/annoupale/compliance-note-contract.test.ts src/app/console/lib/annoupale/compliance-status-contract.test.ts src/app/console/lib/annoupale/compliance-appeals.test.ts src/app/console/lib/annoupale/compliance-search-contract.test.ts src/app/console/lib/annoupale/moderation-contract.test.ts src/app/console/lib/annoupale/audit-contract.test.ts src/app/console/lib/annoupale/analytics-contract.test.ts src/app/console/lib/annoupale/attention-contract.test.ts",
+    "test:pale": "node --test src/app/console/lib/pale-rbac.test.ts src/app/console/lib/pale-reports-contract.test.ts",
+    "test:clients": "node --test src/app/console/lib/modules/client-lookup-query.test.ts",
+    "test:auth": "node --test src/app/console/lib/session-cookie.test.ts src/app/console/lib/password-hash.test.ts src/app/console/lib/rejected-mail-staff-auth.test.ts",
+    "test:nav": "node --test src/app/console/components/nav-authorization.test.ts"
   },
   "dependencies": {
     "@migrateck/auth-client": "workspace:*",
@@ -19,6 +26,7 @@
     "pg": "^8.20.0",
     "react": "19.2.5",
     "react-dom": "19.2.5",
+    "server-only": "^0.0.1",
     "tailwindcss": "^4.2.2",
     "zod": "^4.3.6"
   },

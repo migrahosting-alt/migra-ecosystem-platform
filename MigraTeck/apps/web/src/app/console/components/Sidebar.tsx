@@ -1,6 +1,11 @@
 import Image from "next/image";
 import Link from "next/link";
 import {
+  ClipboardCheck,
+  Scale,
+  Flag,
+  ScrollText,
+  LineChart,
   LayoutDashboard,
   Boxes,
   Server,
@@ -21,37 +26,100 @@ import {
   ChevronLeft,
   Activity,
 } from "lucide-react";
+import { getSession } from "../lib/auth";
+import { canViewAccounts, canViewReports, getPaleRole } from "../lib/pale-rbac";
+import { visibleNav, type NavCapability, type NavItem } from "./nav-model";
 
-type NavItem = {
-  label: string;
-  href: string;
-  icon?: React.ComponentType<{ className?: string }>;
-  logoSrc?: string;
+/** Lucide components by registry name. Keeps nav-model.ts free of React imports. */
+const ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
+  LayoutDashboard, Boxes, Server, Globe, Mail, Inbox, Phone, FileText, Megaphone,
+  Workflow, Receipt, Users, LifeBuoy, BarChart3, Shield, UsersRound, Settings, Activity,
+  ClipboardCheck, Scale, Flag, ScrollText, LineChart,
 };
 
-const NAV: ReadonlyArray<NavItem> = [
-  { label: "Overview", href: "/console", icon: LayoutDashboard },
-  { label: "Ecosystem", href: "/console/ecosystem", icon: Boxes },
-  { label: "Hosting", href: "/console/hosting", icon: Server },
-  { label: "Domains", href: "/console/domains", icon: Globe },
-  { label: "Email", href: "/console/email", icon: Mail },
-  { label: "Mail", href: "/console/mail", icon: Inbox },
-  { label: "Voice", href: "/console/voice", icon: Phone },
-  { label: "Intake", href: "/console/intake", icon: FileText },
-  { label: "Marketing", href: "/console/marketing", icon: Megaphone },
-  { label: "Automation", href: "/console/automation", icon: Workflow },
-  { label: "Billing", href: "/console/billing", icon: Receipt },
-  { label: "Clients", href: "/console/clients", icon: Users },
-  { label: "Support", href: "/console/support", icon: LifeBuoy },
-  { label: "Activity", href: "/console/activity", icon: Activity },
-  { label: "Analytics", href: "/console/analytics", icon: BarChart3 },
-  { label: "Security", href: "/console/security", icon: Shield },
-  { label: "Team", href: "/console/team", icon: UsersRound },
-  { label: "Pale", href: "/console/pale", logoSrc: "/brands/products/pale.png" },
-  { label: "Settings", href: "/console/settings", icon: Settings },
-];
 
-export const Sidebar = ({ activePath }: { activePath: string }) => {
+/** One nav entry, plus its indented children when the entry is a group. */
+const NavRow = ({ item, activePath }: { item: NavItem; activePath: string }) => {
+  const isActive = (href: string) =>
+    activePath === href || (href !== "/console" && activePath.startsWith(href));
+  const active = isActive(item.href);
+  const Icon = item.icon ? ICONS[item.icon] : undefined;
+  return (
+    <li>
+      <Link
+        href={item.href}
+        prefetch
+        className={[
+          "group flex items-center gap-3 rounded-lg px-3 py-2 transition",
+          active
+            ? "bg-gradient-to-r from-fuchsia-500/15 via-purple-500/10 to-transparent text-white shadow-[inset_0_0_0_1px_rgba(217,70,239,0.25)]"
+            : "text-slate-400 hover:bg-white/5 hover:text-slate-100",
+        ].join(" ")}
+      >
+        {item.logoSrc ? (
+          <span className="relative inline-flex h-4 w-4 shrink-0 items-center justify-center overflow-hidden rounded">
+            <Image src={item.logoSrc} alt="" fill sizes="16px" className="object-contain" />
+          </span>
+        ) : Icon ? (
+          <Icon
+            className={[
+              "h-4 w-4 shrink-0 transition",
+              active ? "text-fuchsia-300" : "text-slate-500 group-hover:text-slate-300",
+            ].join(" ")}
+          />
+        ) : null}
+        <span className="truncate">{item.label}</span>
+      </Link>
+
+      {item.children && item.children.length > 0 ? (
+        // Indented and hairline-anchored so the group reads as belonging to its parent
+        // rather than as more top-level entries.
+        <ul className="mt-0.5 space-y-0.5 border-l border-white/5 pl-3 ml-[1.375rem]">
+          {item.children.map((child) => {
+            const childActive = isActive(child.href);
+            const ChildIcon = child.icon ? ICONS[child.icon] : undefined;
+            return (
+              <li key={child.href}>
+                <Link
+                  href={child.href}
+                  prefetch
+                  className={[
+                    "group flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-[13px] transition",
+                    childActive
+                      ? "bg-gradient-to-r from-fuchsia-500/10 via-purple-500/5 to-transparent text-white"
+                      : "text-slate-500 hover:bg-white/5 hover:text-slate-200",
+                  ].join(" ")}
+                >
+                  {ChildIcon ? (
+                    <ChildIcon
+                      className={[
+                        "h-3.5 w-3.5 shrink-0 transition",
+                        childActive ? "text-fuchsia-300" : "text-slate-600 group-hover:text-slate-400",
+                      ].join(" ")}
+                    />
+                  ) : null}
+                  <span className="truncate">{child.label}</span>
+                </Link>
+              </li>
+            );
+          })}
+        </ul>
+      ) : null}
+    </li>
+  );
+};
+
+export const Sidebar = async ({ activePath }: { activePath: string }) => {
+  // Sidebar visibility is CONVENIENCE ONLY. Every destination re-checks authorization
+  // server-side; hiding a link avoids offering a door that would be shut, and never
+  // substitutes for the lock.
+  const session = await getSession();
+  const paleRole = getPaleRole(session);
+  const granted = new Set<NavCapability>();
+  if (canViewAccounts(paleRole)) granted.add("pale.accounts.read");
+  if (canViewReports(paleRole)) granted.add("pale.reports.read");
+  const nav = visibleNav(granted);
+
   return (
     <aside className="hidden w-64 shrink-0 flex-col border-r border-white/5 bg-slate-950/95 backdrop-blur lg:flex">
       <div className="flex items-center justify-between px-5 py-5">
@@ -81,38 +149,9 @@ export const Sidebar = ({ activePath }: { activePath: string }) => {
 
       <nav className="flex-1 overflow-y-auto px-3 pb-4">
         <ul className="space-y-0.5 text-sm">
-          {NAV.map((item) => {
-            const active = activePath === item.href || (item.href !== "/console" && activePath.startsWith(item.href));
-            const Icon = item.icon;
-            return (
-              <li key={item.href}>
-                <Link
-                  href={item.href}
-                  prefetch
-                  className={[
-                    "group flex items-center gap-3 rounded-lg px-3 py-2 transition",
-                    active
-                      ? "bg-gradient-to-r from-fuchsia-500/15 via-purple-500/10 to-transparent text-white shadow-[inset_0_0_0_1px_rgba(217,70,239,0.25)]"
-                      : "text-slate-400 hover:bg-white/5 hover:text-slate-100",
-                  ].join(" ")}
-                >
-                  {item.logoSrc ? (
-                    <span className="relative inline-flex h-4 w-4 shrink-0 items-center justify-center overflow-hidden rounded">
-                      <Image src={item.logoSrc} alt="" fill sizes="16px" className="object-contain" />
-                    </span>
-                  ) : Icon ? (
-                    <Icon
-                      className={[
-                        "h-4 w-4 shrink-0 transition",
-                        active ? "text-fuchsia-300" : "text-slate-500 group-hover:text-slate-300",
-                      ].join(" ")}
-                    />
-                  ) : null}
-                  <span className="truncate">{item.label}</span>
-                </Link>
-              </li>
-            );
-          })}
+          {nav.map((item) => (
+            <NavRow key={item.href} item={item} activePath={activePath} />
+          ))}
         </ul>
       </nav>
 

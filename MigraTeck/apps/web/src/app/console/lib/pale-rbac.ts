@@ -63,6 +63,61 @@ export const canViewReports = (role: PaleRole | null): role is PaleRole =>
 export const canMutateReports = (role: PaleRole | null): role is PaleRole =>
   role != null && PALE_REPORT_MUTATE_ROLES.includes(role);
 
+/**
+ * Account-controls RBAC (console-side pre-gate; pale-api's RolesGuard is the
+ * source of truth). The console is intentionally STRICTER than pale-api:
+ * pale-api lets any moderation role suspend/ban/restore, but here a moderator may
+ * only SUSPEND, and ban/restore require trust_safety_manager or above. Auditor is
+ * view-only.
+ */
+export const PALE_ACCOUNT_VIEW_ROLES: ReadonlyArray<PaleRole> = [
+  "owner",
+  "admin",
+  "trust_safety_manager",
+  "moderator",
+  "auditor",
+];
+export const PALE_ACCOUNT_SUSPEND_ROLES: ReadonlyArray<PaleRole> = [
+  "owner",
+  "admin",
+  "trust_safety_manager",
+  "moderator",
+];
+export const PALE_ACCOUNT_BAN_ROLES: ReadonlyArray<PaleRole> = [
+  "owner",
+  "admin",
+  "trust_safety_manager",
+];
+export const PALE_ACCOUNT_RESTORE_ROLES: ReadonlyArray<PaleRole> = [
+  "owner",
+  "admin",
+  "trust_safety_manager",
+];
+
+export const canViewAccounts = (role: PaleRole | null): role is PaleRole =>
+  role != null && PALE_ACCOUNT_VIEW_ROLES.includes(role);
+export const canSuspendAccounts = (role: PaleRole | null): role is PaleRole =>
+  role != null && PALE_ACCOUNT_SUSPEND_ROLES.includes(role);
+export const canBanAccounts = (role: PaleRole | null): role is PaleRole =>
+  role != null && PALE_ACCOUNT_BAN_ROLES.includes(role);
+export const canRestoreAccounts = (role: PaleRole | null): role is PaleRole =>
+  role != null && PALE_ACCOUNT_RESTORE_ROLES.includes(role);
+
+/** Mask an email to first 2 chars + domain (e.g. "ab•••@host.com"). */
+export const maskEmail = (email: string | null | undefined): string | null => {
+  const e = (email ?? "").trim();
+  const at = e.indexOf("@");
+  if (at <= 0 || at === e.length - 1) return null;
+  const head = e.slice(0, 2);
+  const domain = e.slice(at + 1);
+  return `${head}•••@${domain}`;
+};
+
+// Display-safe account names are produced by `safeDisplayName` in pale-dashboard.ts
+// (rejects phone-like values AND phone-derived auto-usernames). Use that — do not
+// reintroduce a weaker helper here that trusts display_name verbatim, since a
+// user's display_name can be their raw phone number.
+
 /** Map a console Pale role → the pale-api staff role for the bridge header. */
 export const paleApiRoleFor = (role: PaleRole): string | null => {
   switch (role) {
