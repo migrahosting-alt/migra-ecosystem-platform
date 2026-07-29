@@ -75,20 +75,39 @@ test("lib/annoupale/overview.ts is absent and unreferenced", () => {
 });
 
 test("overview.ts's dependencies survive — only the aggregator was removed", () => {
-  // Most have independent consumers. attention-contract.ts is the exception: overview.ts was
-  // its only RUNTIME importer, so removing the aggregator left it a cascade orphan with test
-  // coverage but no caller. It is retained deliberately — deleting a dependency as collateral
-  // of removing its consumer is a separate decision, and its contract tests still pass.
+  // These have independent consumers and must survive. attention-contract.ts is NOT in this
+  // list: overview.ts was its only runtime importer, so it fell with the aggregator and is
+  // asserted absent below instead.
   for (const dep of [
     "compliance.ts",
     "compliance-appeals.ts",
     "moderation.ts",
     "audit.ts",
     "health.ts",
-    "attention-contract.ts",
     "compliance-contract.ts",
   ]) {
     assert.ok(existsSync(join(HERE, dep)), `${dep} must remain`);
+  }
+});
+
+test("attention-contract.ts is absent — it fell with its only consumer", () => {
+  /**
+   * A CASCADE ORPHAN: overview.ts was its sole runtime importer, so removing the unapproved
+   * aggregation model left this deriving attention severity for nobody. Verified before
+   * deletion: 0 production importers, 0 consumers outside its own contract test, 0 references
+   * to any of its five exported symbols, and no export from any package barrel or exports
+   * field — the one package.json mention was a test-script path, not a published API.
+   *
+   * It is dormant architecture for the model canonical did not adopt, so it goes with the
+   * model rather than lingering as compiling code that gets picked up by accident.
+   */
+  assert.equal(existsSync(join(HERE, "attention-contract.ts")), false, "must stay removed");
+  assert.equal(existsSync(join(HERE, "attention-contract.test.ts")), false, "its test must stay removed");
+  for (const f of ALL) {
+    const src = readFileSync(f, "utf8");
+    assert.ok(!src.includes("attention-contract"), `${relative(SRC_ROOT, f)} imports the removed module`);
+    assert.ok(!src.includes("deriveAttention"), `${relative(SRC_ROOT, f)} calls the removed deriveAttention`);
+    assert.ok(!src.includes("AttentionResult"), `${relative(SRC_ROOT, f)} references the removed AttentionResult`);
   }
 });
 
