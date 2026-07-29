@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useEffect, useRef, useState } from "react";
+import { useActionState, useState } from "react";
 import { SubmitButton } from "./SubmitButton";
 import {
   addInternalNoteAction,
@@ -22,14 +22,16 @@ export function AnnoupaleAddNoteForm({ caseId }: { caseId: string }) {
     undefined,
   );
   const [value, setValue] = useState("");
-  const lastTs = useRef(0);
-
-  useEffect(() => {
-    if (state?.ok && state.ts !== lastTs.current) {
-      lastTs.current = state.ts;
-      setValue("");
-    }
-  }, [state]);
+  const [lastTs, setLastTs] = useState(0);
+  // Clear the field once per successful submit. This ADJUSTS STATE DURING RENDER rather
+  // than in an effect: the effect form re-rendered a second time after paint, which is the
+  // cascading-render pattern the lint rule rejects. React sanctions this guarded
+  // during-render update for exactly this "reset when an input changes" case — the guard on
+  // the timestamp is what keeps it from looping.
+  if (state?.ok && state.ts !== lastTs) {
+    setLastTs(state.ts);
+    setValue("");
+  }
 
   return (
     <form action={formAction} className="space-y-2">
