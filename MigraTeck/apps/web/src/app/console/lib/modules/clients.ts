@@ -1,4 +1,5 @@
 import { panelQuery, isPanelDbConfigured } from "../db";
+import { buildClientByEmailQuery } from "./client-lookup-query";
 
 export type ClientListItem = {
   id: string;
@@ -134,19 +135,11 @@ export const loadDistinctClientStatuses = async (): Promise<string[]> => {
  */
 export const loadClientByEmail = async (email: string): Promise<ClientDetail | null> => {
   if (!isPanelDbConfigured()) return null;
-  const e = email.trim().toLowerCase();
-  if (!e || !e.includes("@")) return null;
-  const rows = await panelQuery<{ id: string }>(
-    `SELECT t.id
-       FROM tenants t
-      WHERE LOWER(COALESCE(t.billing_email, '')) = $1
-      UNION
-     SELECT m.tenantid AS id
-       FROM mailboxes m
-      WHERE LOWER(m.address) = $1 AND m.tenantid IS NOT NULL
-      LIMIT 1`,
-    [e],
-  );
+  // Precedence and tiebreaks live in buildClientByEmailQuery so the rule is testable and
+  // cannot drift into an arbitrary planner-order result again.
+  const built = buildClientByEmailQuery(email);
+  if (!built) return null;
+  const rows = await panelQuery<{ id: string }>(built.sql, built.params);
   if (rows.length === 0) return null;
   return loadClientDetail(rows[0]!.id);
 };
