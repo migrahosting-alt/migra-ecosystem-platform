@@ -78,3 +78,79 @@ export const markReportReviewing = async (
     clearTimeout(timer);
   }
 };
+
+// ─── Account controls (Phase: suspend / ban / restore) ───────────────────────
+//
+// POST pale-api `/v1/admin/users/:id/{suspend,ban,restore}`. Every call is
+// RBAC-checked AND audited server-side by pale-api (USER_SUSPENDED/BANNED/
+// RESTORED with onBehalfOf/actorRole/requestId). Never surfaces raw response
+// bodies (could contain user detail) to the caller.
+
+type AccountAction = "suspend" | "ban" | "restore";
+
+const callAccountAction = async (
+  action: AccountAction,
+  userId: string,
+  reason: string,
+  consoleAdminEmail: string,
+  role: PaleRole,
+): Promise<BridgeResult> => {
+  const apiRole = paleApiRoleFor(role);
+  if (!apiRole) return { ok: false, error: "Your role cannot perform this action." };
+  if (!BRIDGE_KEY) return { ok: false, error: "Staff bridge is not configured." };
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 6000);
+  try {
+    const res = await fetch(
+      `${ADMIN_BASE}/users/${encodeURIComponent(userId)}/${action}`,
+      {
+        method: "POST",
+        cache: "no-store",
+        signal: controller.signal,
+        headers: {
+          "Content-Type": "application/json",
+          "X-Pale-Service-Key": BRIDGE_KEY,
+          "X-Console-Role": apiRole,
+          "X-Console-Actor": consoleAdminEmail,
+          "X-Request-Id": randomUUID(),
+        },
+        body: JSON.stringify({ reason }),
+      },
+    );
+    if (!res.ok) {
+      if (res.status === 401 || res.status === 403)
+        return { ok: false, error: "Not authorized by pale-api." };
+      if (res.status === 404) return { ok: false, error: "User not found." };
+      if (res.status === 400)
+        return { ok: false, error: "pale-api rejected the request (e.g. self-action)." };
+      return { ok: false, error: `pale-api error (${res.status}).` };
+    }
+    return { ok: true };
+  } catch {
+    return { ok: false, error: "Could not reach pale-api." };
+  } finally {
+    clearTimeout(timer);
+  }
+};
+
+export const suspendUser = (
+  userId: string,
+  reason: string,
+  consoleAdminEmail: string,
+  role: PaleRole,
+): Promise<BridgeResult> => callAccountAction("suspend", userId, reason, consoleAdminEmail, role);
+
+export const banUser = (
+  userId: string,
+  reason: string,
+  consoleAdminEmail: string,
+  role: PaleRole,
+): Promise<BridgeResult> => callAccountAction("ban", userId, reason, consoleAdminEmail, role);
+
+export const restoreUser = (
+  userId: string,
+  reason: string,
+  consoleAdminEmail: string,
+  role: PaleRole,
+): Promise<BridgeResult> => callAccountAction("restore", userId, reason, consoleAdminEmail, role);

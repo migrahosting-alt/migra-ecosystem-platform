@@ -16,8 +16,9 @@
 
 import { cookies } from "next/headers";
 import crypto from "node:crypto";
+import { SESSION_COOKIE_NAME, SESSION_COOKIE_PATH } from "./session-cookie";
 
-const COOKIE_NAME = "migrateck_console_session";
+const COOKIE_NAME = SESSION_COOKIE_NAME;
 const SESSION_TTL_SECONDS = 60 * 60 * 12; // 12 hours
 
 type SessionPayload = {
@@ -102,14 +103,24 @@ export const issueSession = async (email: string): Promise<void> => {
     httpOnly: true,
     secure: true,
     sameSite: "lax",
-    path: "/console",
+    path: SESSION_COOKIE_PATH,
     maxAge: SESSION_TTL_SECONDS,
   });
 };
 
 export const clearSession = async (): Promise<void> => {
   const store = await cookies();
-  store.delete(COOKIE_NAME);
+  // The session cookie is set with path "/console" (see issueSession). A bare
+  // delete(name) targets the default path "/" and leaves the "/console"-scoped
+  // cookie intact — so we must expire it at the EXACT same path/attributes.
+  store.set(COOKIE_NAME, "", {
+    httpOnly: true,
+    secure: true,
+    sameSite: "lax",
+    path: SESSION_COOKIE_PATH,
+    maxAge: 0,
+    expires: new Date(0),
+  });
 };
 
 export const getSession = async (): Promise<SessionPayload | null> => {
