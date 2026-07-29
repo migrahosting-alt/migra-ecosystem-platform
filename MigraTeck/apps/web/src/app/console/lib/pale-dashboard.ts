@@ -88,7 +88,7 @@ const relative = (iso: string | null): string => {
   return `${Math.floor(s / 86400)}d ago`;
 };
 
-const absolute = (iso: string | null): string => {
+export const absolute = (iso: string | null): string => {
   if (!iso) return "—";
   return new Date(iso).toLocaleString("en-US", {
     month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit",
@@ -115,10 +115,10 @@ const auditTone = (action: string): "danger" | "ok" | "warn" => {
   return "warn";
 };
 
-const prettyAction = (action: string) =>
+export const prettyAction = (action: string) =>
   action.toLowerCase().replace(/_/g, " ").replace(/^\w/, (c) => c.toUpperCase());
 
-const shortId = (id: string | null) => (id ? id.slice(0, 8) : "");
+export const shortId = (id: string | null) => (id ? id.slice(0, 8) : "");
 
 /**
  * Pale defaults `display_name` (and sometimes username) to the user's raw phone
@@ -151,7 +151,7 @@ const isPhoneDerived = (value: string, phone: string | null): boolean => {
  * name/username, else the masked phone. Rejects both phone-like values and
  * phone-derived auto-usernames so no phone digits leak through the Name column.
  */
-const safeDisplayName = (
+export const safeDisplayName = (
   name: string | null,
   username: string | null,
   phone: string | null,
@@ -169,7 +169,7 @@ const safeDisplayName = (
  * Phone-derived handles render as "Pale user ••••NNNN" (last 4 digits only —
  * never a 6+ digit run). Real admin handles/roles (no long digit run) pass through.
  */
-const maskActor = (actor: string): string => {
+export const maskActor = (actor: string): string => {
   const a = actor.trim();
   const digits = a.replace(/\D/g, "");
   const phoneDerived = /^pale\d{4,}$/i.test(a) || digits.length >= 6;
