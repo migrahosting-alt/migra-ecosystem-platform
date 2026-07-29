@@ -16,6 +16,8 @@ import {
   paleRoleLabel,
 } from "../../lib/pale-rbac";
 import { isBridgeConfigured } from "../../lib/pale-admin";
+import { ReportFiltersBar } from "./ReportFilters";
+import { toFilterView, toReportFilters } from "./report-filter-params";
 import { ReportActions } from "./ReportActions";
 
 export const dynamic = "force-dynamic";
@@ -45,7 +47,14 @@ const Td = ({ children, right, className = "" }: { children: ReactNode; right?: 
   <td className={`px-2 py-2.5 align-middle text-[12px] ${right ? "text-right" : "text-left"} ${className}`}>{children}</td>
 );
 
-export default async function PaleReportsPage() {
+/** The page's canonical limit, unchanged from before filtering existed. */
+const PAGE_LIMIT = 25;
+
+export default async function PaleReportsPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
   const session = await getSession();
   if (!session) redirect("/console/login");
 
@@ -66,7 +75,12 @@ export default async function PaleReportsPage() {
   }
 
   const dbConfigured = isPaleDbConfigured();
-  const reports = dbConfigured ? await getPaleReports(25) : [];
+  // Server-side only: searchParams are read here and passed to the additive
+  // getPaleReports(options) overload. No client-side fetching is introduced.
+  const sp = await searchParams;
+  const view = toFilterView(sp);
+  const hasFilters = Boolean(view.status || view.type || view.from || view.to);
+  const reports = dbConfigured ? await getPaleReports(toReportFilters(sp, PAGE_LIMIT)) : [];
   const mayMutate = canMutateReports(role);
   const bridgeReady = isBridgeConfigured();
 
@@ -98,7 +112,11 @@ export default async function PaleReportsPage() {
         </div>
       )}
 
-      <SectionCard title="Reports" subtitle={dbConfigured ? `${reports.length} most recent` : undefined}>
+      {dbConfigured && (
+        <ReportFiltersBar status={view.status} type={view.type} from={view.from} to={view.to} />
+      )}
+
+      <SectionCard title="Reports" subtitle={dbConfigured ? `${reports.length} ${hasFilters ? "matching" : "most recent"}` : undefined}>
         {!dbConfigured ? (
           <div className="rounded-lg border border-dashed border-white/10 bg-white/[0.01] px-4 py-8 text-center text-[11px] text-slate-500">
             Pale DB not configured — no live reports.
