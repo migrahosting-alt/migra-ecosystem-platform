@@ -13,12 +13,15 @@ export interface CreateCustomerInput {
   metadata?: Record<string, string>;
 }
 
+// Optional fields are declared `| undefined` because every consumer below tests
+// `!== undefined` — an explicitly-undefined field is accepted exactly like an absent
+// one. Under `exactOptionalPropertyTypes` the bare `?:` form would claim otherwise.
 export interface UpdateCustomerInput {
-  billingEmail?: string;
-  billingContactName?: string;
-  taxCountry?: string;
-  taxState?: string;
-  taxId?: string;
+  billingEmail?: string | undefined;
+  billingContactName?: string | undefined;
+  taxCountry?: string | undefined;
+  taxState?: string | undefined;
+  taxId?: string | undefined;
 }
 
 /**

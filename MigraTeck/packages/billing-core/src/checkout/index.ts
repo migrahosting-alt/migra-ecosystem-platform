@@ -11,11 +11,11 @@ export interface CreateCheckoutSessionInput {
   productFamily: ProductFamily;
   planCode: PlanCode;
   billingInterval: BillingInterval;
-  seatCount?: number;
+  seatCount?: number | undefined;
   successUrl: string;
   cancelUrl: string;
-  trialDays?: number;
-  metadata?: Record<string, string>;
+  trialDays?: number | undefined;
+  metadata?: Record<string, string> | undefined;
 }
 
 export interface CheckoutSessionResult {

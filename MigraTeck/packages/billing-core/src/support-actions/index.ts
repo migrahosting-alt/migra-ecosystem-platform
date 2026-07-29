@@ -9,11 +9,11 @@ export interface IssueAdjustmentInput {
   orgId: string;
   kind: AdjustmentKind;
   amount: number;
-  currency?: string;
+  currency?: string | undefined;
   reason: string;
   createdByUserId: string;
   /** If this should also create a Stripe credit note */
-  stripeInvoiceId?: string;
+  stripeInvoiceId?: string | undefined;
 }
 
 /**
@@ -72,7 +72,7 @@ export interface OverrideEntitlementsInput {
   entitlements: OrgEntitlements;
   reason: string;
   createdByUserId: string;
-  expiresAt?: Date;
+  expiresAt?: Date | undefined;
 }
 
 /**

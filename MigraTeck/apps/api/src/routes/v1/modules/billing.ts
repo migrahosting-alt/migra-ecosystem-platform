@@ -99,7 +99,7 @@ export async function registerBillingRoutes(
     "/billing/catalog/:family",
     async (request) => {
       const product = PRODUCT_CATALOG.find(
-        (p) => p.family === request.params.family,
+        (p) => p.productFamily === request.params.family,
       );
       if (!product)
         throw Object.assign(
@@ -351,8 +351,11 @@ export async function registerBillingRoutes(
     const body = z
       .object({
         taxCountry: z.string().length(2),
-        taxState: z.string().max(80).optional(),
-        taxId: z.string().max(80).optional(),
+        // `.nullable()` so a caller can CLEAR a field, `.optional()` so omitting one leaves
+        // it untouched. The two are different requests and must not be conflated — see
+        // UpdateTaxInfoInput.
+        taxState: z.string().max(80).nullable().optional(),
+        taxId: z.string().max(80).nullable().optional(),
       })
       .parse(request.body);
     await updateTaxInfo(ctx, orgId, body);

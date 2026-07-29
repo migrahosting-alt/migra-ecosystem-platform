@@ -254,7 +254,7 @@ export async function getSubscription(
 export interface ChangePlanInput {
   subscriptionId: string;
   newPlanCode: PlanCode;
-  newBillingInterval?: "month" | "year";
+  newBillingInterval?: "month" | "year" | undefined;
   idempotencyKey: string;
 }
 
@@ -426,7 +426,7 @@ export async function resumeSubscription(
 
 export interface CancelSubscriptionInput {
   subscriptionId: string;
-  cancelImmediately?: boolean;
+  cancelImmediately?: boolean | undefined;
   idempotencyKey: string;
 }
 

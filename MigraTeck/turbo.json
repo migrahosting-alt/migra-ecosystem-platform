@@ -1,9 +1,19 @@
 {
   "$schema": "https://turbo.build/schema.json",
   "tasks": {
+    "db:generate": {
+      "inputs": [
+        "prisma/schema.prisma",
+        "prisma.config.ts"
+      ],
+      "outputs": [
+        "node_modules/.prisma/**"
+      ]
+    },
     "build": {
       "dependsOn": [
-        "^build"
+        "^build",
+        "db:generate"
       ],
       "outputs": [
         "dist/**",
@@ -16,12 +26,19 @@
     },
     "lint": {
       "dependsOn": [
-        "^lint"
+        "^build",
+        "db:generate"
       ]
     },
     "typecheck": {
       "dependsOn": [
-        "^typecheck"
+        "^build",
+        "db:generate"
+      ]
+    },
+    "test": {
+      "dependsOn": [
+        "build"
       ]
     }
   }
