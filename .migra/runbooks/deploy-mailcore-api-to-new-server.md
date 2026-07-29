@@ -52,7 +52,8 @@ EOF
 ```bash
 ssh root@100.81.76.39 << 'EOF'
 cat > /etc/mailcore-api.env << 'ENVEOF'
-MAILCORE_API_TOKEN=8941d7b2cc20cea5b7b84032b02d156a7c7ae5a186de5e12d75e17af0b7859be
+MAILCORE_API_TOKEN=${MAILCORE_API_TOKEN}   # supplied from the mail-core secret store;
+                                           # never committed. See "Where secrets come from".
 MAILCORE_ALLOWLIST=100.119.105.93,100.68.239.94
 MAILCORE_BIND_HOST=100.81.76.39
 MAILCORE_PORT=9080

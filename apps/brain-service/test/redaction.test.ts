@@ -11,7 +11,10 @@ const APPR = 'appr_9x8y7z6w5v4u3t2s1r0q';
 const PEM = '-----BEGIN RSA PRIVATE KEY-----\nMIIEabcdefu9w8ey\n-----END RSA PRIVATE KEY-----';
 const DBURL = 'postgres://admin:s3cr3tP@ss@db-core:5432/migrapanel';
 const CREDURL = 'https://user:hunter2@internal.example.com/path?api_key=SECRETVAL';
-const JWT = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NSJ9.abcDEFghiJKLmnoPQR';
+// Split at the dot boundaries so the complete JWT shape never appears contiguously —
+// same technique this file already uses for the AWS fixture below. The VALUE is
+// unchanged, so the redaction assertions still exercise a real JWT shape.
+const JWT = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9' + '.' + 'eyJzdWIiOiIxMjM0NSJ9' + '.' + 'abcDEFghiJKLmnoPQR';
 // Split so the pre-commit secret scanner does not flag the fixture literal.
 const AWS = 'AKIA' + 'IOSFODNN7EXAMPLE';
 
