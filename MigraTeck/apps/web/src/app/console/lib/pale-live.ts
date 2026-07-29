@@ -11,6 +11,16 @@
  */
 
 import { paleQuery, paleScalar, isPaleDbConfigured } from "./pale-db";
+import {
+  buildReportQuery,
+  buildReportsQuery,
+  REPORT_STATUSES,
+  type ReportFilters,
+} from "./pale-reports-query";
+
+// Re-exported so callers keep a single import site for the reports contract.
+export { buildReportQuery, buildReportsQuery, REPORT_STATUSES };
+export type { ReportFilters };
 
 export type LiveUser = {
   id: string;
@@ -40,7 +50,16 @@ export type LiveReport = {
   status: string;
   reporterPhone: string | null;
   createdAt: string | null;
+  /**
+   * Detail-view fields. OPTIONAL so the canonical result shape is preserved: every
+   * existing consumer reads the six fields above and is unaffected by their presence,
+   * while the report-detail route can rely on them being populated.
+   */
+  targetId?: string;
+  details?: string | null;
 };
+
+
 
 export type LiveAudit = {
   createdAt: string | null;
@@ -167,26 +186,60 @@ export const getPaleTriage = async (): Promise<PaleTriage> => {
   return { configured: true, pending, reviewing, escalated, resolvedToday };
 };
 
-export const getPaleReports = async (limit = 8): Promise<LiveReport[]> => {
-  const rows = await paleQuery<{
-    id: string; target_type: string; reason: string; status: string;
-    reporter_phone: string | null; created_at: Date | null;
-  }>(
-    `SELECT r.id, r.target_type, r.reason, r.status, ru.phone_number AS reporter_phone, r.created_at
-       FROM reports r
-       LEFT JOIN users ru ON ru.id = r.reporter_id
-      ORDER BY r.created_at DESC
-      LIMIT $1`,
-    [limit],
-  );
-  return rows.map((r) => ({
-    id: r.id,
-    targetType: r.target_type,
-    reason: r.reason,
-    status: r.status,
-    reporterPhone: r.reporter_phone,
-    createdAt: r.created_at ? new Date(r.created_at).toISOString() : null,
-  }));
+
+type RawReportRow = {
+  id: string;
+  target_type: string;
+  target_id: string;
+  reason: string;
+  details: string | null;
+  status: string;
+  reporter_phone: string | null;
+  created_at: Date | null;
+};
+
+
+const mapReport = (r: RawReportRow): LiveReport => ({
+  id: r.id,
+  targetType: r.target_type,
+  targetId: r.target_id,
+  reason: r.reason,
+  details: r.details,
+  status: r.status,
+  reporterPhone: r.reporter_phone,
+  createdAt: r.created_at ? new Date(r.created_at).toISOString() : null,
+});
+
+
+
+
+export function getPaleReports(limit?: number): Promise<LiveReport[]>;
+export function getPaleReports(options?: ReportFilters): Promise<LiveReport[]>;
+export async function getPaleReports(arg?: number | ReportFilters): Promise<LiveReport[]> {
+  const { sql, params } = buildReportsQuery(arg);
+  const rows = await paleQuery<RawReportRow>(sql, params);
+  return rows.map(mapReport);
+}
+
+/**
+ * One report by id, or null.
+ *
+ * SCOPING NOTE. The Pale schema exposes no tenant, organization or workspace column —
+ * verified across every pale query in this tree — so there is no scope to filter on at
+ * this layer. `reports` is product-global, the console is a staff surface, and every
+ * other canonical pale reader (getPaleReports, getPaleAudit, getPaleUsers) is likewise
+ * unscoped. Lookup by primary key is therefore consistent with the established data
+ * contract rather than an exception to it.
+ *
+ * If Pale ever gains a tenant column, this function and its siblings must gain the
+ * predicate together; a scoped list beside an unscoped detail read would be worse than
+ * today's uniformly unscoped pair.
+ */
+export const getPaleReport = async (id: string): Promise<LiveReport | null> => {
+  if (!id) return null;
+  const { sql, params } = buildReportQuery(id);
+  const rows = await paleQuery<RawReportRow>(sql, params);
+  return rows[0] ? mapReport(rows[0]) : null;
 };
 
 export type LiveQueueRow = { targetType: string; count: number; oldest: string | null };

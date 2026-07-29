@@ -10,7 +10,8 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test:session": "node --test src/app/console/lib/session-cookie.test.ts",
     "test:bridge": "node --test src/app/console/lib/annoupale/bridge-core.test.ts",
-    "test:annoupale": "node --test src/app/console/lib/annoupale/bridge-core.test.ts src/app/console/lib/annoupale/compliance-contract.test.ts src/app/console/lib/annoupale/compliance-detail-contract.test.ts src/app/console/lib/annoupale/compliance-note-contract.test.ts src/app/console/lib/annoupale/compliance-status-contract.test.ts src/app/console/lib/annoupale/compliance-appeals.test.ts src/app/console/lib/annoupale/compliance-search-contract.test.ts src/app/console/lib/annoupale/moderation-contract.test.ts src/app/console/lib/annoupale/audit-contract.test.ts src/app/console/lib/annoupale/analytics-contract.test.ts src/app/console/lib/annoupale/attention-contract.test.ts"
+    "test:annoupale": "node --test src/app/console/lib/annoupale/bridge-core.test.ts src/app/console/lib/annoupale/compliance-contract.test.ts src/app/console/lib/annoupale/compliance-detail-contract.test.ts src/app/console/lib/annoupale/compliance-note-contract.test.ts src/app/console/lib/annoupale/compliance-status-contract.test.ts src/app/console/lib/annoupale/compliance-appeals.test.ts src/app/console/lib/annoupale/compliance-search-contract.test.ts src/app/console/lib/annoupale/moderation-contract.test.ts src/app/console/lib/annoupale/audit-contract.test.ts src/app/console/lib/annoupale/analytics-contract.test.ts src/app/console/lib/annoupale/attention-contract.test.ts",
+    "test:pale": "node --test src/app/console/lib/pale-rbac.test.ts src/app/console/lib/pale-reports-contract.test.ts"
   },
   "dependencies": {
     "@migrateck/auth-client": "workspace:*",
