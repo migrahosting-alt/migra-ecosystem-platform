@@ -7,18 +7,23 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",
-    "typecheck": "tsc --noEmit -p tsconfig.json"
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test:session": "node --test src/app/console/lib/session-cookie.test.ts",
+    "test:bridge": "node --test src/app/console/lib/annoupale/bridge-core.test.ts",
+    "test:annoupale": "node --test src/app/console/lib/annoupale/bridge-core.test.ts src/app/console/lib/annoupale/compliance-contract.test.ts src/app/console/lib/annoupale/compliance-detail-contract.test.ts src/app/console/lib/annoupale/compliance-note-contract.test.ts src/app/console/lib/annoupale/compliance-status-contract.test.ts src/app/console/lib/annoupale/compliance-appeals.test.ts src/app/console/lib/annoupale/compliance-search-contract.test.ts src/app/console/lib/annoupale/moderation-contract.test.ts src/app/console/lib/annoupale/audit-contract.test.ts src/app/console/lib/annoupale/analytics-contract.test.ts src/app/console/lib/annoupale/attention-contract.test.ts"
   },
   "dependencies": {
     "@migrateck/auth-client": "workspace:*",
     "@migrateck/lib": "workspace:*",
     "@migrateck/ui": "workspace:*",
     "clsx": "^2.1.1",
+    "dompurify": "^3.4.8",
     "lucide-react": "^1.8.0",
     "next": "16.2.6",
     "pg": "^8.20.0",
     "react": "19.2.5",
     "react-dom": "19.2.5",
+    "server-only": "^0.0.1",
     "tailwindcss": "^4.2.2",
     "zod": "^4.3.6"
   },
