@@ -168,7 +168,7 @@ rsync -avz --delete dist/ root@100.68.239.94:/srv/web/migrahosting/
 ```bash
 curl -X POST http://100.119.105.93:3020/wordpress/provision \
   -H "Content-Type: application/json" \
-  -H "X-API-Key: YOUR_API_KEY" \
+  -H "X-API-Key: ${PROVISIONING_API_KEY}" \
   -d '{
     "tenantId": "test-tenant-id",
     "customerId": "test-customer-id",
@@ -197,7 +197,7 @@ curl -X POST http://100.119.105.93:3020/wordpress/provision \
 ```bash
 curl -X POST http://100.119.105.93:3020/email/provision \
   -H "Content-Type: application/json" \
-  -H "X-API-Key: YOUR_API_KEY" \
+  -H "X-API-Key: ${PROVISIONING_API_KEY}" \
   -d '{
     "tenantId": "test-tenant-id",
     "customerId": "test-customer-id",
@@ -226,7 +226,7 @@ curl -X POST http://100.119.105.93:3020/email/provision \
 ```bash
 curl -X POST http://100.119.105.93:3020/vps/provision \
   -H "Content-Type: application/json" \
-  -H "X-API-Key: YOUR_API_KEY" \
+  -H "X-API-Key: ${PROVISIONING_API_KEY}" \
   -d '{
     "tenantId": "test-tenant-id",
     "customerId": "test-customer-id",
@@ -404,3 +404,6 @@ A: Service is flagged for cleanup, provisioning job completes but service is imm
 ---
 
 *For issues or questions, check `.migra/runbooks/payment-to-provisioning-automation.md` for full technical specification.*
+
+> `PROVISIONING_API_KEY` is supplied from the panel-api service environment on
+> app-core. It is never stored in this repository.

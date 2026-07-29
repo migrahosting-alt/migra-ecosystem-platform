@@ -1,3 +1,9 @@
+import { createHash } from "node:crypto";
+
+/** Deterministic non-secret test key: reproducible, but not credential-shaped. */
+const testKey = (label: string): string =>
+  createHash("sha256").update(`migrateck-test:${label}`).digest("hex").slice(0, 64);
+
 import { OrgRole, SecretScope } from "@prisma/client";
 import { beforeEach, describe, expect, test } from "vitest";
 import { writeAuditLog } from "../../src/lib/audit";
@@ -38,7 +44,7 @@ import { recordSecurityEvent } from "../../src/lib/security/security-events";
 import { createMembership, createOrganization, createUser, resetDatabase } from "../helpers/fixtures";
 import { prisma } from "../helpers/prisma";
 
-const PLATFORM_ENCRYPTION_KEY = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+const PLATFORM_ENCRYPTION_KEY = testKey("compliance-runtime");
 
 describe("Compliance runtime proof", () => {
   beforeEach(async () => {

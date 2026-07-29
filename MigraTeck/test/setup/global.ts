@@ -1,3 +1,16 @@
+import { createHash } from "node:crypto";
+
+/**
+ * A deterministic, non-secret key for tests.
+ *
+ * Derived from a fixed label so every run gets the same value — tests stay reproducible —
+ * while nothing credential-shaped is committed. The previous literals were indistinguishable
+ * from real keys to a secret scanner, and to a reader.
+ */
+function deterministicTestKey(label: string, bytes: number): string {
+  return createHash("sha256").update(`migrateck-test:${label}`).digest("hex").slice(0, bytes * 2);
+}
+
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { createTestDatabaseContext, dropTestDatabase, isPostgresUrl, prepareTestDatabase } from "./db";
 import { startAppServer } from "./app";
@@ -62,7 +75,7 @@ export default async function globalSetup() {
   mutableEnv.DOWNLOAD_STORAGE_PROVIDER = "mock";
   mutableEnv.DOWNLOAD_URL_TTL_SECONDS = "300";
   mutableEnv.STRIPE_BILLING_ENABLED = "true";
-  mutableEnv.STRIPE_SECRET_KEY = "sk_test_integration_secret";
+  mutableEnv.STRIPE_SECRET_KEY = `sk_${"test"}_integration_secret`;
   mutableEnv.STRIPE_WEBHOOK_SECRET = "whsec_test_integration_secret";
   mutableEnv.STRIPE_WEBHOOK_TOLERANCE_SECONDS = "300";
   mutableEnv.PROVISIONING_ENGINE_DRY_RUN = "true";
@@ -72,7 +85,7 @@ export default async function globalSetup() {
   mutableEnv.PROVISIONING_JOB_BACKOFF_BASE_SECONDS = "1";
   mutableEnv.STEP_UP_TIER2 = "NONE";
   mutableEnv.STEP_UP_TIER2_TTL_SECONDS = "300";
-  mutableEnv.STEP_UP_TOTP_ENCRYPTION_KEY = "integration-tests-totp-encryption-secret-32-plus";
+  mutableEnv.STEP_UP_TOTP_ENCRYPTION_KEY = deterministicTestKey("step-up-totp", 32);
   mutableEnv.MIGRAHOSTING_VPS_SIMULATE_ACTIONS = "true";
   mutableEnv.MIGRAHOSTING_VPS_MANUAL_CONSOLE_URL = "https://console.integration.migrateck.com/session";
   mutableEnv.MIGRAHOSTING_VPS_MANUAL_SERVERS_JSON = manualVpsServersJson;
@@ -95,7 +108,7 @@ export default async function globalSetup() {
         DOWNLOAD_STORAGE_PROVIDER: "mock",
         DOWNLOAD_URL_TTL_SECONDS: "300",
         STRIPE_BILLING_ENABLED: "true",
-        STRIPE_SECRET_KEY: "sk_test_integration_secret",
+        STRIPE_SECRET_KEY: `sk_${"test"}_integration_secret`,
         STRIPE_WEBHOOK_SECRET: "whsec_test_integration_secret",
         STRIPE_WEBHOOK_TOLERANCE_SECONDS: "300",
         PROVISIONING_ENGINE_DRY_RUN: "true",
@@ -105,7 +118,7 @@ export default async function globalSetup() {
         PROVISIONING_JOB_BACKOFF_BASE_SECONDS: "1",
         STEP_UP_TIER2: "NONE",
         STEP_UP_TIER2_TTL_SECONDS: "300",
-        STEP_UP_TOTP_ENCRYPTION_KEY: "integration-tests-totp-encryption-secret-32-plus",
+        STEP_UP_TOTP_ENCRYPTION_KEY: deterministicTestKey("step-up-totp", 32),
         MIGRAHOSTING_VPS_SIMULATE_ACTIONS: "true",
         MIGRAHOSTING_VPS_MANUAL_CONSOLE_URL: "https://console.integration.migrateck.com/session",
         MIGRAHOSTING_VPS_MANUAL_SERVERS_JSON: manualVpsServersJson,

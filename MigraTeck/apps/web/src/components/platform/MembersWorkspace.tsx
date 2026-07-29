@@ -54,6 +54,19 @@ function getSafeErrorMessage(fallback: string) {
   return `${fallback} Refresh sign-in and try again.`;
 }
 
+/**
+ * The organization-members API row. Snake_case fields are the API's, camelCase are this
+ * component's — naming both sides is what lets the mapping below be checked rather than
+ * trusted.
+ */
+type ApiMember = {
+  id: string;
+  role: string;
+  status: string;
+  joined_at: string | null;
+  user: { id: string; email: string; display_name: string | null };
+};
+
 export function MembersWorkspace({
   orgId,
   orgName,
@@ -94,7 +107,7 @@ export function MembersWorkspace({
         if (!cancelled) {
           setMembers(
             Array.isArray(payload?.members)
-              ? payload.members.map((member: any) => ({
+              ? payload.members.map((member: ApiMember) => ({
                   id: member.id,
                   role: member.role,
                   status: member.status,

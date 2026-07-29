@@ -1,3 +1,9 @@
+import { createHash } from "node:crypto";
+
+/** Deterministic non-secret test key: reproducible, but not credential-shaped. */
+const testKey = (label: string): string =>
+  createHash("sha256").update(`migrateck-test:${label}`).digest("hex").slice(0, 64);
+
 import { createHmac } from "node:crypto";
 import { ProductKey } from "@prisma/client";
 import { beforeEach, describe, expect, test } from "vitest";
@@ -128,7 +134,7 @@ describe("Product launch integration", () => {
         iat: now - 120,
         exp: now - 60,
       },
-      process.env.LAUNCH_TOKEN_SECRET || "integration-tests-launch-secret-32-plus",
+      process.env.LAUNCH_TOKEN_SECRET || testKey("products-launch"),
     );
 
     const expired = await client.post<{ error?: string }>("/api/products/consume", {

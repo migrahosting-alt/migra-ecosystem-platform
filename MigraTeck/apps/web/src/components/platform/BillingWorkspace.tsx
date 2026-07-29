@@ -1,3 +1,4 @@
+import Link from "next/link";
 "use client";
 
 import { useEffect, useState } from "react";
@@ -193,12 +194,12 @@ export function BillingWorkspace() {
             {portalLoading ? "Opening portal…" : "Manage billing in Stripe"}
           </button>
         ) : null}
-        <a
+        <Link
           href="/legal/payment"
           className="inline-flex items-center justify-center rounded-full border border-slate-200 bg-white px-5 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
         >
           Review payment policy
-        </a>
+        </Link>
       </div>
 
       <div className="grid gap-6 xl:grid-cols-[1.15fr_0.85fr]">

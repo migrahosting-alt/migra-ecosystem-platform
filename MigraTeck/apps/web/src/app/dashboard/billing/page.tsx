@@ -26,6 +26,17 @@ interface BillingOverview {
   dunningState: string;
 }
 
+/**
+ * Only the fields this page reads; the endpoint returns more. Naming them keeps the
+ * downstream `overview.account` assignment type-checked instead of `any`-erased.
+ */
+type BillingAccount = {
+  status: string;
+  billingEmail: string | null;
+  defaultCurrency: string;
+};
+type BillingSubscription = Record<string, unknown>;
+
 export default async function BillingPage() {
   ensureAuthClientInitialized();
   const session = await requirePermission("platform.read");
@@ -51,8 +62,8 @@ export default async function BillingPage() {
   let overview: BillingOverview | null = null;
   try {
     const [account, subscriptions, dunning] = await Promise.all([
-      fetchBilling<any>("/billing/account", orgId, "").catch(() => null),
-      fetchBilling<any[]>("/billing/subscriptions", orgId, "").catch(() => []),
+      fetchBilling<BillingAccount | null>("/billing/account", orgId, "").catch(() => null),
+      fetchBilling<BillingSubscription[]>("/billing/subscriptions", orgId, "").catch(() => []),
       fetchBilling<{ dunningState: string }>("/billing/dunning", orgId, "").catch(() => ({ dunningState: "unknown" })),
     ]);
     overview = {

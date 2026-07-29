@@ -129,3 +129,10 @@ _security_scan_outputs/
 
 # Claude Code local (uncommitted) personal settings
 .claude/settings.local.json
+
+# Accidentally-committed Chrome/Chromium user-data directories from Lighthouse runs.
+# These were captured on Windows, so the path is a literal name containing a drive letter.
+# Narrow by design: it matches ONLY the generated `lighthouse.<digits>` profile directories,
+# never Lighthouse report output (*.report.html / *.report.json) or app configuration.
+MigraTeck/C:\\Users\\*\\AppData\\Local\\lighthouse.[0-9]*/
+**/lighthouse.[0-9]*/Default/
