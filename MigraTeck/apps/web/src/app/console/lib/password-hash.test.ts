@@ -120,6 +120,28 @@ test("a correct hash rejects the wrong password and accepts only the right one",
   }
 });
 
+test("the OTHER documented copy of the command agrees with the parser", () => {
+  /**
+   * canonical console/account/page.tsx shows operators the same rotation command in the UI,
+   * and it already used the colon. That second copy is why the auth.ts defect went
+   * unnoticed for so long: the screen was right and the code comment was wrong.
+   *
+   * Two documented copies is two drift risks, so both are pinned here.
+   */
+  const accountPage = readFileSync(join(HERE, "..", "account", "page.tsx"), "utf8");
+  assert.match(accountPage, /scryptSync/, "account/page.tsx should still document rotation");
+  assert.match(
+    accountPage,
+    /'scrypt:'\s*\+/,
+    "the account page must document the colon-separated format",
+  );
+  assert.doesNotMatch(
+    accountPage,
+    /'scrypt\$'/,
+    "the account page must never document `$` separators",
+  );
+});
+
 test("the separator is a colon, and the reason is recorded", () => {
   // The value lives in env files and systemd units, where `$` is expanded by the shell.
   // That is why the format is not the more conventional `$`-delimited PHC string.
