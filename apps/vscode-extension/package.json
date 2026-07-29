@@ -349,14 +349,15 @@
     "build": "tsc -b",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "npm run build && node ./scripts/test-smoke.js",
-    "test:unit": "tsc -b && node scripts/aggregate-controls.mjs && node --test dist/test/unit/*.test.js",
+    "test:unit": "tsc -b && node scripts/aggregate-controls.mjs && node scripts/check-notification-awaits.mjs && node --test dist/test/unit/*.test.js",
     "test:integration": "tsc -b && node ./dist/test/runTest.js",
     "test:vsix": "tsc -b && node scripts/bundle.mjs && node ./dist/test/runTestVsix.js",
     "test:ops": "tsc -b && node ./dist/test/runOps.js",
     "watch": "tsc -b -w",
-    "package": "tsc -b && node scripts/aggregate-controls.mjs && node scripts/bundle.mjs && vsce package --no-dependencies --allow-missing-repository --skip-license",
+    "package": "tsc -b && node scripts/aggregate-controls.mjs && node scripts/check-notification-awaits.mjs && node scripts/bundle.mjs && vsce package --no-dependencies --allow-missing-repository --skip-license",
     "inspect:vsix": "node scripts/inspect-vsix.mjs migrapilot-extension-0.1.0.vsix",
-    "controls:aggregate": "node scripts/aggregate-controls.mjs"
+    "controls:aggregate": "node scripts/aggregate-controls.mjs",
+    "notifications:check": "node scripts/check-notification-awaits.mjs"
   },
   "dependencies": {
     "@migrapilot/protocol": "0.1.0",

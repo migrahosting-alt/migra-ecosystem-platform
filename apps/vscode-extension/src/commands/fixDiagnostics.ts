@@ -18,19 +18,19 @@ export async function runFixDiagnostics(deps: CommandDeps): Promise<void> {
   const uri = editor?.document.uri;
 
   if (!editor || !uri) {
-    await vscode.window.showWarningMessage('No active file to diagnose.');
+    void vscode.window.showWarningMessage('No active file to diagnose.');
     return;
   }
 
   const diagnostics = vscode.languages.getDiagnostics(uri);
   if (!diagnostics.length) {
-    await vscode.window.showInformationMessage('No diagnostics found in the active file.');
+    void vscode.window.showInformationMessage('No diagnostics found in the active file.');
     return;
   }
 
   const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   if (!workspaceRoot) {
-    await vscode.window.showWarningMessage('Open a workspace folder to fix diagnostics with repo context.');
+    void vscode.window.showWarningMessage('Open a workspace folder to fix diagnostics with repo context.');
     return;
   }
 
@@ -257,7 +257,7 @@ async function runFixRemote(
   );
 
   if (!res.proposedEdits?.length) {
-    await vscode.window.showInformationMessage('pilot-api proposed no edits for the current diagnostics.');
+    void vscode.window.showInformationMessage('pilot-api proposed no edits for the current diagnostics.');
     return;
   }
 

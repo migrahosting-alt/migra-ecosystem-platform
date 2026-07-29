@@ -13,7 +13,7 @@ import { type CommandDeps, surfacePilotError, withCancellableProgress } from './
 export async function runReviewApprovals(deps: CommandDeps): Promise<void> {
   const backend = deps.router.current() ?? (await deps.router.resolve());
   if (backend.kind === 'local') {
-    await vscode.window.showInformationMessage('Approvals require pilot-api (remote) mode.');
+    void vscode.window.showInformationMessage('Approvals require pilot-api (remote) mode.');
     return;
   }
   const gate = evaluateCapability(backend, CAP_APPROVALS);
@@ -33,7 +33,7 @@ export async function runReviewApprovals(deps: CommandDeps): Promise<void> {
 
   const pending = actions.filter((a) => a.state === 'PENDING');
   if (pending.length === 0) {
-    await vscode.window.showInformationMessage('MigraPilot: no pending actions to review.');
+    void vscode.window.showInformationMessage('MigraPilot: no pending actions to review.');
     return;
   }
 
@@ -69,13 +69,13 @@ export async function runReviewApprovals(deps: CommandDeps): Promise<void> {
   try {
     if (choice === 'Reject') {
       const rejected = await approvals.reject(pick.actionId, newRequestId());
-      await vscode.window.showInformationMessage(`MigraPilot: action ${rejected.state.toLowerCase()}.`);
+      void vscode.window.showInformationMessage(`MigraPilot: action ${rejected.state.toLowerCase()}.`);
       return;
     }
     const outcome = await withCancellableProgress('MigraPilot: approving & executing…', (signal) =>
       approveResumeAndReconcile(approvals, pick.actionId, signal),
     );
-    await vscode.window.showInformationMessage(
+    void vscode.window.showInformationMessage(
       outcome.status === 'completed'
         ? 'MigraPilot: action approved and executed.'
         : `MigraPilot: action ${outcome.status.replace('_', ' ')} (state ${outcome.action.state}).`,

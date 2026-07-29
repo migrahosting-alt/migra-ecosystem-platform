@@ -74,7 +74,7 @@ export async function previewAndMaybeApplyProposedEdits(
 
   const dirtyPath = firstDirtyPath(rootPath, changes);
   if (dirtyPath) {
-    await vscode.window.showWarningMessage(
+    void vscode.window.showWarningMessage(
       `Save or revert local editor changes before applying MigraPilot edits to ${dirtyPath}.`,
     );
     return false;
@@ -106,7 +106,7 @@ export async function previewAndMaybeApplyProposedEdits(
   );
 
   if (!verification.verified) {
-    await vscode.window.showWarningMessage(
+    void vscode.window.showWarningMessage(
       verification.failures.length === 1
         ? `MigraPilot could not verify the edit to ${verification.failures[0]}. Review the file before relying on it.`
         : `MigraPilot could not verify edits to ${verification.failures.length} files. Review them before relying on them.`,
@@ -114,7 +114,7 @@ export async function previewAndMaybeApplyProposedEdits(
     return false;
   }
 
-  await vscode.window.showInformationMessage(
+  void vscode.window.showInformationMessage(
     changedCount === 1
       ? 'MigraPilot applied and verified 1 patch.'
       : `MigraPilot applied and verified ${changedCount} patches.`,
@@ -126,7 +126,7 @@ export async function previewAndMaybeApplyProposedEdits(
 async function surfaceToolError(error: unknown): Promise<void> {
   const code = isPilotError(error) ? error.code : 'SERVER_ERROR';
   const message = toUserMessage(code) || 'MigraPilot could not apply the edit.';
-  await vscode.window.showWarningMessage(message);
+  void vscode.window.showWarningMessage(message);
 }
 
 function toRelativeWorkspacePath(rootPath: string, filePath: string): string {
