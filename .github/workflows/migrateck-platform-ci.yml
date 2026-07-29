@@ -12,6 +12,11 @@ on:
       - "MigraTeck/**"
       - ".github/workflows/migrateck-platform-ci.yml"
 
+# Least privilege, declared explicitly rather than inherited. The repository default is
+# already `read`, but a default is a setting someone can change; this is a guarantee.
+permissions:
+  contents: read
+
 jobs:
   validate:
     runs-on: ubuntu-latest
@@ -51,9 +56,36 @@ jobs:
 
   secret-scan:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # gitleaks-action reads the PR's commit list to determine the scan range.
+      pull-requests: read
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          # gitleaks scans the PR's commit RANGE, so the default shallow clone
+          # (fetch-depth: 1) leaves it nothing to compare against.
+          fetch-depth: 0
 
       - name: Secret scan
         uses: gitleaks/gitleaks-action@v2
+        env:
+          # Redact match text everywhere gitleaks can emit it. Findings must report rule,
+          # path and line — never the value. On a PUBLIC repository a verbose scanner is a
+          # disclosure channel, so this is a safety control, not tidiness.
+          GITLEAKS_ENABLE_COMMENTS: "false"
+          GITLEAKS_ENABLE_UPLOAD_ARTIFACT: "false"
+          GITLEAKS_ENABLE_SUMMARY: "false"
+          # REQUIRED since gitleaks-action v2.3.0. Without it the action aborts during
+          # initialization with "GITHUB_TOKEN is now required to scan pull requests" —
+          # it never scans, so every run is a configuration error rather than a verdict.
+          # This is the automatically-provisioned per-run token; it is masked in logs by
+          # the runner and is never echoed by this workflow.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Proves the scanner actually detects secrets, rather than trusting that a passing
+      # job means it ran. Fixtures are synthetic and live outside the repository.
+      - name: Verify the scanner detects secrets
+        run: bash .github/scripts/verify-secret-scan.sh
+        working-directory: ${{ github.workspace }}

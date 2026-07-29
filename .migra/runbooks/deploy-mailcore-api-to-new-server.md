@@ -114,7 +114,7 @@ ssh root@100.81.76.39 "systemctl start mailcore-api.service && systemctl status 
 
 ```bash
 # From panel-api host
-ssh root@100.119.105.93 "curl -v http://100.81.76.39:9080/health"
+ssh root@mail-core "curl -v 'http://100.81.76.39:9080/health'"   # unauthenticated health probe
 
 # Should return: {"status":"ok"}
 ```
@@ -122,7 +122,7 @@ ssh root@100.119.105.93 "curl -v http://100.81.76.39:9080/health"
 ### 7. Test from Panel API (if service is running)
 
 ```bash
-ssh root@100.119.105.93 "curl -H 'Authorization: Bearer 8941d7b2cc20cea5b7b84032b02d156a7c7ae5a186de5e12d75e17af0b7859be' http://100.81.76.39:9080/health"
+ssh root@100.119.105.93 "curl -H 'Authorization: Bearer ${MAILCORE_API_TOKEN}' http://100.81.76.39:9080/health"
 ```
 
 ---
