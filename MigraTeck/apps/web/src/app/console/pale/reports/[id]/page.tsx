@@ -76,7 +76,7 @@ export default async function PaleReportDetailPage({
             <dl className="grid grid-cols-1 gap-x-6 gap-y-2.5 sm:grid-cols-2">
               {[
                 ["Status", <span key="s" className={`inline-flex items-center rounded-md border px-2 py-0.5 text-[10px] font-medium ${STATUS_BADGE[report.status] ?? STATUS_BADGE.pending}`}>{report.status}</span>],
-                ["Target", <span key="t" className="text-slate-200">{report.targetType} <span className="font-mono text-slate-500">{shortId(report.targetId)}</span></span>],
+                ["Target", <span key="t" className="text-slate-200">{report.targetType} <span className="font-mono text-slate-500">{shortId(report.targetId ?? null)}</span></span>],
                 ["Reporter", <span key="r" className="font-mono text-slate-400">{maskPhone(report.reporterPhone)}</span>],
                 ["Created", <span key="c" className="text-slate-400">{absolute(report.createdAt)}</span>],
                 ["Reason", <span key="rs" className="text-slate-300">{report.reason}</span>],
