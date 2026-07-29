@@ -126,6 +126,31 @@ export const loadDistinctClientStatuses = async (): Promise<string[]> => {
   return Array.from(seen).sort();
 };
 
+/**
+ * Resolves a customer by an inbound email address — matching either the tenant's
+ * billing email or one of its mailbox addresses — then returns the full detail.
+ * Used by the Mail module's sender → customer context panel. Read-only, reuses
+ * the same migrapanel access as the Clients module (no new cross-DB access).
+ */
+export const loadClientByEmail = async (email: string): Promise<ClientDetail | null> => {
+  if (!isPanelDbConfigured()) return null;
+  const e = email.trim().toLowerCase();
+  if (!e || !e.includes("@")) return null;
+  const rows = await panelQuery<{ id: string }>(
+    `SELECT t.id
+       FROM tenants t
+      WHERE LOWER(COALESCE(t.billing_email, '')) = $1
+      UNION
+     SELECT m.tenantid AS id
+       FROM mailboxes m
+      WHERE LOWER(m.address) = $1 AND m.tenantid IS NOT NULL
+      LIMIT 1`,
+    [e],
+  );
+  if (rows.length === 0) return null;
+  return loadClientDetail(rows[0]!.id);
+};
+
 export const loadClientDetail = async (id: string): Promise<ClientDetail | null> => {
   if (!isPanelDbConfigured()) return null;
   const baseRows = await panelQuery<{
