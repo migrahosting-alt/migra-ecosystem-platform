@@ -351,8 +351,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<MigraP
       if (!root) return void vscode.window.showWarningMessage('Open a workspace before pairing Agent Mode.');
       const secret = await vscode.window.showInputBox({ title: 'Pair Agent Mode', prompt: 'Enter the one-time bootstrap secret shown by the local brain operator.', password: true, ignoreFocusOut: true });
       if (!secret) return;
-      try { await ensureAgentAuthorization(root, secret, 'pairing'); await vscode.window.showInformationMessage('Agent Mode paired for this extension activation and workspace.'); }
-      catch { await vscode.window.showErrorMessage('Agent Mode pairing was refused or expired.'); }
+      try { await ensureAgentAuthorization(root, secret, 'pairing'); void vscode.window.showInformationMessage('Agent Mode paired for this extension activation and workspace.'); }
+      catch { void vscode.window.showErrorMessage('Agent Mode pairing was refused or expired.'); }
     }),
   );
 
@@ -667,11 +667,11 @@ async function providerInfo(): Promise<void> {
     const caps = makeProvider().capabilities();
     const message = `MigraPilot provider: ${caps.providerId} · model ${caps.model} · streaming ${caps.streaming}`;
     output(message);
-    await vscode.window.showInformationMessage(message);
+    void vscode.window.showInformationMessage(message);
   } catch (error) {
     const message = `MigraPilot provider: ${getProviderKind()} (not fully configured: ${error instanceof Error ? error.message : String(error)})`;
     output(message);
-    await vscode.window.showWarningMessage(message);
+    void vscode.window.showWarningMessage(message);
   }
 }
 
@@ -687,7 +687,7 @@ async function checkHealth(): Promise<void> {
     const message = `MigraPilot brain is ${health.status}. Version ${health.version}. Uptime ${health.uptimeSec}s.`;
     output(message);
     shell?.recordActivity(`Health check: brain ${health.status}`, health.status === 'ok' ? 'ok' : 'warn');
-    await vscode.window.showInformationMessage(message, 'Show Logs');
+    void vscode.window.showInformationMessage(message, 'Show Logs');
   } catch (error) {
     const message = formatError('Health check failed', error);
     output(message);
@@ -720,7 +720,7 @@ async function chooseExecutionPolicy(): Promise<void> {
   try {
     policies = (await routerClient.getPolicies()).policies;
   } catch (error) {
-    await vscode.window.showErrorMessage(formatError('Could not load execution policies from the engine', error));
+    void vscode.window.showErrorMessage(formatError('Could not load execution policies from the engine', error));
     return;
   }
   const items = policyPickItems(policies, policyState.get() as never).map((it) => ({ label: it.label, description: it.description, id: it.id }));
@@ -733,7 +733,7 @@ async function chooseExecutionPolicy(): Promise<void> {
   await policyState.set(picked.id);
   refreshPolicyStatusBar();
   const label = policyStatusLabel(policies, picked.id as never);
-  await vscode.window.showInformationMessage(`${label}. This is a per-request preference — the engine resolves the effective policy and enforces routing, consent, privacy, and budget.`);
+  void vscode.window.showInformationMessage(`${label}. This is a per-request preference — the engine resolves the effective policy and enforces routing, consent, privacy, and budget.`);
 }
 
 /** Read-only provider status (Slice 5). Shows the fleet without credential values. */
@@ -743,7 +743,7 @@ async function showProviderStatus(): Promise<void> {
     const items = providerRows(providers).map((r) => ({ label: `${r.name} · ${r.type}`, description: `${r.health}${r.note ? ` — ${r.note}` : ''}`, detail: `Capabilities: ${r.capabilities}${r.model ? ` · Model: ${r.model}` : ''}` }));
     await vscode.window.showQuickPick(items, { title: 'MigraPilot — Providers (read-only)', placeHolder: 'Provider status. No credentials or endpoints are shown.' });
   } catch (error) {
-    await vscode.window.showErrorMessage(formatError('Could not load provider status', error));
+    void vscode.window.showErrorMessage(formatError('Could not load provider status', error));
   }
 }
 
@@ -752,9 +752,9 @@ async function showAiUsage(): Promise<void> {
   try {
     const [budget, usage] = await Promise.all([routerClient.getBudget(), routerClient.getUsage({ limit: 1 })]);
     const rows = budgetRows(budget, usage).map((r) => `${r.label}: ${r.value}`);
-    await vscode.window.showInformationMessage(`AI Usage — ${rows.join(' · ')}`, 'OK');
+    void vscode.window.showInformationMessage(`AI Usage — ${rows.join(' · ')}`, 'OK');
   } catch (error) {
-    await vscode.window.showErrorMessage(formatError('Could not load AI usage', error));
+    void vscode.window.showErrorMessage(formatError('Could not load AI usage', error));
   }
 }
 
@@ -777,7 +777,7 @@ async function productionDiagnosticsStatus(): Promise<void> {
   } catch (error) {
     const message = formatError('Production Diagnostics status unavailable', error);
     output(message);
-    await vscode.window.showErrorMessage(message);
+    void vscode.window.showErrorMessage(message);
   }
 }
 

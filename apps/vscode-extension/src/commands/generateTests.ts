@@ -215,12 +215,12 @@ export async function runGenerateTests(
 export async function runGenerateTestsCommand(deps: TestGenDeps): Promise<void> {
   const editor = vscode.window.activeTextEditor;
   if (!editor) {
-    await vscode.window.showWarningMessage('Open a file to generate tests for.');
+    void vscode.window.showWarningMessage('Open a file to generate tests for.');
     return;
   }
   const folder = vscode.workspace.workspaceFolders?.[0];
   if (!folder) {
-    await vscode.window.showWarningMessage('Open a workspace folder to generate tests.');
+    void vscode.window.showWarningMessage('Open a workspace folder to generate tests.');
     return;
   }
   const root = folder.uri.fsPath;
@@ -255,22 +255,22 @@ async function reportResult(result: TestGenResult): Promise<void> {
         'skipped' in result.testRun
           ? `tests not run (${result.testRun.reason})`
           : `test command exited ${result.testRun.exitCode}`;
-      await vscode.window.showInformationMessage(
+      void vscode.window.showInformationMessage(
         `MigraPilot wrote ${result.written.length} test file(s) · read-back ${result.verified ? 'verified' : 'UNVERIFIED'} · ${run}.`,
       );
       break;
     }
     case 'partial':
-      await vscode.window.showErrorMessage(
+      void vscode.window.showErrorMessage(
         `MigraPilot partially wrote tests (${result.written.length} written, failed at ${result.failed}). Review the workspace.`,
       );
       break;
     case 'no-write':
-      await vscode.window.showInformationMessage('MigraPilot: test generation cancelled — no files changed.');
+      void vscode.window.showInformationMessage('MigraPilot: test generation cancelled — no files changed.');
       break;
     case 'refused':
     case 'error':
-      await vscode.window.showWarningMessage(`MigraPilot could not generate tests: ${result.reason}`);
+      void vscode.window.showWarningMessage(`MigraPilot could not generate tests: ${result.reason}`);
       break;
   }
 }

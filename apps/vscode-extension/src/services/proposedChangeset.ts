@@ -101,7 +101,7 @@ export async function previewAndMaybeApplyChangeset(
     return false;
   }
 
-  await vscode.window.showInformationMessage(
+  void vscode.window.showInformationMessage(
     `MigraPilot ${options.autoApply ? 'auto-applied' : 'applied'} ${fileOps.length} file change${fileOps.length === 1 ? '' : 's'} to the workspace: ${summary}.`,
   );
   return true;
@@ -112,7 +112,7 @@ async function surfaceToolError(error: unknown, phase: 'propose' | 'apply'): Pro
   const base = toUserMessage(code) || 'MigraPilot could not apply the proposed changes.';
   // A stale hash (proposal TTL elapsed) is the common, recoverable case.
   const hint = phase === 'propose' ? ' The proposal may have expired — ask MigraPilot to rebuild it.' : '';
-  await vscode.window.showWarningMessage(`${base}${hint}`);
+  void vscode.window.showWarningMessage(`${base}${hint}`);
 }
 
 /** Open a native diff for each proposed file (bounded). Creates render as an

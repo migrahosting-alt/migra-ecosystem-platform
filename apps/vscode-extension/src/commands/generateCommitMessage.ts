@@ -145,7 +145,7 @@ export async function runGenerateCommitMessage(
 export async function runGenerateCommitMessageCommand(deps: CommitGenDeps): Promise<void> {
   const folder = vscode.workspace.workspaceFolders?.[0];
   if (!folder) {
-    await vscode.window.showWarningMessage('Open a workspace folder to generate a commit message.');
+    void vscode.window.showWarningMessage('Open a workspace folder to generate a commit message.');
     return;
   }
   const root = folder.uri.fsPath;
@@ -156,13 +156,13 @@ export async function runGenerateCommitMessageCommand(deps: CommitGenDeps): Prom
       runGenerateCommitMessage(deps, root, {}, signal),
     );
     if (result.status === 'no-staged-changes') {
-      await vscode.window.showInformationMessage(
+      void vscode.window.showInformationMessage(
         'MigraPilot: no staged changes to describe. Stage changes first (git add).',
       );
       return;
     }
     if (result.status === 'refused' || result.status === 'error') {
-      await vscode.window.showWarningMessage(`MigraPilot could not write a commit message: ${result.reason}`);
+      void vscode.window.showWarningMessage(`MigraPilot could not write a commit message: ${result.reason}`);
       return;
     }
     // Preview (read-only) BEFORE any clipboard action.
@@ -172,7 +172,7 @@ export async function runGenerateCommitMessageCommand(deps: CommitGenDeps): Prom
     const choice = await vscode.window.showInformationMessage('MigraPilot generated a commit message.', 'Copy to Clipboard');
     if (choice === 'Copy to Clipboard') {
       await vscode.env.clipboard.writeText(preview);
-      await vscode.window.showInformationMessage('Commit message copied to clipboard.');
+      void vscode.window.showInformationMessage('Commit message copied to clipboard.');
     }
   } catch (err) {
     await surfacePilotError(deps.output, err, requestId);
