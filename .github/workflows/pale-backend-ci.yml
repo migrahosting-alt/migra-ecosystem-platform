@@ -18,7 +18,10 @@ defaults:
 
 jobs:
   ci:
-    name: Typecheck & Lint
+    # Was `Typecheck & Lint`, identical to pale-mobile-ci.yml's job name. Their path filters both
+    # include Software/Pale/packages/**, so one PR produced two check-runs sharing a single
+    # context name — indistinguishable to branch protection and to the aggregate gate.
+    name: pale-backend-checks
     runs-on: ubuntu-latest
     timeout-minutes: 15
 

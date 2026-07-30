@@ -219,3 +219,82 @@ None. This audit is read-only:
 
 Recorded for the record: the only write actions in this workstream were a push of
 `fix/migrateck-ci-environment-parity` and opening a **draft** PR, both explicitly authorised.
+
+---
+
+## 10. Incident record — PR #124, same-actor promote-and-merge (2026-07-30)
+
+Appended as a follow-up. This section records an observed event; §9 above remains accurate for the
+original audit.
+
+### What GitHub records
+
+From the PR #124 timeline and merge metadata, quoted as the API reports them:
+
+```
+2026-07-30T03:46:06Z  ready_for_review   actor: migrahosting-alt
+2026-07-30T03:46:10Z  merged             actor: migrahosting-alt
+2026-07-30T03:46:10Z  closed             actor: migrahosting-alt
+```
+
+| field | value |
+|---|---|
+| ready for review | `2026-07-30T03:46:06Z` |
+| merged | `2026-07-30T03:46:10Z` |
+| interval | **4 seconds** |
+| actor attribution | `migrahosting-alt` on all three events, exactly as reported by GitHub |
+| merge commit | `598743e1a0ea965f3f0408e3e0de8d6a7adc7e7d` |
+| head at merge | `1c53092129cafdcbe111545329ca3ba46bb458f9` |
+| base branch | `phase-1/canonical-vscode-extension` |
+| base protection at the time | **none** — `GET /branches/.../protection` returned `404 Branch not protected`; no rulesets existed |
+
+### What this is, and what it is not
+
+The PR had been asked to remain a draft pending a governance review. It was promoted and merged four
+seconds later.
+
+**All five visible checks were green at merge** — `canonical-integration-gate`, `nginx-gate`,
+`Workspace Hygiene (Strict)`, `guard-bootstrap` and `fresh-clone-proof` all reported `SUCCESS`, with
+zero pending, cancelled or failed. The merged head was the expected commit and the base was the
+expected branch.
+
+So this was **not a code-quality failure.** The merged content was exactly what had been reviewed and
+validated. The failure was **process enforcement**: nothing in the repository required the review
+step to happen, because the base branch had no protection and no required checks. A four-second
+promote-and-merge was permitted by configuration, not achieved in spite of it.
+
+**No inference is drawn about whether the action was human or automated.** GitHub attributes an
+event to the account whose credentials performed it; the API does not distinguish a person acting
+interactively from automation using the same account's token. The attribution above is recorded as
+reported and nothing further is claimed.
+
+### Why it is recorded here
+
+This is the concrete case for protecting the integration branch, and it is the second instance of
+the pattern:
+
+| PR | ready → merged | interval | base protection |
+|---|---|---|---|
+| #123 | `02:22:01Z` → `02:22:05Z` | 4s | none |
+| #124 | `03:46:06Z` → `03:46:10Z` | 4s | none |
+
+PRs #120, #121 and #122 show the same shape earlier — ready to merged in roughly four to six
+seconds, same base, and in those cases with checks that were failing or absent rather than green.
+
+The operational consequence is already visible: an exact-version `sharp` pin intended for #123 was
+still in flight when #123 merged, so it was stranded on a dead branch and had to be re-landed
+separately as PR #125. Treat any pushed PR on this base as mergeable without warning, and make each
+branch complete before its first push.
+
+### The control that addresses it
+
+`require_last_push_approval: true` in the proposed integration ruleset (§6) is the specific rule
+that closes this path: the account that made the most recent push cannot supply the required
+approval. Combined with one required approving review, review-thread resolution and stale-review
+dismissal, promote-and-merge by a single actor is refused rather than merely discouraged.
+
+Status at time of writing: ruleset `canonical-integration-branch` (id `20017185`) exists with those
+rules but `enforcement: "disabled"`, so it is inert. `evaluate` mode is unavailable — this
+repository's plan rejects it with *"Enforcement evaluate option is not supported on this plan"* — so
+the intended observe-before-enforce step cannot be performed as designed. No bypass actors are
+configured.
