@@ -1,0 +1,4 @@
+canonical-integration-gate scope verification.
+Throwaway: proves pilot-ci is APPLICABLE when apps/pilot-web/** changes,
+while validate/secret-scan and the Pale contexts stay NOT APPLICABLE.
+Substitutes for the Pale scope, which has zero tracked files in this repo.
