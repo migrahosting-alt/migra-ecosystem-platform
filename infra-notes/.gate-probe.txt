@@ -1,0 +1,1 @@
+Gate probe: unrelated-path change (outside every gate scope). Throwaway.
