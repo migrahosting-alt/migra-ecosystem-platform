@@ -1,5 +1,16 @@
 name: Pale — Staging Deploy
 
+# MANUAL-ONLY during the default-branch transition. Deliberately NOT widened to canonical.
+#
+# This workflow cannot deploy from this repository: `Software/` has ZERO tracked files (every
+# Software/* directory is an untracked nested git repo), so these path filters can never match,
+# and this file exists only on canonical while the trigger names `main`. It has never run — no
+# history at all. There is therefore no deployment to preserve and no duplicate-deploy risk.
+#
+# The push trigger is left in place rather than removed, so that if Software/Pale is ever brought
+# under this repository's control the intent is still recorded — but `workflow_dispatch` is added
+# so emergency and rollback deploys remain possible without relying on a trigger that cannot fire.
+# Decide deployment authority explicitly before making this automatic on any branch.
 on:
   push:
     branches:
@@ -8,6 +19,7 @@ on:
       - "Software/Pale/backend/**"
       - "Software/Pale/packages/**"
       - "Software/Pale/infra/**"
+  workflow_dispatch:
 
 defaults:
   run:

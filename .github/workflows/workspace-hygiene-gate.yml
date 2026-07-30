@@ -3,9 +3,12 @@ name: Workspace Hygiene Gate
 on:
   pull_request:
     branches: ["**"]
+  # Transition list for the default-branch cutover — see migrateck-platform-ci.yml. This file
+  # exists only on canonical, so the `main`-only trigger never fired.
   push:
     branches:
       - main
+      - phase-1/canonical-vscode-extension
   workflow_dispatch:
 
 permissions:
