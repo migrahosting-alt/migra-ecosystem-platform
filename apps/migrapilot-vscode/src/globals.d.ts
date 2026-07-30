@@ -10,3 +10,11 @@ declare function fetch(input: string, init?: unknown): Promise<{
   text(): Promise<string>;
 }>;
 declare class TextDecoder { decode(input?: Uint8Array, options?: { stream?: boolean }): string; }
+
+// Node 18+ provides AbortController/AbortSignal globally; @types/node ^16 does
+// not declare them. Loose ambient declarations sufficient for cancellation.
+interface AbortSignal { readonly aborted: boolean; }
+declare class AbortController {
+  readonly signal: AbortSignal;
+  abort(reason?: unknown): void;
+}

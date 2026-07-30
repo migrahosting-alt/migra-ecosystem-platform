@@ -9,6 +9,23 @@ const SUGGESTIONS: Array<{ ic: string; label: string }> = [
   { ic: "🔌", label: "Create an API endpoint" },
 ];
 
+export type ProposalAction = "review" | "approve" | "reject" | "apply" | "rollback";
+
+/** Proposal card metadata rendered as a first-class card in the transcript. */
+export interface ProposalCard {
+  proposalId: string;
+  title: string;
+  model: string;
+  filesAffected: number;
+  linesAdded: number;
+  linesRemoved: number;
+  risk: string;
+  summary: string;
+  expiresAt: string;
+  destructive: boolean;
+  sensitive: boolean;
+}
+
 export interface ChatHandlers {
   onUserMessage: (text: string) => void;
   onSetModel: (model: string) => void;
@@ -19,6 +36,10 @@ export interface ChatHandlers {
   onPasteImage: (dataUri: string, mime: string) => void;
   onUploadFile: (name: string, kind: string, content?: string, dataUri?: string) => void;
   onVoiceCapture: () => void;
+  /** A proposal card button was clicked (Review Diff / Approve / Reject / Apply / Rollback). */
+  onProposalAction: (action: ProposalAction, proposalId: string) => void;
+  /** Phase D: an approval card button was clicked (Approve / Reject). */
+  onApprovalAction?: (action: "approve" | "reject", pendingActionId: string) => void;
 }
 
 /**
@@ -59,6 +80,8 @@ export class ChatPanelViewProvider implements vscode.WebviewViewProvider {
         case "pasteImage": if (m.dataUri) this.h.onPasteImage(String(m.dataUri), String(m.mime ?? "image/png")); return;
         case "uploadFile": this.h.onUploadFile(String(m.name ?? "file"), String(m.kind ?? "file"), m.content, m.dataUri); return;
         case "voiceCapture": this.h.onVoiceCapture(); return;
+        case "proposalAction": if (m.action && m.id) this.h.onProposalAction(String(m.action) as ProposalAction, String(m.id)); return;
+        case "approvalAction": if (m.action && m.id) this.h.onApprovalAction?.(String(m.action) as "approve" | "reject", String(m.id)); return;
       }
     });
   }
@@ -81,6 +104,18 @@ export class ChatPanelViewProvider implements vscode.WebviewViewProvider {
   public completeAssistant(id: string, markdown: string): void {
     this.post({ command: "completeAssistant", id, text: markdown });
   }
+  /** Render a first-class proposed-edit card in the transcript. */
+  public proposalCard(card: ProposalCard): void { this.post({ command: "proposalCard", card }); }
+  /** Reflect the Phase C state machine on an existing proposal card. */
+  public proposalStatus(id: string, status: string, detail?: string): void { this.post({ command: "proposalStatus", id, status, detail }); }
+  /** Phase D — a live mutation is waiting for a human. */
+  public approvalCard(card: unknown): void { this.post({ command: "approvalCard", card }); }
+  /** Reflect the server's pending-action state machine. Never invent an intermediate state. */
+  public approvalStatus(id: string, status: string, detail?: string): void { this.post({ command: "approvalStatus", id, status, detail }); }
+  /** Render the server-authored execution plan (Phase C.6.1), before any tool runs. */
+  public planCard(plan: unknown): void { this.post({ command: "planCard", plan }); }
+  /** Advance the plan card as planning \u2192 execution \u2192 completion phases stream in. */
+  public planPhase(plan: unknown): void { this.post({ command: "planPhase", plan }); }
   /** Drop a finished voice transcript into the composer for the user to review/edit. */
   public insertTranscript(text: string): void { this.post({ command: "transcript", text }); }
   /** Reflect voice state in the composer: "transcribing" | "idle" | "error". */
@@ -182,6 +217,180 @@ export class ChatPanelViewProvider implements vscode.WebviewViewProvider {
     }
     function send(){ const v = input.value.trim(); if (!v) return; input.value=""; vscode.postMessage({ command:"send", text:v }); }
 
+    // ── Proposed-edit cards (Phase C.5) ──
+    // Card lifecycle mirrors the backend state machine: received → reviewing →
+    // approved/rejected → applying → applied → rollback_available → rolled_back.
+    // Apply is disabled until approved; Rollback until applied. All mutation runs
+    // through the existing Phase C commands (approval-before-apply preserved).
+    function riskBadge(risk){
+      const r = String(risk||"LOW").toUpperCase();
+      const label = r === "HIGH" ? "High" : r === "MEDIUM" ? "Medium" : "Low";
+      return '<span class="pe-risk pe-risk-'+r.toLowerCase()+'">⚠ Risk: '+label+'</span>';
+    }
+    function expiresLabel(iso){
+      const t = Date.parse(iso); if (!t) return "";
+      const mins = Math.round((t - Date.now())/60000);
+      if (mins <= 0) return "⏱ Expired";
+      if (mins < 60) return "⏱ Expires in "+mins+" min";
+      return "⏱ Expires in "+Math.round(mins/60)+" h";
+    }
+    function planGlyph(status){
+      return status === "done" ? "\u2713" : status === "running" ? "\u25B6"
+        : status === "failed" ? "\u2717" : status === "skipped" ? "\u2298" : "\u2610";
+    }
+    function planStatusLabel(status){
+      return status === "dry_run" ? "Dry Run" : status === "executing" ? "Executing"
+        : status === "complete" ? "Complete" : status === "failed" ? "Failed"
+        : status === "approved" ? "Approved" : String(status || "");
+    }
+    function planCardHtml(plan){
+      const steps = (plan.steps || []).map(function(s){
+        return '<li class="plan-step plan-'+esc(s.status)+'"><span class="plan-glyph">'+planGlyph(s.status)+'</span>'+esc(s.text)+'</li>';
+      }).join("");
+      const resolution = plan.resolution ? '<div class="plan-resolution">'+esc(plan.resolution)+'</div>' : '';
+      const note = plan.note ? '<div class="plan-note">'+esc(plan.note)+'</div>' : '';
+      const dry = plan.status === "dry_run";
+      return '<div class="plan-title">\uD83D\uDCCB '+esc(plan.title || "Execution Plan")+'</div>' +
+        resolution +
+        '<ol class="plan-steps">'+steps+'</ol>' +
+        '<div class="plan-foot">' +
+          '<span class="plan-status plan-status-'+esc(plan.status)+'">Status: '+esc(planStatusLabel(plan.status))+'</span>' +
+          (dry ? '<span class="plan-gate">\u26A0 No infrastructure changes until you approve.</span>' : '') +
+        '</div>' + note;
+    }
+    function renderPlanCard(plan){
+      hideWelcome();
+      let wrap = document.querySelector(".plan-card[data-live='1']");
+      if (!wrap){
+        wrap = document.createElement("div");
+        wrap.className = "plan-card"; wrap.dataset.live = "1";
+        transcript.appendChild(wrap);
+      }
+      wrap.innerHTML = planCardHtml(plan);
+      transcript.scrollTop = transcript.scrollHeight;
+    }
+    function renderProposalCard(card){
+      hideWelcome();
+      const wrap = document.createElement("div");
+      wrap.className = "pe-card"; wrap.dataset.pid = card.proposalId;
+      const flags = [];
+      if (card.destructive) flags.push('<span class="pe-flag pe-flag-danger">🗑 Destructive (delete/rename)</span>');
+      if (card.sensitive) flags.push('<span class="pe-flag pe-flag-secret">🔒 Affects a protected/secret file</span>');
+      wrap.innerHTML =
+        '<div class="pe-title">📝 '+esc(card.title)+'</div>' +
+        '<div class="pe-meta">' +
+          '<span>🤖 '+esc(card.model)+'</span>' +
+          '<span>📁 Files affected: '+esc(card.filesAffected)+'</span>' +
+          '<span class="pe-add">➕ '+esc(card.linesAdded)+'</span>' +
+          '<span class="pe-rem">➖ '+esc(card.linesRemoved)+'</span>' +
+          riskBadge(card.risk) +
+        '</div>' +
+        (flags.length ? '<div class="pe-flags">'+flags.join(" ")+'</div>' : '') +
+        '<div class="pe-summary">📋 '+esc(card.summary||"")+'</div>' +
+        '<div class="pe-actions">' +
+          '<button class="pe-btn" data-act="review">🔍 Review Diff</button>' +
+          '<button class="pe-btn pe-approve" data-act="approve">✅ Approve</button>' +
+          '<button class="pe-btn pe-reject" data-act="reject">❌ Reject</button>' +
+          '<button class="pe-btn pe-apply" data-act="apply" disabled>⚙ Apply</button>' +
+          '<button class="pe-btn pe-rollback" data-act="rollback" disabled>↩ Rollback</button>' +
+        '</div>' +
+        '<div class="pe-foot"><span class="pe-expire">'+expiresLabel(card.expiresAt)+'</span>' +
+          '<span class="pe-rollnote">🔁 Rollback available after apply</span></div>' +
+        '<div class="pe-status" hidden></div>';
+      wrap.querySelectorAll(".pe-btn").forEach(function(b){
+        b.addEventListener("click", function(){
+          if (b.disabled) return;
+          vscode.postMessage({ command:"proposalAction", action: b.dataset.act, id: card.proposalId });
+        });
+      });
+      transcript.appendChild(wrap); transcript.scrollTop = transcript.scrollHeight;
+    }
+    /* ── Phase D: the approval card ──────────────────────────────────────────────────────────
+     *
+     * The one thing a human reads before a LIVE mutation runs. It shows the action, not a
+     * paraphrase: the tool, the real arguments, the tenant, and whether this is live. The
+     * summary is written server-side by describeAction() — never by the model — and a
+     * destructive tool says so in capital letters, because a comfortable verb is how someone
+     * approves the wrong thing. */
+    function renderApprovalCard(card){
+      hideWelcome();
+      const wrap = document.createElement("div");
+      wrap.className = "ap-card"; wrap.dataset.aid = card.pendingActionId;
+      const live = card.mode === "live";
+      const destructive = /CANNOT BE UNDONE/.test(String(card.summary||""));
+      const rows = Object.keys(card.args||{}).map(function(k){
+        var v = card.args[k];
+        var s = (typeof v === "string") ? v : JSON.stringify(v);
+        return '<div class="ap-arg"><span class="ap-k">'+esc(k)+'</span><span class="ap-v">'+esc(s)+'</span></div>';
+      }).join("");
+      wrap.innerHTML =
+        '<div class="ap-title">'+(destructive ? "🛑" : "🔐")+' Approval required</div>' +
+        '<div class="ap-meta">' +
+          '<span class="ap-badge '+(live ? "ap-live" : "ap-dry")+'">'+(live ? "⚡ LIVE — this really happens" : "🧪 Dry run")+'</span>' +
+          '<span>🔧 '+esc(card.toolName)+'</span>' +
+          (card.tenantScope ? '<span>🏷 '+esc(card.tenantScope)+'</span>' : '') +
+        '</div>' +
+        (destructive ? '<div class="ap-flags"><span class="ap-flag-danger">🗑 THIS CANNOT BE UNDONE</span></div>' : '') +
+        '<div class="ap-summary">'+esc(card.summary||"")+'</div>' +
+        /* The args in full. The summary is a summary — never a substitute for what will run. */
+        '<div class="ap-args">'+rows+'</div>' +
+        '<div class="ap-actions">' +
+          '<button class="ap-btn ap-approve" data-act="approve">✅ Approve &amp; run once</button>' +
+          '<button class="ap-btn ap-reject" data-act="reject">❌ Reject</button>' +
+        '</div>' +
+        '<div class="ap-foot"><span class="ap-expire">'+expiresLabel(card.expiresAt)+'</span>' +
+          '<span class="ap-note">Single-use · runs exactly once · not a standing permission</span></div>' +
+        '<div class="ap-status" hidden></div>';
+      wrap.querySelectorAll(".ap-btn").forEach(function(b){
+        b.addEventListener("click", function(){
+          if (b.disabled) return;
+          wrap.querySelectorAll(".ap-btn").forEach(function(x){ x.disabled = true; });
+          setApprovalStatus(card.pendingActionId, b.dataset.act === "approve" ? "EXECUTING" : "REJECTED");
+          vscode.postMessage({ command:"approvalAction", action: b.dataset.act, id: card.pendingActionId });
+        });
+      });
+      transcript.appendChild(wrap); transcript.scrollTop = transcript.scrollHeight;
+    }
+    function setApprovalStatus(id, status, detail){
+      const card = transcript.querySelector('.ap-card[data-aid="'+id+'"]'); if (!card) return;
+      const st = card.querySelector(".ap-status");
+      const s = String(status||"");
+      /* A failed live mutation must LOOK failed. The most dangerous possible bug in this card is
+       * a tidy green tick over an action that did not happen — or worse, half happened. */
+      /* REFUSED and FAILED are different facts and must look different. After a refusal nothing
+       * ran and there is nothing to check. After a failure the action EXECUTED and may have
+       * partially landed on real infrastructure. Blurring the two is how an operator walks away
+       * believing nothing happened when something half did. */
+      const bad = (s === "FAILED" || s === "REJECTED" || s === "EXPIRED" || s === "CANCELLED" || s === "REFUSED" || s === "UNKNOWN");
+      const icons = { EXECUTING:"⏳", EXECUTED:"✅", FAILED:"⚠️ RAN AND FAILED —", REFUSED:"🚫 refused, nothing ran —",
+                      UNKNOWN:"❓ outcome unknown —", REJECTED:"❌", EXPIRED:"⌛", CANCELLED:"🚫", APPROVED:"👍" };
+      st.hidden = false;
+      st.className = "ap-status" + (bad ? " ap-status-bad" : "");
+      st.textContent = (icons[s] || "•") + " " + s.toLowerCase() + (detail ? " — " + detail : "");
+      if (s !== "PENDING") card.querySelectorAll(".ap-btn").forEach(function(b){ b.disabled = true; });
+    }
+    function setProposalStatus(id, status, detail){
+      const card = transcript.querySelector('.pe-card[data-pid="'+id+'"]'); if (!card) return;
+      const st = card.querySelector(".pe-status");
+      const s = String(status||"");
+      const blocked = s === "blocked";
+      const applied = s === "applied" || s === "rollback_available" || s === "partially_applied";
+      const done = s === "rejected" || s === "rolled_back" || s === "expired";
+      const q = function(sel){ return card.querySelector(sel); };
+      // enable/disable per state
+      const approveBtn = q(".pe-approve"), rejectBtn = q(".pe-reject"), applyBtn = q(".pe-apply"), rollBtn = q(".pe-rollback");
+      if (s === "approved"){ applyBtn.disabled = false; approveBtn.disabled = true; }
+      if (applied){ applyBtn.disabled = true; approveBtn.disabled = true; rejectBtn.disabled = true; rollBtn.disabled = !(s === "rollback_available" || s === "applied"); }
+      if (done){ approveBtn.disabled = true; rejectBtn.disabled = true; applyBtn.disabled = true; rollBtn.disabled = true; }
+      if (s === "rolled_back") rollBtn.disabled = true;
+      card.classList.toggle("pe-card-blocked", blocked);
+      if (st){
+        st.hidden = false;
+        const icon = blocked ? "⛔" : done ? "•" : applied ? "✅" : "•";
+        st.textContent = icon + " " + s.replace(/_/g," ") + (detail ? " — " + detail : "");
+      }
+    }
+
     document.getElementById("send").addEventListener("click", send);
     input.addEventListener("keydown", (e)=>{ if (e.key==="Enter") send(); });
     document.getElementById("newChat").addEventListener("click", ()=> vscode.postMessage({ command:"send", text:"__new_chat__" }) );
@@ -256,6 +465,12 @@ export class ChatPanelViewProvider implements vscode.WebviewViewProvider {
       const m = e.data;
       if (m.command === "addChip"){ addChip(m.id, m.label, m.kind); return; }
       if (m.command === "clearChips"){ chipsEl.innerHTML = ""; return; }
+      if (m.command === "planCard"){ renderPlanCard(m.plan); return; }
+      if (m.command === "planPhase"){ renderPlanCard(m.plan); return; }
+      if (m.command === "approvalCard"){ renderApprovalCard(m.card); return; }
+      if (m.command === "approvalStatus"){ setApprovalStatus(m.id, m.status, m.detail); return; }
+      if (m.command === "proposalCard"){ renderProposalCard(m.card); return; }
+      if (m.command === "proposalStatus"){ setProposalStatus(m.id, m.status, m.detail); return; }
       if (m.command === "transcript"){
         endVoice(); input.placeholder = DEFAULT_PH;
         const t = String(m.text||"").trim();

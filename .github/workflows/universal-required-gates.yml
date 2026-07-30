@@ -1,0 +1,81 @@
+name: Universal Required Gates
+
+# Provides the two repo-wide REQUIRED check contexts for `main`:
+#
+#     validate      (job id: validate)
+#     secret-scan   (job id: secret-scan)
+#
+# These MUST run on every pull request into `main` with NO path filters.
+# Branch protection requires both contexts; a required context whose workflow is
+# path-filtered (or absent) never reports, which parks every PR at
+# "Expected — waiting for status" and deadlocks all merges. Keeping these jobs
+# unconditional is what makes branch protection satisfiable — do not add
+# `paths:` filters here.
+#
+# These are a universal BASELINE. App-specific validation remains owned by its
+# own workflows (Migra NGINX Gate, MigraPilot Extension CI, platform CI, Pale CI,
+# …) and is unchanged by this workflow.
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# Least privilege: read-only, no deployment, no repository mutation.
+permissions:
+  contents: read
+
+concurrency:
+  group: universal-gates-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout (full history for change-set diff)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install YAML parser
+        run: python3 -m pip install --quiet --disable-pip-version-check pyyaml
+
+      - name: Repository hygiene validation
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref || 'main' }}
+        run: python3 .github/scripts/repo_validate.py
+
+  secret-scan:
+    name: secret-scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout (full history for change-set diff)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # Proves the scanner is not a no-op. Fixtures are generated at runtime from
+      # fragments — no secret-like literal is ever committed to the repository.
+      - name: Scanner self-test (runtime dummy fixtures)
+        run: python3 .github/scripts/secret_scan_selftest.py
+
+      - name: Secret scan (pull-request change set)
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref || 'main' }}
+        run: python3 .github/scripts/secret_scan.py

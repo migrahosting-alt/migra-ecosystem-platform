@@ -18,6 +18,17 @@ export interface WorkspaceContext {
   selectedTextLength: number;
   truncated: boolean;
   warning: string;
+  /**
+   * Truncation is tracked PER KIND, because the model must be told exactly what it
+   * is looking at. A model that cannot distinguish "the whole file" from "the first
+   * 4% of the file" will infer end-of-file corruption from a clean cut (E-CTX-01:
+   * a truncated package-lock.json was reported as malformed JSON). The aggregate
+   * `truncated` flag above cannot express which of the two was cut.
+   */
+  filePreviewTruncated: boolean;
+  selectionTruncated: boolean;
+  /** Full length of the document in characters (the preview may be shorter). */
+  fileCharCount: number;
 }
 
 export interface DraftPatchPlan {

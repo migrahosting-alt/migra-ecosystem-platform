@@ -1,0 +1,12 @@
+.vscode/**
+.vscode-test/**
+out-int/**
+src/**
+test/**
+**/*.map
+**/*.ts
+!out/**/*.js
+node_modules/**
+tsconfig*.json
+vitest.config.ts
+MANUAL_SMOKE.md
