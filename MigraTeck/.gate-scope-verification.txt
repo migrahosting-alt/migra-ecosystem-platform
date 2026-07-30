@@ -1,0 +1,3 @@
+canonical-integration-gate re-verification after pilot-ci/Pale withdrawal.
+Expect: 6 applicable (4 always-on + validate + secret-scan), 0 not-applicable, 4 dormant.
+Throwaway; do not merge.
