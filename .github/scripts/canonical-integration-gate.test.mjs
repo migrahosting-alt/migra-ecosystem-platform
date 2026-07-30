@@ -19,7 +19,7 @@ const DORMANT = ["pale-validate", "pale-backend-checks", "pale-mobile-checks", "
  * is that it cannot be satisfied by accident.
  */
 
-const ALWAYS = ["guard-bootstrap", "fresh-clone-proof", "nginx-gate", "Workspace Hygiene (Strict)"];
+const ALWAYS = ["guard-bootstrap", "fresh-clone-proof", "nginx-gate", "Workspace Hygiene (Strict)", "validate", "secret-scan"];
 
 const completed = (conclusion) => ({ status: "completed", conclusion });
 const runsFor = (map) => new Map(Object.entries(map));
@@ -29,7 +29,7 @@ const runsFor = (map) => new Map(Object.entries(map));
 test("req 1: a documentation-only PR still expects every always-on gate", () => {
   const { expected, notApplicable } = computeApplicability(["docs/some-note.md"]);
   for (const c of ALWAYS) assert.ok(expected.includes(c), `${c} must be expected`);
-  assert.ok(notApplicable.includes("validate"), "platform validate is not applicable");
+  assert.ok(notApplicable.includes("canonical-platform-validate"), "platform validate is not applicable");
 });
 
 // ── dormancy: defined, never required ────────────────────────────────────────────────────
@@ -60,8 +60,11 @@ test("a truncated file list does NOT resurrect dormant gates", () => {
   const { expected, dormant } = computeApplicability([], true);
   for (const c of DORMANT) assert.ok(!expected.includes(c), `${c} must stay dormant`);
   assert.equal(dormant.length, DORMANT.length);
-  // Fail-safe still expands the LIVE gates.
-  assert.deepEqual([...expected].sort(), [...ALWAYS, "validate", "secret-scan"].sort());
+  // Fail-safe still expands every LIVE gate: the unconditional set plus the path-filtered ones.
+  assert.deepEqual(
+    [...expected].sort(),
+    [...ALWAYS, "canonical-platform-validate", "canonical-platform-secret-scan", "extension"].sort(),
+  );
 });
 
 test("every dormant reason carries explicit, non-trivial re-entry criteria", () => {
@@ -101,13 +104,13 @@ test("req 3: all applicable succeed => no failures", () => {
 
 test("req 3: a MigraTeck change expects platform validate and secret-scan", () => {
   const { expected } = computeApplicability(["MigraTeck/packages/config/package.json"]);
-  assert.ok(expected.includes("validate"));
-  assert.ok(expected.includes("secret-scan"));
+  assert.ok(expected.includes("canonical-platform-validate"));
+  assert.ok(expected.includes("canonical-platform-secret-scan"));
 });
 
 test("req 3: editing the platform workflow itself expects platform validate", () => {
   const { expected } = computeApplicability([".github/workflows/migrateck-platform-ci.yml"]);
-  assert.ok(expected.includes("validate"));
+  assert.ok(expected.includes("canonical-platform-validate"));
 });
 
 // ── requirement 4: skipped path-specific checks are not applicable, not failures ─────────
@@ -234,7 +237,7 @@ test("a mixed PR expects the union of LIVE applicable gates only", () => {
     "apps/pilot-web/src/main.ts",
     "docs/notes.md",
   ]);
-  for (const c of [...ALWAYS, "validate", "secret-scan"]) {
+  for (const c of [...ALWAYS, "canonical-platform-validate", "canonical-platform-secret-scan"]) {
     assert.ok(expected.includes(c), `${c} must be expected`);
   }
   assert.ok(!expected.includes("pilot-ci"), "pilot-ci is dormant and must not gate the merge");
