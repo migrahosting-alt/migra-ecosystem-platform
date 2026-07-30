@@ -298,3 +298,5 @@ rules but `enforcement: "disabled"`, so it is inert. `evaluate` mode is unavaila
 repository's plan rejects it with *"Enforcement evaluate option is not supported on this plan"* — so
 the intended observe-before-enforce step cannot be performed as designed. No bypass actors are
 configured.
+
+Gate probe: documentation-only change. Throwaway.
