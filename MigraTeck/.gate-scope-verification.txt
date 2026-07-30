@@ -1,0 +1,3 @@
+canonical-integration-gate scope verification.
+Throwaway file: proves validate + secret-scan are APPLICABLE when MigraTeck/** changes.
+Do not merge; branch will be deleted.
