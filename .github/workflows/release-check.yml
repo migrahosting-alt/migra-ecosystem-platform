@@ -1,5 +1,22 @@
 name: Release Check
 
+# DEFERRED — deliberately NOT widened to canonical, and must NOT become a required context.
+#
+# Named blocker: this workflow runs `npm run release-check`, which is
+# `node release-check.js ./docs/migrapilot/phase-36 36`. Neither the entrypoint nor its argument
+# is tracked by this repository:
+#
+#     release-check.js            tracked: 0   (present only in local working trees)
+#     docs/migrapilot/phase-36    tracked: 0
+#
+# So every CI checkout fails with MODULE_NOT_FOUND before the check performs any work — the same
+# defect class as pilot-ci, where a gitignored application left `tsc` with no inputs. It has never
+# passed. Widening a permanently-failing workflow to canonical would hand the new default branch a
+# gate that can only ever block.
+#
+# Resolve by ONE of: (a) track release-check.js and docs/migrapilot/phase-36, prove it passes from
+# a clean clone, then target canonical; (b) retire it and record the replacement; (c) keep it
+# manual/informational. Until then it stays main-scoped and non-required.
 on:
   pull_request:
     branches:

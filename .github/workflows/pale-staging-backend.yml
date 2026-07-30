@@ -1,5 +1,10 @@
 name: pale-staging-backend
 
+# MANUAL-ONLY during the default-branch transition — see pale-staging-deploy.yml for the full
+# reasoning. `Software/` has zero tracked files here, so this path filter can never match; the
+# workflow has never run. Not widened to canonical: deployment authority must be decided
+# explicitly, not acquired as a side effect of a default-branch change. `workflow_dispatch`
+# below already preserves emergency and rollback use.
 on:
   push:
     branches:

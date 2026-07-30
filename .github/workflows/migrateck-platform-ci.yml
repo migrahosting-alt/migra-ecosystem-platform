@@ -5,9 +5,14 @@ on:
     paths:
       - "MigraTeck/**"
       - ".github/workflows/migrateck-platform-ci.yml"
+  # Transition list for the default-branch cutover. This file exists only on canonical, and
+  # GitHub reads workflows from the ref being pushed — so the `main`-only trigger could never
+  # fire (0 push runs, ever). Listing canonical gives this scope the post-merge validation it
+  # has never actually had. Narrow again only after the cutover settles.
   push:
     branches:
       - main
+      - phase-1/canonical-vscode-extension
     paths:
       - "MigraTeck/**"
       - ".github/workflows/migrateck-platform-ci.yml"
