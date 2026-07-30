@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  DORMANT_REASONS,
   GATES,
   GATE_CONTEXT,
   computeApplicability,
@@ -8,6 +9,8 @@ import {
   globToRegExp,
   pendingContexts,
 } from "./lib/gate-rules.mjs";
+
+const DORMANT = ["pale-validate", "pale-backend-checks", "pale-mobile-checks", "pilot-ci"];
 
 /**
  * Tests for the canonical integration gate's decision rules.
@@ -27,8 +30,60 @@ test("req 1: a documentation-only PR still expects every always-on gate", () => 
   const { expected, notApplicable } = computeApplicability(["docs/some-note.md"]);
   for (const c of ALWAYS) assert.ok(expected.includes(c), `${c} must be expected`);
   assert.ok(notApplicable.includes("validate"), "platform validate is not applicable");
-  assert.ok(notApplicable.includes("pale-validate"));
-  assert.ok(notApplicable.includes("pilot-ci"));
+});
+
+// ── dormancy: defined, never required ────────────────────────────────────────────────────
+
+test("dormant gates are never expected, even when their paths match exactly", () => {
+  const { expected, dormant } = computeApplicability([
+    "Software/Pale/backend/src/x.ts",
+    "Software/Pale/mobile/App.tsx",
+    "Software/Pale/packages/shared/i.ts",
+    "apps/pilot-web/src/main.ts",
+  ]);
+  for (const c of DORMANT) {
+    assert.ok(!expected.includes(c), `${c} must not gate merge eligibility`);
+  }
+  assert.deepEqual(dormant.map((d) => d.context).sort(), [...DORMANT].sort());
+  // Only the always-on gates remain for a PR touching nothing but dormant scopes.
+  assert.deepEqual([...expected].sort(), [...ALWAYS].sort());
+});
+
+test("dormant gates are reported with a reason, so withdrawal is never silent", () => {
+  const { dormant } = computeApplicability(["apps/pilot-web/src/main.ts"]);
+  for (const d of dormant) {
+    assert.ok(typeof d.reason === "string" && d.reason.length > 40, `${d.context} needs a reason`);
+  }
+});
+
+test("a truncated file list does NOT resurrect dormant gates", () => {
+  const { expected, dormant } = computeApplicability([], true);
+  for (const c of DORMANT) assert.ok(!expected.includes(c), `${c} must stay dormant`);
+  assert.equal(dormant.length, DORMANT.length);
+  // Fail-safe still expands the LIVE gates.
+  assert.deepEqual([...expected].sort(), [...ALWAYS, "validate", "secret-scan"].sort());
+});
+
+test("every dormant reason carries explicit, non-trivial re-entry criteria", () => {
+  for (const [key, r] of Object.entries(DORMANT_REASONS)) {
+    assert.ok(Array.isArray(r.reentry) && r.reentry.length >= 3, `${key} needs re-entry criteria`);
+    for (const c of r.reentry) assert.ok(c.length > 10, `${key} criterion too vague: ${c}`);
+  }
+});
+
+test("pilot-ci re-entry demands tracked source, tracked tsconfig, clean-clone install and a live pass", () => {
+  const joined = DORMANT_REASONS.PILOT_WEB_UNTRACKED.reentry.join(" | ").toLowerCase();
+  for (const needle of ["source is tracked", "tsconfig", "clean-clone", "typecheck", "reports success"]) {
+    assert.ok(joined.includes(needle), `re-entry criteria must mention ${needle}`);
+  }
+});
+
+test("dormant gates keep their path filters recorded for the day they return", () => {
+  for (const c of DORMANT) {
+    const gate = GATES.find((g) => g.context === c);
+    assert.ok(Array.isArray(gate.paths) && gate.paths.length > 0, `${c} lost its paths`);
+    assert.ok(gate.dormant?.reason, `${c} lost its dormancy reason`);
+  }
 });
 
 test("req 1: an unrelated-path PR still expects the always-on gates", () => {
@@ -122,10 +177,13 @@ test("req 9: queued counts as pending", () => {
   assert.deepEqual(pendingContexts(["nginx-gate"], runs), ["nginx-gate"]);
 });
 
-test("req 9: a truncated file list expects EVERY gate rather than under-expecting", () => {
-  const { expected, notApplicable } = computeApplicability([], true);
-  assert.equal(notApplicable.length, 0);
-  assert.equal(expected.length, GATES.length);
+test("req 9: a truncated file list expects every LIVE gate rather than under-expecting", () => {
+  const { expected, notApplicable, dormant } = computeApplicability([], true);
+  assert.equal(notApplicable.length, 0, "nothing is dismissed as not-applicable when truncated");
+  const live = GATES.filter((g) => !g.dormant);
+  assert.equal(expected.length, live.length);
+  assert.deepEqual([...expected].sort(), live.map((g) => g.context).sort());
+  assert.equal(dormant.length, GATES.length - live.length);
 });
 
 // ── path-matching semantics ──────────────────────────────────────────────────────────────
@@ -148,27 +206,37 @@ test("glob: dots are literal, not wildcards", () => {
   assert.ok(!re.test("xgithub/workflows/pale-ciXyml"));
 });
 
-test("overlapping Pale paths expect BOTH backend and mobile checks", () => {
-  const { expected } = computeApplicability(["Software/Pale/packages/shared/index.ts"]);
-  assert.ok(expected.includes("pale-backend-checks"));
-  assert.ok(expected.includes("pale-mobile-checks"));
-  assert.ok(expected.includes("pale-validate"), "Software/Pale/** also matches");
+test("overlapping Pale paths still match all three filters — dormancy, not the glob, excludes them", () => {
+  const files = ["Software/Pale/packages/shared/index.ts"];
+  for (const c of ["pale-validate", "pale-backend-checks", "pale-mobile-checks"]) {
+    const gate = GATES.find((g) => g.context === c);
+    assert.ok(
+      gate.paths.some((p) => globToRegExp(p).test(files[0])),
+      `${c}'s filter should still match ${files[0]}`,
+    );
+  }
+  // ...yet none of them gate merge eligibility.
+  const { expected } = computeApplicability(files);
+  assert.deepEqual([...expected].sort(), [...ALWAYS].sort());
 });
 
-test("a mobile-only Pale change does not expect the backend checks", () => {
-  const { expected, notApplicable } = computeApplicability(["Software/Pale/mobile/App.tsx"]);
-  assert.ok(expected.includes("pale-mobile-checks"));
-  assert.ok(notApplicable.includes("pale-backend-checks"));
+test("a mobile-only Pale change matches only the mobile filter", () => {
+  const f = "Software/Pale/mobile/App.tsx";
+  const mobile = GATES.find((g) => g.context === "pale-mobile-checks");
+  const backend = GATES.find((g) => g.context === "pale-backend-checks");
+  assert.ok(mobile.paths.some((p) => globToRegExp(p).test(f)));
+  assert.ok(!backend.paths.some((p) => globToRegExp(p).test(f)));
 });
 
-test("a mixed PR expects the union of applicable gates", () => {
-  const { expected } = computeApplicability([
+test("a mixed PR expects the union of LIVE applicable gates only", () => {
+  const { expected, dormant } = computeApplicability([
     "MigraTeck/apps/web/page.tsx",
     "apps/pilot-web/src/main.ts",
     "docs/notes.md",
   ]);
-  for (const c of [...ALWAYS, "validate", "secret-scan", "pilot-ci"]) {
+  for (const c of [...ALWAYS, "validate", "secret-scan"]) {
     assert.ok(expected.includes(c), `${c} must be expected`);
   }
-  assert.ok(!expected.includes("pale-validate"));
+  assert.ok(!expected.includes("pilot-ci"), "pilot-ci is dormant and must not gate the merge");
+  assert.ok(dormant.some((d) => d.context === "pilot-ci"));
 });

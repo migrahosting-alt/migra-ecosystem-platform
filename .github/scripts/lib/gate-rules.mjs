@@ -13,6 +13,46 @@ export const GATE_CONTEXT = "canonical-integration-gate";
  * If a workflow's filter changes, change it here too. Drift fails closed: the gate waits for a
  * check that cannot arrive and then fails, rather than passing something unverified.
  */
+/**
+ * Why a gate can be DORMANT.
+ *
+ * A dormant gate keeps its context name and path filter recorded — so the definition and the
+ * collision fixes are not lost — but is never treated as applicable and never gates merge
+ * eligibility. Dead checks must not become required checks: a required context that cannot pass,
+ * or cannot even be emitted, makes every PR in its scope unmergeable.
+ *
+ * Restoring one is deliberate: delete its `dormant` entry, which means deleting the documented
+ * re-entry criteria below. It cannot be silently switched back on.
+ */
+export const DORMANT_REASONS = {
+  PALE_UNREACHABLE: {
+    reason:
+      "Software/Pale has zero tracked files in this repository — every Software/* directory is " +
+      "an untracked nested git repo. No PR here can match Software/Pale/**, so these contexts " +
+      "can never be emitted. The duplicate-name fixes are kept for the day Pale is tracked.",
+    reentry: [
+      "Software/Pale content is tracked by this repository (git ls-files Software/Pale is non-empty)",
+      "the Pale workflows actually trigger on a pull_request to the integration branch",
+      "a live scoped PR proves each context reports success",
+    ],
+  },
+  PILOT_WEB_UNTRACKED: {
+    reason:
+      "apps/pilot-web is gitignored with only package.json and package-lock.json force-added — " +
+      "no tracked source and no tracked tsconfig.json. A CI checkout therefore contains neither, " +
+      "so pilot:ci's `tsc --noEmit` has no inputs, prints its option list and exits non-zero. " +
+      "pilot-ci cannot pass in its current state, so it is not a valid repository quality gate. " +
+      "The workflow is kept; only its merge eligibility is withdrawn.",
+    reentry: [
+      "apps/pilot-web source is tracked by this repository",
+      "apps/pilot-web/tsconfig.json is tracked",
+      "a clean-clone dependency install succeeds reproducibly from the committed lockfile",
+      "typecheck and build succeed in that clean clone",
+      "a live scoped PR proves the pilot-ci context reports success",
+    ],
+  },
+};
+
 export const GATES = [
   // No path filter — these run on every PR to the integration branch.
   { context: "guard-bootstrap", always: true },
@@ -20,16 +60,31 @@ export const GATES = [
   { context: "nginx-gate", always: true },
   { context: "Workspace Hygiene (Strict)", always: true },
 
-  // Path-filtered.
+  // Path-filtered and live.
   { context: "validate", paths: ["MigraTeck/**", ".github/workflows/migrateck-platform-ci.yml"] },
   { context: "secret-scan", paths: ["MigraTeck/**", ".github/workflows/migrateck-platform-ci.yml"] },
-  { context: "pale-validate", paths: ["Software/Pale/**"] },
+
+  // Path-filtered but DORMANT — defined, never required. See DORMANT_REASONS.
+  {
+    context: "pale-validate",
+    paths: ["Software/Pale/**"],
+    dormant: DORMANT_REASONS.PALE_UNREACHABLE,
+  },
   {
     context: "pale-backend-checks",
     paths: ["Software/Pale/backend/**", "Software/Pale/packages/**"],
+    dormant: DORMANT_REASONS.PALE_UNREACHABLE,
   },
-  { context: "pale-mobile-checks", paths: ["Software/Pale/mobile/**", "Software/Pale/packages/**"] },
-  { context: "pilot-ci", paths: ["apps/pilot-web/**"] },
+  {
+    context: "pale-mobile-checks",
+    paths: ["Software/Pale/mobile/**", "Software/Pale/packages/**"],
+    dormant: DORMANT_REASONS.PALE_UNREACHABLE,
+  },
+  {
+    context: "pilot-ci",
+    paths: ["apps/pilot-web/**"],
+    dormant: DORMANT_REASONS.PILOT_WEB_UNTRACKED,
+  },
 ];
 
 /**
@@ -71,22 +126,26 @@ export function matchesAny(paths, files) {
 
 /**
  * Split the gate table into what this PR must wait for and what it must not.
- * `truncated` means the changed-file list could not be fully enumerated; every path-filtered gate
- * is then treated as applicable, because under-expecting would let a real gate go unchecked.
+ *
+ * `truncated` means the changed-file list could not be fully enumerated; every live path-filtered
+ * gate is then treated as applicable, because under-expecting would let a real gate go unchecked.
+ * Dormant gates are excluded unconditionally — truncation must not resurrect a gate that cannot
+ * pass, or the fail-safe would itself become the thing that blocks every PR.
  */
 export function computeApplicability(files, truncated = false) {
   const expected = [];
   const notApplicable = [];
+  const dormant = [];
   for (const gate of GATES) {
-    if (gate.always) {
-      expected.push(gate.context);
-    } else if (truncated || matchesAny(gate.paths, files)) {
+    if (gate.dormant) {
+      dormant.push({ context: gate.context, reason: gate.dormant.reason });
+    } else if (gate.always || truncated || matchesAny(gate.paths, files)) {
       expected.push(gate.context);
     } else {
       notApplicable.push(gate.context);
     }
   }
-  return { expected, notApplicable };
+  return { expected, notApplicable, dormant };
 }
 
 /** Contexts that are applicable but have not reached `completed` yet. */

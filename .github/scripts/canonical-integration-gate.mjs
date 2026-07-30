@@ -87,12 +87,16 @@ const { files, truncated } = await changedFiles();
 console.log(`PR #${PR_NUMBER} head ${HEAD_SHA}`);
 console.log(`changed files: ${files.length}${truncated ? " (TRUNCATED — failing safe)" : ""}`);
 
-const { expected, notApplicable } = computeApplicability(files, truncated);
+const { expected, notApplicable, dormant } = computeApplicability(files, truncated);
 
-console.log(`\nAPPLICABLE (${expected.length}):`);
+console.log(`\nAPPLICABLE (${expected.length}) — must succeed:`);
 for (const c of expected) console.log(`  - ${c}`);
 console.log(`NOT APPLICABLE (${notApplicable.length}) — paths untouched, never waited on:`);
 for (const c of notApplicable) console.log(`  - ${c}`);
+// Logged, never silent: a withdrawn gate should be visible in every run rather than something a
+// reader has to notice is missing.
+console.log(`DORMANT (${dormant.length}) — defined but NOT gating merge eligibility:`);
+for (const d of dormant) console.log(`  - ${d.context}: ${d.reason}`);
 
 if (expected.length === 0) {
   fail("no applicable gates computed — the always-on gates should make this impossible");
