@@ -60,6 +60,14 @@ export const GATES = [
   { context: "nginx-gate", always: true },
   { context: "Workspace Hygiene (Strict)", always: true },
 
+  // main's universal baseline, brought in by the reconciliation. universal-required-gates.yml is
+  // deliberately unconditional — that is what makes a required context satisfiable on every PR
+  // regardless of paths — and its trigger now lists the integration branch alongside `main`, so
+  // these two report here as well. Kept as separate contexts from the canonical platform jobs
+  // below because the two implementations scan differently.
+  { context: "validate", always: true },
+  { context: "secret-scan", always: true },
+
   // Path-filtered and live. These were `validate` / `secret-scan` until the reconciliation with
   // `main`, whose universal-required-gates.yml emits those two names unconditionally. Protection
   // matches by context NAME, so the canonical platform jobs were renamed to keep both security
@@ -71,6 +79,14 @@ export const GATES = [
   {
     context: "canonical-platform-secret-scan",
     paths: ["MigraTeck/**", ".github/workflows/migrateck-platform-ci.yml"],
+  },
+
+  // main's VS Code extension CI, brought in by the reconciliation. The reconciliation takes main's
+  // apps/migrapilot-vscode wholesale (it is a strict behavioural superset of canonical's copy), so
+  // main's CI for it comes along and is the right gate for that path.
+  {
+    context: "extension",
+    paths: ["apps/migrapilot-vscode/**", ".github/workflows/migrapilot-extension.yml"],
   },
 
   // Path-filtered but DORMANT — defined, never required. See DORMANT_REASONS.

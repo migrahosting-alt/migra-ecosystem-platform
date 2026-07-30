@@ -16,9 +16,21 @@ name: Universal Required Gates
 # own workflows (Migra NGINX Gate, MigraPilot Extension CI, platform CI, Pale CI,
 # …) and is unchanged by this workflow.
 
+# Explicit TRANSITION list. This workflow supplies `validate` and `secret-scan`, which `main`'s
+# branch protection requires by exact name. It was pinned to `branches: [main]`, which means it
+# does not run on any other branch — proven on a disposable mirror of main's tip, where only
+# `nginx-gate` reported and the PR was permanently BLOCKED because two of three required contexts
+# could never arrive.
+#
+# That makes the guarantee NAME-BOUND: promoting another branch to default, or renaming `main`,
+# would silently stop these contexts reporting and deadlock every pull request. So the integration
+# branch is listed alongside `main` for the duration of the reconciliation. Narrow this list again
+# only AFTER the final cutover, and only to the branch that is then authoritative.
 on:
   pull_request:
-    branches: [main]
+    branches:
+      - main
+      - phase-1/canonical-vscode-extension
   workflow_dispatch:
 
 # Least privilege: read-only, no deployment, no repository mutation.

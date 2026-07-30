@@ -19,7 +19,7 @@ const DORMANT = ["pale-validate", "pale-backend-checks", "pale-mobile-checks", "
  * is that it cannot be satisfied by accident.
  */
 
-const ALWAYS = ["guard-bootstrap", "fresh-clone-proof", "nginx-gate", "Workspace Hygiene (Strict)"];
+const ALWAYS = ["guard-bootstrap", "fresh-clone-proof", "nginx-gate", "Workspace Hygiene (Strict)", "validate", "secret-scan"];
 
 const completed = (conclusion) => ({ status: "completed", conclusion });
 const runsFor = (map) => new Map(Object.entries(map));
@@ -60,8 +60,11 @@ test("a truncated file list does NOT resurrect dormant gates", () => {
   const { expected, dormant } = computeApplicability([], true);
   for (const c of DORMANT) assert.ok(!expected.includes(c), `${c} must stay dormant`);
   assert.equal(dormant.length, DORMANT.length);
-  // Fail-safe still expands the LIVE gates.
-  assert.deepEqual([...expected].sort(), [...ALWAYS, "canonical-platform-validate", "canonical-platform-secret-scan"].sort());
+  // Fail-safe still expands every LIVE gate: the unconditional set plus the path-filtered ones.
+  assert.deepEqual(
+    [...expected].sort(),
+    [...ALWAYS, "canonical-platform-validate", "canonical-platform-secret-scan", "extension"].sort(),
+  );
 });
 
 test("every dormant reason carries explicit, non-trivial re-entry criteria", () => {
