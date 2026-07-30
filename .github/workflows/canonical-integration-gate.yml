@@ -1,0 +1,47 @@
+name: Canonical Integration Gate
+
+# Deliberately NO `paths:` filter. This is the single context branch protection requires, so it
+# must be emitted on EVERY pull request to the integration branch — including documentation-only
+# and unrelated-path PRs. A required context that is filtered out never reports, and a PR waiting
+# on a check that cannot arrive can never merge.
+on:
+  pull_request:
+    branches:
+      - phase-1/canonical-vscode-extension
+
+permissions:
+  contents: read
+  checks: read
+  pull-requests: read
+
+# One evaluation per PR. Superseded runs are cancelled so the required context always reflects
+# the newest head commit.
+concurrency:
+  group: canonical-integration-gate-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  canonical-integration-gate:
+    # The job NAME is the check context branch protection must require. Keep it stable and
+    # unique — it is deliberately not `validate`, which two other workflows already emit.
+    name: canonical-integration-gate
+    runs-on: ubuntu-latest
+    # Must exceed the script's wait budget so the runner does not kill it mid-evaluation and
+    # leave the required context reporting `cancelled`.
+    timeout-minutes: 30
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # No `continue-on-error`: this step's exit code IS the gate verdict.
+      - name: Evaluate applicable gates
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: node .github/scripts/canonical-integration-gate.mjs

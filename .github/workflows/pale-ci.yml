@@ -8,6 +8,10 @@ on:
 
 jobs:
   validate:
+    # Distinct context name. This job previously emitted `validate`, colliding with
+    # migrateck-platform-ci.yml's `validate` — branch protection matches by context NAME, so the
+    # two competed for one required slot and a Pale-only PR could satisfy the platform gate.
+    name: pale-validate
     runs-on: ubuntu-latest
     defaults:
       run:
