@@ -170,3 +170,5 @@ every pre-cutover state stays reachable. No step rewrites history.
 
 No default-branch change · no rename or deletion of `main` · no protection or ruleset change · no
 historical branch deletion · no scanner suppressions.
+
+Post-cutover probe: documentation-only. Throwaway.
