@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useMemo, useState, type FormEvent } from "react";
+import { Suspense, useMemo, useState, type FormEvent } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Image from "next/image";
 import {
@@ -33,11 +33,15 @@ function MfaForm() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
-  useEffect(() => {
+  // Switching factor clears whatever the previous one had entered. This is a consequence of
+  // the user's click, so it belongs in the handler — an effect on [method] also fired on
+  // mount, re-setting three values that were already at these exact initial values.
+  function selectMethod(nextMethod: Method) {
+    setMethod(nextMethod);
     setCode(["", "", "", "", "", ""]);
     setRecoveryCode("");
     setError("");
-  }, [method]);
+  }
 
   async function completeOAuthFlow() {
     if (!clientId || !redirectUri) {
@@ -172,7 +176,7 @@ function MfaForm() {
                   <button
                     key={item.key}
                     type="button"
-                    onClick={() => setMethod(item.key as Method)}
+                    onClick={() => selectMethod(item.key as Method)}
                     className={
                       method === item.key
                         ? "rounded-2xl bg-[linear-gradient(135deg,var(--brand-start),var(--brand-end))] px-3 py-3 text-sm font-semibold text-white"

@@ -51,8 +51,12 @@ jobs:
       - name: Build
         run: pnpm build
 
+      # `--recursive` is not an option of `pnpm audit` (it is a global filter flag), so the
+      # previous invocation aborted on "Unknown option" every run — the gate reported a
+      # configuration error, never a verdict. `pnpm audit` already covers the whole
+      # workspace because it reads the lockfile.
       - name: Dependency scan
-        run: pnpm audit --recursive --prod
+        run: pnpm audit --prod
 
   secret-scan:
     runs-on: ubuntu-latest

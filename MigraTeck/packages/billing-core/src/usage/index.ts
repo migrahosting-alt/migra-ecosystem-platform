@@ -56,7 +56,11 @@ export async function recordUsage(
 export async function getUsageSummary(
   ctx: BillingContext,
   orgId: string,
-  opts?: { productFamily?: ProductFamily; meterName?: string; since?: Date },
+  opts?: {
+    productFamily?: ProductFamily | undefined;
+    meterName?: string | undefined;
+    since?: Date | undefined;
+  },
 ): Promise<UsageSummaryEntry[]> {
   const where: Record<string, unknown> = { orgId };
   if (opts?.productFamily) where.productFamily = opts.productFamily;

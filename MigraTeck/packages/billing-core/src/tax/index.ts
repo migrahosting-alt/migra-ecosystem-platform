@@ -12,12 +12,33 @@ export interface TaxInfo {
 }
 
 /**
+ * Write shape for tax details. Deliberately NOT `TaxInfo` — that is the *read* shape
+ * `getTaxInfo` returns, in which every field is present and `string | null`.
+ *
+ * A write has three distinguishable states per field, and Prisma already implements all
+ * three; this type exists so callers can express them:
+ *
+ *   - property absent             -> `undefined` -> column left untouched
+ *   - property present as `null`  -> `null`      -> column cleared
+ *   - property present with value -> value       -> column updated
+ *
+ * Absent and `null` must stay separable all the way down to the `data` object. Collapsing
+ * them would silently clear columns the caller never mentioned — a partial update that
+ * destroys data it was never asked to touch.
+ */
+export interface UpdateTaxInfoInput {
+  taxCountry?: string | null | undefined;
+  taxState?: string | null | undefined;
+  taxId?: string | null | undefined;
+}
+
+/**
  * Update the tax info on a billing account and sync to Stripe.
  */
 export async function updateTaxInfo(
   ctx: BillingContext,
   orgId: string,
-  input: TaxInfo,
+  input: UpdateTaxInfoInput,
 ): Promise<void> {
   const account = await ctx.db.billingAccount.findUnique({
     where: { orgId },

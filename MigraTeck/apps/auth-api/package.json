@@ -20,20 +20,20 @@
     "@fastify/cors": "^11.0.0",
     "@fastify/formbody": "^8.0.2",
     "@fastify/rate-limit": "^10.2.1",
-    "@prisma/adapter-pg": "7.7.0",
-    "@prisma/client": "^7.7.0",
-    "@prisma/client-runtime-utils": "7.7.0",
+    "@prisma/adapter-pg": "7.9.1",
+    "@prisma/client": "^7.9.1",
+    "@prisma/client-runtime-utils": "7.9.1",
     "argon2": "^0.43.0",
-    "fastify": "^5.6.1",
+    "fastify": "^5.10.0",
     "jose": "^6.0.11",
     "nanoid": "^5.1.5",
-    "nodemailer": "^6.10.1",
+    "nodemailer": "^9.0.3",
     "zod": "^3.24.4"
   },
   "devDependencies": {
     "@types/node": "^22.18.0",
-    "@types/nodemailer": "^6.4.17",
-    "prisma": "^7.7.0",
+    "@types/nodemailer": "^8.0.1",
+    "prisma": "^7.9.1",
     "tsx": "^4.20.3",
     "typescript": "^5.9.3"
   }

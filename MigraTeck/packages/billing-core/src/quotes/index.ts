@@ -6,12 +6,12 @@ export interface CreateQuoteInput {
   orgId: string;
   lineItems: Array<{
     priceLookupKey: string;
-    quantity?: number;
+    quantity?: number | undefined;
   }>;
-  header?: string;
-  description?: string;
-  expiresInDays?: number;
-  metadata?: Record<string, string>;
+  header?: string | undefined;
+  description?: string | undefined;
+  expiresInDays?: number | undefined;
+  metadata?: Record<string, string> | undefined;
 }
 
 /**

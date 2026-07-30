@@ -88,7 +88,7 @@ export async function syncInvoiceFromStripe(
 export async function getInvoices(
   ctx: BillingContext,
   orgId: string,
-  opts?: { limit?: number; offset?: number },
+  opts?: { limit?: number | undefined; offset?: number | undefined },
 ): Promise<BillingInvoice[]> {
   const invoices = await ctx.db.billingInvoice.findMany({
     where: { orgId },
