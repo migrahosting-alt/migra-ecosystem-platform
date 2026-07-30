@@ -60,9 +60,18 @@ export const GATES = [
   { context: "nginx-gate", always: true },
   { context: "Workspace Hygiene (Strict)", always: true },
 
-  // Path-filtered and live.
-  { context: "validate", paths: ["MigraTeck/**", ".github/workflows/migrateck-platform-ci.yml"] },
-  { context: "secret-scan", paths: ["MigraTeck/**", ".github/workflows/migrateck-platform-ci.yml"] },
+  // Path-filtered and live. These were `validate` / `secret-scan` until the reconciliation with
+  // `main`, whose universal-required-gates.yml emits those two names unconditionally. Protection
+  // matches by context NAME, so the canonical platform jobs were renamed to keep both security
+  // models without two check-runs sharing a name.
+  {
+    context: "canonical-platform-validate",
+    paths: ["MigraTeck/**", ".github/workflows/migrateck-platform-ci.yml"],
+  },
+  {
+    context: "canonical-platform-secret-scan",
+    paths: ["MigraTeck/**", ".github/workflows/migrateck-platform-ci.yml"],
+  },
 
   // Path-filtered but DORMANT — defined, never required. See DORMANT_REASONS.
   {

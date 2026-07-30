@@ -19,6 +19,13 @@ permissions:
 
 jobs:
   validate:
+    # Distinct context name. `main` carries universal-required-gates.yml, which emits `validate`
+    # and `secret-scan` UNCONDITIONALLY and is what makes main's branch protection satisfiable.
+    # This workflow emitted the same two names while being path-filtered to MigraTeck/**. Once the
+    # two histories are reconciled both workflows coexist, and protection matches by context NAME —
+    # two check-runs called `validate` are indistinguishable to it. Renaming the canonical side
+    # keeps main's required names untouched and unambiguous.
+    name: canonical-platform-validate
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -59,6 +66,11 @@ jobs:
         run: pnpm audit --prod
 
   secret-scan:
+    # Renamed for the same reason as the validate job above. Note the two implementations are not
+    # interchangeable: main's `secret-scan` is a Python change-set scanner with runtime-generated
+    # fixtures, this one is gitleaks plus a detection self-proof. Both are kept — they scan
+    # differently — which is exactly why they must not share a context name.
+    name: canonical-platform-secret-scan
     runs-on: ubuntu-latest
     permissions:
       contents: read
