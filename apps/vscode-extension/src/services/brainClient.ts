@@ -1,4 +1,3 @@
-import * as vscode from 'vscode';
 import type {
   ChatTurnRequest,
   ChatTurnResponse,
@@ -109,11 +108,29 @@ function nextOperationId(action: string): string {
   return `${action}-${Date.now().toString(36)}-${operationCounter}`;
 }
 
+/** Configuration the client needs, injected rather than read from `vscode` directly.
+ *
+ * This exists so BrainClient is CONSTRUCTIBLE IN A UNIT TEST. The public-path tests
+ * must drive the exported methods — that is the only way to catch wrapper logic
+ * mistranslating a timeout or normalising a malformed response into success — and a
+ * hard `import * as vscode` made that impossible under bare `node --test`. */
+export interface BrainConfig {
+  baseUrl(): string;
+  timeoutMs(): number;
+  connectionTimeoutMs(): number;
+}
+
+/** Minimal log sink. Avoids depending on `vscode.OutputChannel` in tests. */
+export interface BrainLogSink {
+  appendLine(message: string): void;
+}
+
 export class BrainClient {
   private readonly connection: BrainConnectionState;
 
   constructor(
-    private readonly output: vscode.OutputChannel,
+    private readonly output: BrainLogSink,
+    private readonly config: BrainConfig,
     private readonly fetchImpl?: FetchLike,
     private readonly retryPolicy: BrainRetryPolicy = DEFAULT_RETRY_POLICY,
   ) {
@@ -121,19 +138,16 @@ export class BrainClient {
   }
 
   get baseUrl(): string {
-    const config = vscode.workspace.getConfiguration('migrapilot');
-    return String(config.get('brainUrl', 'http://127.0.0.1:3988')).replace(/\/$/, '');
+    return this.config.baseUrl().replace(/\/$/, '');
   }
 
   /** Configurable, replacing the former hard-coded 1500ms probe timeout. */
   get timeoutMs(): number {
-    const config = vscode.workspace.getConfiguration('migrapilot');
-    return Number(config.get('brainTimeoutMs', 30_000));
+    return this.config.timeoutMs();
   }
 
   get connectionTimeoutMs(): number {
-    const config = vscode.workspace.getConfiguration('migrapilot');
-    return Number(config.get('brainConnectionTimeoutMs', 5_000));
+    return this.config.connectionTimeoutMs();
   }
 
   /** Current readiness — derived only from observed probes. */
@@ -143,6 +157,12 @@ export class BrainClient {
 
   connectionStatusLine(): string {
     return this.connection.statusLine();
+  }
+
+  /** Last OBSERVED connection failure category. Reads the connection record only —
+   * it can never expose or mutate operation state. */
+  snapshotFailureCategory(): FailureCategory | undefined {
+    return this.connection.snapshot().lastFailureCategory;
   }
 
   /**
@@ -192,10 +212,18 @@ export class BrainClient {
     return unwrap(await this.routeGoverned(payload, signal));
   }
 
-  /** Governed variant: returns the full outcome instead of throwing. */
-  async routeGoverned(payload: RouteRequest, signal?: AbortSignal): Promise<BrainOperationOutcome<RouteResponse>> {
+  /** Governed variant: returns the full outcome instead of throwing.
+   *
+   * `gate` lets a caller attach a precondition that must be CONFIRMED before anything
+   * is dispatched. An unconfirmed gate performs zero transport calls. */
+  async routeGoverned(
+    payload: RouteRequest,
+    signal?: AbortSignal,
+    gate?: { precondition: () => boolean | Promise<boolean>; label?: string },
+  ): Promise<BrainOperationOutcome<RouteResponse>> {
     return this.dispatch<RouteResponse>('route', '/route', payload, 'POST', {
       timeoutMs: this.timeoutMs,
+      ...(gate ? { gate } : {}),
       ...(signal ? { signal } : {}),
     });
   }
@@ -233,7 +261,11 @@ export class BrainClient {
     path: string,
     body: unknown,
     method: 'GET' | 'POST',
-    opts: { timeoutMs: number; signal?: AbortSignal },
+    opts: {
+      timeoutMs: number;
+      signal?: AbortSignal;
+      gate?: { precondition: () => boolean | Promise<boolean>; label?: string };
+    },
   ): Promise<BrainOperationOutcome<T>> {
     const endpoint = `${this.baseUrl}${path}`;
     this.log(`${method} ${endpoint}`);
@@ -246,6 +278,12 @@ export class BrainClient {
       ...(body === undefined ? {} : { body }),
       ...(this.fetchImpl ? { fetchImpl: this.fetchImpl } : {}),
       ...(opts.signal ? { externalSignal: opts.signal } : {}),
+      ...(opts.gate
+        ? {
+            precondition: opts.gate.precondition,
+            preconditionLabel: opts.gate.label ?? 'caller precondition',
+          }
+        : {}),
     });
   }
 

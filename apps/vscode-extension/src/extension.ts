@@ -23,6 +23,7 @@ import {
 import { BrainLifecycle, type EnsureResult } from './services/brainLifecycle.js';
 import { createRealBrainLauncher } from './services/brainLifecycleVscode.js';
 import { BrainClient, callBrainTool } from './services/brainClient.js';
+import { vscodeBrainConfig } from './services/brainConfigVscode.js';
 import { CAP_DIAGNOSTICS_SYNC, evaluateCapability } from './services/commandCapabilities.js';
 import { PilotApiClient } from '@migrapilot/pilot-client';
 import { VscodePilotApiConfig, VscodeSecretTokenStore, getMode } from './services/pilotConfigVscode.js';
@@ -258,7 +259,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<MigraP
   inheritedAgentBootstrapSecret = process.env.MIGRAPILOT_AGENT_BOOTSTRAP_SECRET;
   delete process.env.MIGRAPILOT_AGENT_BOOTSTRAP_SECRET;
   outputChannel = vscode.window.createOutputChannel('MigraPilot');
-  brainClient = new BrainClient(outputChannel);
+  brainClient = new BrainClient(outputChannel, vscodeBrainConfig());
   // MigraAI Engine client — the local chat path streams through /api/ai/chat.
   // The engine is served by brain-service, so it shares the brain base URL.
   migraAiClient = new MigraAiClient({
