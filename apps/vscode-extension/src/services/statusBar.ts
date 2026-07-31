@@ -2,6 +2,10 @@ import * as vscode from 'vscode';
 import type { HealthResponse } from '@migrapilot/shared-types';
 import { type ResolvedBackend } from './backendRouter.js';
 import { BrainClient } from './brainClient.js';
+import {
+  statusBarFor,
+  type OutcomePresentation,
+} from './brainOutcomePresentation.js';
 
 export class MigraPilotStatusBar {
   private readonly item: vscode.StatusBarItem;
@@ -25,6 +29,22 @@ export class MigraPilotStatusBar {
       this.item.tooltip = 'MigraPilot brain is unreachable';
       this.item.backgroundColor = new vscode.ThemeColor('statusBarItem.errorBackground');
     }
+  }
+
+  /**
+   * Render a governed operation outcome. The wording, icon and colour all come from
+   * the shared presenter, so the status bar cannot say "done" while the persisted
+   * record says the terminal revision was never written.
+   */
+  showOperationOutcome(p: OutcomePresentation): void {
+    const v = statusBarFor(p);
+    this.item.text = v.text;
+    this.item.tooltip = v.tooltip;
+    this.item.backgroundColor = v.error
+      ? new vscode.ThemeColor('statusBarItem.errorBackground')
+      : v.warning
+        ? new vscode.ThemeColor('statusBarItem.warningBackground')
+        : undefined;
   }
 
   applyHealth(health: HealthResponse): void {

@@ -13,7 +13,7 @@
 // process died did not complete, and is recovered as interrupted with explicit evidence.
 
 import type { ExecutionState, FailureCategory } from './executionState.js';
-import type { ConnectionReadiness } from './brainConnection.js';
+import type { ConnectionPersister, ConnectionReadiness } from './brainConnection.js';
 
 export const SCHEMA_VERSION = 1 as const;
 
@@ -445,5 +445,108 @@ export function operationPersister(
       }
     },
     currentRevision: () => revision,
+  };
+}
+
+// ── activation core (vscode-free, so ordering can be tested) ─────────────────
+
+export interface BrainBootstrapCore {
+  store: BrainStore;
+  storagePath: string;
+  recovered: Array<{ operationId: string; state: string; evidence?: string }>;
+  quarantined: Array<{ sourceFile: string; failure: string }>;
+}
+
+/**
+ * Steps 2–5 of the activation contract, in order and without gaps.
+ *
+ * Resolves ONLY after recovery has been persisted. The caller may start health
+ * polling once this settles and not before: a probe that ran first would overwrite
+ * the recovered state the user is shown, so an interrupted run would look fine.
+ *
+ * vscode-free on purpose — the ordering guarantee is the thing worth testing, and it
+ * cannot be tested through a module that needs the editor host.
+ */
+export async function bootstrapBrainStoreAt(
+  storagePath: string,
+  fs: StorageFs,
+  log: (message: string) => void,
+): Promise<BrainBootstrapCore> {
+  // 2/3 — one shared store; directories exist before any read.
+  const store = new BrainStore(storagePath, fs);
+  await store.init();
+
+  // 4/5 — load, recover, and REWRITE incomplete records so the recovery decision is
+  // itself durable. A record recovered only in memory would be re-recovered — or
+  // worse, re-interpreted — on the next restart.
+  const { operations, quarantined } = await store.loadOperations();
+  const recovered: BrainBootstrapCore['recovered'] = [];
+
+  for (const op of operations) {
+    if (op.recovery) {
+      try {
+        await store.saveOperation(op);
+      } catch (err) {
+        // Persisting the recovery failed. Report it; never downgrade to "fine".
+        log(`brain-store: could not persist recovery for ${op.operationId}: ${String(err)}`);
+      }
+      recovered.push({
+        operationId: op.operationId,
+        state: op.currentState,
+        ...(op.recovery.evidence ? { evidence: op.recovery.evidence } : {}),
+      });
+    }
+  }
+
+  log(
+    `brain-store: ready (${operations.length} record(s), ${recovered.length} recovered, ` +
+      `${quarantined.length} quarantined)`,
+  );
+  for (const q of quarantined) {
+    log(`brain-store: quarantined ${q.sourceFile} — ${q.failure}`);
+  }
+
+  return {
+    store,
+    storagePath,
+    recovered,
+    quarantined: quarantined.map((q) => ({ sourceFile: q.sourceFile, failure: q.failure })),
+  };
+}
+
+/**
+ * Adapts the narrow ConnectionPersister onto the store, owning the monotonic revision
+ * for `connection.json` alone.
+ *
+ * Writes are fire-and-forget by design: a health poll must never block the UI on disk
+ * IO, and a failed connection write is a diagnostic, not a reason to misreport
+ * readiness. Failures are logged — never swallowed, never escalated into a false state.
+ */
+export function connectionPersister(
+  store: BrainStore,
+  log: (message: string) => void,
+  clock: () => string = () => new Date().toISOString(),
+): ConnectionPersister {
+  let revision = 0;
+  let inFlight: Promise<unknown> = Promise.resolve();
+  return {
+    persist(record) {
+      revision += 1;
+      const rev = revision;
+      // Serialised through one chain so rapid transitions stay monotonic on disk
+      // rather than racing each other into out-of-order revisions.
+      inFlight = inFlight
+        .then(() =>
+          store.saveConnection({
+            schemaVersion: SCHEMA_VERSION,
+            revision: rev,
+            updatedAt: clock(),
+            ...record,
+          }),
+        )
+        .catch((err: unknown) => {
+          log(`brain-store: connection revision ${rev} not persisted — ${String(err)}`);
+        });
+    },
   };
 }

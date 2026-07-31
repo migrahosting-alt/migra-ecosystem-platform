@@ -11,12 +11,12 @@
 import * as vscode from 'vscode';
 
 import {
-  BrainStore,
-  SCHEMA_VERSION,
-  type PersistedBrainOperation,
+  bootstrapBrainStoreAt,
+  type BrainBootstrapCore,
   type StorageFs,
 } from './brainPersistence.js';
-import type { ConnectionPersister } from './brainConnection.js';
+
+export { connectionPersister } from './brainPersistence.js';
 
 /** StorageFs over vscode.workspace.fs, so the same code path works remotely. */
 export function vscodeStorageFs(): StorageFs {
@@ -52,20 +52,14 @@ export function vscodeStorageFs(): StorageFs {
   };
 }
 
-export interface BrainBootstrap {
-  store: BrainStore;
-  /** Resolved location, for sanitized diagnostics only. */
-  storagePath: string;
-  /** Recovered operations, already rewritten at a new revision on disk. */
-  recovered: Array<{ operationId: string; state: string; evidence?: string }>;
-  quarantined: Array<{ sourceFile: string; failure: string }>;
-}
+export type BrainBootstrap = BrainBootstrapCore;
 
 /**
- * Steps 1–5 of the activation contract, in order and without gaps.
+ * Resolves storage under globalStorageUri and delegates to the vscode-free core.
  *
- * Returns only after recovery has been PERSISTED, so the caller may safely start
- * health polling and accept operations once this resolves — and not before.
+ * Storage NEVER lives in a workspace or repository: an operation record is not project
+ * content, it is operator evidence, and writing it into a checkout would both pollute
+ * the tree and leak across clones.
  */
 export async function bootstrapBrainStore(
   context: vscode.ExtensionContext,
@@ -73,47 +67,7 @@ export async function bootstrapBrainStore(
 ): Promise<BrainBootstrap> {
   // 1 — resolve under globalStorageUri. Never the workspace.
   const storagePath = vscode.Uri.joinPath(context.globalStorageUri, 'brain-execution').fsPath;
-
-  // 2/3 — construct one shared store and create its directories before any read.
-  const store = new BrainStore(storagePath, vscodeStorageFs());
-  await store.init();
-
-  // 4/5 — load, recover, and REWRITE incomplete records so the recovery decision is
-  // itself durable. A record recovered only in memory would be re-recovered — or worse,
-  // re-interpreted — on the next restart.
-  const { operations, quarantined } = await store.loadOperations();
-  const recovered: BrainBootstrap['recovered'] = [];
-
-  for (const op of operations) {
-    if (op.recovery) {
-      try {
-        await store.saveOperation(op);
-      } catch (err) {
-        // Persisting the recovery failed. Report it; never downgrade to "fine".
-        log(`brain-store: could not persist recovery for ${op.operationId}: ${String(err)}`);
-      }
-      recovered.push({
-        operationId: op.operationId,
-        state: op.currentState,
-        ...(op.recovery.evidence ? { evidence: op.recovery.evidence } : {}),
-      });
-    }
-  }
-
-  log(
-    `brain-store: ready (${operations.length} record(s), ${recovered.length} recovered, ` +
-      `${quarantined.length} quarantined)`,
-  );
-  for (const q of quarantined) {
-    log(`brain-store: quarantined ${q.sourceFile} — ${q.failure}`);
-  }
-
-  return {
-    store,
-    storagePath,
-    recovered,
-    quarantined: quarantined.map((q) => ({ sourceFile: q.sourceFile, failure: q.failure })),
-  };
+  return bootstrapBrainStoreAt(storagePath, vscodeStorageFs(), log);
 }
 
 /**
@@ -132,41 +86,4 @@ export function recoveredStatusLine(recovered: BrainBootstrap['recovered']): str
     parts.push(`${unconfirmed.length} cancellation(s) requested but not confirmed`);
   }
   return `MigraPilot: ${parts.join('; ')}. Re-run if still required.`;
-}
-
-
-/**
- * Adapts the narrow ConnectionPersister onto the store, owning the monotonic revision
- * for `connection.json` alone.
- *
- * Writes are fire-and-forget by design: a health poll must never block the UI on disk
- * IO, and a failed connection write is a diagnostic, not a reason to misreport
- * readiness. Failures are logged — never swallowed, never escalated into a false state.
- */
-export function connectionPersister(
-  store: BrainStore,
-  log: (message: string) => void,
-): ConnectionPersister {
-  let revision = 0;
-  let inFlight: Promise<unknown> = Promise.resolve();
-  return {
-    persist(record) {
-      revision += 1;
-      const rev = revision;
-      // Serialised through one chain so rapid transitions stay monotonic on disk
-      // rather than racing each other into out-of-order revisions.
-      inFlight = inFlight
-        .then(() =>
-          store.saveConnection({
-            schemaVersion: SCHEMA_VERSION,
-            revision: rev,
-            updatedAt: new Date().toISOString(),
-            ...record,
-          }),
-        )
-        .catch((err: unknown) => {
-          log(`brain-store: connection revision ${rev} not persisted — ${String(err)}`);
-        });
-    },
-  };
 }
