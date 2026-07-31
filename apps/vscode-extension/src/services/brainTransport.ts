@@ -18,6 +18,68 @@ import {
   type ExecutionRecord,
   type FailureCategory,
 } from './executionState.js';
+import type { OperationKind, OperationPersister, PersistedBrainOperation } from './brainPersistence.js';
+
+/** Project the live execution record onto the persisted shape. Response bodies are
+ * never carried across — only what an operator needs to reconstruct what happened. */
+export function toPersisted(
+  record: ExecutionRecord,
+  kind: OperationKind,
+): Omit<PersistedBrainOperation, 'schemaVersion' | 'revision'> {
+  return {
+    operationId: record.operationId,
+    requestedAction: record.requestedAction,
+    operationKind: kind,
+    currentState: record.state,
+    startedAt: record.startedAt,
+    updatedAt: new Date().toISOString(),
+    ...(record.endedAt ? { endedAt: record.endedAt } : {}),
+    transitions: record.transitions.map((t) => ({
+      from: t.from, to: t.to, at: t.at, reason: t.reason, ...(t.rejected ? { rejected: true as const } : {}),
+    })),
+    invariantViolations: [...record.invariantViolations],
+    endpointIdentity: record.brainEndpoint,
+    precondition: {
+      required: record.phase !== undefined,
+      ...(record.phase === 'precondition_confirmed' ? { confirmedAt: record.startedAt } : {}),
+    },
+    transportAttempts: record.transportAttempts.map((a, i) => ({
+      attemptId: `${record.operationId}#a${i + 1}`,
+      attemptNumber: i + 1,
+      startedAt: a.at,
+      status: a.outcome === 'response' ? ('succeeded' as const) : ('failed' as const),
+      followedByAnotherAttempt: i < record.transportAttempts.length - 1,
+      producedAuthoritativeResult:
+        i === record.transportAttempts.length - 1 && record.terminalObserved,
+      diagnostic: a.detail,
+    })),
+    ...(record.cancellationRequestedAt
+      ? {
+          cancellation: {
+            requestedAt: record.cancellationRequestedAt,
+            ...(record.cancellationAcknowledgedAt
+              ? { acknowledgedAt: record.cancellationAcknowledgedAt }
+              : {}),
+            confirmed: record.cancellationAcknowledgedAt !== undefined,
+          },
+        }
+      : {}),
+    ...(record.terminalObserved && record.endedAt
+      ? {
+          terminalEvidence: {
+            observedAt: record.endedAt,
+            outcome: 'success' as const,
+            evidenceType: 'parsed-terminal-response',
+          },
+        }
+      : {}),
+    commands: [...record.commands],
+    changedFiles: [...record.filesChanged],
+    tests: [...record.testsRun],
+    failures: [...record.failures],
+    remainingWork: [...record.remainingWork],
+  };
+}
 
 /** Why a transport was aborted. Kept distinct so a timeout is never reported as a
  * user cancellation, and a shutdown is never reported as either. */
@@ -153,6 +215,10 @@ export interface BrainOperationOptions<T> {
   onTerminal?: (value: T) => void;
   fetchImpl?: FetchLike;
   externalSignal?: AbortSignal;
+  /** When present every transition is persisted, and the AWAITED terminal write becomes
+   * the success gate. Absent ⇒ the operation runs non-durably, and `durable` is false. */
+  persister?: OperationPersister;
+  operationKind?: OperationKind;
 }
 
 export interface BrainOperationOutcome<T> {
@@ -160,6 +226,11 @@ export interface BrainOperationOutcome<T> {
   readonly value?: T;
   readonly record: ExecutionRecord;
   readonly statusLine: string;
+  /** True only when the terminal revision was durably written. A successful Brain
+   * response with `durable === false` must NOT be shown as a normal success. */
+  readonly durable: boolean;
+  /** Revision the UI and work report must stamp themselves with. */
+  readonly revision?: number;
 }
 
 /**
@@ -176,14 +247,43 @@ export async function runBrainOperation<T>(
   }),
 ): Promise<BrainOperationOutcome<T>> {
   const doFetch = opts.fetchImpl ?? ((u, i) => fetch(u, i));
-  const finish = (ok: boolean, value?: T): BrainOperationOutcome<T> => ({
+  const kind: OperationKind = opts.operationKind ?? 'consequential';
+  const progress = (): void => {
+    opts.persister?.persistProgress(toPersisted(machine.snapshot(), kind));
+  };
+  const finish = (
+    ok: boolean,
+    value?: T,
+    durable = false,
+  ): BrainOperationOutcome<T> => ({
     ok,
     ...(value === undefined ? {} : { value }),
     record: machine.snapshot(),
     statusLine: machine.statusLine(),
+    durable,
+    ...(opts.persister ? { revision: opts.persister.currentRevision() } : {}),
   });
+  /** Terminal writes are AWAITED — the boolean is the success gate. */
+  const finishTerminal = async (ok: boolean, value?: T): Promise<BrainOperationOutcome<T>> => {
+    if (!opts.persister) return finish(ok, value, false);
+    const durable = await opts.persister.persistTerminal(toPersisted(machine.snapshot(), kind));
+    if (ok && !durable) {
+      // Completion and DURABILITY are different facts. The operation genuinely reached
+      // `completed` — forcing the record to `failed` would be a lie, and the state
+      // machine rightly refuses that transition anyway. What must not happen is a
+      // SUCCESS reaching the user: ok=false and durable=false close that path, and the
+      // status line names the actual problem.
+      return {
+        ...finish(false, undefined, false),
+        statusLine:
+          'Completed, but not durably recorded — the terminal revision was not persisted.',
+      };
+    }
+    return finish(ok, value, durable);
+  };
 
   machine.transition('connecting', 'operation start');
+  progress(); // 1 — initial record exists BEFORE anything is dispatched
   machine.transition('ready', 'endpoint configured');
 
   // ── Phase 1–2: precondition ───────────────────────────────────────────────
@@ -197,14 +297,14 @@ export async function runBrainOperation<T>(
       observed = false;
       machine.recordTransportAttempt(opts.endpoint, 'error', `precondition threw: ${String(err)}`);
     }
-    if (!machine.confirmPrecondition(observed, label)) return finish(false);
+    if (!machine.confirmPrecondition(observed, label)) return finishTerminal(false);
   } else {
     machine.requestPrecondition('none required');
     machine.confirmPrecondition(true, 'no precondition for this action');
   }
 
   // ── Phase 3: the gate. Zero fetches happen if this is false. ──────────────
-  if (!machine.mayAttemptAction()) return finish(false);
+  if (!machine.mayAttemptAction()) return finishTerminal(false);
 
   const controller = new AbortController();
   let timedOut = false;
@@ -221,6 +321,7 @@ export async function runBrainOperation<T>(
 
   machine.markActionAttempted(opts.endpoint);
   machine.transition('running', 'request dispatched');
+  progress(); // 2 — running
 
   try {
     const response = await doFetch(opts.endpoint, {
@@ -231,11 +332,12 @@ export async function runBrainOperation<T>(
     });
 
     machine.markResponseReceived();
+    progress(); // 3 — attempt completed
 
     if (!response.ok) {
       const c = classifyTransportFailure({ httpStatus: response.status });
-      machine.fail(c.category, `HTTP ${response.status}: ${c.diagnostic}`);
-      return finish(false);
+      machine.fail(c.category, `HTTP ${response.status}: ${c.diagnostic}`); // 8 — failure classification
+      return finishTerminal(false);
     }
 
     let parsed: T | undefined;
@@ -245,17 +347,20 @@ export async function runBrainOperation<T>(
       if (parsed === undefined) throw new Error('parse returned undefined');
     } catch (err) {
       const c = classifyTransportFailure({ parseFailed: true, cause: { message: String(err) } });
-      machine.fail(c.category, c.diagnostic);
-      return finish(false);
+      machine.fail(c.category, c.diagnostic); // 8 — failure classification
+      return finishTerminal(false);
     }
 
     // ── Phase 5: the ONLY route to success. Returns false if cancellation was
     // requested, in which case the continuation below must not run. ──────────
     const promoted = machine.observeTerminal(true, 'terminal response observed and parsed');
-    if (!promoted) return finish(false);
+    if (!promoted) return finishTerminal(false);
 
-    opts.onTerminal?.(parsed);
-    return finish(true, parsed);
+    // 9 — terminal evidence + final state. AWAITED: no continuation runs, and no
+    // success escapes, until the terminal revision is durably written.
+    const outcome = await finishTerminal(true, parsed);
+    if (outcome.ok) opts.onTerminal?.(parsed);
+    return outcome;
   } catch (err) {
     const e = err as { cause?: { code?: string; name?: string; message?: string }; name?: string };
     const aborted = controller.signal.aborted;
@@ -267,12 +372,12 @@ export async function runBrainOperation<T>(
     if (aborted && !timedOut && machine.state === 'cancelling') {
       // A user cancellation whose transport is conclusively dead counts as
       // acknowledged — the work cannot still be running.
-      machine.resolveCancellation(true, 'transport terminated after user cancellation');
-      return finish(false);
+      machine.resolveCancellation(true, 'transport terminated after user cancellation'); // 6/7
+      return finishTerminal(false);
     }
 
-    machine.fail(c.category, c.diagnostic);
-    return finish(false);
+    machine.fail(c.category, c.diagnostic); // 8 — failure classification
+    return finishTerminal(false);
   } finally {
     clearTimeout(timer);
     opts.externalSignal?.removeEventListener('abort', onExternalAbort);

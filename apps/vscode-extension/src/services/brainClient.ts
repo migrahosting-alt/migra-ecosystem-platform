@@ -15,6 +15,7 @@ import {
 } from './brainConnection.js';
 import { runBrainOperation, type BrainOperationOutcome, type FetchLike } from './brainTransport.js';
 import type { ExecutionRecord, FailureCategory } from './executionState.js';
+import type { OperationPersister } from './brainPersistence.js';
 
 /**
  * A Brain operation that did not reach observed terminal success.
@@ -358,6 +359,7 @@ export class BrainClient {
         ok: false,
         record: { ...({} as ExecutionRecord), operationId, failures: attemptLog } as ExecutionRecord,
         statusLine: 'Cancelled before any attempt was dispatched.',
+        durable: false,
       }
     );
   }
@@ -368,9 +370,16 @@ export class BrainClient {
   }
 
   /** Governed variant: returns the full outcome instead of throwing. */
-  async chatGoverned(payload: ChatTurnRequest, signal?: AbortSignal): Promise<BrainOperationOutcome<ChatTurnResponse>> {
+  async chatGoverned(
+    payload: ChatTurnRequest,
+    signal?: AbortSignal,
+    gate?: { precondition: () => boolean | Promise<boolean>; label?: string },
+    persister?: OperationPersister,
+  ): Promise<BrainOperationOutcome<ChatTurnResponse>> {
     return this.dispatch<ChatTurnResponse>('chat', '/chat', payload, 'POST', {
       timeoutMs: this.timeoutMs,
+      ...(gate ? { gate } : {}),
+      ...(persister ? { persister } : {}),
       ...(signal ? { signal } : {}),
     });
   }
@@ -388,6 +397,7 @@ export class BrainClient {
       gate?: { precondition: () => boolean | Promise<boolean>; label?: string };
       operationId?: string;
       attemptId?: string;
+      persister?: OperationPersister;
     },
   ): Promise<BrainOperationOutcome<T>> {
     const endpoint = `${this.baseUrl}${path}`;
@@ -401,6 +411,7 @@ export class BrainClient {
       ...(body === undefined ? {} : { body }),
       ...(this.fetchImpl ? { fetchImpl: this.fetchImpl } : {}),
       ...(opts.signal ? { externalSignal: opts.signal } : {}),
+      ...(opts.persister ? { persister: opts.persister } : {}),
       ...(opts.gate
         ? {
             precondition: opts.gate.precondition,

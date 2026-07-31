@@ -405,3 +405,53 @@ test('structural · no wrapper converts BrainOperationError into a success-shape
     assert.equal(r.resolved, false, 'a refused connection must not resolve to a value');
   }
 });
+
+// ── operation persistence: the terminal write is the success gate ────────────
+
+import { BrainStore, operationPersister, type StorageFs } from '../../services/brainPersistence.js';
+
+function tinyFs() {
+  const files = new Map<string, string>();
+  let breakNext = false;
+  const fs: StorageFs = {
+    mkdir: async () => {},
+    readFile: async (p) => { const v = files.get(p); if (v === undefined) throw new Error('ENOENT'); return v; },
+    writeFile: async (p, d) => { if (breakNext) { breakNext = false; throw new Error('EIO'); } files.set(p, d); },
+    rename: async (a, b) => { const v = files.get(a)!; files.delete(a); files.set(b, v); },
+    readdir: async () => [],
+    exists: async (p) => files.has(p),
+  };
+  return { fs, files, breakNext: () => { breakNext = true; } };
+}
+
+test('persistence · a successful operation writes progress then an awaited terminal revision', async () => {
+  const t = tinyFs();
+  const store = new BrainStore('/gs', t.fs);
+  const p = operationPersister(store, () => {});
+  const c = new BrainClient(sink, config(), spy(json({ content: 'ok' })), RETRY_0, instantScheduler);
+  const out = await c.chatGoverned({} as never, undefined, undefined, p);
+  assert.equal(out.ok, true);
+  assert.equal(out.durable, true, 'terminal revision was persisted');
+  assert.ok((out.revision ?? 0) >= 3, 'progress writes precede the terminal revision');
+});
+
+test('persistence · a failed TERMINAL write suppresses success entirely', async () => {
+  const t = tinyFs();
+  const store = new BrainStore('/gs', t.fs);
+  const p = operationPersister(store, () => {});
+  let continued = 0;
+  const c = new BrainClient(sink, config(), spy(json({ content: 'ok' })), RETRY_0, instantScheduler);
+  // Break the write that the TERMINAL revision will use.
+  const origPersistTerminal = p.persistTerminal.bind(p);
+  const gated = { ...p, persistTerminal: async () => { void origPersistTerminal; return false; } };
+  const out = await c.chatGoverned({} as never, undefined, undefined, gated);
+  assert.equal(out.ok, false, 'a Brain success that is not durable is NOT a success');
+  assert.equal(out.durable, false);
+  assert.equal(continued, 0);
+  assert.match(out.statusLine, /not durably recorded/i);
+  // The record still says `completed` — that is TRUE, the operation did complete.
+  // Durability is a separate fact, and forcing the state to `failed` would be a lie.
+  // What matters is that no success escapes: ok=false and durable=false.
+  assert.equal(out.record.state, 'completed');
+  assert.equal(out.value, undefined, 'no value may escape a non-durable completion');
+});
