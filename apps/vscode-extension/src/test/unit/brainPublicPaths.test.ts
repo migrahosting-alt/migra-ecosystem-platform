@@ -455,3 +455,72 @@ test('persistence · a failed TERMINAL write suppresses success entirely', async
   assert.equal(out.record.state, 'completed');
   assert.equal(out.value, undefined, 'no value may escape a non-durable completion');
 });
+
+// ── integration: nine write points, monotonic, never batched ─────────────────
+
+/** Captures every persisted revision in write order, so ordering is provable rather
+ * than inferred from the final file. */
+function recordingStore() {
+  const t = tinyFs();
+  const store = new BrainStore('/gs', t.fs);
+  const seen: Array<{ revision: number; state: string }> = [];
+  const base = operationPersister(store, () => {});
+  const p = {
+    persistProgress: (r: Parameters<typeof base.persistProgress>[0]) => {
+      seen.push({ revision: p.currentRevision() + 1, state: r.currentState });
+      base.persistProgress(r);
+    },
+    persistTerminal: async (r: Parameters<typeof base.persistTerminal>[0]) => {
+      seen.push({ revision: p.currentRevision() + 1, state: r.currentState });
+      return base.persistTerminal(r);
+    },
+    currentRevision: () => base.currentRevision(),
+  };
+  return { p, seen, files: t.files };
+}
+
+test('integration · a successful operation persists monotonic revisions, never batched', async () => {
+  const { p, seen } = recordingStore();
+  const c = new BrainClient(sink, config(), spy(json({ content: 'ok' })), RETRY_0, instantScheduler);
+  const out = await c.chatGoverned({} as never, undefined, undefined, p);
+
+  assert.equal(out.ok, true);
+  assert.equal(out.durable, true);
+  assert.ok(seen.length >= 4, `expected several distinct writes, saw ${seen.length}`);
+
+  // Monotonic and gapless — batching would collapse these into one.
+  const revs = seen.map((s) => s.revision);
+  assert.deepEqual(revs, [...revs].sort((a, b) => a - b), 'revisions must be monotonic');
+  assert.equal(new Set(revs).size, revs.length, 'no revision may be reused');
+
+  // The lifecycle is visible in the record trail, not just the end state.
+  const states = seen.map((s) => s.state);
+  assert.ok(states.includes('connecting'), 'initial record precedes dispatch');
+  assert.ok(states.includes('running'), 'running is persisted');
+  assert.equal(states.at(-1), 'completed', 'terminal write is last');
+});
+
+test('integration · a failing operation still persists its trail and terminal failure', async () => {
+  const { p, seen } = recordingStore();
+  const c = new BrainClient(sink, config(), spy(refuse), RETRY_0, instantScheduler);
+  const out = await c.chatGoverned({} as never, undefined, undefined, p);
+
+  assert.equal(out.ok, false);
+  assert.equal(seen.at(-1)!.state, 'failed', 'the terminal write records the failure');
+  const revs = seen.map((s) => s.revision);
+  assert.deepEqual(revs, [...revs].sort((a, b) => a - b));
+});
+
+test('integration · no token-shaped value reaches disk from a real operation', async () => {
+  const { p, files } = recordingStore();
+  const c = new BrainClient(sink, config(), spy(json({ content: 'ok' })), RETRY_0, instantScheduler);
+  await c.chatGoverned(
+    { prompt: 'Authorization: Bearer supersecrettokenvalue123456' } as never,
+    undefined,
+    undefined,
+    p,
+  );
+  const onDisk = [...files.values()].join('\n');
+  assert.equal(/supersecrettokenvalue123456/.test(onDisk), false, 'request payloads never persist');
+  assert.equal(/sk_live_/.test(onDisk), false);
+});
