@@ -24,6 +24,7 @@ import { BrainLifecycle, type EnsureResult } from './services/brainLifecycle.js'
 import { createRealBrainLauncher } from './services/brainLifecycleVscode.js';
 import { BrainClient, callBrainTool } from './services/brainClient.js';
 import { vscodeBrainConfig } from './services/brainConfigVscode.js';
+import { bootstrapBrainStore, recoveredStatusLine, type BrainBootstrap } from './services/brainStoreVscode.js';
 import { CAP_DIAGNOSTICS_SYNC, evaluateCapability } from './services/commandCapabilities.js';
 import { PilotApiClient } from '@migrapilot/pilot-client';
 import { VscodePilotApiConfig, VscodeSecretTokenStore, getMode } from './services/pilotConfigVscode.js';
@@ -54,6 +55,7 @@ import { MigraPilotStudioPanel } from './panel/shell/studioPanel.js';
 import { type ShellTabId } from './panel/shell/navigationModel.js';
 
 let outputChannel: vscode.OutputChannel;
+let brainBootstrap: BrainBootstrap | undefined;
 let brainClient: BrainClient;
 let migraAiClient: MigraAiClient;
 let engineDiagnostics: EngineDiagnostics;
@@ -259,6 +261,24 @@ export async function activate(context: vscode.ExtensionContext): Promise<MigraP
   inheritedAgentBootstrapSecret = process.env.MIGRAPILOT_AGENT_BOOTSTRAP_SECRET;
   delete process.env.MIGRAPILOT_AGENT_BOOTSTRAP_SECRET;
   outputChannel = vscode.window.createOutputChannel('MigraPilot');
+
+  // ── Durable execution authority ──────────────────────────────────────────
+  // Steps 1-5 of the activation contract. This MUST complete before any health
+  // probe or Brain operation begins: a probe that lands first would overwrite the
+  // recovered state the user is shown, so an interrupted run would look fine.
+  try {
+    brainBootstrap = await bootstrapBrainStore(context, (m) => output(m));
+    const recoveredLine = recoveredStatusLine(brainBootstrap.recovered);
+    if (recoveredLine) {
+      // 6 — publish recovered status BEFORE polling starts.
+      output(recoveredLine);
+      void vscode.window.showWarningMessage(recoveredLine);
+    }
+  } catch (err) {
+    // Persistence is unavailable. Say so plainly rather than running as if durable.
+    output(`brain-store: UNAVAILABLE — ${String(err)}. Runtime state will not be durable.`);
+  }
+
   brainClient = new BrainClient(outputChannel, vscodeBrainConfig());
   // MigraAI Engine client — the local chat path streams through /api/ai/chat.
   // The engine is served by brain-service, so it shares the brain base URL.
