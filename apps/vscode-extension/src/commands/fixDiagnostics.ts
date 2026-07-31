@@ -8,6 +8,9 @@ import type {
 } from '@migrapilot/protocol';
 import type { ProposedEdit } from '@migrapilot/shared-types';
 import { MigraAiClient } from '../services/migraAiClient.js';
+import { unwrap } from '../services/brainClient.js';
+import { presentOutcome } from '../services/brainOutcomePresentation.js';
+import { governedValue, notifyOutcome } from '../services/brainOutcomeNotify.js';
 import { previewAndMaybeApplyProposedEdits } from '../services/proposedEdits.js';
 import { CAP_FIX_DIAGNOSTICS } from '../services/commandCapabilities.js';
 import { type CommandDeps, routeCommand, surfacePilotError, withCancellableProgress } from './commandRouting.js';
@@ -75,7 +78,7 @@ export async function runFixDiagnostics(deps: CommandDeps): Promise<void> {
     path: relativePath,
   });
 
-  const route = await brainClient.route({
+  const route = governedValue(await brainClient.routeGoverned({
     feature: 'fix',
     userPrompt: 'Analyze the active diagnostics and propose a targeted fix.',
     signals: {
@@ -83,16 +86,16 @@ export async function runFixDiagnostics(deps: CommandDeps): Promise<void> {
       hasSelection: !editor.selection.isEmpty,
       openFileCount: vscode.workspace.textDocuments.length,
     },
-  });
+  }));
 
-  const retrieved = await brainClient.retrieve({
+  const retrieved = governedValue(await brainClient.retrieveGoverned({
     query: diagnosticsResult.items.map((item) => item.message).join('\n'),
     workspaceRoot,
     feature: 'fix',
     activeFile: uri.fsPath,
     selectionText: editor.selection.isEmpty ? undefined : editor.document.getText(editor.selection),
     maxChunks: 8,
-  });
+  }));
 
   const payload: ChatTurnRequest = {
     feature: 'fix',
@@ -136,11 +139,22 @@ export async function runFixDiagnostics(deps: CommandDeps): Promise<void> {
     outputMode: 'structured_fix',
   };
 
-  const response = await brainClient.chat(payload);
+  // Governed variant, so the RECORD survives: the document below is a user-visible
+  // outcome and must carry the same operation identity and revision the store holds.
+  const outcome = await brainClient.chatGoverned(payload);
+  const response = unwrap(outcome);
+  const presented = presentOutcome(outcome);
+
+  // A Brain answer that was never durably recorded is still shown — the fix may be
+  // perfectly good — but it is never presented as a normal completion.
+  if (presented.severity !== 'success') notifyOutcome(presented);
 
   const document = await vscode.workspace.openTextDocument({
     language: 'markdown',
-    content: `# MigraPilot Fix Diagnostics\n\n${response.content}`,
+    content:
+      `# MigraPilot Fix Diagnostics\n\n_${presented.stamp}_\n\n` +
+      (presented.severity === 'success' ? '' : `> ${presented.message}\n\n`) +
+      response.content,
   });
   await vscode.window.showTextDocument(document, { preview: true });
 

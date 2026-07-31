@@ -6,6 +6,9 @@ import type {
   FileReadSymbolResponse,
 } from '@migrapilot/protocol';
 import { MigraAiClient } from '../services/migraAiClient.js';
+import { unwrap } from '../services/brainClient.js';
+import { presentOutcome, type OutcomePresentation } from '../services/brainOutcomePresentation.js';
+import { governedValue, notifyOutcome } from '../services/brainOutcomeNotify.js';
 import { BackendRouter } from '../services/backendRouter.js';
 import { CAP_EXPLAIN_SELECTION } from '../services/commandCapabilities.js';
 import { type CommandDeps, routeCommand, surfacePilotError, withCancellableProgress } from './commandRouting.js';
@@ -62,7 +65,7 @@ export async function runExplainSelection(deps: CommandDeps): Promise<void> {
     selectedRange.startLine,
   );
 
-  const route = await brainClient.route({
+  const route = governedValue(await brainClient.routeGoverned({
     feature: 'explain',
     userPrompt: 'Explain this selected code clearly and identify any risks.',
     signals: {
@@ -70,16 +73,16 @@ export async function runExplainSelection(deps: CommandDeps): Promise<void> {
       hasDiagnostics: diagnosticsResult.items.length > 0,
       openFileCount: vscode.workspace.textDocuments.length,
     },
-  });
+  }));
 
-  const retrieved = await brainClient.retrieve({
+  const retrieved = governedValue(await brainClient.retrieveGoverned({
     query: selection,
     workspaceRoot,
     feature: 'explain',
     activeFile: editor.document.uri.fsPath,
     selectionText: selection,
     maxChunks: 6,
-  });
+  }));
 
   const payload: ChatTurnRequest = {
     feature: 'explain',
@@ -122,14 +125,27 @@ export async function runExplainSelection(deps: CommandDeps): Promise<void> {
     outputMode: 'markdown',
   };
 
-  const response = await brainClient.chat(payload);
-  await showMarkdownResult('MigraPilot: Explain Selection', response.content);
+  // Governed variant, so the RECORD survives to stamp the rendered document.
+  const outcome = await brainClient.chatGoverned(payload);
+  const response = unwrap(outcome);
+  const presented = presentOutcome(outcome);
+  if (presented.severity !== 'success') notifyOutcome(presented);
+  await showMarkdownResult('MigraPilot: Explain Selection', response.content, presented);
 }
 
-async function showMarkdownResult(title: string, content: string): Promise<void> {
+async function showMarkdownResult(
+  title: string,
+  content: string,
+  presented?: OutcomePresentation,
+): Promise<void> {
+  // The stamp goes in the document itself: a rendered answer is a user-visible
+  // outcome, and an unstamped one cannot be traced back to the persisted record.
+  const header = presented
+    ? `_${presented.stamp}_\n\n` + (presented.severity === 'success' ? '' : `> ${presented.message}\n\n`)
+    : '';
   const document = await vscode.workspace.openTextDocument({
     language: 'markdown',
-    content: `# ${title}\n\n${content}`,
+    content: `# ${title}\n\n${header}${content}`,
   });
   await vscode.window.showTextDocument(document, { preview: true });
 }

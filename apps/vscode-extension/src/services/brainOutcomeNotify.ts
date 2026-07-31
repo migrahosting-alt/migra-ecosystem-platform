@@ -9,7 +9,13 @@
 
 import * as vscode from 'vscode';
 
-import { notificationApiFor, type OutcomePresentation } from './brainOutcomePresentation.js';
+import {
+  notificationApiFor,
+  presentOutcome,
+  type OutcomePresentation,
+} from './brainOutcomePresentation.js';
+import { unwrap } from './brainClient.js';
+import type { BrainOperationOutcome } from './brainTransport.js';
 
 export { notificationApiFor };
 
@@ -35,4 +41,21 @@ export function notifyOutcome(p: OutcomePresentation): void {
     default:
       void vscode.window.showWarningMessage(message);
   }
+}
+
+/**
+ * Unwrap a governed outcome, warning the user if it was anything short of a durable
+ * success.
+ *
+ * Preparatory operations (`route`, `retrieve`) are not themselves rendered, so it is
+ * tempting to drop their records. That is wrong for a narrower reason than a false
+ * success claim: an operation ran, a record was meant to be written, and if the write
+ * failed nothing in the UI would ever say so. Each governed operation answers for
+ * itself.
+ */
+export function governedValue<T>(outcome: BrainOperationOutcome<T>): T {
+  const value = unwrap(outcome);
+  const presented = presentOutcome(outcome);
+  if (presented.severity !== 'success') notifyOutcome(presented);
+  return value;
 }

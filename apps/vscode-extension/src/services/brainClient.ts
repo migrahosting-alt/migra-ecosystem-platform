@@ -37,7 +37,14 @@ export class BrainOperationError extends Error {
 }
 
 /** Success is unwrapped ONLY when the machine reported observed terminal evidence. */
-function unwrap<T>(outcome: BrainOperationOutcome<T>): T {
+/**
+ * Turn a governed outcome into a value or a throw.
+ *
+ * Exported so a caller that needs the RECORD (to stamp its own surface) can keep the
+ * identical failure behaviour instead of hand-rolling a second, subtly different
+ * error path beside the governed one.
+ */
+export function unwrap<T>(outcome: BrainOperationOutcome<T>): T {
   if (outcome.ok && outcome.value !== undefined) return outcome.value;
   throw new BrainOperationError(outcome.record, outcome.record.failureCategory, outcome.statusLine);
 }
