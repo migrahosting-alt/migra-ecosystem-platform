@@ -8,7 +8,11 @@ import type {
   RouteResponse,
 } from '@migrapilot/shared-types';
 
-import { BrainConnectionState, type ConnectionReadiness } from './brainConnection.js';
+import {
+  BrainConnectionState,
+  type ConnectionPersister,
+  type ConnectionReadiness,
+} from './brainConnection.js';
 import { runBrainOperation, type BrainOperationOutcome, type FetchLike } from './brainTransport.js';
 import type { ExecutionRecord, FailureCategory } from './executionState.js';
 
@@ -164,8 +168,14 @@ export class BrainClient {
     private readonly fetchImpl?: FetchLike,
     private readonly retryPolicy: BrainRetryPolicy = DEFAULT_RETRY_POLICY,
     private readonly scheduler: Scheduler = realScheduler,
+    connectionPersister?: ConnectionPersister,
   ) {
-    this.connection = new BrainConnectionState(this.baseUrl);
+    this.connection = new BrainConnectionState(
+      this.baseUrl,
+      undefined,
+      undefined,
+      connectionPersister,
+    );
   }
 
   get baseUrl(): string {

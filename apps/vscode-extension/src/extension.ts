@@ -24,7 +24,12 @@ import { BrainLifecycle, type EnsureResult } from './services/brainLifecycle.js'
 import { createRealBrainLauncher } from './services/brainLifecycleVscode.js';
 import { BrainClient, callBrainTool } from './services/brainClient.js';
 import { vscodeBrainConfig } from './services/brainConfigVscode.js';
-import { bootstrapBrainStore, recoveredStatusLine, type BrainBootstrap } from './services/brainStoreVscode.js';
+import {
+  bootstrapBrainStore,
+  connectionPersister,
+  recoveredStatusLine,
+  type BrainBootstrap,
+} from './services/brainStoreVscode.js';
 import { CAP_DIAGNOSTICS_SYNC, evaluateCapability } from './services/commandCapabilities.js';
 import { PilotApiClient } from '@migrapilot/pilot-client';
 import { VscodePilotApiConfig, VscodeSecretTokenStore, getMode } from './services/pilotConfigVscode.js';
@@ -279,7 +284,18 @@ export async function activate(context: vscode.ExtensionContext): Promise<MigraP
     output(`brain-store: UNAVAILABLE — ${String(err)}. Runtime state will not be durable.`);
   }
 
-  brainClient = new BrainClient(outputChannel, vscodeBrainConfig());
+  // Connection readiness becomes durable here. The persister is narrow by type — it
+  // cannot reach an operation record — so injecting it carries none of the
+  // writers-before-recovery hazard. Absent a store, the client simply runs
+  // non-durably rather than pretending otherwise.
+  brainClient = new BrainClient(
+    outputChannel,
+    vscodeBrainConfig(),
+    undefined,
+    undefined,
+    undefined,
+    brainBootstrap ? connectionPersister(brainBootstrap.store, (m) => output(m)) : undefined,
+  );
   // MigraAI Engine client — the local chat path streams through /api/ai/chat.
   // The engine is served by brain-service, so it shares the brain base URL.
   migraAiClient = new MigraAiClient({

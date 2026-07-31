@@ -10,7 +10,8 @@
 
 import * as vscode from 'vscode';
 
-import { BrainStore, type StorageFs } from './brainPersistence.js';
+import { BrainStore, SCHEMA_VERSION, type StorageFs } from './brainPersistence.js';
+import type { ConnectionPersister } from './brainConnection.js';
 
 /** StorageFs over vscode.workspace.fs, so the same code path works remotely. */
 export function vscodeStorageFs(): StorageFs {
@@ -126,4 +127,41 @@ export function recoveredStatusLine(recovered: BrainBootstrap['recovered']): str
     parts.push(`${unconfirmed.length} cancellation(s) requested but not confirmed`);
   }
   return `MigraPilot: ${parts.join('; ')}. Re-run if still required.`;
+}
+
+
+/**
+ * Adapts the narrow ConnectionPersister onto the store, owning the monotonic revision
+ * for `connection.json` alone.
+ *
+ * Writes are fire-and-forget by design: a health poll must never block the UI on disk
+ * IO, and a failed connection write is a diagnostic, not a reason to misreport
+ * readiness. Failures are logged — never swallowed, never escalated into a false state.
+ */
+export function connectionPersister(
+  store: BrainStore,
+  log: (message: string) => void,
+): ConnectionPersister {
+  let revision = 0;
+  let inFlight: Promise<unknown> = Promise.resolve();
+  return {
+    persist(record) {
+      revision += 1;
+      const rev = revision;
+      // Serialised through one chain so rapid transitions stay monotonic on disk
+      // rather than racing each other into out-of-order revisions.
+      inFlight = inFlight
+        .then(() =>
+          store.saveConnection({
+            schemaVersion: SCHEMA_VERSION,
+            revision: rev,
+            updatedAt: new Date().toISOString(),
+            ...record,
+          }),
+        )
+        .catch((err: unknown) => {
+          log(`brain-store: connection revision ${rev} not persisted — ${String(err)}`);
+        });
+    },
+  };
 }
