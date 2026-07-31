@@ -204,28 +204,95 @@ test('9 · production-diagnostics timeout suppresses every downstream callback',
 
 // ── 10. retry supersession on an idempotent read ────────────────────────────
 
-test('10 · supersession — late first result discarded, second authoritative', async () => {
-  let attempt = 0;
-  let releaseFirst!: (r: Response) => void;
-  const f = spy(async () => {
-    attempt += 1;
-    if (attempt === 1) {
-      // First attempt fails with a RETRYABLE category.
-      throw Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNRESET' } });
+/** Tracks how many transport attempts are in flight at once. The sequential-retry
+ * guarantee is exactly "this never exceeds 1", so it is asserted directly rather than
+ * inferred from a token that does no work. */
+function concurrencyTracker(impl: FetchLike) {
+  const t = { active: 0, max: 0, calls: 0 };
+  const f: FetchLike = async (u, i) => {
+    t.calls += 1;
+    t.active += 1;
+    t.max = Math.max(t.max, t.active);
+    try {
+      return await impl(u, i);
+    } finally {
+      t.active -= 1;
     }
+  };
+  return { f, t };
+}
+
+const resetFail: FetchLike = async () => {
+  throw Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNRESET' } });
+};
+
+test('10 · retries are strictly sequential — maxConcurrentAttempts === 1', async () => {
+  let n = 0;
+  const { f, t } = concurrencyTracker(async () => {
+    n += 1;
+    if (n === 1) throw Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNRESET' } });
     return new Response(JSON.stringify({ chunks: [], second: true }), { status: 200 });
   });
   const c = new BrainClient(sink, config(), f, RETRY_1, instantScheduler);
   const out = await c.retrieveGoverned({} as never);
 
-  assert.equal(f.calls, 2, 'the retryable failure must produce a second attempt');
-  assert.equal(out.ok, true, 'the second attempt is authoritative and succeeded');
-  assert.equal((out.value as unknown as { second: boolean }).second, true);
-  assert.ok(
-    out.record.failures.some((x) => /superseded by attempt 2/.test(x)),
-    'the first attempt must be recorded as superseded, not silently dropped',
-  );
-  void releaseFirst;
+  assert.equal(t.max, 1, 'at most one transport attempt may be active at any time');
+  assert.equal(t.calls, 2);
+  assert.equal(out.ok, true, 'the second attempt is authoritative because the first already ended');
+});
+
+test('10 · a retry is created only AFTER the previous attempt reaches a terminal outcome', async () => {
+  const order: string[] = [];
+  let n = 0;
+  const f: FetchLike = async () => {
+    n += 1;
+    const id = n;
+    order.push(`start:${id}`);
+    if (id === 1) {
+      order.push(`end:${id}`);
+      throw Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNRESET' } });
+    }
+    order.push(`end:${id}`);
+    return new Response(JSON.stringify({ chunks: [] }), { status: 200 });
+  };
+  const c = new BrainClient(sink, config(), f, RETRY_1, instantScheduler);
+  await c.retrieveGoverned({} as never);
+  assert.deepEqual(order, ['start:1', 'end:1', 'start:2', 'end:2'],
+    'attempt 2 must not start before attempt 1 has ended');
+});
+
+test('10 · cancellation while the first attempt is pending creates no second attempt', async () => {
+  const ac = new AbortController();
+  const { f, t } = concurrencyTracker(hang);
+  const c = new BrainClient(sink, config({ timeoutMs: 5_000 }), f, RETRY_1, instantScheduler);
+  const p = c.retrieveGoverned({} as never, ac.signal);
+  setTimeout(() => ac.abort(), 10);
+  await p;
+  assert.equal(t.calls, 1, 'no attempt may be created after cancellation');
+  assert.equal(t.max, 1);
+});
+
+test('10 · a successful first attempt produces exactly one attempt', async () => {
+  const { f, t } = concurrencyTracker(json({ chunks: [] }));
+  const c = new BrainClient(sink, config(), f, RETRY_1, instantScheduler);
+  const out = await c.retrieveGoverned({} as never);
+  assert.equal(t.calls, 1, 'success must not trigger a retry');
+  assert.equal(out.ok, true);
+});
+
+test('10 · a successful second attempt records the first as failed, with no supersession claim', async () => {
+  let n = 0;
+  const f = spy(async () => {
+    n += 1;
+    if (n === 1) throw Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNRESET' } });
+    return new Response(JSON.stringify({ chunks: [] }), { status: 200 });
+  });
+  const c = new BrainClient(sink, config(), f, RETRY_1, instantScheduler);
+  const out = await c.retrieveGoverned({} as never);
+  const log = out.record.failures.join(' | ');
+  assert.match(log, /#a1 failed with connection_lost — retry_scheduled/);
+  assert.match(log, /#a2 succeeded — authoritative result/);
+  assert.doesNotMatch(log, /supersed/i, 'supersession is not a reachable state in a sequential design');
 });
 
 test('10b · policy disabled ⇒ exactly one attempt', async () => {

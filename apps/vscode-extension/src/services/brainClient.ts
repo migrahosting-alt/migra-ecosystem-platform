@@ -275,10 +275,18 @@ export class BrainClient {
   /**
    * Bounded retry for EXPLICITLY idempotent reads.
    *
-   * Authority is an attempt GENERATION, not promise ordering: each attempt carries a
-   * token, the generation is bumped before the next attempt, and a result whose token
-   * is stale is recorded as superseded and discarded. Ordering alone cannot express
-   * that — a slow first attempt can resolve after a fast second one.
+   * THE INVARIANT IS STRICT SEQUENCING: a retry attempt is created only after the
+   * previous attempt has reached a terminal outcome, so at most one transport attempt
+   * is ever active for an operation. A late result from an earlier attempt therefore
+   * cannot exist, and the next attempt is authoritative precisely because the prior
+   * one has already ended.
+   *
+   * An earlier version carried a generation token and claimed it provided supersession
+   * safety. It did not: `generation` was only mutated at the top of the next iteration,
+   * after this loop had already awaited the attempt to completion, so the comparison
+   * was unreachable. `await` was doing the work. The token has been removed rather than
+   * left as defensive-looking dead code, and no supersession claim is made — that state
+   * is not reachable in a sequential design.
    */
   private async retryIdempotent<T>(
     action: string,
@@ -288,14 +296,11 @@ export class BrainClient {
   ): Promise<BrainOperationOutcome<T>> {
     const maxAttempts = Math.max(0, this.retryPolicy.idempotentReads) + 1;
     const operationId = nextOperationId(action);
-    let generation = 0;
     let last: BrainOperationOutcome<T> | undefined;
-    const superseded: string[] = [];
+    const attemptLog: string[] = [];
 
     for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-      if (signal?.aborted) break; // cancellation prevents further attempts
-      generation += 1;
-      const myGeneration = generation;
+      if (signal?.aborted) break; // cancellation prevents creating a further attempt
       const attemptId = `${operationId}#a${attempt}`;
 
       const outcome = await this.dispatch<T>(action, path, payload, 'POST', {
@@ -305,34 +310,43 @@ export class BrainClient {
         attemptId,
       });
 
-      // Authority check: only the CURRENT generation may publish.
-      if (myGeneration !== generation) {
-        superseded.push(`${attemptId} superseded — late result discarded`);
-        continue;
-      }
-
       last = outcome;
-      if (outcome.ok) break;
+      if (outcome.ok) {
+        attemptLog.push(`${attemptId} succeeded — authoritative result`);
+        break;
+      }
 
       const category = outcome.record.failureCategory;
       const retryable = category !== undefined && RETRYABLE.has(category);
-      if (!retryable || attempt === maxAttempts || signal?.aborted) break;
+      if (!retryable || attempt === maxAttempts) {
+        attemptLog.push(
+          `${attemptId} failed with ${category ?? 'unknown'} — ${
+            retryable ? 'retry_exhausted' : 'not retryable'
+          }`,
+        );
+        break;
+      }
+      if (signal?.aborted) {
+        attemptLog.push(`${attemptId} failed with ${category} — cancelled, no further attempt`);
+        break;
+      }
 
-      superseded.push(`${attemptId} failed with ${category} — superseded by attempt ${attempt + 1}`);
+      attemptLog.push(`${attemptId} failed with ${category} — retry_scheduled`);
       try {
         await this.scheduler.delay(backoffMs(attempt), signal);
       } catch {
-        break; // cancelled during backoff: no further attempt
+        attemptLog.push(`${attemptId} cancelled during backoff — no further attempt`);
+        break;
       }
     }
 
-    if (last && superseded.length > 0) {
-      last.record.failures.push(...superseded);
+    if (last && attemptLog.length > 0) {
+      last.record.failures.push(...attemptLog);
     }
     return (
       last ?? {
         ok: false,
-        record: { ...({} as ExecutionRecord), operationId, failures: superseded } as ExecutionRecord,
+        record: { ...({} as ExecutionRecord), operationId, failures: attemptLog } as ExecutionRecord,
         statusLine: 'Cancelled before any attempt was dispatched.',
       }
     );
