@@ -96,6 +96,36 @@ export interface BrainRetryPolicy {
   readonly idempotentReads: number;
 }
 
+/** Categories worth another attempt: the request demonstrably did not land, so a
+ * retry cannot duplicate work. Everything else is non-retryable by construction —
+ * notably `terminal_state_unverified`, where the server MAY already have acted, and
+ * `invalid_response`, where the server answered and answering again is unlikely to
+ * differ. */
+export const RETRYABLE: ReadonlySet<FailureCategory> = new Set([
+  'connection_refused',
+  'connection_lost',
+  'request_timeout',
+]);
+
+/** Deterministic, bounded backoff. Injected in tests so no real time passes. */
+export interface Scheduler {
+  delay(ms: number, signal?: AbortSignal): Promise<void>;
+}
+
+export const realScheduler: Scheduler = {
+  delay: (ms, signal) =>
+    new Promise((resolve, reject) => {
+      if (signal?.aborted) return reject(new Error('cancelled during backoff'));
+      const t = setTimeout(resolve, ms);
+      signal?.addEventListener('abort', () => { clearTimeout(t); reject(new Error('cancelled during backoff')); }, { once: true });
+    }),
+};
+
+/** Bounded: never unbounded exponential growth. */
+export function backoffMs(attempt: number, baseMs = 50, capMs = 500): number {
+  return Math.min(capMs, baseMs * 2 ** Math.max(0, attempt - 1));
+}
+
 export const DEFAULT_RETRY_POLICY: BrainRetryPolicy = {
   consequential: 0,
   health: 2,
@@ -133,6 +163,7 @@ export class BrainClient {
     private readonly config: BrainConfig,
     private readonly fetchImpl?: FetchLike,
     private readonly retryPolicy: BrainRetryPolicy = DEFAULT_RETRY_POLICY,
+    private readonly scheduler: Scheduler = realScheduler,
   ) {
     this.connection = new BrainConnectionState(this.baseUrl);
   }
@@ -234,11 +265,77 @@ export class BrainClient {
   }
 
   /** Governed variant: returns the full outcome instead of throwing. */
-  async retrieveGoverned(payload: RetrieveRequest, signal?: AbortSignal): Promise<BrainOperationOutcome<RetrieveResponse>> {
-    return this.dispatch<RetrieveResponse>('retrieve', '/retrieve', payload, 'POST', {
-      timeoutMs: this.timeoutMs,
-      ...(signal ? { signal } : {}),
-    });
+  async retrieveGoverned(
+    payload: RetrieveRequest,
+    signal?: AbortSignal,
+  ): Promise<BrainOperationOutcome<RetrieveResponse>> {
+    return this.retryIdempotent<RetrieveResponse>('retrieve', '/retrieve', payload, signal);
+  }
+
+  /**
+   * Bounded retry for EXPLICITLY idempotent reads.
+   *
+   * Authority is an attempt GENERATION, not promise ordering: each attempt carries a
+   * token, the generation is bumped before the next attempt, and a result whose token
+   * is stale is recorded as superseded and discarded. Ordering alone cannot express
+   * that — a slow first attempt can resolve after a fast second one.
+   */
+  private async retryIdempotent<T>(
+    action: string,
+    path: string,
+    payload: unknown,
+    signal?: AbortSignal,
+  ): Promise<BrainOperationOutcome<T>> {
+    const maxAttempts = Math.max(0, this.retryPolicy.idempotentReads) + 1;
+    const operationId = nextOperationId(action);
+    let generation = 0;
+    let last: BrainOperationOutcome<T> | undefined;
+    const superseded: string[] = [];
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      if (signal?.aborted) break; // cancellation prevents further attempts
+      generation += 1;
+      const myGeneration = generation;
+      const attemptId = `${operationId}#a${attempt}`;
+
+      const outcome = await this.dispatch<T>(action, path, payload, 'POST', {
+        timeoutMs: this.timeoutMs,
+        ...(signal ? { signal } : {}),
+        operationId,
+        attemptId,
+      });
+
+      // Authority check: only the CURRENT generation may publish.
+      if (myGeneration !== generation) {
+        superseded.push(`${attemptId} superseded — late result discarded`);
+        continue;
+      }
+
+      last = outcome;
+      if (outcome.ok) break;
+
+      const category = outcome.record.failureCategory;
+      const retryable = category !== undefined && RETRYABLE.has(category);
+      if (!retryable || attempt === maxAttempts || signal?.aborted) break;
+
+      superseded.push(`${attemptId} failed with ${category} — superseded by attempt ${attempt + 1}`);
+      try {
+        await this.scheduler.delay(backoffMs(attempt), signal);
+      } catch {
+        break; // cancelled during backoff: no further attempt
+      }
+    }
+
+    if (last && superseded.length > 0) {
+      last.record.failures.push(...superseded);
+    }
+    return (
+      last ?? {
+        ok: false,
+        record: { ...({} as ExecutionRecord), operationId, failures: superseded } as ExecutionRecord,
+        statusLine: 'Cancelled before any attempt was dispatched.',
+      }
+    );
   }
 
   /** Consequential — never retried. */
@@ -265,13 +362,15 @@ export class BrainClient {
       timeoutMs: number;
       signal?: AbortSignal;
       gate?: { precondition: () => boolean | Promise<boolean>; label?: string };
+      operationId?: string;
+      attemptId?: string;
     },
   ): Promise<BrainOperationOutcome<T>> {
     const endpoint = `${this.baseUrl}${path}`;
     this.log(`${method} ${endpoint}`);
     return runBrainOperation<T>({
-      operationId: nextOperationId(action),
-      requestedAction: action,
+      operationId: opts.operationId ?? nextOperationId(action),
+      requestedAction: opts.attemptId ? `${action} (${opts.attemptId})` : action,
       endpoint,
       method,
       timeoutMs: opts.timeoutMs,

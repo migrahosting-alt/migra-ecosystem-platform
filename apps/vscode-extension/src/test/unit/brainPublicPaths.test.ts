@@ -56,6 +56,11 @@ const hang: FetchLike = (_u, init) =>
 
 const client = (fetchImpl: FetchLike, cfg = config()) => new BrainClient(sink, cfg, fetchImpl);
 
+/** No real time passes in tests. */
+const instantScheduler = { delay: async () => {} };
+const RETRY_0 = { consequential: 0 as const, health: 0, idempotentReads: 0 };
+const RETRY_1 = { consequential: 0 as const, health: 0, idempotentReads: 1 };
+
 // ── 1. health() connection refusal ──────────────────────────────────────────
 
 test('1 · health() refusal drives readiness to disconnected and returns no success', async () => {
@@ -199,24 +204,93 @@ test('9 · production-diagnostics timeout suppresses every downstream callback',
 
 // ── 10. retry supersession on an idempotent read ────────────────────────────
 
-test('10 · idempotent reads are NOT retried today — declared policy is not yet implemented', async () => {
-  // KNOWN GAP, asserted rather than hidden. `BrainRetryPolicy.idempotentReads` is
-  // declared and documented, but retrieve() does not yet implement supersession. The
-  // truthful behaviour is therefore a single attempt whose failure surfaces — never a
-  // silent success. This test pins that reality so the gap cannot be mistaken for a
-  // working feature, and will fail loudly when retry is implemented (at which point it
-  // becomes the supersession test: stale first response discarded, second authoritative,
-  // both attempts under one operation record).
+test('10 · supersession — late first result discarded, second authoritative', async () => {
   let attempt = 0;
+  let releaseFirst!: (r: Response) => void;
   const f = spy(async () => {
     attempt += 1;
-    if (attempt === 1) throw Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNRESET' } });
-    return new Response(JSON.stringify({ chunks: [] }), { status: 200 });
+    if (attempt === 1) {
+      // First attempt fails with a RETRYABLE category.
+      throw Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNRESET' } });
+    }
+    return new Response(JSON.stringify({ chunks: [], second: true }), { status: 200 });
   });
-  const c = new BrainClient(sink, config(), f, { consequential: 0, health: 0, idempotentReads: 1 });
+  const c = new BrainClient(sink, config(), f, RETRY_1, instantScheduler);
   const out = await c.retrieveGoverned({} as never);
-  assert.equal(f.calls, 1, 'no retry is implemented for idempotent reads yet');
-  assert.equal(out.ok, false, 'the single attempt failed, and that failure must surface');
+
+  assert.equal(f.calls, 2, 'the retryable failure must produce a second attempt');
+  assert.equal(out.ok, true, 'the second attempt is authoritative and succeeded');
+  assert.equal((out.value as unknown as { second: boolean }).second, true);
+  assert.ok(
+    out.record.failures.some((x) => /superseded by attempt 2/.test(x)),
+    'the first attempt must be recorded as superseded, not silently dropped',
+  );
+  void releaseFirst;
+});
+
+test('10b · policy disabled ⇒ exactly one attempt', async () => {
+  const f = spy(async () => {
+    throw Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNRESET' } });
+  });
+  const c = new BrainClient(sink, config(), f, RETRY_0, instantScheduler);
+  const out = await c.retrieveGoverned({} as never);
+  assert.equal(f.calls, 1);
+  assert.equal(out.ok, false);
+});
+
+test('10c · terminal_state_unverified is never retried', async () => {
+  const f = spy(async () => new Response('err', { status: 500 }));
+  const c = new BrainClient(sink, config(), f, RETRY_1, instantScheduler);
+  const out = await c.retrieveGoverned({} as never);
+  assert.equal(f.calls, 1, 'the server may already have acted — never replay');
+  assert.equal(out.record.failureCategory, 'terminal_state_unverified');
+});
+
+test('10d · malformed payload is not retried', async () => {
+  const f = spy(malformed);
+  const c = new BrainClient(sink, config(), f, RETRY_1, instantScheduler);
+  const out = await c.retrieveGoverned({} as never);
+  assert.equal(f.calls, 1);
+  assert.equal(out.record.failureCategory, 'invalid_response');
+});
+
+test('10e · cancellation during backoff prevents the second attempt', async () => {
+  const ac = new AbortController();
+  const f = spy(async () => {
+    throw Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNRESET' } });
+  });
+  // Scheduler that cancels while "waiting", then rejects as a real cancelled delay would.
+  const cancelDuringBackoff = {
+    delay: async () => {
+      ac.abort();
+      throw new Error('cancelled during backoff');
+    },
+  };
+  const c = new BrainClient(sink, config(), f, RETRY_1, cancelDuringBackoff);
+  const out = await c.retrieveGoverned({} as never, ac.signal);
+  assert.equal(f.calls, 1, 'no attempt may start after cancellation');
+  assert.equal(out.ok, false);
+});
+
+test('10f · a consequential method never retries even if policy enables retries', async () => {
+  const f = spy(async () => {
+    throw Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNRESET' } });
+  });
+  // idempotentReads is high, but chat() is consequential and must ignore it entirely.
+  const c = new BrainClient(sink, config(), f, { consequential: 0, health: 0, idempotentReads: 5 }, instantScheduler);
+  const out = await c.chatGoverned({} as never);
+  assert.equal(f.calls, 1, 'chat() is consequential — retry policy must not apply');
+  assert.equal(out.ok, false);
+});
+
+test('10g · retry exhaustion ends in a truthful failure, never a generic success', async () => {
+  const f = spy(async () => {
+    throw Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNRESET' } });
+  });
+  const c = new BrainClient(sink, config(), f, { consequential: 0, health: 0, idempotentReads: 2 }, instantScheduler);
+  const out = await c.retrieveGoverned({} as never);
+  assert.equal(f.calls, 3, 'bounded: initial attempt plus two retries');
+  assert.equal(out.ok, false);
   assert.equal(out.record.failureCategory, 'connection_lost');
   assert.notEqual(out.record.state, 'completed');
 });
@@ -242,7 +316,7 @@ test('structural · every exported Brain-facing method has a public-path test he
     const d = Object.getOwnPropertyDescriptor(BrainClient.prototype, n);
     return typeof d?.value === 'function';
   });
-  const brainFacing = actual.filter((n) => !['log', 'dispatch', 'connectionStatusLine', 'snapshotFailureCategory'].includes(n));
+  const brainFacing = actual.filter((n) => !['log', 'dispatch', 'retryIdempotent', 'connectionStatusLine', 'snapshotFailureCategory'].includes(n));
   for (const method of brainFacing) {
     assert.ok(covered.has(method), `BrainClient.${method}() has no public-path behaviour test`);
   }
