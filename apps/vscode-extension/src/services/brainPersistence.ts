@@ -382,3 +382,68 @@ export function selectPrunable(
     .slice(0, Math.max(0, eligible.length - policy.maxRecords));
   return [...new Set([...tooOld, ...overflow])];
 }
+
+/**
+ * Durable sink for ONE operation. Created per operation id, and owns that record's
+ * monotonic revision chain — operations do not share a counter, so two concurrent runs
+ * cannot interleave revisions into each other's files.
+ *
+ * CRITICAL DIFFERENCE FROM connectionPersister: connection writes are fire-and-forget
+ * because a failed health write is only a diagnostic. Operation writes are NOT. The
+ * terminal write IS the success gate, so `persistTerminal()` is awaited and its failure
+ * must suppress the success notification. Copying the connection pattern wholesale here
+ * would quietly break the rule this whole boundary exists to enforce.
+ */
+export interface OperationPersister {
+  /** Fire-and-forget for intermediate transitions — ordered, never blocking the UI. */
+  persistProgress(record: Omit<PersistedBrainOperation, 'schemaVersion' | 'revision'>): void;
+  /**
+   * AWAITED. Resolves true only when the terminal revision is durably written.
+   * `false` means the Brain outcome may be real but is NOT durably recorded — the
+   * caller must then suppress normal success and report degraded completion.
+   */
+  persistTerminal(
+    record: Omit<PersistedBrainOperation, 'schemaVersion' | 'revision'>,
+  ): Promise<boolean>;
+  /** Revision most recently written, for stamping UI and reports. */
+  currentRevision(): number;
+}
+
+export function operationPersister(
+  store: BrainStore,
+  log: (message: string) => void,
+): OperationPersister {
+  let revision = 0;
+  let chain: Promise<unknown> = Promise.resolve();
+
+  const write = (record: Omit<PersistedBrainOperation, 'schemaVersion' | 'revision'>) => {
+    revision += 1;
+    const rev = revision;
+    return { rev, full: { ...record, schemaVersion: SCHEMA_VERSION, revision: rev } };
+  };
+
+  return {
+    persistProgress(record) {
+      const { rev, full } = write(record);
+      chain = chain
+        .then(() => store.saveOperation(full as PersistedBrainOperation))
+        .catch((err: unknown) => {
+          log(`brain-store: operation revision ${rev} not persisted — ${String(err)}`);
+        });
+    },
+    async persistTerminal(record) {
+      const { rev, full } = write(record);
+      // Queue behind pending progress writes so the terminal revision is genuinely the
+      // highest, then AWAIT it — this boolean is the success gate.
+      chain = chain.catch(() => undefined).then(() => store.saveOperation(full as PersistedBrainOperation));
+      try {
+        await chain;
+        return true;
+      } catch (err) {
+        log(`brain-store: TERMINAL revision ${rev} not persisted — ${String(err)}`);
+        return false;
+      }
+    },
+    currentRevision: () => revision,
+  };
+}

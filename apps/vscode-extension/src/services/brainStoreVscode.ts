@@ -10,7 +10,12 @@
 
 import * as vscode from 'vscode';
 
-import { BrainStore, SCHEMA_VERSION, type StorageFs } from './brainPersistence.js';
+import {
+  BrainStore,
+  SCHEMA_VERSION,
+  type PersistedBrainOperation,
+  type StorageFs,
+} from './brainPersistence.js';
 import type { ConnectionPersister } from './brainConnection.js';
 
 /** StorageFs over vscode.workspace.fs, so the same code path works remotely. */

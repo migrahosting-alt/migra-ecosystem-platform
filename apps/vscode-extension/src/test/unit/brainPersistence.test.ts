@@ -12,6 +12,7 @@ import {
   selectPrunable,
   type PersistedBrainConnection,
   type PersistedBrainOperation,
+  operationPersister,
   type StorageFs,
 } from '../../services/brainPersistence.js';
 
@@ -352,4 +353,48 @@ test('connection · the persister surface cannot express an operation write', ()
   for (const forbidden of ['operationId', 'currentState', 'terminalEvidence', 'transportAttempts']) {
     assert.equal(keys.includes(forbidden), false, `connection writes must not carry ${forbidden}`);
   }
+});
+
+// ── operation persister: the terminal write is the success gate ──────────────
+
+
+
+const bare = (over: Partial<PersistedBrainOperation> = {}) => {
+  const { schemaVersion: _s, revision: _r, ...rest } = op(over);
+  return rest;
+};
+
+test('operation persister · revisions are monotonic across progress then terminal', async () => {
+  const { m, s } = store();
+  await s.init();
+  const p = operationPersister(s, () => {});
+  p.persistProgress(bare({ currentState: 'connecting' }));
+  p.persistProgress(bare({ currentState: 'running' }));
+  const ok = await p.persistTerminal(bare({ currentState: 'completed' }));
+  assert.equal(ok, true);
+  assert.equal(p.currentRevision(), 3);
+  const written = JSON.parse(m.files.get('/gs/brain-execution/operations/op-1.json')!);
+  assert.equal(written.revision, 3, 'the terminal revision must be the highest on disk');
+  assert.equal(written.currentState, 'completed');
+});
+
+test('operation persister · a failed TERMINAL write returns false — the success gate closes', async () => {
+  const { m, s } = store();
+  await s.init();
+  const p = operationPersister(s, () => {});
+  m.breakWrite();
+  const ok = await p.persistTerminal(bare({ currentState: 'completed' }));
+  assert.equal(ok, false, 'caller must suppress success when the terminal revision is not durable');
+});
+
+test('operation persister · each operation owns its own revision chain', async () => {
+  const { s } = store();
+  await s.init();
+  const a = operationPersister(s, () => {});
+  const b = operationPersister(s, () => {});
+  a.persistProgress(bare({ operationId: 'op-a' }));
+  await a.persistTerminal(bare({ operationId: 'op-a' }));
+  await b.persistTerminal(bare({ operationId: 'op-b' }));
+  assert.equal(a.currentRevision(), 2);
+  assert.equal(b.currentRevision(), 1, 'operations must not share a counter');
 });
