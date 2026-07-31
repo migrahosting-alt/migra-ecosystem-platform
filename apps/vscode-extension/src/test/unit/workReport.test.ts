@@ -56,3 +56,99 @@ test('a long file list is truncated with a "+N more" tail', () => {
   assert.match(r, /\*\*Files:\*\* 20 —/);
   assert.match(r, /\+8 more/);
 });
+
+// ── convergence: the execution snapshot is the only authority ────────────────
+
+import { SCHEMA_VERSION, type PersistedBrainOperation } from '../../services/brainPersistence.js';
+
+const rec = (over: Partial<PersistedBrainOperation> = {}): PersistedBrainOperation => ({
+  schemaVersion: SCHEMA_VERSION,
+  revision: 3,
+  operationId: 'op-42',
+  requestedAction: 'chat',
+  operationKind: 'consequential',
+  currentState: 'completed',
+  startedAt: 'T0',
+  updatedAt: 'T1',
+  endedAt: 'T1',
+  transitions: [],
+  invariantViolations: [],
+  precondition: { required: false },
+  transportAttempts: [],
+  commands: [],
+  changedFiles: [],
+  tests: [],
+  failures: [],
+  remainingWork: [],
+  terminalEvidence: { observedAt: 'T1', outcome: 'success', evidenceType: 'parsed-body' },
+  ...over,
+});
+
+const base = { task: 't', root: '/w', proposedFiles: [{ path: 'a.js' }], applied: true };
+
+test('the persisted record overrides a stale manual cancelled=false', () => {
+  const r = buildWorkReport({
+    ...base,
+    cancelled: false, // deprecated input, deliberately wrong
+    execution: { record: rec({ currentState: 'cancelled', terminalEvidence: undefined }), currentRevision: 3 },
+  });
+  assert.match(r, /Stopped/, 'the record says cancelled, so the report must say cancelled');
+});
+
+test('the persisted record overrides a stale manual cancelled=true', () => {
+  const r = buildWorkReport({
+    ...base,
+    cancelled: true, // deprecated input, deliberately wrong
+    execution: { record: rec(), currentRevision: 3 },
+  });
+  assert.doesNotMatch(r, /Stopped/, 'the record says completed, so the report must not claim cancelled');
+});
+
+test('every report carries its operation id and revision', () => {
+  const r = buildWorkReport({ ...base, cancelled: false, execution: { record: rec(), currentRevision: 3 } });
+  assert.match(r, /operation `op-42`/);
+  assert.match(r, /revision 3/);
+});
+
+test('a report rendered from a stale revision is visibly marked', () => {
+  const r = buildWorkReport({
+    ...base,
+    cancelled: false,
+    execution: { record: rec({ revision: 2 }), currentRevision: 5 },
+  });
+  assert.match(r, /STALE REPORT/);
+  assert.match(r, /revision 5 is authoritative/);
+});
+
+test('completed WITHOUT terminal evidence is not reported as success', () => {
+  const r = buildWorkReport({
+    ...base,
+    cancelled: false,
+    execution: { record: rec({ terminalEvidence: undefined }), currentRevision: 3 },
+  });
+  assert.match(r, /without\*\* durable terminal evidence/);
+});
+
+test('an interrupted record is surfaced, never rendered as a clean run', () => {
+  const r = buildWorkReport({
+    ...base,
+    cancelled: false,
+    execution: {
+      record: rec({ currentState: 'failed', recovery: { evidence: 'operation_interrupted', recoveredAt: 'T2' } }),
+      currentRevision: 3,
+    },
+  });
+  assert.match(r, /Interrupted \(operation_interrupted\)/);
+});
+
+test('cancellation requested but unconfirmed says exactly that', () => {
+  const r = buildWorkReport({
+    ...base,
+    cancelled: false,
+    execution: {
+      record: rec({ currentState: 'failed', cancellation: { requestedAt: 'T', confirmed: false } }),
+      currentRevision: 3,
+    },
+  });
+  assert.match(r, /Cancellation requested but not confirmed/);
+});
