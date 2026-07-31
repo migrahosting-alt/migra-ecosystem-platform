@@ -51,6 +51,26 @@ export interface ConnectionOptions {
   failureThreshold: number;
 }
 
+/**
+ * Durable sink for connection state ONLY.
+ *
+ * Deliberately narrow: it accepts a connection record and nothing else, so this class
+ * has no capability to reach an operation file. A routine health poll structurally
+ * cannot rewrite a completed run — that is enforced by the type, not by discipline.
+ */
+export interface ConnectionPersister {
+  persist(record: {
+    readiness: ConnectionReadiness;
+    endpointIdentity: string;
+    lastSuccessAt?: string;
+    lastFailureAt?: string;
+    lastFailureCategory?: FailureCategory;
+    consecutiveFailures: number;
+    reconnectAttempts: number;
+    observedProcessIdentity?: string;
+  }): void;
+}
+
 const DEFAULTS: ConnectionOptions = { failureThreshold: 3 };
 
 /**
@@ -64,6 +84,7 @@ export class BrainConnectionState {
     endpoint: string,
     private readonly options: ConnectionOptions = DEFAULTS,
     private readonly clock: () => string = () => new Date().toISOString(),
+    private readonly persister?: ConnectionPersister,
   ) {
     this.record = {
       endpoint,
@@ -81,20 +102,50 @@ export class BrainConnectionState {
     return JSON.parse(JSON.stringify(this.record)) as ConnectionRecord;
   }
 
+  /**
+   * Persist only when something an operator would care about actually changed.
+   * A repeated identical poll result is not written — otherwise a healthy Brain would
+   * rewrite the record every few seconds for no information gain.
+   */
+  private flush(previous: ConnectionReadiness, previousFailures: number): void {
+    if (!this.persister) return;
+    const r = this.record;
+    const changed =
+      r.readiness !== previous ||
+      r.consecutiveFailures !== previousFailures;
+    if (!changed) return;
+    this.persister.persist({
+      readiness: r.readiness,
+      endpointIdentity: r.endpoint,
+      ...(r.lastSuccessAt ? { lastSuccessAt: r.lastSuccessAt } : {}),
+      ...(r.lastFailureAt ? { lastFailureAt: r.lastFailureAt } : {}),
+      ...(r.lastFailureCategory ? { lastFailureCategory: r.lastFailureCategory } : {}),
+      consecutiveFailures: r.consecutiveFailures,
+      reconnectAttempts: r.reconnectAttempts,
+      ...(r.brainProcessId !== undefined ? { observedProcessIdentity: String(r.brainProcessId) } : {}),
+    });
+  }
+
   /** A probe has been dispatched. */
   probeStarted(): void {
     this.record.reconnectAttempts += 1;
     // A probe from a failed/disconnected endpoint is a reconnect attempt; from a
     // ready one it is routine and must not downgrade the displayed readiness.
+    const before = this.record.readiness;
+    const beforeFailures = this.record.consecutiveFailures;
     if (this.record.readiness !== 'ready') this.record.readiness = 'connecting';
+    this.flush(before, beforeFailures);
   }
 
   /** A health response was received AND validated. */
   probeSucceeded(brainProcessId?: number): void {
+    const before = this.record.readiness;
+    const beforeFailures = this.record.consecutiveFailures;
     this.record.readiness = 'ready';
     this.record.lastSuccessAt = this.clock();
     this.record.consecutiveFailures = 0;
     if (brainProcessId !== undefined) this.record.brainProcessId = brainProcessId;
+    this.flush(before, beforeFailures);
   }
 
   /**
@@ -102,6 +153,8 @@ export class BrainConnectionState {
    * generic error, and escalates to `failed` only past the configured threshold.
    */
   probeFailed(evidence: FailureEvidence): ConnectionReadiness {
+    const before = this.record.readiness;
+    const beforeFailures = this.record.consecutiveFailures;
     const { category } = classifyTransportFailure(evidence);
     this.record.lastFailureAt = this.clock();
     this.record.lastFailureCategory = category;
@@ -116,6 +169,7 @@ export class BrainConnectionState {
     } else {
       this.record.readiness = 'degraded';
     }
+    this.flush(before, beforeFailures);
     return this.record.readiness;
   }
 

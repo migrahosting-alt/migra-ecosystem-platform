@@ -297,3 +297,59 @@ test('16b · overflow prunes oldest terminal records first', () => {
   const prunable = selectPrunable(records, { maxRecords: 1, maxAgeMs: Number.MAX_SAFE_INTEGER }, Date.parse('2025-06-01T00:00:00.000Z'));
   assert.deepEqual(prunable.map((r) => r.operationId), ['old']);
 });
+
+// ── live connection persistence ─────────────────────────────────────────────
+
+import { BrainConnectionState, type ConnectionPersister } from '../../services/brainConnection.js';
+
+function recordingPersister() {
+  const writes: Array<Record<string, unknown>> = [];
+  const p: ConnectionPersister = { persist: (r) => { writes.push(r as Record<string, unknown>); } };
+  return { p, writes };
+}
+
+test('connection · a readiness change is persisted', () => {
+  const { p, writes } = recordingPersister();
+  const c = new BrainConnectionState('http://127.0.0.1:3988', { failureThreshold: 3 }, () => 'T', p);
+  c.probeStarted();
+  c.probeSucceeded();
+  assert.ok(writes.length >= 2);
+  assert.equal(writes.at(-1)!.readiness, 'ready');
+  assert.equal(writes.at(-1)!.endpointIdentity, 'http://127.0.0.1:3988');
+});
+
+test('connection · an identical repeated poll result is NOT rewritten', () => {
+  const { p, writes } = recordingPersister();
+  const c = new BrainConnectionState('http://x', { failureThreshold: 3 }, () => 'T', p);
+  c.probeStarted();
+  c.probeSucceeded();
+  const after = writes.length;
+  c.probeStarted();   // already ready — no readiness change
+  c.probeSucceeded(); // still ready, failures still 0
+  assert.equal(writes.length, after, 'a healthy Brain must not rewrite the record every poll');
+});
+
+test('connection · failure counters and category are persisted as they change', () => {
+  const { p, writes } = recordingPersister();
+  const c = new BrainConnectionState('http://x', { failureThreshold: 3 }, () => 'T', p);
+  c.probeFailed({ cause: { code: 'ECONNREFUSED' } });
+  assert.equal(writes.at(-1)!.readiness, 'disconnected');
+  assert.equal(writes.at(-1)!.lastFailureCategory, 'connection_refused');
+  assert.equal(writes.at(-1)!.consecutiveFailures, 1);
+  c.probeFailed({ cause: { code: 'ECONNREFUSED' } });
+  c.probeFailed({ cause: { code: 'ECONNREFUSED' } });
+  assert.equal(writes.at(-1)!.readiness, 'failed', 'threshold escalation is persisted');
+  assert.equal(writes.at(-1)!.consecutiveFailures, 3);
+});
+
+test('connection · the persister surface cannot express an operation write', () => {
+  // Structural: `persist` accepts a connection shape only. There is no operationId,
+  // no state, no terminal evidence — so a health poll has no capability to touch a run.
+  const { p, writes } = recordingPersister();
+  const c = new BrainConnectionState('http://x', { failureThreshold: 3 }, () => 'T', p);
+  c.probeFailed({ cause: { code: 'ECONNREFUSED' } });
+  const keys = Object.keys(writes.at(-1)!);
+  for (const forbidden of ['operationId', 'currentState', 'terminalEvidence', 'transportAttempts']) {
+    assert.equal(keys.includes(forbidden), false, `connection writes must not carry ${forbidden}`);
+  }
+});
