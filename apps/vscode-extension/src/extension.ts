@@ -22,7 +22,7 @@ import {
 } from './services/backendDiagnostics.js';
 import { BrainLifecycle, type EnsureResult } from './services/brainLifecycle.js';
 import { createRealBrainLauncher } from './services/brainLifecycleVscode.js';
-import { BrainClient } from './services/brainClient.js';
+import { BrainClient, callBrainTool } from './services/brainClient.js';
 import { CAP_DIAGNOSTICS_SYNC, evaluateCapability } from './services/commandCapabilities.js';
 import { PilotApiClient } from '@migrapilot/pilot-client';
 import { VscodePilotApiConfig, VscodeSecretTokenStore, getMode } from './services/pilotConfigVscode.js';
@@ -765,8 +765,14 @@ async function productionDiagnosticsStatus(): Promise<void> {
   const cfg = vscode.workspace.getConfiguration('migrapilot');
   const base = String(cfg.get('brainUrl', 'http://127.0.0.1:3988'));
   try {
-    const res = await fetch(`${base}/api/ai/production-diagnostics/status`);
-    const s = (await res.json()) as { mode?: string; enabled?: boolean; targetCount?: number; capabilityCount?: number };
+    // Governed: `base` is migrapilot.brainUrl, so this IS Brain traffic and goes
+      // through the approved transport for the same timeout, cancellation and
+      // structured failure classification. Read-only — never a mutation.
+      const outcome = await callBrainTool<undefined, {
+        mode?: string; enabled?: boolean; targetCount?: number; capabilityCount?: number;
+      }>(base, '/api/ai/production-diagnostics/status', undefined, { method: 'GET' });
+      if (!outcome.ok || !outcome.value) throw new Error(outcome.statusLine);
+    const s = outcome.value;
     const label = s.mode ?? 'Production Diagnostics — Read Only';
     const state = s.enabled ? 'ENABLED (read-only)' : 'DISABLED (fail-closed)';
     const message = `${label}: ${state}. Targets: ${s.targetCount ?? 0}. Read-only capabilities: ${s.capabilityCount ?? 0}.`;
