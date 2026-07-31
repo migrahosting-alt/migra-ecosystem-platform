@@ -15,7 +15,7 @@ import {
 } from './brainConnection.js';
 import { runBrainOperation, type BrainOperationOutcome, type FetchLike } from './brainTransport.js';
 import type { ExecutionRecord, FailureCategory } from './executionState.js';
-import type { OperationPersister } from './brainPersistence.js';
+import { operationPersister, type BrainStore, type OperationPersister } from './brainPersistence.js';
 
 /**
  * A Brain operation that did not reach observed terminal success.
@@ -170,6 +170,9 @@ export class BrainClient {
     private readonly retryPolicy: BrainRetryPolicy = DEFAULT_RETRY_POLICY,
     private readonly scheduler: Scheduler = realScheduler,
     connectionPersister?: ConnectionPersister,
+    /** When supplied, EVERY dispatch gets its own per-operation persister, so operation
+     * state is durable in production. Absent ⇒ operations run non-durably and say so. */
+    private readonly store?: BrainStore,
   ) {
     this.connection = new BrainConnectionState(
       this.baseUrl,
@@ -402,6 +405,11 @@ export class BrainClient {
   ): Promise<BrainOperationOutcome<T>> {
     const endpoint = `${this.baseUrl}${path}`;
     this.log(`${method} ${endpoint}`);
+    // One persister per operation — each owns its own monotonic revision chain, so
+    // concurrent operations cannot interleave revisions into each other's files.
+    const persister =
+      opts.persister ??
+      (this.store ? operationPersister(this.store, (m) => this.log(m)) : undefined);
     return runBrainOperation<T>({
       operationId: opts.operationId ?? nextOperationId(action),
       requestedAction: opts.attemptId ? `${action} (${opts.attemptId})` : action,
@@ -411,7 +419,8 @@ export class BrainClient {
       ...(body === undefined ? {} : { body }),
       ...(this.fetchImpl ? { fetchImpl: this.fetchImpl } : {}),
       ...(opts.signal ? { externalSignal: opts.signal } : {}),
-      ...(opts.persister ? { persister: opts.persister } : {}),
+      ...(persister ? { persister } : {}),
+      operationKind: action === 'health' ? 'health' : action === 'retrieve' ? 'idempotent_read' : 'consequential',
       ...(opts.gate
         ? {
             precondition: opts.gate.precondition,

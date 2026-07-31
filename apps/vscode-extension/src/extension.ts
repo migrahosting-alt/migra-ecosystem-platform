@@ -295,6 +295,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<MigraP
     undefined,
     undefined,
     brainBootstrap ? connectionPersister(brainBootstrap.store, (m) => output(m)) : undefined,
+    // Operation state becomes durable in production here.
+    brainBootstrap?.store,
   );
   // MigraAI Engine client — the local chat path streams through /api/ai/chat.
   // The engine is served by brain-service, so it shares the brain base URL.
