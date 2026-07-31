@@ -28,6 +28,10 @@
  * run lifecycle. This machine describes what *this extension* has actually observed
  * about connectivity and the in-flight operation. */
 export type ExecutionState =
+  /** Pre-dispatch. The record EXISTS on disk but nothing has been sent yet, so a
+   * restart that finds one knows for certain no work was started. Initial-only:
+   * nothing transitions INTO `created`. */
+  | 'created'
   | 'disconnected'
   | 'connecting'
   | 'ready'
@@ -65,6 +69,9 @@ export type OperationPhase =
  * `completed` appears as a target ONLY from `running`, and even then the bare
  * transition is not exposed — `observeTerminal()` is the only way in. */
 const LEGAL: Record<ExecutionState, readonly ExecutionState[]> = {
+  // A created child either gets dispatched, or is abandoned before dispatch when its
+  // parent reference could not be written. It can never reach a success state.
+  created: ['connecting', 'failed'],
   disconnected: ['connecting'],
   connecting: ['ready', 'degraded', 'failed', 'disconnected'],
   ready: ['running', 'degraded', 'disconnected', 'failed'],
@@ -87,6 +94,10 @@ export const FORBIDDEN_TRANSITIONS: ReadonlyArray<readonly [ExecutionState, Exec
   ['disconnected', 'completed'],
   ['disconnected', 'ready'],
   ['disconnected', 'running'],
+  // A record that was never dispatched cannot have succeeded, run, or been cancelled.
+  ['created', 'completed'],
+  ['created', 'running'],
+  ['created', 'cancelled'],
 ];
 
 export function isLegalTransition(from: ExecutionState, to: ExecutionState): boolean {
@@ -362,6 +373,8 @@ export class ExecutionStateMachine {
         return `Degraded — ${r.failureCategory ?? 'recoverable transport problem'}. Recovery still possible.`;
       case 'running':
         return 'Running — no terminal response yet.';
+      case 'created':
+        return 'Created — nothing has been dispatched yet.';
       case 'ready':
         return 'Ready.';
       case 'connecting':

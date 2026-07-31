@@ -14,10 +14,18 @@
 
 import type { ExecutionState, FailureCategory } from './executionState.js';
 import type { ConnectionPersister, ConnectionReadiness } from './brainConnection.js';
+import type { PersistedChatTurn } from './chatTurnExecution.js';
 
 export const SCHEMA_VERSION = 1 as const;
 
-export type OperationKind = 'consequential' | 'idempotent_read' | 'health' | 'diagnostic';
+export type OperationKind =
+  | 'consequential'
+  | 'idempotent_read'
+  | 'health'
+  | 'diagnostic'
+  /** A user-initiated chat turn. NOT a Brain request: it is the parent that owns any
+   * Brain operations the turn dispatches. Stored separately from `operations/`. */
+  | 'chat_turn';
 
 /** Attempt statuses. `superseded` is deliberately absent: retries are strictly
  * sequential, so an earlier attempt is a historical TERMINAL attempt, never an
@@ -168,11 +176,15 @@ export class BrainStore {
   private get opsDir() { return `${this.root}/operations`; }
   private get tmpDir() { return `${this.root}/tmp`; }
   private get quarantineDir() { return `${this.root}/quarantine`; }
+  /** Turns live in their own directory: a chat turn is not a Brain request, and
+   * mixing them would let an operation loader read one as a malformed operation. */
+  private get turnsDir() { return `${this.root}/turns`; }
+  private turnPath(id: string) { return `${this.turnsDir}/${id}.json`; }
   private opPath(id: string) { return `${this.opsDir}/${id}.json`; }
   private get connPath() { return `${this.root}/connection.json`; }
 
   async init(): Promise<void> {
-    for (const d of [this.root, this.opsDir, this.tmpDir, this.quarantineDir]) {
+    for (const d of [this.root, this.opsDir, this.tmpDir, this.quarantineDir, this.turnsDir]) {
       await this.fs.mkdir(d);
     }
   }
@@ -207,6 +219,44 @@ export class BrainStore {
     const next = { ...record, updatedAt: this.now() };
     await this.atomicWrite(path, next);
     return next;
+  }
+
+  /** Read one operation, or undefined. Used to VERIFY a child rather than assume it. */
+  async readOperation(operationId: string): Promise<PersistedBrainOperation | undefined> {
+    const raw = await this.readJson(this.opPath(operationId));
+    const rec = raw as PersistedBrainOperation | undefined;
+    return rec && typeof rec.operationId === 'string' ? rec : undefined;
+  }
+
+  /** Same monotonic-revision rule as operations; turns are a separate namespace. */
+  async saveTurn(record: PersistedChatTurn): Promise<PersistedChatTurn> {
+    const path = this.turnPath(record.turnId);
+    if (await this.fs.exists(path)) {
+      const current = (await this.readJson(path)) as PersistedChatTurn | undefined;
+      if (typeof current?.revision === 'number' && current.revision >= record.revision) {
+        throw new StaleRevisionError(record.revision, current.revision);
+      }
+    }
+    const next = { ...record, updatedAt: this.now() };
+    await this.atomicWrite(path, next);
+    return next;
+  }
+
+  async readTurn(turnId: string): Promise<PersistedChatTurn | undefined> {
+    const raw = await this.readJson(this.turnPath(turnId));
+    const rec = raw as PersistedChatTurn | undefined;
+    return rec && typeof rec.turnId === 'string' ? rec : undefined;
+  }
+
+  /** Load every turn. A malformed file is skipped, never read as authoritative. */
+  async loadTurns(): Promise<PersistedChatTurn[]> {
+    const out: PersistedChatTurn[] = [];
+    for (const name of await this.fs.readdir(this.turnsDir)) {
+      if (!name.endsWith('.json')) continue;
+      const rec = (await this.readJson(`${this.turnsDir}/${name}`)) as PersistedChatTurn | undefined;
+      if (rec && typeof rec.turnId === 'string' && rec.schemaVersion === SCHEMA_VERSION) out.push(rec);
+    }
+    return out;
   }
 
   async saveConnection(record: PersistedBrainConnection): Promise<PersistedBrainConnection> {
