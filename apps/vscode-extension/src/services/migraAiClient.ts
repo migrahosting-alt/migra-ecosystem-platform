@@ -156,6 +156,27 @@ export interface AnswerTimeoutEvidence {
   modelCallsCompleted: number;
 }
 
+/** Repository-map build/reuse cost for a run. */
+export interface AnswerMapReport {
+  paths: number;
+  head: string;
+  fromCache: boolean;
+  builtInMs: number;
+  unavailable?: string;
+}
+
+/** What a bounded run spent against its ceilings, and which ceilings bound it. */
+export interface AnswerBudgetSpend {
+  candidatesConsidered: number;
+  filesOpened: number;
+  spans: number;
+  evidenceUnits: number;
+  modelCalls: number;
+  toolSteps: number;
+  expansionRounds: number;
+  binding: string[];
+}
+
 /** Streamed events from the agentic answer loop (`POST /api/ai/answer`, SSE). */
 export type AnswerStreamEvent =
   | { type: 'request'; traceId: string; tier: string; tierSource: string; runner: string; model: string }
@@ -172,6 +193,13 @@ export type AnswerStreamEvent =
     }
   | { type: 'timeout'; evidence: AnswerTimeoutEvidence }
   | { type: 'timings'; timings: Record<string, unknown> }
+  | { type: 'map'; map: AnswerMapReport }
+  | {
+      type: 'plan';
+      stopReason: string;
+      spend: AnswerBudgetSpend;
+      plan: { candidates: Array<{ path: string; score: number; reasons: string[] }>; opened: string[]; gaps: Array<{ token: string; resolvedTo?: string; source: string }> };
+    }
   | { type: 'done'; stepsUsed: number; model: string };
 
 export interface AnswerRequest {
@@ -635,6 +663,14 @@ export class MigraAiClient {
               rejected: (d.rejected ?? []) as RejectedClaim[],
               refused: d.refused === true,
               evidence: (d.evidence ?? { readPaths: [], spanCount: 0, knownPathCount: 0 }) as { readPaths: string[]; spanCount: number; knownPathCount: number },
+            };
+          } else if (parsed.event === 'map') yield { type: 'map', map: d.map as AnswerMapReport };
+          else if (parsed.event === 'plan') {
+            yield {
+              type: 'plan',
+              stopReason: String(d.stopReason ?? ''),
+              spend: d.spend as AnswerBudgetSpend,
+              plan: d.plan as { candidates: Array<{ path: string; score: number; reasons: string[] }>; opened: string[]; gaps: Array<{ token: string; resolvedTo?: string; source: string }> },
             };
           } else if (parsed.event === 'timeout') yield { type: 'timeout', evidence: d.evidence as AnswerTimeoutEvidence };
           else if (parsed.event === 'timings') yield { type: 'timings', timings: (d.timings ?? {}) as Record<string, unknown> };

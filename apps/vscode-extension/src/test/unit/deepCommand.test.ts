@@ -5,7 +5,7 @@
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { groundingFooter, parseDeepCommand, runDeepCommand, timeoutFooter } from '../../chat/deepCommand.js';
+import { budgetFooter, groundingFooter, parseDeepCommand, runDeepCommand, timeoutFooter } from '../../chat/deepCommand.js';
 import type { MigraAiClient, AnswerStreamEvent, GroundedClaim } from '../../services/migraAiClient.js';
 
 function sink(): { md: string; prog: string[]; s: { markdown(t: string): void; progress(t: string): void } } {
@@ -122,4 +122,51 @@ test('timeoutFooter names the call that ran out — not the whole request', () =
   assert.ok(!/request timed out/i.test(text));
   // A user cancellation is not a failure to report.
   assert.equal(timeoutFooter({ category: 'client_abort', callIndex: 1, callBudgetMs: 1, elapsedMs: 1, contextFileCount: 0, lastObservedPhase: 'model_inference', partialEvidenceAvailable: false, runElapsedMs: 1, modelCallsCompleted: 0 }), '');
+});
+
+const SPEND = {
+  candidatesConsidered: 12,
+  filesOpened: 3,
+  spans: 3,
+  evidenceUnits: 1840,
+  modelCalls: 1,
+  toolSteps: 0,
+  expansionRounds: 0,
+  binding: [] as string[],
+};
+
+test('budgetFooter reports the scope of every run, bound or not', () => {
+  assert.match(budgetFooter('claims-supported', SPEND), /1 model call, 3 files opened, 1840 evidence units/);
+  assert.match(budgetFooter('claims-supported', SPEND), /stopped: claims-supported/);
+  assert.ok(!/bound by/.test(budgetFooter('claims-supported', SPEND)), 'nothing bound, nothing claimed');
+  assert.match(
+    budgetFooter('evidence-budget-exhausted', { ...SPEND, modelCalls: 2, expansionRounds: 1, binding: ['maxExpansionRounds'] }),
+    /1 expansion .* bound by maxExpansionRounds/,
+  );
+});
+
+test('runDeepCommand renders the map cost, the scope footer and a recycled read', async () => {
+  const out = sink();
+  const events: AnswerStreamEvent[] = [
+    { type: 'route', model: 'qwen3-coder:30b', runner: 'local' },
+    { type: 'map', map: { paths: 2899, head: 'abc123', fromCache: false, builtInMs: 76 } },
+    { type: 'step', step: { tool: 'read', args: { path: 'src/a.ts' }, ok: true, summary: 'fresh src/a.ts:1-40' } },
+    { type: 'step', step: { tool: 'evidence(cached)', args: { path: 'src/a.ts' }, ok: true, summary: 'cache-hit src/a.ts:1-40' } },
+    { type: 'token', text: '`src/a.ts:1-4` verifies the token.' },
+    { type: 'plan', stopReason: 'claims-supported', spend: SPEND, plan: { candidates: [], opened: ['src/a.ts'], gaps: [] } },
+    {
+      type: 'grounding',
+      claims: [CLAIM],
+      rejected: [],
+      refused: false,
+      evidence: { readPaths: ['src/a.ts'], spanCount: 1, knownPathCount: 1 },
+    },
+    { type: 'done', stepsUsed: 1, model: 'qwen3-coder:30b' },
+  ];
+  await runDeepCommand(clientYielding(events), { kind: 'ask', question: 'how does login work?' }, '/repo', out.s, new AbortController().signal);
+
+  assert.ok(out.prog.some((p) => /2899 tracked paths in 76ms/.test(p)), 'the map cost is visible');
+  assert.match(out.md, /♻️.*cache-hit/, 'a recycled read is shown, not hidden');
+  assert.match(out.md, /scope: 1 model call, 3 files opened/);
+  assert.ok(out.md.indexOf('grounded') < out.md.indexOf('scope:'), 'grounding verdict first, then scope');
 });

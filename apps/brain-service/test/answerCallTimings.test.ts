@@ -12,12 +12,14 @@
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { execFileSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as http from 'node:http';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import type { AddressInfo, Socket } from 'node:net';
 import { agenticAnswer, describeTimeout } from '../src/engine/agenticAnswer.js';
+import { clearRepoMapCache } from '../src/engine/planning/repoMap.js';
 import type { AnswerRunTimings, TimeoutEvidence } from '../src/engine/answerTimings.js';
 
 /** One scripted model turn. */
@@ -240,7 +242,10 @@ test('the overall deadline is reported as its own category, not as a call timeou
   }
 });
 
-test('repeated reads of the same file are counted as wasted scope', async () => {
+test('a repeated read is eliminated rather than merely counted', async () => {
+  // This test used to assert `repeatedReads: [{ path, count: 2 }]` — it recorded
+  // the waste. Now the waste does not happen, so the assertion is that the second
+  // request cost nothing AND that the run still says out loud it was asked twice.
   const stub = await stubModel([
     { kind: 'toolCall', name: 'read', args: { path: 'src/limiter.ts' } },
     { kind: 'toolCall', name: 'read', args: { path: 'src/limiter.ts' } },
@@ -255,7 +260,10 @@ test('repeated reads of the same file are counted as wasted scope', async () => 
       perCallTimeoutMs: 5_000,
       overallDeadlineMs: 20_000,
     });
-    assert.deepEqual(result.timings.repeatedReads, [{ path: 'src/limiter.ts', count: 2 }]);
+    assert.deepEqual(result.timings.repeatedReads, [], 'the file was read once, so nothing repeated');
+    assert.equal(result.cache.requests, 2, 'but the run reports that it was asked twice');
+    assert.equal(result.cache.cacheHits, 1);
+    assert.equal(result.cache.filesystemReads, 1);
     assert.equal(result.timings.calls.length, 3);
     assert.ok(result.timings.toolExecutionMs >= 0);
   } finally {
@@ -280,6 +288,113 @@ test('describeTimeout names the call and its budget — never a generic request 
   assert.match(text, /7 file\(s\)/);
   assert.match(text, /model_inference/);
   assert.ok(!/request timed out/i.test(text), 'the whole request is not blamed for one call');
+});
+
+// ── The planned path, end to end through `agenticAnswer` ───────────────────────
+
+/** A real git repository, so `buildRepoMap` can enumerate with `git ls-files`. */
+function tmpGitRepo(): string {
+  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'migra-plan-e2e-')));
+  fs.mkdirSync(path.join(dir, 'src'));
+  fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ name: 'e2e-pkg' }));
+  fs.writeFileSync(
+    path.join(dir, 'src', 'limiter.ts'),
+    ['export function throttleRequests(count: number): boolean {', '  return count <= 20;', '}', ''].join('\n'),
+  );
+  const g = (args: string[]): void => {
+    execFileSync('git', args, { cwd: dir, stdio: 'ignore' });
+  };
+  g(['init', '-q']);
+  g(['config', 'user.email', 't@t.co']);
+  g(['config', 'user.name', 'T']);
+  g(['add', '-A']);
+  g(['commit', '-q', '-m', 'init']);
+  return dir;
+}
+
+test('the planned path answers a small-scope question in ONE model call', async () => {
+  // The acceptance target, asserted through the real entry point: the 305s run made
+  // eight calls to reach an answer the map routes to immediately.
+  const stub = await stubModel([
+    { kind: 'reply', content: '`src/limiter.ts:1-3` returns true when the count is at most 20, via `throttleRequests`.' },
+  ]);
+  try {
+    clearRepoMapCache();
+    const result = await agenticAnswer({
+      prompt: 'what does throttleRequests do in src/limiter.ts?',
+      workspaceRoot: tmpGitRepo(),
+      model: 'test-model',
+      providerBaseUrl: stub.baseUrl,
+      perCallTimeoutMs: 5_000,
+      overallDeadlineMs: 20_000,
+    });
+
+    assert.equal(stub.calls.length, 1, `one model call, got ${stub.calls.length}`);
+    assert.equal(result.timings.calls.length, 1);
+    assert.equal(result.stopReason, 'claims-supported');
+    assert.equal(result.refused, false);
+    assert.ok(result.claims.some((c) => c.kind === 'direct_evidence'));
+
+    // The map was built and used; the plan reports what it opened and why.
+    assert.ok(result.map.paths >= 2, 'the map enumerated the repository');
+    assert.equal(result.map.unavailable, undefined);
+    assert.ok(result.plan, 'a plan report is present');
+    assert.ok(result.plan!.opened.includes('src/limiter.ts'));
+    assert.equal(result.plan!.gaps.length, 0);
+    assert.deepEqual(result.spend!.binding, [], 'no ceiling bound this run');
+
+    // One read per unique file, and no duplicate evidence.
+    assert.equal(result.cache.filesystemReads, result.cache.uniqueFiles, 'one read per unique file');
+    assert.deepEqual(result.timings.repeatedReads, []);
+    assert.equal(result.timings.calls[0]!.phase, 'tool_loop');
+  } finally {
+    await stub.close();
+  }
+});
+
+test('a non-git workspace falls back to exploration and says so', async () => {
+  const stub = await stubModel([{ kind: 'reply', content: 'No repository evidence was retrieved.' }]);
+  try {
+    clearRepoMapCache();
+    const result = await agenticAnswer({
+      prompt: 'what does throttleRequests do?',
+      workspaceRoot: tmpWorkspace(), // no `git init`
+      model: 'test-model',
+      providerBaseUrl: stub.baseUrl,
+      perCallTimeoutMs: 5_000,
+      overallDeadlineMs: 20_000,
+    });
+    assert.ok(result.map.unavailable, 'the map could not be built');
+    assert.equal(result.plan, undefined, 'no plan is claimed for a run that explored');
+  } finally {
+    await stub.close();
+  }
+});
+
+test('a repeated read in the exploration fallback costs one filesystem read', async () => {
+  const stub = await stubModel([
+    { kind: 'toolCall', name: 'read', args: { path: 'src/limiter.ts' } },
+    { kind: 'toolCall', name: 'read', args: { path: 'src/limiter.ts' } },
+    { kind: 'reply', content: '`src/limiter.ts:1-3` returns true when the count is at most 20.' },
+  ]);
+  try {
+    const result = await agenticAnswer({
+      prompt: 'what does throttleRequests do?',
+      workspaceRoot: tmpWorkspace(), // not a git repo → exploration fallback
+      model: 'test-model',
+      providerBaseUrl: stub.baseUrl,
+      perCallTimeoutMs: 5_000,
+      overallDeadlineMs: 20_000,
+    });
+    assert.equal(result.cache.requests, 2, 'the model asked twice');
+    assert.equal(result.cache.filesystemReads, 1, 'the filesystem was read once');
+    assert.equal(result.cache.cacheHits, 1);
+    assert.equal(result.cache.uniqueFiles, 1);
+    // The second step is reported honestly rather than hidden.
+    assert.match(result.steps[1]!.summary, /already retrieved/i);
+  } finally {
+    await stub.close();
+  }
 });
 
 test('the cloud runner is carried through to the timing rows', async () => {

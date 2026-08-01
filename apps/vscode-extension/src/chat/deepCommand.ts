@@ -9,7 +9,7 @@
 // Read-only by construction — no edits, no approval. `/deep cloud <q>` escalates
 // to a faster/stronger cloud model. vscode-free so it is unit-testable.
 
-import type { MigraAiClient, AnswerRequest, AnswerTimeoutEvidence, GroundedClaim, RejectedClaim } from '../services/migraAiClient.js';
+import type { MigraAiClient, AnswerRequest, AnswerBudgetSpend, AnswerTimeoutEvidence, GroundedClaim, RejectedClaim } from '../services/migraAiClient.js';
 import { isPilotError, toUserMessage } from '@migrapilot/pilot-client';
 import type { ChatSink } from './chatEngine.js';
 
@@ -71,6 +71,24 @@ export function timeoutFooter(e: AnswerTimeoutEvidence): string {
   return `\n\n⏱️ _Stopped early: ${which} (${e.modelCallsCompleted} call(s) completed, ${e.contextFileCount} file(s) in context, phase \`${e.lastObservedPhase}\`)._`;
 }
 
+/**
+ * What the run cost, in the units it is budgeted in.
+ *
+ * Shown always, including when nothing bound: an operator who cannot see that a run
+ * used 1 of 2 model calls and 3 of 8 files cannot tell a well-scoped answer from
+ * one that silently hit a ceiling and stopped looking.
+ */
+export function budgetFooter(stopReason: string, spend: AnswerBudgetSpend): string {
+  const parts = [
+    `${spend.modelCalls} model call${spend.modelCalls === 1 ? '' : 's'}`,
+    `${spend.filesOpened} file${spend.filesOpened === 1 ? '' : 's'} opened`,
+    `${spend.evidenceUnits} evidence units`,
+  ];
+  if (spend.expansionRounds) parts.push(`${spend.expansionRounds} expansion`);
+  const bound = spend.binding.length ? ` · bound by ${spend.binding.join(', ')}` : '';
+  return `\n_scope: ${parts.join(', ')} · stopped: ${stopReason}${bound}_`;
+}
+
 /** Human icon for a tool step. */
 function stepIcon(tool: string): string {
   switch (tool) {
@@ -79,6 +97,7 @@ function stepIcon(tool: string): string {
     case 'find': return '📁';
     case 'list': return '🗂️';
     case 'git_status': return '🔧';
+    case 'evidence(cached)': return '♻️';
     default: return '•';
   }
 }
@@ -104,6 +123,7 @@ export async function runDeepCommand(
   const req: AnswerRequest = { prompt: cmd.question!, workspaceRoot, ...(cmd.tier ? { tier: cmd.tier } : {}) };
   const stepLines: string[] = [];
   let answering = false;
+  let planFooter = '';
   // The Brain verifies the answer before emitting it, so the grounding verdict
   // arrives AFTER the text. Footers are rendered when they arrive, in order.
   try {
@@ -124,8 +144,13 @@ export async function runDeepCommand(
           answering = true;
         }
         sink.markdown(ev.text);
+      } else if (ev.type === 'map') {
+        if (ev.map.unavailable) sink.progress('🗺️ No git map here — exploring instead');
+        else sink.progress(`🗺️ ${ev.map.paths} tracked paths ${ev.map.fromCache ? '(cached)' : `in ${ev.map.builtInMs}ms`}`);
+      } else if (ev.type === 'plan') {
+        planFooter = budgetFooter(ev.stopReason, ev.spend);
       } else if (ev.type === 'grounding') {
-        sink.markdown(groundingFooter(ev.claims, ev.rejected, ev.refused));
+        sink.markdown(groundingFooter(ev.claims, ev.rejected, ev.refused) + planFooter);
       } else if (ev.type === 'timeout') {
         sink.markdown(timeoutFooter(ev.evidence));
       }
