@@ -212,13 +212,13 @@ test('10 · attempt records carry sequential statuses and no supersession claim'
 // 11/12 ── scrubbing
 test('11 · scrubbing is recursive over unknown nested structures', () => {
   const dirty = {
-    level1: { level2: { note: 'Bearer abcdefghijklmnopqrst', arr: ['sk_live_ABCDEFGH12345678'] } },
+    level1: { level2: { note: 'Bearer abcdefghijklmnopqrst', arr: ['sk_live_ABCDEFGH12345678'] } }, // secret-scan:allow(stripe-secret-key) fabricated Stripe-shaped fixture; this test exists to prove scrub() removes it
     jwt: 'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.sig',
-    dsn: 'postgres://user:hunter2pass@host:5432/db',
+    dsn: 'postgres://user:hunter2pass@host:5432/db', // secret-scan:allow(credentialed-connection-string) fabricated DSN fixture (user/hunter2pass are invented) proving credentialed-URL removal
     keep: 'status=503 bytes=411 ms=87',
   };
   const clean = JSON.stringify(scrub(dirty));
-  for (const leak of ['Bearer abcdefghijklmnopqrst', 'sk_live_ABCDEFGH12345678', 'eyJhbGciOiJIUzI1NiJ9', 'hunter2pass']) {
+  for (const leak of ['Bearer abcdefghijklmnopqrst', 'sk_live_ABCDEFGH12345678', 'eyJhbGciOiJIUzI1NiJ9', 'hunter2pass']) { // secret-scan:allow(stripe-secret-key) the same fabricated fixture, asserted absent from the scrubbed output
     assert.equal(clean.includes(leak), false, `must not leak ${leak}`);
   }
   assert.match(clean, /status=503 bytes=411 ms=87/, 'useful metadata is preserved');
