@@ -21,11 +21,22 @@ const SRC = join(EXT_ROOT, 'src');
 /** Generated or installed trees, legitimately untracked. */
 const EXCLUDED = new Set(['node_modules', 'dist', 'out', '.vscode-test']);
 
+/**
+ * Transient negative-control fixtures. controlRegistry.test.ts and
+ * notificationAwaits.test.ts write `__probe*` files INTO the source tree, run a scanner
+ * against them, and delete them — so this guard races them when the suite runs together.
+ *
+ * The exclusion is deliberately keyed to that one prefix rather than to a directory: a
+ * real source file is never named `__probe`, so nothing genuine can hide behind it.
+ */
+const isTransientProbe = (name: string) => name.startsWith('__probe');
+
 function sources(dir: string, out: string[] = []): string[] {
   for (const name of readdirSync(dir)) {
     if (EXCLUDED.has(name)) continue;
     const p = join(dir, name);
     if (statSync(p).isDirectory()) sources(p, out);
+    else if (isTransientProbe(name)) continue;
     else if (name.endsWith('.ts') || name.endsWith('.mjs')) out.push(p);
   }
   return out;

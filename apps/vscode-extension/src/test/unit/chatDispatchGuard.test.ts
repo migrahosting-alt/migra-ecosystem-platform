@@ -17,6 +17,35 @@ import {
 const ENGINE = join(__dirname, '..', '..', '..', 'src', 'chat', 'chatEngine.ts');
 const source = readFileSync(ENGINE, 'utf8');
 
+/**
+ * Remove every `governedChild(...)` region, balanced-paren.
+ *
+ * A requiresChild callee surviving in the remainder was dispatched directly. Stripping
+ * the approved regions — rather than searching for the callee NEAR a wrapper — is what
+ * stops a call from passing because a governed call happens to sit a few lines above it.
+ */
+function withoutGovernedRegions(src: string): string {
+  let out = '';
+  let i = 0;
+  for (;;) {
+    const at = src.indexOf('governedChild(', i);
+    if (at < 0) return out + src.slice(i);
+    out += src.slice(i, at);
+    let depth = 0;
+    let j = at + 'governedChild'.length;
+    for (; j < src.length; j += 1) {
+      if (src[j] === '(') depth += 1;
+      else if (src[j] === ')') {
+        depth -= 1;
+        if (depth === 0) break;
+      }
+    }
+    i = j + 1;
+  }
+}
+
+const ungoverned = withoutGovernedRegions(source);
+
 /** Awaited calls and for-await iterations — the shapes that can outlive the loop. */
 const DISPATCH_SHAPES = [
   /await\s+([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)\s*\(/g,
@@ -32,6 +61,7 @@ const NOT_A_DISPATCH = new Set([
   'vscode.workspace.openTextDocument', 'vscode.window.showTextDocument',
   'vscode.window.showWarningMessage', 'vscode.window.showInformationMessage',
   'Promise.all', 'Promise.race', 'JSON.parse',
+  'governedChild', // the wrapper itself is the approved mechanism, not a dispatch
 ]);
 
 function calleesInSource(): Set<string> {
@@ -90,6 +120,44 @@ test('passive_local is the only classification allowed to skip child governance'
       s.classification,
       'passive_local',
       `${s.id} skips governance but is classified ${s.classification} — remote work needs a record`,
+    );
+  }
+});
+
+
+// ── enforcement: classification alone is not governance ─────────────────────
+
+test('every requiresChild site is dispatched through governedChild, never directly', () => {
+  const direct = REQUIRED_CHILD_SITES.filter((s) => {
+    const bare = s.callee.split('.').pop()!;
+    return new RegExp(`\\b${bare}\\s*\\(`).test(ungoverned);
+  }).map((s) => `${s.id} (${s.callee})`);
+  assert.deepEqual(
+    direct,
+    [],
+    'these are classified as needing a child but are called outside governedChild:\n' +
+      direct.map((d) => `  ${d}`).join('\n'),
+  );
+});
+
+test('every requiresChild site id actually appears in a governedChild call', () => {
+  const missing = REQUIRED_CHILD_SITES.filter((s) => !source.includes(`'${s.id}'`)).map((s) => s.id);
+  assert.deepEqual(missing, [], `registered but never dispatched as a child:\n${missing.join('\n')}`);
+});
+
+test('the wrapper-stripper is not vacuous — it removes real regions', () => {
+  assert.ok(source.includes('governedChild('), 'the engine must actually use the wrapper');
+  assert.ok(ungoverned.length < source.length, 'stripping removed nothing');
+  assert.equal(ungoverned.includes('governedChild('), false, 'all regions were removed');
+});
+
+test('no passive_local site performs network or provider work', () => {
+  const NETWORKY = /fetch\(|\.chatStream\(|\.inspect\(|router\.chat\(|escalationDispatch\(/;
+  for (const s of CHAT_DISPATCH_SITES.filter((x) => !x.requiresChild)) {
+    assert.equal(
+      NETWORKY.test(s.callee),
+      false,
+      `${s.id} is passive_local but its callee ${s.callee} looks like remote work`,
     );
   }
 });

@@ -9,7 +9,7 @@
   "findings": [
     {
       "file": "src/chat/chatEngine.ts",
-      "line": 289,
+      "line": 296,
       "api": "showWarningMessage",
       "classification": "consumed",
       "snippet": "await vscode.window.showWarningMessage("

@@ -273,6 +273,98 @@ export class ChatTurnExecution {
     }
   }
 
+  /**
+   * created → running, persisted.
+   *
+   * The walk goes through `connecting` and `ready` because `created → running` is
+   * FORBIDDEN: a record must pass through the states that describe actually reaching
+   * the endpoint. All three steps land in one revision — the transition list carries
+   * the path, so nothing is lost by not writing three times.
+   */
+  async startChild(childId: string): Promise<boolean> {
+    const existing = await this.store.readOperation(childId);
+    if (!existing) {
+      this.turn.invariantViolations.push(`cannot start missing child ${childId}`);
+      return false;
+    }
+    const at = this.now();
+    const path: ExecutionState[] = ['connecting', 'ready', 'running'];
+    const transitions = [...existing.transitions];
+    let from: ExecutionState = existing.currentState;
+    for (const to of path) {
+      if (!isLegalTransition(from, to)) {
+        transitions.push({ from, to, at, reason: 'child start', rejected: true });
+        return false;
+      }
+      transitions.push({ from, to, at, reason: 'child start' });
+      from = to;
+    }
+    try {
+      await this.store.saveOperation({
+        ...existing,
+        revision: existing.revision + 1,
+        currentState: 'running',
+        transitions,
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Persist the child's terminal evidence. Awaited by the dispatcher, so the caller
+   * cannot continue on an outcome that was never written down.
+   */
+  async finishChild(
+    childId: string,
+    outcome: 'success' | 'failure' | 'cancelled',
+    detail?: string,
+  ): Promise<boolean> {
+    const existing = await this.store.readOperation(childId);
+    if (!existing) {
+      this.turn.invariantViolations.push(`cannot finish missing child ${childId}`);
+      return false;
+    }
+    const to: ExecutionState =
+      outcome === 'success' ? 'completed' : outcome === 'cancelled' ? 'cancelled' : 'failed';
+    const at = this.now();
+    // `running → cancelled` is not legal directly; a cancelled child must have passed
+    // through `cancelling`, and that path is recorded rather than skipped.
+    const path: ExecutionState[] = outcome === 'cancelled' ? ['cancelling', 'cancelled'] : [to];
+    const transitions = [...existing.transitions];
+    let from: ExecutionState = existing.currentState;
+    for (const step of path) {
+      if (!isLegalTransition(from, step)) {
+        transitions.push({ from, to: step, at, reason: 'child terminal', rejected: true });
+        this.turn.invariantViolations.push(
+          `illegal child transition ${from} -> ${step} for ${childId}`,
+        );
+        return false;
+      }
+      transitions.push({ from, to: step, at, reason: 'child terminal' });
+      from = step;
+    }
+    try {
+      await this.store.saveOperation({
+        ...existing,
+        revision: existing.revision + 1,
+        currentState: from,
+        endedAt: at,
+        transitions,
+        terminalEvidence: {
+          observedAt: at,
+          outcome: outcome === 'success' ? 'success' : 'failure',
+          evidenceType: `child_${outcome}`,
+        },
+        ...(detail ? { failures: [...existing.failures, detail] } : {}),
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   /** Record an OBSERVED child terminal outcome. Never inferred from the parent. */
   noteChildTerminal(childId: string, outcome: 'success' | 'failure' | 'cancelled'): void {
     if (!this.turn.childOperationIds.includes(childId)) {

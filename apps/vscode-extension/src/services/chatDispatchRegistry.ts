@@ -95,9 +95,12 @@ export const CHAT_DISPATCH_SITES: readonly DispatchSite[] = [
   {
     id: 'remote_stream',
     callee: 'streamRemote',
-    classification: 'external_provider',
-    requiresChild: true,
-    rationale: 'Streams from pilot-api; the remote run outlives our loop.',
+    classification: 'passive_local',
+    requiresChild: false,
+    rationale:
+      'A local wrapper in this same file. The remote run it starts is router.chat, which is ' +
+      'registered separately — governing both would create TWO children for ONE remote run, and ' +
+      'the parent would then wait on a child that never independently terminates.',
   },
   {
     id: 'workspace_find',
