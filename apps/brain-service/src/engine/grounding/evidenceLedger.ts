@@ -49,6 +49,16 @@ export interface EvidenceSpan {
   /** Stable content hash of {@link text} — proves the excerpt was not rewritten. */
   excerptHash: string;
   origin: EvidenceOrigin;
+  /**
+   * The span runs to the end of the file.
+   *
+   * Without this the cache misses the commonest case by construction: a caller
+   * asking for "lines 1-400" of a 69-line file gets a span ending at 69, and the
+   * NEXT identical request looks like a request for lines the ledger does not
+   * hold. Every whole-file re-read would then count as an expansion — the exact
+   * repetition the cache exists to stop.
+   */
+  reachesEof?: boolean;
 }
 
 /** Extensions whose `#` starts a comment. `#` is a private field in JS/TS. */
@@ -120,6 +130,62 @@ export interface CitationRef {
   endLine: number;
 }
 
+/**
+ * What happened to a request for a file range.
+ *
+ * `fresh`    — the run had nothing for this file; content was read and recorded.
+ * `cache-hit`— the exact range was already covered. No filesystem read, and NO new
+ *              text into the model's context.
+ * `expanded` — the file was known but this range reaches beyond what was held.
+ * `stale`    — the file changed on disk since it was recorded, so it was re-read.
+ */
+export type EvidenceRequestOutcome = 'fresh' | 'cache-hit' | 'expanded' | 'stale';
+
+/**
+ * How the ledger obtains a file range, injected so it stays free of fs.
+ *
+ * `fingerprint` must be CHEAP — a stat, not a read. It is the only thing consulted
+ * on a cache hit, which is what makes a repeat request cost nothing.
+ */
+export interface EvidenceSource {
+  /**
+   * Async because containment must be validated before any metadata is touched,
+   * and the boundary check is async. Still cheap: a resolve plus a stat, never a read.
+   */
+  fingerprint(): Promise<string | undefined>;
+  read(): Promise<{ startLine: number; endLine: number; text: string; totalLines?: number }>;
+}
+
+export interface EvidenceRequest {
+  outcome: EvidenceRequestOutcome;
+  /** The span that now covers the request. */
+  span: EvidenceSpan;
+  /** True when the caller must NOT put this text into the prompt again. */
+  alreadyInContext: boolean;
+}
+
+/** Counters proving repeated discovery was eliminated rather than hidden. */
+export interface EvidenceCacheStats {
+  /** Every request made, including ones served from cache. */
+  requests: number;
+  freshReads: number;
+  cacheHits: number;
+  expansions: number;
+  staleRereads: number;
+  /** Distinct files whose content was retrieved. */
+  uniqueFiles: number;
+  /** Requests that asked again for a file already held (hits + expansions). */
+  repeatedRequests: number;
+  /**
+   * Actual filesystem reads performed.
+   *
+   * The number the acceptance target is stated in ("one read per unique file"), and
+   * not derivable from `freshReads` alone: a range that reaches past a seeded
+   * snippet is an expansion, which is still a real read.
+   */
+  filesystemReads: number;
+}
+
 /** Normalise a path the way both a tool result and a model citation would write it. */
 export function normalizePath(p: string): string {
   return p
@@ -179,6 +245,14 @@ export function termAppearsIn(haystackLower: string, term: string): boolean {
   return (TERM_ALIASES[t] ?? []).some((alias) => haystackLower.includes(alias));
 }
 
+/** Merge what a duplicate arrival knew into the span already held. */
+function absorb(held: EvidenceSpan, arriving: EvidenceSpan): EvidenceSpan {
+  if (arriving.reachesEof && !held.reachesEof) held.reachesEof = true;
+  // A real `read` is stronger provenance than a seeded snippet or a search preview.
+  if (arriving.origin === 'read' && held.origin !== 'read') held.origin = 'read';
+  return held;
+}
+
 function makeSpan(path: string, startLine: number, endLine: number, text: string, origin: EvidenceOrigin): EvidenceSpan {
   const { code, comments } = splitCodeAndComments(path, text);
   return { path, startLine, endLine, text, codeText: code, commentText: comments, excerptHash: hashExcerpt(text), origin };
@@ -191,12 +265,120 @@ export class EvidenceLedger {
   private corpusLower = '';
   private corpusDirty = false;
   private readonly readCounts = new Map<string, number>();
+  private readonly stats = { requests: 0, freshReads: 0, cacheHits: 0, expansions: 0, staleRereads: 0, repeatedRequests: 0 };
+  /** Cheap validity token per path (stat-derived), so a hit costs no read. */
+  private readonly fingerprints = new Map<string, string>();
 
   /** Record a `read` result: a real line range with its literal content. */
-  recordRead(path: string, startLine: number, endLine: number, text: string): EvidenceSpan {
+  recordRead(path: string, startLine: number, endLine: number, text: string, totalLines?: number): EvidenceSpan {
     const p = normalizePath(path);
     this.readCounts.set(p, (this.readCounts.get(p) ?? 0) + 1);
-    return this.add(makeSpan(p, startLine, endLine, text, 'read'));
+    const span = makeSpan(p, startLine, endLine, text, 'read');
+    if (totalLines !== undefined && endLine >= totalLines) span.reachesEof = true;
+    return this.add(span);
+  }
+
+  /**
+   * Ask for a file range, reading it only if the run does not already hold it.
+   *
+   * The measured defect: one run read `brainTransport.ts` FOUR times — four
+   * filesystem reads, and four copies of the same 386 lines pushed into a context
+   * that then cost 30–90s per model call to process. Nothing about the second read
+   * was different from the first.
+   *
+   * `load` is injected rather than called here so the ledger stays pure and the
+   * cache is testable without a filesystem. It is invoked ONLY on a miss, so a
+   * cache hit provably performs no read.
+   */
+  async request(
+    reqPath: string,
+    startLine: number,
+    endLine: number,
+    source: EvidenceSource,
+  ): Promise<EvidenceRequest> {
+    const p = normalizePath(reqPath);
+    this.stats.requests += 1;
+    const held = this.spansByPath.get(p) ?? [];
+
+    if (held.length > 0) {
+      this.stats.repeatedRequests += 1;
+      // Freshness is checked with a STAT, never a read: re-reading the file to
+      // decide whether we need to re-read the file would leave the filesystem cost
+      // exactly where it was and only save the context insertion.
+      const current = await source.fingerprint();
+      const recorded = this.fingerprints.get(p);
+      if (recorded !== undefined && current !== undefined && current !== recorded) {
+        this.stats.staleRereads += 1;
+        this.spansByPath.delete(p);
+        this.fingerprints.delete(p);
+        this.corpusDirty = true;
+        return this.load(p, source, 'stale');
+      }
+      // A span that reaches EOF covers any request that runs past it: there is no
+      // more file to fetch.
+      const covering = held.find((s) => s.startLine <= startLine && (s.endLine >= endLine || s.reachesEof === true));
+      if (covering) {
+        this.stats.cacheHits += 1;
+        return { outcome: 'cache-hit', span: covering, alreadyInContext: true };
+      }
+      this.stats.expansions += 1;
+      return this.load(p, source, 'expanded');
+    }
+
+    this.stats.freshReads += 1;
+    return this.load(p, source, 'fresh');
+  }
+
+  private async load(p: string, source: EvidenceSource, outcome: EvidenceRequestOutcome): Promise<EvidenceRequest> {
+    const fresh = await source.read();
+    const span = this.recordRead(p, fresh.startLine, fresh.endLine, fresh.text, fresh.totalLines);
+    const fingerprint = await source.fingerprint();
+    if (fingerprint !== undefined) this.fingerprints.set(p, fingerprint);
+    return { outcome, span, alreadyInContext: false };
+  }
+
+  /**
+   * Remove a span that was retrieved but must not be used.
+   *
+   * The budget admits a file by ESTIMATE before reading it (so an over-large file
+   * is never read at all), but the real cost is only known afterwards. When the
+   * actual span would exceed the ceiling it is rolled straight back out, keeping
+   * the invariant that the ledger, the prompt and the reported spend describe the
+   * same evidence.
+   */
+  discard(span: EvidenceSpan): void {
+    const list = this.spansByPath.get(span.path);
+    if (!list) return;
+    const next = list.filter((s) => s !== span);
+    if (next.length === list.length) return;
+    const count = (this.readCounts.get(span.path) ?? 1) - 1;
+    if (count > 0) this.readCounts.set(span.path, count);
+    else this.readCounts.delete(span.path);
+    if (next.length) {
+      this.spansByPath.set(span.path, next);
+    } else {
+      this.spansByPath.delete(span.path);
+      this.fingerprints.delete(span.path);
+    }
+    this.corpusDirty = true;
+  }
+
+  /** How many times each path was expanded beyond its first read. */
+  expansionsFor(path: string): number {
+    return Math.max(0, (this.readCounts.get(normalizePath(path)) ?? 0) - 1);
+  }
+
+  cacheStats(): EvidenceCacheStats {
+    return {
+      ...this.stats,
+      uniqueFiles: this.spansByPath.size,
+      filesystemReads: this.stats.freshReads + this.stats.expansions + this.stats.staleRereads,
+    };
+  }
+
+  /** Approximate context units (chars/4) the ledger would contribute to a prompt. */
+  evidenceUnits(): number {
+    return Math.ceil(this.spans.reduce((n, s) => n + s.text.length, 0) / 4);
   }
 
   /** Record one `search` hit. A preview line is evidence for that line only. */
@@ -223,11 +405,33 @@ export class EvidenceLedger {
     if (p) this.paths.add(p);
   }
 
+  /**
+   * Insert a span, collapsing duplicates.
+   *
+   * An identical (path, range, content-hash) triple is the SAME evidence however
+   * many times it arrives — from a re-read, from a seed that overlaps a read, from
+   * two search hits on one line. Storing it twice would double its weight in the
+   * corpus and its size in every prompt built from the ledger.
+   */
   private add(span: EvidenceSpan): EvidenceSpan {
     const list = this.spansByPath.get(span.path);
-    if (list) list.push(span);
-    else this.spansByPath.set(span.path, [span]);
-    this.paths.add(span.path);
+    if (!list) {
+      this.spansByPath.set(span.path, [span]);
+      this.paths.add(span.path);
+      this.corpusDirty = true;
+      return span;
+    }
+    const duplicate = list.find(
+      (s) => s.startLine === span.startLine && s.endLine === span.endLine && s.excerptHash === span.excerptHash,
+    );
+    // Collapsing must not LOSE what the new arrival knew. A seeded snippet and a
+    // full read of the same lines are the same evidence, but only the read knows it
+    // reached EOF — dropping that made every later whole-file request a miss.
+    if (duplicate) return absorb(duplicate, span);
+    // A span strictly contained in one we already hold adds nothing.
+    const container = list.find((s) => s.startLine <= span.startLine && s.endLine >= span.endLine && s.text.includes(span.text));
+    if (container) return absorb(container, span);
+    list.push(span);
     this.corpusDirty = true;
     return span;
   }
@@ -325,6 +529,24 @@ export class EvidenceLedger {
   resolve(ref: CitationRef): EvidenceSpan[] {
     return this.spansFor(ref.path).filter((s) => ref.startLine <= s.endLine && ref.endLine >= s.startLine);
   }
+}
+
+/** The header a rendered span carries. Its cost is part of the span's cost. */
+export function spanHeader(span: Pick<EvidenceSpan, 'path' | 'startLine' | 'endLine'>): string {
+  return `--- ${span.path}:${span.startLine}-${span.endLine} ---`;
+}
+
+/**
+ * What a span costs the model's context, in approximate units.
+ *
+ * ONE definition, used by both the budget and the renderer. They diverged by the
+ * header — the budget counted only `text`, the renderer emitted `header + text` —
+ * so a run reported 2,010 units against a 2,000 ceiling it believed it had
+ * honoured. Two subtly different cost models is the same defect shape as two
+ * subtly different range validators.
+ */
+export function spanUnits(span: Pick<EvidenceSpan, 'path' | 'startLine' | 'endLine' | 'text'>): number {
+  return Math.ceil((spanHeader(span).length + span.text.length) / 4);
 }
 
 /** Citation shapes an answer may use: `path:12`, `path:12-40`, `path:12–40`. */

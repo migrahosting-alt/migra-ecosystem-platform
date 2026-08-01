@@ -11,6 +11,7 @@ import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { randomUUID } from 'node:crypto';
 import { agenticAnswer, streamAgentic } from './agenticAnswer.js';
 import { describeTimings } from './answerTimings.js';
+import { DEFAULT_EVIDENCE_BUDGET, type EvidenceBudget } from './planning/evidenceBudget.js';
 
 /**
  * The tier vocabulary of THIS route.
@@ -34,6 +35,10 @@ interface AnswerBody {
   tier?: unknown;
   maxSteps?: unknown;
   stream?: boolean;
+  /** Ceilings for the bounded evidence plan. */
+  budget?: unknown;
+  /** Set false to force the exploration fallback instead of planning. */
+  plan?: unknown;
 }
 
 export interface AnswerRouteOptions {
@@ -45,7 +50,7 @@ export interface AnswerRouteOptions {
 }
 
 export interface AnswerValidationError {
-  code: 'BAD_REQUEST' | 'workspace_not_open' | 'invalid_tier' | 'invalid_max_steps';
+  code: 'BAD_REQUEST' | 'workspace_not_open' | 'invalid_tier' | 'invalid_max_steps' | 'invalid_budget';
   field?: string;
   error: string;
   received?: unknown;
@@ -61,6 +66,8 @@ export interface ValidatedAnswerRequest {
   model?: string;
   maxSteps?: number;
   stream: boolean;
+  budget?: Partial<EvidenceBudget>;
+  plan?: boolean;
 }
 
 /**
@@ -112,8 +119,42 @@ export function validateAnswerRequest(body: AnswerBody | undefined | null): { ok
     maxSteps = n;
   }
 
+  // Budget overrides are validated the same way as tier: an unknown key or a
+  // non-positive ceiling is a caller mistake, not an instruction to do nothing.
+  let budgetOverrides: Partial<EvidenceBudget> | undefined;
+  if (b.budget !== undefined && b.budget !== null) {
+    if (typeof b.budget !== 'object' || Array.isArray(b.budget)) {
+      return { ok: false, error: { code: 'invalid_budget', field: 'budget', error: '`budget` must be an object of ceilings.', received: b.budget } };
+    }
+    const allowed = Object.keys(DEFAULT_EVIDENCE_BUDGET);
+    const out: Record<string, number> = {};
+    for (const [k, v] of Object.entries(b.budget as Record<string, unknown>)) {
+      if (!allowed.includes(k)) {
+        return { ok: false, error: { code: 'invalid_budget', field: `budget.${k}`, error: 'Unknown budget ceiling.', received: k, allowed } };
+      }
+      if (typeof v !== 'number' || !Number.isInteger(v) || v < 1) {
+        return { ok: false, error: { code: 'invalid_budget', field: `budget.${k}`, error: 'Each ceiling must be a positive integer.', received: v } };
+      }
+      out[k] = v;
+    }
+    budgetOverrides = out as Partial<EvidenceBudget>;
+  }
+
   const model = typeof b.model === 'string' && b.model.trim() ? b.model.trim() : undefined;
-  return { ok: true, value: { prompt, workspaceRoot, tier, tierSource, ...(model ? { model } : {}), ...(maxSteps ? { maxSteps } : {}), stream: b.stream === true } };
+  return {
+    ok: true,
+    value: {
+      prompt,
+      workspaceRoot,
+      tier,
+      tierSource,
+      ...(model ? { model } : {}),
+      ...(maxSteps ? { maxSteps } : {}),
+      ...(budgetOverrides ? { budget: budgetOverrides } : {}),
+      ...(b.plan === false ? { plan: false } : {}),
+      stream: b.stream === true,
+    },
+  };
 }
 
 export interface ResolvedRunner {
@@ -158,6 +199,8 @@ export function registerAnswerRoutes(app: FastifyInstance, opts: AnswerRouteOpti
       runner: resolved.runner,
       providerBaseUrl: opts.providerBaseUrl,
       ...(req.maxSteps ? { maxSteps: req.maxSteps } : {}),
+      ...(req.budget ? { budget: req.budget } : {}),
+      ...(req.plan === false ? { plan: false } : {}),
     };
 
     // ── SSE streaming path: live tool steps + a verified answer ──
@@ -194,7 +237,16 @@ export function registerAnswerRoutes(app: FastifyInstance, opts: AnswerRouteOpti
       // Where the wall clock went, on one line, per run. A timing report that only
       // exists in a response body cannot be correlated after the fact.
       request.log.info(
-        { traceId, runner: result.runner, refused: result.refused, rejected: result.rejected.length },
+        {
+          traceId,
+          runner: result.runner,
+          refused: result.refused,
+          rejected: result.rejected.length,
+          stopReason: result.stopReason,
+          map: `${result.map.paths} paths ${result.map.builtInMs}ms${result.map.fromCache ? ' (cached)' : ''}`,
+          cache: result.cache,
+          ...(result.spend ? { spend: result.spend } : {}),
+        },
         `answer ${describeTimings(result.timings)}`,
       );
       // A budget exhaustion is reported as its own measured category — never
@@ -212,6 +264,11 @@ export function registerAnswerRoutes(app: FastifyInstance, opts: AnswerRouteOpti
           model: result.model,
           timeout: result.timeout,
           timings: result.timings,
+          stopReason: result.stopReason,
+          plan: result.plan,
+          spend: result.spend,
+          cache: result.cache,
+          map: result.map,
           partialAnswer: result.answer,
           claims: result.claims,
           steps: result.steps,
@@ -236,6 +293,14 @@ export function registerAnswerRoutes(app: FastifyInstance, opts: AnswerRouteOpti
           inferenceClaims: result.claims.filter((c) => c.kind === 'inference').length,
         },
         timings: result.timings,
+        // Every ceiling, every counter, and the reason the run ended — reported
+        // whether or not anything bound. A limit the operator cannot see is
+        // indistinguishable from silent truncation.
+        stopReason: result.stopReason,
+        plan: result.plan,
+        spend: result.spend,
+        cache: result.cache,
+        map: result.map,
         steps: result.steps,
         stepsUsed: result.stepsUsed,
       };

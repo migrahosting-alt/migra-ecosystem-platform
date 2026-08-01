@@ -18,8 +18,12 @@
 import * as path from 'node:path';
 import { runInspection, type InspectOp } from './inspectRoutes.js';
 import { retrieveContext } from '../retrieval/retrieve.js';
-import { EvidenceLedger } from './grounding/evidenceLedger.js';
-import { verifyAnswer, type GroundedClaim, type RejectedClaim } from './grounding/claimVerifier.js';
+import { EvidenceLedger, type EvidenceCacheStats } from './grounding/evidenceLedger.js';
+import { verifyAnswer, type GroundedClaim, type RejectedClaim, type VerifiedAnswer } from './grounding/claimVerifier.js';
+import { buildRepoMap } from './planning/repoMap.js';
+import { runEvidencePlan, type EvidencePlanResult } from './planning/evidencePlan.js';
+import { BudgetLedger, resolveBudget, type EvidenceBudget, type BudgetSpend, type StopReason } from './planning/evidenceBudget.js';
+import { makeSpanSource } from './planning/workspaceSpanSource.js';
 import {
   AnswerTimeline,
   type AnswerRunTimings,
@@ -52,6 +56,39 @@ export interface AgenticResult {
   timings: AnswerRunTimings;
   /** Present when a model-call or run budget was exhausted. */
   timeout?: TimeoutEvidence;
+  /** Why the run ended. Always set — there is no unlabelled ending. */
+  stopReason: StopReason;
+  /** What the run spent against its ceilings, and which ceilings bound it. */
+  spend?: BudgetSpend;
+  /** The bounded plan's report, absent when the run fell back to exploration. */
+  plan?: PlanReport;
+  /** Evidence-cache counters: repeated requests served without a re-read. */
+  cache: {
+    requests: number;
+    freshReads: number;
+    cacheHits: number;
+    expansions: number;
+    staleRereads: number;
+    uniqueFiles: number;
+    repeatedRequests: number;
+    filesystemReads: number;
+  };
+  /** Repository-map build/reuse cost, so planning overhead is never invisible. */
+  map: MapReport;
+}
+
+export interface MapReport {
+  paths: number;
+  head: string;
+  fromCache: boolean;
+  builtInMs: number;
+  unavailable?: string;
+}
+
+export interface PlanReport {
+  candidates: Array<{ path: string; score: number; reasons: string[] }>;
+  opened: string[];
+  gaps: Array<{ token: string; resolvedTo?: string; source: 'model' | 'verifier' }>;
 }
 
 interface ChatMessage {
@@ -187,13 +224,17 @@ export async function executeTool(
         req.limit = Math.min(20, Math.max(1, n(args.limit) ?? 10));
         if (!req.query) return { ok: false, summary: 'search: empty query', feedback: 'Error: `query` is required.' };
         break;
-      case 'read':
+      case 'read': {
         op = 'read';
         req.path = s(args.path);
-        if (n(args.startLine)) req.startLine = n(args.startLine);
-        if (n(args.endLine)) req.endLine = n(args.endLine);
         if (!req.path) return { ok: false, summary: 'read: missing path', feedback: 'Error: `path` is required.' };
+        // Same validator as the cached path — see `validateLineRange`.
+        const range = validateLineRange(args.startLine, args.endLine);
+        if (!range.ok) return { ok: false, summary: `read: ${range.error}`, feedback: `Error: ${range.error}` };
+        req.startLine = range.startLine;
+        req.endLine = range.endLine;
         break;
+      }
       case 'find':
         op = 'find';
         req.query = s(args.query) ?? '';
@@ -221,6 +262,89 @@ export async function executeTool(
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return { ok: false, summary: `${name} failed: ${message}`, feedback: `Error: ${message}` };
+  }
+}
+
+/** Default line window for a `read` that names no range. Matches `runInspection`. */
+export const DEFAULT_READ_LINES = 400;
+
+export type LineRangeResult =
+  | { ok: true; startLine: number; endLine: number }
+  | { ok: false; error: string };
+
+/**
+ * The ONE validator for a model-supplied line range.
+ *
+ * Two subtly different paths existed: `executeTool` guarded with `Number.isFinite`,
+ * while the cached path accepted anything whose `typeof` was `number`. `NaN` is a
+ * number, and every comparison against it is false — so a `NaN` range silently
+ * defeated the cache's coverage check, in the cache this slice exists to provide.
+ * Divergent validation is the defect; a shared validator is the fix.
+ */
+export function validateLineRange(rawStart: unknown, rawEnd: unknown, defaultSpan = DEFAULT_READ_LINES): LineRangeResult {
+  const given = (v: unknown): boolean => v !== undefined && v !== null;
+  const int = (v: unknown, label: string): number | string => {
+    if (typeof v !== 'number' || !Number.isFinite(v)) return `\`${label}\` must be a finite number.`;
+    if (!Number.isInteger(v)) return `\`${label}\` must be a whole line number.`;
+    if (v < 1) return `\`${label}\` must be 1 or greater.`;
+    return v;
+  };
+
+  if (!given(rawStart) && !given(rawEnd)) return { ok: true, startLine: 1, endLine: defaultSpan };
+
+  const start = given(rawStart) ? int(rawStart, 'startLine') : 1;
+  if (typeof start === 'string') return { ok: false, error: start };
+  const end = given(rawEnd) ? int(rawEnd, 'endLine') : start + defaultSpan - 1;
+  if (typeof end === 'string') return { ok: false, error: end };
+  // An inverted range is a caller error, not something to silently swap: swapping
+  // would answer a different question than the one asked.
+  if (end < start) return { ok: false, error: '`endLine` must not be before `startLine`.' };
+  return { ok: true, startLine: start, endLine: end };
+}
+
+/**
+ * Execute a tool, serving a `read` from the evidence cache when the run already
+ * holds that range.
+ *
+ * The measured waste: `brainTransport.ts` was read four times in one run — four
+ * filesystem reads and four copies of 386 lines pushed into a context that then
+ * cost 30–90s per model call. A repeat now costs a stat, and the model is told, in
+ * one line, that it already has the file rather than being handed it again.
+ */
+export async function executeToolCached(
+  ledger: EvidenceLedger,
+  name: string,
+  args: Record<string, unknown>,
+  workspaceRoot: string,
+): Promise<{ ok: boolean; summary: string; feedback: string; data?: unknown; cached?: boolean }> {
+  if (name !== 'read' || typeof args.path !== 'string' || !args.path.trim()) {
+    return executeTool(name, args, workspaceRoot);
+  }
+  const rel = args.path.trim();
+  const range = validateLineRange(args.startLine, args.endLine);
+  if (!range.ok) return { ok: false, summary: `read: ${range.error}`, feedback: `Error: ${range.error}` };
+  const { startLine, endLine } = range;
+  try {
+    const result = await ledger.request(rel, startLine, endLine, makeSpanSource(workspaceRoot, rel, startLine, endLine));
+    const range = `${result.span.startLine}-${result.span.endLine}`;
+    if (result.outcome === 'cache-hit') {
+      return {
+        ok: true,
+        cached: true,
+        summary: `read(${rel}) → already retrieved ${range}`,
+        // Deliberately NOT the file text. Re-sending it is the growth this fixes.
+        feedback: `Already retrieved earlier in this run: ${rel}:${range}. Its contents are in your evidence; do not request it again.`,
+      };
+    }
+    return {
+      ok: true,
+      cached: false,
+      summary: `read(${rel})`,
+      feedback: JSON.stringify({ path: rel, startLine: result.span.startLine, endLine: result.span.endLine, content: result.span.text }).slice(0, READ_RESULT_CAP),
+    };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return { ok: false, summary: `read failed: ${message}`, feedback: `Error: ${message}` };
   }
 }
 
@@ -512,6 +636,16 @@ export interface AgenticOptions {
   overallDeadlineMs?: number;
   /** Injected monotonic clock — tests assert real timing fields without waiting. */
   clock?: () => number;
+  /** Ceilings for the bounded plan. Merged over the measured defaults. */
+  budget?: Partial<EvidenceBudget>;
+  /**
+   * Set `false` to skip planning and explore with tools.
+   *
+   * Kept as an explicit switch, not a silent heuristic: exploration is what the
+   * plan replaced because it cost 8 model calls where 2 suffice, and a run that
+   * quietly chose it would hide a regression rather than report one.
+   */
+  plan?: boolean;
 }
 
 /** Streamed event from the agentic loop — drives a live "agent mode" UI. */
@@ -530,7 +664,9 @@ export type AgenticEvent =
       rawAnswer: string;
     }
   | { type: 'timeout'; evidence: TimeoutEvidence }
-  | { type: 'timings'; timings: AnswerRunTimings }
+  | { type: 'timings'; timings: AnswerRunTimings; cache: EvidenceCacheStats }
+  | { type: 'map'; map: MapReport }
+  | { type: 'plan'; stopReason: StopReason; spend: BudgetSpend; plan?: PlanReport }
   | { type: 'done'; stepsUsed: number; model: string };
 
 /** Build the initial messages, seeding deterministic retrieval so even a weak
@@ -577,10 +713,14 @@ async function* emitVerified(
   opts: AgenticOptions,
   stepsUsed: number,
   runner: 'local' | 'cloud',
+  pre?: VerifiedAnswer,
 ): AsyncGenerator<AgenticEvent> {
   yield { type: 'phase', phase: 'answer_verification' };
   const endVerify = timeline.beginPhase('answer_verification');
-  const verified = verifyAnswer(raw, ledger, { question: opts.prompt });
+  // The plan verifies as it goes (it needs the verdict to find its gaps), so its
+  // result is reused rather than re-checked: verifying the same text twice would
+  // burn the work and, worse, invite the two verdicts to disagree.
+  const verified = pre ?? verifyAnswer(raw, ledger, { question: opts.prompt });
   endVerify();
   timeline.noteRepeatedReads(ledger.repeatedReads());
   timeline.markPhase('complete');
@@ -600,7 +740,7 @@ async function* emitVerified(
     rawAnswer: raw,
   };
   if (evidence) yield { type: 'timeout', evidence };
-  yield { type: 'timings', timings: timeline.snapshot() };
+  yield { type: 'timings', timings: timeline.snapshot(), cache: ledger.cacheStats() };
   yield { type: 'done', stepsUsed, model: opts.model };
   void runner;
 }
@@ -663,6 +803,90 @@ export async function* streamAgentic(opts: AgenticOptions): AsyncGenerator<Agent
   try {
     yield { type: 'route', model: opts.model, runner };
     yield { type: 'phase', phase: 'enumeration' };
+
+    // ── Bounded plan (the default path) ──────────────────────────────────────
+    // Build the routing map first. Over 2,899 tracked files this costs ~76ms once
+    // and nothing thereafter — against 30–90s for a single model call spent
+    // rediscovering the same facts by search.
+    const endMap = timeline.beginPhase('enumeration');
+    const map = await buildRepoMap(opts.workspaceRoot);
+    endMap();
+    const mapReport: MapReport = {
+      paths: map.entries.length,
+      head: map.head,
+      fromCache: map.fromCache,
+      builtInMs: map.builtInMs,
+      ...(map.unavailable ? { unavailable: map.unavailable } : {}),
+    };
+    yield { type: 'map', map: mapReport };
+
+    if (opts.plan !== false && !map.unavailable) {
+      const planBudget = resolveBudget(opts.budget);
+      const plan = yield* runEvidencePlan({
+        question: opts.prompt,
+        map,
+        ledger,
+        timeline,
+        budget: planBudget,
+        openSpan: (rel, start, end) => makeSpanSource(opts.workspaceRoot, rel, start, end),
+        callModel: async (planMessages, phase) => {
+          const budgetMs = remainingCallBudget(timeline, perCallBudgetMs, overallDeadlineMs, budgetExhausted);
+          if (budgetMs < Math.max(1, Math.floor(perCallBudgetMs * MIN_SYNTHESIS_BUDGET_RATIO))) {
+            budgetExhausted = true;
+            return '';
+          }
+          const handle = timeline.beginCall({
+            phase,
+            model: opts.model,
+            runner,
+            budgetMs,
+            messages: planMessages,
+            contextFiles: ledger.readPaths,
+            toolStepsBefore: toolSteps,
+          });
+          try {
+            const msg = await callModel(nativeChatUrl, opts.model, planMessages as ChatMessage[], false, controller.signal, budgetMs, cause);
+            handle.end('ok', { toolStepsAfter: toolSteps });
+            return (msg.content ?? '').trim();
+          } catch (err) {
+            if (!(err instanceof ModelBudgetExhausted)) {
+              handle.end('error', { toolStepsAfter: toolSteps });
+              throw err;
+            }
+            // An exhausted budget ends the plan with an empty answer, which the
+            // gate turns into a truthful gap statement. It never starts a fresh
+            // full-budget call to try again.
+            const record = handle.end('timeout', { timeoutCategory: err.category, toolStepsAfter: toolSteps });
+            timeline.recordTimeout(record, err.category, !ledger.isEmpty);
+            budgetExhausted = true;
+            return '';
+          }
+        },
+      });
+
+      if (!plan.needsExploration) {
+        const stopReason: StopReason = timeline.timeoutEvidence ? 'time-budget-exhausted' : plan.stopReason;
+        yield {
+          type: 'plan',
+          stopReason,
+          spend: plan.spend,
+          plan: { candidates: plan.candidates, opened: plan.opened, gaps: plan.gaps },
+        };
+        yield* emitVerified(plan.rawAnswer, ledger, timeline, opts, plan.opened.length, runner, plan.verified);
+        return;
+      }
+    }
+
+    // ── Exploration fallback ─────────────────────────────────────────────────
+    // `maxToolSteps` is enforced HERE, around every dispatch. It was previously
+    // validated by the route and documented as the exploration ceiling while
+    // `canTakeToolStep()` was never called anywhere — a control that looked real
+    // and did nothing, which is the exact defect class `tier: 'premium'` was.
+    const fallbackBudget = new BudgetLedger(resolveBudget(opts.budget));
+    let fallbackStop: StopReason = 'claims-supported';
+    // Reached only when the map cannot route the question (no candidates, or the
+    // workspace is not a git repository). Still bounded, and now cache-backed so a
+    // repeated read costs a stat rather than another copy of the file in context.
     const messages = await seedMessages(opts, ledger, timeline);
     const evidenceLog: string[] = []; // compiled tool results for a clean synthesis
     let consecutiveEmpty = 0;
@@ -705,6 +929,11 @@ export async function* streamAgentic(opts: AgenticOptions): AsyncGenerator<Agent
       if (calls.length === 0) {
         const answer = (msg.content ?? '').trim();
         if (answer) {
+          yield {
+            type: 'plan',
+            stopReason: timeline.timeoutEvidence ? 'time-budget-exhausted' : fallbackStop,
+            spend: fallbackBudget.spend(),
+          };
           yield* emitVerified(answer, ledger, timeline, opts, step, runner);
           return;
         }
@@ -726,15 +955,37 @@ export async function* streamAgentic(opts: AgenticOptions): AsyncGenerator<Agent
       // Execute every tool call in this turn CONCURRENTLY (speed), preserving order.
       yield { type: 'phase', phase: 'tool_execution' };
       const endTools = timeline.beginPhase('tool_execution');
-      const results = await Promise.all(calls.map((c) => executeTool(c.name, c.args, opts.workspaceRoot)));
+      // Budget is consumed at DISPATCH, so a tool that fails still costs the step
+      // it really took; a refused call costs nothing because it never ran.
+      const admitted: typeof calls = [];
+      const refusedCalls: typeof calls = [];
+      for (const c of calls) {
+        if (fallbackBudget.canTakeToolStep()) {
+          fallbackBudget.noteToolStep();
+          admitted.push(c);
+        } else {
+          refusedCalls.push(c);
+        }
+      }
+      if (refusedCalls.length) fallbackStop = 'tool-step-budget-exhausted';
+      const results = await Promise.all(admitted.map((c) => executeToolCached(ledger, c.name, c.args, opts.workspaceRoot)));
       endTools();
-      for (let i = 0; i < calls.length; i += 1) {
-        const call = calls[i]!;
+      for (const call of refusedCalls) {
+        const summary = `${call.name}: refused — tool-step budget exhausted`;
+        yield { type: 'step', step: { tool: call.name, args: call.args, ok: false, summary } };
+        messages.push({ role: 'tool', name: call.name, content: `Error: ${summary}. Answer from the evidence you already have.` });
+      }
+      for (let i = 0; i < admitted.length; i += 1) {
+        const call = admitted[i]!;
         const result = results[i]!;
         toolSteps += 1;
         if (result.ok) {
-          recordEvidence(ledger, call.name, result.data);
-          evidenceLog.push(`### ${result.summary}\n${result.feedback}`);
+          // A cached read is already in the ledger and already in the evidence log;
+          // appending it again is exactly the duplication this path now avoids.
+          if (!result.cached) {
+            recordEvidence(ledger, call.name, result.data);
+            evidenceLog.push(`### ${result.summary}\n${result.feedback}`);
+          }
         }
         yield { type: 'step', step: { tool: call.name, args: call.args, ok: result.ok, summary: result.summary } };
         messages.push({ role: 'tool', name: call.name, content: result.feedback });
@@ -742,6 +993,7 @@ export async function* streamAgentic(opts: AgenticOptions): AsyncGenerator<Agent
       // Stamped only now: the tool steps a call PRODUCED are not known when the
       // call returns, and `before === after` on every row would say nothing.
       record.toolStepsAfter = toolSteps;
+      if (refusedCalls.length) break; // no budget left to explore with
     }
 
     // A call that burned its whole budget having gathered nothing has no synthesis
@@ -845,6 +1097,11 @@ export async function* streamAgentic(opts: AgenticOptions): AsyncGenerator<Agent
     // An empty synthesis produces no claims, so the gate refuses and states the
     // gap from the ledger — which is exactly the truthful report the old
     // hand-written fallback was trying to approximate.
+    yield {
+      type: 'plan',
+      stopReason: timeline.timeoutEvidence ? 'time-budget-exhausted' : fallbackStop,
+      spend: fallbackBudget.spend(),
+    };
     yield* emitVerified(streamed, ledger, timeline, opts, toolSteps || maxSteps, runner);
   } finally {
     clearTimeout(timer);
@@ -879,6 +1136,11 @@ export async function agenticAnswer(opts: AgenticOptions): Promise<AgenticResult
   let refused = false;
   let timings: AnswerRunTimings | undefined;
   let timeout: TimeoutEvidence | undefined;
+  let stopReason: StopReason = 'claims-supported';
+  let spend: BudgetSpend | undefined;
+  let plan: PlanReport | undefined;
+  let map: MapReport = { paths: 0, head: '', fromCache: false, builtInMs: 0 };
+  let cache: AgenticResult['cache'] = { requests: 0, freshReads: 0, cacheHits: 0, expansions: 0, staleRereads: 0, uniqueFiles: 0, repeatedRequests: 0, filesystemReads: 0 };
 
   for await (const ev of streamAgentic(opts)) {
     if (ev.type === 'step') steps.push(ev.step);
@@ -890,7 +1152,15 @@ export async function agenticAnswer(opts: AgenticOptions): Promise<AgenticResult
       refused = ev.refused;
       rawAnswer = ev.rawAnswer;
     } else if (ev.type === 'timeout') timeout = ev.evidence;
-    else if (ev.type === 'timings') timings = ev.timings;
+    else if (ev.type === 'timings') {
+      timings = ev.timings;
+      cache = ev.cache;
+    } else if (ev.type === 'map') map = ev.map;
+    else if (ev.type === 'plan') {
+      stopReason = ev.stopReason;
+      spend = ev.spend;
+      plan = ev.plan;
+    }
     else if (ev.type === 'done') {
       stepsUsed = ev.stepsUsed;
       model = ev.model;
@@ -907,6 +1177,11 @@ export async function agenticAnswer(opts: AgenticOptions): Promise<AgenticResult
     rejected,
     refused,
     timings: timings ?? new AnswerTimeline(opts.clock).snapshot(),
+    stopReason: timeout && stopReason === 'claims-supported' ? 'time-budget-exhausted' : stopReason,
+    ...(spend ? { spend } : {}),
+    ...(plan ? { plan } : {}),
+    cache,
+    map,
     ...(timeout ? { timeout } : {}),
   };
 }

@@ -188,6 +188,24 @@ function detectPackageManager(realRoot: string): { manager: string; evidence: st
   }
 }
 
+/**
+ * Resolve a workspace-relative path inside `rootPath`, or throw.
+ *
+ * Exported because the containment boundary must have exactly ONE implementation.
+ * A second caller that reimplemented "is this inside the workspace" with its own
+ * weaker check is how `workspaceSpanSource.fingerprint()` came to `statSync` an
+ * arbitrary model-supplied path while its own doc comment claimed this module was
+ * the single boundary.
+ *
+ * Callers that only need metadata (size, mtime) must still come through here
+ * FIRST: existence and mtime of a host file outside the workspace are disclosures,
+ * even when the contents never leave.
+ */
+export async function resolveWorkspacePath(rootPath: string, rel: string): Promise<string> {
+  const realRoot = await resolveRoot(rootPath);
+  return containedPath(realRoot, rel);
+}
+
 /** Run one read-only inspection op. Returns op-specific data or throws InspectError. */
 export async function runInspection(req: InspectRequest): Promise<{ op: InspectOp; data: unknown }> {
   const realRoot = await resolveRoot(req.rootPath);
