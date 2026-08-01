@@ -52,11 +52,14 @@ export interface ContentSignals {
     name: string[];
   };
   /**
-   * Parts recovered from run-together compounds (`allowlist` → `allow`, `list`).
+   * Parts recovered from run-together CODE compounds (`allowlist` → `allow`, `list`).
    *
    * Kept SEPARATE from exact tokens so a file that merely contains `allow` inside
    * a longer word scores below one that says `allow` outright — and so
    * `guardrails` stays distinguishable from an exact `guard`.
+   *
+   * Code tokens only: a component must be attributable to the class it came from,
+   * or a score reason can name a source that did not contribute.
    */
   componentTokens: string[];
 }
@@ -195,8 +198,13 @@ export function extractSignals(input: ExtractInput): ContentSignals {
     if (identifiers.length >= MAX_IDENTIFIERS) break;
     identifiers.push(m[1]!);
   }
+  // Imports are read from the comment-stripped `code`, never the raw text. A
+  // `require()` inside a line comment, a block-commented `import`, and a JSDoc
+  // example all matched the raw scan and were indexed as if this file depended on
+  // them. (`// import …` happened to escape, because the regex anchors `import` at
+  // line start — three of four comment shapes leaked, not one.)
   const imports: string[] = [];
-  for (const m of input.text.matchAll(IMPORT_RE)) {
+  for (const m of code.matchAll(IMPORT_RE)) {
     const spec = m[1] ?? m[2];
     if (spec && imports.length < MAX_IDENTIFIERS) imports.push(spec);
   }
@@ -241,13 +249,25 @@ export function extractSignals(input: ExtractInput): ContentSignals {
  * `ALLOWLIST`-contains-`allow` below a file that says `allow` outright.
  */
 export function finalizeSignals(signals: ContentSignals, role: string, vocabulary: ReadonlySet<string>): ContentSignals {
+  // Components are derived from CODE tokens only, so a component can be attributed
+  // to the signal class it actually came from. Pooling code, filename and comment
+  // components into one set let an identifier-derived `allow` satisfy a *filename*
+  // check and emit the reason "filename component allow" for a filename containing
+  // no such thing.
   const components = new Set<string>();
-  for (const token of [...signals.tokens.code, ...signals.tokens.name, ...signals.tokens.comment]) {
+  for (const token of signals.tokens.code) {
     for (const part of decompose(token, vocabulary)) components.add(part);
   }
 
-  // Categories are decided on EXACT tokens plus decomposed components, never on a
-  // filename substring.
+  // Categories are decided on EXACT tokens ONLY — deliberately NOT on decomposed
+  // components, and never on a filename substring.
+  //
+  // This is the rule that keeps `guardrails` and `guardian` out of the `guard`
+  // category. Both decompose or resemble their way toward `guard`; neither IS a
+  // guard, and a category is a claim about a file's purpose. Admitting components
+  // here would re-create precisely the false positives this slice removed, so if a
+  // future change makes categories component-aware, `contentSignalRanking.test.ts`
+  // will fail on purpose.
   const exact = new Set([...signals.tokens.code, ...signals.tokens.name, ...signals.tokens.comment]);
   const categories = new Set<string>();
   for (const rule of CATEGORY_RULES) {

@@ -261,14 +261,27 @@ export function rankCandidates(map: RepoMap, question: string, opts: RankOptions
     for (const concept of concepts) {
       const singular = concept.endsWith('s') && concept.length > 4 ? concept.slice(0, -1) : concept;
       const plural = `${concept}s`;
-      const hits = (set: Set<string>): boolean => set.has(concept) || set.has(singular) || set.has(plural);
-      const compound = (set: Set<string>): boolean =>
-        componentSet.has(concept) || [...set].some((t) => isCompoundOf(t, concept, vocabulary));
+      const hits = (set: ReadonlySet<string>): boolean => set.has(concept) || set.has(singular) || set.has(plural);
+      /**
+       * Compound match within ONE signal class.
+       *
+       * It previously also consulted the shared component set regardless of which
+       * class was being checked, so a component recovered from an identifier
+       * satisfied the filename and category checks too — inflating the score and
+       * emitting reasons that named a source which had contributed nothing.
+       * Iterates the set directly; the old `[...set]` spread allocated an array on
+       * every concept x class check.
+       */
+      const compoundIn = (set: ReadonlySet<string>): boolean => {
+        for (const token of set) if (isCompoundOf(token, concept, vocabulary)) return true;
+        return false;
+      };
 
       if (hits(codeSet) || hits(exportSet)) {
         credit(concept, SIGNAL_WEIGHT.codeIdentifier, 'exact', `identifier ${concept}`);
         sawExecutable = true;
-      } else if (compound(codeSet) || compound(exportSet)) {
+        // `componentSet` is derived from CODE tokens, so it belongs to this class alone.
+      } else if (componentSet.has(concept) || compoundIn(codeSet) || compoundIn(exportSet)) {
         // `ALLOWLIST` yields `allow`: real executable signal, deliberately discounted.
         credit(concept, SIGNAL_WEIGHT.codeIdentifier, 'component', `identifier component ${concept}`);
         sawExecutable = true;
@@ -276,7 +289,7 @@ export function rankCandidates(map: RepoMap, question: string, opts: RankOptions
       if (hits(categorySet)) {
         credit(concept, SIGNAL_WEIGHT.structuralCategory, 'exact', `category ${concept}`);
         sawStructural = true;
-      } else if (compound(categorySet)) {
+      } else if (compoundIn(categorySet)) {
         credit(concept, SIGNAL_WEIGHT.structuralCategory, 'component', `category component ${concept}`);
         sawStructural = true;
       }
@@ -285,7 +298,7 @@ export function rankCandidates(map: RepoMap, question: string, opts: RankOptions
       if (hits(importSet)) credit(concept, SIGNAL_WEIGHT.importOrLiteral, 'exact', `import ${concept}`);
       if (!GENERIC_TOKENS.has(concept)) {
         if (hits(nameSet)) credit(concept, SIGNAL_WEIGHT.filenameToken, 'exact', `filename token ${concept}`);
-        else if (compound(nameSet)) credit(concept, SIGNAL_WEIGHT.filenameToken, 'component', `filename component ${concept}`);
+        else if (compoundIn(nameSet)) credit(concept, SIGNAL_WEIGHT.filenameToken, 'component', `filename component ${concept}`);
       }
       // Comments are a DISCOVERY hint only — enough to surface a file, never
       // enough to outrank what the code actually says.

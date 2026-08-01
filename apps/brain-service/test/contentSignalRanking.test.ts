@@ -375,3 +375,67 @@ test('renderEvidence carries source spans only — never signals', async () => {
   assert.ok(!rendered.text.includes('structuralCategor'));
   assert.ok(!rendered.text.includes('concepts matched'));
 });
+
+// ── Copilot review findings (PR #142) — each fix pinned ────────────────────────
+
+test('review-1 — categories use EXACT tokens only, so `guardrails`/`guardian` are never guards', async () => {
+  // The comment claimed "EXACT tokens plus decomposed components" while the code
+  // used exact only. The code was right; the comment invited a regression. This
+  // test is what makes the intent enforceable rather than merely written down.
+  const root = tmpRepo();
+  clearRepoMapCache();
+  const map = await buildRepoMap(root);
+  const rails = map.byPath.get('infra/deploy-mail-guardrails.sh')!;
+  const guardian = map.byPath.get('migrations/deploy-guardian-migration.sh')!;
+
+  assert.ok(rails.signals.tokens.name.includes('guardrails'), 'the token is present…');
+  assert.ok(!rails.signals.structuralCategories.includes('guard'), '…but it is NOT categorised as a guard');
+  assert.ok(!guardian.signals.structuralCategories.includes('guard'));
+
+  // The real guard IS categorised, from an exact token in its comment.
+  assert.ok(map.byPath.get(SUBJECT)!.signals.structuralCategories.includes('guard'), 'the real guard IS categorised, from an exact comment token');
+});
+
+test('review-2 — a component match is attributed to the class it actually came from', async () => {
+  const root = tmpRepo();
+  clearRepoMapCache();
+  const map = await buildRepoMap(root);
+  const subject = rankCandidates(map, QUERY, { limit: 50 }).find((c) => c.entry.path === SUBJECT)!;
+
+  // `ALLOWLIST` is an identifier, so `allow` may be credited as an identifier component…
+  assert.ok(subject.reasons.some((r) => /identifier component allow/.test(r)), subject.reasons.join('; '));
+
+  // …but the filename is `check-brain-transport.mjs`, which contains no `allow`,
+  // and the reasons must not claim otherwise. Before the fix, the shared component
+  // set satisfied every class check and produced exactly this false attribution.
+  const nameTokens = map.byPath.get(SUBJECT)!.signals.tokens.name;
+  assert.ok(!nameTokens.some((t) => t.includes('allow')), 'precondition: the filename has no allow token');
+  assert.ok(!subject.reasons.some((r) => /filename component allow/.test(r)), `no false filename credit: ${subject.reasons.join('; ')}`);
+
+  // A category component IS legitimate here: the `allowlist` category contains it.
+  const cats = map.byPath.get(SUBJECT)!.signals.structuralCategories;
+  const claimsCategory = subject.reasons.some((r) => /category component allow/.test(r));
+  if (claimsCategory) assert.ok(cats.some((c) => isCompoundOf(c, 'allow', map.vocabulary)), 'category credit is earned');
+});
+
+test('review-2b — scoping the leak does not push the subject out of the candidate set', async () => {
+  const kept = aboveRelevanceFloor(await ranked(tmpRepo()));
+  const at = kept.findIndex((c) => c.entry.path === SUBJECT);
+  assert.ok(at >= 0, 'still ranked');
+  assert.ok(at < DEFAULT_EVIDENCE_BUDGET.maxFilesOpened, `still inside the open budget, at ${at + 1}`);
+});
+
+test('review-3 — imports come from comment-stripped code only', () => {
+  const cases: Array<[string, string, string[]]> = [
+    ['real import', "import { ok } from 'real-module';\nexport const a = 1;\n", ['real-module']],
+    ['real require', "const ok = require('real-require');\nexport const a = 1;\n", ['real-require']],
+    ['line-commented require', "// const x = require('ghost-require');\nexport const a = 1;\n", []],
+    ['block-commented import', "/*\nimport { evil } from 'ghost-block';\n*/\nexport const a = 1;\n", []],
+    ['jsdoc require', "/**\n * const y = require('ghost-jsdoc');\n */\nexport const a = 1;\n", []],
+    ['prose naming a package', "// we deliberately do not use 'ghost-prose' here\nexport const a = 1;\n", []],
+  ];
+  for (const [label, text, expected] of cases) {
+    const s = extractSignals({ path: 'x.ts', text, role: 'source' });
+    assert.deepEqual(s.imports, expected, `${label}: got ${JSON.stringify(s.imports)}`);
+  }
+});
