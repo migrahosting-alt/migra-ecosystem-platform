@@ -9,7 +9,7 @@
 // Read-only by construction — no edits, no approval. `/deep cloud <q>` escalates
 // to a faster/stronger cloud model. vscode-free so it is unit-testable.
 
-import type { MigraAiClient, AnswerRequest } from '../services/migraAiClient.js';
+import type { MigraAiClient, AnswerRequest, AnswerTimeoutEvidence, GroundedClaim, RejectedClaim } from '../services/migraAiClient.js';
 import { isPilotError, toUserMessage } from '@migrapilot/pilot-client';
 import type { ChatSink } from './chatEngine.js';
 
@@ -40,6 +40,35 @@ export function parseDeepCommand(prompt: string): DeepCommand | null {
   const question = cloud ? rest.replace(/^cloud\s+/i, '').trim() : rest;
   if (!question) return { kind: 'usage', error: 'Provide a question, e.g. `/deep how does auth work?`' };
   return { kind: 'ask', question, tier: cloud ? 'cloud' : 'local' };
+}
+
+/**
+ * Footer describing how the answer above was verified.
+ *
+ * Rendered even when nothing was rejected: "0 removed, 4 evidenced" is the line
+ * that makes the gate's silence meaningful. Without it, an ungated answer and a
+ * fully-evidenced one look identical to the reader.
+ */
+export function groundingFooter(claims: GroundedClaim[], rejected: RejectedClaim[], refused: boolean): string {
+  const direct = claims.filter((c) => c.kind === 'direct_evidence');
+  const inferred = claims.filter((c) => c.kind === 'inference');
+  const parts = [`${direct.length} evidenced`];
+  if (inferred.length) parts.push(`${inferred.length} inferred`);
+  parts.push(`${rejected.length} removed`);
+  const sources = new Set(direct.flatMap((c) => c.sources.map((s) => `${s.path}:${s.startLine}-${s.endLine}`)));
+  const cited = sources.size ? ` · sources: ${[...sources].slice(0, 6).map((s) => `\`${s}\``).join(', ')}` : '';
+  const verdict = refused ? '⛔ not answered from evidence' : '✅ grounded';
+  return `\n\n---\n_${verdict} — ${parts.join(', ')}${cited}_`;
+}
+
+/** Operator-readable account of a budget exhaustion. */
+export function timeoutFooter(e: AnswerTimeoutEvidence): string {
+  if (e.category === 'client_abort') return '';
+  const which =
+    e.category === 'model_call_timeout'
+      ? `model call #${e.callIndex} used its full ${Math.round(e.callBudgetMs / 1000)}s budget`
+      : `the run hit its overall deadline after ${Math.round(e.runElapsedMs / 1000)}s`;
+  return `\n\n⏱️ _Stopped early: ${which} (${e.modelCallsCompleted} call(s) completed, ${e.contextFileCount} file(s) in context, phase \`${e.lastObservedPhase}\`)._`;
 }
 
 /** Human icon for a tool step. */
@@ -75,24 +104,32 @@ export async function runDeepCommand(
   const req: AnswerRequest = { prompt: cmd.question!, workspaceRoot, ...(cmd.tier ? { tier: cmd.tier } : {}) };
   const stepLines: string[] = [];
   let answering = false;
+  // The Brain verifies the answer before emitting it, so the grounding verdict
+  // arrives AFTER the text. Footers are rendered when they arrive, in order.
   try {
     sink.progress('🧠 Agent mode: gathering evidence…');
     for await (const ev of client.answerStream(req, signal)) {
       if (ev.type === 'route') {
-        sink.progress(`🧠 Agent mode → ${ev.model}`);
+        sink.progress(`🧠 Agent mode → ${ev.model} (${ev.runner})`);
+      } else if (ev.type === 'phase') {
+        if (ev.phase === 'answer_verification') sink.progress('🔎 Verifying every claim against retrieved evidence…');
       } else if (ev.type === 'step') {
         const q = ev.step.args.query ?? ev.step.args.path ?? '';
         stepLines.push(`${stepIcon(ev.step.tool)} \`${ev.step.tool}\`${q ? ` ${String(q)}` : ''} — ${ev.step.summary}`);
         sink.progress(`${stepIcon(ev.step.tool)} ${ev.step.summary}`);
       } else if (ev.type === 'token') {
         if (!answering) {
-          // Render the collected tool trace once, then stream the answer below it.
+          // Render the collected tool trace once, then the verified answer below it.
           if (stepLines.length) sink.markdown(`**Investigation**\n${stepLines.map((l) => `- ${l}`).join('\n')}\n\n**Answer**\n`);
           answering = true;
         }
         sink.markdown(ev.text);
+      } else if (ev.type === 'grounding') {
+        sink.markdown(groundingFooter(ev.claims, ev.rejected, ev.refused));
+      } else if (ev.type === 'timeout') {
+        sink.markdown(timeoutFooter(ev.evidence));
       }
-      // 'done' needs no rendering.
+      // 'request', 'timings' and 'done' need no rendering.
     }
   } catch (err) {
     if (isPilotError(err) && err.code === 'CANCELLED') return;
