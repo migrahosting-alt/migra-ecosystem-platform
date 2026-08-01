@@ -4,6 +4,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { runTests } from '@vscode/test-electron';
 import { TEST_BRAIN_OWNER_ENV, killStaleBrains, markTestBrainOwnership } from './support/staleBrains.js';
+import { runFixtureTests, writeCodingFixture } from './support/codingFixture.js';
 
 // See runTest.ts — strip the parent extension host's env so the child VS Code
 // launches as a real editor rather than plain Node.
@@ -38,6 +39,19 @@ function makeFixtureWorkspace(): string {
   git(['add', '-A']);
   git(['commit', '-qm', 'fixture']);
   fs.appendFileSync(path.join(root, 'sample.ts'), '\nexport const version = 1;\n');
+
+  // The governed-coding fixture lives in the SAME workspace, because VS Code opens
+  // exactly one and the command deliberately refuses a multi-root workspace. It is
+  // committed here so the tree the coding acceptance inherits is CLEAN — a
+  // pre-existing dirty file would be reconciled as a write outside the approved
+  // scope, which is the rule working, not a fixture we may ignore.
+  writeCodingFixture(root);
+  // The launcher puts VS Code's user-data-dir INSIDE this workspace, and it churns
+  // constantly. Ignoring it keeps `git status` a statement about repository
+  // content — which is what reconciliation compares the approved scope against.
+  fs.writeFileSync(path.join(root, '.gitignore'), '.vscode-user/\n');
+  git(['add', '-A']);
+  git(['commit', '-qm', 'coding fixture']);
   return root;
 }
 
@@ -89,6 +103,21 @@ async function main(): Promise<void> {
   }
 
   const workspace = makeFixtureWorkspace();
+
+  // Verify the fixture BASELINE before anything activates. Measuring a damaged
+  // fixture would produce an acceptance result about the wrong repository, so a
+  // baseline that is not exactly five genuine failures aborts the gate.
+  const baseline = runFixtureTests(workspace);
+  if (baseline.exitCode === 0 || baseline.failed !== 5) {
+    throw new Error(
+      `coding fixture baseline is not the expected 5 failures (exit ${baseline.exitCode}, pass ${baseline.passed}, fail ${baseline.failed}) — refusing to run acceptance against a damaged fixture`,
+    );
+  }
+  console.log(`coding fixture baseline: exit ${baseline.exitCode}, ${baseline.passed} pass, ${baseline.failed} fail`);
+
+  // Real durable state. `off` would leave the coding capability correctly
+  // unavailable, so an acceptance run against it would prove nothing.
+  const codingDb = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'migrapilot-vsix-db-')), 'engine.db');
   let packagedRoot: string | undefined;
 
   try {
@@ -114,6 +143,10 @@ async function main(): Promise<void> {
         MIGRAPILOT_E2E_WORKSPACE: workspace,
         MIGRAPILOT_STATE_DB: 'off',
         MIGRAPILOT_TEST_MODE: 'vsix',
+        // Governed coding acceptance. The suite spawns its OWN brain with these,
+        // so the shared DB-free brain above stays untouched.
+        MIGRAPILOT_CODING_E2E_DB: codingDb,
+        MIGRAPILOT_CODING_E2E_ROOT: workspace,
       },
     });
   } catch (err) {
