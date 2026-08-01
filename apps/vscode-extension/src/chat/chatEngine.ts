@@ -385,8 +385,10 @@ async function runChatTurnInner(
         // Slice 5: cloud escalation needs explicit consent (a modal); the approved
         // cloud result is rendered back into the response.
         onEscalation: async (offer) => {
-          const d = getEscalationDispatch();
-          if (d) await d(offer, (md) => sink.markdown(md));
+          // Named, not `d`: this dispatches the offer to a CLOUD provider after the
+          // consent modal, so it must be legible to the dispatch-governance guard.
+          const escalationDispatch = getEscalationDispatch();
+          if (escalationDispatch) await escalationDispatch(offer, (md) => sink.markdown(md));
         },
         onAttribution: (routing) => {
           const a = attributionView((routing ?? {}) as RoutingView);
