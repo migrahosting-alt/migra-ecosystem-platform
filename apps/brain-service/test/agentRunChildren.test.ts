@@ -380,23 +380,46 @@ test('the coding payload validator refuses malformed records rather than default
   assert.equal(parseCodingPayload(null).ok, false);
   assert.equal(parseCodingPayload({ phase: 'planning', attempts: { initialProposal: 0, repair: 0 } }).ok, false);
 
-  const unknownPhase = parseCodingPayload({ issueText: 'x', phase: 'apologising', attempts: { initialProposal: 0, repair: 0 } });
+  const unknownPhase = parseCodingPayload({ issueText: 'x', phase: 'apologising', attempts: { initialProposal: 0, repair: 0 }, childRefs: [] });
   assert.equal(unknownPhase.ok === false && unknownPhase.fault, 'unknown-phase');
 
-  const badAttempts = parseCodingPayload({ issueText: 'x', phase: 'planning', attempts: { initialProposal: -1, repair: 0 } });
+  const badAttempts = parseCodingPayload({ issueText: 'x', phase: 'planning', attempts: { initialProposal: -1, repair: 0 }, childRefs: [] });
   assert.equal(badAttempts.ok === false && badAttempts.fault, 'invalid-attempts');
 
   // A scoped path with no evidence is the failure that matters most: it would be
   // write authority granted over a file nobody read.
   const unevidenced = parseCodingPayload({
     issueText: 'x', phase: 'awaiting_scope_approval', attempts: { initialProposal: 1, repair: 0 },
-    scope: { proposedPaths: ['src/a.ts'], pathSetHash: 'h', sourcesByPath: {}, proposalRevision: 2, proposedAt: 't', approvalExpiresAt: 't2', approvalState: 'pending_display' },
+    childRefs: [], scope: { proposedPaths: ['src/a.ts'], pathSetHash: 'h', sourcesByPath: {}, proposalRevision: 2, proposedAt: 't', approvalExpiresAt: 't2', approvalState: 'pending_display' },
   });
   assert.equal(unevidenced.ok === false && unevidenced.fault, 'invalid-scope');
 
+  // An absent child-reference list would be indistinguishable from "this parent
+  // authorised nothing" — a claim reconciliation must never make by accident.
+  const noRefs = parseCodingPayload({ issueText: 'x', phase: 'planning', attempts: { initialProposal: 0, repair: 0 } });
+  assert.equal(noRefs.ok === false && noRefs.fault, 'invalid-child-refs');
+
+  const badKind = parseCodingPayload({
+    issueText: 'x', phase: 'planning', attempts: { initialProposal: 0, repair: 0 },
+    childRefs: [{ childId: 'c1', kind: 'coding_step', attempt: 1 }],
+  });
+  assert.equal(badKind.ok === false && badKind.fault, 'invalid-child-refs', 'a generic step kind is not a coding child kind');
+
+  const duplicateRef = parseCodingPayload({
+    issueText: 'x', phase: 'planning', attempts: { initialProposal: 0, repair: 0 },
+    childRefs: [{ childId: 'c1', kind: 'validation', attempt: 1 }, { childId: 'c1', kind: 'validation', attempt: 2 }],
+  });
+  assert.equal(duplicateRef.ok === false && duplicateRef.fault, 'invalid-child-refs');
+
+  const badCancellation = parseCodingPayload({
+    issueText: 'x', phase: 'planning', attempts: { initialProposal: 0, repair: 0 }, childRefs: [],
+    cancellation: { confirmedAt: 't2' },
+  });
+  assert.equal(badCancellation.ok === false && badCancellation.fault, 'invalid-cancellation', 'a confirmation with no request is incoherent');
+
   const unknownApproval = parseCodingPayload({
     issueText: 'x', phase: 'awaiting_scope_approval', attempts: { initialProposal: 1, repair: 0 },
-    scope: { proposedPaths: [], pathSetHash: 'h', sourcesByPath: {}, proposalRevision: 2, proposedAt: 't', approvalExpiresAt: 't2', approvalState: 'definitely_fine' },
+    childRefs: [], scope: { proposedPaths: [], pathSetHash: 'h', sourcesByPath: {}, proposalRevision: 2, proposedAt: 't', approvalExpiresAt: 't2', approvalState: 'definitely_fine' },
   });
   assert.equal(unknownApproval.ok === false && unknownApproval.fault, 'invalid-scope');
 });
@@ -407,6 +430,7 @@ test('a well-formed coding payload survives a serialize → store → parse cycl
     issueText: 'Cancelled line items are still counted in the order total.',
     phase: 'awaiting_scope_approval',
     attempts: { initialProposal: 1, repair: 0 },
+    childRefs: [{ childId: 'c_plan', kind: 'repository_planning', attempt: 1 }],
     scope: {
       proposedPaths: ['src/services/orderTotalsService.js'],
       pathSetHash: '590eb93b42d7bc73',

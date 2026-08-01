@@ -104,7 +104,11 @@ export const MAX_SCOPE_FILES = 12;
 /** Matches the tool-approval store's window, so neither outlives the other. */
 export const SCOPE_TTL_MS = 5 * 60 * 1000;
 
-function hashPaths(paths: readonly string[]): string {
+/** Binds an approval to an exact path set. EXPORTED so restart re-verification
+ * recomputes the same hash from the same function — a parallel implementation
+ * could drift, and a drifted hash would silently invalidate valid approvals (or,
+ * far worse, validate changed ones). */
+export function hashPaths(paths: readonly string[]): string {
   return createHash('sha256').update([...paths].sort().join('\n'), 'utf8').digest('hex').slice(0, 16);
 }
 

@@ -116,12 +116,31 @@ export interface CodingScopeState {
   approvedAt?: string;
 }
 
+/** The parent's OWN record of a child it authorised. Deliberately duplicated
+ * against the child row: with a reference in both directions, reconciliation can
+ * tell "parent names a child that does not exist" (unrecoverable — the outcome is
+ * unknowable) from "a child exists that no parent named" (an orphan, harmless if
+ * it never left `created`). One direction alone cannot distinguish those. */
+export interface CodingChildRef {
+  childId: string;
+  kind: CodingChildKind;
+  attempt: number;
+}
+
 export interface CodingRunPayloadV1 {
   issueText: string;
   phase: CodingPhase;
   plan?: GovernedCodingPlanSnapshot;
   scope?: CodingScopeState;
   attempts: { initialProposal: number; repair: number };
+  /** Only children whose reference write SUCCEEDED. An entry here is a promise
+   * that the child row exists; recovery relies on that promise. */
+  childRefs: CodingChildRef[];
+  /** Children whose parent-reference write failed, so they were never dispatched. */
+  abandonedChildIds?: string[];
+  /** Parent-level cancellation. A request is not an outcome — `confirmedAt` is
+   * written only once work is observed to have stopped. */
+  cancellation?: { requestedAt: string; confirmedAt?: string };
   latestValidation?: ValidationRecord;
   failureEvidence?: ObservedFailureEvidence[];
   finalReport?: CodingRunReport;
@@ -133,7 +152,9 @@ export type CodingPayloadFault =
   | 'unknown-phase'
   | 'invalid-attempts'
   | 'invalid-scope'
-  | 'invalid-plan';
+  | 'invalid-plan'
+  | 'invalid-child-refs'
+  | 'invalid-cancellation';
 
 export type CodingPayloadParse =
   | { ok: true; payload: CodingRunPayloadV1 }
@@ -172,6 +193,41 @@ export function parseCodingPayload(raw: unknown): CodingPayloadParse {
   }
   if (!isRecord(raw.attempts) || !isCount(raw.attempts.initialProposal) || !isCount(raw.attempts.repair)) {
     return { ok: false, fault: 'invalid-attempts', detail: 'attempts must carry non-negative integer counters' };
+  }
+
+  // Child references are REQUIRED, even when empty. An absent list would be
+  // indistinguishable from "this parent never authorised anything", which is
+  // exactly the claim reconciliation must not be able to make by accident.
+  if (!Array.isArray(raw.childRefs)) return { ok: false, fault: 'invalid-child-refs', detail: 'childRefs is absent' };
+  const childRefs: CodingChildRef[] = [];
+  const seenChildIds = new Set<string>();
+  for (const entry of raw.childRefs) {
+    if (!isRecord(entry) || !isNonEmptyString(entry.childId)) {
+      return { ok: false, fault: 'invalid-child-refs', detail: 'a child reference is malformed' };
+    }
+    if (typeof entry.kind !== 'string' || !CODING_CHILD_KINDS.includes(entry.kind as CodingChildKind)) {
+      return { ok: false, fault: 'invalid-child-refs', detail: `unknown child kind ${JSON.stringify(entry.kind)}` };
+    }
+    if (!isCount(entry.attempt) || entry.attempt < 1) {
+      return { ok: false, fault: 'invalid-child-refs', detail: 'child attempt must be a positive integer' };
+    }
+    if (seenChildIds.has(entry.childId)) {
+      return { ok: false, fault: 'invalid-child-refs', detail: `child ${entry.childId} is referenced twice` };
+    }
+    seenChildIds.add(entry.childId);
+    childRefs.push({ childId: entry.childId, kind: entry.kind as CodingChildKind, attempt: entry.attempt });
+  }
+
+  let cancellation: CodingRunPayloadV1['cancellation'];
+  if (raw.cancellation !== undefined) {
+    const c = raw.cancellation;
+    if (!isRecord(c) || !isNonEmptyString(c.requestedAt)) {
+      return { ok: false, fault: 'invalid-cancellation', detail: 'cancellation.requestedAt is absent' };
+    }
+    if (c.confirmedAt !== undefined && !isNonEmptyString(c.confirmedAt)) {
+      return { ok: false, fault: 'invalid-cancellation', detail: 'cancellation.confirmedAt is malformed' };
+    }
+    cancellation = { requestedAt: c.requestedAt, ...(isNonEmptyString(c.confirmedAt) ? { confirmedAt: c.confirmedAt } : {}) };
   }
 
   let scope: CodingScopeState | undefined;
@@ -262,6 +318,10 @@ export function parseCodingPayload(raw: unknown): CodingPayloadParse {
       issueText: raw.issueText,
       phase: raw.phase as CodingPhase,
       attempts: { initialProposal: raw.attempts.initialProposal, repair: raw.attempts.repair },
+      childRefs,
+      ...(Array.isArray(raw.abandonedChildIds) && raw.abandonedChildIds.every(isNonEmptyString)
+        ? { abandonedChildIds: [...(raw.abandonedChildIds as string[])] } : {}),
+      ...(cancellation ? { cancellation } : {}),
       ...(plan ? { plan } : {}),
       ...(scope ? { scope } : {}),
       ...(raw.latestValidation !== undefined ? { latestValidation: raw.latestValidation as ValidationRecord } : {}),
@@ -273,5 +333,5 @@ export function parseCodingPayload(raw: unknown): CodingPayloadParse {
 
 /** A fresh payload for a run that has been accepted but not yet planned. */
 export function initialCodingPayload(issueText: string): CodingRunPayloadV1 {
-  return { issueText, phase: 'planning', attempts: { initialProposal: 0, repair: 0 } };
+  return { issueText, phase: 'planning', attempts: { initialProposal: 0, repair: 0 }, childRefs: [] };
 }
