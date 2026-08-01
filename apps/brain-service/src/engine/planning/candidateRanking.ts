@@ -12,13 +12,88 @@
  */
 
 import * as path from 'node:path';
+import { GENERIC_TOKENS, splitToken } from './contentSignals.js';
 import type { FileRole, RepoMap, RepoMapEntry } from './repoMap.js';
+
+/**
+ * Score contributed by a match, by the SIGNAL CLASS it came from.
+ *
+ * The precedence is the design: executable text outranks structure, structure
+ * outranks prose, and a directory word is worth nothing. A comment must be able to
+ * make a file DISCOVERABLE — that is how `check-brain-transport.mjs`, whose only
+ * "guard" is in a header comment, becomes findable at all — without letting a
+ * stale or aspirational comment outrank code that says otherwise.
+ */
+const SIGNAL_WEIGHT = {
+  exactPath: 100,
+  exactFilename: 60,
+  codeIdentifier: 40,
+  structuralCategory: 22,
+  importOrLiteral: 8,
+  filenameToken: 8,
+  commentTerm: 4,
+  genericPathToken: 0,
+} as const;
+
+/**
+ * A component recovered from a compound counts, but at well under half an exact
+ * match — so `guardrails` never reads as `guard`, and `ALLOWLIST` containing
+ * `allow` ranks below a file that says `allow` outright.
+ */
+const COMPONENT_FACTOR = 0.45;
+
+/** Cap on the multi-concept bonus, so combination can never dwarf evidence class. */
+const MAX_CONCEPT_BONUS = 2.5;
+
+/** A compound part must be a whole word's worth of characters, not a fragment. */
+const MIN_COMPOUND_REMAINDER = 4;
+
+/**
+ * Does `token` contain `concept` as a real compound part?
+ *
+ * `allowlist` contains `allow`, because the remainder `list` is four characters —
+ * a word, not a fragment. `guardian` does NOT contain `guard`, because `ian` is
+ * three. That single threshold is what separates the file we want from the
+ * `deploy-guardian-*` files that outranked it.
+ *
+ * An earlier version also required the remainder to appear in the repository's own
+ * vocabulary. That was more precise and too fragile: a small workspace has no file
+ * declaring a standalone `list`, so `allowlist` stopped decomposing and the whole
+ * mechanism silently switched off exactly where the repository was smallest. The
+ * vocabulary is still used for build-time decomposition, where a miss costs
+ * nothing; matching a live query cannot depend on it.
+ */
+export function isCompoundOf(token: string, concept: string, vocabulary?: ReadonlySet<string>): boolean {
+  if (token === concept || token.length <= concept.length) return false;
+  const accepts = (remainder: string): boolean =>
+    remainder.length >= MIN_COMPOUND_REMAINDER || (vocabulary?.has(remainder) ?? false);
+  if (token.startsWith(concept) && accepts(token.slice(concept.length))) return true;
+  if (token.endsWith(concept) && accepts(token.slice(0, token.length - concept.length))) return true;
+  return false;
+}
+
+/**
+ * Specificity prior.
+ *
+ * A 69-line script whose whole purpose is a guard with an allowlist is a better
+ * answer than a 400-line route that happens to import a guard helper. Standard
+ * length normalisation, applied gently and only to concept scoring.
+ */
+function focusFactor(lineCount: number): number {
+  if (lineCount === 0) return 1;
+  if (lineCount <= 120) return 1.35;
+  if (lineCount <= 400) return 1.1;
+  if (lineCount <= 1200) return 1;
+  return 0.75;
+}
 
 export interface RankedCandidate {
   entry: RepoMapEntry;
   score: number;
   /** Why it ranked — surfaced in the run report so a bad plan is diagnosable. */
   reasons: string[];
+  /** The question named this file by path or filename. */
+  exactNamed: boolean;
 }
 
 /**
@@ -96,9 +171,21 @@ export interface RankOptions {
  */
 export const RELEVANCE_FLOOR_RATIO = 0.25;
 
-/** Drop candidates far below the best one; always keep at least the top match. */
+/**
+ * Drop candidates far below the best one; always keep at least the top match.
+ *
+ * When the question NAMES a file, that file is the subject and the semantic
+ * candidates are noise. Measured: adding content signals lifted enough unrelated
+ * files above the proportional floor that the exact-path query went from opening
+ * ONE file in 19.9s to opening EIGHT in 62s — a regression caused entirely by
+ * better recall arriving where recall was not the problem. A named file
+ * short-circuits the field; the gap-expansion round still fetches genuinely
+ * related files when the verifier asks for them.
+ */
 export function aboveRelevanceFloor(ranked: RankedCandidate[]): RankedCandidate[] {
   if (ranked.length === 0) return ranked;
+  const named = ranked.filter((c) => c.exactNamed);
+  if (named.length) return named;
   const floor = ranked[0]!.score * RELEVANCE_FLOOR_RATIO;
   const kept = ranked.filter((c) => c.score >= floor);
   return kept.length ? kept : ranked.slice(0, 1);
@@ -115,7 +202,14 @@ export function rankCandidates(map: RepoMap, question: string, opts: RankOptions
   const { words, paths, identifiers } = questionTerms(question);
   const structural = STRUCTURAL.test(question);
   const wantsTests = opts.includeTests || /\btests?\b|\bspec\b|\bregression\b/i.test(question);
-  const identifiersLower = identifiers.map((i) => i.toLowerCase());
+
+  // The question's CONCEPTS: salient words that are not directory scaffolding.
+  // "What does the guard allow?" carries two — `guard` and `allow` — and a file
+  // satisfying both is a far better candidate than one satisfying either alone.
+  const concepts = [...new Set([...words, ...identifiers.flatMap((i) => splitToken(i))])].filter(
+    (w) => !GENERIC_TOKENS.has(w),
+  );
+  const vocabulary = map.vocabulary ?? new Set<string>();
   const ranked: RankedCandidate[] = [];
 
   for (const entry of map.entries) {
@@ -128,61 +222,99 @@ export function rankCandidates(map: RepoMap, question: string, opts: RankOptions
     let score = 0;
     const reasons: string[] = [];
 
+    // ── 1-2. Exact path / filename. Unchanged: a named file is never outranked. ──
+    let exactNamed = false;
     for (const p of paths) {
       const pl = p.toLowerCase();
       if (relLower === pl) {
-        score += 100;
+        score += SIGNAL_WEIGHT.exactPath;
         reasons.push(`exact path match ${p}`);
+        exactNamed = true;
       } else if (relLower.endsWith('/' + pl) || base === path.posix.basename(pl)) {
-        score += 60;
+        score += SIGNAL_WEIGHT.exactFilename;
         reasons.push(`filename match ${p}`);
+        exactNamed = true;
       }
     }
 
-    for (const id of identifiers) {
-      if (entry.exports.includes(id)) {
-        score += 40;
-        reasons.push(`exports ${id}`);
-      } else if (base.includes(id.toLowerCase())) {
-        score += 20;
-        reasons.push(`name contains ${id}`);
-      }
-    }
-    for (const id of identifiersLower) {
-      if (entry.exports.some((e) => e.toLowerCase() === id)) {
-        score += 12;
-        reasons.push(`exports ~${id}`);
-      }
-    }
+    // ── 3-8. Deterministic content signals, by class. ──
+    const sig = entry.signals;
+    const codeSet = new Set(sig.tokens.code);
+    const nameSet = new Set(sig.tokens.name);
+    const commentSet = new Set(sig.tokens.comment);
+    const componentSet = new Set(sig.componentTokens);
+    const categorySet = new Set(sig.structuralCategories);
+    const importSet = new Set(sig.imports.flatMap((i) => splitToken(i)));
+    const exportSet = new Set(entry.exports.flatMap((e) => splitToken(e)));
 
-    for (const w of words) {
-      if (base.includes(w)) {
-        score += 8;
-        reasons.push(`filename word ${w}`);
-      } else if (relLower.includes(w)) {
-        score += 3;
-        reasons.push(`path word ${w}`);
+    /** Concepts matched, and whether any came from executable vs structural text. */
+    const matched = new Set<string>();
+    let sawExecutable = false;
+    let sawStructural = false;
+    const credit = (concept: string, weight: number, kind: 'exact' | 'component', why: string): void => {
+      if (weight === 0) return;
+      score += weight * (kind === 'exact' ? 1 : COMPONENT_FACTOR);
+      matched.add(concept);
+      reasons.push(why);
+    };
+
+    for (const concept of concepts) {
+      const singular = concept.endsWith('s') && concept.length > 4 ? concept.slice(0, -1) : concept;
+      const plural = `${concept}s`;
+      const hits = (set: Set<string>): boolean => set.has(concept) || set.has(singular) || set.has(plural);
+      const compound = (set: Set<string>): boolean =>
+        componentSet.has(concept) || [...set].some((t) => isCompoundOf(t, concept, vocabulary));
+
+      if (hits(codeSet) || hits(exportSet)) {
+        credit(concept, SIGNAL_WEIGHT.codeIdentifier, 'exact', `identifier ${concept}`);
+        sawExecutable = true;
+      } else if (compound(codeSet) || compound(exportSet)) {
+        // `ALLOWLIST` yields `allow`: real executable signal, deliberately discounted.
+        credit(concept, SIGNAL_WEIGHT.codeIdentifier, 'component', `identifier component ${concept}`);
+        sawExecutable = true;
       }
-      if (entry.exports.some((e) => e.toLowerCase().includes(w))) {
-        score += 5;
-        reasons.push(`export word ${w}`);
+      if (hits(categorySet)) {
+        credit(concept, SIGNAL_WEIGHT.structuralCategory, 'exact', `category ${concept}`);
+        sawStructural = true;
+      } else if (compound(categorySet)) {
+        credit(concept, SIGNAL_WEIGHT.structuralCategory, 'component', `category component ${concept}`);
+        sawStructural = true;
       }
-      if (entry.packageName && entry.packageName.toLowerCase().includes(w)) {
-        score += 4;
-        reasons.push(`package ${entry.packageName}`);
+      // An import is evidence about a DEPENDENCY, not about this file's purpose, so
+      // it scores but never counts as executable purpose for the bonus.
+      if (hits(importSet)) credit(concept, SIGNAL_WEIGHT.importOrLiteral, 'exact', `import ${concept}`);
+      if (!GENERIC_TOKENS.has(concept)) {
+        if (hits(nameSet)) credit(concept, SIGNAL_WEIGHT.filenameToken, 'exact', `filename token ${concept}`);
+        else if (compound(nameSet)) credit(concept, SIGNAL_WEIGHT.filenameToken, 'component', `filename component ${concept}`);
+      }
+      // Comments are a DISCOVERY hint only — enough to surface a file, never
+      // enough to outrank what the code actually says.
+      if (hits(commentSet)) {
+        credit(concept, SIGNAL_WEIGHT.commentTerm, 'exact', `comment term ${concept}`);
+        sawStructural = true;
       }
     }
 
     if (structural && entry.entryPoint) {
-      score += 15;
+      score += SIGNAL_WEIGHT.structuralCategory;
       reasons.push(entry.entryPoint);
     }
     if (score === 0) continue;
 
+    // ── Multi-concept bonus, bounded. ──
+    // Satisfying two distinct concepts is qualitatively different from matching one
+    // word twice: it is what separates the real guard-with-an-allowlist from the
+    // dozen files that merely contain "guard" or merely contain "allow".
+    if (matched.size >= 2) {
+      let bonus = 1 + 0.5 * (matched.size - 1);
+      if (sawExecutable && sawStructural) bonus += 0.25;
+      score *= Math.min(bonus, MAX_CONCEPT_BONUS);
+      reasons.push(`${matched.size} concepts matched${sawExecutable && sawStructural ? ' (code + structure)' : ''}`);
+    }
+
     // Prefer the file that DEFINES a thing over a large file that merely mentions
     // it: a 4,000-line barrel matching one word is rarely the answer.
-    const sizePenalty = entry.lineCount > 1200 ? 0.75 : 1;
-    ranked.push({ entry, score: score * roleWeight * sizePenalty, reasons: [...new Set(reasons)].slice(0, 5) });
+    ranked.push({ entry, exactNamed, score: score * roleWeight * focusFactor(entry.lineCount), reasons: [...new Set(reasons)].slice(0, 6) });
   }
 
   ranked.sort((a, b) => b.score - a.score || a.entry.path.localeCompare(b.entry.path));
