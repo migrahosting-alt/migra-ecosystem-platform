@@ -36,18 +36,20 @@ function withFixture(contents: string, assertion: (r: ReturnType<typeof aggregat
   }
 }
 
-test('the shipped registry validates and now holds two controls', () => {
+test('the shipped registry validates and now holds three controls', () => {
   const r = aggregate();
   assert.equal(r.status, 0, `validation failed: ${r.stderr}`);
-  assert.match(r.stdout, /2 declared, 26 known gaps of 28 contributed commands/);
+  assert.match(r.stdout, /3 declared, 26 known gaps of 29 contributed commands/);
 
   const artifact = JSON.parse(
     readFileSync(join(EXT_ROOT, 'src', 'interaction', 'generated', 'controls.generated.json'), 'utf8'),
-  ) as { declarations: Array<{ controlId: string; locator: { commandId: string } }>; coverage: { knownGaps: string[] } };
+  ) as { declarations: Array<{ controlId: string; consequence: string; locator: { commandId: string } }>; coverage: { knownGaps: string[] } };
 
-  assert.deepEqual(artifact.declarations.map((d) => d.controlId).sort(), ['diagnose-failure', 'explain-selection']);
-  // Two identities, two distinct exact locators — the generalisation this slice exists to prove.
-  assert.equal(new Set(artifact.declarations.map((d) => d.locator.commandId)).size, 2);
+  assert.deepEqual(artifact.declarations.map((d) => d.controlId).sort(), ['diagnose-failure', 'explain-selection', 'governed-coding']);
+  // Distinct identities, distinct exact locators — the generalisation this slice exists to prove.
+  assert.equal(new Set(artifact.declarations.map((d) => d.locator.commandId)).size, 3);
+  // The first control that can WRITE to the repository declares itself as such.
+  assert.equal(artifact.declarations.find((d) => d.controlId === 'governed-coding')?.consequence, 'mutating');
   assert.ok(!artifact.coverage.knownGaps.includes('migrapilot.explainSelection'), 'the declared command left the gap list');
   assert.equal(artifact.coverage.knownGaps.length, 26);
 });
