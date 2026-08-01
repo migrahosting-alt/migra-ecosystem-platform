@@ -420,6 +420,24 @@ test('18 — duplicate continuation cannot double-dispatch', async () => {
   await h.app.close(); h.store.close();
 });
 
+test('19b — a failed planning model call reaches a TERMINAL state, never stalls in planning', async () => {
+  // Reproduces a real defect: the provider returned 500 (the 30B model OOM'd on
+  // load), the planning stage recorded an observed failure, and the driver simply
+  // returned — leaving the run in `planning` forever with nothing explaining why.
+  // A client polling that run would never get an answer.
+  const h = harness({ model: async () => { throw new Error('model call failed: 500'); } });
+  const started = await startRun(h);
+  const runId = started.json<{ runId: string }>().runId;
+  await settleWithRealValidation(h, runId);
+
+  const body = (await read(h, runId)).json<{ state: string; phase: string; blockers: string[] }>();
+  assert.equal(body.phase, 'terminal', 'the run must not stall mid-phase when a stage fails');
+  assert.ok(['FAILED', 'CANCELLED'].includes(body.state), `expected a terminal state, got ${body.state}`);
+  assert.ok(body.blockers.length > 0, 'the reason stays inspectable');
+  assert.deepEqual(gitDirty(h.root), [], 'a failed plan writes nothing');
+  await h.app.close(); h.store.close();
+});
+
 test('19 — a detached execution failure becomes a durable failed run', async () => {
   const h = harness({ model: async () => { throw new Error('provider unreachable'); } });
   const started = await startRun(h);

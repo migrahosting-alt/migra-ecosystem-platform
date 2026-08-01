@@ -137,7 +137,16 @@ export function createProductionCodingDriver(deps: ProductionCodingDriverDeps): 
           ...(result.ok ? {} : { error: { code: result.reason, message: result.message } }),
         };
       });
-      if (planning.status !== 'completed' || !planning.value?.ok) return;
+      // A stage that did not complete must still leave the run TERMINAL. Returning
+      // here without finalizing was a real defect: a planner whose model call
+      // failed left the run sitting in `planning` forever with no terminal state
+      // and nothing explaining why — the precise condition a client polls against
+      // and never gets an answer from. `finalize()` computes FAILED from the child
+      // evidence, so the reason stays inspectable.
+      if (planning.status !== 'completed' || !planning.value?.ok) {
+        ctx.run.finalize({});
+        return;
+      }
       const plan = planning.value.plan;
 
       // 2 — the initial model proposal is a SEPARATE child: a plan that is sound
@@ -154,7 +163,10 @@ export function createProductionCodingDriver(deps: ProductionCodingDriverDeps): 
         }),
         value: plan.initialChangeset,
       }));
-      if (proposal.status !== 'completed') return;
+      if (proposal.status !== 'completed') {
+        ctx.run.finalize({});
+        return;
+      }
 
       // 3 — record the plan and freeze the scope. `hashPaths` is the SAME function
       // the edit scope uses, so the hash an operator approves is the hash the
@@ -187,7 +199,7 @@ export function createProductionCodingDriver(deps: ProductionCodingDriverDeps): 
     async resume(ctx: CodingWorkflowContext): Promise<void> {
       const payload = ctx.run.payload;
       const scope = payload.scope;
-      if (!scope || !payload.plan) return;
+      if (!scope || !payload.plan) { ctx.run.finalize({}); return; }
 
       // Re-verify BEFORE the first write. An approval is authority over the
       // repository as it was shown; a tree that moved underneath invalidates it.
