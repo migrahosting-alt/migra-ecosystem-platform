@@ -22,7 +22,7 @@ import { EvidenceLedger, type EvidenceCacheStats } from './grounding/evidenceLed
 import { verifyAnswer, type GroundedClaim, type RejectedClaim, type VerifiedAnswer } from './grounding/claimVerifier.js';
 import { buildRepoMap } from './planning/repoMap.js';
 import { runEvidencePlan, type EvidencePlanResult } from './planning/evidencePlan.js';
-import { resolveBudget, type EvidenceBudget, type BudgetSpend, type StopReason } from './planning/evidenceBudget.js';
+import { BudgetLedger, resolveBudget, type EvidenceBudget, type BudgetSpend, type StopReason } from './planning/evidenceBudget.js';
 import { makeSpanSource } from './planning/workspaceSpanSource.js';
 import {
   AnswerTimeline,
@@ -224,13 +224,17 @@ export async function executeTool(
         req.limit = Math.min(20, Math.max(1, n(args.limit) ?? 10));
         if (!req.query) return { ok: false, summary: 'search: empty query', feedback: 'Error: `query` is required.' };
         break;
-      case 'read':
+      case 'read': {
         op = 'read';
         req.path = s(args.path);
-        if (n(args.startLine)) req.startLine = n(args.startLine);
-        if (n(args.endLine)) req.endLine = n(args.endLine);
         if (!req.path) return { ok: false, summary: 'read: missing path', feedback: 'Error: `path` is required.' };
+        // Same validator as the cached path — see `validateLineRange`.
+        const range = validateLineRange(args.startLine, args.endLine);
+        if (!range.ok) return { ok: false, summary: `read: ${range.error}`, feedback: `Error: ${range.error}` };
+        req.startLine = range.startLine;
+        req.endLine = range.endLine;
         break;
+      }
       case 'find':
         op = 'find';
         req.query = s(args.query) ?? '';
@@ -261,6 +265,43 @@ export async function executeTool(
   }
 }
 
+/** Default line window for a `read` that names no range. Matches `runInspection`. */
+export const DEFAULT_READ_LINES = 400;
+
+export type LineRangeResult =
+  | { ok: true; startLine: number; endLine: number }
+  | { ok: false; error: string };
+
+/**
+ * The ONE validator for a model-supplied line range.
+ *
+ * Two subtly different paths existed: `executeTool` guarded with `Number.isFinite`,
+ * while the cached path accepted anything whose `typeof` was `number`. `NaN` is a
+ * number, and every comparison against it is false — so a `NaN` range silently
+ * defeated the cache's coverage check, in the cache this slice exists to provide.
+ * Divergent validation is the defect; a shared validator is the fix.
+ */
+export function validateLineRange(rawStart: unknown, rawEnd: unknown, defaultSpan = DEFAULT_READ_LINES): LineRangeResult {
+  const given = (v: unknown): boolean => v !== undefined && v !== null;
+  const int = (v: unknown, label: string): number | string => {
+    if (typeof v !== 'number' || !Number.isFinite(v)) return `\`${label}\` must be a finite number.`;
+    if (!Number.isInteger(v)) return `\`${label}\` must be a whole line number.`;
+    if (v < 1) return `\`${label}\` must be 1 or greater.`;
+    return v;
+  };
+
+  if (!given(rawStart) && !given(rawEnd)) return { ok: true, startLine: 1, endLine: defaultSpan };
+
+  const start = given(rawStart) ? int(rawStart, 'startLine') : 1;
+  if (typeof start === 'string') return { ok: false, error: start };
+  const end = given(rawEnd) ? int(rawEnd, 'endLine') : start + defaultSpan - 1;
+  if (typeof end === 'string') return { ok: false, error: end };
+  // An inverted range is a caller error, not something to silently swap: swapping
+  // would answer a different question than the one asked.
+  if (end < start) return { ok: false, error: '`endLine` must not be before `startLine`.' };
+  return { ok: true, startLine: start, endLine: end };
+}
+
 /**
  * Execute a tool, serving a `read` from the evidence cache when the run already
  * holds that range.
@@ -280,8 +321,9 @@ export async function executeToolCached(
     return executeTool(name, args, workspaceRoot);
   }
   const rel = args.path.trim();
-  const startLine = typeof args.startLine === 'number' ? args.startLine : 1;
-  const endLine = typeof args.endLine === 'number' ? args.endLine : startLine + DEFAULT_READ_LINES - 1;
+  const range = validateLineRange(args.startLine, args.endLine);
+  if (!range.ok) return { ok: false, summary: `read: ${range.error}`, feedback: `Error: ${range.error}` };
+  const { startLine, endLine } = range;
   try {
     const result = await ledger.request(rel, startLine, endLine, makeSpanSource(workspaceRoot, rel, startLine, endLine));
     const range = `${result.span.startLine}-${result.span.endLine}`;
@@ -305,9 +347,6 @@ export async function executeToolCached(
     return { ok: false, summary: `read failed: ${message}`, feedback: `Error: ${message}` };
   }
 }
-
-/** Default line window for a `read` that names no range. Matches `runInspection`. */
-const DEFAULT_READ_LINES = 400;
 
 /** Fold one tool result into the evidence ledger, per op result shape. */
 export function recordEvidence(ledger: EvidenceLedger, tool: string, data: unknown): void {
@@ -627,7 +666,7 @@ export type AgenticEvent =
   | { type: 'timeout'; evidence: TimeoutEvidence }
   | { type: 'timings'; timings: AnswerRunTimings; cache: EvidenceCacheStats }
   | { type: 'map'; map: MapReport }
-  | { type: 'plan'; stopReason: StopReason; spend: BudgetSpend; plan: PlanReport }
+  | { type: 'plan'; stopReason: StopReason; spend: BudgetSpend; plan?: PlanReport }
   | { type: 'done'; stepsUsed: number; model: string };
 
 /** Build the initial messages, seeding deterministic retrieval so even a weak
@@ -839,6 +878,12 @@ export async function* streamAgentic(opts: AgenticOptions): AsyncGenerator<Agent
     }
 
     // ── Exploration fallback ─────────────────────────────────────────────────
+    // `maxToolSteps` is enforced HERE, around every dispatch. It was previously
+    // validated by the route and documented as the exploration ceiling while
+    // `canTakeToolStep()` was never called anywhere — a control that looked real
+    // and did nothing, which is the exact defect class `tier: 'premium'` was.
+    const fallbackBudget = new BudgetLedger(resolveBudget(opts.budget));
+    let fallbackStop: StopReason = 'claims-supported';
     // Reached only when the map cannot route the question (no candidates, or the
     // workspace is not a git repository). Still bounded, and now cache-backed so a
     // repeated read costs a stat rather than another copy of the file in context.
@@ -884,6 +929,11 @@ export async function* streamAgentic(opts: AgenticOptions): AsyncGenerator<Agent
       if (calls.length === 0) {
         const answer = (msg.content ?? '').trim();
         if (answer) {
+          yield {
+            type: 'plan',
+            stopReason: timeline.timeoutEvidence ? 'time-budget-exhausted' : fallbackStop,
+            spend: fallbackBudget.spend(),
+          };
           yield* emitVerified(answer, ledger, timeline, opts, step, runner);
           return;
         }
@@ -905,10 +955,28 @@ export async function* streamAgentic(opts: AgenticOptions): AsyncGenerator<Agent
       // Execute every tool call in this turn CONCURRENTLY (speed), preserving order.
       yield { type: 'phase', phase: 'tool_execution' };
       const endTools = timeline.beginPhase('tool_execution');
-      const results = await Promise.all(calls.map((c) => executeToolCached(ledger, c.name, c.args, opts.workspaceRoot)));
+      // Budget is consumed at DISPATCH, so a tool that fails still costs the step
+      // it really took; a refused call costs nothing because it never ran.
+      const admitted: typeof calls = [];
+      const refusedCalls: typeof calls = [];
+      for (const c of calls) {
+        if (fallbackBudget.canTakeToolStep()) {
+          fallbackBudget.noteToolStep();
+          admitted.push(c);
+        } else {
+          refusedCalls.push(c);
+        }
+      }
+      if (refusedCalls.length) fallbackStop = 'tool-step-budget-exhausted';
+      const results = await Promise.all(admitted.map((c) => executeToolCached(ledger, c.name, c.args, opts.workspaceRoot)));
       endTools();
-      for (let i = 0; i < calls.length; i += 1) {
-        const call = calls[i]!;
+      for (const call of refusedCalls) {
+        const summary = `${call.name}: refused — tool-step budget exhausted`;
+        yield { type: 'step', step: { tool: call.name, args: call.args, ok: false, summary } };
+        messages.push({ role: 'tool', name: call.name, content: `Error: ${summary}. Answer from the evidence you already have.` });
+      }
+      for (let i = 0; i < admitted.length; i += 1) {
+        const call = admitted[i]!;
         const result = results[i]!;
         toolSteps += 1;
         if (result.ok) {
@@ -925,6 +993,7 @@ export async function* streamAgentic(opts: AgenticOptions): AsyncGenerator<Agent
       // Stamped only now: the tool steps a call PRODUCED are not known when the
       // call returns, and `before === after` on every row would say nothing.
       record.toolStepsAfter = toolSteps;
+      if (refusedCalls.length) break; // no budget left to explore with
     }
 
     // A call that burned its whole budget having gathered nothing has no synthesis
@@ -1028,6 +1097,11 @@ export async function* streamAgentic(opts: AgenticOptions): AsyncGenerator<Agent
     // An empty synthesis produces no claims, so the gate refuses and states the
     // gap from the ledger — which is exactly the truthful report the old
     // hand-written fallback was trying to approximate.
+    yield {
+      type: 'plan',
+      stopReason: timeline.timeoutEvidence ? 'time-budget-exhausted' : fallbackStop,
+      spend: fallbackBudget.spend(),
+    };
     yield* emitVerified(streamed, ledger, timeline, opts, toolSteps || maxSteps, runner);
   } finally {
     clearTimeout(timer);

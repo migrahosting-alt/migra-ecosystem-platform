@@ -26,6 +26,8 @@ export type StopReason =
   | 'model-call-budget-exhausted'
   /** A model call or the run outran its time budget. */
   | 'time-budget-exhausted'
+  /** The exploration fallback used every tool step it was allowed. */
+  | 'tool-step-budget-exhausted'
   /** Ranking produced nothing to open — the plan never had a subject. */
   | 'no-candidates'
   /** The workspace is not a git repository, so no map could be built. */
@@ -71,12 +73,32 @@ export const DEFAULT_EVIDENCE_BUDGET: EvidenceBudget = {
   maxExpansionRounds: 1,
 };
 
+/**
+ * Smallest meaningful value per ceiling.
+ *
+ * One is 0, deliberately. Zero files or zero model calls would answer every
+ * question with an empty refusal, so those are misconfigurations. Zero TOOL steps
+ * is a real policy — "planned path only, never explore" — and refusing to honour
+ * it would be the same silent-substitution defect this project already fixed for
+ * `tier`.
+ */
+export const MIN_BUDGET: Record<keyof EvidenceBudget, number> = {
+  maxCandidates: 1,
+  maxFilesOpened: 1,
+  maxSpans: 1,
+  maxEvidenceUnits: 1,
+  maxModelCalls: 1,
+  maxToolSteps: 0,
+  maxExpansionsPerPath: 1,
+  maxExpansionRounds: 1,
+};
+
 export function resolveBudget(overrides?: Partial<EvidenceBudget>): EvidenceBudget {
   const merged = { ...DEFAULT_EVIDENCE_BUDGET, ...(overrides ?? {}) };
-  // A budget of zero anything is a misconfiguration, not an instruction to do
-  // nothing: it would produce a confident empty refusal for every question.
   for (const key of Object.keys(merged) as Array<keyof EvidenceBudget>) {
-    if (!Number.isFinite(merged[key]) || merged[key] < 1) merged[key] = DEFAULT_EVIDENCE_BUDGET[key];
+    if (!Number.isFinite(merged[key]) || !Number.isInteger(merged[key]) || merged[key] < MIN_BUDGET[key]) {
+      merged[key] = DEFAULT_EVIDENCE_BUDGET[key];
+    }
   }
   return merged;
 }
@@ -110,6 +132,7 @@ export class BudgetLedger {
   private calls = 0;
   private steps = 0;
   private rounds = 0;
+  private renderedUnits: number | undefined;
 
   constructor(readonly budget: EvidenceBudget) {}
 
@@ -212,8 +235,25 @@ export class BudgetLedger {
     this.bindingSet.add(ceiling);
   }
 
+  /**
+   * Record the evidence units that ACTUALLY reached the model.
+   *
+   * The running total is an accounting of what was admitted; this is what the
+   * prompt finally carried after hash-deduplication. Reporting the former as
+   * though it were the latter is exactly the kind of plausible-but-unverified
+   * number this project exists to stop producing.
+   */
+  noteRenderedUnits(units: number): void {
+    this.renderedUnits = units;
+  }
+
   get modelCalls(): number {
     return this.calls;
+  }
+
+  /** Files admitted so far — lets a caller honour the first-file exemption. */
+  get filesOpened(): number {
+    return this.files;
   }
 
   spend(): BudgetSpend {
@@ -221,7 +261,7 @@ export class BudgetLedger {
       candidatesConsidered: this.candidates,
       filesOpened: this.files,
       spans: this.spanCount,
-      evidenceUnits: this.units,
+      evidenceUnits: this.renderedUnits ?? this.units,
       modelCalls: this.calls,
       toolSteps: this.steps,
       expansionRounds: this.rounds,

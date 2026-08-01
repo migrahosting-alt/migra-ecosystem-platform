@@ -18,7 +18,8 @@ import * as http from 'node:http';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import type { AddressInfo, Socket } from 'node:net';
-import { agenticAnswer, describeTimeout } from '../src/engine/agenticAnswer.js';
+import { agenticAnswer, describeTimeout, executeTool, executeToolCached, validateLineRange } from '../src/engine/agenticAnswer.js';
+import { EvidenceLedger } from '../src/engine/grounding/evidenceLedger.js';
 import { clearRepoMapCache } from '../src/engine/planning/repoMap.js';
 import type { AnswerRunTimings, TimeoutEvidence } from '../src/engine/answerTimings.js';
 
@@ -411,6 +412,120 @@ test('the cloud runner is carried through to the timing rows', async () => {
     });
     assert.equal(result.runner, 'cloud');
     assert.equal(call(result.timings, 1).runner, 'cloud');
+  } finally {
+    await stub.close();
+  }
+});
+
+// ── Copilot review findings (PR #141) — range parity and the tool-step ceiling ──
+
+const MALFORMED_RANGES: Array<[string, unknown, unknown]> = [
+  ['NaN start', Number.NaN, 10],
+  ['NaN end', 1, Number.NaN],
+  ['+Infinity', 1, Number.POSITIVE_INFINITY],
+  ['-Infinity', Number.NEGATIVE_INFINITY, 10],
+  ['non-integer', 1.5, 10],
+  ['zero start', 0, 10],
+  ['negative start', -3, 10],
+  ['inverted', 40, 10],
+];
+
+test('review-4 — the cached and uncached read paths reject exactly the same malformed ranges', async () => {
+  const dir = tmpWorkspace();
+  for (const [label, startLine, endLine] of MALFORMED_RANGES) {
+    const direct = await executeTool('read', { path: 'src/limiter.ts', startLine, endLine }, dir);
+    const ledger = new EvidenceLedger();
+    const cached = await executeToolCached(ledger, 'read', { path: 'src/limiter.ts', startLine, endLine }, dir);
+    assert.equal(direct.ok, false, `direct rejects ${label}`);
+    assert.equal(cached.ok, false, `cached rejects ${label}`);
+    assert.equal(ledger.spans.length, 0, `${label} never reaches the ledger`);
+  }
+});
+
+test('review-4b — a valid range still works on both paths, and an omitted range defaults', async () => {
+  const dir = tmpWorkspace();
+  const ledger = new EvidenceLedger();
+  assert.ok((await executeTool('read', { path: 'src/limiter.ts', startLine: 1, endLine: 3 }, dir)).ok);
+  assert.ok((await executeToolCached(ledger, 'read', { path: 'src/limiter.ts', startLine: 1, endLine: 3 }, dir)).ok);
+  assert.ok((await executeTool('read', { path: 'src/limiter.ts' }, dir)).ok, 'no range = documented default');
+
+  assert.deepEqual(validateLineRange(undefined, undefined, 400), { ok: true, startLine: 1, endLine: 400 });
+  assert.deepEqual(validateLineRange(5, undefined, 10), { ok: true, startLine: 5, endLine: 14 });
+  assert.equal(validateLineRange(Number.NaN, 3).ok, false);
+  assert.equal(validateLineRange(2, 1).ok, false, 'inverted is an error, never silently swapped');
+});
+
+test('review-5 — maxToolSteps: 0 performs ZERO fallback dispatches', async () => {
+  const stub = await stubModel([
+    { kind: 'toolCall', name: 'read', args: { path: 'src/limiter.ts' } },
+    { kind: 'reply', content: 'I could not find the specific code that answers this in the workspace.' },
+  ]);
+  try {
+    const result = await agenticAnswer({
+      prompt: 'what does throttleRequests do?',
+      workspaceRoot: tmpWorkspace(), // not a git repo -> exploration fallback
+      model: 'test-model',
+      providerBaseUrl: stub.baseUrl,
+      perCallTimeoutMs: 5_000,
+      overallDeadlineMs: 20_000,
+      budget: { maxToolSteps: 0 },
+    });
+    assert.equal(result.cache.filesystemReads, 0, 'no tool ran, so nothing was read');
+    assert.equal(result.spend?.toolSteps, 0);
+    assert.equal(result.stopReason, 'tool-step-budget-exhausted');
+    assert.ok(result.steps.some((s) => /refused/.test(s.summary)), 'the refusal is reported, not hidden');
+  } finally {
+    await stub.close();
+  }
+});
+
+test('review-5b — maxToolSteps: 1 permits exactly one dispatch', async () => {
+  const stub = await stubModel([
+    { kind: 'toolCall', name: 'read', args: { path: 'src/limiter.ts' } },
+    { kind: 'toolCall', name: 'search', args: { query: 'throttle' } },
+    { kind: 'reply', content: '`src/limiter.ts:1-3` returns true when the count is at most 20.' },
+  ]);
+  try {
+    const result = await agenticAnswer({
+      prompt: 'what does throttleRequests do?',
+      workspaceRoot: tmpWorkspace(),
+      model: 'test-model',
+      providerBaseUrl: stub.baseUrl,
+      perCallTimeoutMs: 5_000,
+      overallDeadlineMs: 20_000,
+      budget: { maxToolSteps: 1 },
+    });
+    assert.equal(result.spend?.toolSteps, 1, 'exactly one step was consumed');
+    assert.equal(result.stopReason, 'tool-step-budget-exhausted');
+    assert.equal(result.steps.filter((s) => s.ok).length, 1, 'exactly one tool actually ran');
+  } finally {
+    await stub.close();
+  }
+});
+
+test('review-5c — an attempted dispatch that FAILS still consumes its step', async () => {
+  const stub = await stubModel([
+    // A real dispatch that fails: the path escapes the workspace.
+    { kind: 'toolCall', name: 'read', args: { path: '../../etc/passwd' } },
+    { kind: 'toolCall', name: 'read', args: { path: 'src/limiter.ts' } },
+    { kind: 'reply', content: 'I could not find the specific code that answers this in the workspace.' },
+  ]);
+  try {
+    const result = await agenticAnswer({
+      prompt: 'what does throttleRequests do?',
+      workspaceRoot: tmpWorkspace(),
+      model: 'test-model',
+      providerBaseUrl: stub.baseUrl,
+      perCallTimeoutMs: 5_000,
+      overallDeadlineMs: 20_000,
+      budget: { maxToolSteps: 1 },
+    });
+    // The failed attempt really ran, so it cost the step; the second call was then
+    // refused. A failure that cost nothing would let a model retry without bound.
+    assert.equal(result.spend?.toolSteps, 1);
+    assert.equal(result.steps[0]!.ok, false, 'the first dispatch ran and failed');
+    assert.ok(result.steps.some((s) => /refused/.test(s.summary)), 'the second was refused');
+    assert.equal(result.stopReason, 'tool-step-budget-exhausted');
   } finally {
     await stub.close();
   }

@@ -198,7 +198,8 @@ export type AnswerStreamEvent =
       type: 'plan';
       stopReason: string;
       spend: AnswerBudgetSpend;
-      plan: { candidates: Array<{ path: string; score: number; reasons: string[] }>; opened: string[]; gaps: Array<{ token: string; resolvedTo?: string; source: string }> };
+      /** Absent when the run explored instead of planning. */
+      plan?: { candidates: Array<{ path: string; score: number; reasons: string[] }>; opened: string[]; gaps: Array<{ token: string; resolvedTo?: string; source: string }> };
     }
   | { type: 'done'; stepsUsed: number; model: string };
 
@@ -670,7 +671,7 @@ export class MigraAiClient {
               type: 'plan',
               stopReason: String(d.stopReason ?? ''),
               spend: d.spend as AnswerBudgetSpend,
-              plan: d.plan as { candidates: Array<{ path: string; score: number; reasons: string[] }>; opened: string[]; gaps: Array<{ token: string; resolvedTo?: string; source: string }> },
+              ...(d.plan ? { plan: d.plan as { candidates: Array<{ path: string; score: number; reasons: string[] }>; opened: string[]; gaps: Array<{ token: string; resolvedTo?: string; source: string }> } } : {}),
             };
           } else if (parsed.event === 'timeout') yield { type: 'timeout', evidence: d.evidence as AnswerTimeoutEvidence };
           else if (parsed.event === 'timings') yield { type: 'timings', timings: (d.timings ?? {}) as Record<string, unknown> };

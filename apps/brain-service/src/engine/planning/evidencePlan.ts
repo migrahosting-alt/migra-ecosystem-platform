@@ -28,7 +28,7 @@
  */
 
 import { verifyAnswer, type VerifiedAnswer } from '../grounding/claimVerifier.js';
-import { EvidenceLedger, normalizePath, type EvidenceSource } from '../grounding/evidenceLedger.js';
+import { EvidenceLedger, normalizePath, spanHeader, spanUnits, type EvidenceSource } from '../grounding/evidenceLedger.js';
 import type { AnswerTimeline, CallPhase, RunPhase } from '../answerTimings.js';
 import { BudgetLedger, type EvidenceBudget, type BudgetSpend, type StopReason } from './evidenceBudget.js';
 import { aboveRelevanceFloor, importNeighbours, rankCandidates, type RankedCandidate } from './candidateRanking.js';
@@ -147,40 +147,49 @@ export function resolveGap(map: RepoMap, token: string): RepoMapEntry | undefine
   return ranked[0]?.entry;
 }
 
-/** Render the evidence the model may use — exact spans, deduplicated by hash. */
-export function renderEvidence(ledger: EvidenceLedger, maxUnits: number): string {
+/**
+ * Render the evidence the model may use — exact spans, deduplicated by hash.
+ *
+ * Returns the unit count it actually emitted, so the run can report the evidence
+ * that REACHED the model rather than the evidence it admitted along the way. The
+ * two differ whenever hash-deduplication collapses an excerpt.
+ */
+export function renderEvidence(ledger: EvidenceLedger): { text: string; units: number } {
   const seen = new Set<string>();
   const blocks: string[] = [];
   let units = 0;
   for (const span of ledger.spans) {
     if (seen.has(span.excerptHash)) continue; // the same excerpt is one piece of evidence
     seen.add(span.excerptHash);
-    const header = `--- ${span.path}:${span.startLine}-${span.endLine} ---`;
-    const cost = Math.ceil((header.length + span.text.length) / 4);
-    if (units + cost > maxUnits) break;
-    units += cost;
-    blocks.push(`${header}\n${span.text}`);
+    units += spanUnits(span);
+    blocks.push(`${spanHeader(span)}\n${span.text}`);
   }
-  return blocks.join('\n\n');
+  return { text: blocks.join('\n\n'), units };
 }
 
-function buildMessages(opts: EvidencePlanOptions, candidates: RankedCandidate[], gaps: string[]): PlanMessage[] {
+function buildMessages(opts: EvidencePlanOptions, candidates: RankedCandidate[], gaps: string[]): { messages: PlanMessage[]; renderedUnits: number } {
   const digest = describeCandidates(candidates.map((c) => c.entry), 12);
-  const evidence = renderEvidence(opts.ledger, opts.budget.maxEvidenceUnits);
+  // No truncation here: the LEDGER is what the budget bounds, so everything it
+  // holds is rendered. Silently dropping an admitted span at render time would
+  // reintroduce the divergence between reported and delivered evidence.
+  const { text: evidence, units: renderedUnits } = renderEvidence(opts.ledger);
   const gapNote = gaps.length
     ? `\n\nYou previously could not support these. The evidence above now includes what could be found for them; anything still missing is genuinely unavailable:\n${gaps.map((g) => `- ${g}`).join('\n')}`
     : '';
-  return [
-    { role: 'system', content: PLAN_SYSTEM_PROMPT },
-    {
-      role: 'user',
-      content:
-        `Question: ${opts.question}\n\n` +
-        `ROUTING MAP (file names only — NOT evidence):\n${digest || '(no candidates)'}\n\n` +
-        `EVIDENCE (exact source text retrieved for you):\n${evidence || '(nothing was retrieved)'}` +
-        gapNote,
-    },
-  ];
+  return {
+    renderedUnits,
+    messages: [
+      { role: 'system', content: PLAN_SYSTEM_PROMPT },
+      {
+        role: 'user',
+        content:
+          `Question: ${opts.question}\n\n` +
+          `ROUTING MAP (file names only — NOT evidence):\n${digest || '(no candidates)'}\n\n` +
+          `EVIDENCE (exact source text retrieved for you):\n${evidence || '(nothing was retrieved)'}` +
+          gapNote,
+      },
+    ],
+  };
 }
 
 /** Open one candidate's span into the ledger, respecting the budget. */
@@ -194,15 +203,22 @@ async function* openCandidate(
   const alreadyHeld = ledger.hasContentFor(entry.path);
   // Cost is estimated from the map BEFORE reading, so a file that would blow the
   // evidence ceiling is never read at all rather than read and then discarded.
-  const estimatedUnits = Math.ceil(Math.min(entry.sizeBytes, lines * 80) / 4);
+  // Estimated the same way a rendered span is costed, header included.
+  const estimatedUnits = spanUnits({ path: entry.path, startLine: 1, endLine: lines, text: 'x'.repeat(Math.min(entry.sizeBytes, lines * 80)) });
   if (!alreadyHeld && !budget.canOpenFile(estimatedUnits)) return 'skipped';
-  if (alreadyHeld && ledger.expansionsFor(entry.path) >= opts.budget.maxExpansionsPerPath) {
-    budget.noteBinding('maxExpansionsPerPath');
-    return 'skipped';
+  if (alreadyHeld) {
+    if (ledger.expansionsFor(entry.path) >= opts.budget.maxExpansionsPerPath) {
+      budget.noteBinding('maxExpansionsPerPath');
+      return 'skipped';
+    }
+    // The span budget is decided BEFORE `ledger.request`, not after. Recording
+    // first and checking second left rejected spans in the ledger — renderable,
+    // sent to the model, and absent from the reported spend.
+    if (!budget.canAddSpan(estimatedUnits)) return 'skipped';
   }
   const end = Math.min(lines, entry.lineCount || lines);
   const result = await ledger.request(entry.path, 1, end, opts.openSpan(entry.path, 1, end));
-  const units = Math.ceil(result.span.text.length / 4);
+  const units = spanUnits(result.span);
   const range = `${result.span.startLine}-${result.span.endLine}`;
   // A cache hit is reported as a STEP too. Silently skipping it would hide the very
   // thing this slice is measured on: how often the run asked for what it already had.
@@ -216,8 +232,18 @@ async function* openCandidate(
     },
   };
   if (result.outcome === 'cache-hit') return 'cached';
+
+  // Reconcile the estimate against the real cost. The first file is exempt — a low
+  // ceiling must not answer every question about a large file with an empty
+  // refusal — but anything beyond it is rolled back rather than carried silently.
+  const isFirstFile = !alreadyHeld && budget.filesOpened === 0;
+  const admits = alreadyHeld ? budget.canAddSpan(units) : budget.canOpenFile(units);
+  if (!isFirstFile && !admits) {
+    ledger.discard(result.span);
+    return 'skipped';
+  }
   if (!alreadyHeld) budget.noteFileOpened(units);
-  else if (budget.canAddSpan(units)) budget.noteSpanAdded(units);
+  else budget.noteSpanAdded(units);
   return 'opened';
 }
 
@@ -279,7 +305,8 @@ export async function* runEvidencePlan(opts: EvidencePlanOptions): AsyncGenerato
       break;
     }
     const phase: CallPhase = round === 0 ? 'tool_loop' : 'final_synthesis_retry';
-    const messages = buildMessages(opts, candidates, carriedGaps);
+    const { messages, renderedUnits } = buildMessages(opts, candidates, carriedGaps);
+    budget.noteRenderedUnits(renderedUnits);
     budget.noteModelCall();
     yield { type: 'phase', phase: 'model_inference' };
     const text = await opts.callModel(messages, phase);

@@ -84,7 +84,7 @@ export function budgetFooter(stopReason: string, spend: AnswerBudgetSpend): stri
     `${spend.filesOpened} file${spend.filesOpened === 1 ? '' : 's'} opened`,
     `${spend.evidenceUnits} evidence units`,
   ];
-  if (spend.expansionRounds) parts.push(`${spend.expansionRounds} expansion`);
+  if (spend.expansionRounds) parts.push(`${spend.expansionRounds} expansion${spend.expansionRounds === 1 ? '' : 's'}`);
   const bound = spend.binding.length ? ` · bound by ${spend.binding.join(', ')}` : '';
   return `\n_scope: ${parts.join(', ')} · stopped: ${stopReason}${bound}_`;
 }

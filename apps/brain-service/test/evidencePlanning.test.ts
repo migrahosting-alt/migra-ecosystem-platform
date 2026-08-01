@@ -20,7 +20,7 @@ import { EvidenceLedger } from '../src/engine/grounding/evidenceLedger.js';
 import { AnswerTimeline } from '../src/engine/answerTimings.js';
 import { buildRepoMap, clearRepoMapCache, classifyRole, describeCandidates } from '../src/engine/planning/repoMap.js';
 import { rankCandidates, importNeighbours, aboveRelevanceFloor, questionTerms } from '../src/engine/planning/candidateRanking.js';
-import { resolveBudget, DEFAULT_EVIDENCE_BUDGET } from '../src/engine/planning/evidenceBudget.js';
+import { resolveBudget, DEFAULT_EVIDENCE_BUDGET, MIN_BUDGET } from '../src/engine/planning/evidenceBudget.js';
 import { makeSpanSource } from '../src/engine/planning/workspaceSpanSource.js';
 import {
   runEvidencePlan,
@@ -188,8 +188,9 @@ test('2 — the same excerpt recorded twice is one span, and renders once', asyn
   ledger.recordRead('src/a.ts', 1, 1, 'export const A = 1;'); // contained in the above
 
   assert.equal(ledger.spans.length, 1, `duplicates collapse, got ${JSON.stringify(ledger.spans.map((s) => [s.startLine, s.endLine]))}`);
-  const rendered = renderEvidence(ledger, 10_000);
-  assert.equal((rendered.match(/export const A = 1;/g) ?? []).length, 1);
+  const rendered = renderEvidence(ledger);
+  assert.equal((rendered.text.match(/export const A = 1;/g) ?? []).length, 1);
+  assert.ok(rendered.units > 0, 'rendering reports the units it actually emitted');
 });
 
 // ── 3. Context does not grow by duplicate evidence ──────────────────────────────
@@ -524,11 +525,22 @@ test('the evidence-unit ceiling binds the INITIAL open, not just later spans', a
   const root = tmpRepo(big);
 
   const run = await runPlan(root, 'explain the brain bulk services', [CITED_ANSWER], { maxEvidenceUnits: 2_000, maxFilesOpened: 8 });
-  assert.ok(run.result.spend.evidenceUnits <= 2_000, `the ceiling holds, got ${run.result.spend.evidenceUnits}`);
-  assert.ok(run.result.spend.binding.includes('maxEvidenceUnits'), 'and it is reported as binding');
+  assert.ok(run.result.spend.binding.includes('maxEvidenceUnits'), 'the ceiling is reported as binding');
   assert.ok(run.result.spend.filesOpened < 8, 'so fewer files opened than the count ceiling allowed');
-  // A file refused on cost is never read at all.
-  assert.equal(run.reads.length, run.result.spend.filesOpened);
+
+  // The ceiling binds every file AFTER the first. The first is exempt by policy —
+  // a low ceiling must not answer every question about a large file with an empty
+  // refusal — so a single-file overshoot is expected, and it is now REPORTED
+  // rather than hidden by a spend figure that under-counted what was delivered.
+  // Reported equals delivered, and the ceiling holds: the budget and the renderer
+  // now cost a span identically (text AND its header), so a run can no longer
+  // believe it honoured a ceiling it exceeded.
+  assert.equal(run.result.spend.evidenceUnits, renderEvidence(run.ledger).units, 'reported equals delivered');
+  assert.ok(run.result.spend.evidenceUnits <= 2_000, `the ceiling holds, got ${run.result.spend.evidenceUnits}`);
+
+  // A file refused on cost is rolled back, never left in the ledger to reach the
+  // model uncounted: the ledger holds exactly what the spend reports.
+  assert.equal(run.ledger.readPaths.length, run.result.spend.filesOpened);
 });
 
 test('one enormous file is still opened — a cost ceiling must not answer nothing', async () => {
@@ -540,4 +552,88 @@ test('one enormous file is still opened — a cost ceiling must not answer nothi
   const run = await runPlan(root, 'what does src/onlyFile.ts do?', ['`src/onlyFile.ts:1-2` defines onlyFile.'], { maxEvidenceUnits: 10 });
   assert.equal(run.result.spend.filesOpened, 1, 'the first file is always allowed');
   assert.ok(run.result.opened.includes('src/onlyFile.ts'));
+});
+
+// ── Copilot review findings (PR #141) — each fix pinned by a test ───────────────
+
+test('review-1 — a traversal path is rejected BEFORE any stat, and leaks no metadata', async () => {
+  const root = tmpRepo(STANDARD_FILES);
+  const outside = path.join(path.dirname(root), `migra-outside-${path.basename(root)}.txt`);
+  fs.writeFileSync(outside, 'host secret\n');
+
+  // A real file that genuinely exists outside the workspace...
+  const escape = makeSpanSource(root, `../${path.basename(outside)}`, 1, 5);
+  // ...and one that does not exist anywhere.
+  const absent = makeSpanSource(root, '../definitely-not-here-9f3c.txt', 1, 5);
+  const inside = makeSpanSource(root, 'src/services/brainTransport.ts', 1, 5);
+
+  assert.equal(await escape.fingerprint(), undefined, 'an out-of-workspace path yields nothing');
+  assert.equal(await absent.fingerprint(), undefined);
+  // Existence, size and mtime outside the workspace are indistinguishable from
+  // absence — the rejection reveals nothing about the host filesystem.
+  assert.equal(await escape.fingerprint(), await absent.fingerprint());
+  assert.ok((await inside.fingerprint())!.length > 0, 'a contained path still fingerprints');
+
+  // And the read path refuses too, so no content can follow the metadata.
+  await assert.rejects(escape.read());
+});
+
+test('review-1b — an absolute path is refused the same way', async () => {
+  const root = tmpRepo(STANDARD_FILES);
+  const abs = makeSpanSource(root, '/etc/hostname', 1, 5);
+  assert.equal(await abs.fingerprint(), undefined);
+  await assert.rejects(abs.read());
+});
+
+test('review-2 — a span rejected by the evidence budget never enters the ledger', async () => {
+  const big: Record<string, string> = { ...STANDARD_FILES };
+  for (let i = 0; i < 4; i += 1) {
+    big[`src/services/brainBulk${i}.ts`] = `// bulk ${i}\n` + 'export const filler = "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx";\n'.repeat(120);
+  }
+  const root = tmpRepo(big);
+  const run = await runPlan(root, 'explain the brain bulk services', [CITED_ANSWER], { maxEvidenceUnits: 2_000, maxFilesOpened: 8 });
+
+  // The ledger holds only what the budget admitted — nothing was recorded and
+  // then quietly excluded from the report.
+  assert.equal(run.ledger.readPaths.length, run.result.spend.filesOpened);
+  assert.equal(run.reads.length, run.result.spend.filesOpened, 'a rejected span is never even read');
+
+  // And what is reported equals what the prompt actually carried.
+  const promptEvidence = run.prompts[0]![1]!.content.split('EVIDENCE (exact source text retrieved for you):')[1] ?? '';
+  for (const p of run.ledger.readPaths) assert.ok(promptEvidence.includes(p), `${p} reached the model`);
+});
+
+test('review-2b — reported evidenceUnits equal the units actually rendered', async () => {
+  const root = tmpRepo(STANDARD_FILES);
+  const run = await runPlan(root, 'what does scripts/check-brain-transport.mjs do?', [CITED_ANSWER]);
+  const rendered = renderEvidence(run.ledger);
+  assert.equal(run.result.spend.evidenceUnits, rendered.units, 'the spend reports what reached the model');
+});
+
+test('review-2c — a duplicate excerpt is not double-counted in the reported spend', () => {
+  const ledger = new EvidenceLedger();
+  const text = 'export const A = 1;\nexport const B = 2;';
+  ledger.recordRead('src/a.ts', 1, 2, text);
+  ledger.recordSeed('src/a.ts', 1, 2, text);
+  const once = renderEvidence(ledger);
+  assert.equal((once.text.match(/export const A = 1;/g) ?? []).length, 1);
+  assert.equal(once.units, Math.ceil((`--- src/a.ts:1-2 ---`.length + text.length) / 4));
+});
+
+test('review-5 — maxToolSteps: 0 is honoured, not replaced by the default', () => {
+  assert.equal(resolveBudget({ maxToolSteps: 0 }).maxToolSteps, 0, 'zero exploration is a real policy');
+  // Every other ceiling still refuses zero, because zero there answers nothing.
+  assert.equal(resolveBudget({ maxFilesOpened: 0 }).maxFilesOpened, DEFAULT_EVIDENCE_BUDGET.maxFilesOpened);
+  assert.equal(resolveBudget({ maxModelCalls: 0 }).maxModelCalls, DEFAULT_EVIDENCE_BUDGET.maxModelCalls);
+  assert.equal(resolveBudget({ maxToolSteps: 2.5 }).maxToolSteps, DEFAULT_EVIDENCE_BUDGET.maxToolSteps, 'non-integers are refused');
+});
+
+test('review-5b — planned retrieval does not consume exploration tool steps', async () => {
+  const root = tmpRepo(STANDARD_FILES);
+  const run = await runPlan(root, 'what does scripts/check-brain-transport.mjs do?', [CITED_ANSWER], { maxToolSteps: 0 });
+  // The plan opened files with zero tool-step budget: opening evidence is not
+  // exploration, and conflating them would make the ceiling mean two things.
+  assert.ok(run.result.spend.filesOpened >= 1);
+  assert.equal(run.result.spend.toolSteps, 0);
+  assert.equal(run.result.stopReason, 'claims-supported');
 });

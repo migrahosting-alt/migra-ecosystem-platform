@@ -145,6 +145,29 @@ test('budgetFooter reports the scope of every run, bound or not', () => {
   );
 });
 
+test('review-3 — the expansion count is pluralised correctly', () => {
+  assert.match(budgetFooter('claims-supported', { ...SPEND, expansionRounds: 1 }), /\b1 expansion\b/);
+  assert.ok(!/1 expansions/.test(budgetFooter('claims-supported', { ...SPEND, expansionRounds: 1 })));
+  assert.match(budgetFooter('claims-supported', { ...SPEND, expansionRounds: 2 }), /\b2 expansions\b/);
+  assert.match(budgetFooter('claims-supported', { ...SPEND, expansionRounds: 5 }), /\b5 expansions\b/);
+  // Zero expansions is not mentioned at all rather than rendered as "0 expansions".
+  assert.ok(!/expansion/.test(budgetFooter('claims-supported', { ...SPEND, expansionRounds: 0 })));
+});
+
+test('review-3b — the scope footer renders for an exploration run that reports no plan', async () => {
+  const out = sink();
+  const events: AnswerStreamEvent[] = [
+    { type: 'route', model: 'm', runner: 'local' },
+    { type: 'token', text: '`src/a.ts:1-4` verifies the token.' },
+    // The fallback emits a stop reason and spend with NO plan detail.
+    { type: 'plan', stopReason: 'tool-step-budget-exhausted', spend: { ...SPEND, toolSteps: 6 } },
+    { type: 'grounding', claims: [CLAIM], rejected: [], refused: false, evidence: { readPaths: ['src/a.ts'], spanCount: 1, knownPathCount: 1 } },
+    { type: 'done', stepsUsed: 6, model: 'm' },
+  ];
+  await runDeepCommand(clientYielding(events), { kind: 'ask', question: 'q' }, '/repo', out.s, new AbortController().signal);
+  assert.match(out.md, /stopped: tool-step-budget-exhausted/);
+});
+
 test('runDeepCommand renders the map cost, the scope footer and a recycled read', async () => {
   const out = sink();
   const events: AnswerStreamEvent[] = [

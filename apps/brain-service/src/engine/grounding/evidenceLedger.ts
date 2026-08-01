@@ -148,7 +148,11 @@ export type EvidenceRequestOutcome = 'fresh' | 'cache-hit' | 'expanded' | 'stale
  * on a cache hit, which is what makes a repeat request cost nothing.
  */
 export interface EvidenceSource {
-  fingerprint(): string | undefined;
+  /**
+   * Async because containment must be validated before any metadata is touched,
+   * and the boundary check is async. Still cheap: a resolve plus a stat, never a read.
+   */
+  fingerprint(): Promise<string | undefined>;
   read(): Promise<{ startLine: number; endLine: number; text: string; totalLines?: number }>;
 }
 
@@ -301,7 +305,7 @@ export class EvidenceLedger {
       // Freshness is checked with a STAT, never a read: re-reading the file to
       // decide whether we need to re-read the file would leave the filesystem cost
       // exactly where it was and only save the context insertion.
-      const current = source.fingerprint();
+      const current = await source.fingerprint();
       const recorded = this.fingerprints.get(p);
       if (recorded !== undefined && current !== undefined && current !== recorded) {
         this.stats.staleRereads += 1;
@@ -328,9 +332,35 @@ export class EvidenceLedger {
   private async load(p: string, source: EvidenceSource, outcome: EvidenceRequestOutcome): Promise<EvidenceRequest> {
     const fresh = await source.read();
     const span = this.recordRead(p, fresh.startLine, fresh.endLine, fresh.text, fresh.totalLines);
-    const fingerprint = source.fingerprint();
+    const fingerprint = await source.fingerprint();
     if (fingerprint !== undefined) this.fingerprints.set(p, fingerprint);
     return { outcome, span, alreadyInContext: false };
+  }
+
+  /**
+   * Remove a span that was retrieved but must not be used.
+   *
+   * The budget admits a file by ESTIMATE before reading it (so an over-large file
+   * is never read at all), but the real cost is only known afterwards. When the
+   * actual span would exceed the ceiling it is rolled straight back out, keeping
+   * the invariant that the ledger, the prompt and the reported spend describe the
+   * same evidence.
+   */
+  discard(span: EvidenceSpan): void {
+    const list = this.spansByPath.get(span.path);
+    if (!list) return;
+    const next = list.filter((s) => s !== span);
+    if (next.length === list.length) return;
+    const count = (this.readCounts.get(span.path) ?? 1) - 1;
+    if (count > 0) this.readCounts.set(span.path, count);
+    else this.readCounts.delete(span.path);
+    if (next.length) {
+      this.spansByPath.set(span.path, next);
+    } else {
+      this.spansByPath.delete(span.path);
+      this.fingerprints.delete(span.path);
+    }
+    this.corpusDirty = true;
   }
 
   /** How many times each path was expanded beyond its first read. */
@@ -499,6 +529,24 @@ export class EvidenceLedger {
   resolve(ref: CitationRef): EvidenceSpan[] {
     return this.spansFor(ref.path).filter((s) => ref.startLine <= s.endLine && ref.endLine >= s.startLine);
   }
+}
+
+/** The header a rendered span carries. Its cost is part of the span's cost. */
+export function spanHeader(span: Pick<EvidenceSpan, 'path' | 'startLine' | 'endLine'>): string {
+  return `--- ${span.path}:${span.startLine}-${span.endLine} ---`;
+}
+
+/**
+ * What a span costs the model's context, in approximate units.
+ *
+ * ONE definition, used by both the budget and the renderer. They diverged by the
+ * header — the budget counted only `text`, the renderer emitted `header + text` —
+ * so a run reported 2,010 units against a 2,000 ceiling it believed it had
+ * honoured. Two subtly different cost models is the same defect shape as two
+ * subtly different range validators.
+ */
+export function spanUnits(span: Pick<EvidenceSpan, 'path' | 'startLine' | 'endLine' | 'text'>): number {
+  return Math.ceil((spanHeader(span).length + span.text.length) / 4);
 }
 
 /** Citation shapes an answer may use: `path:12`, `path:12-40`, `path:12–40`. */

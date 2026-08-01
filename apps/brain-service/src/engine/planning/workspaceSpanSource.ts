@@ -9,22 +9,33 @@
  *
  * The fingerprint is a STAT (mtime + size), never a read: it is consulted on every
  * cache hit, and re-reading a file to decide whether to re-read it would leave the
- * filesystem cost exactly where it was. © MigraTeck LLC.
+ * filesystem cost exactly where it was.
+ *
+ * CONTAINMENT COMES FIRST, including for the stat. An earlier version resolved the
+ * path itself and called `statSync` directly, which let a model-supplied `..` in
+ * the exploration fallback probe host files: the contents never escaped, but
+ * existence, size and mtime did, and a "no such file" outside the workspace was
+ * distinguishable from a rejected path. Both now resolve to the same silent
+ * `undefined`. © MigraTeck LLC.
  */
 
 import * as fs from 'node:fs';
-import * as path from 'node:path';
-import { runInspection } from '../inspectRoutes.js';
+import { runInspection, resolveWorkspacePath } from '../inspectRoutes.js';
 import type { EvidenceSource } from '../grounding/evidenceLedger.js';
 
 export function makeSpanSource(workspaceRoot: string, relPath: string, startLine: number, endLine: number): EvidenceSource {
   return {
-    fingerprint() {
+    async fingerprint() {
       try {
-        const s = fs.statSync(path.resolve(workspaceRoot, relPath));
+        // Boundary first. A path that fails containment never reaches `statSync`,
+        // so nothing about it — existence, size, mtime, or which error it would
+        // have produced — can be inferred from the result.
+        const abs = await resolveWorkspacePath(workspaceRoot, relPath);
+        const s = fs.statSync(abs);
         return `${s.mtimeMs}:${s.size}`;
       } catch {
-        return undefined; // absent or unreadable: treat as unknown, never as unchanged
+        // Rejected, absent and unreadable are deliberately indistinguishable.
+        return undefined;
       }
     },
     async read() {
