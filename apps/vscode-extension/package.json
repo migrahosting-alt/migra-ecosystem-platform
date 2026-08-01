@@ -349,7 +349,7 @@
     "build": "tsc -b",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "npm run build && node ./scripts/test-smoke.js",
-    "test:unit": "tsc -b && node scripts/aggregate-controls.mjs && node scripts/check-notification-awaits.mjs && node --test dist/test/unit/*.test.js",
+    "test:unit": "tsc -b && node scripts/check-brain-transport.mjs && node scripts/aggregate-controls.mjs && node scripts/check-notification-awaits.mjs && node --test dist/test/unit/*.test.js",
     "test:integration": "tsc -b && node ./dist/test/runTest.js",
     "test:vsix": "tsc -b && node scripts/bundle.mjs && node ./dist/test/runTestVsix.js",
     "test:ops": "tsc -b && node ./dist/test/runOps.js",

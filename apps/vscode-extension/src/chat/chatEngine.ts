@@ -21,6 +21,9 @@ import { getEscalationDispatch } from '../services/escalationConsent.js';
 import { attributionView, type RoutingView } from '../panel/providerRouterViewModel.js';
 import { buildAiRequest } from './intentMapping.js';
 import { parseSummaryTurns } from './conversationSummary.js';
+import { ChatTurnExecution } from '../services/chatTurnExecution.js';
+import { governedChild } from '../services/chatChildDispatch.js';
+import type { BrainStore } from '../services/brainPersistence.js';
 
 /** A backend-agnostic output surface for a chat turn. Both the native chat
  * participant (wrapping a vscode.ChatResponseStream) and the dedicated chat
@@ -41,6 +44,10 @@ export interface ChatEngineDeps {
   migraAiClient: MigraAiClient;
   /** Sanitized routing diagnostics recorder (observability only). */
   engineDiagnostics?: EngineDiagnostics;
+  /** Durable execution store. When present every chat turn becomes a governed
+   * operation with its own parent record; when absent the turn runs ungoverned and
+   * says so, rather than pretending a record exists. */
+  brainStore?: BrainStore;
 }
 
 
@@ -117,6 +124,16 @@ export interface ChatTurnOptions {
  *
  * `conversationSummary` is supplied by the caller (built from whatever history
  * representation it holds) so the engine stays agnostic of the chat surface. */
+/**
+ * Governed entry point.
+ *
+ * The turn's parent record is created BEFORE any work, and resolved in a `finally` so
+ * every exit path — including the seven early returns below — lands on an observed
+ * terminal state rather than falling off the end unrecorded.
+ *
+ * The VS Code token is wired as a TRIGGER only. It reports that someone pressed stop;
+ * whether the work actually stopped is decided by `finish()`, from child records.
+ */
 export async function runChatTurn(
   deps: ChatEngineDeps,
   sink: ChatSink,
@@ -124,6 +141,42 @@ export async function runChatTurn(
   conversationSummary: string,
   token: vscode.CancellationToken,
   options: ChatTurnOptions = {},
+): Promise<void> {
+  if (!deps.brainStore) {
+    // No store wired: run ungoverned rather than fabricate a record.
+    await runChatTurnInner(deps, sink, prompt, conversationSummary, token, options, undefined);
+    return;
+  }
+  const turn = await ChatTurnExecution.begin(deps.brainStore, newTurnId());
+  const stop = token.onCancellationRequested(() => {
+    void turn.requestCancellation();
+  });
+  try {
+    await runChatTurnInner(deps, sink, prompt, conversationSummary, token, options, turn);
+  } finally {
+    stop.dispose();
+    // Control returning is the observable acknowledgement that this turn's own loop
+    // stopped. It is NOT evidence that an in-flight child stopped — `finish()` checks
+    // each child's own record for that, and refuses `cancelled` if any is unresolved.
+    if (token.isCancellationRequested) turn.acknowledgeCancellation();
+    await turn.finish();
+  }
+}
+
+let turnCounter = 0;
+function newTurnId(): string {
+  turnCounter += 1;
+  return `turn-${Date.now().toString(36)}-${turnCounter}`;
+}
+
+async function runChatTurnInner(
+  deps: ChatEngineDeps,
+  sink: ChatSink,
+  prompt: string,
+  conversationSummary: string,
+  token: vscode.CancellationToken,
+  options: ChatTurnOptions,
+  turn: ChatTurnExecution | undefined,
 ): Promise<void> {
   const { brainClient, router } = deps;
   const trimmed = prompt.trim();
@@ -138,10 +191,12 @@ export async function runChatTurn(
   // execution error — never an LLM apology, never a silent fallback to chat.
   const agentCmd = parseAgentCommand(trimmed);
   if (agentCmd) {
-    await runAgentCommand(deps.migraAiClient, agentCmd, sink, {
-      rootPath: vscode.workspace.workspaceFolders?.[0]?.uri.fsPath,
-      path: activeEditor ? vscode.workspace.asRelativePath(activeEditor.document.uri) : undefined,
-    });
+    await governedChild(turn, 'agent_command', () =>
+      runAgentCommand(deps.migraAiClient, agentCmd, sink, {
+        rootPath: vscode.workspace.workspaceFolders?.[0]?.uri.fsPath,
+        path: activeEditor ? vscode.workspace.asRelativePath(activeEditor.document.uri) : undefined,
+      }),
+    );
     return;
   }
 
@@ -151,12 +206,14 @@ export async function runChatTurn(
   // tool steps render as progress. Read-only; never edits; never a silent fallback.
   const deepCmd = parseDeepCommand(trimmed);
   if (deepCmd) {
-    await runDeepCommand(
-      deps.migraAiClient,
-      deepCmd,
-      vscode.workspace.workspaceFolders?.[0]?.uri.fsPath,
-      sink,
-      tokenToSignal(token),
+    await governedChild(turn, 'deep_command', () =>
+      runDeepCommand(
+        deps.migraAiClient,
+        deepCmd,
+        vscode.workspace.workspaceFolders?.[0]?.uri.fsPath,
+        sink,
+        tokenToSignal(token),
+      ),
     );
     return;
   }
@@ -179,7 +236,9 @@ export async function runChatTurn(
       renderRoutingError(sink, 'workspace_not_open', { operation: 'workspace inspection', traceId: requestId });
       return;
     }
-    await runInspectionTurn(deps.migraAiClient, inspectRoot, buildInspectionPlan(trimmed), sink, tokenToSignal(token));
+    await governedChild(turn, 'inspection_turn', () =>
+      runInspectionTurn(deps.migraAiClient, inspectRoot, buildInspectionPlan(trimmed), sink, tokenToSignal(token)),
+    );
     return;
   }
 
@@ -288,66 +347,74 @@ export async function runChatTurn(
     // proposes, it never writes; applying is an explicit operator action here.
     const changesetProposals: ChangesetProposal[] = [];
     const taskSignal = tokenToSignal(token);
-    await runEngineerTurn(
-      deps.migraAiClient,
-      {
-        rootPath: workspaceRootForTask,
-        task: trimmed,
-        ecosystem: detectEcosystem({ rootPath: workspaceRootForTask, prompt: trimmed }),
-        // The agent now serves ordinary conversation too, so it must carry the
-        // same memory the chat path held — otherwise "now build it" loses what
-        // "it" refers to. Server-owned conversations keep history server-side.
-        ...(options.conversationId ? {} : { history: parseSummaryTurns(conversationSummary) }),
-        // Honor the chat model picker on this path too. Ordinary turns used to
-        // reach the chat endpoint (which reads modelProfile); now that they run
-        // the agent, the picker would silently stop working unless its choice is
-        // carried across as the agent's tier.
-        ...(options.modelProfile ? { tier: PROFILE_TIER[options.modelProfile] } : {}),
-        // An explicitly pinned model outranks the profile — same as the chat path.
-        ...(options.modelId ? { model: options.modelId } : {}),
-        ...(options.policy ? { policy: options.policy } : {}),
-        // The MODE is the request field, so the boundary is enforced by the Brain
-        // rather than by how the question happens to be worded. `auto` is omitted so
-        // the wire shape for existing callers is byte-identical to before.
-        ...(options.sourceMode && groundingModeOf(options.sourceMode) !== 'auto'
-          ? { groundingMode: groundingModeOf(options.sourceMode) }
-          : {}),
-        // Capability class from the HOST WORKFLOW. Omitted for ordinary chat, so an
-        // existing payload is byte-identical and absence still means `ungoverned`.
-        ...taskClassPayload(options.workflow),
-        // The second dimension, sent as its own field. `off` is OMITTED so the wire
-        // shape for every existing caller stays byte-identical — and because a Brain
-        // that predates the field resolves absence to `off` anyway, which is the same
-        // meaning rather than a lucky coincidence.
-        ...(options.liveMode && liveModeOf(options.liveMode) !== 'off'
-          ? { liveKnowledgeMode: liveModeOf(options.liveMode) }
-          : {}),
-        // Legacy alias kept alongside for older Brains that predate `groundingMode`;
-        // a Brain that understands both prefers the mode.
-        ...(requiresApprovedEvidence(options.sourceMode) ? { requireApproved: true } : {}),
-        ...(options.currentBranch ? { currentBranch: options.currentBranch } : {}),
-      },
-      {
-        markdown: (t) => sink.markdown(t),
-        progress: (t) => sink.progress?.(t),
-        // Slice 5: cloud escalation needs explicit consent (a modal); the approved
-        // cloud result is rendered back into the response.
-        onEscalation: async (offer) => {
-          const d = getEscalationDispatch();
-          if (d) await d(offer, (md) => sink.markdown(md));
+    await governedChild(turn, 'engineer_turn', () =>
+      runEngineerTurn(
+        deps.migraAiClient,
+        {
+          rootPath: workspaceRootForTask,
+          task: trimmed,
+          ecosystem: detectEcosystem({ rootPath: workspaceRootForTask, prompt: trimmed }),
+          // The agent now serves ordinary conversation too, so it must carry the
+          // same memory the chat path held — otherwise "now build it" loses what
+          // "it" refers to. Server-owned conversations keep history server-side.
+          ...(options.conversationId ? {} : { history: parseSummaryTurns(conversationSummary) }),
+          // Honor the chat model picker on this path too. Ordinary turns used to
+          // reach the chat endpoint (which reads modelProfile); now that they run
+          // the agent, the picker would silently stop working unless its choice is
+          // carried across as the agent's tier.
+          ...(options.modelProfile ? { tier: PROFILE_TIER[options.modelProfile] } : {}),
+          // An explicitly pinned model outranks the profile — same as the chat path.
+          ...(options.modelId ? { model: options.modelId } : {}),
+          ...(options.policy ? { policy: options.policy } : {}),
+          // The MODE is the request field, so the boundary is enforced by the Brain
+          // rather than by how the question happens to be worded. `auto` is omitted so
+          // the wire shape for existing callers is byte-identical to before.
+          ...(options.sourceMode && groundingModeOf(options.sourceMode) !== 'auto'
+            ? { groundingMode: groundingModeOf(options.sourceMode) }
+            : {}),
+          // Capability class from the HOST WORKFLOW. Omitted for ordinary chat, so an
+          // existing payload is byte-identical and absence still means `ungoverned`.
+          ...taskClassPayload(options.workflow),
+          // The second dimension, sent as its own field. `off` is OMITTED so the wire
+          // shape for every existing caller stays byte-identical — and because a Brain
+          // that predates the field resolves absence to `off` anyway, which is the same
+          // meaning rather than a lucky coincidence.
+          ...(options.liveMode && liveModeOf(options.liveMode) !== 'off'
+            ? { liveKnowledgeMode: liveModeOf(options.liveMode) }
+            : {}),
+          // Legacy alias kept alongside for older Brains that predate `groundingMode`;
+          // a Brain that understands both prefers the mode.
+          ...(requiresApprovedEvidence(options.sourceMode) ? { requireApproved: true } : {}),
+          ...(options.currentBranch ? { currentBranch: options.currentBranch } : {}),
         },
-        onAttribution: (routing) => {
-          const a = attributionView((routing ?? {}) as RoutingView);
-          sink.markdown(`\n\n— _${a.headline}_${a.lines.length ? '\n' + a.lines.map((l) => `_${l}_`).join('  ·  ') : ''}\n`);
+        {
+          markdown: (t) => sink.markdown(t),
+          progress: (t) => sink.progress?.(t),
+          // Slice 5: cloud escalation needs explicit consent (a modal); the approved
+          // cloud result is rendered back into the response.
+          onEscalation: async (offer) => {
+            // Named, not `d`: this dispatches the offer to a CLOUD provider after the
+            // consent modal, so it must be legible to the dispatch-governance guard.
+            const escalationDispatch = getEscalationDispatch();
+            if (escalationDispatch) {
+              await governedChild(turn, 'cloud_escalation', () =>
+                escalationDispatch(offer, (md) => sink.markdown(md)),
+              );
+            }
+          },
+          onAttribution: (routing) => {
+            const a = attributionView((routing ?? {}) as RoutingView);
+            sink.markdown(`\n\n— _${a.headline}_${a.lines.length ? '\n' + a.lines.map((l) => `_${l}_`).join('  ·  ') : ''}\n`);
+          },
+          onProposal: (p) => {
+            const pv = (p as { preview?: { ops?: ChangesetOp[]; proposalHash?: string; fileCount?: number } }).preview;
+            if (pv?.proposalHash && pv.ops?.length) {
+              changesetProposals.push({ proposalHash: pv.proposalHash, ops: pv.ops, ...(pv.fileCount != null ? { fileCount: pv.fileCount } : {}) });
+            }
+          },
         },
-        onProposal: (p) => {
-          const pv = (p as { preview?: { ops?: ChangesetOp[]; proposalHash?: string; fileCount?: number } }).preview;
-          if (pv?.proposalHash && pv.ops?.length) {
-            changesetProposals.push({ proposalHash: pv.proposalHash, ops: pv.ops, ...(pv.fileCount != null ? { fileCount: pv.fileCount } : {}) });
-          }
-        },
-      },
-      taskSignal,
+        taskSignal,
+      ),
     );
     // Offer to apply the final (most complete) proposed changeset — user-confirmed,
     // via the engine's approval boundary. Non-fatal: a decline/failure just leaves
@@ -360,7 +427,9 @@ export async function runChatTurn(
       // Opt-in auto-approve: when on, apply without the interactive prompt. Default
       // off keeps the owner's preview-only behavior (review + click Apply).
       try {
-        applied = await previewAndMaybeApplyChangeset(deps.migraAiClient, workspaceRootForTask, finalChangeset, 'MigraPilot proposal', { autoApply, signal: taskSignal });
+        applied = await governedChild(turn, 'apply_changeset', () =>
+          previewAndMaybeApplyChangeset(deps.migraAiClient, workspaceRootForTask, finalChangeset, 'MigraPilot proposal', { autoApply, signal: taskSignal }),
+        );
       } catch {
         /* apply UI failure never breaks the chat turn */
       }
@@ -370,13 +439,21 @@ export async function runChatTurn(
     // Suppressed when the turn produced no work (a question answered, nothing
     // proposed): a "0 files" report under a plain answer is noise, not a summary.
     if (finalChangeset || token.isCancellationRequested) {
+      // Resolve the turn BEFORE reporting on it. `token.isCancellationRequested` says
+      // only that stop was pressed; `outcome.state === 'cancelled'` requires an
+      // acknowledged cancellation AND every child resolved to a terminal record AND
+      // the parent's terminal revision persisted. Without a store there is no record
+      // to consult, so the deprecated signal remains the only available input and the
+      // report is honestly ungoverned.
+      if (turn && token.isCancellationRequested) turn.acknowledgeCancellation();
+      const outcome = turn ? await turn.finish() : undefined;
       sink.markdown(
         buildWorkReport({
           task: trimmed,
           root: workspaceRootForTask,
           proposedFiles: (finalChangeset?.ops ?? []).map((o) => ({ path: o.path ?? '', ...(o.kind ? { kind: o.kind } : {}) })),
           applied,
-          cancelled: token.isCancellationRequested,
+          cancelled: outcome ? outcome.state === 'cancelled' : token.isCancellationRequested,
           autoApply,
         }),
       );
@@ -391,7 +468,7 @@ export async function runChatTurn(
   }
 
   if (backend.kind === 'remote') {
-    await streamRemote(router, sink, token, trimmed, requestId, {
+    await streamRemote(router, sink, token, trimmed, requestId, turn, {
       activeFile: activeEditor?.document.uri.fsPath,
       selectionText,
       conversationSummary,
@@ -423,7 +500,9 @@ export async function runChatTurn(
       },
       findDirs: async (name) => {
         try {
-          const res = await deps.migraAiClient.inspect({ rootPath: openRoot, op: 'find', query: name, kind: 'dir', limit: 30 });
+          const res = await governedChild(turn, 'workspace_find', () =>
+            deps.migraAiClient.inspect({ rootPath: openRoot, op: 'find', query: name, kind: 'dir', limit: 30 }),
+          );
           if (!res.ok) return [];
           const matches = (res.data as { matches?: Array<{ path?: string }> }).matches ?? [];
           return matches
@@ -456,7 +535,7 @@ export async function runChatTurn(
     aiRequest.conversationId = options.conversationId;
     aiRequest.memoryPolicy = options.memoryPolicy ?? { mode: 'session', retrieve: true, store: true };
   }
-  await streamLocalEngine(deps, sink, token, requestId, aiRequest);
+  await streamLocalEngine(deps, sink, token, requestId, aiRequest, turn);
 }
 
 /** Stream a chat turn from the local MigraAI Engine. On failure, surface a
@@ -467,26 +546,29 @@ async function streamLocalEngine(
   token: vscode.CancellationToken,
   requestId: string,
   request: AiChatRequest,
+  chatTurn?: ChatTurnExecution,
 ): Promise<void> {
   const signal = tokenToSignal(token);
   const diag = deps.engineDiagnostics;
   let sawToken = false;
   try {
-    for await (const event of deps.migraAiClient.chatStream(request, signal, requestId)) {
-      if (event.type === 'route') {
-        diag?.record(event.routing);
-        sink.progress(
-          event.routing.failedOver.length
-            ? `Engine → ${event.routing.model} (failover)`
-            : `Engine → ${event.routing.model}`,
-        );
-      } else if (event.type === 'token') {
-        sawToken = true;
-        sink.markdown(event.text);
-      } else if (event.type === 'done') {
-        diag?.finish('completed', event.usage);
+    await governedChild(chatTurn, 'local_chat_stream', async () => {
+      for await (const event of deps.migraAiClient.chatStream(request, signal, requestId)) {
+        if (event.type === 'route') {
+          diag?.record(event.routing);
+          sink.progress(
+            event.routing.failedOver.length
+              ? `Engine → ${event.routing.model} (failover)`
+              : `Engine → ${event.routing.model}`,
+          );
+        } else if (event.type === 'token') {
+          sawToken = true;
+          sink.markdown(event.text);
+        } else if (event.type === 'done') {
+          diag?.finish('completed', event.usage);
+        }
       }
-    }
+    });
     // Stream closed without a terminal `done` (rare) — still mark completed.
     if (sawToken) diag?.finish('completed');
   } catch (err) {
@@ -520,6 +602,7 @@ async function streamRemote(
   token: vscode.CancellationToken,
   prompt: string,
   requestId: string,
+  chatTurn: ChatTurnExecution | undefined,
   context: {
     activeFile?: string;
     selectionText?: string;
@@ -541,14 +624,16 @@ async function streamRemote(
     },
   };
   try {
-    for await (const chunk of router.chat(turn, signal)) {
-      if (chunk.type === 'token') {
-        sink.markdown(chunk.text);
-      } else if (chunk.type === 'plan') {
-        sink.progress('Planning…');
+    await governedChild(chatTurn, 'remote_router_stream', async () => {
+      for await (const chunk of router.chat(turn, signal)) {
+        if (chunk.type === 'token') {
+          sink.markdown(chunk.text);
+        } else if (chunk.type === 'plan') {
+          sink.progress('Planning…');
+        }
+        // 'done'/'info' need no rendering here.
       }
-      // 'done'/'info' need no rendering here.
-    }
+    });
   } catch (err) {
     const code = isPilotError(err) ? err.code : 'NETWORK';
     if (code !== 'CANCELLED') {

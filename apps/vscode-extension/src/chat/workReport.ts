@@ -3,6 +3,18 @@
 // regardless of what prose the model wrote in its final answer (Claude Code /
 // Copilot behavior). Pure + unit-tested; the caller feeds it observed run facts.
 
+import { deriveFlags, isStaleRender, type PersistedBrainOperation } from '../services/brainPersistence.js';
+
+/** The authoritative execution snapshot a report is rendered FROM.
+ *
+ * `currentRevision` is what the store believes is authoritative right now. If it
+ * differs from the snapshot's own revision the report is rendered from stale data and
+ * says so — mixed revisions are never rendered silently. */
+export interface WorkReportExecution {
+  record: PersistedBrainOperation;
+  currentRevision: number;
+}
+
 export interface WorkReportInput {
   /** The user's task text. */
   task: string;
@@ -12,8 +24,15 @@ export interface WorkReportInput {
   proposedFiles: Array<{ path: string; kind?: string }>;
   /** True iff the changeset was applied to disk. */
   applied: boolean;
-  /** True iff the turn was cancelled (Stop). */
+  /**
+   * @deprecated NOT an authority. When `execution` is supplied every outcome flag is
+   * derived from the persisted record and this value is ignored entirely. It remains
+   * only for call sites that have not yet been migrated to the execution snapshot.
+   */
   cancelled: boolean;
+  /** The persisted execution record. When present it is the ONLY source of truth for
+   * cancelled/success/failed/interrupted. */
+  execution?: WorkReportExecution;
   /** Whether auto-apply mode was on (changes how "not applied" reads). */
   autoApply?: boolean;
 }
@@ -27,11 +46,49 @@ const KIND_LABEL: Record<string, string> = { add: 'create', delete: 'delete', mk
 
 /** Render the report as a Markdown block. Deterministic — same facts, same text. */
 export function buildWorkReport(input: WorkReportInput): string {
-  if (input.cancelled) {
-    return '\n\n---\n**⏹ Stopped.** The run was cancelled before it finished — no changes were applied.\n';
+  // One snapshot decides every outcome flag. `input.cancelled` is consulted only when
+  // no execution record was supplied, and is deprecated.
+  const flags = input.execution ? deriveFlags(input.execution.record) : undefined;
+  const cancelled = flags ? flags.cancelled : input.cancelled;
+
+  const header: string[] = [];
+  if (input.execution) {
+    const { record, currentRevision } = input.execution;
+    const stale = isStaleRender(
+      { operationId: record.operationId, revision: record.revision },
+      { operationId: record.operationId, revision: currentRevision },
+    );
+    if (stale) {
+      header.push(
+        `> **STALE REPORT** — rendered from revision ${record.revision}, but revision ` +
+          `${currentRevision} is authoritative. Do not rely on the outcome below.`,
+        '',
+      );
+    }
+    header.push(`_operation \`${record.operationId}\` · revision ${record.revision}_`, '');
+    if (flags && !flags.success && record.currentState === 'completed') {
+      header.push(
+        '> Completed **without** durable terminal evidence — not reported as success.',
+        '',
+      );
+    }
+    if (flags?.interrupted) {
+      header.push(
+        `> Interrupted (${record.recovery?.evidence ?? 'unknown'}) — the outcome was never observed.`,
+        '',
+      );
+    }
+    if (flags?.cancellationRequested && !flags.cancellationConfirmed) {
+      header.push('> Cancellation requested but not confirmed', '');
+    }
+  }
+  const prefix = header.length ? `${header.join('\n')}` : '';
+
+  if (cancelled) {
+    return `\n\n---\n${prefix}**⏹ Stopped.** The run was cancelled before it finished — no changes were applied.\n`;
   }
 
-  const lines: string[] = ['\n\n---', '### 📋 Summary'];
+  const lines: string[] = ['\n\n---', ...(prefix ? [prefix] : []), '### 📋 Summary'];
   lines.push(`- **Task:** ${clip(input.task, 160) || '(none)'}`);
   lines.push(`- **Folder:** \`${input.root}\``);
 

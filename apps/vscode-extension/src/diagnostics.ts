@@ -1,4 +1,6 @@
 import * as vscode from 'vscode';
+
+import { BrainOperationError, callBrainTool } from './services/brainClient.js';
 import type {
   DiagnosticsGetResponse,
   DiagnosticsSyncRequest,
@@ -71,17 +73,21 @@ export async function syncDiagnostics(brainServiceUrl: string): Promise<void> {
     items: collectDiagnostics(),
   };
 
-  const response = await fetch(`${brainServiceUrl.replace(/\/$/, '')}/internal/diagnostics.sync`, {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-    },
-    body: JSON.stringify(body),
-  });
+  // Governed: routed through the approved Brain transport so a diagnostics sync gets
+  // the same timeout, cancellation and structured failure classification as any other
+  // Brain call. A non-terminal outcome throws with the OBSERVED category attached.
+  const outcome = await callBrainTool<DiagnosticsSyncRequest, unknown>(
+    brainServiceUrl,
+    '/internal/diagnostics.sync',
+    body,
+  );
 
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`Failed to sync diagnostics: ${response.status} ${text}`);
+  if (!outcome.ok) {
+    throw new BrainOperationError(
+      outcome.record,
+      outcome.record.failureCategory,
+      `Failed to sync diagnostics: ${outcome.statusLine}`,
+    );
   }
 }
 

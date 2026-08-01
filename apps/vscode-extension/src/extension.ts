@@ -22,7 +22,14 @@ import {
 } from './services/backendDiagnostics.js';
 import { BrainLifecycle, type EnsureResult } from './services/brainLifecycle.js';
 import { createRealBrainLauncher } from './services/brainLifecycleVscode.js';
-import { BrainClient } from './services/brainClient.js';
+import { BrainClient, callBrainTool } from './services/brainClient.js';
+import { vscodeBrainConfig } from './services/brainConfigVscode.js';
+import {
+  bootstrapBrainStore,
+  connectionPersister,
+  recoveredStatusLine,
+  type BrainBootstrap,
+} from './services/brainStoreVscode.js';
 import { CAP_DIAGNOSTICS_SYNC, evaluateCapability } from './services/commandCapabilities.js';
 import { PilotApiClient } from '@migrapilot/pilot-client';
 import { VscodePilotApiConfig, VscodeSecretTokenStore, getMode } from './services/pilotConfigVscode.js';
@@ -53,6 +60,7 @@ import { MigraPilotStudioPanel } from './panel/shell/studioPanel.js';
 import { type ShellTabId } from './panel/shell/navigationModel.js';
 
 let outputChannel: vscode.OutputChannel;
+let brainBootstrap: BrainBootstrap | undefined;
 let brainClient: BrainClient;
 let migraAiClient: MigraAiClient;
 let engineDiagnostics: EngineDiagnostics;
@@ -258,7 +266,38 @@ export async function activate(context: vscode.ExtensionContext): Promise<MigraP
   inheritedAgentBootstrapSecret = process.env.MIGRAPILOT_AGENT_BOOTSTRAP_SECRET;
   delete process.env.MIGRAPILOT_AGENT_BOOTSTRAP_SECRET;
   outputChannel = vscode.window.createOutputChannel('MigraPilot');
-  brainClient = new BrainClient(outputChannel);
+
+  // ── Durable execution authority ──────────────────────────────────────────
+  // Steps 1-5 of the activation contract. This MUST complete before any health
+  // probe or Brain operation begins: a probe that lands first would overwrite the
+  // recovered state the user is shown, so an interrupted run would look fine.
+  try {
+    brainBootstrap = await bootstrapBrainStore(context, (m) => output(m));
+    const recoveredLine = recoveredStatusLine(brainBootstrap.recovered);
+    if (recoveredLine) {
+      // 6 — publish recovered status BEFORE polling starts.
+      output(recoveredLine);
+      void vscode.window.showWarningMessage(recoveredLine);
+    }
+  } catch (err) {
+    // Persistence is unavailable. Say so plainly rather than running as if durable.
+    output(`brain-store: UNAVAILABLE — ${String(err)}. Runtime state will not be durable.`);
+  }
+
+  // Connection readiness becomes durable here. The persister is narrow by type — it
+  // cannot reach an operation record — so injecting it carries none of the
+  // writers-before-recovery hazard. Absent a store, the client simply runs
+  // non-durably rather than pretending otherwise.
+  brainClient = new BrainClient(
+    outputChannel,
+    vscodeBrainConfig(),
+    undefined,
+    undefined,
+    undefined,
+    brainBootstrap ? connectionPersister(brainBootstrap.store, (m) => output(m)) : undefined,
+    // Operation state becomes durable in production here.
+    brainBootstrap?.store,
+  );
   // MigraAI Engine client — the local chat path streams through /api/ai/chat.
   // The engine is served by brain-service, so it shares the brain base URL.
   migraAiClient = new MigraAiClient({
@@ -371,6 +410,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<MigraP
     router,
     migraAiClient,
     engineDiagnostics,
+    // Governs chat turns. Bootstrap ran at activation and its recovery is already
+    // persisted by the time this executes, so a turn can never start before the store
+    // is consistent.
+    ...(brainBootstrap?.store ? { brainStore: brainBootstrap.store } : {}),
     memoryMode: () => {
       const m = String(vscode.workspace.getConfiguration('migrapilot').get('memoryMode', 'session'));
       return m === 'off' || m === 'durable' ? m : 'session';
@@ -765,8 +808,14 @@ async function productionDiagnosticsStatus(): Promise<void> {
   const cfg = vscode.workspace.getConfiguration('migrapilot');
   const base = String(cfg.get('brainUrl', 'http://127.0.0.1:3988'));
   try {
-    const res = await fetch(`${base}/api/ai/production-diagnostics/status`);
-    const s = (await res.json()) as { mode?: string; enabled?: boolean; targetCount?: number; capabilityCount?: number };
+    // Governed: `base` is migrapilot.brainUrl, so this IS Brain traffic and goes
+      // through the approved transport for the same timeout, cancellation and
+      // structured failure classification. Read-only — never a mutation.
+      const outcome = await callBrainTool<undefined, {
+        mode?: string; enabled?: boolean; targetCount?: number; capabilityCount?: number;
+      }>(base, '/api/ai/production-diagnostics/status', undefined, { method: 'GET' });
+      if (!outcome.ok || !outcome.value) throw new Error(outcome.statusLine);
+    const s = outcome.value;
     const label = s.mode ?? 'Production Diagnostics — Read Only';
     const state = s.enabled ? 'ENABLED (read-only)' : 'DISABLED (fail-closed)';
     const message = `${label}: ${state}. Targets: ${s.targetCount ?? 0}. Read-only capabilities: ${s.capabilityCount ?? 0}.`;

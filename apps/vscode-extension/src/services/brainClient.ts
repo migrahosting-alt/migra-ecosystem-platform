@@ -1,4 +1,3 @@
-import * as vscode from 'vscode';
 import type {
   ChatTurnRequest,
   ChatTurnResponse,
@@ -9,10 +8,99 @@ import type {
   RouteResponse,
 } from '@migrapilot/shared-types';
 
+import {
+  BrainConnectionState,
+  type ConnectionPersister,
+  type ConnectionReadiness,
+} from './brainConnection.js';
+import { runBrainOperation, type BrainOperationOutcome, type FetchLike } from './brainTransport.js';
+import type { ExecutionRecord, FailureCategory } from './executionState.js';
+import { operationPersister, type BrainStore, type OperationPersister } from './brainPersistence.js';
+
+/**
+ * A Brain operation that did not reach observed terminal success.
+ *
+ * Carries the full authoritative record, so a caller can report the OBSERVED
+ * category rather than "something went wrong". Failure is surfaced as a throw so
+ * that a caller which ignores it crashes loudly — the safe direction. A silent
+ * fallthrough into success is the one outcome this type makes impossible.
+ */
+/**
+ * The record for work that was CANCELLED BEFORE DISPATCH.
+ *
+ * A real, fully-shaped record in `created` — not `{} as ExecutionRecord`, which type-
+ * asserts a shape it does not have and leaves every field undefined for the next reader.
+ * `created` is exactly right here: it means the record exists and nothing was sent.
+ */
+export function neverDispatchedRecord(
+  operationId: string,
+  requestedAction: string,
+  brainEndpoint: string,
+  failures: string[] = [],
+): ExecutionRecord {
+  return {
+    operationId,
+    requestedAction,
+    brainEndpoint,
+    startedAt: new Date().toISOString(),
+    state: 'created',
+    failureCategory: 'cancellation_unconfirmed',
+    failureDetail: 'cancelled before any attempt was dispatched',
+    terminalObserved: false,
+    transitions: [],
+    transportAttempts: [],
+    commands: [],
+    filesChanged: [],
+    testsRun: [],
+    failures: [...failures],
+    remainingWork: [],
+    invariantViolations: [],
+  };
+}
+
+export class BrainOperationError extends Error {
+  constructor(
+    readonly record: ExecutionRecord,
+    readonly category: FailureCategory | undefined,
+    message: string,
+  ) {
+    super(message);
+    this.name = 'BrainOperationError';
+  }
+}
+
+/** Success is unwrapped ONLY when the machine reported observed terminal evidence. */
+/**
+ * Turn a governed outcome into a value or a throw.
+ *
+ * Exported so a caller that needs the RECORD (to stamp its own surface) can keep the
+ * identical failure behaviour instead of hand-rolling a second, subtly different
+ * error path beside the governed one.
+ */
+export function unwrap<T>(outcome: BrainOperationOutcome<T>): T {
+  if (outcome.ok && outcome.value !== undefined) return outcome.value;
+  throw new BrainOperationError(outcome.record, outcome.record.failureCategory, outcome.statusLine);
+}
+
+// APPROVED BRAIN TRANSPORT ADAPTER.
+//
+// This module is the ONLY production code permitted to reach the Brain. Every request
+// runs through `runBrainOperation()`, so it is governed by the truthful execution
+// model: nothing dispatches until its precondition is confirmed, success is emitted
+// only on observed terminal evidence, and failures carry a structured category rather
+// than a generic Error.
+//
+// `scripts/check-brain-transport.mjs` fails the build if a direct Brain-targeting
+// `fetch()` appears anywhere else in production source.
+//
+// Health is deliberately NOT an operation: it uses the same transport primitive and
+// the same classifier, but writes to a separate BrainConnectionState so a routine poll
+// can never rewrite a completed, failed, cancelled or running operation record.
+
 /** `GET /health` as the engine actually serves it. The extra blocks are optional
  * because an older brain may not report them; consumers must handle absence. */
 export interface BrainHealthDetail extends HealthResponse {
-  readiness?: {
+  readonly readiness?: {
     process?: string;
     inferenceProviders?: string;
     persistence?: string;
@@ -22,7 +110,7 @@ export interface BrainHealthDetail extends HealthResponse {
     migrationState?: string;
     detail?: string;
   };
-  operational?: {
+  readonly operational?: {
     status?: string;
     reachable?: boolean;
     schemaCurrent?: boolean;
@@ -34,64 +122,362 @@ export interface BrainHealthDetail extends HealthResponse {
   };
 }
 
-export class BrainClient {
-  constructor(private readonly output: vscode.OutputChannel) {}
+/** RETRY POLICY — explicit, because an implicit retry on a consequential action can
+ * duplicate real work.
+ *
+ *  consequential (route/chat/tool)  never retried
+ *  terminal_state_unverified        NEVER retried automatically: a response was not
+ *                                   proven absent, so the server may already have
+ *                                   performed the work
+ *  health                           bounded retries permitted (see healthRetries)
+ *  idempotent reads (retrieve)      retried only when explicitly configured
+ *
+ * Cancellation stops pending retries; each attempt appends its own transport-attempt
+ * entry under the SAME operation id; a late result from a superseded attempt is
+ * discarded by the state machine. */
+export interface BrainRetryPolicy {
+  readonly consequential: 0;
+  readonly health: number;
+  readonly idempotentReads: number;
+}
 
-  get baseUrl(): string {
-    const config = vscode.workspace.getConfiguration('migrapilot');
-    return String(config.get('brainUrl', 'http://127.0.0.1:3988')).replace(/\/$/, '');
+/** Categories worth another attempt: the request demonstrably did not land, so a
+ * retry cannot duplicate work. Everything else is non-retryable by construction —
+ * notably `terminal_state_unverified`, where the server MAY already have acted, and
+ * `invalid_response`, where the server answered and answering again is unlikely to
+ * differ. */
+export const RETRYABLE: ReadonlySet<FailureCategory> = new Set([
+  'connection_refused',
+  'connection_lost',
+  'request_timeout',
+]);
+
+/** Deterministic, bounded backoff. Injected in tests so no real time passes. */
+export interface Scheduler {
+  delay(ms: number, signal?: AbortSignal): Promise<void>;
+}
+
+export const realScheduler: Scheduler = {
+  delay: (ms, signal) =>
+    new Promise((resolve, reject) => {
+      if (signal?.aborted) return reject(new Error('cancelled during backoff'));
+      const t = setTimeout(resolve, ms);
+      signal?.addEventListener('abort', () => { clearTimeout(t); reject(new Error('cancelled during backoff')); }, { once: true });
+    }),
+};
+
+/** Bounded: never unbounded exponential growth. */
+export function backoffMs(attempt: number, baseMs = 50, capMs = 500): number {
+  return Math.min(capMs, baseMs * 2 ** Math.max(0, attempt - 1));
+}
+
+export const DEFAULT_RETRY_POLICY: BrainRetryPolicy = {
+  consequential: 0,
+  health: 2,
+  idempotentReads: 0,
+};
+
+let operationCounter = 0;
+function nextOperationId(action: string): string {
+  operationCounter += 1;
+  return `${action}-${Date.now().toString(36)}-${operationCounter}`;
+}
+
+/** Configuration the client needs, injected rather than read from `vscode` directly.
+ *
+ * This exists so BrainClient is CONSTRUCTIBLE IN A UNIT TEST. The public-path tests
+ * must drive the exported methods — that is the only way to catch wrapper logic
+ * mistranslating a timeout or normalising a malformed response into success — and a
+ * hard `import * as vscode` made that impossible under bare `node --test`. */
+export interface BrainConfig {
+  baseUrl(): string;
+  timeoutMs(): number;
+  connectionTimeoutMs(): number;
+}
+
+/** Minimal log sink. Avoids depending on `vscode.OutputChannel` in tests. */
+export interface BrainLogSink {
+  appendLine(message: string): void;
+}
+
+export class BrainClient {
+  private readonly connection: BrainConnectionState;
+
+  constructor(
+    private readonly output: BrainLogSink,
+    private readonly config: BrainConfig,
+    private readonly fetchImpl?: FetchLike,
+    private readonly retryPolicy: BrainRetryPolicy = DEFAULT_RETRY_POLICY,
+    private readonly scheduler: Scheduler = realScheduler,
+    connectionPersister?: ConnectionPersister,
+    /** When supplied, EVERY dispatch gets its own per-operation persister, so operation
+     * state is durable in production. Absent ⇒ operations run non-durably and say so. */
+    private readonly store?: BrainStore,
+  ) {
+    this.connection = new BrainConnectionState(
+      this.baseUrl,
+      undefined,
+      undefined,
+      connectionPersister,
+    );
   }
 
-  async health(): Promise<HealthResponse> {
-    return this.request<HealthResponse>('GET', '/health');
+  get baseUrl(): string {
+    return this.config.baseUrl().replace(/\/$/, '');
+  }
+
+  /** Configurable, replacing the former hard-coded 1500ms probe timeout. */
+  get timeoutMs(): number {
+    return this.config.timeoutMs();
+  }
+
+  get connectionTimeoutMs(): number {
+    return this.config.connectionTimeoutMs();
+  }
+
+  /** Current readiness — derived only from observed probes. */
+  get readiness(): ConnectionReadiness {
+    return this.connection.readiness;
+  }
+
+  connectionStatusLine(): string {
+    return this.connection.statusLine();
+  }
+
+  /** Last OBSERVED connection failure category. Reads the connection record only —
+   * it can never expose or mutate operation state. */
+  snapshotFailureCategory(): FailureCategory | undefined {
+    return this.connection.snapshot().lastFailureCategory;
   }
 
   /**
-   * The SAME `GET /health` payload, typed to include the operational readiness
-   * fields the engine already returns beyond {@link HealthResponse}: persistence
-   * readiness, schema version, durable-store integrity and the retention worker.
+   * Probe readiness. Updates the CONNECTION record only.
    *
-   * No new endpoint and no new request — the extra fields were always on the
-   * wire; this accessor just stops discarding them so the shell can display
-   * canonical readiness instead of guessing from `status` alone.
+   * Bounded retries are allowed here because a health check is idempotent and
+   * performs no work.
    */
-  async healthDetail(): Promise<BrainHealthDetail> {
-    return this.request<BrainHealthDetail>('GET', '/health');
+  async health(signal?: AbortSignal): Promise<HealthResponse> {
+    const attempts = this.retryPolicy.health + 1;
+    let last: BrainOperationOutcome<BrainHealthDetail> | undefined;
+
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
+      if (signal?.aborted) break; // cancellation stops pending retries
+      this.connection.probeStarted();
+      last = await this.dispatch<BrainHealthDetail>('health', '/health', undefined, 'GET', {
+        timeoutMs: this.connectionTimeoutMs,
+        ...(signal ? { signal } : {}),
+      });
+      if (last.ok && last.value) {
+        this.connection.probeSucceeded();
+        return last.value;
+      }
+      const category = last.record.failureCategory;
+      this.connection.probeFailed({
+        ...(category === 'connection_refused' ? { cause: { code: 'ECONNREFUSED' } } : {}),
+        ...(category === 'brain_process_exit' ? { processExited: true } : {}),
+        ...(category === 'invalid_response' ? { parseFailed: true } : {}),
+        ...(category === 'request_timeout' ? { cause: { code: 'UND_ERR_HEADERS_TIMEOUT' } } : {}),
+      });
+    }
+    this.log(`health probe failed: ${this.connection.statusLine()}`);
+    if (!last) {
+      // Aborted before the first dispatch, so no attempt — and therefore no record —
+      // exists. Dereferencing `last!` here would crash with a TypeError, which is the
+      // one outcome this whole design forbids: a failure that is not a governed failure.
+      throw new BrainOperationError(
+        neverDispatchedRecord(nextOperationId('health'), 'health', this.baseUrl),
+        'cancellation_unconfirmed',
+        'Cancelled before any health probe was dispatched.',
+      );
+    }
+    throw new BrainOperationError(
+      last.record,
+      last.record.failureCategory,
+      this.connection.statusLine(),
+    );
   }
 
-  async route(payload: RouteRequest): Promise<RouteResponse> {
-    return this.request<RouteResponse>('POST', '/route', payload);
+  /** The same `/health` payload, typed to include the operational readiness fields. */
+  async healthDetail(signal?: AbortSignal): Promise<BrainHealthDetail> {
+    return (await this.health(signal)) as BrainHealthDetail;
   }
 
-  async retrieve(payload: RetrieveRequest): Promise<RetrieveResponse> {
-    return this.request<RetrieveResponse>('POST', '/retrieve', payload);
+  /** Consequential — never retried. */
+  async route(payload: RouteRequest, signal?: AbortSignal): Promise<RouteResponse> {
+    return unwrap(await this.routeGoverned(payload, signal));
   }
 
-  async chat(payload: ChatTurnRequest): Promise<ChatTurnResponse> {
-    return this.request<ChatTurnResponse>('POST', '/chat', payload);
-  }
-
-  private async request<TResponse>(
-    method: 'GET' | 'POST',
-    path: string,
-    body?: unknown,
-  ): Promise<TResponse> {
-    const url = `${this.baseUrl}${path}`;
-    this.log(`${method} ${url}`);
-
-    const response = await fetch(url, {
-      method,
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: method === 'GET' ? undefined : JSON.stringify(body),
+  /** Governed variant: returns the full outcome instead of throwing.
+   *
+   * `gate` lets a caller attach a precondition that must be CONFIRMED before anything
+   * is dispatched. An unconfirmed gate performs zero transport calls. */
+  async routeGoverned(
+    payload: RouteRequest,
+    signal?: AbortSignal,
+    gate?: { precondition: () => boolean | Promise<boolean>; label?: string },
+  ): Promise<BrainOperationOutcome<RouteResponse>> {
+    return this.dispatch<RouteResponse>('route', '/route', payload, 'POST', {
+      timeoutMs: this.timeoutMs,
+      ...(gate ? { gate } : {}),
+      ...(signal ? { signal } : {}),
     });
+  }
 
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status} ${response.statusText}`);
+  /** Idempotent read — retried only when the policy explicitly allows it. */
+  async retrieve(payload: RetrieveRequest, signal?: AbortSignal): Promise<RetrieveResponse> {
+    return unwrap(await this.retrieveGoverned(payload, signal));
+  }
+
+  /** Governed variant: returns the full outcome instead of throwing. */
+  async retrieveGoverned(
+    payload: RetrieveRequest,
+    signal?: AbortSignal,
+  ): Promise<BrainOperationOutcome<RetrieveResponse>> {
+    return this.retryIdempotent<RetrieveResponse>('retrieve', '/retrieve', payload, signal);
+  }
+
+  /**
+   * Bounded retry for EXPLICITLY idempotent reads.
+   *
+   * THE INVARIANT IS STRICT SEQUENCING: a retry attempt is created only after the
+   * previous attempt has reached a terminal outcome, so at most one transport attempt
+   * is ever active for an operation. A late result from an earlier attempt therefore
+   * cannot exist, and the next attempt is authoritative precisely because the prior
+   * one has already ended.
+   *
+   * An earlier version carried a generation token and claimed it provided supersession
+   * safety. It did not: `generation` was only mutated at the top of the next iteration,
+   * after this loop had already awaited the attempt to completion, so the comparison
+   * was unreachable. `await` was doing the work. The token has been removed rather than
+   * left as defensive-looking dead code, and no supersession claim is made — that state
+   * is not reachable in a sequential design.
+   */
+  private async retryIdempotent<T>(
+    action: string,
+    path: string,
+    payload: unknown,
+    signal?: AbortSignal,
+  ): Promise<BrainOperationOutcome<T>> {
+    const maxAttempts = Math.max(0, this.retryPolicy.idempotentReads) + 1;
+    const operationId = nextOperationId(action);
+    let last: BrainOperationOutcome<T> | undefined;
+    const attemptLog: string[] = [];
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      if (signal?.aborted) break; // cancellation prevents creating a further attempt
+      const attemptId = `${operationId}#a${attempt}`;
+
+      const outcome = await this.dispatch<T>(action, path, payload, 'POST', {
+        timeoutMs: this.timeoutMs,
+        ...(signal ? { signal } : {}),
+        operationId,
+        attemptId,
+      });
+
+      last = outcome;
+      if (outcome.ok) {
+        attemptLog.push(`${attemptId} succeeded — authoritative result`);
+        break;
+      }
+
+      const category = outcome.record.failureCategory;
+      const retryable = category !== undefined && RETRYABLE.has(category);
+      if (!retryable || attempt === maxAttempts) {
+        attemptLog.push(
+          `${attemptId} failed with ${category ?? 'unknown'} — ${
+            retryable ? 'retry_exhausted' : 'not retryable'
+          }`,
+        );
+        break;
+      }
+      if (signal?.aborted) {
+        attemptLog.push(`${attemptId} failed with ${category} — cancelled, no further attempt`);
+        break;
+      }
+
+      attemptLog.push(`${attemptId} failed with ${category} — retry_scheduled`);
+      try {
+        await this.scheduler.delay(backoffMs(attempt), signal);
+      } catch {
+        attemptLog.push(`${attemptId} cancelled during backoff — no further attempt`);
+        break;
+      }
     }
 
-    return (await response.json()) as TResponse;
+    if (last && attemptLog.length > 0) {
+      last.record.failures.push(...attemptLog);
+    }
+    return (
+      last ?? {
+        ok: false,
+        record: neverDispatchedRecord(operationId, action, this.baseUrl, attemptLog),
+        statusLine: 'Cancelled before any attempt was dispatched.',
+        durable: false,
+      }
+    );
+  }
+
+  /** Consequential — never retried. */
+  async chat(payload: ChatTurnRequest, signal?: AbortSignal): Promise<ChatTurnResponse> {
+    return unwrap(await this.chatGoverned(payload, signal));
+  }
+
+  /** Governed variant: returns the full outcome instead of throwing. */
+  async chatGoverned(
+    payload: ChatTurnRequest,
+    signal?: AbortSignal,
+    gate?: { precondition: () => boolean | Promise<boolean>; label?: string },
+    persister?: OperationPersister,
+  ): Promise<BrainOperationOutcome<ChatTurnResponse>> {
+    return this.dispatch<ChatTurnResponse>('chat', '/chat', payload, 'POST', {
+      timeoutMs: this.timeoutMs,
+      ...(gate ? { gate } : {}),
+      ...(persister ? { persister } : {}),
+      ...(signal ? { signal } : {}),
+    });
+  }
+
+  /** Single governed dispatch path. Nothing in this class reaches the network any
+   * other way. */
+  private async dispatch<T>(
+    action: string,
+    path: string,
+    body: unknown,
+    method: 'GET' | 'POST',
+    opts: {
+      timeoutMs: number;
+      signal?: AbortSignal;
+      gate?: { precondition: () => boolean | Promise<boolean>; label?: string };
+      operationId?: string;
+      attemptId?: string;
+      persister?: OperationPersister;
+    },
+  ): Promise<BrainOperationOutcome<T>> {
+    const endpoint = `${this.baseUrl}${path}`;
+    this.log(`${method} ${endpoint}`);
+    // One persister per operation — each owns its own monotonic revision chain, so
+    // concurrent operations cannot interleave revisions into each other's files.
+    const persister =
+      opts.persister ??
+      (this.store ? operationPersister(this.store, (m) => this.log(m)) : undefined);
+    return runBrainOperation<T>({
+      operationId: opts.operationId ?? nextOperationId(action),
+      requestedAction: opts.attemptId ? `${action} (${opts.attemptId})` : action,
+      endpoint,
+      method,
+      timeoutMs: opts.timeoutMs,
+      ...(body === undefined ? {} : { body }),
+      ...(this.fetchImpl ? { fetchImpl: this.fetchImpl } : {}),
+      ...(opts.signal ? { externalSignal: opts.signal } : {}),
+      ...(persister ? { persister } : {}),
+      operationKind: action === 'health' ? 'health' : action === 'retrieve' ? 'idempotent_read' : 'consequential',
+      ...(opts.gate
+        ? {
+            precondition: opts.gate.precondition,
+            preconditionLabel: opts.gate.label ?? 'caller precondition',
+          }
+        : {}),
+    });
   }
 
   log(message: string): void {
@@ -99,23 +485,28 @@ export class BrainClient {
   }
 }
 
+/**
+ * Governed replacement for the former parallel `callBrainTool` fetch path.
+ *
+ * Tool calls are CONSEQUENTIAL — they are never retried, and a
+ * `terminal_state_unverified` outcome is never replayed, because the tool may already
+ * have run on the server.
+ */
 export async function callBrainTool<TRequest, TResponse>(
   baseUrl: string,
   toolPath: string,
   body: TRequest,
-): Promise<TResponse> {
-  const response = await fetch(`${baseUrl.replace(/\/$/, '')}${toolPath}`, {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-    },
-    body: JSON.stringify(body),
+  opts: { timeoutMs?: number; signal?: AbortSignal; fetchImpl?: FetchLike; method?: 'GET' | 'POST' } = {},
+): Promise<BrainOperationOutcome<TResponse>> {
+  const endpoint = `${baseUrl.replace(/\/$/, '')}${toolPath}`;
+  return runBrainOperation<TResponse>({
+    operationId: nextOperationId('tool'),
+    requestedAction: `tool:${toolPath}`,
+    endpoint,
+    method: opts.method ?? 'POST',
+    timeoutMs: opts.timeoutMs ?? 30_000,
+    ...(body === undefined ? {} : { body }),
+    ...(opts.fetchImpl ? { fetchImpl: opts.fetchImpl } : {}),
+    ...(opts.signal ? { externalSignal: opts.signal } : {}),
   });
-
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`Brain tool call failed: ${response.status} ${text}`);
-  }
-
-  return (await response.json()) as TResponse;
 }
