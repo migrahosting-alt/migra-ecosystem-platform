@@ -5,8 +5,8 @@
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { parseDeepCommand, runDeepCommand } from '../../chat/deepCommand.js';
-import type { MigraAiClient, AnswerStreamEvent } from '../../services/migraAiClient.js';
+import { groundingFooter, parseDeepCommand, runDeepCommand, timeoutFooter } from '../../chat/deepCommand.js';
+import type { MigraAiClient, AnswerStreamEvent, GroundedClaim } from '../../services/migraAiClient.js';
 
 function sink(): { md: string; prog: string[]; s: { markdown(t: string): void; progress(t: string): void } } {
   const box = { md: '', prog: [] as string[] };
@@ -50,7 +50,7 @@ test('runDeepCommand: a missing workspace is a truthful message, not a crash', a
 test('runDeepCommand: renders tool steps before streaming the answer', async () => {
   const out = sink();
   const events: AnswerStreamEvent[] = [
-    { type: 'route', model: 'qwen3-coder:30b' },
+    { type: 'route', model: 'qwen3-coder:30b', runner: 'local' },
     { type: 'step', step: { tool: 'search', args: { query: 'login' }, ok: true, summary: 'search(login) → 3 hit(s)' } },
     { type: 'step', step: { tool: 'read', args: { path: 'src/auth.ts' }, ok: true, summary: 'read(src/auth.ts)' } },
     { type: 'token', text: 'Login is handled in ' },
@@ -65,4 +65,61 @@ test('runDeepCommand: renders tool steps before streaming the answer', async () 
   assert.match(out.md, /src\/auth\.ts:1/);
   // The investigation block must appear before the answer text.
   assert.ok(out.md.indexOf('Investigation') < out.md.indexOf('Login is handled'), 'steps render before answer');
+});
+
+const CLAIM: GroundedClaim = {
+  text: '`src/auth.ts:1-4` verifies the token.',
+  kind: 'direct_evidence',
+  sources: [{ path: 'src/auth.ts', startLine: 1, endLine: 4, excerptHash: 'abc123def4567890' }],
+  confidence: 'high',
+};
+
+test('runDeepCommand: the grounding verdict is rendered after the verified answer', async () => {
+  const out = sink();
+  const events: AnswerStreamEvent[] = [
+    { type: 'route', model: 'qwen3-coder:30b', runner: 'local' },
+    { type: 'phase', phase: 'answer_verification' },
+    { type: 'token', text: '`src/auth.ts:1-4` verifies the token.' },
+    {
+      type: 'grounding',
+      claims: [CLAIM],
+      rejected: [{ text: 'It also posts to Sentry.', reason: 'term-absent-from-evidence', terms: ['Sentry'] }],
+      refused: false,
+      evidence: { readPaths: ['src/auth.ts'], spanCount: 1, knownPathCount: 3 },
+    },
+    { type: 'done', stepsUsed: 1, model: 'qwen3-coder:30b' },
+  ];
+  await runDeepCommand(clientYielding(events), { kind: 'ask', question: 'how does login work?' }, '/repo', out.s, new AbortController().signal);
+
+  assert.match(out.md, /✅ grounded/);
+  assert.match(out.md, /1 evidenced, 1 removed/);
+  assert.match(out.md, /src\/auth\.ts:1-4/);
+  assert.ok(out.md.indexOf('verifies the token') < out.md.indexOf('grounded'), 'the verdict follows the answer');
+  assert.ok(out.prog.some((p) => /Verifying every claim/.test(p)), 'verification is visible while it runs');
+});
+
+test('groundingFooter reports a refusal as a refusal, not as a quiet success', () => {
+  assert.match(groundingFooter([], [{ text: 'x', reason: 'no-source-span', terms: [] }], true), /⛔ not answered from evidence/);
+  assert.match(groundingFooter([CLAIM], [], false), /✅ grounded — 1 evidenced, 0 removed/);
+  assert.match(groundingFooter([{ ...CLAIM, kind: 'inference', basis: 'hedged' }], [], true), /1 inferred/);
+});
+
+test('timeoutFooter names the call that ran out — not the whole request', () => {
+  const text = timeoutFooter({
+    category: 'model_call_timeout',
+    callIndex: 2,
+    callBudgetMs: 150_000,
+    elapsedMs: 150_010,
+    contextFileCount: 7,
+    lastObservedPhase: 'model_inference',
+    partialEvidenceAvailable: true,
+    runElapsedMs: 331_000,
+    modelCallsCompleted: 1,
+  });
+  assert.match(text, /model call #2/);
+  assert.match(text, /150s budget/);
+  assert.match(text, /7 file\(s\) in context/);
+  assert.ok(!/request timed out/i.test(text));
+  // A user cancellation is not a failure to report.
+  assert.equal(timeoutFooter({ category: 'client_abort', callIndex: 1, callBudgetMs: 1, elapsedMs: 1, contextFileCount: 0, lastObservedPhase: 'model_inference', partialEvidenceAvailable: false, runElapsedMs: 1, modelCallsCompleted: 0 }), '');
 });

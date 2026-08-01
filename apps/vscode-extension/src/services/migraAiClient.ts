@@ -119,17 +119,69 @@ export interface AgenticStep {
   summary: string;
 }
 
+/** An exact source span a claim rests on, as recorded by the Brain's ledger. */
+export interface ClaimSource {
+  path: string;
+  startLine: number;
+  endLine: number;
+  excerptHash: string;
+}
+
+/** One verified statement from an agent answer. */
+export interface GroundedClaim {
+  text: string;
+  kind: 'direct_evidence' | 'inference';
+  sources: ClaimSource[];
+  confidence: 'high' | 'medium' | 'low';
+  basis?: 'hedged' | 'comment';
+}
+
+/** A statement the Brain removed, with the reason it could not be supported. */
+export interface RejectedClaim {
+  text: string;
+  reason: string;
+  terms: string[];
+}
+
+/** Measured evidence for a budget exhaustion — never a generic "timed out". */
+export interface AnswerTimeoutEvidence {
+  category: 'model_call_timeout' | 'overall_deadline' | 'client_abort';
+  callIndex: number;
+  callBudgetMs: number;
+  elapsedMs: number;
+  contextFileCount: number;
+  lastObservedPhase: string;
+  partialEvidenceAvailable: boolean;
+  runElapsedMs: number;
+  modelCallsCompleted: number;
+}
+
 /** Streamed events from the agentic answer loop (`POST /api/ai/answer`, SSE). */
 export type AnswerStreamEvent =
-  | { type: 'route'; model: string }
+  | { type: 'request'; traceId: string; tier: string; tierSource: string; runner: string; model: string }
+  | { type: 'route'; model: string; runner: 'local' | 'cloud' }
+  | { type: 'phase'; phase: string }
   | { type: 'step'; step: AgenticStep }
   | { type: 'token'; text: string }
+  | {
+      type: 'grounding';
+      claims: GroundedClaim[];
+      rejected: RejectedClaim[];
+      refused: boolean;
+      evidence: { readPaths: string[]; spanCount: number; knownPathCount: number };
+    }
+  | { type: 'timeout'; evidence: AnswerTimeoutEvidence }
+  | { type: 'timings'; timings: Record<string, unknown> }
   | { type: 'done'; stepsUsed: number; model: string };
 
 export interface AnswerRequest {
   prompt: string;
   workspaceRoot: string;
-  /** `cloud` escalates to a faster/stronger model (opt-in). */
+  /**
+   * Where the answer runs. This route's vocabulary is exactly `local | cloud` —
+   * NOT the model-registry tiers (`fast`/`balanced`/`deep`). Anything else is a
+   * 400 from the Brain rather than a silent local fallback.
+   */
   tier?: 'local' | 'cloud';
   model?: string;
   maxSteps?: number;
@@ -562,9 +614,30 @@ export class MigraAiClient {
             throw new PilotError('SERVER_ERROR', data.message ?? 'The agent run failed.', { requestId });
           }
           const d = parsed.data as Record<string, unknown>;
-          if (parsed.event === 'route') yield { type: 'route', model: String(d.model ?? '') };
+          if (parsed.event === 'request') {
+            yield {
+              type: 'request',
+              traceId: String(d.traceId ?? ''),
+              tier: String(d.tier ?? ''),
+              tierSource: String(d.tierSource ?? ''),
+              runner: String(d.runner ?? ''),
+              model: String(d.model ?? ''),
+            };
+          } else if (parsed.event === 'route') {
+            yield { type: 'route', model: String(d.model ?? ''), runner: d.runner === 'cloud' ? 'cloud' : 'local' };
+          } else if (parsed.event === 'phase') yield { type: 'phase', phase: String(d.phase ?? '') };
           else if (parsed.event === 'step') yield { type: 'step', step: d.step as AgenticStep };
           else if (parsed.event === 'token') yield { type: 'token', text: String(d.text ?? '') };
+          else if (parsed.event === 'grounding') {
+            yield {
+              type: 'grounding',
+              claims: (d.claims ?? []) as GroundedClaim[],
+              rejected: (d.rejected ?? []) as RejectedClaim[],
+              refused: d.refused === true,
+              evidence: (d.evidence ?? { readPaths: [], spanCount: 0, knownPathCount: 0 }) as { readPaths: string[]; spanCount: number; knownPathCount: number },
+            };
+          } else if (parsed.event === 'timeout') yield { type: 'timeout', evidence: d.evidence as AnswerTimeoutEvidence };
+          else if (parsed.event === 'timings') yield { type: 'timings', timings: (d.timings ?? {}) as Record<string, unknown> };
           else if (parsed.event === 'done') yield { type: 'done', stepsUsed: Number(d.stepsUsed ?? 0), model: String(d.model ?? '') };
         }
       }

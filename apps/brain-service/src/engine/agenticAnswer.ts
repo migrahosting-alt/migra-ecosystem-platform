@@ -18,6 +18,16 @@
 import * as path from 'node:path';
 import { runInspection, type InspectOp } from './inspectRoutes.js';
 import { retrieveContext } from '../retrieval/retrieve.js';
+import { EvidenceLedger } from './grounding/evidenceLedger.js';
+import { verifyAnswer, type GroundedClaim, type RejectedClaim } from './grounding/claimVerifier.js';
+import {
+  AnswerTimeline,
+  type AnswerRunTimings,
+  type ModelCallTiming,
+  type RunPhase,
+  type TimeoutCategory,
+  type TimeoutEvidence,
+} from './answerTimings.js';
 
 export interface AgenticStep {
   tool: string;
@@ -27,10 +37,21 @@ export interface AgenticStep {
 }
 
 export interface AgenticResult {
+  /** The answer to show — verified, with unsupported claims removed. */
   answer: string;
+  /** What the model actually wrote, before the grounding gate. Kept for audit. */
+  rawAnswer: string;
   steps: AgenticStep[];
   model: string;
+  runner: 'local' | 'cloud';
   stepsUsed: number;
+  claims: GroundedClaim[];
+  rejected: RejectedClaim[];
+  /** True when no claim survived as direct evidence. */
+  refused: boolean;
+  timings: AnswerRunTimings;
+  /** Present when a model-call or run budget was exhausted. */
+  timeout?: TimeoutEvidence;
 }
 
 interface ChatMessage {
@@ -48,8 +69,18 @@ interface RawToolCall {
 const MAX_STEPS_DEFAULT = 8;
 const TOOL_RESULT_CAP = 1800; // chars fed back for a search/find/list result
 const READ_RESULT_CAP = 8000; // chars fed back for a `read` (files need real context)
-const PER_CALL_TIMEOUT_MS = 150_000; // budget for ONE model call (local models can be slow)
-const OVERALL_DEADLINE_MS = 360_000; // hard ceiling for the whole loop
+export const PER_CALL_TIMEOUT_MS = 150_000; // budget for ONE model call (local models can be slow)
+export const OVERALL_DEADLINE_MS = 360_000; // hard ceiling for the whole loop
+
+/**
+ * Smallest slice of a per-call budget worth starting a synthesis call with.
+ *
+ * Expressed as a FRACTION rather than a fixed number of milliseconds so it tracks
+ * whatever budget the run is actually operating under — a fixed 20s floor silently
+ * disables synthesis for any deployment or test that runs on a smaller budget,
+ * which is the same class of bug as the absolute timeouts this slice is unpicking.
+ */
+const MIN_SYNTHESIS_BUDGET_RATIO = 0.1;
 
 /** Read-only tool surface exposed to the model (OpenAI/Ollama function schema). */
 const TOOLS = [
@@ -132,7 +163,10 @@ const SYSTEM_PROMPT =
   '3. NEVER describe a generic/typical architecture (e.g. "might use Winston/Sentry/Kubernetes", "could be Express"). Only state what the files you READ actually show.\n' +
   '4. This workspace may contain DUPLICATE, ARCHIVED, BACKUP, or LEGACY copies of code. Prefer current source; name the exact file path you are describing so the user knows which copy. If files conflict, say so.\n' +
   '5. If the tools do not surface the specific code that answers the question, say EXACTLY that: state what you searched for / read, and that you could not find the answer in this workspace. Do NOT fill the gap with inference.\n' +
-  'When you have enough real evidence, give a concise Markdown answer and cite each repository fact as `path:line` from a file you read.';
+  'When you have enough real evidence, give a concise Markdown answer and cite each repository fact as `path:line` from a file you read.\n' +
+  '\nHOW YOUR ANSWER IS CHECKED (this is enforcement, not advice): every sentence is verified against the exact text these tools returned. ' +
+  'A sentence that names a file, symbol or technology absent from that text is DELETED from your answer, as is a factual sentence with no `path:line` citation in its paragraph. ' +
+  'So: put a `path:line` citation in every paragraph that states repository behaviour, name only files you read, and if you are reasoning rather than reporting, hedge it explicitly ("likely", "appears to") so it survives as labelled inference instead of being removed.';
 
 /** Map a model tool call to a read-only inspection op and execute it. Exported
  * for testing — it exercises the whole read-only tool surface without a model. */
@@ -140,7 +174,7 @@ export async function executeTool(
   name: string,
   args: Record<string, unknown>,
   workspaceRoot: string,
-): Promise<{ ok: boolean; summary: string; feedback: string }> {
+): Promise<{ ok: boolean; summary: string; feedback: string; data?: unknown }> {
   const s = (v: unknown): string | undefined => (typeof v === 'string' && v.trim() ? v.trim() : undefined);
   const n = (v: unknown): number | undefined => (typeof v === 'number' && Number.isFinite(v) ? v : undefined);
   try {
@@ -179,10 +213,64 @@ export async function executeTool(
     const { data } = await runInspection({ ...req, op } as Parameters<typeof runInspection>[0]);
     const cap = name === 'read' ? READ_RESULT_CAP : TOOL_RESULT_CAP;
     const feedback = JSON.stringify(data).slice(0, cap);
-    return { ok: true, summary: summarize(name, args, data), feedback };
+    // `data` is returned alongside the model-facing feedback so the caller can
+    // record structured evidence. The feedback string is capped for the model; the
+    // ledger keeps the real spans, because the gate must check claims against what
+    // was RETRIEVED, not against a truncated JSON rendering of it.
+    return { ok: true, summary: summarize(name, args, data), feedback, data };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return { ok: false, summary: `${name} failed: ${message}`, feedback: `Error: ${message}` };
+  }
+}
+
+/** Fold one tool result into the evidence ledger, per op result shape. */
+export function recordEvidence(ledger: EvidenceLedger, tool: string, data: unknown): void {
+  if (!data || typeof data !== 'object') return;
+  const d = data as Record<string, unknown>;
+  switch (tool) {
+    case 'read': {
+      const p = typeof d.path === 'string' ? d.path : '';
+      const start = typeof d.startLine === 'number' ? d.startLine : 1;
+      const end = typeof d.endLine === 'number' ? d.endLine : start;
+      const content = typeof d.content === 'string' ? d.content : '';
+      if (p && content) ledger.recordRead(p, start, end, content);
+      break;
+    }
+    case 'search': {
+      for (const raw of Array.isArray(d.matches) ? d.matches : []) {
+        const m = raw as { path?: unknown; line?: unknown; preview?: unknown };
+        if (typeof m.path === 'string' && typeof m.line === 'number' && typeof m.preview === 'string') {
+          ledger.recordSearchMatch(m.path, m.line, m.preview);
+        }
+      }
+      break;
+    }
+    case 'find': {
+      // A found filename proves the path exists — never what is inside it.
+      for (const raw of Array.isArray(d.matches) ? d.matches : []) {
+        const m = raw as { path?: unknown };
+        if (typeof m.path === 'string') ledger.notePath(m.path);
+      }
+      break;
+    }
+    case 'list': {
+      const dir = typeof d.dir === 'string' && d.dir !== '.' ? d.dir : '';
+      for (const raw of Array.isArray(d.entries) ? d.entries : []) {
+        const e = raw as { name?: unknown };
+        if (typeof e.name === 'string') ledger.notePath(dir ? `${dir}/${e.name}` : e.name);
+      }
+      break;
+    }
+    case 'git_status': {
+      for (const raw of Array.isArray(d.files) ? d.files : []) {
+        const f = raw as { path?: unknown };
+        if (typeof f.path === 'string') ledger.notePath(f.path);
+      }
+      break;
+    }
+    default:
+      break;
   }
 }
 
@@ -267,20 +355,69 @@ export function tryParseContentToolCall(content: string): { name: string; args: 
   return null;
 }
 
+/**
+ * A model call that ran out of budget, carrying WHICH budget.
+ *
+ * Without the category, a per-call exhaustion and a whole-run deadline arrive at
+ * the route as the same anonymous `AbortError` and get reported as the same
+ * generic failure — which is precisely how ~331s of two exhausted call budgets was
+ * misread as one outer timeout.
+ */
+export class ModelBudgetExhausted extends Error {
+  constructor(
+    readonly category: TimeoutCategory,
+    readonly budgetMs: number,
+  ) {
+    super(`model call exceeded its ${category === 'model_call_timeout' ? `${budgetMs}ms call budget` : category}`);
+    this.name = 'ModelBudgetExhausted';
+  }
+}
+
+/** Arm a per-call budget on top of the loop signal, reporting which one fired. */
+function armCallBudget(
+  loopSignal: AbortSignal,
+  budgetMs: number,
+  loopCause: () => TimeoutCategory,
+): { signal: AbortSignal; release(): void; cause(): TimeoutCategory | undefined } {
+  const controller = new AbortController();
+  let cause: TimeoutCategory | undefined;
+  const timer = setTimeout(() => {
+    cause = 'model_call_timeout';
+    controller.abort();
+  }, budgetMs);
+  const onLoopAbort = (): void => {
+    cause = loopCause();
+    controller.abort();
+  };
+  if (loopSignal.aborted) onLoopAbort();
+  else loopSignal.addEventListener('abort', onLoopAbort, { once: true });
+  return {
+    signal: controller.signal,
+    release: () => {
+      clearTimeout(timer);
+      loopSignal.removeEventListener('abort', onLoopAbort);
+    },
+    cause: () => cause,
+  };
+}
+
+function isAbortError(err: unknown): boolean {
+  return err instanceof Error && (err.name === 'AbortError' || /abort/i.test(err.message));
+}
+
 async function callModel(
   nativeChatUrl: string,
   model: string,
   messages: ChatMessage[],
   useTools: boolean,
   loopSignal: AbortSignal,
+  budgetMs: number,
+  loopCause: () => TimeoutCategory,
 ): Promise<ChatMessage> {
-  // Each model call gets its OWN timeout so a multi-hop loop against a slow local
+  // Each model call gets its OWN budget so a multi-hop loop against a slow local
   // model is never cut off mid-turn; the loop-level signal still aborts the call
   // when the overall deadline or the caller cancels.
-  const callController = new AbortController();
-  const timer = setTimeout(() => callController.abort(), PER_CALL_TIMEOUT_MS);
-  const onLoopAbort = (): void => callController.abort();
-  loopSignal.addEventListener('abort', onLoopAbort, { once: true });
+  const budget = armCallBudget(loopSignal, budgetMs, loopCause);
   try {
     const res = await fetch(nativeChatUrl, {
       method: 'POST',
@@ -292,14 +429,17 @@ async function callModel(
         ...(useTools ? { tools: TOOLS } : {}),
         options: { temperature: 0.1 },
       }),
-      signal: callController.signal,
+      signal: budget.signal,
     });
     if (!res.ok) throw new Error(`agent model HTTP ${res.status}`);
     const json = (await res.json()) as { message?: ChatMessage };
     return json.message ?? { role: 'assistant', content: '' };
+  } catch (err) {
+    const cause = budget.cause();
+    if (cause && isAbortError(err)) throw new ModelBudgetExhausted(cause, budgetMs);
+    throw err;
   } finally {
-    clearTimeout(timer);
-    loopSignal.removeEventListener('abort', onLoopAbort);
+    budget.release();
   }
 }
 
@@ -311,17 +451,16 @@ async function* streamModel(
   model: string,
   messages: ChatMessage[],
   loopSignal: AbortSignal,
+  budgetMs: number,
+  loopCause: () => TimeoutCategory,
 ): AsyncGenerator<string> {
-  const callController = new AbortController();
-  const timer = setTimeout(() => callController.abort(), PER_CALL_TIMEOUT_MS);
-  const onLoopAbort = (): void => callController.abort();
-  loopSignal.addEventListener('abort', onLoopAbort, { once: true });
+  const budget = armCallBudget(loopSignal, budgetMs, loopCause);
   try {
     const res = await fetch(nativeChatUrl, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ model, messages, stream: true, options: { temperature: 0.1 } }),
-      signal: callController.signal,
+      signal: budget.signal,
     });
     if (!res.ok || !res.body) throw new Error(`agent model stream HTTP ${res.status}`);
     const decoder = new TextDecoder();
@@ -342,9 +481,12 @@ async function* streamModel(
         }
       }
     }
+  } catch (err) {
+    const cause = budget.cause();
+    if (cause && isAbortError(err)) throw new ModelBudgetExhausted(cause, budgetMs);
+    throw err;
   } finally {
-    clearTimeout(timer);
-    loopSignal.removeEventListener('abort', onLoopAbort);
+    budget.release();
   }
 }
 
@@ -362,72 +504,208 @@ export interface AgenticOptions {
   providerBaseUrl: string;
   maxSteps?: number;
   signal?: AbortSignal;
+  /** Which runner the resolved model actually belongs to. Reported, never guessed. */
+  runner?: 'local' | 'cloud';
+  /** Budget for ONE model call. Overridable so timeout behaviour is testable. */
+  perCallTimeoutMs?: number;
+  /** Ceiling for the whole run. */
+  overallDeadlineMs?: number;
+  /** Injected monotonic clock — tests assert real timing fields without waiting. */
+  clock?: () => number;
 }
 
 /** Streamed event from the agentic loop — drives a live "agent mode" UI. */
 export type AgenticEvent =
-  | { type: 'route'; model: string }
+  | { type: 'route'; model: string; runner: 'local' | 'cloud' }
+  | { type: 'phase'; phase: RunPhase }
   | { type: 'step'; step: AgenticStep }
   | { type: 'token'; text: string }
+  | {
+      type: 'grounding';
+      claims: GroundedClaim[];
+      rejected: RejectedClaim[];
+      refused: boolean;
+      evidence: { readPaths: string[]; spanCount: number; knownPathCount: number };
+      /** What the model wrote before the gate — for audit, not for display. */
+      rawAnswer: string;
+    }
+  | { type: 'timeout'; evidence: TimeoutEvidence }
+  | { type: 'timings'; timings: AnswerRunTimings }
   | { type: 'done'; stepsUsed: number; model: string };
 
 /** Build the initial messages, seeding deterministic retrieval so even a weak
- * local model starts from REAL code instead of flailing with guessed searches. */
-async function seedMessages(opts: AgenticOptions): Promise<ChatMessage[]> {
+ * local model starts from REAL code instead of flailing with guessed searches.
+ * Every seeded chunk is recorded as evidence: it is text the run really retrieved
+ * and put in front of the model, so a claim may legitimately rest on it. */
+async function seedMessages(opts: AgenticOptions, ledger: EvidenceLedger, timeline: AnswerTimeline): Promise<ChatMessage[]> {
   let seededEvidence = '';
+  const endEnumeration = timeline.beginPhase('enumeration');
   try {
     const seed = await retrieveContext({ query: opts.prompt, workspaceRoot: opts.workspaceRoot, feature: 'chat', maxChunks: 5 });
+    endEnumeration();
+    const endSelection = timeline.beginPhase('evidence_selection');
     const chunks = seed.chunks.filter((c) => c.source === 'grep');
     if (chunks.length) {
       const rel = (p: string): string => {
         const r = path.relative(opts.workspaceRoot, p);
         return r && !r.startsWith('..') ? r.replace(/\\/g, '/') : p;
       };
+      for (const c of chunks) ledger.recordSeed(rel(c.path), c.startLine, c.endLine, c.snippet);
       seededEvidence =
         '\n\nRelevant code already located in the workspace (read more with the `read` tool if needed):\n' +
         chunks.map((c) => `--- ${rel(c.path)}:${c.startLine}-${c.endLine} ---\n${c.snippet}`).join('\n\n');
     }
+    endSelection();
   } catch {
     /* seeding is best-effort */
+    endEnumeration();
   }
-  return [
+  const endPrompt = timeline.beginPhase('prompt_construction');
+  const messages: ChatMessage[] = [
     { role: 'system', content: SYSTEM_PROMPT },
     { role: 'user', content: opts.prompt + seededEvidence },
   ];
+  endPrompt();
+  return messages;
 }
 
-/** The agentic tool loop as a stream of events. Tool calls in a single turn run
- * in PARALLEL. The final answer is streamed token-by-token. */
+/** Verify the model's text against the ledger and emit the terminal events. */
+async function* emitVerified(
+  raw: string,
+  ledger: EvidenceLedger,
+  timeline: AnswerTimeline,
+  opts: AgenticOptions,
+  stepsUsed: number,
+  runner: 'local' | 'cloud',
+): AsyncGenerator<AgenticEvent> {
+  yield { type: 'phase', phase: 'answer_verification' };
+  const endVerify = timeline.beginPhase('answer_verification');
+  const verified = verifyAnswer(raw, ledger, { question: opts.prompt });
+  endVerify();
+  timeline.noteRepeatedReads(ledger.repeatedReads());
+  timeline.markPhase('complete');
+
+  // The runtime's own measured report is appended AFTER the gate: it is not a
+  // model claim, and passing it through a checker built for model claims would be
+  // checking our own instrumentation against the model's evidence.
+  const evidence = timeline.timeoutEvidence;
+  const note = evidence ? `\n\n${describeTimeout(evidence)}` : '';
+  yield { type: 'token', text: verified.answer + note };
+  yield {
+    type: 'grounding',
+    claims: verified.claims,
+    rejected: verified.rejected,
+    refused: verified.refused,
+    evidence: verified.evidence,
+    rawAnswer: raw,
+  };
+  if (evidence) yield { type: 'timeout', evidence };
+  yield { type: 'timings', timings: timeline.snapshot() };
+  yield { type: 'done', stepsUsed, model: opts.model };
+  void runner;
+}
+
+/** Truthful, measured account of a budget exhaustion — never "the request timed out". */
+export function describeTimeout(e: TimeoutEvidence): string {
+  if (e.category === 'client_abort') return '> ⚠️ The run was cancelled by the client before it finished.';
+  const what =
+    e.category === 'model_call_timeout'
+      ? `model call #${e.callIndex} used its full ${Math.round(e.callBudgetMs / 1000)}s budget (${Math.round(e.elapsedMs / 1000)}s elapsed) without returning`
+      : `the run reached its overall deadline after ${Math.round(e.runElapsedMs / 1000)}s`;
+  const scope = `${e.contextFileCount} file(s) were represented in that call's context; ${e.modelCallsCompleted} model call(s) had completed.`;
+  const partial = e.partialEvidenceAvailable
+    ? 'The answer above is limited to the evidence gathered before that point.'
+    : 'No workspace evidence had been gathered before that point.';
+  return `> ⚠️ Budget exhausted at \`${e.lastObservedPhase}\`: ${what}. ${scope} ${partial}`;
+}
+
+/**
+ * The agentic tool loop as a stream of events. Tool calls in a single turn run in
+ * PARALLEL.
+ *
+ * The final answer is BUFFERED, verified against {@link EvidenceLedger}, and only
+ * then emitted. Token-by-token streaming of the raw model text was the nicer UX,
+ * but a grounding gate that streams before it checks has not gated anything — the
+ * unsupported sentence is already on screen. Live tool steps still stream, so the
+ * run remains legible while it works.
+ */
 export async function* streamAgentic(opts: AgenticOptions): AsyncGenerator<AgenticEvent> {
   const maxSteps = opts.maxSteps && opts.maxSteps > 0 ? opts.maxSteps : MAX_STEPS_DEFAULT;
+  const perCallBudgetMs = opts.perCallTimeoutMs && opts.perCallTimeoutMs > 0 ? opts.perCallTimeoutMs : PER_CALL_TIMEOUT_MS;
+  const overallDeadlineMs = opts.overallDeadlineMs && opts.overallDeadlineMs > 0 ? opts.overallDeadlineMs : OVERALL_DEADLINE_MS;
+  const runner = opts.runner ?? 'local';
   const nativeChatUrl = nativeChatUrlFrom(opts.providerBaseUrl);
 
+  const timeline = new AnswerTimeline(opts.clock);
+  const ledger = new EvidenceLedger();
+
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), OVERALL_DEADLINE_MS);
-  if (opts.signal) opts.signal.addEventListener('abort', () => controller.abort(), { once: true });
+  let loopCause: TimeoutCategory = 'overall_deadline';
+  const cause = (): TimeoutCategory => loopCause;
+  const timer = setTimeout(() => {
+    loopCause = 'overall_deadline';
+    controller.abort();
+  }, overallDeadlineMs);
+  if (opts.signal) {
+    opts.signal.addEventListener(
+      'abort',
+      () => {
+        loopCause = 'client_abort';
+        controller.abort();
+      },
+      { once: true },
+    );
+  }
+
+  let toolSteps = 0;
+  let budgetExhausted = false;
 
   try {
-    yield { type: 'route', model: opts.model };
-    const messages = await seedMessages(opts);
-    const readFiles = new Set<string>(); // files actually read this run
+    yield { type: 'route', model: opts.model, runner };
+    yield { type: 'phase', phase: 'enumeration' };
+    const messages = await seedMessages(opts, ledger, timeline);
     const evidenceLog: string[] = []; // compiled tool results for a clean synthesis
     let consecutiveEmpty = 0;
+    let step = 0;
 
-    for (let step = 0; step < maxSteps; step += 1) {
+    for (; step < maxSteps; step += 1) {
       // When the budget is nearly spent, tell the model to stop searching and
       // answer with what it has — prevents a thorough model from looping to the
       // cap and forcing a fragile last-ditch synthesis.
       if (step === maxSteps - 2) {
         messages.push({ role: 'user', content: 'You are almost out of tool budget. Do at most one more lookup if essential, then ANSWER now with citations.' });
       }
-      const msg = await callModel(nativeChatUrl, opts.model, messages, true, controller.signal);
+
+      const handle = timeline.beginCall({
+        phase: 'tool_loop',
+        model: opts.model,
+        runner,
+        budgetMs: perCallBudgetMs,
+        messages,
+        contextFiles: ledger.readPaths,
+        toolStepsBefore: toolSteps,
+      });
+      let msg: ChatMessage;
+      let record: ModelCallTiming;
+      try {
+        msg = await callModel(nativeChatUrl, opts.model, messages, true, controller.signal, perCallBudgetMs, cause);
+        record = handle.end('ok', { toolStepsAfter: toolSteps });
+      } catch (err) {
+        if (err instanceof ModelBudgetExhausted) {
+          const record = handle.end('timeout', { timeoutCategory: err.category, toolStepsAfter: toolSteps });
+          timeline.recordTimeout(record, err.category, !ledger.isEmpty);
+          budgetExhausted = true;
+          break;
+        }
+        handle.end('error', { toolStepsAfter: toolSteps });
+        throw err;
+      }
       const calls = extractToolCalls(msg);
 
       if (calls.length === 0) {
         const answer = (msg.content ?? '').trim();
         if (answer) {
-          yield { type: 'token', text: answer };
-          yield { type: 'done', stepsUsed: step, model: opts.model };
+          yield* emitVerified(answer, ledger, timeline, opts, step, runner);
           return;
         }
         // Empty turn (a reasoning-model hiccup, or it emitted only `thinking`).
@@ -446,15 +724,32 @@ export async function* streamAgentic(opts: AgenticOptions): AsyncGenerator<Agent
 
       messages.push({ role: 'assistant', content: msg.content ?? '', tool_calls: msg.tool_calls });
       // Execute every tool call in this turn CONCURRENTLY (speed), preserving order.
+      yield { type: 'phase', phase: 'tool_execution' };
+      const endTools = timeline.beginPhase('tool_execution');
       const results = await Promise.all(calls.map((c) => executeTool(c.name, c.args, opts.workspaceRoot)));
+      endTools();
       for (let i = 0; i < calls.length; i += 1) {
         const call = calls[i]!;
         const result = results[i]!;
-        if (call.name === 'read' && result.ok && typeof call.args.path === 'string') readFiles.add(call.args.path);
-        if (result.ok) evidenceLog.push(`### ${result.summary}\n${result.feedback}`);
+        toolSteps += 1;
+        if (result.ok) {
+          recordEvidence(ledger, call.name, result.data);
+          evidenceLog.push(`### ${result.summary}\n${result.feedback}`);
+        }
         yield { type: 'step', step: { tool: call.name, args: call.args, ok: result.ok, summary: result.summary } };
         messages.push({ role: 'tool', name: call.name, content: result.feedback });
       }
+      // Stamped only now: the tool steps a call PRODUCED are not known when the
+      // call returns, and `before === after` on every row would say nothing.
+      record.toolStepsAfter = toolSteps;
+    }
+
+    // A call that burned its whole budget having gathered nothing has no synthesis
+    // to attempt: a second full budget on the same model and the same context is
+    // exactly the ~331s double-spend this instrumentation exists to expose.
+    if (budgetExhausted && ledger.isEmpty) {
+      yield* emitVerified('', ledger, timeline, opts, toolSteps, runner);
+      return;
     }
 
     // Step budget exhausted (or empty answer) — force a grounded final answer.
@@ -480,31 +775,94 @@ export async function* streamAgentic(opts: AgenticOptions): AsyncGenerator<Agent
           'Never invent files, code, or behaviour.',
       },
     ];
-    let streamed = '';
-    for await (const chunk of streamModel(nativeChatUrl, opts.model, synthesisMessages, controller.signal)) {
-      streamed += chunk;
-      yield { type: 'token', text: chunk };
+
+    const minCallBudgetMs = Math.max(1, Math.floor(perCallBudgetMs * MIN_SYNTHESIS_BUDGET_RATIO));
+    const synthesisBudgetMs = remainingCallBudget(timeline, perCallBudgetMs, overallDeadlineMs, budgetExhausted);
+    if (synthesisBudgetMs < minCallBudgetMs) {
+      yield* emitVerified('', ledger, timeline, opts, toolSteps, runner);
+      return;
     }
+
+    yield { type: 'phase', phase: 'model_inference' };
+    const streamHandle = timeline.beginCall({
+      phase: 'final_synthesis_stream',
+      model: opts.model,
+      runner,
+      budgetMs: synthesisBudgetMs,
+      messages: synthesisMessages,
+      contextFiles: ledger.readPaths,
+      toolStepsBefore: toolSteps,
+    });
+    let streamed = '';
+    try {
+      for await (const chunk of streamModel(nativeChatUrl, opts.model, synthesisMessages, controller.signal, synthesisBudgetMs, cause)) {
+        streamed += chunk;
+      }
+      streamHandle.end('ok', { toolStepsAfter: toolSteps });
+    } catch (err) {
+      if (err instanceof ModelBudgetExhausted) {
+        const record = streamHandle.end('timeout', { timeoutCategory: err.category, toolStepsAfter: toolSteps });
+        timeline.recordTimeout(record, err.category, !ledger.isEmpty);
+        // Whatever streamed before the budget ran out is still real model output;
+        // the gate decides whether any of it survives.
+        yield* emitVerified(streamed, ledger, timeline, opts, toolSteps, runner);
+        return;
+      }
+      streamHandle.end('error', { toolStepsAfter: toolSteps });
+      throw err;
+    }
+
     // Reasoning models (e.g. gpt-oss) sometimes stream only `thinking` and emit
     // no `content` in a streamed call. Fall back to a NON-streamed call so the
     // answer is reliable rather than empty.
     if (!streamed.trim()) {
-      const finalMsg = await callModel(nativeChatUrl, opts.model, synthesisMessages, false, controller.signal);
-      let finalText = (finalMsg.content ?? '').trim();
-      if (!finalText) {
-        // Even the forced synthesis was empty. Be TRUTHFUL about what happened
-        // rather than fabricating — report the files actually read so the user
-        // has a real starting point.
-        finalText = readFiles.size
-          ? `I could not synthesize a confident answer, but I read these files while investigating — the answer is likely in one of them:\n${[...readFiles].map((f) => `- \`${f}\``).join('\n')}`
-          : 'I could not find the specific code that answers this in the workspace. Try naming a file, folder, or symbol to narrow it down.';
+      const retryBudgetMs = remainingCallBudget(timeline, perCallBudgetMs, overallDeadlineMs, budgetExhausted);
+      if (retryBudgetMs >= minCallBudgetMs) {
+        const retryHandle = timeline.beginCall({
+          phase: 'final_synthesis_retry',
+          model: opts.model,
+          runner,
+          budgetMs: retryBudgetMs,
+          messages: synthesisMessages,
+          contextFiles: ledger.readPaths,
+          toolStepsBefore: toolSteps,
+        });
+        try {
+          const finalMsg = await callModel(nativeChatUrl, opts.model, synthesisMessages, false, controller.signal, retryBudgetMs, cause);
+          retryHandle.end('ok', { toolStepsAfter: toolSteps });
+          streamed = (finalMsg.content ?? '').trim();
+        } catch (err) {
+          if (!(err instanceof ModelBudgetExhausted)) {
+            retryHandle.end('error', { toolStepsAfter: toolSteps });
+            throw err;
+          }
+          const record = retryHandle.end('timeout', { timeoutCategory: err.category, toolStepsAfter: toolSteps });
+          timeline.recordTimeout(record, err.category, !ledger.isEmpty);
+        }
       }
-      yield { type: 'token', text: finalText };
     }
-    yield { type: 'done', stepsUsed: maxSteps, model: opts.model };
+
+    // An empty synthesis produces no claims, so the gate refuses and states the
+    // gap from the ledger — which is exactly the truthful report the old
+    // hand-written fallback was trying to approximate.
+    yield* emitVerified(streamed, ledger, timeline, opts, toolSteps || maxSteps, runner);
   } finally {
     clearTimeout(timer);
   }
+}
+
+/**
+ * Budget for the next model call.
+ *
+ * Bounded by BOTH the per-call budget and what is left of the overall deadline —
+ * and halved once a previous call has already exhausted a full budget, because
+ * handing the same model the same context and a fresh full budget is what turned
+ * one 150s exhaustion into a 331s failure.
+ */
+function remainingCallBudget(timeline: AnswerTimeline, perCallBudgetMs: number, overallDeadlineMs: number, alreadyExhausted: boolean): number {
+  const remaining = overallDeadlineMs - timeline.elapsed();
+  const ceiling = alreadyExhausted ? Math.floor(perCallBudgetMs / 2) : perCallBudgetMs;
+  return Math.max(0, Math.min(ceiling, remaining));
 }
 
 /** Non-streaming convenience wrapper — collects the stream into a single result.
@@ -512,15 +870,43 @@ export async function* streamAgentic(opts: AgenticOptions): AsyncGenerator<Agent
 export async function agenticAnswer(opts: AgenticOptions): Promise<AgenticResult> {
   const steps: AgenticStep[] = [];
   let answer = '';
+  let rawAnswer = '';
   let stepsUsed = 0;
   let model = opts.model;
+  let runner: 'local' | 'cloud' = opts.runner ?? 'local';
+  let claims: GroundedClaim[] = [];
+  let rejected: RejectedClaim[] = [];
+  let refused = false;
+  let timings: AnswerRunTimings | undefined;
+  let timeout: TimeoutEvidence | undefined;
+
   for await (const ev of streamAgentic(opts)) {
     if (ev.type === 'step') steps.push(ev.step);
     else if (ev.type === 'token') answer += ev.text;
+    else if (ev.type === 'route') runner = ev.runner;
+    else if (ev.type === 'grounding') {
+      claims = ev.claims;
+      rejected = ev.rejected;
+      refused = ev.refused;
+      rawAnswer = ev.rawAnswer;
+    } else if (ev.type === 'timeout') timeout = ev.evidence;
+    else if (ev.type === 'timings') timings = ev.timings;
     else if (ev.type === 'done') {
       stepsUsed = ev.stepsUsed;
       model = ev.model;
     }
   }
-  return { answer: answer.trim(), steps, model, stepsUsed };
+  return {
+    answer: answer.trim(),
+    rawAnswer,
+    steps,
+    model,
+    runner,
+    stepsUsed,
+    claims,
+    rejected,
+    refused,
+    timings: timings ?? new AnswerTimeline(opts.clock).snapshot(),
+    ...(timeout ? { timeout } : {}),
+  };
 }
