@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import type { AgentModeCommandPreview, AgentModeCommandResult, AgentModeCommandRunView, AgentModeState } from '@migrapilot/protocol';
 import { auditHash } from './auditLog.js';
-import { redactValue } from './redaction.js';
+import { MARKERS, redactString, redactValue } from './redaction.js';
 import { validateRecoverySourceProvenance } from './recoverySourceProvenance.js';
 import type {
   AgentRunJournalPersistence,
@@ -9,13 +9,18 @@ import type {
   AgentRunReproposalResult,
   AgentRunReconciliationClaim,
   AgentRunTransitionInput,
+  AgentRunChildTransitionInput,
+  AgentRunChildWriteResult,
   DurableAgentApprovalLifecycle,
   DurableAgentRun,
+  DurableAgentRunChild,
   DurableAgentRunEvent,
   DurableAgentRecoveryClass,
   DurableAgentRunState,
   DurableAgentRunTombstone,
+  DurableChildState,
 } from './persistence/types.js';
+import { DURABLE_CHILD_TERMINAL_STATES, isLegalChildTransition } from './persistence/types.js';
 
 export const AGENT_RUN_SCHEMA_VERSION = 1;
 export const AGENT_TERMINAL_STATES = new Set<AgentModeState>(['COMPLETED', 'REJECTED', 'EXPIRED', 'STALE', 'FAILED', 'CANCELLED']);
@@ -46,6 +51,10 @@ export interface AgentRunCreateInput {
   expectedEffects: readonly string[];
   preview: AgentModeCommandPreview;
   recoverySourceRunId?: string;
+  /** Opaque to the journal. Present only for domain runs (e.g. governed coding). */
+  domainKind?: string;
+  domainSchemaVersion?: number;
+  domainPayloadJson?: string;
 }
 
 export interface AgentRunTransition {
@@ -82,6 +91,9 @@ export interface AgentRunTransition {
   recoveryAttemptCount?: number;
   lastRecoveryRequestId?: string;
   recoveryTerminalReason?: string;
+  domainKind?: string;
+  domainSchemaVersion?: number;
+  domainPayloadJson?: string;
   reconciliation?: {
     owner: string;
     fence: number;
@@ -94,12 +106,16 @@ export interface AgentRunJournalConfig {
   terminalRetentionMs: number;
   retentionBatchSize: number;
   reconciliationLeaseMs: number;
+  /** Ceiling for one run's domain payload. A payload is rejected, never truncated:
+   * a half-written record of what a run authorised is worse than no record. */
+  maxDomainPayloadBytes: number;
 }
 
 export const DEFAULT_AGENT_RUN_JOURNAL_CONFIG: AgentRunJournalConfig = Object.freeze({
   terminalRetentionMs: 14 * 24 * 60 * 60 * 1000,
   retentionBatchSize: 100,
   reconciliationLeaseMs: 30_000,
+  maxDomainPayloadBytes: 256 * 1024,
 });
 
 export function buildAgentRunJournalConfig(env: NodeJS.ProcessEnv = process.env): AgentRunJournalConfig {
@@ -107,7 +123,146 @@ export function buildAgentRunJournalConfig(env: NodeJS.ProcessEnv = process.env)
     terminalRetentionMs: boundedDays(env.MIGRAPILOT_AGENT_RUN_RETENTION_DAYS, 14, 1, 90) * 24 * 60 * 60 * 1000,
     retentionBatchSize: boundedInt(env.MIGRAPILOT_AGENT_RUN_RETENTION_BATCH, 100, 1, 500),
     reconciliationLeaseMs: boundedInt(env.MIGRAPILOT_AGENT_RUN_RECONCILE_LEASE_MS, 30_000, 5_000, 120_000),
+    maxDomainPayloadBytes: boundedInt(env.MIGRAPILOT_AGENT_RUN_MAX_DOMAIN_PAYLOAD_BYTES, 256 * 1024, 16 * 1024, 2 * 1024 * 1024),
   };
+}
+
+// ── Opaque versioned domain payload ──────────────────────────────────────────
+//
+// The journal validates SHAPE only — kind present ⇒ version present, serializable,
+// redacted, within limit. It never looks inside. That boundary is what lets a
+// coding run store its workflow state here without putting coding concepts into
+// every agent run.
+
+export type DomainPayloadWriteFault =
+  | 'MISSING_KIND'
+  | 'INVALID_SCHEMA_VERSION'
+  | 'NOT_SERIALIZABLE'
+  | 'TOO_LARGE'
+  /** Redaction TRUNCATED the payload rather than merely substituting a credential.
+   * See `serializeDomainPayload` — a shortened record of what an operator approved
+   * is worse than no record, so the write is refused. */
+  | 'REDACTION_LOSSY';
+
+export type DomainPayloadWriteResult =
+  | { ok: true; kind: string; schemaVersion: number; json: string; bytes: number }
+  | { ok: false; code: DomainPayloadWriteFault; bytes?: number; limit?: number };
+
+export type DomainPayloadReadFault = 'ABSENT' | 'KIND_MISMATCH' | 'UNSUPPORTED_SCHEMA_VERSION' | 'MALFORMED';
+
+export type DomainPayloadReadResult<T> =
+  | { ok: true; kind: string; schemaVersion: number; payload: T }
+  | { ok: false; code: DomainPayloadReadFault; kind?: string; schemaVersion?: number };
+
+/** Mirrors `MAX_STRING` in redaction.ts — the length past which `redactString`
+ * truncates. A domain payload string at or below this is redacted losslessly. */
+const REDACTOR_STRING_CAP = 8 * 1024;
+/** Depth bound. Present for stack safety, not for trimming: exceeding it refuses
+ * the write rather than storing a shortened structure. */
+const MAX_DOMAIN_DEPTH = 32;
+
+/**
+ * Redact a domain payload WITHOUT shortening it.
+ *
+ * `redactValue` cannot be used here. It is the general diagnostic redactor and is
+ * lossy by design — strings past 8 KB and depth/node overruns become `[TRUNCATED]`,
+ * and, worse, arrays/Maps/Sets past 200 entries are `slice()`d away with NO marker
+ * at all. Silent array truncation applied to `proposedPaths` would store a shorter
+ * approved scope than the operator approved, which is indistinguishable afterwards
+ * from an approval that really was that small.
+ *
+ * So this walk substitutes credentials exactly as the shared redactor does — same
+ * `redactString`, same sensitive-key rule — but drops nothing. Anything it cannot
+ * represent losslessly is refused upward, and the size limit (not truncation) is
+ * what bounds what gets stored.
+ */
+function redactLossless(value: unknown, depth = 0): { ok: true; value: unknown } | { ok: false } {
+  if (depth > MAX_DOMAIN_DEPTH) return { ok: false };
+  if (value === null || value === undefined) return { ok: true, value };
+  if (typeof value === 'number' || typeof value === 'boolean') return { ok: true, value };
+  if (typeof value === 'string') {
+    if (value.length > REDACTOR_STRING_CAP) return { ok: false };
+    return { ok: true, value: redactString(value).value };
+  }
+  if (Array.isArray(value)) {
+    const out: unknown[] = [];
+    for (const entry of value) {
+      const scrubbed = redactLossless(entry, depth + 1);
+      if (!scrubbed.ok) return { ok: false };
+      out.push(scrubbed.value);
+    }
+    return { ok: true, value: out };
+  }
+  if (typeof value === 'object') {
+    const out: Record<string, unknown> = {};
+    for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+      if (entry === undefined) continue;
+      if (SENSITIVE_PAYLOAD_KEY.test(key)) { out[key] = MARKERS.secret; continue; }
+      const scrubbed = redactLossless(entry, depth + 1);
+      if (!scrubbed.ok) return { ok: false };
+      out[key] = scrubbed.value;
+    }
+    return { ok: true, value: out };
+  }
+  // Functions, symbols, bigints — not representable in a durable payload.
+  return { ok: false };
+}
+
+/** Same rule as the shared redactor's `SENSITIVE_KEY`: the VALUE goes regardless
+ * of what it looks like. Duplicated deliberately — this list must not silently
+ * change meaning if the diagnostic redactor's does. */
+const SENSITIVE_PAYLOAD_KEY = /(authorization|cookie|set-cookie|passwd|password|secret|token|api[_-]?key|access[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret|private[_-]?key|credential|session[_-]?id|connection[_-]?string|db[_-]?url|database[_-]?url|dsn)/i;
+
+/** Serialize + redact a domain payload for persistence. */
+export function serializeDomainPayload(
+  input: { kind: string; schemaVersion: number; payload: unknown },
+  limitBytes: number,
+): DomainPayloadWriteResult {
+  if (!input.kind.trim()) return { ok: false, code: 'MISSING_KIND' };
+  if (!Number.isInteger(input.schemaVersion) || input.schemaVersion < 1) return { ok: false, code: 'INVALID_SCHEMA_VERSION' };
+  const scrubbed = redactLossless(input.payload);
+  if (!scrubbed.ok) return { ok: false, code: 'REDACTION_LOSSY' };
+  let json: string;
+  try {
+    // Redaction happens BEFORE the size check, so the limit governs what is
+    // actually stored rather than what was offered.
+    const serialized = JSON.stringify(scrubbed.value);
+    if (typeof serialized !== 'string') return { ok: false, code: 'NOT_SERIALIZABLE' };
+    json = serialized;
+  } catch {
+    return { ok: false, code: 'NOT_SERIALIZABLE' };
+  }
+  const bytes = Buffer.byteLength(json, 'utf8');
+  if (bytes > limitBytes) return { ok: false, code: 'TOO_LARGE', bytes, limit: limitBytes };
+  return { ok: true, kind: input.kind, schemaVersion: input.schemaVersion, json, bytes };
+}
+
+/**
+ * Read a domain payload back.
+ *
+ * Never throws. A corrupt or future-versioned payload is a typed fault, because a
+ * journal read that crashes takes every OTHER run's history down with it — and the
+ * one record you cannot afford to lose access to is the one that went wrong.
+ */
+export function readDomainPayload<T>(
+  run: Pick<DurableAgentRun, 'domainKind' | 'domainSchemaVersion' | 'domainPayloadJson'>,
+  expect: { kind: string; maxSchemaVersion: number },
+): DomainPayloadReadResult<T> {
+  if (!run.domainKind || run.domainPayloadJson === undefined) return { ok: false, code: 'ABSENT' };
+  if (run.domainKind !== expect.kind) return { ok: false, code: 'KIND_MISMATCH', kind: run.domainKind };
+  const version = run.domainSchemaVersion;
+  if (!Number.isInteger(version) || (version as number) < 1) {
+    return { ok: false, code: 'MALFORMED', kind: run.domainKind, schemaVersion: version };
+  }
+  if ((version as number) > expect.maxSchemaVersion) {
+    // Written by a newer build. Refused rather than parsed on a guess.
+    return { ok: false, code: 'UNSUPPORTED_SCHEMA_VERSION', kind: run.domainKind, schemaVersion: version };
+  }
+  try {
+    return { ok: true, kind: run.domainKind, schemaVersion: version as number, payload: JSON.parse(run.domainPayloadJson) as T };
+  } catch {
+    return { ok: false, code: 'MALFORMED', kind: run.domainKind, schemaVersion: version as number };
+  }
 }
 
 export class AgentRunJournal {
@@ -219,6 +374,9 @@ export class AgentRunJournal {
       version: 1,
       reconciliationFence: 0,
       updatedAt: input.proposalAt,
+      domainKind: input.domainKind,
+      domainSchemaVersion: input.domainSchemaVersion,
+      domainPayloadJson: input.domainPayloadJson,
     };
   }
 
@@ -287,6 +445,9 @@ export class AgentRunJournal {
       recoveryAttemptCount: input.recoveryAttemptCount,
       lastRecoveryRequestId: input.lastRecoveryRequestId,
       recoveryTerminalReason: input.recoveryTerminalReason,
+      domainKind: input.domainKind,
+      domainSchemaVersion: input.domainSchemaVersion,
+      domainPayloadJson: input.domainPayloadJson,
     };
     return this.persistence.transitionAgentRun({
       runId: input.runId,
@@ -300,6 +461,90 @@ export class AgentRunJournal {
       patch,
       eventId: this.mkId(),
     });
+  }
+
+  // ── Child operations ────────────────────────────────────────────────────────
+
+  /**
+   * Step 1 of the dispatch invariant: persist the child in `created`.
+   *
+   * A `created` child is proof that NOTHING was sent. The caller may not dispatch
+   * until it has also persisted the parent's reference — see `registeredChild()`.
+   */
+  registerChild(input: {
+    childId: string;
+    runId: string;
+    kind: string;
+    attempt?: number;
+    required?: boolean;
+    at: number;
+    metadata?: unknown;
+  }): AgentRunChildWriteResult {
+    if (!this.persistence) return { ok: false, code: 'UNKNOWN_PARENT' };
+    return this.persistence.insertAgentRunChild({
+      childId: input.childId,
+      runId: input.runId,
+      kind: input.kind,
+      attempt: input.attempt ?? 1,
+      state: 'created',
+      required: input.required ?? true,
+      revision: 1,
+      createdAt: input.at,
+      metadataJson: input.metadata === undefined ? undefined : stableJson(redactValue(input.metadata)),
+      schemaVersion: AGENT_RUN_SCHEMA_VERSION,
+      updatedAt: input.at,
+    });
+  }
+
+  /** Advance a child. `expectedRevision` makes a stale writer lose rather than clobber. */
+  transitionChild(input: {
+    childId: string;
+    expectedRevision: number;
+    nextState: DurableChildState;
+    at: number;
+    startedAt?: number;
+    endedAt?: number;
+    terminalCategory?: DurableAgentRunChild['terminalCategory'];
+    terminalEvidence?: unknown;
+    cancellationRequestedAt?: number;
+    cancellationConfirmedAt?: number;
+    error?: { code: string; message: string };
+    metadata?: unknown;
+  }): AgentRunChildWriteResult {
+    if (!this.persistence) return { ok: false, code: 'UNKNOWN_CHILD' };
+    return this.persistence.transitionAgentRunChild({
+      childId: input.childId,
+      expectedRevision: input.expectedRevision,
+      nextState: input.nextState,
+      at: input.at,
+      startedAt: input.startedAt,
+      endedAt: input.endedAt,
+      terminalCategory: input.terminalCategory,
+      terminalEvidenceJson: input.terminalEvidence === undefined ? undefined : stableJson(redactValue(input.terminalEvidence)),
+      cancellationRequestedAt: input.cancellationRequestedAt,
+      cancellationConfirmedAt: input.cancellationConfirmedAt,
+      errorJson: input.error === undefined ? undefined : stableJson(redactValue(input.error)),
+      metadataJson: input.metadata === undefined ? undefined : stableJson(redactValue(input.metadata)),
+    });
+  }
+
+  children(runId: string): DurableAgentRunChild[] {
+    return this.persistence?.loadAgentRunChildren(runId) ?? [];
+  }
+
+  child(childId: string): DurableAgentRunChild | undefined {
+    return this.persistence?.loadAgentRunChild(childId);
+  }
+
+  /**
+   * Required children that are not yet terminal.
+   *
+   * A parent MUST NOT reach a terminal success while this is non-empty. Returned as
+   * the blocking records themselves rather than a boolean so the caller can say
+   * exactly what is unfinished instead of merely refusing.
+   */
+  blockingChildren(runId: string): DurableAgentRunChild[] {
+    return this.children(runId).filter((c) => c.required && !DURABLE_CHILD_TERMINAL_STATES.has(c.state));
   }
 
   loadRuns(): DurableAgentRun[] {
@@ -570,6 +815,55 @@ export class MemoryAgentRunJournalPersistence implements AgentRunJournalPersiste
     return { ok: true, created: true, successor: { ...input.successor } };
   }
 
+  readonly childRecords = new Map<string, DurableAgentRunChild>();
+
+  insertAgentRunChild(child: DurableAgentRunChild): AgentRunChildWriteResult {
+    const parent = this.runs.get(child.runId);
+    if (!parent) return { ok: false, code: 'UNKNOWN_PARENT' };
+    if (AGENT_TERMINAL_STATES.has(parent.state as AgentModeState)) return { ok: false, code: 'PARENT_TERMINAL' };
+    const clash = this.childRecords.get(child.childId)
+      ?? [...this.childRecords.values()].find((c) => c.runId === child.runId && c.kind === child.kind && c.attempt === child.attempt);
+    if (clash) return { ok: false, code: 'DUPLICATE_CHILD', current: { ...clash } };
+    this.childRecords.set(child.childId, { ...child });
+    return { ok: true, child: { ...child } };
+  }
+
+  transitionAgentRunChild(input: AgentRunChildTransitionInput): AgentRunChildWriteResult {
+    const current = this.childRecords.get(input.childId);
+    if (!current) return { ok: false, code: 'UNKNOWN_CHILD' };
+    if (DURABLE_CHILD_TERMINAL_STATES.has(current.state)) return { ok: false, code: 'TERMINAL_CHILD_IMMUTABLE', current: { ...current } };
+    if (current.revision !== input.expectedRevision) return { ok: false, code: 'STALE_REVISION', current: { ...current } };
+    if (!isLegalChildTransition(current.state, input.nextState)) return { ok: false, code: 'ILLEGAL_TRANSITION', current: { ...current } };
+    const next: DurableAgentRunChild = {
+      ...current,
+      state: input.nextState,
+      revision: current.revision + 1,
+      startedAt: input.startedAt ?? current.startedAt,
+      endedAt: input.endedAt ?? current.endedAt,
+      terminalCategory: input.terminalCategory ?? current.terminalCategory,
+      terminalEvidenceJson: input.terminalEvidenceJson ?? current.terminalEvidenceJson,
+      cancellationRequestedAt: input.cancellationRequestedAt ?? current.cancellationRequestedAt,
+      cancellationConfirmedAt: input.cancellationConfirmedAt ?? current.cancellationConfirmedAt,
+      errorJson: input.errorJson ?? current.errorJson,
+      metadataJson: input.metadataJson ?? current.metadataJson,
+      updatedAt: input.at,
+    };
+    this.childRecords.set(input.childId, next);
+    return { ok: true, child: { ...next } };
+  }
+
+  loadAgentRunChildren(runId: string): DurableAgentRunChild[] {
+    return [...this.childRecords.values()]
+      .filter((c) => c.runId === runId)
+      .sort((a, b) => a.createdAt - b.createdAt || a.childId.localeCompare(b.childId))
+      .map((c) => ({ ...c }));
+  }
+
+  loadAgentRunChild(childId: string): DurableAgentRunChild | undefined {
+    const c = this.childRecords.get(childId);
+    return c ? { ...c } : undefined;
+  }
+
   loadAgentRuns(limit = 5000): DurableAgentRun[] { return [...this.runs.values()].slice(0, limit).map((r) => ({ ...r })); }
   loadAgentRun(runId: string): DurableAgentRun | undefined { const r = this.runs.get(runId); return r ? { ...r } : undefined; }
   loadAgentRunEvents(runId: string, limit = 500): DurableAgentRunEvent[] { return (this.events.get(runId) ?? []).slice(0, limit).map((e) => ({ ...e })); }
@@ -605,6 +899,9 @@ export class MemoryAgentRunJournalPersistence implements AgentRunJournalPersiste
       this.tombstones.push({ tombstoneId: `tombstone_${run.runId}_${now}`, runId: run.runId, workspaceIdentity: run.workspaceIdentity, recipeId: run.recipeId, finalState: run.state, terminalAt: run.terminalAt!, deletedAt: now, deletionReason: 'RETENTION_EXPIRED', finalAuditSeq: run.auditSeq, eventCount, recoverySourceRunId: run.recoverySourceRunId, successorRunId: run.successorRunId, schemaVersion: AGENT_RUN_SCHEMA_VERSION });
       events += eventCount;
       this.events.delete(run.runId);
+      // Mirrors the SQL FK cascade: a child cannot outlive its parent, or it would
+      // read back as an orphan that no run can explain.
+      for (const child of this.loadAgentRunChildren(run.runId)) this.childRecords.delete(child.childId);
       this.runs.delete(run.runId);
       runs += 1;
     }

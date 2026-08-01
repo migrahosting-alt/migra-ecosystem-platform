@@ -299,7 +299,7 @@ function pointers(dbPath: string, indexId: string): { version: number; approved:
   return { version: r.version, approved: r.approved_version };
 }
 
-test('a v5 database upgrades to v6 with its approved index preserved and no re-index', (t) => {
+test('a v5 database upgrades to v7 with its approved index preserved and no re-index', (t) => {
   const dbPath = tmpDb();
 
   // Build a v5-shaped database: chunks with NO index_version, state 'approved',
@@ -325,10 +325,10 @@ test('a v5 database upgrades to v6 with its approved index preserved and no re-i
   ).run('idx_live:src/a.ts#1', 'idx_live', '/repo/a', 'src/a.ts', 'ts', null, 1, 9, 'h', 'fake-embed', 'v0', 1, 'approved v5 content', legacyVector);
   raw.close();
 
-  // Opening with the v6 engine migrates additively.
+  // Opening with the current engine migrates additively.
   const store = new SqliteDurableStore(dbPath);
   t.after(() => store.close());
-  assert.equal(store.health().schemaVersion, 6);
+  assert.equal(store.health().schemaVersion, 7);
   assert.equal(store.health().migrationState, 'applied');
 
   const p = pointers(dbPath, 'idx_live');

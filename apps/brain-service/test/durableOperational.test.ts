@@ -120,8 +120,8 @@ function reproposalInput(store: SqliteDurableStore, source: DurableAgentRun, req
   };
 }
 
-test('SCHEMA_VERSION is 6 (index version isolation: approved_version + index_version)', () => {
-  assert.equal(SCHEMA_VERSION, 6);
+test('SCHEMA_VERSION is 7 (agent run children + opaque versioned domain payload)', () => {
+  assert.equal(SCHEMA_VERSION, 7);
 });
 
 test('operational data survives a restart (write → close → reopen → read)', () => {
@@ -200,18 +200,18 @@ test('a v2 database upgrades additively to v3 (Agent journal tables created on r
   raw.exec('CREATE TABLE IF NOT EXISTS schema_meta (key TEXT PRIMARY KEY, value TEXT);');
   raw.prepare('INSERT INTO schema_meta(key,value) VALUES(?,?)').run('schema_version', '2');
   raw.close();
-  const store = new SqliteDurableStore(p); // v6 engine migrates additively
-  assert.equal(store.health().schemaVersion, 6);
+  const store = new SqliteDurableStore(p); // v7 engine migrates additively
+  assert.equal(store.health().schemaVersion, 7);
   assert.deepEqual(store.loadAgentRuns(), []);
   store.close();
 });
 
-test('a v6 database startup is idempotent and refuses newer schemas', () => {
+test('a v7 database startup is idempotent and refuses newer schemas', () => {
   const p = tmpDb();
   let store = new SqliteDurableStore(p);
   store.close();
   store = new SqliteDurableStore(p);
-  assert.equal(store.health().schemaVersion, 6);
+  assert.equal(store.health().schemaVersion, 7);
   store.close();
 
   const bad = tmpDb();
@@ -219,10 +219,10 @@ test('a v6 database startup is idempotent and refuses newer schemas', () => {
   raw.exec('CREATE TABLE IF NOT EXISTS schema_meta (key TEXT PRIMARY KEY, value TEXT);');
   raw.prepare('INSERT INTO schema_meta(key,value) VALUES(?,?)').run('schema_version', '999');
   raw.close();
-  assert.throws(() => new SqliteDurableStore(bad), /schema v999 > engine v6/);
+  assert.throws(() => new SqliteDurableStore(bad), /schema v999 > engine v7/);
 });
 
-test('v6 schema integrity fails closed on missing index or malformed tombstone table', () => {
+test('v7 schema integrity fails closed on missing index or malformed tombstone table', () => {
   const missingIndex = tmpDb();
   let store = new SqliteDurableStore(missingIndex);
   store.close();
@@ -241,7 +241,7 @@ test('v6 schema integrity fails closed on missing index or malformed tombstone t
     CREATE TABLE agent_run_tombstones (tombstone_id TEXT PRIMARY KEY, run_id TEXT);
   `);
   raw.close();
-  assert.throws(() => new SqliteDurableStore(malformed), /db schema v6 (missing|has nullable|has incompatible|cannot migrate)/);
+  assert.throws(() => new SqliteDurableStore(malformed), /db schema v7 (missing|has nullable|has incompatible|cannot migrate)/);
 
   const missingForeignKey = tmpDb();
   store = new SqliteDurableStore(missingForeignKey);
@@ -258,7 +258,7 @@ test('v6 schema integrity fails closed on missing index or malformed tombstone t
   assert.throws(() => new SqliteDurableStore(missingForeignKey), /missing foreign key agent_run_events\(run_id\) -> agent_runs\(run_id\)/);
 });
 
-test('v6 Agent schema contract rejects every critical missing or malformed object', () => {
+test('v7 Agent schema contract rejects every critical missing or malformed object', () => {
   const requiredRunColumns = [
     'activation_ref',
     'proposal_hash',
@@ -331,6 +331,22 @@ test('v6 Agent schema contract rejects every critical missing or malformed objec
   expectCorruptV5('wrong reconciliation index column order', (p) => replaceCreateSql(p, 'index', 'idx_agent_runs_reconciliation', 'reconciliation_owner, reconciliation_fence, version, reconciliation_lease_until', 'reconciliation_owner, version, reconciliation_fence, reconciliation_lease_until'), /columns for idx_agent_runs_reconciliation/);
   expectCorruptV5('wrong active successor partial predicate', (p) => replaceCreateSql(p, 'index', 'idx_agent_runs_active_successor', "state NOT IN ('COMPLETED','REJECTED','EXPIRED','STALE','FAILED','CANCELLED')", "state NOT IN ('COMPLETED')"), /partial predicate for idx_agent_runs_active_successor/);
 
+  // v7 child operations — held to the same fail-closed contract as every other
+  // agent object, so a damaged child table can never be opened and read as "no
+  // children were ever registered".
+  expectCorruptV5('agent_run_children missing state', (p) => replaceCreateSql(p, 'table', 'agent_run_children', ',\n  state TEXT NOT NULL', ''), /missing agent_run_children\.state|malformed database schema/);
+  expectCorruptV5('agent_run_children missing revision', (p) => replaceCreateSql(p, 'table', 'agent_run_children', ',\n  revision INTEGER NOT NULL DEFAULT 1', ''), /missing agent_run_children\.revision|malformed database schema/);
+  expectCorruptV5('agent_run_children nullable run ID', (p) => replaceCreateSql(p, 'table', 'agent_run_children', 'run_id TEXT NOT NULL', 'run_id TEXT'), /nullable agent_run_children\.run_id/);
+  expectCorruptV5('agent_run_children missing primary key', (p) => replaceCreateSql(p, 'table', 'agent_run_children', 'child_id TEXT PRIMARY KEY', 'child_id TEXT'), /primary key on agent_run_children\.child_id|malformed database schema/);
+  expectCorruptV5('agent_run_children wrong foreign key delete behavior', (p) => replaceCreateSql(p, 'table', 'agent_run_children', 'ON DELETE CASCADE', 'ON DELETE RESTRICT'), /missing foreign key/);
+  for (const index of ['idx_agent_run_children_run', 'idx_agent_run_children_active']) {
+    expectCorruptV5(`missing ${index}`, (p) => {
+      const raw = new DatabaseSync(p);
+      raw.exec(`DROP INDEX ${index};`);
+      raw.close();
+    }, new RegExp(`missing index ${index}`));
+  }
+
   expectCorruptV5('schema_meta missing version row', (p) => {
     const raw = new DatabaseSync(p);
     raw.prepare("DELETE FROM schema_meta WHERE key='schema_version'").run();
@@ -341,13 +357,13 @@ test('v6 Agent schema contract rejects every critical missing or malformed objec
     const raw = new DatabaseSync(p);
     raw.prepare("UPDATE schema_meta SET value='999' WHERE key='schema_version'").run();
     raw.close();
-  }, /schema v999 > engine v6/);
+  }, /schema v999 > engine v7/);
 });
 
-test('clean v6 initialization and v2/v3/v4/v5 migrations create every validator-required Agent object', () => {
+test('clean v7 initialization and v2/v3/v4/v5/v6 migrations create every validator-required Agent object', () => {
   for (const p of [initializedDb()]) {
     const store = new SqliteDurableStore(p);
-    assert.equal(store.health().schemaVersion, 6);
+    assert.equal(store.health().schemaVersion, 7);
     store.close();
   }
   for (const version of ['2', '3', '4']) {
@@ -357,7 +373,7 @@ test('clean v6 initialization and v2/v3/v4/v5 migrations create every validator-
     raw.prepare('INSERT INTO schema_meta(key,value) VALUES(?,?)').run('schema_version', version);
     raw.close();
     const store = new SqliteDurableStore(p);
-    assert.equal(store.health().schemaVersion, 6);
+    assert.equal(store.health().schemaVersion, 7);
     store.close();
   }
 });
