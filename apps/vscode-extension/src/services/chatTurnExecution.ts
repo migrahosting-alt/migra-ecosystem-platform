@@ -129,6 +129,8 @@ export class ChatTurnExecution {
   private turn: PersistedChatTurn;
   /** Child terminal outcomes this turn actually observed, keyed by child id. */
   private readonly observed = new Map<string, 'success' | 'failure' | 'cancelled'>();
+  /** Whether the terminal revision was actually written. Only `finish()` sets it. */
+  private terminalDurable = false;
 
   private constructor(
     turn: PersistedChatTurn,
@@ -411,7 +413,11 @@ export class ChatTurnExecution {
     if (this.turn.currentState !== 'running' && this.turn.currentState !== 'cancelling') {
       return {
         state: this.turn.currentState,
-        durable: true,
+        // NOT hardcoded true. If the first finish() failed to write the terminal
+        // revision, the state still moved in memory, so the wrapper's `finally` would
+        // hit this path and report durable — masking exactly the durability failure
+        // this design exists to surface. `terminalDurable` is what was OBSERVED.
+        durable: this.terminalDurable,
         ...(this.turn.failure ? { failure: this.turn.failure } : {}),
       };
     }
@@ -480,6 +486,7 @@ export class ChatTurnExecution {
     if (failure) this.turn.failure = failure;
 
     const durable = await this.persist();
+    this.terminalDurable = durable;
     if (!durable && !this.turn.failure) this.turn.failure = 'terminal_not_persisted';
     return {
       state: this.turn.currentState,

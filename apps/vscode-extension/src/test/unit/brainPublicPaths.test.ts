@@ -524,3 +524,30 @@ test('integration · no token-shaped value reaches disk from a real operation', 
   assert.equal(/supersecrettokenvalue123456/.test(onDisk), false, 'request payloads never persist');
   assert.equal(/sk_live_/.test(onDisk), false);
 });
+
+// ── review findings (PR #139) ───────────────────────────────────────────────
+
+test('review · health aborted before the first dispatch fails governed, not with a TypeError', async () => {
+  const ac = new AbortController();
+  ac.abort();
+  const c = new BrainClient(sink, config(), spy(json({ status: 'ok' })), RETRY_0, instantScheduler);
+  const err = await c.health(ac.signal).then(
+    () => undefined,
+    (e: unknown) => e,
+  );
+  assert.ok(err instanceof BrainOperationError, `expected a governed failure, got ${String(err)}`);
+  assert.equal(err.record.state, 'created', 'the record says nothing was dispatched');
+  assert.equal(err.record.operationId.length > 0, true, 'and it is a real record, not {} as T');
+  assert.equal(err.category, 'cancellation_unconfirmed');
+});
+
+test('review · a cancelled idempotent read returns a fully-shaped record', async () => {
+  const ac = new AbortController();
+  ac.abort();
+  const c = new BrainClient(sink, config(), spy(json({ chunks: [] })), RETRY_0, instantScheduler);
+  const out = await c.retrieveGoverned({} as never, ac.signal);
+  assert.equal(out.ok, false);
+  assert.equal(out.record.state, 'created');
+  assert.deepEqual(out.record.transitions, [], 'shaped, not a type-asserted empty object');
+  assert.equal(Array.isArray(out.record.invariantViolations), true);
+});

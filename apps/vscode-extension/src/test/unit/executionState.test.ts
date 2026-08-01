@@ -303,3 +303,32 @@ test('user-facing status and durable record derive from the same state', () => {
     if (expected !== 'completed') assert.doesNotMatch(m.statusLine(), /^Completed/);
   }
 });
+
+// ── review findings (PR #139) ───────────────────────────────────────────────
+
+test('review · a late terminal after cancellation still reaches a terminal state', () => {
+  const m = make();
+  toRunning(m);
+  m.requestCancellation('user pressed stop');
+  const accepted = m.observeTerminal(true, 'stale success arrived');
+  assert.equal(accepted, false, 'the late response is still discarded');
+  const r = m.snapshot();
+  assert.notEqual(r.state, 'cancelling', 'the record must not be left mid-cancellation');
+  assert.equal(r.state, 'failed');
+  assert.equal(r.failureCategory, 'cancellation_unconfirmed');
+  assert.ok(r.endedAt, 'a terminal record carries an end time');
+});
+
+test('review · precondition is recorded, not inferred from phase', () => {
+  const none = make();
+  none.requestPrecondition('none required', false);
+  assert.equal(none.snapshot().preconditionRequired, false, 'no-precondition path must not claim one');
+
+  const real = make();
+  real.requestPrecondition('branch exists');
+  real.confirmPrecondition(true, 'verified');
+  const r = real.snapshot();
+  assert.equal(r.preconditionRequired, true);
+  assert.ok(r.preconditionConfirmedAt, 'confirmation time is recorded');
+  assert.notEqual(r.preconditionConfirmedAt, r.startedAt, 'and it is not just the start time');
+});

@@ -216,3 +216,20 @@ test('parent-child · with no turn the work still runs, ungoverned and unfaked',
   assert.equal(v, 42);
   assert.equal(ran, true);
 });
+
+// ── review findings (PR #139, copilot-pull-request-reviewer) ────────────────
+
+test('review · a repeated finish after a failed terminal write still reports NOT durable', async () => {
+  const h = await harness('t15');
+  await governedChild(h.turn, 'engineer_turn', async () => 'ok');
+  h.failOn(/turns\/t15/);
+  const first = await h.turn.finish();
+  h.failOn(undefined);
+  assert.equal(first.durable, false, 'the first call saw the write fail');
+
+  // The wrapper's `finally` calls finish() again on every path. The fast-path used to
+  // hardcode durable:true, which masked exactly this failure.
+  const second = await h.turn.finish();
+  assert.equal(second.durable, false, 'a second call must not manufacture durability');
+  assert.equal(second.failure, 'terminal_not_persisted');
+});

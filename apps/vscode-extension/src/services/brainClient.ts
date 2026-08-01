@@ -25,6 +25,39 @@ import { operationPersister, type BrainStore, type OperationPersister } from './
  * that a caller which ignores it crashes loudly — the safe direction. A silent
  * fallthrough into success is the one outcome this type makes impossible.
  */
+/**
+ * The record for work that was CANCELLED BEFORE DISPATCH.
+ *
+ * A real, fully-shaped record in `created` — not `{} as ExecutionRecord`, which type-
+ * asserts a shape it does not have and leaves every field undefined for the next reader.
+ * `created` is exactly right here: it means the record exists and nothing was sent.
+ */
+export function neverDispatchedRecord(
+  operationId: string,
+  requestedAction: string,
+  brainEndpoint: string,
+  failures: string[] = [],
+): ExecutionRecord {
+  return {
+    operationId,
+    requestedAction,
+    brainEndpoint,
+    startedAt: new Date().toISOString(),
+    state: 'created',
+    failureCategory: 'cancellation_unconfirmed',
+    failureDetail: 'cancelled before any attempt was dispatched',
+    terminalObserved: false,
+    transitions: [],
+    transportAttempts: [],
+    commands: [],
+    filesChanged: [],
+    testsRun: [],
+    failures: [...failures],
+    remainingWork: [],
+    invariantViolations: [],
+  };
+}
+
 export class BrainOperationError extends Error {
   constructor(
     readonly record: ExecutionRecord,
@@ -247,9 +280,19 @@ export class BrainClient {
       });
     }
     this.log(`health probe failed: ${this.connection.statusLine()}`);
+    if (!last) {
+      // Aborted before the first dispatch, so no attempt — and therefore no record —
+      // exists. Dereferencing `last!` here would crash with a TypeError, which is the
+      // one outcome this whole design forbids: a failure that is not a governed failure.
+      throw new BrainOperationError(
+        neverDispatchedRecord(nextOperationId('health'), 'health', this.baseUrl),
+        'cancellation_unconfirmed',
+        'Cancelled before any health probe was dispatched.',
+      );
+    }
     throw new BrainOperationError(
-      last!.record,
-      last!.record.failureCategory,
+      last.record,
+      last.record.failureCategory,
       this.connection.statusLine(),
     );
   }
@@ -367,7 +410,7 @@ export class BrainClient {
     return (
       last ?? {
         ok: false,
-        record: { ...({} as ExecutionRecord), operationId, failures: attemptLog } as ExecutionRecord,
+        record: neverDispatchedRecord(operationId, action, this.baseUrl, attemptLog),
         statusLine: 'Cancelled before any attempt was dispatched.',
         durable: false,
       }

@@ -40,8 +40,8 @@ export function toPersisted(
     invariantViolations: [...record.invariantViolations],
     endpointIdentity: record.brainEndpoint,
     precondition: {
-      required: record.phase !== undefined,
-      ...(record.phase === 'precondition_confirmed' ? { confirmedAt: record.startedAt } : {}),
+      required: record.preconditionRequired === true,
+      ...(record.preconditionConfirmedAt ? { confirmedAt: record.preconditionConfirmedAt } : {}),
     },
     transportAttempts: record.transportAttempts.map((a, i) => ({
       attemptId: `${record.operationId}#a${i + 1}`,
@@ -299,7 +299,7 @@ export async function runBrainOperation<T>(
     }
     if (!machine.confirmPrecondition(observed, label)) return finishTerminal(false);
   } else {
-    machine.requestPrecondition('none required');
+    machine.requestPrecondition('none required', false);
     machine.confirmPrecondition(true, 'no precondition for this action');
   }
 

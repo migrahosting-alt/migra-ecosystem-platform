@@ -135,6 +135,12 @@ export interface ExecutionRecord {
   /** Free-text detail of what was actually observed. Never a guess. */
   failureDetail?: string;
   cancellationRequestedAt?: string;
+  /** Whether a real precondition was required. Recorded, never inferred from `phase`:
+   * the no-precondition path still sets a phase, so `phase !== undefined` would make
+   * every record claim a precondition it never had. */
+  preconditionRequired?: boolean;
+  /** When the precondition was actually CONFIRMED — not when the operation started. */
+  preconditionConfirmedAt?: string;
   cancellationAcknowledgedAt?: string;
   /** True only when a terminal response was actually observed on the wire. */
   terminalObserved: boolean;
@@ -218,8 +224,9 @@ export class ExecutionStateMachine {
 
   // ── Five-phase operation gating ─────────────────────────────────────────────
 
-  requestPrecondition(what: string): void {
+  requestPrecondition(what: string, required = true): void {
     this.record.phase = 'precondition_requested';
+    this.record.preconditionRequired = required;
     this.record.commands.push(`precondition requested: ${what}`);
   }
 
@@ -233,6 +240,7 @@ export class ExecutionStateMachine {
       return false;
     }
     this.record.phase = 'precondition_confirmed';
+    this.record.preconditionConfirmedAt = this.clock.now();
     return true;
   }
 
@@ -276,7 +284,18 @@ export class ExecutionStateMachine {
    */
   observeTerminal(terminalObserved: boolean, detail: string): boolean {
     if (this.record.cancellationRequestedAt) {
+      // The response is discarded — a stale success is not a success. But the record
+      // must still REACH a terminal state: leaving it in `cancelling` with no endedAt
+      // and no category, while the caller persists this as the terminal revision, is
+      // precisely the "terminal outcomes are explicit and evidenced" invariant being
+      // broken from the inside.
       this.record.failures.push(`late terminal response discarded after cancellation: ${detail}`);
+      if (this.record.state === 'cancelling') {
+        this.fail(
+          this.record.cancellationAcknowledgedAt ? 'connection_lost' : 'cancellation_unconfirmed',
+          `late terminal response after cancellation: ${detail}`,
+        );
+      }
       return false;
     }
     if (!terminalObserved) {
