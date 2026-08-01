@@ -26,6 +26,7 @@ import { createHash } from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { promisify } from 'node:util';
+import { EMPTY_SIGNALS, buildVocabulary, extractSignals, finalizeSignals, splitToken, type ContentSignals } from './contentSignals.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -48,6 +49,14 @@ export interface RepoMapEntry {
   packageName?: string;
   /** Why this looks like an entry point, when it does. */
   entryPoint?: string;
+  /**
+   * Deterministic content signals for RANKING ONLY.
+   *
+   * Never evidence: nothing here is written to the ledger, rendered into the
+   * EVIDENCE block, or citable. It exists so the planner can find the file whose
+   * name says nothing about what it does.
+   */
+  signals: ContentSignals;
 }
 
 export interface RepoMap {
@@ -60,6 +69,14 @@ export interface RepoMap {
   /** Index by path for O(1) lookup. */
   byPath: Map<string, RepoMapEntry>;
   builtInMs: number;
+  /**
+   * Every word this repository uses, for decomposing run-together compounds at
+   * RANK time rather than at build time. Build-time decomposition could not see
+   * the query: `allowlist` never split, because no file in the tree happens to
+   * declare a standalone `allow` for the vocabulary to learn from — yet `allow` is
+   * exactly what the question asks about.
+   */
+  vocabulary: Set<string>;
   /** True when this map came from the cache rather than a fresh build. */
   fromCache: boolean;
   /** Present when enumeration could not use git and the map is empty. */
@@ -214,6 +231,7 @@ export async function buildRepoMap(root: string, opts: BuildRepoMapOptions = {})
       dirtyFingerprint: '',
       entries: [],
       byPath: new Map(),
+      vocabulary: new Set<string>(),
       builtInMs: Date.now() - started,
       fromCache: false,
       unavailable: err instanceof Error ? err.message : String(err),
@@ -239,7 +257,7 @@ export async function buildRepoMap(root: string, opts: BuildRepoMapOptions = {})
     } catch {
       continue; // tracked but absent from the working tree
     }
-    const entry: RepoMapEntry = { path: rel, ext, role, sizeBytes, lineCount: 0, exports: [], imports: [] };
+    const entry: RepoMapEntry = { path: rel, ext, role, sizeBytes, lineCount: 0, exports: [], imports: [], signals: EMPTY_SIGNALS };
     const owner = owners.find((o) => (o.dir === '' ? true : rel.startsWith(o.dir + '/')));
     if (owner) entry.packageName = owner.name;
     const entryWhy = entryPointOf(rel);
@@ -264,14 +282,30 @@ export async function buildRepoMap(root: string, opts: BuildRepoMapOptions = {})
         for (const m of text.matchAll(IMPORT_RE)) specs.add(m[1]!);
         for (const m of text.matchAll(REQUIRE_RE)) specs.add(m[1]!);
         entry.imports = [...specs].map((s) => resolveImport(rel, s, trackedSet) ?? s).slice(0, 64);
+        // Same single read: signals cost no extra IO on top of the export scan.
+        entry.signals = extractSignals({ path: rel, text, role });
       } catch {
         /* unreadable file: keep the name-level entry */
       }
     }
+    // Even an unscanned file contributes its path tokens, so a name-only match
+    // still works for assets, configs and oversize files.
+    if (entry.signals === EMPTY_SIGNALS) {
+      entry.signals = { ...EMPTY_SIGNALS, tokens: { code: [], comment: [], name: splitToken(rel) } };
+    }
     entries.push(entry);
   }
 
+  // Second pass: the repository's own vocabulary decomposes run-together compounds
+  // (`allowlist` → allow + list) and drives category assignment. Built from the
+  // tree itself rather than curated, so it needs no maintenance as names change.
+  const vocabulary = buildVocabulary(
+    entries.flatMap((e) => [...e.signals.tokens.code, ...e.signals.tokens.name, ...e.exports, e.path]),
+  );
+  for (const entry of entries) entry.signals = finalizeSignals(entry.signals, entry.role, vocabulary);
+
   const map: RepoMap = {
+    vocabulary,
     root: realRoot,
     head,
     dirtyFingerprint,
