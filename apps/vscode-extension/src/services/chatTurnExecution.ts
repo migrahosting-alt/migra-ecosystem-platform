@@ -313,6 +313,16 @@ export class ChatTurnExecution {
    * A missing child is a referential-integrity failure, never a completion.
    */
   async finish(): Promise<{ state: ChatTurnState; durable: boolean; failure?: ChatTurnFailure }> {
+    // Idempotent: a turn is resolved once. The wrapper calls this in a `finally`, so a
+    // path that already resolved explicitly must not be re-resolved into a different
+    // answer — and must not push a second terminal revision.
+    if (this.turn.currentState !== 'running' && this.turn.currentState !== 'cancelling') {
+      return {
+        state: this.turn.currentState,
+        durable: true,
+        ...(this.turn.failure ? { failure: this.turn.failure } : {}),
+      };
+    }
     const unresolved: string[] = [];
     const missing: string[] = [];
     let anyChildFailed = false;
@@ -366,14 +376,13 @@ export class ChatTurnExecution {
     }
 
     this.turn.endedAt = this.now();
+    // Re-read through an explicit annotation: the idempotence guard above narrowed the
+    // field, but `transition()` has since mutated it.
+    const finalState = this.turn.currentState as ChatTurnState;
     this.turn.terminalEvidence = {
       observedAt: this.now(),
       outcome:
-        this.turn.currentState === 'completed'
-          ? 'success'
-          : this.turn.currentState === 'cancelled'
-            ? 'cancelled'
-            : 'failure',
+        finalState === 'completed' ? 'success' : finalState === 'cancelled' ? 'cancelled' : 'failure',
       evidenceType: 'child_records_resolved',
     };
     if (failure) this.turn.failure = failure;

@@ -32,6 +32,7 @@ import { type GitResult, type GitRunner, assertReadOnly } from '../../commitGen/
 import { BrainClient } from '../../services/brainClient.js';
 import type { BackendRouter } from '../../services/backendRouter.js';
 import type { EngineDiagnostics } from '../../services/engineDiagnostics.js';
+import type { BrainStore } from '../../services/brainPersistence.js';
 import { MigraAiClient } from '../../services/migraAiClient.js';
 import { readGitContext, readWorkingChanges } from '../../services/gitContext.js';
 import { groundingModeOf, liveModeConfirmation, liveModeOf, sourceModeConfirmation } from './composerModel.js';
@@ -123,6 +124,9 @@ export interface ShellDeps {
   router: BackendRouter;
   migraAiClient: MigraAiClient;
   engineDiagnostics?: EngineDiagnostics;
+  /** Durable execution store. Absent until activation bootstrap resolves; a turn that
+   * starts without it runs ungoverned and says so rather than faking a record. */
+  brainStore?: BrainStore;
   memoryMode: () => 'off' | 'session' | 'durable';
   executionPolicy?: () => string;
   workspaceRoot: () => string | undefined;
@@ -928,6 +932,7 @@ export class MigraPilotShell {
           router: this.deps.router,
           migraAiClient: this.deps.migraAiClient,
           ...(this.deps.engineDiagnostics ? { engineDiagnostics: this.deps.engineDiagnostics } : {}),
+          ...(this.deps.brainStore ? { brainStore: this.deps.brainStore } : {}),
         },
         sink,
         text || 'Analyze the attached file(s).',

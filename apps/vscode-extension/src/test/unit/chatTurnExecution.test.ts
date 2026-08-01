@@ -242,3 +242,33 @@ test('cross · recovery reports a terminal child under a nonterminal parent', ()
   const f = reconcile([turn], [child]);
   assert.equal(f.some((x) => x.kind === 'terminal_child_under_nonterminal_parent'), true);
 });
+
+// ── the wrapper contract: every exit path resolves the turn ─────────────────
+
+test('chat · finish is idempotent — an explicitly resolved turn is not re-resolved', async () => {
+  const { s } = await store();
+  const t = await ChatTurnExecution.begin(s, 'turn-16');
+  const first = await t.finish();
+  const revAfterFirst = t.snapshot().revision;
+  const second = await t.finish();
+  assert.equal(second.state, first.state, 'the answer does not change');
+  assert.equal(t.snapshot().revision, revAfterFirst, 'and no second terminal revision is written');
+});
+
+test('chat · a turn resolved as cancelled is not reopened by a later finish', async () => {
+  const { s } = await store();
+  const t = await ChatTurnExecution.begin(s, 'turn-17');
+  await t.requestCancellation();
+  t.acknowledgeCancellation();
+  assert.equal((await t.finish()).state, 'cancelled');
+  // The wrapper's `finally` calls finish() again on every path.
+  assert.equal((await t.finish()).state, 'cancelled');
+});
+
+test('chat · pressing stop after the turn resolved does not rewrite the outcome', async () => {
+  const { s } = await store();
+  const t = await ChatTurnExecution.begin(s, 'turn-18');
+  assert.equal((await t.finish()).state, 'completed');
+  await t.requestCancellation(); // late token event
+  assert.equal(t.state, 'completed', 'a completed turn ignores a late cancellation request');
+});

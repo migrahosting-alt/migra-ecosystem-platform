@@ -21,6 +21,8 @@ import { getEscalationDispatch } from '../services/escalationConsent.js';
 import { attributionView, type RoutingView } from '../panel/providerRouterViewModel.js';
 import { buildAiRequest } from './intentMapping.js';
 import { parseSummaryTurns } from './conversationSummary.js';
+import { ChatTurnExecution } from '../services/chatTurnExecution.js';
+import type { BrainStore } from '../services/brainPersistence.js';
 
 /** A backend-agnostic output surface for a chat turn. Both the native chat
  * participant (wrapping a vscode.ChatResponseStream) and the dedicated chat
@@ -41,6 +43,10 @@ export interface ChatEngineDeps {
   migraAiClient: MigraAiClient;
   /** Sanitized routing diagnostics recorder (observability only). */
   engineDiagnostics?: EngineDiagnostics;
+  /** Durable execution store. When present every chat turn becomes a governed
+   * operation with its own parent record; when absent the turn runs ungoverned and
+   * says so, rather than pretending a record exists. */
+  brainStore?: BrainStore;
 }
 
 
@@ -117,6 +123,16 @@ export interface ChatTurnOptions {
  *
  * `conversationSummary` is supplied by the caller (built from whatever history
  * representation it holds) so the engine stays agnostic of the chat surface. */
+/**
+ * Governed entry point.
+ *
+ * The turn's parent record is created BEFORE any work, and resolved in a `finally` so
+ * every exit path — including the seven early returns below — lands on an observed
+ * terminal state rather than falling off the end unrecorded.
+ *
+ * The VS Code token is wired as a TRIGGER only. It reports that someone pressed stop;
+ * whether the work actually stopped is decided by `finish()`, from child records.
+ */
 export async function runChatTurn(
   deps: ChatEngineDeps,
   sink: ChatSink,
@@ -124,6 +140,42 @@ export async function runChatTurn(
   conversationSummary: string,
   token: vscode.CancellationToken,
   options: ChatTurnOptions = {},
+): Promise<void> {
+  if (!deps.brainStore) {
+    // No store wired: run ungoverned rather than fabricate a record.
+    await runChatTurnInner(deps, sink, prompt, conversationSummary, token, options, undefined);
+    return;
+  }
+  const turn = await ChatTurnExecution.begin(deps.brainStore, newTurnId());
+  const stop = token.onCancellationRequested(() => {
+    void turn.requestCancellation();
+  });
+  try {
+    await runChatTurnInner(deps, sink, prompt, conversationSummary, token, options, turn);
+  } finally {
+    stop.dispose();
+    // Control returning is the observable acknowledgement that this turn's own loop
+    // stopped. It is NOT evidence that an in-flight child stopped — `finish()` checks
+    // each child's own record for that, and refuses `cancelled` if any is unresolved.
+    if (token.isCancellationRequested) turn.acknowledgeCancellation();
+    await turn.finish();
+  }
+}
+
+let turnCounter = 0;
+function newTurnId(): string {
+  turnCounter += 1;
+  return `turn-${Date.now().toString(36)}-${turnCounter}`;
+}
+
+async function runChatTurnInner(
+  deps: ChatEngineDeps,
+  sink: ChatSink,
+  prompt: string,
+  conversationSummary: string,
+  token: vscode.CancellationToken,
+  options: ChatTurnOptions,
+  turn: ChatTurnExecution | undefined,
 ): Promise<void> {
   const { brainClient, router } = deps;
   const trimmed = prompt.trim();
@@ -370,13 +422,21 @@ export async function runChatTurn(
     // Suppressed when the turn produced no work (a question answered, nothing
     // proposed): a "0 files" report under a plain answer is noise, not a summary.
     if (finalChangeset || token.isCancellationRequested) {
+      // Resolve the turn BEFORE reporting on it. `token.isCancellationRequested` says
+      // only that stop was pressed; `outcome.state === 'cancelled'` requires an
+      // acknowledged cancellation AND every child resolved to a terminal record AND
+      // the parent's terminal revision persisted. Without a store there is no record
+      // to consult, so the deprecated signal remains the only available input and the
+      // report is honestly ungoverned.
+      if (turn && token.isCancellationRequested) turn.acknowledgeCancellation();
+      const outcome = turn ? await turn.finish() : undefined;
       sink.markdown(
         buildWorkReport({
           task: trimmed,
           root: workspaceRootForTask,
           proposedFiles: (finalChangeset?.ops ?? []).map((o) => ({ path: o.path ?? '', ...(o.kind ? { kind: o.kind } : {}) })),
           applied,
-          cancelled: token.isCancellationRequested,
+          cancelled: outcome ? outcome.state === 'cancelled' : token.isCancellationRequested,
           autoApply,
         }),
       );

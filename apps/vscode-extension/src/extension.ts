@@ -410,6 +410,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<MigraP
     router,
     migraAiClient,
     engineDiagnostics,
+    // Governs chat turns. Bootstrap ran at activation and its recovery is already
+    // persisted by the time this executes, so a turn can never start before the store
+    // is consistent.
+    ...(brainBootstrap?.store ? { brainStore: brainBootstrap.store } : {}),
     memoryMode: () => {
       const m = String(vscode.workspace.getConfiguration('migrapilot').get('memoryMode', 'session'));
       return m === 'off' || m === 'durable' ? m : 'session';
