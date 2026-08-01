@@ -334,6 +334,17 @@ async function main(): Promise<void> {
   // has no reference to it and cannot approve or execute commands.
   const agentModeCommands = buildAgentModeCommandService(toolDeps, durable ?? undefined);
   registerAgentModeCommandRoutes(app, toolDeps, agentActivation, agentModeCommands);
+  // Governed coding runs (/api/ai/coding/runs) are NOT mounted yet.
+  //
+  // The HTTP surface and its service are complete and covered by
+  // codingRunRoutes.test.ts, but the workflow driver that connects them to the
+  // real planner, mutation engine and validation runner is the next slice.
+  // Mounting the routes against a driver that always fails would advertise a
+  // capability the server does not have, and a coding run can WRITE files — so it
+  // stays unreachable until the driver is real. Enabling it will additionally
+  // require a durable store and an explicit MIGRAPILOT_CODING_WORKSPACE_ROOTS
+  // boundary, because a run whose record cannot outlive the process that made the
+  // changes is exactly the state this workflow exists to prevent.
   const agentModeReconciliation = await agentModeCommands.reconcileOnStartup();
   if (agentModeReconciliation.scanned > 0) app.log.info({ agentModeReconciliation }, 'Agent Mode durable run reconciliation completed');
   // Private snapshots are released with their proposal, but a process killed

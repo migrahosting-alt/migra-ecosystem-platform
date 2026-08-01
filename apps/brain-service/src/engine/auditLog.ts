@@ -38,6 +38,13 @@ export type AuditEventType =
   | 'proposal.stale'
   | 'execution.spawned'
   | 'cancellation.requested'
+  /** Governed coding runs. Every MUTATING route emits one of these, so an
+   * approval or a cancellation is auditable independently of the run journal. */
+  | 'coding.run_started'
+  | 'coding.scope_approved'
+  | 'coding.scope_rejected'
+  | 'coding.cancellation_requested'
+  | 'coding.workflow_failed'
   | 'containment.terminated'
   | 'execution.timed_out'
   | 'execution.termination_failed'

@@ -47,7 +47,16 @@ export interface CodingRunStore {
    * cannot tell a failed write from a successful one cannot stay truthful. */
   writePayload(payload: CodingRunPayloadV1, note: string): boolean;
   parentState(): DurableAgentRunState;
-  transitionParent(next: DurableAgentRunState, note: string): boolean;
+  /**
+   * Move the parent, optionally carrying a payload in the SAME durable revision.
+   *
+   * The payload argument is not a convenience. A terminal parent refuses all
+   * further writes, so a phase written afterwards could never land — the run
+   * would sit at `COMPLETED` with a payload still claiming it was applying a
+   * changeset. Writing both together makes the phase become terminal exactly
+   * when the parent does, and fail together when the write fails.
+   */
+  transitionParent(next: DurableAgentRunState, note: string, payload?: CodingRunPayloadV1): boolean;
 }
 
 export type StageStatus =
@@ -256,6 +265,25 @@ export class JournaledCodingRun {
     return { ok: true };
   }
 
+  /**
+   * The operator refused the scope.
+   *
+   * The proposal and its evidence are PRESERVED — a rejected scope has to stay
+   * inspectable, or nobody can later ask what was turned down and why. Only the
+   * decision is added, and the parent reaches `REJECTED`, which is what makes
+   * further mutation impossible rather than merely discouraged.
+   */
+  rejectScope(): boolean {
+    const current = this.payload;
+    const scope = current.scope;
+    if (!scope) return false;
+    return this.store.transitionParent('REJECTED', 'scope.rejected', {
+      ...current,
+      scope: { ...scope, approvalState: 'invalidated' },
+      phase: 'terminal',
+    });
+  }
+
   // ── Cancellation ───────────────────────────────────────────────────────────
 
   /** Record the REQUEST. Says someone pressed stop; says nothing about stopping. */
@@ -316,10 +344,13 @@ export class JournaledCodingRun {
     else if (current.cancellation?.confirmedAt) state = 'CANCELLED';
     else state = 'FAILED';
 
-    const durable = this.store.transitionParent(state, `run.${state.toLowerCase()}`);
-    if (durable) {
-      this.patchPayload({ phase: 'terminal', ...(input.report ? { finalReport: input.report } : {}) }, 'run.terminal');
-    }
+    // One revision carries both. If it does not land, the phase stays where it
+    // was and `durable: false` says the outcome may be real but is not recorded.
+    const durable = this.store.transitionParent(state, `run.${state.toLowerCase()}`, {
+      ...current,
+      phase: 'terminal',
+      ...(input.report ? { finalReport: input.report } : {}),
+    });
     return { state, durable, blockers: eligibility.blockers };
   }
 

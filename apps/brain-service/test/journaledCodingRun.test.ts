@@ -54,9 +54,11 @@ class TestStore implements CodingRunStore {
     return true;
   }
   parentState(): DurableAgentRunState { return this.state; }
-  transitionParent(next: DurableAgentRunState, note: string): boolean {
+  transitionParent(next: DurableAgentRunState, note: string, payload?: CodingRunPayloadV1): boolean {
     if (this.failParentTransition) return false;
+    // Mirrors the real store: state and payload land in ONE revision or neither.
     this.state = next;
+    if (payload) this.payload = payload;
     this.notes.push(note);
     return true;
   }

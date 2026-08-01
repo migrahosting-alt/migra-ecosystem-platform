@@ -722,6 +722,13 @@ export class MemoryAgentRunJournalPersistence implements AgentRunJournalPersiste
       recoveryAttemptCount: input.patch?.recoveryAttemptCount,
       lastRecoveryRequestId: input.patch?.lastRecoveryRequestId,
       recoveryTerminalReason: input.patch?.recoveryTerminalReason,
+      // The domain payload must be applied here too. Omitting it made this double
+      // silently DROP every payload write while the SQLite adapter persisted them
+      // — a divergence that would have let memory-backed tests pass against
+      // behaviour production does not have.
+      domainKind: input.patch?.domainKind,
+      domainSchemaVersion: input.patch?.domainSchemaVersion,
+      domainPayloadJson: input.patch?.domainPayloadJson,
       updatedAt: input.at,
       version: run.version + 1,
     }));
