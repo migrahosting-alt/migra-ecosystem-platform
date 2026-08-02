@@ -1,4 +1,4 @@
-// Evidence-governed multi-file coding: the 20 acceptance cases.
+// Evidence-governed multi-file coding: the 22 acceptance cases.
 //
 // These drive the REAL apply engine (`applyChangeset`, with its readback
 // verification and all-or-nothing rollback) and the REAL command runner against
