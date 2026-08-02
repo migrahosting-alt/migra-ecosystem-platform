@@ -33,6 +33,7 @@
 
 import { createHash } from 'node:crypto';
 import type { ChangesetRequest } from '@migrapilot/protocol';
+import { isWorkspaceRelativeContained } from './editScope.js';
 import { normalizePath, type EvidenceLedger } from '../grounding/evidenceLedger.js';
 import type { ApprovedEditScope } from './editScope.js';
 import type { DeclaredValidation, ValidationRecord } from './validationRun.js';
@@ -207,6 +208,10 @@ export function parseProposal(raw: unknown): ParsedProposal | null {
     const e = entry as { path?: unknown; content?: unknown };
     if (typeof e.path !== 'string' || !e.path.trim()) return null;
     if (typeof e.content !== 'string') return null;
+    // Refuse an absolute or escaping path rather than normalising it into a
+    // plausible workspace-relative one. Rewriting would hide the attempt, and a
+    // hidden attempt is worse than a rejected proposal.
+    if (!isWorkspaceRelativeContained(e.path)) return null;
     edits.push({ path: normalizePath(e.path), content: e.content });
   }
   const citedIds: string[] = [];

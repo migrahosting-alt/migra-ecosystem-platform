@@ -228,7 +228,7 @@ export async function runCodingTask(opts: CodingRunOptions): Promise<CodingRunRe
 
   // ── Baseline: the failure must be observed BEFORE anything is changed. ────────
   const baseline = await validate(opts.validations.baseline, 'baseline');
-  if (cancelled()) return finish('cancelled', baseline, { ok: false, refusal: 'scope-violation', message: 'cancelled before apply', offendingPaths: [], mutated: false });
+  if (cancelled()) return finish('cancelled', baseline, { ok: false, refusal: 'cancelled-before-apply', message: 'the run was cancelled after baseline validation and before any write was attempted', offendingPaths: [], mutated: false });
 
   // ── Initial governed apply ───────────────────────────────────────────────────
   const initialApply = await governedApply(opts.initialChangeset, applyDeps);
