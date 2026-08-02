@@ -198,3 +198,31 @@ test('10 — the shape the real model invented is still refused', () => {
   assert.equal(parsePlannerOutput(invented), null);
   assert.equal(parseProposal(invented), null);
 });
+
+// ── 11-12. every validated field must be stated ────────────────────────────────
+
+test('11 — the repair contract states quotedEvidence, which the repair adapter validates', () => {
+  // Raised in review of this PR. `parseProposal` accepts `quotedEvidence` and the
+  // repair adapter checks each quotation strictly against the block it names, but
+  // the contract never mentioned it while the system prompt forbids "other
+  // top-level keys". A compliant model therefore could never volunteer a
+  // quotation — the strict check was unreachable — and a model that sent one was
+  // violating the stated shape. A validated field that the contract hides is the
+  // same drift, pointing the other way.
+  assert.ok(REPAIR_OUTPUT_CONTRACT.includes('"quotedEvidence"'), 'contract never names "quotedEvidence"');
+  assert.ok(REPAIR_OUTPUT_CONTRACT.includes('"evidenceId"'), 'contract never names "evidenceId"');
+  // It must be stated as OPTIONAL: requiring it would force invention, and an
+  // invented quotation is rejected outright.
+  assert.match(REPAIR_OUTPUT_CONTRACT, /OPTIONAL/);
+});
+
+test('12 — a repair reply carrying quotedEvidence parses and keeps the quotations', () => {
+  const parsed = parseProposal({
+    rationale: 'the tests expect excludedLineCount',
+    observedFailureEvidenceIds: ['F-1'],
+    quotedEvidence: [{ evidenceId: 'F-1', text: 'expected excludedLineCount' }],
+    edits: [{ path: ROUTE, content: 'export function orderTotalsRoute() {}\n' }],
+  });
+  assert.ok(parsed, 'a reply built to the stated repair contract was rejected');
+  assert.deepEqual(parsed.quoted, [{ evidenceId: 'F-1', text: 'expected excludedLineCount' }]);
+});

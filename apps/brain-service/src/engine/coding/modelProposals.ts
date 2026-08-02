@@ -226,7 +226,8 @@ export const REPAIR_OUTPUT_CONTRACT = [
   '{',
   '  "rationale": "what the failure shows and why this fixes it",',
   '  "observedFailureEvidenceIds": ["F-1"],',
-  '  "edits": [{ "path": "<file>", "content": "<COMPLETE new file text>" }]',
+  '  "edits": [{ "path": "<file>", "content": "<COMPLETE new file text>" }],',
+  '  "quotedEvidence": [{ "evidenceId": "F-1", "text": "<exact text from that block>" }]',
   '}',
   'Rules:',
   '- "edits" must contain at least one entry.',
@@ -234,6 +235,14 @@ export const REPAIR_OUTPUT_CONTRACT = [
   '- "content" is the entire file after the change, never a diff or a fragment.',
   '- "observedFailureEvidenceIds" must quote ids that appear in failureEvidence.',
   '  Cite only what the failure actually shows; invented ids are rejected.',
+  // Stated because the parser accepts it and the repair adapter checks it. Omitting
+  // it while the system prompt forbids "other top-level keys" left a validated field
+  // the model was told not to send: the strict quotation check became unreachable,
+  // and a model that sent one anyway was violating the shape instruction. Exactly
+  // the contract/validator drift these constants exist to prevent.
+  '- "quotedEvidence" is OPTIONAL. Omit it entirely unless you quote verbatim.',
+  '  Each quotation is checked strictly against the block it names: text that does',
+  '  not appear in that block rejects the whole proposal. Never paraphrase here.',
 ].join('\n');
 
 export function parseProposal(raw: unknown): ParsedProposal | null {
