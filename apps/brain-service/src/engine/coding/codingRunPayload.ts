@@ -20,7 +20,7 @@
 
 import type { ClaimSource } from '../grounding/claimVerifier.js';
 import type { ValidationRecord } from './validationRun.js';
-import type { ObservedFailureEvidence } from './modelProposals.js';
+import { REPAIR_HISTORY_LIMITS, type ObservedFailureEvidence, type PreviousRepairAttempt } from './modelProposals.js';
 import type { CodingRunReport } from './codingRun.js';
 
 /** Domain identity written to `agent_runs.domain_kind`.
@@ -143,6 +143,15 @@ export interface CodingRunPayloadV1 {
   cancellation?: { requestedAt: string; confirmedAt?: string };
   latestValidation?: ValidationRecord;
   failureEvidence?: ObservedFailureEvidence[];
+  /**
+   * What earlier repair attempts tried and what became of them.
+   *
+   * Durable because a restart must not hand the model a clean slate: the whole
+   * point of the history is that an attempt already shown not to land is not tried
+   * again, and a process that forgot would repeat exactly the strategy it had
+   * already spent an attempt disproving. Bounded and summarised — never raw output.
+   */
+  repairHistory?: PreviousRepairAttempt[];
   finalReport?: CodingRunReport;
 }
 
@@ -185,6 +194,43 @@ function parseClaimSources(raw: unknown): ClaimSource[] | undefined {
  * A run whose scope cannot be parsed must surface as unreadable — silently
  * defaulting `approvalState` would hand out write authority nobody granted.
  */
+const REPAIR_OUTCOMES = new Set(['proposal_rejected', 'apply_refused', 'apply_failed', 'validation_failed', 'rolled_back']);
+
+/** A history entry is trusted only if every field it will be rendered from is sound. */
+function isRepairAttempt(raw: unknown): raw is PreviousRepairAttempt {
+  if (!isRecord(raw)) return false;
+  if (!isCount(raw.attempt)) return false;
+  if (!isNonEmptyString(raw.rationale) || !isNonEmptyString(raw.proposalDigest)) return false;
+  if (typeof raw.outcome !== 'string' || !REPAIR_OUTCOMES.has(raw.outcome)) return false;
+  if (typeof raw.outcomeReason !== 'string') return false;
+  if (!Array.isArray(raw.citedEvidenceIds) || !raw.citedEvidenceIds.every(isNonEmptyString)) return false;
+  if (!Array.isArray(raw.proposedPaths) || !raw.proposedPaths.every(isNonEmptyString)) return false;
+  if (raw.validationEvidenceIds !== undefined
+    && (!Array.isArray(raw.validationEvidenceIds) || !raw.validationEvidenceIds.every(isNonEmptyString))) return false;
+  return true;
+}
+
+/**
+ * Copy ONLY the declared fields.
+ *
+ * Filtering with a type guard keeps the original object, so anything the writer
+ * attached — a raw model reply, a transcript — rode along into durable storage and
+ * back out into the next prompt. History is a summary by construction, and that is
+ * only true if the parser makes it true.
+ */
+function projectRepairAttempt(raw: PreviousRepairAttempt): PreviousRepairAttempt {
+  return {
+    attempt: raw.attempt,
+    citedEvidenceIds: [...raw.citedEvidenceIds],
+    rationale: raw.rationale,
+    proposedPaths: [...raw.proposedPaths],
+    proposalDigest: raw.proposalDigest,
+    outcome: raw.outcome,
+    outcomeReason: raw.outcomeReason,
+    ...(raw.validationEvidenceIds ? { validationEvidenceIds: [...raw.validationEvidenceIds] } : {}),
+  };
+}
+
 export function parseCodingPayload(raw: unknown): CodingPayloadParse {
   if (!isRecord(raw)) return { ok: false, fault: 'not-an-object', detail: 'payload is not an object' };
   if (!isNonEmptyString(raw.issueText)) return { ok: false, fault: 'missing-issue-text', detail: 'issueText is absent or empty' };
@@ -194,6 +240,13 @@ export function parseCodingPayload(raw: unknown): CodingPayloadParse {
   if (!isRecord(raw.attempts) || !isCount(raw.attempts.initialProposal) || !isCount(raw.attempts.repair)) {
     return { ok: false, fault: 'invalid-attempts', detail: 'attempts must carry non-negative integer counters' };
   }
+
+  // Repair history is optional but STRICTLY shaped when present. A malformed entry
+  // is dropped rather than failing the whole payload: history is an aid to model
+  // competence, and losing one summary must never make a durable run unreadable.
+  const repairHistory: PreviousRepairAttempt[] = Array.isArray(raw.repairHistory)
+    ? (raw.repairHistory as unknown[]).filter(isRepairAttempt).map(projectRepairAttempt).slice(-REPAIR_HISTORY_LIMITS.maxAttempts)
+    : [];
 
   // Child references are REQUIRED, even when empty. An absent list would be
   // indistinguishable from "this parent never authorised anything", which is
@@ -326,6 +379,7 @@ export function parseCodingPayload(raw: unknown): CodingPayloadParse {
       ...(scope ? { scope } : {}),
       ...(raw.latestValidation !== undefined ? { latestValidation: raw.latestValidation as ValidationRecord } : {}),
       ...(Array.isArray(raw.failureEvidence) ? { failureEvidence: raw.failureEvidence as ObservedFailureEvidence[] } : {}),
+      ...(repairHistory.length ? { repairHistory } : {}),
       ...(raw.finalReport !== undefined ? { finalReport: raw.finalReport as CodingRunReport } : {}),
     },
   };

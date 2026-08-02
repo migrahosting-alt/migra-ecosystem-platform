@@ -585,6 +585,7 @@ test('26 — a run that exhausts its repairs is labelled repair-ceiling-exhauste
   // WRONG field name, so validation can never pass and every repair is spent.
   // The harness builds the fixture, so the model learns the root just after.
   let root = '';
+  let repairCalls = 0;
   const wrongFieldModel = async (input: unknown): Promise<unknown> => {
     const body = input as Record<string, unknown>;
     if ('candidatePaths' in body) {
@@ -597,10 +598,15 @@ test('26 — a run that exhausts its repairs is labelled repair-ceiling-exhauste
     }
     if ('failureEvidence' in body) {
       const ids = [...String(body.failureEvidence ?? '').matchAll(/\b(F-\d+)\b/g)].map((m) => m[1]!);
+      // A DIFFERENT wrong name each attempt. Resending the identical changeset is
+      // now rejected as a duplicate before the ceiling can be reached, which is the
+      // repair-memory rule working — but this test is about the ceiling label, so
+      // the model must keep proposing genuinely new (and still wrong) changesets.
+      repairCalls += 1;
       return {
-        rationale: 'Retrying with the same field name.',
+        rationale: `Retrying with a different field name (attempt ${repairCalls}).`,
         observedFailureEvidenceIds: ids.slice(0, 4),
-        edits: edits(root, 'cancelledCount'),
+        edits: edits(root, `cancelledCount${repairCalls}`),
       };
     }
     return { rationale: 'Report the count.', edits: edits(root, 'cancelledCount') };
@@ -729,6 +735,12 @@ test('28 — a rejected repair proposal is named, not reported as a refused appl
   const body = (await read(h, runId)).json<{ finalReport?: { complete: boolean; stopReason: string } }>();
   assert.ok(repairCalls > 0, 'the repair path must actually have been entered');
   assert.equal(body.finalReport?.complete, false);
-  assert.equal(body.finalReport?.stopReason, 'repair-proposal-rejected');
+  // A rejected proposal now COSTS an attempt instead of ending the run, so a model
+  // that is malformed every time spends the whole budget and the run is labelled by
+  // what actually stopped it. The distinction this test was written for still holds:
+  // a rejected proposal is never reported as an apply that was refused.
+  assert.equal(body.finalReport?.stopReason, 'repair-ceiling-exhausted');
+  assert.notEqual(body.finalReport?.stopReason, 'apply-refused');
+  assert.ok(repairCalls >= 2, 'a rejection must not end the run while attempts remain');
   await h.app.close(); h.store.close();
 });
