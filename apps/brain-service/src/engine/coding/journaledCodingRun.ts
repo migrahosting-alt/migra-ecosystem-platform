@@ -103,14 +103,48 @@ export interface RunStageOptions {
 
 const CHILD_ID_PREFIX = 'codingchild';
 
+/**
+ * Boundary trace for the dispatch invariant.
+ *
+ * Every transition between "about to record work" and "work recorded" gets an
+ * event, because the failure this exists to diagnose is invisible in the final
+ * parent record: a run that never registered a child looks identical to a run
+ * whose child registration was refused. Non-secret facts only — ids, kinds,
+ * codes and states, never paths or payloads.
+ */
+export type CodingDiagnosticEvent =
+  | { at: 'coding.plan.entered'; runId: string; kind: string; attempt: number }
+  | { at: 'coding.child.create.requested'; runId: string; kind: string; attempt: number }
+  | { at: 'coding.child.create.refused'; runId: string; kind: string; attempt: number; code: string; detail: string }
+  | { at: 'coding.child.created'; runId: string; kind: string; attempt: number; childId: string }
+  | { at: 'coding.child.parent_ref.persisted'; runId: string; childId: string }
+  | { at: 'coding.plan.dispatch_started'; runId: string; childId: string }
+  | { at: 'coding.plan.returned'; runId: string; childId: string; outcome: string }
+  | { at: 'coding.stage.skipped'; runId: string; kind: string; reason: string };
+
+export type CodingDiagnosticSink = (event: CodingDiagnosticEvent) => void;
+
 export class JournaledCodingRun {
   constructor(
     private readonly journal: AgentRunJournal,
     private readonly runId: string,
     private readonly store: CodingRunStore,
     private readonly now: () => number = () => Date.now(),
+    /**
+     * Child ids MUST be namespaced by run.
+     *
+     * `child_id` is a global PRIMARY KEY, so an id of `kind_attempt` collides with
+     * every other run in the same database: the first coding run works and every
+     * one after it is refused DUPLICATE_CHILD before its first child exists. That
+     * shipped, and only surfaced through the packaged acceptance, because unit
+     * tests build a fresh in-memory journal per case and never see a second run.
+     *
+     * Still deterministic, so a resumed run computes the same id and its completed
+     * children are reused rather than duplicated.
+     */
     private readonly mkChildId: (kind: CodingChildKind, attempt: number) => string =
-      (kind, attempt) => `${CHILD_ID_PREFIX}_${kind}_${attempt}`,
+      (kind, attempt) => `${CHILD_ID_PREFIX}_${runId}_${kind}_${attempt}`,
+    private readonly diagnostic: CodingDiagnosticSink = () => undefined,
   ) {}
 
   get payload(): CodingRunPayloadV1 {
@@ -149,6 +183,7 @@ export class JournaledCodingRun {
   async runStage<T>(opts: RunStageOptions, work: (child: DurableAgentRunChild) => Promise<StageWorkResult<T>>): Promise<StageResult<T>> {
     // 0 — cancellation is checked at the boundary, before anything is created.
     if (this.cancellationRequested()) {
+      this.diagnostic({ at: 'coding.stage.skipped', runId: this.runId, kind: opts.kind, reason: 'cancellation_requested' });
       return { status: 'cancelled', detail: 'cancellation was requested; no new child was launched' };
     }
 
@@ -158,6 +193,7 @@ export class JournaledCodingRun {
     if (opts.reuseIfCompleted) {
       const existing = this.completedChild(opts.kind);
       if (existing) {
+        this.diagnostic({ at: 'coding.stage.skipped', runId: this.runId, kind: opts.kind, reason: 'reused_completed_child' });
         this.advancePhase(opts.phase, `stage.reused:${opts.kind}`);
         return { status: 'reused', child: existing, reusedEvidence: parseEvidence(existing), detail: `reused durable ${opts.kind} from attempt ${existing.attempt}` };
       }
@@ -165,6 +201,8 @@ export class JournaledCodingRun {
 
     const attempt = this.nextAttempt(opts.kind);
     const childId = this.mkChildId(opts.kind, attempt);
+    this.diagnostic({ at: 'coding.plan.entered', runId: this.runId, kind: opts.kind, attempt });
+    this.diagnostic({ at: 'coding.child.create.requested', runId: this.runId, kind: opts.kind, attempt });
 
     // 1 + 2 — existence, then reference. Refusal here means zero dispatch.
     const registration = registerCodingChild(this.journal, (p, note) => this.store.writePayload(p, note), {
@@ -178,8 +216,16 @@ export class JournaledCodingRun {
       metadata: opts.metadata,
     });
     if (registration.decision !== 'dispatch') {
+      // The refusal CODE is the diagnostic. Discarding it here is what made this
+      // failure class invisible: every refusal read as "no work happened".
+      this.diagnostic({
+        at: 'coding.child.create.refused', runId: this.runId, kind: opts.kind, attempt,
+        code: registration.reason.replace(/^child not created: /, ''), detail: registration.reason,
+      });
       return { status: 'refused', detail: registration.reason };
     }
+    this.diagnostic({ at: 'coding.child.created', runId: this.runId, kind: opts.kind, attempt, childId });
+    this.diagnostic({ at: 'coding.child.parent_ref.persisted', runId: this.runId, childId });
 
     // 3 + 4 — dispatch, and only now does the child become `running`.
     const started = startCodingChild(this.journal, registration.child, this.now());
@@ -187,6 +233,7 @@ export class JournaledCodingRun {
       return { status: 'refused', detail: 'the child could not be moved to running; nothing was dispatched' };
     }
 
+    this.diagnostic({ at: 'coding.plan.dispatch_started', runId: this.runId, childId });
     let result: StageWorkResult<T>;
     try {
       result = await work(started);
@@ -208,6 +255,7 @@ export class JournaledCodingRun {
       return { status: 'errored', child: started, value: result.value, detail: 'the terminal revision for this stage did not persist' };
     }
 
+    this.diagnostic({ at: 'coding.plan.returned', runId: this.runId, childId, outcome: result.outcome });
     // 6 — the phase advances only now that the child's terminal revision landed.
     this.advancePhase(opts.phase, `stage.${result.outcome}:${opts.kind}`);
     return { status: result.outcome === 'success' ? 'completed' : 'failed', child: finished, value: result.value };

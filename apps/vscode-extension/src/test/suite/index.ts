@@ -17,7 +17,7 @@ export async function run(): Promise<void> {
   // that cannot pass would make every other gate's result unreadable.
   const files = (await glob('**/*.test.js', { cwd: testsRoot }))
     .filter((f) => !f.includes('opsValidation'))
-    .filter((f) => !f.includes('governedCoding'));
+    ;
   for (const file of files) {
     mocha.addFile(path.resolve(testsRoot, file));
   }

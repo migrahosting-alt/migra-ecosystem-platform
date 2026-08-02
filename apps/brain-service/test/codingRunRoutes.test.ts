@@ -508,3 +508,17 @@ test('25 — the route module reaches the journal only through the coding servic
   }
   assert.ok(source.includes("from './codingRunService.js'"), 'routes go through the service');
 });
+
+test('a terminal run refuses cancellation instead of reporting it accepted', async () => {
+  const h = await harness();
+  const { runId, revision } = await plannedRun(h);
+  await decide(h, runId, { expectedRevision: revision, pathSetHash: SCOPE_HASH, decision: 'approve' });
+  await h.service.settle(runId);
+
+  const current = (h.service.read(runId) as { value: { revision: number; phase: string } }).value;
+  assert.equal(current.phase, 'terminal');
+  const res = await cancel(h, runId, { expectedRevision: current.revision });
+  assert.equal(res.statusCode, 409, 'a finished run cannot be cancelled');
+  assert.equal(res.json<{ reason: string }>().reason, 'invalid_state');
+  await h.app.close();
+});

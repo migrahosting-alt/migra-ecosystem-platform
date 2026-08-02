@@ -41,7 +41,7 @@ import {
   type AgentRunJournalConfig,
 } from '../agentRunJournal.js';
 import type { DurableAgentRun, DurableAgentRunState } from '../persistence/types.js';
-import { JournaledCodingRun, type CodingRunStore } from './journaledCodingRun.js';
+import { JournaledCodingRun, type CodingDiagnosticSink, type CodingRunStore } from './journaledCodingRun.js';
 import { codingCompletionEligibility } from './codingChildren.js';
 import {
   CODING_DOMAIN_KIND,
@@ -311,6 +311,8 @@ export interface CodingRunServiceOptions {
   config: Pick<AgentRunJournalConfig, 'maxDomainPayloadBytes'>;
   now?: () => number;
   newRunId?: () => string;
+  /** Boundary trace for the dispatch invariant. Non-secret facts only. */
+  diagnostic?: CodingDiagnosticSink;
   /** Approval window. Matches the edit-scope TTL so neither outlives the other. */
   approvalTtlMs?: number;
 }
@@ -341,6 +343,8 @@ export class CodingRunService {
       runId,
       journalCodingStore(this.opts.journal, runId, this.opts.config.maxDomainPayloadBytes, this.now),
       this.now,
+      undefined,
+      (event) => this.opts.diagnostic?.(event),
     );
   }
 
@@ -471,6 +475,11 @@ export class CodingRunService {
     if (!loaded.ok) return loaded;
     const { run, payload } = loaded.value;
     if (run.version !== input.expectedRevision) return this.conflict(run, payload, 'stale_revision');
+    // A finished run cannot be cancelled. Answering 200 here would report the
+    // request as accepted while the durable write silently failed — a terminal
+    // parent refuses further writes — leaving a caller believing it had stopped
+    // something that had already ended.
+    if (payload.phase === 'terminal') return this.conflict(run, payload, 'invalid_state');
 
     const journaled = this.runFor(runId);
     // Idempotent: an already-requested cancellation records nothing new, so a

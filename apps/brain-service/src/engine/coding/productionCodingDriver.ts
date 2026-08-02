@@ -73,6 +73,8 @@ export interface ProductionCodingDriverDeps {
   gitDiffPaths?: (rootPath: string) => string[];
   /** Injected for tests; defaults to reading the real file. */
   readSpan?: (rootPath: string, relPath: string, startLine: number, endLine: number) => Promise<string | undefined>;
+  /** Surfaces why planning produced no usable plan. */
+  onPlanRefused?: (runId: string, reason: string) => void;
 }
 
 const DEFAULT_MAX_REPAIRS = 3;
@@ -144,6 +146,14 @@ export function createProductionCodingDriver(deps: ProductionCodingDriverDeps): 
       // and never gets an answer from. `finalize()` computes FAILED from the child
       // evidence, so the reason stays inspectable.
       if (planning.status !== 'completed' || !planning.value?.ok) {
+        // Record WHY. Discarding this was what made a refused registration
+        // indistinguishable from a run that simply did nothing.
+        const refusal = planning.value && !planning.value.ok ? planning.value : undefined;
+        const why = refusal
+          ? `repository_planning refused: ${refusal.reason} — ${refusal.message} (opened ${refusal.openedPaths.length} path(s))`
+          : `repository_planning did not complete: ${planning.status}${planning.detail ? ` — ${planning.detail}` : ''}`;
+        ctx.run.patchPayload({ phase: 'terminal' }, `plan.refused:${planning.status}`);
+        deps.onPlanRefused?.(ctx.runId, why);
         ctx.run.finalize({});
         return;
       }

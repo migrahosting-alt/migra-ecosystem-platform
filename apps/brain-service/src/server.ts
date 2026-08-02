@@ -355,6 +355,7 @@ async function main(): Promise<void> {
       plannerModel: codingStructuredModel(env.providerBaseUrl, codingModelId),
       proposalModel: codingStructuredModel(env.providerBaseUrl, codingModelId),
       validationCommand: readCodingValidationCommand(),
+      onPlanRefused: (runId, reason) => app.log.warn({ runId, reason }, 'governed coding: planning produced no usable plan'),
     });
     registerCodingRunRoutes(app, {
       service: new CodingRunService({
@@ -362,6 +363,10 @@ async function main(): Promise<void> {
         driver: codingDriver,
         boundary: { allowedRoots: codingConfig.allowedRoots },
         config: buildAgentRunJournalConfig(),
+        // Boundary trace for the dispatch invariant. Non-secret facts only, and
+        // the refusal CODE in particular — a refused child registration is
+        // otherwise indistinguishable from a run that never began.
+        diagnostic: (event) => app.log.info({ coding: event }, 'governed coding boundary'),
       }),
     });
     // Classify, never auto-resume. Nothing below re-invokes a model or re-applies

@@ -274,7 +274,7 @@ suite('MigraPilot — governed coding through the packaged VSIX', function () {
     // ── 5 + 6: what the operator was actually shown ──────────────────────────
     if (scripted.approvals.length !== 1) {
       const snap = await snapshot(lastStartedRunId!);
-      assert.fail(`asked ${scripted.approvals.length} times. snapshot=${JSON.stringify(snap).slice(0, 900)} provider=[${providerCalls.join(',')}] brain=${brainLog.slice(-900)}`);
+      assert.fail(`asked ${scripted.approvals.length} times. snapshot=${JSON.stringify(snap).slice(0, 900)} provider=[${providerCalls.join(',')}] trace=${brainLog.split('\n').filter((l) => l.includes(lastStartedRunId ?? 'NONE')).slice(-12).join('\n') || '(NO EVENTS FOR THIS RUN)'}`);
     }
     const approval = scripted.approvals[0]!;
     assert.deepEqual([...approval.files.map((f) => f.path)].sort(), [...REQUIRED].sort(), 'exactly the three files were presented');

@@ -461,3 +461,26 @@ test('reconciliation evidence summarises authoritative records without inventing
   assert.equal(evidence.completion, 'incomplete', 'a child blocker makes it incomplete even though the diff reconciled');
   assert.equal(evidence.terminalWrite, 'not-durable');
 });
+
+test('two runs in ONE journal each register their own children', async () => {
+  // The defect this closes: child_id is a global PRIMARY KEY, and the default id
+  // was `kind_attempt` — so the FIRST coding run in a database worked and every
+  // one after it was refused DUPLICATE_CHILD before registering anything. Unit
+  // tests never saw it because each built a fresh in-memory journal.
+  const persistence = new MemoryAgentRunJournalPersistence();
+  const journal = new AgentRunJournal(persistence, DEFAULT_AGENT_RUN_JOURNAL_CONFIG, () => 'ev');
+
+  const results: string[] = [];
+  for (const runId of ['run_a', 'run_b']) {
+    persistence.insertAgentRun({ ...parentRow(), runId }, { eventId: `e_${runId}`, runId, seq: 1, at: 1_000, type: 'run.created', nextState: 'AWAITING_APPROVAL', correlationId: 'corr_1', source: 'API', schemaVersion: 1 });
+    const store = new TestStore(initialCodingPayload('issue'));
+    const run = new JournaledCodingRun(journal, runId, store, () => 1_000);
+    const stage = await run.runStage({ kind: 'repository_planning', phase: 'planning' }, () => ok({ planned: true }, runId));
+    results.push(`${runId}:${stage.status}`);
+  }
+
+  assert.deepEqual(results, ['run_a:completed', 'run_b:completed'], 'the second run must not collide with the first');
+  assert.equal(journal.children('run_a').length, 1);
+  assert.equal(journal.children('run_b').length, 1);
+  assert.notEqual(journal.children('run_a')[0]!.childId, journal.children('run_b')[0]!.childId, 'child ids are namespaced by run');
+});
