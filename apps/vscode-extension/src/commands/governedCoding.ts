@@ -1,20 +1,22 @@
 // MigraPilot — `MigraPilot: Governed Coding Change`.
 //
-// The editor-facing surface. It owns windows, prompts and buttons; it owns no
-// judgement about what a run did. Every label it renders comes from
-// codingSurfaceModel, which computes from the Brain snapshot alone.
+// The editor-facing surface. It owns sequencing and workspace resolution; it owns
+// no judgement about what a run did, and it no longer reaches for global dialog
+// functions. Every point where it waits on a PERSON goes through the injected
+// `GovernedCodingUi`, which is what lets the packaged acceptance drive this exact
+// command with scripted answers.
 //
-// Two rules that are easy to get wrong and are enforced here:
+// Two rules enforced rather than documented:
 //
-//   THE WORKSPACE IS RESOLVED, NEVER TYPED. The issue text is free-form; the path
-//   is not. A user cannot type a workspace root into this command, because a path
-//   accepted from free text is an access-control decision made by whoever is
-//   typing. VS Code resolves the active folder, and the Brain still enforces its
-//   own configured boundary on top.
+//   THE WORKSPACE IS RESOLVED, NEVER TYPED. Issue text is free-form; the path is
+//   not. A path accepted from free text is an access-control decision made by
+//   whoever is typing. VS Code resolves the active folder and the Brain still
+//   enforces its own configured boundary on top.
 //
-//   CLOSING THE PANEL IS NOT CANCELLING. Dismissing a progress notification stops
-//   the extension watching; it does not stop the run, and it must never report
-//   that it did. Cancellation is an explicit control with its own durable answer.
+//   CLOSING THE PANEL IS NOT CANCELLING. Dismissing the notification stops the
+//   extension watching; the run continues on the Brain. Cancellation is an explicit
+//   choice with its own durable answer, and `dismiss` is a distinct outcome from
+//   `reject` throughout.
 
 import * as vscode from 'vscode';
 import type { CodingRunClient, CodingRunSnapshot } from '../services/codingRunClient.js';
@@ -26,14 +28,23 @@ import {
   finalReportDocument,
   phaseView,
 } from '../services/codingSurfaceModel.js';
+import {
+  GovernedCodingUiHolder,
+  UiAdapterError,
+  guardUi,
+  type GovernedCodingUi,
+} from '../services/governedCodingUi.js';
+import { createVscodeGovernedCodingUi } from '../services/governedCodingUiVscode.js';
 
 /** Remembered so a window reload can ask the Brain what happened. */
 export const ACTIVE_CODING_RUN_KEY = 'migrapilot.governedCoding.activeRunId';
 
-async function showMarkdown(title: string, body: string): Promise<void> {
-  const doc = await vscode.workspace.openTextDocument({ content: body, language: 'markdown' });
-  await vscode.window.showTextDocument(doc, { preview: true, viewColumn: vscode.ViewColumn.Beside });
-  void title;
+export interface GovernedCodingCommandDeps {
+  client: CodingRunClient;
+  log(message: string): void;
+  /** Overridden only by the packaged acceptance. Production installs the VS Code
+   * adapter and nothing replaces it. */
+  uiHolder?: GovernedCodingUiHolder;
 }
 
 /** The active folder, or a refusal. Never read from user input. */
@@ -50,37 +61,37 @@ export function resolveWorkspaceRoot(): { ok: true; root: string } | { ok: false
 
 export function registerGovernedCodingCommand(
   context: vscode.ExtensionContext,
-  client: CodingRunClient,
-  log: (message: string) => void,
-): vscode.Disposable {
-  return vscode.commands.registerCommand('migrapilot.governedCoding', async () => {
+  deps: GovernedCodingCommandDeps,
+): { disposable: vscode.Disposable; uiHolder: GovernedCodingUiHolder } {
+  const uiHolder = deps.uiHolder ?? new GovernedCodingUiHolder((progress) => createVscodeGovernedCodingUi(progress as never));
+
+  const disposable = vscode.commands.registerCommand('migrapilot.governedCoding', async () => {
+    const client = deps.client;
+    const baseUi = guardUi(uiHolder.create());
+
     const capability = await client.getCodingCapability();
     if (capability.kind !== 'ok') {
-      void vscode.window.showWarningMessage(
-        capability.kind === 'capability_unavailable'
-          ? `Governed coding is not available: ${capability.detail}`
-          : `Could not reach the MigraPilot Brain: ${describe(capability)}`,
-      );
+      await baseUi.showError({
+        title: 'Governed coding is not available',
+        detail: capability.kind === 'capability_unavailable' ? capability.detail : describe(capability),
+        recoverable: true,
+      });
       return;
     }
     if (!capability.value.available) {
-      void vscode.window.showWarningMessage(`Governed coding is not enabled on this Brain: ${capability.value.unavailableReason ?? 'unavailable'}`);
+      await baseUi.showError({ title: 'Governed coding is not enabled on this Brain', detail: capability.value.unavailableReason ?? 'unavailable', recoverable: true });
       return;
     }
 
     const workspace = resolveWorkspaceRoot();
     if (!workspace.ok) {
-      void vscode.window.showWarningMessage(workspace.message);
+      await baseUi.showError({ title: 'No single workspace folder', detail: workspace.message, recoverable: true });
       return;
     }
 
-    const issueText = await vscode.window.showInputBox({
-      title: 'Governed coding change',
-      prompt: 'Describe the problem in behavioural terms. MigraPilot will propose a file scope for your approval before writing anything.',
-      placeHolder: 'e.g. Cancelled line items are still counted in the order total.',
-      ignoreFocusOut: true,
-      validateInput: (value) => (value.trim().length < 12 ? 'Describe the issue in a little more detail.' : undefined),
-    });
+    const issueText = await baseUi.requestIssueText();
+    // Abandoning the prompt starts nothing. There is no run to cancel, reject or
+    // report, and creating one would leave a durable record of a request nobody made.
     if (!issueText?.trim()) return;
 
     let activeRunId: string | undefined;
@@ -89,98 +100,111 @@ export function registerGovernedCodingCommand(
     await vscode.window.withProgress(
       { location: vscode.ProgressLocation.Notification, title: 'MigraPilot: governed coding change', cancellable: true },
       async (progress, token) => {
+        // Inside the progress scope the UI can report through it. A scripted UI
+        // ignores the progress handle entirely.
+        const ui = guardUi(uiHolder.create(progress));
+
         // The token means "stop watching". Whether the RUN stops is a separate,
-        // durable question answered by the Brain — see the cancellation block.
+        // durable question answered by the Brain.
         const watching = new AbortController();
         token.onCancellationRequested(() => watching.abort());
 
-        const ui: CodingWorkflowUi = {
+        const workflowUi: CodingWorkflowUi = {
           async requestScopeApproval(request) {
             activeRunId = request.runId;
             await context.globalState.update(ACTIVE_CODING_RUN_KEY, request.runId);
             const document = approvalDocument(request);
-            await showMarkdown(document.title, document.markdown);
-            const choice = await vscode.window.showWarningMessage(
-              document.title,
-              { modal: true, detail: document.modalDetail },
-              'Approve scope',
-              'Reject',
-            );
-            if (choice === 'Approve scope') return 'approve';
-            if (choice === 'Reject') return 'reject';
-            return undefined;
+            const answer = await ui.presentScopeApproval({
+              runId: request.runId,
+              revision: request.revision,
+              pathSetHash: request.pathSetHash,
+              expiresAt: request.expiresAt,
+              ...(request.issueSummary ? { issueSummary: request.issueSummary } : {}),
+              files: request.files,
+              excluded: request.excluded,
+              supersededPreviousProposal: request.supersededPreviousProposal === true,
+              title: document.title,
+              markdown: document.markdown,
+              modalDetail: document.modalDetail,
+            });
+            // `dismiss` is NOT a rejection — returning undefined leaves the run
+            // awaiting a decision nobody made.
+            return answer === 'dismiss' ? undefined : answer;
           },
           onProgress(snapshot) {
             latest = snapshot;
             activeRunId = snapshot.runId;
             void context.globalState.update(ACTIVE_CODING_RUN_KEY, snapshot.runId);
             const view = phaseView(snapshot);
-            const children = childViews(snapshot).filter((c) => c.outcome !== 'pending');
-            const done = children.filter((c) => c.outcome === 'succeeded').length;
-            progress.report({ message: `${view.label}${children.length ? ` — ${done}/${children.length} steps complete` : ''}` });
+            void ui.showProgress({
+              runId: snapshot.runId,
+              revision: snapshot.revision,
+              phaseLabel: view.label,
+              busy: view.busy,
+              steps: childViews(snapshot),
+            });
           },
           onFinalReport(snapshot) { latest = snapshot; },
           onProblem(problem) {
-            log(`governed-coding: ${problem.title} — ${problem.detail}`);
-            if (!problem.recoverable) void vscode.window.showErrorMessage(`${problem.title}. ${problem.detail}`);
+            deps.log(`governed-coding: ${problem.title} — ${problem.detail}`);
+            if (!problem.recoverable) void ui.showError(problem);
           },
         };
 
-        const outcome = await runCodingWorkflow(client, {
-          issueText: issueText.trim(),
-          workspaceRoot: workspace.root,
-          ui,
-          signal: watching.signal,
-          isDisposed: () => watching.signal.aborted,
-        });
+        try {
+          const outcome = await runCodingWorkflow(client, {
+            issueText: issueText.trim(),
+            workspaceRoot: workspace.root,
+            ui: workflowUi,
+            signal: watching.signal,
+            isDisposed: () => watching.signal.aborted,
+          });
 
-        // ── the user pressed the notification's Cancel ────────────────────────
-        if (token.isCancellationRequested && activeRunId && latest && latest.phase !== 'terminal') {
-          const choice = await vscode.window.showWarningMessage(
-            'Stop watching, or cancel the run?',
-            { modal: true, detail: 'Closing this notification stops MigraPilot watching the run. The run itself keeps going on the Brain unless you cancel it.' },
-            'Cancel the run',
-            'Just stop watching',
-          );
-          if (choice === 'Cancel the run') {
-            const result = await requestCodingCancellation(client, activeRunId, latest.revision);
-            // The label is the Brain's answer, never the button press.
-            void vscode.window.showInformationMessage(`MigraPilot: ${result.label}`);
+          if (token.isCancellationRequested && activeRunId && latest && latest.phase !== 'terminal') {
+            const answer = await ui.presentCancellationChoice();
+            if (answer === 'cancel-run') {
+              const result = await requestCodingCancellation(client, activeRunId, latest.revision);
+              // The label is the Brain's answer, never the button press.
+              deps.log(`governed-coding: ${result.label}`);
+              await ui.showError({ title: 'MigraPilot', detail: result.label, recoverable: true });
+            }
+            return;
           }
-          return;
+
+          if (outcome.kind === 'unavailable') { await ui.showError({ title: 'Governed coding is unavailable', detail: outcome.detail, recoverable: true }); return; }
+          if (outcome.kind === 'dismissed') return;
+          if (outcome.kind === 'problem') await ui.showError({ title: 'MigraPilot could not complete the run', detail: outcome.detail, recoverable: false });
+
+          const snapshot = 'snapshot' in outcome ? outcome.snapshot : latest;
+          if (!snapshot) return;
+          await ui.showFinalReport(finalReportView(snapshot));
+        } catch (error) {
+          // A broken dialog surface is an explicit command failure, never a silent
+          // dismissal — "the surface broke" and "the operator closed it" lead to
+          // opposite conclusions about whether anyone decided anything.
+          const detail = error instanceof UiAdapterError ? error.message : error instanceof Error ? error.message : String(error);
+          deps.log(`governed-coding: ${detail}`);
+          void vscode.window.showErrorMessage(`MigraPilot: ${detail}`);
         }
-
-        if (outcome.kind === 'unavailable') { void vscode.window.showWarningMessage(`Governed coding is unavailable: ${outcome.detail}`); return; }
-        if (outcome.kind === 'dismissed') return;
-        if (outcome.kind === 'problem') { void vscode.window.showErrorMessage(`MigraPilot could not complete the run: ${outcome.detail}`); }
-
-        const snapshot = 'snapshot' in outcome ? outcome.snapshot : latest;
-        if (!snapshot) return;
-        await showMarkdown('Governed coding report', finalReportDocument(snapshot));
-        await offerFollowUp(snapshot, workspace.root);
       },
     );
   });
+
+  return { disposable, uiHolder };
 }
 
-/** Post-run actions. Deliberately narrow — no unrestricted terminal shortcut. */
-async function offerFollowUp(snapshot: CodingRunSnapshot, root: string): Promise<void> {
-  const changed = snapshot.finalReport?.changedFiles ?? [];
-  if (!changed.length) return;
-  const choice = await vscode.window.showInformationMessage(
-    `MigraPilot changed ${changed.length} file(s).`,
-    'Open changed files',
-    'Open Source Control',
-  );
-  if (choice === 'Open changed files') {
-    for (const rel of changed.slice(0, 10)) {
-      const uri = vscode.Uri.joinPath(vscode.Uri.file(root), rel);
-      const doc = await vscode.workspace.openTextDocument(uri).then((d) => d, () => undefined);
-      if (doc) await vscode.window.showTextDocument(doc, { preview: false });
-    }
-  } else if (choice === 'Open Source Control') {
-    await vscode.commands.executeCommand('workbench.view.scm');
-  }
+export function finalReportView(snapshot: CodingRunSnapshot): {
+  runId: string; revision: number; state: string; complete: boolean; changedFiles: string[]; markdown: string;
+} {
+  return {
+    runId: snapshot.runId,
+    revision: snapshot.revision,
+    state: snapshot.state,
+    // Read from the Brain's record. The extension never computes completion.
+    complete: snapshot.finalReport?.complete === true,
+    changedFiles: [...(snapshot.finalReport?.changedFiles ?? [])],
+    markdown: finalReportDocument(snapshot),
+  };
 }
 
 /**
@@ -194,6 +218,7 @@ export async function restoreGovernedCodingRun(
   context: vscode.ExtensionContext,
   client: CodingRunClient,
   log: (message: string) => void,
+  ui?: GovernedCodingUi,
 ): Promise<void> {
   const storedRunId = context.globalState.get<string>(ACTIVE_CODING_RUN_KEY);
   if (!storedRunId) return;
@@ -210,22 +235,20 @@ export async function restoreGovernedCodingRun(
             : lookup.kind === 'capability_unavailable' ? { kind: 'capability_unavailable', detail: lookup.detail }
               : { kind: 'other', detail: describe(lookup) },
   });
+  const surface = ui ? guardUi(ui) : undefined;
 
   switch (decision.kind) {
     case 'show_final':
       await context.globalState.update(ACTIVE_CODING_RUN_KEY, undefined);
-      await showMarkdown('Governed coding report', finalReportDocument(decision.snapshot));
+      if (surface) await surface.showFinalReport(finalReportView(decision.snapshot));
+      log(`governed-coding: restored terminal run ${storedRunId} (${decision.snapshot.state})`);
       break;
     case 'restore_approval':
-      await vscode.window.showInformationMessage(
-        `MigraPilot has a coding run awaiting your approval (${phaseView(decision.snapshot).label}).`,
-        'Review scope',
-      ).then(async (choice) => {
-        if (choice === 'Review scope') await vscode.commands.executeCommand('migrapilot.governedCoding.resume', decision.snapshot.runId);
-      });
+      log(`governed-coding: run ${storedRunId} is awaiting approval`);
+      if (surface) await surface.showError({ title: 'A coding run is awaiting your approval', detail: phaseView(decision.snapshot).label, recoverable: true });
       break;
     case 'restore_progress':
-      void vscode.window.showInformationMessage(`MigraPilot coding run is still ${phaseView(decision.snapshot).label.toLowerCase()}.`);
+      log(`governed-coding: run ${storedRunId} is still ${phaseView(decision.snapshot).label.toLowerCase()}`);
       break;
     case 'run_missing':
       await context.globalState.update(ACTIVE_CODING_RUN_KEY, undefined);
@@ -235,7 +258,8 @@ export async function restoreGovernedCodingRun(
       log(`governed-coding: capability unavailable on reload — ${decision.detail}`);
       break;
     case 'unreadable':
-      void vscode.window.showErrorMessage(`MigraPilot: a previous coding run's record cannot be read. ${decision.detail}`);
+      log(`governed-coding: run ${storedRunId} has an unreadable durable record — ${decision.detail}`);
+      if (surface) await surface.showError({ title: 'A previous coding run’s record cannot be read', detail: decision.detail, recoverable: false });
       break;
     case 'unknown':
       log(`governed-coding: could not restore run ${storedRunId} — ${decision.detail}`);

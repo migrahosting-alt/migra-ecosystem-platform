@@ -24,6 +24,8 @@ import * as http from 'node:http';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
 import { runFixtureTests } from '../support/codingFixture.js';
+import { createScriptedCodingUi, type ScriptedCodingUi } from '../support/scriptedCodingUi.js';
+import type { ScopeApprovalAnswer } from '../../services/governedCodingUi.js';
 
 const EXTENSION_ID = 'MigraTeck.migrapilot-extension';
 const CODING_PORT = 3994;
@@ -50,11 +52,15 @@ let editCall = 0;
 /** Set to hold the next model call open, for the cancellation scenario. */
 let blockNextCall: (() => void) | undefined;
 
-interface DialogRecord { kind: string; message: string; detail?: string }
-const dialogs: DialogRecord[] = [];
-/** Answers the modal approval prompt. */
-let approvalAnswer: 'Approve scope' | 'Reject' | undefined = 'Approve scope';
-let inputAnswer: string | undefined = ISSUE;
+let ui: ScriptedCodingUi;
+let extApi: { governedCoding: { setUi(factory: () => ScriptedCodingUi): void; restore(): Promise<void> } };
+
+/** Install a scripted interaction for the next command invocation. */
+function scriptUi(approvals: ScopeApprovalAnswer[], over: { issueText?: string | undefined } = {}): ScriptedCodingUi {
+  ui = createScriptedCodingUi({ issueText: 'issueText' in over ? over.issueText : ISSUE, approvals });
+  extApi.governedCoding.setUi(() => ui);
+  return ui;
+}
 
 function git(args: string[], cwd = workspaceRoot): string {
   return spawnSync('git', args, { cwd, encoding: 'utf8' }).stdout ?? '';
@@ -202,30 +208,10 @@ suite('MigraPilot — governed coding through the packaged VSIX', function () {
 
     // Drive the real dialogs. The command is invoked through the VS Code command
     // registry; only the human's two answers are supplied here.
-    // Drive the real dialogs. PLAIN ASSIGNMENT SILENTLY FAILS on the vscode
-    // namespace — the properties are not writable that way, and a stub that does
-    // not take effect leaves the command waiting on a real input box forever.
-    // `Object.defineProperty` is what actually replaces them.
-    const stub = (name: string, value: unknown): void => {
-      Object.defineProperty(vscode.window, name, { value, configurable: true, writable: true });
-    };
-    stub('showInputBox', async () => inputAnswer);
-    stub('showWarningMessage', async (message: string, ...rest: unknown[]) => {
-      const options = rest[0] as { modal?: boolean; detail?: string } | undefined;
-      const hasOptions = options !== undefined && typeof options === 'object' && !Array.isArray(options);
-      dialogs.push({ kind: 'warn', message, ...(hasOptions && options.detail ? { detail: options.detail } : {}) });
-      const items = (hasOptions ? rest.slice(1) : rest) as string[];
-      if (items.includes('Approve scope')) return approvalAnswer;
-      if (items.includes('Cancel the run')) return 'Cancel the run';
-      return undefined;
-    });
-    stub('showInformationMessage', async (message: string) => { dialogs.push({ kind: 'info', message }); return undefined; });
-    stub('showErrorMessage', async (message: string) => { dialogs.push({ kind: 'error', message }); return undefined; });
-    stub('showTextDocument', async () => undefined);
-
     const ext = vscode.extensions.getExtension(EXTENSION_ID);
     assert.ok(ext, `extension ${EXTENSION_ID} not found`);
-    await ext.activate();
+    extApi = (await ext.activate()) as typeof extApi;
+    assert.ok(extApi.governedCoding?.setUi, 'the packaged extension exposes the interaction seam');
   });
 
   suiteTeardown(() => {
@@ -233,7 +219,7 @@ suite('MigraPilot — governed coding through the packaged VSIX', function () {
     provider?.close();
   });
 
-  setup(() => { dialogs.length = 0; });
+
 
   // ── 1–3. capability + workspace resolution ─────────────────────────────────
 
@@ -262,8 +248,7 @@ suite('MigraPilot — governed coding through the packaged VSIX', function () {
 
   test('4–13 — one approval drives plan → wrong edit → repair → validated report', async function () {
     this.timeout(180_000);
-    approvalAnswer = 'Approve scope';
-    inputAnswer = ISSUE;
+    const scripted = scriptUi(['approve']);
 
     const before = dirty();
     assert.deepEqual(before, [], 'the tree is clean before the command runs');
@@ -284,15 +269,22 @@ suite('MigraPilot — governed coding through the packaged VSIX', function () {
       vscode.commands.executeCommand('migrapilot.governedCoding').then(() => 'done'),
       new Promise((r) => setTimeout(() => r(timedOut), 90_000)),
     ]);
-    assert.notEqual(raced, timedOut, `the command hung. dialogs=${JSON.stringify(dialogs)} provider=${providerCalls.join(',')} brain=${brainLog.slice(-1500)}`);
+    assert.notEqual(raced, timedOut, `the command hung. approvals=${scripted.approvals.length} progress=${scripted.progress.length} provider=${providerCalls.join(',')} brain=${brainLog.slice(-1500)}`);
 
-    // ── 5 + 6: the approval panel content ────────────────────────────────────
-    const approval = dialogs.find((d) => d.detail?.includes('may write to exactly these files'));
-    assert.ok(approval, `an approval modal was shown (saw: ${dialogs.map((d) => d.message).join(' | ')})`);
-    for (const file of REQUIRED) assert.ok(approval.detail!.includes(file), `${file} appears in the approval modal`);
-    assert.equal(approval.detail!.includes(TRAP), false, 'the trap file is not in the approved scope');
-    assert.match(approval.detail!, /Scope hash \w+ · expires /, 'the hash and expiry are shown');
-    assert.match(approval.message, /Approve coding scope — 3 file\(s\)/);
+    // ── 5 + 6: what the operator was actually shown ──────────────────────────
+    if (scripted.approvals.length !== 1) {
+      const snap = await snapshot(lastStartedRunId!);
+      assert.fail(`asked ${scripted.approvals.length} times. snapshot=${JSON.stringify(snap).slice(0, 900)} provider=[${providerCalls.join(',')}] brain=${brainLog.slice(-900)}`);
+    }
+    const approval = scripted.approvals[0]!;
+    assert.deepEqual([...approval.files.map((f) => f.path)].sort(), [...REQUIRED].sort(), 'exactly the three files were presented');
+    assert.equal(approval.files.some((f) => f.path === TRAP), false, 'the trap file was never proposed');
+    assert.ok(approval.files.every((f) => f.rationale.length > 0), 'each file states why it is in scope');
+    assert.ok(approval.files.every((f) => f.evidence.length > 0), 'each file carries the evidence ranges that justified it');
+    assert.ok(approval.pathSetHash.length > 0, 'the scope hash the decision binds to');
+    assert.ok(approval.expiresAt.length > 0, 'the approval expiry');
+    assert.equal(approval.supersededPreviousProposal, false, 'a first proposal is not falsely marked superseded');
+    for (const file of REQUIRED) assert.ok(approval.modalDetail.includes(file), `${file} appears in the modal detail`);
 
     // ── 8 + 11: the run executed once, under the approved scope ──────────────
     const runId = lastStartedRunId ?? await discoverRunId();
@@ -310,6 +302,12 @@ suite('MigraPilot — governed coding through the packaged VSIX', function () {
     assert.ok(children.some((c) => c.kind === 'final_validation' && c.state === 'completed'), 'final validation ran and passed');
     assert.ok(providerCalls.includes('edit:cancelledCount'), 'the first edit was the wrong one');
     assert.ok(providerCalls.some((c) => /^repair:[1-9]/.test(c)), 'the repair cited generated failure-evidence ids');
+
+    // The progress the operator saw came from durable snapshots.
+    assert.ok(scripted.progress.length > 0, 'progress was rendered');
+    assert.ok(scripted.progress.every((p) => p.revision > 0), 'every progress frame carries a durable revision');
+    assert.ok(scripted.reports.length > 0, 'a final report was rendered');
+    assert.equal(scripted.reports.at(-1)!.complete, true, 'the report says complete because the BRAIN says so');
 
     // ── 13: the report matches the real repository ──────────────────────────
     const report = snap.finalReport as { complete: boolean; changedFiles: string[] };
@@ -334,7 +332,7 @@ suite('MigraPilot — governed coding through the packaged VSIX', function () {
     spawnSync('git', ['commit', '-qm', 'accepted change'], { cwd: workspaceRoot });
     assert.deepEqual(dirty(), [], 'clean before the rejection run');
 
-    approvalAnswer = 'Reject';
+    const scripted = scriptUi(['reject']);
     editCall = 0;
     await vscode.commands.executeCommand('migrapilot.governedCoding');
 
@@ -342,6 +340,7 @@ suite('MigraPilot — governed coding through the packaged VSIX', function () {
     const runId = lastStartedRunId ?? await discoverRunId();
     const snap = await snapshot(runId!);
     assert.equal(snap.state, 'REJECTED');
+    assert.equal(scripted.approvals.length, 1, 'the rejection followed one presented proposal');
     const children = snap.children as Array<{ kind: string }>;
     assert.equal(children.some((c) => c.kind === 'initial_apply'), false, 'no mutation child was ever registered');
   });
@@ -380,19 +379,15 @@ suite('MigraPilot — governed coding through the packaged VSIX', function () {
     } else {
       assert.equal(res.status, 409, `a terminal run refuses cancellation with a conflict, got ${res.status}`);
     }
-    assert.equal(dialogs.some((d) => d.message.includes('MigraPilot: Cancelled')), false, 'nothing claimed a confirmed cancellation');
+    assert.equal(ui.errors.some((e) => e.detail === 'Cancelled'), false, 'nothing claimed a confirmed cancellation');
   });
 
   // ── 15: reload recovery ────────────────────────────────────────────────────
 
   test('15 — reload recovers the run from Brain state, not local inference', async function () {
     this.timeout(120_000);
-    const ext = vscode.extensions.getExtension(EXTENSION_ID);
-    const api = ext!.exports as { governedCoding?: { restore(): Promise<void> } };
-    assert.ok(api.governedCoding, 'the packaged extension exposes governed coding recovery');
-
     // Restore asks the Brain. The extension having restarted implies nothing.
-    await api.governedCoding.restore();
+    await extApi.governedCoding.restore();
     const runId = lastStartedRunId ?? await discoverRunId();
     const snap = await snapshot(runId!);
     assert.ok(['terminal'].includes(String(snap.phase)), 'the durable phase is what recovery reflects');
@@ -416,7 +411,11 @@ suite('MigraPilot — governed coding through the packaged VSIX', function () {
   });
 
   test('no raw model response or secret is rendered to the user', () => {
-    const rendered = dialogs.map((d) => `${d.message} ${d.detail ?? ''}`).join('\n');
+    const rendered = [
+      ...ui.approvals.map((a) => `${a.markdown} ${a.modalDetail}`),
+      ...ui.reports.map((r) => r.markdown),
+      ...ui.errors.map((e) => `${e.title} ${e.detail}`),
+    ].join('\n');
     assert.equal(/observedFailureEvidenceIds|"edits"\s*:/.test(rendered), false, 'raw model JSON is never shown');
     assert.equal(/sk-[A-Za-z0-9]{8,}|Bearer\s+[A-Za-z0-9._-]{12,}/.test(rendered), false, 'no credential-shaped text is rendered');
   });

@@ -139,7 +139,7 @@ test('an active required child blocks the parent terminal state', () => {
   assert.deepEqual(activeRequiredChildren(h.journal, RUN_ID).map((c) => c.childId), ['c1']);
   const eligibility = codingCompletionEligibility(h.payload, h.children);
   assert.equal(eligibility.mayComplete, false);
-  assert.equal(eligibility.blockers[0]?.kind, 'active_required_child');
+  assert.ok(eligibility.blockers.some((b) => b.kind === 'active_required_child'), JSON.stringify(eligibility.blockers));
 });
 
 test('a failed required child blocks success even though it is terminal', () => {
@@ -151,8 +151,9 @@ test('a failed required child blocks success even though it is terminal', () => 
   assert.deepEqual(activeRequiredChildren(h.journal, RUN_ID), [], 'it IS terminal');
   const eligibility = codingCompletionEligibility(h.payload, h.children);
   assert.equal(eligibility.mayComplete, false, 'terminality is not success');
-  assert.equal(eligibility.blockers[0]?.kind, 'required_child_not_successful');
-  assert.equal(eligibility.blockers[0] && 'category' in eligibility.blockers[0] && eligibility.blockers[0].category, 'observed_failure');
+  const failed = eligibility.blockers.find((b) => b.kind === 'required_child_not_successful');
+  assert.ok(failed, JSON.stringify(eligibility.blockers));
+  assert.equal('category' in failed && failed.category, 'observed_failure');
 });
 
 test('an interrupted required child blocks success — the outcome is unknown, not good', () => {
@@ -289,4 +290,23 @@ test('a run under cancellation refuses to acquire new children', () => {
   const refused = registerCodingChild(h.journal, h.writePayload, { runId: RUN_ID, payload: cancelling, childId: 'c_new', kind: 'repair_apply', at: 2_000 });
   assert.equal(refused.decision, 'refused');
   assert.equal(h.journal.child('c_new'), undefined, 'no row was written at all');
+});
+
+test('a run that recorded no work is never COMPLETED', () => {
+  // Observed in the installed acceptance: planning failed before registering any
+  // child, leaving `children: [], blockers: []` — and the run reported COMPLETED
+  // because nothing had objected. Completion must rest on positive evidence.
+  const empty = codingCompletionEligibility({ childRefs: [] }, []);
+  assert.equal(empty.mayComplete, false);
+  assert.equal(empty.blockers[0]?.kind, 'no_work_recorded');
+
+  const resolved = resolveCodingRun({ childRefs: [] }, [], () => true);
+  assert.equal(resolved.state, 'FAILED', 'a run with no recorded work resolves FAILED, not COMPLETED');
+
+  // A single successful required child is enough to clear this particular blocker.
+  const h = harness();
+  const reg = registerCodingChild(h.journal, h.writePayload, { runId: RUN_ID, payload: h.payload, childId: 'c1', kind: 'final_validation', at: 2_000 });
+  const started = startCodingChild(h.journal, (reg as { child: DurableAgentRunChild }).child, 2_050)!;
+  finishCodingChild(h.journal, started, 'success', 2_100, { exitCode: 0 });
+  assert.equal(codingCompletionEligibility(h.payload, h.children).mayComplete, true);
 });

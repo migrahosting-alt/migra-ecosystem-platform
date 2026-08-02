@@ -248,6 +248,8 @@ export function reconcileCodingChildren(
 // ── Parent completion eligibility ────────────────────────────────────────────
 
 export type CodingCompletionBlocker =
+  /** The run recorded no successful required work at all. */
+  | { kind: 'no_work_recorded'; detail: string }
   | { kind: 'active_required_child'; childId: string; state: string }
   | { kind: 'required_child_not_successful'; childId: string; category?: string }
   | { kind: 'reconciliation_finding'; childId: string; detail: string }
@@ -284,7 +286,20 @@ export function codingCompletionEligibility(
     blockers.push({ kind: 'reconciliation_finding', childId: finding.childId, detail: `${finding.kind}: ${finding.detail}` });
   }
 
+  // COMPLETION REQUIRES POSITIVE EVIDENCE, NOT THE ABSENCE OF OBJECTIONS.
+  //
+  // Without this, a run that never registered a single child — planning that
+  // failed before its first write, a driver that returned early — had no blockers
+  // and was therefore reported COMPLETED. A run that did nothing is not a run that
+  // succeeded, and this was observed: `children: [], blockers: [], COMPLETED`.
   const referenced = new Set(payload.childRefs.map((r) => r.childId));
+  const successfulRequired = children.filter(
+    (c) => referenced.has(c.childId) && c.required && c.state === 'completed' && c.terminalCategory === 'observed_success',
+  );
+  if (successfulRequired.length === 0) {
+    blockers.push({ kind: 'no_work_recorded', detail: 'no required operation completed successfully; a run that recorded no work has not succeeded' });
+  }
+
   for (const child of children) {
     if (!referenced.has(child.childId)) continue;
     if (!child.required) continue;
