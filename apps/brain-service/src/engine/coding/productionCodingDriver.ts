@@ -44,7 +44,7 @@ import {
   type ProposalModel,
 } from './modelProposals.js';
 import { observedFailure, runValidation, type DeclaredValidation, type ValidationRecord } from './validationRun.js';
-import { reconcile } from './codingRun.js';
+import { reconcile, type CodingStopReason } from './codingRun.js';
 import {
   applyEvidence,
   applyOutcome,
@@ -284,6 +284,24 @@ export function createProductionCodingDriver(deps: ProductionCodingDriverDeps): 
       });
       if (authored.status !== 'completed' || !authored.value?.ok) { ctx.run.finalize({}); return; }
 
+      /**
+       * Declared BEFORE the apply, because `finish()` reads them.
+       *
+       * `finish()` is hoisted and closes over both. They used to be declared after
+       * the `initialApply.status !== 'completed'` early return that calls it, so
+       * that one path — the only path that exists to report a refused apply — hit
+       * a temporal-dead-zone `ReferenceError` on `current` instead of reporting
+       * anything. The run still ended non-complete, so nothing was falsely claimed,
+       * but the throw happened INSIDE the reconciliation stage: the journal then
+       * recorded `reconciliation: observed_failure` for a reconciliation that never
+       * evaluated a thing. A record asserting an outcome that was never computed is
+       * exactly what this journal exists to prevent.
+       */
+      let current: ValidationRecord | undefined;
+      let repairAttempt = 0;
+      /** Why the repair loop stopped, so the report can name it rather than guess. */
+      let loopExit: 'ran-to-completion' | 'cancelled' | 'repair-proposal-rejected' | 'repair-apply-refused' = 'ran-to-completion';
+
       const initialApply = await ctx.run.runStage({ kind: 'initial_apply', phase: 'executing_initial_changeset' }, async () => {
         const changeset = authored.value!.ok ? authored.value!.changeset : undefined;
         const result = await governedApply(changeset!, applyDeps);
@@ -295,10 +313,9 @@ export function createProductionCodingDriver(deps: ProductionCodingDriverDeps): 
       if (initialApply.status !== 'completed') { await finish(); return; }
 
       // ── validate → repair ─────────────────────────────────────────────────
-      let current = await recordValidation('validation', 'final');
-      let repairAttempt = 0;
+      current = await recordValidation('validation', 'final');
       while (current && !current.passed && repairAttempt < maxRepairs) {
-        if (ctx.run.cancellationRequested() || ctx.signal.aborted) break;
+        if (ctx.run.cancellationRequested() || ctx.signal.aborted) { loopExit = 'cancelled'; break; }
         repairAttempt += 1;
         const observed = observedFailure(current);
         const evidenceBlocks = extractFailureEvidence(current, current.id);
@@ -328,7 +345,7 @@ export function createProductionCodingDriver(deps: ProductionCodingDriverDeps): 
           };
         });
         ctx.run.patchPayload({ attempts: { initialProposal: 1, repair: repairAttempt }, failureEvidence: evidenceBlocks }, 'repair.evidence');
-        if (proposed.status !== 'completed' || !proposed.value?.ok) break;
+        if (proposed.status !== 'completed' || !proposed.value?.ok) { loopExit = 'repair-proposal-rejected'; break; }
 
         const repairApply = await ctx.run.runStage({ kind: 'repair_apply', phase: 'repairing', required: false }, async () => {
           const changeset = proposed.value!.ok ? proposed.value!.changeset : undefined;
@@ -336,7 +353,7 @@ export function createProductionCodingDriver(deps: ProductionCodingDriverDeps): 
           const evidence = applyEvidence({ changeset, requestedPaths: changeset!.ops.map((o) => normalizePath(o.path)), result });
           return { outcome: applyOutcome(evidence), evidence, value: result };
         });
-        if (repairApply.status !== 'completed') break;
+        if (repairApply.status !== 'completed') { loopExit = 'repair-apply-refused'; break; }
         void observed;
         current = await recordValidation('validation', 'repair');
       }
@@ -409,10 +426,43 @@ export function createProductionCodingDriver(deps: ProductionCodingDriverDeps): 
           return;
         }
 
+        /**
+         * Name the cause the run actually hit.
+         *
+         * This used to be `complete ? 'validated' : rec ? 'reconciliation-failed'
+         * : 'apply-refused'`, which labelled EVERY incomplete run with a
+         * reconciliation record as `reconciliation-failed` — including the common
+         * case where the diff and the ledger agreed perfectly and the real cause
+         * was that the model burned its repair attempts without making the tests
+         * pass. A real `qwen3-coder:30b` run stopped exactly that way. The detail
+         * was never lost (it is in `blockers`), but the headline sent an operator
+         * hunting a scope/diff integrity problem that did not exist.
+         *
+         * `reconciliation-failed` now means what it says in `codingRun.ts`: the
+         * validation passed and the records still did not agree. That is the alarm
+         * worth keeping distinct, and it stays distinct only if the other endings
+         * are named honestly.
+         */
+        const stopReason: CodingStopReason = complete
+          ? 'validated'
+          : ctx.run.cancellationRequested() || ctx.signal.aborted
+            ? 'cancelled'
+            : !current.admitted
+              ? 'validation-refused'
+              : current.passed
+                ? 'reconciliation-failed'
+                : loopExit === 'repair-proposal-rejected'
+                  ? 'repair-proposal-rejected'
+                  : loopExit === 'repair-apply-refused'
+                    ? 'apply-refused'
+                    : repairAttempt >= maxRepairs
+                      ? 'repair-ceiling-exhausted'
+                      : 'apply-refused';
+
         ctx.run.finalize({
           report: {
             runId: ctx.runId,
-            stopReason: complete ? 'validated' : rec ? 'reconciliation-failed' : 'apply-refused',
+            stopReason,
             complete,
             scopeId: approved.scopeId,
             scopeHash: approved.scopeHash,

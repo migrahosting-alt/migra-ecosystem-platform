@@ -28,6 +28,17 @@ import { normalizePath } from '../grounding/evidenceLedger.js';
 export type CodingStopReason =
   | 'validated'
   | 'repair-ceiling-exhausted'
+  /**
+   * The model's repair proposal was rejected before anything was applied —
+   * malformed output, or a rationale citing evidence the run cannot support.
+   *
+   * Distinct from `apply-refused` on purpose. Both end the repair loop early, but
+   * one is the model failing to produce a usable proposal and the other is the
+   * governed write boundary refusing one. Observed in real `qwen3-coder:30b` runs,
+   * where the second repair proposal was rejected and the run then reported an
+   * apply refusal that never happened.
+   */
+  | 'repair-proposal-rejected'
   | 'apply-refused'
   | 'validation-refused'
   | 'cancelled'

@@ -102,6 +102,13 @@ export const DEFAULT_PLANNING_LIMITS: PlanningLimits = {
 
 /** What the model is given. Contains evidence, never the answer. */
 export interface PlannerModelInput {
+  /**
+   * The exact JSON shape the reply must take — `PLANNER_OUTPUT_CONTRACT`.
+   *
+   * Part of the input rather than the adapter's system prompt because the shape
+   * belongs to this parser, not to whatever transport happens to carry the call.
+   */
+  responseShape: string;
   issue: string;
   /** Exact retrieved spans, with real line numbers. */
   evidence: Array<{ path: string; startLine: number; endLine: number; text: string }>;
@@ -119,6 +126,37 @@ interface RawPlan {
   excluded: unknown;
   edits: unknown;
 }
+
+/**
+ * The output shape, stated to the model in the words the parser enforces.
+ *
+ * This lives beside `parsePlannerOutput` deliberately. The prompt used to send
+ * the input data alone and instruct the model to match "the requested shape"
+ * without ever requesting one, so a real model had to guess it — a real
+ * `qwen3-coder:30b` run chose the correct three files and wrote correct code,
+ * then returned it under `{"fixes":[...]}` and was refused as malformed. The
+ * refusal was right; the prompt was not. A scripted provider cannot expose this,
+ * because the script IS the shape.
+ *
+ * Keeping the text next to the parser is the point: a contract that drifts from
+ * the validator would send the model confidently in the wrong direction.
+ */
+export const PLANNER_OUTPUT_CONTRACT = [
+  'Reply with a single JSON object, and no other top-level keys:',
+  '{',
+  '  "issueSummary": "one sentence describing the change",',
+  '  "scope": [{ "path": "<file to edit>", "rationale": "why it must change" }],',
+  '  "excluded": [{ "path": "<candidate not edited>", "reason": "why not" }],',
+  '  "edits": [{ "path": "<file>", "content": "<COMPLETE new file text>" }]',
+  '}',
+  'Rules:',
+  '- "scope" and "edits" must each contain at least one entry.',
+  '- Every "path" must be workspace-relative: no leading "/", no drive letter, no "..".',
+  '- Every "scope" path must be one of the supplied candidatePaths.',
+  '- Every "edits" path must also appear in "scope".',
+  '- "content" is the entire file after the change, never a diff or a fragment.',
+  '- "scope" must name at most maxScopeFiles files.',
+].join('\n');
 
 /**
  * Validate model output into a shape the rest of the system can trust.
@@ -210,7 +248,13 @@ export async function planCodingTask(opts: PlanCodingTaskOptions): Promise<PlanR
 
   // ── Ask the model to choose among what was actually retrieved ───────────────
   const evidence = ledger.spans.map((s) => ({ path: s.path, startLine: s.startLine, endLine: s.endLine, text: s.text }));
-  const raw = await opts.model({ issue: opts.issue, evidence, candidatePaths: openedPaths, maxScopeFiles: limits.maxScopeFiles });
+  const raw = await opts.model({
+    responseShape: PLANNER_OUTPUT_CONTRACT,
+    issue: opts.issue,
+    evidence,
+    candidatePaths: openedPaths,
+    maxScopeFiles: limits.maxScopeFiles,
+  });
   const parsed = parsePlannerOutput(raw);
   if (!parsed) return refuse('malformed-model-output', 'The planner output did not match the required shape and was not repaired.');
 

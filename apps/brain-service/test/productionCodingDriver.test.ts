@@ -13,7 +13,7 @@
 
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { chmodSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
@@ -570,4 +570,165 @@ test('25 — no route handler imports the journal or the mutation engine', async
   for (const forbidden of ['agentRunJournal', 'AgentRunJournal', 'governedApply', 'changeset', 'JournaledCodingRun', 'productionCodingDriver']) {
     assert.equal(source.includes(forbidden), false, `routes must not reference ${forbidden}`);
   }
+});
+
+// ── 26. the stop reason names the cause ──────────────────────────────────────
+
+test('26 — a run that exhausts its repairs is labelled repair-ceiling-exhausted, not reconciliation-failed', async () => {
+  // Found by a real `qwen3-coder:30b` run. The driver labelled EVERY incomplete
+  // run that produced a reconciliation record as `reconciliation-failed`, so a run
+  // whose diff and ledger agreed perfectly — and which simply never made the tests
+  // pass — accused itself of an integrity failure. That sends an operator hunting
+  // a scope/diff mismatch that does not exist.
+  //
+  // A model that plans correctly and edits consistently, but always writes the
+  // WRONG field name, so validation can never pass and every repair is spent.
+  // The harness builds the fixture, so the model learns the root just after.
+  let root = '';
+  const wrongFieldModel = async (input: unknown): Promise<unknown> => {
+    const body = input as Record<string, unknown>;
+    if ('candidatePaths' in body) {
+      return {
+        issueSummary: 'Exclude cancelled lines from the order total.',
+        scope: REQUIRED_FILES.map((p) => ({ path: p, rationale: `${p} participates in the total` })),
+        excluded: [{ path: TRAP_FILE, reason: 'formats output only' }],
+        edits: edits(root, 'cancelledCount'),
+      };
+    }
+    if ('failureEvidence' in body) {
+      const ids = [...String(body.failureEvidence ?? '').matchAll(/\b(F-\d+)\b/g)].map((m) => m[1]!);
+      return {
+        rationale: 'Retrying with the same field name.',
+        observedFailureEvidenceIds: ids.slice(0, 4),
+        edits: edits(root, 'cancelledCount'),
+      };
+    }
+    return { rationale: 'Report the count.', edits: edits(root, 'cancelledCount') };
+  };
+
+  const h = harness({ model: wrongFieldModel });
+  root = h.root;
+
+  const { runId, revision, hash } = await planned(h);
+  await decide(h, runId, { expectedRevision: revision, pathSetHash: hash, decision: 'approve' });
+  await settleWithRealValidation(h, runId);
+
+  const body = (await read(h, runId)).json<{
+    state: string;
+    finalReport?: { complete: boolean; stopReason: string };
+    blockers?: unknown[];
+  }>();
+
+  assert.equal(body.finalReport?.complete, false, 'the tests never passed, so the run is not complete');
+  assert.equal(
+    body.finalReport?.stopReason,
+    'repair-ceiling-exhausted',
+    'the cause was a model that never fixed the tests, not a records mismatch',
+  );
+  // The distinction is only worth anything if the alarm still exists for the real thing.
+  assert.notEqual(body.finalReport?.stopReason, 'reconciliation-failed');
+
+  await h.app.close(); h.store.close();
+});
+
+// ── 27. the failed-initial-apply path must still finalize ────────────────────
+
+test('27 — a refused initial apply finalizes truthfully instead of throwing', async () => {
+  // `finish()` is hoisted and closes over `let current`, which is declared AFTER
+  // the `initialApply.status !== 'completed'` early return calls it. Reading
+  // `current` there is a temporal-dead-zone access, so the one path that exists
+  // to report a failed apply threw a ReferenceError instead of reporting it.
+  //
+  // Provoked with a real refusal, not a stub: the approved files are made
+  // unwritable, so the governed apply genuinely cannot land.
+  const h = harness();
+  const { runId, revision, hash } = await planned(h);
+
+  const targets = REQUIRED_FILES.map((p) => path.join(h.root, p));
+  const dirs = [...new Set(targets.map((t) => path.dirname(t)))];
+  for (const f of targets) chmodSync(f, 0o444);
+  for (const d of dirs) chmodSync(d, 0o555);
+
+  try {
+    await decide(h, runId, { expectedRevision: revision, pathSetHash: hash, decision: 'approve' });
+    await settleWithRealValidation(h, runId);
+
+    const body = (await read(h, runId)).json<{
+      phase: string;
+      state: string;
+      finalReport?: { complete: boolean; stopReason: string };
+    }>();
+
+    // The run must END, and must not claim success.
+    assert.equal(body.phase, 'terminal', 'a refused apply must still reach a terminal phase');
+    assert.notEqual(body.state, 'COMPLETED');
+    assert.notEqual(body.finalReport?.complete, true);
+
+    // The apply must be recorded as the failure it was.
+    const apply = h.journal.children(runId).find((c) => c.kind === 'initial_apply');
+    assert.equal(apply?.state, 'failed', 'the governed apply genuinely could not write');
+
+    // The real assertion. Before the hoist, `finish()` threw a ReferenceError
+    // INSIDE the reconciliation stage, so this child was marked observed_failure
+    // for a reconciliation that never ran — a durable record of an outcome nobody
+    // computed. It must now carry an actual reconciliation verdict.
+    const rec = h.journal.children(runId).find((c) => c.kind === 'reconciliation');
+    assert.ok(rec, 'reconciliation must be recorded');
+    const evidence = JSON.parse(rec.terminalEvidenceJson ?? '{}') as {
+      approvedPaths?: string[];
+      writtenPaths?: string[];
+      diffPaths?: string[];
+      blockers?: string[];
+    };
+    assert.ok(Array.isArray(evidence.approvedPaths), 'reconciliation must record the approved set it compared');
+    assert.deepEqual([...(evidence.approvedPaths ?? [])].sort(), [...REQUIRED_FILES].sort());
+    assert.deepEqual(evidence.diffPaths, [], 'a refused apply leaves the tree untouched');
+    assert.ok((evidence.blockers ?? []).length > 0, 'an inconsistent reconciliation must say why');
+    // The blockers must describe the ACTUAL discrepancy — writes admitted by the
+    // ledger that never reached the tree — not a stage that crashed.
+    assert.match((evidence.blockers ?? []).join(' '), /absent from the diff/);
+  } finally {
+    for (const d of dirs) chmodSync(d, 0o755);
+    for (const f of targets) chmodSync(f, 0o644);
+    await h.app.close(); h.store.close();
+  }
+});
+
+test('28 — a rejected repair proposal is named, not reported as a refused apply', async () => {
+  // Observed twice in real `qwen3-coder:30b` runs: the second repair proposal was
+  // rejected, the loop broke, and the report said `apply-refused` — an apply that
+  // never happened. The two endings mean different things to an operator: one is
+  // the model failing to produce a usable proposal, the other is the governed write
+  // boundary refusing one.
+  let root = '';
+  let repairCalls = 0;
+  const model = async (input: unknown): Promise<unknown> => {
+    const body = input as Record<string, unknown>;
+    if ('candidatePaths' in body) {
+      return {
+        issueSummary: 'Exclude cancelled lines from the order total.',
+        scope: REQUIRED_FILES.map((p) => ({ path: p, rationale: `${p} participates in the total` })),
+        excluded: [{ path: TRAP_FILE, reason: 'formats output only' }],
+        edits: edits(root, 'cancelledCount'),
+      };
+    }
+    if ('failureEvidence' in body) {
+      repairCalls += 1;
+      // Malformed on the first repair: the loop must stop here, before any apply.
+      return { rationale: '', edits: [] };
+    }
+    return { rationale: 'Report the count.', edits: edits(root, 'cancelledCount') };
+  };
+
+  const h = harness({ model });
+  root = h.root;
+  const { runId, revision, hash } = await planned(h);
+  await decide(h, runId, { expectedRevision: revision, pathSetHash: hash, decision: 'approve' });
+  await settleWithRealValidation(h, runId);
+
+  const body = (await read(h, runId)).json<{ finalReport?: { complete: boolean; stopReason: string } }>();
+  assert.ok(repairCalls > 0, 'the repair path must actually have been entered');
+  assert.equal(body.finalReport?.complete, false);
+  assert.equal(body.finalReport?.stopReason, 'repair-proposal-rejected');
+  await h.app.close(); h.store.close();
 });
