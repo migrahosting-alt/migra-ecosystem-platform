@@ -381,7 +381,7 @@ export function createProductionCodingDriver(deps: ProductionCodingDriverDeps): 
             ledger,
             diffPaths: diffPaths(ctx.workspaceRoot),
             rollbacks: [],
-            ...(current ? { finalValidation: current } : {}),
+            finalValidation: current,
           });
           const findings = reconcileCodingChildren(ctx.run.payload, ctx.run.children(), false);
           const eligibility = codingCompletionEligibility(ctx.run.payload, ctx.run.children());
@@ -394,6 +394,21 @@ export function createProductionCodingDriver(deps: ProductionCodingDriverDeps): 
 
         const rec = reconciliation.value;
         const complete = rec?.consistent === true && current?.passed === true;
+
+        // A report is built FROM records. `baseline` and `initialApply` are
+        // required fields of CodingRunReport, and both can legitimately be absent
+        // here — a validation stage that was refused or cancelled at a boundary
+        // returns no record, and finish() is reached after a non-completed apply.
+        // Asserting them non-null would persist a finalReport whose required
+        // fields are `undefined`: structurally invalid, and a report claiming a
+        // baseline that never ran. The run still finalizes; the blockers already
+        // say why there is nothing to report.
+        const applyResult = initialApply.value;
+        if (!current || !applyResult) {
+          ctx.run.finalize({});
+          return;
+        }
+
         ctx.run.finalize({
           report: {
             runId: ctx.runId,
@@ -404,10 +419,10 @@ export function createProductionCodingDriver(deps: ProductionCodingDriverDeps): 
             approvalToken: '[REDACTED]',
             rationale: payload.plan!.issueSummary,
             reconciliation: rec ?? { approved: [], attempted: [], refused: [], written: [], unusedScope: [], diffPaths: [], blockers: ['reconciliation did not run'], consistent: false },
-            baseline: current!,
+            baseline: current,
             repairs: [],
-            ...(current ? { finalValidation: current } : {}),
-            initialApply: initialApply.value!,
+            finalValidation: current,
+            initialApply: applyResult,
             rollbacks: [],
             unresolvedRisks: [],
           },
