@@ -1,6 +1,14 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import test from 'node:test';
+import { fileURLToPath } from 'node:url';
+
+/** This package's root, whether running from `test/` (tsx) or `dist/test/` (CI). */
+function packageRoot(): string {
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  return here.endsWith(path.join('dist', 'test')) ? path.resolve(here, '../..') : path.resolve(here, '..');
+}
 
 import {
   ToolGate,
@@ -66,8 +74,13 @@ test('the real route routes BOTH tool paths through the gate', () => {
   // proves turns complete. This test adds the complementary half, that both the advertised
   // list and the execution check go through the SAME gate rather than one of them bypassing
   // it, which a runtime test cannot show on its own.
-  const source = new URL('../../src/engine/engineerRoutes.ts', import.meta.url).pathname;
-  const text = readFileSync(source, 'utf8');
+  // Derive the package root instead of counting `..` segments. `import.meta.url`
+  // is `test/` under tsx and `dist/test/` after a build, so the fixed `../../src`
+  // this used resolved correctly ONLY in the compiled layout — which is how CI
+  // runs it. Locally it pointed at `apps/src/...` and the test failed with ENOENT
+  // for a file that was never missing, so the check looked broken on every
+  // developer machine and green in CI.
+  const text = readFileSync(path.join(packageRoot(), 'src/engine/engineerRoutes.ts'), 'utf8');
   const opened = text.indexOf('new ToolGate().open(capability)');
   const advertised = text.indexOf('permittedTools(toolGate,');
   const executed = text.indexOf('toolGate.assertPermitted(');

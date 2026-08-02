@@ -123,7 +123,16 @@ export function codingStructuredModel(providerBaseUrl: string, model: string): (
         format: 'json',
         options: { temperature: 0.1 },
         messages: [
-          { role: 'system', content: 'You are a precise software engineer. Reply with JSON only, matching the requested shape exactly. Never include prose outside the JSON.' },
+          // The user message carries a `responseShape` field describing the exact
+          // JSON the adapter's parser will accept. Naming it here matters: the
+          // instruction used to say "the requested shape" when no shape was ever
+          // requested, and a real model that produced correct code under its own
+          // invented keys was refused as malformed.
+          {
+            role: 'system',
+            content:
+              'You are a precise software engineer. Reply with JSON only. The user message contains a "responseShape" field: your reply must match that shape exactly, using those key names and no other top-level keys. Never include prose outside the JSON.',
+          },
           { role: 'user', content: JSON.stringify(input) },
         ],
       }),

@@ -197,6 +197,45 @@ interface ParsedProposal {
   quoted: Array<{ evidenceId: string; text: string }>;
 }
 
+/**
+ * The proposal shape, stated in the words `parseProposal` enforces.
+ *
+ * Same reasoning as the planner contract: the prompt carried the data but never
+ * the shape, so a real model returned correct code under invented keys and was
+ * refused. Stated here, next to the validator, so the two cannot drift.
+ */
+export const PROPOSAL_OUTPUT_CONTRACT = [
+  'Reply with a single JSON object, and no other top-level keys:',
+  '{',
+  '  "rationale": "why this change is correct",',
+  '  "edits": [{ "path": "<file>", "content": "<COMPLETE new file text>" }]',
+  '}',
+  'Rules:',
+  '- "edits" must contain at least one entry.',
+  '- Every "path" must be workspace-relative (no leading "/", no drive letter, no "..")',
+  '  and must be one of the supplied approvedPaths. Any other path is refused.',
+  '- "content" is the entire file after the change, never a diff or a fragment.',
+].join('\n');
+
+/**
+ * The repair shape. Adds the cited failure evidence, which is what gives a repair
+ * its authority: the ids are checked against the run's real validation output.
+ */
+export const REPAIR_OUTPUT_CONTRACT = [
+  'Reply with a single JSON object, and no other top-level keys:',
+  '{',
+  '  "rationale": "what the failure shows and why this fixes it",',
+  '  "observedFailureEvidenceIds": ["F-1"],',
+  '  "edits": [{ "path": "<file>", "content": "<COMPLETE new file text>" }]',
+  '}',
+  'Rules:',
+  '- "edits" must contain at least one entry.',
+  '- Every "path" must be workspace-relative and one of the supplied approvedPaths.',
+  '- "content" is the entire file after the change, never a diff or a fragment.',
+  '- "observedFailureEvidenceIds" must quote ids that appear in failureEvidence.',
+  '  Cite only what the failure actually shows; invented ids are rejected.',
+].join('\n');
+
 export function parseProposal(raw: unknown): ParsedProposal | null {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
   const r = raw as RawProposal;
@@ -307,6 +346,7 @@ export function createInitialChangesetAuthor(deps: {
         // The model sees the issue, the frozen scope, its evidence and the current
         // contents — never arbitrary repository access.
         raw = await deps.model({
+          responseShape: PROPOSAL_OUTPUT_CONTRACT,
           issue: input.issue,
           approvedPaths: input.scope.files.map((f) => f.path),
           evidence: input.evidence,
@@ -403,6 +443,7 @@ export function createRepairChangesetAuthor(deps: {
       let raw: unknown;
       try {
         raw = await deps.model({
+          responseShape: REPAIR_OUTPUT_CONTRACT,
           approvedPaths: input.scope.files.map((f) => f.path),
           currentDiff: input.currentDiff,
           exitCode: input.latestValidation.exitCode,
