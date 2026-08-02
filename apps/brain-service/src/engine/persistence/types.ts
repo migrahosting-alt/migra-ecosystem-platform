@@ -225,6 +225,7 @@ export interface OperationalCounts {
   agentRuns?: number;
   agentRunEvents?: number;
   agentRunTombstones?: number;
+  agentRunChildren?: number;
 }
 
 export type DurableAgentRunState =
@@ -326,6 +327,13 @@ export interface DurableAgentRun {
   reconciliationLeaseUntil?: number;
   reconciliationFence: number;
   updatedAt: number;
+  // ── Opaque versioned domain payload ────────────────────────────────────────
+  // The core journal validates SHAPE (kind present ⇒ version present, valid JSON,
+  // within size limit, redacted) and nothing else. It never interprets these —
+  // that is the boundary that keeps coding concerns out of every agent run.
+  domainKind?: string;
+  domainSchemaVersion?: number;
+  domainPayloadJson?: string;
 }
 
 export interface AgentRunReconciliationClaim {
@@ -334,6 +342,131 @@ export interface AgentRunReconciliationClaim {
   fence: number;
   leaseUntil: number;
   version: number;
+}
+
+// ── Child operations ─────────────────────────────────────────────────────────
+//
+// A parent run's `agent_run_events` log records what happened TO THE PARENT. It
+// cannot represent an operation that has its own lifecycle, its own terminal
+// evidence, and its own ability to be cancelled or interrupted independently —
+// which is exactly what each consequential step of a governed coding run is.
+//
+// Children are therefore rows, not events. The parent may not reach a terminal
+// success while a REQUIRED child is still non-terminal; that rule is the whole
+// reason the table exists.
+
+export type DurableChildState =
+  /** Written before dispatch. Proves no work was sent. Nothing transitions INTO it. */
+  | 'created'
+  | 'running'
+  | 'cancelling'
+  | 'completed'
+  | 'failed'
+  | 'cancelled'
+  /** Process died while this child was live. Deliberately NOT `failed`: the outcome
+   * is unknown rather than known-bad, and a new child — never a rewrite of this one
+   * — is how work resumes. */
+  | 'interrupted';
+
+export const DURABLE_CHILD_TERMINAL_STATES: ReadonlySet<DurableChildState> = new Set([
+  'completed',
+  'failed',
+  'cancelled',
+  'interrupted',
+]);
+
+/**
+ * Legal child transitions. Fail closed: anything absent is refused.
+ *
+ * `created → running` is the ONLY way work begins, and `created` has no path to any
+ * success state — a child that was never dispatched cannot have succeeded. Terminal
+ * states have no outgoing edges at all: resuming interrupted work means a NEW child,
+ * never the rewriting of one whose outcome was never observed.
+ */
+const LEGAL_CHILD: Record<DurableChildState, readonly DurableChildState[]> = {
+  created: ['running', 'failed', 'interrupted'],
+  running: ['cancelling', 'completed', 'failed', 'interrupted'],
+  cancelling: ['cancelled', 'failed', 'interrupted'],
+  completed: [],
+  failed: [],
+  cancelled: [],
+  interrupted: [],
+};
+
+export function isLegalChildTransition(from: DurableChildState, to: DurableChildState): boolean {
+  return (LEGAL_CHILD[from] ?? []).includes(to);
+}
+
+/** Why a child became terminal. Replaces a generic `success` boolean: terminal truth
+ * is state + evidence, and a boolean would let those two disagree. */
+export type DurableChildTerminalCategory =
+  | 'observed_success'
+  | 'observed_failure'
+  | 'cancellation_confirmed'
+  | 'orphaned_before_dispatch'
+  | 'interrupted_by_restart'
+  | 'outcome_unverified';
+
+export interface DurableAgentRunChild {
+  childId: string;
+  runId: string;
+  /** Explicit operation kind. Never collapsed into a generic step. */
+  kind: string;
+  /** Distinguishes repeated occurrences of one kind (repair attempt 1, 2, …) and
+   * backs the (run_id, kind, attempt) uniqueness constraint. */
+  attempt: number;
+  state: DurableChildState;
+  /** A required child blocks parent completion until terminal AND acceptable. */
+  required: boolean;
+  revision: number;
+  createdAt: number;
+  startedAt?: number;
+  endedAt?: number;
+  terminalCategory?: DurableChildTerminalCategory;
+  terminalEvidenceJson?: string;
+  cancellationRequestedAt?: number;
+  cancellationConfirmedAt?: number;
+  errorJson?: string;
+  metadataJson?: string;
+  schemaVersion: number;
+  updatedAt: number;
+}
+
+export type AgentRunChildWriteFailure =
+  | 'UNKNOWN_PARENT'
+  | 'PARENT_TERMINAL'
+  | 'DUPLICATE_CHILD'
+  | 'UNKNOWN_CHILD'
+  | 'STALE_REVISION'
+  | 'ILLEGAL_TRANSITION'
+  | 'TERMINAL_CHILD_IMMUTABLE'
+  | 'PAYLOAD_TOO_LARGE';
+
+export type AgentRunChildWriteResult =
+  | { ok: true; child: DurableAgentRunChild }
+  | { ok: false; code: AgentRunChildWriteFailure; current?: DurableAgentRunChild };
+
+export interface AgentRunChildTransitionInput {
+  childId: string;
+  /** Optimistic concurrency. The caller states what it believes it is updating. */
+  expectedRevision: number;
+  nextState: DurableChildState;
+  at: number;
+  startedAt?: number;
+  endedAt?: number;
+  terminalCategory?: DurableChildTerminalCategory;
+  terminalEvidenceJson?: string;
+  cancellationRequestedAt?: number;
+  cancellationConfirmedAt?: number;
+  errorJson?: string;
+  metadataJson?: string;
+}
+
+export interface AgentRunChildPersistence {
+  insertAgentRunChild(child: DurableAgentRunChild): AgentRunChildWriteResult;
+  transitionAgentRunChild(input: AgentRunChildTransitionInput): AgentRunChildWriteResult;
+  loadAgentRunChildren(runId: string): DurableAgentRunChild[];
+  loadAgentRunChild(childId: string): DurableAgentRunChild | undefined;
 }
 
 export interface DurableAgentRunTombstone {
@@ -380,7 +513,7 @@ export interface AgentRunTransitionInput {
     leaseValidAt: number;
     expectedVersion?: number;
   };
-  patch?: Partial<Pick<DurableAgentRun, 'approvalDisplayedAt' | 'approvalDecisionAt' | 'executionStartedAt' | 'terminalAt' | 'resultJson' | 'errorJson' | 'exitCode' | 'signal' | 'failureCode' | 'interruptionClassification' | 'containmentUnit' | 'containmentBinding' | 'approvalLifecycle' | 'approvalRequestedAt' | 'approvalExpiresAt' | 'approvalDecisionType' | 'approvalInvalidationReason' | 'approvalActorRef' | 'recoveryClass' | 'recoveryEligible' | 'recoveryReason' | 'successorRunId' | 'reproposalAt' | 'recoveryAttemptCount' | 'lastRecoveryRequestId' | 'recoveryTerminalReason'>>;
+  patch?: Partial<Pick<DurableAgentRun, 'approvalDisplayedAt' | 'approvalDecisionAt' | 'executionStartedAt' | 'terminalAt' | 'resultJson' | 'errorJson' | 'exitCode' | 'signal' | 'failureCode' | 'interruptionClassification' | 'containmentUnit' | 'containmentBinding' | 'approvalLifecycle' | 'approvalRequestedAt' | 'approvalExpiresAt' | 'approvalDecisionType' | 'approvalInvalidationReason' | 'approvalActorRef' | 'recoveryClass' | 'recoveryEligible' | 'recoveryReason' | 'successorRunId' | 'reproposalAt' | 'recoveryAttemptCount' | 'lastRecoveryRequestId' | 'recoveryTerminalReason' | 'domainKind' | 'domainSchemaVersion' | 'domainPayloadJson'>>;
   eventId?: string;
 }
 
@@ -421,7 +554,7 @@ export interface AgentRunFencedEventInput {
   eventId?: string;
 }
 
-export interface AgentRunJournalPersistence {
+export interface AgentRunJournalPersistence extends AgentRunChildPersistence {
   insertAgentRun(run: DurableAgentRun, createdEvent: DurableAgentRunEvent): void;
   appendAgentRunEvent(event: Omit<DurableAgentRunEvent, 'seq'>): void;
   appendAgentRunEventUnderFence(input: AgentRunFencedEventInput): AgentRunReconciliationClaim | undefined;

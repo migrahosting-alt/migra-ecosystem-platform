@@ -7,7 +7,8 @@ export async function run(): Promise<void> {
   const testsRoot = __dirname;
 
   // The ops-validation matrix runs only via its dedicated runner (opsIndex.js),
-  // never in the normal gates.
+  // never in the normal gates. It is the ONLY exclusion — `governedCoding` runs
+  // here with everything else and is expected to pass.
   const files = (await glob('**/*.test.js', { cwd: testsRoot })).filter((f) => !f.includes('opsValidation'));
   for (const file of files) {
     mocha.addFile(path.resolve(testsRoot, file));

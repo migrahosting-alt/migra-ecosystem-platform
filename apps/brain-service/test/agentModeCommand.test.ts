@@ -405,7 +405,7 @@ test('dynamic sentinel matrix redacts reusable authority across Agent HTTP, audi
   const processes = new FakeProcesses();
   processes.stdout = `${sentinels.stdout}\n${sentinels.privateKey}`;
   processes.stderr = sentinels.stderr;
-  const journal = new AgentRunJournal(persistence, { terminalRetentionMs: 1, retentionBatchSize: 10, reconciliationLeaseMs: 30_000 }, () => `sentinel_event_${++sequence}`);
+  const journal = new AgentRunJournal(persistence, { terminalRetentionMs: 1, retentionBatchSize: 10, reconciliationLeaseMs: 30_000, maxDomainPayloadBytes: 256 * 1024 }, () => `sentinel_event_${++sequence}`);
   let service = new AgentModeCommandService(deps, () => now, () => `agentcmd_sentinel_${++sequence}`, resolver, processes, journal, `svc_sentinel_${++sequence}`);
   const authority = new AgentActivationAuthority(sentinels.bootstrap, () => now, () => sentinels.capability, process.pid);
   const app = Fastify({ logger: false });

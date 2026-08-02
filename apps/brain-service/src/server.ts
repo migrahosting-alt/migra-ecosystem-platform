@@ -42,6 +42,11 @@ import { buildPricingBook, buildBudgetManager, buildUsageLedger } from './engine
 import { registerBudgetRoutes } from './engine/providers/budget/budgetRoutes.js';
 import { AgentRegistry } from './engine/agentRegistry.js';
 import { registerAgentModeCommandRoutes } from './engine/agentModeCommandRoutes.js';
+import { registerCodingRunRoutes } from './engine/coding/codingRunRoutes.js';
+import { CodingRunService } from './engine/coding/codingRunService.js';
+import { createProductionCodingDriver } from './engine/coding/productionCodingDriver.js';
+import { codingCapability, codingStructuredModel, readCodingConfig, readCodingValidationCommand, recoverCodingRuns } from './engine/coding/codingRuntime.js';
+import { buildAgentRunJournalConfig } from './engine/agentRunJournal.js';
 import { AgentActivationAuthority } from './engine/agentActivation.js';
 import { buildAgentModeCommandService } from './engine/agentModeCommandService.js';
 import { scavengeStaleAgentSnapshots } from './engine/agentRecipe.js';
@@ -334,6 +339,59 @@ async function main(): Promise<void> {
   // has no reference to it and cannot approve or execute commands.
   const agentModeCommands = buildAgentModeCommandService(toolDeps, durable ?? undefined);
   registerAgentModeCommandRoutes(app, toolDeps, agentActivation, agentModeCommands);
+  // Governed coding runs (/api/ai/coding/runs). The ONLY Brain capability that
+  // writes to a user's repository, so every precondition must hold before the
+  // routes exist at all: explicitly enabled, a validated workspace boundary, and
+  // a durable journal. A run whose record cannot outlive the process that made the
+  // changes is exactly the state this workflow exists to prevent, so an in-memory
+  // journal disqualifies it rather than downgrading it.
+  const codingConfig = readCodingConfig();
+  // The coding model is explicit: an unset local model would otherwise silently
+  // fall back to whatever the provider defaults to, and this one authors edits.
+  const codingModelId = process.env.MIGRAPILOT_CODING_MODEL ?? env.localModel ?? env.defaultModel ?? '';
+  const codingReady = codingConfig.enabled && durable !== undefined && Boolean(codingModelId);
+  if (codingReady) {
+    const codingDriver = createProductionCodingDriver({
+      plannerModel: codingStructuredModel(env.providerBaseUrl, codingModelId),
+      proposalModel: codingStructuredModel(env.providerBaseUrl, codingModelId),
+      validationCommand: readCodingValidationCommand(),
+      onPlanRefused: (runId, reason) => app.log.warn({ runId, reason }, 'governed coding: planning produced no usable plan'),
+    });
+    registerCodingRunRoutes(app, {
+      service: new CodingRunService({
+        journal: agentModeCommands.agentRunJournal(),
+        driver: codingDriver,
+        boundary: { allowedRoots: codingConfig.allowedRoots },
+        config: buildAgentRunJournalConfig(),
+        // Boundary trace for the dispatch invariant. Non-secret facts only, and
+        // the refusal CODE in particular — a refused child registration is
+        // otherwise indistinguishable from a run that never began.
+        diagnostic: (event) => app.log.info({ coding: event }, 'governed coding boundary'),
+      }),
+    });
+    // Classify, never auto-resume. Nothing below re-invokes a model or re-applies
+    // a changeset — an apply live at process death leaves a tree only the diff can
+    // describe.
+    const codingRecovery = await recoverCodingRuns({
+      journal: agentModeCommands.agentRunJournal(),
+      readSpan: () => async () => undefined,
+      now: Date.now(),
+    });
+    if (codingRecovery.length) app.log.warn({ codingRecovery }, 'governed coding runs required restart classification');
+    app.log.info({ workspaceRootsConfigured: codingConfig.allowedRoots.length }, 'governed coding run API enabled');
+  } else {
+    // Diagnostics name the missing precondition. A write capability that is quietly
+    // absent is indistinguishable from one that is broken.
+    for (const diagnostic of codingConfig.diagnostics) app.log.info({ capability: 'governedCoding' }, diagnostic);
+    if (codingConfig.enabled && durable === undefined) {
+      app.log.warn({ capability: 'governedCoding' }, 'governed coding is enabled but no durable store is available; routes were not mounted.');
+    }
+  }
+  // Always registered, even when the capability is off: a client must be able to
+  // discover that governed coding is unavailable and why, rather than inferring it
+  // from a 404 on a route that might simply have moved.
+  const governedCoding = codingCapability({ config: codingConfig, durable: durable !== undefined, driverReady: codingReady });
+  app.get('/api/ai/coding/capability', async () => ({ governedCoding }));
   const agentModeReconciliation = await agentModeCommands.reconcileOnStartup();
   if (agentModeReconciliation.scanned > 0) app.log.info({ agentModeReconciliation }, 'Agent Mode durable run reconciliation completed');
   // Private snapshots are released with their proposal, but a process killed

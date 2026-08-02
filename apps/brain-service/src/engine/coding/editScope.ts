@@ -122,7 +122,11 @@ export function isWorkspaceRelativeContained(raw: unknown): raw is string {
   return !trimmed.replace(/\\/g, '/').split('/').includes('..');
 }
 
-function hashPaths(paths: readonly string[]): string {
+/** Binds an approval to an exact path set. EXPORTED so restart re-verification
+ * recomputes the same hash from the same function — a parallel implementation
+ * could drift, and a drifted hash would silently invalidate valid approvals (or,
+ * far worse, validate changed ones). */
+export function hashPaths(paths: readonly string[]): string {
   return createHash('sha256').update([...paths].sort().join('\n'), 'utf8').digest('hex').slice(0, 16);
 }
 

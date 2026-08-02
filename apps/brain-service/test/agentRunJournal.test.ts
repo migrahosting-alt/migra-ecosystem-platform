@@ -96,7 +96,7 @@ function harness(persistence = new MemoryAgentRunJournalPersistence(), now = () 
   const deps = { registry: new CapabilityRegistry(), approvals, audit: new ToolAudit() };
   const resolver = new Resolver();
   const processes = new Processes();
-  const journal = new AgentRunJournal(persistence, { terminalRetentionMs: 1_000, retentionBatchSize: 10, reconciliationLeaseMs: 30_000 }, () => `event_${++sequence}`);
+  const journal = new AgentRunJournal(persistence, { terminalRetentionMs: 1_000, retentionBatchSize: 10, reconciliationLeaseMs: 30_000, maxDomainPayloadBytes: 256 * 1024 }, () => `event_${++sequence}`);
   const service = new AgentModeCommandService(deps, now, () => `agentcmd_${++sequence}`, resolver, processes, journal, `svc_${++sequence}`);
   return { service, processes, persistence, deps, resolver };
 }
@@ -545,7 +545,7 @@ test('retention preserves active runs and deletes old terminals in bounded batch
   h.service.displayed(terminal.runId, terminal.preview!.fingerprint, context(workspace));
   await h.service.decide(terminal.runId, 'reject', terminal.preview!.fingerprint, context(workspace));
   shared.runs.get(terminal.runId)!.terminalAt = 1;
-  const pruned = new AgentRunJournal(shared, { terminalRetentionMs: 1_000, retentionBatchSize: 1, reconciliationLeaseMs: 30_000 }).prune(10_000);
+  const pruned = new AgentRunJournal(shared, { terminalRetentionMs: 1_000, retentionBatchSize: 1, reconciliationLeaseMs: 30_000, maxDomainPayloadBytes: 256 * 1024 }).prune(10_000);
   assert.equal(pruned.runs, 1);
   assert.ok(shared.runs.has(active.runId));
   assert.equal(shared.runs.has(terminal.runId), false);
@@ -969,7 +969,7 @@ test('retention preserves terminal source while its recovery successor is active
   assert.equal(successor.ok, true);
   shared.runs.get(source.runId)!.terminalAt = 1;
 
-  const pruned = new AgentRunJournal(shared, { terminalRetentionMs: 1_000, retentionBatchSize: 10, reconciliationLeaseMs: 30_000 }).prune(10_000);
+  const pruned = new AgentRunJournal(shared, { terminalRetentionMs: 1_000, retentionBatchSize: 10, reconciliationLeaseMs: 30_000, maxDomainPayloadBytes: 256 * 1024 }).prune(10_000);
   assert.equal(pruned.runs, 0);
   assert.ok(shared.runs.has(source.runId));
   assert.ok(shared.runs.has(successor.view.runId));

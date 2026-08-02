@@ -51,6 +51,9 @@ import { MigraPilotWorkspaceViewProvider } from './panel/workspaceView.js';
 import { WorkspaceController } from './panel/workspaceController.js';
 import { type WorkspacePanelModel, type RootResolution } from './panel/workspaceViewModel.js';
 import { MigraAiClient } from './services/migraAiClient.js';
+import { CodingRunClient } from './services/codingRunClient.js';
+import { registerGovernedCodingCommand, restoreGovernedCodingRun } from './commands/governedCoding.js';
+import type { GovernedCodingUiFactory } from './services/governedCodingUi.js';
 import { EngineDiagnostics, type EngineDiagnosticSnapshot } from './services/engineDiagnostics.js';
 import { type TokenStore } from './services/tokenStore.js';
 import { MigraPilotAgentModeViewProvider } from './panel/agentModeView.js';
@@ -63,6 +66,8 @@ let outputChannel: vscode.OutputChannel;
 let brainBootstrap: BrainBootstrap | undefined;
 let brainClient: BrainClient;
 let migraAiClient: MigraAiClient;
+let codingRunClient: CodingRunClient;
+let governedCoding: ReturnType<typeof registerGovernedCodingCommand>;
 let engineDiagnostics: EngineDiagnostics;
 let statusBar: MigraPilotStatusBar;
 let router: BackendRouter;
@@ -167,6 +172,17 @@ export interface MigraPilotApi {
   /** Sanitized, local-only MigraAI Engine routing snapshot (selected model /
    * provider / tier / reason / failed-over models per chat turn). */
   engineDiagnostics(): EngineDiagnosticSnapshot;
+  /** Governed coding, for the installed-path acceptance gate. `restore` asks the
+   * Brain what happened to a remembered run — it never infers from the extension
+   * having restarted. */
+  governedCoding: {
+    restore(): Promise<void>;
+    client(): CodingRunClient;
+    /** Supply a scripted interaction sequence. Packaged acceptance ONLY: it
+     * injects user responses, never the client, workspace, snapshots, mutation
+     * decisions or completion state. */
+    setUi(factory: GovernedCodingUiFactory): void;
+  };
 }
 
 /** True when the developer opted into the superseded classic sidebar views. */
@@ -306,6 +322,19 @@ export async function activate(context: vscode.ExtensionContext): Promise<MigraP
     log: (message) => output(message),
     // Memory isolation: one workspace's conversations never leak into another.
     scope: () => ({ owner: 'local', workspace: vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? 'default' }),
+  });
+  // Governed coding runs. Shares the brain base URL; a longer timeout than chat
+  // because planning and validation are server-side stages, not a streamed reply.
+  codingRunClient = new CodingRunClient({
+    baseUrl: () => String(vscode.workspace.getConfiguration('migrapilot').get('brainUrl', 'http://127.0.0.1:3988')),
+    timeoutMs: () => Number(vscode.workspace.getConfiguration('migrapilot').get('requestTimeoutMs', 30000)),
+    log: (message) => output(message),
+  });
+  // Registered once here so the packaged acceptance can drive THIS registration
+  // with a scripted interaction rather than a second copy of the command.
+  governedCoding = registerGovernedCodingCommand(context, {
+    client: codingRunClient,
+    log: (message) => output(message),
   });
   engineDiagnostics = new EngineDiagnostics(() => Date.now());
   statusBar = new MigraPilotStatusBar();
@@ -468,6 +497,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<MigraP
     vscode.commands.registerCommand('migrapilot.openChat', async () => {
       await studioPanel.reveal('chat');
     }),
+    // Governed coding change. The only command that can cause a repository write,
+    // and it does so only after one scope approval bound to a hashed path set.
+    governedCoding.disposable,
     // Developer-only escape hatches for the superseded views. They are hidden
     // from the Command Palette unless `migrapilot.enableClassicViews` is on
     // (package.json `menus.commandPalette`), and they refuse rather than fail
@@ -619,6 +651,15 @@ export async function activate(context: vscode.ExtensionContext): Promise<MigraP
     },
     backendDiagnostics: () => diagnostics.snapshot(),
     engineDiagnostics: () => engineDiagnostics.snapshot(),
+    governedCoding: {
+      /** Exposed for installed-path acceptance; asks the Brain, never infers. */
+      restore: () => restoreGovernedCodingRun(context, codingRunClient, (message) => output(message)),
+      client: () => codingRunClient,
+      /** Supply a scripted interaction sequence. Used ONLY by the packaged
+       * acceptance; production never calls it, and it injects user RESPONSES —
+       * never the client, workspace, snapshots or completion state. */
+      setUi: (factory) => governedCoding.uiHolder.set(factory),
+    },
   };
 }
 

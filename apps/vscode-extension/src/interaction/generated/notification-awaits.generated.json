@@ -2,7 +2,7 @@
   "generated": "by scripts/check-notification-awaits.mjs — DERIVED EVIDENCE, do not edit",
   "rule": "await on a VS Code message API is prohibited when the result is discarded; permitted when consumed",
   "counts": {
-    "consumed": 16,
+    "consumed": 18,
     "discarded": 0,
     "ambiguous": 0
   },
@@ -37,7 +37,7 @@
     },
     {
       "file": "src/extension.ts",
-      "line": 345,
+      "line": 374,
       "api": "showWarningMessage",
       "classification": "consumed",
       "snippet": "await vscode.window.showWarningMessage([card.title, '', ...card.lines].join('\\n'), { modal: true }, 'Approve once', 'Sta"
@@ -111,6 +111,20 @@
       "api": "showWarningMessage",
       "classification": "consumed",
       "snippet": "await vscode.window.showWarningMessage(`${scope.confirmLabel}?`, { modal: true, detail }, 'Delete')"
+    },
+    {
+      "file": "src/services/governedCodingUiVscode.ts",
+      "line": 46,
+      "api": "showWarningMessage",
+      "classification": "consumed",
+      "snippet": "await vscode.window.showWarningMessage("
+    },
+    {
+      "file": "src/services/governedCodingUiVscode.ts",
+      "line": 58,
+      "api": "showWarningMessage",
+      "classification": "consumed",
+      "snippet": "await vscode.window.showWarningMessage("
     },
     {
       "file": "src/services/proposedEdits.ts",

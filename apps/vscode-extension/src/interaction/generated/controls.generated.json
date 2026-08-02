@@ -28,11 +28,25 @@
         "commandId": "migrapilot.explainSelection",
         "confidence": "exact"
       }
+    },
+    {
+      "file": "src/commands/governedCoding.control.ts",
+      "applicationId": "migrapilot-vscode",
+      "surfaceId": "engineer.command-palette",
+      "controlId": "governed-coding",
+      "controlVersion": 1,
+      "instanceScope": "workspace",
+      "consequence": "mutating",
+      "locator": {
+        "adapter": "vscode-command",
+        "commandId": "migrapilot.governedCoding",
+        "confidence": "exact"
+      }
     }
   ],
   "coverage": {
-    "contributedCommands": 28,
-    "declaredControls": 2,
+    "contributedCommands": 29,
+    "declaredControls": 3,
     "knownGaps": [
       "migrapilot.aiUsage",
       "migrapilot.clearProviderKey",

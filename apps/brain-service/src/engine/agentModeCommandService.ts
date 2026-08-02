@@ -407,7 +407,13 @@ export class AgentModeCommandService {
   }
 
   async reconcileOnStartup(): Promise<{ scanned: number; reconciled: number; outcomes: Record<string, number> }> {
-    const runs = this.journal.loadRuns().filter((run) => !AGENT_TERMINAL_STATES.has(run.state as AgentModeState));
+    const runs = this.journal.loadRuns()
+      .filter((run) => !AGENT_TERMINAL_STATES.has(run.state as AgentModeState))
+      // Command policy only. A run carrying a domain payload belongs to another
+      // workflow with its own restart rules — reconciling it here would apply the
+      // command binding (snapshot + executable digest) to a run that never had one,
+      // and would EXPIRE a coding scope approval this service cannot re-verify.
+      .filter((run) => run.domainKind === undefined);
     const outcomes: Record<string, number> = {};
     let reconciled = 0;
     for (const run of runs) {
