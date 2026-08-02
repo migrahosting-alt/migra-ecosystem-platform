@@ -26,6 +26,24 @@ import { createProductionCodingDriver } from '../src/engine/coding/productionCod
 import { codingCapability, readCodingConfig, readCodingValidationCommand, recoverCodingRuns } from '../src/engine/coding/codingRuntime.js';
 import { createFixtureRepo, REQUIRED_FILES, TRAP_FILE, ISSUE, runFixtureTests } from './fixtures/multifileCodingFixture.js';
 
+/**
+ * Read a file from the package SOURCE tree, wherever this test is running from.
+ *
+ * `import.meta.url` points at `test/` under tsx and at `dist/test/` after a build,
+ * so a bare `../src/...` resolves to a path that does not exist in the compiled
+ * layout. That is precisely how CI runs these (`node --test dist/test/*.test.js`)
+ * and how the package's own `npm test` does — so a structural assertion written
+ * against the source tree silently became an error there while passing locally.
+ */
+async function readSource(relative: string): Promise<string> {
+  const { fileURLToPath } = await import('node:url');
+  const nodePath = await import('node:path');
+  const { readFile } = await import('node:fs/promises');
+  const here = nodePath.dirname(fileURLToPath(import.meta.url));
+  const packageRoot = here.endsWith(nodePath.join('dist', 'test')) ? nodePath.resolve(here, '../..') : nodePath.resolve(here, '..');
+  return readFile(nodePath.join(packageRoot, 'src', relative), 'utf8');
+}
+
 const roots: string[] = [];
 process.on('exit', () => {
   for (const dir of roots) { try { rmSync(dir, { recursive: true, force: true }); } catch { /* best effort */ } }
@@ -548,7 +566,7 @@ test('24 — capability metadata is false when initialization fails, and never l
 });
 
 test('25 — no route handler imports the journal or the mutation engine', async () => {
-  const source = await import('node:fs/promises').then((fs) => fs.readFile(new URL('../src/engine/coding/codingRunRoutes.ts', import.meta.url), 'utf8'));
+  const source = await readSource('engine/coding/codingRunRoutes.ts');
   for (const forbidden of ['agentRunJournal', 'AgentRunJournal', 'governedApply', 'changeset', 'JournaledCodingRun', 'productionCodingDriver']) {
     assert.equal(source.includes(forbidden), false, `routes must not reference ${forbidden}`);
   }
