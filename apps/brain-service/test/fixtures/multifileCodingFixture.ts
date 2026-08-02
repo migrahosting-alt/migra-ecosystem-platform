@@ -6,8 +6,8 @@
  * the tests fail until they agree. That is the property being measured — a
  * single-file edit is not a passing answer here, it is a wrong one.
  *
- * It also carries one deliberate trap. `orderTotalsFormatter.ts` sits beside
- * `orderTotalsService.ts`, shares its prefix, mentions totals and cancellation in
+ * It also carries one deliberate trap. `orderTotalsFormatter.js` sits beside
+ * `orderTotalsService.js`, shares its prefix, mentions totals and cancellation in
  * its comments, and has nothing to do with the defect. An agent that edits it has
  * selected on name similarity rather than evidence — the same failure the ranking
  * slice measured, now with write access. © MigraTeck LLC.

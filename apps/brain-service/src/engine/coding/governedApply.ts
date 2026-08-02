@@ -41,7 +41,11 @@ export type ApplyRefusal =
   | 'empty-changeset'
   | 'root-mismatch'
   /** The mutation engine refused or failed. Authority was fine; the write was not. */
-  | 'apply-failed';
+  | 'apply-failed'
+  /** The run was cancelled before any write was attempted. NOT a scope violation:
+   * reporting one would tell an operator an out-of-scope write was tried when
+   * nothing was. */
+  | 'cancelled-before-apply';
 
 export interface GovernedApplyRefused {
   ok: false;

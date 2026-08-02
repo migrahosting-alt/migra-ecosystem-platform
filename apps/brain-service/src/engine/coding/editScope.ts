@@ -104,6 +104,24 @@ export const MAX_SCOPE_FILES = 12;
 /** Matches the tool-approval store's window, so neither outlives the other. */
 export const SCOPE_TTL_MS = 5 * 60 * 1000;
 
+/**
+ * Is a model-supplied path workspace-relative and contained?
+ *
+ * Checked on the RAW string, before any normalisation. `normalizePath` strips a
+ * leading slash, so validating afterwards turns `/etc/passwd` into the
+ * innocent-looking `etc/passwd` and admits it. Every caller that accepts a path
+ * from a model uses this, so a refusal is a refusal everywhere rather than a hard
+ * error in the scope declaration and a silent rewrite in the parsers.
+ */
+export function isWorkspaceRelativeContained(raw: unknown): raw is string {
+  if (typeof raw !== 'string') return false;
+  const trimmed = raw.trim();
+  if (!trimmed) return false;
+  if (/^[/\\]/.test(trimmed)) return false;
+  if (/^[A-Za-z]:[/\\]/.test(trimmed)) return false;
+  return !trimmed.replace(/\\/g, '/').split('/').includes('..');
+}
+
 /** Binds an approval to an exact path set. EXPORTED so restart re-verification
  * recomputes the same hash from the same function — a parallel implementation
  * could drift, and a drifted hash would silently invalidate valid approvals (or,
@@ -133,7 +151,7 @@ export function proposeEditScope(req: EditScopeRequest, now = Date.now()): Propo
     // rewriting an out-of-workspace path into an in-workspace one is precisely
     // the hiding this check exists to prevent.
     const raw = (file.path ?? '').trim();
-    if (!raw || /^[/\\]/.test(raw) || /^[A-Za-z]:[/\\]/.test(raw) || raw.replace(/\\/g, '/').split('/').includes('..')) {
+    if (!isWorkspaceRelativeContained(raw)) {
       throw new EditScopeError('absolute-or-escaping-path', `Scope path must be workspace-relative and contained: ${file.path}`);
     }
     const path = normalizePath(raw);

@@ -1,4 +1,4 @@
-// Evidence-governed multi-file coding: the 18 acceptance cases.
+// Evidence-governed multi-file coding: the 22 acceptance cases.
 //
 // These drive the REAL apply engine (`applyChangeset`, with its readback
 // verification and all-or-nothing rollback) and the REAL command runner against
@@ -13,10 +13,12 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { nodeChangesetFs } from '../src/tools/changesetFs.js';
 import { ChangesetProposalStore } from '../src/tools/changeset.js';
-import { approveEditScope, proposeEditScope, ScopedEditLedger, SCOPE_TTL_MS } from '../src/engine/coding/editScope.js';
+import { approveEditScope, isWorkspaceRelativeContained, proposeEditScope, ScopedEditLedger, SCOPE_TTL_MS } from '../src/engine/coding/editScope.js';
 import { governedApply, changesetPaths } from '../src/engine/coding/governedApply.js';
 import { runValidation, observedFailure, type DeclaredValidation } from '../src/engine/coding/validationRun.js';
 import { runCodingTask, reconcile, citesObservedEvidence, renderCodingReport, type RepairProposal } from '../src/engine/coding/codingRun.js';
+import { parseProposal } from '../src/engine/coding/modelProposals.js';
+import { parsePlannerOutput } from '../src/engine/coding/codingPlanner.js';
 import { createFixtureRepo, runFixtureTests, REQUIRED_FILES, TRAP_FILE, ISSUE } from './fixtures/multifileCodingFixture.js';
 
 const SRC = (p: string) => ({ path: p, startLine: 1, endLine: 9, excerptHash: 'a1b2c3d4e5f60718' });
@@ -445,4 +447,49 @@ test('18 — an incomplete run reports incomplete from persisted evidence, not m
   assert.ok(afterRestart.blockers.some((b) => /required by the task contract/.test(b)));
   assert.deepEqual(afterRestart.written, [SERVICE]);
   assert.deepEqual(afterRestart.diffPaths, [SERVICE]);
+});
+
+test('an absolute or escaping model path is REFUSED, never normalised into a relative one', () => {
+  // Copilot review, PR #143. `normalizePath` strips a leading slash, so
+  // normalising before validating turns `/src/x.js` into the innocent-looking
+  // `src/x.js` and admits it. That hides the attempt instead of refusing it, and
+  // it was inconsistent with editScope, which already validated the RAW path.
+  for (const bad of ['/src/x.js', '/etc/passwd', '../outside.js', 'src/../../outside.js', 'C:\\Windows\\x.js']) {
+    assert.equal(isWorkspaceRelativeContained(bad), false, `${bad} must be refused`);
+    assert.equal(
+      parseProposal({ rationale: 'r', edits: [{ path: bad, content: 'x' }] }),
+      null,
+      `parseProposal must refuse ${bad} rather than rewrite it`,
+    );
+    assert.equal(
+      parsePlannerOutput({ issueSummary: 's', scope: [{ path: bad, rationale: 'r' }], edits: [{ path: 'src/ok.js', content: 'x' }] }),
+      null,
+      `parsePlannerOutput must refuse ${bad} rather than rewrite it`,
+    );
+  }
+  // A legitimate relative path still parses.
+  assert.ok(parseProposal({ rationale: 'r', edits: [{ path: 'src/ok.js', content: 'x' }] }));
+  assert.equal(isWorkspaceRelativeContained('src/ok.js'), true);
+});
+
+test('cancellation before any write is not reported as a scope violation', async () => {
+  // Copilot review, PR #143. The fabricated `scope-violation` told an operator an
+  // out-of-scope write had been attempted when nothing had been written at all.
+  const root = createFixtureRepo();
+  const scope = scopeFor();
+  const d = deps(root, scope);
+  const controller = new AbortController();
+  controller.abort();
+  const report = await withoutTestContext(() => runCodingTask({
+    runId: 'r_cancel', rootPath: root, scope, approvalToken: scope.approvalToken, validations: VALIDATIONS,
+    initialChangeset: replaceOps(root, { [SERVICE]: FIXED_SERVICE }),
+    repairAuthor: async () => null,
+    maxRepairAttempts: 1, applyDeps: d.applyDeps, gitDiffPaths, env: childEnv(),
+    signal: controller.signal,
+  }));
+  assert.equal(report.stopReason, 'cancelled');
+  assert.equal(report.initialApply.ok, false);
+  assert.equal(report.initialApply.ok === false && report.initialApply.refusal, 'cancelled-before-apply');
+  assert.notEqual(report.initialApply.ok === false && report.initialApply.refusal, 'scope-violation');
+  assert.match(report.initialApply.ok === false ? report.initialApply.message : '', /cancelled/i);
 });

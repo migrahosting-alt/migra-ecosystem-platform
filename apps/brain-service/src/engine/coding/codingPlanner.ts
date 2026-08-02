@@ -35,6 +35,7 @@ import { EvidenceLedger, normalizePath, type EvidenceSource } from '../grounding
 import type { ClaimSource } from '../grounding/claimVerifier.js';
 import { buildRepoMap, type RepoMap } from '../planning/repoMap.js';
 import { aboveRelevanceFloor, rankCandidates } from '../planning/candidateRanking.js';
+import { isWorkspaceRelativeContained } from './editScope.js';
 import type { DeclaredValidation } from './validationRun.js';
 
 export type ProposedChangeset = ChangesetRequest;
@@ -144,6 +145,11 @@ export function parsePlannerOutput(raw: unknown): {
     const e = entry as { path?: unknown; rationale?: unknown };
     if (typeof e.path !== 'string' || !e.path.trim()) return null;
     if (typeof e.rationale !== 'string' || !e.rationale.trim()) return null;
+    // Refused, not normalised. Rewriting an absolute or escaping path into a
+    // plausible relative one would weaken the promise that malformed output is
+    // never repaired, and would make the audit trail describe a path the model
+    // did not actually propose.
+    if (!isWorkspaceRelativeContained(e.path)) return null;
     scope.push({ path: normalizePath(e.path), rationale: e.rationale.trim() });
   }
   const edits: Array<{ path: string; content: string }> = [];
@@ -151,12 +157,14 @@ export function parsePlannerOutput(raw: unknown): {
     const e = entry as { path?: unknown; content?: unknown };
     if (typeof e.path !== 'string' || !e.path.trim()) return null;
     if (typeof e.content !== 'string') return null;
+    if (!isWorkspaceRelativeContained(e.path)) return null;
     edits.push({ path: normalizePath(e.path), content: e.content });
   }
   const excluded: Array<{ path: string; reason: string }> = [];
   for (const entry of (r.excluded as unknown[]) ?? []) {
     const e = entry as { path?: unknown; reason?: unknown };
     if (typeof e.path !== 'string' || typeof e.reason !== 'string') return null;
+    if (!isWorkspaceRelativeContained(e.path)) return null;
     excluded.push({ path: normalizePath(e.path), reason: e.reason.trim() });
   }
   return { issueSummary: r.issueSummary.trim(), scope, excluded, edits };
