@@ -249,6 +249,8 @@ model OAuthClient {
   requiresPkce           Boolean  @default(true) @map("requires_pkce")
   tokenAuthMethod        String   @default("none") @map("token_auth_method") @db.VarChar(40)
   isFirstParty           Boolean  @default(true) @map("is_first_party")
+  /// Opt-in. Existing clients stay false so the portal is untouched until migrated.
+  requiresActiveOrganization Boolean @default(false) @map("requires_active_organization")
   isActive               Boolean  @default(true) @map("is_active")
   ownerUserId            String?  @map("owner_user_id") @db.Uuid
   ownerOrganizationId    String?  @map("owner_organization_id") @db.Uuid
@@ -275,6 +277,9 @@ model OAuthAuthorizationCode {
   redirectUri         String    @map("redirect_uri")
   scope               String    @default("openid")
   nonce               String?
+  /// The organization selected and membership-verified at authorization. Immutable once
+  /// the code exists: the token endpoint reads it and never accepts a replacement.
+  organizationId      String?   @map("organization_id") @db.Uuid
   stateHash           String?   @map("state_hash")
   nonceHash           String?   @map("nonce_hash")
   issuedIp            String?   @map("issued_ip") @db.Inet
@@ -298,6 +303,10 @@ model OAuthRefreshToken {
   familyId        String    @map("family_id") @db.Uuid
   parentTokenId   String?   @map("parent_token_id") @db.Uuid
   scope           String    @default("openid")
+  /// Carried forward from the authorization code and preserved across rotation. Refresh
+  /// re-validates the membership against THIS value and never accepts a replacement from
+  /// the request, so a refresh can only ever preserve the organization or be refused.
+  organizationId  String?   @map("organization_id") @db.Uuid
   issuedAt        DateTime  @map("issued_at") @db.Timestamptz
   expiresAt       DateTime  @map("expires_at") @db.Timestamptz
   rotatedAt       DateTime? @map("rotated_at") @db.Timestamptz
