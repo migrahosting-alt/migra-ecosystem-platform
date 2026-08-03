@@ -6,7 +6,7 @@ import type { FastifyRequest, FastifyReply } from "fastify";
 import { validateSession } from "../modules/sessions/index.js";
 import { findUserById } from "../modules/users/index.js";
 import { config } from "../config/env.js";
-import { verifyAccessToken } from "../lib/jwt.js";
+import { verifyIssuedToken } from "../lib/jwt.js";
 import type { User, Session } from "../prisma-client.js";
 
 declare module "fastify" {
@@ -62,7 +62,10 @@ async function authenticateWithBearerToken(request: FastifyRequest): Promise<Use
   }
 
   try {
-    const payload = await verifyAccessToken(token);
+    // The identity provider's OWN endpoints: any token MigraAuth issued is legitimately
+    // in scope here, so this is deliberately not bound to a single resource audience.
+    // Resource servers use `verifyAccessToken`, which requires an explicit audience.
+    const payload = await verifyIssuedToken(token);
     const user = await findUserById(payload.sub);
 
     if (!user || user.status === "DISABLED") {
