@@ -1,8 +1,10 @@
 /**
  * OAuth 2.1 routes — /authorize, /token, /revoke, /userinfo, OIDC discovery.
  */
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyReply } from "fastify";
 import { authorizeQuerySchema, tokenExchangeSchema, revokeSchema } from "../lib/schemas.js";
+import { decideActiveOrganization } from "../modules/organizations/activeOrganization.js";
+import { loadMemberships } from "../modules/organizations/memberships.js";
 import { findClientById, isConfidentialClient, validateRedirectUri, validateScopes, verifyRegisteredClientSecret } from "../modules/clients/index.js";
 import { createAuthCode, exchangeAuthCode, rotateRefreshToken, revokeRefreshTokenFamily } from "../modules/tokens/index.js";
 import { logAuditEvent } from "../modules/audit/index.js";
@@ -52,6 +54,11 @@ export async function oauthRoutes(app: FastifyInstance): Promise<void> {
 
     // If user is already authenticated, issue code immediately (SSO)
     if (request.authUser && request.authUser.status === "ACTIVE") {
+      const orgDecision = await resolveAuthorizationOrganization(client, request.authUser.id, query.org_id);
+      if (!orgDecision.ok) {
+        return organizationDenial(reply, orgDecision.denial, orgDecision.eligibleOrganizationIds);
+      }
+
       const code = await createAuthCode(
         request.authUser.id,
         query.client_id,
@@ -60,7 +67,12 @@ export async function oauthRoutes(app: FastifyInstance): Promise<void> {
         query.code_challenge_method,
         validScopes,
         query.nonce,
-        { issuedIp: getClientIp(request), issuedUserAgent: request.headers["user-agent"] },
+        {
+          issuedIp: getClientIp(request),
+          issuedUserAgent: request.headers["user-agent"],
+          // Bound here, so the token endpoint reads it instead of accepting one.
+          ...(orgDecision.active ? { organizationId: orgDecision.active.orgId } : {}),
+        },
       );
 
       const redirectUrl = new URL(query.redirect_uri);
@@ -82,10 +94,48 @@ export async function oauthRoutes(app: FastifyInstance): Promise<void> {
     if (query.prompt) loginUrl.searchParams.set("prompt", query.prompt);
     if (query.login_hint) loginUrl.searchParams.set("login_hint", query.login_hint);
     if (query.return_to) loginUrl.searchParams.set("return_to", query.return_to);
+    // Carried so the selection survives the login round trip. Still only a request:
+    // it is re-verified against membership at /authorize/complete.
+    if (query.org_id) loginUrl.searchParams.set("org_id", query.org_id);
     loginUrl.searchParams.set("response_type", "code");
 
     return reply.redirect(loginUrl.toString());
   });
+
+
+/**
+ * Resolve the organization this authorization may bind, or the reason it may not.
+ *
+ * Runs BEFORE a code is issued, so a denial never produces a usable credential. The
+ * requested `org_id` reaches this only as a preference: `decideActiveOrganization` checks
+ * it against memberships loaded from the database, and a user who names an organization
+ * they do not actively belong to is refused rather than quietly given a default.
+ */
+async function resolveAuthorizationOrganization(
+  client: { requiresActiveOrganization: boolean },
+  userId: string,
+  requestedOrgId: string | undefined,
+) {
+  return decideActiveOrganization({
+    clientRequiresActiveOrganization: client.requiresActiveOrganization,
+    memberships: await loadMemberships(userId),
+    requestedOrganizationId: requestedOrgId,
+  });
+}
+
+/** OAuth error shape for a refused organization binding. Reasons are structured. */
+function organizationDenial(reply: FastifyReply, denial: string, eligible?: string[]) {
+  const code =
+    denial === "organization_selection_required" ? "organization_selection_required" : "access_denied";
+  return reply.code(403).send({
+    error: {
+      code,
+      message: "This application requires an active organization context.",
+      reason: denial,
+      ...(eligible ? { eligible_organization_ids: eligible } : {}),
+    },
+  });
+}
 
   // ── POST /authorize/complete ──────────────────────────────────────
   // Called by auth-web after successful login to issue the auth code.
@@ -105,6 +155,13 @@ export async function oauthRoutes(app: FastifyInstance): Promise<void> {
     const requestedScopes = body.scope ? body.scope.split(" ") : ["openid"];
     const validScopes = validateScopes(client, requestedScopes);
 
+    // Re-verified here, not carried over from the login round trip. The `org_id` that
+    // arrived through the browser is still only a request.
+    const orgDecision = await resolveAuthorizationOrganization(client, user.id, body.org_id);
+    if (!orgDecision.ok) {
+      return organizationDenial(reply, orgDecision.denial, orgDecision.eligibleOrganizationIds);
+    }
+
     const code = await createAuthCode(
       user.id,
       body.client_id,
@@ -113,7 +170,11 @@ export async function oauthRoutes(app: FastifyInstance): Promise<void> {
       body.code_challenge_method,
       validScopes,
       body.nonce,
-      { issuedIp: getClientIp(request), issuedUserAgent: request.headers["user-agent"] },
+      {
+        issuedIp: getClientIp(request),
+        issuedUserAgent: request.headers["user-agent"],
+        ...(orgDecision.active ? { organizationId: orgDecision.active.orgId } : {}),
+      },
     );
 
     return reply.code(200).send({

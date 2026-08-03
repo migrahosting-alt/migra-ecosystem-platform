@@ -42,6 +42,19 @@ export interface AccessTokenPayload {
   email_verified: boolean;
   scope: string;
   client_id: string;
+  /**
+   * The ONE organization this token acts in, when the client is organization-bound.
+   *
+   * Singular by design. A membership array does not tell a resource server which tenant
+   * is authoritative for the request carrying it, so it would have to guess — and two
+   * services guessing differently is how a tenant boundary stops being one.
+   */
+  org_id?: string;
+  /** Roles inside `org_id` only. Never roles the user holds in another organization. */
+  org_roles?: string[];
+  org_membership_id?: string;
+  /** Session identifier, so a token can be tied back to a revocable session. */
+  sid?: string;
 }
 
 export interface IdTokenPayload {
@@ -52,6 +65,11 @@ export interface IdTokenPayload {
   given_name?: string;
   family_name?: string;
   picture?: string;
+  /** Mirrors the access token. The two must never disagree about the active tenant. */
+  org_id?: string;
+  org_roles?: string[];
+  org_membership_id?: string;
+  sid?: string;
 }
 
 // ── Issue tokens ────────────────────────────────────────────────────

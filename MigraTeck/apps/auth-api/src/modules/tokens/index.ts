@@ -6,6 +6,8 @@ import { db } from "../../lib/db.js";
 import { generateToken, hashToken, verifyCodeChallenge } from "../../lib/crypto.js";
 import { issueAccessToken, issueIdToken } from "../../lib/jwt.js";
 import { config } from "../../config/env.js";
+import { activeOrganizationClaims, revalidateActiveOrganization } from "../organizations/activeOrganization.js";
+import { loadMemberships } from "../organizations/memberships.js";
 import { randomUUID } from "node:crypto";
 import type { User } from "../../prisma-client.js";
 
@@ -19,7 +21,19 @@ export async function createAuthCode(
   codeChallengeMethod: string,
   scopes: string[],
   nonce?: string,
-  opts?: { stateHash?: string; nonceHash?: string; issuedIp?: string; issuedUserAgent?: string },
+  opts?: {
+    stateHash?: string;
+    nonceHash?: string;
+    issuedIp?: string;
+    issuedUserAgent?: string;
+    /**
+     * The organization selected AND membership-verified during authorization.
+     *
+     * Recorded on the code so the token endpoint reads it rather than accepting one from
+     * the token request. Absent for clients that are not organization-bound.
+     */
+    organizationId?: string;
+  },
 ): Promise<string> {
   const code = generateToken(32);
   const codeHash = hashToken(code);
@@ -39,6 +53,7 @@ export async function createAuthCode(
       nonceHash: opts?.nonceHash ?? null,
       issuedIp: opts?.issuedIp ?? null,
       issuedUserAgent: opts?.issuedUserAgent ?? null,
+      organizationId: opts?.organizationId ?? null,
       expiresAt,
     },
   });
@@ -92,6 +107,28 @@ export async function exchangeAuthCode(
   const scopeStr = authCode.scope;
   const scopes = scopeStr.split(" ");
 
+  /**
+   * The organization comes from the CODE, never from this request.
+   *
+   * `exchangeAuthCode` receives nothing about organizations from the caller and there is
+   * deliberately no parameter for it: the binding was made where the user consented to it,
+   * and a token endpoint that accepted a replacement would make that consent decorative.
+   *
+   * It is re-checked rather than trusted. Membership can be suspended between authorize
+   * and exchange, and a code minted a minute ago must not outlive the access it recorded.
+   */
+  const client = await db.oAuthClient.findUnique({ where: { clientId } });
+  const requiresOrg = client?.requiresActiveOrganization ?? false;
+  const orgDecision = revalidateActiveOrganization({
+    boundOrganizationId: authCode.organizationId ?? undefined,
+    memberships: await loadMemberships(user.id),
+    clientRequiresActiveOrganization: requiresOrg,
+  });
+  // Fails closed. The code is already marked used above, so a refused exchange cannot be
+  // retried against the same code either.
+  if (!orgDecision.ok) return null;
+  const orgClaims = orgDecision.active ? activeOrganizationClaims(orgDecision.active) : {};
+
   // Issue tokens
   const access_token = await issueAccessToken({
     sub: user.id,
@@ -99,9 +136,13 @@ export async function exchangeAuthCode(
     email_verified: !!user.emailVerifiedAt,
     scope: scopeStr,
     client_id: clientId,
+    ...orgClaims,
   });
 
-  const refresh_token = await createRefreshToken(user.id, clientId, undefined, undefined, scopeStr);
+  const refresh_token = await createRefreshToken(
+    user.id, clientId, undefined, undefined, scopeStr, undefined, undefined, undefined,
+    orgDecision.active?.orgId ?? null,
+  );
 
   let id_token: string | undefined;
   if (scopes.includes("openid")) {
@@ -114,6 +155,8 @@ export async function exchangeAuthCode(
         given_name: user.givenName ?? undefined,
         family_name: user.familyName ?? undefined,
         picture: user.avatarUrl ?? undefined,
+        // Mirrors the access token. The two must never disagree about the active tenant.
+        ...orgClaims,
       },
       clientId,
       authCode.nonce ?? undefined,
@@ -141,6 +184,7 @@ async function createRefreshToken(
   ipAddress?: string,
   userAgent?: string,
   deviceId?: string,
+  organizationId?: string | null,
 ): Promise<string> {
   const token = generateToken(48);
   const tokenHash = hashToken(token);
@@ -161,6 +205,7 @@ async function createRefreshToken(
       ipAddress: ipAddress ?? null,
       userAgent: userAgent ?? null,
       deviceId: deviceId ?? null,
+      organizationId: organizationId ?? null,
     },
   });
 
@@ -241,12 +286,31 @@ export async function rotateRefreshToken(
 
   const scopeStr = existing.scope;
 
+  /**
+   * Refresh can only PRESERVE the organization or refuse it.
+   *
+   * There is no parameter here that could change it — the bound value is read from the
+   * stored token and re-checked against current membership. That is what makes "switch
+   * organizations by sending a header" structurally impossible rather than merely
+   * disallowed, and it is why a revoked membership stops working at the next refresh
+   * instead of lasting the token's lifetime.
+   */
+  const refreshClient = await db.oAuthClient.findUnique({ where: { clientId } });
+  const orgDecision = revalidateActiveOrganization({
+    boundOrganizationId: existing.organizationId ?? undefined,
+    memberships: await loadMemberships(user.id),
+    clientRequiresActiveOrganization: refreshClient?.requiresActiveOrganization ?? false,
+  });
+  if (!orgDecision.ok) return null;
+  const orgClaims = orgDecision.active ? activeOrganizationClaims(orgDecision.active) : {};
+
   const access_token = await issueAccessToken({
     sub: user.id,
     email: user.email ?? undefined,
     email_verified: !!user.emailVerifiedAt,
     scope: scopeStr,
     client_id: clientId,
+    ...orgClaims,
   });
 
   const refresh_token = await createRefreshToken(
@@ -258,6 +322,9 @@ export async function rotateRefreshToken(
     options?.ipAddress ?? existing.ipAddress ?? undefined,
     options?.userAgent ?? existing.userAgent ?? undefined,
     options?.deviceId ?? existing.deviceId ?? undefined,
+    // The rotated token inherits the SAME organization, so the binding survives every
+    // rotation in the family rather than being lost at the first one.
+    orgDecision.active?.orgId ?? existing.organizationId ?? null,
   );
 
   const id_token = await issueIdToken(
@@ -269,6 +336,7 @@ export async function rotateRefreshToken(
       given_name: user.givenName ?? undefined,
       family_name: user.familyName ?? undefined,
       picture: user.avatarUrl ?? undefined,
+      ...orgClaims,
     },
     clientId,
   );
