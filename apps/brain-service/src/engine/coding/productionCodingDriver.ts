@@ -42,6 +42,7 @@ import {
   changesetFingerprint,
   extractFailureEvidence,
   importedModules,
+  boundRepairAttempt,
   REPAIR_HISTORY_LIMITS,
   type PreviousRepairAttempt,
   type ProposalModel,
@@ -354,7 +355,7 @@ export function createProductionCodingDriver(deps: ProductionCodingDriverDeps): 
        * would try first is precisely the one already disproved.
        */
       const recordAttempt = (entry: PreviousRepairAttempt): void => {
-        repairHistory.push(entry);
+        repairHistory.push(boundRepairAttempt(entry));
         if (repairHistory.length > REPAIR_HISTORY_LIMITS.maxAttempts) {
           repairHistory.splice(0, repairHistory.length - REPAIR_HISTORY_LIMITS.maxAttempts);
         }

@@ -471,6 +471,29 @@ export const REPAIR_HISTORY_LIMITS = {
 } as const;
 
 /**
+ * Bound a history entry's free text BEFORE it is stored.
+ *
+ * The 400-char cap above applies when the history is rendered into a prompt, which
+ * left the durable payload itself unbounded: a verbose model rationale, or a long
+ * refusal message, was persisted whole against a 256 KB domain-payload ceiling.
+ * "Durable and bounded" has to be true at rest, not only on the way out.
+ */
+export function boundRepairAttempt(entry: PreviousRepairAttempt): PreviousRepairAttempt {
+  const clip = (text: string): string =>
+    text.length > REPAIR_HISTORY_LIMITS.maxRationaleChars
+      ? `${text.slice(0, REPAIR_HISTORY_LIMITS.maxRationaleChars)}…`
+      : text;
+  return {
+    ...entry,
+    rationale: clip(entry.rationale),
+    outcomeReason: clip(entry.outcomeReason),
+    citedEvidenceIds: entry.citedEvidenceIds.slice(0, 16),
+    proposedPaths: entry.proposedPaths.slice(0, 16),
+    ...(entry.validationEvidenceIds ? { validationEvidenceIds: entry.validationEvidenceIds.slice(0, 16) } : {}),
+  };
+}
+
+/**
  * Render the history as instruction, not narration.
  *
  * States what was tried, why it failed, what was cited, what was touched, and what
@@ -485,8 +508,11 @@ export function renderRepairHistory(
   const rules = [
     'You MUST NOT:',
     '- resend any changeset above (an identical digest is rejected outright);',
-    '- retry a strategy whose outcome was apply_refused or rolled_back — it did not',
-    '  land, and repeating it cannot make it land;',
+    // Written FROM the enforced set, so the instruction cannot name fewer outcomes
+    // than the check refuses. It previously listed two of the four, so a model could
+    // spend an attempt on a strategy it was never told was forbidden.
+    `- retry a strategy whose outcome was ${[...NON_LANDING_OUTCOMES].join(', ')} — it`,
+    '  did not land, and repeating it cannot make it land;',
     '- introduce a framework, package or import that the supplied evidence does not',
     '  already show this repository using;',
     '- edit any path outside approvedPaths, or supply a validation command.',
@@ -534,22 +560,30 @@ export function renderRepairHistory(
 
 /** Bare (non-relative) module specifiers a changeset introduces. */
 export function importedModules(content: string): string[] {
+  // Comments first. `\bfrom\s+["']x["']` matched any prose containing `from "x"`,
+  // so a line like `// migrated from "express" to fetch` was read as a dependency
+  // and refused the whole proposal. A false positive here rejects correct work.
+  const code = content
+    .replace(/\/\*[\s\S]*?\*\//g, ' ')
+    .replace(/(^|[^:])\/\/[^\n]*/g, '$1 ');
+
   const out = new Set<string>();
-  const patterns = [
-    /\bfrom\s+["']([^"']+)["']/g,
-    /\brequire\(\s*["']([^"']+)["']\s*\)/g,
-    /\bimport\(\s*["']([^"']+)["']\s*\)/g,
-  ];
-  for (const re of patterns) {
-    for (const m of content.matchAll(re)) {
-      const spec = m[1] ?? '';
-      // Relative and absolute specifiers stay inside the repository; only a BARE
-      // specifier can drag in a dependency the repository does not have.
-      if (spec && !spec.startsWith('.') && !spec.startsWith('/') && !spec.startsWith('node:')) {
-        out.add(spec.split('/').slice(0, spec.startsWith('@') ? 2 : 1).join('/'));
-      }
-    }
-  }
+  const add = (spec: string | undefined): void => {
+    if (!spec) return;
+    // Relative, absolute and `node:` specifiers stay inside what the repository and
+    // platform already provide; only a BARE specifier can drag in a dependency.
+    if (spec.startsWith('.') || spec.startsWith('/') || spec.startsWith('node:')) return;
+    out.add(spec.split('/').slice(0, spec.startsWith('@') ? 2 : 1).join('/'));
+  };
+
+  // `import … from "x"` / `export … from "x"` — anchored to a statement start so the
+  // `from` belongs to a module declaration rather than to a sentence.
+  for (const m of code.matchAll(/(?:^|[;{}])\s*(?:import|export)\b[^;'"]*?\bfrom\s*["']([^"']+)["']/gm)) add(m[1]);
+  // Bare side-effect import: `import "x"`.
+  for (const m of code.matchAll(/(?:^|[;{}])\s*import\s*["']([^"']+)["']/gm)) add(m[1]);
+  // `require("x")` and dynamic `import("x")`.
+  for (const m of code.matchAll(/\brequire\(\s*["']([^"']+)["']\s*\)/g)) add(m[1]);
+  for (const m of code.matchAll(/\bimport\(\s*["']([^"']+)["']\s*\)/g)) add(m[1]);
   return [...out];
 }
 

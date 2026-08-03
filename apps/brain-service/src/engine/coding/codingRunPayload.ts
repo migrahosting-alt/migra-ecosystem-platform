@@ -20,7 +20,7 @@
 
 import type { ClaimSource } from '../grounding/claimVerifier.js';
 import type { ValidationRecord } from './validationRun.js';
-import { REPAIR_HISTORY_LIMITS, type ObservedFailureEvidence, type PreviousRepairAttempt } from './modelProposals.js';
+import { boundRepairAttempt, REPAIR_HISTORY_LIMITS, type ObservedFailureEvidence, type PreviousRepairAttempt } from './modelProposals.js';
 import type { CodingRunReport } from './codingRun.js';
 
 /** Domain identity written to `agent_runs.domain_kind`.
@@ -219,7 +219,10 @@ function isRepairAttempt(raw: unknown): raw is PreviousRepairAttempt {
  * only true if the parser makes it true.
  */
 function projectRepairAttempt(raw: PreviousRepairAttempt): PreviousRepairAttempt {
-  return {
+  // Bounded on the way IN as well as on the way out: a payload written by an older
+  // build, or by anything that skipped the writer's own bound, must not be able to
+  // reintroduce unbounded text simply by being read back.
+  return boundRepairAttempt({
     attempt: raw.attempt,
     citedEvidenceIds: [...raw.citedEvidenceIds],
     rationale: raw.rationale,
@@ -228,7 +231,7 @@ function projectRepairAttempt(raw: PreviousRepairAttempt): PreviousRepairAttempt
     outcome: raw.outcome,
     outcomeReason: raw.outcomeReason,
     ...(raw.validationEvidenceIds ? { validationEvidenceIds: [...raw.validationEvidenceIds] } : {}),
-  };
+  });
 }
 
 export function parseCodingPayload(raw: unknown): CodingPayloadParse {

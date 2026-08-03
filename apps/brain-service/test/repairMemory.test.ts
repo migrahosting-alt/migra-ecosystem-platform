@@ -26,6 +26,7 @@ import {
   changesetFingerprint,
   extractFailureEvidence,
   importedModules,
+  boundRepairAttempt,
   renderRepairHistory,
   REPAIR_HISTORY_LIMITS,
   type ObservedFailureEvidence,
@@ -470,4 +471,50 @@ test('17 — a mismatched quotation is reported apart from evidence-ID authority
   assert.ok(plain.ok);
   assert.equal(plain.evidenceIdVerified, true);
   assert.equal(plain.quotationMatched, undefined, 'no quotation offered, so no verdict is invented');
+});
+
+// ── 18-20. Review findings on this slice ─────────────────────────────────────
+
+test('18 — history free text is bounded AT REST, not only when rendered', async () => {
+  // The 400-char cap applied when history was rendered into a prompt, leaving the
+  // durable payload itself unbounded: a verbose rationale or a long refusal message
+  // was persisted whole against a 256 KB domain-payload ceiling.
+  const huge = 'z'.repeat(50_000);
+  const bounded = boundRepairAttempt(attempt({ rationale: huge, outcomeReason: huge }));
+  assert.ok(bounded.rationale.length <= REPAIR_HISTORY_LIMITS.maxRationaleChars + 1, `rationale was ${bounded.rationale.length}`);
+  assert.ok(bounded.outcomeReason.length <= REPAIR_HISTORY_LIMITS.maxRationaleChars + 1, `outcomeReason was ${bounded.outcomeReason.length}`);
+
+  // And reading a payload written without that bound must not reintroduce it.
+  const parsed = parseCodingPayload({
+    issueText: ISSUE, phase: 'repairing', attempts: { initialProposal: 1, repair: 1 }, childRefs: [],
+    repairHistory: [attempt({ rationale: huge, outcomeReason: huge })],
+  });
+  assert.ok(parsed.ok, parsed.ok ? '' : parsed.fault);
+  const kept = (parsed.payload.repairHistory ?? [])[0]!;
+  assert.ok(kept.rationale.length <= REPAIR_HISTORY_LIMITS.maxRationaleChars + 1);
+  assert.ok(JSON.stringify(parsed.payload).length < 10_000, 'a single entry must not dominate the payload');
+});
+
+test('19 — prose mentioning a package is not a dependency', () => {
+  // `\bfrom\s+["']x["']` matched any sentence containing `from "x"`, so a comment
+  // like `// migrated from "express" to fetch` was read as introducing express and
+  // refused the whole proposal. A false positive here rejects correct work.
+  assert.deepEqual(importedModules('// migrated from "express" to fetch\nexport const a = 1;\n'), []);
+  assert.deepEqual(importedModules('/* see the notes from "lodash" */\n'), []);
+  // Real syntax still detected, in every form the repository could use.
+  assert.deepEqual(importedModules('import x from "express";'), ['express']);
+  assert.deepEqual(importedModules('import "dotenv/config";'), ['dotenv']);
+  assert.deepEqual(importedModules('const r = require("express");'), ['express']);
+  assert.deepEqual(importedModules('export { a } from "express";'), ['express']);
+  assert.deepEqual(importedModules('import fs from "node:fs";\nimport { a } from "./x.js";'), []);
+});
+
+test('20 — the MUST NOT list names every outcome the check actually refuses', () => {
+  // The instruction listed two of the four non-landing outcomes, so a model could
+  // spend an attempt on a strategy it was never told was forbidden. Same
+  // contract-must-match-validator rule this codebase already applies to output shapes.
+  const text = renderRepairHistory([attempt({ outcome: 'apply_refused' })], 3);
+  for (const outcome of ['proposal_rejected', 'apply_refused', 'apply_failed', 'rolled_back']) {
+    assert.ok(text.includes(outcome), `the guidance never names "${outcome}", which the check refuses`);
+  }
 });
