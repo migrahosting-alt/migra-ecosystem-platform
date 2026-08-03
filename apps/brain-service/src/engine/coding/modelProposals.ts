@@ -128,6 +128,10 @@ export type ProposalRejection =
   | 'size-ceiling'
   /** The identical changeset already failed; repeating it cannot help. */
   | 'duplicate-repair'
+  /** A strategy already shown not to land on disk, retried unchanged in substance. */
+  | 'repeated-strategy'
+  /** The edit introduces a package or framework the repository's evidence never shows. */
+  | 'unsupported-dependency'
   /** The model asserted the tests pass. Only a real exit code decides that. */
   | 'claims-passed'
   /** No attempts remain. */
@@ -138,6 +142,25 @@ export interface AcceptedProposal {
   rationale: string;
   changeset: ChangesetRequest;
   citedEvidenceIds: string[];
+  /**
+   * Things worth recording that are NOT grounds for refusal — currently a voluntary
+   * quotation that did not match the block it named. Surfaced into the stage's
+   * durable evidence so a paraphrasing model stays visible rather than silent.
+   *
+   * Never contains the quoted TEXT. A quotation that failed its check is exactly
+   * the string that must not be repeated anywhere as though it came from evidence.
+   */
+  concerns?: string[];
+  /**
+   * Did every cited id verify — exists, current, this run's, hash intact?
+   *
+   * Reported separately from `quotationMatched` on purpose. The two answer
+   * different questions, and collapsing them would let "the model quoted sloppily"
+   * read as "the authority behind this repair is in doubt", or worse, the reverse.
+   */
+  evidenceIdVerified?: boolean;
+  /** Absent when no quotation was offered; false when one did not match its block. */
+  quotationMatched?: boolean;
 }
 
 export interface RejectedProposal {
@@ -385,12 +408,183 @@ export interface RepairChangesetInput {
   evidence: ObservedFailureEvidence[];
   /** The attempt these blocks belong to. */
   commandRunId: string;
-  previousAttempts: Array<{ rationale: string; changesetFingerprint: string }>;
+  /**
+   * What earlier repair attempts tried and what became of them. Bounded and
+   * summarised — never raw model output. Empty only on the first attempt.
+   */
+  previousAttempts: PreviousRepairAttempt[];
+  /**
+   * Bare module specifiers this repository demonstrably already uses — its declared
+   * dependencies plus whatever the approved files import today.
+   *
+   * Supplied by the driver so this module performs no IO. When omitted the check is
+   * skipped rather than guessed at: refusing every bare import on an empty set would
+   * reject correct repairs in a repository nobody enumerated.
+   */
+  knownModules?: string[];
   remainingAttempts: number;
 }
 
 export interface RepairChangesetAuthor {
   propose(input: RepairChangesetInput): Promise<ModelProposalResult>;
+}
+
+/**
+ * What a previous repair attempt tried, and what actually became of it.
+ *
+ * The driver used to pass `previousAttempts: []` unconditionally, so every repair
+ * was authored as though it were the first. A real `qwen3-coder:30b` run spent its
+ * whole budget that way: told only "the tests still fail", it escalated from a
+ * field-name change to hallucinating an Express application into an ESM codebase
+ * that never used Express. It was refused, correctly — but it was never given the
+ * one fact that would have stopped it, namely that its own last attempt had
+ * already been rejected and why.
+ *
+ * Deliberately a SUMMARY, not a transcript. Raw model responses are never carried
+ * here: they are unbounded, they are the least trustworthy thing in the run, and
+ * replaying them invites the model to continue its own worst reasoning.
+ */
+export interface PreviousRepairAttempt {
+  attempt: number;
+  citedEvidenceIds: string[];
+  rationale: string;
+  proposedPaths: string[];
+  proposalDigest: string;
+  outcome: 'proposal_rejected' | 'apply_refused' | 'apply_failed' | 'validation_failed' | 'rolled_back';
+  outcomeReason: string;
+  validationEvidenceIds?: string[];
+}
+
+/** Outcomes proving the strategy never reached a validated state on disk. */
+const NON_LANDING_OUTCOMES: ReadonlySet<PreviousRepairAttempt['outcome']> = new Set([
+  'proposal_rejected',
+  'apply_refused',
+  'apply_failed',
+  'rolled_back',
+]);
+
+/** How much history the model may see. Bounded by COUNT and by SIZE. */
+export const REPAIR_HISTORY_LIMITS = {
+  maxAttempts: 4,
+  maxRationaleChars: 400,
+  maxTotalChars: 4000,
+} as const;
+
+/**
+ * Bound a history entry's free text BEFORE it is stored.
+ *
+ * The 400-char cap above applies when the history is rendered into a prompt, which
+ * left the durable payload itself unbounded: a verbose model rationale, or a long
+ * refusal message, was persisted whole against a 256 KB domain-payload ceiling.
+ * "Durable and bounded" has to be true at rest, not only on the way out.
+ */
+export function boundRepairAttempt(entry: PreviousRepairAttempt): PreviousRepairAttempt {
+  const clip = (text: string): string =>
+    text.length > REPAIR_HISTORY_LIMITS.maxRationaleChars
+      ? `${text.slice(0, REPAIR_HISTORY_LIMITS.maxRationaleChars)}…`
+      : text;
+  return {
+    ...entry,
+    rationale: clip(entry.rationale),
+    outcomeReason: clip(entry.outcomeReason),
+    citedEvidenceIds: entry.citedEvidenceIds.slice(0, 16),
+    proposedPaths: entry.proposedPaths.slice(0, 16),
+    ...(entry.validationEvidenceIds ? { validationEvidenceIds: entry.validationEvidenceIds.slice(0, 16) } : {}),
+  };
+}
+
+/**
+ * Render the history as instruction, not narration.
+ *
+ * States what was tried, why it failed, what was cited, what was touched, and what
+ * must not be repeated — then stops. The most RECENT attempts are kept when the
+ * budget binds, because the strategy the model is most likely to repeat is the one
+ * it just tried.
+ */
+export function renderRepairHistory(
+  attempts: readonly PreviousRepairAttempt[],
+  remainingAttempts: number,
+): string {
+  const rules = [
+    'You MUST NOT:',
+    '- resend any changeset above (an identical digest is rejected outright);',
+    // Written FROM the enforced set, so the instruction cannot name fewer outcomes
+    // than the check refuses. It previously listed two of the four, so a model could
+    // spend an attempt on a strategy it was never told was forbidden.
+    `- retry a strategy whose outcome was ${[...NON_LANDING_OUTCOMES].join(', ')} — it`,
+    '  did not land, and repeating it cannot make it land;',
+    '- introduce a framework, package or import that the supplied evidence does not',
+    '  already show this repository using;',
+    '- edit any path outside approvedPaths, or supply a validation command.',
+    '',
+    `Repair attempts remaining after this one: ${Math.max(0, remainingAttempts - 1)}.`,
+    'If the evidence does not support a different, smaller change, say so in',
+    '"rationale" and edit only what the evidence supports.',
+  ].join('\n');
+
+  if (!attempts.length) return `No previous repair attempt. This is the first.\n\n${rules}`;
+
+  // NEWEST FIRST. The budget is spent from the top, so if it binds it drops the
+  // oldest attempt — never the one the model is most likely to repeat. Rendering
+  // oldest-first and truncating the tail did exactly the wrong thing: it cut the
+  // most recent attempt AND the prohibitions below it.
+  const kept = attempts.slice(-REPAIR_HISTORY_LIMITS.maxAttempts).reverse();
+  const cap = (text: string): string =>
+    text.length > REPAIR_HISTORY_LIMITS.maxRationaleChars
+      ? `${text.slice(0, REPAIR_HISTORY_LIMITS.maxRationaleChars)}…`
+      : text;
+
+  const blocks: string[] = [];
+  let used = 0;
+  for (const a of kept) {
+    const block = [
+      `Attempt ${a.attempt} — OUTCOME: ${a.outcome}`,
+      `  why it failed: ${cap(a.outcomeReason)}`,
+      `  it claimed: ${cap(a.rationale)}`,
+      `  it edited: ${a.proposedPaths.join(', ') || '(nothing)'}`,
+      `  it cited: ${a.citedEvidenceIds.join(', ') || '(nothing)'}`,
+      `  digest: ${a.proposalDigest}`,
+      '',
+    ].join('\n');
+    if (used + block.length > REPAIR_HISTORY_LIMITS.maxTotalChars) {
+      blocks.push('…(older attempts omitted)\n');
+      break;
+    }
+    blocks.push(block);
+    used += block.length;
+  }
+  // The rules are appended AFTER the budget is spent, so they can never be the
+  // thing that gets cut. A history without its prohibitions is worse than none.
+  return `${blocks.join('\n')}\n${rules}`;
+}
+
+/** Bare (non-relative) module specifiers a changeset introduces. */
+export function importedModules(content: string): string[] {
+  // Comments first. `\bfrom\s+["']x["']` matched any prose containing `from "x"`,
+  // so a line like `// migrated from "express" to fetch` was read as a dependency
+  // and refused the whole proposal. A false positive here rejects correct work.
+  const code = content
+    .replace(/\/\*[\s\S]*?\*\//g, ' ')
+    .replace(/(^|[^:])\/\/[^\n]*/g, '$1 ');
+
+  const out = new Set<string>();
+  const add = (spec: string | undefined): void => {
+    if (!spec) return;
+    // Relative, absolute and `node:` specifiers stay inside what the repository and
+    // platform already provide; only a BARE specifier can drag in a dependency.
+    if (spec.startsWith('.') || spec.startsWith('/') || spec.startsWith('node:')) return;
+    out.add(spec.split('/').slice(0, spec.startsWith('@') ? 2 : 1).join('/'));
+  };
+
+  // `import … from "x"` / `export … from "x"` — anchored to a statement start so the
+  // `from` belongs to a module declaration rather than to a sentence.
+  for (const m of code.matchAll(/(?:^|[;{}])\s*(?:import|export)\b[^;'"]*?\bfrom\s*["']([^"']+)["']/gm)) add(m[1]);
+  // Bare side-effect import: `import "x"`.
+  for (const m of code.matchAll(/(?:^|[;{}])\s*import\s*["']([^"']+)["']/gm)) add(m[1]);
+  // `require("x")` and dynamic `import("x")`.
+  for (const m of code.matchAll(/\brequire\(\s*["']([^"']+)["']\s*\)/g)) add(m[1]);
+  for (const m of code.matchAll(/\bimport\(\s*["']([^"']+)["']\s*\)/g)) add(m[1]);
+  return [...out];
 }
 
 /** Stable identity of a changeset, for detecting a repeated failed repair. */
@@ -457,7 +651,7 @@ export function createRepairChangesetAuthor(deps: {
           currentDiff: input.currentDiff,
           exitCode: input.latestValidation.exitCode,
           failureEvidence: renderFailureEvidence(input.evidence),
-          previousAttempts: input.previousAttempts.map((a) => a.rationale),
+          repairHistory: renderRepairHistory(input.previousAttempts, input.remainingAttempts),
           remainingAttempts: input.remainingAttempts,
         });
       } catch (err) {
@@ -488,13 +682,28 @@ export function createRepairChangesetAuthor(deps: {
           return reject('evidence-hash-mismatch', `${id} no longer matches the output it was taken from.`);
         }
       }
-      // A voluntary quotation is checked strictly — wrong quotations fail rather
-      // than being repaired.
+      /**
+       * A voluntary quotation is CHECKED, but it cannot veto a repair.
+       *
+       * It used to reject outright. That was safe only while no model ever sent one:
+       * once `quotedEvidence` was named in the contract, `qwen3-coder:30b` supplied it
+       * on every attempt and re-indented the TAP output it was quoting, so the strict
+       * check failed 16 times across an 8-run benchmark and took completion from 3/8
+       * to 0/8 — discarding repairs whose actual authority was fully verified.
+       *
+       * This module's own design note says why that is the wrong trade: requiring a
+       * model to reproduce failure text verbatim "is brittle in exactly the wrong
+       * direction", which is precisely why authority moved to evidence IDs. A
+       * quotation grants no authority, so a bad one cannot be allowed to destroy a
+       * proposal whose IDs are current, unaltered and this run's. Citing an
+       * id that does not exist is still fatal — that is a citation, not a quotation.
+       */
+      const concerns: string[] = [];
       for (const q of parsed.quoted) {
         const block = byId.get(q.evidenceId);
         if (!block) return reject('unobserved-citation', `Quotation cites ${q.evidenceId}, which is not current evidence.`);
         if (!block.text.includes(q.text.trim())) {
-          return reject('quotation-mismatch', `The quotation attributed to ${q.evidenceId} does not appear in it.`);
+          concerns.push(`the quotation attributed to ${q.evidenceId} does not appear in it verbatim`);
         }
       }
 
@@ -508,10 +717,54 @@ export function createRepairChangesetAuthor(deps: {
 
       const changeset = toChangeset(deps.rootPath, parsed.edits);
       const fingerprint = changesetFingerprint(changeset);
-      if (input.previousAttempts.some((a) => a.changesetFingerprint === fingerprint)) {
-        return reject('duplicate-repair', 'This exact changeset has already been applied and did not fix the failure.');
+      if (input.previousAttempts.some((a) => a.proposalDigest === fingerprint)) {
+        return reject('duplicate-repair', 'This exact changeset has already been proposed and did not fix the failure.');
       }
-      return { ok: true, rationale: parsed.rationale, changeset, citedEvidenceIds: parsed.citedIds };
+
+      // A strategy that never reached disk cannot be made to work by resending it in
+      // slightly different words. Keyed on WHAT it touches and WHAT it claims as
+      // authority — not on byte equality, which the digest check above already owns.
+      const pathKey = [...new Set(parsed.edits.map((e) => normalizePath(e.path)))].sort().join('|');
+      const citeKey = [...new Set(parsed.citedIds)].sort().join('|');
+      const repeated = input.previousAttempts.find(
+        (a) =>
+          NON_LANDING_OUTCOMES.has(a.outcome) &&
+          [...new Set(a.proposedPaths.map(normalizePath))].sort().join('|') === pathKey &&
+          [...new Set(a.citedEvidenceIds)].sort().join('|') === citeKey,
+      );
+      // A hallucinated framework is the observed real-model failure mode: given only
+      // "the tests still fail", the 30B rewrote an ESM codebase into an Express app.
+      // Bare specifiers only — relative and `node:` imports stay inside what the
+      // repository and platform already provide.
+      if (input.knownModules) {
+        const known = new Set(input.knownModules);
+        for (const edit of parsed.edits) {
+          for (const mod of importedModules(edit.content)) {
+            if (!known.has(mod)) {
+              return reject(
+                'unsupported-dependency',
+                `The repair imports "${mod}" in ${edit.path}, which this repository's evidence never shows it using. A repair may not introduce a package or framework.`,
+              );
+            }
+          }
+        }
+      }
+
+      if (repeated) {
+        return reject(
+          'repeated-strategy',
+          `Attempt ${repeated.attempt} already tried these files under the same evidence and ended as ${repeated.outcome} (${repeated.outcomeReason}). Repeating it cannot make it land.`,
+        );
+      }
+      return {
+        ok: true, rationale: parsed.rationale, changeset, citedEvidenceIds: parsed.citedIds,
+        // Reaching here means every cited id passed existence, currency, ownership
+        // and hash checks — those still reject outright, so `true` is a fact, not a
+        // default. The quotation verdict is a separate, weaker statement.
+        evidenceIdVerified: true,
+        ...(parsed.quoted.length ? { quotationMatched: concerns.length === 0 } : {}),
+        ...(concerns.length ? { concerns } : {}),
+      };
     },
   };
 }
