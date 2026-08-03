@@ -13,6 +13,15 @@ export const authorizeQuerySchema = z.object({
   prompt: z.enum(["none", "login", "consent"]).optional(),
   login_hint: z.string().trim().max(255).optional(),
   return_to: urlSchema.optional(),
+  /**
+   * Which organization the user wants to act in.
+   *
+   * A REQUEST, never authority. It can only select among memberships the authenticated
+   * user provably holds; anything else is denied rather than corrected to a default.
+   * Accepted here only so a user in several organizations can say which one — it is
+   * verified against `OrganizationMember` before a code is issued.
+   */
+  org_id: z.string().uuid().optional(),
 });
 
 export const tokenExchangeSchema = z.object({
