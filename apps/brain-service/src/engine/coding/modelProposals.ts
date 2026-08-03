@@ -132,6 +132,8 @@ export type ProposalRejection =
   | 'repeated-strategy'
   /** The edit introduces a package or framework the repository's evidence never shows. */
   | 'unsupported-dependency'
+  /** The edit removes an exported symbol the file currently provides. */
+  | 'api-shape-change'
   /** The model asserted the tests pass. Only a real exit code decides that. */
   | 'claims-passed'
   /** No attempts remain. */
@@ -238,6 +240,9 @@ export const PROPOSAL_OUTPUT_CONTRACT = [
   '- Every "path" must be workspace-relative (no leading "/", no drive letter, no "..")',
   '  and must be one of the supplied approvedPaths. Any other path is refused.',
   '- "content" is the entire file after the change, never a diff or a fragment.',
+  '- Do NOT rename or remove anything the file currently exports. Callers you were',
+  '  not shown depend on those names; renaming one is an API change nobody asked for.',
+  '- Do NOT import a package the supplied files do not already import.',
 ].join('\n');
 
 /**
@@ -313,6 +318,10 @@ function checkShape(
   scope: ApprovedEditScope,
   ledger: EvidenceLedger,
   limits: ProposalLimits,
+  /** Current contents of the approved files, when the caller has them. */
+  current?: Map<string, string>,
+  /** Bare modules this repository already uses, when the caller has enumerated them. */
+  knownModules?: readonly string[],
 ): RejectedProposal | null {
   const r = raw as RawProposal;
   // A model may not choose its own check, nor declare its own success.
@@ -338,6 +347,53 @@ function checkShape(
     if (!approved.has(edit.path)) return reject('scope-expansion', `${edit.path} is outside the approved scope; a proposal may not widen it.`);
     if (ledger.spansFor(edit.path).length === 0) return reject('unsupported-path', `${edit.path} has no retrieved evidence behind it.`);
   }
+
+  /**
+   * A file's exports are its contract with everything that imports it.
+   *
+   * Observed live: asked to exclude cancelled lines, the model rewrote
+   * `computeOrderTotal(lines)` as `calculateOrderTotals(order)` — a rename nobody
+   * asked for, invisible to the approved scope, and fatal to a caller the run never
+   * retrieved. Removing an export is an API change, and an API change the issue did
+   * not ask for is a guess.
+   *
+   * Checked in the direction that cannot reject correct work: only DISAPPEARANCE is
+   * refused. Adding an export is how a legitimate change often starts, and requiring
+   * new names to be grounded in retrieved evidence would reject the correct answer
+   * whenever the required name lives somewhere the run never opened — which is the
+   * normal case for a name that only the failing test knows.
+   */
+  if (current) {
+    for (const edit of parsed.edits) {
+      const before = current.get(edit.path);
+      if (before === undefined) continue;
+      const had = exportedSymbols(before);
+      const now = new Set(exportedSymbols(edit.content));
+      const dropped = had.filter((name) => !now.has(name));
+      if (dropped.length) {
+        return reject(
+          'api-shape-change',
+          `${edit.path} currently exports ${dropped.join(', ')}, and the proposal removes ${dropped.length > 1 ? 'them' : 'it'}. Renaming or dropping an exported symbol changes the contract every caller depends on, including callers this run never retrieved.`,
+        );
+      }
+    }
+  }
+
+  // A proposal may not reach for a package the repository does not already use.
+  // Shared by BOTH adapters from here, so the rule cannot drift between them.
+  if (knownModules) {
+    const known = new Set(knownModules);
+    for (const edit of parsed.edits) {
+      for (const mod of importedModules(edit.content)) {
+        if (!known.has(mod)) {
+          return reject(
+            'unsupported-dependency',
+            `The proposal imports "${mod}" in ${edit.path}, which this repository's evidence never shows it using. A proposal may not introduce a package or framework.`,
+          );
+        }
+      }
+    }
+  }
   return null;
 }
 
@@ -356,6 +412,12 @@ export interface InitialChangesetInput {
   /** Current contents of the approved files, and nothing else. */
   currentFiles: Array<{ path: string; content: string }>;
   validationCommand: DeclaredValidation;
+  /**
+   * Bare modules this repository demonstrably already uses. Supplied by the driver
+   * so this module performs no IO; when omitted the dependency check is skipped
+   * rather than guessed at.
+   */
+  knownModules?: string[];
 }
 
 export type ProposalModel = (input: unknown) => Promise<unknown>;
@@ -390,7 +452,11 @@ export function createInitialChangesetAuthor(deps: {
       }
       const parsed = parseProposal(raw);
       if (!parsed) return reject('malformed-output', 'The proposal did not match the required structured shape.');
-      const shapeError = checkShape(parsed, raw, input.scope, deps.ledger, limits);
+      const shapeError = checkShape(
+        parsed, raw, input.scope, deps.ledger, limits,
+        new Map(input.currentFiles.map((f) => [normalizePath(f.path), f.content])),
+        input.knownModules,
+      );
       if (shapeError) return shapeError;
       return { ok: true, rationale: parsed.rationale, changeset: toChangeset(deps.rootPath, parsed.edits), citedEvidenceIds: [] };
     },
@@ -558,6 +624,27 @@ export function renderRepairHistory(
   return `${blocks.join('\n')}\n${rules}`;
 }
 
+/**
+ * Names a file exports today.
+ *
+ * Deliberately syntactic and conservative: it reads declarations rather than
+ * parsing, so it under-reports rather than inventing exports that are not there.
+ * An under-report costs a missed check; an over-report would reject correct work.
+ */
+export function exportedSymbols(content: string): string[] {
+  const out = new Set<string>();
+  for (const m of content.matchAll(/\bexport\s+(?:async\s+)?(?:function|class|const|let|var)\s+([A-Za-z_$][\w$]*)/g)) {
+    out.add(m[1]!);
+  }
+  for (const m of content.matchAll(/\bexport\s*\{([^}]*)\}/g)) {
+    for (const part of (m[1] ?? '').split(',')) {
+      const name = part.split(/\bas\b/)[part.includes(' as ') ? 1 : 0]?.trim();
+      if (name && /^[A-Za-z_$][\w$]*$/.test(name)) out.add(name);
+    }
+  }
+  return [...out];
+}
+
 /** Bare (non-relative) module specifiers a changeset introduces. */
 export function importedModules(content: string): string[] {
   // Comments first. `\bfrom\s+["']x["']` matched any prose containing `from "x"`,
@@ -660,7 +747,7 @@ export function createRepairChangesetAuthor(deps: {
 
       const parsed = parseProposal(raw);
       if (!parsed) return reject('malformed-output', 'The repair did not match the required structured shape.');
-      const shapeError = checkShape(parsed, raw, input.scope, deps.ledger, limits);
+      const shapeError = checkShape(parsed, raw, input.scope, deps.ledger, limits, undefined, input.knownModules);
       if (shapeError) return shapeError;
 
       // ── Citation authority ──────────────────────────────────────────────────
@@ -732,24 +819,6 @@ export function createRepairChangesetAuthor(deps: {
           [...new Set(a.proposedPaths.map(normalizePath))].sort().join('|') === pathKey &&
           [...new Set(a.citedEvidenceIds)].sort().join('|') === citeKey,
       );
-      // A hallucinated framework is the observed real-model failure mode: given only
-      // "the tests still fail", the 30B rewrote an ESM codebase into an Express app.
-      // Bare specifiers only — relative and `node:` imports stay inside what the
-      // repository and platform already provide.
-      if (input.knownModules) {
-        const known = new Set(input.knownModules);
-        for (const edit of parsed.edits) {
-          for (const mod of importedModules(edit.content)) {
-            if (!known.has(mod)) {
-              return reject(
-                'unsupported-dependency',
-                `The repair imports "${mod}" in ${edit.path}, which this repository's evidence never shows it using. A repair may not introduce a package or framework.`,
-              );
-            }
-          }
-        }
-      }
-
       if (repeated) {
         return reject(
           'repeated-strategy',

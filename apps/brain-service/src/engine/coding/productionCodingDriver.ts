@@ -304,6 +304,7 @@ export function createProductionCodingDriver(deps: ProductionCodingDriverDeps): 
       const authored = await ctx.run.runStage({ kind: 'initial_model_proposal', phase: 'executing_initial_changeset' }, async () => {
         const result = await author.propose({
           issue: payload.issueText,
+          knownModules,
           scope: approved,
           evidence: evidenceLedger.spans.map((s) => ({ path: s.path, startLine: s.startLine, endLine: s.endLine, text: s.text })),
           currentFiles,
