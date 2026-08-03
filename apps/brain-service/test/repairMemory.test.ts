@@ -22,6 +22,7 @@ import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import Fastify, { type FastifyInstance } from 'fastify';
 import {
+  createInitialChangesetAuthor,
   createRepairChangesetAuthor,
   changesetFingerprint,
   extractFailureEvidence,
@@ -517,4 +518,106 @@ test('20 — the MUST NOT list names every outcome the check actually refuses', 
   for (const outcome of ['proposal_rejected', 'apply_refused', 'apply_failed', 'rolled_back']) {
     assert.ok(text.includes(outcome), `the guidance never names "${outcome}", which the check refuses`);
   }
+});
+// ── 21-25. Initial-proposal grounding ─────────────────────────────────────────
+
+test('21 — an initial proposal may not rename an exported symbol', async () => {
+  // The exact live failure: asked to exclude cancelled lines, the model rewrote
+  // `computeOrderTotal(lines)` as `calculateOrderTotals(order)`. The rename is
+  // invisible to the approved scope and fatal to a caller the run never retrieved,
+  // and it must die BEFORE mutation rather than consume the repair budget.
+  const root = fixture();
+  const before = readFileSync(path.join(root, SERVICE), 'utf8');
+  const renamed = 'export function calculateOrderTotals(order) {\n  return { subtotalCents: 0, totalCents: 0, excludedLineCount: 0 };\n}\n';
+  const a = createInitialChangesetAuthor({
+    model: async () => ({ rationale: 'exclude cancelled lines', edits: [{ path: SERVICE, content: renamed }] }),
+    rootPath: root,
+    ledger: await ledgerFor(root),
+  });
+  const r = await a.propose({
+    issue: ISSUE, scope: scopeFor(), evidence: [],
+    currentFiles: [{ path: SERVICE, content: before }],
+    validationCommand: VALIDATION,
+  });
+  assert.ok(!r.ok && r.kind === 'rejected', JSON.stringify(r));
+  assert.equal((r as { rejection: string }).rejection, 'api-shape-change');
+  assert.match((r as { message: string }).message, /computeOrderTotal/);
+});
+
+test('22 — an initial proposal that keeps the exported surface is accepted', async () => {
+  // The guard must not stand in the way of the correct answer.
+  const root = fixture();
+  const before = readFileSync(path.join(root, SERVICE), 'utf8');
+  const fixed = 'export function computeOrderTotal(lines) {\n  const kept = lines.filter((l) => l.status !== "cancelled");\n  const subtotalCents = kept.reduce((s, l) => s + l.amountCents, 0);\n  return { subtotalCents, totalCents: subtotalCents, excludedLineCount: lines.length - kept.length };\n}\n';
+  const a = createInitialChangesetAuthor({
+    model: async () => ({ rationale: 'exclude cancelled lines', edits: [{ path: SERVICE, content: fixed }] }),
+    rootPath: root,
+    ledger: await ledgerFor(root),
+  });
+  const r = await a.propose({
+    issue: ISSUE, scope: scopeFor(), evidence: [],
+    currentFiles: [{ path: SERVICE, content: before }],
+    validationCommand: VALIDATION,
+  });
+  assert.ok(r.ok, r.ok ? '' : `${(r as { rejection?: string }).rejection}: ${(r as { message?: string }).message}`);
+});
+
+test('23 — a new export is allowed; only disappearance is refused', async () => {
+  // Checked in the one direction that cannot reject correct work. Requiring NEW
+  // names to appear in retrieved evidence would reject the right answer whenever
+  // the required name lives somewhere the run never opened — see test 25.
+  const root = fixture();
+  const before = readFileSync(path.join(root, SERVICE), 'utf8');
+  const added = `${before}\nexport function describeTotals(t) {\n  return String(t.subtotalCents);\n}\n`;
+  const a = createInitialChangesetAuthor({
+    model: async () => ({ rationale: 'add a helper', edits: [{ path: SERVICE, content: added }] }),
+    rootPath: root,
+    ledger: await ledgerFor(root),
+  });
+  const r = await a.propose({
+    issue: ISSUE, scope: scopeFor(), evidence: [],
+    currentFiles: [{ path: SERVICE, content: before }],
+    validationCommand: VALIDATION,
+  });
+  assert.ok(r.ok, r.ok ? '' : `${(r as { rejection?: string }).rejection}`);
+});
+
+test('24 — an initial proposal may not introduce a framework', async () => {
+  const root = fixture();
+  const before = readFileSync(path.join(root, ROUTE), 'utf8');
+  const express = 'import express from "express";\nexport function orderTotalsRoute(body) {\n  return express.json(body);\n}\n';
+  const a = createInitialChangesetAuthor({
+    model: async () => ({ rationale: 'use express', edits: [{ path: ROUTE, content: express }] }),
+    rootPath: root,
+    ledger: await ledgerFor(root),
+  });
+  const r = await a.propose({
+    issue: ISSUE, scope: scopeFor(), evidence: [],
+    currentFiles: [{ path: ROUTE, content: before }],
+    validationCommand: VALIDATION,
+    knownModules: [],
+  });
+  assert.ok(!r.ok && r.kind === 'rejected', JSON.stringify(r));
+  assert.equal((r as { rejection: string }).rejection, 'unsupported-dependency');
+  assert.match((r as { message: string }).message, /express/);
+});
+
+test('25 — the required field name is NOT derivable from approved evidence', async () => {
+  // Recorded as a measurement, not a rule. The fixture's tests demand
+  // `excludedLineCount`, and that name appears in NEITHER the issue text NOR any
+  // file this run retrieves — it exists only in the test file, which is never an
+  // approved path. So an initial proposal cannot ground it, and a guard that
+  // rejected ungrounded field names would refuse the correct answer.
+  //
+  // This is why grounding is enforced on exports and dependencies but not on field
+  // names, and why the next lever is giving the initial proposal observed failure
+  // evidence rather than static spans alone.
+  const root = fixture();
+  assert.equal(/excludedLineCount/.test(ISSUE), false, 'the issue does not name the required field');
+  const ledger = await ledgerFor(root);
+  const retrieved = ledger.readPaths.map((p) => ledger.spansFor(p).map((s) => s.text).join('\n')).join('\n');
+  assert.equal(/excludedLineCount/.test(retrieved), false, 'no retrieved span names the required field');
+  // It is discoverable only from the failing validation, which arrives later.
+  const testFile = readFileSync(path.join(root, 'test/orderTotals.test.js'), 'utf8');
+  assert.match(testFile, /excludedLineCount/);
 });
