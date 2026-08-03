@@ -119,9 +119,26 @@ export interface RepairProposalEvidence extends ModelProposalEvidence {
   /** The immutable evidence IDs this proposal claimed to answer. */
   citedEvidenceIds: string[];
   acceptedProposalDigest?: string;
+  /**
+   * Accepted, but not without remark — a voluntary quotation that did not match the
+   * block it named. Recorded rather than fatal: the quotation confers no authority,
+   * so it cannot veto a repair, but a paraphrasing model must not become invisible.
+   *
+   * The mismatched quotation TEXT is deliberately absent. Storing it would put a
+   * string that failed its check into the record beside verified evidence, where a
+   * later reader could mistake it for source.
+   */
+  concerns?: string[];
+  /** Every cited id existed, was current, belonged to this run, and hashed true. */
+  evidenceIdVerified?: boolean;
+  /** Absent when no quotation was offered; false when one did not match its block. */
+  quotationMatched?: boolean;
 }
 
 export function repairProposalEvidence(input: Parameters<typeof modelProposalEvidence>[0] & {
+  concerns?: readonly string[];
+  evidenceIdVerified?: boolean;
+  quotationMatched?: boolean;
   citedEvidenceIds: readonly string[];
   acceptedProposal?: unknown;
 }): RepairProposalEvidence {
@@ -129,6 +146,9 @@ export function repairProposalEvidence(input: Parameters<typeof modelProposalEvi
     ...modelProposalEvidence(input),
     citedEvidenceIds: [...input.citedEvidenceIds],
     ...(input.acceptedProposal !== undefined ? { acceptedProposalDigest: digest(input.acceptedProposal) } : {}),
+    ...(input.concerns?.length ? { concerns: [...input.concerns] } : {}),
+    ...(input.evidenceIdVerified !== undefined ? { evidenceIdVerified: input.evidenceIdVerified } : {}),
+    ...(input.quotationMatched !== undefined ? { quotationMatched: input.quotationMatched } : {}),
   };
 }
 
@@ -188,8 +208,26 @@ export function applyEvidence(input: {
 
 /** A partial mutation must never terminate as successful. Callers derive the
  * child outcome from HERE rather than from their own reading of the result. */
+/**
+ * An apply succeeded only if something SURVIVED it.
+ *
+ * This required `mutation !== 'partial'`, which let a rolled-back apply through:
+ * `governedApply` returns `ok: true` when its own rollback succeeded, so the stage
+ * completed as an ordinary success while the tree sat at its pre-change state.
+ * Reconciliation still refused completion — it saw a recorded write absent from the
+ * diff — but it reported that absence as UNEXPLAINED, so the one outcome the run
+ * understood perfectly well arrived at the operator as a mystery.
+ *
+ * `complete` is now the only success. `none` covers both a refusal and a rollback,
+ * and both are failures because neither left a change behind.
+ */
 export function applyOutcome(evidence: ApplyEvidence): 'success' | 'failure' {
-  return evidence.status === 'applied' && evidence.mutation !== 'partial' ? 'success' : 'failure';
+  return evidence.status === 'applied' && evidence.mutation === 'complete' ? 'success' : 'failure';
+}
+
+/** Paths this apply wrote and then rolled back, for the reconciliation's rollback set. */
+export function rolledBackPaths(evidence: ApplyEvidence): string[] {
+  return evidence.rollback === 'rolled-back' ? [...evidence.admittedPaths] : [];
 }
 
 // ── 4. validation / 7. final_validation ──────────────────────────────────────

@@ -199,7 +199,17 @@ test('14 — an identical already-failed repair is not retried', async () => {
   const edits = [EDIT(CONTRACT)];
   const fingerprint = changesetFingerprint({ rootPath: root, ops: edits.map((e) => ({ op: 'replace' as const, path: e.path, content: e.content })) });
   const r = await repairAuthor(root, {}, () => ({ rationale: 'same again', edits, observedFailureEvidenceIds: [contractBlock.evidenceId] }))
-    .propose(repairInput(blocks, record, { previousAttempts: [{ rationale: 'first try', changesetFingerprint: fingerprint }] }));
+    .propose(repairInput(blocks, record, {
+      previousAttempts: [{
+        attempt: 1,
+        citedEvidenceIds: [contractBlock.evidenceId],
+        rationale: 'first try',
+        proposedPaths: [CONTRACT],
+        proposalDigest: fingerprint,
+        outcome: 'validation_failed',
+        outcomeReason: 'the change applied but the tests still failed',
+      }],
+    }));
   assert.ok(!r.ok && r.kind === 'rejected' && r.rejection === 'duplicate-repair');
 });
 
@@ -252,7 +262,7 @@ test('18 — the rationale may paraphrase freely while the cited id carries auth
   assert.ok(r.ok, r.ok ? '' : `${(r as { rejection?: string }).rejection}`);
 });
 
-test('19 — a direct quotation that does not match its evidence is rejected', async () => {
+test('19 — a direct quotation that does not match its evidence is recorded, not fatal', async () => {
   const root = createFixtureRepo();
   const { record, blocks } = await realEvidence(root);
   const contractBlock = blocks.find((b) => /contract/.test(b.text))!;
@@ -260,7 +270,11 @@ test('19 — a direct quotation that does not match its evidence is rejected', a
     rationale: 'x', edits: [EDIT(CONTRACT)], observedFailureEvidenceIds: [contractBlock.evidenceId],
     quotedEvidence: [{ evidenceId: contractBlock.evidenceId, text: 'not ok 3 - the database connection was refused' }],
   })).propose(repairInput(blocks, record));
-  assert.ok(!bad.ok && bad.kind === 'rejected' && bad.rejection === 'quotation-mismatch');
+  // A quotation grants no authority, so a paraphrased one can no longer veto a
+  // repair whose cited IDs are current and unaltered — measured on a real model, the
+  // strict veto took completion from 3/8 to 0/8. It is recorded as a concern instead.
+  assert.ok(bad.ok, bad.ok ? '' : `${(bad as { rejection?: string }).rejection}`);
+  assert.deepEqual(bad.concerns, ['the quotation attributed to F-002 does not appear in it verbatim'.replace('F-002', contractBlock.evidenceId)]);
 
   const good = await repairAuthor(root, {}, () => ({
     rationale: 'x', edits: [EDIT(CONTRACT)], observedFailureEvidenceIds: [contractBlock.evidenceId],

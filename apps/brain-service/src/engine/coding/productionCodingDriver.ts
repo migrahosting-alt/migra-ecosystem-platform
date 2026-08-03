@@ -41,6 +41,10 @@ import {
   createRepairChangesetAuthor,
   changesetFingerprint,
   extractFailureEvidence,
+  importedModules,
+  boundRepairAttempt,
+  REPAIR_HISTORY_LIMITS,
+  type PreviousRepairAttempt,
   type ProposalModel,
 } from './modelProposals.js';
 import { observedFailure, runValidation, type DeclaredValidation, type ValidationRecord } from './validationRun.js';
@@ -48,6 +52,8 @@ import { reconcile, type CodingStopReason } from './codingRun.js';
 import {
   applyEvidence,
   applyOutcome,
+  rolledBackPaths,
+  type ApplyEvidence,
   digest,
   modelProposalEvidence,
   planningEvidence,
@@ -78,6 +84,12 @@ export interface ProductionCodingDriverDeps {
 }
 
 const DEFAULT_MAX_REPAIRS = 3;
+
+/** Stands in for "no apply evidence was captured", so rollback derivation stays total. */
+const EMPTY_APPLY_EVIDENCE: ApplyEvidence = {
+  changesetDigest: '', requestedPaths: [], admittedPaths: [], refusedPaths: [],
+  readback: 'not-performed', rollback: 'none', mutation: 'none', status: 'refused',
+};
 
 /** Working-tree changes vs HEAD, plus untracked files. Authoritative for effect. */
 export function gitDiffPaths(rootPath: string): string[] {
@@ -261,6 +273,33 @@ export function createProductionCodingDriver(deps: ProductionCodingDriverDeps): 
         path,
         content: (await readFile(`${ctx.workspaceRoot}/${path}`, 'utf8').catch(() => '')) as string,
       })));
+      /**
+       * Bare modules this repository demonstrably already uses.
+       *
+       * Its declared dependencies, plus whatever the approved files import today. A
+       * repair may reach for these; anything else is a dependency the evidence does
+       * not support, which is exactly how a real run turned an ESM codebase into an
+       * Express app. Read here, in the driver, so the proposal adapters stay IO-free.
+       */
+      const knownModules = await (async (): Promise<string[]> => {
+        const mods = new Set<string>();
+        for (const file of currentFiles) for (const m of importedModules(file.content)) mods.add(m);
+        try {
+          const pkg = JSON.parse(await readFile(`${ctx.workspaceRoot}/package.json`, 'utf8')) as {
+            dependencies?: Record<string, string>;
+            devDependencies?: Record<string, string>;
+            peerDependencies?: Record<string, string>;
+          };
+          for (const group of [pkg.dependencies, pkg.devDependencies, pkg.peerDependencies]) {
+            for (const name of Object.keys(group ?? {})) mods.add(name);
+          }
+        } catch {
+          // No manifest, or an unreadable one. The imports already in the approved
+          // files still stand as evidence; nothing is assumed on their behalf.
+        }
+        return [...mods];
+      })();
+
       const author = createInitialChangesetAuthor({ model: deps.proposalModel, rootPath: ctx.workspaceRoot, ledger: evidenceLedger });
       const authored = await ctx.run.runStage({ kind: 'initial_model_proposal', phase: 'executing_initial_changeset' }, async () => {
         const result = await author.propose({
@@ -299,13 +338,38 @@ export function createProductionCodingDriver(deps: ProductionCodingDriverDeps): 
        */
       let current: ValidationRecord | undefined;
       let repairAttempt = 0;
+      /**
+       * What each repair actually did, carried forward so the NEXT one is not
+       * authored blind. Seeded from the durable payload so a restart resumes with
+       * the strategies it has already disproved rather than a clean slate.
+       */
+      const repairHistory: PreviousRepairAttempt[] = [...(payload.repairHistory ?? [])];
+      /** Paths written and then rolled back. Derived from apply evidence, never assumed. */
+      const rollbacks: string[] = [];
+
+      /**
+       * Append an attempt, bounded, and make it durable immediately.
+       *
+       * Written through the payload rather than held in memory because a restart
+       * that forgot would hand the next attempt a clean slate — and the strategy it
+       * would try first is precisely the one already disproved.
+       */
+      const recordAttempt = (entry: PreviousRepairAttempt): void => {
+        repairHistory.push(boundRepairAttempt(entry));
+        if (repairHistory.length > REPAIR_HISTORY_LIMITS.maxAttempts) {
+          repairHistory.splice(0, repairHistory.length - REPAIR_HISTORY_LIMITS.maxAttempts);
+        }
+        ctx.run.patchPayload({ repairHistory: [...repairHistory] }, 'repair.history');
+      };
       /** Why the repair loop stopped, so the report can name it rather than guess. */
       let loopExit: 'ran-to-completion' | 'cancelled' | 'repair-proposal-rejected' | 'repair-apply-refused' = 'ran-to-completion';
 
+      let initialApplyEvidence: ApplyEvidence | undefined;
       const initialApply = await ctx.run.runStage({ kind: 'initial_apply', phase: 'executing_initial_changeset' }, async () => {
         const changeset = authored.value!.ok ? authored.value!.changeset : undefined;
         const result = await governedApply(changeset!, applyDeps);
         const evidence = applyEvidence({ changeset, requestedPaths: changeset!.ops.map((o) => normalizePath(o.path)), result });
+        initialApplyEvidence = evidence;
         // The OUTCOME comes from the evidence, so a partial mutation cannot be
         // reported as success by a caller reading `ok` alone.
         return { outcome: applyOutcome(evidence), evidence, value: result };
@@ -328,7 +392,8 @@ export function createProductionCodingDriver(deps: ProductionCodingDriverDeps): 
             latestValidation: current!,
             evidence: evidenceBlocks,
             commandRunId: current!.id,
-            previousAttempts: [],
+            previousAttempts: repairHistory,
+            knownModules,
             remainingAttempts: maxRepairs - repairAttempt + 1,
           });
           return {
@@ -339,23 +404,105 @@ export function createProductionCodingDriver(deps: ProductionCodingDriverDeps): 
               structuredOutput: result.ok ? 'valid' : 'malformed',
               proposedPaths: result.ok ? result.changeset.ops.map((o) => normalizePath(o.path)) : [],
               citedEvidenceIds: result.ok ? result.citedEvidenceIds : [],
+              ...(result.ok && result.concerns?.length ? { concerns: result.concerns } : {}),
+              ...(result.ok && result.evidenceIdVerified !== undefined ? { evidenceIdVerified: result.evidenceIdVerified } : {}),
+              ...(result.ok && result.quotationMatched !== undefined ? { quotationMatched: result.quotationMatched } : {}),
               ...(result.ok ? { acceptedProposal: result.changeset } : { rejectionCategory: 'kind' in result ? String(result.kind) : 'rejected' }),
             }),
             value: result,
           };
         });
         ctx.run.patchPayload({ attempts: { initialProposal: 1, repair: repairAttempt }, failureEvidence: evidenceBlocks }, 'repair.evidence');
-        if (proposed.status !== 'completed' || !proposed.value?.ok) { loopExit = 'repair-proposal-rejected'; break; }
 
+        if (proposed.status !== 'completed' || !proposed.value?.ok) {
+          // Record the refusal BEFORE leaving. A rejected proposal is the single most
+          // useful thing a later attempt can know, and on this path the loop ends —
+          // so if the run is later resumed, this is all that survives of the attempt.
+          const failure = proposed.value && !proposed.value.ok ? proposed.value : undefined;
+          recordAttempt({
+            attempt: repairAttempt,
+            citedEvidenceIds: [],
+            rationale: '(the proposal was refused before it could be applied)',
+            proposedPaths: [],
+            proposalDigest: `rejected_${repairAttempt}`,
+            outcome: 'proposal_rejected',
+            outcomeReason: failure?.message ?? proposed.detail ?? 'the repair proposal was not accepted',
+          });
+          // A rejected proposal COSTS an attempt; it does not end the run.
+          //
+          // Breaking here made repair memory pointless by construction: the model
+          // never got a second chance to use what it had just been told. It is also
+          // what ended 5 of 8 real `qwen3-coder:30b` runs — each on its second
+          // repair — while attempts still remained.
+          //
+          // The one case that must still break is a refusal that consumed NOTHING
+          // (an exhausted ceiling, a transport failure the author declined to
+          // charge for). Continuing on those would spin without progress.
+          if (failure && failure.consumedAttempt === false) {
+            loopExit = 'repair-proposal-rejected';
+            break;
+          }
+          continue;
+        }
+        const accepted = proposed.value;
+
+        let repairApplyEvidence: ApplyEvidence | undefined;
         const repairApply = await ctx.run.runStage({ kind: 'repair_apply', phase: 'repairing', required: false }, async () => {
-          const changeset = proposed.value!.ok ? proposed.value!.changeset : undefined;
-          const result = await governedApply(changeset!, applyDeps);
-          const evidence = applyEvidence({ changeset, requestedPaths: changeset!.ops.map((o) => normalizePath(o.path)), result });
+          const changeset = accepted.changeset;
+          const result = await governedApply(changeset, applyDeps);
+          const evidence = applyEvidence({ changeset, requestedPaths: changeset.ops.map((o) => normalizePath(o.path)), result });
+          repairApplyEvidence = evidence;
           return { outcome: applyOutcome(evidence), evidence, value: result };
         });
-        if (repairApply.status !== 'completed') { loopExit = 'repair-apply-refused'; break; }
+        const digest = changesetFingerprint(accepted.changeset);
+        const attemptPaths = accepted.changeset.ops.map((o) => normalizePath(o.path));
+        const applyEv = repairApplyEvidence;
+        if (applyEv) rollbacks.push(...rolledBackPaths(applyEv));
+
+        if (repairApply.status !== 'completed') {
+          // A rolled-back apply is NOT a refusal: the write landed and was undone.
+          // Naming it as such is the difference between "the boundary stopped you"
+          // and "your change did not survive", which are different instructions.
+          const rolledBack = applyEv?.rollback === 'rolled-back';
+          recordAttempt({
+            attempt: repairAttempt,
+            citedEvidenceIds: accepted.citedEvidenceIds,
+            rationale: accepted.rationale,
+            proposedPaths: attemptPaths,
+            proposalDigest: digest,
+            outcome: rolledBack ? 'rolled_back' : applyEv?.mutation === 'partial' ? 'apply_failed' : 'apply_refused',
+            outcomeReason: rolledBack
+              ? 'the apply was rolled back; nothing survived and the tree is at its pre-change state'
+              : applyEv?.refusal ?? 'the governed apply did not land this changeset',
+          });
+          // Same reasoning as a rejected proposal: the boundary refused THIS
+          // changeset, not every possible one. The attempt is spent and recorded,
+          // and the next is told exactly what did not land.
+          if (repairAttempt >= maxRepairs) {
+            loopExit = 'repair-apply-refused';
+            break;
+          }
+          continue;
+        }
         void observed;
         current = await recordValidation('validation', 'repair');
+
+        // The change landed. Whether it WORKED is the validation's verdict.
+        // Recorded only when it did NOT work. A repair that passes ends the loop, and
+        // history exists to stop the NEXT attempt repeating a failure — a success has
+        // nothing to warn anyone about.
+        if (current && !current.passed) {
+          recordAttempt({
+            attempt: repairAttempt,
+            citedEvidenceIds: accepted.citedEvidenceIds,
+            rationale: accepted.rationale,
+            proposedPaths: attemptPaths,
+            proposalDigest: digest,
+            outcome: 'validation_failed',
+            outcomeReason: `the change applied cleanly but validation still exited ${current.exitCode ?? 'null'}`,
+            validationEvidenceIds: extractFailureEvidence(current, current.id).map((b) => b.evidenceId),
+          });
+        }
       }
 
       // The report rests on the CONTRACT's final validation, at its own stage,
@@ -397,7 +544,11 @@ export function createProductionCodingDriver(deps: ProductionCodingDriverDeps): 
             scope: approved,
             ledger,
             diffPaths: diffPaths(ctx.workspaceRoot),
-            rollbacks: [],
+            // Derived from apply evidence, not assumed empty. `reconcile` uses this
+            // to tell "a recorded write is missing from the diff" (a real mismatch)
+            // apart from "it was rolled back" (a known, explained outcome). Passing
+            // [] made every rollback surface as an unexplained discrepancy.
+            rollbacks: [...new Set([...rollbacks, ...rolledBackPaths(initialApplyEvidence ?? EMPTY_APPLY_EVIDENCE)])],
             finalValidation: current,
           });
           const findings = reconcileCodingChildren(ctx.run.payload, ctx.run.children(), false);
@@ -421,6 +572,7 @@ export function createProductionCodingDriver(deps: ProductionCodingDriverDeps): 
         // baseline that never ran. The run still finalizes; the blockers already
         // say why there is nothing to report.
         const applyResult = initialApply.value;
+        const allRollbacks = [...new Set([...rollbacks, ...rolledBackPaths(initialApplyEvidence ?? EMPTY_APPLY_EVIDENCE)])];
         if (!current || !applyResult) {
           ctx.run.finalize({});
           return;
@@ -473,8 +625,12 @@ export function createProductionCodingDriver(deps: ProductionCodingDriverDeps): 
             repairs: [],
             finalValidation: current,
             initialApply: applyResult,
-            rollbacks: [],
-            unresolvedRisks: [],
+            rollbacks: allRollbacks,
+            // A rollback is a real outcome the operator must see, not a silent
+            // non-event: the write was permitted, landed, and did not survive.
+            unresolvedRisks: allRollbacks.length
+              ? [`${allRollbacks.length} path(s) were written and rolled back; the tree is at its pre-change state for: ${allRollbacks.join(', ')}`]
+              : [],
           },
         });
         void digest;
