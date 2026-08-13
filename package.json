@@ -5,6 +5,7 @@
   "packageManager": "npm@10.8.2",
   "workspaces": [
     "apps/brain-service",
+    "apps/migrapilot-consumer",
     "apps/vscode-extension",
     "packages/protocol",
     "packages/shared-types",

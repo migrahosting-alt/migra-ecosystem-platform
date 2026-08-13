@@ -1,0 +1,15 @@
+node_modules
+.next
+next-env.d.ts
+tsconfig.tsbuildinfo
+dist
+*.local
+.env
+.env.local
+.DS_Store
+
+# host inspection output — contains internal addresses; keep out of git
+brain-host-facts.txt
+
+# Proxmox discovery output — infrastructure-sensitive
+pve-facts.txt

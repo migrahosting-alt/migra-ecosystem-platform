@@ -1,0 +1,328 @@
+'use client'
+
+import { useState } from 'react'
+import {
+  BarChart3,
+  CheckCheck,
+  Copy,
+  ExternalLink,
+  Pause,
+  Play,
+  Rocket,
+  ShieldCheck,
+  ThumbsDown,
+  ThumbsUp,
+} from 'lucide-react'
+import { LogoMark } from '@/components/brand/Logo'
+import { FileTypeIcon } from '@/components/ui/FileTypeIcon'
+import { RichText } from './RichText'
+import { SourceIcon } from './SourceIcon'
+import { DiagramPreview, Waveform } from './DiagramPreview'
+import type { Attachment, Block, Message } from '@/data/types'
+import { cn } from '@/lib/cn'
+
+const titleIcons = {
+  chart: BarChart3,
+  rocket: Rocket,
+  shield: ShieldCheck,
+}
+
+const titleIconTones = {
+  chart: 'text-brand-600',
+  rocket: 'text-orange-500',
+  shield: 'text-emerald-600',
+}
+
+function BlockView({ block, divided }: { block: Block; divided: boolean }) {
+  if (block.type === 'paragraph') {
+    return (
+      <p className="text-[15px] leading-[1.7] text-slate-700">
+        <RichText text={block.text} />
+      </p>
+    )
+  }
+
+  const Icon = block.titleIcon ? titleIcons[block.titleIcon] : null
+
+  return (
+    <div className={cn(divided && 'border-t border-hairline pt-5')}>
+      {block.title && (
+        <h3 className="mb-2.5 flex items-center gap-2 text-[15px] font-semibold text-slate-900">
+          {Icon && (
+            <Icon
+              className={cn('h-[18px] w-[18px]', titleIconTones[block.titleIcon!])}
+              strokeWidth={2.2}
+            />
+          )}
+          {block.title}
+        </h3>
+      )}
+
+      <ul className={cn('flex flex-col', block.variant === 'numbered' ? 'gap-2' : 'gap-1.5')}>
+        {block.items.map((item, index) => (
+          <li key={index} className="flex gap-2.5 text-[15px] leading-[1.65] text-slate-700">
+            {block.variant === 'numbered' ? (
+              <span className="mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-brand-600 text-[11px] font-bold text-white">
+                {index + 1}
+              </span>
+            ) : (
+              <span className="mt-[9px] h-1.5 w-1.5 shrink-0 rounded-full bg-slate-400" />
+            )}
+            <span>
+              <RichText text={item} />
+            </span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
+function AudioAttachment({ attachment }: { attachment: Attachment }) {
+  const [playing, setPlaying] = useState(false)
+
+  return (
+    <div className="flex flex-col rounded-xl border border-hairline bg-white p-3.5">
+      <p className="flex items-center gap-2 text-[13px] font-semibold text-slate-700">
+        <Play className="h-3.5 w-3.5 fill-slate-400 text-slate-400" />
+        {attachment.name}
+      </p>
+
+      <div className="mt-3 flex flex-1 items-center gap-3">
+        <button
+          onClick={() => setPlaying((value) => !value)}
+          aria-label={playing ? `Pause ${attachment.name}` : `Play ${attachment.name}`}
+          className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-brand-50 text-brand-600 transition-colors hover:bg-brand-100"
+        >
+          {playing ? (
+            <Pause className="h-5 w-5 fill-current" />
+          ) : (
+            <Play className="ml-0.5 h-5 w-5 fill-current" />
+          )}
+        </button>
+        <Waveform className={cn(playing && 'opacity-100', !playing && 'opacity-80')} />
+        <span className="shrink-0 text-sm font-medium text-slate-500 tabular-nums">
+          {attachment.duration}
+        </span>
+      </div>
+
+      <p className="mt-2 text-right text-xs text-slate-400">{attachment.size}</p>
+    </div>
+  )
+}
+
+function ImageAttachment({ attachment }: { attachment: Attachment }) {
+  return (
+    <div className="overflow-hidden rounded-xl border border-hairline bg-white">
+      <div className="h-[112px] border-b border-hairline bg-slate-50/60 p-1.5">
+        {attachment.preview && <DiagramPreview variant={attachment.preview} />}
+      </div>
+      <div className="flex items-center gap-2.5 p-3">
+        <FileTypeIcon name={attachment.name} size="sm" />
+        <div className="min-w-0">
+          <p className="truncate text-[13px] font-semibold text-slate-700">{attachment.name}</p>
+          <p className="text-xs text-slate-400">{attachment.size}</p>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function AttachmentGrid({ attachments }: { attachments: Attachment[] }) {
+  return (
+    <div className="grid gap-3.5 sm:grid-cols-2">
+      {attachments.map((attachment) =>
+        attachment.kind === 'audio' ? (
+          <AudioAttachment key={attachment.id} attachment={attachment} />
+        ) : (
+          <ImageAttachment key={attachment.id} attachment={attachment} />
+        ),
+      )}
+    </div>
+  )
+}
+
+function UserTurn({ message }: { message: Message }) {
+  const wide = Boolean(message.attachments?.length)
+
+  return (
+    <div className="flex justify-end">
+      <div className={cn('w-full', wide ? 'max-w-[620px]' : 'max-w-[440px]')}>
+        {message.text && (
+          <div className="rounded-2xl rounded-br-md bg-brand-50 px-4.5 py-3.5">
+            <p className="text-[15px] leading-[1.6] text-slate-800">{message.text}</p>
+            <p className="mt-1.5 flex items-center justify-end gap-1.5 text-xs text-slate-400">
+              {message.time}
+              {message.delivered && <CheckCheck className="h-3.5 w-3.5 text-brand-500" />}
+            </p>
+          </div>
+        )}
+
+        {message.attachments && (
+          <>
+            <AttachmentGrid attachments={message.attachments} />
+            <p className="mt-1.5 flex items-center justify-end gap-1.5 text-xs text-slate-400">
+              {message.time}
+              {message.delivered && <CheckCheck className="h-3.5 w-3.5 text-brand-500" />}
+            </p>
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function AssistantTurn({
+  message,
+  onReviewScope,
+}: {
+  message: Message
+  onReviewScope?: () => void
+}) {
+  const [vote, setVote] = useState<'up' | 'down' | null>(null)
+  const blocks = message.blocks ?? []
+
+  return (
+    <div className="flex gap-3.5">
+      <LogoMark className="mt-1 h-8 w-8 shrink-0" id={`msg-${message.id}`} />
+
+      <div className="min-w-0 flex-1">
+        <div className="rounded-2xl rounded-tl-md border border-hairline bg-white p-5 shadow-card sm:p-6">
+          <div className="flex flex-col gap-5">
+            {blocks.map((block, index) => (
+              <BlockView
+                key={index}
+                block={block}
+                divided={index > 0 && block.type === 'list' && blocks[index - 1]?.type === 'list'}
+              />
+            ))}
+          </div>
+
+          {message.sources && (
+            <div className="mt-5 grid gap-3 sm:grid-cols-2">
+              {message.sources.map((source) => (
+                <a
+                  key={source.id}
+                  href={`https://${source.domain}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="group flex items-center gap-3 rounded-xl border border-hairline bg-white px-3.5 py-3 transition-colors hover:border-brand-200 hover:bg-brand-50/40"
+                >
+                  <SourceIcon domain={source.domain} />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-[13px] font-semibold text-slate-800">
+                      {source.title}
+                    </span>
+                    <span className="block truncate text-xs text-slate-400">{source.domain}</span>
+                  </span>
+                  <ExternalLink className="h-3.5 w-3.5 shrink-0 text-slate-300 transition-colors group-hover:text-brand-500" />
+                </a>
+              ))}
+            </div>
+          )}
+
+          {message.action === 'scope-review' && (
+            <div className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-brand-100 bg-brand-50/60 p-3.5">
+              <p className="flex items-center gap-2.5 text-[13px] font-medium text-slate-600">
+                <ShieldCheck className="h-[18px] w-[18px] shrink-0 text-brand-600" strokeWidth={2} />
+                A scope approval is waiting for your decision.
+              </p>
+              <button
+                onClick={onReviewScope}
+                className="inline-flex h-9 items-center gap-2 rounded-lg bg-brand-600 px-3.5 text-[13px] font-semibold text-white shadow-brand transition-colors hover:bg-brand-700"
+              >
+                Review scope
+              </button>
+            </div>
+          )}
+
+          <div className="mt-5 flex items-center justify-between border-t border-hairline pt-3.5">
+            <span className="text-xs text-slate-400">{message.time}</span>
+            <div className="flex items-center gap-1">
+              <button
+                aria-label="Copy answer"
+                title="Copy answer"
+                onClick={() => {
+                  const text = blocks
+                    .map((block) =>
+                      block.type === 'paragraph'
+                        ? block.text
+                        : [block.title, ...block.items].filter(Boolean).join('\n'),
+                    )
+                    .join('\n\n')
+                    .replace(/\*\*/g, '')
+                  void navigator.clipboard?.writeText(text).catch(() => undefined)
+                }}
+                className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600"
+              >
+                <Copy className="h-4 w-4" />
+              </button>
+              <button
+                aria-label="Good response"
+                aria-pressed={vote === 'up'}
+                onClick={() => setVote(vote === 'up' ? null : 'up')}
+                className={cn(
+                  'inline-flex h-8 w-8 items-center justify-center rounded-lg transition-colors',
+                  vote === 'up'
+                    ? 'bg-emerald-50 text-emerald-600'
+                    : 'text-slate-400 hover:bg-slate-100 hover:text-slate-600',
+                )}
+              >
+                <ThumbsUp className="h-4 w-4" />
+              </button>
+              <button
+                aria-label="Bad response"
+                aria-pressed={vote === 'down'}
+                onClick={() => setVote(vote === 'down' ? null : 'down')}
+                className={cn(
+                  'inline-flex h-8 w-8 items-center justify-center rounded-lg transition-colors',
+                  vote === 'down'
+                    ? 'bg-red-50 text-red-600'
+                    : 'text-slate-400 hover:bg-slate-100 hover:text-slate-600',
+                )}
+              >
+                <ThumbsDown className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+export function MessageView({
+  message,
+  onReviewScope,
+}: {
+  message: Message
+  onReviewScope?: () => void
+}) {
+  return (
+    <div className="animate-fade-up">
+      {message.role === 'user' ? (
+        <UserTurn message={message} />
+      ) : (
+        <AssistantTurn message={message} onReviewScope={onReviewScope} />
+      )}
+    </div>
+  )
+}
+
+/** Three-dot thinking indicator shown while a reply is being generated. */
+export function TypingIndicator() {
+  return (
+    <div className="flex animate-fade gap-3.5">
+      <LogoMark className="mt-1 h-8 w-8 shrink-0" id="typing" />
+      <div className="flex items-center gap-1.5 rounded-2xl rounded-tl-md border border-hairline bg-white px-5 py-4 shadow-card">
+        {[0, 1, 2].map((index) => (
+          <span
+            key={index}
+            className="h-2 w-2 animate-bounce rounded-full bg-brand-300"
+            style={{ animationDelay: `${index * 140}ms`, animationDuration: '1s' }}
+          />
+        ))}
+      </div>
+    </div>
+  )
+}

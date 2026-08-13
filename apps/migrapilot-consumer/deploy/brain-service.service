@@ -1,0 +1,98 @@
+### MigraPilot Brain — hardened systemd unit  (TEMPLATE — DO NOT APPLY UNVERIFIED)
+#
+# Every «PLACEHOLDER» must be replaced with a value proven by
+# `deploy/host-inspection.sh` output. Nothing here is guessed: the ExecStart,
+# health path, bind variables and state-DB variable were all read from
+# apps/brain-service source, not invented.
+#
+#   ExecStart        ← package.json "start": node dist/src/server.js
+#   bind             ← src/config/env.ts  MIGRAPILOT_BRAIN_HOST / _PORT
+#   state database   ← src/server.ts:240  MIGRAPILOT_STATE_DB
+#   health           ← src/server.ts:215  GET /health
+#
+# Install path is conventionally /etc/systemd/system/brain-service.service
+# — confirm the host actually uses systemd before assuming this file applies.
+
+[Unit]
+Description=MigraPilot Brain (MigraAI Engine)
+Documentation=https://github.com/migrateck/MigraTeck-Ecosystem
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+
+# ── identity ───────────────────────────────────────────────────────────────
+# A dedicated unprivileged account. Do NOT run as root, and do not reuse a
+# human login. Verify the account exists before enabling.
+User=«BRAIN_SERVICE_USER»
+Group=«BRAIN_SERVICE_GROUP»
+
+# ── layout ─────────────────────────────────────────────────────────────────
+# WorkingDirectory matters: without MIGRAPILOT_STATE_DB the Brain writes
+# migraai-state.db into CWD. The environment file below sets that path
+# explicitly so state never lives inside the replaceable application directory.
+WorkingDirectory=«BRAIN_APP_DIR»
+EnvironmentFile=«BRAIN_ENV_FILE»
+
+ExecStart=/usr/bin/env node dist/src/server.js
+
+# ── lifecycle ──────────────────────────────────────────────────────────────
+Restart=on-failure
+RestartSec=5s
+# Give up rather than crash-loop silently; failure should be visible.
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+# Clean shutdown: the Brain holds SQLite WAL state, so it must be allowed to
+# close cleanly rather than be killed mid-write.
+KillSignal=SIGTERM
+TimeoutStopSec=30
+KillMode=mixed
+
+# ── privilege reduction ────────────────────────────────────────────────────
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectKernelLogs=yes
+ProtectKernelModules=yes
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+ProtectProc=invisible
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+RemoveIPC=yes
+
+# The ONLY writable paths. ProtectSystem=strict makes everything else read-only,
+# which is what forces state to live in a declared, backed-up location.
+ReadWritePaths=«BRAIN_DATA_DIR»
+ReadWritePaths=«BRAIN_LOG_DIR»
+
+# Loopback + IPv4/IPv6 only. No unix-socket or packet-socket surface needed.
+RestrictAddressFamilies=AF_INET AF_INET6
+
+# NOTE: MemoryDenyWriteExecute is deliberately NOT set — V8 requires W^X for
+# JIT and Node will fail to start with it enabled.
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+SystemCallArchitectures=native
+
+# ── logging ────────────────────────────────────────────────────────────────
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=brain-service
+
+# Raise ONLY if journal shows EMFILE. Node's default is usually sufficient;
+# an unjustified high limit is not hardening.
+# LimitNOFILE=8192
+
+[Install]
+WantedBy=multi-user.target

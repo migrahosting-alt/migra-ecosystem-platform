@@ -63,6 +63,11 @@
 # apps/vscode-extension/.gitignore.
 !/apps/vscode-extension/
 !/apps/vscode-extension/**
+# Canonical MigraPilot consumer web app (Next.js App Router) — track its source.
+# Build output (.next/), node_modules, next-env.d.ts, tsconfig.tsbuildinfo and
+# .env are re-excluded by its own apps/migrapilot-consumer/.gitignore.
+!/apps/migrapilot-consumer/
+!/apps/migrapilot-consumer/**
 !/apps/**/package.json
 !/apps/**/package-lock.json
 !/apps/**/pnpm-lock.yaml

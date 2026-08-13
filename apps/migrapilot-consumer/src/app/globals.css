@@ -1,0 +1,144 @@
+@import 'tailwindcss';
+
+/* ------------------------------------------------------------------ *
+ * MigraPilot design tokens
+ * Derived from the product mockups: a calm, near-white product canvas
+ * with one saturated blue used for every primary action.
+ * ------------------------------------------------------------------ */
+@theme {
+  --font-sans:
+    'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+
+  /* Brand blue — the single accent that carries every primary action */
+  --color-brand-50: #eff6ff;
+  --color-brand-100: #dbeafe;
+  --color-brand-200: #bfdbfe;
+  --color-brand-300: #93c5fd;
+  --color-brand-400: #60a5fa;
+  --color-brand-500: #3b82f6;
+  --color-brand-600: #2563eb;
+  --color-brand-700: #1d4ed8;
+  --color-brand-800: #1e40af;
+
+  /* Product canvas */
+  --color-canvas: #ffffff;
+  --color-rail: #f8fafc;
+  --color-hairline: #e8edf4;
+
+  --radius-card: 0.875rem;
+  --radius-field: 0.75rem;
+
+  --shadow-card: 0 1px 2px rgb(15 23 42 / 0.04), 0 1px 3px rgb(15 23 42 / 0.03);
+  --shadow-raised: 0 4px 16px -4px rgb(15 23 42 / 0.1), 0 2px 6px -2px rgb(15 23 42 / 0.06);
+  --shadow-modal: 0 24px 64px -12px rgb(15 23 42 / 0.25), 0 8px 24px -8px rgb(15 23 42 / 0.12);
+  --shadow-brand: 0 6px 16px -6px rgb(37 99 235 / 0.5);
+}
+
+@layer base {
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    @apply bg-canvas font-sans text-slate-900 antialiased;
+  }
+
+  /* Consistent, brand-tinted focus ring everywhere */
+  :focus-visible {
+    @apply outline-2 outline-offset-2 outline-brand-500;
+  }
+
+  ::selection {
+    @apply bg-brand-100 text-brand-800;
+  }
+}
+
+@layer components {
+  /* Slim scrollbars for the app's many independently scrolling columns */
+  .scroll-slim {
+    scrollbar-width: thin;
+    scrollbar-color: #cbd5e1 transparent;
+  }
+  .scroll-slim::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  .scroll-slim::-webkit-scrollbar-thumb {
+    @apply rounded-full bg-slate-300;
+  }
+  .scroll-slim::-webkit-scrollbar-thumb:hover {
+    @apply bg-slate-400;
+  }
+  .scroll-slim::-webkit-scrollbar-track {
+    background: transparent;
+  }
+}
+
+@utility card {
+  @apply rounded-card border border-hairline bg-white shadow-card;
+}
+
+/* Motion ---------------------------------------------------------- */
+@keyframes mp-fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes mp-scale-in {
+  from {
+    opacity: 0;
+    transform: scale(0.97) translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes mp-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes mp-pulse-ring {
+  0% {
+    box-shadow: 0 0 0 0 rgb(37 99 235 / 0.35);
+  }
+  70% {
+    box-shadow: 0 0 0 8px rgb(37 99 235 / 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgb(37 99 235 / 0);
+  }
+}
+
+.animate-fade-up {
+  animation: mp-fade-up 0.32s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.animate-scale-in {
+  animation: mp-scale-in 0.24s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.animate-fade {
+  animation: mp-fade 0.2s ease-out both;
+}
+.animate-pulse-ring {
+  animation: mp-pulse-ring 2s ease-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
