@@ -63,7 +63,7 @@ import { SqliteDurableStore } from './engine/persistence/sqliteStore.js';
 import type { DurableStore } from './engine/persistence/types.js';
 import { resolvePersistence, PersistenceConfigError } from './engine/persistence/persistenceConfig.js';
 import { wireOperationalPersistence } from './engine/persistence/operationalBridge.js';
-import { OperationalMaintenance, buildRetentionConfig } from './engine/persistence/operationalMaintenance.js';
+import { OperationalMaintenance, buildRetentionConfig, isMaintainable } from './engine/persistence/operationalMaintenance.js';
 import { auditStore } from './engine/auditLog.js';
 import { incidentManager } from './engine/incidents.js';
 import { engineVersion } from './engine/version.js';
@@ -264,40 +264,32 @@ async function main(): Promise<void> {
   selectionKind = selection.kind;
 
   const memoryDisabled = selection.kind === 'off';
-  // ⚠ TRANSITIONAL DEBT — must be resolved before Sub-slice 2 closes.
-  //
-  // OperationalMaintenance requires `probeWriteLatencyMs` and a database FILE
-  // path, neither of which belongs to the DurableStore contract. Holding a
-  // concretely-typed SQLite handle keeps that SQLite-shaped assumption visible
-  // and local, rather than widening the shared interface prematurely.
-  //
-  // It must NOT become a permanent instanceof-style fork. Resolve it by either
-  // (a) moving the capability onto a narrow optional interface — e.g.
-  // `MaintainableStore` — that any adapter may implement, or (b) giving the
-  // Postgres adapter an equivalent implementation.
-  //
-  // Consequence while this stands: operational maintenance does not run under
-  // Postgres. Acceptable only because the Postgres adapter is itself
-  // incomplete; it becomes a correctness gap the moment sub-slice 2 lands.
-  let sqliteDurable: SqliteDurableStore | undefined;
   if (selection.kind === 'sqlite') {
+    // SQLite is the local/dev/test adapter. An unavailable local database stays
+    // DEGRADED rather than fatal: `resolvePersistence` has already refused to
+    // let production reach this branch, so nothing here can be serving real
+    // tenants.
     try {
-      sqliteDurable = new SqliteDurableStore(selection.sqlitePath!);
-      durable = sqliteDurable;
+      durable = new SqliteDurableStore(selection.sqlitePath!);
     } catch (error) {
       durable = undefined;
       durableError = error instanceof Error ? error.message : String(error);
       app.log.error({ err: durableError }, 'durable store unavailable — engine starting in DEGRADED persistence state');
     }
   } else if (selection.kind === 'postgres') {
-    // Sub-slice 1 delivers connection, migration and readiness only; the
-    // DurableStore data methods land in sub-slice 2. Until then this refuses
-    // rather than presenting a half-implemented store as usable.
+    // The PostgreSQL repositories exist and are tested, but they cannot be
+    // reached through this slot yet: `DurableStore` is a synchronous contract
+    // (built around node:sqlite) and the PostgreSQL driver is asynchronous.
+    // Converting that contract is sub-slice 2.5; the runtime assembly and its
+    // startup gates land with it.
+    //
+    // Until then this refuses rather than presenting a half-implemented store
+    // as usable, and specifically never falls back to SQLite.
     durable = undefined;
     durableError =
-      'PostgreSQL adapter selected but its DurableStore implementation is not yet available (sub-slice 2). ' +
-      'Refusing to fall back to SQLite.';
-    app.log.error({ err: durableError }, 'postgres persistence selected but adapter incomplete');
+      'PostgreSQL adapter selected but not yet reachable at runtime: the DurableStore contract is ' +
+      'synchronous and the PostgreSQL driver is not (sub-slice 2.5 converts it). Refusing to fall back to SQLite.';
+    app.log.error({ err: durableError }, 'postgres persistence selected but adapter not yet wired');
   }
 
   // MigraAI Engine conversation memory (/api/ai/conversations): the engine owns
@@ -364,17 +356,25 @@ async function main(): Promise<void> {
     // Retention + integrity + health. Verify integrity on startup (reported via
     // health, never a crash — the engine continues with whatever survived), then
     // start the age-based retention worker.
-    if (sqliteDurable) {
+    // Capability-based, not type-based: any adapter that implements the
+    // maintenance surface gets maintenance. An adapter that does not is skipped
+    // LOUDLY, because silently running without retention or integrity checks is
+    // the failure mode worth preventing here.
+    if (isMaintainable(durable)) {
       opMaintenance = new OperationalMaintenance(
-        sqliteDurable,
+        durable,
         buildRetentionConfig(process.env),
         () => Date.now(),
-        selection.sqlitePath,
       );
       const integrity = opMaintenance.verifyIntegrity();
       if (integrity !== 'ok') app.log.error({ integrity }, 'durable operational store integrity check FAILED — continuing in degraded state');
       opMaintenance.start();
       app.log.info('Operational retention worker STARTED (age-based; open incidents never pruned).');
+    } else {
+      app.log.error(
+        { persistence: selection.kind },
+        'durable store does not implement the maintenance capability — retention and integrity checks are NOT running',
+      );
     }
     // Shutdown: stop the retention worker + close the durable store cleanly.
     app.addHook('onClose', async () => { opMaintenance?.close(); durable?.close(); });

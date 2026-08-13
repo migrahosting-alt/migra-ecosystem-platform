@@ -58,11 +58,39 @@ export function buildRetentionConfig(env: NodeJS.ProcessEnv = process.env): Oper
   };
 }
 
-/** The durable surface this maintenance needs (a narrow view of DurableStore). */
+/**
+ * The durable surface this maintenance needs — a narrow CAPABILITY, not a class.
+ *
+ * Any adapter that can answer these three questions gets maintenance; any that
+ * cannot is skipped, with the reason reported. Nothing here may be keyed off a
+ * concrete store type: an `instanceof SqliteDurableStore` check would silently
+ * disable maintenance for every future adapter rather than telling anyone.
+ *
+ * `storageBytes` replaced a database FILE PATH that used to be handed in
+ * separately and stat-ed here. That was a SQLite-shaped assumption leaking into
+ * shared code — only the adapter knows whether its storage is a file, a
+ * tablespace, or nothing measurable, so the adapter answers.
+ */
 export interface MaintenanceStore extends OperationalPersistence {
   integrityCheck(): string;
   health(): PersistenceHealth;
   probeWriteLatencyMs(): number;
+  /** Bytes on disk, or null when the adapter cannot determine it. */
+  storageBytes(): number | null;
+}
+
+/**
+ * Capability detection, deliberately structural.
+ *
+ * Checks for the METHODS rather than for a class, so an adapter earns
+ * maintenance by implementing the capability — which is the whole point of
+ * expressing it as one.
+ */
+export function isMaintainable<T extends object>(store: T): store is T & MaintenanceStore {
+  const s = store as Partial<MaintenanceStore>;
+  return typeof s.integrityCheck === 'function'
+    && typeof s.probeWriteLatencyMs === 'function'
+    && typeof s.storageBytes === 'function';
 }
 
 export interface RetentionResult {
@@ -104,8 +132,6 @@ export class OperationalMaintenance {
     private readonly durable: MaintenanceStore,
     private readonly config: OperationalRetentionConfig = DEFAULT_RETENTION,
     private readonly now: () => number = () => Date.now(),
-    /** DB file path — enables storage-utilization reporting. */
-    private readonly dbPath?: string,
   ) {}
 
   /** Verify durable integrity (startup check). Returns 'ok' or the problem. Never
@@ -151,8 +177,9 @@ export class OperationalMaintenance {
   }
 
   private storageBytes(): number | null {
-    if (!this.dbPath) return null;
-    try { return fs.statSync(this.dbPath).size; } catch { return null; }
+    // Delegated to the adapter. A throwing adapter must not take down health
+    // reporting — unknown size is a legitimate answer, an exception is not.
+    try { return this.durable.storageBytes(); } catch { return null; }
   }
 
   /** Truthful operational health — never "green because the process is alive". */

@@ -12,6 +12,7 @@
  */
 
 import { DatabaseSync } from 'node:sqlite';
+import { statSync } from 'node:fs';
 import type {
   ConversationPersistence, MemoryItemPersistence, RagIndexPersistence, EmbeddingCachePersistence,
   DurableStore, PersistenceHealth, PersistedChunk, PersistedIndexRecord,
@@ -625,12 +626,29 @@ export class SqliteDurableStore implements DurableStore {
   private detail?: string;
   private agentRunReproposalFaultPhase?: AgentRunReproposalFaultPhase;
 
-  constructor(path: string) {
+  constructor(private readonly path: string) {
     // Open + migrate up front. A failure here throws — the engine treats that as a
     // fail-closed startup (degraded/unavailable), never a silent empty store.
     this.db = new DatabaseSync(path);
     this.db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;');
     this.migrate();
+  }
+
+  /**
+   * Bytes on disk, for storage-utilization reporting.
+   *
+   * The store answers this itself rather than having a caller stat a file path
+   * it was told about separately: "how big is your storage" is a property of the
+   * adapter, and only the adapter knows whether that means a file, a tablespace
+   * or nothing measurable. Returns null when it cannot be determined, which is a
+   * legitimate answer and not an error.
+   */
+  storageBytes(): number | null {
+    try {
+      return statSync(this.path).size;
+    } catch {
+      return null;
+    }
   }
 
   injectAgentRunReproposalFaultForTest(phase?: AgentRunReproposalFaultPhase): void {
