@@ -18,6 +18,10 @@
  * that still cannot cross a tenant boundary once RLS (migration 2) is enabled.
  */
 
+// Migration 7 lives in its own module only because of size — its four tables
+// carry 105 derived column definitions, which would bury the rest of this file.
+import { M7_AGENT_RUNS } from './agentRunSchema.js';
+
 export interface Migration {
   version: number;
   name: string;
@@ -408,6 +412,7 @@ export const MIGRATIONS: readonly Migration[] = [
   { version: 4, name: 'app_role', sql: M4_APP_ROLE },
   { version: 5, name: 'memory_workspaces', sql: M5_MEMORY_WORKSPACES },
   { version: 6, name: 'rag', sql: M6_RAG },
+  { version: 7, name: 'agent_runs', sql: M7_AGENT_RUNS },
 ];
 
 /** Highest version defined in code. */
