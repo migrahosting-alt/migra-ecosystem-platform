@@ -1,0 +1,285 @@
+/**
+ * MigraAI Engine — PostgreSQL RAG persistence (Group 3).
+ *
+ * ── Why no pgvector ────────────────────────────────────────────────────────
+ * The store interface performs no similarity search. `loadChunks(indexId,
+ * version)` bulk-loads one version; ranking lives in `engine/rag/vectorIndex.ts`
+ * and `hybridRetriever.ts`. Introducing pgvector would add a distance operator
+ * and index type that nothing queries, and would invite a silent change of
+ * ranking semantics. Vectors are therefore stored as BYTEA carrying the exact
+ * little-endian Float32 encoding SQLite uses, so round-trips are bit-identical.
+ *
+ * ── embedding_cache classification: GLOBAL-SAFE ────────────────────────────
+ * Columns: model, version, content_hash, dims, vector, created_at.
+ * PK: (model, version, content_hash).
+ *
+ *   • no owner/workspace/tenant identifier
+ *   • no source text — only a content hash
+ *   • no file path, document id, or provenance
+ *   • the value is a deterministic function of content, not of who embedded it
+ *
+ * It is therefore shared, with NO RLS, exactly as SQLite has it. One caveat is
+ * documented rather than hidden: the cache is a HIT ORACLE. A caller who
+ * already possesses content X can hash it and learn that *someone* embedded X.
+ * It confirms rather than reveals — the prober must already hold the content,
+ * and no tenant identity is returned — but it is a real cross-tenant signal. If
+ * that ever becomes unacceptable, the fix is to salt the key per tenant, which
+ * forfeits all sharing; that trade-off should be a deliberate decision.
+ */
+
+import type { PoolClient } from 'pg';
+import type { PersistedChunk, PersistedIndexRecord } from '../types.js';
+import type { ScopedRequest } from './conversationRepo.js';
+
+export class InvalidVectorError extends Error {
+  readonly code = 'INVALID_VECTOR';
+  constructor(reason: string, chunkId?: string) {
+    super(`invalid vector${chunkId ? ` for chunk ${chunkId}` : ''}: ${reason}`);
+    this.name = 'InvalidVectorError';
+  }
+}
+
+/** Mirrors the SQLite adapter's encoding exactly: Float32, little-endian. */
+export function toVectorBytes(vec: number[] | undefined, chunkId?: string): Buffer {
+  if (!Array.isArray(vec) || vec.length === 0) throw new InvalidVectorError('empty-vector', chunkId);
+  for (const n of vec) {
+    if (!Number.isFinite(n)) throw new InvalidVectorError('non-finite', chunkId);
+  }
+  const f32 = new Float32Array(vec);
+  return Buffer.from(f32.buffer, f32.byteOffset, f32.byteLength);
+}
+
+/**
+ * Decode with the SAME validation ladder as the SQLite adapter, so failure
+ * behaviour is identical rather than merely similar: null, empty, misaligned,
+ * wrong-dims, non-finite.
+ */
+export function fromVectorBytes(buf: unknown, expectedDims?: number, chunkId?: string): number[] {
+  if (buf === null || buf === undefined) throw new InvalidVectorError('null-blob', chunkId);
+  if (!(buf instanceof Uint8Array)) throw new InvalidVectorError('null-blob', chunkId);
+  if (buf.byteLength === 0) throw new InvalidVectorError('empty-blob', chunkId);
+  if (buf.byteLength % 4 !== 0) throw new InvalidVectorError('misaligned-blob', chunkId);
+
+  // Copy the EXACT bytes into a fresh buffer.
+  //
+  // `buf.slice().buffer` is wrong here: `pg` hands back a Node Buffer, and
+  // `Buffer.prototype.slice` shares memory rather than copying (it behaves like
+  // `subarray`). Its `.buffer` is therefore the whole 8 KB allocation pool, so
+  // a 3-element vector decoded as 2048 elements and every read failed
+  // `wrong-dims`. The SQLite adapter is unaffected because it receives a plain
+  // Uint8Array, whose `slice` does copy.
+  const copy = new Uint8Array(buf.byteLength);
+  copy.set(buf);
+  const f = new Float32Array(copy.buffer);
+  if (expectedDims !== undefined && f.length !== expectedDims) throw new InvalidVectorError('wrong-dims', chunkId);
+  for (const n of f) {
+    if (!Number.isFinite(n)) throw new InvalidVectorError('non-finite', chunkId);
+  }
+  return Array.from(f);
+}
+
+const num = (v: unknown): number => (v === null || v === undefined ? 0 : Number(v));
+const optStr = (v: unknown): string | undefined => (v === null || v === undefined ? undefined : String(v));
+
+// ── indexes ─────────────────────────────────────────────────────────────────
+
+export async function saveIndex(
+  client: PoolClient,
+  rec: PersistedIndexRecord,
+  scope: ScopedRequest,
+): Promise<void> {
+  // Reuses workspace_indexes from Group 2; scope columns are omitted from the
+  // conflict update so an index cannot be re-homed by re-saving it.
+  await client.query(
+    `INSERT INTO workspace_indexes
+       (id, workspace_id, owner_scope, workspace_scope, source_type, root, state, version,
+        embedding_model, embedding_version, created_at, updated_at, approved_version)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+     ON CONFLICT (id) DO UPDATE SET
+       workspace_id      = EXCLUDED.workspace_id,
+       source_type       = EXCLUDED.source_type,
+       root              = EXCLUDED.root,
+       state             = EXCLUDED.state,
+       version           = EXCLUDED.version,
+       embedding_model   = EXCLUDED.embedding_model,
+       embedding_version = EXCLUDED.embedding_version,
+       updated_at        = EXCLUDED.updated_at`,
+    [
+      rec.id, rec.workspaceId, scope.ownerScope, scope.workspaceScope, rec.sourceType, rec.root,
+      rec.state, rec.version, rec.embeddingModel, rec.embeddingVersion,
+      rec.createdAt, rec.updatedAt, rec.approvedVersion ?? null,
+    ],
+  );
+}
+
+/** Cascade order matches SQLite: chunks → versions → index record. */
+export async function deleteIndex(client: PoolClient, id: string): Promise<void> {
+  await client.query('DELETE FROM index_chunks WHERE index_id = $1', [id]);
+  await client.query('DELETE FROM index_versions WHERE index_id = $1', [id]);
+  await client.query('DELETE FROM workspace_indexes WHERE id = $1', [id]);
+}
+
+export async function setIndexState(
+  client: PoolClient, id: string, state: string, updatedAt: number,
+): Promise<void> {
+  await client.query('UPDATE workspace_indexes SET state = $2, updated_at = $3 WHERE id = $1', [id, state, updatedAt]);
+}
+
+/**
+ * Independent of `state`, matching the documented contract: advancing a
+ * candidate must never move this pointer, and demoting one must never revoke it.
+ */
+export async function setApprovedVersion(
+  client: PoolClient, id: string, approvedVersion: number | null, updatedAt: number,
+): Promise<void> {
+  await client.query(
+    'UPDATE workspace_indexes SET approved_version = $2, updated_at = $3 WHERE id = $1',
+    [id, approvedVersion, updatedAt],
+  );
+}
+
+export async function loadIndexes(client: PoolClient): Promise<PersistedIndexRecord[]> {
+  const { rows } = await client.query<Record<string, unknown>>('SELECT * FROM workspace_indexes');
+  return rows.map((r) => ({
+    id: String(r.id),
+    workspaceId: String(r.workspace_id ?? ''),
+    ownerScope: String(r.owner_scope),
+    sourceType: String(r.source_type ?? ''),
+    root: String(r.root ?? ''),
+    state: String(r.state ?? ''),
+    ...(r.approved_version !== null && r.approved_version !== undefined
+      ? { approvedVersion: num(r.approved_version) } : {}),
+    version: num(r.version),
+    embeddingModel: String(r.embedding_model ?? ''),
+    embeddingVersion: String(r.embedding_version ?? ''),
+    createdAt: num(r.created_at),
+    updatedAt: num(r.updated_at),
+  }));
+}
+
+/**
+ * Chunks for ONE version. Never across versions — mixing them would blend
+ * approved and candidate content into a single index.
+ *
+ * SQLite imposes no ORDER BY, so none is imposed here. The dimension ladder is
+ * preserved exactly: the first row pins the width and every later row must match.
+ */
+export async function loadChunks(
+  client: PoolClient, indexId: string, indexVersion: number,
+): Promise<PersistedChunk[]> {
+  const { rows } = await client.query<Record<string, unknown>>(
+    'SELECT * FROM index_chunks WHERE index_id = $1 AND index_version = $2',
+    [indexId, indexVersion],
+  );
+  let dims: number | undefined;
+  return rows.map((r) => {
+    const vector = fromVectorBytes(r.vector, dims, String(r.id));
+    dims ??= vector.length;
+    return {
+      id: String(r.id),
+      indexId: String(r.index_id ?? ''),
+      workspaceId: String(r.workspace_id ?? ''),
+      filePath: String(r.file_path ?? ''),
+      language: String(r.language ?? ''),
+      ...(optStr(r.symbol) ? { symbol: String(r.symbol) } : {}),
+      startLine: num(r.start_line),
+      endLine: num(r.end_line),
+      contentHash: String(r.content_hash ?? ''),
+      embeddingModel: String(r.embedding_model ?? ''),
+      embeddingVersion: String(r.embedding_version ?? ''),
+      indexedAt: num(r.indexed_at),
+      text: String(r.text ?? ''),
+      vector,
+    };
+  });
+}
+
+/**
+ * Atomically replace the chunk set for the changed files of ONE index version.
+ *
+ * The caller supplies the transaction; a failure anywhere leaves the previous
+ * persisted version intact rather than a partial write.
+ */
+export async function commitSync(
+  client: PoolClient,
+  indexId: string,
+  version: number,
+  changed: PersistedChunk[],
+  changedFiles: string[],
+  deletedFiles: string[],
+  updatedAt: number,
+  scope: ScopedRequest,
+): Promise<void> {
+  const touched = [...new Set([...changedFiles, ...deletedFiles])];
+  if (touched.length > 0) {
+    await client.query(
+      'DELETE FROM index_chunks WHERE index_id = $1 AND index_version = $2 AND file_path = ANY($3::text[])',
+      [indexId, version, touched],
+    );
+  }
+
+  for (const c of changed) {
+    await client.query(
+      `INSERT INTO index_chunks
+         (id, index_id, workspace_id, owner_scope, workspace_scope, file_path, language, symbol,
+          start_line, end_line, content_hash, embedding_model, embedding_version,
+          indexed_at, text, vector, index_version)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
+       ON CONFLICT (id) DO UPDATE SET
+         file_path = EXCLUDED.file_path, language = EXCLUDED.language, symbol = EXCLUDED.symbol,
+         start_line = EXCLUDED.start_line, end_line = EXCLUDED.end_line,
+         content_hash = EXCLUDED.content_hash, embedding_model = EXCLUDED.embedding_model,
+         embedding_version = EXCLUDED.embedding_version, indexed_at = EXCLUDED.indexed_at,
+         text = EXCLUDED.text, vector = EXCLUDED.vector, index_version = EXCLUDED.index_version`,
+      [
+        c.id, indexId, c.workspaceId, scope.ownerScope, scope.workspaceScope, c.filePath, c.language,
+        c.symbol ?? null, c.startLine, c.endLine, c.contentHash, c.embeddingModel, c.embeddingVersion,
+        c.indexedAt, c.text, toVectorBytes(c.vector, c.id), version,
+      ],
+    );
+  }
+
+  await client.query(
+    `INSERT INTO index_versions (index_id, version, owner_scope, workspace_scope, committed_at)
+     VALUES ($1,$2,$3,$4,$5)
+     ON CONFLICT (index_id, version) DO UPDATE SET committed_at = EXCLUDED.committed_at`,
+    [indexId, version, scope.ownerScope, scope.workspaceScope, updatedAt],
+  );
+
+  await client.query(
+    'UPDATE workspace_indexes SET version = $2, updated_at = $3 WHERE id = $1',
+    [indexId, version, updatedAt],
+  );
+}
+
+// ── embedding cache (GLOBAL, no RLS — see file header) ──────────────────────
+
+export async function getEmbedding(
+  client: PoolClient, model: string, version: string, contentHash: string,
+): Promise<number[] | undefined> {
+  const { rows } = await client.query<{ vector: Uint8Array; dims: number }>(
+    'SELECT vector, dims FROM embedding_cache WHERE model = $1 AND version = $2 AND content_hash = $3',
+    [model, version, contentHash],
+  );
+  const row = rows[0];
+  if (!row) return undefined;
+  return fromVectorBytes(row.vector, row.dims === null ? undefined : Number(row.dims));
+}
+
+export async function putEmbedding(
+  client: PoolClient, model: string, version: string, contentHash: string, vector: number[],
+): Promise<void> {
+  const bytes = toVectorBytes(vector);
+  await client.query(
+    `INSERT INTO embedding_cache (model, version, content_hash, dims, vector, created_at)
+     VALUES ($1,$2,$3,$4,$5,$6)
+     ON CONFLICT (model, version, content_hash) DO UPDATE SET
+       dims = EXCLUDED.dims, vector = EXCLUDED.vector, created_at = EXCLUDED.created_at`,
+    [model, version, contentHash, vector.length, bytes, Date.now()],
+  );
+}
+
+export async function pruneOlderThan(client: PoolClient, cutoffMs: number): Promise<number> {
+  const result = await client.query('DELETE FROM embedding_cache WHERE created_at < $1', [cutoffMs]);
+  return result.rowCount ?? 0;
+}

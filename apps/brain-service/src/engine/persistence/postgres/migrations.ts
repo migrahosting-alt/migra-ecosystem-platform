@@ -1,0 +1,428 @@
+/**
+ * MigraAI Engine — PostgreSQL migrations.
+ *
+ * Migrations are embedded as TypeScript rather than loose `.sql` files on
+ * purpose: `tsc` does not copy non-TS assets into `dist/`, so a file-based
+ * migration set would compile cleanly and then fail at runtime in a packaged
+ * release. Embedding makes the built artifact self-contained.
+ *
+ * Rules:
+ *   • migrations are append-only and never edited once released
+ *   • each runs inside a transaction; a failure leaves no partial version
+ *   • the applied version is recorded in `schema_meta`, mirroring the SQLite
+ *     adapter's existing precedent (`schema_meta(key, value)`)
+ *
+ * Tenant isolation is a SCHEMA property here, not a convention: every
+ * ownership-scoped table carries NOT NULL owner/workspace columns, and indexes
+ * lead with that scope so a query that forgets the filter is a sequential scan
+ * that still cannot cross a tenant boundary once RLS (migration 2) is enabled.
+ */
+
+export interface Migration {
+  version: number;
+  name: string;
+  sql: string;
+}
+
+const M1_FOUNDATION = `
+-- Version bookkeeping. Mirrors the SQLite adapter's schema_meta contract.
+CREATE TABLE IF NOT EXISTS schema_meta (
+  key   TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);
+
+-- Applied-migration ledger: which versions ran, when, and how long they took.
+-- Distinct from schema_meta so "current version" and "migration history" are
+-- separately auditable.
+CREATE TABLE IF NOT EXISTS schema_migrations (
+  version     INTEGER PRIMARY KEY,
+  name        TEXT        NOT NULL,
+  applied_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  duration_ms INTEGER     NOT NULL
+);
+
+-- Advisory-lock helper table is unnecessary; pg_advisory_lock is used directly
+-- by the runner so concurrent engine starts cannot race the same migration.
+`;
+
+/**
+ * Migration 2 establishes the tenancy primitives every scoped table will use in
+ * sub-slice 2. Defining them once here keeps every later table consistent, and
+ * makes cross-tenant access a schema-level impossibility rather than a review
+ * checklist item.
+ */
+const M2_TENANCY = `
+-- Canonical scope type. Owner and workspace are ALWAYS present together.
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'migra_scope') THEN
+    CREATE DOMAIN migra_scope AS TEXT
+      CHECK (VALUE IS NOT NULL AND length(VALUE) BETWEEN 1 AND 200);
+  END IF;
+END $$;
+
+-- Session-scoped tenant context. Row-level security policies read these, so a
+-- connection that has not declared its scope sees nothing.
+CREATE OR REPLACE FUNCTION migra_current_owner() RETURNS TEXT AS $$
+  SELECT nullif(current_setting('migrapilot.owner_scope', true), '');
+$$ LANGUAGE sql STABLE;
+
+CREATE OR REPLACE FUNCTION migra_current_workspace() RETURNS TEXT AS $$
+  SELECT nullif(current_setting('migrapilot.workspace_scope', true), '');
+$$ LANGUAGE sql STABLE;
+`;
+
+/**
+ * Group 1 — conversations, messages, summaries.
+ *
+ * Two DELIBERATE, documented differences from the SQLite schema:
+ *
+ *  1. `owner_scope` / `workspace_scope` are DENORMALISED onto messages and
+ *     summaries. SQLite scopes them transitively through `conversation_id`,
+ *     which RLS cannot express reliably — a policy that joins is a policy that
+ *     can be defeated by a planner choice or a missing index. Carrying the
+ *     scope on the row makes isolation a property of the row itself.
+ *
+ *  2. Epoch milliseconds are stored as BIGINT, not TIMESTAMPTZ. This preserves
+ *     SQLite's exact integer values, so timestamp precision needs no
+ *     normalisation at the boundary and round-trips are bit-identical.
+ *
+ * `ins_seq BIGSERIAL` replaces SQLite's implicit `rowid`, which `loadDurable`
+ * uses as the final ordering tie-break.
+ */
+const M3_CONVERSATIONS = `
+CREATE TABLE IF NOT EXISTS conversations (
+  id              TEXT PRIMARY KEY,
+  owner_scope     migra_scope NOT NULL,
+  workspace_scope migra_scope NOT NULL,
+  title           TEXT,
+  memory_mode     TEXT,
+  created_at      BIGINT,
+  updated_at      BIGINT,
+  deleted_at      BIGINT,
+  ins_seq         BIGSERIAL
+);
+
+CREATE TABLE IF NOT EXISTS conversation_messages (
+  id              TEXT PRIMARY KEY,
+  conversation_id TEXT NOT NULL,
+  owner_scope     migra_scope NOT NULL,
+  workspace_scope migra_scope NOT NULL,
+  role            TEXT,
+  content         TEXT,
+  status          TEXT,
+  request_id      TEXT,
+  model_id        TEXT,
+  provider_id     TEXT,
+  created_at      BIGINT,
+  durable         BOOLEAN,
+  supersedes_id   TEXT,
+  seq             BIGINT,
+  ins_seq         BIGSERIAL
+);
+
+CREATE TABLE IF NOT EXISTS conversation_summaries (
+  id                     TEXT PRIMARY KEY,
+  conversation_id        TEXT NOT NULL,
+  owner_scope            migra_scope NOT NULL,
+  workspace_scope        migra_scope NOT NULL,
+  source_from_message_id TEXT,
+  source_to_message_id   TEXT,
+  summary_json           TEXT,
+  version                BIGINT,
+  created_at             BIGINT,
+  ins_seq                BIGSERIAL
+);
+
+-- Scope-leading indexes: every legitimate read is scoped, so the scope belongs
+-- at the front of the key.
+CREATE INDEX IF NOT EXISTS conversations_scope_idx
+  ON conversations (owner_scope, workspace_scope, deleted_at);
+CREATE INDEX IF NOT EXISTS conversation_messages_scope_order_idx
+  ON conversation_messages (owner_scope, workspace_scope, conversation_id, seq, ins_seq);
+CREATE INDEX IF NOT EXISTS conversation_summaries_scope_order_idx
+  ON conversation_summaries (owner_scope, workspace_scope, conversation_id, version);
+
+-- ── Row-level security ─────────────────────────────────────────────────────
+-- The FINAL enforcement layer, not a second predicate. A query that forgets its
+-- owner filter returns nothing rather than everything, and an unset scope
+-- (NULL) matches no row because NULL = anything is never true.
+ALTER TABLE conversations           ENABLE ROW LEVEL SECURITY;
+ALTER TABLE conversation_messages   ENABLE ROW LEVEL SECURITY;
+ALTER TABLE conversation_summaries  ENABLE ROW LEVEL SECURITY;
+
+-- FORCE so the table owner is subject to policy too; without it a superuser or
+-- owner connection silently bypasses the boundary we are relying on.
+ALTER TABLE conversations           FORCE ROW LEVEL SECURITY;
+ALTER TABLE conversation_messages   FORCE ROW LEVEL SECURITY;
+ALTER TABLE conversation_summaries  FORCE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS conversations_scope ON conversations;
+CREATE POLICY conversations_scope ON conversations
+  USING (owner_scope = migra_current_owner() AND workspace_scope = migra_current_workspace())
+  WITH CHECK (owner_scope = migra_current_owner() AND workspace_scope = migra_current_workspace());
+
+DROP POLICY IF EXISTS conversation_messages_scope ON conversation_messages;
+CREATE POLICY conversation_messages_scope ON conversation_messages
+  USING (owner_scope = migra_current_owner() AND workspace_scope = migra_current_workspace())
+  WITH CHECK (owner_scope = migra_current_owner() AND workspace_scope = migra_current_workspace());
+
+DROP POLICY IF EXISTS conversation_summaries_scope ON conversation_summaries;
+CREATE POLICY conversation_summaries_scope ON conversation_summaries
+  USING (owner_scope = migra_current_owner() AND workspace_scope = migra_current_workspace())
+  WITH CHECK (owner_scope = migra_current_owner() AND workspace_scope = migra_current_workspace());
+`;
+
+/**
+ * The application role.
+ *
+ * CRITICAL: PostgreSQL superusers — and any role with BYPASSRLS — ignore row
+ * level security completely. `FORCE ROW LEVEL SECURITY` does not change that.
+ * A Brain connected as `postgres` therefore has NO tenant isolation whatsoever,
+ * while every policy still appears correctly configured in the catalogue.
+ *
+ * This was caught by the "RLS is the final layer" test, which failed while the
+ * flags and policies all looked right.
+ *
+ * `migrapilot_app` is NOLOGIN by design: migrations must not invent
+ * credentials. Provisioning grants it to a login role, or gives it LOGIN with a
+ * managed password, per MigraTeck database standards.
+ */
+const M4_APP_ROLE = `
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'migrapilot_app') THEN
+    CREATE ROLE migrapilot_app NOLOGIN NOBYPASSRLS;
+  ELSE
+    ALTER ROLE migrapilot_app NOBYPASSRLS;
+  END IF;
+END $$;
+
+GRANT USAGE ON SCHEMA public TO migrapilot_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON conversations          TO migrapilot_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON conversation_messages  TO migrapilot_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON conversation_summaries TO migrapilot_app;
+GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO migrapilot_app;
+
+-- Read-only on bookkeeping: the app reports schema version but never rewrites it.
+GRANT SELECT ON schema_meta        TO migrapilot_app;
+GRANT SELECT ON schema_migrations  TO migrapilot_app;
+
+-- Future tables created by later migrations inherit these grants.
+ALTER DEFAULT PRIVILEGES IN SCHEMA public
+  GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO migrapilot_app;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public
+  GRANT USAGE, SELECT ON SEQUENCES TO migrapilot_app;
+`;
+
+/**
+ * Group 2 — memory items, workspaces, workspace indexes.
+ *
+ * Deliberate, documented differences from SQLite:
+ *
+ *  1. Scope columns are NOT NULL. `MemoryItem.scope` marks owner/workspace as
+ *     optional, and SQLite happily stores NULLs — but a NULL-scoped row under
+ *     RLS is either invisible to everyone or visible to everyone, and neither
+ *     is a defensible answer. The adapter refuses to persist an unscoped item.
+ *
+ *  2. `workspace_indexes` gains `workspace_scope`. SQLite carries only
+ *     `owner_scope`, which would let a caller who learns another tenant's
+ *     workspace id reach its indexes. Both dimensions are now required.
+ */
+const M5_MEMORY_WORKSPACES = `
+CREATE TABLE IF NOT EXISTS memory_items (
+  id              TEXT PRIMARY KEY,
+  owner_scope     migra_scope NOT NULL,
+  workspace_scope migra_scope NOT NULL,
+  category        TEXT,
+  content         TEXT,
+  confidence      DOUBLE PRECISION,
+  source_type     TEXT,
+  source_id       TEXT,
+  expires_at      BIGINT,
+  created_at      BIGINT,
+  ins_seq         BIGSERIAL
+);
+
+CREATE TABLE IF NOT EXISTS workspaces (
+  id                   TEXT PRIMARY KEY,
+  owner_scope          migra_scope NOT NULL,
+  workspace_scope      migra_scope NOT NULL,
+  name                 TEXT,
+  root                 TEXT,
+  git_repo             TEXT,
+  git_branch           TEXT,
+  memory_mode          TEXT,
+  index_id             TEXT,
+  provider_preferences TEXT,
+  permissions          TEXT,
+  last_sync_at         BIGINT,
+  created_at           BIGINT,
+  updated_at           BIGINT,
+  ins_seq              BIGSERIAL
+);
+
+CREATE TABLE IF NOT EXISTS workspace_indexes (
+  id                TEXT PRIMARY KEY,
+  workspace_id      TEXT,
+  owner_scope       migra_scope NOT NULL,
+  workspace_scope   migra_scope NOT NULL,
+  source_type       TEXT,
+  root              TEXT,
+  state             TEXT,
+  version           BIGINT,
+  embedding_model   TEXT,
+  embedding_version TEXT,
+  created_at        BIGINT,
+  updated_at        BIGINT,
+  approved_version  BIGINT,
+  ins_seq           BIGSERIAL
+);
+
+CREATE INDEX IF NOT EXISTS memory_items_scope_idx
+  ON memory_items (owner_scope, workspace_scope, created_at);
+CREATE INDEX IF NOT EXISTS workspaces_scope_idx
+  ON workspaces (owner_scope, workspace_scope, id);
+CREATE INDEX IF NOT EXISTS workspace_indexes_scope_idx
+  ON workspace_indexes (owner_scope, workspace_scope, workspace_id);
+
+ALTER TABLE memory_items      ENABLE ROW LEVEL SECURITY;
+ALTER TABLE workspaces        ENABLE ROW LEVEL SECURITY;
+ALTER TABLE workspace_indexes ENABLE ROW LEVEL SECURITY;
+ALTER TABLE memory_items      FORCE ROW LEVEL SECURITY;
+ALTER TABLE workspaces        FORCE ROW LEVEL SECURITY;
+ALTER TABLE workspace_indexes FORCE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS memory_items_scope ON memory_items;
+CREATE POLICY memory_items_scope ON memory_items
+  USING (owner_scope = migra_current_owner() AND workspace_scope = migra_current_workspace())
+  WITH CHECK (owner_scope = migra_current_owner() AND workspace_scope = migra_current_workspace());
+
+DROP POLICY IF EXISTS workspaces_scope ON workspaces;
+CREATE POLICY workspaces_scope ON workspaces
+  USING (owner_scope = migra_current_owner() AND workspace_scope = migra_current_workspace())
+  WITH CHECK (owner_scope = migra_current_owner() AND workspace_scope = migra_current_workspace());
+
+DROP POLICY IF EXISTS workspace_indexes_scope ON workspace_indexes;
+CREATE POLICY workspace_indexes_scope ON workspace_indexes
+  USING (owner_scope = migra_current_owner() AND workspace_scope = migra_current_workspace())
+  WITH CHECK (owner_scope = migra_current_owner() AND workspace_scope = migra_current_workspace());
+
+GRANT SELECT, INSERT, UPDATE, DELETE ON memory_items      TO migrapilot_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON workspaces        TO migrapilot_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON workspace_indexes TO migrapilot_app;
+GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO migrapilot_app;
+`;
+
+/**
+ * Group 3 — RAG: index versions, chunks, embedding cache.
+ *
+ * NO pgvector. Justified by the actual query path, not by availability:
+ * `RagIndexPersistence` exposes only `loadChunks(indexId, version)`, a bulk
+ * version-scoped load. Similarity ranking happens OUTSIDE the store, in
+ * `engine/rag/vectorIndex.ts` and `hybridRetriever.ts`. The store is a
+ * byte-faithful vector container, so vectors are stored as BYTEA holding the
+ * identical little-endian Float32 encoding SQLite uses. Round-trips are
+ * bit-identical and no distance metric is implied. ANN indexing (HNSW/IVFFlat)
+ * belongs to a later performance slice, once a similarity path exists here.
+ *
+ * `embedding_cache` is GLOBAL-SAFE and deliberately has no RLS — see
+ * ragRepo.ts for the field-by-field justification and its one caveat.
+ */
+const M6_RAG = `
+CREATE TABLE IF NOT EXISTS index_versions (
+  index_id        TEXT NOT NULL,
+  version         BIGINT NOT NULL,
+  owner_scope     migra_scope NOT NULL,
+  workspace_scope migra_scope NOT NULL,
+  committed_at    BIGINT,
+  PRIMARY KEY (index_id, version)
+);
+
+CREATE TABLE IF NOT EXISTS index_chunks (
+  id                TEXT PRIMARY KEY,
+  index_id          TEXT,
+  workspace_id      TEXT,
+  owner_scope       migra_scope NOT NULL,
+  workspace_scope   migra_scope NOT NULL,
+  file_path         TEXT,
+  language          TEXT,
+  symbol            TEXT,
+  start_line        BIGINT,
+  end_line          BIGINT,
+  content_hash      TEXT,
+  embedding_model   TEXT,
+  embedding_version TEXT,
+  indexed_at        BIGINT,
+  text              TEXT,
+  vector            BYTEA,
+  index_version     BIGINT,
+  ins_seq           BIGSERIAL
+);
+
+-- GLOBAL-SAFE: no tenant identifier, no source text, no path, no provenance.
+-- Keyed by (model, version, content_hash); the value is a deterministic
+-- function of content the caller already holds. No RLS by design.
+CREATE TABLE IF NOT EXISTS embedding_cache (
+  model        TEXT NOT NULL,
+  version      TEXT NOT NULL,
+  content_hash TEXT NOT NULL,
+  dims         INTEGER,
+  vector       BYTEA,
+  created_at   BIGINT,
+  PRIMARY KEY (model, version, content_hash)
+);
+
+CREATE INDEX IF NOT EXISTS index_chunks_scope_version_idx
+  ON index_chunks (owner_scope, workspace_scope, index_id, index_version);
+CREATE INDEX IF NOT EXISTS index_versions_scope_idx
+  ON index_versions (owner_scope, workspace_scope, index_id, version);
+CREATE INDEX IF NOT EXISTS embedding_cache_created_idx
+  ON embedding_cache (created_at);
+
+ALTER TABLE index_versions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE index_chunks   ENABLE ROW LEVEL SECURITY;
+ALTER TABLE index_versions FORCE ROW LEVEL SECURITY;
+ALTER TABLE index_chunks   FORCE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS index_versions_scope ON index_versions;
+CREATE POLICY index_versions_scope ON index_versions
+  USING (owner_scope = migra_current_owner() AND workspace_scope = migra_current_workspace())
+  WITH CHECK (owner_scope = migra_current_owner() AND workspace_scope = migra_current_workspace());
+
+DROP POLICY IF EXISTS index_chunks_scope ON index_chunks;
+CREATE POLICY index_chunks_scope ON index_chunks
+  USING (owner_scope = migra_current_owner() AND workspace_scope = migra_current_workspace())
+  WITH CHECK (owner_scope = migra_current_owner() AND workspace_scope = migra_current_workspace());
+
+GRANT SELECT, INSERT, UPDATE, DELETE ON index_versions  TO migrapilot_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON index_chunks    TO migrapilot_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON embedding_cache TO migrapilot_app;
+GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO migrapilot_app;
+`;
+
+export const MIGRATIONS: readonly Migration[] = [
+  { version: 1, name: 'foundation', sql: M1_FOUNDATION },
+  { version: 2, name: 'tenancy_primitives', sql: M2_TENANCY },
+  { version: 3, name: 'conversations', sql: M3_CONVERSATIONS },
+  { version: 4, name: 'app_role', sql: M4_APP_ROLE },
+  { version: 5, name: 'memory_workspaces', sql: M5_MEMORY_WORKSPACES },
+  { version: 6, name: 'rag', sql: M6_RAG },
+];
+
+/** Highest version defined in code. */
+export function latestVersion(): number {
+  return MIGRATIONS.reduce((max, m) => (m.version > max ? m.version : max), 0);
+}
+
+/**
+ * Target schema version for the PostgreSQL adapter.
+ *
+ * DERIVED, never hand-maintained — a hand-written constant drifts from the
+ * migration list the first time someone appends a migration and forgets it.
+ *
+ * Deliberately independent of the SQLite adapter's `SCHEMA_VERSION` (7): the two
+ * adapters evolve separately, and pinning them together would force a migration
+ * in one because the other changed.
+ */
+export const PG_SCHEMA_VERSION = latestVersion();

@@ -60,6 +60,8 @@ import { registerMemoryRoutes } from './engine/memory/memoryRoutes.js';
 import { ConversationStore } from './engine/memory/conversationStore.js';
 import { QualificationStore } from './engine/qualificationStore.js';
 import { SqliteDurableStore } from './engine/persistence/sqliteStore.js';
+import type { DurableStore } from './engine/persistence/types.js';
+import { resolvePersistence, PersistenceConfigError } from './engine/persistence/persistenceConfig.js';
 import { wireOperationalPersistence } from './engine/persistence/operationalBridge.js';
 import { OperationalMaintenance, buildRetentionConfig } from './engine/persistence/operationalMaintenance.js';
 import { auditStore } from './engine/auditLog.js';
@@ -85,11 +87,13 @@ const env = readEnv();
 const agentActivation = AgentActivationAuthority.fromEnvironment(process.env);
 const providerRegistry = new ProviderRegistry(env);
 
-/** Durable state adapter (SQLite). Undefined ⇒ persistence unavailable/disabled;
+/** Durable state adapter, selected by MIGRAPILOT_PERSISTENCE. Undefined ⇒ persistence unavailable/disabled;
  * the engine still runs (session + inference) but /health reports it and durable
  * memory/indexes do NOT silently appear empty-as-ready. */
-let durable: SqliteDurableStore | undefined;
+let durable: DurableStore | undefined;
 let durableError: string | undefined;
+/** Which adapter was selected. Read by /health, so it lives at module scope. */
+let selectionKind: 'postgres' | 'sqlite' | 'off' = 'sqlite';
 /** Operational retention + integrity + health (ODF Slice 1). Present only when a
  * durable store is present; owns the retention worker + shutdown of it. */
 let opMaintenance: OperationalMaintenance | undefined;
@@ -114,7 +118,7 @@ async function getHealth(): Promise<HealthResponse> {
   const inferenceReady = defaultOk || cheapOk || localOk;
 
   // Persistence readiness — a running process is NOT proof of full readiness.
-  const memoryDisabled = process.env.MIGRAPILOT_STATE_DB === 'off';
+  const memoryDisabled = selectionKind === 'off';
   const persistence = durable
     ? durable.health()
     : {
@@ -232,20 +236,68 @@ async function main(): Promise<void> {
     defaultModel: process.env.MIGRAPILOT_AGENT_MODEL ?? 'qwen3-coder:30b',
     cloudModel: process.env.MIGRAPILOT_AGENT_CLOUD_MODEL ?? 'gpt-oss:120b-cloud',
   });
-  // ── Durable state (MigraAI Durable State): embedded SQLite adapter. Fail-
-  // closed — if the DB can't open or the schema is incompatible, `durable` stays
-  // undefined and /health reports persistence degraded/unavailable rather than
-  // silently serving empty durable memory/indexes. ──
-  const memoryDisabled = process.env.MIGRAPILOT_STATE_DB === 'off';
-  const dbPath = memoryDisabled ? '' : (process.env.MIGRAPILOT_STATE_DB ?? path.join(process.cwd(), 'migraai-state.db'));
-  if (!memoryDisabled) {
+  // ── Durable state (MigraAI Durable State) ──────────────────────────────────
+  // The adapter is chosen explicitly (MIGRAPILOT_PERSISTENCE); PostgreSQL is the
+  // production architecture and SQLite is a local/dev/test adapter.
+  //
+  // Two different failure modes, deliberately handled differently:
+  //
+  //   MISCONFIGURATION is fatal. `resolvePersistence` throws when production
+  //   would reach a local database, and that must abort startup — a Brain that
+  //   silently serves VM-local state looks healthy while its data diverges.
+  //
+  //   AN UNAVAILABLE STORE is degraded, not fatal. If a correctly-configured
+  //   database cannot be opened, `durable` stays undefined and /health reports
+  //   it, preserving the existing fail-closed behaviour rather than serving
+  //   empty durable memory as if it were ready.
+  let selection: ReturnType<typeof resolvePersistence>;
+  try {
+    selection = resolvePersistence(process.env, process.cwd());
+  } catch (error) {
+    if (error instanceof PersistenceConfigError) {
+      app.log.fatal({ err: error.message }, 'persistence misconfigured — refusing to start');
+      throw error;
+    }
+    throw error;
+  }
+  app.log.info({ persistence: selection.kind, reason: selection.reason }, 'durable persistence selected');
+  selectionKind = selection.kind;
+
+  const memoryDisabled = selection.kind === 'off';
+  // ⚠ TRANSITIONAL DEBT — must be resolved before Sub-slice 2 closes.
+  //
+  // OperationalMaintenance requires `probeWriteLatencyMs` and a database FILE
+  // path, neither of which belongs to the DurableStore contract. Holding a
+  // concretely-typed SQLite handle keeps that SQLite-shaped assumption visible
+  // and local, rather than widening the shared interface prematurely.
+  //
+  // It must NOT become a permanent instanceof-style fork. Resolve it by either
+  // (a) moving the capability onto a narrow optional interface — e.g.
+  // `MaintainableStore` — that any adapter may implement, or (b) giving the
+  // Postgres adapter an equivalent implementation.
+  //
+  // Consequence while this stands: operational maintenance does not run under
+  // Postgres. Acceptable only because the Postgres adapter is itself
+  // incomplete; it becomes a correctness gap the moment sub-slice 2 lands.
+  let sqliteDurable: SqliteDurableStore | undefined;
+  if (selection.kind === 'sqlite') {
     try {
-      durable = new SqliteDurableStore(dbPath);
+      sqliteDurable = new SqliteDurableStore(selection.sqlitePath!);
+      durable = sqliteDurable;
     } catch (error) {
       durable = undefined;
       durableError = error instanceof Error ? error.message : String(error);
       app.log.error({ err: durableError }, 'durable store unavailable — engine starting in DEGRADED persistence state');
     }
+  } else if (selection.kind === 'postgres') {
+    // Sub-slice 1 delivers connection, migration and readiness only; the
+    // DurableStore data methods land in sub-slice 2. Until then this refuses
+    // rather than presenting a half-implemented store as usable.
+    durable = undefined;
+    durableError =
+      'PostgreSQL adapter selected but its DurableStore implementation is not yet available (sub-slice 2). ' +
+      'Refusing to fall back to SQLite.';
+    app.log.error({ err: durableError }, 'postgres persistence selected but adapter incomplete');
   }
 
   // MigraAI Engine conversation memory (/api/ai/conversations): the engine owns
@@ -312,11 +364,18 @@ async function main(): Promise<void> {
     // Retention + integrity + health. Verify integrity on startup (reported via
     // health, never a crash — the engine continues with whatever survived), then
     // start the age-based retention worker.
-    opMaintenance = new OperationalMaintenance(durable, buildRetentionConfig(process.env), () => Date.now(), dbPath);
-    const integrity = opMaintenance.verifyIntegrity();
-    if (integrity !== 'ok') app.log.error({ integrity }, 'durable operational store integrity check FAILED — continuing in degraded state');
-    opMaintenance.start();
-    app.log.info('Operational retention worker STARTED (age-based; open incidents never pruned).');
+    if (sqliteDurable) {
+      opMaintenance = new OperationalMaintenance(
+        sqliteDurable,
+        buildRetentionConfig(process.env),
+        () => Date.now(),
+        selection.sqlitePath,
+      );
+      const integrity = opMaintenance.verifyIntegrity();
+      if (integrity !== 'ok') app.log.error({ integrity }, 'durable operational store integrity check FAILED — continuing in degraded state');
+      opMaintenance.start();
+      app.log.info('Operational retention worker STARTED (age-based; open incidents never pruned).');
+    }
     // Shutdown: stop the retention worker + close the durable store cleanly.
     app.addHook('onClose', async () => { opMaintenance?.close(); durable?.close(); });
   }
