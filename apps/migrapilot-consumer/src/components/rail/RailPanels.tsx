@@ -2,11 +2,7 @@
 
 import type { ReactNode } from 'react'
 import Link from 'next/link'
-import { Check } from 'lucide-react'
 import { Card } from '@/components/ui/Card'
-import { StatusOrb } from '@/components/ui/Progress'
-import { FileTypeIcon, extensionOf } from '@/components/ui/FileTypeIcon'
-import { uploadedFiles } from '@/data/mock'
 import { cn } from '@/lib/cn'
 
 export function RailCard({
@@ -50,54 +46,12 @@ export function RailLink({ href, children }: { href: string; children: ReactNode
   )
 }
 
-export function AssistantStatusPanel() {
-  return (
-    <RailCard title="Assistant Status">
-      <p className="flex items-center gap-2 text-[15px] font-semibold text-emerald-600">
-        <span className="relative flex h-2.5 w-2.5">
-          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-60" />
-          <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-emerald-500" />
-        </span>
-        Online
-      </p>
-      <p className="mt-3 text-[15px] leading-relaxed text-slate-600">
-        MigraPilot is ready to help you today.
-      </p>
-      <StatusOrb className="mt-4">
-        <Check className="h-8 w-8" strokeWidth={3} />
-      </StatusOrb>
-    </RailCard>
-  )
-}
+/* AssistantStatusPanel and RecentFilesPanel were REMOVED 2026-08-15.
+ * They rendered a hardcoded "Online" status and three invented documents
+ * (Migration Plan.pdf etc.) to signed-out visitors on a public site. Neither was
+ * backed by anything real. Reinstate only when a genuine Brain health probe and
+ * a real per-principal file list exist. Do not restore the mock versions. */
 
-export function RecentFilesPanel() {
-  return (
-    <RailCard title="Recent Files" action={<RailLink href="/files">View all</RailLink>}>
-      <ul className="flex flex-col gap-1">
-        {uploadedFiles.map((file) => (
-          <li key={file.id}>
-            <Link
-              href="/files"
-              className="flex items-center gap-3 rounded-lg p-2 transition-colors hover:bg-slate-50"
-            >
-              <FileTypeIcon name={file.name} />
-              <span className="min-w-0">
-                <span className="block truncate text-sm font-semibold text-slate-800">
-                  {file.name}
-                </span>
-                <span className="block text-xs text-slate-400 uppercase">
-                  {extensionOf(file.name)} • {file.size}
-                </span>
-              </span>
-            </Link>
-          </li>
-        ))}
-      </ul>
-    </RailCard>
-  )
-}
-
-/** Row with an icon tile, a title/subtitle stack and a trailing chevron. */
 export function ActionRow({
   icon,
   title,

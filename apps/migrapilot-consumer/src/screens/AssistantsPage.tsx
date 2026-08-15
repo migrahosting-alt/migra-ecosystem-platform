@@ -12,7 +12,6 @@ import {
 } from 'lucide-react'
 import { Workspace } from '@/components/layout/AppShell'
 import { RailCard } from '@/components/rail/RailPanels'
-import { AssistantStatusPanel } from '@/components/rail/RailPanels'
 import { IconTile, toneStyles } from '@/components/ui/Badge'
 import { assistants } from '@/data/mock'
 import { useChat } from '@/state/ChatProvider'
@@ -39,7 +38,6 @@ export function AssistantsPage() {
       contentClassName="mx-auto w-full max-w-[880px] px-6 py-7 sm:px-8"
       rail={
         <>
-          <AssistantStatusPanel />
           <RailCard title="About Assistants">
             <p className="text-sm leading-relaxed text-slate-600">
               Assistants are saved configurations — a role, a tone, and a set of grounding sources.

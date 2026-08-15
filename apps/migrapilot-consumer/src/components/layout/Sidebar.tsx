@@ -3,11 +3,8 @@
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import {
-  ChevronRight,
-  Compass,
   FileText,
   FolderKanban,
-  Gem,
   History,
   Plus,
   Settings,
@@ -16,7 +13,6 @@ import {
 import { cn } from '@/lib/cn'
 
 const navItems = [
-  { to: '/explore', label: 'Explore', icon: Compass },
   { to: '/projects', label: 'Projects', icon: FolderKanban },
   { to: '/files', label: 'Files', icon: FileText },
   { to: '/assistants', label: 'Assistants', icon: Users },
@@ -70,19 +66,6 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
         })}
       </nav>
 
-      <div className="mt-auto rounded-2xl border border-brand-100 bg-linear-to-b from-brand-50/90 to-brand-50/40 p-5">
-        <p className="flex items-center gap-2 text-[15px] font-semibold text-brand-700">
-          <Gem className="h-[18px] w-[18px]" strokeWidth={2} />
-          Upgrade to Pro
-        </p>
-        <p className="mt-2.5 text-sm leading-relaxed text-slate-600">
-          Unlock advanced features and higher limits.
-        </p>
-        <button className="mt-4 inline-flex h-11 w-full items-center justify-center gap-2 rounded-field border border-brand-200 bg-white text-sm font-semibold text-brand-700 transition-colors hover:border-brand-300 hover:bg-brand-50">
-          Upgrade Now
-          <ChevronRight className="h-4 w-4" strokeWidth={2.5} />
-        </button>
-      </div>
     </div>
   )
 }

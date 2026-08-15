@@ -11,7 +11,7 @@ import {
 } from 'react'
 import { conversations as seedConversations } from '@/data/mock'
 import type { Conversation, Message } from '@/data/types'
-import { demoReply, titleFromPrompt } from './demoResponder'
+import { titleFromPrompt } from './demoResponder'
 
 interface ChatContextValue {
   conversations: Conversation[]
@@ -24,8 +24,6 @@ interface ChatContextValue {
 
 const ChatContext = createContext<ChatContextValue | null>(null)
 
-const REPLY_DELAY_MS = 900
-
 function clockTime() {
   return new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
 }
@@ -35,18 +33,33 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const [pendingIn, setPendingIn] = useState<string | null>(null)
   const counter = useRef(0)
 
-  const appendReply = useCallback((conversationId: string, prompt: string) => {
+  /**
+   * Honest placeholder while the real Brain path is being wired.
+   *
+   * This previously called `demoReply()` and, after a 900 ms fake "thinking"
+   * delay, rendered an invented assistant answer — on a PUBLIC site. That is a
+   * fabricated capability claim, so it is gone.
+   *
+   * `callBrain()` refuses without a session ("No session, no Brain call") and
+   * derives tenancy from the principal, so real answers cannot land until
+   * MigraAuth exists. Until then this states the truth rather than simulating
+   * an assistant. Replace this whole function with the `chatTurn` seam — do not
+   * reintroduce a local responder.
+   */
+  const appendReply = useCallback((conversationId: string) => {
     setPendingIn(conversationId)
 
     window.setTimeout(() => {
-      const reply = demoReply(prompt)
       const message: Message = {
         id: `a-${Date.now()}`,
         role: 'assistant',
         time: clockTime(),
-        blocks: reply.blocks,
-        sources: reply.sources,
-        action: reply.action,
+        blocks: [
+          {
+            type: 'paragraph',
+            text: "MigraPilot's AI isn't connected to this page yet. Sign-in and the live model are being wired up now — your message wasn't sent to a model, and nothing here is a generated answer.",
+          },
+        ],
       }
 
       setConversations((current) =>
@@ -57,7 +70,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         ),
       )
       setPendingIn(null)
-    }, REPLY_DELAY_MS)
+    }, 250)
   }, [])
 
   const startConversation = useCallback(
@@ -78,7 +91,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       }
 
       setConversations((current) => [conversation, ...current])
-      appendReply(id, prompt)
+      appendReply(id)
       return id
     },
     [appendReply],
@@ -101,7 +114,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
             : conversation,
         ),
       )
-      appendReply(conversationId, prompt)
+      appendReply(conversationId)
     },
     [appendReply],
   )

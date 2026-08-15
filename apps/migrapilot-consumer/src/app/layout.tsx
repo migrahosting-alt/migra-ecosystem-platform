@@ -2,28 +2,47 @@ import type { Metadata, Viewport } from 'next'
 import './globals.css'
 import { AppShell } from '@/components/layout/AppShell'
 import { ChatProvider } from '@/state/ChatProvider'
+import { getSession, toPublicSession } from '@/server/auth'
 
 /**
  * Root layout — a Server Component.
  *
- * It renders no Brain data and holds no session logic; the shell below it is a
- * client component. Server data flows in later through page-level Server
- * Components calling `src/server/brain/seams.ts`, never through the browser.
+ * It renders no Brain data. It DOES resolve the session, because identity is
+ * the one thing the shell cannot honestly render without: `getSession()` never
+ * throws for the unauthenticated case, and `toPublicSession` narrows the result
+ * to the token-free shape a client component is allowed to receive.
+ *
+ * Brain data still flows in later through page-level Server Components calling
+ * `src/server/brain/seams.ts`, never through the browser.
  */
 export const metadata: Metadata = {
-  title: 'MigraPilot',
+  /* `default` names a bare page; `template` brands every nested route. */
+  title: { default: 'MigraPilot', template: '%s · MigraPilot' },
+  applicationName: 'MigraPilot',
   description:
     'MigraPilot — your AI assistant for smarter answers, simpler workflows, and better results.',
-  icons: { icon: '/favicon.svg' },
+  /* Icons are resolved from src/app/{icon,apple-icon,favicon.ico}, which are
+   * generated from the official brand mark. Declaring paths here too would
+   * duplicate them, so the convention files are left to do the work. */
+  openGraph: {
+    title: 'MigraPilot',
+    siteName: 'MigraPilot',
+    description:
+      'MigraPilot — your AI assistant for smarter answers, simpler workflows, and better results.',
+    type: 'website',
+  },
 }
 
 export const viewport: Viewport = {
-  themeColor: '#2563eb',
+  themeColor: '#2060e0',
   width: 'device-width',
   initialScale: 1,
 }
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  const session = await getSession()
+  const publicSession = session ? toPublicSession(session) : null
+
   return (
     <html lang="en">
       <head>
@@ -36,7 +55,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       </head>
       <body>
         <ChatProvider>
-          <AppShell>{children}</AppShell>
+          <AppShell session={publicSession}>{children}</AppShell>
         </ChatProvider>
       </body>
     </html>

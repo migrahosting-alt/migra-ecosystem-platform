@@ -5,7 +5,6 @@ import { ArrowRight, BarChart3, Lightbulb, PencilLine, ScrollText } from 'lucide
 import { Workspace } from '@/components/layout/AppShell'
 import { LogoMark } from '@/components/brand/Logo'
 import { Composer, ComposerDisclaimer } from '@/components/chat/Composer'
-import { AssistantStatusPanel, RecentFilesPanel } from '@/components/rail/RailPanels'
 import { IconTile } from '@/components/ui/Badge'
 import { useChat } from '@/state/ChatProvider'
 
@@ -44,12 +43,6 @@ export function WelcomePage() {
 
   return (
     <Workspace
-      rail={
-        <>
-          <AssistantStatusPanel />
-          <RecentFilesPanel />
-        </>
-      }
       contentClassName="mx-auto flex min-h-full w-full max-w-[820px] flex-col px-6 py-8 sm:px-8"
     >
       <div className="flex flex-1 flex-col items-center justify-center pb-8 text-center">

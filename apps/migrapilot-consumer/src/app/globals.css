@@ -9,16 +9,24 @@
   --font-sans:
     'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
 
-  /* Brand blue — the single accent that carries every primary action */
+  /* Brand blue — sampled from the official MigraPilot mark, not invented.
+   * The logo's dominant body colours measure #3080F0 (mid) and #2060E0 (deep);
+   * 500/600 are set to those so the UI accent and the mark are the same blue. */
   --color-brand-50: #eff6ff;
   --color-brand-100: #dbeafe;
   --color-brand-200: #bfdbfe;
   --color-brand-300: #93c5fd;
-  --color-brand-400: #60a5fa;
-  --color-brand-500: #3b82f6;
-  --color-brand-600: #2563eb;
-  --color-brand-700: #1d4ed8;
-  --color-brand-800: #1e40af;
+  --color-brand-400: #4090f0;
+  --color-brand-500: #3080f0;
+  --color-brand-600: #2060e0;
+  --color-brand-700: #1b4fc4;
+  --color-brand-800: #17409f;
+
+  /* Cyan/teal secondary — the lit edge of the mark (#60C0F0). Used sparingly for
+   * highlights; the multicolour prism in the logo is deliberately NOT themed. */
+  --color-accent-300: #9ad9f8;
+  --color-accent-400: #60c0f0;
+  --color-accent-500: #2aa8e0;
 
   /* Product canvas */
   --color-canvas: #ffffff;
@@ -31,7 +39,7 @@
   --shadow-card: 0 1px 2px rgb(15 23 42 / 0.04), 0 1px 3px rgb(15 23 42 / 0.03);
   --shadow-raised: 0 4px 16px -4px rgb(15 23 42 / 0.1), 0 2px 6px -2px rgb(15 23 42 / 0.06);
   --shadow-modal: 0 24px 64px -12px rgb(15 23 42 / 0.25), 0 8px 24px -8px rgb(15 23 42 / 0.12);
-  --shadow-brand: 0 6px 16px -6px rgb(37 99 235 / 0.5);
+  --shadow-brand: 0 6px 16px -6px rgb(32 96 224 / 0.45);
 }
 
 @layer base {

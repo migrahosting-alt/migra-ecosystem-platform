@@ -1,12 +1,11 @@
 'use client'
 
 import { useState, type ReactNode } from 'react'
-import { Gem, ShieldCheck } from 'lucide-react'
+import { ShieldCheck } from 'lucide-react'
 import { Workspace } from '@/components/layout/AppShell'
 import { RailCard } from '@/components/rail/RailPanels'
 import { Avatar } from '@/components/ui/Avatar'
 import { Button } from '@/components/ui/Button'
-import { Badge } from '@/components/ui/Badge'
 import { currentUser, scopeRequest } from '@/data/mock'
 import { cn } from '@/lib/cn'
 
@@ -94,25 +93,6 @@ export function SettingsPage() {
       contentClassName="mx-auto w-full max-w-[880px] px-6 py-7 sm:px-8"
       rail={
         <>
-          <RailCard title="Plan">
-            <div className="flex items-center justify-between">
-              <span className="text-[15px] text-slate-600">Current plan</span>
-              <Badge tone="slate">{currentUser.plan}</Badge>
-            </div>
-            <div className="mt-4 rounded-xl border border-brand-100 bg-brand-50/60 p-4">
-              <p className="flex items-center gap-2 text-sm font-semibold text-brand-700">
-                <Gem className="h-4 w-4" strokeWidth={2} />
-                Upgrade to Pro
-              </p>
-              <p className="mt-1.5 text-[13px] leading-relaxed text-slate-600">
-                Higher run limits, longer retention, and priority validation.
-              </p>
-              <Button size="sm" className="mt-3 w-full">
-                Upgrade Now
-              </Button>
-            </div>
-          </RailCard>
-
           <RailCard title="Governance">
             <p className="flex items-start gap-2.5 text-[13px] leading-relaxed text-slate-600">
               <ShieldCheck className="mt-0.5 h-4.5 w-4.5 shrink-0 text-brand-600" strokeWidth={2} />

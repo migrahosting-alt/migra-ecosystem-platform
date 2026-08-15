@@ -5,9 +5,21 @@ import { usePathname } from 'next/navigation'
 import { X } from 'lucide-react'
 import { Sidebar } from './Sidebar'
 import { TopBar } from './TopBar'
+import type { PublicSession } from '@/server/auth'
 import { cn } from '@/lib/cn'
 
-export function AppShell({ children }: { children: ReactNode }) {
+/**
+ * `session` is resolved on the server and passed down. It is `PublicSession`,
+ * never `AppSession` — no tokens or tenancy material crosses to the browser.
+ * `null` means genuinely unauthenticated and must render as such.
+ */
+export function AppShell({
+  children,
+  session,
+}: {
+  children: ReactNode
+  session: PublicSession | null
+}) {
   const [navOpen, setNavOpen] = useState(false)
   const pathname = usePathname()
 
@@ -15,7 +27,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   return (
     <div className="flex h-dvh flex-col overflow-hidden bg-canvas">
-      <TopBar onOpenNav={() => setNavOpen(true)} />
+      <TopBar onOpenNav={() => setNavOpen(true)} session={session} />
 
       <div className="flex min-h-0 flex-1">
         <aside className="hidden lg:block">
