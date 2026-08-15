@@ -120,7 +120,7 @@ async function getHealth(): Promise<HealthResponse> {
   // Persistence readiness — a running process is NOT proof of full readiness.
   const memoryDisabled = selectionKind === 'off';
   const persistence = durable
-    ? durable.health()
+    ? await durable.health()
     : {
         memoryStore: 'unavailable' as const,
         ragStore: 'unavailable' as const,
@@ -131,6 +131,13 @@ async function getHealth(): Promise<HealthResponse> {
   // Fail-closed: durable state expected (not explicitly disabled) but not ready ⇒
   // DEGRADED — the engine never reports full "ok" on missing persistence.
   const persistenceExpectedButNotReady = !memoryDisabled && persistence.memoryStore !== 'ready';
+
+  // `health()` became Promise-returning in the durable persistence migration.
+  // Awaited here rather than inside the response literal, where an un-awaited
+  // Promise would have serialized as `{}` and reported empty operational health.
+  const operational = opMaintenance
+    ? await opMaintenance.health()
+    : { status: memoryDisabled ? ('disabled' as const) : ('unavailable' as const) };
 
   const baseStatus: HealthResponse['status'] =
     env.mode === 'offline' ? (localOk ? 'ok' : 'error') : inferenceReady ? 'ok' : 'degraded';
@@ -167,7 +174,7 @@ async function getHealth(): Promise<HealthResponse> {
     engine: engineVersion(persistence.schemaVersion),
     // Operational Data Foundation (Slice 1): durable operational evidence health —
     // reachable, schema-current, integrity, retention worker, write latency, storage.
-    operational: opMaintenance ? opMaintenance.health() : { status: memoryDisabled ? 'disabled' : 'unavailable' },
+    operational,
   } as HealthResponse & { readiness: unknown; engine: unknown; operational: unknown };
 }
 
@@ -217,7 +224,7 @@ async function main(): Promise<void> {
   });
 
   app.get('/health', async () => getHealth());
-  app.get('/api/ai/version', async () => engineVersion(durable?.health().schemaVersion ?? 0));
+  app.get('/api/ai/version', async () => engineVersion((await durable?.health())?.schemaVersion ?? 0));
   app.post<{ Body: RouteRequest }>('/route', async (request) => decideRoute(request.body));
   app.post<{ Body: RetrieveRequest }>('/retrieve', async (request) => retrieveContext(request.body));
   app.post<{ Body: ChatTurnRequest }>('/chat', async (request) => handleChat(request.body));
@@ -297,7 +304,15 @@ async function main(): Promise<void> {
   // conversations write through to the store and are hydrated on startup.
   const memoryStore = new ConversationStore(undefined, undefined, durable ?? undefined);
   if (durable) {
-    memoryStore.hydrate({ ...durable.loadDurable(), memoryItems: durable.loadMemoryItems() });
+    // `loadDurable`/`loadMemoryItems` became Promise-returning in the durable
+    // persistence migration. Spreading the un-awaited Promise yielded no own
+    // enumerable properties, so `conversations` arrived `undefined` and hydrate
+    // crashed the process at startup. Both must be awaited.
+    const [durableState, memoryItems] = await Promise.all([
+      durable.loadDurable(),
+      durable.loadMemoryItems(),
+    ]);
+    memoryStore.hydrate({ ...durableState, memoryItems });
   }
   registerMemoryRoutes(app, memoryStore);
   // Model qualification manifest (installing a model does not approve it). The
@@ -315,7 +330,10 @@ async function main(): Promise<void> {
   const baseEmbedder = env.localProvider === 'stub' ? new FakeEmbedder() : new OllamaEmbedder(env.providerBaseUrl, 'nomic-embed-text:latest', 'v1', env.openAiApiKey);
   const embedder = new CachedEmbedder(baseEmbedder, 20000, durable ?? undefined);
   const indexService = new IndexService(embedder, (rec) => new FsFileSource(rec.root), undefined, undefined, durable ?? undefined);
-  if (durable) indexService.hydrate();
+  // AWAITED: the vector indexes, their approved pointers and any startup
+  // quarantine all load here. Detached, the engine answered retrieval requests
+  // against an empty index set while claiming it had hydrated.
+  if (durable) await indexService.hydrate();
   // The branch an APPROVED generation was built from lives on the workspace record,
   // not the index. Resolved lazily per request so a later sync is reflected without
   // a restart; undefined when unknown, which the grounding boundary reports as
@@ -351,7 +369,11 @@ async function main(): Promise<void> {
   // then attach durable writers so new evidence persists. Metadata only — the stores
   // already redact at their append boundary; recovery history rides the audit writer.
   if (durable) {
-    wireOperationalPersistence(durable, { auditStore, usageLedger, incidentManager, budgetManager });
+    // AWAITED: this hydrates budget scopes, reservations, incidents and audit
+    // history from disk. Left detached, the server began accepting requests
+    // while those stores were still empty — budget enforcement would have
+    // started the process believing nothing had been spent or reserved.
+    const operational = await wireOperationalPersistence(durable, { auditStore, usageLedger, incidentManager, budgetManager });
     app.log.info('Operational persistence WIRED (audit/usage/incidents/budget durable across restarts).');
     // Retention + integrity + health. Verify integrity on startup (reported via
     // health, never a crash — the engine continues with whatever survived), then
@@ -366,7 +388,10 @@ async function main(): Promise<void> {
         buildRetentionConfig(process.env),
         () => Date.now(),
       );
-      const integrity = opMaintenance.verifyIntegrity();
+      // Awaited: `verifyIntegrity` became Promise-returning, so the un-awaited
+      // comparison was never equal to 'ok' and reported a FAILED integrity check
+      // on every boot, logging an empty object instead of the real verdict.
+      const integrity = await opMaintenance.verifyIntegrity();
       if (integrity !== 'ok') app.log.error({ integrity }, 'durable operational store integrity check FAILED — continuing in degraded state');
       opMaintenance.start();
       app.log.info('Operational retention worker STARTED (age-based; open incidents never pruned).');
@@ -377,7 +402,15 @@ async function main(): Promise<void> {
       );
     }
     // Shutdown: stop the retention worker + close the durable store cleanly.
-    app.addHook('onClose', async () => { opMaintenance?.close(); durable?.close(); });
+    app.addHook('onClose', async () => {
+      opMaintenance?.close();
+      // Drain BEFORE closing. The usage/incident/budget writers are detached by
+      // contract, so at this point durable writes may still be queued; closing the
+      // store first discards operational evidence that was already accepted in
+      // memory. `close()` is itself asynchronous — un-awaited, shutdown raced it.
+      await operational.drain();
+      await durable?.close();
+    });
   }
   const cloudMaxOutputTokens = Number(process.env.MIGRAPILOT_CLOUD_MAX_OUTPUT_TOKENS ?? 2000) || 2000;
   const escalation = new EscalationController(new EscalationOfferStore(), new CloudEscalationExecutor(), providerFleet, providerRegistry, pricingBook, budgetManager, usageLedger, cloudMaxOutputTokens);
@@ -547,12 +580,19 @@ async function main(): Promise<void> {
       embedding: models.filter((m) => m.capabilities.embedding).map((m) => m.id),
     };
   };
+  // `health()` is now async, but `WorkspaceManager` requires a synchronous
+  // `() => number`. The schema version is fixed once startup migrations have run,
+  // so it is resolved once here and closed over — rather than making the
+  // WorkspaceManager contract async for a value that cannot change at runtime.
+  const durableSchemaVersion = durable ? (await durable.health()).schemaVersion : 0;
   const workspaceManager = new WorkspaceManager({
     indexService, conversations: memoryStore, agents: agentRegistry, approvedModelsByTier,
-    version: engineVersion, schemaVersion: () => durable?.health().schemaVersion ?? 0,
+    version: engineVersion, schemaVersion: () => durableSchemaVersion,
     persistence: durable ?? undefined, gitInfo,
   });
-  if (durable) workspaceManager.hydrate();
+  // AWAITED for the same reason: workspace→index bindings must exist before the
+  // routes below can serve them.
+  if (durable) await workspaceManager.hydrate();
   registerWorkspaceRoutes(app, workspaceManager);
   app.post<{ Body: TelemetryEventRequest }>('/telemetry/event', async (request, reply) => {
     if (env.enableTelemetry) {

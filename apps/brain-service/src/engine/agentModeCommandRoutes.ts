@@ -24,8 +24,8 @@ export function registerAgentModeCommandRoutes(
   authority: AgentActivationAuthority,
   service = new AgentModeCommandService(toolDeps),
 ): AgentModeCommandService {
-  const history = new AgentRunHistoryService(service.agentRunJournal(), (run, context) => {
-    const result = service.getRunRecoveryStatus(run.runId, context);
+  const history = new AgentRunHistoryService(service.agentRunJournal(), async (run, context) => {
+    const result = await service.getRunRecoveryStatus(run.runId, context);
     if (result.ok) return result.status;
     return {
       runId: run.runId,
@@ -61,14 +61,14 @@ export function registerAgentModeCommandRoutes(
   app.get<{ Params: { runId: string } }>('/api/ai/agent-mode/commands/:runId', async (request, reply) => {
     const context = await requestContext(request, authority);
     if (!context) return forbidden(reply);
-    return send(reply, service.get(request.params.runId, context));
+    return send(reply, await service.get(request.params.runId, context));
   });
   app.post<{ Params: { runId: string }; Body: unknown }>('/api/ai/agent-mode/commands/:runId/displayed', { bodyLimit: 4 * 1024 }, async (request, reply) => {
     const context = await requestContext(request, authority);
     if (!context) return forbidden(reply);
     const parsed = AgentModeDisplaySchema.safeParse(request.body);
     if (!parsed.success) return invalid(reply, 'INVALID_INPUT', 'A valid authoritative preview fingerprint is required.');
-    return send(reply, service.displayed(request.params.runId, parsed.data.fingerprint, context));
+    return send(reply, await service.displayed(request.params.runId, parsed.data.fingerprint, context));
   });
   app.post<{ Params: { runId: string }; Body: unknown }>('/api/ai/agent-mode/commands/:runId/decision', { bodyLimit: 4 * 1024 }, async (request, reply) => {
     const context = await requestContext(request, authority);
@@ -80,12 +80,12 @@ export function registerAgentModeCommandRoutes(
   app.post<{ Params: { runId: string } }>('/api/ai/agent-mode/commands/:runId/cancel', async (request, reply) => {
     const context = await requestContext(request, authority);
     if (!context) return forbidden(reply);
-    return send(reply, service.cancel(request.params.runId, context));
+    return send(reply, await service.cancel(request.params.runId, context));
   });
   app.get<{ Params: { runId: string } }>('/api/ai/agent-mode/commands/:runId/recovery', async (request, reply) => {
     const context = await requestContext(request, authority);
     if (!context) return forbidden(reply);
-    return sendRecovery(reply, service.getRunRecoveryStatus(request.params.runId, context));
+    return sendRecovery(reply, await service.getRunRecoveryStatus(request.params.runId, context));
   });
   app.post<{ Params: { runId: string }; Body: unknown }>('/api/ai/agent-mode/commands/:runId/repropose', { bodyLimit: 4 * 1024 }, async (request, reply) => {
     const context = await requestContext(request, authority);
@@ -99,17 +99,17 @@ export function registerAgentModeCommandRoutes(
     if (!context) return forbidden(reply);
     const parsed = AgentModeRunHistoryQuerySchema.safeParse(parseHistoryQuery(request.query));
     if (!parsed.success) return invalid(reply, 'INVALID_INPUT', 'A valid Agent run history query is required.');
-    return sendHistory(reply, history.list(parsed.data, context));
+    return sendHistory(reply, await history.list(parsed.data, context));
   });
   app.get<{ Params: { runId: string } }>('/api/ai/agent-mode/history/runs/:runId', async (request, reply) => {
     const context = await requestContext(request, authority);
     if (!context) return forbidden(reply);
-    return sendHistory(reply, history.detail(request.params.runId, context));
+    return sendHistory(reply, await history.detail(request.params.runId, context));
   });
   app.get<{ Params: { runId: string } }>('/api/ai/agent-mode/history/runs/:runId/events', async (request, reply) => {
     const context = await requestContext(request, authority);
     if (!context) return forbidden(reply);
-    const result = history.detail(request.params.runId, context);
+    const result = await history.detail(request.params.runId, context);
     return sendHistory(reply, result.ok ? { ok: true, value: { events: result.value.timeline, integrity: result.value.summary.integrity, integrityIssues: result.value.summary.integrityIssues } } : result);
   });
   app.post<{ Params: { runId: string }; Body: unknown }>('/api/ai/agent-mode/history/runs/:runId/export', { bodyLimit: 4 * 1024 }, async (request, reply) => {
@@ -117,7 +117,7 @@ export function registerAgentModeCommandRoutes(
     if (!context) return forbidden(reply);
     const parsed = AgentModeRunHistoryExportRequestSchema.safeParse(request.body ?? {});
     if (!parsed.success) return invalid(reply, 'INVALID_INPUT', 'A valid Agent run evidence export request is required.');
-    return sendHistory(reply, history.export(request.params.runId, parsed.data, context));
+    return sendHistory(reply, await history.export(request.params.runId, parsed.data, context));
   });
   return service;
 }
@@ -182,7 +182,7 @@ function send(reply: FastifyReply, result: AgentModeActionResult): AgentModeComm
   return { ok: false, code: result.code, error: result.message };
 }
 
-function sendRecovery(reply: FastifyReply, result: ReturnType<AgentModeCommandService['getRunRecoveryStatus']>): AgentModeRunRecoveryStatus | { ok: false; code: string; error: string } {
+function sendRecovery(reply: FastifyReply, result: Awaited<ReturnType<AgentModeCommandService['getRunRecoveryStatus']>>): AgentModeRunRecoveryStatus | { ok: false; code: string; error: string } {
   if (result.ok) return result.status;
   const status = result.code === 'UNKNOWN_RUN' ? 404 : result.code === 'INVALID_CONTEXT' ? 403 : 409;
   reply.code(status);

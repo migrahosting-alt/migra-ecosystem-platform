@@ -187,17 +187,38 @@ export class BudgetManager {
     return { affordable: true, remainingUsd: remaining, perRequestRemainingUsd: perReq?.enabled ? perReq.hardLimitUsd : undefined };
   }
 
+  /**
+   * Record an audit event WITHOUT awaiting it — deliberately, and narrowly.
+   *
+   * `reserve`, `consume`, `release` and `releaseExpired` are SYNCHRONOUS critical
+   * sections: `reserve` checks every scope and then increments them with no
+   * suspension point in between, and that is the only thing preventing two
+   * concurrent requests from both passing a limit they cannot jointly afford.
+   * Making them async to await an observability record would split that section
+   * and reintroduce the exact overspend race the design exists to prevent — a
+   * strictly worse trade than a late audit row.
+   *
+   * Safe because none of the `budget.*` types are in CRITICAL_EVENTS, so `append`
+   * never throws and enforcement never depends on the write landing. ENFORCEMENT
+   * state is not carried here: it rides `saveScope`/`saveReservation` into the
+   * operational bridge's ordered queue, which is drainable at shutdown.
+   */
+  private auditDetached(input: Parameters<typeof auditStore.append>[0]): void {
+    // floating-ok: detached — atomic critical section; see the note above.
+    void auditStore.append(input);
+  }
+
   /** ATOMIC reserve. The check + increment below run with NO await between them —
    * that synchronous critical section is what prevents concurrent overspend. */
   reserve(ctx: ReserveContext): ReserveResult {
     const deny = (code: BudgetFailureCode, detail: string): ReserveResult => {
-      auditStore.append({ correlationId: ctx.correlationId, type: 'budget.reservation_denied', component: 'budget', outcome: code, fields: { provider: ctx.providerId, model: ctx.modelId, code } });
+      this.auditDetached({ correlationId: ctx.correlationId, type: 'budget.reservation_denied', component: 'budget', outcome: code, fields: { provider: ctx.providerId, model: ctx.modelId, code } });
       return { ok: false, code, detail };
     };
 
     if (!this.enabled) return deny('BUDGET_DISABLED', 'budget enforcement is disabled — paid cloud is not permitted');
     if (ctx.estimate.costUnavailable) {
-      auditStore.append({ correlationId: ctx.correlationId, type: 'budget.pricing_unknown', component: 'budget', fields: { provider: ctx.providerId, model: ctx.modelId } });
+      this.auditDetached({ correlationId: ctx.correlationId, type: 'budget.pricing_unknown', component: 'budget', fields: { provider: ctx.providerId, model: ctx.modelId } });
       return deny('COST_ESTIMATE_UNAVAILABLE', 'no trustworthy price for this provider/model');
     }
     const cost = ctx.estimate.worstCaseCostUsd;
@@ -222,8 +243,8 @@ export class BudgetManager {
       s.reservedUsd = round(s.reservedUsd + cost);
       this.saveScope(s);
       const used = (s.spentUsd + s.reservedUsd) / s.hardLimitUsd;
-      if (used >= s.warningThreshold) auditStore.append({ correlationId: ctx.correlationId, type: 'budget.warning_threshold_reached', component: 'budget', fields: { scope: s.kind, usedPercent: Math.round(used * 100) } });
-      if (used >= 1) auditStore.append({ correlationId: ctx.correlationId, type: 'budget.hard_limit_reached', component: 'budget', fields: { scope: s.kind } });
+      if (used >= s.warningThreshold) this.auditDetached({ correlationId: ctx.correlationId, type: 'budget.warning_threshold_reached', component: 'budget', fields: { scope: s.kind, usedPercent: Math.round(used * 100) } });
+      if (used >= 1) this.auditDetached({ correlationId: ctx.correlationId, type: 'budget.hard_limit_reached', component: 'budget', fields: { scope: s.kind } });
     }
 
     const reservation: Reservation = {
@@ -239,7 +260,7 @@ export class BudgetManager {
     };
     this.reservations.set(reservation.reservationId, reservation);
     this.saveReservation(reservation);
-    auditStore.append({ correlationId: ctx.correlationId, type: 'budget.reservation_created', component: 'budget', fields: { provider: ctx.providerId, model: ctx.modelId, amountUsd: cost } });
+    this.auditDetached({ correlationId: ctx.correlationId, type: 'budget.reservation_created', component: 'budget', fields: { provider: ctx.providerId, model: ctx.modelId, amountUsd: cost } });
     return { ok: true, reservation };
   }
 
@@ -260,9 +281,9 @@ export class BudgetManager {
     r.status = 'consumed';
     this.dropReservation(r.reservationId);
     const overrun = actual > r.amountUsd;
-    auditStore.append({ correlationId: r.correlationId, type: 'budget.reservation_consumed', component: 'budget', fields: { provider: r.providerId, reservedUsd: r.amountUsd, actualUsd: actual } });
-    auditStore.append({ correlationId: r.correlationId, type: 'budget.reconciled', component: 'budget', outcome: overrun ? 'overrun' : 'ok', fields: { reservedUsd: r.amountUsd, actualUsd: actual } });
-    if (overrun) auditStore.append({ correlationId: r.correlationId, type: 'budget.overrun_detected', component: 'budget', outcome: 'high', fields: { reservedUsd: r.amountUsd, actualUsd: actual } });
+    this.auditDetached({ correlationId: r.correlationId, type: 'budget.reservation_consumed', component: 'budget', fields: { provider: r.providerId, reservedUsd: r.amountUsd, actualUsd: actual } });
+    this.auditDetached({ correlationId: r.correlationId, type: 'budget.reconciled', component: 'budget', outcome: overrun ? 'overrun' : 'ok', fields: { reservedUsd: r.amountUsd, actualUsd: actual } });
+    if (overrun) this.auditDetached({ correlationId: r.correlationId, type: 'budget.overrun_detected', component: 'budget', outcome: 'high', fields: { reservedUsd: r.amountUsd, actualUsd: actual } });
     return { ok: true, actualUsd: actual, reservedUsd: r.amountUsd, overrun };
   }
 
@@ -276,7 +297,7 @@ export class BudgetManager {
     }
     r.status = 'released';
     this.dropReservation(r.reservationId);
-    auditStore.append({ correlationId: r.correlationId, type: 'budget.reservation_released', component: 'budget', fields: { provider: r.providerId, releasedUsd: r.amountUsd } });
+    this.auditDetached({ correlationId: r.correlationId, type: 'budget.reservation_released', component: 'budget', fields: { provider: r.providerId, releasedUsd: r.amountUsd } });
     return true;
   }
 
@@ -292,7 +313,7 @@ export class BudgetManager {
         }
         r.status = 'expired';
         this.dropReservation(r.reservationId);
-        auditStore.append({ correlationId: r.correlationId, type: 'budget.reservation_released', component: 'budget', outcome: 'expired', fields: { provider: r.providerId, releasedUsd: r.amountUsd } });
+        this.auditDetached({ correlationId: r.correlationId, type: 'budget.reservation_released', component: 'budget', outcome: 'expired', fields: { provider: r.providerId, releasedUsd: r.amountUsd } });
         n += 1;
       }
     }

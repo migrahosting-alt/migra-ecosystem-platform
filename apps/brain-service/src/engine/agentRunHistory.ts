@@ -37,47 +37,47 @@ export class AgentRunHistoryService {
 
   constructor(
     private readonly journal: AgentRunJournal,
-    private readonly recoveryStatus: (run: DurableAgentRun, context: AgentModeRequestContext, events?: DurableAgentRunEvent[]) => AgentModeRunRecoveryStatus,
+    private readonly recoveryStatus: (run: DurableAgentRun, context: AgentModeRequestContext, events?: DurableAgentRunEvent[]) => AgentModeRunRecoveryStatus | Promise<AgentModeRunRecoveryStatus>,
     private readonly now: () => number = () => Date.now(),
     cursorKey: Buffer = randomBytes(32),
   ) {
     this.cursorKey = Buffer.from(cursorKey);
   }
 
-  list(query: AgentModeRunHistoryQuery, context: AgentModeRequestContext): AgentRunHistoryResult<AgentModeRunHistoryList> {
+  async list(query: AgentModeRunHistoryQuery, context: AgentModeRequestContext): Promise<AgentRunHistoryResult<AgentModeRunHistoryList>> {
     if (!validContext(context)) return denied();
     const cursor = query.cursor ? this.decodeCursor(query.cursor, context.workspaceIdentity, query.sort) : undefined;
     if (query.cursor && !cursor) return { ok: false, code: 'INVALID_INPUT', message: 'The Agent run history cursor is invalid or expired.' };
-    const all = this.filteredRuns(query, context);
+    const all = await this.filteredRuns(query, context);
     const after = cursor ? all.filter((run) => afterCursor(run, query.sort, cursor)) : all;
     const page = after.slice(0, query.limit);
     const next = after.length > query.limit ? page.at(-1) : undefined;
     return {
       ok: true,
       value: {
-        runs: page.map((run) => this.summary(run, context)),
+        runs: await Promise.all(page.map(async (run) => this.summary(run, context, await this.journal.events(run.runId)))),
         nextCursor: next ? this.encodeCursor(context.workspaceIdentity, query.sort, sortValue(next, query.sort), next.runId) : undefined,
         query,
         retention: {
           terminalRetentionMs: this.journal.config.terminalRetentionMs,
           retentionBatchSize: this.journal.config.retentionBatchSize,
-          tombstoneCount: this.journal.tombstones(500).length,
+          tombstoneCount: (await this.journal.tombstones(500)).length,
           governance: 'READ_ONLY',
         },
       },
     };
   }
 
-  detail(runId: string, context: AgentModeRequestContext): AgentRunHistoryResult<AgentModeRunHistoryDetail> {
-    const run = this.visibleRun(runId, context);
+  async detail(runId: string, context: AgentModeRequestContext): Promise<AgentRunHistoryResult<AgentModeRunHistoryDetail>> {
+    const run = await this.visibleRun(runId, context);
     if (!run) return { ok: false, code: 'UNKNOWN_RUN', message: 'Unknown Agent Mode run.' };
-    return { ok: true, value: this.detailForRun(run, context) };
+    return { ok: true, value: await this.detailForRun(run, context) };
   }
 
-  export(runId: string, request: AgentModeRunHistoryExportRequest, context: AgentModeRequestContext): AgentRunHistoryResult<AgentModeRunHistoryExport> {
-    const run = this.visibleRun(runId, context);
+  async export(runId: string, request: AgentModeRunHistoryExportRequest, context: AgentModeRequestContext): Promise<AgentRunHistoryResult<AgentModeRunHistoryExport>> {
+    const run = await this.visibleRun(runId, context);
     if (!run) return { ok: false, code: 'UNKNOWN_RUN', message: 'Unknown Agent Mode run.' };
-    const detail = this.detailForRun(run, context);
+    const detail = await this.detailForRun(run, context);
     const body: AgentModeRunHistoryDetail = {
       ...detail,
       preview: request.includePreview ? detail.preview : undefined,
@@ -103,9 +103,9 @@ export class AgentRunHistoryService {
     };
   }
 
-  private filteredRuns(query: AgentModeRunHistoryQuery, context: AgentModeRequestContext): DurableAgentRun[] {
+  private async filteredRuns(query: AgentModeRunHistoryQuery, context: AgentModeRequestContext): Promise<DurableAgentRun[]> {
     const q = query.q?.toLowerCase();
-    return this.journal.loadRuns()
+    return (await this.journal.loadRuns())
       .filter((run) => run.workspaceIdentity === context.workspaceIdentity)
       .filter((run) => context.allowedRecipes.includes(run.recipeId as never))
       .filter((run) => !query.state || run.state === query.state)
@@ -119,18 +119,18 @@ export class AgentRunHistoryService {
       .slice(0, MAX_SCAN);
   }
 
-  private visibleRun(runId: string, context: AgentModeRequestContext): DurableAgentRun | undefined {
+  private async visibleRun(runId: string, context: AgentModeRequestContext): Promise<DurableAgentRun | undefined> {
     if (!validContext(context)) return undefined;
-    const run = this.journal.loadRun(runId);
+    const run = await this.journal.loadRun(runId);
     if (!run || run.workspaceIdentity !== context.workspaceIdentity) return undefined;
     if (!context.allowedRecipes.includes(run.recipeId as never)) return undefined;
     return run;
   }
 
-  private detailForRun(run: DurableAgentRun, context: AgentModeRequestContext): AgentModeRunHistoryDetail {
-    const events = this.journal.events(run.runId);
-    const summary = this.summary(run, context, events);
-    const tombstone = this.journal.tombstones(500).find((entry) => entry.runId === run.runId);
+  private async detailForRun(run: DurableAgentRun, context: AgentModeRequestContext): Promise<AgentModeRunHistoryDetail> {
+    const events = await this.journal.events(run.runId);
+    const summary = await this.summary(run, context, events);
+    const tombstone = (await this.journal.tombstones(500)).find((entry) => entry.runId === run.runId);
     return {
       summary,
       preview: safePreview(run.previewJson, run),
@@ -140,10 +140,10 @@ export class AgentRunHistoryService {
       lineage: {
         sourceRunId: run.recoverySourceRunId,
         successorRunId: run.successorRunId,
-        source: run.recoverySourceRunId ? this.optionalSummary(run.recoverySourceRunId, context) : undefined,
-        successor: run.successorRunId ? this.optionalSummary(run.successorRunId, context) : undefined,
+        source: run.recoverySourceRunId ? await this.optionalSummary(run.recoverySourceRunId, context) : undefined,
+        successor: run.successorRunId ? await this.optionalSummary(run.successorRunId, context) : undefined,
       },
-      recovery: AGENT_TERMINAL_STATES.has(run.state as never) ? this.recoveryStatus(run, context, events) : undefined,
+      recovery: AGENT_TERMINAL_STATES.has(run.state as never) ? await this.recoveryStatus(run, context, events) : undefined,
       retention: {
         eligibleForDeletion: retentionEligible(run, this.now() - this.journal.config.terminalRetentionMs, this.now()),
         reason: retentionReason(run, this.now() - this.journal.config.terminalRetentionMs, this.now()),
@@ -152,12 +152,17 @@ export class AgentRunHistoryService {
     };
   }
 
-  private optionalSummary(runId: string, context: AgentModeRequestContext): AgentModeRunHistorySummary | undefined {
-    const run = this.visibleRun(runId, context);
-    return run ? this.summary(run, context) : undefined;
+  private async optionalSummary(runId: string, context: AgentModeRequestContext): Promise<AgentModeRunHistorySummary | undefined> {
+    const run = await this.visibleRun(runId, context);
+    return run ? this.summary(run, context, await this.journal.events(run.runId)) : undefined;
   }
 
-  private summary(run: DurableAgentRun, context: AgentModeRequestContext, events = this.journal.events(run.runId)): AgentModeRunHistorySummary {
+  /**
+   * `events` is REQUIRED. It used to default to a journal read, which under an
+   * async journal would be a hidden refresh at an unpredictable point. Callers
+   * pass the authoritative events they already loaded.
+   */
+  private async summary(run: DurableAgentRun, context: AgentModeRequestContext, events: DurableAgentRunEvent[]): Promise<AgentModeRunHistorySummary> {
     const integrity = historyIntegrity(run, events, context, this.now());
     // Recovery classification is DERIVED from the authoritative contract, not
     // read back from the stored columns. Rows written before the policy was

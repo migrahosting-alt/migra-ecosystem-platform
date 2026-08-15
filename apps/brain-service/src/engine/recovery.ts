@@ -75,7 +75,7 @@ export class RecoveryManager {
   }
 
   /** PLAN — read-only. Builds an approval-gated restoration; ZERO writes. */
-  plan(originalCorrelationId: string): RecoveryPlan {
+  async plan(originalCorrelationId: string): Promise<RecoveryPlan> {
     const stash = this.stashed.get(originalCorrelationId);
     if (!stash) throw new RecoveryError('NO_REVERSE_MATERIAL', 'no recovery material for that correlation');
     const recoveryId = this.mkId();
@@ -83,8 +83,8 @@ export class RecoveryManager {
     const changeset = restorationChangeset(stash.rootPath, stash.entries);
     const approvalToken = `rec_${this.mkId()}`;
     // recovery.started + plan_created — linked to the ORIGINAL execution + incident.
-    auditStore.append({ correlationId: recoveryCorrelationId, type: 'recovery.started', component: 'recovery', causationId: null, fields: { origin: auditHash(originalCorrelationId), incident: stash.incidentId ?? 'none', workspace: auditHash(stash.rootPath) } });
-    auditStore.append({ correlationId: recoveryCorrelationId, type: 'recovery.plan_created', component: 'recovery', fields: { fileCount: changeset.ops.length, workspace: auditHash(stash.rootPath) } });
+    await auditStore.append({ correlationId: recoveryCorrelationId, type: 'recovery.started', component: 'recovery', causationId: null, fields: { origin: auditHash(originalCorrelationId), incident: stash.incidentId ?? 'none', workspace: auditHash(stash.rootPath) } });
+    await auditStore.append({ correlationId: recoveryCorrelationId, type: 'recovery.plan_created', component: 'recovery', fields: { fileCount: changeset.ops.length, workspace: auditHash(stash.rootPath) } });
     const plan: RecoveryBundle = {
       recoveryId,
       recoveryCorrelationId,
@@ -130,13 +130,13 @@ export class RecoveryManager {
 
   /** APPLY — explicit, single-use approval-gated, through the contained atomic
    * changeset engine (NOT a bypass). Replay is refused. */
-  apply(recoveryId: string, approvalToken: string, fs: ChangesetFs): { created: string[]; modified: string[]; deleted: string[] } {
+  async apply(recoveryId: string, approvalToken: string, fs: ChangesetFs): Promise<{ created: string[]; modified: string[]; deleted: string[] }> {
     const b = this.bundles.get(recoveryId);
     if (!b) throw new RecoveryError('UNKNOWN_RECOVERY', 'unknown recovery id');
     if (b.approvalToken !== approvalToken) throw new RecoveryError('APPROVAL_MISMATCH', 'recovery approval does not match');
     if (b.approvalUsed) throw new RecoveryError('APPROVAL_REPLAYED', 'recovery approval already used');
     b.approvalUsed = true; // single-use
-    auditStore.append({ correlationId: b.recoveryCorrelationId, type: 'recovery.approved', component: 'recovery', fields: { fileCount: b.fileCount } });
+    await auditStore.append({ correlationId: b.recoveryCorrelationId, type: 'recovery.approved', component: 'recovery', fields: { fileCount: b.fileCount } });
     // Apply through the standard changeset engine: propose (stores) → apply by
     // hash. Containment + atomic write + rollback are enforced there.
     const changeset = this.effective(b, fs);
@@ -144,17 +144,17 @@ export class RecoveryManager {
     const proposal = proposeChangeset(changeset, fs, store, b.recoveryCorrelationId);
     try {
       const res = applyChangeset({ rootPath: changeset.rootPath, proposalHash: proposal.proposalHash }, fs, store, b.recoveryCorrelationId);
-      auditStore.append({ correlationId: b.recoveryCorrelationId, type: 'recovery.applied', component: 'recovery', outcome: 'ok', fields: { created: res.created.length, modified: res.modified.length, deleted: res.deleted.length } });
+      await auditStore.append({ correlationId: b.recoveryCorrelationId, type: 'recovery.applied', component: 'recovery', outcome: 'ok', fields: { created: res.created.length, modified: res.modified.length, deleted: res.deleted.length } });
       return { created: res.created, modified: res.modified, deleted: res.deleted };
     } catch (err) {
-      auditStore.append({ correlationId: b.recoveryCorrelationId, type: 'recovery.failed', component: 'recovery', outcome: 'error', fields: {} });
+      await auditStore.append({ correlationId: b.recoveryCorrelationId, type: 'recovery.failed', component: 'recovery', outcome: 'error', fields: {} });
       throw err;
     }
   }
 
   /** VERIFY — integrity check that restored files now match the expected prior
    * content. Produces the validation evidence required to resolve the incident. */
-  verify(recoveryId: string, fs: ChangesetFs): { ok: boolean; checked: number; recoveryCorrelationId: string } {
+  async verify(recoveryId: string, fs: ChangesetFs): Promise<{ ok: boolean; checked: number; recoveryCorrelationId: string }> {
     const b = this.bundles.get(recoveryId);
     if (!b) throw new RecoveryError('UNKNOWN_RECOVERY', 'unknown recovery id');
     const stash = this.stashed.get(b.originalCorrelationId)!;
@@ -169,13 +169,13 @@ export class RecoveryManager {
         if (!fs.exists(abs) || fs.readFile(abs) !== e.previousContent) ok = false;
       }
     }
-    auditStore.append({ correlationId: b.recoveryCorrelationId, type: 'recovery.validation_completed', component: 'recovery', outcome: ok ? 'ok' : 'mismatch', fields: { checked, ok } });
+    await auditStore.append({ correlationId: b.recoveryCorrelationId, type: 'recovery.validation_completed', component: 'recovery', outcome: ok ? 'ok' : 'mismatch', fields: { checked, ok } });
     return { ok, checked, recoveryCorrelationId: b.recoveryCorrelationId };
   }
 
   /** RESOLVE — require validation evidence; link the recovery to the incident;
    * emit recovery.completed. Refuses to resolve without evidence. */
-  resolve(recoveryId: string, evidence: { ok: boolean; checked: number }): void {
+  async resolve(recoveryId: string, evidence: { ok: boolean; checked: number }): Promise<void> {
     const b = this.bundles.get(recoveryId);
     if (!b) throw new RecoveryError('UNKNOWN_RECOVERY', 'unknown recovery id');
     if (!evidence || evidence.ok !== true || evidence.checked < 1) {
@@ -188,7 +188,7 @@ export class RecoveryManager {
         note: 'recovery applied + validated',
       });
     }
-    auditStore.append({ correlationId: b.recoveryCorrelationId, type: 'recovery.completed', component: 'recovery', outcome: 'ok', fields: { incident: b.incidentId ?? 'none' } });
+    await auditStore.append({ correlationId: b.recoveryCorrelationId, type: 'recovery.completed', component: 'recovery', outcome: 'ok', fields: { incident: b.incidentId ?? 'none' } });
   }
 
   get(recoveryId: string): RecoveryBundle | undefined {

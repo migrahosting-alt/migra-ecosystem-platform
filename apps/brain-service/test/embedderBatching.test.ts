@@ -282,8 +282,8 @@ test('a durable-cache hit is served without re-embedding', async () => {
   const inner = new CountingEmbedder(8);
   const [vector] = await new FakeEmbedder(8).embed(['persisted']);
   const store = {
-    getEmbedding: (_m: string, _v: string, hash: string) => (hash === hashText('persisted') ? vector : undefined),
-    putEmbedding: () => {},
+    getEmbedding: async (_m: string, _v: string, hash: string) => (hash === hashText('persisted') ? vector : undefined),
+    putEmbedding: async () => {},
   };
   const cached = new CachedEmbedder(inner, 100, store);
 

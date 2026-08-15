@@ -320,9 +320,9 @@ test('embedding cache round-trip matches SQLite', async (t) => {
 
   const vec = [0.5, -0.25, 0.125];
   const sqlite = new SqliteDurableStore(join(tmp, 'rag.db'));
-  sqlite.putEmbedding('m1', 'v1', 'h1', vec);
-  const fromSqlite = sqlite.getEmbedding('m1', 'v1', 'h1');
-  const sqliteMiss = sqlite.getEmbedding('m1', 'v2', 'h1');
+  await sqlite.putEmbedding('m1', 'v1', 'h1', vec);
+  const fromSqlite = await sqlite.getEmbedding('m1', 'v1', 'h1');
+  const sqliteMiss = await sqlite.getEmbedding('m1', 'v2', 'h1');
   sqlite.close();
 
   await scoped(A, (c) => putEmbedding(c, 'm1', 'v1', 'h1', vec));

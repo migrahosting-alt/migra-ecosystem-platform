@@ -144,7 +144,13 @@ export class ProductionDiagnosticsProvider {
     const auditBase = { correlationId, component: 'production-diagnostics' as const };
 
     const deny = (code: string, message: string): never => {
-      auditStore.append({ ...auditBase, type: 'production.diagnostics.denied', outcome: code, fields: { target: safeId(req.targetId), capability: safeId(req.capability), code } });
+      // floating-ok: detached — `deny` is a SYNCHRONOUS throwing guard (`: never`)
+      // used inline in validation expressions and passed as a `(c, m) => never`
+      // callback; making it async would destroy that control-flow contract for the
+      // sake of a record. Detaching is safe here in a way it would not be for a
+      // success path: this path always THROWS, so the caller can never report
+      // success on the strength of an audit write that did not land.
+      void auditStore.append({ ...auditBase, type: 'production.diagnostics.denied', outcome: code, fields: { target: safeId(req.targetId), capability: safeId(req.capability), code } });
       throw new DiagnosticError(code as never, message);
     };
 
@@ -184,7 +190,7 @@ export class ProductionDiagnosticsProvider {
     if (!this.allowRate(t)) deny('RATE_LIMITED', 'rate limit exceeded for this target');
 
     // Record the request (audited) then execute under timeout + caps.
-    auditStore.append({ ...auditBase, type: 'production.diagnostics.requested', fields: { target: t.targetId, capability: capability.id, environment: t.environment } });
+    await auditStore.append({ ...auditBase, type: 'production.diagnostics.requested', fields: { target: t.targetId, capability: capability.id, environment: t.environment } });
 
     const timeoutMs = Math.min(t.timeoutMs, this.config.maxTimeoutMs);
     const runId = `pdr_${this.mkId()}`;
@@ -196,13 +202,13 @@ export class ProductionDiagnosticsProvider {
       record.status = result.status;
       record.result = result;
       this.store(record);
-      auditStore.append({ ...auditBase, type: 'production.diagnostics.completed', outcome: result.status, fields: { target: t.targetId, capability: capability.id, environment: t.environment, status: result.status } });
+      await auditStore.append({ ...auditBase, type: 'production.diagnostics.completed', outcome: result.status, fields: { target: t.targetId, capability: capability.id, environment: t.environment, status: result.status } });
       return { runId, correlationId, result };
     } catch (err) {
       const code = err instanceof DiagnosticError ? err.code : 'TIMEOUT';
       record.errorCode = code;
       this.store(record);
-      auditStore.append({ ...auditBase, type: 'production.diagnostics.failed', outcome: code, fields: { target: t.targetId, capability: capability.id, code } });
+      await auditStore.append({ ...auditBase, type: 'production.diagnostics.failed', outcome: code, fields: { target: t.targetId, capability: capability.id, code } });
       throw err instanceof DiagnosticError ? err : new DiagnosticError('TIMEOUT', 'diagnostic timed out');
     }
   }
@@ -248,7 +254,10 @@ export class ProductionDiagnosticsProvider {
   private withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
     return new Promise<T>((resolve, reject) => {
       const timer = setTimeout(() => reject(new DiagnosticError('TIMEOUT', 'diagnostic timed out')), ms);
-      p.then(
+      // floating-ok: accepted — promise-combinator idiom. `p`'s settlement is not
+      // discarded: it is wired into this Promise's resolve/reject below, and the
+      // combined promise IS returned and awaited by the caller.
+      void p.then(
         (v) => {
           clearTimeout(timer);
           resolve(v);

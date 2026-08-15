@@ -9,32 +9,32 @@ import { AuditStore, AuditCriticalWriteError, auditHash, type AuditRecord } from
 let idc = 0;
 const ids = () => `ev_${idc++}`;
 
-test('append assigns monotonic seq + auto-causation per correlation (stable order)', () => {
+test('append assigns monotonic seq + auto-causation per correlation (stable order)', async () => {
   idc = 0;
   const s = new AuditStore(() => 1, null, 100, ids);
-  const a = s.append({ correlationId: 'c1', type: 'execution.started', component: 'x' });
-  const b = s.append({ correlationId: 'c1', type: 'execution.routed', component: 'x' });
-  const c = s.append({ correlationId: 'c1', type: 'loop.started', component: 'x' });
+  const a = (await s.append({ correlationId: 'c1', type: 'execution.started', component: 'x' }));
+  const b = (await s.append({ correlationId: 'c1', type: 'execution.routed', component: 'x' }));
+  const c = (await s.append({ correlationId: 'c1', type: 'loop.started', component: 'x' }));
   assert.equal(a.causationId, null); // root
   assert.equal(b.causationId, a.eventId);
   assert.equal(c.causationId, b.eventId);
   assert.deepEqual([a.seq, b.seq, c.seq], [1, 2, 3]);
 });
 
-test('correlations are independent chains', () => {
+test('correlations are independent chains', async () => {
   idc = 0;
   const s = new AuditStore(() => 1, null, 100, ids);
   s.append({ correlationId: 'c1', type: 'execution.started', component: 'x' });
-  const b2 = s.append({ correlationId: 'c2', type: 'execution.started', component: 'x' });
+  const b2 = (await s.append({ correlationId: 'c2', type: 'execution.started', component: 'x' }));
   assert.equal(b2.causationId, null); // c2 root, not chained to c1
   assert.equal(b2.seq, 1);
 });
 
-test('event ids deduplicate retries (idempotent append)', () => {
+test('event ids deduplicate retries (idempotent append)', async () => {
   idc = 0;
   const s = new AuditStore(() => 1, null, 100, ids);
-  const a = s.append({ correlationId: 'c1', type: 'tool.completed', component: 'x', eventId: 'fixed' });
-  const b = s.append({ correlationId: 'c1', type: 'tool.completed', component: 'x', eventId: 'fixed' });
+  const a = (await s.append({ correlationId: 'c1', type: 'tool.completed', component: 'x', eventId: 'fixed' }));
+  const b = (await s.append({ correlationId: 'c1', type: 'tool.completed', component: 'x', eventId: 'fixed' }));
   assert.equal(a.eventId, b.eventId);
   assert.equal(s.byCorrelation('c1').length, 1);
 });
@@ -63,40 +63,40 @@ test('byCorrelation returns ONLY the requested chain (no leakage)', () => {
   assert.ok(chain.every((r) => r.correlationId === 'c1'));
 });
 
-test('redaction: content / paths / tokens / diffs are stripped before persistence', () => {
+test('redaction: content / paths / tokens / diffs are stripped before persistence', async () => {
   idc = 0;
   const s = new AuditStore(() => 1, null, 100, ids);
-  const r = s.append({
+  const r = (await s.append({
     correlationId: 'c1',
     type: 'application.completed',
     component: 'changeset',
     fields: { content: 'SECRET', rootPath: '/home/x/ws', path: 'a.js', diff: '- x\n+ y', token: 'appr_TOK', command: ['npm', 'test'], created: 2, workspace: auditHash('/home/x/ws') },
-  });
+  }));
   const flat = JSON.stringify(r);
   assert.doesNotMatch(flat, /SECRET|\/home\/x\/ws|appr_TOK|a\.js/);
   assert.equal(r.fields.created, 2); // safe metadata preserved
   assert.ok(typeof r.fields.workspace === 'string');
 });
 
-test('critical write failure FAILS CLOSED (throws) before persisting', () => {
+test('critical write failure FAILS CLOSED (throws) before persisting', async () => {
   idc = 0;
   const failing = () => {
     throw new Error('durable sink down');
   };
   const s = new AuditStore(() => 1, failing, 100, ids);
   // application.started is critical → must throw.
-  assert.throws(() => s.append({ correlationId: 'c1', type: 'application.started', component: 'c' }), AuditCriticalWriteError);
+  await assert.rejects(() => s.append({ correlationId: 'c1', type: 'application.started', component: 'c' }), AuditCriticalWriteError);
   // and the record is NOT in memory (fail closed before commit).
   assert.equal(s.byCorrelation('c1').length, 0);
 });
 
-test('non-critical write failure degrades health but does NOT throw', () => {
+test('non-critical write failure degrades health but does NOT throw', async () => {
   idc = 0;
   const failing = () => {
     throw new Error('durable sink down');
   };
   const s = new AuditStore(() => 1, failing, 100, ids);
-  const r = s.append({ correlationId: 'c1', type: 'tool.completed', component: 'x' }); // non-critical
+  const r = (await s.append({ correlationId: 'c1', type: 'tool.completed', component: 'x' })); // non-critical
   assert.ok(r.eventId); // continued with in-memory fallback
   assert.equal(s.healthSnapshot().status, 'unhealthy'); // durable sink failed
   assert.ok(s.healthSnapshot().write_failures >= 1);

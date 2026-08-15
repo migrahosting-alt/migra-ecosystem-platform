@@ -80,7 +80,7 @@ test('memory item round-trips with identical field values in both adapters', asy
 
   const sqlite = new SqliteDurableStore(join(tmp, 'mem.db'));
   sqlite.saveMemoryItem(item('mi-1', A, { confidence: 0.5, expiresAt: 9_999, sourceId: 'src-1' }));
-  const fromSqlite = sqlite.loadMemoryItems().find((i) => i.id === 'mi-1')!;
+  const fromSqlite = (await sqlite.loadMemoryItems()).find((i) => i.id === 'mi-1')!;
   sqlite.close();
 
   await scoped(A, (c) => saveMemoryItem(c, item('mi-1', A, { confidence: 0.5, expiresAt: 9_999, sourceId: 'src-1' })));
@@ -100,7 +100,7 @@ test('memory item upsert replaces content in both adapters', async (t) => {
   const sqlite = new SqliteDurableStore(join(tmp, 'mem2.db'));
   sqlite.saveMemoryItem(item('mi-up', A, { content: 'first' }));
   sqlite.saveMemoryItem(item('mi-up', A, { content: 'second' }));
-  const sqliteItems = sqlite.loadMemoryItems().filter((i) => i.id === 'mi-up');
+  const sqliteItems = (await sqlite.loadMemoryItems()).filter((i) => i.id === 'mi-up');
   sqlite.close();
 
   await scoped(A, async (c) => {
@@ -121,7 +121,7 @@ test('workspace upsert updates fields but never scope, in both adapters', async 
   const sqlite = new SqliteDurableStore(join(tmp, 'ws.db'));
   sqlite.saveWorkspace(workspace('w-1', A, { name: 'one' }));
   sqlite.saveWorkspace({ ...workspace('w-1', B, { name: 'two' }) });
-  const fromSqlite = sqlite.loadWorkspaces().find((w) => w.id === 'w-1')!;
+  const fromSqlite = (await sqlite.loadWorkspaces()).find((w) => w.id === 'w-1')!;
   sqlite.close();
 
   assert.equal(fromSqlite.name, 'two', 'SQLite updates the name');

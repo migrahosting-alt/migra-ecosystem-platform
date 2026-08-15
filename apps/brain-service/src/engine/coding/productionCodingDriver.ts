@@ -164,9 +164,9 @@ export function createProductionCodingDriver(deps: ProductionCodingDriverDeps): 
         const why = refusal
           ? `repository_planning refused: ${refusal.reason} — ${refusal.message} (opened ${refusal.openedPaths.length} path(s))`
           : `repository_planning did not complete: ${planning.status}${planning.detail ? ` — ${planning.detail}` : ''}`;
-        ctx.run.patchPayload({ phase: 'terminal' }, `plan.refused:${planning.status}`);
+        await ctx.run.patchPayload({ phase: 'terminal' }, `plan.refused:${planning.status}`);
         deps.onPlanRefused?.(ctx.runId, why);
-        ctx.run.finalize({});
+        await ctx.run.finalize({});
         return;
       }
       const plan = planning.value.plan;
@@ -186,7 +186,7 @@ export function createProductionCodingDriver(deps: ProductionCodingDriverDeps): 
         value: plan.initialChangeset,
       }));
       if (proposal.status !== 'completed') {
-        ctx.run.finalize({});
+        await ctx.run.finalize({});
         return;
       }
 
@@ -194,7 +194,22 @@ export function createProductionCodingDriver(deps: ProductionCodingDriverDeps): 
       // the edit scope uses, so the hash an operator approves is the hash the
       // mutation boundary will later enforce.
       const sourcesByPath = Object.fromEntries(plan.proposedScope.map((s) => [s.path, s.sources]));
-      ctx.run.patchPayload({
+      /**
+       * AWAITED, and the ordering matters more than it looks.
+       *
+       * `patchPayload` and `awaitScopeApproval` both build their next payload by
+       * spreading the store's cached copy, and that cache only advances once a
+       * write has actually landed. Firing this one without awaiting it therefore
+       * let the approval write below spread a cache that did not yet contain the
+       * plan — and the approval revision, being written second, won.
+       *
+       * The run then sat at AWAITING_APPROVAL with a scope but no plan, and on
+       * approval `resume` took its `!payload.plan` exit: finalized, zero apply,
+       * zero validation, an empty diff, and — because planning and proposal are
+       * themselves successful required children — NO blockers. A governed coding
+       * run reported COMPLETED having written nothing.
+       */
+      await ctx.run.patchPayload({
         plan: {
           issueSummary: plan.issueSummary,
           proposedScope: plan.proposedScope,
@@ -205,7 +220,7 @@ export function createProductionCodingDriver(deps: ProductionCodingDriverDeps): 
       }, 'plan.recorded');
 
       const expiresAt = new Date(now() + 5 * 60 * 1000).toISOString();
-      ctx.run.awaitScopeApproval({
+      await ctx.run.awaitScopeApproval({
         proposedPaths: scopePaths,
         pathSetHash: hashPaths(scopePaths),
         sourcesByPath,
@@ -221,7 +236,7 @@ export function createProductionCodingDriver(deps: ProductionCodingDriverDeps): 
     async resume(ctx: CodingWorkflowContext): Promise<void> {
       const payload = ctx.run.payload;
       const scope = payload.scope;
-      if (!scope || !payload.plan) { ctx.run.finalize({}); return; }
+      if (!scope || !payload.plan) { await ctx.run.finalize({}); return; }
 
       // Re-verify BEFORE the first write. An approval is authority over the
       // repository as it was shown; a tree that moved underneath invalidates it.
@@ -231,8 +246,8 @@ export function createProductionCodingDriver(deps: ProductionCodingDriverDeps): 
         now: now(),
       });
       if (verified.outcome !== 'still_valid') {
-        ctx.run.patchPayload({ scope: { ...scope, approvalState: 'invalidated' } }, 'scope.reverification_failed');
-        ctx.run.finalize({});
+        await ctx.run.patchPayload({ scope: { ...scope, approvalState: 'invalidated' } }, 'scope.reverification_failed');
+        await ctx.run.finalize({});
         return;
       }
 
@@ -322,7 +337,7 @@ export function createProductionCodingDriver(deps: ProductionCodingDriverDeps): 
           value: result,
         };
       });
-      if (authored.status !== 'completed' || !authored.value?.ok) { ctx.run.finalize({}); return; }
+      if (authored.status !== 'completed' || !authored.value?.ok) { await ctx.run.finalize({}); return; }
 
       /**
        * Declared BEFORE the apply, because `finish()` reads them.
@@ -355,12 +370,12 @@ export function createProductionCodingDriver(deps: ProductionCodingDriverDeps): 
        * that forgot would hand the next attempt a clean slate — and the strategy it
        * would try first is precisely the one already disproved.
        */
-      const recordAttempt = (entry: PreviousRepairAttempt): void => {
+      const recordAttempt = async (entry: PreviousRepairAttempt): Promise<void> => {
         repairHistory.push(boundRepairAttempt(entry));
         if (repairHistory.length > REPAIR_HISTORY_LIMITS.maxAttempts) {
           repairHistory.splice(0, repairHistory.length - REPAIR_HISTORY_LIMITS.maxAttempts);
         }
-        ctx.run.patchPayload({ repairHistory: [...repairHistory] }, 'repair.history');
+        await ctx.run.patchPayload({ repairHistory: [...repairHistory] }, 'repair.history');
       };
       /** Why the repair loop stopped, so the report can name it rather than guess. */
       let loopExit: 'ran-to-completion' | 'cancelled' | 'repair-proposal-rejected' | 'repair-apply-refused' = 'ran-to-completion';
@@ -413,14 +428,14 @@ export function createProductionCodingDriver(deps: ProductionCodingDriverDeps): 
             value: result,
           };
         });
-        ctx.run.patchPayload({ attempts: { initialProposal: 1, repair: repairAttempt }, failureEvidence: evidenceBlocks }, 'repair.evidence');
+        await ctx.run.patchPayload({ attempts: { initialProposal: 1, repair: repairAttempt }, failureEvidence: evidenceBlocks }, 'repair.evidence');
 
         if (proposed.status !== 'completed' || !proposed.value?.ok) {
           // Record the refusal BEFORE leaving. A rejected proposal is the single most
           // useful thing a later attempt can know, and on this path the loop ends —
           // so if the run is later resumed, this is all that survives of the attempt.
           const failure = proposed.value && !proposed.value.ok ? proposed.value : undefined;
-          recordAttempt({
+          await recordAttempt({
             attempt: repairAttempt,
             citedEvidenceIds: [],
             rationale: '(the proposal was refused before it could be applied)',
@@ -465,7 +480,7 @@ export function createProductionCodingDriver(deps: ProductionCodingDriverDeps): 
           // Naming it as such is the difference between "the boundary stopped you"
           // and "your change did not survive", which are different instructions.
           const rolledBack = applyEv?.rollback === 'rolled-back';
-          recordAttempt({
+          await recordAttempt({
             attempt: repairAttempt,
             citedEvidenceIds: accepted.citedEvidenceIds,
             rationale: accepted.rationale,
@@ -493,7 +508,7 @@ export function createProductionCodingDriver(deps: ProductionCodingDriverDeps): 
         // history exists to stop the NEXT attempt repeating a failure — a success has
         // nothing to warn anyone about.
         if (current && !current.passed) {
-          recordAttempt({
+          await recordAttempt({
             attempt: repairAttempt,
             citedEvidenceIds: accepted.citedEvidenceIds,
             rationale: accepted.rationale,
@@ -535,7 +550,7 @@ export function createProductionCodingDriver(deps: ProductionCodingDriverDeps): 
             value: record,
           };
         });
-        if (result.value) ctx.run.patchPayload({ latestValidation: result.value }, 'validation.recorded');
+        if (result.value) await ctx.run.patchPayload({ latestValidation: result.value }, 'validation.recorded');
         return result.value;
       }
 
@@ -552,8 +567,8 @@ export function createProductionCodingDriver(deps: ProductionCodingDriverDeps): 
             rollbacks: [...new Set([...rollbacks, ...rolledBackPaths(initialApplyEvidence ?? EMPTY_APPLY_EVIDENCE)])],
             finalValidation: current,
           });
-          const findings = reconcileCodingChildren(ctx.run.payload, ctx.run.children(), false);
-          const eligibility = codingCompletionEligibility(ctx.run.payload, ctx.run.children());
+          const findings = reconcileCodingChildren(ctx.run.payload, await ctx.run.children(), false);
+          const eligibility = codingCompletionEligibility(ctx.run.payload, await ctx.run.children());
           return {
             outcome: rec.consistent ? ('success' as const) : ('failure' as const),
             evidence: reconciliationEvidence({ reconciliation: rec, findings, blockers: eligibility.blockers, terminalDurable: false }),
@@ -575,7 +590,7 @@ export function createProductionCodingDriver(deps: ProductionCodingDriverDeps): 
         const applyResult = initialApply.value;
         const allRollbacks = [...new Set([...rollbacks, ...rolledBackPaths(initialApplyEvidence ?? EMPTY_APPLY_EVIDENCE)])];
         if (!current || !applyResult) {
-          ctx.run.finalize({});
+          await ctx.run.finalize({});
           return;
         }
 
@@ -612,7 +627,7 @@ export function createProductionCodingDriver(deps: ProductionCodingDriverDeps): 
                       ? 'repair-ceiling-exhausted'
                       : 'apply-refused';
 
-        ctx.run.finalize({
+        await ctx.run.finalize({
           report: {
             runId: ctx.runId,
             stopReason,

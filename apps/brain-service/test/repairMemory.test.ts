@@ -347,7 +347,7 @@ test('13 — repair attempts survive a restart', async () => {
   const runId = await approvedRun(h);
 
   // Read the DURABLE record, exactly as a restarted process would.
-  const payload = parseCodingPayload(JSON.parse(h.journal.loadRun(runId)!.domainPayloadJson!));
+  const payload = parseCodingPayload(JSON.parse((await h.journal.loadRun(runId))!.domainPayloadJson!));
   assert.ok(payload.ok, payload.ok ? '' : payload.fault);
   const history = payload.payload.repairHistory ?? [];
   assert.ok(history.length > 0, 'a restarted run would have no memory of its failed repairs');
@@ -378,7 +378,7 @@ test('14 — a cancelled run does not record its stop as a repair failure', asyn
   await h.app.inject({ method: 'POST', url: `/api/ai/coding/runs/${runId}/cancel`, payload: { expectedRevision: snap.revision } });
   await settle(h, runId);
 
-  const payload = parseCodingPayload(JSON.parse(h.journal.loadRun(runId)!.domainPayloadJson!));
+  const payload = parseCodingPayload(JSON.parse((await h.journal.loadRun(runId))!.domainPayloadJson!));
   assert.ok(payload.ok, payload.ok ? '' : payload.fault);
   const history = payload.payload.repairHistory ?? [];
   assert.deepEqual(history, [], 'a cancellation is not a failed repair and must not be recorded as one');

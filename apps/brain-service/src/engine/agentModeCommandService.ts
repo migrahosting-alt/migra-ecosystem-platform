@@ -25,7 +25,7 @@ import {
   type AgentRecipeResolverLike,
 } from './agentRecipe.js';
 import { AgentRunJournal, AGENT_TERMINAL_STATES, buildAgentRunJournalConfig, durableRunToView } from './agentRunJournal.js';
-import type { AgentRunJournalPersistence, AgentRunReconciliationClaim, DurableAgentRun } from './persistence/types.js';
+import type { AgentRunJournalPersistence, AgentRunReconciliationClaim, DurableAgentRun, DurableAgentRunEvent } from './persistence/types.js';
 import { recoveryProductionReasonContracts, validateRecoverySourceProvenance } from './recoverySourceProvenance.js';
 
 const TERMINAL = new Set<AgentModeState>(['COMPLETED', 'REJECTED', 'EXPIRED', 'STALE', 'FAILED', 'CANCELLED']);
@@ -98,6 +98,15 @@ interface CommandRunRecord {
   error?: { code: string; message: string };
   controller?: AbortController;
   cancelRequested?: boolean;
+  /**
+   * A decision is being processed for this run RIGHT NOW.
+   *
+   * `state` cannot serve this purpose: it stays AWAITING_APPROVAL across several
+   * awaits inside `decide`, so two concurrent approvals both pass the state guard.
+   * Claimed synchronously so the second caller loses before it can emit a second
+   * `approval.approved` audit record for a single human decision.
+   */
+  approvalInFlight?: boolean;
   containment?: AgentContainmentIdentity;
 }
 
@@ -125,7 +134,10 @@ export class AgentModeCommandService {
     private readonly journal = new AgentRunJournal(undefined),
     private readonly serviceInstanceId = `agentreconcile_${randomUUID()}`,
   ) {
-    this.cleanupTimer = setInterval(() => this.cleanup(), 5_000);
+    // Detached by necessity (constructor) and by design: cleanup failure is
+    // non-fatal. The catch is what keeps it from becoming an unhandled
+    // rejection now that cleanup touches the async journal.
+    this.cleanupTimer = setInterval(() => { void this.cleanup().catch(() => undefined); }, 5_000);
     this.cleanupTimer.unref();
   }
 
@@ -139,7 +151,7 @@ export class AgentModeCommandService {
     if (!validContext(context) || parsed.data.rootPath !== context.workspaceRoot || !context.allowedRecipes.includes(parsed.data.recipe)) {
       return { ok: false, code: 'INVALID_CONTEXT', message: 'The Agent Mode session or workspace context is invalid.' };
     }
-    this.cleanup();
+    await this.cleanup();
     const pending = [...this.runs.values()].filter((run) => !TERMINAL.has(run.state));
     if (this.runs.size >= MAX_RUNS || pending.length >= MAX_PENDING || pending.filter((run) => run.activationId === context.activationId).length >= MAX_PENDING_PER_SESSION) {
       return { ok: false, code: 'OVERLOADED', message: 'The Agent Mode run limit is currently reached.' };
@@ -221,7 +233,7 @@ export class AgentModeCommandService {
     };
     this.runs.set(runId, run);
     try {
-      this.journal.create({
+      await this.journal.create({
         runId,
         correlationId: requestId,
         externalRequestRef: run.externalRequestRef,
@@ -246,35 +258,35 @@ export class AgentModeCommandService {
         preview: run.preview,
       });
     } catch {
-      this.revokeApproval(run);
+      await this.revokeApproval(run);
       this.runs.delete(runId);
       await this.resolver.release(plan).catch(() => {});
       return { ok: false, code: 'PROPOSAL_FAILED', message: 'The server could not durably record the Agent run.' };
     }
-    this.audit(run, 'proposal.created', 'AWAITING_APPROVAL', { recipe: plan.identity.recipe, fingerprint, expiresAt: approval.expiresAt });
+    await this.audit(run, 'proposal.created', 'AWAITING_APPROVAL', { recipe: plan.identity.recipe, fingerprint, expiresAt: approval.expiresAt });
     return { ok: true, view: toView(run) };
   }
 
-  displayed(runId: string, fingerprint: string, context: AgentModeRequestContext): AgentModeActionResult {
+  async displayed(runId: string, fingerprint: string, context: AgentModeRequestContext): Promise<AgentModeActionResult> {
     const found = this.owned(runId, context);
     if (!found.ok) return found;
     const run = found.run;
-    this.expire(run);
+    await this.expire(run);
     if (run.state !== 'AWAITING_APPROVAL' || fingerprint !== run.fingerprint) {
       return { ok: false, code: 'INVALID_STATE', message: 'The authoritative proposal cannot be marked displayed.' };
     }
     if (!run.displayed) {
-      this.journal.transition({ runId: run.runId, expectedState: 'AWAITING_APPROVAL', nextState: 'AWAITING_APPROVAL', at: this.now(), eventType: 'approval.displayed', source: 'API', reason: run.fingerprint, approvalDisplayedAt: this.now(), approvalLifecycle: 'DISPLAYED' });
+      await this.journal.transition({ runId: run.runId, expectedState: 'AWAITING_APPROVAL', nextState: 'AWAITING_APPROVAL', at: this.now(), eventType: 'approval.displayed', source: 'API', reason: run.fingerprint, approvalDisplayedAt: this.now(), approvalLifecycle: 'DISPLAYED' });
       run.displayed = true;
-      this.audit(run, 'approval.displayed', 'AWAITING_APPROVAL', { recipe: run.plan.identity.recipe, fingerprint });
+      await this.audit(run, 'approval.displayed', 'AWAITING_APPROVAL', { recipe: run.plan.identity.recipe, fingerprint });
     }
     return { ok: true, view: toView(run) };
   }
 
-  get(runId: string, context: AgentModeRequestContext, _reconcile = true): AgentModeActionResult {
+  async get(runId: string, context: AgentModeRequestContext, _reconcile = true): Promise<AgentModeActionResult> {
     const found = this.owned(runId, context);
     if (!found.ok) {
-      const durable = this.journal.loadRun(runId);
+      const durable = await this.journal.loadRun(runId);
       if (durable && durable.workspaceIdentity === context.workspaceIdentity && AGENT_TERMINAL_STATES.has(durable.state as AgentModeState)) {
         return { ok: true, view: durableRunToView(durable) };
       }
@@ -283,26 +295,26 @@ export class AgentModeCommandService {
     return { ok: true, view: toView(found.run) };
   }
 
-  getRunRecoveryStatus(runId: string, context: AgentModeRequestContext): AgentModeRecoveryResult {
+  async getRunRecoveryStatus(runId: string, context: AgentModeRequestContext): Promise<AgentModeRecoveryResult> {
     if (!validContext(context)) return { ok: false, code: 'INVALID_CONTEXT', message: 'The Agent Mode session or workspace context is invalid.' };
-    const run = this.journal.loadRun(runId);
+    const run = await this.journal.loadRun(runId);
     if (!run || run.workspaceIdentity !== context.workspaceIdentity) return { ok: false, code: 'UNKNOWN_RUN', message: 'Unknown Agent Mode recipe run.' };
-    return { ok: true, status: this.recoveryStatus(run, context) };
+    return { ok: true, status: this.recoveryStatus(run, context, await this.journal.events(run.runId)) };
   }
 
   async reproposeFromRun(runId: string, raw: unknown, context: AgentModeRequestContext, signal?: AbortSignal): Promise<AgentModeActionResult> {
     const parsed = AgentModeReproposalRequestSchema.safeParse(raw);
     if (!parsed.success) return { ok: false, code: 'PROPOSAL_FAILED', message: 'A valid recovery request id is required.' };
     if (!validContext(context)) return { ok: false, code: 'INVALID_CONTEXT', message: 'The Agent Mode session or workspace context is invalid.' };
-    this.cleanup();
-    const source = this.journal.loadRun(runId);
+    await this.cleanup();
+    const source = await this.journal.loadRun(runId);
     if (!source || source.workspaceIdentity !== context.workspaceIdentity) return { ok: false, code: 'UNKNOWN_RUN', message: 'Unknown Agent Mode recipe run.' };
     if (source.successorRunId) {
-      const successor = this.journal.loadRun(source.successorRunId);
+      const successor = await this.journal.loadRun(source.successorRunId);
       if (source.lastRecoveryRequestId === parsed.data.requestId && successor) return { ok: true, view: durableRunToView(successor) };
       return { ok: false, code: 'RECOVERY_CONFLICT', message: 'This run already has an active recovery successor.' };
     }
-    const sourceEvents = this.journal.events(source.runId);
+    const sourceEvents = await this.journal.events(source.runId);
     const provenance = validateRecoverySourceProvenance({ run: source, events: sourceEvents, workspaceIdentity: context.workspaceIdentity, allowedRecipes: context.allowedRecipes, now: this.now() });
     const status = this.recoveryStatus(source, context, sourceEvents);
     if (!status.eligible) return { ok: false, code: 'RECOVERY_INELIGIBLE', message: status.explanation };
@@ -338,7 +350,7 @@ export class AgentModeCommandService {
     }
     const createdAt = this.now();
     const preview = this.previewFor(plan, safeReason, requestId, fingerprint, approval.expiresAt);
-    const journalResult = this.journal.createSuccessor({
+    const journalResult = await this.journal.createSuccessor({
       source,
       provenance: {
         workspaceIdentity: context.workspaceIdentity,
@@ -402,12 +414,12 @@ export class AgentModeCommandService {
       preview,
     };
     this.runs.set(newRunId, run);
-    this.audit(run, 'recovery.successor_created', 'AWAITING_APPROVAL', { recipe: plan.identity.recipe, source: auditHash(source.runId), fingerprint });
+    await this.audit(run, 'recovery.successor_created', 'AWAITING_APPROVAL', { recipe: plan.identity.recipe, source: auditHash(source.runId), fingerprint });
     return { ok: true, view: toView(run) };
   }
 
   async reconcileOnStartup(): Promise<{ scanned: number; reconciled: number; outcomes: Record<string, number> }> {
-    const runs = this.journal.loadRuns()
+    const runs = (await this.journal.loadRuns())
       .filter((run) => !AGENT_TERMINAL_STATES.has(run.state as AgentModeState))
       // Command policy only. A run carrying a domain payload belongs to another
       // workflow with its own restart rules — reconciling it here would apply the
@@ -417,10 +429,10 @@ export class AgentModeCommandService {
     const outcomes: Record<string, number> = {};
     let reconciled = 0;
     for (const run of runs) {
-      const claim = this.journal.claimReconciliation(run.runId, this.serviceInstanceId, this.now());
+      const claim = await this.journal.claimReconciliation(run.runId, this.serviceInstanceId, this.now());
       if (!claim) continue;
       reconciled += 1;
-      const started = this.journal.reconciliationEvent({ runId: run.runId, expectedState: run.state as AgentModeState, at: this.now(), type: 'restart.reconciliation_started', reason: run.state, reconciliation: { owner: claim.owner, fence: claim.fence, leaseValidAt: this.now(), expectedVersion: claim.version } });
+      const started = await this.journal.reconciliationEvent({ runId: run.runId, expectedState: run.state as AgentModeState, at: this.now(), type: 'restart.reconciliation_started', reason: run.state, reconciliation: { owner: claim.owner, fence: claim.fence, leaseValidAt: this.now(), expectedVersion: claim.version } });
       if (!started) {
         outcomes.RECONCILIATION_FENCE_LOST = (outcomes.RECONCILIATION_FENCE_LOST ?? 0) + 1;
         continue;
@@ -435,77 +447,102 @@ export class AgentModeCommandService {
     const found = this.owned(runId, context);
     if (!found.ok) return found;
     const run = found.run;
-    this.expire(run);
+    await this.expire(run);
     if (TERMINAL.has(run.state)) return this.terminalDecision(run);
     if (run.state !== 'AWAITING_APPROVAL') return this.duplicateDecision(run);
     if (decision === 'reject') {
-      this.revokeApproval(run);
-      this.journal.transition({ runId, expectedState: 'AWAITING_APPROVAL', nextState: 'REJECTED', at: this.now(), eventType: 'approval.rejected', source: 'APPROVAL', reason: 'HUMAN_REJECTED', approvalDecisionAt: this.now(), terminalAt: this.now(), failureCode: 'REJECTED', approvalLifecycle: 'REJECTED', approvalDecisionType: 'REJECTED', approvalActorRef: auditHash(context.activationId), recoveryClass: 'REPROPOSAL_ALLOWED', recoveryEligible: true, recoveryReason: 'REJECTED_FRESH_PROPOSAL_ALLOWED' });
-      this.transition(run, 'REJECTED');
-      this.audit(run, 'approval.rejected', 'REJECTED', { recipe: run.plan.identity.recipe });
+      await this.revokeApproval(run);
+      await this.journal.transition({ runId, expectedState: 'AWAITING_APPROVAL', nextState: 'REJECTED', at: this.now(), eventType: 'approval.rejected', source: 'APPROVAL', reason: 'HUMAN_REJECTED', approvalDecisionAt: this.now(), terminalAt: this.now(), failureCode: 'REJECTED', approvalLifecycle: 'REJECTED', approvalDecisionType: 'REJECTED', approvalActorRef: auditHash(context.activationId), recoveryClass: 'REPROPOSAL_ALLOWED', recoveryEligible: true, recoveryReason: 'REJECTED_FRESH_PROPOSAL_ALLOWED' });
+      await this.transition(run, 'REJECTED');
+      await this.audit(run, 'approval.rejected', 'REJECTED', { recipe: run.plan.identity.recipe });
       void this.resolver.release(run.plan);
       return { ok: true, view: toView(run) };
     }
     if (!run.displayed) return { ok: false, code: 'INVALID_STATE', message: 'Approval requires the authoritative preview to be displayed first.' };
+    // Claim the decision SYNCHRONOUSLY, before the first suspension point below.
+    // Two concurrent approvals otherwise both pass every guard as far as the
+    // token consume — one wins the token, but BOTH have already written an
+    // `approval.approved` audit record, so the trail claims a human approved the
+    // same run twice. Exactly-once execution was never at risk; exactly-once
+    // ATTRIBUTION was.
+    if (run.approvalInFlight) return this.duplicateDecision(run);
+    run.approvalInFlight = true;
     const currentValid = await this.resolver.verify(run.plan);
     if (run.state !== 'AWAITING_APPROVAL') return TERMINAL.has(run.state) ? this.terminalDecision(run) : this.duplicateDecision(run);
     const currentHash = this.binding(run.plan, run.preview.reason);
     if (!currentValid || fingerprint !== run.fingerprint || currentHash !== run.proposalHash || currentHash.slice(0, 16) !== run.fingerprint) return this.stale(run);
-    if (!this.journal.transition({ runId, expectedState: 'AWAITING_APPROVAL', nextState: 'APPROVED', at: this.now(), eventType: 'approval.approved', source: 'APPROVAL', reason: 'HUMAN_APPROVED', approvalDecisionAt: this.now(), approvalLifecycle: 'APPROVED', approvalDecisionType: 'APPROVED', approvalActorRef: auditHash(context.activationId) })) {
+    if (!await this.journal.transition({ runId, expectedState: 'AWAITING_APPROVAL', nextState: 'APPROVED', at: this.now(), eventType: 'approval.approved', source: 'APPROVAL', reason: 'HUMAN_APPROVED', approvalDecisionAt: this.now(), approvalLifecycle: 'APPROVED', approvalDecisionType: 'APPROVED', approvalActorRef: auditHash(context.activationId) })) {
+      // Not terminal: the run is still AWAITING_APPROVAL, so a retry is legitimate.
+      run.approvalInFlight = false;
       return { ok: false, code: 'STALE', message: 'The durable Agent run could not be approved safely.' };
     }
     // This critical audit write must succeed before the private approval is consumed.
-    this.audit(run, 'approval.approved', 'APPROVED', { recipe: run.plan.identity.recipe, fingerprint: run.fingerprint });
+    await this.audit(run, 'approval.approved', 'APPROVED', { recipe: run.plan.identity.recipe, fingerprint: run.fingerprint });
     const consumed = this.toolDeps.approvals.consume(run.approvalId, { tool: 'agent.recipe', inputHash: run.proposalHash, correlationId: run.requestId });
-    if (!consumed.ok) return this.stale(run);
+    if (!consumed.ok) {
+      /**
+       * `consumed` means THIS run's one-time authority was already spent — by a
+       * concurrent duplicate of this very approval. That is a DUPLICATE decision,
+       * not a stale proposal, and the distinction matters: `stale()` drives the
+       * run to a terminal STALE state, so a duplicate click destroyed a run that
+       * was legitimately approved and already executing. Exactly-once is enforced
+       * by the token itself (one consume succeeds); the loser must report that it
+       * started nothing WITHOUT invalidating the winner's live execution.
+       *
+       * Every other reason — unknown, expired, rejected, mismatch — means the
+       * authority genuinely is not usable, which is what STALE exists to say.
+       */
+      if (consumed.reason === 'consumed') return this.duplicateDecision(run);
+      return this.stale(run);
+    }
     // Consumption is itself a critical, durable boundary. If this append fails,
     // the private token is already revoked and execution remains fail-closed.
-    this.audit(run, 'approval.consumed', 'CONSUMED', { recipe: run.plan.identity.recipe, fingerprint: run.fingerprint });
-    this.journal.transition({ runId, expectedState: 'APPROVED', nextState: 'APPROVED', at: this.now(), eventType: 'approval.consumed', source: 'APPROVAL', reason: 'ONE_TIME_AUTHORITY_CONSUMED', approvalLifecycle: 'CONSUMED' });
-    this.transition(run, 'APPROVED');
+    await this.audit(run, 'approval.consumed', 'CONSUMED', { recipe: run.plan.identity.recipe, fingerprint: run.fingerprint });
+    await this.journal.transition({ runId, expectedState: 'APPROVED', nextState: 'APPROVED', at: this.now(), eventType: 'approval.consumed', source: 'APPROVAL', reason: 'ONE_TIME_AUTHORITY_CONSUMED', approvalLifecycle: 'CONSUMED' });
+    await this.transition(run, 'APPROVED');
     run.controller = new AbortController();
-    queueMicrotask(() => {
+    queueMicrotask(async () => {
       if (run.state !== 'APPROVED') return;
-      if (!this.journal.transition({ runId: run.runId, expectedState: 'APPROVED', nextState: 'EXECUTING', at: this.now(), eventType: 'execution.start_requested', source: 'EXECUTION', reason: 'APPROVED_EXECUTION_START', executionStartedAt: this.now() })) {
-        this.transition(run, 'FAILED');
+      if (!(await this.journal.transition({ runId: run.runId, expectedState: 'APPROVED', nextState: 'EXECUTING', at: this.now(), eventType: 'execution.start_requested', source: 'EXECUTION', reason: 'APPROVED_EXECUTION_START', executionStartedAt: this.now() }))) {
+        await this.transition(run, 'FAILED');
         run.error = { code: 'DURABLE_WRITE_FAILED', message: 'The approved recipe did not start because durable execution state could not be recorded.' };
-        this.audit(run, 'execution.failed', 'DURABLE_WRITE_FAILED', { recipe: run.plan.identity.recipe });
+        await this.audit(run, 'execution.failed', 'DURABLE_WRITE_FAILED', { recipe: run.plan.identity.recipe });
         void this.resolver.release(run.plan);
         return;
       }
-      this.transition(run, 'EXECUTING');
+      await this.transition(run, 'EXECUTING');
       const execution = this.execute(run).finally(() => this.executing.delete(execution));
       this.executing.add(execution);
     });
     return { ok: true, view: toView(run) };
   }
 
-  cancel(runId: string, context: AgentModeRequestContext): AgentModeActionResult {
+  async cancel(runId: string, context: AgentModeRequestContext): Promise<AgentModeActionResult> {
     const found = this.owned(runId, context);
     if (!found.ok) return found;
     const run = found.run;
-    this.expire(run);
+    await this.expire(run);
     if (run.state === 'CANCELLED') return { ok: true, view: toView(run) };
     if (TERMINAL.has(run.state)) return { ok: false, code: 'INVALID_STATE', message: `The recipe run is already terminal in ${run.state}.` };
     if (run.state === 'AWAITING_APPROVAL' || run.state === 'APPROVED') {
-      if (run.state === 'AWAITING_APPROVAL') this.revokeApproval(run);
-      this.journal.transition({ runId, expectedState: run.state, nextState: 'CANCELLED', at: this.now(), eventType: 'cancellation.requested', source: 'API', reason: 'CANCELLED_BEFORE_SPAWN', terminalAt: this.now(), failureCode: 'CANCELLED_BEFORE_SPAWN', approvalLifecycle: run.state === 'AWAITING_APPROVAL' ? 'INVALIDATED' : undefined, approvalInvalidationReason: 'CANCELLED_BEFORE_SPAWN', recoveryClass: 'REPROPOSAL_ALLOWED', recoveryEligible: true, recoveryReason: 'CANCELLED_FRESH_PROPOSAL_ALLOWED' });
-      this.transition(run, 'CANCELLED');
+      if (run.state === 'AWAITING_APPROVAL') await this.revokeApproval(run);
+      await this.journal.transition({ runId, expectedState: run.state, nextState: 'CANCELLED', at: this.now(), eventType: 'cancellation.requested', source: 'API', reason: 'CANCELLED_BEFORE_SPAWN', terminalAt: this.now(), failureCode: 'CANCELLED_BEFORE_SPAWN', approvalLifecycle: run.state === 'AWAITING_APPROVAL' ? 'INVALIDATED' : undefined, approvalInvalidationReason: 'CANCELLED_BEFORE_SPAWN', recoveryClass: 'REPROPOSAL_ALLOWED', recoveryEligible: true, recoveryReason: 'CANCELLED_FRESH_PROPOSAL_ALLOWED' });
+      await this.transition(run, 'CANCELLED');
       run.controller?.abort();
-      this.audit(run, 'cancellation.requested', 'CANCELLED_BEFORE_SPAWN', { recipe: run.plan.identity.recipe });
+      await this.audit(run, 'cancellation.requested', 'CANCELLED_BEFORE_SPAWN', { recipe: run.plan.identity.recipe });
       void this.resolver.release(run.plan);
       return { ok: true, view: toView(run) };
     }
     run.cancelRequested = true;
     run.controller?.abort();
-    this.journal.event({ runId, at: this.now(), type: 'cancellation.requested', state: 'EXECUTING', correlationId: run.requestId, source: 'API', reason: 'USER_CANCELLED' });
-    this.audit(run, 'cancellation.requested', 'EXECUTING', { recipe: run.plan.identity.recipe });
+    await this.journal.event({ runId, at: this.now(), type: 'cancellation.requested', state: 'EXECUTING', correlationId: run.requestId, source: 'API', reason: 'USER_CANCELLED' });
+    await this.audit(run, 'cancellation.requested', 'EXECUTING', { recipe: run.plan.identity.recipe });
     return { ok: true, view: toView(run) };
   }
 
   async shutdown(): Promise<void> {
     clearInterval(this.cleanupTimer);
-    for (const run of this.runs.values()) if (run.state === 'EXECUTING') this.audit(run, 'shutdown.termination_requested', 'EXECUTING', { recipe: run.plan.identity.recipe });
+    for (const run of this.runs.values()) if (run.state === 'EXECUTING') await this.audit(run, 'shutdown.termination_requested', 'EXECUTING', { recipe: run.plan.identity.recipe });
     await this.processes.shutdown();
     await Promise.allSettled([...this.executing]);
     for (const run of this.runs.values()) await this.resolver.release(run.plan).catch(() => {});
@@ -513,60 +550,60 @@ export class AgentModeCommandService {
 
   private async execute(run: CommandRunRecord): Promise<void> {
     if (!(await this.resolver.verify(run.plan)) || this.binding(run.plan, run.preview.reason) !== run.proposalHash) {
-      this.transition(run, 'STALE');
+      await this.transition(run, 'STALE');
       run.error = { code: 'STALE', message: 'The recipe execution identity changed before process start.' };
-      this.audit(run, 'proposal.stale', 'STALE', { recipe: run.plan.identity.recipe, reason: 'identity_changed' });
+      await this.audit(run, 'proposal.stale', 'STALE', { recipe: run.plan.identity.recipe, reason: 'identity_changed' });
       await this.resolver.release(run.plan).catch(() => {});
       return;
     }
     try {
-      const outcome = await this.processes.execute(run.runId, run.plan, { onSpawned: (identity) => {
+      const outcome = await this.processes.execute(run.runId, run.plan, { onSpawned: async (identity) => {
         const trustedIdentity = this.containmentIdentity(run, identity.unit);
         run.containment = trustedIdentity;
-        const persisted = this.journal.transition({ runId: run.runId, expectedState: 'EXECUTING', nextState: 'EXECUTING', at: this.now(), eventType: 'execution.spawned', source: 'EXECUTION', reason: trustedIdentity.unit, containmentUnit: trustedIdentity.unit, containmentBinding: trustedIdentity.binding });
+        const persisted = await this.journal.transition({ runId: run.runId, expectedState: 'EXECUTING', nextState: 'EXECUTING', at: this.now(), eventType: 'execution.spawned', source: 'EXECUTION', reason: trustedIdentity.unit, containmentUnit: trustedIdentity.unit, containmentBinding: trustedIdentity.binding });
         if (!persisted) {
           throw new AgentRecipePolicyError('SPAWNED_IDENTITY_PERSISTENCE_FAILED', 'The contained recipe was stopped because its spawned identity could not be recorded durably.');
         }
-        this.audit(run, 'execution.spawned', 'EXECUTING', { recipe: run.plan.identity.recipe, snapshot: run.plan.identity.snapshotId.slice(0, 16) });
+        await this.audit(run, 'execution.spawned', 'EXECUTING', { recipe: run.plan.identity.recipe, snapshot: run.plan.identity.snapshotId.slice(0, 16) });
       } }, run.controller?.signal);
       const result = sanitizeAgentModeCommandResult(outcome.result);
       run.result = result;
       if (outcome.disposition === 'cancelled') {
-        if (!this.persistTransition({ runId: run.runId, expectedState: 'EXECUTING', nextState: 'CANCELLED', at: this.now(), eventType: 'containment.terminated', source: 'EXECUTION', reason: 'USER_CANCELLED', terminalAt: this.now(), result, exitCode: result.exitCode, failureCode: 'CANCELLED' })) {
-          this.failLocalAfterDurableTerminalLoss(run);
+        if (!await this.persistTransition({ runId: run.runId, expectedState: 'EXECUTING', nextState: 'CANCELLED', at: this.now(), eventType: 'containment.terminated', source: 'EXECUTION', reason: 'USER_CANCELLED', terminalAt: this.now(), result, exitCode: result.exitCode, failureCode: 'CANCELLED' })) {
+          await this.failLocalAfterDurableTerminalLoss(run);
           return;
         }
-        this.transition(run, 'CANCELLED');
-        this.audit(run, 'containment.terminated', 'CANCELLED', { recipe: run.plan.identity.recipe });
+        await this.transition(run, 'CANCELLED');
+        await this.audit(run, 'containment.terminated', 'CANCELLED', { recipe: run.plan.identity.recipe });
       } else if (outcome.disposition === 'timed_out') {
-        if (!this.persistTransition({ runId: run.runId, expectedState: 'EXECUTING', nextState: 'FAILED', at: this.now(), eventType: 'execution.failed', source: 'EXECUTION', reason: 'TIMED_OUT', terminalAt: this.now(), result, exitCode: result.exitCode, failureCode: 'TIMED_OUT' })) {
-          this.failLocalAfterDurableTerminalLoss(run);
+        if (!await this.persistTransition({ runId: run.runId, expectedState: 'EXECUTING', nextState: 'FAILED', at: this.now(), eventType: 'execution.failed', source: 'EXECUTION', reason: 'TIMED_OUT', terminalAt: this.now(), result, exitCode: result.exitCode, failureCode: 'TIMED_OUT' })) {
+          await this.failLocalAfterDurableTerminalLoss(run);
           return;
         }
-        this.transition(run, 'FAILED');
+        await this.transition(run, 'FAILED');
         run.error = { code: 'TIMED_OUT', message: 'The recipe exceeded its server-owned timeout and its process tree was stopped.' };
-        this.audit(run, 'execution.timed_out', 'TIMED_OUT', { recipe: run.plan.identity.recipe });
+        await this.audit(run, 'execution.timed_out', 'TIMED_OUT', { recipe: run.plan.identity.recipe });
       } else if (outcome.disposition === 'shutdown') {
-        if (!this.persistTransition({ runId: run.runId, expectedState: 'EXECUTING', nextState: 'CANCELLED', at: this.now(), eventType: 'containment.terminated', source: 'SHUTDOWN', reason: 'SHUTDOWN_TERMINATED', terminalAt: this.now(), result, exitCode: result.exitCode, failureCode: 'SHUTDOWN_TERMINATED' })) {
-          this.failLocalAfterDurableTerminalLoss(run);
+        if (!await this.persistTransition({ runId: run.runId, expectedState: 'EXECUTING', nextState: 'CANCELLED', at: this.now(), eventType: 'containment.terminated', source: 'SHUTDOWN', reason: 'SHUTDOWN_TERMINATED', terminalAt: this.now(), result, exitCode: result.exitCode, failureCode: 'SHUTDOWN_TERMINATED' })) {
+          await this.failLocalAfterDurableTerminalLoss(run);
           return;
         }
-        this.transition(run, 'CANCELLED');
-        this.audit(run, 'shutdown.terminated', 'CANCELLED', { recipe: run.plan.identity.recipe });
+        await this.transition(run, 'CANCELLED');
+        await this.audit(run, 'shutdown.terminated', 'CANCELLED', { recipe: run.plan.identity.recipe });
       } else {
-        if (!this.persistTransition({ runId: run.runId, expectedState: 'EXECUTING', nextState: 'COMPLETED', at: this.now(), eventType: 'execution.completed', source: 'EXECUTION', reason: 'PROCESS_EXITED', terminalAt: this.now(), result, exitCode: result.exitCode })) {
-          this.failLocalAfterDurableTerminalLoss(run);
+        if (!await this.persistTransition({ runId: run.runId, expectedState: 'EXECUTING', nextState: 'COMPLETED', at: this.now(), eventType: 'execution.completed', source: 'EXECUTION', reason: 'PROCESS_EXITED', terminalAt: this.now(), result, exitCode: result.exitCode })) {
+          await this.failLocalAfterDurableTerminalLoss(run);
           return;
         }
-        this.transition(run, 'COMPLETED');
-        this.audit(run, 'execution.completed', 'COMPLETED', { recipe: run.plan.identity.recipe, exitCode: result.exitCode, redacted: result.redacted });
+        await this.transition(run, 'COMPLETED');
+        await this.audit(run, 'execution.completed', 'COMPLETED', { recipe: run.plan.identity.recipe, exitCode: result.exitCode, redacted: result.redacted });
       }
     } catch (error) {
       const code = error instanceof AgentRecipePolicyError ? error.code : 'EXECUTION_FAILED';
-      this.persistTerminalFailure(run, code, 'EXECUTION');
-      this.transition(run, 'FAILED');
+      await this.persistTerminalFailure(run, code, 'EXECUTION');
+      await this.transition(run, 'FAILED');
       run.error = { code, message: code === 'TERMINATION_FAILED' ? 'The recipe process tree could not be confirmed stopped.' : code === 'SPAWNED_IDENTITY_PERSISTENCE_FAILED' ? 'The recipe process tree was stopped because durable containment identity recording failed.' : 'The approved recipe did not complete.' };
-      this.audit(run, code === 'TERMINATION_FAILED' ? 'execution.termination_failed' : 'execution.failed', code, { recipe: run.plan.identity.recipe });
+      await this.audit(run, code === 'TERMINATION_FAILED' ? 'execution.termination_failed' : 'execution.failed', code, { recipe: run.plan.identity.recipe });
     } finally {
       await this.resolver.release(run.plan).catch(() => {});
     }
@@ -584,21 +621,21 @@ export class AgentModeCommandService {
     return { ok: true, run };
   }
 
-  private stale(run: CommandRunRecord): AgentModeActionResult {
-    this.revokeApproval(run);
-    this.journal.transition({ runId: run.runId, nextState: 'STALE', at: this.now(), eventType: 'proposal.stale', source: 'APPROVAL', reason: 'STALE_PROPOSAL', terminalAt: this.now(), failureCode: 'STALE', approvalLifecycle: 'INVALIDATED', approvalInvalidationReason: 'SNAPSHOT_CHANGED', recoveryClass: 'SNAPSHOT_CHANGED', recoveryEligible: true, recoveryReason: 'STALE_REQUIRES_FRESH_PROPOSAL' });
-    this.transition(run, 'STALE');
-    this.audit(run, 'proposal.stale', 'STALE', { recipe: run.plan.identity.recipe });
+  private async stale(run: CommandRunRecord): Promise<AgentModeActionResult> {
+    await this.revokeApproval(run);
+    await this.journal.transition({ runId: run.runId, nextState: 'STALE', at: this.now(), eventType: 'proposal.stale', source: 'APPROVAL', reason: 'STALE_PROPOSAL', terminalAt: this.now(), failureCode: 'STALE', approvalLifecycle: 'INVALIDATED', approvalInvalidationReason: 'SNAPSHOT_CHANGED', recoveryClass: 'SNAPSHOT_CHANGED', recoveryEligible: true, recoveryReason: 'STALE_REQUIRES_FRESH_PROPOSAL' });
+    await this.transition(run, 'STALE');
+    await this.audit(run, 'proposal.stale', 'STALE', { recipe: run.plan.identity.recipe });
     void this.resolver.release(run.plan);
     return { ok: false, code: 'STALE', message: 'The preview fingerprint or recipe execution identity is stale.' };
   }
 
-  private expire(run: CommandRunRecord): void {
+  private async expire(run: CommandRunRecord): Promise<void> {
     if (run.state !== 'AWAITING_APPROVAL' || run.expiresAt > this.now()) return;
-    this.revokeApproval(run);
-    this.journal.transition({ runId: run.runId, expectedState: 'AWAITING_APPROVAL', nextState: 'EXPIRED', at: this.now(), eventType: 'approval.expired', source: 'CLEANUP', reason: 'APPROVAL_TTL_EXPIRED', terminalAt: this.now(), failureCode: 'EXPIRED', approvalLifecycle: 'EXPIRED', approvalInvalidationReason: 'APPROVAL_TTL_EXPIRED', recoveryClass: 'REPROPOSAL_ALLOWED', recoveryEligible: true, recoveryReason: 'EXPIRED_FRESH_PROPOSAL_ALLOWED' });
-    this.transition(run, 'EXPIRED');
-    this.audit(run, 'approval.expired', 'EXPIRED', { recipe: run.plan.identity.recipe });
+    await this.revokeApproval(run);
+    await this.journal.transition({ runId: run.runId, expectedState: 'AWAITING_APPROVAL', nextState: 'EXPIRED', at: this.now(), eventType: 'approval.expired', source: 'CLEANUP', reason: 'APPROVAL_TTL_EXPIRED', terminalAt: this.now(), failureCode: 'EXPIRED', approvalLifecycle: 'EXPIRED', approvalInvalidationReason: 'APPROVAL_TTL_EXPIRED', recoveryClass: 'REPROPOSAL_ALLOWED', recoveryEligible: true, recoveryReason: 'EXPIRED_FRESH_PROPOSAL_ALLOWED' });
+    await this.transition(run, 'EXPIRED');
+    await this.audit(run, 'approval.expired', 'EXPIRED', { recipe: run.plan.identity.recipe });
     void this.resolver.release(run.plan);
   }
 
@@ -611,25 +648,36 @@ export class AgentModeCommandService {
     return { ok: false, code: 'INVALID_STATE', message: `The recipe run cannot be approved from ${run.state}.` };
   }
 
-  private revokeApproval(run: CommandRunRecord): void {
+  private async revokeApproval(run: CommandRunRecord): Promise<void> {
     this.toolDeps.approvals.reject(run.approvalId, { tool: 'agent.recipe', inputHash: run.proposalHash, correlationId: run.requestId });
   }
 
-  private transition(run: CommandRunRecord, state: AgentModeState): void {
+  private async transition(run: CommandRunRecord, state: AgentModeState): Promise<void> {
     if (TERMINAL.has(run.state)) return;
     run.state = state;
     run.updatedAt = this.now();
   }
 
-  private cleanup(): void {
-    for (const run of this.runs.values()) this.expire(run);
+  private async cleanup(): Promise<void> {
+    for (const run of this.runs.values()) await this.expire(run);
     const cutoff = this.now() - TERMINAL_RETENTION_MS;
     for (const [runId, run] of this.runs) if (TERMINAL.has(run.state) && run.updatedAt < cutoff) this.runs.delete(runId);
-    this.journal.prune(this.now());
+    await this.journal.prune(this.now());
   }
 
-  private audit(run: CommandRunRecord, type: Parameters<typeof auditStore.append>[0]['type'], outcome: string, fields: Record<string, unknown>): void {
-    auditStore.append({ correlationId: run.requestId, requestId: run.requestId, type, component: 'agent-mode-recipe', outcome, fields: { ...fields, run: auditHash(run.runId), activation: auditHash(run.activationId), workspace: auditHash(run.workspaceRoot), ...(run.externalRequestRef ? { externalRequest: run.externalRequestRef } : {}) } });
+  /**
+   * AWAITED BY EVERY CALLER — this helper emits three CRITICAL events
+   * (`approval.approved`, `approval.consumed`, `execution.spawned`).
+   *
+   * `AuditStore.append` writes durably BEFORE committing to memory and throws
+   * `AuditCriticalWriteError` when a CRITICAL record cannot be persisted, so the
+   * caller can fail closed before authorising the next step. Detached, that throw
+   * became an unhandled rejection while the approval or spawn proceeded — turning
+   * a fail-CLOSED contract into a fail-OPEN one. Non-critical events never throw,
+   * so awaiting is safe at every call site.
+   */
+  private async audit(run: CommandRunRecord, type: Parameters<typeof auditStore.append>[0]['type'], outcome: string, fields: Record<string, unknown>): Promise<void> {
+    await auditStore.append({ correlationId: run.requestId, requestId: run.requestId, type, component: 'agent-mode-recipe', outcome, fields: { ...fields, run: auditHash(run.runId), activation: auditHash(run.activationId), workspace: auditHash(run.workspaceRoot), ...(run.externalRequestRef ? { externalRequest: run.externalRequestRef } : {}) } });
   }
 
   private previewFor(plan: AgentRecipePlan, safeReason: string, requestId: string, fingerprint: string, expiresAt: number): NonNullable<AgentModeCommandRunView['preview']> {
@@ -664,7 +712,11 @@ export class AgentModeCommandService {
     };
   }
 
-  private recoveryStatus(run: DurableAgentRun, context: AgentModeRequestContext, events = this.journal.events(run.runId)): AgentModeRunRecoveryStatus {
+  /**
+   * `events` is REQUIRED — it used to default to a journal read, which under an
+   * async journal is a hidden refresh at an unpredictable point.
+   */
+  private recoveryStatus(run: DurableAgentRun, context: AgentModeRequestContext, events: DurableAgentRunEvent[]): AgentModeRunRecoveryStatus {
     const workspaceMatches = run.workspaceIdentity === context.workspaceIdentity;
     const currentRecipeAvailable = context.allowedRecipes.includes(run.recipeId as AgentModeRecipeId);
     const provenance = validateRecoverySourceProvenance({ run, events, workspaceIdentity: context.workspaceIdentity, allowedRecipes: context.allowedRecipes, now: this.now() });
@@ -704,30 +756,30 @@ export class AgentModeCommandService {
       if (run.containmentBinding !== expected.binding) {
         return this.reconciliationTransition(run, reconciliation, 'EXECUTING', 'FAILED', 'restart.interrupted_execution', 'RESTART_CONTAINMENT_IDENTITY_MISMATCH');
       }
-      const renewed = this.journal.renewReconciliation(run.runId, claim.owner, claim.fence, this.now());
+      const renewed = await this.journal.renewReconciliation(run.runId, claim.owner, claim.fence, this.now());
       if (!renewed) return 'RECONCILIATION_FENCE_LOST';
       const outcome = await this.processes.reconcileRun(run.runId, { ...expected, binding: run.containmentBinding });
-      const finalClaim = this.journal.renewReconciliation(run.runId, renewed.owner, renewed.fence, this.now());
+      const finalClaim = await this.journal.renewReconciliation(run.runId, renewed.owner, renewed.fence, this.now());
       if (!finalClaim) return 'RECONCILIATION_FENCE_LOST';
       const finalReconciliation = { owner: finalClaim.owner, fence: finalClaim.fence, leaseValidAt: this.now(), expectedVersion: finalClaim.version };
       const nextState = outcome.code === 'RESTART_CONTAINMENT_TERMINATED' ? 'CANCELLED' : 'FAILED';
       const eventType = outcome.code === 'RESTART_CONTAINMENT_TERMINATED' ? 'containment.terminated' : outcome.code === 'RESTART_TERMINATION_FAILED' ? 'containment.termination_failed' : 'restart.interrupted_execution';
-      const transitioned = this.reconciliationTransition(run, finalReconciliation, 'EXECUTING', nextState, eventType, outcome.code);
+      const transitioned = await this.reconciliationTransition(run, finalReconciliation, 'EXECUTING', nextState, eventType, outcome.code);
       return transitioned === outcome.code ? outcome.code : transitioned;
     }
     return 'RECONCILIATION_UNSUPPORTED_STATE';
   }
 
-  private reconciliationTransition(
+  private async reconciliationTransition(
     run: DurableAgentRun,
     reconciliation: ReconciliationFence,
     expectedState: AgentModeState,
     nextState: AgentModeState,
     eventType: string,
     reason: string,
-  ): string {
+  ): Promise<string> {
     const recovery = agentModeRecoveryMetadataFor(reason, nextState);
-    const ok = this.journal.transition({
+    const ok = await this.journal.transition({
       runId: run.runId,
       expectedState,
       nextState,
@@ -748,20 +800,20 @@ export class AgentModeCommandService {
     return ok ? reason : 'RECONCILIATION_FENCE_LOST';
   }
 
-  private persistTerminalFailure(run: CommandRunRecord, code: string, source: 'EXECUTION' | 'SHUTDOWN'): void {
-    if (this.persistTransition({ runId: run.runId, expectedState: 'EXECUTING', nextState: 'FAILED', at: this.now(), eventType: code === 'TERMINATION_FAILED' ? 'containment.termination_failed' : 'execution.failed', source, reason: code, terminalAt: this.now(), error: { code, message: code === 'TERMINATION_FAILED' ? 'The recipe process tree could not be confirmed stopped.' : 'The approved recipe did not complete.' }, failureCode: code })) return;
-    auditStore.append({ correlationId: run.requestId, requestId: run.requestId, type: 'execution.failed', component: 'agent-mode-recipe', outcome: 'DURABLE_TERMINAL_WRITE_FAILED', fields: { run: auditHash(run.runId), code } });
+  private async persistTerminalFailure(run: CommandRunRecord, code: string, source: 'EXECUTION' | 'SHUTDOWN'): Promise<void> {
+    if (await this.persistTransition({ runId: run.runId, expectedState: 'EXECUTING', nextState: 'FAILED', at: this.now(), eventType: code === 'TERMINATION_FAILED' ? 'containment.termination_failed' : 'execution.failed', source, reason: code, terminalAt: this.now(), error: { code, message: code === 'TERMINATION_FAILED' ? 'The recipe process tree could not be confirmed stopped.' : 'The approved recipe did not complete.' }, failureCode: code })) return;
+    await auditStore.append({ correlationId: run.requestId, requestId: run.requestId, type: 'execution.failed', component: 'agent-mode-recipe', outcome: 'DURABLE_TERMINAL_WRITE_FAILED', fields: { run: auditHash(run.runId), code } });
   }
 
-  private persistTransition(input: Parameters<AgentRunJournal['transition']>[0]): boolean {
-    for (let attempt = 0; attempt < 3; attempt += 1) if (this.journal.transition(input)) return true;
+  private async persistTransition(input: Parameters<AgentRunJournal['transition']>[0]): Promise<boolean> {
+    for (let attempt = 0; attempt < 3; attempt += 1) if (await this.journal.transition(input)) return true;
     return false;
   }
 
-  private failLocalAfterDurableTerminalLoss(run: CommandRunRecord): void {
-    this.transition(run, 'FAILED');
+  private async failLocalAfterDurableTerminalLoss(run: CommandRunRecord): Promise<void> {
+    await this.transition(run, 'FAILED');
     run.error = { code: 'DURABLE_TERMINAL_WRITE_FAILED', message: 'The recipe process ended, but durable terminal state could not be recorded.' };
-    this.audit(run, 'execution.failed', 'DURABLE_TERMINAL_WRITE_FAILED', { recipe: run.plan.identity.recipe });
+    await this.audit(run, 'execution.failed', 'DURABLE_TERMINAL_WRITE_FAILED', { recipe: run.plan.identity.recipe });
   }
 
   private containmentIdentity(run: CommandRunRecord, unit?: string): AgentContainmentIdentity {

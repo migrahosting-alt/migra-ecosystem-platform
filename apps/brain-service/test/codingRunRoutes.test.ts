@@ -155,7 +155,7 @@ test('1 — start returns 202 with a durable run id', async () => {
   assert.match(body.runId, /^codingrun_/);
   assert.equal(body.phase, 'planning');
   assert.equal(body.statusUrl, `/api/ai/coding/runs/${body.runId}`);
-  assert.ok(h.journal.loadRun(body.runId), 'the run is durable before the response returns');
+  assert.ok((await h.journal.loadRun(body.runId)), 'the run is durable before the response returns');
   h.driver.releasePlan();
   await h.app.close();
 });
@@ -296,7 +296,7 @@ test('11 — an invalidated approval is 409 approval_invalidated', async () => {
   const { runId, revision } = await plannedRun(h);
   // Restart re-verification found the evidence had moved.
   const service = h.service;
-  const snapshot = service.read(runId);
+  const snapshot = (await service.read(runId));
   assert.ok(snapshot.ok);
   const persistence = (h.journal as unknown as { persistence: MemoryAgentRunJournalPersistence }).persistence;
   const stored = JSON.parse(persistence.runs.get(runId)!.domainPayloadJson!) as CodingRunPayloadV1;
@@ -321,7 +321,7 @@ test('12 + 15 — an approval is consumed once and cannot dispatch twice', async
 
   // Replay with the CURRENT revision, so the conflict cannot be explained away
   // as merely stale — the approval itself must be what refuses it.
-  const current = (h.service.read(runId) as { value: { revision: number } }).value.revision;
+  const current = ((await h.service.read(runId)) as { value: { revision: number } }).value.revision;
   const replay = await decide(h, runId, { expectedRevision: current, pathSetHash: SCOPE_HASH, decision: 'approve' });
   assert.equal(replay.statusCode, 409);
   assert.ok(['approval_already_consumed', 'invalid_state'].includes(replay.json<{ reason: string }>().reason), `a consumed approval must refuse a replay (got ${replay.json<{ reason: string }>().reason})`);
@@ -341,8 +341,8 @@ test('13 — rejection launches no mutation child and preserves the proposal', a
 
   assert.equal(h.driver.resumeCalls, 0);
   assert.equal(h.driver.mutationsDispatched, 0);
-  assert.equal(h.journal.children(runId).some((c) => c.kind === 'initial_apply'), false);
-  assert.equal(h.journal.loadRun(runId)?.state, 'REJECTED');
+  assert.equal((await h.journal.children(runId)).some((c) => c.kind === 'initial_apply'), false);
+  assert.equal((await h.journal.loadRun(runId))?.state, 'REJECTED');
 
   const body = res.json<{ scope: { proposedPaths: string[]; approvalState: string } }>();
   assert.deepEqual(body.scope.proposedPaths, ['src/a.ts', 'src/b.ts'], 'the rejected proposal stays inspectable');
@@ -355,7 +355,7 @@ test('14 — approval resumes execution exactly once', async () => {
   await decide(h, runId, { expectedRevision: revision, pathSetHash: SCOPE_HASH, decision: 'approve' });
   await h.service.settle(runId);
   assert.equal(h.driver.resumeCalls, 1);
-  assert.equal(h.journal.children(runId).filter((c) => c.kind === 'initial_apply').length, 1);
+  assert.equal((await h.journal.children(runId)).filter((c) => c.kind === 'initial_apply').length, 1);
   await h.app.close();
 });
 
@@ -382,7 +382,7 @@ test('18 — cancellation prevents the next stage from launching', async () => {
   await cancel(h, runId, { expectedRevision: revision });
 
   // Approving after cancellation must not start mutation.
-  const after = await decide(h, runId, { expectedRevision: (h.service.read(runId) as { value: { revision: number } }).value.revision, pathSetHash: SCOPE_HASH, decision: 'approve' });
+  const after = await decide(h, runId, { expectedRevision: ((await h.service.read(runId)) as { value: { revision: number } }).value.revision, pathSetHash: SCOPE_HASH, decision: 'approve' });
   assert.equal(after.statusCode, 409);
   assert.equal(after.json<{ reason: string }>().reason, 'cancellation_requested');
   await h.service.settle(runId);
@@ -418,8 +418,8 @@ test('20 — a detached task failure is persisted as a truthful workflow failure
   h.driver.releasePlan();
   await h.service.settle(runId);
 
-  assert.equal(h.journal.loadRun(runId)?.state, 'FAILED', 'the run did not silently stay in planning');
-  assert.equal(h.journal.loadRun(runId)?.failureCode, 'WORKFLOW_THREW');
+  assert.equal((await h.journal.loadRun(runId))?.state, 'FAILED', 'the run did not silently stay in planning');
+  assert.equal((await h.journal.loadRun(runId))?.failureCode, 'WORKFLOW_THREW');
   const res = await h.app.inject({ method: 'GET', url: `/api/ai/coding/runs/${runId}` });
   assert.equal(res.statusCode, 200);
   assert.equal(res.json<{ state: string }>().state, 'FAILED');
@@ -440,7 +440,7 @@ test('21 — after restart the registry is empty and the journal is still author
     now: () => Date.parse('2026-08-01T00:01:00.000Z'),
   });
   assert.equal(restarted.hasExecutor(runId), false);
-  const snapshot = restarted.read(runId);
+  const snapshot = (await restarted.read(runId));
   assert.ok(snapshot.ok);
   assert.equal(snapshot.value.phase, 'awaiting_scope_approval', 'absence from the registry is not completion');
   assert.equal(snapshot.value.scope?.pathSetHash, SCOPE_HASH);
@@ -533,7 +533,7 @@ test('a terminal run refuses cancellation instead of reporting it accepted', asy
   await decide(h, runId, { expectedRevision: revision, pathSetHash: SCOPE_HASH, decision: 'approve' });
   await h.service.settle(runId);
 
-  const current = (h.service.read(runId) as { value: { revision: number; phase: string } }).value;
+  const current = ((await h.service.read(runId)) as { value: { revision: number; phase: string } }).value;
   assert.equal(current.phase, 'terminal');
   const res = await cancel(h, runId, { expectedRevision: current.revision });
   assert.equal(res.statusCode, 409, 'a finished run cannot be cancelled');

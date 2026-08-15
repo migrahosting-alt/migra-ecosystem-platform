@@ -31,60 +31,65 @@ function estimate(worst: number): CostEstimate {
   return { providerId: 'anthropic', modelId: 'claude', estimatedInputTokens: 100, maximumOutputTokens: 500, estimatedCostUsd: worst, worstCaseCostUsd: worst, pricingStatus: 'verified', costUnavailable: false };
 }
 
-function build(durable: SqliteDurableStore): { audit: AuditStore; usage: UsageLedger; incidents: IncidentManager; budget: BudgetManager } {
+async function build(durable: SqliteDurableStore): Promise<{ audit: AuditStore; usage: UsageLedger; incidents: IncidentManager; budget: BudgetManager; drain(): Promise<void> }> {
   const audit = new AuditStore(now);
   const usage = new UsageLedger(now, mkId);
   const incidents = new IncidentManager(new LocalAlertSink().sink, now, mkId);
   const budget = new BudgetManager(true, [scope()], now, mkId);
-  wireOperationalPersistence(durable, { auditStore: audit, usageLedger: usage, incidentManager: incidents, budgetManager: budget }, { now, recentLimit: 500 });
-  return { audit, usage, incidents, budget };
+  const handle = await wireOperationalPersistence(durable, { auditStore: audit, usageLedger: usage, incidentManager: incidents, budgetManager: budget }, { now, recentLimit: 500 });
+  return { audit, usage, incidents, budget, drain: handle.drain };
 }
 
-test('audit + usage written through the stores survive a restart', () => {
+test('audit + usage written through the stores survive a restart', async () => {
   const p = tmpDb();
   let d = new SqliteDurableStore(p);
-  let s = build(d);
-  s.audit.append({ correlationId: 'c1', type: 'execution.started', component: 'engineer', fields: { workspace: 'ws1' } });
+  let s = await build(d);
+  await s.audit.append({ correlationId: 'c1', type: 'execution.started', component: 'engineer', fields: { workspace: 'ws1' } });
   s.usage.append({ executionCorrelationId: 'c1', providerId: 'local', modelId: 'qwen', executionMode: 'chat', policy: 'auto', localOrCloud: 'local', outcome: 'ok', costStatus: 'unknown' });
+  await s.drain();
   d.close();
 
   d = new SqliteDurableStore(p);
-  s = build(d); // fresh managers, hydrated from durable
+  s = await build(d); // fresh managers, hydrated from durable
   assert.equal(s.audit.byCorrelation('c1')[0]!.type, 'execution.started');
   assert.equal(s.usage.summary().totalRecords, 1);
-  assert.equal(d.operationalCounts().auditEvents, 1);
+  assert.equal((await d.operationalCounts()).auditEvents, 1);
+  await s.drain();
   d.close();
 });
 
-test('an OPEN incident survives a restart and still dedups the repeat occurrence', () => {
+test('an OPEN incident survives a restart and still dedups the repeat occurrence', async () => {
   const p = tmpDb();
   let d = new SqliteDurableStore(p);
-  let s = build(d);
+  let s = await build(d);
   const raised = s.incidents.raiseInconsistentState({ correlationId: 'c2', workspaceIdentityHash: 'wh', proposalHashPrefix: 'ph', appliedFileCount: 2, affectedPathCount: 2, rollbackFailureCount: 1, failureStage: 'rollback' });
+  await s.drain();
   d.close();
 
   d = new SqliteDurableStore(p);
-  s = build(d);
+  s = await build(d);
   // Same workspace+proposal+stage after restart → dedups to the restored incident.
   const again = s.incidents.raiseInconsistentState({ correlationId: 'c2b', workspaceIdentityHash: 'wh', proposalHashPrefix: 'ph', appliedFileCount: 2, affectedPathCount: 2, rollbackFailureCount: 1, failureStage: 'rollback' });
   assert.equal(again.notified, false, 'repeat after restart must NOT re-notify');
   assert.equal(again.incident.incidentId, raised.incident.incidentId);
   assert.equal(again.incident.occurrenceCount, 2);
-  assert.equal(d.operationalCounts().incidents, 1);
+  assert.equal((await d.operationalCounts()).incidents, 1);
+  await s.drain();
   d.close();
 });
 
-test('budget running totals + active reservation survive a restart (reconciled to env scope)', () => {
+test('budget running totals + active reservation survive a restart (reconciled to env scope)', async () => {
   const p = tmpDb();
   let d = new SqliteDurableStore(p);
-  let s = build(d);
+  let s = await build(d);
   const r = s.budget.reserve({ correlationId: 'c3', providerId: 'anthropic', modelId: 'claude', estimate: estimate(2) });
   assert.equal(r.ok, true);
+  await s.drain();
   d.close();
 
   // Reopen: spent=0 reserved=2 must reconcile onto the still-existing monthly:global scope.
   d = new SqliteDurableStore(p);
-  s = build(d);
+  s = await build(d);
   const pf = s.budget.preflight({ correlationId: 'c3b', providerId: 'anthropic', modelId: 'claude', estimate: estimate(1) });
   assert.equal(pf.remainingUsd, 48, 'reserved 2 of 50 survived the restart');
   // The restored reservation is still consumable (single-use continuity).
@@ -92,31 +97,34 @@ test('budget running totals + active reservation survive a restart (reconciled t
     const consumed = s.budget.consume(r.reservation.reservationId, 2);
     assert.equal(consumed.ok, true);
   }
+  await s.drain();
   d.close();
 
   // Third boot: spent=2 persisted, reservation removed on consume.
   d = new SqliteDurableStore(p);
-  s = build(d);
+  s = await build(d);
   const pf2 = s.budget.preflight({ correlationId: 'c3c', providerId: 'anthropic', modelId: 'claude', estimate: estimate(1) });
   assert.equal(pf2.remainingUsd, 48, 'spent 2 persisted after consume');
-  assert.equal(d.operationalCounts().reservations, 0, 'consumed reservation dropped from durable');
+  assert.equal((await d.operationalCounts()).reservations, 0, 'consumed reservation dropped from durable');
+  await s.drain();
   d.close();
 });
 
-test('a removed env scope does NOT resurrect persisted totals (config-change safe)', () => {
+test('a removed env scope does NOT resurrect persisted totals (config-change safe)', async () => {
   const p = tmpDb();
   const d = new SqliteDurableStore(p);
   // Persist a scope id that will NOT exist in the next boot's env config.
-  d.saveBudgetScope({ scopeId: 'provider:openai', kind: 'provider', scopeKeyName: 'openai', hardLimitUsd: 10, spentUsd: 9, reservedUsd: 0, periodStart: 0, updatedAt: 1000 });
+  await d.saveBudgetScope({ scopeId: 'provider:openai', kind: 'provider', scopeKeyName: 'openai', hardLimitUsd: 10, spentUsd: 9, reservedUsd: 0, periodStart: 0, updatedAt: 1000 });
   // Next boot only defines monthly:global — the orphaned provider:openai total is dropped.
   const audit = new AuditStore(now);
   const usage = new UsageLedger(now, mkId);
   const incidents = new IncidentManager(new LocalAlertSink().sink, now, mkId);
   const budget = new BudgetManager(true, [scope()], now, mkId);
-  wireOperationalPersistence(d, { auditStore: audit, usageLedger: usage, incidentManager: incidents, budgetManager: budget }, { now });
+  const handle = await wireOperationalPersistence(d, { auditStore: audit, usageLedger: usage, incidentManager: incidents, budgetManager: budget }, { now });
   // The only surviving scope is monthly:global, untouched: the orphaned $9 spend on
   // the removed provider:openai scope was DROPPED, never leaked onto a live scope.
   const pf = budget.preflight({ correlationId: 'c4', providerId: 'openai', modelId: 'gpt', estimate: estimate(1) });
   assert.equal(pf.remainingUsd, 50, 'monthly:global untouched — orphaned total not resurrected');
+  await handle.drain();
   d.close();
 });

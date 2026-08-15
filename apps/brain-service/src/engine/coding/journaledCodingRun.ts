@@ -39,14 +39,47 @@ import {
 import type { CodingChildKind, CodingPhase, CodingRunPayloadV1 } from './codingRunPayload.js';
 import { CODING_MUTATING_CHILD_KINDS } from './codingRunPayload.js';
 
-/** The durable surface this wrapper needs. Injected so the ordering rules can be
- * tested without a live SQLite journal — the rules are the valuable part. */
+/**
+ * The durable surface this wrapper needs. Injected so the ordering rules can be
+ * tested without a live SQLite journal — the rules are the valuable part.
+ *
+ * ─── Read/write split (sub-slice 2.5) ───────────────────────────────────────
+ *
+ * The journal became asynchronous; this subsystem did not. The mismatch is NOT
+ * that reads suddenly need I/O — it is that the persistence layer is async while
+ * the subsystem legitimately expects synchronous access to run state it has
+ * already loaded. So the store holds a canonical in-memory copy:
+ *
+ *   • READS (`readPayload`, `parentState`, `revision`) are synchronous and served
+ *     ONLY from that cache. They never touch the journal. `get payload()` on
+ *     JournaledCodingRun therefore stays a pure synchronous read, which is what
+ *     lets the rest of the subsystem stay unchanged.
+ *
+ *   • WRITES (`writePayload`, `transitionParent`) are asynchronous and strictly
+ *     ordered: persist through the journal, AWAIT success, and only then update
+ *     the cache. A failed write leaves the cache byte-for-byte unchanged, so the
+ *     in-memory view never claims something the journal did not accept.
+ *
+ * There are no background refreshes and no implicit re-reads. The previous
+ * implementation re-read the run on every single call, which under an async
+ * journal would have meant nondeterministic staleness at arbitrary points.
+ *
+ * SINGLE-WRITER BY CONTRACT. A store instance assumes it is the only writer for
+ * its run. That is already true of a coding run, which is driven by one service.
+ * It is stated rather than assumed: if another writer mutates the run, this cache
+ * is stale and `reload()` is the only sanctioned way to resynchronise. Nothing
+ * here silently pretends coherence across writers.
+ */
 export interface CodingRunStore {
   readPayload(): CodingRunPayloadV1;
+  parentState(): DurableAgentRunState;
+  /** Cached durable revision. Advances only when a write actually lands. */
+  revision(): number;
+  /** Deliberate resynchronisation. The ONLY path that re-reads the journal. */
+  reload(): Promise<void>;
   /** Returns false when the write did NOT land. Never throws; a caller that
    * cannot tell a failed write from a successful one cannot stay truthful. */
-  writePayload(payload: CodingRunPayloadV1, note: string): boolean;
-  parentState(): DurableAgentRunState;
+  writePayload(payload: CodingRunPayloadV1, note: string): Promise<boolean>;
   /**
    * Move the parent, optionally carrying a payload in the SAME durable revision.
    *
@@ -56,7 +89,7 @@ export interface CodingRunStore {
    * changeset. Writing both together makes the phase become terminal exactly
    * when the parent does, and fail together when the write fails.
    */
-  transitionParent(next: DurableAgentRunState, note: string, payload?: CodingRunPayloadV1): boolean;
+  transitionParent(next: DurableAgentRunState, note: string, payload?: CodingRunPayloadV1): Promise<boolean>;
 }
 
 export type StageStatus =
@@ -151,20 +184,20 @@ export class JournaledCodingRun {
     return this.store.readPayload();
   }
 
-  children(): DurableAgentRunChild[] {
+  async children(): Promise<DurableAgentRunChild[]> {
     return this.journal.children(this.runId);
   }
 
   /** Highest attempt recorded for a kind. Repeated stages increment under the
    * (run_id, kind, attempt) uniqueness constraint rather than colliding. */
-  nextAttempt(kind: CodingChildKind): number {
-    const attempts = this.children().filter((c) => c.kind === kind).map((c) => c.attempt);
+  async nextAttempt(kind: CodingChildKind): Promise<number> {
+    const attempts = (await this.children()).filter((c) => c.kind === kind).map((c) => c.attempt);
     return attempts.length ? Math.max(...attempts) + 1 : 1;
   }
 
   /** A durable, successfully completed child of this kind, if one exists. */
-  completedChild(kind: CodingChildKind): DurableAgentRunChild | undefined {
-    return this.children().find((c) => c.kind === kind && c.state === 'completed' && c.terminalCategory === 'observed_success');
+  async completedChild(kind: CodingChildKind): Promise<DurableAgentRunChild | undefined> {
+    return (await this.children()).find((c) => c.kind === kind && c.state === 'completed' && c.terminalCategory === 'observed_success');
   }
 
   /** Cancellation was REQUESTED. Not an outcome — see `confirmCancellation`. */
@@ -191,21 +224,21 @@ export class JournaledCodingRun {
     // run a second time; re-running an apply is exactly the double-write the
     // recovery rules forbid.
     if (opts.reuseIfCompleted) {
-      const existing = this.completedChild(opts.kind);
+      const existing = await this.completedChild(opts.kind);
       if (existing) {
         this.diagnostic({ at: 'coding.stage.skipped', runId: this.runId, kind: opts.kind, reason: 'reused_completed_child' });
-        this.advancePhase(opts.phase, `stage.reused:${opts.kind}`);
+        await this.advancePhase(opts.phase, `stage.reused:${opts.kind}`);
         return { status: 'reused', child: existing, reusedEvidence: parseEvidence(existing), detail: `reused durable ${opts.kind} from attempt ${existing.attempt}` };
       }
     }
 
-    const attempt = this.nextAttempt(opts.kind);
+    const attempt = await this.nextAttempt(opts.kind);
     const childId = this.mkChildId(opts.kind, attempt);
     this.diagnostic({ at: 'coding.plan.entered', runId: this.runId, kind: opts.kind, attempt });
     this.diagnostic({ at: 'coding.child.create.requested', runId: this.runId, kind: opts.kind, attempt });
 
     // 1 + 2 — existence, then reference. Refusal here means zero dispatch.
-    const registration = registerCodingChild(this.journal, (p, note) => this.store.writePayload(p, note), {
+    const registration = await registerCodingChild(this.journal, async (p, note) => this.store.writePayload(p, note), {
       runId: this.runId,
       payload: this.payload,
       childId,
@@ -228,7 +261,7 @@ export class JournaledCodingRun {
     this.diagnostic({ at: 'coding.child.parent_ref.persisted', runId: this.runId, childId });
 
     // 3 + 4 — dispatch, and only now does the child become `running`.
-    const started = startCodingChild(this.journal, registration.child, this.now());
+    const started = await startCodingChild(this.journal, registration.child, this.now());
     if (!started) {
       return { status: 'refused', detail: 'the child could not be moved to running; nothing was dispatched' };
     }
@@ -240,12 +273,12 @@ export class JournaledCodingRun {
     } catch (error) {
       // A thrown stage is an OBSERVED failure with evidence, never a silent gap.
       const message = error instanceof Error ? error.message : String(error);
-      const failed = finishCodingChild(this.journal, started, 'failure', this.now(), { threw: true, message }, { code: 'STAGE_THREW', message });
+      const failed = await finishCodingChild(this.journal, started, 'failure', this.now(), { threw: true, message }, { code: 'STAGE_THREW', message });
       return { status: 'errored', ...(failed ? { child: failed } : {}), detail: message };
     }
 
     // 5 — terminal evidence.
-    const finished = finishCodingChild(
+    const finished = await finishCodingChild(
       this.journal, started, result.outcome, this.now(), result.evidence,
       ...(result.error ? [result.error] as const : []),
     );
@@ -257,20 +290,29 @@ export class JournaledCodingRun {
 
     this.diagnostic({ at: 'coding.plan.returned', runId: this.runId, childId, outcome: result.outcome });
     // 6 — the phase advances only now that the child's terminal revision landed.
-    this.advancePhase(opts.phase, `stage.${result.outcome}:${opts.kind}`);
+    await this.advancePhase(opts.phase, `stage.${result.outcome}:${opts.kind}`);
     return { status: result.outcome === 'success' ? 'completed' : 'failed', child: finished, value: result.value };
   }
 
-  /** Write the phase. Never `terminal` — see `finalize`. */
-  private advancePhase(phase: CodingPhase, note: string): void {
+  /**
+   * Write the phase. Never `terminal` — see `finalize`.
+   *
+   * AWAITED by both callers. This builds its next payload by spreading the
+   * store's cached copy, and that cache only advances once a write has landed —
+   * the exact shape that let an un-awaited plan write be clobbered by the
+   * approval write that followed it. Left detached here, the phase write races
+   * whatever the caller does next, and `runStage` returns claiming a phase the
+   * journal may never have accepted.
+   */
+  private async advancePhase(phase: CodingPhase, note: string): Promise<void> {
     if (phase === 'terminal') return;
     const current = this.payload;
     if (current.phase === phase) return;
-    this.store.writePayload({ ...current, phase }, note);
+    await this.store.writePayload({ ...current, phase }, note);
   }
 
   /** Merge arbitrary payload fields (plan, scope, validation record, evidence). */
-  patchPayload(patch: Partial<CodingRunPayloadV1>, note: string): boolean {
+  async patchPayload(patch: Partial<CodingRunPayloadV1>, note: string): Promise<boolean> {
     return this.store.writePayload({ ...this.payload, ...patch }, note);
   }
 
@@ -284,10 +326,23 @@ export class JournaledCodingRun {
    * happen, and resuming past it would mean writing files under authority nobody
    * can produce afterwards.
    */
-  awaitScopeApproval(scope: NonNullable<CodingRunPayloadV1['scope']>, note = 'scope.proposed'): boolean {
-    const written = this.patchPayload({ phase: 'awaiting_scope_approval', scope }, note);
-    if (!written) return false;
-    return this.store.transitionParent('AWAITING_APPROVAL', note);
+  async awaitScopeApproval(scope: NonNullable<CodingRunPayloadV1['scope']>, note = 'scope.proposed'): Promise<boolean> {
+    // ONE revision carries both, per this file's own contract. This previously
+    // wrote the payload and then transitioned state separately, consuming two
+    // durable revisions for a single governed scope proposal. That was masked
+    // while `patchPayload` was un-awaited (its version bump landed in a later
+    // microtask, usually after the transition had already read the revision);
+    // awaiting it made the second revision observable.
+    //
+    // A split is not merely wasteful here: a crash between the two writes would
+    // leave the payload saying `awaiting_scope_approval` while the parent state
+    // had not moved — exactly the half-applied transition the all-or-nothing
+    // contract exists to prevent.
+    return await this.store.transitionParent(
+      'AWAITING_APPROVAL',
+      note,
+      { ...this.payload, phase: 'awaiting_scope_approval', scope },
+    );
   }
 
   /**
@@ -298,14 +353,21 @@ export class JournaledCodingRun {
    * anything else: an approval that arrives for a different path set is not late,
    * it is for a different plan.
    */
-  consumeApproval(input: { pathSetHash: string; at: string }): { ok: true } | { ok: false; code: 'no-scope' | 'scope-mismatch' | 'not-pending' | 'already-consumed' | 'not-persisted' } {
+  async consumeApproval(input: { pathSetHash: string; at: string }): Promise<{ ok: true } | { ok: false; code: 'no-scope' | 'scope-mismatch' | 'not-pending' | 'already-consumed' | 'not-persisted' }> {
     const current = this.payload;
     const scope = current.scope;
     if (!scope) return { ok: false, code: 'no-scope' };
     if (scope.approvalState === 'consumed' || scope.approvalState === 'approved') return { ok: false, code: 'already-consumed' };
     if (scope.approvalState !== 'pending_display' && scope.approvalState !== 'displayed') return { ok: false, code: 'not-pending' };
     if (scope.pathSetHash !== input.pathSetHash) return { ok: false, code: 'scope-mismatch' };
-    const written = this.patchPayload(
+    // AWAITED. `patchPayload` became asynchronous in sub-slice 2.5 while this
+    // method stayed synchronous, so `written` held a Promise — always truthy —
+    // and `not-persisted` became unreachable. An approval whose durable write
+    // FAILED therefore answered `ok`, and the caller went on to dispatch a
+    // governed apply under authority nothing could produce afterwards. That is
+    // the exact condition this guard exists to refuse, so it is awaited here
+    // rather than made best-effort.
+    const written = await this.patchPayload(
       { scope: { ...scope, approvalState: 'consumed', approvedAt: input.at }, phase: 'executing_initial_changeset' },
       'scope.approved',
     );
@@ -321,7 +383,7 @@ export class JournaledCodingRun {
    * decision is added, and the parent reaches `REJECTED`, which is what makes
    * further mutation impossible rather than merely discouraged.
    */
-  rejectScope(): boolean {
+  async rejectScope(): Promise<boolean> {
     const current = this.payload;
     const scope = current.scope;
     if (!scope) return false;
@@ -335,7 +397,7 @@ export class JournaledCodingRun {
   // ── Cancellation ───────────────────────────────────────────────────────────
 
   /** Record the REQUEST. Says someone pressed stop; says nothing about stopping. */
-  requestCancellation(at: string): boolean {
+  async requestCancellation(at: string): Promise<boolean> {
     const current = this.payload;
     if (current.cancellation) return true;
     return this.patchPayload({ cancellation: { requestedAt: at } }, 'cancellation.requested');
@@ -354,19 +416,22 @@ export class JournaledCodingRun {
     observeStopped: (child: DurableAgentRunChild) => Promise<boolean>;
   }): Promise<{ confirmed: boolean; unconfirmed: string[] }> {
     const unconfirmed: string[] = [];
-    for (const child of this.children()) {
+    for (const child of await this.children()) {
       if (DURABLE_CHILD_TERMINAL_STATES.has(child.state)) continue;
-      const cancelling = child.state === 'cancelling' ? child : requestCodingChildCancellation(this.journal, child, this.now());
+      const cancelling = child.state === 'cancelling' ? child : await requestCodingChildCancellation(this.journal, child, this.now());
       if (!cancelling) { unconfirmed.push(child.childId); continue; }
       const stopped = await input.observeStopped(cancelling);
       if (!stopped) { unconfirmed.push(child.childId); continue; }
-      const confirmed = confirmCodingChildCancellation(this.journal, cancelling, this.now(), { observedStopped: true });
+      const confirmed = await confirmCodingChildCancellation(this.journal, cancelling, this.now(), { observedStopped: true });
       if (!confirmed) unconfirmed.push(child.childId);
     }
     if (unconfirmed.length) return { confirmed: false, unconfirmed };
     const current = this.payload;
     const requestedAt = current.cancellation?.requestedAt ?? input.at;
-    this.patchPayload({ cancellation: { requestedAt, confirmedAt: input.at } }, 'cancellation.confirmed');
+    // Awaited: `confirmed: true` below is a claim the record must already support.
+    if (!(await this.patchPayload({ cancellation: { requestedAt, confirmedAt: input.at } }, 'cancellation.confirmed'))) {
+      return { confirmed: false, unconfirmed: [] };
+    }
     return { confirmed: true, unconfirmed: [] };
   }
 
@@ -380,13 +445,13 @@ export class JournaledCodingRun {
    * the phase stays where it was — a payload claiming `terminal` with no terminal
    * parent revision would be a completion nothing can prove.
    */
-  finalize(input: { report?: CodingRunPayloadV1['finalReport'] }): {
+  async finalize(input: { report?: CodingRunPayloadV1['finalReport'] }): Promise<{
     state: 'COMPLETED' | 'FAILED' | 'CANCELLED';
     durable: boolean;
     blockers: CodingCompletionBlocker[];
-  } {
+  }> {
     const current = this.payload;
-    const eligibility = codingCompletionEligibility(current, this.children());
+    const eligibility = codingCompletionEligibility(current, await this.children());
     let state: 'COMPLETED' | 'FAILED' | 'CANCELLED';
     if (eligibility.mayComplete) state = 'COMPLETED';
     else if (current.cancellation?.confirmedAt) state = 'CANCELLED';
@@ -394,7 +459,7 @@ export class JournaledCodingRun {
 
     // One revision carries both. If it does not land, the phase stays where it
     // was and `durable: false` says the outcome may be real but is not recorded.
-    const durable = this.store.transitionParent(state, `run.${state.toLowerCase()}`, {
+    const durable = await this.store.transitionParent(state, `run.${state.toLowerCase()}`, {
       ...current,
       phase: 'terminal',
       ...(input.report ? { finalReport: input.report } : {}),
@@ -412,13 +477,13 @@ export class JournaledCodingRun {
    * provably never dispatched, so abandoning it and starting a fresh attempt is
    * safe — those two look similar and must never be treated the same.
    */
-  resumePlan(): {
+  async resumePlan(): Promise<{
     action: 'continue' | 'reconcile_mutation' | 'new_validation_attempt';
     ambiguousChildren: string[];
     abandonableChildren: string[];
     reusableKinds: CodingChildKind[];
-  } {
-    const children = this.children();
+  }> {
+    const children = await this.children();
     const ambiguous: string[] = [];
     const abandonable: string[] = [];
     let interruptedValidation = false;

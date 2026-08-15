@@ -203,7 +203,7 @@ async function planned(h: Harness): Promise<{ runId: string; revision: number; h
   const started = await startRun(h);
   const runId = started.json<{ runId: string }>().runId;
   await settleWithRealValidation(h, runId);
-  const snapshot = read(h, runId);
+  const snapshot = (await read(h, runId));
   const body = (await snapshot).json<{ revision: number; scope?: { pathSetHash: string } }>();
   return { runId, revision: body.revision, hash: body.scope?.pathSetHash ?? '' };
 }
@@ -270,7 +270,7 @@ test('4 + 5 — start persists a real run, returns 202, and planning reaches AWA
 
   // Durable across a new journal over the same database.
   const reopened = new AgentRunJournal(h.store, buildAgentRunJournalConfig());
-  assert.equal(reopened.loadRun(runId)?.state, 'AWAITING_APPROVAL');
+  assert.equal((await reopened.loadRun(runId))?.state, 'AWAITING_APPROVAL');
   await h.app.close(); h.store.close();
 });
 
@@ -279,16 +279,16 @@ test('6 — start never mutates the fixture', async () => {
   assert.deepEqual(gitDirty(h.root), [], 'fixture starts clean');
   const { runId } = await planned(h);
   assert.deepEqual(gitDirty(h.root), [], 'planning wrote nothing — the approval boundary is before any mutation');
-  assert.equal(h.journal.children(runId).some((c) => c.kind === 'initial_apply'), false);
+  assert.equal((await h.journal.children(runId)).some((c) => c.kind === 'initial_apply'), false);
   await h.app.close(); h.store.close();
 });
 
 test('11 — the initial model proposal is journaled as its own child', async () => {
   const h = harness();
   const { runId } = await planned(h);
-  const kinds = h.journal.children(runId).map((c) => c.kind);
+  const kinds = (await h.journal.children(runId)).map((c) => c.kind);
   assert.deepEqual(kinds, ['repository_planning', 'initial_model_proposal']);
-  const planning = h.journal.children(runId).find((c) => c.kind === 'repository_planning')!;
+  const planning = (await h.journal.children(runId)).find((c) => c.kind === 'repository_planning')!;
   const evidence = JSON.parse(planning.terminalEvidenceJson!) as { selectedPaths: string[]; excludedPaths: string[]; result: string };
   assert.equal(evidence.result, 'planned');
   assert.deepEqual([...evidence.selectedPaths].sort(), [...REQUIRED_FILES].sort());
@@ -332,7 +332,7 @@ test('8 — rejection performs zero writes', async () => {
   await settleWithRealValidation(h, runId);
 
   assert.deepEqual(gitDirty(h.root), [], 'a rejected scope leaves the workspace untouched');
-  assert.equal(h.journal.loadRun(runId)?.state, 'REJECTED');
+  assert.equal((await h.journal.loadRun(runId))?.state, 'REJECTED');
   const body = (await read(h, runId)).json<{ scope: { proposedPaths: string[] } }>();
   assert.equal(body.scope.proposedPaths.length, 3, 'the rejected plan stays inspectable');
   await h.app.close(); h.store.close();
@@ -368,13 +368,13 @@ test('12 — apply and validation children persist real terminal evidence', asyn
   await decide(h, runId, { expectedRevision: revision, pathSetHash: hash, decision: 'approve' });
   await settleWithRealValidation(h, runId);
 
-  const apply = h.journal.children(runId).find((c) => c.kind === 'initial_apply')!;
+  const apply = (await h.journal.children(runId)).find((c) => c.kind === 'initial_apply')!;
   const applyEvidence = JSON.parse(apply.terminalEvidenceJson!) as { mutation: string; admittedPaths: string[]; status: string };
   assert.equal(applyEvidence.status, 'applied');
   assert.equal(applyEvidence.mutation, 'complete');
   assert.deepEqual([...applyEvidence.admittedPaths].sort(), [...REQUIRED_FILES].sort());
 
-  const validation = h.journal.children(runId).find((c) => c.kind === 'final_validation' || c.kind === 'validation')!;
+  const validation = (await h.journal.children(runId)).find((c) => c.kind === 'final_validation' || c.kind === 'validation')!;
   const evidence = JSON.parse(validation.terminalEvidenceJson!) as { executable: string; exitCode: number; passed: boolean; commandRunId: string; stdout: { digest: string } };
   assert.equal(evidence.executable, 'node');
   assert.equal(evidence.exitCode, 0);
@@ -390,12 +390,12 @@ test('13 — a failed validation creates repair children and the repair succeeds
   await decide(h, runId, { expectedRevision: revision, pathSetHash: hash, decision: 'approve' });
   await settleWithRealValidation(h, runId);
 
-  const kinds = h.journal.children(runId).map((c) => c.kind);
-  const trace = `children=[${h.journal.children(runId).map((c) => `${c.kind}#${c.attempt}:${c.state}`).join(' ')}] modelCalls=[${h.calls.join(' ')}]`;
+  const kinds = (await h.journal.children(runId)).map((c) => c.kind);
+  const trace = `children=[${(await h.journal.children(runId)).map((c) => `${c.kind}#${c.attempt}:${c.state}`).join(' ')}] modelCalls=[${h.calls.join(' ')}]`;
   assert.ok(kinds.includes('repair_model_proposal'), `a repair proposal child exists — ${trace}`);
   assert.ok(kinds.includes('repair_apply'), 'a repair apply child exists');
 
-  const repair = h.journal.children(runId).find((c) => c.kind === 'repair_model_proposal')!;
+  const repair = (await h.journal.children(runId)).find((c) => c.kind === 'repair_model_proposal')!;
   const evidence = JSON.parse(repair.terminalEvidenceJson!) as { citedEvidenceIds: string[] };
   assert.ok(evidence.citedEvidenceIds.length > 0, 'the repair cited immutable failure-evidence ids the run itself produced');
 
@@ -434,7 +434,7 @@ test('18 — duplicate continuation cannot double-dispatch', async () => {
 
   const accepted = [first, second].filter((r) => r.statusCode === 200);
   assert.equal(accepted.length, 1, 'exactly one approval was accepted');
-  assert.equal(h.journal.children(runId).filter((c) => c.kind === 'initial_apply').length, 1, 'only one apply child exists');
+  assert.equal((await h.journal.children(runId)).filter((c) => c.kind === 'initial_apply').length, 1, 'only one apply child exists');
   await h.app.close(); h.store.close();
 });
 
@@ -462,10 +462,10 @@ test('19 — a detached execution failure becomes a durable failed run', async (
   const runId = started.json<{ runId: string }>().runId;
   await settleWithRealValidation(h, runId);
 
-  const run = h.journal.loadRun(runId)!;
+  const run = (await h.journal.loadRun(runId))!;
   // Either the planning child recorded the failure, or the run itself did — but
   // the run must never sit in `planning` with nothing explaining why.
-  const planningChild = h.journal.children(runId).find((c) => c.kind === 'repository_planning');
+  const planningChild = (await h.journal.children(runId)).find((c) => c.kind === 'repository_planning');
   assert.ok(run.state === 'FAILED' || planningChild?.state === 'failed', `run=${run.state} child=${planningChild?.state}`);
   assert.deepEqual(gitDirty(h.root), []);
   await h.app.close(); h.store.close();
@@ -512,7 +512,7 @@ test('22 — restart does not replay an ambiguous apply', async () => {
   await settleWithRealValidation(h, runId);
 
   // Simulate a crash mid-apply on a second run by leaving an apply child running.
-  const apply = h.journal.children(runId).find((c) => c.kind === 'initial_apply')!;
+  const apply = (await h.journal.children(runId)).find((c) => c.kind === 'initial_apply')!;
   assert.equal(apply.state, 'completed', 'the real run finished cleanly');
 
   // A fresh run whose apply is left mid-flight.
@@ -521,7 +521,7 @@ test('22 — restart does not replay an ambiguous apply', async () => {
   await decide(h2, second.runId, { expectedRevision: second.revision, pathSetHash: second.hash, decision: 'approve' });
   const journal2 = h2.journal;
   await settleWithRealValidation(h2, second.runId);
-  const applyChild = journal2.children(second.runId).find((c) => c.kind === 'initial_apply')!;
+  const applyChild = (await journal2.children(second.runId)).find((c) => c.kind === 'initial_apply')!;
   // Force the durable record back into an unresolved state, as a crash would.
   h2.store.transitionAgentRunChild({ childId: applyChild.childId, expectedRevision: applyChild.revision, nextState: 'running', at: Date.now() });
 
@@ -544,7 +544,7 @@ test('23 — shutdown does not manufacture a cancellation confirmation', async (
   const body = (await read(h, runId)).json<{ cancellation: { status: string; confirmedAt?: string } }>();
   assert.equal(body.cancellation.status, 'cancelling', 'restart must not upgrade a request into a confirmation');
   assert.equal(body.cancellation.confirmedAt, undefined);
-  assert.notEqual(h.journal.loadRun(runId)?.state, 'CANCELLED');
+  assert.notEqual((await h.journal.loadRun(runId))?.state, 'CANCELLED');
   void outcomes;
   await h.app.close(); h.store.close();
 });
@@ -671,14 +671,14 @@ test('27 — a refused initial apply finalizes truthfully instead of throwing', 
     assert.notEqual(body.finalReport?.complete, true);
 
     // The apply must be recorded as the failure it was.
-    const apply = h.journal.children(runId).find((c) => c.kind === 'initial_apply');
+    const apply = (await h.journal.children(runId)).find((c) => c.kind === 'initial_apply');
     assert.equal(apply?.state, 'failed', 'the governed apply genuinely could not write');
 
     // The real assertion. Before the hoist, `finish()` threw a ReferenceError
     // INSIDE the reconciliation stage, so this child was marked observed_failure
     // for a reconciliation that never ran — a durable record of an outcome nobody
     // computed. It must now carry an actual reconciliation verdict.
-    const rec = h.journal.children(runId).find((c) => c.kind === 'reconciliation');
+    const rec = (await h.journal.children(runId)).find((c) => c.kind === 'reconciliation');
     assert.ok(rec, 'reconciliation must be recorded');
     const evidence = JSON.parse(rec.terminalEvidenceJson ?? '{}') as {
       approvedPaths?: string[];

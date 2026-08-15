@@ -57,7 +57,7 @@ function agentEvent(over: Partial<DurableAgentRunEvent> = {}): DurableAgentRunEv
   const runId = over.runId ?? 'agentcmd_1';
   return { eventId: `${runId}:agev1`, runId, seq: 1, at: 1000, type: 'run.created', nextState: 'AWAITING_APPROVAL', correlationId: 'agentcorr_1', source: 'API', schemaVersion: 1, ...over };
 }
-function seedRejectedSource(store: SqliteDurableStore, over: Partial<DurableAgentRun> = {}): DurableAgentRun {
+async function seedRejectedSource(store: SqliteDurableStore, over: Partial<DurableAgentRun> = {}): Promise<DurableAgentRun> {
   const run = agentRun({
     runId: 'agentcmd_recovery_source',
     correlationId: 'agentcorr_recovery_source',
@@ -65,7 +65,7 @@ function seedRejectedSource(store: SqliteDurableStore, over: Partial<DurableAgen
   });
   store.insertAgentRun(run, agentEvent({ runId: run.runId, correlationId: run.correlationId, nextState: 'AWAITING_APPROVAL' }));
   store.appendAgentRunEvent({ eventId: `${run.runId}:proposal`, runId: run.runId, at: 1000, type: 'proposal.created', priorState: 'AWAITING_APPROVAL', nextState: 'AWAITING_APPROVAL', reason: run.recipeId, correlationId: run.correlationId, source: 'API', schemaVersion: 1 });
-  assert.equal(store.transitionAgentRun({
+  assert.equal((await store.transitionAgentRun({
     runId: run.runId,
     expectedState: 'AWAITING_APPROVAL',
     nextState: 'REJECTED',
@@ -83,11 +83,11 @@ function seedRejectedSource(store: SqliteDurableStore, over: Partial<DurableAgen
       recoveryEligible: true,
       recoveryReason: 'REJECTED',
     },
-  }), true);
-  return store.loadAgentRun(run.runId)!;
+  })), true);
+  return (await store.loadAgentRun(run.runId))!;
 }
-function reproposalProvenance(store: SqliteDurableStore, source: DurableAgentRun) {
-  const events = store.loadAgentRunEvents(source.runId);
+async function reproposalProvenance(store: SqliteDurableStore, source: DurableAgentRun) {
+  const events = (await store.loadAgentRunEvents(source.runId));
   return {
     workspaceIdentity: source.workspaceIdentity,
     allowedRecipes: [source.recipeId],
@@ -95,7 +95,7 @@ function reproposalProvenance(store: SqliteDurableStore, source: DurableAgentRun
     highestSeq: source.auditSeq,
   };
 }
-function reproposalInput(store: SqliteDurableStore, source: DurableAgentRun, requestId: string, successorId: string, at = 2_000): AgentRunReproposalInput {
+async function reproposalInput(store: SqliteDurableStore, source: DurableAgentRun, requestId: string, successorId: string, at = 2_000): Promise<AgentRunReproposalInput> {
   const successor = agentRun({
     runId: successorId,
     correlationId: `${successorId}_corr`,
@@ -113,7 +113,7 @@ function reproposalInput(store: SqliteDurableStore, source: DurableAgentRun, req
     sourceExpectedVersion: source.version,
     requestId,
     at,
-    provenance: reproposalProvenance(store, source),
+    provenance: await reproposalProvenance(store, source),
     successor,
     createdEvent: agentEvent({ eventId: `${successorId}:created`, runId: successor.runId, correlationId: successor.correlationId, type: 'run.created' }),
     proposalEvent: agentEvent({ eventId: `${successorId}:proposal`, runId: successor.runId, correlationId: successor.correlationId, seq: 2, type: 'proposal.created' }),
@@ -124,7 +124,7 @@ test('SCHEMA_VERSION is 7 (agent run children + opaque versioned domain payload)
   assert.equal(SCHEMA_VERSION, 7);
 });
 
-test('operational data survives a restart (write → close → reopen → read)', () => {
+test('operational data survives a restart (write → close → reopen → read)', async () => {
   const p = tmpDb();
   let store = new SqliteDurableStore(p);
   store.appendAuditEvent(audit());
@@ -134,66 +134,66 @@ test('operational data survives a restart (write → close → reopen → read)'
   store.close();
 
   store = new SqliteDurableStore(p); // reopen — durable across "restart"
-  assert.equal(store.recentAuditEvents(10)[0]!.eventId, 'ev1');
-  assert.equal(store.recentUsageRecords(10)[0]!.costUsd, 0.05);
-  assert.equal(store.listIncidents(10)[0]!.incidentId, 'i1');
-  assert.equal(store.operationalCounts().recoveryEvents, 1);
+  assert.equal((await store.recentAuditEvents(10))[0]!.eventId, 'ev1');
+  assert.equal((await store.recentUsageRecords(10))[0]!.costUsd, 0.05);
+  assert.equal((await store.listIncidents(10))[0]!.incidentId, 'i1');
+  assert.equal((await store.operationalCounts()).recoveryEvents, 1);
   store.close();
 });
 
-test('audit + usage appends are idempotent by id (a replay never double-counts)', () => {
+test('audit + usage appends are idempotent by id (a replay never double-counts)', async () => {
   const store = new SqliteDurableStore(tmpDb());
   store.appendAuditEvent(audit());
   store.appendAuditEvent(audit()); // same eventId
   store.appendUsageRecord(usage());
   store.appendUsageRecord(usage()); // same usageId
-  assert.equal(store.operationalCounts().auditEvents, 1);
-  assert.equal(store.operationalCounts().usageRecords, 1);
+  assert.equal((await store.operationalCounts()).auditEvents, 1);
+  assert.equal((await store.operationalCounts()).usageRecords, 1);
   store.close();
 });
 
-test('incident upsert mutates state by id (open → resolved), not a duplicate', () => {
+test('incident upsert mutates state by id (open → resolved), not a duplicate', async () => {
   const store = new SqliteDurableStore(tmpDb());
   store.upsertIncident(incident({ state: 'open' }));
   store.upsertIncident(incident({ state: 'resolved', lastSeenAt: 2000, occurrenceCount: 2, resolutionJson: '{"ok":true}' }));
-  const list = store.listIncidents(10);
+  const list = (await store.listIncidents(10));
   assert.equal(list.length, 1);
   assert.equal(list[0]!.state, 'resolved');
   assert.equal(list[0]!.occurrenceCount, 2);
   store.close();
 });
 
-test('budget scope + reservation persist and reload', () => {
+test('budget scope + reservation persist and reload', async () => {
   const p = tmpDb();
   let store = new SqliteDurableStore(p);
   store.saveBudgetScope({ scopeId: 'monthly:global', kind: 'monthly', scopeKeyName: 'global', hardLimitUsd: 50, spentUsd: 12.48, reservedUsd: 0.07, periodStart: 0, updatedAt: 1000 });
   store.saveReservation({ reservationId: 'rsv1', amountUsd: 0.07, scopeIdsJson: '["monthly:global"]', correlationId: 'c1', providerId: 'anthropic', modelId: 'claude', createdAt: 1000, expiresAt: 9000, status: 'active' });
   store.close();
   store = new SqliteDurableStore(p);
-  assert.equal(store.loadBudgetScopes()[0]!.spentUsd, 12.48);
-  assert.equal(store.loadReservations()[0]!.status, 'active');
+  assert.equal((await store.loadBudgetScopes())[0]!.spentUsd, 12.48);
+  assert.equal((await store.loadReservations())[0]!.status, 'active');
   store.removeReservation('rsv1');
-  assert.equal(store.loadReservations().length, 0);
+  assert.equal((await store.loadReservations()).length, 0);
   store.close();
 });
 
-test('retention prunes by age; open incidents are NEVER pruned', () => {
+test('retention prunes by age; open incidents are NEVER pruned', async () => {
   const store = new SqliteDurableStore(tmpDb());
   store.appendAuditEvent(audit({ eventId: 'old', at: 100 }));
   store.appendAuditEvent(audit({ eventId: 'new', at: 10_000 }));
   store.appendUsageRecord(usage({ usageId: 'oldu', at: 100 }));
   store.upsertIncident(incident({ incidentId: 'open1', state: 'open', lastSeenAt: 100 }));
   store.upsertIncident(incident({ incidentId: 'res1', state: 'resolved', lastSeenAt: 100 }));
-  const pruned = store.pruneOperational({ auditBefore: 5000, usageBefore: 5000, incidentsBefore: 5000, recoveryBefore: 5000 });
+  const pruned = (await store.pruneOperational({ auditBefore: 5000, usageBefore: 5000, incidentsBefore: 5000, recoveryBefore: 5000 }));
   assert.equal(pruned.audit, 1); // only 'old'
   assert.equal(pruned.usage, 1);
   assert.equal(pruned.incidents, 1); // only the resolved one
-  assert.equal(store.recentAuditEvents(10)[0]!.eventId, 'new');
-  assert.ok(store.listIncidents(10).some((i) => i.incidentId === 'open1'), 'open incident retained');
+  assert.equal((await store.recentAuditEvents(10))[0]!.eventId, 'new');
+  assert.ok((await store.listIncidents(10)).some((i) => i.incidentId === 'open1'), 'open incident retained');
   store.close();
 });
 
-test('a v2 database upgrades additively to v3 (Agent journal tables created on reopen)', () => {
+test('a v2 database upgrades additively to v3 (Agent journal tables created on reopen)', async () => {
   const p = tmpDb();
   // Simulate an existing v2 DB: create the base + set schema_version=2, then reopen with the v3 engine.
   const raw = new DatabaseSync(p);
@@ -201,17 +201,17 @@ test('a v2 database upgrades additively to v3 (Agent journal tables created on r
   raw.prepare('INSERT INTO schema_meta(key,value) VALUES(?,?)').run('schema_version', '2');
   raw.close();
   const store = new SqliteDurableStore(p); // v7 engine migrates additively
-  assert.equal(store.health().schemaVersion, 7);
-  assert.deepEqual(store.loadAgentRuns(), []);
+  assert.equal((await store.health()).schemaVersion, 7);
+  assert.deepEqual((await store.loadAgentRuns()), []);
   store.close();
 });
 
-test('a v7 database startup is idempotent and refuses newer schemas', () => {
+test('a v7 database startup is idempotent and refuses newer schemas', async () => {
   const p = tmpDb();
   let store = new SqliteDurableStore(p);
   store.close();
   store = new SqliteDurableStore(p);
-  assert.equal(store.health().schemaVersion, 7);
+  assert.equal((await store.health()).schemaVersion, 7);
   store.close();
 
   const bad = tmpDb();
@@ -360,10 +360,10 @@ test('v7 Agent schema contract rejects every critical missing or malformed objec
   }, /schema v999 > engine v7/);
 });
 
-test('clean v7 initialization and v2/v3/v4/v5/v6 migrations create every validator-required Agent object', () => {
+test('clean v7 initialization and v2/v3/v4/v5/v6 migrations create every validator-required Agent object', async () => {
   for (const p of [initializedDb()]) {
     const store = new SqliteDurableStore(p);
-    assert.equal(store.health().schemaVersion, 7);
+    assert.equal((await store.health()).schemaVersion, 7);
     store.close();
   }
   for (const version of ['2', '3', '4']) {
@@ -373,33 +373,33 @@ test('clean v7 initialization and v2/v3/v4/v5/v6 migrations create every validat
     raw.prepare('INSERT INTO schema_meta(key,value) VALUES(?,?)').run('schema_version', version);
     raw.close();
     const store = new SqliteDurableStore(p);
-    assert.equal(store.health().schemaVersion, 7);
+    assert.equal((await store.health()).schemaVersion, 7);
     store.close();
   }
 });
 
-test('Agent run journal persists runs, CAS transitions, leases, events, and bounded retention', () => {
+test('Agent run journal persists runs, CAS transitions, leases, events, and bounded retention', async () => {
   const store = new SqliteDurableStore(tmpDb());
   store.insertAgentRun(agentRun(), agentEvent());
-  assert.equal(store.loadAgentRun('agentcmd_1')?.state, 'AWAITING_APPROVAL');
-  assert.equal(store.transitionAgentRun({ runId: 'agentcmd_1', expectedState: 'AWAITING_APPROVAL', nextState: 'APPROVED', at: 1100, source: 'APPROVAL', eventType: 'approval.approved', reason: 'HUMAN_APPROVED', patch: { approvalDecisionAt: 1100 } }), true);
-  assert.equal(store.transitionAgentRun({ runId: 'agentcmd_1', expectedState: 'AWAITING_APPROVAL', nextState: 'FAILED', at: 1110, source: 'RECONCILIATION', eventType: 'restart.interrupted_execution' }), false);
-  const claim = store.claimAgentRunReconciliation('agentcmd_1', 'owner-a', 5000, 1200);
+  assert.equal((await store.loadAgentRun('agentcmd_1'))?.state, 'AWAITING_APPROVAL');
+  assert.equal((await store.transitionAgentRun({ runId: 'agentcmd_1', expectedState: 'AWAITING_APPROVAL', nextState: 'APPROVED', at: 1100, source: 'APPROVAL', eventType: 'approval.approved', reason: 'HUMAN_APPROVED', patch: { approvalDecisionAt: 1100 } })), true);
+  assert.equal((await store.transitionAgentRun({ runId: 'agentcmd_1', expectedState: 'AWAITING_APPROVAL', nextState: 'FAILED', at: 1110, source: 'RECONCILIATION', eventType: 'restart.interrupted_execution' })), false);
+  const claim = (await store.claimAgentRunReconciliation('agentcmd_1', 'owner-a', 5000, 1200));
   assert.equal(claim?.fence, 1);
-  assert.equal(store.claimAgentRunReconciliation('agentcmd_1', 'owner-b', 5000, 1300), undefined);
-  assert.equal(store.transitionAgentRun({ runId: 'agentcmd_1', expectedState: 'APPROVED', nextState: 'STALE', at: 1400, source: 'RECONCILIATION', eventType: 'restart.authorization_lost', reason: 'RESTART_BEFORE_EXECUTION', patch: { terminalAt: 1400, failureCode: 'RESTART_BEFORE_EXECUTION' } }), true);
-  assert.equal(store.transitionAgentRun({ runId: 'agentcmd_1', nextState: 'COMPLETED', at: 1500, source: 'EXECUTION', eventType: 'execution.completed' }), false, 'terminal states are immutable');
-  assert.equal(store.loadAgentRunEvents('agentcmd_1').map((e) => e.type).join(','), 'run.created,approval.approved,restart.authorization_lost');
-  const pruned = store.pruneAgentRuns(2000, 10, 3000);
+  assert.equal((await store.claimAgentRunReconciliation('agentcmd_1', 'owner-b', 5000, 1300)), undefined);
+  assert.equal((await store.transitionAgentRun({ runId: 'agentcmd_1', expectedState: 'APPROVED', nextState: 'STALE', at: 1400, source: 'RECONCILIATION', eventType: 'restart.authorization_lost', reason: 'RESTART_BEFORE_EXECUTION', patch: { terminalAt: 1400, failureCode: 'RESTART_BEFORE_EXECUTION' } })), true);
+  assert.equal((await store.transitionAgentRun({ runId: 'agentcmd_1', nextState: 'COMPLETED', at: 1500, source: 'EXECUTION', eventType: 'execution.completed' })), false, 'terminal states are immutable');
+  assert.equal((await store.loadAgentRunEvents('agentcmd_1')).map((e) => e.type).join(','), 'run.created,approval.approved,restart.authorization_lost');
+  const pruned = (await store.pruneAgentRuns(2000, 10, 3000));
   assert.equal(pruned.runs, 1);
-  assert.equal(store.loadAgentRun('agentcmd_1'), undefined);
-  assert.equal(store.loadAgentRunTombstones()[0]?.runId, 'agentcmd_1');
+  assert.equal((await store.loadAgentRun('agentcmd_1')), undefined);
+  assert.equal((await store.loadAgentRunTombstones())[0]?.runId, 'agentcmd_1');
   store.close();
 });
 
-test('Agent recovery reproposal links successor transactionally and idempotently', () => {
+test('Agent recovery reproposal links successor transactionally and idempotently', async () => {
   const store = new SqliteDurableStore(tmpDb());
-  const source = seedRejectedSource(store);
+  const source = (await seedRejectedSource(store));
   const successor = agentRun({
     runId: 'agentcmd_recovery_successor',
     correlationId: 'agentcorr_recovery_successor',
@@ -408,45 +408,45 @@ test('Agent recovery reproposal links successor transactionally and idempotently
     expiresAt: 3_000,
     recoverySourceRunId: source.runId,
   });
-  const result = store.reproposeAgentRun({
+  const result = (await store.reproposeAgentRun({
     sourceRunId: source.runId,
     sourceExpectedVersion: source.version,
     requestId: 'stage3b-sqlite-reproposal',
     at: 2_000,
-    provenance: reproposalProvenance(store, source),
+    provenance: await reproposalProvenance(store, source),
     successor,
     createdEvent: agentEvent({ eventId: 'agev_successor_created', runId: successor.runId, correlationId: successor.correlationId, type: 'run.created' }),
     proposalEvent: agentEvent({ eventId: 'agev_successor_proposal', runId: successor.runId, correlationId: successor.correlationId, seq: 2, type: 'proposal.created' }),
-  });
+  }));
   assert.equal(result.ok, true);
   assert.equal(result.ok && result.created, true);
-  assert.equal(store.loadAgentRun(source.runId)?.successorRunId, successor.runId);
-  assert.equal(store.loadAgentRun(successor.runId)?.recoverySourceRunId, source.runId);
-  assert.deepEqual(store.loadAgentRunEvents(source.runId).map((event) => event.type), ['run.created', 'proposal.created', 'approval.rejected', 'recovery.reproposal_requested', 'recovery.successor_linked']);
+  assert.equal((await store.loadAgentRun(source.runId))?.successorRunId, successor.runId);
+  assert.equal((await store.loadAgentRun(successor.runId))?.recoverySourceRunId, source.runId);
+  assert.deepEqual((await store.loadAgentRunEvents(source.runId)).map((event) => event.type), ['run.created', 'proposal.created', 'approval.rejected', 'recovery.reproposal_requested', 'recovery.successor_linked']);
 
-  const replay = store.reproposeAgentRun({
+  const replay = (await store.reproposeAgentRun({
     sourceRunId: source.runId,
-    sourceExpectedVersion: store.loadAgentRun(source.runId)!.version,
+    sourceExpectedVersion: (await store.loadAgentRun(source.runId))!.version,
     requestId: 'stage3b-sqlite-reproposal',
     at: 2_100,
-    provenance: reproposalProvenance(store, store.loadAgentRun(source.runId)!),
+    provenance: await reproposalProvenance(store, (await store.loadAgentRun(source.runId))!),
     successor,
     createdEvent: agentEvent({ eventId: 'agev_duplicate_created', runId: successor.runId, correlationId: successor.correlationId }),
     proposalEvent: agentEvent({ eventId: 'agev_duplicate_proposal', runId: successor.runId, correlationId: successor.correlationId, seq: 2, type: 'proposal.created' }),
-  });
+  }));
   assert.equal(replay.ok, true);
   assert.equal(replay.ok && replay.created, false);
 
-  const pruned = store.pruneAgentRuns(5_000, 10, 1_000);
+  const pruned = (await store.pruneAgentRuns(5_000, 10, 1_000));
   assert.equal(pruned.runs, 0, 'terminal source with active successor must be retained');
   store.close();
 });
 
-test('Agent recovery reproposal rejects stale provenance when source events mutate before transaction', () => {
+test('Agent recovery reproposal rejects stale provenance when source events mutate before transaction', async () => {
   const p = tmpDb();
   const store = new SqliteDurableStore(p);
-  const source = seedRejectedSource(store);
-  const staleProvenance = reproposalProvenance(store, source);
+  const source = (await seedRejectedSource(store));
+  const staleProvenance = (await reproposalProvenance(store, source));
   const successor = agentRun({
     runId: 'agentcmd_recovery_stale_successor',
     correlationId: 'agentcorr_recovery_stale_successor',
@@ -461,7 +461,7 @@ test('Agent recovery reproposal rejects stale provenance when source events muta
      VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
   ).run('agev_source_race', source.runId, source.auditSeq + 1, 1500, 'forged.extra_event', 'REJECTED', 'REJECTED', 'race', source.correlationId, 'RECOVERY', 1);
   raw.close();
-  const result = store.reproposeAgentRun({
+  const result = (await store.reproposeAgentRun({
     sourceRunId: source.runId,
     sourceExpectedVersion: source.version,
     requestId: 'stage3b-sqlite-race',
@@ -470,17 +470,17 @@ test('Agent recovery reproposal rejects stale provenance when source events muta
     successor,
     createdEvent: agentEvent({ eventId: 'agev_race_successor_created', runId: successor.runId, correlationId: successor.correlationId, type: 'run.created' }),
     proposalEvent: agentEvent({ eventId: 'agev_race_successor_proposal', runId: successor.runId, correlationId: successor.correlationId, seq: 2, type: 'proposal.created' }),
-  });
+  }));
   assert.deepEqual(result, { ok: false, code: 'SOURCE_PROVENANCE_FAILED' });
-  assert.equal(store.loadAgentRun(successor.runId), undefined);
-  assert.equal(store.loadAgentRun(source.runId)?.successorRunId, undefined);
+  assert.equal((await store.loadAgentRun(successor.runId)), undefined);
+  assert.equal((await store.loadAgentRun(source.runId))?.successorRunId, undefined);
   store.close();
 });
 
-test('Agent recovery event id collisions fail the transaction without partial lineage', () => {
+test('Agent recovery event id collisions fail the transaction without partial lineage', async () => {
   const p = tmpDb();
   const store = new SqliteDurableStore(p);
-  const source = seedRejectedSource(store);
+  const source = (await seedRejectedSource(store));
   const successor = agentRun({
     runId: 'agentcmd_recovery_collision_successor',
     correlationId: 'agentcorr_recovery_collision_successor',
@@ -500,28 +500,28 @@ test('Agent recovery event id collisions fail the transaction without partial li
      VALUES(?,?,?,?,?,?,?,?,?)`,
   ).run(collidingEventId, 'agentcmd_collision_holder', 1, 900, 'run.created', 'AWAITING_APPROVAL', 'agentcorr_collision_holder', 'API', 1);
   raw.close();
-  const result = store.reproposeAgentRun({
+  const result = (await store.reproposeAgentRun({
     sourceRunId: source.runId,
     sourceExpectedVersion: source.version,
     requestId: 'stage3b-sqlite-collision',
     at: 2_000,
-    provenance: reproposalProvenance(store, source),
+    provenance: await reproposalProvenance(store, source),
     successor,
     createdEvent: agentEvent({ eventId: 'agev_collision_successor_created', runId: successor.runId, correlationId: successor.correlationId, type: 'run.created' }),
     proposalEvent: agentEvent({ eventId: 'agev_collision_successor_proposal', runId: successor.runId, correlationId: successor.correlationId, seq: 2, type: 'proposal.created' }),
-  });
+  }));
   assert.equal(result.ok, false);
   assert.equal(result.ok ? undefined : result.code, 'RECOVERY_EVENT_CONTENT_MISMATCH');
-  assert.equal(store.loadAgentRun(successor.runId), undefined);
-  assert.equal(store.loadAgentRun(source.runId)?.successorRunId, undefined);
-  assert.equal(store.loadAgentRunEvents(source.runId).some((event) => event.type.startsWith('recovery.')), false);
+  assert.equal((await store.loadAgentRun(successor.runId)), undefined);
+  assert.equal((await store.loadAgentRun(source.runId))?.successorRunId, undefined);
+  assert.equal((await store.loadAgentRunEvents(source.runId)).some((event) => event.type.startsWith('recovery.')), false);
   store.close();
 });
 
-test('Agent recovery reproposal under SQLite writer lock fails closed and retries deterministically', () => {
+test('Agent recovery reproposal under SQLite writer lock fails closed and retries deterministically', async () => {
   const p = tmpDb();
   const store = new SqliteDurableStore(p);
-  const source = seedRejectedSource(store);
+  const source = (await seedRejectedSource(store));
   const successor = agentRun({
     runId: 'agentcmd_recovery_locked_successor',
     correlationId: 'agentcorr_recovery_locked_successor',
@@ -535,7 +535,7 @@ test('Agent recovery reproposal under SQLite writer lock fails closed and retrie
     sourceExpectedVersion: source.version,
     requestId: 'stage3b-sqlite-locked',
     at: 2_000,
-    provenance: reproposalProvenance(store, source),
+    provenance: await reproposalProvenance(store, source),
     successor,
     createdEvent: agentEvent({ eventId: 'agev_locked_successor_created', runId: successor.runId, correlationId: successor.correlationId, type: 'run.created' }),
     proposalEvent: agentEvent({ eventId: 'agev_locked_successor_proposal', runId: successor.runId, correlationId: successor.correlationId, seq: 2, type: 'proposal.created' }),
@@ -543,27 +543,27 @@ test('Agent recovery reproposal under SQLite writer lock fails closed and retrie
   const raw = new DatabaseSync(p);
   raw.exec('BEGIN EXCLUSIVE');
   try {
-    const locked = store.reproposeAgentRun(input);
+    const locked = (await store.reproposeAgentRun(input));
     assert.deepEqual(locked, { ok: false, code: 'PARTIAL_FAILURE' });
   } finally {
     raw.exec('ROLLBACK');
     raw.close();
   }
-  assert.equal(store.loadAgentRun(successor.runId), undefined);
-  assert.equal(store.loadAgentRun(source.runId)?.successorRunId, undefined);
-  assert.equal(store.loadAgentRun(source.runId)?.version, source.version);
-  assert.equal(store.loadAgentRun(source.runId)?.auditSeq, source.auditSeq);
-  assert.equal(store.loadAgentRunEvents(source.runId).some((event) => event.type.startsWith('recovery.')), false);
+  assert.equal((await store.loadAgentRun(successor.runId)), undefined);
+  assert.equal((await store.loadAgentRun(source.runId))?.successorRunId, undefined);
+  assert.equal((await store.loadAgentRun(source.runId))?.version, source.version);
+  assert.equal((await store.loadAgentRun(source.runId))?.auditSeq, source.auditSeq);
+  assert.equal((await store.loadAgentRunEvents(source.runId)).some((event) => event.type.startsWith('recovery.')), false);
 
-  const retry = store.reproposeAgentRun(input);
+  const retry = (await store.reproposeAgentRun(input));
   assert.equal(retry.ok, true);
   assert.equal(retry.ok && retry.created, true);
-  assert.equal(store.loadAgentRun(source.runId)?.successorRunId, successor.runId);
-  assert.equal(store.loadAgentRun(successor.runId)?.recoverySourceRunId, source.runId);
+  assert.equal((await store.loadAgentRun(source.runId))?.successorRunId, successor.runId);
+  assert.equal((await store.loadAgentRun(successor.runId))?.recoverySourceRunId, source.runId);
   store.close();
 });
 
-test('Agent recovery reproposal SQLite ten-phase fault matrix rolls back and retries deterministically', () => {
+test('Agent recovery reproposal SQLite ten-phase fault matrix rolls back and retries deterministically', async () => {
   const phases: AgentRunReproposalFaultPhase[] = [
     'recovery-status source read',
     'source event read',
@@ -579,100 +579,100 @@ test('Agent recovery reproposal SQLite ten-phase fault matrix rolls back and ret
 
   for (const phase of phases) {
     const store = new SqliteDurableStore(tmpDb());
-    const source = seedRejectedSource(store, { runId: `agentcmd_source_${phase.replaceAll(/[^a-z0-9]+/gi, '_')}` });
-    const sourceEvents = store.loadAgentRunEvents(source.runId);
-    const sourceJson = JSON.stringify(store.loadAgentRun(source.runId));
+    const source = (await seedRejectedSource(store, { runId: `agentcmd_source_${phase.replaceAll(/[^a-z0-9]+/gi, '_')}` }));
+    const sourceEvents = (await store.loadAgentRunEvents(source.runId));
+    const sourceJson = JSON.stringify((await store.loadAgentRun(source.runId)));
     const sourceEventsJson = JSON.stringify(sourceEvents);
-    const input = reproposalInput(store, source, `stage3b-${phase}`, `agentcmd_successor_${phase.replaceAll(/[^a-z0-9]+/gi, '_')}`);
+    const input = (await reproposalInput(store, source, `stage3b-${phase}`, `agentcmd_successor_${phase.replaceAll(/[^a-z0-9]+/gi, '_')}`));
 
     store.injectAgentRunReproposalFaultForTest(phase);
-    const failed = store.reproposeAgentRun(input);
+    const failed = (await store.reproposeAgentRun(input));
     assert.deepEqual(failed, { ok: false, code: 'PARTIAL_FAILURE' }, phase);
-    assert.equal(store.loadAgentRun(input.successor.runId), undefined, phase);
-    assert.equal(JSON.stringify(store.loadAgentRun(source.runId)), sourceJson, phase);
-    assert.equal(JSON.stringify(store.loadAgentRunEvents(source.runId)), sourceEventsJson, phase);
-    assert.equal(store.loadAgentRunEvents(source.runId).some((event) => event.type.startsWith('recovery.')), false, phase);
+    assert.equal((await store.loadAgentRun(input.successor.runId)), undefined, phase);
+    assert.equal(JSON.stringify((await store.loadAgentRun(source.runId))), sourceJson, phase);
+    assert.equal(JSON.stringify((await store.loadAgentRunEvents(source.runId))), sourceEventsJson, phase);
+    assert.equal((await store.loadAgentRunEvents(source.runId)).some((event) => event.type.startsWith('recovery.')), false, phase);
 
-    const retry = store.reproposeAgentRun(input);
+    const retry = (await store.reproposeAgentRun(input));
     assert.equal(retry.ok, true, phase);
     assert.equal(retry.ok && retry.created, true, phase);
-    assert.equal(store.loadAgentRun(source.runId)?.successorRunId, input.successor.runId, phase);
-    assert.equal(store.loadAgentRun(input.successor.runId)?.recoverySourceRunId, source.runId, phase);
+    assert.equal((await store.loadAgentRun(source.runId))?.successorRunId, input.successor.runId, phase);
+    assert.equal((await store.loadAgentRun(input.successor.runId))?.recoverySourceRunId, source.runId, phase);
 
-    const sameRequestReplay = store.reproposeAgentRun({
+    const sameRequestReplay = (await store.reproposeAgentRun({
       ...input,
-      sourceExpectedVersion: store.loadAgentRun(source.runId)!.version,
-      provenance: reproposalProvenance(store, store.loadAgentRun(source.runId)!),
+      sourceExpectedVersion: (await store.loadAgentRun(source.runId))!.version,
+      provenance: await reproposalProvenance(store, (await store.loadAgentRun(source.runId))!),
       successor: agentRun({ runId: `${input.successor.runId}_duplicate`, correlationId: `${input.successor.runId}_duplicate_corr`, recoverySourceRunId: source.runId }),
-    });
+    }));
     assert.equal(sameRequestReplay.ok, true, phase);
     assert.equal(sameRequestReplay.ok && sameRequestReplay.created, false, phase);
     assert.equal(sameRequestReplay.ok && sameRequestReplay.successor.runId, input.successor.runId, phase);
 
-    const differentRequest = store.reproposeAgentRun({
-      ...reproposalInput(store, store.loadAgentRun(source.runId)!, `stage3b-${phase}-different`, `${input.successor.runId}_other`, 2_100),
-      sourceExpectedVersion: store.loadAgentRun(source.runId)!.version,
-    });
+    const differentRequest = (await store.reproposeAgentRun({
+      ...(await reproposalInput(store, (await store.loadAgentRun(source.runId))!, `stage3b-${phase}-different`, `${input.successor.runId}_other`, 2_100)),
+      sourceExpectedVersion: (await store.loadAgentRun(source.runId))!.version,
+    }));
     assert.equal(differentRequest.ok, false, phase);
     assert.equal(differentRequest.ok ? undefined : differentRequest.code, 'ACTIVE_SUCCESSOR_EXISTS', phase);
-    assert.equal(store.loadAgentRuns().filter((run) => run.recoverySourceRunId === source.runId).length, 1, phase);
+    assert.equal((await store.loadAgentRuns()).filter((run) => run.recoverySourceRunId === source.runId).length, 1, phase);
     store.close();
   }
 });
 
-test('reconciliation fencing rejects stale owners after lease expiry', () => {
+test('reconciliation fencing rejects stale owners after lease expiry', async () => {
   const store = new SqliteDurableStore(tmpDb());
   store.insertAgentRun(agentRun({ runId: 'agentcmd_fence', correlationId: 'agentcorr_fence' }), agentEvent({ runId: 'agentcmd_fence', correlationId: 'agentcorr_fence' }));
-  const ownerA = store.claimAgentRunReconciliation('agentcmd_fence', 'owner-a', 2_000, 1_000)!;
-  const ownerB = store.claimAgentRunReconciliation('agentcmd_fence', 'owner-b', 5_000, 3_000)!;
+  const ownerA = (await store.claimAgentRunReconciliation('agentcmd_fence', 'owner-a', 2_000, 1_000))!;
+  const ownerB = (await store.claimAgentRunReconciliation('agentcmd_fence', 'owner-b', 5_000, 3_000))!;
   assert.equal(ownerB.fence, ownerA.fence + 1);
-  assert.equal(store.transitionAgentRun({ runId: 'agentcmd_fence', expectedState: 'AWAITING_APPROVAL', nextState: 'EXPIRED', at: 3_100, source: 'RECONCILIATION', eventType: 'owner-a-stale', reason: 'STALE', reconciliation: { owner: ownerA.owner, fence: ownerA.fence, leaseValidAt: 3_100, expectedVersion: ownerA.version }, patch: { terminalAt: 3_100 } }), false);
-  assert.equal(store.transitionAgentRun({ runId: 'agentcmd_fence', expectedState: 'AWAITING_APPROVAL', nextState: 'EXPIRED', at: 3_200, source: 'RECONCILIATION', eventType: 'owner-b-terminal', reason: 'OK', reconciliation: { owner: ownerB.owner, fence: ownerB.fence, leaseValidAt: 3_200, expectedVersion: ownerB.version }, patch: { terminalAt: 3_200 } }), true);
-  assert.equal(store.loadAgentRun('agentcmd_fence')?.state, 'EXPIRED');
-  assert.deepEqual(store.loadAgentRunEvents('agentcmd_fence').map((event) => event.type), ['run.created', 'owner-b-terminal']);
+  assert.equal((await store.transitionAgentRun({ runId: 'agentcmd_fence', expectedState: 'AWAITING_APPROVAL', nextState: 'EXPIRED', at: 3_100, source: 'RECONCILIATION', eventType: 'owner-a-stale', reason: 'STALE', reconciliation: { owner: ownerA.owner, fence: ownerA.fence, leaseValidAt: 3_100, expectedVersion: ownerA.version }, patch: { terminalAt: 3_100 } })), false);
+  assert.equal((await store.transitionAgentRun({ runId: 'agentcmd_fence', expectedState: 'AWAITING_APPROVAL', nextState: 'EXPIRED', at: 3_200, source: 'RECONCILIATION', eventType: 'owner-b-terminal', reason: 'OK', reconciliation: { owner: ownerB.owner, fence: ownerB.fence, leaseValidAt: 3_200, expectedVersion: ownerB.version }, patch: { terminalAt: 3_200 } })), true);
+  assert.equal((await store.loadAgentRun('agentcmd_fence'))?.state, 'EXPIRED');
+  assert.deepEqual((await store.loadAgentRunEvents('agentcmd_fence')).map((event) => event.type), ['run.created', 'owner-b-terminal']);
   store.close();
 });
 
-test('reconciliation fenced events reject stale owners after a newer fence exists', () => {
+test('reconciliation fenced events reject stale owners after a newer fence exists', async () => {
   const store = new SqliteDurableStore(tmpDb());
   store.insertAgentRun(agentRun({ runId: 'agentcmd_eventfence', correlationId: 'agentcorr_eventfence' }), agentEvent({ runId: 'agentcmd_eventfence', correlationId: 'agentcorr_eventfence' }));
-  const ownerA = store.claimAgentRunReconciliation('agentcmd_eventfence', 'owner-a', 2_000, 1_000)!;
-  const startedA = store.appendAgentRunEventUnderFence({ runId: 'agentcmd_eventfence', expectedState: 'AWAITING_APPROVAL', at: 1_100, source: 'RECONCILIATION', eventType: 'restart.reconciliation_started', reason: 'test', reconciliation: { owner: ownerA.owner, fence: ownerA.fence, leaseValidAt: 1_100, expectedVersion: ownerA.version } })!;
-  const ownerB = store.claimAgentRunReconciliation('agentcmd_eventfence', 'owner-b', 5_000, 3_000)!;
+  const ownerA = (await store.claimAgentRunReconciliation('agentcmd_eventfence', 'owner-a', 2_000, 1_000))!;
+  const startedA = (await store.appendAgentRunEventUnderFence({ runId: 'agentcmd_eventfence', expectedState: 'AWAITING_APPROVAL', at: 1_100, source: 'RECONCILIATION', eventType: 'restart.reconciliation_started', reason: 'test', reconciliation: { owner: ownerA.owner, fence: ownerA.fence, leaseValidAt: 1_100, expectedVersion: ownerA.version } }))!;
+  const ownerB = (await store.claimAgentRunReconciliation('agentcmd_eventfence', 'owner-b', 5_000, 3_000))!;
   assert.equal(ownerB.fence, startedA.fence + 1);
-  assert.equal(store.appendAgentRunEventUnderFence({ runId: 'agentcmd_eventfence', expectedState: 'AWAITING_APPROVAL', at: 3_100, source: 'RECONCILIATION', eventType: 'restart.reconciliation_completed', reason: 'stale', reconciliation: { owner: startedA.owner, fence: startedA.fence, leaseValidAt: 3_100, expectedVersion: startedA.version } }), undefined);
-  assert.ok(store.appendAgentRunEventUnderFence({ runId: 'agentcmd_eventfence', expectedState: 'AWAITING_APPROVAL', at: 3_200, source: 'RECONCILIATION', eventType: 'restart.reconciliation_started', reason: 'owner-b', reconciliation: { owner: ownerB.owner, fence: ownerB.fence, leaseValidAt: 3_200, expectedVersion: ownerB.version } }));
-  assert.deepEqual(store.loadAgentRunEvents('agentcmd_eventfence').map((event) => event.type), ['run.created', 'restart.reconciliation_started', 'restart.reconciliation_started']);
+  assert.equal((await store.appendAgentRunEventUnderFence({ runId: 'agentcmd_eventfence', expectedState: 'AWAITING_APPROVAL', at: 3_100, source: 'RECONCILIATION', eventType: 'restart.reconciliation_completed', reason: 'stale', reconciliation: { owner: startedA.owner, fence: startedA.fence, leaseValidAt: 3_100, expectedVersion: startedA.version } })), undefined);
+  assert.ok((await store.appendAgentRunEventUnderFence({ runId: 'agentcmd_eventfence', expectedState: 'AWAITING_APPROVAL', at: 3_200, source: 'RECONCILIATION', eventType: 'restart.reconciliation_started', reason: 'owner-b', reconciliation: { owner: ownerB.owner, fence: ownerB.fence, leaseValidAt: 3_200, expectedVersion: ownerB.version } })));
+  assert.deepEqual((await store.loadAgentRunEvents('agentcmd_eventfence')).map((event) => event.type), ['run.created', 'restart.reconciliation_started', 'restart.reconciliation_started']);
   store.close();
 });
 
-test('reconciliation renewal cannot extend an already expired owner lease', () => {
+test('reconciliation renewal cannot extend an already expired owner lease', async () => {
   const store = new SqliteDurableStore(tmpDb());
   store.insertAgentRun(agentRun({ runId: 'agentcmd_expired_renew', correlationId: 'agentcorr_expired_renew' }), agentEvent({ runId: 'agentcmd_expired_renew', correlationId: 'agentcorr_expired_renew' }));
-  const claim = store.claimAgentRunReconciliation('agentcmd_expired_renew', 'owner-a', 2_000, 1_000)!;
-  assert.equal(store.renewAgentRunReconciliation('agentcmd_expired_renew', claim.owner, claim.fence, 10_000, 3_000), undefined);
-  const ownerB = store.claimAgentRunReconciliation('agentcmd_expired_renew', 'owner-b', 10_000, 3_000)!;
+  const claim = (await store.claimAgentRunReconciliation('agentcmd_expired_renew', 'owner-a', 2_000, 1_000))!;
+  assert.equal((await store.renewAgentRunReconciliation('agentcmd_expired_renew', claim.owner, claim.fence, 10_000, 3_000)), undefined);
+  const ownerB = (await store.claimAgentRunReconciliation('agentcmd_expired_renew', 'owner-b', 10_000, 3_000))!;
   assert.equal(ownerB.fence, claim.fence + 1);
-  assert.equal(store.appendAgentRunEventUnderFence({ runId: 'agentcmd_expired_renew', expectedState: 'AWAITING_APPROVAL', at: 3_100, source: 'RECONCILIATION', eventType: 'restart.reconciliation_started', reason: 'expired-owner', reconciliation: { owner: claim.owner, fence: claim.fence, leaseValidAt: 3_100, expectedVersion: claim.version } }), undefined);
+  assert.equal((await store.appendAgentRunEventUnderFence({ runId: 'agentcmd_expired_renew', expectedState: 'AWAITING_APPROVAL', at: 3_100, source: 'RECONCILIATION', eventType: 'restart.reconciliation_started', reason: 'expired-owner', reconciliation: { owner: claim.owner, fence: claim.fence, leaseValidAt: 3_100, expectedVersion: claim.version } })), undefined);
   store.close();
 });
 
-test('retention preserves actively leased terminal runs and tombstones only selected rows', () => {
+test('retention preserves actively leased terminal runs and tombstones only selected rows', async () => {
   const store = new SqliteDurableStore(tmpDb());
   const leased = agentRun({ runId: 'agentcmd_leased_terminal', correlationId: 'agentcorr_leased', state: 'COMPLETED', terminalAt: 10, reconciliationOwner: 'owner-live', reconciliationLeaseUntil: 10_000, reconciliationFence: 4 });
   const eligible = agentRun({ runId: 'agentcmd_eligible_terminal', correlationId: 'agentcorr_eligible', state: 'COMPLETED', terminalAt: 10 });
   store.insertAgentRun(leased, agentEvent({ runId: leased.runId, correlationId: leased.correlationId, nextState: 'COMPLETED' }));
   store.insertAgentRun(eligible, agentEvent({ runId: eligible.runId, correlationId: eligible.correlationId, nextState: 'COMPLETED' }));
-  const pruned = store.pruneAgentRuns(100, 10, 1_000);
+  const pruned = (await store.pruneAgentRuns(100, 10, 1_000));
   assert.equal(pruned.runs, 1);
-  assert.ok(store.loadAgentRun(leased.runId), 'actively leased terminal run must remain');
-  assert.equal(store.loadAgentRunEvents(leased.runId).length, 1, 'leased run events must remain');
-  assert.equal(store.loadAgentRun(eligible.runId), undefined);
-  assert.deepEqual(store.loadAgentRunTombstones().map((t) => t.runId), [eligible.runId]);
+  assert.ok((await store.loadAgentRun(leased.runId)), 'actively leased terminal run must remain');
+  assert.equal((await store.loadAgentRunEvents(leased.runId)).length, 1, 'leased run events must remain');
+  assert.equal((await store.loadAgentRun(eligible.runId)), undefined);
+  assert.deepEqual((await store.loadAgentRunTombstones()).map((t) => t.runId), [eligible.runId]);
   store.close();
 });
 
-test('retention tombstone failure preserves the run and its events atomically', () => {
+test('retention tombstone failure preserves the run and its events atomically', async () => {
   const db = tmpDb();
   let store = new SqliteDurableStore(db);
   const run = agentRun({ runId: 'agentcmd_tombstone_conflict', correlationId: 'agentcorr_tombstone_conflict', state: 'COMPLETED', terminalAt: 10 });
@@ -687,31 +687,31 @@ test('retention tombstone failure preserves the run and its events atomically', 
   raw.close();
 
   store = new SqliteDurableStore(db);
-  assert.throws(() => store.pruneAgentRuns(100, 10, 1_000), /UNIQUE constraint failed|constraint/i);
-  assert.ok(store.loadAgentRun(run.runId), 'run must remain when tombstone cannot be inserted');
-  assert.equal(store.loadAgentRunEvents(run.runId).length, 1, 'events must remain when tombstone cannot be inserted');
+  await assert.rejects(() => store.pruneAgentRuns(100, 10, 1_000), /UNIQUE constraint failed|constraint/i);
+  assert.ok((await store.loadAgentRun(run.runId)), 'run must remain when tombstone cannot be inserted');
+  assert.equal((await store.loadAgentRunEvents(run.runId)).length, 1, 'events must remain when tombstone cannot be inserted');
   store.close();
 });
 
-test('retention is bounded and repeated workers do not prune leased terminal rows', () => {
+test('retention is bounded and repeated workers do not prune leased terminal rows', async () => {
   const store = new SqliteDurableStore(tmpDb());
   const first = agentRun({ runId: 'agentcmd_retention_first', correlationId: 'agentcorr_retention_first', state: 'COMPLETED', terminalAt: 10 });
   const second = agentRun({ runId: 'agentcmd_retention_second', correlationId: 'agentcorr_retention_second', state: 'FAILED', terminalAt: 20 });
   const leased = agentRun({ runId: 'agentcmd_retention_leased', correlationId: 'agentcorr_retention_leased', state: 'COMPLETED', terminalAt: 5, reconciliationOwner: 'owner-live', reconciliationLeaseUntil: 10_000, reconciliationFence: 9 });
   for (const run of [first, second, leased]) store.insertAgentRun(run, agentEvent({ runId: run.runId, correlationId: run.correlationId, nextState: run.state }));
-  assert.equal(store.pruneAgentRuns(100, 1, 1_000).runs, 1);
-  assert.equal(store.loadAgentRunTombstones().length, 1);
-  assert.ok(store.loadAgentRun(second.runId), 'batch limit must leave the second eligible row for a later worker');
-  assert.ok(store.loadAgentRun(leased.runId), 'active lease must remain protected even when older than eligible rows');
-  assert.equal(store.pruneAgentRuns(100, 1, 1_000).runs, 1);
-  assert.equal(store.pruneAgentRuns(100, 1, 1_000).runs, 0);
-  assert.ok(store.loadAgentRun(leased.runId));
-  assert.deepEqual(store.loadAgentRunTombstones().map((t) => t.runId).sort(), [first.runId, second.runId].sort());
+  assert.equal((await store.pruneAgentRuns(100, 1, 1_000)).runs, 1);
+  assert.equal((await store.loadAgentRunTombstones()).length, 1);
+  assert.ok((await store.loadAgentRun(second.runId)), 'batch limit must leave the second eligible row for a later worker');
+  assert.ok((await store.loadAgentRun(leased.runId)), 'active lease must remain protected even when older than eligible rows');
+  assert.equal((await store.pruneAgentRuns(100, 1, 1_000)).runs, 1);
+  assert.equal((await store.pruneAgentRuns(100, 1, 1_000)).runs, 0);
+  assert.ok((await store.loadAgentRun(leased.runId)));
+  assert.deepEqual((await store.loadAgentRunTombstones()).map((t) => t.runId).sort(), [first.runId, second.runId].sort());
   store.close();
 });
 
-test('integrityCheck reports ok on a healthy store', () => {
+test('integrityCheck reports ok on a healthy store', async () => {
   const store = new SqliteDurableStore(tmpDb());
-  assert.equal(store.integrityCheck(), 'ok');
+  assert.equal((await store.integrityCheck()), 'ok');
   store.close();
 });

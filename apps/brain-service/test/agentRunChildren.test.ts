@@ -71,7 +71,7 @@ function child(store: SqliteDurableStore, over: Partial<Parameters<SqliteDurable
 
 // ── 1. migration ─────────────────────────────────────────────────────────────
 
-test('v7 migration upgrades an existing journal without disturbing its rows', () => {
+test('v7 migration upgrades an existing journal without disturbing its rows', async () => {
   const file = dbPath();
   const first = new SqliteDurableStore(file);
   first.insertAgentRun(run(), createdEvent());
@@ -80,23 +80,23 @@ test('v7 migration upgrades an existing journal without disturbing its rows', ()
 
   // Re-open: applyMigrations runs again against a populated database.
   const second = new SqliteDurableStore(file);
-  const health = second.health();
+  const health = (await second.health());
   assert.equal(health.memoryStore, 'ready');
   assert.equal(health.schemaVersion, SCHEMA_VERSION);
 
-  const reloaded = second.loadAgentRun('run_1');
+  const reloaded = (await second.loadAgentRun('run_1'));
   assert.equal(reloaded?.state, 'AWAITING_APPROVAL');
   assert.equal(reloaded?.auditSeq, 2, 'existing audit chain survived the migration');
-  assert.equal(second.loadAgentRunEvents('run_1').length, 2);
+  assert.equal((await second.loadAgentRunEvents('run_1')).length, 2);
   // A pre-v7 run owns no domain payload and no children — absent, not broken.
   assert.equal(reloaded?.domainKind, undefined);
-  assert.deepEqual(second.loadAgentRunChildren('run_1'), []);
+  assert.deepEqual((await second.loadAgentRunChildren('run_1')), []);
   second.close();
 });
 
 // ── 2–3, 12–13. domain payload ───────────────────────────────────────────────
 
-test('domain payload round-trips through the durable store', () => {
+test('domain payload round-trips through the durable store', async () => {
   const store = new SqliteDurableStore(dbPath());
   const payload = initialCodingPayload('Cancelled lines are still counted.');
   const written = serializeDomainPayload(
@@ -106,29 +106,29 @@ test('domain payload round-trips through the durable store', () => {
   assert.ok(written.ok);
   store.insertAgentRun(run({ domainKind: written.kind, domainSchemaVersion: written.schemaVersion, domainPayloadJson: written.json }), createdEvent());
 
-  const read = readDomainPayload<CodingRunPayloadV1>(store.loadAgentRun('run_1')!, { kind: CODING_DOMAIN_KIND, maxSchemaVersion: 1 });
+  const read = readDomainPayload<CodingRunPayloadV1>((await store.loadAgentRun('run_1'))!, { kind: CODING_DOMAIN_KIND, maxSchemaVersion: 1 });
   assert.ok(read.ok);
   assert.deepEqual(read.payload, payload);
   store.close();
 });
 
-test('a payload written by a newer build is refused, not parsed on a guess', () => {
+test('a payload written by a newer build is refused, not parsed on a guess', async () => {
   const store = new SqliteDurableStore(dbPath());
   store.insertAgentRun(run({ domainKind: CODING_DOMAIN_KIND, domainSchemaVersion: 99, domainPayloadJson: '{"issueText":"x","phase":"planning","attempts":{"initialProposal":0,"repair":0}}' }), createdEvent());
-  const read = readDomainPayload(store.loadAgentRun('run_1')!, { kind: CODING_DOMAIN_KIND, maxSchemaVersion: 1 });
+  const read = readDomainPayload((await store.loadAgentRun('run_1'))!, { kind: CODING_DOMAIN_KIND, maxSchemaVersion: 1 });
   assert.equal(read.ok, false);
   assert.equal(read.ok === false && read.code, 'UNSUPPORTED_SCHEMA_VERSION');
   store.close();
 });
 
-test('a malformed payload faults instead of crashing the journal read', () => {
+test('a malformed payload faults instead of crashing the journal read', async () => {
   const store = new SqliteDurableStore(dbPath());
   store.insertAgentRun(run({ domainKind: CODING_DOMAIN_KIND, domainSchemaVersion: 1, domainPayloadJson: '{"issueText": TRUNCA' }), createdEvent());
   // The run itself must still load — one corrupt payload cannot take the history
   // of every other run down with it.
-  const loaded = store.loadAgentRun('run_1');
+  const loaded = (await store.loadAgentRun('run_1'));
   assert.ok(loaded);
-  assert.equal(store.loadAgentRuns().length, 1);
+  assert.equal((await store.loadAgentRuns()).length, 1);
   const read = readDomainPayload(loaded, { kind: CODING_DOMAIN_KIND, maxSchemaVersion: 1 });
   assert.equal(read.ok === false && read.code, 'MALFORMED');
   store.close();
@@ -189,77 +189,77 @@ test('redaction applies to the domain payload before it is persisted', () => {
 
 // ── 4–11. children ───────────────────────────────────────────────────────────
 
-test('child revisions are monotonic and a stale writer loses', () => {
+test('child revisions are monotonic and a stale writer loses', async () => {
   const store = new SqliteDurableStore(dbPath());
   store.insertAgentRun(run(), createdEvent());
-  const created = child(store);
+  const created = (await child(store));
   assert.ok(created.ok);
   assert.equal(created.child.revision, 1);
 
-  const started = store.transitionAgentRunChild({ childId: 'child_1', expectedRevision: 1, nextState: 'running', at: 2_100, startedAt: 2_100 });
+  const started = (await store.transitionAgentRunChild({ childId: 'child_1', expectedRevision: 1, nextState: 'running', at: 2_100, startedAt: 2_100 }));
   assert.ok(started.ok);
   assert.equal(started.child.revision, 2);
 
   // A second writer still holding revision 1 must not win.
-  const stale = store.transitionAgentRunChild({ childId: 'child_1', expectedRevision: 1, nextState: 'failed', at: 2_200 });
+  const stale = (await store.transitionAgentRunChild({ childId: 'child_1', expectedRevision: 1, nextState: 'failed', at: 2_200 }));
   assert.equal(stale.ok, false);
   assert.equal(stale.ok === false && stale.code, 'STALE_REVISION');
-  assert.equal(store.loadAgentRunChild('child_1')?.state, 'running');
+  assert.equal((await store.loadAgentRunChild('child_1'))?.state, 'running');
   store.close();
 });
 
-test('parent and child revisions advance independently', () => {
+test('parent and child revisions advance independently', async () => {
   const store = new SqliteDurableStore(dbPath());
   store.insertAgentRun(run(), createdEvent());
   child(store);
-  const parentBefore = store.loadAgentRun('run_1')!.version;
+  const parentBefore = (await store.loadAgentRun('run_1'))!.version;
 
   store.transitionAgentRunChild({ childId: 'child_1', expectedRevision: 1, nextState: 'running', at: 2_100 });
-  assert.equal(store.loadAgentRun('run_1')!.version, parentBefore, 'a child write must not bump the parent');
+  assert.equal((await store.loadAgentRun('run_1'))!.version, parentBefore, 'a child write must not bump the parent');
 
   store.transitionAgentRun({ runId: 'run_1', nextState: 'APPROVED', at: 3_000, source: 'APPROVAL', eventType: 'approval.granted' });
-  assert.equal(store.loadAgentRun('run_1')!.version, parentBefore + 1);
-  assert.equal(store.loadAgentRunChild('child_1')!.revision, 2, 'a parent write must not bump the child');
+  assert.equal((await store.loadAgentRun('run_1'))!.version, parentBefore + 1);
+  assert.equal((await store.loadAgentRunChild('child_1'))!.revision, 2, 'a parent write must not bump the child');
   store.close();
 });
 
-test('a duplicate child id is refused', () => {
+test('a duplicate child id is refused', async () => {
   const store = new SqliteDurableStore(dbPath());
   store.insertAgentRun(run(), createdEvent());
-  assert.ok(child(store).ok);
-  const again = child(store, { kind: 'validation', attempt: 4 });
+  assert.ok((await child(store)).ok);
+  const again = (await child(store, { kind: 'validation', attempt: 4 }));
   assert.equal(again.ok === false && again.code, 'DUPLICATE_CHILD');
   store.close();
 });
 
-test('the same (kind, attempt) cannot be registered twice under one run', () => {
+test('the same (kind, attempt) cannot be registered twice under one run', async () => {
   const store = new SqliteDurableStore(dbPath());
   store.insertAgentRun(run(), createdEvent());
-  assert.ok(child(store, { childId: 'c1', kind: 'repair_apply', attempt: 1 }).ok);
-  const clash = child(store, { childId: 'c2', kind: 'repair_apply', attempt: 1 });
+  assert.ok((await child(store, { childId: 'c1', kind: 'repair_apply', attempt: 1 })).ok);
+  const clash = (await child(store, { childId: 'c2', kind: 'repair_apply', attempt: 1 }));
   assert.equal(clash.ok === false && clash.code, 'DUPLICATE_CHILD');
   // A second attempt of the same kind is legitimate and must still be allowed.
-  assert.ok(child(store, { childId: 'c3', kind: 'repair_apply', attempt: 2 }).ok);
+  assert.ok((await child(store, { childId: 'c3', kind: 'repair_apply', attempt: 2 })).ok);
   store.close();
 });
 
-test('a child cannot reference a missing parent', () => {
+test('a child cannot reference a missing parent', async () => {
   const store = new SqliteDurableStore(dbPath());
-  const orphan = child(store, { runId: 'run_nonexistent' });
+  const orphan = (await child(store, { runId: 'run_nonexistent' }));
   assert.equal(orphan.ok === false && orphan.code, 'UNKNOWN_PARENT');
-  assert.equal(store.loadAgentRunChild('child_1'), undefined, 'nothing was written');
+  assert.equal((await store.loadAgentRunChild('child_1')), undefined, 'nothing was written');
   store.close();
 });
 
-test('a child cannot be registered under an already-terminal parent', () => {
+test('a child cannot be registered under an already-terminal parent', async () => {
   const store = new SqliteDurableStore(dbPath());
   store.insertAgentRun(run({ state: 'COMPLETED', terminalAt: 5_000 }), createdEvent());
-  const late = child(store);
+  const late = (await child(store));
   assert.equal(late.ok === false && late.code, 'PARENT_TERMINAL');
   store.close();
 });
 
-test('deleting a parent cascades its children away', () => {
+test('deleting a parent cascades its children away', async () => {
   const store = new SqliteDurableStore(dbPath());
   store.insertAgentRun(run({ state: 'COMPLETED', terminalAt: 1 }), createdEvent());
   // Insert while non-terminal is enforced above, so write the child directly for
@@ -268,26 +268,26 @@ test('deleting a parent cascades its children away', () => {
 
   const second = new SqliteDurableStore(dbPath());
   second.insertAgentRun(run(), createdEvent());
-  assert.ok(child(second).ok);
+  assert.ok((await child(second)).ok);
   second.transitionAgentRun({ runId: 'run_1', nextState: 'COMPLETED', at: 4_000, source: 'EXECUTION', eventType: 'run.completed', patch: { terminalAt: 4_000 } });
-  const pruned = second.pruneAgentRuns(5_000, 10, 6_000);
+  const pruned = (await second.pruneAgentRuns(5_000, 10, 6_000));
   assert.equal(pruned.runs, 1);
-  assert.deepEqual(second.loadAgentRunChildren('run_1'), [], 'children did not outlive the parent');
-  assert.equal(second.loadAgentRunTombstones().length, 1, 'the parent left a tombstone');
+  assert.deepEqual((await second.loadAgentRunChildren('run_1')), [], 'children did not outlive the parent');
+  assert.equal((await second.loadAgentRunTombstones()).length, 1, 'the parent left a tombstone');
   second.close();
 });
 
-test('a terminal child can never return to running', () => {
+test('a terminal child can never return to running', async () => {
   const store = new SqliteDurableStore(dbPath());
   store.insertAgentRun(run(), createdEvent());
   child(store);
   store.transitionAgentRunChild({ childId: 'child_1', expectedRevision: 1, nextState: 'running', at: 2_100 });
-  const done = store.transitionAgentRunChild({ childId: 'child_1', expectedRevision: 2, nextState: 'completed', at: 2_200, endedAt: 2_200, terminalCategory: 'observed_success' });
+  const done = (await store.transitionAgentRunChild({ childId: 'child_1', expectedRevision: 2, nextState: 'completed', at: 2_200, endedAt: 2_200, terminalCategory: 'observed_success' }));
   assert.ok(done.ok);
 
-  const resurrect = store.transitionAgentRunChild({ childId: 'child_1', expectedRevision: 3, nextState: 'running', at: 2_300 });
+  const resurrect = (await store.transitionAgentRunChild({ childId: 'child_1', expectedRevision: 3, nextState: 'running', at: 2_300 }));
   assert.equal(resurrect.ok === false && resurrect.code, 'TERMINAL_CHILD_IMMUTABLE');
-  assert.equal(store.loadAgentRunChild('child_1')?.state, 'completed');
+  assert.equal((await store.loadAgentRunChild('child_1'))?.state, 'completed');
 
   // The rule is in the table, not only in the store.
   assert.equal(isLegalChildTransition('completed', 'running'), false);
@@ -296,19 +296,19 @@ test('a terminal child can never return to running', () => {
   store.close();
 });
 
-test('a cancellation request is not a cancellation confirmation', () => {
+test('a cancellation request is not a cancellation confirmation', async () => {
   const store = new SqliteDurableStore(dbPath());
   store.insertAgentRun(run(), createdEvent());
   child(store);
   store.transitionAgentRunChild({ childId: 'child_1', expectedRevision: 1, nextState: 'running', at: 2_100 });
 
-  const requested = store.transitionAgentRunChild({ childId: 'child_1', expectedRevision: 2, nextState: 'cancelling', at: 2_200, cancellationRequestedAt: 2_200 });
+  const requested = (await store.transitionAgentRunChild({ childId: 'child_1', expectedRevision: 2, nextState: 'cancelling', at: 2_200, cancellationRequestedAt: 2_200 }));
   assert.ok(requested.ok);
   assert.equal(requested.child.state, 'cancelling');
   assert.equal(requested.child.cancellationConfirmedAt, undefined, 'requesting must not confirm');
   assert.equal(requested.child.endedAt, undefined, 'a requested cancellation has not ended the work');
 
-  const confirmed = store.transitionAgentRunChild({ childId: 'child_1', expectedRevision: 3, nextState: 'cancelled', at: 2_300, endedAt: 2_300, cancellationConfirmedAt: 2_300, terminalCategory: 'cancellation_confirmed' });
+  const confirmed = (await store.transitionAgentRunChild({ childId: 'child_1', expectedRevision: 3, nextState: 'cancelled', at: 2_300, endedAt: 2_300, cancellationConfirmedAt: 2_300, terminalCategory: 'cancellation_confirmed' }));
   assert.ok(confirmed.ok);
   assert.equal(confirmed.child.cancellationConfirmedAt, 2_300);
   // `running → cancelled` directly is refused: work must pass through cancelling.
@@ -316,37 +316,37 @@ test('a cancellation request is not a cancellation confirmation', () => {
   store.close();
 });
 
-test('required children block parent completion until terminal', () => {
+test('required children block parent completion until terminal', async () => {
   const persistence = new MemoryAgentRunJournalPersistence();
   const journal = new AgentRunJournal(persistence, DEFAULT_AGENT_RUN_JOURNAL_CONFIG, () => 'ev');
   persistence.insertAgentRun(run(), createdEvent());
 
   journal.registerChild({ childId: 'c_apply', runId: 'run_1', kind: 'initial_apply', at: 2_000 });
   journal.registerChild({ childId: 'c_opt', runId: 'run_1', kind: 'reconciliation', required: false, at: 2_001 });
-  assert.deepEqual(journal.blockingChildren('run_1').map((c) => c.childId), ['c_apply']);
+  assert.deepEqual((await journal.blockingChildren('run_1')).map((c) => c.childId), ['c_apply']);
 
   journal.transitionChild({ childId: 'c_apply', expectedRevision: 1, nextState: 'running', at: 2_100 });
-  assert.equal(journal.blockingChildren('run_1').length, 1, 'a running required child still blocks');
+  assert.equal((await journal.blockingChildren('run_1')).length, 1, 'a running required child still blocks');
 
   journal.transitionChild({ childId: 'c_apply', expectedRevision: 2, nextState: 'completed', at: 2_200, terminalCategory: 'observed_success' });
-  assert.deepEqual(journal.blockingChildren('run_1'), [], 'nothing blocks once every required child is terminal');
+  assert.deepEqual((await journal.blockingChildren('run_1')), [], 'nothing blocks once every required child is terminal');
 
   // An INTERRUPTED child is terminal — it stops blocking, but it is not a success,
   // so completion has to consult the category, never mere terminality.
   journal.registerChild({ childId: 'c_val', runId: 'run_1', kind: 'validation', at: 2_300 });
   journal.transitionChild({ childId: 'c_val', expectedRevision: 1, nextState: 'running', at: 2_310 });
   journal.transitionChild({ childId: 'c_val', expectedRevision: 2, nextState: 'interrupted', at: 2_320, terminalCategory: 'interrupted_by_restart' });
-  assert.deepEqual(journal.blockingChildren('run_1'), []);
-  assert.equal(journal.child('c_val')?.terminalCategory, 'interrupted_by_restart');
+  assert.deepEqual((await journal.blockingChildren('run_1')), []);
+  assert.equal((await journal.child('c_val'))?.terminalCategory, 'interrupted_by_restart');
 });
 
-test('redaction applies to child metadata and terminal evidence', () => {
+test('redaction applies to child metadata and terminal evidence', async () => {
   const persistence = new MemoryAgentRunJournalPersistence();
   const journal = new AgentRunJournal(persistence, DEFAULT_AGENT_RUN_JOURNAL_CONFIG, () => 'ev');
   persistence.insertAgentRun(run(), createdEvent());
 
   journal.registerChild({ childId: 'c1', runId: 'run_1', kind: 'validation', at: 2_000, metadata: { authorization: 'Bearer zzzzzzzzzzzzzzzzzzzz' } });
-  const registered = journal.child('c1');
+  const registered = (await journal.child('c1'));
   assert.ok(!(registered?.metadataJson ?? '').includes('zzzzzzzzzzzzzzzzzzzz'));
 
   journal.transitionChild({ childId: 'c1', expectedRevision: 1, nextState: 'running', at: 2_100 });
@@ -354,23 +354,23 @@ test('redaction applies to child metadata and terminal evidence', () => {
     childId: 'c1', expectedRevision: 2, nextState: 'failed', at: 2_200, terminalCategory: 'observed_failure',
     terminalEvidence: { exitCode: 1, note: `token ${SYNTHETIC_PROVIDER_TOKEN} leaked into output` },
   });
-  const finished = journal.child('c1');
+  const finished = (await journal.child('c1'));
   assert.ok(!(finished?.terminalEvidenceJson ?? '').includes(SYNTHETIC_PROVIDER_TOKEN));
 });
 
 // ── 14. retention ────────────────────────────────────────────────────────────
 
-test('retention preserves active coding runs and pending approvals', () => {
+test('retention preserves active coding runs and pending approvals', async () => {
   const store = new SqliteDurableStore(dbPath());
   // Non-terminal: awaiting approval, far older than the cutoff.
   store.insertAgentRun(run({ runId: 'run_waiting', state: 'AWAITING_APPROVAL', requestedAt: 1, updatedAt: 1 }), createdEvent('run_waiting'));
   // Terminal and old: legitimately prunable.
   store.insertAgentRun(run({ runId: 'run_done', state: 'COMPLETED', terminalAt: 10, requestedAt: 1, updatedAt: 10 }), createdEvent('run_done'));
 
-  const pruned = store.pruneAgentRuns(1_000_000, 100, 2_000_000);
+  const pruned = (await store.pruneAgentRuns(1_000_000, 100, 2_000_000));
   assert.equal(pruned.runs, 1, 'only the terminal run was pruned');
-  assert.ok(store.loadAgentRun('run_waiting'), 'a pending approval is never pruned by age');
-  assert.equal(store.loadAgentRun('run_done'), undefined);
+  assert.ok((await store.loadAgentRun('run_waiting')), 'a pending approval is never pruned by age');
+  assert.equal((await store.loadAgentRun('run_done')), undefined);
   store.close();
 });
 
@@ -424,7 +424,7 @@ test('the coding payload validator refuses malformed records rather than default
   assert.equal(unknownApproval.ok === false && unknownApproval.fault, 'invalid-scope');
 });
 
-test('a well-formed coding payload survives a serialize → store → parse cycle', () => {
+test('a well-formed coding payload survives a serialize → store → parse cycle', async () => {
   const store = new SqliteDurableStore(dbPath());
   const payload: CodingRunPayloadV1 = {
     issueText: 'Cancelled line items are still counted in the order total.',
@@ -445,7 +445,7 @@ test('a well-formed coding payload survives a serialize → store → parse cycl
   assert.ok(written.ok);
   store.insertAgentRun(run({ domainKind: written.kind, domainSchemaVersion: written.schemaVersion, domainPayloadJson: written.json }), createdEvent());
 
-  const read = readDomainPayload(store.loadAgentRun('run_1')!, { kind: CODING_DOMAIN_KIND, maxSchemaVersion: 1 });
+  const read = readDomainPayload((await store.loadAgentRun('run_1'))!, { kind: CODING_DOMAIN_KIND, maxSchemaVersion: 1 });
   assert.ok(read.ok);
   const parsed = parseCodingPayload(read.payload);
   assert.ok(parsed.ok);

@@ -52,20 +52,20 @@ function preview(at: number): AgentModeCommandPreview {
   };
 }
 
-function harness() {
+async function harness() {
   const at = 1_700_000_000_000;
   const persistence = new MemoryAgentRunJournalPersistence();
   const journal = new AgentRunJournal(persistence);
   let sequence = 0;
   const deps = { registry: new CapabilityRegistry(), approvals: new ToolApprovalStore(() => at, () => `appr_${++sequence}`, 100), audit: new ToolAudit() };
   const service = new AgentModeCommandService(deps, () => at, undefined, undefined, undefined, journal);
-  const history = new AgentRunHistoryService(journal, (run, ctx) => {
-    const result = service.getRunRecoveryStatus(run.runId, ctx);
+  const history = new AgentRunHistoryService(journal, async (run, ctx) => {
+    const result = (await service.getRunRecoveryStatus(run.runId, ctx));
     if (!result.ok) throw new Error('recovery status unavailable');
     return result.status;
   }, () => at);
 
-  journal.create({
+  await journal.create({
     runId: RUN_ID, correlationId: `agentcorr_${RUN_ID}`, activationId: ACTIVATION, workspaceRoot: WORKSPACE,
     workspaceIdentity: 'workspace-id', recipeId: 'git.status', recipePolicyVersion: AGENT_RECIPE_POLICY_VERSION,
     proposalFingerprint: FINGERPRINT, proposalHash: `${FINGERPRINT}${'0'.repeat(48)}`, snapshotId: SNAPSHOT_ID,
@@ -76,13 +76,13 @@ function harness() {
     preview: preview(at),
   });
   // approval.displayed carries the proposal fingerprint as its reason.
-  journal.transition({ runId: RUN_ID, expectedState: 'AWAITING_APPROVAL', nextState: 'AWAITING_APPROVAL', at: at + 10, eventType: 'approval.displayed', source: 'API', reason: FINGERPRINT, approvalDisplayedAt: at + 10, approvalLifecycle: 'DISPLAYED' });
-  journal.transition({ runId: RUN_ID, expectedState: 'AWAITING_APPROVAL', nextState: 'REJECTED', at: at + 20, eventType: 'approval.rejected', source: 'APPROVAL', reason: 'HUMAN_REJECTED', approvalDecisionAt: at + 20, terminalAt: at + 20, failureCode: 'REJECTED', approvalLifecycle: 'REJECTED', approvalDecisionType: 'REJECTED', recoveryClass: 'REPROPOSAL_ALLOWED', recoveryEligible: true, recoveryReason: 'REJECTED_FRESH_PROPOSAL_ALLOWED' });
+  await journal.transition({ runId: RUN_ID, expectedState: 'AWAITING_APPROVAL', nextState: 'AWAITING_APPROVAL', at: at + 10, eventType: 'approval.displayed', source: 'API', reason: FINGERPRINT, approvalDisplayedAt: at + 10, approvalLifecycle: 'DISPLAYED' });
+  await journal.transition({ runId: RUN_ID, expectedState: 'AWAITING_APPROVAL', nextState: 'REJECTED', at: at + 20, eventType: 'approval.rejected', source: 'APPROVAL', reason: 'HUMAN_REJECTED', approvalDecisionAt: at + 20, terminalAt: at + 20, failureCode: 'REJECTED', approvalLifecycle: 'REJECTED', approvalDecisionType: 'REJECTED', recoveryClass: 'REPROPOSAL_ALLOWED', recoveryEligible: true, recoveryReason: 'REJECTED_FRESH_PROPOSAL_ALLOWED' });
   return { journal, service, history, persistence };
 }
 
-function exportEvidence(history: AgentRunHistoryService) {
-  const result = history.export(RUN_ID, { includeTimeline: true, includePreview: true, includeResultSummary: true }, context());
+async function exportEvidence(history: AgentRunHistoryService) {
+  const result = (await history.export(RUN_ID, { includeTimeline: true, includePreview: true, includeResultSummary: true }, context()));
   assert.equal(result.ok, true);
   if (!result.ok) throw new Error('unreachable');
   return result.value;
@@ -99,9 +99,9 @@ function canonicalJson(value: unknown): string {
 }
 
 // 1 + 2. The canonical snapshot identifier is consistent and visible.
-test('snapshotId is identical in summary and preview and remains visible', () => {
-  const { history } = harness();
-  const evidence = exportEvidence(history);
+test('snapshotId is identical in summary and preview and remains visible', async () => {
+  const { history } = await harness();
+  const evidence = (await exportEvidence(history));
   assert.equal(evidence.body.summary.snapshotId, SNAPSHOT_ID);
   assert.equal(evidence.body.preview?.snapshotId, SNAPSHOT_ID);
   assert.equal(evidence.body.preview?.snapshotId, evidence.body.summary.snapshotId);
@@ -109,21 +109,21 @@ test('snapshotId is identical in summary and preview and remains visible', () =>
 });
 
 // 3. The exemption is schema-bound, not a blanket hex exemption.
-test('an unrelated 64-hex value stays redacted', () => {
-  const { history, persistence } = harness();
+test('an unrelated 64-hex value stays redacted', async () => {
+  const { history, persistence } = await harness();
   // The write-time redactor must still have scrubbed the operator text.
   const stored = persistence.runs.get(RUN_ID)!.previewJson!;
   assert.equal(stored.includes(UNRELATED_HEX), false, 'write-time redaction must scrub unrelated high-entropy values');
-  const evidence = exportEvidence(history);
+  const evidence = (await exportEvidence(history));
   const body = canonicalJson(evidence.body);
   assert.equal(body.includes(UNRELATED_HEX), false);
   assert.ok(evidence.body.preview?.reason.includes('[REDACTED_SECRET]'));
 });
 
 // 4. Authority-binding material is replaced with a semantic marker.
-test('proposal fingerprint is replaced with the authority-binding marker everywhere', () => {
-  const { history, journal } = harness();
-  const evidence = exportEvidence(history);
+test('proposal fingerprint is replaced with the authority-binding marker everywhere', async () => {
+  const { history, journal } = await harness();
+  const evidence = (await exportEvidence(history));
   const body = canonicalJson(evidence.body);
   assert.equal(body.includes(FINGERPRINT), false, 'no exported surface may carry the proposal fingerprint');
   assert.equal(evidence.body.preview?.fingerprint, REDACTED_AUTHORITY_BINDING);
@@ -133,13 +133,13 @@ test('proposal fingerprint is replaced with the authority-binding marker everywh
   assert.equal(evidence.body.timeline.find((e) => e.type === 'approval.rejected')?.reason, 'HUMAN_REJECTED');
   assert.equal(evidence.body.timeline.find((e) => e.type === 'proposal.created')?.reason, 'git.status');
   // The durable record still retains it for internal binding.
-  assert.equal(journal.loadRun(RUN_ID)?.proposalFingerprint, FINGERPRINT);
+  assert.equal((await journal.loadRun(RUN_ID))?.proposalFingerprint, FINGERPRINT);
 });
 
 // 5. Credentials, digests, paths, and environment values stay out.
-test('capability, approval id, bootstrap material, digests, paths and env values are absent', () => {
-  const { history } = harness();
-  const evidence = exportEvidence(history);
+test('capability, approval id, bootstrap material, digests, paths and env values are absent', async () => {
+  const { history } = await harness();
+  const evidence = (await exportEvidence(history));
   const body = canonicalJson(evidence.body);
   for (const forbidden of [CAPABILITY, APPROVAL_ID, EXECUTABLE_DIGEST, MANIFEST_DIGEST, WORKSPACE, '/tmp/migrapilot-agent-snapshot-', 'bootstrap-secret']) {
     assert.equal(body.includes(forbidden), false, `${forbidden} must not appear in sanitized evidence`);
@@ -154,10 +154,10 @@ test('capability, approval id, bootstrap material, digests, paths and env values
 });
 
 // 6 + 7. Determinism and digest integrity survive the schema-preserving change.
-test('repeat export is byte-identical and the manifest digest recomputes', () => {
-  const { history } = harness();
-  const first = exportEvidence(history);
-  const second = exportEvidence(history);
+test('repeat export is byte-identical and the manifest digest recomputes', async () => {
+  const { history } = await harness();
+  const first = (await exportEvidence(history));
+  const second = (await exportEvidence(history));
   assert.equal(second.manifest.digest, first.manifest.digest);
   assert.equal(canonicalJson(second.body), canonicalJson(first.body));
 
@@ -170,22 +170,22 @@ test('repeat export is byte-identical and the manifest digest recomputes', () =>
 });
 
 // The digest must cover the sanitized bytes actually handed to the operator.
-test('the manifest digest is computed over the sanitized body, not the raw record', () => {
-  const { history } = harness();
-  const evidence = exportEvidence(history);
+test('the manifest digest is computed over the sanitized body, not the raw record', async () => {
+  const { history } = await harness();
+  const evidence = (await exportEvidence(history));
   const rawish = canonicalJson({ ...evidence.body, preview: { ...evidence.body.preview, fingerprint: FINGERPRINT } });
   assert.notEqual(createHash('sha256').update(rawish).digest('hex'), evidence.manifest.digest);
 });
 
 // 8. The evidence surface still carries no execution authority.
 test('history still exposes no execution authority after sanitation', async () => {
-  const { history, service } = harness();
+  const { history, service } = await harness();
   for (const forbidden of ['decide', 'approve', 'execute', 'resume', 'start', 'cancel', 'repropose', 'propose']) {
     assert.equal(typeof (history as unknown as Record<string, unknown>)[forbidden], 'undefined');
   }
   const decided = await service.decide(RUN_ID, 'approve', FINGERPRINT, context());
   assert.equal(decided.ok, false);
-  const cancelled = service.cancel(RUN_ID, context());
+  const cancelled = (await service.cancel(RUN_ID, context()));
   assert.equal(cancelled.ok, false);
   // The marker itself must never be usable as a fingerprint.
   const withMarker = await service.decide(RUN_ID, 'approve', REDACTED_AUTHORITY_BINDING, context());

@@ -50,15 +50,15 @@ export class CloudEscalationExecutor {
   async attempt(input: CloudAttemptInput): Promise<CloudAttemptResult> {
     const cid = input.correlationId;
     const base = { ok: false as const, viaEscalation: true as const, provider: input.provider.id, model: input.modelId, reason: input.reason };
-    auditStore.append({ correlationId: cid, type: 'escalation.attempted', component: 'escalation', fields: { provider: input.provider.id, model: input.modelId, reason: input.reason } });
+    await auditStore.append({ correlationId: cid, type: 'escalation.attempted', component: 'escalation', fields: { provider: input.provider.id, model: input.modelId, reason: input.reason } });
 
     const key = input.provider.credentialEnv ? this.env[input.provider.credentialEnv] : undefined;
     if (input.provider.credentialEnv && !(typeof key === 'string' && key.trim().length > 0)) {
-      auditStore.append({ correlationId: cid, type: 'escalation.failed', component: 'escalation', outcome: 'NO_CREDENTIAL', fields: { provider: input.provider.id, reason: input.reason } });
+      await auditStore.append({ correlationId: cid, type: 'escalation.failed', component: 'escalation', outcome: 'NO_CREDENTIAL', fields: { provider: input.provider.id, reason: input.reason } });
       return { ...base, error: 'cloud credential unavailable' };
     }
     if (!input.provider.baseUrl) {
-      auditStore.append({ correlationId: cid, type: 'escalation.failed', component: 'escalation', outcome: 'NO_ENDPOINT', fields: { provider: input.provider.id, reason: input.reason } });
+      await auditStore.append({ correlationId: cid, type: 'escalation.failed', component: 'escalation', outcome: 'NO_ENDPOINT', fields: { provider: input.provider.id, reason: input.reason } });
       return { ...base, error: 'cloud endpoint unavailable' };
     }
 
@@ -66,7 +66,7 @@ export class CloudEscalationExecutor {
       // ONE attempt — no failover, no retry.
       const client = this.makeProvider({ baseUrl: input.provider.baseUrl, model: input.modelId, apiKey: key });
       const res = await client.complete(input.request);
-      auditStore.append({ correlationId: cid, type: 'escalation.completed', component: 'escalation', outcome: 'ok', fields: { provider: input.provider.id, model: input.modelId, reason: input.reason, outputTokens: res.telemetry.outputTokens } });
+      await auditStore.append({ correlationId: cid, type: 'escalation.completed', component: 'escalation', outcome: 'ok', fields: { provider: input.provider.id, model: input.modelId, reason: input.reason, outputTokens: res.telemetry.outputTokens } });
       return {
         ok: true,
         viaEscalation: true,
@@ -77,7 +77,7 @@ export class CloudEscalationExecutor {
         usage: { inputTokens: res.telemetry.inputTokens, outputTokens: res.telemetry.outputTokens, latencyMs: res.telemetry.latencyMs },
       };
     } catch (err) {
-      auditStore.append({ correlationId: cid, type: 'escalation.failed', component: 'escalation', outcome: 'error', fields: { provider: input.provider.id, model: input.modelId, reason: input.reason } });
+      await auditStore.append({ correlationId: cid, type: 'escalation.failed', component: 'escalation', outcome: 'error', fields: { provider: input.provider.id, model: input.modelId, reason: input.reason } });
       return { ...base, error: sanitizeError(err).message };
     }
   }

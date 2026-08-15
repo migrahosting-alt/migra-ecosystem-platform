@@ -113,7 +113,12 @@ async function applyChangesetAudited(input: unknown, correlationId?: string): Pr
   const workspace = req.rootPath ? auditHash(req.rootPath) : 'unknown';
   const proposal = req.proposalHash ? auditHash(req.proposalHash) : 'unknown';
   // Critical: this append throws AuditCriticalWriteError → fail closed pre-mutation.
-  auditStore.append({ correlationId: cid, type: 'application.started', component: 'changeset', fields: { workspace, proposal } });
+  //
+  // AWAITED, and that is the entire guarantee. Un-awaited, control fell straight
+  // through to applyChangeset below: the mutation happened, and the failure of the
+  // CRITICAL record surfaced later as an unhandled rejection. The comment above
+  // described a fail-closed boundary the code did not have.
+  await auditStore.append({ correlationId: cid, type: 'application.started', component: 'changeset', fields: { workspace, proposal } });
   const started = Date.now();
   try {
     const res = applyChangeset(input, changesetFs, changesetProposals, correlationId) as {
@@ -121,7 +126,7 @@ async function applyChangesetAudited(input: unknown, correlationId?: string): Pr
       modified: string[];
       deleted: string[];
     };
-    auditStore.append({
+    await auditStore.append({
       correlationId: cid,
       type: 'application.completed',
       component: 'changeset',
@@ -133,7 +138,7 @@ async function applyChangesetAudited(input: unknown, correlationId?: string): Pr
   } catch (err) {
     if (err instanceof ChangesetError && err.code === 'INCONSISTENT_STATE') {
       const d = err.details ?? { appliedFileCount: 0, affectedPathCount: 0, rollbackFailureCount: 1, failureStage: 'rollback' };
-      auditStore.append({
+      await auditStore.append({
         correlationId: cid,
         type: 'application.rollback_failed',
         component: 'changeset',
@@ -156,9 +161,9 @@ async function applyChangesetAudited(input: unknown, correlationId?: string): Pr
         recoveryManager.stashReverseMaterial(cid, req.rootPath, err.reverseMaterial, raised.incident.incidentId);
       }
     } else if (err instanceof ChangesetError && err.code === 'PARTIAL_WRITE') {
-      auditStore.append({ correlationId: cid, type: 'application.rollback_completed', component: 'changeset', outcome: 'rolled_back', durationMs: Date.now() - started, fields: { workspace, proposal } });
+      await auditStore.append({ correlationId: cid, type: 'application.rollback_completed', component: 'changeset', outcome: 'rolled_back', durationMs: Date.now() - started, fields: { workspace, proposal } });
     } else {
-      auditStore.append({ correlationId: cid, type: 'application.failed', component: 'changeset', outcome: err instanceof ChangesetError ? err.code : 'error', durationMs: Date.now() - started, fields: { workspace, proposal } });
+      await auditStore.append({ correlationId: cid, type: 'application.failed', component: 'changeset', outcome: err instanceof ChangesetError ? err.code : 'error', durationMs: Date.now() - started, fields: { workspace, proposal } });
     }
     throw err;
   }

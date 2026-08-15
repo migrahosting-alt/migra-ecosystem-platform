@@ -96,9 +96,9 @@ export class IndexService {
   /** Rebuild in-memory indexes from durable storage on startup — approved indexes
    * and their chunks/vectors survive a restart, so unchanged files are not
    * re-embedded. */
-  hydrate(): void {
+  async hydrate(): Promise<void> {
     if (!this.persistence) return;
-    for (const rec of this.persistence.loadIndexes()) {
+    for (const rec of await this.persistence.loadIndexes()) {
       const record: IndexRecord = {
         id: rec.id, workspaceId: rec.workspaceId, sourceType: rec.sourceType as 'workspace' | 'docs', root: rec.root,
         state: rec.state as IndexState, syncing: false, version: rec.version, embeddingModel: rec.embeddingModel,
@@ -113,21 +113,23 @@ export class IndexService {
       let approvedIndex: VectorIndex | undefined;
       if (rec.approvedVersion !== undefined) {
         try {
-          approvedIndex = this.loadVersion(rec.id, rec.approvedVersion);
+          approvedIndex = await this.loadVersion(rec.id, rec.approvedVersion);
         } catch (error) {
           record.approvedVersion = undefined;
           record.state = 'degraded';
           record.stats.lastError = faultOf(error);
           // Revoke durably: approved content we cannot decode must never be served.
-          this.persistence.setApprovedVersion(rec.id, null, this.now());
-          this.persistence.setIndexState(rec.id, 'degraded', this.now());
+          // "Durably" is the whole point, so both writes are awaited — fired and
+          // forgotten, they lose to the next restart and the junk stays approved.
+          await this.persistence.setApprovedVersion(rec.id, null, this.now());
+          await this.persistence.setIndexState(rec.id, 'degraded', this.now());
         }
       }
 
       try {
         const index = rec.approvedVersion !== undefined && rec.approvedVersion === rec.version && approvedIndex
           ? approvedIndex // same version — one object, not two copies
-          : this.loadVersion(rec.id, rec.version);
+          : await this.loadVersion(rec.id, rec.version);
         record.stats = { files: index.files().length, chunks: index.size(), approxBytes: index.approxBytes(), lastSyncMs: 0, lastError: record.stats.lastError };
         this.byId.set(rec.id, { record, index, approvedIndex: approvedIndex ?? (record.approvedVersion !== undefined ? index : undefined) });
       } catch (error) {
@@ -141,17 +143,17 @@ export class IndexService {
         record.state = 'degraded';
         record.stats = { files: 0, chunks: 0, approxBytes: 0, lastSyncMs: 0, lastError: faultOf(error) };
         this.byId.set(rec.id, { record, index: new VectorIndex(), approvedIndex });
-        this.persistence.setIndexState(rec.id, 'degraded', this.now());
+        await this.persistence.setIndexState(rec.id, 'degraded', this.now());
       }
     }
   }
 
   /** Build an in-memory index from ONE persisted version. Throws if any vector
    * in that version is damaged (all-or-nothing — never a partial index). */
-  private loadVersion(indexId: string, indexVersion: number): VectorIndex {
+  private async loadVersion(indexId: string, indexVersion: number): Promise<VectorIndex> {
     const index = new VectorIndex();
     const byFile = new Map<string, IndexedChunk[]>();
-    for (const c of this.persistence!.loadChunks(indexId, indexVersion)) {
+    for (const c of await this.persistence!.loadChunks(indexId, indexVersion)) {
       const chunk: IndexedChunk = { ...c, symbol: c.symbol };
       (byFile.get(c.filePath) ?? byFile.set(c.filePath, []).get(c.filePath)!).push(chunk);
     }
@@ -159,7 +161,13 @@ export class IndexService {
     return index;
   }
 
-  createIndex(scope: Scope, params: { sourceType?: 'workspace' | 'docs'; root: string }): IndexRecord {
+  /**
+   * Asynchronous because the durable write is: the record is registered in memory
+   * only AFTER `saveIndex` lands. Fired and forgotten, a failed save left an index
+   * that existed for this process and vanished on restart — callers had already
+   * been handed its id and bound workspaces to it.
+   */
+  async createIndex(scope: Scope, params: { sourceType?: 'workspace' | 'docs'; root: string }): Promise<IndexRecord> {
     const t = this.now();
     const record: IndexRecord = {
       id: this.mkId(),
@@ -175,8 +183,8 @@ export class IndexService {
       updatedAt: t,
       stats: { files: 0, chunks: 0, approxBytes: 0, lastSyncMs: 0 },
     };
+    await this.persistence?.saveIndex(this.toPersisted(record, scope.owner));
     this.byId.set(record.id, { record, index: new VectorIndex() });
-    this.persistence?.saveIndex(this.toPersisted(record, scope.owner));
     return record;
   }
 
@@ -207,9 +215,11 @@ export class IndexService {
     return this.entry(id, scope)?.record;
   }
 
-  delete(id: string, scope: Scope): boolean {
+  /** Durable deletion first: dropping it from memory while the row survived meant
+   * the index came back on the next boot, after the caller was told it was gone. */
+  async delete(id: string, scope: Scope): Promise<boolean> {
     if (!this.entry(id, scope)) return false;
-    this.persistence?.deleteIndex(id);
+    await this.persistence?.deleteIndex(id);
     return this.byId.delete(id);
   }
 
@@ -221,21 +231,35 @@ export class IndexService {
    * content move in the same synchronous step, so `requireApproved` retrieval
    * switches from the old version to the new one with nothing in between.
    *
+   * That property is PRESERVED now the method is asynchronous: the durable writes
+   * are awaited FIRST, and every in-memory mutation happens afterwards in one
+   * synchronous block with no `await` between the pointer and the served content.
+   * A reader can still never observe a half-promoted index.
+   *
+   * Persisting first is the point. Approving in memory and then firing the writes
+   * meant a failed write left this process serving content as `approved` that the
+   * database still called a candidate — the divergence survives until a restart
+   * silently demotes it.
+   *
    * Demoting a candidate (`evaluated`/`experimental`/`degraded`) deliberately does
    * NOT revoke approval — that is exactly the "v6 committed, v5 still serving"
    * state. Only damaged approved content or an explicit revoke clears the pointer.
    */
-  setState(id: string, scope: Scope, state: IndexState): IndexRecord | undefined {
+  async setState(id: string, scope: Scope, state: IndexState): Promise<IndexRecord | undefined> {
     const e = this.entry(id, scope);
     if (!e) return undefined;
+    const updatedAt = this.now();
+    if (state === 'approved') {
+      await this.persistence?.setApprovedVersion(id, e.record.version, updatedAt);
+    }
+    await this.persistence?.setIndexState(id, state, updatedAt);
+    // ── memory, all at once, only now that the record is durable ──
     e.record.state = state;
-    e.record.updatedAt = this.now();
+    e.record.updatedAt = updatedAt;
     if (state === 'approved') {
       e.record.approvedVersion = e.record.version;
       e.approvedIndex = e.index; // the reviewed content becomes the served content
-      this.persistence?.setApprovedVersion(id, e.record.version, e.record.updatedAt);
     }
-    this.persistence?.setIndexState(id, state, e.record.updatedAt);
     return e.record;
   }
 
@@ -304,7 +328,12 @@ export class IndexService {
       // Durable commit (one transaction). It validates every vector before BEGIN,
       // so an invalid candidate throws here having written nothing.
       if (this.persistence) {
-        this.persistence.commitSync(e.record.id, nextVersion, changedChunks.map((c) => this.toPersistedChunk(e.record.id, c)), changedFiles, deletedFiles, this.now());
+        // AWAITED, or the swap below is not "only after the durable commit
+        // succeeded" — it is concurrent with it. Un-awaited, a commit that threw
+        // (an invalid vector, a rolled-back transaction) surfaced as an unhandled
+        // rejection while control fell through to the swap, so memory adopted a
+        // version the database never accepted and the catch never ran.
+        await this.persistence.commitSync(e.record.id, nextVersion, changedChunks.map((c) => this.toPersistedChunk(e.record.id, c)), changedFiles, deletedFiles, this.now());
       }
 
       // Atomic swap — only after the durable commit succeeded. Assignments only:
@@ -330,7 +359,9 @@ export class IndexService {
       // Durable AND honest: without this the database kept the pre-sync state
       // string (often `approved`) while memory said `degraded`, so a restart
       // resurrected the index as approved with no record of the failure.
-      this.persistence?.setIndexState(e.record.id, 'degraded', e.record.updatedAt);
+      // Awaited for the same reason it exists: an un-awaited demotion that loses
+      // its race with the caller closing the store is the resurrection bug again.
+      await this.persistence?.setIndexState(e.record.id, 'degraded', e.record.updatedAt);
       return { ok: false, code: 'SYNC_FAILED', error: 'Indexing failed; the previous index is unchanged.' };
     }
   }

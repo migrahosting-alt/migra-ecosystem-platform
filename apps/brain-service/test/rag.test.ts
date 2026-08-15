@@ -116,7 +116,7 @@ test('index service: create → sync → retrieve (cited), incremental, deletion
   ]);
   const counting = new CountingEmbedder(new FakeEmbedder());
   const svc = new IndexService(new CachedEmbedder(counting), () => memSource(files));
-  const rec = svc.createIndex(A, { root: '/ws/A' });
+  const rec = await svc.createIndex(A, { root: '/ws/A' });
   assert.equal(rec.state, 'experimental');
 
   const s1 = await svc.sync(rec.id, A);
@@ -147,7 +147,7 @@ test('index service: partial/failed sync keeps the prior index (embedding failur
   let fail = false;
   const flaky: Embedder = { model: 'flaky', version: 'v0', embed: async (t) => { if (fail) throw new Error('embed down'); return good.embed(t); } };
   const svc = new IndexService(flaky, () => memSource(files));
-  const rec = svc.createIndex(A, { root: '/ws/A' });
+  const rec = await svc.createIndex(A, { root: '/ws/A' });
   await svc.sync(rec.id, A);
   const before = svc.status(rec.id, A)!.stats.chunks;
   assert.ok(before >= 1);
@@ -164,7 +164,7 @@ test('index service: partial/failed sync keeps the prior index (embedding failur
 test('index service: workspace isolation + approval gating', async () => {
   const files = new Map<string, string>([['x.ts', 'export function x() { login auth }']]);
   const svc = new IndexService(new FakeEmbedder(), () => memSource(files));
-  const rec = svc.createIndex(A, { root: '/ws/A' });
+  const rec = await svc.createIndex(A, { root: '/ws/A' });
   await svc.sync(rec.id, A);
   // Workspace B cannot see or retrieve A's index.
   assert.equal(svc.status(rec.id, B), undefined);
@@ -173,7 +173,7 @@ test('index service: workspace isolation + approval gating', async () => {
   const gated = await svc.retrieve(rec.id, A, 'login', { requireApproved: true });
   assert.equal(gated.ok, false);
   assert.equal((gated as { code: string }).code, 'NOT_APPROVED');
-  svc.setState(rec.id, A, 'approved');
+  await svc.setState(rec.id, A, 'approved');
   assert.equal(svc.approvedIndexFor(A), rec.id);
   assert.equal((await svc.retrieve(rec.id, A, 'login', { requireApproved: true })).ok, true);
 });

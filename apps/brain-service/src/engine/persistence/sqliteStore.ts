@@ -643,7 +643,7 @@ export class SqliteDurableStore implements DurableStore {
    * or nothing measurable. Returns null when it cannot be determined, which is a
    * legitimate answer and not an error.
    */
-  storageBytes(): number | null {
+  async storageBytes(): Promise<number | null> {
     try {
       return statSync(this.path).size;
     } catch {
@@ -755,16 +755,16 @@ export class SqliteDurableStore implements DurableStore {
     });
   }
 
-  health(): PersistenceHealth {
+  async health(): Promise<PersistenceHealth> {
     return { memoryStore: this.healthy, ragStore: this.healthy, schemaVersion: this.schemaVersion, migrationState: this.migrationState, detail: this.detail };
   }
 
-  close(): void {
+  async close(): Promise<void> {
     try { this.db.close(); } catch { /* ignore */ }
   }
 
   // ── ConversationPersistence ──────────────────────────────────────────────
-  saveConversation(c: Conversation): void {
+  async saveConversation(c: Conversation): Promise<void> {
     this.db.prepare(
       `INSERT INTO conversations(id,owner_scope,workspace_scope,title,memory_mode,created_at,updated_at,deleted_at)
        VALUES(?,?,?,?,?,?,?,NULL)
@@ -772,7 +772,7 @@ export class SqliteDurableStore implements DurableStore {
     ).run(c.id, c.ownerScope, c.workspaceScope, c.title, c.memoryMode, c.createdAt, c.updatedAt);
   }
 
-  deleteConversation(id: string): void {
+  async deleteConversation(id: string): Promise<void> {
     this.tx(() => {
       this.db.prepare('DELETE FROM conversation_messages WHERE conversation_id = ?').run(id);
       this.db.prepare('DELETE FROM conversation_summaries WHERE conversation_id = ?').run(id);
@@ -780,21 +780,21 @@ export class SqliteDurableStore implements DurableStore {
     });
   }
 
-  saveMessage(m: Message): void {
+  async saveMessage(m: Message): Promise<void> {
     this.db.prepare(
       `INSERT OR IGNORE INTO conversation_messages(id,conversation_id,role,content,status,request_id,model_id,provider_id,created_at,durable,supersedes_id,seq)
        VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`,
     ).run(m.id, m.conversationId, m.role, m.content, m.status, m.requestId ?? null, m.modelId ?? null, m.providerId ?? null, m.createdAt, m.durable ? 1 : 0, m.supersedesId ?? null, m.createdAt);
   }
 
-  saveSummary(s: Summary): void {
+  async saveSummary(s: Summary): Promise<void> {
     this.db.prepare(
       `INSERT OR REPLACE INTO conversation_summaries(id,conversation_id,source_from_message_id,source_to_message_id,summary_json,version,created_at)
        VALUES(?,?,?,?,?,?,?)`,
     ).run(s.id, s.conversationId, s.sourceFromMessageId, s.sourceToMessageId, JSON.stringify(s.summary), s.version, s.createdAt);
   }
 
-  loadDurable(): { conversations: Conversation[]; messages: Message[]; summaries: Summary[] } {
+  async loadDurable(): Promise<{ conversations: Conversation[]; messages: Message[]; summaries: Summary[] }> {
     const conversations = (this.db.prepare('SELECT * FROM conversations WHERE deleted_at IS NULL').all() as Array<Record<string, unknown>>).map(rowToConversation);
     const messages = (this.db.prepare('SELECT * FROM conversation_messages ORDER BY conversation_id, seq, rowid').all() as Array<Record<string, unknown>>).map(rowToMessage);
     const summaries = (this.db.prepare('SELECT * FROM conversation_summaries ORDER BY conversation_id, version').all() as Array<Record<string, unknown>>).map(rowToSummary);
@@ -802,14 +802,14 @@ export class SqliteDurableStore implements DurableStore {
   }
 
   // ── MemoryItemPersistence ────────────────────────────────────────────────
-  saveMemoryItem(i: MemoryItem): void {
+  async saveMemoryItem(i: MemoryItem): Promise<void> {
     this.db.prepare(
       `INSERT OR REPLACE INTO memory_items(id,owner_scope,workspace_scope,category,content,confidence,source_type,source_id,expires_at,created_at)
        VALUES(?,?,?,?,?,?,?,?,?,?)`,
     ).run(i.id, i.scope.owner ?? null, i.scope.workspace ?? null, i.category, i.content, i.confidence, i.sourceType, i.sourceId ?? null, i.expiresAt ?? null, i.createdAt);
   }
 
-  loadMemoryItems(): MemoryItem[] {
+  async loadMemoryItems(): Promise<MemoryItem[]> {
     return (this.db.prepare('SELECT * FROM memory_items').all() as Array<Record<string, unknown>>).map((r) => ({
       id: r.id as string, scope: { owner: (r.owner_scope as string) ?? undefined, workspace: (r.workspace_scope as string) ?? undefined },
       category: r.category as MemoryItem['category'], content: r.content as string, confidence: r.confidence as number,
@@ -818,7 +818,7 @@ export class SqliteDurableStore implements DurableStore {
   }
 
   // ── RagIndexPersistence ──────────────────────────────────────────────────
-  saveIndex(rec: PersistedIndexRecord): void {
+  async saveIndex(rec: PersistedIndexRecord): Promise<void> {
     this.db.prepare(
       `INSERT INTO workspace_indexes(id,workspace_id,owner_scope,source_type,root,state,version,embedding_model,embedding_version,created_at,updated_at)
        VALUES(?,?,?,?,?,?,?,?,?,?,?)
@@ -826,11 +826,11 @@ export class SqliteDurableStore implements DurableStore {
     ).run(rec.id, rec.workspaceId, rec.ownerScope, rec.sourceType, rec.root, rec.state, rec.version, rec.embeddingModel, rec.embeddingVersion, rec.createdAt, rec.updatedAt);
   }
 
-  setIndexState(id: string, state: string, updatedAt: number): void {
+  async setIndexState(id: string, state: string, updatedAt: number): Promise<void> {
     this.db.prepare('UPDATE workspace_indexes SET state=?, updated_at=? WHERE id=?').run(state, updatedAt, id);
   }
 
-  deleteIndex(id: string): void {
+  async deleteIndex(id: string): Promise<void> {
     this.tx(() => {
       this.db.prepare('DELETE FROM index_chunks WHERE index_id=?').run(id);
       this.db.prepare('DELETE FROM index_versions WHERE index_id=?').run(id);
@@ -838,7 +838,7 @@ export class SqliteDurableStore implements DurableStore {
     });
   }
 
-  commitSync(indexId: string, version: number, changed: PersistedChunk[], changedFiles: string[], deletedFiles: string[], updatedAt: number): void {
+  async commitSync(indexId: string, version: number, changed: PersistedChunk[], changedFiles: string[], deletedFiles: string[], updatedAt: number): Promise<void> {
     // ── Validate the ENTIRE candidate before BEGIN ──────────────────────────
     // Serializing inside the transaction was not enough: `toBlob` used to accept
     // `undefined` silently, so the transaction COMMITTED bad rows and the failure
@@ -916,11 +916,11 @@ export class SqliteDurableStore implements DurableStore {
   }
 
   /** Promote/clear the version authorised for production retrieval. */
-  setApprovedVersion(id: string, approvedVersion: number | null, updatedAt: number): void {
+  async setApprovedVersion(id: string, approvedVersion: number | null, updatedAt: number): Promise<void> {
     this.db.prepare('UPDATE workspace_indexes SET approved_version=?, updated_at=? WHERE id=?').run(approvedVersion, updatedAt, id);
   }
 
-  loadIndexes(): PersistedIndexRecord[] {
+  async loadIndexes(): Promise<PersistedIndexRecord[]> {
     return (this.db.prepare('SELECT * FROM workspace_indexes').all() as Array<Record<string, unknown>>).map((r) => ({
       id: r.id as string, workspaceId: r.workspace_id as string, ownerScope: r.owner_scope as string, sourceType: r.source_type as string,
       root: r.root as string, state: r.state as string, version: r.version as number, embeddingModel: r.embedding_model as string,
@@ -937,7 +937,7 @@ export class SqliteDurableStore implements DurableStore {
    * quietly miss content. Throwing lets {@link IndexService.hydrate} quarantine
    * this one index, mark it degraded, and keep the Brain running.
    */
-  loadChunks(indexId: string, indexVersion: number): PersistedChunk[] {
+  async loadChunks(indexId: string, indexVersion: number): Promise<PersistedChunk[]> {
     // ALWAYS version-scoped: loading every version for an index_id would mix
     // approved and candidate content into one index.
     const rows = this.db.prepare('SELECT * FROM index_chunks WHERE index_id=? AND index_version=?').all(indexId, indexVersion) as Array<Record<string, unknown>>;
@@ -955,18 +955,18 @@ export class SqliteDurableStore implements DurableStore {
   }
 
   // ── EmbeddingCachePersistence ────────────────────────────────────────────
-  getEmbedding(model: string, version: string, contentHash: string): number[] | undefined {
+  async getEmbedding(model: string, version: string, contentHash: string): Promise<number[] | undefined> {
     const r = this.db.prepare('SELECT vector FROM embedding_cache WHERE model=? AND version=? AND content_hash=?').get(model, version, contentHash) as { vector?: Uint8Array } | undefined;
     return r?.vector ? fromBlob(r.vector) : undefined;
   }
 
-  putEmbedding(model: string, version: string, contentHash: string, vector: number[]): void {
+  async putEmbedding(model: string, version: string, contentHash: string, vector: number[]): Promise<void> {
     this.db.prepare('INSERT OR REPLACE INTO embedding_cache(model,version,content_hash,dims,vector,created_at) VALUES(?,?,?,?,?,?)')
       .run(model, version, contentHash, vector.length, toBlob(vector), Date.now());
   }
 
   // ── WorkspacePersistence ─────────────────────────────────────────────────
-  saveWorkspace(w: import('./types.js').PersistedWorkspace): void {
+  async saveWorkspace(w: import('./types.js').PersistedWorkspace): Promise<void> {
     this.db.prepare(
       `INSERT INTO workspaces(id,owner_scope,workspace_scope,name,root,git_repo,git_branch,memory_mode,index_id,provider_preferences,permissions,last_sync_at,created_at,updated_at)
        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)
@@ -976,11 +976,11 @@ export class SqliteDurableStore implements DurableStore {
     ).run(w.id, w.ownerScope, w.workspaceScope, w.name, w.root, w.gitRepo ?? null, w.gitBranch ?? null, w.memoryMode, w.indexId ?? null, w.providerPreferences ?? null, w.permissions ?? null, w.lastSyncAt ?? null, w.createdAt, w.updatedAt);
   }
 
-  deleteWorkspace(id: string): void {
+  async deleteWorkspace(id: string): Promise<void> {
     this.db.prepare('DELETE FROM workspaces WHERE id=?').run(id);
   }
 
-  loadWorkspaces(): import('./types.js').PersistedWorkspace[] {
+  async loadWorkspaces(): Promise<import('./types.js').PersistedWorkspace[]> {
     return (this.db.prepare('SELECT * FROM workspaces').all() as Array<Record<string, unknown>>).map((r) => ({
       id: r.id as string, ownerScope: r.owner_scope as string, workspaceScope: r.workspace_scope as string, name: r.name as string, root: r.root as string,
       gitRepo: (r.git_repo as string) ?? undefined, gitBranch: (r.git_branch as string) ?? undefined, memoryMode: r.memory_mode as string,
@@ -989,7 +989,7 @@ export class SqliteDurableStore implements DurableStore {
     }));
   }
 
-  pruneOlderThan(cutoffMs: number): number {
+  async pruneOlderThan(cutoffMs: number): Promise<number> {
     const before = (this.db.prepare('SELECT count(*) c FROM embedding_cache').get() as { c: number }).c;
     this.db.prepare('DELETE FROM embedding_cache WHERE created_at < ?').run(cutoffMs);
     const after = (this.db.prepare('SELECT count(*) c FROM embedding_cache').get() as { c: number }).c;
@@ -1005,7 +1005,7 @@ export class SqliteDurableStore implements DurableStore {
   }
 
   /** SQLite integrity verification. Returns 'ok' or the first problem reported. */
-  integrityCheck(): string {
+  async integrityCheck(): Promise<string> {
     const rows = this.db.prepare('PRAGMA integrity_check').all() as Array<{ integrity_check: string }>;
     return rows[0]?.integrity_check ?? 'unknown';
   }
@@ -1013,7 +1013,7 @@ export class SqliteDurableStore implements DurableStore {
   /** Time a real (idempotent) write to gauge durable write latency. Uses a
    * dedicated schema_meta heartbeat key — never touches operational data. Timed
    * with a monotonic clock so it is independent of any injected wall clock. */
-  probeWriteLatencyMs(): number {
+  async probeWriteLatencyMs(): Promise<number> {
     const t0 = process.hrtime.bigint();
     this.db.prepare('INSERT INTO schema_meta(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').run('op_heartbeat', 'ping');
     return Number(process.hrtime.bigint() - t0) / 1e6;
@@ -1027,72 +1027,72 @@ export class SqliteDurableStore implements DurableStore {
 
   // ── OperationalPersistence (v2) ──────────────────────────────────────────────
 
-  appendAuditEvent(e: DurableAuditEvent): void {
+  async appendAuditEvent(e: DurableAuditEvent): Promise<void> {
     // Idempotent by eventId — a replayed append is a no-op (never double-counts).
     this.db.prepare(
       `INSERT OR IGNORE INTO op_audit_events(event_id,correlation_id,causation_id,seq,type,at,duration_ms,component,outcome,request_id,fields_json)
        VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
     ).run(e.eventId, e.correlationId, e.causationId, e.seq, e.type, e.at, e.durationMs ?? null, e.component, e.outcome ?? null, e.requestId ?? null, e.fieldsJson);
   }
-  recentAuditEvents(limit: number): DurableAuditEvent[] {
+  async recentAuditEvents(limit: number): Promise<DurableAuditEvent[]> {
     return (this.db.prepare('SELECT * FROM op_audit_events ORDER BY at DESC, seq DESC LIMIT ?').all(clampLimit(limit)) as unknown as AuditRow[]).map(rowToAudit);
   }
-  auditByCorrelation(correlationId: string, limit = 500): DurableAuditEvent[] {
+  async auditByCorrelation(correlationId: string, limit = 500): Promise<DurableAuditEvent[]> {
     return (this.db.prepare('SELECT * FROM op_audit_events WHERE correlation_id = ? ORDER BY seq ASC LIMIT ?').all(correlationId, clampLimit(limit)) as unknown as AuditRow[]).map(rowToAudit);
   }
 
-  appendUsageRecord(r: DurableUsageRecord): void {
+  async appendUsageRecord(r: DurableUsageRecord): Promise<void> {
     this.db.prepare(
       `INSERT OR IGNORE INTO op_usage_records(usage_id,correlation_id,provider_id,model_id,execution_mode,policy,local_or_cloud,at,outcome,cost_usd,cost_status,escalation_reason,fields_json)
        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     ).run(r.usageId, r.correlationId, r.providerId, r.modelId, r.executionMode, r.policy, r.localOrCloud, r.at, r.outcome, r.costUsd ?? null, r.costStatus, r.escalationReason ?? null, r.fieldsJson);
   }
-  recentUsageRecords(limit: number): DurableUsageRecord[] {
+  async recentUsageRecords(limit: number): Promise<DurableUsageRecord[]> {
     return (this.db.prepare('SELECT * FROM op_usage_records ORDER BY at DESC LIMIT ?').all(clampLimit(limit)) as unknown as UsageRow[]).map(rowToUsage);
   }
 
-  upsertIncident(i: DurableIncident): void {
+  async upsertIncident(i: DurableIncident): Promise<void> {
     this.db.prepare(
       `INSERT INTO op_incidents(incident_id,dedup_key,correlation_id,first_seen_at,last_seen_at,occurrence_count,state,severity,affected_json,last_delivery_status,resolution_json)
        VALUES(?,?,?,?,?,?,?,?,?,?,?)
        ON CONFLICT(incident_id) DO UPDATE SET last_seen_at=excluded.last_seen_at, occurrence_count=excluded.occurrence_count, state=excluded.state, last_delivery_status=excluded.last_delivery_status, resolution_json=excluded.resolution_json`,
     ).run(i.incidentId, i.deduplicationKey, i.correlationId, i.firstSeenAt, i.lastSeenAt, i.occurrenceCount, i.state, i.severity, i.affectedJson, i.lastDeliveryStatus, i.resolutionJson ?? null);
   }
-  listIncidents(limit: number): DurableIncident[] {
+  async listIncidents(limit: number): Promise<DurableIncident[]> {
     return (this.db.prepare('SELECT * FROM op_incidents ORDER BY last_seen_at DESC LIMIT ?').all(clampLimit(limit)) as unknown as IncidentRow[]).map(rowToIncident);
   }
 
-  appendRecoveryEvent(e: DurableRecoveryEvent): void {
+  async appendRecoveryEvent(e: DurableRecoveryEvent): Promise<void> {
     this.db.prepare(
       `INSERT OR IGNORE INTO op_recovery_events(id,recovery_id,correlation_id,incident_id,type,at,outcome,fields_json) VALUES(?,?,?,?,?,?,?,?)`,
     ).run(e.id, e.recoveryId, e.correlationId, e.incidentId ?? null, e.type, e.at, e.outcome ?? null, e.fieldsJson);
   }
 
-  saveBudgetScope(s: DurableBudgetScope): void {
+  async saveBudgetScope(s: DurableBudgetScope): Promise<void> {
     this.db.prepare(
       `INSERT INTO op_budget_scopes(scope_id,kind,scope_key,hard_limit_usd,spent_usd,reserved_usd,period_start,updated_at)
        VALUES(?,?,?,?,?,?,?,?)
        ON CONFLICT(scope_id) DO UPDATE SET hard_limit_usd=excluded.hard_limit_usd, spent_usd=excluded.spent_usd, reserved_usd=excluded.reserved_usd, period_start=excluded.period_start, updated_at=excluded.updated_at`,
     ).run(s.scopeId, s.kind, s.scopeKeyName, s.hardLimitUsd, s.spentUsd, s.reservedUsd, s.periodStart, s.updatedAt);
   }
-  loadBudgetScopes(): DurableBudgetScope[] {
+  async loadBudgetScopes(): Promise<DurableBudgetScope[]> {
     return (this.db.prepare('SELECT * FROM op_budget_scopes').all() as unknown as BudgetScopeRow[]).map(rowToBudgetScope);
   }
-  saveReservation(r: DurableReservation): void {
+  async saveReservation(r: DurableReservation): Promise<void> {
     this.db.prepare(
       `INSERT INTO op_reservations(reservation_id,amount_usd,scope_ids_json,correlation_id,provider_id,model_id,created_at,expires_at,status)
        VALUES(?,?,?,?,?,?,?,?,?)
        ON CONFLICT(reservation_id) DO UPDATE SET status=excluded.status`,
     ).run(r.reservationId, r.amountUsd, r.scopeIdsJson, r.correlationId, r.providerId, r.modelId, r.createdAt, r.expiresAt, r.status);
   }
-  removeReservation(reservationId: string): void {
+  async removeReservation(reservationId: string): Promise<void> {
     this.db.prepare('DELETE FROM op_reservations WHERE reservation_id = ?').run(reservationId);
   }
-  loadReservations(): DurableReservation[] {
+  async loadReservations(): Promise<DurableReservation[]> {
     return (this.db.prepare('SELECT * FROM op_reservations').all() as unknown as ReservationRow[]).map(rowToReservation);
   }
 
-  pruneOperational(cutoffs: { auditBefore: number; usageBefore: number; incidentsBefore: number; recoveryBefore: number }): { audit: number; usage: number; incidents: number; recovery: number } {
+  async pruneOperational(cutoffs: { auditBefore: number; usageBefore: number; incidentsBefore: number; recoveryBefore: number }): Promise<{ audit: number; usage: number; incidents: number; recovery: number }> {
     const del = (sql: string, arg: number): number => Number(this.db.prepare(sql).run(arg).changes ?? 0);
     return {
       audit: del('DELETE FROM op_audit_events WHERE at < ?', cutoffs.auditBefore),
@@ -1102,14 +1102,14 @@ export class SqliteDurableStore implements DurableStore {
       recovery: del('DELETE FROM op_recovery_events WHERE at < ?', cutoffs.recoveryBefore),
     };
   }
-  operationalCounts(): OperationalCounts {
+  async operationalCounts(): Promise<OperationalCounts> {
     const c = (t: string): number => (this.db.prepare(`SELECT count(*) c FROM ${t}`).get() as { c: number }).c;
     return { auditEvents: c('op_audit_events'), usageRecords: c('op_usage_records'), incidents: c('op_incidents'), recoveryEvents: c('op_recovery_events'), reservations: c('op_reservations'), agentRuns: c('agent_runs'), agentRunEvents: c('agent_run_events'), agentRunTombstones: c('agent_run_tombstones'), agentRunChildren: c('agent_run_children') };
   }
 
   // ── Agent Mode durable run journal (v3) ─────────────────────────────────────
 
-  insertAgentRun(run: DurableAgentRun, createdEvent: DurableAgentRunEvent): void {
+  async insertAgentRun(run: DurableAgentRun, createdEvent: DurableAgentRunEvent): Promise<void> {
     this.tx(() => {
       this.insertAgentRunInside(run);
       this.appendAgentRunEventInside({ ...createdEvent, seq: 1 });
@@ -1117,7 +1117,7 @@ export class SqliteDurableStore implements DurableStore {
     });
   }
 
-  appendAgentRunEvent(event: Omit<DurableAgentRunEvent, 'seq'>): void {
+  async appendAgentRunEvent(event: Omit<DurableAgentRunEvent, 'seq'>): Promise<void> {
     this.tx(() => {
       const row = this.db.prepare('SELECT audit_seq FROM agent_runs WHERE run_id = ?').get(event.runId) as { audit_seq: number } | undefined;
       if (!row) throw new Error(`unknown Agent run ${event.runId}`);
@@ -1126,7 +1126,7 @@ export class SqliteDurableStore implements DurableStore {
     });
   }
 
-  appendAgentRunEventUnderFence(input: AgentRunFencedEventInput): AgentRunReconciliationClaim | undefined {
+  async appendAgentRunEventUnderFence(input: AgentRunFencedEventInput): Promise<AgentRunReconciliationClaim | undefined> {
     let claim: AgentRunReconciliationClaim | undefined;
     this.tx(() => {
       const row = this.db.prepare('SELECT * FROM agent_runs WHERE run_id = ?').get(input.runId) as AgentRunRow | undefined;
@@ -1154,7 +1154,7 @@ export class SqliteDurableStore implements DurableStore {
     return claim;
   }
 
-  transitionAgentRun(input: AgentRunTransitionInput): boolean {
+  async transitionAgentRun(input: AgentRunTransitionInput): Promise<boolean> {
     let changed = false;
     this.tx(() => {
       const row = this.db.prepare('SELECT * FROM agent_runs WHERE run_id = ?').get(input.runId) as AgentRunRow | undefined;
@@ -1224,7 +1224,7 @@ export class SqliteDurableStore implements DurableStore {
     return changed;
   }
 
-  reproposeAgentRun(input: AgentRunReproposalInput): AgentRunReproposalResult {
+  async reproposeAgentRun(input: AgentRunReproposalInput): Promise<AgentRunReproposalResult> {
     let outcome: AgentRunReproposalResult = { ok: false, code: 'UNKNOWN_SOURCE' };
     try {
       this.tx(() => {
@@ -1233,7 +1233,7 @@ export class SqliteDurableStore implements DurableStore {
       if (!source) { outcome = { ok: false, code: 'UNKNOWN_SOURCE' }; return; }
       this.failAgentRunReproposalPhase('idempotency lookup');
       if (source.last_recovery_request_id === input.requestId && source.successor_run_id) {
-        const successor = this.loadAgentRun(source.successor_run_id);
+        const successor = this.loadAgentRunInside(source.successor_run_id);
         outcome = successor ? { ok: true, created: false, successor } : { ok: false, code: 'PARTIAL_FAILURE' };
         return;
       }
@@ -1325,20 +1325,34 @@ export class SqliteDurableStore implements DurableStore {
     return outcome;
   }
 
-  loadAgentRuns(limit = 5000): DurableAgentRun[] {
+  async loadAgentRuns(limit = 5000): Promise<DurableAgentRun[]> {
     return (this.db.prepare('SELECT * FROM agent_runs ORDER BY updated_at DESC LIMIT ?').all(clampLimit(limit)) as unknown as AgentRunRow[]).map(rowToAgentRun);
   }
 
-  loadAgentRun(runId: string): DurableAgentRun | undefined {
+  /**
+   * Synchronous core, called from inside `tx()` callbacks.
+   *
+   * The public `loadAgentRun` is async to satisfy the DurableStore contract, but
+   * a transaction callback here is synchronous by construction — `tx()` runs
+   * BEGIN, the callback, then COMMIT with no suspension point. Awaiting inside
+   * it would let other work interleave between BEGIN and COMMIT on the same
+   * connection, so callers inside a transaction use this instead. Same
+   * convention as `loadAgentRunEventsInside`.
+   */
+  private loadAgentRunInside(runId: string): DurableAgentRun | undefined {
     const row = this.db.prepare('SELECT * FROM agent_runs WHERE run_id = ?').get(runId) as AgentRunRow | undefined;
     return row ? rowToAgentRun(row) : undefined;
   }
 
-  loadAgentRunEvents(runId: string, limit = 500): DurableAgentRunEvent[] {
+  async loadAgentRun(runId: string): Promise<DurableAgentRun | undefined> {
+    return this.loadAgentRunInside(runId);
+  }
+
+  async loadAgentRunEvents(runId: string, limit = 500): Promise<DurableAgentRunEvent[]> {
     return (this.db.prepare('SELECT * FROM agent_run_events WHERE run_id = ? ORDER BY seq ASC LIMIT ?').all(runId, clampLimit(limit)) as unknown as AgentRunEventRow[]).map(rowToAgentRunEvent);
   }
 
-  claimAgentRunReconciliation(runId: string, owner: string, leaseUntil: number, now: number): AgentRunReconciliationClaim | undefined {
+  async claimAgentRunReconciliation(runId: string, owner: string, leaseUntil: number, now: number): Promise<AgentRunReconciliationClaim | undefined> {
     const result = this.db.prepare(
       `UPDATE agent_runs SET reconciliation_owner=?, reconciliation_lease_until=?, reconciliation_fence=reconciliation_fence+1, version=version+1, updated_at=?
        WHERE run_id=? AND state NOT IN ('COMPLETED','REJECTED','EXPIRED','STALE','FAILED','CANCELLED')
@@ -1348,7 +1362,7 @@ export class SqliteDurableStore implements DurableStore {
     return this.loadReconciliationClaim(runId, owner);
   }
 
-  renewAgentRunReconciliation(runId: string, owner: string, fence: number, leaseUntil: number, now: number): AgentRunReconciliationClaim | undefined {
+  async renewAgentRunReconciliation(runId: string, owner: string, fence: number, leaseUntil: number, now: number): Promise<AgentRunReconciliationClaim | undefined> {
     const result = this.db.prepare(
       `UPDATE agent_runs SET reconciliation_lease_until=?, version=version+1, updated_at=?
        WHERE run_id=? AND reconciliation_owner=? AND reconciliation_fence=? AND reconciliation_lease_until>=?
@@ -1358,7 +1372,7 @@ export class SqliteDurableStore implements DurableStore {
     return this.loadReconciliationClaim(runId, owner);
   }
 
-  pruneAgentRuns(cutoff: number, batchSize: number, now: number): { runs: number; events: number } {
+  async pruneAgentRuns(cutoff: number, batchSize: number, now: number): Promise<{ runs: number; events: number }> {
     const limit = clampLimit(batchSize);
     let runs = 0;
     let events = 0;
@@ -1400,7 +1414,7 @@ export class SqliteDurableStore implements DurableStore {
 
   // ── Child operations (v7) ───────────────────────────────────────────────────
 
-  insertAgentRunChild(child: DurableAgentRunChild): AgentRunChildWriteResult {
+  async insertAgentRunChild(child: DurableAgentRunChild): Promise<AgentRunChildWriteResult> {
     let outcome: AgentRunChildWriteResult = { ok: false, code: 'UNKNOWN_PARENT' };
     this.tx(() => {
       const parent = this.db.prepare('SELECT state FROM agent_runs WHERE run_id = ?').get(child.runId) as { state: string } | undefined;
@@ -1408,7 +1422,7 @@ export class SqliteDurableStore implements DurableStore {
       // on — an unowned child must never be dispatched.
       if (!parent) { outcome = { ok: false, code: 'UNKNOWN_PARENT' }; return; }
       if (isAgentTerminal(parent.state as DurableAgentRunState)) { outcome = { ok: false, code: 'PARENT_TERMINAL' }; return; }
-      const existing = this.loadAgentRunChild(child.childId)
+      const existing = this.loadAgentRunChildInside(child.childId)
         ?? this.rowChild(this.db.prepare('SELECT * FROM agent_run_children WHERE run_id=? AND kind=? AND attempt=?').get(child.runId, child.kind, child.attempt) as AgentRunChildRow | undefined);
       if (existing) { outcome = { ok: false, code: 'DUPLICATE_CHILD', current: existing }; return; }
       this.db.prepare(
@@ -1427,10 +1441,10 @@ export class SqliteDurableStore implements DurableStore {
     return outcome;
   }
 
-  transitionAgentRunChild(input: AgentRunChildTransitionInput): AgentRunChildWriteResult {
+  async transitionAgentRunChild(input: AgentRunChildTransitionInput): Promise<AgentRunChildWriteResult> {
     let outcome: AgentRunChildWriteResult = { ok: false, code: 'UNKNOWN_CHILD' };
     this.tx(() => {
-      const current = this.loadAgentRunChild(input.childId);
+      const current = this.loadAgentRunChildInside(input.childId);
       if (!current) { outcome = { ok: false, code: 'UNKNOWN_CHILD' }; return; }
       // Terminal is immutable — checked BEFORE the revision compare so a caller
       // holding a fresh revision still cannot rewrite a finished operation.
@@ -1452,24 +1466,29 @@ export class SqliteDurableStore implements DurableStore {
         input.errorJson ?? null, input.metadataJson ?? null, input.at, input.childId, input.expectedRevision,
       );
       if (Number(result.changes ?? 0) !== 1) { outcome = { ok: false, code: 'STALE_REVISION', current }; return; }
-      outcome = { ok: true, child: this.loadAgentRunChild(input.childId)! };
+      outcome = { ok: true, child: this.loadAgentRunChildInside(input.childId)! };
     });
     return outcome;
   }
 
-  loadAgentRunChildren(runId: string): DurableAgentRunChild[] {
+  async loadAgentRunChildren(runId: string): Promise<DurableAgentRunChild[]> {
     return (this.db.prepare('SELECT * FROM agent_run_children WHERE run_id = ? ORDER BY created_at ASC, child_id ASC').all(runId) as unknown as AgentRunChildRow[]).map(childRow);
   }
 
-  loadAgentRunChild(childId: string): DurableAgentRunChild | undefined {
+  /** Synchronous core for use inside `tx()` callbacks — see loadAgentRunInside. */
+  private loadAgentRunChildInside(childId: string): DurableAgentRunChild | undefined {
     return this.rowChild(this.db.prepare('SELECT * FROM agent_run_children WHERE child_id = ?').get(childId) as AgentRunChildRow | undefined);
+  }
+
+  async loadAgentRunChild(childId: string): Promise<DurableAgentRunChild | undefined> {
+    return this.loadAgentRunChildInside(childId);
   }
 
   private rowChild(row: AgentRunChildRow | undefined): DurableAgentRunChild | undefined {
     return row ? childRow(row) : undefined;
   }
 
-  loadAgentRunTombstones(limit = 500): DurableAgentRunTombstone[] {
+  async loadAgentRunTombstones(limit = 500): Promise<DurableAgentRunTombstone[]> {
     return (this.db.prepare('SELECT * FROM agent_run_tombstones ORDER BY deleted_at DESC LIMIT ?').all(clampLimit(limit)) as unknown as AgentRunTombstoneRow[]).map(rowToAgentRunTombstone);
   }
 

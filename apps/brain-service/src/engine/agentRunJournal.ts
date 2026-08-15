@@ -274,10 +274,10 @@ export class AgentRunJournal {
 
   get durable(): boolean { return this.persistence !== undefined; }
 
-  create(input: AgentRunCreateInput): void {
+  async create(input: AgentRunCreateInput): Promise<void> {
     if (!this.persistence) return;
     const run = this.buildRun(input);
-    this.persistence.insertAgentRun(run, {
+    await this.persistence.insertAgentRun(run, {
       eventId: this.mkId(),
       runId: input.runId,
       seq: 1,
@@ -289,16 +289,16 @@ export class AgentRunJournal {
       source: 'API',
       schemaVersion: AGENT_RUN_SCHEMA_VERSION,
     });
-    this.event({ runId: input.runId, at: input.proposalAt, type: 'proposal.created', state: 'AWAITING_APPROVAL', correlationId: input.correlationId, source: 'API', reason: input.recipeId });
-    this.event({ runId: input.runId, at: input.proposalAt, type: 'approval.requested', state: 'AWAITING_APPROVAL', correlationId: input.correlationId, source: 'APPROVAL', reason: 'PENDING_DISPLAY' });
+    await this.event({ runId: input.runId, at: input.proposalAt, type: 'proposal.created', state: 'AWAITING_APPROVAL', correlationId: input.correlationId, source: 'API', reason: input.recipeId });
+    await this.event({ runId: input.runId, at: input.proposalAt, type: 'approval.requested', state: 'AWAITING_APPROVAL', correlationId: input.correlationId, source: 'APPROVAL', reason: 'PENDING_DISPLAY' });
   }
 
-  createSuccessor(input: {
+  async createSuccessor(input: {
     source: DurableAgentRun;
     provenance: Parameters<AgentRunJournalPersistence['reproposeAgentRun']>[0]['provenance'];
     requestId: string;
     run: AgentRunCreateInput;
-  }): AgentRunReproposalResult {
+  }): Promise<AgentRunReproposalResult> {
     if (!this.persistence) return { ok: false, code: 'UNKNOWN_SOURCE' };
     const successor = this.buildRun(input.run);
     return this.persistence.reproposeAgentRun({
@@ -380,9 +380,9 @@ export class AgentRunJournal {
     };
   }
 
-  event(input: { runId: string; at: number; type: string; state: AgentModeState; correlationId: string; source: AgentRunEventSource; reason?: string }): void {
+  async event(input: { runId: string; at: number; type: string; state: AgentModeState; correlationId: string; source: AgentRunEventSource; reason?: string }): Promise<void> {
     if (!this.persistence) return;
-    this.persistence.appendAgentRunEvent({
+    await this.persistence.appendAgentRunEvent({
       eventId: this.mkId(),
       runId: input.runId,
       at: input.at,
@@ -395,14 +395,14 @@ export class AgentRunJournal {
     });
   }
 
-  reconciliationEvent(input: {
+  async reconciliationEvent(input: {
     runId: string;
     expectedState?: AgentModeState;
     at: number;
     type: string;
     reason?: string;
     reconciliation: AgentRunFencedEventInput['reconciliation'];
-  }): AgentRunReconciliationClaim | undefined {
+  }): Promise<AgentRunReconciliationClaim | undefined> {
     if (!this.persistence) return undefined;
     return this.persistence.appendAgentRunEventUnderFence({
       runId: input.runId,
@@ -416,7 +416,7 @@ export class AgentRunJournal {
     });
   }
 
-  transition(input: AgentRunTransition): boolean {
+  async transition(input: AgentRunTransition): Promise<boolean> {
     if (!this.persistence) return true;
     const patch: AgentRunTransitionInput['patch'] = {
       approvalDisplayedAt: input.approvalDisplayedAt,
@@ -471,7 +471,7 @@ export class AgentRunJournal {
    * A `created` child is proof that NOTHING was sent. The caller may not dispatch
    * until it has also persisted the parent's reference — see `registeredChild()`.
    */
-  registerChild(input: {
+  async registerChild(input: {
     childId: string;
     runId: string;
     kind: string;
@@ -479,7 +479,7 @@ export class AgentRunJournal {
     required?: boolean;
     at: number;
     metadata?: unknown;
-  }): AgentRunChildWriteResult {
+  }): Promise<AgentRunChildWriteResult> {
     if (!this.persistence) return { ok: false, code: 'UNKNOWN_PARENT' };
     return this.persistence.insertAgentRunChild({
       childId: input.childId,
@@ -497,7 +497,7 @@ export class AgentRunJournal {
   }
 
   /** Advance a child. `expectedRevision` makes a stale writer lose rather than clobber. */
-  transitionChild(input: {
+  async transitionChild(input: {
     childId: string;
     expectedRevision: number;
     nextState: DurableChildState;
@@ -510,7 +510,7 @@ export class AgentRunJournal {
     cancellationConfirmedAt?: number;
     error?: { code: string; message: string };
     metadata?: unknown;
-  }): AgentRunChildWriteResult {
+  }): Promise<AgentRunChildWriteResult> {
     if (!this.persistence) return { ok: false, code: 'UNKNOWN_CHILD' };
     return this.persistence.transitionAgentRunChild({
       childId: input.childId,
@@ -528,11 +528,11 @@ export class AgentRunJournal {
     });
   }
 
-  children(runId: string): DurableAgentRunChild[] {
-    return this.persistence?.loadAgentRunChildren(runId) ?? [];
+  async children(runId: string): Promise<DurableAgentRunChild[]> {
+    return (await this.persistence?.loadAgentRunChildren(runId)) ?? [];
   }
 
-  child(childId: string): DurableAgentRunChild | undefined {
+  async child(childId: string): Promise<DurableAgentRunChild | undefined> {
     return this.persistence?.loadAgentRunChild(childId);
   }
 
@@ -543,37 +543,39 @@ export class AgentRunJournal {
    * the blocking records themselves rather than a boolean so the caller can say
    * exactly what is unfinished instead of merely refusing.
    */
-  blockingChildren(runId: string): DurableAgentRunChild[] {
-    return this.children(runId).filter((c) => c.required && !DURABLE_CHILD_TERMINAL_STATES.has(c.state));
+  async blockingChildren(runId: string): Promise<DurableAgentRunChild[]> {
+    // The await is load-bearing: filtering the Promise itself would always
+    // yield [], reporting every parent as unblocked.
+    return (await this.children(runId)).filter((c) => c.required && !DURABLE_CHILD_TERMINAL_STATES.has(c.state));
   }
 
-  loadRuns(): DurableAgentRun[] {
-    return this.persistence?.loadAgentRuns() ?? [];
+  async loadRuns(): Promise<DurableAgentRun[]> {
+    return (await this.persistence?.loadAgentRuns()) ?? [];
   }
 
-  loadRun(runId: string): DurableAgentRun | undefined {
+  async loadRun(runId: string): Promise<DurableAgentRun | undefined> {
     return this.persistence?.loadAgentRun(runId);
   }
 
-  events(runId: string): DurableAgentRunEvent[] {
-    return this.persistence?.loadAgentRunEvents(runId) ?? [];
+  async events(runId: string): Promise<DurableAgentRunEvent[]> {
+    return (await this.persistence?.loadAgentRunEvents(runId)) ?? [];
   }
 
-  claimReconciliation(runId: string, owner: string, now: number): AgentRunReconciliationClaim | undefined {
+  async claimReconciliation(runId: string, owner: string, now: number): Promise<AgentRunReconciliationClaim | undefined> {
     return this.persistence?.claimAgentRunReconciliation(runId, owner, now + this.config.reconciliationLeaseMs, now);
   }
 
-  renewReconciliation(runId: string, owner: string, fence: number, now: number): AgentRunReconciliationClaim | undefined {
+  async renewReconciliation(runId: string, owner: string, fence: number, now: number): Promise<AgentRunReconciliationClaim | undefined> {
     return this.persistence?.renewAgentRunReconciliation(runId, owner, fence, now + this.config.reconciliationLeaseMs, now);
   }
 
-  prune(now: number): { runs: number; events: number } {
+  async prune(now: number): Promise<{ runs: number; events: number }> {
     if (!this.persistence) return { runs: 0, events: 0 };
     return this.persistence.pruneAgentRuns(now - this.config.terminalRetentionMs, this.config.retentionBatchSize, now);
   }
 
-  tombstones(limit = 500): DurableAgentRunTombstone[] {
-    return this.persistence?.loadAgentRunTombstones(limit) ?? [];
+  async tombstones(limit = 500): Promise<DurableAgentRunTombstone[]> {
+    return (await this.persistence?.loadAgentRunTombstones(limit)) ?? [];
   }
 }
 
@@ -640,14 +642,14 @@ export class MemoryAgentRunJournalPersistence implements AgentRunJournalPersiste
   readonly events = new Map<string, DurableAgentRunEvent[]>();
   readonly tombstones: DurableAgentRunTombstone[] = [];
 
-  insertAgentRun(run: DurableAgentRun, createdEvent: DurableAgentRunEvent): void {
+  async insertAgentRun(run: DurableAgentRun, createdEvent: DurableAgentRunEvent): Promise<void> {
     if (this.runs.has(run.runId)) throw new Error(`duplicate Agent run ${run.runId}`);
     this.runs.set(run.runId, { ...run });
     this.events.set(run.runId, [{ ...createdEvent }]);
     this.runs.get(run.runId)!.auditSeq = createdEvent.seq;
   }
 
-  appendAgentRunEvent(event: Omit<DurableAgentRunEvent, 'seq'>): void {
+  async appendAgentRunEvent(event: Omit<DurableAgentRunEvent, 'seq'>): Promise<void> {
     const run = this.runs.get(event.runId);
     if (!run) throw new Error(`unknown Agent run ${event.runId}`);
     const next = { ...event, seq: run.auditSeq + 1 };
@@ -655,7 +657,7 @@ export class MemoryAgentRunJournalPersistence implements AgentRunJournalPersiste
     run.auditSeq = next.seq;
     run.updatedAt = event.at;
   }
-  appendAgentRunEventUnderFence(input: AgentRunFencedEventInput): AgentRunReconciliationClaim | undefined {
+  async appendAgentRunEventUnderFence(input: AgentRunFencedEventInput): Promise<AgentRunReconciliationClaim | undefined> {
     const run = this.runs.get(input.runId);
     if (!run || AGENT_TERMINAL_STATES.has(run.state as AgentModeState)) return undefined;
     if (input.expectedState && run.state !== input.expectedState) return undefined;
@@ -683,7 +685,7 @@ export class MemoryAgentRunJournalPersistence implements AgentRunJournalPersiste
     return { runId: input.runId, owner: run.reconciliationOwner, fence: run.reconciliationFence, leaseUntil: run.reconciliationLeaseUntil!, version: run.version };
   }
 
-  transitionAgentRun(input: AgentRunTransitionInput): boolean {
+  async transitionAgentRun(input: AgentRunTransitionInput): Promise<boolean> {
     const run = this.runs.get(input.runId);
     if (!run || AGENT_TERMINAL_STATES.has(run.state as AgentModeState)) return false;
     if (input.expectedState && run.state !== input.expectedState) return false;
@@ -736,7 +738,13 @@ export class MemoryAgentRunJournalPersistence implements AgentRunJournalPersiste
       run.reconciliationOwner = undefined;
       run.reconciliationLeaseUntil = undefined;
     }
-    this.appendAgentRunEvent({
+    // floating-ok: accepted — `appendAgentRunEvent` contains NO await, so its body
+    // runs to completion synchronously and the event is durable in this double
+    // before the promise resolves. Awaiting would insert a suspension point inside
+    // this method's guard-to-write section, which is what makes the transition
+    // behave like a CAS; two concurrent transitions could then both pass the
+    // expectedState check. Atomicity is worth more than the wrapper promise.
+    void this.appendAgentRunEvent({
       eventId: input.eventId ?? this.events.size.toString(),
       runId: input.runId,
       at: input.at,
@@ -751,7 +759,7 @@ export class MemoryAgentRunJournalPersistence implements AgentRunJournalPersiste
     return true;
   }
 
-  reproposeAgentRun(input: Parameters<AgentRunJournalPersistence['reproposeAgentRun']>[0]): AgentRunReproposalResult {
+  async reproposeAgentRun(input: Parameters<AgentRunJournalPersistence['reproposeAgentRun']>[0]): Promise<AgentRunReproposalResult> {
     const source = this.runs.get(input.sourceRunId);
     if (!source) return { ok: false, code: 'UNKNOWN_SOURCE' };
     if (source.lastRecoveryRequestId === input.requestId && source.successorRunId) {
@@ -824,7 +832,7 @@ export class MemoryAgentRunJournalPersistence implements AgentRunJournalPersiste
 
   readonly childRecords = new Map<string, DurableAgentRunChild>();
 
-  insertAgentRunChild(child: DurableAgentRunChild): AgentRunChildWriteResult {
+  async insertAgentRunChild(child: DurableAgentRunChild): Promise<AgentRunChildWriteResult> {
     const parent = this.runs.get(child.runId);
     if (!parent) return { ok: false, code: 'UNKNOWN_PARENT' };
     if (AGENT_TERMINAL_STATES.has(parent.state as AgentModeState)) return { ok: false, code: 'PARENT_TERMINAL' };
@@ -835,7 +843,7 @@ export class MemoryAgentRunJournalPersistence implements AgentRunJournalPersiste
     return { ok: true, child: { ...child } };
   }
 
-  transitionAgentRunChild(input: AgentRunChildTransitionInput): AgentRunChildWriteResult {
+  async transitionAgentRunChild(input: AgentRunChildTransitionInput): Promise<AgentRunChildWriteResult> {
     const current = this.childRecords.get(input.childId);
     if (!current) return { ok: false, code: 'UNKNOWN_CHILD' };
     if (DURABLE_CHILD_TERMINAL_STATES.has(current.state)) return { ok: false, code: 'TERMINAL_CHILD_IMMUTABLE', current: { ...current } };
@@ -859,22 +867,22 @@ export class MemoryAgentRunJournalPersistence implements AgentRunJournalPersiste
     return { ok: true, child: { ...next } };
   }
 
-  loadAgentRunChildren(runId: string): DurableAgentRunChild[] {
+  async loadAgentRunChildren(runId: string): Promise<DurableAgentRunChild[]> {
     return [...this.childRecords.values()]
       .filter((c) => c.runId === runId)
       .sort((a, b) => a.createdAt - b.createdAt || a.childId.localeCompare(b.childId))
       .map((c) => ({ ...c }));
   }
 
-  loadAgentRunChild(childId: string): DurableAgentRunChild | undefined {
+  async loadAgentRunChild(childId: string): Promise<DurableAgentRunChild | undefined> {
     const c = this.childRecords.get(childId);
     return c ? { ...c } : undefined;
   }
 
-  loadAgentRuns(limit = 5000): DurableAgentRun[] { return [...this.runs.values()].slice(0, limit).map((r) => ({ ...r })); }
-  loadAgentRun(runId: string): DurableAgentRun | undefined { const r = this.runs.get(runId); return r ? { ...r } : undefined; }
-  loadAgentRunEvents(runId: string, limit = 500): DurableAgentRunEvent[] { return (this.events.get(runId) ?? []).slice(0, limit).map((e) => ({ ...e })); }
-  claimAgentRunReconciliation(runId: string, owner: string, leaseUntil: number, now: number): AgentRunReconciliationClaim | undefined {
+  async loadAgentRuns(limit = 5000): Promise<DurableAgentRun[]> { return [...this.runs.values()].slice(0, limit).map((r) => ({ ...r })); }
+  async loadAgentRun(runId: string): Promise<DurableAgentRun | undefined> { const r = this.runs.get(runId); return r ? { ...r } : undefined; }
+  async loadAgentRunEvents(runId: string, limit = 500): Promise<DurableAgentRunEvent[]> { return (this.events.get(runId) ?? []).slice(0, limit).map((e) => ({ ...e })); }
+  async claimAgentRunReconciliation(runId: string, owner: string, leaseUntil: number, now: number): Promise<AgentRunReconciliationClaim | undefined> {
     const run = this.runs.get(runId);
     if (!run || AGENT_TERMINAL_STATES.has(run.state as AgentModeState)) return undefined;
     if (run.reconciliationOwner && (run.reconciliationLeaseUntil ?? 0) >= now) return undefined;
@@ -885,7 +893,7 @@ export class MemoryAgentRunJournalPersistence implements AgentRunJournalPersiste
     run.updatedAt = now;
     return { runId, owner, fence: run.reconciliationFence, leaseUntil, version: run.version };
   }
-  renewAgentRunReconciliation(runId: string, owner: string, fence: number, leaseUntil: number, now: number): AgentRunReconciliationClaim | undefined {
+  async renewAgentRunReconciliation(runId: string, owner: string, fence: number, leaseUntil: number, now: number): Promise<AgentRunReconciliationClaim | undefined> {
     const run = this.runs.get(runId);
     if (!run || AGENT_TERMINAL_STATES.has(run.state as AgentModeState)) return undefined;
     if (run.reconciliationOwner !== owner || run.reconciliationFence !== fence) return undefined;
@@ -895,7 +903,7 @@ export class MemoryAgentRunJournalPersistence implements AgentRunJournalPersiste
     run.updatedAt = now;
     return { runId, owner, fence, leaseUntil, version: run.version };
   }
-  pruneAgentRuns(cutoff: number, batchSize: number, now: number): { runs: number; events: number } {
+  async pruneAgentRuns(cutoff: number, batchSize: number, now: number): Promise<{ runs: number; events: number }> {
     let runs = 0;
     let events = 0;
     const candidates = [...this.runs.values()].filter((r) => r.terminalAt !== undefined && r.terminalAt < cutoff && AGENT_TERMINAL_STATES.has(r.state as AgentModeState) && (!r.reconciliationOwner || (r.reconciliationLeaseUntil ?? 0) < now) && !activeLineage(this.runs, r)).slice(0, batchSize).map((run) => ({ run, version: run.version }));
@@ -908,13 +916,13 @@ export class MemoryAgentRunJournalPersistence implements AgentRunJournalPersiste
       this.events.delete(run.runId);
       // Mirrors the SQL FK cascade: a child cannot outlive its parent, or it would
       // read back as an orphan that no run can explain.
-      for (const child of this.loadAgentRunChildren(run.runId)) this.childRecords.delete(child.childId);
+      for (const child of await this.loadAgentRunChildren(run.runId)) this.childRecords.delete(child.childId);
       this.runs.delete(run.runId);
       runs += 1;
     }
     return { runs, events };
   }
-  loadAgentRunTombstones(limit = 500): DurableAgentRunTombstone[] { return this.tombstones.slice(0, limit).map((t) => ({ ...t })); }
+  async loadAgentRunTombstones(limit = 500): Promise<DurableAgentRunTombstone[]> { return this.tombstones.slice(0, limit).map((t) => ({ ...t })); }
 }
 
 function activeLineage(runs: Map<string, DurableAgentRun>, run: DurableAgentRun): boolean {

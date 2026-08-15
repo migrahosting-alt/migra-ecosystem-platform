@@ -223,13 +223,13 @@ test('N concurrent self-transitions match SQLite exactly and never duplicate a s
     });
     let sqliteWins = 0;
     for (let i = 0; i < N; i++) {
-      if (sq.transitionAgentRun({
+      if (await sq.transitionAgentRun({
         runId: 'run-self-1', expectedState: 'EXECUTING', nextState: 'EXECUTING',
         at: 3_000 + i, source: 'EXECUTION', eventType: 'HEARTBEAT',
         eventId: `run-self-1:heartbeat:${i}`,
       })) sqliteWins++;
     }
-    const sqliteSeqs = sq.loadAgentRunEvents('run-self-1')
+    const sqliteSeqs = (await sq.loadAgentRunEvents('run-self-1'))
       .filter((e) => e.type === 'HEARTBEAT').map((e) => e.seq);
     sq.close();
 

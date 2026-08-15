@@ -69,9 +69,9 @@ export class WorkspaceManager {
     this.mkId = deps.mkId ?? (() => `ws_${Math.random().toString(36).slice(2, 12)}`);
   }
 
-  hydrate(): void {
+  async hydrate(): Promise<void> {
     if (!this.deps.persistence) return;
-    for (const w of this.deps.persistence.loadWorkspaces()) this.byId.set(w.id, fromPersisted(w));
+    for (const w of await this.deps.persistence.loadWorkspaces()) this.byId.set(w.id, fromPersisted(w));
   }
 
   private forScope(scope: Scope, id?: string): WorkspaceRecord | undefined {
@@ -94,18 +94,18 @@ export class WorkspaceManager {
       existing.gitBranch = git.branch ?? existing.gitBranch;
       if (params.memoryMode) existing.memoryMode = params.memoryMode;
       existing.updatedAt = this.now();
-      this.persist(existing);
+      await this.persist(existing);
       return existing;
     }
     // New workspace: create its index so retrieval/sync have a home.
-    const index = this.deps.indexService.createIndex(scope, { sourceType: 'workspace', root: params.root });
+    const index = await this.deps.indexService.createIndex(scope, { sourceType: 'workspace', root: params.root });
     const record: WorkspaceRecord = {
       id: this.mkId(), ownerScope: scope.owner, workspaceScope: scope.workspace,
       name: params.name ?? basename(params.root), root: params.root, gitRepo: git.repo, gitBranch: git.branch,
       memoryMode: params.memoryMode ?? 'session', indexId: index.id, createdAt: this.now(), updatedAt: this.now(),
     };
     this.byId.set(record.id, record);
-    this.persist(record);
+    await this.persist(record);
     return record;
   }
 
@@ -117,23 +117,26 @@ export class WorkspaceManager {
     return this.forScope(scope, id);
   }
 
-  patch(id: string, scope: Scope, changes: { name?: string; memoryMode?: 'off' | 'session' | 'durable'; providerPreferences?: Record<string, string> }): WorkspaceRecord | undefined {
+  async patch(id: string, scope: Scope, changes: { name?: string; memoryMode?: 'off' | 'session' | 'durable'; providerPreferences?: Record<string, string> }): Promise<WorkspaceRecord | undefined> {
     const w = this.forScope(scope, id);
     if (!w) return undefined;
     if (changes.name) w.name = changes.name;
     if (changes.memoryMode) w.memoryMode = changes.memoryMode;
     if (changes.providerPreferences) w.providerPreferences = changes.providerPreferences;
     w.updatedAt = this.now();
-    this.persist(w);
+    await this.persist(w);
     return w;
   }
 
   async delete(id: string, scope: Scope): Promise<boolean> {
     const w = this.forScope(scope, id);
     if (!w) return false;
-    if (w.indexId) this.deps.indexService.delete(w.indexId, scope);
+    // Durable first, both of them: a workspace dropped from memory while its row
+    // and its index survived reappeared on the next boot, still bound to an index
+    // the caller had been told was deleted.
+    if (w.indexId) await this.deps.indexService.delete(w.indexId, scope);
+    await this.deps.persistence?.deleteWorkspace(id);
     this.byId.delete(id);
-    this.deps.persistence?.deleteWorkspace(id);
     return true;
   }
 
@@ -142,7 +145,7 @@ export class WorkspaceManager {
     const w = this.forScope(scope, id);
     if (!w) return { ok: false, code: 'UNKNOWN_WORKSPACE', error: 'Workspace not found.' };
     if (!w.indexId) {
-      const idx = this.deps.indexService.createIndex(scope, { sourceType: 'workspace', root: w.root });
+      const idx = await this.deps.indexService.createIndex(scope, { sourceType: 'workspace', root: w.root });
       w.indexId = idx.id;
     }
     const res = await this.deps.indexService.sync(w.indexId, scope);
@@ -150,10 +153,10 @@ export class WorkspaceManager {
     // A sync moves the index to a new version. If it was already approved, that
     // approval covered the OLD content — demote so the new version must be
     // re-approved before it backs production RAG. (Sync never auto-approves.)
-    if (res.record.state === 'approved') this.deps.indexService.setState(w.indexId, scope, 'evaluated');
+    if (res.record.state === 'approved') await this.deps.indexService.setState(w.indexId, scope, 'evaluated');
     w.lastSyncAt = this.now();
     w.updatedAt = this.now();
-    this.persist(w);
+    await this.persist(w);
     return { ok: true, view: await this.view(id, scope) as WorkspaceView };
   }
 
@@ -162,10 +165,10 @@ export class WorkspaceManager {
   async rebuild(id: string, scope: Scope): Promise<{ ok: true; view: WorkspaceView } | { ok: false; code: string; error: string }> {
     const w = this.forScope(scope, id);
     if (!w) return { ok: false, code: 'UNKNOWN_WORKSPACE', error: 'Workspace not found.' };
-    if (w.indexId) this.deps.indexService.delete(w.indexId, scope);
-    const idx = this.deps.indexService.createIndex(scope, { sourceType: 'workspace', root: w.root });
+    if (w.indexId) await this.deps.indexService.delete(w.indexId, scope);
+    const idx = await this.deps.indexService.createIndex(scope, { sourceType: 'workspace', root: w.root });
     w.indexId = idx.id;
-    this.persist(w);
+    await this.persist(w);
     return this.sync(id, scope);
   }
 
@@ -188,9 +191,9 @@ export class WorkspaceManager {
     if (status.version !== expectedVersion) {
       return { ok: false, code: 'STALE_VERSION', error: `Index changed (now version ${status.version}, you approved version ${expectedVersion}). Review and approve again.` };
     }
-    this.deps.indexService.setState(w.indexId, scope, 'approved');
+    await this.deps.indexService.setState(w.indexId, scope, 'approved');
     w.updatedAt = this.now();
-    this.persist(w);
+    await this.persist(w);
     return { ok: true, view: (await this.view(id, scope)) as WorkspaceView };
   }
 
@@ -222,8 +225,10 @@ export class WorkspaceManager {
     };
   }
 
-  private persist(w: WorkspaceRecord): void {
-    this.deps.persistence?.saveWorkspace(toPersisted(w));
+  /** Awaited by every caller: a workspace mutation that is only in memory is a
+   * change the next boot silently discards. */
+  private async persist(w: WorkspaceRecord): Promise<void> {
+    await this.deps.persistence?.saveWorkspace(toPersisted(w));
   }
 }
 

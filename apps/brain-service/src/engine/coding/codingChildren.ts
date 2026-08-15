@@ -37,7 +37,15 @@ export type CodingChildRegistration =
 /** Persists the parent's domain payload. Returns false when the write did NOT
  * land — callers must treat that as "the reference does not exist", never as a
  * warning to log and continue past. */
-export type PayloadWriter = (payload: CodingRunPayloadV1, note: string) => boolean;
+/**
+ * Persists a payload revision. Asynchronous since sub-slice 2.5.
+ *
+ * Callers MUST await it. A negated un-awaited promise is always false, so the
+ * registration guard below would never fire and a child could be dispatched
+ * even though its parent reference never landed — the precise invariant
+ * registerCodingChild exists to enforce.
+ */
+export type PayloadWriter = (payload: CodingRunPayloadV1, note: string) => Promise<boolean>;
 
 /**
  * Steps 1 and 2 of the invariant.
@@ -47,7 +55,7 @@ export type PayloadWriter = (payload: CodingRunPayloadV1, note: string) => boole
  * THAT write also fails, the row on disk is still `created`, which reconciliation
  * already reads as provably-never-dispatched.
  */
-export function registerCodingChild(
+export async function registerCodingChild(
   journal: AgentRunJournal,
   writePayload: PayloadWriter,
   input: {
@@ -60,7 +68,7 @@ export function registerCodingChild(
     at: number;
     metadata?: unknown;
   },
-): CodingChildRegistration {
+): Promise<CodingChildRegistration> {
   const attempt = input.attempt ?? 1;
 
   // A cancelling or cancelled run must not acquire new work.
@@ -69,7 +77,7 @@ export function registerCodingChild(
   }
 
   // 1 — existence.
-  const created = journal.registerChild({
+  const created = await journal.registerChild({
     childId: input.childId, runId: input.runId, kind: input.kind, attempt,
     required: input.required ?? true, at: input.at, metadata: input.metadata,
   });
@@ -80,14 +88,16 @@ export function registerCodingChild(
   // 2 — reference.
   const ref: CodingChildRef = { childId: input.childId, kind: input.kind, attempt };
   const next: CodingRunPayloadV1 = { ...input.payload, childRefs: [...input.payload.childRefs, ref] };
-  if (!writePayload(next, `child.registered:${input.kind}`)) {
-    const abandoned = abandonChild(journal, created.child, input.at, 'parent reference not persisted');
+  if (!(await writePayload(next, `child.registered:${input.kind}`))) {
+    const abandoned = await abandonChild(journal, created.child, input.at, 'parent reference not persisted');
     const payload: CodingRunPayloadV1 = {
       ...input.payload,
       abandonedChildIds: [...(input.payload.abandonedChildIds ?? []), input.childId],
     };
     // Best effort — the child row already proves nothing was dispatched.
-    writePayload(payload, 'child.abandoned');
+    // Best effort, but still awaited: ignoring the RESULT is intended;
+    // leaving the promise dangling is not.
+    await writePayload(payload, 'child.abandoned');
     return {
       decision: 'refused',
       childId: input.childId,
@@ -100,8 +110,8 @@ export function registerCodingChild(
   return { decision: 'dispatch', child: created.child, payload: next };
 }
 
-function abandonChild(journal: AgentRunJournal, child: DurableAgentRunChild, at: number, reason: string): boolean {
-  const result = journal.transitionChild({
+async function abandonChild(journal: AgentRunJournal, child: DurableAgentRunChild, at: number, reason: string): Promise<boolean> {
+  const result = await journal.transitionChild({
     childId: child.childId, expectedRevision: child.revision, nextState: 'failed', at, endedAt: at,
     terminalCategory: 'orphaned_before_dispatch', terminalEvidence: { reason },
   });
@@ -109,21 +119,21 @@ function abandonChild(journal: AgentRunJournal, child: DurableAgentRunChild, at:
 }
 
 /** Step 4. `created → running` is the only way work begins. */
-export function startCodingChild(journal: AgentRunJournal, child: DurableAgentRunChild, at: number): DurableAgentRunChild | undefined {
-  const result = journal.transitionChild({ childId: child.childId, expectedRevision: child.revision, nextState: 'running', at, startedAt: at });
+export async function startCodingChild(journal: AgentRunJournal, child: DurableAgentRunChild, at: number): Promise<DurableAgentRunChild | undefined> {
+  const result = await journal.transitionChild({ childId: child.childId, expectedRevision: child.revision, nextState: 'running', at, startedAt: at });
   return result.ok ? result.child : undefined;
 }
 
 /** A cancellation REQUEST. Says someone pressed stop; says nothing about whether
  * the work stopped. `running → cancelled` is refused by the table for this reason. */
-export function requestCodingChildCancellation(journal: AgentRunJournal, child: DurableAgentRunChild, at: number): DurableAgentRunChild | undefined {
-  const result = journal.transitionChild({ childId: child.childId, expectedRevision: child.revision, nextState: 'cancelling', at, cancellationRequestedAt: at });
+export async function requestCodingChildCancellation(journal: AgentRunJournal, child: DurableAgentRunChild, at: number): Promise<DurableAgentRunChild | undefined> {
+  const result = await journal.transitionChild({ childId: child.childId, expectedRevision: child.revision, nextState: 'cancelling', at, cancellationRequestedAt: at });
   return result.ok ? result.child : undefined;
 }
 
 /** Cancellation CONFIRMED — the work was observed to stop. */
-export function confirmCodingChildCancellation(journal: AgentRunJournal, child: DurableAgentRunChild, at: number, evidence: unknown): DurableAgentRunChild | undefined {
-  const result = journal.transitionChild({
+export async function confirmCodingChildCancellation(journal: AgentRunJournal, child: DurableAgentRunChild, at: number, evidence: unknown): Promise<DurableAgentRunChild | undefined> {
+  const result = await journal.transitionChild({
     childId: child.childId, expectedRevision: child.revision, nextState: 'cancelled', at, endedAt: at,
     cancellationConfirmedAt: at, terminalCategory: 'cancellation_confirmed', terminalEvidence: evidence,
   });
@@ -131,15 +141,15 @@ export function confirmCodingChildCancellation(journal: AgentRunJournal, child: 
 }
 
 /** Step 5. Terminal state plus the evidence that justifies it. */
-export function finishCodingChild(
+export async function finishCodingChild(
   journal: AgentRunJournal,
   child: DurableAgentRunChild,
   outcome: 'success' | 'failure',
   at: number,
   evidence: unknown,
   error?: { code: string; message: string },
-): DurableAgentRunChild | undefined {
-  const result = journal.transitionChild({
+): Promise<DurableAgentRunChild | undefined> {
+  const result = await journal.transitionChild({
     childId: child.childId, expectedRevision: child.revision,
     nextState: outcome === 'success' ? 'completed' : 'failed', at, endedAt: at,
     terminalCategory: outcome === 'success' ? 'observed_success' : 'observed_failure',
@@ -149,7 +159,7 @@ export function finishCodingChild(
 }
 
 /** Required children that are not yet terminal. */
-export function activeRequiredChildren(journal: AgentRunJournal, runId: string): DurableAgentRunChild[] {
+export async function activeRequiredChildren(journal: AgentRunJournal, runId: string): Promise<DurableAgentRunChild[]> {
   return journal.blockingChildren(runId);
 }
 
@@ -160,11 +170,11 @@ export function activeRequiredChildren(journal: AgentRunJournal, runId: string):
  * known-bad — an apply that was live at process death may have written files.
  * Resuming means a new child; this record is never rewritten into a success.
  */
-export function markInterruptedChildren(journal: AgentRunJournal, runId: string, at: number): DurableAgentRunChild[] {
+export async function markInterruptedChildren(journal: AgentRunJournal, runId: string, at: number): Promise<DurableAgentRunChild[]> {
   const interrupted: DurableAgentRunChild[] = [];
-  for (const child of journal.children(runId)) {
+  for (const child of await journal.children(runId)) {
     if (DURABLE_CHILD_TERMINAL_STATES.has(child.state)) continue;
-    const result = journal.transitionChild({
+    const result = await journal.transitionChild({
       childId: child.childId, expectedRevision: child.revision, nextState: 'interrupted', at, endedAt: at,
       terminalCategory: child.state === 'created' ? 'orphaned_before_dispatch' : 'interrupted_by_restart',
       terminalEvidence: { priorState: child.state, reason: 'process restarted while the operation was unresolved' },

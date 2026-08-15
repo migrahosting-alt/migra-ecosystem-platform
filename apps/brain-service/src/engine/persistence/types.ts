@@ -27,20 +27,20 @@ export interface PersistenceHealth {
 
 // ── Conversation memory ──────────────────────────────────────────────────────
 export interface ConversationPersistence {
-  saveConversation(c: Conversation): void;
+  saveConversation(c: Conversation): Promise<void>;
   /** Hard cascade delete: the conversation + its messages + summaries, so a
    * deleted conversation is inaccessible after restart. */
-  deleteConversation(id: string): void;
-  saveMessage(m: Message): void;
-  saveSummary(s: Summary): void;
+  deleteConversation(id: string): Promise<void>;
+  saveMessage(m: Message): Promise<void>;
+  saveSummary(s: Summary): Promise<void>;
   /** Hydrate durable conversations + their messages (in order) + summaries. */
-  loadDurable(): { conversations: Conversation[]; messages: Message[]; summaries: Summary[] };
+  loadDurable(): Promise<{ conversations: Conversation[]; messages: Message[]; summaries: Summary[] }>;
 }
 
 // ── Memory items (workspace facts / user prefs) ──────────────────────────────
 export interface MemoryItemPersistence {
-  saveMemoryItem(item: MemoryItem): void;
-  loadMemoryItems(): MemoryItem[];
+  saveMemoryItem(item: MemoryItem): Promise<void>;
+  loadMemoryItems(): Promise<MemoryItem[]>;
 }
 
 // ── RAG indexes ──────────────────────────────────────────────────────────────
@@ -79,34 +79,34 @@ export interface PersistedChunk {
 }
 
 export interface RagIndexPersistence {
-  saveIndex(rec: PersistedIndexRecord): void;
-  deleteIndex(id: string): void;
-  setIndexState(id: string, state: string, updatedAt: number): void;
+  saveIndex(rec: PersistedIndexRecord): Promise<void>;
+  deleteIndex(id: string): Promise<void>;
+  setIndexState(id: string, state: string, updatedAt: number): Promise<void>;
   /**
    * Atomically replace the persisted chunk set for a set of files within one
    * index: `changed` files' chunks are rewritten, `deletedFiles` are removed, and
    * the index version is bumped — all in one transaction. A failure leaves the
    * previous persisted version intact (never a partial write).
    */
-  commitSync(indexId: string, version: number, changed: PersistedChunk[], changedFiles: string[], deletedFiles: string[], updatedAt: number): void;
+  commitSync(indexId: string, version: number, changed: PersistedChunk[], changedFiles: string[], deletedFiles: string[], updatedAt: number): Promise<void>;
   /**
    * Promote (or clear, with `null`) the version authorised for production
    * retrieval. Independent of `state`: advancing a candidate must never move this
    * pointer, and demoting a candidate's lifecycle must never revoke it.
    */
-  setApprovedVersion(id: string, approvedVersion: number | null, updatedAt: number): void;
-  loadIndexes(): PersistedIndexRecord[];
+  setApprovedVersion(id: string, approvedVersion: number | null, updatedAt: number): Promise<void>;
+  loadIndexes(): Promise<PersistedIndexRecord[]>;
   /** Chunks for ONE version. Never load an index_id across versions. */
-  loadChunks(indexId: string, indexVersion: number): PersistedChunk[];
+  loadChunks(indexId: string, indexVersion: number): Promise<PersistedChunk[]>;
 }
 
 // ── Embedding cache ──────────────────────────────────────────────────────────
 export interface EmbeddingCachePersistence {
   /** Look up a cached vector keyed by (model, version, contentHash) — an
    * embedding from one model/version is NEVER returned for another. */
-  getEmbedding(model: string, version: string, contentHash: string): number[] | undefined;
-  putEmbedding(model: string, version: string, contentHash: string, vector: number[]): void;
-  pruneOlderThan(cutoffMs: number): number;
+  getEmbedding(model: string, version: string, contentHash: string): Promise<number[] | undefined>;
+  putEmbedding(model: string, version: string, contentHash: string, vector: number[]): Promise<void>;
+  pruneOlderThan(cutoffMs: number): Promise<number>;
 }
 
 // ── Workspaces ───────────────────────────────────────────────────────────────
@@ -128,9 +128,9 @@ export interface PersistedWorkspace {
 }
 
 export interface WorkspacePersistence {
-  saveWorkspace(w: PersistedWorkspace): void;
-  deleteWorkspace(id: string): void;
-  loadWorkspaces(): PersistedWorkspace[];
+  saveWorkspace(w: PersistedWorkspace): Promise<void>;
+  deleteWorkspace(id: string): Promise<void>;
+  loadWorkspaces(): Promise<PersistedWorkspace[]>;
 }
 
 // ── Operational data foundation (durable metadata only — NEVER prompts,
@@ -463,10 +463,10 @@ export interface AgentRunChildTransitionInput {
 }
 
 export interface AgentRunChildPersistence {
-  insertAgentRunChild(child: DurableAgentRunChild): AgentRunChildWriteResult;
-  transitionAgentRunChild(input: AgentRunChildTransitionInput): AgentRunChildWriteResult;
-  loadAgentRunChildren(runId: string): DurableAgentRunChild[];
-  loadAgentRunChild(childId: string): DurableAgentRunChild | undefined;
+  insertAgentRunChild(child: DurableAgentRunChild): Promise<AgentRunChildWriteResult>;
+  transitionAgentRunChild(input: AgentRunChildTransitionInput): Promise<AgentRunChildWriteResult>;
+  loadAgentRunChildren(runId: string): Promise<DurableAgentRunChild[]>;
+  loadAgentRunChild(childId: string): Promise<DurableAgentRunChild | undefined>;
 }
 
 export interface DurableAgentRunTombstone {
@@ -555,51 +555,51 @@ export interface AgentRunFencedEventInput {
 }
 
 export interface AgentRunJournalPersistence extends AgentRunChildPersistence {
-  insertAgentRun(run: DurableAgentRun, createdEvent: DurableAgentRunEvent): void;
-  appendAgentRunEvent(event: Omit<DurableAgentRunEvent, 'seq'>): void;
-  appendAgentRunEventUnderFence(input: AgentRunFencedEventInput): AgentRunReconciliationClaim | undefined;
-  transitionAgentRun(input: AgentRunTransitionInput): boolean;
-  reproposeAgentRun(input: AgentRunReproposalInput): AgentRunReproposalResult;
-  loadAgentRuns(limit?: number): DurableAgentRun[];
-  loadAgentRun(runId: string): DurableAgentRun | undefined;
-  loadAgentRunEvents(runId: string, limit?: number): DurableAgentRunEvent[];
-  claimAgentRunReconciliation(runId: string, owner: string, leaseUntil: number, now: number): AgentRunReconciliationClaim | undefined;
-  renewAgentRunReconciliation(runId: string, owner: string, fence: number, leaseUntil: number, now: number): AgentRunReconciliationClaim | undefined;
-  pruneAgentRuns(cutoff: number, batchSize: number, now: number): { runs: number; events: number };
-  loadAgentRunTombstones(limit?: number): DurableAgentRunTombstone[];
+  insertAgentRun(run: DurableAgentRun, createdEvent: DurableAgentRunEvent): Promise<void>;
+  appendAgentRunEvent(event: Omit<DurableAgentRunEvent, 'seq'>): Promise<void>;
+  appendAgentRunEventUnderFence(input: AgentRunFencedEventInput): Promise<AgentRunReconciliationClaim | undefined>;
+  transitionAgentRun(input: AgentRunTransitionInput): Promise<boolean>;
+  reproposeAgentRun(input: AgentRunReproposalInput): Promise<AgentRunReproposalResult>;
+  loadAgentRuns(limit?: number): Promise<DurableAgentRun[]>;
+  loadAgentRun(runId: string): Promise<DurableAgentRun | undefined>;
+  loadAgentRunEvents(runId: string, limit?: number): Promise<DurableAgentRunEvent[]>;
+  claimAgentRunReconciliation(runId: string, owner: string, leaseUntil: number, now: number): Promise<AgentRunReconciliationClaim | undefined>;
+  renewAgentRunReconciliation(runId: string, owner: string, fence: number, leaseUntil: number, now: number): Promise<AgentRunReconciliationClaim | undefined>;
+  pruneAgentRuns(cutoff: number, batchSize: number, now: number): Promise<{ runs: number; events: number }>;
+  loadAgentRunTombstones(limit?: number): Promise<DurableAgentRunTombstone[]>;
 }
 
 /** Durable persistence for operational metadata. Append-only where noted; incident
  * + budget rows are mutable-by-key. Retention prunes by age. */
 export interface OperationalPersistence {
-  appendAuditEvent(e: DurableAuditEvent): void; // idempotent by eventId
-  recentAuditEvents(limit: number): DurableAuditEvent[];
-  auditByCorrelation(correlationId: string, limit?: number): DurableAuditEvent[];
+  appendAuditEvent(e: DurableAuditEvent): Promise<void>; // idempotent by eventId
+  recentAuditEvents(limit: number): Promise<DurableAuditEvent[]>;
+  auditByCorrelation(correlationId: string, limit?: number): Promise<DurableAuditEvent[]>;
 
-  appendUsageRecord(r: DurableUsageRecord): void;
-  recentUsageRecords(limit: number): DurableUsageRecord[];
+  appendUsageRecord(r: DurableUsageRecord): Promise<void>;
+  recentUsageRecords(limit: number): Promise<DurableUsageRecord[]>;
 
-  upsertIncident(i: DurableIncident): void;
-  listIncidents(limit: number): DurableIncident[];
+  upsertIncident(i: DurableIncident): Promise<void>;
+  listIncidents(limit: number): Promise<DurableIncident[]>;
 
-  appendRecoveryEvent(e: DurableRecoveryEvent): void;
+  appendRecoveryEvent(e: DurableRecoveryEvent): Promise<void>;
 
-  saveBudgetScope(s: DurableBudgetScope): void;
-  loadBudgetScopes(): DurableBudgetScope[];
-  saveReservation(r: DurableReservation): void;
-  removeReservation(reservationId: string): void;
-  loadReservations(): DurableReservation[];
+  saveBudgetScope(s: DurableBudgetScope): Promise<void>;
+  loadBudgetScopes(): Promise<DurableBudgetScope[]>;
+  saveReservation(r: DurableReservation): Promise<void>;
+  removeReservation(reservationId: string): Promise<void>;
+  loadReservations(): Promise<DurableReservation[]>;
 
   /** Age-based retention per store; returns rows deleted per table. */
-  pruneOperational(cutoffs: { auditBefore: number; usageBefore: number; incidentsBefore: number; recoveryBefore: number }): { audit: number; usage: number; incidents: number; recovery: number };
-  operationalCounts(): OperationalCounts;
+  pruneOperational(cutoffs: { auditBefore: number; usageBefore: number; incidentsBefore: number; recoveryBefore: number }): Promise<{ audit: number; usage: number; incidents: number; recovery: number }>;
+  operationalCounts(): Promise<OperationalCounts>;
 }
 
 /** A composite durable store exposing every persistence facet + health. */
 export interface DurableStore extends ConversationPersistence, MemoryItemPersistence, RagIndexPersistence, EmbeddingCachePersistence, WorkspacePersistence, OperationalPersistence, AgentRunJournalPersistence {
-  health(): PersistenceHealth;
-  integrityCheck(): string;
-  close(): void;
+  health(): Promise<PersistenceHealth>;
+  integrityCheck(): Promise<string>;
+  close(): Promise<void>;
 }
 
 /** Scope guard used by adapters to build scoped WHERE clauses. */

@@ -108,7 +108,7 @@ export function registerCodingRunRoutes(app: FastifyInstance, opts: CodingRunRou
 
   // ── read ───────────────────────────────────────────────────────────────────
   app.get('/api/ai/coding/runs/:runId', async (request: FastifyRequest<{ Params: { runId: string } }>, reply: FastifyReply) => {
-    return send(reply, service.read(request.params.runId), 200);
+    return send(reply, await service.read(request.params.runId), 200);
   });
 
   // ── scope decision ─────────────────────────────────────────────────────────

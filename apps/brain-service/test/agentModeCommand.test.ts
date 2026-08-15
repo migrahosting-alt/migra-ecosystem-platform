@@ -84,11 +84,11 @@ class FakeProcesses implements AgentRecipeProcessManagerLike {
   activeCount(): number { return this.active; }
   reconcileOutcome?: AgentContainmentReconcileOutcome;
   reconcileCalls = 0;
-  async execute(runId: string, value: AgentRecipePlan, hooks: { onSpawned(identity: AgentContainmentIdentity): void }, signal?: AbortSignal): Promise<AgentRecipeExecutionOutcome> {
+  async execute(runId: string, value: AgentRecipePlan, hooks: { onSpawned(identity: AgentContainmentIdentity): void | Promise<void> }, signal?: AbortSignal): Promise<AgentRecipeExecutionOutcome> {
     if (this.failureCode === 'START_FAILED') throw new AgentRecipePolicyError('START_FAILED', 'injected start failure');
     this.starts += 1;
     this.active += 1;
-    hooks.onSpawned(containmentIdentityForPlan(runId, value));
+    await hooks.onSpawned(containmentIdentityForPlan(runId, value));
     await new Promise<void>((resolve) => {
       const timer = setTimeout(resolve, this.delayMs);
       this.wake = () => { clearTimeout(timer); resolve(); };
@@ -118,7 +118,7 @@ function harness(now: () => number = () => Date.now()) {
 
 async function terminal(service: AgentModeCommandService, runId: string, ctx: AgentModeRequestContext) {
   for (let attempt = 0; attempt < 100; attempt += 1) {
-    const found = service.get(runId, ctx, false);
+    const found = (await service.get(runId, ctx, false));
     if (found.ok && ['COMPLETED', 'FAILED', 'CANCELLED', 'STALE'].includes(found.view.state)) return found.view;
     await new Promise((resolve) => setTimeout(resolve, 5));
   }
@@ -161,7 +161,7 @@ test('fixed snapshot proposal is token-free and concurrent approval starts exact
   assert.ok(proposal.ok);
   assert.equal(proposal.view.preview?.snapshotId, 'snapshot-id');
   assert.doesNotMatch(JSON.stringify(proposal), /appr_private/);
-  assert.ok(service.displayed(proposal.view.runId, proposal.view.preview!.fingerprint, ctx).ok);
+  assert.ok((await service.displayed(proposal.view.runId, proposal.view.preview!.fingerprint, ctx)).ok);
   await Promise.all([
     service.decide(proposal.view.runId, 'approve', proposal.view.preview!.fingerprint, ctx),
     service.decide(proposal.view.runId, 'approve', proposal.view.preview!.fingerprint, ctx),
@@ -183,7 +183,7 @@ test('snapshot drift before approval and before spawn fails with zero starts', a
   const ctx = context(workspace);
   const proposal = await service.propose({ rootPath: workspace, recipe: 'git.diff', reason: 'inspect' }, ctx);
   assert.ok(proposal.ok);
-  assert.ok(service.displayed(proposal.view.runId, proposal.view.preview!.fingerprint, ctx).ok);
+  assert.ok((await service.displayed(proposal.view.runId, proposal.view.preview!.fingerprint, ctx)).ok);
   resolver.valid = false;
   const stale = await service.decide(proposal.view.runId, 'approve', proposal.view.preview!.fingerprint, ctx);
   assert.equal(stale.ok, false);
@@ -200,7 +200,7 @@ test('approval fails closed until the authoritative preview is acknowledged as d
   const denied = await service.decide(proposal.view.runId, 'approve', proposal.view.preview!.fingerprint, ctx);
   assert.equal(denied.ok, false);
   assert.equal(processes.starts, 0);
-  assert.ok(service.displayed(proposal.view.runId, proposal.view.preview!.fingerprint, ctx).ok);
+  assert.ok((await service.displayed(proposal.view.runId, proposal.view.preview!.fingerprint, ctx)).ok);
   assert.ok((await service.decide(proposal.view.runId, 'approve', proposal.view.preview!.fingerprint, ctx)).ok);
   assert.equal((await terminal(service, proposal.view.runId, ctx)).state, 'COMPLETED');
   await service.shutdown();
@@ -215,9 +215,9 @@ test('terminal states are immutable and cross-activation access is indistinguish
   assert.ok((await service.decide(proposal.view.runId, 'reject', proposal.view.preview!.fingerprint, ctx)).ok);
   assert.equal((await service.decide(proposal.view.runId, 'approve', 'wrong', ctx)).ok, false);
   const foreign = context(workspace, '22222222-2222-4222-8222-222222222222');
-  const missing = service.get('does-not-exist', foreign);
-  assert.deepEqual(service.get(proposal.view.runId, foreign), missing);
-  assert.equal((service.get(proposal.view.runId, ctx) as { ok: true; view: { state: string } }).view.state, 'REJECTED');
+  const missing = (await service.get('does-not-exist', foreign));
+  assert.deepEqual((await service.get(proposal.view.runId, foreign)), missing);
+  assert.equal(((await service.get(proposal.view.runId, ctx)) as { ok: true; view: { state: string } }).view.state, 'REJECTED');
   await service.shutdown();
 });
 
@@ -310,7 +310,7 @@ test('HTTP Agent routes reject every Origin-bearing request at the boundary with
   const hostileReproposal = await app.inject({ method: 'POST', url: `/api/ai/agent-mode/commands/${run.runId}/repropose`, headers: { ...authHeaders, ...hostileHeaders }, payload: { requestId: 'stage3b-hostile-recovery' } });
   assert.equal(hostileReproposal.statusCode, 403);
   assert.equal(processes.starts, 0);
-  assert.equal((service.get(run.runId, context(workspace)) as { ok: true; view: { state: string } }).view.state, 'AWAITING_APPROVAL');
+  assert.equal(((await service.get(run.runId, context(workspace))) as { ok: true; view: { state: string } }).view.state, 'AWAITING_APPROVAL');
 
   await app.close();
   authority.shutdown();
@@ -445,8 +445,8 @@ test('dynamic sentinel matrix redacts reusable authority across Agent HTTP, audi
   service = new AgentModeCommandService(deps, () => now, () => `agentcmd_sentinel_${++sequence}`, resolver, processes, journal, `svc_sentinel_${++sequence}`);
   const restartSummary = await service.reconcileOnStartup();
   assert.equal(restartSummary.outcomes.RESTART_AUTHORIZATION_LOST, 1);
-  const recoveryContext = { ...context(workspace), workspaceIdentity: persistence.loadAgentRun(restart.runId)!.workspaceIdentity };
-  const recoveryStatus = service.getRunRecoveryStatus(restart.runId, recoveryContext);
+  const recoveryContext = { ...context(workspace), workspaceIdentity: (await persistence.loadAgentRun(restart.runId))!.workspaceIdentity };
+  const recoveryStatus = (await service.getRunRecoveryStatus(restart.runId, recoveryContext));
   assert.equal(recoveryStatus.ok, true);
   const successor = await service.reproposeFromRun(restart.runId, { requestId: 'stage3b-dynamic-sentinel' }, recoveryContext);
   assert.equal(successor.ok, true);
@@ -454,7 +454,7 @@ test('dynamic sentinel matrix redacts reusable authority across Agent HTTP, audi
   assert.equal(duplicate.ok, true);
   const policyDenied = await service.reproposeFromRun(restart.runId, { requestId: 'stage3b-dynamic-policy-denied' }, { ...recoveryContext, allowedRecipes: ['git.diff'] });
   assert.equal(policyDenied.ok, false);
-  const forgedStatus = service.getRunRecoveryStatus('agentcmd_forged_unknown', recoveryContext);
+  const forgedStatus = (await service.getRunRecoveryStatus('agentcmd_forged_unknown', recoveryContext));
   assert.equal(forgedStatus.ok, false);
 
   now += 10_000;
@@ -466,7 +466,7 @@ test('dynamic sentinel matrix redacts reusable authority across Agent HTTP, audi
   const nonBootstrapResponses = [rejectedProposal.body, displayed.body, reject.body, completedProposal.body, approved.body, JSON.stringify(completedView), JSON.stringify(recoveryStatus), JSON.stringify(successor), JSON.stringify(duplicate), JSON.stringify(policyDenied), JSON.stringify(forgedStatus)].join('\n');
   const durableBytes = [dbPath, `${dbPath}-wal`, `${dbPath}-shm`].filter((file) => existsSync(file)).map((file) => readFileSync(file, 'utf8')).join('\n');
   const reopened = new SqliteDurableStore(dbPath);
-  const reopenedRuns = reopened.loadAgentRuns();
+  const reopenedRuns = (await reopened.loadAgentRuns());
   const durableRows = JSON.stringify({
     runs: reopenedRuns,
     events: reopenedRuns.flatMap((run) => reopened.loadAgentRunEvents(run.runId)),
@@ -530,7 +530,7 @@ test('shutdown and termination failure produce distinct exact audit endings', as
   const ctx = context(workspace);
   const proposal = await first.service.propose({ rootPath: workspace, recipe: 'git.status', reason: 'shutdown' }, ctx);
   assert.ok(proposal.ok);
-  first.service.displayed(proposal.view.runId, proposal.view.preview!.fingerprint, ctx);
+  await first.service.displayed(proposal.view.runId, proposal.view.preview!.fingerprint, ctx);
   await first.service.decide(proposal.view.runId, 'approve', proposal.view.preview!.fingerprint, ctx);
   while (first.processes.starts === 0) await new Promise((resolve) => setTimeout(resolve, 1));
   await first.service.shutdown();
@@ -541,7 +541,7 @@ test('shutdown and termination failure produce distinct exact audit endings', as
   second.processes.failureCode = 'TERMINATION_FAILED';
   const failed = await second.service.propose({ rootPath: workspace, recipe: 'git.diff', reason: 'failure' }, ctx);
   assert.ok(failed.ok);
-  second.service.displayed(failed.view.runId, failed.view.preview!.fingerprint, ctx);
+  await second.service.displayed(failed.view.runId, failed.view.preview!.fingerprint, ctx);
   await second.service.decide(failed.view.runId, 'approve', failed.view.preview!.fingerprint, ctx);
   assert.equal((await terminal(second.service, failed.view.runId, ctx)).state, 'FAILED');
   assert.equal(auditStore.byCorrelation(failed.view.requestId).at(-1)?.type, 'execution.termination_failed');
@@ -555,7 +555,7 @@ test('rejection, expiry, spawn failure, cancellation, and timeout have exact aud
   const rejected = harness();
   const rejectRun = await rejected.service.propose({ rootPath: workspace, recipe: 'git.status', reason: 'reject' }, ctx);
   assert.ok(rejectRun.ok);
-  rejected.service.displayed(rejectRun.view.runId, rejectRun.view.preview!.fingerprint, ctx);
+  await rejected.service.displayed(rejectRun.view.runId, rejectRun.view.preview!.fingerprint, ctx);
   await rejected.service.decide(rejectRun.view.runId, 'reject', rejectRun.view.preview!.fingerprint, ctx);
   assert.deepEqual(auditStore.byCorrelation(rejectRun.view.requestId).map((event) => event.type), ['proposal.created', 'approval.displayed', 'approval.rejected']);
   await rejected.service.shutdown();
@@ -573,7 +573,7 @@ test('rejection, expiry, spawn failure, cancellation, and timeout have exact aud
   spawnFailed.processes.failureCode = 'START_FAILED';
   const spawnRun = await spawnFailed.service.propose({ rootPath: workspace, recipe: 'git.diff', reason: 'spawn failure' }, ctx);
   assert.ok(spawnRun.ok);
-  spawnFailed.service.displayed(spawnRun.view.runId, spawnRun.view.preview!.fingerprint, ctx);
+  await spawnFailed.service.displayed(spawnRun.view.runId, spawnRun.view.preview!.fingerprint, ctx);
   await spawnFailed.service.decide(spawnRun.view.runId, 'approve', spawnRun.view.preview!.fingerprint, ctx);
   assert.equal((await terminal(spawnFailed.service, spawnRun.view.runId, ctx)).state, 'FAILED');
   assert.deepEqual(auditStore.byCorrelation(spawnRun.view.requestId).map((event) => event.type), ['proposal.created', 'approval.displayed', 'approval.approved', 'approval.consumed', 'execution.failed']);
@@ -583,7 +583,7 @@ test('rejection, expiry, spawn failure, cancellation, and timeout have exact aud
   cancelled.processes.delayMs = 10_000;
   const cancelRun = await cancelled.service.propose({ rootPath: workspace, recipe: 'git.status', reason: 'cancel' }, ctx);
   assert.ok(cancelRun.ok);
-  cancelled.service.displayed(cancelRun.view.runId, cancelRun.view.preview!.fingerprint, ctx);
+  await cancelled.service.displayed(cancelRun.view.runId, cancelRun.view.preview!.fingerprint, ctx);
   await cancelled.service.decide(cancelRun.view.runId, 'approve', cancelRun.view.preview!.fingerprint, ctx);
   while (cancelled.processes.starts === 0) await new Promise((resolve) => setTimeout(resolve, 1));
   cancelled.service.cancel(cancelRun.view.runId, ctx);
@@ -595,7 +595,7 @@ test('rejection, expiry, spawn failure, cancellation, and timeout have exact aud
   timedOut.processes.forcedDisposition = 'timed_out';
   const timeoutRun = await timedOut.service.propose({ rootPath: workspace, recipe: 'git.diff', reason: 'timeout' }, ctx);
   assert.ok(timeoutRun.ok);
-  timedOut.service.displayed(timeoutRun.view.runId, timeoutRun.view.preview!.fingerprint, ctx);
+  await timedOut.service.displayed(timeoutRun.view.runId, timeoutRun.view.preview!.fingerprint, ctx);
   await timedOut.service.decide(timeoutRun.view.runId, 'approve', timeoutRun.view.preview!.fingerprint, ctx);
   assert.equal((await terminal(timedOut.service, timeoutRun.view.runId, ctx)).state, 'FAILED');
   assert.equal(auditStore.byCorrelation(timeoutRun.view.requestId).at(-1)?.type, 'execution.timed_out');

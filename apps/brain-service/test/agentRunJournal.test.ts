@@ -73,9 +73,9 @@ class Processes implements AgentRecipeProcessManagerLike {
   onReconcile?: () => void | Promise<void>;
   activeCount(): number { return 0; }
   async availability() { return { ok: true, policy: 'fake' } as const; }
-  async execute(runId: string, value: AgentRecipePlan, hooks: { onSpawned(identity: AgentContainmentIdentity): void }, signal?: AbortSignal): Promise<AgentRecipeExecutionOutcome> {
+  async execute(runId: string, value: AgentRecipePlan, hooks: { onSpawned(identity: AgentContainmentIdentity): void | Promise<void> }, signal?: AbortSignal): Promise<AgentRecipeExecutionOutcome> {
     this.starts += 1;
-    hooks.onSpawned(containmentIdentityForPlan(runId, value));
+    await hooks.onSpawned(containmentIdentityForPlan(runId, value));
     await new Promise<void>((resolve) => {
       const t = setTimeout(resolve, this.delayMs);
       signal?.addEventListener('abort', () => { clearTimeout(t); resolve(); }, { once: true });
@@ -180,8 +180,8 @@ function installTerminalHistory(shared: MemoryAgentRunJournalPersistence, runId:
   shared.events.set(runId, events);
 }
 
-function approveDurableRun(shared: MemoryAgentRunJournalPersistence, runId: string, at: number) {
-  assert.equal(shared.transitionAgentRun({
+async function approveDurableRun(shared: MemoryAgentRunJournalPersistence, runId: string, at: number) {
+  assert.equal((await shared.transitionAgentRun({
     runId,
     expectedState: 'AWAITING_APPROVAL',
     nextState: 'APPROVED',
@@ -190,11 +190,11 @@ function approveDurableRun(shared: MemoryAgentRunJournalPersistence, runId: stri
     eventType: 'approval.approved',
     reason: 'HUMAN_APPROVED',
     patch: { approvalLifecycle: 'APPROVED', approvalDecisionType: 'APPROVED', approvalDecisionAt: at },
-  }), true);
+  })), true);
 }
 
-function startDurableRun(shared: MemoryAgentRunJournalPersistence, runId: string, at: number, withContainment: boolean) {
-  assert.equal(shared.transitionAgentRun({
+async function startDurableRun(shared: MemoryAgentRunJournalPersistence, runId: string, at: number, withContainment: boolean) {
+  assert.equal((await shared.transitionAgentRun({
     runId,
     expectedState: 'APPROVED',
     nextState: 'APPROVED',
@@ -203,8 +203,8 @@ function startDurableRun(shared: MemoryAgentRunJournalPersistence, runId: string
     eventType: 'approval.consumed',
     reason: 'ONE_TIME_AUTHORITY_CONSUMED',
     patch: { approvalLifecycle: 'CONSUMED' },
-  }), true);
-  assert.equal(shared.transitionAgentRun({
+  })), true);
+  assert.equal((await shared.transitionAgentRun({
     runId,
     expectedState: 'APPROVED',
     nextState: 'EXECUTING',
@@ -213,10 +213,10 @@ function startDurableRun(shared: MemoryAgentRunJournalPersistence, runId: string
     eventType: 'execution.start_requested',
     reason: 'APPROVED_EXECUTION_START',
     patch: { executionStartedAt: at + 1 },
-  }), true);
+  })), true);
   if (withContainment) {
     const identity = durableContainmentIdentity(shared, runId);
-    assert.equal(shared.transitionAgentRun({
+    assert.equal((await shared.transitionAgentRun({
       runId,
       expectedState: 'EXECUTING',
       nextState: 'EXECUTING',
@@ -225,7 +225,7 @@ function startDurableRun(shared: MemoryAgentRunJournalPersistence, runId: string
       eventType: 'execution.spawned',
       reason: 'CONTAINMENT_STARTED',
       patch: { containmentUnit: identity.unit, containmentBinding: identity.binding },
-    }), true);
+    })), true);
   }
 }
 
@@ -268,7 +268,7 @@ test('AWAITING_APPROVAL restart loses approval credential, terminalizes, and old
   const second = harness(shared);
   const summary = await second.service.reconcileOnStartup();
   assert.equal(summary.outcomes.RESTART_AUTHORIZATION_LOST, 1);
-  const view = second.service.get(run.runId, context(workspace, '22222222-2222-4222-8222-222222222222'));
+  const view = (await second.service.get(run.runId, context(workspace, '22222222-2222-4222-8222-222222222222')));
   assert.ok(view.ok);
   assert.equal(view.view.state, 'EXPIRED');
   const approval = await second.service.decide(run.runId, 'approve', run.preview!.fingerprint, context(workspace));
@@ -281,7 +281,7 @@ test('APPROVED restart never executes and records RESTART_BEFORE_EXECUTION', asy
   const shared = new MemoryAgentRunJournalPersistence();
   const first = harness(shared);
   const run = await propose(first.service, workspace);
-  first.service.displayed(run.runId, run.preview!.fingerprint, context(workspace));
+  await first.service.displayed(run.runId, run.preview!.fingerprint, context(workspace));
   assert.ok(shared.runs.get(run.runId));
   shared.transitionAgentRun({ runId: run.runId, expectedState: 'AWAITING_APPROVAL', nextState: 'APPROVED', at: Date.now(), source: 'APPROVAL', eventType: 'approval.approved', reason: 'test' });
   const second = harness(shared);
@@ -334,7 +334,7 @@ test('mismatched unit and termination failure become precise FAILED outcomes', a
 test('startup reconciliation enumerates every production terminal branch with contract-matched metadata', async () => {
   const cases: Array<{
     name: string;
-    setup(shared: MemoryAgentRunJournalPersistence, runId: string): void;
+    setup(shared: MemoryAgentRunJournalPersistence, runId: string): void | Promise<void>;
     outcome?: AgentContainmentReconcileOutcome;
     expectedState: DurableAgentRunState;
     expectedReason: string;
@@ -359,7 +359,7 @@ test('startup reconciliation enumerates every production terminal branch with co
     },
     {
       name: 'executing without containment identity becomes interrupted failure',
-      setup: (shared, runId) => { approveDurableRun(shared, runId, 2_000); startDurableRun(shared, runId, 2_010, false); },
+      setup: async (shared, runId) => { await approveDurableRun(shared, runId, 2_000); await startDurableRun(shared, runId, 2_010, false); },
       expectedState: 'FAILED',
       expectedReason: 'INTERRUPTED_BY_RESTART',
       expectedEvent: 'restart.interrupted_execution',
@@ -367,9 +367,9 @@ test('startup reconciliation enumerates every production terminal branch with co
     },
     {
       name: 'executing with mismatched containment identity becomes integrity-sensitive failure',
-      setup: (shared, runId) => {
-        approveDurableRun(shared, runId, 2_000);
-        startDurableRun(shared, runId, 2_010, true);
+      setup: async (shared, runId) => {
+        await approveDurableRun(shared, runId, 2_000);
+        await startDurableRun(shared, runId, 2_010, true);
         shared.runs.get(runId)!.containmentBinding = 'forged-binding';
       },
       expectedState: 'FAILED',
@@ -379,7 +379,7 @@ test('startup reconciliation enumerates every production terminal branch with co
     },
     {
       name: 'valid containment not found',
-      setup: (shared, runId) => { approveDurableRun(shared, runId, 2_000); startDurableRun(shared, runId, 2_010, true); },
+      setup: async (shared, runId) => { await approveDurableRun(shared, runId, 2_000); await startDurableRun(shared, runId, 2_010, true); },
       outcome: { code: 'RESTART_NO_CONTAINMENT_FOUND', terminated: false, cgroupEmpty: true },
       expectedState: 'FAILED',
       expectedReason: 'RESTART_NO_CONTAINMENT_FOUND',
@@ -388,7 +388,7 @@ test('startup reconciliation enumerates every production terminal branch with co
     },
     {
       name: 'valid containment already exited',
-      setup: (shared, runId) => { approveDurableRun(shared, runId, 2_000); startDurableRun(shared, runId, 2_010, true); },
+      setup: async (shared, runId) => { await approveDurableRun(shared, runId, 2_000); await startDurableRun(shared, runId, 2_010, true); },
       outcome: { code: 'RESTART_CONTAINMENT_ALREADY_EXITED', terminated: false, cgroupEmpty: true },
       expectedState: 'FAILED',
       expectedReason: 'RESTART_CONTAINMENT_ALREADY_EXITED',
@@ -397,7 +397,7 @@ test('startup reconciliation enumerates every production terminal branch with co
     },
     {
       name: 'valid containment termination failed',
-      setup: (shared, runId) => { approveDurableRun(shared, runId, 2_000); startDurableRun(shared, runId, 2_010, true); },
+      setup: async (shared, runId) => { await approveDurableRun(shared, runId, 2_000); await startDurableRun(shared, runId, 2_010, true); },
       outcome: { code: 'RESTART_TERMINATION_FAILED', terminated: false, cgroupEmpty: false },
       expectedState: 'FAILED',
       expectedReason: 'RESTART_TERMINATION_FAILED',
@@ -406,7 +406,7 @@ test('startup reconciliation enumerates every production terminal branch with co
     },
     {
       name: 'valid containment terminated',
-      setup: (shared, runId) => { approveDurableRun(shared, runId, 2_000); startDurableRun(shared, runId, 2_010, true); },
+      setup: async (shared, runId) => { await approveDurableRun(shared, runId, 2_000); await startDurableRun(shared, runId, 2_010, true); },
       outcome: { code: 'RESTART_CONTAINMENT_TERMINATED', terminated: true, cgroupEmpty: true },
       expectedState: 'CANCELLED',
       expectedReason: 'RESTART_CONTAINMENT_TERMINATED',
@@ -420,7 +420,7 @@ test('startup reconciliation enumerates every production terminal branch with co
     const shared = new MemoryAgentRunJournalPersistence();
     const seed = harness(shared);
     const run = await propose(seed.service, workspace);
-    entry.setup(shared, run.runId);
+    await entry.setup(shared, run.runId);
     const service = harness(shared);
     if (entry.outcome) service.processes.outcome = entry.outcome;
 
@@ -460,7 +460,7 @@ test('dual-instance reconciliation lease lets only one owner terminalize a run',
 test('spawned containment identity persistence failure fails closed instead of completing', async () => {
   const workspace = root();
   class FailingSpawnPersistence extends MemoryAgentRunJournalPersistence {
-    override transitionAgentRun(input: Parameters<MemoryAgentRunJournalPersistence['transitionAgentRun']>[0]): boolean {
+    override async transitionAgentRun(input: Parameters<MemoryAgentRunJournalPersistence['transitionAgentRun']>[0]): Promise<boolean> {
       if (input.eventType === 'execution.spawned') return false;
       return super.transitionAgentRun(input);
     }
@@ -468,7 +468,7 @@ test('spawned containment identity persistence failure fails closed instead of c
   const shared = new FailingSpawnPersistence();
   const h = harness(shared);
   const run = await propose(h.service, workspace);
-  h.service.displayed(run.runId, run.preview!.fingerprint, context(workspace));
+  await h.service.displayed(run.runId, run.preview!.fingerprint, context(workspace));
   assert.ok((await h.service.decide(run.runId, 'approve', run.preview!.fingerprint, context(workspace))).ok);
   for (let attempt = 0; attempt < 100; attempt += 1) {
     const durable = shared.runs.get(run.runId);
@@ -491,9 +491,9 @@ test('long-running reconciliation cannot terminalize after its lease expires and
   shared.transitionAgentRun({ runId: run.runId, expectedState: 'AWAITING_APPROVAL', nextState: 'EXECUTING', at: now, source: 'EXECUTION', eventType: 'execution.spawned', reason: 'test', patch: { containmentUnit: identity.unit, containmentBinding: identity.binding } });
   const ownerA = harness(shared, () => now);
   ownerA.processes.outcome = { code: 'RESTART_CONTAINMENT_TERMINATED', terminated: true, cgroupEmpty: true };
-  ownerA.processes.onReconcile = () => {
+  ownerA.processes.onReconcile = async () => {
     now = 40_000;
-    const ownerB = shared.claimAgentRunReconciliation(run.runId, 'owner-b', 70_000, now);
+    const ownerB = (await shared.claimAgentRunReconciliation(run.runId, 'owner-b', 70_000, now));
     assert.ok(ownerB);
   };
   const summary = await ownerA.service.reconcileOnStartup();
@@ -530,7 +530,7 @@ test('journal redacts durable preview/result/error and never persists credential
   const shared = new MemoryAgentRunJournalPersistence();
   const h = harness(shared);
   const run = await propose(h.service, workspace);
-  h.service.displayed(run.runId, run.preview!.fingerprint, context(workspace));
+  await h.service.displayed(run.runId, run.preview!.fingerprint, context(workspace));
   await h.service.decide(run.runId, 'reject', run.preview!.fingerprint, context(workspace));
   const durableJson = JSON.stringify({ runs: [...shared.runs.values()], events: [...shared.events.values()] });
   assert.doesNotMatch(durableJson, /appr_private|agentcap_|bootstrap-secret|ghp_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA|PRIVATE KEY/);
@@ -542,10 +542,10 @@ test('retention preserves active runs and deletes old terminals in bounded batch
   const h = harness(shared, () => 10_000);
   const active = await propose(h.service, workspace);
   const terminal = await propose(h.service, workspace);
-  h.service.displayed(terminal.runId, terminal.preview!.fingerprint, context(workspace));
+  await h.service.displayed(terminal.runId, terminal.preview!.fingerprint, context(workspace));
   await h.service.decide(terminal.runId, 'reject', terminal.preview!.fingerprint, context(workspace));
   shared.runs.get(terminal.runId)!.terminalAt = 1;
-  const pruned = new AgentRunJournal(shared, { terminalRetentionMs: 1_000, retentionBatchSize: 1, reconciliationLeaseMs: 30_000, maxDomainPayloadBytes: 256 * 1024 }).prune(10_000);
+  const pruned = (await new AgentRunJournal(shared, { terminalRetentionMs: 1_000, retentionBatchSize: 1, reconciliationLeaseMs: 30_000, maxDomainPayloadBytes: 256 * 1024 }).prune(10_000));
   assert.equal(pruned.runs, 1);
   assert.ok(shared.runs.has(active.runId));
   assert.equal(shared.runs.has(terminal.runId), false);
@@ -559,7 +559,7 @@ test('approval lifecycle is durable from proposal through display, rejection, an
   assert.equal(shared.runs.get(run.runId)?.approvalLifecycle, 'PENDING_DISPLAY');
   assert.equal(shared.runs.get(run.runId)?.recoveryEligible, false);
 
-  const displayed = h.service.displayed(run.runId, run.preview!.fingerprint, context(workspace));
+  const displayed = (await h.service.displayed(run.runId, run.preview!.fingerprint, context(workspace)));
   assert.equal(displayed.ok, true);
   assert.equal(shared.runs.get(run.runId)?.approvalLifecycle, 'DISPLAYED');
 
@@ -581,7 +581,7 @@ test('restart reconciliation records lost approval and permits fresh proposal wi
 
   const second = harness(shared);
   await second.service.reconcileOnStartup();
-  const status = second.service.getRunRecoveryStatus(run.runId, context(workspace));
+  const status = (await second.service.getRunRecoveryStatus(run.runId, context(workspace)));
   assert.equal(status.ok, true);
   assert.equal(status.status.recoveryClass, 'REPROPOSAL_REQUIRED');
   assert.equal(status.status.eligible, true);
@@ -610,7 +610,7 @@ test('fresh reproposal requires current workspace and recipe policy', async () =
   const shared = new MemoryAgentRunJournalPersistence();
   const h = harness(shared);
   const run = await propose(h.service, workspace);
-  h.service.displayed(run.runId, run.preview!.fingerprint, context(workspace));
+  await h.service.displayed(run.runId, run.preview!.fingerprint, context(workspace));
   await h.service.decide(run.runId, 'reject', run.preview!.fingerprint, context(workspace));
 
   const wrongWorkspace = await h.service.reproposeFromRun(run.runId, { requestId: 'stage3b-reproposal-workspace' }, { ...context(workspace), workspaceIdentity: 'other-workspace' });
@@ -628,7 +628,7 @@ test('forged terminal durable row without coherent events cannot be recovered', 
   const shared = new MemoryAgentRunJournalPersistence();
   const h = harness(shared);
   const run = await propose(h.service, workspace);
-  h.service.displayed(run.runId, run.preview!.fingerprint, context(workspace));
+  await h.service.displayed(run.runId, run.preview!.fingerprint, context(workspace));
   await h.service.decide(run.runId, 'reject', run.preview!.fingerprint, context(workspace));
 
   const durable = shared.runs.get(run.runId)!;
@@ -636,7 +636,7 @@ test('forged terminal durable row without coherent events cannot be recovered', 
   durable.recoveryClass = 'REPROPOSAL_ALLOWED';
   shared.events.set(run.runId, []);
 
-  const status = h.service.getRunRecoveryStatus(run.runId, context(workspace));
+  const status = (await h.service.getRunRecoveryStatus(run.runId, context(workspace)));
   assert.equal(status.ok, true);
   assert.equal(status.status.eligible, false);
   assert.match(status.status.explanation, /durable history is incomplete/i);
@@ -670,13 +670,13 @@ test('corrupt source event chains are ineligible and cannot create successors', 
     const shared = new MemoryAgentRunJournalPersistence();
     const h = harness(shared);
     const view = await propose(h.service, workspace);
-    h.service.displayed(view.runId, view.preview!.fingerprint, context(workspace));
+    await h.service.displayed(view.runId, view.preview!.fingerprint, context(workspace));
     await h.service.decide(view.runId, 'reject', view.preview!.fingerprint, context(workspace));
     const durable = shared.runs.get(view.runId)!;
     corruption.run?.(durable);
     shared.events.set(view.runId, corruption.mutate(shared.events.get(view.runId) ?? []));
 
-    const status = h.service.getRunRecoveryStatus(view.runId, context(workspace));
+    const status = (await h.service.getRunRecoveryStatus(view.runId, context(workspace)));
     assert.equal(status.ok, true, corruption.name);
     assert.equal(status.status.eligible, false, corruption.name);
     assert.notEqual(status.status.recommendedAction, 'Create a fresh proposal.', corruption.name);
@@ -751,7 +751,7 @@ test('forged terminal reason and terminal event contracts are rejected', async (
     ];
     durable.auditSeq = events.length;
     shared.events.set(view.runId, events);
-    const status = h.service.getRunRecoveryStatus(view.runId, context(workspace));
+    const status = (await h.service.getRunRecoveryStatus(view.runId, context(workspace)));
     assert.equal(status.ok, true, entry.name);
     assert.equal(status.status.eligible, false, entry.name);
     assert.notEqual(status.status.recommendedAction, 'Create a fresh proposal.', entry.name);
@@ -777,7 +777,7 @@ test('valid recoverable terminal histories create only fresh idempotent repropos
     const sourceApprovalDecision = durableSource.approvalDecisionType;
     h.resolver.workspaceVersion += 1;
 
-    const status = h.service.getRunRecoveryStatus(source.runId, context(workspace));
+    const status = (await h.service.getRunRecoveryStatus(source.runId, context(workspace)));
     assert.equal(status.ok, true, spec.name);
     assert.equal(status.status.eligible, true, spec.name);
     assert.equal(status.status.recoveryClass, spec.recoveryClass, spec.name);
@@ -889,7 +889,7 @@ test('nonrecoverable and non-production terminal histories fail closed without s
     const source = await propose(h.service, workspace);
     installTerminalHistory(shared, source.runId, spec);
 
-    const status = h.service.getRunRecoveryStatus(source.runId, context(workspace));
+    const status = (await h.service.getRunRecoveryStatus(source.runId, context(workspace)));
     assert.equal(status.ok, true, spec.name);
     assert.equal(status.status.eligible, false, spec.name);
     assert.notEqual(status.status.recommendedAction, 'Create a fresh proposal.', spec.name);
@@ -962,14 +962,14 @@ test('retention preserves terminal source while its recovery successor is active
   const shared = new MemoryAgentRunJournalPersistence();
   const h = harness(shared, () => 10_000);
   const source = await propose(h.service, workspace);
-  h.service.displayed(source.runId, source.preview!.fingerprint, context(workspace));
+  await h.service.displayed(source.runId, source.preview!.fingerprint, context(workspace));
   await h.service.decide(source.runId, 'reject', source.preview!.fingerprint, context(workspace));
 
   const successor = await h.service.reproposeFromRun(source.runId, { requestId: 'stage3b-retention-successor' }, context(workspace));
   assert.equal(successor.ok, true);
   shared.runs.get(source.runId)!.terminalAt = 1;
 
-  const pruned = new AgentRunJournal(shared, { terminalRetentionMs: 1_000, retentionBatchSize: 10, reconciliationLeaseMs: 30_000, maxDomainPayloadBytes: 256 * 1024 }).prune(10_000);
+  const pruned = (await new AgentRunJournal(shared, { terminalRetentionMs: 1_000, retentionBatchSize: 10, reconciliationLeaseMs: 30_000, maxDomainPayloadBytes: 256 * 1024 }).prune(10_000));
   assert.equal(pruned.runs, 0);
   assert.ok(shared.runs.has(source.runId));
   assert.ok(shared.runs.has(successor.view.runId));

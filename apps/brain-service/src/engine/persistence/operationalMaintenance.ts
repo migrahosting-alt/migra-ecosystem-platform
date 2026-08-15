@@ -72,11 +72,11 @@ export function buildRetentionConfig(env: NodeJS.ProcessEnv = process.env): Oper
  * tablespace, or nothing measurable, so the adapter answers.
  */
 export interface MaintenanceStore extends OperationalPersistence {
-  integrityCheck(): string;
-  health(): PersistenceHealth;
-  probeWriteLatencyMs(): number;
+  integrityCheck(): Promise<string>;
+  health(): Promise<PersistenceHealth>;
+  probeWriteLatencyMs(): Promise<number>;
   /** Bytes on disk, or null when the adapter cannot determine it. */
-  storageBytes(): number | null;
+  storageBytes(): Promise<number | null>;
 }
 
 /**
@@ -137,9 +137,9 @@ export class OperationalMaintenance {
   /** Verify durable integrity (startup check). Returns 'ok' or the problem. Never
    * throws — a corrupt store is reported via health, not a crash ("no everything
    * reset"): the engine continues with whatever durable state survived. */
-  verifyIntegrity(): string {
+  async verifyIntegrity(): Promise<string> {
     try {
-      this.lastIntegrity = this.durable.integrityCheck();
+      this.lastIntegrity = await this.durable.integrityCheck();
     } catch (err) {
       this.lastIntegrity = err instanceof Error ? err.message : String(err);
     }
@@ -147,9 +147,9 @@ export class OperationalMaintenance {
   }
 
   /** Run one retention pass now. Age cutoffs derive from the configured windows. */
-  runRetention(): RetentionResult {
+  async runRetention(): Promise<RetentionResult> {
     const at = this.now();
-    const deleted = this.durable.pruneOperational({
+    const deleted = await this.durable.pruneOperational({
       auditBefore: at - this.config.auditDays * DAY_MS,
       usageBefore: at - this.config.usageDays * DAY_MS,
       incidentsBefore: at - this.config.incidentDays * DAY_MS,
@@ -159,16 +159,42 @@ export class OperationalMaintenance {
     return this.lastRetention;
   }
 
-  /** Start the periodic retention worker (idempotent). Runs one pass immediately,
+  /**
+   * Start the periodic retention worker (idempotent). Runs one pass immediately,
    * then on the configured cadence. The timer is unref'd so it never keeps the
-   * process alive on its own. */
+   * process alive on its own.
+   *
+   * Two hazards appear once retention is asynchronous, both handled here rather
+   * than left to chance:
+   *
+   *   • A rejected promise inside a timer callback is an UNHANDLED REJECTION,
+   *     which can terminate the process on modern Node. Retention failure is
+   *     explicitly non-fatal — it is reported through health — so every pass is
+   *     terminated with a catch rather than being left floating.
+   *
+   *   • A pass slower than the interval could previously never overlap, because
+   *     it was synchronous. Now it can. `inFlight` drops a tick rather than
+   *     running two concurrent prunes against the same store.
+   */
   start(): void {
     if (this.timer) return;
-    try { this.runRetention(); } catch { /* a retention failure is reported via health, never fatal */ }
-    this.timer = setInterval(() => {
-      try { this.runRetention(); } catch { /* reported via health */ }
-    }, this.config.intervalMs);
+    void this.runPassSafely();
+    this.timer = setInterval(() => { void this.runPassSafely(); }, this.config.intervalMs);
     (this.timer as { unref?: () => void }).unref?.();
+  }
+
+  private inFlight = false;
+
+  private async runPassSafely(): Promise<void> {
+    if (this.inFlight) return;
+    this.inFlight = true;
+    try {
+      await this.runRetention();
+    } catch {
+      /* a retention failure is reported via health, never fatal */
+    } finally {
+      this.inFlight = false;
+    }
   }
 
   /** Stop the retention worker (shutdown). Idempotent. */
@@ -176,24 +202,24 @@ export class OperationalMaintenance {
     if (this.timer) { clearInterval(this.timer); this.timer = null; }
   }
 
-  private storageBytes(): number | null {
+  private async storageBytes(): Promise<number | null> {
     // Delegated to the adapter. A throwing adapter must not take down health
     // reporting — unknown size is a legitimate answer, an exception is not.
-    try { return this.durable.storageBytes(); } catch { return null; }
+    try { return await this.durable.storageBytes(); } catch { return null; }
   }
 
   /** Truthful operational health — never "green because the process is alive". */
-  health(): OperationalHealthSnapshot {
-    const ph = this.durable.health();
+  async health(): Promise<OperationalHealthSnapshot> {
+    const ph = await this.durable.health();
     let reachable = true;
     let writeLatencyMs: number | null = null;
     try {
-      writeLatencyMs = this.durable.probeWriteLatencyMs();
+      writeLatencyMs = await this.durable.probeWriteLatencyMs();
     } catch {
       reachable = false;
     }
     let counts: OperationalCounts = { auditEvents: 0, usageRecords: 0, incidents: 0, recoveryEvents: 0, reservations: 0 };
-    try { counts = this.durable.operationalCounts(); } catch { reachable = false; }
+    try { counts = await this.durable.operationalCounts(); } catch { reachable = false; }
 
     // Both states represent an engine-compatible schema:
     // - applied: this startup migrated the durable store to SCHEMA_VERSION
@@ -224,7 +250,7 @@ export class OperationalMaintenance {
       lastRetentionDeleted: this.lastRetention?.deleted ?? null,
       writeLatencyMs,
       writeLatencyOk,
-      storageBytes: this.storageBytes(),
+      storageBytes: await this.storageBytes(),
       counts,
     };
   }

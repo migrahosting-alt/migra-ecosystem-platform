@@ -181,7 +181,7 @@ export interface AuditAppendInput {
 
 /** Optional durable writer (e.g. append a JSONL line to disk). May throw; the
  * store treats a failure on a CRITICAL event as fail-closed. */
-export type AuditWriter = (record: AuditRecord) => void;
+export type AuditWriter = (record: AuditRecord) => void | Promise<void>;
 
 const DEFAULT_MAX_RECORDS = 10_000;
 
@@ -227,7 +227,7 @@ export class AuditStore {
    * event for this correlation and a monotonic per-correlation sequence.
    * Throws AuditCriticalWriteError if a CRITICAL event cannot be durably
    * written (caller must fail closed). */
-  append(input: AuditAppendInput): AuditRecord {
+  async append(input: AuditAppendInput): Promise<AuditRecord> {
     const eventId = input.eventId ?? this.mkId();
     if (this.seen.has(eventId)) {
       // Idempotent retry — return the existing record, no duplicate.
@@ -254,7 +254,7 @@ export class AuditStore {
     // critical record that cannot be persisted fails closed.
     if (this.writer) {
       try {
-        this.writer(record);
+        await this.writer(record);
       } catch (err) {
         this.writeFailures += 1;
         this.health.onCleanup(0, true); // durable sink unhealthy

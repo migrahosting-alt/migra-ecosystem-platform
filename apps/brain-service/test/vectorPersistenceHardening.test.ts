@@ -58,19 +58,19 @@ function insertRawChunk(dbPath: string, indexId: string, rawVector: unknown, ind
   db.close();
 }
 
-function mkIndex(store: SqliteDurableStore): { svc: IndexService; id: string } {
+async function mkIndex(store: SqliteDurableStore): Promise<{ svc: IndexService; id: string }> {
   const svc = new IndexService(new FakeEmbedder(8), noSource, undefined, undefined, store);
-  const rec = svc.createIndex(A, { sourceType: 'workspace', root: '/repo/a' });
+  const rec = await svc.createIndex(A, { sourceType: 'workspace', root: '/repo/a' });
   return { svc, id: rec.id };
 }
 
 // ── R1: serialization refuses every invalid vector ───────────────────────────
 
-test('an invalid vector is refused before it can be written', (t) => {
+test('an invalid vector is refused before it can be written', async (t) => {
   const dbPath = tmpDb();
   const store = new SqliteDurableStore(dbPath);
   t.after(() => store.close());
-  const { id } = mkIndex(store);
+  const { id } = await mkIndex(store);
 
   const base = {
     id: 'c1', indexId: id, workspaceId: A.workspace, filePath: 'src/a.ts', language: 'ts',
@@ -91,7 +91,7 @@ test('an invalid vector is refused before it can be written', (t) => {
   ];
 
   for (const [label, vector] of invalid) {
-    assert.throws(
+    await assert.rejects(
       () => store.commitSync(id, 1, [{ ...base, vector } as never], ['src/a.ts'], [], 1),
       /invalid vector/,
       `must refuse ${label}`,
@@ -105,27 +105,27 @@ test('an invalid vector is refused before it can be written', (t) => {
   assert.equal(n, 0, 'a rejected candidate must write no rows at all');
 });
 
-test('a mixed-width candidate is refused (one index, one vector width)', (t) => {
+test('a mixed-width candidate is refused (one index, one vector width)', async (t) => {
   const store = new SqliteDurableStore(tmpDb());
   t.after(() => store.close());
-  const { id } = mkIndex(store);
+  const { id } = await mkIndex(store);
   const chunk = (line: number, vector: number[]) => ({
     id: `c${line}`, indexId: id, workspaceId: A.workspace, filePath: 'src/a.ts', language: 'ts',
     symbol: undefined, startLine: line, endLine: line, contentHash: `h${line}`,
     embeddingModel: 'fake-embed', embeddingVersion: 'v0', indexedAt: 1, text: 'x', vector,
   });
 
-  assert.throws(
+  await assert.rejects(
     () => store.commitSync(id, 1, [chunk(1, [1, 2, 3, 4]), chunk(2, [1, 2])], ['src/a.ts'], [], 1),
     /wrong-dims/,
     'a narrower vector in the same index corrupts similarity silently — refuse it',
   );
 });
 
-test('a valid vector still round-trips exactly', (t) => {
+test('a valid vector still round-trips exactly', async (t) => {
   const store = new SqliteDurableStore(tmpDb());
   t.after(() => store.close());
-  const { id } = mkIndex(store);
+  const { id } = await mkIndex(store);
   const vector = [0.5, -0.25, 0, 1];
 
   store.commitSync(id, 1, [{
@@ -134,13 +134,13 @@ test('a valid vector still round-trips exactly', (t) => {
     embeddingModel: 'fake-embed', embeddingVersion: 'v0', indexedAt: 1, text: 'x', vector,
   }], ['src/a.ts'], [], 1);
 
-  const [loaded] = store.loadChunks(id, 1);
+  const [loaded] = (await store.loadChunks(id, 1));
   assert.deepEqual(loaded!.vector, vector, 'float32-exact values survive the round trip');
 });
 
 // ── R2: decode classifies every damaged shape ────────────────────────────────
 
-test('every damaged blob shape is classified, not crashed on', (t) => {
+test('every damaged blob shape is classified, not crashed on', async (t) => {
   const cases: Array<[string, unknown, RegExp]> = [
     ['SQL NULL', null, /null-blob/],
     ['the exact 0-length-buffer form that binds as NULL', new Uint8Array(new Float32Array(undefined as never).buffer), /null-blob/],
@@ -152,27 +152,27 @@ test('every damaged blob shape is classified, not crashed on', (t) => {
   for (const [label, raw, expected] of cases) {
     const dbPath = tmpDb();
     const store = new SqliteDurableStore(dbPath);
-    const { id } = mkIndex(store);
+    const { id } = await mkIndex(store);
     store.close();
     insertRawChunk(dbPath, id, raw);
 
     const reopened = new SqliteDurableStore(dbPath);
     t.after(() => reopened.close());
-    assert.throws(() => reopened.loadChunks(id, 0), expected, `must classify ${label}`);
+    await assert.rejects(() => reopened.loadChunks(id, 0), expected, `must classify ${label}`);
   }
 });
 
-test('a classified fault names the chunk but never its source text', (t) => {
+test('a classified fault names the chunk but never its source text', async (t) => {
   const dbPath = tmpDb();
   const store = new SqliteDurableStore(dbPath);
-  const { id } = mkIndex(store);
+  const { id } = await mkIndex(store);
   store.close();
   insertRawChunk(dbPath, id, null);
 
   const reopened = new SqliteDurableStore(dbPath);
   t.after(() => reopened.close());
   try {
-    reopened.loadChunks(id, 0);
+    await reopened.loadChunks(id, 0);
     assert.fail('expected a classified fault');
   } catch (error) {
     const message = (error as Error).message;
@@ -183,12 +183,12 @@ test('a classified fault names the chunk but never its source text', (t) => {
 
 // ── R2b: hydration quarantines instead of terminating the Brain ──────────────
 
-test('a damaged index is quarantined at startup and the Brain keeps running', (t) => {
+test('a damaged index is quarantined at startup and the Brain keeps running', async (t) => {
   const dbPath = tmpDb();
   const store = new SqliteDurableStore(dbPath);
   const good = new IndexService(new FakeEmbedder(8), noSource, undefined, undefined, store);
-  const damaged = good.createIndex(A, { sourceType: 'workspace', root: '/repo/a' });
-  const healthy = good.createIndex(A, { sourceType: 'workspace', root: '/repo/b' });
+  const damaged = await good.createIndex(A, { sourceType: 'workspace', root: '/repo/a' });
+  const healthy = await good.createIndex(A, { sourceType: 'workspace', root: '/repo/b' });
   const vector = [1, 2, 3, 4];
   store.commitSync(healthy.id, 1, [{
     id: 'h1', indexId: healthy.id, workspaceId: A.workspace, filePath: 'src/b.ts', language: 'ts',
@@ -206,7 +206,7 @@ test('a damaged index is quarantined at startup and the Brain keeps running', (t
   const svc = new IndexService(new FakeEmbedder(8), noSource, undefined, undefined, reopened);
 
   // THE REGRESSION: this used to throw straight out of startup.
-  assert.doesNotThrow(() => svc.hydrate(), 'hydration must never crash the Brain');
+  await assert.doesNotReject(() => svc.hydrate(), 'hydration must never crash the Brain');
 
   const bad = svc.status(damaged.id, A);
   assert.ok(bad, 'the damaged index stays VISIBLE so health can report it');
@@ -218,24 +218,24 @@ test('a damaged index is quarantined at startup and the Brain keeps running', (t
   assert.equal(ok!.stats.chunks, 1, 'an unrelated healthy index still hydrates');
 });
 
-test('quarantine is durable — a restart cannot resurrect it as approved', (t) => {
+test('quarantine is durable — a restart cannot resurrect it as approved', async (t) => {
   const dbPath = tmpDb();
   const store = new SqliteDurableStore(dbPath);
   const svc = new IndexService(new FakeEmbedder(8), noSource, undefined, undefined, store);
-  const rec = svc.createIndex(A, { sourceType: 'workspace', root: '/repo/a' });
+  const rec = await svc.createIndex(A, { sourceType: 'workspace', root: '/repo/a' });
   store.setApprovedVersion(rec.id, 0, 1);
   store.setIndexState(rec.id, 'approved', 1);
   store.close();
   insertRawChunk(dbPath, rec.id, null);
 
   const second = new SqliteDurableStore(dbPath);
-  new IndexService(new FakeEmbedder(8), noSource, undefined, undefined, second).hydrate();
+  await new IndexService(new FakeEmbedder(8), noSource, undefined, undefined, second).hydrate();
   second.close();
 
   // A THIRD boot must still see it degraded, not the stale `approved` string.
   const third = new SqliteDurableStore(dbPath);
   t.after(() => third.close());
-  const persisted = third.loadIndexes().find((r) => r.id === rec.id);
+  const persisted = (await third.loadIndexes()).find((r) => r.id === rec.id);
   assert.equal(persisted?.state, 'degraded', 'the demotion was written, not just remembered');
 });
 
@@ -243,7 +243,7 @@ test('a quarantined index refuses approved retrieval', async (t) => {
   const dbPath = tmpDb();
   const store = new SqliteDurableStore(dbPath);
   const svc0 = new IndexService(new FakeEmbedder(8), noSource, undefined, undefined, store);
-  const rec = svc0.createIndex(A, { sourceType: 'workspace', root: '/repo/a' });
+  const rec = await svc0.createIndex(A, { sourceType: 'workspace', root: '/repo/a' });
   store.setApprovedVersion(rec.id, 0, 1);
   store.setIndexState(rec.id, 'approved', 1);
   store.close();
@@ -252,7 +252,7 @@ test('a quarantined index refuses approved retrieval', async (t) => {
   const reopened = new SqliteDurableStore(dbPath);
   t.after(() => reopened.close());
   const svc = new IndexService(new FakeEmbedder(8), noSource, undefined, undefined, reopened);
-  svc.hydrate();
+  await svc.hydrate();
 
   const result = await svc.retrieve(rec.id, A, 'anything', { requireApproved: true });
   assert.equal(result.ok, false, 'damaged content must never back production retrieval');
@@ -299,7 +299,7 @@ function pointers(dbPath: string, indexId: string): { version: number; approved:
   return { version: r.version, approved: r.approved_version };
 }
 
-test('a v5 database upgrades to v7 with its approved index preserved and no re-index', (t) => {
+test('a v5 database upgrades to v7 with its approved index preserved and no re-index', async (t) => {
   const dbPath = tmpDb();
 
   // Build a v5-shaped database: chunks with NO index_version, state 'approved',
@@ -328,8 +328,8 @@ test('a v5 database upgrades to v7 with its approved index preserved and no re-i
   // Opening with the current engine migrates additively.
   const store = new SqliteDurableStore(dbPath);
   t.after(() => store.close());
-  assert.equal(store.health().schemaVersion, 7);
-  assert.equal(store.health().migrationState, 'applied');
+  assert.equal((await store.health()).schemaVersion, 7);
+  assert.equal((await store.health()).migrationState, 'applied');
 
   const p = pointers(dbPath, 'idx_live');
   assert.equal(p.version, 5, 'latest version preserved');
@@ -337,7 +337,7 @@ test('a v5 database upgrades to v7 with its approved index preserved and no re-i
   assert.deepEqual(rowsAt(dbPath, 'idx_live', 5), ['approved v5 content'], 'existing chunks bound to v5 — no re-index');
 
   const svc = new IndexService(new FakeEmbedder(8), noSource, undefined, undefined, store);
-  svc.hydrate();
+  await svc.hydrate();
   const status = svc.status('idx_live', A)!;
   assert.equal(status.approvedVersion, 5, 'the approval pointer hydrates');
   assert.equal(status.stats.chunks, 1, 'approved content is loaded and retrievable');
@@ -371,12 +371,12 @@ test('MANDATORY: a failed v6 candidate leaves approved v5 intact across a restar
   const files = new Map<string, string>([['src/a.ts', 'approved content one']]);
   const store = new SqliteDurableStore(dbPath);
   const svc = new IndexService(new FakeEmbedder(8), mutableSource(files), undefined, undefined, store);
-  const rec = svc.createIndex(A, { sourceType: 'workspace', root: '/repo/a' });
+  const rec = await svc.createIndex(A, { sourceType: 'workspace', root: '/repo/a' });
 
   // v1 synced and approved (the live "v5 approved" shape, at smaller numbers).
   assert.equal((await svc.sync(rec.id, A)).ok, true);
   const approvedAt = svc.status(rec.id, A)!.version;
-  svc.setState(rec.id, A, 'approved');
+  await svc.setState(rec.id, A, 'approved');
   const before = rowsAt(dbPath, rec.id, approvedAt);
   assert.ok(before.length > 0, 'approved version has durable chunks');
   const approvedHit = await svc.retrieve(rec.id, A, 'approved content one', { requireApproved: true });
@@ -389,7 +389,7 @@ test('MANDATORY: a failed v6 candidate leaves approved v5 intact across a restar
     embed: async (texts: string[]) => texts.map(() => [Number.NaN, 0, 0, 0, 0, 0, 0, 0]),
   };
   const svcBroken = new IndexService(brokenEmbedder, mutableSource(files), undefined, undefined, store);
-  svcBroken.hydrate();
+  await svcBroken.hydrate();
   const failed = await svcBroken.sync(rec.id, A);
 
   assert.equal(failed.ok, false, 'a malformed candidate must fail');
@@ -405,7 +405,7 @@ test('MANDATORY: a failed v6 candidate leaves approved v5 intact across a restar
   const reopened = new SqliteDurableStore(dbPath);
   t.after(() => reopened.close());
   const after = new IndexService(new FakeEmbedder(8), mutableSource(files), undefined, undefined, reopened);
-  assert.doesNotThrow(() => after.hydrate(), 'restart must succeed');
+  await assert.doesNotReject(() => after.hydrate(), 'restart must succeed');
 
   const status = after.status(rec.id, A)!;
   assert.equal(status.approvedVersion, approvedAt, 'approval survives the restart');
@@ -423,11 +423,11 @@ test('MANDATORY: a successful v6 keeps serving v5 until explicit approval, then 
   const store = new SqliteDurableStore(dbPath);
   t.after(() => store.close());
   const svc = new IndexService(new FakeEmbedder(8), mutableSource(files), undefined, undefined, store);
-  const rec = svc.createIndex(A, { sourceType: 'workspace', root: '/repo/a' });
+  const rec = await svc.createIndex(A, { sourceType: 'workspace', root: '/repo/a' });
 
   await svc.sync(rec.id, A);
   const v1 = svc.status(rec.id, A)!.version;
-  svc.setState(rec.id, A, 'approved');
+  await svc.setState(rec.id, A, 'approved');
   assert.equal(pointers(dbPath, rec.id).approved, v1);
 
   // A SUCCESSFUL replacement candidate.
@@ -449,7 +449,7 @@ test('MANDATORY: a successful v6 keeps serving v5 until explicit approval, then 
   assert.ok(!beforeText.includes('second generation'), 'candidate content is invisible to production');
 
   // Explicit, version-bound approval promotes atomically.
-  svc.setState(rec.id, A, 'approved');
+  await svc.setState(rec.id, A, 'approved');
   assert.equal(pointers(dbPath, rec.id).approved, v2, 'approval promoted to the candidate');
   const afterApproval = await svc.retrieve(rec.id, A, 'generation text', { requireApproved: true });
   const afterText = (afterApproval as { chunks: Array<{ snippet: string }> }).chunks.map((c) => c.snippet).join(' ');
@@ -463,11 +463,11 @@ test('copy-forward keeps a candidate complete, and pruning bounds the history', 
   const store = new SqliteDurableStore(dbPath);
   t.after(() => store.close());
   const svc = new IndexService(new FakeEmbedder(8), mutableSource(files), undefined, undefined, store);
-  const rec = svc.createIndex(A, { sourceType: 'workspace', root: '/repo/a' });
+  const rec = await svc.createIndex(A, { sourceType: 'workspace', root: '/repo/a' });
 
   await svc.sync(rec.id, A);
   const v1 = svc.status(rec.id, A)!.version;
-  svc.setState(rec.id, A, 'approved');
+  await svc.setState(rec.id, A, 'approved');
 
   files.set('a.ts', 'alpha rewritten'); // only a.ts changes
   await svc.sync(rec.id, A);
@@ -495,7 +495,7 @@ test('stale approval is still refused when the version moved on', async (t) => {
   const store = new SqliteDurableStore(dbPath);
   t.after(() => store.close());
   const svc = new IndexService(new FakeEmbedder(8), mutableSource(files), undefined, undefined, store);
-  const rec = svc.createIndex(A, { sourceType: 'workspace', root: '/repo/a' });
+  const rec = await svc.createIndex(A, { sourceType: 'workspace', root: '/repo/a' });
 
   await svc.sync(rec.id, A);
   const observed = svc.status(rec.id, A)!.version;

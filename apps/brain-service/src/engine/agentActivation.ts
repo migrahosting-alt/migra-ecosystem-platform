@@ -56,7 +56,12 @@ export class AgentActivationAuthority {
     this.bootstrapExpiresAt = this.now() + BOOTSTRAP_TTL_MS;
     this.bootstrapTimer = setTimeout(() => { this.bootstrapDigest = undefined; }, BOOTSTRAP_TTL_MS);
     this.bootstrapTimer.unref();
-    auditStore.append({ correlationId: this.serverInstanceId, type: 'bootstrap.created', component: 'agent-activation', outcome: this.bootstrapDigest ? 'available' : 'unavailable', fields: { expiresAt: this.bootstrapExpiresAt } });
+    // floating-ok: detached — a constructor cannot await, and `bootstrap.created`
+    // is NOT in CRITICAL_EVENTS so the append never throws. It records that a
+    // secret was made available; the authorization DECISION is `bootstrap.consumed`
+    // in bootstrap(), which is awaited and does gate. Marked `void` so the
+    // detachment is a statement of intent rather than an oversight.
+    void auditStore.append({ correlationId: this.serverInstanceId, type: 'bootstrap.created', component: 'agent-activation', outcome: this.bootstrapDigest ? 'available' : 'unavailable', fields: { expiresAt: this.bootstrapExpiresAt } });
   }
 
   static fromEnvironment(env: NodeJS.ProcessEnv = process.env): AgentActivationAuthority {
@@ -102,8 +107,8 @@ export class AgentActivationAuthority {
       expiresAt: issuedAt + ACTIVATION_TTL_MS,
     };
     this.activations.set(input.activationId, record);
-    auditStore.append({ correlationId: this.serverInstanceId, type: 'bootstrap.consumed', component: 'agent-activation', outcome: 'consumed', fields: { activation: auditHash(input.activationId) } });
-    auditStore.append({ correlationId: this.serverInstanceId, type: 'activation.issued', component: 'agent-activation', outcome: 'issued', fields: { activation: auditHash(input.activationId), workspace: auditHash(canonicalWorkspace), expiresAt: record.expiresAt } });
+    await auditStore.append({ correlationId: this.serverInstanceId, type: 'bootstrap.consumed', component: 'agent-activation', outcome: 'consumed', fields: { activation: auditHash(input.activationId) } });
+    await auditStore.append({ correlationId: this.serverInstanceId, type: 'activation.issued', component: 'agent-activation', outcome: 'issued', fields: { activation: auditHash(input.activationId), workspace: auditHash(canonicalWorkspace), expiresAt: record.expiresAt } });
     return { activationCapability: rawCapability, activationId: input.activationId, serverInstanceId: this.serverInstanceId, canonicalWorkspace, allowedRecipes, issuedAt, expiresAt: record.expiresAt };
   }
 

@@ -150,8 +150,8 @@ test('audit events round-trip identically to SQLite and are idempotent', { skip:
   sq.appendAuditEvent(e);
   sq.appendAuditEvent(e); // replay
   sq.appendAuditEvent(bare);
-  const sqRecent = sq.recentAuditEvents(50);
-  const sqByCorr = sq.auditByCorrelation('corr1');
+  const sqRecent = (await sq.recentAuditEvents(50));
+  const sqByCorr = (await sq.auditByCorrelation('corr1'));
   sq.close();
 
   await scoped(A, async (c) => {
@@ -174,7 +174,7 @@ test('usage records round-trip identically to SQLite', { skip: skip ?? false }, 
   sq.appendUsageRecord(r);
   sq.appendUsageRecord(r);
   sq.appendUsageRecord(bare);
-  const sqRows = sq.recentUsageRecords(50);
+  const sqRows = (await sq.recentUsageRecords(50));
   sq.close();
 
   await scoped(A, async (c) => {
@@ -199,7 +199,7 @@ test('incident upsert updates the same subset SQLite updates', { skip: skip ?? f
   const sq = sqlite();
   sq.upsertIncident(first);
   sq.upsertIncident(second);
-  const sqRows = sq.listIncidents(50);
+  const sqRows = (await sq.listIncidents(50));
   sq.close();
 
   await scoped(A, async (c) => {
@@ -224,8 +224,8 @@ test('budget scopes and reservations round-trip identically to SQLite', { skip: 
   sq.saveReservation(reservation());
   sq.saveReservation(reservation({ status: 'settled', amountUsd: 99 }));
   sq.saveReservation(reservation({ reservationId: 'res2' }));
-  const sqScopes = sq.loadBudgetScopes();
-  const sqRes = sq.loadReservations();
+  const sqScopes = (await sq.loadBudgetScopes());
+  const sqRes = (await sq.loadReservations());
   sq.close();
 
   await scoped(A, async (c) => {
@@ -266,8 +266,8 @@ test('retention matches SQLite and spares open incidents', { skip: skip ?? false
   seed.usages.forEach((x) => sq.appendUsageRecord(x));
   seed.incidents.forEach((x) => sq.upsertIncident(x));
   seed.recoveries.forEach((x) => sq.appendRecoveryEvent(x));
-  const sqCounts = sq.pruneOperational(cutoffs);
-  const sqIncidents = sq.listIncidents(50);
+  const sqCounts = (await sq.pruneOperational(cutoffs));
+  const sqIncidents = (await sq.listIncidents(50));
   sq.close();
 
   await scoped(A, async (c) => {
@@ -315,7 +315,7 @@ test('operational counts match SQLite for a single tenant', { skip: skip ?? fals
   sq.upsertIncident(incident({ incidentId: 'c3' }));
   sq.appendRecoveryEvent(recovery({ id: 'c4' }));
   sq.saveReservation(reservation({ reservationId: 'c5' }));
-  const sqCounts = sq.operationalCounts();
+  const sqCounts = (await sq.operationalCounts());
   sq.close();
 
   await scoped(B, async (c) => {

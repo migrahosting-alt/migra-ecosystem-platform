@@ -65,11 +65,12 @@ export class TelemetryHub {
     // Bridge store lifecycle → durable audit (only when correlated + mappable).
     const auditType = e.correlationId ? toAuditType(e.event) : null;
     if (auditType && e.correlationId) {
-      try {
-        auditStore.append({ correlationId: e.correlationId, type: auditType, component: e.event.startsWith('proposal.') ? 'proposal-store' : 'approval-store', outcome: String(e.fields.reason ?? ''), fields: e.fields });
-      } catch {
-        /* non-critical bridge — never break the store operation */
-      }
+      // floating-ok: detached — this bridge exists to observe store lifecycle and
+      // is contractually forbidden from affecting it ("never break the store
+      // operation"). Awaiting would make a slow or failing audit sink able to stall
+      // an approval-store write. No `store.*` bridged type is in CRITICAL_EVENTS,
+      // so `append` never throws here; the catch keeps a rejected write silent.
+      void auditStore.append({ correlationId: e.correlationId, type: auditType, component: e.event.startsWith('proposal.') ? 'proposal-store' : 'approval-store', outcome: String(e.fields.reason ?? ''), fields: e.fields }).catch(() => { /* non-critical bridge */ });
     }
   };
 

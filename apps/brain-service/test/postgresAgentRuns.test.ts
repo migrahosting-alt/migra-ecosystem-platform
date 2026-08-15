@@ -122,7 +122,7 @@ test('a fully-populated run round-trips identically to SQLite', { skip: skip ?? 
 
   const sq = sqlite();
   sq.insertAgentRun(run, ev);
-  const fromSqlite = sq.loadAgentRun('run-parity-1');
+  const fromSqlite = (await sq.loadAgentRun('run-parity-1'));
   sq.close();
 
   await scoped(A, (c) => insertAgentRun(c, run, ev));
@@ -149,7 +149,7 @@ test('a minimally-populated run round-trips identically to SQLite', { skip: skip
 
   const sq = sqlite();
   sq.insertAgentRun(run, ev);
-  const fromSqlite = sq.loadAgentRun('run-parity-2');
+  const fromSqlite = (await sq.loadAgentRun('run-parity-2'));
   sq.close();
 
   await scoped(A, (c) => insertAgentRun(c, run, ev));
@@ -164,8 +164,8 @@ test('creation writes the CREATED event at seq 1 and sets audit_seq to 1', { ski
 
   const sq = sqlite();
   sq.insertAgentRun(run, ev);
-  const sqEvents = sq.loadAgentRunEvents('run-created-1');
-  const sqAudit = sq.loadAgentRun('run-created-1')!.auditSeq;
+  const sqEvents = (await sq.loadAgentRunEvents('run-created-1'));
+  const sqAudit = (await sq.loadAgentRun('run-created-1'))!.auditSeq;
   sq.close();
 
   await scoped(A, (c) => insertAgentRun(c, run, ev));
@@ -188,9 +188,9 @@ test('a transition writes the same event SQLite writes', { skip: skip ?? false }
 
   const sq = sqlite();
   sq.insertAgentRun(run, ev);
-  const sqOk = sq.transitionAgentRun(input);
-  const sqEvents = sq.loadAgentRunEvents('run-trans-1');
-  const sqRun = sq.loadAgentRun('run-trans-1');
+  const sqOk = (await sq.transitionAgentRun(input));
+  const sqEvents = (await sq.loadAgentRunEvents('run-trans-1'));
+  const sqRun = (await sq.loadAgentRun('run-trans-1'));
   sq.close();
 
   await scoped(A, (c) => insertAgentRun(c, run, ev));
@@ -217,8 +217,8 @@ test('appendAgentRunEventNext allocates the next sequence, matching SQLite', { s
   const sq = sqlite();
   sq.insertAgentRun(run, ev);
   sq.appendAgentRunEvent(next);
-  const sqEvents = sq.loadAgentRunEvents('run-append-1');
-  const sqAudit = sq.loadAgentRun('run-append-1')!.auditSeq;
+  const sqEvents = (await sq.loadAgentRunEvents('run-append-1'));
+  const sqAudit = (await sq.loadAgentRun('run-append-1'))!.auditSeq;
   sq.close();
 
   await scoped(A, (c) => insertAgentRun(c, run, ev));
@@ -309,13 +309,13 @@ test('a fenced append matches SQLite and is idempotent on replay', { skip: skip 
 
   const sq = sqlite();
   sq.insertAgentRun(run, ev);
-  const sqClaim = sq.claimAgentRunReconciliation('run-fenced-1', 'w1', 50_000, 10_000)!;
-  const sqFenced = sq.appendAgentRunEventUnderFence({
+  const sqClaim = (await sq.claimAgentRunReconciliation('run-fenced-1', 'w1', 50_000, 10_000))!;
+  const sqFenced = (await sq.appendAgentRunEventUnderFence({
     runId: 'run-fenced-1', at: 11_000, source: 'RECONCILIATION', eventType: 'PROBE',
     eventId: 'run-fenced-1:probe',
     reconciliation: { owner: 'w1', fence: sqClaim.fence, leaseValidAt: 11_000, expectedVersion: sqClaim.version },
-  });
-  const sqEvents = sq.loadAgentRunEvents('run-fenced-1');
+  }));
+  const sqEvents = (await sq.loadAgentRunEvents('run-fenced-1'));
   sq.close();
 
   await scoped(A, (c) => insertAgentRun(c, run, ev));
@@ -397,8 +397,8 @@ test('prune removes an eligible run and records a tombstone matching SQLite', { 
 
   const sq = sqlite();
   sq.insertAgentRun(run, ev);
-  const sqCounts = sq.pruneAgentRuns(5_000, 10, 6_000);
-  const sqTombs = sq.loadAgentRunTombstones();
+  const sqCounts = (await sq.pruneAgentRuns(5_000, 10, 6_000));
+  const sqTombs = (await sq.loadAgentRunTombstones());
   sq.close();
 
   await scoped(A, (c) => insertAgentRun(c, run, ev));
@@ -516,13 +516,13 @@ async function seedRejectedSource(sq: SqliteDurableStore, runId: string): Promis
 
   sq.insertAgentRun(run, ev);
   sq.appendAgentRunEvent(proposal);
-  assert.equal(sq.transitionAgentRun(reject), true);
+  assert.equal((await sq.transitionAgentRun(reject)), true);
 
   await scoped(A, (c) => insertAgentRun(c, run, ev));
   await scoped(A, (c) => appendAgentRunEventNext(c, proposal));
   assert.equal(await scoped(A, (c) => transitionAgentRun(c, reject)), true);
 
-  const sqSource = sq.loadAgentRun(runId)!;
+  const sqSource = (await sq.loadAgentRun(runId))!;
   const pgSource = await scoped(A, (c) => loadAgentRun(c, runId));
   assert.deepEqual(pgSource, sqSource, 'both engines must agree on the source before reproposing');
   return sqSource;
@@ -559,28 +559,28 @@ function reproposalInput(
 test('reproposal links a successor and matches SQLite, including the replay', { skip: skip ?? false }, async () => {
   const sq = sqlite();
   const source = await seedRejectedSource(sq, 'src_ok');
-  const events = sq.loadAgentRunEvents('src_ok');
+  const events = (await sq.loadAgentRunEvents('src_ok'));
   const input = reproposalInput(source, events, 'req-1', 'succ_ok');
 
-  const sqResult = sq.reproposeAgentRun(input);
+  const sqResult = (await sq.reproposeAgentRun(input));
   const pgResult = await scoped(A, (c) => reproposeAgentRun(c, input));
   assert.equal(sqResult.ok, true, 'the fixture must actually pass provenance');
   assert.deepEqual(pgResult, sqResult);
 
   // Source lineage and successor must agree field for field.
   assert.deepEqual(
-    await scoped(A, (c) => loadAgentRun(c, 'src_ok')), sq.loadAgentRun('src_ok'));
+    await scoped(A, (c) => loadAgentRun(c, 'src_ok')), (await sq.loadAgentRun('src_ok')));
   assert.deepEqual(
-    await scoped(A, (c) => loadAgentRun(c, 'succ_ok')), sq.loadAgentRun('succ_ok'));
+    await scoped(A, (c) => loadAgentRun(c, 'succ_ok')), (await sq.loadAgentRun('succ_ok')));
   assert.deepEqual(
-    await scoped(A, (c) => loadAgentRunEvents(c, 'src_ok')), sq.loadAgentRunEvents('src_ok'));
+    await scoped(A, (c) => loadAgentRunEvents(c, 'src_ok')), (await sq.loadAgentRunEvents('src_ok')));
   assert.deepEqual(
-    await scoped(A, (c) => loadAgentRunEvents(c, 'succ_ok')), sq.loadAgentRunEvents('succ_ok'));
+    await scoped(A, (c) => loadAgentRunEvents(c, 'succ_ok')), (await sq.loadAgentRunEvents('succ_ok')));
 
   // Replaying the same request id returns the existing successor, not a conflict.
   const replayInput = reproposalInput(
-    sq.loadAgentRun('src_ok')!, sq.loadAgentRunEvents('src_ok'), 'req-1', 'succ_ok');
-  const sqReplay = sq.reproposeAgentRun(replayInput);
+    (await sq.loadAgentRun('src_ok'))!, (await sq.loadAgentRunEvents('src_ok')), 'req-1', 'succ_ok');
+  const sqReplay = (await sq.reproposeAgentRun(replayInput));
   const pgReplay = await scoped(A, (c) => reproposeAgentRun(c, replayInput));
   assert.equal(sqReplay.ok && sqReplay.created, false);
   assert.deepEqual(pgReplay, sqReplay);
@@ -590,15 +590,15 @@ test('reproposal links a successor and matches SQLite, including the replay', { 
 test('reproposal refusals match SQLite code for code', { skip: skip ?? false }, async () => {
   const sq = sqlite();
   const source = await seedRejectedSource(sq, 'src_refuse');
-  const events = sq.loadAgentRunEvents('src_refuse');
+  const events = (await sq.loadAgentRunEvents('src_refuse'));
 
   // Unknown source.
   const unknown = { ...reproposalInput(source, events, 'r', 's1'), sourceRunId: 'nope' };
-  assert.deepEqual(await scoped(A, (c) => reproposeAgentRun(c, unknown)), sq.reproposeAgentRun(unknown));
+  assert.deepEqual(await scoped(A, (c) => reproposeAgentRun(c, unknown)), (await sq.reproposeAgentRun(unknown)));
 
   // Version moved under the caller.
   const stale = { ...reproposalInput(source, events, 'r', 's2'), sourceExpectedVersion: 999 };
-  assert.deepEqual(await scoped(A, (c) => reproposeAgentRun(c, stale)), sq.reproposeAgentRun(stale));
+  assert.deepEqual(await scoped(A, (c) => reproposeAgentRun(c, stale)), (await sq.reproposeAgentRun(stale)));
 
   // Provenance digest that does not match the stored history.
   const tampered = reproposalInput(source, events, 'r', 's3');
@@ -606,7 +606,7 @@ test('reproposal refusals match SQLite code for code', { skip: skip ?? false }, 
     ...tampered,
     provenance: { ...tampered.provenance, eventDigest: 'deadbeef' },
   };
-  assert.deepEqual(await scoped(A, (c) => reproposeAgentRun(c, badDigest)), sq.reproposeAgentRun(badDigest));
+  assert.deepEqual(await scoped(A, (c) => reproposeAgentRun(c, badDigest)), (await sq.reproposeAgentRun(badDigest)));
   sq.close();
 });
 
@@ -617,7 +617,7 @@ test('a failed reproposal leaves no successor behind', { skip: skip ?? false }, 
   // reachable from nothing.
   const sq = sqlite();
   const source = await seedRejectedSource(sq, 'src_rollback');
-  const events = sq.loadAgentRunEvents('src_rollback');
+  const events = (await sq.loadAgentRunEvents('src_rollback'));
   const input = reproposalInput(source, events, 'req-x', 'succ_orphan');
 
   // Occupy the successor's created-event id so the strict append collides
@@ -659,8 +659,8 @@ test('a child round-trips identically to SQLite', { skip: skip ?? false }, async
 
   const sq = sqlite();
   sq.insertAgentRun(run, ev);
-  const sqIns = sq.insertAgentRunChild(ch);
-  const sqLoad = sq.loadAgentRunChild('child-1');
+  const sqIns = (await sq.insertAgentRunChild(ch));
+  const sqLoad = (await sq.loadAgentRunChild('child-1'));
   sq.close();
 
   await scoped(A, (c) => insertAgentRun(c, run, ev));
@@ -707,9 +707,9 @@ test('child transitions enforce SQLite guard order: terminal beats a fresh revis
   sq.insertAgentRun(run, ev);
   sq.insertAgentRunChild(ch);
   sq.transitionAgentRunChild({ childId: 'child-2', expectedRevision: 1, nextState: 'running', at: 200 });
-  const sqDone = sq.transitionAgentRunChild({ childId: 'child-2', expectedRevision: 2, nextState: 'completed', at: 300 });
+  const sqDone = (await sq.transitionAgentRunChild({ childId: 'child-2', expectedRevision: 2, nextState: 'completed', at: 300 }));
   // Revision 3 is genuinely current, but the child is finished.
-  const sqAfter = sq.transitionAgentRunChild({ childId: 'child-2', expectedRevision: 3, nextState: 'failed', at: 400 });
+  const sqAfter = (await sq.transitionAgentRunChild({ childId: 'child-2', expectedRevision: 3, nextState: 'failed', at: 400 }));
   sq.close();
 
   await scoped(A, (c) => insertAgentRun(c, run, ev));

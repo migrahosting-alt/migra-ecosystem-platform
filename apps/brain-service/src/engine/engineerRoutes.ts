@@ -336,7 +336,7 @@ export function registerEngineerRoutes(
       return { ok: false, code: 'NOT_FOUND', error: 'unknown incident' };
     }
     try {
-      return { ok: true, plan: recoveryManager.plan(inc.correlationId) };
+      return { ok: true, plan: await recoveryManager.plan(inc.correlationId) };
     } catch (err) {
       return recFail(reply, err);
     }
@@ -350,14 +350,14 @@ export function registerEngineerRoutes(
   });
   app.post<{ Params: { id: string }; Body: { approvalToken?: string } }>('/api/ai/engineer/recovery/:id/apply', async (request, reply) => {
     try {
-      return { ok: true, applied: recoveryManager.apply(request.params.id, request.body?.approvalToken ?? '', recFs) };
+      return { ok: true, applied: await recoveryManager.apply(request.params.id, request.body?.approvalToken ?? '', recFs) };
     } catch (err) {
       return recFail(reply, err);
     }
   });
   app.post<{ Params: { id: string } }>('/api/ai/engineer/recovery/:id/verify', async (request, reply) => {
     try {
-      return { ok: true, evidence: recoveryManager.verify(request.params.id, recFs) };
+      return { ok: true, evidence: await recoveryManager.verify(request.params.id, recFs) };
     } catch (err) {
       return recFail(reply, err);
     }
@@ -365,8 +365,8 @@ export function registerEngineerRoutes(
   // Resolve requires passing validation evidence (verify is re-run server-side).
   app.post<{ Params: { id: string } }>('/api/ai/engineer/recovery/:id/resolve', async (request, reply) => {
     try {
-      const evidence = recoveryManager.verify(request.params.id, recFs);
-      recoveryManager.resolve(request.params.id, evidence);
+      const evidence = await recoveryManager.verify(request.params.id, recFs);
+      await recoveryManager.resolve(request.params.id, evidence);
       return { ok: true, resolved: true, evidence };
     } catch (err) {
       return recFail(reply, err);
@@ -394,7 +394,7 @@ export function registerEngineerRoutes(
     const stage: StageLogger = makeStageLogger(correlationId, jsonLineSink((line) => request.log.info(line)));
     const scope: Scope = scopeFrom(request);
     stage.log('request', { rootPath: body.rootPath, ecosystem: Boolean(body.ecosystem) });
-    auditStore.append({ correlationId, type: 'execution.started', component: 'engineer', requestId: headerId || undefined, fields: { workspace: auditHash(body.rootPath), ecosystem: Boolean(body.ecosystem) } });
+    await auditStore.append({ correlationId, type: 'execution.started', component: 'engineer', requestId: headerId || undefined, fields: { workspace: auditHash(body.rootPath), ecosystem: Boolean(body.ecosystem) } });
 
     // Slice 2 — local-first coding routing. When provider routing is wired, the
     // engineer selects the highest-ranked eligible LOCAL model under the active
@@ -438,7 +438,7 @@ export function registerEngineerRoutes(
     }
     const provider = providerFor(decision.model);
     stage.log('route', { model: decision.model.id, provider: decision.model.provider, fallbackRecommended: routing.fallbackRecommended });
-    auditStore.append({ correlationId, type: 'execution.routed', component: 'engineer', fields: { model: decision.model.id, provider: decision.model.provider, ...(routing.policy ? { policy: routing.policy, fallbackRecommended: routing.fallbackRecommended } : {}) } });
+    await auditStore.append({ correlationId, type: 'execution.routed', component: 'engineer', fields: { model: decision.model.id, provider: decision.model.provider, ...(routing.policy ? { policy: routing.policy, fallbackRecommended: routing.fallbackRecommended } : {}) } });
 
     reply.hijack();
     const raw = reply.raw;
@@ -480,7 +480,7 @@ export function registerEngineerRoutes(
     // names somebody it did not learn from the requester.
     const principal = resolveOperatorPrincipal({ headers: request.headers as Record<string, string | undefined>, env: process.env });
 
-    auditStore.append({
+    await auditStore.append({
       correlationId,
       type: 'capability.decided',
       component: 'engineer',
@@ -548,7 +548,7 @@ export function registerEngineerRoutes(
         now: () => new Date().toISOString(),
       },
     );
-    auditStore.append({
+    await auditStore.append({
       correlationId,
       type: 'liveKnowledge.decided',
       component: 'engineer',
@@ -558,7 +558,7 @@ export function registerEngineerRoutes(
     });
 
     if (grounding) {
-      auditStore.append({
+      await auditStore.append({
         correlationId,
         type: 'retrieval.decided',
         component: 'engineer',
@@ -640,7 +640,7 @@ export function registerEngineerRoutes(
           capability.reason,
         ].join('\n'),
       });
-      auditStore.append({
+      await auditStore.append({
         correlationId,
         type: 'capability.refused',
         component: 'engineer',
@@ -748,7 +748,7 @@ export function registerEngineerRoutes(
           } catch (err) {
             if (err instanceof ToolNotPermittedError) {
               stage.log('error', { tool, code: 'CAPABILITY_TOOL_DENIED', detail: err.message.slice(0, 200) });
-              auditStore.append({
+              await auditStore.append({
                 correlationId,
                 type: 'capability.tool_denied',
                 component: 'engineer',
@@ -799,7 +799,7 @@ export function registerEngineerRoutes(
       },
     );
 
-    auditStore.append({ correlationId, type: 'loop.started', component: 'engineer' });
+    await auditStore.append({ correlationId, type: 'loop.started', component: 'engineer' });
     let failure: ProviderFailure | undefined;
     let terminal: 'completed' | 'failed' = 'failed';
     let finalText = '';
@@ -822,13 +822,13 @@ export function registerEngineerRoutes(
       send('error', { type: 'error', code: failure.code, cause: failure.cause, ...(failure.limitMs ? { limitMs: failure.limitMs } : {}), error: sanitizeError(err) });
     }
     if (terminal === 'completed') {
-      auditStore.append({ correlationId, type: 'loop.completed', component: 'engineer' });
-      auditStore.append({ correlationId, type: 'execution.completed', component: 'engineer', outcome: 'ok' });
+      await auditStore.append({ correlationId, type: 'loop.completed', component: 'engineer' });
+      await auditStore.append({ correlationId, type: 'execution.completed', component: 'engineer', outcome: 'ok' });
     } else {
-      auditStore.append({ correlationId, type: 'loop.failed', component: 'engineer' });
+      await auditStore.append({ correlationId, type: 'loop.failed', component: 'engineer' });
       // Metadata only — the cause CLASS and the limit that expired, never the
       // provider's text or the prompt.
-      auditStore.append({
+      await auditStore.append({
         correlationId,
         type: 'execution.failed',
         component: 'engineer',

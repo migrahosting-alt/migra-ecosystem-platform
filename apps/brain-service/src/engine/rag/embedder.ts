@@ -144,8 +144,8 @@ async function providerDetail(res: Response): Promise<string> {
 /** Durable-cache hook, keyed by (model, version, contentHash) so an embedding
  * from one model/version is never reused for another. */
 export interface EmbeddingCacheStore {
-  getEmbedding(model: string, version: string, contentHash: string): number[] | undefined;
-  putEmbedding(model: string, version: string, contentHash: string, vector: number[]): void;
+  getEmbedding(model: string, version: string, contentHash: string): Promise<number[] | undefined>;
+  putEmbedding(model: string, version: string, contentHash: string, vector: number[]): Promise<void>;
 }
 
 /** Wraps an embedder with an in-memory content-hash cache, optionally backed by a
@@ -186,7 +186,10 @@ export class CachedEmbedder implements Embedder {
     for (let i = 0; i < texts.length; i += 1) {
       const key = keys[i]!;
       // Durable cache: (model, version, hash) — never cross model/version.
-      const hit = this.cache.get(key) ?? this.persistence?.getEmbedding(this.model, this.version, key);
+      // Awaited: the durable store's embedding accessors became Promise-returning.
+      // Un-awaited, a Promise object is truthy and would have been stored and
+      // returned AS an embedding vector, corrupting the index.
+      const hit = this.cache.get(key) ?? (await this.persistence?.getEmbedding(this.model, this.version, key));
       if (hit) {
         this.put(key, hit);
         out[i] = hit;
@@ -200,13 +203,19 @@ export class CachedEmbedder implements Embedder {
     if (wanted.size) {
       const missKeys = [...wanted.keys()];
       const fresh = await this.inner.embed(missKeys.map((k) => texts[wanted.get(k)![0]!]!));
+      // Durable writes are collected and awaited together: concurrent rather than
+      // serialized, but still observed — an unobserved rejection here would lose
+      // cache entries silently and surface as an unhandled rejection.
+      const persisted: Promise<void>[] = [];
       for (let j = 0; j < missKeys.length; j += 1) {
         const key = missKeys[j]!;
         const vector = fresh[j]!;
         for (const i of wanted.get(key)!) out[i] = vector;
         this.put(key, vector);
-        this.persistence?.putEmbedding(this.model, this.version, key, vector);
+        const write = this.persistence?.putEmbedding(this.model, this.version, key, vector);
+        if (write) persisted.push(write);
       }
+      await Promise.all(persisted);
     }
 
     // Fail loudly rather than let a hole reach an indexed chunk.

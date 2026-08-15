@@ -52,7 +52,7 @@ function harness(opts: { failPayloadWrite?: boolean } = {}) {
   let stored: CodingRunPayloadV1 = initialCodingPayload('cancelled lines are counted');
   const writes: string[] = [];
   const state = { fail: opts.failPayloadWrite ?? false };
-  const writePayload = (payload: CodingRunPayloadV1, note: string): boolean => {
+  const writePayload = async (payload: CodingRunPayloadV1, note: string): Promise<boolean> => {
     if (state.fail) return false;
     stored = payload;
     writes.push(note);
@@ -67,18 +67,18 @@ function harness(opts: { failPayloadWrite?: boolean } = {}) {
 
 // ── 1. child created but parent reference fails → zero dispatch ──────────────
 
-test('a child whose parent reference fails is never dispatched', () => {
+test('a child whose parent reference fails is never dispatched', async () => {
   const h = harness({ failPayloadWrite: true });
-  const registration = registerCodingChild(h.journal, h.writePayload, {
+  const registration = (await registerCodingChild(h.journal, h.writePayload, {
     runId: RUN_ID, payload: h.payload, childId: 'c_apply', kind: 'initial_apply', at: 2_000,
-  });
+  }));
 
   assert.equal(registration.decision, 'refused', 'refusal is the ONLY safe answer — dispatch must not proceed');
   assert.equal(registration.decision === 'refused' && registration.reason.includes('parent reference not persisted'), true);
 
   // The child row exists and is terminal-but-never-started, so nothing can later
   // mistake it for live work.
-  const child = h.journal.child('c_apply');
+  const child = (await h.journal.child('c_apply'));
   assert.equal(child?.state, 'failed');
   assert.equal(child?.terminalCategory, 'orphaned_before_dispatch');
   assert.equal(child?.startedAt, undefined, 'a refused child was never started');
@@ -88,16 +88,16 @@ test('a child whose parent reference fails is never dispatched', () => {
   assert.deepEqual(registration.payload.abandonedChildIds, ['c_apply']);
 });
 
-test('the reference is persisted BEFORE dispatch is permitted', () => {
+test('the reference is persisted BEFORE dispatch is permitted', async () => {
   const h = harness();
-  const registration = registerCodingChild(h.journal, h.writePayload, {
+  const registration = (await registerCodingChild(h.journal, h.writePayload, {
     runId: RUN_ID, payload: h.payload, childId: 'c_plan', kind: 'repository_planning', at: 2_000,
-  });
+  }));
   assert.equal(registration.decision, 'dispatch');
   // The payload write happened during registration, not after.
   assert.deepEqual(h.writes, ['child.registered:repository_planning']);
   assert.deepEqual(h.payload.childRefs, [{ childId: 'c_plan', kind: 'repository_planning', attempt: 1 }]);
-  assert.equal(h.journal.child('c_plan')?.state, 'created', 'still created — the caller has not dispatched yet');
+  assert.equal((await h.journal.child('c_plan'))?.state, 'created', 'still created — the caller has not dispatched yet');
 });
 
 // ── 2–3. bidirectional reconciliation ────────────────────────────────────────
@@ -130,80 +130,80 @@ test('an orphaned child is detected, and a never-dispatched one is not alarming'
 
 // ── 4–5. completion gating ───────────────────────────────────────────────────
 
-test('an active required child blocks the parent terminal state', () => {
+test('an active required child blocks the parent terminal state', async () => {
   const h = harness();
-  const reg = registerCodingChild(h.journal, h.writePayload, { runId: RUN_ID, payload: h.payload, childId: 'c1', kind: 'validation', at: 2_000 });
+  const reg = (await registerCodingChild(h.journal, h.writePayload, { runId: RUN_ID, payload: h.payload, childId: 'c1', kind: 'validation', at: 2_000 }));
   assert.equal(reg.decision, 'dispatch');
   startCodingChild(h.journal, (reg as { child: DurableAgentRunChild }).child, 2_100);
 
-  assert.deepEqual(activeRequiredChildren(h.journal, RUN_ID).map((c) => c.childId), ['c1']);
-  const eligibility = codingCompletionEligibility(h.payload, h.children);
+  assert.deepEqual((await activeRequiredChildren(h.journal, RUN_ID)).map((c) => c.childId), ['c1']);
+  const eligibility = codingCompletionEligibility(h.payload, (await h.children));
   assert.equal(eligibility.mayComplete, false);
   assert.ok(eligibility.blockers.some((b) => b.kind === 'active_required_child'), JSON.stringify(eligibility.blockers));
 });
 
-test('a failed required child blocks success even though it is terminal', () => {
+test('a failed required child blocks success even though it is terminal', async () => {
   const h = harness();
-  const reg = registerCodingChild(h.journal, h.writePayload, { runId: RUN_ID, payload: h.payload, childId: 'c1', kind: 'validation', at: 2_000 });
-  const started = startCodingChild(h.journal, (reg as { child: DurableAgentRunChild }).child, 2_100)!;
+  const reg = (await registerCodingChild(h.journal, h.writePayload, { runId: RUN_ID, payload: h.payload, childId: 'c1', kind: 'validation', at: 2_000 }));
+  const started = (await startCodingChild(h.journal, (reg as { child: DurableAgentRunChild }).child, 2_100))!;
   finishCodingChild(h.journal, started, 'failure', 2_200, { exitCode: 1 });
 
-  assert.deepEqual(activeRequiredChildren(h.journal, RUN_ID), [], 'it IS terminal');
-  const eligibility = codingCompletionEligibility(h.payload, h.children);
+  assert.deepEqual((await activeRequiredChildren(h.journal, RUN_ID)), [], 'it IS terminal');
+  const eligibility = codingCompletionEligibility(h.payload, (await h.children));
   assert.equal(eligibility.mayComplete, false, 'terminality is not success');
   const failed = eligibility.blockers.find((b) => b.kind === 'required_child_not_successful');
   assert.ok(failed, JSON.stringify(eligibility.blockers));
   assert.equal('category' in failed && failed.category, 'observed_failure');
 });
 
-test('an interrupted required child blocks success — the outcome is unknown, not good', () => {
+test('an interrupted required child blocks success — the outcome is unknown, not good', async () => {
   const h = harness();
-  const reg = registerCodingChild(h.journal, h.writePayload, { runId: RUN_ID, payload: h.payload, childId: 'c1', kind: 'initial_apply', at: 2_000 });
+  const reg = (await registerCodingChild(h.journal, h.writePayload, { runId: RUN_ID, payload: h.payload, childId: 'c1', kind: 'initial_apply', at: 2_000 }));
   startCodingChild(h.journal, (reg as { child: DurableAgentRunChild }).child, 2_100);
-  const interrupted = markInterruptedChildren(h.journal, RUN_ID, 3_000);
+  const interrupted = (await markInterruptedChildren(h.journal, RUN_ID, 3_000));
 
   assert.equal(interrupted[0]?.state, 'interrupted');
   assert.equal(interrupted[0]?.terminalCategory, 'interrupted_by_restart');
-  assert.equal(codingCompletionEligibility(h.payload, h.children).mayComplete, false);
+  assert.equal(codingCompletionEligibility(h.payload, (await h.children)).mayComplete, false);
 });
 
 // ── 6–7. cancellation ────────────────────────────────────────────────────────
 
-test('a cancelled child requires a CONFIRMED cancellation', () => {
+test('a cancelled child requires a CONFIRMED cancellation', async () => {
   const h = harness();
-  const reg = registerCodingChild(h.journal, h.writePayload, { runId: RUN_ID, payload: h.payload, childId: 'c1', kind: 'validation', at: 2_000 });
-  const started = startCodingChild(h.journal, (reg as { child: DurableAgentRunChild }).child, 2_100)!;
+  const reg = (await registerCodingChild(h.journal, h.writePayload, { runId: RUN_ID, payload: h.payload, childId: 'c1', kind: 'validation', at: 2_000 }));
+  const started = (await startCodingChild(h.journal, (reg as { child: DurableAgentRunChild }).child, 2_100))!;
 
-  const cancelling = requestCodingChildCancellation(h.journal, started, 2_200)!;
+  const cancelling = (await requestCodingChildCancellation(h.journal, started, 2_200))!;
   assert.equal(cancelling.state, 'cancelling', 'a request is not an outcome');
   assert.equal(cancelling.cancellationConfirmedAt, undefined);
-  assert.equal(activeRequiredChildren(h.journal, RUN_ID).length, 1, 'cancelling work is still unresolved');
+  assert.equal((await activeRequiredChildren(h.journal, RUN_ID)).length, 1, 'cancelling work is still unresolved');
 
-  const cancelled = confirmCodingChildCancellation(h.journal, cancelling, 2_300, { signal: 'SIGTERM' })!;
+  const cancelled = (await confirmCodingChildCancellation(h.journal, cancelling, 2_300, { signal: 'SIGTERM' }))!;
   assert.equal(cancelled.state, 'cancelled');
   assert.equal(cancelled.cancellationConfirmedAt, 2_300);
   assert.equal(cancelled.terminalCategory, 'cancellation_confirmed');
-  assert.equal(codingCompletionEligibility(h.payload, h.children).mayComplete, false, 'a cancelled child is never a success');
+  assert.equal(codingCompletionEligibility(h.payload, (await h.children)).mayComplete, false, 'a cancelled child is never a success');
 });
 
-test('a late child success cannot override a cancelling parent', () => {
+test('a late child success cannot override a cancelling parent', async () => {
   const h = harness();
-  const reg = registerCodingChild(h.journal, h.writePayload, { runId: RUN_ID, payload: h.payload, childId: 'c1', kind: 'validation', at: 2_000 });
-  const started = startCodingChild(h.journal, (reg as { child: DurableAgentRunChild }).child, 2_100)!;
-  const cancelling = requestCodingChildCancellation(h.journal, started, 2_200)!;
-  const cancelled = confirmCodingChildCancellation(h.journal, cancelling, 2_300, {})!;
+  const reg = (await registerCodingChild(h.journal, h.writePayload, { runId: RUN_ID, payload: h.payload, childId: 'c1', kind: 'validation', at: 2_000 }));
+  const started = (await startCodingChild(h.journal, (reg as { child: DurableAgentRunChild }).child, 2_100))!;
+  const cancelling = (await requestCodingChildCancellation(h.journal, started, 2_200))!;
+  const cancelled = (await confirmCodingChildCancellation(h.journal, cancelling, 2_300, {}))!;
 
   // The work reports success after cancellation was confirmed. It must be
   // discarded: the child is terminal and terminal is immutable.
-  const late = finishCodingChild(h.journal, cancelled, 'success', 2_400, { exitCode: 0 });
+  const late = (await finishCodingChild(h.journal, cancelled, 'success', 2_400, { exitCode: 0 }));
   assert.equal(late, undefined, 'the late success was refused');
-  assert.equal(h.journal.child('c1')?.state, 'cancelled');
-  assert.equal(h.journal.child('c1')?.terminalCategory, 'cancellation_confirmed');
+  assert.equal((await h.journal.child('c1'))?.state, 'cancelled');
+  assert.equal((await h.journal.child('c1'))?.terminalCategory, 'cancellation_confirmed');
 
   // And at parent level a confirmed cancellation resolves to CANCELLED, never
   // COMPLETED, regardless of what arrived afterwards.
   const cancelledPayload: CodingRunPayloadV1 = { ...h.payload, cancellation: { requestedAt: 't1', confirmedAt: 't2' } };
-  const resolved = resolveCodingRun(cancelledPayload, h.children, () => true);
+  const resolved = resolveCodingRun(cancelledPayload, (await h.children), () => true);
   assert.equal(resolved.state, 'CANCELLED');
 });
 
@@ -217,82 +217,82 @@ test('a cancellation requested but never confirmed fails rather than reporting c
 
 // ── 8. independent revisions ─────────────────────────────────────────────────
 
-test('parent and child revision conflicts are independent', () => {
+test('parent and child revision conflicts are independent', async () => {
   const h = harness();
-  const reg = registerCodingChild(h.journal, h.writePayload, { runId: RUN_ID, payload: h.payload, childId: 'c1', kind: 'validation', at: 2_000 });
+  const reg = (await registerCodingChild(h.journal, h.writePayload, { runId: RUN_ID, payload: h.payload, childId: 'c1', kind: 'validation', at: 2_000 }));
   const child = (reg as { child: DurableAgentRunChild }).child;
 
-  const started = startCodingChild(h.journal, child, 2_100);
+  const started = (await startCodingChild(h.journal, child, 2_100));
   assert.ok(started);
   assert.equal(started.revision, 2);
 
   // A caller still holding revision 1 loses; the winner's record is unchanged.
-  const stale = startCodingChild(h.journal, child, 2_150);
+  const stale = (await startCodingChild(h.journal, child, 2_150));
   assert.equal(stale, undefined);
-  assert.equal(h.journal.child('c1')?.revision, 2);
+  assert.equal((await h.journal.child('c1'))?.revision, 2);
 
   // A second, different child keeps its own counter — they do not share one.
-  const other = registerCodingChild(h.journal, h.writePayload, { runId: RUN_ID, payload: h.payload, childId: 'c2', kind: 'final_validation', at: 2_200 });
+  const other = (await registerCodingChild(h.journal, h.writePayload, { runId: RUN_ID, payload: h.payload, childId: 'c2', kind: 'final_validation', at: 2_200 }));
   assert.equal((other as { child: DurableAgentRunChild }).child.revision, 1);
 });
 
 // ── 9. terminal persistence failure ──────────────────────────────────────────
 
-test('a terminal write that does not land suppresses the completion claim', () => {
+test('a terminal write that does not land suppresses the completion claim', async () => {
   const h = harness();
-  const reg = registerCodingChild(h.journal, h.writePayload, { runId: RUN_ID, payload: h.payload, childId: 'c1', kind: 'validation', at: 2_000 });
-  const started = startCodingChild(h.journal, (reg as { child: DurableAgentRunChild }).child, 2_100)!;
+  const reg = (await registerCodingChild(h.journal, h.writePayload, { runId: RUN_ID, payload: h.payload, childId: 'c1', kind: 'validation', at: 2_000 }));
+  const started = (await startCodingChild(h.journal, (reg as { child: DurableAgentRunChild }).child, 2_100))!;
   finishCodingChild(h.journal, started, 'success', 2_200, { exitCode: 0 });
 
   // Every child succeeded, so the run is genuinely eligible...
-  assert.equal(codingCompletionEligibility(h.payload, h.children).mayComplete, true);
+  assert.equal(codingCompletionEligibility(h.payload, (await h.children)).mayComplete, true);
 
   // ...but the terminal revision fails to persist. `durable` must report that.
-  const resolved = resolveCodingRun(h.payload, h.children, () => false);
+  const resolved = resolveCodingRun(h.payload, (await h.children), () => false);
   assert.equal(resolved.state, 'COMPLETED');
   assert.equal(resolved.durable, false, 'the outcome may be real but is NOT recorded — the caller must not report plain success');
 
-  const persisted = resolveCodingRun(h.payload, h.children, () => true);
+  const persisted = resolveCodingRun(h.payload, (await h.children), () => true);
   assert.equal(persisted.durable, true);
 });
 
-test('a fully successful run with every reference intact may complete', () => {
+test('a fully successful run with every reference intact may complete', async () => {
   const h = harness();
   for (const [id, kind] of [['c1', 'repository_planning'], ['c2', 'initial_apply'], ['c3', 'final_validation']] as const) {
-    const reg = registerCodingChild(h.journal, h.writePayload, { runId: RUN_ID, payload: h.payload, childId: id, kind, at: 2_000 });
+    const reg = (await registerCodingChild(h.journal, h.writePayload, { runId: RUN_ID, payload: h.payload, childId: id, kind, at: 2_000 }));
     assert.equal(reg.decision, 'dispatch');
-    const started = startCodingChild(h.journal, (reg as { child: DurableAgentRunChild }).child, 2_100)!;
+    const started = (await startCodingChild(h.journal, (reg as { child: DurableAgentRunChild }).child, 2_100))!;
     finishCodingChild(h.journal, started, 'success', 2_200, { exitCode: 0 });
   }
-  const eligibility = codingCompletionEligibility(h.payload, h.children);
+  const eligibility = codingCompletionEligibility(h.payload, (await h.children));
   assert.deepEqual(eligibility.blockers, []);
   assert.deepEqual(eligibility.findings, []);
   assert.equal(eligibility.mayComplete, true);
-  assert.equal(resolveCodingRun(h.payload, h.children, () => true).state, 'COMPLETED');
+  assert.equal(resolveCodingRun(h.payload, (await h.children), () => true).state, 'COMPLETED');
 });
 
-test('an optional child that fails does not block completion', () => {
+test('an optional child that fails does not block completion', async () => {
   const h = harness();
-  const required = registerCodingChild(h.journal, h.writePayload, { runId: RUN_ID, payload: h.payload, childId: 'c1', kind: 'final_validation', at: 2_000 });
-  const startedRequired = startCodingChild(h.journal, (required as { child: DurableAgentRunChild }).child, 2_050)!;
+  const required = (await registerCodingChild(h.journal, h.writePayload, { runId: RUN_ID, payload: h.payload, childId: 'c1', kind: 'final_validation', at: 2_000 }));
+  const startedRequired = (await startCodingChild(h.journal, (required as { child: DurableAgentRunChild }).child, 2_050))!;
   finishCodingChild(h.journal, startedRequired, 'success', 2_100, { exitCode: 0 });
 
-  const optional = registerCodingChild(h.journal, h.writePayload, { runId: RUN_ID, payload: h.payload, childId: 'c2', kind: 'reconciliation', required: false, at: 2_200 });
-  const startedOptional = startCodingChild(h.journal, (optional as { child: DurableAgentRunChild }).child, 2_250)!;
+  const optional = (await registerCodingChild(h.journal, h.writePayload, { runId: RUN_ID, payload: h.payload, childId: 'c2', kind: 'reconciliation', required: false, at: 2_200 }));
+  const startedOptional = (await startCodingChild(h.journal, (optional as { child: DurableAgentRunChild }).child, 2_250))!;
   finishCodingChild(h.journal, startedOptional, 'failure', 2_300, { note: 'advisory only' });
 
-  assert.equal(codingCompletionEligibility(h.payload, h.children).mayComplete, true);
+  assert.equal(codingCompletionEligibility(h.payload, (await h.children)).mayComplete, true);
 });
 
-test('a run under cancellation refuses to acquire new children', () => {
+test('a run under cancellation refuses to acquire new children', async () => {
   const h = harness();
   const cancelling: CodingRunPayloadV1 = { ...h.payload, cancellation: { requestedAt: 't1' } };
-  const refused = registerCodingChild(h.journal, h.writePayload, { runId: RUN_ID, payload: cancelling, childId: 'c_new', kind: 'repair_apply', at: 2_000 });
+  const refused = (await registerCodingChild(h.journal, h.writePayload, { runId: RUN_ID, payload: cancelling, childId: 'c_new', kind: 'repair_apply', at: 2_000 }));
   assert.equal(refused.decision, 'refused');
-  assert.equal(h.journal.child('c_new'), undefined, 'no row was written at all');
+  assert.equal((await h.journal.child('c_new')), undefined, 'no row was written at all');
 });
 
-test('a run that recorded no work is never COMPLETED', () => {
+test('a run that recorded no work is never COMPLETED', async () => {
   // Observed in the installed acceptance: planning failed before registering any
   // child, leaving `children: [], blockers: []` — and the run reported COMPLETED
   // because nothing had objected. Completion must rest on positive evidence.
@@ -305,8 +305,8 @@ test('a run that recorded no work is never COMPLETED', () => {
 
   // A single successful required child is enough to clear this particular blocker.
   const h = harness();
-  const reg = registerCodingChild(h.journal, h.writePayload, { runId: RUN_ID, payload: h.payload, childId: 'c1', kind: 'final_validation', at: 2_000 });
-  const started = startCodingChild(h.journal, (reg as { child: DurableAgentRunChild }).child, 2_050)!;
+  const reg = (await registerCodingChild(h.journal, h.writePayload, { runId: RUN_ID, payload: h.payload, childId: 'c1', kind: 'final_validation', at: 2_000 }));
+  const started = (await startCodingChild(h.journal, (reg as { child: DurableAgentRunChild }).child, 2_050))!;
   finishCodingChild(h.journal, started, 'success', 2_100, { exitCode: 0 });
-  assert.equal(codingCompletionEligibility(h.payload, h.children).mayComplete, true);
+  assert.equal(codingCompletionEligibility(h.payload, (await h.children)).mayComplete, true);
 });

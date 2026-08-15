@@ -90,17 +90,17 @@ test('message ordering matches SQLite exactly (seq then insertion order)', async
 
   // Same createdAt on two messages forces the tie-break: SQLite rowid,
   // Postgres ins_seq. Insertion order must decide in both.
-  const build = (save: (m: Message) => Promise<void> | void) => [
+  const build = async (save: (m: Message) => Promise<void> | void) => [
     message('m-b', 'c1', 200),
     message('m-a', 'c1', 100),
     message('m-tie1', 'c1', 300),
     message('m-tie2', 'c1', 300),
-  ].reduce(async (p, m) => { await p; await save(m); }, Promise.resolve());
+  ].reduce(async (p, m) => { await p; await save(m); }, (await Promise.resolve()));
 
   const sqlite = new SqliteDurableStore(join(tmp, 'order.db'));
   sqlite.saveConversation(conversation('c1'));
   await build((m) => { sqlite.saveMessage(m); });
-  const sqliteOrder = sqlite.loadDurable().messages.map((m) => m.id);
+  const sqliteOrder = (await sqlite.loadDurable()).messages.map((m) => m.id);
   sqlite.close();
 
   await pgScoped(A, async (client) => {
@@ -120,7 +120,7 @@ test('duplicate message id is ignored by both adapters', async (t) => {
   sqlite.saveConversation(conversation('c-dupe'));
   sqlite.saveMessage(message('m1', 'c-dupe', 10, { content: 'first' }));
   sqlite.saveMessage(message('m1', 'c-dupe', 99, { content: 'second' }));
-  const sqliteMsgs = sqlite.loadDurable().messages.filter((m) => m.conversationId === 'c-dupe');
+  const sqliteMsgs = (await sqlite.loadDurable()).messages.filter((m) => m.conversationId === 'c-dupe');
   sqlite.close();
 
   await pgScoped(A, async (client) => {
@@ -145,7 +145,7 @@ test('summary replacement and ordering match SQLite', async (t) => {
   sqlite.saveSummary(summary('s1', 'c-s', 2));
   sqlite.saveSummary(summary('s2', 'c-s', 1));
   sqlite.saveSummary({ ...summary('s1', 'c-s', 2), summary: { text: 'replaced' } as never });
-  const sqliteSummaries = sqlite.loadDurable().summaries.filter((s) => s.conversationId === 'c-s');
+  const sqliteSummaries = (await sqlite.loadDurable()).summaries.filter((s) => s.conversationId === 'c-s');
   sqlite.close();
 
   await pgScoped(A, async (client) => {

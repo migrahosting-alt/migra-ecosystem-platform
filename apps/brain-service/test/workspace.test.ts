@@ -20,13 +20,17 @@ function memSource(files: Map<string, string>): FileSource {
 const APPROVED_MODELS = async (): Promise<WorkspaceView['models']> => ({
   coding: ['qwen3-coder:30b'], reasoning: ['deepseek-r1:14b'], general: ['qwen3:14b'], vision: ['llava:latest'], embedding: ['nomic-embed-text:latest'],
 });
-function mkManager(opts: { persistence?: SqliteDurableStore; files?: Map<string, string> } = {}) {
+async function mkManager(opts: { persistence?: SqliteDurableStore; files?: Map<string, string> } = {}) {
   const files = opts.files ?? new Map([['src/x.ts', 'export function x() { auth login }']]);
   const idx = new IndexService(new FakeEmbedder(), () => memSource(files), undefined, undefined, opts.persistence);
   const conv = new ConversationStore();
+  // `health()` is async but WorkspaceManager needs a synchronous `() => number`;
+  // the schema version cannot change mid-test, so it is resolved once here —
+  // mirroring how the production composition root does it.
+  const schemaVersion = opts.persistence ? (await opts.persistence.health()).schemaVersion : 0;
   const mgr = new WorkspaceManager({
     indexService: idx, conversations: conv, agents: new AgentRegistry(), approvedModelsByTier: APPROVED_MODELS,
-    version: engineVersion, schemaVersion: () => opts.persistence?.health().schemaVersion ?? 0,
+    version: engineVersion, schemaVersion: () => schemaVersion,
     persistence: opts.persistence, gitInfo: async () => ({ repo: 'git@example.com:migra/app.git', branch: 'main' }),
   });
   return { mgr, idx, conv, files };
@@ -41,7 +45,7 @@ test('engine version contract shape', () => {
 });
 
 test('open workspace: creates an index, detects git, is idempotent per scope', async () => {
-  const { mgr } = mkManager();
+  const { mgr } = (await mkManager());
   const w1 = await mgr.openWorkspace(A, { root: '/repo/app' });
   assert.ok(w1.indexId, 'an index is created');
   assert.equal(w1.gitBranch, 'main');
@@ -53,7 +57,7 @@ test('open workspace: creates an index, detects git, is idempotent per scope', a
 });
 
 test('workspace isolation: B cannot see A', async () => {
-  const { mgr } = mkManager();
+  const { mgr } = (await mkManager());
   const w = await mgr.openWorkspace(A, { root: '/repo/app' });
   assert.equal(mgr.get(w.id, B), undefined);
   assert.equal(await mgr.view(w.id, B), undefined);
@@ -61,7 +65,7 @@ test('workspace isolation: B cannot see A', async () => {
 });
 
 test('aggregated view: index/memory/agents/models/versions + health transitions', async () => {
-  const { mgr, conv } = mkManager();
+  const { mgr, conv } = (await mkManager());
   const w = await mgr.openWorkspace(A, { root: '/repo/app', memoryMode: 'durable' });
   conv.createConversation(A, { memoryMode: 'durable' });
   let view = (await mgr.view(w.id, A))!;
@@ -81,7 +85,7 @@ test('aggregated view: index/memory/agents/models/versions + health transitions'
 });
 
 test('sync then rebuild resets the index to a fresh (experimental) one', async () => {
-  const { mgr, idx } = mkManager();
+  const { mgr, idx } = (await mkManager());
   const w = await mgr.openWorkspace(A, { root: '/repo/app' });
   await mgr.sync(w.id, A);
   const beforeIndexId = mgr.get(w.id, A)!.indexId;
@@ -94,7 +98,7 @@ test('sync then rebuild resets the index to a fresh (experimental) one', async (
 });
 
 test('approveIndex binds to the exact current index version (stale refused)', async () => {
-  const { mgr, idx } = mkManager();
+  const { mgr, idx } = (await mkManager());
   const w = await mgr.openWorkspace(A, { root: '/repo/app' });
 
   // Cannot approve before anything is indexed.
@@ -120,7 +124,7 @@ test('approveIndex binds to the exact current index version (stale refused)', as
 });
 
 test('a sync after approval bumps the version, forcing re-approval of the new version', async () => {
-  const { mgr, idx, files } = mkManager();
+  const { mgr, idx, files } = (await mkManager());
   const w = await mgr.openWorkspace(A, { root: '/repo/app' });
   await mgr.sync(w.id, A);
   const v1 = idx.status(mgr.get(w.id, A)!.indexId!, A)!.version;
@@ -140,18 +144,18 @@ test('a sync after approval bumps the version, forcing re-approval of the new ve
   assert.equal((stale as { code: string }).code, 'STALE_VERSION');
 });
 
-test('workspace survives restart (durable) with its git + index binding', () => {
+test('workspace survives restart (durable) with its git + index binding', async () => {
   const dbPath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'migraai-ws-')), 'state.db');
   const store1 = new SqliteDurableStore(dbPath);
-  const { mgr: mgr1 } = mkManager({ persistence: store1 });
+  const { mgr: mgr1 } = (await mkManager({ persistence: store1 }));
   // openWorkspace is async; run synchronously via a resolved promise chain.
   return (async () => {
     const w = await mgr1.openWorkspace(A, { root: '/repo/app', memoryMode: 'durable' });
     store1.close();
 
     const store2 = new SqliteDurableStore(dbPath);
-    const { mgr: mgr2 } = mkManager({ persistence: store2 });
-    mgr2.hydrate();
+    const { mgr: mgr2 } = (await mkManager({ persistence: store2 }));
+    await mgr2.hydrate();
     const restored = mgr2.get(w.id, A);
     assert.ok(restored, 'workspace survives restart');
     assert.equal(restored!.gitBranch, 'main');

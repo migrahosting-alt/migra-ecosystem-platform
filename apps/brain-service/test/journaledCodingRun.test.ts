@@ -45,21 +45,29 @@ class TestStore implements CodingRunStore {
   failParentTransition = false;
   readonly notes: string[] = [];
   state: DurableAgentRunState = 'EXECUTING';
+  private rev = 0;
   constructor(private payload: CodingRunPayloadV1) {}
   readPayload(): CodingRunPayloadV1 { return this.payload; }
-  writePayload(payload: CodingRunPayloadV1, note: string): boolean {
+  /** Advances ONLY when a write actually lands — the property the real store promises. */
+  revision(): number { return this.rev; }
+  /** This double IS the source of truth; there is no journal behind it to re-read,
+   * so deliberate resynchronisation is genuinely a no-op here. */
+  async reload(): Promise<void> {}
+  async writePayload(payload: CodingRunPayloadV1, note: string): Promise<boolean> {
     if (this.failPayloadWrite) return false;
     this.payload = payload;
     this.notes.push(note);
+    this.rev += 1;
     return true;
   }
   parentState(): DurableAgentRunState { return this.state; }
-  transitionParent(next: DurableAgentRunState, note: string, payload?: CodingRunPayloadV1): boolean {
+  async transitionParent(next: DurableAgentRunState, note: string, payload?: CodingRunPayloadV1): Promise<boolean> {
     if (this.failParentTransition) return false;
     // Mirrors the real store: state and payload land in ONE revision or neither.
     this.state = next;
     if (payload) this.payload = payload;
     this.notes.push(note);
+    this.rev += 1; // state + payload land in ONE revision, never two.
     return true;
   }
 }
@@ -91,8 +99,8 @@ test('1 — every stage records its own explicit child kind', async () => {
     const result = await h.run.runStage({ kind, phase: 'validating' }, () => ok({ kind }, kind));
     assert.equal(result.status, 'completed', `${kind} should complete`);
   }
-  assert.deepEqual(h.journal.children(RUN_ID).map((c) => c.kind), [...kinds]);
-  assert.equal(h.journal.children(RUN_ID).every((c) => c.kind !== 'coding_step'), true, 'nothing was collapsed into a generic kind');
+  assert.deepEqual((await h.journal.children(RUN_ID)).map((c) => c.kind), [...kinds]);
+  assert.equal((await h.journal.children(RUN_ID)).every((c) => c.kind !== 'coding_step'), true, 'nothing was collapsed into a generic kind');
 });
 
 // ── 2–4. the dispatch invariant ──────────────────────────────────────────────
@@ -103,7 +111,7 @@ test('2 + 3 — the child row and then the parent reference are durable BEFORE t
 
   await h.run.runStage({ kind: 'initial_apply', phase: 'executing_initial_changeset' }, async (child) => {
     observedAtDispatch = {
-      childExists: h.journal.child(child.childId) !== undefined,
+      childExists: (await h.journal.child(child.childId)) !== undefined,
       referenced: h.store.readPayload().childRefs.some((r) => r.childId === child.childId),
     };
     return ok({ applied: true }, 'done');
@@ -125,7 +133,7 @@ test('4 — a parent-reference failure causes ZERO stage execution', async () =>
 
   assert.equal(ran, false, 'the mutation must not run when nothing can account for it');
   assert.equal(result.status, 'refused');
-  const child = h.journal.children(RUN_ID)[0];
+  const child = (await h.journal.children(RUN_ID))[0];
   assert.equal(child?.state, 'failed');
   assert.equal(child?.terminalCategory, 'orphaned_before_dispatch');
   assert.equal(child?.startedAt, undefined);
@@ -146,11 +154,11 @@ const scopeFor = (paths: string[]): NonNullable<CodingRunPayloadV1['scope']> => 
 test('5 — planning stops at AWAITING_APPROVAL', async () => {
   const h = harness();
   await h.run.runStage({ kind: 'repository_planning', phase: 'planning' }, () => ok({ planned: true }, 1));
-  assert.equal(h.run.awaitScopeApproval(scopeFor(['src/a.ts'])), true);
+  assert.equal((await h.run.awaitScopeApproval(scopeFor(['src/a.ts']))), true);
 
   assert.equal(h.store.parentState(), 'AWAITING_APPROVAL');
   assert.equal(h.run.payload.phase, 'awaiting_scope_approval');
-  assert.equal(h.journal.children(RUN_ID).some((c) => c.kind === 'initial_apply'), false, 'no mutation child exists at the boundary');
+  assert.equal((await h.journal.children(RUN_ID)).some((c) => c.kind === 'initial_apply'), false, 'no mutation child exists at the boundary');
 });
 
 test('6 — mutation cannot start before a durable approval', async () => {
@@ -158,12 +166,12 @@ test('6 — mutation cannot start before a durable approval', async () => {
   h.run.awaitScopeApproval(scopeFor(['src/a.ts']));
 
   // A wrong hash is not a late approval; it is an approval for a different plan.
-  assert.deepEqual(h.run.consumeApproval({ pathSetHash: 'hash_WIDENED', at: 't' }), { ok: false, code: 'scope-mismatch' });
+  assert.deepEqual(await h.run.consumeApproval({ pathSetHash: 'hash_WIDENED', at: 't' }), { ok: false, code: 'scope-mismatch' });
   assert.equal(h.run.payload.phase, 'awaiting_scope_approval', 'still waiting');
 
   // And when the approval cannot be persisted, it did not happen.
   h.store.failPayloadWrite = true;
-  assert.deepEqual(h.run.consumeApproval({ pathSetHash: 'hash_abc', at: 't' }), { ok: false, code: 'not-persisted' });
+  assert.deepEqual(await h.run.consumeApproval({ pathSetHash: 'hash_abc', at: 't' }), { ok: false, code: 'not-persisted' });
   h.store.failPayloadWrite = false;
   assert.notEqual(h.run.payload.scope?.approvalState, 'consumed');
 });
@@ -172,12 +180,12 @@ test('7 — an approval is consumed exactly once', async () => {
   const h = harness();
   h.run.awaitScopeApproval(scopeFor(['src/a.ts']));
 
-  assert.deepEqual(h.run.consumeApproval({ pathSetHash: 'hash_abc', at: 't1' }), { ok: true });
+  assert.deepEqual(await h.run.consumeApproval({ pathSetHash: 'hash_abc', at: 't1' }), { ok: true });
   assert.equal(h.run.payload.scope?.approvalState, 'consumed');
   assert.equal(h.run.payload.phase, 'executing_initial_changeset');
 
   // A replayed approval must not re-authorise mutation.
-  assert.deepEqual(h.run.consumeApproval({ pathSetHash: 'hash_abc', at: 't2' }), { ok: false, code: 'already-consumed' });
+  assert.deepEqual(await h.run.consumeApproval({ pathSetHash: 'hash_abc', at: 't2' }), { ok: false, code: 'already-consumed' });
   assert.equal(h.run.payload.scope?.approvedAt, 't1', 'the original decision is untouched');
 });
 
@@ -199,7 +207,7 @@ test('8 + 20 — a completed stage is reused after restart and never runs twice'
   assert.equal(second.status, 'reused');
   assert.equal(executions, 1, 'the stage did not run a second time');
   assert.deepEqual(second.reusedEvidence, { selectedPaths: ['src/a.ts'] }, 'the prior result is recovered from durable evidence');
-  assert.equal(h.journal.children(RUN_ID).length, 1, 'no duplicate child was created');
+  assert.equal((await h.journal.children(RUN_ID)).length, 1, 'no duplicate child was created');
 });
 
 test('9 — a created-but-undispatched apply child can be abandoned safely', async () => {
@@ -208,12 +216,12 @@ test('9 — a created-but-undispatched apply child can be abandoned safely', asy
   await h.run.runStage({ kind: 'initial_apply', phase: 'executing_initial_changeset' }, () => ok({}, 1));
   h.store.failPayloadWrite = false;
 
-  const plan = h.run.resumePlan();
+  const plan = (await h.run.resumePlan());
   assert.equal(plan.action, 'continue', 'nothing was dispatched, so nothing is ambiguous');
   assert.deepEqual(plan.ambiguousChildren, []);
 
   // A fresh attempt takes the next attempt number under the unique constraint.
-  assert.equal(h.run.nextAttempt('initial_apply'), 2);
+  assert.equal((await h.run.nextAttempt('initial_apply')), 2);
   const retry = await h.run.runStage({ kind: 'initial_apply', phase: 'executing_initial_changeset' }, () => ok({ applied: true }, 'ok'));
   assert.equal(retry.status, 'completed');
   assert.equal(retry.child?.attempt, 2);
@@ -237,11 +245,11 @@ test('10 — a running apply at restart blocks blind replay', async () => {
   });
   assert.equal(registered.state, 'running');
 
-  markInterruptedChildren(h2.journal, RUN_ID, 9_000);
-  const plan = h2.run.resumePlan();
+  await markInterruptedChildren(h2.journal, RUN_ID, 9_000);
+  const plan = (await h2.run.resumePlan());
   assert.equal(plan.action, 'reconcile_mutation');
   assert.deepEqual(plan.ambiguousChildren, [registered.childId]);
-  assert.equal(h.journal.children(RUN_ID)[0]?.state, 'failed', 'a thrown stage is an observed failure, not a gap');
+  assert.equal((await h.journal.children(RUN_ID))[0]?.state, 'failed', 'a thrown stage is an observed failure, not a gap');
 });
 
 test('11 — an interrupted validation creates a NEW attempt and preserves the old child', async () => {
@@ -252,29 +260,29 @@ test('11 — an interrupted validation creates a NEW attempt and preserves the o
       return neverSettles();
     });
   });
-  markInterruptedChildren(h.journal, RUN_ID, 9_000);
+  await markInterruptedChildren(h.journal, RUN_ID, 9_000);
 
-  const plan = h.run.resumePlan();
+  const plan = (await h.run.resumePlan());
   assert.equal(plan.action, 'new_validation_attempt');
 
   const retry = await h.run.runStage({ kind: 'final_validation', phase: 'validating' }, () => ok({ exitCode: 0 }, 'passed'));
   assert.equal(retry.status, 'completed');
   assert.equal(retry.child?.attempt, 2);
-  assert.equal(h.journal.child(started.childId)?.state, 'interrupted', 'the interrupted child was preserved, never rewritten');
-  assert.equal(h.journal.child(started.childId)?.terminalCategory, 'interrupted_by_restart');
+  assert.equal((await h.journal.child(started.childId))?.state, 'interrupted', 'the interrupted child was preserved, never rewritten');
+  assert.equal((await h.journal.child(started.childId))?.terminalCategory, 'interrupted_by_restart');
 });
 
 // ── 12–13. cancellation ──────────────────────────────────────────────────────
 
 test('12 — cancellation prevents the next child from launching', async () => {
   const h = harness();
-  assert.equal(h.run.requestCancellation('2026-08-01T00:01:00.000Z'), true);
+  assert.equal((await h.run.requestCancellation('2026-08-01T00:01:00.000Z')), true);
 
   let ran = false;
   const result = await h.run.runStage({ kind: 'repair_apply', phase: 'repairing' }, async () => { ran = true; return ok({}, 1); });
   assert.equal(result.status, 'cancelled');
   assert.equal(ran, false);
-  assert.equal(h.journal.children(RUN_ID).length, 0, 'no child row was written at all');
+  assert.equal((await h.journal.children(RUN_ID)).length, 0, 'no child row was written at all');
 });
 
 test('13 — an unconfirmed child cancellation prevents the parent reporting CANCELLED', async () => {
@@ -293,7 +301,7 @@ test('13 — an unconfirmed child cancellation prevents the parent reporting CAN
   assert.deepEqual(outcome.unconfirmed, [running.childId]);
   assert.equal(h.run.payload.cancellation?.confirmedAt, undefined);
 
-  const final = h.run.finalize({});
+  const final = (await h.run.finalize({}));
   assert.equal(final.state, 'FAILED', 'work may still be running — CANCELLED would be unverified');
   assert.equal(final.blockers.some((b) => b.kind === 'cancellation_unconfirmed'), true);
 });
@@ -309,7 +317,7 @@ test('13b — a confirmed cancellation resolves CANCELLED', async () => {
   h.run.requestCancellation('t1');
   const outcome = await h.run.confirmCancellation({ at: 't2', observeStopped: async () => true });
   assert.equal(outcome.confirmed, true);
-  assert.equal(h.run.finalize({}).state, 'CANCELLED');
+  assert.equal((await h.run.finalize({})).state, 'CANCELLED');
 });
 
 // ── 14–15. completion gating ─────────────────────────────────────────────────
@@ -317,7 +325,7 @@ test('13b — a confirmed cancellation resolves CANCELLED', async () => {
 test('14 — a failed required child blocks final success', async () => {
   const h = harness();
   await h.run.runStage({ kind: 'final_validation', phase: 'validating' }, async () => ({ outcome: 'failure', evidence: { exitCode: 1 }, value: null }));
-  const final = h.run.finalize({});
+  const final = (await h.run.finalize({}));
   assert.equal(final.state, 'FAILED');
   assert.equal(final.blockers.some((b) => b.kind === 'required_child_not_successful'), true);
 });
@@ -326,7 +334,7 @@ test('15 — an optional child does not block success', async () => {
   const h = harness();
   await h.run.runStage({ kind: 'final_validation', phase: 'validating' }, () => ok({ exitCode: 0 }, 1));
   await h.run.runStage({ kind: 'reconciliation', phase: 'reconciling', required: false }, async () => ({ outcome: 'failure', evidence: { advisory: true }, value: null }));
-  const final = h.run.finalize({});
+  const final = (await h.run.finalize({}));
   assert.equal(final.state, 'COMPLETED');
   assert.deepEqual(final.blockers, []);
 });
@@ -343,10 +351,10 @@ test('16 — reconciliation detects missing and orphaned children', async () => 
     childRefs: [...h.run.payload.childRefs, { childId: 'c_ghost', kind: 'initial_apply', attempt: 1 }],
   };
   h.journal.registerChild({ childId: 'c_orphan', runId: RUN_ID, kind: 'repair_apply', at: 5_000 });
-  const orphan = h.journal.child('c_orphan')!;
+  const orphan = (await h.journal.child('c_orphan'))!;
   h.journal.transitionChild({ childId: orphan.childId, expectedRevision: orphan.revision, nextState: 'running', at: 5_010 });
 
-  const findings = reconcileCodingChildren(withGhost, h.journal.children(RUN_ID), false);
+  const findings = reconcileCodingChildren(withGhost, (await h.journal.children(RUN_ID)), false);
   assert.equal(findings.some((f) => f.kind === 'parent_references_missing_child' && f.childId === 'c_ghost'), true);
   assert.equal(findings.some((f) => f.kind === 'child_orphaned' && f.childId === 'c_orphan'), true);
 });
@@ -364,7 +372,7 @@ test('17 — the final report matches the child terminal evidence', async () => 
   const stage = await h.run.runStage({ kind: 'final_validation', phase: 'validating' }, () => ok(evidence, record));
   assert.equal(stage.status, 'completed');
 
-  const persisted = JSON.parse(h.journal.child(stage.child!.childId)!.terminalEvidenceJson!) as typeof evidence;
+  const persisted = JSON.parse((await h.journal.child(stage.child!.childId))!.terminalEvidenceJson!) as typeof evidence;
   assert.equal(persisted.commandRunId, 'cmdrun_7');
   assert.equal(persisted.executable, 'node');
   assert.deepEqual(persisted.arguments, ['--test', 'test/orderTotals.test.js']);
@@ -385,7 +393,7 @@ test('18 — parent completion waits for the durable reconciliation child', asyn
       return neverSettles();
     });
   });
-  const blocked = h.run.finalize({});
+  const blocked = (await h.run.finalize({}));
   assert.equal(blocked.state, 'FAILED');
   assert.equal(blocked.blockers.some((b) => b.kind === 'active_required_child' && b.childId === pending.childId), true);
 });
@@ -395,13 +403,13 @@ test('19 — a parent terminal write that fails reports a non-durable outcome', 
   await h.run.runStage({ kind: 'final_validation', phase: 'validating' }, () => ok({ exitCode: 0 }, 1));
 
   h.store.failParentTransition = true;
-  const final = h.run.finalize({});
+  const final = (await h.run.finalize({}));
   assert.equal(final.state, 'COMPLETED', 'the evidence says complete');
   assert.equal(final.durable, false, 'but nothing recorded it');
   assert.notEqual(h.run.payload.phase, 'terminal', 'phase must NOT claim terminal without a durable parent revision');
 
   h.store.failParentTransition = false;
-  const retried = h.run.finalize({});
+  const retried = (await h.run.finalize({}));
   assert.equal(retried.durable, true);
   assert.equal(h.run.payload.phase, 'terminal');
 });
@@ -480,7 +488,7 @@ test('two runs in ONE journal each register their own children', async () => {
   }
 
   assert.deepEqual(results, ['run_a:completed', 'run_b:completed'], 'the second run must not collide with the first');
-  assert.equal(journal.children('run_a').length, 1);
-  assert.equal(journal.children('run_b').length, 1);
-  assert.notEqual(journal.children('run_a')[0]!.childId, journal.children('run_b')[0]!.childId, 'child ids are namespaced by run');
+  assert.equal((await journal.children('run_a')).length, 1);
+  assert.equal((await journal.children('run_b')).length, 1);
+  assert.notEqual((await journal.children('run_a'))[0]!.childId, (await journal.children('run_b'))[0]!.childId, 'child ids are namespaced by run');
 });

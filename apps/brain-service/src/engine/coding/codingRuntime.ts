@@ -209,7 +209,7 @@ export async function recoverCodingRuns(input: {
   const outcomes: CodingRecoveryOutcome[] = [];
   const terminal = new Set(['COMPLETED', 'REJECTED', 'EXPIRED', 'STALE', 'FAILED', 'CANCELLED']);
 
-  for (const run of input.journal.loadRuns()) {
+  for (const run of await input.journal.loadRuns()) {
     if (run.domainKind !== CODING_DOMAIN_KIND) continue;
     if (terminal.has(run.state)) continue;
 
@@ -227,8 +227,8 @@ export async function recoverCodingRuns(input: {
 
     // Children left unresolved are marked interrupted BEFORE classification, so
     // the classifier reads a settled record rather than a racing one.
-    const wasActive = input.journal.children(run.runId).filter((c) => !['completed', 'failed', 'cancelled', 'interrupted'].includes(c.state));
-    const interrupted = wasActive.length ? markInterruptedChildren(input.journal, run.runId, input.now) : [];
+    const wasActive = (await input.journal.children(run.runId)).filter((c) => !['completed', 'failed', 'cancelled', 'interrupted'].includes(c.state));
+    const interrupted = wasActive.length ? await markInterruptedChildren(input.journal, run.runId, input.now) : [];
     const interruptedIds = interrupted.map((c) => c.childId);
 
     if (payload.phase === 'awaiting_scope_approval') {
@@ -241,7 +241,7 @@ export async function recoverCodingRuns(input: {
       continue;
     }
 
-    const classified = classifyInterruptedExecution({ children: input.journal.children(run.runId), interrupted });
+    const classified = classifyInterruptedExecution({ children: await input.journal.children(run.runId), interrupted });
     if (classified.action === 'requires_mutation_reconciliation') {
       outcomes.push({ runId: run.runId, action: 'mutation_reconciliation_required', detail: classified.detail, interruptedChildren: interruptedIds });
       continue;
@@ -256,7 +256,7 @@ export async function recoverCodingRuns(input: {
     }
     // Reconciliation completed but the parent never reached terminal: the only
     // outstanding work is the parent's own terminal write.
-    const reconciliationDone = input.journal.children(run.runId).some((c) => c.kind === 'reconciliation' && c.state === 'completed');
+    const reconciliationDone = (await input.journal.children(run.runId)).some((c) => c.kind === 'reconciliation' && c.state === 'completed');
     outcomes.push({
       runId: run.runId,
       action: reconciliationDone ? 'terminal_write_retry' : 'safe_to_resume',

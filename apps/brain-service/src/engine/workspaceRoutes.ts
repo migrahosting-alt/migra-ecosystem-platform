@@ -68,7 +68,7 @@ export function registerWorkspaceRoutes(app: FastifyInstance, manager: Workspace
   });
 
   app.patch<{ Params: { id: string }; Body: { name?: string; memoryMode?: 'off' | 'session' | 'durable'; providerPreferences?: Record<string, string> } }>('/api/ai/workspaces/:id', async (request, reply) => {
-    const w = manager.patch(request.params.id, scopeFrom(request), request.body ?? {});
+    const w = await manager.patch(request.params.id, scopeFrom(request), request.body ?? {});
     if (!w) { reply.code(404); return { ok: false, code: 'UNKNOWN_WORKSPACE', error: 'Workspace not found.' }; }
     return manager.view(w.id, scopeFrom(request));
   });

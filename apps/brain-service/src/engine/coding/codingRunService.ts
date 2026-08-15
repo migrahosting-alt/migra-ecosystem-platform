@@ -217,35 +217,63 @@ export interface CodingWorkflowDriver {
 
 // ── The store binding ────────────────────────────────────────────────────────
 
-/** Binds a JournaledCodingRun to the durable journal. */
-export function journalCodingStore(
+/**
+ * Binds a JournaledCodingRun to the durable journal.
+ *
+ * Async because the canonical run state is loaded ONCE, here. Every later read
+ * is served from that cache; only writes touch the journal. See CodingRunStore
+ * for the full contract and the single-writer assumption it states.
+ */
+export async function journalCodingStore(
   journal: AgentRunJournal,
   runId: string,
   maxPayloadBytes: number,
   now: () => number,
-): CodingRunStore {
-  const load = (): DurableAgentRun | undefined => journal.loadRun(runId);
+): Promise<CodingRunStore> {
+  const parse = (run: DurableAgentRun): CodingRunPayloadV1 => {
+    const read = readDomainPayload<unknown>(run, { kind: CODING_DOMAIN_KIND, maxSchemaVersion: CODING_PAYLOAD_SCHEMA_VERSION });
+    if (!read.ok) throw new Error(`coding payload unreadable: ${read.code}`);
+    const parsed = parseCodingPayload(read.payload);
+    if (!parsed.ok) throw new Error(`coding payload invalid: ${parsed.fault}`);
+    return parsed.payload;
+  };
+
+  const fetch = async (): Promise<{ state: DurableAgentRunState; payload: CodingRunPayloadV1; version: number }> => {
+    const run = await journal.loadRun(runId);
+    if (!run) throw new Error(`unknown coding run ${runId}`);
+    return { state: run.state, payload: parse(run), version: run.version };
+  };
+
+  // The canonical cache. Populated once at construction so the synchronous
+  // readers below can never be the thing that discovers the run is missing.
+  let cache = await fetch();
+
   return {
     readPayload(): CodingRunPayloadV1 {
-      const run = load();
-      if (!run) throw new Error(`unknown coding run ${runId}`);
-      const read = readDomainPayload<unknown>(run, { kind: CODING_DOMAIN_KIND, maxSchemaVersion: CODING_PAYLOAD_SCHEMA_VERSION });
-      if (!read.ok) throw new Error(`coding payload unreadable: ${read.code}`);
-      const parsed = parseCodingPayload(read.payload);
-      if (!parsed.ok) throw new Error(`coding payload invalid: ${parsed.fault}`);
-      return parsed.payload;
+      return cache.payload;
     },
-    writePayload(payload: CodingRunPayloadV1, note: string): boolean {
-      const run = load();
-      if (!run) return false;
+    parentState(): DurableAgentRunState {
+      return cache.state;
+    },
+    revision(): number {
+      return cache.version;
+    },
+    async reload(): Promise<void> {
+      cache = await fetch();
+    },
+    async writePayload(payload: CodingRunPayloadV1, note: string): Promise<boolean> {
       const written = serializeDomainPayload({ kind: CODING_DOMAIN_KIND, schemaVersion: CODING_PAYLOAD_SCHEMA_VERSION, payload }, maxPayloadBytes);
       if (!written.ok) return false;
       // Same-state transition: the payload write IS a durable parent revision, so
       // every payload change is versioned and audited like any other.
-      return journal.transition({
+      //
+      // `expectedState` comes from the CACHE, which is what makes this a real CAS
+      // rather than last-write-wins: if anything moved the run since this store
+      // loaded, the journal refuses and the cache stays untouched.
+      const ok = await journal.transition({
         runId,
-        expectedState: run.state as never,
-        nextState: run.state as never,
+        expectedState: cache.state as never,
+        nextState: cache.state as never,
         at: now(),
         eventType: `coding.${note}`,
         source: 'API',
@@ -253,14 +281,12 @@ export function journalCodingStore(
         domainSchemaVersion: written.schemaVersion,
         domainPayloadJson: written.json,
       });
+      // Cache updates ONLY after the journal accepted the write.
+      if (ok) cache = { ...cache, payload, version: cache.version + 1 };
+      return ok;
     },
-    parentState(): DurableAgentRunState {
-      return load()?.state ?? 'FAILED';
-    },
-    transitionParent(next: DurableAgentRunState, note: string, payload?: CodingRunPayloadV1): boolean {
-      const run = load();
-      if (!run) return false;
-      if (run.state === next && !payload) return true;
+    async transitionParent(next: DurableAgentRunState, note: string, payload?: CodingRunPayloadV1): Promise<boolean> {
+      if (cache.state === next && !payload) return true;
       let domain: { domainKind: string; domainSchemaVersion: number; domainPayloadJson: string } | undefined;
       if (payload) {
         const written = serializeDomainPayload({ kind: CODING_DOMAIN_KIND, schemaVersion: CODING_PAYLOAD_SCHEMA_VERSION, payload }, maxPayloadBytes);
@@ -269,9 +295,9 @@ export function journalCodingStore(
         if (!written.ok) return false;
         domain = { domainKind: written.kind, domainSchemaVersion: written.schemaVersion, domainPayloadJson: written.json };
       }
-      return journal.transition({
+      const ok = await journal.transition({
         runId,
-        expectedState: run.state as never,
+        expectedState: cache.state as never,
         nextState: next as never,
         at: now(),
         eventType: `coding.${note}`,
@@ -279,6 +305,16 @@ export function journalCodingStore(
         ...(domain ?? {}),
         ...(next === 'COMPLETED' || next === 'FAILED' || next === 'CANCELLED' || next === 'REJECTED' ? { terminalAt: now() } : {}),
       });
+      // State and payload move together or not at all — the same all-or-nothing
+      // the durable revision itself has.
+      if (ok) {
+        cache = {
+          state: next,
+          payload: payload ?? cache.payload,
+          version: cache.version + 1,
+        };
+      }
+      return ok;
     },
   };
 }
@@ -337,11 +373,11 @@ export class CodingRunService {
     return this.executors.has(runId);
   }
 
-  private runFor(runId: string): JournaledCodingRun {
+  private async runFor(runId: string): Promise<JournaledCodingRun> {
     return new JournaledCodingRun(
       this.opts.journal,
       runId,
-      journalCodingStore(this.opts.journal, runId, this.opts.config.maxDomainPayloadBytes, this.now),
+      await journalCodingStore(this.opts.journal, runId, this.opts.config.maxDomainPayloadBytes, this.now),
       this.now,
       undefined,
       (event) => this.opts.diagnostic?.(event),
@@ -366,7 +402,7 @@ export class CodingRunService {
     );
     if (!written.ok) return { ok: false, kind: 'invalid', message: `The issue could not be stored durably (${written.code}).` };
 
-    this.opts.journal.create({
+    await this.opts.journal.create({
       runId,
       correlationId: runId,
       activationId: runId,
@@ -398,16 +434,16 @@ export class CodingRunService {
     // default. A coding run has nothing to approve yet — it is planning — so the
     // state is corrected immediately rather than left describing a proposal that
     // does not exist.
-    this.opts.journal.transition({
+    await this.opts.journal.transition({
       runId, expectedState: 'AWAITING_APPROVAL', nextState: 'PLANNING', at,
       eventType: 'coding.planning_started', source: 'API', reason: 'PLANNING_STARTED',
     });
-    this.audit(runId, 'coding.run_started', 'started', { workspace: auditHash(workspace.canonical), issue: auditHash(issueText) });
+    await this.audit(runId, 'coding.run_started', 'started', { workspace: auditHash(workspace.canonical), issue: auditHash(issueText) });
 
     // Planning continues after this returns — hence 202 at the route.
     this.dispatch(runId, workspace.canonical, issueText, (ctx) => this.opts.driver.plan(ctx));
 
-    const current = this.opts.journal.loadRun(runId);
+    const current = await this.opts.journal.loadRun(runId);
     return {
       ok: true,
       value: { runId, revision: current?.version ?? 1, state: current?.state ?? 'PLANNING', phase: 'planning', statusUrl: statusUrl(runId) },
@@ -416,14 +452,14 @@ export class CodingRunService {
 
   // ── 2. read ────────────────────────────────────────────────────────────────
 
-  read(runId: string): CodingServiceResult<CodingRunSnapshot> {
-    return this.snapshotOrFault(runId);
+  async read(runId: string): Promise<CodingServiceResult<CodingRunSnapshot>> {
+    return await this.snapshotOrFault(runId);
   }
 
   // ── 3. scope decision ──────────────────────────────────────────────────────
 
   async scopeDecision(runId: string, input: { expectedRevision: number; pathSetHash: string; decision: 'approve' | 'reject' }): Promise<CodingServiceResult<CodingRunSnapshot>> {
-    const loaded = this.load(runId);
+    const loaded = await this.load(runId);
     if (!loaded.ok) return loaded;
     const { run, payload } = loaded.value;
 
@@ -444,34 +480,34 @@ export class CodingRunService {
       return this.conflict(run, payload, 'approval_already_consumed');
     }
 
-    const journaled = this.runFor(runId);
+    const journaled = await this.runFor(runId);
     if (input.decision === 'reject') {
       // The proposal and its evidence stay in the payload; only the decision is
       // added. A rejected scope must remain inspectable afterwards.
-      journaled.rejectScope();
-      this.audit(runId, 'coding.scope_rejected', 'rejected', { scope: scope.pathSetHash, paths: scope.proposedPaths.length });
-      return this.snapshotOrFault(runId);
+      await journaled.rejectScope();
+      await this.audit(runId, 'coding.scope_rejected', 'rejected', { scope: scope.pathSetHash, paths: scope.proposedPaths.length });
+      return await this.snapshotOrFault(runId);
     }
 
-    const consumed = journaled.consumeApproval({ pathSetHash: input.pathSetHash, at: new Date(this.now()).toISOString() });
+    const consumed = await journaled.consumeApproval({ pathSetHash: input.pathSetHash, at: new Date(this.now()).toISOString() });
     if (!consumed.ok) {
-      const fresh = this.load(runId);
+      const fresh = await this.load(runId);
       const reason: CodingConflictReason = consumed.code === 'already-consumed' ? 'approval_already_consumed'
         : consumed.code === 'scope-mismatch' ? 'scope_hash_mismatch' : 'invalid_state';
       return fresh.ok ? this.conflict(fresh.value.run, fresh.value.payload, reason) : fresh;
     }
-    this.audit(runId, 'coding.scope_approved', 'approved', { scope: scope.pathSetHash, paths: scope.proposedPaths.length });
+    await this.audit(runId, 'coding.scope_approved', 'approved', { scope: scope.pathSetHash, paths: scope.proposedPaths.length });
 
     // Resumption is detached; the response carries the new durable revision.
-    const workspaceRoot = this.workspaceRootFor(runId);
+    const workspaceRoot = await this.workspaceRootFor(runId);
     this.dispatch(runId, workspaceRoot, payload.issueText, (ctx) => this.opts.driver.resume(ctx));
-    return this.snapshotOrFault(runId);
+    return await this.snapshotOrFault(runId);
   }
 
   // ── 4. cancel ──────────────────────────────────────────────────────────────
 
   async cancel(runId: string, input: { expectedRevision: number }): Promise<CodingServiceResult<CodingRunSnapshot>> {
-    const loaded = this.load(runId);
+    const loaded = await this.load(runId);
     if (!loaded.ok) return loaded;
     const { run, payload } = loaded.value;
     if (run.version !== input.expectedRevision) return this.conflict(run, payload, 'stale_revision');
@@ -481,12 +517,12 @@ export class CodingRunService {
     // something that had already ended.
     if (payload.phase === 'terminal') return this.conflict(run, payload, 'invalid_state');
 
-    const journaled = this.runFor(runId);
+    const journaled = await this.runFor(runId);
     // Idempotent: an already-requested cancellation records nothing new, so a
     // repeat cannot produce duplicate children or contradictory audit events.
     if (!payload.cancellation) {
-      journaled.requestCancellation(new Date(this.now()).toISOString());
-      this.audit(runId, 'coding.cancellation_requested', 'requested', {});
+      await journaled.requestCancellation(new Date(this.now()).toISOString());
+      await this.audit(runId, 'coding.cancellation_requested', 'requested', {});
     }
 
     // Signal this process's executor, if it holds one. Absence is not completion.
@@ -494,7 +530,7 @@ export class CodingRunService {
 
     // Reconciliation is asynchronous, and the response says `cancelling` until a
     // confirmation is durable — never `cancelled` merely because we asked.
-    return this.snapshotOrFault(runId);
+    return await this.snapshotOrFault(runId);
   }
 
   // ── internals ──────────────────────────────────────────────────────────────
@@ -503,7 +539,7 @@ export class CodingRunService {
    * dispatch closure, so no later request can re-point a run at another tree. */
   private readonly boundRoots = new Map<string, string>();
 
-  private workspaceRootFor(runId: string): string {
+  private async workspaceRootFor(runId: string): Promise<string> {
     return this.boundRoots.get(runId) ?? '';
   }
 
@@ -517,17 +553,20 @@ export class CodingRunService {
   private dispatch(runId: string, workspaceRoot: string, issueText: string, work: (ctx: CodingWorkflowContext) => Promise<void>): void {
     this.boundRoots.set(runId, workspaceRoot);
     const controller = new AbortController();
-    const run = this.runFor(runId);
     const task = (async () => {
+      // Constructed inside the detached task: `dispatch` stays synchronous so
+      // the HTTP response is not held open while the run store loads its
+      // canonical state. The task already owns its own failure reporting.
+      const run = await this.runFor(runId);
       try {
         await work({ run, runId, workspaceRoot, issueText, signal: controller.signal });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        this.audit(runId, 'coding.workflow_failed', 'failed', { detail: auditHash(message) });
+        await this.audit(runId, 'coding.workflow_failed', 'failed', { detail: auditHash(message) });
         try {
-          run.patchPayload({ phase: 'terminal' }, 'workflow.failed');
+          await run.patchPayload({ phase: 'terminal' }, 'workflow.failed');
         } catch { /* the payload may itself be unreadable; the transition below still records the failure */ }
-        this.opts.journal.transition({
+        await this.opts.journal.transition({
           runId,
           nextState: 'FAILED',
           at: this.now(),
@@ -552,8 +591,8 @@ export class CodingRunService {
     await this.executors.get(runId)?.task;
   }
 
-  private load(runId: string): CodingServiceResult<{ run: DurableAgentRun; payload: CodingRunPayloadV1 }> {
-    const run = this.opts.journal.loadRun(runId);
+  private async load(runId: string): Promise<CodingServiceResult<{ run: DurableAgentRun; payload: CodingRunPayloadV1 }>> {
+    const run = await this.opts.journal.loadRun(runId);
     if (!run) return { ok: false, kind: 'not_found' };
     const read = readDomainPayload<unknown>(run, { kind: CODING_DOMAIN_KIND, maxSchemaVersion: CODING_PAYLOAD_SCHEMA_VERSION });
     if (!read.ok) {
@@ -600,17 +639,19 @@ export class CodingRunService {
     };
   }
 
-  private snapshotOrFault(runId: string): CodingServiceResult<CodingRunSnapshot> {
-    const loaded = this.load(runId);
+  private async snapshotOrFault(runId: string): Promise<CodingServiceResult<CodingRunSnapshot>> {
+    const loaded = await this.load(runId);
     if (!loaded.ok) return loaded;
     const { run, payload } = loaded.value;
-    const children = this.opts.journal.children(runId);
+    const children = await this.opts.journal.children(runId);
     const eligibility = codingCompletionEligibility(payload, children);
     return { ok: true, value: buildSnapshot(run, payload, children, eligibility.blockers.map(describeBlocker)) };
   }
 
-  private audit(runId: string, type: CodingAuditType, outcome: string, fields: Record<string, unknown>): void {
-    auditStore.append({ correlationId: runId, type, component: 'coding-run', outcome, fields });
+  /** Awaited by its callers: `coding.scope_approved` / `scope_rejected` record an
+   * operator authorization decision, and all callers are already async. */
+  private async audit(runId: string, type: CodingAuditType, outcome: string, fields: Record<string, unknown>): Promise<void> {
+    await auditStore.append({ correlationId: runId, type, component: 'coding-run', outcome, fields });
   }
 }
 
@@ -627,7 +668,7 @@ export function statusUrl(runId: string): string {
 function buildSnapshot(
   run: DurableAgentRun,
   payload: CodingRunPayloadV1,
-  children: ReturnType<AgentRunJournal['children']>,
+  children: Awaited<ReturnType<AgentRunJournal['children']>>,
   blockers: string[],
 ): CodingRunSnapshot {
   const scope = payload.scope;

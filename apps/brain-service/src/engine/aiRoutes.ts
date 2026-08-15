@@ -233,7 +233,7 @@ export function registerAiRoutes(
     }
 
     const requestId = engineCorrelationId(request);
-    auditStore.append({
+    await auditStore.append({
       correlationId: requestId,
       requestId,
       type: 'execution.started',
@@ -255,7 +255,7 @@ export function registerAiRoutes(
 
     let decision = await selectModel(reg, spec);
     if (!decision) {
-      auditStore.append({
+      await auditStore.append({
         correlationId: requestId,
         requestId,
         type: 'execution.failed',
@@ -353,7 +353,7 @@ export function registerAiRoutes(
           minScore: DEFAULT_MIN_APPROVED_SCORE,
         },
       );
-      auditStore.append({
+      await auditStore.append({
         correlationId: requestId,
         requestId,
         type: 'retrieval.decided',
@@ -380,7 +380,7 @@ export function registerAiRoutes(
     }
 
     const chatRequest = await buildChatRequest(body, userPrompt, effectiveSummary, ragChunks);
-    auditStore.append({
+    await auditStore.append({
       correlationId: requestId,
       requestId,
       type: 'execution.routed',
@@ -404,7 +404,7 @@ export function registerAiRoutes(
       try {
         const result = await providerFor(candidate).complete(chatRequest);
         commit?.(result.content, candidate.id, candidate.provider);
-        auditStore.append({
+        await auditStore.append({
           correlationId: requestId,
           requestId,
           type: 'execution.completed',
@@ -446,11 +446,11 @@ export function registerAiRoutes(
     if (spec.preferCoding && providerRouting && escalation) {
       const off = await escalation.offer({ correlationId: requestId, policy: resolved?.effective ?? providerRouting.policy, outcome: { hadLocalModel: true, terminal: 'failed', output: '', errorMessage: 'local completion failed' }, request: chatRequest, requiredCaps: { coding: true, vision: spec.needsVision, tools: spec.needsTools } });
       if (off.offered) {
-        auditStore.append({ correlationId: requestId, requestId, type: 'execution.failed', component: 'chat', outcome: 'ESCALATION_OFFERED' });
+        await auditStore.append({ correlationId: requestId, requestId, type: 'execution.failed', component: 'chat', outcome: 'ESCALATION_OFFERED' });
         return { ok: false, code: 'LOCAL_COMPLETION_FAILED', failedOver: failed, escalationOffer: { offerId: off.offerId, token: off.token, reason: off.reason, target: off.target, estimatedCostUsd: off.estimate?.estimatedCostUsd, worstCaseCostUsd: off.worstCaseCostUsd, costCeilingUsd: off.costCeilingUsd, remainingBudgetUsd: off.remainingBudgetUsd, dataLeavesLocal: off.dataLeavesLocal, expiresAt: off.expiresAt, request: chatRequest } };
       }
     }
-    auditStore.append({ correlationId: requestId, requestId, type: 'execution.failed', component: 'chat', outcome: 'COMPLETION_FAILED' });
+    await auditStore.append({ correlationId: requestId, requestId, type: 'execution.failed', component: 'chat', outcome: 'COMPLETION_FAILED' });
     reply.code(502);
     return { ok: false, code: 'COMPLETION_FAILED', error: 'The engine could not complete the request.', failedOver: failed };
   });
@@ -629,7 +629,7 @@ async function streamChat(
       // Successful completion → commit the assistant message to memory (only here,
       // never on a partial/cancelled/failed stream).
       memory.commit?.(fullText, candidate.id, candidate.provider);
-      auditStore.append({
+      await auditStore.append({
         correlationId: requestId,
         requestId,
         type: 'execution.completed',
@@ -643,7 +643,7 @@ async function streamChat(
     } catch (error) {
       if (ac.signal.aborted) {
         // Client cancelled — no `done`, no false answer.
-        auditStore.append({ correlationId: requestId, requestId, type: 'execution.failed', component: 'chat', outcome: 'cancelled', fields: { toolCalls: 0 } });
+        await auditStore.append({ correlationId: requestId, requestId, type: 'execution.failed', component: 'chat', outcome: 'cancelled', fields: { toolCalls: 0 } });
         raw.end();
         return;
       }
@@ -651,7 +651,7 @@ async function streamChat(
         // Already streaming this model when it broke — surface a sanitized error;
         // do NOT fail over mid-stream (tokens already emitted).
         request.log.warn({ model: candidate.id, err: errText(error) }, 'ai/chat stream broke mid-turn');
-        auditStore.append({ correlationId: requestId, requestId, type: 'execution.failed', component: 'chat', outcome: 'STREAM_INTERRUPTED', fields: { model: candidate.id, toolCalls: 0 } });
+        await auditStore.append({ correlationId: requestId, requestId, type: 'execution.failed', component: 'chat', outcome: 'STREAM_INTERRUPTED', fields: { model: candidate.id, toolCalls: 0 } });
         send('error', { code: 'COMPLETION_FAILED', message: 'The engine stream was interrupted.' });
         raw.end();
         return;
@@ -660,7 +660,7 @@ async function streamChat(
       failed.push(candidate.id);
     }
   }
-  auditStore.append({ correlationId: requestId, requestId, type: 'execution.failed', component: 'chat', outcome: 'COMPLETION_FAILED', fields: { toolCalls: 0 } });
+  await auditStore.append({ correlationId: requestId, requestId, type: 'execution.failed', component: 'chat', outcome: 'COMPLETION_FAILED', fields: { toolCalls: 0 } });
   send('error', { code: 'COMPLETION_FAILED', message: 'The engine could not complete the request.', failedOver: failed });
   raw.end();
 }

@@ -79,7 +79,7 @@ export interface AgentRecipeResolverLike {
 export interface AgentRecipeProcessManagerLike {
   availability(): Promise<{ ok: true; policy: string } | { ok: false; code: 'UNSUPPORTED_PLATFORM' | 'CONTAINMENT_UNAVAILABLE'; message: string }>;
   activeCount(): number;
-  execute(runId: string, plan: AgentRecipePlan, hooks: { onSpawned(identity: AgentContainmentIdentity): void }, signal?: AbortSignal): Promise<AgentRecipeExecutionOutcome>;
+  execute(runId: string, plan: AgentRecipePlan, hooks: { onSpawned(identity: AgentContainmentIdentity): void | Promise<void> }, signal?: AbortSignal): Promise<AgentRecipeExecutionOutcome>;
   reconcileRun?(runId: string, identity: AgentContainmentReconciliationIdentity): Promise<AgentContainmentReconcileOutcome>;
   shutdown(): Promise<void>;
 }
@@ -342,7 +342,7 @@ export class AgentRecipeProcessManager implements AgentRecipeProcessManagerLike 
     return { ok: false, code: 'CONTAINMENT_UNAVAILABLE', message: 'A delegated user systemd/cgroup containment manager is unavailable.' };
   }
 
-  async execute(runId: string, plan: AgentRecipePlan, hooks: { onSpawned(identity: AgentContainmentIdentity): void }, signal?: AbortSignal): Promise<AgentRecipeExecutionOutcome> {
+  async execute(runId: string, plan: AgentRecipePlan, hooks: { onSpawned(identity: AgentContainmentIdentity): void | Promise<void> }, signal?: AbortSignal): Promise<AgentRecipeExecutionOutcome> {
     if (this.active.size >= this.maxConcurrent) throw new AgentRecipePolicyError('OVERLOADED', 'The Agent execution containment limit is reached.');
     const available = await this.availability();
     if (!available.ok) throw new AgentRecipePolicyError(available.code, available.message);
@@ -401,9 +401,13 @@ export class AgentRecipeProcessManager implements AgentRecipeProcessManagerLike 
     try {
       await new Promise<void>((resolve, reject) => {
         launcher.once('spawn', () => {
-          void this.containment.waitForAcquisition(unit).then((acquired) => {
+          void this.containment.waitForAcquisition(unit).then(async (acquired) => {
             if (!acquired) throw new AgentRecipePolicyError('START_FAILED', 'The systemd service did not acquire the recipe process.');
-            hooks.onSpawned(identity);
+            // Awaited deliberately: the hook records the spawned containment identity
+            // durably and throws if that write fails. Fire-and-forget here would let a
+            // recipe run on with no durable record of what was spawned — the `.catch`
+            // below is what turns that failure into termination.
+            await hooks.onSpawned(identity);
             resolve();
           }).catch((error) => { void terminate('cancel'); reject(error); });
         });

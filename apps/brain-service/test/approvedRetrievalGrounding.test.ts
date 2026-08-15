@@ -74,9 +74,9 @@ const noSource = (): FileSource => ({ files: async () => [] });
 /** An index service holding one APPROVED index over the given files. */
 async function approvedIndex(files: Array<{ relPath: string; content: string }>): Promise<{ svc: IndexService; id: string }> {
   const svc = new IndexService(new FakeEmbedder(64), () => ({ files: async () => files }), undefined, undefined, undefined);
-  const rec = svc.createIndex(A, { sourceType: 'workspace', root: '/repo' });
+  const rec = await svc.createIndex(A, { sourceType: 'workspace', root: '/repo' });
   await svc.sync(rec.id, A);
-  svc.setState(rec.id, A, 'approved');
+  await svc.setState(rec.id, A, 'approved');
   return { svc, id: rec.id };
 }
 
@@ -354,7 +354,7 @@ test('the retrieval decision survives to SQLite as metadata only', async (t) => 
   // what this test exists to exercise, so none of it is stubbed.
   const clock = () => 1_700_000_000_000;
   const store = new AuditStore(clock);
-  wireOperationalPersistence(
+  await wireOperationalPersistence(
     durable,
     {
       auditStore: store,
@@ -389,7 +389,7 @@ test('the retrieval decision survives to SQLite as metadata only', async (t) => 
   });
 
   // Read the PERSISTED row back out of SQLite.
-  const rows = durable.recentAuditEvents(50).filter((e) => e.type === 'retrieval.decided');
+  const rows = (await durable.recentAuditEvents(50)).filter((e) => e.type === 'retrieval.decided');
   assert.equal(rows.length, 1, 'the decision must be durably persisted');
   const row = rows[0]!;
   const raw = JSON.stringify(row); // the exact bytes that rest in SQLite

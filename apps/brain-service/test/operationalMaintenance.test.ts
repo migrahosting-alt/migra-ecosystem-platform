@@ -22,7 +22,7 @@ function incident(over: Partial<DurableIncident> = {}): DurableIncident {
 
 const DAY = 24 * 60 * 60 * 1000;
 
-test('retention prunes aged rows on the configured windows; open incidents survive', () => {
+test('retention prunes aged rows on the configured windows; open incidents survive', async () => {
   const p = tmpDbPath();
   const d = new SqliteDurableStore(p);
   const NOW = 400 * DAY;
@@ -37,21 +37,21 @@ test('retention prunes aged rows on the configured windows; open incidents survi
   d.upsertIncident(incident({ incidentId: 'resolved', deduplicationKey: 'k2', state: 'resolved', lastSeenAt: NOW - 400 * DAY }));
 
   const maint = new OperationalMaintenance(d, DEFAULT_RETENTION, () => NOW);
-  const res = maint.runRetention();
+  const res = (await maint.runRetention());
   assert.equal(res.deleted.usage, 1, 'aged usage pruned');
   assert.equal(res.deleted.audit, 1, 'aged audit pruned');
   assert.equal(res.deleted.incidents, 1, 'only the resolved aged incident pruned');
-  assert.equal(d.recentUsageRecords(10)[0]!.usageId, 'fresh');
-  assert.ok(d.listIncidents(10).some((i) => i.incidentId === 'open'), 'open incident retained past its window');
+  assert.equal((await d.recentUsageRecords(10))[0]!.usageId, 'fresh');
+  assert.ok((await d.listIncidents(10)).some((i) => i.incidentId === 'open'), 'open incident retained past its window');
   d.close();
 });
 
-test('verifyIntegrity reports ok and health is healthy on a fresh store', () => {
+test('verifyIntegrity reports ok and health is healthy on a fresh store', async () => {
   const p = tmpDbPath();
   const d = new SqliteDurableStore(p);
   const maint = new OperationalMaintenance(d, DEFAULT_RETENTION, () => 1000);
-  assert.equal(maint.verifyIntegrity(), 'ok');
-  const h = maint.health();
+  assert.equal((await maint.verifyIntegrity()), 'ok');
+  const h = (await maint.health());
   assert.equal(h.reachable, true);
   assert.equal(h.schemaCurrent, true);
   assert.equal(h.schemaVersion, SCHEMA_VERSION);
@@ -62,22 +62,22 @@ test('verifyIntegrity reports ok and health is healthy on a fresh store', () => 
   d.close();
 });
 
-test('health is healthy when an existing store is already at the current schema', () => {
+test('health is healthy when an existing store is already at the current schema', async () => {
   const p = tmpDbPath();
 
   // First open creates and migrates the store, producing migrationState=applied.
   const initial = new SqliteDurableStore(p);
-  assert.equal(initial.health().migrationState, 'applied');
+  assert.equal((await initial.health()).migrationState, 'applied');
   initial.close();
 
   // Reopening the same schema-current store produces migrationState=current.
   const reopened = new SqliteDurableStore(p);
-  assert.equal(reopened.health().migrationState, 'current');
+  assert.equal((await reopened.health()).migrationState, 'current');
 
   const maint = new OperationalMaintenance(reopened, DEFAULT_RETENTION, () => 1000);
-  assert.equal(maint.verifyIntegrity(), 'ok');
+  assert.equal((await maint.verifyIntegrity()), 'ok');
 
-  const h = maint.health();
+  const h = (await maint.health());
   assert.equal(h.schemaCurrent, true);
   assert.equal(h.schemaVersion, SCHEMA_VERSION);
   assert.equal(h.migrationState, 'current');
@@ -86,27 +86,27 @@ test('health is healthy when an existing store is already at the current schema'
   reopened.close();
 });
 
-test('health is degraded until integrity has been verified', () => {
+test('health is degraded until integrity has been verified', async () => {
   const p = tmpDbPath();
   const d = new SqliteDurableStore(p);
   const maint = new OperationalMaintenance(d, DEFAULT_RETENTION, () => 1000);
   // No verifyIntegrity() called yet → integrity 'unknown' → degraded (not a false green).
-  assert.equal(maint.health().status, 'degraded');
+  assert.equal((await maint.health()).status, 'degraded');
   maint.verifyIntegrity();
-  assert.equal(maint.health().status, 'healthy');
+  assert.equal((await maint.health()).status, 'healthy');
   d.close();
 });
 
-test('the retention worker starts, reports running, and stops on close', () => {
+test('the retention worker starts, reports running, and stops on close', async () => {
   const p = tmpDbPath();
   const d = new SqliteDurableStore(p);
   const maint = new OperationalMaintenance(d, DEFAULT_RETENTION, () => 1000);
-  assert.equal(maint.health().retentionWorker, 'stopped');
+  assert.equal((await maint.health()).retentionWorker, 'stopped');
   maint.start();
-  assert.equal(maint.health().retentionWorker, 'running');
-  assert.notEqual(maint.health().lastRetentionAt, null, 'start() runs one pass immediately');
+  assert.equal((await maint.health()).retentionWorker, 'running');
+  assert.notEqual((await maint.health()).lastRetentionAt, null, 'start() runs one pass immediately');
   maint.close();
-  assert.equal(maint.health().retentionWorker, 'stopped');
+  assert.equal((await maint.health()).retentionWorker, 'stopped');
   d.close();
 });
 
@@ -146,20 +146,20 @@ test("a store missing the capability is reported, not silently skipped", () => {
   assert.equal(isMaintainable({}), false);
 });
 
-test("storage utilization is answered by the adapter, not by stat-ing a path", () => {
+test("storage utilization is answered by the adapter, not by stat-ing a path", async () => {
   const p = tmpDbPath();
   const d = new SqliteDurableStore(p);
-  const bytes = d.storageBytes();
+  const bytes = (await d.storageBytes());
   assert.ok(typeof bytes === "number" && bytes > 0, "the SQLite adapter reports real file size");
-  assert.equal(d.storageBytes(), fs.statSync(p).size);
+  assert.equal((await d.storageBytes()), fs.statSync(p).size);
 
   // Health must surface whatever the adapter reports, with no path handed in.
   const maint = new OperationalMaintenance(d, DEFAULT_RETENTION, () => Date.now());
-  assert.equal(maint.health().storageBytes, bytes);
+  assert.equal((await maint.health()).storageBytes, bytes);
   d.close();
 });
 
-test("an adapter that throws while sizing storage degrades to unknown, not a crash", () => {
+test("an adapter that throws while sizing storage degrades to unknown, not a crash", async () => {
   const p = tmpDbPath();
   const d = new SqliteDurableStore(p);
   const hostile = Object.create(d) as SqliteDurableStore;
@@ -167,6 +167,6 @@ test("an adapter that throws while sizing storage degrades to unknown, not a cra
     value: () => { throw new Error("tablespace query failed"); },
   });
   const maint = new OperationalMaintenance(hostile, DEFAULT_RETENTION, () => Date.now());
-  assert.equal(maint.health().storageBytes, null, "unknown size is reported, never thrown");
+  assert.equal((await maint.health()).storageBytes, null, "unknown size is reported, never thrown");
   d.close();
 });

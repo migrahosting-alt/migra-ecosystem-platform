@@ -462,7 +462,7 @@ test('rejecting a proposal releases its snapshot without waiting for shutdown', 
     if (!proposal.ok) return;
     const fingerprint = proposal.view.preview!.fingerprint;
     assert.equal(snapshotTempDirs().length, before + 1);
-    service.displayed(proposal.view.runId, fingerprint, requestContext);
+    await service.displayed(proposal.view.runId, fingerprint, requestContext);
     const decided = await service.decide(proposal.view.runId, 'reject', fingerprint, requestContext);
     assert.equal(decided.ok, true);
     if (decided.ok) assert.equal(decided.view.state, 'REJECTED');

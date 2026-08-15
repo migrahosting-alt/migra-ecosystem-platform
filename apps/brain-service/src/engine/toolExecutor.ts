@@ -47,11 +47,11 @@ export async function executeToolCore(deps: ToolExecDeps, req: ToolExecInput): P
   // are audited; uncorrelated direct calls stay out of the execution chain.
   const recordAudit = (type: AuditEventType, outcome: string, fields: Record<string, unknown> = {}): void => {
     if (!cid || cid === 'none') return;
-    try {
-      auditStore.append({ correlationId: cid, type, component: 'tool-executor', outcome, requestId, fields: { tool: toolId, ...fields } });
-    } catch {
-      /* tool.* is non-critical; never break execution */
-    }
+    // floating-ok: detached — `recordAudit` is called from synchronous stage
+    // transitions and is documented as never breaking execution. No `tool.*` type
+    // is in CRITICAL_EVENTS, so the write cannot fail closed; the catch keeps a
+    // rejected write from surfacing as an unhandled rejection.
+    void auditStore.append({ correlationId: cid, type, component: 'tool-executor', outcome, requestId, fields: { tool: toolId, ...fields } }).catch(() => { /* tool.* is non-critical */ });
   };
   const failWith = (readOnly: boolean, error: unknown): ToolExecOutcome => {
     recordAudit('tool.failed', 'error');
