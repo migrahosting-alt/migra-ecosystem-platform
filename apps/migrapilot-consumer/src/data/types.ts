@@ -60,6 +60,14 @@ export interface Message {
   delivered?: boolean
   /** Assistant turns only — renders a call to action beneath the answer. */
   action?: 'scope-review'
+  /**
+   * Assistant turns only — this is a system notice, NOT model output.
+   *
+   * It exists so a failed turn can never be mistaken for a generated answer.
+   * The renderer must style it as a notice, and anything that treats messages
+   * as model output (copy, export, summarise) must skip it.
+   */
+  error?: boolean
 }
 
 export interface Conversation {

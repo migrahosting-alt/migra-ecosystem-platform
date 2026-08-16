@@ -34,34 +34,25 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const counter = useRef(0)
 
   /**
-   * Honest placeholder while the real Brain path is being wired.
+   * A real turn against the Brain.
    *
-   * This previously called `demoReply()` and, after a 900 ms fake "thinking"
-   * delay, rendered an invented assistant answer — on a PUBLIC site. That is a
-   * fabricated capability claim, so it is gone.
+   * This replaces two earlier stand-ins, and must not regress to either: first
+   * `demoReply()`, which invented an assistant answer after a fake 900 ms
+   * "thinking" delay, then a fixed "AI isn't connected" notice. Both were
+   * capability claims the app could not back, on a public site.
    *
-   * `callBrain()` refuses without a session ("No session, no Brain call") and
-   * derives tenancy from the principal, so real answers cannot land until
-   * MigraAuth exists. Until then this states the truth rather than simulating
-   * an assistant. Replace this whole function with the `chatTurn` seam — do not
-   * reintroduce a local responder.
+   * The request goes to this app's own `/api/chat`, never to the Brain — the
+   * browser has no Brain address and no way to assert a tenancy scope. Identity
+   * travels as the httpOnly session cookie and is verified server-side.
+   *
+   * A failure renders as a failure. There is deliberately no fallback text that
+   * could be mistaken for a generated answer: if the model did not answer, the
+   * message says so and says why.
    */
-  const appendReply = useCallback((conversationId: string) => {
+  const appendReply = useCallback(async (conversationId: string, prompt: string) => {
     setPendingIn(conversationId)
 
-    window.setTimeout(() => {
-      const message: Message = {
-        id: `a-${Date.now()}`,
-        role: 'assistant',
-        time: clockTime(),
-        blocks: [
-          {
-            type: 'paragraph',
-            text: "MigraPilot's AI isn't connected to this page yet. Sign-in and the live model are being wired up now — your message wasn't sent to a model, and nothing here is a generated answer.",
-          },
-        ],
-      }
-
+    const push = (message: Message) => {
       setConversations((current) =>
         current.map((conversation) =>
           conversation.id === conversationId
@@ -70,7 +61,52 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         ),
       )
       setPendingIn(null)
-    }, 250)
+    }
+
+    const notice = (text: string): Message => ({
+      id: `a-${Date.now()}`,
+      role: 'assistant',
+      time: clockTime(),
+      // `error` marks this as a system notice rather than model output, so it
+      // can never be read — or copied, or exported — as a generated answer.
+      error: true,
+      blocks: [{ type: 'paragraph', text }],
+    })
+
+    try {
+      const response = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ prompt }),
+      })
+
+      if (!response.ok) {
+        const detail = (await response.json().catch(() => null)) as { message?: string } | null
+        push(
+          notice(
+            detail?.message ??
+              'The assistant could not answer that. Nothing here is a generated answer.',
+          ),
+        )
+        return
+      }
+
+      const { content } = (await response.json()) as { content?: string }
+      if (typeof content !== 'string' || !content.trim()) {
+        push(notice('The model returned an empty answer.'))
+        return
+      }
+
+      push({
+        id: `a-${Date.now()}`,
+        role: 'assistant',
+        time: clockTime(),
+        blocks: [{ type: 'paragraph', text: content }],
+      })
+    } catch {
+      // A dropped connection is not an answer either.
+      push(notice('The assistant could not be reached. Nothing here is a generated answer.'))
+    }
   }, [])
 
   const startConversation = useCallback(
@@ -91,7 +127,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       }
 
       setConversations((current) => [conversation, ...current])
-      appendReply(id)
+      void appendReply(id, prompt)
       return id
     },
     [appendReply],
@@ -114,7 +150,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
             : conversation,
         ),
       )
-      appendReply(conversationId)
+      void appendReply(conversationId, prompt)
     },
     [appendReply],
   )

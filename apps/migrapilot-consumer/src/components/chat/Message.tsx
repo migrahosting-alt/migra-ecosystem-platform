@@ -12,6 +12,7 @@ import {
   ShieldCheck,
   ThumbsDown,
   ThumbsUp,
+  TriangleAlert,
 } from 'lucide-react'
 import { LogoMark } from '@/components/brand/Logo'
 import { FileTypeIcon } from '@/components/ui/FileTypeIcon'
@@ -181,6 +182,32 @@ function AssistantTurn({
 }) {
   const [vote, setVote] = useState<'up' | 'down' | null>(null)
   const blocks = message.blocks ?? []
+
+  /*
+   * A failed turn is a system notice, not an answer.
+   *
+   * It is rendered without the assistant avatar, the answer card, or the
+   * copy/rate controls — every one of those would frame it as model output.
+   * `role="status"` announces it as a state change rather than content.
+   */
+  if (message.error) {
+    return (
+      <div
+        role="status"
+        className="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50/70 px-4 py-3.5"
+      >
+        <TriangleAlert className="mt-0.5 h-[18px] w-[18px] shrink-0 text-amber-600" strokeWidth={2} />
+        <div className="min-w-0 flex-1">
+          {blocks.map((block, index) => (
+            <p key={index} className="text-[13px] leading-relaxed text-amber-900">
+              {block.type === 'paragraph' ? block.text : null}
+            </p>
+          ))}
+          <span className="mt-1.5 block text-xs text-amber-700/70">{message.time}</span>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="flex gap-3.5">
