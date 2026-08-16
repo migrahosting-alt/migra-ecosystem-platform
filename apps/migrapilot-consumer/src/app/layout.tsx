@@ -39,6 +39,21 @@ export const viewport: Viewport = {
   initialScale: 1,
 }
 
+/**
+ * The shell is session-dependent, so it must never be prerendered.
+ *
+ * This is not a precaution — without it the app renders signed-out for
+ * everyone, permanently. Next infers dynamism from a `cookies()` call, and at
+ * BUILD time MigraAuth is (correctly) unconfigured, so `getSession()` returns
+ * through the fail-closed port, which answers `null` without reading a cookie.
+ * No cookie read means no dynamic signal, so every page was prerendered with a
+ * signed-out header and kept serving it after a real sign-in succeeded.
+ *
+ * The fail-closed default is right; depending on it to force dynamism was the
+ * mistake. Session-dependent chrome states its own rendering requirement.
+ */
+export const dynamic = 'force-dynamic'
+
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   const session = await getSession()
   const publicSession = session ? toPublicSession(session) : null

@@ -47,6 +47,7 @@ const OWNED = [
   'MIGRAAUTH_CLIENT_SECRET',
   'MIGRAAUTH_POST_LOGOUT_REDIRECT_URI',
   'MIGRAAUTH_SCOPES',
+  'MIGRAAUTH_API_URL',
   'APP_SESSION_COOKIE_NAME',
   'NEXT_RUNTIME',
   'NODE_ENV',
@@ -248,6 +249,49 @@ test('an empty web origin falls back to the issuer rather than to an empty origi
   const { getAuthClientConfig } = await import('@migrateck/auth-client')
   assert.equal(getAuthClientConfig().migraAuthWebUrl, COMPLETE.MIGRAAUTH_BASE_URL)
   assert.doesNotThrow(() => new URL('/logout', getAuthClientConfig().migraAuthWebUrl))
+})
+
+// ── the back channel is a separate origin from the browser redirect ─────────
+
+test('the back-channel origin defaults to the issuer', async () => {
+  const resolution = await resolveWith({ ...COMPLETE, MIGRAAUTH_API_URL: undefined })
+  assert.equal(resolution.configured, true, `unexpected missing: [${resolution.missing.join(', ')}]`)
+  const { getAuthClientConfig } = await import('@migrateck/auth-client')
+  const cfg = getAuthClientConfig()
+  // Unset means "same origin for both" — the behaviour every other app relies on.
+  assert.equal(cfg.migraAuthApiUrl ?? cfg.migraAuthBaseUrl, COMPLETE.MIGRAAUTH_BASE_URL)
+})
+
+test('the back-channel origin can differ from the browser origin', async () => {
+  // The VM111 topology: the browser reaches the public issuer, the server
+  // cannot (its own edge address hairpins), so /token and /userinfo go over the
+  // private path while /authorize stays public.
+  const resolution = await resolveWith({ ...COMPLETE, MIGRAAUTH_API_URL: 'http://app-core:4120' })
+  assert.equal(resolution.configured, true, `unexpected missing: [${resolution.missing.join(', ')}]`)
+
+  const { getAuthClientConfig } = await import('@migrateck/auth-client')
+  const cfg = getAuthClientConfig()
+  assert.equal(cfg.migraAuthApiUrl, 'http://app-core:4120')
+  // The browser must still be sent to the public issuer.
+  assert.equal(cfg.migraAuthBaseUrl, COMPLETE.MIGRAAUTH_BASE_URL)
+})
+
+test('an empty back-channel origin falls back to the issuer, not to an empty origin', async () => {
+  const resolution = await resolveWith({ ...COMPLETE, MIGRAAUTH_API_URL: '' })
+  assert.equal(resolution.configured, true)
+  const { getAuthClientConfig } = await import('@migrateck/auth-client')
+  const cfg = getAuthClientConfig()
+  assert.equal(cfg.migraAuthApiUrl, undefined)
+  assert.doesNotThrow(() => new URL('/token', cfg.migraAuthApiUrl ?? cfg.migraAuthBaseUrl))
+})
+
+test('a relative back-channel origin is refused rather than used', async () => {
+  const resolution = await resolveWith({ ...COMPLETE, MIGRAAUTH_API_URL: '/token' })
+  assert.equal(resolution.configured, true)
+  const { getAuthClientConfig } = await import('@migrateck/auth-client')
+  // Unusable means absent: the exchange falls back to the issuer rather than
+  // building `/token/token`.
+  assert.equal(getAuthClientConfig().migraAuthApiUrl, undefined)
 })
 
 test('scopes default when unset and are honoured when set', async () => {

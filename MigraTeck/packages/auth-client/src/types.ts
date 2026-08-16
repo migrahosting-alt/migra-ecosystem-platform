@@ -1,6 +1,24 @@
 export type AuthClientConfig = {
+  /**
+   * The issuer origin the BROWSER is sent to (`/authorize`). It must be an
+   * origin the end user's browser can reach.
+   */
   migraAuthBaseUrl: string;
   migraAuthWebUrl?: string;
+  /**
+   * The origin THIS SERVER calls for the back-channel (`/token`, `/userinfo`).
+   * Defaults to `migraAuthBaseUrl`.
+   *
+   * These are two different reachability questions and conflating them is a
+   * deployment trap. MigraPilot hit it: the consumer runs on a VM behind the
+   * same public address that serves `auth.migrateck.com`, so the browser
+   * reached the issuer normally while the server's own connection to that
+   * address hairpinned and timed out. Authorization succeeded, a real code came
+   * back, and every token exchange failed. Setting this to the private path
+   * (a Tailscale address) fixes the back channel without moving the browser off
+   * the public origin.
+   */
+  migraAuthApiUrl?: string;
   clientId: string;
   clientSecret?: string;
   redirectUri: string;

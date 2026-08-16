@@ -93,6 +93,17 @@ export async function resolveAuthPort(): Promise<AuthResolution> {
   // host that just authenticated the user.
   const webUrl = absoluteHttpUrl(readFirstEnv('MIGRAAUTH_WEB_URL', 'AUTH_WEB_URL')) ?? resolvedIssuer
 
+  // The back-channel origin, for the /token and /userinfo calls this server
+  // makes itself. It is a SEPARATE reachability question from the issuer above,
+  // which is where the browser is sent.
+  //
+  // On VM111 they genuinely differ: chat.migrateck.com and auth.migrateck.com
+  // both resolve to the edge address this VM sits behind, so the server's own
+  // connection to the public issuer hairpins and times out while the browser
+  // reaches it normally. Authorization succeeded and every exchange failed.
+  // The private Tailscale path to auth-api is what makes the exchange work.
+  const apiUrl = absoluteHttpUrl(readEnv('MIGRAAUTH_API_URL'))
+
   const postLogoutRedirectUri =
     absoluteHttpUrl(readEnv('MIGRAAUTH_POST_LOGOUT_REDIRECT_URI')) ?? appBaseUrl!
 
@@ -107,6 +118,7 @@ export async function resolveAuthPort(): Promise<AuthResolution> {
   initAuthClient({
     migraAuthBaseUrl: resolvedIssuer,
     migraAuthWebUrl: webUrl,
+    ...(apiUrl ? { migraAuthApiUrl: apiUrl } : {}),
     clientId: clientId!,
     ...(clientSecret ? { clientSecret } : {}),
     redirectUri: redirectUri!,

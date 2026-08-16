@@ -8,6 +8,7 @@ export function initAuthClient(nextConfig: AuthClientConfig) {
     clientId: nextConfig.clientId,
     ...(nextConfig.clientSecret ? { clientSecret: nextConfig.clientSecret } : {}),
     ...(nextConfig.migraAuthWebUrl ? { migraAuthWebUrl: nextConfig.migraAuthWebUrl.replace(/\/+$/, "") } : {}),
+    ...(nextConfig.migraAuthApiUrl ? { migraAuthApiUrl: nextConfig.migraAuthApiUrl.replace(/\/+$/, "") } : {}),
     redirectUri: nextConfig.redirectUri.replace(/\/+$/, ""),
     ...(nextConfig.postLogoutRedirectUri
       ? { postLogoutRedirectUri: nextConfig.postLogoutRedirectUri.replace(/\/+$/, "") }

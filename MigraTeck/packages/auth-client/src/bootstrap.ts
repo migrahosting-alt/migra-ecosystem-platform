@@ -8,7 +8,7 @@ export async function handleOAuthCallback(params: {
   state: string;
   bootstrap: BootstrapFn;
 }) {
-  const { state: savedState, verifier } = await getPkceCookies();
+  const { state: savedState, verifier } = await getPkceCookies(params.state);
 
   if (!savedState || savedState !== params.state || !verifier) {
     throw new Error("Invalid OAuth state");
@@ -42,7 +42,7 @@ export async function handleOAuthCallback(params: {
     expiresAt: Date.now() + tokens.expires_in * 1000,
   });
 
-  await clearPkceCookies();
+  await clearPkceCookies(params.state);
 
   return {
     user: {

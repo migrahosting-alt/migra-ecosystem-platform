@@ -72,8 +72,17 @@ export async function GET(request: Request): Promise<Response> {
         { status: 503 },
       )
     }
-    // A rejected exchange (replayed code, bad state, expired verifier) is a
-    // failed sign-in, not a server fault — and its detail must not reach the URL.
+    // A rejected exchange (replayed code, bad state, expired verifier, an
+    // unreachable issuer) is a failed sign-in, not a server fault — and its
+    // detail must not reach the URL.
+    //
+    // It must still reach the LOG. Swallowing it entirely meant a sign-in that
+    // failed on every attempt left no server-side evidence at all: the browser
+    // showed `?auth_error=exchange_failed` and the log showed nothing, so the
+    // cause had to be found by probing the network by hand. The message is
+    // safe — `@migrateck/auth-client` puts a status and an OAuth error code in
+    // it, never a token or the raw response body.
+    console.error('[auth] callback exchange failed:', error instanceof Error ? error.message : error)
     return home(request, '?auth_error=exchange_failed')
   }
 
