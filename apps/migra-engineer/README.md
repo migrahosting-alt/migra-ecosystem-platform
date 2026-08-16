@@ -73,64 +73,106 @@ real failures → evaluation set → corpus/dataset → training/adaptation
 Until a candidate qualifies, Haitian Creole traffic stays on the incumbent.
 A weaker experimental model does not get production traffic for being newer.
 
-## MKES_STRESS — Haitian Creole stress set (`datasets/mkes-stress`)
+## MKES_STRESS — Haitian Creole speech stress set (`datasets/mkes-stress`)
 
-Ten authored utterances, each probing a capability models are known to fail:
-conversation, Haitian names and geography, dates/money, English code-switching,
-French code-switching, self-correction, ordered instructions, prosody, culture,
-long-context reasoning.
+Part of **MKES**, the Migra Kreyòl Evaluation Suite. This is the spoken stress
+subset.
 
 ```bash
 npm run mkes:status
 ```
 
+### Case vs variant
+
+A **case** is a linguistic unit: one authored utterance, one reference
+transcript. A **variant** is a recording of that same utterance under one
+acoustic condition.
+
+```
+MKES_STRESS_004   Kreyòl + English code-switching
+  reference: <one authored transcript>
+  variants:  clean → MKES_STRESS_004_codeswitch_en.wav
+             noise → MKES_STRESS_004_codeswitch_en_noise.wav
+```
+
+The transcript is **not** duplicated per variant. Same speaker, same words,
+different microphone conditions — hold the language constant, vary only the
+acoustics. That is what makes it usable ASR evidence.
+
+Each take is still reviewed **independently**: two takes of one script are not
+one performance. A speaker hesitates, drops a word, or self-corrects on one and
+not the other, and that deviation is data (`spokenDeviation`), not an error to
+tidy away.
+
+Current conditions: `clean`, `phone`, `noise`, `distance`.
+
+### `MKES_STRESS_011` is not a speech case
+
+Room tone with no speech, modelled as a separate type with no transcript field
+at all. WER against it would be meaningless. The measurement is *did the system
+produce anything at all* — many ASR models invent plausible words from room
+noise, and one that transcribes silence into fluent Kreyòl is broken in a way no
+speech-accuracy metric would reveal.
+
+Its expected transcript stays `null` until a human confirms by listening.
+Asserting "empty" for an unheard file would be inventing the ground truth.
+
+### Source evidence is immutable
+
+Authoritative recordings:
+
+```
+/mnt/p/MigraAI-Engineer/training/datasets/kreyol-speech-source/raw
+```
+
+Never relocated, renamed, normalised, resampled, or edited in place. This
+catalogue **references** them by measured filename, size, SHA-256 and format.
+Derived audio (denoised, resampled, segmented) belongs under a derived or export
+path and never returns to `raw`.
+
+The Cubase `.cpr` files are session assets for re-editing a recording. They are
+**not** a pipeline dependency: the dataset consumes stable WAV artifacts plus
+hashes, so evaluation never requires opening a DAW.
+
+That mount is drvfs. It is read-only from here, and there is a standing rule
+never to edit it in place.
+
 ### Held out, on purpose
 
-Each item targets a named capability. That is what makes the set valuable as a
-benchmark and **disqualifying as training data** — train on these, then score
-against them, and the number means nothing. `datasetRole: 'held-out-evaluation'`
-and `trainingEligible: false` are in the schema so this survives someone
-forgetting the convention. Training material is built separately around the same
-linguistic categories.
+Each case targets a named capability — what makes it valuable as a benchmark and
+disqualifying as training data. `datasetRole: 'held-out-evaluation'` and
+`trainingEligible: false` are in the schema so this survives someone forgetting
+the convention. Training material is built separately around the same categories.
 
 ### Nothing is asserted before it exists
 
-`referenceTranscript` is `null` until its author supplies it. Audio duration,
-sample rate, speaker identity, acoustic properties, emotion, confidence and ASR
-metrics are absent fields until measured — never defaults, never estimates.
-
-A generated reference would silently become the ground truth every future
-candidate is scored against. The slots stay empty until the real text arrives.
+`referenceTranscript` is `null` until its author supplies it. Duration, sample
+rate, hash and format are measured from the file. Speaker identity, emotion,
+transcription confidence and ASR metrics are absent fields until measured.
 
 ### Rules a "helpful" pipeline would break
 
-Standard ASR and text normalisation actively destroy what this set measures:
-
-- **Code-switched words stay code-switched.** `server`, `crash`, `check logs`
-  stay English; `rendez-vous`, `pièce d'identité` stay French. Translating them
-  into Creole produces a transcript nobody said.
-- **Self-correction stays intact.** `... madi ... non, tann, se te mèkredi ...`
-  must keep the mistake *and* the repair. Reducing it to `mèkredi` deletes the
-  phenomenon.
-- **Haitian place names keep their Creole surface form** — `Jakmèl`, not Jacmel;
-  `Okap`, not Cap-Haïtien.
+- **Code-switched words stay code-switched** — `server`, `crash`, `check logs`
+  stay English; `rendez-vous`, `pièce d'identité` stay French.
+- **Self-correction stays intact** — `... madi ... non, tann, se te mèkredi ...`
+  keeps the mistake *and* the repair.
+- **Haitian place names keep their Creole surface form** — `Jakmèl`, not Jacmel.
 - **Instruction order is the measurement**, not just the verbs present.
-- **No emotion label is inferred from text.** Prosody is evidenced by audio.
+- **No emotion label is inferred from text.**
 - **The reference is never edited to improve a score.**
 
-### When the WAVs arrive
-
-Bind strictly by `MKES_STRESS_###`, then:
+### When a candidate is scored
 
 ```
-file validation → audio metadata → provenance/consent validation
+file validation → hash check against catalogue → consent/provenance validation
 → transcription → reference comparison → WER → CER
 → code-switch accuracy → named-entity accuracy
-→ number/date/currency accuracy → human linguistic review
+→ number/date/currency accuracy → per-condition comparison
+→ human linguistic review
 ```
 
 ### Consent
 
-Permitted uses are enumerated per item. **Voice cloning is withheld explicitly
+Permitted uses are enumerated per entry. **Voice cloning is withheld explicitly
 and always**: consenting to contribute speech to a dataset is not consenting to
-have your voice synthesised, and the two must never be collapsed by inference.
+have your voice synthesised.

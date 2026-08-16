@@ -1,36 +1,61 @@
 /**
- * MKES_STRESS — Haitian Creole speech/text stress set.
+ * MKES_STRESS — Haitian Creole speech stress set.
  *
- * Ten authored utterances, each probing a capability we know models fail at.
- * Recorded by Bonex; the WAV files arrive separately from the text.
+ * Part of MKES, the Migra Kreyòl Evaluation Suite
+ * (`/mnt/p/MigraAI-Engineer/evaluations/mkes/taxonomy.json`). This is the spoken
+ * stress subset: authored utterances recorded under controlled conditions.
  *
- * TWO RULES SHAPE THIS WHOLE FILE.
+ * ── THE MODEL ────────────────────────────────────────────────────────────────
  *
- * 1. HELD-OUT FIRST. Each item probes a named capability, which is exactly what
- *    makes it valuable as a benchmark and dangerous as training data. Train on
- *    these and then score against them and the number means nothing. They are
- *    evaluation evidence; training material is built separately around the same
- *    linguistic categories. `datasetRole` and `trainingEligible` carry that in
- *    the schema rather than in a convention someone can forget.
+ * A CASE is a linguistic unit: one authored utterance, one reference transcript.
+ * A VARIANT is a recording of that same utterance under one acoustic condition.
  *
- * 2. NOTHING IS ASSERTED BEFORE IT EXISTS. A reference transcript is present
- *    only when its author supplied it; an audio artifact is present only when
- *    the WAV arrives. Duration, sample rate, speaker identity, acoustic
- *    properties, emotion, transcription confidence and ASR metrics are ABSENT
- *    fields until measured — never defaults, never estimates. A benchmark that
- *    invents its own reference is worse than no benchmark.
+ *   MKES_STRESS_004  (Kreyòl + English code-switching)
+ *     reference: <one authored transcript>
+ *     variants:  clean  → MKES_STRESS_004_codeswitch_en.wav
+ *                noise  → MKES_STRESS_004_codeswitch_en_noise.wav
+ *
+ * The transcript is NOT duplicated per variant. Same speaker, same words,
+ * different microphone conditions — which is what makes this good ASR evidence:
+ * hold the language constant and vary only the acoustics.
+ *
+ * But each recording is still reviewed INDEPENDENTLY. Two takes of the same
+ * script are not the same performance; a speaker hesitates differently, drops a
+ * word, or self-corrects on one take and not the other. Sharing the authored
+ * reference does not mean assuming the delivery matched it.
+ *
+ * ── SOURCE EVIDENCE IS IMMUTABLE ─────────────────────────────────────────────
+ *
+ * The authoritative recordings live at
+ *   /mnt/p/MigraAI-Engineer/training/datasets/kreyol-speech-source/raw
+ *
+ * They are never relocated, renamed, normalised, resampled or edited in place.
+ * This catalogue REFERENCES them by measured filename, size, hash and format.
+ * Any derived audio (denoised, resampled, segmented) belongs under a derived or
+ * export path and never returns to `raw`.
+ *
+ * The Cubase `.cpr` files in that tree are session assets for re-editing a
+ * recording. They are NOT a pipeline dependency: the dataset consumes stable
+ * WAV artifacts plus hashes, so evaluation never requires opening a DAW.
  */
+
+/** Acoustic condition of a recording, not a property of the language. */
+export type AcousticCondition =
+  | 'clean'
+  /** Band-limited / phone-like capture. */
+  | 'phone'
+  /** Additive background noise. */
+  | 'noise'
+  /** Far-field / off-mic capture. */
+  | 'distance'
 
 export type AudioStatus = 'pending' | 'received' | 'validated' | 'rejected'
 
-/**
- * Whether the authored text has actually reached the manifest.
- *
- * Separate from audio on purpose: text and recordings arrive independently, and
- * the pipeline must be honest about each. `awaiting-author` means exactly what
- * it says — the slot is prepared and empty, not filled with a guess.
- */
+/** Whether the authored text has actually reached this catalogue. */
 export type TranscriptStatus = 'awaiting-author' | 'authored' | 'released'
+
+/** Whether a human has listened to this specific take. */
+export type ReviewStatus = 'not-reviewed' | 'matches-reference' | 'deviates-from-reference'
 
 export type EvaluationTag =
   | 'conversation'
@@ -45,14 +70,13 @@ export type EvaluationTag =
   | 'prosody'
   | 'culture'
   | 'long_context_reasoning'
+  | 'acoustic_robustness'
 
-/** A named entity the recognizer must preserve, with its type. */
 export interface NamedEntityTarget {
   surface: string
   type: 'PERSON' | 'PLACE' | 'ORG'
 }
 
-/** A quantity, date, time or amount that must survive recognition intact. */
 export interface NumericTarget {
   surface: string
   kind: 'date' | 'time' | 'count' | 'currency'
@@ -60,80 +84,111 @@ export interface NumericTarget {
   value?: string
 }
 
-/**
- * A rule the transcript must obey, and that a "helpful" pipeline would break.
- *
- * These exist because the usual defaults are wrong here: ASR and normalisers
- * translate code-switched words into the matrix language, and clean disfluency
- * out of self-corrections. Both destroy the exact signal being measured.
- */
 export interface TranscriptRule {
   rule: string
   rationale: string
 }
 
 export interface ConsentScope {
-  /** What the speaker agreed this recording may be used for. */
   permitted: string[]
   /**
-   * Explicitly withheld uses.
-   *
-   * Voice cloning is listed separately and always: consent to contribute speech
-   * to a dataset is NOT consent to synthesise that person's voice, and the two
-   * must never be collapsed by inference.
+   * Voice cloning is listed here always and explicitly: consent to contribute
+   * speech to a dataset is NOT consent to synthesise that person's voice, and
+   * the two must never be collapsed by inference.
    */
   withheld: string[]
 }
 
-export interface AudioArtifact {
+/**
+ * One recording. Every field below is MEASURED from the file on disk — never
+ * estimated, never defaulted. A recording that has not arrived has no entry.
+ */
+export interface RecordingVariant {
   filename: string
+  condition: AcousticCondition
   status: AudioStatus
-  /**
-   * Everything below is measured from the file, never predicted.
-   * Absent while `status` is `pending`.
-   */
-  sha256?: string
   bytes?: number
+  sha256?: string
   durationMs?: number
   sampleRateHz?: number
   channels?: number
-  receivedAt?: string
+  bitDepth?: number
+  /**
+   * Reviewed per take, not per case.
+   *
+   * `matches-reference` may only be set by a human who listened. A take that
+   * deviates keeps the case's authored reference AND records what was actually
+   * said, because the deviation is data, not an error to be tidied away.
+   */
+  review: ReviewStatus
+  /** What the speaker actually said on THIS take, when it differs. */
+  spokenDeviation?: string
 }
 
-export interface MkesStressItem {
+/** A linguistic case: one authored utterance, recorded under one or more conditions. */
+export interface MkesStressCase {
   id: string
+  kind: 'speech'
   suite: 'MKES_STRESS'
   version: string
   language: 'ht'
   /**
-   * The utterance as authored. `null` until the author supplies it — see
-   * `transcriptStatus`. Immutable once the version is released; any
-   * orthographic normalisation is a derived representation under a new version,
-   * never an overwrite of this field.
+   * The authored utterance, shared by every variant. `null` until its author
+   * supplies it. Immutable once released; orthographic normalisation is a
+   * derived representation under a new version, never an overwrite.
    */
   referenceTranscript: string | null
   transcriptStatus: TranscriptStatus
-  audio: AudioArtifact
   purpose: string
+  variants: RecordingVariant[]
   evaluationTags: EvaluationTag[]
-  /** Languages deliberately mixed in. Empty means monolingual Haitian Creole. */
   codeSwitchLanguages: ('en' | 'fr')[]
   namedEntities: NamedEntityTarget[]
   numericTargets: NumericTarget[]
   transcriptRules: TranscriptRule[]
-  provenance: {
-    author: string
-    authoredFor: string
-    /** Attached when the WAV arrives; absent until then. */
-    recordedAt?: string
-    recordingDevice?: string
-  }
+  provenance: { author: string; authoredFor: string; sourceDirectory: string }
   consentScope: ConsentScope
-  /** Held-out benchmark, or material eligible to train on. */
   datasetRole: 'held-out-evaluation'
   trainingEligible: false
   notes?: string
 }
+
+/**
+ * A negative acoustic control: room tone, no speech.
+ *
+ * Deliberately a DIFFERENT type from a speech case, because it has no authored
+ * utterance and scoring it with WER would be meaningless. Its purpose is the
+ * opposite: many ASR systems invent words from room noise, and a system that
+ * transcribes silence into plausible Kreyòl is broken in a way no
+ * speech-accuracy metric would reveal.
+ *
+ * `expectation.transcript` stays null until a human has listened and confirmed
+ * the recording genuinely contains no speech. Asserting "empty" for a file
+ * nobody has heard would be inventing the ground truth.
+ */
+export interface MkesAcousticControl {
+  id: string
+  kind: 'acoustic-control'
+  suite: 'MKES_STRESS'
+  version: string
+  purpose: string
+  variants: RecordingVariant[]
+  expectation: {
+    speechDetected: false
+    /** Null until confirmed by listening. Expected to be the empty string. */
+    transcript: string | null
+    hallucinatedSpeech: 'none'
+    confirmedByHuman: boolean
+  }
+  evaluationTags: EvaluationTag[]
+  provenance: { author: string; authoredFor: string; sourceDirectory: string }
+  consentScope: ConsentScope
+  datasetRole: 'held-out-evaluation'
+  trainingEligible: false
+  notes?: string
+}
+
+export type MkesStressEntry = MkesStressCase | MkesAcousticControl
 
 export interface MkesStressManifest {
   suite: 'MKES_STRESS'
@@ -141,5 +196,9 @@ export interface MkesStressManifest {
   language: 'ht'
   createdAt: string
   datasetRole: 'held-out-evaluation'
-  items: MkesStressItem[]
+  /** Read-only source of every recording referenced below. */
+  sourceDirectory: string
+  entries: MkesStressEntry[]
 }
+
+export const isSpeechCase = (e: MkesStressEntry): e is MkesStressCase => e.kind === 'speech'
