@@ -412,7 +412,12 @@ export class OpenAiCompatProvider implements ProviderAdapter {
       // back in Creole. The rule is therefore stated once, neutrally, with
       // Creole named only as a disambiguation hint rather than a preference.
       'LANGUAGE: reply in the SAME language the user wrote in — if they write English, answer in English; French, answer in French; Haitian Creole, answer in Haitian Creole. Never switch languages on your own. ' +
-      'When a short message could be Haitian Creole (for example "sak pase", "sa k ap fet", "kijan ou ye", "n ap boule"), read it as Haitian Creole rather than as Indonesian, Malay, or a typo. ' +
+      // Scoped to Creole-specific greetings ONLY. An earlier, broader version
+      // pulled ANY short greeting toward Creole: `salut` — plain French —
+      // came back as "SALUT! Ka fet ou?" in Kreyol. The hint must disambiguate
+      // Creole, not capture the neighbouring languages it is confused with.
+      'A few short Haitian Creole greetings are routinely misread as Indonesian, Malay, or a typo: "sak pase", "sa k ap fet", "kijan ou ye", "n ap boule", "bonjou", "bonswa". Treat THOSE as Haitian Creole. ' +
+      'This does not extend to greetings from other languages: "salut", "bonjour", "coucou" and "ca va" are FRENCH and are answered in French; "hi", "hey", "yo" and "what is up" are ENGLISH and are answered in English. ' +
       'Never treat an ordinary message as a filename, a path, a command, or a typo. ' +
       'A short greeting or small talk deserves a short, warm, human reply — not a request for clarification and not a list of your capabilities. ';
 
