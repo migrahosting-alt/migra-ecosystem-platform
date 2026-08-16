@@ -76,11 +76,12 @@
 !/apps/migrapilot-consumer/
 !/apps/migrapilot-consumer/**
 
-# Migra Engineer — the intelligence-development system (evaluation, benchmarking,
-# capability qualification). Source only; build output and deps are re-excluded
-# by its own apps/migra-engineer/.gitignore.
-!/apps/migra-engineer/
-!/apps/migra-engineer/**
+# Migra Engineer is NOT in this repository. Its authoritative home is the
+# separate MigraAI-Engineer repo (P:\MigraAI-Engineer). A short-lived
+# apps/migra-engineer/ was created here before that repo was discovered; the
+# work was migrated into evaluations/mkes/stress and evaluations/
+# conversation-quality there, and the duplicate removed. Two Migra Engineer
+# implementations is the expensive outcome — do not re-add one here.
 !/apps/**/package.json
 !/apps/**/package-lock.json
 !/apps/**/pnpm-lock.yaml
