@@ -331,3 +331,39 @@ test('Brain status codes map to discriminated outcomes', async () => {
     assert.equal(result.kind, kind, `status ${status}`)
   }
 })
+
+// ── bodyless requests ───────────────────────────────────────────────────────
+
+test('a bodyless request does not claim to carry JSON', async () => {
+  // Fastify rejects an empty body that declares `application/json`, which made
+  // every bodyless POST fail with a 500 that read like a Brain fault. The index
+  // sync is exactly such a call.
+  const { calls, fetchImpl } = recordingFetch(200, { ok: true })
+  await callBrain(
+    { kind: 'syncIndex', indexId: 'idx_abc' },
+    { fetchImpl, sessionProvider: async () => userA },
+  )
+
+  assert.equal(calls.length, 1)
+  const [call] = calls
+  assert.equal(call!.init.body, undefined, 'no body should be sent')
+  assert.equal(
+    new Headers(call!.init.headers).get('content-type'),
+    null,
+    'content-type must be absent when there is no body',
+  )
+  // The scope still travels; only the body declaration changed.
+  assert.ok(new Headers(call!.init.headers).get('x-owner-scope'))
+})
+
+test('a request with a body still declares JSON', async () => {
+  const { calls, fetchImpl } = recordingFetch(200, { ok: true })
+  await callBrain(
+    { kind: 'chatTurn', prompt: 'hello' },
+    { fetchImpl, sessionProvider: async () => userA },
+  )
+
+  const [call] = calls
+  assert.equal(new Headers(call!.init.headers).get('content-type'), 'application/json')
+  assert.equal(JSON.parse(String(call!.init.body)).prompt, 'hello')
+})

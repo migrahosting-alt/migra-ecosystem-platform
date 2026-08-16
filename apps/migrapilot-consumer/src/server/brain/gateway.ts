@@ -62,11 +62,18 @@ export interface GatewayDeps {
   signal?: AbortSignal
 }
 
-function buildHeaders(scope: { owner: string; workspace: string }, requestId?: string): Headers {
+function buildHeaders(
+  scope: { owner: string; workspace: string },
+  requestId?: string,
+  hasBody = true,
+): Headers {
   // Constructed from nothing — there is no inbound header object in scope.
   const headers = new Headers()
   headers.set('accept', 'application/json')
-  headers.set('content-type', 'application/json')
+  // Only declare a JSON body when there IS one. Fastify rejects an empty body
+  // that claims `application/json`, which made every bodyless POST — the index
+  // sync among them — fail with a 500 that looked like a Brain fault.
+  if (hasBody) headers.set('content-type', 'application/json')
   headers.set('x-owner-scope', scope.owner)
   headers.set('x-workspace-scope', scope.workspace)
   if (requestId) headers.set('x-request-id', requestId)
@@ -141,7 +148,7 @@ async function prepareBrainCall(
     call: {
       url: `${baseUrl}${resolved.path}`,
       method: resolved.method,
-      headers: buildHeaders(scope, deps.requestId),
+      headers: buildHeaders(scope, deps.requestId, resolved.body !== undefined),
       ...(resolved.body !== undefined ? { body: JSON.stringify(resolved.body) } : {}),
       // A stream is alive for as long as the model generates, so a total budget
       // sized for a buffered reply would sever a working answer mid-sentence.

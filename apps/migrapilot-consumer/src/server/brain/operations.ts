@@ -27,6 +27,11 @@ export type BrainOperation =
   // ── turns ────────────────────────────────────────────────────────────────
   | { kind: 'chatTurn'; prompt: string; conversationSummary?: string; stream?: boolean }
   | { kind: 'answer'; prompt: string; tier?: 'local' | 'cloud' }
+  // ── document indexes (the Files library) ─────────────────────────────────
+  | { kind: 'listIndexes' }
+  | { kind: 'createDocsIndex'; root: string }
+  | { kind: 'syncIndex'; indexId: string }
+  | { kind: 'indexStatus'; indexId: string }
   // ── governed coding (observation only) ───────────────────────────────────
   | { kind: 'codingCapability' }
   | { kind: 'getCodingRun'; runId: string }
@@ -55,6 +60,24 @@ export class InvalidOperationError extends Error {
 function id(value: string, label: string): string {
   if (typeof value !== 'string' || !SAFE_ID.test(value)) {
     throw new InvalidOperationError(`${label} is not a valid identifier.`)
+  }
+  return value
+}
+
+/**
+ * An absolute path beneath the upload root.
+ *
+ * This is the only operation that carries a filesystem path, so it is bounded
+ * here as well as at the call site: anything relative, containing `..`, or
+ * outside the configured root is refused rather than forwarded to the Brain.
+ */
+function absolutePath(value: string, label: string): string {
+  const root = process.env.UPLOAD_ROOT ?? '/var/lib/migrapilot/uploads'
+  if (typeof value !== 'string' || !value.startsWith('/') || value.includes('..')) {
+    throw new InvalidOperationError(`${label} must be an absolute path with no parent segments.`)
+  }
+  if (value !== root && !value.startsWith(`${root}/`)) {
+    throw new InvalidOperationError(`${label} must sit under the upload root.`)
   }
   return value
 }
@@ -130,6 +153,26 @@ export function resolveOperation(op: BrainOperation): ResolvedRequest {
         // workspace, and asserting one would be a fiction.
         body: { prompt: text(op.prompt, 'prompt'), tier: op.tier ?? 'local' },
       }
+
+    case 'listIndexes':
+      return { method: 'GET', path: '/api/ai/indexes' }
+
+    case 'createDocsIndex':
+      // `root` is a path, which is exactly the thing this module exists to keep
+      // out of a caller's hands — so it is validated as an absolute path under
+      // the upload root and never reaches here from a request body. See
+      // `src/server/files/storage.ts` for where it is derived from the session.
+      return {
+        method: 'POST',
+        path: '/api/ai/indexes',
+        body: { sourceType: 'docs', root: absolutePath(op.root, 'root') },
+      }
+
+    case 'syncIndex':
+      return { method: 'POST', path: `/api/ai/indexes/${id(op.indexId, 'indexId')}/sync` }
+
+    case 'indexStatus':
+      return { method: 'GET', path: `/api/ai/indexes/${id(op.indexId, 'indexId')}/status` }
 
     case 'codingCapability':
       return { method: 'GET', path: '/api/ai/coding/capability' }

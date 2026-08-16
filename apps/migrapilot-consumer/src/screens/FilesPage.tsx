@@ -1,155 +1,200 @@
 'use client'
 
-import { useRef, useState, type DragEvent } from 'react'
+import { useCallback, useEffect, useRef, useState, type DragEvent } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   ArrowRight,
-  BookOpen,
-  Calendar,
   CheckCircle2,
   CloudUpload,
-  FileSpreadsheet,
   FileText,
-  Info,
   Loader2,
   MessageCircle,
-  Network,
-  ShieldAlert,
-  Sparkles,
+  RefreshCw,
+  TriangleAlert,
   Trash2,
 } from 'lucide-react'
 import { Workspace } from '@/components/layout/AppShell'
 import { ActionRow, RailCard } from '@/components/rail/RailPanels'
 import { Button } from '@/components/ui/Button'
-import { IconTile, toneStyles } from '@/components/ui/Badge'
-import { FileTypeIcon, extensionOf } from '@/components/ui/FileTypeIcon'
-import {
-  analysisSummary,
-  detectedTopics,
-  keyPoints,
-  uploadedFiles as seedFiles,
-} from '@/data/mock'
-import type { UploadedFile } from '@/data/types'
+import { IconTile } from '@/components/ui/Badge'
+import { FileTypeIcon } from '@/components/ui/FileTypeIcon'
 import { useChat } from '@/state/ChatProvider'
 import { cn } from '@/lib/cn'
 
-const topicIcons = {
-  calendar: Calendar,
-  sheet: FileSpreadsheet,
-  integration: Network,
-  shield: ShieldAlert,
-  book: BookOpen,
+/*
+ * Every value on this page is measured.
+ *
+ * What this replaced: a mock-seeded file list, an upload that discarded the
+ * file and displayed "8 pages" after a 1400ms timer, an "Analyze" button that
+ * was a 1200ms timer setting a flag, and an insights panel of invented topics
+ * and key points about documents nothing had read — on a public site.
+ *
+ * There is deliberately no "Detected Topics", no page count, and no export:
+ * nothing produces them. An empty library says it is empty.
+ */
+
+interface StoredFile {
+  name: string
+  bytes: number
+  updatedAt: number
 }
 
-function bytesLabel(mb: number) {
-  return mb >= 1 ? `${mb.toFixed(1)} MB` : `${Math.round(mb * 1000)} KB`
+interface Limits {
+  maxFileBytes: number
+  maxLibraryBytes: number
+  maxFiles: number
+  allowedExtensions: string[]
+}
+
+interface IndexState {
+  indexed: boolean
+  state?: string | null
+  stats?: Record<string, unknown> | null
+}
+
+function sizeLabel(bytes: number): string {
+  if (bytes >= 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`
+  if (bytes >= 1024) return `${Math.round(bytes / 1024)} KB`
+  return `${bytes} B`
+}
+
+/** Only counts the Brain actually reported. Anything absent stays absent. */
+function indexedCount(stats: Record<string, unknown> | null | undefined): number | null {
+  for (const key of ['files', 'documents', 'fileCount', 'documentCount', 'chunks']) {
+    const value = stats?.[key]
+    if (typeof value === 'number') return value
+  }
+  return null
 }
 
 export function FilesPage() {
   const router = useRouter()
   const { startConversation } = useChat()
   const inputRef = useRef<HTMLInputElement>(null)
-  const [files, setFiles] = useState<UploadedFile[]>(seedFiles)
+
+  const [files, setFiles] = useState<StoredFile[]>([])
+  const [limits, setLimits] = useState<Limits | null>(null)
+  const [usedBytes, setUsedBytes] = useState(0)
+  const [loading, setLoading] = useState(true)
   const [dragging, setDragging] = useState(false)
-  const [analyzing, setAnalyzing] = useState(false)
-  const [analyzed, setAnalyzed] = useState(false)
+  const [busy, setBusy] = useState<'uploading' | 'indexing' | null>(null)
+  const [problems, setProblems] = useState<string[]>([])
+  const [index, setIndex] = useState<IndexState>({ indexed: false })
 
-  const totalSize = files.reduce((sum, file) => sum + file.bytes, 0)
-  const totalPages = files.reduce((sum, file) => sum + file.pages, 0)
-  const fileTypes = [...new Set(files.map((file) => extensionOf(file.name).toUpperCase()))]
-  const ready = files.length > 0 && files.every((file) => file.status === 'ready')
+  const refresh = useCallback(async () => {
+    try {
+      const response = await fetch('/api/files')
+      if (!response.ok) return
+      const body = (await response.json()) as { files: StoredFile[]; limits: Limits; usedBytes: number }
+      setFiles(body.files)
+      setLimits(body.limits)
+      setUsedBytes(body.usedBytes)
+    } finally {
+      setLoading(false)
+    }
+  }, [])
 
-  const addFiles = (incoming: FileList | null) => {
-    if (!incoming?.length) return
+  const refreshIndex = useCallback(async () => {
+    const response = await fetch('/api/files/index')
+    if (!response.ok) return
+    setIndex((await response.json()) as IndexState)
+  }, [])
 
-    const mapped: UploadedFile[] = Array.from(incoming).map((file, index) => ({
-      id: `up-${Date.now()}-${index}`,
-      name: file.name,
-      size: bytesLabel(file.size / 1_000_000),
-      meta: '—',
-      status: 'processing',
-      pages: 0,
-      bytes: file.size / 1_000_000,
-    }))
+  useEffect(() => {
+    void refresh()
+    void refreshIndex()
+  }, [refresh, refreshIndex])
 
-    setFiles((current) => [...current, ...mapped])
-    setAnalyzed(false)
+  const upload = useCallback(
+    async (incoming: FileList | null) => {
+      if (!incoming?.length) return
+      setBusy('uploading')
+      setProblems([])
 
-    // Simulated extraction pass — a real build swaps this for the ingest API.
-    window.setTimeout(() => {
-      setFiles((current) =>
-        current.map((file) =>
-          mapped.some((added) => added.id === file.id)
-            ? {
-                ...file,
-                status: 'ready',
-                meta: ['pdf', 'docx'].includes(extensionOf(file.name)) ? '8 pages' : 'Sheet1',
-                pages: ['pdf', 'docx'].includes(extensionOf(file.name)) ? 8 : 0,
-              }
-            : file,
-        ),
-      )
-    }, 1400)
-  }
+      const form = new FormData()
+      for (const file of Array.from(incoming)) form.append('file', file)
 
-  const onDrop = (event: DragEvent<HTMLDivElement>) => {
-    event.preventDefault()
-    setDragging(false)
-    addFiles(event.dataTransfer.files)
-  }
+      try {
+        const response = await fetch('/api/files', { method: 'POST', body: form })
+        const body = (await response.json().catch(() => null)) as {
+          rejected?: { name: string; message: string }[]
+          message?: string
+        } | null
 
-  const analyze = () => {
-    setAnalyzing(true)
-    window.setTimeout(() => {
-      setAnalyzing(false)
-      setAnalyzed(true)
-    }, 1200)
-  }
+        // Rejections are named. A file silently missing from the list afterwards
+        // is the same failure the old page had, just quieter.
+        if (body?.rejected?.length) {
+          setProblems(body.rejected.map((r) => `${r.name}: ${r.message}`))
+        } else if (!response.ok) {
+          setProblems([body?.message ?? 'That upload failed.'])
+        }
+        await refresh()
+      } catch {
+        setProblems(['That upload could not be sent.'])
+      } finally {
+        setBusy(null)
+      }
+    },
+    [refresh],
+  )
+
+  const remove = useCallback(
+    async (name: string) => {
+      await fetch(`/api/files?name=${encodeURIComponent(name)}`, { method: 'DELETE' })
+      await refresh()
+      // The library changed, so any previous index result is now stale.
+      setIndex({ indexed: false })
+    },
+    [refresh],
+  )
+
+  const runIndex = useCallback(async () => {
+    setBusy('indexing')
+    setProblems([])
+    try {
+      const response = await fetch('/api/files/index', { method: 'POST' })
+      const body = (await response.json().catch(() => null)) as (IndexState & { message?: string }) | null
+      if (!response.ok) {
+        setProblems([body?.message ?? 'Your files could not be indexed.'])
+        return
+      }
+      setIndex(body ?? { indexed: false })
+    } catch {
+      setProblems(['Indexing could not be started.'])
+    } finally {
+      setBusy(null)
+    }
+  }, [])
+
+  const count = indexedCount(index.stats)
 
   return (
     <Workspace
       contentClassName="mx-auto w-full max-w-[880px] px-6 py-7 sm:px-8"
       rail={
         <>
-          <RailCard title="File Insights">
+          <RailCard title="Library">
             <p className="flex items-center gap-2.5 text-sm font-semibold text-slate-700">
               <FileText className="h-[18px] w-[18px] text-slate-400" strokeWidth={1.9} />
-              {files.length} {files.length === 1 ? 'file' : 'files'} uploaded
+              {files.length} {files.length === 1 ? 'file' : 'files'}
             </p>
 
             <dl className="mt-4 flex flex-col gap-3 text-sm">
-              {[
-                ['Total size', `${totalSize.toFixed(2)} MB`],
-                ['Total pages', String(totalPages)],
-                ['File types', fileTypes.join(', ') || '—'],
-              ].map(([label, value]) => (
-                <div key={label} className="flex items-center justify-between gap-4">
-                  <dt className="text-slate-500">{label}</dt>
-                  <dd className="truncate font-semibold text-slate-800">{value}</dd>
-                </div>
-              ))}
-            </dl>
-
-            <div className="mt-5 border-t border-hairline pt-5">
-              <p className="text-sm font-semibold text-slate-800">Detected Topics</p>
-              <div className="mt-3 flex flex-col gap-2">
-                {detectedTopics.map((topic) => {
-                  const Icon = topicIcons[topic.icon]
-                  return (
-                    <span
-                      key={topic.label}
-                      className={cn(
-                        'inline-flex w-fit items-center gap-2 rounded-lg px-2.5 py-1.5 text-[13px] font-semibold ring-1 ring-inset',
-                        toneStyles[topic.tone].chip,
-                      )}
-                    >
-                      <Icon className="h-4 w-4" strokeWidth={2} />
-                      {topic.label}
-                    </span>
-                  )
-                })}
+              <div className="flex items-center justify-between gap-4">
+                <dt className="text-slate-500">Storage used</dt>
+                <dd className="truncate font-semibold text-slate-800">
+                  {sizeLabel(usedBytes)}
+                  {limits ? ` of ${sizeLabel(limits.maxLibraryBytes)}` : ''}
+                </dd>
               </div>
-            </div>
+              <div className="flex items-center justify-between gap-4">
+                <dt className="text-slate-500">Searchable</dt>
+                <dd className="truncate font-semibold text-slate-800">
+                  {/* Never guessed: only what the index actually reported. */}
+                  {index.indexed ? (count === null ? 'Yes' : `${count}`) : 'Not yet'}
+                </dd>
+              </div>
+            </dl>
           </RailCard>
 
           <RailCard title="Quick Actions">
@@ -161,198 +206,130 @@ export function FilesPage() {
                   </IconTile>
                 }
                 title="Ask about these files"
-                subtitle="Get answers and insights"
+                subtitle={index.indexed ? 'Your indexed documents' : 'Index your files first'}
                 trailing={<ArrowRight className="h-4 w-4 shrink-0 text-slate-300" />}
-                onClick={() =>
+                onClick={() => {
+                  // The prompt names the real files, so the model is asked about
+                  // documents that exist rather than an imagined "migration set".
+                  const names = files.map((file) => file.name).join(', ')
                   router.push(
-                    `/chat/${startConversation('Summarise the key risks and dependencies across my uploaded migration files.')}`,
+                    `/chat/${startConversation(
+                      `Using my uploaded documents (${names}), summarise the key points and anything that needs my attention.`,
+                    )}`,
                   )
-                }
-              />
-              <ActionRow
-                icon={
-                  <IconTile tone="slate">
-                    <FileText strokeWidth={2} />
-                  </IconTile>
-                }
-                title="Generate summary"
-                subtitle="Create a detailed summary"
-                trailing={<ArrowRight className="h-4 w-4 shrink-0 text-slate-300" />}
-                onClick={analyze}
+                }}
               />
             </div>
-          </RailCard>
-
-          <RailCard title="Export Insights">
-            <ActionRow
-              icon={<FileTypeIcon name="insights.pdf" size="md" />}
-              title="Export to PDF"
-              trailing={<ArrowRight className="h-4 w-4 shrink-0 text-slate-300" />}
-            />
           </RailCard>
         </>
       }
     >
-      <h1 className="text-[26px] leading-tight font-bold tracking-[-0.025em] text-slate-900">
-        Upload files to analyze
-      </h1>
+      <h1 className="text-[26px] leading-tight font-bold tracking-[-0.025em] text-slate-900">Your files</h1>
+      <p className="mt-2 text-[15px] leading-relaxed text-slate-500">
+        Upload documents, then index them so the assistant can read them in a chat.
+      </p>
 
       <div
-        onDragOver={(event) => {
+        onDragOver={(event: DragEvent<HTMLDivElement>) => {
           event.preventDefault()
           setDragging(true)
         }}
         onDragLeave={() => setDragging(false)}
-        onDrop={onDrop}
+        onDrop={(event: DragEvent<HTMLDivElement>) => {
+          event.preventDefault()
+          setDragging(false)
+          void upload(event.dataTransfer.files)
+        }}
         className={cn(
-          'mt-5 rounded-2xl border-2 border-dashed px-6 py-11 text-center transition-colors',
-          dragging ? 'border-brand-400 bg-brand-50/60' : 'border-slate-200 bg-white',
+          'mt-6 flex flex-col items-center rounded-2xl border-2 border-dashed px-6 py-10 text-center transition-colors',
+          dragging ? 'border-brand-400 bg-brand-50/50' : 'border-hairline bg-white',
         )}
       >
-        <CloudUpload
-          className={cn(
-            'mx-auto h-11 w-11 transition-colors',
-            dragging ? 'text-brand-600' : 'text-brand-500',
-          )}
-          strokeWidth={1.6}
-        />
-        <p className="mt-3.5 text-[17px] font-medium text-slate-700">Drag and drop files here</p>
-        <p className="mt-1 text-[15px] text-slate-500">
-          or{' '}
-          <button
-            onClick={() => inputRef.current?.click()}
-            className="font-semibold text-brand-600 underline-offset-2 hover:underline"
-          >
-            browse files
-          </button>
+        <CloudUpload className="h-8 w-8 text-slate-300" strokeWidth={1.6} />
+        <p className="mt-3 text-[15px] font-semibold text-slate-800">Drop files here</p>
+        <p className="mt-1 text-[13px] text-slate-500">
+          {/* The real allowlist, from the server — not a hopeful sentence. */}
+          Text and code documents up to {limits ? sizeLabel(limits.maxFileBytes) : '2 MB'}. PDF and Office
+          files are not supported yet.
         </p>
-        <p className="mt-3 text-[13px] text-slate-400">PDF, DOCX, XLSX, CSV up to 50MB each</p>
+        <Button className="mt-5" variant="secondary" onClick={() => inputRef.current?.click()} disabled={busy !== null}>
+          Browse files
+        </Button>
         <input
           ref={inputRef}
           type="file"
           multiple
-          className="hidden"
+          hidden
+          accept={limits ? limits.allowedExtensions.map((extension) => `.${extension}`).join(',') : undefined}
           onChange={(event) => {
-            addFiles(event.target.files)
+            void upload(event.target.files)
             event.target.value = ''
           }}
         />
       </div>
 
-      {files.length > 0 && (
-        <ul className="mt-5 divide-y divide-slate-100 overflow-hidden rounded-2xl border border-hairline bg-white">
-          {files.map((file) => (
-            <li key={file.id} className="flex items-center gap-4 px-4 py-3.5">
-              <FileTypeIcon name={file.name} size="lg" />
-
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-[15px] font-semibold text-slate-900">{file.name}</p>
-                <p className="text-[13px] text-slate-400">
-                  <span className="uppercase">{extensionOf(file.name)}</span> • {file.size}
-                </p>
-              </div>
-
-              <span className="hidden w-24 shrink-0 text-sm text-slate-500 sm:block">
-                {file.meta}
-              </span>
-
-              <span className="flex w-28 shrink-0 items-center gap-2 text-sm font-medium">
-                {file.status === 'ready' ? (
-                  <>
-                    <CheckCircle2 className="h-[18px] w-[18px] text-emerald-500" strokeWidth={2.2} />
-                    <span className="text-emerald-600">Ready</span>
-                  </>
-                ) : (
-                  <>
-                    <Loader2 className="h-[18px] w-[18px] animate-spin text-brand-500" />
-                    <span className="text-slate-500">Processing</span>
-                  </>
-                )}
-              </span>
-
-              <button
-                onClick={() => setFiles((current) => current.filter((item) => item.id !== file.id))}
-                aria-label={`Remove ${file.name}`}
-                className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-red-50 hover:text-red-500"
-              >
-                <Trash2 className="h-[18px] w-[18px]" strokeWidth={1.9} />
-              </button>
-            </li>
+      {problems.length > 0 && (
+        <div role="alert" className="mt-4 rounded-xl border border-amber-200 bg-amber-50/70 px-4 py-3">
+          {problems.map((problem) => (
+            <p key={problem} className="flex items-start gap-2 text-[13px] leading-relaxed text-amber-900">
+              <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" strokeWidth={2} />
+              {problem}
+            </p>
           ))}
-        </ul>
+        </div>
       )}
 
-      <div className="mt-5 flex flex-wrap items-center justify-between gap-4">
-        <p className="text-[15px] text-slate-500">
-          <span className="font-semibold text-slate-700">{files.length} files selected</span>
-          {' • '}
-          {totalSize.toFixed(2)} MB total
-        </p>
-        <Button size="lg" onClick={analyze} disabled={!ready || analyzing}>
-          {analyzing ? (
-            <Loader2 className="h-4.5 w-4.5 animate-spin" />
-          ) : (
-            <Sparkles className="h-4.5 w-4.5" strokeWidth={2.2} />
-          )}
-          {analyzing ? 'Analyzing…' : 'Analyze Files'}
-        </Button>
-      </div>
-
-      <div className="mt-6 rounded-2xl border border-hairline bg-white p-5 shadow-card sm:p-6">
-        <h2 className="flex items-center gap-2.5 text-[17px] font-semibold text-slate-900">
-          <Sparkles className="h-5 w-5 text-brand-600" strokeWidth={2.2} />
-          Analysis Preview
-        </h2>
-
-        <div className="mt-5 grid gap-6 md:grid-cols-[1fr_320px]">
-          <div>
-            <h3 className="text-sm font-semibold text-slate-800">Key Points Extracted</h3>
-            <ul className="mt-3.5 flex flex-col gap-3">
-              {keyPoints.map((point) => (
-                <li key={point} className="flex gap-3 text-[15px] leading-snug text-slate-700">
-                  <CheckCircle2 className="mt-0.5 h-4.5 w-4.5 shrink-0 text-brand-500" strokeWidth={2} />
-                  {point}
-                </li>
-              ))}
-            </ul>
-          </div>
-
-          <div>
-            <h3 className="text-sm font-semibold text-slate-800">AI Summary</h3>
-            <div className="mt-3.5 rounded-xl border border-hairline bg-slate-50/70 p-4">
-              <p className="text-sm leading-relaxed text-slate-600">{analysisSummary}</p>
-              <button
-                onClick={() =>
-                  router.push(
-                    `/chat/${startConversation('Give me the full summary of my uploaded migration documents.')}`,
-                  )
-                }
-                className="mt-4 inline-flex h-9 items-center rounded-lg border border-brand-200 bg-white px-3.5 text-[13px] font-semibold text-brand-700 transition-colors hover:bg-brand-50"
-              >
-                View full summary
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div
-        className={cn(
-          'mt-5 flex items-center gap-3 rounded-xl border p-4 text-[15px]',
-          analyzed
-            ? 'border-emerald-200/70 bg-emerald-50/60 text-emerald-800'
-            : 'border-brand-100 bg-brand-50/60 text-slate-600',
-        )}
-      >
-        {analyzed ? (
-          <CheckCircle2 className="h-5 w-5 shrink-0 text-emerald-600" strokeWidth={2.2} />
+      <div className="mt-7">
+        {loading ? (
+          <p className="text-[15px] text-slate-500">Loading your files…</p>
+        ) : files.length === 0 ? (
+          <p className="text-[15px] text-slate-500">You have not uploaded any files yet.</p>
         ) : (
-          <Info className="h-5 w-5 shrink-0 text-brand-600" strokeWidth={2.2} />
+          <ul className="flex flex-col gap-2.5">
+            {files.map((file) => (
+              <li
+                key={file.name}
+                className="flex items-center gap-3.5 rounded-xl border border-hairline bg-white px-4 py-3"
+              >
+                <FileTypeIcon name={file.name} size="md" />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-[15px] font-semibold text-slate-800">{file.name}</span>
+                  <span className="block text-[13px] text-slate-500">{sizeLabel(file.bytes)}</span>
+                </span>
+                <button
+                  aria-label={`Delete ${file.name}`}
+                  onClick={() => void remove(file.name)}
+                  className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-red-50 hover:text-red-600"
+                >
+                  <Trash2 className="h-4 w-4" />
+                </button>
+              </li>
+            ))}
+          </ul>
         )}
-        {analyzed
-          ? 'Analysis complete. Insights are up to date in the panel on the right.'
-          : 'Ready to analyze. Click “Analyze Files” to generate insights and answers.'}
       </div>
+
+      {files.length > 0 && (
+        <div className="mt-7 flex flex-wrap items-center gap-3 border-t border-hairline pt-6">
+          <Button size="lg" onClick={() => void runIndex()} disabled={busy !== null}>
+            {busy === 'indexing' ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" /> Indexing…
+              </>
+            ) : (
+              <>
+                <RefreshCw className="h-4 w-4" /> {index.indexed ? 'Re-index files' : 'Index files'}
+              </>
+            )}
+          </Button>
+          {index.indexed && busy === null && (
+            <p className="flex items-center gap-2 text-[13px] font-medium text-emerald-700">
+              <CheckCircle2 className="h-4 w-4" strokeWidth={2} />
+              Indexed{count === null ? '' : ` — ${count} entries`}
+            </p>
+          )}
+        </div>
+      )}
     </Workspace>
   )
 }
