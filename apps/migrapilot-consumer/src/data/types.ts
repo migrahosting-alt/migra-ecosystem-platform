@@ -75,7 +75,8 @@ export interface Conversation {
   title: string
   preview: string
   time: string
-  group: 'Today' | 'Yesterday' | 'This Week'
+  /** Sidebar bucket, derived from `updatedAt` — never assumed. */
+  group: 'Today' | 'Yesterday' | 'This Week' | 'Older'
   icon: 'chat' | 'doc' | 'sheet' | 'chart' | 'mail'
   tone: Tone
   messages: Message[]

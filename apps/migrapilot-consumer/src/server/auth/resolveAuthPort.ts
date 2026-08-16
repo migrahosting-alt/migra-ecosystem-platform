@@ -112,6 +112,22 @@ export async function resolveAuthPort(): Promise<AuthResolution> {
 
   const clientSecret = readEnv('MIGRAAUTH_CLIENT_SECRET')
 
+  /*
+   * The application session's own lifetime.
+   *
+   * It must NOT inherit the access token's. MigraAuth issues 15-minute access
+   * tokens, and this app stops using the token the moment bootstrap finishes —
+   * tenancy is derived from `authUserId`, never from a token. Inheriting 15
+   * minutes signed users out mid-conversation, with the shell still showing
+   * them as signed in because only `requireSession` checked expiry.
+   *
+   * See `appSessionLifetimeMs` in the auth-client for what this trades away:
+   * an issuer-side sign-out no longer propagates before this elapses.
+   */
+  const configuredTtl = Number(readEnv('APP_SESSION_TTL_SECONDS'))
+  const sessionTtlSeconds =
+    Number.isFinite(configuredTtl) && configuredTtl > 0 ? configuredTtl : 12 * 60 * 60
+
   const { initAuthClient } = await import('@migrateck/auth-client')
   const { migraAuthPort } = await import('./migraAuthPort')
 
@@ -127,6 +143,7 @@ export async function resolveAuthPort(): Promise<AuthResolution> {
     scopes,
     sessionCookieName: readEnv('APP_SESSION_COOKIE_NAME') ?? 'migrapilot_consumer_session',
     sessionSecret: sessionSecret!,
+    sessionTtlSeconds,
   })
 
   return { port: migraAuthPort, configured: true, missing: [] }

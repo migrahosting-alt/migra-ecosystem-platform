@@ -181,6 +181,26 @@ test('getSession returns null rather than throwing when unconfigured', async () 
   assert.equal(await getSession(), null)
 })
 
+test('getSession and requireSession agree on what "signed in" means', async () => {
+  // Expiry was once checked only in requireSession, so the shell rendered a
+  // signed-in header while every action behind it answered 401.
+  reset({})
+  const expired = session({ expiresAt: Date.now() - 1 })
+  setAuthPort(stubPort({ getSession: async () => expired }))
+
+  assert.equal(await getSession(), null, 'an expired session must not read as signed in')
+  await assert.rejects(() => requireSession(), UnauthenticatedError)
+})
+
+test('a live session reads as signed in from both', async () => {
+  reset({})
+  const live = session()
+  setAuthPort(stubPort({ getSession: async () => live }))
+
+  assert.equal(await getSession(), live)
+  assert.equal(await requireSession(), live)
+})
+
 test('requireSession throws when there is no session', async () => {
   reset({})
   setAuthPort(stubPort({ getSession: async () => null }))

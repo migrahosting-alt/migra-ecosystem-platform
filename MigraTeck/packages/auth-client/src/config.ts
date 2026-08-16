@@ -17,6 +17,7 @@ export function initAuthClient(nextConfig: AuthClientConfig) {
     scopes: nextConfig.scopes,
     sessionCookieName: nextConfig.sessionCookieName,
     sessionSecret: nextConfig.sessionSecret,
+    ...(nextConfig.sessionTtlSeconds ? { sessionTtlSeconds: nextConfig.sessionTtlSeconds } : {}),
   };
 }
 

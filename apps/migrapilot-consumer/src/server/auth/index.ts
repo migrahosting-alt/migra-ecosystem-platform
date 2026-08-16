@@ -64,9 +64,21 @@ export function resetAuthPort(): void {
   resolved = undefined
 }
 
-/** The current session, or null. Never throws for the unauthenticated case. */
+/** An expired session is not a session. */
+const isLive = (session: AppSession | null): session is AppSession =>
+  session !== null && !(session.expiresAt && session.expiresAt <= Date.now())
+
+/**
+ * The current session, or null. Never throws for the unauthenticated case.
+ *
+ * Expiry is applied HERE, not only in `requireSession`. It used to be checked
+ * only there, so an expired cookie still rendered a signed-in header while
+ * every action behind it answered 401 — the shell claimed an identity the rest
+ * of the app refused to honour. One definition of "signed in", for both.
+ */
 export async function getSession(): Promise<AppSession | null> {
-  return (await getAuthPort()).getSession()
+  const session = await (await getAuthPort()).getSession()
+  return isLive(session) ? session : null
 }
 
 /**
@@ -76,9 +88,7 @@ export async function getSession(): Promise<AppSession | null> {
 export async function requireSession(): Promise<AppSession> {
   const session = await (await getAuthPort()).getSession()
   if (!session) throw new UnauthenticatedError()
-  if (session.expiresAt && session.expiresAt <= Date.now()) {
-    throw new UnauthenticatedError('Session expired.')
-  }
+  if (!isLive(session)) throw new UnauthenticatedError('Session expired.')
   return session
 }
 

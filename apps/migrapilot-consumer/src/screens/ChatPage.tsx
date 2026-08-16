@@ -216,7 +216,7 @@ export function ChatPage() {
   const params = useParams<{ id: string }>()
   const router = useRouter()
   const id = typeof params?.id === 'string' ? params.id : ''
-  const { byId, sendMessage, pendingIn } = useChat()
+  const { byId, sendMessage, pendingIn, loading, openConversation } = useChat()
   const conversation = byId(id)
   const [scopeOpen, setScopeOpen] = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null)
@@ -232,11 +232,23 @@ export function ChatPage() {
     first.current = false
   }, [])
 
+  // Pull this conversation's durable messages in. The provider only holds
+  // titles until a conversation is opened, so on a fresh load — a reload, or a
+  // shared link — this is what puts the thread on screen.
+  useEffect(() => {
+    if (id) openConversation(id)
+  }, [id, openConversation])
+
   // An unknown conversation id sends the user home. Done in an effect rather
   // than during render because navigation is a side effect in the App Router.
+  //
+  // `loading` is what makes a reload work: the conversation list is fetched
+  // after mount, so on the first render of `/chat/<id>` NO conversation is
+  // known yet. Redirecting on that would bounce every reload straight home
+  // before the durable history ever arrived.
   useEffect(() => {
-    if (!conversation) router.replace('/')
-  }, [conversation, router])
+    if (!loading && !conversation) router.replace('/')
+  }, [loading, conversation, router])
 
   if (!conversation) return null
 

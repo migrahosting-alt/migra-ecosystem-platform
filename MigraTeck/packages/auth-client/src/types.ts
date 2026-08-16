@@ -27,6 +27,13 @@ export type AuthClientConfig = {
   scopes: string[];
   sessionCookieName: string;
   sessionSecret: string;
+  /**
+   * Application session lifetime in seconds. Defaults to the access token's.
+   *
+   * Set this only when the app stops using the access token after bootstrap;
+   * see `appSessionLifetimeMs` in `./bootstrap.ts` for the trade-off it accepts.
+   */
+  sessionTtlSeconds?: number;
 };
 
 export type AuthenticatedUser = {
@@ -71,6 +78,7 @@ export type AppSession = {
 export type BootstrapFn = (input: {
   authUserId: string;
   email: string;
+  emailVerified: boolean;
   displayName?: string;
   accessToken: string;
   refreshToken?: string;

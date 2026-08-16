@@ -48,19 +48,57 @@ const post = (body: unknown): Promise<Response> =>
     }),
   )
 
-/** Stand in for the Brain at the network edge, without touching the gateway. */
-function brainReturns(status: number, body: unknown) {
+/**
+ * Stand in for the Brain at the network edge, without touching the gateway.
+ *
+ * A turn is four Brain calls, not one — create the conversation, append the
+ * user's message, run the model, append the answer — so the double dispatches
+ * by path. `chatStatus`/`chatBody` override only the model call; the
+ * persistence calls succeed unless a test says otherwise.
+ */
+const CONVERSATION_ID = 'conv_test123'
+
+function brainStub(
+  options: {
+    chatStatus?: number
+    chatBody?: unknown
+    appendStatus?: number
+    createStatus?: number
+  } = {},
+) {
   const calls: { url: string; init: RequestInit }[] = []
   const original = globalThis.fetch
+
   globalThis.fetch = (async (url: string | URL | Request, init: RequestInit = {}) => {
-    calls.push({ url: String(url), init })
-    return new Response(JSON.stringify(body), {
-      status,
-      headers: { 'content-type': 'application/json' },
-    })
+    const href = String(url)
+    calls.push({ url: href, init })
+
+    const json = (status: number, body: unknown) =>
+      new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
+
+    if (href.endsWith('/api/ai/chat')) {
+      return json(options.chatStatus ?? 200, options.chatBody ?? { ok: true, content: 'answer' })
+    }
+    if (href.endsWith('/messages')) {
+      return json(options.appendStatus ?? 200, { ok: true, stored: true, message: { id: 'msg_1' } })
+    }
+    if (href.endsWith('/api/ai/conversations')) {
+      return json(options.createStatus ?? 200, { id: CONVERSATION_ID, memoryMode: 'durable' })
+    }
+    return json(404, { ok: false })
   }) as typeof globalThis.fetch
-  return { calls, restore: () => void (globalThis.fetch = original) }
+
+  return {
+    calls,
+    /** Just the Brain paths, in order. */
+    paths: () => calls.map((call) => new URL(call.url).pathname),
+    restore: () => void (globalThis.fetch = original),
+  }
 }
+
+/** Back-compat shim for the tests that only care about the model call. */
+const brainReturns = (status: number, body: unknown) =>
+  brainStub({ chatStatus: status, chatBody: body })
 
 /** No failure response may carry model-shaped text. */
 async function assertCarriesNoAnswer(response: Response) {
@@ -159,17 +197,135 @@ test('the browser is told nothing about where the Brain lives', async () => {
 })
 
 test('the prompt reaches the Brain chat operation, scoped to the caller', async () => {
-  const brain = brainReturns(200, { ok: true, content: 'ok' })
+  const brain = brainStub()
   setAuthPort(portWith(session))
 
   await post({ prompt: 'the prompt' })
-  assert.equal(brain.calls.length, 1)
-  const [call] = brain.calls
-  assert.ok(call!.url.endsWith('/api/ai/chat'), `unexpected path: ${call!.url}`)
-  // Tenancy is derived server-side from the session; the browser cannot influence it.
-  const headers = new Headers(call!.init.headers)
-  assert.ok(headers.get('x-owner-scope'))
-  assert.equal(JSON.parse(String(call!.init.body)).prompt, 'the prompt')
+
+  const chat = brain.calls.find((call) => call.url.endsWith('/api/ai/chat'))
+  assert.ok(chat, `no chat call in: ${brain.paths().join(', ')}`)
+  assert.equal(JSON.parse(String(chat!.init.body)).prompt, 'the prompt')
+
+  // Tenancy is derived server-side from the session, on EVERY call — the
+  // browser cannot influence it and no call may go out without it.
+  for (const call of brain.calls) {
+    assert.ok(new Headers(call.init.headers).get('x-owner-scope'), `unscoped call: ${call.url}`)
+  }
+
+  brain.restore()
+  resetAuthPort()
+})
+
+// ── durable persistence ─────────────────────────────────────────────────────
+
+test('a new conversation is created and both sides of the turn are stored', async () => {
+  const brain = brainStub({ chatBody: { ok: true, content: 'the answer' } })
+  setAuthPort(portWith(session))
+
+  const response = await post({ prompt: 'the prompt' })
+  assert.equal(response.status, 200)
+  assert.equal(((await response.json()) as Record<string, unknown>).conversationId, CONVERSATION_ID)
+
+  assert.deepEqual(brain.paths(), [
+    '/api/ai/conversations',
+    `/api/ai/conversations/${CONVERSATION_ID}/messages`,
+    '/api/ai/chat',
+    `/api/ai/conversations/${CONVERSATION_ID}/messages`,
+  ])
+
+  const stored = brain.calls
+    .filter((call) => call.url.endsWith('/messages'))
+    .map((call) => JSON.parse(String(call.init.body)))
+  assert.deepEqual(stored, [
+    { role: 'user', content: 'the prompt' },
+    { role: 'assistant', content: 'the answer' },
+  ])
+
+  brain.restore()
+  resetAuthPort()
+})
+
+test('the conversation is durable, so a reload can find it', async () => {
+  const brain = brainStub()
+  setAuthPort(portWith(session))
+
+  await post({ prompt: 'hi' })
+  const create = brain.calls.find((call) => call.url.endsWith('/api/ai/conversations'))
+  // `session` memory would vanish on a Brain restart, which is precisely the
+  // failure this whole slice exists to prevent.
+  assert.equal(JSON.parse(String(create!.init.body)).memoryMode, 'durable')
+
+  brain.restore()
+  resetAuthPort()
+})
+
+test('an existing conversation is continued, not duplicated', async () => {
+  const brain = brainStub()
+  setAuthPort(portWith(session))
+
+  await post({ prompt: 'follow up', conversationId: CONVERSATION_ID })
+  assert.ok(
+    !brain.paths().includes('/api/ai/conversations'),
+    'a supplied conversation id must not create another conversation',
+  )
+
+  brain.restore()
+  resetAuthPort()
+})
+
+test("the user's message is stored BEFORE the model runs, so a failed turn survives", async () => {
+  // Persisting only on success would discard exactly the turns worth retrying.
+  const brain = brainStub({ chatStatus: 502, chatBody: { ok: false, code: 'COMPLETION_FAILED' } })
+  setAuthPort(portWith(session))
+
+  const response = await post({ prompt: 'the prompt' })
+  assert.equal(response.status, 502)
+
+  const paths = brain.paths()
+  assert.ok(
+    paths.indexOf(`/api/ai/conversations/${CONVERSATION_ID}/messages`) < paths.indexOf('/api/ai/chat'),
+    `the user message must be stored before the model call: ${paths.join(', ')}`,
+  )
+  // The answer never existed, so nothing is stored for it.
+  assert.equal(paths.filter((path) => path.endsWith('/messages')).length, 1)
+
+  brain.restore()
+  resetAuthPort()
+})
+
+test('a failed turn still returns its conversation id, so the retry stays put', async () => {
+  const brain = brainStub({ chatStatus: 502 })
+  setAuthPort(portWith(session))
+
+  const body = (await (await post({ prompt: 'hi' })).json()) as Record<string, unknown>
+  assert.equal(body.conversationId, CONVERSATION_ID)
+  assert.equal(body.content, undefined)
+
+  brain.restore()
+  resetAuthPort()
+})
+
+test('a conversation that cannot be created does not reach the model', async () => {
+  const brain = brainStub({ createStatus: 500 })
+  setAuthPort(portWith(session))
+
+  const response = await post({ prompt: 'hi' })
+  assert.equal(response.status, 502)
+  assert.ok(!brain.paths().includes('/api/ai/chat'), 'no model call without somewhere to store the turn')
+
+  brain.restore()
+  resetAuthPort()
+})
+
+test('a foreign or unknown conversation id is a 404, not a silent new conversation', async () => {
+  // The Brain scopes by owner, so another principal's id is genuinely not found
+  // for this caller. Falling back to "create one" would hide the mistake.
+  const brain = brainStub({ appendStatus: 404 })
+  setAuthPort(portWith(session))
+
+  const response = await post({ prompt: 'hi', conversationId: 'conv_someone_else' })
+  assert.equal(response.status, 404)
+  assert.ok(!brain.paths().includes('/api/ai/chat'))
 
   brain.restore()
   resetAuthPort()
