@@ -1,6 +1,6 @@
 'use client'
 
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { ArrowRight, BarChart3, Lightbulb, PencilLine, ScrollText } from 'lucide-react'
 import { Workspace } from '@/components/layout/AppShell'
 import { LogoMark } from '@/components/brand/Logo'
@@ -38,8 +38,11 @@ const suggestions = [
 export function WelcomePage() {
   const router = useRouter()
   const { startConversation } = useChat()
+  // Arriving from Files means every question in this chat is about those files.
+  const grounded = useSearchParams().get('grounded') === 'files'
 
-  const start = (prompt: string) => router.push(`/chat/${startConversation(prompt)}`)
+  const start = (prompt: string) =>
+    router.push(`/chat/${startConversation(prompt, grounded ? { grounded: true } : undefined)}`)
 
   return (
     <Workspace

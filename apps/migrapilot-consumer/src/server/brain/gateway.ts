@@ -270,6 +270,27 @@ export async function streamBrain(
   if (response.status === 404) return { kind: 'not_found' }
   if (!response.ok || !response.body) {
     const detail = await response.text().catch(() => '')
+    // A refused stream is diagnosable only if the request that caused it is
+    // visible: scope and mode decide the outcome, and both are server-derived.
+    console.warn(
+      '[brain] stream refused',
+      JSON.stringify({
+        url,
+        status: response.status,
+        ownerScope: headers.get('x-owner-scope'),
+        workspaceScope: headers.get('x-workspace-scope'),
+        // The prompt is user content and is deliberately NOT logged; the mode
+        // and scope are what decide this outcome.
+        mode: (() => {
+          try {
+            return (JSON.parse(body ?? '{}') as { groundingMode?: string }).groundingMode ?? null
+          } catch {
+            return null
+          }
+        })(),
+        detail: detail.slice(0, 300),
+      }),
+    )
     return { kind: 'brain_error', status: response.status, body: detail }
   }
 

@@ -15,6 +15,26 @@
 
 export type MessageRole = 'user' | 'assistant' | 'system'
 
+/**
+ * Evidence-source modes the Brain ENFORCES (`packages/protocol/src/grounding.ts`).
+ *
+ * Only two are meaningful to this app, and the difference is the whole Files
+ * feature:
+ *
+ *   approved  the caller's approved semantic index only — REFUSE rather than
+ *             answer without it. This is what makes "ask about my documents"
+ *             truthful: no evidence means no answer, not a confident guess.
+ *   none      no document evidence at all, for ordinary chat.
+ *
+ * `auto` is deliberately NOT used. It prefers approved evidence and silently
+ * falls back when retrieval returns nothing — which on a consumer server with no
+ * checkout means falling back to nothing, leaving the model to answer from its
+ * own priors. Asked to summarise an uploaded `migration-notes.md`, it invented a
+ * document: `user_sessions` tables, a Stripe v3 migration, Amplitude webhooks,
+ * `scripts/migrate_data.py`. None of it existed. That answer was persisted.
+ */
+export type GroundingMode = 'approved' | 'none'
+
 export type BrainOperation =
   // ── conversations ────────────────────────────────────────────────────────
   | { kind: 'listConversations' }
@@ -25,13 +45,21 @@ export type BrainOperation =
   | { kind: 'listMessages'; conversationId: string }
   | { kind: 'appendMessage'; conversationId: string; role: MessageRole; content: string }
   // ── turns ────────────────────────────────────────────────────────────────
-  | { kind: 'chatTurn'; prompt: string; conversationSummary?: string; stream?: boolean }
+  | {
+      kind: 'chatTurn'
+      prompt: string
+      conversationSummary?: string
+      stream?: boolean
+      /** Which evidence the Brain may ground on. See GROUNDING_MODES below. */
+      groundingMode?: GroundingMode
+    }
   | { kind: 'answer'; prompt: string; tier?: 'local' | 'cloud' }
   // ── document indexes (the Files library) ─────────────────────────────────
   | { kind: 'listIndexes' }
   | { kind: 'createDocsIndex'; root: string }
   | { kind: 'syncIndex'; indexId: string }
   | { kind: 'indexStatus'; indexId: string }
+  | { kind: 'approveIndex'; indexId: string }
   // ── governed coding (observation only) ───────────────────────────────────
   | { kind: 'codingCapability' }
   | { kind: 'getCodingRun'; runId: string }
@@ -142,6 +170,9 @@ export function resolveOperation(op: BrainOperation): ResolvedRequest {
           ...(op.conversationSummary ? { conversationSummary: op.conversationSummary } : {}),
           // The Brain streams SSE when this is truthy and buffers otherwise.
           ...(op.stream ? { stream: true } : {}),
+          // Always explicit. Omitting it defaults the Brain to `auto`, which is
+          // the mode that let an ungrounded answer through.
+          groundingMode: op.groundingMode ?? 'none',
         },
       }
 
@@ -173,6 +204,17 @@ export function resolveOperation(op: BrainOperation): ResolvedRequest {
 
     case 'indexStatus':
       return { method: 'GET', path: `/api/ai/indexes/${id(op.indexId, 'indexId')}/status` }
+
+    case 'approveIndex':
+      // Promotion to `approved` is what makes an index eligible for grounding:
+      // `approvedIndexFor` ignores any index without an approved version. The
+      // index being promoted is always the caller's own — see the root check in
+      // `createDocsIndex` and the lookup in `app/api/files/index/route.ts`.
+      return {
+        method: 'PATCH',
+        path: `/api/ai/indexes/${id(op.indexId, 'indexId')}`,
+        body: { state: 'approved' },
+      }
 
     case 'codingCapability':
       return { method: 'GET', path: '/api/ai/coding/capability' }

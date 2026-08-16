@@ -392,3 +392,97 @@ test('every Brain call in a streamed turn carries the derived scope', async () =
   brain.restore()
   resetAuthPort()
 })
+
+// ── grounding mode ──────────────────────────────────────────────────────────
+
+test('an ordinary turn asks for no document evidence', async () => {
+  const brain = brainStub()
+  setAuthPort(portWith(session))
+
+  await collect(await post({ prompt: 'what is the capital of France' }))
+  const chat = brain.calls.find((call) => call.url.endsWith('/api/ai/chat'))!
+  // `none`, never `auto`: auto silently falls back when retrieval finds nothing,
+  // which is how an ungrounded answer got presented as a document summary.
+  assert.equal(JSON.parse(String(chat.init.body)).groundingMode, 'none')
+
+  brain.restore()
+  resetAuthPort()
+})
+
+test('a grounded turn demands the approved index', async () => {
+  const brain = brainStub()
+  setAuthPort(portWith(session))
+
+  await collect(await post({ prompt: 'summarise my documents', grounded: true }))
+  const chat = brain.calls.find((call) => call.url.endsWith('/api/ai/chat'))!
+  assert.equal(JSON.parse(String(chat.init.body)).groundingMode, 'approved')
+
+  brain.restore()
+  resetAuthPort()
+})
+
+test('a non-boolean grounded flag does not enable grounding', async () => {
+  const brain = brainStub()
+  setAuthPort(portWith(session))
+
+  for (const grounded of ['true', 1, {}, null]) {
+    await collect(await post({ prompt: 'hi', grounded }))
+  }
+  for (const call of brain.calls.filter((c) => c.url.endsWith('/api/ai/chat'))) {
+    assert.equal(JSON.parse(String(call.init.body)).groundingMode, 'none')
+  }
+
+  brain.restore()
+  resetAuthPort()
+})
+
+test('a refusal for want of evidence is reported as such, and persists nothing', async () => {
+  /*
+   * In `approved` mode the Brain answers 409 INSUFFICIENT_APPROVED_EVIDENCE
+   * rather than letting the model answer from its own priors. That is the
+   * feature working. The user must hear the real reason, and no answer may be
+   * written to the conversation.
+   */
+  const original = globalThis.fetch
+  const calls: { url: string; init: RequestInit }[] = []
+  globalThis.fetch = (async (url: string | URL | Request, init: RequestInit = {}) => {
+    const href = String(url)
+    calls.push({ url: href, init })
+    if (href.endsWith('/api/ai/chat')) {
+      return new Response(
+        JSON.stringify({
+          ok: false,
+          code: 'INSUFFICIENT_APPROVED_EVIDENCE',
+          error: 'Your indexed documents do not cover that.',
+        }),
+        { status: 409, headers: { 'content-type': 'application/json' } },
+      )
+    }
+    if (href.endsWith('/messages')) {
+      return new Response(JSON.stringify({ ok: true }), { status: 200, headers: { 'content-type': 'application/json' } })
+    }
+    return new Response(JSON.stringify({ id: CONVERSATION_ID }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    })
+  }) as typeof globalThis.fetch
+  setAuthPort(portWith(session))
+
+  const frames = await collect(await post({ prompt: 'anything', grounded: true }))
+  const last = frames[frames.length - 1]!
+  assert.equal(last.event, 'error')
+  assert.equal(last.data.error, 'insufficient_evidence')
+  // The Brain's repo-centric text must not reach the user.
+  assert.match(last.data.message, /do not cover that/)
+  assert.ok(!last.data.message.includes('branch'), 'no developer branch language')
+  assert.ok(!last.data.message.includes('semantic index'), 'no engine internals')
+
+  const storedAssistant = calls
+    .filter((call) => call.url.endsWith('/messages'))
+    .map((call) => JSON.parse(String(call.init.body)))
+    .filter((stored) => stored.role === 'assistant')
+  assert.deepEqual(storedAssistant, [], 'a refusal must not be persisted as an answer')
+
+  globalThis.fetch = original
+  resetAuthPort()
+})

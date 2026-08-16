@@ -1,6 +1,7 @@
 import 'server-only'
 
 import { callBrain, streamBrain, type BrainResult, type BrainStream, type GatewayDeps } from './gateway'
+import type { GroundingMode } from './operations'
 import type {
   ConversationMessage,
   ConversationSummary,
@@ -74,10 +75,19 @@ export function chatTurn(
  */
 export function chatTurnStream(
   prompt: string,
-  conversationSummary?: string,
+  options: { conversationSummary?: string; groundingMode?: GroundingMode } = {},
   deps?: GatewayDeps,
 ): Promise<BrainStream> {
-  return streamBrain({ kind: 'chatTurn', prompt, conversationSummary, stream: true }, deps)
+  return streamBrain(
+    {
+      kind: 'chatTurn',
+      prompt,
+      ...(options.conversationSummary ? { conversationSummary: options.conversationSummary } : {}),
+      ...(options.groundingMode ? { groundingMode: options.groundingMode } : {}),
+      stream: true,
+    },
+    deps,
+  )
 }
 
 /** The grounded, cited answer path. Streaming is a later addition. */

@@ -61,6 +61,11 @@ export interface Message {
   /** Assistant turns only — renders a call to action beneath the answer. */
   action?: 'scope-review'
   /**
+   * Assistant turns only — files from the caller's own library that this answer
+   * refers to. Verified against real files, so it is never a fabricated source.
+   */
+  citedFiles?: string[]
+  /**
    * Assistant turns only — this is a system notice, NOT model output.
    *
    * It exists so a failed turn can never be mistaken for a generated answer.

@@ -62,16 +62,32 @@ function assertCanonical(value: unknown, label: string): string {
 /** Namespace prefixes. Distinct so a user id can never collide with an org id. */
 export const OWNER_PREFIX = 'user:'
 export const ORG_WORKSPACE_PREFIX = 'org:'
-/** Workspace used when no organization context is established. */
-export const PERSONAL_WORKSPACE = 'personal'
+/**
+ * Prefix for the workspace a user gets when no organization context exists.
+ *
+ * It is PER USER, not a shared literal. It used to be the constant `personal`,
+ * which put every org-less user — that is, every consumer user today — in one
+ * shared workspace. Conversations survived that because the Brain scopes them by
+ * owner AND workspace, and owner is unique. Semantic indexes do NOT: both
+ * `approvedIndexFor` and `listForScope` match on workspace alone
+ * (`apps/brain-service/src/engine/rag/indexService.ts`).
+ *
+ * So the moment any consumer index became approved, one user's private uploaded
+ * documents would have been retrieved as grounding evidence for another user's
+ * question. Nothing was leaked because no consumer index had ever been
+ * approved — the Files slice was about to make that true for the first time.
+ *
+ * A per-user workspace is strictly narrowing and cannot widen access.
+ */
+export const PERSONAL_WORKSPACE_PREFIX = 'personal:'
 
 /**
  * Derive the Brain scope for a verified session.
  *
  * Format (documented contract):
  *
- *   owner     = "user:<authUserId>"                  — always the OIDC sub
- *   workspace = "org:<activeOrgId>" | "personal"     — org narrows, never widens
+ *   owner     = "user:<authUserId>"                        — always the OIDC sub
+ *   workspace = "org:<activeOrgId>" | "personal:<sub>"     — org narrows, never widens
  *
  * If organization-scoped *shared* memory is ever required, `owner` would have
  * to become `org:<id>`. That is a deliberate future migration with data
@@ -87,7 +103,8 @@ export function deriveBrainScope(session: AppSession | null | undefined): BrainS
   // Org context is optional today: `/userinfo` does not yet carry org claims
   // (PR #147 pending), so it arrives via the bootstrap step and may be absent.
   // Absent org means a narrower namespace, never a broader one.
-  let workspace = PERSONAL_WORKSPACE
+  // Per user, never a shared literal — see PERSONAL_WORKSPACE_PREFIX.
+  let workspace = `${PERSONAL_WORKSPACE_PREFIX}${authUserId}`
   if (session.activeOrgId !== undefined && session.activeOrgId !== null) {
     workspace = `${ORG_WORKSPACE_PREFIX}${assertCanonical(session.activeOrgId, 'activeOrgId')}`
   }

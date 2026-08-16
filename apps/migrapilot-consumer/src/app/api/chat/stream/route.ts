@@ -23,6 +23,7 @@
 import { requireSession } from '@/server/auth'
 import { UnauthenticatedError } from '@/server/auth/authPort'
 import { appendMessage, chatTurnStream, createConversation } from '@/server/brain/seams'
+import { listFiles } from '@/server/files/storage'
 import type { BrainStreamFrame } from '@/server/brain/gateway'
 import type { ConversationSummary } from '@/server/brain/contracts'
 
@@ -34,6 +35,76 @@ const json = (status: number, error: string, message: string): Response =>
 function titleFrom(prompt: string): string {
   const line = prompt.trim().split('\n')[0]!.trim()
   return line.length > 60 ? `${line.slice(0, 57)}…` : line
+}
+
+/**
+ * Which of the caller's real documents an answer refers to.
+ *
+ * The Brain instructs the model to cite `path:startLine-endLine` for retrieved
+ * evidence, but it does not report the chunks it used back over the stream, so
+ * the only citations available here are the ones the MODEL wrote — and a model
+ * can write a filename it never read.
+ *
+ * So nothing is trusted: every candidate is intersected with the caller's
+ * actual library, and anything that does not name a file they really have is
+ * dropped. The result is therefore always a subset of real files. It can
+ * under-report — a document used but not named will not appear — and that is
+ * the correct direction to be wrong in. A fabricated citation is a false claim
+ * about provenance; a missing one is merely incomplete.
+ */
+async function citedFiles(answer: string): Promise<string[]> {
+  const owned = await listFiles().catch(() => [])
+  if (owned.length === 0) return []
+
+  const found = owned
+    .filter((file) => answer.includes(file.name))
+    .map((file) => file.name)
+
+  return [...new Set(found)]
+}
+
+/**
+ * A grounded turn the Brain refused, distinguished from a fault.
+ *
+ * In `approved` mode the Brain answers 409 `INSUFFICIENT_APPROVED_EVIDENCE`
+ * rather than letting the model answer from its own priors. That is the feature
+ * working, not an error, and the user needs to hear the actual reason — "your
+ * documents do not cover this" — instead of a generic failure that invites them
+ * to retry an identical question forever.
+ */
+function refusalOr(failure: { kind: string; body?: unknown; status?: number }): {
+  error: string
+  message: string
+} {
+  if (failure.kind === 'brain_error' || failure.kind === 'conflict') {
+    const body = failure.body
+    const parsed =
+      typeof body === 'string'
+        ? (() => {
+            try {
+              return JSON.parse(body) as { code?: string; error?: string }
+            } catch {
+              return null
+            }
+          })()
+        : (body as { code?: string; error?: string } | null)
+
+    if (parsed?.code === 'INSUFFICIENT_APPROVED_EVIDENCE') {
+      /*
+       * The Brain's own text is NOT relayed. It is written for the repository
+       * case and tells the reader to "sync and approve the current branch" —
+       * developer language about code, and here it is also simply wrong: an
+       * index IS approved. The refusal is the relevance floor rejecting a
+       * retrieval, which for this product means one thing worth saying.
+       */
+      return {
+        error: 'insufficient_evidence',
+        message:
+          'Your indexed documents do not cover that. Try naming the document or asking something more specific — nothing here is a generated answer.',
+      }
+    }
+  }
+  return reasonFor(failure.kind)
 }
 
 /** The failure vocabulary the client renders. Mirrors the buffered route. */
@@ -105,6 +176,21 @@ export async function POST(request: Request): Promise<Response> {
   const summary = (body as { conversationSummary?: unknown })?.conversationSummary
   const conversationSummary = typeof summary === 'string' && summary.trim() ? summary : undefined
 
+  /*
+   * Whether this turn may be answered from the caller's documents.
+   *
+   * `grounded: true` means the Brain must answer from the caller's APPROVED
+   * index or refuse — it may not fall back to its own priors. Anything else
+   * gets `none`, so an ordinary chat turn never quietly pulls a user's private
+   * documents into an unrelated answer.
+   *
+   * A browser-supplied value is safe here because both modes are strictly
+   * narrowing: neither can widen what the caller may see, and tenancy is still
+   * derived server-side from the session.
+   */
+  const grounded = (body as { grounded?: unknown })?.grounded === true
+  const groundingMode = grounded ? 'approved' : 'none'
+
   const encoder = new TextEncoder()
   /** Set once the upstream stream opens; stays null if the client leaves first. */
   let frames: AsyncGenerator<BrainStreamFrame> | null = null
@@ -142,13 +228,15 @@ export async function POST(request: Request): Promise<Response> {
        */
       emit('meta', { conversationId: durableId })
 
-      const opened = await chatTurnStream(prompt, conversationSummary, {
+      const opened = await chatTurnStream(
+        prompt,
+        { ...(conversationSummary ? { conversationSummary } : {}), groundingMode },
         // The browser going away must stop the model, not just this handler.
-        signal: request.signal,
-      })
+        { signal: request.signal },
+      )
 
       if (opened.kind !== 'ok') {
-        emit('error', reasonFor(opened.kind))
+        emit('error', refusalOr(opened))
         closed = true
         try {
           controller.close()
@@ -194,10 +282,13 @@ export async function POST(request: Request): Promise<Response> {
         completed = false
       }
 
+      // Attribution, verified against the library rather than trusted.
+      const sources = grounded && completed ? await citedFiles(answer) : []
+
       if (completed && answer.trim()) {
         const stored = await appendMessage(durableId, 'assistant', answer)
         if (stored.kind === 'ok') {
-          emit('done', { conversationId: durableId })
+          emit('done', { conversationId: durableId, ...(sources.length ? { sources } : {}) })
         } else {
           // The user watched a complete answer arrive that will not survive a
           // reload. Saying so is the only honest option.

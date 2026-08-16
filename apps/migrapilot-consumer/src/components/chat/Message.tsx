@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import Link from 'next/link'
 import {
   BarChart3,
   CheckCheck,
@@ -14,8 +15,8 @@ import {
   ThumbsUp,
   TriangleAlert,
 } from 'lucide-react'
-import { LogoMark } from '@/components/brand/Logo'
 import { FileTypeIcon } from '@/components/ui/FileTypeIcon'
+import { LogoMark } from '@/components/brand/Logo'
 import { RichText } from './RichText'
 import { SourceIcon } from './SourceIcon'
 import { DiagramPreview, Waveform } from './DiagramPreview'
@@ -244,6 +245,27 @@ function AssistantTurn({
                   </span>
                   <ExternalLink className="h-3.5 w-3.5 shrink-0 text-slate-300 transition-colors group-hover:text-brand-500" />
                 </a>
+              ))}
+            </div>
+          )}
+
+          {/*
+            * Provenance the user can check. These names are intersected with the
+            * caller's real library server-side, so a model-invented filename can
+            * never appear here — see `citedFiles` in the stream route.
+            */}
+          {message.citedFiles && message.citedFiles.length > 0 && (
+            <div className="mt-5 flex flex-wrap items-center gap-2 border-t border-hairline pt-4">
+              <span className="text-[13px] font-medium text-slate-500">From your files:</span>
+              {message.citedFiles.map((name) => (
+                <Link
+                  key={name}
+                  href="/files"
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-hairline bg-white px-2.5 py-1 text-[12.5px] font-semibold text-slate-700 transition-colors hover:border-brand-200 hover:bg-brand-50/40"
+                >
+                  <FileTypeIcon name={name} size="sm" />
+                  {name}
+                </Link>
               ))}
             </div>
           )}

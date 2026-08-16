@@ -185,8 +185,17 @@ test('5b · absent org narrows to a personal namespace, never a shared one', () 
 
   const scope = deriveBrainScope(noOrg)
   assert.equal(scope.owner, 'user:auth-user-AAA')
-  assert.equal(scope.workspace, 'personal')
+
+  // This assertion used to read `=== 'personal'`, which contradicted the name of
+  // the test it lived in: that constant WAS shared, by every org-less user. It
+  // was harmless only because indexes are selected by workspace and no consumer
+  // index had ever been approved. See `tenancy/ownerScope.test.ts`.
+  assert.equal(scope.workspace, 'personal:auth-user-AAA')
+  assert.notEqual(scope.workspace, 'personal', 'the shared literal is the defect')
   assert.notEqual(scope.workspace, 'default', 'must never fall back to the Brain default bucket')
+
+  const other = deriveBrainScope({ ...noOrg, authUserId: 'auth-user-BBB' })
+  assert.notEqual(scope.workspace, other.workspace)
 })
 
 // ── 6. missing/invalid canonical identity fails closed ─────────────────────

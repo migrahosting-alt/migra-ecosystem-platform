@@ -18,7 +18,6 @@ import { ActionRow, RailCard } from '@/components/rail/RailPanels'
 import { Button } from '@/components/ui/Button'
 import { IconTile } from '@/components/ui/Badge'
 import { FileTypeIcon } from '@/components/ui/FileTypeIcon'
-import { useChat } from '@/state/ChatProvider'
 import { cn } from '@/lib/cn'
 
 /*
@@ -48,8 +47,11 @@ interface Limits {
 
 interface IndexState {
   indexed: boolean
+  /** Indexed is not the same as reachable: only an approved index is grounded on. */
+  searchable?: boolean
   state?: string | null
   stats?: Record<string, unknown> | null
+  message?: string
 }
 
 function sizeLabel(bytes: number): string {
@@ -69,7 +71,6 @@ function indexedCount(stats: Record<string, unknown> | null | undefined): number
 
 export function FilesPage() {
   const router = useRouter()
-  const { startConversation } = useChat()
   const inputRef = useRef<HTMLInputElement>(null)
 
   const [files, setFiles] = useState<StoredFile[]>([])
@@ -158,6 +159,8 @@ export function FilesPage() {
         setProblems([body?.message ?? 'Your files could not be indexed.'])
         return
       }
+      // Indexed-but-not-searchable is a real outcome and is reported, not hidden.
+      if (body && body.indexed && !body.searchable && body.message) setProblems([body.message])
       setIndex(body ?? { indexed: false })
     } catch {
       setProblems(['Indexing could not be started.'])
@@ -191,7 +194,7 @@ export function FilesPage() {
                 <dt className="text-slate-500">Searchable</dt>
                 <dd className="truncate font-semibold text-slate-800">
                   {/* Never guessed: only what the index actually reported. */}
-                  {index.indexed ? (count === null ? 'Yes' : `${count}`) : 'Not yet'}
+                  {index.searchable ? (count === null ? 'Yes' : `${count}`) : 'Not yet'}
                 </dd>
               </div>
             </dl>
@@ -206,17 +209,26 @@ export function FilesPage() {
                   </IconTile>
                 }
                 title="Ask about these files"
-                subtitle={index.indexed ? 'Your indexed documents' : 'Index your files first'}
+                subtitle={
+                  index.searchable
+                    ? 'Ask a specific question — answers cite your documents'
+                    : 'Index your files first'
+                }
                 trailing={<ArrowRight className="h-4 w-4 shrink-0 text-slate-300" />}
                 onClick={() => {
-                  // The prompt names the real files, so the model is asked about
-                  // documents that exist rather than an imagined "migration set".
-                  const names = files.map((file) => file.name).join(', ')
-                  router.push(
-                    `/chat/${startConversation(
-                      `Using my uploaded documents (${names}), summarise the key points and anything that needs my attention.`,
-                    )}`,
-                  )
+                  /*
+                   * Takes the user somewhere to ask, rather than auto-sending a
+                   * broad "summarise everything" prompt.
+                   *
+                   * Retrieval grounding matches a question against document
+                   * chunks above a relevance floor. A multi-topic summary
+                   * request matches nothing strongly, so the flagship button
+                   * reliably produced a refusal. A specific question — "when
+                   * does the freeze begin?" — retrieves and is answered with a
+                   * citation. So the button opens a grounded chat and lets the
+                   * user ask the thing they actually want to know.
+                   */
+                  router.push('/?grounded=files')
                 }}
               />
             </div>
@@ -318,14 +330,14 @@ export function FilesPage() {
               </>
             ) : (
               <>
-                <RefreshCw className="h-4 w-4" /> {index.indexed ? 'Re-index files' : 'Index files'}
+                <RefreshCw className="h-4 w-4" /> {index.searchable ? 'Re-index files' : 'Index files'}
               </>
             )}
           </Button>
-          {index.indexed && busy === null && (
+          {index.searchable && busy === null && (
             <p className="flex items-center gap-2 text-[13px] font-medium text-emerald-700">
               <CheckCircle2 className="h-4 w-4" strokeWidth={2} />
-              Indexed{count === null ? '' : ` — ${count} entries`}
+              Searchable{count === null ? '' : ` — ${count} entries`}
             </p>
           )}
         </div>
