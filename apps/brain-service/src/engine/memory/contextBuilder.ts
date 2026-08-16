@@ -39,7 +39,20 @@ export function estimateTokens(text: string): number {
   return Math.ceil(text.length / 4);
 }
 
-const SYSTEM = 'You are MigraPilot, a workspace-aware assistant. Use the provided context; do not invent facts.';
+/**
+ * The universal assistant identity for memory-backed turns.
+ *
+ * Deliberately SHORT. This string is pushed first into a token-budgeted
+ * context, so every character here displaces workspace memory: an earlier
+ * attempt to carry the full persona and language policy in this constant
+ * squeezed the memories out and broke the budget test that proves they fit.
+ *
+ * The full persona — including the Haitian Creole language rule — lives where
+ * it costs nothing, in the provider's system message
+ * (`providers/openAiCompatProvider.ts`), selected by `systemPromptId`.
+ */
+const SYSTEM =
+  "You are MigraPilot, a helpful general-purpose AI assistant. Always reply in the user's own language. Use the provided context; do not invent facts.";
 
 export function renderSummary(summary: Summary): string {
   const s = summary.summary;
