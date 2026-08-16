@@ -1,0 +1,16 @@
+{
+  "name": "@migrateck/migra-engineer",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Migra Engineer — intelligence development: evaluation, benchmarking, capability qualification.",
+  "scripts": {
+    "eval:conversation": "node --import tsx eval/conversation-quality/run.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^26.2.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}

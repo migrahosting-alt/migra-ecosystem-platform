@@ -1,0 +1,9 @@
+# Generated and installed artifacts never belong in the repo.
+node_modules
+dist/
+*.tsbuildinfo
+
+# Evaluation reports are evidence about a specific run on a specific host.
+# They are attached to a promotion record, not committed as source.
+*.report.json
+baseline-*.json

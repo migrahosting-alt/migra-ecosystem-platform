@@ -25,6 +25,11 @@
 !.migra/
 !.migra/**
 
+# Allow MigraAuth design/hardening documentation
+!/docs/
+!/docs/migraauth/
+!/docs/migraauth/**
+
 # Allow ONLY nginx infra tree
 !infra/
 !infra/nginx/
@@ -46,6 +51,8 @@
 !/apps/migrapilot-runner-server/**
 !/apps/migrapilot-desktop/
 !/apps/migrapilot-desktop/**
+!/apps/migrapilot-endpoint-agent-windows/
+!/apps/migrapilot-endpoint-agent-windows/**
 !/apps/migrapilot-vscode-extension/
 !/apps/migrapilot-vscode-extension/**
 # Canonical MigraPilot VS Code extension — track its source. Build output
@@ -68,6 +75,12 @@
 # .env are re-excluded by its own apps/migrapilot-consumer/.gitignore.
 !/apps/migrapilot-consumer/
 !/apps/migrapilot-consumer/**
+
+# Migra Engineer — the intelligence-development system (evaluation, benchmarking,
+# capability qualification). Source only; build output and deps are re-excluded
+# by its own apps/migra-engineer/.gitignore.
+!/apps/migra-engineer/
+!/apps/migra-engineer/**
 !/apps/**/package.json
 !/apps/**/package-lock.json
 !/apps/**/pnpm-lock.yaml
