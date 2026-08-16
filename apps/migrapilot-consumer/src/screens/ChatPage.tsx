@@ -1,33 +1,23 @@
 'use client'
 
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import Link from 'next/link'
 import { useParams, useRouter } from 'next/navigation'
 import {
   ChevronDown,
   ChevronUp,
   Download,
-  Filter,
-  FolderOpen,
   ListChecks,
-  MoreVertical,
-  Play,
   Share2,
   SquareLibrary,
 } from 'lucide-react'
 import { Workspace } from '@/components/layout/AppShell'
 import { Composer, ComposerDisclaimer } from '@/components/chat/Composer'
 import { MessageView, TypingIndicator } from '@/components/chat/Message'
-import { DiagramPreview } from '@/components/chat/DiagramPreview'
 import { ActionRow, RailCard } from '@/components/rail/RailPanels'
 import { IconTile } from '@/components/ui/Badge'
 import { IconButton } from '@/components/ui/Button'
-import { FileTypeIcon } from '@/components/ui/FileTypeIcon'
-import { UnderlineTabs } from '@/components/ui/Tabs'
 import { CopyButton } from '@/components/ui/CopyField'
 import { ScopeApprovalModal } from '@/features/governance/ScopeApprovalModal'
-import { mediaLibrary } from '@/data/mock'
-import type { Attachment } from '@/data/types'
 import { useChat } from '@/state/ChatProvider'
 import { cn } from '@/lib/cn'
 
@@ -100,114 +90,6 @@ function ConversationToolsRail() {
   )
 }
 
-const mediaFilters = [
-  { id: 'all', label: 'All' },
-  { id: 'images', label: 'Images' },
-  { id: 'audio', label: 'Audio' },
-  { id: 'files', label: 'Files' },
-] as const
-
-type MediaFilter = (typeof mediaFilters)[number]['id']
-
-function matchesFilter(attachment: Attachment, filter: MediaFilter) {
-  if (filter === 'all') return true
-  if (filter === 'images') return attachment.kind === 'image'
-  if (filter === 'audio') return attachment.kind === 'audio'
-  return attachment.kind === 'document'
-}
-
-function MediaThumb({ attachment }: { attachment: Attachment }) {
-  if (attachment.kind === 'image' && attachment.preview) {
-    return (
-      <span className="h-10 w-12 shrink-0 overflow-hidden rounded-lg border border-hairline bg-white p-0.5">
-        <DiagramPreview variant={attachment.preview} />
-      </span>
-    )
-  }
-  if (attachment.kind === 'audio') {
-    return (
-      <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-brand-50 text-brand-600">
-        <Play className="ml-0.5 h-4 w-4 fill-current" />
-      </span>
-    )
-  }
-  return <FileTypeIcon name={attachment.name} size="lg" className="h-10 w-10" />
-}
-
-function MediaRail() {
-  const [filter, setFilter] = useState<MediaFilter>('all')
-  const visible = mediaLibrary.filter((item) => matchesFilter(item, filter))
-  const groups = ['Today', 'Yesterday'] as const
-
-  return (
-    <RailCard
-      title="Media"
-      action={
-        <IconButton label="Filter media" className="-mr-1">
-          <Filter className="h-4.5 w-4.5" strokeWidth={1.9} />
-        </IconButton>
-      }
-      bodyClassName="-mt-1"
-    >
-      <UnderlineTabs items={[...mediaFilters]} value={filter} onChange={setFilter} />
-
-      <div className="mt-4 flex flex-col gap-4">
-        {groups.map((group) => {
-          const items = visible.filter((item) => item.uploadedAt === group)
-          if (!items.length) return null
-
-          return (
-            <div key={group}>
-              <p className="mb-2 text-[13px] font-semibold text-slate-500">{group}</p>
-              <ul className="flex flex-col gap-2.5">
-                {items.map((item) => (
-                  <li
-                    key={item.id}
-                    className="flex items-center gap-2.5 rounded-xl border border-hairline bg-white p-2.5 transition-colors hover:border-brand-200"
-                  >
-                    <MediaThumb attachment={item} />
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate text-[12.5px] font-semibold text-slate-800">
-                        {item.name}
-                      </span>
-                      <span className="block truncate text-[11px] text-slate-400">
-                        {item.duration ? `${item.duration} • ` : ''}
-                        {item.size} •{' '}
-                        {item.kind === 'document'
-                          ? 'Document'
-                          : item.kind === 'image'
-                            ? 'Image'
-                            : 'Audio'}
-                      </span>
-                    </span>
-                    <IconButton label={`Options for ${item.name}`} className="h-6 w-6">
-                      <MoreVertical className="h-4 w-4" />
-                    </IconButton>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )
-        })}
-
-        {!visible.length && (
-          <p className="rounded-xl border border-dashed border-slate-200 py-8 text-center text-sm text-slate-400">
-            Nothing here yet.
-          </p>
-        )}
-      </div>
-
-      <Link
-        href="/files"
-        className="mt-4 flex h-11 items-center justify-center gap-2.5 rounded-field border border-hairline bg-white text-sm font-semibold text-slate-700 transition-colors hover:border-slate-300 hover:bg-slate-50"
-      >
-        <FolderOpen className="h-4.5 w-4.5 text-slate-400" strokeWidth={1.9} />
-        View all files
-      </Link>
-    </RailCard>
-  )
-}
-
 /* ---------------------------------------------------------------- *
  * Page
  * ---------------------------------------------------------------- */
@@ -264,7 +146,16 @@ export function ChatPage() {
 
   if (!conversation) return null
 
-  const framed = Boolean(conversation.hasMedia)
+  /*
+   * The media rail is gone with its data.
+   *
+   * It rendered `mediaLibrary` from `src/data/mock.ts` — invented attachments —
+   * behind `conversation.hasMedia`, a flag only the mock seed ever set. Durable
+   * conversations come from the Brain and never set it, so this was unreachable
+   * fabrication kept alive by a dead import. It returns with real attachments,
+   * not before.
+   */
+  const framed = false
 
   const thread = (
     <div className={cn('flex flex-col gap-6', framed && 'px-5 py-6 sm:px-6')}>
@@ -283,7 +174,7 @@ export function ChatPage() {
   return (
     <>
       <Workspace
-        rail={framed ? <MediaRail /> : <ConversationToolsRail />}
+        rail={<ConversationToolsRail />}
         contentClassName="mx-auto flex min-h-full w-full max-w-[880px] flex-col px-6 py-7 sm:px-8"
       >
         <div className="flex-1">
