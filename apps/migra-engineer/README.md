@@ -72,3 +72,65 @@ real failures → evaluation set → corpus/dataset → training/adaptation
 
 Until a candidate qualifies, Haitian Creole traffic stays on the incumbent.
 A weaker experimental model does not get production traffic for being newer.
+
+## MKES_STRESS — Haitian Creole stress set (`datasets/mkes-stress`)
+
+Ten authored utterances, each probing a capability models are known to fail:
+conversation, Haitian names and geography, dates/money, English code-switching,
+French code-switching, self-correction, ordered instructions, prosody, culture,
+long-context reasoning.
+
+```bash
+npm run mkes:status
+```
+
+### Held out, on purpose
+
+Each item targets a named capability. That is what makes the set valuable as a
+benchmark and **disqualifying as training data** — train on these, then score
+against them, and the number means nothing. `datasetRole: 'held-out-evaluation'`
+and `trainingEligible: false` are in the schema so this survives someone
+forgetting the convention. Training material is built separately around the same
+linguistic categories.
+
+### Nothing is asserted before it exists
+
+`referenceTranscript` is `null` until its author supplies it. Audio duration,
+sample rate, speaker identity, acoustic properties, emotion, confidence and ASR
+metrics are absent fields until measured — never defaults, never estimates.
+
+A generated reference would silently become the ground truth every future
+candidate is scored against. The slots stay empty until the real text arrives.
+
+### Rules a "helpful" pipeline would break
+
+Standard ASR and text normalisation actively destroy what this set measures:
+
+- **Code-switched words stay code-switched.** `server`, `crash`, `check logs`
+  stay English; `rendez-vous`, `pièce d'identité` stay French. Translating them
+  into Creole produces a transcript nobody said.
+- **Self-correction stays intact.** `... madi ... non, tann, se te mèkredi ...`
+  must keep the mistake *and* the repair. Reducing it to `mèkredi` deletes the
+  phenomenon.
+- **Haitian place names keep their Creole surface form** — `Jakmèl`, not Jacmel;
+  `Okap`, not Cap-Haïtien.
+- **Instruction order is the measurement**, not just the verbs present.
+- **No emotion label is inferred from text.** Prosody is evidenced by audio.
+- **The reference is never edited to improve a score.**
+
+### When the WAVs arrive
+
+Bind strictly by `MKES_STRESS_###`, then:
+
+```
+file validation → audio metadata → provenance/consent validation
+→ transcription → reference comparison → WER → CER
+→ code-switch accuracy → named-entity accuracy
+→ number/date/currency accuracy → human linguistic review
+```
+
+### Consent
+
+Permitted uses are enumerated per item. **Voice cloning is withheld explicitly
+and always**: consenting to contribute speech to a dataset is not consenting to
+have your voice synthesised, and the two must never be collapsed by inference.
