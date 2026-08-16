@@ -87,11 +87,35 @@ export async function buildSignupRedirect() {
   return `${cfg.migraAuthWebUrl ?? cfg.migraAuthBaseUrl}/signup?${params.toString()}`;
 }
 
+/**
+ * Where to send the browser to end the session at the issuer.
+ *
+ * The post-logout target is sent as `post_logout_redirect_uri` — the OIDC
+ * standard name, and the one MigraAuth's logout page actually reads
+ * (`apps/auth-web/src/app/logout/page.tsx`).
+ *
+ * It used to be sent as `return_to` only. Nothing read that on this path, so
+ * every product fell through to `resolveProductHomeUrl(clientId)` instead: a
+ * user who signed out of MigraPilot was handed to migrateck.com, a different
+ * product, with no way back. `return_to` is still sent because the
+ * authorize→login path does read it (`apps/auth-api/src/routes/oauth.ts`), and
+ * an unread parameter costs nothing.
+ *
+ * `client_id` goes along so the issuer can brand the sign-out screen as the
+ * product being left, and so a future `validatePostLogoutUri` has the client to
+ * validate against — see the note in the consumer's logout route about that
+ * validation existing but never being called.
+ */
 export function buildLogoutRedirect() {
   const cfg = getAuthClientConfig();
   const target = new URL("/logout", cfg.migraAuthWebUrl ?? cfg.migraAuthBaseUrl);
 
+  if (cfg.clientId) {
+    target.searchParams.set("client_id", cfg.clientId);
+  }
+
   if (cfg.postLogoutRedirectUri) {
+    target.searchParams.set("post_logout_redirect_uri", cfg.postLogoutRedirectUri);
     target.searchParams.set("return_to", cfg.postLogoutRedirectUri);
   }
 

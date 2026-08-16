@@ -342,3 +342,61 @@ test('only AuthNotConfiguredError becomes 503 across every route', async () => {
   await assert.rejects(() => logoutPost(), /cookie store unavailable/)
   resetAuthPort()
 })
+
+// ── where sign-out lands ────────────────────────────────────────────────────
+
+test('the logout redirect carries the post-logout target the issuer reads', async () => {
+  /*
+   * Regression: the target used to be sent as `return_to` only. MigraAuth's
+   * logout page reads `post_logout_redirect_uri`, so it never saw one and fell
+   * back to a per-product home URL — signing out of MigraPilot dropped the user
+   * on migrateck.com, a different product.
+   *
+   * This drives the real `buildLogoutRedirect` through the auth client rather
+   * than a stub, because the parameter name is the whole defect.
+   */
+  const { initAuthClient, buildLogoutRedirect } = await import('@migrateck/auth-client')
+
+  initAuthClient({
+    migraAuthBaseUrl: 'https://auth.example.test',
+    migraAuthWebUrl: 'https://auth.example.test',
+    clientId: 'migrapilot_web',
+    redirectUri: `${APP_BASE}/api/auth/callback`,
+    postLogoutRedirectUri: APP_BASE,
+    appBaseUrl: APP_BASE,
+    scopes: ['openid'],
+    sessionCookieName: 'migrapilot_consumer_session',
+    sessionSecret: 'test-session-secret-not-a-real-secret',
+  })
+
+  const target = new URL(buildLogoutRedirect())
+  assert.equal(target.origin, 'https://auth.example.test')
+  assert.equal(target.pathname, '/logout')
+
+  // The parameter the issuer actually reads.
+  assert.equal(target.searchParams.get('post_logout_redirect_uri'), APP_BASE)
+  // Still sent, because the authorize→login path does read it.
+  assert.equal(target.searchParams.get('return_to'), APP_BASE)
+  // So the issuer can brand the sign-out screen, and so a future
+  // `validatePostLogoutUri` has a client to validate against.
+  assert.equal(target.searchParams.get('client_id'), 'migrapilot_web')
+})
+
+test('the post-logout target stays inside this app', async () => {
+  const { initAuthClient, buildLogoutRedirect } = await import('@migrateck/auth-client')
+
+  initAuthClient({
+    migraAuthBaseUrl: 'https://auth.example.test',
+    clientId: 'migrapilot_web',
+    redirectUri: `${APP_BASE}/api/auth/callback`,
+    postLogoutRedirectUri: APP_BASE,
+    appBaseUrl: APP_BASE,
+    scopes: ['openid'],
+    sessionCookieName: 'migrapilot_consumer_session',
+    sessionSecret: 'test-session-secret-not-a-real-secret',
+  })
+
+  const landing = new URL(buildLogoutRedirect()).searchParams.get('post_logout_redirect_uri')!
+  // Signing out of MigraPilot must leave the user in MigraPilot.
+  assert.equal(new URL(landing).origin, APP_BASE)
+})
