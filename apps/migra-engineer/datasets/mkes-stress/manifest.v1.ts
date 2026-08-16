@@ -15,6 +15,7 @@
  * enumerated, and the transcript rules that protect each item's signal.
  */
 
+import { bindAudio } from './audio-binding'
 import type { MkesStressItem, MkesStressManifest } from './types'
 
 const VERSION = '1.0.0-draft'
@@ -66,7 +67,8 @@ const item = (
   language: 'ht',
   referenceTranscript: null,
   transcriptStatus: 'awaiting-author',
-  audio: { filename, status: 'pending' },
+  // Authored slot, overlaid with measured facts when the WAV has arrived.
+  audio: bindAudio(id, { filename, status: 'pending' }),
   purpose,
   evaluationTags: [],
   codeSwitchLanguages: [],
