@@ -25,7 +25,7 @@ export type BrainOperation =
   | { kind: 'listMessages'; conversationId: string }
   | { kind: 'appendMessage'; conversationId: string; role: MessageRole; content: string }
   // ── turns ────────────────────────────────────────────────────────────────
-  | { kind: 'chatTurn'; prompt: string; conversationSummary?: string }
+  | { kind: 'chatTurn'; prompt: string; conversationSummary?: string; stream?: boolean }
   | { kind: 'answer'; prompt: string; tier?: 'local' | 'cloud' }
   // ── governed coding (observation only) ───────────────────────────────────
   | { kind: 'codingCapability' }
@@ -117,6 +117,8 @@ export function resolveOperation(op: BrainOperation): ResolvedRequest {
         body: {
           prompt: text(op.prompt, 'prompt'),
           ...(op.conversationSummary ? { conversationSummary: op.conversationSummary } : {}),
+          // The Brain streams SSE when this is truthy and buffers otherwise.
+          ...(op.stream ? { stream: true } : {}),
         },
       }
 

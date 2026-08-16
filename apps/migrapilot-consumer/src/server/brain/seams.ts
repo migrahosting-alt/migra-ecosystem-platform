@@ -1,6 +1,6 @@
 import 'server-only'
 
-import { callBrain, type BrainResult, type GatewayDeps } from './gateway'
+import { callBrain, streamBrain, type BrainResult, type BrainStream, type GatewayDeps } from './gateway'
 import type {
   ConversationMessage,
   ConversationSummary,
@@ -62,6 +62,22 @@ export function chatTurn(
   deps?: GatewayDeps,
 ): Promise<BrainResult<unknown>> {
   return callBrain({ kind: 'chatTurn', prompt, conversationSummary }, deps)
+}
+
+/**
+ * The same chat turn, streamed.
+ *
+ * The Brain emits `context`, `route`, `token`, `done` and `error` frames over
+ * SSE, and commits the assistant message to its own memory ONLY on a completed
+ * stream — never on a partial, cancelled or failed one. Callers must mirror
+ * that: an interrupted stream has no answer to persist.
+ */
+export function chatTurnStream(
+  prompt: string,
+  conversationSummary?: string,
+  deps?: GatewayDeps,
+): Promise<BrainStream> {
+  return streamBrain({ kind: 'chatTurn', prompt, conversationSummary, stream: true }, deps)
 }
 
 /** The grounded, cited answer path. Streaming is a later addition. */

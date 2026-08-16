@@ -14,9 +14,19 @@ import 'server-only'
 export interface BrainConfig {
   baseUrl: string
   timeoutMs: number
+  /**
+   * Total budget for a streaming turn.
+   *
+   * Separate from `timeoutMs` because the two measure different things: a
+   * buffered call waits for a whole answer with nothing to show, while a stream
+   * is already delivering. Sizing a stream by the buffered budget would sever a
+   * working answer mid-sentence.
+   */
+  streamTimeoutMs: number
 }
 
 const DEFAULT_TIMEOUT_MS = 20_000
+const DEFAULT_STREAM_TIMEOUT_MS = 600_000
 
 export function brainConfig(): BrainConfig {
   const baseUrl = (process.env.BRAIN_BASE_URL ?? 'http://127.0.0.1:3988').replace(/\/+$/, '')
@@ -25,5 +35,9 @@ export function brainConfig(): BrainConfig {
   const timeoutMs =
     Number.isFinite(parsedTimeout) && parsedTimeout > 0 ? parsedTimeout : DEFAULT_TIMEOUT_MS
 
-  return { baseUrl, timeoutMs }
+  const parsedStream = Number(process.env.BRAIN_STREAM_TIMEOUT_MS)
+  const streamTimeoutMs =
+    Number.isFinite(parsedStream) && parsedStream > 0 ? parsedStream : DEFAULT_STREAM_TIMEOUT_MS
+
+  return { baseUrl, timeoutMs, streamTimeoutMs }
 }

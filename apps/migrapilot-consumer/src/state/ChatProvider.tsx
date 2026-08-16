@@ -84,6 +84,53 @@ function groupOf(value: number | string | null): Conversation['group'] {
 const paragraphText = (block: Block | undefined): string | undefined =>
   block?.type === 'paragraph' ? block.text : undefined
 
+/**
+ * Read `text/event-stream` from a response body.
+ *
+ * Events are only emitted on a complete blank-line terminator: a chunk
+ * boundary can fall anywhere, including mid-token and mid-UTF-8-sequence, so
+ * parsing whatever one `read()` returned would corrupt the answer.
+ */
+async function* readEventStream(
+  body: ReadableStream<Uint8Array>,
+): AsyncGenerator<{ event: string; data: unknown }> {
+  const reader = body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+
+  try {
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+
+      let boundary = buffer.indexOf('\n\n')
+      while (boundary !== -1) {
+        const raw = buffer.slice(0, boundary)
+        buffer = buffer.slice(boundary + 2)
+
+        let event = 'message'
+        const data: string[] = []
+        for (const line of raw.split('\n')) {
+          if (line.startsWith('event:')) event = line.slice(6).trim()
+          else if (line.startsWith('data:')) data.push(line.slice(5).trimStart())
+        }
+        if (data.length) {
+          const payload = data.join('\n')
+          try {
+            yield { event, data: JSON.parse(payload) }
+          } catch {
+            yield { event, data: payload }
+          }
+        }
+        boundary = buffer.indexOf('\n\n')
+      }
+    }
+  } finally {
+    await reader.cancel().catch(() => undefined)
+  }
+}
+
 /** A durable message becomes the shape the existing renderer already speaks. */
 function toMessage(message: WireMessage, index: number): Message {
   const time = timeOf(message.createdAt)
@@ -275,6 +322,14 @@ export function ChatProvider({ children }: { children: ReactNode }) {
      *   Even with the router told, the rename and the navigation do not land in
      *   the same commit. The alias keeps the old id resolvable across that gap,
      *   so there is no render in which the open conversation does not exist.
+     *
+     * The URL rewrite itself is NOT done here. It used to be, guarded by
+     * `window.location.pathname === '/chat/<from>'` — which worked only because
+     * the durable id arrived ~21s late, after the navigation had settled. Once
+     * `meta` started arriving in ~200ms it began racing that navigation and the
+     * guard silently missed, leaving `/chat/chat-1786…` in the address bar: a
+     * link that 404s on reload. `ChatPage` owns the rewrite now, because it is
+     * the thing that actually knows which conversation is on screen.
      */
     const adoptDurableId = (from: string, to: string) => {
       hydrated.current.add(to)
@@ -285,9 +340,6 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         ),
       )
       if (pendingRef.current === from) setPendingIn(to)
-      if (window.location.pathname === `/chat/${from}`) {
-        router.replace(`/chat/${to}`, { scroll: false })
-      }
     }
 
     const push = (message: Message) => {
@@ -316,8 +368,41 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       blocks: [{ type: 'paragraph', text }],
     })
 
+    /** Replace the in-progress answer as tokens arrive. */
+    const messageId = `a-${Date.now()}`
+    let streamed = ''
+    const paint = (text: string) => {
+      setConversations((current) =>
+        current.map((conversation) => {
+          if (conversation.id !== conversationId) return conversation
+          const messages = [...conversation.messages]
+          const last = messages[messages.length - 1]
+          const partial: Message = {
+            id: messageId,
+            role: 'assistant',
+            time: clockTime(),
+            blocks: [{ type: 'paragraph', text }],
+          }
+          if (last?.id === messageId) messages[messages.length - 1] = partial
+          else messages.push(partial)
+          return { ...conversation, messages, preview: text.slice(0, 120) }
+        }),
+      )
+    }
+
+    /** Drop the in-progress bubble. An interrupted answer is not an answer. */
+    const discardPartial = () => {
+      setConversations((current) =>
+        current.map((conversation) =>
+          conversation.id === conversationId
+            ? { ...conversation, messages: conversation.messages.filter((m) => m.id !== messageId) }
+            : conversation,
+        ),
+      )
+    }
+
     try {
-      const response = await fetch('/api/chat', {
+      const response = await fetch('/api/chat/stream', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         // A brand-new conversation has only a client-side id, which the Brain
@@ -325,44 +410,70 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         body: JSON.stringify({ prompt, ...(isDurableId(conversationId) ? { conversationId } : {}) }),
       })
 
-      const payload = (await response.json().catch(() => null)) as {
-        content?: string
-        conversationId?: string
-        message?: string
-      } | null
-
-      // The durable id arrives on success AND on failure, because the user's
-      // message is persisted before the model runs. Adopting it either way is
-      // what makes a failed turn retryable in the same conversation.
-      if (payload?.conversationId && payload.conversationId !== conversationId) {
-        adoptDurableId(conversationId, payload.conversationId)
-        conversationId = payload.conversationId
-      }
-
-      if (!response.ok) {
+      // A pre-stream failure still answers JSON, not SSE.
+      if (!response.ok || !response.body) {
+        const payload = (await response.json().catch(() => null)) as {
+          conversationId?: string
+          message?: string
+        } | null
+        if (payload?.conversationId && payload.conversationId !== conversationId) {
+          adoptDurableId(conversationId, payload.conversationId)
+          conversationId = payload.conversationId
+        }
         push(
           notice(
-            payload?.message ??
-              'The assistant could not answer that. Nothing here is a generated answer.',
+            payload?.message ?? 'The assistant could not answer that. Nothing here is a generated answer.',
           ),
         )
         return
       }
 
-      const content = payload?.content
-      if (typeof content !== 'string' || !content.trim()) {
-        push(notice('The model returned an empty answer.'))
+      let failure: string | null = null
+      let done = false
+
+      for await (const frame of readEventStream(response.body)) {
+        if (frame.event === 'meta') {
+          const id = (frame.data as { conversationId?: string })?.conversationId
+          if (id && id !== conversationId) {
+            adoptDurableId(conversationId, id)
+            conversationId = id
+          }
+          continue
+        }
+        if (frame.event === 'token') {
+          const text = (frame.data as { text?: string })?.text
+          if (typeof text === 'string') {
+            streamed += text
+            paint(streamed)
+          }
+          continue
+        }
+        if (frame.event === 'error') {
+          failure = (frame.data as { message?: string })?.message ?? null
+          continue
+        }
+        if (frame.event === 'done') done = true
+      }
+
+      if (done && streamed.trim()) {
+        // Settle the bubble: same text, but no longer the in-progress one.
+        paint(streamed)
+        setPendingIn(null)
         return
       }
 
-      push({
-        id: `a-${Date.now()}`,
-        role: 'assistant',
-        time: clockTime(),
-        blocks: [{ type: 'paragraph', text: content }],
-      })
+      // Anything else — an error frame, or a stream that ended without `done` —
+      // means the server persisted no answer. Showing the partial text would
+      // present something as a saved answer when a reload will not have it.
+      discardPartial()
+      push(
+        notice(
+          failure ?? 'The answer was cut off before it finished, so it was not saved. Try again.',
+        ),
+      )
     } catch {
       // A dropped connection is not an answer either.
+      discardPartial()
       push(notice('The assistant could not be reached. Nothing here is a generated answer.'))
     }
   }, [router])

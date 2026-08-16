@@ -239,6 +239,18 @@ export function ChatPage() {
     if (id) openConversation(id)
   }, [id, openConversation])
 
+  // A new conversation is routed to under an optimistic id, and the Brain names
+  // it a moment later. Once `byId` resolves that alias to a different id, the
+  // address bar is stale — and a stale one is a link that 404s on reload. Doing
+  // it here rather than in the provider means it happens when this page is
+  // actually mounted on that id, not on a guess about the pathname.
+  const settledId = conversation?.id
+  useEffect(() => {
+    if (settledId && id && settledId !== id) {
+      router.replace(`/chat/${settledId}`, { scroll: false })
+    }
+  }, [settledId, id, router])
+
   // An unknown conversation id sends the user home. Done in an effect rather
   // than during render because navigation is a side effect in the App Router.
   //
