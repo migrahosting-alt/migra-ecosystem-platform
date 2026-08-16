@@ -3,7 +3,7 @@
 import { useCallback, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { ChevronDown, Menu, Settings, User as UserIcon } from 'lucide-react'
+import { ChevronDown, LogOut, Menu, Settings, User as UserIcon } from 'lucide-react'
 import { Wordmark } from '@/components/brand/Logo'
 import { Avatar } from '@/components/ui/Avatar'
 import type { PublicSession } from '@/server/auth'
@@ -104,10 +104,21 @@ export function TopBar({
                   </button>
                 ))}
                 {/*
-                  Sign out is deliberately ABSENT until a real logout endpoint
-                  exists. A button that only closes this menu — which is what
-                  shipped before — is a decorative control, not a feature.
+                  A real POST to a real endpoint. It is a form rather than a
+                  link so the destructive action is not reachable by a prefetch
+                  or a third-party image tag.
                 */}
+                <form action="/api/auth/logout" method="post">
+                  <button
+                    type="submit"
+                    role="menuitem"
+                    data-testid="sign-out"
+                    className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-slate-600 transition-colors hover:bg-red-50 hover:text-red-600"
+                  >
+                    <LogOut className="h-4 w-4 text-slate-400" />
+                    Sign out
+                  </button>
+                </form>
               </div>
             )}
           </div>
@@ -120,21 +131,22 @@ export function TopBar({
 }
 
 /**
- * The honest unauthenticated header.
+ * The unauthenticated header.
  *
- * There is no sign-in link yet because no login route exists in this app: the
- * MigraAuth client (`migrapilot_web`) is not registered and the OAuth env is
- * unset, so `/authorize` cannot be reached. Rendering a "Sign in" control now
- * would be a dead link. This states the real state instead, and becomes a live
- * control in the auth-wiring slice.
+ * A plain link, not a fetch: `/api/auth/login` answers with a 302 to MigraAuth's
+ * authorize endpoint, and the browser must follow that navigation itself for the
+ * OAuth round trip to work. If MigraAuth is unconfigured the route answers 503
+ * rather than redirecting, so this control can never lead somewhere that cannot
+ * complete a sign-in.
  */
 function SignedOut() {
   return (
-    <span
-      className="text-sm font-medium text-slate-400"
-      data-testid="signed-out-indicator"
+    <a
+      href="/api/auth/login"
+      data-testid="sign-in"
+      className="rounded-field bg-brand-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-brand-700"
     >
-      Not signed in
-    </span>
+      Sign in
+    </a>
   )
 }

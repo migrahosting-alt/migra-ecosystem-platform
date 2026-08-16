@@ -44,6 +44,21 @@ FORBIDDEN=(
   'getAppSession'       # canonical auth internals
   'exchangeCode'
   'handleOAuthCallback'
+  # Token exchange must exist only on the server. A code_verifier or a PKCE
+  # cookie name in a client chunk would mean the browser can complete — or
+  # replay — the exchange itself.
+  'code_verifier'
+  'ma_verifier'
+  'ma_state'
+  'fetchUserInfo'
+  'buildLoginRedirect'
+  'initAuthClient'
+  'getAuthClientConfig'
+  'APP_SESSION_SECRET'
+  'grant_type'
+  'authorization_code'
+  '/token'
+  '/userinfo'
 )
 
 status=0
