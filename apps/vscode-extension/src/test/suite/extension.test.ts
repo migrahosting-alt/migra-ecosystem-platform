@@ -12,8 +12,6 @@ import { diagnoseFailureControl } from '../../commands/diagnoseFailure.control.j
 import { explainSelectionControl } from '../../commands/explainSelection.control.js';
 import { shellHtml } from '../../panel/shell/shellHtml.js';
 import { CAP_FIX_DIAGNOSTICS, evaluateCapability } from '../../services/commandCapabilities.js';
-import { type ProviderChunk } from '../../providers/modelProvider.js';
-import { type MockModelProvider, startMockModelProvider } from '../support/mockModelProvider.js';
 import { type MockPilotApi, startMockPilotApi } from '../support/mockPilotApi.js';
 import { MigraAiClient, type AiStreamEvent } from '../../services/migraAiClient.js';
 
@@ -1148,262 +1146,31 @@ suite('MigraPilot extension — end to end', () => {
   });
 
   // ── P7: real model-provider run (against the deterministic mock provider) ────
-  suite('model provider (openai-compat) real run', () => {
-    let provider: MockModelProvider;
+  /*
+   * REMOVED: six suites that configured `migrapilot.provider*` and drove an
+   * OpenAI-compatible endpoint directly from the extension host.
+   *
+   *   model provider (openai-compat) real run
+   *   generateTests (stub provider, local)
+   *   generateTests unsafe proposal (openai-compat)
+   *   commit message: staged change (stub)
+   *   commit message: no staged changes (openai-compat)
+   *   commit message: provider failure (openai-compat 500)
+   *
+   * The extension no longer has a model provider: Generate Commit Message and
+   * Generate Tests route through the Brain. There is no provider to configure,
+   * no provider key to set, and no provider identity to assert, so these could
+   * not be repaired in place — the capability they covered is gone by design.
+   *
+   * What replaced their coverage:
+   *   - src/test/unit/brainBackedCommands.test.ts   (contract + fail-closed)
+   *   - src/test/unit/noDirectModelPath.test.ts     (structural invariant)
+   *   - real end-to-end acceptance against a running Brain
+   *
+   * Host-level coverage of these two commands against a live Brain is worth
+   * rebuilding as a follow-up; it needs Brain lifecycle in the host fixture.
+   */
 
-    setup(async () => {
-      provider = await startMockModelProvider({ requireAuth: true, tokens: ['Hello', ' world'] });
-      const cfg = vscode.workspace.getConfiguration('migrapilot');
-      await cfg.update('provider', 'openai-compat', vscode.ConfigurationTarget.Global);
-      await cfg.update('providerUrl', provider.url, vscode.ConfigurationTarget.Global);
-      await cfg.update('providerModel', 'mock-model', vscode.ConfigurationTarget.Global);
-      await extApi!.setProviderKey('sk-host-key');
-    });
-
-    teardown(async () => {
-      const cfg = vscode.workspace.getConfiguration('migrapilot');
-      await cfg.update('provider', 'stub', vscode.ConfigurationTarget.Global);
-      await cfg.update('providerUrl', undefined, vscode.ConfigurationTarget.Global);
-      await extApi!.clearProviderKey();
-      await provider.close();
-    });
-
-    test('streams a real completion with correlation and provider identity', async function () {
-      this.timeout(20_000);
-      const p = extApi!.provider();
-      assert.equal(p.capabilities().providerId, 'openai-compat', 'configured real provider (not stub)');
-      assert.equal(p.capabilities().model, 'mock-model');
-
-      let text = '';
-      for await (const chunk of p.stream({ messages: [{ role: 'user', content: 'ping' }], requestId: 'host-prov-1' }) as AsyncGenerator<ProviderChunk>) {
-        if (chunk.type === 'token') {
-          text += chunk.text;
-        }
-      }
-      assert.equal(text, 'Hello world', 'real streamed completion');
-
-      // Correlation + auth on the wire; key never exposed by the provider itself.
-      const req = provider.requests[0]!;
-      assert.equal(req.headers['x-request-id'], 'host-prov-1');
-      assert.equal(req.headers['authorization'], 'Bearer sk-host-key');
-    });
-
-    test('cancellation aborts the provider stream (CANCELLED, no false completion)', async function () {
-      this.timeout(20_000);
-      const p = extApi!.provider();
-      const ac = new AbortController();
-      ac.abort();
-      await assert.rejects(
-        async () => {
-          for await (const _ of p.stream({ messages: [{ role: 'user', content: 'x' }], requestId: 'host-prov-2' }, ac.signal)) {
-            /* must throw before completing */
-          }
-        },
-        (err: unknown) => isPilotErrorCode(err, 'CANCELLED'),
-      );
-    });
-  });
-
-  // ── generateTests: provider-backed, non-destructive (assert workspace) ──────
-  suite('generateTests (stub provider, local)', () => {
-    let root: string;
-    setup(async () => {
-      root = vscode.workspace.workspaceFolders![0]!.uri.fsPath;
-      await vscode.workspace
-        .getConfiguration('migrapilot')
-        .update('provider', 'stub', vscode.ConfigurationTarget.Global);
-    });
-    teardown(() => {
-      for (const f of ['genwrite.ts', 'genwrite.test.ts', 'gencancel.ts', 'gencancel.test.ts']) {
-        try {
-          fs.rmSync(path.join(root, f));
-        } catch {
-          /* ignore */
-        }
-      }
-    });
-
-    test('preview → confirm → write → read-back (workspace actually changes)', async function () {
-      this.timeout(20_000);
-      fs.writeFileSync(path.join(root, 'genwrite.ts'), 'export const a = 1;\n');
-      const result = await extApi!.generateTests('genwrite.ts', true, { runCommand: false });
-      assert.equal(result.status, 'written');
-      if (result.status === 'written') {
-        assert.deepEqual(result.written, ['genwrite.test.ts']);
-        assert.equal(result.verified, true, 'read-back verified');
-      }
-      // Assert the workspace state directly.
-      const onDisk = path.join(root, 'genwrite.test.ts');
-      assert.equal(fs.existsSync(onDisk), true, 'test file exists on disk');
-      assert.match(fs.readFileSync(onDisk, 'utf8'), /describe\(|test\(/);
-    });
-
-    test('cancel before apply → no write (workspace unchanged)', async function () {
-      this.timeout(20_000);
-      fs.writeFileSync(path.join(root, 'gencancel.ts'), 'export const b = 2;\n');
-      const result = await extApi!.generateTests('gencancel.ts', false);
-      assert.equal(result.status, 'no-write');
-      assert.equal(fs.existsSync(path.join(root, 'gencancel.test.ts')), false, 'no file written on cancel');
-    });
-  });
-
-  suite('generateTests unsafe proposal (openai-compat)', () => {
-    let root: string;
-    let mock: MockModelProvider;
-    setup(async () => {
-      root = vscode.workspace.workspaceFolders![0]!.uri.fsPath;
-      const unsafe = JSON.stringify({ files: [{ path: '../evil.test.ts', contents: 'x', mode: 'create' }] });
-      mock = await startMockModelProvider({ tokens: [unsafe] });
-      const cfg = vscode.workspace.getConfiguration('migrapilot');
-      await cfg.update('provider', 'openai-compat', vscode.ConfigurationTarget.Global);
-      await cfg.update('providerUrl', mock.url, vscode.ConfigurationTarget.Global);
-      await extApi!.setProviderKey('sk-host');
-    });
-    teardown(async () => {
-      const cfg = vscode.workspace.getConfiguration('migrapilot');
-      await cfg.update('provider', 'stub', vscode.ConfigurationTarget.Global);
-      await cfg.update('providerUrl', undefined, vscode.ConfigurationTarget.Global);
-      await extApi!.clearProviderKey();
-      await mock.close();
-      try {
-        fs.rmSync(path.join(root, 'genunsafe.ts'));
-      } catch {
-        /* ignore */
-      }
-    });
-
-    test('unsafe provider path is refused and nothing is written', async function () {
-      this.timeout(20_000);
-      fs.writeFileSync(path.join(root, 'genunsafe.ts'), 'export const c = 3;\n');
-      const result = await extApi!.generateTests('genunsafe.ts', true, { runCommand: false });
-      assert.equal(result.status, 'refused');
-      assert.equal(fs.existsSync(path.join(root, '..', 'evil.test.ts')), false, 'unsafe path never written');
-    });
-  });
-
-  // ── commit-message generation: read-only (assert git state before/after) ────
-  function git(root: string, args: string[]): string {
-    return execFileSync('git', args, { cwd: root, encoding: 'utf8' });
-  }
-  function gitState(root: string): { head: string; staged: string } {
-    return {
-      head: git(root, ['rev-parse', 'HEAD']).trim(),
-      staged: git(root, ['diff', '--cached', '--name-only']).trim(),
-    };
-  }
-
-  suite('commit message: staged change (stub)', () => {
-    let root: string;
-    setup(async () => {
-      root = vscode.workspace.workspaceFolders![0]!.uri.fsPath;
-      await vscode.workspace
-        .getConfiguration('migrapilot')
-        .update('provider', 'stub', vscode.ConfigurationTarget.Global);
-      fs.writeFileSync(path.join(root, 'commitme.ts'), 'export const z = 9;\n');
-      git(root, ['add', 'commitme.ts']);
-    });
-    teardown(() => {
-      try {
-        git(root, ['reset', '--', 'commitme.ts']);
-      } catch {
-        /* ignore */
-      }
-      try {
-        fs.rmSync(path.join(root, 'commitme.ts'));
-      } catch {
-        /* ignore */
-      }
-    });
-
-    test('generates a subject/body and leaves the repo unchanged', async function () {
-      this.timeout(20_000);
-      const before = gitState(root);
-      const result = await extApi!.generateCommitMessage();
-      assert.equal(result.status, 'generated');
-      if (result.status === 'generated') {
-        assert.ok(result.subject.length > 0 && !result.subject.includes('\n'));
-        assert.match(result.body, /commitme\.ts/);
-      }
-      const after = gitState(root);
-      assert.deepEqual(after, before, 'repo state unchanged (read-only)');
-    });
-  });
-
-  suite('commit message: no staged changes (openai-compat)', () => {
-    let root: string;
-    let mock: MockModelProvider;
-    setup(async () => {
-      root = vscode.workspace.workspaceFolders![0]!.uri.fsPath;
-      try {
-        git(root, ['reset']); // ensure nothing staged
-      } catch {
-        /* ignore */
-      }
-      mock = await startMockModelProvider({});
-      const cfg = vscode.workspace.getConfiguration('migrapilot');
-      await cfg.update('provider', 'openai-compat', vscode.ConfigurationTarget.Global);
-      await cfg.update('providerUrl', mock.url, vscode.ConfigurationTarget.Global);
-      await extApi!.setProviderKey('sk-host');
-    });
-    teardown(async () => {
-      const cfg = vscode.workspace.getConfiguration('migrapilot');
-      await cfg.update('provider', 'stub', vscode.ConfigurationTarget.Global);
-      await cfg.update('providerUrl', undefined, vscode.ConfigurationTarget.Global);
-      await extApi!.clearProviderKey();
-      await mock.close();
-    });
-
-    test('precise no-staged result and NO provider request', async function () {
-      this.timeout(20_000);
-      const before = gitState(root);
-      const result = await extApi!.generateCommitMessage();
-      assert.equal(result.status, 'no-staged-changes');
-      assert.equal(mock.requests.length, 0, 'no provider request when nothing is staged');
-      assert.deepEqual(gitState(root), before, 'repo unchanged');
-    });
-  });
-
-  suite('commit message: provider failure (openai-compat 500)', () => {
-    let root: string;
-    let mock: MockModelProvider;
-    setup(async () => {
-      root = vscode.workspace.workspaceFolders![0]!.uri.fsPath;
-      fs.writeFileSync(path.join(root, 'failme.ts'), 'export const q = 1;\n');
-      git(root, ['add', 'failme.ts']);
-      mock = await startMockModelProvider({ status: 500 });
-      const cfg = vscode.workspace.getConfiguration('migrapilot');
-      await cfg.update('provider', 'openai-compat', vscode.ConfigurationTarget.Global);
-      await cfg.update('providerUrl', mock.url, vscode.ConfigurationTarget.Global);
-      await extApi!.setProviderKey('sk-host');
-    });
-    teardown(async () => {
-      const cfg = vscode.workspace.getConfiguration('migrapilot');
-      await cfg.update('provider', 'stub', vscode.ConfigurationTarget.Global);
-      await cfg.update('providerUrl', undefined, vscode.ConfigurationTarget.Global);
-      await extApi!.clearProviderKey();
-      await mock.close();
-      try {
-        git(root, ['reset', '--', 'failme.ts']);
-      } catch {
-        /* ignore */
-      }
-      try {
-        fs.rmSync(path.join(root, 'failme.ts'));
-      } catch {
-        /* ignore */
-      }
-    });
-
-    test('surfaces an error and produces no side effect (repo unchanged)', async function () {
-      this.timeout(20_000);
-      const before = gitState(root);
-      const result = await extApi!.generateCommitMessage();
-      assert.equal(result.status, 'error', 'provider failure surfaces error, no fabricated message');
-      assert.deepEqual(gitState(root), before, 'repo unchanged after failure');
-    });
-  });
-
-  // ── backend-selection diagnostics (observational; sanitized) ────────────────
   suite('backend diagnostics: explicit local', () => {
     setup(async () => {
       await vscode.workspace

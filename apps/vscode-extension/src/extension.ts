@@ -33,13 +33,7 @@ import {
 import { CAP_DIAGNOSTICS_SYNC, evaluateCapability } from './services/commandCapabilities.js';
 import { PilotApiClient } from '@migrapilot/pilot-client';
 import { VscodePilotApiConfig, VscodeSecretTokenStore, getMode } from './services/pilotConfigVscode.js';
-import {
-  ProviderLocalChatBackend,
-  VscodeProviderKeyStore,
-  buildActiveProvider,
-  getProviderKind,
-} from './services/providerConfigVscode.js';
-import { type ModelProvider } from './providers/modelProvider.js';
+import { BrainLocalChatBackend } from './services/brainLocalChatBackend.js';
 import { MigraPilotStatusBar } from './services/statusBar.js';
 import { MigraPilotSidebarProvider } from './panel/sidebarView.js';
 import { MigraPilotChatViewProvider } from './panel/chatView.js';
@@ -76,8 +70,6 @@ let pilotClient: PilotApiClient;
 let commandDeps: CommandDeps;
 let testGenDeps: TestGenDeps;
 let brainLifecycle: BrainLifecycle;
-let providerKeys: VscodeProviderKeyStore;
-let makeProvider: () => ModelProvider;
 let diagnostics: BackendDiagnostics;
 let sidebar: MigraPilotSidebarProvider;
 let chatView: MigraPilotChatViewProvider;
@@ -117,11 +109,6 @@ export interface MigraPilotApi {
   /** Render the user-facing consent view (filtered delta) for an action's
    * change — used by host tests to verify no internal material is displayed. */
   renderConsent(actionId: string): Promise<string>;
-  /** The currently-configured model provider (built from settings + SecretStorage
-   * key) — used by host tests to prove a real provider run. */
-  provider(): ModelProvider;
-  setProviderKey(key: string): Promise<void>;
-  clearProviderKey(): Promise<void>;
   /** Programmatic test-generation (host tests) — same flow as the command but
    * with a boolean confirm instead of the modal. */
   generateTests(targetRelPath: string, confirm: boolean, opts?: { runCommand?: boolean }): Promise<TestGenResult>;
@@ -341,13 +328,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<MigraP
 
   tokenStore = new VscodeSecretTokenStore(context.secrets);
   pilotClient = new PilotApiClient(new VscodePilotApiConfig(tokenStore, outputChannel));
-  providerKeys = new VscodeProviderKeyStore(context.secrets);
-  makeProvider = () => buildActiveProvider(providerKeys, outputChannel);
   diagnostics = new BackendDiagnostics(() => Date.now());
   router = new BackendRouter({
     mode: getMode,
-    // Local chat runs through the configured model provider (default: stub).
-    local: new ProviderLocalChatBackend(makeProvider),
+    // Local chat runs through the canonical Brain. The extension has no
+    // model provider of its own — see brainLocalChatBackend.ts.
+    local: new BrainLocalChatBackend(() => brainClient),
     pilot: pilotClient,
     log: output,
     // Observational only — records why a backend was selected; never affects it.
@@ -356,7 +342,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<MigraP
     },
   });
   commandDeps = { brainClient, router, pilot: pilotClient, migraAi: migraAiClient, output: outputChannel };
-  testGenDeps = { ...commandDeps, makeProvider };
+  testGenDeps = commandDeps;
   brainLifecycle = new BrainLifecycle(createRealBrainLauncher(), output);
 
   // Intelligent Provider Router — Slice 5: read-only client + policy preference.
@@ -564,9 +550,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<MigraP
     vscode.commands.registerCommand('migrapilot.setToken', setToken),
     vscode.commands.registerCommand('migrapilot.clearToken', clearToken),
     vscode.commands.registerCommand('migrapilot.reviewApprovals', () => runReviewApprovals(commandDeps)),
-    vscode.commands.registerCommand('migrapilot.setProviderKey', setProviderKey),
-    vscode.commands.registerCommand('migrapilot.clearProviderKey', clearProviderKey),
-    vscode.commands.registerCommand('migrapilot.providerInfo', providerInfo),
     vscode.commands.registerCommand('migrapilot.showBackendDiagnostics', showBackendDiagnostics),
   );
 
@@ -584,7 +567,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<MigraP
     void ensureBrainRunning().then((r) => statusBar.showLocalLifecycle(r));
   }
   await syncWorkspaceDiagnostics();
-  output(`Model provider: ${getProviderKind()}.`);
   output('MigraPilot extension activated.');
 
   return {
@@ -598,9 +580,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<MigraP
       const action = await new ApprovalsClient(pilotClient).get(actionId);
       return action.change ? renderActionConsent(action.change) : '';
     },
-    provider: makeProvider,
-    setProviderKey: (key: string) => Promise.resolve(providerKeys.set(key)).then(() => undefined),
-    clearProviderKey: () => Promise.resolve(providerKeys.delete()).then(() => undefined),
     generateTests: (targetRelPath: string, confirm: boolean, opts?: { runCommand?: boolean }) => {
       const folder = vscode.workspace.workspaceFolders?.[0];
       if (!folder) {
@@ -711,24 +690,6 @@ async function clearToken(): Promise<void> {
   await resolveBackend(true);
 }
 
-async function setProviderKey(): Promise<void> {
-  const key = await vscode.window.showInputBox({
-    prompt: 'Paste the model provider API key (stored in SecretStorage).',
-    password: true,
-    ignoreFocusOut: true,
-  });
-  if (!key) {
-    return;
-  }
-  await providerKeys.set(key.trim());
-  output('Model provider API key stored in SecretStorage.'); // never logs the value
-}
-
-async function clearProviderKey(): Promise<void> {
-  await providerKeys.delete();
-  output('Model provider API key cleared from SecretStorage.');
-}
-
 async function showBackendDiagnostics(): Promise<void> {
   // Render the sanitized snapshots as read-only JSON. Contains no secrets by
   // construction; opening it never triggers resolution/repair. Includes the
@@ -743,20 +704,6 @@ async function showBackendDiagnostics(): Promise<void> {
     content: JSON.stringify(snapshot, null, 2),
   });
   await vscode.window.showTextDocument(doc, { preview: true });
-}
-
-async function providerInfo(): Promise<void> {
-  // Identity only — provider id + model, never the key.
-  try {
-    const caps = makeProvider().capabilities();
-    const message = `MigraPilot provider: ${caps.providerId} · model ${caps.model} · streaming ${caps.streaming}`;
-    output(message);
-    void vscode.window.showInformationMessage(message);
-  } catch (error) {
-    const message = `MigraPilot provider: ${getProviderKind()} (not fully configured: ${error instanceof Error ? error.message : String(error)})`;
-    output(message);
-    void vscode.window.showWarningMessage(message);
-  }
 }
 
 export async function deactivate(): Promise<void> {

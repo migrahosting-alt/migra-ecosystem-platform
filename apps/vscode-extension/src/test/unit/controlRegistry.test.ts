@@ -39,7 +39,7 @@ function withFixture(contents: string, assertion: (r: ReturnType<typeof aggregat
 test('the shipped registry validates and now holds three controls', () => {
   const r = aggregate();
   assert.equal(r.status, 0, `validation failed: ${r.stderr}`);
-  assert.match(r.stdout, /3 declared, 26 known gaps of 29 contributed commands/);
+  assert.match(r.stdout, /3 declared, 23 known gaps of 26 contributed commands/);
 
   const artifact = JSON.parse(
     readFileSync(join(EXT_ROOT, 'src', 'interaction', 'generated', 'controls.generated.json'), 'utf8'),
@@ -51,7 +51,7 @@ test('the shipped registry validates and now holds three controls', () => {
   // The first control that can WRITE to the repository declares itself as such.
   assert.equal(artifact.declarations.find((d) => d.controlId === 'governed-coding')?.consequence, 'mutating');
   assert.ok(!artifact.coverage.knownGaps.includes('migrapilot.explainSelection'), 'the declared command left the gap list');
-  assert.equal(artifact.coverage.knownGaps.length, 26);
+  assert.equal(artifact.coverage.knownGaps.length, 23);
 });
 
 test('a DUPLICATE identity is rejected', () => {

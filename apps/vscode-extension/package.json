@@ -177,18 +177,6 @@
         "title": "MigraPilot: Review Pending Actions"
       },
       {
-        "command": "migrapilot.setProviderKey",
-        "title": "MigraPilot: Set Model Provider API Key"
-      },
-      {
-        "command": "migrapilot.clearProviderKey",
-        "title": "MigraPilot: Clear Model Provider API Key"
-      },
-      {
-        "command": "migrapilot.providerInfo",
-        "title": "MigraPilot: Show Model Provider"
-      },
-      {
         "command": "migrapilot.showBackendDiagnostics",
         "title": "MigraPilot: Show Backend Selection Diagnostics"
       },
@@ -279,30 +267,6 @@
           "type": "number",
           "default": 30000,
           "description": "Per-request timeout (ms) for pilot-api and model-provider calls."
-        },
-        "migrapilot.provider": {
-          "type": "string",
-          "enum": [
-            "stub",
-            "openai-compat"
-          ],
-          "default": "stub",
-          "markdownDescription": "Model provider for local chat. `stub` = deterministic built-in response (default; for local/deterministic use). `openai-compat` = a real OpenAI-compatible `/chat/completions` endpoint (OpenAI, Ollama `/v1`, LM Studio, vLLM, …). There is no silent fallback: a configured real provider that fails surfaces an error."
-        },
-        "migrapilot.providerUrl": {
-          "type": "string",
-          "default": "http://127.0.0.1:11434/v1",
-          "description": "Base URL for the openai-compat provider (must expose POST /chat/completions)."
-        },
-        "migrapilot.providerModel": {
-          "type": "string",
-          "default": "gpt-oss:20b",
-          "description": "Model name sent to the openai-compat provider."
-        },
-        "migrapilot.providerApiKey": {
-          "type": "string",
-          "default": "",
-          "markdownDescription": "**Discouraged.** Non-secret fallback API key, used ONLY when SecretStorage is empty (headless/dev). Prefer the 'MigraPilot: Set Model Provider API Key' command, which stores the key in SecretStorage and never writes it to settings."
         },
         "migrapilot.maxContextChunks": {
           "type": "number",

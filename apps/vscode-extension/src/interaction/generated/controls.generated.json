@@ -45,11 +45,10 @@
     }
   ],
   "coverage": {
-    "contributedCommands": 29,
+    "contributedCommands": 26,
     "declaredControls": 3,
     "knownGaps": [
       "migrapilot.aiUsage",
-      "migrapilot.clearProviderKey",
       "migrapilot.clearToken",
       "migrapilot.dev.openClassicAgentMode",
       "migrapilot.dev.openClassicChat",
@@ -65,11 +64,9 @@
       "migrapilot.openWorkspacePanel",
       "migrapilot.pairAgentMode",
       "migrapilot.productionDiagnostics",
-      "migrapilot.providerInfo",
       "migrapilot.providerStatus",
       "migrapilot.repairConnection",
       "migrapilot.reviewApprovals",
-      "migrapilot.setProviderKey",
       "migrapilot.setToken",
       "migrapilot.showBackendDiagnostics",
       "migrapilot.showDiagnostics",

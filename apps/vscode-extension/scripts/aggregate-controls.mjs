@@ -33,7 +33,6 @@ const OUT_FILE = join(OUT_DIR, 'controls.generated.json');
  */
 const UNDECLARED_COMMANDS = new Set([
   'migrapilot.aiUsage',
-  'migrapilot.clearProviderKey',
   'migrapilot.clearToken',
   'migrapilot.dev.openClassicAgentMode',
   'migrapilot.dev.openClassicChat',
@@ -49,11 +48,9 @@ const UNDECLARED_COMMANDS = new Set([
   'migrapilot.openWorkspacePanel',
   'migrapilot.pairAgentMode',
   'migrapilot.productionDiagnostics',
-  'migrapilot.providerInfo',
   'migrapilot.providerStatus',
   'migrapilot.repairConnection',
   'migrapilot.reviewApprovals',
-  'migrapilot.setProviderKey',
   'migrapilot.setToken',
   'migrapilot.showBackendDiagnostics',
   'migrapilot.showDiagnostics',

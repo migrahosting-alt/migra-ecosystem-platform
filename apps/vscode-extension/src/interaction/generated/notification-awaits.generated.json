@@ -16,14 +16,14 @@
     },
     {
       "file": "src/commands/generateCommitMessage.ts",
-      "line": 172,
+      "line": 186,
       "api": "showInformationMessage",
       "classification": "consumed",
       "snippet": "await vscode.window.showInformationMessage('MigraPilot generated a commit message.', 'Copy to Clipboard')"
     },
     {
       "file": "src/commands/generateTests.ts",
-      "line": 233,
+      "line": 243,
       "api": "showInformationMessage",
       "classification": "consumed",
       "snippet": "await vscode.window.showInformationMessage("
@@ -37,7 +37,7 @@
     },
     {
       "file": "src/extension.ts",
-      "line": 374,
+      "line": 360,
       "api": "showWarningMessage",
       "classification": "consumed",
       "snippet": "await vscode.window.showWarningMessage([card.title, '', ...card.lines].join('\\n'), { modal: true }, 'Approve once', 'Sta"

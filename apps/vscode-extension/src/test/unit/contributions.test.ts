@@ -132,11 +132,11 @@ test('every pre-existing command is still contributed', () => {
     'migrapilot.setToken',
     'migrapilot.clearToken',
     'migrapilot.reviewApprovals',
-    'migrapilot.setProviderKey',
-    'migrapilot.clearProviderKey',
-    'migrapilot.providerInfo',
     'migrapilot.showBackendDiagnostics',
   ];
+  // migrapilot.setProviderKey / clearProviderKey / providerInfo were removed
+  // deliberately: the extension no longer has a model provider to configure,
+  // key, or identify — inference belongs to the Brain. See noDirectModelPath.
   for (const command of preExisting) {
     assert.ok(commands.includes(command), `pre-existing command removed: ${command}`);
   }

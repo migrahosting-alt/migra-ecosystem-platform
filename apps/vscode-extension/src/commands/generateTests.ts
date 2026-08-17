@@ -6,7 +6,6 @@ import {
   type FrameworkInfo,
   type PackageJsonLike,
   detectTestFramework,
-  deterministicTestProposal,
   selectTestCommand,
   testPathFor,
 } from '../generateTests/framework.js';
@@ -19,17 +18,15 @@ import {
   parseProposal,
   validateProposal,
 } from '../generateTests/proposal.js';
-import { type ModelProvider } from '../providers/modelProvider.js';
-import { collectCompletion } from '../providers/providerFactory.js';
+import { type BrainClient } from '../services/brainClient.js';
 import { BackendRouter } from '../services/backendRouter.js';
 import { CAP_GENERATE_TESTS, evaluateCapability } from '../services/commandCapabilities.js';
 import { newRequestId } from '@migrapilot/pilot-client';
 import { isPilotError, toUserMessage } from '@migrapilot/pilot-client';
 import { type CommandDeps, surfacePilotError, withCancellableProgress } from './commandRouting.js';
 
-export interface TestGenDeps extends CommandDeps {
-  makeProvider: () => ModelProvider;
-}
+/** Inference runs in the Brain; this command supplies workspace context only. */
+export type TestGenDeps = CommandDeps;
 
 export interface TestRunResult {
   command: string[];
@@ -84,30 +81,43 @@ async function readPackageJson(fs: WorkspaceFs): Promise<PackageJsonLike | undef
   }
 }
 
+/**
+ * Ask the Brain for the proposal. The extension supplies the target file and
+ * the detected framework; the Brain owns persona (`generate-tests-v1`), model
+ * routing and audit. No local model call and no fallback — a Brain failure
+ * propagates and is reported as an error rather than quietly answered here.
+ */
 async function obtainProposal(
-  provider: ModelProvider,
+  brain: BrainClient,
   targetRelPath: string,
   targetContents: string,
   framework: FrameworkInfo,
   signal?: AbortSignal,
 ): Promise<TestProposal> {
-  // The stub provider contributes a deterministic fixture (not a placeholder).
-  if (provider.id === 'stub') {
-    return deterministicTestProposal(targetRelPath, framework.framework);
-  }
-  const system = [
-    'You are a precise test generator. Respond ONLY with a JSON object of the form',
-    '{"files":[{"path":"<workspace-relative path>","contents":"<file text>","mode":"create|update"}]}.',
-    'Paths must stay inside the workspace. Prefer creating a new *.test file next to the source.',
-    `Test framework: ${framework.framework}.`,
-  ].join(' ');
-  const user = `Generate tests for ${targetRelPath}:\n\n${targetContents.slice(0, 6000)}`;
-  const completion = await collectCompletion(
-    provider,
-    { messages: [{ role: 'system', content: system }, { role: 'user', content: user }], requestId: newRequestId() },
+  const instruction =
+    `Generate tests for ${targetRelPath}. Test framework: ${framework.framework}.`;
+
+  const route = await brain.route(
+    { feature: 'test', userPrompt: instruction, signals: { hasSelection: true } },
     signal,
   );
-  return parseProposal(completion.content);
+
+  const response = await brain.chat(
+    {
+      feature: 'test',
+      modelProfile: route.modelProfile === 'none' ? 'cheap' : route.modelProfile,
+      systemPromptId: 'generate-tests-v1',
+      userPrompt: instruction,
+      context: {
+        activeFile: targetRelPath,
+        selectionText: targetContents.slice(0, 6000),
+      },
+      outputMode: 'markdown',
+    },
+    signal,
+  );
+
+  return parseProposal(response.content);
 }
 
 function previewMarkdown(proposal: TestProposal): string {
@@ -165,10 +175,10 @@ export async function runGenerateTests(
 
   let proposal: TestProposal;
   try {
-    proposal = await obtainProposal(deps.makeProvider(), targetRelPath, targetContents, framework, opts.signal);
+    proposal = await obtainProposal(deps.brainClient, targetRelPath, targetContents, framework, opts.signal);
   } catch (err) {
     if (err instanceof ProposalParseError) {
-      return { status: 'error', reason: `provider returned malformed test proposal: ${err.message}` };
+      return { status: 'error', reason: `the Brain returned a malformed test proposal: ${err.message}` };
     }
     if (isPilotError(err)) {
       return { status: 'error', reason: `${err.code}` };

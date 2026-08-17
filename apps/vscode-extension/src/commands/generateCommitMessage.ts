@@ -2,17 +2,15 @@ import { spawn } from 'node:child_process';
 import * as vscode from 'vscode';
 import { type BoundedDiff, type ConventionSetting, buildBoundedDiff, detectConvention } from '../commitGen/prepare.js';
 import { type GitResult, type GitRunner, assertReadOnly, recentSubjects, stagedFiles, unstagedFiles } from '../commitGen/git.js';
-import { type CommitMessage, deterministicCommitMessage, sanitizeCommitMessage, validateSubject } from '../commitGen/sanitize.js';
-import { type ModelProvider } from '../providers/modelProvider.js';
-import { collectCompletion } from '../providers/providerFactory.js';
+import { type CommitMessage, sanitizeCommitMessage, validateSubject } from '../commitGen/sanitize.js';
+import { type BrainClient } from '../services/brainClient.js';
 import { CAP_COMMIT_MESSAGE, evaluateCapability } from '../services/commandCapabilities.js';
 import { newRequestId } from '@migrapilot/pilot-client';
 import { isPilotError } from '@migrapilot/pilot-client';
 import { type CommandDeps, surfacePilotError, withCancellableProgress } from './commandRouting.js';
 
-export interface CommitGenDeps extends CommandDeps {
-  makeProvider: () => ModelProvider;
-}
+/** Inference runs in the Brain; this command supplies git context only. */
+export type CommitGenDeps = CommandDeps;
 
 export interface CommitGenOptions {
   includeUnstaged?: boolean;
@@ -20,10 +18,10 @@ export interface CommitGenOptions {
 }
 
 export type CommitGenResult =
-  | { status: 'no-staged-changes' } // precise, non-error; no provider request made
-  | { status: 'generated'; subject: string; body: string; includedUnstaged: boolean; providerId: string }
+  | { status: 'no-staged-changes' } // precise, non-error; no Brain request made
+  | { status: 'generated'; subject: string; body: string; includedUnstaged: boolean; modelProfile: string }
   | { status: 'refused'; reason: string } // capability-gated remote
-  | { status: 'error'; reason: string }; // provider failure / malformed / unusable
+  | { status: 'error'; reason: string }; // Brain failure / malformed / unusable
 
 /** Real, read-only git runner (spawn — no execFile maxBuffer trap). */
 function realGitRunner(root: string): GitRunner {
@@ -46,31 +44,47 @@ function renderDiffForPrompt(diff: BoundedDiff): string {
     .join('\n\n');
 }
 
+/**
+ * Ask the Brain for the message. The extension supplies the bounded diff and
+ * the convention instruction; the Brain owns persona (`commit-message-v1`),
+ * model routing, grounding and audit. There is no local model call and no
+ * fallback — if the Brain cannot answer, this throws and the caller reports it.
+ */
 async function obtainMessage(
-  provider: ModelProvider,
+  brain: BrainClient,
   diff: BoundedDiff,
   convention: ReturnType<typeof detectConvention>,
   signal?: AbortSignal,
-): Promise<CommitMessage> {
-  if (provider.id === 'stub') {
-    return deterministicCommitMessage(diff, convention);
-  }
-  const system = [
-    'You write a git commit message describing ONLY the changes shown.',
-    'Output a concise subject line, then a blank line, then an optional body.',
-    convention.conventional
-      ? 'Use Conventional Commits (type(scope): subject) only where the diff clearly supports it.'
-      : 'Do NOT use a type(scope): prefix.',
-    'Do NOT invent issue numbers, breaking-change markers, scopes, test results, or affected components not in the diff.',
-    'Do not include code fences or trailers.',
-  ].join(' ');
-  const user = `Changes:\n\n${renderDiffForPrompt(diff)}`;
-  const completion = await collectCompletion(
-    provider,
-    { messages: [{ role: 'system', content: system }, { role: 'user', content: user }], requestId: newRequestId() },
+): Promise<{ message: CommitMessage; modelProfile: string }> {
+  const instruction = convention.conventional
+    ? 'Write the git commit message for the diff below. Use Conventional Commits (type(scope): subject) only where the diff clearly supports it.'
+    : 'Write the git commit message for the diff below. Do NOT use a type(scope): prefix.';
+
+  const route = await brain.route(
+    {
+      feature: 'commit',
+      userPrompt: instruction,
+      signals: { changedFileCount: diff.totalFiles },
+    },
     signal,
   );
-  return sanitizeCommitMessage(completion.content, convention);
+
+  const response = await brain.chat(
+    {
+      feature: 'commit',
+      modelProfile: route.modelProfile === 'none' ? 'cheap' : route.modelProfile,
+      systemPromptId: 'commit-message-v1',
+      userPrompt: instruction,
+      context: { gitDiff: renderDiffForPrompt(diff) },
+      outputMode: 'markdown',
+    },
+    signal,
+  );
+
+  return {
+    message: sanitizeCommitMessage(response.content, convention),
+    modelProfile: response.modelProfile,
+  };
 }
 
 /**
@@ -117,9 +131,9 @@ export async function runGenerateCommitMessage(
 
   const convention = detectConvention(await recentSubjects(git, 20, signal), opts.convention ?? 'auto');
 
-  let message: CommitMessage;
+  let generated: { message: CommitMessage; modelProfile: string };
   try {
-    message = await obtainMessage(deps.makeProvider(), combined, convention, signal);
+    generated = await obtainMessage(deps.brainClient, combined, convention, signal);
   } catch (err) {
     if (isPilotError(err)) {
       return { status: 'error', reason: err.code };
@@ -127,17 +141,17 @@ export async function runGenerateCommitMessage(
     return { status: 'error', reason: err instanceof Error ? err.message : String(err) };
   }
 
-  const validation = validateSubject(message.subject, convention.maxSubjectLength);
+  const validation = validateSubject(generated.message.subject, convention.maxSubjectLength);
   if (!validation.ok) {
-    return { status: 'error', reason: `provider produced no usable subject (${validation.reason})` };
+    return { status: 'error', reason: `the Brain produced no usable subject (${validation.reason})` };
   }
 
   return {
     status: 'generated',
-    subject: message.subject,
-    body: message.body,
+    subject: generated.message.subject,
+    body: generated.message.body,
     includedUnstaged: combined.includedUnstaged,
-    providerId: deps.makeProvider().capabilities().providerId,
+    modelProfile: generated.modelProfile,
   };
 }
 

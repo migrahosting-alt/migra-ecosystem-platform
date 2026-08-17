@@ -1,7 +1,5 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { OpenAiCompatProvider } from '../../providers/openAiCompatProvider.js';
-import { collectCompletion } from '../../providers/providerFactory.js';
 import {
   type TestProposal,
   type WorkspaceFs,
@@ -11,7 +9,6 @@ import {
   parseProposal,
   validateProposal,
 } from '../../generateTests/proposal.js';
-import { startMockModelProvider } from '../support/mockModelProvider.js';
 
 const ROOT = '/ws';
 
@@ -34,32 +31,17 @@ class MemFs implements WorkspaceFs {
   }
 }
 
-/** Stream JSON tokens through the real provider, then parse the completion. */
+/**
+ * These cases verify proposal parsing/validation of model output. They used to
+ * stream the JSON through a real provider first; the extension no longer has
+ * one — the Brain owns inference — so the payload is parsed directly. The
+ * assertions are unchanged.
+ */
 async function proposalFromProvider(json: string): Promise<TestProposal> {
-  const mock = await startMockModelProvider({ tokens: splitTokens(json) });
-  try {
-    const provider = new OpenAiCompatProvider({
-      baseUrl: () => mock.url,
-      apiKey: () => 'k',
-      model: () => 'm',
-      timeoutMs: () => 2000,
-      log: () => {},
-    });
-    const completion = await collectCompletion(provider, { messages: [{ role: 'user', content: 'gen' }], requestId: 'r' });
-    return parseProposal(completion.content);
-  } finally {
-    await mock.close();
-  }
+  return parseProposal(json);
 }
 
-function splitTokens(s: string): string[] {
-  // chunk the payload so it arrives across multiple SSE frames
-  const out: string[] = [];
-  for (let i = 0; i < s.length; i += 8) out.push(s.slice(i, i + 8));
-  return out.length ? out : [s];
-}
-
-test('mock-provider: new-file proposal parses + validates', async () => {
+test('new-file proposal parses + validates', async () => {
   const json = JSON.stringify({ files: [{ path: 'src/a.test.ts', contents: 'ok', mode: 'create' }] });
   const proposal = await proposalFromProvider(json);
   assert.equal(proposal.files[0]?.mode, 'create');
@@ -67,38 +49,26 @@ test('mock-provider: new-file proposal parses + validates', async () => {
   assert.equal(v.ok, true);
 });
 
-test('mock-provider: update to an existing test file validates', async () => {
+test('update to an existing test file validates', async () => {
   const json = JSON.stringify({ files: [{ path: 'src/a.test.ts', contents: 'new', mode: 'update' }] });
   const proposal = await proposalFromProvider(json);
   const v = await validateProposal(proposal, ROOT, new MemFs().seed('src/a.test.ts'));
   assert.equal(v.ok, true);
 });
 
-test('mock-provider: malformed output throws ProposalParseError', async () => {
-  const mock = await startMockModelProvider({ tokens: ['sorry, ', 'I cannot ', 'do that'] });
-  try {
-    const provider = new OpenAiCompatProvider({
-      baseUrl: () => mock.url,
-      apiKey: () => 'k',
-      model: () => 'm',
-      timeoutMs: () => 2000,
-      log: () => {},
-    });
-    const completion = await collectCompletion(provider, { messages: [{ role: 'user', content: 'x' }], requestId: 'r' });
-    assert.throws(() => parseProposal(completion.content), (e: unknown) => e instanceof ProposalParseError);
-  } finally {
-    await mock.close();
-  }
+test('malformed model output throws ProposalParseError', () => {
+  // The Brain can return prose when the model ignores the JSON instruction.
+  assert.throws(() => parseProposal('sorry, I cannot do that'), (e: unknown) => e instanceof ProposalParseError);
 });
 
-test('mock-provider: unsafe path is refused by validation', async () => {
+test('unsafe path is refused by validation', async () => {
   const json = JSON.stringify({ files: [{ path: '../../etc/evil.ts', contents: 'x', mode: 'create' }] });
   const proposal = await proposalFromProvider(json);
   const v = await validateProposal(proposal, ROOT, new MemFs());
   assert.equal(v.ok, false);
 });
 
-test('mock-provider: proposal changed after review is refused at apply', async () => {
+test('proposal changed after review is refused at apply', async () => {
   const json = JSON.stringify({ files: [{ path: 'src/a.test.ts', contents: 'reviewed', mode: 'create' }] });
   const reviewed = await proposalFromProvider(json);
   const reviewedFp = fingerprintProposal(reviewed);

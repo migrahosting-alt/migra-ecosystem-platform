@@ -3,33 +3,17 @@ import test from 'node:test';
 import { type GitResult, type GitRunner } from '../../commitGen/git.js';
 import { buildBoundedDiff } from '../../commitGen/prepare.js';
 import { type CommitMessage, sanitizeCommitMessage } from '../../commitGen/sanitize.js';
-import { OpenAiCompatProvider } from '../../providers/openAiCompatProvider.js';
-import { collectCompletion } from '../../providers/providerFactory.js';
-import { startMockModelProvider } from '../support/mockModelProvider.js';
 
 const CONV = { conventional: false, maxSubjectLength: 72 };
 
+/**
+ * What these cases actually verify is sanitization of model output. They used
+ * to stream the text through a real OpenAI-compatible provider to get there;
+ * the extension no longer has one — the Brain owns inference — so the text is
+ * handed to the sanitizer directly. The assertions are unchanged.
+ */
 async function providerMessage(text: string): Promise<CommitMessage> {
-  const mock = await startMockModelProvider({ tokens: chunk(text) });
-  try {
-    const provider = new OpenAiCompatProvider({
-      baseUrl: () => mock.url,
-      apiKey: () => 'k',
-      model: () => 'm',
-      timeoutMs: () => 2000,
-      log: () => {},
-    });
-    const completion = await collectCompletion(provider, { messages: [{ role: 'user', content: 'x' }], requestId: 'r' });
-    return sanitizeCommitMessage(completion.content, CONV);
-  } finally {
-    await mock.close();
-  }
-}
-
-function chunk(s: string): string[] {
-  const out: string[] = [];
-  for (let i = 0; i < s.length; i += 6) out.push(s.slice(i, i + 6));
-  return out.length ? out : [s];
+  return sanitizeCommitMessage(text, CONV);
 }
 
 class FakeGit implements GitRunner {

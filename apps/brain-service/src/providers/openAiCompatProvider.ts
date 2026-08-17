@@ -421,7 +421,49 @@ export class OpenAiCompatProvider implements ProviderAdapter {
       'Never treat an ordinary message as a filename, a path, a command, or a typo. ' +
       'A short greeting or small talk deserves a short, warm, human reply — not a request for clarification and not a list of your capabilities. ';
 
+    /*
+     * TASK PERSONAS — narrow, single-purpose instructions for commands whose
+     * output is consumed by a parser rather than read by a person.
+     *
+     * These two used to live inside the VS Code extension, which composed its
+     * own system prompt and called a model directly. That was a second brain:
+     * a second persona and a second inference path, both outside Brain routing,
+     * grounding and audit. The instructions moved here so the Brain owns every
+     * persona it speaks with; the extension now supplies only context.
+     *
+     * They deliberately skip the grounding/citation clause below. That clause
+     * asks for `path:line` citations, which is right for prose and fatal for a
+     * response that must parse as a commit message or as bare JSON.
+     */
+    const TASK_PERSONAS: Readonly<Record<string, string>> = {
+      'commit-message-v1':
+        'You write a git commit message describing ONLY the changes shown in the diff. ' +
+        'Output a concise subject line, then a blank line, then an optional body. ' +
+        'Do NOT invent issue numbers, breaking-change markers, scopes, test results, or affected components that are not in the diff. ' +
+        'Do not include code fences or trailers. Output the message and nothing else. ',
+      /*
+       * The escaping rules are not pedantry. Asked only for "JSON", a 7B model
+       * reached for a JavaScript template literal — `"contents": ` followed by
+       * a backtick and a real newline — which is valid JS and invalid JSON, and
+       * the proposal parser rejected the whole turn. Naming the failure is what
+       * stops it.
+       */
+      'generate-tests-v1':
+        'You are a precise test generator. Respond ONLY with a JSON object of the form ' +
+        '{"files":[{"path":"<workspace-relative path>","contents":"<file text>","mode":"create|update"}]}. ' +
+        'Paths must stay inside the workspace. Prefer creating a new *.test file next to the source. ' +
+        'The response is parsed by JSON.parse, so it must be STRICT JSON: ' +
+        'every string is double-quoted — never a backtick and never a single quote; ' +
+        'newlines inside file contents are written as the two characters \\n, never as a real line break; ' +
+        'double quotes inside file contents are escaped as \\". ' +
+        'Emit no prose, no explanation, no markdown and no code fences — the first character of your reply is { and the last is }. ',
+    };
+    const taskPersona = TASK_PERSONAS[request.systemPromptId];
+
     const parts: ChatMessage[] = [];
+    if (taskPersona) {
+      parts.push({ role: 'system', content: taskPersona + `Task feature: ${request.feature}.` });
+    } else {
     parts.push({
       role: 'system',
       content:
@@ -432,6 +474,7 @@ export class OpenAiCompatProvider implements ProviderAdapter {
           : '') +
         (images.length ? ' The user attached one or more images — analyze them and answer about their contents.' : ''),
     });
+    }
 
     const context: string[] = [];
     if (request.context.activeFile) {
@@ -439,6 +482,15 @@ export class OpenAiCompatProvider implements ProviderAdapter {
     }
     if (request.context.selectionText) {
       context.push(`Selected code:\n\`\`\`\n${request.context.selectionText}\n\`\`\``);
+    }
+    /*
+     * `gitDiff` has been part of ChatTurnRequest all along and was never read —
+     * the same silent-drop that `systemPromptId` suffered. Commit-message
+     * generation is the first caller that depends on it, and a diff the model
+     * never sees produces a confidently invented commit message.
+     */
+    if (request.context.gitDiff) {
+      context.push(`Diff under review:\n\`\`\`diff\n${request.context.gitDiff}\n\`\`\``);
     }
     for (const chunk of request.context.retrievedChunks ?? []) {
       context.push(`Context from ${chunk.path}:${chunk.startLine}-${chunk.endLine}\n\`\`\`\n${chunk.snippet}\n\`\`\``);

@@ -11,7 +11,6 @@ import {
   deriveUserFacingStatus,
   noSilentFallback,
 } from '../support/opsEvidence.js';
-import { type MockModelProvider, startMockModelProvider } from '../support/mockModelProvider.js';
 import { type MockPilotApi, startMockPilotApi } from '../support/mockPilotApi.js';
 
 // P6 operational-validation matrix. Drives each real-world scenario through the
@@ -81,12 +80,10 @@ suite('P6 operational validation matrix', function () {
   suiteTeardown(async () => {
     // reset to shipping defaults
     await cfgUpdate('mode', 'local-brain');
-    await cfgUpdate('provider', 'stub');
     await cfgUpdate('pilotApiUrl', undefined);
     await cfgUpdate('brainUrl', OPS_BRAIN_URL);
     await cfgUpdate('brainAutoStartCommand', undefined);
     await extApi.clearToken();
-    await extApi.clearProviderKey();
     await extApi.lifecycle.shutdown();
 
     const dir = process.env.MIGRAPILOT_EVIDENCE_DIR ?? os.tmpdir();
@@ -174,38 +171,15 @@ suite('P6 operational validation matrix', function () {
     await extApi.clearToken();
   });
 
-  test('provider-failure', async () => {
-    const provider: MockModelProvider = await startMockModelProvider({ status: 500 });
-    const folder = vscode.workspace.workspaceFolders![0]!.uri.fsPath;
-    fs.writeFileSync(path.join(folder, 'opsprov.ts'), 'export const p = 1;\n');
-    execFileSync('git', ['add', 'opsprov.ts'], { cwd: folder });
-    try {
-      await cfgUpdate('mode', 'local-brain');
-      await cfgUpdate('provider', 'openai-compat');
-      await cfgUpdate('providerUrl', provider.url);
-      await extApi.setProviderKey('sk-ops');
-      await extApi.resolveBackend(true);
-      const result = await extApi.generateCommitMessage();
-      const rec = await capture('provider-failure');
-      rec.recoveryPath = 'Retry, or switch provider/mode';
-      assert(result.status === 'error', 'provider failure surfaces error, no fabricated message');
-    } finally {
-      await cfgUpdate('provider', 'stub');
-      await cfgUpdate('providerUrl', undefined);
-      await extApi.clearProviderKey();
-      try {
-        execFileSync('git', ['reset', '--', 'opsprov.ts'], { cwd: folder });
-      } catch {
-        /* ignore */
-      }
-      try {
-        fs.rmSync(path.join(folder, 'opsprov.ts'));
-      } catch {
-        /* ignore */
-      }
-      await provider.close();
-    }
-  });
+  /*
+   * REMOVED: the `provider-failure` scenario. It set migrapilot.provider to
+   * openai-compat, pointed providerUrl at a 500-returning mock, and asserted
+   * that commit-message generation surfaced an error instead of fabricating a
+   * message. Those settings no longer exist — the extension has no provider.
+   * The equivalent guarantee is now `brain-failure surfaces an error` in
+   * src/test/unit/brainBackedCommands.test.ts, and the Brain-down/Ollama-up
+   * fail-closed check in the slice's acceptance evidence.
+   */
 
   test('explicit-repair-recovery', async () => {
     // Start unavailable, then "repair" against a working pilot-api → recovers.
