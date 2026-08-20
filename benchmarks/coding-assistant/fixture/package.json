@@ -1,0 +1,9 @@
+{
+  "name": "orders-service",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Order intake and pricing for a small storefront.",
+  "scripts": {
+    "test": "node --test test/*.test.js"
+  }
+}

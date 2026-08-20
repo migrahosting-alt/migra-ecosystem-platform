@@ -1,0 +1,32 @@
+The change introduces a defect that breaks the atomicity guarantee stated in the method's own docstring.
+
+## The defect
+
+`reserve()` promises: *"Reserve every line atomically: if any line cannot be met, nothing is held."*
+
+The original code guaranteed this by using **two passes**: first check *all* lines, and only if every check passes, decrement *all* lines. If any check failed, it threw before touching `this.stock`, so no stock was mutated.
+
+The new "single pass" version checks and decrements each line together. So it now decrements stock for the lines it has already processed **before** it discovers that a later line can't be met. When the throw happens, those earlier decrements are never rolled back.
+
+## Exact input that triggers it
+
+```js
+const inv = new Inventory({ WIDGET: 10, GADGET: 0 });
+
+inv.reserve('order-1', [
+  { sku: 'WIDGET', quantity: 5 },   // passes → stock.WIDGET decremented to 5
+  { sku: 'GADGET', quantity: 1 },   // fails   → throws OutOfStockError
+]);
+```
+
+## What goes wrong
+
+- Line 1 (`WIDGET`) passes the check, so line 28 runs `this.stock.WIDGET -= 5` → `WIDGET` is now **5**.
+- Line 2 (`GADGET`) fails the check and throws `OutOfStockError`.
+- The reservation is **not** recorded (line 30 never runs), and no rollback happens.
+
+Result: 5 units of `WIDGET` are permanently gone — decremented from stock but held by no order. `available('WIDGET')` returns 5 instead of 10, and because there's no reservation for `order-1`, `release('order-1')` returns `false` and can never restore them. This leaks inventory (progressively, on every partially-failing reserve) and violates the atomic all-or-nothing contract.
+
+The ordering matters: the leak only occurs when a satisfiable line precedes an unsatisfiable one. If the failing line comes first, no decrement has happened yet, so the bug is hidden — which makes it easy to miss in a naive test.
+
+No code changed, as requested.

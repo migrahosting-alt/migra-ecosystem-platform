@@ -1,0 +1,27 @@
+The test command requires an approval that isn't being granted in this session, so I could not execute the suite myself. Everything else is complete.
+
+## Summary
+
+**Change — `src/orders.js`:** Added a per-customer order-limit check inside `submitOrder`, placed after `validateOrder` but **before** `repository.nextId()` and `inventory.reserve()`:
+
+```js
+if (typeof order.maxOrdersPerCustomer === 'number') {
+  const existing = repository.countForCustomer(order.customerId);
+  if (existing >= order.maxOrdersPerCustomer) {
+    throw new ValidationError(
+      `customer ${order.customerId} already has ${existing} orders (limit ${order.maxOrdersPerCustomer})`,
+      'maxOrdersPerCustomer',
+    );
+  }
+}
+```
+
+This satisfies each requirement:
+- **Refuses with `ValidationError`** when the customer's saved-order count meets/exceeds the limit (`ValidationError` is now imported from `validation.js`).
+- **No stock consumed or held** on refusal — the throw happens before `reserve()` is ever called, so no ID is allocated and no inventory is touched.
+- **Per customer, not global** — uses the existing `repository.countForCustomer(order.customerId)`.
+- **Unchanged with no limit** — the block is skipped entirely unless `maxOrdersPerCustomer` is a number.
+
+**Tests — `test/orders.test.js`:** Added four cases: refusal at the limit (asserting `name`/`field`), stock untouched after a refused order, the limit being per-customer (a second customer still succeeds), and unlimited orders when no limit is supplied.
+
+**One thing I need from you:** every attempt to run the suite (`npm test`, `node --test`) returned "requires approval" and wasn't granted, so I have not been able to run it. Please approve the test command (or run `npm test`) and I'll address any failures — though I don't expect any given the logic relies only on the existing `countForCustomer` method.

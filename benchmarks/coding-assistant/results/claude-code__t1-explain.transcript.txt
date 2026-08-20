@@ -1,0 +1,43 @@
+The subagent's trace is confirmed by the source. Here's exactly what happens.
+
+## Files involved
+
+- `src/orders.js` — `submitOrder` (the orchestrator)
+- `src/validation.js` — `validateOrder`
+- `src/inventory.js` — `Inventory.reserve` / `Inventory.release`
+- `src/repository.js` — `OrderRepository.nextId` / `save`
+- `src/pricing.js` — `lineSubtotal`, `memberDiscount`, `applyCoupon`, `taxFor`
+
+## Execution order (gold tier + percentage coupon)
+
+`submitOrder(order, { inventory, repository })` runs, in sequence (`orders.js:18-44`):
+
+1. **`validateOrder(order)`** — `orders.js:19` → `validation.js`. Rejects a malformed order before anything else.
+2. **`repository.nextId()`** — `orders.js:21`. Allocates the order id.
+3. **`inventory.reserve(id, order.lines)`** — `orders.js:22`. Reserves stock **before pricing**, and importantly **outside the try block**.
+4. **`lineSubtotal(order.lines)`** — `orders.js:25`. Base subtotal (Σ quantity × unitPrice).
+5. **`memberDiscount(subtotal, 'gold')`** — `orders.js:26` → `pricing.js:23-28`. Gold rate is `0.10`, so `round(subtotal × 0.90)`.
+6. **`applyCoupon(afterMember, coupon)`** — `orders.js:27` → `pricing.js:12-21`. For a `percent` coupon: `round(afterMember × (1 − value/100))`. Note it receives `afterMember`, **not** the raw subtotal.
+7. **`taxFor(afterCoupon)`** — `orders.js:28` → `pricing.js:30-32`. `round(afterCoupon × 0.0825)` (8.25%).
+8. **`repository.save({...})`** — `orders.js:30-39`. Persists with `discountedCents = afterCoupon`, `totalCents = afterCoupon + taxCents`, status `confirmed`.
+
+## Precedence: member discount → coupon → tax
+
+The ordering is deliberate and documented at `orders.js:11-15`. The three operations compound in this exact order:
+
+```
+subtotal
+  → × (1 − 0.10)          member discount (gold)   [pricing.js:23-28]
+  → × (1 − coupon.value/100)  percentage coupon    [pricing.js:12-21]
+  → tax = × 0.0825 on that result                  [pricing.js:30-32]
+```
+
+So the **member discount is applied first to the subtotal**, the **coupon stacks multiplicatively on the already-discounted amount** (`afterMember`), and **tax is computed last, on the fully-discounted amount** the customer actually pays — never on the pre-discount subtotal. Each step is independently `Math.round`-ed to whole cents.
+
+Concretely, on a $100.00 subtotal with a 20% coupon: `10000 → 9000 (gold) → 7200 (coupon) → tax 594 → total 7794` ($77.94).
+
+## Reserved stock when pricing throws
+
+Stock is safe. `inventory.reserve` runs at `orders.js:22`, and the entire pricing + save block is wrapped in `try/catch` (`orders.js:24-43`). If any of `memberDiscount`, `applyCoupon`, `taxFor`, or `repository.save` throws — e.g. an unknown tier (`pricing.js:26`) or unknown coupon kind (`pricing.js:20`) — the `catch` at `orders.js:40-42` calls **`inventory.release(id)`** to return the reserved units, then **re-throws** the original error. So reserved stock is **not leaked** on a pricing failure.
+
+One boundary detail: because `reserve` sits *outside* the try, a throw from `reserve` itself (out of stock) is not caught here — but in that case nothing was reserved, so there's nothing to leak. The catch only guards failures that occur *after* a successful reservation.

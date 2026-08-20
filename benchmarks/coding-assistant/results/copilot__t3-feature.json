@@ -1,0 +1,33 @@
+{
+  "tool": "copilot",
+  "label": "GitHub Copilot",
+  "task": "t3-feature",
+  "kind": "feature",
+  "wallMs": 13875,
+  "exitCode": 1,
+  "timedOut": false,
+  "visibleBefore": {
+    "exit": 0,
+    "pass": 3,
+    "fail": 0
+  },
+  "visibleAfter": {
+    "exit": 0,
+    "pass": 3,
+    "fail": 0
+  },
+  "hidden": {
+    "pass": 3,
+    "fail": 2,
+    "exit": 1
+  },
+  "scope": {
+    "files": [],
+    "added": 0,
+    "removed": 0,
+    "touchedTests": false
+  },
+  "ranTestsItself": false,
+  "transcriptChars": 548,
+  "invalid": "GitHub Copilot CLI is blocked by an organisation policy ('Access denied by policy settings')"
+}

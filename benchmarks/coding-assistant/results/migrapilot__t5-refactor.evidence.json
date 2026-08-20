@@ -1,0 +1,49 @@
+{
+  "task": "t5-refactor",
+  "kind": "refactor",
+  "capabilities": [
+    "coding.issue",
+    "governed-coding",
+    "test.run"
+  ],
+  "steps": [
+    {
+      "at": 1787240379010,
+      "step": "timeout",
+      "detail": "900000"
+    },
+    {
+      "at": 1787240378790,
+      "step": "activated",
+      "detail": "/tmp/bench-t5-refactor-fLczkO"
+    },
+    {
+      "at": 1787240378790,
+      "step": "coding:start",
+      "detail": "t5-refactor"
+    },
+    {
+      "at": 1787240378775,
+      "step": "final",
+      "detail": "{\"runId\":\"codingrun_62fcd4d3-b1e8-4c69-8a5b-cce893c59950\",\"revision\":5,\"state\":\"FAILED\",\"complete\":false,\"changedFiles\":[],\"markdown\":\"# Governed coding — Failed\\n\\nRun `codingrun_62fcd4d3-b1e8-4c69-8a5b-cce893c59950` · revision 5 · state `FAILED`\\n\\n_The Brain recorded no final report for this run."
+    },
+    {
+      "at": 1787240378985,
+      "step": "tests",
+      "detail": "{\"status\":\"passed\",\"totals\":{\"passed\":3,\"failed\":0}}"
+    }
+  ],
+  "answer": "{\"runId\":\"codingrun_62fcd4d3-b1e8-4c69-8a5b-cce893c59950\",\"revision\":5,\"state\":\"FAILED\",\"complete\":false,\"changedFiles\":[],\"markdown\":\"# Governed coding — Failed\\n\\nRun `codingrun_62fcd4d3-b1e8-4c69-8a5b-cce893c59950` · revision 5 · state `FAILED`\\n\\n_The Brain recorded no final report for this run._\\n\\n## Blocked by\\n- no_work_recorded: no required operation completed successfully; a run that recorded no work has not succeeded\\n- required_child_not_successful: codingchild_codingrun_62fcd4d3-b1e8-4c69-8a5b-cce893c59950_repository_planning_1 (observed_failure)\"}",
+  "errors": [],
+  "timeoutRaisedFrom": 30000,
+  "effectiveTimeoutMs": 900000,
+  "testOutcome": {
+    "status": "passed",
+    "totals": {
+      "passed": 3,
+      "failed": 0
+    },
+    "failures": []
+  },
+  "wallMs": 3358
+}

@@ -1,0 +1,36 @@
+{
+  "tool": "claude-code",
+  "label": "Claude Code",
+  "task": "t3-feature",
+  "kind": "feature",
+  "wallMs": 114630,
+  "exitCode": 0,
+  "timedOut": false,
+  "visibleBefore": {
+    "exit": 0,
+    "pass": 3,
+    "fail": 0
+  },
+  "visibleAfter": {
+    "exit": 0,
+    "pass": 7,
+    "fail": 0
+  },
+  "hidden": {
+    "pass": 5,
+    "fail": 0,
+    "exit": 0
+  },
+  "scope": {
+    "files": [
+      "src/orders.js",
+      "test/orders.test.js"
+    ],
+    "added": 59,
+    "removed": 1,
+    "touchedTests": true
+  },
+  "ranTestsItself": true,
+  "transcriptChars": 1862,
+  "invalid": null
+}

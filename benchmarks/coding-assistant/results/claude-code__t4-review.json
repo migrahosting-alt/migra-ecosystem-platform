@@ -1,0 +1,31 @@
+{
+  "tool": "claude-code",
+  "label": "Claude Code",
+  "task": "t4-review",
+  "kind": "review",
+  "wallMs": 20849,
+  "exitCode": 0,
+  "timedOut": false,
+  "visibleBefore": {
+    "exit": 0,
+    "pass": 3,
+    "fail": 0
+  },
+  "visibleAfter": {
+    "exit": 0,
+    "pass": 3,
+    "fail": 0
+  },
+  "hidden": null,
+  "scope": {
+    "files": [
+      "src/inventory.js"
+    ],
+    "added": 1,
+    "removed": 2,
+    "touchedTests": false
+  },
+  "ranTestsItself": false,
+  "transcriptChars": 1911,
+  "invalid": null
+}

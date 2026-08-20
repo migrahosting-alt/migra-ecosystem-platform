@@ -1,0 +1,33 @@
+{
+  "tool": "copilot",
+  "label": "GitHub Copilot",
+  "task": "t2-repair",
+  "kind": "repair",
+  "wallMs": 12550,
+  "exitCode": 1,
+  "timedOut": false,
+  "visibleBefore": {
+    "exit": 1,
+    "pass": 2,
+    "fail": 1
+  },
+  "visibleAfter": {
+    "exit": 1,
+    "pass": 2,
+    "fail": 1
+  },
+  "hidden": {
+    "pass": 3,
+    "fail": 1,
+    "exit": 1
+  },
+  "scope": {
+    "files": [],
+    "added": 0,
+    "removed": 0,
+    "touchedTests": false
+  },
+  "ranTestsItself": false,
+  "transcriptChars": 548,
+  "invalid": "GitHub Copilot CLI is blocked by an organisation policy ('Access denied by policy settings')"
+}

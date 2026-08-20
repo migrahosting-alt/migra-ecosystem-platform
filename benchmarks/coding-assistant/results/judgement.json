@@ -1,0 +1,24 @@
+{
+  "_note": "Human reads of the transcripts. The keyword rubric proved unreliable — it scored a flawless Claude Code review 0/3 — so judgement lives here, attributed, and the indicator was removed from the report.",
+  "_reader": "Claude (this session), from the saved transcripts in this directory",
+  "t1-explain": {
+    "migrapilot": {
+      "correct": true,
+      "note": "Technically accurate: names validation.js, pricing.js, repository, and gets the four pricing steps in the right order (subtotal -> member -> coupon -> tax). ANSWERED IN FRENCH despite an English prompt on an English codebase. Did not mention that stock is released when pricing throws."
+    },
+    "claude-code": {
+      "correct": true,
+      "note": "Complete and precise, with file:line citations (src/orders.js:18, src/validation.js:11). Covers the release-on-throw path the task asked about."
+    }
+  },
+  "t4-review": {
+    "migrapilot": {
+      "correct": false,
+      "note": "No answer produced. git.overview succeeded, then the engineer stream ran 427s and was interrupted. Workflow/robustness failure, not a wrong answer."
+    },
+    "claude-code": {
+      "correct": true,
+      "note": "Identified the exact defect: the single-pass rewrite breaks the atomicity the docstring promises. Gave a concrete triggering input and traced the consequence (stock decremented, no reservation recorded, release() cannot recover it). Made no edits, as instructed."
+    }
+  }
+}

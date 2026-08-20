@@ -1,0 +1,11 @@
+All test invocations require your approval, which hasn't been granted, so I can't execute the suite myself. The refactor is complete though:
+
+**Change in `src/pricing.js`:** extracted the shared `Math.round(amount * (1 - rate))` arithmetic into a helper `reduceByRate(amountCents, rate)`, now used by both `applyCoupon` (passing `coupon.value / 100`) and `memberDiscount` (passing the tier `rate`). This is a pure textual extraction — the exact same expression runs in both call sites, so rounding and all behaviour are unchanged.
+
+To confirm, please approve/run:
+
+```
+npm test
+```
+
+Want me to retry the test run if you enable approval, or would you prefer to run it yourself?

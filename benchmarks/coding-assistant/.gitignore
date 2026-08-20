@@ -1,0 +1,4 @@
+# Per-run scratch. The evidence that matters — REPORT.md, judgement.json, the
+# result records and transcripts — is tracked.
+results/*.brain.log
+.vscode-test/

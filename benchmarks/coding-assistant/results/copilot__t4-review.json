@@ -1,0 +1,31 @@
+{
+  "tool": "copilot",
+  "label": "GitHub Copilot",
+  "task": "t4-review",
+  "kind": "review",
+  "wallMs": 12506,
+  "exitCode": 1,
+  "timedOut": false,
+  "visibleBefore": {
+    "exit": 0,
+    "pass": 3,
+    "fail": 0
+  },
+  "visibleAfter": {
+    "exit": 0,
+    "pass": 3,
+    "fail": 0
+  },
+  "hidden": null,
+  "scope": {
+    "files": [
+      "src/inventory.js"
+    ],
+    "added": 1,
+    "removed": 2,
+    "touchedTests": false
+  },
+  "ranTestsItself": false,
+  "transcriptChars": 548,
+  "invalid": "GitHub Copilot CLI is blocked by an organisation policy ('Access denied by policy settings')"
+}

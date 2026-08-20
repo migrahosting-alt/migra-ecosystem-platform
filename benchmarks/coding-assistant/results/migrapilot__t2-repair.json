@@ -1,0 +1,77 @@
+{
+  "tool": "migrapilot",
+  "label": "MigraPilot",
+  "task": "t2-repair",
+  "kind": "repair",
+  "model": "qwen3-coder:30b",
+  "wallMs": 4521,
+  "visibleBefore": {
+    "exit": 1,
+    "pass": 2,
+    "fail": 1
+  },
+  "visibleAfter": {
+    "exit": 1,
+    "pass": 2,
+    "fail": 1
+  },
+  "hidden": {
+    "pass": 3,
+    "fail": 1,
+    "exit": 1
+  },
+  "scope": {
+    "files": [],
+    "added": 0,
+    "removed": 0,
+    "touchedTests": false
+  },
+  "ranTestsItself": true,
+  "capabilities": [
+    "coding.issue",
+    "governed-coding",
+    "test.run"
+  ],
+  "steps": [
+    {
+      "at": 1787240035584,
+      "step": "timeout",
+      "detail": "900000"
+    },
+    {
+      "at": 1787240035784,
+      "step": "activated",
+      "detail": "/tmp/bench-t2-repair-zkz0De"
+    },
+    {
+      "at": 1787240035785,
+      "step": "coding:start",
+      "detail": "t2-repair"
+    },
+    {
+      "at": 1787240036300,
+      "step": "final",
+      "detail": "{\"runId\":\"codingrun_fdbdd848-ea13-4b55-adc4-39ea9bee230b\",\"revision\":5,\"state\":\"FAILED\",\"complete\":false,\"changedFiles\":[],\"markdown\":\"# Governed coding \u2014 Failed\\n\\nRun `codingrun_fdbdd848-ea13-4b55-adc4-39ea9bee230b` \u00b7 revision 5 \u00b7 state `FAILED`\\n\\n_The Brain recorded no final report for this run."
+    },
+    {
+      "at": 1787240036486,
+      "step": "tests",
+      "detail": "{\"status\":\"failed\",\"totals\":{\"passed\":2,\"failed\":1}}"
+    }
+  ],
+  "testOutcome": {
+    "status": "failed",
+    "totals": {
+      "passed": 2,
+      "failed": 1
+    },
+    "failures": [
+      {
+        "name": "a gold member gets 10% off before tax",
+        "file": null
+      }
+    ]
+  },
+  "errors": [],
+  "invalid": null
+}

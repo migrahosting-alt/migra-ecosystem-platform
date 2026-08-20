@@ -1,0 +1,35 @@
+{
+  "tool": "claude-code",
+  "label": "Claude Code",
+  "task": "t5-refactor",
+  "kind": "refactor",
+  "wallMs": 46497,
+  "exitCode": 0,
+  "timedOut": false,
+  "visibleBefore": {
+    "exit": 0,
+    "pass": 3,
+    "fail": 0
+  },
+  "visibleAfter": {
+    "exit": 0,
+    "pass": 3,
+    "fail": 0
+  },
+  "hidden": {
+    "pass": 2,
+    "fail": 0,
+    "exit": 0
+  },
+  "scope": {
+    "files": [
+      "src/pricing.js"
+    ],
+    "added": 6,
+    "removed": 2,
+    "touchedTests": false
+  },
+  "ranTestsItself": true,
+  "transcriptChars": 676,
+  "invalid": null
+}

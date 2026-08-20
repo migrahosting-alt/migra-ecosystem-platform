@@ -1,0 +1,33 @@
+{
+  "tool": "copilot",
+  "label": "GitHub Copilot",
+  "task": "t5-refactor",
+  "kind": "refactor",
+  "wallMs": 13625,
+  "exitCode": 1,
+  "timedOut": false,
+  "visibleBefore": {
+    "exit": 0,
+    "pass": 3,
+    "fail": 0
+  },
+  "visibleAfter": {
+    "exit": 0,
+    "pass": 3,
+    "fail": 0
+  },
+  "hidden": {
+    "pass": 2,
+    "fail": 0,
+    "exit": 0
+  },
+  "scope": {
+    "files": [],
+    "added": 0,
+    "removed": 0,
+    "touchedTests": false
+  },
+  "ranTestsItself": false,
+  "transcriptChars": 547,
+  "invalid": "GitHub Copilot CLI is blocked by an organisation policy ('Access denied by policy settings')"
+}

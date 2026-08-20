@@ -41,6 +41,12 @@
 !migra-infra/wordpress/migrastacks-plugins/
 !migra-infra/wordpress/migrastacks-plugins/**
 
+# --- Coding-assistant capability benchmark (allowlist) ---
+# The fixture, tasks, hidden verification, harness and recorded results. Per-run
+# brain logs are excluded by benchmarks/coding-assistant/.gitignore.
+!/benchmarks/
+!/benchmarks/**
+
 # --- MigraPilot apps (allowlist) ---
 !/apps/
 !/apps/migrapilot-console/

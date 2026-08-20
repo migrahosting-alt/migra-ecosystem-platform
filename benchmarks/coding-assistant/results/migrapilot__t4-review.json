@@ -1,0 +1,52 @@
+{
+  "tool": "migrapilot",
+  "label": "MigraPilot",
+  "task": "t4-review",
+  "kind": "review",
+  "model": "qwen3-coder:30b",
+  "wallMs": 426655,
+  "visibleBefore": {
+    "exit": 0,
+    "pass": 3,
+    "fail": 0
+  },
+  "visibleAfter": {
+    "exit": 0,
+    "pass": 3,
+    "fail": 0
+  },
+  "hidden": null,
+  "scope": {
+    "files": [
+      "src/inventory.js"
+    ],
+    "added": 1,
+    "removed": 2,
+    "touchedTests": false
+  },
+  "ranTestsItself": false,
+  "capabilities": [
+    "git.overview"
+  ],
+  "steps": [
+    {
+      "at": 1787240484565,
+      "step": "timeout",
+      "detail": "900000"
+    },
+    {
+      "at": 1787240484658,
+      "step": "activated",
+      "detail": "/tmp/bench-t4-review-coA00f"
+    },
+    {
+      "at": 1787240484761,
+      "step": "git",
+      "detail": "{\"staged\":0,\"unstaged\":1,\"untracked\":0,\"conflicted\":0}"
+    }
+  ],
+  "testOutcome": null,
+  "errors": [
+    "PilotError: Engineer stream interrupted.\n\tat MigraAiClient.engineerStream (/home/bonex/workspace/active/MigraTeck-Ecosystem/dev/apps/vscode-extension/dist/services/migraAiClient.js:420:19)\n\tat process.processTicksAndRejections (node:internal/process/task_queues:103:5)\n\tat async Object.run (/home/bonex/workspace/active/MigraTeck-Ecosystem/dev/benchmarks/coding-assistant/adapters/migrapilot-suite.cjs:81:24)"
+  ]
+}

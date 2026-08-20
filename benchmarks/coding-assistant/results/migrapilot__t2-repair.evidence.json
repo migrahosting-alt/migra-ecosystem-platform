@@ -1,0 +1,55 @@
+{
+  "task": "t2-repair",
+  "kind": "repair",
+  "capabilities": [
+    "coding.issue",
+    "governed-coding",
+    "test.run"
+  ],
+  "steps": [
+    {
+      "at": 1787240035584,
+      "step": "timeout",
+      "detail": "900000"
+    },
+    {
+      "at": 1787240035784,
+      "step": "activated",
+      "detail": "/tmp/bench-t2-repair-zkz0De"
+    },
+    {
+      "at": 1787240035785,
+      "step": "coding:start",
+      "detail": "t2-repair"
+    },
+    {
+      "at": 1787240036300,
+      "step": "final",
+      "detail": "{\"runId\":\"codingrun_fdbdd848-ea13-4b55-adc4-39ea9bee230b\",\"revision\":5,\"state\":\"FAILED\",\"complete\":false,\"changedFiles\":[],\"markdown\":\"# Governed coding \u2014 Failed\\n\\nRun `codingrun_fdbdd848-ea13-4b55-adc4-39ea9bee230b` \u00b7 revision 5 \u00b7 state `FAILED`\\n\\n_The Brain recorded no final report for this run."
+    },
+    {
+      "at": 1787240036486,
+      "step": "tests",
+      "detail": "{\"status\":\"failed\",\"totals\":{\"passed\":2,\"failed\":1}}"
+    }
+  ],
+  "answer": "{\"runId\":\"codingrun_fdbdd848-ea13-4b55-adc4-39ea9bee230b\",\"revision\":5,\"state\":\"FAILED\",\"complete\":false,\"changedFiles\":[],\"markdown\":\"# Governed coding \u2014 Failed\\n\\nRun `codingrun_fdbdd848-ea13-4b55-adc4-39ea9bee230b` \u00b7 revision 5 \u00b7 state `FAILED`\\n\\n_The Brain recorded no final report for this run._\\n\\n## Blocked by\\n- no_work_recorded: no required operation completed successfully; a run that recorded no work has not succeeded\\n- required_child_not_successful: codingchild_codingrun_fdbdd848-ea13-4b55-adc4-39ea9bee230b_repository_planning_1 (observed_failure)\"}",
+  "errors": [],
+  "timeoutRaisedFrom": 30000,
+  "effectiveTimeoutMs": 900000,
+  "testOutcome": {
+    "status": "failed",
+    "totals": {
+      "passed": 2,
+      "failed": 1
+    },
+    "failures": [
+      {
+        "name": "a gold member gets 10% off before tax",
+        "file": null
+      }
+    ]
+  },
+  "wallMs": 4331,
+  "invalid": null
+}

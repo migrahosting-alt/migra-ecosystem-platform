@@ -1,0 +1,33 @@
+{
+  "tool": "codex",
+  "label": "Codex",
+  "task": "t2-repair",
+  "kind": "repair",
+  "wallMs": 2477,
+  "exitCode": 1,
+  "timedOut": false,
+  "visibleBefore": {
+    "exit": 1,
+    "pass": 2,
+    "fail": 1
+  },
+  "visibleAfter": {
+    "exit": 1,
+    "pass": 2,
+    "fail": 1
+  },
+  "hidden": {
+    "pass": 3,
+    "fail": 1,
+    "exit": 1
+  },
+  "scope": {
+    "files": [],
+    "added": 0,
+    "removed": 0,
+    "touchedTests": false
+  },
+  "ranTestsItself": false,
+  "transcriptChars": 236372,
+  "invalid": "Codex CLI is older than the account's model; the API refused with HTTP 400 ('gpt-5.6-sol' requires a newer Codex)"
+}
