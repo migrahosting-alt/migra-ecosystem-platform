@@ -21,7 +21,7 @@
 
 import * as vscode from 'vscode';
 import type { CommandDeps } from './commandRouting.js';
-import { applyApprovedChangeset } from '../services/changesetApply.js';
+import { applyApprovedChangesetDetailed } from '../services/changesetApply.js';
 import {
   runQuickEditFlow,
   type QuickEditEngine,
@@ -81,14 +81,12 @@ function engineAdapter(deps: CommandDeps): QuickEditEngine {
       }
       return latest;
     },
-    apply: async (rootPath, proposalHash) => {
-      const outcome = await applyApprovedChangeset(
+    apply: async (rootPath, proposalHash) =>
+      applyApprovedChangesetDetailed(
         (req) => deps.migraAi.executeTool(req as never) as never,
         rootPath,
         proposalHash,
-      );
-      return outcome === 'applied';
-    },
+      ),
   };
 }
 

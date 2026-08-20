@@ -85,7 +85,7 @@ export function registerToolExecutionRoutes(app: FastifyInstance, deps: ToolRout
     const body = request.body ?? {};
     if (body.tool === 'command.run' || body.tool === 'agent.recipe') {
       reply.code(403);
-      return { ok: false, code: 'CAPABILITY_DENIED', error: 'Command execution is available only through the scoped Agent Mode recipe boundary.' };
+      return { ok: false, code: 'CAPABILITY_DENIED', reason: 'CAPABILITY_DENIED', error: 'Command execution is available only through the scoped Agent Mode recipe boundary.' };
     }
     // Resume correlation (Slice 3): an operator apply carries the ORIGINAL
     // execution correlation id via header, plus this call's own requestId — so

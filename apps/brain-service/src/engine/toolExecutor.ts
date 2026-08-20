@@ -12,6 +12,7 @@ import { ApprovalCapacityError, ToolApprovalStore, hashInput } from './toolAppro
 import { ToolAudit } from './toolAudit.js';
 import { NOOP_STAGE_LOGGER, type StageLogger } from './correlation.js';
 import { auditStore, type AuditEventType } from './auditLog.js';
+import { classifyToolFailure } from './toolFailureReason.js';
 
 export interface ToolExecInput {
   tool?: string;
@@ -29,7 +30,7 @@ export interface ToolExecInput {
  * the agent runtime switches on `status`/`code`. */
 export type ToolExecOutcome =
   | { ok: true; httpStatus: 200; status: 'ok' | 'dry_run' | 'approval_required' | 'executed'; tool: string; requestId: string; result?: unknown; preview?: unknown; approvalId?: string; expiresAt?: number }
-  | { ok: false; httpStatus: number; code: string; tool: string; requestId: string; error: string; issues?: Array<{ path: string; message: string }>; requiredCapabilities?: string[]; reason?: string };
+  | { ok: false; httpStatus: number; code: string; tool: string; requestId: string; error: string; issues?: Array<{ path: string; message: string }>; requiredCapabilities?: string[]; reason?: string; details?: { appliedFileCount: number; affectedPathCount: number; rollbackFailureCount: number; failureStage: string } };
 
 export interface ToolExecDeps {
   registry: CapabilityRegistry;
@@ -70,7 +71,9 @@ export async function executeToolCore(deps: ToolExecDeps, req: ToolExecInput): P
   if (!registry.isAvailable(toolId)) {
     audit.record({ requestId, tool: toolId, action: 'denied', readOnly: runnable.descriptor.readOnly, outcome: 'refused' });
     recordAudit('tool.denied', 'refused');
-    return { ok: false, httpStatus: 403, code: 'CAPABILITY_DENIED', tool: toolId, requestId, error: `Capability not available: ${toolId}`, requiredCapabilities: runnable.descriptor.requiredCapabilities };
+    // A machine-readable reason here too, so a client branches on one vocabulary rather
+    // than special-casing this code. The human message and gate are unchanged.
+    return { ok: false, httpStatus: 403, code: 'CAPABILITY_DENIED', tool: toolId, requestId, error: `Capability not available: ${toolId}`, reason: 'CAPABILITY_DENIED', requiredCapabilities: runnable.descriptor.requiredCapabilities };
   }
   recordAudit('tool.requested', 'requested', { readOnly: runnable.descriptor.readOnly });
 
@@ -167,8 +170,24 @@ export async function executeToolCore(deps: ToolExecDeps, req: ToolExecInput): P
   }
 }
 
-function failed(audit: ToolAudit, requestId: string, tool: string, readOnly: boolean, _error: unknown): ToolExecOutcome {
-  // Detail is logged by the caller/route; the client-facing error is generic.
+function failed(audit: ToolAudit, requestId: string, tool: string, readOnly: boolean, error: unknown): ToolExecOutcome {
+  // The engine already knows WHY it refused. Collapsing every refusal into one opaque
+  // sentence kept the safety property and threw away the diagnosis, so a caller could not
+  // tell "someone edited that file under me" from "that path escapes the workspace".
+  //
+  // `classifyToolFailure` reads only the structured code (and, for a rollback, the
+  // documented-safe bounded counts). The raw message and stack are still never forwarded —
+  // that is what the generic message existed to protect, and it is preserved.
+  const classified = classifyToolFailure(error);
   audit.record({ requestId, tool, action: 'tool_failed', readOnly, outcome: 'error' });
-  return { ok: false, httpStatus: 502, code: 'TOOL_FAILED', tool, requestId, error: 'The tool could not complete.' };
+  return {
+    ok: false,
+    httpStatus: 502,
+    code: 'TOOL_FAILED',
+    tool,
+    requestId,
+    error: classified.message,
+    reason: classified.reason,
+    ...(classified.details ? { details: classified.details } : {}),
+  };
 }

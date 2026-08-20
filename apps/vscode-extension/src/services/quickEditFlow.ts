@@ -60,11 +60,20 @@ export interface QuickEditUi {
   showApplied(files: string[]): Promise<void>;
 }
 
+/** The engine's answer to an apply, including WHY when it refused. */
+export interface QuickEditApplyResult {
+  applied: boolean;
+  /** Stable machine-readable reason, e.g. STALE_CONTENT. Absent on older engines. */
+  reason?: string;
+  /** Engine-vetted, user-safe message. Absent on older engines. */
+  message?: string;
+}
+
 export interface QuickEditEngine {
   /** Ask the engine for a propose-only changeset. Never writes. */
   propose(instruction: string, rootPath: string): Promise<QuickEditProposal | undefined>;
   /** Apply a stored proposal by hash through the approval handshake. */
-  apply(rootPath: string, proposalHash: string): Promise<boolean>;
+  apply(rootPath: string, proposalHash: string): Promise<QuickEditApplyResult>;
 }
 
 /** File-touching ops only; `mkdir` is structural and does not count toward the bound. */
@@ -151,9 +160,9 @@ export async function runQuickEditFlow(input: {
   const confirmed = await input.ui.confirm(summarize(ops), fileOpsOf(ops));
   if (!confirmed) return { status: 'declined' };
 
-  let applied: boolean;
+  let result: QuickEditApplyResult;
   try {
-    applied = await input.engine.apply(input.rootPath, proposal.proposalHash);
+    result = await input.engine.apply(input.rootPath, proposal.proposalHash);
   } catch (error) {
     // A refusal at apply time — stale content, containment, a rollback — is reported as
     // itself. The engine is all-or-nothing, so "not applied" means the workspace is
@@ -162,9 +171,12 @@ export async function runQuickEditFlow(input: {
     await input.ui.showRefusal(reason);
     return { status: 'refused', reason };
   }
-  if (!applied) {
-    const reason = 'the engine did not apply the change; the workspace is unchanged.';
-    await input.ui.showRefusal(reason);
+  if (!result.applied) {
+    // Prefer the ENGINE's vetted message: it names the actual rule that refused (stale
+    // content, containment, a rollback). Only fall back to the generic sentence when the
+    // engine sent nothing — never guess a cause on the engine's behalf.
+    const reason = result.message ?? 'the engine did not apply the change; the workspace is unchanged.';
+    await input.ui.showRefusal(result.reason ? `${reason} [${result.reason}]` : reason);
     return { status: 'refused', reason };
   }
   const files = fileOpsOf(ops).map((o) => o.path as string);

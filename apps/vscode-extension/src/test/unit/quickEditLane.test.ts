@@ -60,7 +60,7 @@ test('applies a bounded change and reports the files touched', async () => {
     ui,
     engine: {
       propose: async () => proposal([edit('src/a.ts', 'new')]),
-      apply: async () => true,
+      apply: async () => ({ applied: true }),
     },
   });
   assert.deepEqual(outcome, { status: 'applied', files: ['src/a.ts'] });
@@ -76,7 +76,7 @@ test('a multi-file change within the bound is allowed', async () => {
     instruction: 'rename across three files',
     rootPath: '/w',
     ui,
-    engine: { propose: async () => proposal(ops), apply: async () => true },
+    engine: { propose: async () => proposal(ops), apply: async () => ({ applied: true }) },
   });
   assert.equal(outcome.status, 'applied');
 });
@@ -93,7 +93,7 @@ test('BOUND: too many files is refused BEFORE the user is asked', async () => {
       propose: async () => proposal(many),
       apply: async () => {
         applyCalled = true;
-        return true;
+        return { applied: true };
       },
     },
   });
@@ -110,7 +110,7 @@ test('BOUND: too many bytes is refused, and names the limit', async () => {
     instruction: 'paste a large file',
     rootPath: '/w',
     ui,
-    engine: { propose: async () => proposal(huge), apply: async () => true },
+    engine: { propose: async () => proposal(huge), apply: async () => ({ applied: true }) },
   });
   assert.equal(outcome.status, 'refused');
   assert.match(captured.refusals[0]!, /KiB/);
@@ -132,7 +132,7 @@ test('FAIL CLOSED: an unreachable Brain changes nothing and says so', async () =
       propose: async () => {
         throw new Error('local_runner_unavailable');
       },
-      apply: async () => true,
+      apply: async () => ({ applied: true }),
     },
   });
   assert.equal(outcome.status, 'refused');
@@ -164,7 +164,7 @@ test('an engine that declines to apply leaves the workspace reported as unchange
     instruction: 'bump the timeout',
     rootPath: '/w',
     ui,
-    engine: { propose: async () => proposal([edit('src/a.ts', 'new')]), apply: async () => false },
+    engine: { propose: async () => proposal([edit('src/a.ts', 'new')]), apply: async () => ({ applied: false }) },
   });
   assert.equal(outcome.status, 'refused');
   assert.match(captured.refusals[0]!, /workspace is unchanged/);
@@ -181,7 +181,7 @@ test('declining the diff applies nothing', async () => {
       propose: async () => proposal([edit('src/a.ts', 'new')]),
       apply: async () => {
         applyCalled = true;
-        return true;
+        return { applied: true };
       },
     },
   });
@@ -201,7 +201,7 @@ test('no proposal, no workspace and no instruction are each refused without appl
       instruction: input.instruction,
       rootPath: input.rootPath,
       ui,
-      engine: { propose: async () => proposal([...input.ops]), apply: async () => true },
+      engine: { propose: async () => proposal([...input.ops]), apply: async () => ({ applied: true }) },
     });
     assert.notEqual(outcome.status, 'applied', `${label} must not apply`);
     assert.equal(captured.applied.length, 0);
@@ -236,4 +236,40 @@ test('the lane documents why it is not a governed coding run', () => {
   assert.match(source, /NO SECOND MUTATION PATH/);
   assert.match(source, /NO NEW APPROVAL/);
   assert.match(source, /Governed coding run \/ Agent Mode/);
+});
+
+test("the ENGINE's structured refusal is surfaced instead of a generic message", async () => {
+  const { ui, captured } = harness(true);
+  const outcome = await runQuickEditFlow({
+    instruction: 'bump the timeout',
+    rootPath: '/w',
+    ui,
+    engine: {
+      propose: async () => proposal([edit('src/a.ts', 'new')]),
+      apply: async () => ({
+        applied: false,
+        reason: 'STALE_CONTENT',
+        message: 'A file changed after the change was proposed, so it was not applied.',
+      }),
+    },
+  });
+  assert.equal(outcome.status, 'refused');
+  assert.match(captured.refusals[0]!, /changed after the change was proposed/);
+  assert.match(captured.refusals[0]!, /STALE_CONTENT/);
+  assert.ok(!captured.refusals[0]!.includes('did not apply the change'), 'the generic fallback must not be used');
+});
+
+test('an engine that sends no reason falls back without inventing a cause', async () => {
+  const { ui, captured } = harness(true);
+  await runQuickEditFlow({
+    instruction: 'bump the timeout',
+    rootPath: '/w',
+    ui,
+    engine: {
+      propose: async () => proposal([edit('src/a.ts', 'new')]),
+      apply: async () => ({ applied: false }),
+    },
+  });
+  assert.match(captured.refusals[0]!, /workspace is unchanged/);
+  assert.ok(!/STALE|CONTAINED|ROLLED/.test(captured.refusals[0]!), 'never guess a cause');
 });
