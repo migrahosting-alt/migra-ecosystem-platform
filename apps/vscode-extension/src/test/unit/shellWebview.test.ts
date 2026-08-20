@@ -6,7 +6,8 @@ import { shellHtml } from '../../panel/shell/shellHtml.js';
 import { shellStyles } from '../../panel/shell/shellStyles.js';
 import { navigationHtml, navigationScript } from '../../panel/shell/navigationHtml.js';
 import { icon, knownIcons } from '../../panel/shell/icons.js';
-import { NAV_ACTIONS, SHELL_TABS, findNavAction, navListActions, navPrimaryAction, shellTabs } from '../../panel/shell/navigationModel.js';
+import { NAV_ACTIONS, SHELL_TABS, findNavAction, navActionsFor, navPrimaryAction, shellTabs } from '../../panel/shell/navigationModel.js';
+import { classify, isProductSurface } from '../../panel/shell/surfaceClassification.js';
 import { SLASH_COMMANDS, slashCommandsFor } from '../../panel/shell/composerModel.js';
 
 const NONCE = 'test-nonce-abcdefgh';
@@ -343,17 +344,63 @@ test('reduced motion and forced colors are honoured', () => {
 
 // ── Navigation surface ───────────────────────────────────────────────────────
 
-test('the navigation surface renders the launcher sections and a footer identity', () => {
+test('THE PRODUCT SIDEBAR IS FOUR THINGS: start, resume, where, and four outcomes', () => {
   const document = navigationHtml({ nonce: NONCE, csp: CSP, logoUri: 'https://file%2B.vscode-resource/logo.svg' });
-  for (const section of ['Agent Mode', 'Workspace', 'Tools &amp; Services', 'Service']) {
-    assert.ok(document.includes(section), `${section} must be a navigation section`);
+  for (const section of ['Recent', 'Workspace', 'Quick Actions']) {
+    assert.ok(document.includes(`<span>${section}</span>`), `${section} must be a sidebar section`);
   }
-  for (const id of ['nav-agent-actions', 'nav-service-actions', 'nav-workspace', 'nav-tools', 'nav-identity', 'brain-badge']) {
-    assert.ok(document.includes(`id="${id}"`), `#${id} must exist on the navigation surface`);
+  for (const id of ['nav-conversations', 'nav-workspace', 'nav-quick-actions', 'nav-approvals', 'nav-identity', 'brain-badge']) {
+    assert.ok(document.includes(`id="${id}"`), `#${id} must exist on the sidebar`);
   }
   assert.equal(document.split('<script').length - 1, 1);
-  // The status summary belongs to the Studio panel — not duplicated in the rail.
-  assert.ok(!document.includes('id="statusrow"'));
+  assert.ok(!document.includes('id="statusrow"'), 'the status summary belongs to the Studio panel');
+});
+
+test('NO ENGINEERING CONSOLE REMAINS IN THE PRODUCT SIDEBAR', () => {
+  // This surface shipped the console intact through an entire "pivot": it is
+  // rendered by navigationHtml, not shellHtml, and nothing asserted on it.
+  const document = navigationHtml({ nonce: NONCE, csp: CSP });
+  // Visible LABELS are checked against the markup only: the inlined script
+  // carries source comments ("…canonical Agent Mode counts") which are code, not
+  // a surface. Element ids and dispatch attributes are checked against the whole
+  // document, because those are what the client could actually act on.
+  const markup = document.slice(0, document.indexOf('<script nonce='));
+  for (const label of ['Agent Mode', 'Tools &amp; Services', 'Brain Status', 'Repair Connection', 'Open Command Center', 'Service']) {
+    assert.ok(!markup.includes(label), `the product sidebar must not render "${label}"`);
+  }
+  for (const leak of [
+    'id="nav-agent-actions"',
+    'id="nav-tools"',
+    'id="nav-service-actions"',
+    'id="nav-agent-status"',
+    'data-nav-action="brainStatus"',
+    'data-nav-action="repairConnection"',
+    'data-nav-action="logs"',
+    'data-nav-action="runHistory"',
+    'data-nav-action="activeRuns"',
+    'data-nav-action="submitTask"',
+  ]) {
+    assert.ok(!document.includes(leak), `the product sidebar must not render "${leak}"`);
+  }
+});
+
+test('developer mode restores every engineering section, unchanged', () => {
+  const developer = navigationHtml({ nonce: NONCE, csp: CSP, developerMode: true });
+  for (const kept of [
+    'Agent Mode',
+    'Tools &amp; Services',
+    'Brain Status',
+    'Repair Connection',
+    'id="nav-agent-actions"',
+    'id="nav-tools"',
+    'id="nav-service-actions"',
+  ]) {
+    assert.ok(developer.includes(kept), `developer mode must keep "${kept}"`);
+  }
+  // …and it still shows the product sections. Developer mode ADDS; it never swaps.
+  for (const product of ['id="nav-quick-actions"', 'id="nav-conversations"', 'id="nav-workspace"']) {
+    assert.ok(developer.includes(product), `developer mode must keep "${product}"`);
+  }
 });
 
 test('every tab panel is actually rendered by the state handler', () => {
@@ -390,71 +437,69 @@ test('the launcher bundle excludes the context-panel renderer entirely', () => {
   assert.ok(shellScript().includes('function renderContext'));
 });
 
-test('the sidebar is a launcher: Open Command Center is the prominent primary action', () => {
+test('the primary action STARTS A TASK, which is what a person came to do', () => {
   const primary = navPrimaryAction();
-  assert.equal(primary.id, 'openCommandCenter');
-  assert.equal(primary.label, 'Open Command Center');
+  assert.equal(primary.id, 'newTask');
+  assert.equal(primary.label, 'New Task');
   assert.equal(primary.kind, 'studio');
   assert.equal(primary.target, 'chat');
-  // Exactly one primary, and it is rendered with the prominent button style.
-  assert.equal(NAV_ACTIONS.filter((action) => action.primary).length, 1);
+  assert.equal(NAV_ACTIONS.filter((action) => action.primary).length, 1, 'exactly one primary');
   const document = navigationHtml({ nonce: NONCE, csp: CSP });
-  assert.match(document, /<button class="newchat" data-nav-action="openCommandCenter">/);
+  assert.match(document, /<button class="newchat" data-nav-action="newTask">/);
 });
 
-test('the sidebar exposes exactly the approved visible action set', () => {
-  // The approved list, in order. Anything else must NOT be a sidebar action.
-  const approved = [
-    'Open Command Center',
-    'New Task',
-    'Pending Approvals',
-    'Active Runs',
-    'Run History',
-    'Brain Status',
-    'Repair Connection',
-    'Logs',
-    'Settings',
-  ];
-  assert.deepEqual(NAV_ACTIONS.map((action) => action.label), approved);
-
+test('QUICK ACTIONS ARE FOUR OUTCOMES, each reaching a real product surface', () => {
+  assert.deepEqual(
+    navActionsFor('quick', false).map((action) => action.label),
+    ['Explain Code', 'Fix Code', 'Review Changes', 'Run Tests'],
+  );
+  for (const action of navActionsFor('quick', false)) {
+    assert.equal(isProductSurface('nav-action', action.id), true, `${action.id} must be product`);
+    if (action.kind === 'command') {
+      assert.equal(isProductSurface('command', action.target), true, `${action.id} -> ${action.target}`);
+    }
+    if (action.kind === 'studio') {
+      assert.equal(isProductSurface('tab', action.target), true, `${action.id} opens the ${action.target} tab`);
+    }
+  }
   const document = navigationHtml({ nonce: NONCE, csp: CSP });
-  for (const action of NAV_ACTIONS) {
+  for (const action of navActionsFor('quick', false)) {
     assert.ok(document.includes(`data-nav-action="${action.id}"`), `${action.label} is not rendered`);
   }
-  // Every rendered launcher row corresponds to an approved action — no extras.
-  const rendered = [...document.matchAll(/data-nav-action="([^"]+)"/g)].map((match) => match[1]);
-  assert.deepEqual(rendered.sort(), NAV_ACTIONS.map((action) => action.id).sort());
-  // Icons resolve.
-  const available = new Set(knownIcons());
-  for (const action of NAV_ACTIONS) assert.ok(available.has(action.icon), `missing icon ${action.icon}`);
 });
 
-test('launcher rows route governed work to the Command Center, never inline', () => {
-  // Everything that touches a composer, an approval, or a history record must be
-  // a `studio` reveal so the sidebar never renders a second surface (§8).
-  for (const id of ['openCommandCenter', 'newTask', 'pendingApprovals', 'activeRuns', 'runHistory']) {
-    const action = findNavAction(id);
-    assert.equal(action?.kind, 'studio', `${id} must open the Command Center`);
-    assert.ok(['chat', 'agent', 'audit'].includes(action?.target ?? ''), `${id} targets a real tab`);
+test('EVERY sidebar row is classified, and only product rows render by default', () => {
+  const available = new Set(knownIcons());
+  for (const action of NAV_ACTIONS) {
+    assert.ok(classify('nav-action', action.id), `${action.id} must be classified`);
+    assert.ok(available.has(action.icon), `missing icon ${action.icon}`);
   }
-  // Service rows run already-registered commands (allow-list enforced on the host).
-  assert.deepEqual(
-    navListActions('service').map((action) => [action.kind, action.target]),
-    [
-      ['command', 'health'],
-      ['command', 'repairConnection'],
-      ['command', 'showLogs'],
-      ['shell', 'settings'],
-    ],
-  );
+  const document = navigationHtml({ nonce: NONCE, csp: CSP });
+  const rendered = [...document.matchAll(/data-nav-action="([^"]+)"/g)]
+    .map((match) => match[1])
+    .filter((id): id is string => typeof id === 'string');
+  assert.ok(rendered.length > 0, 'the sidebar must render rows');
+  for (const id of rendered) {
+    assert.equal(isProductSurface('nav-action', id), true, `${id} rendered but is not product`);
+  }
+});
+
+test('the approval prompt is NOT a permanent section', () => {
+  const document = navigationHtml({ nonce: NONCE, csp: CSP });
+  // The container exists but is empty; the renderer fills it only when a
+  // decision is actually waiting, and CSS hides an empty container.
+  assert.match(document, /<div id="nav-approvals"[^>]*><\/div>/, 'must ship empty');
+  assert.match(document, /#nav-approvals:empty \{ display: none; \}/, 'and stay invisible while empty');
+  // The renderer emits it only for a non-zero count.
+  assert.match(navigationScript(), /setHtml\('nav-approvals', waiting > 0/);
 });
 
 test('counts render blank when unknown, never as a reassuring zero', () => {
-  const document = navigationHtml({ nonce: NONCE, csp: CSP });
-  // Count badges start hidden; live state reveals them only when a real count
-  // arrives (the renderer keeps them hidden for undefined).
-  for (const counter of ['pendingApprovals', 'activeRuns', 'runHistory']) {
-    assert.match(document, new RegExp(`data-counter="${counter}" hidden`), `${counter} badge must start hidden`);
+  // The engineering counters live in developer mode now; the rule they encode —
+  // unknown renders blank, never 0 — is unchanged.
+  const developer = navigationHtml({ nonce: NONCE, csp: CSP, developerMode: true });
+  for (const counter of ['activeRuns', 'runHistory']) {
+    assert.match(developer, new RegExp(`data-counter="${counter}" hidden`), `${counter} badge must start hidden`);
   }
   assert.match(navigationScript(), /badge\.hidden = true;/);
 });
@@ -471,7 +516,7 @@ test('the navigation surface has no composer, no agent approval controls, and no
   // No history execution or evidence-mutation path.
   assert.doesNotMatch(document, /data-evidence=/);
   assert.doesNotMatch(document, /data-history-run=/);
-  // And no conversation list — a second chat entry point belongs to the
-  // Command Center, not the launcher.
-  assert.ok(!document.includes('id="nav-conversations"'));
+  // The Recent list IS present now — resuming a task is product, and it only
+  // reveals conversations, never a second composer or execution path.
+  assert.ok(document.includes('id="nav-conversations"'));
 });

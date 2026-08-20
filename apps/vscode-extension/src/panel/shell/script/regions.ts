@@ -66,20 +66,34 @@ function renderNavigation(nav) {
     statusEl.textContent = agent.statusText;
     statusEl.className = 'badge b-' + agent.statusTone;
   }
+  /* THE APPROVAL PROMPT IS NOT A SECTION. A permanent "Pending Approvals: 0" row
+   * asks the user to monitor a mechanism; this appears only when a decision is
+   * actually waiting, and disappears the moment it is not. An unreadable count
+   * (undefined) renders nothing rather than a reassuring zero. */
+  const waiting = agent.pendingApprovals;
+  setHtml('nav-approvals', waiting > 0
+    ? '<button class="navbtn" data-nav-action="pendingApprovals">'
+      + '<span>Needs your approval</span>'
+      + '<span class="count governed">' + esc(waiting) + '</span></button>'
+    : '');
+
+  /* Engineering rows. setHtml is a no-op when the element is absent, so the
+   * product sidebar simply has nowhere for these to land. */
   setHtml('nav-agent',
     navRow('Submit Task', 'tab-jump', 'agent', undefined, agent.active)
-    + navRow('Pending Approvals', 'tab-jump', 'agent', agent.pendingApprovals, agent.pendingApprovals > 0)
     + navRow('Active Runs', 'tab-jump', 'agent', agent.activeRuns, false)
     + navRow('Run History', 'tab-jump', 'audit', agent.runHistory, false)
     + (agent.countsNote ? '<div class="placeholder s-degraded">' + esc(agent.countsNote) + '</div>' : ''));
 
   const workspace = nav.workspace;
   if (workspace.state === 'ready') {
-    setHtml('nav-workspace', rowsHtml([
-      { label: 'Workspace', value: workspace.name },
-      { label: 'Branch', value: workspace.branch || '—', tone: workspace.branch ? 'info' : 'muted', mono: true },
-      { label: 'Status', value: workspace.cleanLabel || '—', tone: workspace.cleanTone || 'muted' }
-    ]));
+    /* Compact: "repo · branch" then the change count. Three labelled rows spent
+     * a third of the sidebar restating what one line says. */
+    const where = workspace.name + (workspace.branch ? ' · ' + workspace.branch : '');
+    setHtml('nav-workspace',
+      '<div class="row"><span class="v mono" title="' + esc(where) + '">' + esc(where) + '</span></div>'
+      + '<div class="row"><span class="v t-' + esc(workspace.cleanTone || 'muted') + '">'
+      + esc(workspace.cleanLabel || '—') + '</span></div>');
   } else {
     setHtml('nav-workspace', placeholderHtml({
       state: workspace.state === 'empty' ? 'empty' : 'disconnected',

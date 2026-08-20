@@ -198,12 +198,12 @@ function requireClassicViews(label: string): boolean {
   if (classicViewsEnabled()) return true;
   void vscode.window
     .showWarningMessage(
-      `${label} is a superseded developer-only view. The canonical interface is the MigraPilot Command Center.`,
-      'Open Command Center',
+      `${label} is a superseded developer-only view. The canonical interface is MigraPilot itself.`,
+      'Open MigraPilot',
       'Enable Classic Views',
     )
     .then(async (choice) => {
-      if (choice === 'Open Command Center') {
+      if (choice === 'Open MigraPilot') {
         await studioPanel.reveal('chat');
       } else if (choice === 'Enable Classic Views') {
         await vscode.commands.executeCommand('workbench.action.openSettings', 'migrapilot.enableClassicViews');
@@ -576,6 +576,21 @@ export async function activate(context: vscode.ExtensionContext): Promise<MigraP
   );
 
   context.subscriptions.push(
+    // Developer mode changes WHICH DOCUMENT each surface renders, so the surfaces
+    // must be rebuilt. Without this the setting appeared to do nothing until the
+    // window was reloaded — indistinguishable from a broken setting.
+    vscode.workspace.onDidChangeConfiguration((event) => {
+      if (!event.affectsConfiguration('migrapilot.developerMode')) return;
+      shell?.onDeveloperModeChanged();
+      const developer = developerModeEnabled();
+      if (developer) {
+        policyStatusBar?.show();
+        agentModeStatusBar?.show();
+      } else {
+        policyStatusBar?.hide();
+        agentModeStatusBar?.hide();
+      }
+    }),
     vscode.languages.onDidChangeDiagnostics(() => {
       void syncWorkspaceDiagnostics();
     }),

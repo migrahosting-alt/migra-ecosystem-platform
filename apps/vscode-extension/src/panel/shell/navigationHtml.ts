@@ -13,13 +13,19 @@ import { coreScript } from './script/core.js';
 import { regionsScript } from './script/regions.js';
 import { injectStaticData } from './shellScript.js';
 import { shellStyles } from './shellStyles.js';
-import { navListActions, navPrimaryAction } from './navigationModel.js';
+import { navActionsFor, navPrimaryAction } from './navigationModel.js';
+import { isProductSurface } from './surfaceClassification.js';
 import { SHELL_TITLE } from './welcomeModel.js';
 
 export interface NavigationHtmlOptions {
   nonce: string;
   csp: string;
   logoUri?: string;
+  /**
+   * Reveal engineering sections. OFF by default, so a caller that forgets the
+   * flag renders the product sidebar rather than the console.
+   */
+  developerMode?: boolean;
 }
 
 function escapeHtml(value: string): string {
@@ -27,7 +33,7 @@ function escapeHtml(value: string): string {
 }
 
 /** Composed navigation client: core helpers + the shared region renderers. */
-export function navigationScript(): string {
+export function navigationScript(developerMode = false): string {
   return injectStaticData([
     '(function () {',
     "'use strict';",
@@ -64,7 +70,7 @@ document.addEventListener('click', (event) => {
 vscode.postMessage({ type: 'ready' });
 `,
     '})();',
-  ].join('\n'));
+  ].join('\n'), developerMode);
 }
 
 /**
@@ -72,8 +78,8 @@ vscode.postMessage({ type: 'ready' });
  * always registered and the Command Center tabs always exist, so availability
  * needs no backend state. Counts are filled in from live state at runtime.
  */
-function actionRows(group: 'agent' | 'service'): string {
-  return navListActions(group)
+function actionRows(group: 'quick' | 'agent' | 'service', developerMode: boolean): string {
+  return navActionsFor(group, developerMode)
     .map(
       (action) => `<button class="navbtn" data-nav-action="${escapeHtml(action.id)}" title="${escapeHtml(action.label)}">
         ${icon(action.icon)}<span>${escapeHtml(action.label)}</span>
@@ -93,9 +99,13 @@ function primaryAction(): string {
 
 export function navigationHtml(options: NavigationHtmlOptions): string {
   const { nonce, csp, logoUri } = options;
+  const developerMode = options.developerMode === true;
   const brand = logoUri
     ? `<img src="${escapeHtml(logoUri)}" alt="" width="18" height="18" />`
     : icon('rocket');
+  /** Emit an engineering section only when this mode may show it. */
+  const only = (id: string, markup: string): string =>
+    developerMode || isProductSurface('nav-region', id) ? markup : '';
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -112,9 +122,12 @@ body { padding: 8px 10px 12px; background: var(--mp-rail); }
 #navhdr .spacer { flex: 1 1 auto; }
 #navfoot { margin-top: 14px; padding-top: 8px; border-top: 1px solid var(--mp-border); display: flex; align-items: center; gap: 8px; }
 #navfoot #nav-identity { font-size: 10.5px; color: var(--mp-fg-dim); flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-/* The status summary (§12) belongs to the Studio panel and to VS Code's own
- * status bar. Repeating it here would duplicate what the sections above already
- * show, so the navigation surface omits it. */
+/* The approval prompt is not a section: it has no heading and is hidden until
+ * something is actually waiting, so an empty product surface stays empty. */
+#nav-approvals:empty { display: none; }
+#nav-approvals { margin-top: 10px; }
+/* Compact workspace line — repo · branch on one row, change count beneath. */
+#nav-workspace .row { padding: 2px 0; }
 </style>
 </head>
 <body>
@@ -128,23 +141,28 @@ body { padding: 8px 10px 12px; background: var(--mp-rail); }
 
   ${primaryAction()}
 
-  <section class="navsec">
-    <h3><span>Agent Mode</span><span id="nav-agent-status" class="badge b-muted">OFF</span></h3>
-    <div id="nav-agent-actions">${actionRows('agent')}</div>
-  </section>
+  <div id="nav-approvals" role="status" aria-live="polite"></div>
+
+  <section class="navsec"><h3><span>Recent</span></h3><div id="nav-conversations"></div></section>
   <section class="navsec"><h3><span>Workspace</span></h3><div id="nav-workspace"></div></section>
-  <section class="navsec"><h3><span>Tools &amp; Services</span></h3><div id="nav-tools"></div></section>
-  <section class="navsec">
+  <section class="navsec"><h3><span>Quick Actions</span></h3><div id="nav-quick-actions">${actionRows('quick', developerMode)}</div></section>
+
+  ${only('nav-agent-actions', `<section class="navsec">
+    <h3><span>Agent Mode</span><span id="nav-agent-status" class="badge b-muted">OFF</span></h3>
+    <div id="nav-agent-actions">${actionRows('agent', developerMode)}</div>
+  </section>`)}
+  ${only('nav-tools', '<section class="navsec"><h3><span>Tools &amp; Services</span></h3><div id="nav-tools"></div></section>')}
+  ${only('nav-service-actions', `<section class="navsec">
     <h3><span>Service</span></h3>
-    <div id="nav-service-actions">${actionRows('service')}</div>
-  </section>
+    <div id="nav-service-actions">${actionRows('service', developerMode)}</div>
+  </section>`)}
 
   <div id="navfoot">
     <span id="nav-identity">MigraTeck · MigraPilot</span>
     <button class="iconbtn" data-shell-action="settings" title="MigraPilot settings">${icon('gear')}</button>
   </div>
 
-<script nonce="${nonce}">${navigationScript()}</script>
+<script nonce="${nonce}">${navigationScript(developerMode)}</script>
 </body>
 </html>`;
 }

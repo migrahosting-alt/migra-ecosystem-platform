@@ -359,7 +359,9 @@ suite('MigraPilot extension — end to end', () => {
     if (!IS_VSIX) {
       const refusals = dialogCalls.slice(before).map((call) => call.message).join(' | ');
       assert.match(refusals, /superseded developer-only view/i, `unexpected dialogs: ${refusals}`);
-      assert.match(refusals, /Command Center/, 'the refusal must point at the canonical interface');
+      // "Command Center" was engineering vocabulary for what is simply MigraPilot.
+      // The requirement is unchanged: the refusal must send the person somewhere real.
+      assert.match(refusals, /canonical interface is MigraPilot/, 'the refusal must point at the product');
     }
   });
 

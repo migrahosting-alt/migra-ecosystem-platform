@@ -23,6 +23,7 @@ import * as vscode from 'vscode';
 import { MigraAiClient } from '../../services/migraAiClient.js';
 import { applyApprovedChangesetDetailed } from '../../services/changesetApply.js';
 import { shellHtml } from '../../panel/shell/shellHtml.js';
+import { navigationHtml } from '../../panel/shell/navigationHtml.js';
 import { shellScript } from '../../panel/shell/shellScript.js';
 import { isProductSurface, SURFACES } from '../../panel/shell/surfaceClassification.js';
 import type { TestRunOutcome } from '../../services/testRunFlow.js';
@@ -149,6 +150,29 @@ suite('PRODUCT SURFACE — one real coding task, product surfaces only', () => {
     assert.ok(markup.includes('id="nav-workspace"'), 'current workspace: repo, branch, changed files');
     assert.ok(markup.includes('id="ctx-run"'), 'what it is currently doing');
     assert.ok(markup.includes('id="brain-badge"'), 'readiness indicator');
+  });
+
+  test('1a — THE SIDEBAR — the surface the Activity Bar icon opens — is product-only', () => {
+    const configured = vscode.workspace.getConfiguration('migrapilot').get<boolean>('developerMode', false);
+    const sidebar = navigationHtml({ nonce: 'n', csp: "default-src 'none'", developerMode: configured });
+    const markup = sidebar.slice(0, sidebar.indexOf('<script nonce='));
+
+    for (const label of ['Agent Mode', 'Tools &amp; Services', 'Brain Status', 'Repair Connection', 'Open Command Center']) {
+      assert.ok(!markup.includes(label), `the sidebar must not show "${label}"`);
+    }
+    for (const id of ['nav-agent-actions', 'nav-tools', 'nav-service-actions']) {
+      assert.ok(!sidebar.includes(`id="${id}"`), `#${id} must not be in the sidebar`);
+    }
+    // What it DOES show: start, resume, where, and four outcomes.
+    assert.match(markup, /data-nav-action="newTask"/);
+    for (const section of ['Recent', 'Workspace', 'Quick Actions']) {
+      assert.ok(markup.includes(`<span>${section}</span>`), `${section} must be a section`);
+    }
+    for (const row of ['explainCode', 'fixCode', 'reviewChanges', 'runTests']) {
+      assert.ok(markup.includes(`data-nav-action="${row}"`), `${row} must be offered`);
+    }
+    // The approval prompt ships empty and hidden — not a permanent section.
+    assert.match(markup, /<div id="nav-approvals"[^>]*><\/div>/);
   });
 
   test('1b — no engineering slash command is typeable', () => {

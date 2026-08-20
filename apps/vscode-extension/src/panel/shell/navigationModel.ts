@@ -10,7 +10,7 @@
 import type { ConversationMeta } from '../../services/migraAiClient.js';
 import type { GitContextSnapshot } from './contextPanelModel.js';
 import { type Badge, type Row, type Tone, optionalRow, relativeAge } from './types.js';
-import { visibleIds } from './surfaceClassification.js';
+import { classify, isProductSurface, visibleIds } from './surfaceClassification.js';
 
 // ── Conversation list ─────────────────────────────────────────────────────────
 
@@ -242,31 +242,65 @@ export interface NavAction {
   counter?: 'pendingApprovals' | 'activeRuns' | 'runHistory';
   /** Rendered as the prominent primary button rather than a list row. */
   primary?: boolean;
-  /** Section the row belongs to. `primary` rows sit above every section. */
-  group?: 'agent' | 'service';
+  /**
+   * Section the row belongs to. `primary` rows sit above every section.
+   *
+   * `quick` is the product's Quick Actions list — four outcomes. `agent` and
+   * `service` are engineering sections that only developer mode renders.
+   */
+  group?: 'quick' | 'agent' | 'service';
 }
 
+/**
+ * Every row the sidebar can render.
+ *
+ * THE PRODUCT SIDEBAR IS FOUR THINGS: start a task, resume a recent one, see
+ * where you are, and reach for one of four outcomes. Everything else — Agent
+ * Mode, Tools & Services, Brain lifecycle — is declared here, classified as
+ * engineering in `surfaceClassification.ts`, and rendered only in developer
+ * mode. None of it is deleted, and none of the backends behind it change.
+ *
+ * `Open Command Center` is gone as a row: the primary button now STARTS A TASK,
+ * which is what a person came to do. It opens the same surface.
+ */
 export const NAV_ACTIONS: readonly NavAction[] = [
-  { id: 'openCommandCenter', label: 'Open Command Center', icon: 'rocket', kind: 'studio', target: 'chat', primary: true },
-  { id: 'newTask', label: 'New Task', icon: 'add', kind: 'studio', target: 'agent', group: 'agent' },
-  { id: 'pendingApprovals', label: 'Pending Approvals', icon: 'shield', kind: 'studio', target: 'agent', counter: 'pendingApprovals', group: 'agent' },
+  { id: 'newTask', label: 'New Task', icon: 'add', kind: 'studio', target: 'chat', primary: true },
+  // Quick Actions — the four outcomes, each reaching a real command or tab.
+  { id: 'explainCode', label: 'Explain Code', icon: 'search', kind: 'command', target: 'explainSelection', group: 'quick' },
+  { id: 'fixCode', label: 'Fix Code', icon: 'code', kind: 'command', target: 'quickEdit', group: 'quick' },
+  { id: 'reviewChanges', label: 'Review Changes', icon: 'git-compare', kind: 'studio', target: 'diff', group: 'quick' },
+  { id: 'runTests', label: 'Run Tests', icon: 'beaker', kind: 'command', target: 'runTests', group: 'quick' },
+  // Shown ONLY when something is actually waiting on the user — see the
+  // approvals block in the navigation renderer. Not a permanent section.
+  { id: 'pendingApprovals', label: 'Needs your approval', icon: 'shield', kind: 'studio', target: 'agent', counter: 'pendingApprovals' },
+  // Engineering: developer mode only.
+  { id: 'submitTask', label: 'Submit Agent Task', icon: 'rocket', kind: 'studio', target: 'agent', group: 'agent' },
   { id: 'activeRuns', label: 'Active Runs', icon: 'pulse', kind: 'studio', target: 'agent', counter: 'activeRuns', group: 'agent' },
   { id: 'runHistory', label: 'Run History', icon: 'history', kind: 'studio', target: 'audit', counter: 'runHistory', group: 'agent' },
   { id: 'brainStatus', label: 'Brain Status', icon: 'info', kind: 'command', target: 'health', group: 'service' },
   { id: 'repairConnection', label: 'Repair Connection', icon: 'sync', kind: 'command', target: 'repairConnection', group: 'service' },
   { id: 'logs', label: 'Logs', icon: 'file', kind: 'command', target: 'showLogs', group: 'service' },
-  { id: 'settings', label: 'Settings', icon: 'gear', kind: 'shell', target: 'settings', group: 'service' },
+  // Settings has NO group: the footer gear provides it in both modes, and a
+  // product row parked inside an engineering section would render in neither.
+  { id: 'settings', label: 'Settings', icon: 'gear', kind: 'shell', target: 'settings' },
 ];
+
+/** Rows of a group the current mode may render, in declaration order. */
+export function navActionsFor(group: NavAction['group'], developerMode: boolean): NavAction[] {
+  const allowed = new Set(visibleIds('nav-action', developerMode));
+  return NAV_ACTIONS.filter((action) => !action.primary && action.group === group && allowed.has(action.id));
+}
+
+/** True when a sidebar row may be dispatched in the current mode. Fails closed. */
+export function navActionAllowed(id: string, developerMode: boolean): boolean {
+  return developerMode ? classify('nav-action', id) !== undefined : isProductSurface('nav-action', id);
+}
 
 /** The prominent primary action (§7). */
 export function navPrimaryAction(): NavAction {
   const primary = NAV_ACTIONS.find((action) => action.primary);
   if (!primary) throw new Error('the navigation must always expose a primary action');
   return primary;
-}
-
-export function navListActions(group?: NavAction['group']): readonly NavAction[] {
-  return NAV_ACTIONS.filter((action) => !action.primary && (group === undefined || action.group === group));
 }
 
 export function findNavAction(id: string): NavAction | undefined {

@@ -10,6 +10,8 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
 
+import { NAV_ACTIONS, navActionAllowed, navActionsFor } from '../../panel/shell/navigationModel.js';
+
 import {
   PRODUCT_CLASSES,
   SURFACES,
@@ -23,9 +25,10 @@ import {
 interface Manifest {
   contributes: {
     commands: Array<{ command: string; title: string }>;
-    menus: { commandPalette?: Array<{ command: string; when?: string }> };
+    menus: Record<string, Array<{ command: string; when?: string }>>;
     configuration: { properties: Record<string, unknown> };
     views: Record<string, Array<{ id: string; when?: string }>>;
+    viewsContainers?: Record<string, Array<{ id: string }>>;
   };
 }
 
@@ -66,6 +69,54 @@ test('no surface is classified twice, and every one says why', () => {
     assert.ok(surface.why.length > 15, `${key} must record WHY it is classified this way`);
     assert.ok(surface.label.length > 0);
   }
+});
+
+test('EVERY registered user-facing surface is classified — no escapes', () => {
+  // The sidebar shipped an entire engineering console through a "complete" pivot
+  // because nothing required its rows to be classified. This is that requirement.
+  for (const action of NAV_ACTIONS) {
+    assert.ok(classify('nav-action', action.id), `sidebar row ${action.id} must be classified`);
+  }
+  // Editor context-menu entries.
+  const contextMenu = (manifest.contributes.menus['editor/context'] ?? []) as Array<{ command: string }>;
+  assert.ok(contextMenu.length > 0, 'the manifest contributes context-menu entries');
+  for (const entry of contextMenu) {
+    assert.ok(classify('context-menu', entry.command), `${entry.command} must be classified`);
+  }
+  // Activity Bar containers.
+  const containers = (manifest.contributes.viewsContainers?.activitybar ?? []) as Array<{ id: string }>;
+  for (const container of containers) {
+    assert.ok(classify('activity-bar', container.id), `activity bar ${container.id} must be classified`);
+  }
+  // Views.
+  for (const [, views] of Object.entries(manifest.contributes.views)) {
+    for (const view of views) assert.ok(classify('view', view.id), `view ${view.id} must be classified`);
+  }
+});
+
+test('THE SIDEBAR IS PRODUCT-ONLY, and every rendered row is a product surface', () => {
+  const rows = navActionsFor('quick', false).map((a) => a.id);
+  assert.deepEqual(rows, ['explainCode', 'fixCode', 'reviewChanges', 'runTests']);
+  // Engineering groups render nothing in product mode.
+  assert.deepEqual(navActionsFor('agent', false), []);
+  assert.deepEqual(navActionsFor('service', false), []);
+  // Settings belongs to no section — the footer gear serves it in both modes.
+  assert.equal(NAV_ACTIONS.find((a) => a.id === 'settings')?.group, undefined);
+  // …and developer mode gets them back.
+  assert.ok(navActionsFor('agent', true).length > 0);
+  assert.ok(navActionsFor('service', true).length > 0);
+});
+
+test('A WEBVIEW MESSAGE CANNOT REACH A HIDDEN SIDEBAR ROW', () => {
+  // Hiding markup is a display rule. This is the boundary the host enforces.
+  for (const engineering of ['brainStatus', 'repairConnection', 'logs', 'runHistory', 'activeRuns', 'submitTask']) {
+    assert.equal(navActionAllowed(engineering, false), false, `${engineering} must be refused in product mode`);
+    assert.equal(navActionAllowed(engineering, true), true, `${engineering} must work in developer mode`);
+  }
+  for (const product of ['newTask', 'explainCode', 'fixCode', 'reviewChanges', 'runTests', 'pendingApprovals', 'settings']) {
+    assert.equal(navActionAllowed(product, false), true, `${product} must be dispatchable`);
+  }
+  assert.equal(navActionAllowed('notARealRow', false), false, 'unknown ids fail closed');
 });
 
 test('every setting the manifest declares is classified', () => {

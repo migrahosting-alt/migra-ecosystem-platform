@@ -1,8 +1,9 @@
 # Surface audit — what the product shows, and what it does not
 
-Every visible surface in the installed extension, classified. **81 surfaces**: 30 commands,
-4 views, 5 tabs, 4 navigation sections, 6 context panels, 5 header actions, 6 composer
-controls, 4 status surfaces, 17 settings.
+Every registered user-facing surface in the installed extension, classified. **107 surfaces**:
+30 commands, 4 views, 5 tabs, 13 sidebar rows, 7 sidebar sections, 4 shell navigation
+sections, 6 context panels, 5 header actions, 6 composer controls, 2 editor context-menu
+entries, 1 Activity Bar container, 3 notification actions, 4 status surfaces, 17 settings.
 
 The classification is not this document. It is
 [`src/panel/shell/surfaceClassification.ts`](../src/panel/shell/surfaceClassification.ts),
@@ -38,15 +39,26 @@ and the policy engine all still run. What changed is who has to look at them.
 | 20 slash commands incl. `/agent`, `/policy`, `/health`, `/noevidence` | **12**, all outcomes; `/edit`, `/tests`, `/debug`, `/run`, `/changes` added |
 | 30 commands in the palette | **14**: 13 product + one developer door |
 | 17 settings shown together | product settings first; the rest classified as engineering |
+| **Sidebar**: Open Command Center · Agent Mode · Workspace · Tools & Services · Service | **New Task · Recent · Workspace · Quick Actions** |
 | Status line: `Brain: Healthy · Schema: v0 · Policy: auto · Agent Mode: Off` | **`Branch · MigraPilot: Ready`** |
 | VS Code status bar: `MigraPilot: local` · `auto` · `Agent Mode: OFF` | **one item**: `MigraPilot: ready` |
 
-**Four of these were found by looking at the running product, not by reading the code.** The
-first pass of this audit classified 77 surfaces from source and missed both status surfaces
-entirely — the shell's status line and MigraPilot's three items in VS Code's own status bar,
-carrying backend topology, schema version, execution policy and Agent Mode state on the two
-lines a person actually glances at while writing code. That is the whole argument for the
-visual gate.
+**Most of these were found by looking at the running product, not by reading the code.** The
+first pass classified 77 surfaces from source and missed both status surfaces. The second pass
+missed something larger: **the entire sidebar**. `migrapilot.sidebar` — the view the Activity
+Bar icon opens, the first thing anyone sees — is rendered by `navigationHtml.ts`, not
+`shellHtml.ts`, and shipped the console intact through a "complete" pivot with 834 tests green.
+A pre-existing test even asserted that console AS THE APPROVED CONTRACT, naming Brain Status,
+Repair Connection and Logs. It was green *because* the console was still there.
+
+Two rules came out of that, and both are now enforced in code: **every registered user-facing
+surface must be classified** (a test enumerates the manifest and fails on any gap), and
+**hiding markup is not a boundary** — `navActionAllowed` and `dispatchCommand` refuse an
+engineering surface in product mode even if a webview message asks for it.
+
+The sidebar is deliberately compact. Fewer visible controls, not less capability: Git blame,
+the repository index, the command runner, the changeset engine, model routing and the test
+parser are all still there — the assistant reaches for them, the user picks the outcome.
 
 Two things are deliberately kept in the product because they are **real decisions a person has
 to make**: the live-knowledge control (does anything leave this machine) and the approval
@@ -57,7 +69,7 @@ One thing is withdrawn carefully rather than hidden: the **evidence-source selec
 the exact defect the original test was written to prevent. The host-rendered provenance line
 is untouched: whichever source answered is still stated with the answer.
 
-### core-product — 20
+### core-product — 32
 
 | Kind | Surface | Why |
 |---|---|---|
@@ -81,8 +93,20 @@ is untouched: whichever source answered is still stated with the answer.
 | Composer | Attach context `ccontext` | Choosing what MigraPilot looks at is part of asking. |
 | Composer | Attach file `cattach` | Attaching a file is part of asking a question well. |
 | Composer | Dictate `cmic` | Speaking the question is another way of asking it. |
+| Sidebar row | New Task `newTask` | Starting work is what a person opened the sidebar to do. |
+| Sidebar row | Explain Code `explainCode` | Understand the repository — step two of the journey. |
+| Sidebar row | Fix Code `fixCode` | Describe a change, see the diff, apply it. |
+| Sidebar row | Review Changes `reviewChanges` | See what changed before trusting it. |
+| Sidebar row | Run Tests `runTests` | Verification decides whether the work is done. |
+| Sidebar row | Needs your approval `pendingApprovals` | A real decision only the user can make — and shown ONLY when one is waiting. |
+| Sidebar section | Quick Actions `nav-quick` | Four outcomes, one click each. |
+| Sidebar section | Approval prompt `nav-approvals` | Appears only when a decision is actually pending. |
+| Context menu | Explain Code (right-click) `migrapilot.explainSelection` | IDE-native entry to a product outcome, on a real selection. |
+| Context menu | Fix Problems (right-click) `migrapilot.fixDiagnostics` | Acts on the errors the editor already shows. |
+| Activity Bar | MigraPilot container `migrapilot` | The one icon that opens the product. |
+| Notification | Open MigraPilot `openMigraPilot` | Sends a person to the product surface; was worded "Open Command Center". |
 
-### supporting-product-state — 13
+### supporting-product-state — 16
 
 | Kind | Surface | Why |
 |---|---|---|
@@ -94,13 +118,16 @@ is untouched: whichever source answered is still stated with the answer.
 | Context panel | Recent Activity `ctx-activity` | What just happened in this session. |
 | Header | Settings `settings` | Opens VS Code settings, scoped to the product ones. |
 | Composer | Live knowledge `clive` | A REAL user decision: whether anything leaves this machine for this turn. |
+| Sidebar row | Settings `settings` | Opens VS Code settings scoped to MigraPilot. |
+| Sidebar section | Recent `nav-recent` | Task history a user resumes work from. |
+| Sidebar section | Workspace `nav-workspace` | Repo, branch and how much has changed. |
 | Status | Shell status line `statusrow` | Where you are working and whether MigraPilot is ready — nothing else. |
 | Status | Status bar: readiness `statusbar.readiness` | One glanceable answer to "can MigraPilot work right now"; opens MigraPilot. |
 | Setting | Memory mode `migrapilot.memoryMode` | Whether conversations persist is the user’s choice. |
 | Setting | Auto-apply changes `migrapilot.autoApplyChangeset` | How much approval the user wants is their choice. |
 | Setting | Telemetry `migrapilot.enableTelemetry` | A privacy choice belongs to the user. |
 
-### internal-diagnostics — 33
+### internal-diagnostics — 43
 
 | Kind | Surface | Why |
 |---|---|---|
@@ -125,6 +152,16 @@ is untouched: whichever source answered is still stated with the answer.
 | Header | Run History `runHistory` | Execution-engine evidence. |
 | Composer | Model routing `croute` | The product picks the model. Exposing routing makes the user operate the backend. |
 | Composer | Evidence source `csource` | Governance machinery. The provenance LINE stays — the host still states which source answered; only the control is withdrawn. |
+| Sidebar row | Submit Agent Task `submitTask` | Agent Mode is a mechanism; a task asks for permission when it needs it. |
+| Sidebar row | Active Runs `activeRuns` | Execution-engine state; progress belongs to the task that is running. |
+| Sidebar row | Run History `runHistory` | Engineering audit evidence. |
+| Sidebar row | Brain Status `brainStatus` | Service lifecycle. The readiness badge already answers the user question. |
+| Sidebar row | Repair Connection `repairConnection` | Service lifecycle control the product should not delegate to a user. |
+| Sidebar row | Logs `logs` | Runtime troubleshooting. |
+| Sidebar section | Agent Mode section `nav-agent-actions` | A permanent Agent Mode console is exactly what the product must not be. |
+| Sidebar section | Tools & Services `nav-tools` | Brain Service, Local Models, Policy Engine, Audit Store — operations, not work. |
+| Sidebar section | Service section `nav-service-actions` | Brain lifecycle controls. |
+| Notification | Show Logs `showLogs` | Offered when a lane cannot reach the engine; the output channel is a developer read. |
 | Status | Status bar: Agent Mode `statusbar.agentMode` | Lifecycle state of a mechanism the product does not ask users to run. |
 | Setting | Brain URL `migrapilot.brainUrl` | Raw service address. |
 | Setting | Transcribe URL `migrapilot.transcribeUrl` | Raw service address. |
@@ -151,7 +188,7 @@ is untouched: whichever source answered is still stated with the answer.
 | Setting | Pilot API token `migrapilot.pilotApiToken` | A credential, administered centrally rather than typed here. |
 | Setting | Pilot API auth mode `migrapilot.pilotApiAuthMode` | Credential handling. |
 
-### legacy-duplicate — 7
+### legacy-duplicate — 8
 
 | Kind | Surface | Why |
 |---|---|---|
@@ -161,6 +198,7 @@ is untouched: whichever source answered is still stated with the answer.
 | View | Chat (Classic) `migrapilot.chatView` | Gated on enableClassicViews. |
 | View | Agent Mode (Classic) `migrapilot.agentMode` | Gated on enableClassicViews. |
 | View | MigraAI Workspace (Classic) `migrapilot.workspace` | Gated on enableClassicViews. |
+| Notification | Enable Classic Views `enableClassicViews` | Only offered by the already-gated classic developer commands. |
 | Setting | Classic views `migrapilot.enableClassicViews` | Keeps superseded surfaces reachable. |
 
 ### placeholder
@@ -185,11 +223,13 @@ whole coding task with no engineering surface anywhere in it:
 7. every command the task needed is classified `core-product`.
 
 **From the packaged VSIX, in a real window, photographed.** The same journey driven through
-the installed artifact with `developerMode` confirmed off, capturing the Ask surface, the
-failing run, the passing run and the Changes surface. This is what found the status-surface
-leaks; nothing in the source review did.
+the installed artifact with `developerMode` confirmed off, capturing the **sidebar**, the Ask
+surface, the failing run, the passing run and the Changes surface — plus the sidebar again
+with `developerMode` on, to prove developer mode restores every engineering section live,
+without a window reload, while `Run Tests` still passes. This is what found the status-surface
+leaks and the whole sidebar; nothing in the source review did.
 
-The extension unit suite is **834/834**. The `test:vsix`-only governed-coding suite is the
+The extension unit suite is **840/840**. The `test:vsix`-only governed-coding suite is the
 single integration failure and predates this work: its fixture is seeded exclusively by
 `runTestVsix.ts`, so it cannot pass under `test:integration`. Recorded as fixture-architecture
 debt, not normalised away — `test:integration` should eventually have one authoritative setup

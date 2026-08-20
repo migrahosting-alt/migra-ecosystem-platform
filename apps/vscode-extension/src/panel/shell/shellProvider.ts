@@ -40,7 +40,7 @@ import type { GovernedWorkflow } from '../../capability/workflowClassification.j
 import { AgentModeSessionGate } from '../agentModeModel.js';
 import { ActivityRecorder, type ContextFileEntry, type GitContextSnapshot } from './contextPanelModel.js';
 import { navigationHtml } from './navigationHtml.js';
-import { findNavAction, isShellTab, resolveTab, type ShellTabId } from './navigationModel.js';
+import { findNavAction, isShellTab, navActionAllowed, resolveTab, type ShellTabId } from './navigationModel.js';
 import { approvalConsentDetail, toProposalCard } from './proposalCardModel.js';
 import { toEvidenceExportSummary } from './runHistoryModel.js';
 import { shellHtml } from './shellHtml.js';
@@ -163,10 +163,12 @@ function realGitRunner(root: string): GitRunner {
 }
 
 export class MigraPilotShell {
-  /** Full-shell surfaces (the Studio editor panel). */
-  private readonly views = new Set<vscode.Webview>();
+  /** Full-shell surfaces (the Studio editor panel), with their density hint. */
+  private readonly views = new Map<vscode.Webview, { compact: boolean }>();
   /** Navigation-only surfaces (the sidebar view). */
   private readonly navViews = new Set<vscode.Webview>();
+  /** Mode the currently-rendered documents were built for. */
+  private renderedDeveloperMode = false;
   private readonly gate = new AgentModeSessionGate();
   private readonly activity = new ActivityRecorder(20);
 
@@ -216,8 +218,9 @@ export class MigraPilotShell {
    * message protocol. `compact` only hints at initial density; CSS decides. */
   attach(webview: vscode.Webview, opts: { compact: boolean }): vscode.Disposable {
     webview.options = { enableScripts: true, localResourceRoots: [this.deps.extensionUri] };
+    this.renderedDeveloperMode = this.developerMode;
     webview.html = this.render(webview, opts.compact);
-    this.views.add(webview);
+    this.views.set(webview, { compact: opts.compact });
     const subscription = webview.onDidReceiveMessage((message: unknown) => void this.onMessage(message, webview));
     return new vscode.Disposable(() => {
       subscription.dispose();
@@ -237,6 +240,7 @@ export class MigraPilotShell {
    */
   attachNavigation(webview: vscode.Webview): vscode.Disposable {
     webview.options = { enableScripts: true, localResourceRoots: [this.deps.extensionUri] };
+    this.renderedDeveloperMode = this.developerMode;
     webview.html = this.renderNavigation(webview);
     this.navViews.add(webview);
     const subscription = webview.onDidReceiveMessage((message: unknown) => void this.onMessage(message, webview));
@@ -256,7 +260,7 @@ export class MigraPilotShell {
       "connect-src 'none'",
     ].join('; ');
     const logo = webview.asWebviewUri(vscode.Uri.joinPath(this.deps.extensionUri, 'resources', 'migrapilot-icon.svg'));
-    return navigationHtml({ nonce, csp, logoUri: logo.toString() });
+    return navigationHtml({ nonce, csp, logoUri: logo.toString(), developerMode: this.developerMode });
   }
 
   /** Focus the composer with a seeded prompt (used by commands routing to chat). */
@@ -267,6 +271,26 @@ export class MigraPilotShell {
   /** Engineering surfaces are revealed only by explicit opt-in. Default: off. */
   private get developerMode(): boolean {
     return vscode.workspace.getConfiguration('migrapilot').get<boolean>('developerMode', false) === true;
+  }
+
+  /**
+   * Re-render every surface when the developer-mode setting changes.
+   *
+   * The document is BUILT per mode — sections are emitted or not, and the slash
+   * catalogue is baked in — so posting new state cannot reveal or withdraw a
+   * region. Without this, toggling the setting silently did nothing until the
+   * window was reloaded, which is indistinguishable from a broken setting. Seen
+   * in the running product: the Studio panel picked up the new state while the
+   * sidebar kept rendering the old document.
+   */
+  onDeveloperModeChanged(): void {
+    const mode = this.developerMode;
+    if (mode === this.renderedDeveloperMode) return;
+    this.renderedDeveloperMode = mode;
+    for (const [webview, opts] of this.views) webview.html = this.render(webview, opts.compact);
+    for (const webview of this.navViews) webview.html = this.renderNavigation(webview);
+    // A rebuilt document starts empty; give it the state back immediately.
+    void this.refresh();
   }
 
   showTab(tab: ShellTabId): void {
@@ -314,12 +338,12 @@ export class MigraPilotShell {
   }
 
   private post(message: unknown): void {
-    for (const view of this.views) void view.postMessage(message);
+    for (const view of this.views.keys()) void view.postMessage(message);
   }
 
   /** State is broadcast to BOTH surfaces; everything else is shell-only. */
   private postAll(message: unknown): void {
-    for (const view of this.views) void view.postMessage(message);
+    for (const view of this.views.keys()) void view.postMessage(message);
     for (const view of this.navViews) void view.postMessage(message);
   }
 
@@ -1054,6 +1078,12 @@ export class MigraPilotShell {
     const action = id ? findNavAction(id) : undefined;
     if (!action) {
       this.deps.output.appendLine(`[shell] unknown navigation action: ${id ?? '(none)'}`);
+      return;
+    }
+    // A webview message must not reach a row the interface deliberately does not
+    // render. Hiding markup is a display rule; this is the boundary.
+    if (!navActionAllowed(action.id, this.developerMode)) {
+      this.deps.output.appendLine(`[shell] refused engineering navigation action in product mode: ${action.id}`);
       return;
     }
     if (action.kind === 'studio') {

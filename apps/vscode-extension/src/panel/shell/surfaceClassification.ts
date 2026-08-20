@@ -45,6 +45,16 @@ export type SurfaceKind =
   | 'composer-control'
   /** The shell's status line and MigraPilot's items in VS Code's status bar. */
   | 'status'
+  /** Rows in the Activity Bar sidebar (`navigationHtml`). */
+  | 'nav-action'
+  /** Sections of that sidebar. */
+  | 'nav-region'
+  /** Editor right-click entries. */
+  | 'context-menu'
+  /** Activity Bar containers. */
+  | 'activity-bar'
+  /** Buttons offered on a notification. */
+  | 'notification-action'
   | 'setting';
 
 export interface SurfaceRecord {
@@ -137,6 +147,43 @@ export const SURFACES: readonly SurfaceRecord[] = [
   { id: 'cmic', kind: 'composer-control', label: 'Dictate', cls: 'core-product', why: 'Speaking the question is another way of asking it.' },
   { id: 'croute', kind: 'composer-control', label: 'Model routing', cls: 'internal-diagnostics', why: 'The product picks the model. Exposing routing makes the user operate the backend.' },
   { id: 'csource', kind: 'composer-control', label: 'Evidence source', cls: 'internal-diagnostics', why: 'Governance machinery. The provenance LINE stays — the host still states which source answered; only the control is withdrawn.' },
+
+  // ── Sidebar rows (the Activity Bar view — the surface opened FIRST) ────────
+  //
+  // This whole surface was missed by the first pass of the pivot: it is rendered
+  // by `navigationHtml.ts`, not `shellHtml.ts`, and shipped the console intact.
+  { id: 'newTask', kind: 'nav-action', label: 'New Task', cls: 'core-product', why: 'Starting work is what a person opened the sidebar to do.' },
+  { id: 'explainCode', kind: 'nav-action', label: 'Explain Code', cls: 'core-product', why: 'Understand the repository — step two of the journey.' },
+  { id: 'fixCode', kind: 'nav-action', label: 'Fix Code', cls: 'core-product', why: 'Describe a change, see the diff, apply it.' },
+  { id: 'reviewChanges', kind: 'nav-action', label: 'Review Changes', cls: 'core-product', why: 'See what changed before trusting it.' },
+  { id: 'runTests', kind: 'nav-action', label: 'Run Tests', cls: 'core-product', why: 'Verification decides whether the work is done.' },
+  { id: 'pendingApprovals', kind: 'nav-action', label: 'Needs your approval', cls: 'core-product', why: 'A real decision only the user can make — and shown ONLY when one is waiting.' },
+  { id: 'settings', kind: 'nav-action', label: 'Settings', cls: 'supporting-product-state', why: 'Opens VS Code settings scoped to MigraPilot.' },
+  { id: 'submitTask', kind: 'nav-action', label: 'Submit Agent Task', cls: 'internal-diagnostics', why: 'Agent Mode is a mechanism; a task asks for permission when it needs it.' },
+  { id: 'activeRuns', kind: 'nav-action', label: 'Active Runs', cls: 'internal-diagnostics', why: 'Execution-engine state; progress belongs to the task that is running.' },
+  { id: 'runHistory', kind: 'nav-action', label: 'Run History', cls: 'internal-diagnostics', why: 'Engineering audit evidence.' },
+  { id: 'brainStatus', kind: 'nav-action', label: 'Brain Status', cls: 'internal-diagnostics', why: 'Service lifecycle. The readiness badge already answers the user question.' },
+  { id: 'repairConnection', kind: 'nav-action', label: 'Repair Connection', cls: 'internal-diagnostics', why: 'Service lifecycle control the product should not delegate to a user.' },
+  { id: 'logs', kind: 'nav-action', label: 'Logs', cls: 'internal-diagnostics', why: 'Runtime troubleshooting.' },
+
+  // ── Sidebar sections ──────────────────────────────────────────────────────
+  { id: 'nav-recent', kind: 'nav-region', label: 'Recent', cls: 'supporting-product-state', why: 'Task history a user resumes work from.' },
+  { id: 'nav-workspace', kind: 'nav-region', label: 'Workspace', cls: 'supporting-product-state', why: 'Repo, branch and how much has changed.' },
+  { id: 'nav-quick', kind: 'nav-region', label: 'Quick Actions', cls: 'core-product', why: 'Four outcomes, one click each.' },
+  { id: 'nav-approvals', kind: 'nav-region', label: 'Approval prompt', cls: 'core-product', why: 'Appears only when a decision is actually pending.' },
+  { id: 'nav-agent-actions', kind: 'nav-region', label: 'Agent Mode section', cls: 'internal-diagnostics', why: 'A permanent Agent Mode console is exactly what the product must not be.' },
+  { id: 'nav-tools', kind: 'nav-region', label: 'Tools & Services', cls: 'internal-diagnostics', why: 'Brain Service, Local Models, Policy Engine, Audit Store — operations, not work.' },
+  { id: 'nav-service-actions', kind: 'nav-region', label: 'Service section', cls: 'internal-diagnostics', why: 'Brain lifecycle controls.' },
+
+  // ── Editor context menu + Activity Bar ────────────────────────────────────
+  { id: 'migrapilot.explainSelection', kind: 'context-menu', label: 'Explain Code (right-click)', cls: 'core-product', why: 'IDE-native entry to a product outcome, on a real selection.' },
+  { id: 'migrapilot.fixDiagnostics', kind: 'context-menu', label: 'Fix Problems (right-click)', cls: 'core-product', why: 'Acts on the errors the editor already shows.' },
+  { id: 'migrapilot', kind: 'activity-bar', label: 'MigraPilot container', cls: 'core-product', why: 'The one icon that opens the product.' },
+
+  // ── Notification actions ──────────────────────────────────────────────────
+  { id: 'openMigraPilot', kind: 'notification-action', label: 'Open MigraPilot', cls: 'core-product', why: 'Sends a person to the product surface; was worded "Open Command Center".' },
+  { id: 'enableClassicViews', kind: 'notification-action', label: 'Enable Classic Views', cls: 'legacy-duplicate', why: 'Only offered by the already-gated classic developer commands.' },
+  { id: 'showLogs', kind: 'notification-action', label: 'Show Logs', cls: 'internal-diagnostics', why: 'Offered when a lane cannot reach the engine; the output channel is a developer read.' },
 
   // ── Status surfaces ────────────────────────────────────────────────────────
   //
