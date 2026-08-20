@@ -36,23 +36,26 @@ function withFixture(contents: string, assertion: (r: ReturnType<typeof aggregat
   }
 }
 
-test('the shipped registry validates and now holds four controls', () => {
+test('the shipped registry validates and now holds five controls', () => {
   const r = aggregate();
   assert.equal(r.status, 0, `validation failed: ${r.stderr}`);
-  assert.match(r.stdout, /4 declared, 23 known gaps of 27 contributed commands/);
+  assert.match(r.stdout, /5 declared, 23 known gaps of 28 contributed commands/);
 
   const artifact = JSON.parse(
     readFileSync(join(EXT_ROOT, 'src', 'interaction', 'generated', 'controls.generated.json'), 'utf8'),
   ) as { declarations: Array<{ controlId: string; consequence: string; locator: { commandId: string } }>; coverage: { knownGaps: string[] } };
 
-  assert.deepEqual(artifact.declarations.map((d) => d.controlId).sort(), ['diagnose-failure', 'explain-selection', 'governed-coding', 'run-command']);
+  assert.deepEqual(artifact.declarations.map((d) => d.controlId).sort(), ['diagnose-failure', 'explain-selection', 'governed-coding', 'quick-edit', 'run-command']);
   // Distinct identities, distinct exact locators — the generalisation this slice exists to prove.
-  assert.equal(new Set(artifact.declarations.map((d) => d.locator.commandId)).size, 4);
+  assert.equal(new Set(artifact.declarations.map((d) => d.locator.commandId)).size, 5);
   // The first control that can WRITE to the repository declares itself as such.
   assert.equal(artifact.declarations.find((d) => d.controlId === 'governed-coding')?.consequence, 'mutating');
   // The ad-hoc command lane declares `mutating` too: it writes nothing itself, but the
   // command it runs legitimately can, and consequence describes the EFFECT not the file.
   assert.equal(artifact.declarations.find((d) => d.controlId === 'run-command')?.consequence, 'mutating');
+  // The quick edit lane is `mutating`, not `approval`: it passes THROUGH an approval, but its
+  // job is to change files, not to grant authority. `approval` belongs to the reviewer.
+  assert.equal(artifact.declarations.find((d) => d.controlId === 'quick-edit')?.consequence, 'mutating');
   assert.ok(!artifact.coverage.knownGaps.includes('migrapilot.explainSelection'), 'the declared command left the gap list');
   assert.equal(artifact.coverage.knownGaps.length, 23);
 });

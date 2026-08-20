@@ -44,6 +44,20 @@
       }
     },
     {
+      "file": "src/commands/quickEdit.control.ts",
+      "applicationId": "migrapilot-vscode",
+      "surfaceId": "engineer.command-palette",
+      "controlId": "quick-edit",
+      "controlVersion": 1,
+      "instanceScope": "workspace",
+      "consequence": "mutating",
+      "locator": {
+        "adapter": "vscode-command",
+        "commandId": "migrapilot.quickEdit",
+        "confidence": "exact"
+      }
+    },
+    {
       "file": "src/commands/runCommand.control.ts",
       "applicationId": "migrapilot-vscode",
       "surfaceId": "engineer.command-palette",
@@ -59,8 +73,8 @@
     }
   ],
   "coverage": {
-    "contributedCommands": 27,
-    "declaredControls": 4,
+    "contributedCommands": 28,
+    "declaredControls": 5,
     "knownGaps": [
       "migrapilot.aiUsage",
       "migrapilot.clearToken",

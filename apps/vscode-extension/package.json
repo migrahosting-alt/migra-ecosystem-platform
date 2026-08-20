@@ -187,6 +187,10 @@
       {
         "command": "migrapilot.runCommand",
         "title": "MigraPilot: Run Command"
+      },
+      {
+        "command": "migrapilot.quickEdit",
+        "title": "MigraPilot: Quick Edit"
       }
     ],
     "configuration": {
