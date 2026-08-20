@@ -106,3 +106,22 @@ export async function runTestFlow(input: {
   }
   return { kind: 'ran', result, report: formatTestReport(result) };
 }
+
+/**
+ * A one-line verification summary for the product's result area.
+ *
+ * Keeps the same distinction the report makes: a refusal is not a failing suite,
+ * and a timeout is not a failure — it is an unknown.
+ */
+export function testRunActivity(outcome: TestRunOutcome): { text: string; tone: 'ok' | 'warn' | 'error' | 'info' } {
+  if (outcome.kind === 'unavailable') return { text: 'Tests not run — MigraPilot is unavailable', tone: 'error' };
+  if (outcome.kind === 'refused') return { text: `Tests not run — ${outcome.reason}`, tone: 'warn' };
+  const { status, totals, script } = outcome.result;
+  const name = script ?? 'tests';
+  if (status === 'timeout') return { text: `${name}: timed out — result unknown`, tone: 'warn' };
+  if (status === 'passed') {
+    return { text: totals ? `${name}: passed (${totals.passed})` : `${name}: passed`, tone: 'ok' };
+  }
+  return { text: totals ? `${name}: FAILED (${totals.failed} of ${totals.passed + totals.failed})` : `${name}: FAILED`, tone: 'error' };
+}
+

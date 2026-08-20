@@ -10,6 +10,7 @@
 import type { ConversationMeta } from '../../services/migraAiClient.js';
 import type { GitContextSnapshot } from './contextPanelModel.js';
 import { type Badge, type Row, type Tone, optionalRow, relativeAge } from './types.js';
+import { visibleIds } from './surfaceClassification.js';
 
 // ── Conversation list ─────────────────────────────────────────────────────────
 
@@ -287,15 +288,29 @@ export interface StatusSummaryInput {
   agentModeActive: boolean;
 }
 
-export function toStatusSummary(input: StatusSummaryInput): StatusSummaryModel {
+/**
+ * The one-line status under the shell.
+ *
+ * PRODUCT MODE ANSWERS TWO QUESTIONS: where am I working, and is MigraPilot ready.
+ * It used to read `Brain: Healthy · Schema: v0 · Policy: auto · Agent Mode: Off` —
+ * four pieces of backend state on the surface a user looks at while writing code.
+ * That was found by looking at the running product, not by reading the code, which
+ * is why the visual gate exists.
+ *
+ * Developer mode keeps every field.
+ */
+export function toStatusSummary(input: StatusSummaryInput, developerMode = false): StatusSummaryModel {
+  const branch = optionalRow('Branch', input.branch, 'info', true);
+  const ready: Row = {
+    label: 'MigraPilot',
+    value: input.connected ? 'Ready' : 'Not ready',
+    tone: input.connected ? 'ok' : 'error',
+  };
+  if (!developerMode) return { items: [branch, ready].filter(Boolean) as Row[] };
   return {
     items: [
-      optionalRow('Branch', input.branch, 'info', true),
-      {
-        label: 'MigraPilot',
-        value: input.connected ? 'Connected' : 'Disconnected',
-        tone: input.connected ? 'ok' : 'error',
-      },
+      branch,
+      { ...ready, value: input.connected ? 'Connected' : 'Disconnected' },
       {
         label: 'Brain',
         value: input.brainStatus === 'ok' ? 'Healthy' : input.brainStatus ? capitalize(input.brainStatus) : 'Unknown',
@@ -314,15 +329,33 @@ export function toStatusSummary(input: StatusSummaryInput): StatusSummaryModel {
 
 // ── Header ────────────────────────────────────────────────────────────────────
 
+/**
+ * Every tab the shell can render, in journey order.
+ *
+ * `chat` and `diff` are the product: ask, then see what changed. The other three
+ * are engineering surfaces — they keep working, and their backends are untouched,
+ * but `shellTabs()` only hands them out in developer mode. The classification that
+ * decides this lives in `surfaceClassification.ts`, so the tab strip and the
+ * command palette cannot disagree about what counts as product.
+ */
 export const SHELL_TABS = [
-  { id: 'chat', label: 'MigraPilot Chat', icon: 'comment-discussion' },
+  { id: 'chat', label: 'Ask', icon: 'comment-discussion' },
+  { id: 'diff', label: 'Changes', icon: 'diff' },
   { id: 'agent', label: 'Agent Workspace', icon: 'shield' },
-  { id: 'diff', label: 'Run Diff', icon: 'diff' },
   { id: 'audit', label: 'Audit Trail', icon: 'checklist' },
-  // MigraAI Workspace consolidation: the semantic index, memory, agents, models
-  // and engine — previously only reachable from the standalone sidebar view.
   { id: 'workspace', label: 'Workspace', icon: 'database' },
 ] as const;
+
+/** The tab strip for the current mode. Never empty: `chat` is always product. */
+export function shellTabs(developerMode: boolean): Array<(typeof SHELL_TABS)[number]> {
+  const allowed = new Set(visibleIds('tab', developerMode));
+  return SHELL_TABS.filter((tab) => allowed.has(tab.id));
+}
+
+/** Product mode must never land on a tab it does not render. */
+export function resolveTab(tab: ShellTabId, developerMode: boolean): ShellTabId {
+  return shellTabs(developerMode).some((candidate) => candidate.id === tab) ? tab : 'chat';
+}
 
 export type ShellTabId = (typeof SHELL_TABS)[number]['id'];
 

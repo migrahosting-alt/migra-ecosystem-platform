@@ -130,6 +130,58 @@ export interface BrainHealthPanelModel extends Panel {
   endpoint: string;
 }
 
+/**
+ * READINESS FOR A PERSON, not for an operator.
+ *
+ * The health panel answers "what is the Brain service doing"; a user only needs
+ * "can MigraPilot work right now, and if not, is that a problem I should see".
+ * The engineering words and the endpoint are dropped, including from the tooltip —
+ * an error string routinely carries the service URL, which is the exact detail the
+ * product is not supposed to show.
+ */
+export function toReadinessBadge(panel: BrainHealthPanelModel): Badge {
+  switch (panel.badge.tone) {
+    case 'ok':
+      return { text: 'Ready', tone: 'ok', title: 'MigraPilot is ready.' };
+    case 'warn':
+      return { text: 'Limited', tone: 'warn', title: 'MigraPilot is running with reduced capability.' };
+    case 'muted':
+      return { text: 'Starting…', tone: 'muted', title: 'MigraPilot is starting up.' };
+    default:
+      return { text: 'Not ready', tone: 'error', title: 'MigraPilot cannot run right now.' };
+  }
+}
+
+/**
+ * The health panel reduced for the product surface.
+ *
+ * `ctx-brain` is not rendered in product mode, but the state is POSTED to the
+ * webview either way, and endpoint / version / schema version / retention-worker
+ * rows have no business crossing that boundary just because nothing draws them.
+ * Same rule the Workspace tab already follows with its deny-list.
+ */
+export function toProductBrainPanel(panel: BrainHealthPanelModel): BrainHealthPanelModel {
+  return {
+    title: 'MigraPilot',
+    state: panel.state,
+    endpoint: '',
+    badge: toReadinessBadge(panel),
+    rows: [],
+    // A placeholder only exists for a state worth explaining; `ready` has none.
+    ...(panel.placeholder
+      ? { placeholder: { state: panel.placeholder.state, message: readinessMessage(panel) } }
+      : {}),
+  };
+}
+
+/** A user-facing sentence that never carries a URL or an internal error string. */
+function readinessMessage(panel: BrainHealthPanelModel): string {
+  if (panel.state === 'loading') return 'MigraPilot is starting up…';
+  if (panel.state === 'disconnected') return 'MigraPilot is not running. Reload the window to start it again.';
+  if (panel.state === 'degraded') return 'MigraPilot is running with reduced capability.';
+  return 'MigraPilot is ready.';
+}
+
 export function toBrainHealthPanel(
   endpoint: string,
   snapshot: BrainHealthSnapshot | undefined,

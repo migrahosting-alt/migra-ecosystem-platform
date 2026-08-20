@@ -11,6 +11,8 @@ import { runCommandTrace } from '../../interaction/vscodeCommandAdapter.js';
 import { diagnoseFailureControl } from '../../commands/diagnoseFailure.control.js';
 import { explainSelectionControl } from '../../commands/explainSelection.control.js';
 import { shellHtml } from '../../panel/shell/shellHtml.js';
+import { shellScript } from '../../panel/shell/shellScript.js';
+import { sourceModeBadge } from '../../panel/shell/composerModel.js';
 import { CAP_FIX_DIAGNOSTICS, evaluateCapability } from '../../services/commandCapabilities.js';
 import { type MockPilotApi, startMockPilotApi } from '../support/mockPilotApi.js';
 import { MigraAiClient, type AiStreamEvent } from '../../services/migraAiClient.js';
@@ -371,7 +373,10 @@ suite('MigraPilot extension — end to end', () => {
     }
     await vscode.commands.executeCommand('migrapilot.health');
     const reported = dialogCalls.map((c) => c.message).join(' | ');
-    assert.match(reported, /brain is ok/i, `unexpected health dialogs: ${reported}`);
+    // The message is "MigraPilot Brain Service is ok…"; the old `/brain is ok/`
+    // stopped matching when the capability line was added and has been failing
+    // since. The guard is the STATUS, so match the status, not the old phrasing.
+    assert.match(reported, /brain service is ok/i, `unexpected health dialogs: ${reported}`);
   });
 
   test('showDiagnostics runs without error', async () => {
@@ -1377,10 +1382,15 @@ suite('MigraPilot extension — end to end', () => {
       return approved.index.version;
     }
 
-    test('the composer renders the evidence-source selector', () => {
-      // The activation control must EXIST in the shipped markup — it was once
-      // defined and never rendered, leaving the mode reachable only via /approved.
-      const html = shellHtml({ nonce: 'test-nonce', csp: "default-src 'none'", initialTab: 'chat', script: 'void 0;', compact: false });
+    test('the evidence-source selector renders WHERE IT BELONGS — developer mode', () => {
+      // The control must EXIST in the shipped markup — it was once defined and
+      // never rendered, leaving the mode reachable only via /approved. It is now
+      // classified as governance machinery, so it renders in developer mode; the
+      // requirement that it be REACHABLE AND VISIBLE there is unchanged.
+      const html = shellHtml({
+        nonce: 'test-nonce', csp: "default-src 'none'", initialTab: 'chat',
+        script: 'void 0;', compact: false, developerMode: true,
+      });
       assert.match(html, /id="csource"/, 'the evidence-source select must be present');
       assert.match(html, /Approved index/, 'and expose the approved-only option');
       assert.match(html, /Auto evidence/, 'with an explicitly-named default, not a bare "Auto"');
@@ -1390,6 +1400,28 @@ suite('MigraPilot extension — end to end', () => {
       // It sits with the other composer controls, not somewhere unreachable.
       const composer = html.slice(html.indexOf('id="ctools"'), html.indexOf('id="chint"'));
       assert.match(composer, /id="csource"/, 'rendered inside the composer tool row');
+    });
+
+    test('THE PRODUCT WITHDRAWS THE CONTROL WITHOUT HIDING THE DISCLOSURE', () => {
+      // Product mode does not ask a user to operate a governance mode. What it must
+      // NOT do is leave the mode selectable-but-invisible, which is the defect the
+      // test above exists to prevent — so the control and the `/approved` shortcut
+      // are withdrawn TOGETHER, and the turn falls back to `auto`.
+      const html = shellHtml({
+        nonce: 'test-nonce', csp: "default-src 'none'", initialTab: 'chat',
+        script: shellScript(false), compact: false,
+      });
+      const markup = html.slice(0, html.indexOf('<script nonce='));
+      assert.doesNotMatch(markup, /id="csource"/, 'no evidence-source control in the product');
+      assert.ok(!html.includes('"name":"/approved"'), 'and no /approved shortcut either');
+
+      // The DISCLOSURE is host-rendered and unconditional: whichever source
+      // answered is still stated with the answer.
+      assert.match(
+        sourceModeBadge({ sourceMode: 'approved-index', indexVersion: 7 }),
+        /approved/i,
+        'the provenance line is not a UI control and must survive the pivot',
+      );
     });
 
     test('an approved-only turn with insufficient evidence REFUSES and discloses divergence', async () => {

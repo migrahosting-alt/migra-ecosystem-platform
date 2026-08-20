@@ -119,7 +119,7 @@ test('the command is registered and activated', () => {
   };
   assert.ok(pkg.activationEvents.includes('onCommand:migrapilot.diagnoseFailure'));
   const entry = pkg.contributes.commands.find((c) => c.command === 'migrapilot.diagnoseFailure');
-  assert.equal(entry?.title, 'MigraPilot: Diagnose Failure');
+  assert.equal(entry?.title, 'MigraPilot: Debug a Failure');
   assert.match(source('extension.ts'), /registerCommand\('migrapilot\.diagnoseFailure'/);
 });
 

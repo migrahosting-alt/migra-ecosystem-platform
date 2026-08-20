@@ -9,7 +9,7 @@
 // catalogue and the icon set. Nothing from the backend, the workspace, or the
 // activation is ever interpolated here.
 
-import { SLASH_COMMANDS } from './composerModel.js';
+import { slashCommandsFor } from './composerModel.js';
 import { ICON_PATHS } from './icons.js';
 import { agentScript } from './script/agent.js';
 import { chatScript } from './script/chat.js';
@@ -22,14 +22,20 @@ import { workspaceScript } from './script/workspace.js';
 const SLASH_TOKEN = 'SLASH_COMMANDS_JSON';
 const ICONS_TOKEN = 'ICON_PATHS_JSON';
 
-/** Inject the shared static metadata into a fragment. */
-export function injectStaticData(fragment: string): string {
+/**
+ * Inject the shared static metadata into a fragment.
+ *
+ * The slash catalogue is baked in per MODE. Filtering it in the client instead
+ * would ship the engineering entries to every install and rely on the webview to
+ * hide them, which is a display rule, not a boundary.
+ */
+export function injectStaticData(fragment: string, developerMode = false): string {
   return fragment
-    .replace(SLASH_TOKEN, JSON.stringify(SLASH_COMMANDS))
+    .replace(SLASH_TOKEN, JSON.stringify(slashCommandsFor(developerMode)))
     .replace(ICONS_TOKEN, JSON.stringify(ICON_PATHS));
 }
 
-export function shellScript(): string {
+export function shellScript(developerMode = false): string {
   const fragments = [
     '(function () {',
     "'use strict';",
@@ -42,5 +48,5 @@ export function shellScript(): string {
     composerScript(),
     '})();',
   ];
-  return injectStaticData(fragments.join('\n'));
+  return injectStaticData(fragments.join('\n'), developerMode);
 }

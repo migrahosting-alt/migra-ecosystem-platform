@@ -65,7 +65,7 @@
     },
     {
       "file": "src/commands/runTests.ts",
-      "line": 44,
+      "line": 58,
       "api": "showWarningMessage",
       "classification": "consumed",
       "snippet": "await vscode.window.showWarningMessage(`MigraPilot: ${outcome.reason}`, 'Show Logs')"
@@ -93,14 +93,14 @@
     },
     {
       "file": "src/panel/shell/shellProvider.ts",
-      "line": 1324,
+      "line": 1341,
       "api": "showWarningMessage",
       "classification": "consumed",
       "snippet": "await vscode.window.showWarningMessage("
     },
     {
       "file": "src/panel/shell/shellProvider.ts",
-      "line": 1340,
+      "line": 1357,
       "api": "showWarningMessage",
       "classification": "consumed",
       "snippet": "await vscode.window.showWarningMessage("

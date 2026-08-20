@@ -371,11 +371,16 @@ export async function activate(context: vscode.ExtensionContext): Promise<MigraP
     if (outcome.kind === 'approved' && outcome.result.ok && outcome.result.content) render(`\n\n${outcome.result.content}`);
   });
   context.subscriptions.push({ dispose: () => setEscalationDispatch(undefined) });
+  // The execution policy is administrative and Agent Mode is a mechanism. Both had
+  // permanent items in VS Code's status bar — "auto" and "Agent Mode: OFF" — which
+  // is backend state on the strip a person reads while writing code. They are
+  // created either way, so nothing about their behaviour changes; they are only
+  // SHOWN in developer mode.
   policyStatusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 99);
   policyStatusBar.command = 'migrapilot.executionPolicy';
   policyStatusBar.tooltip = 'MigraPilot execution policy (local-first; cloud is a gated fallback)';
   refreshPolicyStatusBar();
-  policyStatusBar.show();
+  if (developerModeEnabled()) policyStatusBar.show();
   context.subscriptions.push(policyStatusBar);
 
   registerMigraPilotParticipant(context, brainClient, router, migraAiClient, engineDiagnostics);
@@ -384,7 +389,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<MigraP
   agentModeStatusBar.command = 'migrapilot.openAgentMode';
   agentModeStatusBar.text = agentModeStatusText(false, 'IDLE');
   agentModeStatusBar.tooltip = 'Explicit Agent Mode command approval control plane';
-  agentModeStatusBar.show();
+  if (developerModeEnabled()) agentModeStatusBar.show();
   agentModeView = new MigraPilotAgentModeViewProvider(context.extensionUri, {
     client: migraAiClient,
     workspaceRoot: () => vscode.workspace.workspaceFolders?.[0]?.uri.fsPath,
@@ -560,7 +565,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<MigraP
     ),
     vscode.commands.registerCommand('migrapilot.quickEdit', () => runQuickEdit(commandDeps)),
     vscode.commands.registerCommand('migrapilot.gitOverview', () => runGitOverview(commandDeps)),
-    vscode.commands.registerCommand('migrapilot.runTests', () => runTests(commandDeps, context.workspaceState)),
+    vscode.commands.registerCommand('migrapilot.runTests', () =>
+      // Verification is a RESULT, so it is reflected in the product surface, not
+      // only in an output channel the user has to go looking for.
+      runTests(commandDeps, context.workspaceState, undefined, (summary) =>
+        shell?.recordActivity(summary.text, summary.tone),
+      ),
+    ),
     vscode.commands.registerCommand('migrapilot.showBackendDiagnostics', showBackendDiagnostics),
   );
 
@@ -752,6 +763,11 @@ async function checkHealth(): Promise<void> {
     await statusBar.refresh(brainClient);
     void sidebar?.refresh();
   }
+}
+
+/** Engineering surfaces are revealed only by explicit opt-in. Default: off. */
+function developerModeEnabled(): boolean {
+  return vscode.workspace.getConfiguration('migrapilot').get<boolean>('developerMode', false) === true;
 }
 
 function refreshPolicyStatusBar(): void {

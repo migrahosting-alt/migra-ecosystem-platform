@@ -28,6 +28,9 @@ export const ICON_PATHS: Record<string, string> = {
   'comment-discussion':
     '<path d="M1.8 3.2h9.4v6.2H5.4L2.8 11.6V9.4H1.8V3.2z" fill="none" stroke="currentColor" stroke-width="1.2"/><path d="M12.8 5.6h1.4v6.2h-1v2.2l-2.6-2.2H7.2" fill="none" stroke="currentColor" stroke-width="1.2"/>',
   code: '<path d="M5.6 4.4L2 8l3.6 3.6M10.4 4.4L14 8l-3.6 3.6" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>',
+  // Run tests — the verification step earns its own glyph rather than borrowing one.
+  beaker:
+    '<path d="M6.4 1.8v4.1L2.9 12a1.5 1.5 0 001.3 2.2h7.6A1.5 1.5 0 0013.1 12L9.6 5.9V1.8" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><path d="M5.6 1.8h4.8" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><path d="M4.5 9.8h7" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>',
   search:
     '<circle cx="7" cy="7" r="4.2" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M10.2 10.2L14 14" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>',
   rocket:

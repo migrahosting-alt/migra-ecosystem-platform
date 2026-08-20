@@ -14,7 +14,8 @@
 
 import * as vscode from 'vscode';
 import type { CommandDeps } from './commandRouting.js';
-import { runTestFlow, type TestRunResult, type TestRunner } from '../services/testRunFlow.js';
+import { runTestFlow, type TestRunOutcome, type TestRunResult, type TestRunner } from '../services/testRunFlow.js';
+import { testRunActivity } from '../services/testRunFlow.js';
 
 const LAST_SCRIPT_KEY = 'migrapilot.runTests.lastScript';
 
@@ -24,7 +25,18 @@ function brainRunner(deps: CommandDeps): TestRunner {
   };
 }
 
-export async function runTests(deps: CommandDeps, memento?: vscode.Memento, script?: string): Promise<void> {
+/**
+ * Returns the outcome so the caller can reflect VERIFICATION in the product
+ * surface. The result area is meant to answer "did it pass", and a result that
+ * only ever lands in an output channel does not answer it where the user is
+ * looking.
+ */
+export async function runTests(
+  deps: CommandDeps,
+  memento?: vscode.Memento,
+  script?: string,
+  onOutcome?: (summary: { text: string; tone: 'ok' | 'warn' | 'error' | 'info' }) => void,
+): Promise<TestRunOutcome | undefined> {
   const output = deps.output ?? vscode.window.createOutputChannel('MigraPilot');
   const chosen = script ?? memento?.get<string>(LAST_SCRIPT_KEY);
 
@@ -39,11 +51,13 @@ export async function runTests(deps: CommandDeps, memento?: vscode.Memento, scri
       }),
   );
 
+  onOutcome?.(testRunActivity(outcome));
+
   if (outcome.kind === 'unavailable') {
     output.appendLine(`\nTests: ${outcome.reason}`);
     const choice = await vscode.window.showWarningMessage(`MigraPilot: ${outcome.reason}`, 'Show Logs');
     if (choice === 'Show Logs') output.show(true);
-    return;
+    return outcome;
   }
 
   if (outcome.kind === 'refused') {
@@ -57,12 +71,12 @@ export async function runTests(deps: CommandDeps, memento?: vscode.Memento, scri
       });
       if (pick !== undefined) {
         await memento?.update(LAST_SCRIPT_KEY, pick);
-        await runTests(deps, memento, pick);
+        return runTests(deps, memento, pick, onOutcome);
       }
-      return;
+      return outcome;
     }
     void vscode.window.showWarningMessage(`MigraPilot: ${outcome.reason}`);
-    return;
+    return outcome;
   }
 
   if (outcome.result.script !== null) await memento?.update(LAST_SCRIPT_KEY, outcome.result.script);
@@ -74,5 +88,14 @@ export async function runTests(deps: CommandDeps, memento?: vscode.Memento, scri
         ? 'MigraPilot: the test run timed out.'
         : `MigraPilot: tests failed${outcome.result.totals ? ` (${outcome.result.totals.failed})` : ''}.`,
     );
+  } else {
+    // A PASS MUST ANNOUNCE ITSELF. VS Code keeps a warning toast on screen until
+    // it is dismissed, so a failing run followed by a passing one left "tests
+    // failed" as the newest thing a user could see — seen in the running product,
+    // not in any test. Reporting only failures made the stale toast look current.
+    void vscode.window.showInformationMessage(
+      `MigraPilot: tests passed${outcome.result.totals ? ` (${outcome.result.totals.passed})` : ''}.`,
+    );
   }
+  return outcome;
 }

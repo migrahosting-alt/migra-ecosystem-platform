@@ -82,11 +82,11 @@
     "commands": [
       {
         "command": "migrapilot.openChat",
-        "title": "MigraPilot: Open Chat"
+        "title": "MigraPilot: Ask MigraPilot"
       },
       {
         "command": "migrapilot.openStudio",
-        "title": "MigraPilot: Open Command Center"
+        "title": "MigraPilot: Open MigraPilot"
       },
       {
         "command": "migrapilot.dev.openClassicChat",
@@ -102,75 +102,75 @@
       },
       {
         "command": "migrapilot.openWorkspacePanel",
-        "title": "MigraPilot: Open MigraAI Workspace"
+        "title": "MigraPilot (Developer): MigraAI Workspace"
       },
       {
         "command": "migrapilot.openAgentMode",
-        "title": "MigraPilot: Open Agent Mode"
+        "title": "MigraPilot (Developer): Agent Mode"
       },
       {
         "command": "migrapilot.pairAgentMode",
-        "title": "MigraPilot: Pair Agent Mode Securely"
+        "title": "MigraPilot (Admin): Pair Agent Mode Securely"
       },
       {
         "command": "migrapilot.health",
-        "title": "MigraPilot: Check Health"
+        "title": "MigraPilot (Developer): Check Health"
       },
       {
         "command": "migrapilot.repairConnection",
-        "title": "MigraPilot: Repair Connection"
+        "title": "MigraPilot (Developer): Repair Connection"
       },
       {
         "command": "migrapilot.showLogs",
-        "title": "MigraPilot: Show Logs"
+        "title": "MigraPilot (Developer): Show Logs"
       },
       {
         "command": "migrapilot.showDiagnostics",
-        "title": "MigraPilot: Show Diagnostics"
+        "title": "MigraPilot (Developer): Diagnostics"
       },
       {
         "command": "migrapilot.productionDiagnostics",
-        "title": "MigraPilot: Production Diagnostics — Read Only"
+        "title": "MigraPilot (Developer): Production Diagnostics — Read Only"
       },
       {
         "command": "migrapilot.executionPolicy",
-        "title": "MigraPilot: Execution Policy"
+        "title": "MigraPilot (Admin): Execution Policy"
       },
       {
         "command": "migrapilot.providerStatus",
-        "title": "MigraPilot: Providers (Read-Only)"
+        "title": "MigraPilot (Developer): Providers (Read-Only)"
       },
       {
         "command": "migrapilot.aiUsage",
-        "title": "MigraPilot: AI Usage & Budget"
+        "title": "MigraPilot (Admin): AI Usage & Budget"
       },
       {
         "command": "migrapilot.explainSelection",
-        "title": "MigraPilot: Explain Selection"
+        "title": "MigraPilot: Explain Code"
       },
       {
         "command": "migrapilot.fixDiagnostics",
-        "title": "MigraPilot: Fix Diagnostics"
+        "title": "MigraPilot: Fix Problems in This File"
       },
       {
         "command": "migrapilot.diagnoseFailure",
-        "title": "MigraPilot: Diagnose Failure"
+        "title": "MigraPilot: Debug a Failure"
       },
       {
         "command": "migrapilot.generateTests",
-        "title": "MigraPilot: Generate Tests"
+        "title": "MigraPilot: Write Tests"
       },
       {
         "command": "migrapilot.generateCommit",
-        "title": "MigraPilot: Generate Commit Message"
+        "title": "MigraPilot: Write a Commit Message"
       },
       {
         "command": "migrapilot.setToken",
-        "title": "MigraPilot: Set Pilot Service Token"
+        "title": "MigraPilot (Admin): Set Pilot Service Token"
       },
       {
         "command": "migrapilot.clearToken",
-        "title": "MigraPilot: Clear Pilot Service Token"
+        "title": "MigraPilot (Admin): Clear Pilot Service Token"
       },
       {
         "command": "migrapilot.reviewApprovals",
@@ -178,23 +178,23 @@
       },
       {
         "command": "migrapilot.showBackendDiagnostics",
-        "title": "MigraPilot: Show Backend Selection Diagnostics"
+        "title": "MigraPilot (Developer): Backend Selection Diagnostics"
       },
       {
         "command": "migrapilot.governedCoding",
-        "title": "MigraPilot: Governed Coding Change"
+        "title": "MigraPilot: Make a Code Change"
       },
       {
         "command": "migrapilot.runCommand",
-        "title": "MigraPilot: Run Command"
+        "title": "MigraPilot: Run a Command"
       },
       {
         "command": "migrapilot.quickEdit",
-        "title": "MigraPilot: Quick Edit"
+        "title": "MigraPilot: Fix Code"
       },
       {
         "command": "migrapilot.gitOverview",
-        "title": "MigraPilot: Git Status & History"
+        "title": "MigraPilot: Review Changes"
       },
       {
         "command": "migrapilot.runTests",
@@ -303,6 +303,11 @@
           "type": "string",
           "default": "",
           "markdownDescription": "Absolute path to the capability contract **published by MigraAI-Brain** (`capabilities.json`). Leave empty to disable capability resolution; MigraPilot then reports qualified intelligence as UNAVAILABLE and refuses to substitute a model. Never point this at MigraAI-Engineer: Engineer is a build-time component and is absent at runtime."
+        },
+        "migrapilot.developerMode": {
+          "type": "boolean",
+          "default": false,
+          "description": "Show MigraPilot engineering surfaces: the Agent Workspace, Audit Trail and MigraAI Workspace tabs, service and model diagnostics, and the model-routing and evidence-source selectors. Off by default — the normal interface is the coding assistant, not the console. Nothing is disabled by leaving this off."
         }
       }
     },
@@ -319,6 +324,58 @@
         {
           "command": "migrapilot.dev.openClassicWorkspace",
           "when": "config.migrapilot.enableClassicViews"
+        },
+        {
+          "command": "migrapilot.health",
+          "when": "config.migrapilot.developerMode"
+        },
+        {
+          "command": "migrapilot.repairConnection",
+          "when": "config.migrapilot.developerMode"
+        },
+        {
+          "command": "migrapilot.showLogs",
+          "when": "config.migrapilot.developerMode"
+        },
+        {
+          "command": "migrapilot.productionDiagnostics",
+          "when": "config.migrapilot.developerMode"
+        },
+        {
+          "command": "migrapilot.showBackendDiagnostics",
+          "when": "config.migrapilot.developerMode"
+        },
+        {
+          "command": "migrapilot.providerStatus",
+          "when": "config.migrapilot.developerMode"
+        },
+        {
+          "command": "migrapilot.openWorkspacePanel",
+          "when": "config.migrapilot.developerMode"
+        },
+        {
+          "command": "migrapilot.openAgentMode",
+          "when": "config.migrapilot.developerMode"
+        },
+        {
+          "command": "migrapilot.executionPolicy",
+          "when": "config.migrapilot.developerMode"
+        },
+        {
+          "command": "migrapilot.aiUsage",
+          "when": "config.migrapilot.developerMode"
+        },
+        {
+          "command": "migrapilot.setToken",
+          "when": "config.migrapilot.developerMode"
+        },
+        {
+          "command": "migrapilot.clearToken",
+          "when": "config.migrapilot.developerMode"
+        },
+        {
+          "command": "migrapilot.pairAgentMode",
+          "when": "config.migrapilot.developerMode"
         }
       ],
       "editor/context": [

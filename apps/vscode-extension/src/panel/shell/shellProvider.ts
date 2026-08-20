@@ -40,7 +40,7 @@ import type { GovernedWorkflow } from '../../capability/workflowClassification.j
 import { AgentModeSessionGate } from '../agentModeModel.js';
 import { ActivityRecorder, type ContextFileEntry, type GitContextSnapshot } from './contextPanelModel.js';
 import { navigationHtml } from './navigationHtml.js';
-import { findNavAction, isShellTab, type ShellTabId } from './navigationModel.js';
+import { findNavAction, isShellTab, resolveTab, type ShellTabId } from './navigationModel.js';
 import { approvalConsentDetail, toProposalCard } from './proposalCardModel.js';
 import { toEvidenceExportSummary } from './runHistoryModel.js';
 import { shellHtml } from './shellHtml.js';
@@ -60,30 +60,27 @@ import {
   type WorkspaceActionDeps,
 } from './workspaceActions.js';
 import { isWorkspaceIntent, type WorkspaceIntent } from './workspaceTabModel.js';
-import { findWelcomeAction } from './welcomeModel.js';
+import { findWelcomeAction, resolveWelcomeEffect } from './welcomeModel.js';
+import { classify, isProductSurface } from './surfaceClassification.js';
 import type { Row } from './types.js';
 
 /** Commands the webview may dispatch. Every entry is an EXISTING registered
  * command; the shell adds no new execution surface. */
-const COMMAND_ALLOW_LIST = new Set([
-  'health',
-  'repairConnection',
-  'showLogs',
-  'showDiagnostics',
-  'productionDiagnostics',
-  'executionPolicy',
-  'providerStatus',
-  'aiUsage',
-  'explainSelection',
-  'fixDiagnostics',
-  'generateTests',
-  'generateCommit',
-  'reviewApprovals',
-  'showBackendDiagnostics',
-  'pairAgentMode',
-  'openWorkspacePanel',
-  'openAgentMode',
-]);
+/**
+ * Commands the shell may dispatch.
+ *
+ * Derived from the locked classification rather than hand-listed, because the two
+ * had already drifted: the hand-written set carried eight diagnostics commands and
+ * none of the lanes a user actually needs, so a `Run tests` card would have been
+ * refused by its own host and shipped as a dead button.
+ *
+ * `dispatchCommand` additionally refuses anything outside the product classes when
+ * developer mode is off, so a webview message cannot reach an engineering command
+ * that the interface deliberately does not offer.
+ */
+function isDispatchableCommand(command: string): boolean {
+  return classify('command', command) !== undefined;
+}
 
 const CONVERSATION_KEY = 'migrapilot.activeConversationId';
 const ACTIVE_RUN_KEY = 'migrapilot.shell.activeCommandRun';
@@ -267,7 +264,15 @@ export class MigraPilotShell {
     this.post({ type: 'injectMessage', text, submit });
   }
 
+  /** Engineering surfaces are revealed only by explicit opt-in. Default: off. */
+  private get developerMode(): boolean {
+    return vscode.workspace.getConfiguration('migrapilot').get<boolean>('developerMode', false) === true;
+  }
+
   showTab(tab: ShellTabId): void {
+    // A tab the current mode does not render would leave the strip pointing at an
+    // element that is not in the document, which reads as a blank product.
+    tab = resolveTab(tab, this.developerMode);
     this.tab = tab;
     this.post({ type: 'tab', tab });
     // Revealing a tab must load its data on EVERY path. The webview only reports
@@ -301,9 +306,10 @@ export class MigraPilotShell {
       nonce,
       csp,
       logoUri: logo.toString(),
-      initialTab: this.tab,
-      script: shellScript(),
+      initialTab: resolveTab(this.tab, this.developerMode),
+      script: shellScript(this.developerMode),
       compact,
+      developerMode: this.developerMode,
     });
   }
 
@@ -778,6 +784,7 @@ export class MigraPilotShell {
     return {
       now: Date.now(),
       tab: this.tab,
+      developerMode: this.developerMode,
       brainEndpoint: this.deps.brainClient.baseUrl,
       ...(this.brainHealth ? { brainHealth: this.brainHealth } : {}),
       ...(this.brainError ? { brainError: this.brainError } : {}),
@@ -1128,8 +1135,14 @@ export class MigraPilotShell {
   }
 
   private async onWelcomeAction(id: string | undefined): Promise<void> {
-    const action = id ? findWelcomeAction(id) : undefined;
-    if (!action) return;
+    const found = id ? findWelcomeAction(id) : undefined;
+    if (!found) return;
+    // "Explain code" with nothing selected must not dead-end on a warning toast, so
+    // the host resolves the effect against the editor state it can actually see.
+    const editor = vscode.window.activeTextEditor;
+    const hasSelection = editor !== undefined && !editor.selection.isEmpty
+      && editor.document.getText(editor.selection).trim().length > 0;
+    const action = { ...found, effect: resolveWelcomeEffect(found.effect, { hasSelection }) };
     if (action.effect.kind === 'command') {
       await this.dispatchCommand(action.effect.command);
       return;
@@ -1150,8 +1163,12 @@ export class MigraPilotShell {
 
   private async dispatchCommand(command: string | undefined): Promise<void> {
     if (!command) return;
-    if (!COMMAND_ALLOW_LIST.has(command)) {
-      this.deps.output.appendLine(`[shell] refused command not on the allow-list: ${command}`);
+    if (!isDispatchableCommand(command)) {
+      this.deps.output.appendLine(`[shell] refused unclassified command: ${command}`);
+      return;
+    }
+    if (!this.developerMode && !isProductSurface('command', command)) {
+      this.deps.output.appendLine(`[shell] refused engineering command in product mode: ${command}`);
       return;
     }
     await vscode.commands.executeCommand(`migrapilot.${command}`);

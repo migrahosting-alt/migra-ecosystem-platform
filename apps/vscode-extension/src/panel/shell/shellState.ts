@@ -24,6 +24,7 @@ import {
   toContextFilesPanel,
   toRecentActivityPanel,
   toWorkspaceContextPanel,
+  toProductBrainPanel,
   withHistoryIntegrity,
 } from './contextPanelModel.js';
 import {
@@ -117,6 +118,8 @@ export interface ShellStateInput {
   brainEndpoint: string;
   brainHealth?: BrainHealthSnapshot;
   brainError?: string;
+  /** Reveal engineering state. Absent = product mode, which is how it ships. */
+  developerMode?: boolean;
   git?: GitContextSnapshot;
   workspaceName?: string;
   conversations?: readonly ConversationMeta[];
@@ -162,7 +165,10 @@ export function buildShellState(input: ShellStateInput): ShellState {
     policy,
   } = input;
 
-  const brain = toBrainHealthPanel(brainEndpoint, brainHealth, brainError);
+  const fullBrain = toBrainHealthPanel(brainEndpoint, brainHealth, brainError);
+  // Product mode never posts the endpoint, version, schema version or retention
+  // worker to the webview — not merely leaves them undrawn.
+  const brain = input.developerMode === true ? fullBrain : toProductBrainPanel(fullBrain);
   const connected = !brainError && Boolean(brainHealth);
   const schemaVersion = brainHealth?.operational?.schemaVersion ?? brainHealth?.readiness?.schemaVersion;
 
@@ -218,7 +224,7 @@ export function buildShellState(input: ShellStateInput): ShellState {
       ...(schemaVersion !== undefined ? { schemaVersion } : {}),
       ...(policy ? { policy } : {}),
       agentModeActive,
-    }),
+    }, input.developerMode === true),
     composer: { connected, voiceSupported: input.voiceSupported },
   };
 }

@@ -13,7 +13,8 @@ import {
   toWorkspaceTab,
 } from '../../panel/shell/workspaceTabModel.js';
 import { buildShellState, type ShellStateInput } from '../../panel/shell/shellState.js';
-import { SHELL_TABS, isShellTab } from '../../panel/shell/navigationModel.js';
+import { SHELL_TABS, isShellTab, shellTabs } from '../../panel/shell/navigationModel.js';
+import { isProductSurface } from '../../panel/shell/surfaceClassification.js';
 import { knownIcons } from '../../panel/shell/icons.js';
 
 const NOW = 1_700_000_000_000;
@@ -284,13 +285,18 @@ test('the workspace controller is injected LAZILY, not captured at construction'
 
 // ── Shell integration ────────────────────────────────────────────────────────
 
-test('Workspace is the fifth tab and resolves as a real tab id', () => {
+test('Workspace is a DEVELOPER tab: real, reachable, and not in the product', () => {
   assert.deepEqual(
     SHELL_TABS.map((tab) => tab.label),
-    ['MigraPilot Chat', 'Agent Workspace', 'Run Diff', 'Audit Trail', 'Workspace'],
+    ['Ask', 'Changes', 'Agent Workspace', 'Audit Trail', 'Workspace'],
   );
   assert.equal(isShellTab('workspace'), true);
   assert.ok(knownIcons().includes('database'), 'the Workspace tab icon must exist');
+  // Index internals — chunks, embedding model, schema, engine version — are
+  // engineering. The tab and its backend are untouched; it is simply not shipped
+  // as part of the normal interface.
+  assert.equal(isProductSurface('tab', 'workspace'), false);
+  assert.ok(shellTabs(true).some((tab) => tab.id === 'workspace'), 'developer mode still has it');
 });
 
 function baseInput(overrides: Partial<ShellStateInput> = {}): ShellStateInput {

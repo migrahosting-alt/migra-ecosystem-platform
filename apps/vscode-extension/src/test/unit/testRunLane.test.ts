@@ -219,7 +219,9 @@ test('REGISTRATION: migrapilot.runTests is contributed AND wired to its handler'
   const source = readFileSync(path.resolve(__dirname, '../../../src/extension.ts'), 'utf8');
   assert.match(
     source,
-    /registerCommand\('migrapilot\.runTests',\s*\(\)\s*=>\s*runTests\(/,
+    // Tolerates line wrapping, but still requires the handler to BE runTests —
+    // the quickEdit defect passed a compile and registered nothing at all.
+    /registerCommand\(\s*'migrapilot\.runTests',\s*(?:\/\/[^\n]*\n\s*)*\(\)\s*=>\s*(?:\n\s*)?(?:\/\/[^\n]*\n\s*)*runTests\(/,
     'must be registered and wired to runTests()',
   );
 });

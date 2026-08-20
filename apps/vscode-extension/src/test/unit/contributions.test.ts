@@ -37,10 +37,12 @@ test('the compact navigation view is the FIRST view, so the activity-bar icon fo
   assert.equal(views[0]?.when, undefined, 'the launcher must never be conditionally hidden');
 });
 
-test('the Command Center is a first-class command', () => {
+test('the product surface is a first-class command, named for the product', () => {
   assert.ok(commands.includes('migrapilot.openStudio'));
   const entry = manifest.contributes.commands.find((c) => c.command === 'migrapilot.openStudio');
-  assert.match(entry?.title ?? '', /Command Center/i);
+  // "Command Center" was engineering vocabulary for what is simply MigraPilot.
+  assert.equal(entry?.title, 'MigraPilot: Open MigraPilot');
+  assert.ok(!/command center|console|studio/i.test(entry?.title ?? ''));
 });
 
 // ── Classic surfaces are not default-visible ─────────────────────────────────

@@ -9,7 +9,9 @@ import {
   composerState,
   matchSlashCommands,
   shouldDispatchSubmit,
+  slashCommandsFor,
 } from '../../panel/shell/composerModel.js';
+import { isProductSurface } from '../../panel/shell/surfaceClassification.js';
 
 function input(overrides: Partial<Parameters<typeof composerState>[0]> = {}) {
   return { inFlight: false, connected: true, voiceSupported: true, text: '', attachmentCount: 0, ...overrides };
@@ -83,9 +85,35 @@ test('every slash command maps to a real command, prompt, or shell action', () =
   }
 });
 
+test('THE PRODUCT PALETTE OFFERS NO ENGINEERING COMMAND', () => {
+  const product = slashCommandsFor(false).map((c) => c.name);
+  for (const engineering of ['/agent', '/history', '/diagnostics', '/health', '/policy', '/approved', '/workspace', '/noevidence']) {
+    assert.ok(!product.includes(engineering), `${engineering} must not be typeable in the normal product`);
+  }
+  // The journey IS typeable, all of it.
+  for (const outcome of ['/explain', '/fix', '/edit', '/review', '/changes', '/tests', '/debug', '/run', '/commit']) {
+    assert.ok(product.includes(outcome), `${outcome} must be offered`);
+  }
+  // Developer mode still has everything — nothing was deleted.
+  assert.equal(slashCommandsFor(true).length, SLASH_COMMANDS.length);
+});
+
+test('every product slash command reaches a command the product actually offers', () => {
+  for (const command of slashCommandsFor(false)) {
+    if (command.effect.kind === 'command') {
+      assert.ok(isProductSurface('command', command.effect.command), `${command.name} → ${command.effect.command}`);
+    }
+    if (command.effect.kind === 'shell' && command.effect.action.startsWith('tab:')) {
+      const tab = command.effect.action.slice(4);
+      assert.ok(isProductSurface('tab', tab), `${command.name} opens the ${tab} tab`);
+    }
+  }
+});
+
 test('slash matching is prefix-first and falls back to description search', () => {
   assert.deepEqual(matchSlashCommands('/exp').map((c) => c.name), ['/explain']);
-  assert.deepEqual(matchSlashCommands('/hist').map((c) => c.name), ['/history']);
+  // Prefix first, then description: `/changes` is "Git status, history and blame".
+  assert.deepEqual(matchSlashCommands('/hist').map((c) => c.name), ['/changes', '/history']);
   assert.equal(matchSlashCommands('/').length, SLASH_COMMANDS.length, 'a bare slash lists everything');
   assert.ok(matchSlashCommands('/commit').some((c) => c.name === '/commit'));
   assert.ok(matchSlashCommands('/evidence').length === 0 || matchSlashCommands('/evidence').length > 0);

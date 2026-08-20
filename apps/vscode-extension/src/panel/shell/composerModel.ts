@@ -87,30 +87,52 @@ export interface SlashCommand {
   args: string;
   description: string;
   effect: { kind: 'command'; command: string } | { kind: 'prompt'; prefix: string } | { kind: 'shell'; action: string };
+  /**
+   * `developer` keeps the entry out of the normal palette.
+   *
+   * The palette is a real entry point, not decoration: `/agent` opened the Agent
+   * Workspace and `/noevidence` changed a governance mode. Hiding the tab while
+   * leaving its slash command typeable would have moved the console rather than
+   * withdrawn it.
+   */
+  audience?: 'product' | 'developer';
 }
 
 export const SLASH_COMMANDS: readonly SlashCommand[] = [
+  // ── The product: the journey, typed ───────────────────────────────────────
   { name: '/explain', args: '<code>', description: 'Explain the current selection', effect: { kind: 'command', command: 'explainSelection' } },
-  { name: '/fix', args: '<issue>', description: 'Fix reported diagnostics', effect: { kind: 'command', command: 'fixDiagnostics' } },
-  { name: '/test', args: '<file>', description: 'Generate tests', effect: { kind: 'command', command: 'generateTests' } },
-  { name: '/commit', args: '', description: 'Generate a commit message', effect: { kind: 'command', command: 'generateCommit' } },
-  { name: '/diagnostics', args: '', description: 'Show workspace diagnostics', effect: { kind: 'command', command: 'showDiagnostics' } },
-  { name: '/health', args: '', description: 'Check Brain service health', effect: { kind: 'command', command: 'health' } },
-  { name: '/policy', args: '', description: 'Choose the execution policy', effect: { kind: 'command', command: 'executionPolicy' } },
-  { name: '/approved', args: '', description: 'Answer only from the approved semantic index', effect: { kind: 'shell', action: 'sourceMode:approved' } },
-  { name: '/workspace', args: '', description: 'Answer from the current checkout, not the approved index', effect: { kind: 'shell', action: 'sourceMode:workspace' } },
-  { name: '/noevidence', args: '', description: 'Answer without reading the repository at all', effect: { kind: 'shell', action: 'sourceMode:none' } },
-  { name: '/agent', args: '', description: 'Open the governed Agent Workspace', effect: { kind: 'shell', action: 'tab:agent' } },
-  { name: '/history', args: '', description: 'Open the evidence-only Audit Trail', effect: { kind: 'shell', action: 'tab:audit' } },
+  { name: '/fix', args: '<issue>', description: 'Fix the problems reported in this file', effect: { kind: 'command', command: 'fixDiagnostics' } },
+  { name: '/edit', args: '<change>', description: 'Describe a change and review the diff', effect: { kind: 'command', command: 'quickEdit' } },
   { name: '/refactor', args: '<code>', description: 'Refactor the selection', effect: { kind: 'prompt', prefix: 'Refactor this code: ' } },
   { name: '/review', args: '', description: 'Review the working changes', effect: { kind: 'shell', action: 'tab:diff' } },
+  { name: '/changes', args: '', description: 'Git status, history and blame', effect: { kind: 'command', command: 'gitOverview' } },
+  { name: '/tests', args: '', description: 'Run the project test suite', effect: { kind: 'command', command: 'runTests' } },
+  { name: '/test', args: '<file>', description: 'Write tests for this file', effect: { kind: 'command', command: 'generateTests' } },
+  { name: '/debug', args: '', description: 'Diagnose why something failed', effect: { kind: 'command', command: 'diagnoseFailure' } },
+  { name: '/run', args: '<command>', description: 'Run a project command', effect: { kind: 'command', command: 'runCommand' } },
+  { name: '/commit', args: '', description: 'Write a commit message', effect: { kind: 'command', command: 'generateCommit' } },
   { name: '/new', args: '', description: 'Start a new conversation', effect: { kind: 'shell', action: 'newChat' } },
+  // ── Engineering: developer mode only ──────────────────────────────────────
+  { name: '/diagnostics', args: '', description: 'Show workspace diagnostics', effect: { kind: 'command', command: 'showDiagnostics' }, audience: 'developer' },
+  { name: '/health', args: '', description: 'Check Brain service health', effect: { kind: 'command', command: 'health' }, audience: 'developer' },
+  { name: '/policy', args: '', description: 'Choose the execution policy', effect: { kind: 'command', command: 'executionPolicy' }, audience: 'developer' },
+  { name: '/approved', args: '', description: 'Answer only from the approved semantic index', effect: { kind: 'shell', action: 'sourceMode:approved' }, audience: 'developer' },
+  { name: '/workspace', args: '', description: 'Answer from the current checkout, not the approved index', effect: { kind: 'shell', action: 'sourceMode:workspace' }, audience: 'developer' },
+  { name: '/noevidence', args: '', description: 'Answer without reading the repository at all', effect: { kind: 'shell', action: 'sourceMode:none' }, audience: 'developer' },
+  { name: '/agent', args: '', description: 'Open the governed Agent Workspace', effect: { kind: 'shell', action: 'tab:agent' }, audience: 'developer' },
+  { name: '/history', args: '', description: 'Open the evidence-only Audit Trail', effect: { kind: 'shell', action: 'tab:audit' }, audience: 'developer' },
 ];
 
-export function matchSlashCommands(query: string): SlashCommand[] {
+/** The palette for a mode. Product mode never sees the engineering entries. */
+export function slashCommandsFor(developerMode: boolean): SlashCommand[] {
+  return SLASH_COMMANDS.filter((command) => developerMode || command.audience !== 'developer');
+}
+
+export function matchSlashCommands(query: string, developerMode = true): SlashCommand[] {
+  const catalogue = slashCommandsFor(developerMode);
   const needle = query.replace(/^\//, '').toLowerCase();
-  if (!needle) return [...SLASH_COMMANDS];
-  return SLASH_COMMANDS.filter(
+  if (!needle) return catalogue;
+  return catalogue.filter(
     (command) => command.name.slice(1).toLowerCase().startsWith(needle) || command.description.toLowerCase().includes(needle),
   );
 }

@@ -7,8 +7,9 @@
 
 import { icon } from './icons.js';
 import { COMPOSER_PLACEHOLDER, ROUTING_OPTIONS, LIVE_MODE_OPTIONS, SOURCE_MODE_OPTIONS } from './composerModel.js';
-import { HEADER_ACTIONS, SHELL_SUBTITLE, SHELL_TITLE, WELCOME_ACTIONS, WELCOME_SUBTITLE } from './welcomeModel.js';
-import { SHELL_TABS, type ShellTabId } from './navigationModel.js';
+import { headerActions as headerActionsFor, SHELL_SUBTITLE, SHELL_TITLE, WELCOME_ACTIONS, WELCOME_SUBTITLE } from './welcomeModel.js';
+import { shellTabs, type ShellTabId } from './navigationModel.js';
+import { isProductSurface, type SurfaceKind } from './surfaceClassification.js';
 import { shellStyles } from './shellStyles.js';
 
 export interface ShellHtmlOptions {
@@ -23,6 +24,15 @@ export interface ShellHtmlOptions {
   script: string;
   /** Compact mode hint for a narrow host (sidebar) — CSS still decides layout. */
   compact: boolean;
+  /**
+   * Reveal engineering surfaces.
+   *
+   * OFF on a normal install, and the default here, so a caller that forgets the
+   * flag ships the product experience rather than the console. Nothing is deleted
+   * when it is off — the tabs, panels and selectors simply are not emitted, and
+   * the backends behind them are untouched.
+   */
+  developerMode?: boolean;
 }
 
 function escapeHtml(value: string): string {
@@ -41,8 +51,8 @@ function brandMark(logoUri: string | undefined, size: 'sm' | 'lg'): string {
   return icon('rocket');
 }
 
-function tabStrip(initialTab: ShellTabId): string {
-  return SHELL_TABS.map(
+function tabStrip(initialTab: ShellTabId, developerMode: boolean): string {
+  return shellTabs(developerMode).map(
     (tab) => `<button class="tab" role="tab" id="tabbtn-${tab.id}" data-tab="${tab.id}"
         aria-selected="${tab.id === initialTab ? 'true' : 'false'}"
         aria-controls="panel-${tab.id}" tabindex="${tab.id === initialTab ? '0' : '-1'}">
@@ -51,8 +61,8 @@ function tabStrip(initialTab: ShellTabId): string {
   ).join('');
 }
 
-function headerActions(): string {
-  return HEADER_ACTIONS.map(
+function headerActions(developerMode: boolean): string {
+  return headerActionsFor(developerMode).map(
     (action) => `<button class="hbtn a-${action.accent}" data-header-action="${action.id}" title="${escapeHtml(action.label)}">
         ${icon(action.icon)}<span class="hlabel">${escapeHtml(action.label)}</span>
       </button>`,
@@ -97,6 +107,10 @@ function liveModeOptions(): string {
 
 export function shellHtml(options: ShellHtmlOptions): string {
   const { nonce, csp, logoUri, initialTab, script, compact } = options;
+  const developerMode = options.developerMode === true;
+  /** Emit `markup` only when this surface belongs in the current mode. */
+  const only = (kind: SurfaceKind, id: string, markup: string): string =>
+    developerMode || isProductSurface(kind, id) ? markup : '';
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -118,20 +132,20 @@ export function shellHtml(options: ShellHtmlOptions): string {
     </span>
     <span id="brain-badge" class="badge b-muted" role="status" aria-live="polite"><span class="dot"></span><span id="brain-badge-text">Checking…</span></span>
     <span class="spacer"></span>
-    <span id="hdr-actions">${headerActions()}</span>
+    <span id="hdr-actions">${headerActions(developerMode)}</span>
     <button class="iconbtn" id="ctx-toggle" aria-pressed="true" aria-controls="context" title="Toggle context panel">${icon('layout-sidebar-right')}</button>
   </header>
 
-  <div id="tabs" role="tablist" aria-label="MigraPilot surfaces">${tabStrip(initialTab)}</div>
+  <div id="tabs" role="tablist" aria-label="MigraPilot surfaces">${tabStrip(initialTab, developerMode)}</div>
 
   <div class="body" id="body">
 
     <aside id="nav-drawer" aria-label="MigraPilot navigation">
       <button class="newchat" data-shell-action="newChat">${icon('add')}<span>New Chat</span></button>
       <section class="navsec"><h3><span>Conversations</span></h3><div id="nav-conversations"></div></section>
-      <section class="navsec"><h3><span>Agent Mode</span><span id="nav-agent-status" class="badge b-muted">OFF</span></h3><div id="nav-agent"></div></section>
-      <section class="navsec"><h3><span>Workspace</span></h3><div id="nav-workspace"></div></section>
-      <section class="navsec"><h3><span>Tools &amp; Services</span></h3><div id="nav-tools"></div></section>
+      <section class="navsec"><h3><span>Current workspace</span></h3><div id="nav-workspace"></div></section>
+      ${only('nav-section', 'nav-agent', '<section class="navsec"><h3><span>Agent Mode</span><span id="nav-agent-status" class="badge b-muted">OFF</span></h3><div id="nav-agent"></div></section>')}
+      ${only('nav-section', 'nav-tools', '<section class="navsec"><h3><span>Tools &amp; Services</span></h3><div id="nav-tools"></div></section>')}
     </aside>
 
     <main id="main">
@@ -145,31 +159,25 @@ export function shellHtml(options: ShellHtmlOptions): string {
           <div class="wcards">${welcomeCards()}</div>
         </div>
         <div id="thread" role="log" aria-label="Conversation" aria-live="polite" aria-relevant="additions text"></div>
-        <div id="chat-agent"></div>
-      </section>
-
-      <section class="tabpanel" id="panel-agent" role="tabpanel" aria-labelledby="tabbtn-agent" tabindex="0">
-        <div id="agent-workspace"></div>
+        ${only('tab', 'agent', '<div id="chat-agent"></div>')}
       </section>
 
       <section class="tabpanel" id="panel-diff" role="tabpanel" aria-labelledby="tabbtn-diff" tabindex="0">
         <div id="run-diff"></div>
       </section>
 
-      <section class="tabpanel" id="panel-audit" role="tabpanel" aria-labelledby="tabbtn-audit" tabindex="0">
-        <div id="audit-trail"></div>
-      </section>
+      ${only('tab', 'agent', '<section class="tabpanel" id="panel-agent" role="tabpanel" aria-labelledby="tabbtn-agent" tabindex="0"><div id="agent-workspace"></div></section>')}
 
-      <section class="tabpanel" id="panel-workspace" role="tabpanel" aria-labelledby="tabbtn-workspace" tabindex="0">
-        <div id="workspace-tab"></div>
-      </section>
+      ${only('tab', 'audit', '<section class="tabpanel" id="panel-audit" role="tabpanel" aria-labelledby="tabbtn-audit" tabindex="0"><div id="audit-trail"></div></section>')}
+
+      ${only('tab', 'workspace', '<section class="tabpanel" id="panel-workspace" role="tabpanel" aria-labelledby="tabbtn-workspace" tabindex="0"><div id="workspace-tab"></div></section>')}
 
     </main>
 
     <aside id="context" aria-label="Workspace and run context">
       <div id="ctx-workspace" class="panel"></div>
-      <div id="ctx-brain" class="panel"></div>
-      <div id="ctx-agent" class="panel"></div>
+      ${only('context-panel', 'ctx-brain', '<div id="ctx-brain" class="panel"></div>')}
+      ${only('context-panel', 'ctx-agent', '<div id="ctx-agent" class="panel"></div>')}
       <div id="ctx-run" class="panel"></div>
       <div id="ctx-files" class="panel"></div>
       <div id="ctx-activity" class="panel"></div>
@@ -190,12 +198,12 @@ export function shellHtml(options: ShellHtmlOptions): string {
         <button class="ctool" id="cmic" title="Voice input">${icon('mic')}<span>Voice</span></button>
         <button class="ctool" id="ccmd" title="Slash commands">${icon('terminal-cmd')}<span>Commands</span></button>
         <span class="spacer"></span>
-        <label class="sr-only" for="csource">Evidence source</label>
-        <select id="csource" title="Where answers may draw evidence from">${sourceModeOptions()}</select>
+        ${only('composer-control', 'csource', `<label class="sr-only" for="csource">Evidence source</label>
+        <select id="csource" title="Where answers may draw evidence from">${sourceModeOptions()}</select>`)}
         <label class="sr-only" for="clive">Live knowledge</label>
         <select id="clive" title="Whether this turn may consult information outside the repository">${liveModeOptions()}</select>
-        <label class="sr-only" for="croute">Model routing</label>
-        <select id="croute" title="Model routing for the next message">${routingOptions()}</select>
+        ${only('composer-control', 'croute', `<label class="sr-only" for="croute">Model routing</label>
+        <select id="croute" title="Model routing for the next message">${routingOptions()}</select>`)}
         <button id="csend" title="Send (Enter)" aria-label="Send message">${icon('send')}</button>
         <button id="cstop" title="Stop generating" aria-label="Stop generating">${icon('stop')}</button>
       </div>

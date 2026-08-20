@@ -4,8 +4,9 @@ import test from 'node:test';
 import type { AgentModeCommandRunView } from '@migrapilot/protocol';
 import { buildShellState, type ShellStateInput } from '../../panel/shell/shellState.js';
 import { ActivityRecorder, toBrainHealthPanel, toContextFilesPanel, toRecentActivityPanel, toWorkspaceContextPanel } from '../../panel/shell/contextPanelModel.js';
-import { SHELL_TABS, isShellTab, toToolsStatusList } from '../../panel/shell/navigationModel.js';
-import { WELCOME_ACTIONS, HEADER_ACTIONS } from '../../panel/shell/welcomeModel.js';
+import { SHELL_TABS, isShellTab, resolveTab, shellTabs, toToolsStatusList } from '../../panel/shell/navigationModel.js';
+import { WELCOME_ACTIONS, HEADER_ACTIONS, headerActions, resolveWelcomeEffect } from '../../panel/shell/welcomeModel.js';
+import { isProductSurface } from '../../panel/shell/surfaceClassification.js';
 import { knownIcons } from '../../panel/shell/icons.js';
 import { display, formatDuration, relativeAge, shortenId, UNAVAILABLE } from '../../panel/shell/types.js';
 
@@ -265,15 +266,15 @@ test('tool statuses never fabricate Online / Ready / Healthy', () => {
 
 // ── Status summary ───────────────────────────────────────────────────────────
 
-test('the status row reflects connection, schema, policy and Agent Mode', () => {
-  const connected = buildShellState(
-    baseInput({
-      brainHealth: HEALTHY,
-      git: { repository: 'repo', branch: 'phase-1/canonical-vscode-extension', clean: true, changedFileCount: 0 },
-      policy: 'Local First',
-      agentModeActive: true,
-    }),
-  );
+const statusInput = {
+  brainHealth: HEALTHY,
+  git: { repository: 'repo', branch: 'phase-1/canonical-vscode-extension', clean: true, changedFileCount: 0 },
+  policy: 'Local First',
+  agentModeActive: true,
+};
+
+test('DEVELOPER status row reflects connection, schema, policy and Agent Mode', () => {
+  const connected = buildShellState(baseInput({ ...statusInput, developerMode: true }));
   const items = new Map(connected.status.items.map((item) => [item.label, [item.value, item.tone]]));
   assert.deepEqual(items.get('Branch'), ['phase-1/canonical-vscode-extension', 'info']);
   assert.deepEqual(items.get('MigraPilot'), ['Connected', 'ok']);
@@ -282,11 +283,34 @@ test('the status row reflects connection, schema, policy and Agent Mode', () => 
   assert.deepEqual(items.get('Policy'), ['Local First', 'info']);
   assert.deepEqual(items.get('Agent Mode'), ['Governed', 'governed']);
 
-  const offline = buildShellState(baseInput({ brainError: 'unreachable' }));
+  const offline = buildShellState(baseInput({ brainError: 'unreachable', developerMode: true }));
   const offlineItems = new Map(offline.status.items.map((item) => [item.label, [item.value, item.tone]]));
   assert.deepEqual(offlineItems.get('MigraPilot'), ['Disconnected', 'error']);
   assert.deepEqual(offlineItems.get('Brain'), ['Unknown', 'muted']);
   assert.equal(offline.composer.connected, false, 'the composer must be blocked while disconnected');
+});
+
+test('THE PRODUCT STATUS ROW ANSWERS TWO QUESTIONS: where, and is it ready', () => {
+  // Found by looking at the running product: the row read
+  // "Brain: Healthy · Schema: v0 · Policy: auto · Agent Mode: Off" — four pieces of
+  // backend state on the line a user reads while writing code.
+  const connected = buildShellState(baseInput(statusInput));
+  assert.deepEqual(
+    connected.status.items.map((item) => item.label),
+    ['Branch', 'MigraPilot'],
+  );
+  const items = new Map(connected.status.items.map((item) => [item.label, [item.value, item.tone]]));
+  assert.deepEqual(items.get('Branch'), ['phase-1/canonical-vscode-extension', 'info']);
+  assert.deepEqual(items.get('MigraPilot'), ['Ready', 'ok'], 'readiness, not connection topology');
+
+  const offline = buildShellState(baseInput({ brainError: 'unreachable' }));
+  const offlineItems = new Map(offline.status.items.map((item) => [item.label, [item.value, item.tone]]));
+  assert.deepEqual(offlineItems.get('MigraPilot'), ['Not ready', 'error']);
+  assert.equal(offlineItems.has('Brain'), false, 'no service lifecycle on the product surface');
+  assert.equal(offlineItems.has('Schema'), false);
+  assert.equal(offlineItems.has('Policy'), false);
+  assert.equal(offlineItems.has('Agent Mode'), false);
+  assert.equal(offline.composer.connected, false, 'the composer is still blocked while disconnected');
 });
 
 // ── Run diff ─────────────────────────────────────────────────────────────────
@@ -350,9 +374,8 @@ test('the activity feed is bounded, newest-first, and empty until something happ
 
 // ── Tabs, welcome actions, icons ─────────────────────────────────────────────
 
-test('the tab set matches the approved contract and validates', () => {
-  // Four accepted tabs, plus Workspace from the MigraAI Workspace consolidation.
-  assert.deepEqual(SHELL_TABS.map((tab) => tab.label), ['MigraPilot Chat', 'Agent Workspace', 'Run Diff', 'Audit Trail', 'Workspace']);
+test('the tab set is journey-ordered and validates', () => {
+  assert.deepEqual(SHELL_TABS.map((tab) => tab.label), ['Ask', 'Changes', 'Agent Workspace', 'Audit Trail', 'Workspace']);
   assert.equal(isShellTab('workspace'), true);
   assert.equal(isShellTab('chat'), true);
   assert.equal(isShellTab('audit'), true);
@@ -360,20 +383,63 @@ test('the tab set matches the approved contract and validates', () => {
   assert.equal(isShellTab(undefined), false);
 });
 
-test('the six welcome cards match the mockup and every one has a real effect', () => {
+test('PRODUCT MODE SHOWS TWO TABS: ask, and see what changed', () => {
+  assert.deepEqual(shellTabs(false).map((tab) => tab.id), ['chat', 'diff']);
+  // The engineering tabs are not deleted — developer mode still has all five.
+  assert.deepEqual(shellTabs(true).map((tab) => tab.id), ['chat', 'diff', 'agent', 'audit', 'workspace']);
+});
+
+test('product mode never lands on a tab it does not render', () => {
+  for (const engineering of ['agent', 'audit', 'workspace'] as const) {
+    assert.equal(resolveTab(engineering, false), 'chat', `${engineering} must fall back to Ask`);
+    assert.equal(resolveTab(engineering, true), engineering, 'developer mode keeps it');
+  }
+  assert.equal(resolveTab('diff', false), 'diff');
+});
+
+test('THE SIX ACTIONS ARE OUTCOMES, and every one has a real effect', () => {
   assert.deepEqual(WELCOME_ACTIONS.map((action) => action.title), [
-    'Build or Fix Code',
-    'Inspect & Analyze',
-    'Run Agent Task',
-    'Diagnose System',
-    'Review Changes',
-    'Run History',
+    'Explain code',
+    'Fix code',
+    'Plan a task',
+    'Review changes',
+    'Run tests',
+    'Debug a failure',
   ]);
   for (const action of WELCOME_ACTIONS) {
-    assert.ok(action.effect.kind === 'command' || action.effect.kind === 'prompt' || action.effect.kind === 'tab');
-    if (action.effect.kind === 'tab') assert.equal(isShellTab(action.effect.tab), true, `${action.id} targets a real tab`);
-    if (action.effect.kind === 'prompt') assert.ok(action.effect.prompt.length > 10);
+    const effect = resolveWelcomeEffect(action.effect, { hasSelection: true });
+    assert.ok(effect.kind === 'command' || effect.kind === 'prompt' || effect.kind === 'tab');
+    if (effect.kind === 'tab') assert.equal(isShellTab(effect.tab), true, `${action.id} targets a real tab`);
+    if (effect.kind === 'prompt') assert.ok(effect.prompt.length > 10);
+    // Every card must reach a command the product actually offers.
+    if (effect.kind === 'command') {
+      assert.ok(isProductSurface('command', effect.command), `${action.id} must dispatch a product command`);
+    }
   }
+});
+
+test('no card opens an engineering console', () => {
+  const banned = ['showDiagnostics', 'providerStatus', 'health', 'openWorkspacePanel', 'openAgentMode'];
+  for (const action of WELCOME_ACTIONS) {
+    const effect = resolveWelcomeEffect(action.effect, { hasSelection: true });
+    if (effect.kind === 'command') assert.ok(!banned.includes(effect.command), `${action.id} opens ${effect.command}`);
+    if (effect.kind === 'tab') assert.ok(isProductSurface('tab', effect.tab), `${action.id} opens the ${effect.tab} tab`);
+  }
+});
+
+test('"Explain code" with nothing selected asks about the repository instead of dead-ending', () => {
+  const explain = WELCOME_ACTIONS.find((action) => action.id === 'explain');
+  assert.ok(explain);
+  const withSelection = resolveWelcomeEffect(explain.effect, { hasSelection: true });
+  assert.deepEqual(withSelection, { kind: 'command', command: 'explainSelection' });
+  const without = resolveWelcomeEffect(explain.effect, { hasSelection: false });
+  assert.equal(without.kind, 'prompt');
+  if (without.kind === 'prompt') assert.match(without.prompt, /repository/i);
+});
+
+test('the header bar drops the engineering controls in product mode', () => {
+  assert.deepEqual(headerActions(false).map((a) => a.id), ['newTask', 'settings']);
+  assert.deepEqual(headerActions(true).map((a) => a.id), ['newTask', 'settings', 'agentMode', 'audit', 'runHistory']);
 });
 
 test('every icon referenced by a model exists in the icon set', () => {

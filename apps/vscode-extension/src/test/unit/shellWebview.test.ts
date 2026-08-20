@@ -6,14 +6,20 @@ import { shellHtml } from '../../panel/shell/shellHtml.js';
 import { shellStyles } from '../../panel/shell/shellStyles.js';
 import { navigationHtml, navigationScript } from '../../panel/shell/navigationHtml.js';
 import { icon, knownIcons } from '../../panel/shell/icons.js';
-import { NAV_ACTIONS, SHELL_TABS, findNavAction, navListActions, navPrimaryAction } from '../../panel/shell/navigationModel.js';
-import { SLASH_COMMANDS } from '../../panel/shell/composerModel.js';
+import { NAV_ACTIONS, SHELL_TABS, findNavAction, navListActions, navPrimaryAction, shellTabs } from '../../panel/shell/navigationModel.js';
+import { SLASH_COMMANDS, slashCommandsFor } from '../../panel/shell/composerModel.js';
 
 const NONCE = 'test-nonce-abcdefgh';
 const CSP = "default-src 'none'; script-src 'nonce-test-nonce-abcdefgh'";
 
+/** The document a NORMAL install renders. Developer mode is off, as it ships. */
 function html(): string {
   return shellHtml({ nonce: NONCE, csp: CSP, logoUri: 'https://file%2B.vscode-resource/logo.svg', initialTab: 'chat', script: shellScript(), compact: false });
+}
+
+/** The same document with engineering surfaces revealed. */
+function devHtml(initialTab: 'chat' | 'diff' | 'agent' | 'audit' | 'workspace' = 'chat'): string {
+  return shellHtml({ nonce: NONCE, csp: CSP, logoUri: 'https://file%2B.vscode-resource/logo.svg', initialTab, script: shellScript(true), compact: false, developerMode: true });
 }
 
 /**
@@ -57,11 +63,19 @@ test('the shell script runs in strict mode inside an IIFE (no globals leaked)', 
   assert.match(script, /\}\)\(\);$/);
 });
 
-test('the slash catalogue is injected as data, with no placeholder token left', () => {
-  const script = shellScript();
-  assert.doesNotMatch(script, /SLASH_COMMANDS_JSON/, 'the token must be replaced');
+test('the slash catalogue is injected PER MODE, with no placeholder token left', () => {
+  const product = shellScript();
+  assert.doesNotMatch(product, /SLASH_COMMANDS_JSON/, 'the token must be replaced');
+  for (const command of slashCommandsFor(false)) {
+    assert.ok(product.includes(`"${command.name}"`), `${command.name} must reach the webview`);
+  }
+  // Engineering entries are not shipped and then hidden — they are not shipped.
+  for (const command of ['/agent', '/noevidence', '/policy', '/health', '/diagnostics']) {
+    assert.ok(!product.includes(`"name":"${command}"`), `${command} must not be in the product catalogue`);
+  }
+  const developer = shellScript(true);
   for (const command of SLASH_COMMANDS) {
-    assert.ok(script.includes(command.name), `${command.name} must reach the webview`);
+    assert.ok(developer.includes(`"${command.name}"`), `developer mode keeps ${command.name}`);
   }
 });
 
@@ -145,31 +159,74 @@ test('inline event handler attributes are never emitted', () => {
 
 // ── Layout contract ──────────────────────────────────────────────────────────
 
-test('the document declares the three regions, every tab and six context panels', () => {
+test('the document declares the three regions and every tab of the CURRENT mode', () => {
   const document = html();
   for (const id of ['nav-drawer', 'main', 'context', 'composer', 'statusrow', 'tabs', 'hdr']) {
     assert.ok(document.includes(`id="${id}"`), `region #${id} must exist`);
   }
-  for (const tab of SHELL_TABS.map((entry) => entry.id)) {
+  for (const tab of shellTabs(false).map((entry) => entry.id)) {
     assert.ok(document.includes(`id="panel-${tab}"`), `panel-${tab} must exist`);
     assert.ok(document.includes(`id="tabbtn-${tab}"`), `tabbtn-${tab} must exist`);
   }
-  for (const panel of ['ctx-workspace', 'ctx-brain', 'ctx-agent', 'ctx-run', 'ctx-files', 'ctx-activity']) {
-    assert.ok(document.includes(`id="${panel}"`), `context panel #${panel} must exist`);
+  const developer = devHtml();
+  for (const tab of SHELL_TABS.map((entry) => entry.id)) {
+    assert.ok(developer.includes(`id="panel-${tab}"`), `developer mode keeps panel-${tab}`);
   }
 });
 
-test('the welcome state renders six action cards, so the centre is never empty', () => {
+test('PRODUCT MODE SHOWS ONLY THE PANELS A USER NEEDS', () => {
+  const document = html();
+  for (const panel of ['ctx-workspace', 'ctx-run', 'ctx-files', 'ctx-activity']) {
+    assert.ok(document.includes(`id="${panel}"`), `#${panel} is product state and must exist`);
+  }
+  for (const panel of ['ctx-brain', 'ctx-agent']) {
+    assert.ok(!document.includes(`id="${panel}"`), `#${panel} is engineering and must not render`);
+    assert.ok(devHtml().includes(`id="${panel}"`), `#${panel} must still exist in developer mode`);
+  }
+});
+
+test('NO ENGINEERING SURFACE LEAKS INTO THE PRODUCT DOCUMENT', () => {
+  // Scoped to the MARKUP: the inlined script carries source comments such as
+  // "Agent Workspace tab", which are code, not a surface. What matters is what
+  // the document renders and what the client can be told to open.
+  const document = html();
+  const markup = document.slice(0, document.indexOf('<script nonce='));
+  for (const leak of [
+    'Tools &amp; Services',
+    'Agent Workspace',
+    'Audit Trail',
+    'Model routing',
+    'Evidence source',
+    'id="nav-tools"',
+    'id="nav-agent"',
+    'id="croute"',
+    'id="csource"',
+    'id="panel-agent"',
+    'id="panel-audit"',
+    'id="panel-workspace"',
+  ]) {
+    assert.ok(!markup.includes(leak), `product mode must not render "${leak}"`);
+  }
+  // …and the same document in developer mode still has them all. Nothing deleted.
+  const developer = devHtml();
+  for (const kept of ['id="nav-tools"', 'id="croute"', 'id="csource"', 'Agent Workspace', 'id="panel-audit"']) {
+    assert.ok(developer.includes(kept), `developer mode must keep "${kept}"`);
+  }
+});
+
+test('the welcome state renders the six OUTCOME cards, so the centre is never empty', () => {
   const document = html();
   const cards = document.match(/data-welcome="/g) ?? [];
   assert.equal(cards.length, 6);
-  assert.ok(document.includes('Build or Fix Code'));
-  assert.ok(document.includes('Run Agent Task'));
-  assert.ok(document.includes('Your governed AI engineering and infrastructure copilot.'));
+  for (const title of ['Explain code', 'Fix code', 'Plan a task', 'Review changes', 'Run tests', 'Debug a failure']) {
+    assert.ok(document.includes(title), `the "${title}" card must be offered`);
+  }
+  assert.ok(document.includes('Ask a question, or pick where you want to start.'));
+  assert.ok(!document.includes('governed AI engineering and infrastructure copilot'));
 });
 
 test('the initial tab is reflected in aria-selected and the roving tabindex', () => {
-  const document = shellHtml({ nonce: NONCE, csp: CSP, initialTab: 'audit', script: 'void 0;', compact: false });
+  const document = shellHtml({ nonce: NONCE, csp: CSP, initialTab: 'audit', script: 'void 0;', compact: false, developerMode: true });
   assert.match(document, /id="tabbtn-audit" data-tab="audit"\s*\n?\s*aria-selected="true"/);
   assert.ok(document.includes('data-initial-tab="audit"'));
   // Scope the counts to the tab strip markup — the stylesheet also contains
@@ -187,9 +244,10 @@ test('the initial tab is reflected in aria-selected and the roving tabindex', ()
 
 test('the tab strip, thread, composer and status row expose the right roles', () => {
   const document = html();
+  const productTabs = shellTabs(false).length;
   assert.ok(document.includes('role="tablist"'));
-  assert.equal((document.match(/role="tab"/g) ?? []).length, SHELL_TABS.length);
-  assert.equal((document.match(/role="tabpanel"/g) ?? []).length, SHELL_TABS.length);
+  assert.equal((document.match(/role="tab"/g) ?? []).length, productTabs);
+  assert.equal((document.match(/role="tabpanel"/g) ?? []).length, productTabs);
   assert.ok(document.includes('id="thread" role="log"'));
   assert.ok(document.includes('aria-live="polite"'));
   assert.ok(document.includes('role="complementary"') || document.includes('<aside id="context"'));
@@ -200,7 +258,9 @@ test('every interactive control has an accessible name', () => {
   const document = html();
   // The composer's textarea and select are labelled; the icon buttons have titles.
   assert.ok(document.includes('<label class="sr-only" for="cinput">'));
-  assert.ok(document.includes('<label class="sr-only" for="croute">'));
+  assert.ok(document.includes('<label class="sr-only" for="clive">'));
+  // The routing selector is engineering; when it IS rendered it stays labelled.
+  assert.ok(devHtml().includes('<label class="sr-only" for="croute">'));
   assert.ok(document.includes('aria-label="Send message"'));
   assert.ok(document.includes('aria-label="Stop generating"'));
   assert.ok(document.includes('id="nav-toggle" aria-expanded="false" aria-controls="nav-drawer"'));

@@ -173,15 +173,16 @@ function renderRunDiff(diff) {
   }
   html += '</div>';
 
-  html += '<div class="panel"><h3><span>Proposed effects</span></h3>';
+  /* Only shown when something IS waiting. An always-present panel reading
+     "No active proposal — nothing is pending execution" put Agent Mode's
+     vocabulary on a product surface and told the reader nothing. */
   if (diff.expectedEffects.length) {
+    html += '<div class="panel"><h3><span>Waiting for your approval</span></h3>';
     for (const effect of diff.expectedEffects) {
       html += '<div class="effect"><span class="ebullet">&bull;</span><span>' + esc(effect) + '</span></div>';
     }
-  } else {
-    html += placeholderHtml({ state: 'empty', message: 'No active proposal — nothing is pending execution.' });
+    html += '</div>';
   }
-  html += '</div>';
 
   setHtml('run-diff', html);
 }
