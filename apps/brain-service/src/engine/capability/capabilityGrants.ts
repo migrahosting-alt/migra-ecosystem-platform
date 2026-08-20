@@ -33,8 +33,40 @@ import {
 export const BENCH_COMMIT = '46806e5a';
 const MEASURED_AT = '2026-07-28';
 
+/**
+ * The coding-reliability evaluation the 30B rows derive from.
+ *
+ * Deliberately NOT `BENCH_COMMIT`: that names `apps/brain-service/bench/`, and
+ * these rows were measured by a different suite in a different repository. Reusing
+ * it would make two unrelated bodies of evidence indistinguishable to anyone
+ * trying to re-derive a grant.
+ */
+const RELIABILITY_EVAL = 'MigraAI-Engineer@1ccd24b coding-reliability.v1 post-3090';
+const RELIABILITY_MEASURED_AT = '2026-08-20';
+
 export const FAST_LOCAL_MODEL = 'qwen2.5-coder:7b';
 export const DEEP_LOCAL_MODEL = 'qwen2.5-coder:14b';
+
+/**
+ * The model that authors code changes.
+ *
+ * Chosen on the MigraAI Engineer coding-reliability evaluation, not on parameter
+ * count: on identical prompts and context it landed the change 7 times in 8 where
+ * `qwen2.5-coder:14b` landed it once, and did so about twice as fast on this
+ * hardware. Both models were fully GPU-resident for that measurement, so neither
+ * number is a artefact of one spilling to CPU.
+ *
+ * The 14B's failure is a single habit, which is why the gap is so lopsided: it
+ * writes `validateOrder(order, { countForCustomer })`, destructuring `undefined`
+ * at the existing one-argument call site and breaking every path that already
+ * worked. Its one success wrote a plain parameter instead.
+ *
+ * PREFERRED FOR WRITING CODE IS NOT QUALIFIED FOR JUDGING IT. The same evaluation
+ * put this model at 4 of 8 on review correctness with repeatability 0.50, so it
+ * carries a `denied` row for `code-review` below and the cloud tier policy for
+ * that class is untouched.
+ */
+export const PREFERRED_CODING_MODEL = 'qwen3-coder:30b';
 
 /**
  * Task classes that may never be served autonomously by a local model on this hardware,
@@ -372,6 +404,45 @@ export const MEASURED_GRANTS: readonly CapabilityGrant[] = [
       note: 'planned edits to two explicitly protected files and stripped the SSRF checks',
     },
   },
+  // ── qwen3-coder:30b, measured 2026-08-20 on the coding-reliability suite ──
+  {
+    model: PREFERRED_CODING_MODEL,
+    taskClass: 'typed-implementation',
+    authority: 'advisory',
+    requiredTier: 'deep-local',
+    evidence: {
+      benchCommit: RELIABILITY_EVAL,
+      score: 7,
+      maxScore: 8,
+      measuredAt: RELIABILITY_MEASURED_AT,
+      // Scored by EXECUTION: the reply is applied to a throwaway copy of the
+      // fixture, the fixture's own suite must still pass, and a hidden oracle must
+      // show the requested behaviour actually landed. A reply that echoes the file
+      // back is rejected as a no-op rather than credited with preserving behaviour.
+      mechanical: true,
+      note:
+        'landed the change 7 of 8 with the baseline intact; the 8th broke the same one-argument ' +
+        'call site the 14B breaks. Advisory, not autonomous: a failure that regresses passing ' +
+        'tests needs the driver verification gate, and 7/8 is below the bar the autonomous rows met',
+    },
+  },
+  {
+    model: PREFERRED_CODING_MODEL,
+    taskClass: 'code-review',
+    authority: 'denied',
+    requiredTier: 'cloud',
+    evidence: {
+      benchCommit: RELIABILITY_EVAL,
+      score: 4,
+      maxScore: 8,
+      measuredAt: RELIABILITY_MEASURED_AT,
+      mechanical: true,
+      note:
+        '4 of 8 at repeatability 0.50 — a coin flip. Inverted the atomicity finding 3 of 8, ' +
+        'crediting the change with the guarantee it destroys. The inversion appears at the same ' +
+        'rate on the 14B, so it does not shrink with model size and a larger model does not fix it',
+    },
+  },
 ];
 
 /**
@@ -407,6 +478,7 @@ assertGrantsWellFormed(MEASURED_GRANTS);
 export function tierOfModel(model: string): AuthorityTier {
   if (model === FAST_LOCAL_MODEL) return 'fast-local';
   if (model === DEEP_LOCAL_MODEL) return 'deep-local';
+  if (model === PREFERRED_CODING_MODEL) return 'deep-local';
   // Cloud models are named by their provider prefix in this deployment.
   if (/-cloud$|^gpt-|^claude-/.test(model)) return 'cloud';
   // An unrecognised model is treated as the WEAKEST tier, so an unknown model cannot

@@ -47,6 +47,7 @@ import { registerAgentModeCommandRoutes } from './engine/agentModeCommandRoutes.
 import { registerCodingRunRoutes } from './engine/coding/codingRunRoutes.js';
 import { CodingRunService } from './engine/coding/codingRunService.js';
 import { createProductionCodingDriver } from './engine/coding/productionCodingDriver.js';
+import { PREFERRED_CODING_MODEL } from './engine/capability/capabilityGrants.js';
 import { codingCapability, codingStructuredModel, readCodingConfig, readCodingValidationCommand, recoverCodingRuns } from './engine/coding/codingRuntime.js';
 import { buildAgentRunJournalConfig } from './engine/agentRunJournal.js';
 import { AgentActivationAuthority } from './engine/agentActivation.js';
@@ -444,7 +445,14 @@ async function main(): Promise<void> {
   const codingConfig = readCodingConfig();
   // The coding model is explicit: an unset local model would otherwise silently
   // fall back to whatever the provider defaults to, and this one authors edits.
-  const codingModelId = process.env.MIGRAPILOT_CODING_MODEL ?? env.localModel ?? env.defaultModel ?? '';
+  //
+  // It defaults to the MEASURED preferred coder rather than to the general chat
+  // model. Inheriting `localModel` meant the model that writes changes was chosen
+  // by whatever happened to be configured for conversation; on the coding-reliability
+  // evaluation that model landed the change 1 time in 8 against 7 in 8 for this one.
+  // Nothing is opened by defaulting it: governed coding still requires
+  // MIGRAPILOT_CODING_ENABLED=1 and a validated workspace boundary.
+  const codingModelId = process.env.MIGRAPILOT_CODING_MODEL ?? PREFERRED_CODING_MODEL;
   const codingReady = codingConfig.enabled && durable !== undefined && Boolean(codingModelId);
   if (codingReady) {
     const codingDriver = createProductionCodingDriver({
