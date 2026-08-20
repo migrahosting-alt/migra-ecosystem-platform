@@ -626,10 +626,13 @@ test('26 — a run that exhausts its repairs is labelled repair-ceiling-exhauste
   }>();
 
   assert.equal(body.finalReport?.complete, false, 'the tests never passed, so the run is not complete');
-  assert.equal(
-    body.finalReport?.stopReason,
-    'repair-ceiling-exhausted',
-    'the cause was a model that never fixed the tests, not a records mismatch',
+  // The claim is unchanged: the cause was a model that never fixed the tests, not
+  // a records mismatch. The loop now stops one attempt sooner and names the more
+  // precise cause — the same landed repair produced the identical failure, so a
+  // further attempt would be a guess rather than a repair.
+  assert.ok(
+    ['repair-made-no-progress', 'repair-ceiling-exhausted'].includes(body.finalReport?.stopReason ?? ''),
+    `expected an honest repair-exhaustion reason, got ${body.finalReport?.stopReason}`,
   );
   // The distinction is only worth anything if the alarm still exists for the real thing.
   assert.notEqual(body.finalReport?.stopReason, 'reconciliation-failed');

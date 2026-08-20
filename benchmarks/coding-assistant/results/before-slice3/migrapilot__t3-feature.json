@@ -1,0 +1,115 @@
+{
+  "tool": "migrapilot",
+  "label": "MigraPilot",
+  "task": "t3-feature",
+  "kind": "feature",
+  "model": "qwen3-coder:30b",
+  "wallMs": 305939,
+  "provenance": {
+    "brainPid": 2552965,
+    "brainPort": 43822,
+    "brainUrl": "http://127.0.0.1:43822",
+    "workspaceRoot": "/tmp/bench-t3-feature-5mfPbd",
+    "codingRootsGranted": "/tmp/bench-t3-feature-5mfPbd",
+    "service": "migrapilot-brain",
+    "serviceVersion": "0.1.0",
+    "uptimeSecAtAttach": 0,
+    "model": "qwen3-coder:30b",
+    "spawnedByHarness": true,
+    "timeoutOverrides": []
+  },
+  "visibleBefore": {
+    "exit": 0,
+    "pass": 3,
+    "fail": 0
+  },
+  "visibleAfter": {
+    "exit": 1,
+    "pass": 0,
+    "fail": 5
+  },
+  "hidden": {
+    "pass": 0,
+    "fail": 5,
+    "exit": 1
+  },
+  "scope": {
+    "files": [
+      "src/orders.js",
+      "src/validation.js",
+      "test/orders.test.js"
+    ],
+    "added": 70,
+    "removed": 41,
+    "touchedTests": true
+  },
+  "ranTestsItself": true,
+  "capabilities": [
+    "coding.issue",
+    "coding.scope-approval",
+    "governed-coding",
+    "test.run"
+  ],
+  "steps": [
+    {
+      "at": 1787245573461,
+      "step": "timeout",
+      "detail": "900000"
+    },
+    {
+      "at": 1787245573491,
+      "step": "activated",
+      "detail": "/tmp/bench-t3-feature-5mfPbd"
+    },
+    {
+      "at": 1787245573491,
+      "step": "coding:start",
+      "detail": "t3-feature"
+    },
+    {
+      "at": 1787245672816,
+      "step": "scope",
+      "detail": "{\"files\":[{\"path\":\"src/validation.js\",\"rationale\":\"The validateOrder function needs to be updated to check for maxOrdersPerCustomer and validate it.\",\"evidence\":[{\"startLine\":1,\"endLine\":32,\"excerptHash\":\"5b3f788fd0c8cacf\"}]},{\"path\":\"src/orders.js\",\"rationale\":\"The submitOrder function must be modified to check the customer's order count against the limit before processing.\",\"evidence\":[{\"startLine\":1,\"endLine\":47,\"excerptHash\":\"934023ea512fa271\"}]},{\"path\":\"test/orders.test.js\",\"rationale\":\"Ne"
+    },
+    {
+      "at": 1787245875356,
+      "step": "final",
+      "detail": "{\"runId\":\"codingrun_7f9e0cc5-7160-4393-a0bb-a9bcd765752a\",\"revision\":39,\"state\":\"FAILED\",\"complete\":false,\"changedFiles\":[\"src/orders.js\",\"src/validation.js\",\"test/orders.test.js\"],\"markdown\":\"# Governed coding \u2014 Failed\\n\\nRun `codingrun_7f9e0cc5-7160-4393-a0bb-a9bcd765752a` \u00b7 revision 39 \u00b7 state `F"
+    },
+    {
+      "at": 1787245875564,
+      "step": "tests",
+      "detail": "{\"status\":\"failed\",\"totals\":{\"passed\":0,\"failed\":5}}"
+    }
+  ],
+  "testOutcome": {
+    "status": "failed",
+    "totals": {
+      "passed": 0,
+      "failed": 5
+    },
+    "failures": [
+      {
+        "name": "a plain order is priced subtotal + tax",
+        "file": null
+      },
+      {
+        "name": "stock is decremented on a confirmed order",
+        "file": null
+      },
+      {
+        "name": "a gold member gets 10% off before tax",
+        "file": null
+      },
+      {
+        "name": "submitting an order with maxOrdersPerCustomer limit works when under the limit",
+        "file": null
+      },
+      {
+        "name": "submitting an order with maxOrdersPerCustomer limit fails when over the limit",
+        "file": null
+      }
+    ]
+  },
+  "errors": []
+}

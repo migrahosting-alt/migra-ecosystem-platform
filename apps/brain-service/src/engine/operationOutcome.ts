@@ -22,7 +22,17 @@ export type OperationOutcome =
   /** A human stopped it. Downstream work was aborted; this is not a failure. */
   | 'cancelled'
   /** The transport died mid-answer. What was produced is partial, never complete. */
-  | 'stream_interrupted';
+  | 'stream_interrupted'
+  /**
+   * The engine finished normally and produced nothing usable.
+   *
+   * Measured: an Explain returned a title, a provenance line and an unterminated
+   * code fence — 67 bytes, no error — and was presented to the user as a finished
+   * answer. Nothing failed, so nothing said so. An empty answer is not a
+   * completed one, and calling it `completed` is the same class of untruth as
+   * reporting a dead stream as success.
+   */
+  | 'empty_completion';
 
 /** Terminal states in which a result may be trusted as whole. */
 export const COMPLETE_OUTCOMES: ReadonlySet<OperationOutcome> = new Set<OperationOutcome>(['completed']);
@@ -36,6 +46,8 @@ export interface OutcomeEvidence {
   streamEndedEarly?: boolean;
   /** The engine signalled a normal end. */
   engineCompleted?: boolean;
+  /** The answer the engine produced, for the emptiness check. */
+  content?: string;
   /** A genuine error from the work itself. */
   error?: { message: string } | undefined;
 }
@@ -54,7 +66,9 @@ export function classifyOutcome(evidence: OutcomeEvidence): OperationOutcome {
   if (evidence.timedOut) return 'timed_out';
   if (evidence.streamEndedEarly && !evidence.engineCompleted) return 'stream_interrupted';
   if (evidence.error) return 'failed';
-  return evidence.engineCompleted ? 'completed' : 'stream_interrupted';
+  if (!evidence.engineCompleted) return 'stream_interrupted';
+  // A normal end that produced nothing usable is not a completed answer.
+  return evidence.content !== undefined && !isSubstantive(evidence.content) ? 'empty_completion' : 'completed';
 }
 
 /** A user-facing sentence that states the outcome without blaming the wrong thing. */
@@ -72,7 +86,27 @@ export function describeOutcome(outcome: OperationOutcome, evidence: OutcomeEvid
     }
     case 'stream_interrupted':
       return 'The connection ended before the answer finished. What arrived is partial.';
+    case 'empty_completion':
+      return 'The model returned no usable answer. Nothing failed — there is simply nothing to show, so this is not reported as a result.';
     case 'failed':
       return evidence.error?.message ? `Failed — ${evidence.error.message}` : 'Failed.';
   }
+}
+
+/**
+ * Is there an actual answer in here?
+ *
+ * Deliberately crude and generous: strip code fences, list bullets, headings and
+ * whitespace, and ask whether anything is left. It is looking for the difference
+ * between "an answer" and "punctuation", not judging quality — a wrong answer is
+ * still an answer and belongs to the model, not to this check.
+ */
+export function isSubstantive(content: string): boolean {
+  const stripped = content
+    .replace(/^```[^\n]*$/gm, '')      // fence markers, opened or closed
+    .replace(/^#{1,6}\s.*$/gm, '')      // headings
+    .replace(/^[-*+>\s]+$/gm, '')       // bare bullets and rules
+    .replace(/\s+/g, ' ')
+    .trim();
+  return stripped.length >= 40;
 }

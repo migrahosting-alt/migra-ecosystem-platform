@@ -210,3 +210,69 @@ observed choosing `qwen2.5-coder:14b` at the `balanced` tier for the same reques
 The field was renamed from `model` after this run, and a `modelRouted` slot is now
 populated from the engine's own `route` frame; these five records predate that, so
 their model field states an intention, not a fact.
+
+---
+
+## Slice 3 — workflow truthfulness (t1 and t3 rerun)
+
+Two fixes, both about a run claiming more than it achieved. No retrieval, planning,
+model, prompt or UI change.
+
+**An empty completion is no longer a success.** New terminal state
+`empty_completion`, and the extension refuses to open a document that contains no
+answer. The substance check is deliberately crude and generous — it separates *an
+answer* from *punctuation* and explicitly does not judge quality, because a wrong
+answer is still an answer. A test asserts against the exact 67-byte string the
+frozen run produced.
+
+**The repair loop can now tell it is going backwards.** Bounded three ways rather
+than one:
+
+| Guard | Stops when |
+|---|---|
+| ceiling (3 → **2**) | a backstop, no longer the primary bound |
+| `regressed-beyond-baseline` | a test that passed **before the run started** now fails |
+| `repair-made-no-progress` | a landed repair produced the **identical** failure |
+
+Only attempts that actually **landed** count as progress evidence: a rejected
+proposal leaves the tree untouched, so the next validation is identical by
+construction. Reading that as a stall killed a loop that went on to succeed — the
+existing suite caught it.
+
+### t3, before and after
+
+| | wall | visible | hidden | diff | stop reason |
+|---|---|---|---|---|---|
+| before | 306s | 0/5 | 0/5 | +70/−41 | `repair-ceiling-exhausted` |
+| after | 229s | 3/4 | 4/5 | **+25/−0** | **`regressed-beyond-baseline`** |
+
+The guard fired, named the cause, and spent **zero** repair attempts after
+detecting harm — revision 16 against 31–39 before. **The smaller damage is not
+attributable to the guard**: a better initial apply is within this model's measured
+variance. What the guard demonstrably changed is that the run stopped instead of
+spending its budget, and said why.
+
+### t1, before and after
+
+| | wall | answer |
+|---|---|---|
+| frozen run | 9s | **67 bytes** — title, stamp, unterminated fence, reported as an answer |
+| after | 135s | 3 667 bytes, substantive, in English |
+
+**The empty-completion guard did not fire in this run** — the model produced a real
+answer, so there was nothing to suppress. It is proven by unit test against the
+recorded 67-byte output, not by live reproduction; the empty case is intermittent.
+t1 has now produced a French answer, an empty answer and an English answer across
+three runs of the same build.
+
+### Two defects found in my own fix
+
+Recorded because both would have shipped silently:
+
+1. **The guards were wired into `codingRun.ts`, which has no production callers.**
+   Twelve tests passed against code the product never executes, and the first t3
+   rerun returned `repair-ceiling-exhausted` unchanged. Caught by reading the stop
+   reason rather than the pass/fail line.
+2. **The baseline was measured after the first write**, so the guard compared the
+   model's changes against themselves and could never have detected harm. It now
+   runs on the untouched tree, before the initial apply.

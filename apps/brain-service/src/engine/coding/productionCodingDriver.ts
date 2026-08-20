@@ -48,6 +48,7 @@ import {
   type ProposalModel,
 } from './modelProposals.js';
 import { observedFailure, runValidation, type DeclaredValidation, type ValidationRecord } from './validationRun.js';
+import { assessProgress } from './verificationProgress.js';
 import { reconcile, type CodingStopReason } from './codingRun.js';
 import {
   applyEvidence,
@@ -83,7 +84,16 @@ export interface ProductionCodingDriverDeps {
   onPlanRefused?: (runId: string, reason: string) => void;
 }
 
-const DEFAULT_MAX_REPAIRS = 3;
+/**
+ * TWO repair attempts after the first failed verification.
+ *
+ * Was 3. A loop that cannot tell it is going backwards spends every attempt it is
+ * given, and a measured run used all of them to break three tests that passed at
+ * baseline. With the regression and no-progress guards in place the ceiling is a
+ * backstop rather than the primary bound, so it is set to the smallest number that
+ * still allows a genuine second look.
+ */
+const DEFAULT_MAX_REPAIRS = 2;
 
 /** Stands in for "no apply evidence was captured", so rollback derivation stays total. */
 const EMPTY_APPLY_EVIDENCE: ApplyEvidence = {
@@ -390,7 +400,19 @@ export function createProductionCodingDriver(deps: ProductionCodingDriverDeps): 
         await ctx.run.patchPayload({ repairHistory: [...repairHistory] }, 'repair.history');
       };
       /** Why the repair loop stopped, so the report can name it rather than guess. */
-      let loopExit: 'ran-to-completion' | 'cancelled' | 'repair-proposal-rejected' | 'repair-apply-refused' = 'ran-to-completion';
+      let loopExit:
+        | 'ran-to-completion' | 'cancelled' | 'repair-proposal-rejected' | 'repair-apply-refused'
+        | 'regressed-beyond-baseline' | 'repair-made-no-progress' = 'ran-to-completion';
+      /** The suite BEFORE this run touched anything — the bar for "made it worse". */
+      let baselineRecord: ValidationRecord | undefined;
+      /** The previous attempt's result, for "the same failure twice". */
+      let previousValidation: ValidationRecord | undefined;
+
+      // THE BAR IS THE UNTOUCHED TREE. Measured here, before the first write,
+      // because after the initial apply "worse than baseline" is unknowable — the
+      // first draft of this took the reading AFTER the apply and would have
+      // compared the model's changes against themselves.
+      baselineRecord = await validate('baseline').catch(() => undefined);
 
       let initialApplyEvidence: ApplyEvidence | undefined;
       const initialApply = await ctx.run.runStage({ kind: 'initial_apply', phase: 'executing_initial_changeset' }, async () => {
@@ -408,6 +430,30 @@ export function createProductionCodingDriver(deps: ProductionCodingDriverDeps): 
       current = await recordValidation('validation', 'final');
       while (current && !current.passed && repairAttempt < maxRepairs) {
         if (ctx.run.cancellationRequested() || ctx.signal.aborted) { loopExit = 'cancelled'; break; }
+
+        // STOP IF THIS IS GOING BACKWARDS, or going nowhere.
+        //
+        // Measured: a run spent its whole repair budget and finished having broken
+        // three tests that passed at baseline. Every attempt was individually
+        // valid; nothing was watching the trend. A loop that cannot tell it is
+        // making things worse will keep making them worse for as long as it is
+        // allowed to.
+        const progress = assessProgress({ baseline: baselineRecord, previous: previousValidation, current });
+        if (progress.kind !== 'continue') {
+          loopExit = progress.kind === 'regressed' ? 'regressed-beyond-baseline' : 'repair-made-no-progress';
+          await recordAttempt({
+            attempt: repairAttempt + 1,
+            citedEvidenceIds: [],
+            rationale: `repair stopped: ${progress.detail}`,
+            proposedPaths: [],
+            proposalDigest: '',
+            outcome: 'proposal_rejected',
+            outcomeReason: loopExit === 'regressed-beyond-baseline'
+              ? `stopped to avoid further harm — ${progress.detail}`
+              : `stopped making progress — ${progress.detail}`,
+          });
+          break;
+        }
         repairAttempt += 1;
         const observed = observedFailure(current);
         const evidenceBlocks = extractFailureEvidence(current, current.id);
@@ -513,6 +559,12 @@ export function createProductionCodingDriver(deps: ProductionCodingDriverDeps): 
           continue;
         }
         void observed;
+        // Only an attempt that actually LANDED can be compared for progress. A
+        // rejected proposal or a refused apply leaves the tree untouched, so the
+        // next validation is identical by construction — reading that as "no
+        // progress" killed a loop that went on to succeed, which is exactly what
+        // test 15 caught.
+        previousValidation = current;
         current = await recordValidation('validation', 'repair');
 
         // The change landed. Whether it WORKED is the validation's verdict.
@@ -635,9 +687,11 @@ export function createProductionCodingDriver(deps: ProductionCodingDriverDeps): 
                   ? 'repair-proposal-rejected'
                   : loopExit === 'repair-apply-refused'
                     ? 'apply-refused'
-                    : repairAttempt >= maxRepairs
-                      ? 'repair-ceiling-exhausted'
-                      : 'apply-refused';
+                    : loopExit === 'regressed-beyond-baseline' || loopExit === 'repair-made-no-progress'
+                      ? loopExit
+                      : repairAttempt >= maxRepairs
+                        ? 'repair-ceiling-exhausted'
+                        : 'apply-refused';
 
         await ctx.run.finalize({
           report: {

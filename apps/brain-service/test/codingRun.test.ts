@@ -341,10 +341,42 @@ test('12 — the repair ceiling produces an INCOMPLETE result, never a success',
     }),
     maxRepairAttempts: 2, requiredPaths: REQUIRED_FILES, applyDeps: d.applyDeps, gitDiffPaths, env: childEnv(),
   }));
-  assert.equal(report.complete, false);
-  assert.equal(report.stopReason, 'repair-ceiling-exhausted');
-  assert.equal(report.repairs.length, 2, 'the ceiling held');
+  assert.equal(report.complete, false, 'a run whose validation still fails is never complete');
+  // A no-op repair now stops at the NO-PROGRESS guard rather than burning the
+  // ceiling: the same failure twice means the next attempt is a guess. The claim
+  // this test makes — incomplete, never a success — is unchanged and stronger,
+  // because the loop stops one attempt sooner.
+  assert.equal(report.stopReason, 'repair-made-no-progress');
+  assert.equal(report.repairs.length, 1, 'it stopped as soon as the failure repeated');
   assert.ok(report.unresolvedRisks.some((r) => /still failing/.test(r)));
+  assert.ok(report.unresolvedRisks.some((r) => /repair stopped: the same/.test(r)), JSON.stringify(report.unresolvedRisks));
+});
+
+test('12b — a repair that keeps making progress still uses its full ceiling', async () => {
+  // The no-progress guard must not cut short a loop that IS improving. Each
+  // attempt here fixes one of two failures, so the signatures differ every round.
+  const root = createFixtureRepo();
+  const scope = scopeFor();
+  const d = deps(root, scope);
+  let attempt = 0;
+  const report = await withoutTestContext(() => runCodingTask({
+    runId: 'r12b', rootPath: root, scope, approvalToken: scope.approvalToken, validations: VALIDATIONS,
+    initialChangeset: replaceOps(root, { [SERVICE]: FIXED_SERVICE }),
+    repairAuthor: async ({ failureLines }) => {
+      attempt += 1;
+      return {
+        rationale: `attempt ${attempt}`,
+        citedFailureLines: failureLines.slice(0, 1),
+        // Fix everything on the last allowed attempt so the run can also succeed.
+        changeset: replaceOps(root, attempt >= 2
+          ? { [CONTRACT]: FIXED_CONTRACT, [ROUTE]: FIXED_ROUTE }
+          : { [CONTRACT]: FIXED_CONTRACT }),
+      };
+    },
+    maxRepairAttempts: 2, requiredPaths: REQUIRED_FILES, applyDeps: d.applyDeps, gitDiffPaths, env: childEnv(),
+  }));
+  assert.ok(attempt >= 1, 'the loop ran');
+  assert.notEqual(report.stopReason, 'repair-made-no-progress', 'progress must not be mistaken for a stall');
 });
 
 // ── 13-16. Reconciliation and reporting ────────────────────────────────────────

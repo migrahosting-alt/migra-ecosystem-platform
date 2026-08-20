@@ -7,6 +7,7 @@ import type {
 } from '@migrapilot/protocol';
 import { MigraAiClient } from '../services/migraAiClient.js';
 import { unwrap } from '../services/brainClient.js';
+import { EMPTY_ANSWER_MESSAGE, isSubstantiveAnswer } from '../services/answerSubstance.js';
 import { presentOutcome, type OutcomePresentation } from '../services/brainOutcomePresentation.js';
 import { governedValue, notifyOutcome } from '../services/brainOutcomeNotify.js';
 import { BackendRouter } from '../services/backendRouter.js';
@@ -130,6 +131,14 @@ export async function runExplainSelection(deps: CommandDeps): Promise<void> {
   const response = unwrap(outcome);
   const presented = presentOutcome(outcome);
   if (presented.severity !== 'success') notifyOutcome(presented);
+  // AN EMPTY ANSWER IS NOT A RESULT. Opening a document containing only a title
+  // and an unterminated code fence tells the user the work succeeded when the
+  // model returned nothing at all.
+  if (!isSubstantiveAnswer(response.content)) {
+    deps.output?.appendLine(`[explain] empty completion (${response.content?.length ?? 0} chars) — not rendered`);
+    void vscode.window.showWarningMessage(EMPTY_ANSWER_MESSAGE);
+    return;
+  }
   await showMarkdownResult('MigraPilot: Explain Selection', response.content, presented);
 }
 

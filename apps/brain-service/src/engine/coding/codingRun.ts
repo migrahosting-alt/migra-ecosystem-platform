@@ -20,6 +20,7 @@
 
 import type { ChangesetRequest } from '@migrapilot/protocol';
 import { governedApply, type GovernedApplyDeps, type GovernedApplyResult } from './governedApply.js';
+import { assessProgress } from './verificationProgress.js';
 import { observedFailure, runValidation, type DeclaredValidation, type ValidationRecord, type ValidationStage } from './validationRun.js';
 import { ScopedEditLedger, type ApprovedEditScope } from './editScope.js';
 import { normalizePath } from '../grounding/evidenceLedger.js';
@@ -28,6 +29,17 @@ import { normalizePath } from '../grounding/evidenceLedger.js';
 export type CodingStopReason =
   | 'validated'
   | 'repair-ceiling-exhausted'
+  /**
+   * A repair broke something that worked before the run started.
+   *
+   * Measured: a run changed +70/-41 across three files and finished having broken
+   * three tests that passed at baseline. Every attempt was individually valid and
+   * the loop had no way to notice it was going backwards, so it spent its whole
+   * budget making the workspace worse. Stopping is the only honest move.
+   */
+  | 'regressed-beyond-baseline'
+  /** Two attempts produced the identical failure. A third is a guess, not a repair. */
+  | 'repair-made-no-progress'
   /**
    * The model's repair proposal was rejected before anything was applied —
    * malformed output, or a rationale citing evidence the run cannot support.
@@ -262,8 +274,21 @@ export async function runCodingTask(opts: CodingRunOptions): Promise<CodingRunRe
   if (cancelled()) return finish('cancelled', baseline, initialApply, current);
 
   // ── Repair, only from observed failure ───────────────────────────────────────
+  // Bounded THREE ways: an attempt ceiling, a REGRESSION guard (never keep going
+  // once the run has broken something that worked before it started), and a
+  // NO-PROGRESS guard (the same failure twice means the next attempt is a guess).
+  let previousValidation: ValidationRecord | undefined;
+  let progressStop: 'regressed-beyond-baseline' | 'repair-made-no-progress' | undefined;
   for (let attempt = 1; !current.passed && attempt <= opts.maxRepairAttempts; attempt += 1) {
     if (cancelled()) return finish('cancelled', baseline, initialApply, current);
+
+    const progress = assessProgress({ baseline, previous: previousValidation, current });
+    if (progress.kind !== 'continue') {
+      unresolvedRisks.push('repair stopped: ' + progress.detail);
+      progressStop = progress.kind === 'regressed' ? 'regressed-beyond-baseline' : 'repair-made-no-progress';
+      break;
+    }
+
     const observed = observedFailure(current);
     const proposal = await opts.repairAuthor({
       attempt,
@@ -301,6 +326,9 @@ export async function runCodingTask(opts: CodingRunOptions): Promise<CodingRunRe
     };
     if (apply.ok && apply.result.rolledBack) rollbacks.push(...apply.paths);
     if (apply.ok) {
+      // Only a LANDED attempt is progress evidence — an untouched tree revalidates
+      // identically, which is not a stall.
+      previousValidation = current;
       current = await validate(opts.validations.final, 'repair');
       record.validation = current;
     } else {
@@ -312,7 +340,10 @@ export async function runCodingTask(opts: CodingRunOptions): Promise<CodingRunRe
   if (!current.passed) {
     if (!current.admitted) return finish('validation-refused', baseline, initialApply, current);
     unresolvedRisks.push(`validation still failing after ${repairs.length} repair attempt(s)`);
-    return finish('repair-ceiling-exhausted', baseline, initialApply, current);
+    // Name the reason the loop ACTUALLY stopped. Reporting a regression or a
+    // stalled repair as "ceiling exhausted" would send someone to raise the
+    // attempt budget, which is the one change guaranteed to make it worse.
+    return finish(progressStop ?? 'repair-ceiling-exhausted', baseline, initialApply, current);
   }
 
   // A passing run still ends with the CONTRACT's final validation, at its own
