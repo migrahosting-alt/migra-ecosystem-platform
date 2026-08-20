@@ -40,7 +40,7 @@ function withProbe(contents: string, assertion: (r: ReturnType<typeof check>) =>
 test('the codebase has no discarded awaited notification results', () => {
   const r = check();
   assert.equal(r.status, 0, `violations remain:\n${r.stderr}`);
-  assert.match(r.stdout, /21 consumed, 0 discarded, 0 ambiguous/);
+  assert.match(r.stdout, /22 consumed, 0 discarded, 0 ambiguous/);
 });
 
 test('a DISCARDED awaited result is rejected', () => {

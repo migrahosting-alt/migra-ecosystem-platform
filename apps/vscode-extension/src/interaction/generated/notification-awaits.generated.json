@@ -2,7 +2,7 @@
   "generated": "by scripts/check-notification-awaits.mjs — DERIVED EVIDENCE, do not edit",
   "rule": "await on a VS Code message API is prohibited when the result is discarded; permitted when consumed",
   "counts": {
-    "consumed": 21,
+    "consumed": 22,
     "discarded": 0,
     "ambiguous": 0
   },
@@ -27,6 +27,13 @@
       "api": "showInformationMessage",
       "classification": "consumed",
       "snippet": "await vscode.window.showInformationMessage("
+    },
+    {
+      "file": "src/commands/gitOverview.ts",
+      "line": 58,
+      "api": "showWarningMessage",
+      "classification": "consumed",
+      "snippet": "await vscode.window.showWarningMessage(`MigraPilot: ${outcome.reason}`, 'Show Logs')"
     },
     {
       "file": "src/commands/quickEdit.ts",
@@ -58,7 +65,7 @@
     },
     {
       "file": "src/extension.ts",
-      "line": 363,
+      "line": 364,
       "api": "showWarningMessage",
       "classification": "consumed",
       "snippet": "await vscode.window.showWarningMessage([card.title, '', ...card.lines].join('\\n'), { modal: true }, 'Approve once', 'Sta"

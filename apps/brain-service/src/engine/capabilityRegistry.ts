@@ -28,6 +28,9 @@ import {
   DiagnosticsGetRequestSchema,
   ChangesetRequestSchema,
   ApplyChangesetRequestSchema,
+  GitOverviewRequestSchema,
+  GitHistoryRequestSchema,
+  GitBlameRequestSchema,
 } from '@migrapilot/protocol';
 import { proposeChangeset, applyChangeset, previewStoredChangeset, ChangesetProposalStore, ChangesetError } from '../tools/changeset.js';
 import { nodeChangesetFs } from '../tools/changesetFs.js';
@@ -36,6 +39,7 @@ import { auditStore, auditHash } from './auditLog.js';
 import { incidentManager } from './incidents.js';
 import { recoveryManager } from './recovery.js';
 import { workspaceSearch } from '../tools/workspaceSearch.js';
+import { gitOverview, gitHistory, gitBlame } from '../tools/gitInsight.js';
 import { workspaceList, WorkspaceListRequestSchema } from '../tools/workspaceList.js';
 import { fileRead, FileReadRequestSchema } from '../tools/fileRead.js';
 import { workspaceFind, WorkspaceFindRequestSchema } from '../tools/workspaceFind.js';
@@ -215,6 +219,25 @@ const TOOLS: RunnableCapability[] = [
     descriptor: meta('git.diff', 'Git Diff', 'Inspect staged/unstaged diffs.', 'git', ['git.read'], { readOnly: true }),
     inputSchema: GitDiffRequestSchema,
     handler: (i) => gitDiff(i as never),
+  },
+  // Read-only Git visibility. Each answers ONE question with a fixed argv built in
+  // gitInsight.ts — no request field becomes a git subcommand or flag, so no input shape
+  // can turn a read into a mutation. `git` is deliberately NOT on the command.run
+  // allowlist and this does not change that: structured facts, never arbitrary execution.
+  {
+    descriptor: meta('git.overview', 'Git Overview', 'Branch, HEAD, ahead/behind, and staged/unstaged/untracked counts.', 'git', ['git.read'], { readOnly: true }),
+    inputSchema: GitOverviewRequestSchema,
+    handler: (i) => gitOverview(i as never),
+  },
+  {
+    descriptor: meta('git.history', 'Git History', 'Recent commits, bounded.', 'git', ['git.read'], { readOnly: true }),
+    inputSchema: GitHistoryRequestSchema,
+    handler: (i) => gitHistory(i as never),
+  },
+  {
+    descriptor: meta('git.blame', 'Git Blame', 'Attribution for a file or line range.', 'git', ['git.read'], { readOnly: true }),
+    inputSchema: GitBlameRequestSchema,
+    handler: (i) => gitBlame(i as never),
   },
   {
     descriptor: meta('diagnostics.get', 'Get Diagnostics', 'Read synced editor diagnostics.', 'diagnostics', ['workspace.read'], { readOnly: true }),

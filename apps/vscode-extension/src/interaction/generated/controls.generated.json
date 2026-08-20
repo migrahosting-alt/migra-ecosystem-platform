@@ -30,6 +30,20 @@
       }
     },
     {
+      "file": "src/commands/gitOverview.control.ts",
+      "applicationId": "migrapilot-vscode",
+      "surfaceId": "engineer.command-palette",
+      "controlId": "git-overview",
+      "controlVersion": 1,
+      "instanceScope": "workspace",
+      "consequence": "read-only",
+      "locator": {
+        "adapter": "vscode-command",
+        "commandId": "migrapilot.gitOverview",
+        "confidence": "exact"
+      }
+    },
+    {
       "file": "src/commands/governedCoding.control.ts",
       "applicationId": "migrapilot-vscode",
       "surfaceId": "engineer.command-palette",
@@ -73,8 +87,8 @@
     }
   ],
   "coverage": {
-    "contributedCommands": 28,
-    "declaredControls": 5,
+    "contributedCommands": 29,
+    "declaredControls": 6,
     "knownGaps": [
       "migrapilot.aiUsage",
       "migrapilot.clearToken",

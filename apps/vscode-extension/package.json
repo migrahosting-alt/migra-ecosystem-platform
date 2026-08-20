@@ -191,6 +191,10 @@
       {
         "command": "migrapilot.quickEdit",
         "title": "MigraPilot: Quick Edit"
+      },
+      {
+        "command": "migrapilot.gitOverview",
+        "title": "MigraPilot: Git Status & History"
       }
     ],
     "configuration": {

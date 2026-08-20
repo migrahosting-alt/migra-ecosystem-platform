@@ -362,6 +362,100 @@ export const CommandRunResponseSchema = z.object({
 export type CommandRunRequest = z.infer<typeof CommandRunRequestSchema>;
 export type CommandRunResponse = z.infer<typeof CommandRunResponseSchema>;
 
+
+// ── Read-only Git visibility ────────────────────────────────────────────────
+//
+// Structured Git facts, never arbitrary Git execution. Each request names a
+// QUESTION ("what is the overview", "the last N commits", "who wrote these
+// lines"); no request field ever becomes a git subcommand or flag, so there is
+// no shape of input that turns a read into a mutation.
+
+export const GitOverviewRequestSchema = z.object({
+  rootPath: z.string().min(1),
+});
+
+export const GitOverviewResponseSchema = z.object({
+  tool: z.literal('git.overview'),
+  branch: z.string().nullable(),
+  /** Full HEAD sha, or null in a repository with no commits yet. */
+  head: z.string().nullable(),
+  headShort: z.string().nullable(),
+  detached: z.boolean(),
+  /** Null when the branch has no upstream configured. */
+  ahead: z.number().nullable(),
+  behind: z.number().nullable(),
+  counts: z.object({
+    staged: z.number(),
+    unstaged: z.number(),
+    untracked: z.number(),
+    conflicted: z.number(),
+  }),
+  /** Line churn from `--numstat`, summarised. Binary files contribute 0/0. */
+  diffSummary: z.object({
+    stagedFiles: z.number(),
+    stagedInsertions: z.number(),
+    stagedDeletions: z.number(),
+    unstagedFiles: z.number(),
+    unstagedInsertions: z.number(),
+    unstagedDeletions: z.number(),
+  }),
+});
+
+export const GitHistoryRequestSchema = z.object({
+  rootPath: z.string().min(1),
+  /** Bounded on purpose — an unbounded log is a denial-of-service on the loop. */
+  limit: z.number().int().min(1).max(100).default(20),
+  /** Optional workspace-relative path filter; contained server-side. */
+  path: z.string().optional(),
+});
+
+export const GitCommitSchema = z.object({
+  sha: z.string(),
+  shortSha: z.string(),
+  author: z.string(),
+  authoredAt: z.string(),
+  subject: z.string(),
+});
+
+export const GitHistoryResponseSchema = z.object({
+  tool: z.literal('git.history'),
+  head: z.string().nullable(),
+  branch: z.string().nullable(),
+  commits: z.array(GitCommitSchema),
+  /** True when more commits exist beyond `limit`. */
+  truncated: z.boolean(),
+});
+
+export const GitBlameRequestSchema = z.object({
+  rootPath: z.string().min(1),
+  /** Workspace-relative; contained server-side. */
+  path: z.string().min(1),
+  startLine: z.number().int().min(1).optional(),
+  endLine: z.number().int().min(1).optional(),
+});
+
+export const GitBlameLineSchema = z.object({
+  line: z.number(),
+  sha: z.string(),
+  shortSha: z.string(),
+  author: z.string(),
+  authoredAt: z.string(),
+});
+
+export const GitBlameResponseSchema = z.object({
+  tool: z.literal('git.blame'),
+  path: z.string(),
+  lines: z.array(GitBlameLineSchema),
+  truncated: z.boolean(),
+});
+
+export type GitOverviewRequest = z.infer<typeof GitOverviewRequestSchema>;
+export type GitOverviewResponse = z.infer<typeof GitOverviewResponseSchema>;
+export type GitHistoryRequest = z.infer<typeof GitHistoryRequestSchema>;
+export type GitHistoryResponse = z.infer<typeof GitHistoryResponseSchema>;
+export type GitBlameRequest = z.infer<typeof GitBlameRequestSchema>;
+export type GitBlameResponse = z.infer<typeof GitBlameResponseSchema>;
+
 export type ToolRequestMap = {
   'command.run': CommandRunRequest;
   'workspace.search': WorkspaceSearchRequest;
@@ -369,6 +463,9 @@ export type ToolRequestMap = {
   'file.readSymbol': FileReadSymbolRequest;
   'git.status': GitStatusRequest;
   'git.diff': GitDiffRequest;
+  'git.overview': GitOverviewRequest;
+  'git.history': GitHistoryRequest;
+  'git.blame': GitBlameRequest;
   'edit.preview': EditPreviewRequest;
   'edit.apply': EditApplyRequest;
   'diagnostics.get': DiagnosticsGetRequest;
@@ -381,6 +478,9 @@ export type ToolResponseMap = {
   'file.readSymbol': FileReadSymbolResponse;
   'git.status': GitStatusResponse;
   'git.diff': GitDiffResponse;
+  'git.overview': GitOverviewResponse;
+  'git.history': GitHistoryResponse;
+  'git.blame': GitBlameResponse;
   'edit.preview': EditPreviewResponse;
   'edit.apply': EditApplyResponse;
   'diagnostics.get': DiagnosticsGetResponse;

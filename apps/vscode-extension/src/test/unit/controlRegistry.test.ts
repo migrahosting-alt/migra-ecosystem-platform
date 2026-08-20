@@ -36,18 +36,18 @@ function withFixture(contents: string, assertion: (r: ReturnType<typeof aggregat
   }
 }
 
-test('the shipped registry validates and now holds five controls', () => {
+test('the shipped registry validates and now holds six controls', () => {
   const r = aggregate();
   assert.equal(r.status, 0, `validation failed: ${r.stderr}`);
-  assert.match(r.stdout, /5 declared, 23 known gaps of 28 contributed commands/);
+  assert.match(r.stdout, /6 declared, 23 known gaps of 29 contributed commands/);
 
   const artifact = JSON.parse(
     readFileSync(join(EXT_ROOT, 'src', 'interaction', 'generated', 'controls.generated.json'), 'utf8'),
   ) as { declarations: Array<{ controlId: string; consequence: string; locator: { commandId: string } }>; coverage: { knownGaps: string[] } };
 
-  assert.deepEqual(artifact.declarations.map((d) => d.controlId).sort(), ['diagnose-failure', 'explain-selection', 'governed-coding', 'quick-edit', 'run-command']);
+  assert.deepEqual(artifact.declarations.map((d) => d.controlId).sort(), ['diagnose-failure', 'explain-selection', 'git-overview', 'governed-coding', 'quick-edit', 'run-command']);
   // Distinct identities, distinct exact locators — the generalisation this slice exists to prove.
-  assert.equal(new Set(artifact.declarations.map((d) => d.locator.commandId)).size, 5);
+  assert.equal(new Set(artifact.declarations.map((d) => d.locator.commandId)).size, 6);
   // The first control that can WRITE to the repository declares itself as such.
   assert.equal(artifact.declarations.find((d) => d.controlId === 'governed-coding')?.consequence, 'mutating');
   // The ad-hoc command lane declares `mutating` too: it writes nothing itself, but the
@@ -56,6 +56,9 @@ test('the shipped registry validates and now holds five controls', () => {
   // The quick edit lane is `mutating`, not `approval`: it passes THROUGH an approval, but its
   // job is to change files, not to grant authority. `approval` belongs to the reviewer.
   assert.equal(artifact.declarations.find((d) => d.controlId === 'quick-edit')?.consequence, 'mutating');
+  // Read-only Git visibility is read-only in BOTH senses: the control reads, and nothing it
+  // can request writes. No request it makes carries a git subcommand or flag.
+  assert.equal(artifact.declarations.find((d) => d.controlId === 'git-overview')?.consequence, 'read-only');
   assert.ok(!artifact.coverage.knownGaps.includes('migrapilot.explainSelection'), 'the declared command left the gap list');
   assert.equal(artifact.coverage.knownGaps.length, 23);
 });
