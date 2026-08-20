@@ -37,7 +37,7 @@
     },
     {
       "file": "src/extension.ts",
-      "line": 360,
+      "line": 361,
       "api": "showWarningMessage",
       "classification": "consumed",
       "snippet": "await vscode.window.showWarningMessage([card.title, '', ...card.lines].join('\\n'), { modal: true }, 'Approve once', 'Sta"

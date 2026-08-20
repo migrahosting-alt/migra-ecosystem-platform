@@ -1,3 +1,4 @@
+import { capabilityStatusLine } from './services/capabilityContractVscode.js';
 import * as vscode from 'vscode';
 import { randomBytes } from 'node:crypto';
 import type { DiagnosticsGetResponse } from '@migrapilot/protocol';
@@ -713,11 +714,16 @@ export async function deactivate(): Promise<void> {
 }
 
 async function checkHealth(): Promise<void> {
+  // Qualified-intelligence availability is reported alongside runtime health because the two
+  // failures look identical to a user otherwise: a healthy Brain with nothing qualified is
+  // NOT a usable estate, and must not be presented as one.
+  const capabilityLine = capabilityStatusLine();
+  output(capabilityLine);
   try {
     const health = await brainClient.health();
-    const message = `MigraPilot brain is ${health.status}. Version ${health.version}. Uptime ${health.uptimeSec}s.`;
+    const message = `MigraPilot Brain Service is ${health.status}. Version ${health.version}. Uptime ${health.uptimeSec}s. ${capabilityLine}`;
     output(message);
-    shell?.recordActivity(`Health check: brain ${health.status}`, health.status === 'ok' ? 'ok' : 'warn');
+    shell?.recordActivity(`Health check: Brain Service ${health.status}`, health.status === 'ok' ? 'ok' : 'warn');
     void vscode.window.showInformationMessage(message, 'Show Logs');
   } catch (error) {
     const message = formatError('Health check failed', error);
