@@ -252,18 +252,28 @@ attributable to the guard**: a better initial apply is within this model's measu
 variance. What the guard demonstrably changed is that the run stopped instead of
 spending its budget, and said why.
 
-### t1, before and after
+### t1, across four runs of one build
 
-| | wall | answer |
+| run | wall | answer |
 |---|---|---|
-| frozen run | 9s | **67 bytes** — title, stamp, unterminated fence, reported as an answer |
-| after | 135s | 3 667 bytes, substantive, in English |
+| early read | 63s | 4 490 bytes, substantive, **French** |
+| frozen | 9s | **67 bytes** — title, stamp, unterminated fence, reported as an answer |
+| slice-3 rerun | 119s | 3 667 bytes, substantive, **English** |
+| slice-3b rerun | 135s | 5 145 bytes, substantive, **French** |
 
-**The empty-completion guard did not fire in this run** — the model produced a real
-answer, so there was nothing to suppress. It is proven by unit test against the
-recorded 67-byte output, not by live reproduction; the empty case is intermittent.
-t1 has now produced a French answer, an empty answer and an English answer across
-three runs of the same build.
+**The empty-completion guard did not fire in either rerun** — the model produced a
+real answer, so there was nothing to suppress. It is proven by unit test against
+the recorded 67-byte output, not by live reproduction; the empty case is
+intermittent.
+
+**Correction.** An earlier version of this section reported the 135s rerun as "3 667
+bytes, in English". That conflated two different reruns: the English answer was the
+119s run, and the 135s run that followed it was French. The error was found while
+building the Engineer evaluation, when a language checker scored the file labelled
+"english answer" at eleven French markers. **The 3 667-byte English transcript no
+longer exists** — the launcher overwrote it on the next run. Per-run transcripts are
+now preserved (see README) so a rerun can no longer destroy the evidence it is
+being compared against.
 
 ### Two defects found in my own fix
 

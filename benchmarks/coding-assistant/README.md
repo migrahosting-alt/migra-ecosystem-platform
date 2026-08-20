@@ -78,6 +78,12 @@ Three defences, all now in `adapters/migrapilot-launch.mjs`:
 **Never trust a cross-task regression before checking that every task got its own
 backend.**
 
+A fourth defence, added after a rerun destroyed the evidence it was being compared
+against: **every run is archived** under `results/runs/<task>/<brainPid>.*`, so
+`results/migrapilot__<task>.*` being the latest never costs the previous one. A
+comparison whose baseline can be overwritten by the act of measuring is not a
+comparison.
+
 ## Environment caveats, recorded not hidden
 
 - MigraPilot's local model was `qwen2.5-coder:14b` (the router's choice at the

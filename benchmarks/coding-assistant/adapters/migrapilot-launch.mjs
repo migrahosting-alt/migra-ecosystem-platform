@@ -204,6 +204,14 @@ for (const task of tasks) {
   };
   fs.writeFileSync(path.join(RESULTS, `migrapilot__${task.id}.json`), JSON.stringify(record, null, 2));
   fs.writeFileSync(path.join(RESULTS, `migrapilot__${task.id}.transcript.txt`), evidence.answer ?? '');
+  // A RERUN MUST NOT DESTROY THE ANSWER IT IS BEING COMPARED AGAINST. The English
+  // t1 answer from one rerun was overwritten by the next and is gone; the
+  // comparison that depended on it had to be corrected from memory. Every run also
+  // keeps its own copy, keyed by the Brain PID that produced it.
+  const archive = path.join(RESULTS, 'runs', `${task.id}`);
+  fs.mkdirSync(archive, { recursive: true });
+  fs.writeFileSync(path.join(archive, `${provenance.brainPid}.transcript.txt`), evidence.answer ?? '');
+  fs.writeFileSync(path.join(archive, `${provenance.brainPid}.json`), JSON.stringify(record, null, 2));
   console.log(
     `migrapilot   ${task.id.padEnd(12)} ${String(Math.round(wallMs / 1000)).padStart(4)}s`,
     `visible ${record.visibleAfter.pass}/${record.visibleAfter.pass + record.visibleAfter.fail}`,
