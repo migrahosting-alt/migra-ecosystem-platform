@@ -2,6 +2,22 @@
 // engineer (Slice 2). Local-only: no pilot-api involvement anywhere on this
 // path, so disabled remote delegation can never block ordinary local work.
 
+import { DEFAULT_TIMEOUTS } from '../config/timeoutHierarchy.js';
+import { classifyOutcome, type OperationOutcome } from './operationOutcome.js';
+
+/** Which clock a provider timeout code refers to, for an honest message. */
+function timeoutClock(code: string): 'connect' | 'idle' | 'response' | 'absolute' {
+  if (code === 'PROVIDER_CONNECT_TIMEOUT') return 'connect';
+  if (code === 'PROVIDER_IDLE_TIMEOUT') return 'idle';
+  if (code === 'PROVIDER_ABSOLUTE_TIMEOUT') return 'absolute';
+  return 'response';
+}
+
+/** The terminal state a provider failure implies, before other evidence. */
+function outcomeFor(code: string): OperationOutcome {
+  if (code === 'USER_ABORTED') return 'cancelled';
+  return /_TIMEOUT$/.test(code) ? 'timed_out' : 'failed';
+}
 import type { FastifyInstance } from 'fastify';
 import { readdir } from 'node:fs/promises';
 import * as path from 'node:path';
@@ -237,6 +253,7 @@ export function registerEngineerRoutes(
       apiKey: env.openAiApiKey,
       connectTimeoutMs: env.providerConnectTimeoutMs,
       idleTimeoutMs: env.providerIdleTimeoutMs,
+      responseTimeoutMs: env.providerResponseTimeoutMs,
       absoluteTimeoutMs: env.providerAbsoluteTimeoutMs,
     });
   };
@@ -440,6 +457,7 @@ export function registerEngineerRoutes(
     stage.log('route', { model: decision.model.id, provider: decision.model.provider, fallbackRecommended: routing.fallbackRecommended });
     await auditStore.append({ correlationId, type: 'execution.routed', component: 'engineer', fields: { model: decision.model.id, provider: decision.model.provider, ...(routing.policy ? { policy: routing.policy, fallbackRecommended: routing.fallbackRecommended } : {}) } });
 
+    const KEEPALIVE_MS = DEFAULT_TIMEOUTS.keepaliveMs;
     reply.hijack();
     const raw = reply.raw;
     raw.writeHead(200, {
@@ -456,10 +474,31 @@ export function registerEngineerRoutes(
       if (closed) return;
       try {
         raw.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+        lastWriteAt = Date.now();
       } catch {
         closed = true;
       }
     };
+
+    // KEEPALIVE — the only thing that distinguishes slow work from dead work.
+    //
+    // A local model can spend minutes on prefill before its first token, during
+    // which the stream is silent and indistinguishable from a hung one. Every
+    // patience clock in the chain resets on ANY frame, so a periodic heartbeat is
+    // what lets those clocks stay short: the UI can give up after two minutes of
+    // real silence without ever cutting off work that is genuinely running.
+    //
+    // It carries elapsed time so a client can show honest progress, and it is the
+    // only frame with no meaning for the answer — clients ignore its content.
+    let lastWriteAt = Date.now();
+    const startedAt = Date.now();
+    const keepalive = setInterval(() => {
+      if (closed) return;
+      if (Date.now() - lastWriteAt < KEEPALIVE_MS) return; // real output already proved life
+      send('keepalive', { elapsedMs: Date.now() - startedAt });
+    }, KEEPALIVE_MS);
+    keepalive.unref?.();
+    request.raw.on('close', () => clearInterval(keepalive));
 
     // ── Capability authority: does this model have STANDING for this work? ─────
     // Computed from measured benchmark grants, disclosed by the host, and audited. This
@@ -801,12 +840,18 @@ export function registerEngineerRoutes(
 
     await auditStore.append({ correlationId, type: 'loop.started', component: 'engineer' });
     let failure: ProviderFailure | undefined;
-    let terminal: 'completed' | 'failed' = 'failed';
+    // FIVE terminal states, not two. `completed | failed` could not say that a
+    // deadline fired while the work was still running, that a human stopped it, or
+    // that the client went away mid-answer — so all three were reported as
+    // `failed`, which blamed the model for two of them.
+    let terminal: OperationOutcome = 'failed';
+    let engineCompleted = false;
     let finalText = '';
     try {
       for await (const ev of events) {
         if (closed) break; // client went away — stop driving the model
         if (ev.type === 'final') {
+          engineCompleted = true;
           terminal = 'completed';
           const f = ev as { content?: string; summary?: string; text?: string };
           finalText = String(f.content ?? f.summary ?? f.text ?? '');
@@ -819,8 +864,26 @@ export function registerEngineerRoutes(
       // "too slow to start" from "went silent" from "the user pressed Stop", which
       // made a 60s total-deadline defect look like an unexplained engine fault.
       failure = classifyProviderFailure(err);
-      send('error', { type: 'error', code: failure.code, cause: failure.cause, ...(failure.limitMs ? { limitMs: failure.limitMs } : {}), error: sanitizeError(err) });
+      send('error', {
+        type: 'error', code: failure.code, cause: failure.cause,
+        ...(failure.limitMs ? { limitMs: failure.limitMs } : {}),
+        error: sanitizeError(err),
+        outcome: outcomeFor(failure.code),
+      });
     }
+
+    // Decide the terminal state from what was OBSERVED, in one place.
+    terminal = classifyOutcome({
+      ...(failure?.code === 'USER_ABORTED' ? { cancelled: true } : {}),
+      ...(failure && /_TIMEOUT$/.test(failure.code)
+        ? { timedOut: { clock: timeoutClock(failure.code), limitMs: failure.limitMs ?? 0, elapsedMs: Date.now() - startedAt } }
+        : {}),
+      // A client that went away is never a completed answer, however much of it
+      // was generated before the socket closed.
+      ...(closed && !engineCompleted ? { streamEndedEarly: true } : {}),
+      engineCompleted,
+      ...(failure && failure.code === 'ENGINE_FAILURE' ? { error: { message: failure.cause } } : {}),
+    });
     if (terminal === 'completed') {
       await auditStore.append({ correlationId, type: 'loop.completed', component: 'engineer' });
       await auditStore.append({ correlationId, type: 'execution.completed', component: 'engineer', outcome: 'ok' });
@@ -859,10 +922,15 @@ export function registerEngineerRoutes(
     }
     send('done', {
       correlationId,
+      outcome: terminal,
       routing: { policy: routing.policy, requestedPolicy: routing.requestedPolicy, effectivePolicy: routing.effectivePolicy, policyReason: routing.policyReason, model: decision.model.id, providerId: decision.model.provider, fallbackRecommended, reasons: [...routing.fallbackReasons, ...assessment.reasons] },
       ...(escalationOffer ? { escalationOffer } : {}),
       ...(localSavings ? { localSavings } : {}),
     });
+    // The heartbeat must not outlive the request it was proving alive. `unref` kept
+    // it from holding the process open, but one interval per completed request is
+    // still an orphan, and "no orphan remains" is the contract.
+    clearInterval(keepalive);
     raw.end();
   });
 }

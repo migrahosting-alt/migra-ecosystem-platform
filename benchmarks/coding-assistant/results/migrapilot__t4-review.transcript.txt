@@ -1,0 +1,19 @@
+The uncommitted changes in `src/inventory.js` refactor the `reserve` method to perform both the check and decrement operations in a single pass. This change aims to optimize the code by reducing the number of iterations over the `lines` array from two to one.
+
+**Defect introduced:** The refactoring introduces a defect where reservations are decremented even if an `OutOfStockError` is thrown for one of the lines. This means that if any line in the order cannot be met, the quantities for all other lines in the order will still be decremented from the stock, leading to an inconsistent inventory state.
+
+**Exact input that would trigger the defect:**
+```javascript
+const inventory = new Inventory({
+  'sku1': 10,
+  'sku2': 5
+});
+inventory.reserve('order123', [
+  { sku: 'sku1', quantity: 8 },
+  { sku: 'sku2', quantity: 10 }
+]);
+```
+
+**What would go wrong:** The `OutOfStockError` would be thrown for `sku2` because only 5 units are available, but `sku1` would still have its quantity decremented from 10 to 2. This leaves the inventory in an inconsistent state where `sku1` has fewer units available than intended.
+
+**Summary:** The proposed change is not safe to commit as it can lead to inconsistent inventory state. The original two-pass approach ensures that either all lines are reserved successfully, or none are reserved at all, maintaining the atomicity of the reservation.

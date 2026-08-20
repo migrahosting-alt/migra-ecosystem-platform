@@ -4,7 +4,20 @@
   "task": "t1-explain",
   "kind": "explain",
   "model": "qwen3-coder:30b",
-  "wallMs": 73535,
+  "wallMs": 8837,
+  "provenance": {
+    "brainPid": 2546258,
+    "brainPort": 43320,
+    "brainUrl": "http://127.0.0.1:43320",
+    "workspaceRoot": "/tmp/bench-t1-explain-tqYUgd",
+    "codingRootsGranted": "/tmp/bench-t1-explain-tqYUgd",
+    "service": "migrapilot-brain",
+    "serviceVersion": "0.1.0",
+    "uptimeSecAtAttach": 0,
+    "model": "qwen3-coder:30b",
+    "spawnedByHarness": true,
+    "timeoutOverrides": []
+  },
   "visibleBefore": {
     "exit": 0,
     "pass": 3,
@@ -29,27 +42,26 @@
   ],
   "steps": [
     {
-      "at": 1787239960670,
+      "at": 1787245502527,
       "step": "timeout",
       "detail": "900000"
     },
     {
-      "at": 1787239960842,
+      "at": 1787245502547,
       "step": "activated",
-      "detail": "/tmp/bench-t1-explain-xeiNeF"
+      "detail": "/tmp/bench-t1-explain-tqYUgd"
     },
     {
-      "at": 1787239961159,
+      "at": 1787245502859,
       "step": "selected",
       "detail": "submitOrder in src/orders.js"
     },
     {
-      "at": 1787240030458,
+      "at": 1787245507364,
       "step": "explained",
-      "detail": "4305 chars"
+      "detail": "66 chars"
     }
   ],
   "testOutcome": null,
-  "errors": [],
-  "invalid": null
+  "errors": []
 }

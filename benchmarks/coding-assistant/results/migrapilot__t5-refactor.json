@@ -4,7 +4,20 @@
   "task": "t5-refactor",
   "kind": "refactor",
   "model": "qwen3-coder:30b",
-  "wallMs": 76281,
+  "wallMs": 116909,
+  "provenance": {
+    "brainPid": 2586353,
+    "brainPort": 43690,
+    "brainUrl": "http://127.0.0.1:43690",
+    "workspaceRoot": "/tmp/bench-t5-refactor-ztcKEP",
+    "codingRootsGranted": "/tmp/bench-t5-refactor-ztcKEP",
+    "service": "migrapilot-brain",
+    "serviceVersion": "0.1.0",
+    "uptimeSecAtAttach": 0,
+    "model": "qwen3-coder:30b",
+    "spawnedByHarness": true,
+    "timeoutOverrides": []
+  },
   "visibleBefore": {
     "exit": 0,
     "pass": 3,
@@ -37,32 +50,32 @@
   ],
   "steps": [
     {
-      "at": 1787242153039,
+      "at": 1787246015866,
       "step": "timeout",
       "detail": "900000"
     },
     {
-      "at": 1787242153202,
+      "at": 1787246015885,
       "step": "activated",
-      "detail": "/tmp/bench-t5-refactor-YzHNul"
+      "detail": "/tmp/bench-t5-refactor-ztcKEP"
     },
     {
-      "at": 1787242153202,
+      "at": 1787246015885,
       "step": "coding:start",
       "detail": "t5-refactor"
     },
     {
-      "at": 1787242186704,
+      "at": 1787246099152,
       "step": "scope",
-      "detail": "{\"files\":[{\"path\":\"src/pricing.js\",\"rationale\":\"This file contains the duplicated percentage calculation logic that needs to be refactored into a single helper function.\",\"evidence\":[{\"startLine\":1,\"endLine\":39,\"excerptHash\":\"59b4d94258b01859\"}]}]}"
+      "detail": "{\"files\":[{\"path\":\"src/pricing.js\",\"rationale\":\"This file contains the duplicated percentage-reduction logic that needs to be refactored into a single helper function.\",\"evidence\":[{\"startLine\":1,\"endLine\":39,\"excerptHash\":\"59b4d94258b01859\"}]}]}"
     },
     {
-      "at": 1787242224548,
+      "at": 1787246128878,
       "step": "final",
-      "detail": "{\"runId\":\"codingrun_594ee138-f71c-4fbe-8d7f-ed850320b0c7\",\"revision\":17,\"state\":\"COMPLETED\",\"complete\":true,\"changedFiles\":[\"src/pricing.js\"],\"markdown\":\"# Governed coding — Completed\\n\\nRun `codingrun_594ee138-f71c-4fbe-8d7f-ed850320b0c7` · revision 17 · state `COMPLETED`\\n\\n**Complete:** yes · **S"
+      "detail": "{\"runId\":\"codingrun_aeffff5a-f7cb-42c6-b55d-5e66832818f8\",\"revision\":17,\"state\":\"COMPLETED\",\"complete\":true,\"changedFiles\":[\"src/pricing.js\"],\"markdown\":\"# Governed coding \u2014 Completed\\n\\nRun `codingrun_aeffff5a-f7cb-42c6-b55d-5e66832818f8` \u00b7 revision 17 \u00b7 state `COMPLETED`\\n\\n**Complete:** yes \u00b7 **S"
     },
     {
-      "at": 1787242224789,
+      "at": 1787246129093,
       "step": "tests",
       "detail": "{\"status\":\"passed\",\"totals\":{\"passed\":3,\"failed\":0}}"
     }
@@ -75,6 +88,5 @@
     },
     "failures": []
   },
-  "errors": [],
-  "root": "/tmp/bench-t5-refactor-YzHNul"
+  "errors": []
 }

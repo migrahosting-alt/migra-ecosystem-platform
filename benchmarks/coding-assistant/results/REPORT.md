@@ -118,3 +118,95 @@ is 1393/1505 with the same 57 pre-existing Postgres failures as before the chang
 
 Still open, for the next slices: `t1` answered in French, `t3` did not converge
 (4/5 hidden, ended FAILED at revision 35), `t4` interrupted after 427s.
+
+---
+
+## Slice 2 — frozen five-task evidence
+
+Two complete runs on the identical build, fixed harness, **shipped defaults, no timeout
+overrides**. Both are shown wherever they differ: one number per task would hide how
+unstable some of this is, and the instability is itself the finding.
+
+| Task | Frozen run (with provenance) | Early read | Same outcome? |
+|---|---|---|---|
+| `t1-explain` | 9s · **empty answer (67 bytes)** | 63s · real answer, **in French** | **NO — content** |
+| `t2-repair` | 59s · visible 3/3 · hidden 4/4 · 1 file(s) | 55s · visible 3/3 · hidden 4/4 · 1 file(s) | yes |
+| `t3-feature` | 306s · visible 0/5 · hidden 0/5 · 3 file(s) | 321s · visible 4/5 · hidden 4/5 · 3 file(s) | **NO** |
+| `t4-review` | 134s · **found the real defect** | 193s · **analysis inverted** | **NO — content** |
+| `t5-refactor` | 117s · visible 3/3 · hidden 2/2 · 1 file(s) | 125s · visible 3/3 · hidden 2/2 · 1 file(s) | yes |
+
+### Provenance — every task got its own Brain
+
+| Task | Brain PID | Port | Uptime at attach | Overrides | Workspace root |
+|---|---|---|---|---|---|
+| `t1-explain` | 2546258 | 43320 | 0s | `[]` | `…-t1-explain-tqYUgd` |
+| `t2-repair` | 2547964 | 44940 | 0s | `[]` | `…h-t2-repair-6bsxFO` |
+| `t3-feature` | 2552965 | 43822 | 0s | `[]` | `…-t3-feature-5mfPbd` |
+| `t4-review` | 2575549 | 44794 | 0s | `[]` | `…h-t4-review-BJlIld` |
+| `t5-refactor` | 2586353 | 43690 | 0s | `[]` | `…t5-refactor-ztcKEP` |
+
+The pass/fail columns say **nothing** about whether an explanation or a review was
+correct — `t1` and `t4` produce no tests to run. Both were read by hand, and both
+differed completely between runs while scoring identically. A column that had only
+counted tests would have called them stable; it was corrected rather than kept.
+
+### Answer quality, read by hand
+
+- **`t1-explain`** — frozen run returned an **empty document**: a title, the
+  provenance line, and an unterminated code fence. 67 bytes, no error, presented as
+  a finished answer. The early read returned a correct explanation **written in
+  French** from an English prompt on an English codebase.
+- **`t4-review`** — frozen run **identified the real defect**: *"reservations are
+  decremented even if an OutOfStockError is thrown for one of the lines… leading to
+  an inconsistent inventory state."* The early read asserted the exact opposite —
+  that the single pass *ensures* atomicity — and invented a race condition
+  irrelevant to single-threaded JavaScript. Both correctly made no edits.
+- **`t3-feature`** — frozen run changed +70/−41 across three files and broke **every
+  pre-existing test**, including three that passed at baseline. The early read got
+  4 of 5 hidden checks. Same build, same prompt, same fixture.
+
+## Failure ownership — one owner each
+
+| Task | Outcome | Primary owner |
+|---|---|---|
+| `t1-explain` | empty answer (frozen) / French answer (early) | **model/intelligence** |
+| `t2-repair` | **PASS** in both runs | — |
+| `t3-feature` | fails, and unstable between 0/5 and 4/5 | **model/intelligence** |
+| `t4-review` | completes; correct once, inverted once | **model/intelligence** |
+| `t5-refactor` | **PASS** in both runs | — |
+
+**Nothing remains in retrieval/planning, transport/runtime, or benchmark/harness.**
+Slice 1 removed the planning refusals; Slice 2 removed the deadline and stream
+failures; the harness now proves per-task isolation. Every surviving defect is in
+the model layer.
+
+Two **workflow/tooling** contributors are worth separating out, because they are
+MigraPilot's to fix even though the model caused the underlying error:
+
+1. **An empty completion is presented as a successful answer.** Same family as the
+   stream-interruption fix — never present nothing as an answer.
+2. **The coding loop can terminate leaving its own declared verification failing
+   outright.** On `t3` it ran `test.run`, observed a suite where nothing passed, and
+   finished anyway with the workspace worse than it started. A bounded
+   repair-or-revert loop is the missing piece.
+
+## Acceptance
+
+| Criterion | Result |
+|---|---|
+| `t2` and `t5` PASS from clean baselines | ✅ both, in both runs |
+| `t1` completes without timeout or connection loss | ✅ both runs |
+| `t3` fails for a real reasoning/self-repair reason, not transport | ✅ no transport failure in either run's Brain log |
+| `t4` completes with a truthful terminal state attributable to reasoning | ✅ both runs |
+| Every task on its own Brain, own ephemeral port | ✅ five distinct PIDs and ports |
+| No result from a Brain the harness did not start | ✅ `uptimeSecAtAttach: 0` on all five |
+| No timeout overrides in the launcher | ✅ `timeoutOverrides: []` on all five |
+
+## Known limitation of this evidence
+
+`provenance.modelRequested` records `qwen3-coder:30b`, which is what the launcher
+configured — **not necessarily what the router selected**. The router has been
+observed choosing `qwen2.5-coder:14b` at the `balanced` tier for the same request.
+The field was renamed from `model` after this run, and a `modelRouted` slot is now
+populated from the engine's own `route` frame; these five records predate that, so
+their model field states an intention, not a fact.

@@ -1,0 +1,60 @@
+# MigraPilot: Explain Selection
+
+_op chat-mt1rcpuy-6 · rev 4_
+
+### Explication claire du code
+
+Cette fonction `submitOrder` est l'élément central pour enregistrer une commande dans un système de vente. Elle effectue plusieurs étapes dans un ordre précis :
+
+1. **Validation de la commande :**
+   - Elle appelle `validateOrder(order)` pour vérifier que la commande respecte certaines règles (ex. les lignes doivent contenir un SKU, une quantité valide, etc.). Si la validation échoue, une erreur est levée.
+
+2. **Génération d'un identifiant unique :**
+   - Elle demande à `repository.nextId()` un ID unique pour cette commande, qui sera utilisé plus tard pour l'enregistrer en base.
+
+3. **Réservation de stock :**
+   - Elle appelle `inventory.reserve(id, order.lines)` afin de réserver les produits demandés dans la commande. Cela évite qu’un produit ne soit vendu deux fois si plusieurs commandes sont traitées en même temps.
+
+4. **Calcul du prix :**
+   - **Sous-total (`subtotalCents`)** : Calculé avec `lineSubtotal(order.lines)`.
+   - **Réduction membre (`afterMember`)** : Appliquée avec `memberDiscount(subtotalCents, order.tier ?? 'none')`. L'option `?? 'none'` prend en compte le fait que si aucun niveau de membre n'est spécifié, on suppose qu’il s’agit d’un client non-membre.
+   - **Coupon (`afterCoupon`)** : Appliqué via `applyCoupon(afterMember, order.coupon)`.
+   - **Taxe (`taxCents`)** : Calculée en dernier sur le prix déjà réduit, grâce à `taxFor(afterCoupon)` — la taxe ne s'applique donc pas sur le prix initial mais sur ce qu’a effectivement payé le client.
+
+5. **Enregistrement de la commande :**
+   - En cas de succès, elle sauvegarde l’information complète (`repository.save(...)`) dans un format structuré contenant tous les éléments nécessaires à la facturation et au suivi.
+   - Si quelque chose échoue durant ce processus (exemple : erreur de calcul ou dans le sauvegarde), le bloc `catch` s’exécute :
+     - Il libère (`inventory.release(id)`) la réservation de stock qui avait été faite avant, pour éviter qu’un produit reste bloqué.
+     - Puis il relance l'erreur (`throw error`) afin que l’appelant puisse gérer cette erreur correctement.
+
+---
+
+### Risques identifiés
+
+1. **Erreurs non gérées dans `applyCoupon` ou d'autres fonctions :**
+   - Il est important de savoir si `applyCoupon`, `memberDiscount`, etc., peuvent lever des exceptions inattendues.
+   - En cas d’erreur critique (par exemple, mauvaise gestion du coupon), cela peut entraîner la libération de stock sans avoir sauvegardé la commande — ce qui pourrait mener à un état inconsistent dans le système.
+
+2. **Réserve de stock avant le calcul final :**
+   - Réserver le stock avant le calcul complet est bon pour éviter les conflits mais cela signifie que le système réserve des produits même si l’opération échoue ensuite.
+   - Cela peut poser problème si :
+     - Il y a peu de stock disponible.
+     - Des erreurs intermédiaires se produisent après la réservation, entraînant un blocage inutile de ressources.
+
+3. **Manque de traçabilité ou journalisation :**
+   - Le code ne semble pas logguer les actions ou les erreurs dans le cas d’un échec.
+   - Dans un environnement réel, cela pourrait rendre difficile le diagnostic d’un problème (ex. : pourquoi une commande n’a pas été enregistrée ?).
+
+4. **Risque de données incorrectes si `validateOrder` est contourné :**
+   - Si `validateOrder` n’est jamais appelée ou si sa logique change sans mise à jour, le système peut traiter des commandes invalides et provoquer des erreurs imprévues ou des résultats incohérents.
+
+---
+
+### Conclusion
+
+La fonction `submitOrder` est bien structurée et suit les principes de **sécurité**, **clarté de logique de prix** (sous-total → réduction → coupon → taxe) et de **gestion d’erreurs** (récupération automatique du stock lors d’un échec). Toutefois, pour assurer la robustesse globale du système :
+- Il faudrait garantir la fiabilité des fonctions annexes (`applyCoupon`, `memberDiscount`, etc.)
+- Considérer l’ajout de logs pour tracer les étapes critiques
+- Établir une protection supplémentaire contre les cas limites ou échecs fréquents
+
+À partir du contexte fourni, aucune autre définition de `memberDiscount`, `applyCoupon` ou `taxFor` n’a été donnée, donc on ne peut pas déterminer exactement leur comportement sans plus d’informations.

@@ -1,0 +1,60 @@
+{
+  "task": "t3-feature",
+  "kind": "feature",
+  "capabilities": [
+    "coding.issue",
+    "coding.scope-approval",
+    "governed-coding",
+    "test.run"
+  ],
+  "steps": [
+    {
+      "at": 1787244827494,
+      "step": "timeout",
+      "detail": "900000"
+    },
+    {
+      "at": 1787244827510,
+      "step": "activated",
+      "detail": "/tmp/bench-t3-feature-q4pXfw"
+    },
+    {
+      "at": 1787244827510,
+      "step": "coding:start",
+      "detail": "t3-feature"
+    },
+    {
+      "at": 1787244933781,
+      "step": "scope",
+      "detail": "{\"files\":[{\"path\":\"src/validation.js\",\"rationale\":\"The validateOrder function needs to be updated to check for maxOrdersPerCustomer and validate it as part of the order structure.\",\"evidence\":[{\"startLine\":1,\"endLine\":32,\"excerptHash\":\"5b3f788fd0c8cacf\"}]},{\"path\":\"src/orders.js\",\"rationale\":\"The submitOrder function must be modified to check if a customer has exceeded their order limit before processing the order, and to throw a ValidationError if they have.\",\"evidence\":[{\"startLine\":1,\"endLine"
+    },
+    {
+      "at": 1787245144354,
+      "step": "final",
+      "detail": "{\"runId\":\"codingrun_dfc77246-b3e7-4d7e-ae6b-770904e7e352\",\"revision\":39,\"state\":\"FAILED\",\"complete\":false,\"changedFiles\":[\"src/orders.js\",\"src/validation.js\",\"test/orders.test.js\"],\"markdown\":\"# Governed coding \u2014 Failed\\n\\nRun `codingrun_dfc77246-b3e7-4d7e-ae6b-770904e7e352` \u00b7 revision 39 \u00b7 state `F"
+    },
+    {
+      "at": 1787245144566,
+      "step": "tests",
+      "detail": "{\"status\":\"failed\",\"totals\":{\"passed\":4,\"failed\":1}}"
+    }
+  ],
+  "answer": "{\"runId\":\"codingrun_dfc77246-b3e7-4d7e-ae6b-770904e7e352\",\"revision\":39,\"state\":\"FAILED\",\"complete\":false,\"changedFiles\":[\"src/orders.js\",\"src/validation.js\",\"test/orders.test.js\"],\"markdown\":\"# Governed coding \u2014 Failed\\n\\nRun `codingrun_dfc77246-b3e7-4d7e-ae6b-770904e7e352` \u00b7 revision 39 \u00b7 state `FAILED`\\n\\n**Complete:** no \u00b7 **Stop reason:** `repair-ceiling-exhausted`\\n\\n## Files\\n- **Approved scope:** `src/validation.js`, `src/orders.js`, `src/repository.js`, `test/orders.test.js`\\n- **Changed (git diff, authoritative):** `src/orders.js`, `src/validation.js`, `test/orders.test.js`\\n- **Approved but never written:** `src/repository.js`\\n\\n## Validation\\n- Ran validation (attempt 1): **failed**\\n- Ran validation (attempt 2): **failed**\\n- Ran validation (attempt 3): **failed**\\n- Ran validation (attempt 4): **failed**\\n- Command: `npm test` \u2192 exit 1\\n\\n## Repairs\\n- Proposed a repair (attempt 1): observed_success\\n- Applied the repair (attempt 1): observed_success\\n- Proposed a repair (attempt 2): observed_success\\n- Applied the repair (attempt 2): observed_success\\n- Proposed a repair (attempt 3): observed_success\\n- Applied the repair (attempt 3): observed_success\\n\\n## Completion blocked by\\n- required_child_not_successful: codingchild_codingrun_dfc77246-b3e7-4d7e-ae6b-770904e7e352_reconciliation_1 (observed_failure)\"}",
+  "errors": [],
+  "timeoutRaisedFrom": 30000,
+  "effectiveTimeoutMs": 900000,
+  "testOutcome": {
+    "status": "failed",
+    "totals": {
+      "passed": 4,
+      "failed": 1
+    },
+    "failures": [
+      {
+        "name": "customer is limited to maxOrdersPerCustomer orders",
+        "file": null
+      }
+    ]
+  },
+  "wallMs": 320691
+}

@@ -1,0 +1,40 @@
+**Review of Uncommitted Changes**
+
+#### File: `src/inventory.js`
+- **Modification Summary:** The `reserve` method has been modified to perform a single pass check and decrement for inventory line items. The original implementation had two separate loops, one for checking and the other for decrementing.
+
+#### Detailed Analysis:
+- **Original Code (Lines 16-19):**
+  ```javascript
+  for (const line of lines) {
+    if (this.available(line.sku) < line.quantity) {
+      throw new OutOfStockError(line.sku, line.quantity, this.available(line.sku));
+    }
+  }
+  for (const line of lines) {
+    this.stock[line.sku] -= line.quantity;
+  }
+  ```
+- **Modified Code (Lines 21-24):**
+  ```javascript
+  for (const line of lines) {
+    if (this.available(line.sku) < line.quantity) {
+      throw new OutOfStockError(line.sku, line.quantity, this.available(line.sku));
+    }
+    this.stock[line.sku] -= line.quantity;
+  }
+  ```
+
+#### Potential Defects:
+1. **Race Condition:**
+   - **Issue:** The modified code ensures atomicity by checking and decrementing inventory in a single pass. However, if multiple threads or processes access the inventory simultaneously, a race condition could occur. For example, if two processes check and decrement inventory concurrently, they might both assume sufficient stock is available, leading to understocking.
+   - **Input that would Trigger it:** Simultaneous requests to reserve the same库存 line items that are just above the threshold of available stock.
+   - **Consequence:** Incorrect stock levels and potential overselling.
+
+2. **Error Handling:**
+   - **Issue:** The `reserve` method throws an `OutOfStockError` if any line item in the order cannot be met. This behavior could be problematic if the error handling in the calling code is not robust, leading to partial order processing or other cascading failures.
+   - **Input that would Trigger it:** An order with items where one or more lines exceed the available stock.
+   - **Consequence:** Order reservation failure with an `OutOfStockError`, potentially causing issues in the workflow that depends on successful order reservation.
+
+#### Summary:**
+The modification ensures atomicity by combining the check and decrement logic into a single pass. While this optimizes performance, it introduces potential race conditions in concurrent environments. Additionally, the error handling for out-of-stock situations should be carefully managed to prevent workflow disruptions. No code changes have been made; the review is complete.

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { DEFAULT_TIMEOUTS } from '../src/config/timeoutHierarchy.js';
 import test from 'node:test';
 
 import {
@@ -79,13 +80,14 @@ function sseStream(count: number, gapMs: number, opts: { headerDelayMs?: number;
   }) as unknown as typeof fetch;
 }
 
-function provider(opts: { connectMs?: number; idleMs?: number; absoluteMs?: number }, fetchImpl: typeof fetch): OpenAiCompatProvider {
+function provider(opts: { connectMs?: number; idleMs?: number; responseMs?: number; absoluteMs?: number }, fetchImpl: typeof fetch): OpenAiCompatProvider {
   const p = new OpenAiCompatProvider({
     profile: 'default',
     baseUrl: 'http://127.0.0.1:11434/v1',
     model: 'qwen2.5-coder:14b',
     ...(opts.connectMs !== undefined ? { connectTimeoutMs: opts.connectMs } : {}),
     ...(opts.idleMs !== undefined ? { idleTimeoutMs: opts.idleMs } : {}),
+    ...(opts.responseMs !== undefined ? { responseTimeoutMs: opts.responseMs } : {}),
     ...(opts.absoluteMs !== undefined ? { absoluteTimeoutMs: opts.absoluteMs } : {}),
   });
   // Inject the transport without widening the public constructor.
@@ -158,7 +160,10 @@ test('a slow NON-STREAMING generation is a response timeout, never a connect tim
   // Reporting that as `connect` sent an operator to check networking that answers in
   // 0.6ms while a 14B model spilling 34% to CPU was the real cost. The label has to name
   // what actually failed.
-  const p = provider({ connectMs: 40 }, sseStream(0, 0, { headerDelayMs: 10_000 }));
+  // `responseMs` is what bounds a non-streaming generation now — connect no longer
+  // doubles as the total, which is the whole point of the fix. The budget is set
+  // small HERE so the deadline fires inside the test.
+  const p = provider({ connectMs: 40, responseMs: 200 }, sseStream(0, 0, { headerDelayMs: 10_000 }));
 
   await assert.rejects(
     () => p.complete(req()),
@@ -214,7 +219,7 @@ test('a stream that goes silent fails with an IDLE timeout, naming the gap', asy
   );
 });
 
-test('the absolute ceiling is a real guard and is OFF by default', async () => {
+test('the absolute ceiling is a real guard, and is ON by default', async () => {
   const bounded = provider({ connectMs: 500, idleMs: 500, absoluteMs: 90 }, sseStream(50, 20));
   await assert.rejects(
     () => drain(bounded.stream(req())),
@@ -224,8 +229,12 @@ test('the absolute ceiling is a real guard and is OFF by default', async () => {
     },
   );
 
-  const unbounded = new OpenAiCompatProvider({ profile: 'default', baseUrl: 'http://x/v1', model: 'm' });
-  assert.equal(unbounded.timeoutPolicy().absoluteMs, 0, 'no ceiling unless one is configured');
+  // The ceiling is ON by default now. Unbounded meant NO layer owned the final
+  // stop, so an outer one always fired first and named the wrong cause. It stays
+  // below the Brain and extension budgets so the innermost layer reports.
+  const shipped = new OpenAiCompatProvider({ profile: 'default', baseUrl: 'http://x/v1', model: 'm' });
+  assert.ok(shipped.timeoutPolicy().absoluteMs > 0, 'the provider must own a final stop');
+  assert.equal(shipped.timeoutPolicy().absoluteMs, DEFAULT_TIMEOUTS.ceiling.provider);
 });
 
 // ── user abort is never reported as a timeout ───────────────────────────────
@@ -269,22 +278,26 @@ test('the legacy requestTimeoutMs seeds CONNECT only, never the total', async ()
 
   assert.equal(policy.connectMs, 15_000, 'the legacy value still bounds startup');
   assert.equal(policy.idleMs, 120_000, 'but idle is independent of it');
-  assert.equal(policy.absoluteMs, 0, 'and it imposes no total ceiling');
+  assert.ok(policy.responseMs > 15_000, 'and it does NOT bound a whole generation');
+  assert.equal(policy.absoluteMs, DEFAULT_TIMEOUTS.ceiling.provider, 'the shipped ceiling still applies');
 });
 
 test('explicit options win over the legacy value', () => {
   const p = new OpenAiCompatProvider({
     profile: 'default', baseUrl: 'http://x/v1', model: 'm',
-    requestTimeoutMs: 60_000, connectTimeoutMs: 10_000, idleTimeoutMs: 45_000, absoluteTimeoutMs: 600_000,
+    requestTimeoutMs: 60_000, connectTimeoutMs: 10_000, idleTimeoutMs: 45_000,
+    responseTimeoutMs: 300_000, absoluteTimeoutMs: 600_000,
   });
-  assert.deepEqual(p.timeoutPolicy(), { connectMs: 10_000, idleMs: 45_000, absoluteMs: 600_000 });
+  assert.deepEqual(p.timeoutPolicy(), { connectMs: 10_000, idleMs: 45_000, responseMs: 300_000, absoluteMs: 600_000 });
 });
 
 test('defaults are liveness-based, not total-based', () => {
   const policy = new OpenAiCompatProvider({ profile: 'default', baseUrl: 'http://x/v1', model: 'm' }).timeoutPolicy();
   assert.equal(policy.connectMs, 60_000);
   assert.equal(policy.idleMs, 120_000);
-  assert.equal(policy.absoluteMs, 0);
+  // A non-streaming generation is bounded by its OWN budget, minutes not seconds.
+  assert.ok(policy.responseMs >= 300_000, `a local generation needs minutes, got ${policy.responseMs}`);
+  assert.equal(policy.absoluteMs, DEFAULT_TIMEOUTS.ceiling.provider, 'a real final stop, not unbounded');
   assert.ok(policy.idleMs > 0, 'there is always SOME liveness guard');
 });
 

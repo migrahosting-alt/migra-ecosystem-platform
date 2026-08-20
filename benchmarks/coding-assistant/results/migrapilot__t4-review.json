@@ -4,7 +4,20 @@
   "task": "t4-review",
   "kind": "review",
   "model": "qwen3-coder:30b",
-  "wallMs": 426655,
+  "wallMs": 133691,
+  "provenance": {
+    "brainPid": 2575549,
+    "brainPort": 44794,
+    "brainUrl": "http://127.0.0.1:44794",
+    "workspaceRoot": "/tmp/bench-t4-review-BJlIld",
+    "codingRootsGranted": "/tmp/bench-t4-review-BJlIld",
+    "service": "migrapilot-brain",
+    "serviceVersion": "0.1.0",
+    "uptimeSecAtAttach": 0,
+    "model": "qwen3-coder:30b",
+    "spawnedByHarness": true,
+    "timeoutOverrides": []
+  },
   "visibleBefore": {
     "exit": 0,
     "pass": 3,
@@ -26,27 +39,31 @@
   },
   "ranTestsItself": false,
   "capabilities": [
-    "git.overview"
+    "git.overview",
+    "engineer-turn"
   ],
   "steps": [
     {
-      "at": 1787240484565,
+      "at": 1787245879557,
       "step": "timeout",
       "detail": "900000"
     },
     {
-      "at": 1787240484658,
+      "at": 1787245879578,
       "step": "activated",
-      "detail": "/tmp/bench-t4-review-coA00f"
+      "detail": "/tmp/bench-t4-review-BJlIld"
     },
     {
-      "at": 1787240484761,
+      "at": 1787245879676,
       "step": "git",
       "detail": "{\"staged\":0,\"unstaged\":1,\"untracked\":0,\"conflicted\":0}"
+    },
+    {
+      "at": 1787246010826,
+      "step": "reviewed",
+      "detail": "1385 chars"
     }
   ],
   "testOutcome": null,
-  "errors": [
-    "PilotError: Engineer stream interrupted.\n\tat MigraAiClient.engineerStream (/home/bonex/workspace/active/MigraTeck-Ecosystem/dev/apps/vscode-extension/dist/services/migraAiClient.js:420:19)\n\tat process.processTicksAndRejections (node:internal/process/task_queues:103:5)\n\tat async Object.run (/home/bonex/workspace/active/MigraTeck-Ecosystem/dev/benchmarks/coding-assistant/adapters/migrapilot-suite.cjs:81:24)"
-  ]
+  "errors": []
 }

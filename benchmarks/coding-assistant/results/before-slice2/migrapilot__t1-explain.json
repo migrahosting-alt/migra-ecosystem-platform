@@ -1,0 +1,55 @@
+{
+  "tool": "migrapilot",
+  "label": "MigraPilot",
+  "task": "t1-explain",
+  "kind": "explain",
+  "model": "qwen3-coder:30b",
+  "wallMs": 73535,
+  "visibleBefore": {
+    "exit": 0,
+    "pass": 3,
+    "fail": 0
+  },
+  "visibleAfter": {
+    "exit": 0,
+    "pass": 3,
+    "fail": 0
+  },
+  "hidden": null,
+  "scope": {
+    "files": [],
+    "added": 0,
+    "removed": 0,
+    "touchedTests": false
+  },
+  "ranTestsItself": false,
+  "capabilities": [
+    "editor-selection",
+    "explain-selection"
+  ],
+  "steps": [
+    {
+      "at": 1787239960670,
+      "step": "timeout",
+      "detail": "900000"
+    },
+    {
+      "at": 1787239960842,
+      "step": "activated",
+      "detail": "/tmp/bench-t1-explain-xeiNeF"
+    },
+    {
+      "at": 1787239961159,
+      "step": "selected",
+      "detail": "submitOrder in src/orders.js"
+    },
+    {
+      "at": 1787240030458,
+      "step": "explained",
+      "detail": "4305 chars"
+    }
+  ],
+  "testOutcome": null,
+  "errors": [],
+  "invalid": null
+}

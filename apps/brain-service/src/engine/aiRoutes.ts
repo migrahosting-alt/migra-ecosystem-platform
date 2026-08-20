@@ -177,6 +177,7 @@ export function registerAiRoutes(
       apiKey: env.openAiApiKey,
       connectTimeoutMs: env.providerConnectTimeoutMs,
       idleTimeoutMs: env.providerIdleTimeoutMs,
+      responseTimeoutMs: env.providerResponseTimeoutMs,
       absoluteTimeoutMs: env.providerAbsoluteTimeoutMs,
     });
   };

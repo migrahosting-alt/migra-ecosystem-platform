@@ -1,0 +1,56 @@
+{
+  "tool": "migrapilot",
+  "label": "MigraPilot",
+  "task": "t4-review",
+  "kind": "review",
+  "model": "qwen3-coder:30b",
+  "wallMs": 192715,
+  "visibleBefore": {
+    "exit": 0,
+    "pass": 3,
+    "fail": 0
+  },
+  "visibleAfter": {
+    "exit": 0,
+    "pass": 3,
+    "fail": 0
+  },
+  "hidden": null,
+  "scope": {
+    "files": [
+      "src/inventory.js"
+    ],
+    "added": 1,
+    "removed": 2,
+    "touchedTests": false
+  },
+  "ranTestsItself": false,
+  "capabilities": [
+    "git.overview",
+    "engineer-turn"
+  ],
+  "steps": [
+    {
+      "at": 1787245150191,
+      "step": "timeout",
+      "detail": "900000"
+    },
+    {
+      "at": 1787245150201,
+      "step": "activated",
+      "detail": "/tmp/bench-t4-review-HN4MnJ"
+    },
+    {
+      "at": 1787245150308,
+      "step": "git",
+      "detail": "{\"staged\":0,\"unstaged\":1,\"untracked\":0,\"conflicted\":0}"
+    },
+    {
+      "at": 1787245338915,
+      "step": "reviewed",
+      "detail": "2513 chars"
+    }
+  ],
+  "testOutcome": null,
+  "errors": []
+}

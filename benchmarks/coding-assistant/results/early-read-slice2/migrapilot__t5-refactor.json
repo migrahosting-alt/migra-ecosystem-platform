@@ -1,0 +1,79 @@
+{
+  "tool": "migrapilot",
+  "label": "MigraPilot",
+  "task": "t5-refactor",
+  "kind": "refactor",
+  "model": "qwen3-coder:30b",
+  "wallMs": 125193,
+  "visibleBefore": {
+    "exit": 0,
+    "pass": 3,
+    "fail": 0
+  },
+  "visibleAfter": {
+    "exit": 0,
+    "pass": 3,
+    "fail": 0
+  },
+  "hidden": {
+    "pass": 2,
+    "fail": 0,
+    "exit": 0
+  },
+  "scope": {
+    "files": [
+      "src/pricing.js"
+    ],
+    "added": 13,
+    "removed": 2,
+    "touchedTests": false
+  },
+  "ranTestsItself": true,
+  "capabilities": [
+    "coding.issue",
+    "coding.scope-approval",
+    "governed-coding",
+    "test.run"
+  ],
+  "steps": [
+    {
+      "at": 1787245344330,
+      "step": "timeout",
+      "detail": "900000"
+    },
+    {
+      "at": 1787245344346,
+      "step": "activated",
+      "detail": "/tmp/bench-t5-refactor-o35ju4"
+    },
+    {
+      "at": 1787245344346,
+      "step": "coding:start",
+      "detail": "t5-refactor"
+    },
+    {
+      "at": 1787245431596,
+      "step": "scope",
+      "detail": "{\"files\":[{\"path\":\"src/pricing.js\",\"rationale\":\"This file contains the duplicated percentage-reduction logic that needs to be refactored into a single helper function.\",\"evidence\":[{\"startLine\":1,\"endLine\":39,\"excerptHash\":\"59b4d94258b01859\"}]}]}"
+    },
+    {
+      "at": 1787245465348,
+      "step": "final",
+      "detail": "{\"runId\":\"codingrun_f6c35ed5-2bb2-49fc-9a15-bcb3d07ac58d\",\"revision\":17,\"state\":\"COMPLETED\",\"complete\":true,\"changedFiles\":[\"src/pricing.js\"],\"markdown\":\"# Governed coding \u2014 Completed\\n\\nRun `codingrun_f6c35ed5-2bb2-49fc-9a15-bcb3d07ac58d` \u00b7 revision 17 \u00b7 state `COMPLETED`\\n\\n**Complete:** yes \u00b7 **S"
+    },
+    {
+      "at": 1787245465548,
+      "step": "tests",
+      "detail": "{\"status\":\"passed\",\"totals\":{\"passed\":3,\"failed\":0}}"
+    }
+  ],
+  "testOutcome": {
+    "status": "passed",
+    "totals": {
+      "passed": 3,
+      "failed": 0
+    },
+    "failures": []
+  },
+  "errors": []
+}

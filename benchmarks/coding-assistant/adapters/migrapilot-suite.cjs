@@ -11,7 +11,7 @@ const BRAIN = process.env.BENCH_BRAIN_URL;
 const EXT_ID = 'migrateck.migrapilot-extension';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-const evidence = { task: TASK.id, kind: TASK.kind, capabilities: [], steps: [], answer: '', errors: [] };
+const evidence = { task: TASK.id, kind: TASK.kind, capabilities: [], steps: [], answer: '', errors: [], modelRouted: null };
 const note = (step, detail) => evidence.steps.push({ at: Date.now(), step, detail });
 const cap = (name) => { if (!evidence.capabilities.includes(name)) evidence.capabilities.push(name); };
 
@@ -79,6 +79,8 @@ exports.run = async function run() {
 
       let answer = '';
       for await (const frame of client.engineerStream({ rootPath: root, task: TASK.prompt })) {
+        // The model the engine ACTUALLY routed to, taken from its own route frame.
+        if (frame.event === 'route' && frame.data?.model) evidence.modelRouted = String(frame.data.model);
         if (frame.type === 'token' && typeof frame.data === 'string') answer += frame.data;
         else if (frame.data && typeof frame.data.text === 'string') answer += frame.data.text;
         if (frame.type === 'tool' && frame.data?.tool) cap(`tool:${frame.data.tool}`);

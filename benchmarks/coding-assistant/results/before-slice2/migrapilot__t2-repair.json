@@ -1,0 +1,79 @@
+{
+  "tool": "migrapilot",
+  "label": "MigraPilot",
+  "task": "t2-repair",
+  "kind": "repair",
+  "model": "qwen3-coder:30b",
+  "wallMs": 121935,
+  "visibleBefore": {
+    "exit": 1,
+    "pass": 2,
+    "fail": 1
+  },
+  "visibleAfter": {
+    "exit": 0,
+    "pass": 3,
+    "fail": 0
+  },
+  "hidden": {
+    "pass": 4,
+    "fail": 0,
+    "exit": 0
+  },
+  "scope": {
+    "files": [
+      "src/orders.js"
+    ],
+    "added": 1,
+    "removed": 1,
+    "touchedTests": false
+  },
+  "ranTestsItself": true,
+  "capabilities": [
+    "coding.issue",
+    "coding.scope-approval",
+    "governed-coding",
+    "test.run"
+  ],
+  "steps": [
+    {
+      "at": 1787242017318,
+      "step": "timeout",
+      "detail": "900000"
+    },
+    {
+      "at": 1787242017491,
+      "step": "activated",
+      "detail": "/tmp/bench-t2-repair-3knUmR"
+    },
+    {
+      "at": 1787242017492,
+      "step": "coding:start",
+      "detail": "t2-repair"
+    },
+    {
+      "at": 1787242105022,
+      "step": "scope",
+      "detail": "{\"files\":[{\"path\":\"src/orders.js\",\"rationale\":\"The tax calculation in submitOrder was incorrect, using subtotal instead of the discounted amount which caused test failures.\",\"evidence\":[{\"startLine\":1,\"endLine\":47,\"excerptHash\":\"15efbc7633a74896\"}]}]}"
+    },
+    {
+      "at": 1787242134883,
+      "step": "final",
+      "detail": "{\"runId\":\"codingrun_d9388bbf-a1ce-4a3e-9a29-723aa91ea724\",\"revision\":17,\"state\":\"COMPLETED\",\"complete\":true,\"changedFiles\":[\"src/orders.js\"],\"markdown\":\"# Governed coding \u2014 Completed\\n\\nRun `codingrun_d9388bbf-a1ce-4a3e-9a29-723aa91ea724` \u00b7 revision 17 \u00b7 state `COMPLETED`\\n\\n**Complete:** yes \u00b7 **St"
+    },
+    {
+      "at": 1787242135105,
+      "step": "tests",
+      "detail": "{\"status\":\"passed\",\"totals\":{\"passed\":3,\"failed\":0}}"
+    }
+  ],
+  "testOutcome": {
+    "status": "passed",
+    "totals": {
+      "passed": 3,
+      "failed": 0
+    },
+    "failures": []
+  },
+  "errors": []
+}

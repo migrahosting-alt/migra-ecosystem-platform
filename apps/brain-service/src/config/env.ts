@@ -25,6 +25,8 @@ export interface BrainEnv {
   providerConnectTimeoutMs?: number;
   /** Max gap between streamed tokens; reset on every chunk. */
   providerIdleTimeoutMs?: number;
+  /** Whole-request budget for a NON-streaming generation. */
+  providerResponseTimeoutMs?: number;
   /** Final wall-clock guard; 0 = unbounded. */
   providerAbsoluteTimeoutMs?: number;
   /** Pilot Runtime Adapter (agent runs delegated to pilot-api). Delegation is
@@ -74,7 +76,23 @@ export function readEnv(env: NodeJS.ProcessEnv = process.env): BrainEnv {
     // off by default so a long legitimate generation is never truncated.
     providerConnectTimeoutMs: parseInteger(env.MIGRAPILOT_PROVIDER_CONNECT_TIMEOUT_MS, 60_000),
     providerIdleTimeoutMs: parseInteger(env.MIGRAPILOT_PROVIDER_IDLE_TIMEOUT_MS, 120_000),
-    providerAbsoluteTimeoutMs: parseInteger(env.MIGRAPILOT_PROVIDER_ABSOLUTE_TIMEOUT_MS, 0),
+    /**
+     * Whole-request budget for a NON-STREAMING generation.
+     *
+     * Distinct from `connect` because they measure different things and the
+     * difference is not academic: `complete()` used the CONNECT budget as its
+     * total, so a local model that was demonstrably still generating after 58s
+     * was aborted at 60s and surfaced to the user as HTTP 500. Connect to a local
+     * provider takes under a millisecond; generation takes minutes.
+     */
+    providerResponseTimeoutMs: parseInteger(env.MIGRAPILOT_PROVIDER_RESPONSE_TIMEOUT_MS, 480_000),
+    /**
+     * The innermost HARD ceiling. Was 0 (unbounded), which meant no layer owned a
+     * final stop and an outer one always fired first, naming the wrong cause.
+     * Kept BELOW the Brain and extension budgets on purpose: the layer closest to
+     * the work must be the one that names the failure.
+     */
+    providerAbsoluteTimeoutMs: parseInteger(env.MIGRAPILOT_PROVIDER_ABSOLUTE_TIMEOUT_MS, 480_000),
     // Fail-closed by default: delegation requires an explicit opt-in AND a URL.
     pilotRuntimeEnabled: parseBoolean(env.MIGRAPILOT_PILOT_RUNTIME_ENABLED, false),
     liveKnowledgeConnectorsEnabled: parseBoolean(env.MIGRAPILOT_LIVE_CONNECTORS_ENABLED, true),

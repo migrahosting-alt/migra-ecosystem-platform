@@ -17,7 +17,15 @@ export type PilotErrorCode =
   | 'INVALID_INPUT'
   | 'NETWORK'
   | 'SERVER_ERROR'
-  | 'CANCELLED';
+  | 'CANCELLED'
+  /**
+   * The response stream ended before the engine signalled completion.
+   *
+   * Distinct from NETWORK and from CANCELLED on purpose: what arrived is PARTIAL,
+   * and the previous behaviour — returning normally when the stream simply
+   * stopped — reported a disconnected client as a finished answer.
+   */
+  | 'STREAM_INTERRUPTED';
 
 export interface PilotErrorInit {
   httpStatus?: number;
@@ -78,6 +86,8 @@ export function toUserMessage(code: PilotErrorCode): string {
       return 'Pilot hit an internal error.';
     case 'CANCELLED':
       return '';
+    case 'STREAM_INTERRUPTED':
+      return 'The connection ended before the answer finished. What arrived is partial.';
   }
 }
 
@@ -92,6 +102,7 @@ export function suggestedAction(code: PilotErrorCode): 'set-token' | 'retry' | '
     case 'RATE_LIMITED':
       return 'retry';
     case 'NETWORK':
+    case 'STREAM_INTERRUPTED':
       return 'repair';
     case 'SERVER_ERROR':
       return 'show-logs';

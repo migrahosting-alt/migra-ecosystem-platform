@@ -20,6 +20,7 @@ export interface OpenAiCompatOptions {
    * so a total deadline killed valid turns — see {@link StreamTimeoutPolicy}.
    */
   requestTimeoutMs?: number;
+  responseTimeoutMs?: number;
   /** Deadline for the provider to ACCEPT the request and return headers. */
   connectTimeoutMs?: number;
   /** Max gap BETWEEN tokens. Reset on every chunk, so a healthy stream never
@@ -78,9 +79,13 @@ export class ProviderAbortedError extends Error {
  * stream is the GAP between them, not the total.
  */
 export interface StreamTimeoutPolicy {
+  /** Headers deadline for a STREAMING request. Connect is sub-millisecond locally. */
   connectMs: number;
+  /** Max gap between streamed chunks; reset by every chunk AND by a keepalive. */
   idleMs: number;
-  /** 0 = unbounded. */
+  /** Whole-request budget for a NON-STREAMING generation, which has no chunks. */
+  responseMs: number;
+  /** Final wall-clock guard. 0 = unbounded. */
   absoluteMs: number;
 }
 
@@ -135,7 +140,8 @@ export class OpenAiCompatProvider implements ProviderAdapter {
     this.timeouts = {
       connectMs: opts.connectTimeoutMs ?? opts.requestTimeoutMs ?? 60_000,
       idleMs: opts.idleTimeoutMs ?? 120_000,
-      absoluteMs: opts.absoluteTimeoutMs ?? 0,
+      responseMs: opts.responseTimeoutMs ?? 480_000,
+      absoluteMs: opts.absoluteTimeoutMs ?? 480_000,
     };
   }
 
@@ -167,7 +173,7 @@ export class OpenAiCompatProvider implements ProviderAdapter {
     };
   }
 
-  async complete(request: ChatTurnRequest): Promise<ChatTurnResponse> {
+  async complete(request: ChatTurnRequest, signal?: AbortSignal): Promise<ChatTurnResponse> {
     const started = Date.now();
     const { model, messages } = this.prepare(request);
     // Non-streaming: there are no tokens to prove liveness, so the only sensible
@@ -180,7 +186,11 @@ export class OpenAiCompatProvider implements ProviderAdapter {
     // It is therefore reported as `response`, NOT `connect` — TCP connect to this
     // provider completes in ~0.6ms, so blaming connect pointed operators at healthy
     // networking while a 14B model spilling 34% to CPU was the actual cost.
-    const budget = this.timeouts.absoluteMs > 0 ? Math.max(this.timeouts.connectMs, this.timeouts.absoluteMs) : this.timeouts.connectMs;
+    // The budget is the RESPONSE budget, never the connect one. Using connect as a
+    // total is what turned a model still generating at 58s into an HTTP 500 at 60s.
+    const budget = this.timeouts.absoluteMs > 0
+      ? Math.min(this.timeouts.responseMs, this.timeouts.absoluteMs)
+      : this.timeouts.responseMs;
     let response: Response;
     try {
       response = await this.fetchWithTimeout(
@@ -194,8 +204,12 @@ export class OpenAiCompatProvider implements ProviderAdapter {
           body: JSON.stringify({ model, messages, stream: false }),
         },
         budget,
+        signal,
       );
     } catch (err) {
+      // CANCELLED and TIMED OUT are different outcomes and must not be merged: a
+      // user who stopped the work is not a provider that failed to answer.
+      if (signal?.aborted) throw new ProviderAbortedError(Date.now() - started);
       // A bare AbortError says nothing about WHY. Name the deadline HONESTLY: the
       // connection was accepted, the response never completed.
       if (isAbort(err)) throw new ProviderTimeoutError('response', budget, Date.now() - started, this.baseUrl);
@@ -518,13 +532,27 @@ export class OpenAiCompatProvider implements ProviderAdapter {
     return parts;
   }
 
-  private async fetchWithTimeout(url: string, init: RequestInit, timeoutMs: number): Promise<Response> {
+  /**
+   * Fetch under a deadline that the CALLER can also cut short.
+   *
+   * The caller's signal is honoured as well as the timer, because cancellation
+   * has to terminate the downstream generation — a non-streaming `complete()`
+   * previously ignored it entirely, so pressing Stop closed the UI and left the
+   * model running to completion with nobody waiting for the answer.
+   */
+  private async fetchWithTimeout(url: string, init: RequestInit, timeoutMs: number, signal?: AbortSignal): Promise<Response> {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
+    const onAbort = (): void => controller.abort();
+    if (signal) {
+      if (signal.aborted) controller.abort();
+      else signal.addEventListener('abort', onAbort, { once: true });
+    }
     try {
       return await fetch(url, { ...init, signal: controller.signal });
     } finally {
       clearTimeout(timer);
+      signal?.removeEventListener('abort', onAbort);
     }
   }
 }

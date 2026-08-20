@@ -281,8 +281,8 @@
         },
         "migrapilot.requestTimeoutMs": {
           "type": "number",
-          "default": 30000,
-          "description": "Per-request timeout (ms) for pilot-api and model-provider calls."
+          "default": 120000,
+          "description": "How long MigraPilot waits WITHOUT PROGRESS on a streaming request before giving up (ms). This is patience for silence, not a total budget: every token and every keepalive resets it, so a long answer that is still arriving is never cut off. Raised from 30s because a local model can spend longer than that on prefill before its first token."
         },
         "migrapilot.maxContextChunks": {
           "type": "number",
@@ -308,6 +308,16 @@
           "type": "boolean",
           "default": false,
           "description": "Show MigraPilot engineering surfaces: the Agent Workspace, Audit Trail and MigraAI Workspace tabs, service and model diagnostics, and the model-routing and evidence-source selectors. Off by default — the normal interface is the coding assistant, not the console. Nothing is disabled by leaving this off."
+        },
+        "migrapilot.brainTimeoutMs": {
+          "type": "number",
+          "default": 600000,
+          "description": "Hard ceiling for one non-streaming Brain request (ms), such as Explain Code or Fix Problems. These have no tokens to prove liveness, so the only bound is a total budget — and the previous undeclared 30s default made those commands impossible to complete against a local model. Progress is shown and can be cancelled, so a long wait is visible and interruptible. Deliberately LARGER than the Brain and provider budgets so the layer closest to the work is the one that names the failure."
+        },
+        "migrapilot.brainConnectionTimeoutMs": {
+          "type": "number",
+          "default": 5000,
+          "description": "Timeout for the Brain health probe (ms). Reachability only — never generation."
         }
       }
     },

@@ -4,7 +4,20 @@
   "task": "t2-repair",
   "kind": "repair",
   "model": "qwen3-coder:30b",
-  "wallMs": 121935,
+  "wallMs": 59244,
+  "provenance": {
+    "brainPid": 2547964,
+    "brainPort": 44940,
+    "brainUrl": "http://127.0.0.1:44940",
+    "workspaceRoot": "/tmp/bench-t2-repair-6bsxFO",
+    "codingRootsGranted": "/tmp/bench-t2-repair-6bsxFO",
+    "service": "migrapilot-brain",
+    "serviceVersion": "0.1.0",
+    "uptimeSecAtAttach": 0,
+    "model": "qwen3-coder:30b",
+    "spawnedByHarness": true,
+    "timeoutOverrides": []
+  },
   "visibleBefore": {
     "exit": 1,
     "pass": 2,
@@ -37,32 +50,32 @@
   ],
   "steps": [
     {
-      "at": 1787242017318,
+      "at": 1787245512705,
       "step": "timeout",
       "detail": "900000"
     },
     {
-      "at": 1787242017491,
+      "at": 1787245512729,
       "step": "activated",
-      "detail": "/tmp/bench-t2-repair-3knUmR"
+      "detail": "/tmp/bench-t2-repair-6bsxFO"
     },
     {
-      "at": 1787242017492,
+      "at": 1787245512729,
       "step": "coding:start",
       "detail": "t2-repair"
     },
     {
-      "at": 1787242105022,
+      "at": 1787245542084,
       "step": "scope",
-      "detail": "{\"files\":[{\"path\":\"src/orders.js\",\"rationale\":\"The tax calculation in submitOrder was incorrect, using subtotal instead of the discounted amount which caused test failures.\",\"evidence\":[{\"startLine\":1,\"endLine\":47,\"excerptHash\":\"15efbc7633a74896\"}]}]}"
+      "detail": "{\"files\":[{\"path\":\"src/orders.js\",\"rationale\":\"The tax calculation in submitOrder was incorrect, using subtotalCents instead of afterCoupon for tax computation.\",\"evidence\":[{\"startLine\":1,\"endLine\":47,\"excerptHash\":\"15efbc7633a74896\"}]}]}"
     },
     {
-      "at": 1787242134883,
+      "at": 1787245567827,
       "step": "final",
-      "detail": "{\"runId\":\"codingrun_d9388bbf-a1ce-4a3e-9a29-723aa91ea724\",\"revision\":17,\"state\":\"COMPLETED\",\"complete\":true,\"changedFiles\":[\"src/orders.js\"],\"markdown\":\"# Governed coding — Completed\\n\\nRun `codingrun_d9388bbf-a1ce-4a3e-9a29-723aa91ea724` · revision 17 · state `COMPLETED`\\n\\n**Complete:** yes · **St"
+      "detail": "{\"runId\":\"codingrun_8ece7245-3072-40b7-b08d-f9dc8cf90690\",\"revision\":17,\"state\":\"COMPLETED\",\"complete\":true,\"changedFiles\":[\"src/orders.js\"],\"markdown\":\"# Governed coding \u2014 Completed\\n\\nRun `codingrun_8ece7245-3072-40b7-b08d-f9dc8cf90690` \u00b7 revision 17 \u00b7 state `COMPLETED`\\n\\n**Complete:** yes \u00b7 **St"
     },
     {
-      "at": 1787242135105,
+      "at": 1787245568049,
       "step": "tests",
       "detail": "{\"status\":\"passed\",\"totals\":{\"passed\":3,\"failed\":0}}"
     }
@@ -75,6 +88,5 @@
     },
     "failures": []
   },
-  "errors": [],
-  "root": "/tmp/bench-t2-repair-3knUmR"
+  "errors": []
 }

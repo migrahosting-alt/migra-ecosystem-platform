@@ -794,6 +794,7 @@ export class MigraAiClient {
     }
     const decoder = new TextDecoder();
     let buffer = '';
+    let completed = false;
     try {
       for await (const chunk of res.body as unknown as AsyncIterable<Uint8Array>) {
         buffer += decoder.decode(chunk, { stream: true });
@@ -803,14 +804,26 @@ export class MigraAiClient {
           buffer = buffer.slice(sep + 2);
           const parsed = parseSseFrame(frame);
           if (!parsed) continue;
-          if (parsed.event === 'done') return;
+          // A keepalive proves the run is alive during a long silence. It carries
+          // nothing about the answer, so it is not yielded — arriving at all is
+          // the whole point, because reading it resets every patience clock.
+          if (parsed.event === 'keepalive') continue;
+          if (parsed.event === 'done') { completed = true; return; }
           yield { event: parsed.event, data: parsed.data } as EngineerStreamEvent;
         }
       }
+      // THE STREAM STOPPED WITHOUT SAYING IT WAS DONE.
+      //
+      // This used to fall out of the loop and return normally, so a connection
+      // that died mid-answer was indistinguishable from a finished one and the
+      // caller rendered a truncated result as complete.
+      throw new PilotError('STREAM_INTERRUPTED', 'The engine stream ended before the run completed.', { requestId });
     } catch (err) {
       if (err instanceof PilotError) throw err;
       if (isAbort(err)) throw new PilotError('CANCELLED', 'Engineer run cancelled.', { requestId });
       throw new PilotError('NETWORK', 'Engineer stream interrupted.', { requestId, cause: err });
+    } finally {
+      if (!completed) this.cfg.log(`[${requestId}] engineer stream ended without a done frame`);
     }
   }
 

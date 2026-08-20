@@ -1,0 +1,60 @@
+{
+  "task": "t3-feature",
+  "kind": "feature",
+  "capabilities": [
+    "coding.issue",
+    "coding.scope-approval",
+    "governed-coding",
+    "test.run"
+  ],
+  "steps": [
+    {
+      "at": 1787240041983,
+      "step": "timeout",
+      "detail": "900000"
+    },
+    {
+      "at": 1787240042006,
+      "step": "activated",
+      "detail": "/tmp/bench-t3-feature-BPgQKk"
+    },
+    {
+      "at": 1787240042006,
+      "step": "coding:start",
+      "detail": "t3-feature"
+    },
+    {
+      "at": 1787240172815,
+      "step": "scope",
+      "detail": "{\"files\":[{\"path\":\"src/validation.js\",\"rationale\":\"The validateOrder function needs to be updated to check for maxOrdersPerCustomer and validate it.\",\"evidence\":[{\"startLine\":1,\"endLine\":32,\"excerptHash\":\"5b3f788fd0c8cacf\"}]},{\"path\":\"src/orders.js\",\"rationale\":\"The submitOrder function must be modified to check the customer's order count before processing and reject if limit is exceeded.\",\"evidence\":[{\"startLine\":1,\"endLine\":47,\"excerptHash\":\"934023ea512fa271\"}]},{\"path\":\"src/repository.js\",\"ra"
+    },
+    {
+      "at": 1787240368298,
+      "step": "final",
+      "detail": "{\"runId\":\"codingrun_93cc4e39-f986-4fb6-adf4-f6b84f36664e\",\"revision\":35,\"state\":\"FAILED\",\"complete\":false,\"changedFiles\":[\"src/orders.js\",\"src/validation.js\",\"test/orders.test.js\"],\"markdown\":\"# Governed coding \u2014 Failed\\n\\nRun `codingrun_93cc4e39-f986-4fb6-adf4-f6b84f36664e` \u00b7 revision 35 \u00b7 state `F"
+    },
+    {
+      "at": 1787240368493,
+      "step": "tests",
+      "detail": "{\"status\":\"failed\",\"totals\":{\"passed\":5,\"failed\":1}}"
+    }
+  ],
+  "answer": "{\"runId\":\"codingrun_93cc4e39-f986-4fb6-adf4-f6b84f36664e\",\"revision\":35,\"state\":\"FAILED\",\"complete\":false,\"changedFiles\":[\"src/orders.js\",\"src/validation.js\",\"test/orders.test.js\"],\"markdown\":\"# Governed coding \u2014 Failed\\n\\nRun `codingrun_93cc4e39-f986-4fb6-adf4-f6b84f36664e` \u00b7 revision 35 \u00b7 state `FAILED`\\n\\n**Complete:** no \u00b7 **Stop reason:** `repair-ceiling-exhausted`\\n\\n## Files\\n- **Approved scope:** `src/validation.js`, `src/orders.js`, `src/repository.js`, `test/orders.test.js`\\n- **Changed (git diff, authoritative):** `src/orders.js`, `src/validation.js`, `test/orders.test.js`\\n- **Approved but never written:** `src/repository.js`\\n\\n## Validation\\n- Ran validation (attempt 1): **failed**\\n- Ran validation (attempt 2): **failed**\\n- Ran validation (attempt 3): **failed**\\n- Command: `npm test` \u2192 exit 1\\n\\n## Repairs\\n- Proposed a repair (attempt 1): observed_success\\n- Applied the repair (attempt 1): observed_success\\n- Proposed a repair (attempt 2): observed_success\\n- Applied the repair (attempt 2): observed_success\\n- Proposed a repair (attempt 3): observed_failure\\n\\n## Completion blocked by\\n- required_child_not_successful: codingchild_codingrun_93cc4e39-f986-4fb6-adf4-f6b84f36664e_reconciliation_1 (observed_failure)\"}",
+  "errors": [],
+  "timeoutRaisedFrom": 30000,
+  "effectiveTimeoutMs": 900000,
+  "testOutcome": {
+    "status": "failed",
+    "totals": {
+      "passed": 5,
+      "failed": 1
+    },
+    "failures": [
+      {
+        "name": "customer exceeding order limit gets validation error",
+        "file": null
+      }
+    ]
+  },
+  "wallMs": 330299
+}

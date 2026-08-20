@@ -13,7 +13,11 @@ export function vscodeBrainConfig(): BrainConfig {
   const cfg = () => vscode.workspace.getConfiguration('migrapilot');
   return {
     baseUrl: () => String(cfg().get('brainUrl', 'http://127.0.0.1:3988')),
-    timeoutMs: () => Number(cfg().get('brainTimeoutMs', 30_000)),
+    // Hard ceiling for ONE non-streaming request. The 30s default here was
+    // undeclared in package.json, so no user could raise it — and it governs
+    // Explain Code, Fix Problems, Write Tests and Write a Commit Message, none of
+    // which a local model finishes in 30s. Declared now, with a real default.
+    timeoutMs: () => Number(cfg().get('brainTimeoutMs', 600_000)),
     connectionTimeoutMs: () => Number(cfg().get('brainConnectionTimeoutMs', 5_000)),
   };
 }
