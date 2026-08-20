@@ -35,6 +35,7 @@ import { EvidenceLedger, normalizePath, type EvidenceSource } from '../grounding
 import type { ClaimSource } from '../grounding/claimVerifier.js';
 import { buildRepoMap, type RepoMap } from '../planning/repoMap.js';
 import { aboveRelevanceFloor, rankCandidates } from '../planning/candidateRanking.js';
+import { failureEvidence } from '../planning/failureEvidence.js';
 import { isWorkspaceRelativeContained } from './editScope.js';
 import type { DeclaredValidation } from './validationRun.js';
 
@@ -97,7 +98,15 @@ export const DEFAULT_PLANNING_LIMITS: PlanningLimits = {
   maxCandidatesOpened: 8,
   maxScopeFiles: 6,
   spanLines: 400,
-  minEvidenceFiles: 2,
+  // ONE readable file is sufficient evidence to plan.
+  //
+  // This was 2, which made a legitimate single-file change impossible: a refactor
+  // confined to `pricing.js` retrieved exactly that file and was refused
+  // `insufficient-evidence`, having edited nothing. The rule that matters is that
+  // the planner read something real before proposing a change — a file COUNT is a
+  // proxy for that, and a wrong one, because the only way to satisfy it is to open
+  // files the change does not concern.
+  minEvidenceFiles: 1,
 };
 
 /** What the model is given. Contains evidence, never the answer. */
@@ -218,6 +227,15 @@ export interface PlanCodingTaskOptions {
   openSpan: (relPath: string, startLine: number, endLine: number) => EvidenceSource;
   /** Injected for tests; defaults to the real map builder. */
   buildMap?: (rootPath: string) => Promise<RepoMap>;
+  /**
+   * Run the declared verification and return its raw output, so planning can
+   * start from a SYMPTOM.
+   *
+   * Optional, and injected by the driver, which owns validation: the planner
+   * decides WHEN evidence is needed, never how a command is admitted or run.
+   * Absent, planning behaves exactly as before.
+   */
+  observeFailure?: () => Promise<{ output: string; passed: boolean }>;
 }
 
 /** Plan a governed coding change. Never mutates; returns a proposal or a refusal. */
@@ -230,8 +248,46 @@ export async function planCodingTask(opts: PlanCodingTaskOptions): Promise<PlanR
   if (map.unavailable) return refuse('map-unavailable', `No repository map could be built: ${map.unavailable}`);
 
   // ── Rank, then open a bounded evidence set ──────────────────────────────────
-  const ranked = aboveRelevanceFloor(rankCandidates(map, opts.issue, { limit: limits.maxCandidatesOpened * 4 }));
-  if (!ranked.length) return refuse('no-candidates', 'The issue text matched no file in this repository.');
+  let ranked = aboveRelevanceFloor(rankCandidates(map, opts.issue, { limit: limits.maxCandidatesOpened * 4 }));
+  let symptom: { output: string; passed: boolean } | undefined;
+
+  // START FROM THE SYMPTOM WHEN THE WORDS ARE NOT ENOUGH.
+  //
+  // Ranking scores the user's words against the repository, so "the test suite is
+  // failing" — which names no file, symbol or identifier — clears nothing and used
+  // to refuse here. A person would run the suite and read what broke; so does this.
+  // The failure names files directly (stack frames, FAIL headlines) and carries the
+  // words that rank the rest (`a gold member gets 10% off before tax`).
+  if (!ranked.length && opts.observeFailure) {
+    try {
+      symptom = await opts.observeFailure();
+    } catch {
+      /* a probe that cannot run is simply no evidence; the refusal below stands */
+    }
+    if (symptom && !symptom.passed) {
+      const observed = failureEvidence(symptom.output, opts.rootPath);
+      const named = new Set(observed.paths);
+      // Rank against what the failure SAID, and include tests: a failing test is
+      // evidence about the thing it tests, and the expectation itself is worth reading.
+      const reranked = rankCandidates(map, `${opts.issue}\n${observed.query}\n${observed.paths.join('\n')}`, {
+        limit: limits.maxCandidatesOpened * 4,
+        includeTests: true,
+      });
+      // Files the failure named by path come first — they are observation, not inference.
+      const direct = reranked.filter((c) => named.has(c.entry.path));
+      const rest = aboveRelevanceFloor(reranked.filter((c) => !named.has(c.entry.path)));
+      ranked = [...direct, ...rest];
+    }
+  }
+
+  if (!ranked.length) {
+    return refuse(
+      'no-candidates',
+      symptom
+        ? 'The issue text matched no file, and the verification that was run reported nothing that named one.'
+        : 'The issue text matched no file in this repository.',
+    );
+  }
 
   for (const candidate of ranked.slice(0, limits.maxCandidatesOpened)) {
     const end = Math.min(limits.spanLines, candidate.entry.lineCount || limits.spanLines);
@@ -243,7 +299,12 @@ export async function planCodingTask(opts: PlanCodingTaskOptions): Promise<PlanR
   }
   const openedPaths = ledger.readPaths;
   if (openedPaths.length < limits.minEvidenceFiles) {
-    return refuse('insufficient-evidence', `Only ${openedPaths.length} file(s) could be retrieved; at least ${limits.minEvidenceFiles} are required to plan a change.`);
+    return refuse(
+      'insufficient-evidence',
+      openedPaths.length === 0
+        ? 'No candidate file could be read, so there is no evidence to plan from.'
+        : `Only ${openedPaths.length} file(s) could be read; at least ${limits.minEvidenceFiles} are required.`,
+    );
   }
 
   // ── Ask the model to choose among what was actually retrieved ───────────────

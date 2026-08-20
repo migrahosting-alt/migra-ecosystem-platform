@@ -23,12 +23,12 @@ MigraPilot capabilities exercised: `editor-selection` `explain-selection`
 
 | Tool | Verdict | Time | Visible | Hidden | Files | Ran tests | Touched tests |
 |---|---|---|---|---|---|---|---|
-| migrapilot | NO-OP (changed nothing) | 5s | 2/3 | 3/4 | 0 | yes | no |
+| migrapilot | PASS | 122s | 3/3 | 4/4 | 1 | yes | no |
 | claude-code | PASS | 51s | 3/3 | 4/4 | 1 | yes | no |
 | codex | **COULD NOT RUN** — Codex CLI is older than the account's model; the API refused with HTTP 400 ('gpt-5.6-sol' requires a newer Codex) | — | — | — | — | — | — |
 | copilot | **COULD NOT RUN** — GitHub Copilot CLI is blocked by an organisation policy ('Access denied by policy settings') | — | — | — | — | — | — |
 
-MigraPilot capabilities exercised: `coding.issue` `governed-coding` `test.run`
+MigraPilot capabilities exercised: `coding.issue` `coding.scope-approval` `governed-coding` `test.run`
 
 ## t3-feature — Implement a small feature across multiple files
 
@@ -61,85 +61,60 @@ MigraPilot capabilities exercised: `git.overview`
 
 | Tool | Verdict | Time | Visible | Hidden | Files | Ran tests | Touched tests |
 |---|---|---|---|---|---|---|---|
-| migrapilot | NO-OP (changed nothing) | 4s | 3/3 | 2/2 | 0 | yes | no |
+| migrapilot | PASS | 76s | 3/3 | 2/2 | 1 | yes | no |
 | claude-code | PASS | 46s | 3/3 | 2/2 | 1 | yes | no |
 | codex | **COULD NOT RUN** — Codex CLI is older than the account's model; the API refused with HTTP 400 ('gpt-5.6-sol' requires a newer Codex) | — | — | — | — | — | — |
 | copilot | **COULD NOT RUN** — GitHub Copilot CLI is blocked by an organisation policy ('Access denied by policy settings') | — | — | — | — | — | — |
 
-MigraPilot capabilities exercised: `coding.issue` `governed-coding` `test.run`
+MigraPilot capabilities exercised: `coding.issue` `coding.scope-approval` `governed-coding` `test.run`
 
 ---
 
-## Where the weakness lives
+## Remediation slice 1 — planning/retrieval (re-run of tasks 2 and 5)
 
-The point of the benchmark is to route each failure to the layer that owns it.
+Two changes, both in the Brain's planning layer. No model, prompt, IDE or
+integration change.
 
-### Brain / retrieval — the biggest gap
+**Planning can start from a symptom.** When the issue text ranks nothing, the
+planner asks the driver to run the *declared* verification and reads what broke:
+paths the failure names directly (stack frames, `FAIL` headlines, TAP subtest
+headers) become candidates, and the failing test names and assertion bodies become
+the ranking query. The driver owns the command, so it is the same declared
+validation, the same governed runner, the same containment — the planner decides
+only *when* evidence is needed.
 
-**MigraPilot's planner cannot start from a symptom.** On `t2-repair` — *"The test
-suite is failing. Find out why, fix the source"* — it refused in 5 seconds:
+**One readable file is sufficient evidence.** `minEvidenceFiles` was 2, which made
+a legitimate single-file change impossible. The rule that matters is that the
+planner read something real; a file *count* is a bad proxy for it, and the only way
+to satisfy it is to open files the change does not concern.
 
-> `repository_planning refused: no-candidates — The issue text matched no file in this repository. (opened 0 path(s))`
+| Task | Before | After |
+|---|---|---|
+| `t2-repair` | `no-candidates` in 5s, 0 files | **PASS** — 122s, `src/orders.js` +1/−1, visible 3/3, hidden 4/4 |
+| `t5-refactor` | `insufficient-evidence`, NO-OP | **PASS** — 76s, `src/pricing.js` +13/−2, visible 3/3, behaviour oracle 2/2 |
 
-Candidates are ranked by matching the **issue text** against a repository map with
-a relevance floor. A prompt that names no file, symbol or identifier ranks nothing
-and the run stops. Claude Code solved the same prompt in 51 s by running the suite,
-reading the failure, and navigating from there. The capability that is missing is
-not intelligence — it is *starting from evidence the tool gathers itself*.
+It found the right file from the symptom alone. Its own scope rationale for `t2`:
 
-**A single-file change is structurally impossible.** On `t5-refactor`:
+> *"The tax calculation in submitOrder was incorrect, using subtotal instead of the
+> discounted amount which caused test failures."*
 
-> `repository_planning refused: insufficient-evidence — Only 1 file(s) could be retrieved; at least 2 are required to plan a change.`
+That is the actual bug, stated correctly, from a prompt that named no file.
 
-The refactor is genuinely confined to `pricing.js`. The planner requires two files,
-so it refused and edited nothing. This is a hard constraint in the planner, not a
-model limitation.
+Acceptance, point by point:
 
-### MigraPilot product / tooling
+- `no-candidates` no longer returned for the failing-test task — **yes**;
+- evidence is run and read, and the relevant file identified — **yes**, `src/orders.js`;
+- the single-file refactor is no longer refused — **yes**, `src/pricing.js`;
+- unrelated files are not added to satisfy planning — **yes**, one file each, and
+  a test asserts the scope is not padded;
+- containment and governance intact — **yes**: the probe runs the declared command
+  through the same governed runner, every candidate still passes through the
+  evidence ledger, and a test forges `/etc/passwd.js` and `../../outside/secret.js`
+  into the failure output and asserts neither can be opened;
+- tests untouched in both runs — **yes**.
 
-**Two stacked default timeouts stop real local models.**
+12 new tests in `brain-service/test/symptomDrivenPlanning.test.ts`; the brain suite
+is 1393/1505 with the same 57 pre-existing Postgres failures as before the change.
 
-1. `BrainClient` reads `migrapilot.brainTimeoutMs`, defaulting to 30 000 ms — and
-   that setting **is not declared in `package.json`**, so no user can raise it
-   through any documented setting. It governs Explain Selection, Fix Diagnostics,
-   Generate Tests and Generate Commit Message. On a 14B local model, Explain fails
-   with `request_timeout`.
-2. The Brain's own provider timeout defaults to 60 000 ms; the model was *"still
-   generating after 58 058 ms"*, so the request became **HTTP 500**.
-
-Stock settings plus the shipped local model equals a product that cannot complete
-its own Explain command. Both had to be overridden for this benchmark to measure
-anything.
-
-**The engineer stream is not durable enough for slow local inference.** `t4-review`
-ran 427 s and ended `Engineer stream interrupted` with no answer.
-
-**The coding loop does not converge.** `t3-feature` is the encouraging result: real
-multi-file work across `validation.js`, `orders.js` and `test/orders.test.js`, with
-a scope approval carrying a per-file rationale. But it ended `FAILED` at revision
-35 with one of its own tests failing — it could not close its own loop.
-
-### Model / intelligence
-
-Genuine but secondary next to the above. The `t1-explain` answer was technically
-correct and **written in French** from an English prompt on an English codebase.
-`t3-feature` got 4/5 hidden tests: the shape was right, the last case was not.
-
-### Not MigraPilot's fault
-
-`t4-review` was first scored against a **harness bug of mine** — requiring
-`dist/services/migraAiClient.js` out of the unzipped VSIX, where its workspace
-imports do not resolve. Re-run from the built source tree before scoring.
-
-## What this says about investment order
-
-1. **Retrieval/planning that starts from evidence** — run the suite, read the
-   failure, navigate from the stack trace. This single gap cost two of five tasks.
-2. **Drop the two-file planning floor.** Single-file changes are ordinary work.
-3. **Fix the timeout defaults**, and declare `brainTimeoutMs`.
-4. **Make the engineer stream survive minutes of local inference.**
-5. Model quality — real, but it is not what lost the tasks.
-
-None of the candidate IDE integrations (right-click Ask, Problems-panel Fix,
-clickable `file:line`) would have changed a single result here. They are worth
-building later; they are not the bottleneck.
+Still open, for the next slices: `t1` answered in French, `t3` did not converge
+(4/5 hidden, ended FAILED at revision 35), `t4` interrupted after 427s.

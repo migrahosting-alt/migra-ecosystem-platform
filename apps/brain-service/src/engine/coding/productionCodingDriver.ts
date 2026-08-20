@@ -141,6 +141,18 @@ export function createProductionCodingDriver(deps: ProductionCodingDriverDeps): 
           validationCommand: deps.validationCommand,
           model: deps.plannerModel,
           openSpan: openSpan(ctx.workspaceRoot),
+          // Let planning start from a SYMPTOM. The driver owns validation, so the
+          // planner asks for the observation and never admits a command itself:
+          // the same declared command, the same governed runner, the same
+          // containment. Only used when the issue text matched nothing.
+          observeFailure: async () => {
+            const record = await runValidation(
+              { ...deps.validationCommand, command: [...deps.validationCommand.command] },
+              'baseline',
+              { rootPath: ctx.workspaceRoot, now, ...(ctx.signal ? { signal: ctx.signal } : {}) },
+            );
+            return { output: `${record.stdout}\n${record.stderr}`, passed: record.passed };
+          },
         });
         if (result.ok) plannerLedger = result.ledger;
         const evidence = planningEvidence({ issue: ctx.issueText, candidateCount: result.ok ? result.ledger.readPaths.length : result.openedPaths.length, plan: result });
