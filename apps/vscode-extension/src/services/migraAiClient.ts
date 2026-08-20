@@ -32,6 +32,8 @@ import {
   type AgentModeRunHistoryQuery,
   type AgentModeReproposalRequest,
   type AgentModeRunRecoveryStatus,
+  type CommandRunRequest,
+  type CommandRunResponse,
 } from '@migrapilot/protocol';
 
 export interface MigraAiConfig {
@@ -525,6 +527,60 @@ export class MigraAiClient {
     } catch {
       throw new PilotError('SERVER_ERROR', 'The local runner returned an unreadable inspection response.', { requestId });
     }
+  }
+
+  /**
+   * Run ONE bounded command in the workspace (`POST /api/ai/command-run`).
+   *
+   * The AD-HOC LANE, deliberately distinct from Agent Mode: a single user-initiated
+   * command, no autonomous follow-up, no mutation authority beyond what the allowed
+   * command itself performs. Agent Mode remains the multi-step governed recipe path
+   * with checkpoint semantics, and `POST /api/ai/tools` still refuses `command.run`
+   * so the MODEL cannot execute commands on its own initiative.
+   *
+   * Every policy control — allowlist, no shell, cwd containment, publish/deploy/push
+   * refusal, timeout, output caps, redaction — lives in the Brain. Nothing is executed
+   * locally by the extension: a bypass here would make all of it decorative.
+   *
+   * A POLICY REFUSAL is returned, not thrown: "not on the allowlist" is an answer the
+   * caller must show, not a transport failure. Only an unreachable Brain throws.
+   */
+  async runCommand(
+    body: CommandRunRequest,
+    signal?: AbortSignal,
+  ): Promise<{ ok: true; result: CommandRunResponse } | { ok: false; refusal: string }> {
+    const requestId = newRequestId();
+    const { signal: combined, done, timedOut } = this.withTimeout(signal);
+    const url = `${this.base()}/api/ai/command-run`;
+    this.cfg.log(`POST ${url} [${requestId}] (${body.command[0]})`);
+    let res: Response;
+    try {
+      res = await fetch(url, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', [REQUEST_ID_HEADER]: requestId, ...this.scopeHeaders() },
+        body: JSON.stringify(body),
+        signal: combined,
+      });
+    } catch (err) {
+      done();
+      // Brain unreachable — fail closed. Never fall back to running it locally.
+      throw this.transportError(err, timedOut(), requestId);
+    }
+    done();
+    let payload: unknown;
+    try {
+      payload = await res.json();
+    } catch {
+      throw new PilotError('SERVER_ERROR', 'The Brain returned an unreadable command result.', { requestId });
+    }
+    if (!res.ok) {
+      const message =
+        typeof payload === 'object' && payload !== null && typeof (payload as { message?: unknown }).message === 'string'
+          ? (payload as { message: string }).message
+          : `The Brain refused the command (HTTP ${res.status}).`;
+      return { ok: false, refusal: message };
+    }
+    return { ok: true, result: payload as CommandRunResponse };
   }
 
   /**

@@ -183,6 +183,10 @@
       {
         "command": "migrapilot.governedCoding",
         "title": "MigraPilot: Governed Coding Change"
+      },
+      {
+        "command": "migrapilot.runCommand",
+        "title": "MigraPilot: Run Command"
       }
     ],
     "configuration": {

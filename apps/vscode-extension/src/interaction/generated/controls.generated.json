@@ -42,11 +42,25 @@
         "commandId": "migrapilot.governedCoding",
         "confidence": "exact"
       }
+    },
+    {
+      "file": "src/commands/runCommand.control.ts",
+      "applicationId": "migrapilot-vscode",
+      "surfaceId": "engineer.command-palette",
+      "controlId": "run-command",
+      "controlVersion": 1,
+      "instanceScope": "workspace",
+      "consequence": "mutating",
+      "locator": {
+        "adapter": "vscode-command",
+        "commandId": "migrapilot.runCommand",
+        "confidence": "exact"
+      }
     }
   ],
   "coverage": {
-    "contributedCommands": 26,
-    "declaredControls": 3,
+    "contributedCommands": 27,
+    "declaredControls": 4,
     "knownGaps": [
       "migrapilot.aiUsage",
       "migrapilot.clearToken",

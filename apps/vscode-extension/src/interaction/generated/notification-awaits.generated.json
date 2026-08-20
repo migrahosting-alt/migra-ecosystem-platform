@@ -2,7 +2,7 @@
   "generated": "by scripts/check-notification-awaits.mjs — DERIVED EVIDENCE, do not edit",
   "rule": "await on a VS Code message API is prohibited when the result is discarded; permitted when consumed",
   "counts": {
-    "consumed": 18,
+    "consumed": 19,
     "discarded": 0,
     "ambiguous": 0
   },
@@ -36,8 +36,15 @@
       "snippet": "await vscode.window.showInformationMessage("
     },
     {
+      "file": "src/commands/runCommand.ts",
+      "line": 44,
+      "api": "showWarningMessage",
+      "classification": "consumed",
+      "snippet": "await vscode.window.showWarningMessage("
+    },
+    {
       "file": "src/extension.ts",
-      "line": 361,
+      "line": 362,
       "api": "showWarningMessage",
       "classification": "consumed",
       "snippet": "await vscode.window.showWarningMessage([card.title, '', ...card.lines].join('\\n'), { modal: true }, 'Approve once', 'Sta"

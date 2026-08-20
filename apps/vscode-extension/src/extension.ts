@@ -48,6 +48,7 @@ import { type WorkspacePanelModel, type RootResolution } from './panel/workspace
 import { MigraAiClient } from './services/migraAiClient.js';
 import { CodingRunClient } from './services/codingRunClient.js';
 import { registerGovernedCodingCommand, restoreGovernedCodingRun } from './commands/governedCoding.js';
+import { runAdHocCommand } from './commands/runCommand.js';
 import type { GovernedCodingUiFactory } from './services/governedCodingUi.js';
 import { EngineDiagnostics, type EngineDiagnosticSnapshot } from './services/engineDiagnostics.js';
 import { type TokenStore } from './services/tokenStore.js';
@@ -551,6 +552,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<MigraP
     vscode.commands.registerCommand('migrapilot.setToken', setToken),
     vscode.commands.registerCommand('migrapilot.clearToken', clearToken),
     vscode.commands.registerCommand('migrapilot.reviewApprovals', () => runReviewApprovals(commandDeps)),
+    vscode.commands.registerCommand('migrapilot.runCommand', () =>
+      runAdHocCommand(commandDeps, context.workspaceState),
+    ),
     vscode.commands.registerCommand('migrapilot.showBackendDiagnostics', showBackendDiagnostics),
   );
 

@@ -84,7 +84,12 @@ export interface CommandRunPreview {
   environment: Array<{ key: string; value: string; redacted: boolean }>;
 }
 
-class CommandPolicyError extends Error {
+/**
+ * A refusal by POLICY, not a failure to execute. Exported so a caller can report
+ * "refused, and here is why" truthfully instead of collapsing it into a generic
+ * internal error — the refusal reason is the useful part.
+ */
+export class CommandPolicyError extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'CommandPolicyError';
