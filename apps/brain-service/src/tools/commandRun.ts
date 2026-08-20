@@ -36,9 +36,27 @@ const DENIED_ENVIRONMENT_KEYS = new Set([
   'DYLD_INSERT_LIBRARIES', 'DYLD_LIBRARY_PATH',
 ]);
 
+// Inherited variables that change how a child TEST RUNNER behaves without changing which
+// executable runs. `NODE_TEST_CONTEXT` is the dangerous one: a nested `node --test` sees it,
+// logs "run() is being called recursively ... skipping running files", runs NOTHING, and
+// still exits 0 — which reads as a passing suite. A test workflow that can report "passed"
+// for a suite that never executed is worse than one that fails, so these are stripped from
+// the child environment. This removes inherited state; it grants nothing.
+const STRIPPED_INHERITED_KEYS = ['NODE_TEST_CONTEXT'] as const;
+
 function assertSafeEnvironment(environment: Record<string, string> | undefined): void {
   const denied = Object.keys(environment ?? {}).find((key) => DENIED_ENVIRONMENT_KEYS.has(key.toUpperCase()));
   if (denied) throw new CommandPolicyError(`environment variable "${denied}" can alter executable resolution and is refused`);
+}
+
+/** The child's environment: inherited, minus runner state that would corrupt the result. */
+function childEnvironment(
+  base: NodeJS.ProcessEnv,
+  explicit: Record<string, string> | undefined,
+): NodeJS.ProcessEnv {
+  const merged: NodeJS.ProcessEnv = { ...process.env, ...base, ...(explicit ?? {}) };
+  for (const key of STRIPPED_INHERITED_KEYS) delete merged[key];
+  return merged;
 }
 
 function redactKnownEnvironmentValues(
@@ -143,8 +161,14 @@ export async function commandRun(
     const child = spawn(argv0, req.command.slice(1), {
       cwd,
       shell: false,
+      // Own process GROUP on POSIX. `npm run x` spawns a grandchild; killing only `npm`
+      // leaves the grandchild holding the stdout pipe, so `close` never fires and a timeout
+      // waits for work it was supposed to stop — a hanging suite would hang forever. The
+      // group lets the timeout kill the whole tree. Windows has no process groups, so the
+      // kill path falls back to killing the child directly.
+      detached: process.platform !== 'win32',
       stdio: ['ignore', 'pipe', 'pipe'],
-      env: { ...process.env, ...env, ...(req.environment ?? {}) },
+      env: childEnvironment(env, req.environment),
     });
     let stdout = '';
     let stderr = '';
@@ -168,13 +192,25 @@ export async function commandRun(
     child.stdout.on('data', (c: Buffer) => { stdout = cap(stdout, c); });
     child.stderr.on('data', (c: Buffer) => { stderr = cap(stderr, c); });
 
+    /** Kill the whole tree, not just the direct child. */
+    const killTree = (): void => {
+      if (child.pid !== undefined && process.platform !== 'win32') {
+        try {
+          process.kill(-child.pid, 'SIGKILL');
+          return;
+        } catch {
+          // The group may already be gone; fall through to the direct kill.
+        }
+      }
+      child.kill('SIGKILL');
+    };
     const timer = setTimeout(() => {
       timedOut = true;
-      child.kill('SIGKILL');
+      killTree();
     }, timeoutMs);
     const onAbort = (): void => {
       cancelled = true;
-      child.kill('SIGKILL');
+      killTree();
     };
     if (signal?.aborted) onAbort();
     else signal?.addEventListener('abort', onAbort, { once: true });

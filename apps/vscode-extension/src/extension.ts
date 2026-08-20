@@ -51,6 +51,7 @@ import { registerGovernedCodingCommand, restoreGovernedCodingRun } from './comma
 import { runAdHocCommand } from './commands/runCommand.js';
 import { runQuickEdit } from './commands/quickEdit.js';
 import { runGitOverview } from './commands/gitOverview.js';
+import { runTests } from './commands/runTests.js';
 import type { GovernedCodingUiFactory } from './services/governedCodingUi.js';
 import { EngineDiagnostics, type EngineDiagnosticSnapshot } from './services/engineDiagnostics.js';
 import { type TokenStore } from './services/tokenStore.js';
@@ -559,6 +560,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<MigraP
     ),
     vscode.commands.registerCommand('migrapilot.quickEdit', () => runQuickEdit(commandDeps)),
     vscode.commands.registerCommand('migrapilot.gitOverview', () => runGitOverview(commandDeps)),
+    vscode.commands.registerCommand('migrapilot.runTests', () => runTests(commandDeps, context.workspaceState)),
     vscode.commands.registerCommand('migrapilot.showBackendDiagnostics', showBackendDiagnostics),
   );
 

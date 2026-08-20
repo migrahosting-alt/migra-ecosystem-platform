@@ -530,6 +530,17 @@ export class MigraAiClient {
   }
 
   /**
+   * Run the project's tests (`POST /api/ai/test-run`).
+   *
+   * A SCRIPT is named, never a command line: the Brain will only run a script the project
+   * already declares. A `refused` status is a normal 200 answer ("nothing safe to run
+   * here") and must not be read as a failing suite; only an unreachable Brain throws.
+   */
+  async runTests(body: { rootPath: string; script?: string; cwd?: string; timeoutMs?: number }, signal?: AbortSignal): Promise<unknown> {
+    return this.jsonRequest<unknown>('POST', '/api/ai/test-run', body, signal);
+  }
+
+  /**
    * Run ONE bounded command in the workspace (`POST /api/ai/command-run`).
    *
    * The AD-HOC LANE, deliberately distinct from Agent Mode: a single user-initiated

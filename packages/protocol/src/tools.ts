@@ -456,6 +456,62 @@ export type GitHistoryResponse = z.infer<typeof GitHistoryResponseSchema>;
 export type GitBlameRequest = z.infer<typeof GitBlameRequestSchema>;
 export type GitBlameResponse = z.infer<typeof GitBlameResponseSchema>;
 
+
+// ── Structured test runs ────────────────────────────────────────────────────
+//
+// A test run names a SCRIPT, never a command line. The script must already exist
+// in the project's package.json, so the set of runnable things is whatever the
+// project already declared — there is no field here that becomes a shell string,
+// and no way to reach a program the project did not define for itself.
+
+export const TestRunRequestSchema = z.object({
+  rootPath: z.string().min(1),
+  /** A key in package.json "scripts". Omitted means "discover the standard one". */
+  script: z.string().min(1).optional(),
+  /** Optional working directory RELATIVE to rootPath (contained server-side). */
+  cwd: z.string().optional(),
+  timeoutMs: z.number().int().positive().max(600_000).optional(),
+});
+
+export const TestFailureSchema = z.object({
+  /** Test name when parsable, else the file that reported it. */
+  name: z.string(),
+  file: z.string().nullable(),
+});
+
+export const TestRunResponseSchema = z.object({
+  tool: z.literal('test.run'),
+  /**
+   * `passed`/`failed` are TEST outcomes — the suite ran and reported.
+   * `timeout` is the suite exceeding its limit.
+   * `refused` means the run never started: no discoverable script, an unknown
+   * script, or a policy refusal. A caller must never read `refused` as `failed`.
+   */
+  status: z.enum(['passed', 'failed', 'timeout', 'refused']),
+  /** The script that ran, or null when nothing ran. */
+  script: z.string().nullable(),
+  /** The exact argv executed, for reproducibility. Null when nothing ran. */
+  command: z.array(z.string()).nullable(),
+  exitCode: z.number().nullable(),
+  durationMs: z.number(),
+  /** Populated when the runner's output was parsable. */
+  totals: z
+    .object({ passed: z.number(), failed: z.number() })
+    .nullable(),
+  failures: z.array(TestFailureSchema),
+  /** Bounded raw output, preserved for inspection. */
+  stdout: z.string(),
+  stderr: z.string(),
+  truncated: z.boolean(),
+  /** Present only when status is `refused`. */
+  refusalReason: z.string().nullable(),
+  /** Scripts the project declares that look like tests — for a caller to offer. */
+  availableScripts: z.array(z.string()),
+});
+
+export type TestRunRequest = z.infer<typeof TestRunRequestSchema>;
+export type TestRunResponse = z.infer<typeof TestRunResponseSchema>;
+
 export type ToolRequestMap = {
   'command.run': CommandRunRequest;
   'workspace.search': WorkspaceSearchRequest;

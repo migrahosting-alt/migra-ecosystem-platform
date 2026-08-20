@@ -195,6 +195,10 @@
       {
         "command": "migrapilot.gitOverview",
         "title": "MigraPilot: Git Status & History"
+      },
+      {
+        "command": "migrapilot.runTests",
+        "title": "MigraPilot: Run Tests"
       }
     ],
     "configuration": {

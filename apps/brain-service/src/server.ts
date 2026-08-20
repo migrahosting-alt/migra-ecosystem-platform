@@ -18,6 +18,7 @@ import { registerAiRoutes } from './engine/aiRoutes.js';
 import { registerToolExecutionRoutes } from './engine/toolRoutes.js';
 import { registerInspectRoutes } from './engine/inspectRoutes.js';
 import { registerCommandRunRoutes } from './engine/commandRunRoutes.js';
+import { registerTestRunRoutes } from './engine/testRunRoutes.js';
 import { registerAnswerRoutes } from './engine/answerRoutes.js';
 import { lookup as dnsLookup } from 'node:dns/promises';
 import { registerEngineerRoutes } from './engine/engineerRoutes.js';
@@ -237,6 +238,7 @@ async function main(): Promise<void> {
   // refusal. Read-only + workspace-contained + typed errors.
   registerInspectRoutes(app);
   registerCommandRunRoutes(app);
+  registerTestRunRoutes(app);
   // ── Agentic answer path (`POST /api/ai/answer`): the model gathers real
   // workspace evidence with read-only tools before answering — Copilot-style,
   // grounded + cited. Read-only by construction. Uses a tool-capable local model.
