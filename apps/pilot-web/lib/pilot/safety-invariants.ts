@@ -6,7 +6,7 @@
 // policy/registry/tool posture, read-only. Human-readable companion:
 // docs/pilot/ops-safety-invariants-phase-12-12.md
 
-export const SAFETY_INVARIANTS_VERSION = "12.12.0";
+export const SAFETY_INVARIANTS_VERSION = "12.13.0";
 
 export type InvariantSeverity = "critical" | "high" | "medium";
 
@@ -26,6 +26,9 @@ export const SAFETY_INVARIANTS: readonly SafetyInvariant[] = [
   { id: "approval-eligibility-paths-not-redaction-wrapped", description: "Approval/eligibility/target/preflight routes are NOT redaction-wrapped (preserve hash/eval integrity).", machineCheckable: true, severity: "high" },
   { id: "safe-read-surfaces-redacted", description: "Report/journal/diagnostic/export safe-read routes pass output through safeJson.", machineCheckable: true, severity: "high" },
   { id: "code-paths-not-redacted", description: "Source/code/repo/prompt routes are NOT redaction-wrapped (avoid corrupting content).", machineCheckable: true, severity: "high" },
+  { id: "read-only-modes-cannot-mutate", description: "Inspect/Plan/Verify/Review admit safe_read only; every non-read action is blocked with no approval card offered.", machineCheckable: true, severity: "critical" },
+  { id: "unknown-mode-fails-closed", description: "An unrecognised, absent or malformed mode resolves to the WEAKEST authority (read-only), never to Execute.", machineCheckable: true, severity: "critical" },
+  { id: "mode-ceiling-never-promotes", description: "The mode ceiling only narrows: it never unblocks a blocked action, never turns approval into auto-run, and leaves Execute-mode decisions byte-identical to the classifier's.", machineCheckable: true, severity: "critical" },
   { id: "image-generate-approval-gated", description: "image.generate is requires_approval.", machineCheckable: true, severity: "high" },
   { id: "image-diagnostics-safe-read", description: "image.health and image.preview are safe_read.", machineCheckable: true, severity: "medium" },
   { id: "sdxl-live-unproven-unless-configured", description: "SDXL live generation is unproven; the image provider is disabled by default until an endpoint is configured (NEEDS_REAL_SD_ENDPOINT).", machineCheckable: false, severity: "medium" },

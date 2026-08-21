@@ -1,3 +1,4 @@
+import { authorityOfMode, parseMode } from "./mode-authority";
 // MigraPilot — mock agent (Phase 1).
 // Classifies intent, picks an agent profile, and produces a read-only plan.
 // NO tools are executed and NO system state is changed. Real model gateway,
@@ -103,6 +104,22 @@ const TOOLS_NOTE = [
   "- Do NOT call tools for greetings or chit-chat — just reply. After a tool returns, answer concisely. Never invent file paths.",
 ].join("\n");
 
-export function buildSystemPrompt(agentId: AgentProfileId): string {
-  return `${GUARDRAILS}\n\n${AGENT_SYSTEM_PROMPTS[agentId]}\n${TOOLS_NOTE}`;
+/**
+ * ADVISORY ONLY. The mode line saves the model a wasted tool call it would be refused for,
+ * and lets it say what it WOULD do instead of failing at it. It carries NO authority:
+ * applyModeCeiling() runs on the dispatch path and refuses whatever the mode forbids
+ * regardless of this text, of what the model believes, or of what it claims. Never soften
+ * the gate on the grounds that the prompt already says this.
+ */
+export function buildSystemPrompt(agentId: AgentProfileId, mode?: unknown): string {
+  const readOnly = authorityOfMode(mode) === "read_only";
+  const named = parseMode(mode);
+  const modeNote = readOnly
+    ? `\n\nCURRENT MODE: ${named ?? "unrecognised (treated as read-only)"}. In this mode you may `
+      + `read and explain, but you may NOT run any tool that changes anything — those calls are `
+      + `refused before they execute. If the user asks for a change, say plainly what you would do `
+      + `and that Execute mode is what carries it out. Do not claim you have done it.`
+    : `\n\nCURRENT MODE: Execute. Changes are permitted, and each one still stops for the user's `
+      + `approval before it runs.`;
+  return `${GUARDRAILS}\n\n${AGENT_SYSTEM_PROMPTS[agentId]}\n${TOOLS_NOTE}${modeNote}`;
 }

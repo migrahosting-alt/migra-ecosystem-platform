@@ -88,6 +88,7 @@ function pilotRunPct(run: PilotRun): number {
   return Math.round((run.steps.filter((s) => s.status === "done").length / run.steps.length) * 100);
 }
 function pilotRunTone(status: string): string {
+  if (status === "refused") return "Failed"; // amber/negative tone: the ask was not carried out
   return status === "succeeded" ? "Succeeded" : status === "failed" ? "Failed" : "Running";
 }
 function pilotTruncate(text: string, max = 30): string {

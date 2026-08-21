@@ -7,6 +7,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { resolve } from "node:path";
 import { SAFETY_INVARIANTS, SAFETY_INVARIANTS_VERSION } from "../../lib/pilot/safety-invariants";
 import { classifyPilotAction } from "../../lib/pilot/policy";
+import { PILOT_MODES, applyModeCeiling, authorityOfMode } from "../../lib/pilot/mode-authority";
 import { TOOLS } from "../../lib/pilot/tools";
 import { listOpsActions } from "../../lib/pilot/ops-action-registry";
 import { checkEligibility, previewEligibility } from "../../lib/pilot/ops-eligibility-policy";
@@ -19,6 +20,52 @@ const usesSafeJson = (p: string) => /safe-output|safeJson/.test(routeSrc(p));
 async function main() {
   const results: { id: string; pass: boolean; detail: string }[] = [];
   const record = (id: string, pass: boolean, detail: string) => results.push({ id, pass, detail });
+
+  // ---- mode authority ceiling ----
+  // A representative spread: an auto-run read, an approval-gated mutation, a memory write,
+  // and a hard-blocked verb. The ceiling must treat each correctly in every mode.
+  const MODE_PROBES = ["repo.read", "image.generate", "memory.ingest", "ops.deploy"] as const;
+  const readOnlyModes = PILOT_MODES.filter((m) => authorityOfMode(m) === "read_only");
+
+  // read-only-modes-cannot-mutate
+  {
+    const bad: string[] = [];
+    for (const mode of readOnlyModes) {
+      for (const name of MODE_PROBES) {
+        const base = classifyPilotAction(name, {});
+        const gated = applyModeCeiling(base, mode);
+        if (base.risk === "safe_read") { if (gated.risk !== "safe_read") bad.push(`${mode}/${name} narrowed a read`); continue; }
+        // Every non-read must be refused outright, and must NOT offer an approval card.
+        if (!gated.blocked || gated.requiresApproval) bad.push(`${mode}/${name} blocked=${gated.blocked} approval=${gated.requiresApproval}`);
+      }
+    }
+    record("read-only-modes-cannot-mutate", bad.length === 0,
+      `${readOnlyModes.length} read-only modes x ${MODE_PROBES.length} probes; violations: ${bad.length ? bad.join("; ") : "none"}`);
+  }
+  // unknown-mode-fails-closed
+  {
+    const junk: unknown[] = [undefined, null, "", "execute", "EXECUTE", "Exec", "Plan ", 7, {}, ["Execute"], "Execute\u0000"];
+    const promoted = junk.filter((m) => authorityOfMode(m) !== "read_only");
+    const reachable = junk.filter((m) => !applyModeCeiling(classifyPilotAction("image.generate", {}), m).blocked);
+    record("unknown-mode-fails-closed", promoted.length === 0 && reachable.length === 0,
+      `${junk.length} malformed modes: ${promoted.length} gained authority, ${reachable.length} reached image.generate`);
+  }
+  // mode-ceiling-never-promotes
+  {
+    const names = Object.keys(TOOLS);
+    // Execute must be a pass-through: identical decision object for every tool.
+    const drift = names.filter((n) => JSON.stringify(applyModeCeiling(classifyPilotAction(n, {}), "Execute")) !== JSON.stringify(classifyPilotAction(n, {})));
+    // No mode may unblock what the classifier blocked.
+    const unblocked: string[] = [];
+    for (const mode of PILOT_MODES) {
+      for (const n of names) {
+        const base = classifyPilotAction(n, {});
+        if (base.blocked && !applyModeCeiling(base, mode).blocked) unblocked.push(`${mode}/${n}`);
+      }
+    }
+    record("mode-ceiling-never-promotes", drift.length === 0 && unblocked.length === 0,
+      `Execute pass-through over ${names.length} tools: ${drift.length} drifted; unblocked-by-mode: ${unblocked.length}`);
+  }
 
   // executor-absent
   {

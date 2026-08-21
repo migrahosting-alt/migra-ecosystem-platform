@@ -7,6 +7,7 @@ import { KNOWN_TOOL_NAMES, runTool, toolSpecsForModel } from "./tools";
 import { classifyPilotAction } from "./policy";
 import { addAudit, id, saveMessage, saveRun, setRunConvo, store } from "./store";
 import { createApproval } from "./approval-store";
+import { applyModeCeiling } from "./mode-authority";
 import type { ApprovalRequest, Message, PilotEvent, Run, RunStep } from "./types";
 
 const now = () => new Date().toISOString();
@@ -95,7 +96,11 @@ export async function runAgentLoop(run: Run, convo: ChatMessage[], send: (e: Pil
       const args = argsOf(tc);
       assistantMsg.tool_calls!.push(tc);
 
-      const decision = classifyPilotAction(name, args);
+      // THE MODE CEILING. classifyPilotAction says what the action IS; the run's mode says
+      // what may be reached from here. Applied on the dispatch path so it binds every tool
+      // call regardless of what the model was told or believes. Until now `mode` was stored
+      // on the Run and never read — Inspect could reach image.generate exactly like Execute.
+      const decision = applyModeCeiling(classifyPilotAction(name, args), run.mode);
 
       if (decision.blocked) {
         // REFUSE — never execute, never offer approval. Tell the model and move on.
@@ -103,6 +108,7 @@ export async function runAgentLoop(run: Run, convo: ChatMessage[], send: (e: Pil
         run.steps.push(step);
         saveRun(run);
         send({ type: "step", step });
+        run.refusedCount = (run.refusedCount ?? 0) + 1;
         addAudit({ id: id("aud"), runId: run.id, ts: now(), kind: "action.blocked", detail: `${name}: ${decision.reason}` });
         convo.push({ role: "tool", content: `BLOCKED: ${decision.reason}. This action is not permitted; do not attempt it again.`, tool_name: name });
         continue;
@@ -174,7 +180,8 @@ export async function streamPilotRun(run: Run, convo: ChatMessage[], send: (e: P
   store.conversations.get(run.conversationId)?.messageIds.push(assistantMessage.id);
   send({ type: "message", message: assistantMessage });
 
-  run.status = "succeeded";
+  // Answered, but refused something the user asked for — say so rather than "succeeded".
+  run.status = (run.refusedCount ?? 0) > 0 ? "refused" : "succeeded";
   run.summary = text;
   run.pendingApprovalId = undefined;
   run.endedAt = now();

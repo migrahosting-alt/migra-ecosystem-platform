@@ -10,6 +10,12 @@ import { spawnSync } from "node:child_process";
 const STEPS = [
   { name: "redaction", script: "pilot:redaction:test" },
   { name: "safety-invariants", script: "pilot:safety:verify" },
+  // The executor precheck was written and passing but gated NOWHERE: not in pilot:verify,
+  // not in pilot:ci. Its version-drift guard happens to be tsc-visible (literal types), but
+  // its most important assertion is not — "every promotion precheck is still pending, nothing
+  // silently pre-approved". Flipping one to satisfied would have compiled clean and shipped
+  // green. A cold-perimeter guard that nothing runs is not a guard.
+  { name: "executor-precheck", script: "pilot:precheck:verify" },
 ];
 
 const results = [];

@@ -1,7 +1,13 @@
 // MigraPilot — Phase 1 data model (in-memory).
 // Read-only planning agent only. No tool execution, no production changes.
 
-export type RunStatus = "queued" | "running" | "succeeded" | "failed" | "needs_approval";
+/**
+ * `refused` is its own outcome. A run that answered but was refused an action the user
+ * asked for did NOT do what was asked, and reporting it as "succeeded" beside a
+ * "1 action(s) blocked" banner tells the user two contradictory things at once. Same rule
+ * as the model-fallback fix: a run must not claim more than it achieved.
+ */
+export type RunStatus = "queued" | "running" | "succeeded" | "refused" | "failed" | "needs_approval";
 export type StepStatus = "pending" | "running" | "done" | "failed";
 
 export type AgentProfileId =
@@ -57,6 +63,9 @@ export interface Run {
    * than evidence that names none.
    */
   modelRequested?: string;
+  /** How many tool calls the policy/mode gate refused. Counted structurally, never by
+   *  matching step titles — a status derived from prose is a status that drifts. */
+  refusedCount?: number;
   tier?: string;
   pendingApprovalId?: string;
   recalled?: { count: number; sources: { title: string; path: string }[] };

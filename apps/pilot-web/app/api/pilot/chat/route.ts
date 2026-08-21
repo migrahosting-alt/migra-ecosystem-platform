@@ -4,6 +4,7 @@
 // human approval (resumed via /api/pilot/runs/:id/approve).
 
 import { AGENT_PROFILES, classifyAgent, buildSystemPrompt } from "../../../../lib/pilot/agent";
+import { parseMode } from "../../../../lib/pilot/mode-authority";
 import { selectModel, type ChatMessage } from "../../../../lib/pilot/gateway";
 import { streamPilotRun } from "../../../../lib/pilot/orchestrator";
 import { retrieveContext } from "../../../../lib/pilot/knowledge";
@@ -26,7 +27,9 @@ export async function POST(req: Request) {
   }
 
   const message = typeof body.message === "string" ? body.message.trim() : "";
-  const mode = typeof body.mode === "string" && body.mode ? body.mode : "Plan";
+  // An unrecognised mode resolves to the weakest authority, not to a default that acts.
+  // parseMode returning null is preserved as-is so the ceiling sees exactly what arrived.
+  const mode = parseMode(body.mode) ?? (body.mode === undefined ? "Plan" : String(body.mode));
   const conversationId = typeof body.conversationId === "string" ? body.conversationId : undefined;
 
   if (!message) {
@@ -68,7 +71,7 @@ export async function POST(req: Request) {
     .slice(-HISTORY_LIMIT)
     .map((m) => ({ role: m.role, content: m.content }));
 
-  const convo: ChatMessage[] = [{ role: "system", content: buildSystemPrompt(agentId) }, ...history];
+  const convo: ChatMessage[] = [{ role: "system", content: buildSystemPrompt(agentId, mode) }, ...history];
 
   const encoder = new TextEncoder();
   const stream = new ReadableStream<Uint8Array>({

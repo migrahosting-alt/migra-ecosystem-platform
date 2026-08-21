@@ -88,6 +88,26 @@
 # work was migrated into evaluations/mkes/stress and evaluations/
 # conversation-quality there, and the duplicate removed. Two Migra Engineer
 # implementations is the expensive outcome — do not re-add one here.
+# apps/pilot-web IS the product chat surface (chat.migrateck.com lane) and 122 of its
+# files are already tracked — but the directory was never allowlisted, so git silently
+# refused every NEW file added to it while happily accepting edits to the old ones. A
+# module can be written, typechecked, gated and verified and still never reach a commit.
+# Allowlist it explicitly so the ignore file matches what the repo actually tracks.
+!/apps/pilot-web/
+!/apps/pilot-web/**
+
+# ...but the allowlist above also uncovers pilot-web's RUNTIME and GENERATED output, which
+# was only invisible because the whole directory was ignored. Re-exclude it explicitly:
+# a python venv, local run/scratch state, tool output and build artefacts are not source.
+/apps/pilot-web/.pilot-data/
+/apps/pilot-web/.pilot-scratch/
+/apps/pilot-web/.pilot-sd/
+/apps/pilot-web/.playwright-mcp/
+/apps/pilot-web/.next/
+/apps/pilot-web/tsconfig.tsbuildinfo
+/apps/pilot-web/next-env.d.ts
+/apps/pilot-web/*.png
+
 !/apps/**/package.json
 !/apps/**/package-lock.json
 !/apps/**/pnpm-lock.yaml
