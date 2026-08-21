@@ -1,8 +1,24 @@
 'use client'
 
-import { useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
+import { useRef, useState, type ChangeEvent, type FormEvent, type KeyboardEvent } from 'react'
 import { ImageIcon, Lock, Mic, Paperclip, SendHorizontal } from 'lucide-react'
+import { AttachmentChips } from '@/features/attachments/AttachmentChips'
+import { useAttachments } from '@/features/attachments/useAttachments'
 import { cn } from '@/lib/cn'
+
+/**
+ * THE CONTROLS IN HERE ARE REAL, OR THEY ARE VISIBLY OFF.
+ *
+ * The paperclip, the mic and the image button were all `type="button"` with no handler —
+ * three affordances promising capabilities the composer did not have. The paperclip now
+ * runs the whole path (see `useAttachments`): pick, validate, upload to the caller's own
+ * library, index it, and mark the turn grounded so the Brain answers FROM the file.
+ *
+ * The mic and the image button are DISABLED, with the reason in their tooltip, because
+ * there is no speech pipeline and no image ingest behind them. A control that is enabled
+ * and does nothing is the thing being removed here; leaving one in place while fixing its
+ * neighbour would defeat the point.
+ */
 
 const toolButton =
   'inline-flex h-10 w-10 items-center justify-center rounded-field border border-slate-200 bg-white text-slate-500 transition-colors hover:border-slate-300 hover:bg-slate-50 hover:text-slate-700'
@@ -16,7 +32,8 @@ export function Composer({
   className,
   highlighted,
 }: {
-  onSubmit?: (value: string) => void
+  /** `meta.grounded` is true when the turn carries a searchable attachment. */
+  onSubmit?: (value: string, meta?: { grounded?: boolean }) => void
   placeholder?: string
   /** "media" adds image/mic affordances inline, as on the media review screen. */
   variant?: 'default' | 'media' | 'research'
@@ -29,6 +46,8 @@ export function Composer({
   const [value, setValue] = useState(defaultValue)
   const [focused, setFocused] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const { attachments, limits, add, remove, retry, clear, busy, groundable } = useAttachments()
 
   const grow = () => {
     const el = textareaRef.current
@@ -41,9 +60,19 @@ export function Composer({
     event?.preventDefault()
     const trimmed = value.trim()
     if (!trimmed) return
-    onSubmit?.(trimmed)
+    // Never send while an attachment is still uploading or indexing: the turn would be
+    // answered without the file the user attached it for.
+    if (busy) return
+    onSubmit?.(trimmed, groundable ? { grounded: true } : undefined)
     setValue('')
+    clear()
     requestAnimationFrame(grow)
+  }
+
+  const onPicked = (event: ChangeEvent<HTMLInputElement>) => {
+    if (event.target.files?.length) add(event.target.files)
+    // Reset so picking the SAME file twice still fires a change event.
+    event.target.value = ''
   }
 
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -66,6 +95,17 @@ export function Composer({
         className,
       )}
     >
+      <AttachmentChips attachments={attachments} onRemove={remove} onRetry={retry} />
+
+      <input
+        ref={fileInputRef}
+        type="file"
+        multiple
+        className="hidden"
+        onChange={onPicked}
+        {...(limits ? { accept: limits.allowedExtensions.join(',') } : {})}
+      />
+
       <textarea
         ref={textareaRef}
         rows={variant === 'research' ? 2 : 1}
@@ -87,18 +127,40 @@ export function Composer({
         <div className="flex items-center gap-2">
           {variant === 'media' ? (
             <>
-              <button type="button" className={toolButton} aria-label="Record voice note">
+              <button
+                type="button"
+                disabled
+                title="Voice input isn't available yet — MigraPilot has no speech pipeline connected."
+                className={cn(toolButton, 'cursor-not-allowed opacity-40')}
+                aria-label="Record voice note (not available yet)"
+              >
                 <Mic className="h-[18px] w-[18px]" strokeWidth={1.9} />
               </button>
-              <button type="button" className={toolButton} aria-label="Attach a file">
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                className={toolButton}
+                aria-label="Attach a file"
+              >
                 <Paperclip className="h-[18px] w-[18px]" strokeWidth={1.9} />
               </button>
-              <button type="button" className={toolButton} aria-label="Attach an image">
+              <button
+                type="button"
+                disabled
+                title="Image attachments aren't supported yet — only text and code documents can be read."
+                className={cn(toolButton, 'cursor-not-allowed opacity-40')}
+                aria-label="Attach an image (not available yet)"
+              >
                 <ImageIcon className="h-[18px] w-[18px]" strokeWidth={1.9} />
               </button>
             </>
           ) : (
-            <button type="button" className={toolButton} aria-label="Attach a file">
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              className={toolButton}
+              aria-label="Attach a file"
+            >
               <Paperclip className="h-[18px] w-[18px]" strokeWidth={1.9} />
             </button>
           )}
@@ -106,7 +168,13 @@ export function Composer({
 
         <div className="flex items-center gap-2.5">
           {variant !== 'media' && (
-            <button type="button" className={toolButton} aria-label="Dictate">
+            <button
+              type="button"
+              disabled
+              title="Voice input isn't available yet — MigraPilot has no speech pipeline connected."
+              className={cn(toolButton, 'cursor-not-allowed opacity-40')}
+              aria-label="Dictate (not available yet)"
+            >
               <Mic className="h-[18px] w-[18px]" strokeWidth={1.9} />
             </button>
           )}
@@ -114,7 +182,8 @@ export function Composer({
             type="submit"
             aria-label="Send message"
             className="inline-flex h-10 w-10 items-center justify-center rounded-field bg-brand-600 text-white shadow-brand transition-all hover:bg-brand-700 active:scale-95 disabled:opacity-40 disabled:shadow-none"
-            disabled={!value.trim()}
+            disabled={!value.trim() || busy}
+            title={busy ? 'Waiting for your attachment to finish' : undefined}
           >
             <SendHorizontal className="h-[18px] w-[18px]" strokeWidth={2} />
           </button>

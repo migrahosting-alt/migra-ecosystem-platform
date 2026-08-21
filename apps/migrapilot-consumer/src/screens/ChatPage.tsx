@@ -205,7 +205,7 @@ export function ChatPage() {
           <div className="pointer-events-none -mt-6 h-6 bg-linear-to-b from-transparent to-canvas" />
           <Composer
             variant={framed ? 'media' : 'default'}
-            onSubmit={(value) => sendMessage(conversation.id, value)}
+            onSubmit={(value, meta) => sendMessage(conversation.id, value, meta)}
           />
           {!framed && <ComposerDisclaimer className="mt-3.5" />}
         </div>

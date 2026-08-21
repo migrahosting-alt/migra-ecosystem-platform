@@ -41,8 +41,15 @@ export function WelcomePage() {
   // Arriving from Files means every question in this chat is about those files.
   const grounded = useSearchParams().get('grounded') === 'files'
 
-  const start = (prompt: string) =>
-    router.push(`/chat/${startConversation(prompt, grounded ? { grounded: true } : undefined)}`)
+  /*
+   * Two independent reasons a first turn is grounded: the user arrived from Files, or they
+   * attached a searchable file to this very message. Either one means the answer must come
+   * from their documents, so they are OR'd rather than one overriding the other.
+   */
+  const start = (prompt: string, meta?: { grounded?: boolean }) =>
+    router.push(
+      `/chat/${startConversation(prompt, grounded || meta?.grounded ? { grounded: true } : undefined)}`,
+    )
 
   return (
     <Workspace
