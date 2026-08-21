@@ -1056,7 +1056,7 @@ export async function* runEngineerTask(deps: EngineerDeps, input: EngineerInput)
       } else {
         for (const note of normalized.notes) yield { type: 'note', n, kind: 'normalized', message: note };
         const toolInput = { ...normalized.input, rootPath: input.rootPath };
-        const canonical = `${tool} ${stableStringify(toolInput)}`;
+        const canonical = `${tool}\u0000${stableStringify(toolInput)}`;
 
         // Command-write policy (in-loop refusal for external-effect commands).
         const denied = tool === 'command.run' ? deniedCommandReason((toolInput as { command?: unknown }).command) : null;
