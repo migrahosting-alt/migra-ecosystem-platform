@@ -156,3 +156,14 @@ test('no session disables the mic as signed_out', () => {
   const mic = micAvailability({ kind: 'unauthenticated', detail: 'Authentication required.' })
   assert.equal(mic.state === 'disabled' ? mic.cause : '', 'signed_out')
 })
+
+test('a Brain with no speech route at all is INCOMPATIBLE, not "no record"', () => {
+  // The literal production state when this was written: brain-service persona-v4 has no
+  // speech routes and answers 404. "The Brain has no record for this request" would send
+  // someone hunting for a setting; the real answer is that the deployed Brain is older
+  // than this build.
+  const mic = micAvailability({ kind: 'not_found' })
+  assert.equal(mic.state, 'disabled')
+  assert.equal(mic.state === 'disabled' ? mic.cause : '', 'incompatible')
+  assert.match(mic.state === 'disabled' ? mic.reason : '', /older than this build/)
+})

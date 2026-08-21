@@ -121,6 +121,27 @@ export type MicAvailability =
   | { state: 'disabled'; cause: 'unavailable' | 'incompatible' | 'unreachable' | 'signed_out'; reason: string }
 
 export function micAvailability(result: BrainResult<TranscriptionCapability>): MicAvailability {
+  /*
+   * A 404 on a CAPABILITY probe is a contract mismatch, not a missing record.
+   *
+   * `not_found` normally means "no such conversation/run", which is genuinely `unavailable`.
+   * But a capability endpoint either exists in the Brain or it does not, and a Brain that
+   * does not serve this operation is a Brain older than this build. Reporting that as "the
+   * Brain has no record for this request" sends someone looking for a setting; reporting it
+   * as incompatible sends them to look at what is deployed — which is the actual answer.
+   * Measured on production the day this was written: brain-service release persona-v4 has no
+   * speech routes at all and answers 404.
+   */
+  if (result.kind === 'not_found') {
+    return {
+      state: 'disabled',
+      cause: 'incompatible',
+      reason:
+        'This app expects a speech capability the connected Brain does not provide. The ' +
+        'Brain is likely older than this build.',
+    }
+  }
+
   const view = toBrainView(result)
   if (view.state !== 'ready') {
     return { state: 'disabled', cause: view.state, reason: view.reason }
