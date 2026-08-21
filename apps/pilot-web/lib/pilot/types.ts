@@ -48,6 +48,15 @@ export interface Run {
   userMessage: string;
   summary?: string;
   model?: string;
+  /**
+   * The model the router ASKED for, when it differs from the one that answered.
+   *
+   * chatOnce falls back to the local model if the cloud one is unavailable, and until
+   * now nothing recorded that: `model` kept the requested id, so a fallback answer was
+   * attributed to a model that never ran. Evidence that names the wrong model is worse
+   * than evidence that names none.
+   */
+  modelRequested?: string;
   tier?: string;
   pendingApprovalId?: string;
   recalled?: { count: number; sources: { title: string; path: string }[] };

@@ -58,6 +58,26 @@ export async function runAgentLoop(run: Run, convo: ChatMessage[], send: (e: Pil
   const model = run.model ?? "llama3.1:8b";
   for (let iter = 0; iter < MAX_ITERS; iter++) {
     const turn = await chatOnce({ model, messages: convo, tools: toolSpecsForModel() });
+    // WHO ACTUALLY ANSWERED. chatOnce silently falls back to the local model when the
+    // cloud one is unavailable (gateway.ts). run.model held the REQUESTED id, so every
+    // fallback answer was attributed to a model that never ran — and a capture that
+    // names the wrong model cannot be compared against anything. Record the truth, and
+    // surface it, because a silent downgrade is exactly what a user needs told.
+    if (turn.model && turn.model !== run.model) {
+      run.modelRequested = run.modelRequested ?? run.model;
+      run.model = turn.model;
+      send({
+        type: "step",
+        step: {
+          id: `step_fallback_${iter}`,
+          index: -1,
+          title: `⚠ model fallback: ${run.modelRequested} unavailable — answered by ${turn.model}`,
+          status: "done",
+          startedAt: new Date().toISOString(),
+          endedAt: new Date().toISOString(),
+        },
+      } as PilotEvent);
+    }
     let toolCalls = turn.toolCalls;
     if (toolCalls.length === 0) {
       const recovered = extractTextToolCall(turn.content);
