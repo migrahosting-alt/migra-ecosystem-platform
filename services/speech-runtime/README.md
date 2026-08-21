@@ -66,6 +66,38 @@ interpreter, found no `faster_whisper`, and correctly reported `ready: false` in
 pretending — which is the readiness rule doing its job on a real deployment mistake. A mise
 version bump will move that path and the unit must be updated.
 
+## ⚠️ Auto-start after a Windows reboot — REQUIRED, and not yet proven
+
+The GPU is on the workstation and the workstation runs WSL, so the chain is:
+
+    Windows boots -> WSL distro starts -> systemd user manager starts -> this service starts
+
+Everything from the distro onward is already configured: `/etc/wsl.conf` sets
+`[boot] systemd=true`, the unit is **enabled**, and **lingering is on**, so the service does
+NOT need anyone to log in or open a shell.
+
+**The unproven link is the first arrow.** WSL does not start at Windows boot by itself — it
+starts when something touches it, which in practice means opening a terminal. Until that is
+fixed, a Windows reboot leaves production voice unavailable (correctly and truthfully — the
+consumer fails closed — but unavailable) until a human opens a shell.
+
+This cannot be configured from inside WSL: interop is disabled on this machine
+(`/proc/sys/fs/binfmt_misc/WSLInterop` is absent and `.exe` returns "Exec format error"), so
+no scheduled task can be created from here. It is a Windows-side step:
+
+    Task Scheduler -> Create Task
+      Trigger : At log on  (or At startup, if the task runs as SYSTEM)
+      Action  : wsl.exe -d <distro> --exec /bin/true
+      Options : Run whether user is logged on or not; do NOT stop if idle
+
+Starting the distro is sufficient — systemd plus lingering brings the service up. Verify by
+rebooting Windows, waiting, and WITHOUT opening a terminal checking from another tailnet
+host:
+
+    curl -s http://100.86.143.93:4600/health     # -> {"ok": true}
+
+**Production voice acceptance is not complete until that survives a real reboot.**
+
 ## Readiness is proven, not assumed
 
 Startup runs a real warmup transcription. Only if it succeeds does `/capability` report
