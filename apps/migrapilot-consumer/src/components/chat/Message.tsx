@@ -176,10 +176,8 @@ function UserTurn({ message }: { message: Message }) {
 
 function AssistantTurn({
   message,
-  onReviewScope,
 }: {
   message: Message
-  onReviewScope?: () => void
 }) {
   const [vote, setVote] = useState<'up' | 'down' | null>(null)
   const blocks = message.blocks ?? []
@@ -270,20 +268,6 @@ function AssistantTurn({
             </div>
           )}
 
-          {message.action === 'scope-review' && (
-            <div className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-brand-100 bg-brand-50/60 p-3.5">
-              <p className="flex items-center gap-2.5 text-[13px] font-medium text-slate-600">
-                <ShieldCheck className="h-[18px] w-[18px] shrink-0 text-brand-600" strokeWidth={2} />
-                A scope approval is waiting for your decision.
-              </p>
-              <button
-                onClick={onReviewScope}
-                className="inline-flex h-9 items-center gap-2 rounded-lg bg-brand-600 px-3.5 text-[13px] font-semibold text-white shadow-brand transition-colors hover:bg-brand-700"
-              >
-                Review scope
-              </button>
-            </div>
-          )}
 
           <div className="mt-5 flex items-center justify-between border-t border-hairline pt-3.5">
             <span className="text-xs text-slate-400">{message.time}</span>
@@ -342,17 +326,15 @@ function AssistantTurn({
 
 export function MessageView({
   message,
-  onReviewScope,
 }: {
   message: Message
-  onReviewScope?: () => void
 }) {
   return (
     <div className="animate-fade-up">
       {message.role === 'user' ? (
         <UserTurn message={message} />
       ) : (
-        <AssistantTurn message={message} onReviewScope={onReviewScope} />
+        <AssistantTurn message={message} />
       )}
     </div>
   )

@@ -5,23 +5,17 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import {
   BarChart3,
-  Briefcase,
   ChevronDown,
-  CircleDot,
-  Code2,
   FileSpreadsheet,
   FileText,
   Mail,
   MessageSquare,
   MoreHorizontal,
-  PencilLine,
   Search,
   SquarePen,
-  Terminal,
 } from 'lucide-react'
 import { Workspace } from '@/components/layout/AppShell'
-import { IconTile, Badge, toneStyles } from '@/components/ui/Badge'
-import { activeRun, assistants, completedRun } from '@/data/mock'
+import { IconTile } from '@/components/ui/Badge'
 import type { Conversation } from '@/data/types'
 import { useChat } from '@/state/ChatProvider'
 import { cn } from '@/lib/cn'
@@ -32,13 +26,6 @@ const conversationIcons = {
   sheet: FileSpreadsheet,
   chart: BarChart3,
   mail: Mail,
-}
-
-const assistantIcons = {
-  pencil: PencilLine,
-  search: Search,
-  code: Code2,
-  briefcase: Briefcase,
 }
 
 const groups = ['Today', 'Yesterday', 'This Week'] as const
@@ -188,58 +175,6 @@ export function HistoryPage() {
         </kbd>
       </div>
 
-      <section className="mt-8">
-        <div className="flex items-center justify-between">
-          <h2 className="text-[21px] font-bold tracking-[-0.02em] text-slate-900">
-            Saved Assistants
-          </h2>
-          <Link
-            href="/assistants"
-            className="text-[13px] font-semibold text-brand-600 hover:text-brand-700"
-          >
-            View all
-          </Link>
-        </div>
-
-        <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          {assistants.map((assistant) => {
-            const Icon = assistantIcons[assistant.icon]
-            return (
-              <div
-                key={assistant.id}
-                className="flex flex-col items-center rounded-2xl border border-hairline bg-white p-5 text-center transition-all duration-150 hover:-translate-y-0.5 hover:border-brand-200 hover:shadow-raised"
-              >
-                <IconTile tone={assistant.tone} size="lg" className="h-14 w-14 rounded-full">
-                  <Icon strokeWidth={1.9} />
-                </IconTile>
-                <h3 className="mt-3.5 text-[15px] font-semibold text-slate-900">
-                  {assistant.name}
-                </h3>
-                <p className="mt-1.5 flex-1 text-[13px] leading-snug text-slate-500">
-                  {assistant.description}
-                </p>
-                <div className="mt-4 flex w-full items-center justify-between">
-                  <span
-                    className={cn(
-                      'rounded-md px-2 py-1 text-xs font-semibold',
-                      toneStyles[assistant.tone].chip,
-                    )}
-                  >
-                    {assistant.chats} chats
-                  </span>
-                  <button
-                    aria-label={`Options for ${assistant.name}`}
-                    className="inline-flex h-7 w-7 items-center justify-center rounded-md text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600"
-                  >
-                    <MoreHorizontal className="h-4 w-4" />
-                  </button>
-                </div>
-              </div>
-            )
-          })}
-        </div>
-      </section>
-
       <section className="mt-9">
         <div className="flex items-center justify-between">
           <h2 className="text-[21px] font-bold tracking-[-0.02em] text-slate-900">
@@ -286,7 +221,12 @@ export function HistoryPage() {
 
           {!recent.length && (
             <li className="rounded-2xl border border-dashed border-slate-200 py-12 text-center text-slate-400">
-              No conversations match “{query}”.
+              {/* "No match" and "none yet" are different facts. With the seeded list gone,
+                  an empty account hit the search-miss copy and was told its own history had
+                  been filtered out — implying conversations existed somewhere. */}
+              {query.trim()
+                ? `No conversations match “${query}”.`
+                : 'No conversations yet. Start one from New Chat.'}
             </li>
           )}
         </ul>
@@ -295,54 +235,21 @@ export function HistoryPage() {
       <section className="mt-9 pb-4">
         <h2 className="text-[21px] font-bold tracking-[-0.02em] text-slate-900">Coding Runs</h2>
         <p className="mt-1 text-[15px] text-slate-500">
-          Every governed change MigraPilot has executed on your behalf.
+          Governed changes MigraPilot has executed on your behalf.
         </p>
 
-        <ul className="mt-4 flex flex-col gap-2.5">
-          <li>
-            <Link
-              href="/runs/active"
-              className="flex items-center gap-4 rounded-2xl border border-hairline bg-white p-4 transition-all duration-150 hover:border-brand-200 hover:shadow-card"
-            >
-              <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-slate-900 text-white">
-                <Terminal className="h-5 w-5" strokeWidth={2.2} />
-              </span>
-              <span className="min-w-0 flex-1">
-                <span className="block truncate font-mono text-sm font-semibold text-slate-900">
-                  {activeRun.id}
-                </span>
-                <span className="block truncate text-sm text-slate-500">
-                  Implementing migration changes across {activeRun.filesInScope} files.
-                </span>
-              </span>
-              <Badge tone="blue" icon={<CircleDot className="h-3.5 w-3.5" />}>
-                In Progress
-              </Badge>
-            </Link>
-          </li>
-
-          <li>
-            <Link
-              href={`/runs/${completedRun.id}`}
-              className="flex items-center gap-4 rounded-2xl border border-hairline bg-white p-4 transition-all duration-150 hover:border-brand-200 hover:shadow-card"
-            >
-              <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-slate-900 text-white">
-                <Terminal className="h-5 w-5" strokeWidth={2.2} />
-              </span>
-              <span className="min-w-0 flex-1">
-                <span className="block truncate font-mono text-sm font-semibold text-slate-900">
-                  {completedRun.id}
-                </span>
-                <span className="block truncate text-sm text-slate-500">
-                  {completedRun.filesChanged} files changed •{' '}
-                  {completedRun.linesModified.toLocaleString()} lines modified
-                </span>
-              </span>
-              <Badge tone="green">Success</Badge>
-            </Link>
-          </li>
-        </ul>
+        {/* No run LIST exists. `getCodingRun(id)` reads ONE run by id, but no seam
+            enumerates them, and runs are started by the VS Code extension — the consumer
+            watches. Two invented runs used to sit here with fabricated ids, file counts
+            and "lines modified", which read as a record of the user's real work. */}
+        <div className="mt-4 rounded-2xl border border-dashed border-slate-200 bg-slate-50/50 px-6 py-8 text-center">
+          <p className="text-[14px] leading-relaxed text-slate-500">
+            Runs are started from the MigraPilot VS Code extension. This app can open a run by
+            its id, but cannot list your runs yet.
+          </p>
+        </div>
       </section>
+
     </Workspace>
   )
 }

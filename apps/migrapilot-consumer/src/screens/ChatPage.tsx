@@ -17,7 +17,6 @@ import { ActionRow, RailCard } from '@/components/rail/RailPanels'
 import { IconTile } from '@/components/ui/Badge'
 import { IconButton } from '@/components/ui/Button'
 import { CopyButton } from '@/components/ui/CopyField'
-import { ScopeApprovalModal } from '@/features/governance/ScopeApprovalModal'
 import { useChat } from '@/state/ChatProvider'
 import { cn } from '@/lib/cn'
 
@@ -100,7 +99,6 @@ export function ChatPage() {
   const id = typeof params?.id === 'string' ? params.id : ''
   const { byId, sendMessage, pendingIn, loading, openConversation } = useChat()
   const conversation = byId(id)
-  const [scopeOpen, setScopeOpen] = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null)
   const messageCount = conversation?.messages.length ?? 0
   const pending = pendingIn === id
@@ -163,7 +161,6 @@ export function ChatPage() {
         <MessageView
           key={message.id}
           message={message}
-          onReviewScope={() => setScopeOpen(true)}
         />
       ))}
       {pending && <TypingIndicator />}
@@ -216,7 +213,6 @@ export function ChatPage() {
         {framed && <ComposerDisclaimer className="mt-1 mb-1" />}
       </Workspace>
 
-      <ScopeApprovalModal open={scopeOpen} onClose={() => setScopeOpen(false)} />
     </>
   )
 }

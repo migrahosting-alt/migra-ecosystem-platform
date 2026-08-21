@@ -1,247 +1,236 @@
 'use client'
 
-import Link from 'next/link'
-import {
-  ArrowLeft,
-  ArrowRight,
-  Check,
-  CheckCircle2,
-  ClipboardCheck,
-  Code2,
-  FileText,
-  FolderOpen,
-  GitCompare,
-  Rocket,
-  TriangleAlert,
-} from 'lucide-react'
+import { AlertTriangle, CheckCircle2, FileText, ShieldOff, XCircle } from 'lucide-react'
 import { Workspace } from '@/components/layout/AppShell'
 import { RailCard } from '@/components/rail/RailPanels'
-import { Badge, IconTile } from '@/components/ui/Badge'
-import { Button } from '@/components/ui/Button'
-import { StatusOrb } from '@/components/ui/Progress'
-import { FileTypeIcon } from '@/components/ui/FileTypeIcon'
-import { CopyButton } from '@/components/ui/CopyField'
-import { completedRun } from '@/data/mock'
+import { NotBuiltState } from '@/components/ui/SurfaceState'
+import type { BrainView } from '@/server/brain/view'
+import type { CodingRunSnapshot } from '@/server/brain/contracts'
 
-export function RunReportPage() {
-  const run = completedRun
+/**
+ * A real run snapshot, or an honest account of why there isn't one.
+ *
+ * What it replaced: `completedRun` from `src/data/mock.ts` — run id RUN-2025-05-16-1432,
+ * "2m 47s", environment "Production", 18 files changed, 2,531 lines modified, five named
+ * fixes and a per-file diff table with added/removed counts. Every number was invented, and
+ * the page rendered them for ANY id in the URL, so a made-up run id produced a confident
+ * report of work that never happened.
+ *
+ * The real `CodingRunSnapshot` has no duration, no environment, and no line counts, so
+ * those are simply gone rather than approximated. This renders what the Brain publishes:
+ * state, phase, blockers, the validation it actually ran, and the final report's own file
+ * lists — including the paths it REFUSED, which the mock had no concept of.
+ */
+function Stat({ label, value, tone }: { label: string; value: string; tone?: 'good' | 'bad' }) {
+  return (
+    <div className="rounded-2xl border border-hairline bg-white p-4">
+      <p className="text-xs font-medium text-slate-500">{label}</p>
+      <p
+        className={
+          tone === 'good'
+            ? 'mt-1 text-[15px] font-semibold text-emerald-700'
+            : tone === 'bad'
+              ? 'mt-1 text-[15px] font-semibold text-red-700'
+              : 'mt-1 text-[15px] font-semibold text-slate-900'
+        }
+      >
+        {value}
+      </p>
+    </div>
+  )
+}
 
-  const stats = [
-    {
-      icon: FileText,
-      tone: 'blue' as const,
-      value: String(run.filesChanged),
-      label: 'Files Changed',
-    },
-    {
-      icon: CheckCircle2,
-      tone: 'green' as const,
-      value: `${run.validationsPassed} / ${run.validationsTotal}`,
-      label: 'Validations Passed',
-    },
-    {
-      icon: TriangleAlert,
-      tone: 'amber' as const,
-      value: String(run.warnings),
-      label: 'Warnings',
-    },
-    {
-      icon: Code2,
-      tone: 'purple' as const,
-      value: run.linesModified.toLocaleString(),
-      label: 'Lines Modified',
-    },
-  ]
+function PathList({ title, paths, tone }: { title: string; paths: string[]; tone: 'slate' | 'red' }) {
+  if (paths.length === 0) return null
+  return (
+    <section className="mt-6">
+      <h2 className="text-[15px] font-semibold text-slate-800">
+        {title} ({paths.length})
+      </h2>
+      <ul className="mt-2 flex flex-col gap-1.5">
+        {paths.map((path) => (
+          <li
+            key={path}
+            className={
+              tone === 'red'
+                ? 'truncate rounded-xl border border-red-100 bg-red-50/50 px-4 py-2.5 font-mono text-[13px] text-red-800'
+                : 'truncate rounded-xl border border-hairline bg-white px-4 py-2.5 font-mono text-[13px] text-slate-700'
+            }
+          >
+            {path}
+          </li>
+        ))}
+      </ul>
+    </section>
+  )
+}
 
-  const details: [string, React.ReactNode][] = [
-    [
-      'Run ID',
-      <span className="flex items-center gap-1">
-        <code className="font-mono text-[13px] font-semibold text-slate-800">{run.id}</code>
-        <CopyButton value={run.id} label="Copy run ID" />
-      </span>,
-    ],
-    [
-      'Revision',
-      <span className="flex items-center gap-1">
-        <code className="font-mono text-[13px] font-semibold text-slate-800">{run.revision}</code>
-        <CopyButton value={run.revision} label="Copy revision" />
-      </span>,
-    ],
-    ['Started', <span className="font-semibold text-slate-800">{run.started}</span>],
-    ['Completed', <span className="font-semibold text-slate-800">{run.completed}</span>],
-    ['Duration', <span className="font-semibold text-slate-800">{run.duration}</span>],
-    [
-      'Final Status',
-      <span className="flex items-center gap-2 font-semibold text-emerald-600">
-        <span className="h-2 w-2 rounded-full bg-emerald-500" />
-        Success
-      </span>,
-    ],
-    ['Environment', <span className="font-semibold text-slate-800">{run.environment}</span>],
-    ['Validation', <span className="font-semibold text-emerald-600">All Checks Passed</span>],
-  ]
+export function RunReportPage({
+  runId,
+  run,
+}: {
+  runId: string
+  run: BrainView<CodingRunSnapshot>
+}) {
+  if (run.state !== 'ready') {
+    const title =
+      run.state === 'unavailable'
+        ? 'No run found for this id'
+        : run.state === 'unreachable'
+          ? 'The Brain could not be reached'
+          : run.state === 'signed_out'
+            ? 'Sign in to view this run'
+            : 'This app and the Brain disagree on the run contract'
+    return (
+      <Workspace contentClassName="mx-auto w-full max-w-[880px] px-6 py-7 sm:px-8">
+        <h1 className="text-[28px] leading-tight font-bold tracking-[-0.025em] text-slate-900">
+          Run report
+        </h1>
+        <p className="mt-1 font-mono text-[13px] text-slate-500">{runId}</p>
+        <div className="mt-6">
+          <NotBuiltState
+            icon={<ShieldOff className="h-6 w-6" strokeWidth={1.8} />}
+            title={title}
+            reason={run.reason}
+          />
+        </div>
+      </Workspace>
+    )
+  }
+
+  const snapshot = run.value
+  const report = snapshot.finalReport
+  const validation = snapshot.latestValidation
 
   return (
     <Workspace
       contentClassName="mx-auto w-full max-w-[880px] px-6 py-7 sm:px-8"
       rail={
-        <>
-          <RailCard title="Run Details">
-            <dl className="flex flex-col gap-3 text-sm">
-              {details.map(([label, value]) => (
-                <div key={label} className="flex items-center justify-between gap-3">
-                  <dt className="shrink-0 text-slate-500">{label}</dt>
-                  <dd className="min-w-0 truncate text-right">{value}</dd>
-                </div>
-              ))}
-            </dl>
-          </RailCard>
-
-          <RailCard title="Validation Summary">
-            <StatusOrb tone="green">
-              <Check className="h-8 w-8" strokeWidth={3} />
-            </StatusOrb>
-            <p className="mt-2 text-center text-[22px] font-bold tracking-[-0.02em] text-slate-900">
-              {run.validationsPassed} / {run.validationsTotal}
-            </p>
-            <p className="text-center text-sm text-slate-500">Validations Passed</p>
-            <button className="mt-4 flex w-full items-center justify-center gap-2 text-[13px] font-semibold text-brand-600 hover:text-brand-700">
-              View validation details
-              <ArrowRight className="h-4 w-4" />
-            </button>
-          </RailCard>
-
-          <RailCard title="Next Steps">
-            <p className="text-sm text-slate-600">Your code is ready to ship!</p>
-            <button className="mt-4 flex h-11 w-full items-center justify-center gap-2.5 rounded-field border border-brand-200 bg-white text-sm font-semibold text-brand-700 transition-colors hover:bg-brand-50">
-              <Rocket className="h-4.5 w-4.5" strokeWidth={2} />
-              Create Deployment Package
-            </button>
-          </RailCard>
-        </>
+        <RailCard title="Run">
+          <dl className="flex flex-col gap-2.5 text-[13px]">
+            <div>
+              <dt className="text-slate-500">State</dt>
+              <dd className="font-medium text-slate-800">{snapshot.state}</dd>
+            </div>
+            <div>
+              <dt className="text-slate-500">Phase</dt>
+              <dd className="font-medium text-slate-800">{snapshot.phase}</dd>
+            </div>
+            <div>
+              <dt className="text-slate-500">Revision</dt>
+              <dd className="font-mono font-medium text-slate-800">{snapshot.revision}</dd>
+            </div>
+          </dl>
+        </RailCard>
       }
     >
-      <Link
-        href="/history"
-        className="inline-flex items-center gap-2 text-[15px] font-semibold text-brand-600 hover:text-brand-700"
-      >
-        <ArrowLeft className="h-4.5 w-4.5" strokeWidth={2.2} />
-        Back to History
-      </Link>
+      <h1 className="text-[28px] leading-tight font-bold tracking-[-0.025em] text-slate-900">
+        Run report
+      </h1>
+      <p className="mt-1 font-mono text-[13px] text-slate-500">{snapshot.runId}</p>
+      {snapshot.issueSummary && (
+        <p className="mt-3 text-[15px] text-slate-600">{snapshot.issueSummary}</p>
+      )}
 
-      <div className="mt-5 flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-emerald-200/70 bg-emerald-50/60 p-5">
-        <div className="flex items-center gap-4">
-          <span className="inline-flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-emerald-500 text-white">
-            <Check className="h-6 w-6" strokeWidth={3} />
-          </span>
-          <div>
-            <h1 className="text-[21px] font-bold tracking-[-0.02em] text-slate-900">
-              Run Completed Successfully
-            </h1>
-            <p className="mt-0.5 text-[15px] text-slate-600">
-              Your code has been updated and validated.
-            </p>
-          </div>
-        </div>
-        <Badge tone="green" className="px-3 py-1.5 text-[13px]">
-          Success
-        </Badge>
+      {snapshot.cancellation && (
+        <p className="mt-4 flex items-start gap-2.5 rounded-xl border border-amber-200 bg-amber-50/70 p-3 text-[13px] text-amber-900">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+          Cancellation {snapshot.cancellation.status}, requested{' '}
+          {snapshot.cancellation.requestedAt}
+          {snapshot.cancellation.confirmedAt ? `, confirmed ${snapshot.cancellation.confirmedAt}` : ''}.
+        </p>
+      )}
+
+      <div className="mt-6 grid gap-3 sm:grid-cols-3">
+        <Stat
+          label="Outcome"
+          value={report ? (report.complete ? 'Complete' : 'Incomplete') : 'Not reported yet'}
+          tone={report ? (report.complete ? 'good' : 'bad') : undefined}
+        />
+        <Stat label="Stop reason" value={report?.stopReason ?? '—'} />
+        <Stat
+          label="Validation"
+          value={
+            validation ? (validation.passed ? 'Passed' : validation.timedOut ? 'Timed out' : 'Failed') : 'None run'
+          }
+          tone={validation ? (validation.passed ? 'good' : 'bad') : undefined}
+        />
       </div>
 
-      <div className="mt-5 rounded-2xl border border-hairline bg-white p-5 shadow-card sm:p-6">
-        <h2 className="text-[17px] font-semibold text-slate-900">Final Report</h2>
-        <p className="mt-1 text-sm text-slate-500">Summary of changes and validation results.</p>
-
-        <div className="mt-5 grid gap-3 rounded-xl border border-hairline p-4 sm:grid-cols-2 lg:grid-cols-4">
-          {stats.map(({ icon: Icon, tone, value, label }) => (
-            <div key={label} className="flex items-center gap-3">
-              <IconTile tone={tone}>
-                <Icon strokeWidth={2} />
-              </IconTile>
-              <div className="min-w-0">
-                <p className="text-[19px] leading-tight font-bold tracking-[-0.02em] text-slate-900">
-                  {value}
-                </p>
-                <p className="truncate text-[13px] text-slate-500">{label}</p>
-              </div>
-            </div>
-          ))}
-        </div>
-
-        <div className="mt-6">
-          <h3 className="text-[15px] font-semibold text-slate-900">What Was Fixed</h3>
-          <ul className="mt-3.5 flex flex-col gap-3">
-            {run.fixes.map((fix) => (
-              <li key={fix} className="flex gap-3 text-[15px] leading-snug text-slate-700">
-                <CheckCircle2 className="mt-0.5 h-4.5 w-4.5 shrink-0 text-emerald-500" strokeWidth={2.2} />
-                {fix}
-              </li>
-            ))}
-          </ul>
-        </div>
-
-        <div className="mt-6 border-t border-hairline pt-5">
-          <div className="flex items-center justify-between">
-            <h3 className="text-[15px] font-semibold text-slate-900">Changed Files</h3>
-            <button className="text-[13px] font-semibold text-brand-600 hover:text-brand-700">
-              View all
-            </button>
-          </div>
-
-          <ul className="mt-3.5 flex flex-col">
-            {run.changedFiles.map((file) => (
+      {snapshot.blockers.length > 0 && (
+        <section className="mt-6">
+          <h2 className="flex items-center gap-2 text-[15px] font-semibold text-slate-800">
+            <XCircle className="h-4 w-4 text-red-600" />
+            Blockers ({snapshot.blockers.length})
+          </h2>
+          <ul className="mt-2 flex flex-col gap-1.5">
+            {snapshot.blockers.map((blocker) => (
               <li
-                key={file.path}
-                className="flex items-center gap-3.5 rounded-lg px-1 py-2.5 transition-colors hover:bg-slate-50"
+                key={blocker}
+                className="rounded-xl border border-red-100 bg-red-50/50 px-4 py-2.5 text-[13px] text-red-800"
               >
-                <FileTypeIcon name={file.path} size="sm" />
-                <span className="min-w-0 flex-1 truncate font-mono text-[13px] text-slate-700">
-                  {file.path}
-                </span>
-                <span className="shrink-0 text-[13px] font-semibold text-emerald-600 tabular-nums">
-                  +{file.added}
-                </span>
-                <span className="w-10 shrink-0 text-right text-[13px] font-semibold text-red-500 tabular-nums">
-                  −{file.removed}
-                </span>
+                {blocker}
               </li>
             ))}
           </ul>
-        </div>
+        </section>
+      )}
 
-        <div className="mt-6 grid gap-3 sm:grid-cols-3">
-          <Button size="lg">
-            <GitCompare className="h-4.5 w-4.5" strokeWidth={2} />
-            View Diff
-          </Button>
-          <Button variant="secondary" size="lg">
-            <FolderOpen className="h-4.5 w-4.5 text-slate-400" strokeWidth={2} />
-            Open Files
-          </Button>
-          <Button
-            variant="secondary"
-            size="lg"
-            onClick={() => {
-              const report = [
-                `MigraPilot run ${run.id} (${run.revision})`,
-                `${run.filesChanged} files changed • ${run.linesModified} lines modified`,
-                `${run.validationsPassed}/${run.validationsTotal} validations passed • ${run.warnings} warnings`,
-                '',
-                ...run.fixes.map((fix) => `- ${fix}`),
-              ].join('\n')
-              void navigator.clipboard?.writeText(report).catch(() => undefined)
-            }}
-          >
-            <ClipboardCheck className="h-4.5 w-4.5 text-slate-400" strokeWidth={2} />
-            Copy Report
-          </Button>
-        </div>
-      </div>
+      {validation && (
+        <section className="mt-6 rounded-2xl border border-hairline bg-white p-5">
+          <h2 className="flex items-center gap-2 text-[15px] font-semibold text-slate-800">
+            {validation.passed ? (
+              <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+            ) : (
+              <XCircle className="h-4 w-4 text-red-600" />
+            )}
+            Validation
+          </h2>
+          <code className="mt-2 block overflow-x-auto rounded-lg bg-slate-900 px-3.5 py-2.5 font-mono text-[12px] text-slate-100">
+            {validation.command.join(' ')}
+          </code>
+          <p className="mt-2 text-[13px] text-slate-500">
+            Exit code {validation.exitCode ?? '—'}
+            {validation.timedOut ? ' · timed out' : ''}
+          </p>
+          {validation.outputHead && (
+            <pre className="mt-2 max-h-48 overflow-auto rounded-lg border border-hairline bg-slate-50 p-3 font-mono text-[12px] whitespace-pre-wrap text-slate-700">
+              {validation.outputHead}
+            </pre>
+          )}
+        </section>
+      )}
 
-      <p className="mt-5 text-center text-[13px] text-slate-400">
-        MigraPilot can make mistakes. Check important info.
-      </p>
+      {report ? (
+        <>
+          <PathList title="Changed files" paths={report.changedFiles} tone="slate" />
+          <PathList title="Refused paths" paths={report.refusedPaths} tone="red" />
+          <PathList title="Approved but unused" paths={report.unusedScope} tone="slate" />
+          {report.unresolvedRisks.length > 0 && (
+            <section className="mt-6">
+              <h2 className="text-[15px] font-semibold text-slate-800">
+                Unresolved risks ({report.unresolvedRisks.length})
+              </h2>
+              <ul className="mt-2 flex flex-col gap-1.5">
+                {report.unresolvedRisks.map((risk) => (
+                  <li
+                    key={risk}
+                    className="rounded-xl border border-amber-200 bg-amber-50/60 px-4 py-2.5 text-[13px] text-amber-900"
+                  >
+                    {risk}
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+        </>
+      ) : (
+        <p className="mt-6 flex items-start gap-2.5 rounded-xl border border-hairline bg-slate-50/70 p-3.5 text-[13px] text-slate-600">
+          <FileText className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" />
+          This run has not published a final report, so no file lists are available. Nothing is
+          being estimated in its place.
+        </p>
+      )}
     </Workspace>
   )
 }
