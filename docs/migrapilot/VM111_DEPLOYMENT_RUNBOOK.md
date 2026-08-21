@@ -1,0 +1,137 @@
+# VM111 deployment runbook — Brain and Consumer
+
+Production for `chat.migrateck.com`. Written after a deploy that **took the Brain down**;
+the rule that would have prevented it is §4 and it is not optional.
+
+## 0. Topology (traced, not assumed)
+
+```
+chat.migrateck.com -> 138.201.255.55 (pve)
+  :443 DNAT -> 10.10.0.2 (VM102 NGINX-PROXY-CORE)
+       -> VM111 migrapilot-app-core = 10.10.0.13, tailnet 100.95.14.29
+```
+
+| service | env file | serves |
+|---|---|---|
+| `migrapilot-brain.service` | `/etc/migrapilot/brain.env` | `127.0.0.1:3988` |
+| `migrapilot-consumer.service` | `/etc/migrapilot/consumer.env` | `10.10.0.13:3000` |
+
+Access: `ssh migrapilot-app-core` (user `bonex`, ProxyJump `pve`). Releases are symlink
+swaps: `/opt/migrapilot/{brain-service,consumer}/current -> releases/<name>`.
+
+## 1. What a release artifact contains
+
+**Brain** — `dist/` + `package.json` + `pkgs/*.tgz`, and **no `node_modules`** (~1.7 MB).
+`pkgs/` holds all five packed workspace packages: `protocol`, `shared-types`,
+`pilot-client`, `agent-defs`, `workspace-tools`.
+
+**Consumer** — `.next/` (**exclude `.next/cache`**, 256 MB to 149 MB) + `package.json` +
+`next.config.ts` + `public/`. `@migrapilot/shared-types` is imported **type-only** there, so
+it is erased at build time and is not a runtime dependency.
+
+Build from a **clean tree at a known commit**, and name the artifact after that commit.
+
+## 2. Install ALL FIVE workspace packages — the incident
+
+The first Brain deploy staged by copying the previous release's `node_modules` and replacing
+only `@migrapilot/shared-types`, because that was the package whose output had changed. The
+service crashed on boot:
+
+```
+SyntaxError: The requested module '@migrapilot/protocol'
+does not provide an export named 'GitBlameRequestSchema'
+```
+
+The new `dist` also needed a newer `protocol`. **Production was down until rollback.**
+
+`node_modules` inherited from the previous release is a *base*, never a *finished state*.
+Unpack **every** tgz in `pkgs/` over `node_modules/@migrapilot/<name>`, moving the old copy
+aside first — a leftover file from the previous package silently satisfying an import is the
+same failure wearing a different hat.
+
+## 3. Stage as `bonex`, install as root
+
+Do all assembly in `~` with no elevation, then copy the finished tree into `/opt`. Keep
+elevated commands to `cp`, `chown`, `ln`, `systemctl`.
+
+## 4. BOOT-TEST ON A SPARE PORT BEFORE THE SYMLINK MOVES
+
+**Non-negotiable. This is the rule the incident bought.**
+
+```bash
+cd ~/stage-<sha>
+MIGRAPILOT_BRAIN_PORT=3999 node dist/src/server.js                 # Brain
+node node_modules/next/dist/bin/next start -p 3001 -H 127.0.0.1    # Consumer
+```
+
+The service must reach "listening" **and** answer a route that only exists in the new build:
+
+```bash
+curl -s -w '\n%{http_code}\n' http://127.0.0.1:3999/api/ai/speech/capability
+```
+
+Expect **200** with `unavailable` (the spare-port run has no `brain.env`, so no runtime is
+configured). A **404 means the new code is not actually in the tree you are about to
+promote.** Only after this passes may `current` move.
+
+`systemctl is-active` is NOT a boot test: a crash-looping unit reports `activating
+(auto-restart)` and will read as running if you glance at it during a restart window.
+
+## 5. Promote, then restart one service
+
+```bash
+sudo cp -r stage-<sha> /opt/migrapilot/brain-service/releases/<sha>
+sudo chown -R migrapilot:migrapilot /opt/migrapilot/brain-service/releases/<sha>
+sudo ln -sfn /opt/migrapilot/brain-service/releases/<sha> /opt/migrapilot/brain-service/current
+sudo systemctl restart migrapilot-brain.service
+```
+
+Use a **new directory name** per attempt. Copying over a broken tree leaves stale files, and
+"which files are live" must never be a guess.
+
+**Brain first, verified independently, then the consumer.** Never one combined release: when
+something breaks you need to know which half.
+
+## 6. Secrets
+
+Append via **stdin**, never as an argument — arguments appear in process listings and shell
+history:
+
+```bash
+printf 'KEY=%s\n' "$TOKEN" | ssh migrapilot-app-core 'sudo tee -a /etc/migrapilot/brain.env | wc -c'
+```
+
+`| wc -c` rather than a redirect to the null device: `tee` echoes stdin, and `/dev/null` is
+outside the hook's approved path scope. Never print a token into output, logs, commits or chat.
+
+## 7. Verify through the PUBLIC surface
+
+A restarted process is not a deployed build. Prove it with a route that did not exist
+before:
+
+```bash
+curl -s -w ' [%{http_code}]\n' https://chat.migrateck.com/api/speech/capability
+curl -s https://chat.migrateck.com/settings | grep -c 'Emma Johnson'   # must be 0
+```
+
+## 8. Rollback
+
+Keep the previous release directory. Rollback is a symlink swap plus a restart — seconds:
+
+```bash
+sudo ln -sfn /opt/migrapilot/brain-service/releases/<previous> /opt/migrapilot/brain-service/current
+sudo systemctl restart migrapilot-brain.service
+```
+
+Roll back **first**, diagnose after. Production being down while you read a stack trace is a
+choice, and the wrong one.
+
+## 9. Elevated-access scope on VM111
+
+`.claude/hooks/block-dangerous.sh` permits elevation only in an ssh command naming the
+`migrapilot-app-core` alias, only under `/opt/migrapilot`, `/etc/migrapilot`,
+`/etc/systemd/system/migrapilot-*`, `/var/{log,lib}/migrapilot`, and only for write verbs
+(`cp mv install mkdir chown chmod tee ln touch stat systemctl`). **Reading is deliberately
+excluded** — no elevated `cat`/`ls`/`grep`/`tail`. Use `systemctl status` for logs. Two
+recurring trip-ups: the null device anywhere in an elevated command is outside path scope,
+and `chown user:group` without `-R` breaks the verb parser.

@@ -30,6 +30,12 @@
 !/docs/migraauth/
 !/docs/migraauth/**
 
+# docs/migrapilot holds the MigraPilot runbooks — 8 are already tracked, but the root
+# allowlist hid every NEW one, so a production deployment procedure could be written and
+# never committed. Markdown only.
+!/docs/migrapilot/
+!/docs/migrapilot/*.md
+
 # Allow ONLY nginx infra tree
 !infra/
 !infra/nginx/
