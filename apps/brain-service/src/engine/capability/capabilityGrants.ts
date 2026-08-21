@@ -40,6 +40,12 @@ const MEASURED_AT = '2026-07-28';
  * these rows were measured by a different suite in a different repository. Reusing
  * it would make two unrelated bodies of evidence indistinguishable to anyone
  * trying to re-derive a grant.
+ *
+ * ⚠ It now backs exactly ONE row — typed-implementation — which is scored by
+ * EXECUTION: the reply is applied, the suite is run, a hidden oracle checks the
+ * behaviour landed. The prose-scored rows from the same suite were withdrawn; that
+ * a body of evidence contains one invalid measurement does not invalidate the
+ * measurements taken a different way, and does not excuse keeping the invalid one.
  */
 const RELIABILITY_EVAL = 'MigraAI-Engineer@1ccd24b coding-reliability.v1 post-3090';
 const RELIABILITY_MEASURED_AT = '2026-08-20';
@@ -61,10 +67,13 @@ export const DEEP_LOCAL_MODEL = 'qwen2.5-coder:14b';
  * at the existing one-argument call site and breaking every path that already
  * worked. Its one success wrote a plain parameter instead.
  *
- * PREFERRED FOR WRITING CODE IS NOT QUALIFIED FOR JUDGING IT. The same evaluation
- * put this model at 4 of 8 on review correctness with repeatability 0.50, so it
- * carries a `denied` row for `code-review` below and the cloud tier policy for
- * that class is untouched.
+ * PREFERRED FOR WRITING CODE IS NOT QUALIFIED FOR JUDGING IT. That separation
+ * stands, but the numbers once cited for it do not: the review-correctness figures
+ * from the same evaluation were WITHDRAWN on 2026-08-20 when the detector behind
+ * them proved unable to tell "violates the guarantee" from "ensures the guarantee".
+ * See the withdrawal record at the end of MEASURED_GRANTS. `code-review` remains at
+ * the cloud tier on independent evidence, and this model holds no review grant at
+ * all — an unmeasured pair, denied.
  */
 export const PREFERRED_CODING_MODEL = 'qwen3-coder:30b';
 
@@ -426,23 +435,29 @@ export const MEASURED_GRANTS: readonly CapabilityGrant[] = [
         'tests needs the driver verification gate, and 7/8 is below the bar the autonomous rows met',
     },
   },
-  {
-    model: PREFERRED_CODING_MODEL,
-    taskClass: 'code-review',
-    authority: 'denied',
-    requiredTier: 'cloud',
-    evidence: {
-      benchCommit: RELIABILITY_EVAL,
-      score: 4,
-      maxScore: 8,
-      measuredAt: RELIABILITY_MEASURED_AT,
-      mechanical: true,
-      note:
-        '4 of 8 at repeatability 0.50 — a coin flip. Inverted the atomicity finding 3 of 8, ' +
-        'crediting the change with the guarantee it destroys. The inversion appears at the same ' +
-        'rate on the 14B, so it does not shrink with model size and a larger model does not fix it',
-    },
-  },
+  // ── WITHDRAWN 2026-08-20: qwen3-coder:30b / code-review ──────────────────
+  //
+  // A grant row previously stood here recording 4 of 8 with an atomicity-inversion
+  // rate of 3 of 8. THAT EVIDENCE IS WITHDRAWN. The detector it came from decided
+  // "did this review credit the wrong version" by keyword presence, and could not
+  // distinguish "the change VIOLATES the atomicity guarantee" from "the change
+  // ENSURES atomicity" — negation and cross-paragraph BEFORE/AFTER attribution are
+  // semantic properties, not lexical ones. A hand audit of every flagged trial found
+  // 15 of 15 were false positives, so both the 4/8 and the 3/8 are unsupported.
+  //
+  // The row is REMOVED rather than rewritten, and deliberately not replaced with a
+  // corrected number: rescoring with a detector authored after seeing the outcomes
+  // would be a worse error than the one being fixed. With no row, resolveCapability
+  // denies the pair as never measured — which is now the true state — and reports
+  // the capability as unverified instead of quoting a figure that does not hold.
+  //
+  // THE RESTRICTION SURVIVES ITS JUSTIFICATION. code-review still requires the cloud
+  // tier under a tier policy resting on the independent 2026-07-28 bench, which this
+  // defect does not touch. A capability restriction can outlive one invalidated
+  // reason; the invalidated reason cannot stay in the record.
+  //
+  // Re-derivable only from a validated semantic attribution/polarity evaluator, run
+  // against the 40 preserved trial replies. Until then: denied, unmeasured.
 ];
 
 /**
