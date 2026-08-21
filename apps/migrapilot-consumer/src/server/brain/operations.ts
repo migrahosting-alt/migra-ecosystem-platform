@@ -64,6 +64,20 @@ export type BrainOperation =
   | { kind: 'codingCapability' }
   | { kind: 'getCodingRun'; runId: string }
 
+  // ── Speech ──────────────────────────────────────────────────────────────
+  | { kind: 'transcriptionCapability' }
+  /**
+   * `requestedLanguage` is present ONLY when the user explicitly chose one.
+   *
+   * It must never be populated with a runtime default. The ASR worker pins "en" for an
+   * English-only model by itself, and when that pin was reported as the caller's request it
+   * disabled the fabrication guard: French audio came back status "ok", no warnings, fluent
+   * invented English, ready to send as the speaker's own words. A runtime choice must not
+   * masquerade as something the user asked for — so the field is optional and never
+   * defaulted anywhere along this path.
+   */
+  | { kind: 'transcribe'; audioBase64: string; audioMime: string; requestedLanguage?: string }
+
 export interface ResolvedRequest {
   method: 'GET' | 'POST' | 'PATCH' | 'DELETE'
   path: string
@@ -88,6 +102,39 @@ export class InvalidOperationError extends Error {
 function id(value: string, label: string): string {
   if (typeof value !== 'string' || !SAFE_ID.test(value)) {
     throw new InvalidOperationError(`${label} is not a valid identifier.`)
+  }
+  return value
+}
+
+/** Audio is bounded here, not just at the Brain: an unbounded base64 body is a denial of
+ *  service the consumer can refuse to send in the first place. */
+const MAX_AUDIO_BASE64 = 34 * 1024 * 1024 // ~25 MB of bytes once decoded
+
+function boundedAudio(value: string): string {
+  if (typeof value !== 'string' || value.length === 0) {
+    throw new InvalidOperationError('audio must be a non-empty base64 string.')
+  }
+  if (value.length > MAX_AUDIO_BASE64) {
+    throw new InvalidOperationError('audio is too large to transcribe.')
+  }
+  return value
+}
+
+const AUDIO_MIME = /^audio\/[A-Za-z0-9.+-]{1,64}$/
+
+function audioMime(value: string): string {
+  if (typeof value !== 'string' || !AUDIO_MIME.test(value)) {
+    throw new InvalidOperationError('audioMime must be an audio/* media type.')
+  }
+  return value
+}
+
+/** BCP-47-ish. Validated so a language field cannot become a path or a payload. */
+const LANGUAGE_CODE = /^[a-z]{2,3}(-[A-Za-z]{2,8})?$/
+
+function languageCode(value: string): string {
+  if (typeof value !== 'string' || !LANGUAGE_CODE.test(value)) {
+    throw new InvalidOperationError('requestedLanguage is not a valid language code.')
   }
   return value
 }
@@ -221,6 +268,21 @@ export function resolveOperation(op: BrainOperation): ResolvedRequest {
 
     case 'getCodingRun':
       return { method: 'GET', path: `/api/ai/coding/runs/${id(op.runId, 'runId')}` }
+
+    case 'transcriptionCapability':
+      return { method: 'GET', path: '/api/ai/speech/capability' }
+
+    case 'transcribe':
+      return {
+        method: 'POST',
+        path: '/api/ai/speech/transcribe',
+        body: {
+          audio: boundedAudio(op.audioBase64),
+          mime: audioMime(op.audioMime),
+          // Omitted entirely when the user chose nothing. Not null, not "en".
+          ...(op.requestedLanguage ? { requestedLanguage: languageCode(op.requestedLanguage) } : {}),
+        },
+      }
   }
 
   // Unreachable for well-typed callers. Reached at runtime only if an

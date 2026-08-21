@@ -8,6 +8,10 @@ import type {
   CodingRunSnapshot,
   GovernedCodingCapability,
 } from './contracts'
+import type {
+  TranscriptionCapability,
+  TranscriptionResult,
+} from '@migrapilot/shared-types/transcription'
 
 /**
  * Typed integration seams for Phase 1.
@@ -126,4 +130,44 @@ export function getCodingRun(
   deps?: GatewayDeps,
 ): Promise<BrainResult<CodingRunSnapshot>> {
   return callBrain({ kind: 'getCodingRun', runId }, deps)
+}
+
+// ── Speech ─────────────────────────────────────────────────────────────────
+
+/**
+ * What the Brain can do with speech RIGHT NOW.
+ *
+ * A microphone may only be enabled when this reports `ready`. The consumer does not know,
+ * and must not guess, which ASR runtime is behind it — that is the whole point of routing
+ * through the Brain rather than reaching into another app's implementation.
+ */
+export function transcriptionCapability(
+  deps?: GatewayDeps,
+): Promise<BrainResult<TranscriptionCapability>> {
+  return callBrain({ kind: 'transcriptionCapability' }, deps)
+}
+
+/**
+ * Transcribe one recording.
+ *
+ * Returns the SHARED TranscriptionResult — status and warnings included — because a
+ * fluent transcript is not proof the ASR heard the user. The safety decision is made once,
+ * at the capability layer, and every surface reads the same verdict instead of re-deriving
+ * it and drifting.
+ *
+ * `requestedLanguage` is passed ONLY when the user explicitly chose one.
+ */
+export function transcribe(
+  input: { audioBase64: string; audioMime: string; requestedLanguage?: string },
+  deps?: GatewayDeps,
+): Promise<BrainResult<TranscriptionResult>> {
+  return callBrain(
+    {
+      kind: 'transcribe',
+      audioBase64: input.audioBase64,
+      audioMime: input.audioMime,
+      ...(input.requestedLanguage ? { requestedLanguage: input.requestedLanguage } : {}),
+    },
+    deps,
+  )
 }

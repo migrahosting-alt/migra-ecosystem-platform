@@ -12,6 +12,7 @@
     "verify:bundle": "bash scripts/verify-client-bundle.sh"
   },
   "dependencies": {
+    "@migrapilot/shared-types": "0.1.0",
     "@migrateck/auth-client": "file:../../MigraTeck/packages/auth-client",
     "clsx": "^2.1.1",
     "lucide-react": "^0.469.0",

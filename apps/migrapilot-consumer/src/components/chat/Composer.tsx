@@ -4,6 +4,7 @@ import { useRef, useState, type ChangeEvent, type FormEvent, type KeyboardEvent 
 import { ImageIcon, Lock, Mic, Paperclip, SendHorizontal } from 'lucide-react'
 import { AttachmentChips } from '@/features/attachments/AttachmentChips'
 import { useAttachments } from '@/features/attachments/useAttachments'
+import { micDisabledReason, useMicAvailability } from '@/features/voice/useMicAvailability'
 import { cn } from '@/lib/cn'
 
 /**
@@ -48,6 +49,17 @@ export function Composer({
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const { attachments, limits, add, remove, retry, clear, busy, groundable } = useAttachments()
+  /*
+   * THE MIC IS GATED ON THE SHARED CAPABILITY, not on a local guess.
+   *
+   * The consumer asks the Brain whether speech is available; it never reaches into the
+   * Command Center's whisper runtime. Until the Brain implements the operation this reports
+   * `incompatible` and the control stays off with that reason shown — which is the correct
+   * answer, and a visibly different one from "switched off".
+   */
+  const mic = useMicAvailability()
+  const micReady = mic?.state === 'ready'
+  const micReason = micDisabledReason(mic)
 
   const grow = () => {
     const el = textareaRef.current
@@ -129,10 +141,10 @@ export function Composer({
             <>
               <button
                 type="button"
-                disabled
-                title="Voice input isn't available yet — MigraPilot has no speech pipeline connected."
-                className={cn(toolButton, 'cursor-not-allowed opacity-40')}
-                aria-label="Record voice note (not available yet)"
+                disabled={!micReady}
+                title={micReady ? 'Record a voice note' : micReason}
+                className={cn(toolButton, !micReady && 'cursor-not-allowed opacity-40')}
+                aria-label={micReady ? 'Record voice note' : `Record voice note (unavailable: ${micReason})`}
               >
                 <Mic className="h-[18px] w-[18px]" strokeWidth={1.9} />
               </button>
@@ -170,10 +182,10 @@ export function Composer({
           {variant !== 'media' && (
             <button
               type="button"
-              disabled
-              title="Voice input isn't available yet — MigraPilot has no speech pipeline connected."
-              className={cn(toolButton, 'cursor-not-allowed opacity-40')}
-              aria-label="Dictate (not available yet)"
+              disabled={!micReady}
+              title={micReady ? 'Dictate' : micReason}
+              className={cn(toolButton, !micReady && 'cursor-not-allowed opacity-40')}
+              aria-label={micReady ? 'Dictate' : `Dictate (unavailable: ${micReason})`}
             >
               <Mic className="h-[18px] w-[18px]" strokeWidth={1.9} />
             </button>

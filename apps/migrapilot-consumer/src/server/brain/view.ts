@@ -2,6 +2,7 @@ import 'server-only'
 
 import type { BrainResult } from './gateway'
 import type { GovernedCodingCapability } from './contracts'
+import type { TranscriptionCapability } from '@migrapilot/shared-types/transcription'
 
 /**
  * ONE honest translation from a Brain result to something a screen may render.
@@ -88,5 +89,66 @@ export function governedCodingView(
     approvalMode: c.approvalMode,
     progressMode: c.progressMode,
     workspaceRootsConfigured: c.workspaceRootsConfigured,
+  }
+}
+
+/**
+ * Whether a microphone may be offered, and if not, exactly why.
+ *
+ * Deliberately reduced to ONE thing the UI keys on. Each Brain state maps to a distinct,
+ * user-meaningful cause so the composer never has to interpret a capability itself:
+ *
+ *   unavailable  the speech backend is off or not configured
+ *   incompatible this build and the Brain disagree on the contract
+ *   unreachable  temporary — the Brain could not be reached
+ *   signed_out   no session
+ *
+ * Creole is reported separately from readiness on purpose. A ready English-only runtime is
+ * still ready for English, and telling a Creole speaker the mic is "unavailable" would be
+ * both wrong and unhelpful — they need to be told Creole specifically is not served yet.
+ */
+export type MicAvailability =
+  | {
+      state: 'ready'
+      model: string | null
+      multilingual: boolean
+      supportedLanguages: string[]
+      /** False when the active model cannot serve Haitian Creole. */
+      creoleReady: boolean
+      /** Present when ready for some languages but NOT Creole. */
+      creoleReason?: string
+    }
+  | { state: 'disabled'; cause: 'unavailable' | 'incompatible' | 'unreachable' | 'signed_out'; reason: string }
+
+export function micAvailability(result: BrainResult<TranscriptionCapability>): MicAvailability {
+  const view = toBrainView(result)
+  if (view.state !== 'ready') {
+    return { state: 'disabled', cause: view.state, reason: view.reason }
+  }
+
+  const capability = view.value
+  if (capability.state !== 'ready') {
+    return {
+      state: 'disabled',
+      cause: 'unavailable',
+      reason: capability.unavailableReason ?? 'Speech input is not available on this workspace.',
+    }
+  }
+
+  const creoleReady = capability.multilingual && capability.supportedLanguages.includes('ht')
+  return {
+    state: 'ready',
+    model: capability.model,
+    multilingual: capability.multilingual,
+    supportedLanguages: capability.supportedLanguages,
+    creoleReady,
+    ...(creoleReady
+      ? {}
+      : {
+          creoleReason:
+            `Haitian Creole is not available on ${capability.model ?? 'the active model'}. ` +
+            `Speaking Creole would be transcribed as invented English rather than refused, ` +
+            `so it is not offered yet.`,
+        }),
   }
 }

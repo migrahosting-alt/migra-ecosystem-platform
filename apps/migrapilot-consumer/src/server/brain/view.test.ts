@@ -12,7 +12,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { toBrainView, governedCodingView } from './view'
+import { toBrainView, governedCodingView, micAvailability } from './view'
 import type { BrainResult } from './gateway'
 import type { GovernedCodingCapability } from './contracts'
 
@@ -93,4 +93,66 @@ test('transport failure does not become "unavailable"', () => {
   // The distinction the whole mapper exists for: an unreachable Brain must never be
   // reported as a switched-off feature.
   assert.equal(governedCodingView({ kind: 'transport_failure', detail: 'ECONNREFUSED' }).state, 'unreachable')
+})
+
+/* ── Microphone availability ─────────────────────────────────────────────── */
+
+const capabilityResult = (
+  over: Partial<import('@migrapilot/shared-types/transcription').TranscriptionCapability> = {},
+): BrainResult<import('@migrapilot/shared-types/transcription').TranscriptionCapability> => ({
+  kind: 'ok',
+  status: 200,
+  value: {
+    state: 'ready',
+    model: 'large-v3',
+    multilingual: true,
+    supportedLanguages: ['en', 'fr', 'es', 'ht'],
+    ...over,
+  },
+})
+
+test('a multilingual runtime is ready, and Creole is ready with it', () => {
+  const mic = micAvailability(capabilityResult())
+  assert.equal(mic.state, 'ready')
+  assert.equal(mic.state === 'ready' ? mic.creoleReady : null, true)
+})
+
+test('an English-only runtime is READY, but Creole is not — and says so specifically', () => {
+  // Telling a Creole speaker the mic is "unavailable" would be wrong: it works for English.
+  // What they need to know is that Creole in particular is not served.
+  const mic = micAvailability(
+    capabilityResult({ model: 'base.en', multilingual: false, supportedLanguages: ['en'] }),
+  )
+  assert.equal(mic.state, 'ready')
+  assert.equal(mic.state === 'ready' ? mic.creoleReady : null, false)
+  assert.match(mic.state === 'ready' ? (mic.creoleReason ?? '') : '', /Creole/)
+  // And it must explain the danger, not just decline.
+  assert.match(mic.state === 'ready' ? (mic.creoleReason ?? '') : '', /invented English/)
+})
+
+test('a capability that reports itself unavailable disables the mic with its own reason', () => {
+  const mic = micAvailability(
+    capabilityResult({ state: 'unavailable', unavailableReason: 'No speech runtime is configured.' }),
+  )
+  assert.equal(mic.state, 'disabled')
+  assert.equal(mic.state === 'disabled' ? mic.cause : '', 'unavailable')
+  assert.equal(mic.state === 'disabled' ? mic.reason : '', 'No speech runtime is configured.')
+})
+
+test('a Brain that does not know the operation is INCOMPATIBLE, not merely off', () => {
+  // This is the state a consumer sees before the Brain implements speech at all. It must be
+  // distinguishable from "switched off", or a missing capability looks like a setting.
+  const mic = micAvailability({ kind: 'invalid_operation', detail: 'unknown operation: transcriptionCapability' })
+  assert.equal(mic.state, 'disabled')
+  assert.equal(mic.state === 'disabled' ? mic.cause : '', 'incompatible')
+})
+
+test('an unreachable Brain disables the mic as temporary, not as unsupported', () => {
+  const mic = micAvailability({ kind: 'transport_failure', detail: 'ECONNREFUSED' })
+  assert.equal(mic.state === 'disabled' ? mic.cause : '', 'unreachable')
+})
+
+test('no session disables the mic as signed_out', () => {
+  const mic = micAvailability({ kind: 'unauthenticated', detail: 'Authentication required.' })
+  assert.equal(mic.state === 'disabled' ? mic.cause : '', 'signed_out')
 })
