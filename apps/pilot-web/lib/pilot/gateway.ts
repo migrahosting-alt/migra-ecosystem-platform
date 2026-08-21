@@ -21,6 +21,12 @@ export const MODELS = {
 
 // gpt-oss:120b-cloud is fast and strong across every agent type, so route everything to it.
 export function selectModel(_agentId: AgentProfileId): { model: string; tier: string } {
+  // TEST INSTRUMENTATION, behaviour-neutral when unset. One-variable isolation needs the
+  // model PINNED and PROVEN, not inferred from behaviour — the pinned id travels out in
+  // run.created.model and in the tier, so a capture records which model actually answered
+  // instead of leaving a reader to guess whether a fallback occurred.
+  const pinned = process.env.PILOT_CHAT_MODEL;
+  if (pinned) return { model: pinned, tier: `pinned:${pinned}` };
   return { model: MODELS.primary, tier: "cloud-120b" };
 }
 
