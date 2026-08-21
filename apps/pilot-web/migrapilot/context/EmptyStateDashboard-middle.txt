@@ -1,0 +1,161 @@
+    lineHeight: "1.6",
+  } as React.CSSProperties,
+
+  outputLine: (level?: string): React.CSSProperties => ({
+    color: level === "error" ? "#f85149" : level === "success" ? "#3fb950" : level === "warning" ? "#d29922" : level === "info" ? "#569cd6" : "var(--fg)",
+    whiteSpace: "pre-wrap" as const,
+    wordBreak: "break-word" as const,
+  }),
+
+  clearBtn: {
+    background: "none",
+    border: "1px solid var(--border)",
+    borderRadius: 4,
+    padding: "3px 8px",
+    color: "var(--fg-dim)",
+    fontSize: 10,
+    cursor: "pointer",
+  } as React.CSSProperties,
+
+  statusDot: (running: boolean): React.CSSProperties => ({
+    width: 8,
+    height: 8,
+    borderRadius: "50%",
+    background: running ? "#d29922" : "#3fb950",
+    animation: running ? "blink 1s step-end infinite" : "none",
+    flexShrink: 0,
+  }),
+};
+
+/* ── Helpers ── */
+function getAuthHeader(): Record<string, string> {
+  if (typeof window === "undefined") return {};
+  const t = localStorage.getItem("token");
+  return t ? { Authorization: `Bearer ${t}` } : {};
+}
+
+function timeAgo(d: string) {
+  const s = (Date.now() - new Date(d).getTime()) / 1000;
+  if (s < 60) return "just now";
+  if (s < 3600) return `${Math.floor(s / 60)}m ago`;
+  if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
+  return new Date(d).toLocaleDateString();
+}
+
+/* ── Component ── */
+export function EmptyStateDashboard({ onQuickAction, isAuthenticated, onReadOnlyTriggered, onSystemModeChange }: EmptyStateDashboardProps) {
+  const [health, setHealth] = useState<HealthData | null>(null);
+  const [hoveredAction, setHoveredAction] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [runningCmd, setRunningCmd] = useState<string | null>(null);
+  const [output, setOutput] = useState<CommandOutput[]>([]);
+  const [verifications, setVerifications] = useState<Map<string, VerificationData>>(new Map());
+  const [lastRunLabel, setLastRunLabel] = useState<string | null>(null);
+  const outputEndRef = useRef<HTMLDivElement>(null);
+
+  const fetchHealth = useCallback(async () => {
+    try {
+      const r = await fetch(`${API_BASE}/health`, { headers: getAuthHeader() });
+      if (r.ok) setHealth(await r.json());
+    } catch { /* offline */ }
+    setLoading(false);
+  }, []);
+
+  useEffect(() => {
+    fetchHealth();
+    const iv = setInterval(fetchHealth, 30_000);
+    return () => clearInterval(iv);
+  }, [fetchHealth]);
+
+  useEffect(() => {
+    outputEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [output]);
+
+  /* ── Execute command via SSE ── */
+  const runCommand = useCallback(async (commandId: string, dryRun: boolean) => {
+    if (runningCmd) return;
+    setRunningCmd(commandId);
+    setOutput([]);
+    setVerifications(new Map());
+
+    try {
+      const r = await fetch(`${API_BASE}/api/commands/run`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...getAuthHeader() },
+        body: JSON.stringify({ commandId, args: {}, dryRun, mode: "operator" }),
+      });
+
+      if (!r.ok) {
+        const err = await r.json().catch(() => ({ error: "UNKNOWN" }));
+        setOutput([{ line: `Error: ${err.error ?? r.statusText}${err.reason ? " — " + err.reason : ""}`, level: "error", ts: new Date().toISOString() }]);
+        setRunningCmd(null);
+        return;
+      }
+
+      const reader = r.body?.getReader();
+      if (!reader) { setRunningCmd(null); return; }
+
+      let buf = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += new TextDecoder().decode(value, { stream: true });
+        const chunks = buf.split("\n\n");
+        buf = chunks.pop() ?? "";
+
+        for (const c of chunks) {
+          const lines = c.split("\n");
+          const ev = lines.find((l) => l.startsWith("event:"))?.slice(6).trim();
+          const dr = lines.find((l) => l.startsWith("data:"))?.slice(5).trim();
+          if (!ev || !dr) continue;
+
+          try {
+            const p = JSON.parse(dr);
+
+            if (ev === "command_started") {
+              setLastRunLabel(p.label);
+              setOutput((prev) => [...prev, { line: `▶ ${p.label} (${commandId})${p.dryRun ? " [DRY RUN]" : ""}`, level: "info", ts: p.startedAt }]);
+            }
+
+            if (ev === "command_output") {
+              setOutput((prev) => [...prev, { line: p.line, level: p.level, ts: new Date().toISOString() }]);
+            }
+
+            if (ev === "command_finished") {
+              const lvl = p.status === "completed" ? "success" : "error";
+              setOutput((prev) => [...prev, { line: `${p.status === "completed" ? "✓" : "✗"} Finished — ${p.status}`, level: lvl, ts: p.finishedAt }]);
+            }
+
+            /* ── Verification events ── */
+            if (ev === "verification") {
+              setVerifications((prev) => {
+                const next = new Map(prev);
+                const existing = next.get(p.toolCallId);
+                next.set(p.toolCallId, {
+                  toolCallId: p.toolCallId,
+                  toolName: p.toolName ?? existing?.toolName ?? "unknown",
+                  verifyWith: p.verifyWith ?? existing?.verifyWith ?? "unknown",
+                  strictness: p.strictness ?? existing?.strictness ?? "soft",
+                  status: p.verified === true ? "verified" : p.verified === false ? "failed" : p.status === "started" ? "verifying" : existing?.status ?? "verifying",
+                  attempts: existing?.attempts ?? [],
+                  currentAttempt: p.attempts ?? existing?.currentAttempt ?? 0,
+                  maxAttempts: p.maxAttempts ?? existing?.maxAttempts ?? 5,
+                  durationMs: p.durationMs ?? existing?.durationMs,
+                  summary: p.summary ?? existing?.summary,
+                  startedAt: p.startedAt ?? existing?.startedAt,
+                  nextAttemptAt: p.nextAttemptAt ?? existing?.nextAttemptAt,
+                });
+                return next;
+              });
+            }
+
+            if (ev === "verification_attempt") {
+              setVerifications((prev) => {
+                const next = new Map(prev);
+                const existing = next.get(p.toolCallId);
+                if (existing) {
+                  const attempt: VerificationAttempt = {
+                    attempt: p.attempt ?? existing.attempts.length + 1,
+                    maxAttempts: p.maxAttempts ?? existing.maxAttempts,
+                    waitMs: p.waitMs,
+                    status: p.passed ? "success" : p.attempt < (p.maxAttempts ?? existing.maxAttempts) ? "waiting" : "failed",

@@ -1,0 +1,111 @@
+                    status: p.passed ? "success" : p.attempt < (p.maxAttempts ?? existing.maxAttempts) ? "waiting" : "failed",
+                  };
+                  next.set(p.toolCallId, {
+                    ...existing,
+                    currentAttempt: attempt.attempt,
+                    attempts: [...existing.attempts, attempt],
+                    nextAttemptAt: p.nextAttemptAt ?? existing.nextAttemptAt,
+                  });
+                }
+                return next;
+              });
+            }
+
+            if (ev === "read_only_mode") {
+              if (p.enabled) {
+                onSystemModeChange?.("read-only");
+                onReadOnlyTriggered?.({
+                  failedToolCallId: p.failedToolCallId ?? "unknown",
+                  failedToolName: p.failedToolName ?? "unknown",
+                  reason: p.reason ?? "Verification failed",
+                  timestamp: new Date().toISOString(),
+                });
+              } else {
+                onSystemModeChange?.("normal");
+              }
+            }
+          } catch { /* malformed */ }
+        }
+      }
+    } catch (err: any) {
+      setOutput((prev) => [...prev, { line: `Network error: ${err.message}`, level: "error", ts: new Date().toISOString() }]);
+    }
+
+    setRunningCmd(null);
+  }, [runningCmd, onReadOnlyTriggered, onSystemModeChange]);
+
+  const isHealthy = health?.ok ?? false;
+  const verificationsArray = Array.from(verifications.values());
+
+  return (
+    <div style={S.container}>
+      {/* Hero */}
+      <div style={S.hero}>
+        <div style={S.heroTitle}>MIGRAPILOT READY</div>
+        <div style={S.heroSub}>AI-powered infrastructure operations console</div>
+      </div>
+
+      {/* System Status */}
+      <div style={S.sectionHeader}>System Status</div>
+      <div style={S.readinessGrid}>
+        <div style={S.readinessCard}>
+          <span style={S.cardLabel}>Providers</span>
+          <span style={S.cardValue(isHealthy ? "#4ec9b0" : loading ? "#858585" : "#f85149")}>
+            <span style={S.cardDot(isHealthy ? "#4ec9b0" : loading ? "#858585" : "#f85149")} />
+            {loading ? "Checking…" : isHealthy ? "Healthy" : "Unavailable"}
+          </span>
+        </div>
+        <div style={S.readinessCard}>
+          <span style={S.cardLabel}>Tool Runner</span>
+          <span style={S.cardValue(isHealthy ? "#4ec9b0" : "#858585")}>
+            <span style={S.cardDot(isHealthy ? "#4ec9b0" : "#858585")} />
+            {isHealthy ? "Online" : "Unknown"}
+          </span>
+        </div>
+        <div style={S.readinessCard}>
+          <span style={S.cardLabel}>Policy Engine</span>
+          <span style={S.cardValue("#4ec9b0")}>
+            <span style={S.cardDot("#4ec9b0")} />
+            Enforced
+          </span>
+        </div>
+        <div style={S.readinessCard}>
+          <span style={S.cardLabel}>Verification</span>
+          <span style={S.cardValue("#4ec9b0")}>
+            <span style={S.cardDot("#4ec9b0")} />
+            Enabled
+          </span>
+        </div>
+        <div style={S.readinessCard}>
+          <span style={S.cardLabel}>Circuit Breakers</span>
+          <span style={S.cardValue("#4ec9b0")}>
+            <span style={S.cardDot("#4ec9b0")} />
+            All Closed
+          </span>
+        </div>
+        <div style={S.readinessCard}>
+          <span style={S.cardLabel}>Last Run</span>
+          <span style={S.cardValue("#569cd6")}>
+            <span style={S.cardDot("#569cd6")} />
+            {lastRunLabel ?? (health?.lastRun ? timeAgo(health.lastRun.timestamp) : "No runs yet")}
+          </span>
+        </div>
+      </div>
+
+      {/* Quick Actions */}
+      {isAuthenticated && (
+        <>
+          <div style={S.sectionHeader}>Quick Actions</div>
+          <div style={S.actionsGrid}>
+            {QUICK_ACTIONS.map((a) => (
+              <button
+                key={a.label}
+                style={S.actionBtn(runningCmd === a.commandId, hoveredAction === a.label)}
+                onMouseEnter={() => setHoveredAction(a.label)}
+                onMouseLeave={() => setHoveredAction(null)}
+                onClick={() => runCommand(a.commandId, a.dryRun)}
+                disabled={!!runningCmd}
+              >
+                <span style={S.actionIcon}>{runningCmd === a.commandId ? "⏳" : a.icon}</span>
+                <span>{a.label}</span>
+              </button>

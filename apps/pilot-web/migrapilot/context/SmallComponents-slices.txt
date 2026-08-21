@@ -1,0 +1,298 @@
+=== components/StatusPills.tsx ===
+"use client";
+
+/**
+ * StatusPills — always-visible system instrumentation in the header.
+ *
+ * Shows: Auth state, LLM provider + breaker state, Policy engine,
+ * System mode (Normal / Read-Only), Environment badge.
+ *
+ * Periodically polls /api/pilot/admin/providers for live data.
+ */
+
+import { useState, useEffect, useCallback } from "react";
+
+/* ── Types ── */
+export type SystemMode = "normal" | "read-only" | "degraded";
+export type BreakerState = "closed" | "open" | "half-open";
+
+export interface ProviderStatus {
+  tag: string;
+  model: string;
+  available: boolean;
+  breaker: BreakerState;
+  latencyMs?: number;
+}
+
+export interface StatusPillsProps {
+  isAuthenticated: boolean;
+  activeProvider?: { tag: string; model: string; reason: string } | null;
+  systemMode: SystemMode;
+  policyEnforced: boolean;
+  dryRun: boolean;
+  providers?: ProviderStatus[];
+  environment?: "PROD" | "DEV" | "STAGING";
+}
+
+/* ── Styles ── */
+const S = {
+  container: {
+    display: "flex",
+    alignItems: "center",
+    gap: 6,
+    flexShrink: 0,
+  } as React.CSSProperties,
+
+  pill: (color: string, active: boolean): React.CSSProperties => ({
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 4,
+    padding: "3px 8px",
+    borderRadius: 20,
+    fontSize: 10,
+    fontWeight: 600,
+    letterSpacing: ".3px",
+    border: `1px solid ${active ? color : "var(--border)"}`,
+    color: active ? color : "var(--fg-dim)",
+    background: active ? `${color}12` : "transparent",
+    whiteSpace: "nowrap" as const,
+    transition: "all .2s",
+    lineHeight: "1.4",
+  }),
+
+  dot: (color: string): React.CSSProperties => ({
+    width: 6,
+    height: 6,
+    borderRadius: "50%",
+    background: color,
+    flexShrink: 0,
+  }),
+
+  envBadge: (env: string): React.CSSProperties => ({
+    display: "inline-flex",
+    alignItems: "center",
+    padding: "2px 7px",
+    borderRadius: 4,
+    fontSize: 9,
+    fontWeight: 700,
+    letterSpacing: ".5px",
+    background: env === "PROD" ? "rgba(248,81,73,0.15)" : env === "STAGING" ? "rgba(210,153,34,0.15)" : "rgba(78,201,176,0.15)",
+    color: env === "PROD" ? "#f85149" : env === "STAGING" ? "#d29922" : "#4ec9b0",
+    border: `1px solid ${env === "PROD" ? "rgba(248,81,73,0.3)" : env === "STAGING" ? "rgba(210,153,34,0.3)" : "rgba(78,201,176,0.3)"}`,
+  }),
+};
+
+/* ── Helpers ── */
+function breakerColor(state: BreakerState): string {
+  switch (state) {
+    case "closed": return "#4ec9b0";
+    case "half-open": return "#d29922";
+    case "open": return "#f85149";
+  }
+}
+
+function providerLabel(tag: string): string {
+  const map: Record<string, string> = {
+    local: "Local",
+    sonnet: "Sonnet",
+    opus: "Opus",
+    haiku: "Haiku",
+  };
+  return map[tag] ?? tag;
+}
+
+/* ── Component ── */
+export function StatusPills({
+  isAuthenticated,
+  activeProvider,
+  systemMode,
+  policyEnforced,
+  dryRun,
+  providers = [],
+  environment = "PROD",
+}: StatusPillsProps) {
+  /* Build LLM display from providers or fallback to activeProvider */
+  const llmPills = providers.length > 0
+    ? providers
+    : activeProvider
+      ? [{ tag: activeProvider.tag, model: activeProvider.model, available: true, breaker: "closed" as BreakerState }]
+      : [];
+
+  const modeColor = systemMode === "normal" ? "#4ec9b0" : systemMode === "read-only" ? "#f85149" : "#d29922";
+  const modeLabel = systemMode === "normal" ? "Normal" : systemMode === "read-only" ? "Read-Only" : "Degraded";
+
+  return (
+    <div style={S.container}>
+      {/* Env badge */}
+      <span style={S.envBadge(environment)}>{environment}</span>
+
+      {/* Auth */}
+      <span style={S.pill(isAuthenticated ? "#4ec9b0" : "#d29922", true)}>
+        <span style={S.dot(isAuthenticated ? "#4ec9b0" : "#d29922")} />
+        {isAuthenticated ? "Auth ✓" : "No Auth"}
+      </span>
+
+      {/* LLM providers */}
+      {llmPills.length > 0 ? (
+        llmPills.map((p) => {
+          const bc = breakerColor(p.breaker);
+          return (
+            <span key={p.tag} style={S.pill(p.available ? "#569cd6" : "#f85149", true)}>
+              <span style={S.dot(p.available ? bc : "#f85149")} />
+              {providerLabel(p.tag)}
+              {p.breaker !== "closed" && (
+                <span style={{ fontSize: 9, opacity: 0.7 }}>({p.breaker})</span>
+              )}
+              {!p.available && <span style={{ fontSize: 9 }}>✗</span>}
+            </span>
+          );
+        })
+      ) : (
+        <span style={S.pill("#858585", false)}>
+          <span style={S.dot("#858585")} />
+          LLM idle
+        </span>
+      )}
+
+      {/* Policy */}
+      <span style={S.pill(policyEnforced ? "#4ec9b0" : "#d29922", true)}>
+        <span style={S.dot(policyEnforced ? "#4ec9b0" : "#d29922")} />
+        Policy: {policyEnforced ? "Enforced" : "Off"}
+      </span>
+
+      {/* System mode */}
+      <span style={S.pill(modeColor, true)}>
+        <span style={S.dot(modeColor)} />
+        {modeLabel}
+      </span>
+    </div>
+  );
+}
+
+=== components/AuthGate.tsx lines 230-285 ===
+      }
+
+      localStorage.setItem("token", data.token);
+      onTokenSet(data.token);
+    } catch (err: any) {
+      setError("Unable to reach API — check network");
+    } finally {
+      setLoading(false);
+    }
+  }, [email, password, onTokenSet]);
+
+  /* ── JWT paste (fallback) ── */
+  const handleJwtSubmit = useCallback(() => {
+    const t = tokenDraft.trim();
+    if (!t) return;
+    localStorage.setItem("token", t);
+    onTokenSet(t);
+    setShowJwtModal(false);
+    setTokenDraft("");
+  }, [tokenDraft, onTokenSet]);
+
+  return (
+    <>
+      <div style={S.container}>
+        <div style={S.card}>
+          <span style={S.lockIcon}>🔐</span>
+          <div style={S.title}>
+            {isExpired ? "Session Expired" : "Authentication Required"}
+          </div>
+          <div style={S.subtitle}>
+            {isExpired
+              ? "Your session has expired. Please sign in again to continue."
+              : "Connect your operator identity to begin using MigraPilot."}
+          </div>
+
+          {error && <div style={S.errorMsg}>{error}</div>}
+          {hint && !error && <div style={S.errorMsg}>{hint}</div>}
+
+          {/* Email field */}
+          <div style={S.formGroup}>
+            <label style={S.label}>Email</label>
+            <input
+              style={S.input}
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="operator@migrateck.com"
+              autoFocus
+              onKeyDown={(e) => {
+                if (e.key === "Enter") handleSignIn();
+              }}
+            />
+          </div>
+
+          {/* Password field */}
+          <div style={S.formGroup}>
+
+=== components/ModeSwitch.tsx ===
+"use client";
+
+/**
+ * ModeSwitch — toggles between Operator, Engineering, and Incident modes.
+ *
+ * Operator mode: infrastructure tools (pods, domains, DNS, mail, backups) — blue accent
+ * Engineering mode: repo tools (search, readFile, applyPatch, tests, format) — orange accent
+ * Incident mode: triage and response (future) — red accent
+ *
+ * The mode accent color propagates via CSS custom properties for themed header.
+ */
+
+export type PilotMode = "operator" | "engineering" | "incident";
+
+/* ── Mode config ── */
+const MODE_CONFIG: Record<PilotMode, { icon: string; label: string; color: string; description: string }> = {
+  operator:    { icon: "🔧", label: "Operator",    color: "#0078d4", description: "Infrastructure operations: pods, domains, DNS, mail, backups" },
+  engineering: { icon: "⚡", label: "Engineering", color: "#e8823a", description: "Code operations: search, read, patch, test, format" },
+  incident:    { icon: "🚨", label: "Incident",    color: "#f85149", description: "Incident triage and response (coming soon)" },
+};
+
+export function getModeColor(mode: PilotMode): string {
+  return MODE_CONFIG[mode].color;
+}
+
+interface ModeSwitchProps {
+  mode: PilotMode;
+  onChange: (mode: PilotMode) => void;
+  disableIncident?: boolean;
+}
+
+const S = {
+  container: {
+    display: "flex", alignItems: "center", gap: 0,
+    border: "1px solid var(--border)", borderRadius: 6, overflow: "hidden",
+    fontSize: 11, fontWeight: 600, letterSpacing: ".3px",
+  },
+  tab: (active: boolean, color: string, disabled: boolean) => ({
+    padding: "5px 12px", cursor: disabled ? "default" : "pointer", userSelect: "none" as const,
+    background: active ? color : "transparent",
+    color: active ? "#fff" : disabled ? "var(--border)" : "var(--fg-dim)",
+    transition: "background .15s, color .15s",
+    border: "none", outline: "none",
+    opacity: disabled ? 0.4 : 1,
+  }),
+};
+
+export function ModeSwitch({ mode, onChange, disableIncident = true }: ModeSwitchProps) {
+  return (
+    <div style={S.container}>
+      {(Object.keys(MODE_CONFIG) as PilotMode[]).map((m) => {
+        const cfg = MODE_CONFIG[m];
+        const disabled = m === "incident" && disableIncident;
+        return (
+          <button
+            key={m}
+            style={S.tab(mode === m, cfg.color, disabled)}
+            onClick={() => !disabled && onChange(m)}
+            title={cfg.description + (disabled ? " (disabled)" : "")}
+            disabled={disabled}
+          >
+            {cfg.icon} {cfg.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}

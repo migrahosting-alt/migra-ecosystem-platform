@@ -108,6 +108,16 @@
 /apps/pilot-web/next-env.d.ts
 /apps/pilot-web/*.png
 
+# Reviewed out of the pilot-web source baseline (2026-08-21), left on disk for a decision:
+#   * two unreferenced design mockups, 3.2 MB of the 3.8 MB in app/assets — no code imports
+#     them, and git history is forever. MigraPilot.png (48 refs) and
+#     MigraPilot_official_logo.png (1 ref) ARE tracked, because they are used.
+#   * EnhancedAssistant.tsx — a one-line placeholder returning the text "Enhanced Assistant
+#     Component", imported by nothing. Baselining a placeholder is how it survives.
+/apps/pilot-web/app/assets/MigraPilot_Vs_code_Mockup-Draft.png
+/apps/pilot-web/app/assets/MigraPilot AI Command Center Dashboard.png
+/apps/pilot-web/components/EnhancedAssistant.tsx
+
 !/apps/**/package.json
 !/apps/**/package-lock.json
 !/apps/**/pnpm-lock.yaml

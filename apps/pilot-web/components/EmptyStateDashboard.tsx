@@ -1,0 +1,465 @@
+"use client";
+
+/**
+ * EmptyStateDashboard — command center with real Quick Actions.
+ *
+ * Each button triggers POST /api/commands/run and streams SSE events.
+ * Shows live command output, verification cards, and system status.
+ */
+
+import { useState, useEffect, useCallback, useRef } from "react";
+import { VerificationCard, type VerificationData, type VerificationAttempt } from "./VerificationCard";
+import type { ReadOnlyInfo } from "./ReadOnlyBanner";
+
+const API_BASE = process.env.NEXT_PUBLIC_PILOT_API_BASE ?? "http://localhost:3377";
+
+/* ── Types ── */
+interface HealthData {
+  ok: boolean;
+  uptime?: number;
+  version?: string;
+  lastRun?: { timestamp: string; provider: string; outcome: string } | null;
+}
+
+interface CommandOutput {
+  line: string;
+  level?: "success" | "error" | "warning" | "info";
+  ts: string;
+}
+
+export interface EmptyStateDashboardProps {
+  onQuickAction: (prompt: string) => void;
+  isAuthenticated: boolean;
+  onReadOnlyTriggered?: (info: ReadOnlyInfo) => void;
+  onSystemModeChange?: (mode: "normal" | "read-only") => void;
+}
+
+/* ── Quick Actions — now mapped to real commandIds ── */
+const QUICK_ACTIONS = [
+  { icon: "💚", label: "Run health check", commandId: "system.health_check", dryRun: false, category: "system" },
+  { icon: "📦", label: "List tenants", commandId: "tenants.list", dryRun: false, category: "operator" },
+  { icon: "🚀", label: "Create pod (dry-run)", commandId: "pods.create", dryRun: true, category: "operator" },
+  { icon: "🌐", label: "DNS change (dry-run)", commandId: "dns.change_record", dryRun: true, category: "operator" },
+  { icon: "🔍", label: "Search codebase", commandId: "code.search", dryRun: false, category: "engineering" },
+  { icon: "📋", label: "View recent logs", commandId: "logs.tail", dryRun: false, category: "operator" },
+  { icon: "🔧", label: "Propose a patch", commandId: "patch.propose", dryRun: true, category: "engineering" },
+  { icon: "⏪", label: "Rollback last change", commandId: "system.rollback_last", dryRun: false, category: "operator" },
+  { icon: "✅", label: "Verification demo", commandId: "system.verification_demo", dryRun: false, category: "system" },
+  { icon: "🔴", label: "Read-only demo", commandId: "system.read_only_demo", dryRun: false, category: "system" },
+];
+
+/* ── Styles ── */
+const S = {
+  container: {
+    display: "flex",
+    flexDirection: "column" as const,
+    alignItems: "center",
+    height: "100%",
+    padding: "24px 24px 40px",
+    gap: 24,
+    overflowY: "auto" as const,
+  } as React.CSSProperties,
+
+  hero: { textAlign: "center" as const, marginBottom: 0 } as React.CSSProperties,
+  heroTitle: { fontSize: 22, fontWeight: 700, color: "var(--fg-bright)", letterSpacing: "-0.3px", marginBottom: 4 } as React.CSSProperties,
+  heroSub: { fontSize: 13, color: "var(--fg-dim)", fontWeight: 400 } as React.CSSProperties,
+
+  readinessGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))",
+    gap: 10,
+    width: "100%",
+    maxWidth: 720,
+  } as React.CSSProperties,
+
+  readinessCard: {
+    border: "1px solid var(--border)",
+    borderRadius: 12,
+    padding: "14px 16px",
+    background: "rgba(255,255,255,0.03)",
+    display: "flex",
+    flexDirection: "column" as const,
+    gap: 6,
+  } as React.CSSProperties,
+
+  cardLabel: { fontSize: 11, fontWeight: 600, color: "var(--fg-dim)", textTransform: "uppercase" as const, letterSpacing: ".4px" } as React.CSSProperties,
+  cardValue: (color: string): React.CSSProperties => ({
+    fontSize: 13, fontWeight: 700, color, display: "flex", alignItems: "center", gap: 6,
+  }),
+  cardDot: (color: string): React.CSSProperties => ({
+    width: 8, height: 8, borderRadius: "50%", background: color, flexShrink: 0, boxShadow: `0 0 6px ${color}66`,
+  }),
+
+  sectionHeader: {
+    fontSize: 11, fontWeight: 600, color: "var(--fg-dim)", textTransform: "uppercase" as const,
+    letterSpacing: ".5px", width: "100%", maxWidth: 720, marginBottom: -14,
+  } as React.CSSProperties,
+
+  actionsGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fill, minmax(170px, 1fr))",
+    gap: 8,
+    width: "100%",
+    maxWidth: 720,
+  } as React.CSSProperties,
+
+  actionBtn: (running: boolean, hovered: boolean): React.CSSProperties => ({
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    padding: "10px 14px",
+    borderRadius: 10,
+    border: `1px solid ${running ? "var(--accent)" : hovered ? "var(--accent)" : "var(--border)"}`,
+    background: running ? "rgba(0,120,212,0.12)" : hovered ? "rgba(0,120,212,0.06)" : "transparent",
+    color: "var(--fg-bright)",
+    cursor: running ? "wait" : "pointer",
+    fontSize: 12,
+    fontWeight: 500,
+    textAlign: "left" as const,
+    transition: "all .15s",
+    lineHeight: "1.3",
+    opacity: running ? 0.7 : 1,
+  }),
+
+  actionIcon: { fontSize: 16, flexShrink: 0, width: 24, textAlign: "center" as const } as React.CSSProperties,
+
+  /* ── Output panel ── */
+  outputPanel: {
+    width: "100%",
+    maxWidth: 720,
+    background: "rgba(0,0,0,0.3)",
+    border: "1px solid var(--border)",
+    borderRadius: 12,
+    overflow: "hidden",
+  } as React.CSSProperties,
+
+  outputHeader: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    padding: "10px 16px",
+    borderBottom: "1px solid var(--border)",
+    background: "rgba(0,0,0,0.2)",
+  } as React.CSSProperties,
+
+  outputTitle: {
+    fontSize: 12,
+    fontWeight: 700,
+    color: "var(--fg-bright)",
+    display: "flex",
+    alignItems: "center",
+    gap: 6,
+  } as React.CSSProperties,
+
+  outputBody: {
+    padding: "12px 16px",
+    maxHeight: 320,
+    overflowY: "auto" as const,
+    fontFamily: "var(--mono, 'Fira Code', Consolas, monospace)",
+    fontSize: 12,
+    lineHeight: "1.6",
+  } as React.CSSProperties,
+
+  outputLine: (level?: string): React.CSSProperties => ({
+    color: level === "error" ? "#f85149" : level === "success" ? "#3fb950" : level === "warning" ? "#d29922" : level === "info" ? "#569cd6" : "var(--fg)",
+    whiteSpace: "pre-wrap" as const,
+    wordBreak: "break-word" as const,
+  }),
+
+  clearBtn: {
+    background: "none",
+    border: "1px solid var(--border)",
+    borderRadius: 4,
+    padding: "3px 8px",
+    color: "var(--fg-dim)",
+    fontSize: 10,
+    cursor: "pointer",
+  } as React.CSSProperties,
+
+  statusDot: (running: boolean): React.CSSProperties => ({
+    width: 8,
+    height: 8,
+    borderRadius: "50%",
+    background: running ? "#d29922" : "#3fb950",
+    animation: running ? "blink 1s step-end infinite" : "none",
+    flexShrink: 0,
+  }),
+};
+
+/* ── Helpers ── */
+function getAuthHeader(): Record<string, string> {
+  if (typeof window === "undefined") return {};
+  const t = localStorage.getItem("token");
+  return t ? { Authorization: `Bearer ${t}` } : {};
+}
+
+function timeAgo(d: string) {
+  const s = (Date.now() - new Date(d).getTime()) / 1000;
+  if (s < 60) return "just now";
+  if (s < 3600) return `${Math.floor(s / 60)}m ago`;
+  if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
+  return new Date(d).toLocaleDateString();
+}
+
+/* ── Component ── */
+export function EmptyStateDashboard({ onQuickAction, isAuthenticated, onReadOnlyTriggered, onSystemModeChange }: EmptyStateDashboardProps) {
+  const [health, setHealth] = useState<HealthData | null>(null);
+  const [hoveredAction, setHoveredAction] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [runningCmd, setRunningCmd] = useState<string | null>(null);
+  const [output, setOutput] = useState<CommandOutput[]>([]);
+  const [verifications, setVerifications] = useState<Map<string, VerificationData>>(new Map());
+  const [lastRunLabel, setLastRunLabel] = useState<string | null>(null);
+  const outputEndRef = useRef<HTMLDivElement>(null);
+
+  const fetchHealth = useCallback(async () => {
+    try {
+      const r = await fetch(`${API_BASE}/health`, { headers: getAuthHeader() });
+      if (r.ok) setHealth(await r.json());
+    } catch { /* offline */ }
+    setLoading(false);
+  }, []);
+
+  useEffect(() => {
+    fetchHealth();
+    const iv = setInterval(fetchHealth, 30_000);
+    return () => clearInterval(iv);
+  }, [fetchHealth]);
+
+  useEffect(() => {
+    outputEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [output]);
+
+  /* ── Execute command via SSE ── */
+  const runCommand = useCallback(async (commandId: string, dryRun: boolean) => {
+    if (runningCmd) return;
+    setRunningCmd(commandId);
+    setOutput([]);
+    setVerifications(new Map());
+
+    try {
+      const r = await fetch(`${API_BASE}/api/commands/run`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...getAuthHeader() },
+        body: JSON.stringify({ commandId, args: {}, dryRun, mode: "operator" }),
+      });
+
+      if (!r.ok) {
+        const err = await r.json().catch(() => ({ error: "UNKNOWN" }));
+        setOutput([{ line: `Error: ${err.error ?? r.statusText}${err.reason ? " — " + err.reason : ""}`, level: "error", ts: new Date().toISOString() }]);
+        setRunningCmd(null);
+        return;
+      }
+
+      const reader = r.body?.getReader();
+      if (!reader) { setRunningCmd(null); return; }
+
+      let buf = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += new TextDecoder().decode(value, { stream: true });
+        const chunks = buf.split("\n\n");
+        buf = chunks.pop() ?? "";
+
+        for (const c of chunks) {
+          const lines = c.split("\n");
+          const ev = lines.find((l) => l.startsWith("event:"))?.slice(6).trim();
+          const dr = lines.find((l) => l.startsWith("data:"))?.slice(5).trim();
+          if (!ev || !dr) continue;
+
+          try {
+            const p = JSON.parse(dr);
+
+            if (ev === "command_started") {
+              setLastRunLabel(p.label);
+              setOutput((prev) => [...prev, { line: `▶ ${p.label} (${commandId})${p.dryRun ? " [DRY RUN]" : ""}`, level: "info", ts: p.startedAt }]);
+            }
+
+            if (ev === "command_output") {
+              setOutput((prev) => [...prev, { line: p.line, level: p.level, ts: new Date().toISOString() }]);
+            }
+
+            if (ev === "command_finished") {
+              const lvl = p.status === "completed" ? "success" : "error";
+              setOutput((prev) => [...prev, { line: `${p.status === "completed" ? "✓" : "✗"} Finished — ${p.status}`, level: lvl, ts: p.finishedAt }]);
+            }
+
+            /* ── Verification events ── */
+            if (ev === "verification") {
+              setVerifications((prev) => {
+                const next = new Map(prev);
+                const existing = next.get(p.toolCallId);
+                next.set(p.toolCallId, {
+                  toolCallId: p.toolCallId,
+                  toolName: p.toolName ?? existing?.toolName ?? "unknown",
+                  verifyWith: p.verifyWith ?? existing?.verifyWith ?? "unknown",
+                  strictness: p.strictness ?? existing?.strictness ?? "soft",
+                  status: p.verified === true ? "verified" : p.verified === false ? "failed" : p.status === "started" ? "verifying" : existing?.status ?? "verifying",
+                  attempts: existing?.attempts ?? [],
+                  currentAttempt: p.attempts ?? existing?.currentAttempt ?? 0,
+                  maxAttempts: p.maxAttempts ?? existing?.maxAttempts ?? 5,
+                  durationMs: p.durationMs ?? existing?.durationMs,
+                  summary: p.summary ?? existing?.summary,
+                  startedAt: p.startedAt ?? existing?.startedAt,
+                  nextAttemptAt: p.nextAttemptAt ?? existing?.nextAttemptAt,
+                });
+                return next;
+              });
+            }
+
+            if (ev === "verification_attempt") {
+              setVerifications((prev) => {
+                const next = new Map(prev);
+                const existing = next.get(p.toolCallId);
+                if (existing) {
+                  const attempt: VerificationAttempt = {
+                    attempt: p.attempt ?? existing.attempts.length + 1,
+                    maxAttempts: p.maxAttempts ?? existing.maxAttempts,
+                    waitMs: p.waitMs,
+                    status: p.passed ? "success" : p.attempt < (p.maxAttempts ?? existing.maxAttempts) ? "waiting" : "failed",
+                  };
+                  next.set(p.toolCallId, {
+                    ...existing,
+                    currentAttempt: attempt.attempt,
+                    attempts: [...existing.attempts, attempt],
+                    nextAttemptAt: p.nextAttemptAt ?? existing.nextAttemptAt,
+                  });
+                }
+                return next;
+              });
+            }
+
+            if (ev === "read_only_mode") {
+              if (p.enabled) {
+                onSystemModeChange?.("read-only");
+                onReadOnlyTriggered?.({
+                  failedToolCallId: p.failedToolCallId ?? "unknown",
+                  failedToolName: p.failedToolName ?? "unknown",
+                  reason: p.reason ?? "Verification failed",
+                  timestamp: new Date().toISOString(),
+                });
+              } else {
+                onSystemModeChange?.("normal");
+              }
+            }
+          } catch { /* malformed */ }
+        }
+      }
+    } catch (err: any) {
+      setOutput((prev) => [...prev, { line: `Network error: ${err.message}`, level: "error", ts: new Date().toISOString() }]);
+    }
+
+    setRunningCmd(null);
+  }, [runningCmd, onReadOnlyTriggered, onSystemModeChange]);
+
+  const isHealthy = health?.ok ?? false;
+  const verificationsArray = Array.from(verifications.values());
+
+  return (
+    <div style={S.container}>
+      {/* Hero */}
+      <div style={S.hero}>
+        <div style={S.heroTitle}>MIGRAPILOT READY</div>
+        <div style={S.heroSub}>AI-powered infrastructure operations console</div>
+      </div>
+
+      {/* System Status */}
+      <div style={S.sectionHeader}>System Status</div>
+      <div style={S.readinessGrid}>
+        <div style={S.readinessCard}>
+          <span style={S.cardLabel}>Providers</span>
+          <span style={S.cardValue(isHealthy ? "#4ec9b0" : loading ? "#858585" : "#f85149")}>
+            <span style={S.cardDot(isHealthy ? "#4ec9b0" : loading ? "#858585" : "#f85149")} />
+            {loading ? "Checking…" : isHealthy ? "Healthy" : "Unavailable"}
+          </span>
+        </div>
+        <div style={S.readinessCard}>
+          <span style={S.cardLabel}>Tool Runner</span>
+          <span style={S.cardValue(isHealthy ? "#4ec9b0" : "#858585")}>
+            <span style={S.cardDot(isHealthy ? "#4ec9b0" : "#858585")} />
+            {isHealthy ? "Online" : "Unknown"}
+          </span>
+        </div>
+        <div style={S.readinessCard}>
+          <span style={S.cardLabel}>Policy Engine</span>
+          <span style={S.cardValue("#4ec9b0")}>
+            <span style={S.cardDot("#4ec9b0")} />
+            Enforced
+          </span>
+        </div>
+        <div style={S.readinessCard}>
+          <span style={S.cardLabel}>Verification</span>
+          <span style={S.cardValue("#4ec9b0")}>
+            <span style={S.cardDot("#4ec9b0")} />
+            Enabled
+          </span>
+        </div>
+        <div style={S.readinessCard}>
+          <span style={S.cardLabel}>Circuit Breakers</span>
+          <span style={S.cardValue("#4ec9b0")}>
+            <span style={S.cardDot("#4ec9b0")} />
+            All Closed
+          </span>
+        </div>
+        <div style={S.readinessCard}>
+          <span style={S.cardLabel}>Last Run</span>
+          <span style={S.cardValue("#569cd6")}>
+            <span style={S.cardDot("#569cd6")} />
+            {lastRunLabel ?? (health?.lastRun ? timeAgo(health.lastRun.timestamp) : "No runs yet")}
+          </span>
+        </div>
+      </div>
+
+      {/* Quick Actions */}
+      {isAuthenticated && (
+        <>
+          <div style={S.sectionHeader}>Quick Actions</div>
+          <div style={S.actionsGrid}>
+            {QUICK_ACTIONS.map((a) => (
+              <button
+                key={a.label}
+                style={S.actionBtn(runningCmd === a.commandId, hoveredAction === a.label)}
+                onMouseEnter={() => setHoveredAction(a.label)}
+                onMouseLeave={() => setHoveredAction(null)}
+                onClick={() => runCommand(a.commandId, a.dryRun)}
+                disabled={!!runningCmd}
+              >
+                <span style={S.actionIcon}>{runningCmd === a.commandId ? "⏳" : a.icon}</span>
+                <span>{a.label}</span>
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+
+      {/* Live Output Panel */}
+      {output.length > 0 && (
+        <div style={S.outputPanel}>
+          <div style={S.outputHeader}>
+            <span style={S.outputTitle}>
+              <span style={S.statusDot(!!runningCmd)} />
+              {runningCmd ? "Running..." : "Output"}
+            </span>
+            <button style={S.clearBtn} onClick={() => { setOutput([]); setVerifications(new Map()); }}>Clear</button>
+          </div>
+          <div style={S.outputBody}>
+            {output.map((o, i) => (
+              <div key={i} style={S.outputLine(o.level)}>{o.line}</div>
+            ))}
+            <div ref={outputEndRef} />
+          </div>
+
+          {/* Verification cards below output */}
+          {verificationsArray.length > 0 && (
+            <div style={{ padding: "8px 12px", borderTop: "1px solid var(--border)" }}>
+              {verificationsArray.map((v) => (
+                <VerificationCard key={v.toolCallId} data={v} />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}

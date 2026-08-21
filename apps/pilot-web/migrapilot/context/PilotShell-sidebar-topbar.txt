@@ -1,0 +1,111 @@
+  function handlePaletteSelect(cmd: PaletteCommand) {
+    setInput(cmd.template);
+    setShowPalette(false);
+    taRef.current?.focus();
+  }
+
+  // Cmd+K shortcut for command palette
+  useEffect(() => {
+    function handleGlobalKey(e: KeyboardEvent) {
+      if ((e.metaKey || e.ctrlKey) && e.key === "k") {
+        e.preventDefault();
+        setShowPalette(prev => !prev);
+        setPaletteFilter("");
+        taRef.current?.focus();
+      }
+    }
+    window.addEventListener("keydown", handleGlobalKey);
+    return () => window.removeEventListener("keydown", handleGlobalKey);
+  }, []);
+
+  /* ── Build chat items from conversation ── */
+  const allRuns = conversation?.runs ?? [];
+  const toolCallMap = new Map<string, ToolCall>();
+  for (const run of allRuns) for (const tc of run.toolCalls) toolCallMap.set(tc.id, tc);
+
+  /* ── Derived values ── */
+  const modeColor = getModeColor(pilotMode);
+  const hasMessages = (conversation?.messages?.length ?? 0) > 0;
+  const showEmptyState = !authHint && !conversation && isAuthenticated;
+  const showAuthGate = !!authHint || !isAuthenticated;
+  const verificationsArray = Array.from(verifications.values());
+
+  /* ── Render ── */
+  return (
+    <div style={S.shell}>
+      <style>{`@keyframes blink{0%,100%{opacity:1}50%{opacity:0}} details>summary::-webkit-details-marker{display:none}`}</style>
+
+      {/* ── Sidebar ── */}
+      <aside style={S.sidebar}>
+        <div style={S.sidebarHeader}>
+          <CopilotIcon />
+          <span style={S.sidebarTitle}>MigraPilot</span>
+          <button style={S.newBtn} onClick={newConversation} title="New chat"><PlusIcon /> New</button>
+        </div>
+        <input style={S.searchBox} value={query}
+          onChange={e => { setQuery(e.target.value); loadConversations(e.target.value); }}
+          placeholder="Search conversations…"
+        />
+        <div style={S.convoList}>
+          {conversations.map(c => {
+            const snip = c.messages?.[0]?.contentJson?.text;
+            return (
+              <button key={c.id} style={S.convoItem(c.id === selectedId)} onClick={() => setSelectedId(c.id)}>
+                <div style={S.convoDate}>{timeAgo(c.createdAt)}</div>
+                <div style={S.convoSnip}>{snip ? (snip.length > 60 ? snip.slice(0, 60) + "…" : snip) : c.id.slice(0, 12)}</div>
+              </button>
+            );
+          })}
+          {conversations.length === 0 && !authHint && (
+            <div style={{ textAlign: "center", padding: 20, color: "var(--fg-dim)", fontSize: 12 }}>No conversations yet</div>
+          )}
+        </div>
+      </aside>
+
+      {/* ── Main ── */}
+      <div style={S.main}>
+        {/* top bar — themed by mode */}
+        <div style={{ ...S.topBar, borderBottom: `2px solid ${modeColor}20` }}>
+          <div style={S.topTitle}><CopilotIcon /> MigraPilot</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <ModeSwitch mode={pilotMode} onChange={setPilotMode} />
+            <StatusPills
+              isAuthenticated={isAuthenticated}
+              activeProvider={activeProvider}
+              systemMode={systemMode}
+              policyEnforced={true}
+              dryRun={dryRun}
+            />
+            <button
+              style={{ background: "none", border: "1px solid var(--border)", borderRadius: 4, padding: "4px 8px", cursor: "pointer", color: showSources ? modeColor : "var(--fg-dim)", fontSize: 11, fontWeight: 600 }}
+              onClick={() => setShowSources(v => !v)}
+              title="Toggle source citations panel"
+            >
+              📚 Sources
+            </button>
+            <button
+              style={{ background: "none", border: "1px solid var(--border)", borderRadius: 4, padding: "4px 8px", cursor: "pointer", color: showPolicy ? modeColor : "var(--fg-dim)", fontSize: 11, fontWeight: 600 }}
+              onClick={() => setShowPolicy(v => !v)}
+              title="Toggle policy timeline"
+            >
+              🛡️ Policy
+            </button>
+            <button
+              style={{ background: "none", border: "1px solid var(--border)", borderRadius: 4, padding: "4px 8px", cursor: "pointer", color: showEngState ? modeColor : "var(--fg-dim)", fontSize: 11, fontWeight: 600 }}
+              onClick={() => setShowEngState(v => !v)}
+              title="Toggle engineering state"
+            >
+              🧠 State
+            </button>
+            <label style={S.dryLabel}>
+              <input type="checkbox" checked={dryRun} onChange={e => setDryRun(e.target.checked)} style={S.dryCheck} />
+              Dry run
+            </label>
+
+            {/* ── Operator Identity ── */}
+            {operatorInfo && (
+              <div style={{ position: "relative" as const }}>
+                <button
+                  style={{
+                    background: "none", border: "1px solid var(--border)", borderRadius: 6,
+                    padding: "4px 10px", cursor: "pointer", color: "var(--fg-bright)", fontSize: 11,

@@ -1,0 +1,186 @@
+              }}
+              onSystemModeChange={(mode) => {
+                setSystemMode(mode);
+                if (mode === "normal") setReadOnlyInfo(null);
+              }}
+            />
+          )}
+
+          {conversation?.messages?.map(m => {
+            const isUser = m.role === "user";
+            const text = m.contentJson?.text ?? JSON.stringify(m.contentJson);
+            return (
+              <div key={m.id} style={S.msgRow(isUser)}>
+                <div style={S.avatar}>{isUser ? <UserIcon /> : <CopilotIcon />}</div>
+                <div style={S.msgBody}>
+                  <div style={S.msgRole}>{isUser ? "You" : "MigraPilot"}</div>
+                  {isUser
+                    ? <div style={S.msgText}>{text}</div>
+                    : <MarkdownMessage text={text} />
+                  }
+                </div>
+              </div>
+            );
+          })}
+
+          {/* Tool cards from loaded runs */}
+          {allRuns.flatMap(run => run.toolCalls).map(tc => (
+            <div key={tc.id} style={{ padding: "0 20px" }}>
+              <div style={S.toolCard}>
+                <div style={S.toolHeader(tc.result ? tc.result.ok : null)}>
+                  <ToolIcon />
+                  <span>{tc.toolName}</span>
+                  <span style={{ ...S.toolStatus, color: statusColor(tc.status) }}>{tc.status}</span>
+                </div>
+                <details style={S.toolDetails}>
+                  <summary style={S.toolSummary}>▸ Arguments</summary>
+                  <pre style={S.toolPre}>{JSON.stringify(redact(tc.argsJson), null, 2)}</pre>
+                </details>
+                {tc.result && (
+                  <details style={S.toolDetails}>
+                    <summary style={S.toolSummary}>▸ Result</summary>
+                    <pre style={S.toolPre}>{JSON.stringify(redact(tc.result), null, 2)}</pre>
+                  </details>
+                )}
+                <button style={S.copyBtn}
+                  onClick={() => navigator.clipboard.writeText(JSON.stringify({ args: redact(tc.argsJson), result: redact(tc.result) }, null, 2))}>
+                  Copy JSON
+                </button>
+              </div>
+            </div>
+          ))}
+
+          {/* Live streaming tool events */}
+          {streamingTools.map((t, i) => (
+            <div key={`st-${i}`} style={{ padding: "0 20px" }}>
+              <div style={S.toolCard}>
+                <div style={S.toolHeader(t.payload?.ok ?? null)}>
+                  <ToolIcon />
+                  <span>{t.toolName}</span>
+                  <span style={{ ...S.toolStatus, color: statusColor(t.status) }}>{t.status}</span>
+                </div>
+              </div>
+            </div>
+          ))}
+
+          {/* ── Verification Cards (V2) ── */}
+          {verificationsArray.map((v) => (
+            <div key={v.toolCallId} id={`vc-${v.toolCallId}`}>
+              <VerificationCard data={v} />
+            </div>
+          ))}
+
+          {/* Streaming text */}
+          {streamingText && (
+            <div style={S.msgRow(false)}>
+              <div style={S.avatar}><CopilotIcon /></div>
+              <div style={S.msgBody}>
+                <div style={{ ...S.msgRole, display: "flex", alignItems: "center", gap: 6 }}>
+                  MigraPilot
+                  {activeProvider && <ProviderBadge tag={activeProvider.tag} />}
+                </div>
+                <div><MarkdownMessage text={streamingText} /><span style={S.cursor} /></div>
+              </div>
+            </div>
+          )}
+
+          {/* Enhanced approval modal */}
+          {pendingApproval && (
+            <ApprovalModal
+              toolName={pendingApproval.toolName}
+              approvalId={pendingApproval.approvalId}
+              expiresAt={pendingApproval.expiresAt}
+              argsJson={pendingApproval.argsJson}
+              blastRadius={pendingApproval.blastRadius}
+              rollbackHint={pendingApproval.rollbackHint}
+              onApprove={() => approve("approve")}
+              onDeny={() => approve("deny")}
+              onClose={() => setPendingApproval(null)}
+            />
+          )}
+
+          <div ref={endRef} />
+        </div>
+
+        {/* Input */}
+        {/* Input area with file support */}
+        <div
+          style={{ ...S.inputArea, position: "relative" as const, flexDirection: "column" as const, gap: 0, padding: 0 }}
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+          onDrop={handleDrop}
+        >
+          {isDragging && (
+            <div style={S.dragOverlay}>Drop files here (images, PDFs, JSON, CSV, YAML)</div>
+          )}
+          <CommandPalette
+            visible={showPalette}
+            filter={paletteFilter}
+            onSelect={handlePaletteSelect}
+            onClose={() => setShowPalette(false)}
+            mode={pilotMode}
+          />
+
+          {/* File chips */}
+          {pendingFiles.length > 0 && (
+            <div style={S.fileChipsRow}>
+              {pendingFiles.map((f, i) => {
+                const preview = filePreviews.get(f.name + f.size);
+                return (
+                  <div key={f.name + f.size + i} style={S.fileChip}>
+                    {preview
+                      ? <img src={preview} alt="" style={{ width: 20, height: 20, borderRadius: 3, objectFit: "cover" }} />
+                      : (isImageFile(f) ? <ImageIcon /> : <FileDocIcon />)
+                    }
+                    <span style={S.fileChipName} title={f.name}>{f.name}</span>
+                    <span style={{ color: "var(--fg-dim)", fontSize: 10, flexShrink: 0 }}>{formatFileSize(f.size)}</span>
+                    <button style={S.fileChipClose} onClick={() => removeFile(i)} title="Remove"><CloseChipIcon /></button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Input row */}
+          <div style={{ display: "flex", gap: 8, alignItems: "flex-end", padding: "10px 16px" }}>
+            <input ref={fileInputRef} type="file" accept={ALLOWED_EXTENSIONS} multiple style={{ display: "none" }} onChange={handleFileInputChange} />
+            <button
+              style={S.attachBtn}
+              onClick={handleFilePick}
+              title={`Attach files (${MAX_FILES - pendingFiles.length} remaining)`}
+              disabled={pendingFiles.length >= MAX_FILES}
+            >
+              <AttachIcon />
+            </button>
+            <div style={S.inputWrap}>
+              <textarea ref={taRef} style={S.textarea} value={input}
+                onChange={handleInputChange}
+                onKeyDown={handleKey}
+                onPaste={handlePaste}
+                placeholder={`Ask MigraPilot… (paste images, drag files, / for commands)`} rows={1}
+              />
+            </div>
+            <button style={S.sendBtn(!!input.trim() && !sending)} onClick={sendMessage} disabled={sending || !input.trim()} title="Send message">
+              {sending
+                ? <span style={{ width: 14, height: 14, border: "2px solid var(--fg-dim)", borderTop: "2px solid var(--accent)", borderRadius: "50%", display: "inline-block", animation: "blink .6s linear infinite" }} />
+                : <SendIcon />}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* ── Right Drawers ── */}
+      <RightDrawer title="Sources" icon="📚" visible={showSources} onClose={() => setShowSources(false)} accentColor={modeColor}>
+        <div style={{ padding: "8px 10px" }}>
+          {sourceCitations.length === 0 ? (
+            <div style={{ padding: 24, textAlign: "center", color: "var(--fg-dim)", fontSize: 12 }}>No source citations for this message</div>
+          ) : (
+            sourceCitations.map((c, i) => (
+              <div key={i} style={{ border: "1px solid var(--border)", borderRadius: 8, marginBottom: 8, overflow: "hidden", background: "var(--bg)" }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 12px", borderBottom: "1px solid var(--border)", fontSize: 11 }}>
+                  <span style={{ fontWeight: 600, color: "var(--fg-bright)", fontFamily: "var(--mono)" }}>{c.source}</span>
+                  <span style={{ fontSize: 10, padding: "1px 6px", borderRadius: 3, background: c.score >= 10 ? "rgba(46,160,67,0.15)" : c.score >= 5 ? "rgba(210,153,34,0.15)" : "rgba(139,148,158,0.1)", color: c.score >= 10 ? "#3fb950" : c.score >= 5 ? "#d29922" : "var(--fg-dim)", fontWeight: 600 }}>score: {c.score}</span>
+                </div>
+                <div style={{ padding: "8px 12px", fontSize: 12, color: "var(--fg)", lineHeight: "1.5", maxHeight: 120, overflowY: "auto", whiteSpace: "pre-wrap" }}>{c.content}</div>
+                {c.tags.length > 0 && (
+                  <div style={{ display: "flex", gap: 4, flexWrap: "wrap", padding: "4px 12px 8px" }}>
