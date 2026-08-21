@@ -45,6 +45,7 @@ import { registerBudgetRoutes } from './engine/providers/budget/budgetRoutes.js'
 import { AgentRegistry } from './engine/agentRegistry.js';
 import { registerAgentModeCommandRoutes } from './engine/agentModeCommandRoutes.js';
 import { registerCodingRunRoutes } from './engine/coding/codingRunRoutes.js';
+import { registerSpeechRoutes } from './engine/speech/speechRoutes.js';
 import { CodingRunService } from './engine/coding/codingRunService.js';
 import { createProductionCodingDriver } from './engine/coding/productionCodingDriver.js';
 import { PREFERRED_CODING_MODEL } from './engine/capability/capabilityGrants.js';
@@ -496,6 +497,9 @@ async function main(): Promise<void> {
   // from a 404 on a route that might simply have moved.
   const governedCoding = codingCapability({ config: codingConfig, durable: durable !== undefined, driverReady: codingReady });
   app.get('/api/ai/coding/capability', async () => ({ governedCoding }));
+  // Speech, on the same terms: always mounted so "unavailable and why" is discoverable,
+  // and delegating to a configured runtime rather than reaching into another application.
+  registerSpeechRoutes(app);
   const agentModeReconciliation = await agentModeCommands.reconcileOnStartup();
   if (agentModeReconciliation.scanned > 0) app.log.info({ agentModeReconciliation }, 'Agent Mode durable run reconciliation completed');
   // Private snapshots are released with their proposal, but a process killed
