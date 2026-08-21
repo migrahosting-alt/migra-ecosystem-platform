@@ -36,6 +36,10 @@ function harness(replies: string[]): {
     prompts,
     calls,
     deps: {
+      // The synthetic root does not exist on disk. The controller VERIFIES a
+      // WORKSPACE_FACT claim against the real filesystem, so the harness supplies its
+      // own answer rather than the tests silently exercising the not-found path.
+      workspaceExists: () => true,
       complete: async (prompt: string) => {
         prompts.push(prompt);
         return replies[Math.min(i++, replies.length - 1)]!;
@@ -258,7 +262,10 @@ test('a malformed run with NO proposals still fails honestly (nothing to salvage
 
 test('handing the work back to the user without looking is challenged, not delivered', async () => {
   const h = harness([
-    '{"final":"Sorry, but I don\'t have the necessary information. Could you please specify which commands were executed?"}',
+    // The fixture now DECLARES what it lacks, because the protocol gained that field.
+    // The behaviour under test is unchanged: a workspace-answerable gap must send the
+    // agent looking rather than back to the user.
+    '{"final":"Sorry, but I don\'t have the necessary information. Could you please specify which commands were executed?","missing":{"kind":"WORKSPACE_FACT","subject":"what this repository contains"}}',
     '{"action":{"tool":"workspace.search","input":{"rootPath":"/w","query":"x"}}}',
     '{"final":"The workspace is empty: no files, no commits, and no commands were run in this session."}',
   ]);
@@ -281,7 +288,10 @@ test('the agent never asks the user to do its looking (observed on the real mono
     'Let me know which directory holds the engine and I will take it from there.',
   ]) {
     const h = harness([
-      JSON.stringify({ final: punt }),
+      JSON.stringify({
+        final: punt,
+        missing: { kind: 'WORKSPACE_FACT', subject: 'where the engineer loop lives' },
+      }),
       '{"action":{"tool":"workspace.search","input":{"rootPath":"/w","query":"engineer loop"}}}',
       '{"final":"The loop lives in src/engine/engineerRuntime.ts:410 and drives a JSON action/final protocol."}',
     ]);
@@ -293,19 +303,28 @@ test('the agent never asks the user to do its looking (observed on the real mono
   }
 });
 
-test('the correction is safe when the question did NOT need the workspace', async () => {
-  // A false positive must cost one round, never a wrong answer — so the directive
-  // explicitly permits answering directly when the workspace is irrelevant.
+// HISTORICAL REGRESSION (Record #1). This test used to assert that a deferral on a
+// non-workspace question was CHALLENGED, on the premise at engineerRuntime that "a false
+// positive costs one round, never a wrong answer". Record #1 disproved that premise: the
+// false positive cost a discarded correct answer, three unwanted mutation proposals,
+// execution telemetry leaked into a chat turn, and an unanswered question.
+//
+// The turn is no longer challenged. A question only the user can settle terminates with
+// the model's own words, and the round is not spent.
+test('a user-only gap ENDS the turn — it is no longer challenged into a retry', async () => {
   const h = harness([
-    '{"final":"Could you tell me which language you mean, so I can answer precisely?"}',
-    '{"final":"A monad wraps a value and defines bind; Promise.then is the classic example of that shape."}',
+    '{"final":"Could you tell me which language you mean, so I can answer precisely?","missing":{"kind":"USER_PREFERENCE","subject":"which language the user means"}}',
   ]);
   const events = await drain(runEngineerTask(h.deps, { rootPath: '/w', task: 'what is a monad?' }));
 
-  assert.match(h.prompts[1]!, /does not depend on the workspace, answer from your own/);
-  assert.deepEqual(h.calls, [], 'no pointless search for a general question');
+  assert.equal(h.prompts.length, 1, 'no corrective round is spent on a legitimate question');
+  assert.deepEqual(h.calls, [], 'and no tools are reached');
   const final = events.find((e) => e.type === 'final') as { markdown: string };
-  assert.match(final.markdown, /Promise\.then/);
+  // PASS-7: the model's own question survives to the user, unparaphrased.
+  assert.match(final.markdown, /which language you mean/);
+  const decision = events.find((e) => e.type === 'decision') as { missingInformationKind: string; toolAuthority: string };
+  assert.equal(decision.missingInformationKind, 'USER_PREFERENCE');
+  assert.equal(decision.toolAuthority, 'NONE');
 });
 
 test('the workspace-question rule tells the model to search rather than ask', async () => {
@@ -610,20 +629,28 @@ test('the prompt forbids searching for something it is being asked to create', a
   assert.match(prompt, /is never a valid answer/);
 });
 
-test('the deferral correction tells a BUILD request to build, not to search', async () => {
+// HISTORICAL REGRESSION (Record #1). This test used to assert the DEFECT: that a
+// deferral on a build request must produce a directive ordering fs.proposeChangeset.
+// That is precisely what happened on 2026-08-21 — a correct "what kind of website?" was
+// discarded and three files were proposed against a workspace the user had not asked to
+// change.
+//
+// A build request plus an open requirement is an INCOMPLETE REQUIREMENT, not a failure
+// to act. Deferring no longer buys mutation authority; that now requires established ACT
+// mode, a capability grant, and governance consumed by the loop.
+test('a deferral on a BUILD request does NOT buy mutation authority', async () => {
   const h = harness([
-    '{"final":"I did not find any files matching \'thesystem\' in your workspace. Please provide more details."}',
-    '{"action":{"tool":"fs.proposeChangeset","input":{"rootPath":"/w","ops":[{"op":"create","path":"index.html","content":"<!doctype html>"}]}}}',
-    '{"final":"Proposed index.html as the starting point for the system; review and apply it."}',
+    '{"final":"I did not find any files matching \'thesystem\'. What should it do, and which stack should it use?","missing":{"kind":"USER_PREFERENCE","subject":"what thesystem should be"}}',
   ]);
   const events = await drain(runEngineerTask(h.deps, { rootPath: '/w', task: 'build thesystem' }));
 
-  const directive = h.prompts[1]!;
-  assert.match(directive, /searching for it is the\s+WRONG move/);
-  assert.match(directive, /Call fs\.proposeChangeset NOW/);
-  assert.deepEqual(h.calls, ['fs.proposeChangeset'], 'it builds instead of searching again');
+  assert.deepEqual(h.calls, [], 'no tool is reached on an unresolved requirement');
+  assert.equal(h.prompts.length, 1, 'and no directive orders it to build anyway');
+  const decision = events.find((e) => e.type === 'decision') as { toolAuthority: string; disposition: string };
+  assert.equal(decision.toolAuthority, 'NONE');
+  assert.equal(decision.disposition, 'NEEDS_USER_INPUT');
   const final = events.find((e) => e.type === 'final') as { markdown: string };
-  assert.match(final.markdown, /Proposed index\.html/);
+  assert.match(final.markdown, /which stack should it use/, 'the question reaches the user');
 });
 
 test('seeded excerpts are declared BACKGROUND for a build request', async () => {

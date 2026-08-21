@@ -28,6 +28,8 @@
 // side effects (npm install, etc.) are permitted, contained, and reported.
 
 import { NOOP_STAGE_LOGGER, type StageLogger } from './correlation.js';
+import { decideTurn, type MissingInformationDeclaration, type TurnDecision } from './turnDecision.js';
+import { existsSync } from 'node:fs';
 import { lintChangeset, summarizeDefects } from '../tools/changesetLint.js';
 import { FinalAnswerStreamer } from './finalAnswerStream.js';
 
@@ -54,6 +56,14 @@ export interface EngineerDeps {
   /** Optional workspace file lister — enables command side-effect reporting and
    * the "new files" progress signal. Absent in pure unit contexts. */
   listFiles?(rootPath: string): Promise<string[]>;
+  /**
+   * Does this workspace root exist?
+   *
+   * Injected like the other deps so the controller can VERIFY a WORKSPACE_FACT claim
+   * without the check itself becoming untestable. Defaults to a real filesystem probe;
+   * a synthetic harness supplies its own.
+   */
+  workspaceExists?(rootPath: string): boolean;
   /** Correlation logger — emits a structured line per loop stage. Defaults to
    * no-op so pure unit contexts need not supply one. */
   stage?: StageLogger;
@@ -105,7 +115,20 @@ export type EngineerEvent =
   | { type: 'note'; n: number; kind: EngineerNoteKind; message: string }
   | { type: 'token'; text: string }
   | { type: 'final'; markdown: string; steps: number; streamedPrefix?: boolean }
-  | { type: 'error'; code: 'MALFORMED_MODEL_OUTPUT' | 'STEP_LIMIT' | 'LOOP_NO_PROGRESS'; message: string };
+  | { type: 'error'; code: 'MALFORMED_MODEL_OUTPUT' | 'STEP_LIMIT' | 'LOOP_NO_PROGRESS'; message: string }
+  /**
+   * The controller's action-mode decision, emitted so a capture can prove WHY a turn
+   * terminated or continued. Deliberately not part of chat rendering: the evidence
+   * channel and the presentation channel are different concerns (6D).
+   */
+  | {
+      type: 'decision';
+      missingInformationKind: TurnDecision['missingInformationKind'];
+      disposition: TurnDecision['disposition'];
+      toolAuthority: TurnDecision['toolAuthority'];
+      declarationOverridden: boolean;
+      reason: string;
+    };
 
 const DEFAULT_MAX_STEPS = 14;
 const DEFAULT_RESULT_CAP = 6_000;
@@ -194,6 +217,20 @@ function protocolPrompt(input: EngineerInput, tools: EngineerToolInfo[]): string
     'RULES:',
     '- Reply with ONLY one JSON object, no prose, no code fences.',
     '- {"action":{"tool":"<id>","input":{...}}} to use a tool; {"final":"<markdown>"} to finish.',
+    '- If you CANNOT finish because information is missing, still reply with {"final":...}',
+    '  containing your question to the user, and add "missing" alongside it:',
+    '    {"final":"<your question>","missing":{"kind":"<KIND>","subject":"<what you need>",',
+    '     "evidence":"<why you need it>"}}',
+    '  kind is exactly one of:',
+    '    WORKSPACE_FACT   the answer can be DISCOVERED from this project — its files,',
+    '                     its history, or project context already grounded for you.',
+    '    USER_PREFERENCE  only the user can decide or supply it: a requirement, a choice,',
+    '                     a preference, a name, a target. No amount of searching produces it.',
+    '    EXTERNAL_FACT    it lies outside this project AND outside the user.',
+    '  Do NOT answer WORKSPACE_FACT merely because a workspace exists. Ask whether looking',
+    '  in THIS project would actually produce the missing thing. "Which framework do you',
+    '  want?" is USER_PREFERENCE even in a full repository; "which framework does this repo',
+    '  already use?" is WORKSPACE_FACT.',
     '- Every WORKSPACE tool input must include "rootPath" set to the root above. Tools',
     '  whose id starts with "mcp." are external and take their OWN arguments — never add',
     '  rootPath to an mcp.* call.',
@@ -319,7 +356,7 @@ export function repairJsonEscapes(text: string): string {
 /** Parse the model's step reply. Tolerates surrounding whitespace/fences. */
 export function parseStep(text: string, opts: { lenient?: boolean } = {}):
   | { kind: 'action'; tool: string; input: unknown }
-  | { kind: 'final'; markdown: string }
+  | { kind: 'final'; markdown: string; missing?: MissingInformationDeclaration }
   | { kind: 'malformed'; reason: string } {
   let body = text.trim();
   const fence = body.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/);
@@ -351,7 +388,17 @@ export function parseStep(text: string, opts: { lenient?: boolean } = {}):
       : { kind: 'malformed', reason: 'a bare string, not the protocol object' };
   }
   const obj = parsed as Record<string, unknown>;
-  if (typeof obj.final === 'string') return { kind: 'final', markdown: obj.final };
+  if (typeof obj.final === 'string') {
+    // OPTIONAL and deliberately so. A model that omits it, or emits junk, yields
+    // UNKNOWN downstream and the turn fails closed to the user — never to execution.
+    // The protocol degrades safely from the day it ships, before any model is taught it.
+    const declared = obj.missing;
+    const missing =
+      declared && typeof declared === 'object' && !Array.isArray(declared)
+        ? (declared as MissingInformationDeclaration)
+        : undefined;
+    return { kind: 'final', markdown: obj.final, ...(missing ? { missing } : {}) };
+  }
   const action = obj.action as { tool?: unknown; input?: unknown } | undefined;
   if (action && typeof action.tool === 'string') {
     return { kind: 'action', tool: action.tool, input: action.input ?? {} };
@@ -627,6 +674,21 @@ const DEFERRED_TO_USER =
 /** Safe whichever way the turn actually should have gone: it tells the model to
  * use its tools IF the answer depends on the workspace, and to answer directly
  * if it does not — so a false positive costs one round, never a wrong answer. */
+/**
+ * Tools that can only LOOK. A workspace gap buys discovery and nothing else, so the
+ * controller checks that at least one of these is actually available before it accepts a
+ * WORKSPACE_FACT declaration — "read capability granted" must be a fact, not an
+ * assumption.
+ */
+const READ_ONLY_TOOL_IDS = new Set([
+  'workspace.search',
+  'workspace.list',
+  'file.readRange',
+  'git.status',
+  'git.diff',
+  'diagnostics.get',
+]);
+
 const LOOK_FIRST_DIRECTIVE = [
   'That final puts the work back on the user. Never ask them to look something up,',
   'name a file, or supply context you can obtain yourself, and never merely announce',
@@ -983,10 +1045,46 @@ export async function* runEngineerTask(deps: EngineerDeps, input: EngineerInput)
       // The opposite failure, same root cause: handing the work back to the user
       // — refusing, asking for context, or announcing an inspection never done —
       // while holding the tools that would have settled it.
-      if (answeredDirectly && DEFERRED_TO_USER.test(step.markdown) && !finalCorrected) {
-        finalCorrected = true;
-        transcript.push(LOOK_FIRST_DIRECTIVE);
-        continue;
+      // A DECLARATION IS PRIMARY EVIDENCE; the regex is only a fallback way of
+      // NOTICING a deferral the model did not declare. Gating the decision on the
+      // regex would leave it deciding whether the controller may think at all — the
+      // same authority in a quieter place. Either signal opens the decision.
+      const deferredObserved = DEFERRED_TO_USER.test(step.markdown);
+      if (answeredDirectly && (deferredObserved || step.missing !== undefined) && !finalCorrected) {
+        // Step 6B. THE REGEX IS NOW AN OBSERVATION ONLY. It answers exactly one
+        // question — "did the model appear to defer?" — and has no say in whether the
+        // turn continues into tools. That decision belongs to the controller, and rests
+        // on a declaration the model makes and the controller verifies.
+        //
+        // Record #1: a correct requirements question was discarded here and replaced by
+        // a directive to call fs.proposeChangeset. Three unwanted file creations
+        // followed, and the user's question went unanswered.
+        const decision = decideTurn({
+          intent: 'UNKNOWN',
+          declaration: step.missing,
+          deferredObserved,
+          workspaceExists: (deps.workspaceExists ?? existsSync)(input.rootPath),
+          readCapabilityGranted: deps.tools.some((t) => READ_ONLY_TOOL_IDS.has(t.id)),
+          // Mutation is unreachable from this branch by construction, and is gated
+          // independently at dispatch (6C) rather than inherited from here.
+          governanceConsumed: false,
+          mutationCapabilityGranted: false,
+        });
+        yield {
+          type: 'decision',
+          missingInformationKind: decision.missingInformationKind,
+          disposition: decision.disposition,
+          toolAuthority: decision.toolAuthority,
+          declarationOverridden: decision.declarationOverridden,
+          reason: decision.reason,
+        };
+        if (decision.disposition === 'CONTINUE_TO_INSPECT') {
+          finalCorrected = true;
+          transcript.push(LOOK_FIRST_DIRECTIVE);
+          continue;
+        }
+        // Otherwise the model's answer STANDS — unparaphrased, unreplaced. The
+        // requirements question it actually asked is the terminal response (PASS-7).
       }
       // A recorded proposal is success — if the model still reports failure or tells
       // the user to create files manually, correct it once…
