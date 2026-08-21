@@ -28,12 +28,22 @@ export interface SpeechRuntimeConfig {
   /** Base URL of a speech runtime speaking the contract below. Absent = not configured. */
   url?: string;
   timeoutMs: number;
+  /**
+   * Shared secret for the runtime, when it requires one.
+   *
+   * The GPU is on the workstation and this Brain is not, so the runtime has to listen where
+   * the tailnet can reach it — and it refuses to do that unauthenticated. Absent here simply
+   * means no header is sent, which is correct for a loopback runtime.
+   */
+  token?: string;
 }
 
 export function readSpeechRuntimeConfig(env: NodeJS.ProcessEnv = process.env): SpeechRuntimeConfig {
   const raw = env.MIGRAPILOT_SPEECH_RUNTIME_URL?.trim();
+  const token = env.MIGRAPILOT_SPEECH_RUNTIME_TOKEN?.trim();
   return {
     ...(raw ? { url: raw.replace(/\/+$/, '') } : {}),
+    ...(token ? { token } : {}),
     timeoutMs: Number(env.MIGRAPILOT_SPEECH_TIMEOUT_MS ?? 120_000),
   };
 }
@@ -72,6 +82,10 @@ const unavailable = (reason: string): TranscriptionCapability => ({
 
 type FetchLike = typeof fetch;
 
+/** The secret is only ever a request header — never a query string, never logged. */
+const authHeaders = (config: SpeechRuntimeConfig): Record<string, string> =>
+  config.token ? { authorization: `Bearer ${config.token}` } : {};
+
 async function withTimeout<T>(ms: number, run: (signal: AbortSignal) => Promise<T>): Promise<T> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), ms);
@@ -96,8 +110,13 @@ export async function probeSpeechCapability(
   let payload: RuntimeCapability;
   try {
     const response = await withTimeout(Math.min(config.timeoutMs, 10_000), (signal) =>
-      fetchImpl(`${config.url}/capability`, { signal }),
+      fetchImpl(`${config.url}/capability`, { signal, headers: authHeaders(config) }),
     );
+    if (response.status === 401) {
+      // A misconfigured secret must not read as "speech is switched off" — that would send
+      // someone looking for a feature flag instead of a credential.
+      return unavailable('The speech runtime rejected this Brain\'s credentials.');
+    }
     if (!response.ok) return unavailable(`The speech runtime answered HTTP ${response.status}.`);
     payload = (await response.json()) as RuntimeCapability;
   } catch (error) {
@@ -170,7 +189,7 @@ export async function transcribeWithRuntime(
     const response = await withTimeout(config.timeoutMs, (signal) =>
       fetchImpl(`${config.url}/transcribe`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: { 'content-type': 'application/json', ...authHeaders(config) },
         body: JSON.stringify({
           audio: input.audioBase64,
           mime: input.audioMime,

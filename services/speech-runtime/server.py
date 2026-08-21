@@ -41,6 +41,46 @@ MAX_AUDIO_BYTES = int(os.environ.get("SPEECH_MAX_AUDIO_BYTES", str(25 * 1024 * 1
 # production deployment should install CUDA properly; this exists so a box that already has
 # the libs in a venv can serve without repackaging them.
 CUDA_LIB_DIRS = [d for d in os.environ.get("SPEECH_CUDA_LIBS", "").split(":") if d]
+# Shared secret for server-to-server calls from the Brain.
+AUTH_TOKEN = os.environ.get("SPEECH_AUTH_TOKEN", "").strip()
+
+_LOOPBACK = {"127.0.0.1", "::1", "localhost"}
+
+
+def _guard_exposure() -> None:
+    """REFUSE TO START unauthenticated on a routable interface.
+
+    The GPU lives on the workstation and the Brain that serves chat.migrateck.com does not,
+    so this has to listen somewhere the tailnet can reach. An unauthenticated endpoint that
+    accepts arbitrary audio and runs GPU inference on it is a resource-abuse vector at
+    minimum, and it would be reachable by anything on the tailnet. Binding to loopback for
+    local development is fine; binding wider without a token is not, and the safe default is
+    to fail loudly at startup rather than serve quietly.
+    """
+    if AUTH_TOKEN or HOST in _LOOPBACK:
+        return
+    raise SystemExit(
+        json.dumps({
+            "event": "refused",
+            "error": (
+                f"SPEECH_HOST={HOST} is reachable beyond this machine and SPEECH_AUTH_TOKEN "
+                "is not set. Set a token, or bind to 127.0.0.1."
+            ),
+        })
+    )
+
+
+def _authorized(headers) -> bool:
+    if not AUTH_TOKEN:
+        return True
+    supplied = (headers.get("authorization") or "").strip()
+    if not supplied.lower().startswith("bearer "):
+        return False
+    # Constant-time: a token check that leaks length or prefix through timing is a token
+    # check that can be walked.
+    import hmac
+
+    return hmac.compare_digest(supplied[7:].strip(), AUTH_TOKEN)
 
 # Languages this deployment is willing to CLAIM. Whisper knows ~99; claiming all of them
 # would invite a surface to offer a language nobody has ever qualified. Haitian Creole is
@@ -254,13 +294,20 @@ class Handler(BaseHTTPRequestHandler):
         return
 
     def do_GET(self):  # noqa: N802
-        if self.path == "/capability":
-            return self._send(200, capability())
+        # Liveness is deliberately unauthenticated: a supervisor must be able to see whether
+        # the process is up without holding the transcription secret, and it discloses only
+        # that one bit.
         if self.path == "/health":
             return self._send(200, {"ok": _model is not None})
+        if not _authorized(self.headers):
+            return self._send(401, {"error": "unauthorized"})
+        if self.path == "/capability":
+            return self._send(200, capability())
         self._send(404, {"error": "not found"})
 
     def do_POST(self):  # noqa: N802
+        if not _authorized(self.headers):
+            return self._send(401, {"error": "unauthorized"})
         if self.path != "/transcribe":
             return self._send(404, {"error": "not found"})
         length = int(self.headers.get("content-length") or 0)
@@ -294,9 +341,16 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main() -> None:
+    _guard_exposure()
     load_model()
     server = ThreadingHTTPServer((HOST, PORT), Handler)
-    print(json.dumps({"event": "listening", "host": HOST, "port": PORT, "ready": _model is not None}), flush=True)
+    print(
+        json.dumps({
+            "event": "listening", "host": HOST, "port": PORT,
+            "ready": _model is not None, "authRequired": bool(AUTH_TOKEN),
+        }),
+        flush=True,
+    )
     try:
         server.serve_forever()
     except KeyboardInterrupt:

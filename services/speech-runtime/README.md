@@ -23,6 +23,7 @@ python3 services/speech-runtime/server.py
 | `SPEECH_HOST` / `SPEECH_PORT` | `127.0.0.1` / `4600` | |
 | `SPEECH_LANGUAGES` | `en,fr,es,ht` | Languages this deployment will CLAIM. |
 | `SPEECH_CUDA_LIBS` | — | Colon-separated dirs holding `libcublas.so.12` and `libcudnn*.so.9`. |
+| `SPEECH_AUTH_TOKEN` | — | Shared secret. **Required** unless bound to loopback. |
 
 ### `SPEECH_CUDA_LIBS`, and why it exists
 
@@ -36,6 +37,34 @@ venv:
 V=/path/to/venv/lib/python3.12/site-packages/nvidia
 SPEECH_CUDA_LIBS="$V/cublas/lib:$V/cudnn/lib" python3 services/speech-runtime/server.py
 ```
+
+## It refuses to be exposed without a secret
+
+The GPU is on the workstation; the Brain serving `chat.migrateck.com` is not. So this has to
+listen where the tailnet can reach it — and an unauthenticated endpoint that accepts
+arbitrary audio and runs GPU inference on it is a resource-abuse vector reachable by anything
+on the tailnet.
+
+**With `SPEECH_HOST` set to anything but loopback and no `SPEECH_AUTH_TOKEN`, the process
+exits at startup** rather than serving quietly. `/capability` and `/transcribe` require
+`Authorization: Bearer <token>`, compared in constant time. `/health` stays open so a
+supervisor can probe liveness without holding the secret; it discloses one bit.
+
+The Brain presents the token via `MIGRAPILOT_SPEECH_RUNTIME_TOKEN`, and reports a 401 as
+"the runtime rejected this Brain's credentials" — never as "speech is unavailable", which
+would send someone hunting for a feature flag instead of a credential.
+
+## Deployment (workstation, systemd --user)
+
+Installed at `~/.config/systemd/user/migrapilot-speech.service`, enabled, with lingering on
+so it survives logout. Token lives in `~/.config/migrapilot/speech.env` (mode 600), not in
+the unit.
+
+⚠️ **`ExecStart` pins an absolute interpreter path.** faster-whisper and ctranslate2 are
+installed in a mise-managed python, NOT `/usr/bin/python3`. The first start used the system
+interpreter, found no `faster_whisper`, and correctly reported `ready: false` instead of
+pretending — which is the readiness rule doing its job on a real deployment mistake. A mise
+version bump will move that path and the unit must be updated.
 
 ## Readiness is proven, not assumed
 
