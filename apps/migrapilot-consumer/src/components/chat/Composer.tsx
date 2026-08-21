@@ -5,6 +5,8 @@ import { ImageIcon, Lock, Mic, Paperclip, SendHorizontal } from 'lucide-react'
 import { AttachmentChips } from '@/features/attachments/AttachmentChips'
 import { useAttachments } from '@/features/attachments/useAttachments'
 import { micDisabledReason, useMicAvailability } from '@/features/voice/useMicAvailability'
+import { VoicePanel } from '@/features/voice/VoicePanel'
+import { useVoiceRecorder } from '@/features/voice/useVoiceRecorder'
 import { cn } from '@/lib/cn'
 
 /**
@@ -60,6 +62,25 @@ export function Composer({
   const mic = useMicAvailability()
   const micReady = mic?.state === 'ready'
   const micReason = micDisabledReason(mic)
+  const voice = useVoiceRecorder()
+  const recording = voice.state === 'recording' || voice.state === 'requesting'
+
+  /**
+   * A transcript is INSERTED, never sent.
+   *
+   * It lands in the textarea for the user to read, edit and send themselves. Even a clean
+   * `ok` transcript goes through them: a fluent sentence is not proof the system heard what
+   * they said, and the one irreversible step — sending it as their words — stays a human
+   * action.
+   */
+  const acceptTranscript = (text: string) => {
+    setValue((current) => (current.trim() ? `${current.trim()} ${text}` : text))
+    voice.discard()
+    requestAnimationFrame(() => {
+      grow()
+      textareaRef.current?.focus()
+    })
+  }
 
   const grow = () => {
     const el = textareaRef.current
@@ -75,6 +96,9 @@ export function Composer({
     // Never send while an attachment is still uploading or indexing: the turn would be
     // answered without the file the user attached it for.
     if (busy) return
+    // Sending while audio is still being captured or transcribed would send the turn
+    // WITHOUT the words the user is in the middle of speaking.
+    if (recording || voice.state === 'transcribing') return
     onSubmit?.(trimmed, groundable ? { grounded: true } : undefined)
     setValue('')
     clear()
@@ -107,6 +131,18 @@ export function Composer({
         className,
       )}
     >
+      <VoicePanel
+        state={voice.state}
+        error={voice.error}
+        result={voice.result}
+        level={voice.level}
+        onStop={voice.stop}
+        onCancel={voice.cancel}
+        onAccept={acceptTranscript}
+        onDiscard={voice.discard}
+        onRetry={() => void voice.start()}
+      />
+
       <AttachmentChips attachments={attachments} onRemove={remove} onRetry={retry} />
 
       <input
@@ -142,9 +178,10 @@ export function Composer({
               <button
                 type="button"
                 disabled={!micReady}
-                title={micReady ? 'Record a voice note' : micReason}
-                className={cn(toolButton, !micReady && 'cursor-not-allowed opacity-40')}
-                aria-label={micReady ? 'Record voice note' : `Record voice note (unavailable: ${micReason})`}
+                onClick={() => (recording ? voice.stop() : void voice.start())}
+                title={micReady ? (recording ? 'Stop recording' : 'Record a voice note') : micReason}
+                className={cn(toolButton, !micReady && 'cursor-not-allowed opacity-40', recording && 'border-red-300 text-red-600')}
+                aria-label={micReady ? (recording ? 'Stop recording' : 'Record voice note') : `Record voice note (unavailable: ${micReason})`}
               >
                 <Mic className="h-[18px] w-[18px]" strokeWidth={1.9} />
               </button>
@@ -183,9 +220,10 @@ export function Composer({
             <button
               type="button"
               disabled={!micReady}
-              title={micReady ? 'Dictate' : micReason}
-              className={cn(toolButton, !micReady && 'cursor-not-allowed opacity-40')}
-              aria-label={micReady ? 'Dictate' : `Dictate (unavailable: ${micReason})`}
+              onClick={() => (recording ? voice.stop() : void voice.start())}
+              title={micReady ? (recording ? 'Stop recording' : 'Dictate') : micReason}
+              className={cn(toolButton, !micReady && 'cursor-not-allowed opacity-40', recording && 'border-red-300 text-red-600')}
+              aria-label={micReady ? (recording ? 'Stop recording' : 'Dictate') : `Dictate (unavailable: ${micReason})`}
             >
               <Mic className="h-[18px] w-[18px]" strokeWidth={1.9} />
             </button>

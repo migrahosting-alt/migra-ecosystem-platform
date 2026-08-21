@@ -40,9 +40,14 @@ export function readSpeechRuntimeConfig(env: NodeJS.ProcessEnv = process.env): S
 
 /** What a runtime reports about itself: `GET {url}/capability`. */
 interface RuntimeCapability {
+  /** A runtime that knows it is not serving says so; absent means "assume nothing". */
+  ready?: boolean;
+  unavailableReason?: string;
   model?: string;
   multilingual?: boolean;
   supportedLanguages?: string[];
+  /** cuda | cpu. Reported so a slow deployment is visible rather than mysterious. */
+  device?: string;
 }
 
 /** What a runtime returns from `POST {url}/transcribe`. Raw observation, no verdict. */
@@ -99,6 +104,12 @@ export async function probeSpeechCapability(
     // Unreachable is UNAVAILABLE, never ready-with-a-shrug. A surface must not open a
     // microphone against a runtime that did not answer.
     return unavailable(`The speech runtime could not be reached: ${(error as Error).message}`);
+  }
+
+  // A runtime that reports itself not ready is authoritative about that, and its own reason
+  // is better than anything inferred out here. A model still loading is not a broken model.
+  if (payload.ready === false) {
+    return unavailable(payload.unavailableReason ?? 'The speech runtime reports it is not ready.');
   }
 
   const model = payload.model ?? null;

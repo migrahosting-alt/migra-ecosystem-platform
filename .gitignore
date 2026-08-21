@@ -141,6 +141,13 @@
 !/packages/shared-types/src/
 !/packages/shared-types/src/*.ts
 
+# The speech runtime is a real service the Brain delegates to (MIGRAPILOT_SPEECH_RUNTIME_URL).
+# Source and docs only — no models, no audio, no caches.
+!/services/
+!/services/speech-runtime/
+!/services/speech-runtime/*.py
+!/services/speech-runtime/*.md
+
 # --- MigraTeck web (allowlist) ---
 !/MigraTeck/
 !/MigraTeck/**

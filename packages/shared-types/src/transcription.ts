@@ -60,8 +60,18 @@ export interface TranscriptionResult {
   text: string
   /** What the model says it heard. `null` when the model cannot detect (English-only). */
   detectedLanguage: string | null
-  /** What the caller asked for. `null` means auto-detect, which is the DEFAULT. */
+  /** What the USER asked for. `null` means auto-detect, which is the DEFAULT. */
   requestedLanguage: string | null
+  /**
+   * What the decoder was actually told to assume. `null` means it was free to detect.
+   *
+   * Kept separate from `requestedLanguage` because they diverge, and the divergence is
+   * dangerous: a runtime pins "en" for an English-only model by itself. Collapsing the two
+   * once already disabled the fabrication guard — French audio returned status "ok" with
+   * fluent invented English. Requested is a CHOICE; forced is a MECHANISM; detected is an
+   * OBSERVATION. Three different facts, three fields.
+   */
+  forcedLanguage: string | null
   /** Detection probability 0..1, or `null` when detection did not happen. */
   confidence: number | null
   model: string
@@ -124,6 +134,8 @@ export interface RawTranscription {
   text: string
   detectedLanguage: string | null
   requestedLanguage: string | null
+  /** What the decoder was told. Defaults to the request, or to nothing. */
+  forcedLanguage?: string | null
   confidence: number | null
   model: string
   /** True when the model can only ever produce English. */
@@ -192,6 +204,8 @@ export function assessTranscription(
     text,
     detectedLanguage: raw.detectedLanguage,
     requestedLanguage: raw.requestedLanguage,
+    // An English-only model is pinned to "en" whether or not anyone asked.
+    forcedLanguage: raw.forcedLanguage ?? raw.requestedLanguage ?? (raw.englishOnly ? 'en' : null),
     confidence: raw.confidence,
     model: raw.model,
     durationMs: raw.durationMs,

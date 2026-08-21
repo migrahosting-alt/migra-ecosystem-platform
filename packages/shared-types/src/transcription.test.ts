@@ -130,3 +130,25 @@ test('Creole needs a multilingual model, not just a ready one', () => {
     true,
   )
 })
+
+test('requested, forced and detected stay three separate facts', () => {
+  // Nobody asked; the model pinned "en" because it cannot do anything else; it cannot
+  // report a detection. Collapsing any pair of these re-opens the fabrication hole.
+  const pinned = assessTranscription(
+    raw({ model: 'base.en', englishOnly: true, requestedLanguage: null, detectedLanguage: null, confidence: null }),
+  )
+  assert.equal(pinned.requestedLanguage, null, 'nobody requested a language')
+  assert.equal(pinned.forcedLanguage, 'en', 'the decoder was pinned to English')
+  assert.equal(pinned.detectedLanguage, null, 'an English-only model detects nothing')
+
+  // Auto-detect on a multilingual model: nothing requested, nothing forced, something heard.
+  const detected = assessTranscription(raw({ detectedLanguage: 'fr', confidence: 0.99 }))
+  assert.equal(detected.requestedLanguage, null)
+  assert.equal(detected.forcedLanguage, null)
+  assert.equal(detected.detectedLanguage, 'fr')
+
+  // An explicit choice is both requested and forced.
+  const asked = assessTranscription(raw({ requestedLanguage: 'ht', detectedLanguage: 'ht' }))
+  assert.equal(asked.requestedLanguage, 'ht')
+  assert.equal(asked.forcedLanguage, 'ht')
+})
