@@ -9,10 +9,22 @@ import { randomBytes } from "node:crypto";
 import { writeFile, unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { toTranscriptionResult, transcriptionCapability, type WorkerOutput } from "../../../../lib/pilot/transcription";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 120;
+
+/**
+ * GET — the capability a surface consults before enabling a mic.
+ *
+ * Kept mounted whether or not the model is multilingual, so "English-only" and "no speech
+ * backend" stay distinguishable. A surface that cannot tell them apart would either hide a
+ * working mic or offer Creole it cannot serve.
+ */
+export async function GET(): Promise<Response> {
+  return json(transcriptionCapability());
+}
 
 const execFileP = promisify(execFile);
 const MAX_BYTES = 25 * 1024 * 1024; // 25MB — plenty for a dictation turn
@@ -70,6 +82,7 @@ export async function POST(req: Request) {
     await Promise.allSettled([unlink(inPath), unlink(wavPath)]);
   };
 
+  const startedAt = Date.now();
   try {
     await writeFile(inPath, audio.bytes);
     // Normalize to what whisper wants: 16kHz mono PCM WAV.
@@ -82,32 +95,22 @@ export async function POST(req: Request) {
       timeout: 90000,
       maxBuffer: 8 * 1024 * 1024,
     });
-    const parsed = JSON.parse(stdout.trim().split("\n").pop() || "{}") as {
-      text?: string;
-      error?: string;
-      language?: string;
-      language_probability?: number;
-      model?: string;
-      english_only?: boolean;
-      forced_language?: string | null;
-      low_confidence?: boolean;
-    };
+    const parsed = JSON.parse(stdout.trim().split("\n").pop() || "{}") as WorkerOutput;
     if (parsed.error) return json({ error: parsed.error }, 500);
-    // PASS THE LANGUAGE SIGNALS THROUGH. This used to return the bare text, which meant a
+
+    // THE SHARED CONTRACT, not a local shape. This used to return the bare text, so a
     // caller had no way to tell a real transcript from a confident hallucination: Whisper
     // forced to the wrong language emits fluent training-data text, not obvious garbage.
     // Measured before the fix — French in, "I hope you enjoyed this video and like and
-    // subscribe to my channel." out. A caller that cannot see `english_only` or
-    // `low_confidence` cannot refuse or confirm, so it would send words never spoken.
-    return json({
-      text: (parsed.text || "").trim(),
-      language: parsed.language ?? null,
-      languageProbability: parsed.language_probability ?? null,
-      model: parsed.model ?? null,
-      englishOnly: parsed.english_only === true,
-      forcedLanguage: parsed.forced_language ?? null,
-      lowConfidence: parsed.low_confidence === true,
-    });
+    // subscribe to my channel." out. assessTranscription() decides status and warnings
+    // ONCE, in the package both surfaces import, so the Command Center and the consumer
+    // cannot come to different conclusions about the same audio.
+    const result = toTranscriptionResult(
+      parsed,
+      { kind: "machine-transcribed", audioBytes: audio.bytes.length, audioMime: audio.ext },
+      Date.now() - startedAt,
+    );
+    return json(result);
   } catch (err) {
     const msg = err instanceof Error ? err.message : "transcription failed";
     return json({ error: /ENOENT/.test(msg) ? "transcription tools not installed (ffmpeg / python)" : msg }, 500);

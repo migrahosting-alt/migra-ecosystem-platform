@@ -63,7 +63,13 @@ def main():
         # An .en model can only ever produce English, so pinning it is honest. A
         # multilingual model must DETECT rather than be told, or it will hallucinate
         # fluently in the language it was forced into.
-        forced = os.environ.get("PILOT_WHISPER_LANGUAGE") or ("en" if english_only else None)
+        # WHAT THE USER ASKED FOR vs WHAT THIS WORKER PINNED ARE DIFFERENT FACTS.
+        # Only PILOT_WHISPER_LANGUAGE is a request. The "en" an .en model gets is this
+        # worker's own default, and reporting it as a request let a caller conclude the
+        # speaker had chosen English — which silently re-opened the fabrication hole the
+        # language fix was meant to close.
+        requested = os.environ.get("PILOT_WHISPER_LANGUAGE") or None
+        forced = requested or ("en" if english_only else None)
 
         segments, info = model.transcribe(
             audio_path,
@@ -88,6 +94,7 @@ def main():
             # True => this transcript is only meaningful if the speaker was speaking English.
             "english_only": english_only,
             "forced_language": forced,
+            "requested_language": requested,
             "low_confidence": low_confidence,
         }, ensure_ascii=False))
     except Exception as exc:  # noqa: BLE001 — worker surfaces any failure to the caller

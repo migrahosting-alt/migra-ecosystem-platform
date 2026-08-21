@@ -132,6 +132,15 @@
 !/packages/protocol/src/
 !/packages/protocol/src/agentMode.ts
 
+# @migrapilot/shared-types is a real workspace package — the consumer app depends on it and
+# the Command Center's ASR adapter now imports its transcription contract. package.json,
+# contracts.ts and tsconfig.json were already tracked, but the root allowlist hid every NEW
+# file, so a shared contract could be written, typechecked, tested and still never reach a
+# commit. Source only: dist/ and tsbuildinfo stay ignored.
+!/packages/shared-types/
+!/packages/shared-types/src/
+!/packages/shared-types/src/*.ts
+
 # --- MigraTeck web (allowlist) ---
 !/MigraTeck/
 !/MigraTeck/**

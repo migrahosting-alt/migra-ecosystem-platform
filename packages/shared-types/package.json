@@ -16,6 +16,7 @@
   ],
   "scripts": {
     "build": "tsc -b",
-    "watch": "tsc -b -w"
+    "watch": "tsc -b -w",
+    "test": "node --import tsx --test \"src/**/*.test.ts\""
   }
 }

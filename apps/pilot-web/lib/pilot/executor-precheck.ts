@@ -11,12 +11,13 @@
 export const EXECUTOR_PRECHECK_VERSION = "12.15.0";
 
 // The safety-invariant manifest version this checklist was written against (drift-guarded).
-// Re-confirmed against safety-invariant manifest v12.13.0, which added the three mode-ceiling
+// Re-confirmed against safety-invariant manifest v12.14.0, which added a transcript-safety
+// invariant (no executor surface), and before it v12.13.0's three mode-ceiling
 // invariants. Those only NARROW authority (read-only modes refuse every non-read action, an
 // unrecognised mode falls to the weakest authority, and the ceiling never promotes). Nothing in
 // them touches executor readiness: EXECUTOR_READY stays false and every promotion precheck stays
 // pending. The drift guard fired exactly as intended and this bump is the deliberate re-review.
-export const MANIFEST_VERSION_REF = "12.13.0";
+export const MANIFEST_VERSION_REF = "12.14.0";
 
 // The executor remains structurally forbidden until this is deliberately flipped in a future,
 // human-approved promotion phase after all `promotion` prechecks below are satisfied.

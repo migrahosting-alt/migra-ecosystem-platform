@@ -8,6 +8,7 @@ import { resolve } from "node:path";
 import { SAFETY_INVARIANTS, SAFETY_INVARIANTS_VERSION } from "../../lib/pilot/safety-invariants";
 import { classifyPilotAction } from "../../lib/pilot/policy";
 import { PILOT_MODES, applyModeCeiling, authorityOfMode } from "../../lib/pilot/mode-authority";
+import { toTranscriptionResult } from "../../lib/pilot/transcription";
 import { TOOLS } from "../../lib/pilot/tools";
 import { listOpsActions } from "../../lib/pilot/ops-action-registry";
 import { checkEligibility, previewEligibility } from "../../lib/pilot/ops-eligibility-policy";
@@ -20,6 +21,32 @@ const usesSafeJson = (p: string) => /safe-output|safeJson/.test(routeSrc(p));
 async function main() {
   const results: { id: string; pass: boolean; detail: string }[] = [];
   const record = (id: string, pass: boolean, detail: string) => results.push({ id, pass, detail });
+
+  // unverifiable-transcript-needs-confirmation
+  {
+    const provenance = { kind: "machine-transcribed" as const, audioBytes: 1, audioMime: "wav" };
+    // REGRESSION GUARD, and it caught a real one. The worker pins language="en" for an .en
+    // model by itself. That pin was being reported as `forced_language` and read as the
+    // USER'S request, so French audio transcribed by base.en came back status "ok" with no
+    // warnings — "Thank you for watching, and I will see you in the next video." — ready to
+    // send as the speaker's own words. A machine default must never masquerade as a choice.
+    const autoPinned = toTranscriptionResult(
+      { text: "Thank you for watching, and I will see you in the next video.", model: "base.en",
+        english_only: true, forced_language: "en", requested_language: null, language: "en" },
+      provenance, 100,
+    );
+    // An EXPLICIT English request on the same model is legitimately fine.
+    const explicit = toTranscriptionResult(
+      { text: "Please summarize the migration document.", model: "base.en",
+        english_only: true, forced_language: "en", requested_language: "en", language: "en" },
+      provenance, 100,
+    );
+    const ok = autoPinned.status === "needs_confirmation"
+      && autoPinned.warnings.some((w) => w.code === "english_only_model")
+      && explicit.status === "ok";
+    record("unverifiable-transcript-needs-confirmation", ok,
+      `auto-pinned=${autoPinned.status} (warnings: ${autoPinned.warnings.map((w) => w.code).join(",") || "none"}), explicit-request=${explicit.status}`);
+  }
 
   // ---- mode authority ceiling ----
   // A representative spread: an auto-run read, an approval-gated mutation, a memory write,
