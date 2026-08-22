@@ -447,6 +447,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
       let failure: string | null = null
       let done = false
+      let notSaved = false
       let sources: string[] = []
 
       for await (const frame of readEventStream(response.body)) {
@@ -468,6 +469,9 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         }
         if (frame.event === 'error') {
           failure = (frame.data as { message?: string })?.message ?? null
+          // "Generated but not saved" is a different outcome from "generation
+          // failed", and only this frame can tell them apart.
+          if ((frame.data as { error?: string })?.error === 'not_saved') notSaved = true
           continue
         }
         if (frame.event === 'done') {
@@ -494,6 +498,33 @@ export function ChatProvider({ children }: { children: ReactNode }) {
           ),
         )
         setPendingIn(null)
+        return
+      }
+
+      /*
+       * A COMPLETE ANSWER THAT STORAGE REFUSED IS STILL AN ANSWER.
+       *
+       * It is kept on screen and marked, rather than deleted. The text is real
+       * and finished — the user can read it, copy it, act on it — and throwing
+       * it away would destroy work over a storage fault they did not cause. The
+       * label is what keeps it honest: it says plainly that a reload will not
+       * have it, so nothing here implies a persistence that never happened.
+       */
+      if (notSaved && streamed.trim()) {
+        setConversations((current) =>
+          current.map((conversation) =>
+            conversation.id === conversationId
+              ? {
+                  ...conversation,
+                  messages: conversation.messages.map((message) =>
+                    message.id === messageId ? { ...message, unsaved: true } : message,
+                  ),
+                }
+              : conversation,
+          ),
+        )
+        setPendingIn(null)
+        push(notice(failure ?? 'The answer was produced but could not be saved, so it will not be here after a reload.'))
         return
       }
 

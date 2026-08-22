@@ -346,6 +346,25 @@ export async function POST(request: Request): Promise<Response> {
               break
             case 'error': {
               const message = (frame.data as { message?: unknown })?.message
+              const code = (frame.data as { code?: unknown })?.code
+              /*
+               * A DURABLE WRITE THE BRAIN REFUSED IS NOT A GENERATION FAILURE.
+               *
+               * The Brain emits this AFTER the tokens are already on the wire:
+               * the answer is real and complete, and only its persistence
+               * failed. Collapsing it into `brain_error` would tell the user
+               * their answer failed while the finished text sat on screen.
+               */
+              if (code === 'PERSISTENCE_UNAVAILABLE') {
+                emit('error', {
+                  error: 'not_saved',
+                  message:
+                    typeof message === 'string' && message
+                      ? message
+                      : 'The answer was produced but could not be saved, so it will not be here after a reload.',
+                })
+                break
+              }
               emit('error', {
                 error: 'brain_error',
                 message: typeof message === 'string' && message ? message : reasonFor('brain_error').message,

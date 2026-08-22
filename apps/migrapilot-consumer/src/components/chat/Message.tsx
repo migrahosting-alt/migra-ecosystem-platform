@@ -248,6 +248,24 @@ function AssistantTurn({
           )}
 
           {/*
+            * A real answer that storage refused. Stated in the user's terms —
+            * what will happen to it — not in ours.
+            */}
+          {message.unsaved && (
+            <div
+              role="status"
+              className="mt-5 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50/70 px-3 py-2 text-[13px] text-amber-900"
+            >
+              <span aria-hidden="true">⚠</span>
+              <span>
+                <strong className="font-semibold">Not saved.</strong> This answer was produced, but
+                storage was unavailable — it will not be here after you reload. Copy anything you
+                need to keep.
+              </span>
+            </div>
+          )}
+
+          {/*
             * Provenance the user can check. These names are intersected with the
             * caller's real library server-side, so a model-invented filename can
             * never appear here — see `citedFiles` in the stream route.

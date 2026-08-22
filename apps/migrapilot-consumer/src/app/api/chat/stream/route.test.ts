@@ -355,6 +355,39 @@ test('an answer that completes but cannot be saved is reported, not claimed', as
   resetAuthPort()
 })
 
+test('a persistence refusal mid-stream is reported as not_saved, not as a failed turn', async () => {
+  // The Brain emits PERSISTENCE_UNAVAILABLE AFTER the tokens are on the wire:
+  // the answer is real and finished, and only its storage failed. Flattening it
+  // into `brain_error` would tell the user their answer failed while the
+  // finished text sat on screen — and the client would then delete it.
+  const brain = brainStub({
+    chatBody: sse([
+      ['token', { text: 'Paris' }],
+      ['error', { code: 'PERSISTENCE_UNAVAILABLE', message: 'The answer was produced but could not be saved.' }],
+      ['done', {}],
+    ]),
+  })
+  setAuthPort(portWith(session))
+
+  const frames = await collect(await post({ prompt: 'capital of France?' }))
+  const errors = frames.filter((f) => f.event === 'error')
+
+  assert.ok(errors.length > 0, 'the refusal must reach the client')
+  assert.ok(
+    errors.some((f) => f.data.error === 'not_saved'),
+    'a persistence refusal must be named not_saved',
+  )
+  assert.ok(
+    !errors.some((f) => f.data.error === 'brain_error'),
+    'it must NOT be flattened into a generic generation failure',
+  )
+  // The tokens still reached the user — that is the whole point of the distinction.
+  assert.ok(frames.some((f) => f.event === 'token' && f.data.text === 'Paris'))
+
+  brain.restore()
+  resetAuthPort()
+})
+
 // ── ordering and isolation ──────────────────────────────────────────────────
 
 test('the prompt is durable before the model is asked', async () => {

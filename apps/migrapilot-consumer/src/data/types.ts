@@ -73,6 +73,17 @@ export interface Message {
    * as model output (copy, export, summarise) must skip it.
    */
   error?: boolean
+  /**
+   * Assistant turns only — a REAL, COMPLETE answer that storage refused.
+   *
+   * This is deliberately not `error`. The two are different facts and the user
+   * needs them told apart: generation failing means there is nothing to read,
+   * while this means the answer is genuine and finished but will not survive a
+   * reload. Discarding it would throw away work the user can still read, copy,
+   * or act on; presenting it as normal would promise a persistence that did not
+   * happen. So it is shown, and it is labelled.
+   */
+  unsaved?: boolean
 }
 
 export interface Conversation {
