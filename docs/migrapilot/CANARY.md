@@ -81,6 +81,28 @@ Secondary: `/api/ai/engineer/stores/health` reported `healthy` throughout, becau
 the in-memory proposal/approval stores. True in isolation, misleading during a persistence
 outage — two health surfaces disagreeing is an operational hazard on its own.
 
+## Post-fix rerun — Brain `fea97a1`, 2026-08-22
+
+The finding is closed. The same sequence, replayed against a real database on the canary:
+
+| step | result |
+|---|---|
+| durable write while healthy | `stored: true`, `durable: true`, really on disk |
+| `chmod 000` the state DB, restart | `/health` → `degraded`, `persistence: unavailable`, `"unable to open database file"` |
+| durable conversation during the outage | **HTTP 503** `PERSISTENCE_UNAVAILABLE` — *"Durable storage is unavailable, so this was not saved. Nothing was stored."* |
+| **session** write during the outage | ✅ still created, `mode: session` — it never promised disk |
+| restore + restart | `status: ok`, `persistence: ready`, schema 8 |
+| pre-failure durable data | ✅ intact (`survivor GREEN LANTERN 404`) |
+| the refused writes | ✅ **absent** — neither the durable nor the session conversation written during the failure came back |
+| new durable write after recovery | ✅ `stored: true`, `durable: true`, and survives a further restart |
+
+Where it previously answered `{ok:true, stored:true, durable:true}` and lost the data, it now
+refuses and says nothing was stored. Covered by `test/durableWriteTruthfulness.test.ts`, which
+encodes this exact sequence.
+
+Production was promoted to the same artifact after the canary proved it, and smoke-tested:
+durable write `stored/durable: true`, session mode intact, a real chat turn answered normally.
+
 ## Known limitation — the consumer half is not yet reachable
 
 The canary consumer runs, serves, and is correctly isolated, but its **authenticated** routes
