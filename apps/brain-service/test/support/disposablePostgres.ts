@@ -46,7 +46,22 @@ export async function appRoleUrl(ownerUrl: string, password = 'app-test-pw'): Pr
          END IF;
        END $$;`,
     );
-    await admin.query(`ALTER ROLE ${login} PASSWORD '${password}' NOSUPERUSER NOBYPASSRLS`);
+    // PASSWORD only. NOSUPERUSER/NOBYPASSRLS are superuser-only attributes, and
+    // roles are CLUSTER-wide — so on a shared server where this role already
+    // exists, re-asserting them fails for the owning role even though CREATE
+    // above already set them. Re-asserting a state the role is already in is not
+    // worth making the suite undeployable outside a throwaway superuser
+    // container.
+    await admin.query(`ALTER ROLE ${login} PASSWORD '${password}'`);
+    // The unsafe state is still caught, loudly, rather than assumed away.
+    const attrs = await admin.query<{ rolbypassrls: boolean; rolsuper: boolean }>(
+      `SELECT rolbypassrls, rolsuper FROM pg_roles WHERE rolname = '${login}'`,
+    );
+    if (attrs.rows[0]?.rolbypassrls || attrs.rows[0]?.rolsuper) {
+      throw new Error(
+        `${login} has BYPASSRLS or SUPERUSER; RLS tests would pass vacuously. Fix the role with a superuser.`,
+      );
+    }
     await admin.query(`GRANT migrapilot_app TO ${login}`);
   } finally {
     await admin.end();

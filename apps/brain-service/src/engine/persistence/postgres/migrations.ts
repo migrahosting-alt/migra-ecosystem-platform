@@ -198,7 +198,19 @@ DO $$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'migrapilot_app') THEN
     CREATE ROLE migrapilot_app NOLOGIN NOBYPASSRLS;
-  ELSE
+  ELSIF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'migrapilot_app' AND rolbypassrls) THEN
+    -- ONLY when the attribute is actually wrong.
+    --
+    -- Roles are CLUSTER-wide, so on any server where migrapilot_app already
+    -- exists this branch runs on every fresh database. ALTER ROLE ... NOBYPASSRLS
+    -- is superuser-only, so running it unconditionally made the migration
+    -- undeployable by the database owner: the Brain failed to start, and every
+    -- scratch-database test failed, purely because the role was already in the
+    -- state being asked for.
+    --
+    -- Attempting it only when the role really can bypass RLS keeps the security
+    -- intent exactly: a genuinely unsafe role still raises loudly and demands
+    -- superuser attention, rather than being silently tolerated.
     ALTER ROLE migrapilot_app NOBYPASSRLS;
   END IF;
 END $$;
