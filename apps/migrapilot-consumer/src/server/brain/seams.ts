@@ -132,6 +132,30 @@ export function getCodingRun(
   return callBrain({ kind: 'getCodingRun', runId }, deps)
 }
 
+/** One conversation, including the files it answers from. */
+export function getConversation(
+  conversationId: string,
+  deps?: GatewayDeps,
+): Promise<BrainResult<ConversationSummary>> {
+  return callBrain({ kind: 'getConversation', conversationId }, deps)
+}
+
+/**
+ * Replace the files this conversation answers from.
+ *
+ * Grounding is a property of the CONVERSATION, stored in the Brain — not a flag the
+ * browser remembers. It used to live in a React ref, so a reload silently dropped it
+ * and the same question started answering "I don't have access to external documents"
+ * with the earlier grounded answers still on screen.
+ */
+export function setConversationGrounding(
+  conversationId: string,
+  files: string[],
+  deps?: GatewayDeps,
+): Promise<BrainResult<ConversationSummary>> {
+  return callBrain({ kind: 'setConversationGrounding', conversationId, files }, deps)
+}
+
 // ── Speech ─────────────────────────────────────────────────────────────────
 
 /**

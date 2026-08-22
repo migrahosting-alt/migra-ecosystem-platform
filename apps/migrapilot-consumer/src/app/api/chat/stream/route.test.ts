@@ -409,24 +409,46 @@ test('an ordinary turn asks for no document evidence', async () => {
   resetAuthPort()
 })
 
-test('a grounded turn demands the approved index', async () => {
+test('attaching a file grounds the turn AND persists that on the conversation', async () => {
+  // Grounding is a property of the CONVERSATION now, not a boolean the browser
+  // remembers. The turn that carries an attachment reports it; the durable set is
+  // what decides, so a reload cannot change the answer.
   const brain = brainStub()
   setAuthPort(portWith(session))
 
-  await collect(await post({ prompt: 'summarise my documents', grounded: true }))
+  await collect(await post({ prompt: 'summarise my documents', attachments: ['notes.md'] }))
+
   const chat = brain.calls.find((call) => call.url.endsWith('/api/ai/chat'))!
   assert.equal(JSON.parse(String(chat.init.body)).groundingMode, 'approved')
+
+  const put = brain.calls.find((call) => call.url.endsWith('/grounding'))
+  assert.ok(put, 'the grounding set must be written to the conversation')
+  assert.deepEqual(JSON.parse(String(put!.init.body)).files, ['notes.md'])
 
   brain.restore()
   resetAuthPort()
 })
 
-test('a non-boolean grounded flag does not enable grounding', async () => {
+test('a body flag alone can no longer ground a turn', async () => {
+  // The exact defect: the browser said "grounded" and the server believed it, so
+  // grounding lived only as long as the tab. A claim from the client is not state.
   const brain = brainStub()
   setAuthPort(portWith(session))
 
-  for (const grounded of ['true', 1, {}, null]) {
-    await collect(await post({ prompt: 'hi', grounded }))
+  await collect(await post({ prompt: 'summarise my documents', grounded: true }))
+  const chat = brain.calls.find((call) => call.url.endsWith('/api/ai/chat'))!
+  assert.equal(JSON.parse(String(chat.init.body)).groundingMode, 'none')
+
+  brain.restore()
+  resetAuthPort()
+})
+
+test('a malformed attachments field does not enable grounding', async () => {
+  const brain = brainStub()
+  setAuthPort(portWith(session))
+
+  for (const attachments of ['notes.md', 1, {}, null, [1, 2], ['']]) {
+    await collect(await post({ prompt: 'hi', attachments }))
   }
   for (const call of brain.calls.filter((c) => c.url.endsWith('/api/ai/chat'))) {
     assert.equal(JSON.parse(String(call.init.body)).groundingMode, 'none')

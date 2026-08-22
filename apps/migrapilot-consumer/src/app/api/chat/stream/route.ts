@@ -22,7 +22,13 @@
 
 import { requireSession } from '@/server/auth'
 import { UnauthenticatedError } from '@/server/auth/authPort'
-import { appendMessage, chatTurnStream, createConversation } from '@/server/brain/seams'
+import {
+  appendMessage,
+  chatTurnStream,
+  createConversation,
+  getConversation,
+  setConversationGrounding,
+} from '@/server/brain/seams'
 import { listFiles } from '@/server/files/storage'
 import type { BrainStreamFrame } from '@/server/brain/gateway'
 import type { ConversationSummary } from '@/server/brain/contracts'
@@ -188,7 +194,40 @@ export async function POST(request: Request): Promise<Response> {
    * narrowing: neither can widen what the caller may see, and tenancy is still
    * derived server-side from the session.
    */
-  const grounded = (body as { grounded?: unknown })?.grounded === true
+  /*
+   * THE CONVERSATION DECIDES, NOT THE BROWSER.
+   *
+   * `grounded` used to be read straight off the request body, and the client
+   * remembered it in a React ref. A reload wiped that ref, so the same question in
+   * the same thread stopped using the file and answered "I don't have access to
+   * external documents" with the earlier grounded answers still on screen.
+   *
+   * Now the browser only reports INTENT for the turn that carries an attachment;
+   * the durable set on the conversation is what actually decides, and it is read
+   * back from the Brain on every turn. A reload cannot change the answer because
+   * nothing about grounding lives in the tab.
+   */
+  const attachedNow = Array.isArray((body as { attachments?: unknown })?.attachments)
+    ? ((body as { attachments: unknown[] }).attachments.filter(
+        // A `typeof` check alone let [''] through, and an empty filename would have
+        // grounded the turn on nothing — grounded:true with no document behind it.
+        (f): f is string => typeof f === 'string' && f.trim().length > 0,
+      ) as string[])
+    : []
+
+  const existing = await getConversation(conversationId)
+  const storedGrounding =
+    existing.kind === 'ok' ? ((existing.value as ConversationSummary)?.groundingFiles ?? []) : []
+
+  // Attaching adds to the thread's set; it never silently replaces what is there.
+  const groundingFiles = [...new Set([...storedGrounding, ...attachedNow])]
+  if (attachedNow.length > 0 && groundingFiles.length !== storedGrounding.length) {
+    // Persist BEFORE answering: if the write fails the turn must not claim a
+    // grounding the next turn will not have.
+    await setConversationGrounding(conversationId, groundingFiles)
+  }
+
+  const grounded = groundingFiles.length > 0
   const groundingMode = grounded ? 'approved' : 'none'
 
   const encoder = new TextEncoder()

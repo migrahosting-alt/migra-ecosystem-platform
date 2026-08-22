@@ -43,6 +43,13 @@ export type BrainOperation =
   | { kind: 'renameConversation'; conversationId: string; title: string }
   | { kind: 'deleteConversation'; conversationId: string }
   | { kind: 'listMessages'; conversationId: string }
+  /**
+   * Replace the files this conversation answers from.
+   *
+   * The WHOLE set is sent, never a delta: a retry or a race must not be able to
+   * leave a thread grounded in something nobody chose.
+   */
+  | { kind: 'setConversationGrounding'; conversationId: string; files: string[] }
   | { kind: 'appendMessage'; conversationId: string; role: MessageRole; content: string }
   // ── turns ────────────────────────────────────────────────────────────────
   | {
@@ -79,7 +86,7 @@ export type BrainOperation =
   | { kind: 'transcribe'; audioBase64: string; audioMime: string; requestedLanguage?: string }
 
 export interface ResolvedRequest {
-  method: 'GET' | 'POST' | 'PATCH' | 'DELETE'
+  method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
   path: string
   body?: unknown
 }
@@ -125,6 +132,17 @@ const AUDIO_MIME = /^audio\/[A-Za-z0-9.+-]{1,64}$/
 function audioMime(value: string): string {
   if (typeof value !== 'string' || !AUDIO_MIME.test(value)) {
     throw new InvalidOperationError('audioMime must be an audio/* media type.')
+  }
+  return value
+}
+
+/** A library filename, not a path: no separators, no traversal, bounded. */
+function filename(value: string): string {
+  if (typeof value !== 'string' || value.length === 0 || value.length > 255) {
+    throw new InvalidOperationError('a grounding entry must be a non-empty filename.')
+  }
+  if (value.includes('/') || value.includes('\\') || value.includes('..')) {
+    throw new InvalidOperationError('a grounding entry must be a bare filename.')
   }
   return value
 }
@@ -193,6 +211,13 @@ export function resolveOperation(op: BrainOperation): ResolvedRequest {
       return {
         method: 'DELETE',
         path: `/api/ai/conversations/${id(op.conversationId, 'conversationId')}`,
+      }
+
+    case 'setConversationGrounding':
+      return {
+        method: 'PUT',
+        path: `/api/ai/conversations/${id(op.conversationId, 'conversationId')}/grounding`,
+        body: { files: op.files.map((f) => filename(f)) },
       }
 
     case 'listMessages':

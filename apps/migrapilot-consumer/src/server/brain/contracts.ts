@@ -82,6 +82,8 @@ export interface ConversationSummary {
   id: string
   title?: string
   memoryMode?: 'off' | 'session' | 'durable'
+  /** Files this conversation answers from. Absent or empty means ungrounded. */
+  groundingFiles?: string[]
   createdAt?: string | number
   updatedAt?: string | number
 }

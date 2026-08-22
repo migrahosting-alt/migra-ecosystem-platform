@@ -21,8 +21,8 @@ interface ChatContextValue {
   pendingIn: string | null
   /** True until the caller's durable conversations have been read once. */
   loading: boolean
-  startConversation: (prompt: string, options?: { grounded?: boolean }) => string
-  sendMessage: (conversationId: string, prompt: string, options?: { grounded?: boolean }) => void
+  startConversation: (prompt: string, options?: { attachments?: string[] }) => string
+  sendMessage: (conversationId: string, prompt: string, options?: { attachments?: string[] }) => void
   /** Load one conversation's durable messages. Safe to call repeatedly. */
   openConversation: (conversationId: string) => void
 }
@@ -162,15 +162,16 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const router = useRouter()
   /** Optimistic id → durable id, so a URL captured before the swap still resolves. */
   const aliases = useRef(new Map<string, string>())
-  /**
-   * Conversations that must answer from the caller's documents or refuse.
+  /*
+   * There is deliberately NO grounded-conversation set here any more.
    *
-   * Carried per conversation, not per message: a follow-up question in a chat
-   * started from Files is still a question about those files, and silently
-   * dropping to ungrounded on the second turn is how a grounded thread starts
-   * inventing answers halfway down.
+   * It used to be a ref, which meant grounding existed only as long as the tab:
+   * after a reload the same question in the same thread answered "I don't have
+   * access to external documents" with the earlier grounded answers still on
+   * screen. Grounding is now a property of the CONVERSATION, stored in the Brain
+   * and read back by the server on every turn, so the browser holds no state that
+   * could disagree with it.
    */
-  const groundedConversations = useRef(new Set<string>())
   /** Mirrors `pendingIn` so the id swap can read it without re-creating callbacks. */
   const pendingRef = useRef<string | null>(null)
   pendingRef.current = pendingIn
@@ -310,9 +311,8 @@ export function ChatProvider({ children }: { children: ReactNode }) {
    * could be mistaken for a generated answer: if the model did not answer, the
    * message says so and says why.
    */
-  const appendReply = useCallback(async (localId: string, prompt: string, grounded = false) => {
+  const appendReply = useCallback(async (localId: string, prompt: string, attachments: string[] = []) => {
     let conversationId = localId
-    if (grounded) groundedConversations.current.add(localId)
     setPendingIn(conversationId)
 
     /*
@@ -344,7 +344,6 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     const adoptDurableId = (from: string, to: string) => {
       hydrated.current.add(to)
       aliases.current.set(from, to)
-      if (groundedConversations.current.has(from)) groundedConversations.current.add(to)
       setConversations((current) =>
         current.map((conversation) =>
           conversation.id === from ? { ...conversation, id: to } : conversation,
@@ -421,7 +420,9 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         body: JSON.stringify({
           prompt,
           // Grounded turns must cite the caller's documents or be refused.
-          ...(grounded ? { grounded: true } : {}),
+          // Names only: the SERVER decides grounding from the conversation's durable
+          // set. A claim from the browser is not state.
+          ...(attachments.length > 0 ? { attachments } : {}),
           ...(isDurableId(conversationId) ? { conversationId } : {}),
         }),
       })
@@ -513,7 +514,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   }, [router])
 
   const startConversation = useCallback(
-    (prompt: string, options?: { grounded?: boolean }) => {
+    (prompt: string, options?: { attachments?: string[] }) => {
       counter.current += 1
       const id = `chat-${Date.now()}-${counter.current}`
       const conversation: Conversation = {
@@ -530,14 +531,14 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       }
 
       setConversations((current) => [conversation, ...current])
-      void appendReply(id, prompt, options?.grounded === true)
+      void appendReply(id, prompt, options?.attachments ?? [])
       return id
     },
     [appendReply],
   )
 
   const sendMessage = useCallback(
-    (conversationId: string, prompt: string, options?: { grounded?: boolean }) => {
+    (conversationId: string, prompt: string, options?: { attachments?: string[] }) => {
       const message: Message = {
         id: `u-${Date.now()}`,
         role: 'user',
@@ -553,12 +554,8 @@ export function ChatProvider({ children }: { children: ReactNode }) {
             : conversation,
         ),
       )
-      // A grounded conversation stays grounded without the caller re-stating it.
-      void appendReply(
-        conversationId,
-        prompt,
-        options?.grounded === true || groundedConversations.current.has(conversationId),
-      )
+
+      void appendReply(conversationId, prompt, options?.attachments ?? [])
     },
     [appendReply],
   )

@@ -1,5 +1,6 @@
 'use client'
 
+import { useEffect, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { ArrowRight, BarChart3, Lightbulb, PencilLine, ScrollText } from 'lucide-react'
 import { Workspace } from '@/components/layout/AppShell'
@@ -39,17 +40,39 @@ export function WelcomePage() {
   const router = useRouter()
   const { startConversation } = useChat()
   // Arriving from Files means every question in this chat is about those files.
-  const grounded = useSearchParams().get('grounded') === 'files'
+  const fromFiles = useSearchParams().get('grounded') === 'files'
+  const [libraryFiles, setLibraryFiles] = useState<string[]>([])
 
   /*
-   * Two independent reasons a first turn is grounded: the user arrived from Files, or they
-   * attached a searchable file to this very message. Either one means the answer must come
-   * from their documents, so they are OR'd rather than one overriding the other.
+   * Arriving from Files attaches the library to the FIRST turn, by name.
+   *
+   * Under the conversation-scoped model there is no "grounded" boolean to pass: the
+   * server records what a turn attached and grounds from the conversation's durable
+   * set. So "ask about these files" has to say WHICH files, and the answer is the
+   * caller's own library — read from the server, never assumed.
    */
-  const start = (prompt: string, meta?: { grounded?: boolean }) =>
-    router.push(
-      `/chat/${startConversation(prompt, grounded || meta?.grounded ? { grounded: true } : undefined)}`,
-    )
+  useEffect(() => {
+    if (!fromFiles) return
+    let cancelled = false
+    void fetch('/api/files')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (cancelled || !Array.isArray(data?.files)) return
+        setLibraryFiles(data.files.map((f: { name: string }) => f.name).filter(Boolean))
+      })
+      .catch(() => {
+        // A failed read is not permission to ground on nothing: the first turn simply
+        // goes ungrounded and the user can attach explicitly.
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [fromFiles])
+
+  const start = (prompt: string, meta?: { attachments?: string[] }) => {
+    const attachments = [...new Set([...(meta?.attachments ?? []), ...libraryFiles])]
+    router.push(`/chat/${startConversation(prompt, attachments.length > 0 ? { attachments } : undefined)}`)
+  }
 
   return (
     <Workspace

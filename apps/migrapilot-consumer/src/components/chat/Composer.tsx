@@ -36,8 +36,8 @@ export function Composer({
   className,
   highlighted,
 }: {
-  /** `meta.grounded` is true when the turn carries a searchable attachment. */
-  onSubmit?: (value: string, meta?: { grounded?: boolean }) => void
+  /** `meta.attachments` names the searchable files this turn attached, if any. */
+  onSubmit?: (value: string, meta?: { attachments?: string[] }) => void
   placeholder?: string
   /** "media" adds image/mic affordances inline, as on the media review screen. */
   variant?: 'default' | 'media' | 'research'
@@ -51,7 +51,7 @@ export function Composer({
   const [focused, setFocused] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const { attachments, limits, add, remove, retry, clear, busy, groundable } = useAttachments()
+  const { attachments, limits, add, remove, retry, clear, busy } = useAttachments()
   /*
    * THE MIC IS GATED ON THE SHARED CAPABILITY, not on a local guess.
    *
@@ -100,7 +100,11 @@ export function Composer({
     // Sending while audio is still being captured or transcribed would send the turn
     // WITHOUT the words the user is in the middle of speaking.
     if (recording || voice.state === 'transcribing') return
-    onSubmit?.(trimmed, groundable ? { grounded: true } : undefined)
+    // The NAMES, not a claim: the server adds them to the conversation's durable
+    // grounding set and decides from that. Only `ready` files are sent — one that is
+    // stored but not searchable cannot ground anything and must not pretend to.
+    const readyFiles = attachments.filter((a) => a.state === 'ready').map((a) => a.name)
+    onSubmit?.(trimmed, readyFiles.length > 0 ? { attachments: readyFiles } : undefined)
     setValue('')
     clear()
     requestAnimationFrame(grow)
