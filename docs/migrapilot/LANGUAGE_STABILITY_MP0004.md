@@ -107,3 +107,33 @@ return on this model.
   a string` — no local Postgres credential. Pre-existing and unrelated, but note that
   `postgresRag.test.ts` *skips* cleanly under the same condition while these *fail*; the skip
   guard is inconsistent across the Postgres suites.
+
+## 6. Post-fix verification — live, Brain `64490c3b`
+
+Deployed Brain-only (consumer unchanged at `6411a35`), restarted 08:10:02 UTC.
+
+| arm | condition | n | flipped |
+|---|---|---|---|
+| A | the exact original prompt, ungrounded | 12 | **0** (was 2/5) |
+| D | plain English control, incl. the prompt that gave French | 6 | **0** (was 1/5) |
+| — | `sak pase?`, `kijan ou ye?`, `bonjou, mwen bezwen yon koutmen.` | 4 | Creole, 4/4 — capability intact |
+| — | `bonjour, peux-tu expliquer…`, `salut, ca va ?` | 2 | French, 2/2 |
+
+**24 turns, 0 flips.** Before the fix: 20 turns, 4 flips.
+
+The French pair is the live proof of the whole-word discriminator: `bonjour` contains `bonjou`,
+did **not** pull the Creole hint, and was answered in French — while `sak pase?` did pull it and
+was answered in Creole. That is the conditional behaving correctly at the live boundary, not only
+in the unit test.
+
+Verified through the real composer as well as the route: typed into the UI, sent, rendered in
+English and persisted in English — `conv_devw9qlu73tbhjui2i1y3`.
+
+**Grounding regression after the Brain replacement:** attached turn cited
+`handbook-neutral.txt:3-7`, a follow-up with no re-attachment stayed grounded, durable set
+`["handbook-neutral.txt"]`. The substrate closed before this work still holds.
+
+**Observed and not fixed here:** one of the 12 post-fix runs confabulated
+("betaSecret (BSC) is a cryptocurrency token…"). Same confabulation class seen direct-to-provider
+in §5. It is a separate defect — an unknown term invented rather than declined — and it is NOT
+what this change was for.
