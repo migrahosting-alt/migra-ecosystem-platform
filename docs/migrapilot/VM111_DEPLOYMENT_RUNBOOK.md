@@ -96,6 +96,30 @@ same failure wearing a different hat.
 Do all assembly in `~` with no elevation, then copy the finished tree into `/opt`. Keep
 elevated commands to `cp`, `chown`, `ln`, `systemctl`.
 
+### 🚨 GATE: VERIFY ARTIFACT CONTENT — "pack succeeded" IS NOT EVIDENCE
+
+A packaging step can exit 0, warn about nothing, and produce a **syntactically valid but
+functionally empty package**. That is not hypothetical: see §1 — `npm pack` shipped
+`@migrapilot/protocol` with one file out of thirty, because `.gitignore` hides `dist/`.
+The tarball was well-formed. It was simply missing the code.
+
+So the artifact is checked for CONTENT before it is booted, every time:
+
+```bash
+# Every workspace package must carry more than its entry point.
+for p in protocol shared-types pilot-client agent-defs workspace-tools; do
+  n=$(tar -tzf <stage>/pkgs/migrapilot-$p-0.1.0.tgz | wc -l)
+  [ "$n" -ge 5 ] && echo "ok   $p ($n entries)" || echo "FAIL $p ($n entries) — STOP"
+done
+
+# And the change you are deploying must actually be in the built output.
+grep -c "<a symbol from this change>" <stage>/dist/src/<the file you edited>.js
+```
+
+Both must pass before §4 runs. The boot test catches a missing module only when something
+imports it on the startup path; a package that lost a lazily-imported module passes the boot
+test and fails in front of a user. Content is checked because liveness cannot prove it.
+
 ## 4. BOOT-TEST ON A SPARE PORT BEFORE THE SYMLINK MOVES
 
 **Non-negotiable. This is the rule the incident bought.**
@@ -207,3 +231,34 @@ choice, and the wrong one.
 excluded** — no elevated `cat`/`ls`/`grep`/`tail`. Use `systemctl status` for logs. Two
 recurring trip-ups: the null device anywhere in an elevated command is outside path scope,
 and `chown user:group` without `-R` breaks the verb parser.
+
+## 10. Known deployment risks
+
+### 🚨 The gap between symlink promotion and process replacement
+
+Promotion is two independent steps — `ln -sfn` then `systemctl restart` — and between them
+`current` names the NEW release while the running process is still the OLD build. On
+2026-08-22 that window lasted about five minutes, because the restart was refused three times
+by the permission classifier while the symlink move had already gone through. Production stayed
+healthy on the old build the whole time, so this cost nothing. **In a rollback it would.**
+
+The state is also silently misleading: `ls -l current` reports the new release and
+`systemctl is-active` reports `active`, and both are true while the defect you are rolling
+back from is still being served. Neither answers "what is the running process actually
+executing?"
+
+So during any promotion, the running build is established from the PROCESS, never from the
+symlink:
+
+```bash
+systemctl show migrapilot-brain.service -p ExecMainPID -p ExecMainStartTimestamp
+# ExecMainStartTimestamp EARLIER than the symlink's mtime means the restart has not happened.
+```
+
+If a restart is refused, say so and stop — do not leave the window open silently, and never
+report a release as deployed on the strength of the symlink alone.
+
+### Rollback is a restart, not only a symlink move
+
+For the same reason: pointing `current` back at the previous release does nothing until the
+service is restarted. Both halves, or the rollback has not happened.
