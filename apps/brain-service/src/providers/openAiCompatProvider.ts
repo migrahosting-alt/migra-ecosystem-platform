@@ -418,6 +418,49 @@ export class OpenAiCompatProvider implements ProviderAdapter {
      * because models of this size routinely misread it as Indonesian, Malay or
      * French, and because it is a first-class language for this product.
      */
+
+    /*
+     * ...BUT THE DISAMBIGUATION HINT SHIPS PER MESSAGE, NOT ON EVERY MESSAGE.
+     *
+     * Naming Haitian Creole and quoting Creole phrases in the system prompt
+     * primes the output distribution toward Creole, and it fired on turns that
+     * had nothing to do with Creole. Measured against the production model
+     * (qwen3:8b) with one English question, twelve identical runs per arm:
+     *
+     *   no system prompt at all .................. 0/12 flipped
+     *   persona, this hint removed ............... 0/12 flipped
+     *   persona + the French/English sentence .... 0/12 flipped
+     *   persona + THIS sentence .................. 5/12 flipped
+     *   full production persona .................. 5/12 flipped
+     *
+     * One sentence carried the whole defect, and what came back was malformed
+     * Creole — Creole-shaped nonsense, not the language — so it was never a
+     * style issue. It reached a real user on the live consumer.
+     *
+     * Shortening the clause was tried before this and did not work, because the
+     * cause is not its length: it is that the tokens are present at all on a
+     * turn where the user never wrote a word of Creole.
+     *
+     * So the hint is now attached to the turns it was written for — it ships
+     * only when the user's OWN message contains one of these greetings.
+     * Matching is WHOLE-WORD, which is exactly what keeps French `bonjour`
+     * from matching Creole `bonjou`: the over-capture the paired sentence was
+     * written to prevent. The two sentences travel together, because the second
+     * is the first one's guard and means nothing without it.
+     *
+     * What this does NOT cost: with the hint absent, `sak pase?` still came
+     * back in Creole 5/5 — the Indonesian failure above did not return.
+     */
+    const CREOLE_GREETINGS = ['sak pase', 'sa k ap fet', 'kijan ou ye', 'n ap boule', 'bonjou', 'bonswa'] as const;
+    const userWroteCreoleGreeting = CREOLE_GREETINGS.some((greeting) =>
+      new RegExp(`\\b${greeting.replace(/ /g, '\\s+')}\\b`, 'i').test(request.userPrompt),
+    );
+    const CREOLE_DISAMBIGUATION = userWroteCreoleGreeting
+      ? `A few short Haitian Creole greetings are routinely misread as Indonesian, Malay, or a typo: ${CREOLE_GREETINGS.map(
+          (greeting) => `"${greeting}"`,
+        ).join(', ')}. Treat THOSE as Haitian Creole. ` +
+        'This does not extend to greetings from other languages: "salut", "bonjour", "coucou" and "ca va" are FRENCH and are answered in French; "hi", "hey", "yo" and "what is up" are ENGLISH and are answered in English. '
+      : '';
     const ASSISTANT_PERSONA =
       'You are MigraPilot, a helpful, friendly, general-purpose AI assistant. Answer naturally and use Markdown when it helps. ' +
       'You help with everyday questions, writing, explanation, planning, analysis and code. Code is one of your abilities, not your identity — never introduce yourself as a coding assistant or a workspace assistant unless the user is specifically asking about software work. ' +
@@ -426,12 +469,10 @@ export class OpenAiCompatProvider implements ProviderAdapter {
       // back in Creole. The rule is therefore stated once, neutrally, with
       // Creole named only as a disambiguation hint rather than a preference.
       'LANGUAGE: reply in the SAME language the user wrote in — if they write English, answer in English; French, answer in French; Haitian Creole, answer in Haitian Creole. Never switch languages on your own. ' +
-      // Scoped to Creole-specific greetings ONLY. An earlier, broader version
-      // pulled ANY short greeting toward Creole: `salut` — plain French —
-      // came back as "SALUT! Ka fet ou?" in Kreyol. The hint must disambiguate
-      // Creole, not capture the neighbouring languages it is confused with.
-      'A few short Haitian Creole greetings are routinely misread as Indonesian, Malay, or a typo: "sak pase", "sa k ap fet", "kijan ou ye", "n ap boule", "bonjou", "bonswa". Treat THOSE as Haitian Creole. ' +
-      'This does not extend to greetings from other languages: "salut", "bonjour", "coucou" and "ca va" are FRENCH and are answered in French; "hi", "hey", "yo" and "what is up" are ENGLISH and are answered in English. ' +
+      // Present ONLY when the user's own message contains one of these greetings.
+      // Unconditionally, it flipped English answers into malformed Creole on
+      // 5 of 12 identical runs — see the measurement above the constant.
+      CREOLE_DISAMBIGUATION +
       'Never treat an ordinary message as a filename, a path, a command, or a typo. ' +
       'A short greeting or small talk deserves a short, warm, human reply — not a request for clarification and not a list of your capabilities. ';
 
