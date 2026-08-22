@@ -79,7 +79,20 @@ export function chatTurn(
  */
 export function chatTurnStream(
   prompt: string,
-  options: { conversationSummary?: string; groundingMode?: GroundingMode } = {},
+  options: {
+    conversationSummary?: string
+    groundingMode?: GroundingMode
+    /**
+     * Restrict retrieval to these files.
+     *
+     * Every layer between the route and the wire re-declares its own shape, so a field
+     * added at one end is silently discarded by the next. This one was: the route passed
+     * it, the operation type lacked it, and the caller compiled anyway because excess
+     * properties are not checked through a spread. Retrieval kept ranking over the whole
+     * library while everything looked correct.
+     */
+    groundingFiles?: string[]
+  } = {},
   deps?: GatewayDeps,
 ): Promise<BrainStream> {
   return streamBrain(
@@ -88,6 +101,9 @@ export function chatTurnStream(
       prompt,
       ...(options.conversationSummary ? { conversationSummary: options.conversationSummary } : {}),
       ...(options.groundingMode ? { groundingMode: options.groundingMode } : {}),
+      ...(options.groundingFiles && options.groundingFiles.length > 0
+        ? { groundingFiles: options.groundingFiles }
+        : {}),
       stream: true,
     },
     deps,

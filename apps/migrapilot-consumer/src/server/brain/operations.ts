@@ -59,6 +59,16 @@ export type BrainOperation =
       stream?: boolean
       /** Which evidence the Brain may ground on. See GROUNDING_MODES below. */
       groundingMode?: GroundingMode
+      /**
+       * Restrict retrieval to these files. A BOUNDARY, not a hint.
+       *
+       * This field was missing once, and the omission was invisible: the route spread
+       * `groundingFiles` into the call, excess-property checks do not apply through a
+       * spread, so it compiled, the tests passed, and `resolveOperation` silently dropped
+       * it while building the body. Retrieval kept ranking across the whole library and a
+       * grounded conversation still could not find its own attached file.
+       */
+      groundingFiles?: string[]
     }
   | { kind: 'answer'; prompt: string; tier?: 'local' | 'cloud' }
   // ── document indexes (the Files library) ─────────────────────────────────
@@ -245,6 +255,11 @@ export function resolveOperation(op: BrainOperation): ResolvedRequest {
           // Always explicit. Omitting it defaults the Brain to `auto`, which is
           // the mode that let an ungrounded answer through.
           groundingMode: op.groundingMode ?? 'none',
+          // Only when non-empty: an empty array must not read as "scope to nothing",
+          // which would refuse every grounded answer.
+          ...(op.groundingFiles && op.groundingFiles.length > 0
+            ? { groundingFiles: op.groundingFiles.map((f) => filename(f)) }
+            : {}),
         },
       }
 

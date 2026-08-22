@@ -25,7 +25,15 @@ import { deriveBrainScope } from '@/server/tenancy/ownerScope'
  */
 
 /** Matches the Brain's own writable root (`migrapilot-brain.service`). */
-const ROOT = process.env.UPLOAD_ROOT ?? '/var/lib/migrapilot/uploads'
+/**
+ * Read at CALL time, not at module load.
+ *
+ * ESM hoists imports, so a test that sets UPLOAD_ROOT in its body was already too late —
+ * this module had captured the production default before the assignment ran, and the tests
+ * quietly exercised the fail-closed path instead of the real directory. Resolving lazily
+ * costs nothing and removes an import-order trap.
+ */
+const uploadRoot = (): string => process.env.UPLOAD_ROOT ?? '/var/lib/migrapilot/uploads'
 
 /**
  * What the Brain's indexer can actually read.
@@ -81,7 +89,7 @@ export async function userDirectory(): Promise<string> {
   const session = await requireSession()
   const scope = deriveBrainScope(session)
   const bucket = createHash('sha256').update(scope.owner).digest('hex').slice(0, 32)
-  const dir = join(ROOT, bucket)
+  const dir = join(uploadRoot(), bucket)
   await mkdir(dir, { recursive: true, mode: 0o700 })
   return dir
 }

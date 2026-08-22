@@ -23,11 +23,14 @@ process.env.UPLOAD_ROOT = mkdtempSync(join(tmpdir(), 'migrapilot-chat-'))
 
 import { POST } from './route'
 import { setAuthPort, resetAuthPort } from '@/server/auth'
+import { saveFile, userDirectory } from '@/server/files/storage'
 import type { AppSession, AuthPort } from '@/server/auth/authPort'
 
 // ── harness ─────────────────────────────────────────────────────────────────
 
 const CONVERSATION_ID = 'conv_stream1'
+/** Resolved lazily: userDirectory() needs a session, which each test installs. */
+let UPLOAD_DIR = ''
 
 const session: AppSession = {
   sessionId: 'sess-1',
@@ -70,6 +73,10 @@ function brainStub(
     /** Fails only the ASSISTANT append — the prompt must still be stored, or
      *  the route legitimately answers JSON instead of ever opening a stream. */
     assistantAppendStatus?: number
+    /** Files the conversation is durably grounded in, as the Brain would report. */
+    conversationGrounding?: string[]
+    /** Serve an APPROVED index so reconciliation can find one. */
+    approvedIndex?: boolean
   } = {},
 ) {
   const calls: { url: string; init: RequestInit }[] = []
@@ -106,6 +113,17 @@ function brainStub(
       return json(status, { ok: true, stored: true, message: { id: 'msg_1' } })
     }
     if (href.endsWith('/api/ai/conversations')) return json(200, { id: CONVERSATION_ID })
+    // Reconciliation reads the conversation, then the index, before it will ground.
+    if (/\/api\/ai\/conversations\/[^/]+$/.test(new URL(href).pathname)) {
+      return json(200, { id: CONVERSATION_ID, groundingFiles: options.conversationGrounding ?? [] })
+    }
+    if (href.includes('/api/ai/indexes') && !href.includes('/status')) {
+      return json(200, {
+        indexes: options.approvedIndex ? [{ id: 'ix1', root: UPLOAD_DIR, state: 'approved' }] : [],
+      })
+    }
+    if (href.includes('/status')) return json(200, { state: 'approved' })
+    if (href.endsWith('/grounding')) return json(200, { id: CONVERSATION_ID })
     return json(404, { ok: false })
   }) as typeof globalThis.fetch
 
@@ -432,6 +450,33 @@ test('attaching a file that is NOT in the library grounds nothing and stores not
 
   const put = brain.calls.find((call) => call.url.endsWith('/grounding'))
   assert.deepEqual(JSON.parse(String(put!.init.body)).files, [], 'a phantom file must not be stored')
+
+  brain.restore()
+  resetAuthPort()
+})
+
+test('THE GROUNDING SET REACHES THE BRAIN, not just the conversation', async () => {
+  /*
+   * The regression this exists for: the route spread `groundingFiles` into the seam call,
+   * excess-property checks do not apply through a spread, so it compiled and passed while
+   * resolveOperation dropped the field building the wire body. Retrieval kept ranking over
+   * the whole library, and a grounded conversation could not find its own attached file.
+   *
+   * Asserting groundingMode was not enough — the boundary has to be ON THE WIRE.
+   */
+  setAuthPort(portWith(session))
+  // A REAL file on disk: reconciliation refuses to ground on a name with nothing behind it,
+  // which is the correct behaviour and would otherwise mask the regression under test.
+  UPLOAD_DIR = await userDirectory()
+  await saveFile('notes.md', new TextEncoder().encode('notes content').buffer as ArrayBuffer)
+  const brain = brainStub({ conversationGrounding: ['notes.md'], approvedIndex: true })
+
+  await collect(await post({ prompt: 'what is in my notes?', conversationId: CONVERSATION_ID }))
+
+  const chat = brain.calls.find((call) => call.url.endsWith('/api/ai/chat'))!
+  const body = JSON.parse(String(chat.init.body))
+  assert.equal(body.groundingMode, 'approved')
+  assert.deepEqual(body.groundingFiles, ['notes.md'], 'the file set must be sent to the Brain')
 
   brain.restore()
   resetAuthPort()
