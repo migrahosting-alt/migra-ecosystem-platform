@@ -3,6 +3,7 @@
 import { useRef, useState, type ChangeEvent, type FormEvent, type KeyboardEvent } from 'react'
 import { ImageIcon, Lock, Mic, Paperclip, SendHorizontal } from 'lucide-react'
 import { AttachmentChips } from '@/features/attachments/AttachmentChips'
+import { acceptAttribute } from '@/features/attachments/filename'
 import { useAttachments } from '@/features/attachments/useAttachments'
 import { micDisabledReason, useMicAvailability } from '@/features/voice/useMicAvailability'
 import { VoicePanel } from '@/features/voice/VoicePanel'
@@ -151,7 +152,7 @@ export function Composer({
         multiple
         className="hidden"
         onChange={onPicked}
-        {...(limits ? { accept: limits.allowedExtensions.join(',') } : {})}
+        {...(limits ? { accept: acceptAttribute(limits.allowedExtensions) } : {})}
       />
 
       <textarea

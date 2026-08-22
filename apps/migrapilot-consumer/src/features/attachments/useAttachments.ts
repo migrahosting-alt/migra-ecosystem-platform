@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { outcomeOfIndex, outcomeOfUpload } from './outcome'
+import { rejectionFor } from './filename'
 
 /**
  * Attachments, end to end and for real.
@@ -52,10 +53,6 @@ export interface AttachmentLimits {
 let sequence = 0
 const nextId = () => `att_${(sequence += 1)}`
 
-const extensionOf = (name: string) => {
-  const dot = name.lastIndexOf('.')
-  return dot === -1 ? '' : name.slice(dot).toLowerCase()
-}
 
 export function useAttachments() {
   const [attachments, setAttachments] = useState<Attachment[]>([])
@@ -133,36 +130,18 @@ export function useAttachments() {
         const id = nextId()
         originals.current.set(id, file)
 
-        // Immediate, local pre-checks so an obvious rejection does not need a round trip.
-        // These MIRROR the server; they never replace it.
-        if (limits) {
-          const extension = extensionOf(file.name)
-          if (!limits.allowedExtensions.includes(extension)) {
-            setAttachments((c) => [
-              ...c,
-              {
-                id,
-                name: file.name,
-                bytes: file.size,
-                state: 'failed',
-                reason: `${extension || 'That file type'} is not supported. Allowed: ${limits.allowedExtensions.join(', ')}.`,
-              },
-            ])
-            continue
-          }
-          if (file.size > limits.maxFileBytes) {
-            setAttachments((c) => [
-              ...c,
-              {
-                id,
-                name: file.name,
-                bytes: file.size,
-                state: 'failed',
-                reason: `Files are limited to ${Math.round(limits.maxFileBytes / 1024 / 1024)} MB.`,
-              },
-            ])
-            continue
-          }
+        // Immediate, local pre-check so an obvious rejection does not need a round trip.
+        // It MIRRORS the server and never replaces it — and it lives in `filename.ts` with
+        // tests that compare it against the server's own extractor over real filenames,
+        // because the last version of this check disagreed with the server about what the
+        // extension of "pilot-upload-test.json" even was, and rejected every upload.
+        const rejection = rejectionFor(file, limits)
+        if (rejection) {
+          setAttachments((c) => [
+            ...c,
+            { id, name: file.name, bytes: file.size, state: 'failed', reason: rejection.message },
+          ])
+          continue
         }
 
         setAttachments((c) => [...c, { id, name: file.name, bytes: file.size, state: 'uploading' }])
