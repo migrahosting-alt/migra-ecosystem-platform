@@ -13,6 +13,14 @@
     "./transcription": {
       "types": "./src/transcription.ts",
       "default": "./dist/transcription.js"
+    },
+    "./composer-capabilities": {
+      "types": "./src/composer-capabilities.ts",
+      "default": "./dist/composer-capabilities.js"
+    },
+    "./anonymous-quota": {
+      "types": "./src/anonymous-quota.ts",
+      "default": "./dist/anonymous-quota.js"
     }
   },
   "files": [
