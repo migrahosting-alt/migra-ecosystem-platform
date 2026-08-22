@@ -79,7 +79,13 @@ async function citedFiles(answer: string): Promise<string[]> {
  * documents do not cover this" — instead of a generic failure that invites them
  * to retry an identical question forever.
  */
-function refusalOr(failure: { kind: string; body?: unknown; status?: number }): {
+function refusalOr(
+  failure: { kind: string; body?: unknown; status?: number },
+  /** Attached files the approved index holds no chunks for. */
+  unreadable: readonly string[] = [],
+  /** Attached files that exist and could be used. */
+  available: readonly string[] = [],
+): {
   error: string
   message: string
 } {
@@ -104,6 +110,21 @@ function refusalOr(failure: { kind: string; body?: unknown; status?: number }): 
        * index IS approved. The refusal is the relevance floor rejecting a
        * retrieval, which for this product means one thing worth saying.
        */
+      /*
+       * "Try naming the document" is impossible to satisfy when the attached files hold no
+       * indexed content — naming a file with zero chunks cannot retrieve anything. Advice a
+       * user cannot act on is worse than no advice.
+       */
+      const allUnreadable = available.length > 0 && unreadable.length === available.length
+      if (allUnreadable) {
+        const names = unreadable.join(', ')
+        return {
+          error: 'insufficient_evidence',
+          message:
+            `No readable content was found in ${names}, so there is nothing to answer from. ` +
+            `Attach a file with text in it, or ask about a different document.`,
+        }
+      }
       return {
         error: 'insufficient_evidence',
         message:
@@ -298,7 +319,7 @@ export async function POST(request: Request): Promise<Response> {
       )
 
       if (opened.kind !== 'ok') {
-        emit('error', refusalOr(opened))
+        emit('error', refusalOr(opened, reconciled.unreadable, reconciled.available))
         closed = true
         try {
           controller.close()

@@ -51,6 +51,19 @@ export class VectorIndex {
     return this.byFile.has(filePath);
   }
 
+  /**
+   * Chunks per file, for the APPROVED content.
+   *
+   * A library-wide "searchable" boolean cannot answer "can this file be read?", and the UI
+   * was claiming "Ready — MigraPilot can read this" for a whitespace-only file that produced
+   * ZERO chunks. Readiness is a per-file fact, so the index has to report it per file.
+   */
+  chunkCounts(): Record<string, number> {
+    const counts: Record<string, number> = {};
+    for (const [filePath, list] of this.byFile.entries()) counts[filePath] = list.length;
+    return counts;
+  }
+
   files(): string[] {
     return [...this.byFile.keys()];
   }

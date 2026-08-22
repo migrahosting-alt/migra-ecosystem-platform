@@ -109,7 +109,8 @@ export function useAttachments() {
 
       try {
         const response = await fetch('/api/files/index', { method: 'POST' })
-        const indexed = outcomeOfIndex(response.ok, await response.json())
+        // The SERVER's stored name, not the picked one — they can differ.
+        const indexed = outcomeOfIndex(response.ok, await response.json(), uploaded.name)
         patch(id, {
           state: indexed.state,
           reason: 'reason' in indexed ? indexed.reason : undefined,

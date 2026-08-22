@@ -24,6 +24,13 @@ import { listFiles, userDirectory } from '@/server/files/storage'
 export interface GroundingReconciliation {
   /** Names still present in the library. */
   available: string[]
+  /**
+   * Available files the approved index holds NO chunks for.
+   *
+   * They are stored and retained, but nothing can be answered from them. Kept separate from
+   * `missing` because the file has not been deleted — it simply has no readable content.
+   */
+  unreadable: string[]
   /** Names dropped because the file no longer exists. */
   missing: string[]
   /** True when the index can actually serve a grounded answer. */
@@ -38,22 +45,34 @@ interface IndexRecord {
   state?: string
 }
 
-async function indexIsSearchable(): Promise<boolean> {
+/**
+ * Whether the index can serve at all, and per-file counts when the Brain reports them.
+ *
+ * The two are SEPARATE on purpose. Tying searchability to the presence of counts made an
+ * older Brain — one that does not report them — look completely unsearchable, which would
+ * have silently ungrounded every conversation on a version skew. Approval decides whether
+ * anything can be served; counts only refine WHICH files are readable.
+ */
+async function approvedIndexState(): Promise<{ approved: boolean; counts: Record<string, number> | null }> {
   const root = await userDirectory()
   const listed = await callBrain<{ indexes?: IndexRecord[] }>({ kind: 'listIndexes' })
-  if (listed.kind !== 'ok') return false
+  if (listed.kind !== 'ok') return { approved: false, counts: null }
   const index = (listed.value?.indexes ?? []).find((i) => i.root === root)
-  if (!index?.id) return false
-  const status = await callBrain<{ state?: string }>({ kind: 'indexStatus', indexId: index.id })
+  if (!index?.id) return { approved: false, counts: null }
+  const status = await callBrain<{ state?: string; chunkCounts?: Record<string, number> }>({
+    kind: 'indexStatus',
+    indexId: index.id,
+  })
+  if (status.kind !== 'ok') return { approved: false, counts: null }
   // Only an APPROVED index is reachable by grounding. Anything else is
   // indexed-but-not-searchable and must never be treated as ready.
-  const state = status.kind === 'ok' ? (status.value?.state ?? index.state) : index.state
-  return state === 'approved'
+  const approved = (status.value?.state ?? index.state) === 'approved'
+  return { approved, counts: status.value?.chunkCounts ?? null }
 }
 
 export async function reconcileGrounding(requested: string[]): Promise<GroundingReconciliation> {
   if (requested.length === 0) {
-    return { available: [], missing: [], searchable: false, grounded: false }
+    return { available: [], missing: [], unreadable: [], searchable: false, grounded: false }
   }
 
   // FAIL CLOSED. If the library cannot be read at all we ground nothing rather than
@@ -61,12 +80,23 @@ export async function reconcileGrounding(requested: string[]): Promise<Grounding
   // there, and a chat turn must not 500 because storage hiccuped.
   const listed = await listFiles().catch(() => null)
   if (listed === null) {
-    return { available: [], missing: requested, searchable: false, grounded: false }
+    return { available: [], missing: requested, unreadable: [], searchable: false, grounded: false }
   }
   const present = new Set(listed.map((f) => f.name))
   const available = requested.filter((name) => present.has(name))
   const missing = requested.filter((name) => !present.has(name))
-  const searchable = available.length > 0 ? await indexIsSearchable() : false
+  const state = available.length > 0 ? await approvedIndexState() : { approved: false, counts: null }
+  const searchable = state.approved
+  const counts = state.counts
 
-  return { available, missing, searchable, grounded: available.length > 0 && searchable }
+  /*
+   * A file with zero chunks is retained but unreadable.
+   *
+   * Unknown counts are NOT treated as zero: an older Brain that does not report them would
+   * otherwise mark every attachment unreadable. Absent means "cannot tell", and the turn
+   * proceeds as before.
+   */
+  const unreadable = counts ? available.filter((name) => counts[name] === 0) : []
+
+  return { available, missing, unreadable, searchable, grounded: available.length > 0 && searchable }
 }

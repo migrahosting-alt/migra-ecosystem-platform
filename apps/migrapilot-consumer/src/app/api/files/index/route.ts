@@ -56,7 +56,11 @@ export async function GET(): Promise<Response> {
 
   // Only counts and state are relayed. The root is this server's filesystem
   // layout and is of no use to a browser.
-  const value = status.value as { state?: string; stats?: Record<string, unknown> }
+  const value = status.value as {
+    state?: string
+    stats?: Record<string, unknown>
+    chunkCounts?: Record<string, number>
+  }
   const state = value?.state ?? existing.state ?? null
   return Response.json({
     indexed: true,
@@ -65,6 +69,15 @@ export async function GET(): Promise<Response> {
     searchable: state === 'approved',
     state,
     stats: value?.stats ?? existing.stats ?? null,
+    /*
+     * PER-FILE readability, not a library-wide guess.
+     *
+     * `searchable` says the INDEX can serve answers; it says nothing about whether a
+     * particular file contributed anything. A whitespace-only upload produced zero chunks
+     * and the UI still showed "Ready — MigraPilot can read this" for it. A file is readable
+     * only when the approved index holds chunks FOR THAT FILE.
+     */
+    chunkCounts: value?.chunkCounts ?? {},
   })
 }
 
@@ -134,10 +147,23 @@ export async function POST(): Promise<Response> {
   }
 
   const record = approved.value ?? synced.value?.index
+
+  /*
+   * Re-read the status to learn WHICH FILES the approved index actually holds chunks for.
+   *
+   * The promotion result says the index is servable; it does not say a given file
+   * contributed anything. A whitespace-only upload indexed "successfully" and produced zero
+   * chunks, and the composer still told the user "Ready — MigraPilot can read this". A
+   * failure to read the counts leaves them ABSENT rather than assuming readiness.
+   */
+  const after = await callBrain<{ chunkCounts?: Record<string, number> }>({ kind: 'indexStatus', indexId })
+  const chunkCounts = after.kind === 'ok' ? (after.value?.chunkCounts ?? {}) : {}
+
   return Response.json({
     indexed: true,
     searchable: true,
     state: record?.state ?? null,
     stats: record?.stats ?? synced.value?.index?.stats ?? null,
+    chunkCounts,
   })
 }

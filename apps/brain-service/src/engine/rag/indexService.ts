@@ -215,6 +215,19 @@ export class IndexService {
     return this.entry(id, scope)?.record;
   }
 
+  /**
+   * Retrievable chunks per file, from the APPROVED index.
+   *
+   * Deliberately the approved index and not the candidate: a file only counts as readable
+   * when the content that production retrieval actually serves contains it. Reporting the
+   * candidate would claim readiness for content no answer can reach.
+   */
+  approvedChunkCounts(id: string, scope: Scope): Record<string, number> {
+    const e = this.entry(id, scope);
+    if (!e || e.record.approvedVersion === undefined || !e.approvedIndex) return {};
+    return e.approvedIndex.chunkCounts();
+  }
+
   /** Durable deletion first: dropping it from memory while the row survived meant
    * the index came back on the next boot, after the caller was told it was gone. */
   async delete(id: string, scope: Scope): Promise<boolean> {

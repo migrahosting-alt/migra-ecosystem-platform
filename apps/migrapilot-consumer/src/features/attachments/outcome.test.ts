@@ -63,3 +63,34 @@ test('a failed index does not discard the fact that the file IS stored', () => {
   // delete the file. Reporting it as a failed upload would strand a real stored file.
   assert.equal(outcomeOfIndex(false, { message: 'Indexing failed.' }).state, 'unsearchable')
 })
+
+/* ── per-file readability ─────────────────────────────────────────────────── */
+
+test('a file the index holds NO chunks for is not Ready', () => {
+  // The whitespace-only upload: the library was searchable, so the chip said
+  // "Ready — MigraPilot can read this" for a file nothing could be answered from.
+  const outcome = outcomeOfIndex(true, { searchable: true, chunkCounts: { 'blank.txt': 0 } }, 'blank.txt')
+  assert.equal(outcome.state, 'unsearchable')
+  assert.match(outcome.state === 'unsearchable' ? outcome.reason : '', /No readable content/)
+})
+
+test('a file WITH chunks is Ready', () => {
+  assert.equal(outcomeOfIndex(true, { searchable: true, chunkCounts: { 'notes.md': 3 } }, 'notes.md').state, 'ready')
+})
+
+test('ABSENT counts are not read as zero', () => {
+  // An older Brain does not report chunkCounts. Treating absent as zero would mark every
+  // attachment unreadable on a version skew — the opposite failure, and just as wrong.
+  assert.equal(outcomeOfIndex(true, { searchable: true }, 'notes.md').state, 'ready')
+  assert.equal(outcomeOfIndex(true, { searchable: true, chunkCounts: {} }, 'notes.md').state, 'ready')
+})
+
+test('readiness is judged for THIS file, not a sibling', () => {
+  // A populated sibling must not vouch for an empty file.
+  const outcome = outcomeOfIndex(
+    true,
+    { searchable: true, chunkCounts: { 'full.md': 9, 'blank.txt': 0 } },
+    'blank.txt',
+  )
+  assert.equal(outcome.state, 'unsearchable')
+})

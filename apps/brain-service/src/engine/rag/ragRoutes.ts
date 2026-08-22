@@ -53,7 +53,19 @@ export function registerRagRoutes(app: FastifyInstance, service: IndexService): 
       reply.code(404);
       return { ok: false, code: 'UNKNOWN_INDEX', error: 'Index not found.' };
     }
-    return { ...rec, status: rec.syncing ? 'indexing' : rec.state };
+    /*
+     * `chunkCounts` is per FILE, from the approved index.
+     *
+     * A library-wide `searchable` flag cannot answer "can this file be read?", and the UI
+     * was showing "Ready — MigraPilot can read this" for a whitespace-only upload that
+     * produced zero chunks. A caller can now tell readiness per file instead of inferring
+     * it from a library-wide boolean.
+     */
+    return {
+      ...rec,
+      status: rec.syncing ? 'indexing' : rec.state,
+      chunkCounts: service.approvedChunkCounts(request.params.id, scopeFrom(request)),
+    };
   });
 
   app.patch<{ Params: { id: string }; Body: { state?: string } }>('/api/ai/indexes/:id', async (request, reply) => {
