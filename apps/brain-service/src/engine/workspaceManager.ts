@@ -69,10 +69,37 @@ export class WorkspaceManager {
     this.mkId = deps.mkId ?? (() => `ws_${Math.random().toString(36).slice(2, 12)}`);
   }
 
-  async hydrate(): Promise<void> {
+  /**
+   * Load ONE scope's workspaces, once.
+   *
+   * A global load returns zero rows under row-level security, so a scope-less
+   * call has nothing legitimate to read and returns rather than issuing one.
+   */
+  async hydrate(scope?: Scope): Promise<void> {
     if (!this.deps.persistence) return;
+    const key = scope ? `${scope.owner}\u0000${scope.workspace}` : '';
+    if (this.hydratedScopes.has(key)) return;
+
+    const source = this.deps.persistence as {
+      loadWorkspacesForScope?: (s: Scope) => Promise<PersistedWorkspace[]>;
+    };
+    if (typeof source.loadWorkspacesForScope === 'function') {
+      if (!scope) return;
+      this.hydratedScopes.add(key);
+      try {
+        for (const w of await source.loadWorkspacesForScope(scope)) this.byId.set(w.id, fromPersisted(w));
+      } catch (error) {
+        this.hydratedScopes.delete(key);
+        throw error;
+      }
+      return;
+    }
+
+    this.hydratedScopes.add(key);
     for (const w of await this.deps.persistence.loadWorkspaces()) this.byId.set(w.id, fromPersisted(w));
   }
+
+  private readonly hydratedScopes = new Set<string>();
 
   private forScope(scope: Scope, id?: string): WorkspaceRecord | undefined {
     for (const w of this.byId.values()) {

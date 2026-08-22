@@ -21,7 +21,7 @@ import { chunkFile } from './chunker.js';
 import type { Embedder } from './embedder.js';
 import { VectorIndex, type IndexedChunk } from './vectorIndex.js';
 import { hybridRetrieve, type HybridOptions, type RetrievedRagChunk, type RetrieveDiagnostics } from './hybridRetriever.js';
-import type { RagIndexPersistence, PersistedChunk } from '../persistence/types.js';
+import type { RagIndexPersistence, PersistedChunk, PersistedIndexRecord } from '../persistence/types.js';
 
 export type IndexState = 'experimental' | 'evaluated' | 'approved' | 'degraded' | 'disabled';
 
@@ -38,6 +38,16 @@ export interface FileSource {
 export interface IndexRecord {
   id: string;
   workspaceId: string;
+  /**
+   * The owner half of the scope.
+   *
+   * Was absent, so every in-memory isolation check compared WORKSPACE only while
+   * the database enforced (owner, workspace). Two owners sharing a workspace
+   * string would have seen each other's indexes in the cache — latent while
+   * workspaces are per-user, and reachable once hydration became per-scope and
+   * filled one shared cache from several tenants.
+   */
+  ownerScope: string;
   sourceType: 'workspace' | 'docs';
   root: string;
   /** Lifecycle of the LATEST candidate. NOT what production retrieval serves. */
@@ -96,11 +106,33 @@ export class IndexService {
   /** Rebuild in-memory indexes from durable storage on startup — approved indexes
    * and their chunks/vectors survive a restart, so unchanged files are not
    * re-embedded. */
-  async hydrate(): Promise<void> {
+  async hydrate(scope?: Scope): Promise<void> {
     if (!this.persistence) return;
-    for (const rec of await this.persistence.loadIndexes()) {
+
+    /*
+     * SCOPED, OR NOTHING.
+     *
+     * `loadIndexes()` used to read every index in the database. Under row-level
+     * security that returns ZERO rows, and the failure is quiet in the worst
+     * way: chat keeps answering, it just stops using the caller's documents. An
+     * empty conversation list is obvious; an empty index looks like a model
+     * regression.
+     *
+     * Without a scope there is nothing legitimate to load, so this returns
+     * rather than issuing a read that can only come back empty.
+     */
+    const source = this.persistence as {
+      loadIndexesForScope?: (s: Scope) => Promise<PersistedIndexRecord[]>;
+    };
+    const records = scope && typeof source.loadIndexesForScope === 'function'
+      ? await source.loadIndexesForScope(scope)
+      : typeof source.loadIndexesForScope === 'function'
+        ? []
+        : await this.persistence.loadIndexes();
+
+    for (const rec of records) {
       const record: IndexRecord = {
-        id: rec.id, workspaceId: rec.workspaceId, sourceType: rec.sourceType as 'workspace' | 'docs', root: rec.root,
+        id: rec.id, workspaceId: rec.workspaceId, ownerScope: rec.ownerScope, sourceType: rec.sourceType as 'workspace' | 'docs', root: rec.root,
         state: rec.state as IndexState, syncing: false, version: rec.version, embeddingModel: rec.embeddingModel,
         embeddingVersion: rec.embeddingVersion, createdAt: rec.createdAt, updatedAt: rec.updatedAt,
         stats: { files: 0, chunks: 0, approxBytes: 0, lastSyncMs: 0 },
@@ -113,7 +145,7 @@ export class IndexService {
       let approvedIndex: VectorIndex | undefined;
       if (rec.approvedVersion !== undefined) {
         try {
-          approvedIndex = await this.loadVersion(rec.id, rec.approvedVersion);
+          approvedIndex = await this.loadVersion(rec.id, rec.approvedVersion, scope);
         } catch (error) {
           record.approvedVersion = undefined;
           record.state = 'degraded';
@@ -129,7 +161,7 @@ export class IndexService {
       try {
         const index = rec.approvedVersion !== undefined && rec.approvedVersion === rec.version && approvedIndex
           ? approvedIndex // same version — one object, not two copies
-          : await this.loadVersion(rec.id, rec.version);
+          : await this.loadVersion(rec.id, rec.version, scope);
         record.stats = { files: index.files().length, chunks: index.size(), approxBytes: index.approxBytes(), lastSyncMs: 0, lastError: record.stats.lastError };
         this.byId.set(rec.id, { record, index, approvedIndex: approvedIndex ?? (record.approvedVersion !== undefined ? index : undefined) });
       } catch (error) {
@@ -150,10 +182,16 @@ export class IndexService {
 
   /** Build an in-memory index from ONE persisted version. Throws if any vector
    * in that version is damaged (all-or-nothing — never a partial index). */
-  private async loadVersion(indexId: string, indexVersion: number): Promise<VectorIndex> {
+  private async loadVersion(indexId: string, indexVersion: number, scope?: Scope): Promise<VectorIndex> {
     const index = new VectorIndex();
     const byFile = new Map<string, IndexedChunk[]>();
-    for (const c of await this.persistence!.loadChunks(indexId, indexVersion)) {
+    const source = this.persistence as {
+      loadChunksForScope?: (s: Scope, id: string, v: number) => Promise<PersistedChunk[]>;
+    };
+    const chunks = scope && typeof source.loadChunksForScope === 'function'
+      ? await source.loadChunksForScope(scope, indexId, indexVersion)
+      : await this.persistence!.loadChunks(indexId, indexVersion);
+    for (const c of chunks) {
       const chunk: IndexedChunk = { ...c, symbol: c.symbol };
       (byFile.get(c.filePath) ?? byFile.set(c.filePath, []).get(c.filePath)!).push(chunk);
     }
@@ -172,6 +210,7 @@ export class IndexService {
     const record: IndexRecord = {
       id: this.mkId(),
       workspaceId: scope.workspace,
+      ownerScope: scope.owner,
       sourceType: params.sourceType ?? 'workspace',
       root: params.root,
       state: 'experimental',
@@ -207,7 +246,9 @@ export class IndexService {
 
   private entry(id: string, scope: Scope): Entry | undefined {
     const e = this.byId.get(id);
-    if (!e || e.record.workspaceId !== scope.workspace) return undefined; // isolation
+    // BOTH halves, matching what the database enforces. Comparing only the
+    // workspace let a different owner in the same workspace read this index.
+    if (!e || e.record.workspaceId !== scope.workspace || e.record.ownerScope !== scope.owner) return undefined;
     return e;
   }
 
@@ -415,12 +456,17 @@ export class IndexService {
 
   /** First approved index for a workspace (for chat integration). */
   approvedIndexFor(scope: Scope): string | undefined {
-    for (const [id, e] of this.byId) if (e.record.workspaceId === scope.workspace && e.record.approvedVersion !== undefined) return id;
+    for (const [id, e] of this.byId) {
+      if (e.record.workspaceId !== scope.workspace || e.record.ownerScope !== scope.owner) continue;
+      if (e.record.approvedVersion !== undefined) return id;
+    }
     return undefined;
   }
 
   listForScope(scope: Scope): IndexRecord[] {
-    return [...this.byId.values()].filter((e) => e.record.workspaceId === scope.workspace).map((e) => e.record);
+    return [...this.byId.values()]
+      .filter((e) => e.record.workspaceId === scope.workspace && e.record.ownerScope === scope.owner)
+      .map((e) => e.record);
   }
 
   /** Build the default MigraAI exclusions for a root (loads .gitignore). */

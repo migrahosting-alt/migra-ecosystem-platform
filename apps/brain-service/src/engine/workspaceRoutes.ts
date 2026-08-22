@@ -19,6 +19,13 @@ import { WorkspaceManager } from './workspaceManager.js';
 import { scopeFrom } from './memory/memoryRoutes.js';
 
 export function registerWorkspaceRoutes(app: FastifyInstance, manager: WorkspaceManager): WorkspaceManager {
+  // Hydrate the caller's own workspaces before any handler reads. A global load
+  // is invalid under row-level security, so this is the only point at which a
+  // scope's durable state enters memory.
+  app.addHook('preHandler', async (request) => {
+    await manager.hydrate(scopeFrom(request));
+  });
+
   app.post<{ Body: { name?: string; root?: string; memoryMode?: 'off' | 'session' | 'durable' } }>('/api/ai/workspaces', async (request, reply) => {
     const scope = scopeFrom(request);
     const root = request.body?.root ?? (scope.workspace !== 'default' ? scope.workspace : undefined);

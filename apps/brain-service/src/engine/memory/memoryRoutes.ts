@@ -51,6 +51,22 @@ function persistenceRefusal(error: unknown, reply: FastifyReply): { ok: false; c
 }
 
 export function registerMemoryRoutes(app: FastifyInstance, store: ConversationStore): ConversationStore {
+  /*
+   * HYDRATE THE REQUEST'S SCOPE BEFORE ANY HANDLER READS.
+   *
+   * The store is an in-memory cache over durable storage. It used to be filled
+   * once at startup by reading every conversation in the database, which is
+   * invalid under row-level security — an undeclared connection sees nothing, so
+   * that load would have produced an empty Brain that looked healthy.
+   *
+   * One preHandler instead of a call in each handler: a route added later is
+   * covered automatically, whereas a forgotten per-handler call would surface as
+   * "my conversations disappeared" rather than as an error.
+   */
+  app.addHook('preHandler', async (request) => {
+    await store.ensureScopeHydrated(scopeFrom(request));
+  });
+
   app.post<{ Body: { title?: string; memoryMode?: string } }>('/api/ai/conversations', async (request, reply) => {
     const scope = scopeFrom(request);
     const mode = MODES.includes(request.body?.memoryMode as MemoryMode) ? (request.body!.memoryMode as MemoryMode) : 'session';

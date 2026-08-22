@@ -22,6 +22,17 @@ import { citation } from './hybridRetriever.js';
 const STATES: IndexState[] = ['experimental', 'evaluated', 'approved', 'degraded', 'disabled'];
 
 export function registerRagRoutes(app: FastifyInstance, service: IndexService): IndexService {
+  /*
+   * Hydrate the caller's own indexes before any handler reads.
+   *
+   * This is the quiet one. An empty conversation list is obvious; an empty INDEX
+   * is not — chat keeps answering and simply stops using the caller's documents,
+   * which reads as a model regression rather than a persistence bug.
+   */
+  app.addHook('preHandler', async (request) => {
+    await service.hydrate(scopeFrom(request));
+  });
+
   app.post<{ Body: { sourceType?: 'workspace' | 'docs'; root?: string } }>('/api/ai/indexes', async (request, reply) => {
     const scope = scopeFrom(request);
     const root = request.body?.root ?? scope.workspace;

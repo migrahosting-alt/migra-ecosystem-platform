@@ -209,6 +209,51 @@ export class ConversationStore {
 
   /** Load durable state from persistence on startup (never re-persists what it
    * loads). Session/off conversations are not part of durable state. */
+  /** Scopes already loaded from durable storage. Keyed owner\u0000workspace. */
+  private readonly hydratedScopes = new Set<string>();
+
+  /**
+   * Load ONE scope's durable state, once.
+   *
+   * Startup used to hydrate every conversation in the database. That is invalid
+   * under PostgreSQL row-level security: a connection with no declared scope
+   * sees zero rows, so a global load would have booted an apparently empty Brain
+   * while every row sat safe in the database.
+   *
+   * So hydration follows the request. Each scoped entry point calls this before
+   * reading, the scope is loaded at most once, and one tenant's load never
+   * populates another's cache — the cache key is the scope pair itself.
+   *
+   * Idempotent and safe to call on every request: the Set makes the second call
+   * free.
+   */
+  async ensureScopeHydrated(scope: Scope): Promise<void> {
+    const key = `${scope.owner}\u0000${scope.workspace}`;
+    if (this.hydratedScopes.has(key)) return;
+
+    const source = this.persistence as { loadDurableForScope?: (s: Scope) => Promise<{ conversations: Conversation[]; messages: Message[]; summaries: Summary[] }> };
+    if (typeof source.loadDurableForScope !== 'function') {
+      // A store without scoped loading (the in-memory default) has nothing to
+      // hydrate. Marking it done keeps the call free rather than retrying.
+      this.hydratedScopes.add(key);
+      return;
+    }
+
+    // Marked BEFORE awaiting so concurrent requests for the same scope do not
+    // each issue a load; the second caller proceeds against the same cache the
+    // first is filling, which is the existing behaviour for a warm scope.
+    this.hydratedScopes.add(key);
+    try {
+      const state = await source.loadDurableForScope(scope);
+      this.hydrate(state);
+    } catch (error) {
+      // A failed load must not leave the scope marked as loaded — the next
+      // request would then read an empty cache and report no conversations.
+      this.hydratedScopes.delete(key);
+      throw error;
+    }
+  }
+
   hydrate(data: { conversations: Conversation[]; messages: Message[]; summaries: Summary[]; memoryItems?: MemoryItem[] }): void {
     for (const c of data.conversations) {
       this.conversations.set(c.id, c);

@@ -318,17 +318,18 @@ async function main(): Promise<void> {
   // durable, layered conversational context (scope-isolated, redacted). Durable
   // conversations write through to the store and are hydrated on startup.
   const memoryStore = new ConversationStore(undefined, undefined, durable ?? undefined);
-  if (durable) {
-    // `loadDurable`/`loadMemoryItems` became Promise-returning in the durable
-    // persistence migration. Spreading the un-awaited Promise yielded no own
-    // enumerable properties, so `conversations` arrived `undefined` and hydrate
-    // crashed the process at startup. Both must be awaited.
-    const [durableState, memoryItems] = await Promise.all([
-      durable.loadDurable(),
-      durable.loadMemoryItems(),
-    ]);
-    memoryStore.hydrate({ ...durableState, memoryItems });
-  }
+  /*
+   * NO GLOBAL HYDRATION AT STARTUP.
+   *
+   * This used to load every conversation in the database. Under PostgreSQL
+   * row-level security that read returns ZERO rows — a connection that has not
+   * declared a scope sees nothing — so the Brain would have booted reporting an
+   * empty history while all of it sat safe in the database.
+   *
+   * Hydration now follows the request: `registerMemoryRoutes` installs a
+   * preHandler that loads the caller's own scope, once, before any handler
+   * reads. Nothing is loaded for tenants who never connect.
+   */
   registerMemoryRoutes(app, memoryStore);
   // Model qualification manifest (installing a model does not approve it). The
   // router serves only `approved` models when the manifest is `enforced`.
@@ -348,7 +349,9 @@ async function main(): Promise<void> {
   // AWAITED: the vector indexes, their approved pointers and any startup
   // quarantine all load here. Detached, the engine answered retrieval requests
   // against an empty index set while claiming it had hydrated.
-  if (durable) await indexService.hydrate();
+  // NOT hydrated globally: under row-level security a scope-less read returns
+  // zero rows, and an empty index fails quietly — chat keeps answering while
+  // silently ignoring the caller's documents. Scopes load on their first request.
   // The branch an APPROVED generation was built from lives on the workspace record,
   // not the index. Resolved lazily per request so a later sync is reflected without
   // a restart; undefined when unknown, which the grounding boundary reports as
@@ -617,7 +620,7 @@ async function main(): Promise<void> {
   });
   // AWAITED for the same reason: workspace→index bindings must exist before the
   // routes below can serve them.
-  if (durable) await workspaceManager.hydrate();
+  // Scope-loaded on first request, for the same reason as the index above.
   registerWorkspaceRoutes(app, workspaceManager);
   app.post<{ Body: TelemetryEventRequest }>('/telemetry/event', async (request, reply) => {
     if (env.enableTelemetry) {
