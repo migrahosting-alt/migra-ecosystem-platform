@@ -13,6 +13,13 @@
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { mkdtempSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+
+// A real, empty library: reconciliation must be exercised, not short-circuited by an
+// unreadable default root.
+process.env.UPLOAD_ROOT = mkdtempSync(join(tmpdir(), 'migrapilot-chat-'))
 
 import { POST } from './route'
 import { setAuthPort, resetAuthPort } from '@/server/auth'
@@ -409,21 +416,22 @@ test('an ordinary turn asks for no document evidence', async () => {
   resetAuthPort()
 })
 
-test('attaching a file grounds the turn AND persists that on the conversation', async () => {
-  // Grounding is a property of the CONVERSATION now, not a boolean the browser
-  // remembers. The turn that carries an attachment reports it; the durable set is
-  // what decides, so a reload cannot change the answer.
+test('attaching a file that is NOT in the library grounds nothing and stores nothing', async () => {
+  // Reconciliation runs before the answer: the durable set is checked against the files
+  // that actually exist. A name with no file behind it cannot ground, and must not be
+  // written to the conversation either — a stale entry would keep claiming grounding on
+  // every later turn. (The positive path needs a real file and an approved index, and is
+  // covered by server/files/grounding.test.ts.)
   const brain = brainStub()
   setAuthPort(portWith(session))
 
   await collect(await post({ prompt: 'summarise my documents', attachments: ['notes.md'] }))
 
   const chat = brain.calls.find((call) => call.url.endsWith('/api/ai/chat'))!
-  assert.equal(JSON.parse(String(chat.init.body)).groundingMode, 'approved')
+  assert.equal(JSON.parse(String(chat.init.body)).groundingMode, 'none')
 
   const put = brain.calls.find((call) => call.url.endsWith('/grounding'))
-  assert.ok(put, 'the grounding set must be written to the conversation')
-  assert.deepEqual(JSON.parse(String(put!.init.body)).files, ['notes.md'])
+  assert.deepEqual(JSON.parse(String(put!.init.body)).files, [], 'a phantom file must not be stored')
 
   brain.restore()
   resetAuthPort()

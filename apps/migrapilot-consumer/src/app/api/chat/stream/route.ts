@@ -30,6 +30,7 @@ import {
   setConversationGrounding,
 } from '@/server/brain/seams'
 import { listFiles } from '@/server/files/storage'
+import { reconcileGrounding } from '@/server/files/grounding'
 import type { BrainStreamFrame } from '@/server/brain/gateway'
 import type { ConversationSummary } from '@/server/brain/contracts'
 
@@ -220,14 +221,30 @@ export async function POST(request: Request): Promise<Response> {
     existing.kind === 'ok' ? ((existing.value as ConversationSummary)?.groundingFiles ?? []) : []
 
   // Attaching adds to the thread's set; it never silently replaces what is there.
-  const groundingFiles = [...new Set([...storedGrounding, ...attachedNow])]
-  if (attachedNow.length > 0 && groundingFiles.length !== storedGrounding.length) {
-    // Persist BEFORE answering: if the write fails the turn must not claim a
-    // grounding the next turn will not have.
-    await setConversationGrounding(conversationId, groundingFiles)
+  const requestedGrounding = [...new Set([...storedGrounding, ...attachedNow])]
+
+  /*
+   * RECONCILE AGAINST REALITY BEFORE ANSWERING.
+   *
+   * The set is durable, so it outlives the files in it. A deleted file would still be
+   * named here, and one name is enough to send groundingMode "approved" for a document
+   * that no longer exists. Durable state that is never checked is a stale claim with a
+   * database behind it.
+   */
+  const reconciled = await reconcileGrounding(requestedGrounding)
+
+  // A file that is GONE leaves the set permanently, and the correction is written back
+  // so the drift does not outlive the turn. A merely unsearchable index changes nothing
+  // about the set — searchability returns, and discarding the user's choice would not.
+  const shouldPersist =
+    reconciled.missing.length > 0 || requestedGrounding.length !== storedGrounding.length
+  if (shouldPersist) {
+    // Persist BEFORE answering: if the write fails the turn must not claim a grounding
+    // the next turn will not have.
+    await setConversationGrounding(conversationId, reconciled.available)
   }
 
-  const grounded = groundingFiles.length > 0
+  const grounded = reconciled.grounded
   const groundingMode = grounded ? 'approved' : 'none'
 
   const encoder = new TextEncoder()
