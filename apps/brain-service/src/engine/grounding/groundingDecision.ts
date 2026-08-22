@@ -140,6 +140,27 @@ export interface GroundingRequest {
    */
   mode: GroundingMode;
   query: string;
+  /**
+   * The caller EXPLICITLY named these files for this turn.
+   *
+   * 🚨 THIS REPLACES THE RELEVANCE FLOOR, and the reason is architectural rather than
+   * convenience: once the user has attached or selected the files for a conversation,
+   * relevance selection has already happened at the USER-INTENT layer. The floor exists to
+   * stop unrelated documents surfacing from a global pool; applying it again inside an
+   * explicit scope is a second gate built for a different problem, and it overrides the
+   * user's own selection.
+   *
+   * Measured on production: a conversation grounded in two attached files answered "your
+   * indexed documents do not cover that" for a value sitting in one of them, because the
+   * chunk scored under 0.53. Naming the file in the question lifted the lexical score over
+   * the bar and the same content answered — the floor was refusing to READ a file the user
+   * had explicitly attached.
+   *
+   * Scoring still runs: it decides WHICH PARTS of the selected documents are shown first
+   * and what fits the budget. It no longer decides whether the system is willing to look
+   * at them at all.
+   */
+  scopedFiles?: readonly string[];
   /** Branch of the working tree, when the caller knows it. */
   currentBranch?: string;
 }
@@ -171,8 +192,10 @@ export interface GroundingDeps {
 /**
  * Decide where this turn's evidence comes from.
  *
- * `approved` fails CLOSED: no approved index, a retrieval failure, or nothing
- * clearing {@link GroundingDeps.minScore} all refuse. It never falls back to the
+ * `approved` fails CLOSED: no approved index or a retrieval failure refuses, as does
+ * nothing clearing {@link GroundingDeps.minScore} — EXCEPT when the caller supplied
+ * {@link GroundingRequest.scopedFiles}, where the user's own selection is the relevance
+ * decision and the floor does not apply. It never falls back to the
  * working tree, because a caller that asked for approved-only evidence would
  * otherwise receive unapproved evidence under an approved-sounding answer.
  *
@@ -248,7 +271,17 @@ export async function decideGrounding(req: GroundingRequest, deps: GroundingDeps
       : fellBack();
   }
 
-  const relevant = chunks.filter((c) => c.score >= deps.minScore);
+  /*
+   * An explicit scope replaces the floor; it does not lower it to another number.
+   *
+   * A "scoped threshold" would be a second magic constant needing its own experimental
+   * justification, when the product semantics already give a clean boundary: the user
+   * either named the documents or did not. Ranking above has already ordered these chunks
+   * and the caller's maxChunks/tokenBudget still bound them, so dropping the floor changes
+   * WHICH evidence is admitted, never HOW MUCH.
+   */
+  const scoped = (req.scopedFiles?.length ?? 0) > 0;
+  const relevant = scoped ? chunks : chunks.filter((c) => c.score >= deps.minScore);
   if (relevant.length === 0) {
     const bestScore = chunks.length ? Math.max(...chunks.map((c) => c.score)) : undefined;
     if (requested === 'approved') {

@@ -343,22 +343,35 @@ export function registerAiRoutes(
     // and the model is told to distinguish evidence from inference. ──
     let ragChunks: Array<{ path: string; startLine: number; endLine: number; snippet: string; score: number; source: 'embedding' }> | undefined;
     let grounding: GroundingDecision | undefined;
+    /*
+     * Files the caller explicitly attached to this conversation.
+     *
+     * Computed once and used for BOTH the retrieval boundary and the grounding decision,
+     * so the two cannot disagree about whether this turn is scoped — the retriever
+     * narrowing while the floor still judged it globally is precisely how a user's own
+     * attached file got refused.
+     */
+    const scopedFiles = Array.isArray(body.groundingFiles)
+      ? body.groundingFiles.filter((f): f is string => typeof f === 'string' && f.trim().length > 0)
+      : [];
     if (indexService && userPrompt && policy.retrieve !== false) {
       grounding = await decideGrounding(
-        { mode: body.groundingMode ?? modeFromLegacy(body.requireApproved), query: userPrompt, currentBranch: body.currentBranch },
+        {
+          mode: body.groundingMode ?? modeFromLegacy(body.requireApproved),
+          query: userPrompt,
+          currentBranch: body.currentBranch,
+          ...(scopedFiles.length > 0 ? { scopedFiles } : {}),
+        },
         {
           approvedIndexId: () => indexService.approvedIndexFor(scope),
           retrieveApproved: async (indexId, query) => {
-            // Only strings, and only when non-empty: an empty array must not read as
-            // "scope to nothing", which would silently refuse every grounded answer.
-            const files = Array.isArray(body.groundingFiles)
-              ? body.groundingFiles.filter((f): f is string => typeof f === 'string' && f.trim().length > 0)
-              : [];
             const rag = await indexService.retrieve(indexId, scope, query, {
               maxChunks: 6,
               tokenBudget: 2000,
               requireApproved: true,
-              ...(files.length > 0 ? { files } : {}),
+              // Same value the grounding decision sees. An empty array is NO scope, never
+              // "scope to nothing".
+              ...(scopedFiles.length > 0 ? { files: scopedFiles } : {}),
             });
             if (!rag.ok) throw new Error(rag.code);
             return rag.chunks.map((c) => ({ path: c.filePath, startLine: c.startLine, endLine: c.endLine, snippet: c.snippet, score: c.score }));
