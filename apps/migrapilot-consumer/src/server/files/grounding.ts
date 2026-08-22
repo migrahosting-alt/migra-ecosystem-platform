@@ -96,7 +96,9 @@ export async function reconcileGrounding(requested: string[]): Promise<Grounding
    * otherwise mark every attachment unreadable. Absent means "cannot tell", and the turn
    * proceeds as before.
    */
-  const unreadable = counts ? available.filter((name) => counts[name] === 0) : []
+  // Omitted, not zero: the indexer never adds a file that yielded nothing, so a name
+  // missing from a PRESENT map is the index saying it holds nothing for that file.
+  const unreadable = counts ? available.filter((name) => (counts[name] ?? 0) === 0) : []
 
   return { available, missing, unreadable, searchable, grounded: available.length > 0 && searchable }
 }

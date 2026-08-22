@@ -74,7 +74,17 @@ export function outcomeOfIndex(ok: boolean, response: IndexResponse, fileName?: 
    * "zero chunks" — that would mark every file unreadable on a version skew.
    */
   if (response.searchable === true && fileName && response.chunkCounts) {
-    const chunks = response.chunkCounts[fileName]
+    /*
+     * A file that yielded nothing is OMITTED from the map, not recorded as 0 — the indexer
+     * never adds it. So "no readable content" is the ABSENCE OF THE KEY while the MAP IS
+     * PRESENT, and checking only for a literal 0 let a whitespace-only upload keep showing
+     * "Ready — MigraPilot can read this" after the per-file fix shipped.
+     *
+     * The two absences are different and must stay so: no `chunkCounts` OBJECT means an
+     * older Brain that cannot tell us, and that still reads as ready. A missing KEY inside a
+     * present map is the index saying it holds nothing for this file.
+     */
+    const chunks = response.chunkCounts[fileName] ?? 0
     if (chunks === 0) {
       return {
         state: 'unsearchable',

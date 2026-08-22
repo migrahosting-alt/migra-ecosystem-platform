@@ -78,11 +78,19 @@ test('a file WITH chunks is Ready', () => {
   assert.equal(outcomeOfIndex(true, { searchable: true, chunkCounts: { 'notes.md': 3 } }, 'notes.md').state, 'ready')
 })
 
+test('a file OMITTED from a present map has no readable content', () => {
+  // The indexer never adds a file that yielded nothing, so absence-of-key is the real
+  // signal. Checking only for a literal 0 let the whitespace-only upload stay "Ready".
+  const outcome = outcomeOfIndex(true, { searchable: true, chunkCounts: { 'other.md': 4 } }, 'blank.txt')
+  assert.equal(outcome.state, 'unsearchable')
+  assert.match(outcome.state === 'unsearchable' ? outcome.reason : '', /No readable content/)
+})
+
 test('ABSENT counts are not read as zero', () => {
   // An older Brain does not report chunkCounts. Treating absent as zero would mark every
   // attachment unreadable on a version skew — the opposite failure, and just as wrong.
+  // No `chunkCounts` OBJECT at all — an older Brain cannot tell us, so readiness stands.
   assert.equal(outcomeOfIndex(true, { searchable: true }, 'notes.md').state, 'ready')
-  assert.equal(outcomeOfIndex(true, { searchable: true, chunkCounts: {} }, 'notes.md').state, 'ready')
 })
 
 test('readiness is judged for THIS file, not a sibling', () => {
