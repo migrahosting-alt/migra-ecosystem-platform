@@ -247,24 +247,45 @@ export class PostgresDurableStore implements DurableStore {
 
   /* ── memory items + workspaces ─────────────────────────────────────────── */
 
-  async saveMemoryItem(item: MemoryItem): Promise<void> {
-    await this.tx((client) => memoryWorkspaces.saveMemoryItem(client, item));
+  async saveMemoryItem(item: MemoryItem, scope?: PersistenceScope): Promise<void> {
+    // memory_items runs FORCE RLS; a write with no declared scope is refused by
+    // the policy rather than silently stored.
+    const declared = scope ?? { owner: (item as { ownerScope?: string }).ownerScope ?? '', workspace: (item as { workspaceScope?: string }).workspaceScope ?? '' };
+    await this.inScope(declared, (client) => memoryWorkspaces.saveMemoryItem(client, item));
   }
 
+  /** @deprecated Scope-dependent read; use {@link loadMemoryItemsForScope}. */
   async loadMemoryItems(): Promise<MemoryItem[]> {
-    return this.tx((client) => memoryWorkspaces.loadMemoryItems(client));
+    throw new Error(
+      'loadMemoryItems() cannot be served under row-level security: an undeclared connection sees no rows. ' +
+        'Use loadMemoryItemsForScope(scope).',
+    );
+  }
+
+  async loadMemoryItemsForScope(scope: PersistenceScope): Promise<MemoryItem[]> {
+    return this.inScope(scope, (client) => memoryWorkspaces.loadMemoryItems(client));
   }
 
   async saveWorkspace(w: PersistedWorkspace): Promise<void> {
-    await this.tx((client) => memoryWorkspaces.saveWorkspace(client, w));
+    await this.inScope({ owner: w.ownerScope, workspace: w.workspaceScope }, (client) =>
+      memoryWorkspaces.saveWorkspace(client, w),
+    );
   }
 
   async deleteWorkspace(id: string): Promise<void> {
     await this.tx((client) => memoryWorkspaces.deleteWorkspace(client, id));
   }
 
+  /** @deprecated Scope-dependent read; use {@link loadWorkspacesForScope}. */
   async loadWorkspaces(): Promise<PersistedWorkspace[]> {
-    return this.tx((client) => memoryWorkspaces.loadWorkspaces(client));
+    throw new Error(
+      'loadWorkspaces() cannot be served under row-level security: an undeclared connection sees no rows. ' +
+        'Use loadWorkspacesForScope(scope).',
+    );
+  }
+
+  async loadWorkspacesForScope(scope: PersistenceScope): Promise<PersistedWorkspace[]> {
+    return this.inScope(scope, (client) => memoryWorkspaces.loadWorkspaces(client));
   }
 
   /* ── RAG index ─────────────────────────────────────────────────────────── */
@@ -303,12 +324,39 @@ export class PostgresDurableStore implements DurableStore {
     await this.tx((client) => rag.setApprovedVersion(client, id, approvedVersion, updatedAt));
   }
 
+  /** @deprecated Scope-dependent read; use {@link loadIndexesForScope}. */
   async loadIndexes(): Promise<PersistedIndexRecord[]> {
-    return this.tx((client) => rag.loadIndexes(client));
+    throw new Error(
+      'loadIndexes() cannot be served under row-level security: an undeclared connection sees no rows. ' +
+        'Use loadIndexesForScope(scope).',
+    );
   }
 
-  async loadChunks(indexId: string, indexVersion: number): Promise<PersistedChunk[]> {
-    return this.tx((client) => rag.loadChunks(client, indexId, indexVersion));
+  async loadIndexesForScope(scope: PersistenceScope): Promise<PersistedIndexRecord[]> {
+    return this.inScope(scope, (client) => rag.loadIndexes(client));
+  }
+
+  /**
+   * @deprecated Scope-dependent read; use {@link loadChunksForScope}.
+   *
+   * `index_chunks` runs FORCE row-level security, so an undeclared connection
+   * sees zero rows. Returning them would look like an index with no content —
+   * the same silent-empty failure as loadDurable, and far harder to notice
+   * because an empty index degrades retrieval rather than breaking it.
+   */
+  async loadChunks(): Promise<PersistedChunk[]> {
+    throw new Error(
+      'loadChunks() cannot be served under row-level security: an undeclared connection sees no rows. ' +
+        'Use loadChunksForScope(scope, indexId, version) — an empty result here would look like an empty index.',
+    );
+  }
+
+  async loadChunksForScope(
+    scope: PersistenceScope,
+    indexId: string,
+    indexVersion: number,
+  ): Promise<PersistedChunk[]> {
+    return this.inScope(scope, (client) => rag.loadChunks(client, indexId, indexVersion));
   }
 
   /* ── embedding cache ───────────────────────────────────────────────────── */

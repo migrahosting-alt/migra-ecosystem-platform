@@ -221,3 +221,90 @@ test('1.10 a summary referencing a NONEXISTENT conversation is rejected', { skip
     'a summary must reference a real conversation',
   );
 });
+
+/* ── 1.8 the workspaceId / workspace_scope question ──────────────────────── */
+
+const indexRecord = (id: string, scope: { owner: string; workspace: string }) => ({
+  id,
+  // `workspaceId` is set to `scope.workspace` at creation (indexService.createIndex),
+  // so despite the NAME it carries the workspace SCOPE string. 1.8 exists to prove
+  // that against the database rather than trusting the field name.
+  workspaceId: scope.workspace,
+  ownerScope: scope.owner,
+  sourceType: 'docs',
+  root: `/library/${id}`,
+  state: 'ready',
+  version: 1,
+  approvedVersion: undefined,
+  embeddingModel: 'nomic-embed-text',
+  embeddingVersion: 'v1',
+  createdAt: 1,
+  updatedAt: 1,
+});
+
+const chunk = (id: string, indexId: string, scope: { owner: string; workspace: string }) => ({
+  id,
+  indexId,
+  workspaceId: scope.workspace,
+  filePath: 'notes.md',
+  language: 'markdown',
+  startLine: 1,
+  endLine: 2,
+  contentHash: `hash-${id}`,
+  embeddingModel: 'nomic-embed-text',
+  embeddingVersion: 'v1',
+  indexedAt: 1,
+  text: `text of ${id}`,
+  vector: [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8],
+});
+
+test('1.8 saveIndex stores workspace_scope EQUAL to a conversation in the same workspace', { skip: skip ?? false }, async () => {
+  // The actual question: is `workspaceId` the same semantic value RLS compares
+  // against for conversations? If the two diverge, every index write breaks.
+  await store.saveConversation(conversation('c-ws-probe', A));
+  await store.saveIndex(indexRecord('idx-probe', A) as never);
+
+  // The verification query must ALSO declare a scope. Reading without one
+  // returns null for every row — which is what made the first run of this case
+  // look like a mapping mismatch when it was an unscoped SELECT.
+  const rows = await appConnection.transaction(async (client) => {
+    await client.query(`SELECT set_config('migrapilot.owner_scope', $1, true)`, [A.owner]);
+    await client.query(`SELECT set_config('migrapilot.workspace_scope', $1, true)`, [A.workspace]);
+    const r = await client.query<{ ws_index: string; ws_conv: string }>(
+      `SELECT (SELECT workspace_scope FROM workspace_indexes WHERE id = 'idx-probe') AS ws_index,
+              (SELECT workspace_scope FROM conversations      WHERE id = 'c-ws-probe') AS ws_conv`,
+    );
+    return r.rows;
+  });
+
+  assert.equal(
+    rows[0]?.ws_index,
+    rows[0]?.ws_conv,
+    'workspaceId and the RLS workspace_scope must be the SAME value, or the mapping is a modelling defect',
+  );
+  assert.equal(rows[0]?.ws_index, A.workspace);
+});
+
+test('1.8b commitSync under the correct scope succeeds', { skip: skip ?? false }, async () => {
+  await store.saveIndex(indexRecord('idx-commit', A) as never);
+  await store.commitSync('idx-commit', 1, [chunk('ch-1', 'idx-commit', A) as never], ['notes.md'], [], 2, A);
+
+  const chunks = await store.loadChunksForScope(A, 'idx-commit', 1);
+  assert.ok(chunks.some((c) => c.id === 'ch-1'), 'the chunk is readable in its own scope');
+});
+
+test('1.8c commitSync under a WRONG owner is rejected', { skip: skip ?? false }, async () => {
+  await store.saveIndex(indexRecord('idx-wrong-owner', A) as never);
+  await assert.rejects(
+    () => store.commitSync('idx-wrong-owner', 1, [chunk('ch-bad', 'idx-wrong-owner', B) as never], ['notes.md'], [], 2, B),
+    'chunks may not be committed against another tenant index',
+  );
+});
+
+test('1.8d commitSync under a WRONG workspace is rejected', { skip: skip ?? false }, async () => {
+  await store.saveIndex(indexRecord('idx-wrong-ws', A) as never);
+  await assert.rejects(
+    () => store.commitSync('idx-wrong-ws', 1, [chunk('ch-bad-ws', 'idx-wrong-ws', AY) as never], ['notes.md'], [], 2, AY),
+    'same owner, different workspace, still refused',
+  );
+});
