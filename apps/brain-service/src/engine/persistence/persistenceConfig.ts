@@ -35,6 +35,16 @@ export class PersistenceConfigError extends Error {
 
 export interface PersistenceEnv {
   MIGRAPILOT_PERSISTENCE?: string;
+  /**
+   * The Brain's OWN database. Preferred over DATABASE_URL.
+   *
+   * `DATABASE_URL` is a generic name that other tooling on the same host sets
+   * for its own database — the Console's Prisma stack among them. Pointing the
+   * Brain at another application's database would be a silent, catastrophic
+   * mis-binding, so the specific name wins and the generic one is only a
+   * fallback.
+   */
+  MIGRAPILOT_BRAIN_DATABASE_URL?: string;
   DATABASE_URL?: string;
   MIGRAPILOT_STATE_DB?: string;
   NODE_ENV?: string;
@@ -60,7 +70,7 @@ export function resolvePersistence(env: PersistenceEnv, cwd: string): Persistenc
   const production = isProductionEnv(env);
   const requested = normalise(env.MIGRAPILOT_PERSISTENCE)?.toLowerCase();
   const stateDb = normalise(env.MIGRAPILOT_STATE_DB);
-  const databaseUrl = normalise(env.DATABASE_URL);
+  const databaseUrl = normalise(env.MIGRAPILOT_BRAIN_DATABASE_URL) ?? normalise(env.DATABASE_URL);
 
   // `MIGRAPILOT_STATE_DB=off` remains the explicit "no durable state" switch.
   if (stateDb === 'off') {
@@ -94,7 +104,7 @@ export function resolvePersistence(env: PersistenceEnv, cwd: string): Persistenc
     }
     if (!databaseUrl) {
       throw new PersistenceConfigError(
-        'DATABASE_URL is required in production (MIGRAPILOT_PERSISTENCE=postgres). Refusing to start ' +
+        'MIGRAPILOT_BRAIN_DATABASE_URL is required in production (MIGRAPILOT_PERSISTENCE=postgres). Refusing to start ' +
           'rather than fall back to a local database.',
       );
     }
@@ -110,7 +120,7 @@ export function resolvePersistence(env: PersistenceEnv, cwd: string): Persistenc
   if (requested === 'postgres') {
     if (!databaseUrl) {
       throw new PersistenceConfigError(
-        'MIGRAPILOT_PERSISTENCE=postgres requires DATABASE_URL. Refusing to fall back to SQLite.',
+        'MIGRAPILOT_PERSISTENCE=postgres requires MIGRAPILOT_BRAIN_DATABASE_URL (or DATABASE_URL). Refusing to fall back to SQLite.',
       );
     }
     assertPostgresUrl(databaseUrl);
