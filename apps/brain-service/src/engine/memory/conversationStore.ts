@@ -96,8 +96,24 @@ export interface MemoryItem {
  * (in-memory only); a disk/DB adapter can back it without changing the store. */
 export interface MemoryPersistence {
   saveConversation(c: Conversation): Promise<void>;
-  saveMessage(m: Message): Promise<void>;
-  saveSummary(s: Summary): Promise<void>;
+  /**
+   * SCOPE IS CARRIED, NOT RECOVERED.
+   *
+   * A `Message` has no owner/workspace of its own, and under PostgreSQL the
+   * scope cannot be looked up from the parent conversation either: the
+   * conversation tables run FORCE ROW LEVEL SECURITY whose policies read
+   * `migrapilot.owner_scope`, so a connection that has not yet declared its
+   * scope sees NOTHING. Reading the parent to learn the scope would require
+   * BYPASSRLS or a SECURITY DEFINER lookup — punching a hole through the exact
+   * boundary that makes cross-tenant reads impossible.
+   *
+   * So the caller passes the scope it already holds, and PostgreSQL
+   * independently rejects any row that disagrees with it (`WITH CHECK`). A
+   * mislabelled write fails at the database instead of being stored under the
+   * wrong tenant — a stronger guarantee than an application-side lookup.
+   */
+  saveMessage(m: Message, scope: Scope): Promise<void>;
+  saveSummary(s: Summary, scope: Scope): Promise<void>;
   deleteConversation(id: string): Promise<void>;
   /** Optional workspace-memory persistence (a durable adapter provides it). */
   saveMemoryItem?(item: MemoryItem): Promise<void>;
@@ -358,7 +374,7 @@ export class ConversationStore {
     Object.freeze(record);
     // Persist before the message is visible in memory: a durable message that
     // failed to commit must not be readable until a restart quietly loses it.
-    if (record.durable) await this.commit('appendMessage', () => this.persistence.saveMessage(record));
+    if (record.durable) await this.commit('appendMessage', () => this.persistence.saveMessage(record, scope));
     list.push(record);
     this.messages.set(id, list);
     c.updatedAt = record.createdAt;
@@ -379,7 +395,7 @@ export class ConversationStore {
     const list = this.summaries.get(id) ?? [];
     const version = list.length + 1;
     const record: Summary = { ...s, id: this.mkId('sum'), conversationId: id, version, createdAt: this.now() };
-    if (c.memoryMode === 'durable') await this.commit('addSummary', () => this.persistence.saveSummary(record));
+    if (c.memoryMode === 'durable') await this.commit('addSummary', () => this.persistence.saveSummary(record, scope));
     list.push(record);
     this.summaries.set(id, list);
     return record;

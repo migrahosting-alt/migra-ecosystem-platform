@@ -346,7 +346,16 @@ export class IndexService {
         // (an invalid vector, a rolled-back transaction) surfaced as an unhandled
         // rejection while control fell through to the swap, so memory adopted a
         // version the database never accepted and the catch never ran.
-        await this.persistence.commitSync(e.record.id, nextVersion, changedChunks.map((c) => this.toPersistedChunk(e.record.id, c)), changedFiles, deletedFiles, this.now());
+        await this.persistence.commitSync(
+          e.record.id,
+          nextVersion,
+          changedChunks.map((c) => this.toPersistedChunk(e.record.id, c)),
+          changedFiles,
+          deletedFiles,
+          this.now(),
+          // The scope this sync was invoked under. Threaded, never inferred.
+          scope,
+        );
       }
 
       // Atomic swap — only after the durable commit succeeded. Assignments only:

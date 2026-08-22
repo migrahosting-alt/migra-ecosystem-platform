@@ -19,6 +19,7 @@ import type {
   DurableAuditEvent, DurableUsageRecord, DurableIncident, DurableRecoveryEvent, DurableBudgetScope, DurableReservation, OperationalCounts,
   DurableAgentRun, DurableAgentRunEvent, AgentRunTransitionInput, DurableAgentRunState, AgentRunReconciliationClaim, DurableAgentRunTombstone, AgentRunFencedEventInput, AgentRunReproposalInput, AgentRunReproposalResult,
   DurableAgentRunChild, DurableChildState, AgentRunChildTransitionInput, AgentRunChildWriteResult,
+  PersistenceScope,
 } from './types.js';
 import { DURABLE_CHILD_TERMINAL_STATES, isLegalChildTransition } from './types.js';
 import type { Conversation, Message, Summary, MemoryItem } from '../memory/conversationStore.js';
@@ -850,7 +851,13 @@ export class SqliteDurableStore implements DurableStore {
     });
   }
 
-  async commitSync(indexId: string, version: number, changed: PersistedChunk[], changedFiles: string[], deletedFiles: string[], updatedAt: number): Promise<void> {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- see below
+  async commitSync(indexId: string, version: number, changed: PersistedChunk[], changedFiles: string[], deletedFiles: string[], updatedAt: number, _scope?: PersistenceScope): Promise<void> {
+    // Declared and ignored ON PURPOSE. SQLite has no scope columns and no
+    // row-level security, so there is nothing to enforce here. It is named
+    // rather than omitted because TypeScript accepts a narrower signature
+    // silently, and an invisibly dropped parameter is the exact failure mode
+    // that hid a dropped Promise in this same file.
     // ── Validate the ENTIRE candidate before BEGIN ──────────────────────────
     // Serializing inside the transaction was not enough: `toBlob` used to accept
     // `undefined` silently, so the transaction COMMITTED bad rows and the failure

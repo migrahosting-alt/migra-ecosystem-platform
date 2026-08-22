@@ -26,13 +26,27 @@ export interface PersistenceHealth {
 }
 
 // ── Conversation memory ──────────────────────────────────────────────────────
+/** The tenant/workspace pair every scoped statement declares. */
+export interface PersistenceScope {
+  owner: string;
+  workspace: string;
+}
+
 export interface ConversationPersistence {
   saveConversation(c: Conversation): Promise<void>;
   /** Hard cascade delete: the conversation + its messages + summaries, so a
    * deleted conversation is inaccessible after restart. */
   deleteConversation(id: string): Promise<void>;
-  saveMessage(m: Message): Promise<void>;
-  saveSummary(s: Summary): Promise<void>;
+  /**
+   * Scope is supplied by the caller because it cannot be recovered.
+   *
+   * Under FORCE ROW LEVEL SECURITY a connection that has not declared its scope
+   * sees no rows at all, so the parent conversation cannot be read to learn it.
+   * The database re-checks the row against the declared scope (`WITH CHECK`),
+   * so a wrong scope is a hard write failure rather than a cross-tenant write.
+   */
+  saveMessage(m: Message, scope: PersistenceScope): Promise<void>;
+  saveSummary(s: Summary, scope: PersistenceScope): Promise<void>;
   /** Hydrate durable conversations + their messages (in order) + summaries. */
   loadDurable(): Promise<{ conversations: Conversation[]; messages: Message[]; summaries: Summary[] }>;
 }
@@ -88,7 +102,12 @@ export interface RagIndexPersistence {
    * the index version is bumped — all in one transaction. A failure leaves the
    * previous persisted version intact (never a partial write).
    */
-  commitSync(indexId: string, version: number, changed: PersistedChunk[], changedFiles: string[], deletedFiles: string[], updatedAt: number): Promise<void>;
+  /**
+   * Scope is carried for the same reason `saveMessage` carries it: `index_chunks`
+   * is row-level-security protected, and an `indexId` cannot be resolved to a
+   * scope by reading first — an undeclared connection sees no rows at all.
+   */
+  commitSync(indexId: string, version: number, changed: PersistedChunk[], changedFiles: string[], deletedFiles: string[], updatedAt: number, scope: PersistenceScope): Promise<void>;
   /**
    * Promote (or clear, with `null`) the version authorised for production
    * retrieval. Independent of `state`: advancing a candidate must never move this

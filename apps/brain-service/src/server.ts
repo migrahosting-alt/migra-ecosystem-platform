@@ -290,11 +290,16 @@ async function main(): Promise<void> {
       app.log.error({ err: durableError }, 'durable store unavailable — engine starting in DEGRADED persistence state');
     }
   } else if (selection.kind === 'postgres') {
-    // The PostgreSQL repositories exist and are tested, but they cannot be
-    // reached through this slot yet: `DurableStore` is a synchronous contract
-    // (built around node:sqlite) and the PostgreSQL driver is asynchronous.
-    // Converting that contract is sub-slice 2.5; the runtime assembly and its
-    // startup gates land with it.
+    // PostgreSQL repositories and async persistence contracts already exist.
+    // Runtime PostgreSQL persistence requires a DurableStore aggregate that
+    // delegates the existing interfaces to the PostgreSQL repositories.
+    // SQLite remains the local/dev adapter only, pending its removal.
+    //
+    // NOTE: the previous comment here claimed DurableStore was a synchronous
+    // contract awaiting "sub-slice 2.5". That was stale — every method has been
+    // Promise-returning for some time — and it caused a migration to be planned
+    // that did not exist. No future-roadmap claims in comments unless they are
+    // mechanically enforced.
     //
     // Until then this refuses rather than presenting a half-implemented store
     // as usable, and specifically never falls back to SQLite.
