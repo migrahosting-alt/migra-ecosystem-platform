@@ -170,7 +170,88 @@ than assumed working; it remains covered by unit tests at the route and client l
 Storage restored → Brain restarted → the turn answered `144`, four messages persisted, and the
 pre-outage marker (`CANARY ISOLATION MARKER 5150`) intact.
 
-## Known limitation — remaining consumer cases
+## Authenticated destructive matrix — run 2026-08-22
+
+All four cases driven through the authenticated canary UI/API, with **real infrastructure
+faults only** — a read-only SQLite store, an unreadable upload root. No test switches.
+
+### 1. Index-promotion failure ✅
+
+Baseline: `alpha-canary.txt` indexed, `state: approved`, answering with a citation. Store made
+read-only, then a new document uploaded and indexed.
+
+| assertion | result |
+|---|---|
+| candidate does not become approved/searchable | ✅ `searchable: false`, `state: degraded`, chunk counts show **only alpha** |
+| nothing claims success | ✅ HTTP 502, `sync_failed` |
+| no fabrication of the un-indexed content | ✅ the `betaCode` question failed closed, 503 |
+| existing approved index intact | ✅ chunk counts preserved through the fault |
+| recovery promotes cleanly | ✅ both files indexed, both answer, `state: approved` |
+
+The fault landed at **sync**, not at promotion — both write to the same store, so file
+permissions cannot isolate the promotion step. Recorded as what actually happened rather than
+claimed as an isolated promotion failure. The invariant under test holds either way.
+
+⚠️ **Finding, not yet fixed:** the message is `"Your files could not be read. Nothing was
+indexed."` The files were perfectly readable; the STORE could not be written. Same misdirection
+class as the chat-path defect fixed in `e7a2951`, and it points the user at their documents
+instead of at the outage.
+
+### 2. `UPLOAD_ROOT` read failure — 🚨 found a real defect, now fixed
+
+With the upload root unreadable for a **single turn**:
+
+| assertion | before fix | after fix |
+|---|---|---|
+| no fabrication | ✅ | ✅ |
+| no leak of document contents | ✅ | ✅ |
+| durable grounding retained | ❌ **erased to `[]`** | ✅ preserved |
+| usable again after recovery, no re-attach | ❌ **never came back** | ✅ answers again |
+
+`reconcileGrounding` reported every name as `missing` when the library could not be read, and
+the caller correctly treats `missing` as "deleted, drop it permanently". One storage hiccup
+therefore destroyed the user's own choice, permanently — the exact outcome the function's doc
+comment forbids. Fixed in `25bf79f`; an unreadable library now reports `libraryUnreadable` with
+an empty missing list, and no set derived from it is ever persisted.
+
+### 3. Partial-delete cleanup ✅
+
+Store made read-only, then `beta-canary.txt` deleted **through the real Files UI**.
+
+- route returned **`DELETE /api/files?name=beta-canary.txt → 207 Multi-Status`**
+- the deployed warning appeared verbatim: *"The file was deleted, but your search index could
+  not be updated, so its contents may still appear in answers until indexing runs again."*
+- it did **not** masquerade as a clean delete
+- after recovery and re-index, the deleted content is unreachable — `IRON HERON 902` is gone
+
+Limitation: the stale-content window itself could not be observed, because the same outage that
+fails the purge also fails chat turns closed. The 207 and the warning are proven; "content
+briefly retrievable after a failed purge" is not.
+
+### 4. Non-searchable / recovery transition ✅ (with a recorded limit)
+
+Retained conversation state never made unavailable content retrievable: during the outage the
+durable set stayed `["alpha-canary.txt"]`, the turn failed closed at 503, and nothing was
+fabricated. After recovery the conversation answered **without re-attachment**.
+
+An honest distinction worth keeping: with only the store read-only, the index correctly reports
+`searchable: true` — it genuinely *is* readable and approved, and the block is on the
+conversation write path. The `degraded`/`searchable: false` state was reached in case 1, where a
+failed index write left it there. **A pure "index unsearchable while everything else works"
+fault still has no natural inducer**, and manufacturing one would need the test switch this
+programme forbids. Unchanged from the earlier finding.
+
+## Still open
+
+- **Health needs a writable dimension.** `persistence: ready` means "opens, reads, migrations
+  current" — a READ-ONLY database reports ready. Too broad a name for what the write path now
+  guarantees; read readiness and write readiness should be separate.
+- **The assistant-output-not-saved window stays explicitly unverified.** It needs storage to
+  fail between the user commit and the assistant commit. Not to be manufactured by distorting
+  the architecture.
+- **`sync_failed` blames the user's files for a store outage** (case 1).
+
+## Superseded limitation — the consumer half
 
 Still untested through the authenticated product: index-promotion failure, storage-read failure
 through `UPLOAD_ROOT`, partial-delete cleanup failure and the real 207 UI, and non-searchable
