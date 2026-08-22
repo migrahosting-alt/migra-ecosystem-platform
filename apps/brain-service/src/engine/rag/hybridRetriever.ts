@@ -35,6 +35,15 @@ export interface Reranker {
 }
 
 export interface HybridOptions {
+  /**
+   * Restrict retrieval to these files.
+   *
+   * When present it is a BOUNDARY, not a preference: nothing outside the set may be
+   * returned, and there is no fallback to the wider index. A grounded conversation must
+   * answer from the documents it names or refuse — quietly widening the search is how an
+   * answer ends up citing a file the user never attached.
+   */
+  files?: readonly string[];
   topK?: number;
   maxChunks?: number;
   tokenBudget?: number;
@@ -56,7 +65,8 @@ export async function hybridRetrieve(
   const tokenBudget = opts.tokenBudget ?? 2000;
 
   const terms = tokenize(queryText);
-  const candidates = index.search(queryVec, topK);
+  const scope = opts.files && opts.files.length > 0 ? new Set(opts.files) : undefined;
+  const candidates = index.search(queryVec, topK, scope);
   if (candidates.length === 0) {
     return { chunks: [], diagnostics: { candidatesConsidered: 0, returned: 0, deduped: 0, omittedForBudget: 0, estimatedTokens: 0, reranked: false } };
   }

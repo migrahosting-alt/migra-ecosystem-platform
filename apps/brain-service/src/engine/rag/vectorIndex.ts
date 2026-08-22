@@ -80,9 +80,19 @@ export class VectorIndex {
   }
 
   /** Top-K by cosine similarity across all chunks. */
-  search(queryVec: number[], topK: number): SearchHit[] {
+  /**
+   * Nearest chunks, optionally restricted to a set of files.
+   *
+   * THE SCOPE IS APPLIED BEFORE RANKING, not after. Taking top-K across the whole index
+   * and filtering the survivors silently loses recall: a conversation grounded in one
+   * small file would be out-scored by every other document the user owns, and the answer
+   * would come back "your indexed documents do not cover that" for a file that was right
+   * there. Measured exactly that way in production before this existed.
+   */
+  search(queryVec: number[], topK: number, files?: ReadonlySet<string>): SearchHit[] {
     const hits: SearchHit[] = [];
-    for (const list of this.byFile.values()) {
+    for (const [filePath, list] of this.byFile.entries()) {
+      if (files && !files.has(filePath)) continue;
       for (const chunk of list) hits.push({ chunk, semantic: cosine(queryVec, chunk.vector) });
     }
     hits.sort((a, b) => b.semantic - a.semantic);

@@ -11,6 +11,7 @@
  */
 
 import { requireSession } from '@/server/auth'
+import { reindexLibrary } from '@/server/files/reindex'
 import { UnauthenticatedError } from '@/server/auth/authPort'
 import {
   ALLOWED_EXTENSIONS,
@@ -99,7 +100,32 @@ export async function DELETE(request: Request): Promise<Response> {
   try {
     const removed = await deleteFile(name)
     if (!removed) return fail(404, 'not_found', 'That file is not in your library.')
-    return Response.json({ deleted: name })
+
+    /*
+     * DELETION IS NOT DONE UNTIL THE CONTENT IS UNANSWERABLE.
+     *
+     * The bytes are gone, but retrieval serves the APPROVED index version, which still
+     * holds this file's chunks. Measured in production: the question right after a delete
+     * answered from the deleted file and cited it by name. Re-reading and re-promoting the
+     * library is what removes it from what can be retrieved.
+     */
+    const reindexed = await reindexLibrary()
+    if (!reindexed.ok) {
+      // The file IS deleted; what failed is making that true for search. Say so rather
+      // than reporting a clean delete the index will contradict on the next question.
+      return Response.json(
+        {
+          deleted: name,
+          searchPurged: false,
+          message:
+            'The file was deleted, but your search index could not be updated, so its ' +
+            'contents may still appear in answers until indexing runs again.',
+        },
+        { status: 207 },
+      )
+    }
+
+    return Response.json({ deleted: name, searchPurged: true })
   } catch (error) {
     if (error instanceof FileRejected) return fail(400, error.code, error.message)
     throw error

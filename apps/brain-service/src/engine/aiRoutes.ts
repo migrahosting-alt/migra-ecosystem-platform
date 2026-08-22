@@ -76,6 +76,15 @@ interface AiChatBody {
    * evidence. Defaults to false so existing callers are unaffected.
    */
   requireApproved?: boolean;
+  /**
+   * Restrict grounded retrieval to these files.
+   *
+   * A BOUNDARY, not a hint: when present, nothing outside the set may be retrieved and
+   * there is no fallback to the wider index. This is what makes a conversation's attached
+   * files mean something — without it the set only toggled grounding on, and retrieval
+   * ranked across every document the caller owned.
+   */
+  groundingFiles?: string[];
   /** Explicit evidence-source mode; supersedes `requireApproved`. */
   groundingMode?: GroundingMode;
   /** Branch of the caller's checkout, for divergence disclosure. */
@@ -340,7 +349,17 @@ export function registerAiRoutes(
         {
           approvedIndexId: () => indexService.approvedIndexFor(scope),
           retrieveApproved: async (indexId, query) => {
-            const rag = await indexService.retrieve(indexId, scope, query, { maxChunks: 6, tokenBudget: 2000, requireApproved: true });
+            // Only strings, and only when non-empty: an empty array must not read as
+            // "scope to nothing", which would silently refuse every grounded answer.
+            const files = Array.isArray(body.groundingFiles)
+              ? body.groundingFiles.filter((f): f is string => typeof f === 'string' && f.trim().length > 0)
+              : [];
+            const rag = await indexService.retrieve(indexId, scope, query, {
+              maxChunks: 6,
+              tokenBudget: 2000,
+              requireApproved: true,
+              ...(files.length > 0 ? { files } : {}),
+            });
             if (!rag.ok) throw new Error(rag.code);
             return rag.chunks.map((c) => ({ path: c.filePath, startLine: c.startLine, endLine: c.endLine, snippet: c.snippet, score: c.score }));
           },

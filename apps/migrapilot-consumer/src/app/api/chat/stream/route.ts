@@ -286,7 +286,13 @@ export async function POST(request: Request): Promise<Response> {
 
       const opened = await chatTurnStream(
         prompt,
-        { ...(conversationSummary ? { conversationSummary } : {}), groundingMode },
+        {
+          ...(conversationSummary ? { conversationSummary } : {}),
+          groundingMode,
+          // The BOUNDARY for retrieval, not a hint. Sent only when grounded, so an
+          // ungrounded turn cannot accidentally scope itself to a stale list.
+          ...(grounded ? { groundingFiles: reconciled.available } : {}),
+        },
         // The browser going away must stop the model, not just this handler.
         { signal: request.signal },
       )
