@@ -24,7 +24,7 @@ import { DURABLE_CHILD_TERMINAL_STATES, isLegalChildTransition } from './types.j
 import type { Conversation, Message, Summary, MemoryItem } from '../memory/conversationStore.js';
 import { validateRecoverySourceProvenance } from '../recoverySourceProvenance.js';
 
-export const SCHEMA_VERSION = 7;
+export const SCHEMA_VERSION = 8;
 
 export type AgentRunReproposalFaultPhase =
   | 'recovery-status source read'
@@ -48,7 +48,8 @@ const SCHEMA = `
 CREATE TABLE IF NOT EXISTS schema_meta (key TEXT PRIMARY KEY, value TEXT);
 CREATE TABLE IF NOT EXISTS conversations (
   id TEXT PRIMARY KEY, owner_scope TEXT, workspace_scope TEXT, title TEXT,
-  memory_mode TEXT, created_at INTEGER, updated_at INTEGER, deleted_at INTEGER);
+  memory_mode TEXT, created_at INTEGER, updated_at INTEGER, deleted_at INTEGER,
+  grounding_files TEXT);
 CREATE TABLE IF NOT EXISTS conversation_messages (
   id TEXT PRIMARY KEY, conversation_id TEXT, role TEXT, content TEXT, status TEXT,
   request_id TEXT, model_id TEXT, provider_id TEXT, created_at INTEGER, durable INTEGER,
@@ -750,6 +751,11 @@ export class SqliteDurableStore implements DurableStore {
         this.addColumnIfMissing('agent_runs', 'domain_kind', 'TEXT');
         this.addColumnIfMissing('agent_runs', 'domain_schema_version', 'INTEGER');
         this.addColumnIfMissing('agent_runs', 'domain_payload_json', 'TEXT');
+        // ── v8: conversation-scoped grounding ─────────────────────────────────
+        // Purely additive. Every existing conversation reads back NULL, which maps
+        // to "grounded in nothing" — the same behaviour it had before the column
+        // existed, so no thread changes meaning on upgrade.
+        this.addColumnIfMissing('conversations', 'grounding_files', 'TEXT');
         this.db.prepare('INSERT INTO schema_meta(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').run('schema_version', String(SCHEMA_VERSION));
       }
     });
@@ -766,10 +772,16 @@ export class SqliteDurableStore implements DurableStore {
   // ── ConversationPersistence ──────────────────────────────────────────────
   async saveConversation(c: Conversation): Promise<void> {
     this.db.prepare(
-      `INSERT INTO conversations(id,owner_scope,workspace_scope,title,memory_mode,created_at,updated_at,deleted_at)
-       VALUES(?,?,?,?,?,?,?,NULL)
-       ON CONFLICT(id) DO UPDATE SET title=excluded.title, updated_at=excluded.updated_at`,
-    ).run(c.id, c.ownerScope, c.workspaceScope, c.title, c.memoryMode, c.createdAt, c.updatedAt);
+      `INSERT INTO conversations(id,owner_scope,workspace_scope,title,memory_mode,created_at,updated_at,deleted_at,grounding_files)
+       VALUES(?,?,?,?,?,?,?,NULL,?)
+       ON CONFLICT(id) DO UPDATE SET title=excluded.title, updated_at=excluded.updated_at,
+         grounding_files=excluded.grounding_files`,
+    ).run(
+      c.id, c.ownerScope, c.workspaceScope, c.title, c.memoryMode, c.createdAt, c.updatedAt,
+      // NULL rather than "[]" when there is nothing: an empty set and "never set"
+      // are the same fact here, and storing both invites them to diverge.
+      c.groundingFiles && c.groundingFiles.length > 0 ? JSON.stringify(c.groundingFiles) : null,
+    );
   }
 
   async deleteConversation(id: string): Promise<void> {
@@ -1677,7 +1689,26 @@ export class SqliteDurableStore implements DurableStore {
 }
 
 function rowToConversation(r: Record<string, unknown>): Conversation {
-  return { id: r.id as string, ownerScope: r.owner_scope as string, workspaceScope: r.workspace_scope as string, title: r.title as string, memoryMode: r.memory_mode as Conversation['memoryMode'], createdAt: r.created_at as number, updatedAt: r.updated_at as number };
+  return {
+    id: r.id as string, ownerScope: r.owner_scope as string, workspaceScope: r.workspace_scope as string,
+    title: r.title as string, memoryMode: r.memory_mode as Conversation['memoryMode'],
+    createdAt: r.created_at as number, updatedAt: r.updated_at as number,
+    // A row written before v8 has no column value at all. Unparseable JSON is
+    // treated as "grounded in nothing" rather than throwing: one bad row must not
+    // take the whole hydrate down on startup.
+    ...(typeof r.grounding_files === 'string' && r.grounding_files.length > 0
+      ? { groundingFiles: safeJsonArray(r.grounding_files as string) }
+      : {}),
+  };
+}
+
+function safeJsonArray(raw: string): string[] {
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter((v): v is string => typeof v === 'string') : [];
+  } catch {
+    return [];
+  }
 }
 function rowToMessage(r: Record<string, unknown>): Message {
   return { id: r.id as string, conversationId: r.conversation_id as string, role: r.role as Message['role'], content: r.content as string, status: r.status as Message['status'], requestId: (r.request_id as string) ?? undefined, modelId: (r.model_id as string) ?? undefined, providerId: (r.provider_id as string) ?? undefined, createdAt: r.created_at as number, durable: (r.durable as number) === 1, supersedesId: (r.supersedes_id as string) ?? undefined };

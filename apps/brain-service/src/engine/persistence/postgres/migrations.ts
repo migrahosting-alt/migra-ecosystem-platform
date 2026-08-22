@@ -406,6 +406,15 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON embedding_cache TO migrapilot_app;
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO migrapilot_app;
 `;
 
+/**
+ * Conversation-scoped grounding. Purely additive and idempotent: an existing row
+ * reads back NULL, which maps to "grounded in nothing" — exactly the behaviour it
+ * had before the column existed, so no thread changes meaning on upgrade.
+ */
+const M9_CONVERSATION_GROUNDING = `
+ALTER TABLE conversations ADD COLUMN IF NOT EXISTS grounding_files TEXT;
+`;
+
 export const MIGRATIONS: readonly Migration[] = [
   { version: 1, name: 'foundation', sql: M1_FOUNDATION },
   { version: 2, name: 'tenancy_primitives', sql: M2_TENANCY },
@@ -415,6 +424,7 @@ export const MIGRATIONS: readonly Migration[] = [
   { version: 6, name: 'rag', sql: M6_RAG },
   { version: 7, name: 'agent_runs', sql: M7_AGENT_RUNS },
   { version: 8, name: 'operational', sql: M8_OPERATIONAL },
+  { version: 9, name: 'conversation_grounding', sql: M9_CONVERSATION_GROUNDING },
 ];
 
 /** Highest version defined in code. */

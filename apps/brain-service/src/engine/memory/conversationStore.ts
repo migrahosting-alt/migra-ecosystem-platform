@@ -32,6 +32,16 @@ export interface Conversation {
   createdAt: number;
   updatedAt: number;
   deletedAt?: number;
+  /**
+   * Files this conversation answers from, by library filename.
+   *
+   * Lives on the CONVERSATION because that is what the user experiences: they
+   * attached a file to this thread, and a reload must not change what the thread
+   * knows. It was previously a React ref in the browser, so refreshing the page
+   * silently dropped grounding and the same question started answering "I don't
+   * have access to external documents" with the earlier answers still on screen.
+   */
+  groundingFiles?: string[];
 }
 
 export type MessageRole = 'user' | 'assistant' | 'system';
@@ -181,6 +191,25 @@ export class ConversationStore {
     const c = this.getConversation(id, scope);
     if (!c) return undefined;
     c.title = title.slice(0, 200);
+    c.updatedAt = this.now();
+    if (c.memoryMode === 'durable') this.persistence.saveConversation(c);
+    return c;
+  }
+
+  /**
+   * Replace the conversation's grounding set.
+   *
+   * The whole set is sent rather than add/remove deltas: a client that retries or
+   * races cannot end up with a set nobody chose, and "what is this thread grounded
+   * in" has exactly one answer at any moment.
+   */
+  setGroundingFiles(id: string, scope: Scope, files: string[]): Conversation | undefined {
+    const c = this.getConversation(id, scope);
+    if (!c) return undefined;
+    // Bounded, de-duplicated, order preserved. Names come from the caller's own
+    // library; anything empty or absurdly long is not a filename.
+    const cleaned = [...new Set(files.filter((f) => typeof f === 'string' && f.length > 0 && f.length <= 255))].slice(0, 50);
+    c.groundingFiles = cleaned;
     c.updatedAt = this.now();
     if (c.memoryMode === 'durable') this.persistence.saveConversation(c);
     return c;

@@ -70,6 +70,31 @@ export function registerMemoryRoutes(app: FastifyInstance, store: ConversationSt
     return conv;
   });
 
+  /**
+   * Replace the conversation's grounding set.
+   *
+   * PUT, not POST: the whole set is sent, so a retry or a race cannot leave the
+   * thread grounded in something nobody chose, and "what is this grounded in" has
+   * one answer at any moment. An empty array is a legitimate body — it means the
+   * user detached everything, which is different from never having attached.
+   */
+  app.put<{ Params: { id: string }; Body: { files?: unknown } }>(
+    '/api/ai/conversations/:id/grounding',
+    async (request, reply) => {
+      const files = request.body?.files;
+      if (!Array.isArray(files) || files.some((f) => typeof f !== 'string')) {
+        reply.code(400);
+        return { ok: false, code: 'INVALID_INPUT', error: 'A `files` array of filenames is required.' };
+      }
+      const conv = store.setGroundingFiles(request.params.id, scopeFrom(request), files as string[]);
+      if (!conv) {
+        reply.code(404);
+        return { ok: false, code: 'UNKNOWN_CONVERSATION', error: 'Conversation not found.' };
+      }
+      return conv;
+    },
+  );
+
   app.delete<{ Params: { id: string } }>('/api/ai/conversations/:id', async (request, reply) => {
     const ok = store.deleteConversation(request.params.id, scopeFrom(request));
     if (!ok) {

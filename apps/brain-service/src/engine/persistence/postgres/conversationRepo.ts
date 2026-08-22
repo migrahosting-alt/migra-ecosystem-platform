@@ -50,7 +50,21 @@ export function rowToConversation(r: Record<string, unknown>): Conversation {
     createdAt: num(r.created_at),
     updatedAt: num(r.updated_at),
     ...(r.deleted_at !== null && r.deleted_at !== undefined ? { deletedAt: num(r.deleted_at) } : {}),
+    // Unparseable JSON reads as "grounded in nothing" rather than throwing: one bad
+    // row must not take the whole hydrate down on startup.
+    ...(typeof r.grounding_files === 'string' && r.grounding_files.length > 0
+      ? { groundingFiles: safeJsonArray(r.grounding_files) }
+      : {}),
   };
+}
+
+function safeJsonArray(raw: string): string[] {
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter((v): v is string => typeof v === 'string') : [];
+  } catch {
+    return [];
+  }
 }
 
 export function rowToMessage(r: Record<string, unknown>): Message {
@@ -91,10 +105,14 @@ export function rowToSummary(r: Record<string, unknown>): Summary {
 export async function saveConversation(client: PoolClient, c: Conversation): Promise<void> {
   await client.query(
     `INSERT INTO conversations
-       (id, owner_scope, workspace_scope, title, memory_mode, created_at, updated_at, deleted_at)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,NULL)
-     ON CONFLICT (id) DO UPDATE SET title = EXCLUDED.title, updated_at = EXCLUDED.updated_at`,
-    [c.id, c.ownerScope, c.workspaceScope, c.title, c.memoryMode, c.createdAt, c.updatedAt],
+       (id, owner_scope, workspace_scope, title, memory_mode, created_at, updated_at, deleted_at, grounding_files)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,NULL,$8)
+     ON CONFLICT (id) DO UPDATE SET title = EXCLUDED.title, updated_at = EXCLUDED.updated_at,
+       grounding_files = EXCLUDED.grounding_files`,
+    [
+      c.id, c.ownerScope, c.workspaceScope, c.title, c.memoryMode, c.createdAt, c.updatedAt,
+      c.groundingFiles && c.groundingFiles.length > 0 ? JSON.stringify(c.groundingFiles) : null,
+    ],
   );
 }
 

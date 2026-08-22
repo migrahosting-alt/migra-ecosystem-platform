@@ -120,8 +120,8 @@ async function reproposalInput(store: SqliteDurableStore, source: DurableAgentRu
   };
 }
 
-test('SCHEMA_VERSION is 7 (agent run children + opaque versioned domain payload)', () => {
-  assert.equal(SCHEMA_VERSION, 7);
+test('SCHEMA_VERSION is 8 (conversation-scoped grounding)', () => {
+  assert.equal(SCHEMA_VERSION, 8);
 });
 
 test('operational data survives a restart (write → close → reopen → read)', async () => {
@@ -193,7 +193,7 @@ test('retention prunes by age; open incidents are NEVER pruned', async () => {
   store.close();
 });
 
-test('a v2 database upgrades additively to v3 (Agent journal tables created on reopen)', async () => {
+test('a v2 database upgrades additively to the current schema (Agent journal tables created on reopen)', async () => {
   const p = tmpDb();
   // Simulate an existing v2 DB: create the base + set schema_version=2, then reopen with the v3 engine.
   const raw = new DatabaseSync(p);
@@ -201,17 +201,17 @@ test('a v2 database upgrades additively to v3 (Agent journal tables created on r
   raw.prepare('INSERT INTO schema_meta(key,value) VALUES(?,?)').run('schema_version', '2');
   raw.close();
   const store = new SqliteDurableStore(p); // v7 engine migrates additively
-  assert.equal((await store.health()).schemaVersion, 7);
+  assert.equal((await store.health()).schemaVersion, 8);
   assert.deepEqual((await store.loadAgentRuns()), []);
   store.close();
 });
 
-test('a v7 database startup is idempotent and refuses newer schemas', async () => {
+test('a v8 database startup is idempotent and refuses newer schemas', async () => {
   const p = tmpDb();
   let store = new SqliteDurableStore(p);
   store.close();
   store = new SqliteDurableStore(p);
-  assert.equal((await store.health()).schemaVersion, 7);
+  assert.equal((await store.health()).schemaVersion, 8);
   store.close();
 
   const bad = tmpDb();
@@ -219,10 +219,10 @@ test('a v7 database startup is idempotent and refuses newer schemas', async () =
   raw.exec('CREATE TABLE IF NOT EXISTS schema_meta (key TEXT PRIMARY KEY, value TEXT);');
   raw.prepare('INSERT INTO schema_meta(key,value) VALUES(?,?)').run('schema_version', '999');
   raw.close();
-  assert.throws(() => new SqliteDurableStore(bad), /schema v999 > engine v7/);
+  assert.throws(() => new SqliteDurableStore(bad), /schema v999 > engine v8/);
 });
 
-test('v7 schema integrity fails closed on missing index or malformed tombstone table', () => {
+test('v8 schema integrity fails closed on missing index or malformed tombstone table', () => {
   const missingIndex = tmpDb();
   let store = new SqliteDurableStore(missingIndex);
   store.close();
@@ -241,7 +241,7 @@ test('v7 schema integrity fails closed on missing index or malformed tombstone t
     CREATE TABLE agent_run_tombstones (tombstone_id TEXT PRIMARY KEY, run_id TEXT);
   `);
   raw.close();
-  assert.throws(() => new SqliteDurableStore(malformed), /db schema v7 (missing|has nullable|has incompatible|cannot migrate)/);
+  assert.throws(() => new SqliteDurableStore(malformed), /db schema v8 (missing|has nullable|has incompatible|cannot migrate)/);
 
   const missingForeignKey = tmpDb();
   store = new SqliteDurableStore(missingForeignKey);
@@ -258,7 +258,7 @@ test('v7 schema integrity fails closed on missing index or malformed tombstone t
   assert.throws(() => new SqliteDurableStore(missingForeignKey), /missing foreign key agent_run_events\(run_id\) -> agent_runs\(run_id\)/);
 });
 
-test('v7 Agent schema contract rejects every critical missing or malformed object', () => {
+test('v8 Agent schema contract rejects every critical missing or malformed object', () => {
   const requiredRunColumns = [
     'activation_ref',
     'proposal_hash',
@@ -357,13 +357,13 @@ test('v7 Agent schema contract rejects every critical missing or malformed objec
     const raw = new DatabaseSync(p);
     raw.prepare("UPDATE schema_meta SET value='999' WHERE key='schema_version'").run();
     raw.close();
-  }, /schema v999 > engine v7/);
+  }, /schema v999 > engine v8/);
 });
 
 test('clean v7 initialization and v2/v3/v4/v5/v6 migrations create every validator-required Agent object', async () => {
   for (const p of [initializedDb()]) {
     const store = new SqliteDurableStore(p);
-    assert.equal((await store.health()).schemaVersion, 7);
+    assert.equal((await store.health()).schemaVersion, 8);
     store.close();
   }
   for (const version of ['2', '3', '4']) {
@@ -373,7 +373,7 @@ test('clean v7 initialization and v2/v3/v4/v5/v6 migrations create every validat
     raw.prepare('INSERT INTO schema_meta(key,value) VALUES(?,?)').run('schema_version', version);
     raw.close();
     const store = new SqliteDurableStore(p);
-    assert.equal((await store.health()).schemaVersion, 7);
+    assert.equal((await store.health()).schemaVersion, 8);
     store.close();
   }
 });
