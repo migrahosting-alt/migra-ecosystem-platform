@@ -37,6 +37,16 @@ export async function GET(): Promise<Response> {
       id: conversation.id,
       title: conversation.title ?? 'Untitled',
       updatedAt: conversation.updatedAt ?? conversation.createdAt ?? null,
+      /*
+       * The files this conversation answers from.
+       *
+       * Included so the durable state is OBSERVABLE from the product itself. Without
+       * it, "does the answer agree with what is stored?" can only be guessed from
+       * behaviour, and the two could drift for a long time before anyone noticed —
+       * which is exactly how grounding-in-a-React-ref survived until a reload exposed
+       * it. Filenames the caller already owns; no tenancy material is added.
+       */
+      groundingFiles: conversation.groundingFiles ?? [],
     })),
   })
 }

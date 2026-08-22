@@ -25,8 +25,21 @@ swaps: `/opt/migrapilot/{brain-service,consumer}/current -> releases/<name>`.
 `pkgs/` holds all five packed workspace packages: `protocol`, `shared-types`,
 `pilot-client`, `agent-defs`, `workspace-tools`.
 
-**Consumer** — `.next/` (**exclude `.next/cache`**, 256 MB to 149 MB) + `package.json` +
-`next.config.ts` + `public/`. `@migrapilot/shared-types` is imported **type-only** there, so
+**Consumer** — `.next/` (**exclude BOTH `.next/cache` AND `.next/dev`**) + `package.json` +
+`next.config.ts` + `public/`.
+
+🚨 `.next/dev` is stale **dev-server** output. It was shipped to production in every earlier
+release: 207 MB of code that `next start` never serves but that sits in the release forever,
+and can contain a build older than the one being deployed. Excluding it took the artifact
+from **149 MB to 3.9 MB**.
+
+And when staging over a previous release, **move the old `.next` aside rather than laying the
+new one over it** — otherwise last release's cruft outlives every deploy:
+
+```bash
+mv ~/cstage-<sha>/.next ~/cstage-<sha>/.next.old-<sha>
+tar -xzf ~/consumer-release-<sha>.tgz -C ~/cstage-<sha>
+``` `@migrapilot/shared-types` is imported **type-only** there, so
 it is erased at build time and is not a runtime dependency.
 
 Build from a **clean tree at a known commit**, and name the artifact after that commit.
@@ -76,6 +89,36 @@ promote.** Only after this passes may `current` move.
 
 `systemctl is-active` is NOT a boot test: a crash-looping unit reports `activating
 (auto-restart)` and will read as running if you glance at it during a restart window.
+
+### 🚨 PROVE THE PORT IS FREE, AND THAT THE ANSWER CAME FROM YOUR CANDIDATE
+
+A spare-port boot test is only evidence if the process answering is the build under test.
+The Brain, finding its port occupied, does NOT fail — it logs
+
+    MigraPilot brain port already in use; reusing the existing healthy local service
+
+and serves the process already there. A stale test process left over from the PREVIOUS
+deploy therefore answered a later boot test, `PUT /grounding` returned 404, and the release
+looked broken when it was fine. That is a confident false negative, which is worse than no
+test.
+
+Before every boot test:
+
+```bash
+ss -lnt | grep <port> || echo FREE          # must print FREE
+```
+
+After it, prove the responder is yours:
+
+```bash
+grep -c "reusing the existing" <boot log>   # must be 0
+for pid in $(pgrep -f "dist/src/server.js"); do
+  echo "$pid $(readlink /proc/$pid/cwd)"    # your staging dir, not another release
+done
+```
+
+Kill only YOUR leftovers. A process whose `/proc/<pid>/cwd` is unreadable belongs to another
+user — that is the production service, and it must never be killed to free a test port.
 
 ## 5. Promote, then restart one service
 
