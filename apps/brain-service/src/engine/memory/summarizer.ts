@@ -23,12 +23,12 @@ export interface SummarizeResult {
 
 const MIN_NEW_MESSAGES = 4;
 
-export function summarizeConversation(
+export async function summarizeConversation(
   store: ConversationStore,
   scope: Scope,
   conversationId: string,
   opts: { minNewMessages?: number; force?: boolean } = {},
-): SummarizeResult {
+): Promise<SummarizeResult> {
   if (!store.getConversation(conversationId, scope)) {
     return { ok: false, reason: 'unknown-conversation' };
   }
@@ -59,7 +59,7 @@ export function summarizeConversation(
     else body.decisions.push(line);
   }
 
-  const summary = store.addSummary(conversationId, scope, {
+  const summary = await store.addSummary(conversationId, scope, {
     sourceFromMessageId: from.id,
     sourceToMessageId: to.id,
     summary: body,

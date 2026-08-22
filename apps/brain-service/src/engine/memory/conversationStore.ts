@@ -95,20 +95,51 @@ export interface MemoryItem {
 /** Write-through persistence for `durable` conversations. The default is a no-op
  * (in-memory only); a disk/DB adapter can back it without changing the store. */
 export interface MemoryPersistence {
-  saveConversation(c: Conversation): void;
-  saveMessage(m: Message): void;
-  saveSummary(s: Summary): void;
-  deleteConversation(id: string): void;
+  saveConversation(c: Conversation): Promise<void>;
+  saveMessage(m: Message): Promise<void>;
+  saveSummary(s: Summary): Promise<void>;
+  deleteConversation(id: string): Promise<void>;
   /** Optional workspace-memory persistence (a durable adapter provides it). */
-  saveMemoryItem?(item: MemoryItem): void;
+  saveMemoryItem?(item: MemoryItem): Promise<void>;
 }
 
+/**
+ * The no-op adapter. It is NOT a durable store and must never satisfy a durable
+ * write — see {@link ConversationStore.commit}, which refuses rather than
+ * letting this one silently "succeed".
+ */
 export const NOOP_PERSISTENCE: MemoryPersistence = {
-  saveConversation() {},
-  saveMessage() {},
-  saveSummary() {},
-  deleteConversation() {},
+  async saveConversation() {},
+  async saveMessage() {},
+  async saveSummary() {},
+  async deleteConversation() {},
 };
+
+/**
+ * A durable write that was NOT committed.
+ *
+ * WHY THIS IS AN ERROR AND NOT A DOWNGRADE. The canary caught the Brain
+ * answering `{ok:true, stored:true, durable:true}` for a `memoryMode: durable`
+ * write while the state database was unreadable. After recovery that
+ * conversation was gone, while durable data written before the failure survived
+ * intact — so the acknowledgement had been false, and the loss was silent.
+ *
+ * Quietly demoting a durable write to session memory would be the same lie with
+ * a softer name: the caller asked for data that outlives the process and would
+ * still be told "stored". A caller who is told the truth can retry, warn a user,
+ * or refuse to proceed. One that is told a comforting fiction cannot.
+ */
+export class PersistenceUnavailableError extends Error {
+  readonly code = 'PERSISTENCE_UNAVAILABLE';
+  constructor(
+    /** The store operation that was refused, for the audit line. */
+    readonly operation: string,
+    options?: { cause?: unknown },
+  ) {
+    super(`Durable persistence is unavailable: ${operation} was not committed.`, options);
+    this.name = 'PersistenceUnavailableError';
+  }
+}
 
 const DEFAULT_TTL = 24 * 60 * 60_000;
 const MAX_CONVERSATIONS = 1000;
@@ -125,6 +156,40 @@ export class ConversationStore {
     private readonly persistence: MemoryPersistence = NOOP_PERSISTENCE,
     private readonly ttlMs = DEFAULT_TTL,
   ) {}
+
+  /**
+   * Commit a durable write, or refuse it. THE acknowledgement gate.
+   *
+   * `durable: true` is returned ONLY after persistence has actually committed.
+   * Two distinct ways a durable write can be a lie, and both are closed here:
+   *
+   *  1. **The adapter fails.** An unreadable or unwritable database throws, and
+   *     that used to be invisible: `MemoryPersistence` declared these methods
+   *     `void` while the real adapter returns `Promise<void>`, and TypeScript's
+   *     void-return bivariance accepts that silently. The promise was dropped —
+   *     rejection and all — so the store never learned the write had failed.
+   *     The contract now returns `Promise<void>` and this awaits it.
+   *
+   *  2. **There is no durable adapter at all.** `server.ts` sets `durable` to
+   *     undefined when persistence is selected but unwired, which lands
+   *     {@link NOOP_PERSISTENCE} here — and a no-op "succeeds" every time. A
+   *     durable write against it is refused outright.
+   *
+   * The commit result is the ONLY authority. `/health` reports persistence
+   * readiness accurately and could reject some writes earlier, but it is a
+   * second source of truth about the same fact, and a write that passed a health
+   * check can still fail. Nothing here is acknowledged on a prediction.
+   */
+  private async commit(operation: string, write: () => Promise<void>): Promise<void> {
+    if (this.persistence === NOOP_PERSISTENCE) {
+      throw new PersistenceUnavailableError(operation);
+    }
+    try {
+      await write();
+    } catch (cause) {
+      throw new PersistenceUnavailableError(operation, { cause });
+    }
+  }
 
   /** Load durable state from persistence on startup (never re-persists what it
    * loads). Session/off conversations are not part of durable state. */
@@ -144,7 +209,7 @@ export class ConversationStore {
   }
 
   // ── Conversations ────────────────────────────────────────────────────────
-  createConversation(scope: Scope, params: { title?: string; memoryMode: MemoryMode; id?: string }): Conversation {
+  async createConversation(scope: Scope, params: { title?: string; memoryMode: MemoryMode; id?: string }): Promise<Conversation> {
     const t = this.now();
     // An explicit id lets the engine RE-ADOPT a client's still-referenced
     // conversationId after in-memory `session` state was lost (e.g. a brain
@@ -160,10 +225,12 @@ export class ConversationStore {
       createdAt: t,
       updatedAt: t,
     };
+    // ORDER IS THE ROLLBACK. Persist first: a refused durable write must leave no
+    // conversation behind, and there is nothing to undo if it never existed.
+    if (c.memoryMode === 'durable') await this.commit('createConversation', () => this.persistence.saveConversation(c));
     this.conversations.set(c.id, c);
     this.messages.set(c.id, []);
     this.summaries.set(c.id, []);
-    if (c.memoryMode === 'durable') this.persistence.saveConversation(c);
     if (this.conversations.size > MAX_CONVERSATIONS) {
       const oldest = this.conversations.keys().next().value;
       if (oldest) this.hardDelete(oldest);
@@ -187,12 +254,22 @@ export class ConversationStore {
       .sort((a, b) => b.updatedAt - a.updatedAt);
   }
 
-  renameConversation(id: string, scope: Scope, title: string): Conversation | undefined {
+  async renameConversation(id: string, scope: Scope, title: string): Promise<Conversation | undefined> {
     const c = this.getConversation(id, scope);
     if (!c) return undefined;
+    // The adapter persists the conversation OBJECT, so the new value has to be on
+    // it before the commit — which makes reverting the only honest failure path.
+    const previous = { title: c.title, updatedAt: c.updatedAt };
     c.title = title.slice(0, 200);
     c.updatedAt = this.now();
-    if (c.memoryMode === 'durable') this.persistence.saveConversation(c);
+    if (c.memoryMode === 'durable') {
+      try {
+        await this.commit('renameConversation', () => this.persistence.saveConversation(c));
+      } catch (error) {
+        Object.assign(c, previous);
+        throw error;
+      }
+    }
     return c;
   }
 
@@ -203,28 +280,47 @@ export class ConversationStore {
    * races cannot end up with a set nobody chose, and "what is this thread grounded
    * in" has exactly one answer at any moment.
    */
-  setGroundingFiles(id: string, scope: Scope, files: string[]): Conversation | undefined {
+  async setGroundingFiles(id: string, scope: Scope, files: string[]): Promise<Conversation | undefined> {
     const c = this.getConversation(id, scope);
     if (!c) return undefined;
     // Bounded, de-duplicated, order preserved. Names come from the caller's own
     // library; anything empty or absurdly long is not a filename.
     const cleaned = [...new Set(files.filter((f) => typeof f === 'string' && f.length > 0 && f.length <= 255))].slice(0, 50);
+    const previous = { groundingFiles: c.groundingFiles, updatedAt: c.updatedAt };
     c.groundingFiles = cleaned;
     c.updatedAt = this.now();
-    if (c.memoryMode === 'durable') this.persistence.saveConversation(c);
+    if (c.memoryMode === 'durable') {
+      try {
+        await this.commit('setGroundingFiles', () => this.persistence.saveConversation(c));
+      } catch (error) {
+        // A grounding set the store could not persist would answer the next turn
+        // from documents this thread will not remember choosing.
+        Object.assign(c, previous);
+        throw error;
+      }
+    }
     return c;
   }
 
   /** Soft-delete + cascade: messages and summaries are dropped and the durable
    * adapter is told to remove the conversation. A deleted conversation can never
    * be reopened. */
-  deleteConversation(id: string, scope: Scope): boolean {
+  async deleteConversation(id: string, scope: Scope): Promise<boolean> {
     const c = this.getConversation(id, scope);
     if (!c) return false;
+    // A durable delete that does not commit is the defect inverted: the
+    // conversation disappears from the UI and returns after a restart. The
+    // caller is told, so it can report the deletion as incomplete.
+    if (c.memoryMode === 'durable') {
+      await this.commit('deleteConversation', () => this.persistence.deleteConversation(id));
+    } else {
+      // Best-effort for non-durable conversations: nothing was promised to disk,
+      // so a no-op adapter refusing is not a failure worth propagating.
+      await this.persistence.deleteConversation(id).catch(() => undefined);
+    }
     c.deletedAt = this.now();
     this.messages.delete(id);
     this.summaries.delete(id);
-    this.persistence.deleteConversation(id);
     return true;
   }
 
@@ -232,11 +328,11 @@ export class ConversationStore {
   /** Append a message. Under `off` nothing is retained (returns null). Idempotent
    * per (requestId, role): a retried append returns the existing record rather
    * than duplicating. Callers MUST pass already-redacted content. */
-  appendMessage(
+  async appendMessage(
     id: string,
     scope: Scope,
     msg: { role: MessageRole; content: string; status: MessageStatus; requestId?: string; modelId?: string; providerId?: string; supersedesId?: string },
-  ): Message | null {
+  ): Promise<Message | null> {
     const c = this.getConversation(id, scope);
     if (!c) return null;
     if (c.memoryMode === 'off') return null;
@@ -260,10 +356,12 @@ export class ConversationStore {
       durable: c.memoryMode === 'durable',
     };
     Object.freeze(record);
+    // Persist before the message is visible in memory: a durable message that
+    // failed to commit must not be readable until a restart quietly loses it.
+    if (record.durable) await this.commit('appendMessage', () => this.persistence.saveMessage(record));
     list.push(record);
     this.messages.set(id, list);
     c.updatedAt = record.createdAt;
-    if (record.durable) this.persistence.saveMessage(record);
     return record;
   }
 
@@ -275,15 +373,15 @@ export class ConversationStore {
   }
 
   // ── Summaries ────────────────────────────────────────────────────────────
-  addSummary(id: string, scope: Scope, s: Omit<Summary, 'id' | 'conversationId' | 'createdAt' | 'version'>): Summary | null {
+  async addSummary(id: string, scope: Scope, s: Omit<Summary, 'id' | 'conversationId' | 'createdAt' | 'version'>): Promise<Summary | null> {
     const c = this.getConversation(id, scope);
     if (!c || c.memoryMode === 'off') return null;
     const list = this.summaries.get(id) ?? [];
     const version = list.length + 1;
     const record: Summary = { ...s, id: this.mkId('sum'), conversationId: id, version, createdAt: this.now() };
+    if (c.memoryMode === 'durable') await this.commit('addSummary', () => this.persistence.saveSummary(record));
     list.push(record);
     this.summaries.set(id, list);
-    if (c.memoryMode === 'durable') this.persistence.saveSummary(record);
     return record;
   }
 

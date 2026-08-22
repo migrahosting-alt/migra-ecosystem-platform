@@ -23,7 +23,16 @@ const APPROVED_MODELS = async (): Promise<WorkspaceView['models']> => ({
 async function mkManager(opts: { persistence?: SqliteDurableStore; files?: Map<string, string> } = {}) {
   const files = opts.files ?? new Map([['src/x.ts', 'export function x() { auth login }']]);
   const idx = new IndexService(new FakeEmbedder(), () => memSource(files), undefined, undefined, opts.persistence);
-  const conv = new ConversationStore();
+  // A durable conversation now requires a store that can actually commit it —
+  // the no-op adapter is deliberately refused, because "durable" against it was
+  // an acknowledgement nothing backed. Tests that assert durable memory must
+  // supply persistence, exactly as production does.
+  const conv = new ConversationStore(undefined, undefined, {
+    async saveConversation() {},
+    async saveMessage() {},
+    async saveSummary() {},
+    async deleteConversation() {},
+  });
   // `health()` is async but WorkspaceManager needs a synchronous `() => number`;
   // the schema version cannot change mid-test, so it is resolved once here —
   // mirroring how the production composition root does it.
@@ -67,7 +76,7 @@ test('workspace isolation: B cannot see A', async () => {
 test('aggregated view: index/memory/agents/models/versions + health transitions', async () => {
   const { mgr, conv } = (await mkManager());
   const w = await mgr.openWorkspace(A, { root: '/repo/app', memoryMode: 'durable' });
-  conv.createConversation(A, { memoryMode: 'durable' });
+  await conv.createConversation(A, { memoryMode: 'durable' });
   let view = (await mgr.view(w.id, A))!;
   assert.equal(view.health, 'needs-sync', 'no sync yet');
   assert.equal(view.index.pendingSync, true);

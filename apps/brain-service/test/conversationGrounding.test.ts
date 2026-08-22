@@ -16,7 +16,7 @@ let seq = 0;
 function storeWith(saved: unknown[] = []) {
   const persistence = {
     saveConversation(c: unknown) { saved.push(structuredClone(c)); },
-    saveMessage() {}, saveSummary() {}, deleteConversation() {},
+    async saveMessage() {}, async saveSummary() {}, async deleteConversation() {},
   };
   // (now, mkId, persistence) — the clock and id factory are injected so tests do
   // not depend on wall-clock time.
@@ -24,49 +24,49 @@ function storeWith(saved: unknown[] = []) {
   return { store, saved };
 }
 
-test('a durable conversation persists its grounding set', () => {
+test('a durable conversation persists its grounding set', async () => {
   const { store, saved } = storeWith();
-  const c = store.createConversation(scope, { memoryMode: 'durable' });
-  const updated = store.setGroundingFiles(c.id, scope, ['notes.md', 'data.json']);
+  const c = await store.createConversation(scope, { memoryMode: 'durable' });
+  const updated = await store.setGroundingFiles(c.id, scope, ['notes.md', 'data.json']);
   assert.deepEqual(updated?.groundingFiles, ['notes.md', 'data.json']);
   // Written through, or a restart loses it — which is the whole point.
   assert.ok(saved.some((s) => (s as { groundingFiles?: string[] }).groundingFiles?.length === 2));
 });
 
-test('the set is replaced, never merged', () => {
+test('the set is replaced, never merged', async () => {
   // Deltas would let a retry leave a thread grounded in something nobody chose.
   const { store } = storeWith();
-  const c = store.createConversation(scope, { memoryMode: 'durable' });
-  store.setGroundingFiles(c.id, scope, ['a.md', 'b.md']);
-  assert.deepEqual(store.setGroundingFiles(c.id, scope, ['c.md'])?.groundingFiles, ['c.md']);
+  const c = await store.createConversation(scope, { memoryMode: 'durable' });
+  await store.setGroundingFiles(c.id, scope, ['a.md', 'b.md']);
+  assert.deepEqual((await store.setGroundingFiles(c.id, scope, ['c.md']))?.groundingFiles, ['c.md']);
 });
 
-test('detaching everything is a real state, distinct from never attaching', () => {
+test('detaching everything is a real state, distinct from never attaching', async () => {
   const { store } = storeWith();
-  const c = store.createConversation(scope, { memoryMode: 'durable' });
-  store.setGroundingFiles(c.id, scope, ['a.md']);
-  assert.deepEqual(store.setGroundingFiles(c.id, scope, [])?.groundingFiles, []);
+  const c = await store.createConversation(scope, { memoryMode: 'durable' });
+  await store.setGroundingFiles(c.id, scope, ['a.md']);
+  assert.deepEqual((await store.setGroundingFiles(c.id, scope, []))?.groundingFiles, []);
 });
 
-test('duplicates collapse and order is preserved', () => {
+test('duplicates collapse and order is preserved', async () => {
   const { store } = storeWith();
-  const c = store.createConversation(scope, { memoryMode: 'durable' });
-  assert.deepEqual(store.setGroundingFiles(c.id, scope, ['b.md', 'a.md', 'b.md'])?.groundingFiles, ['b.md', 'a.md']);
+  const c = await store.createConversation(scope, { memoryMode: 'durable' });
+  assert.deepEqual((await store.setGroundingFiles(c.id, scope, ['b.md', 'a.md', 'b.md']))?.groundingFiles, ['b.md', 'a.md']);
 });
 
-test('another tenant cannot read or set grounding', () => {
+test('another tenant cannot read or set grounding', async () => {
   const { store } = storeWith();
-  const c = store.createConversation(scope, { memoryMode: 'durable' });
-  assert.equal(store.setGroundingFiles(c.id, { owner: 'other', workspace: 'w1' }, ['x.md']), undefined);
+  const c = await store.createConversation(scope, { memoryMode: 'durable' });
+  assert.equal(await store.setGroundingFiles(c.id, { owner: 'other', workspace: 'w1' }, ['x.md']), undefined);
 });
 
-test('a new conversation starts grounded in nothing', () => {
+test('a new conversation starts grounded in nothing', async () => {
   const { store } = storeWith();
-  const c = store.createConversation(scope, { memoryMode: 'durable' });
+  const c = await store.createConversation(scope, { memoryMode: 'durable' });
   assert.equal(c.groundingFiles, undefined);
 });
 
-test('hydrated conversations keep the grounding they were stored with', () => {
+test('hydrated conversations keep the grounding they were stored with', async () => {
   // The restart path: what loadDurable returns must come back intact.
   const { store } = storeWith();
   store.hydrate({

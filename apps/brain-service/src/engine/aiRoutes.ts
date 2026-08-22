@@ -38,7 +38,7 @@ import { selectLocalCoding, type LocalRoutingDeps } from './providers/localCodin
 import { resolveEffectivePolicy } from './providers/executionPolicy.js';
 import type { EscalationController } from './providers/escalationController.js';
 import { QualificationStore } from './qualificationStore.js';
-import { ConversationStore, type Scope } from './memory/conversationStore.js';
+import { ConversationStore, PersistenceUnavailableError, type Scope } from './memory/conversationStore.js';
 import { buildContext, type ContextDiagnostics } from './memory/contextBuilder.js';
 import { redactSecrets } from './memory/redaction.js';
 import { scopeFrom } from './memory/memoryRoutes.js';
@@ -313,7 +313,7 @@ export function registerAiRoutes(
     // summary (which the client always sends as a fallback). No recreation when the
     // client opted out of memory (mode 'off').
     if (!conv && memoryStore && body.conversationId && policy.mode !== 'off') {
-      conv = memoryStore.createConversation(scope, { memoryMode: policy.mode === 'durable' ? 'durable' : 'session', id: body.conversationId });
+      conv = await memoryStore.createConversation(scope, { memoryMode: policy.mode === 'durable' ? 'durable' : 'session', id: body.conversationId });
     }
     const memoryActive = Boolean(conv && conv.memoryMode !== 'off');
 
@@ -327,14 +327,18 @@ export function registerAiRoutes(
     }
     // Store the user message BEFORE the model call (idempotent per requestId).
     if (memoryActive && policy.store && userPrompt) {
-      memoryStore!.appendMessage(conv!.id, scope, { role: 'user', content: redactSecrets(userPrompt).text, status: 'complete', requestId });
+      // Deliberately NOT guarded: a refused durable write propagates out of the
+      // route. Storing the prompt happens before the model runs, so failing here
+      // costs no inference — and answering a turn whose prompt was never stored
+      // would leave a conversation that cannot be reconstructed.
+      await memoryStore!.appendMessage(conv!.id, scope, { role: 'user', content: redactSecrets(userPrompt).text, status: 'complete', requestId });
     }
     // Commit the assistant message ONLY on successful completion — never a
     // partial/cancelled/failed response.
     const commit = memoryActive && policy.store
-      ? (text: string, modelId: string, providerId: string): void => {
+      ? async (text: string, modelId: string, providerId: string): Promise<void> => {
           if (!text.trim()) return;
-          memoryStore!.appendMessage(conv!.id, scope, { role: 'assistant', content: redactSecrets(text).text, status: 'complete', requestId, modelId, providerId });
+          await memoryStore!.appendMessage(conv!.id, scope, { role: 'assistant', content: redactSecrets(text).text, status: 'complete', requestId, modelId, providerId });
         }
       : undefined;
 
@@ -436,7 +440,7 @@ export function registerAiRoutes(
     for (const candidate of attempts) {
       try {
         const result = await providerFor(candidate).complete(chatRequest);
-        commit?.(result.content, candidate.id, candidate.provider);
+        await commit?.(result.content, candidate.id, candidate.provider);
         await auditStore.append({
           correlationId: requestId,
           requestId,
@@ -468,6 +472,11 @@ export function registerAiRoutes(
           ...(localSavings ? { localSavings } : {}),
         };
       } catch (error) {
+        // A REFUSED DURABLE WRITE IS NOT A MODEL FAILURE. Swallowing it here
+        // would retry the whole turn against the next candidate — burning
+        // inference on a storage outage, and eventually reporting "every model
+        // failed" for a database that would not open.
+        if (error instanceof PersistenceUnavailableError) throw error;
         request.log.warn({ model: candidate.id, err: errText(error) }, 'ai/chat model failed; trying next');
         failed.push(candidate.id);
       }
@@ -661,7 +670,17 @@ async function streamChat(
       }
       // Successful completion → commit the assistant message to memory (only here,
       // never on a partial/cancelled/failed stream).
-      memory.commit?.(fullText, candidate.id, candidate.provider);
+      try {
+        await memory.commit?.(fullText, candidate.id, candidate.provider);
+      } catch (error) {
+        if (!(error instanceof PersistenceUnavailableError)) throw error;
+        // The tokens are already on the client's screen; the turn cannot be
+        // un-answered. What CAN be done is refuse to pretend it was kept.
+        send('error', {
+          code: error.code,
+          message: 'The answer was produced but could not be saved, so it will not be here after a reload.',
+        });
+      }
       await auditStore.append({
         correlationId: requestId,
         requestId,

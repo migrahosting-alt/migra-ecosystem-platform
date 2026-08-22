@@ -18,7 +18,7 @@ const STUB_ENV: BrainEnv = {
 };
 
 // ── Redaction ────────────────────────────────────────────────────────────────
-test('redaction removes secrets + approval material', () => {
+test('redaction removes secrets + approval material', async () => {
   const r = redactSecrets('token eyJhbGciOiJIUzI1NiJ9.aaaaabbbbb.cccccddddd key sk-ABCDEFGHIJKLMNOP appr_deadbeef1234 PASSWORD=hunter2 Bearer abcdef123456');
   assert.ok(!/eyJhbGc|sk-ABCDEF|appr_deadbeef|hunter2|Bearer abcdef/.test(r.text), r.text);
   assert.ok(r.redacted.length >= 4);
@@ -26,121 +26,121 @@ test('redaction removes secrets + approval material', () => {
 });
 
 // ── Conversation CRUD + isolation + cascade ─────────────────────────────────
-test('create/read/delete conversation + deleted cannot be reopened', () => {
+test('create/read/delete conversation + deleted cannot be reopened', async () => {
   const s = new ConversationStore();
-  const c = s.createConversation(A, { memoryMode: 'session' });
+  const c = await s.createConversation(A, { memoryMode: 'session' });
   assert.ok(s.getConversation(c.id, A));
-  assert.equal(s.deleteConversation(c.id, A), true);
+  assert.equal(await s.deleteConversation(c.id, A), true);
   assert.equal(s.getConversation(c.id, A), undefined, 'deleted conversation cannot be reopened');
 });
 
-test('createConversation re-adopts a well-shaped, unused client id (restart recovery)', () => {
+test('createConversation re-adopts a well-shaped, unused client id (restart recovery)', async () => {
   const s = new ConversationStore();
   // A client id whose in-memory conversation was lost (brain restart) is re-adopted
   // verbatim, so the client's stored id stays valid and forward turns accumulate.
-  const readopted = s.createConversation(A, { memoryMode: 'session', id: 'conv_stale123abc' });
+  const readopted = await s.createConversation(A, { memoryMode: 'session', id: 'conv_stale123abc' });
   assert.equal(readopted.id, 'conv_stale123abc');
   assert.ok(s.getConversation('conv_stale123abc', A), 're-adopted id is retrievable');
   // A malformed id is ignored (a fresh id is minted instead).
-  assert.notEqual(s.createConversation(A, { memoryMode: 'session', id: 'not-a-conv-id' }).id, 'not-a-conv-id');
+  assert.notEqual((await s.createConversation(A, { memoryMode: 'session', id: 'not-a-conv-id' })).id, 'not-a-conv-id');
   // A colliding id is never hijacked — a fresh id is minted.
-  assert.notEqual(s.createConversation(A, { memoryMode: 'session', id: 'conv_stale123abc' }).id, 'conv_stale123abc');
+  assert.notEqual((await s.createConversation(A, { memoryMode: 'session', id: 'conv_stale123abc' })).id, 'conv_stale123abc');
 });
 
-test('workspace + tenant isolation at the store layer', () => {
+test('workspace + tenant isolation at the store layer', async () => {
   const s = new ConversationStore();
-  const c = s.createConversation(A, { memoryMode: 'session' });
-  s.appendMessage(c.id, A, { role: 'user', content: 'secret A history', status: 'complete' });
+  const c = await s.createConversation(A, { memoryMode: 'session' });
+  await s.appendMessage(c.id, A, { role: 'user', content: 'secret A history', status: 'complete' });
   assert.equal(s.getConversation(c.id, B), undefined, 'workspace B cannot see workspace A conversation');
   assert.equal(s.getMessages(c.id, B).length, 0, 'workspace B cannot read A messages');
-  assert.equal(s.appendMessage(c.id, B, { role: 'user', content: 'x', status: 'complete' }), null);
+  assert.equal(await s.appendMessage(c.id, B, { role: 'user', content: 'x', status: 'complete' }), null);
 });
 
-test('off / session / durable retention semantics', () => {
+test('off / session / durable retention semantics', async () => {
   const saved: string[] = [];
-  const spy: MemoryPersistence = { saveConversation() {}, saveMessage: (m) => saved.push(m.id), saveSummary() {}, deleteConversation() {} };
+  const spy: MemoryPersistence = { async saveConversation() {}, saveMessage: async (m) => { saved.push(m.id); }, async saveSummary() {}, async deleteConversation() {} };
   const s = new ConversationStore(undefined, undefined, spy);
-  const off = s.createConversation(A, { memoryMode: 'off' });
-  assert.equal(s.appendMessage(off.id, A, { role: 'user', content: 'x', status: 'complete' }), null);
+  const off = await s.createConversation(A, { memoryMode: 'off' });
+  assert.equal(await s.appendMessage(off.id, A, { role: 'user', content: 'x', status: 'complete' }), null);
   assert.equal(s.getMessages(off.id, A).length, 0, 'off retains nothing');
 
-  const sess = s.createConversation(A, { memoryMode: 'session' });
-  const sm = s.appendMessage(sess.id, A, { role: 'user', content: 'x', status: 'complete' })!;
+  const sess = await s.createConversation(A, { memoryMode: 'session' });
+  const sm = (await s.appendMessage(sess.id, A, { role: 'user', content: 'x', status: 'complete' }))!;
   assert.equal(sm.durable, false);
 
-  const dur = s.createConversation(A, { memoryMode: 'durable' });
-  const dm = s.appendMessage(dur.id, A, { role: 'user', content: 'x', status: 'complete' })!;
+  const dur = await s.createConversation(A, { memoryMode: 'durable' });
+  const dm = (await s.appendMessage(dur.id, A, { role: 'user', content: 'x', status: 'complete' }))!;
   assert.equal(dm.durable, true);
   assert.ok(saved.includes(dm.id) && !saved.includes(sm.id), 'only durable messages persist');
 });
 
-test('messages are immutable; corrections create new records', () => {
+test('messages are immutable; corrections create new records', async () => {
   const s = new ConversationStore();
-  const c = s.createConversation(A, { memoryMode: 'session' });
-  const m1 = s.appendMessage(c.id, A, { role: 'assistant', content: 'first', status: 'complete' })!;
+  const c = await s.createConversation(A, { memoryMode: 'session' });
+  const m1 = (await s.appendMessage(c.id, A, { role: 'assistant', content: 'first', status: 'complete' }))!;
   assert.ok(Object.isFrozen(m1));
   assert.throws(() => { (m1 as { content: string }).content = 'edited'; });
-  const m2 = s.appendMessage(c.id, A, { role: 'assistant', content: 'corrected', status: 'complete', supersedesId: m1.id })!;
+  const m2 = (await s.appendMessage(c.id, A, { role: 'assistant', content: 'corrected', status: 'complete', supersedesId: m1.id }))!;
   assert.equal(m2.supersedesId, m1.id);
   assert.equal(s.getMessages(c.id, A).length, 2, 'correction is a NEW record');
 });
 
-test('append is idempotent per (requestId, role)', () => {
+test('append is idempotent per (requestId, role)', async () => {
   const s = new ConversationStore();
-  const c = s.createConversation(A, { memoryMode: 'session' });
-  s.appendMessage(c.id, A, { role: 'user', content: 'hi', status: 'complete', requestId: 'r1' });
-  s.appendMessage(c.id, A, { role: 'user', content: 'hi', status: 'complete', requestId: 'r1' });
+  const c = await s.createConversation(A, { memoryMode: 'session' });
+  await s.appendMessage(c.id, A, { role: 'user', content: 'hi', status: 'complete', requestId: 'r1' });
+  await s.appendMessage(c.id, A, { role: 'user', content: 'hi', status: 'complete', requestId: 'r1' });
   assert.equal(s.getMessages(c.id, A).length, 1, 'retry with same requestId does not duplicate');
 });
 
-test('deletion cascade removes messages + summaries', () => {
+test('deletion cascade removes messages + summaries', async () => {
   const s = new ConversationStore();
-  const c = s.createConversation(A, { memoryMode: 'session' });
-  for (let i = 0; i < 5; i++) s.appendMessage(c.id, A, { role: 'user', content: `m${i}`, status: 'complete' });
-  summarizeConversation(s, A, c.id, { force: true });
-  s.deleteConversation(c.id, A);
+  const c = await s.createConversation(A, { memoryMode: 'session' });
+  for (let i = 0; i < 5; i++) await s.appendMessage(c.id, A, { role: 'user', content: `m${i}`, status: 'complete' });
+  await summarizeConversation(s, A, c.id, { force: true });
+  await s.deleteConversation(c.id, A);
   assert.equal(s.getMessages(c.id, A).length, 0);
   assert.equal(s.getSummaries(c.id, A).length, 0);
 });
 
 // ── Summarizer ───────────────────────────────────────────────────────────────
-test('summary: source binding + idempotency + no invention', () => {
+test('summary: source binding + idempotency + no invention', async () => {
   const s = new ConversationStore();
-  const c = s.createConversation(A, { memoryMode: 'session' });
+  const c = await s.createConversation(A, { memoryMode: 'session' });
   const ids: string[] = [];
-  for (let i = 0; i < 5; i++) ids.push(s.appendMessage(c.id, A, { role: 'user', content: `request ${i}?`, status: 'complete' })!.id);
-  const first = summarizeConversation(s, A, c.id, { force: true });
+  for (let i = 0; i < 5; i++) ids.push((await s.appendMessage(c.id, A, { role: 'user', content: `request ${i}?`, status: 'complete' }))!.id);
+  const first = await summarizeConversation(s, A, c.id, { force: true });
   assert.ok(first.ok && first.summary);
   assert.equal(first.summary!.sourceFromMessageId, ids[0]);
   assert.equal(first.summary!.sourceToMessageId, ids[4]);
   assert.equal(first.summary!.summary.confirmedFacts.length, 0, 'no invented facts');
   assert.ok(first.summary!.summary.questions.length >= 1);
   // Idempotent: nothing new → already-summarized, returns the same summary.
-  const again = summarizeConversation(s, A, c.id, { force: true });
+  const again = await summarizeConversation(s, A, c.id, { force: true });
   assert.equal(again.reason, 'already-summarized');
   assert.equal(again.summary!.id, first.summary!.id);
 });
 
-test('summary threshold gating', () => {
+test('summary threshold gating', async () => {
   const s = new ConversationStore();
-  const c = s.createConversation(A, { memoryMode: 'session' });
-  s.appendMessage(c.id, A, { role: 'user', content: 'only one', status: 'complete' });
-  assert.equal(summarizeConversation(s, A, c.id).reason, 'not-enough-messages');
+  const c = await s.createConversation(A, { memoryMode: 'session' });
+  await s.appendMessage(c.id, A, { role: 'user', content: 'only one', status: 'complete' });
+  assert.equal((await summarizeConversation(s, A, c.id)).reason, 'not-enough-messages');
 });
 
 // ── Context builder ──────────────────────────────────────────────────────────
-test('context builder: bounded, budgeted, explainable', () => {
+test('context builder: bounded, budgeted, explainable', async () => {
   const s = new ConversationStore();
-  const c = s.createConversation(A, { memoryMode: 'session' });
+  const c = await s.createConversation(A, { memoryMode: 'session' });
   s.addMemoryItem({ scope: { workspace: 'wsA' }, category: 'workspace-fact', content: 'Uses Fastify', confidence: 0.9, sourceType: 'manual' });
-  for (let i = 0; i < 10; i++) s.appendMessage(c.id, A, { role: i % 2 ? 'assistant' : 'user', content: `msg ${i} ${'x'.repeat(200)}`, status: 'complete' });
+  for (let i = 0; i < 10; i++) await s.appendMessage(c.id, A, { role: i % 2 ? 'assistant' : 'user', content: `msg ${i} ${'x'.repeat(200)}`, status: 'complete' });
   const built = buildContext({ store: s, scope: A, conversationId: c.id, currentPrompt: 'now what?', retrieve: true, tokenBudget: 200 });
   assert.ok(built.diagnostics.workspaceMemoriesUsed >= 1);
   assert.ok(built.diagnostics.omittedForBudget > 0, 'tight budget omits older messages');
   assert.ok(built.messages[built.messages.length - 1]!.content.includes('now what?'), 'current request always included');
 });
 
-test('workspace memory isolation', () => {
+test('workspace memory isolation', async () => {
   const s = new ConversationStore();
   s.addMemoryItem({ scope: { workspace: 'wsA' }, category: 'workspace-fact', content: 'A-fact', confidence: 1, sourceType: 'manual' });
   s.addMemoryItem({ scope: { workspace: 'wsB' }, category: 'workspace-fact', content: 'B-fact', confidence: 1, sourceType: 'manual' });

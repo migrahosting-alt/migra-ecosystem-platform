@@ -15,8 +15,8 @@
  * scope. Content is redacted before storage.
  */
 
-import type { FastifyInstance, FastifyRequest } from 'fastify';
-import { ConversationStore, type MemoryMode, type MessageRole, type Scope } from './conversationStore.js';
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import { ConversationStore, PersistenceUnavailableError, type MemoryMode, type MessageRole, type Scope } from './conversationStore.js';
 import { redactSecrets } from './redaction.js';
 import { summarizeConversation } from './summarizer.js';
 
@@ -33,13 +33,36 @@ function headerValue(request: FastifyRequest, name: string): string | undefined 
 
 const MODES: MemoryMode[] = ['off', 'session', 'durable'];
 
+/**
+ * A durable write the store refused, as a structured 503.
+ *
+ * The caller asked for data that outlives the process and did not get it. That
+ * is reported, never softened into a success with `durable: false` — a client
+ * told "stored" has no reason to retry, warn anyone, or stop.
+ */
+function persistenceRefusal(error: unknown, reply: FastifyReply): { ok: false; code: string; error: string } | undefined {
+  if (!(error instanceof PersistenceUnavailableError)) return undefined;
+  reply.code(503);
+  return {
+    ok: false,
+    code: error.code,
+    error: 'Durable storage is unavailable, so this was not saved. Nothing was stored.',
+  };
+}
+
 export function registerMemoryRoutes(app: FastifyInstance, store: ConversationStore): ConversationStore {
   app.post<{ Body: { title?: string; memoryMode?: string } }>('/api/ai/conversations', async (request, reply) => {
     const scope = scopeFrom(request);
     const mode = MODES.includes(request.body?.memoryMode as MemoryMode) ? (request.body!.memoryMode as MemoryMode) : 'session';
-    const conv = store.createConversation(scope, { title: request.body?.title, memoryMode: mode });
-    reply.code(201);
-    return conv;
+    try {
+      const conv = await store.createConversation(scope, { title: request.body?.title, memoryMode: mode });
+      reply.code(201);
+      return conv;
+    } catch (error) {
+      const refusal = persistenceRefusal(error, reply);
+      if (refusal) return refusal;
+      throw error;
+    }
   });
 
   app.get('/api/ai/conversations', async (request) => {
@@ -62,7 +85,7 @@ export function registerMemoryRoutes(app: FastifyInstance, store: ConversationSt
       reply.code(400);
       return { ok: false, code: 'INVALID_INPUT', error: 'A `title` is required.' };
     }
-    const conv = store.renameConversation(request.params.id, scopeFrom(request), title);
+    const conv = await store.renameConversation(request.params.id, scopeFrom(request), title);
     if (!conv) {
       reply.code(404);
       return { ok: false, code: 'UNKNOWN_CONVERSATION', error: 'Conversation not found.' };
@@ -86,7 +109,7 @@ export function registerMemoryRoutes(app: FastifyInstance, store: ConversationSt
         reply.code(400);
         return { ok: false, code: 'INVALID_INPUT', error: 'A `files` array of filenames is required.' };
       }
-      const conv = store.setGroundingFiles(request.params.id, scopeFrom(request), files as string[]);
+      const conv = await store.setGroundingFiles(request.params.id, scopeFrom(request), files as string[]);
       if (!conv) {
         reply.code(404);
         return { ok: false, code: 'UNKNOWN_CONVERSATION', error: 'Conversation not found.' };
@@ -96,7 +119,7 @@ export function registerMemoryRoutes(app: FastifyInstance, store: ConversationSt
   );
 
   app.delete<{ Params: { id: string } }>('/api/ai/conversations/:id', async (request, reply) => {
-    const ok = store.deleteConversation(request.params.id, scopeFrom(request));
+    const ok = await store.deleteConversation(request.params.id, scopeFrom(request));
     if (!ok) {
       reply.code(404);
       return { ok: false, code: 'UNKNOWN_CONVERSATION', error: 'Conversation not found.' };
@@ -120,9 +143,17 @@ export function registerMemoryRoutes(app: FastifyInstance, store: ConversationSt
       }
       const clean = redactSecrets(content).text;
       const status = request.body?.status === 'partial' || request.body?.status === 'failed' ? request.body.status : 'complete';
-      const msg = store.appendMessage(request.params.id, scope, { role: role as MessageRole, content: clean, status });
-      // `off` conversations retain nothing → null; report that honestly.
-      return { ok: true, stored: msg !== null, message: msg };
+      try {
+        const msg = await store.appendMessage(request.params.id, scope, { role: role as MessageRole, content: clean, status });
+        // `off` conversations retain nothing → null; report that honestly.
+        return { ok: true, stored: msg !== null, message: msg };
+      } catch (error) {
+        // THE CANARY FINDING. This used to answer ok:true/stored:true/durable:true
+        // with the database unreadable, and the message was gone after a restart.
+        const refusal = persistenceRefusal(error, reply);
+        if (refusal) return refusal;
+        throw error;
+      }
     },
   );
 
@@ -137,7 +168,7 @@ export function registerMemoryRoutes(app: FastifyInstance, store: ConversationSt
 
   app.post<{ Params: { id: string }; Body: { force?: boolean } }>('/api/ai/conversations/:id/summarize', async (request, reply) => {
     const scope = scopeFrom(request);
-    const result = summarizeConversation(store, scope, request.params.id, { force: request.body?.force });
+    const result = await summarizeConversation(store, scope, request.params.id, { force: request.body?.force });
     if (!result.ok) {
       if (result.reason === 'unknown-conversation') {
         reply.code(404);

@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { SqliteDurableStore } from '../src/engine/persistence/sqliteStore.js';
+import { SCHEMA_VERSION, SqliteDurableStore } from '../src/engine/persistence/sqliteStore.js';
 import { IndexService, type FileSource, type Scope } from '../src/engine/rag/indexService.js';
 import { FakeEmbedder } from '../src/engine/rag/embedder.js';
 import { VectorIndex } from '../src/engine/rag/vectorIndex.js';
@@ -299,7 +299,7 @@ function pointers(dbPath: string, indexId: string): { version: number; approved:
   return { version: r.version, approved: r.approved_version };
 }
 
-test('a v5 database upgrades to v7 with its approved index preserved and no re-index', async (t) => {
+test('a v5 database upgrades to the current schema with its approved index preserved and no re-index', async (t) => {
   const dbPath = tmpDb();
 
   // Build a v5-shaped database: chunks with NO index_version, state 'approved',
@@ -328,7 +328,10 @@ test('a v5 database upgrades to v7 with its approved index preserved and no re-i
   // Opening with the current engine migrates additively.
   const store = new SqliteDurableStore(dbPath);
   t.after(() => store.close());
-  assert.equal((await store.health()).schemaVersion, 7);
+  // Read from the constant, not a literal: this assertion was left at 7 by the
+  // grounding migration that moved the schema to 8, and a stale number turns a
+  // passing migration into a red suite that says nothing useful.
+  assert.equal((await store.health()).schemaVersion, SCHEMA_VERSION);
   assert.equal((await store.health()).migrationState, 'applied');
 
   const p = pointers(dbPath, 'idx_live');
