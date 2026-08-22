@@ -427,6 +427,114 @@ const M9_CONVERSATION_GROUNDING = `
 ALTER TABLE conversations ADD COLUMN IF NOT EXISTS grounding_files TEXT;
 `;
 
+
+/**
+ * PARENT-SCOPE INTEGRITY.
+ *
+ * Gate 1 proved a cross-tenant hole that row-level security does not close.
+ * RLS answers "does this row belong to the scope I declared?" — and for a child
+ * row carrying its OWN scope columns the answer is trivially yes, because the
+ * writer stamps them. It never asks "does this child's parent live in that same
+ * scope?"
+ *
+ * Measured, not theorised: with the app role declaring beta's scope, a message
+ * was written against a conversation owned by alpha. WITH CHECK passed, because
+ * the row said beta and the connection said beta. The result was a structurally
+ * valid orphan under the wrong tenant. Worse, no table here had ANY foreign key,
+ * so a message could also name a conversation that had never existed.
+ *
+ * The composite key makes the mismatch unrepresentable rather than unlikely: the
+ * child must point at a parent row that matches on id AND both scopes, so a
+ * wrong scope becomes a foreign-key violation — the hard failure the design
+ * assumed it already had.
+ *
+ * Applied to every child table with the same shape, not just the two Gate 1
+ * exercised. The pattern was repo-wide: five tables, duplicated scope columns,
+ * zero foreign keys.
+ *
+ * DELIBERATELY NO CASCADES. Deletion already has an explicit path
+ * (`deleteConversation`), and attaching ON DELETE CASCADE here would change
+ * product behaviour as a side effect of an integrity fix.
+ *
+ * NOT VALID + VALIDATE: the constraint starts guarding new writes immediately
+ * while the existing-row check takes a weaker lock. The dataset is small today,
+ * but a migration that only works on a small table is a trap for the day it is
+ * not.
+ */
+const M10_PARENT_SCOPE_INTEGRITY = `
+-- PREFLIGHT. Refuse rather than repair: silently rewriting rows to satisfy a new
+-- constraint would destroy the evidence of how they came to be wrong.
+DO $$
+DECLARE
+  bad_messages   BIGINT;
+  bad_summaries  BIGINT;
+BEGIN
+  SELECT count(*) INTO bad_messages
+  FROM conversation_messages m
+  WHERE NOT EXISTS (
+    SELECT 1 FROM conversations c
+    WHERE c.id = m.conversation_id
+      AND c.owner_scope = m.owner_scope
+      AND c.workspace_scope = m.workspace_scope
+  );
+
+  SELECT count(*) INTO bad_summaries
+  FROM conversation_summaries s
+  WHERE NOT EXISTS (
+    SELECT 1 FROM conversations c
+    WHERE c.id = s.conversation_id
+      AND c.owner_scope = s.owner_scope
+      AND c.workspace_scope = s.workspace_scope
+  );
+
+  IF bad_messages > 0 OR bad_summaries > 0 THEN
+    RAISE EXCEPTION
+      'parent-scope integrity preflight failed: % orphaned/mismatched messages, % summaries. Investigate before migrating; do not rewrite rows to satisfy the constraint.',
+      bad_messages, bad_summaries;
+  END IF;
+END $$;
+
+-- The identity a child must reference: id plus BOTH scope halves.
+ALTER TABLE conversations
+  ADD CONSTRAINT conversations_scope_identity_uq
+  UNIQUE (id, owner_scope, workspace_scope);
+
+ALTER TABLE conversation_messages
+  ADD CONSTRAINT conversation_messages_parent_fk
+  FOREIGN KEY (conversation_id, owner_scope, workspace_scope)
+  REFERENCES conversations (id, owner_scope, workspace_scope) NOT VALID;
+ALTER TABLE conversation_messages VALIDATE CONSTRAINT conversation_messages_parent_fk;
+
+ALTER TABLE conversation_summaries
+  ADD CONSTRAINT conversation_summaries_parent_fk
+  FOREIGN KEY (conversation_id, owner_scope, workspace_scope)
+  REFERENCES conversations (id, owner_scope, workspace_scope) NOT VALID;
+ALTER TABLE conversation_summaries VALIDATE CONSTRAINT conversation_summaries_parent_fk;
+
+-- The index chain has the same shape: workspaces -> workspace_indexes ->
+-- index_versions -> index_chunks, each child carrying its own scope columns and
+-- none of them constrained.
+ALTER TABLE workspaces
+  ADD CONSTRAINT workspaces_scope_identity_uq
+  UNIQUE (id, owner_scope, workspace_scope);
+
+ALTER TABLE workspace_indexes
+  ADD CONSTRAINT workspace_indexes_scope_identity_uq
+  UNIQUE (id, owner_scope, workspace_scope);
+
+ALTER TABLE index_versions
+  ADD CONSTRAINT index_versions_parent_fk
+  FOREIGN KEY (index_id, owner_scope, workspace_scope)
+  REFERENCES workspace_indexes (id, owner_scope, workspace_scope) NOT VALID;
+ALTER TABLE index_versions VALIDATE CONSTRAINT index_versions_parent_fk;
+
+ALTER TABLE index_chunks
+  ADD CONSTRAINT index_chunks_parent_fk
+  FOREIGN KEY (index_id, owner_scope, workspace_scope)
+  REFERENCES workspace_indexes (id, owner_scope, workspace_scope) NOT VALID;
+ALTER TABLE index_chunks VALIDATE CONSTRAINT index_chunks_parent_fk;
+`;
+
 export const MIGRATIONS: readonly Migration[] = [
   { version: 1, name: 'foundation', sql: M1_FOUNDATION },
   { version: 2, name: 'tenancy_primitives', sql: M2_TENANCY },
@@ -437,6 +545,7 @@ export const MIGRATIONS: readonly Migration[] = [
   { version: 7, name: 'agent_runs', sql: M7_AGENT_RUNS },
   { version: 8, name: 'operational', sql: M8_OPERATIONAL },
   { version: 9, name: 'conversation_grounding', sql: M9_CONVERSATION_GROUNDING },
+  { version: 10, name: 'parent_scope_integrity', sql: M10_PARENT_SCOPE_INTEGRITY },
 ];
 
 /** Highest version defined in code. */
