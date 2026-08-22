@@ -141,7 +141,35 @@ export function FilesPage() {
 
   const remove = useCallback(
     async (name: string) => {
-      await fetch(`/api/files?name=${encodeURIComponent(name)}`, { method: 'DELETE' })
+      setProblems([])
+      /*
+       * A PARTIAL DELETE MUST NOT RENDER AS A CLEAN ONE.
+       *
+       * The bytes go first and the indexed content is purged second. When that second
+       * half fails the route answers 207 with searchPurged:false — and 207 is a 2xx, so
+       * `response.ok` is TRUE. This handler previously ignored the response entirely, so
+       * the row simply vanished and the user was told nothing: they would believe the
+       * document was gone while its contents could still be quoted back at them with a
+       * citation. Deletion is exactly where a silent half-success is least acceptable.
+       */
+      type DeleteOutcome = { searchPurged?: boolean; message?: string }
+      let outcome: DeleteOutcome | null = null
+      try {
+        const response = await fetch(`/api/files?name=${encodeURIComponent(name)}`, { method: 'DELETE' })
+        outcome = (await response.json().catch(() => null)) as DeleteOutcome | null
+        if (!response.ok) {
+          setProblems([outcome?.message ?? `${name} could not be deleted.`])
+        } else if (outcome?.searchPurged === false) {
+          setProblems([
+            outcome.message ??
+              `${name} was removed from your library, but its indexed content could not be ` +
+                `cleared and may still appear in answers. Re-index to finish removing it.`,
+          ])
+        }
+      } catch {
+        setProblems([`${name} could not be deleted — the server could not be reached.`])
+      }
+
       await refresh()
       // The library changed, so any previous index result is now stale.
       setIndex({ indexed: false })
