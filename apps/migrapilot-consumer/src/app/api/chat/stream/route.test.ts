@@ -73,6 +73,10 @@ function brainStub(
     /** Fails only the ASSISTANT append — the prompt must still be stored, or
      *  the route legitimately answers JSON instead of ever opening a stream. */
     assistantAppendStatus?: number
+    /** Fails the USER append — a storage outage stops the turn before the model runs. */
+    userAppendStatus?: number
+    /** The Brain's error body, whose `code` carries the real reason. */
+    userAppendBody?: unknown
     /** Files the conversation is durably grounded in, as the Brain would report. */
     conversationGrounding?: string[]
     /** Serve an APPROVED index so reconciliation can find one. */
@@ -109,6 +113,9 @@ function brainStub(
           return undefined
         }
       })()
+      if (role !== 'assistant' && options.userAppendStatus) {
+        return json(options.userAppendStatus, options.userAppendBody ?? { ok: false })
+      }
       const status = role === 'assistant' ? (options.assistantAppendStatus ?? 200) : 200
       return json(status, { ok: true, stored: true, message: { id: 'msg_1' } })
     }
@@ -383,6 +390,28 @@ test('a persistence refusal mid-stream is reported as not_saved, not as a failed
   )
   // The tokens still reached the user — that is the whole point of the distinction.
   assert.ok(frames.some((f) => f.event === 'token' && f.data.text === 'Paris'))
+
+  brain.restore()
+  resetAuthPort()
+})
+
+test('a storage outage is named, not blamed on "the assistant service"', async () => {
+  // Reproduced on the canary: with the Brain's database read-only, the Brain
+  // answered 503 PERSISTENCE_UNAVAILABLE and the user was shown "The assistant
+  // service could not complete this request" — a model-fault reading of a
+  // storage fault, with an identical retry as the only suggested action.
+  const brain = brainStub({
+    userAppendStatus: 503,
+    userAppendBody: { ok: false, code: 'PERSISTENCE_UNAVAILABLE', error: 'Durable storage is unavailable.' },
+  })
+  setAuthPort(portWith(session))
+
+  const response = await post({ prompt: 'hi' })
+  assert.equal(response.status, 503, 'a storage outage is not a 502 service error')
+  const body = (await response.json()) as { error: string; message: string }
+  assert.equal(body.error, 'persistence_unavailable')
+  assert.match(body.message, /could not be saved/i)
+  assert.doesNotMatch(body.message, /assistant service/i, 'must not blame the model service')
 
   brain.restore()
   resetAuthPort()

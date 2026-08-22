@@ -89,6 +89,9 @@ function refusalOr(
   error: string
   message: string
 } {
+  const outage = persistenceOutage(failure)
+  if (outage) return outage
+
   if (failure.kind === 'brain_error' || failure.kind === 'conflict') {
     const body = failure.body
     const parsed =
@@ -135,7 +138,42 @@ function refusalOr(
   return reasonFor(failure.kind)
 }
 
-/** The failure vocabulary the client renders. Mirrors the buffered route. */
+/**
+ * A storage outage, reported as a storage outage.
+ *
+ * The Brain answers 503 PERSISTENCE_UNAVAILABLE when a durable write cannot be
+ * committed. That arrived here as a generic `brain_error` — "The assistant
+ * service could not complete this request" — which reads as a model or service
+ * fault and invites the user to retry the identical request forever. The real
+ * fact is narrower, it is not their fault, and it is actionable: nothing was
+ * saved, so nothing was answered.
+ *
+ * The code travels in the Brain's response BODY, which the generic mapping
+ * never read. Verified on the canary: the Brain returned 503 with this code and
+ * the user was shown the generic service message.
+ */
+function persistenceOutage(failure: { kind: string; body?: unknown }): { error: string; message: string } | null {
+  const body = failure.body
+  const parsed =
+    typeof body === 'string'
+      ? (() => {
+          try {
+            return JSON.parse(body) as { code?: string }
+          } catch {
+            return null
+          }
+        })()
+      : (body as { code?: string } | null)
+
+  if (parsed?.code !== 'PERSISTENCE_UNAVAILABLE') return null
+  return {
+    error: 'persistence_unavailable',
+    message:
+      'Your message could not be saved, so it was not answered. Storage is unavailable right now — nothing was lost, because nothing was stored. Try again shortly.',
+  }
+}
+
+/** The failure vocabulary the client renders. Mirrors the buffered turn. */
 function reasonFor(kind: string): { error: string; message: string } {
   switch (kind) {
     case 'unauthenticated':
@@ -187,6 +225,8 @@ export async function POST(request: Request): Promise<Response> {
   if (!conversationId) {
     const created = await createConversation(titleFrom(prompt))
     if (created.kind !== 'ok') {
+      const outage = persistenceOutage(created)
+      if (outage) return json(503, outage.error, outage.message)
       const reason = reasonFor(created.kind)
       return json(created.kind === 'unauthenticated' ? 401 : 502, reason.error, reason.message)
     }
@@ -196,6 +236,12 @@ export async function POST(request: Request): Promise<Response> {
 
   const storedPrompt = await appendMessage(conversationId, 'user', prompt)
   if (storedPrompt.kind !== 'ok') {
+    // FAIL CLOSED, AND SAY WHY. The prompt is stored before the model runs, so a
+    // storage outage stops the turn here — correctly, since answering a turn whose
+    // prompt was never stored leaves a conversation that cannot be reconstructed.
+    // What was wrong was the explanation, not the refusal.
+    const outage = persistenceOutage(storedPrompt)
+    if (outage) return json(503, outage.error, outage.message)
     const reason = reasonFor(storedPrompt.kind)
     return json(storedPrompt.kind === 'not_found' ? 404 : 502, reason.error, reason.message)
   }
