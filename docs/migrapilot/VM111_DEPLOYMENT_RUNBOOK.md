@@ -44,6 +44,35 @@ it is erased at build time and is not a runtime dependency.
 
 Build from a **clean tree at a known commit**, and name the artifact after that commit.
 
+### 🚨 DO NOT BUILD `pkgs/*.tgz` WITH `npm pack`
+
+`npm pack` produced a package containing **one file**. The boot test caught it:
+
+    ERR_MODULE_NOT_FOUND
+    file:///home/bonex/stage-<sha>/node_modules/@migrapilot/protocol/dist/tools.js
+
+None of these packages declare a `files` field, so npm falls back to `.gitignore` — and
+`.gitignore` ignores `dist/`. npm force-includes only the file named by `main`, so the tarball
+held `dist/index.js` and nothing else. It packs successfully, reports no warning, and is the
+right size to look plausible. Production's own `protocol` tarball has 38 entries; the `npm pack`
+one had 2.
+
+Build them explicitly instead, keeping the `package/` root that `--strip-components=1` expects:
+
+```bash
+cd packages/<name>
+tar -czf <stage>/pkgs/migrapilot-<name>-0.1.0.tgz --transform 's,^,package/,' dist package.json
+```
+
+And check the count before shipping — a package that lost its modules is not visibly different
+from one that did not:
+
+```bash
+for p in protocol shared-types pilot-client agent-defs workspace-tools; do
+  echo "$p: $(tar -tzf <stage>/pkgs/migrapilot-$p-0.1.0.tgz | wc -l) entries"
+done
+```
+
 ## 2. Install ALL FIVE workspace packages — the incident
 
 The first Brain deploy staged by copying the previous release's `node_modules` and replacing
