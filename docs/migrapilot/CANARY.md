@@ -103,12 +103,79 @@ encodes this exact sequence.
 Production was promoted to the same artifact after the canary proved it, and smoke-tested:
 durable write `stored/durable: true`, session mode intact, a real chat turn answered normally.
 
-## Known limitation — the consumer half is not yet reachable
+## Authenticated canary — LIVE, 2026-08-22
 
-The canary consumer runs, serves, and is correctly isolated, but its **authenticated** routes
-cannot be exercised yet, so these remain untested: index-promotion failure, storage-read failure
-through `UPLOAD_ROOT`, partial-delete cleanup failure, and non-searchable transitions as the
-*user* meets them.
+The consumer half is now reachable. `migrapilot_canary` exists as a **separate** OAuth client
+against the real production issuer (`https://auth.migrateck.com`), and the canary consumer is
+bound to **loopback only**, reached through an operator SSH tunnel.
+
+```
+ssh -L 3100:127.0.0.1:3100 migrapilot-app-core     # then browse http://localhost:3100
+```
+
+Why loopback rather than the tailnet: the session cookie is `httpOnly`, `secure` and host-only,
+and none of those may be relaxed for testing. Browsers treat `http://localhost` as a **secure
+context**, so a `Secure` cookie is sent over the tunnel with no TLS, no certificate and no DNS —
+and the canary ends up *less* reachable than a tailnet binding, not more.
+
+### Verification run at creation
+
+| check | result |
+|---|---|
+| `migrapilot_web` unchanged | ✅ field-by-field before/after diff, `UNCHANGED: true` |
+| canary login targets only the canary callback | ✅ `client_id=migrapilot_canary`, `redirect_uri=http://localhost:3100/api/auth/callback`, scopes identical to production, PKCE S256 |
+| session cookie still `httpOnly` | ✅ absent from `document.cookie` |
+| canary conversation uses canary Brain/state only | ✅ canary lists **1** conversation; production lists **95** |
+| that conversation absent from production | ✅ not listed, and a direct fetch 404s |
+| canary session secret | ✅ its own `MIGRAPILOT_CANARY_APP_SESSION_SECRET`, generated on the host and never printed |
+
+The client was created by a **targeted upsert of one row**. The general seed was never run —
+its `update` block rewrites `redirectUris` wholesale for every client it names.
+
+### 🚨 FINDING (fixed): a storage outage blamed "the assistant service"
+
+With the canary Brain's database read-only, the Brain answered a precise
+`503 PERSISTENCE_UNAVAILABLE` — and the consumer flattened it to `502 brain_error`, showing:
+
+> The assistant service could not complete this request.
+
+A model-fault reading of a storage fault, with an identical retry as the only apparent action.
+The code was in the Brain's response body the whole time; the generic mapping never read it.
+
+Fixed in `e7a2951` and re-verified live through the UI:
+
+> **503 persistence_unavailable** — "Your message could not be saved, so it was not answered.
+> Storage is unavailable right now — nothing was lost, because nothing was stored."
+
+### What the run established about reachability
+
+**The assistant-side "produced but not saved" case is NOT reachable by breaking storage before a
+turn.** The prompt is persisted before the model runs, so the user append fails first and fails
+closed — correctly, since answering a turn whose prompt was never stored leaves a conversation
+that cannot be reconstructed. Reaching the assistant-side case needs storage to fail *between*
+the user append and the assistant append. Recorded as reachable-only-in-a-narrow-window rather
+than assumed working; it remains covered by unit tests at the route and client layers.
+
+### Two smaller findings
+
+- **`/health` reports `persistence: ready` against a READ-ONLY database.** It checks that the
+  store opens, reads and reports a current schema — not that it accepts writes. Honest for what
+  it measures, optimistic as a write-readiness signal.
+- **Restoring a SQLite database's mode is not enough.** SQLite created `brain-state.db-shm` with
+  the read-only mode it inherited, so writes stayed blocked after the `.db` was restored. The
+  `-shm` and `-wal` sidecars must be restored too, or recovery silently does not happen.
+
+### Recovery confirmed
+
+Storage restored → Brain restarted → the turn answered `144`, four messages persisted, and the
+pre-outage marker (`CANARY ISOLATION MARKER 5150`) intact.
+
+## Known limitation — remaining consumer cases
+
+Still untested through the authenticated product: index-promotion failure, storage-read failure
+through `UPLOAD_ROOT`, partial-delete cleanup failure and the real 207 UI, and non-searchable
+transitions as the *user* meets them. The auth blocker below is now CLOSED — these are simply
+the next cases to run.
 
 The reason is not a gap in the canary. The session cookie is `httpOnly`, `secure`, and
 **host-only** (`packages/auth-client/src/session.ts` sets no `domain`), so it cannot be replayed
