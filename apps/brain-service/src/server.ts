@@ -63,6 +63,8 @@ import { gitInfo } from './engine/gitInfo.js';
 import { registerMemoryRoutes } from './engine/memory/memoryRoutes.js';
 import { ConversationStore } from './engine/memory/conversationStore.js';
 import { QualificationStore } from './engine/qualificationStore.js';
+import { PostgresDurableStore } from './engine/persistence/postgresStore.js';
+import { PostgresConnection } from './engine/persistence/postgres/pool.js';
 import { SqliteDurableStore } from './engine/persistence/sqliteStore.js';
 import type { DurableStore } from './engine/persistence/types.js';
 import { resolvePersistence, PersistenceConfigError } from './engine/persistence/persistenceConfig.js';
@@ -290,24 +292,26 @@ async function main(): Promise<void> {
       app.log.error({ err: durableError }, 'durable store unavailable — engine starting in DEGRADED persistence state');
     }
   } else if (selection.kind === 'postgres') {
-    // PostgreSQL repositories and async persistence contracts already exist.
-    // Runtime PostgreSQL persistence requires a DurableStore aggregate that
-    // delegates the existing interfaces to the PostgreSQL repositories.
-    // SQLite remains the local/dev adapter only, pending its removal.
+    // PostgreSQL is the durable backend. SQLite remains a local/dev adapter only,
+    // pending removal.
     //
-    // NOTE: the previous comment here claimed DurableStore was a synchronous
-    // contract awaiting "sub-slice 2.5". That was stale — every method has been
-    // Promise-returning for some time — and it caused a migration to be planned
-    // that did not exist. No future-roadmap claims in comments unless they are
-    // mechanically enforced.
-    //
-    // Until then this refuses rather than presenting a half-implemented store
-    // as usable, and specifically never falls back to SQLite.
-    durable = undefined;
-    durableError =
-      'PostgreSQL adapter selected but not yet reachable at runtime: the DurableStore contract is ' +
-      'synchronous and the PostgreSQL driver is not (sub-slice 2.5 converts it). Refusing to fall back to SQLite.';
-    app.log.error({ err: durableError }, 'postgres persistence selected but adapter not yet wired');
+    // NEVER FALLS BACK. If PostgreSQL cannot be reached or migrated, this stays
+    // undefined and the engine runs in a DEGRADED persistence state that refuses
+    // durable writes — it does not quietly serve from a local SQLite file while
+    // reporting success. A silent downgrade is how durable state goes missing.
+    try {
+      const connection = new PostgresConnection({ databaseUrl: selection.databaseUrl! });
+      const store = new PostgresDurableStore(connection);
+      // Migrations run BEFORE the store is published, so nothing can read or
+      // write against a schema that has not been brought current.
+      await store.initialize();
+      durable = store;
+      app.log.info('postgres durable store ready');
+    } catch (error) {
+      durable = undefined;
+      durableError = error instanceof Error ? error.message : String(error);
+      app.log.error({ err: durableError }, 'postgres persistence unavailable — refusing to fall back to SQLite');
+    }
   }
 
   // MigraAI Engine conversation memory (/api/ai/conversations): the engine owns

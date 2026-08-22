@@ -16,7 +16,6 @@ import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
 import { PostgresDurableStore } from '../src/engine/persistence/postgresStore.js';
 import type { Conversation, Message } from '../src/engine/memory/conversationStore.js';
-import { Pool } from 'pg';
 import { PostgresConnection } from '../src/engine/persistence/postgres/pool.js';
 import {
   appRoleUrl, postgresTestSkipReason, startDisposablePostgres, type DisposablePostgres,
@@ -24,7 +23,7 @@ import {
 
 let skip: string | null = null;
 let pg: DisposablePostgres;
-let pool: Pool;
+let appConnection: PostgresConnection;
 let store: PostgresDurableStore;
 
 const A = { owner: 'user:alpha', workspace: 'ws:one' };
@@ -65,12 +64,12 @@ before(async () => {
   // BYPASSRLS connection ignores policies entirely, so RLS assertions made on
   // one prove nothing — they pass whatever the policies actually say.
   const appUrl = await appRoleUrl(pg.databaseUrl);
-  pool = new Pool({ connectionString: appUrl });
-  store = new PostgresDurableStore(pool, new PostgresConnection({ databaseUrl: appUrl }));
+  appConnection = new PostgresConnection({ databaseUrl: appUrl });
+  store = new PostgresDurableStore(appConnection);
 }, { timeout: 180_000 });
 
 after(async () => {
-  await pool?.end().catch(() => undefined);
+  await appConnection?.close().catch(() => undefined);
   await pg?.stop();
 });
 

@@ -30,7 +30,7 @@
  * committed, so a caller is never told its data was stored when it was not.
  */
 
-import type { Pool, PoolClient } from 'pg';
+import type { PoolClient } from 'pg';
 import type { Conversation, Message, Summary, MemoryItem } from '../memory/conversationStore.js';
 import type {
   DurableStore,
@@ -76,11 +76,12 @@ const scoped = (s: PersistenceScope): conversations.ScopedRequest => ({
 });
 
 export class PostgresDurableStore implements DurableStore {
-  constructor(
-    private readonly pool: Pool,
-    /** Owns migrate()/readiness; the aggregate does not re-implement them. */
-    private readonly connection: PostgresConnection,
-  ) {}
+  /**
+   * Owns the pool, the transaction helper, migrations and readiness. The
+   * aggregate deliberately holds no pool of its own — two owners of one pool is
+   * how connections leak.
+   */
+  constructor(private readonly connection: PostgresConnection) {}
 
   /* ── connection + transaction boundary ─────────────────────────────────── */
 
@@ -90,20 +91,11 @@ export class PostgresDurableStore implements DurableStore {
    * unrelated timeout.
    */
   private async tx<T>(fn: (client: PoolClient) => Promise<T>): Promise<T> {
-    const client = await this.pool.connect();
-    try {
-      await client.query('BEGIN');
-      const result = await fn(client);
-      await client.query('COMMIT');
-      return result;
-    } catch (error) {
-      // A failed ROLLBACK must not mask the original error — that is the one the
-      // caller needs in order to know what was not stored.
-      await client.query('ROLLBACK').catch(() => undefined);
-      throw error;
-    } finally {
-      client.release();
-    }
+    // Delegates to the connection's transaction helper, which already begins,
+    // commits, rolls back on throw and always releases. Re-implementing it here
+    // would be a second, divergent copy of the rule that keeps the durable-write
+    // guarantee honest.
+    return this.connection.transaction(fn);
   }
 
   /** A transaction that has declared its tenant scope to row-level security. */
@@ -132,21 +124,22 @@ export class PostgresDurableStore implements DurableStore {
     let detail: string | undefined;
 
     try {
-      const client = await this.pool.connect();
-      try {
-        const v = await client.query<{ version: string }>('SELECT version FROM schema_meta LIMIT 1');
-        schemaVersion = Number(v.rows[0]?.version ?? 0);
-        readable = true;
+      const rows = await this.connection.query<{ version: string }>('SELECT version FROM schema_meta LIMIT 1');
+      schemaVersion = Number(rows[0]?.version ?? 0);
+      readable = true;
 
-        // A transaction that is rolled back: it proves write permission without
-        // leaving anything behind.
-        await client.query('BEGIN');
+      // A transaction that is deliberately rolled back: it proves write
+      // permission without leaving anything behind.
+      await this.connection.transaction(async (client) => {
         await client.query('CREATE TEMP TABLE migrapilot_write_probe(x int) ON COMMIT DROP');
-        await client.query('ROLLBACK');
-        writable = true;
-      } finally {
-        client.release();
-      }
+        throw new Error('write probe rollback');
+      }).catch((error) => {
+        if (error instanceof Error && error.message === 'write probe rollback') {
+          writable = true;
+          return;
+        }
+        throw error;
+      });
     } catch (error) {
       detail = error instanceof Error ? error.message : String(error);
     }
@@ -181,7 +174,7 @@ export class PostgresDurableStore implements DurableStore {
   }
 
   async close(): Promise<void> {
-    await this.pool.end();
+    await this.connection.close();
   }
 
   /* ── conversations ─────────────────────────────────────────────────────── */
