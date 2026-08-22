@@ -303,8 +303,12 @@ export async function POST(request: Request): Promise<Response> {
   // A file that is GONE leaves the set permanently, and the correction is written back
   // so the drift does not outlive the turn. A merely unsearchable index changes nothing
   // about the set — searchability returns, and discarding the user's choice would not.
+  // A set derived from an unreadable library is not a fact, so it is never written.
+  // Without this guard, attaching a file during a storage hiccup would still erase
+  // the thread's existing grounding — the same data loss by a second route.
   const shouldPersist =
-    reconciled.missing.length > 0 || requestedGrounding.length !== storedGrounding.length
+    !reconciled.libraryUnreadable &&
+    (reconciled.missing.length > 0 || requestedGrounding.length !== storedGrounding.length)
   if (shouldPersist) {
     // Persist BEFORE answering: if the write fails the turn must not claim a grounding
     // the next turn will not have.

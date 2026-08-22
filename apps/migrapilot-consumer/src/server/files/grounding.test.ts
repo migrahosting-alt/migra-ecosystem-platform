@@ -8,7 +8,7 @@
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtemp } from 'node:fs/promises'
+import { mkdtemp, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -126,4 +126,52 @@ test('an empty set short-circuits without consulting the Brain', async () => {
   assert.equal(called, false, 'an ungrounded turn must not cost an index lookup')
 
   globalThis.fetch = original; resetAuthPort()
+})
+
+test('an unreadable library reports NOTHING missing, so the set is never erased', async () => {
+  // Proven on the canary: with the upload root unreadable for one turn, a grounded
+  // conversation lost its document — and restoring the library did not bring it
+  // back. The user had to re-attach a file they had never removed.
+  //
+  // The cause was this function reporting the names as `missing`, which the caller
+  // correctly treats as "deleted, drop it permanently". An unreadable library is
+  // not evidence of deletion; it is evidence of nothing.
+  setAuthPort(port)
+  const brain = brainWith('approved')
+  const realRoot = process.env.UPLOAD_ROOT
+
+  // A library that genuinely cannot be read. A missing directory is NOT enough —
+  // listFiles treats that as an empty library, which is a different (and correct)
+  // answer. Pointing the root at a FILE makes the directory read throw for real,
+  // which is what an unreadable upload root does in production.
+  const notADirectory = join(await mkdtemp(join(tmpdir(), 'migrapilot-notdir-')), 'blocker')
+  await writeFile(notADirectory, 'not a directory')
+  process.env.UPLOAD_ROOT = notADirectory
+
+  const r = await reconcileGrounding(['notes.md'])
+
+  assert.equal(r.libraryUnreadable, true, 'the unreadable case must be distinguishable')
+  assert.deepEqual(r.missing, [], 'nothing may be reported missing when nothing could be read')
+  assert.equal(r.grounded, false, 'and this turn still grounds nothing')
+
+  process.env.UPLOAD_ROOT = realRoot
+  brain()
+  resetAuthPort()
+})
+
+test('a genuinely deleted file IS still reported missing', async () => {
+  // The guard above must not blunt the real case: a file that is actually gone
+  // has to leave the set permanently, or a deleted document keeps being quoted.
+  setAuthPort(port)
+  const brain = brainWith('approved')
+
+  await saveFile('temporary.md', new TextEncoder().encode('# temp').buffer as ArrayBuffer)
+  await deleteFile('temporary.md')
+
+  const r = await reconcileGrounding(['temporary.md'])
+  assert.equal(r.libraryUnreadable, false)
+  assert.deepEqual(r.missing, ['temporary.md'], 'a deleted file still leaves the set')
+
+  brain()
+  resetAuthPort()
 })

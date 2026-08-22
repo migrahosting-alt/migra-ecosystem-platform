@@ -33,6 +33,16 @@ export interface GroundingReconciliation {
   unreadable: string[]
   /** Names dropped because the file no longer exists. */
   missing: string[]
+  /**
+   * The library could not be read AT ALL, so nothing here is a fact about it.
+   *
+   * Kept separate from `missing` because the two demand opposite durable actions.
+   * A missing file is GONE and must leave the set permanently. An unreadable
+   * library says only that we could not look — the files are probably still
+   * there, and erasing the set would destroy the user's own choice over a
+   * transient fault. Callers must not persist any set derived from this.
+   */
+  libraryUnreadable: boolean
   /** True when the index can actually serve a grounded answer. */
   searchable: boolean
   /** May this turn be grounded at all? */
@@ -72,15 +82,34 @@ async function approvedIndexState(): Promise<{ approved: boolean; counts: Record
 
 export async function reconcileGrounding(requested: string[]): Promise<GroundingReconciliation> {
   if (requested.length === 0) {
-    return { available: [], missing: [], unreadable: [], searchable: false, grounded: false }
+    return { available: [], missing: [], unreadable: [], searchable: false, grounded: false, libraryUnreadable: false }
   }
 
-  // FAIL CLOSED. If the library cannot be read at all we ground nothing rather than
-  // trusting the stored names: an unreadable library is not evidence that the files are
-  // there, and a chat turn must not 500 because storage hiccuped.
+  /*
+   * FAIL CLOSED, BUT DO NOT FORGET.
+   *
+   * An unreadable library is not evidence that the files are gone, and a chat turn
+   * must not 500 because storage hiccuped — so this turn grounds nothing.
+   *
+   * What it must NOT do is report the names as `missing`. It used to, and the
+   * caller treats `missing` as "deleted, drop it permanently" — so one transient
+   * read failure ERASED the conversation's durable grounding set for good. Proven
+   * on the canary: with the upload root unreadable for a single turn, a grounded
+   * conversation lost its document, and restoring the library did not bring it
+   * back. The user had to re-attach a file they had never removed.
+   *
+   * Nothing is known to be missing here, because nothing could be read.
+   */
   const listed = await listFiles().catch(() => null)
   if (listed === null) {
-    return { available: [], missing: requested, unreadable: [], searchable: false, grounded: false }
+    return {
+      available: [],
+      missing: [],
+      unreadable: [],
+      searchable: false,
+      grounded: false,
+      libraryUnreadable: true,
+    }
   }
   const present = new Set(listed.map((f) => f.name))
   const available = requested.filter((name) => present.has(name))
@@ -100,5 +129,12 @@ export async function reconcileGrounding(requested: string[]): Promise<Grounding
   // missing from a PRESENT map is the index saying it holds nothing for that file.
   const unreadable = counts ? available.filter((name) => (counts[name] ?? 0) === 0) : []
 
-  return { available, missing, unreadable, searchable, grounded: available.length > 0 && searchable }
+  return {
+    available,
+    missing,
+    unreadable,
+    searchable,
+    grounded: available.length > 0 && searchable,
+    libraryUnreadable: false,
+  }
 }
