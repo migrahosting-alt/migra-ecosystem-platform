@@ -12,7 +12,7 @@
  * than no audit, because it closes the question falsely.
  */
 
-import { readdir, readFile, stat } from 'node:fs/promises';
+import { readdir, readFile, realpath, stat } from 'node:fs/promises';
 import { join, relative } from 'node:path';
 import { createHash } from 'node:crypto';
 import { LegacySource } from './legacySource.js';
@@ -32,6 +32,18 @@ export interface IndexAuditRow {
   workspaceScope: string;
   root: string;
   sourceAvailable: boolean;
+  /**
+   * The root with symlinks resolved, when it differs from the configured root.
+   *
+   * A root that reaches the filesystem through a symlink is a MOVING target:
+   * `/opt/migrapilot/brain-service/current/dist` points at whichever release is
+   * deployed right now, not the one that was indexed. The comparison below is
+   * still worth making — every persisted file must exist — but it compares
+   * against today's source, and the verdict must not be read as proof that the
+   * index matches what was indexed.
+   */
+  sourceResolvedPath?: string;
+  sourceRootIsSymlinked: boolean;
   expectedFiles: number | null;
   persistedFiles: number;
   persistedChunks: number;
@@ -109,6 +121,12 @@ export async function auditChunkIntegrity(source: LegacySource): Promise<ChunkAu
 
     let sourceAvailable = false;
     let sourceFiles: string[] | null = null;
+    let resolved: string | null = null;
+    try {
+      resolved = await realpath(r.root);
+    } catch {
+      resolved = null;
+    }
     try {
       const s = await stat(r.root);
       if (s.isDirectory()) {
@@ -135,6 +153,8 @@ export async function auditChunkIntegrity(source: LegacySource): Promise<ChunkAu
       workspaceScope: scope.workspaceScope,
       root: r.root,
       sourceAvailable,
+      ...(resolved !== null && resolved !== r.root ? { sourceResolvedPath: resolved } : {}),
+      sourceRootIsSymlinked: resolved !== null && resolved !== r.root,
       expectedFiles: sourceFiles === null ? null : sourceFiles.length,
       persistedFiles: persistedFiles.size,
       persistedChunks: chunks.length,

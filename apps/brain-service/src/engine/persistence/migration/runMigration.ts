@@ -80,6 +80,10 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     out(`    scope=${r.ownerScope} / ${r.workspaceScope}`);
     out(`    root=${r.root} (${r.sourceAvailable ? 'source present' : 'SOURCE GONE'})`);
     out(`    files: expected=${r.expectedFiles ?? 'unknown'} persisted=${r.persistedFiles}  chunks=${r.persistedChunks}`);
+    if (r.sourceRootIsSymlinked) {
+      out(`    NOTE: root resolves through a symlink to ${r.sourceResolvedPath}`);
+      out('          The comparison is against the source AS IT IS NOW, not as it was when indexed.');
+    }
     if (r.filesMissingFromSource.length) out(`    files persisted but absent from source: ${r.filesMissingFromSource.length}`);
     if (r.filesMissingFromIndex.length) out(`    files in source but not indexed: ${r.filesMissingFromIndex.length}`);
     if (r.duplicateLogicalKeys.length) out(`    DUPLICATE logical keys within a version: ${r.duplicateLogicalKeys.length}`);
