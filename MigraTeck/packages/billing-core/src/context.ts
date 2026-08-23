@@ -20,6 +20,7 @@ export interface BillingDb {
   billingQuote: PrismaDelegate;
   billingWebhookEvent: PrismaDelegate;
   billingAdjustment: PrismaDelegate;
+  billingRenewalOutcome: PrismaDelegate;
   $transaction: <T>(fn: (tx: BillingDb) => Promise<T>) => Promise<T>;
 }
 

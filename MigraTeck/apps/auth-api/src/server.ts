@@ -20,6 +20,7 @@ import { clientRoutes } from "./routes/clients.js";
 import { billingRoutes } from "./routes/billing.js";
 import { internalBillingRoutes } from "./routes/internal-billing.js";
 import { publicClientRoutes } from "./routes/public-clients.js";
+import { socialRoutes } from "./routes/social.js";
 
 async function main() {
   const app = Fastify({
@@ -93,6 +94,7 @@ async function main() {
   await app.register(billingRoutes);
   await app.register(internalBillingRoutes);
   await app.register(publicClientRoutes);
+  await app.register(socialRoutes);
 
   // Health check
   app.get("/health", async () => ({ status: "ok", service: "migraauth-api" }));

@@ -10,7 +10,8 @@ import {
   PasswordInput,
   toBrandStyle,
 } from "@migrateck/auth-ui";
-import { authFetch } from "@/lib/api";
+import { authFetch, API_BASE } from "@/lib/api";
+import { SocialSignIn } from "@/components/SocialSignIn";
 import {
   resolveAuthBrandTheme,
   resolveAuthIdentifierLabel,
@@ -299,6 +300,20 @@ function LoginForm() {
                 {loading ? "Signing in..." : "Sign in"}
               </Button>
             </form>
+
+            {/*
+              Providers finish the OIDC flow this page is already inside: the
+              return destination is the FULL authorize URL, so the client's PKCE
+              challenge, its state, the `next` path and the anonymous
+              conversation waiting to be claimed all survive the round trip.
+            */}
+            <SocialSignIn
+              returnTo={
+                isOAuthFlow
+                  ? `${API_BASE}/authorize${queryString ? `?${queryString}` : ""}`
+                  : API_BASE
+              }
+            />
 
             <div className="mt-6 rounded-2xl border border-white/[0.08] bg-white/[0.025] px-4 py-3">
               <p className="text-center text-xs leading-5 text-white/45">

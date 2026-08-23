@@ -134,6 +134,7 @@ model User {
   auditLogs          AuditLog[] @relation("AuditActor")
   auditTargets       AuditLog[] @relation("AuditTarget")
   authEvents         AuthEvent[]
+  linkedIdentities   UserLinkedIdentity[]
 
   @@map("users")
 }
@@ -762,4 +763,83 @@ model BillingRenewalOutcome {
   @@index([externalRef])
   @@index([stripeEventId])
   @@map("billing_renewal_outcomes")
+}
+
+/// External identity providers MigraAuth accepts a sign-in from.
+///
+/// PROVIDER-NEUTRAL BY CONSTRUCTION. Adding a third provider is a new value
+/// here plus a descriptor in `modules/social/providers.ts` — never a change to
+/// the account model, the linking rules, or the routes. The alternative, a
+/// `googleId` and then a `githubId` column on `users`, is the design that makes
+/// the fourth provider a migration and the fifth a rewrite.
+enum IdentityProvider {
+  GOOGLE @map("google")
+  GITHUB @map("github")
+
+  @@map("identity_provider")
+}
+
+/// An external account this MigraAuth user has proven control of.
+///
+/// THE SUBJECT ID IS THE IDENTITY, NOT THE EMAIL. `providerAccountId` is the
+/// provider's immutable subject (Google `sub`, GitHub numeric `id`) and it is
+/// what `@@unique` is built on. Emails at both Google and GitHub can be changed
+/// and re-used, so keying on one would mean a person changing their address
+/// silently becomes a different user — or worse, inherits somebody else's
+/// account.
+///
+/// `emailVerified` records what the PROVIDER asserted at link time, kept
+/// separately from MigraAuth's own verification state. The linking rules need
+/// both, and collapsing them would make "Google says this address is theirs"
+/// indistinguishable from "we sent a code to this address and they typed it
+/// back".
+model UserLinkedIdentity {
+  id                String           @id @default(uuid()) @db.Uuid
+  userId            String           @map("user_id") @db.Uuid
+  provider          IdentityProvider
+  providerAccountId String           @map("provider_account_id") @db.VarChar(255)
+  email             String?          @db.Citext
+  emailVerified     Boolean          @default(false) @map("email_verified")
+  displayName       String?          @map("display_name") @db.VarChar(200)
+  avatarUrl         String?          @map("avatar_url")
+  linkedAt          DateTime         @default(now()) @map("linked_at") @db.Timestamptz
+  lastUsedAt        DateTime?        @map("last_used_at") @db.Timestamptz
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// One external account belongs to exactly one MigraAuth user. This is the
+  /// constraint that makes "sign in with Google" deterministic instead of a
+  /// guess, and the one that stops a provider account being silently moved
+  /// between accounts.
+  @@unique([provider, providerAccountId])
+  /// A user may link each provider once — a second Google account on the same
+  /// user is ambiguous at sign-in time, because both would resolve here.
+  @@unique([userId, provider])
+  @@index([userId])
+  @@map("user_linked_identities")
+}
+
+/// One in-flight provider sign-in.
+///
+/// SERVER-SIDE AND SINGLE-USE. The PKCE verifier cannot live in the browser
+/// (that is the whole point of PKCE) and `return_to` must not live in the URL
+/// (that is an open redirect). Consumed rows are RETAINED briefly rather than
+/// deleted, so a replayed `state` is recognisable as a replay and refused as
+/// one, instead of being indistinguishable from an expired attempt.
+model SocialLoginState {
+  state        String           @id @db.VarChar(128)
+  provider     IdentityProvider
+  mode         String           @db.VarChar(16)
+  codeVerifier String           @map("code_verifier") @db.VarChar(255)
+  nonce        String           @db.VarChar(128)
+  returnTo     String           @map("return_to")
+  linkUserId   String?          @map("link_user_id") @db.Uuid
+  ipAddress    String?          @map("ip_address") @db.Inet
+  userAgent    String?          @map("user_agent")
+  consumedAt   DateTime?        @map("consumed_at") @db.Timestamptz
+  expiresAt    DateTime         @map("expires_at") @db.Timestamptz
+  createdAt    DateTime         @default(now()) @map("created_at") @db.Timestamptz
+
+  @@index([expiresAt])
+  @@map("social_login_states")
 }

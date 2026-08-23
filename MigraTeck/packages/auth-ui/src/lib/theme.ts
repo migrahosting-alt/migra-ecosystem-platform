@@ -8,6 +8,7 @@ export type AuthBrandTheme = {
   securityLabel?: string;
   monogram: string;
   logoSrc?: string;
+  supportsPhoneAuth?: boolean;
   eyebrow?: string;
   headline?: string;
   supportCopy?: string;

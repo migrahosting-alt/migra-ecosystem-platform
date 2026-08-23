@@ -11,11 +11,11 @@ export interface CreateCheckoutSessionInput {
   productFamily: ProductFamily;
   planCode: PlanCode;
   billingInterval: BillingInterval;
-  seatCount?: number | undefined;
+  seatCount?: number;
   successUrl: string;
   cancelUrl: string;
-  trialDays?: number | undefined;
-  metadata?: Record<string, string> | undefined;
+  trialDays?: number;
+  metadata?: Record<string, string>;
 }
 
 export interface CheckoutSessionResult {
@@ -107,4 +107,47 @@ export async function createCheckoutSession(
     sessionId: session.id,
     url: session.url!,
   };
+}
+
+// ── Guest / explicit-price checkout (platform-agnostic) ──────────────
+export interface GuestCheckoutLineItem { name: string; amountCents: number; quantity?: number; interval?: BillingInterval; intervalCount?: number; }
+export interface CreateGuestCheckoutInput {
+  platform: string;
+  billingEmail: string;
+  mode: "payment" | "subscription";
+  lineItems: GuestCheckoutLineItem[];
+  successUrl: string;
+  cancelUrl: string;
+  trialDays?: number;
+  metadata?: Record<string, string>;
+}
+
+export async function createGuestCheckoutSession(
+  ctx: BillingContext,
+  input: CreateGuestCheckoutInput,
+): Promise<CheckoutSessionResult> {
+  const line_items = input.lineItems.map((li) => ({
+    quantity: li.quantity ?? 1,
+    price_data: {
+      currency: "usd",
+      unit_amount: li.amountCents,
+      product_data: { name: li.name },
+      ...(input.mode === "subscription" && li.interval ? { recurring: { interval: li.interval, ...(li.intervalCount ? { interval_count: li.intervalCount } : {}) } } : {}),
+    },
+  })) as Stripe.Checkout.SessionCreateParams.LineItem[];
+
+  const session = await ctx.stripe.checkout.sessions.create({
+    mode: input.mode,
+    customer_email: input.billingEmail,
+    ...(input.mode === "payment" ? { customer_creation: "always" as const } : {}),
+    line_items,
+    success_url: input.successUrl,
+    cancel_url: input.cancelUrl,
+    metadata: { platform: input.platform, billing_email: input.billingEmail.toLowerCase(), guest: "1", ...input.metadata },
+    ...(input.mode === "subscription" ? { subscription_data: { ...(input.trialDays ? { trial_period_days: input.trialDays } : {}), metadata: { platform: input.platform, billing_email: input.billingEmail.toLowerCase(), guest: "1", ...input.metadata } } } : {}),
+    automatic_tax: { enabled: true },
+    allow_promotion_codes: true,
+  });
+
+  return { sessionId: session.id, url: session.url! };
 }
