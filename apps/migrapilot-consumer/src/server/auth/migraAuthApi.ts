@@ -38,8 +38,25 @@ export type MigraAuthResult<T> =
   | { kind: 'reauth_required' }
   | { kind: 'unavailable'; status: number }
 
+/**
+ * Where this SERVER reaches MigraAuth.
+ *
+ * `MIGRAAUTH_API_URL` first, deliberately. It is the private app-core endpoint,
+ * and it is the only one that works: this host cannot reach
+ * `auth.migrateck.com` at all — every request to the public name times out,
+ * measured from the box rather than assumed — because the public name resolves
+ * out to the edge and egress does not come back. The private address answered
+ * `401` on `/v1/me`, which is reachability proven by refusal.
+ *
+ * The public issuer stays the fallback, since a deployment that shares a network
+ * with nothing still needs somewhere to go.
+ */
 function issuer(): string | null {
-  return absoluteHttpUrl(readFirstEnv('MIGRAAUTH_BASE_URL', 'AUTH_PUBLIC_URL')) ?? null
+  return (
+    absoluteHttpUrl(readEnv('MIGRAAUTH_API_URL')) ??
+    absoluteHttpUrl(readFirstEnv('MIGRAAUTH_BASE_URL', 'AUTH_PUBLIC_URL')) ??
+    null
+  )
 }
 
 /** The tokens this session captured at sign-in, if it captured any. */
@@ -52,10 +69,11 @@ function tokensOf(session: AppSession): StoredTokens | null {
 /**
  * Exchange a refresh token for a new access token.
  *
- * `migrapilot_web` is a PUBLIC PKCE client — the issuer advertises `none` and no
- * secret is issued — so the refresh carries the client id and nothing else. A
- * secret sent by a public client is not a credential; it is a string in a
- * bundle, and pretending otherwise is worse than not having one.
+ * The client secret is sent WHEN ONE IS CONFIGURED. A comment elsewhere in this
+ * app records `migrapilot_web` as a public PKCE client with no secret; the
+ * deployed environment has `MIGRAAUTH_CLIENT_SECRET` set, so the environment is
+ * taken as the authority over the comment. Omitting a secret a confidential
+ * client is registered with turns every refresh into an unexplained 401.
  */
 async function refreshAccessToken(refreshToken: string): Promise<StoredTokens | null> {
   const base = issuer()
@@ -70,6 +88,9 @@ async function refreshAccessToken(refreshToken: string): Promise<StoredTokens | 
         grant_type: 'refresh_token',
         refresh_token: refreshToken,
         client_id: clientId,
+        ...(readEnv('MIGRAAUTH_CLIENT_SECRET')
+          ? { client_secret: readEnv('MIGRAAUTH_CLIENT_SECRET')! }
+          : {}),
       }),
       cache: 'no-store',
     })
