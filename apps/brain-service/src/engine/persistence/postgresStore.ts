@@ -32,6 +32,7 @@
 
 import type { PoolClient } from 'pg';
 import * as quota from './postgres/anonymousQuotaRepo.js';
+import * as claim from './postgres/anonymousClaimRepo.js';
 import type { Conversation, Message, Summary, MemoryItem } from '../memory/conversationStore.js';
 import type {
   DurableStore,
@@ -608,6 +609,49 @@ export class PostgresDurableStore implements DurableStore {
   ): Promise<void> {
     await this.inScope(this.anonScope(anonymousSessionId, ownerScope), (client) =>
       quota.markClaimed(client, anonymousSessionId, claimedBy, now));
+  }
+
+
+  /**
+   * Move an anonymous conversation into the account that just signed in.
+   *
+   * ONE transaction, and deliberately NOT wrapped in `inScope`: the move spans
+   * two scopes, declaring each only while it operates in it. That is why it can
+   * happen at all — row-level security's WITH CHECK refuses to let a row be
+   * rewritten into a scope other than the declared one, which is exactly what
+   * stops "make this conversation mine" being something a request can ask for.
+   *
+   * The quota row is marked claimed in the SAME transaction. If the mark failed
+   * after the move committed, the same cookie could be presented again for a
+   * second free allowance.
+   */
+  async claimAnonymousConversation(input: {
+    conversationId: string;
+    anonymousSessionId: string;
+    anonymousOwner: string;
+    accountOwner: string;
+    accountWorkspace: string;
+    now: number;
+  }): Promise<claim.ClaimOutcome> {
+    return this.connection.transaction(async (client) => {
+      const outcome = await claim.claimConversation(
+        client,
+        input.conversationId,
+        {
+          anonymousOwner: input.anonymousOwner,
+          accountOwner: input.accountOwner,
+          accountWorkspace: input.accountWorkspace,
+        },
+        input.now,
+      );
+
+      // Back to the anonymous scope to retire its allowance.
+      await client.query(`SELECT set_config('migrapilot.owner_scope', $1, true)`, [input.anonymousOwner]);
+      await client.query(`SELECT set_config('migrapilot.workspace_scope', $1, true)`, [input.anonymousOwner]);
+      await quota.markClaimed(client, input.anonymousSessionId, input.accountOwner, input.now);
+
+      return outcome;
+    });
   }
 
 }

@@ -220,3 +220,102 @@ test('a claimed session keeps its spent allowance — no fresh quota by re-prese
     assert.equal(after.ok, false, 'the allowance is spent and stays spent');
     assert.equal((await store.getAnonymousQuota(s.id, s.scope))?.used, LIMIT);
   });
+
+/* ── claiming an anonymous conversation into an account ──────────────────── */
+
+const conversation = (id: string, owner: string, workspace: string) => ({
+  id, ownerScope: owner, workspaceScope: workspace,
+  title: 'anonymous thread', memoryMode: 'durable' as const, createdAt: 10, updatedAt: 10,
+  groundingFiles: ['notes.md'],
+});
+
+const message = (id: string, conversationId: string, content: string) => ({
+  id, conversationId, role: 'user' as const, content,
+  status: 'complete' as const, createdAt: 20, durable: true,
+});
+
+test('signing in moves the conversation, keeping its ID and content', { skip: skip ?? false }, async () => {
+  const s = session('claim-move');
+  const ACCOUNT = { owner: 'user:claimer', workspace: 'personal:claimer' };
+  const anonScope = { owner: s.scope, workspace: s.scope };
+
+  await store.saveConversation(conversation('conv-claimed', s.scope, s.scope) as never);
+  await store.saveMessage(message('m-1', 'conv-claimed', 'ANONYMOUS TURN ONE') as never, anonScope);
+  await store.saveMessage(message('m-2', 'conv-claimed', 'ANONYMOUS TURN TWO') as never, anonScope);
+  await reserve(s);
+
+  const outcome = await store.claimAnonymousConversation({
+    conversationId: 'conv-claimed', anonymousSessionId: s.id, anonymousOwner: s.scope,
+    accountOwner: ACCOUNT.owner, accountWorkspace: ACCOUNT.workspace, now: 7_000,
+  });
+  assert.equal(outcome.conversationId, 'conv-claimed', 'the SAME id — the person is looking at this thread');
+  assert.equal(outcome.messages, 2);
+
+  const owned = await store.loadDurableForScope({ owner: ACCOUNT.owner, workspace: ACCOUNT.workspace });
+  const conv = owned.conversations.find((c) => c.id === 'conv-claimed');
+  assert.ok(conv, 'the account now owns it');
+  assert.deepEqual(conv?.groundingFiles, ['notes.md'], 'grounding came with it');
+  assert.deepEqual(
+    owned.messages.filter((m) => m.conversationId === 'conv-claimed').map((m) => m.content),
+    ['ANONYMOUS TURN ONE', 'ANONYMOUS TURN TWO'],
+    'both turns, in order',
+  );
+});
+
+test('the old anonymous token CANNOT read the conversation back', { skip: skip ?? false }, async () => {
+  /*
+   * The whole security point of the claim. Whoever still holds the anonymous
+   * cookie — including someone who stole it — must not be able to keep reading
+   * a thread that now belongs to a signed-in person.
+   */
+  const stillAnon = await store.loadDurableForScope({ owner: 'anon:claim-move', workspace: 'anon:claim-move' });
+  assert.equal(stillAnon.conversations.some((c) => c.id === 'conv-claimed'), false,
+    'the anonymous scope must no longer see it');
+  assert.equal(stillAnon.messages.some((m) => m.conversationId === 'conv-claimed'), false,
+    'nor its messages');
+});
+
+test('a second account cannot claim the same anonymous session', { skip: skip ?? false }, async () => {
+  await store.saveConversation(conversation('conv-second', 'anon:claim-move', 'anon:claim-move') as never);
+  await assert.rejects(
+    () => store.claimAnonymousConversation({
+      conversationId: 'conv-second', anonymousSessionId: 'anon-claim-move', anonymousOwner: 'anon:claim-move',
+      accountOwner: 'user:thief', accountWorkspace: 'personal:thief', now: 8_000,
+    }),
+    /already claimed/,
+  );
+});
+
+test('a FAILED claim moves nothing — the conversation stays where it was', { skip: skip ?? false }, async () => {
+  /*
+   * The rejection above happens AFTER the rows were moved inside the same
+   * transaction. If that transaction did not roll back, the conversation would
+   * be gone from the anonymous scope and sitting in an account that was refused.
+   */
+  const stillAnon = await store.loadDurableForScope({ owner: 'anon:claim-move', workspace: 'anon:claim-move' });
+  assert.ok(stillAnon.conversations.some((c) => c.id === 'conv-second'),
+    'the refused claim rolled back and left the conversation with the visitor');
+
+  const thief = await store.loadDurableForScope({ owner: 'user:thief', workspace: 'personal:thief' });
+  assert.equal(thief.conversations.length, 0, 'and nothing landed in the refused account');
+});
+
+test('claiming a conversation that is not yours reports NOT_FOUND, not someone else\'s data',
+  { skip: skip ?? false }, async () => {
+    const other = session('claim-other');
+    await store.saveConversation(conversation('conv-elsewhere', other.scope, other.scope) as never);
+    await reserve(other);
+
+    const attacker = session('claim-attacker');
+    await reserve(attacker);
+    await assert.rejects(
+      () => store.claimAnonymousConversation({
+        conversationId: 'conv-elsewhere', anonymousSessionId: attacker.id, anonymousOwner: attacker.scope,
+        accountOwner: 'user:attacker', accountWorkspace: 'personal:attacker', now: 9_000,
+      }),
+      /not visible to this anonymous session/,
+    );
+
+    const victim = await store.loadDurableForScope({ owner: other.scope, workspace: other.scope });
+    assert.ok(victim.conversations.some((c) => c.id === 'conv-elsewhere'), 'the victim keeps their thread');
+  });
