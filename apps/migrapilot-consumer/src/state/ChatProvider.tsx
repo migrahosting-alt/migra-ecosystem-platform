@@ -15,6 +15,7 @@ import type { Block, Conversation, Message } from '@/data/types'
 import type { AnonymousChatQuota } from '@migrapilot/shared-types/anonymous-quota'
 import { useAnonymousQuota } from '@/features/anonymous/AnonymousQuotaProvider'
 import { titleFromPrompt } from './demoResponder'
+import { toMessage, timeOf, type WireMessage } from '@/features/conversations/messages'
 
 interface ChatContextValue {
   conversations: Conversation[]
@@ -52,13 +53,6 @@ interface WireConversation {
   title: string
   updatedAt: number | string | null
 }
-interface WireMessage {
-  id: string | null
-  role: 'user' | 'assistant' | 'system'
-  content: string
-  createdAt: number | string | null
-}
-
 /**
  * Does this id name a conversation the Brain knows about?
  *
@@ -72,11 +66,6 @@ function dateOf(value: number | string | null): Date | null {
   if (value === null) return null
   const date = new Date(typeof value === 'number' ? value : Date.parse(value))
   return Number.isNaN(date.getTime()) ? null : date
-}
-
-function timeOf(value: number | string | null): string {
-  const date = dateOf(value)
-  return date ? date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : ''
 }
 
 /** The sidebar bucket, derived from when the conversation last changed. */
@@ -142,19 +131,6 @@ async function* readEventStream(
   } finally {
     await reader.cancel().catch(() => undefined)
   }
-}
-
-/** A durable message becomes the shape the existing renderer already speaks. */
-function toMessage(message: WireMessage, index: number): Message {
-  const time = timeOf(message.createdAt)
-  return message.role === 'user'
-    ? { id: message.id ?? `u-${index}`, role: 'user', text: message.content, time, delivered: true }
-    : {
-        id: message.id ?? `a-${index}`,
-        role: 'assistant',
-        time,
-        blocks: [{ type: 'paragraph', text: message.content }],
-      }
 }
 
 export function ChatProvider({ children }: { children: ReactNode }) {

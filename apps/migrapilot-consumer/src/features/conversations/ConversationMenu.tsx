@@ -7,6 +7,7 @@ import { useAnonymousQuota } from '@/features/anonymous/AnonymousQuotaProvider'
 import { useDismissable } from '@/lib/hooks'
 import { cn } from '@/lib/cn'
 import { toTranscript, transcriptFilename } from './transcript'
+import { fetchMessages } from './messages'
 
 /**
  * What you can do to a conversation.
@@ -76,24 +77,44 @@ export function ConversationMenu({
   }
 
   /**
-   * The file is built and handed over in the browser.
+   * The file is assembled and handed over in the browser.
    *
-   * There is nothing to ask a server for: the transcript is exactly the thread
-   * already loaded, so a round trip would only add a way for this to fail.
+   * IT FETCHES THE THREAD WHEN IT DOES NOT HAVE ONE. Messages load when a
+   * conversation is OPENED, so from History the provider holds titles and
+   * nothing else — and the first live export produced a file containing a
+   * heading and "this conversation has no messages yet" for a conversation with
+   * plenty. The screen was not wrong; the export was reading a cache nobody had
+   * asked to fill.
    */
-  const exportTranscript = () => {
-    const now = new Date()
-    const blob = new Blob([toTranscript(conversation, now)], { type: 'text/markdown;charset=utf-8' })
-    const url = URL.createObjectURL(blob)
-    const link = document.createElement('a')
-    link.href = url
-    link.download = transcriptFilename(conversation, now)
-    document.body.appendChild(link)
-    link.click()
-    link.remove()
-    // Revoked on the next tick: revoking synchronously can beat the download.
-    setTimeout(() => URL.revokeObjectURL(url), 0)
-    close()
+  const exportTranscript = async () => {
+    setBusy(true)
+    setError(null)
+    try {
+      const messages = conversation.messages.length
+        ? conversation.messages
+        : await fetchMessages(conversationId)
+
+      const now = new Date()
+      const blob = new Blob([toTranscript({ ...conversation, messages }, now)], {
+        type: 'text/markdown;charset=utf-8',
+      })
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = transcriptFilename(conversation, now)
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      // Revoked on the next tick: revoking synchronously can beat the download.
+      setTimeout(() => URL.revokeObjectURL(url), 0)
+      close()
+    } catch {
+      // Better to say nothing was exported than to hand over an empty file that
+      // looks like a conversation with nothing in it.
+      setError('The transcript could not be read. Nothing was downloaded.')
+    } finally {
+      setBusy(false)
+    }
   }
 
   const confirmDelete = async () => {
@@ -206,9 +227,16 @@ export function ConversationMenu({
                   Rename
                 </button>
               )}
-              <button type="button" role="menuitem" data-testid="menu-export" onClick={exportTranscript} className={item}>
+              <button
+                type="button"
+                role="menuitem"
+                data-testid="menu-export"
+                onClick={() => void exportTranscript()}
+                disabled={busy}
+                className={item}
+              >
                 <Download className="h-4 w-4 text-slate-400" />
-                Export transcript
+                {busy ? 'Preparing…' : 'Export transcript'}
               </button>
               {!signedOut && (
                 <button
