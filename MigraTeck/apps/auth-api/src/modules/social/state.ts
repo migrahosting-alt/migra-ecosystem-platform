@@ -37,6 +37,8 @@ export async function createLoginState(input: {
   provider: IdentityProvider;
   mode: LinkMode;
   returnTo: string;
+  /** The authorization request this trip interrupts, when there is one. */
+  transactionId?: string | null;
   linkUserId?: string | null;
   ip?: string;
   userAgent?: string;
@@ -55,6 +57,7 @@ export async function createLoginState(input: {
       codeVerifier,
       nonce,
       returnTo: input.returnTo,
+      transactionId: input.transactionId ?? null,
       linkUserId: input.linkUserId ?? null,
       ipAddress: input.ip ?? null,
       userAgent: input.userAgent ?? null,
@@ -83,6 +86,7 @@ export interface ConsumedState {
   codeVerifier: string;
   nonce: string;
   returnTo: string;
+  transactionId: string | null;
   linkUserId: string | null;
 }
 
@@ -134,6 +138,7 @@ export async function consumeLoginState(input: {
       codeVerifier: row.codeVerifier,
       nonce: row.nonce,
       returnTo: row.returnTo,
+      transactionId: row.transactionId,
       linkUserId: row.linkUserId,
     },
   };

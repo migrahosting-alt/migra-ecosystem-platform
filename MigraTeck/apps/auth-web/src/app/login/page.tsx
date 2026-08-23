@@ -92,7 +92,16 @@ function LoginForm() {
   const identifierLabel = useMemo(() => resolveAuthIdentifierLabel(clientId), [clientId]);
   const identifierPlaceholder = useMemo(() => resolveAuthIdentifierPlaceholder(clientId), [clientId]);
 
-  const isOAuthFlow = !!(clientId && redirectUri && state && codeChallenge);
+  /*
+   * ONE OPAQUE REFERENCE, NOT A DOZEN PARAMETERS.
+   *
+   * `txn` names an authorization request held server-side. The legacy parameter
+   * set is still read so a link opened before this shipped still completes, but
+   * a transaction is preferred whenever present — and it is the only path that
+   * cannot lose a parameter between hops, because it carries none.
+   */
+  const txn = searchParams.get("txn");
+  const isOAuthFlow = !!txn || !!(clientId && redirectUri && state && codeChallenge);
   const queryString = searchParams.toString();
 
   async function handleSubmit(event: FormEvent) {
@@ -176,6 +185,26 @@ function LoginForm() {
   }
 
   async function completeOAuthFlow() {
+    /*
+     * RESUME FROM SERVER STATE. The body carries one id; the client, redirect,
+     * scopes, PKCE challenge and the client's own state are read from the
+     * transaction row. Nothing this page holds can alter the request being
+     * completed, because this page holds nothing to alter.
+     */
+    if (txn) {
+      const resumed = await authFetch<{ redirect_to: string }>("/authorize/resume", {
+        method: "POST",
+        body: { txn },
+      });
+      if (!resumed.ok || !resumed.data?.redirect_to) {
+        setError("That sign-in request is no longer valid. Start again from the app.");
+        setLoading(false);
+        return;
+      }
+      window.location.href = resumed.data.redirect_to;
+      return;
+    }
+
     const response = await authFetch<{
       redirect_uri: string;
       code: string;
@@ -307,7 +336,7 @@ function LoginForm() {
               challenge, its state, the `next` path and the anonymous
               conversation waiting to be claimed all survive the round trip.
             */}
-            <SocialSignIn authorizeQuery={isOAuthFlow ? queryString : null} />
+            <SocialSignIn transactionId={txn} authorizeQuery={!txn && isOAuthFlow ? queryString : null} />
 
             <div className="mt-6 rounded-2xl border border-white/[0.08] bg-white/[0.025] px-4 py-3">
               <p className="text-center text-xs leading-5 text-white/45">

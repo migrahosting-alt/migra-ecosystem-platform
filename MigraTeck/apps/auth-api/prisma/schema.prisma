@@ -135,6 +135,7 @@ model User {
   auditTargets       AuditLog[] @relation("AuditTarget")
   authEvents         AuthEvent[]
   linkedIdentities   UserLinkedIdentity[]
+  authorizationTransactions AuthorizationTransaction[]
 
   @@map("users")
 }
@@ -261,6 +262,7 @@ model OAuthClient {
 
   ownerUser         User?         @relation("OAuthClientOwner", fields: [ownerUserId], references: [id], onDelete: SetNull)
   ownerOrganization Organization? @relation("OAuthClientOrganization", fields: [ownerOrganizationId], references: [id], onDelete: SetNull)
+  authorizationTransactions AuthorizationTransaction[]
 
   @@index([ownerUserId])
   @@index([ownerOrganizationId])
@@ -826,6 +828,46 @@ model UserLinkedIdentity {
 /// (that is an open redirect). Consumed rows are RETAINED briefly rather than
 /// deleted, so a replayed `state` is recognisable as a replay and refused as
 /// one, instead of being indistinguishable from an expired attempt.
+/// One authorization request, held server-side for its whole life.
+///
+/// THE BROWSER CARRIES ONE OPAQUE REFERENCE. Everything else — client, redirect,
+/// scopes, PKCE challenge, the client's own `state` — lives here and is read
+/// from here when the code is issued. A parameter cannot be dropped between
+/// hops, because there are no parameters between hops.
+///
+/// `clientState` is the CLIENT's state and is distinct from the provider state
+/// in `SocialLoginState`: that protects the MigraAuth↔provider hop, this
+/// protects the client↔MigraAuth hop. Conflating them would let one flow's
+/// protection stand in for the other's.
+model AuthorizationTransaction {
+  id                  String           @id @db.VarChar(128)
+  clientId            String           @map("client_id") @db.VarChar(255)
+  redirectUri         String           @map("redirect_uri")
+  responseType        String           @map("response_type") @db.VarChar(32)
+  scope               String
+  clientState         String           @map("client_state")
+  codeChallenge       String           @map("code_challenge") @db.VarChar(255)
+  codeChallengeMethod String           @map("code_challenge_method") @db.VarChar(16)
+  nonce               String?
+  prompt              String?          @db.VarChar(32)
+  loginHint           String?          @map("login_hint") @db.VarChar(320)
+  provider            IdentityProvider?
+  userId              String?          @map("user_id") @db.Uuid
+  /// Retained after use so a REPLAY is recognisable as one.
+  consumedAt          DateTime?        @map("consumed_at") @db.Timestamptz
+  createdAt           DateTime         @default(now()) @map("created_at") @db.Timestamptz
+  expiresAt           DateTime         @map("expires_at") @db.Timestamptz
+  ipAddress           String?          @map("ip_address") @db.Inet
+  userAgent           String?          @map("user_agent")
+
+  client OAuthClient @relation(fields: [clientId], references: [clientId], onDelete: Cascade)
+  user   User?       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([expiresAt])
+  @@index([userId])
+  @@map("authorization_transactions")
+}
+
 model SocialLoginState {
   state        String           @id @db.VarChar(128)
   provider     IdentityProvider
@@ -833,6 +875,8 @@ model SocialLoginState {
   codeVerifier String           @map("code_verifier") @db.VarChar(255)
   nonce        String           @db.VarChar(128)
   returnTo     String           @map("return_to")
+  /// Which authorization request this provider trip is interrupting, if any.
+  transactionId String?         @map("transaction_id") @db.VarChar(128)
   linkUserId   String?          @map("link_user_id") @db.Uuid
   ipAddress    String?          @map("ip_address") @db.Inet
   userAgent    String?          @map("user_agent")

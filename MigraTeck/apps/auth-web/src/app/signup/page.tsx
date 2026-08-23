@@ -73,6 +73,7 @@ function SignupForm() {
   const clientId = searchParams.get("client_id");
   const redirectUri = searchParams.get("redirect_uri");
   const queryString = searchParams.toString();
+  const txn = searchParams.get("txn");
   const effectiveClientId = clientId ?? "migraauth_web";
   const hardcodedBrand = useMemo(() => resolveAuthBrandTheme(clientId), [clientId]);
   const brand = useRegistryBrand(clientId, hardcodedBrand);
@@ -325,7 +326,7 @@ function SignupForm() {
               challenge, its state, the `next` path and the anonymous
               conversation waiting to be claimed all survive the round trip.
             */}
-            <SocialSignIn authorizeQuery={clientId && redirectUri ? queryString : null} />
+            <SocialSignIn transactionId={txn} authorizeQuery={!txn && clientId && redirectUri ? queryString : null} />
 
             <div className="mt-6 text-center text-sm text-white/55">
               Already have an account?{" "}

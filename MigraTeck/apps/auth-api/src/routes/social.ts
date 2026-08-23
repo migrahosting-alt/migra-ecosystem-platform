@@ -31,8 +31,14 @@ import { consumeLoginState, createLoginState } from "../modules/social/state.js"
 import { listLinkedIdentities, resolveProviderSignIn, unlinkProvider } from "../modules/social/index.js";
 import { defaultReturnTo, safeReturnTo, withOutcome } from "../modules/social/redirect.js";
 import { establishFirstPartySession } from "./auth.js";
+import {
+  attachProvider,
+  consumeTransaction,
+  loadTransaction,
+} from "../modules/authorization/transaction.js";
 import { logAuditEvent } from "../modules/audit/index.js";
 import { revokeAllUserSessions } from "../modules/sessions/index.js";
+import { createAuthCode } from "../modules/tokens/index.js";
 import { updateLastLogin } from "../modules/users/index.js";
 import { requireAuthenticatedUser, optionalSession, getClientIp } from "../middleware/session.js";
 import type { IdentityProvider } from "../prisma-client.js";
@@ -67,11 +73,22 @@ export async function socialRoutes(app: FastifyInstance): Promise<void> {
   }));
 
   // ── start ─────────────────────────────────────────────────────────
-  app.get<{ Params: { provider: string }; Querystring: { return_to?: string; mode?: string } }>(
+  app.get<{ Params: { provider: string }; Querystring: { return_to?: string; mode?: string; txn?: string } }>(
     "/v1/social/:provider/start",
     { preHandler: optionalSession },
     async (request, reply) => {
       const slug = request.params.provider.toLowerCase();
+      /*
+       * `txn` IS THE PREFERRED HANDOFF, and `return_to` is the fallback for
+       * flows that are not completing an authorization request — linking a
+       * provider from settings, or signing in at MigraAuth itself.
+       *
+       * When a transaction is named, the destination is NOT a URL the browser
+       * supplied: it is rebuilt from the transaction row after the provider
+       * returns. This is what stops a provider round trip from being able to
+       * lose, reorder or alter the request it is interrupting.
+       */
+      const txn = typeof request.query.txn === "string" ? request.query.txn : "";
       const returnTo = safeReturnTo(request.query.return_to) ?? defaultReturnTo();
 
       const resolved = resolveConfiguredProvider(slug);
@@ -93,10 +110,25 @@ export async function socialRoutes(app: FastifyInstance): Promise<void> {
       }
 
       const { descriptor, credentials } = resolved;
+
+      /*
+       * A named transaction must still be OPEN before the user is sent away.
+       * Discovering it expired only after the provider round trip wastes the
+       * user's time and leaves them somewhere they cannot act on.
+       */
+      if (txn) {
+        const found = await loadTransaction(txn);
+        if (!found.ok) {
+          return bounce(reply, defaultReturnTo(), { auth_error: `transaction_${found.reason}` });
+        }
+        await attachProvider(txn, providerEnum(descriptor));
+      }
+
       const created = await createLoginState({
         provider: providerEnum(descriptor),
         mode,
         returnTo,
+        transactionId: txn || null,
         linkUserId: mode === "link" ? sessionUserId : null,
         ip: getClientIp(request),
         userAgent: request.headers["user-agent"],
@@ -256,6 +288,55 @@ export async function socialRoutes(app: FastifyInstance): Promise<void> {
     await revokeAllUserSessions(result.user.id);
     await establishFirstPartySession({ reply, userId: result.user.id, ip, userAgent: ua });
     await updateLastLogin(result.user.id);
+
+    /*
+     * RESUME THE ORIGINAL REQUEST FROM SERVER STATE.
+     *
+     * Everything the code is bound to — client, redirect, scopes, PKCE
+     * challenge, the client's own state — is read from the transaction row. The
+     * browser contributed one opaque id and nothing else, so nothing it carried
+     * through Google or GitHub could have altered the request being completed.
+     */
+    if (state.transactionId) {
+      const outcome = await consumeTransaction({ id: state.transactionId, userId: result.user.id });
+      if (!outcome.ok) {
+        await logAuditEvent({
+          actorUserId: result.user.id,
+          eventType: "SOCIAL_LOGIN_FAILURE",
+          eventData: { provider: slug, reason: `transaction_${outcome.reason}` },
+          ipAddress: ip,
+          userAgent: ua,
+        });
+        // The person IS signed in; only the request they were completing is
+        // gone. Saying so beats dropping them on an invalid authorize URL.
+        return bounce(reply, defaultReturnTo(), { auth_error: `transaction_${outcome.reason}` });
+      }
+
+      const t = outcome.transaction;
+      const code = await createAuthCode(
+        result.user.id,
+        t.clientId,
+        t.redirectUri,
+        t.codeChallenge,
+        t.codeChallengeMethod,
+        t.scope ? t.scope.split(" ") : ["openid"],
+        t.nonce ?? undefined,
+        { issuedIp: ip, issuedUserAgent: ua },
+      );
+
+      await logAuditEvent({
+        actorUserId: result.user.id,
+        eventType: "SOCIAL_LOGIN_SUCCESS",
+        eventData: { provider: slug, created_account: result.created, via_transaction: true },
+        ipAddress: ip,
+        userAgent: ua,
+      });
+
+      const redirectUrl = new URL(t.redirectUri);
+      redirectUrl.searchParams.set("code", code);
+      redirectUrl.searchParams.set("state", t.clientState);
+      return reply.redirect(redirectUrl.toString(), 302);
+    }
 
     await logAuditEvent({
       actorUserId: result.user.id,

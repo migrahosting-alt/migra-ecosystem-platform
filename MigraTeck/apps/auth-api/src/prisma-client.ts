@@ -2,6 +2,7 @@ import { PrismaPg } from "@prisma/adapter-pg";
 import { createRequire } from "node:module";
 import type {
   AuditActorType,
+  AuthorizationTransaction,
   IdentityProvider,
   MemberRole,
   OAuthClient,
@@ -49,6 +50,7 @@ export function createAuthPrismaAdapter(connectionString: string) {
 
 export type {
   AuditActorType,
+  AuthorizationTransaction,
   IdentityProvider,
   MemberRole,
   OAuthClient,

@@ -64,10 +64,32 @@ function ProviderMark({ id }: { id: string }) {
  */
 function absoluteAuthorizeUrl(query: string): string {
   if (typeof window === "undefined") return "";
-  return `${window.location.origin}/authorize${query ? `?${query}` : ""}`;
+  /*
+   * NO TRANSACTION, NO `/authorize`.
+   *
+   * This returned a PARAMETERLESS `/authorize` whenever the page was reached
+   * without an OAuth request in progress — a bare `/login` visit. MigraAuth then
+   * correctly refused it, and the user was shown raw validation JSON at the end
+   * of an otherwise successful Google or GitHub sign-in.
+   *
+   * `/authorize` is only a valid destination when there is a request for it to
+   * resume. Without one the sign-in still belongs somewhere — the account's own
+   * home — and composing an address that is invalid by construction is not a
+   * destination at all.
+   */
+  if (!query) return window.location.origin;
+  return `${window.location.origin}/authorize?${query}`;
 }
 
-export function SocialSignIn({ authorizeQuery }: { authorizeQuery: string | null }) {
+export function SocialSignIn({
+  transactionId,
+  authorizeQuery,
+}: {
+  /** An authorization request held server-side. Preferred when present. */
+  transactionId?: string | null;
+  /** Legacy parameter carry, for links opened before transactions shipped. */
+  authorizeQuery?: string | null;
+}) {
   const [providers, setProviders] = useState<Provider[] | null>(null);
 
   useEffect(() => {
@@ -105,9 +127,16 @@ export function SocialSignIn({ authorizeQuery }: { authorizeQuery: string | null
           <a
             key={provider.id}
             data-testid={`social-${provider.id}`}
-            href={`${API_BASE}/v1/social/${provider.id}/start?return_to=${encodeURIComponent(
-              absoluteAuthorizeUrl(authorizeQuery ?? ""),
-            )}`}
+            href={
+              transactionId
+                ? // ONE OPAQUE REFERENCE. No destination travels with the user:
+                  // the request is rebuilt server-side after the provider
+                  // returns, so this round trip cannot lose or alter it.
+                  `${API_BASE}/v1/social/${provider.id}/start?txn=${encodeURIComponent(transactionId)}`
+                : `${API_BASE}/v1/social/${provider.id}/start?return_to=${encodeURIComponent(
+                    absoluteAuthorizeUrl(authorizeQuery ?? ""),
+                  )}`
+            }
             className="inline-flex h-11 w-full items-center justify-center gap-2.5 rounded-xl border border-white/[0.12] bg-white/[0.04] text-[15px] font-semibold text-white/90 transition hover:border-white/25 hover:bg-white/[0.08]"
           >
             <ProviderMark id={provider.id} />
