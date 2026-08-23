@@ -14,7 +14,7 @@ process.env["AUTH_PUBLIC_URL"] = "https://auth.migrateck.com";
 process.env["AUTH_WEB_URL"] = "https://auth.migrateck.com";
 process.env["AUTH_SOCIAL_RETURN_ORIGINS"] = "https://chat.migrateck.com";
 
-const { safeReturnTo, withOutcome } = await import("./redirect.js");
+const { safeReturnTo, withOutcome, defaultReturnTo, errorReturnTo } = await import("./redirect.js");
 
 test("an allowlisted origin is accepted and normalized", () => {
   assert.equal(
@@ -73,4 +73,25 @@ test("an outcome is ADDED to the destination, never rebuilt over it", () => {
   assert.equal(url.searchParams.get("code_challenge"), "abc");
   assert.equal(url.searchParams.get("state"), "xyz");
   assert.equal(url.searchParams.get("auth_error"), "provider_cancelled");
+});
+
+test("a successful sign-in with no destination does not land on the login form", () => {
+  /*
+   * THE REGRESSION THIS PINS. The default was the web root, which redirects to
+   * `/login` — so a Google sign-in that fully succeeded bounced the user back to
+   * the login form and looked exactly like a failure. Reported live, twice over,
+   * because the first fix swapped one bad destination for another.
+   */
+  const landing = defaultReturnTo();
+  assert.ok(landing.endsWith("/sessions"), `expected /sessions, got ${landing}`);
+  assert.ok(!landing.includes("/login"), "must never be the login form");
+  assert.ok(!/\/$/.test(new URL(landing).pathname), "must not be the bare root");
+});
+
+test("a refused sign-in goes to the branded error page, not to /sessions", () => {
+  // `/sessions` redirects an unauthenticated visitor to `/login`, losing the
+  // reason they were refused on the way.
+  const url = new URL(errorReturnTo("state_replayed"));
+  assert.equal(url.pathname, "/error");
+  assert.equal(url.searchParams.get("code"), "state_replayed");
 });

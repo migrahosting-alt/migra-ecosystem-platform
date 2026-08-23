@@ -29,7 +29,7 @@ import {
 } from "../modules/social/providers.js";
 import { consumeLoginState, createLoginState } from "../modules/social/state.js";
 import { listLinkedIdentities, resolveProviderSignIn, unlinkProvider } from "../modules/social/index.js";
-import { defaultReturnTo, safeReturnTo, withOutcome } from "../modules/social/redirect.js";
+import { defaultReturnTo, errorReturnTo, safeReturnTo, withOutcome } from "../modules/social/redirect.js";
 import { establishFirstPartySession } from "./auth.js";
 import {
   attachProvider,
@@ -119,7 +119,7 @@ export async function socialRoutes(app: FastifyInstance): Promise<void> {
       if (txn) {
         const found = await loadTransaction(txn);
         if (!found.ok) {
-          return bounce(reply, defaultReturnTo(), { auth_error: `transaction_${found.reason}` });
+          return void reply.redirect(errorReturnTo(`transaction_${found.reason}`), 302);
         }
         await attachProvider(txn, providerEnum(descriptor));
       }
@@ -189,9 +189,13 @@ export async function socialRoutes(app: FastifyInstance): Promise<void> {
         ipAddress: ip,
         userAgent: ua,
       });
-      // Deliberately NOT redirected to a caller-supplied destination: without a
-      // verified state there is no destination this request has proven.
-      return bounce(reply, defaultReturnTo(), { auth_error: `state_${outcome.reason}` });
+      /*
+       * Deliberately NOT a caller-supplied destination: without a verified state
+       * there is no destination this request has proven. The branded error page
+       * states the reason and survives, where `/sessions` would bounce an
+       * unauthenticated visitor to `/login` and lose it.
+       */
+      return void reply.redirect(errorReturnTo(`state_${outcome.reason}`), 302);
     }
 
     const state = outcome.state;
@@ -308,8 +312,8 @@ export async function socialRoutes(app: FastifyInstance): Promise<void> {
           userAgent: ua,
         });
         // The person IS signed in; only the request they were completing is
-        // gone. Saying so beats dropping them on an invalid authorize URL.
-        return bounce(reply, defaultReturnTo(), { auth_error: `transaction_${outcome.reason}` });
+        // gone. The branded page says which, and `/sessions` would not.
+        return void reply.redirect(errorReturnTo(`transaction_${outcome.reason}`), 302);
       }
 
       const t = outcome.transaction;

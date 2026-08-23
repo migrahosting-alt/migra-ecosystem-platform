@@ -62,22 +62,24 @@ function ProviderMark({ id }: { id: string }) {
  * `/authorize` is served at this origin's root — the published
  * `authorization_endpoint` — so the origin is the correct and only base.
  */
+/**
+ * The authorize URL to resume, or NOTHING.
+ *
+ * Returning an empty string means "no destination", and the caller omits
+ * `return_to` entirely so the SERVER decides where a destination-less sign-in
+ * lands. That is the correct division: this component knows whether a request is
+ * being resumed, and knows nothing about where a signed-in person should
+ * otherwise go.
+ *
+ * Getting this wrong twice is why it is spelled out. First it returned a
+ * PARAMETERLESS `/authorize`, which MigraAuth correctly refused — raw validation
+ * JSON at the end of a successful sign-in. The fix sent people to the web root
+ * instead, which redirects to `/login` — so a successful sign-in bounced back to
+ * the login form and looked like a failure. Both times the mistake was the
+ * same: inventing a destination this component has no basis to choose.
+ */
 function absoluteAuthorizeUrl(query: string): string {
-  if (typeof window === "undefined") return "";
-  /*
-   * NO TRANSACTION, NO `/authorize`.
-   *
-   * This returned a PARAMETERLESS `/authorize` whenever the page was reached
-   * without an OAuth request in progress — a bare `/login` visit. MigraAuth then
-   * correctly refused it, and the user was shown raw validation JSON at the end
-   * of an otherwise successful Google or GitHub sign-in.
-   *
-   * `/authorize` is only a valid destination when there is a request for it to
-   * resume. Without one the sign-in still belongs somewhere — the account's own
-   * home — and composing an address that is invalid by construction is not a
-   * destination at all.
-   */
-  if (!query) return window.location.origin;
+  if (typeof window === "undefined" || !query) return "";
   return `${window.location.origin}/authorize?${query}`;
 }
 
@@ -114,6 +116,22 @@ export function SocialSignIn({
   // about to disappear, and no empty divider over a blank space.
   if (!providers || providers.length === 0) return null;
 
+  /**
+   * Where the provider flow begins.
+   *
+   * A transaction is named when one exists — one opaque reference, no
+   * destination travelling with the user, so the round trip cannot lose or
+   * alter the request it interrupts. Otherwise `return_to` is sent only if there
+   * is genuinely something to return to, and omitted entirely when there is not,
+   * leaving the choice to the server.
+   */
+  const startUrl = (providerId: string): string => {
+    const base = `${API_BASE}/v1/social/${providerId}/start`;
+    if (transactionId) return `${base}?txn=${encodeURIComponent(transactionId)}`;
+    const resume = absoluteAuthorizeUrl(authorizeQuery ?? "");
+    return resume ? `${base}?return_to=${encodeURIComponent(resume)}` : base;
+  };
+
   return (
     <div className="mt-6">
       <div className="flex items-center gap-3">
@@ -127,16 +145,7 @@ export function SocialSignIn({
           <a
             key={provider.id}
             data-testid={`social-${provider.id}`}
-            href={
-              transactionId
-                ? // ONE OPAQUE REFERENCE. No destination travels with the user:
-                  // the request is rebuilt server-side after the provider
-                  // returns, so this round trip cannot lose or alter it.
-                  `${API_BASE}/v1/social/${provider.id}/start?txn=${encodeURIComponent(transactionId)}`
-                : `${API_BASE}/v1/social/${provider.id}/start?return_to=${encodeURIComponent(
-                    absoluteAuthorizeUrl(authorizeQuery ?? ""),
-                  )}`
-            }
+            href={startUrl(provider.id)}
             className="inline-flex h-11 w-full items-center justify-center gap-2.5 rounded-xl border border-white/[0.12] bg-white/[0.04] text-[15px] font-semibold text-white/90 transition hover:border-white/25 hover:bg-white/[0.08]"
           >
             <ProviderMark id={provider.id} />

@@ -55,9 +55,33 @@ export function safeReturnTo(value: string | undefined | null): string | null {
   return parsed.toString();
 }
 
-/** Where to land when the caller named nowhere usable. */
+/**
+ * Where a SUCCESSFUL sign-in lands when no destination was named.
+ *
+ * `/sessions`, not the web root. The root redirects to `/login`, so sending a
+ * freshly authenticated person there bounced them straight back to the login
+ * form — a successful sign-in that looks exactly like a failed one. Reported
+ * live as "google not working, every time I login it redirects me back to the
+ * login screen"; the session was being established correctly every time.
+ *
+ * `/sessions` is where the password flow already lands a non-OAuth login, so the
+ * two agree, and it shows the person something that proves they are signed in.
+ */
 export function defaultReturnTo(): string {
-  return config.webUrl;
+  return `${config.webUrl.replace(/\/+$/, "")}/sessions`;
+}
+
+/**
+ * Where a REFUSED sign-in lands when no destination can be trusted.
+ *
+ * Deliberately not `defaultReturnTo`: an unauthenticated visitor sent to
+ * `/sessions` is redirected to `/login`, and the reason they were refused is
+ * lost on the way. The branded error page states it and survives.
+ */
+export function errorReturnTo(code: string): string {
+  const url = new URL("/error", config.webUrl);
+  url.searchParams.set("code", code);
+  return url.toString();
 }
 
 /**
