@@ -19,8 +19,18 @@ export const dynamic = 'force-dynamic'
 const fail = (status: number, error: string, message: string): Response =>
   Response.json({ error, message }, { status })
 
-/** One mapping, so read and write cannot drift apart in how they fail. */
-function refusal(kind: string, body?: unknown): { status: number; error: string; message: string } {
+/**
+ * One mapping, so read and write cannot drift apart in how they fail.
+ *
+ * `verb` only changes the WORDING. A read that failed must not say "could not be
+ * saved" — the user did not ask to save anything, and a message about the wrong
+ * operation makes a working screen look broken.
+ */
+function refusal(
+  kind: string,
+  body?: unknown,
+  verb: 'load' | 'save' = 'save',
+): { status: number; error: string; message: string } {
   const code = (() => {
     const parsed = typeof body === 'string' ? (() => { try { return JSON.parse(body) } catch { return null } })() : body
     return (parsed as { code?: string } | null)?.code
@@ -34,7 +44,10 @@ function refusal(kind: string, body?: unknown): { status: number; error: string;
       status: 503,
       error: 'persistence_unavailable',
       // Said plainly, because the UI must NOT show this as saved.
-      message: 'Settings storage is unavailable right now, so nothing was saved. Try again shortly.',
+      message:
+        verb === 'load'
+          ? 'Settings storage is unavailable right now, so your settings could not be loaded.'
+          : 'Settings storage is unavailable right now, so nothing was saved. Try again shortly.',
     }
   }
   switch (kind) {
@@ -46,9 +59,18 @@ function refusal(kind: string, body?: unknown): { status: number; error: string;
       return { status: 400, error: 'invalid_request', message: 'That is not a setting MigraPilot recognises.' }
     case 'timeout':
     case 'transport_failure':
-      return { status: 503, error: 'unreachable', message: 'Settings could not be reached right now. Nothing was saved.' }
+      return {
+        status: 503,
+        error: 'unreachable',
+        message:
+          verb === 'load'
+            ? 'Settings could not be reached right now.'
+            : 'Settings could not be reached right now. Nothing was saved.',
+      }
     default:
-      return { status: 502, error: 'save_failed', message: 'That change could not be saved.' }
+      return verb === 'load'
+        ? { status: 502, error: 'load_failed', message: 'Your settings could not be loaded.' }
+        : { status: 502, error: 'save_failed', message: 'That change could not be saved.' }
   }
 }
 
@@ -58,7 +80,7 @@ export async function GET(): Promise<Response> {
 
   const result = await getPreferences({ principal: resolved.principal })
   if (result.kind !== 'ok') {
-    const r = refusal(result.kind, 'body' in result ? result.body : undefined)
+    const r = refusal(result.kind, 'body' in result ? result.body : undefined, 'load')
     return fail(r.status, r.error, r.message)
   }
 
