@@ -10,7 +10,6 @@ import {
   FileText,
   Mail,
   MessageSquare,
-  MoreHorizontal,
   Search,
   SquarePen,
 } from 'lucide-react'
@@ -18,6 +17,7 @@ import { Workspace } from '@/components/layout/AppShell'
 import { IconTile } from '@/components/ui/Badge'
 import type { Conversation } from '@/data/types'
 import { useChat } from '@/state/ChatProvider'
+import { ConversationMenu } from '@/features/conversations/ConversationMenu'
 import { cn } from '@/lib/cn'
 
 const conversationIcons = {
@@ -170,9 +170,11 @@ export function HistoryPage() {
           aria-label="Search history"
           className="h-12 w-full rounded-field border border-slate-200 bg-white pr-16 pl-12 text-[15px] text-slate-700 placeholder:text-slate-400 focus:border-brand-400 focus:ring-4 focus:ring-brand-500/10 focus:outline-none"
         />
-        <kbd className="absolute top-1/2 right-4 -translate-y-1/2 rounded-md border border-slate-200 bg-slate-50 px-1.5 py-0.5 font-sans text-xs font-medium text-slate-400">
-          ⌘K
-        </kbd>
+        {/*
+          The ⌘K badge that used to sit here promised a command palette this app
+          does not have — nothing listens for the shortcut. A keyboard hint is a
+          claim about a binding, so it comes back when the binding does.
+        */}
       </div>
 
       <section className="mt-9">
@@ -180,9 +182,11 @@ export function HistoryPage() {
           <h2 className="text-[21px] font-bold tracking-[-0.02em] text-slate-900">
             Recent Conversations
           </h2>
-          <button className="text-[13px] font-semibold text-brand-600 hover:text-brand-700">
-            View all
-          </button>
+          {/*
+            "View all" was a button with no handler, on the page that already
+            shows everything — there was nowhere for it to go. The full list is
+            the sidebar beside this one.
+          */}
         </div>
 
         <ul className="mt-4 flex flex-col gap-2.5">
@@ -190,31 +194,34 @@ export function HistoryPage() {
             const Icon = conversationIcons[conversation.icon]
             return (
               <li key={conversation.id}>
-                <button
-                  onClick={() => router.push(`/chat/${conversation.id}`)}
-                  className="flex w-full items-center gap-4 rounded-2xl border border-hairline bg-white p-4 text-left transition-all duration-150 hover:border-brand-200 hover:shadow-card"
-                >
-                  <IconTile tone={conversation.tone} size="md">
-                    <Icon strokeWidth={2} />
-                  </IconTile>
-
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-[15px] font-semibold text-slate-900">
-                      {conversation.title}
-                    </span>
-                    <span className="mt-0.5 block truncate text-sm text-slate-500">
-                      {conversation.preview}
-                    </span>
-                  </span>
-
-                  <span className="shrink-0 text-[13px] text-slate-400">{conversation.time}</span>
-                  <span
-                    aria-hidden
-                    className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-slate-400"
+                {/*
+                  The row is a DIV wrapping two siblings, not one button.
+                  The menu is itself a button, and a button inside a button is
+                  invalid markup that browsers repair by splitting the elements —
+                  which drops the handler on whichever one loses.
+                */}
+                <div className="group flex w-full items-center gap-4 rounded-2xl border border-hairline bg-white p-4 transition-all duration-150 hover:border-brand-200 hover:shadow-card">
+                  <button
+                    onClick={() => router.push(`/chat/${conversation.id}`)}
+                    className="flex min-w-0 flex-1 items-center gap-4 text-left"
                   >
-                    <MoreHorizontal className="h-4.5 w-4.5" />
-                  </span>
-                </button>
+                    <IconTile tone={conversation.tone} size="md">
+                      <Icon strokeWidth={2} />
+                    </IconTile>
+
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-[15px] font-semibold text-slate-900">
+                        {conversation.title}
+                      </span>
+                      <span className="mt-0.5 block truncate text-sm text-slate-500">
+                        {conversation.preview}
+                      </span>
+                    </span>
+
+                    <span className="shrink-0 text-[13px] text-slate-400">{conversation.time}</span>
+                  </button>
+                  <ConversationMenu conversationId={conversation.id} />
+                </div>
               </li>
             )
           })}

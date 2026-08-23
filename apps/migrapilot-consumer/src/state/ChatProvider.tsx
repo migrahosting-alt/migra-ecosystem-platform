@@ -27,6 +27,17 @@ interface ChatContextValue {
   sendMessage: (conversationId: string, prompt: string, options?: { attachments?: string[] }) => void
   /** Load one conversation's durable messages. Safe to call repeatedly. */
   openConversation: (conversationId: string) => void
+  /**
+   * Rename a conversation. Resolves false when the server refused it.
+   *
+   * The rename is applied OPTIMISTICALLY and rolled back on refusal, because the
+   * round trip is long enough to feel broken and the failure is rare. Rolling
+   * back matters more than the optimism: a title left on screen that the server
+   * rejected is a lie the next reload silently corrects.
+   */
+  renameConversation: (conversationId: string, title: string) => Promise<boolean>
+  /** Delete a conversation. Resolves false when the server refused it. */
+  deleteConversation: (conversationId: string) => Promise<boolean>
 }
 
 const ChatContext = createContext<ChatContextValue | null>(null)
@@ -621,6 +632,64 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     [appendReply],
   )
 
+  const renameConversation = useCallback(async (conversationId: string, title: string) => {
+    const trimmed = title.trim()
+    if (!trimmed) return false
+
+    let previous: string | undefined
+    setConversations((current) =>
+      current.map((conversation) => {
+        if (conversation.id !== conversationId) return conversation
+        previous = conversation.title
+        return { ...conversation, title: trimmed }
+      }),
+    )
+
+    try {
+      const response = await fetch(`/api/conversations/${encodeURIComponent(conversationId)}`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ title: trimmed }),
+      })
+      if (response.ok) return true
+    } catch {
+      // Falls through to the rollback below.
+    }
+
+    // The server did not accept it, so neither does the screen.
+    if (previous !== undefined) {
+      setConversations((current) =>
+        current.map((conversation) =>
+          conversation.id === conversationId ? { ...conversation, title: previous! } : conversation,
+        ),
+      )
+    }
+    return false
+  }, [])
+
+  const deleteConversation = useCallback(async (conversationId: string) => {
+    /*
+     * REMOVED FROM THE SCREEN ONLY ONCE THE SERVER HAS REMOVED IT.
+     *
+     * The opposite of the rename. An optimistic delete that fails leaves the
+     * user believing something is gone when it is not — and the thing they were
+     * trying to get rid of quietly returns on the next reload. Waiting costs a
+     * moment; being wrong costs their trust in the button.
+     */
+    try {
+      const response = await fetch(`/api/conversations/${encodeURIComponent(conversationId)}`, {
+        method: 'DELETE',
+      })
+      if (!response.ok) return false
+    } catch {
+      return false
+    }
+
+    hydrated.current.delete(conversationId)
+    setConversations((current) => current.filter((conversation) => conversation.id !== conversationId))
+    return true
+  }, [])
+
   const value = useMemo<ChatContextValue>(
     () => ({
       conversations,
@@ -635,8 +704,19 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       startConversation,
       sendMessage,
       openConversation,
+      renameConversation,
+      deleteConversation,
     }),
-    [conversations, pendingIn, loading, startConversation, sendMessage, openConversation],
+    [
+      conversations,
+      pendingIn,
+      loading,
+      startConversation,
+      sendMessage,
+      openConversation,
+      renameConversation,
+      deleteConversation,
+    ],
   )
 
   return <ChatContext.Provider value={value}>{children}</ChatContext.Provider>

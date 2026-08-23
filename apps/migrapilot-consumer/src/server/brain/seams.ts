@@ -56,6 +56,35 @@ export function appendMessage(
   return callBrain({ kind: 'appendMessage', conversationId, role, content }, deps)
 }
 
+/**
+ * Rename one conversation.
+ *
+ * The title is what a person navigates their own history by, and the automatic
+ * one is the first line of whatever they happened to type first. Letting them
+ * fix it is the difference between a history and a pile.
+ */
+export function renameConversation(
+  conversationId: string,
+  title: string,
+  deps?: GatewayDeps,
+): Promise<BrainResult<ConversationSummary>> {
+  return callBrain({ kind: 'renameConversation', conversationId, title }, deps)
+}
+
+/**
+ * Delete one conversation.
+ *
+ * The Brain removes the thread and its messages under the caller's scope, so a
+ * foreign id deletes nothing and reports not-found — the same answer it gives
+ * for an id that never existed, deliberately.
+ */
+export function deleteConversation(
+  conversationId: string,
+  deps?: GatewayDeps,
+): Promise<BrainResult<unknown>> {
+  return callBrain({ kind: 'deleteConversation', conversationId }, deps)
+}
+
 // ── Turns ──────────────────────────────────────────────────────────────────
 
 /**

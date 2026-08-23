@@ -1,23 +1,19 @@
 'use client'
 
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import {
   ChevronDown,
-  ChevronUp,
-  Download,
-  ListChecks,
   Share2,
-  SquareLibrary,
 } from 'lucide-react'
 import { Workspace } from '@/components/layout/AppShell'
 import { Composer, ComposerDisclaimer } from '@/components/chat/Composer'
 import { MessageView, TypingIndicator } from '@/components/chat/Message'
-import { ActionRow, RailCard } from '@/components/rail/RailPanels'
-import { IconTile } from '@/components/ui/Badge'
+import { RailCard } from '@/components/rail/RailPanels'
 import { IconButton } from '@/components/ui/Button'
 import { CopyButton } from '@/components/ui/CopyField'
 import { useChat } from '@/state/ChatProvider'
+import { ConversationMenu } from '@/features/conversations/ConversationMenu'
 import { AnonymousQuotaNotice } from '@/features/anonymous/AnonymousQuotaNotice'
 import { isExhausted, useAnonymousQuota } from '@/features/anonymous/AnonymousQuotaProvider'
 import { cn } from '@/lib/cn'
@@ -26,67 +22,34 @@ import { cn } from '@/lib/cn'
  * Rails
  * ---------------------------------------------------------------- */
 
-const conversationTools = [
-  {
-    icon: ListChecks,
-    tone: 'blue' as const,
-    title: 'Summary',
-    subtitle: 'Get a quick summary of this conversation.',
-  },
-  {
-    icon: Download,
-    tone: 'green' as const,
-    title: 'Export',
-    subtitle: 'Export this conversation or save as a file.',
-  },
-  {
-    icon: SquareLibrary,
-    tone: 'purple' as const,
-    title: 'Sources',
-    subtitle: 'View the sources and references used.',
-  },
-]
-
-function ConversationToolsRail() {
-  const [open, setOpen] = useState(true)
-
+/**
+ * WHAT YOU CAN DO TO THIS CONVERSATION, and nothing you cannot.
+ *
+ * This rail used to offer Summary, Export and Sources as three rows with a
+ * trailing arrow and no handler between them — the exact shape of a working
+ * control, promising a summariser that does not exist, an export that never ran,
+ * and a source list for a product that had no citations to show.
+ *
+ * What replaced them is what is actually built. Rename and Export are real and
+ * immediate; Delete is real and asks first. Summary and Sources are gone rather
+ * than disabled: a greyed-out row still advertises a feature, and these two are
+ * not "switched off", they were never written.
+ */
+function ConversationToolsRail({
+  conversationId,
+  onDeleted,
+}: {
+  conversationId: string
+  onDeleted: () => void
+}) {
   return (
-    <RailCard
-      title={
-        <button
-          onClick={() => setOpen((value) => !value)}
-          aria-expanded={open}
-          className="flex flex-1 items-center justify-between gap-3 text-left"
-        >
-          <span className="text-[15px] font-semibold tracking-[-0.01em] text-slate-900">
-            Conversation Tools
-          </span>
-          {open ? (
-            <ChevronUp className="h-4 w-4 text-slate-400" />
-          ) : (
-            <ChevronDown className="h-4 w-4 text-slate-400" />
-          )}
-        </button>
-      }
-    >
-      {open && (
-        <div className="flex animate-fade flex-col gap-3">
-          {conversationTools.map(({ icon: Icon, tone, title, subtitle }) => (
-            <ActionRow
-              key={title}
-              icon={
-                <IconTile tone={tone} size="md">
-                  <Icon strokeWidth={2} />
-                </IconTile>
-              }
-              title={title}
-              subtitle={subtitle}
-              trailing={<span className="text-slate-300">→</span>}
-              className="items-start"
-            />
-          ))}
-        </div>
-      )}
+    <RailCard title="Conversation">
+      <p className="text-[13px] leading-relaxed text-slate-500">
+        Rename it, keep a copy, or delete it for good.
+      </p>
+      <div className="mt-3">
+        <ConversationMenu conversationId={conversationId} onDeleted={onDeleted} align="left" />
+      </div>
     </RailCard>
   )
 }
@@ -175,7 +138,14 @@ export function ChatPage() {
   return (
     <>
       <Workspace
-        rail={<ConversationToolsRail />}
+        rail={
+          <ConversationToolsRail
+            conversationId={conversation.id}
+            // The thread the page is showing no longer exists, so the page must
+            // not keep showing it.
+            onDeleted={() => router.replace('/')}
+          />
+        }
         contentClassName="mx-auto flex min-h-full w-full max-w-[880px] flex-col px-6 py-7 sm:px-8"
       >
         <div className="flex-1">
