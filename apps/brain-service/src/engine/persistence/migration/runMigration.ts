@@ -23,6 +23,7 @@
  */
 
 import { writeFile } from 'node:fs/promises';
+import { once } from 'node:events';
 import { PostgresConnection } from '../postgres/pool.js';
 import { PostgresDurableStore } from '../postgresStore.js';
 import { LegacySource } from './legacySource.js';
@@ -38,6 +39,9 @@ interface Args {
   verifyOnly: boolean;
   auditOnly: boolean;
   probe: boolean;
+  snapshot: boolean;
+  liveSource?: string;
+  out?: string;
   json?: string;
 }
 
@@ -49,20 +53,26 @@ function parseArgs(argv: string[]): Args {
   const source = get('source');
   const databaseUrl = get('database-url') ?? process.env.MIGRAPILOT_BRAIN_DATABASE_URL ?? process.env.DATABASE_URL;
   const runId = get('run-id');
-  if (!source && !argv.includes('--probe')) {
+  const noSourceNeeded = argv.includes('--probe') || argv.includes('--snapshot');
+  if (!source && !noSourceNeeded) {
     throw new Error('--source <path to a COPY of the legacy state> is required');
   }
-  if (!databaseUrl) throw new Error('--database-url (or MIGRAPILOT_BRAIN_DATABASE_URL) is required');
-  if (!runId && !argv.includes('--probe')) {
+  if (!databaseUrl && !argv.includes('--snapshot')) {
+    throw new Error('--database-url (or MIGRAPILOT_BRAIN_DATABASE_URL) is required');
+  }
+  if (!runId && !noSourceNeeded) {
     throw new Error('--run-id <stable identifier> is required — it is what makes a resume possible');
   }
   return {
     source: source ?? '',
-    databaseUrl,
+    databaseUrl: databaseUrl ?? '',
     runId: runId ?? 'probe',
     verifyOnly: argv.includes('--verify-only'),
     auditOnly: argv.includes('--audit-only'),
     probe: argv.includes('--probe'),
+    snapshot: argv.includes('--snapshot'),
+    ...(get('live-source') === undefined ? {} : { liveSource: get('live-source')! }),
+    ...(get('out') === undefined ? {} : { out: get('out')! }),
     ...(get('json') === undefined ? {} : { json: get('json')! }),
   };
 }
@@ -82,6 +92,59 @@ export function redactAnyDsn(text: string): string {
 export async function main(argv: string[] = process.argv.slice(2)): Promise<number> {
   const args = parseArgs(argv);
   const out = (line: string) => process.stdout.write(`${redactAnyDsn(line)}\n`);
+
+  /*
+   * SNAPSHOT. Never point the importer at the live file.
+   *
+   * The live database is served by a running Brain in WAL mode; reading it
+   * mid-write imports a torn state. `VACUUM INTO` produces a consistent copy
+   * from a READ-ONLY connection, so the artifact being migrated FROM cannot be
+   * damaged by the tool that copies it.
+   *
+   * Run as root, writing straight into the destination, so the copy is never
+   * owned by a login user on its way there.
+   */
+  if (args.snapshot) {
+    const live = args.liveSource ?? '/var/lib/migrapilot/brain-state.db';
+    const dest = args.out;
+    if (!dest) throw new Error('--snapshot requires --out <destination path>');
+
+    const { createHash: hash } = await import('node:crypto');
+    const { createReadStream: read } = await import('node:fs');
+    const checksum = async (p: string): Promise<string> => {
+      const h = hash('sha256');
+      const s = read(p);
+      s.on('data', (c) => h.update(c));
+      await once(s, 'end');
+      return h.digest('hex');
+    };
+
+    out('── snapshot ──');
+    const before = await checksum(live);
+    out(`  live source: ${live}`);
+    out(`  sha256 before: ${before}`);
+
+    const { DatabaseSync } = await import('node:sqlite');
+    const db = new DatabaseSync(live, { readOnly: true });
+    try {
+      db.exec(`VACUUM INTO '${dest.replace(/'/g, "''")}'`);
+    } finally {
+      db.close();
+    }
+
+    const after = await checksum(live);
+    out(`  sha256 after:  ${after}`);
+    if (before !== after) {
+      out('  FAILED: the live database CHANGED while being snapshotted.');
+      out('  Either a write landed mid-copy, or this tool is not as read-only as it claims.');
+      out('  Do not migrate from this snapshot.');
+      return 4;
+    }
+    out('  live database unchanged — the snapshot did not touch it');
+    out(`  snapshot:      ${dest}`);
+    out(`  fingerprint:   ${await LegacySource.fingerprint(dest)}`);
+    return 0;
+  }
 
   /*
    * PROBE. Connectivity first, pg_hba second.
