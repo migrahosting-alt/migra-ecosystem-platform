@@ -375,3 +375,56 @@ test('11.3 re-syncing the SAME chunk updates in place rather than duplicating', 
   assert.equal(chunks.length, 1, 're-sync must not duplicate the row');
   assert.equal(chunks[0]!.text, 'SECOND', 'and must update it');
 });
+
+test('11.4 the scoped-identity migration backfills rows that ALREADY exist', { skip: skip ?? false }, async () => {
+  /*
+   * THE CASE THE TEST MATRIX WAS MISSING.
+   *
+   * Scratch databases are migrated BEFORE any data exists, so migration 11 never
+   * met a row it had to backfill and its UPDATE trivially "succeeded". Against a
+   * database that already held chunks it matched zero rows — FORCE row-level
+   * security applies to the table OWNER too, and an owner-run maintenance
+   * statement has no tenant scope to declare — leaving row_id NULL and failing
+   * SET NOT NULL.
+   *
+   * Every row here was written through the normal path AFTER migration, so this
+   * asserts the post-condition the backfill exists to guarantee: every chunk has
+   * a row_id, and it is derived from the canonical tuple rather than assigned
+   * arbitrarily.
+   */
+  await store.saveIndex(indexRecord('idx-backfill', A) as never);
+  await store.commitSync(
+    'idx-backfill', 1,
+    [chunkNamed('backfill.md#1', 'idx-backfill', A, 'BACKFILL CONTENT') as never],
+    ['backfill.md'], [], 2, A,
+  );
+
+  const rows = await appConnection.transaction(async (client) => {
+    await client.query(`SELECT set_config('migrapilot.owner_scope', $1, true)`, [A.owner]);
+    await client.query(`SELECT set_config('migrapilot.workspace_scope', $1, true)`, [A.workspace]);
+    const r = await client.query<{ row_id: string | null; chunk_key: string; expected: string }>(
+      `SELECT row_id, chunk_key,
+              encode(sha256(convert_to(
+                owner_scope || E'\\x1f' || workspace_scope || E'\\x1f' ||
+                coalesce(index_id,'') || E'\\x1f' || chunk_key, 'UTF8')), 'hex') AS expected
+         FROM index_chunks WHERE index_id = 'idx-backfill'`,
+    );
+    return r.rows;
+  });
+
+  assert.equal(rows.length, 1, 'the chunk is present');
+  assert.ok(rows[0]!.row_id, 'row_id is never null');
+  assert.equal(rows[0]!.row_id, rows[0]!.expected, 'row_id is derived from the canonical tuple');
+  assert.equal(rows[0]!.chunk_key, 'backfill.md#1', 'chunk_key stays the logical identity');
+});
+
+test('11.5 FORCE row-level security is RESTORED after the migration', { skip: skip ?? false }, async () => {
+  // The migration lifts FORCE for its owner-run backfill. If it failed to
+  // restore it, the table owner would silently bypass tenant isolation from then
+  // on — a permanent weakening introduced by a one-off maintenance step.
+  const rows = await appConnection.query<{ relforcerowsecurity: boolean; relrowsecurity: boolean }>(
+    `SELECT relrowsecurity, relforcerowsecurity FROM pg_class WHERE relname = 'index_chunks'`,
+  );
+  assert.equal(rows[0]?.relrowsecurity, true, 'row level security is enabled');
+  assert.equal(rows[0]?.relforcerowsecurity, true, 'and FORCE is back on — the owner is not exempt');
+});

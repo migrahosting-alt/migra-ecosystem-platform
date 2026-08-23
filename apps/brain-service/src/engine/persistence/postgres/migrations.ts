@@ -571,6 +571,24 @@ const M11_SCOPED_CHUNK_IDENTITY = `
 ALTER TABLE index_chunks ADD COLUMN IF NOT EXISTS row_id TEXT;
 ALTER TABLE index_chunks RENAME COLUMN id TO chunk_key;
 
+/*
+ * FORCE ROW LEVEL SECURITY APPLIES TO THE TABLE OWNER TOO.
+ *
+ * The backfill below is an owner-run maintenance statement with no tenant scope
+ * to declare, so under FORCE it matched ZERO rows: row_id stayed NULL on every
+ * existing chunk and SET NOT NULL then failed with "contains null values".
+ *
+ * This was invisible in tests because a scratch database is migrated BEFORE any
+ * data exists — there were no rows to miss. It appeared the moment the migration
+ * met a database that already held chunks.
+ *
+ * FORCE is lifted for the owner only, for the duration of this migration, and
+ * restored below. The app role is NOT the owner and keeps its policies
+ * throughout; if this migration aborts, the whole transaction — including this
+ * DDL — rolls back, so FORCE cannot be left off.
+ */
+ALTER TABLE index_chunks NO FORCE ROW LEVEL SECURITY;
+
 -- Deterministic, from the COMPLETE identity the database already knows. Two
 -- rows that are genuinely the same chunk derive the same row_id; two rows that
 -- differ in any scope component do not.
@@ -609,6 +627,9 @@ ALTER TABLE index_chunks ADD CONSTRAINT index_chunks_pkey PRIMARY KEY (row_id);
 ALTER TABLE index_chunks
   ADD CONSTRAINT index_chunks_scope_identity_uq
   UNIQUE (owner_scope, workspace_scope, index_id, chunk_key);
+
+-- Restored immediately. Tenant isolation is not relaxed beyond this migration.
+ALTER TABLE index_chunks FORCE ROW LEVEL SECURITY;
 `;
 
 export const MIGRATIONS: readonly Migration[] = [
