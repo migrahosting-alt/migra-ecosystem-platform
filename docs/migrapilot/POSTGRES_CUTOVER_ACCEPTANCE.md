@@ -73,6 +73,50 @@ Those are **different kinds of identifier**. A workspace *id* is not self-eviden
 | 3.2 | no SQLite file touched | with Postgres configured, `brain-state.db` mtime is unchanged after a full run |
 | 3.3 | wrong credentials → refuse | no silent degrade to an empty store |
 
+## Gate 2b — candidate boot/restart durability — **PASSED 2026-08-22**
+
+Release `fd8d50a` on `migrapilot-brain-postgres-candidate.service` (:3990),
+`MIGRAPILOT_PERSISTENCE=postgres`, schema 11, `migrationState: current`.
+
+Driven through the real HTTP API by `apps/brain-service/gates/`. Split across a
+genuine `systemctl restart`, because that is the only thing that separates "the
+database recorded it" from "the process remembers it".
+
+| step | result |
+|---|---|
+| 1 · deploy the scoped-write fix | `fd8d50a` installed, content gate passed, boot-tested on :3999 |
+| 2 · health precondition | `persistence: ready`, `migrationState: current`, schema 11, no detail — enforced by the harness, `exit 2` otherwise |
+| 3 · pre-restart, `candidate-gate write` | **9/9** |
+| 4 · pre-restart, `approved-index-gate phase1` | **13/13** |
+| 5 · restart | new process, uptime reset |
+| 6 · post-restart, `candidate-gate read` | **10/10** |
+| 7 · post-restart, `approved-index-gate phase2` | **8/8** |
+| 8 · SQLite untouched | `sha256 e6cdfd30…`, db mtime `16:14`, wal mtime `19:17` — both **before** the candidate first started at `23:57` |
+
+The two assertions this gate existed to add, both with a control that must pass first:
+
+- **approve index → restart → still approved** — `state=approved approvedVersion=1`
+  after a cold process, and the first request after the restart retrieves and
+  cites the approved content.
+- **delete conversation → restart → still deleted** — gone from the list, `404`
+  on direct fetch, messages did not come back; while the sibling conversation
+  that was *not* deleted returned with its content intact.
+- **delete workspace → restart → still deleted**, with the control in another
+  scope — which also proves the delete did not reach across scopes.
+
+### What it caught
+
+| defect | how it presented |
+|---|---|
+| five writes crossed the persistence boundary with no scope | approve succeeded, restart said `experimental` / no approved version |
+| `DELETE` with `content-type: application/json` and no body | `500 Internal server error` — Fastify rejected the empty body before the route ran |
+| the deployment boot test | created a SQLite database in the staging tree and shipped it into two PostgreSQL releases |
+
+Row-count invariant added at the same time: any scoped `UPDATE`/`DELETE` that
+affects zero rows raises `ScopedMutationMissedError`. Delete semantics decided
+explicitly — "already absent" is a **mismatch**, not idempotent success, because
+under FORCE RLS "already gone" and "not yours" are the same observation.
+
 ## Gate 4 — migration parity
 
 Counts alone are insufficient; sample real records.
