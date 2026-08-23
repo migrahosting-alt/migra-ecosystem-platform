@@ -24,7 +24,17 @@ export type IntegrityVerdict =
   /** Source present, but the persisted chunk set does not match it. */
   | 'source_mismatch'
   /** Source gone. What exists was migrated; parity was never demonstrated. */
-  | 'historical_integrity_unverified';
+  | 'historical_integrity_unverified'
+  /**
+   * The source EXISTS but this process could not read it.
+   *
+   * Kept distinct from "gone" on purpose. Reporting a permission failure as a
+   * missing source is how an audit closes a question with a wrong answer — it
+   * happened: run as an ordinary user, three indexes rooted under a 0700
+   * upload directory were recorded as deleted, and the same audit run as root
+   * verified every one of them.
+   */
+  | 'source_unreadable';
 
 export interface IndexAuditRow {
   indexId: string;
@@ -44,6 +54,8 @@ export interface IndexAuditRow {
    */
   sourceResolvedPath?: string;
   sourceRootIsSymlinked: boolean;
+  /** errno when the source could not be inspected — ENOENT vs EACCES matters. */
+  sourceError?: string;
   expectedFiles: number | null;
   persistedFiles: number;
   persistedChunks: number;
@@ -70,7 +82,16 @@ export interface ChunkAuditReport {
   indexes: IndexAuditRow[];
   /** True only if every index was actually compared against a live source. */
   fullyVerified: boolean;
+  /** Indexes whose source is genuinely GONE. */
   unverifiedCount: number;
+  /**
+   * Indexes whose source exists but could not be read by this process.
+   *
+   * Never folded into `unverifiedCount`: one is a fact about the data, the
+   * other is a fact about who ran the audit, and the fix is completely
+   * different — re-run with access, do not conclude anything.
+   */
+  unreadableCount: number;
 }
 
 const IGNORED_DIRS = new Set(['.git', 'node_modules', '.next', 'dist-cache']);
@@ -127,6 +148,7 @@ export async function auditChunkIntegrity(source: LegacySource): Promise<ChunkAu
     } catch {
       resolved = null;
     }
+    let sourceError: string | undefined;
     try {
       const s = await stat(r.root);
       if (s.isDirectory()) {
@@ -136,8 +158,12 @@ export async function auditChunkIntegrity(source: LegacySource): Promise<ChunkAu
         sourceFiles = [relative(r.root, r.root)];
         sourceAvailable = true;
       }
-    } catch {
+    } catch (error) {
+      // The errno is the whole point: ENOENT means the data is gone, EACCES
+      // means THIS PROCESS cannot see it and the audit is simply not qualified
+      // to answer. Swallowing the difference is what produced a false verdict.
       sourceAvailable = false;
+      sourceError = (error as NodeJS.ErrnoException)?.code ?? String(error);
     }
 
     const filesMissingFromSource = sourceAvailable && sourceFiles
@@ -162,8 +188,9 @@ export async function auditChunkIntegrity(source: LegacySource): Promise<ChunkAu
       filesMissingFromIndex,
       duplicateLogicalKeys,
       crossIndexLogicalCollisions: [],
+      ...(sourceError === undefined ? {} : { sourceError }),
       verdict: !sourceAvailable
-        ? 'historical_integrity_unverified'
+        ? (sourceError === 'ENOENT' ? 'historical_integrity_unverified' : 'source_unreadable')
         : (filesMissingFromSource.length === 0 && duplicateLogicalKeys.length === 0
           ? 'verified_against_source'
           : 'source_mismatch'),
@@ -181,9 +208,11 @@ export async function auditChunkIntegrity(source: LegacySource): Promise<ChunkAu
   }
 
   const unverifiedCount = rows.filter((r) => r.verdict === 'historical_integrity_unverified').length;
+  const unreadableCount = rows.filter((r) => r.verdict === 'source_unreadable').length;
   return {
     indexes: rows,
     unverifiedCount,
+    unreadableCount,
     // "Fully verified" requires every index to have been compared against a live
     // source. One unverifiable index is enough to make the overall claim false.
     fullyVerified: rows.length > 0 && rows.every((r) => r.verdict === 'verified_against_source'),

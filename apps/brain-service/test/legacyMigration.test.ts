@@ -11,7 +11,7 @@
 import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
 import { DatabaseSync } from 'node:sqlite';
-import { mkdtemp, rm, mkdir, writeFile } from 'node:fs/promises';
+import { chmod, mkdtemp, rm, mkdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -444,4 +444,58 @@ test('a soft-deleted conversation migrates as DELETED and does not come back', {
   });
   assert.equal(rows.length, 1, 'the row was migrated rather than silently skipped');
   assert.equal(Number(rows[0]?.deleted_at), 515, 'and it kept the exact deletion timestamp');
+});
+
+test('an UNREADABLE source is not reported as a missing one', { skip: skip ?? false }, async () => {
+  /*
+   * The defect this replaces shipped into a written report.
+   *
+   * /var/lib/migrapilot/uploads is 0700. Run as an ordinary user the audit got
+   * EACCES, the catch-all swallowed it, and three indexes were recorded as
+   * "SOURCE GONE" — which I then wrote up as "their upload directories were
+   * deleted". They existed the whole time; the same audit run as root verified
+   * every one of them against its source.
+   *
+   * A permission failure reported as a data fact is worse than no audit: it
+   * closes the question with a wrong answer.
+   */
+  const root = join(workDir, 'library-locked');
+  await mkdir(root, { recursive: true });
+  await writeFile(join(root, 'secret.md'), 'content');
+
+  const dbPath = join(workDir, 'locked-source.db');
+  await buildLegacySource(dbPath);
+  const db = new DatabaseSync(dbPath);
+  db.prepare('UPDATE workspace_indexes SET root = ? WHERE id = ?').run(root, 'idx-a');
+  db.close();
+
+  await chmod(root, 0o000);
+  try {
+    const source = new LegacySource(dbPath);
+    const audit = await auditChunkIntegrity(source);
+    const locked = audit.indexes.find((i) => i.indexId === 'idx-a');
+
+    assert.equal(locked?.verdict, 'source_unreadable', 'unreadable is its own verdict');
+    assert.notEqual(locked?.verdict, 'historical_integrity_unverified', 'and is NOT "gone"');
+    assert.equal(locked?.sourceError, 'EACCES', 'the errno is kept — it says what to fix');
+    assert.equal(audit.unreadableCount, 1);
+    assert.equal(audit.unverifiedCount, 1, 'only the genuinely-absent root counts as unverified');
+    assert.equal(audit.fullyVerified, false);
+    source.close();
+  } finally {
+    // Restore, or the temp-dir cleanup in `after` cannot remove it.
+    await chmod(root, 0o755);
+  }
+});
+
+test('a genuinely ABSENT source still reports ENOENT and "gone"', { skip: skip ?? false }, async () => {
+  // The other half of the distinction: the original behaviour must survive.
+  const source = new LegacySource(sourcePath);
+  const audit = await auditChunkIntegrity(source);
+  for (const row of audit.indexes) {
+    assert.equal(row.verdict, 'historical_integrity_unverified');
+    assert.equal(row.sourceError, 'ENOENT', 'absent, not merely unreadable');
+  }
+  assert.equal(audit.unreadableCount, 0);
+  source.close();
 });

@@ -180,12 +180,28 @@ Inventory: 115 conversations · 270 messages · 0 summaries · 0 workspaces ·
 4 indexes · 34 index versions · 10 127 chunks · 8 976 cached embeddings ·
 838 audit events · 2 usage records. 0 deleted conversations.
 
+> **CORRECTION, 2026-08-23.** An earlier version of this section reported three
+> of these four indexes as `historical_integrity_unverified` and stated that
+> "their upload directories were deleted." That was wrong. The directories exist
+> and are intact. The audit had been run as an ordinary user against
+> `/var/lib/migrapilot/uploads`, which is `0700 migrapilot:migrapilot`; it got
+> `EACCES`, and the catch-all reported the permission failure as a missing
+> source. Re-run as root — inside the rehearsal import unit — every index
+> verified. The audit now reports `source_unreadable` separately from
+> `historical_integrity_unverified`, because one is a fact about the data and
+> the other is a fact about who ran the audit.
+
 | index | scope | source | verdict |
 |---|---|---|---|
 | `idx_31twfee4sn` | local / default | present, **via a moving symlink** | `verified_against_source` |
-| `idx_3r8gt43uq4` | user:74e5… / personal | **gone** | `historical_integrity_unverified` |
-| `idx_7g3a9o5brg` | user:74e5… / personal:74e5… | **gone** | `historical_integrity_unverified` |
-| `idx_t7247x7cs4` | user:8c32… / personal:8c32… | **gone** | `historical_integrity_unverified` |
+| `idx_3r8gt43uq4` | user:74e5… / personal | present (1 of 6 files indexed) | `verified_against_source` |
+| `idx_7g3a9o5brg` | user:74e5… / personal:74e5… | present (5 of 6 files indexed) | `verified_against_source` |
+| `idx_t7247x7cs4` | user:8c32… / personal:8c32… | present (2 of 2 files indexed) | `verified_against_source` |
+
+**Zero files missing from source across all four indexes, and zero duplicate
+logical keys.** Every chunk the legacy state persisted still maps to a file that
+exists. The two indexes sharing the `e19a79f1…` upload root simply synced at
+different times and captured different subsets of it — not a collision.
 
 **Did the legacy key already destroy information? No — and the reason matters.**
 
@@ -210,10 +226,10 @@ The 630 files "in source but not indexed" are 300 `.d.ts`, 300 `.map`, 29 `.js`
 and 1 `.tsbuildinfo` — declaration and sourcemap files the indexer skips, in a
 tree that has been redeployed many times since the index was built.
 
-**Three of four indexes cannot be source-verified at all.** Their upload
-directories were deleted. What exists is migrated as-is and recorded as
-`historical_integrity_unverified`. That is the honest state, not a pass, and it
-is what the report says.
+**No index is unverified any more.** The `historical_integrity_unverified`
+verdict still exists and still means what it says — the source is genuinely gone
+— but on this data nothing is in that state once the audit can actually read the
+upload directory.
 
 ## Limits of this audit, stated plainly
 
@@ -221,3 +237,7 @@ is what the report says.
   older versions are not counted.
 - For a source that still exists, it compares against the source **now**.
 - It cannot reconstruct what an index held at the time it was built.
+- **It can only report on what the running process can read.** Run it with
+  access to the source roots — as root, or as `migrapilot`. Run as anyone else
+  it now says `source_unreadable` rather than inventing a verdict, but a
+  `source_unreadable` row is not evidence of anything either way.

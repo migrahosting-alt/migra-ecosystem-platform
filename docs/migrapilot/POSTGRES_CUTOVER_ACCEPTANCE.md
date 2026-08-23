@@ -150,8 +150,9 @@ full suite 1643/1643. Design and findings: `LEGACY_MIGRATION.md`.
 | historical chunk-integrity audit on REAL production data | **done** — see below |
 | resumable/idempotent import with source-fingerprint pinning | **done**, covered by crash-and-resume and double-import cases |
 | exact reconciliation, proven to fail on a tampered target | **done** |
-| import rehearsal into an isolated target | **BLOCKED** — needs `migrapilot_brain_rehearsal` on db-core (`provision-rehearsal-postgres.sh`) |
-| candidate Brain booted against the migrated database | pending the rehearsal |
+| import rehearsal into an isolated target | **DONE 2026-08-23** — `migrapilot_brain_rehearsal`, existing pg_hba rules sufficed |
+| exact parity on REAL production data | **EXACT** — 6 scopes, 115 conversations, 270 messages, 4 indexes, 10 127 chunks, 0 mismatches |
+| candidate Brain booted against the migrated database | next |
 
 **Two defects found before production was touched**, both in code already
 deployed to the candidate:
@@ -172,11 +173,18 @@ fixed lived in the first PostgreSQL port. Not academic: three indexes hold
 logical keys another index also holds (5, 6 and 1), so 12 chunks would have
 collided on import under the pre-migration-11 key.
 
-**Three of four indexes cannot be source-verified** — their upload directories
-were deleted. Recorded as `historical_integrity_unverified`, migrated as-is, and
-NOT reported as parity. The fourth is rooted at the release symlink, so its
-verdict compares against today's tree rather than the one that was indexed; the
-report prints that caveat rather than letting it read as proof.
+**All four indexes verify against their sources** — 0 files missing from source,
+0 duplicate logical keys.
+
+An earlier run of this audit said the opposite, and it was wrong: run as an
+ordinary user against a `0700` upload directory it got `EACCES`, and the
+catch-all reported the permission failure as "source gone". The tool now
+separates `source_unreadable` from `historical_integrity_unverified`, because one
+is a fact about the data and the other is a fact about who ran the audit.
+
+`idx_31twfee4sn` is rooted at the release symlink, so its verdict compares
+against today's tree rather than the one that was indexed; the report prints that
+caveat rather than letting it read as proof.
 
 ## Gate 5 — canary before production
 

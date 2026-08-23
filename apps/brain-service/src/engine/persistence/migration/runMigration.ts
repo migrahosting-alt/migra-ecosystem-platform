@@ -215,7 +215,10 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
   for (const r of audit.indexes) {
     out(`  ${r.indexId}  ${r.verdict}`);
     out(`    scope=${r.ownerScope} / ${r.workspaceScope}`);
-    out(`    root=${r.root} (${r.sourceAvailable ? 'source present' : 'SOURCE GONE'})`);
+    const sourceState = r.sourceAvailable
+      ? 'source present'
+      : (r.sourceError === 'ENOENT' ? 'SOURCE GONE' : `SOURCE UNREADABLE (${r.sourceError})`);
+    out(`    root=${r.root} (${sourceState})`);
     out(`    files: expected=${r.expectedFiles ?? 'unknown'} persisted=${r.persistedFiles}  chunks=${r.persistedChunks}`);
     if (r.sourceRootIsSymlinked) {
       out(`    NOTE: root resolves through a symlink to ${r.sourceResolvedPath}`);
@@ -226,10 +229,16 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     if (r.duplicateLogicalKeys.length) out(`    DUPLICATE logical keys within a version: ${r.duplicateLogicalKeys.length}`);
     if (r.crossIndexLogicalCollisions.length) out(`    logical keys also used by another index: ${r.crossIndexLogicalCollisions.length}`);
   }
-  out(`  → ${audit.unverifiedCount} of ${audit.indexes.length} index(es) could NOT be verified against a source`);
+  out(`  → ${audit.unverifiedCount} of ${audit.indexes.length} index(es) have NO source left`);
+  if (audit.unreadableCount > 0) {
+    out(`  → ${audit.unreadableCount} index(es) have a source this process CANNOT READ.`);
+    out('    That is a fact about who ran the audit, not about the data. Re-run with');
+    out('    access before concluding anything — an earlier run as an ordinary user');
+    out('    reported a 0700 upload directory as deleted.');
+  }
   if (!audit.fullyVerified) {
     out('    Source parity was NOT demonstrated for those. They are migrated as-is and');
-    out('    recorded as historical_integrity_unverified. That is the honest state, not a pass.');
+    out('    recorded as unverified. That is the honest state, not a pass.');
   }
 
   if (args.auditOnly) {
