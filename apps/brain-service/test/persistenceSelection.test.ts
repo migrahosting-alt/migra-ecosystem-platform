@@ -110,3 +110,101 @@ test('every selection reason is human-readable and non-empty', () => {
     assert.ok(!selection.reason.includes('secret'), 'reason must not carry credentials');
   }
 });
+
+// ── the contradiction that aborted a production cutover ─────────────────────
+
+/*
+ * `MIGRAPILOT_PERSISTENCE=postgres` selects PostgreSQL.
+ * `MIGRAPILOT_STATE_DB=off` disables durable persistence entirely.
+ *
+ * Set together, the `off` branch ran first: the Brain came up with persistence
+ * `off`, reported `status: ok` with `persistence: unavailable`, and never
+ * consulted PostgreSQL. Outside production that branch does not even throw, so
+ * the contradiction degraded silently into a Brain that looks healthy and
+ * refuses every durable write.
+ */
+
+test('postgres + MIGRAPILOT_STATE_DB=off is a hard startup failure, not a silent downgrade', () => {
+  assert.throws(
+    () => resolvePersistence(
+      { MIGRAPILOT_PERSISTENCE: 'postgres', MIGRAPILOT_STATE_DB: 'off', MIGRAPILOT_BRAIN_DATABASE_URL: PG }, CWD,
+    ),
+    (error: unknown) => error instanceof PersistenceConfigError && /contradict/i.test((error as Error).message),
+    'the engine must refuse rather than pick one of two incompatible instructions',
+  );
+});
+
+test('it fails the same way in production', () => {
+  assert.throws(
+    () => resolvePersistence(
+      prod({ MIGRAPILOT_PERSISTENCE: 'postgres', MIGRAPILOT_STATE_DB: 'off', MIGRAPILOT_BRAIN_DATABASE_URL: PG }), CWD,
+    ),
+    (error: unknown) => error instanceof PersistenceConfigError && /contradict/i.test((error as Error).message),
+  );
+});
+
+test('postgres + EMPTY MIGRAPILOT_STATE_DB selects PostgreSQL', () => {
+  // Empty is how an inherited value is cleared — the documented way to stop
+  // SQLite being used without claiming "no durability".
+  const selection = resolvePersistence(
+    { MIGRAPILOT_PERSISTENCE: 'postgres', MIGRAPILOT_STATE_DB: '', MIGRAPILOT_BRAIN_DATABASE_URL: PG }, CWD,
+  );
+  assert.equal(selection.kind, 'postgres');
+  assert.equal(selection.databaseUrl, PG);
+});
+
+test('postgres with MIGRAPILOT_STATE_DB absent entirely selects PostgreSQL', () => {
+  const selection = resolvePersistence(
+    { MIGRAPILOT_PERSISTENCE: 'postgres', MIGRAPILOT_BRAIN_DATABASE_URL: PG }, CWD,
+  );
+  assert.equal(selection.kind, 'postgres');
+});
+
+test('postgres wins even when a legacy SQLite PATH is still set — no fallback', () => {
+  /*
+   * The realistic production shape: brain.env still carries the old
+   * MIGRAPILOT_STATE_DB pointing at brain-state.db. That must not drag the
+   * engine back to SQLite, and must not be treated as a contradiction either —
+   * a stale path is not the `off` switch.
+   */
+  const selection = resolvePersistence(
+    {
+      MIGRAPILOT_PERSISTENCE: 'postgres',
+      MIGRAPILOT_STATE_DB: '/var/lib/migrapilot/brain-state.db',
+      MIGRAPILOT_BRAIN_DATABASE_URL: PG,
+    },
+    CWD,
+  );
+  assert.equal(selection.kind, 'postgres', 'a leftover SQLite path must not win over an explicit postgres selection');
+  assert.equal((selection as { sqlitePath?: string }).sqlitePath, undefined, 'and no SQLite path is carried forward');
+});
+
+test('production still refuses a legacy SQLite path even with postgres requested', () => {
+  // Unchanged contract: in production a set MIGRAPILOT_STATE_DB is an error,
+  // because it means someone believes a local file is still involved.
+  assert.throws(
+    () => resolvePersistence(
+      prod({
+        MIGRAPILOT_PERSISTENCE: 'postgres',
+        MIGRAPILOT_STATE_DB: '/var/lib/migrapilot/brain-state.db',
+        MIGRAPILOT_BRAIN_DATABASE_URL: PG,
+      }),
+      CWD,
+    ),
+    PersistenceConfigError,
+  );
+});
+
+test('the local off switch still works when postgres is NOT requested', () => {
+  // The explicit local contract is untouched until SQLite support is removed.
+  const selection = resolvePersistence({ MIGRAPILOT_STATE_DB: 'off' }, CWD);
+  assert.equal(selection.kind, 'off');
+});
+
+test('sqlite + off still resolves to off, not to a contradiction', () => {
+  // Only postgres conflicts with `off`. `sqlite` + `off` is a coherent local
+  // instruction — "the SQLite adapter, with durability disabled" — and widening
+  // the guard to cover it would break the existing dev contract.
+  const selection = resolvePersistence({ MIGRAPILOT_PERSISTENCE: 'sqlite', MIGRAPILOT_STATE_DB: 'off' }, CWD);
+  assert.equal(selection.kind, 'off');
+});

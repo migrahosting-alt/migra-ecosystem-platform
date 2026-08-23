@@ -72,6 +72,30 @@ export function resolvePersistence(env: PersistenceEnv, cwd: string): Persistenc
   const stateDb = normalise(env.MIGRAPILOT_STATE_DB);
   const databaseUrl = normalise(env.MIGRAPILOT_BRAIN_DATABASE_URL) ?? normalise(env.DATABASE_URL);
 
+  /*
+   * CONTRADICTION FIRST, before either setting is honoured.
+   *
+   * `MIGRAPILOT_PERSISTENCE=postgres` says "use PostgreSQL".
+   * `MIGRAPILOT_STATE_DB=off`        says "no durable state at all".
+   *
+   * Both together is not a preference to resolve, it is a mistake to report.
+   * Resolving it silently aborted a production cutover: the `off` branch ran
+   * first, the engine came up with persistence `off` and `status: ok`, and
+   * PostgreSQL was never consulted. A Brain that looks healthy and refuses
+   * every durable write is the worst of the available outcomes.
+   *
+   * To turn SQLite off for PostgreSQL, do not set MIGRAPILOT_STATE_DB at all —
+   * or set it EMPTY to clear an inherited value. `off` is the local
+   * "no durability" switch and means something else.
+   */
+  if (requested === 'postgres' && stateDb === 'off') {
+    throw new PersistenceConfigError(
+      'MIGRAPILOT_PERSISTENCE=postgres and MIGRAPILOT_STATE_DB=off contradict each other: the first selects ' +
+        'PostgreSQL, the second disables durable persistence entirely. Refusing to guess. To use PostgreSQL, ' +
+        'leave MIGRAPILOT_STATE_DB unset (or set it empty to clear an inherited value).',
+    );
+  }
+
   // `MIGRAPILOT_STATE_DB=off` remains the explicit "no durable state" switch.
   if (stateDb === 'off') {
     if (production) {
