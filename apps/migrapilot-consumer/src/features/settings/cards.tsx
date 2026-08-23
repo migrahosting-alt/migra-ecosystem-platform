@@ -241,11 +241,14 @@ export function SecurityCard({ controller }: { controller: AccountController }) 
                 <p className="flex items-center gap-2 text-[15px] font-medium text-slate-800">
                   <Monitor className="h-4 w-4 shrink-0 text-slate-400" />
                   {deviceLabel(s.userAgent)}
-                  {s.current && (
-                    <span className="rounded-full bg-brand-50 px-2 py-0.5 text-xs font-medium text-brand-700">
-                      This device
-                    </span>
-                  )}
+                  {/*
+                    NO "THIS DEVICE" BADGE. MigraAuth derives `current` from its
+                    session COOKIE, and this app authenticates with a bearer
+                    token — so `current` is false for every row, always. Badging
+                    on it would mark nothing, and trusting it to hide a revoke
+                    button would offer to sign you out of the session you are
+                    reading the page with, while calling it someone else's.
+                  */}
                 </p>
                 {/* Only what MigraAuth actually records. No inferred location. */}
                 <p className="mt-0.5 text-[13px] text-slate-500">
@@ -253,16 +256,14 @@ export function SecurityCard({ controller }: { controller: AccountController }) 
                   {s.lastSeenAt ? new Date(s.lastSeenAt).toLocaleString() : 'unknown'}
                 </p>
               </div>
-              {!s.current && (
-                <button
-                  type="button"
-                  onClick={() => void end(s.id)}
-                  disabled={busy !== null}
-                  className="shrink-0 rounded-field border border-slate-300 px-3 py-1.5 text-sm font-semibold text-slate-700 transition-colors hover:border-red-300 hover:bg-red-50 hover:text-red-700 disabled:opacity-50"
-                >
-                  {busy === s.id ? 'Ending…' : 'Sign out'}
-                </button>
-              )}
+              <button
+                type="button"
+                onClick={() => void end(s.id)}
+                disabled={busy !== null}
+                className="shrink-0 rounded-field border border-slate-300 px-3 py-1.5 text-sm font-semibold text-slate-700 transition-colors hover:border-red-300 hover:bg-red-50 hover:text-red-700 disabled:opacity-50"
+              >
+                {busy === s.id ? 'Ending…' : 'End session'}
+              </button>
             </li>
           ))}
         </ul>
@@ -276,9 +277,23 @@ export function SecurityCard({ controller }: { controller: AccountController }) 
           className="mt-4 inline-flex h-10 items-center gap-2 rounded-field border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-700 transition-colors hover:border-slate-400 hover:bg-slate-50 disabled:opacity-50"
         >
           <ShieldCheck className="h-4 w-4 text-slate-400" />
-          {busy === 'others' ? 'Signing out…' : 'Sign out everywhere else'}
+          {busy === 'others' ? 'Ending…' : 'End all other sessions'}
         </button>
       )}
+
+      {/*
+        SAID PLAINLY, BECAUSE IT IS NOT WHAT PEOPLE ASSUME. Ending a session here
+        ends the MigraTeck sign-in. It does NOT immediately close MigraPilot on
+        that device: this app holds its own session, and it stops working when
+        that session lapses rather than the instant the MigraTeck one is ended.
+        A "signed out everywhere" claim would be false for that window, and the
+        window is exactly when someone reaches for this control.
+      */}
+      <p className="mt-4 text-[13px] leading-relaxed text-slate-500">
+        Ending a session signs that device out of your MigraTeck account. MigraPilot itself may stay
+        open on that device until its own session lapses — to close it immediately, use Sign out on
+        the device.
+      </p>
 
       {error && (
         <p role="alert" className="mt-3 text-[13px] text-red-600">
