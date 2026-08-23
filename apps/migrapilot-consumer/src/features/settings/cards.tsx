@@ -61,9 +61,18 @@ export function IdentityCard({ account }: { account: AccountController['account'
   if (account.status === 'reauth_required') {
     return (
       <SettingsCard title="Account">
+        {/*
+          THE REMEDY WAS RIGHT; THE REASON WAS INVENTED. This used to say the
+          sign-in "predates a security update", which named a cause the app has
+          no way to know. The condition is simply that this app can no longer
+          renew its access to your MigraTeck account — the session ended, or the
+          token could not be refreshed. Seen live after a session was revoked in
+          testing, where the confident wrong explanation was the only misleading
+          thing on the page.
+        */}
         <Unavailable>
-          This sign-in predates a security update, so your account details cannot be read yet.
-          Signing in again fixes it — nothing has been lost.
+          MigraPilot can no longer renew its access to your MigraTeck account, so your account
+          details cannot be read. Signing in again restores it — nothing has been lost.
         </Unavailable>
         <a
           href="/api/auth/login?next=%2Fsettings"

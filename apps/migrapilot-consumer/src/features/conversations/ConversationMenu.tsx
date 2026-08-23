@@ -3,7 +3,6 @@
 import { useCallback, useRef, useState } from 'react'
 import { Download, MoreHorizontal, Pencil, Trash2 } from 'lucide-react'
 import { useChat } from '@/state/ChatProvider'
-import { useAnonymousQuota } from '@/features/anonymous/AnonymousQuotaProvider'
 import { useDismissable } from '@/lib/hooks'
 import { cn } from '@/lib/cn'
 import { toTranscript, transcriptFilename } from './transcript'
@@ -39,14 +38,24 @@ export function ConversationMenu({
 }) {
   const { byId, renameConversation, deleteConversation } = useChat()
   /*
-   * A SIGNED-OUT VISITOR IS OFFERED ONLY WHAT WORKS FOR THEM.
+   * THE SIGN-IN GATE IS GONE, because the policy it mirrored is gone.
    *
-   * Renaming and deleting are account operations — the gateway refuses them for
-   * an anonymous principal by policy, not by accident. Showing the controls
-   * anyway would put two 403s in a menu of three items, which is a worse answer
-   * than not offering them. Export needs no server at all, so it stays.
+   * This menu used to hide Rename and Delete from a signed-out visitor and say
+   * "Sign in to rename or delete conversations." That was the honest reflection
+   * of a server policy at the time: the gateway refused both operations for an
+   * anonymous principal, so offering them would have put two 403s in a menu of
+   * three items.
+   *
+   * The policy was the thing that was wrong. A visitor's conversations live in
+   * the visitor's own scope, and row-level security is what keeps them there —
+   * so renaming or deleting one never leaves that boundary, and erasing what you
+   * typed is precisely the control a signed-out person is most likely to want.
+   * `deleteConversation` and `renameConversation` are now open to both audiences
+   * in OPERATION_AUDIENCE, so the menu offers them to everyone.
+   *
+   * If either is ever closed to visitors again, this gate comes back with it —
+   * a menu item that 403s is worse than one that is absent.
    */
-  const signedOut = useAnonymousQuota().mode === 'anonymous'
   const [open, setOpen] = useState(false)
   const [renaming, setRenaming] = useState(false)
   const [confirming, setConfirming] = useState(false)
@@ -221,12 +230,10 @@ export function ConversationMenu({
             </div>
           ) : (
             <>
-              {!signedOut && (
-                <button type="button" role="menuitem" data-testid="menu-rename" onClick={() => setRenaming(true)} className={item}>
-                  <Pencil className="h-4 w-4 text-slate-400" />
-                  Rename
-                </button>
-              )}
+              <button type="button" role="menuitem" data-testid="menu-rename" onClick={() => setRenaming(true)} className={item}>
+                <Pencil className="h-4 w-4 text-slate-400" />
+                Rename
+              </button>
               <button
                 type="button"
                 role="menuitem"
@@ -238,23 +245,16 @@ export function ConversationMenu({
                 <Download className="h-4 w-4 text-slate-400" />
                 {busy ? 'Preparing…' : 'Export transcript'}
               </button>
-              {!signedOut && (
-                <button
-                  type="button"
-                  role="menuitem"
-                  data-testid="menu-delete"
-                  onClick={() => setConfirming(true)}
-                  className={cn(item, 'hover:bg-red-50 hover:text-red-600')}
-                >
-                  <Trash2 className="h-4 w-4 text-slate-400" />
-                  Delete
-                </button>
-              )}
-              {signedOut && (
-                <p className="px-3 py-2 text-[13px] leading-relaxed text-slate-400">
-                  Sign in to rename or delete conversations.
-                </p>
-              )}
+              <button
+                type="button"
+                role="menuitem"
+                data-testid="menu-delete"
+                onClick={() => setConfirming(true)}
+                className={cn(item, 'hover:bg-red-50 hover:text-red-600')}
+              >
+                <Trash2 className="h-4 w-4 text-slate-400" />
+                Delete
+              </button>
             </>
           )}
 
