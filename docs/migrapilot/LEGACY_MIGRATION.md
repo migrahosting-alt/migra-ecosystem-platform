@@ -29,18 +29,21 @@ state against the source files on disk, so it can run before any database exists
 ## Take a COPY. Never point it at the live file
 
 The live database is served by a running Brain in WAL mode, and reading it
-mid-write imports a torn state. A consistent snapshot, taken from a **read-only**
-connection:
+mid-write imports a torn state. `--snapshot` takes a consistent copy through a
+**read-only** connection and checksums the live file before and after, refusing
+the snapshot if it changed — because "the tool did not modify the live database"
+should be measured, not asserted:
 
 ```bash
-node --input-type=module -e "
-import { DatabaseSync } from 'node:sqlite';
-const db = new DatabaseSync('/var/lib/migrapilot/brain-state.db', { readOnly: true });
-db.exec(\"VACUUM INTO '/home/bonex/legacy-copy.db'\");
-db.close();"
+node runMigration.js --snapshot \
+  --live-source /var/lib/migrapilot/brain-state.db \
+  --out /var/lib/migrapilot/migration/legacy-copy.db
 ```
 
-Verified not to modify the source: `sha256 e6cdfd30…` before and after.
+Run it as the `migrapilot-rehearsal-snapshot` unit rather than by hand. The
+snapshot holds real user conversations, so root produces it directly at its
+destination at `0600` — never owned by a login user on the way there, and no
+elevated copy across an ownership boundary.
 
 ## Design decisions, and why
 
