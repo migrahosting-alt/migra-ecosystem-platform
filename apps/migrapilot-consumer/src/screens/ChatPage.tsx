@@ -2,21 +2,14 @@
 
 import { useEffect, useLayoutEffect, useRef } from 'react'
 import { useParams, useRouter } from 'next/navigation'
-import {
-  ChevronDown,
-  Share2,
-} from 'lucide-react'
 import { Workspace } from '@/components/layout/AppShell'
 import { Composer, ComposerDisclaimer } from '@/components/chat/Composer'
 import { MessageView, TypingIndicator } from '@/components/chat/Message'
 import { RailCard } from '@/components/rail/RailPanels'
-import { IconButton } from '@/components/ui/Button'
-import { CopyButton } from '@/components/ui/CopyField'
 import { useChat } from '@/state/ChatProvider'
 import { ConversationMenu } from '@/features/conversations/ConversationMenu'
 import { AnonymousQuotaNotice } from '@/features/anonymous/AnonymousQuotaNotice'
 import { isExhausted, useAnonymousQuota } from '@/features/anonymous/AnonymousQuotaProvider'
-import { cn } from '@/lib/cn'
 
 /* ---------------------------------------------------------------- *
  * Rails
@@ -112,18 +105,16 @@ export function ChatPage() {
   if (!conversation) return null
 
   /*
-   * The media rail is gone with its data.
+   * The media frame is gone, and so is the branch that rendered it.
    *
-   * It rendered `mediaLibrary` from `src/data/mock.ts` — invented attachments —
-   * behind `conversation.hasMedia`, a flag only the mock seed ever set. Durable
-   * conversations come from the Brain and never set it, so this was unreachable
-   * fabrication kept alive by a dead import. It returns with real attachments,
-   * not before.
+   * It hung off `const framed = false` — permanently unreachable — and carried a
+   * title button with no handler and a Share control that shared nothing. Dead
+   * code is not harmless when it is dead UI: the next person to flip that flag
+   * gets three broken controls and no warning that they were never wired. It
+   * comes back with real attachments and a real share, not before.
    */
-  const framed = false
-
   const thread = (
-    <div className={cn('flex flex-col gap-6', framed && 'px-5 py-6 sm:px-6')}>
+    <div className="flex flex-col gap-6">
       {conversation.messages.map((message) => (
         <MessageView
           key={message.id}
@@ -148,31 +139,7 @@ export function ChatPage() {
         }
         contentClassName="mx-auto flex min-h-full w-full max-w-[880px] flex-col px-6 py-7 sm:px-8"
       >
-        <div className="flex-1">
-          {framed ? (
-            <div className="overflow-hidden rounded-2xl border border-hairline bg-white shadow-card">
-              <div className="flex items-center justify-between gap-3 border-b border-hairline px-5 py-3.5">
-                <button className="flex items-center gap-2 rounded-lg text-[17px] font-semibold tracking-[-0.01em] text-slate-900">
-                  {conversation.title}
-                  <ChevronDown className="h-4.5 w-4.5 text-slate-400" />
-                </button>
-                <div className="flex items-center gap-1">
-                  <CopyButton
-                    value={conversation.messages.map((m) => m.text ?? '').join('\n')}
-                    label="Copy conversation"
-                    className="h-9 w-9"
-                  />
-                  <IconButton label="Share conversation">
-                    <Share2 className="h-4.5 w-4.5" strokeWidth={1.9} />
-                  </IconButton>
-                </div>
-              </div>
-              {thread}
-            </div>
-          ) : (
-            thread
-          )}
-        </div>
+        <div className="flex-1">{thread}</div>
 
         <div className="sticky bottom-0 mt-7 bg-canvas pb-1">
           {/* fades the thread out as it passes behind the pinned composer */}
@@ -183,7 +150,6 @@ export function ChatPage() {
           */}
           <AnonymousQuotaNotice className="mb-3.5" />
           <Composer
-            variant={framed ? 'media' : 'default'}
             onSubmit={(value, meta) => {
               if (outOfTurns) return
               sendMessage(conversation.id, value, meta)
@@ -191,10 +157,8 @@ export function ChatPage() {
             disabled={outOfTurns}
             disabledReason="You have used all your free messages. Sign in or create an account to keep going — this conversation comes with you."
           />
-          {!framed && <ComposerDisclaimer className="mt-3.5" />}
+          <ComposerDisclaimer className="mt-3.5" />
         </div>
-
-        {framed && <ComposerDisclaimer className="mt-1 mb-1" />}
       </Workspace>
 
     </>
