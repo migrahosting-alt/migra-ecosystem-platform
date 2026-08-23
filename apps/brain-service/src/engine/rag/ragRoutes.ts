@@ -111,10 +111,32 @@ export function registerRagRoutes(app: FastifyInstance, service: IndexService): 
         reply.code(400);
         return { ok: false, code: 'INVALID_INPUT', error: 'A `query` is required.' };
       }
-      const indexId = body.indexId ?? service.listForScope(scope)[0]?.id;
+      /*
+       * DETERMINISTIC AUTHORITY, NOT "the first array element".
+       *
+       * This used to fall back to `listForScope(scope)[0]`, so a scope holding
+       * more than one index silently retrieved from an arbitrary one — whichever
+       * happened to be first in a Map. During the candidate gate that selected
+       * an empty index and reported zero chunks while an approved index with
+       * content sat beside it.
+       *
+       * The order is now: what the caller named, else the scope's APPROVED index
+       * (persisted state, not iteration order), else the only index if there is
+       * exactly one. More than one candidate and no approved index is genuinely
+       * ambiguous, and guessing would serve content nobody selected.
+       */
+      const inScope = service.listForScope(scope);
+      const approved = service.approvedIndexFor(scope);
+      const indexId = body.indexId ?? approved ?? (inScope.length === 1 ? inScope[0]!.id : undefined);
       if (!indexId) {
-        reply.code(404);
-        return { ok: false, code: 'NO_INDEX', error: 'No index exists for this workspace.' };
+        reply.code(inScope.length > 1 ? 409 : 404);
+        return inScope.length > 1
+          ? {
+              ok: false,
+              code: 'AMBIGUOUS_INDEX',
+              error: `This workspace has ${inScope.length} indexes and none is approved. Name one with \`indexId\`.`,
+            }
+          : { ok: false, code: 'NO_INDEX', error: 'No index exists for this workspace.' };
       }
       const res = await service.retrieve(indexId, scope, body.query, {
         maxChunks: body.maxChunks,

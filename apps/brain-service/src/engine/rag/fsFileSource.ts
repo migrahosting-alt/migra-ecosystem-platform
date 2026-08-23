@@ -12,6 +12,15 @@ import * as path from 'node:path';
 import { Exclusions, DEFAULT_MIGRAAI_EXCLUSIONS } from './exclusions.js';
 import type { FileSource } from './indexService.js';
 
+/** The root could not be read at all — distinct from a root that is empty. */
+export class FileSourceUnavailableError extends Error {
+  readonly code = 'SOURCE_UNAVAILABLE';
+  constructor(readonly root: string, override readonly cause: unknown) {
+    super(`Index root is unreadable: ${root}. This is NOT an empty library — nothing was read.`);
+    this.name = 'FileSourceUnavailableError';
+  }
+}
+
 export class FsFileSource implements FileSource {
   constructor(
     private readonly root: string,
@@ -20,6 +29,30 @@ export class FsFileSource implements FileSource {
   ) {}
 
   async files(): Promise<Array<{ relPath: string; content: string }>> {
+    /*
+     * AN UNREADABLE ROOT IS NOT AN EMPTY LIBRARY.
+     *
+     * `walk` swallows a readdir failure and returns, so a root that does not
+     * exist, or that this process cannot read, produced an empty list —
+     * indistinguishable from a genuinely empty directory. `sync` then reported
+     * success with `files: 0`, and the user was told their library indexed fine
+     * while nothing had been read at all.
+     *
+     * Observed during the PostgreSQL candidate gate: the service runs with
+     * ProtectHome=true, so a root under /home was invisible to it and the sync
+     * reported ok with zero files.
+     *
+     * The ROOT is therefore checked explicitly and its failure raised. A
+     * subdirectory that cannot be read is still skipped — one unreadable subtree
+     * should not fail an otherwise good index — but the root is the difference
+     * between "nothing here" and "could not look".
+     */
+    try {
+      await fs.readdir(this.root);
+    } catch (error) {
+      throw new FileSourceUnavailableError(this.root, error);
+    }
+
     const gitignore = await fs.readFile(path.join(this.root, '.gitignore'), 'utf8').catch(() => '');
     const excl = new Exclusions({ gitignore, extra: DEFAULT_MIGRAAI_EXCLUSIONS });
     const out: Array<{ relPath: string; content: string }> = [];

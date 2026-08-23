@@ -106,7 +106,41 @@ export class IndexService {
   /** Rebuild in-memory indexes from durable storage on startup — approved indexes
    * and their chunks/vectors survive a restart, so unchanged files are not
    * re-embedded. */
+  private readonly hydratedScopes = new Set<string>();
+
   async hydrate(scope?: Scope): Promise<void> {
+    if (!this.persistence) return;
+
+    /*
+     * ONCE PER SCOPE.
+     *
+     * This is called from a route preHandler, so without the guard it ran on
+     * EVERY request — rebuilding `byId` from the database each time and
+     * discarding the in-memory entry, including the approvedIndex that
+     * setState('approved') had just attached. An index approved a moment earlier
+     * then answered NOT_APPROVED on the next request.
+     *
+     * A failed load does not mark the scope loaded: leaving the mark would make
+     * the next request read an empty cache and report no indexes, which is the
+     * silent-empty-index failure this whole change exists to prevent.
+     */
+    const key = scope ? `${scope.owner}\u0000${scope.workspace}` : '';
+    if (this.hydratedScopes.has(key)) return;
+    this.hydratedScopes.add(key);
+    try {
+      await this.hydrateScope(scope);
+    } catch (error) {
+      this.hydratedScopes.delete(key);
+      throw error;
+    }
+  }
+
+  /** Forget a scope's cached hydration so the next request reloads it. */
+  invalidateScope(scope: Scope): void {
+    this.hydratedScopes.delete(`${scope.owner}\u0000${scope.workspace}`);
+  }
+
+  private async hydrateScope(scope?: Scope): Promise<void> {
     if (!this.persistence) return;
 
     /*
