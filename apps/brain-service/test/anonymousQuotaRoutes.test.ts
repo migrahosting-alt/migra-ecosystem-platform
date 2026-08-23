@@ -31,6 +31,8 @@ const LIMIT = 3;
 const anon = (name: string) => ({ 'x-owner-scope': `anon:${name}`, 'x-workspace-scope': `anon:${name}` });
 const account = { 'x-owner-scope': 'user:acct', 'x-workspace-scope': 'personal:acct' };
 
+const evictions: { anonymousOwner: string; accountOwner: string; accountWorkspace: string }[] = [];
+
 before(async () => {
   skip = await postgresTestSkipReason();
   if (skip) return;
@@ -49,6 +51,9 @@ before(async () => {
     holdMs: () => 60_000,
     now: () => clock,
     newId: () => `res-${(ids += 1)}`,
+    // Recorded, not ignored: a claim that commits and does NOT evict is the
+    // production bug this argument exists to prevent.
+    onClaimed: (scopes) => evictions.push(scopes),
   });
   await app.ready();
 }, { timeout: 180_000 });
@@ -207,6 +212,20 @@ test('a full claim moves the conversation and keeps its id', { skip: skip ?? fal
     conversationId: 'conv-http-claim', anonymousSessionId: 'full-claim', anonymousOwner: 'anon:full-claim',
   });
   assert.equal(second.statusCode, 404, 'it is no longer in the anonymous scope to claim again');
+
+  /*
+   * AND THE CACHE WAS TOLD. The move is a direct scoped transaction — it has to
+   * be — so the in-memory conversation cache learns nothing from it. Without
+   * this eviction the claim commits and both sides keep serving the old world:
+   * the visitor still reads a thread that is no longer theirs, the account
+   * cannot see the one it was just given, and the response says `claimed: true`
+   * to both. That is exactly what production did.
+   */
+  const last = evictions.at(-1);
+  assert.ok(last, 'a committed claim must evict');
+  assert.equal(last?.accountOwner, 'user:acct');
+  assert.equal(last?.accountWorkspace, 'personal:acct');
+  assert.match(last?.anonymousOwner ?? '', /^anon:/);
 });
 
 test('persistence unavailable is 503, never an invented allowance', { skip: skip ?? false }, async () => {

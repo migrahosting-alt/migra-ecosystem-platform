@@ -31,6 +31,23 @@ export interface AnonymousQuotaDeps {
   holdMs: () => number;
   now: () => number;
   newId: () => string;
+  /**
+   * Forget both scopes' cached conversations after a claim.
+   *
+   * The claim moves rows in a direct scoped transaction, because row-level
+   * security will not let a row be rewritten into a scope other than the
+   * declared one. The in-memory conversation cache therefore never hears about
+   * the move — and a cache that does not hear about it keeps serving the world
+   * as it was: the visitor still reads a conversation that is no longer theirs,
+   * and the account cannot see the one it was just given, while the claim
+   * reports success to both. Injected rather than imported so this file keeps
+   * knowing nothing about the memory layer.
+   */
+  onClaimed: (scopes: {
+    anonymousOwner: string;
+    accountOwner: string;
+    accountWorkspace: string;
+  }) => void;
 }
 
 export const DEFAULT_ANON_TURN_LIMIT = 5;

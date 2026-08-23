@@ -356,6 +356,12 @@ async function main(): Promise<void> {
     holdMs: () => anonLimits.holdMs,
     now: () => Date.now(),
     newId: () => `anonres_${randomUUID()}`,
+    // The claim moves rows underneath the conversation cache; without this the
+    // transfer is invisible to both sides while reporting success.
+    onClaimed: ({ anonymousOwner, accountOwner, accountWorkspace }) => {
+      memoryStore.evictScope({ owner: anonymousOwner, workspace: anonymousOwner });
+      memoryStore.evictScope({ owner: accountOwner, workspace: accountWorkspace });
+    },
   });
   // Model qualification manifest (installing a model does not approve it). The
   // router serves only `approved` models when the manifest is `enforced`.

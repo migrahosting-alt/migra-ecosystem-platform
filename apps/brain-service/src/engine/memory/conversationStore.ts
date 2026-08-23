@@ -260,6 +260,41 @@ export class ConversationStore {
     }
   }
 
+  /**
+   * Forget everything cached for one scope, so the next read re-loads it.
+   *
+   * THIS EXISTS BECAUSE THE CLAIM WRITES BEHIND THIS CACHE. Moving an anonymous
+   * conversation into an account is a direct scoped transaction in PostgreSQL —
+   * it has to be, because row-level security's `WITH CHECK` will not let a row
+   * be rewritten into a scope other than the declared one. So the rows move and
+   * this cache does not hear about it, and the result is the worst kind of
+   * failure: the transfer reports success while BOTH sides still see the old
+   * world. The visitor keeps reading a conversation that is no longer theirs,
+   * and the account never sees the one it was just given.
+   *
+   * Measured on production before this existed: a claim answered
+   * `claimed: true`, the anonymous cookie was revoked, and the conversation was
+   * a 404 for the account and a 200 for the visitor whose authority had just
+   * been taken away.
+   *
+   * Eviction rather than a targeted patch: the database is the authority, and
+   * re-reading it cannot disagree with itself. A hand-maintained second copy of
+   * the move would be a third place for the truth to live.
+   *
+   * The conversations are dropped from the maps BEFORE the hydration flag is
+   * cleared, because `hydrate` appends to the message arrays — re-loading a
+   * scope whose rows were left behind would duplicate every message in it.
+   */
+  evictScope(scope: Scope): void {
+    for (const [id, conversation] of this.conversations) {
+      if (conversation.ownerScope !== scope.owner || conversation.workspaceScope !== scope.workspace) continue;
+      this.conversations.delete(id);
+      this.messages.delete(id);
+      this.summaries.delete(id);
+    }
+    this.hydratedScopes.delete(`${scope.owner}\u0000${scope.workspace}`);
+  }
+
   hydrate(data: { conversations: Conversation[]; messages: Message[]; summaries: Summary[]; memoryItems?: MemoryItem[] }): void {
     for (const c of data.conversations) {
       this.conversations.set(c.id, c);

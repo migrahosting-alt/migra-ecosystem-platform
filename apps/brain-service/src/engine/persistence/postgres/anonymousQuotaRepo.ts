@@ -210,19 +210,33 @@ export async function releaseReservation(
  * The quota row is kept, not deleted: it is the evidence that this anonymous id
  * has already been used. Deleting it would let the same browser present the same
  * cookie and get a fresh allowance.
+ *
+ * IDEMPOTENT FOR THE SAME ACCOUNT, CLOSED TO ANY OTHER. The quota row is per
+ * anonymous SESSION while a claim is per CONVERSATION, and a visitor who filled
+ * their allowance has several. `claimed_by IS NULL` alone meant the first
+ * conversation marked the row and every later one was refused ALREADY_CLAIMED —
+ * which, because the mark shares the transaction with the move, ROLLED BACK the
+ * transfer. Signing in silently kept one conversation and abandoned the rest in
+ * a scope whose cookie had just been revoked. Measured on production: three
+ * conversations in, one "claimed", none actually moved.
+ *
+ * Re-asserting the SAME account is therefore allowed, and a DIFFERENT account is
+ * still refused — which is the property that matters, and the one the
+ * second-account test pins.
  */
 export async function markClaimed(
   client: PoolClient, anonymousSessionId: string, claimedBy: string, now: number,
 ): Promise<void> {
   const r = await client.query(
     `UPDATE anonymous_quota SET claimed_by = $2, claimed_at = $3, updated_at = $3
-      WHERE anonymous_session_id = $1 AND claimed_by IS NULL`,
+      WHERE anonymous_session_id = $1 AND (claimed_by IS NULL OR claimed_by = $2)`,
     [anonymousSessionId, claimedBy, now],
   );
   if (!r.rowCount) {
     throw new QuotaLedgerError(
       'ALREADY_CLAIMED',
-      `anonymous session '${anonymousSessionId}' is already claimed, or is not visible in this scope`,
+      `anonymous session '${anonymousSessionId}' is already claimed by a different account, ` +
+        'or is not visible in this scope',
     );
   }
 }

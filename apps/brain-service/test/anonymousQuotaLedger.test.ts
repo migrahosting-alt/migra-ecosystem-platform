@@ -319,3 +319,71 @@ test('claiming a conversation that is not yours reports NOT_FOUND, not someone e
     const victim = await store.loadDurableForScope({ owner: other.scope, workspace: other.scope });
     assert.ok(victim.conversations.some((c) => c.id === 'conv-elsewhere'), 'the victim keeps their thread');
   });
+
+/**
+ * THE BUG THIS PINS COST A VISITOR EVERYTHING THEY HAD WRITTEN.
+ *
+ * The quota row is per anonymous SESSION; a claim is per CONVERSATION. A visitor
+ * who used their allowance has several conversations, and `markClaimed` shared a
+ * transaction with the move while insisting on `claimed_by IS NULL`. So the
+ * first conversation marked the row, every later one was refused ALREADY_CLAIMED,
+ * and — because the refusal happened inside the transaction — each refusal ROLLED
+ * BACK its own move. Signing in kept one thread and abandoned the rest in a scope
+ * whose cookie had just been revoked.
+ *
+ * Measured on chat.migrateck.com before the fix: three conversations in, one
+ * reported "claimed", none actually moved.
+ */
+test('a visitor with SEVERAL conversations keeps all of them', { skip: skip ?? false }, async () => {
+  const s = session('claim-many');
+  const ACCOUNT = { owner: 'user:many', workspace: 'personal:many' };
+  const anonScope = { owner: s.scope, workspace: s.scope };
+  const ids = ['conv-many-1', 'conv-many-2', 'conv-many-3'];
+
+  for (const id of ids) {
+    await store.saveConversation(conversation(id, s.scope, s.scope) as never);
+    await store.saveMessage(message(`m-${id}`, id, `TURN IN ${id}`) as never, anonScope);
+  }
+  await reserve(s);
+
+  for (const id of ids) {
+    const outcome = await store.claimAnonymousConversation({
+      conversationId: id, anonymousSessionId: s.id, anonymousOwner: s.scope,
+      accountOwner: ACCOUNT.owner, accountWorkspace: ACCOUNT.workspace, now: 11_000,
+    });
+    assert.equal(outcome.conversationId, id, `${id} keeps its id`);
+  }
+
+  const owned = await store.loadDurableForScope(ACCOUNT);
+  assert.deepEqual(
+    owned.conversations.filter((c) => ids.includes(c.id)).map((c) => c.id).sort(),
+    [...ids].sort(),
+    'every conversation came with the visitor, not just the first',
+  );
+
+  const left = await store.loadDurableForScope(anonScope);
+  assert.deepEqual(
+    left.conversations.filter((c) => ids.includes(c.id)),
+    [],
+    'and none is still sitting in the abandoned anonymous scope',
+  );
+});
+
+test('a DIFFERENT account is still refused after the first has claimed', { skip: skip ?? false }, async () => {
+  // The idempotency above must not have opened the door: re-asserting the SAME
+  // account is a retry, a different one is a theft.
+  await store.saveConversation(conversation('conv-many-4', 'anon:claim-many', 'anon:claim-many') as never);
+  await assert.rejects(
+    () => store.claimAnonymousConversation({
+      conversationId: 'conv-many-4', anonymousSessionId: 'anon-claim-many', anonymousOwner: 'anon:claim-many',
+      accountOwner: 'user:someone-else', accountWorkspace: 'personal:someone-else', now: 12_000,
+    }),
+    /already claimed/,
+  );
+
+  const stillAnon = await store.loadDurableForScope({ owner: 'anon:claim-many', workspace: 'anon:claim-many' });
+  assert.ok(
+    stillAnon.conversations.some((c) => c.id === 'conv-many-4'),
+    'the refused claim rolled back — the conversation stayed with the visitor',
+  );
+});

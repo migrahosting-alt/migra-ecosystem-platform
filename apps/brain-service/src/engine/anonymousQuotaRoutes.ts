@@ -168,6 +168,16 @@ export function registerAnonymousQuotaRoutes(app: FastifyInstance, deps: Anonymo
           conversationId, anonymousSessionId, anonymousOwner,
           accountOwner, accountWorkspace, now: deps.now(),
         });
+        /*
+         * ONLY AFTER THE TRANSACTION COMMITTED. A cache dropped before the
+         * commit would be re-filled from the pre-move rows by any concurrent
+         * read, leaving the same staleness this call exists to remove — and a
+         * rolled-back claim would have evicted for nothing.
+         *
+         * Both scopes: the visitor must stop seeing what they no longer own,
+         * and the account was very likely hydrated before this row arrived.
+         */
+        deps.onClaimed({ anonymousOwner, accountOwner, accountWorkspace });
         return { ok: true, ...outcome, claimed: true };
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);

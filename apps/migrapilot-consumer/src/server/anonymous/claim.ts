@@ -95,9 +95,14 @@ export async function claimAnonymousWorkInto(session: AppSession): Promise<Claim
   const listed = await listConversations({ principal: anonymous })
   if (listed.kind !== 'ok') {
     console.warn('[anonymous] could not list conversations to claim:', listed.kind)
-    // The identity is still revoked: leaving the cookie in place would let the
-    // browser keep acting as a visitor whose work is now inaccessible anyway.
-    await clearAnonymousIdentity()
+    /*
+     * THE IDENTITY IS KEPT. Revoking it here destroyed the visitor's work: the
+     * conversations were still in the anonymous scope, and the only credential
+     * that could reach them had just been thrown away. The listing failing is a
+     * transient condition — the ledger being briefly unreachable — and the
+     * correct response to "we could not read it" is to try again, which
+     * `pendingClaim` on the quota route makes the client do.
+     */
     return { claimed: [], failed: [], hadAnonymousIdentity: true }
   }
 
@@ -129,16 +134,27 @@ export async function claimAnonymousWorkInto(session: AppSession): Promise<Claim
   }
 
   /*
-   * REVOKE THE ANONYMOUS AUTHORITY, always — including when nothing moved.
+   * REVOKE THE ANONYMOUS AUTHORITY — but ONLY once nothing is left behind.
    *
-   * The durable side is already closed by the Brain: the rows have left the
-   * anonymous scope and the quota row is marked claimed, so a replayed cookie
-   * can neither read the conversation back nor buy a second allowance. This
-   * removes the browser's copy so the visitor identity stops being presented at
-   * all, and a later sign-out starts a genuinely new visitor rather than
-   * resuming a spent one.
+   * When every conversation moved, the durable side is already closed by the
+   * Brain: the rows have left the anonymous scope and the quota row is marked
+   * claimed, so a replayed cookie can neither read them back nor buy a second
+   * allowance. Removing the browser's copy then is pure hygiene.
+   *
+   * When something did NOT move, the cookie is the ONLY thing that can still
+   * reach it. Revoking regardless is how signing in silently destroyed a
+   * visitor's history: the transfer was refused, the credential was discarded,
+   * and the conversations became unreachable by anyone. So a partial claim keeps
+   * the identity, `pendingClaim` stays true, and the client retries until there
+   * is nothing left to lose.
    */
-  await clearAnonymousIdentity()
+  if (failed.length === 0) await clearAnonymousIdentity()
+  else {
+    console.warn(
+      '[anonymous] keeping the visitor identity: work remains unclaimed',
+      JSON.stringify({ claimed: claimed.length, failed: failed.length }),
+    )
+  }
 
   return { claimed, failed, hadAnonymousIdentity: true }
 }

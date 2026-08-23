@@ -11,9 +11,9 @@
  *   the transfer is made AS THE ACCOUNT, with the anonymous side named
  *   both halves come from ONE verified cookie, never from a request
  *   the conversation ID is preserved, so the URL still resolves
- *   the anonymous authority is revoked afterwards — always, including when
- *     nothing moved, because a token that can no longer read anything should
- *     not keep being presented
+ *   the anonymous authority is revoked once, and ONLY once, nothing is left
+ *     behind — a cookie discarded while its conversations are still in the
+ *     anonymous scope makes them unreachable by anyone
  */
 
 import { test } from 'node:test'
@@ -126,7 +126,7 @@ test('every conversation moves, not only the one on screen', async () => {
   __resetCookies()
 })
 
-test('one refused conversation does not abandon the rest, and does not fail the sign-in', async () => {
+test('one refused conversation does not abandon the rest, and KEEPS the identity', async () => {
   __resetCookies()
   visitorCookie()
   const brain = brainStub({
@@ -138,7 +138,18 @@ test('one refused conversation does not abandon the rest, and does not fail the 
 
   assert.deepEqual(outcome.failed, ['conv_1'])
   assert.deepEqual(outcome.claimed, ['conv_2'])
-  assert.equal(__getCookie(ANONYMOUS_COOKIE_NAME), undefined)
+  /*
+   * THE COOKIE SURVIVES A PARTIAL CLAIM, and this is the whole lesson.
+   *
+   * `conv_1` is still in the anonymous scope, and this cookie is the only
+   * credential that can reach it. Revoking it here is how signing in destroyed a
+   * visitor's history on production: the transfer was refused, the credential
+   * was discarded, and the conversation became unreachable by anyone at all.
+   */
+  assert.ok(
+    __getCookie(ANONYMOUS_COOKIE_NAME),
+    'work left behind must stay reachable, so the retry can finish it',
+  )
 
   brain.restore()
   __resetCookies()
@@ -172,7 +183,7 @@ test('a cookie we cannot prove we issued claims NOTHING', async () => {
   __resetCookies()
 })
 
-test('a failed listing still revokes the identity rather than leaving it live', async () => {
+test('a failed listing KEEPS the identity — "we could not read it" is not "it is gone"', async () => {
   __resetCookies()
   visitorCookie()
   const brain = brainStub({ listStatus: 503 })
@@ -181,7 +192,10 @@ test('a failed listing still revokes the identity rather than leaving it live', 
 
   assert.equal(outcome.hadAnonymousIdentity, true)
   assert.deepEqual(outcome.claimed, [])
-  assert.equal(__getCookie(ANONYMOUS_COOKIE_NAME), undefined)
+  assert.ok(
+    __getCookie(ANONYMOUS_COOKIE_NAME),
+    'a transient outage must not cost the visitor the only credential that reaches their work',
+  )
 
   brain.restore()
   __resetCookies()
@@ -196,6 +210,7 @@ test('claiming twice moves nothing the second time — the cookie is already gon
   const second = await claimAnonymousWorkInto(account)
 
   assert.deepEqual(first.claimed, ['conv_1'])
+  assert.deepEqual(first.failed, [], 'a clean claim, so the identity is retired')
   assert.equal(second.hadAnonymousIdentity, false)
   assert.equal(
     brain.calls.filter((call) => call.path === '/api/ai/anonymous/claim').length,
