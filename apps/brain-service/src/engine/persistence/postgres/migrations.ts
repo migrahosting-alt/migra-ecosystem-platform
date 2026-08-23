@@ -729,6 +729,81 @@ END $$;
 `;
 
 
+/**
+ * Migration 14 — anonymous chat quota, as a durable reservation ledger.
+ *
+ * A signed-out visitor can talk to MigraPilot before signing in. That costs real
+ * inference, so it is bounded — and the bound has to be a server-side fact.
+ *
+ * WHY A LEDGER AND NOT A COUNTER. Incrementing a `used` column after the answer
+ * is generated loses every race: two tabs, a double-click, a refresh mid-stream.
+ * Each lost race is a free turn. So a turn takes a RESERVATION first, inside a
+ * transaction, and settles it afterwards — consumed if the user got output,
+ * released if our own infrastructure failed before they did.
+ *
+ * `used` is therefore DERIVED — consumed rows plus live holds — never stored.
+ * A stored total and a set of rows are two sources of truth that drift.
+ *
+ * Row-level security is scoped by `owner_scope`, which for an anonymous visitor
+ * IS their identity (`anon:<opaque>`). Expiry is handled lazily, per session, at
+ * reserve time: a cross-scope sweep would need an owner-run statement, and under
+ * FORCE row-level security that matches zero rows — the lesson migration 11
+ * bought.
+ */
+const M14_ANONYMOUS_QUOTA = `
+CREATE TABLE IF NOT EXISTS anonymous_quota (
+  anonymous_session_id TEXT PRIMARY KEY,
+  owner_scope          TEXT NOT NULL,
+  turn_limit           INTEGER NOT NULL,
+  created_at           BIGINT NOT NULL,
+  updated_at           BIGINT NOT NULL,
+  claimed_by           TEXT,
+  claimed_at           BIGINT
+);
+
+CREATE TABLE IF NOT EXISTS anonymous_reservations (
+  reservation_id       TEXT PRIMARY KEY,
+  anonymous_session_id TEXT NOT NULL,
+  owner_scope          TEXT NOT NULL,
+  -- held: taken, turn in flight. consumed: the user got output.
+  -- A released reservation is DELETED: keeping it would mean every derived
+  -- count has to remember to exclude it, and one query forgetting is a
+  -- permanently wrong quota.
+  state                TEXT NOT NULL CHECK (state IN ('held','consumed')),
+  created_at           BIGINT NOT NULL,
+  expires_at           BIGINT NOT NULL,
+  settled_at           BIGINT,
+  conversation_id      TEXT,
+  CONSTRAINT anonymous_reservations_session_fk
+    FOREIGN KEY (anonymous_session_id) REFERENCES anonymous_quota(anonymous_session_id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_anon_res_session ON anonymous_reservations (anonymous_session_id, state);
+
+ALTER TABLE anonymous_quota ENABLE ROW LEVEL SECURITY;
+ALTER TABLE anonymous_quota FORCE ROW LEVEL SECURITY;
+ALTER TABLE anonymous_reservations ENABLE ROW LEVEL SECURITY;
+ALTER TABLE anonymous_reservations FORCE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS anonymous_quota_scope ON anonymous_quota;
+CREATE POLICY anonymous_quota_scope ON anonymous_quota
+  USING (owner_scope = migra_current_owner())
+  WITH CHECK (owner_scope = migra_current_owner());
+
+DROP POLICY IF EXISTS anonymous_reservations_scope ON anonymous_reservations;
+CREATE POLICY anonymous_reservations_scope ON anonymous_reservations
+  USING (owner_scope = migra_current_owner())
+  WITH CHECK (owner_scope = migra_current_owner());
+
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'migrapilot_app') THEN
+    GRANT SELECT, INSERT, UPDATE, DELETE ON anonymous_quota TO migrapilot_app;
+    GRANT SELECT, INSERT, UPDATE, DELETE ON anonymous_reservations TO migrapilot_app;
+  END IF;
+END $$;
+`;
+
 export const MIGRATIONS: readonly Migration[] = [
   { version: 1, name: 'foundation', sql: M1_FOUNDATION },
   { version: 2, name: 'tenancy_primitives', sql: M2_TENANCY },
@@ -743,6 +818,7 @@ export const MIGRATIONS: readonly Migration[] = [
   { version: 11, name: 'scoped_chunk_identity', sql: M11_SCOPED_CHUNK_IDENTITY },
   { version: 12, name: 'migration_runs', sql: M12_MIGRATION_RUNS },
   { version: 13, name: 'chunk_version_identity', sql: M13_CHUNK_VERSION_IDENTITY },
+  { version: 14, name: 'anonymous_quota', sql: M14_ANONYMOUS_QUOTA },
 ];
 
 /** Highest version defined in code. */

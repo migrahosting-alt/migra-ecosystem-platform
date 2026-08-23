@@ -31,6 +31,7 @@
  */
 
 import type { PoolClient } from 'pg';
+import * as quota from './postgres/anonymousQuotaRepo.js';
 import type { Conversation, Message, Summary, MemoryItem } from '../memory/conversationStore.js';
 import type {
   DurableStore,
@@ -544,4 +545,69 @@ export class PostgresDurableStore implements DurableStore {
   async loadAgentRunChild(childId: string): Promise<DurableAgentRunChild | undefined> {
     return this.tx((client) => agentRunChildren.loadAgentRunChild(client, childId));
   }
+
+  /* ── anonymous chat quota ──────────────────────────────────────────────
+   *
+   * An anonymous visitor's owner scope IS their identity (`anon:<opaque>`),
+   * minted and signed server-side. The workspace half is the same value: a
+   * signed-out visitor has exactly one workspace, and inventing a second
+   * dimension would be a distinction the product does not make.
+   */
+
+  private anonScope(anonymousSessionId: string, ownerScope: string): PersistenceScope {
+    return { owner: ownerScope, workspace: ownerScope };
+  }
+
+  /** Read for RENDERING. Never the authority for whether a turn may run. */
+  async getAnonymousQuota(
+    anonymousSessionId: string, ownerScope: string,
+  ): Promise<quota.QuotaRow | undefined> {
+    return this.inScope(this.anonScope(anonymousSessionId, ownerScope), (client) =>
+      quota.getQuota(client, anonymousSessionId));
+  }
+
+  /**
+   * Take one turn's allowance, atomically, in ONE transaction.
+   *
+   * ensure → expire → lock → count → insert must share a transaction. Split
+   * across calls, the `FOR UPDATE` is released before the insert runs and two
+   * concurrent turns both succeed — the exact race the ledger exists to close.
+   */
+  async reserveAnonymousTurn(input: {
+    anonymousSessionId: string;
+    ownerScope: string;
+    turnLimit: number;
+    reservationId: string;
+    holdMs: number;
+    now: number;
+    conversationId?: string;
+  }): Promise<quota.ReserveResult> {
+    return this.inScope(this.anonScope(input.anonymousSessionId, input.ownerScope), (client) =>
+      quota.reserveTurn(client, input));
+  }
+
+  /** The turn produced output. Raises if the hold is not there to spend. */
+  async consumeAnonymousReservation(
+    reservationId: string, ownerScope: string, now: number,
+  ): Promise<void> {
+    await this.inScope({ owner: ownerScope, workspace: ownerScope }, (client) =>
+      quota.consumeReservation(client, reservationId, now));
+  }
+
+  /** Infrastructure failed before output. Returns false if already gone. */
+  async releaseAnonymousReservation(
+    reservationId: string, ownerScope: string,
+  ): Promise<boolean> {
+    return this.inScope({ owner: ownerScope, workspace: ownerScope }, (client) =>
+      quota.releaseReservation(client, reservationId));
+  }
+
+  /** Record that this anonymous session was claimed by a signed-in account. */
+  async markAnonymousClaimed(
+    anonymousSessionId: string, ownerScope: string, claimedBy: string, now: number,
+  ): Promise<void> {
+    await this.inScope(this.anonScope(anonymousSessionId, ownerScope), (client) =>
+      quota.markClaimed(client, anonymousSessionId, claimedBy, now));
+  }
+
 }
