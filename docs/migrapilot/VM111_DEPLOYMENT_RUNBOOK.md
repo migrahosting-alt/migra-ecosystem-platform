@@ -126,8 +126,34 @@ test and fails in front of a user. Content is checked because liveness cannot pr
 
 ```bash
 cd ~/stage-<sha>
-MIGRAPILOT_BRAIN_PORT=3999 node dist/src/server.js                 # Brain
-node node_modules/next/dist/bin/next start -p 3001 -H 127.0.0.1    # Consumer
+MIGRAPILOT_BRAIN_PORT=3999 MIGRAPILOT_STATE_DB=off node dist/src/server.js   # Brain
+node node_modules/next/dist/bin/next start -p 3001 -H 127.0.0.1              # Consumer
+```
+
+### 🚨 `MIGRAPILOT_STATE_DB=off` IS NOT OPTIONAL
+
+The spare-port run has no `brain.env`, so `NODE_ENV` and `MIGRAPILOT_PERSISTENCE`
+are both unset — and the resolver's non-production default is **SQLite in the
+current working directory**. The boot test therefore created a real
+`migraai-state.db` inside the staging tree, and the next step, `sudo cp -r
+~/stage-<sha> /opt/...`, shipped it into the release directory.
+
+That is how two PostgreSQL candidate releases came to contain a SQLite database
+they never opened. Nothing was corrupted — the file was created before the
+service started and never touched afterwards — but under a PostgreSQL-only
+mandate a stray SQLite database inside a release is indistinguishable, at a
+glance, from a service that quietly fell back to it. Found on 2026-08-22 while
+running the candidate gate's SQLite check.
+
+`MIGRAPILOT_STATE_DB=off` makes the boot test create nothing. It does not weaken
+the test: the boot test proves the process starts and serves new code, and
+persistence is proven separately by the gate against the real service with its
+real environment.
+
+**Check before copying into `/opt`:**
+
+```bash
+find ~/stage-<sha> -maxdepth 1 -name 'migraai-state.db*' | grep . && echo "STOP — the boot test wrote a database"
 ```
 
 The service must reach "listening" **and** answer a route that only exists in the new build:
