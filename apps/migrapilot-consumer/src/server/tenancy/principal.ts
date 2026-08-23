@@ -155,6 +155,23 @@ const OPERATION_AUDIENCE: Readonly<Record<string, OperationAudience>> = {
   getConversation: 'both',
   listMessages: 'both',
   appendMessage: 'both',
+  /*
+   * A VISITOR OWNS WHAT THEY TYPED, INCLUDING THE RIGHT TO TAKE IT BACK.
+   *
+   * These two fell through to the authenticated-only default, which reads as
+   * cautious and was the opposite. A signed-out visitor can already create
+   * conversations and append to them, so their scope fills up — and then rename,
+   * delete, and Settings' "Delete conversation history" were all shown to them
+   * and all refused. Erasing what you said is the control a signed-out person is
+   * most likely to reach for, and it was the one that did not work.
+   *
+   * Safe because the boundary is the SCOPE, not the sign-in state: row-level
+   * security confines each of these to the caller's own scope exactly as it does
+   * for an account. Claiming a conversation INTO an account stays authenticated
+   * below — that one crosses scopes; these do not.
+   */
+  renameConversation: 'both',
+  deleteConversation: 'both',
   // Streaming is a FLAG on this operation, not a separate kind — so admitting
   // `chatTurn` admits both paths, which is what the slice needs and is why the
   // decision is made in the gateway rather than per route.

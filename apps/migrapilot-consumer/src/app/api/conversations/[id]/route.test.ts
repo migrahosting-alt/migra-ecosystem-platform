@@ -51,13 +51,17 @@ const del = (id: string) =>
   DELETE(new Request('https://chat.example.test/api/conversations/x', { method: 'DELETE' }), params(id))
 
 function brainStub(status = 200, body: unknown = { id: 'conv_1', title: 'renamed' }) {
-  const calls: { method: string; path: string; body: unknown }[] = []
+  const calls: { method: string; path: string; body: unknown; scope: string | null }[] = []
   const original = globalThis.fetch
   globalThis.fetch = (async (url: string | URL | Request, init: RequestInit = {}) => {
     calls.push({
       method: init.method ?? 'GET',
       path: new URL(String(url)).pathname,
       body: init.body ? JSON.parse(String(init.body)) : undefined,
+      // Captured because a scoped mutation that loses its scope does not fail —
+      // it matches nothing and reports success. The header is the only place
+      // that boundary is observable from here.
+      scope: new Headers(init.headers).get('x-owner-scope'),
     })
     return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
   }) as typeof globalThis.fetch
@@ -114,15 +118,26 @@ test('an over-long title is refused rather than truncated behind the user\'s bac
   reset()
 })
 
-test('renaming while signed out never reaches the Brain', async () => {
-  const brain = brainStub()
+test('a signed-out visitor can rename their OWN conversation, scoped to them', async () => {
+  /*
+   * This test used to assert the opposite — that a signed-out rename never
+   * reached the Brain. That refusal was not protecting anything: anonymous chat
+   * creates conversations in the visitor's own scope, so the conversation being
+   * renamed is already theirs, and row-level security is what keeps it theirs.
+   * All the refusal achieved was a rename control in the sidebar that silently
+   * failed for every signed-out visitor.
+   *
+   * What still matters is pinned below: the call carries the ANONYMOUS scope, so
+   * a visitor renames inside their own boundary and nowhere else.
+   */
+  const brain = brainStub(200, { ok: true })
   setAuthPort(portWith(null))
 
   const response = await patch('conv_1', { title: 'mine now' })
-  // Anonymous chat is configured in this suite, so the principal resolves — and
-  // the gateway refuses the OPERATION, which is the check being pinned.
-  assert.ok(response.status === 401 || response.status === 403, `got ${response.status}`)
-  assert.equal(brain.calls.length, 0, 'the refusal happens before any request leaves')
+  assert.equal(response.status, 200, 'the visitor owns this conversation')
+  assert.equal(brain.calls.length, 1)
+  const scope = brain.calls[0]?.scope ?? ''
+  assert.ok(scope.length > 0, 'the rename must carry a scope, never run unscoped')
 
   brain.restore()
   reset()
@@ -176,13 +191,17 @@ test('a Brain that refuses the delete is NOT reported as deleted', async () => {
   reset()
 })
 
-test('deleting while signed out never reaches the Brain', async () => {
-  const brain = brainStub()
+test('a signed-out visitor can delete their OWN conversation, scoped to them', async () => {
+  // Same reversal, and the more important half of it: erasing what you typed is
+  // the control a signed-out person is most likely to want, and it was refused.
+  const brain = brainStub(200, { ok: true })
   setAuthPort(portWith(null))
 
   const response = await del('conv_1')
-  assert.ok(response.status === 401 || response.status === 403, `got ${response.status}`)
-  assert.equal(brain.calls.length, 0)
+  assert.equal(response.status, 200)
+  assert.equal(brain.calls.length, 1)
+  const scope = brain.calls[0]?.scope ?? ''
+  assert.ok(scope.length > 0, 'a delete must never run unscoped — that would cross visitors')
 
   brain.restore()
   reset()

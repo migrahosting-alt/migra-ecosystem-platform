@@ -120,8 +120,30 @@ test('the anonymous operation allowlist is closed by default', () => {
   for (const allowed of ['chatTurn', 'createConversation', 'appendMessage', 'listMessages', 'getConversation', 'listConversations']) {
     assert.equal(isAnonymousAllowedOperation(allowed), true, `${allowed} must be reachable`)
   }
-  for (const denied of ['listIndexes', 'createDocsIndex', 'syncIndex', 'approveIndex', 'transcribe', 'getCodingRun', 'setConversationGrounding', 'deleteConversation']) {
+  for (const denied of ['listIndexes', 'createDocsIndex', 'syncIndex', 'approveIndex', 'transcribe', 'getCodingRun', 'setConversationGrounding']) {
     assert.equal(isAnonymousAllowedOperation(denied), false, `${denied} must NOT be reachable anonymously`)
   }
   assert.equal(isAnonymousAllowedOperation('somethingAddedNextWeek'), false, 'unknown operations are closed')
+})
+
+test('a visitor can undo their own conversations, not reach into an account', () => {
+  /*
+   * THIS REVERSES AN EARLIER LINE OF THIS SAME TEST, which asserted that
+   * `deleteConversation` must not be reachable anonymously. That looked like
+   * the safe default and was not: a signed-out visitor can create conversations
+   * and append to them, so their scope fills up, and rename/delete/"Delete
+   * conversation history" were then rendered to them and refused every time.
+   *
+   * The distinction that matters is not signed-in vs signed-out — it is whether
+   * the operation stays inside the caller's own scope. These two do, and
+   * row-level security is what enforces it. The claim does not, which is why it
+   * remains authenticated even though it is part of the same visitor journey.
+   */
+  assert.equal(isAnonymousAllowedOperation('renameConversation'), true)
+  assert.equal(isAnonymousAllowedOperation('deleteConversation'), true)
+  assert.equal(
+    isAnonymousAllowedOperation('claimAnonymousConversation'),
+    false,
+    'the claim crosses scopes and is made AS the account',
+  )
 })

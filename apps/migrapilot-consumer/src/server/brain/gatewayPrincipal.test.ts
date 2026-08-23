@@ -78,8 +78,6 @@ const CLOSED_TO_VISITORS: BrainOperation[] = [
   { kind: 'transcriptionCapability' },
   { kind: 'transcribe', audioBase64: 'AAAA', audioMime: 'audio/webm' },
   { kind: 'setConversationGrounding', conversationId: 'c1', files: ['a.md'] },
-  { kind: 'renameConversation', conversationId: 'c1', title: 'x' },
-  { kind: 'deleteConversation', conversationId: 'c1' },
   { kind: 'answer', prompt: 'hi' },
   { kind: 'claimAnonymousConversation', conversationId: 'c1', anonymousSessionId: 'a'.repeat(22), anonymousOwner: `anon:${'a'.repeat(22)}` },
 ]
@@ -91,6 +89,15 @@ const OPEN_TO_VISITORS: BrainOperation[] = [
   { kind: 'getConversation', conversationId: 'c1' },
   { kind: 'listMessages', conversationId: 'c1' },
   { kind: 'appendMessage', conversationId: 'c1', role: 'user', content: 'hi' },
+  /*
+   * MOVED UP FROM THE CLOSED LIST. A visitor's conversations live in the
+   * visitor's own scope, so renaming or deleting one never leaves that
+   * boundary — and closing them only produced controls that failed silently for
+   * everyone who had not signed in. The claim stays closed just below, because
+   * that one is performed AS the account and does cross scopes.
+   */
+  { kind: 'renameConversation', conversationId: 'c1', title: 'x' },
+  { kind: 'deleteConversation', conversationId: 'c1' },
   { kind: 'chatTurn', prompt: 'hi' },
   { kind: 'chatTurn', prompt: 'hi', stream: true },
   { kind: 'anonymousQuota' },
