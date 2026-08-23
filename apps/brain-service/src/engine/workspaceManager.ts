@@ -162,7 +162,7 @@ export class WorkspaceManager {
     // and its index survived reappeared on the next boot, still bound to an index
     // the caller had been told was deleted.
     if (w.indexId) await this.deps.indexService.delete(w.indexId, scope);
-    await this.deps.persistence?.deleteWorkspace(id);
+    await this.deps.persistence?.deleteWorkspace(id, scope);
     this.byId.delete(id);
     return true;
   }

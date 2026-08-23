@@ -17,6 +17,7 @@
  */
 
 import type { PoolClient } from 'pg';
+import { requireAffected } from './ragRepo.js';
 import type { MemoryItem } from '../../memory/conversationStore.js';
 import type { PersistedWorkspace } from '../types.js';
 import type { ScopedRequest } from './conversationRepo.js';
@@ -115,7 +116,8 @@ export async function saveWorkspace(client: PoolClient, w: PersistedWorkspace): 
 }
 
 export async function deleteWorkspace(client: PoolClient, id: string): Promise<void> {
-  await client.query('DELETE FROM workspaces WHERE id = $1', [id]);
+  const r = await client.query('DELETE FROM workspaces WHERE id = $1', [id]);
+  requireAffected(r.rowCount, 'deleteWorkspace', id);
 }
 
 export async function loadWorkspaces(client: PoolClient): Promise<PersistedWorkspace[]> {

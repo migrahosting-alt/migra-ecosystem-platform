@@ -35,6 +35,12 @@ export interface FileSource {
   files(): Promise<Array<{ relPath: string; content: string }>>;
 }
 
+/** The scope a persisted index record already carries. */
+const recScope = (rec: { ownerScope: string; workspaceId: string }) => ({
+  owner: rec.ownerScope,
+  workspace: rec.workspaceId,
+});
+
 export interface IndexRecord {
   id: string;
   workspaceId: string;
@@ -187,8 +193,8 @@ export class IndexService {
           // Revoke durably: approved content we cannot decode must never be served.
           // "Durably" is the whole point, so both writes are awaited — fired and
           // forgotten, they lose to the next restart and the junk stays approved.
-          await this.persistence.setApprovedVersion(rec.id, null, this.now());
-          await this.persistence.setIndexState(rec.id, 'degraded', this.now());
+          await this.persistence.setApprovedVersion(rec.id, null, this.now(), recScope(rec));
+          await this.persistence.setIndexState(rec.id, 'degraded', this.now(), recScope(rec));
         }
       }
 
@@ -209,7 +215,7 @@ export class IndexService {
         record.state = 'degraded';
         record.stats = { files: 0, chunks: 0, approxBytes: 0, lastSyncMs: 0, lastError: faultOf(error) };
         this.byId.set(rec.id, { record, index: new VectorIndex(), approvedIndex });
-        await this.persistence.setIndexState(rec.id, 'degraded', this.now());
+        await this.persistence.setIndexState(rec.id, 'degraded', this.now(), recScope(rec));
       }
     }
   }
@@ -307,7 +313,7 @@ export class IndexService {
    * the index came back on the next boot, after the caller was told it was gone. */
   async delete(id: string, scope: Scope): Promise<boolean> {
     if (!this.entry(id, scope)) return false;
-    await this.persistence?.deleteIndex(id);
+    await this.persistence?.deleteIndex(id, scope);
     return this.byId.delete(id);
   }
 
@@ -338,9 +344,9 @@ export class IndexService {
     if (!e) return undefined;
     const updatedAt = this.now();
     if (state === 'approved') {
-      await this.persistence?.setApprovedVersion(id, e.record.version, updatedAt);
+      await this.persistence?.setApprovedVersion(id, e.record.version, updatedAt, scope);
     }
-    await this.persistence?.setIndexState(id, state, updatedAt);
+    await this.persistence?.setIndexState(id, state, updatedAt, scope);
     // ── memory, all at once, only now that the record is durable ──
     e.record.state = state;
     e.record.updatedAt = updatedAt;
@@ -458,7 +464,7 @@ export class IndexService {
       // resurrected the index as approved with no record of the failure.
       // Awaited for the same reason it exists: an un-awaited demotion that loses
       // its race with the caller closing the store is the resurrection bug again.
-      await this.persistence?.setIndexState(e.record.id, 'degraded', e.record.updatedAt);
+      await this.persistence?.setIndexState(e.record.id, 'degraded', e.record.updatedAt, scope);
       return { ok: false, code: 'SYNC_FAILED', error: 'Indexing failed; the previous index is unchanged.' };
     }
   }

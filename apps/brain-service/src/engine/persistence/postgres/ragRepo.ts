@@ -83,6 +83,35 @@ const optStr = (v: unknown): string | undefined => (v === null || v === undefine
 
 // ── indexes ─────────────────────────────────────────────────────────────────
 
+/**
+ * A scoped mutation that changed nothing.
+ *
+ * Under FORCE row-level security an UPDATE or DELETE whose scope was not
+ * declared — or was declared wrongly — matches ZERO rows and returns without
+ * error. That is not "best effort": it is an unauthorized statement that
+ * silently did nothing, and reporting success from it is a durability lie of
+ * exactly the kind this codebase already rejected for durable writes.
+ *
+ * Proven, not theorised: approving an index persisted nothing because the
+ * UPDATE was unscoped, memory said `approved`, the database said
+ * `experimental`, and the approval vanished on the next restart.
+ */
+export class ScopedMutationMissedError extends Error {
+  readonly code = 'SCOPED_MUTATION_MISSED';
+  constructor(readonly statement: string, readonly id: string) {
+    super(
+      `${statement} affected no rows for id '${id}'. Either the row does not exist or it is outside the declared scope; ` +
+        'either way nothing was changed.',
+    );
+    this.name = 'ScopedMutationMissedError';
+  }
+}
+
+/** Require a scoped mutation to have actually changed something. */
+export function requireAffected(rowCount: number | null, statement: string, id: string): void {
+  if (!rowCount) throw new ScopedMutationMissedError(statement, id);
+}
+
 export async function saveIndex(
   client: PoolClient,
   rec: PersistedIndexRecord,
@@ -114,15 +143,20 @@ export async function saveIndex(
 
 /** Cascade order matches SQLite: chunks → versions → index record. */
 export async function deleteIndex(client: PoolClient, id: string): Promise<void> {
+  // Children first, then the parent. Only the PARENT's row count is required:
+  // an index legitimately has no chunks or versions yet, so demanding rows there
+  // would fail a correct delete. The parent is the fact being asserted.
   await client.query('DELETE FROM index_chunks WHERE index_id = $1', [id]);
   await client.query('DELETE FROM index_versions WHERE index_id = $1', [id]);
-  await client.query('DELETE FROM workspace_indexes WHERE id = $1', [id]);
+  const r = await client.query('DELETE FROM workspace_indexes WHERE id = $1', [id]);
+  requireAffected(r.rowCount, 'deleteIndex', id);
 }
 
 export async function setIndexState(
   client: PoolClient, id: string, state: string, updatedAt: number,
 ): Promise<void> {
-  await client.query('UPDATE workspace_indexes SET state = $2, updated_at = $3 WHERE id = $1', [id, state, updatedAt]);
+  const r = await client.query('UPDATE workspace_indexes SET state = $2, updated_at = $3 WHERE id = $1', [id, state, updatedAt]);
+  requireAffected(r.rowCount, 'setIndexState', id);
 }
 
 /**
@@ -132,10 +166,11 @@ export async function setIndexState(
 export async function setApprovedVersion(
   client: PoolClient, id: string, approvedVersion: number | null, updatedAt: number,
 ): Promise<void> {
-  await client.query(
+  const r = await client.query(
     'UPDATE workspace_indexes SET approved_version = $2, updated_at = $3 WHERE id = $1',
     [id, approvedVersion, updatedAt],
   );
+  requireAffected(r.rowCount, 'setApprovedVersion', id);
 }
 
 export async function loadIndexes(client: PoolClient): Promise<PersistedIndexRecord[]> {

@@ -26,7 +26,14 @@ export interface PersistenceHealth {
 }
 
 // ── Conversation memory ──────────────────────────────────────────────────────
-/** The tenant/workspace pair every scoped statement declares. */
+/**
+ * The tenant/workspace pair every scoped statement declares.
+ *
+ * Carried by every operation that touches a row-level-security table, including
+ * ones identified only by id. Under FORCE RLS an UPDATE or DELETE with no
+ * declared scope matches ZERO rows and reports success — a silent no-op that
+ * looks exactly like a completed write.
+ */
 export interface PersistenceScope {
   owner: string;
   workspace: string;
@@ -36,7 +43,7 @@ export interface ConversationPersistence {
   saveConversation(c: Conversation): Promise<void>;
   /** Hard cascade delete: the conversation + its messages + summaries, so a
    * deleted conversation is inaccessible after restart. */
-  deleteConversation(id: string): Promise<void>;
+  deleteConversation(id: string, scope: PersistenceScope): Promise<void>;
   /**
    * Scope is supplied by the caller because it cannot be recovered.
    *
@@ -94,8 +101,8 @@ export interface PersistedChunk {
 
 export interface RagIndexPersistence {
   saveIndex(rec: PersistedIndexRecord): Promise<void>;
-  deleteIndex(id: string): Promise<void>;
-  setIndexState(id: string, state: string, updatedAt: number): Promise<void>;
+  deleteIndex(id: string, scope: PersistenceScope): Promise<void>;
+  setIndexState(id: string, state: string, updatedAt: number, scope: PersistenceScope): Promise<void>;
   /**
    * Atomically replace the persisted chunk set for a set of files within one
    * index: `changed` files' chunks are rewritten, `deletedFiles` are removed, and
@@ -113,7 +120,7 @@ export interface RagIndexPersistence {
    * retrieval. Independent of `state`: advancing a candidate must never move this
    * pointer, and demoting a candidate's lifecycle must never revoke it.
    */
-  setApprovedVersion(id: string, approvedVersion: number | null, updatedAt: number): Promise<void>;
+  setApprovedVersion(id: string, approvedVersion: number | null, updatedAt: number, scope: PersistenceScope): Promise<void>;
   loadIndexes(): Promise<PersistedIndexRecord[]>;
   /** Chunks for ONE version. Never load an index_id across versions. */
   loadChunks(indexId: string, indexVersion: number): Promise<PersistedChunk[]>;
@@ -148,7 +155,7 @@ export interface PersistedWorkspace {
 
 export interface WorkspacePersistence {
   saveWorkspace(w: PersistedWorkspace): Promise<void>;
-  deleteWorkspace(id: string): Promise<void>;
+  deleteWorkspace(id: string, scope: PersistenceScope): Promise<void>;
   loadWorkspaces(): Promise<PersistedWorkspace[]>;
 }
 

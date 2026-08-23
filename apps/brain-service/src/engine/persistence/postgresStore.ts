@@ -191,10 +191,11 @@ export class PostgresDurableStore implements DurableStore {
     );
   }
 
-  async deleteConversation(id: string): Promise<void> {
-    // Deletion is scope-checked by RLS: a conversation outside the declared
-    // scope is simply not visible to the statement.
-    await this.tx((client) => conversations.deleteConversation(client, id));
+  async deleteConversation(id: string, scope: PersistenceScope): Promise<void> {
+    // The scope must be DECLARED, not merely relied upon. Under FORCE RLS an
+    // undeclared DELETE matches zero rows and reports success — a delete that
+    // silently did nothing, and a conversation that returns after a restart.
+    await this.inScope(scope, (client) => conversations.deleteConversation(client, id));
   }
 
   async saveMessage(m: Message, scope: PersistenceScope): Promise<void> {
@@ -277,8 +278,8 @@ export class PostgresDurableStore implements DurableStore {
     );
   }
 
-  async deleteWorkspace(id: string): Promise<void> {
-    await this.tx((client) => memoryWorkspaces.deleteWorkspace(client, id));
+  async deleteWorkspace(id: string, scope: PersistenceScope): Promise<void> {
+    await this.inScope(scope, (client) => memoryWorkspaces.deleteWorkspace(client, id));
   }
 
   /** @deprecated Scope-dependent read; use {@link loadWorkspacesForScope}. */
@@ -301,12 +302,21 @@ export class PostgresDurableStore implements DurableStore {
     await this.inScope(scope, (client) => rag.saveIndex(client, rec, scoped(scope)));
   }
 
-  async deleteIndex(id: string): Promise<void> {
-    await this.tx((client) => rag.deleteIndex(client, id));
+  async deleteIndex(id: string, scope: PersistenceScope): Promise<void> {
+    await this.inScope(scope, (client) => rag.deleteIndex(client, id));
   }
 
-  async setIndexState(id: string, state: string, updatedAt: number): Promise<void> {
-    await this.tx((client) => rag.setIndexState(client, id, state, updatedAt));
+  async setIndexState(id: string, state: string, updatedAt: number, scope: PersistenceScope): Promise<void> {
+    /*
+     * THIS IS THE ONE THAT BROKE THE GATE.
+     *
+     * Unscoped, this UPDATE matched zero rows under FORCE RLS and returned
+     * without error, so approving an index persisted NOTHING. The in-memory
+     * record said `approved`; the database still said `experimental`; and after
+     * a restart the approval was simply gone. A write that changes nothing and
+     * reports success is the same lie as a durable write that never committed.
+     */
+    await this.inScope(scope, (client) => rag.setIndexState(client, id, state, updatedAt));
   }
 
   async commitSync(
@@ -325,8 +335,13 @@ export class PostgresDurableStore implements DurableStore {
     );
   }
 
-  async setApprovedVersion(id: string, approvedVersion: number | null, updatedAt: number): Promise<void> {
-    await this.tx((client) => rag.setApprovedVersion(client, id, approvedVersion, updatedAt));
+  async setApprovedVersion(
+    id: string,
+    approvedVersion: number | null,
+    updatedAt: number,
+    scope: PersistenceScope,
+  ): Promise<void> {
+    await this.inScope(scope, (client) => rag.setApprovedVersion(client, id, approvedVersion, updatedAt));
   }
 
   /** @deprecated Scope-dependent read; use {@link loadIndexesForScope}. */

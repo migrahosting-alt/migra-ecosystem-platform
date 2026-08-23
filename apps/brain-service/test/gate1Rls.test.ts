@@ -428,3 +428,137 @@ test('11.5 FORCE row-level security is RESTORED after the migration', { skip: sk
   assert.equal(rows[0]?.relrowsecurity, true, 'row level security is enabled');
   assert.equal(rows[0]?.relforcerowsecurity, true, 'and FORCE is back on — the owner is not exempt');
 });
+
+/* ── 12 the scoped-mutation row-count invariant ──────────────────────────── */
+
+/*
+ * This group exists because of a defect that shipped, not a hypothetical.
+ *
+ * `setIndexState` ran its UPDATE without declaring a scope. Under FORCE row
+ * level security that matched ZERO rows, PostgreSQL raised nothing, the method
+ * resolved, the API answered `state: approved` from memory — and the next
+ * restart revealed the database had always said `experimental`.
+ *
+ * The scope is now declared. These cases assert the SECOND line of defence: if
+ * a scoped UPDATE or DELETE changes nothing, that is an error, never success.
+ * A wrong scope is the cheapest way to produce a zero-row mutation on purpose.
+ */
+
+const workspaceRecord = (id: string, scope: { owner: string; workspace: string }) => ({
+  id,
+  ownerScope: scope.owner,
+  workspaceScope: scope.workspace,
+  name: `ws ${id}`,
+  root: `/work/${id}`,
+  memoryMode: 'durable',
+  createdAt: 1,
+  updatedAt: 1,
+});
+
+test('12.1 setIndexState under a WRONG scope raises rather than silently doing nothing',
+  { skip: skip ?? false }, async () => {
+    await store.saveIndex(indexRecord('idx-rowcount-state', A) as never);
+
+    await assert.rejects(
+      () => store.setIndexState('idx-rowcount-state', 'approved', 9, B),
+      /affected no rows/,
+      'a zero-row UPDATE must raise — this is the exact shape of the shipped defect',
+    );
+
+    // And the state genuinely did not change under the real owner either.
+    const indexes = await store.loadIndexesForScope(A);
+    const rec = indexes.find((i) => i.id === 'idx-rowcount-state');
+    assert.equal(rec?.state, 'ready', 'the rejected UPDATE changed nothing anywhere');
+  });
+
+test('12.2 setIndexState under the CORRECT scope still succeeds and persists',
+  { skip: skip ?? false }, async () => {
+    await store.setIndexState('idx-rowcount-state', 'approved', 10, A);
+    const indexes = await store.loadIndexesForScope(A);
+    assert.equal(indexes.find((i) => i.id === 'idx-rowcount-state')?.state, 'approved');
+  });
+
+test('12.3 setApprovedVersion under a WRONG scope raises', { skip: skip ?? false }, async () => {
+  await assert.rejects(
+    () => store.setApprovedVersion('idx-rowcount-state', 1, 11, B),
+    /affected no rows/,
+  );
+  const indexes = await store.loadIndexesForScope(A);
+  assert.equal(
+    indexes.find((i) => i.id === 'idx-rowcount-state')?.approvedVersion,
+    undefined,
+    'no approval was recorded by the rejected write',
+  );
+});
+
+test('12.4 setApprovedVersion under the CORRECT scope persists the approval',
+  { skip: skip ?? false }, async () => {
+    await store.setApprovedVersion('idx-rowcount-state', 1, 12, A);
+    const indexes = await store.loadIndexesForScope(A);
+    assert.equal(indexes.find((i) => i.id === 'idx-rowcount-state')?.approvedVersion, 1);
+  });
+
+test('12.5 deleteIndex under a WRONG scope raises and the index SURVIVES',
+  { skip: skip ?? false }, async () => {
+    await assert.rejects(() => store.deleteIndex('idx-rowcount-state', B), /affected no rows/);
+    const indexes = await store.loadIndexesForScope(A);
+    assert.ok(
+      indexes.some((i) => i.id === 'idx-rowcount-state'),
+      'a delete that reported success while deleting nothing is the failure mode being blocked',
+    );
+  });
+
+test('12.6 deleting an index that does not exist is a MISMATCH, not idempotent success',
+  { skip: skip ?? false }, async () => {
+    /*
+     * DECIDED, not defaulted: "already absent" is an error.
+     *
+     * Under FORCE row level security "it is already gone" and "it is not yours"
+     * are indistinguishable from the row count, so treating absence as success
+     * would re-open exactly the hole this invariant closes. Callers reach a
+     * delete only after seeing the record in their OWN scope, so zero rows means
+     * something is genuinely wrong.
+     */
+    await assert.rejects(() => store.deleteIndex('idx-never-existed', A), /affected no rows/);
+  });
+
+test('12.7 deleteConversation: wrong scope raises, correct scope deletes, repeat raises',
+  { skip: skip ?? false }, async () => {
+    await store.saveConversation(conversation('c-rowcount', A));
+    await store.saveMessage(message('m-rowcount', 'c-rowcount'), A);
+
+    await assert.rejects(() => store.deleteConversation('c-rowcount', B), /affected no rows/);
+    const stillThere = await store.loadDurableForScope(A);
+    assert.ok(stillThere.conversations.some((c) => c.id === 'c-rowcount'), 'the wrong-scope delete deleted nothing');
+
+    await store.deleteConversation('c-rowcount', A);
+    const afterDelete = await store.loadDurableForScope(A);
+    assert.ok(!afterDelete.conversations.some((c) => c.id === 'c-rowcount'), 'the correct-scope delete removed it');
+    assert.ok(!afterDelete.messages.some((m) => m.id === 'm-rowcount'), 'and its messages went with it');
+
+    // Second delete of the same id: absent, therefore a mismatch.
+    await assert.rejects(() => store.deleteConversation('c-rowcount', A), /affected no rows/);
+  });
+
+test('12.8 deleting a conversation with NO messages still succeeds',
+  { skip: skip ?? false }, async () => {
+    // Only the PARENT row count is required. Demanding rows from the child
+    // tables would fail a perfectly correct delete of an empty conversation.
+    await store.saveConversation(conversation('c-rowcount-empty', A));
+    await store.deleteConversation('c-rowcount-empty', A);
+    const after = await store.loadDurableForScope(A);
+    assert.ok(!after.conversations.some((c) => c.id === 'c-rowcount-empty'));
+  });
+
+test('12.9 deleteWorkspace: wrong scope raises and the workspace SURVIVES',
+  { skip: skip ?? false }, async () => {
+    await store.saveWorkspace(workspaceRecord('ws-rowcount', A) as never);
+
+    await assert.rejects(() => store.deleteWorkspace('ws-rowcount', B), /affected no rows/);
+    const survived = await store.loadWorkspacesForScope(A);
+    assert.ok(survived.some((w) => w.id === 'ws-rowcount'), 'the wrong-scope delete deleted nothing');
+
+    await store.deleteWorkspace('ws-rowcount', A);
+    const after = await store.loadWorkspacesForScope(A);
+    assert.ok(!after.some((w) => w.id === 'ws-rowcount'), 'the correct-scope delete removed it');
+  });

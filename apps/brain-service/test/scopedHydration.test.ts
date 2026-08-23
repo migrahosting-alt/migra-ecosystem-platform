@@ -183,7 +183,7 @@ test('an APPROVED indexed document survives a restart and is retrievable under s
     2,
     A,
   );
-  await store.setApprovedVersion(indexId, 1, 3);
+  await store.setApprovedVersion(indexId, 1, 3, A);
 
   // A brand-new service over the same database — a process restart.
   const fresh = new IndexService(new FakeEmbedder(8), () => ({}) as never, undefined, undefined, store);

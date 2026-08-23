@@ -16,6 +16,7 @@
  */
 
 import type { PoolClient } from 'pg';
+import { requireAffected } from './ragRepo.js';
 import type { Conversation, Message, Summary, MemoryMode, MessageRole, MessageStatus } from '../../memory/conversationStore.js';
 
 export interface ScopedRequest {
@@ -118,9 +119,25 @@ export async function saveConversation(client: PoolClient, c: Conversation): Pro
 
 /** Hard cascade delete, in SQLite's order: messages → summaries → conversation. */
 export async function deleteConversation(client: PoolClient, id: string): Promise<void> {
+  /*
+   * DELETE SEMANTICS, DECIDED EXPLICITLY.
+   *
+   * `rowCount === 0` on the CONVERSATION is an error, not idempotent success.
+   * Under FORCE row-level security "already gone" and "not yours / no scope
+   * declared" are the same observation, and treating that as success is what let
+   * an unscoped delete report completion while changing nothing — the
+   * conversation then returned on the next restart.
+   *
+   * Callers reach here only after confirming the conversation is visible in
+   * their own scope, so zero rows means something is genuinely wrong.
+   *
+   * Child rows are NOT required: a conversation may legitimately have no
+   * messages or summaries yet.
+   */
   await client.query('DELETE FROM conversation_messages WHERE conversation_id = $1', [id]);
   await client.query('DELETE FROM conversation_summaries WHERE conversation_id = $1', [id]);
-  await client.query('DELETE FROM conversations WHERE id = $1', [id]);
+  const r = await client.query('DELETE FROM conversations WHERE id = $1', [id]);
+  requireAffected(r.rowCount, 'deleteConversation', id);
 }
 
 /**

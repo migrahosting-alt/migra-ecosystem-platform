@@ -114,7 +114,13 @@ export interface MemoryPersistence {
    */
   saveMessage(m: Message, scope: Scope): Promise<void>;
   saveSummary(s: Summary, scope: Scope): Promise<void>;
-  deleteConversation(id: string): Promise<void>;
+  /**
+   * Scope is carried for the same reason the writes above carry it: under FORCE
+   * row-level security a DELETE with no declared scope matches ZERO rows and
+   * reports success. A durable delete that silently did nothing would resurrect
+   * the conversation on the next restart.
+   */
+  deleteConversation(id: string, scope: Scope): Promise<void>;
   /** Optional workspace-memory persistence (a durable adapter provides it). */
   saveMemoryItem?(item: MemoryItem): Promise<void>;
 }
@@ -373,11 +379,11 @@ export class ConversationStore {
     // conversation disappears from the UI and returns after a restart. The
     // caller is told, so it can report the deletion as incomplete.
     if (c.memoryMode === 'durable') {
-      await this.commit('deleteConversation', () => this.persistence.deleteConversation(id));
+      await this.commit('deleteConversation', () => this.persistence.deleteConversation(id, scope));
     } else {
       // Best-effort for non-durable conversations: nothing was promised to disk,
       // so a no-op adapter refusing is not a failure worth propagating.
-      await this.persistence.deleteConversation(id).catch(() => undefined);
+      await this.persistence.deleteConversation(id, scope).catch(() => undefined);
     }
     c.deletedAt = this.now();
     this.messages.delete(id);
