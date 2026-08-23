@@ -142,6 +142,24 @@ export async function reserveTurn(
     );
   }
 
+  /*
+   * A CLAIMED SESSION HAS NO ALLOWANCE LEFT, whatever the reservations say.
+   *
+   * `used` is derived from live and consumed reservations, and a claim retires
+   * neither — so after signing in, this row read back as a FULL allowance. The
+   * loop that opens is short and repeatable: sign in, sign out, present the same
+   * cookie, take another five turns of real inference, forever. Keeping the row
+   * as evidence only works if something reads the evidence.
+   *
+   * The allowance is reported as fully spent rather than as a distinct refusal,
+   * so every surface that already handles "out of turns" handles this too — and
+   * what it tells the visitor, "sign in to keep going", is exactly right for
+   * someone who demonstrably has an account.
+   */
+  if (quota.claimedBy) {
+    return { ok: false, quota: { ...quota, used: quota.turnLimit }, refusal: 'exhausted' };
+  }
+
   if (quota.used >= quota.turnLimit) {
     return { ok: false, quota, refusal: 'exhausted' };
   }

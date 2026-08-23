@@ -47,9 +47,18 @@ export function registerAnonymousQuotaRoutes(app: FastifyInstance, deps: Anonymo
     // A visitor with no row yet has used nothing — reporting their full
     // allowance is the truth, and creating a row just to answer a read would
     // let a page view consume storage.
+    const limit = row?.turnLimit ?? deps.turnLimit();
+    /*
+     * A CLAIMED SESSION READS AS SPENT. `used` counts reservations, and a claim
+     * retires none of them, so this reported a full allowance to a cookie whose
+     * owner had already signed in — five more free turns for anyone willing to
+     * sign out and come back. The reservation refuses it too; this keeps the
+     * number the UI renders honest instead of promising turns that will be
+     * denied.
+     */
     return {
       ok: true,
-      quota: evaluateAnonymousQuota({ limit: row?.turnLimit ?? deps.turnLimit(), used: row?.used ?? 0 }),
+      quota: evaluateAnonymousQuota({ limit, used: row?.claimedBy ? limit : (row?.used ?? 0) }),
       claimed: Boolean(row?.claimedBy),
     };
   });

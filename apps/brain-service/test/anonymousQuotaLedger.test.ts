@@ -210,6 +210,33 @@ test('claiming records the account and cannot be repeated', { skip: skip ?? fals
   );
 });
 
+/**
+ * SIGN IN, SIGN OUT, COME BACK WITH THE SAME COOKIE.
+ *
+ * Keeping the quota row as evidence only works if something reads the evidence.
+ * `used` is derived from reservations and a claim retires none of them, so a
+ * claimed session read back as a FULL allowance — five more turns of real
+ * inference, and repeatable for as long as anyone cared to. Found on
+ * chat.migrateck.com after the claim itself was fixed.
+ */
+test('a CLAIMED session cannot buy a fresh allowance', { skip: skip ?? false }, async () => {
+  const s = session('claim-refresh');
+  await reserve(s);
+  await store.saveConversation(conversation('conv-refresh', s.scope, s.scope) as never);
+  await store.claimAnonymousConversation({
+    conversationId: 'conv-refresh', anonymousSessionId: s.id, anonymousOwner: s.scope,
+    accountOwner: 'user:refresher', accountWorkspace: 'personal:refresher', now: 13_000,
+  });
+
+  // Every hold is long gone, so a count of live reservations says "nothing used".
+  const after = await reserve(s, 14_000);
+  assert.equal(after.ok, false, 'the cookie is spent because its owner signed in, not because of a count');
+  assert.equal(after.quota.used, after.quota.turnLimit, 'and it reads as fully spent, so the UI says so too');
+
+  const projection = await store.getAnonymousQuota(s.id, s.scope);
+  assert.ok(projection?.claimedBy, 'the evidence is still there to be read');
+});
+
 test('a claimed session keeps its spent allowance — no fresh quota by re-presenting the cookie',
   { skip: skip ?? false }, async () => {
     const s = session('claim-quota');
