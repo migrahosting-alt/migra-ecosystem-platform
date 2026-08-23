@@ -37,6 +37,16 @@ export function toBrainView<T>(result: BrainResult<T>): BrainView<T> {
       return { state: 'ready', value: result.value }
     case 'unauthenticated':
       return { state: 'signed_out', reason: result.detail }
+    case 'forbidden_for_principal':
+      /*
+       * NOT `signed_out`. The principal IS known — a signed-out visitor asking
+       * for a feature that needs an account, or an account asking for something
+       * only a visitor has. Reporting either as "no session" would send a
+       * signed-in user to sign in again, and would tell a visitor nothing about
+       * why the control is off. The refusal names the operation, so the reason
+       * a surface renders is the actual reason.
+       */
+      return { state: 'unavailable', reason: result.detail }
     case 'tenancy_unresolved':
       return { state: 'unavailable', reason: `Workspace could not be resolved: ${result.detail}` }
     case 'invalid_operation':

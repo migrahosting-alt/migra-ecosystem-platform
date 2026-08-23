@@ -44,6 +44,7 @@ const session: AppSession = {
 const portWith = (current: AppSession | null): AuthPort => ({
   getSession: async () => current,
   buildLoginRedirect: async () => 'https://auth.example.test/authorize',
+  buildSignupRedirect: async () => 'https://auth.example.test/signup',
   buildLogoutRedirect: () => 'https://auth.example.test/logout',
   handleCallback: async () => {},
   clearSession: async () => {},

@@ -2,6 +2,7 @@ import 'server-only'
 
 import { callBrain, streamBrain, type BrainResult, type BrainStream, type GatewayDeps } from './gateway'
 import type { GroundingMode } from './operations'
+import type { AnonymousChatQuota } from '@migrapilot/shared-types/anonymous-quota'
 import type {
   ConversationMessage,
   ConversationSummary,
@@ -210,4 +211,84 @@ export function transcribe(
     },
     deps,
   )
+}
+
+// ── Anonymous allowance ────────────────────────────────────────────────────
+
+/**
+ * What the visitor has left. A PROJECTION for rendering, never the authority.
+ *
+ * The authority is `reserveAnonymousTurn`, because only that decides inside the
+ * transaction that also records the spend. Rendering from this and deciding
+ * from this would be two sources of truth, and they diverge the first time two
+ * tabs send at once.
+ */
+export function anonymousQuota(
+  deps?: GatewayDeps,
+): Promise<BrainResult<{ ok: boolean; quota: AnonymousChatQuota; claimed: boolean }>> {
+  return callBrain({ kind: 'anonymousQuota' }, deps)
+}
+
+/**
+ * Take one turn's allowance BEFORE inference.
+ *
+ * A check after generation is not a limit, it is a receipt. Refusal here is the
+ * thing that stops the model being called at all, so this must be awaited and
+ * its outcome acted on — not fired alongside the turn.
+ */
+export function reserveAnonymousTurn(
+  reservationId: string,
+  conversationId?: string,
+  deps?: GatewayDeps,
+): Promise<
+  BrainResult<{
+    ok: boolean
+    reservation?: { reservationId: string; remainingAfterReservation: number }
+    quota: AnonymousChatQuota
+  }>
+> {
+  return callBrain(
+    {
+      kind: 'reserveAnonymousTurn',
+      reservationId,
+      ...(conversationId ? { conversationId } : {}),
+    },
+    deps,
+  )
+}
+
+/**
+ * Close the reservation.
+ *
+ * `producedOutput` is the pivot, not the HTTP status: a stream that delivered
+ * tokens and then failed to persist DID give the user something, and a 200
+ * carrying an empty answer did not.
+ */
+export function settleAnonymousTurn(
+  input: { reservationId: string; producedOutput: boolean; failure?: string },
+  deps?: GatewayDeps,
+): Promise<BrainResult<{ ok: boolean; settlement: 'consume' | 'release'; released?: boolean }>> {
+  return callBrain(
+    {
+      kind: 'settleAnonymousTurn',
+      reservationId: input.reservationId,
+      producedOutput: input.producedOutput,
+      ...(input.failure ? { failure: input.failure } : {}),
+    },
+    deps,
+  )
+}
+
+/**
+ * Move one anonymous conversation into the account that just signed in.
+ *
+ * Made AS the account — the deps must carry the SESSION principal, never the
+ * anonymous one — with the anonymous side named. Both halves come from one
+ * verified cookie, and the Brain re-checks that they agree.
+ */
+export function claimAnonymousConversation(
+  input: { conversationId: string; anonymousSessionId: string; anonymousOwner: string },
+  deps?: GatewayDeps,
+): Promise<BrainResult<{ ok: boolean; conversationId: string; claimed: boolean }>> {
+  return callBrain({ kind: 'claimAnonymousConversation', ...input }, deps)
 }

@@ -126,28 +126,91 @@ export function isAnonymousScope(owner: string): boolean {
 }
 
 /**
- * What a signed-out visitor is allowed to reach.
+ * WHO MAY PERFORM WHICH OPERATION.
  *
- * An allowlist, not a denylist. Every operation added to the Brain in future is
- * closed to anonymous callers until someone decides otherwise — the opposite
- * default would silently expose each new capability to the public internet.
+ * The gateway resolves a principal and then authorizes THE EXACT OPERATION
+ * against this table. Two separate decisions, deliberately: "we know who you
+ * are" is not "you may do this", and collapsing them is how admitting anonymous
+ * visitors to chat would have admitted them to everything else the Brain can do.
  *
- * Chat and its own conversation are in. Files, indexes, coding, transcription
- * and anything workspace-shaped are out: they cost more, they touch stored user
- * material, and none of them are part of "try it before you sign in".
+ * CLOSED BY DEFAULT IN BOTH DIRECTIONS. An operation absent from this table is
+ * `authenticated` — so every capability added to the Brain in future is shut to
+ * the public internet until someone lists it here on purpose. A denylist would
+ * have the opposite default and would be wrong exactly once, silently.
+ *
+ *   both           chat and its own conversation: what "try it before you sign
+ *                  in" actually needs.
+ *   anonymous      the allowance itself. An authenticated caller has no quota,
+ *                  and asking for one is a bug worth refusing here rather than
+ *                  discovering as a Brain 400.
+ *   authenticated  everything else — files, indexes, coding, transcription,
+ *                  grounding, and the claim, which is made AS the account.
  */
-const ANONYMOUS_OPERATIONS = new Set([
-  'listConversations',
-  'createConversation',
-  'getConversation',
-  'listMessages',
-  'appendMessage',
+export type OperationAudience = 'both' | 'anonymous' | 'authenticated'
+
+const OPERATION_AUDIENCE: Readonly<Record<string, OperationAudience>> = {
+  // Chat, and the conversation it lives in.
+  listConversations: 'both',
+  createConversation: 'both',
+  getConversation: 'both',
+  listMessages: 'both',
+  appendMessage: 'both',
   // Streaming is a FLAG on this operation, not a separate kind — so admitting
   // `chatTurn` admits both paths, which is what the slice needs and is why the
-  // allowlist is checked in the gateway rather than per route.
-  'chatTurn',
-])
+  // decision is made in the gateway rather than per route.
+  chatTurn: 'both',
+
+  // The allowance. Only a signed-out visitor has one.
+  anonymousQuota: 'anonymous',
+  reserveAnonymousTurn: 'anonymous',
+  settleAnonymousTurn: 'anonymous',
+
+  // The transfer INTO an account. Never reachable by the visitor being claimed.
+  claimAnonymousConversation: 'authenticated',
+}
+
+/** The audience for an operation. Unknown operations are authenticated-only. */
+export function operationAudience(kind: string): OperationAudience {
+  return OPERATION_AUDIENCE[kind] ?? 'authenticated'
+}
 
 export function isAnonymousAllowedOperation(kind: string): boolean {
-  return ANONYMOUS_OPERATIONS.has(kind)
+  const audience = operationAudience(kind)
+  return audience === 'both' || audience === 'anonymous'
+}
+
+export function isAuthenticatedAllowedOperation(kind: string): boolean {
+  return operationAudience(kind) !== 'anonymous'
+}
+
+/** Why an operation was refused for this principal, or nothing. */
+export interface OperationRefusal {
+  detail: string
+}
+
+/**
+ * Authorize ONE operation for ONE principal.
+ *
+ * Returns `null` when permitted. The refusal text names the operation, because
+ * a capability refusal a developer cannot locate becomes a bug report about
+ * "chat being broken".
+ */
+export function authorizeOperation(
+  principal: Pick<Principal, 'kind'>,
+  kind: string,
+): OperationRefusal | null {
+  if (principal.kind === 'anonymous') {
+    return isAnonymousAllowedOperation(kind)
+      ? null
+      : {
+          detail:
+            `'${kind}' is not available without an account. Sign in to use it.`,
+        }
+  }
+
+  return isAuthenticatedAllowedOperation(kind)
+    ? null
+    : {
+        detail: `'${kind}' applies only to a signed-out visitor.`,
+      }
 }

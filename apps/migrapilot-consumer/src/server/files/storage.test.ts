@@ -38,6 +38,7 @@ const sessionFor = (authUserId: string): AppSession => ({
 const portFor = (authUserId: string): AuthPort => ({
   getSession: async () => sessionFor(authUserId),
   buildLoginRedirect: async () => 'https://auth.example.test/authorize',
+  buildSignupRedirect: async () => 'https://auth.example.test/signup',
   buildLogoutRedirect: () => 'https://auth.example.test/logout',
   handleCallback: async () => {},
   clearSession: async () => {},

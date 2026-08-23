@@ -7,11 +7,18 @@
  * anything malformed, and send the browser somewhere sensible afterwards.
  *
  * NOTHING here may put tokens in a redirect, a log line, or a response body.
+ *
+ * It is also where a signed-out visitor's work becomes theirs. The claim runs
+ * AFTER the exchange, never before: the account is established by a completed
+ * sign-in rather than asserted by a parameter, and the anonymous authority is
+ * revoked once the transfer is done.
  */
 
-import { getAuthPort } from '@/server/auth'
+import { getAuthPort, getSession } from '@/server/auth'
 import { AuthNotConfiguredError, type BootstrapFn } from '@/server/auth/authPort'
 import { absoluteHttpUrl, readEnv } from '@/server/auth/env'
+import { takeReturnPath } from '@/server/auth/returnTo'
+import { claimAnonymousWorkInto } from '@/server/anonymous/claim'
 
 export const dynamic = 'force-dynamic'
 
@@ -32,6 +39,16 @@ const appBase = (request: Request): string =>
 /** Land the user back on the app, never on an API path. */
 const home = (request: Request, query = ''): Response =>
   Response.redirect(`${appBase(request)}/${query}`, 302)
+
+/**
+ * Land them where they were, if this app remembered a destination.
+ *
+ * The path was validated when it was stored and again when it was read, and it
+ * is joined to THIS app's base — so nothing that arrived from the provider can
+ * steer the final redirect.
+ */
+const landing = (request: Request, path: string | null): Response =>
+  path ? Response.redirect(`${appBase(request)}${path}`, 302) : home(request)
 
 /**
  * Resolve org context and permissions for the authenticated principal.
@@ -86,5 +103,37 @@ export async function GET(request: Request): Promise<Response> {
     return home(request, '?auth_error=exchange_failed')
   }
 
-  return home(request)
+  /*
+   * THE SESSION EXISTS NOW. Only now may anything be claimed.
+   *
+   * Order is the security property: the account being claimed INTO is
+   * established by a completed exchange, not by anything the request asked for.
+   * A claim that ran before this line would be a way to request someone else's
+   * conversation.
+   *
+   * A failure to move the work does NOT fail the sign-in. The person is
+   * authenticated; turning that into an error page over a data move would throw
+   * away the thing that just succeeded. It is logged instead.
+   */
+  const destination = await takeReturnPath()
+  try {
+    const session = await getSession()
+    if (session) {
+      const outcome = await claimAnonymousWorkInto(session)
+      if (outcome.hadAnonymousIdentity) {
+        console.info(
+          '[auth] claimed anonymous work on sign-in',
+          JSON.stringify({ claimed: outcome.claimed.length, failed: outcome.failed.length }),
+        )
+      }
+    } else {
+      // The exchange succeeded but no session read back. Nothing is claimed on a
+      // principal we cannot see, and saying so beats moving rows hopefully.
+      console.warn('[auth] callback completed but no session resolved; nothing claimed.')
+    }
+  } catch (error) {
+    console.error('[auth] anonymous claim failed after sign-in:', error instanceof Error ? error.message : error)
+  }
+
+  return landing(request, destination)
 }

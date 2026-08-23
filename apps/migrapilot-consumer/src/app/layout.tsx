@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from 'next'
 import './globals.css'
 import { AppShell } from '@/components/layout/AppShell'
 import { ChatProvider } from '@/state/ChatProvider'
+import { AnonymousQuotaProvider } from '@/features/anonymous/AnonymousQuotaProvider'
 import { getSession, toPublicSession } from '@/server/auth'
 
 /**
@@ -69,9 +70,16 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         />
       </head>
       <body>
-        <ChatProvider>
-          <AppShell session={publicSession}>{children}</AppShell>
-        </ChatProvider>
+        {/*
+          The allowance sits OUTSIDE the chat state on purpose: a turn reports
+          the server's post-settlement quota, so the chat provider consumes this
+          one rather than the other way round.
+        */}
+        <AnonymousQuotaProvider>
+          <ChatProvider>
+            <AppShell session={publicSession}>{children}</AppShell>
+          </ChatProvider>
+        </AnonymousQuotaProvider>
       </body>
     </html>
   )

@@ -1,8 +1,10 @@
 import 'server-only'
 
-import { requireSession } from '../auth'
 import { UnauthenticatedError, type AppSession } from '../auth/authPort'
 import { deriveBrainScope, isDerivedOwnerScope } from '../tenancy/ownerScope'
+import { isAnonymousScope as isDerivedAnonymousScope } from '../tenancy/anonymousIdentity'
+import { authorizeOperation, type Principal } from '../tenancy/principal'
+import { resolveRequestPrincipal } from '../tenancy/requestPrincipal'
 import { brainConfig } from './config'
 import { InvalidOperationError, resolveOperation, type BrainOperation } from './operations'
 
@@ -15,10 +17,18 @@ import { InvalidOperationError, resolveOperation, type BrainOperation } from './
  *
  * Three properties are enforced here rather than left to callers:
  *
- *   IDENTITY IS SERVER-DERIVED. The scope headers are built from the verified
- *   MigraAuth session by `deriveBrainScope`. No argument to this module can
- *   influence them; there is no parameter through which a caller could supply
- *   one, so a browser-supplied scope is not "ignored" so much as unrepresentable.
+ *   IDENTITY IS SERVER-DERIVED. The scope headers are built from a verified
+ *   MigraAuth session, or from an anonymous identity this server signed. No
+ *   argument to this module can influence them; there is no parameter through
+ *   which a caller could supply one, so a browser-supplied scope is not
+ *   "ignored" so much as unrepresentable.
+ *
+ *   AUTHENTICATION AND AUTHORIZATION ARE TWO STEPS. Resolving WHO is making the
+ *   request does not decide WHETHER they may make it. The principal is resolved
+ *   first, and then the exact operation is authorized against
+ *   `authorizeOperation`. Admitting signed-out visitors to chat must not admit
+ *   them to files, indexes, coding or transcription, and the only way to be sure
+ *   of that is to ask about this operation rather than about this principal.
  *
  *   NO ARBITRARY PROXYING. Callers pass a `BrainOperation` from a closed union,
  *   never a path. Ids inside those operations are pattern-validated, so an id
@@ -33,6 +43,14 @@ import { InvalidOperationError, resolveOperation, type BrainOperation } from './
 export type BrainResult<T> =
   | { kind: 'ok'; status: number; value: T }
   | { kind: 'unauthenticated'; detail: string }
+  /**
+   * The principal is known, and is not allowed to perform THIS operation.
+   *
+   * Distinct from `unauthenticated` on purpose. "Sign in" is the remedy for one
+   * and not the other, and a signed-in user told to sign in has been sent in a
+   * circle.
+   */
+  | { kind: 'forbidden_for_principal'; detail: string }
   | { kind: 'tenancy_unresolved'; detail: string }
   | { kind: 'invalid_operation'; detail: string }
   | { kind: 'not_found' }
@@ -55,6 +73,14 @@ export type FetchLike = (url: string, init: RequestInit) => Promise<Response>
 export interface GatewayDeps {
   /** Overridden in tests. Defaults to the platform fetch. */
   fetchImpl?: FetchLike
+  /**
+   * The principal for this request, resolved ONCE by the route handler.
+   *
+   * Passing it is how a request that makes several Brain calls stays one
+   * visitor. Resolving per call would mint a fresh anonymous identity for each,
+   * which is a fresh allowance for each.
+   */
+  principal?: Principal
   /** Overridden in tests so a session can be supplied without a live auth port. */
   sessionProvider?: () => Promise<AppSession>
   requestId?: string
@@ -78,8 +104,12 @@ function buildHeaders(
   headers.set('x-workspace-scope', scope.workspace)
   if (requestId) headers.set('x-request-id', requestId)
 
-  // Defence in depth: assert we are emitting a scope this process derived.
-  if (!isDerivedOwnerScope(headers.get('x-owner-scope') ?? '')) {
+  // Defence in depth: assert we are emitting a scope this process derived —
+  // either `user:<sub>` from a verified session, or `anon:<id>` from a signature
+  // this server produced. Both patterns are checked, so a value that merely
+  // looks scope-shaped cannot pass.
+  const emitted = headers.get('x-owner-scope') ?? ''
+  if (!isDerivedOwnerScope(emitted) && !isDerivedAnonymousScope(emitted)) {
     throw new Error('Refusing to call the Brain with a non-derived owner scope.')
   }
   return headers
@@ -95,32 +125,49 @@ interface PreparedCall {
 }
 
 /**
- * The three boundary properties, applied once for every caller.
+ * The boundary properties, applied once for every caller.
  *
- * Both the buffered and streaming paths go through here so that "authenticated,
- * server-derived scope, closed operation set" cannot hold for one and not the
- * other. A second entry point that re-implemented this preamble is exactly how
- * a streaming path would quietly become an unauthenticated proxy.
+ * Both the buffered and streaming paths go through here so that "known
+ * principal, authorized operation, server-derived scope, closed operation set"
+ * cannot hold for one and not the other. A second entry point that
+ * re-implemented this preamble is exactly how a streaming path would quietly
+ * become an unauthenticated proxy.
+ *
+ * The order is the design:
+ *
+ *   1. WHO. A verified session, or a signed anonymous visitor, or nobody.
+ *   2. MAY THEY DO THIS. The exact operation, against the audience table.
+ *   3. WHERE THEIR DATA LIVES. Scope derived from the principal, never supplied.
+ *   4. WHAT REQUEST THAT IS. The only path constructor.
+ *
+ * Step 2 is the one this rewrite exists for. Without it, admitting anonymous
+ * visitors at step 1 would admit them to every operation the Brain serves.
  */
 async function prepareBrainCall(
   operation: BrainOperation,
   deps: GatewayDeps,
 ): Promise<{ ok: true; call: PreparedCall } | { ok: false; failure: BrainResult<never> }> {
-  // 1. Principal first. No session, no Brain call — before anything else runs.
-  let session: AppSession
-  try {
-    session = await (deps.sessionProvider ? deps.sessionProvider() : requireSession())
-  } catch (error) {
-    if (error instanceof UnauthenticatedError) {
-      return { ok: false, failure: { kind: 'unauthenticated', detail: error.message } }
+  // 1. Principal first. Nobody, no Brain call — before anything else runs.
+  const resolved = await resolvePrincipal(deps)
+  if (!resolved.ok) return { ok: false, failure: resolved.failure }
+  const principal = resolved.principal
+
+  // 2. Authorize THIS operation for THIS principal. Closed by default: an
+  //    operation nobody has listed is authenticated-only, so a capability added
+  //    to the Brain tomorrow is not public today.
+  const refusal = authorizeOperation(principal, operation.kind)
+  if (refusal) {
+    return {
+      ok: false,
+      failure: { kind: 'forbidden_for_principal', detail: refusal.detail },
     }
-    return { ok: false, failure: { kind: 'unauthenticated', detail: 'Authentication required.' } }
   }
 
-  // 2. Tenancy derived from that principal. Fails closed.
+  // 3. Tenancy comes from the principal. Fails closed; never a default scope.
   let scope
   try {
-    scope = deriveBrainScope(session)
+    scope =
+      principal.kind === 'session' ? deriveBrainScope(principal.session) : principal.scope
   } catch (error) {
     return {
       ok: false,
@@ -131,10 +178,10 @@ async function prepareBrainCall(
     }
   }
 
-  // 3. Operation → concrete request. The only path constructor.
-  let resolved
+  // 4. Operation → concrete request. The only path constructor.
+  let request
   try {
-    resolved = resolveOperation(operation)
+    request = resolveOperation(operation)
   } catch (error) {
     if (error instanceof InvalidOperationError) {
       return { ok: false, failure: { kind: 'invalid_operation', detail: error.message } }
@@ -146,15 +193,84 @@ async function prepareBrainCall(
   return {
     ok: true,
     call: {
-      url: `${baseUrl}${resolved.path}`,
-      method: resolved.method,
-      headers: buildHeaders(scope, deps.requestId, resolved.body !== undefined),
-      ...(resolved.body !== undefined ? { body: JSON.stringify(resolved.body) } : {}),
+      url: `${baseUrl}${request.path}`,
+      method: request.method,
+      headers: buildHeaders(scope, deps.requestId, request.body !== undefined),
+      ...(request.body !== undefined ? { body: JSON.stringify(request.body) } : {}),
       // A stream is alive for as long as the model generates, so a total budget
       // sized for a buffered reply would sever a working answer mid-sentence.
       timeoutMs: isStreaming(operation) ? streamTimeoutMs : timeoutMs,
     },
   }
+}
+
+/**
+ * Who is calling, in the one order that is safe.
+ *
+ * An explicitly supplied principal wins, because the route resolved it for the
+ * whole request and re-resolving would mint a second anonymous identity.
+ * `sessionProvider` is the injection seam for tests and for callers that only
+ * ever act as an account. Otherwise the request is read directly.
+ */
+async function resolvePrincipal(
+  deps: GatewayDeps,
+): Promise<
+  { ok: true; principal: Principal } | { ok: false; failure: BrainResult<never> }
+> {
+  if (deps.principal) return { ok: true, principal: deps.principal }
+
+  if (deps.sessionProvider) {
+    try {
+      const session = await deps.sessionProvider()
+      return {
+        ok: true,
+        principal: { kind: 'session', session, scope: deriveBrainScope(session) },
+      }
+    } catch (error) {
+      // A session that could not be derived is still a session for the purposes
+      // of this step; `deriveBrainScope` throwing is a tenancy fault, and
+      // reporting it as "not signed in" would send the user to sign in again.
+      if (error instanceof UnauthenticatedError) {
+        return { ok: false, failure: { kind: 'unauthenticated', detail: error.message } }
+      }
+      if (error instanceof Error && error.name === 'TenancyError') {
+        return { ok: false, failure: { kind: 'tenancy_unresolved', detail: error.message } }
+      }
+      return {
+        ok: false,
+        failure: { kind: 'unauthenticated', detail: 'Authentication required.' },
+      }
+    }
+  }
+
+  const request = await resolveRequestPrincipal()
+  if (!request) {
+    return {
+      ok: false,
+      failure: { kind: 'unauthenticated', detail: 'Authentication required.' },
+    }
+  }
+
+  /*
+   * A MINTED IDENTITY THAT CANNOT BE WRITTEN IS NOT AN IDENTITY.
+   *
+   * It would exist for exactly this request, and the next one would mint
+   * another — a fresh five-turn allowance every time, which is unlimited free
+   * inference wearing a limit. Refusing is the only correct answer, and the
+   * context where it happens (a Server Component, which cannot set cookies) has
+   * no business starting an anonymous session anyway.
+   */
+  if (!request.identityPersisted) {
+    return {
+      ok: false,
+      failure: {
+        kind: 'unauthenticated',
+        detail: 'An anonymous session could not be established for this request.',
+      },
+    }
+  }
+
+  return { ok: true, principal: request.principal }
 }
 
 const isStreaming = (operation: BrainOperation): boolean =>

@@ -41,6 +41,7 @@ function recordingPort(over: Partial<AuthPort> = {}): { port: AuthPort; recorded
   const port: AuthPort = {
     getSession: async () => null,
     buildLoginRedirect: async () => AUTHORIZE,
+    buildSignupRedirect: async () => `${AUTHORIZE}&signup=1`,
     buildLogoutRedirect: () => `https://auth.example.test/logout?return_to=${encodeURIComponent(APP_BASE)}`,
     handleCallback: async ({ code, state, bootstrap }) => {
       recorded.callbacks.push({ code, state })
@@ -57,6 +58,9 @@ function recordingPort(over: Partial<AuthPort> = {}): { port: AuthPort; recorded
 /** `Response.redirect` needs an absolute request URL; this supplies a real one. */
 const callbackRequest = (query: string): Request => new Request(`${APP_BASE}/api/auth/callback${query}`)
 
+/** The login route reads `?next=` from its request, so it needs a real one. */
+const loginRequest = (query = ''): Request => new Request(`${APP_BASE}/api/auth/login${query}`)
+
 function setBaseUrl(value: string | undefined): void {
   if (value === undefined) delete process.env.APP_BASE_URL
   else process.env.APP_BASE_URL = value
@@ -71,7 +75,7 @@ test('login redirects to exactly the authorize URL the port built', async () => 
   const { port } = recordingPort()
   setAuthPort(port)
 
-  const response = await login()
+  const response = await login(loginRequest())
   assert.equal(response.status, 302)
   // Byte-identical: the route must not rewrite, re-encode or augment the URL.
   assert.equal(response.headers.get('location'), AUTHORIZE)
@@ -82,7 +86,7 @@ test('the authorize URL carries PKCE S256 and a state, and no secret', async () 
   const { port } = recordingPort()
   setAuthPort(port)
 
-  const location = (await login()).headers.get('location')!
+  const location = (await login(loginRequest())).headers.get('location')!
   const params = new URL(location).searchParams
   assert.equal(params.get('response_type'), 'code')
   assert.equal(params.get('code_challenge_method'), 'S256')
@@ -99,7 +103,7 @@ test('login answers 503 — never a redirect — when auth is unconfigured', asy
   // A redirect to a login that cannot complete strands the user at the issuer.
   setAuthPort(unconfiguredAuthPort)
 
-  const response = await login()
+  const response = await login(loginRequest())
   assert.equal(response.status, 503)
   assert.equal(response.headers.get('location'), null)
   assert.equal((await response.json()).error, 'auth_not_configured')
@@ -115,7 +119,7 @@ test('login propagates an unexpected fault rather than masking it as 503', async
   })
   setAuthPort(port)
 
-  await assert.rejects(() => login(), /issuer unreachable/)
+  await assert.rejects(() => login(loginRequest()), /issuer unreachable/)
   resetAuthPort()
 })
 

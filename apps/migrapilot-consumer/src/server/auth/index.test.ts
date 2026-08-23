@@ -75,6 +75,7 @@ const session = (over: Partial<AppSession> = {}): AppSession => ({
 const stubPort = (over: Partial<AuthPort> = {}): AuthPort => ({
   getSession: async () => null,
   buildLoginRedirect: async () => 'https://auth.example.test/authorize',
+  buildSignupRedirect: async () => 'https://auth.example.test/signup',
   buildLogoutRedirect: () => 'https://auth.example.test/logout',
   handleCallback: async () => {},
   clearSession: async () => {},

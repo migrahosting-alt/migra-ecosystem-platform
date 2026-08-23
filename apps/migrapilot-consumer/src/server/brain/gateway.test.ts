@@ -221,6 +221,7 @@ test('6b · an expired session is not a principal', async () => {
   setAuthPort({
     getSession: async () => ({ ...userA, expiresAt: Date.now() - 1 }),
     buildLoginRedirect: async () => '',
+    buildSignupRedirect: async () => 'https://auth.example.test/signup',
     buildLogoutRedirect: () => '',
     handleCallback: async () => {},
     clearSession: async () => {},

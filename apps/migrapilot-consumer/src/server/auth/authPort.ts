@@ -74,6 +74,15 @@ export interface AuthPort {
   getSession(): Promise<AppSession | null>
   /** Where to send the browser to begin login (PKCE S256 authorize URL). */
   buildLoginRedirect(): Promise<string>
+  /**
+   * Where to send the browser to CREATE an account.
+   *
+   * A separate destination, not a label on the same one. "Sign in" and "Create
+   * account" answer different questions, and a visitor who has just been told
+   * their free messages ran out is far more often the second — sending them to a
+   * password prompt they have no password for is where that flow is lost.
+   */
+  buildSignupRedirect(): Promise<string>
   /** Where to send the browser to end the session. */
   buildLogoutRedirect(): string
   /** Complete the OAuth callback: verify state, exchange code, bootstrap, set session. */
@@ -114,6 +123,9 @@ export const unconfiguredAuthPort: AuthPort = {
     return null
   },
   async buildLoginRedirect() {
+    throw new AuthNotConfiguredError()
+  },
+  async buildSignupRedirect() {
     throw new AuthNotConfiguredError()
   },
   buildLogoutRedirect() {

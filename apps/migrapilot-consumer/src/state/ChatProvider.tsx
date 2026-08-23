@@ -12,6 +12,8 @@ import {
 } from 'react'
 import { useRouter } from 'next/navigation'
 import type { Block, Conversation, Message } from '@/data/types'
+import type { AnonymousChatQuota } from '@migrapilot/shared-types/anonymous-quota'
+import { useAnonymousQuota } from '@/features/anonymous/AnonymousQuotaProvider'
 import { titleFromPrompt } from './demoResponder'
 
 interface ChatContextValue {
@@ -160,6 +162,16 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   /** Conversations whose messages have already been fetched. */
   const hydrated = useRef(new Set<string>())
   const router = useRouter()
+  /*
+   * The allowance is READ FROM THE TURN, never counted here.
+   *
+   * Every response on this path carries the server's own post-reservation or
+   * post-settlement quota, so the number on screen is the number in the ledger.
+   * Decrementing locally would be wrong after a refunded failure, wrong in a
+   * second tab, and trivially editable — three ways to display a limit that is
+   * not the limit.
+   */
+  const { applyServerQuota } = useAnonymousQuota()
   /** Optimistic id → durable id, so a URL captured before the swap still resolves. */
   const aliases = useRef(new Map<string, string>())
   /*
@@ -432,7 +444,12 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         const payload = (await response.json().catch(() => null)) as {
           conversationId?: string
           message?: string
+          quota?: AnonymousChatQuota
         } | null
+        // A refusal for being out of turns carries the authoritative allowance,
+        // which is what flips the composer into its exhausted state — not a
+        // count this file kept.
+        if (payload?.quota) applyServerQuota(payload.quota)
         if (payload?.conversationId && payload.conversationId !== conversationId) {
           adoptDurableId(conversationId, payload.conversationId)
           conversationId = payload.conversationId
@@ -457,6 +474,17 @@ export function ChatProvider({ children }: { children: ReactNode }) {
             adoptDurableId(conversationId, id)
             conversationId = id
           }
+          // The allowance AFTER this turn's reservation was taken. It arrives
+          // before the first token, so the count is right while the answer is
+          // still being written.
+          const reserved = (frame.data as { quota?: AnonymousChatQuota })?.quota
+          if (reserved) applyServerQuota(reserved)
+          continue
+        }
+        if (frame.event === 'quota') {
+          // A settlement — a refund after a failure, or a spend confirmed.
+          const settled = frame.data as AnonymousChatQuota
+          if (settled && typeof settled.remaining === 'number') applyServerQuota(settled)
           continue
         }
         if (frame.event === 'token') {
@@ -478,6 +506,8 @@ export function ChatProvider({ children }: { children: ReactNode }) {
           done = true
           const named = (frame.data as { sources?: unknown })?.sources
           if (Array.isArray(named)) sources = named.filter((n): n is string => typeof n === 'string')
+          const settled = (frame.data as { quota?: AnonymousChatQuota })?.quota
+          if (settled) applyServerQuota(settled)
         }
       }
 
@@ -542,7 +572,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       discardPartial()
       push(notice('The assistant could not be reached. Nothing here is a generated answer.'))
     }
-  }, [router])
+  }, [router, applyServerQuota])
 
   const startConversation = useCallback(
     (prompt: string, options?: { attachments?: string[] }) => {

@@ -95,6 +95,47 @@ export type BrainOperation =
    */
   | { kind: 'transcribe'; audioBase64: string; audioMime: string; requestedLanguage?: string }
 
+  // ── anonymous allowance (signed-out visitors) ────────────────────────────
+  /**
+   * The visitor's remaining turns.
+   *
+   * A RENDER-TIME projection, never the authority for whether a turn may run.
+   * `reserveAnonymousTurn` is the authority, because only it decides inside the
+   * transaction that also records the spend.
+   */
+  | { kind: 'anonymousQuota' }
+  /**
+   * Take one turn's allowance BEFORE the model is asked anything.
+   *
+   * The reservation id is minted by the caller so a retried POST settles the
+   * reservation it actually took rather than a second one.
+   */
+  | { kind: 'reserveAnonymousTurn'; reservationId: string; conversationId?: string }
+  /**
+   * Close a reservation. `producedOutput` is the pivot, not the HTTP status: a
+   * stream that delivered tokens and then failed to persist DID give the user
+   * something; a 200 carrying an empty answer did not.
+   */
+  | {
+      kind: 'settleAnonymousTurn'
+      reservationId: string
+      producedOutput: boolean
+      failure?: string
+    }
+  /**
+   * Move an anonymous conversation into the account that just signed in.
+   *
+   * Deliberately NOT anonymous-reachable: it is made AS the account, and the
+   * anonymous side is named in the body. Both halves are derived from one
+   * verified cookie, and the pair is re-checked by the Brain.
+   */
+  | {
+      kind: 'claimAnonymousConversation'
+      conversationId: string
+      anonymousSessionId: string
+      anonymousOwner: string
+    }
+
 export interface ResolvedRequest {
   method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
   path: string
@@ -153,6 +194,34 @@ function filename(value: string): string {
   }
   if (value.includes('/') || value.includes('\\') || value.includes('..')) {
     throw new InvalidOperationError('a grounding entry must be a bare filename.')
+  }
+  return value
+}
+
+/**
+ * The anonymous session id alphabet, kept identical to the one
+ * `tenancy/anonymousIdentity.ts` mints. A wider pattern here would let a value
+ * this app never issued be presented as an anonymous identity.
+ */
+const ANON_SESSION_ID = /^[A-Za-z0-9_-]{22,64}$/
+
+function anonymousSessionId(value: string): string {
+  if (typeof value !== 'string' || !ANON_SESSION_ID.test(value)) {
+    throw new InvalidOperationError('anonymousSessionId is not a canonical anonymous identity.')
+  }
+  return value
+}
+
+/**
+ * The anonymous owner scope, checked AGAINST its session id rather than trusted.
+ *
+ * A mismatched pair is the signature of a caller assembling a claim instead of
+ * deriving both halves from one verified cookie — which is precisely how "make
+ * this conversation mine" would become something a request could ask for.
+ */
+function anonymousOwner(value: string, sessionId: string): string {
+  if (value !== `anon:${sessionId}`) {
+    throw new InvalidOperationError('anonymousOwner must be anon: followed by anonymousSessionId.')
   }
   return value
 }
@@ -321,6 +390,47 @@ export function resolveOperation(op: BrainOperation): ResolvedRequest {
           mime: audioMime(op.audioMime),
           // Omitted entirely when the user chose nothing. Not null, not "en".
           ...(op.requestedLanguage ? { requestedLanguage: languageCode(op.requestedLanguage) } : {}),
+        },
+      }
+
+    case 'anonymousQuota':
+      return { method: 'GET', path: '/api/ai/anonymous/quota' }
+
+    case 'reserveAnonymousTurn':
+      return {
+        method: 'POST',
+        path: '/api/ai/anonymous/reserve',
+        body: {
+          reservationId: id(op.reservationId, 'reservationId'),
+          ...(op.conversationId
+            ? { conversationId: id(op.conversationId, 'conversationId') }
+            : {}),
+        },
+      }
+
+    case 'settleAnonymousTurn':
+      return {
+        method: 'POST',
+        path: '/api/ai/anonymous/settle',
+        body: {
+          reservationId: id(op.reservationId, 'reservationId'),
+          // Explicit boolean, never a truthy value: `producedOutput: undefined`
+          // reads as a release at the Brain, which would refund a served answer.
+          producedOutput: op.producedOutput === true,
+          ...(op.failure ? { failure: text(op.failure, 'failure', 120) } : {}),
+        },
+      }
+
+    case 'claimAnonymousConversation':
+      return {
+        method: 'POST',
+        path: '/api/ai/anonymous/claim',
+        body: {
+          conversationId: id(op.conversationId, 'conversationId'),
+          anonymousSessionId: anonymousSessionId(op.anonymousSessionId),
+          // Re-derived here rather than forwarded, so a caller cannot name one
+          // session and a different owner. The Brain checks the pair again.
+          anonymousOwner: anonymousOwner(op.anonymousOwner, op.anonymousSessionId),
         },
       }
   }

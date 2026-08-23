@@ -8,14 +8,23 @@
  */
 
 import { listConversations } from '@/server/brain/seams'
+import { resolveRequestPrincipal } from '@/server/tenancy/requestPrincipal'
 import type { ConversationSummary } from '@/server/brain/contracts'
 
 export const dynamic = 'force-dynamic'
 
 export async function GET(): Promise<Response> {
-  const result = await listConversations()
+  /*
+   * A signed-out visitor has conversations too, and this is what makes a reload
+   * show them. Their scope is derived from a signed cookie, so the list is
+   * theirs and nobody else's — the same property the session path has.
+   */
+  const resolved = await resolveRequestPrincipal()
+  if (!resolved) return Response.json({ conversations: [] })
 
-  if (result.kind === 'unauthenticated') {
+  const result = await listConversations({ principal: resolved.principal })
+
+  if (result.kind === 'unauthenticated' || result.kind === 'forbidden_for_principal') {
     // Signed out is not an error state for a list: the shell renders an empty
     // sidebar rather than an alarm.
     return Response.json({ conversations: [] })

@@ -11,6 +11,7 @@
  */
 
 import { listMessages } from '@/server/brain/seams'
+import { resolveRequestPrincipal } from '@/server/tenancy/requestPrincipal'
 import type { ConversationMessage } from '@/server/brain/contracts'
 
 export const dynamic = 'force-dynamic'
@@ -21,10 +22,28 @@ export async function GET(
 ): Promise<Response> {
   const { id } = await context.params
 
-  const result = await listMessages(id)
+  /*
+   * Resolved once, and honoured for signed-out visitors too — this is what a
+   * reload reads to put an anonymous thread back on screen.
+   *
+   * An OLD anonymous cookie fails here in exactly the right way: once a
+   * conversation has been claimed its rows live under the account's scope, so a
+   * replayed cookie derives a scope the Brain finds nothing in, and the answer
+   * is a 404 that does not distinguish "gone" from "not yours".
+   */
+  const resolved = await resolveRequestPrincipal()
+  if (!resolved) {
+    return Response.json({ error: 'unauthenticated', message: 'Sign in to view this conversation.' }, { status: 401 })
+  }
+
+  const result = await listMessages(id, { principal: resolved.principal })
 
   if (result.kind === 'unauthenticated') {
     return Response.json({ error: 'unauthenticated', message: 'Sign in to view this conversation.' }, { status: 401 })
+  }
+
+  if (result.kind === 'forbidden_for_principal') {
+    return Response.json({ error: 'requires_account', message: result.detail }, { status: 403 })
   }
 
   if (result.kind === 'not_found') {

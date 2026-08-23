@@ -22,6 +22,10 @@ import { cn } from '@/lib/cn'
  * there is no speech pipeline and no image ingest behind them. A control that is enabled
  * and does nothing is the thing being removed here; leaving one in place while fixing its
  * neighbour would defeat the point.
+ *
+ * `disabled` follows the same rule. It is a convenience — the server refuses the turn
+ * either way — but a composer that accepts a paragraph and only then says "you are out of
+ * free messages" has wasted the user's typing to tell them something it already knew.
  */
 
 const toolButton =
@@ -35,6 +39,8 @@ export function Composer({
   defaultValue = '',
   className,
   highlighted,
+  disabled = false,
+  disabledReason,
 }: {
   /** `meta.attachments` names the searchable files this turn attached, if any. */
   onSubmit?: (value: string, meta?: { attachments?: string[] }) => void
@@ -46,6 +52,17 @@ export function Composer({
   className?: string
   /** Renders the resting state already focused, as in the research mockup. */
   highlighted?: boolean
+  /**
+   * The composer may not send.
+   *
+   * A CONVENIENCE, not the enforcement — the server refuses the turn regardless,
+   * which is what actually stops the inference. This exists so a visitor who is
+   * out of free messages sees that immediately instead of typing a paragraph and
+   * being told afterwards.
+   */
+  disabled?: boolean
+  /** Shown in the tooltip. A disabled control with no reason is a dead end. */
+  disabledReason?: string
 }) {
   const [value, setValue] = useState(defaultValue)
   const [focused, setFocused] = useState(false)
@@ -92,6 +109,7 @@ export function Composer({
 
   const submit = (event?: FormEvent) => {
     event?.preventDefault()
+    if (disabled) return
     const trimmed = value.trim()
     if (!trimmed) return
     // Never send while an attachment is still uploading or indexing: the turn would be
@@ -164,7 +182,9 @@ export function Composer({
         rows={variant === 'research' ? 2 : 1}
         value={value}
         autoFocus={autoFocus}
-        placeholder={placeholder}
+        disabled={disabled}
+        placeholder={disabled ? (disabledReason ?? placeholder) : placeholder}
+        title={disabled ? disabledReason : undefined}
         aria-label="Message MigraPilot"
         onFocus={() => setFocused(true)}
         onBlur={() => setFocused(false)}
@@ -173,7 +193,10 @@ export function Composer({
           setValue(event.target.value)
           grow()
         }}
-        className="scroll-slim block max-h-42 w-full resize-none bg-transparent px-1.5 pt-1 text-[15px] leading-relaxed text-slate-800 placeholder:text-slate-400 focus:outline-none"
+        className={cn(
+          'scroll-slim block max-h-42 w-full resize-none bg-transparent px-1.5 pt-1 text-[15px] leading-relaxed text-slate-800 placeholder:text-slate-400 focus:outline-none',
+          disabled && 'cursor-not-allowed',
+        )}
       />
 
       <div className="mt-2.5 flex items-end justify-between gap-3">
@@ -211,8 +234,10 @@ export function Composer({
           ) : (
             <button
               type="button"
+              disabled={disabled}
               onClick={() => fileInputRef.current?.click()}
-              className={toolButton}
+              title={disabled ? disabledReason : undefined}
+              className={cn(toolButton, disabled && 'cursor-not-allowed opacity-40')}
               aria-label="Attach a file"
             >
               <Paperclip className="h-[18px] w-[18px]" strokeWidth={1.9} />
@@ -237,8 +262,10 @@ export function Composer({
             type="submit"
             aria-label="Send message"
             className="inline-flex h-10 w-10 items-center justify-center rounded-field bg-brand-600 text-white shadow-brand transition-all hover:bg-brand-700 active:scale-95 disabled:opacity-40 disabled:shadow-none"
-            disabled={!value.trim() || busy}
-            title={busy ? 'Waiting for your attachment to finish' : undefined}
+            disabled={disabled || !value.trim() || busy}
+            title={
+              disabled ? disabledReason : busy ? 'Waiting for your attachment to finish' : undefined
+            }
           >
             <SendHorizontal className="h-[18px] w-[18px]" strokeWidth={2} />
           </button>

@@ -8,6 +8,8 @@ import { LogoMark } from '@/components/brand/Logo'
 import { Composer, ComposerDisclaimer } from '@/components/chat/Composer'
 import { IconTile } from '@/components/ui/Badge'
 import { useChat } from '@/state/ChatProvider'
+import { AnonymousQuotaNotice } from '@/features/anonymous/AnonymousQuotaNotice'
+import { isExhausted, useAnonymousQuota } from '@/features/anonymous/AnonymousQuotaProvider'
 
 const suggestions = [
   {
@@ -39,6 +41,8 @@ const suggestions = [
 export function WelcomePage() {
   const router = useRouter()
   const { startConversation } = useChat()
+  const allowance = useAnonymousQuota()
+  const outOfTurns = isExhausted(allowance)
   // Arriving from Files means every question in this chat is about those files.
   const fromFiles = useSearchParams().get('grounded') === 'files'
   const [libraryFiles, setLibraryFiles] = useState<string[]>([])
@@ -70,6 +74,9 @@ export function WelcomePage() {
   }, [fromFiles])
 
   const start = (prompt: string, meta?: { attachments?: string[] }) => {
+    // The server refuses this too; stopping here keeps a visitor with no turns
+    // left from watching an optimistic conversation appear and then fail.
+    if (outOfTurns) return
     const attachments = [...new Set([...(meta?.attachments ?? []), ...libraryFiles])]
     router.push(`/chat/${startConversation(prompt, attachments.length > 0 ? { attachments } : undefined)}`)
   }
@@ -93,7 +100,8 @@ export function WelcomePage() {
             <button
               key={title}
               onClick={() => start(prompt)}
-              className="group flex items-center gap-4 rounded-2xl border border-hairline bg-white p-4.5 text-left transition-all duration-150 hover:-translate-y-0.5 hover:border-brand-200 hover:shadow-raised"
+              disabled={outOfTurns}
+              className="group flex items-center gap-4 rounded-2xl border border-hairline bg-white p-4.5 text-left transition-all duration-150 hover:-translate-y-0.5 hover:border-brand-200 hover:shadow-raised disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0 disabled:hover:border-hairline disabled:hover:shadow-none"
             >
               <IconTile tone="blue">
                 <Icon strokeWidth={2} />
@@ -111,7 +119,13 @@ export function WelcomePage() {
       </div>
 
       <div className="mt-auto">
-        <Composer onSubmit={start} autoFocus />
+        <AnonymousQuotaNotice className="mb-3.5" />
+        <Composer
+          onSubmit={start}
+          autoFocus
+          disabled={outOfTurns}
+          disabledReason="You have used all your free messages. Sign in or create an account to keep going."
+        />
         <ComposerDisclaimer className="mt-3.5" />
       </div>
     </Workspace>

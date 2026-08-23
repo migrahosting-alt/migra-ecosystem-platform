@@ -3,6 +3,7 @@ import 'server-only'
 import {
   buildLoginRedirect,
   buildLogoutRedirect,
+  buildSignupRedirect,
   clearAppSession,
   getAppSession,
   handleOAuthCallback,
@@ -29,6 +30,7 @@ import type { AuthPort } from './authPort'
 export const migraAuthPort: AuthPort = {
   getSession: () => getAppSession(),
   buildLoginRedirect: () => buildLoginRedirect(),
+  buildSignupRedirect: () => buildSignupRedirect(),
   buildLogoutRedirect: () => buildLogoutRedirect(),
   handleCallback: async ({ code, state, bootstrap }) => {
     await handleOAuthCallback({ code, state, bootstrap })

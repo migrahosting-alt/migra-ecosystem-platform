@@ -18,6 +18,8 @@ import { IconTile } from '@/components/ui/Badge'
 import { IconButton } from '@/components/ui/Button'
 import { CopyButton } from '@/components/ui/CopyField'
 import { useChat } from '@/state/ChatProvider'
+import { AnonymousQuotaNotice } from '@/features/anonymous/AnonymousQuotaNotice'
+import { isExhausted, useAnonymousQuota } from '@/features/anonymous/AnonymousQuotaProvider'
 import { cn } from '@/lib/cn'
 
 /* ---------------------------------------------------------------- *
@@ -98,6 +100,8 @@ export function ChatPage() {
   const router = useRouter()
   const id = typeof params?.id === 'string' ? params.id : ''
   const { byId, sendMessage, pendingIn, loading, openConversation } = useChat()
+  const allowance = useAnonymousQuota()
+  const outOfTurns = isExhausted(allowance)
   const conversation = byId(id)
   const bottomRef = useRef<HTMLDivElement>(null)
   const messageCount = conversation?.messages.length ?? 0
@@ -203,9 +207,19 @@ export function ChatPage() {
         <div className="sticky bottom-0 mt-7 bg-canvas pb-1">
           {/* fades the thread out as it passes behind the pinned composer */}
           <div className="pointer-events-none -mt-6 h-6 bg-linear-to-b from-transparent to-canvas" />
+          {/*
+            Above the composer, not below the thread: this is the last thing read
+            before typing, which is when the count actually changes a decision.
+          */}
+          <AnonymousQuotaNotice className="mb-3.5" />
           <Composer
             variant={framed ? 'media' : 'default'}
-            onSubmit={(value, meta) => sendMessage(conversation.id, value, meta)}
+            onSubmit={(value, meta) => {
+              if (outOfTurns) return
+              sendMessage(conversation.id, value, meta)
+            }}
+            disabled={outOfTurns}
+            disabledReason="You have used all your free messages. Sign in or create an account to keep going — this conversation comes with you."
           />
           {!framed && <ComposerDisclaimer className="mt-3.5" />}
         </div>

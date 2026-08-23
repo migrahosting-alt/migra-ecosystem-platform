@@ -13,6 +13,22 @@
  * cold model load has exceeded 240 seconds with nothing on screen. Streaming
  * turns that into a `status` frame immediately and tokens as they are produced.
  *
+ * A SIGNED-OUT VISITOR CAN USE THIS. Identity is resolved once, at the top, as
+ * either a verified session or a signed anonymous cookie, and carried through
+ * every Brain call in this request. Resolving per call would mint a new
+ * anonymous identity each time — a new allowance each time.
+ *
+ * THE ALLOWANCE IS TAKEN BEFORE THE MODEL IS ASKED ANYTHING, and settled on what
+ * actually happened:
+ *
+ *   reserve → persist the prompt → stream the answer → consume, or release
+ *
+ * Exhaustion stops the turn here, before inference. Infrastructure failing
+ * before any token reached the user returns the turn. An answer that arrived and
+ * then failed to persist does NOT: the user got something real, and refunding it
+ * because our storage blinked would make the limit meaningless in exactly the
+ * cases people would learn to reproduce.
+ *
  * PERSISTENCE RULE, and the whole reason this route is careful: the answer is
  * stored ONLY when the stream completes. A partial, interrupted or cancelled
  * stream persists nothing, exactly as the Brain does for its own memory —
@@ -20,8 +36,6 @@
  * claims the model said something it never finished saying.
  */
 
-import { requireSession } from '@/server/auth'
-import { UnauthenticatedError } from '@/server/auth/authPort'
 import {
   appendMessage,
   chatTurnStream,
@@ -31,6 +45,9 @@ import {
 } from '@/server/brain/seams'
 import { listFiles } from '@/server/files/storage'
 import { reconcileGrounding } from '@/server/files/grounding'
+import { resolveRequestPrincipal } from '@/server/tenancy/requestPrincipal'
+import { reserveTurnFor, settleTurnFor } from '@/server/anonymous/turnQuota'
+import type { Principal } from '@/server/tenancy/principal'
 import type { BrainStreamFrame } from '@/server/brain/gateway'
 import type { ConversationSummary } from '@/server/brain/contracts'
 
@@ -178,6 +195,11 @@ function reasonFor(kind: string): { error: string; message: string } {
   switch (kind) {
     case 'unauthenticated':
       return { error: 'unauthenticated', message: 'Sign in to send a message.' }
+    case 'forbidden_for_principal':
+      return {
+        error: 'requires_account',
+        message: 'That needs an account. Sign in to continue this conversation.',
+      }
     case 'tenancy_unresolved':
       return {
         error: 'tenancy_unresolved',
@@ -198,12 +220,22 @@ function reasonFor(kind: string): { error: string; message: string } {
 }
 
 export async function POST(request: Request): Promise<Response> {
-  try {
-    await requireSession()
-  } catch (error) {
-    if (error instanceof UnauthenticatedError) return json(401, 'unauthenticated', 'Sign in to send a message.')
-    throw error
+  /*
+   * ONE principal for the whole request.
+   *
+   * Every Brain call below is made as this principal. Resolving it per call
+   * would give a cookie-less visitor a different anonymous identity for the
+   * conversation, the prompt, the turn and the answer — four allowances, and a
+   * conversation nobody can read back.
+   */
+  const resolved = await resolveRequestPrincipal()
+  if (!resolved) return json(401, 'unauthenticated', 'Sign in to send a message.')
+  if (!resolved.identityPersisted) {
+    // A minted identity that could not be written would be replaced on the next
+    // request, which is a fresh allowance every time. Refuse rather than serve.
+    return json(503, 'session_unavailable', 'A session could not be started. Try again shortly.')
   }
+  const principal: Principal = resolved.principal
 
   let body: unknown
   try {
@@ -217,25 +249,65 @@ export async function POST(request: Request): Promise<Response> {
     return json(400, 'invalid_prompt', 'A non-empty prompt is required.')
   }
 
-  // Persistence before generation, identical to the buffered route: the user's
-  // own message is durable even if the model never answers.
   const requested = (body as { conversationId?: unknown })?.conversationId
   let conversationId = typeof requested === 'string' && requested.trim() ? requested.trim() : undefined
 
+  /*
+   * THE ALLOWANCE, BEFORE ANYTHING IS SPENT.
+   *
+   * Ahead of creating a conversation, ahead of storing the prompt, and far
+   * ahead of the model. A visitor who is out of turns must cost nothing: no
+   * row, no inference, no partial thread that implies an answer is coming.
+   */
+  const allowance = await reserveTurnFor(principal, conversationId)
+  if (allowance.kind === 'exhausted') {
+    return Response.json(
+      {
+        error: 'quota_exhausted',
+        message:
+          'You have used all your free messages. Sign in or create an account to keep going — this conversation comes with you.',
+        quota: allowance.quota,
+      },
+      { status: 429 },
+    )
+  }
+  if (allowance.kind === 'unavailable') {
+    return json(allowance.status, allowance.error, allowance.message)
+  }
+  const reservationId = allowance.kind === 'reserved' ? allowance.reservationId : null
+
+  /**
+   * Give the turn back. Used for every failure BEFORE useful output.
+   *
+   * Idempotent at the Brain, so a path that releases and then falls through to
+   * another release charges nothing twice.
+   */
+  const release = async (reason: string): Promise<void> => {
+    if (!reservationId) return
+    await settleTurnFor(principal, { reservationId, producedOutput: false, failure: reason })
+  }
+
+  // Persistence before generation, identical to the buffered route: the user's
+  // own message is durable even if the model never answers.
   if (!conversationId) {
-    const created = await createConversation(titleFrom(prompt))
+    const created = await createConversation(titleFrom(prompt), { principal })
     if (created.kind !== 'ok') {
+      await release('persistence_unavailable')
       const outage = persistenceOutage(created)
       if (outage) return json(503, outage.error, outage.message)
       const reason = reasonFor(created.kind)
       return json(created.kind === 'unauthenticated' ? 401 : 502, reason.error, reason.message)
     }
     conversationId = (created.value as ConversationSummary)?.id
-    if (!conversationId) return json(502, 'brain_error', 'The assistant service did not return a conversation.')
+    if (!conversationId) {
+      await release('persistence_unavailable')
+      return json(502, 'brain_error', 'The assistant service did not return a conversation.')
+    }
   }
 
-  const storedPrompt = await appendMessage(conversationId, 'user', prompt)
+  const storedPrompt = await appendMessage(conversationId, 'user', prompt, { principal })
   if (storedPrompt.kind !== 'ok') {
+    await release('persistence_unavailable')
     // FAIL CLOSED, AND SAY WHY. The prompt is stored before the model runs, so a
     // storage outage stops the turn here — correctly, since answering a turn whose
     // prompt was never stored leaves a conversation that cannot be reconstructed.
@@ -275,15 +347,29 @@ export async function POST(request: Request): Promise<Response> {
    * back from the Brain on every turn. A reload cannot change the answer because
    * nothing about grounding lives in the tab.
    */
-  const attachedNow = Array.isArray((body as { attachments?: unknown })?.attachments)
-    ? ((body as { attachments: unknown[] }).attachments.filter(
-        // A `typeof` check alone let [''] through, and an empty filename would have
-        // grounded the turn on nothing — grounded:true with no document behind it.
-        (f): f is string => typeof f === 'string' && f.trim().length > 0,
-      ) as string[])
-    : []
+  /*
+   * A SIGNED-OUT VISITOR HAS NO LIBRARY, so there is nothing to ground on.
+   *
+   * Files, indexes and uploads are authenticated-only — the gateway refuses them
+   * for an anonymous principal, and `listFiles` has no directory to read without
+   * a session. Skipping the whole reconciliation is therefore the honest path:
+   * running it would produce an empty set through three failed calls and could
+   * only ever arrive at the same `none`.
+   */
+  const canGround = principal.kind === 'session'
 
-  const existing = await getConversation(conversationId)
+  const attachedNow =
+    canGround && Array.isArray((body as { attachments?: unknown })?.attachments)
+      ? ((body as { attachments: unknown[] }).attachments.filter(
+          // A `typeof` check alone let [''] through, and an empty filename would have
+          // grounded the turn on nothing — grounded:true with no document behind it.
+          (f): f is string => typeof f === 'string' && f.trim().length > 0,
+        ) as string[])
+      : []
+
+  const existing = canGround
+    ? await getConversation(conversationId, { principal })
+    : ({ kind: 'not_found' } as const)
   const storedGrounding =
     existing.kind === 'ok' ? ((existing.value as ConversationSummary)?.groundingFiles ?? []) : []
 
@@ -298,7 +384,9 @@ export async function POST(request: Request): Promise<Response> {
    * that no longer exists. Durable state that is never checked is a stale claim with a
    * database behind it.
    */
-  const reconciled = await reconcileGrounding(requestedGrounding)
+  const reconciled = canGround
+    ? await reconcileGrounding(requestedGrounding)
+    : { grounded: false, available: [] as string[], missing: [] as string[], unreadable: [] as string[], libraryUnreadable: false }
 
   // A file that is GONE leaves the set permanently, and the correction is written back
   // so the drift does not outlive the turn. A merely unsearchable index changes nothing
@@ -309,10 +397,10 @@ export async function POST(request: Request): Promise<Response> {
   const shouldPersist =
     !reconciled.libraryUnreadable &&
     (reconciled.missing.length > 0 || requestedGrounding.length !== storedGrounding.length)
-  if (shouldPersist) {
+  if (canGround && shouldPersist) {
     // Persist BEFORE answering: if the write fails the turn must not claim a grounding
     // the next turn will not have.
-    await setConversationGrounding(conversationId, reconciled.available)
+    await setConversationGrounding(conversationId, reconciled.available, { principal })
   }
 
   const grounded = reconciled.grounded
@@ -327,6 +415,26 @@ export async function POST(request: Request): Promise<Response> {
       let answer = ''
       let completed = false
       let closed = false
+
+      /**
+       * Close the reservation on what ACTUALLY happened, and report the result.
+       *
+       * `producedOutput` is the pivot, not the HTTP status: tokens that reached
+       * the user are output even if persistence then failed, and a stream that
+       * ended cleanly having said nothing is not.
+       */
+      const settle = async (
+        producedOutput: boolean,
+        failure?: string,
+      ): Promise<import('@migrapilot/shared-types/anonymous-quota').AnonymousChatQuota | null> => {
+        if (!reservationId) return null
+        const settlement = await settleTurnFor(principal, {
+          reservationId,
+          producedOutput,
+          ...(failure ? { failure } : {}),
+        })
+        return settlement.quota
+      }
 
       const emit = (event: string, data: unknown) => {
         if (closed) return
@@ -353,7 +461,17 @@ export async function POST(request: Request): Promise<Response> {
        * Opening the upstream stream therefore happens INSIDE the body, after
        * this frame is on the wire.
        */
-      emit('meta', { conversationId: durableId })
+      emit('meta', {
+        conversationId: durableId,
+        /*
+         * The allowance AFTER this turn was reserved, from the ledger.
+         *
+         * This is what the composer renders. It is a server fact, read at the
+         * moment the reservation was taken, so a second tab cannot show a
+         * number this one already spent — which a browser-side counter would.
+         */
+        ...(allowance.kind === 'reserved' ? { quota: allowance.quota } : {}),
+      })
 
       const opened = await chatTurnStream(
         prompt,
@@ -365,11 +483,14 @@ export async function POST(request: Request): Promise<Response> {
           ...(grounded ? { groundingFiles: reconciled.available } : {}),
         },
         // The browser going away must stop the model, not just this handler.
-        { signal: request.signal },
+        { signal: request.signal, principal },
       )
 
       if (opened.kind !== 'ok') {
+        // Nothing reached the user, and the cause is ours — the turn returns.
+        const settlement = await settle(false, 'brain_unreachable')
         emit('error', refusalOr(opened, reconciled.unreadable, reconciled.available))
+        if (settlement) emit('quota', settlement)
         closed = true
         try {
           controller.close()
@@ -437,10 +558,25 @@ export async function POST(request: Request): Promise<Response> {
       // Attribution, verified against the library rather than trusted.
       const sources = grounded && completed ? await citedFiles(answer) : []
 
-      if (completed && answer.trim()) {
-        const stored = await appendMessage(durableId, 'assistant', answer)
+      /*
+       * USEFUL OUTPUT IS TEXT THE USER RECEIVED, not a successful save.
+       *
+       * A completed answer that storage then refused was still generated,
+       * streamed and read. Refunding it would make the limit meaningless in
+       * precisely the situation people would learn to reproduce, and it would
+       * charge us for inference twice.
+       */
+      const producedOutput = completed && answer.trim().length > 0
+
+      if (producedOutput) {
+        const stored = await appendMessage(durableId, 'assistant', answer, { principal })
+        const quota = await settle(true)
         if (stored.kind === 'ok') {
-          emit('done', { conversationId: durableId, ...(sources.length ? { sources } : {}) })
+          emit('done', {
+            conversationId: durableId,
+            ...(sources.length ? { sources } : {}),
+            ...(quota ? { quota } : {}),
+          })
         } else {
           // The user watched a complete answer arrive that will not survive a
           // reload. Saying so is the only honest option.
@@ -448,14 +584,20 @@ export async function POST(request: Request): Promise<Response> {
             error: 'not_saved',
             message: 'The answer arrived but could not be saved, so it will not be here after a reload.',
           })
+          if (quota) emit('quota', quota)
         }
-      } else if (!closed) {
-        emit('error', {
-          error: 'stream_interrupted',
-          message: answer
-            ? 'The answer was cut off before it finished, so it was not saved.'
-            : 'The model did not produce an answer.',
-        })
+      } else {
+        // Nothing useful reached the user. The turn goes back.
+        const quota = await settle(false, answer ? 'cancelled' : 'no_output')
+        if (!closed) {
+          emit('error', {
+            error: 'stream_interrupted',
+            message: answer
+              ? 'The answer was cut off before it finished, so it was not saved.'
+              : 'The model did not produce an answer.',
+          })
+          if (quota) emit('quota', quota)
+        }
       }
 
       closed = true
@@ -474,6 +616,15 @@ export async function POST(request: Request): Promise<Response> {
       // `frames` is still null when the client leaves before the Brain stream
       // opened, which is now a real window: `meta` goes out first, on purpose.
       await frames?.return(undefined).catch(() => undefined)
+      /*
+       * The reservation is deliberately NOT released here.
+       *
+       * `start` is still running and owns the settlement; releasing from both
+       * would be a double settle, and — worse — a visitor who closes the tab
+       * the instant an answer appears would have received output and paid
+       * nothing. The hold expires on its own if `start` never finishes, which is
+       * the case this path actually needs to cover.
+       */
     },
   })
 
