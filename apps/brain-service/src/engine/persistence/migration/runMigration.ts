@@ -22,7 +22,7 @@
  * running Brain, and reading it mid-write imports a torn state.
  */
 
-import { writeFile } from 'node:fs/promises';
+import { chmod, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { once } from 'node:events';
 import { PostgresConnection } from '../postgres/pool.js';
 import { PostgresDurableStore } from '../postgresStore.js';
@@ -124,13 +124,32 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     out(`  live source: ${live}`);
     out(`  sha256 before: ${before}`);
 
+    /*
+     * Write to a temp path, then rename.
+     *
+     * `VACUUM INTO` refuses an existing destination, so a re-run needs the path
+     * to be clear — but deleting the destination first means a failure partway
+     * through leaves NO snapshot, having destroyed the previous one. The real
+     * path only ever holds a complete file, and the step stays repeatable.
+     */
+    const tmp = `${dest}.partial`;
+    await rm(tmp, { force: true });
+
     const { DatabaseSync } = await import('node:sqlite');
     const db = new DatabaseSync(live, { readOnly: true });
     try {
-      db.exec(`VACUUM INTO '${dest.replace(/'/g, "''")}'`);
+      db.exec(`VACUUM INTO '${tmp.replace(/'/g, "''")}'`);
     } finally {
       db.close();
     }
+
+    /*
+     * VACUUM INTO inherits the process umask, which produced a world-readable
+     * 0644 file holding real user conversations. The mode is set here rather
+     * than left to whoever launched the process.
+     */
+    await chmod(tmp, 0o600);
+    await rename(tmp, dest);
 
     const after = await checksum(live);
     out(`  sha256 after:  ${after}`);
@@ -141,7 +160,9 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
       return 4;
     }
     out('  live database unchanged — the snapshot did not touch it');
+    const mode = (await stat(dest)).mode & 0o777;
     out(`  snapshot:      ${dest}`);
+    out(`  mode:          ${mode.toString(8).padStart(4, '0')}${mode === 0o600 ? '' : '  ← EXPECTED 0600'}`);
     out(`  fingerprint:   ${await LegacySource.fingerprint(dest)}`);
     return 0;
   }
