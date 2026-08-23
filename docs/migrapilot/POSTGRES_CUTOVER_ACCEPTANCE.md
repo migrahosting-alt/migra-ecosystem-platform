@@ -138,6 +138,46 @@ identical message counts, and identical grounding sets. "Roughly the same" is a 
 Migration runs **per scope** under `withScope` — never by disabling RLS for a bulk import.
 It must be idempotent: a second run duplicates nothing, keyed on the source's canonical ids.
 
+### Gate 4 status — 2026-08-23
+
+Utility built and proven against a real PostgreSQL and a real SQLite source:
+`apps/brain-service/src/engine/persistence/migration/`, 17 integration cases,
+full suite 1643/1643. Design and findings: `LEGACY_MIGRATION.md`.
+
+| step | state |
+|---|---|
+| read-only extraction + consistent `VACUUM INTO` snapshot | **done** — source sha256 unchanged by the copy |
+| historical chunk-integrity audit on REAL production data | **done** — see below |
+| resumable/idempotent import with source-fingerprint pinning | **done**, covered by crash-and-resume and double-import cases |
+| exact reconciliation, proven to fail on a tampered target | **done** |
+| import rehearsal into an isolated target | **BLOCKED** — needs `migrapilot_brain_rehearsal` on db-core (`provision-rehearsal-postgres.sh`) |
+| candidate Brain booted against the migrated database | pending the rehearsal |
+
+**Two defects found before production was touched**, both in code already
+deployed to the candidate:
+
+1. Chunk identity omitted `index_version`, so committing a new version rewrote
+   the previous version's chunk instead of adding one. Production holds exactly
+   that shape (chunks at v28 **and** v29; v2 **and** v3), so an import under the
+   old key would have destroyed version history at the moment of migration.
+   Fixed by migration 13.
+2. An empty grounding set was stored as NULL, and `saveConversation` always wrote
+   `deleted_at` as NULL — so importing a soft-deleted conversation would have
+   resurrected it in front of the user who deleted it.
+
+**Historical collision question — answered.** The legacy row key was
+`${indexId}:v${version}:${path}#${line}`, already index- and version-qualified,
+so the legacy SQLite state lost nothing. The cross-tenant collision migration 11
+fixed lived in the first PostgreSQL port. Not academic: three indexes hold
+logical keys another index also holds (5, 6 and 1), so 12 chunks would have
+collided on import under the pre-migration-11 key.
+
+**Three of four indexes cannot be source-verified** — their upload directories
+were deleted. Recorded as `historical_integrity_unverified`, migrated as-is, and
+NOT reported as parity. The fourth is rooted at the release symlink, so its
+verdict compares against today's tree rather than the one that was indexed; the
+report prints that caveat rather than letting it read as proof.
+
 ## Gate 5 — canary before production
 
 The canary moves to its own Postgres database first, then the destructive matrix re-runs against
