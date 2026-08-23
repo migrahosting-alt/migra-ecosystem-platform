@@ -48,11 +48,34 @@ export class PostgresConnection {
   private detail: string | undefined;
 
   constructor(private readonly options: PostgresConnectionOptions) {
+    /*
+     * `statement_timeout` travels in the STARTUP PACKET, not in a query.
+     *
+     * It used to be applied from a `pool.on('connect')` handler with a
+     * fire-and-forget `void client.query(...)`. pg emits `connect` and then
+     * immediately hands the client to whoever was waiting, so the caller's first
+     * query overlapped the SET:
+     *
+     *   DeprecationWarning: Calling client.query() when the client is already
+     *   executing a query ... will be removed in pg@9.0
+     *
+     * Measured before changing it: the timeout was NOT being lost — pg queues
+     * per-client queries, so the SET ran first and `SHOW statement_timeout`
+     * returned the configured value on the very first statement. So this was a
+     * forward-compatibility problem, not a correctness one.
+     *
+     * Fixed anyway, because in pg@9 it becomes an error, and "a client is handed
+     * out while a query is still in flight" is the kind of thing that stops
+     * being benign under load. The server now applies the setting before the
+     * connection is usable, so there is nothing to race.
+     */
+    const statementTimeout = Number(options.statementTimeoutMillis ?? 30_000);
     const config: PoolConfig = {
       connectionString: options.databaseUrl,
       connectionTimeoutMillis: options.connectionTimeoutMillis ?? 10_000,
       max: options.max ?? 10,
       application_name: options.applicationName ?? 'migrapilot-brain',
+      options: `-c statement_timeout=${statementTimeout}`,
     };
     this.pool = new Pool(config);
 
@@ -63,10 +86,6 @@ export class PostgresConnection {
       this.detail = error.message;
     });
 
-    const statementTimeout = options.statementTimeoutMillis ?? 30_000;
-    this.pool.on('connect', (client) => {
-      void client.query(`SET statement_timeout = ${Number(statementTimeout)}`).catch(() => undefined);
-    });
   }
 
   /** Redacted connection target, safe for logs and /health. */
