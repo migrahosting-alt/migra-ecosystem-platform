@@ -61,6 +61,9 @@ import { WorkspaceManager } from './engine/workspaceManager.js';
 import { registerWorkspaceRoutes } from './engine/workspaceRoutes.js';
 import { gitInfo } from './engine/gitInfo.js';
 import { registerMemoryRoutes } from './engine/memory/memoryRoutes.js';
+import { randomUUID } from 'node:crypto';
+import { registerAnonymousQuotaRoutes } from './engine/anonymousQuotaRoutes.js';
+import { anonymousLimitsFromEnv } from './engine/anonymousQuotaDeps.js';
 import { installJsonBodyParser } from './http/jsonBodyParser.js';
 import { ConversationStore } from './engine/memory/conversationStore.js';
 import { QualificationStore } from './engine/qualificationStore.js';
@@ -334,6 +337,26 @@ async function main(): Promise<void> {
    * reads. Nothing is loaded for tenants who never connect.
    */
   registerMemoryRoutes(app, memoryStore);
+
+  /*
+   * Anonymous chat allowance.
+   *
+   * The ledger is PostgreSQL-only by construction — it is migration 14, and the
+   * SQLite adapter has no such table. The seam narrows to the PostgreSQL store
+   * and yields `undefined` otherwise, which the routes already report as
+   * persistence unavailable rather than inventing an allowance.
+   *
+   * `store` is a function so a database that comes back after a degraded boot is
+   * picked up on the next request instead of at the next restart.
+   */
+  const anonLimits = anonymousLimitsFromEnv(process.env);
+  registerAnonymousQuotaRoutes(app, {
+    store: () => (durable instanceof PostgresDurableStore ? durable : undefined),
+    turnLimit: () => anonLimits.turnLimit,
+    holdMs: () => anonLimits.holdMs,
+    now: () => Date.now(),
+    newId: () => `anonres_${randomUUID()}`,
+  });
   // Model qualification manifest (installing a model does not approve it). The
   // router serves only `approved` models when the manifest is `enforced`.
   const qualStore = QualificationStore.fromFile(
