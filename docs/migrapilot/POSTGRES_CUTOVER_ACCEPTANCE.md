@@ -187,6 +187,47 @@ is a fact about the data and the other is a fact about who ran the audit.
 against today's tree rather than the one that was indexed; the report prints that
 caveat rather than letting it read as proof.
 
+### Gate 6 status — PRODUCTION CUTOVER COMPLETE, 2026-08-23
+
+Production Brain runs release `28e220c` on PostgreSQL (`migrapilot_brain`,
+schema 13). SQLite is no longer opened.
+
+| step | result |
+|---|---|
+| 1 · target cleaned | `0 0 0 0`, every other table empty too |
+| 2 · quiesce | `15:10:19Z` |
+| 3 · final snapshot | fingerprint `c8635c38…` — **identical** to the rehearsal snapshot, so nothing was written in between |
+| 4 · import | 115 conversations · 270 messages · 4 indexes · 6 versions · 10 127 chunks · 6 scopes |
+| 5 · exact reconciliation | **EXACT**, zero mismatches |
+| 6–7 · switch + start | `28e220c`, `MIGRAPILOT_PERSISTENCE=postgres`, window closed `15:11:11Z` (**52s**) |
+| 8 · health gate | `ok / ready / current / schema 13 / no detail`, fresh PID, no process reuse |
+| 9 · live verification | **14/14** |
+| 10–11 · restart + cold verification | **13/13** |
+
+Counts land where predicted: **115 conversations, 4 indexes** — the API used to
+say 116/5. Both differences were explained in advance and both are now closed:
+the extra conversation was `memoryMode: session` (never persisted by design) and
+the extra index was the legacy cross-owner read leak, which RLS structurally
+prevents. The verification asserts the leak is gone rather than taking it on
+trust.
+
+Verified live: existing history present per scope, old conversations open with
+their migrated messages, 14 grounding sets intact, approved index still at
+version 29, grounded retrieval citing `handbook-neutral.txt`, tenant isolation
+holding by id and by retrieval, a new turn acknowledged durable and surviving a
+restart, and a delete staying deleted.
+
+**One aborted attempt first.** The staged override set
+`MIGRAPILOT_PERSISTENCE=postgres` together with `MIGRAPILOT_STATE_DB=off`. The
+`off` branch runs first, so the Brain came up with persistence `off` and
+`status: ok` — healthy-looking and refusing every durable write. Caught by the
+health gate before any functional claim, rolled back to `fea97a1` on SQLite in
+72 seconds with no data affected, and the contradiction is now a startup error
+(`28e220c`) rather than a silent downgrade.
+
+The legacy SQLite file is retained as rollback evidence, untouched since the
+clean-shutdown checkpoint at `14:41:30Z`.
+
 ## Gate 5 — canary before production
 
 The canary moves to its own Postgres database first, then the destructive matrix re-runs against
