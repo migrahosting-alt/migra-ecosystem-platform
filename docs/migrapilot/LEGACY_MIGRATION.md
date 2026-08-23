@@ -98,6 +98,77 @@ user who deleted it — worse than losing one. The insert now carries the
 timestamp; the conflict path uses `COALESCE(existing, incoming)` so a re-save
 still can never un-delete.
 
+## The rehearsal — staged on VM111, waiting on one provisioning step
+
+Everything below `2.` is installed and, where it needs no database, already
+proven. The units live at `/etc/systemd/system/migrapilot-rehearsal-*.service`
+and the tool at `/opt/migrapilot/migration-tool`.
+
+| # | step | state |
+|---|---|---|
+| 1 | provision `migrapilot_brain_rehearsal` on db-core | **owner action** — `provision-rehearsal-postgres.sh` |
+| 2 | pipe the DSN into `/etc/migrapilot/brain-rehearsal.env`, **root:root 0600** | **owner action** |
+| 3 | probe VM111 → rehearsal PostgreSQL | staged: `systemctl start migrapilot-rehearsal-probe` |
+| 4 | *only if rejected*, add the two narrow pg_hba rules and reload | conditional |
+| 5 | real legacy import into the rehearsal database | staged: `…-import` |
+| 6 | exact reconciliation | runs inside `…-import`; `…-verify` re-runs it read-only |
+| 7 | historical chunk audit report | emitted by both, plus `--audit-only` |
+| 8 | boot the candidate Brain against the rehearsal database | after 5–7 |
+| 9 | exercise old conversations + grounding | after 8 |
+| 10 | restart the candidate | after 9 |
+| 11 | repeat reads/retrieval | after 10 |
+
+### Why systemd units rather than a shell command
+
+The DSN lives in a root-owned `0600` EnvironmentFile. Sourcing it into a shell
+would mean making it readable to a non-root user — the exact thing those
+permissions exist to prevent. systemd reads it as root and hands it to the
+process; it never passes through a terminal, a shell history, or this repo.
+`--database-url` is deliberately **not** passed on the command line either,
+because `ps` shows command lines to every user on the box.
+
+Each operation is its own unit rather than one unit with variable arguments, so
+what ran is a matter of record instead of a matter of what was typed.
+
+### Connectivity is probed BEFORE pg_hba is touched
+
+The Brain's own database already authenticates from VM111, so the existing rules
+may already cover the rehearsal database. Editing production authentication to
+fix a problem that may not exist is the wrong order. `--probe` reports database,
+role, TLS and server version — and nothing else.
+
+### Nothing printed can carry a password
+
+Connection failures are exactly where a driver echoes what it tried to connect
+to, and these units log to a file read afterwards. Every line out of the CLI,
+including the top-level stack trace, is redacted first — otherwise the log would
+undo the file permissions. Five cases cover it.
+
+### Snapshot — run, and proven
+
+`migrapilot-rehearsal-snapshot` needs no database, so it has already run:
+
+```
+live source: /var/lib/migrapilot/brain-state.db
+sha256 before: e6cdfd30…    sha256 after: e6cdfd30…
+live database unchanged — the snapshot did not touch it
+snapshot:    /var/lib/migrapilot/migration/legacy-copy.db   mode 0600  root:root
+fingerprint: c8635c381a12ca3781349d693242c990344caf6ceaa498a23c9dee4fdc09e51d
+```
+
+Two defects surfaced by running it rather than reading it:
+
+- `VACUUM INTO` inherits the umask, so the first snapshot was **0644** — 82MB of
+  real user conversations readable by every local account. The tool sets `0600`
+  itself and prints the resulting mode.
+- `VACUUM INTO` refuses an existing destination, so the unit failed on its second
+  run. It now writes `<dest>.partial` and renames, so the real path only ever
+  holds a complete snapshot and the step is repeatable. Deleting the destination
+  first would have been worse: a mid-run failure would leave nothing at all.
+
+The fingerprint is identical across runs, which is also what makes a resume safe
+— the run is pinned to it.
+
 ## Historical chunk-integrity audit — real production data, 2026-08-23
 
 Source: `legacy-copy.db`, a `VACUUM INTO` snapshot of the live state.
