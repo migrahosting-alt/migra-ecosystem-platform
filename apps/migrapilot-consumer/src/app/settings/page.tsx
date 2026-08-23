@@ -1,29 +1,31 @@
 import type { Metadata } from 'next'
 import { getSession, toPublicSession } from '@/server/auth'
-import { codingCapability } from '@/server/brain/seams'
-import { governedCodingView } from '@/server/brain/view'
 import { SettingsPage } from '@/screens/SettingsPage'
 
 export const metadata: Metadata = { title: 'Settings' }
 
 /**
- * Session- and Brain-dependent, so it must never be prerendered — the same rule the
- * root layout documents. A cached Settings page would show one user's identity and a
- * stale capability state to everyone.
+ * Session-dependent, so it must never be prerendered — the same rule the root
+ * layout documents. A cached Settings page would show one person's account to
+ * everyone.
  */
 export const dynamic = 'force-dynamic'
 
 /**
- * The first screen wired to the Brain.
+ * The account hub.
  *
- * Both facts on this page are resolved on the SERVER and handed down: identity from
- * the real session, governed-coding readiness from the real capability endpoint. The
- * browser never talks to the Brain, and the screen receives no tokens — only the
- * narrow public shapes it is allowed to render.
+ * ONLY THE SESSION IS RESOLVED HERE. Everything else the hub shows — account
+ * details, linked providers, sessions, preferences — is read by the client from
+ * this app's own routes, because all of it is mutable from the page itself. A
+ * server-rendered copy would be stale the moment someone revoked a session or
+ * changed a setting, and the page would then have two disagreeing sources.
+ *
+ * The governed-coding capability card that used to live here is GONE. Run
+ * telemetry belongs to the Command Center, not to a consumer account screen —
+ * and it was the only card here that described the engine rather than the
+ * person's account.
  */
 export default async function Settings() {
   const session = await getSession()
-  const capability = governedCodingView(await codingCapability())
-
-  return <SettingsPage session={session ? toPublicSession(session) : null} capability={capability} />
+  return <SettingsPage session={session ? toPublicSession(session) : null} />
 }
