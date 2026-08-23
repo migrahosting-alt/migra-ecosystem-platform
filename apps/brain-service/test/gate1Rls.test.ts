@@ -308,3 +308,70 @@ test('1.8d commitSync under a WRONG workspace is rejected', { skip: skip ?? fals
     'same owner, different workspace, still refused',
   );
 });
+
+/* ── migration 11: chunk identity is scoped, not global ──────────────────── */
+
+const chunkNamed = (key: string, indexId: string, scope: { owner: string; workspace: string }, text: string) => ({
+  id: key, // the LOGICAL key: `${relPath}#${startLine}`
+  indexId,
+  workspaceId: scope.workspace,
+  filePath: key.split('#')[0],
+  language: 'markdown',
+  startLine: Number(key.split('#')[1] ?? 1),
+  endLine: 3,
+  contentHash: `hash-${indexId}-${key}`,
+  embeddingModel: 'fake',
+  embeddingVersion: 'v1',
+  indexedAt: 1,
+  text,
+  vector: [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8],
+});
+
+test('11.1 the SAME chunk key coexists across two owners', { skip: skip ?? false }, async () => {
+  // `README.md#1` is not exotic — it would collide across essentially every
+  // workspace. Before migration 11 the second write hit ON CONFLICT and RLS
+  // refused it against the first tenant's row; without RLS it would have
+  // OVERWRITTEN that tenant's content.
+  await store.saveIndex(indexRecord('idx-collide-a', A) as never);
+  await store.saveIndex(indexRecord('idx-collide-b', B) as never);
+
+  await store.commitSync('idx-collide-a', 1, [chunkNamed('README.md#1', 'idx-collide-a', A, 'ALPHA CONTENT') as never], ['README.md'], [], 2, A);
+  await store.commitSync('idx-collide-b', 1, [chunkNamed('README.md#1', 'idx-collide-b', B, 'BETA CONTENT') as never], ['README.md'], [], 2, B);
+
+  const a = await store.loadChunksForScope(A, 'idx-collide-a', 1);
+  const b = await store.loadChunksForScope(B, 'idx-collide-b', 1);
+
+  assert.equal(a.length, 1, 'alpha keeps its chunk');
+  assert.equal(b.length, 1, 'beta keeps its chunk');
+  assert.equal(a[0]!.text, 'ALPHA CONTENT', 'alpha reads ALPHA content');
+  assert.equal(b[0]!.text, 'BETA CONTENT', 'beta reads BETA content — not overwritten by alpha');
+  assert.equal(a[0]!.id, 'README.md#1', 'the LOGICAL key is what retrieval sees, not a row id');
+  assert.equal(b[0]!.id, 'README.md#1');
+});
+
+test('11.2 the same chunk key coexists across two indexes in ONE scope', { skip: skip ?? false }, async () => {
+  // Tenant isolation alone does not solve index-to-index collision: both of
+  // these belong to the same owner and workspace.
+  await store.saveIndex(indexRecord('idx-same-scope-1', A) as never);
+  await store.saveIndex(indexRecord('idx-same-scope-2', A) as never);
+
+  await store.commitSync('idx-same-scope-1', 1, [chunkNamed('README.md#1', 'idx-same-scope-1', A, 'FROM INDEX ONE') as never], ['README.md'], [], 2, A);
+  await store.commitSync('idx-same-scope-2', 1, [chunkNamed('README.md#1', 'idx-same-scope-2', A, 'FROM INDEX TWO') as never], ['README.md'], [], 2, A);
+
+  const one = await store.loadChunksForScope(A, 'idx-same-scope-1', 1);
+  const two = await store.loadChunksForScope(A, 'idx-same-scope-2', 1);
+  assert.equal(one[0]!.text, 'FROM INDEX ONE');
+  assert.equal(two[0]!.text, 'FROM INDEX TWO', 'the second index did not overwrite the first');
+});
+
+test('11.3 re-syncing the SAME chunk updates in place rather than duplicating', { skip: skip ?? false }, async () => {
+  // row_id is derived from the canonical tuple, so an unchanged chunk resolves
+  // to the same row and ON CONFLICT updates it.
+  await store.saveIndex(indexRecord('idx-resync', A) as never);
+  await store.commitSync('idx-resync', 1, [chunkNamed('notes.md#1', 'idx-resync', A, 'FIRST') as never], ['notes.md'], [], 2, A);
+  await store.commitSync('idx-resync', 1, [chunkNamed('notes.md#1', 'idx-resync', A, 'SECOND') as never], ['notes.md'], [], 3, A);
+
+  const chunks = await store.loadChunksForScope(A, 'idx-resync', 1);
+  assert.equal(chunks.length, 1, 're-sync must not duplicate the row');
+  assert.equal(chunks[0]!.text, 'SECOND', 'and must update it');
+});

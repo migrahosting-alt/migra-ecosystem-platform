@@ -535,6 +535,82 @@ ALTER TABLE index_chunks
 ALTER TABLE index_chunks VALIDATE CONSTRAINT index_chunks_parent_fk;
 `;
 
+
+/**
+ * SCOPED CHUNK IDENTITY.
+ *
+ * `index_chunks.id` was `${relPath}#${startLine}` — `handbook.md#1` — while the
+ * column was a GLOBAL primary key. Any two indexes holding a file at the same
+ * relative path with a chunk at the same start line collided. `README.md#1`
+ * would collide across essentially every workspace in the system.
+ *
+ * Found by the candidate gate: a second tenant indexing the same document hit
+ * ON CONFLICT, whose update path evaluated row-level security against the FIRST
+ * tenant's row, and PostgreSQL refused with "new row violates row-level security
+ * policy (USING expression)".
+ *
+ * RLS is what turned a silent cross-tenant overwrite into a loud failure. Under
+ * SQLite — same ids, no RLS — the second write would simply have REPLACED the
+ * first tenant's chunk. That is why the migration utility audits existing rows
+ * rather than assuming the current table is intact.
+ *
+ * TWO IDENTITIES, deliberately separated:
+ *
+ *   row_id     globally unique persistence identity, derived from the whole
+ *              canonical tuple. An implementation detail.
+ *   chunk_key  `${relPath}#${startLine}` — the chunk's stable identity INSIDE
+ *              its index. What retrieval uses.
+ *
+ * The composite UNIQUE is what actually documents the domain invariant, and it
+ * is what ON CONFLICT now targets — so one tenant can never select another's
+ * row as its conflict target. Prefixing the id with indexId alone would have
+ * relied on indexId being globally unique, which is a second assumption of
+ * exactly the kind that produced this defect.
+ */
+const M11_SCOPED_CHUNK_IDENTITY = `
+ALTER TABLE index_chunks ADD COLUMN IF NOT EXISTS row_id TEXT;
+ALTER TABLE index_chunks RENAME COLUMN id TO chunk_key;
+
+-- Deterministic, from the COMPLETE identity the database already knows. Two
+-- rows that are genuinely the same chunk derive the same row_id; two rows that
+-- differ in any scope component do not.
+UPDATE index_chunks
+   SET row_id = encode(
+         sha256(convert_to(
+           owner_scope || E'\\x1f' || workspace_scope || E'\\x1f' ||
+           coalesce(index_id, '') || E'\\x1f' || chunk_key, 'UTF8')),
+         'hex')
+ WHERE row_id IS NULL;
+
+-- PREFLIGHT. Refuse rather than repair: if legacy rows already collide on the
+-- canonical tuple, silently dropping one would destroy content whose loss is
+-- exactly what this migration exists to expose.
+DO $$
+DECLARE
+  dupes BIGINT;
+BEGIN
+  SELECT count(*) INTO dupes FROM (
+    SELECT 1 FROM index_chunks
+     GROUP BY owner_scope, workspace_scope, index_id, chunk_key
+    HAVING count(*) > 1
+  ) d;
+  IF dupes > 0 THEN
+    RAISE EXCEPTION
+      'scoped chunk identity preflight failed: % duplicate (owner, workspace, index, chunk_key) groups. Investigate before migrating.',
+      dupes;
+  END IF;
+END $$;
+
+ALTER TABLE index_chunks ALTER COLUMN row_id SET NOT NULL;
+ALTER TABLE index_chunks DROP CONSTRAINT IF EXISTS index_chunks_pkey;
+ALTER TABLE index_chunks ADD CONSTRAINT index_chunks_pkey PRIMARY KEY (row_id);
+
+-- The actual domain invariant, stated structurally.
+ALTER TABLE index_chunks
+  ADD CONSTRAINT index_chunks_scope_identity_uq
+  UNIQUE (owner_scope, workspace_scope, index_id, chunk_key);
+`;
+
 export const MIGRATIONS: readonly Migration[] = [
   { version: 1, name: 'foundation', sql: M1_FOUNDATION },
   { version: 2, name: 'tenancy_primitives', sql: M2_TENANCY },
@@ -546,6 +622,7 @@ export const MIGRATIONS: readonly Migration[] = [
   { version: 8, name: 'operational', sql: M8_OPERATIONAL },
   { version: 9, name: 'conversation_grounding', sql: M9_CONVERSATION_GROUNDING },
   { version: 10, name: 'parent_scope_integrity', sql: M10_PARENT_SCOPE_INTEGRITY },
+  { version: 11, name: 'scoped_chunk_identity', sql: M11_SCOPED_CHUNK_IDENTITY },
 ];
 
 /** Highest version defined in code. */

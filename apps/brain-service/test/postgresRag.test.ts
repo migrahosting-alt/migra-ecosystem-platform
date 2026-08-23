@@ -195,7 +195,7 @@ test('deleteIndex cascades chunks and versions', async (t) => {
 
   const remaining = await scoped(A, async (c) => ({
     indexes: (await loadIndexes(c)).filter((i) => i.id === 'idx-del').length,
-    chunks: (await c.query('SELECT id FROM index_chunks WHERE index_id = $1', ['idx-del'])).rows.length,
+    chunks: (await c.query('SELECT chunk_key FROM index_chunks WHERE index_id = $1', ['idx-del'])).rows.length,
     versions: (await c.query('SELECT version FROM index_versions WHERE index_id = $1', ['idx-del'])).rows.length,
   }));
   assert.deepEqual(remaining, { indexes: 0, chunks: 0, versions: 0 });
@@ -234,7 +234,7 @@ test('index versions and chunks fail closed with no scope set', async (t) => {
   const c = conn();
   try {
     const counts = await c.transaction(async (client) => ({
-      chunks: (await client.query('SELECT id FROM index_chunks')).rows.length,
+      chunks: (await client.query('SELECT chunk_key FROM index_chunks')).rows.length,
       versions: (await client.query('SELECT version FROM index_versions')).rows.length,
     }));
     assert.deepEqual(counts, { chunks: 0, versions: 0 });

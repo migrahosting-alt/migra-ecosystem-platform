@@ -173,10 +173,18 @@ export async function loadChunks(
   );
   let dims: number | undefined;
   return rows.map((r) => {
-    const vector = fromVectorBytes(r.vector, dims, String(r.id));
+    /*
+     * RETRIEVAL IDENTITY, NOT THE DATABASE ROW ID.
+     *
+     * The domain keeps `${relPath}#${startLine}` as a chunk's identity inside
+     * its index; `row_id` is a persistence detail the retriever must never have
+     * to understand. Coupling them is what would force another migration the
+     * next time the storage key changes.
+     */
+    const vector = fromVectorBytes(r.vector, dims, String(r.chunk_key));
     dims ??= vector.length;
     return {
-      id: String(r.id),
+      id: String(r.chunk_key),
       indexId: String(r.index_id ?? ''),
       workspaceId: String(r.workspace_id ?? ''),
       filePath: String(r.file_path ?? ''),
@@ -220,12 +228,25 @@ export async function commitSync(
 
   for (const c of changed) {
     await client.query(
+      /*
+       * CONFLICT ON THE CANONICAL TUPLE, never on a bare id.
+       *
+       * `ON CONFLICT (id)` let one tenant select ANOTHER tenant's row as its
+       * conflict target, because the old id was `relPath#startLine` and global.
+       * Targeting (owner, workspace, index, chunk_key) means a conflict can only
+       * ever be this index's own chunk in this scope.
+       *
+       * row_id is derived from that same tuple, so it is stable across re-syncs
+       * of an unchanged chunk and cannot collide across scopes.
+       */
       `INSERT INTO index_chunks
-         (id, index_id, workspace_id, owner_scope, workspace_scope, file_path, language, symbol,
+         (row_id, chunk_key, index_id, workspace_id, owner_scope, workspace_scope, file_path, language, symbol,
           start_line, end_line, content_hash, embedding_model, embedding_version,
           indexed_at, text, vector, index_version)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
-       ON CONFLICT (id) DO UPDATE SET
+       VALUES (
+         encode(sha256(convert_to($4 || E'\\x1f' || $5 || E'\\x1f' || coalesce($2,'') || E'\\x1f' || $1, 'UTF8')), 'hex'),
+         $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
+       ON CONFLICT (owner_scope, workspace_scope, index_id, chunk_key) DO UPDATE SET
          file_path = EXCLUDED.file_path, language = EXCLUDED.language, symbol = EXCLUDED.symbol,
          start_line = EXCLUDED.start_line, end_line = EXCLUDED.end_line,
          content_hash = EXCLUDED.content_hash, embedding_model = EXCLUDED.embedding_model,
