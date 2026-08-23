@@ -37,6 +37,7 @@ interface Args {
   runId: string;
   verifyOnly: boolean;
   auditOnly: boolean;
+  probe: boolean;
   json?: string;
 }
 
@@ -48,22 +49,74 @@ function parseArgs(argv: string[]): Args {
   const source = get('source');
   const databaseUrl = get('database-url') ?? process.env.MIGRAPILOT_BRAIN_DATABASE_URL ?? process.env.DATABASE_URL;
   const runId = get('run-id');
-  if (!source) throw new Error('--source <path to a COPY of the legacy state> is required');
+  if (!source && !argv.includes('--probe')) {
+    throw new Error('--source <path to a COPY of the legacy state> is required');
+  }
   if (!databaseUrl) throw new Error('--database-url (or MIGRAPILOT_BRAIN_DATABASE_URL) is required');
-  if (!runId) throw new Error('--run-id <stable identifier> is required — it is what makes a resume possible');
+  if (!runId && !argv.includes('--probe')) {
+    throw new Error('--run-id <stable identifier> is required — it is what makes a resume possible');
+  }
   return {
-    source,
+    source: source ?? '',
     databaseUrl,
-    runId,
+    runId: runId ?? 'probe',
     verifyOnly: argv.includes('--verify-only'),
     auditOnly: argv.includes('--audit-only'),
+    probe: argv.includes('--probe'),
     ...(get('json') === undefined ? {} : { json: get('json')! }),
   };
 }
 
+/**
+ * Strip credentials out of anything on its way to stdout or a log.
+ *
+ * The rehearsal reads its DSN from a root-only EnvironmentFile and writes its
+ * output to a log a human reads afterwards. A driver that echoes the connection
+ * string it tried would put the password in that log and undo the file
+ * permissions entirely.
+ */
+export function redactAnyDsn(text: string): string {
+  return text.replace(/(postgres(?:ql)?:\/\/[^:\s]+:)[^@\s]+(@)/gi, '$1***$2');
+}
+
 export async function main(argv: string[] = process.argv.slice(2)): Promise<number> {
   const args = parseArgs(argv);
-  const out = (line: string) => process.stdout.write(`${line}\n`);
+  const out = (line: string) => process.stdout.write(`${redactAnyDsn(line)}\n`);
+
+  /*
+   * PROBE. Connectivity first, pg_hba second.
+   *
+   * The Brain's own database already authenticates from this host, so the
+   * rehearsal database has a good chance of being covered by the existing rules.
+   * Editing pg_hba.conf before finding out would be changing production
+   * authentication to fix a problem that may not exist.
+   */
+  if (args.probe) {
+    const probeConnection = new PostgresConnection({ databaseUrl: args.databaseUrl });
+    try {
+      const rows = await probeConnection.query<{
+        version: string; db: string; role: string; ssl: boolean | null;
+      }>(`SELECT version() AS version, current_database() AS db, current_user AS role,
+                 (SELECT ssl FROM pg_stat_ssl WHERE pid = pg_backend_pid()) AS ssl`);
+      const r = rows[0];
+      out('── connectivity probe ──');
+      out(`  reachable:  yes`);
+      out(`  database:   ${r?.db}`);
+      out(`  role:       ${r?.role}`);
+      out(`  tls:        ${r?.ssl === null ? 'unknown' : String(r?.ssl)}`);
+      out(`  server:     ${(r?.version ?? '').split(',')[0]}`);
+      out('  → no pg_hba change needed.');
+      return 0;
+    } catch (error) {
+      out('── connectivity probe ──');
+      out('  reachable:  NO');
+      out(`  error:      ${redactAnyDsn(error instanceof Error ? error.message : String(error))}`);
+      out('  → if this is a pg_hba rejection, add the two narrow rules and reload PostgreSQL.');
+      return 3;
+    } finally {
+      await probeConnection.close().catch(() => undefined);
+    }
+  }
 
   const source = new LegacySource(args.source);
   const inventory = source.inventory();
@@ -181,7 +234,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
 // Only self-execute when run directly, never on import from a test.
 if (process.argv[1] && process.argv[1].endsWith('runMigration.js')) {
   main().then((code) => process.exit(code)).catch((error: unknown) => {
-    process.stderr.write(`${error instanceof Error ? error.stack ?? error.message : String(error)}\n`);
+    process.stderr.write(`${redactAnyDsn(error instanceof Error ? error.stack ?? error.message : String(error))}\n`);
     process.exit(2);
   });
 }

@@ -214,3 +214,51 @@ test('health() reports a real migrated database as ready', { skip: skip ?? false
   assert.ok(health.schemaVersion >= 10, `schema version should be at least 10, got ${health.schemaVersion}`);
   assert.equal(health.detail, undefined, 'a healthy store reports no failure detail');
 });
+
+test('a DELETED conversation stays deleted across a restart — with a control', { skip: skip ?? false }, async () => {
+  /*
+   * "It is still gone" passes vacuously if persistence is broken and everything
+   * is gone. So a sibling conversation is created and NOT deleted: if it does
+   * not come back, the absence of the other one proves nothing.
+   *
+   * This is the store-level twin of the candidate-gate assertion, and it reads
+   * through a cold cache — the deletion can only come from the database.
+   */
+  await store.saveConversation(conversation('c-control', A));
+  await store.saveMessage(message('m-control', 'c-control'), A);
+  await store.saveConversation(conversation('c-doomed', A));
+  await store.saveMessage(message('m-doomed', 'c-doomed'), A);
+
+  await store.deleteConversation('c-doomed', A);
+
+  const fresh = restarted();
+  await fresh.ensureScopeHydrated(A);
+
+  // Control first — otherwise the next assertion is worthless.
+  assert.ok(fresh.getConversation('c-control', A), 'CONTROL: the undeleted conversation came back');
+  assert.equal(fresh.getMessages('c-control', A).length, 1, 'CONTROL: with its message');
+
+  assert.equal(fresh.getConversation('c-doomed', A), undefined, 'the deleted conversation did NOT come back');
+  assert.equal(fresh.getMessages('c-doomed', A).length, 0, 'and neither did its messages');
+});
+
+test('an APPROVED index is still approved after a restart, read from the database', { skip: skip ?? false }, async () => {
+  // The failure this replaces: setIndexState ran unscoped, matched zero rows,
+  // reported success, and memory said `approved` while the row said
+  // `experimental`. A cold read is the only thing that tells them apart.
+  await store.saveIndex({
+    id: 'idx-approve-restart', workspaceId: A.workspace, ownerScope: A.owner,
+    sourceType: 'docs', root: '/library/approve-restart', state: 'ready', version: 1,
+    approvedVersion: undefined, embeddingModel: 'nomic-embed-text', embeddingVersion: 'v1',
+    createdAt: 1, updatedAt: 1,
+  } as never);
+
+  await store.setIndexState('idx-approve-restart', 'approved', 5, A);
+  await store.setApprovedVersion('idx-approve-restart', 1, 6, A);
+
+  // Read back through a NEW load — no in-process state involved.
+  const indexes = await store.loadIndexesForScope(A);
+  const rec = indexes.find((i) => i.id === 'idx-approve-restart');
+  assert.equal(rec?.state, 'approved', 'the DATABASE says approved, not just memory');
+  assert.equal(rec?.approvedVersion, 1, 'and the approved version is the one that was approved');
+});
