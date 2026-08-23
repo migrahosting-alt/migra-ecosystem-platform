@@ -12,6 +12,7 @@ import { config } from "./config/env.js";
 // Routes
 import { authRoutes } from "./routes/auth.js";
 import { oauthRoutes } from "./routes/oauth.js";
+import { socialRoutes } from "./routes/social.js";
 import { mfaRoutes } from "./routes/mfa.js";
 import { sessionRoutes } from "./routes/sessions.js";
 import { adminRoutes } from "./routes/admin.js";
@@ -80,6 +81,7 @@ async function main() {
 
   await app.register(authRoutes);
   await app.register(oauthRoutes);
+  await app.register(socialRoutes);
   await app.register(mfaRoutes);
   await app.register(sessionRoutes);
   await app.register(adminRoutes);

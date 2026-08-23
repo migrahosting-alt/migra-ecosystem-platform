@@ -60,6 +60,34 @@ export const config = {
   refreshCookieName: env("AUTH_REFRESH_COOKIE", "migraauth_refresh"),
   firstPartyRefreshClientId: env("AUTH_FIRST_PARTY_REFRESH_CLIENT_ID", "migraauth_web"),
 
+  /**
+   * External identity providers.
+   *
+   * ABSENT CREDENTIALS MEAN THE PROVIDER IS OFF, not broken. A deployment
+   * without a Google app must not render a Google button that leads to a
+   * consent screen for a client that does not exist — so these are optional,
+   * and `availableProviders()` reads them to decide what the UI may offer.
+   *
+   * Secrets live here and nowhere else: never in a schema, never in a client
+   * bundle, never in a redirect.
+   */
+  social: {
+    google: {
+      clientId: process.env["AUTH_GOOGLE_CLIENT_ID"] ?? "",
+      clientSecret: process.env["AUTH_GOOGLE_CLIENT_SECRET"] ?? "",
+    },
+    github: {
+      clientId: process.env["AUTH_GITHUB_CLIENT_ID"] ?? "",
+      clientSecret: process.env["AUTH_GITHUB_CLIENT_SECRET"] ?? "",
+    },
+    /**
+     * Extra origins a provider sign-in may return to, beyond this service and
+     * its own web UI. An allowlist of ORIGINS — never a prefix match, which
+     * `https://auth.migrateck.com.evil.test` would satisfy.
+     */
+    returnOrigins: envList("AUTH_SOCIAL_RETURN_ORIGINS"),
+  },
+
   /** CORS */
   corsOrigins: env("AUTH_CORS_ORIGINS", "http://localhost:4100,http://localhost:3000,http://localhost:3200").split(","),
 

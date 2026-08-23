@@ -52,7 +52,7 @@ import {
 } from "../modules/tokens/index.js";
 import type { User, UserIdentifier } from "../prisma-client.js";
 
-function setSessionCookie(
+export function setSessionCookie(
   reply: FastifyReply,
   sessionSecret: string,
 ): void {
@@ -73,7 +73,7 @@ function clearSessionCookie(reply: FastifyReply): void {
   });
 }
 
-function setRefreshCookie(
+export function setRefreshCookie(
   reply: FastifyReply,
   refreshToken: string,
 ): void {
@@ -180,7 +180,7 @@ async function issueVerificationChallenge(input: {
   };
 }
 
-async function establishFirstPartySession(input: {
+export async function establishFirstPartySession(input: {
   reply: FastifyReply;
   userId: string;
   ip?: string;

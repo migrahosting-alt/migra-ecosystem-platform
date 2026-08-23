@@ -10,7 +10,8 @@ import {
   PasswordInput,
   toBrandStyle,
 } from "@migrateck/auth-ui";
-import { authFetch } from "@/lib/api";
+import { authFetch, API_BASE } from "@/lib/api";
+import { SocialSignIn } from "@/components/SocialSignIn";
 import { resolveAuthBrandTheme, resolveProductHomeUrl } from "@/lib/branding";
 
 function extractApiErrorMessage(payload: unknown, fallback: string): string {
@@ -302,6 +303,20 @@ function SignupForm() {
                 {loading ? "Creating account..." : "Create account"}
               </Button>
             </form>
+
+            {/*
+              Providers finish the OIDC flow this page is already inside: the
+              return destination is the FULL authorize URL, so the client's PKCE
+              challenge, its state, the `next` path and the anonymous
+              conversation waiting to be claimed all survive the round trip.
+            */}
+            <SocialSignIn
+              returnTo={
+                clientId && redirectUri
+                  ? `${API_BASE}/authorize${queryString ? `?${queryString}` : ""}`
+                  : API_BASE
+              }
+            />
 
             <div className="mt-6 text-center text-sm text-white/55">
               Already have an account?{" "}
