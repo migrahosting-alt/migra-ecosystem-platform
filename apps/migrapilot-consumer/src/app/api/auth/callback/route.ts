@@ -59,9 +59,40 @@ const landing = (request: Request, path: string | null): Response =>
  * PR #147 note in ../../../server/auth/README.md. When a real resolver exists,
  * it is called from this function and nowhere else.
  */
-const bootstrap: BootstrapFn = async () => ({
+const bootstrap: BootstrapFn = async (input) => ({
   activeOrg: null,
   permissions: [],
+  /*
+   * THE TOKENS ARE KEPT, DELIBERATELY — and this reverses an earlier decision
+   * worth restating rather than quietly overturning.
+   *
+   * This app used to discard the access token the moment bootstrap finished,
+   * which was right while it needed nothing from MigraAuth afterwards. Settings
+   * changed that: active sessions, linked providers and security activity are
+   * MigraAuth's truth, and the alternative ways to reach them are worse. The
+   * browser cannot — CORS blocks it and the MigraAuth session cookie is
+   * SameSite=lax, so it would not be sent cross-site anyway. A service
+   * credential would let this app name ANY user, which is a far larger
+   * authority than reading the one who is signed in.
+   *
+   * The OIDC access token authorizes exactly this user and nothing else, which
+   * is precisely the scope required.
+   *
+   * WHERE THEY LIVE. `productAccount` is carried in the application session
+   * cookie: httpOnly, Secure, SameSite=lax and HMAC-signed. A bearer token in a
+   * cookie is a real exposure, and the honest accounting is that this cookie IS
+   * the session — anyone able to read it already holds the account. The access
+   * token additionally expires in 15 minutes.
+   */
+  productAccount: {
+    migraAuth: {
+      accessToken: input.accessToken,
+      ...(input.refreshToken ? { refreshToken: input.refreshToken } : {}),
+      // Absolute, so expiry survives a cold start rather than being recomputed
+      // from a duration whose origin has been forgotten.
+      accessTokenExpiresAt: Date.now() + Math.max(0, input.expiresInSeconds - 30) * 1000,
+    },
+  },
 })
 
 export async function GET(request: Request): Promise<Response> {
