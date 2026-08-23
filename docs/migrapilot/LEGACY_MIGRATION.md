@@ -101,25 +101,55 @@ user who deleted it — worse than losing one. The insert now carries the
 timestamp; the conflict path uses `COALESCE(existing, incoming)` so a re-save
 still can never un-delete.
 
-## The rehearsal — staged on VM111, waiting on one provisioning step
+## The rehearsal — RUN, 2026-08-23
 
-Everything below `2.` is installed and, where it needs no database, already
-proven. The units live at `/etc/systemd/system/migrapilot-rehearsal-*.service`
-and the tool at `/opt/migrapilot/migration-tool`.
+All eleven steps completed against `migrapilot_brain_rehearsal` on db-core.
+Production and the candidate stayed up throughout, and the legacy SQLite file is
+byte-identical to where it started (`sha256 e6cdfd30…`, mtime unchanged).
 
-| # | step | state |
+| # | step | result |
 |---|---|---|
-| 1 | provision `migrapilot_brain_rehearsal` on db-core | **owner action** — `provision-rehearsal-postgres.sh` |
-| 2 | pipe the DSN into `/etc/migrapilot/brain-rehearsal.env`, **root:root 0600** | **owner action** |
-| 3 | probe VM111 → rehearsal PostgreSQL | staged: `systemctl start migrapilot-rehearsal-probe` |
-| 4 | *only if rejected*, add the two narrow pg_hba rules and reload | conditional |
-| 5 | real legacy import into the rehearsal database | staged: `…-import` |
-| 6 | exact reconciliation | runs inside `…-import`; `…-verify` re-runs it read-only |
-| 7 | historical chunk audit report | emitted by both, plus `--audit-only` |
-| 8 | boot the candidate Brain against the rehearsal database | after 5–7 |
-| 9 | exercise old conversations + grounding | after 8 |
-| 10 | restart the candidate | after 9 |
-| 11 | repeat reads/retrieval | after 10 |
+| 1 | provision `migrapilot_brain_rehearsal` | done |
+| 2 | DSN into `/etc/migrapilot/brain-rehearsal.env`, root:root 0600 | done |
+| 3 | probe VM111 → rehearsal PostgreSQL | **reachable, TLS off over the tailnet** |
+| 4 | pg_hba rules | **not needed** — the existing rules covered it |
+| 5 | real legacy import | 115 conversations · 270 messages · 4 indexes · 6 index versions · 10 127 chunks · 6 scopes |
+| 6 | exact reconciliation | **EXACT**, and again on an independent read-only pass |
+| 7 | historical chunk audit | **all 4 indexes verified**; 0 files missing from source; 0 duplicate logical keys |
+| 8 | Brain booted against the migrated database | `:3991`, schema 13, persistence ready |
+| 9 | exercise old conversations + grounding | **11/11** |
+| 10 | restart | done |
+| 11 | repeat reads/retrieval | **11/11**, cold process |
+
+### What step 9 and 11 actually asserted
+
+Reads only — this is real conversation history, and the point was to prove it
+came back, not to write into it.
+
+- Tenant A's main workspace lists **96** conversations, its other workspace **9**,
+  tenant B **7** — the exact legacy per-scope counts.
+- Tenant B cannot open one of A's conversations **by id** (404), and cannot
+  retrieve from A's index.
+- Migrated messages read back with content, in order.
+- **14 of 96** threads still carry their grounding file sets.
+- The approved index is still `approved` at **version 29** — the multi-version
+  history migration 13 exists to protect.
+- Retrieval from it returns real chunks with text and file paths
+  (`handbook-neutral.txt`), and **zero** chunk ids carry the legacy
+  `${indexId}:v${version}:` storage shape.
+
+All of it repeated identically against a cold process after `systemctl restart`.
+
+### Two things the boot found
+
+- **`Environment=` did not beat `EnvironmentFile=`.** The rehearsal Brain came up
+  trying to bind `3990` — the port the real candidate is on — and only avoided
+  colliding because the Brain detected the healthy service already there. The
+  port override moved into its own `EnvironmentFile`, listed last, where the
+  ordering is well defined.
+- **The schema guard fired, correctly.** The deployed candidate release is engine
+  v11 and the migrated database is v13; it refused to open it rather than
+  falling back. The rehearsal Brain runs a v13 build instead.
 
 ### Why systemd units rather than a shell command
 

@@ -152,7 +152,8 @@ full suite 1643/1643. Design and findings: `LEGACY_MIGRATION.md`.
 | exact reconciliation, proven to fail on a tampered target | **done** |
 | import rehearsal into an isolated target | **DONE 2026-08-23** — `migrapilot_brain_rehearsal`, existing pg_hba rules sufficed |
 | exact parity on REAL production data | **EXACT** — 6 scopes, 115 conversations, 270 messages, 4 indexes, 10 127 chunks, 0 mismatches |
-| candidate Brain booted against the migrated database | next |
+| Brain booted against the migrated database | **DONE** — `:3991`, schema 13, ready |
+| old conversations + grounding + retrieval exercised | **11/11**, and **11/11** again after a restart |
 
 **Two defects found before production was touched**, both in code already
 deployed to the candidate:
