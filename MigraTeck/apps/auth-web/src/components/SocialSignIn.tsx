@@ -13,7 +13,7 @@ import { API_BASE } from "@/lib/api";
  * what is configured and renders exactly that, and renders nothing at all while
  * it does not know.
  *
- * `returnTo` is the FULL authorize URL this page was reached with. Carrying it
+ * `authorizeQuery` is the FULL query this page was reached with. Carrying it
  * whole is what makes a provider sign-in finish the OIDC flow the visitor was
  * already in the middle of, rather than starting a new one that has lost the
  * client's PKCE challenge — and therefore lost the destination, the `next`
@@ -47,7 +47,27 @@ function ProviderMark({ id }: { id: string }) {
   );
 }
 
-export function SocialSignIn({ returnTo }: { returnTo: string }) {
+/**
+ * The absolute authorize URL to come back to.
+ *
+ * BUILT FROM THE BROWSER'S OWN ORIGIN, not from `API_BASE`. In production
+ * `NEXT_PUBLIC_AUTH_API_URL` is the RELATIVE `/api`, so composing the
+ * destination from it yields `/api/authorize?...` — and the server's
+ * `safeReturnTo` refuses relative values on purpose, because a provider
+ * callback has no meaningful base to resolve them against. The sign-in would
+ * have completed and then quietly landed on the default page instead of
+ * finishing the OIDC flow, taking the `next` path and the anonymous
+ * conversation with it.
+ *
+ * `/authorize` is served at this origin's root — the published
+ * `authorization_endpoint` — so the origin is the correct and only base.
+ */
+function absoluteAuthorizeUrl(query: string): string {
+  if (typeof window === "undefined") return "";
+  return `${window.location.origin}/authorize${query ? `?${query}` : ""}`;
+}
+
+export function SocialSignIn({ authorizeQuery }: { authorizeQuery: string | null }) {
   const [providers, setProviders] = useState<Provider[] | null>(null);
 
   useEffect(() => {
@@ -85,7 +105,9 @@ export function SocialSignIn({ returnTo }: { returnTo: string }) {
           <a
             key={provider.id}
             data-testid={`social-${provider.id}`}
-            href={`${API_BASE}/v1/social/${provider.id}/start?return_to=${encodeURIComponent(returnTo)}`}
+            href={`${API_BASE}/v1/social/${provider.id}/start?return_to=${encodeURIComponent(
+              absoluteAuthorizeUrl(authorizeQuery ?? ""),
+            )}`}
             className="inline-flex h-11 w-full items-center justify-center gap-2.5 rounded-xl border border-white/[0.12] bg-white/[0.04] text-[15px] font-semibold text-white/90 transition hover:border-white/25 hover:bg-white/[0.08]"
           >
             <ProviderMark id={provider.id} />

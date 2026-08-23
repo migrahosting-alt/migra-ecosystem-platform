@@ -10,7 +10,7 @@ import {
   PasswordInput,
   toBrandStyle,
 } from "@migrateck/auth-ui";
-import { authFetch, API_BASE } from "@/lib/api";
+import { authFetch } from "@/lib/api";
 import { SocialSignIn } from "@/components/SocialSignIn";
 import {
   resolveAuthBrandTheme,
@@ -307,13 +307,7 @@ function LoginForm() {
               challenge, its state, the `next` path and the anonymous
               conversation waiting to be claimed all survive the round trip.
             */}
-            <SocialSignIn
-              returnTo={
-                isOAuthFlow
-                  ? `${API_BASE}/authorize${queryString ? `?${queryString}` : ""}`
-                  : API_BASE
-              }
-            />
+            <SocialSignIn authorizeQuery={isOAuthFlow ? queryString : null} />
 
             <div className="mt-6 rounded-2xl border border-white/[0.08] bg-white/[0.025] px-4 py-3">
               <p className="text-center text-xs leading-5 text-white/45">

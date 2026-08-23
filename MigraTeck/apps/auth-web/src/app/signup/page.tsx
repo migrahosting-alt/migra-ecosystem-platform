@@ -10,7 +10,7 @@ import {
   PasswordInput,
   toBrandStyle,
 } from "@migrateck/auth-ui";
-import { authFetch, API_BASE } from "@/lib/api";
+import { authFetch } from "@/lib/api";
 import { SocialSignIn } from "@/components/SocialSignIn";
 import {
   resolveAuthBrandTheme,
@@ -325,13 +325,7 @@ function SignupForm() {
               challenge, its state, the `next` path and the anonymous
               conversation waiting to be claimed all survive the round trip.
             */}
-            <SocialSignIn
-              returnTo={
-                clientId && redirectUri
-                  ? `${API_BASE}/authorize${queryString ? `?${queryString}` : ""}`
-                  : API_BASE
-              }
-            />
+            <SocialSignIn authorizeQuery={clientId && redirectUri ? queryString : null} />
 
             <div className="mt-6 text-center text-sm text-white/55">
               Already have an account?{" "}
