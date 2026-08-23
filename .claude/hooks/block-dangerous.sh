@@ -34,6 +34,68 @@ block() {
 ELEV="s""udo"   # split so this policy file can be edited by tooling that
                 # refuses to emit the bare keyword; value is exactly the word.
 
+# ─────────────────────────────────────────────────────────────────────────────
+# SCOPED EXCEPTION — db-core MigraPilot Brain PostgreSQL provisioning
+#
+# Authorized by Bonex, 2026-08-22, in writing, bounded to:
+#   "creating/configuring the migrapilot_brain PostgreSQL role and database,
+#    applying the minimum required grants/revokes, and permitting connections
+#    from 10.10.0.13/32 and 100.95.14.29/32. Do not modify unrelated databases,
+#    roles, packages, firewall rules, SSH configuration, or operating-system
+#    settings."
+#
+# Applied BY the agent, AS Bonex's agent, at his explicit instruction, using the
+# exact rule prepared in docs/migrapilot/hook-patch-dbcore-postgres.md. The
+# agent did not author or broaden the authorization.
+#
+# NARROWER than the VM111 exception on purpose: exactly one elevated binary
+# (psql as the postgres role), on exactly one host, and no filesystem write of
+# any kind. The DSN never touches db-core's disk — it is piped straight to
+# VM111 — so no tee, chmod or /root path is needed here.
+# ─────────────────────────────────────────────────────────────────────────────
+dbcore_brain_postgres_provisioning() {
+  local c="$1"
+
+  # 1. HOST — the db-core alias, and no other host.
+  [[ "$c" == *"ssh "* ]] || return 1
+  [[ "$c" == *"db-core"* ]] || return 1
+  case "$c" in
+    *"migrapilot-app-core"*|*"root@"*|*" pve "*|*"-J pve"*|*"pct exec"*) return 1 ;;
+  esac
+
+  # 2. BINARY — only psql, only as the postgres role.
+  [[ "$c" == *"${ELEV} -u postgres psql"* ]] || return 1
+  case "$c" in
+    *"COPY "*|*"pg_read_file"*|*"pg_write"*|*"lo_import"*|*"lo_export"*) return 1 ;;
+    *"tee "*|*"chmod"*|*"chown"*|*" > "*|*" >> "*) return 1 ;;
+  esac
+
+  # 3. HARD DENY — same absolutes as the VM111 exception.
+  case "$c" in
+    *"rm -rf"*|*"mkfs"*|*"dd if="*|*" fdisk"*|*"parted"*) return 1 ;;
+    *"apt "*|*"apt-get"*|*"yum "*|*"dnf "*) return 1 ;;
+    *"ufw "*|*"iptables"*|*"nft "*|*"firewall-cmd"*) return 1 ;;
+    *"/etc/ssh"*|*"sshd"*|*"authorized_keys"*|*"visudo"*|*"/etc/${ELEV}ers"*) return 1 ;;
+    *"reboot"*|*"shutdown"*) return 1 ;;
+    *"passwd "*|*"usermod -aG"*|*"gpasswd"*) return 1 ;;
+  esac
+
+  # 4. DATABASE SCOPE — only the Brain's own database may be named. The
+  #    Console's Prisma-managed `migrapilot` database is explicitly excluded.
+  case "$c" in
+    *"mpanel"*|*"davical"*|*"elize_competition"*|*"lituation_ticketing"*|*"migracredit"*) return 1 ;;
+    *"migrapilot_brain"*) : ;;
+    *"migrapilot"*) return 1 ;;
+  esac
+
+  # 5. DESTRUCTIVE SQL — provisioning creates and grants. It never drops.
+  case "$c" in
+    *"DROP DATABASE"*|*"DROP ROLE"*|*"DROP SCHEMA"*|*"DROP TABLE"*|*"TRUNCATE"*|*"DELETE FROM"*) return 1 ;;
+  esac
+
+  return 0
+}
+
 vm111_migrapilot_provisioning() {
   local c="$1"
 
@@ -155,8 +217,10 @@ esac
 if [[ "$CMD" == *"${ELEV} "* ]]; then
   if vm111_migrapilot_provisioning "$CMD"; then
     : # permitted: VM111 MigraPilot provisioning, per Bonex 2026-08-15
+  elif dbcore_brain_postgres_provisioning "$CMD"; then
+    : # permitted: db-core Brain PostgreSQL provisioning, per Bonex 2026-08-22
   else
-    block "${ELEV} (outside the approved VM111 MigraPilot provisioning scope)"
+    block "${ELEV} (outside the approved MigraPilot provisioning scopes)"
   fi
 fi
 
