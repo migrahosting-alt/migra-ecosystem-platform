@@ -50,8 +50,9 @@ export async function oauthRoutes(app: FastifyInstance): Promise<void> {
     const requestedScopes = query.scope ? query.scope.split(" ") : ["openid"];
     const validScopes = validateScopes(client, requestedScopes);
 
-    // If user is already authenticated, issue code immediately (SSO)
-    if (request.authUser && request.authUser.status === "ACTIVE") {
+    // If user is already authenticated, issue code immediately (SSO), unless
+    // the client explicitly asks for a fresh login/account switch.
+    if (request.authUser && request.authUser.status === "ACTIVE" && query.prompt !== "login") {
       const code = await createAuthCode(
         request.authUser.id,
         query.client_id,

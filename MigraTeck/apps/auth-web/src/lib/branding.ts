@@ -9,6 +9,8 @@ const defaultBullets = [
 export const migraAuthBrand: AuthBrandTheme = {
   productKey: "migraauth",
   productName: "MigraAuth",
+  logoSrc: "/brands/migrateck-logo.png",
+  supportsPhoneAuth: false,
   securityLabel: "Identity & Security",
   monogram: "MA",
   eyebrow: "Security core",
@@ -26,6 +28,7 @@ const productBrands: Record<string, AuthBrandTheme> = {
     ...migraAuthBrand,
     productKey: "annoupale",
     productName: "AnnouPale",
+    logoSrc: "/brands/products/annoupale-official_logo.png",
     securityLabel: "Community access",
     monogram: "AP",
     eyebrow: "Community identity",
@@ -41,6 +44,7 @@ const productBrands: Record<string, AuthBrandTheme> = {
     ...migraAuthBrand,
     productKey: "migrateck",
     productName: "MigraTeck",
+    logoSrc: "/brands/migrateck-logo.png",
     securityLabel: "Platform access",
     monogram: "MT",
     eyebrow: "Platform identity",
@@ -54,6 +58,7 @@ const productBrands: Record<string, AuthBrandTheme> = {
     ...migraAuthBrand,
     productKey: "migrahosting",
     productName: "MigraHosting",
+    logoSrc: "/brands/products/migrahosting.png",
     securityLabel: "Hosting access",
     monogram: "MH",
     eyebrow: "Hosting access",
@@ -66,6 +71,7 @@ const productBrands: Record<string, AuthBrandTheme> = {
     ...migraAuthBrand,
     productKey: "migradrive",
     productName: "MigraDrive",
+    logoSrc: "/brands/migrateck-logo.png",
     securityLabel: "Storage access",
     monogram: "MD",
     eyebrow: "Storage identity",
@@ -76,6 +82,7 @@ const productBrands: Record<string, AuthBrandTheme> = {
     ...migraAuthBrand,
     productKey: "migramail",
     productName: "MigraMail",
+    logoSrc: "/brands/migrateck-logo.png",
     securityLabel: "Mail access",
     monogram: "MM",
     eyebrow: "Communications identity",
@@ -86,6 +93,7 @@ const productBrands: Record<string, AuthBrandTheme> = {
     ...migraAuthBrand,
     productKey: "migrapanel",
     productName: "MigraPanel",
+    logoSrc: "/brands/migrateck-logo.png",
     securityLabel: "Panel access",
     monogram: "MP",
     eyebrow: "Control surface",
@@ -96,6 +104,7 @@ const productBrands: Record<string, AuthBrandTheme> = {
     ...migraAuthBrand,
     productKey: "migravoice",
     productName: "MigraVoice",
+    logoSrc: "/brands/migrateck-logo.png",
     securityLabel: "Voice access",
     monogram: "MV",
     eyebrow: "Voice identity",
@@ -106,6 +115,7 @@ const productBrands: Record<string, AuthBrandTheme> = {
     ...migraAuthBrand,
     productKey: "migrainvoice",
     productName: "MigraInvoice",
+    logoSrc: "/brands/migrateck-logo.png",
     securityLabel: "Invoice access",
     monogram: "MI",
     eyebrow: "Billing identity",
@@ -116,6 +126,7 @@ const productBrands: Record<string, AuthBrandTheme> = {
     ...migraAuthBrand,
     productKey: "migrabuilder",
     productName: "MigraBuilder",
+    logoSrc: "/brands/migrateck-logo.png",
     securityLabel: "Builder access",
     monogram: "MB",
     eyebrow: "Builder identity",
@@ -126,6 +137,7 @@ const productBrands: Record<string, AuthBrandTheme> = {
     ...migraAuthBrand,
     productKey: "migramarket",
     productName: "MigraMarket",
+    logoSrc: "/brands/products/migramarket.png",
     securityLabel: "Marketing access",
     monogram: "MK",
     eyebrow: "Marketing operations",
@@ -151,14 +163,6 @@ function normalizeClientId(clientId: string | null | undefined) {
     // Staging auth host currently powers AnnouPale flows; default branding accordingly
     // when client_id is omitted in query params.
     if (host === "staging-auth.migrateck.com") {
-      return "annoupale_web";
-    }
-
-    // Direct auth host entry (all main routes) should default to AnnouPale experience.
-    if (
-      host === "auth.migrateck.com" &&
-      ["/login", "/signup", "/forgot-password", "/reset-password"].includes(window.location.pathname)
-    ) {
       return "annoupale_web";
     }
 
@@ -219,4 +223,37 @@ export function resolveProductDisplayDomain(clientId: string | null | undefined)
   } catch {
     return "migrateck.com";
   }
+}
+
+export function resolveAuthIdentifierLabel(clientId: string | null | undefined): string {
+  return resolveAuthBrandTheme(clientId).supportsPhoneAuth ? "Email or phone" : "Email";
+}
+
+export function resolveAuthIdentifierPlaceholder(clientId: string | null | undefined): string {
+  return resolveAuthBrandTheme(clientId).supportsPhoneAuth
+    ? "you@company.com or +1 555 555 0123"
+    : "you@company.com";
+}
+
+export function resolveAuthRecoveryIntro(clientId: string | null | undefined): string {
+  return resolveAuthBrandTheme(clientId).supportsPhoneAuth
+    ? "Enter your email or phone number and we will send secure recovery instructions."
+    : "Enter your email address and we will send secure recovery instructions.";
+}
+
+export function sanitizeAuthMessage(
+  clientId: string | null | undefined,
+  message: string,
+): string {
+  if (resolveAuthBrandTheme(clientId).supportsPhoneAuth) {
+    return message;
+  }
+
+  return message
+    .replace(/Invalid email, phone number, or password\./gi, "Invalid email or password.")
+    .replace(/Enter a valid email address or phone number\./gi, "Enter a valid email address.")
+    .replace(/An account with this email or phone number already exists\./gi, "An account with this email already exists.")
+    .replace(/If this phone number is registered, a reset code has been sent\./gi, "If this email is registered, recovery instructions have been sent.")
+    .replace(/email or phone number/gi, "email address")
+    .replace(/email or phone/gi, "email");
 }

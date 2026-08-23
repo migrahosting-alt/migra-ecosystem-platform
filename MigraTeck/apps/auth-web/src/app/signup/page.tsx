@@ -10,9 +10,15 @@ import {
   PasswordInput,
   toBrandStyle,
 } from "@migrateck/auth-ui";
-import { authFetch, API_BASE } from "@/lib/api";
-import { SocialSignIn } from "@/components/SocialSignIn";
-import { resolveAuthBrandTheme, resolveProductHomeUrl } from "@/lib/branding";
+import { authFetch } from "@/lib/api";
+import {
+  resolveAuthBrandTheme,
+  resolveAuthIdentifierLabel,
+  resolveAuthIdentifierPlaceholder,
+  resolveProductHomeUrl,
+  sanitizeAuthMessage,
+} from "@/lib/branding";
+import { useRegistryBrand } from "@/lib/useRegistryBrand";
 
 function extractApiErrorMessage(payload: unknown, fallback: string): string {
   if (!payload || typeof payload !== "object") {
@@ -67,10 +73,13 @@ function SignupForm() {
   const redirectUri = searchParams.get("redirect_uri");
   const queryString = searchParams.toString();
   const effectiveClientId = clientId ?? "migraauth_web";
-  const brand = useMemo(() => resolveAuthBrandTheme(clientId), [clientId]);
+  const hardcodedBrand = useMemo(() => resolveAuthBrandTheme(clientId), [clientId]);
+  const brand = useRegistryBrand(clientId, hardcodedBrand);
   const isAnnouPale = brand.productKey === "annoupale";
   const brandStyle = useMemo(() => toBrandStyle(brand), [brand]);
   const productHomeUrl = useMemo(() => resolveProductHomeUrl(clientId), [clientId]);
+  const identifierLabel = useMemo(() => resolveAuthIdentifierLabel(clientId), [clientId]);
+  const identifierPlaceholder = useMemo(() => resolveAuthIdentifierPlaceholder(clientId), [clientId]);
   const legalTermsUrl = useMemo(() => {
     if (brand.productKey === "annoupale") {
       return "https://annoupale.com/terms";
@@ -133,7 +142,12 @@ function SignupForm() {
       });
 
       if (!response.ok) {
-        setError(extractApiErrorMessage(response.data, "Signup failed. Please check your details and try again."));
+        setError(
+          sanitizeAuthMessage(
+            clientId,
+            extractApiErrorMessage(response.data, "Signup failed. Please check your details and try again."),
+          ),
+        );
         setLoading(false);
         return;
       }
@@ -192,7 +206,7 @@ function SignupForm() {
                 <div className="inline-flex items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.05] px-4 py-3 backdrop-blur-sm">
                   <div className={isAnnouPale ? "relative h-16 w-16 shrink-0 overflow-hidden rounded-2xl" : "relative h-11 w-11 shrink-0 overflow-hidden rounded-2xl"}>
                     <Image
-                      src={brand.productKey === "annoupale" ? "/brands/products/annoupale-official_logo.png" : "/brands/migrateck-logo.png"}
+                      src={brand.logoSrc ?? "/brands/migrateck-logo.png"}
                       alt={brand.productName}
                       fill
                       className={isAnnouPale ? "object-contain scale-[1.22]" : "object-contain"}
@@ -241,10 +255,10 @@ function SignupForm() {
 
               <Input
                 id="signup-identifier"
-                label="Email or phone"
+                label={identifierLabel}
                 type="text"
                 autoComplete="username"
-                placeholder="you@company.com or +1 555 555 0123"
+                placeholder={identifierPlaceholder}
                 value={identifier}
                 onChange={(event) => setIdentifier(event.target.value)}
               />
@@ -303,20 +317,6 @@ function SignupForm() {
                 {loading ? "Creating account..." : "Create account"}
               </Button>
             </form>
-
-            {/*
-              Providers finish the OIDC flow this page is already inside: the
-              return destination is the FULL authorize URL, so the client's PKCE
-              challenge, its state, the `next` path and the anonymous
-              conversation waiting to be claimed all survive the round trip.
-            */}
-            <SocialSignIn
-              returnTo={
-                clientId && redirectUri
-                  ? `${API_BASE}/authorize${queryString ? `?${queryString}` : ""}`
-                  : API_BASE
-              }
-            />
 
             <div className="mt-6 text-center text-sm text-white/55">
               Already have an account?{" "}

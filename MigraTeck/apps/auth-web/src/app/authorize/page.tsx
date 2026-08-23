@@ -1,12 +1,13 @@
 "use client";
 
-import { Suspense, useEffect } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { authFetch } from "@/lib/api";
 
 function AuthorizeInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const [error, setError] = useState("");
 
   const clientId = searchParams.get("client_id") ?? "";
   const redirectUri = searchParams.get("redirect_uri") ?? "";
@@ -17,12 +18,11 @@ function AuthorizeInner() {
   const responseType = searchParams.get("response_type") ?? "code";
   const nonce = searchParams.get("nonce");
 
-  // Whether the request is well-formed is a property of the URL, so it is derived during
-  // render rather than mirrored into state by an effect.
-  const missingParams = !clientId || !redirectUri;
-
   useEffect(() => {
-    if (missingParams) return;
+    if (!clientId || !redirectUri) {
+      setError("Missing required parameters (client_id, redirect_uri).");
+      return;
+    }
 
     // Try to issue a code directly (SSO check)
     authFetch<{ code?: string; redirect_to?: string; error?: string }>(
@@ -55,14 +55,14 @@ function AuthorizeInner() {
         // Network error — just go to login
         router.replace(`/login?${searchParams.toString()}`);
       });
-  }, [missingParams, clientId, redirectUri, state, scope, codeChallenge, codeChallengeMethod, nonce, router, searchParams]);
+  }, [clientId, redirectUri, state, scope, codeChallenge, codeChallengeMethod, nonce, router, searchParams]);
 
-  if (missingParams) {
+  if (error) {
     return (
       <div className="mx-auto w-full max-w-md">
         <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm text-center">
           <h1 className="text-xl font-semibold text-slate-900">Authorization error</h1>
-          <p className="mt-2 text-sm text-red-600">Missing required parameters (client_id, redirect_uri).</p>
+          <p className="mt-2 text-sm text-red-600">{error}</p>
         </div>
       </div>
     );

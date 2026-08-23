@@ -407,4 +407,31 @@ export async function billingRoutes(app: FastifyInstance): Promise<void> {
 
     return reply.code(200).send({ received: true, eventId: result.eventId, status: result.status });
   });
+
+  app.post("/v1/billing/checkout/guest", async (request, reply) => {
+    if (!config.billing.guestCheckoutEnabled) return reply.code(404).send({ error: { code: "not_found", message: "Not found." } });
+    if (!config.billing.stripeSecretKey) return billingNotConfigured(reply);
+    const __gbody = Buffer.isBuffer(request.body) ? JSON.parse((request.body as Buffer).toString("utf8")) : (typeof request.body === "string" ? JSON.parse(request.body) : request.body);
+    const body = z.object({
+      platform: z.string().min(1),
+      billingEmail: z.string().email(),
+      mode: z.enum(["payment", "subscription"]),
+      lineItems: z.array(z.object({
+        name: z.string().min(1),
+        amountCents: z.number().int().positive(),
+        quantity: z.number().int().positive().optional(),
+        interval: z.enum(["month", "year"]).optional(),
+        intervalCount: z.number().int().positive().optional(),
+      })).min(1),
+      successUrl: z.string().url(),
+      cancelUrl: z.string().url(),
+      trialDays: z.number().int().optional(),
+      metadata: z.record(z.string()).optional(),
+    }).parse(__gbody);
+    const ctx = createBillingContext({ stripeSecretKey: config.billing.stripeSecretKey!, db: db as any });
+    const mod = await import("@migrateck/billing-core/checkout");
+    const result = await mod.createGuestCheckoutSession(ctx, body);
+    return reply.send({ url: result.url, sessionId: result.sessionId });
+  });
+
 }

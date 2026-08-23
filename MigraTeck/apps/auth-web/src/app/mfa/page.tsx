@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useMemo, useState, type FormEvent } from "react";
+import { Suspense, useEffect, useMemo, useState, type FormEvent } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Image from "next/image";
 import {
@@ -11,6 +11,7 @@ import {
 } from "@migrateck/auth-ui";
 import { authFetch } from "@/lib/api";
 import { buildContinueLabel, resolveAuthBrandTheme } from "@/lib/branding";
+import { useRegistryBrand } from "@/lib/useRegistryBrand";
 
 type Method = "totp" | "recovery" | "passkey";
 
@@ -24,7 +25,8 @@ function MfaForm() {
   const codeChallengeMethod = searchParams.get("code_challenge_method");
   const scope = searchParams.get("scope");
   const nonce = searchParams.get("nonce");
-  const brand = useMemo(() => resolveAuthBrandTheme(clientId), [clientId]);
+  const hardcodedBrand = useMemo(() => resolveAuthBrandTheme(clientId), [clientId]);
+  const brand = useRegistryBrand(clientId, hardcodedBrand);
   const brandStyle = useMemo(() => toBrandStyle(brand), [brand]);
 
   const [method, setMethod] = useState<Method>("totp");
@@ -33,15 +35,11 @@ function MfaForm() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
-  // Switching factor clears whatever the previous one had entered. This is a consequence of
-  // the user's click, so it belongs in the handler — an effect on [method] also fired on
-  // mount, re-setting three values that were already at these exact initial values.
-  function selectMethod(nextMethod: Method) {
-    setMethod(nextMethod);
+  useEffect(() => {
     setCode(["", "", "", "", "", ""]);
     setRecoveryCode("");
     setError("");
-  }
+  }, [method]);
 
   async function completeOAuthFlow() {
     if (!clientId || !redirectUri) {
@@ -140,7 +138,7 @@ function MfaForm() {
                 <div className="inline-flex items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 backdrop-blur-sm">
                   <div className="relative h-11 w-11 shrink-0 overflow-hidden rounded-2xl">
                     <Image
-                      src={brand.productKey === "annoupale" ? "/brands/products/annoupale-official_logo.png" : "/brands/migrateck-logo.png"}
+                      src={brand.logoSrc ?? "/brands/migrateck-logo.png"}
                       alt={brand.productName}
                       fill
                       className="object-contain"
@@ -176,7 +174,7 @@ function MfaForm() {
                   <button
                     key={item.key}
                     type="button"
-                    onClick={() => selectMethod(item.key as Method)}
+                    onClick={() => setMethod(item.key as Method)}
                     className={
                       method === item.key
                         ? "rounded-2xl bg-[linear-gradient(135deg,var(--brand-start),var(--brand-end))] px-3 py-3 text-sm font-semibold text-white"

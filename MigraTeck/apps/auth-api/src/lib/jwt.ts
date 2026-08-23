@@ -115,6 +115,7 @@ export async function getJWKS(): Promise<{ keys: jose.JWK[] }> {
 }
 
 export async function getOpenIDConfiguration() {
+  await ensureKeys();
   return {
     issuer: config.jwtIssuer,
     authorization_endpoint: `${config.publicUrl}/authorize`,

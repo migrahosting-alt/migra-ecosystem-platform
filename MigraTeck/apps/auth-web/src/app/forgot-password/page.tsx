@@ -6,15 +6,27 @@ import Link from "next/link";
 import Image from "next/image";
 import { Button, Input, toBrandStyle } from "@migrateck/auth-ui";
 import { authFetch } from "@/lib/api";
-import { resolveAuthBrandTheme, resolveProductDisplayDomain } from "@/lib/branding";
+import {
+  resolveAuthBrandTheme,
+  resolveAuthIdentifierLabel,
+  resolveAuthIdentifierPlaceholder,
+  resolveAuthRecoveryIntro,
+  resolveProductDisplayDomain,
+  sanitizeAuthMessage,
+} from "@/lib/branding";
+import { useRegistryBrand } from "@/lib/useRegistryBrand";
 
 function ForgotPasswordInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const clientId = searchParams.get("client_id");
-  const brand = useMemo(() => resolveAuthBrandTheme(clientId), [clientId]);
+  const hardcodedBrand = useMemo(() => resolveAuthBrandTheme(clientId), [clientId]);
+  const brand = useRegistryBrand(clientId, hardcodedBrand);
   const productDisplayDomain = useMemo(() => resolveProductDisplayDomain(clientId), [clientId]);
   const brandStyle = useMemo(() => toBrandStyle(brand), [brand]);
+  const identifierLabel = useMemo(() => resolveAuthIdentifierLabel(clientId), [clientId]);
+  const identifierPlaceholder = useMemo(() => resolveAuthIdentifierPlaceholder(clientId), [clientId]);
+  const recoveryIntro = useMemo(() => resolveAuthRecoveryIntro(clientId), [clientId]);
   const queryString = searchParams.toString();
 
   const [identifier, setIdentifier] = useState("");
@@ -41,7 +53,12 @@ function ForgotPasswordInner() {
       });
 
       if (!response.ok) {
-        setError(response.data.message ?? "Could not send a reset link right now.");
+        setError(
+          sanitizeAuthMessage(
+            clientId,
+            response.data.message ?? "Could not send a reset link right now.",
+          ),
+        );
         setLoading(false);
         return;
       }
@@ -89,7 +106,7 @@ function ForgotPasswordInner() {
                 <div className="inline-flex items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 backdrop-blur-sm">
                   <div className="relative h-11 w-11 shrink-0 overflow-hidden rounded-2xl">
                     <Image
-                      src={brand.productKey === "annoupale" ? "/brands/products/annoupale-official_logo.png" : "/brands/migrateck-logo.png"}
+                      src={brand.logoSrc ?? "/brands/migrateck-logo.png"}
                       alt={brand.productName}
                       fill
                       className="object-contain"
@@ -114,7 +131,7 @@ function ForgotPasswordInner() {
               <p className="mx-auto mt-2 max-w-[300px] text-sm leading-6 text-slate-300/80">
                 {sent
                   ? `If an account exists for ${identifier}, recovery instructions are on the way.`
-                  : "Enter your email or phone number and we will send secure recovery instructions."}
+                  : recoveryIntro}
               </p>
             </div>
 
@@ -141,11 +158,11 @@ function ForgotPasswordInner() {
               <form onSubmit={handleSubmit} className="space-y-4">
                 <Input
                   id="forgot-password-identifier"
-                  label="Email or phone"
+                  label={identifierLabel}
                   type="text"
                   autoComplete="username"
                   autoFocus
-                  placeholder="you@company.com or +1 555 555 0123"
+                  placeholder={identifierPlaceholder}
                   value={identifier}
                   onChange={(event) => setIdentifier(event.target.value)}
                   error={error}

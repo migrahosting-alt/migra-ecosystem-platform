@@ -16,6 +16,10 @@ declare module "fastify" {
   }
 }
 
+type RequestWithCookies = FastifyRequest & {
+  cookies: Record<string, string | undefined>;
+};
+
 /**
  * Require a valid auth session cookie.
  * Attaches `request.authSession` and `request.authUser`.
@@ -24,7 +28,7 @@ export async function requireSession(
   request: FastifyRequest,
   reply: FastifyReply,
 ): Promise<void> {
-  const sessionSecret = request.cookies[config.sessionCookieName];
+  const sessionSecret = (request as RequestWithCookies).cookies[config.sessionCookieName];
   if (!sessionSecret) {
     reply.code(401).send({ error: "unauthorized", message: "No session cookie" });
     return;
@@ -80,7 +84,7 @@ export async function requireAuthenticatedUser(
   request: FastifyRequest,
   reply: FastifyReply,
 ): Promise<void> {
-  const sessionSecret = request.cookies[config.sessionCookieName];
+  const sessionSecret = (request as RequestWithCookies).cookies[config.sessionCookieName];
 
   if (sessionSecret) {
     const session = await validateSession(sessionSecret);
@@ -109,7 +113,7 @@ export async function optionalSession(
   request: FastifyRequest,
   _reply: FastifyReply,
 ): Promise<void> {
-  const sessionSecret = request.cookies[config.sessionCookieName];
+  const sessionSecret = (request as RequestWithCookies).cookies[config.sessionCookieName];
   if (!sessionSecret) return;
 
   const session = await validateSession(sessionSecret);

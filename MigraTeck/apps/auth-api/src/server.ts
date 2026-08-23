@@ -12,13 +12,14 @@ import { config } from "./config/env.js";
 // Routes
 import { authRoutes } from "./routes/auth.js";
 import { oauthRoutes } from "./routes/oauth.js";
-import { socialRoutes } from "./routes/social.js";
 import { mfaRoutes } from "./routes/mfa.js";
 import { sessionRoutes } from "./routes/sessions.js";
 import { adminRoutes } from "./routes/admin.js";
 import { organizationRoutes } from "./routes/organizations.js";
 import { clientRoutes } from "./routes/clients.js";
 import { billingRoutes } from "./routes/billing.js";
+import { internalBillingRoutes } from "./routes/internal-billing.js";
+import { publicClientRoutes } from "./routes/public-clients.js";
 
 async function main() {
   const app = Fastify({
@@ -30,17 +31,20 @@ async function main() {
 
   // ── Plugins ─────────────────────────────────────────────────────
 
-  await app.register(fastifyCookie);
-  await app.register(fastifyFormbody);
+  // Fastify plugin typings can drift across workspace resolution boundaries.
+  // We register the plugins explicitly while keeping request/reply augmentations
+  // available via the shared declaration file.
+  await app.register(fastifyCookie as any);
+  await app.register(fastifyFormbody as any);
 
-  await app.register(fastifyCors, {
+  await app.register(fastifyCors as any, {
     origin: config.corsOrigins,
     credentials: true,
     methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization", "Cookie"],
   });
 
-  await app.register(fastifyRateLimit, {
+  await app.register(fastifyRateLimit as any, {
     max: config.globalRateLimit,
     timeWindow: "1 minute",
   });
@@ -81,13 +85,14 @@ async function main() {
 
   await app.register(authRoutes);
   await app.register(oauthRoutes);
-  await app.register(socialRoutes);
   await app.register(mfaRoutes);
   await app.register(sessionRoutes);
   await app.register(adminRoutes);
   await app.register(organizationRoutes);
   await app.register(clientRoutes);
   await app.register(billingRoutes);
+  await app.register(internalBillingRoutes);
+  await app.register(publicClientRoutes);
 
   // Health check
   app.get("/health", async () => ({ status: "ok", service: "migraauth-api" }));

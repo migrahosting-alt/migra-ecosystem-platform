@@ -7,6 +7,7 @@ import Image from "next/image";
 import { Button, Input, toBrandStyle } from "@migrateck/auth-ui";
 import { authFetch } from "@/lib/api";
 import { resolveAuthBrandTheme, resolveProductDisplayDomain, resolveProductHomeUrl } from "@/lib/branding";
+import { useRegistryBrand } from "@/lib/useRegistryBrand";
 
 function VerifyEmailInner() {
   const searchParams = useSearchParams();
@@ -16,15 +17,53 @@ function VerifyEmailInner() {
   const identifier = searchParams.get("identifier");
   const maskedDestination = searchParams.get("masked_destination");
   const queryString = searchParams.toString();
-  const brand = useMemo(() => resolveAuthBrandTheme(clientId), [clientId]);
+  const hardcodedBrand = useMemo(() => resolveAuthBrandTheme(clientId), [clientId]);
+  const brand = useRegistryBrand(clientId, hardcodedBrand);
   const isAnnouPale = brand.productKey === "annoupale";
   const productHomeUrl = useMemo(() => resolveProductHomeUrl(clientId), [clientId]);
-  const postVerifySignInUrl = useMemo(() => {
+  const oauthQueryString = useMemo(() => {
+    const params = new URLSearchParams();
+    const passthroughKeys = [
+      "client_id",
+      "redirect_uri",
+      "state",
+      "scope",
+      "code_challenge",
+      "code_challenge_method",
+      "response_type",
+      "nonce",
+      "prompt",
+      "login_hint",
+      "return_to",
+    ];
+
+    for (const key of passthroughKeys) {
+      const value = searchParams.get(key);
+      if (value) {
+        params.set(key, value);
+      }
+    }
+
+    return params.toString();
+  }, [searchParams]);
+  const isOAuthFlow = useMemo(() => {
+    return !!(
+      searchParams.get("client_id")
+      && searchParams.get("redirect_uri")
+      && searchParams.get("state")
+      && searchParams.get("code_challenge")
+    );
+  }, [searchParams]);
+  const continueUrl = useMemo(() => {
+    if (isOAuthFlow) {
+      return `/authorize${oauthQueryString ? `?${oauthQueryString}` : ""}`;
+    }
+
     if (isAnnouPale) {
       return `${productHomeUrl.replace(/\/$/, "")}/signin`;
     }
-    return `/login${queryString ? `?${queryString}` : ""}`;
-  }, [isAnnouPale, productHomeUrl, queryString]);
+    return `/login${oauthQueryString ? `?${oauthQueryString}` : ""}`;
+  }, [isAnnouPale, isOAuthFlow, oauthQueryString, productHomeUrl]);
   const brandStyle = useMemo(() => toBrandStyle(brand), [brand]);
   const productDisplayDomain = useMemo(() => resolveProductDisplayDomain(clientId), [clientId]);
 
@@ -34,18 +73,18 @@ function VerifyEmailInner() {
   const [code, setCode] = useState("");
 
   useEffect(() => {
-    if (status !== "success" || !isAnnouPale) {
+    if (status !== "success") {
       return;
     }
 
     const timer = window.setTimeout(() => {
-      window.location.href = postVerifySignInUrl;
-    }, 1200);
+      window.location.href = continueUrl;
+    }, isOAuthFlow ? 400 : 1200);
 
     return () => {
       window.clearTimeout(timer);
     };
-  }, [status, isAnnouPale, postVerifySignInUrl]);
+  }, [continueUrl, isOAuthFlow, status]);
 
   useEffect(() => {
     if (!token) {
@@ -181,7 +220,7 @@ function VerifyEmailInner() {
                 <div className="inline-flex items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.05] px-4 py-3 backdrop-blur-sm">
                   <div className={isAnnouPale ? "relative h-16 w-16 shrink-0 overflow-hidden rounded-2xl" : "relative h-11 w-11 shrink-0 overflow-hidden rounded-2xl"}>
                     <Image
-                      src={brand.productKey === "annoupale" ? "/brands/products/annoupale-official_logo.png" : "/brands/migrateck-logo.png"}
+                      src={brand.logoSrc ?? "/brands/migrateck-logo.png"}
                       alt={brand.productName}
                       fill
                       className={isAnnouPale ? "object-contain scale-[1.22]" : "object-contain"}
@@ -225,10 +264,14 @@ function VerifyEmailInner() {
                   className="w-full"
                   size="lg"
                   onClick={() => {
-                    window.location.href = postVerifySignInUrl;
+                    window.location.href = continueUrl;
                   }}
                 >
-                  {isAnnouPale ? "Continue to AnnouPale sign in" : "Continue"}
+                  {isOAuthFlow
+                    ? `Continue to ${brand.productName}`
+                    : isAnnouPale
+                      ? "Continue to AnnouPale sign in"
+                      : "Continue"}
                 </Button>
               </div>
             ) : status === "error" ? (
@@ -297,10 +340,10 @@ function VerifyEmailInner() {
 
             <div className="mt-6 text-center text-sm text-white/55">
               <Link
-                href={postVerifySignInUrl}
+                href={continueUrl}
                 className="font-semibold text-white transition hover:text-[var(--brand-accent)]"
               >
-                Back to sign in
+                {isOAuthFlow ? `Back to ${brand.productName}` : "Back to sign in"}
               </Link>
             </div>
           </div>

@@ -10,13 +10,16 @@ import {
   PasswordInput,
   toBrandStyle,
 } from "@migrateck/auth-ui";
-import { authFetch, API_BASE } from "@/lib/api";
-import { SocialSignIn } from "@/components/SocialSignIn";
+import { authFetch } from "@/lib/api";
 import {
   resolveAuthBrandTheme,
+  resolveAuthIdentifierLabel,
+  resolveAuthIdentifierPlaceholder,
   resolveProductDisplayDomain,
   resolveProductHomeUrl,
+  sanitizeAuthMessage,
 } from "@/lib/branding";
+import { useRegistryBrand } from "@/lib/useRegistryBrand";
 
 function extractApiErrorMessage(payload: unknown, fallback: string): string {
   if (!payload || typeof payload !== "object") {
@@ -80,10 +83,13 @@ function LoginForm() {
   const scope = searchParams.get("scope");
   const nonce = searchParams.get("nonce");
   const effectiveClientId = clientId ?? "migraauth_web";
-  const brand = useMemo(() => resolveAuthBrandTheme(clientId), [clientId]);
+  const hardcodedBrand = useMemo(() => resolveAuthBrandTheme(clientId), [clientId]);
+  const brand = useRegistryBrand(clientId, hardcodedBrand);
   const brandStyle = useMemo(() => toBrandStyle(brand), [brand]);
   const productHomeUrl = useMemo(() => resolveProductHomeUrl(clientId), [clientId]);
   const productDisplayDomain = useMemo(() => resolveProductDisplayDomain(clientId), [clientId]);
+  const identifierLabel = useMemo(() => resolveAuthIdentifierLabel(clientId), [clientId]);
+  const identifierPlaceholder = useMemo(() => resolveAuthIdentifierPlaceholder(clientId), [clientId]);
 
   const isOAuthFlow = !!(clientId && redirectUri && state && codeChallenge);
   const queryString = searchParams.toString();
@@ -137,7 +143,12 @@ function LoginForm() {
       }
 
       if (!response.ok) {
-        setError(extractApiErrorMessage(response.data, "Login failed. Please check your credentials and try again."));
+        setError(
+          sanitizeAuthMessage(
+            clientId,
+            extractApiErrorMessage(response.data, "Login failed. Please check your credentials and try again."),
+          ),
+        );
         setLoading(false);
         return;
       }
@@ -224,7 +235,7 @@ function LoginForm() {
                 <div className="inline-flex items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 backdrop-blur-sm">
                   <div className="relative h-11 w-11 shrink-0 overflow-hidden rounded-2xl">
                     <Image
-                      src={brand.productKey === "annoupale" ? "/brands/products/annoupale-official_logo.png" : "/brands/migrateck-logo.png"}
+                      src={brand.logoSrc ?? "/brands/migrateck-logo.png"}
                       alt={brand.productName}
                       fill
                       className="object-contain"
@@ -255,11 +266,11 @@ function LoginForm() {
               <div className="space-y-4">
                 <Input
                   id="login-identifier"
-                  label="Email or phone"
+                  label={identifierLabel}
                   type="text"
                   autoComplete="username"
                   autoFocus
-                  placeholder="you@company.com or +1 555 555 0123"
+                  placeholder={identifierPlaceholder}
                   value={identifier}
                   onChange={(event) => setIdentifier(event.target.value)}
                 />
@@ -288,20 +299,6 @@ function LoginForm() {
                 {loading ? "Signing in..." : "Sign in"}
               </Button>
             </form>
-
-            {/*
-              Providers finish the OIDC flow this page is already inside: the
-              return destination is the FULL authorize URL, so the client's PKCE
-              challenge, its state, the `next` path and the anonymous
-              conversation waiting to be claimed all survive the round trip.
-            */}
-            <SocialSignIn
-              returnTo={
-                isOAuthFlow
-                  ? `${API_BASE}/authorize${queryString ? `?${queryString}` : ""}`
-                  : API_BASE
-              }
-            />
 
             <div className="mt-6 rounded-2xl border border-white/[0.08] bg-white/[0.025] px-4 py-3">
               <p className="text-center text-xs leading-5 text-white/45">

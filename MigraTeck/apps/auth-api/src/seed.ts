@@ -39,6 +39,20 @@ const clients = [
     allowedScopes: ["openid", "profile", "email", "offline_access", "orgs:read"],
   },
   {
+    clientId: "migrahosting_client_portal",
+    clientName: "MigraHosting Client Portal",
+    clientType: "web",
+    redirectUris: [
+      "https://control.migrahosting.com/api/auth/central/callback",
+      "http://localhost:3200/api/auth/central/callback",
+    ],
+    postLogoutRedirectUris: [
+      "https://control.migrahosting.com/client/login",
+      "http://localhost:3200/client/login",
+    ],
+    allowedScopes: ["openid", "profile", "email", "offline_access", "orgs:read"],
+  },
+  {
     clientId: "migradrive_web",
     clientName: "MigraDrive Web",
     clientType: "web",

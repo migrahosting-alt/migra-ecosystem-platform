@@ -12,25 +12,6 @@ function formatDate(value: string) {
   });
 }
 
-type ClientsResult =
-  | { ok: true; clients: AdminClientRow[]; total: number }
-  | { ok: false; error: string };
-
-/** Lives outside the component so the effect body contains no setState call of its own. */
-async function fetchClients(query: string, isActive: string): Promise<ClientsResult> {
-  try {
-    const response = await listAdminClients({
-      q: query || undefined,
-      is_active: isActive === "" ? undefined : isActive === "true",
-      limit: 50,
-    });
-    if (!response.ok) return { ok: false, error: "Failed to load clients." };
-    return { ok: true, clients: response.data.clients, total: response.data.total };
-  } catch {
-    return { ok: false, error: "Failed to load clients." };
-  }
-}
-
 export default function AdminClientsPage() {
   const [query, setQuery] = useState("");
   const [isActive, setIsActive] = useState("");
@@ -38,30 +19,32 @@ export default function AdminClientsPage() {
   const [total, setTotal] = useState(0);
   const [error, setError] = useState("");
 
-  function applyClients(result: ClientsResult) {
-    if (!result.ok) {
-      setError(result.error);
-      return;
-    }
-    setClients(result.clients);
-    setTotal(result.total);
+  async function loadClients(nextQuery = query, nextActive = isActive) {
     setError("");
+    try {
+      const response = await listAdminClients({
+        q: nextQuery || undefined,
+        is_active: nextActive === "" ? undefined : nextActive === "true",
+        limit: 50,
+      });
+      if (!response.ok) {
+        setError("Failed to load clients.");
+        return;
+      }
+      setClients(response.data.clients);
+      setTotal(response.data.total);
+    } catch {
+      setError("Failed to load clients.");
+    }
   }
 
   useEffect(() => {
-    // Guarded so a response landing after unmount is dropped rather than setting state.
-    let cancelled = false;
-    fetchClients("", "").then((result) => {
-      if (!cancelled) applyClients(result);
-    });
-    return () => {
-      cancelled = true;
-    };
+    loadClients();
   }, []);
 
-  async function handleSubmit(event: FormEvent) {
+  function handleSubmit(event: FormEvent) {
     event.preventDefault();
-    applyClients(await fetchClients(query, isActive));
+    loadClients();
   }
 
   return (

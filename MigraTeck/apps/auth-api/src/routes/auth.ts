@@ -2,7 +2,7 @@
  * Auth routes — signup, verification, login, logout, email verification, password reset.
  * Response shapes align with the auth-web needs and the unified identifier model.
  */
-import type { FastifyInstance, FastifyReply } from "fastify";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import {
   signupSchema,
   signupVerifySchema,
@@ -52,11 +52,27 @@ import {
 } from "../modules/tokens/index.js";
 import type { User, UserIdentifier } from "../prisma-client.js";
 
-export function setSessionCookie(
+type RequestWithCookies = FastifyRequest & {
+  cookies: Record<string, string | undefined>;
+};
+
+type ReplyWithCookies = FastifyReply & {
+  setCookie: (
+    name: string,
+    value: string,
+    options: Record<string, unknown>,
+  ) => FastifyReply;
+  clearCookie: (
+    name: string,
+    options?: Record<string, unknown>,
+  ) => FastifyReply;
+};
+
+function setSessionCookie(
   reply: FastifyReply,
   sessionSecret: string,
 ): void {
-  reply.setCookie(config.sessionCookieName, sessionSecret, {
+  (reply as ReplyWithCookies).setCookie(config.sessionCookieName, sessionSecret, {
     httpOnly: true,
     secure: config.cookieSecure,
     sameSite: "lax",
@@ -67,17 +83,17 @@ export function setSessionCookie(
 }
 
 function clearSessionCookie(reply: FastifyReply): void {
-  reply.clearCookie(config.sessionCookieName, {
+  (reply as ReplyWithCookies).clearCookie(config.sessionCookieName, {
     path: "/",
     domain: config.cookieDomain,
   });
 }
 
-export function setRefreshCookie(
+function setRefreshCookie(
   reply: FastifyReply,
   refreshToken: string,
 ): void {
-  reply.setCookie(config.refreshCookieName, refreshToken, {
+  (reply as ReplyWithCookies).setCookie(config.refreshCookieName, refreshToken, {
     httpOnly: true,
     secure: config.cookieSecure,
     sameSite: "lax",
@@ -88,7 +104,7 @@ export function setRefreshCookie(
 }
 
 function clearRefreshCookie(reply: FastifyReply): void {
-  reply.clearCookie(config.refreshCookieName, {
+  (reply as ReplyWithCookies).clearCookie(config.refreshCookieName, {
     path: "/",
     domain: config.cookieDomain,
   });
@@ -180,7 +196,7 @@ async function issueVerificationChallenge(input: {
   };
 }
 
-export async function establishFirstPartySession(input: {
+async function establishFirstPartySession(input: {
   reply: FastifyReply;
   userId: string;
   ip?: string;
@@ -413,7 +429,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
 
   // ── POST /v1/refresh ──────────────────────────────────────────────
   app.post("/v1/refresh", async (request, reply) => {
-    const refreshToken = request.cookies[config.refreshCookieName];
+    const refreshToken = (request as RequestWithCookies).cookies[config.refreshCookieName];
     const ip = getClientIp(request);
     const ua = request.headers["user-agent"];
 
@@ -599,7 +615,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     const ua = request.headers["user-agent"];
 
     const body = logoutSchema.parse(request.body ?? {});
-    const refreshToken = request.cookies[config.refreshCookieName];
+    const refreshToken = (request as RequestWithCookies).cookies[config.refreshCookieName];
 
     if (body.global) {
       await revokeAllUserSessions(user.id);

@@ -7,6 +7,7 @@ import Image from "next/image";
 import { Button, Input, PasswordInput, toBrandStyle } from "@migrateck/auth-ui";
 import { authFetch } from "@/lib/api";
 import { resolveAuthBrandTheme, resolveProductDisplayDomain } from "@/lib/branding";
+import { useRegistryBrand } from "@/lib/useRegistryBrand";
 
 function ResetPasswordForm() {
   const searchParams = useSearchParams();
@@ -14,7 +15,8 @@ function ResetPasswordForm() {
   const token = searchParams.get("token");
   const challengeId = searchParams.get("challenge_id");
   const maskedDestination = searchParams.get("masked_destination");
-  const brand = useMemo(() => resolveAuthBrandTheme(clientId), [clientId]);
+  const hardcodedBrand = useMemo(() => resolveAuthBrandTheme(clientId), [clientId]);
+  const brand = useRegistryBrand(clientId, hardcodedBrand);
   const productDisplayDomain = useMemo(() => resolveProductDisplayDomain(clientId), [clientId]);
   const brandStyle = useMemo(() => toBrandStyle(brand), [brand]);
   const queryString = searchParams.toString();
@@ -84,7 +86,7 @@ function ResetPasswordForm() {
                 <div className="inline-flex items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 backdrop-blur-sm">
                   <div className="relative h-11 w-11 shrink-0 overflow-hidden rounded-2xl">
                     <Image
-                      src={brand.productKey === "annoupale" ? "/brands/products/annoupale-official_logo.png" : "/brands/migrateck-logo.png"}
+                      src={brand.logoSrc ?? "/brands/migrateck-logo.png"}
                       alt={brand.productName}
                       fill
                       className="object-contain"

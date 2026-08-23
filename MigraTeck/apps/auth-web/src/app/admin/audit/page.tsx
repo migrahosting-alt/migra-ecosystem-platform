@@ -23,51 +23,34 @@ function formatTimestamp(value: string) {
   });
 }
 
-type AuditResult =
-  | { ok: true; events: AdminAuditLog[]; total: number }
-  | { ok: false; error: string };
-
-/** Lives outside the component so the effect body contains no setState call of its own. */
-async function fetchAudit(eventType: string): Promise<AuditResult> {
-  try {
-    const response = await listAdminAudit({ event_type: eventType || undefined, limit: 100 });
-    if (!response.ok) return { ok: false, error: "Failed to load audit logs." };
-    return { ok: true, events: response.data.audit_logs, total: response.data.total };
-  } catch {
-    return { ok: false, error: "Failed to load audit logs." };
-  }
-}
-
 export default function AdminAuditPage() {
   const [eventType, setEventType] = useState("");
   const [events, setEvents] = useState<AdminAuditLog[]>([]);
   const [total, setTotal] = useState(0);
   const [error, setError] = useState("");
 
-  function applyAudit(result: AuditResult) {
-    if (!result.ok) {
-      setError(result.error);
-      return;
-    }
-    setEvents(result.events);
-    setTotal(result.total);
+  async function loadAudit(nextEventType = eventType) {
     setError("");
+    try {
+      const response = await listAdminAudit({ event_type: nextEventType || undefined, limit: 100 });
+      if (!response.ok) {
+        setError("Failed to load audit logs.");
+        return;
+      }
+      setEvents(response.data.audit_logs);
+      setTotal(response.data.total);
+    } catch {
+      setError("Failed to load audit logs.");
+    }
   }
 
   useEffect(() => {
-    // Guarded so a response landing after unmount is dropped rather than setting state.
-    let cancelled = false;
-    fetchAudit("").then((result) => {
-      if (!cancelled) applyAudit(result);
-    });
-    return () => {
-      cancelled = true;
-    };
+    loadAudit();
   }, []);
 
-  async function handleSubmit(event: FormEvent) {
+  function handleSubmit(event: FormEvent) {
     event.preventDefault();
-    applyAudit(await fetchAudit(eventType));
+    loadAudit();
   }
 
   return (

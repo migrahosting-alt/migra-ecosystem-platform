@@ -4,6 +4,8 @@
  * Dev: loaded via `tsx watch --env-file .env`
  * Prod: loaded via systemd EnvironmentFile
  */
+import { readFileSync } from "node:fs";
+
 function env(key: string, fallback?: string): string {
   const v = process.env[key] ?? fallback;
   if (v === undefined) throw new Error(`Missing env: ${key}`);
@@ -19,6 +21,22 @@ function envList(key: string): string[] {
   const value = process.env[key];
   if (!value) return [];
   return value.split(",").map((item) => item.trim()).filter(Boolean);
+}
+
+/** Read a signing key from an inline env var, or from a *_FILE path (PEM). HS256 fallback if neither. */
+function readKeyMaybe(inlineKey: string, fileKey: string): string | undefined {
+  const inline = process.env[inlineKey];
+  if (inline && inline.trim()) return inline;
+  const file = process.env[fileKey];
+  if (file && file.trim()) {
+    try {
+      return readFileSync(file, "utf8");
+    } catch (err) {
+      console.error(`[auth] failed to read key file from ${fileKey}=${file}:`, (err as Error).message);
+      return undefined;
+    }
+  }
+  return undefined;
 }
 
 export const config = {
@@ -37,8 +55,8 @@ export const config = {
   /** JWT / Signing */
   jwtIssuer: env("AUTH_JWT_ISSUER", "https://auth.migrateck.com"),
   /** RSA private key PEM or auto-generate in dev */
-  jwtPrivateKey: process.env["AUTH_JWT_PRIVATE_KEY"] ?? undefined,
-  jwtPublicKey: process.env["AUTH_JWT_PUBLIC_KEY"] ?? undefined,
+  jwtPrivateKey: readKeyMaybe("AUTH_JWT_PRIVATE_KEY", "AUTH_JWT_PRIVATE_KEY_FILE"),
+  jwtPublicKey: readKeyMaybe("AUTH_JWT_PUBLIC_KEY", "AUTH_JWT_PUBLIC_KEY_FILE"),
   /** HMAC fallback for dev (not for production) */
   jwtSecret: env("AUTH_JWT_SECRET", "dev-only-change-me-in-production-32-chars!!"),
 
@@ -59,34 +77,6 @@ export const config = {
   sessionCookieName: env("AUTH_SESSION_COOKIE", "migraauth_session"),
   refreshCookieName: env("AUTH_REFRESH_COOKIE", "migraauth_refresh"),
   firstPartyRefreshClientId: env("AUTH_FIRST_PARTY_REFRESH_CLIENT_ID", "migraauth_web"),
-
-  /**
-   * External identity providers.
-   *
-   * ABSENT CREDENTIALS MEAN THE PROVIDER IS OFF, not broken. A deployment
-   * without a Google app must not render a Google button that leads to a
-   * consent screen for a client that does not exist — so these are optional,
-   * and `availableProviders()` reads them to decide what the UI may offer.
-   *
-   * Secrets live here and nowhere else: never in a schema, never in a client
-   * bundle, never in a redirect.
-   */
-  social: {
-    google: {
-      clientId: process.env["AUTH_GOOGLE_CLIENT_ID"] ?? "",
-      clientSecret: process.env["AUTH_GOOGLE_CLIENT_SECRET"] ?? "",
-    },
-    github: {
-      clientId: process.env["AUTH_GITHUB_CLIENT_ID"] ?? "",
-      clientSecret: process.env["AUTH_GITHUB_CLIENT_SECRET"] ?? "",
-    },
-    /**
-     * Extra origins a provider sign-in may return to, beyond this service and
-     * its own web UI. An allowlist of ORIGINS — never a prefix match, which
-     * `https://auth.migrateck.com.evil.test` would satisfy.
-     */
-    returnOrigins: envList("AUTH_SOCIAL_RETURN_ORIGINS"),
-  },
 
   /** CORS */
   corsOrigins: env("AUTH_CORS_ORIGINS", "http://localhost:4100,http://localhost:3000,http://localhost:3200").split(","),
@@ -137,6 +127,7 @@ export const config = {
   billing: {
     stripeSecretKey: process.env["STRIPE_SECRET_KEY"] ?? undefined,
     stripeWebhookSecret: process.env["STRIPE_WEBHOOK_SECRET"] ?? undefined,
+    guestCheckoutEnabled: process.env["GUEST_CHECKOUT_ENABLED"] === "1",
     stripePriceCatalogVersion: env("STRIPE_PRICE_CATALOG_VERSION", "v1"),
   },
 } as const;
