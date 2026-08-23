@@ -61,6 +61,7 @@ import { WorkspaceManager } from './engine/workspaceManager.js';
 import { registerWorkspaceRoutes } from './engine/workspaceRoutes.js';
 import { gitInfo } from './engine/gitInfo.js';
 import { registerMemoryRoutes } from './engine/memory/memoryRoutes.js';
+import { installJsonBodyParser } from './http/jsonBodyParser.js';
 import { ConversationStore } from './engine/memory/conversationStore.js';
 import { QualificationStore } from './engine/qualificationStore.js';
 import { PostgresDurableStore } from './engine/persistence/postgresStore.js';
@@ -86,6 +87,8 @@ import { registerMigraPilotCors } from './http/corsPolicy.js';
 // which routinely exceed Fastify's 1 MB default (surfacing as a confusing
 // 413→500 on /chat). Raise the ceiling to comfortably fit image attachments.
 const app = Fastify({ logger: true, bodyLimit: 32 * 1024 * 1024 });
+
+installJsonBodyParser(app);
 const startedAt = Date.now();
 const env = readEnv();
 // Consume and delete the inherited one-time bootstrap secret before any request
