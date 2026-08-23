@@ -201,3 +201,16 @@ test('an APPROVED indexed document survives a restart and is retrievable under s
   await fresh.hydrate(B);
   assert.equal(fresh.approvedIndexFor(B), undefined, "beta has no approved index of alpha's");
 });
+
+test('health() reports a real migrated database as ready', { skip: skip ?? false }, async () => {
+  // This was missing, and its absence let a health() that queried a nonexistent
+  // column reach a candidate boot. The candidate reported `persistence:
+  // unavailable` with `column "version" does not exist` — correct fail-closed
+  // behaviour reporting a bug in the probe itself rather than in the database.
+  const health = await store.health();
+  assert.equal(health.memoryStore, 'ready', 'a migrated, writable database is ready');
+  assert.equal(health.ragStore, 'ready');
+  assert.equal(health.migrationState, 'current');
+  assert.ok(health.schemaVersion >= 10, `schema version should be at least 10, got ${health.schemaVersion}`);
+  assert.equal(health.detail, undefined, 'a healthy store reports no failure detail');
+});

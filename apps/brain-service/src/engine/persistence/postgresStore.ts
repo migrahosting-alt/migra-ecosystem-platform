@@ -124,8 +124,13 @@ export class PostgresDurableStore implements DurableStore {
     let detail: string | undefined;
 
     try {
-      const rows = await this.connection.query<{ version: string }>('SELECT version FROM schema_meta LIMIT 1');
-      schemaVersion = Number(rows[0]?.version ?? 0);
+      // schema_meta is a KEY/VALUE table, not a column named `version`. Read it
+      // the way pool.ts does, so the two cannot drift into disagreeing about
+      // what the schema version is.
+      const rows = await this.connection.query<{ value: string }>(
+        `SELECT value FROM schema_meta WHERE key = 'schema_version'`,
+      );
+      schemaVersion = Number(rows[0]?.value ?? 0);
       readable = true;
 
       // A transaction that is deliberately rolled back: it proves write
