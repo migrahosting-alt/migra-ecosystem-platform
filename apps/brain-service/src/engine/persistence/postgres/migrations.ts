@@ -804,6 +804,67 @@ BEGIN
 END $$;
 `;
 
+const M15_USER_PREFERENCES = `
+-- MigraPilot's OWN preferences. Identity stays in MigraAuth.
+--
+-- The boundary is the point: name, email, avatar, linked providers and sessions
+-- are MigraAuth's truth and are never copied here. What lives here is what
+-- MigraPilot alone knows how to honour — how an answer should read, what the
+-- assistant may do without asking, what it remembers. Duplicating the identity
+-- fields would create a second version of "who you are" that drifts the first
+-- time someone changes their name in one place.
+--
+-- ONE ROW PER SCOPE, holding a JSON document rather than a column per setting.
+-- Preferences are added and renamed constantly and each one would otherwise be a
+-- migration; the shape is validated in code, where the defaults also live, so an
+-- unknown key from an older or newer client is ignored instead of rejected.
+CREATE TABLE IF NOT EXISTS user_preferences (
+  owner_scope     TEXT PRIMARY KEY,
+  workspace_scope TEXT NOT NULL,
+  -- Validated by \`preferences.ts\` before it is written. Never trusted on read:
+  -- a document written by a newer build is merged over the current defaults.
+  preferences     JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at      BIGINT NOT NULL,
+  updated_at      BIGINT NOT NULL
+);
+
+-- Sensitive preference changes are auditable. Kept separate from the current
+-- document because "what is it now" and "who changed it when" answer different
+-- questions, and squashing them means the second can never be asked.
+CREATE TABLE IF NOT EXISTS user_preference_events (
+  id           TEXT PRIMARY KEY,
+  owner_scope  TEXT NOT NULL,
+  changed_keys TEXT NOT NULL,
+  created_at   BIGINT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_pref_events_owner
+  ON user_preference_events (owner_scope, created_at DESC);
+
+ALTER TABLE user_preferences ENABLE ROW LEVEL SECURITY;
+ALTER TABLE user_preferences FORCE ROW LEVEL SECURITY;
+ALTER TABLE user_preference_events ENABLE ROW LEVEL SECURITY;
+ALTER TABLE user_preference_events FORCE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS user_preferences_scope ON user_preferences;
+CREATE POLICY user_preferences_scope ON user_preferences
+  USING (owner_scope = migra_current_owner())
+  WITH CHECK (owner_scope = migra_current_owner());
+
+DROP POLICY IF EXISTS user_preference_events_scope ON user_preference_events;
+CREATE POLICY user_preference_events_scope ON user_preference_events
+  USING (owner_scope = migra_current_owner())
+  WITH CHECK (owner_scope = migra_current_owner());
+
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'migrapilot_app') THEN
+    GRANT SELECT, INSERT, UPDATE, DELETE ON user_preferences TO migrapilot_app;
+    GRANT SELECT, INSERT, UPDATE, DELETE ON user_preference_events TO migrapilot_app;
+  END IF;
+END $$;
+`;
+
 export const MIGRATIONS: readonly Migration[] = [
   { version: 1, name: 'foundation', sql: M1_FOUNDATION },
   { version: 2, name: 'tenancy_primitives', sql: M2_TENANCY },
@@ -819,6 +880,7 @@ export const MIGRATIONS: readonly Migration[] = [
   { version: 12, name: 'migration_runs', sql: M12_MIGRATION_RUNS },
   { version: 13, name: 'chunk_version_identity', sql: M13_CHUNK_VERSION_IDENTITY },
   { version: 14, name: 'anonymous_quota', sql: M14_ANONYMOUS_QUOTA },
+  { version: 15, name: 'user_preferences', sql: M15_USER_PREFERENCES },
 ];
 
 /** Highest version defined in code. */

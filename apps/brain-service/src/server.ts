@@ -63,6 +63,7 @@ import { gitInfo } from './engine/gitInfo.js';
 import { registerMemoryRoutes } from './engine/memory/memoryRoutes.js';
 import { randomUUID } from 'node:crypto';
 import { registerAnonymousQuotaRoutes } from './engine/anonymousQuotaRoutes.js';
+import { registerPreferencesRoutes } from './engine/preferencesRoutes.js';
 import { anonymousLimitsFromEnv } from './engine/anonymousQuotaDeps.js';
 import { installJsonBodyParser } from './http/jsonBodyParser.js';
 import { ConversationStore } from './engine/memory/conversationStore.js';
@@ -362,6 +363,17 @@ async function main(): Promise<void> {
       memoryStore.evictScope({ owner: anonymousOwner, workspace: anonymousOwner });
       memoryStore.evictScope({ owner: accountOwner, workspace: accountWorkspace });
     },
+  });
+
+  /*
+   * MigraPilot's own preferences. Same PostgreSQL-only seam as the quota ledger:
+   * the table is migration 15 and SQLite has no such thing, so an unavailable
+   * store surfaces as "persistence unavailable" rather than as a fake document.
+   */
+  registerPreferencesRoutes(app, {
+    store: () => (durable instanceof PostgresDurableStore ? durable : undefined),
+    now: () => Date.now(),
+    newId: () => `prefev_${randomUUID()}`,
   });
   // Model qualification manifest (installing a model does not approve it). The
   // router serves only `approved` models when the manifest is `enforced`.

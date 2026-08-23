@@ -21,6 +21,10 @@
     "./anonymous-quota": {
       "types": "./src/anonymous-quota.ts",
       "default": "./dist/anonymous-quota.js"
+    },
+    "./user-preferences": {
+      "types": "./src/user-preferences.ts",
+      "default": "./dist/user-preferences.js"
     }
   },
   "files": [

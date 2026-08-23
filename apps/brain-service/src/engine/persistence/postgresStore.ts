@@ -32,6 +32,7 @@
 
 import type { PoolClient } from 'pg';
 import * as quota from './postgres/anonymousQuotaRepo.js';
+import * as prefs from './postgres/preferencesRepo.js';
 import * as claim from './postgres/anonymousClaimRepo.js';
 import type { Conversation, Message, Summary, MemoryItem } from '../memory/conversationStore.js';
 import type {
@@ -654,4 +655,58 @@ export class PostgresDurableStore implements DurableStore {
     });
   }
 
+
+  /* ── MigraPilot preferences ────────────────────────────────────────────
+   *
+   * Scoped like everything else. Identity stays in MigraAuth: nothing here
+   * stores a name, an email, an avatar or a provider link.
+   */
+
+  /** Read, or report defaults. Never creates a row — a page view is not a write. */
+  async getUserPreferences(scope: PersistenceScope): Promise<prefs.PreferencesRow> {
+    return this.inScope(scope, (client) => prefs.getPreferences(client, scope.owner));
+  }
+
+  /**
+   * Apply a partial update and record the audited keys, in ONE transaction.
+   *
+   * `inScope` already runs its callback inside one transaction with the scope
+   * declared, which is what makes the audit trail trustworthy: a preference
+   * change that committed without its event, or an event without its change, is
+   * a log that disagrees with the product.
+   */
+  async patchUserPreferences(input: {
+    scope: PersistenceScope;
+    patch: unknown;
+    now: number;
+    eventId: string;
+    auditedKeys: readonly string[];
+  }): Promise<prefs.PatchResult> {
+    return this.inScope(input.scope, async (client) => {
+      const result = await prefs.patchPreferences(client, {
+        ownerScope: input.scope.owner,
+        workspaceScope: input.scope.workspace,
+        patch: input.patch,
+        now: input.now,
+      });
+
+      const audited = result.changed.filter((key) => input.auditedKeys.includes(key));
+      await prefs.recordPreferenceEvent(client, {
+        id: input.eventId,
+        ownerScope: input.scope.owner,
+        changedKeys: audited,
+        now: input.now,
+      });
+
+      return result;
+    });
+  }
+
+  async listPreferenceEvents(scope: PersistenceScope, limit?: number): Promise<prefs.PreferenceEvent[]> {
+    return this.inScope(scope, (client) => prefs.listPreferenceEvents(client, scope.owner, limit));
+  }
+
+  async deleteUserPreferences(scope: PersistenceScope): Promise<{ preferences: number; events: number }> {
+    return this.inScope(scope, (client) => prefs.deletePreferences(client, scope.owner));
+  }
 }
