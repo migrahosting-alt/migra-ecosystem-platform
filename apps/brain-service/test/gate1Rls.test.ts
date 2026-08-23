@@ -406,7 +406,8 @@ test('11.4 the scoped-identity migration backfills rows that ALREADY exist', { s
       `SELECT row_id, chunk_key,
               encode(sha256(convert_to(
                 owner_scope || E'\\x1f' || workspace_scope || E'\\x1f' ||
-                coalesce(index_id,'') || E'\\x1f' || chunk_key, 'UTF8')), 'hex') AS expected
+                coalesce(index_id,'') || E'\\x1f' || index_version::text || E'\\x1f' ||
+                chunk_key, 'UTF8')), 'hex') AS expected
          FROM index_chunks WHERE index_id = 'idx-backfill'`,
     );
     return r.rows;
@@ -414,6 +415,9 @@ test('11.4 the scoped-identity migration backfills rows that ALREADY exist', { s
 
   assert.equal(rows.length, 1, 'the chunk is present');
   assert.ok(rows[0]!.row_id, 'row_id is never null');
+  // The canonical tuple includes index_version as of migration 13: without it
+  // an index cannot hold the same logical chunk at two versions, and
+  // committing a new version rewrites the previous version's chunk.
   assert.equal(rows[0]!.row_id, rows[0]!.expected, 'row_id is derived from the canonical tuple');
   assert.equal(rows[0]!.chunk_key, 'backfill.md#1', 'chunk_key stays the logical identity');
 });

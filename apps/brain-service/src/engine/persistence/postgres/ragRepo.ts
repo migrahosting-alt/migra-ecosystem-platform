@@ -268,20 +268,29 @@ export async function commitSync(
        *
        * `ON CONFLICT (id)` let one tenant select ANOTHER tenant's row as its
        * conflict target, because the old id was `relPath#startLine` and global.
-       * Targeting (owner, workspace, index, chunk_key) means a conflict can only
-       * ever be this index's own chunk in this scope.
+       * Targeting (owner, workspace, index, index_version, chunk_key) means a
+       * conflict can only ever be this index's own chunk, in this scope, AT THIS
+       * VERSION.
+       *
+       * The version is part of the identity because an index legitimately holds
+       * the same logical chunk at two versions. Without it, committing v29 takes
+       * the v28 row as its conflict target and rewrites it — the new version
+       * lands and the old version's content is destroyed. SQLite never had this
+       * problem: its row key carried the version too.
        *
        * row_id is derived from that same tuple, so it is stable across re-syncs
-       * of an unchanged chunk and cannot collide across scopes.
+       * of an unchanged chunk and cannot collide across scopes or versions.
        */
       `INSERT INTO index_chunks
          (row_id, chunk_key, index_id, workspace_id, owner_scope, workspace_scope, file_path, language, symbol,
           start_line, end_line, content_hash, embedding_model, embedding_version,
           indexed_at, text, vector, index_version)
        VALUES (
-         encode(sha256(convert_to($4 || E'\\x1f' || $5 || E'\\x1f' || coalesce($2,'') || E'\\x1f' || $1, 'UTF8')), 'hex'),
+         encode(sha256(convert_to(
+           $4 || E'\\x1f' || $5 || E'\\x1f' || coalesce($2,'') || E'\\x1f' || $17::bigint::text || E'\\x1f' || $1,
+           'UTF8')), 'hex'),
          $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
-       ON CONFLICT (owner_scope, workspace_scope, index_id, chunk_key) DO UPDATE SET
+       ON CONFLICT (owner_scope, workspace_scope, index_id, index_version, chunk_key) DO UPDATE SET
          file_path = EXCLUDED.file_path, language = EXCLUDED.language, symbol = EXCLUDED.symbol,
          start_line = EXCLUDED.start_line, end_line = EXCLUDED.end_line,
          content_hash = EXCLUDED.content_hash, embedding_model = EXCLUDED.embedding_model,

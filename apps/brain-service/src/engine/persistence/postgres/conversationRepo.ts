@@ -53,6 +53,7 @@ export function rowToConversation(r: Record<string, unknown>): Conversation {
     ...(r.deleted_at !== null && r.deleted_at !== undefined ? { deletedAt: num(r.deleted_at) } : {}),
     // Unparseable JSON reads as "grounded in nothing" rather than throwing: one bad
     // row must not take the whole hydrate down on startup.
+    // `[]` round-trips as an empty SET, not as absence — see saveConversation.
     ...(typeof r.grounding_files === 'string' && r.grounding_files.length > 0
       ? { groundingFiles: safeJsonArray(r.grounding_files) }
       : {}),
@@ -107,12 +108,21 @@ export async function saveConversation(client: PoolClient, c: Conversation): Pro
   await client.query(
     `INSERT INTO conversations
        (id, owner_scope, workspace_scope, title, memory_mode, created_at, updated_at, deleted_at, grounding_files)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,NULL,$8)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$9,$8)
      ON CONFLICT (id) DO UPDATE SET title = EXCLUDED.title, updated_at = EXCLUDED.updated_at,
-       grounding_files = EXCLUDED.grounding_files`,
+       grounding_files = EXCLUDED.grounding_files,
+       -- Never UN-deletes: an existing deletion wins over whatever is being
+       -- written. Only an insert can carry a deletion timestamp in, which is
+       -- what the legacy import needs.
+       deleted_at = COALESCE(conversations.deleted_at, EXCLUDED.deleted_at)`,
     [
       c.id, c.ownerScope, c.workspaceScope, c.title, c.memoryMode, c.createdAt, c.updatedAt,
-      c.groundingFiles && c.groundingFiles.length > 0 ? JSON.stringify(c.groundingFiles) : null,
+      // An EMPTY grounding set is a real user fact — "I detached every file" —
+      // and is not the same as "I never attached one". Only `undefined` becomes
+      // NULL. Collapsing `[]` to NULL made a cleared conversation come back
+      // from a reload claiming it had never been grounded.
+      c.groundingFiles === undefined ? null : JSON.stringify(c.groundingFiles),
+      c.deletedAt ?? null,
     ],
   );
 }

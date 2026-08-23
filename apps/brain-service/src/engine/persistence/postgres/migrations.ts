@@ -632,6 +632,103 @@ ALTER TABLE index_chunks
 ALTER TABLE index_chunks FORCE ROW LEVEL SECURITY;
 `;
 
+/**
+ * Migration 13 — chunk identity must include the INDEX VERSION.
+ *
+ * Migration 11 keyed chunks by (owner, workspace, index, chunk_key). That is
+ * scoped correctly and fixed the cross-tenant collision, but it is still too
+ * NARROW: it cannot represent the same logical chunk at two index versions.
+ *
+ * An index legitimately holds `notes.md#1` at v28 and again at v29. Under the
+ * migration-11 key the v29 insert takes the v28 row as its conflict target and
+ * UPDATES it — so committing a new version silently rewrites the previous
+ * version's chunk instead of adding one, and the older version's content is
+ * gone. `loadChunks(indexId, 28)` then returns fewer rows than were committed.
+ *
+ * SQLite never had this problem: its row key was
+ * `${indexId}:v${version}:${path}#${line}`, version included.
+ *
+ * Found by the legacy-import parity test on a fixture built from the real
+ * production layout — production holds exactly this shape (one index with
+ * chunks at v28 AND v29, another at v2 AND v3), so an import under the old key
+ * would have destroyed version history at the moment of migration.
+ *
+ * No duplicate preflight is needed here: the old constraint is a strict SUBSET
+ * of the new one, so any state satisfying it already satisfies this.
+ */
+const M13_CHUNK_VERSION_IDENTITY = `
+-- FORCE row-level security applies to the table OWNER too, so an owner-run
+-- maintenance UPDATE matches zero rows while it is on. Lifted only for the
+-- recompute, exactly as migration 11 does, and restored below.
+ALTER TABLE index_chunks NO FORCE ROW LEVEL SECURITY;
+
+ALTER TABLE index_chunks DROP CONSTRAINT IF EXISTS index_chunks_scope_identity_uq;
+
+UPDATE index_chunks
+   SET row_id = encode(sha256(convert_to(
+         owner_scope || E'\\x1f' || workspace_scope || E'\\x1f' ||
+         coalesce(index_id,'') || E'\\x1f' || index_version::text || E'\\x1f' || chunk_key,
+         'UTF8')),
+       'hex');
+
+ALTER TABLE index_chunks
+  ADD CONSTRAINT index_chunks_scope_identity_uq
+  UNIQUE (owner_scope, workspace_scope, index_id, index_version, chunk_key);
+
+ALTER TABLE index_chunks FORCE ROW LEVEL SECURITY;
+`;
+
+/**
+ * Migration 12 — legacy import bookkeeping.
+ *
+ * The importer must be resumable: if it dies at conversation 47 of 96, rerunning
+ * continues rather than duplicating. That needs durable checkpoints, and they
+ * belong in the target database — a checkpoint file next to the process is lost
+ * exactly when the process is.
+ *
+ * NO row-level security here, deliberately. These rows are not tenant data; they
+ * are written by the migration tool about the migration itself, and every read
+ * of them is an operator read. Enabling RLS would mean inventing an owner scope
+ * for a record that has none.
+ *
+ * `source_fingerprint` is what makes a resume safe: it pins the run to one exact
+ * legacy artifact. Resuming against a source that changed underneath would
+ * silently interleave two different datasets.
+ */
+const M12_MIGRATION_RUNS = `
+CREATE TABLE IF NOT EXISTS migration_runs (
+  run_id              TEXT PRIMARY KEY,
+  source_fingerprint  TEXT NOT NULL,
+  source_path         TEXT NOT NULL,
+  started_at          BIGINT NOT NULL,
+  updated_at          BIGINT NOT NULL,
+  completed_at        BIGINT,
+  status              TEXT NOT NULL,
+  verification_status TEXT,
+  records_imported    JSONB NOT NULL DEFAULT '{}'::jsonb,
+  notes               JSONB NOT NULL DEFAULT '{}'::jsonb
+);
+
+CREATE TABLE IF NOT EXISTS migration_scope_progress (
+  run_id           TEXT NOT NULL REFERENCES migration_runs(run_id) ON DELETE CASCADE,
+  owner_scope      TEXT NOT NULL,
+  workspace_scope  TEXT NOT NULL,
+  stage            TEXT NOT NULL,
+  completed_at     BIGINT NOT NULL,
+  records_imported JSONB NOT NULL DEFAULT '{}'::jsonb,
+  PRIMARY KEY (run_id, owner_scope, workspace_scope, stage)
+);
+
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'migrapilot_app') THEN
+    GRANT SELECT, INSERT, UPDATE, DELETE ON migration_runs TO migrapilot_app;
+    GRANT SELECT, INSERT, UPDATE, DELETE ON migration_scope_progress TO migrapilot_app;
+  END IF;
+END $$;
+`;
+
+
 export const MIGRATIONS: readonly Migration[] = [
   { version: 1, name: 'foundation', sql: M1_FOUNDATION },
   { version: 2, name: 'tenancy_primitives', sql: M2_TENANCY },
@@ -644,6 +741,8 @@ export const MIGRATIONS: readonly Migration[] = [
   { version: 9, name: 'conversation_grounding', sql: M9_CONVERSATION_GROUNDING },
   { version: 10, name: 'parent_scope_integrity', sql: M10_PARENT_SCOPE_INTEGRITY },
   { version: 11, name: 'scoped_chunk_identity', sql: M11_SCOPED_CHUNK_IDENTITY },
+  { version: 12, name: 'migration_runs', sql: M12_MIGRATION_RUNS },
+  { version: 13, name: 'chunk_version_identity', sql: M13_CHUNK_VERSION_IDENTITY },
 ];
 
 /** Highest version defined in code. */
