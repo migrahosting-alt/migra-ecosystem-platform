@@ -1,4 +1,4 @@
--- 007_external_identity_providers.sql
+-- 009_external_identity_providers.sql
 -- Sign in with Google or GitHub, against the SAME canonical MigraAuth user.
 --
 -- The account model does not change. An external identity is a link to a user,
