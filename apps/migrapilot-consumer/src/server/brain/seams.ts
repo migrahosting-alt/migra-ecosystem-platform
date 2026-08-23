@@ -2,6 +2,7 @@ import 'server-only'
 
 import { callBrain, streamBrain, type BrainResult, type BrainStream, type GatewayDeps } from './gateway'
 import type { GroundingMode } from './operations'
+import type { UserPreferences } from '@migrapilot/shared-types/user-preferences'
 import type { AnonymousChatQuota } from '@migrapilot/shared-types/anonymous-quota'
 import type {
   ConversationMessage,
@@ -320,4 +321,32 @@ export function claimAnonymousConversation(
   deps?: GatewayDeps,
 ): Promise<BrainResult<{ ok: boolean; conversationId: string; claimed: boolean }>> {
   return callBrain({ kind: 'claimAnonymousConversation', ...input }, deps)
+}
+
+// ── Preferences ────────────────────────────────────────────────────────────
+
+/**
+ * How this caller likes MigraPilot to behave.
+ *
+ * MigraPilot-owned ONLY. Name, email, avatar, linked providers and sessions come
+ * from MigraAuth and are never mirrored here.
+ */
+export function getPreferences(
+  deps?: GatewayDeps,
+): Promise<BrainResult<{ ok: boolean; preferences: UserPreferences; stored: boolean; updatedAt: number }>> {
+  return callBrain({ kind: 'getPreferences' }, deps)
+}
+
+/** A partial update. The FULL document comes back, for the client to reconcile against. */
+export function patchPreferences(
+  patch: Record<string, unknown>,
+  deps?: GatewayDeps,
+): Promise<BrainResult<{ ok: boolean; preferences: UserPreferences; changed: string[] }>> {
+  return callBrain({ kind: 'patchPreferences', patch }, deps)
+}
+
+export function preferenceEvents(
+  deps?: GatewayDeps,
+): Promise<BrainResult<{ ok: boolean; events: { id: string; changedKeys: string[]; createdAt: number }[] }>> {
+  return callBrain({ kind: 'preferenceEvents' }, deps)
 }

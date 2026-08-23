@@ -95,6 +95,20 @@ export type BrainOperation =
    */
   | { kind: 'transcribe'; audioBase64: string; audioMime: string; requestedLanguage?: string }
 
+  // ── MigraPilot preferences ───────────────────────────────────────────────
+  /**
+   * The caller's own preferences. Identity is NOT here — MigraAuth owns name,
+   * email, avatar, providers and sessions, and a second copy would drift.
+   */
+  | { kind: 'getPreferences' }
+  /**
+   * A PARTIAL update. Only the keys present are touched, so a screen that knows
+   * about three preferences cannot blank the twelve it has never heard of.
+   */
+  | { kind: 'patchPreferences'; patch: Record<string, unknown> }
+  /** When audited preferences last changed. Keys only, never values. */
+  | { kind: 'preferenceEvents' }
+
   // ── anonymous allowance (signed-out visitors) ────────────────────────────
   /**
    * The visitor's remaining turns.
@@ -224,6 +238,39 @@ function anonymousOwner(value: string, sessionId: string): string {
     throw new InvalidOperationError('anonymousOwner must be anon: followed by anonymousSessionId.')
   }
   return value
+}
+
+/**
+ * A preference patch, bounded before it leaves this process.
+ *
+ * The Brain validates it again — this is not the security boundary — but an
+ * unbounded object forwarded from a browser is a payload nobody sized. Keys are
+ * capped in number and length so a patch cannot become a denial of service, and
+ * values are limited to the JSON primitives preferences are made of.
+ */
+function preferencePatch(patch: Record<string, unknown>): Record<string, unknown> {
+  if (!patch || typeof patch !== 'object' || Array.isArray(patch)) {
+    throw new InvalidOperationError('a preference patch must be an object.')
+  }
+  const entries = Object.entries(patch)
+  if (entries.length === 0) throw new InvalidOperationError('a preference patch must name at least one setting.')
+  if (entries.length > 40) throw new InvalidOperationError('too many preferences in one update.')
+
+  const out: Record<string, unknown> = {}
+  for (const [key, value] of entries) {
+    if (!/^[A-Za-z][A-Za-z0-9]{0,63}$/.test(key)) {
+      throw new InvalidOperationError(`'${key}' is not a valid preference name.`)
+    }
+    if (typeof value === 'string') {
+      if (value.length > 4000) throw new InvalidOperationError(`'${key}' is too long.`)
+      out[key] = value
+    } else if (typeof value === 'number' || typeof value === 'boolean') {
+      out[key] = value
+    } else {
+      throw new InvalidOperationError(`'${key}' must be a string, number or boolean.`)
+    }
+  }
+  return out
 }
 
 /** BCP-47-ish. Validated so a language field cannot become a path or a payload. */
@@ -392,6 +439,15 @@ export function resolveOperation(op: BrainOperation): ResolvedRequest {
           ...(op.requestedLanguage ? { requestedLanguage: languageCode(op.requestedLanguage) } : {}),
         },
       }
+
+    case 'getPreferences':
+      return { method: 'GET', path: '/api/ai/preferences' }
+
+    case 'patchPreferences':
+      return { method: 'PATCH', path: '/api/ai/preferences', body: preferencePatch(op.patch) }
+
+    case 'preferenceEvents':
+      return { method: 'GET', path: '/api/ai/preferences/events' }
 
     case 'anonymousQuota':
       return { method: 'GET', path: '/api/ai/anonymous/quota' }

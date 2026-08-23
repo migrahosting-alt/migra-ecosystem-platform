@@ -167,6 +167,15 @@ const OPERATION_AUDIENCE: Readonly<Record<string, OperationAudience>> = {
 
   // The transfer INTO an account. Never reachable by the visitor being claimed.
   claimAnonymousConversation: 'authenticated',
+
+  /*
+   * Preferences belong to whoever is asking. A signed-out visitor has a scope of
+   * their own, so their theme is theirs — and the isolation that makes that safe
+   * is the same row-level security every other scoped read relies on.
+   */
+  getPreferences: 'both',
+  patchPreferences: 'both',
+  preferenceEvents: 'both',
 }
 
 /** The audience for an operation. Unknown operations are authenticated-only. */
