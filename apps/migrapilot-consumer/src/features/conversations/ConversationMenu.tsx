@@ -118,7 +118,6 @@ export function ConversationMenu({
         type="button"
         onClick={(event) => {
           event.stopPropagation()
-          event.preventDefault()
           setOpen((value) => !value)
         }}
         aria-expanded={open}
@@ -133,10 +132,18 @@ export function ConversationMenu({
       {open && (
         <div
           role="menu"
-          onClick={(event) => {
-            event.stopPropagation()
-            event.preventDefault()
-          }}
+          /*
+           * STOP PROPAGATION, NEVER THE DEFAULT.
+           *
+           * Propagation is what has to stop: this menu sits inside a row that
+           * navigates on click. `preventDefault` was here too, and it silently
+           * cancelled the ONE default action the menu depends on — submitting
+           * the rename form. Every menu item is `type="button"`, so nothing else
+           * noticed: the menu opened, the form appeared, the field accepted
+           * text, Save reported no error, and no request was ever sent. Found by
+           * operating the control on production, not by any test of the route.
+           */
+          onClick={(event) => event.stopPropagation()}
           className={cn(
             'animate-scale-in absolute z-40 mt-2 w-64 rounded-card border border-hairline bg-white p-1.5 shadow-raised',
             align === 'right' ? 'right-0' : 'left-0',
