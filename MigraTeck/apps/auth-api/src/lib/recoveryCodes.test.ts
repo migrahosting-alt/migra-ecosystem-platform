@@ -114,3 +114,51 @@ test("the stale flag reaches the surface that can act on it", () => {
   assert.match(routes, /recovery_codes_stale: recoveryStale/);
   assert.match(routes, /recoveryCodesAreStale\(user\.id\)/);
 });
+
+test("recovery codes can be replaced WITHOUT disabling the second factor", () => {
+  /*
+   * THE USER-FACING CONSEQUENCE OF THE HISTORICAL DEFECT. Detecting stale sets
+   * is not enough: until this route existed, the only way to obtain a working
+   * set was to turn MFA OFF and enrol again — asking someone to remove their
+   * second factor in order to repair its backup, with a window where they had
+   * neither.
+   */
+  const routes = readFileSync(join(process.cwd(), "src", "routes", "mfa.ts"), "utf8");
+  const start = routes.indexOf('app.post("/v1/mfa/recovery-codes"');
+  assert.ok(start > 0, "the regenerate route must exist");
+  const handler = routes.slice(start, routes.indexOf("  app.", start + 10));
+
+  assert.match(handler, /preHandler: requireAuthenticatedUser/);
+  // Only meaningful when a second factor exists to back up.
+  assert.match(handler, /hasTotpEnabled/);
+  assert.match(handler, /code: "mfa_not_enabled"/);
+  // It must NOT turn the factor off as a side effect.
+  assert.doesNotMatch(handler, /disableTotp/, "regenerating must never disable MFA");
+
+  /*
+   * Ordered cheapest-to-most-consuming, exactly as `/v1/mfa/disable` is: a
+   * recovery code is never spent on a request the password or a live code would
+   * have satisfied.
+   */
+  const pwAt = handler.indexOf("verifyUserPassword");
+  const totpAt = handler.indexOf("verifyTotp(");
+  const recAt = handler.indexOf("consumeRecoveryCode(");
+  assert.ok(pwAt > 0 && totpAt > pwAt && recAt > totpAt, "proofs must be tried cheapest first");
+
+  assert.match(handler, /eventType: "MFA_RECOVERY_CODES_REGENERATED"/);
+  assert.match(handler, /recovery_codes: codes/, "the plaintext is returned exactly once");
+});
+
+test("replacing a set is atomic — never neither old nor new", () => {
+  /*
+   * The two halves are a delete and a create. Unwrapped, a failure between them
+   * destroys the old set without writing the new one, leaving the account with
+   * NO recovery codes while the person reads a freshly printed sheet that never
+   * reached the server.
+   */
+  assert.match(mfa, /await db\.\$transaction\(\[/);
+  const tx = mfa.slice(mfa.indexOf("await db.$transaction(["));
+  const body = tx.slice(0, tx.indexOf("]);"));
+  assert.match(body, /deleteMany/);
+  assert.match(body, /create/);
+});

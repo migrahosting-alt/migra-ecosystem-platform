@@ -50,6 +50,7 @@ export interface ActiveSession {
  */
 export interface AccountSecurity {
   mfa_enabled: boolean
+  recovery_codes_stale: boolean
   has_password: boolean
   password_updated_at: string | null
   email_verified: boolean

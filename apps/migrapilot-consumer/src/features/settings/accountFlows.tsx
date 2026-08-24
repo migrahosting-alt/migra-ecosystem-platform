@@ -397,6 +397,188 @@ export function MfaEnrollment({ onEnrolled }: { onEnrolled: () => void }) {
 }
 
 /**
+ * Replacing recovery codes without touching the second factor.
+ *
+ * WHY THIS IS A CONTROL AND NOT A SENTENCE OF ADVICE. Every set issued before
+ * the store/consume hash mismatch was fixed is unredeemable, and the only route
+ * to a working set was to turn MFA OFF and enrol again — asking people to remove
+ * their second factor in order to repair its backup, and leaving them with
+ * neither in between. Anyone holding a printed sheet from before that fix has
+ * something that looks like a way back in and is not.
+ *
+ * THE WARNING IS SHOWN ONLY WHEN IT IS TRUE. `recovery_codes_stale` comes from
+ * the server, which knows whether a set was written under the corrected
+ * normalization. Nagging everyone would teach people to dismiss the one banner
+ * that matters.
+ */
+export function MfaRecoveryCodes({
+  hasPassword,
+  stale,
+  onRegenerated,
+}: {
+  hasPassword: boolean
+  stale: boolean
+  onRegenerated: () => void
+}) {
+  const [open, setOpen] = useState(false)
+  const [secret, setSecret] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [codes, setCodes] = useState<string[]>([])
+  const [copied, setCopied] = useState(false)
+
+  const regenerate = async (event: React.FormEvent) => {
+    event.preventDefault()
+    setBusy(true)
+    setError(null)
+    try {
+      const response = await fetch('/api/account/mfa/recovery-codes', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        // A password-holder may still prefer a code; the server tries both.
+        body: JSON.stringify(hasPassword ? { password: secret, code: secret } : { code: secret }),
+      })
+      const body = (await response.json().catch(() => null)) as
+        | { recoveryCodes?: string[]; message?: string }
+        | null
+      if (!response.ok || !body?.recoveryCodes) {
+        setError(body?.message ?? 'Your recovery codes could not be replaced.')
+        return
+      }
+      setSecret('')
+      setCodes(body.recoveryCodes)
+      setOpen(false)
+      onRegenerated()
+    } catch {
+      setError('That could not be done. Check your connection.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  /*
+   * THE ONE TIME THESE EXIST. Only hashes are stored, so there is no "show them
+   * again" — and once they are on screen the stale warning is gone, so this
+   * block has to carry the whole weight of "write these down".
+   */
+  if (codes.length > 0) {
+    return (
+      <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-4">
+        <p className="flex items-center gap-1.5 text-[13px] font-semibold text-amber-900">
+          <ShieldCheck className="h-4 w-4 shrink-0" />
+          Save your new recovery codes now
+        </p>
+        <p className="mt-1 text-[13px] leading-relaxed text-amber-800">
+          These replace every code you had before. They are shown once and cannot be shown again.
+        </p>
+        <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 font-mono text-[13px] text-amber-900">
+          {codes.map((c) => (
+            <span key={c} data-testid="mfa-new-recovery-code">
+              {c}
+            </span>
+          ))}
+        </div>
+        <button
+          type="button"
+          onClick={() => {
+            void navigator.clipboard?.writeText(codes.join('\n'))
+            setCopied(true)
+          }}
+          className="mt-2.5 inline-flex items-center gap-1.5 text-[13px] font-semibold text-amber-900 hover:text-amber-950"
+        >
+          {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+          {copied ? 'Copied' : 'Copy codes'}
+        </button>
+      </div>
+    )
+  }
+
+  if (!open) {
+    return (
+      <div className="mt-3">
+        {stale ? (
+          <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+            <p className="text-[13px] font-semibold text-amber-900">
+              Your recovery codes need replacing
+            </p>
+            {/*
+              SAYS PLAINLY THAT THEY DO NOT WORK. Softening this to "we recommend
+              refreshing" would leave someone believing the sheet in their drawer
+              is a fallback. It is not, and they will only discover that while
+              locked out.
+            */}
+            <p className="mt-1 text-[13px] leading-relaxed text-amber-800">
+              The codes you were given previously cannot be used to sign in. Replace them now — your
+              authenticator keeps working and stays set up.
+            </p>
+            <button
+              type="button"
+              onClick={() => setOpen(true)}
+              data-testid="mfa-regenerate-open"
+              className={cn(secondary, 'mt-2.5')}
+            >
+              Regenerate recovery codes
+            </button>
+          </div>
+        ) : (
+          <button
+            type="button"
+            onClick={() => setOpen(true)}
+            data-testid="mfa-regenerate-open"
+            className={secondary}
+          >
+            Regenerate recovery codes
+          </button>
+        )}
+      </div>
+    )
+  }
+
+  return (
+    <form onSubmit={regenerate} className="mt-4 rounded-xl border border-hairline bg-slate-50/60 p-4">
+      <label htmlFor="mfa-regen-secret" className="block text-[15px] font-medium text-slate-800">
+        Confirm it is you
+      </label>
+      <p className="mt-0.5 text-[13px] leading-relaxed text-slate-500">
+        {hasPassword
+          ? 'Enter your password, a code from your authenticator, or a recovery code.'
+          : 'Enter a code from your authenticator app, or one of your recovery codes.'}
+      </p>
+      <p className="mt-1.5 text-[13px] leading-relaxed text-slate-500">
+        This replaces every code you have now. Two-step verification stays on.
+      </p>
+      <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+        <input
+          id="mfa-regen-secret"
+          type={hasPassword ? 'password' : 'text'}
+          required
+          value={secret}
+          onChange={(event) => setSecret(event.target.value)}
+          className="h-10 flex-1 rounded-field border border-slate-300 bg-raised px-3 text-[15px] text-slate-900 outline-none focus:border-brand-border"
+        />
+        <div className="flex gap-2">
+          <button type="submit" disabled={busy} className={primary} data-testid="mfa-regenerate-submit">
+            {busy ? 'Replacing…' : 'Replace codes'}
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setOpen(false)
+              setSecret('')
+              setError(null)
+            }}
+            className={secondary}
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
+      {error ? <p className="mt-2 text-[13px] text-rose-600">{error}</p> : null}
+    </form>
+  )
+}
+
+/**
  * Turning it off.
  *
  * WHAT IT ASKS FOR DEPENDS ON WHAT THE ACCOUNT HAS. An account created through

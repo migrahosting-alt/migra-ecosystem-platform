@@ -31,6 +31,7 @@ import {
   EmailChangeFlow,
   MfaDisable,
   MfaEnrollment,
+  MfaRecoveryCodes,
 } from './accountFlows'
 import type { AccountController } from './useAccount'
 import type { PreferencesController } from './usePreferences'
@@ -493,7 +494,21 @@ export function SecurityCard({ controller }: { controller: AccountController }) 
         */}
         {security !== null &&
           (security.mfa_enabled ? (
-            <MfaDisable hasPassword={security.has_password} onDisabled={controller.reload} />
+            <>
+              {/*
+                REGENERATION IS NOT A DISABLE. Until this existed, replacing
+                recovery codes meant turning the second factor OFF and enrolling
+                again — and anyone whose codes predate the store/consume fix is
+                holding a sheet that cannot sign them in. The warning inside says
+                so plainly when it applies.
+              */}
+              <MfaRecoveryCodes
+                hasPassword={security.has_password}
+                stale={security.recovery_codes_stale}
+                onRegenerated={controller.reload}
+              />
+              <MfaDisable hasPassword={security.has_password} onDisabled={controller.reload} />
+            </>
           ) : (
             <MfaEnrollment onEnrolled={controller.reload} />
           ))}

@@ -19,6 +19,8 @@ export const dynamic = 'force-dynamic'
 /** MigraAuth's answer to "what can this account actually do?". */
 interface SecurityResponse {
   mfa_enabled: boolean
+  /** True when this account holds recovery codes that CANNOT be redeemed. */
+  recovery_codes_stale: boolean
   has_password: boolean
   password_updated_at: string | null
   email_verified: boolean

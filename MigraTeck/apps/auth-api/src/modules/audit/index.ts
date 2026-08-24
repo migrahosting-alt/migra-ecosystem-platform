@@ -35,6 +35,14 @@ const AUTH_EVENT_TYPES = new Set([
   "MFA_VERIFY",
   "MFA_DISABLE",
   /*
+   * Replacing the fallback set is a security-relevant act in its own right: it
+   * invalidates every code the person was holding, and the timeline should show
+   * who did that and when — especially since a lost authenticator and an
+   * attacker refreshing their own foothold look identical without it.
+   */
+  "MFA_RECOVERY_CODES_REGENERATED",
+  "MFA_RECOVERY_CODES_FAILURE",
+  /*
    * Changing the address an account is reached at, and closing it, are among
    * the most consequential things anyone can do to an account — the first
    * redirects every future password reset, the second ends all access. Both

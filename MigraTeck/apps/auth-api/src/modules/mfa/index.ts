@@ -286,19 +286,28 @@ export async function storeRecoveryCodes(
   // Hashed through the SAME normalization the consume path applies. Storing the
   // raw form is what made every issued code unusable.
   const hashed = codes.map((code) => hashToken(normalizeRecoveryCode(code)));
-  // Remove existing recovery codes first
-  await db.userCredential.deleteMany({
-    where: { userId, type: "RECOVERY_CODE" },
-  });
-  await db.userCredential.create({
-    data: {
-      userId,
-      type: "RECOVERY_CODE",
-      metadata: { codes: hashed, v: RECOVERY_CODE_VERSION },
-      priority: 0,
-      isEnabled: true,
-    },
-  });
+
+  /*
+   * ATOMIC, because the two halves are a delete and a create.
+   *
+   * Unwrapped, a failure between them leaves the account with NO recovery codes
+   * at all — the old set destroyed, the new one never written — while the person
+   * is looking at a freshly printed sheet that has never existed on the server.
+   * That is strictly worse than either outcome on its own, and it lands on
+   * someone who came here specifically to secure their fallback.
+   */
+  await db.$transaction([
+    db.userCredential.deleteMany({ where: { userId, type: "RECOVERY_CODE" } }),
+    db.userCredential.create({
+      data: {
+        userId,
+        type: "RECOVERY_CODE",
+        metadata: { codes: hashed, v: RECOVERY_CODE_VERSION },
+        priority: 0,
+        isEnabled: true,
+      },
+    }),
+  ]);
 }
 
 export async function consumeRecoveryCode(

@@ -8,6 +8,7 @@ import {
   confirmTotpEnrollment,
   verifyTotp,
   disableTotp,
+  hasTotpEnabled,
   generateRecoveryCodes,
   storeRecoveryCodes,
   consumeRecoveryCode,
@@ -190,6 +191,94 @@ export async function mfaRoutes(app: FastifyInstance): Promise<void> {
     }
 
     return reply.code(200).send({ message: "TOTP verified.", verified: true });
+  });
+
+  /**
+   * ── POST /v1/mfa/recovery-codes ──────────────────────────────────
+   *
+   * Replace this account's recovery codes with a fresh set.
+   *
+   * WHY THIS ROUTE HAD TO EXIST. Every set issued before the store/consume hash
+   * mismatch was fixed is structurally unredeemable, and the only way to get a
+   * working one was to DISABLE MFA and enrol again — telling people to remove
+   * their second factor in order to repair their fallback, and handing them a
+   * window with neither. That is a worse instruction than the problem.
+   *
+   * ONLY WHEN MFA IS ON. Recovery codes exist to answer a challenge; minting
+   * them for an account with no second factor creates a standing credential
+   * nothing asked for and nothing will ever demand.
+   *
+   * RE-AUTHENTICATED WITH WHATEVER THIS ACCOUNT HAS, in the same order as
+   * `/v1/mfa/disable`: password, then an authenticator code, then a recovery
+   * code last so one is never spent on a request a cheaper proof would have
+   * satisfied. A recovery code IS accepted, deliberately — someone whose
+   * authenticator is gone is exactly who needs a fresh set, and refusing them
+   * here would recreate the dead end this route removes.
+   *
+   * SHOWN ONCE. The response is the only time the plaintext exists; only hashes
+   * are stored, so there is no endpoint that can ever show them again.
+   */
+  app.post("/v1/mfa/recovery-codes", { preHandler: requireAuthenticatedUser }, async (request, reply) => {
+    const user = request.authUser!;
+    const body = mfaDisableSchema.parse(request.body);
+    const ip = getClientIp(request);
+    const ua = request.headers["user-agent"];
+
+    if (!(await hasTotpEnabled(user.id))) {
+      return reply.code(409).send({
+        error: {
+          code: "mfa_not_enabled",
+          message: "Turn on two-step verification first — recovery codes back up a second factor.",
+        },
+      });
+    }
+
+    let method: "password" | "totp" | "recovery_code" | null = null;
+    if (body.password && (await verifyUserPassword(user, body.password))) method = "password";
+    if (!method && body.code) {
+      if (await verifyTotp(user.id, body.code)) method = "totp";
+      else if (await consumeRecoveryCode(user.id, body.code)) method = "recovery_code";
+    }
+
+    if (!method) {
+      await logAuditEvent({
+        actorUserId: user.id,
+        eventType: "MFA_RECOVERY_CODES_FAILURE",
+        eventData: { reason: "reauthentication_failed" },
+        ipAddress: ip,
+        userAgent: ua,
+      });
+      return reply.code(401).send({
+        error: {
+          code: "reauthentication_failed",
+          message: "That did not match. Use your password, an authenticator code, or a recovery code.",
+        },
+      });
+    }
+
+    /*
+     * The previous set is replaced atomically by `storeRecoveryCodes`, so there
+     * is no instant where the account holds neither the old codes nor the new.
+     * A code consumed to authorise THIS request is discarded with the rest of
+     * the set it belonged to, which is the intended outcome.
+     */
+    const codes = generateRecoveryCodes(10);
+    await storeRecoveryCodes(user.id, codes);
+
+    await logAuditEvent({
+      actorUserId: user.id,
+      eventType: "MFA_RECOVERY_CODES_REGENERATED",
+      // How it was authorised, and how many now exist. Never the codes.
+      eventData: { reauthenticated_with: method, count: codes.length },
+      ipAddress: ip,
+      userAgent: ua,
+    });
+
+    return reply.code(200).send({
+      recovery_codes: codes,
+      count: codes.length,
+      message: "These replace any codes you had before. Save them now — they cannot be shown again.",
+    });
   });
 
   // ── POST /v1/mfa/disable ─────────────────────────────────────────
