@@ -73,6 +73,15 @@ export type BrainOperation =
   | { kind: 'answer'; prompt: string; tier?: 'local' | 'cloud' }
   // ── document indexes (the Files library) ─────────────────────────────────
   | { kind: 'listIndexes' }
+  /**
+   * Whether an image turn could actually be answered right now.
+   *
+   * Asked of the BRAIN rather than assumed by this app: the vision registry is
+   * fail-closed — models are installed but unusable until qualified — so
+   * "an image uploaded" and "an image can be understood" are different facts and
+   * only the Brain knows the second one.
+   */
+  | { kind: 'visionCapability' }
   | { kind: 'createDocsIndex'; root: string }
   | { kind: 'syncIndex'; indexId: string }
   | { kind: 'indexStatus'; indexId: string }
@@ -390,6 +399,9 @@ export function resolveOperation(op: BrainOperation): ResolvedRequest {
 
     case 'listIndexes':
       return { method: 'GET', path: '/api/ai/indexes' }
+
+    case 'visionCapability':
+      return { method: 'GET', path: '/api/ai/vision-registry' }
 
     case 'createDocsIndex':
       // `root` is a path, which is exactly the thing this module exists to keep
