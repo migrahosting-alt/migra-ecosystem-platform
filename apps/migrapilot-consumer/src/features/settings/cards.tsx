@@ -324,6 +324,47 @@ export function ConnectedAccountsCard({ controller }: { controller: AccountContr
         </ul>
       )}
 
+      {/*
+        THE SAFEGUARD EXPLAINS ITSELF, IN PLACE.
+        A disabled button with a tooltip states a RULE; it does not tell anyone
+        what to do about it, and tooltips are unreachable on touch — which is
+        most of the people who would hit this. So when removal is blocked the
+        card says why AND names the two ways out, next to the control.
+
+        IT ALSO SAYS WHAT THIS IS NOT. "You cannot remove your only sign-in
+        method" is easily read as "you cannot leave", so the note points at
+        account closure explicitly and separately. Blocking a removal protects
+        access; closing an account ends it. Conflating them would make a safety
+        feature look like a trap.
+      */}
+      {providers !== null && providers.length > 0 && security && !security.can_unlink_a_provider && (
+        <div className="mt-3 rounded-xl border border-hairline bg-slate-50 px-4 py-3">
+          <p className="text-[13px] leading-relaxed text-slate-700">
+            <strong className="font-semibold">
+              This is the only way to sign in, so it cannot be removed.
+            </strong>{' '}
+            Add a second method first — connect another account below, or set a password on your
+            MigraTeck account — and then this can be removed.
+          </p>
+          <div className="mt-2.5 flex flex-wrap gap-2">
+            <a
+              href="https://auth.migrateck.com/sessions"
+              className="inline-flex h-9 items-center rounded-field border border-slate-300 bg-raised px-3 text-[13px] font-semibold text-slate-700 transition-colors hover:border-slate-400 hover:bg-slate-50"
+            >
+              Set a password
+            </a>
+          </div>
+          <p className="mt-2.5 text-[13px] leading-relaxed text-slate-500">
+            Trying to close your account entirely? That is a separate action, under
+            <a href="#danger" className="font-semibold text-brand-text hover:text-brand-text-hover">
+              {' '}
+              Delete history
+            </a>
+            .
+          </p>
+        </div>
+      )}
+
       {error && (
         <p role="alert" className="mt-3 text-[13px] leading-relaxed text-red-600">
           {error}

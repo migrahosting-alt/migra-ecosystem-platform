@@ -61,9 +61,21 @@ export async function DELETE(request: Request): Promise<Response> {
     return Response.json(
       {
         error: code,
+        /*
+         * The safeguard's own wording is relayed, then EXTENDED with the second
+         * way out. MigraAuth says "set a password first"; a person signed in
+         * with Google may not want a password at all, and connecting a second
+         * provider is the easier remedy — so both are named.
+         *
+         * It also states what this is NOT: refusing to remove a last sign-in
+         * method reads as "you are stuck here" unless closing the account is
+         * named as the separate thing it is.
+         */
         message:
-          result.value?.error?.message ??
-          'That sign-in method could not be removed. Nothing was changed.',
+          code === 'last_sign_in_method'
+            ? 'This is the only way to sign in to your account, so it was not removed. Add another sign-in method first — connect a second account, or set a password — and then you can remove this one. (Closing your account entirely is a separate action.)'
+            : (result.value?.error?.message ??
+              'That sign-in method could not be removed. Nothing was changed.'),
       },
       { status: code === 'last_sign_in_method' ? 409 : 400 },
     )

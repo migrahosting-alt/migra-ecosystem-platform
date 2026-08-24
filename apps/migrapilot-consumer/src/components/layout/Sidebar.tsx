@@ -24,8 +24,14 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const router = useRouter()
   const pathname = usePathname()
 
+  /*
+   * `from-canvas`, NOT `from-white`. This gradient shipped a light sidebar
+   * beside a dark page: the migration replaced `bg-white` everywhere and never
+   * looked at GRADIENT STOPS, so `to-slate-50` themed correctly while
+   * `from-white` stayed literally white. A colour utility is not only `bg-*`.
+   */
   return (
-    <div className="flex h-full w-[264px] shrink-0 flex-col border-r border-hairline bg-linear-to-b from-white to-slate-50/80 px-5 py-6">
+    <div className="flex h-full w-[264px] shrink-0 flex-col border-r border-hairline bg-linear-to-b from-canvas to-slate-50/80 px-5 py-6">
       <button
         onClick={() => {
           router.push('/')
