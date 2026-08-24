@@ -191,7 +191,7 @@ export function getClientIp(request: FastifyRequest): string | undefined {
  * disagree. One definition, in `modules/authorization/platformRoles.ts`.
  */
 export function requirePermission(permission: PlatformPermission) {
-  return async function guard(request: FastifyRequest, reply: FastifyReply): Promise<void> {
+  const guard = async function guard(request: FastifyRequest, reply: FastifyReply): Promise<void> {
     await requireAuthenticatedUser(request, reply);
     if (reply.sent) return;
 
@@ -243,6 +243,29 @@ export function requirePermission(permission: PlatformPermission) {
       });
     }
   };
+
+  /*
+   * TAGGED SO A RELEASE GATE CAN READ THE ROUTE TABLE, NOT THE SOURCE TEXT.
+   *
+   * A grep for `app.post("` missed `app.post<{ Params: … }>("` and would have
+   * shipped the MFA-reset route unguarded. Fastify knows exactly which
+   * preHandlers each route carries; marking the guard lets that registry be
+   * inspected directly, so a route is provably authorized rather than
+   * apparently so.
+   */
+  (guard as GuardWithPermission).platformPermission = permission;
+  return guard;
+}
+
+/** A `requirePermission` guard, identifiable in a registered route's handlers. */
+export type GuardWithPermission = ((
+  request: FastifyRequest,
+  reply: FastifyReply,
+) => Promise<void>) & { platformPermission?: PlatformPermission };
+
+/** The permission a preHandler enforces, or null if it is not one of ours. */
+export function permissionOfGuard(handler: unknown): PlatformPermission | null {
+  return (handler as GuardWithPermission | undefined)?.platformPermission ?? null;
 }
 
 /**

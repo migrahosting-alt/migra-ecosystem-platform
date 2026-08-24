@@ -17,7 +17,8 @@
     "verify:prisma-client": "node scripts/verify-prisma-client.mjs",
     "verify:auth-health": "node scripts/verify-auth-health.mjs",
     "verify:mfa-matrix": "node scripts/verify-mfa-matrix.mjs",
-    "build:release": "tsc -p tsconfig.json && node scripts/verify-prisma-client.mjs"
+    "verify:admin-guards": "node scripts/verify-admin-guards.mjs",
+    "build:release": "tsc -p tsconfig.json && node scripts/verify-prisma-client.mjs && node scripts/verify-admin-guards.mjs"
   },
   "dependencies": {
     "@migrateck/billing-core": "workspace:*",
