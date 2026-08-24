@@ -30,7 +30,8 @@ import {
 import { consumeLoginState, createLoginState } from "../modules/social/state.js";
 import { listLinkedIdentities, resolveProviderSignIn, unlinkProvider } from "../modules/social/index.js";
 import { defaultReturnTo, errorReturnTo, safeReturnTo, withOutcome } from "../modules/social/redirect.js";
-import { establishFirstPartySession } from "./auth.js";
+import { establishFirstPartySession, setSessionCookie } from "./auth.js";
+import { hasTotpEnabled } from "../modules/mfa/index.js";
 import {
   attachProvider,
   consumeTransaction,
@@ -39,6 +40,8 @@ import {
 import { logAuditEvent } from "../modules/audit/index.js";
 import { revokeAllUserSessions } from "../modules/sessions/index.js";
 import { createAuthCode } from "../modules/tokens/index.js";
+import { createAuthSession } from "../modules/sessions/index.js";
+import { config } from "../config/env.js";
 import { updateLastLogin } from "../modules/users/index.js";
 import { requireAuthenticatedUser, optionalSession, getClientIp } from "../middleware/session.js";
 import type { IdentityProvider } from "../prisma-client.js";
@@ -290,6 +293,48 @@ export async function socialRoutes(app: FastifyInstance): Promise<void> {
      * authority of whoever just signed in.
      */
     await revokeAllUserSessions(result.user.id);
+
+    /*
+     * ── SECOND FACTOR, BEFORE THE SIGN-IN IS COMPLETE ─────────────────
+     *
+     * MFA used to be enforced in exactly one place — `POST /v1/login`, the
+     * PASSWORD path — so a person who turned on two-step verification and signed
+     * in with Google or GitHub was never asked for it. For a provider-only
+     * account the factor was decorative: no path ever demanded it. The provider
+     * proving an identity is not the same as the account owner proving presence,
+     * which is the entire premise of a second factor.
+     *
+     * A HALF SESSION, exactly as the password path issues: the session cookie
+     * establishes WHO is answering the challenge, and nothing more. No refresh
+     * token is minted and no transaction is consumed, so an abandoned challenge
+     * leaves the person no more signed in than before — and the pending
+     * authorization is still there to resume if they finish.
+     */
+    if (await hasTotpEnabled(result.user.id)) {
+      const { sessionSecret } = await createAuthSession(result.user.id, ip, ua);
+      setSessionCookie(reply, sessionSecret);
+
+      await logAuditEvent({
+        actorUserId: result.user.id,
+        eventType: "MFA_CHALLENGE_REQUIRED",
+        eventData: { provider: slug, path: "social" },
+        ipAddress: ip,
+        userAgent: ua,
+      });
+
+      const challenge = new URL("/mfa", config.webUrl);
+      /*
+       * The challenge carries the SAME opaque handles the flow already had — a
+       * transaction id, or an allowlisted destination — never reconstructed
+       * request parameters. Finishing the factor must not become a second chance
+       * to influence what is being completed.
+       */
+      if (state.transactionId) challenge.searchParams.set("txn", state.transactionId);
+      else challenge.searchParams.set("return_to", returnTo);
+
+      return void reply.redirect(challenge.toString(), 302);
+    }
+
     await establishFirstPartySession({ reply, userId: result.user.id, ip, userAgent: ua });
     await updateLastLogin(result.user.id);
 

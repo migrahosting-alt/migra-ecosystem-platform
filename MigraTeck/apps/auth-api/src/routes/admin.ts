@@ -1,6 +1,7 @@
 /**
  * Admin routes — user management, audit log access.
- * These should be protected by admin role checks in production.
+ * Protected by `requireAdmin`: an explicit operator allowlist that authorizes
+ * nobody when unset. Previously these were open to any signed-in user.
  */
 import type { FastifyInstance } from "fastify";
 import {
@@ -13,8 +14,9 @@ import {
 import { db } from "../lib/db.js";
 import { findUserById, lockUser, unlockUser, disableUser } from "../modules/users/index.js";
 import { logAuditEvent } from "../modules/audit/index.js";
+import { hasTotpEnabled, disableTotp } from "../modules/mfa/index.js";
 import { listUserSessions } from "../modules/sessions/index.js";
-import { requireAuthenticatedUser, getClientIp } from "../middleware/session.js";
+import { requireAdmin, getClientIp } from "../middleware/session.js";
 
 function serializeAuditLog(log: {
   id: string;
@@ -83,8 +85,16 @@ function serializeAdminClient(client: {
 }
 
 export async function adminRoutes(app: FastifyInstance): Promise<void> {
-  // All admin routes require an authenticated operator (should also require admin role in production)
-  app.addHook("preHandler", requireAuthenticatedUser);
+  /*
+   * OPERATOR-ONLY, DENY BY DEFAULT.
+   *
+   * This hook was `requireAuthenticatedUser` — "is signed in" — which made every
+   * route below reachable by any MigraPilot consumer: enumerate all users, read
+   * the whole audit log, read OAuth client configuration, disable or lock ANY
+   * account. `requireAdmin` authorizes against an explicit allowlist and
+   * authorizes nobody when it is unset.
+   */
+  app.addHook("preHandler", requireAdmin);
 
   // ── GET /v1/admin/users ───────────────────────────────────────────
   app.get("/v1/admin/users", async (request, reply) => {
@@ -323,4 +333,48 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       offset: query.offset,
     });
   });
+
+  /**
+   * ── POST /v1/admin/users/:id/mfa/reset ───────────────────────────
+   *
+   * Clear a user's TOTP enrolment and recovery codes.
+   *
+   * WHY THIS HAS TO EXIST. Two-step verification is the one credential a user
+   * can lose completely: the authenticator is on a device that can be wiped, and
+   * the recovery codes are shown exactly once. Without an operator path, such an
+   * account is unrecoverable — the disable endpoint requires precisely the thing
+   * that was lost. Support cannot fix it, and neither can the owner.
+   *
+   * IT REMOVES A FACTOR, SO IT IS LOUD. The event names the target, not just the
+   * actor, because "an operator turned off someone's second factor" is exactly
+   * the action an audit trail exists to record.
+   *
+   * It does NOT touch sessions, providers or the password. Resetting a lost
+   * factor is not a reason to sign someone out of everything.
+   */
+  app.post<{ Params: { id: string } }>("/v1/admin/users/:id/mfa/reset", async (request, reply) => {
+    const { id } = adminUserIdSchema.parse(request.params);
+    const target = await findUserById(id);
+    if (!target) {
+      return reply.code(404).send({ error: { code: "not_found", message: "No such user." } });
+    }
+
+    const hadTotp = await hasTotpEnabled(target.id);
+    await disableTotp(target.id);
+    await db.userCredential.deleteMany({
+      where: { userId: target.id, type: "RECOVERY_CODE" },
+    });
+
+    await logAuditEvent({
+      actorUserId: request.authUser!.id,
+      targetUserId: target.id,
+      eventType: "ADMIN_MFA_RESET",
+      eventData: { had_totp: hadTotp },
+      ipAddress: getClientIp(request),
+      userAgent: request.headers["user-agent"],
+    });
+
+    return reply.code(200).send({ reset: true, had_totp: hadTotp });
+  });
+
 }

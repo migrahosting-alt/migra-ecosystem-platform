@@ -20,6 +20,9 @@ function MfaForm() {
   const searchParams = useSearchParams();
   const clientId = searchParams.get("client_id");
   const redirectUri = searchParams.get("redirect_uri");
+  /** Set when a SOCIAL sign-in was interrupted for the second factor. */
+  const txn = searchParams.get("txn");
+  const returnTo = searchParams.get("return_to");
   const state = searchParams.get("state");
   const codeChallenge = searchParams.get("code_challenge");
   const codeChallengeMethod = searchParams.get("code_challenge_method");
@@ -42,6 +45,43 @@ function MfaForm() {
   }, [method]);
 
   async function completeOAuthFlow() {
+    /*
+     * ── RESUMING A SOCIAL SIGN-IN ─────────────────────────────────────
+     *
+     * This page was written for the PASSWORD path, where the browser still
+     * carries the authorize parameters and can complete the flow itself. A
+     * social sign-in has none of them: the request lives in a durable
+     * transaction on the server, and the callback sent only its opaque id.
+     *
+     * So the transaction branch comes FIRST and resumes from server state.
+     * Falling through to `/authorize/complete` would ask the browser for a
+     * client_id and redirect_uri it does not have — and reconstructing them
+     * from the URL is exactly the pattern the durable transaction exists to
+     * prevent.
+     */
+    if (txn) {
+      const resumed = await authFetch<{ redirect_to?: string }>("/authorize/resume", {
+        method: "POST",
+        body: { transaction_id: txn },
+      });
+      if (resumed.ok && resumed.data.redirect_to) {
+        window.location.href = resumed.data.redirect_to;
+        return;
+      }
+      router.push("/error?code=transaction_unavailable");
+      return;
+    }
+
+    /*
+     * A social sign-in with no pending authorization — someone signing in to
+     * MigraAuth itself. The destination was allowlisted server-side before it
+     * reached this page; it is not re-derived here.
+     */
+    if (returnTo) {
+      window.location.href = returnTo;
+      return;
+    }
+
     if (!clientId || !redirectUri) {
       router.push("/");
       return;
