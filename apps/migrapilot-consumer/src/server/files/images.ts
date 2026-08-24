@@ -64,13 +64,105 @@ export function sniffImageMime(data: Uint8Array): ImageMime | null {
   return null
 }
 
+export interface ImageDimensions {
+  width: number
+  height: number
+}
+
+/**
+ * Pixel dimensions, read from the HEADER only.
+ *
+ * WHY DIMENSIONS ARE A LIMIT AT ALL. Byte size does not bound pixel count: a
+ * 2 MB PNG can be 30000×30000, which is a decompression bomb for anything that
+ * later decodes it — and a vision model tiles by pixels, so an enormous image is
+ * also an enormous inference bill in tokens. Refusing at intake is the only
+ * place it costs nothing.
+ *
+ * NO DECODER IS USED. Each format states its size in a fixed, documented place
+ * near the start; reading those few bytes cannot execute anything, which is the
+ * whole point of not reaching for an image library on an upload path.
+ */
+export function readImageDimensions(data: Uint8Array, mime: ImageMime): ImageDimensions | null {
+  const view = new DataView(data.buffer, data.byteOffset, data.byteLength)
+
+  if (mime === 'image/png') {
+    // IHDR is the first chunk: width/height are big-endian at 16 and 20.
+    if (data.length < 24) return null
+    return { width: view.getUint32(16, false), height: view.getUint32(20, false) }
+  }
+
+  if (mime === 'image/gif') {
+    // Logical screen descriptor, little-endian, immediately after the 6-byte header.
+    if (data.length < 10) return null
+    return { width: view.getUint16(6, true), height: view.getUint16(8, true) }
+  }
+
+  if (mime === 'image/jpeg') {
+    /*
+     * JPEG has no fixed offset: the size lives in a Start-Of-Frame marker that
+     * appears after a variable run of other segments. So the marker chain is
+     * walked, bounded by the buffer — a malformed file must end the scan, never
+     * spin on it.
+     */
+    let offset = 2
+    while (offset + 9 < data.length) {
+      if (data[offset] !== 0xff) { offset += 1; continue }
+      const marker = data[offset + 1] ?? 0
+      // SOF0..SOF15, excluding the non-frame markers DHT(C4), JPG(C8), DAC(CC).
+      if (marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc) {
+        return { height: view.getUint16(offset + 5, false), width: view.getUint16(offset + 7, false) }
+      }
+      const segmentLength = view.getUint16(offset + 2, false)
+      if (segmentLength < 2) return null
+      offset += 2 + segmentLength
+    }
+    return null
+  }
+
+  if (mime === 'image/webp') {
+    // Three container variants, each stating size differently.
+    if (data.length < 30) return null
+    const fourcc = String.fromCharCode(...data.slice(12, 16))
+    if (fourcc === 'VP8X') {
+      // 24-bit little-endian, stored as (dimension - 1).
+      const w = (data[24]! | (data[25]! << 8) | (data[26]! << 16)) + 1
+      const h = (data[27]! | (data[28]! << 8) | (data[29]! << 16)) + 1
+      return { width: w, height: h }
+    }
+    if (fourcc === 'VP8 ') {
+      return { width: view.getUint16(26, true) & 0x3fff, height: view.getUint16(28, true) & 0x3fff }
+    }
+    if (fourcc === 'VP8L') {
+      const bits = view.getUint32(21, true)
+      return { width: (bits & 0x3fff) + 1, height: ((bits >> 14) & 0x3fff) + 1 }
+    }
+    return null
+  }
+
+  return null
+}
+
+/** Beyond this in either direction is refused at intake. */
+export const MAX_IMAGE_DIMENSION = 12000
+/** Total pixels, which bounds cost even when neither side is extreme. */
+export const MAX_IMAGE_PIXELS = 40_000_000
+
 export interface ImageRejection {
-  code: 'unsupported_type' | 'not_an_image' | 'type_mismatch' | 'too_large' | 'empty_file'
+  code:
+    | 'unsupported_type'
+    | 'not_an_image'
+    | 'type_mismatch'
+    | 'too_large'
+    | 'empty_file'
+    | 'unreadable_dimensions'
+    | 'dimensions_too_large'
   message: string
 }
 
 export interface AcceptedImage {
   mime: ImageMime
+  width: number
+  height: number
   extension: string
   /** Canonical, opaque, content-addressed. Never a path, never a client name. */
   id: string
@@ -167,6 +259,33 @@ export function acceptImage(
     }
   }
 
+  /*
+   * Dimensions are read AFTER the type is confirmed, because the parser is
+   * chosen by the sniffed type. An image whose header cannot be read is refused
+   * rather than stored unbounded: "we could not tell how big this is" is not a
+   * reason to accept it.
+   */
+  const dimensions = readImageDimensions(data, sniffed)
+  if (!dimensions || dimensions.width <= 0 || dimensions.height <= 0) {
+    return {
+      ok: false,
+      rejection: { code: 'unreadable_dimensions', message: 'That image could not be read. It may be damaged.' },
+    }
+  }
+  if (
+    dimensions.width > MAX_IMAGE_DIMENSION ||
+    dimensions.height > MAX_IMAGE_DIMENSION ||
+    dimensions.width * dimensions.height > MAX_IMAGE_PIXELS
+  ) {
+    return {
+      ok: false,
+      rejection: {
+        code: 'dimensions_too_large',
+        message: `That image is ${dimensions.width}×${dimensions.height}. Images are limited to ${MAX_IMAGE_DIMENSION}px per side.`,
+      },
+    }
+  }
+
   const sha256 = createHash('sha256').update(data).digest('hex')
   const id = imageIdFor(sha256)
   // Stored under the CANONICAL name. The client's filename is kept only as
@@ -175,6 +294,15 @@ export function acceptImage(
 
   return {
     ok: true,
-    image: { mime: sniffed, extension: canonicalExtension, id, storedName: `${id}.${canonicalExtension}`, sha256, bytes: data.byteLength },
+    image: {
+      mime: sniffed,
+      width: dimensions.width,
+      height: dimensions.height,
+      extension: canonicalExtension,
+      id,
+      storedName: `${id}.${canonicalExtension}`,
+      sha256,
+      bytes: data.byteLength,
+    },
   }
 }

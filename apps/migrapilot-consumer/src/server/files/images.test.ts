@@ -9,8 +9,11 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
+import { deflateSync } from 'node:zlib'
 import {
   acceptImage,
+  readImageDimensions,
+  MAX_IMAGE_DIMENSION,
   sniffImageMime,
   isImageId,
   imageIdFor,
@@ -18,10 +21,41 @@ import {
   MAX_IMAGE_BYTES,
 } from './images'
 
-const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 1, 2, 3])
-const JPEG = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0, 16, 0x4a, 0x46, 0x49, 0x46, 0, 1, 9, 9, 9])
-const GIF = new Uint8Array([...Buffer.from('GIF89a'), 1, 0, 1, 0, 0x80, 0, 0, 7, 7, 7])
-const WEBP = new Uint8Array([...Buffer.from('RIFF'), 0x1a, 0, 0, 0, ...Buffer.from('WEBP'), ...Buffer.from('VP8 ')])
+/*
+ * Fixtures are STRUCTURALLY VALID files, not signature stubs. Once dimensions
+ * became a requirement, a stub that starts with the right eight bytes stopped
+ * being an image — which is the correct behaviour, and it broke every test that
+ * had been leaning on one.
+ */
+function jpegOf(w: number, h: number): Uint8Array {
+  const sof = Buffer.alloc(19)
+  sof.writeUInt16BE(0xffc0, 0)   // SOF0
+  sof.writeUInt16BE(17, 2)       // segment length
+  sof[4] = 8                     // precision
+  sof.writeUInt16BE(h, 5)
+  sof.writeUInt16BE(w, 7)
+  sof[9] = 3                     // components
+  return new Uint8Array(Buffer.concat([
+    Buffer.from([0xff, 0xd8]),                                   // SOI
+    Buffer.from([0xff, 0xe0, 0x00, 0x10]), Buffer.from('JFIF\0', 'ascii'), Buffer.alloc(9),
+    sof,
+    Buffer.from([0xff, 0xd9]),                                   // EOI
+  ]))
+}
+
+function webpOf(w: number, h: number): Uint8Array {
+  const vp8x = Buffer.alloc(10)
+  vp8x.writeUIntLE(w - 1, 4, 3)
+  vp8x.writeUIntLE(h - 1, 7, 3)
+  const body = Buffer.concat([Buffer.from('WEBP', 'ascii'), Buffer.from('VP8X', 'ascii'), Buffer.alloc(4), vp8x])
+  const size = Buffer.alloc(4); size.writeUInt32LE(body.length)
+  return new Uint8Array(Buffer.concat([Buffer.from('RIFF', 'ascii'), size, body]))
+}
+
+const PNG = realPng(24, 16)
+const JPEG = jpegOf(24, 16)
+const GIF = realGif(24, 16)
+const WEBP = webpOf(24, 16)
 
 test('each supported format is recognised by its magic bytes', () => {
   assert.equal(sniffImageMime(PNG), 'image/png')
@@ -132,5 +166,96 @@ test('the accepted extension list and the mime map agree', () => {
     const bytes = ext === 'png' ? PNG : ext === 'gif' ? GIF : ext === 'webp' ? WEBP : JPEG
     const out = acceptImage(`file.${ext}`, bytes)
     assert.ok(out.ok, `.${ext} must be accepted when its bytes match`)
+  }
+})
+
+/*
+ * REAL ENCODED IMAGES, not hand-written headers. A fixture written by the same
+ * understanding as the parser proves only that the misunderstanding is
+ * consistent; these are built by an encoder and then read back.
+ */
+function realPng(w: number, h: number): Uint8Array {
+  const raw = Buffer.concat(Array.from({ length: h }, () => Buffer.concat([Buffer.from([0]), Buffer.alloc(w * 3)])))
+  const crcTable = Array.from({ length: 256 }, (_, n) => {
+    let c = n
+    for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1
+    return c >>> 0
+  })
+  const crc32 = (buf: Buffer) => {
+    let c = 0xffffffff
+    for (const b of buf) c = crcTable[(c ^ b) & 0xff]! ^ (c >>> 8)
+    return (c ^ 0xffffffff) >>> 0
+  }
+  const chunk = (type: string, data: Buffer) => {
+    const len = Buffer.alloc(4); len.writeUInt32BE(data.length)
+    const body = Buffer.concat([Buffer.from(type, 'ascii'), data])
+    const crc = Buffer.alloc(4); crc.writeUInt32BE(crc32(body))
+    return Buffer.concat([len, body, crc])
+  }
+  const ihdr = Buffer.alloc(13)
+  ihdr.writeUInt32BE(w, 0); ihdr.writeUInt32BE(h, 4)
+  ihdr[8] = 8; ihdr[9] = 2
+  return new Uint8Array(Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    chunk('IHDR', ihdr), chunk('IDAT', deflateSync(raw)), chunk('IEND', Buffer.alloc(0)),
+  ]))
+}
+
+function realGif(w: number, h: number): Uint8Array {
+  const head = Buffer.from('GIF89a', 'ascii')
+  const lsd = Buffer.alloc(7)
+  lsd.writeUInt16LE(w, 0); lsd.writeUInt16LE(h, 2); lsd[4] = 0x80
+  return new Uint8Array(Buffer.concat([head, lsd, Buffer.from([0, 0, 0, 255, 255, 255]), Buffer.from([0x3b])]))
+}
+
+test('dimensions are read from real encoded files', () => {
+  const png = realPng(37, 11)
+  assert.deepEqual(readImageDimensions(png, 'image/png'), { width: 37, height: 11 })
+
+  const gif = realGif(5, 9)
+  assert.deepEqual(readImageDimensions(gif, 'image/gif'), { width: 5, height: 9 })
+})
+
+test('width and height are not transposed', () => {
+  /*
+   * The single easiest bug in header parsing, and invisible on a square test
+   * image — so every fixture here is deliberately non-square.
+   */
+  const png = realPng(64, 8)
+  const dims = readImageDimensions(png, 'image/png')
+  assert.equal(dims?.width, 64)
+  assert.equal(dims?.height, 8)
+})
+
+test('an image too large in pixels is refused even when its bytes are small', () => {
+  /*
+   * The reason dimensions are a limit at all: a highly compressible PNG can be
+   * enormous in pixels while tiny on disk. Byte size alone would wave it through
+   * to a decoder and to a vision model that tiles by pixel.
+   */
+  const huge = realPng(MAX_IMAGE_DIMENSION + 1, 4)
+  assert.ok(huge.byteLength < 100_000, 'fixture must be small on disk to make the point')
+  const out = acceptImage('huge.png', huge)
+  assert.equal(out.ok, false)
+  if (!out.ok) {
+    assert.equal(out.rejection.code, 'dimensions_too_large')
+    assert.match(out.rejection.message, /12000px per side/)
+  }
+})
+
+test('an unreadable header is refused, not stored unbounded', () => {
+  // Valid PNG signature, truncated before IHDR carries a size.
+  const truncated = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13])
+  const out = acceptImage('broken.png', truncated)
+  assert.equal(out.ok, false)
+  if (!out.ok) assert.ok(['unreadable_dimensions', 'not_an_image'].includes(out.rejection.code))
+})
+
+test('an accepted image carries its dimensions forward', () => {
+  const out = acceptImage('photo.png', realPng(20, 30))
+  assert.ok(out.ok)
+  if (out.ok) {
+    assert.equal(out.image.width, 20)
+    assert.equal(out.image.height, 30)
   }
 })
