@@ -31,11 +31,23 @@ interface StoredTokens {
   accessTokenExpiresAt: number
 }
 
+/** MigraAuth's error envelope, as its routes send it. */
+export interface RefusalBody {
+  error?: { code?: string; message?: string }
+}
+
 export type MigraAuthResult<T> =
   | { kind: 'ok'; value: T; renewed?: StoredTokens }
   | { kind: 'unauthenticated' }
   /** The session predates token capture, or the token expired and could not be renewed. */
   | { kind: 'reauth_required' }
+  /**
+   * MigraAuth said no and said why — a 4xx with its reason intact. Distinct from
+   * `unavailable` because a caller can often relay this straight to the user:
+   * "set a password first, then unlink this provider" is an instruction, not a
+   * fault.
+   */
+  | { kind: 'refused'; status: number; value: RefusalBody | null }
   | { kind: 'unavailable'; status: number }
 
 /**
@@ -179,6 +191,25 @@ export async function migraAuthFetch<T>(
   }
 
   if (response.status === 401 || response.status === 403) return { kind: 'reauth_required' }
+
+  /*
+   * A DELIBERATE REFUSAL IS NOT AN OUTAGE, AND ITS REASON IS WORTH KEEPING.
+   *
+   * Every non-2xx used to collapse into `unavailable`, which discarded the body
+   * — so MigraAuth refusing to unlink someone's last sign-in method, with a
+   * message telling them to set a password first, reached the user as "that
+   * could not be changed right now". The instruction was in the response the
+   * whole time and this line threw it away.
+   *
+   * 4xx is the server saying no ON PURPOSE and explaining why; 5xx and network
+   * failures are the server failing, where there is nothing to relay. Only the
+   * first carries a body worth forwarding.
+   */
+  if (response.status >= 400 && response.status < 500) {
+    const body = (await response.json().catch(() => null)) as RefusalBody | null
+    return { kind: 'refused', status: response.status, value: body }
+  }
+
   if (!response.ok) return { kind: 'unavailable', status: response.status }
 
   const value = (await response.json().catch(() => null)) as T

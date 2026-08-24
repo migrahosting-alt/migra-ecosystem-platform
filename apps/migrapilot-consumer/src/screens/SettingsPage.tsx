@@ -154,7 +154,7 @@ export function SettingsPage({ session }: { session: PublicSession | null }) {
 
         <div className="flex min-w-0 flex-1 flex-col gap-5">
           <section id="account" className="scroll-mt-24">
-            <IdentityCard account={account.account} />
+            <IdentityCard controller={account} />
           </section>
 
           <section id="responses" className="scroll-mt-24">
@@ -162,7 +162,7 @@ export function SettingsPage({ session }: { session: PublicSession | null }) {
           </section>
 
           <section id="connected" className="scroll-mt-24">
-            <ConnectedAccountsCard account={account.account} />
+            <ConnectedAccountsCard controller={account} />
           </section>
 
           <section id="security" className="scroll-mt-24">

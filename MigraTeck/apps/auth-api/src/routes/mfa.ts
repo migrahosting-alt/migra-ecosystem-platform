@@ -10,6 +10,7 @@ import {
   disableTotp,
   generateRecoveryCodes,
   storeRecoveryCodes,
+  consumeRecoveryCode,
 } from "../modules/mfa/index.js";
 import { verifyUserPassword } from "../modules/users/index.js";
 import { logAuditEvent } from "../modules/audit/index.js";
@@ -82,10 +83,48 @@ export async function mfaRoutes(app: FastifyInstance): Promise<void> {
     const ip = getClientIp(request);
     const ua = request.headers["user-agent"];
 
-    // Require password confirmation to disable MFA
-    const valid = await verifyUserPassword(user, body.password);
-    if (!valid) {
-      return reply.code(401).send({ error: { code: "invalid_password", message: "Incorrect password." } });
+    /*
+     * RE-AUTHENTICATE WITH WHATEVER THIS USER ACTUALLY HAS.
+     *
+     * The password branch alone made this route unreachable for anyone who
+     * signed up through Google or GitHub: they have no PASSWORD credential,
+     * `verifyUserPassword` returns false for the missing row, and the answer was
+     * "Incorrect password" about a password that never existed. Enrolling TOTP
+     * was therefore a one-way door for exactly the accounts most likely to use
+     * a provider.
+     *
+     * Each branch is still a real proof, and the checks are ORDERED so a
+     * recovery code is only consumed once the cheaper checks have failed —
+     * consuming one to answer a request that a TOTP code would have satisfied
+     * would burn a code the user may need later.
+     */
+    let reauthenticated = false;
+    let method: "password" | "totp" | "recovery_code" | null = null;
+
+    if (body.password) {
+      reauthenticated = await verifyUserPassword(user, body.password);
+      if (reauthenticated) method = "password";
+    }
+    if (!reauthenticated && body.code) {
+      if (await verifyTotp(user.id, body.code)) {
+        reauthenticated = true;
+        method = "totp";
+      } else if (await consumeRecoveryCode(user.id, body.code)) {
+        reauthenticated = true;
+        method = "recovery_code";
+      }
+    }
+
+    if (!reauthenticated) {
+      return reply.code(401).send({
+        error: {
+          code: "reauthentication_failed",
+          // Deliberately does not say WHICH credential was wrong, or whether a
+          // password exists on this account — that is an account-enumeration
+          // detail, and the caller already knows what they sent.
+          message: "That did not match. Use your password, an authenticator code, or a recovery code.",
+        },
+      });
     }
 
     await disableTotp(user.id);
@@ -93,7 +132,11 @@ export async function mfaRoutes(app: FastifyInstance): Promise<void> {
     await logAuditEvent({
       actorUserId: user.id,
       eventType: "MFA_DISABLE",
-      eventData: { method: "totp" },
+      // Records HOW it was authorised, not just that it happened — a disable
+      // authorised by a recovery code is a different security story from one
+      // authorised by a password, and the audit trail should be able to tell
+      // them apart afterwards.
+      eventData: { method: "totp", reauthenticated_with: method },
       ipAddress: ip,
       userAgent: ua,
     });

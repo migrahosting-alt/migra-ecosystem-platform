@@ -41,9 +41,31 @@ export interface ActiveSession {
   current: boolean
 }
 
+/**
+ * What this account can actually do, as MigraAuth reports it.
+ *
+ * Null anywhere this appears means UNKNOWN. Rendering unknown as `false` would
+ * tell someone MFA is off when it may be on, and offer "set a password" to an
+ * account that already has one.
+ */
+export interface AccountSecurity {
+  mfa_enabled: boolean
+  has_password: boolean
+  password_updated_at: string | null
+  email_verified: boolean
+  linked_providers: string[]
+  sign_in_methods: number
+  can_unlink_a_provider: boolean
+}
+
 export type AccountState =
   | { status: 'loading' }
-  | { status: 'ready'; profile: AccountProfile; providers: LinkedProvider[] | null }
+  | {
+      status: 'ready'
+      profile: AccountProfile
+      providers: LinkedProvider[] | null
+      security: AccountSecurity | null
+    }
   | { status: 'reauth_required' }
   | { status: 'signed_out' }
   | { status: 'unavailable'; message: string }
@@ -55,6 +77,10 @@ export interface AccountController {
   reload: () => void
   /** End one session, or every OTHER session when no id is given. */
   revoke: (sessionId?: string) => Promise<{ ok: boolean; message?: string }>
+  /** Write the display name to MigraAuth. Null clears it. */
+  saveDisplayName: (name: string | null) => Promise<{ ok: boolean; message?: string }>
+  /** Detach a sign-in provider. MigraAuth refuses the last way in. */
+  unlinkProvider: (provider: string) => Promise<{ ok: boolean; message?: string }>
 }
 
 export function useAccount(): AccountController {
@@ -81,6 +107,7 @@ export function useAccount(): AccountController {
           // Null means UNKNOWN, not none — the distinction matters, because one
           // of them invites you to unlink your last way in.
           providers: (body?.['linkedProviders'] as LinkedProvider[] | null) ?? null,
+          security: (body?.['security'] as AccountSecurity | null) ?? null,
         })
       }
     } catch {
@@ -132,5 +159,64 @@ export function useAccount(): AccountController {
     [read],
   )
 
-  return { account, sessions, sessionsError, reload: () => void read(), revoke }
+  const saveDisplayName = useCallback(
+    async (name: string | null) => {
+      try {
+        const response = await fetch('/api/account', {
+          method: 'PATCH',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ displayName: name }),
+        })
+        if (!response.ok) {
+          const body = (await response.json().catch(() => null)) as { message?: string } | null
+          return { ok: false, message: body?.message ?? 'Your name could not be saved.' }
+        }
+        /*
+         * Re-read rather than trusting the submitted value. MigraAuth trims, and
+         * an all-whitespace name is stored as cleared — so the screen must show
+         * what was SAVED, not what was typed, or the next reload disagrees with
+         * the "Saved" the user just watched appear.
+         */
+        await read()
+        return { ok: true }
+      } catch {
+        return { ok: false, message: 'Your name could not be saved. Check your connection.' }
+      }
+    },
+    [read],
+  )
+
+  const unlinkProvider = useCallback(
+    async (provider: string) => {
+      try {
+        const response = await fetch(`/api/account/providers?provider=${encodeURIComponent(provider)}`, {
+          method: 'DELETE',
+        })
+        if (!response.ok) {
+          const body = (await response.json().catch(() => null)) as { message?: string } | null
+          /*
+           * MigraAuth's own words are relayed. When it refuses because this is
+           * the last way in, it says to set a password first — an instruction
+           * the user can act on, which a generic failure message would destroy.
+           */
+          return { ok: false, message: body?.message ?? 'That sign-in method could not be removed.' }
+        }
+        await read()
+        return { ok: true }
+      } catch {
+        return { ok: false, message: 'That could not be changed. Check your connection.' }
+      }
+    },
+    [read],
+  )
+
+  return {
+    account,
+    sessions,
+    sessionsError,
+    reload: () => void read(),
+    revoke,
+    saveDisplayName,
+    unlinkProvider,
+  }
 }

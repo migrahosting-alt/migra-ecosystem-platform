@@ -63,3 +63,18 @@ export const resendVerificationSchema = z.object({
 });
 
 export const registerSchema = signupSchema;
+
+/**
+ * Editing your own profile.
+ *
+ * A display name is shown to the person themselves and, in shared contexts, to
+ * others — so it is bounded. 120 characters is generous for real names
+ * including scripts that need more code points per glyph, and short enough that
+ * it cannot be used to push a wall of text through any surface that renders it.
+ *
+ * Nullable: clearing a display name is a legitimate choice, and is distinct
+ * from omitting the field, which leaves it unchanged.
+ */
+export const updateProfileSchema = z.object({
+  display_name: z.string().max(120).nullish(),
+});

@@ -16,6 +16,17 @@ import { migraAuthFetch } from '@/server/auth/migraAuthApi'
 
 export const dynamic = 'force-dynamic'
 
+/** MigraAuth's answer to "what can this account actually do?". */
+interface SecurityResponse {
+  mfa_enabled: boolean
+  has_password: boolean
+  password_updated_at: string | null
+  email_verified: boolean
+  linked_providers: string[]
+  sign_in_methods: number
+  can_unlink_a_provider: boolean
+}
+
 interface MeResponse {
   user?: {
     id: string
@@ -37,9 +48,10 @@ interface LinksResponse {
 }
 
 export async function GET(): Promise<Response> {
-  const [me, links] = await Promise.all([
+  const [me, links, security] = await Promise.all([
     migraAuthFetch<MeResponse>('/v1/me'),
     migraAuthFetch<LinksResponse>('/v1/social/links'),
+    migraAuthFetch<SecurityResponse>('/v1/me/security'),
   ])
 
   if (me.kind === 'unauthenticated') {
@@ -79,5 +91,71 @@ export async function GET(): Promise<Response> {
      * sign-in method.
      */
     linkedProviders: links.kind === 'ok' ? (links.value?.links ?? []) : null,
+    /*
+     * Same rule, and it matters more here. An unknown security state rendered as
+     * `false` would tell someone MFA is off when it may be on, and would offer
+     * "Set a password" to an account that already has one. Null means the card
+     * says it could not check.
+     */
+    security: security.kind === 'ok' ? (security.value ?? null) : null,
   })
+}
+
+/**
+ * Editing the profile — one field, written straight through to MigraAuth.
+ *
+ * NOTHING IS STORED HERE. The display name lives in exactly one place, and this
+ * route is a pass-through so the app never becomes a second copy that disagrees
+ * with the account it is describing.
+ */
+export async function PATCH(request: Request): Promise<Response> {
+  let body: unknown
+  try {
+    body = await request.json()
+  } catch {
+    body = null
+  }
+
+  const raw = (body as { displayName?: unknown })?.displayName
+  if (raw !== null && typeof raw !== 'string') {
+    return Response.json(
+      { error: 'invalid', message: 'A display name must be text, or null to clear it.' },
+      { status: 400 },
+    )
+  }
+  if (typeof raw === 'string' && raw.length > 120) {
+    // Refused rather than truncated: silently storing a shortened version of
+    // someone's name and showing it back as if they chose it is worse than
+    // saying it is too long.
+    return Response.json(
+      { error: 'too_long', message: 'A display name can be at most 120 characters.' },
+      { status: 400 },
+    )
+  }
+
+  const updated = await migraAuthFetch<MeResponse>('/v1/me', {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ display_name: raw }),
+  })
+
+  if (updated.kind === 'unauthenticated') {
+    return Response.json({ error: 'unauthenticated' }, { status: 401 })
+  }
+  if (updated.kind === 'reauth_required') {
+    return Response.json(
+      { error: 'reauth_required', message: 'Sign in again to change your profile.' },
+      { status: 409 },
+    )
+  }
+  if (updated.kind !== 'ok' || !updated.value?.user) {
+    return Response.json(
+      { error: 'unavailable', message: 'Your name could not be saved. Nothing was changed.' },
+      { status: 503 },
+    )
+  }
+
+  // The SAVED value is returned, not the submitted one, so the screen reconciles
+  // against what MigraAuth actually stored.
+  return Response.json({ displayName: updated.value.user.display_name })
 }

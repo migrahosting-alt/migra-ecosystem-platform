@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   AlertTriangle,
   Check,
@@ -25,6 +25,7 @@ import {
 import { Avatar } from '@/components/ui/Avatar'
 import { cn } from '@/lib/cn'
 import { Field, SaveIndicator, SettingsCard, Select, Toggle, Unavailable } from './controls'
+import type { SaveState } from './usePreferences'
 import type { AccountController } from './useAccount'
 import type { PreferencesController } from './usePreferences'
 
@@ -42,7 +43,8 @@ const labelled = <T extends string>(values: readonly T[], labels: Record<T, stri
 
 /* ── identity ─────────────────────────────────────────────────────────────── */
 
-export function IdentityCard({ account }: { account: AccountController['account'] }) {
+export function IdentityCard({ controller }: { controller: AccountController }) {
+  const account = controller.account
   if (account.status === 'loading') {
     return <SettingsCard title="Account"><SkeletonRows /></SettingsCard>
   }
@@ -119,14 +121,25 @@ export function IdentityCard({ account }: { account: AccountController['account'
       </div>
 
       {/*
-        Name, email and photo are edited where they LIVE. MigraPilot showing an
-        editable name field would need somewhere to save it, and the only correct
-        destination is MigraAuth — so the honest control is a link to it, not a
-        form that writes a second copy.
+        THE NAME IS NOW EDITABLE HERE, AND STILL LIVES IN ONE PLACE. The earlier
+        version linked out instead, on the reasoning that an editable field would
+        need somewhere to save it and the only correct destination is MigraAuth.
+        The destination was the right conclusion; the link was the wrong remedy —
+        it sent people to another product to change their own name. `PATCH /v1/me`
+        now exists, this writes straight through to it, and no copy is kept.
+
+        EMAIL IS STILL NOT EDITABLE, and that is a different judgement rather
+        than the same one half-applied: changing an address is an identity change
+        needing verification of the new one before the old stops working. Putting
+        it beside a name field would imply the two carry equal weight.
       */}
-      <p className="mt-5 text-[13px] leading-relaxed text-slate-500">
-        Your name, email address and profile photo are changed in your MigraTeck account, so every
-        product stays in step.
+      <div className="mt-6 border-t border-hairline pt-5">
+        <DisplayNameField controller={controller} current={profile.displayName} />
+      </div>
+
+      <p className="mt-4 text-[13px] leading-relaxed text-slate-500">
+        Your email address is part of your MigraTeck identity and is changed there, so every product
+        stays in step.
       </p>
       <a
         href="https://auth.migrateck.com/sessions"
@@ -138,14 +151,101 @@ export function IdentityCard({ account }: { account: AccountController['account'
   )
 }
 
+/**
+ * The one editable identity field.
+ *
+ * Deliberately NOT optimistic. Everywhere else in Settings a control may move
+ * first and reconcile after, because the value is the app's own. A name is the
+ * account's, MigraAuth normalises it (trimmed; all-whitespace clears it), and
+ * showing the typed text as saved would disagree with the next reload. So it
+ * saves, re-reads, and shows what was actually stored.
+ */
+function DisplayNameField({
+  controller,
+  current,
+}: {
+  controller: AccountController
+  current: string | null
+}) {
+  const [value, setValue] = useState(current ?? '')
+  const [state, setState] = useState<SaveState>({ status: 'idle' })
+
+  // Follows the server when a reload brings a different value — otherwise this
+  // field would keep showing a stale edit after any other change re-read.
+  useEffect(() => {
+    setValue(current ?? '')
+  }, [current])
+
+  const dirty = value.trim() !== (current ?? '')
+
+  const submit = async (event: React.FormEvent) => {
+    event.preventDefault()
+    if (!dirty) return
+    setState({ status: 'saving' })
+    const trimmed = value.trim()
+    const result = await controller.saveDisplayName(trimmed.length > 0 ? trimmed : null)
+    setState(
+      result.ok
+        ? { status: 'saved', at: Date.now() }
+        : { status: 'error', message: result.message ?? 'Your name could not be saved.' },
+    )
+  }
+
+  return (
+    <form onSubmit={submit}>
+      <label htmlFor="display-name" className="block text-[15px] font-medium text-slate-800">
+        Display name
+      </label>
+      <p className="mt-0.5 text-[13px] leading-relaxed text-slate-500">
+        How you are addressed across MigraTeck. Leave it empty to go by your email address.
+      </p>
+      <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center">
+        <input
+          id="display-name"
+          value={value}
+          onChange={(event) => setValue(event.target.value)}
+          maxLength={120}
+          placeholder="Your name"
+          data-testid="display-name-input"
+          className="h-10 w-full rounded-field border border-slate-200 bg-white px-3 text-[15px] text-slate-800 focus:border-brand-400 focus:ring-4 focus:ring-brand-500/10 focus:outline-none sm:max-w-[320px]"
+        />
+        <button
+          type="submit"
+          disabled={!dirty || state.status === 'saving'}
+          data-testid="display-name-save"
+          className="h-10 shrink-0 rounded-field bg-brand-600 px-4 text-sm font-semibold text-white transition-colors hover:bg-brand-700 disabled:opacity-40"
+        >
+          {state.status === 'saving' ? 'Saving…' : 'Save'}
+        </button>
+      </div>
+      <SaveIndicator state={state} className="mt-2" />
+    </form>
+  )
+}
+
 /* ── connected accounts ───────────────────────────────────────────────────── */
 
 const PROVIDER_LABEL: Record<string, string> = { google: 'Google', github: 'GitHub' }
 
-export function ConnectedAccountsCard({ account }: { account: AccountController['account'] }) {
+export function ConnectedAccountsCard({ controller }: { controller: AccountController }) {
+  const account = controller.account
+  const [busy, setBusy] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
   if (account.status !== 'ready') return null
 
   const providers = account.providers
+  const security = account.security
+  const linked = new Set(providers?.map((p) => p.provider) ?? [])
+  const addable = Object.keys(PROVIDER_LABEL).filter((id) => !linked.has(id))
+
+  const unlink = async (provider: string) => {
+    setBusy(provider)
+    setError(null)
+    const result = await controller.unlinkProvider(provider)
+    if (!result.ok) setError(result.message ?? 'That sign-in method could not be removed.')
+    setBusy(null)
+  }
 
   return (
     <SettingsCard
@@ -178,23 +278,73 @@ export function ConnectedAccountsCard({ account }: { account: AccountController[
                   {p.email ?? p.display_name ?? 'Connected'}
                 </p>
               </div>
-              <span className="shrink-0 text-[13px] text-slate-400">
-                Added {new Date(p.linked_at).toLocaleDateString()}
-              </span>
+              <div className="flex shrink-0 items-center gap-3">
+                <span className="hidden text-[13px] text-slate-400 sm:inline">
+                  Added {new Date(p.linked_at).toLocaleDateString()}
+                </span>
+                {/*
+                  DISABLED WITH A REASON, NEVER HIDDEN. When this is the only way
+                  in, the control stays visible and says why it cannot be used —
+                  removing it entirely would leave someone wondering whether the
+                  feature exists. The refusal is still MigraAuth's: this only
+                  explains it earlier. `can_unlink_a_provider` unknown (a failed
+                  security read) is treated as "cannot", because offering to
+                  remove a sign-in method on a guess is the one direction with a
+                  permanent cost.
+                */}
+                <button
+                  type="button"
+                  onClick={() => void unlink(p.provider)}
+                  disabled={busy !== null || !security?.can_unlink_a_provider}
+                  title={
+                    security?.can_unlink_a_provider
+                      ? undefined
+                      : security
+                        ? 'This is the only way to sign in to your account.'
+                        : 'Your sign-in methods could not be checked just now.'
+                  }
+                  data-testid={`unlink-${p.provider}`}
+                  className="rounded-field border border-slate-300 px-3 py-1.5 text-sm font-semibold text-slate-700 transition-colors hover:border-red-300 hover:bg-red-50 hover:text-red-700 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-slate-300 disabled:hover:bg-transparent disabled:hover:text-slate-700"
+                >
+                  {busy === p.provider ? 'Removing…' : 'Remove'}
+                </button>
+              </div>
             </li>
           ))}
         </ul>
       )}
 
+      {error && (
+        <p role="alert" className="mt-3 text-[13px] leading-relaxed text-red-600">
+          {error}
+        </p>
+      )}
+
       {/*
-        Linking and unlinking live in MigraAuth, and so does the safeguard that
-        refuses to remove your last sign-in method. Duplicating that control here
-        would mean duplicating the safeguard, and a second copy of a safety check
-        is a second chance to get it wrong.
+        ADDING A PROVIDER IS A REDIRECT, NOT A FETCH. It has to leave for Google
+        or GitHub and come back through MigraAuth's callback, so this is a link
+        to the real social flow with a return to this page — not a button that
+        would have to pretend it could finish the job here.
       */}
+      {addable.length > 0 && providers !== null && (
+        <div className="mt-4 flex flex-wrap gap-2">
+          {addable.map((id) => (
+            <a
+              key={id}
+              href={`https://auth.migrateck.com/api/v1/social/${id}/start?return_to=${encodeURIComponent(
+                'https://chat.migrateck.com/settings',
+              )}`}
+              data-testid={`link-${id}`}
+              className="inline-flex h-10 items-center rounded-field border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-700 transition-colors hover:border-slate-400 hover:bg-slate-50"
+            >
+              Add {PROVIDER_LABEL[id]}
+            </a>
+          ))}
+        </div>
+      )}
+
       <p className="mt-4 text-[13px] leading-relaxed text-slate-500">
-        Add or remove a sign-in method in your MigraTeck account. Your last remaining method cannot
-        be removed, so you can never be locked out.
+        Your last remaining sign-in method cannot be removed, so you can never be locked out.
       </p>
     </SettingsCard>
   )
@@ -228,11 +378,63 @@ export function SecurityCard({ controller }: { controller: AccountController }) 
     if (!result.ok) setError(result.message ?? 'That could not be done.')
   }
 
+  const security = controller.account.status === 'ready' ? controller.account.security : null
+
   return (
     <SettingsCard
       title="Security"
-      description="Where your account is signed in right now."
+      description="How your account is protected, and where it is signed in."
     >
+      {/*
+        REPORTED, NOT ASSUMED. Both facts come from MigraAuth
+        (`GET /v1/me/security`); when that read fails the card says it could not
+        check rather than rendering `false`, which would tell someone two-step
+        verification is off when it may be on — the single most dangerous thing
+        this card could get wrong.
+      */}
+      <div className="mb-5 flex flex-col gap-2.5 border-b border-hairline pb-5">
+        {security === null ? (
+          <Unavailable>
+            Your password and two-step verification status could not be checked just now.
+          </Unavailable>
+        ) : (
+          <>
+            <SecurityFact
+              label="Two-step verification"
+              on={security.mfa_enabled}
+              onText="On — a code is required when you sign in"
+              offText="Off"
+            />
+            <SecurityFact
+              label="Password"
+              on={security.has_password}
+              onText={
+                security.password_updated_at
+                  ? `Set — last changed ${new Date(security.password_updated_at).toLocaleDateString()}`
+                  : 'Set'
+              }
+              /*
+                NOT A DEFICIENCY, AND NOT PHRASED AS ONE. An account created
+                through Google or GitHub has no password and does not need one;
+                calling that "missing" would push people toward adding a
+                credential they never asked for. It matters only because a
+                password is a second way in — which is what the line says.
+              */
+              offText="Not set — you sign in with a connected account"
+            />
+          </>
+        )}
+        <p className="mt-1 text-[13px] leading-relaxed text-slate-500">
+          Two-step verification and your password are changed in your MigraTeck account.{' '}
+          <a
+            href="https://auth.migrateck.com/sessions"
+            className="font-semibold text-brand-700 hover:text-brand-800"
+          >
+            Manage security
+          </a>
+        </p>
+      </div>
+
       {sessionsError ? (
         <Unavailable>{sessionsError}</Unavailable>
       ) : sessions === null ? (
@@ -829,6 +1031,41 @@ function SkeletonRows() {
       {[0, 1, 2].map((row) => (
         <div key={row} className={cn('h-10 animate-pulse rounded-xl bg-slate-100')} />
       ))}
+    </div>
+  )
+}
+
+/**
+ * One reported security fact.
+ *
+ * Green for on, plain slate for off — deliberately NOT red or amber. "Password
+ * not set" is a normal state for a provider-only account, and dressing it as a
+ * warning would invent a problem the person does not have. Only real problems
+ * get warning colours.
+ */
+function SecurityFact({
+  label,
+  on,
+  onText,
+  offText,
+}: {
+  label: string
+  on: boolean
+  onText: string
+  offText: string
+}) {
+  return (
+    <div className="flex flex-col gap-0.5 sm:flex-row sm:items-baseline sm:justify-between sm:gap-6">
+      <span className="text-[15px] font-medium text-slate-800">{label}</span>
+      <span
+        className={cn(
+          'inline-flex items-center gap-1.5 text-[13px] sm:text-right',
+          on ? 'text-emerald-700' : 'text-slate-500',
+        )}
+      >
+        {on && <Check className="h-3.5 w-3.5 shrink-0" />}
+        {on ? onText : offText}
+      </span>
     </div>
   )
 }

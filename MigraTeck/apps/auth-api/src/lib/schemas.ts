@@ -7,6 +7,7 @@ export {
   verifyEmailSchema,
   signupVerifySchema,
   resendVerificationSchema,
+  updateProfileSchema,
   authorizeQuerySchema,
   tokenExchangeSchema,
   revokeSchema,

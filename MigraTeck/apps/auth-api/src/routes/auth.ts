@@ -12,6 +12,7 @@ import {
   resetPasswordSchema,
   verifyEmailSchema,
   resendVerificationSchema,
+  updateProfileSchema,
 } from "../lib/schemas.js";
 import {
   consumeEmailVerification,
@@ -42,6 +43,7 @@ import { hasTotpEnabled } from "../modules/mfa/index.js";
 import { logAuditEvent } from "../modules/audit/index.js";
 import { sendPasswordResetNotification, sendVerificationCode } from "../lib/notifications.js";
 import { parseIdentifier, maskIdentifier } from "../lib/identifier.js";
+import { db } from "../lib/db.js";
 import { config } from "../config/env.js";
 import { requireAuthenticatedUser, requireSession, getClientIp } from "../middleware/session.js";
 import {
@@ -605,6 +607,101 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
       user: toPublicUser(user),
       session: session ? toSessionSummary(session) : null,
     });
+  });
+
+  /**
+   * ── GET /v1/me/security ──────────────────────────────────────────
+   *
+   * What an account screen needs in order to tell the truth.
+   *
+   * SEPARATE FROM `/v1/me` ON PURPOSE. That response is shared with signup and
+   * verification, and widening its user projection would change the shape every
+   * existing caller parses. This endpoint is additive, so nothing that reads
+   * `/v1/me` today has to care.
+   *
+   * The point is that a settings screen cannot honestly render a security card
+   * without these facts. `has_password` decides whether "Change password" is
+   * even applicable; `mfa_enabled` decides whether the control says Enable or
+   * Disable; `sign_in_methods` decides whether unlinking a provider is offered
+   * at all. Guessing any of them produces a card that looks authoritative and
+   * is wrong for exactly the accounts that differ from the default.
+   *
+   * It reports state, never secrets: no hashes, no TOTP secret, no recovery
+   * codes, not even how many recovery codes remain unused.
+   */
+  app.get("/v1/me/security", { preHandler: requireAuthenticatedUser }, async (request, reply) => {
+    const user = request.authUser!;
+
+    const [mfaEnabled, passwordCredential, linkedIdentities] = await Promise.all([
+      hasTotpEnabled(user.id),
+      db.userCredential.findFirst({
+        where: { userId: user.id, type: "PASSWORD", isEnabled: true },
+        select: { id: true, updatedAt: true },
+      }),
+      db.userLinkedIdentity.findMany({
+        where: { userId: user.id },
+        select: { provider: true },
+      }),
+    ]);
+
+    const hasPassword = Boolean(passwordCredential);
+    /*
+     * The same arithmetic `unlinkProvider` uses to refuse the last way in. It is
+     * computed here too so the UI can DISABLE the control with a reason instead
+     * of offering it and surfacing a 409 — the safeguard stays authoritative on
+     * the server either way.
+     */
+    const signInMethods = linkedIdentities.length + (hasPassword ? 1 : 0);
+
+    return reply.code(200).send({
+      mfa_enabled: mfaEnabled,
+      has_password: hasPassword,
+      password_updated_at: passwordCredential?.updatedAt?.toISOString() ?? null,
+      email_verified: !!user.emailVerifiedAt,
+      linked_providers: linkedIdentities.map((identity) => identity.provider.toLowerCase()),
+      sign_in_methods: signInMethods,
+      can_unlink_a_provider: signInMethods > 1,
+    });
+  });
+
+  /**
+   * ── PATCH /v1/me ─────────────────────────────────────────────────
+   *
+   * The only profile field a person can edit here, and it is deliberately only
+   * one.
+   *
+   * EMAIL IS NOT EDITABLE THROUGH THIS ROUTE. Changing it is an identity change,
+   * not a profile edit: it needs verification of the new address before the old
+   * one stops working, or it becomes an account-takeover primitive. Offering it
+   * beside a display name would imply the two carry the same weight.
+   */
+  app.patch("/v1/me", { preHandler: requireAuthenticatedUser }, async (request, reply) => {
+    const user = request.authUser!;
+    const body = updateProfileSchema.parse(request.body ?? {});
+    const ip = getClientIp(request);
+    const ua = request.headers["user-agent"];
+
+    // Trimmed, and an all-whitespace name is cleared rather than stored — a name
+    // rendered as blank space is indistinguishable from a rendering bug.
+    const trimmed = body.display_name?.trim() ?? "";
+    const displayName = trimmed.length > 0 ? trimmed : null;
+
+    const updated = await db.user.update({
+      where: { id: user.id },
+      data: { displayName },
+    });
+
+    await logAuditEvent({
+      actorUserId: user.id,
+      eventType: "PROFILE_UPDATE",
+      // The VALUES are not recorded — an audit log is not a shadow copy of the
+      // profile, and a display name can carry a person's legal name.
+      eventData: { field: "display_name", cleared: displayName === null },
+      ipAddress: ip,
+      userAgent: ua,
+    });
+
+    return reply.code(200).send({ user: toPublicUser(updated) });
   });
 
   // ── POST /v1/logout ───────────────────────────────────────────────
