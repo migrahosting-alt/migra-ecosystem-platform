@@ -30,7 +30,7 @@ export function PillTabs<T extends string>({
             className={cn(
               'inline-flex h-9 items-center gap-2 rounded-lg px-3.5 text-[13px] font-semibold transition-colors',
               active
-                ? 'bg-brand-50 text-brand-700 ring-1 ring-brand-200/70 ring-inset'
+                ? 'bg-brand-50 text-brand-text ring-1 ring-brand-200/70 ring-inset'
                 : 'text-slate-500 hover:bg-slate-100 hover:text-slate-700',
             )}
           >
@@ -68,7 +68,7 @@ export function UnderlineTabs<T extends string>({
             className={cn(
               '-mb-px border-b-2 px-3 pb-2.5 text-[13px] font-semibold transition-colors',
               active
-                ? 'border-brand-600 text-brand-700'
+                ? 'border-brand-600 text-brand-text'
                 : 'border-transparent text-slate-500 hover:text-slate-700',
             )}
           >
@@ -105,7 +105,7 @@ export function ChipTabs<T extends string>({
             className={cn(
               'inline-flex h-9 items-center gap-2 rounded-lg border px-3.5 text-[13px] font-semibold transition-colors',
               active
-                ? 'border-brand-200 bg-brand-50 text-brand-700'
+                ? 'border-brand-200 bg-brand-50 text-brand-text'
                 : 'border-slate-200 bg-raised text-slate-600 hover:border-slate-300 hover:bg-slate-50',
             )}
           >

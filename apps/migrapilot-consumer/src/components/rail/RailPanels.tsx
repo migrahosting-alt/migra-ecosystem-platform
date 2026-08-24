@@ -39,7 +39,7 @@ export function RailLink({ href, children }: { href: string; children: ReactNode
   return (
     <Link
       href={href}
-      className="shrink-0 text-[13px] font-semibold text-brand-600 transition-colors hover:text-brand-700"
+      className="shrink-0 text-[13px] font-semibold text-brand-text transition-colors hover:text-brand-text-hover"
     >
       {children}
     </Link>
@@ -73,7 +73,7 @@ export function ActionRow({
     <>
       {icon}
       <span className="min-w-0 flex-1 text-left">
-        <span className="block text-sm font-semibold text-brand-700">{title}</span>
+        <span className="block text-sm font-semibold text-brand-text">{title}</span>
         {subtitle && (
           <span className="mt-0.5 block text-xs leading-snug text-slate-500">{subtitle}</span>
         )}

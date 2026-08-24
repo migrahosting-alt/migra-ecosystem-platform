@@ -30,7 +30,7 @@ const titleIcons = {
 }
 
 const titleIconTones = {
-  chart: 'text-brand-600',
+  chart: 'text-brand-text',
   rocket: 'text-orange-500',
   shield: 'text-emerald-600',
 }
@@ -94,7 +94,7 @@ function AudioAttachment({ attachment }: { attachment: Attachment }) {
         <button
           onClick={() => setPlaying((value) => !value)}
           aria-label={playing ? `Pause ${attachment.name}` : `Play ${attachment.name}`}
-          className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-brand-50 text-brand-600 transition-colors hover:bg-brand-100"
+          className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-brand-50 text-brand-text transition-colors hover:bg-brand-100"
         >
           {playing ? (
             <Pause className="h-5 w-5 fill-current" />

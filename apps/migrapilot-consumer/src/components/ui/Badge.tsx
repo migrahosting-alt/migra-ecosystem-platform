@@ -5,9 +5,9 @@ export type Tone = 'blue' | 'green' | 'amber' | 'red' | 'purple' | 'slate' | 'cy
 
 export const toneStyles: Record<Tone, { chip: string; tile: string; text: string; bar: string }> = {
   blue: {
-    chip: 'bg-brand-50 text-brand-700 ring-brand-100',
-    tile: 'bg-brand-50 text-brand-600',
-    text: 'text-brand-600',
+    chip: 'bg-brand-50 text-brand-text ring-brand-100',
+    tile: 'bg-brand-50 text-brand-text',
+    text: 'text-brand-text',
     bar: 'bg-brand-600',
   },
   green: {

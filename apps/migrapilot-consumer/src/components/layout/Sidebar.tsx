@@ -49,14 +49,14 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
               className={cn(
                 'group flex h-11 items-center gap-3.5 rounded-field px-3.5 text-[15px] font-medium transition-colors',
                 isActive
-                  ? 'bg-brand-50 text-brand-700'
+                  ? 'bg-brand-50 text-brand-text'
                   : 'text-slate-600 hover:bg-slate-100/80 hover:text-slate-900',
               )}
             >
               <Icon
                 className={cn(
                   'h-[19px] w-[19px] shrink-0 transition-colors',
-                  isActive ? 'text-brand-600' : 'text-slate-400 group-hover:text-slate-600',
+                  isActive ? 'text-brand-text' : 'text-slate-400 group-hover:text-slate-600',
                 )}
                 strokeWidth={1.9}
               />

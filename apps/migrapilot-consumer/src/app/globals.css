@@ -61,6 +61,16 @@
   --mp-brand-600: #2060e0;
   --mp-brand-700: #1b4fc4;
   --mp-brand-800: #17409f;
+  /* Brand as TEXT, which is a different requirement from brand as a FILL.
+   * A fill carries white text and must stay dark; link text sits on the canvas
+   * and must contrast with it. In dark mode those two pull in opposite
+   * directions — white-on-fill needs luminance <= 0.18, text-on-canvas needs
+   * >= 0.23 — so one token cannot serve both and they are split. */
+  --mp-brand-text: #1b4fc4;
+  /* Hover moves AWAY from the canvas in each theme: darker on light, lighter
+     on dark. Collapsing hover onto the base colour left three links with a
+     hover class that changed nothing. */
+  --mp-brand-text-hover: #17409f;
 
   --mp-shadow-card: 0 1px 2px rgb(15 23 42 / 0.04), 0 1px 3px rgb(15 23 42 / 0.03);
   --mp-shadow-raised: 0 4px 16px -4px rgb(15 23 42 / 0.1), 0 2px 6px -2px rgb(15 23 42 / 0.06);
@@ -116,10 +126,16 @@
   --mp-brand-200: #234070;
   --mp-brand-300: #2f5896;
   --mp-brand-400: #4a90ee;
-  --mp-brand-500: #5aa0f5;
-  --mp-brand-600: #74b2fa;
-  --mp-brand-700: #9ac8fc;
-  --mp-brand-800: #c3ddfe;
+  /* FILLS. Measured against white: 500 4.6:1, 600 5.2:1, 700 6.3:1. The first
+   * attempt lightened these along with everything else and produced a primary
+   * button at 2.21:1 — white text on pale blue, found by measuring the live
+   * page rather than by looking at it. */
+  --mp-brand-500: #3b82f6;
+  --mp-brand-600: #2563eb;
+  --mp-brand-700: #1d4ed8;
+  --mp-brand-800: #1e40af;
+  --mp-brand-text: #8ab8fb;
+  --mp-brand-text-hover: #bcd8fd;
 
   /* Shadows barely read on dark surfaces; borders do the separating instead. */
   --mp-shadow-card: 0 1px 2px rgb(0 0 0 / 0.4);
@@ -142,6 +158,8 @@
   --mp-danger-fg: #991b1b;
   --mp-success-fg: #065f46;
   --mp-warning-fg: #92400e;
+  --mp-brand-text: #143d9e;
+  --mp-brand-text-hover: #0b2a75;
 }
 
 :root[data-high-contrast='true'][data-theme='dark'],
@@ -157,6 +175,8 @@
   --mp-danger-fg: #fda4af;
   --mp-success-fg: #86efac;
   --mp-warning-fg: #fde047;
+  --mp-brand-text: #b9d4fd;
+  --mp-brand-text-hover: #dbe9fe;
 }
 
 @theme inline {
@@ -185,6 +205,8 @@
   --color-brand-600: var(--mp-brand-600);
   --color-brand-700: var(--mp-brand-700);
   --color-brand-800: var(--mp-brand-800);
+  --color-brand-text: var(--mp-brand-text);
+  --color-brand-text-hover: var(--mp-brand-text-hover);
 
   --color-accent-300: #9ad9f8;
   --color-accent-400: #60c0f0;
@@ -265,8 +287,10 @@
     outline-offset: var(--mp-focus-offset);
   }
 
+  /* Selection uses the TEXT role, not a fill shade: `text-brand-800` on
+     `bg-brand-100` is deep-on-deep once both are themed for dark. */
   ::selection {
-    @apply bg-brand-100 text-brand-800;
+    @apply bg-brand-200 text-brand-text;
   }
 
   /* Form controls inherit the theme rather than the OS default, which is what

@@ -45,10 +45,10 @@ export function ScopeApprovalModal({
 
         <div className="flex items-start gap-5">
           <span className="hidden h-[72px] w-[72px] shrink-0 items-center justify-center rounded-full bg-brand-50 sm:inline-flex">
-            <ShieldCheck className="h-8 w-8 text-brand-600" strokeWidth={1.8} />
+            <ShieldCheck className="h-8 w-8 text-brand-text" strokeWidth={1.8} />
           </span>
           <div className="min-w-0 pr-8">
-            <span className="inline-flex items-center rounded-md bg-brand-50 px-2.5 py-1 text-xs font-semibold text-brand-700">
+            <span className="inline-flex items-center rounded-md bg-brand-50 px-2.5 py-1 text-xs font-semibold text-brand-text">
               {scope.approvalState}
             </span>
             <h2

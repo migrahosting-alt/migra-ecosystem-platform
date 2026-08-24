@@ -132,7 +132,7 @@ export function SettingsPage({ session }: { session: PublicSession | null }) {
                   className={cn(
                     'flex h-10 items-center gap-2.5 rounded-field px-3 text-sm font-medium whitespace-nowrap transition-colors lg:w-full',
                     active === id
-                      ? 'bg-brand-50 text-brand-700'
+                      ? 'bg-brand-50 text-brand-text'
                       : 'text-slate-600 hover:bg-slate-100/80 hover:text-slate-900',
                     id === 'danger' && active !== id && 'text-red-600 hover:bg-red-50 hover:text-red-700',
                   )}
@@ -140,7 +140,7 @@ export function SettingsPage({ session }: { session: PublicSession | null }) {
                   <Icon
                     className={cn(
                       'h-[17px] w-[17px] shrink-0',
-                      active === id ? 'text-brand-600' : 'text-slate-400',
+                      active === id ? 'text-brand-text' : 'text-slate-400',
                       id === 'danger' && active !== id && 'text-red-400',
                     )}
                     strokeWidth={1.9}

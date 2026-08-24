@@ -98,7 +98,7 @@ function HistorySidebar({
                               <span
                                 className={cn(
                                   'truncate text-sm font-semibold',
-                                  active ? 'text-brand-800' : 'text-slate-800',
+                                  active ? 'text-brand-text' : 'text-slate-800',
                                 )}
                               >
                                 {conversation.title}

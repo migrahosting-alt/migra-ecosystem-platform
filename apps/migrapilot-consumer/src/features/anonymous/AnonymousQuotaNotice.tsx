@@ -47,7 +47,7 @@ export function AnonymousQuotaNotice({ className }: { className?: string }) {
         data-testid="anon-quota-unknown"
       >
         You are chatting without an account.{' '}
-        <a href={signIn} className="font-semibold text-brand-600 hover:underline">
+        <a href={signIn} className="font-semibold text-brand-text hover:underline">
           Sign in
         </a>{' '}
         to keep your conversations.
@@ -113,7 +113,7 @@ export function AnonymousQuotaNotice({ className }: { className?: string }) {
         {label}
       </span>
       <span className="text-slate-400">
-        <a href={signIn} className="font-semibold text-brand-600 hover:underline">
+        <a href={signIn} className="font-semibold text-brand-text hover:underline">
           Sign in
         </a>{' '}
         for unlimited messages — this conversation comes with you.

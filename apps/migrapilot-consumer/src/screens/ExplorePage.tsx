@@ -34,7 +34,7 @@ export function ExplorePage() {
         </p>
         <p className="mt-6 text-[15px] leading-relaxed text-slate-600">
           In the meantime, you can ask MigraPilot anything from{' '}
-          <a href="/" className="font-semibold text-brand-600 hover:text-brand-700">
+          <a href="/" className="font-semibold text-brand-text hover:text-brand-text-hover">
             Chat
           </a>
           .

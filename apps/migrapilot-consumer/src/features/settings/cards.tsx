@@ -455,7 +455,7 @@ export function SecurityCard({ controller }: { controller: AccountController }) 
           Your password is managed in your MigraTeck account.{' '}
           <a
             href="https://auth.migrateck.com/sessions"
-            className="font-semibold text-brand-700 hover:text-brand-800"
+            className="font-semibold text-brand-text hover:text-brand-text-hover"
           >
             Manage password
           </a>
