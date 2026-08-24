@@ -72,6 +72,32 @@
      hover class that changed nothing. */
   --mp-brand-text-hover: #17409f;
 
+  /* Status ramps follow the same shape as the neutral one — a pale fill with
+   * dark text — so they invert the same way. Only the TINTS and the TEXT ends
+   * are themed: 400/500 are saturated chips carrying white text and read
+   * correctly in both modes, so touching them would break what already works. */
+  --mp-red-50: #fef2f2;
+  --mp-red-100: #fee2e2;
+  --mp-red-200: #fecaca;
+  --mp-red-300: #fca5a5;
+  --mp-red-600: #dc2626;
+  --mp-red-700: #b91c1c;
+  --mp-red-800: #991b1b;
+  --mp-red-900: #7f1d1d;
+  --mp-emerald-50: #ecfdf5;
+  --mp-emerald-100: #d1fae5;
+  --mp-emerald-200: #a7f3d0;
+  --mp-emerald-600: #059669;
+  --mp-emerald-700: #047857;
+  --mp-emerald-800: #065f46;
+  --mp-amber-50: #fffbeb;
+  --mp-amber-100: #fef3c7;
+  --mp-amber-200: #fde68a;
+  --mp-amber-600: #d97706;
+  --mp-amber-700: #b45309;
+  --mp-amber-800: #92400e;
+  --mp-amber-900: #78350f;
+
   --mp-shadow-card: 0 1px 2px rgb(15 23 42 / 0.04), 0 1px 3px rgb(15 23 42 / 0.03);
   --mp-shadow-raised: 0 4px 16px -4px rgb(15 23 42 / 0.1), 0 2px 6px -2px rgb(15 23 42 / 0.06);
   --mp-shadow-modal: 0 24px 64px -12px rgb(15 23 42 / 0.25), 0 8px 24px -8px rgb(15 23 42 / 0.12);
@@ -136,6 +162,31 @@
   --mp-brand-800: #1e40af;
   --mp-brand-text: #8ab8fb;
   --mp-brand-text-hover: #bcd8fd;
+
+  /* Inverted: pale fills become deep, dark text becomes light. Danger text
+   * measured 1.98:1 on the dark canvas before this — dark red on near-black,
+   * which is the exact failure the neutral ramp was inverted to avoid. */
+  --mp-red-50: #2a1416;
+  --mp-red-100: #3a1a1d;
+  --mp-red-200: #4d2226;
+  --mp-red-300: #6b2d33;
+  --mp-red-600: #fca5a5;
+  --mp-red-700: #fecaca;
+  --mp-red-800: #fee2e2;
+  --mp-red-900: #fef2f2;
+  --mp-emerald-50: #0d211c;
+  --mp-emerald-100: #123028;
+  --mp-emerald-200: #17513f;
+  --mp-emerald-600: #6ee7b7;
+  --mp-emerald-700: #a7f3d0;
+  --mp-emerald-800: #d1fae5;
+  --mp-amber-50: #241c0c;
+  --mp-amber-100: #33280f;
+  --mp-amber-200: #5a4415;
+  --mp-amber-600: #fcd34d;
+  --mp-amber-700: #fde68a;
+  --mp-amber-800: #fef3c7;
+  --mp-amber-900: #fffbeb;
 
   /* Shadows barely read on dark surfaces; borders do the separating instead. */
   --mp-shadow-card: 0 1px 2px rgb(0 0 0 / 0.4);
@@ -207,6 +258,28 @@
   --color-brand-800: var(--mp-brand-800);
   --color-brand-text: var(--mp-brand-text);
   --color-brand-text-hover: var(--mp-brand-text-hover);
+
+  --color-red-50: var(--mp-red-50);
+  --color-red-100: var(--mp-red-100);
+  --color-red-200: var(--mp-red-200);
+  --color-red-300: var(--mp-red-300);
+  --color-red-600: var(--mp-red-600);
+  --color-red-700: var(--mp-red-700);
+  --color-red-800: var(--mp-red-800);
+  --color-red-900: var(--mp-red-900);
+  --color-emerald-50: var(--mp-emerald-50);
+  --color-emerald-100: var(--mp-emerald-100);
+  --color-emerald-200: var(--mp-emerald-200);
+  --color-emerald-600: var(--mp-emerald-600);
+  --color-emerald-700: var(--mp-emerald-700);
+  --color-emerald-800: var(--mp-emerald-800);
+  --color-amber-50: var(--mp-amber-50);
+  --color-amber-100: var(--mp-amber-100);
+  --color-amber-200: var(--mp-amber-200);
+  --color-amber-600: var(--mp-amber-600);
+  --color-amber-700: var(--mp-amber-700);
+  --color-amber-800: var(--mp-amber-800);
+  --color-amber-900: var(--mp-amber-900);
 
   --color-accent-300: #9ad9f8;
   --color-accent-400: #60c0f0;
