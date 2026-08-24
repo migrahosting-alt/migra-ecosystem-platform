@@ -21,6 +21,7 @@ import 'server-only'
  * moment the screen most needs to be right.
  */
 
+import { createHash } from 'node:crypto'
 import { getSession } from './index'
 import { setAppSession } from '@migrateck/auth-client'
 import { readEnv, readFirstEnv, absoluteHttpUrl } from './env'
@@ -127,6 +128,50 @@ async function refreshAccessToken(refreshToken: string): Promise<StoredTokens | 
 }
 
 /**
+ * One refresh per token, however many requests ask for it at once.
+ *
+ * WHY THIS EXISTS. Serialising the calls INSIDE a request was not enough. Two
+ * concurrent requests -- two browser tabs, a reload while a fetch is in flight,
+ * chat and settings open together -- each read the same refresh token from the
+ * same session cookie and each redeem it. MigraAuth rotates strictly once and
+ * treats the second redemption as theft, revoking the whole family. The result
+ * is the original defect reproduced on any page load after expiry.
+ *
+ * KEYED BY THE TOKEN, NOT BY THE USER. Two requests can only collide when they
+ * hold the SAME refresh token, which is exactly what the key encodes. Different
+ * users, and the same user after a rotation, hash differently and never share an
+ * entry -- so this cannot hand one person's renewal to another.
+ *
+ * THE MAP HOLDS A PROMISE, NOT A TOKEN, and the entry is deleted as soon as it
+ * settles. Nothing credential-shaped is parked in module state for longer than
+ * the exchange itself, which is the property that made module-level token
+ * storage unacceptable in the first place.
+ *
+ * IN-PROCESS ONLY, and that is honest rather than complete: separate Node
+ * workers would still race. The window is the few hundred milliseconds of one
+ * token exchange, and the deployment runs a single process per release. A
+ * cross-process guard would need shared state this app does not have, and would
+ * be the wrong place to introduce it.
+ */
+const inFlightRefreshes = new Map<string, Promise<StoredTokens | null>>()
+
+function refreshKey(refreshToken: string): string {
+  return createHash('sha256').update(refreshToken).digest('hex')
+}
+
+function refreshOnce(refreshToken: string): Promise<StoredTokens | null> {
+  const key = refreshKey(refreshToken)
+  const existing = inFlightRefreshes.get(key)
+  if (existing) return existing
+
+  const attempt = refreshAccessToken(refreshToken).finally(() => {
+    inFlightRefreshes.delete(key)
+  })
+  inFlightRefreshes.set(key, attempt)
+  return attempt
+}
+
+/**
  * Call a MigraAuth endpoint as the signed-in user.
  *
  * A 401 from MigraAuth is reported as `reauth_required` rather than retried
@@ -173,7 +218,7 @@ export async function migraAuthFetch<T>(
 
   if (tokens.accessTokenExpiresAt <= Date.now()) {
     if (!tokens.refreshToken) return { kind: 'reauth_required' }
-    const renewed = await refreshAccessToken(tokens.refreshToken)
+    const renewed = await refreshOnce(tokens.refreshToken)
     if (!renewed) return { kind: 'reauth_required' }
     tokens = renewed
     renewedThisCall = renewed
