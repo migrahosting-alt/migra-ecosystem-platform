@@ -3,10 +3,31 @@ import { uuidSchema } from "./shared.js";
 
 export const enrollTotpSchema = z.object({});
 
-export const verifyTotpSchema = z.object({
-  challenge_id: uuidSchema.optional(),
-  code: z.string().regex(/^\d{6}$/),
-});
+/**
+ * Answering a second-factor challenge.
+ *
+ * EITHER an authenticator code OR a recovery code. The recovery branch existed
+ * in the UI — the challenge page has a "use a recovery code" toggle and posts
+ * `recoveryCode` — while this schema demanded a six-digit `code`, so every
+ * attempt was rejected as malformed. A person who had lost their authenticator
+ * had a button that could not work, which is the worst possible moment for one.
+ *
+ * `recoveryCode` matches what the page already sends; `recovery_code` is
+ * accepted too so the API reads consistently with the rest of the surface.
+ */
+export const verifyTotpSchema = z
+  .object({
+    challenge_id: uuidSchema.optional(),
+    code: z
+      .string()
+      .regex(/^\d{6}$/)
+      .optional(),
+    recoveryCode: z.string().min(6).max(64).optional(),
+    recovery_code: z.string().min(6).max(64).optional(),
+  })
+  .refine((body) => Boolean(body.code ?? body.recoveryCode ?? body.recovery_code), {
+    message: "Provide an authenticator code or a recovery code.",
+  });
 
 /**
  * Turning MFA off — re-authenticated, but not necessarily by a password.

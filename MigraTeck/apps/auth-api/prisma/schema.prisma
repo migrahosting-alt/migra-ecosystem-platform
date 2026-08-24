@@ -9,6 +9,11 @@ generator client {
 
 datasource db {
   provider = "postgresql"
+  // Declared here as well as in `prisma.config.ts`: the config supplies it at
+  // runtime, but `prisma generate` validates the schema block itself and fails
+  // without it. The env var is the same one `src/config/env.ts` reads, so this
+  // introduces no second source of truth.
+  url      = env("AUTH_DATABASE_URL")
 }
 
 // ─── Enums ──────────────────────────────────────────────────────────
@@ -336,6 +341,10 @@ model Session {
   lastSeenAt        DateTime?   @map("last_seen_at") @db.Timestamptz
   ipAddress         String?     @map("ip_address") @db.Inet
   userAgent         String?     @map("user_agent")
+  /// Set when this session was created BEFORE second-factor verification.
+  /// Non-null must not satisfy normal authenticated access — see
+  /// `validateSession`, which refuses these by default.
+  mfaPendingAt      DateTime?   @map("mfa_pending_at") @db.Timestamptz
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 

@@ -18,6 +18,15 @@ export async function createAuthSession(
   userId: string,
   ipAddress?: string,
   userAgent?: string,
+  /**
+   * Create the session as MFA-PENDING.
+   *
+   * Passed by the login paths when the account has a second factor: the browser
+   * needs an identity to answer the challenge with, and must have nothing more
+   * until it does. `validateSession` refuses pending sessions, so this flag is
+   * the whole enforcement — no route has to remember to check it.
+   */
+  opts?: { mfaPending?: boolean },
 ): Promise<SessionCreateResult> {
   const sessionSecret = generateToken(32);
   const sessionSecretHash = hashToken(sessionSecret);
@@ -31,6 +40,7 @@ export async function createAuthSession(
       expiresAt,
       ipAddress: ipAddress ?? null,
       userAgent: userAgent ?? null,
+      mfaPendingAt: opts?.mfaPending ? new Date() : null,
     },
   });
 
@@ -50,6 +60,23 @@ export async function validateSession(
       sessionSecretHash,
       revokedAt: null,
       expiresAt: { gt: new Date() },
+      /*
+       * ── THE MFA BOUNDARY LIVES HERE, NOT IN THE ROUTES ─────────────
+       *
+       * A session created before second-factor verification is not an
+       * authenticated session. Enforcing that in this one query means every
+       * guard, every route, and every route written in future inherits the
+       * refusal without knowing MFA exists.
+       *
+       * The alternative — checking in each handler — is how the hole existed in
+       * the first place: `requireAuthenticatedUser` accepted the pre-challenge
+       * cookie, so an unanswered challenge still authorised `/v1/me`,
+       * `/v1/me/security` and `/v1/admin/*`. Measured on production.
+       *
+       * `validatePendingSession` is the single deliberate exception, used only
+       * by the endpoint whose job is to answer the challenge.
+       */
+      mfaPendingAt: null,
     },
   });
 
@@ -140,4 +167,65 @@ export async function listUserSessions(
     },
     orderBy: { createdAt: "desc" },
   });
+}
+
+/**
+ * A session that has proved WHO but not yet PRESENCE.
+ *
+ * Returned only by `validatePendingSession`. Nothing else in the service can
+ * obtain one, which is the point: the ability to see a half-authenticated
+ * session has to be opted into explicitly, at exactly one call site.
+ */
+export interface PendingSessionResult {
+  session: Session;
+  mfaPending: boolean;
+}
+
+/**
+ * Validate a session for the MFA challenge, pending or not.
+ *
+ * THE ONLY DOOR A PENDING SESSION FITS. `validateSession` refuses them, so the
+ * verify endpoint needs a way to identify the person answering a challenge —
+ * and it is the one endpoint that legitimately does.
+ *
+ * It reports `mfaPending` rather than hiding it, because the caller behaves
+ * differently: a pending session that verifies must be PROMOTED and given a
+ * refresh token, while an already-authenticated user verifying is confirming an
+ * enrolment and needs neither.
+ */
+export async function validatePendingSession(
+  sessionSecret: string,
+): Promise<PendingSessionResult | null> {
+  const sessionSecretHash = hashToken(sessionSecret);
+  const session = await db.session.findFirst({
+    where: {
+      sessionSecretHash,
+      revokedAt: null,
+      expiresAt: { gt: new Date() },
+    },
+  });
+  if (!session) return null;
+
+  await db.session.update({
+    where: { id: session.id },
+    data: { lastSeenAt: new Date() },
+  });
+
+  return { session, mfaPending: session.mfaPendingAt !== null };
+}
+
+/**
+ * Promote a session once the second factor is proved.
+ *
+ * CONDITIONAL, so it cannot be replayed into an already-promoted session and
+ * cannot promote a session that was never pending. The row count is the
+ * authority — a promotion that matched nothing did not happen, and the caller
+ * must not treat it as success.
+ */
+export async function promoteSessionAfterMfa(sessionId: string): Promise<boolean> {
+  const result = await db.session.updateMany({
+    where: { id: sessionId, mfaPendingAt: { not: null }, revokedAt: null },
+    data: { mfaPendingAt: null },
+  });
+  return result.count === 1;
 }

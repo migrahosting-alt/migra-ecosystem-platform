@@ -7,7 +7,9 @@
     "build": "NODE_ENV=production next build",
     "start": "next start -p 4100",
     "lint": "eslint .",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "verify:api-base": "node scripts/verify-api-base.mjs /api",
+    "build:release": "NEXT_PUBLIC_AUTH_API_URL=/api next build && node scripts/verify-api-base.mjs /api"
   },
   "dependencies": {
     "@migrateck/auth-ui": "workspace:*",

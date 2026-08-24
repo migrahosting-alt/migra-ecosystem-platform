@@ -398,7 +398,9 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
 
     const mfaRequired = await hasTotpEnabled(user.id);
     if (mfaRequired) {
-      const { sessionSecret } = await createAuthSession(user.id, ip, ua);
+      // MFA-PENDING. This cookie identifies who is answering the challenge and
+      // authorises nothing else — `validateSession` refuses it everywhere.
+      const { sessionSecret } = await createAuthSession(user.id, ip, ua, { mfaPending: true });
       setSessionCookie(reply, sessionSecret);
       return reply.code(200).send({
         authenticated: false,

@@ -3,7 +3,7 @@
  * Validates the auth session cookie and attaches user context.
  */
 import type { FastifyRequest, FastifyReply } from "fastify";
-import { validateSession } from "../modules/sessions/index.js";
+import { validateSession, validatePendingSession } from "../modules/sessions/index.js";
 import { findUserById } from "../modules/users/index.js";
 import { config } from "../config/env.js";
 import { verifyAccessToken } from "../lib/jwt.js";
@@ -25,6 +25,12 @@ declare module "fastify" {
      * no OAuth client and correctly gets the default branding.
      */
     authClientId?: string;
+    /**
+     * True when the session answered for is MFA-pending. Set only by
+     * `requireMfaChallengeOrUser`; every other guard refuses such sessions
+     * outright, so elsewhere this is always absent.
+     */
+    mfaPending?: boolean;
   }
 }
 
@@ -69,6 +75,10 @@ function getBearerToken(authorization?: string): string | null {
 
   const token = authorization.slice("Bearer ".length).trim();
   return token || null;
+}
+
+export async function authenticateWithBearerTokenPublic(request: FastifyRequest): Promise<User | null> {
+  return authenticateWithBearerToken(request);
 }
 
 async function authenticateWithBearerToken(request: FastifyRequest): Promise<User | null> {
@@ -205,4 +215,46 @@ export async function requireAdmin(
     });
     reply.code(404).send({ error: { code: "not_found", message: "Not found." } });
   }
+}
+
+/**
+ * The ONE guard that admits an MFA-pending session.
+ *
+ * Used only by the endpoint that answers the challenge. Everything else goes
+ * through `requireAuthenticatedUser`, which refuses pending sessions because
+ * `validateSession` does.
+ *
+ * It also admits a FULLY authenticated user, because the same endpoint serves
+ * two different jobs: answering a login challenge, and confirming a new
+ * enrolment while already signed in. `request.mfaPending` tells them apart, and
+ * the route promotes the session only in the first case.
+ */
+export async function requireMfaChallengeOrUser(
+  request: FastifyRequest,
+  reply: FastifyReply,
+): Promise<void> {
+  const sessionSecret = (request as RequestWithCookies).cookies[config.sessionCookieName];
+
+  if (sessionSecret) {
+    const result = await validatePendingSession(sessionSecret);
+    if (result) {
+      const user = await findUserById(result.session.userId);
+      if (user && user.status !== "DISABLED") {
+        request.authSession = result.session;
+        request.authUser = user;
+        request.mfaPending = result.mfaPending;
+        return;
+      }
+    }
+  }
+
+  // A bearer token is never MFA-pending: tokens are only minted for sessions
+  // that completed authentication.
+  const bearerUser = await authenticateWithBearerTokenPublic(request);
+  if (bearerUser) {
+    request.mfaPending = false;
+    return;
+  }
+
+  reply.code(401).send({ error: "unauthorized", message: "Authentication required" });
 }

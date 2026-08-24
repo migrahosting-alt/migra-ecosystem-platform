@@ -311,7 +311,9 @@ export async function socialRoutes(app: FastifyInstance): Promise<void> {
      * authorization is still there to resume if they finish.
      */
     if (await hasTotpEnabled(result.user.id)) {
-      const { sessionSecret } = await createAuthSession(result.user.id, ip, ua);
+      const { sessionSecret } = await createAuthSession(result.user.id, ip, ua, {
+        mfaPending: true,
+      });
       setSessionCookie(reply, sessionSecret);
 
       await logAuditEvent({
