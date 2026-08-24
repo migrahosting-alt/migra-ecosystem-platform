@@ -234,64 +234,93 @@ function MfaForm() {
                 </p>
               </div>
 
-              {/* ── method selector ─── */}
-              <div className="grid grid-cols-3 gap-2 rounded-2xl border border-white/10 bg-black/15 p-1">
+              {/*
+                ── method selector ───────────────────────────────────────
+                A SELECTED TAB IS NOT A CALL TO ACTION. This wore the full brand
+                gradient — the same treatment as "Verify and continue" — so the
+                strongest thing on the page was a segmented control the person
+                had not chosen, competing with the button they actually needed to
+                press. Selection is now carried by a tinted surface and a brand
+                border: unmistakable, and quieter than the primary action.
+
+                INACTIVE IS NOT DISABLED. "Recovery code" is fully available and
+                reads that way — legible text, a real hover — because dimming it
+                tells someone who has lost their authenticator that their way in
+                is gone. Passkey is the one genuinely unavailable method here, so
+                it is the only one rendered as disabled.
+              */}
+              <div
+                role="tablist"
+                aria-label="Verification method"
+                className="grid grid-cols-3 gap-1 rounded-2xl border border-white/10 bg-black/20 p-1"
+              >
                 {[
-                  { key: "totp", label: "Authenticator" },
-                  { key: "recovery", label: "Recovery code" },
-                  { key: "passkey", label: "Passkey" },
-                ].map((item) => (
-                  <button
-                    key={item.key}
-                    type="button"
-                    onClick={() => setMethod(item.key as Method)}
-                    className={
-                      method === item.key
-                        ? "rounded-2xl bg-[linear-gradient(135deg,var(--brand-start),var(--brand-end))] px-3 py-3 text-sm font-semibold text-white"
-                        : "rounded-2xl px-3 py-3 text-sm font-medium text-zinc-400 transition hover:text-white"
-                    }
-                  >
-                    {item.label}
-                  </button>
-                ))}
+                  { key: "totp", label: "Authenticator", disabled: false },
+                  { key: "recovery", label: "Recovery code", disabled: false },
+                  {
+                    key: "passkey",
+                    label: "Passkey",
+                    disabled: true,
+                    hint: "Passkeys are not enabled for this deployment yet.",
+                  },
+                ].map((item) => {
+                  const selected = method === item.key;
+                  return (
+                    <button
+                      key={item.key}
+                      type="button"
+                      role="tab"
+                      aria-selected={selected}
+                      disabled={item.disabled}
+                      title={item.hint}
+                      onClick={() => !item.disabled && setMethod(item.key as Method)}
+                      className={[
+                        "rounded-xl px-3 py-2.5 text-sm transition-colors",
+                        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgb(var(--ring)/0.35)]",
+                        item.disabled
+                          ? "cursor-not-allowed border border-transparent font-medium text-zinc-600"
+                          : selected
+                            ? "border border-[var(--brand-accent)]/55 bg-white/[0.07] font-semibold text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.07)]"
+                            : "border border-transparent font-medium text-zinc-300 hover:bg-white/[0.04] hover:text-white",
+                      ].join(" ")}
+                    >
+                      {item.label}
+                    </button>
+                  );
+                })}
               </div>
 
               {/* ── form ─── */}
-              {method === "passkey" ? (
-                <div className="space-y-4 rounded-2xl border border-white/10 bg-black/15 p-5">
-                  <p className="text-sm text-zinc-300">
-                    Passkey challenge UI is reserved here, but passkey verification is not enabled in this deployment yet.
-                  </p>
-                  <Button type="button" variant="secondary" className="w-full" disabled>
-                    Passkey challenge unavailable
-                  </Button>
-                </div>
-              ) : (
-                <form onSubmit={handleVerify} className="space-y-4">
-                  {method === "totp" ? (
-                    <div className="space-y-4 rounded-2xl border border-white/10 bg-black/15 p-5">
-                      <OtpInput value={code} onChange={setCode} />
-                      <p className="text-center text-sm text-zinc-400">
-                        Enter the 6-digit code from your authenticator app. Codes refresh every 30 seconds.
-                      </p>
-                    </div>
-                  ) : (
-                    <Input
-                      id="recovery-code"
-                      label="Recovery code"
-                      placeholder="xxxx-xxxx"
-                      value={recoveryCode}
-                      onChange={(event) => setRecoveryCode(event.target.value)}
-                    />
-                  )}
+              {/*
+                The passkey panel that used to live here explained, AFTER you
+                selected it, that passkeys do not work yet. The disabled tab and
+                its tooltip say the same thing before the click, so the panel was
+                a dead branch pretending to be a feature.
+              */}
+              <form onSubmit={handleVerify} className="space-y-4">
+                {method === "totp" ? (
+                  <div className="space-y-4 rounded-2xl border border-white/10 bg-black/15 p-5">
+                    <OtpInput value={code} onChange={setCode} />
+                    <p className="text-center text-sm text-zinc-400">
+                      Enter the 6-digit code from your authenticator app. Codes refresh every 30 seconds.
+                    </p>
+                  </div>
+                ) : (
+                  <Input
+                    id="recovery-code"
+                    label="Recovery code"
+                    placeholder="xxxx-xxxx"
+                    value={recoveryCode}
+                    onChange={(event) => setRecoveryCode(event.target.value)}
+                  />
+                )}
 
-                  {error ? <p className="text-sm text-rose-300">{error}</p> : null}
+                {error ? <p className="text-sm text-rose-300">{error}</p> : null}
 
-                  <Button type="submit" className="w-full" size="lg" disabled={loading}>
-                    {loading ? "Verifying..." : "Verify and continue"}
-                  </Button>
-                </form>
-              )}
+                <Button type="submit" className="w-full" size="lg" disabled={loading}>
+                  {loading ? "Verifying..." : "Verify and continue"}
+                </Button>
+              </form>
             </div>
           </div>
         </div>

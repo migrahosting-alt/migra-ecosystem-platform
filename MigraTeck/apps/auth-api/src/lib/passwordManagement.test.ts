@@ -372,6 +372,21 @@ test("every /authorize/resume caller sends the field the route reads", () => {
   }
 });
 
+test("the authenticator entry names the product, from trusted session context", () => {
+  /*
+   * MEASURED WRONG IN PRODUCTION: enrolling from a MigraPilot session saved
+   * "MigraTeck" into the authenticator app. `resolveMfaIssuer` was reading
+   * `authClientId`, which is unset for cookie sessions — so the browser case,
+   * which is most enrolments, always fell back to platform branding.
+   *
+   * An authenticator entry is read months later, out of context, beside a dozen
+   * others; naming it after the wrong product is the one thing that list has to
+   * get right.
+   */
+  const mfa = src("routes/mfa.ts");
+  assert.match(mfa, /resolveMfaIssuer\(\s*request\.authSession\?\.clientId \?\? request\.authClientId,?\s*\)/);
+});
+
 test("no raw API error can reach the user", () => {
   assert.match(page, /function describeFailure/);
   for (const code of ["reauthentication_required", "reauthentication_failed", "password_unchanged"]) {

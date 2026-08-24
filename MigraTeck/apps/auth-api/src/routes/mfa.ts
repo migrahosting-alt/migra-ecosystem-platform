@@ -31,12 +31,27 @@ export async function mfaRoutes(app: FastifyInstance): Promise<void> {
 
     try {
       /*
-       * The issuer comes from the SIGNED token's client, so the authenticator
-       * entry is labelled with the product the person actually enrolled from.
-       * `authClientId` is unset for cookie-session enrolments (MigraAuth's own
-       * UI), which correctly fall back to platform branding.
+       * ── WHICH PRODUCT THIS AUTHENTICATOR ENTRY NAMES ──────────────────
+       *
+       * `authClientId` comes from a SIGNED token and is the strongest answer
+       * when there is one — but it is unset for cookie-session enrolments,
+       * which is how anyone enrolling through MigraAuth's own UI reaches this.
+       * That covered the API case and left the browser case falling back to
+       * platform branding: enrolling from MigraPilot saved "MigraTeck" into the
+       * authenticator app, and an entry named after the wrong product is the
+       * one thing an authenticator list has to get right — it is read months
+       * later, out of context, beside a dozen others.
+       *
+       * The session now records the product it was established for, stamped
+       * server-side when a transaction was consumed, so the browser case has a
+       * trusted answer too. Session context is preferred over the token because
+       * this route is reached by a browser far more often than by an API caller
+       * holding a scoped token, and both are server state either way — neither
+       * is supplied by the caller.
        */
-      const issuer = await resolveMfaIssuer(request.authClientId);
+      const issuer = await resolveMfaIssuer(
+        request.authSession?.clientId ?? request.authClientId,
+      );
       const result = await enrollTotp(
         user.id,
         user.email ?? user.phoneE164 ?? user.id,
