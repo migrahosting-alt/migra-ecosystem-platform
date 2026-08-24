@@ -347,8 +347,14 @@ export function ConnectedAccountsCard({ controller }: { controller: AccountContr
             MigraTeck account — and then this can be removed.
           </p>
           <div className="mt-2.5 flex flex-wrap gap-2">
+            {/*
+              THE BUTTON THAT NAMES THE FIX NOW REACHES IT. This offered "Set a
+              password" and opened the SESSION LIST, so the one escape from the
+              last-sign-in-method safeguard led to a page that could not perform
+              it — the safeguard read as a dead end rather than a choice.
+            */}
             <a
-              href="https://auth.migrateck.com/sessions"
+              href="https://auth.migrateck.com/account/password"
               className="inline-flex h-9 items-center rounded-field border border-slate-300 bg-raised px-3 text-[13px] font-semibold text-slate-700 transition-colors hover:border-slate-400 hover:bg-slate-50"
             >
               Set a password
@@ -492,13 +498,22 @@ export function SecurityCard({ controller }: { controller: AccountController }) 
             <MfaEnrollment onEnrolled={controller.reload} />
           ))}
 
+        {/*
+          POINTS AT THE PASSWORD FLOW, NOT AT THE SESSION LIST. This link used
+          to open /sessions — a page about devices with no password control on
+          it — so an account signed up through Google or GitHub had nowhere to
+          set a first password, and the "you cannot remove your last sign-in
+          method" safeguard gave advice that led nowhere.
+        */}
         <p className="mt-3 text-[13px] leading-relaxed text-slate-500">
-          Your password is managed in your MigraTeck account.{' '}
+          {security?.has_password === false
+            ? 'Set a password to sign in without a connected account.'
+            : 'Your password is managed in your MigraTeck account.'}{' '}
           <a
-            href="https://auth.migrateck.com/sessions"
+            href="https://auth.migrateck.com/account/password"
             className="font-semibold text-brand-text hover:text-brand-text-hover"
           >
-            Manage password
+            {security?.has_password === false ? 'Set a password' : 'Manage password'}
           </a>
         </p>
       </div>

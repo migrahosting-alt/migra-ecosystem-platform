@@ -4,6 +4,7 @@ export {
   logoutSchema,
   forgotPasswordSchema,
   resetPasswordSchema,
+  setPasswordSchema,
   verifyEmailSchema,
   signupVerifySchema,
   resendVerificationSchema,

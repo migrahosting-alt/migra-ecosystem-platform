@@ -17,6 +17,15 @@ const AUTH_EVENT_TYPES = new Set([
   "EMAIL_VERIFIED",
   "PASSWORD_RESET_REQUEST",
   "PASSWORD_RESET_COMPLETE",
+  /*
+   * SETTING a password is a different event from CHANGING one, and neither is a
+   * reset. On a provider-only account the first one ADDS a way to sign in — the
+   * same class of change as linking a provider — so a timeline that showed only
+   * "password changed" would hide the moment the account gained a credential.
+   */
+  "PASSWORD_SET",
+  "PASSWORD_CHANGED",
+  "PASSWORD_CHANGE_FAILURE",
   "SESSION_REVOKE",
   "SESSION_REVOKE_OTHERS",
   "TOKEN_REFRESH",
@@ -39,6 +48,7 @@ const AUTH_EVENT_TYPES = new Set([
 
 const AUTH_EVENT_FAILURE_TYPES = new Set([
   "LOGIN_FAILURE",
+  "PASSWORD_CHANGE_FAILURE",
   "REFRESH_FAILURE",
   "TOKEN_REUSE_DETECTED",
 ]);

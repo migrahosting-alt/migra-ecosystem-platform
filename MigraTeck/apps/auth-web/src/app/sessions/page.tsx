@@ -169,6 +169,24 @@ export default function SessionsPage() {
                 </div>
               </div>
 
+              {/*
+                THE PASSWORD CONTROL IS NOT ON THIS PAGE, so this page says
+                where it is. "Manage password" used to land here — on a list of
+                devices — which is why nobody could find a way to set one.
+              */}
+              <div className="flex items-center justify-between gap-3 rounded-2xl border border-white/10 bg-black/15 px-4 py-3">
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-white">Password</p>
+                  <p className="mt-0.5 text-[13px] text-white/45">Set or change the password you sign in with.</p>
+                </div>
+                <a
+                  href="/account/password"
+                  className="shrink-0 text-sm font-semibold text-white underline underline-offset-4 transition hover:text-white/80"
+                >
+                  Manage
+                </a>
+              </div>
+
               {sessions.length > 1 ? (
                 <div className="flex justify-end">
                   <Button type="button" variant="secondary" size="sm" onClick={revokeOtherSessions} disabled={revokingOthers}>

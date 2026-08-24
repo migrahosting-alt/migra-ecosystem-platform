@@ -91,6 +91,31 @@ export const confirmEmailChangeSchema = z.object({
 });
 
 /**
+ * Setting or changing the account password from inside a signed-in session.
+ *
+ * ONE SCHEMA FOR BOTH, because they are the same act — an account gains a
+ * password it can sign in with — and splitting them into two endpoints would
+ * make the caller decide which case it is in from state it has to fetch first
+ * and can race against. The SERVER knows whether a password already exists, so
+ * the server decides what proof is required.
+ *
+ * `current_password` and `code` are BOTH optional here, and that is not the
+ * check being skipped: what counts as sufficient proof depends on what this
+ * account actually has, and a schema cannot see that. Requiring
+ * `current_password` at this layer is precisely the bug that made
+ * `POST /v1/mfa/disable` unreachable for Google and GitHub accounts — it
+ * demanded a credential those accounts had never had, and answered "Incorrect
+ * password" about a password that did not exist. The route re-authenticates.
+ */
+export const setPasswordSchema = z.object({
+  new_password: passwordSchema,
+  /** Proof for an account that already HAS a password. */
+  current_password: z.string().min(1).max(128).optional(),
+  /** An authenticator code or a recovery code, for an account with MFA on. */
+  code: z.string().min(4).max(64).optional(),
+});
+
+/**
  * Closing an account.
  *
  * The typed confirmation is checked on the SERVER. A client-side "are you sure"

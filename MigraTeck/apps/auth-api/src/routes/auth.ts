@@ -10,6 +10,7 @@ import {
   logoutSchema,
   forgotPasswordSchema,
   resetPasswordSchema,
+  setPasswordSchema,
   verifyEmailSchema,
   resendVerificationSchema,
   updateProfileSchema,
@@ -44,12 +45,13 @@ import {
   revokeAllUserSessions,
   rotateAuthSession,
 } from "../modules/sessions/index.js";
-import { hasTotpEnabled } from "../modules/mfa/index.js";
+import { hasTotpEnabled, verifyTotp, consumeRecoveryCode } from "../modules/mfa/index.js";
 import { logAuditEvent } from "../modules/audit/index.js";
 import { sendPasswordResetNotification, sendVerificationCode } from "../lib/notifications.js";
 import { parseIdentifier, maskIdentifier } from "../lib/identifier.js";
 import { db } from "../lib/db.js";
 import { config } from "../config/env.js";
+import { authenticatedRecently } from "../lib/recentAuth.js";
 import { requireAuthenticatedUser, requireSession, getClientIp } from "../middleware/session.js";
 import {
   findRefreshToken,
@@ -221,6 +223,49 @@ export async function establishFirstPartySession(input: {
   setRefreshCookie(input.reply, refreshToken);
 
   return { session };
+}
+
+/**
+ * The account's sign-in facts, as ONE definition.
+ *
+ * `/v1/me/security` reports these and `POST /v1/me/password` returns them again
+ * after a change, so the UI can update the last-sign-in-method safeguard from
+ * the response instead of re-fetching and rendering a stale count in between.
+ * They are computed in one place because two copies of this arithmetic would
+ * eventually disagree, and the one that disagrees is the one that decides
+ * whether "Disconnect" is offered on the only way into someone's account.
+ */
+async function securityFacts(user: User) {
+  const [mfaEnabled, passwordCredential, linkedIdentities] = await Promise.all([
+    hasTotpEnabled(user.id),
+    db.userCredential.findFirst({
+      where: { userId: user.id, type: "PASSWORD", isEnabled: true },
+      select: { id: true, updatedAt: true },
+    }),
+    db.userLinkedIdentity.findMany({
+      where: { userId: user.id },
+      select: { provider: true },
+    }),
+  ]);
+
+  const hasPassword = Boolean(passwordCredential);
+  /*
+   * The same arithmetic `unlinkProvider` uses to refuse the last way in. It is
+   * computed here too so the UI can DISABLE the control with a reason instead
+   * of offering it and surfacing a 409 — the safeguard stays authoritative on
+   * the server either way.
+   */
+  const signInMethods = linkedIdentities.length + (hasPassword ? 1 : 0);
+
+  return {
+    mfa_enabled: mfaEnabled,
+    has_password: hasPassword,
+    password_updated_at: passwordCredential?.updatedAt?.toISOString() ?? null,
+    email_verified: !!user.emailVerifiedAt,
+    linked_providers: linkedIdentities.map((identity) => identity.provider.toLowerCase()),
+    sign_in_methods: signInMethods,
+    can_unlink_a_provider: signInMethods > 1,
+  };
 }
 
 export async function authRoutes(app: FastifyInstance): Promise<void> {
@@ -638,36 +683,148 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
    */
   app.get("/v1/me/security", { preHandler: requireAuthenticatedUser }, async (request, reply) => {
     const user = request.authUser!;
+    return reply.code(200).send(await securityFacts(user));
+  });
 
-    const [mfaEnabled, passwordCredential, linkedIdentities] = await Promise.all([
-      hasTotpEnabled(user.id),
-      db.userCredential.findFirst({
-        where: { userId: user.id, type: "PASSWORD", isEnabled: true },
-        select: { id: true, updatedAt: true },
-      }),
-      db.userLinkedIdentity.findMany({
-        where: { userId: user.id },
-        select: { provider: true },
-      }),
-    ]);
+  /**
+   * ── POST /v1/me/password ─────────────────────────────────────────
+   *
+   * SET a password, or CHANGE one. Until this existed there was no signed-in
+   * way to do either: "Manage password" pointed at the session list, and an
+   * account created through Google or GitHub had no route to a password at all
+   * — `/v1/reset-password` needs a token sent to a verified address, which is a
+   * recovery flow, not an account-management one.
+   *
+   * That absence was not cosmetic. `unlinkProvider` refuses to remove the last
+   * way into an account and tells people "Set a password first, then unlink
+   * this provider" — advice that pointed at nothing. A provider-only account
+   * was permanently one credential wide.
+   *
+   * WHAT COUNTS AS PROOF DEPENDS ON WHAT THE ACCOUNT HAS. This is the same
+   * lesson `POST /v1/mfa/disable` learned the hard way: demanding a password
+   * from accounts that have never had one makes the route unreachable for
+   * exactly the people who need it, and answers "Incorrect password" about a
+   * password that does not exist.
+   *
+   *   has a password  -> the current password, or an authenticator/recovery
+   *                      code. Knowing the old password is the standard proof,
+   *                      and a second factor is a genuine equivalent; a merely
+   *                      recent sign-in is NOT, because a credential that can be
+   *                      proved should have to be.
+   *   no password     -> an authenticator/recovery code when MFA is on;
+   *                      otherwise the session must have authenticated RECENTLY.
+   *                      There is no older credential to demand, so the strongest
+   *                      available proof is the provider round trip that opened
+   *                      this session — and it has to be fresh.
+   *
+   * Linked identities are never touched. A password is an ADDITIONAL way in, so
+   * setting one must not quietly cost someone the Google account they have been
+   * signing in with.
+   */
+  app.post("/v1/me/password", { preHandler: requireAuthenticatedUser }, async (request, reply) => {
+    const user = request.authUser!;
+    const session = request.authSession!;
+    const body = setPasswordSchema.parse(request.body);
+    const ip = getClientIp(request);
+    const ua = request.headers["user-agent"];
 
-    const hasPassword = Boolean(passwordCredential);
+    const before = await securityFacts(user);
+    const isChange = before.has_password;
+
     /*
-     * The same arithmetic `unlinkProvider` uses to refuse the last way in. It is
-     * computed here too so the UI can DISABLE the control with a reason instead
-     * of offering it and surfacing a 409 — the safeguard stays authoritative on
-     * the server either way.
+     * ORDERED SO A RECOVERY CODE IS CONSUMED LAST. Burning one to authorise a
+     * request that the current password or a TOTP code would have satisfied
+     * spends something the person may need on the day they are locked out.
      */
-    const signInMethods = linkedIdentities.length + (hasPassword ? 1 : 0);
+    let method: "current_password" | "totp" | "recovery_code" | "recent_authentication" | null = null;
+
+    if (isChange && body.current_password) {
+      if (await verifyUserPassword(user, body.current_password)) method = "current_password";
+    }
+    if (!method && body.code && before.mfa_enabled) {
+      if (await verifyTotp(user.id, body.code)) method = "totp";
+      else if (await consumeRecoveryCode(user.id, body.code)) method = "recovery_code";
+    }
+    if (!method && !isChange && !before.mfa_enabled && authenticatedRecently(session)) {
+      method = "recent_authentication";
+    }
+
+    if (!method) {
+      await logAuditEvent({
+        actorUserId: user.id,
+        eventType: "PASSWORD_CHANGE_FAILURE",
+        eventData: { reason: "reauthentication_failed", was_change: isChange },
+        ipAddress: ip,
+        userAgent: ua,
+      });
+
+      /*
+       * The answer says what WOULD work for this account, because the caller is
+       * already signed in and can read `/v1/me/security` anyway — there is no
+       * account-enumeration secret left to protect here, and "that did not
+       * match" with no route forward is how someone gives up on a security
+       * setting. It still never says which credential was wrong.
+       */
+      const needsFreshSignIn = !isChange && !before.mfa_enabled;
+      return reply.code(401).send({
+        error: {
+          code: needsFreshSignIn ? "reauthentication_required" : "reauthentication_failed",
+          message: needsFreshSignIn
+            ? "For your security, sign in again and then set your password."
+            : isChange
+              ? "That did not match. Enter your current password, or a code from your authenticator app."
+              : "Enter a code from your authenticator app, or one of your recovery codes.",
+        },
+      });
+    }
+
+    /*
+     * REFUSED RATHER THAN SILENTLY ACCEPTED. Re-setting the password you already
+     * have looks like it worked and changes nothing, which is the worst possible
+     * answer for someone who came here because they think their password is
+     * known to someone else.
+     */
+    if (isChange && (await verifyUserPassword(user, body.new_password))) {
+      return reply.code(400).send({
+        error: {
+          code: "password_unchanged",
+          message: "That is already your password. Choose a different one.",
+        },
+      });
+    }
+
+    await changePassword(user.id, body.new_password);
+
+    /*
+     * Read AFTER the write, never assumed. "You can now sign in with your
+     * password" and the count behind the last-sign-in-method safeguard are the
+     * two things this endpoint exists to make true, so they are reported from
+     * the database rather than from what we intended to happen.
+     */
+    const after = await securityFacts(user);
+
+    await logAuditEvent({
+      actorUserId: user.id,
+      eventType: isChange ? "PASSWORD_CHANGED" : "PASSWORD_SET",
+      // HOW it was authorised, not just that it happened: a password set on a
+      // recent sign-in is a different security story from one authorised by a
+      // recovery code, and the timeline should be able to tell them apart.
+      eventData: {
+        reauthenticated_with: method,
+        sign_in_methods_before: before.sign_in_methods,
+        sign_in_methods_after: after.sign_in_methods,
+      },
+      ipAddress: ip,
+      userAgent: ua,
+    });
 
     return reply.code(200).send({
-      mfa_enabled: mfaEnabled,
-      has_password: hasPassword,
-      password_updated_at: passwordCredential?.updatedAt?.toISOString() ?? null,
-      email_verified: !!user.emailVerifiedAt,
-      linked_providers: linkedIdentities.map((identity) => identity.provider.toLowerCase()),
-      sign_in_methods: signInMethods,
-      can_unlink_a_provider: signInMethods > 1,
+      success: true,
+      created: !isChange,
+      message: isChange
+        ? "Your password has been changed."
+        : "Your password is set. You can now sign in with it as well.",
+      ...after,
     });
   });
 
