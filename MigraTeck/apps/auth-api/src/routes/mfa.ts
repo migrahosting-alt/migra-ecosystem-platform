@@ -11,6 +11,7 @@ import {
   generateRecoveryCodes,
   storeRecoveryCodes,
   consumeRecoveryCode,
+  resolveMfaIssuer,
 } from "../modules/mfa/index.js";
 import { verifyUserPassword } from "../modules/users/index.js";
 import { logAuditEvent } from "../modules/audit/index.js";
@@ -22,7 +23,18 @@ export async function mfaRoutes(app: FastifyInstance): Promise<void> {
     const user = request.authUser!;
 
     try {
-      const result = await enrollTotp(user.id, user.email ?? user.phoneE164 ?? user.id);
+      /*
+       * The issuer comes from the SIGNED token's client, so the authenticator
+       * entry is labelled with the product the person actually enrolled from.
+       * `authClientId` is unset for cookie-session enrolments (MigraAuth's own
+       * UI), which correctly fall back to platform branding.
+       */
+      const issuer = await resolveMfaIssuer(request.authClientId);
+      const result = await enrollTotp(
+        user.id,
+        user.email ?? user.phoneE164 ?? user.id,
+        issuer,
+      );
 
       return reply.code(200).send({
         challenge_id: result.challengeId,

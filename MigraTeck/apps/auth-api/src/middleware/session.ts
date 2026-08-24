@@ -13,6 +13,17 @@ declare module "fastify" {
   interface FastifyRequest {
     authSession?: Session;
     authUser?: User;
+    /**
+     * Which first-party app is making this request, taken from the SIGNED access
+     * token's `client_id`.
+     *
+     * TRUSTED BECAUSE IT IS INSIDE THE JWT. A header or body field naming the
+     * product would be caller-supplied, and anything deriving branding from it
+     * would let a caller choose how MigraAuth presents itself. This is set only
+     * on the bearer path — a cookie session is MigraAuth's own web UI, which has
+     * no OAuth client and correctly gets the default branding.
+     */
+    authClientId?: string;
   }
 }
 
@@ -74,6 +85,10 @@ async function authenticateWithBearerToken(request: FastifyRequest): Promise<Use
     }
 
     request.authUser = user;
+    // Recorded so product-aware behaviour (currently MFA issuer branding) can
+    // ask which app the token was issued to, without ever trusting the caller
+    // to say.
+    request.authClientId = payload.client_id;
     return user;
   } catch {
     return null;

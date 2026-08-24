@@ -76,6 +76,12 @@ export interface TotpEnrollmentResult {
 export async function enrollTotp(
   userId: string,
   userEmail: string,
+  /**
+   * The name the authenticator app will show. Resolved by `resolveMfaIssuer`
+   * from the signed token's client, and defaulted rather than made required so
+   * every existing caller keeps working with platform branding.
+   */
+  issuer: string = DEFAULT_MFA_ISSUER,
 ): Promise<TotpEnrollmentResult> {
   // Check if already enrolled
   const existing = await db.userCredential.findFirst({
@@ -90,7 +96,13 @@ export async function enrollTotp(
   const secretBuf = Buffer.from(secret, "base64url");
   const base32Secret = base32Encode(secretBuf);
 
-  const otpauthUri = `otpauth://totp/MigraTeck:${encodeURIComponent(userEmail)}?secret=${base32Secret}&issuer=MigraTeck&algorithm=SHA1&digits=${TOTP_DIGITS}&period=${TOTP_PERIOD}`;
+  const otpauthUri = buildOtpauthUri({
+    issuer,
+    account: userEmail,
+    base32Secret,
+    digits: TOTP_DIGITS,
+    period: TOTP_PERIOD,
+  });
 
   // Store (or replace pending) credential
   if (existing) {
@@ -263,4 +275,98 @@ export async function consumeRecoveryCode(
   });
 
   return true;
+}
+
+/**
+ * Whose name an authenticator app should show for this enrolment.
+ *
+ * WHY THIS IS NOT A CONSTANT. MigraAuth is shared identity infrastructure: the
+ * same MFA service enrols users of MigraPilot, MigraHosting and everything else
+ * on the platform. Hardcoding one product's name -- as this did, globally, as
+ * "MigraTeck" -- meant a person enrolling from MigraPilot got an authenticator
+ * entry labelled with a name they never used, and someone holding entries from
+ * two MigraTeck products could not tell them apart at all.
+ *
+ * WHY IT IS DERIVED, NOT PASSED. The client id comes from the SIGNED access
+ * token, so it is a fact about the credential rather than a claim in the
+ * request. Accepting an issuer from the caller would let anyone holding a token
+ * choose how MigraAuth brands itself inside a security app, which is precisely
+ * the trust an authenticator entry is meant to carry.
+ *
+ * FIRST-PARTY ONLY. A third-party integration must not be able to make its
+ * enrolments look like a MigraTeck product; those fall back to the platform
+ * name, as do cookie-session enrolments from MigraAuth's own UI, which have no
+ * OAuth client at all.
+ */
+export const DEFAULT_MFA_ISSUER = "MigraTeck";
+
+/**
+ * The Key URI spec gives ":" structural meaning -- it separates issuer from
+ * account inside the label -- so an issuer containing one produces an entry that
+ * parses wrongly. Stripped rather than escaped, because no correct product name
+ * needs it and a mangled label is worse than a plain one.
+ */
+function sanitizeIssuer(value: string): string {
+  return value.replace(/:/g, "").trim();
+}
+
+export async function resolveMfaIssuer(clientId?: string | null): Promise<string> {
+  if (!clientId) return DEFAULT_MFA_ISSUER;
+
+  const client = await db.oAuthClient.findUnique({
+    where: { clientId },
+    select: { clientName: true, branding: true, isFirstParty: true, isActive: true },
+  });
+  if (!client || !client.isFirstParty || !client.isActive) return DEFAULT_MFA_ISSUER;
+
+  /*
+   * SNAKE_CASE, because that is what the branding blob already uses everywhere
+   * else (`public-clients.ts` reads `display_name` / `product_name` from it).
+   * A camelCase key here would have silently never matched, and the fallback
+   * would have hidden that by still returning something plausible.
+   *
+   * `mfa_issuer` first so a product can name itself differently in an
+   * authenticator list than in a consent screen; `product_name` next, which is
+   * what a product already sets and means exactly this; `clientName` last,
+   * since the OAuth client name is an identifier that should stay stable even
+   * when the shown name changes.
+   */
+  const branding = (client.branding ?? {}) as Record<string, unknown>;
+  const str = (v: unknown) => (typeof v === "string" && v.trim().length > 0 ? v : null);
+  const configured =
+    str(branding["mfa_issuer"]) ?? str(branding["product_name"]) ?? str(branding["display_name"]);
+
+  const chosen = sanitizeIssuer(configured ?? client.clientName ?? "");
+  return chosen.length > 0 ? chosen : DEFAULT_MFA_ISSUER;
+}
+
+/**
+ * Build the otpauth URI.
+ *
+ * BOTH PLACES THE ISSUER APPEARS MUST AGREE. The spec puts it in the label
+ * prefix AND in the `issuer` parameter; authenticators compare the two, and a
+ * mismatch is treated as a different account -- some apps show a duplicate, some
+ * refuse the entry outright. They are built from one value here so they cannot
+ * drift.
+ *
+ * BOTH ARE PERCENT-ENCODED. The previous string interpolated a bare constant,
+ * which was safe only because "MigraTeck" contains nothing needing encoding; a
+ * product name with a space would have produced a broken URI.
+ */
+export function buildOtpauthUri(input: {
+  issuer: string;
+  account: string;
+  base32Secret: string;
+  digits: number;
+  period: number;
+}): string {
+  const label = `${encodeURIComponent(input.issuer)}:${encodeURIComponent(input.account)}`;
+  const params = new URLSearchParams({
+    secret: input.base32Secret,
+    issuer: input.issuer,
+    algorithm: "SHA1",
+    digits: String(input.digits),
+    period: String(input.period),
+  });
+  return `otpauth://totp/${label}?${params.toString()}`;
 }
