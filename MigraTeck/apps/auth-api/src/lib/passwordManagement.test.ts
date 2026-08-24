@@ -189,6 +189,22 @@ test("the page states whether password sign-in is currently on", () => {
   assert.match(page, /Ways to sign in/);
 });
 
+test("a settled load never still says 'loading'", () => {
+  /*
+   * CAUGHT IN A REAL BROWSER, not by a test. The heading and subtitle branched
+   * on `facts === null`, which is true both while loading AND after a failed
+   * load — so an unauthenticated visit rendered "Loading your account security
+   * settings…" forever, directly above the message saying it had failed. A
+   * spinner that never resolves tells someone to wait for something that is not
+   * coming, which is worse than an error.
+   */
+  assert.match(page, /const \[loading, setLoading\] = useState\(true\)/);
+  assert.match(page, /\} finally \{\s*setLoading\(false\);/, "loading must clear on BOTH paths");
+  assert.match(page, /\{loading\s*\?\s*"Loading your account security settings/);
+  // The failed-load message is not a dead end.
+  assert.match(page, /loadNeedsSignIn \? \(/);
+});
+
 test("no raw API error can reach the user", () => {
   assert.match(page, /function describeFailure/);
   for (const code of ["reauthentication_required", "reauthentication_failed", "password_unchanged"]) {

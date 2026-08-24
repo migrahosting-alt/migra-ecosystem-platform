@@ -74,6 +74,16 @@ export default function PasswordPage() {
 
   const [facts, setFacts] = useState<SecurityFacts | null>(null);
   const [loadError, setLoadError] = useState("");
+  /*
+   * TRACKED SEPARATELY FROM `facts`, because "we have no facts" is two different
+   * states and they must not read the same. Branching the heading on
+   * `facts === null` alone left a failed load saying "Loading your account
+   * security settings…" FOREVER, directly above the message explaining that it
+   * had finished and failed. A spinner that never resolves is worse than an
+   * error: it tells someone to wait for something that is not coming.
+   */
+  const [loading, setLoading] = useState(true);
+  const [loadNeedsSignIn, setLoadNeedsSignIn] = useState(false);
 
   const [currentPassword, setCurrentPassword] = useState("");
   const [code, setCode] = useState("");
@@ -89,9 +99,10 @@ export default function PasswordPage() {
     try {
       const response = await authFetch<SecurityFacts>("/v1/me/security");
       if (!response.ok) {
+        setLoadNeedsSignIn(response.status === 401);
         setLoadError(
           response.status === 401
-            ? "Sign in to manage your password."
+            ? "Sign in to your MigraTeck account to set or change your password."
             : "We could not load your account security settings.",
         );
         return;
@@ -99,6 +110,8 @@ export default function PasswordPage() {
       setFacts(response.data);
     } catch {
       setLoadError("We could not reach your account. Check your connection and try again.");
+    } finally {
+      setLoading(false);
     }
   }, []);
 
@@ -202,18 +215,31 @@ export default function PasswordPage() {
                 <h1 className="text-2xl font-semibold tracking-tight text-white">
                   {facts === null ? "Password" : isChange ? "Change your password" : "Set a password"}
                 </h1>
-                <p className="mt-2 text-sm text-white/50">
-                  {facts === null
-                    ? "Loading your account security settings…"
-                    : isChange
-                      ? "Choose a new password for signing in to your MigraTeck account."
-                      : "Add a password so you can sign in without a connected account."}
-                </p>
+                {/*
+                  Says "loading" only while it IS loading. Once the request has
+                  settled without facts, the message below explains why — and
+                  repeating it here would say the same thing twice.
+                */}
+                {loading || facts !== null ? (
+                  <p className="mt-2 text-sm text-white/50">
+                    {loading
+                      ? "Loading your account security settings…"
+                      : isChange
+                        ? "Choose a new password for signing in to your MigraTeck account."
+                        : "Add a password so you can sign in without a connected account."}
+                  </p>
+                ) : null}
               </div>
 
               {loadError ? (
-                <div className="rounded-2xl border border-amber-400/30 bg-amber-400/10 px-4 py-3 text-sm text-amber-100">
-                  {loadError}
+                <div className="space-y-3 rounded-2xl border border-amber-400/30 bg-amber-400/10 px-4 py-3 text-sm text-amber-100">
+                  <p>{loadError}</p>
+                  {/* A dead end otherwise: the one thing that fixes a 401 here. */}
+                  {loadNeedsSignIn ? (
+                    <Link href="/login" className="inline-flex text-sm font-semibold text-white underline underline-offset-4">
+                      Sign in
+                    </Link>
+                  ) : null}
                 </div>
               ) : null}
 
