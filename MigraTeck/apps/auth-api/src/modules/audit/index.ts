@@ -25,6 +25,16 @@ const AUTH_EVENT_TYPES = new Set([
   "MFA_ENROLL",
   "MFA_VERIFY",
   "MFA_DISABLE",
+  /*
+   * Changing the address an account is reached at, and closing it, are among
+   * the most consequential things anyone can do to an account — the first
+   * redirects every future password reset, the second ends all access. Both
+   * already land in `audit_logs`; they belong in the auth timeline too, which is
+   * what gets read when someone asks "what happened to my account?".
+   */
+  "EMAIL_CHANGE_REQUESTED",
+  "EMAIL_CHANGED",
+  "ACCOUNT_CLOSED",
 ]);
 
 const AUTH_EVENT_FAILURE_TYPES = new Set([

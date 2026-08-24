@@ -78,3 +78,25 @@ export const registerSchema = signupSchema;
 export const updateProfileSchema = z.object({
   display_name: z.string().max(120).nullish(),
 });
+
+/** Asking to move an account to a new address. */
+export const requestEmailChangeSchema = z.object({
+  email: emailSchema,
+});
+
+/** Proving control of the new address. */
+export const confirmEmailChangeSchema = z.object({
+  challenge_id: z.string().uuid(),
+  code: z.string().min(4).max(12),
+});
+
+/**
+ * Closing an account.
+ *
+ * The typed confirmation is checked on the SERVER. A client-side "are you sure"
+ * is a rendering choice that anything calling the API directly skips entirely,
+ * and this is the one action with no undo.
+ */
+export const closeAccountSchema = z.object({
+  confirm: z.literal("DELETE"),
+});

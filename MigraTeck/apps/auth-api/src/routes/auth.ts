@@ -13,6 +13,9 @@ import {
   verifyEmailSchema,
   resendVerificationSchema,
   updateProfileSchema,
+  requestEmailChangeSchema,
+  confirmEmailChangeSchema,
+  closeAccountSchema,
 } from "../lib/schemas.js";
 import {
   consumeEmailVerification,
@@ -31,6 +34,8 @@ import {
   updateLastLogin,
   verifyUserPassword,
   changePassword,
+  completeEmailChange,
+  closeUserAccount,
 } from "../modules/users/index.js";
 import {
   createAuthSession,
@@ -702,6 +707,231 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     });
 
     return reply.code(200).send({ user: toPublicUser(updated) });
+  });
+
+  /**
+   * ── POST /v1/me/email/change ─────────────────────────────────────
+   *
+   * Step one of moving an account to a new address: prove you control it.
+   *
+   * NOTHING CHANGES HERE. The account keeps its current address until a code
+   * sent to the NEW one comes back. Writing the new address first — even
+   * unverified — would let anyone who reaches a signed-in screen redirect the
+   * account's password resets to an address they own, which turns a settings
+   * field into an account-takeover primitive.
+   *
+   * The code goes to the NEW address, never the old one. The question being
+   * asked is "do you control this new mailbox", and only the new mailbox can
+   * answer it.
+   */
+  app.post("/v1/me/email/change", { preHandler: requireAuthenticatedUser }, async (request, reply) => {
+    const user = request.authUser!;
+    const body = requestEmailChangeSchema.parse(request.body);
+    const ip = getClientIp(request);
+    const ua = request.headers["user-agent"];
+
+    const parsed = tryParseIdentifier(body.email);
+    if (!parsed.ok || parsed.value.kind !== "EMAIL") {
+      return reply.code(400).send({
+        error: { code: "invalid_identifier", message: "Enter a valid email address." },
+      });
+    }
+
+    if (parsed.value.normalized === user.email) {
+      return reply.code(400).send({
+        error: { code: "same_address", message: "That is already your email address." },
+      });
+    }
+
+    /*
+     * TAKEN BY SOMEONE ELSE IS REFUSED, and refused the same way whoever asks.
+     * The address is globally unique, so this is not an enumeration leak the
+     * signup flow does not already have — and letting it through would only
+     * surface later as an opaque database error after a code had been sent.
+     */
+    const existing = await findIdentifierByParsedValue(parsed.value);
+    if (existing && existing.userId !== user.id) {
+      return reply.code(409).send({
+        error: { code: "identifier_taken", message: "That email address is already in use." },
+      });
+    }
+
+    /*
+     * The pending identifier is created UNVERIFIED and is not the account's
+     * address until the challenge is consumed. Reusing an existing pending row
+     * for the same user keeps a second attempt from colliding with the first.
+     */
+    const identifier =
+      existing ??
+      (await db.userIdentifier.create({
+        data: {
+          userId: user.id,
+          kind: "EMAIL",
+          normalizedValue: parsed.value.normalized,
+          displayValue: body.email,
+          isVerified: false,
+          isPrimary: false,
+        },
+      }));
+
+    const challenge = await createVerificationChallenge({
+      userId: user.id,
+      identifierId: identifier.id,
+      kind: "CHANGE_IDENTIFIER",
+      channel: "EMAIL",
+      ipAddress: ip,
+      userAgent: ua,
+    });
+
+    await sendVerificationCode({
+      channel: "EMAIL",
+      destination: parsed.value.normalized,
+      code: challenge.code,
+    });
+
+    await logAuditEvent({
+      actorUserId: user.id,
+      eventType: "EMAIL_CHANGE_REQUESTED",
+      // The destination is masked. An audit log that records the address in
+      // clear becomes a second place the address has to be protected.
+      eventData: {
+        to: maskIdentifier({ kind: "EMAIL", normalized: parsed.value.normalized }),
+      },
+      ipAddress: ip,
+      userAgent: ua,
+    });
+
+    return reply.code(202).send({
+      challenge_id: challenge.challenge.id,
+      sent_to: maskIdentifier({ kind: "EMAIL", normalized: parsed.value.normalized }),
+      message: "Enter the code sent to your new address to finish the change.",
+    });
+  });
+
+  /**
+   * ── POST /v1/me/email/confirm ────────────────────────────────────
+   *
+   * Step two: the code came back, so the address is proven and the swap happens.
+   *
+   * The challenge is consumed with an EXPECTED KIND. Without that, a code issued
+   * for signup verification or a password reset would be accepted here — codes
+   * are interchangeable digits, and only the kind distinguishes what the person
+   * was actually asked to approve.
+   */
+  app.post("/v1/me/email/confirm", { preHandler: requireAuthenticatedUser }, async (request, reply) => {
+    const user = request.authUser!;
+    const body = confirmEmailChangeSchema.parse(request.body);
+    const ip = getClientIp(request);
+    const ua = request.headers["user-agent"];
+
+    const challenge = await getVerificationChallenge(body.challenge_id);
+    /*
+     * BOUND TO THIS USER. A challenge id is a bearer value; without this check a
+     * signed-in attacker holding someone else's challenge id could complete
+     * that person's change against their own session.
+     */
+    if (!challenge || challenge.userId !== user.id) {
+      return reply.code(400).send({
+        error: { code: "invalid_challenge", message: "That verification is no longer valid." },
+      });
+    }
+
+    const consumed = await consumeVerificationChallenge({
+      challengeId: body.challenge_id,
+      code: body.code,
+      expectedKind: "CHANGE_IDENTIFIER",
+    });
+    if (!consumed.ok) {
+      const failure = challengeFailureResponse(consumed.reason);
+      return reply.code(failure.status).send(failure.body);
+    }
+
+    /*
+     * A challenge can exist without an identifier — the column is nullable, and
+     * some kinds are issued against the user alone. Coercing it here would turn
+     * "this challenge points at no address" into a lookup for the id `null`, so
+     * it is checked rather than asserted away.
+     */
+    const identifier = consumed.challenge.identifierId
+      ? await db.userIdentifier.findUnique({ where: { id: consumed.challenge.identifierId } })
+      : null;
+    if (!identifier || identifier.userId !== user.id) {
+      return reply.code(400).send({
+        error: { code: "invalid_challenge", message: "That verification is no longer valid." },
+      });
+    }
+
+    const updated = await completeEmailChange({
+      userId: user.id,
+      identifierId: identifier.id,
+      normalizedEmail: identifier.normalizedValue,
+      displayEmail: identifier.displayValue ?? identifier.normalizedValue,
+    });
+
+    await logAuditEvent({
+      actorUserId: user.id,
+      eventType: "EMAIL_CHANGED",
+      eventData: { to: maskIdentifier({ kind: "EMAIL", normalized: identifier.normalizedValue }) },
+      ipAddress: ip,
+      userAgent: ua,
+    });
+
+    return reply.code(200).send({ user: toPublicUser(updated) });
+  });
+
+  /**
+   * ── POST /v1/me/close ────────────────────────────────────────────
+   *
+   * Closing the account.
+   *
+   * EVERY SESSION AND REFRESH TOKEN DIES HERE, not eventually. `closeUserAccount`
+   * sets DISABLED, which the session middleware already refuses on every request
+   * — but a live refresh token would otherwise keep minting access for its full
+   * lifetime, so the token families are revoked explicitly too.
+   *
+   * A soft delete, and the reasoning is in `closeUserAccount`: the identity
+   * provider is the audit trail for every sign-in that ever happened, and a hard
+   * delete would cascade that away including the record of this deletion. Access
+   * ends completely; history does not vanish. The addresses ARE released, so the
+   * person can sign up again with their own email.
+   */
+  app.post("/v1/me/close", { preHandler: requireAuthenticatedUser }, async (request, reply) => {
+    const user = request.authUser!;
+    const ip = getClientIp(request);
+    const ua = request.headers["user-agent"];
+
+    // Server-checked, because a confirmation enforced only in a screen is not
+    // enforced for anything that skips the screen.
+    const parsed = closeAccountSchema.safeParse(request.body ?? {});
+    if (!parsed.success) {
+      return reply.code(400).send({
+        error: { code: "confirmation_required", message: "This action needs an explicit confirmation." },
+      });
+    }
+
+    /*
+     * AUDITED BEFORE THE ACT, not after. Once the account is closed the actor
+     * row it references is disabled, and a failure between the two would
+     * otherwise leave the most consequential action in the system unrecorded.
+     */
+    await logAuditEvent({
+      actorUserId: user.id,
+      eventType: "ACCOUNT_CLOSED",
+      eventData: { soft_delete: true },
+      ipAddress: ip,
+      userAgent: ua,
+    });
+
+    await closeUserAccount(user.id);
+    await revokeAllUserSessions(user.id);
+
+    const refreshToken = (request as RequestWithCookies).cookies[config.refreshCookieName];
+    if (refreshToken) await revokeRefreshTokenFamily(refreshToken);
+
+    clearSessionCookie(reply);
+    clearRefreshCookie(reply);
+
+    return reply.code(200).send({ closed: true });
   });
 
   // ── POST /v1/logout ───────────────────────────────────────────────

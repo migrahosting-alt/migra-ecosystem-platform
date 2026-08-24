@@ -26,6 +26,12 @@ import { Avatar } from '@/components/ui/Avatar'
 import { cn } from '@/lib/cn'
 import { Field, SaveIndicator, SettingsCard, Select, Toggle, Unavailable } from './controls'
 import type { SaveState } from './usePreferences'
+import {
+  CloseAccountFlow,
+  EmailChangeFlow,
+  MfaDisable,
+  MfaEnrollment,
+} from './accountFlows'
 import type { AccountController } from './useAccount'
 import type { PreferencesController } from './usePreferences'
 
@@ -128,25 +134,29 @@ export function IdentityCard({ controller }: { controller: AccountController }) 
         it sent people to another product to change their own name. `PATCH /v1/me`
         now exists, this writes straight through to it, and no copy is kept.
 
-        EMAIL IS STILL NOT EDITABLE, and that is a different judgement rather
-        than the same one half-applied: changing an address is an identity change
-        needing verification of the new one before the old stops working. Putting
-        it beside a name field would imply the two carry equal weight.
+        A NAME AND AN ADDRESS ARE NOT THE SAME WEIGHT, which is why they are
+        separate blocks rather than two fields in a row. This one saves on submit.
+        The address below cannot: it is an identity change, so it moves only
+        after a code proves the new mailbox.
       */}
       <div className="mt-6 border-t border-hairline pt-5">
         <DisplayNameField controller={controller} current={profile.displayName} />
       </div>
 
-      <p className="mt-4 text-[13px] leading-relaxed text-slate-500">
-        Your email address is part of your MigraTeck identity and is changed there, so every product
-        stays in step.
-      </p>
-      <a
-        href="https://auth.migrateck.com/sessions"
-        className="mt-3 inline-flex h-10 items-center rounded-field border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-700 transition-colors hover:border-slate-400 hover:bg-slate-50"
-      >
-        Manage MigraTeck account
-      </a>
+      {/*
+        EMAIL IS NOW EDITABLE TOO — but through a flow, not a field. The earlier
+        note said it was changed elsewhere; that was true only because no
+        verified-change flow existed. One does now, and it keeps the property
+        that made the restriction right in the first place: the address does not
+        move until a code proves the new mailbox.
+      */}
+      <div className="mt-5 border-t border-hairline pt-5">
+        <p className="text-[15px] font-medium text-slate-800">Email address</p>
+        <p className="mt-0.5 text-[13px] leading-relaxed text-slate-500">
+          Used to sign in and to reach you. Changing it needs a code sent to the new address.
+        </p>
+        <EmailChangeFlow onChanged={controller.reload} />
+      </div>
     </SettingsCard>
   )
 }
@@ -424,13 +434,30 @@ export function SecurityCard({ controller }: { controller: AccountController }) 
             />
           </>
         )}
-        <p className="mt-1 text-[13px] leading-relaxed text-slate-500">
-          Two-step verification and your password are changed in your MigraTeck account.{' '}
+        {/*
+          TWO-STEP VERIFICATION IS MANAGED HERE NOW. The previous line sent
+          people to another product for it, which was accurate only while this
+          app had no flow of its own. It has one, so the control lives beside the
+          fact it changes.
+
+          The PASSWORD link stays: setting or changing one is a MigraAuth flow
+          with its own reset-token handling, and duplicating that here would
+          duplicate a credential path rather than surface one.
+        */}
+        {security !== null &&
+          (security.mfa_enabled ? (
+            <MfaDisable hasPassword={security.has_password} onDisabled={controller.reload} />
+          ) : (
+            <MfaEnrollment onEnrolled={controller.reload} />
+          ))}
+
+        <p className="mt-3 text-[13px] leading-relaxed text-slate-500">
+          Your password is managed in your MigraTeck account.{' '}
           <a
             href="https://auth.migrateck.com/sessions"
             className="font-semibold text-brand-700 hover:text-brand-800"
           >
-            Manage security
+            Manage password
           </a>
         </p>
       </div>
@@ -900,11 +927,105 @@ export function PlanCard({ signedIn }: { signedIn: boolean }) {
             : 'Signed-out visitors get a limited number of free messages before signing in.'}
         </p>
       </div>
+      <UsageFigures />
+
+      {/*
+        WHY THERE IS NO SUBSCRIPTION HERE, stated rather than left as an absence.
+        MigraAuth's billing endpoints are org-scoped — each requires an
+        `x-org-id` and resolves entitlements for an organisation. A consumer has
+        no organisation, so there is no subscription, entitlement or invoice that
+        belongs to them, and inventing an org to query would fabricate a billing
+        relationship. When a consumer plan exists it will appear here.
+      */}
       <p className="mt-4 text-[13px] leading-relaxed text-slate-500">
         Paid plans are not available yet. When they are, they will appear here — there is nothing to
         upgrade to today.
       </p>
     </SettingsCard>
+  )
+}
+
+/**
+ * Real counts, read from the conversations this account actually holds.
+ *
+ * Loading and failure are distinct states. A failed read says so; it never falls
+ * back to zeros, because a confident "0 conversations" shown to someone with
+ * hundreds is the kind of wrong number that makes every other figure suspect.
+ */
+function UsageFigures() {
+  const [usage, setUsage] = useState<
+    | { status: 'loading' }
+    | {
+        status: 'ready'
+        conversations: number
+        messages: number
+        messagesFromYou: number
+        unreadableConversations: number
+      }
+    | { status: 'unavailable'; message: string }
+  >({ status: 'loading' })
+
+  useEffect(() => {
+    let live = true
+    void (async () => {
+      try {
+        const response = await fetch('/api/account/usage', { cache: 'no-store' })
+        const body = (await response.json().catch(() => null)) as Record<string, unknown> | null
+        if (!live) return
+        if (!response.ok) {
+          setUsage({
+            status: 'unavailable',
+            message: (body?.['message'] as string) ?? 'Your usage could not be read just now.',
+          })
+          return
+        }
+        setUsage({
+          status: 'ready',
+          conversations: Number(body?.['conversations'] ?? 0),
+          messages: Number(body?.['messages'] ?? 0),
+          messagesFromYou: Number(body?.['messagesFromYou'] ?? 0),
+          unreadableConversations: Number(body?.['unreadableConversations'] ?? 0),
+        })
+      } catch {
+        if (live) setUsage({ status: 'unavailable', message: 'Your usage could not be read just now.' })
+      }
+    })()
+    return () => {
+      live = false
+    }
+  }, [])
+
+  if (usage.status === 'loading') return <div className="mt-4"><SkeletonRows /></div>
+  if (usage.status === 'unavailable') {
+    return <div className="mt-4"><Unavailable>{usage.message}</Unavailable></div>
+  }
+
+  return (
+    <div className="mt-4">
+      <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-3">
+        <UsageFigure label="Conversations" value={usage.conversations} />
+        <UsageFigure label="Messages" value={usage.messages} />
+        <UsageFigure label="Sent by you" value={usage.messagesFromYou} />
+      </div>
+      {usage.unreadableConversations > 0 && (
+        <p className="mt-2.5 text-[13px] leading-relaxed text-amber-700">
+          {usage.unreadableConversations} conversation
+          {usage.unreadableConversations === 1 ? '' : 's'} could not be read, so these totals are
+          lower than the real figure.
+        </p>
+      )}
+    </div>
+  )
+}
+
+function UsageFigure({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="rounded-xl border border-hairline px-4 py-3">
+      <p className="text-[22px] leading-none font-semibold tracking-[-0.02em] text-slate-900">
+        {value.toLocaleString()}
+      </p>
+      <p className="mt-1.5 text-[13px] text-slate-500">{label}</p>
+    </div>
   )
 }
 
@@ -1010,15 +1131,24 @@ export function DangerCard({ onHistoryDeleted }: { onHistoryDeleted: () => void 
       )}
 
       {/*
-        Account deletion is NOT offered here. It would have to remove the
-        MigraAuth account every MigraTeck product shares, and MigraAuth has no
-        deletion endpoint yet. A button that deleted only the MigraPilot side
-        would leave the account alive while telling the person it was gone.
+        ACCOUNT DELETION IS OFFERED NOW, and the reason it was not is worth
+        keeping: it would have to remove the MigraAuth account every MigraTeck
+        product shares, and MigraAuth had no deletion endpoint — so a button here
+        would have deleted only the MigraPilot side while telling the person the
+        account was gone. `POST /v1/me/close` exists now, so the button does what
+        it says.
+
+        The route deletes conversations FIRST and only then closes the account,
+        because closing first would revoke the authority needed to reach them and
+        strand the content with nobody left who could delete it.
       */}
-      <p className="mt-5 border-t border-red-100 pt-4 text-[13px] leading-relaxed text-slate-500">
-        Deleting your whole MigraTeck account — across every product — is not something MigraPilot
-        can do on its own yet. Contact support and it will be handled properly rather than partially.
-      </p>
+      <div className="mt-5 border-t border-red-100 pt-4">
+        <p className="text-[15px] font-semibold text-slate-900">Close your MigraTeck account</p>
+        <p className="mt-1 text-[13px] leading-relaxed text-slate-500">
+          Ends your access to every MigraTeck product, not just MigraPilot.
+        </p>
+        <CloseAccountFlow />
+      </div>
     </SettingsCard>
   )
 }

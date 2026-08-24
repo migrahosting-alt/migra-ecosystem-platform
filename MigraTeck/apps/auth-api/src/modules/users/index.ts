@@ -424,3 +424,92 @@ export async function consumePasswordReset(
 
   return { userId: record.userId };
 }
+
+/**
+ * Changing the address an account is reached at, once the new one is proven.
+ *
+ * SWAPPED IN ONE TRANSACTION, and only ever called after a verification
+ * challenge on the NEW address has been consumed. Splitting it would allow a
+ * state where `user.email` and the identifier row disagree — and every lookup
+ * path uses one or the other, so a disagreement means an account that can be
+ * found by one route and not another.
+ *
+ * The old identifier row is REMOVED rather than left behind unverified. Keeping
+ * it would hold the unique constraint on an address the person no longer
+ * controls, quietly preventing them (or anyone) from ever using it again.
+ */
+export async function completeEmailChange(input: {
+  userId: string;
+  identifierId: string;
+  normalizedEmail: string;
+  displayEmail: string;
+}): Promise<User> {
+  return db.$transaction(async (tx) => {
+    const user = await tx.user.update({
+      where: { id: input.userId },
+      data: {
+        email: input.normalizedEmail,
+        emailVerifiedAt: new Date(),
+        // A change proven by a code on the new address leaves the account
+        // verified, so an account mid-verification does not fall back to PENDING
+        // and lose access it already had.
+        status: "ACTIVE",
+      },
+    });
+
+    await tx.userIdentifier.update({
+      where: { id: input.identifierId },
+      data: {
+        isVerified: true,
+        isPrimary: true,
+        verifiedAt: new Date(),
+        displayValue: input.displayEmail,
+      },
+    });
+
+    await tx.userIdentifier.deleteMany({
+      where: {
+        userId: input.userId,
+        kind: "EMAIL",
+        id: { not: input.identifierId },
+      },
+    });
+
+    return user;
+  });
+}
+
+/**
+ * Closing an account.
+ *
+ * A SOFT DELETE, DELIBERATELY. `deletedAt` is stamped and the status becomes
+ * DISABLED — which every session path already refuses, so access ends the
+ * instant this returns rather than whenever a cache expires.
+ *
+ * Rows are not destroyed, and that is the point rather than a shortcut: an
+ * identity provider is the audit trail for every sign-in that ever happened,
+ * and hard-deleting the user would cascade that history away — including the
+ * record of the deletion itself. What must stop is ACCESS, and it does.
+ *
+ * The identifiers ARE released, because holding the unique constraint on a
+ * closed account's address would stop that person ever signing up again with
+ * their own email.
+ */
+export async function closeUserAccount(userId: string): Promise<User> {
+  return db.$transaction(async (tx) => {
+    await tx.userIdentifier.deleteMany({ where: { userId } });
+    await tx.userCredential.deleteMany({ where: { userId } });
+    await tx.userLinkedIdentity.deleteMany({ where: { userId } });
+
+    return tx.user.update({
+      where: { id: userId },
+      data: {
+        status: "DISABLED",
+        disabledAt: new Date(),
+        deletedAt: new Date(),
+        email: null,
+        phoneE164: null,
+      },
+    });
+  });
+}
