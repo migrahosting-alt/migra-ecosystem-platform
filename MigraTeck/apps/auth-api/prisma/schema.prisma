@@ -257,6 +257,11 @@ model OAuthClient {
   tokenAuthMethod        String   @default("none") @map("token_auth_method") @db.VarChar(40)
   branding               Json     @default("{}") @map("branding")
   defaultPostLoginUrl    String?  @map("default_post_login_url") @db.VarChar(500)
+  /// Where to send someone after an account-security action ends their session.
+  /// The product's SIGN-IN entry carrying its own return destination; MigraAuth
+  /// cannot mint the product's PKCE transaction, so the product must start it.
+  /// Origin must match one this client already proved it owns.
+  accountReturnUrl       String?  @map("account_return_url") @db.VarChar(500)
   supportUrl             String?  @map("support_url") @db.VarChar(500)
   isFirstParty           Boolean  @default(true) @map("is_first_party")
   isActive               Boolean  @default(true) @map("is_active")

@@ -297,17 +297,23 @@ test("other devices are NOT signed out — that stays a separate policy", () => 
     "a password change must not revoke every device");
 });
 
-test("the re-auth destination is a registry-owned origin, never a supplied URL", () => {
+test("the re-auth destination comes from the registry, never from the caller", () => {
   const resolver = routes.slice(routes.indexOf("async function reauthenticationTarget"));
   const body = resolver.slice(0, resolver.indexOf("\nexport async function"));
 
-  // Proven-owned destinations only: what the client registered, nothing else.
-  assert.match(body, /defaultPostLoginUrl/);
-  assert.match(body, /redirectUris/);
+  // Registry columns only; no request-supplied value may reach this decision.
+  assert.match(body, /accountReturnUrl/);
   assert.match(body, /isActive/, "a deactivated client must not be a destination");
-  // ORIGIN only — a redirect URI's path is a callback that expects a code.
-  assert.match(body, /url\.origin/);
-  assert.doesNotMatch(body, /request\.(query|body)/, "never a caller-supplied destination");
+  assert.doesNotMatch(body, /request\.(query|body|headers)/, "never caller-supplied");
+
+  /*
+   * The ownership rule itself lives in `lib/accountReturn.ts` and is covered
+   * there by adversarial cases — off-origin, prefix look-alikes, userinfo
+   * tricks, non-http schemes, wrong port. This asserts only that the route
+   * delegates to it rather than re-deriving a redirect of its own.
+   */
+  assert.match(body, /resolveAccountReturn\(client\)/);
+  assert.doesNotMatch(body, /new URL\(/, "the route must not build its own redirect");
 });
 
 test("the success state is a journey, not a permanent tick", () => {

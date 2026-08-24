@@ -44,30 +44,68 @@ try {
 }
 
 /*
- * Parse model blocks and take each field's NAME (the first token of a line).
- * Deliberately simple: this is a drift alarm, not a schema parser, and a false
- * alarm here costs a regenerate while a missed one costs an outage.
+ * Parse model blocks LINE BY LINE, tracking where each one closes.
+ *
+ * The first version matched `/^model\s+(\w+)\s*\{([^}]*)\}/gms`, and `[^}]*`
+ * ends a model at the FIRST closing brace — which in `OAuthClient` is the `{}`
+ * inside `@default("{}")` on the `branding` line. Every field after it was
+ * invisible: `default_post_login_url`, `support_url`, `is_first_party`,
+ * `is_active`, `owner_user_id`, `account_return_url`.
+ *
+ * So the guard against shipping a stale client had a silent hole in exactly the
+ * shape of the outage it was written for: it would have passed a client that
+ * had never heard of `accountReturnUrl`, and the first symptom would have been
+ * `PrismaClientValidationError` on a real request.
+ *
+ * A closing brace at column 0 ends a model. Prisma's own formatter guarantees
+ * it, and it cannot be confused by braces inside attribute values.
  */
 const missing = [];
 let checked = 0;
+let currentModel = null;
+let unclosed = null;
 
-for (const block of schema.matchAll(/^model\s+(\w+)\s*\{([^}]*)\}/gms)) {
-  const [, model, body] = block;
-  for (const rawLine of body.split('\n')) {
-    const line = rawLine.trim();
-    if (!line || line.startsWith('//') || line.startsWith('@@') || line.startsWith('///')) continue;
-    const name = line.split(/\s+/)[0];
-    if (!name || !/^[a-z][A-Za-z0-9_]*$/.test(name)) continue;
+for (const rawLine of schema.split('\n')) {
+  const line = rawLine.trim();
 
-    checked += 1;
-    /*
-     * The generated client names every scalar field in its Where/Select types,
-     * so a field the client has never heard of simply does not appear.
-     */
-    if (!client.includes(name)) {
-      missing.push(`${model}.${name}`);
+  if (currentModel === null) {
+    const opening = /^model\s+(\w+)\s*\{/.exec(line);
+    if (opening) {
+      currentModel = opening[1];
+      unclosed = currentModel;
     }
+    continue;
   }
+
+  if (rawLine.startsWith('}')) {
+    currentModel = null;
+    unclosed = null;
+    continue;
+  }
+
+  if (!line || line.startsWith('//') || line.startsWith('@@') || line.startsWith('///')) continue;
+
+  const name = line.split(/\s+/)[0];
+  if (!name || !/^[a-z][A-Za-z0-9_]*$/.test(name)) continue;
+
+  checked += 1;
+  /*
+   * The generated client names every scalar field in its Where/Select types, so
+   * a field the client has never heard of simply does not appear.
+   */
+  if (!client.includes(name)) {
+    missing.push(`${currentModel}.${name}`);
+  }
+}
+
+/*
+ * A model left open means the parse lost track, and a parse that lost track
+ * reports "no drift" for everything it never reached — the failure this guard
+ * exists to make impossible.
+ */
+if (unclosed !== null) {
+  console.error(`✗ schema parse never closed model \`${unclosed}\` — this guard cannot be trusted`);
+  exit(1);
 }
 
 if (checked === 0) {

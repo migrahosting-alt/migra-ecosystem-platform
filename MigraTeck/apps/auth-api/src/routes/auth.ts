@@ -52,6 +52,7 @@ import { parseIdentifier, maskIdentifier } from "../lib/identifier.js";
 import { db } from "../lib/db.js";
 import { config } from "../config/env.js";
 import { authenticatedRecently } from "../lib/recentAuth.js";
+import { resolveAccountReturn } from "../lib/accountReturn.js";
 import { requireAuthenticatedUser, requireSession, getClientIp } from "../middleware/session.js";
 import {
   findRefreshToken,
@@ -299,28 +300,32 @@ async function reauthenticationTarget(clientId: string | null): Promise<string |
 
   const client = await db.oAuthClient.findUnique({
     where: { clientId },
-    select: { defaultPostLoginUrl: true, redirectUris: true, isActive: true },
+    select: {
+      accountReturnUrl: true,
+      defaultPostLoginUrl: true,
+      redirectUris: true,
+      isActive: true,
+    },
   });
+  // A deactivated client is not a destination: it can no longer complete a
+  // sign-in, so sending someone there strands them.
   if (!client || !client.isActive) return null;
 
-  const candidates: string[] = [];
-  if (client.defaultPostLoginUrl) candidates.push(client.defaultPostLoginUrl);
-  if (Array.isArray(client.redirectUris)) {
-    for (const uri of client.redirectUris) if (typeof uri === "string") candidates.push(uri);
+  const resolved = resolveAccountReturn(client);
+
+  /*
+   * A configured URL pointing off-origin is a misconfiguration worth seeing. It
+   * is ignored, so nothing unsafe happens — but somebody wrote it expecting it
+   * to work, and silence is how that stays broken.
+   */
+  if (resolved.reason === "unowned_origin" || resolved.reason === "unusable") {
+    console.warn(
+      `[auth] ignoring account_return_url for ${clientId} (${resolved.reason}): ` +
+        "it must be an absolute URL whose origin this client already registered",
+    );
   }
 
-  for (const candidate of candidates) {
-    try {
-      const url = new URL(candidate);
-      // Only the ORIGIN. A redirect URI's PATH is a callback that expects a code
-      // and would answer an arriving visitor with an error, not a sign-in.
-      if (url.protocol === "https:" || url.hostname === "localhost") return url.origin;
-    } catch {
-      // A malformed row is not a reason to fail a password change that already
-      // succeeded; the next candidate, or MigraAuth itself, answers instead.
-    }
-  }
-  return null;
+  return resolved.url;
 }
 
 export async function authRoutes(app: FastifyInstance): Promise<void> {
