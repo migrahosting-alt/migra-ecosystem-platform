@@ -24,8 +24,15 @@ import Link from "next/link";
 import { Button, PasswordInput, Input, toBrandStyle } from "@migrateck/auth-ui";
 import { authFetch } from "@/lib/api";
 import { resolveAuthBrandTheme } from "@/lib/branding";
+import { useRegistryBrand } from "@/lib/useRegistryBrand";
 
 type SecurityFacts = {
+  /**
+   * The product this SESSION was established for, stamped server-side when its
+   * authorization transaction was consumed. Never a query parameter: branding
+   * driven by one would let anyone make MigraAuth wear any product's identity.
+   */
+  product_client_id: string | null;
   mfa_enabled: boolean;
   has_password: boolean;
   password_updated_at: string | null;
@@ -69,8 +76,27 @@ function describeFailure(code: string | undefined, fallback: string | undefined)
 }
 
 export default function PasswordPage() {
-  const brand = useMemo(() => resolveAuthBrandTheme(null), []);
+  /*
+   * ── THE PRODUCT CONTEXT FOLLOWS YOU INTO ACCOUNT SECURITY ────────────
+   *
+   * Signing in to MigraPilot shows MigraPilot; opening "Manage password" from
+   * MigraPilot's settings used to drop you into a generic MigraAuth page
+   * mid-journey. Same account, same task, different identity on screen.
+   *
+   * The client id comes from the SESSION, which recorded it when a transaction
+   * was consumed — trusted server state, exactly like /login reads it from the
+   * transaction row. There is deliberately no `client_id` query parameter here:
+   * this page is reached by a plain link, and honouring a URL parameter would
+   * let anyone dress MigraAuth as any product.
+   *
+   * Null — signing in at MigraAuth directly — resolves to MigraAuth's own
+   * brand, which is the honest answer rather than a missing one.
+   */
+  const [productClientId, setProductClientId] = useState<string | null>(null);
+  const hardcodedBrand = useMemo(() => resolveAuthBrandTheme(productClientId), [productClientId]);
+  const brand = useRegistryBrand(productClientId, hardcodedBrand);
   const brandStyle = useMemo(() => toBrandStyle(brand), [brand]);
+  const isProductContext = brand.productKey !== "migraauth";
 
   const [facts, setFacts] = useState<SecurityFacts | null>(null);
   const [loadError, setLoadError] = useState("");
@@ -108,6 +134,7 @@ export default function PasswordPage() {
         return;
       }
       setFacts(response.data);
+      setProductClientId(response.data.product_client_id);
     } catch {
       setLoadError("We could not reach your account. Check your connection and try again.");
     } finally {
@@ -212,8 +239,22 @@ export default function PasswordPage() {
               </div>
 
               <div className="text-center">
+                {/*
+                  NAMES THE PRODUCT YOU CAME FROM, because "Set a password" in
+                  the middle of a MigraPilot journey reads as a different
+                  system's page. With no product context the plain wording is
+                  correct and the product suffix would be a lie.
+                */}
                 <h1 className="text-2xl font-semibold tracking-tight text-white">
-                  {facts === null ? "Password" : isChange ? "Change your password" : "Set a password"}
+                  {facts === null
+                    ? "Password"
+                    : isChange
+                      ? isProductContext
+                        ? `Change your password for ${brand.productName}`
+                        : "Change your password"
+                      : isProductContext
+                        ? `Set a password for ${brand.productName}`
+                        : "Set a password"}
                 </h1>
                 {/*
                   Says "loading" only while it IS loading. Once the request has
@@ -222,11 +263,21 @@ export default function PasswordPage() {
                 */}
                 {loading || facts !== null ? (
                   <p className="mt-2 text-sm text-white/50">
+                    {/*
+                      ONE CREDENTIAL, NOT A PER-PRODUCT ONE. The heading names
+                      the product, so this line has to say plainly what the
+                      password actually is — the MigraTeck account's, managed by
+                      MigraAuth. Without it, "Set a password for MigraPilot"
+                      invites people to believe they are creating a separate
+                      MigraPilot password, and they will look for it later.
+                    */}
                     {loading
                       ? "Loading your account security settings…"
-                      : isChange
-                        ? "Choose a new password for signing in to your MigraTeck account."
-                        : "Add a password so you can sign in without a connected account."}
+                      : isProductContext
+                        ? "This password is managed securely by MigraAuth and works with your MigraTeck account."
+                        : isChange
+                          ? "Choose a new password for signing in to your MigraTeck account."
+                          : "Add a password so you can sign in without a connected account."}
                   </p>
                 ) : null}
               </div>
@@ -364,6 +415,19 @@ export default function PasswordPage() {
                     {saving ? "Saving…" : isChange ? "Change password" : "Set password"}
                   </Button>
                 </form>
+              ) : null}
+
+              {/*
+                THE IDENTITY AUTHORITY STAYS EXPLICIT. A product-skinned page
+                that handles credentials and never says who actually operates it
+                is the shape a phishing page takes. Omitted on MigraAuth's own
+                surface, where it would only say MigraAuth is secured by
+                MigraAuth. Same rule and same wording as the sign-in footer.
+              */}
+              {isProductContext ? (
+                <p className="text-center text-[11px] leading-4 tracking-wide text-white/35">
+                  Secured by MigraAuth
+                </p>
               ) : null}
 
               <div className="flex items-center justify-between gap-3 border-t border-white/10 pt-4 text-sm">

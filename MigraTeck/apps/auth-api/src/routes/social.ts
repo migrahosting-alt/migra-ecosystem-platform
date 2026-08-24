@@ -41,7 +41,7 @@ import {
 import { logAuditEvent } from "../modules/audit/index.js";
 import { revokeAllUserSessions } from "../modules/sessions/index.js";
 import { createAuthCode } from "../modules/tokens/index.js";
-import { createAuthSession } from "../modules/sessions/index.js";
+import { createAuthSession, stampSessionClient } from "../modules/sessions/index.js";
 import { config } from "../config/env.js";
 import { updateLastLogin } from "../modules/users/index.js";
 import { requireAuthenticatedUser, optionalSession, getClientIp } from "../middleware/session.js";
@@ -397,7 +397,7 @@ export async function socialRoutes(app: FastifyInstance): Promise<void> {
       return void reply.redirect(challenge.toString(), 302);
     }
 
-    await establishFirstPartySession({ reply, userId: result.user.id, ip, userAgent: ua });
+    const established = await establishFirstPartySession({ reply, userId: result.user.id, ip, userAgent: ua });
     await updateLastLogin(result.user.id);
 
     /*
@@ -424,6 +424,15 @@ export async function socialRoutes(app: FastifyInstance): Promise<void> {
       }
 
       const t = outcome.transaction;
+
+      /*
+       * Same stamp as the password path: the session records which product it
+       * was established for, so an account-security page opened later from that
+       * product's settings can brand itself from trusted state instead of from
+       * a query parameter anyone could edit.
+       */
+      await stampSessionClient(established.session.id, t.clientId);
+
       const code = await createAuthCode(
         result.user.id,
         t.clientId,

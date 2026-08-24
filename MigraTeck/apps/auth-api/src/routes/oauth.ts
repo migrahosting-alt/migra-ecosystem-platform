@@ -16,6 +16,7 @@ import {
   toPublicView,
 } from "../modules/authorization/transaction.js";
 import { requireAuthenticatedUser, requireSession, optionalSession, getClientIp } from "../middleware/session.js";
+import { stampSessionClient } from "../modules/sessions/index.js";
 
 function parseBasicClientAuth(authorization?: string) {
   if (!authorization?.startsWith("Basic ")) {
@@ -197,6 +198,19 @@ export async function oauthRoutes(app: FastifyInstance): Promise<void> {
       }
 
       const t = outcome.transaction;
+
+      /*
+       * THE SESSION NOW REMEMBERS WHICH PRODUCT IT IS IN.
+       *
+       * Read later by account-security surfaces, which are opened by a plain
+       * link from a product's settings and so have no transaction of their own
+       * to consult. Stamped here because this is the moment the trusted client
+       * and the authenticated session are both in hand.
+       */
+      if (request.authSession) {
+        await stampSessionClient(request.authSession.id, t.clientId);
+      }
+
       const code = await createAuthCode(
         user.id,
         t.clientId,

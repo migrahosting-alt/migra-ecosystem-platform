@@ -126,6 +126,37 @@ export async function rotateAuthSession(
   return { session, sessionSecret };
 }
 
+/**
+ * Record which PRODUCT this browser session was established for.
+ *
+ * WHY THE SESSION AND NOT THE URL. Account-security surfaces — /account/password
+ * and whatever follows it — are opened from a product's settings by a plain
+ * link, so there is no authorization transaction to read and no `txn` in the
+ * address. Branding from a `client_id` query parameter would mean anyone could
+ * make MigraAuth wear any product's identity by editing a URL, which is exactly
+ * the property the durable transaction was built to remove.
+ *
+ * So it is stamped from TRUSTED STATE at the only moments both facts are known
+ * at once: when a transaction is consumed for an authenticated session. The
+ * browser never supplies it and cannot alter it.
+ *
+ * Null stays null for a sign-in that was not completing any product's request —
+ * signing in at MigraAuth directly — and that reads correctly as MigraAuth's own
+ * branding rather than as missing data.
+ *
+ * The LATEST product wins. A session that later authorizes a second product is
+ * genuinely in that product's context now, and the honest answer to "which
+ * product is this person in" is the most recent one, not the first.
+ */
+export async function stampSessionClient(sessionId: string, clientId: string): Promise<void> {
+  await db.session.updateMany({
+    // Scoped to a live session on purpose: a revoked one must not be
+    // resurrected into a product context it can no longer act in.
+    where: { id: sessionId, revokedAt: null },
+    data: { clientId },
+  });
+}
+
 export async function revokeSession(sessionId: string): Promise<void> {
   await db.session.update({
     where: { id: sessionId },

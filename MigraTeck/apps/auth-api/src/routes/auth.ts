@@ -235,7 +235,7 @@ export async function establishFirstPartySession(input: {
  * eventually disagree, and the one that disagrees is the one that decides
  * whether "Disconnect" is offered on the only way into someone's account.
  */
-async function securityFacts(user: User) {
+async function securityFacts(user: User, session?: { clientId: string | null } | null) {
   const [mfaEnabled, passwordCredential, linkedIdentities] = await Promise.all([
     hasTotpEnabled(user.id),
     db.userCredential.findFirst({
@@ -258,6 +258,14 @@ async function securityFacts(user: User) {
   const signInMethods = linkedIdentities.length + (hasPassword ? 1 : 0);
 
   return {
+    /*
+     * WHICH PRODUCT THIS SESSION IS IN, from the session row — stamped when a
+     * transaction was consumed, never supplied by the browser. Account-security
+     * pages brand themselves from it, so a MigraPilot user managing their
+     * password stays inside MigraPilot's identity instead of being dropped into
+     * a generic one mid-journey. Null means MigraAuth's own surface.
+     */
+    product_client_id: session?.clientId ?? null,
     mfa_enabled: mfaEnabled,
     has_password: hasPassword,
     password_updated_at: passwordCredential?.updatedAt?.toISOString() ?? null,
@@ -683,7 +691,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
    */
   app.get("/v1/me/security", { preHandler: requireAuthenticatedUser }, async (request, reply) => {
     const user = request.authUser!;
-    return reply.code(200).send(await securityFacts(user));
+    return reply.code(200).send(await securityFacts(user, request.authSession));
   });
 
   /**
@@ -728,7 +736,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     const ip = getClientIp(request);
     const ua = request.headers["user-agent"];
 
-    const before = await securityFacts(user);
+    const before = await securityFacts(user, session);
     const isChange = before.has_password;
 
     /*
@@ -801,7 +809,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
      * two things this endpoint exists to make true, so they are reported from
      * the database rather than from what we intended to happen.
      */
-    const after = await securityFacts(user);
+    const after = await securityFacts(user, session);
 
     await logAuditEvent({
       actorUserId: user.id,

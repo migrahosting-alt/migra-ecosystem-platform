@@ -84,7 +84,7 @@ test("setting a password never touches linked identities", () => {
 
 test("the safeguard count is read back after the write, not assumed", () => {
   const writeAt = handler.indexOf("await changePassword(");
-  const afterAt = handler.indexOf("const after = await securityFacts(user)");
+  const afterAt = handler.indexOf("const after = await securityFacts(user");
   assert.ok(writeAt > 0 && afterAt > writeAt, "facts must be re-read AFTER the password is written");
   // And returned, so the UI updates the safeguard without a second round trip.
   assert.match(handler, /\.\.\.after,/);
@@ -203,6 +203,64 @@ test("a settled load never still says 'loading'", () => {
   assert.match(page, /\{loading\s*\?\s*"Loading your account security settings/);
   // The failed-load message is not a dead end.
   assert.match(page, /loadNeedsSignIn \? \(/);
+});
+
+test("product context comes from the SESSION, never from the URL", () => {
+  /*
+   * THE PHISHING SHAPE. If this page ever brands from a `client_id` query
+   * parameter, anyone can hand out a link that dresses MigraAuth as any product
+   * on a page that collects a credential. The transaction was moved server-side
+   * precisely to take that parameter out of the browser's hands.
+   */
+  /*
+   * Asserted against the URL-reading APIs themselves rather than the string
+   * "client_id" — the trusted field is NAMED `product_client_id`, so a
+   * substring match flags the correct implementation and passes the wrong one.
+   */
+  assert.doesNotMatch(page, /useSearchParams|searchParams|location\.search|URLSearchParams/,
+    "the password page must not read anything from the URL");
+  assert.match(page, /setProductClientId\(response\.data\.product_client_id\)/);
+  assert.match(page, /useRegistryBrand\(productClientId, hardcodedBrand\)/);
+
+  // And the server takes it from the session row, not the request body.
+  assert.match(routes, /product_client_id: session\?\.clientId \?\? null/);
+});
+
+test("the session is stamped only from a consumed transaction", () => {
+  const sessions = src("modules/sessions/index.ts");
+  assert.match(sessions, /export async function stampSessionClient/);
+  // Never resurrect a revoked session into a product context it cannot act in.
+  assert.match(sessions, /where: \{ id: sessionId, revokedAt: null \}/);
+
+  for (const [file, label] of [["routes/oauth.ts", "password path"], ["routes/social.ts", "social path"]] as const) {
+    const body = src(file);
+    const stampAt = body.indexOf("stampSessionClient(");
+    const consumeAt = body.indexOf("consumeTransaction(");
+    assert.ok(stampAt > 0, `${label}: must stamp the session`);
+    assert.ok(consumeAt > 0 && consumeAt < stampAt,
+      `${label}: the stamp must follow a CONSUMED transaction, never precede it`);
+    assert.match(body.slice(stampAt, stampAt + 120), /t\.clientId/,
+      `${label}: the client must come from the transaction row`);
+  }
+});
+
+test("a product-branded credential page still names its authority", () => {
+  /*
+   * A product-skinned page that handles credentials and never says who operates
+   * it is the shape a phishing page takes. Same rule as the sign-in footer.
+   */
+  assert.match(page, /Secured by MigraAuth/);
+  assert.match(page, /isProductContext \? \(/);
+  assert.match(page, /brand\.productKey !== "migraauth"/);
+});
+
+test("the credential stays canonical to the MigraTeck account", () => {
+  /*
+   * "Set a password for MigraPilot" invites the belief that a separate
+   * MigraPilot password now exists. The copy has to contradict that in the same
+   * breath, or people go looking for a credential that was never created.
+   */
+  assert.match(page, /works with your MigraTeck account/);
 });
 
 test("no raw API error can reach the user", () => {
