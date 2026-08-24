@@ -248,3 +248,67 @@ export function turnPreferences(preferences: UserPreferences): TurnPreferences {
     customInstructions: preferences.customInstructions,
   };
 }
+
+/** Human names for the languages a user can pin. */
+const LANGUAGE_NAMES: Record<Exclude<Language, 'auto'>, string> = {
+  en: 'English',
+  fr: 'French',
+  es: 'Spanish',
+};
+
+/**
+ * Turn stored preferences into instructions a model should actually be given.
+ *
+ * ONLY WHAT DIFFERS FROM THE DEFAULT IS EMITTED, and that is a correctness
+ * requirement rather than brevity. Naming a language in a system prompt biases
+ * output INTO that language even when the user wrote in another; spelling out
+ * "balanced detail, neutral style" on every turn spends the model's attention
+ * restating the behaviour it already has. A preference the user never changed
+ * should leave no trace in the prompt.
+ *
+ * Returns an empty array when the user has changed nothing, so the caller adds
+ * no system message at all rather than an empty one.
+ */
+export function responseDirectives(preferences: TurnPreferences): string[] {
+  const directives: string[] = [];
+
+  const style: Partial<Record<ResponseStyle, string>> = {
+    concise: 'Be brief. Prefer short, direct answers over thorough ones.',
+    technical: 'Write for an experienced engineer. Use precise technical vocabulary and do not simplify.',
+    friendly: 'Write warmly and conversationally.',
+    formal: 'Write formally and professionally.',
+  };
+  if (style[preferences.responseStyle]) directives.push(style[preferences.responseStyle]!);
+
+  const detail: Partial<Record<DetailLevel, string>> = {
+    brief: 'Answer with the smallest useful response. Omit preamble and summary.',
+    thorough: 'Cover the topic thoroughly, including edge cases and alternatives worth knowing.',
+  };
+  if (detail[preferences.detailLevel]) directives.push(detail[preferences.detailLevel]!);
+
+  /*
+   * 'auto' emits NOTHING, deliberately. The model already answers in the
+   * language it is addressed in; naming one here would override the user's
+   * actual choice of language mid-conversation.
+   */
+  if (preferences.language !== 'auto') {
+    directives.push(`Reply in ${LANGUAGE_NAMES[preferences.language]}.`);
+  }
+
+  /*
+   * The user's own words, LAST and clearly delimited. Last so they win over the
+   * generated directives above, which is what a custom instruction is for.
+   * Delimited so a long instruction cannot be mistaken for the conversation, and
+   * labelled as the user's standing preference rather than as system policy —
+   * it must not be able to impersonate the operator.
+   */
+  const custom = preferences.customInstructions.trim();
+  if (custom.length > 0) {
+    directives.push(
+      `The user has given these standing instructions for how they want replies written. ` +
+        `Follow them unless they conflict with safety or accuracy:\n${custom}`,
+    );
+  }
+
+  return directives;
+}

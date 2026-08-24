@@ -531,6 +531,23 @@ export class OpenAiCompatProvider implements ProviderAdapter {
     });
     }
 
+    /*
+     * THE USER'S OWN RESPONSE PREFERENCES, as a system message of their own.
+     *
+     * Separate from the persona rather than concatenated into it, because they
+     * are different kinds of instruction: the persona is what MigraPilot is, and
+     * this is how one person has asked to be spoken to. Keeping them apart means
+     * a preference can never silently rewrite the product's own behaviour.
+     *
+     * AFTER the persona so it takes precedence for anything the two both speak
+     * to, and omitted entirely when the array is empty — a user who changed
+     * nothing adds no message at all.
+     */
+    const directives = request.context.responseDirectives ?? [];
+    if (directives.length > 0) {
+      parts.push({ role: 'system', content: directives.join('\n\n') });
+    }
+
     const context: string[] = [];
     if (request.context.activeFile) {
       context.push(`Active file: ${request.context.activeFile}`);

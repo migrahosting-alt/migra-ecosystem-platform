@@ -1,4 +1,9 @@
 import Fastify from 'fastify';
+import {
+  normalizePreferences,
+  responseDirectives,
+  turnPreferences,
+} from '@migrapilot/shared-types/user-preferences';
 import type {
   BudgetCheckRequest,
   BudgetCheckResponse,
@@ -480,7 +485,23 @@ async function main(): Promise<void> {
   registerBudgetRoutes(app, { budget: budgetManager, ledger: usageLedger, pricing: pricingBook, maxOutputTokens: cloudMaxOutputTokens });
   // Slice 2: coding turns route local-first (cloud NEVER invoked inline). Slice 3
   // adds the offer path (still no inline cloud — approval is a separate call).
-  registerAiRoutes(app, env, modelRegistry, memoryStore, undefined, qualStore, indexService, providerRouting, escalation, indexedBranchFor);
+  /*
+   * The caller's own response preferences, reduced to directives before they go
+   * anywhere near a prompt. Read from the SAME durable store the preferences API
+   * writes to, so what the Settings screen saves is literally what shapes the
+   * answer — there is no second copy to drift.
+   *
+   * Returns [] whenever the store is unavailable or the user changed nothing,
+   * which is precisely the engine's previous behaviour.
+   */
+  const responseDirectivesFor = async (scope: { owner: string; workspace: string }): Promise<string[]> => {
+    const store = durable instanceof PostgresDurableStore ? durable : undefined;
+    if (!store) return [];
+    const row = await store.getUserPreferences(scope);
+    return responseDirectives(turnPreferences(normalizePreferences(row.preferences)));
+  };
+
+  registerAiRoutes(app, env, modelRegistry, memoryStore, undefined, qualStore, indexService, providerRouting, escalation, indexedBranchFor, responseDirectivesFor);
   // Intelligent Provider Router — Slice 1 (/api/ai/providers): read-only, dry-run
   // inspection over the SAME fleet + policy engine. Cloud disabled by default.
   registerProviderRoutes(app, { fleet: providerFleet, engine: policyEngine, defaultPolicy: process.env.MIGRAPILOT_EXECUTION_POLICY });

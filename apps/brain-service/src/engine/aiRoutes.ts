@@ -158,6 +158,17 @@ export function registerAiRoutes(
   /** Branch the APPROVED index was built from, per scope — for divergence
    * disclosure. Absent → divergence is reported as unknown, never as "same". */
   indexedBranch?: (scope: { owner: string; workspace: string }) => string | undefined,
+  /**
+   * The caller's stored response preferences.
+   *
+   * LOADED HERE RATHER THAN SENT BY THE CLIENT. The Brain already owns
+   * preferences and already resolves the caller's scope, so reading them here
+   * means no client can claim a style it was not given, and every client — the
+   * consumer, the extension, anything later — gets the behaviour without
+   * separately remembering to send it. Absent → no directives, which is exactly
+   * how the engine behaved before.
+   */
+  loadPreferences?: (scope: { owner: string; workspace: string }) => Promise<string[]>,
 ): ModelRegistry {
   const real = env.localProvider === 'openai-compat';
   const qual = qualStore ?? new QualificationStore();
@@ -416,7 +427,20 @@ export function registerAiRoutes(
       }
     }
 
-    const chatRequest = await buildChatRequest(body, userPrompt, effectiveSummary, ragChunks);
+    /*
+     * Best-effort: a preferences read that fails must not fail the turn. Losing
+     * a style directive degrades an answer; refusing to answer destroys it.
+     */
+    let directives: string[] = [];
+    if (loadPreferences) {
+      try {
+        directives = await loadPreferences(scope);
+      } catch {
+        directives = [];
+      }
+    }
+
+    const chatRequest = await buildChatRequest(body, userPrompt, effectiveSummary, ragChunks, directives);
     await auditStore.append({
       correlationId: requestId,
       requestId,
@@ -533,6 +557,7 @@ export function registerAiRoutes(
     userPrompt: string,
     summary: string,
     ragChunks?: Array<{ path: string; startLine: number; endLine: number; snippet: string; score: number; source: 'embedding' }>,
+    responseDirectives: string[] = [],
   ): Promise<ChatTurnRequest> {
     let retrievedChunks: ChatTurnRequest['context']['retrievedChunks'] = ragChunks;
     // ── The silent fallback that made "approved index" a preference ───────────
@@ -545,7 +570,7 @@ export function registerAiRoutes(
     // above, and `none` must gather nothing at all.
     const requestedMode: GroundingMode = body.groundingMode ?? modeFromLegacy(body.requireApproved);
     if (requestedMode === 'approved' || requestedMode === 'none') {
-      return finishChatRequest(body, userPrompt, summary, requestedMode === 'none' ? undefined : retrievedChunks);
+      return finishChatRequest(body, userPrompt, summary, requestedMode === 'none' ? undefined : retrievedChunks, responseDirectives);
     }
     if (!retrievedChunks?.length && body.workspaceRoot) {
       try {
@@ -566,7 +591,7 @@ export function registerAiRoutes(
         /* grounding is best-effort — never fail a turn on retrieval */
       }
     }
-    return finishChatRequest(body, userPrompt, summary, retrievedChunks);
+    return finishChatRequest(body, userPrompt, summary, retrievedChunks, responseDirectives);
   }
 
   function finishChatRequest(
@@ -574,6 +599,7 @@ export function registerAiRoutes(
     userPrompt: string,
     summary: string,
     retrievedChunks: ChatTurnRequest['context']['retrievedChunks'],
+    responseDirectives: string[] = [],
   ): ChatTurnRequest {
     return {
       feature: 'chat',
@@ -586,6 +612,9 @@ export function registerAiRoutes(
         activeFile: body.activeFile,
         ...(retrievedChunks?.length ? { retrievedChunks } : {}),
         ...(body.attachments?.length ? { attachments: body.attachments } : {}),
+        // Omitted entirely when empty, so a user who changed nothing leaves no
+        // trace in the request or the prompt.
+        ...(responseDirectives.length ? { responseDirectives } : {}),
       },
       outputMode: 'markdown',
     };

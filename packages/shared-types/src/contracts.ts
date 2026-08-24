@@ -129,6 +129,15 @@ export interface ChatTurnRequest {
     conversationSummary?: string;
     /** User-uploaded attachments (images for vision analysis, documents, …). */
     attachments?: ChatAttachment[];
+    /**
+     * How this user has asked for replies to be written.
+     *
+     * Already reduced to DIRECTIVES rather than carrying the raw preference
+     * document: the model needs the instruction, not the settings object, and
+     * every field that travels here is a field that can end up in a prompt.
+     * Empty or absent means the user changed nothing, and nothing is added.
+     */
+    responseDirectives?: string[];
   };
   outputMode: 'markdown' | 'json_patch' | 'structured_fix';
 }
