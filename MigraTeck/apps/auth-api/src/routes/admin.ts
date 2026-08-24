@@ -10,13 +10,22 @@ import {
   adminClientListQuerySchema,
   adminUserIdSchema,
   adminUserListQuerySchema,
+  platformRoleGrantSchema,
+  platformRoleRevokeSchema,
 } from "../lib/schemas.js";
 import { db } from "../lib/db.js";
 import { findUserById, lockUser, unlockUser, disableUser } from "../modules/users/index.js";
 import { logAuditEvent } from "../modules/audit/index.js";
 import { hasTotpEnabled, disableTotp } from "../modules/mfa/index.js";
 import { listUserSessions } from "../modules/sessions/index.js";
-import { requireAdmin, getClientIp } from "../middleware/session.js";
+import { requirePermission, getClientIp } from "../middleware/session.js";
+import {
+  grantRole,
+  revokeRole,
+  listGrants,
+  PLATFORM_PERMISSIONS,
+} from "../modules/authorization/platformRoles.js";
+import type { PlatformRole } from "../prisma-client.js";
 
 function serializeAuditLog(log: {
   id: string;
@@ -86,18 +95,143 @@ function serializeAdminClient(client: {
 
 export async function adminRoutes(app: FastifyInstance): Promise<void> {
   /*
-   * OPERATOR-ONLY, DENY BY DEFAULT.
+   * EACH ROUTE NAMES THE AUTHORITY IT NEEDS.
    *
-   * This hook was `requireAuthenticatedUser` — "is signed in" — which made every
-   * route below reachable by any MigraPilot consumer: enumerate all users, read
-   * the whole audit log, read OAuth client configuration, disable or lock ANY
-   * account. `requireAdmin` authorizes against an explicit allowlist and
-   * authorizes nobody when it is unset.
+   * This was one blanket hook over the whole surface: anyone who could read a
+   * user could also disable one. That is the wrong shape for support work, which
+   * is overwhelmingly "what happened to this account?" and needs no power to
+   * change anything. Reading and suspending are now different permissions, so a
+   * support role can exist at all.
+   *
+   * There is deliberately NO blanket `addHook` any more: a route added later
+   * without a guard would inherit nothing and fail closed as a 401 rather than
+   * silently inheriting operator authority.
    */
-  app.addHook("preHandler", requireAdmin);
+
+  /**
+   * ── PLATFORM ROLES ────────────────────────────────────────────────
+   *
+   * Authority over authority. Only OWNER holds `platform.roles.manage`, so an
+   * operator can act on accounts but cannot widen anyone's access — including
+   * their own. Separating "can act" from "can decide who acts" is the reason
+   * there is more than one role.
+   *
+   * Every grant and revocation is audited with WHO did it to WHOM. An env var
+   * could record none of that, which is the point of moving off one.
+   */
+  app.get("/v1/admin/roles", { preHandler: requirePermission("platform.roles.manage") }, async (_request, reply) => {
+    return reply.code(200).send({
+      grants: (await listGrants()).map((g) => ({
+        user_id: g.userId,
+        email: g.email,
+        role: g.role.toLowerCase(),
+        granted_at: g.grantedAt.toISOString(),
+        granted_by_user_id: g.grantedByUserId,
+        note: g.note,
+      })),
+      // Published so an interface can render what a role means rather than
+      // hardcoding its own copy of the bundles and drifting from the server.
+      permissions: PLATFORM_PERMISSIONS,
+    });
+  });
+
+  app.post<{ Body: { user_id?: string; role?: string; note?: string } }>(
+    "/v1/admin/roles",
+    { preHandler: requirePermission("platform.roles.manage") },
+    async (request, reply) => {
+      const actor = request.authUser!;
+      const body = platformRoleGrantSchema.parse(request.body ?? {});
+      const role = body.role.toUpperCase() as PlatformRole;
+
+      const outcome = await grantRole({
+        userId: body.user_id,
+        role,
+        grantedByUserId: actor.id,
+        note: body.note,
+      });
+      if (!outcome.ok) {
+        return reply.code(outcome.code === "unknown_user" ? 404 : 409).send({
+          error: { code: outcome.code, message: outcome.message },
+        });
+      }
+
+      await logAuditEvent({
+        actorUserId: actor.id,
+        targetUserId: body.user_id,
+        eventType: "PLATFORM_ROLE_GRANTED",
+        eventData: { role: body.role, note: body.note ?? null },
+        ipAddress: getClientIp(request),
+        userAgent: request.headers["user-agent"],
+      });
+
+      return reply.code(200).send({ granted: true, user_id: body.user_id, role: body.role });
+    },
+  );
+
+  app.delete<{ Body: { user_id?: string; role?: string } }>(
+    "/v1/admin/roles",
+    { preHandler: requirePermission("platform.roles.manage") },
+    async (request, reply) => {
+      const actor = request.authUser!;
+      const body = platformRoleRevokeSchema.parse(request.body ?? {});
+      const role = body.role.toUpperCase() as PlatformRole;
+
+      const outcome = await revokeRole({
+        userId: body.user_id,
+        role,
+        revokedByUserId: actor.id,
+      });
+      if (!outcome.ok) {
+        /*
+         * `last_owner` is a 409 with an instruction, not a bare refusal: the
+         * person is trying to do something reasonable and needs to know the
+         * order to do it in. Same shape as refusing to unlink a last sign-in
+         * method.
+         */
+        await logAuditEvent({
+          actorUserId: actor.id,
+          targetUserId: body.user_id,
+          eventType: "PLATFORM_ROLE_REVOKE_REFUSED",
+          eventData: { role: body.role, reason: outcome.code ?? "unknown" },
+          ipAddress: getClientIp(request),
+          userAgent: request.headers["user-agent"],
+        });
+        return reply.code(409).send({ error: { code: outcome.code, message: outcome.message } });
+      }
+
+      await logAuditEvent({
+        actorUserId: actor.id,
+        targetUserId: body.user_id,
+        eventType: "PLATFORM_ROLE_REVOKED",
+        eventData: { role: body.role },
+        ipAddress: getClientIp(request),
+        userAgent: request.headers["user-agent"],
+      });
+
+      return reply.code(200).send({ revoked: true, user_id: body.user_id, role: body.role });
+    },
+  );
+
+  /**
+   * What the CALLER may do. Lets an interface hide controls it cannot use,
+   * without inventing its own copy of the role bundles.
+   *
+   * Guarded by the weakest platform permission, so anyone with any operator
+   * authority can ask — and nobody without it learns the surface exists.
+   */
+  app.get("/v1/admin/me", { preHandler: requirePermission("platform.users.read") }, async (request, reply) => {
+    const authority = request.platformAuthority!;
+    return reply.code(200).send({
+      roles: authority.roles.map((r) => r.toLowerCase()),
+      permissions: [...authority.permissions],
+      // Surfaced so an interface can WARN that this deployment is still running
+      // on the bootstrap env var instead of real grants.
+      via_bootstrap: authority.viaBootstrap,
+    });
+  });
 
   // ── GET /v1/admin/users ───────────────────────────────────────────
-  app.get("/v1/admin/users", async (request, reply) => {
+  app.get("/v1/admin/users", { preHandler: requirePermission("platform.users.read") }, async (request, reply) => {
     const query = adminUserListQuerySchema.parse(request.query);
 
     const where = {
@@ -141,7 +275,7 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   });
 
   // ── GET /v1/admin/users/:id ───────────────────────────────────────
-  app.get("/v1/admin/users/:id", async (request, reply) => {
+  app.get("/v1/admin/users/:id", { preHandler: requirePermission("platform.users.read") }, async (request, reply) => {
     const { id } = adminUserIdSchema.parse(request.params);
     const user = await findUserById(id);
     if (!user) {
@@ -201,7 +335,7 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   });
 
   // ── GET /v1/admin/clients ─────────────────────────────────────────
-  app.get("/v1/admin/clients", async (request, reply) => {
+  app.get("/v1/admin/clients", { preHandler: requirePermission("platform.clients.read") }, async (request, reply) => {
     const query = adminClientListQuerySchema.parse(request.query);
 
     const where = {
@@ -237,7 +371,7 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   });
 
   // ── POST /v1/admin/users/:id/lock ─────────────────────────────────
-  app.post("/v1/admin/users/:id/lock", async (request, reply) => {
+  app.post("/v1/admin/users/:id/lock", { preHandler: requirePermission("platform.users.suspend") }, async (request, reply) => {
     const { id } = adminUserIdSchema.parse(request.params);
     const { reason } = adminActionSchema.parse(request.body);
     const actor = request.authUser!;
@@ -259,7 +393,7 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   });
 
   // ── POST /v1/admin/users/:id/unlock ───────────────────────────────
-  app.post("/v1/admin/users/:id/unlock", async (request, reply) => {
+  app.post("/v1/admin/users/:id/unlock", { preHandler: requirePermission("platform.users.suspend") }, async (request, reply) => {
     const { id } = adminUserIdSchema.parse(request.params);
     const { reason } = adminActionSchema.parse(request.body);
     const actor = request.authUser!;
@@ -281,7 +415,7 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   });
 
   // ── POST /v1/admin/users/:id/disable ──────────────────────────────
-  app.post("/v1/admin/users/:id/disable", async (request, reply) => {
+  app.post("/v1/admin/users/:id/disable", { preHandler: requirePermission("platform.users.suspend") }, async (request, reply) => {
     const { id } = adminUserIdSchema.parse(request.params);
     const { reason } = adminActionSchema.parse(request.body);
     const actor = request.authUser!;
@@ -303,7 +437,7 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   });
 
   // ── GET /v1/admin/audit ───────────────────────────────────────────
-  app.get("/v1/admin/audit", async (request, reply) => {
+  app.get("/v1/admin/audit", { preHandler: requirePermission("platform.audit.read") }, async (request, reply) => {
     const query = adminAuditQuerySchema.parse(request.query);
 
     const where = {
@@ -352,29 +486,33 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
    * It does NOT touch sessions, providers or the password. Resetting a lost
    * factor is not a reason to sign someone out of everything.
    */
-  app.post<{ Params: { id: string } }>("/v1/admin/users/:id/mfa/reset", async (request, reply) => {
+  app.post<{ Params: { id: string } }>(
+    "/v1/admin/users/:id/mfa/reset",
+    { preHandler: requirePermission("platform.users.mfa_reset") },
+    async (request, reply) => {
     const { id } = adminUserIdSchema.parse(request.params);
-    const target = await findUserById(id);
-    if (!target) {
-      return reply.code(404).send({ error: { code: "not_found", message: "No such user." } });
-    }
+      const target = await findUserById(id);
+      if (!target) {
+        return reply.code(404).send({ error: { code: "not_found", message: "No such user." } });
+      }
 
-    const hadTotp = await hasTotpEnabled(target.id);
-    await disableTotp(target.id);
-    await db.userCredential.deleteMany({
-      where: { userId: target.id, type: "RECOVERY_CODE" },
-    });
+      const hadTotp = await hasTotpEnabled(target.id);
+      await disableTotp(target.id);
+      await db.userCredential.deleteMany({
+        where: { userId: target.id, type: "RECOVERY_CODE" },
+      });
 
-    await logAuditEvent({
-      actorUserId: request.authUser!.id,
-      targetUserId: target.id,
-      eventType: "ADMIN_MFA_RESET",
-      eventData: { had_totp: hadTotp },
-      ipAddress: getClientIp(request),
-      userAgent: request.headers["user-agent"],
-    });
+      await logAuditEvent({
+        actorUserId: request.authUser!.id,
+        targetUserId: target.id,
+        eventType: "ADMIN_MFA_RESET",
+        eventData: { had_totp: hadTotp },
+        ipAddress: getClientIp(request),
+        userAgent: request.headers["user-agent"],
+      });
 
-    return reply.code(200).send({ reset: true, had_totp: hadTotp });
-  });
+      return reply.code(200).send({ reset: true, had_totp: hadTotp });
+    },
+  );
 
 }

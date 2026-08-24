@@ -52,6 +52,21 @@ const AUTH_EVENT_TYPES = new Set([
   "EMAIL_CHANGE_REQUESTED",
   "EMAIL_CHANGED",
   "ACCOUNT_CLOSED",
+  /*
+   * WHO MAY ACT ON EVERY ACCOUNT IN THE PLATFORM, and who decided that. An env
+   * allowlist could record neither. These belong in the auth timeline because
+   * "when did this person gain operator authority" is the first question asked
+   * after anything goes wrong at this level.
+   */
+  "PLATFORM_ROLE_GRANTED",
+  "PLATFORM_ROLE_REVOKED",
+  "PLATFORM_ROLE_REVOKE_REFUSED",
+  /*
+   * Recorded on EVERY use, so a temporary bootstrap path cannot quietly become
+   * permanent — the timeline shows exactly how long the platform ran on an env
+   * var instead of real grants.
+   */
+  "ADMIN_BOOTSTRAP_AUTHORITY_USED",
 ]);
 
 const AUTH_EVENT_FAILURE_TYPES = new Set([

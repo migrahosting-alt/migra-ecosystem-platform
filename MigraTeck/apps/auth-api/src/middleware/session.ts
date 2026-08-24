@@ -8,6 +8,8 @@ import { findUserById } from "../modules/users/index.js";
 import { config } from "../config/env.js";
 import { verifyAccessToken } from "../lib/jwt.js";
 import { logAuditEvent } from "../modules/audit/index.js";
+import { authorityForUser } from "../modules/authorization/platformRoles.js";
+import type { PlatformAuthority, PlatformPermission } from "../modules/authorization/platformRoles.js";
 import type { User, Session } from "../prisma-client.js";
 
 declare module "fastify" {
@@ -31,6 +33,8 @@ declare module "fastify" {
      * outright, so elsewhere this is always absent.
      */
     mfaPending?: boolean;
+    /** Resolved platform authority, set by `requirePermission`. */
+    platformAuthority?: PlatformAuthority;
   }
 }
 
@@ -162,59 +166,83 @@ export function getClientIp(request: FastifyRequest): string | undefined {
 }
 
 /**
- * Admin authorization.
+ * Platform-operator authorization.
  *
- * WHAT THIS REPLACES. `/v1/admin/*` was guarded by `requireAuthenticatedUser`
- * alone — "is signed in", nothing more. There is no admin role on the User
- * model, so there was no check to make: every signed-in MigraPilot consumer
- * could enumerate every user, read the entire audit log, read OAuth client
- * configuration, and disable, lock or unlock ANY account. The source said so
- * twice, in comments, and shipped anyway.
+ * WHAT THIS REPLACES, IN TWO STEPS. `/v1/admin/*` was first guarded by
+ * `requireAuthenticatedUser` alone — "is signed in" — so every signed-in
+ * consumer could enumerate every user, read the whole audit log and disable ANY
+ * account. That was closed with `AUTH_ADMIN_USER_IDS`, an env allowlist, chosen
+ * deliberately because a role needs a schema and an interface and that is not
+ * something to improvise while a hole is open. This is the end state that
+ * comment promised: grants in the database, with a granter and a timestamp.
  *
- * DENY BY DEFAULT. An unset or empty allowlist authorizes nobody. The failure
- * mode of a misconfigured deployment must be "no one is an operator", never
- * "everyone is" — which is precisely how this surface came to be open.
- *
- * AN ALLOWLIST, NOT A ROLE, DELIBERATELY — for now. A role belongs in the
- * schema with a migration and an interface to manage it; that is the right
- * end state and it is not something to improvise while closing a live hole.
- * This is deployable immediately, has no schema dependency, and is strictly
- * narrower than what it replaces.
+ * DENY BY DEFAULT SURVIVES BOTH REWRITES. No grant and no bootstrap entry
+ * authorizes nothing. The failure mode of a misconfigured deployment must be
+ * "no one is an operator", never "everyone is" — which is precisely how this
+ * surface came to be open.
  */
-function adminUserIds(): Set<string> {
-  return new Set(
-    (process.env["AUTH_ADMIN_USER_IDS"] ?? "")
-      .split(",")
-      .map((value) => value.trim())
-      .filter((value) => value.length > 0),
-  );
-}
+/**
+ * Authorize by PERMISSION, never by role.
+ *
+ * Routes name the authority they need — `platform.users.suspend` — and this
+ * resolves whether the caller has it. A guard that checked `role === "owner"`
+ * would spread the role taxonomy across every handler, so re-cutting the
+ * bundles later would mean auditing every route to find the ones that quietly
+ * disagree. One definition, in `modules/authorization/platformRoles.ts`.
+ */
+export function requirePermission(permission: PlatformPermission) {
+  return async function guard(request: FastifyRequest, reply: FastifyReply): Promise<void> {
+    await requireAuthenticatedUser(request, reply);
+    if (reply.sent) return;
 
-export async function requireAdmin(
-  request: FastifyRequest,
-  reply: FastifyReply,
-): Promise<void> {
-  await requireAuthenticatedUser(request, reply);
-  if (reply.sent) return;
+    const user = request.authUser;
+    if (!user) return;
 
-  const user = request.authUser;
-  const allowed = adminUserIds();
+    const authority = await authorityForUser(user.id);
+    request.platformAuthority = authority;
 
-  if (!user || !allowed.has(user.id)) {
+    if (!authority.permissions.has(permission)) {
+      /*
+       * 404, not 403. A 403 confirms the endpoint exists and that the caller is
+       * merely not permitted, which maps the operator surface for anyone
+       * probing it. Nothing here needs to be discoverable by a non-operator.
+       */
+      await logAuditEvent({
+        actorUserId: user.id,
+        eventType: "ADMIN_ACCESS_DENIED",
+        eventData: {
+          path: String(request.url).split("?")[0] ?? "",
+          required: permission,
+          held_roles: authority.roles.join(",") || "none",
+        },
+        ipAddress: getClientIp(request),
+        userAgent: request.headers["user-agent"],
+      });
+      reply.code(404).send({ error: { code: "not_found", message: "Not found." } });
+      return;
+    }
+
     /*
-     * 404, not 403. A 403 confirms the endpoint exists and that the caller is
-     * simply not permitted, which maps the operator surface for anyone probing
-     * it. Nothing here needs to be discoverable by a non-operator.
+     * BOOTSTRAP USE IS RECORDED EVERY TIME. The env allowlist still authorizes
+     * when a user holds no grants, because a fresh deployment has nobody who
+     * can create the first grant. Auditing each use is what stops that
+     * temporary path from quietly becoming permanent: the timeline shows
+     * exactly how long the platform ran on an env var.
      */
-    await logAuditEvent({
-      actorUserId: user?.id,
-      eventType: "ADMIN_ACCESS_DENIED",
-      eventData: { path: String(request.url).split("?")[0] ?? "" },
-      ipAddress: getClientIp(request),
-      userAgent: request.headers["user-agent"],
-    });
-    reply.code(404).send({ error: { code: "not_found", message: "Not found." } });
-  }
+    if (authority.viaBootstrap) {
+      await logAuditEvent({
+        actorUserId: user.id,
+        eventType: "ADMIN_BOOTSTRAP_AUTHORITY_USED",
+        eventData: {
+          path: String(request.url).split("?")[0] ?? "",
+          permission,
+          hint: "grant this user a real OWNER role, then unset AUTH_ADMIN_USER_IDS",
+        },
+        ipAddress: getClientIp(request),
+        userAgent: request.headers["user-agent"],
+      });
+    }
+  };
 }
 
 /**

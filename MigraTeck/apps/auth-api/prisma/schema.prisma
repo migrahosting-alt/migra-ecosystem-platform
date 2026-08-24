@@ -52,6 +52,14 @@ enum TokenStatus {
   @@map("token_status")
 }
 
+enum PlatformRole {
+  SUPPORT  @map("support")
+  OPERATOR @map("operator")
+  OWNER    @map("owner")
+
+  @@map("platform_role")
+}
+
 enum MemberRole {
   OWNER         @map("owner")
   ADMIN         @map("admin")
@@ -143,6 +151,9 @@ model User {
   authorizationTransactions AuthorizationTransaction[]
 
   @@map("users")
+  platformRoleGrants   PlatformRoleGrant[] @relation("PlatformRoleSubject")
+  platformRolesGranted PlatformRoleGrant[] @relation("PlatformRoleGranter")
+  platformRolesRevoked PlatformRoleGrant[] @relation("PlatformRoleRevoker")
 }
 
 model UserIdentifier {
@@ -242,6 +253,29 @@ model VerificationChallenge {
 }
 
 // ─── OAuth Clients ──────────────────────────────────────────────────
+
+/// Platform-wide operator authority. Distinct from `MemberRole`, which is
+/// membership INSIDE one organization — this is authority OVER the platform.
+/// Revocation sets `revokedAt`; rows are never deleted, so "who could do this
+/// on the day it happened" stays answerable.
+model PlatformRoleGrant {
+  id              String       @id @default(uuid()) @db.Uuid
+  userId          String       @map("user_id") @db.Uuid
+  role            PlatformRole
+  /// NULL only for a bootstrap grant, which by definition has no granter.
+  grantedByUserId String?      @map("granted_by_user_id") @db.Uuid
+  grantedAt       DateTime     @default(now()) @map("granted_at") @db.Timestamptz
+  revokedAt       DateTime?    @map("revoked_at") @db.Timestamptz
+  revokedByUserId String?      @map("revoked_by_user_id") @db.Uuid
+  note            String?      @db.VarChar(300)
+
+  user      User  @relation("PlatformRoleSubject", fields: [userId], references: [id], onDelete: Cascade)
+  grantedBy User? @relation("PlatformRoleGranter", fields: [grantedByUserId], references: [id], onDelete: SetNull)
+  revokedBy User? @relation("PlatformRoleRevoker", fields: [revokedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@map("platform_role_grants")
+}
 
 model OAuthClient {
   id                     String   @id @default(uuid()) @db.Uuid

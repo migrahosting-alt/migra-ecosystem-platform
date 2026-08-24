@@ -40,3 +40,23 @@ export const adminUserSearchSchema = adminUserListQuerySchema;
 export const adminActionReasonSchema = adminActionSchema;
 export const adminClientSearchSchema = adminClientListQuerySchema;
 export const adminAuditSearchSchema = adminAuditQuerySchema;
+
+/**
+ * Granting a platform role.
+ *
+ * The role is validated against the CLOSED set here rather than passed through
+ * to the database. An unknown value should be a 400 that names what is allowed,
+ * not a Prisma enum error surfacing as a 500 — and an open string reaching an
+ * enum column is how a typo becomes an outage.
+ */
+export const platformRoleGrantSchema = z.object({
+  user_id: z.string().uuid(),
+  role: z.enum(["support", "operator", "owner"]),
+  /** Why this person has it. Optional, but the reason is the useful part. */
+  note: z.string().min(1).max(300).optional(),
+});
+
+export const platformRoleRevokeSchema = z.object({
+  user_id: z.string().uuid(),
+  role: z.enum(["support", "operator", "owner"]),
+});

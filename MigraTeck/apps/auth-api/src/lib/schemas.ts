@@ -28,6 +28,8 @@ export {
   adminUserListQuerySchema,
   adminClientListQuerySchema,
   adminAuditQuerySchema,
+  platformRoleGrantSchema,
+  platformRoleRevokeSchema,
   oauthClientIdSchema,
   createOAuthClientSchema,
   updateOAuthClientSchema,
