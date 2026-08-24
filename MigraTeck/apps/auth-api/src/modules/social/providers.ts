@@ -15,7 +15,7 @@
  * the normalized shape.
  */
 
-import { config } from "../../config/env.js";
+import { config, providerEnvSuffix } from "../../config/env.js";
 
 /** The only provider-shaped facts the rest of the system is allowed to see. */
 export interface ExternalProfile {
@@ -63,10 +63,62 @@ export interface ProviderCredentials {
   clientSecret: string;
 }
 
-function credentialsFor(id: ProviderDescriptor["id"]): ProviderCredentials | null {
+/**
+ * The provider app this sign-in must use.
+ *
+ * MIGRAAUTH ORCHESTRATES AUTHENTICATION; EACH PRODUCT OWNS ITS EXTERNAL-PROVIDER
+ * PRESENTATION. Google renders the consent screen of the PROJECT its OAuth
+ * client belongs to, one brand per project — so "Continue to MigraPilot" is
+ * reachable only by giving MigraPilot its own project and client. This is where
+ * that choice is made, and it is the ONLY place that knows a product can have
+ * its own app: nothing downstream — linking, the account model, sessions, the
+ * transaction — changes, because the resulting identity is the same canonical
+ * MigraTeck user either way.
+ *
+ * `productClientId` is the MigraAuth client the sign-in is FOR, not the provider
+ * client. Absent (MigraAuth's own login, provider linking from settings) or
+ * unmigrated, the shared credential answers, so products move one at a time.
+ */
+function credentialsFor(
+  id: ProviderDescriptor["id"],
+  productClientId?: string | null,
+): ProviderCredentials | null {
   const creds = id === "GOOGLE" ? config.social.google : config.social.github;
+
+  if (productClientId) {
+    const override = creds.byProduct[providerEnvSuffix(productClientId)];
+    // Never half-applied: `providerOverrides` refuses to boot with one half of
+    // a pair, so an entry here is always complete.
+    if (override) return { clientId: override.clientId, clientSecret: override.clientSecret };
+  }
+
   if (!creds.clientId || !creds.clientSecret) return null;
   return { clientId: creds.clientId, clientSecret: creds.clientSecret };
+}
+
+/** Which products have their own app for this provider. Diagnostics only. */
+export function productsWithOwnApp(id: ProviderDescriptor["id"]): string[] {
+  const creds = id === "GOOGLE" ? config.social.google : config.social.github;
+  return Object.keys(creds.byProduct).sort();
+}
+
+/**
+ * Whether this product signs in through its OWN provider app.
+ *
+ * The callback needs to tell "this product uses the shared app" apart from
+ * "this product had its own app when the trip started and no longer does" —
+ * a config removal inside the state's ten-minute window. Both resolve to the
+ * shared credential, but only the second one guarantees the exchange fails, and
+ * it deserves to be reported as a provider that is unavailable rather than as a
+ * mysterious rejection from Google.
+ */
+export function hasOwnProviderApp(
+  id: ProviderDescriptor["id"],
+  productClientId: string | null | undefined,
+): boolean {
+  if (!productClientId) return false;
+  const creds = id === "GOOGLE" ? config.social.google : config.social.github;
+  return creds.byProduct[providerEnvSuffix(productClientId)] !== undefined;
 }
 
 const json = async (url: string, accessToken: string): Promise<unknown> => {
@@ -207,15 +259,23 @@ export function describeProvider(slug: string): ProviderDescriptor | null {
  */
 export function resolveConfiguredProvider(
   slug: string,
+  productClientId?: string | null,
 ): { descriptor: ProviderDescriptor; credentials: ProviderCredentials } | null {
   const descriptor = describeProvider(slug);
   if (!descriptor) return null;
-  const credentials = credentialsFor(descriptor.id);
+  const credentials = credentialsFor(descriptor.id, productClientId);
   if (!credentials) return null;
   return { descriptor, credentials };
 }
 
-/** What the sign-in UI may offer. Absent credentials means absent button. */
+/**
+ * What the sign-in UI may offer.
+ *
+ * Deliberately asked WITHOUT a product: a provider is offered when the
+ * deployment can complete it at all. A product-specific app can only change
+ * WHICH client answers, never whether the button exists — otherwise adding a
+ * per-product override could silently remove a working provider.
+ */
 export function availableProviders(): { id: string; label: string }[] {
   return Object.entries(DESCRIPTORS)
     .filter(([, descriptor]) => credentialsFor(descriptor.id) !== null)

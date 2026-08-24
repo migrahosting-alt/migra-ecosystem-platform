@@ -22,6 +22,7 @@ import type { FastifyInstance, FastifyReply } from "fastify";
 import {
   availableProviders,
   callbackUrlFor,
+  hasOwnProviderApp,
   describeProvider,
   ProviderError,
   resolveConfiguredProvider,
@@ -112,7 +113,9 @@ export async function socialRoutes(app: FastifyInstance): Promise<void> {
         return bounce(reply, returnTo, { auth_error: "link_requires_session" });
       }
 
-      const { descriptor, credentials } = resolved;
+      const { descriptor } = resolved;
+      let credentials = resolved.credentials;
+      let productClientId: string | null = null;
 
       /*
        * A named transaction must still be OPEN before the user is sent away.
@@ -125,6 +128,27 @@ export async function socialRoutes(app: FastifyInstance): Promise<void> {
           return void reply.redirect(errorReturnTo(`transaction_${found.reason}`), 302);
         }
         await attachProvider(txn, providerEnum(descriptor));
+
+        /*
+         * WHICH PRODUCT'S PROVIDER APP TO SIGN IN THROUGH.
+         *
+         * Read from the TRANSACTION, never from the query string: the product a
+         * consent screen names must be the product whose authorization request
+         * is actually being completed, and the transaction is the only thing
+         * here that establishes that. A caller-supplied product would let
+         * anyone choose which brand a user is shown while signing in to
+         * something else.
+         *
+         * A product without its own app resolves to the shared credential, so
+         * this is a no-op for every product not yet migrated.
+         */
+        productClientId = found.transaction.clientId;
+        const forProduct = resolveConfiguredProvider(slug, productClientId);
+        // Cannot be null: `resolved` already proved the shared credential is
+        // configured, and a product override is complete or the service refused
+        // to boot. Guarded rather than asserted because a crash in the sign-in
+        // path is a worse answer than the default app.
+        if (forProduct) credentials = forProduct.credentials;
       }
 
       const created = await createLoginState({
@@ -132,6 +156,9 @@ export async function socialRoutes(app: FastifyInstance): Promise<void> {
         mode,
         returnTo,
         transactionId: txn || null,
+        // Pinned now so the callback exchanges with the app that issues the
+        // code, whatever has happened to the transaction by then.
+        productClientId,
         linkUserId: mode === "link" ? sessionUserId : null,
         ip: getClientIp(request),
         userAgent: request.headers["user-agent"],
@@ -228,12 +255,45 @@ export async function socialRoutes(app: FastifyInstance): Promise<void> {
       return bounce(reply, returnTo, { auth_error: "provider_error" });
     }
 
+    /*
+     * EXCHANGE WITH THE APP THAT ISSUED THE CODE.
+     *
+     * An authorization code is bound to the client it was issued to, so a
+     * product signed in through its own provider app must be redeemed through
+     * that same app. The binding is read from the STATE row, which recorded it
+     * when the redirect was built — not re-derived from the transaction, which
+     * may have lapsed during the round trip and would leave the exchange
+     * guessing.
+     */
+    const exchangeCredentials =
+      resolveConfiguredProvider(slug, state.productClientId)?.credentials ?? credentials;
+
+    /*
+     * The one case that must NOT fall back: the trip started against a
+     * product's own app and that app is no longer configured. The shared
+     * credential cannot redeem this code, and letting it try turns a
+     * configuration removal into an unexplained rejection from the provider.
+     */
+    if (state.productClientId && !hasOwnProviderApp(descriptor.id, state.productClientId)) {
+      app.log.error(
+        { provider: slug, product: state.productClientId },
+        "provider app for this product is no longer configured; refusing to exchange with the shared app",
+      );
+      await logAuditEvent({
+        eventType: "SOCIAL_LOGIN_FAILURE",
+        eventData: { provider: slug, reason: "product_app_unconfigured", product: state.productClientId },
+        ipAddress: ip,
+        userAgent: ua,
+      });
+      return bounce(reply, returnTo, { auth_error: "provider_unavailable" });
+    }
+
     let profile;
     try {
       const accessToken = await exchangeCode({
         descriptor,
-        clientId: credentials.clientId,
-        clientSecret: credentials.clientSecret,
+        clientId: exchangeCredentials.clientId,
+        clientSecret: exchangeCredentials.clientSecret,
         code: request.query.code,
         redirectUri: callbackUrlFor(slug),
         codeVerifier: state.codeVerifier,

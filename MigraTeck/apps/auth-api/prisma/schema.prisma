@@ -886,6 +886,9 @@ model SocialLoginState {
   returnTo     String           @map("return_to")
   /// Which authorization request this provider trip is interrupting, if any.
   transactionId String?         @map("transaction_id") @db.VarChar(128)
+  /// The product whose own provider app started this trip. Null = shared app.
+  /// The callback must exchange the code with the client that issued it.
+  productClientId String?       @map("product_client_id") @db.VarChar(128)
   linkUserId   String?          @map("link_user_id") @db.Uuid
   ipAddress    String?          @map("ip_address") @db.Inet
   userAgent    String?          @map("user_agent")

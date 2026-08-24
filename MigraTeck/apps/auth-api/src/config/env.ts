@@ -39,6 +39,68 @@ function readKeyMaybe(inlineKey: string, fileKey: string): string | undefined {
   return undefined;
 }
 
+/**
+ * Normalize a MigraAuth client id into the ENV-VAR suffix that names its
+ * per-product provider credentials.
+ *
+ * `migrapilot_web` -> `MIGRAPILOT_WEB`, so the variable reads
+ * `AUTH_GOOGLE_CLIENT_ID__MIGRAPILOT_WEB`. Derived rather than mapped, so
+ * registering a product and configuring its provider app cannot drift apart.
+ */
+export function providerEnvSuffix(productClientId: string): string {
+  return productClientId.toUpperCase().replace(/[^A-Z0-9]+/g, "_");
+}
+
+export interface ProviderCredentialPair {
+  clientId: string;
+  clientSecret: string;
+}
+
+/**
+ * PER-PRODUCT PROVIDER APPS.
+ *
+ * WHY THIS EXISTS. Google shows the consent screen of the PROJECT the OAuth
+ * client belongs to — one brand per project, shared by every client in it. With
+ * a single ecosystem-wide Google app, every product's sign-in says "Continue to
+ * <whatever that one project is called>", and no per-client setting can change
+ * it. Giving a product its own Google project, and therefore its own client, is
+ * the only way its consent screen can name it.
+ *
+ * ABSENT IS THE NORMAL CASE. A product with no override signs in through the
+ * shared credential exactly as before, so products migrate one at a time.
+ *
+ * A HALF-CONFIGURED OVERRIDE IS FATAL AT BOOT, never a silent fallback. Falling
+ * back would start the product against the shared app and show the wrong
+ * product name on the consent screen — the precise failure this feature exists
+ * to prevent — while every health check stayed green. An id without its secret
+ * is a deployment mistake, and it says so before it can serve a request.
+ */
+export function providerOverrides(provider: "GOOGLE" | "GITHUB"): Record<string, ProviderCredentialPair> {
+  const idPrefix = `AUTH_${provider}_CLIENT_ID__`;
+  const secretPrefix = `AUTH_${provider}_CLIENT_SECRET__`;
+  const suffixes = new Set<string>();
+
+  for (const key of Object.keys(process.env)) {
+    if (key.startsWith(idPrefix)) suffixes.add(key.slice(idPrefix.length));
+    else if (key.startsWith(secretPrefix)) suffixes.add(key.slice(secretPrefix.length));
+  }
+
+  const overrides: Record<string, ProviderCredentialPair> = {};
+  for (const suffix of suffixes) {
+    const clientId = (process.env[idPrefix + suffix] ?? "").trim();
+    const clientSecret = (process.env[secretPrefix + suffix] ?? "").trim();
+    if (!clientId || !clientSecret) {
+      throw new Error(
+        `Incomplete ${provider} app for product "${suffix}": ` +
+          `${idPrefix}${suffix} and ${secretPrefix}${suffix} must BOTH be set. ` +
+          `Refusing to start rather than sign that product in through the shared app.`,
+      );
+    }
+    overrides[suffix] = { clientId, clientSecret };
+  }
+  return overrides;
+}
+
 export const config = {
   /** Server */
   port: envInt("AUTH_PORT", 4000),
@@ -93,10 +155,17 @@ export const config = {
     google: {
       clientId: process.env["AUTH_GOOGLE_CLIENT_ID"] ?? "",
       clientSecret: process.env["AUTH_GOOGLE_CLIENT_SECRET"] ?? "",
+      /**
+       * Per-product Google apps, keyed by `providerEnvSuffix(clientId)`. The
+       * shared credential above stays the default for every product without
+       * one. See `providerOverrides`.
+       */
+      byProduct: providerOverrides("GOOGLE"),
     },
     github: {
       clientId: process.env["AUTH_GITHUB_CLIENT_ID"] ?? "",
       clientSecret: process.env["AUTH_GITHUB_CLIENT_SECRET"] ?? "",
+      byProduct: providerOverrides("GITHUB"),
     },
     /**
      * Extra origins a provider sign-in may return to, beyond this service and

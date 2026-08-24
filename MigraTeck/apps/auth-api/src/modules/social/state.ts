@@ -39,6 +39,15 @@ export async function createLoginState(input: {
   returnTo: string;
   /** The authorization request this trip interrupts, when there is one. */
   transactionId?: string | null;
+  /**
+   * The product whose OWN provider app this trip was started against.
+   *
+   * Recorded because the code Google returns can only be redeemed by the client
+   * it was issued to, so the callback has to exchange with the same app the
+   * redirect used. Null means the shared credential — the case for MigraAuth's
+   * own login, for provider linking, and for every product not yet migrated.
+   */
+  productClientId?: string | null;
   linkUserId?: string | null;
   ip?: string;
   userAgent?: string;
@@ -58,6 +67,7 @@ export async function createLoginState(input: {
       nonce,
       returnTo: input.returnTo,
       transactionId: input.transactionId ?? null,
+      productClientId: input.productClientId ?? null,
       linkUserId: input.linkUserId ?? null,
       ipAddress: input.ip ?? null,
       userAgent: input.userAgent ?? null,
@@ -87,6 +97,8 @@ export interface ConsumedState {
   nonce: string;
   returnTo: string;
   transactionId: string | null;
+  /** The provider app the redirect used, and the one the exchange must use. */
+  productClientId: string | null;
   linkUserId: string | null;
 }
 
@@ -139,6 +151,7 @@ export async function consumeLoginState(input: {
       nonce: row.nonce,
       returnTo: row.returnTo,
       transactionId: row.transactionId,
+      productClientId: row.productClientId,
       linkUserId: row.linkUserId,
     },
   };
