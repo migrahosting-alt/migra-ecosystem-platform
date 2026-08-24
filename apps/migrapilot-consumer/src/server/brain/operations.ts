@@ -13,6 +13,8 @@
  * governance contract.
  */
 
+import type { TurnAttachment } from './attachments'
+
 export type MessageRole = 'user' | 'assistant' | 'system'
 
 /**
@@ -59,6 +61,15 @@ export type BrainOperation =
       stream?: boolean
       /** Which evidence the Brain may ground on. See GROUNDING_MODES below. */
       groundingMode?: GroundingMode
+      /**
+       * Opaque attachment refs, in the order the user chose.
+       *
+       * A LIST FROM THE START even though one image is all that is accepted
+       * today: "one image" baked into the transport becomes a breaking change
+       * across the consumer, the contract, the Brain and every persisted turn
+       * the moment someone attaches two. See `server/brain/attachments.ts`.
+       */
+      attachments?: readonly TurnAttachment[]
       /**
        * Restrict retrieval to these files. A BOUNDARY, not a hint.
        *
@@ -380,6 +391,12 @@ export function resolveOperation(op: BrainOperation): ResolvedRequest {
           // Always explicit. Omitting it defaults the Brain to `auto`, which is
           // the mode that let an ungrounded answer through.
           groundingMode: op.groundingMode ?? 'none',
+          /*
+           * An ORDERED list of opaque refs, sent only when there is one. The
+           * Brain resolves each through its own storage state — nothing here
+           * names a path, and the browser could not supply one if it tried.
+           */
+          ...(op.attachments && op.attachments.length > 0 ? { attachments: op.attachments } : {}),
           // Only when non-empty: an empty array must not read as "scope to nothing",
           // which would refuse every grounded answer.
           ...(op.groundingFiles && op.groundingFiles.length > 0
