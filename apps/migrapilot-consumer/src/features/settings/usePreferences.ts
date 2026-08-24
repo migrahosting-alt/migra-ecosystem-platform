@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { announceAppearance } from '@/features/appearance/AppearanceProvider'
 import {
   DEFAULT_PREFERENCES,
   type UserPreferences,
@@ -113,6 +114,12 @@ export function usePreferences(): PreferencesController {
        */
       setPreferences(body.preferences)
       setStored(true)
+      /*
+       * Applied from what the SERVER stored, not from the patch — the same rule
+       * the rest of this hook follows. Announced rather than set directly so the
+       * appearance system stays independent of this screen being mounted.
+       */
+      announceAppearance(body.preferences)
       setSave({ status: 'saved', at: Date.now() })
       return true
     } catch {

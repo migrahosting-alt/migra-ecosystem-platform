@@ -32,8 +32,8 @@ const codeTypes: Record<string, { label: string; className: string }> = {
   json: { label: '{ }', className: 'bg-emerald-500 font-mono text-white' },
   sql: { label: 'SQL', className: 'bg-indigo-500 text-white' },
   html: { label: '< >', className: 'bg-orange-500 font-mono text-white' },
-  yml: { label: 'YML', className: 'bg-slate-600 text-white' },
-  sh: { label: '>_', className: 'bg-slate-700 text-white' },
+  yml: { label: 'YML', className: 'bg-chip-neutral text-white' },
+  sh: { label: '>_', className: 'bg-chip-neutral text-white' },
 }
 
 export function extensionOf(name: string) {

@@ -83,7 +83,7 @@ export function ActionRow({
   )
 
   const classes = cn(
-    'flex w-full items-center gap-3 rounded-xl border border-hairline bg-white p-3 transition-colors hover:border-brand-200 hover:bg-brand-50/50',
+    'flex w-full items-center gap-3 rounded-xl border border-hairline bg-raised p-3 transition-colors hover:border-brand-200 hover:bg-brand-50/50',
     className,
   )
 

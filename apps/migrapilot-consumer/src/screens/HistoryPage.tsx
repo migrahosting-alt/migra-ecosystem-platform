@@ -124,7 +124,7 @@ function HistorySidebar({
 
       <Link
         href="/history"
-        className="mt-5 flex h-11 shrink-0 items-center justify-center gap-2 rounded-field border border-hairline bg-white text-sm font-semibold text-slate-700 transition-colors hover:border-slate-300 hover:bg-slate-50"
+        className="mt-5 flex h-11 shrink-0 items-center justify-center gap-2 rounded-field border border-hairline bg-raised text-sm font-semibold text-slate-700 transition-colors hover:border-slate-300 hover:bg-slate-50"
       >
         View All History
         <span aria-hidden>→</span>
@@ -168,7 +168,7 @@ export function HistoryPage() {
           onChange={(event) => setQuery(event.target.value)}
           placeholder="Search conversations, assistants, or topics..."
           aria-label="Search history"
-          className="h-12 w-full rounded-field border border-slate-200 bg-white pr-16 pl-12 text-[15px] text-slate-700 placeholder:text-slate-400 focus:border-brand-400 focus:ring-4 focus:ring-brand-500/10 focus:outline-none"
+          className="h-12 w-full rounded-field border border-slate-200 bg-raised pr-16 pl-12 text-[15px] text-slate-700 placeholder:text-slate-400 focus:border-brand-400 focus:ring-4 focus:ring-brand-500/10 focus:outline-none"
         />
         {/*
           The ⌘K badge that used to sit here promised a command palette this app
@@ -200,7 +200,7 @@ export function HistoryPage() {
                   invalid markup that browsers repair by splitting the elements —
                   which drops the handler on whichever one loses.
                 */}
-                <div className="group flex w-full items-center gap-4 rounded-2xl border border-hairline bg-white p-4 transition-all duration-150 hover:border-brand-200 hover:shadow-card">
+                <div className="group flex w-full items-center gap-4 rounded-2xl border border-hairline bg-raised p-4 transition-all duration-150 hover:border-brand-200 hover:shadow-card">
                   <button
                     onClick={() => router.push(`/chat/${conversation.id}`)}
                     className="flex min-w-0 flex-1 items-center gap-4 text-left"

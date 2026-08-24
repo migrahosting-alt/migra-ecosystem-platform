@@ -167,7 +167,7 @@ export function VoicePanel({
 }
 
 const actionButton =
-  'inline-flex h-7 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 text-[12px] font-semibold text-slate-700 hover:bg-slate-50'
+  'inline-flex h-7 items-center gap-1.5 rounded-lg border border-slate-200 bg-raised px-2.5 text-[12px] font-semibold text-slate-700 hover:bg-slate-50'
 const ghostButton =
   'inline-flex h-7 w-7 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-200/70 hover:text-slate-700'
 

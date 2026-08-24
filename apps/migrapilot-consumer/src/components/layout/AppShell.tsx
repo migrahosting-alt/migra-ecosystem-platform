@@ -37,7 +37,7 @@ export function AppShell({
         {navOpen && (
           <div className="fixed inset-0 z-40 lg:hidden">
             <div
-              className="animate-fade absolute inset-0 bg-slate-900/30"
+              className="animate-fade absolute inset-0 bg-scrim"
               onClick={() => setNavOpen(false)}
               aria-hidden
             />
@@ -46,7 +46,7 @@ export function AppShell({
               <button
                 onClick={() => setNavOpen(false)}
                 aria-label="Close navigation"
-                className="absolute top-4 -right-12 inline-flex h-10 w-10 items-center justify-center rounded-lg bg-white text-slate-500 shadow-card"
+                className="absolute top-4 -right-12 inline-flex h-10 w-10 items-center justify-center rounded-lg bg-raised text-slate-500 shadow-card"
               >
                 <X className="h-5 w-5" />
               </button>

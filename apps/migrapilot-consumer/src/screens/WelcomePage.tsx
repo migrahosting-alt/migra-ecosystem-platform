@@ -101,7 +101,7 @@ export function WelcomePage() {
               key={title}
               onClick={() => start(prompt)}
               disabled={outOfTurns}
-              className="group flex items-center gap-4 rounded-2xl border border-hairline bg-white p-4.5 text-left transition-all duration-150 hover:-translate-y-0.5 hover:border-brand-200 hover:shadow-raised disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0 disabled:hover:border-hairline disabled:hover:shadow-none"
+              className="group flex items-center gap-4 rounded-2xl border border-hairline bg-raised p-4.5 text-left transition-all duration-150 hover:-translate-y-0.5 hover:border-brand-200 hover:shadow-raised disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0 disabled:hover:border-hairline disabled:hover:shadow-none"
             >
               <IconTile tone="blue">
                 <Icon strokeWidth={2} />

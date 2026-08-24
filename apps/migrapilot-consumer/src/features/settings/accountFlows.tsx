@@ -21,11 +21,11 @@ import { cn } from '@/lib/cn'
  */
 
 const field =
-  'h-10 w-full rounded-field border border-slate-200 bg-white px-3 text-[15px] text-slate-800 focus:border-brand-400 focus:ring-4 focus:ring-brand-500/10 focus:outline-none'
+  'h-10 w-full rounded-field border border-slate-200 bg-raised px-3 text-[15px] text-slate-800 focus:border-brand-400 focus:ring-4 focus:ring-brand-500/10 focus:outline-none'
 const primary =
   'h-10 shrink-0 rounded-field bg-brand-600 px-4 text-sm font-semibold text-white transition-colors hover:bg-brand-700 disabled:opacity-40'
 const secondary =
-  'h-10 shrink-0 rounded-field border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-700 transition-colors hover:border-slate-400 hover:bg-slate-50 disabled:opacity-40'
+  'h-10 shrink-0 rounded-field border border-slate-300 bg-raised px-4 text-sm font-semibold text-slate-700 transition-colors hover:border-slate-400 hover:bg-slate-50 disabled:opacity-40'
 
 function Problem({ children }: { children: React.ReactNode }) {
   return (
@@ -312,10 +312,10 @@ export function MfaEnrollment({ onEnrolled }: { onEnrolled: () => void }) {
           <img
             src={qr}
             alt="QR code for your authenticator app"
-            className="h-[190px] w-[190px] shrink-0 rounded-lg border border-slate-200 bg-white"
+            className="h-[190px] w-[190px] shrink-0 rounded-lg border border-slate-200 bg-raised"
           />
         ) : (
-          <div className="flex h-[190px] w-[190px] shrink-0 items-center justify-center rounded-lg border border-dashed border-slate-200 bg-white text-[13px] text-slate-400">
+          <div className="flex h-[190px] w-[190px] shrink-0 items-center justify-center rounded-lg border border-dashed border-slate-200 bg-raised text-[13px] text-slate-400">
             Use the setup key
           </div>
         )}
@@ -326,7 +326,7 @@ export function MfaEnrollment({ onEnrolled }: { onEnrolled: () => void }) {
           </p>
           <code
             data-testid="mfa-setup-key"
-            className="mt-1.5 block rounded-field border border-slate-200 bg-white px-3 py-2 font-mono text-[13px] break-all text-slate-700"
+            className="mt-1.5 block rounded-field border border-slate-200 bg-raised px-3 py-2 font-mono text-[13px] break-all text-slate-700"
           >
             {setupKey}
           </code>
@@ -528,7 +528,7 @@ export function CloseAccountFlow() {
         type="button"
         onClick={() => setOpen(true)}
         data-testid="close-account-open"
-        className="mt-3 h-10 rounded-field border border-red-300 bg-white px-4 text-sm font-semibold text-red-700 transition-colors hover:bg-red-50"
+        className="mt-3 h-10 rounded-field border border-red-300 bg-raised px-4 text-sm font-semibold text-red-700 transition-colors hover:bg-red-50"
       >
         Close my MigraTeck account
       </button>
@@ -552,7 +552,7 @@ export function CloseAccountFlow() {
         value={typed}
         onChange={(event) => setTyped(event.target.value)}
         data-testid="close-account-input"
-        className="mt-1.5 h-10 w-full max-w-[220px] rounded-field border border-red-300 bg-white px-3 text-[15px] text-slate-800 focus:border-red-400 focus:ring-4 focus:ring-red-500/10 focus:outline-none"
+        className="mt-1.5 h-10 w-full max-w-[220px] rounded-field border border-red-300 bg-raised px-3 text-[15px] text-slate-800 focus:border-red-400 focus:ring-4 focus:ring-red-500/10 focus:outline-none"
       />
       <div className="mt-3 flex flex-wrap gap-2">
         <button

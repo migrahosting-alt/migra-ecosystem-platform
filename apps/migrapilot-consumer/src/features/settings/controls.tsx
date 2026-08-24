@@ -34,7 +34,7 @@ export function SettingsCard({
   return (
     <section
       className={cn(
-        'rounded-2xl border bg-white shadow-card',
+        'rounded-2xl border bg-raised shadow-card',
         tone === 'danger' ? 'border-red-200' : 'border-hairline',
       )}
     >
@@ -105,7 +105,7 @@ export function Select<T extends string>({
       title={disabled ? disabledReason : undefined}
       onChange={(event) => onChange(event.target.value as T)}
       className={cn(
-        'h-10 w-full rounded-field border border-slate-200 bg-white px-3 text-[15px] text-slate-800',
+        'h-10 w-full rounded-field border border-slate-200 bg-raised px-3 text-[15px] text-slate-800',
         'focus:border-brand-400 focus:ring-4 focus:ring-brand-500/10 focus:outline-none',
         disabled && 'cursor-not-allowed bg-slate-50 text-slate-400',
       )}
@@ -152,7 +152,7 @@ export function Toggle({
     >
       <span
         className={cn(
-          'inline-block h-4.5 w-4.5 transform rounded-full bg-white shadow transition-transform',
+          'inline-block h-4.5 w-4.5 transform rounded-full bg-raised shadow transition-transform',
           checked ? 'translate-x-[26px]' : 'translate-x-[3px]',
         )}
       />

@@ -106,7 +106,7 @@ export function ChipTabs<T extends string>({
               'inline-flex h-9 items-center gap-2 rounded-lg border px-3.5 text-[13px] font-semibold transition-colors',
               active
                 ? 'border-brand-200 bg-brand-50 text-brand-700'
-                : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50',
+                : 'border-slate-200 bg-raised text-slate-600 hover:border-slate-300 hover:bg-slate-50',
             )}
           >
             {item.icon}

@@ -217,7 +217,7 @@ function DisplayNameField({
           maxLength={120}
           placeholder="Your name"
           data-testid="display-name-input"
-          className="h-10 w-full rounded-field border border-slate-200 bg-white px-3 text-[15px] text-slate-800 focus:border-brand-400 focus:ring-4 focus:ring-brand-500/10 focus:outline-none sm:max-w-[320px]"
+          className="h-10 w-full rounded-field border border-slate-200 bg-raised px-3 text-[15px] text-slate-800 focus:border-brand-400 focus:ring-4 focus:ring-brand-500/10 focus:outline-none sm:max-w-[320px]"
         />
         <button
           type="submit"
@@ -345,7 +345,7 @@ export function ConnectedAccountsCard({ controller }: { controller: AccountContr
                 'https://chat.migrateck.com/settings',
               )}`}
               data-testid={`link-${id}`}
-              className="inline-flex h-10 items-center rounded-field border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-700 transition-colors hover:border-slate-400 hover:bg-slate-50"
+              className="inline-flex h-10 items-center rounded-field border border-slate-300 bg-raised px-4 text-sm font-semibold text-slate-700 transition-colors hover:border-slate-400 hover:bg-slate-50"
             >
               Add {PROVIDER_LABEL[id]}
             </a>
@@ -512,7 +512,7 @@ export function SecurityCard({ controller }: { controller: AccountController }) 
           type="button"
           onClick={() => void end()}
           disabled={busy !== null}
-          className="mt-4 inline-flex h-10 items-center gap-2 rounded-field border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-700 transition-colors hover:border-slate-400 hover:bg-slate-50 disabled:opacity-50"
+          className="mt-4 inline-flex h-10 items-center gap-2 rounded-field border border-slate-300 bg-raised px-4 text-sm font-semibold text-slate-700 transition-colors hover:border-slate-400 hover:bg-slate-50 disabled:opacity-50"
         >
           <ShieldCheck className="h-4 w-4 text-slate-400" />
           {busy === 'others' ? 'Ending…' : 'End all other sessions'}
@@ -850,7 +850,7 @@ export function PrivacyCard({ controller }: { controller: PreferencesController 
           type="button"
           onClick={() => void exportData()}
           disabled={exporting}
-          className="inline-flex h-10 items-center gap-2 rounded-field border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-700 transition-colors hover:border-slate-400 hover:bg-slate-50 disabled:opacity-50"
+          className="inline-flex h-10 items-center gap-2 rounded-field border border-slate-300 bg-raised px-4 text-sm font-semibold text-slate-700 transition-colors hover:border-slate-400 hover:bg-slate-50 disabled:opacity-50"
         >
           {exporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4 text-slate-400" />}
           {exporting ? 'Preparing…' : 'Export my data'}
@@ -1083,7 +1083,7 @@ export function DangerCard({ onHistoryDeleted }: { onHistoryDeleted: () => void 
         <button
           type="button"
           onClick={() => setConfirming(true)}
-          className="inline-flex h-10 items-center gap-2 rounded-field border border-red-300 bg-white px-4 text-sm font-semibold text-red-700 transition-colors hover:bg-red-50"
+          className="inline-flex h-10 items-center gap-2 rounded-field border border-red-300 bg-raised px-4 text-sm font-semibold text-red-700 transition-colors hover:bg-red-50"
         >
           <Trash2 className="h-4 w-4" />
           Delete all conversations
@@ -1098,7 +1098,7 @@ export function DangerCard({ onHistoryDeleted }: { onHistoryDeleted: () => void 
             value={typed}
             onChange={(event) => setTyped(event.target.value)}
             aria-label="Type DELETE to confirm"
-            className="mt-3 h-10 w-full rounded-field border border-red-300 bg-white px-3 font-mono text-sm text-slate-800 focus:border-red-500 focus:ring-4 focus:ring-red-500/10 focus:outline-none sm:w-56"
+            className="mt-3 h-10 w-full rounded-field border border-red-300 bg-raised px-3 font-mono text-sm text-slate-800 focus:border-red-500 focus:ring-4 focus:ring-red-500/10 focus:outline-none sm:w-56"
           />
           <div className="mt-3 flex flex-wrap gap-2">
             <button
@@ -1115,7 +1115,7 @@ export function DangerCard({ onHistoryDeleted }: { onHistoryDeleted: () => void 
                 setConfirming(false)
                 setTyped('')
               }}
-              className="inline-flex h-10 items-center rounded-field border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+              className="inline-flex h-10 items-center rounded-field border border-slate-300 bg-raised px-4 text-sm font-semibold text-slate-700 hover:bg-slate-50"
             >
               Keep my history
             </button>

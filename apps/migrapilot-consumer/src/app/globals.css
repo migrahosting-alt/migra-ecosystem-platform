@@ -1,72 +1,287 @@
 @import 'tailwindcss';
 
 /* ------------------------------------------------------------------ *
- * MigraPilot design tokens
- * Derived from the product mockups: a calm, near-white product canvas
- * with one saturated blue used for every primary action.
+ * MigraPilot appearance system
+ *
+ * FOUR SETTINGS, ONE SOURCE OF TRUTH. Theme, density, reduced motion and high
+ * contrast are all expressed as data attributes on <html>, set once by the app
+ * shell from the user's stored preferences. Nothing else in the app decides how
+ * it looks; a component that hardcodes a light colour is a component that breaks
+ * in dark mode, so the tokens below are the only palette there is.
+ *
+ * THE NEUTRAL RAMP INVERTS IN DARK MODE, deliberately. The product was written
+ * dark-text-on-light-surface throughout — `text-slate-900` for headings,
+ * `bg-slate-50` for subtle fills — so inverting the ramp themes every one of
+ * those usages at once, including the components nobody remembered to migrate.
+ * That is what makes "no partial dark mode" hold under future edits rather than
+ * only today.
+ *
+ * THREE THINGS MUST NOT INVERT, and they have their own tokens because of it:
+ * modal scrims (always a dark veil over the page), code surfaces (dark in both
+ * themes, by convention), and neutral file-type chips (saturated, white text).
+ * Inverting those produced light-on-light, which is how they were found.
  * ------------------------------------------------------------------ */
-@theme {
+
+/* ── light (default) ───────────────────────────────────────────────── */
+:root {
+  --mp-canvas: #ffffff;
+  --mp-rail: #f8fafc;
+  --mp-raised: #ffffff;
+  --mp-hairline: #e8edf4;
+
+  --mp-n50: #f8fafc;
+  --mp-n100: #f1f5f9;
+  --mp-n200: #e2e8f0;
+  --mp-n300: #cbd5e1;
+  --mp-n400: #94a3b8;
+  --mp-n500: #64748b;
+  --mp-n600: #475569;
+  --mp-n700: #334155;
+  --mp-n800: #1e293b;
+  --mp-n900: #0f172a;
+
+  /* Status families. Kept legible against the surface of the CURRENT theme
+   * rather than assumed — a red that reads on white is muddy on near-black. */
+  --mp-danger-fg: #b91c1c;
+  --mp-danger-bg: #fef2f2;
+  --mp-danger-border: #fecaca;
+  --mp-success-fg: #047857;
+  --mp-success-bg: #ecfdf5;
+  --mp-success-border: #a7f3d0;
+  --mp-warning-fg: #b45309;
+  --mp-warning-bg: #fffbeb;
+  --mp-warning-border: #fde68a;
+
+  --mp-brand-50: #eff6ff;
+  --mp-brand-100: #dbeafe;
+  --mp-brand-200: #bfdbfe;
+  --mp-brand-300: #93c5fd;
+  --mp-brand-400: #4090f0;
+  --mp-brand-500: #3080f0;
+  --mp-brand-600: #2060e0;
+  --mp-brand-700: #1b4fc4;
+  --mp-brand-800: #17409f;
+
+  --mp-shadow-card: 0 1px 2px rgb(15 23 42 / 0.04), 0 1px 3px rgb(15 23 42 / 0.03);
+  --mp-shadow-raised: 0 4px 16px -4px rgb(15 23 42 / 0.1), 0 2px 6px -2px rgb(15 23 42 / 0.06);
+  --mp-shadow-modal: 0 24px 64px -12px rgb(15 23 42 / 0.25), 0 8px 24px -8px rgb(15 23 42 / 0.12);
+
+  --mp-focus-width: 2px;
+  --mp-focus-offset: 2px;
+  --mp-border-strength: 1px;
+}
+
+/* ── dark ──────────────────────────────────────────────────────────── *
+ * Applied when the user chose Dark, and when they chose System and the OS
+ * says dark. The two are separate selectors rather than one media query so an
+ * explicit choice always beats the OS — a user who picks Light on a dark
+ * machine must get Light.
+ * ------------------------------------------------------------------ */
+:root[data-theme='dark'],
+:root[data-theme='system'][data-system-dark='true'] {
+  --mp-canvas: #0f1520;
+  --mp-rail: #0b1017;
+  --mp-raised: #161d2b;
+  --mp-hairline: #232c3d;
+
+  /* The ramp, inverted. Values are chosen against --mp-canvas rather than
+   * mirrored arithmetically: 500 is the most-used muted text in the product
+   * (80 usages) and has to clear 7:1, while 400 is genuinely secondary. */
+  --mp-n50: #151b26;
+  --mp-n100: #1c2434;
+  --mp-n200: #2a3446;
+  --mp-n300: #3d4a5f;
+  --mp-n400: #7f8da3;
+  --mp-n500: #9daac0;
+  --mp-n600: #b7c2d6;
+  --mp-n700: #ccd6e4;
+  --mp-n800: #dfe6f0;
+  --mp-n900: #f2f6fb;
+
+  --mp-danger-fg: #fca5a5;
+  --mp-danger-bg: #2a1416;
+  --mp-danger-border: #5c2226;
+  --mp-success-fg: #6ee7b7;
+  --mp-success-bg: #0d211c;
+  --mp-success-border: #17513f;
+  --mp-warning-fg: #fcd34d;
+  --mp-warning-bg: #241c0c;
+  --mp-warning-border: #5a4415;
+
+  /* Brand tints are re-derived, not reused. `brand-50` as a near-white chip
+   * background is invisible on a dark canvas, so the low end becomes deep and
+   * the mid stays the mark's blue. */
+  --mp-brand-50: #14243f;
+  --mp-brand-100: #1a3055;
+  --mp-brand-200: #234070;
+  --mp-brand-300: #2f5896;
+  --mp-brand-400: #4a90ee;
+  --mp-brand-500: #5aa0f5;
+  --mp-brand-600: #74b2fa;
+  --mp-brand-700: #9ac8fc;
+  --mp-brand-800: #c3ddfe;
+
+  /* Shadows barely read on dark surfaces; borders do the separating instead. */
+  --mp-shadow-card: 0 1px 2px rgb(0 0 0 / 0.4);
+  --mp-shadow-raised: 0 4px 16px -4px rgb(0 0 0 / 0.55);
+  --mp-shadow-modal: 0 24px 64px -12px rgb(0 0 0 / 0.7);
+}
+
+/* ── high contrast ─────────────────────────────────────────────────── *
+ * NOT bolder text. Higher separation: text moves toward the extremes, borders
+ * gain weight and darken/lighten, and the focus ring thickens. Layered after
+ * the theme blocks so it refines whichever palette is active.
+ * ------------------------------------------------------------------ */
+:root[data-high-contrast='true'] {
+  --mp-n400: #52607a;
+  --mp-n500: #3d4a63;
+  --mp-n600: #29354b;
+  --mp-hairline: #94a3b8;
+  --mp-focus-width: 3px;
+  --mp-border-strength: 2px;
+  --mp-danger-fg: #991b1b;
+  --mp-success-fg: #065f46;
+  --mp-warning-fg: #92400e;
+}
+
+:root[data-high-contrast='true'][data-theme='dark'],
+:root[data-high-contrast='true'][data-theme='system'][data-system-dark='true'] {
+  --mp-canvas: #05080e;
+  --mp-rail: #000205;
+  --mp-raised: #0d1420;
+  --mp-n400: #b6c2d4;
+  --mp-n500: #cfd8e6;
+  --mp-n600: #e2e9f3;
+  --mp-n900: #ffffff;
+  --mp-hairline: #55637a;
+  --mp-danger-fg: #fda4af;
+  --mp-success-fg: #86efac;
+  --mp-warning-fg: #fde047;
+}
+
+@theme inline {
   --font-sans:
     'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
 
-  /* Brand blue — sampled from the official MigraPilot mark, not invented.
-   * The logo's dominant body colours measure #3080F0 (mid) and #2060E0 (deep);
-   * 500/600 are set to those so the UI accent and the mark are the same blue. */
-  --color-brand-50: #eff6ff;
-  --color-brand-100: #dbeafe;
-  --color-brand-200: #bfdbfe;
-  --color-brand-300: #93c5fd;
-  --color-brand-400: #4090f0;
-  --color-brand-500: #3080f0;
-  --color-brand-600: #2060e0;
-  --color-brand-700: #1b4fc4;
-  --color-brand-800: #17409f;
+  /* Every neutral utility in the app resolves through these, so a component
+   * written months ago in `text-slate-500` themes correctly with no edit. */
+  --color-slate-50: var(--mp-n50);
+  --color-slate-100: var(--mp-n100);
+  --color-slate-200: var(--mp-n200);
+  --color-slate-300: var(--mp-n300);
+  --color-slate-400: var(--mp-n400);
+  --color-slate-500: var(--mp-n500);
+  --color-slate-600: var(--mp-n600);
+  --color-slate-700: var(--mp-n700);
+  --color-slate-800: var(--mp-n800);
+  --color-slate-900: var(--mp-n900);
 
-  /* Cyan/teal secondary — the lit edge of the mark (#60C0F0). Used sparingly for
-   * highlights; the multicolour prism in the logo is deliberately NOT themed. */
+  --color-brand-50: var(--mp-brand-50);
+  --color-brand-100: var(--mp-brand-100);
+  --color-brand-200: var(--mp-brand-200);
+  --color-brand-300: var(--mp-brand-300);
+  --color-brand-400: var(--mp-brand-400);
+  --color-brand-500: var(--mp-brand-500);
+  --color-brand-600: var(--mp-brand-600);
+  --color-brand-700: var(--mp-brand-700);
+  --color-brand-800: var(--mp-brand-800);
+
   --color-accent-300: #9ad9f8;
   --color-accent-400: #60c0f0;
   --color-accent-500: #2aa8e0;
 
-  /* Product canvas */
-  --color-canvas: #ffffff;
-  --color-rail: #f8fafc;
-  --color-hairline: #e8edf4;
+  --color-canvas: var(--mp-canvas);
+  --color-rail: var(--mp-rail);
+  --color-raised: var(--mp-raised);
+  --color-hairline: var(--mp-hairline);
+
+  /* NON-INVERTING BY DESIGN — see the header note. */
+  --color-scrim: rgb(3 7 18 / 0.55);
+  --color-code-surface: #0f172a;
+  --color-code-text: #e2e8f0;
+  --color-chip-neutral: #475569;
+
+  --color-danger-fg: var(--mp-danger-fg);
+  --color-danger-bg: var(--mp-danger-bg);
+  --color-danger-border: var(--mp-danger-border);
+  --color-success-fg: var(--mp-success-fg);
+  --color-success-bg: var(--mp-success-bg);
+  --color-success-border: var(--mp-success-border);
+  --color-warning-fg: var(--mp-warning-fg);
+  --color-warning-bg: var(--mp-warning-bg);
+  --color-warning-border: var(--mp-warning-border);
 
   --radius-card: 0.875rem;
   --radius-field: 0.75rem;
 
-  --shadow-card: 0 1px 2px rgb(15 23 42 / 0.04), 0 1px 3px rgb(15 23 42 / 0.03);
-  --shadow-raised: 0 4px 16px -4px rgb(15 23 42 / 0.1), 0 2px 6px -2px rgb(15 23 42 / 0.06);
-  --shadow-modal: 0 24px 64px -12px rgb(15 23 42 / 0.25), 0 8px 24px -8px rgb(15 23 42 / 0.12);
+  --shadow-card: var(--mp-shadow-card);
+  --shadow-raised: var(--mp-shadow-raised);
+  --shadow-modal: var(--mp-shadow-modal);
   --shadow-brand: 0 6px 16px -6px rgb(32 96 224 / 0.45);
 }
 
+/* ── density ───────────────────────────────────────────────────────── *
+ * Tailwind v4 derives EVERY spacing utility from `--spacing`, so changing it
+ * rescales padding, margin, gap, width and height across the whole app at once.
+ * That is what makes Compact a real layout change rather than a Settings-page
+ * demo — and why density is set here rather than per component.
+ *
+ * Type scales too, slightly. Compact that only tightens boxes while leaving
+ * 15px body text produces cramped rows around unchanged text.
+ * ------------------------------------------------------------------ */
+:root {
+  --spacing: 0.25rem;
+}
+
+:root[data-density='compact'] {
+  --spacing: 0.2rem;
+  font-size: 15px;
+}
+
+/* ── base ──────────────────────────────────────────────────────────── */
 @layer base {
   html {
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+    /* The canvas is painted on <html> as well as <body> so overscroll and the
+     * area behind a short page match the theme instead of flashing white. */
+    background-color: var(--mp-canvas);
+    color-scheme: light;
+  }
+
+  :root[data-theme='dark'],
+  :root[data-theme='system'][data-system-dark='true'] {
+    color-scheme: dark;
   }
 
   body {
     @apply bg-canvas font-sans text-slate-900 antialiased;
   }
 
-  /* Consistent, brand-tinted focus ring everywhere */
+  /* Focus is a token, not a constant: high contrast thickens it, and it must
+   * stay visible against both a white card and a near-black one. */
   :focus-visible {
-    @apply outline-2 outline-offset-2 outline-brand-500;
+    outline: var(--mp-focus-width) solid var(--color-brand-500);
+    outline-offset: var(--mp-focus-offset);
   }
 
   ::selection {
     @apply bg-brand-100 text-brand-800;
   }
+
+  /* Form controls inherit the theme rather than the OS default, which is what
+   * otherwise leaves white inputs sitting in a dark page. */
+  input,
+  textarea,
+  select {
+    color-scheme: inherit;
+  }
 }
 
 @layer components {
-  /* Slim scrollbars for the app's many independently scrolling columns */
   .scroll-slim {
     scrollbar-width: thin;
-    scrollbar-color: #cbd5e1 transparent;
+    scrollbar-color: var(--mp-n300) transparent;
   }
   .scroll-slim::-webkit-scrollbar {
     width: 8px;
@@ -84,7 +299,7 @@
 }
 
 @utility card {
-  @apply rounded-card border border-hairline bg-white shadow-card;
+  @apply rounded-card border border-hairline bg-raised shadow-card;
 }
 
 /* Motion ---------------------------------------------------------- */
@@ -141,6 +356,14 @@
   animation: mp-pulse-ring 2s ease-out infinite;
 }
 
+/* ── reduced motion ────────────────────────────────────────────────── *
+ * The OS preference and the in-app setting produce the SAME suppression, so
+ * turning it on in Settings is not a weaker version of the system switch.
+ *
+ * NONESSENTIAL only: the spinner that signals work in progress keeps moving,
+ * because a frozen spinner reads as a hung request. What stops is decoration —
+ * entrances, scale-ins, the attention pulse.
+ * ------------------------------------------------------------------ */
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -149,4 +372,18 @@
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
+  .animate-spin {
+    animation: spin 1.4s linear infinite !important;
+  }
+}
+
+:root[data-reduce-motion='true'] *,
+:root[data-reduce-motion='true'] *::before,
+:root[data-reduce-motion='true'] *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+}
+:root[data-reduce-motion='true'] .animate-spin {
+  animation: spin 1.4s linear infinite !important;
 }

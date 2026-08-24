@@ -82,7 +82,7 @@ export function AnonymousQuotaNotice({ className }: { className?: string }) {
           <a
             href={signIn}
             data-testid="anon-sign-in"
-            className="inline-flex w-full items-center justify-center rounded-field border border-slate-300 bg-white px-5 py-2.5 text-sm font-semibold text-slate-700 transition-colors hover:border-slate-400 hover:bg-slate-50 sm:w-auto"
+            className="inline-flex w-full items-center justify-center rounded-field border border-slate-300 bg-raised px-5 py-2.5 text-sm font-semibold text-slate-700 transition-colors hover:border-slate-400 hover:bg-slate-50 sm:w-auto"
           >
             Sign in
           </a>

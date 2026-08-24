@@ -68,7 +68,7 @@ export function Modal({
   return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6">
       <div
-        className="animate-fade absolute inset-0 bg-slate-900/25 backdrop-blur-[2px]"
+        className="animate-fade absolute inset-0 bg-scrim backdrop-blur-[2px]"
         onClick={onClose}
         aria-hidden
       />
@@ -78,7 +78,7 @@ export function Modal({
         aria-modal="true"
         aria-labelledby={labelledBy}
         className={cn(
-          'animate-scale-in scroll-slim relative max-h-[92vh] w-full max-w-[760px] overflow-y-auto rounded-2xl bg-white shadow-modal',
+          'animate-scale-in scroll-slim relative max-h-[92vh] w-full max-w-[760px] overflow-y-auto rounded-2xl bg-raised shadow-modal',
           className,
         )}
       >

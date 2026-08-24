@@ -98,7 +98,7 @@ export function AttachmentChips({
                 type="button"
                 onClick={() => onRetry(attachment.id)}
                 aria-label={`Retry ${attachment.name}`}
-                className="inline-flex h-7 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2 text-[12px] font-semibold text-slate-600 hover:bg-slate-50"
+                className="inline-flex h-7 items-center gap-1.5 rounded-lg border border-slate-200 bg-raised px-2 text-[12px] font-semibold text-slate-600 hover:bg-slate-50"
               >
                 <RotateCw className="h-3.5 w-3.5" />
                 Retry

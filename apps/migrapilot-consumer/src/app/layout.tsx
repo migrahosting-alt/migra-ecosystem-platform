@@ -3,6 +3,10 @@ import './globals.css'
 import { AppShell } from '@/components/layout/AppShell'
 import { ChatProvider } from '@/state/ChatProvider'
 import { AnonymousQuotaProvider } from '@/features/anonymous/AnonymousQuotaProvider'
+import {
+  AppearanceProvider,
+  appearanceBootScript,
+} from '@/features/appearance/AppearanceProvider'
 import { getSession, toPublicSession } from '@/server/auth'
 
 /**
@@ -62,6 +66,13 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   return (
     <html lang="en">
       <head>
+        {/*
+          BEFORE FIRST PAINT, deliberately. React hydrates after the browser has
+          already painted, so applying the theme in a component means a dark-mode
+          user sees a white flash on every single navigation. This runs blocking,
+          reads the device-local value, and is the only script allowed to do so.
+        */}
+        <script dangerouslySetInnerHTML={{ __html: appearanceBootScript }} />
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
         <link
@@ -75,11 +86,13 @@ export default async function RootLayout({ children }: { children: React.ReactNo
           the server's post-settlement quota, so the chat provider consumes this
           one rather than the other way round.
         */}
-        <AnonymousQuotaProvider>
-          <ChatProvider>
-            <AppShell session={publicSession}>{children}</AppShell>
-          </ChatProvider>
-        </AnonymousQuotaProvider>
+        <AppearanceProvider>
+          <AnonymousQuotaProvider>
+            <ChatProvider>
+              <AppShell session={publicSession}>{children}</AppShell>
+            </ChatProvider>
+          </AnonymousQuotaProvider>
+        </AppearanceProvider>
       </body>
     </html>
   )

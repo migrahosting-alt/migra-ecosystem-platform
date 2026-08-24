@@ -23,7 +23,7 @@ import type { CodingRunSnapshot } from '@/server/brain/contracts'
  */
 function Stat({ label, value, tone }: { label: string; value: string; tone?: 'good' | 'bad' }) {
   return (
-    <div className="rounded-2xl border border-hairline bg-white p-4">
+    <div className="rounded-2xl border border-hairline bg-raised p-4">
       <p className="text-xs font-medium text-slate-500">{label}</p>
       <p
         className={
@@ -54,7 +54,7 @@ function PathList({ title, paths, tone }: { title: string; paths: string[]; tone
             className={
               tone === 'red'
                 ? 'truncate rounded-xl border border-red-100 bg-red-50/50 px-4 py-2.5 font-mono text-[13px] text-red-800'
-                : 'truncate rounded-xl border border-hairline bg-white px-4 py-2.5 font-mono text-[13px] text-slate-700'
+                : 'truncate rounded-xl border border-hairline bg-raised px-4 py-2.5 font-mono text-[13px] text-slate-700'
             }
           >
             {path}
@@ -177,7 +177,7 @@ export function RunReportPage({
       )}
 
       {validation && (
-        <section className="mt-6 rounded-2xl border border-hairline bg-white p-5">
+        <section className="mt-6 rounded-2xl border border-hairline bg-raised p-5">
           <h2 className="flex items-center gap-2 text-[15px] font-semibold text-slate-800">
             {validation.passed ? (
               <CheckCircle2 className="h-4 w-4 text-emerald-600" />
@@ -186,7 +186,7 @@ export function RunReportPage({
             )}
             Validation
           </h2>
-          <code className="mt-2 block overflow-x-auto rounded-lg bg-slate-900 px-3.5 py-2.5 font-mono text-[12px] text-slate-100">
+          <code className="mt-2 block overflow-x-auto rounded-lg bg-code-surface px-3.5 py-2.5 font-mono text-[12px] text-code-text">
             {validation.command.join(' ')}
           </code>
           <p className="mt-2 text-[13px] text-slate-500">

@@ -175,7 +175,7 @@ export function ConversationMenu({
            */
           onClick={(event) => event.stopPropagation()}
           className={cn(
-            'animate-scale-in absolute z-40 mt-2 w-64 rounded-card border border-hairline bg-white p-1.5 shadow-raised',
+            'animate-scale-in absolute z-40 mt-2 w-64 rounded-card border border-hairline bg-raised p-1.5 shadow-raised',
             align === 'right' ? 'right-0' : 'left-0',
           )}
         >

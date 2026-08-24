@@ -29,7 +29,7 @@ import { cn } from '@/lib/cn'
  */
 
 const toolButton =
-  'inline-flex h-10 w-10 items-center justify-center rounded-field border border-slate-200 bg-white text-slate-500 transition-colors hover:border-slate-300 hover:bg-slate-50 hover:text-slate-700'
+  'inline-flex h-10 w-10 items-center justify-center rounded-field border border-slate-200 bg-raised text-slate-500 transition-colors hover:border-slate-300 hover:bg-slate-50 hover:text-slate-700'
 
 export function Composer({
   onSubmit,
@@ -147,7 +147,7 @@ export function Composer({
     <form
       onSubmit={submit}
       className={cn(
-        'rounded-2xl border bg-white p-3.5 transition-all duration-200',
+        'rounded-2xl border bg-raised p-3.5 transition-all duration-200',
         active
           ? 'border-brand-400 ring-4 ring-brand-500/10'
           : 'border-slate-200 shadow-card hover:border-slate-300',

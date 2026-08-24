@@ -52,7 +52,7 @@ export function Avatar({
         'inline-flex shrink-0 items-center justify-center rounded-full bg-linear-to-br font-semibold text-white select-none',
         paletteFor(name),
         sizes[size],
-        ring && 'ring-2 ring-white',
+        ring && 'ring-2 ring-canvas',
         className,
       )}
     >

@@ -36,7 +36,7 @@ export function TopBar({
   const menuRef = useDismissable<HTMLDivElement>(menuOpen, closeMenu)
 
   return (
-    <header className="z-30 flex h-[72px] shrink-0 items-center justify-between border-b border-hairline bg-white px-5 sm:px-7">
+    <header className="z-30 flex h-[72px] shrink-0 items-center justify-between border-b border-hairline bg-raised px-5 sm:px-7">
       <div className="flex items-center gap-3">
         <button
           onClick={onOpenNav}
@@ -74,7 +74,7 @@ export function TopBar({
             {menuOpen && (
               <div
                 role="menu"
-                className="animate-scale-in absolute right-0 z-40 mt-2 w-60 rounded-card border border-hairline bg-white p-1.5 shadow-raised"
+                className="animate-scale-in absolute right-0 z-40 mt-2 w-60 rounded-card border border-hairline bg-raised p-1.5 shadow-raised"
               >
                 <div className="border-b border-hairline px-3 py-2.5">
                   <p className="text-sm font-semibold text-slate-800">{session.displayName}</p>

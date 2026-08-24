@@ -282,7 +282,7 @@ export function FilesPage() {
         }}
         className={cn(
           'mt-6 flex flex-col items-center rounded-2xl border-2 border-dashed px-6 py-10 text-center transition-colors',
-          dragging ? 'border-brand-400 bg-brand-50/50' : 'border-hairline bg-white',
+          dragging ? 'border-brand-400 bg-brand-50/50' : 'border-hairline bg-raised',
         )}
       >
         <CloudUpload className="h-8 w-8 text-slate-300" strokeWidth={1.6} />
@@ -329,7 +329,7 @@ export function FilesPage() {
             {files.map((file) => (
               <li
                 key={file.name}
-                className="flex items-center gap-3.5 rounded-xl border border-hairline bg-white px-4 py-3"
+                className="flex items-center gap-3.5 rounded-xl border border-hairline bg-raised px-4 py-3"
               >
                 <FileTypeIcon name={file.name} size="md" />
                 <span className="min-w-0 flex-1">

@@ -9,9 +9,9 @@ const variants: Record<Variant, string> = {
   gradient:
     'bg-linear-to-r from-brand-500 to-brand-700 text-white shadow-brand hover:from-brand-600 hover:to-brand-800',
   secondary:
-    'border border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50 active:bg-slate-100',
+    'border border-slate-200 bg-raised text-slate-700 hover:border-slate-300 hover:bg-slate-50 active:bg-slate-100',
   ghost: 'text-slate-600 hover:bg-slate-100 hover:text-slate-900',
-  danger: 'border border-red-200 bg-white text-red-600 hover:border-red-300 hover:bg-red-50',
+  danger: 'border border-red-200 bg-raised text-red-600 hover:border-red-300 hover:bg-red-50',
 }
 
 const sizes: Record<Size, string> = {

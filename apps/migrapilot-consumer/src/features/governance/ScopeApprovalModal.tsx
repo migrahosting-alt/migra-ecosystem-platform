@@ -83,7 +83,7 @@ export function ScopeApprovalModal({
           {scope.proposedPaths.map((path) => {
             const rationale = scope.rationales.find((r) => r.path === path)?.rationale
             return (
-              <li key={path} className="rounded-xl border border-hairline bg-white px-4 py-3">
+              <li key={path} className="rounded-xl border border-hairline bg-raised px-4 py-3">
                 <p className="truncate font-mono text-[13px] text-slate-800">{path}</p>
                 {rationale && <p className="mt-1 text-[13px] text-slate-500">{rationale}</p>}
               </li>

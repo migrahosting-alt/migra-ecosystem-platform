@@ -84,7 +84,7 @@ function AudioAttachment({ attachment }: { attachment: Attachment }) {
   const [playing, setPlaying] = useState(false)
 
   return (
-    <div className="flex flex-col rounded-xl border border-hairline bg-white p-3.5">
+    <div className="flex flex-col rounded-xl border border-hairline bg-raised p-3.5">
       <p className="flex items-center gap-2 text-[13px] font-semibold text-slate-700">
         <Play className="h-3.5 w-3.5 fill-slate-400 text-slate-400" />
         {attachment.name}
@@ -115,7 +115,7 @@ function AudioAttachment({ attachment }: { attachment: Attachment }) {
 
 function ImageAttachment({ attachment }: { attachment: Attachment }) {
   return (
-    <div className="overflow-hidden rounded-xl border border-hairline bg-white">
+    <div className="overflow-hidden rounded-xl border border-hairline bg-raised">
       <div className="h-[112px] border-b border-hairline bg-slate-50/60 p-1.5">
         {attachment.preview && <DiagramPreview variant={attachment.preview} />}
       </div>
@@ -213,7 +213,7 @@ function AssistantTurn({
       <LogoMark className="mt-1 h-8 w-8 shrink-0" id={`msg-${message.id}`} />
 
       <div className="min-w-0 flex-1">
-        <div className="rounded-2xl rounded-tl-md border border-hairline bg-white p-5 shadow-card sm:p-6">
+        <div className="rounded-2xl rounded-tl-md border border-hairline bg-raised p-5 shadow-card sm:p-6">
           <div className="flex flex-col gap-5">
             {blocks.map((block, index) => (
               <BlockView
@@ -232,7 +232,7 @@ function AssistantTurn({
                   href={`https://${source.domain}`}
                   target="_blank"
                   rel="noreferrer"
-                  className="group flex items-center gap-3 rounded-xl border border-hairline bg-white px-3.5 py-3 transition-colors hover:border-brand-200 hover:bg-brand-50/40"
+                  className="group flex items-center gap-3 rounded-xl border border-hairline bg-raised px-3.5 py-3 transition-colors hover:border-brand-200 hover:bg-brand-50/40"
                 >
                   <SourceIcon domain={source.domain} />
                   <span className="min-w-0 flex-1">
@@ -277,7 +277,7 @@ function AssistantTurn({
                 <Link
                   key={name}
                   href="/files"
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-hairline bg-white px-2.5 py-1 text-[12.5px] font-semibold text-slate-700 transition-colors hover:border-brand-200 hover:bg-brand-50/40"
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-hairline bg-raised px-2.5 py-1 text-[12.5px] font-semibold text-slate-700 transition-colors hover:border-brand-200 hover:bg-brand-50/40"
                 >
                   <FileTypeIcon name={name} size="sm" />
                   {name}
@@ -363,7 +363,7 @@ export function TypingIndicator() {
   return (
     <div className="flex animate-fade gap-3.5">
       <LogoMark className="mt-1 h-8 w-8 shrink-0" id="typing" />
-      <div className="flex items-center gap-1.5 rounded-2xl rounded-tl-md border border-hairline bg-white px-5 py-4 shadow-card">
+      <div className="flex items-center gap-1.5 rounded-2xl rounded-tl-md border border-hairline bg-raised px-5 py-4 shadow-card">
         {[0, 1, 2].map((index) => (
           <span
             key={index}
