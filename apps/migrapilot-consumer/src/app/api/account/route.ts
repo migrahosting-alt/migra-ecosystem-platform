@@ -12,7 +12,7 @@
  * recoverable. Inventing an empty provider list would not be.
  */
 
-import { migraAuthFetch } from '@/server/auth/migraAuthApi'
+import { migraAuthFetch, persistRenewal } from '@/server/auth/migraAuthApi'
 
 export const dynamic = 'force-dynamic'
 
@@ -48,8 +48,27 @@ interface LinksResponse {
 }
 
 export async function GET(): Promise<Response> {
-  const [me, links, security] = await Promise.all([
-    migraAuthFetch<MeResponse>('/v1/me'),
+  /*
+   * THE FIRST CALL IS DELIBERATELY ALONE, AND THE RENEWAL IS SAVED BEFORE THE
+   * OTHERS RUN.
+   *
+   * These three used to go out in one `Promise.all`. With an expired access
+   * token that is not merely wasteful — it is destructive. All three would read
+   * the same refresh token from the session and redeem it concurrently;
+   * MigraAuth rotates refresh tokens strictly once and treats a second
+   * presentation as theft, revoking the ENTIRE FAMILY. So the parallel version
+   * signed the user out precisely when it tried to keep them signed in, and did
+   * it every time the token had expired.
+   *
+   * Serialising the first call means exactly one refresh happens. Persisting it
+   * before the next two means they read the NEW token from the session — Next's
+   * cookie store is request-scoped and reflects the write — so they never
+   * present the rotated one.
+   */
+  const me = await migraAuthFetch<MeResponse>('/v1/me')
+  await persistRenewal(me)
+
+  const [links, security] = await Promise.all([
     migraAuthFetch<LinksResponse>('/v1/social/links'),
     migraAuthFetch<SecurityResponse>('/v1/me/security'),
   ])
@@ -138,6 +157,7 @@ export async function PATCH(request: Request): Promise<Response> {
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ display_name: raw }),
   })
+  await persistRenewal(updated)
 
   if (updated.kind === 'unauthenticated') {
     return Response.json({ error: 'unauthenticated' }, { status: 401 })

@@ -13,7 +13,7 @@
  * anything.
  */
 
-import { migraAuthFetch } from '@/server/auth/migraAuthApi'
+import { migraAuthFetch, persistRenewal } from '@/server/auth/migraAuthApi'
 
 export const dynamic = 'force-dynamic'
 
@@ -62,6 +62,7 @@ export async function POST(request: Request): Promise<Response> {
       body: JSON.stringify({ email }),
     },
   )
+  await persistRenewal(result)
 
   if (result.kind !== 'ok') {
     return relay(result, 'That change could not be started. Your address is unchanged.')
@@ -94,6 +95,7 @@ export async function PUT(request: Request): Promise<Response> {
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ challenge_id: challengeId, code }),
   })
+  await persistRenewal(result)
 
   if (result.kind !== 'ok') {
     return relay(result, 'That code could not be confirmed. Your address is unchanged.')

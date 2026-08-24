@@ -18,7 +18,7 @@
 
 import { deleteConversation, listConversations } from '@/server/brain/seams'
 import { resolveRequestPrincipal } from '@/server/tenancy/requestPrincipal'
-import { migraAuthFetch } from '@/server/auth/migraAuthApi'
+import { migraAuthFetch, persistRenewal } from '@/server/auth/migraAuthApi'
 import { getAuthPort } from '@/server/auth'
 import type { ConversationSummary } from '@/server/brain/contracts'
 
@@ -87,6 +87,7 @@ export async function POST(request: Request): Promise<Response> {
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ confirm: 'DELETE' }),
   })
+  await persistRenewal(closed)
 
   if (closed.kind !== 'ok') {
     /*

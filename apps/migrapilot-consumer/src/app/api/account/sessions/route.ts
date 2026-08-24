@@ -5,7 +5,7 @@
  * because it is gone, not because this app remembered to forget it.
  */
 
-import { migraAuthFetch } from '@/server/auth/migraAuthApi'
+import { migraAuthFetch, persistRenewal } from '@/server/auth/migraAuthApi'
 
 export const dynamic = 'force-dynamic'
 
@@ -37,6 +37,7 @@ const fail = (kind: string): Response => {
 
 export async function GET(): Promise<Response> {
   const result = await migraAuthFetch<SessionsResponse>('/v1/sessions')
+  await persistRenewal(result)
   if (result.kind !== 'ok') return fail(result.kind)
 
   return Response.json({
@@ -71,6 +72,7 @@ export async function DELETE(request: Request): Promise<Response> {
   const path = id ? `/v1/sessions/${encodeURIComponent(id)}` : '/v1/sessions/others'
 
   const result = await migraAuthFetch<{ revoked?: number }>(path, { method: 'DELETE' })
+  await persistRenewal(result)
   if (result.kind !== 'ok') return fail(result.kind)
 
   return Response.json({ revoked: result.value?.revoked ?? (id ? 1 : 0), scope: id ? 'one' : 'others' })

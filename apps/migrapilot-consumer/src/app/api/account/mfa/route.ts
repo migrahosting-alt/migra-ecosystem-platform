@@ -16,7 +16,7 @@
  *          case that used to be locked in.
  */
 
-import { migraAuthFetch } from '@/server/auth/migraAuthApi'
+import { migraAuthFetch, persistRenewal } from '@/server/auth/migraAuthApi'
 
 export const dynamic = 'force-dynamic'
 
@@ -55,6 +55,7 @@ export async function POST(): Promise<Response> {
   if (result.kind !== 'ok') {
     return relay(result, 'Two-step verification could not be set up right now.')
   }
+  await persistRenewal(result)
 
   return Response.json({
     challengeId: result.value?.challenge_id,
@@ -95,6 +96,7 @@ export async function PUT(request: Request): Promise<Response> {
       ...(typeof body?.challengeId === 'string' ? { challenge_id: body.challengeId } : {}),
     }),
   })
+  await persistRenewal(result)
 
   if (result.kind !== 'ok') {
     return relay(result, 'That code could not be confirmed.')
@@ -126,6 +128,7 @@ export async function DELETE(request: Request): Promise<Response> {
     // reaches MigraAuth as an attempted credential.
     body: JSON.stringify({ ...(password ? { password } : {}), ...(code ? { code } : {}) }),
   })
+  await persistRenewal(result)
 
   if (result.kind !== 'ok') {
     return relay(result, 'Two-step verification could not be turned off.')

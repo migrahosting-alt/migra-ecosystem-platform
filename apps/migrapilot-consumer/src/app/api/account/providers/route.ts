@@ -17,7 +17,7 @@
  * complete it, and pretending otherwise would produce a button that fails.
  */
 
-import { migraAuthFetch } from '@/server/auth/migraAuthApi'
+import { migraAuthFetch, persistRenewal } from '@/server/auth/migraAuthApi'
 
 export const dynamic = 'force-dynamic'
 
@@ -38,6 +38,7 @@ export async function DELETE(request: Request): Promise<Response> {
     `/v1/social/${provider}/link`,
     { method: 'DELETE' },
   )
+  await persistRenewal(result)
 
   if (result.kind === 'unauthenticated') {
     return Response.json({ error: 'unauthenticated' }, { status: 401 })

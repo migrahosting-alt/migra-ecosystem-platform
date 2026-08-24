@@ -22,6 +22,7 @@ import 'server-only'
  */
 
 import { getSession } from './index'
+import { setAppSession } from '@migrateck/auth-client'
 import { readEnv, readFirstEnv, absoluteHttpUrl } from './env'
 import type { AppSession } from './authPort'
 
@@ -132,11 +133,14 @@ async function refreshAccessToken(refreshToken: string): Promise<StoredTokens | 
  * forever. The remedy is a new sign-in, and a screen that spins instead of
  * saying so is a screen that never recovers.
  *
- * A RENEWED TOKEN COMES BACK IN THE RESULT rather than being stashed. Read
- * paths cannot set cookies, so the renewal serves this request and the next
- * request renews again; a route that CAN write the session may persist it. What
- * it must never be is module state — that is shared across concurrent requests,
- * and a bearer token parked there belongs to whoever reads it next.
+ * A RENEWED TOKEN COMES BACK IN THE RESULT rather than being stashed, and the
+ * caller MUST persist it with `persistRenewal`. MigraAuth's refresh tokens are
+ * one-time and reuse revokes the whole family, so 'the next request renews
+ * again' — which this comment used to claim was fine — actually replays a
+ * rotated token and destroys the session. See `persistRenewal` below.
+ *
+ * What it must never be is module state — that is shared across concurrent
+ * requests, and a bearer token parked there belongs to whoever reads it next.
  */
 export async function migraAuthFetch<T>(
   path: string,
@@ -214,4 +218,40 @@ export async function migraAuthFetch<T>(
 
   const value = (await response.json().catch(() => null)) as T
   return { kind: 'ok', value, ...(renewedThisCall ? { renewed: renewedThisCall } : {}) }
+}
+
+/**
+ * Save a rotated token set back into the session.
+ *
+ * WITHOUT THIS, EVERY SIGNED-IN SESSION BREAKS ABOUT FIFTEEN MINUTES AFTER
+ * SIGN-IN, and breaks hard. MigraAuth's refresh tokens are strictly one-time:
+ * rotating one stamps `rotatedAt`, and presenting a rotated token again is
+ * treated as theft — `rotateRefreshToken` revokes the ENTIRE FAMILY on reuse
+ * detection. So the sequence was:
+ *
+ *   1. access token expires
+ *   2. a read refreshes, uses the new access token for that one request, and
+ *      throws the new refresh token away because it had nowhere to put it
+ *   3. the next request presents the OLD refresh token again
+ *   4. reuse detected → whole family revoked → `reauth_required`, permanently
+ *
+ * The renewal was already being returned in the result; nothing consumed it.
+ * Diagnosed from live use — having to sign in again repeatedly during
+ * verification, which read as flakiness rather than as the defect it was.
+ *
+ * SAFE ONLY IN A ROUTE HANDLER. Server Components cannot set cookies, which is
+ * why `migraAuthFetch` returns the renewal instead of persisting it itself.
+ * Route handlers can, so they call this.
+ */
+export async function persistRenewal<T>(result: MigraAuthResult<T>): Promise<void> {
+  if (result.kind !== 'ok' || !result.renewed) return
+
+  const session = await getSession()
+  if (!session) return
+
+  const existing = (session.productAccount ?? {}) as Record<string, unknown>
+  await setAppSession({
+    ...session,
+    productAccount: { ...existing, migraAuth: result.renewed },
+  })
 }
