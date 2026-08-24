@@ -239,7 +239,30 @@ export async function migraAuthFetch<T>(
     return { kind: 'unavailable', status: 0 }
   }
 
-  if (response.status === 401 || response.status === 403) return { kind: 'reauth_required' }
+  /*
+   * A 401 MEANS TWO DIFFERENT THINGS AND THEY MUST NOT BE CONFLATED.
+   *
+   * "Your session is finished" and "that code was wrong" both arrive as 401.
+   * Collapsing both into `reauth_required` told someone who simply mistyped a
+   * recovery code to SIGN IN AGAIN — while their session was perfectly valid, so
+   * signing in again fixed nothing and they returned to the same screen. Caught
+   * live: a deliberately wrong code answered "Sign in again to replace your
+   * recovery codes."
+   *
+   * MigraAuth's own two shapes separate them cleanly. A guard refusing the
+   * request sends a bare string — `{"error":"unauthorized"}` — because there is
+   * no request-specific reason to give. A route refusing a CREDENTIAL sends a
+   * structured `{"error":{"code":…,"message":…}}`, and that message is written
+   * for the person to read. So a 401 carrying a reason is a refusal to relay,
+   * and a 401 without one is a session that has ended.
+   */
+  if (response.status === 401 || response.status === 403) {
+    const body = (await response.json().catch(() => null)) as RefusalBody | null
+    if (typeof body?.error === 'object' && body.error !== null && body.error.code) {
+      return { kind: 'refused', status: response.status, value: body }
+    }
+    return { kind: 'reauth_required' }
+  }
 
   /*
    * A DELIBERATE REFUSAL IS NOT AN OUTAGE, AND ITS REASON IS WORTH KEEPING.
