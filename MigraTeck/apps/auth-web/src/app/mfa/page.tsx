@@ -75,9 +75,24 @@ function MfaForm() {
      * prevent.
      */
     if (txn) {
+      /*
+       * `txn` — THE FIELD NAME THE ROUTE ACTUALLY READS.
+       *
+       * This posted `transaction_id`, which `/authorize/resume` never looks at:
+       * it reads `request.body.txn`, so the id arrived as an empty string and
+       * consuming it failed every time. The person WAS signed in — the factor
+       * had already been verified and the session promoted — and was then shown
+       * "that sign-in request is no longer valid" and left on an error page
+       * instead of being returned to the product they came from.
+       *
+       * Invisible to every test and to the password path, which sends `txn`
+       * correctly. It only fires for a sign-in that has BOTH a second factor and
+       * a pending authorization, and it never failed loudly enough to look like
+       * a bug in this request rather than an expired transaction.
+       */
       const resumed = await authFetch<{ redirect_to?: string }>("/authorize/resume", {
         method: "POST",
-        body: { transaction_id: txn },
+        body: { txn },
       });
       if (resumed.ok && resumed.data.redirect_to) {
         window.location.href = resumed.data.redirect_to;

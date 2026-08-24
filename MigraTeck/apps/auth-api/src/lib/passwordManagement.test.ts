@@ -340,6 +340,38 @@ test("neither account surface paints the wrong brand first", () => {
     "the sessions page must not take product context from the URL");
 });
 
+test("every /authorize/resume caller sends the field the route reads", () => {
+  /*
+   * FOUND BY RUNNING THE REAL FLOW, not by any test here.
+   *
+   * `/mfa` posted `transaction_id` while the route reads `body.txn`, so the id
+   * arrived empty and the transaction never completed. The person was signed in
+   * — factor verified, session promoted — and then shown an error page instead
+   * of being returned to their product. It fired only for sign-ins with BOTH a
+   * second factor and a pending authorization, which is why the password path
+   * looked fine.
+   *
+   * Pinned across ALL callers, because one caller agreeing with the route is
+   * exactly the state that hid this.
+   */
+  const route = src("routes/oauth.ts");
+  const field = /request\.body\?\.(\w+)/.exec(route.slice(route.indexOf('"/authorize/resume"')));
+  assert.ok(field, "the route must read a body field");
+  const expected = field[1];
+  assert.equal(expected, "txn");
+
+  for (const caller of ["app/login/page.tsx", "app/mfa/page.tsx"]) {
+    const body = web(caller);
+    const at = body.indexOf('"/authorize/resume"');
+    assert.ok(at > 0, `${caller} must call /authorize/resume`);
+    const call = body.slice(at, at + 400);
+    assert.match(call, new RegExp(`body:\\s*\\{\\s*${expected}\\b`),
+      `${caller} must send \`${expected}\`, the field the route reads`);
+    assert.doesNotMatch(call, /transaction_id/,
+      `${caller} must not send transaction_id — the route ignores it`);
+  }
+});
+
 test("no raw API error can reach the user", () => {
   assert.match(page, /function describeFailure/);
   for (const code of ["reauthentication_required", "reauthentication_failed", "password_unchanged"]) {
