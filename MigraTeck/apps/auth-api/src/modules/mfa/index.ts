@@ -222,6 +222,28 @@ export async function hasTotpEnabled(userId: string): Promise<boolean> {
 
 // ── Recovery Codes ──────────────────────────────────────────────────
 
+/**
+ * ONE NORMALIZATION, USED ON BOTH SIDES.
+ *
+ * THE BUG THIS EXISTS TO END: codes were STORED hashed as issued —
+ * `hashToken("a1b2c-3d4e5")`, dash included — and CONSUMED as
+ * `hashToken(code.replace(/-/g, ""))`. Those two hashes can never be equal, so
+ * every recovery code this system has ever issued was invalid the moment it was
+ * printed. The one credential whose entire purpose is to work when nothing else
+ * does, and it worked never.
+ *
+ * It hid well. A rejected recovery code is indistinguishable from a mistyped or
+ * already-used one, so it reads as the person's mistake — and the people hitting
+ * it are, by definition, already locked out and not in a position to argue.
+ *
+ * Normalizing away case and every separator is also the right behaviour on its
+ * own terms: these are read off paper or a screenshot and typed by someone under
+ * stress, and `A1B2C 3D4E5` is not a different code from `a1b2c-3d4e5`.
+ */
+export function normalizeRecoveryCode(code: string): string {
+  return code.replace(/[^a-z0-9]/gi, "").toLowerCase();
+}
+
 export function generateRecoveryCodes(count = 10): string[] {
   const codes: string[] = [];
   for (let i = 0; i < count; i++) {
@@ -235,7 +257,9 @@ export async function storeRecoveryCodes(
   userId: string,
   codes: string[],
 ): Promise<void> {
-  const hashed = codes.map(hashToken);
+  // Hashed through the SAME normalization the consume path applies. Storing the
+  // raw form is what made every issued code unusable.
+  const hashed = codes.map((code) => hashToken(normalizeRecoveryCode(code)));
   // Remove existing recovery codes first
   await db.userCredential.deleteMany({
     where: { userId, type: "RECOVERY_CODE" },
@@ -262,7 +286,7 @@ export async function consumeRecoveryCode(
 
   const meta = cred.metadata as Record<string, unknown>;
   const storedCodes = meta["codes"] as string[];
-  const codeHash = hashToken(code.replace(/-/g, ""));
+  const codeHash = hashToken(normalizeRecoveryCode(code));
 
   const idx = storedCodes.indexOf(codeHash);
   if (idx === -1) return false;
