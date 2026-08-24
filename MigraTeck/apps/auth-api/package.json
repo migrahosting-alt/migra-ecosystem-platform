@@ -13,7 +13,10 @@
     "db:migrate": "prisma migrate dev --config prisma.config.ts",
     "db:push": "prisma db push --config prisma.config.ts",
     "db:seed": "tsx src/seed.ts",
-    "test": "node --import tsx --test \"src/**/*.test.ts\""
+    "test": "node --import tsx --test \"src/**/*.test.ts\"",
+    "verify:prisma-client": "node scripts/verify-prisma-client.mjs",
+    "verify:auth-health": "node scripts/verify-auth-health.mjs",
+    "build:release": "tsc -p tsconfig.json && node scripts/verify-prisma-client.mjs"
   },
   "dependencies": {
     "@migrateck/billing-core": "workspace:*",

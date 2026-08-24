@@ -9,11 +9,11 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-  // Declared here as well as in `prisma.config.ts`: the config supplies it at
-  // runtime, but `prisma generate` validates the schema block itself and fails
-  // without it. The env var is the same one `src/config/env.ts` reads, so this
-  // introduces no second source of truth.
-  url      = env("AUTH_DATABASE_URL")
+  // NO `url` HERE. Prisma 7 (what the host runs) rejects it outright — the
+  // connection URL belongs in `prisma.config.ts`, which supplies it. I briefly
+  // added it because the local CLI (6.19) demanded it for `generate`, and that
+  // line then made `prisma generate` FAIL ON THE HOST, which is the environment
+  // that matters. Generate against the host toolchain, not the workstation.
 }
 
 // ─── Enums ──────────────────────────────────────────────────────────
