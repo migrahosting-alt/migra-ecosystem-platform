@@ -20,6 +20,7 @@ import {
   sanitizeAuthMessage,
 } from "@/lib/branding";
 import { useRegistryBrand } from "@/lib/useRegistryBrand";
+import { useTransactionClientId } from "@/lib/useTransactionClient";
 
 function extractApiErrorMessage(payload: unknown, fallback: string): string {
   if (!payload || typeof payload !== "object") {
@@ -70,10 +71,24 @@ function extractApiErrorMessage(payload: unknown, fallback: string): string {
 function SignupForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const clientId = searchParams.get("client_id");
+  const urlClientId = searchParams.get("client_id");
   const redirectUri = searchParams.get("redirect_uri");
   const queryString = searchParams.toString();
   const txn = searchParams.get("txn");
+  /*
+   * The client comes from the TRANSACTION when the URL carries only `txn` —
+   * which is the normal case now that the authorization request lives
+   * server-side. Without this the page falls back to MigraAuth's own brand for
+   * a product sign-in. Shared hook, so all three auth pages agree.
+   */
+  /*
+   * The hook is called UNCONDITIONALLY. Written as
+   * `urlClientId ?? useTransactionClientId(txn)` it short-circuits whenever
+   * the URL carries a client_id, so the hook is skipped on some renders and
+   * not others — a rules-of-hooks violation that corrupts hook order.
+   */
+  const txnClientId = useTransactionClientId(txn);
+  const clientId = urlClientId ?? txnClientId;
   const effectiveClientId = clientId ?? "migraauth_web";
   const hardcodedBrand = useMemo(() => resolveAuthBrandTheme(clientId), [clientId]);
   const brand = useRegistryBrand(clientId, hardcodedBrand);

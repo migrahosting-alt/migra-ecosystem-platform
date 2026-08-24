@@ -11,6 +11,7 @@ import {
   toBrandStyle,
 } from "@migrateck/auth-ui";
 import { authFetch } from "@/lib/api";
+import { useTransactionClientId } from "@/lib/useTransactionClient";
 import { SocialSignIn } from "@/components/SocialSignIn";
 import {
   resolveAuthBrandTheme,
@@ -76,13 +77,38 @@ function LoginForm() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
-  const clientId = searchParams.get("client_id");
+  const urlClientId = searchParams.get("client_id");
+  /*
+   * `txn` names an authorization request held server-side; it is read here
+   * rather than further down because branding depends on it.
+   */
+  const txn = searchParams.get("txn");
+  const txnClientId = useTransactionClientId(txn);
   const redirectUri = searchParams.get("redirect_uri");
   const state = searchParams.get("state");
   const codeChallenge = searchParams.get("code_challenge");
   const codeChallengeMethod = searchParams.get("code_challenge_method");
   const scope = searchParams.get("scope");
   const nonce = searchParams.get("nonce");
+  /*
+   * ── WHICH PRODUCT IS THIS SIGN-IN FOR ────────────────────────────────
+   *
+   * THE DURABLE TRANSACTION CAUSED THIS REGRESSION, so it also has to fix it.
+   * Moving the authorization request server-side deliberately removed
+   * `client_id` (and everything else) from the browser's URL — that is the
+   * whole point of it. But branding was reading `client_id` from the query, so
+   * with only `txn` present it resolved to nothing and fell back to MigraAuth's
+   * own brand. MigraPilot users got a MigraAuth login page.
+   *
+   * The client now comes from the TRANSACTION ROW, which is trusted server
+   * state. That is strictly better than the query parameter it replaces: a URL
+   * parameter can be edited to make MigraAuth wear any product's identity,
+   * while the transaction says which client actually initiated the request.
+   *
+   * Not hardcoded to MigraPilot: the id feeds the same registry every product
+   * uses, so each one shows its own mark and name over the shared engine.
+   */
+  const clientId = urlClientId ?? txnClientId;
   const effectiveClientId = clientId ?? "migraauth_web";
   const hardcodedBrand = useMemo(() => resolveAuthBrandTheme(clientId), [clientId]);
   const brand = useRegistryBrand(clientId, hardcodedBrand);
@@ -99,8 +125,9 @@ function LoginForm() {
    * set is still read so a link opened before this shipped still completes, but
    * a transaction is preferred whenever present — and it is the only path that
    * cannot lose a parameter between hops, because it carries none.
+   *
+   * Read above, alongside the branding that depends on it.
    */
-  const txn = searchParams.get("txn");
   const isOAuthFlow = !!txn || !!(clientId && redirectUri && state && codeChallenge);
   const queryString = searchParams.toString();
 
@@ -287,8 +314,21 @@ function LoginForm() {
                 Sign in to {brand.productName}
               </h1>
 
+              {/*
+                THE ACCOUNT IS A MIGRATECK ACCOUNT, WHATEVER PRODUCT YOU CAME FROM.
+                The fallback said "Use your <product> account to continue", which
+                for MigraPilot invented a MigraPilot account that does not exist —
+                there is one identity across the ecosystem, and telling people
+                otherwise is how they end up trying to register twice.
+
+                Written as a rule rather than a MigraPilot special case, so every
+                product sharing this engine gets it right.
+              */}
               <p className="mx-auto mt-2 max-w-[300px] text-sm leading-6 text-slate-300/80">
-                {brand.helperCopy ?? `Use your ${brand.productName} account to continue.`}
+                {brand.helperCopy ??
+                  (brand.productKey === "migraauth"
+                    ? "Use your MigraAuth account to continue."
+                    : "Use your MigraTeck account to continue.")}
               </p>
             </div>
 
@@ -338,10 +378,25 @@ function LoginForm() {
             */}
             <SocialSignIn transactionId={txn} authorizeQuery={!txn && isOAuthFlow ? queryString : null} />
 
+            {/*
+              WHO SECURES THIS, NAMED QUIETLY. When a product owns the page, the
+              engine behind it should still be identifiable — someone typing a
+              password deserves to know which system is receiving it, and a
+              product-skinned login that never says so is the shape a phishing
+              page takes. It is a footnote, not a second brand.
+
+              On MigraAuth's own login the badge is redundant, so it is omitted
+              rather than telling people MigraAuth is secured by MigraAuth.
+            */}
             <div className="mt-6 rounded-2xl border border-white/[0.08] bg-white/[0.025] px-4 py-3">
               <p className="text-center text-xs leading-5 text-white/45">
                 Secure authentication for {productDisplayDomain}.
               </p>
+              {brand.productKey !== "migraauth" && (
+                <p className="mt-1 text-center text-[11px] leading-4 tracking-wide text-white/35">
+                  Secured by MigraAuth
+                </p>
+              )}
             </div>
 
             <div className="mt-6 text-center text-sm text-white/55">

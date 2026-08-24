@@ -12,16 +12,31 @@ import {
 import { authFetch } from "@/lib/api";
 import { buildContinueLabel, resolveAuthBrandTheme } from "@/lib/branding";
 import { useRegistryBrand } from "@/lib/useRegistryBrand";
+import { useTransactionClientId } from "@/lib/useTransactionClient";
 
 type Method = "totp" | "recovery" | "passkey";
 
 function MfaForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const clientId = searchParams.get("client_id");
+  const urlClientId = searchParams.get("client_id");
   const redirectUri = searchParams.get("redirect_uri");
   /** Set when a SOCIAL sign-in was interrupted for the second factor. */
   const txn = searchParams.get("txn");
+  /*
+   * The client comes from the TRANSACTION when the URL carries only `txn` —
+   * which is the normal case now that the authorization request lives
+   * server-side. Without this the page falls back to MigraAuth's own brand for
+   * a product sign-in. Shared hook, so all three auth pages agree.
+   */
+  /*
+   * The hook is called UNCONDITIONALLY. Written as
+   * `urlClientId ?? useTransactionClientId(txn)` it short-circuits whenever
+   * the URL carries a client_id, so the hook is skipped on some renders and
+   * not others — a rules-of-hooks violation that corrupts hook order.
+   */
+  const txnClientId = useTransactionClientId(txn);
+  const clientId = urlClientId ?? txnClientId;
   const returnTo = searchParams.get("return_to");
   const state = searchParams.get("state");
   const codeChallenge = searchParams.get("code_challenge");

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { API_BASE } from "./api";
 import type { AuthBrandTheme } from "@migrateck/auth-ui";
 
 const BRANDING_SOURCE =
@@ -57,7 +58,14 @@ export function useRegistryBrand(
     const timer = setTimeout(() => controller.abort(), 1500);
     let active = true;
 
-    fetch(`/v1/clients/${encodeURIComponent(clientId)}/branding`, {
+    /*
+     * THROUGH `API_BASE`, not a bare relative path. `/v1/clients/...` resolves
+     * against auth.migrateck.com, which serves auth-web and has no such route —
+     * so every registry lookup 404'd and silently fell back to the hardcoded
+     * theme. The fallback made it invisible: branding looked fine, and the
+     * database was simply never consulted.
+     */
+    fetch(`${API_BASE}/v1/clients/${encodeURIComponent(clientId)}/branding`, {
       signal: controller.signal,
       headers: { Accept: "application/json" },
     })

@@ -40,6 +40,29 @@ const productBrands: Record<string, AuthBrandTheme> = {
     gradientEnd: "#ff3e9a",
     accent: "#b14dff",
   },
+  /*
+   * MigraPilot. Added because the login page was rendering MIGRAAUTH branding
+   * for MigraPilot sign-ins: the registry had no entry, so `resolveAuthBrandTheme`
+   * fell through to the identity platform's own brand.
+   *
+   * The logo is the official mark from `Rebrand/Migra_official_logos`, not a
+   * re-drawn or borrowed one.
+   */
+  migrapilot: {
+    ...migraAuthBrand,
+    productKey: "migrapilot",
+    productName: "MigraPilot",
+    logoSrc: "/brands/products/migrapilot.png",
+    securityLabel: "AI assistant",
+    monogram: "MP",
+    eyebrow: "Product identity",
+    headline: "Sign in to MigraPilot",
+    supportCopy:
+      "Your MigraTeck account carries your conversations, preferences and history across every MigraPilot surface.",
+    gradientStart: "#2060e0",
+    gradientEnd: "#60c0f0",
+    accent: "#3080f0",
+  },
   migrateck: {
     ...migraAuthBrand,
     productKey: "migrateck",
@@ -200,6 +223,7 @@ export function buildContinueLabel(clientId: string | null | undefined) {
 
 const productHomeUrls: Record<string, string> = {
   annoupale: "https://annoupale.com",
+  migrapilot: "https://chat.migrateck.com",
   migrateck: "https://migrateck.com",
   migrahosting: "https://migrahosting.com",
   migradrive: "https://migradrive.com",
