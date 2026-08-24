@@ -253,6 +253,32 @@ export function generateRecoveryCodes(count = 10): string[] {
   return codes;
 }
 
+/**
+ * The normalization generation a stored set was written under.
+ *
+ * Sets written BEFORE the store/consume mismatch was fixed hashed the code with
+ * its separator, so they cannot be redeemed by any correct verifier — not
+ * "probably stale", structurally impossible. They must never be presented as a
+ * working fallback, and the only way to tell them apart after the fact is to
+ * stamp the ones written correctly.
+ *
+ * Absent marker means pre-fix, because that is exactly what every existing row
+ * is: absence is the honest signal here, not a default worth guessing at.
+ */
+export const RECOVERY_CODE_VERSION = 2;
+
+/** Whether this user's recovery codes can actually be redeemed. */
+export async function recoveryCodesAreStale(userId: string): Promise<boolean> {
+  const cred = await db.userCredential.findFirst({
+    where: { userId, type: "RECOVERY_CODE" },
+    select: { metadata: true },
+  });
+  // No set at all is not "stale" — there is nothing to mislead anyone about.
+  if (!cred) return false;
+  const meta = (cred.metadata ?? {}) as Record<string, unknown>;
+  return meta["v"] !== RECOVERY_CODE_VERSION;
+}
+
 export async function storeRecoveryCodes(
   userId: string,
   codes: string[],
@@ -268,7 +294,7 @@ export async function storeRecoveryCodes(
     data: {
       userId,
       type: "RECOVERY_CODE",
-      metadata: { codes: hashed },
+      metadata: { codes: hashed, v: RECOVERY_CODE_VERSION },
       priority: 0,
       isEnabled: true,
     },
@@ -295,7 +321,7 @@ export async function consumeRecoveryCode(
   storedCodes.splice(idx, 1);
   await db.userCredential.update({
     where: { id: cred.id },
-    data: { metadata: { codes: storedCodes } },
+    data: { metadata: { codes: storedCodes, v: meta["v"] ?? null } },
   });
 
   return true;

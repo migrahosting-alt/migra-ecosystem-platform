@@ -45,7 +45,7 @@ import {
   revokeAllUserSessions,
   rotateAuthSession,
 } from "../modules/sessions/index.js";
-import { hasTotpEnabled, verifyTotp, consumeRecoveryCode } from "../modules/mfa/index.js";
+import { hasTotpEnabled, verifyTotp, consumeRecoveryCode, recoveryCodesAreStale } from "../modules/mfa/index.js";
 import { logAuditEvent } from "../modules/audit/index.js";
 import { sendPasswordResetNotification, sendVerificationCode } from "../lib/notifications.js";
 import { parseIdentifier, maskIdentifier } from "../lib/identifier.js";
@@ -237,7 +237,7 @@ export async function establishFirstPartySession(input: {
  * whether "Disconnect" is offered on the only way into someone's account.
  */
 async function securityFacts(user: User, session?: { clientId: string | null } | null) {
-  const [mfaEnabled, passwordCredential, linkedIdentities] = await Promise.all([
+  const [mfaEnabled, passwordCredential, linkedIdentities, recoveryStale] = await Promise.all([
     hasTotpEnabled(user.id),
     db.userCredential.findFirst({
       where: { userId: user.id, type: "PASSWORD", isEnabled: true },
@@ -247,6 +247,7 @@ async function securityFacts(user: User, session?: { clientId: string | null } |
       where: { userId: user.id },
       select: { provider: true },
     }),
+    recoveryCodesAreStale(user.id),
   ]);
 
   const hasPassword = Boolean(passwordCredential);
@@ -268,6 +269,13 @@ async function securityFacts(user: User, session?: { clientId: string | null } |
      */
     product_client_id: session?.clientId ?? null,
     mfa_enabled: mfaEnabled,
+    /*
+     * TRUE means this account holds recovery codes that CANNOT be redeemed —
+     * issued before the store/consume hash mismatch was fixed. Reported so the
+     * UI can say so and offer regeneration, rather than leaving someone holding
+     * a printed sheet that looks like a way back in and is not.
+     */
+    recovery_codes_stale: recoveryStale,
     has_password: hasPassword,
     password_updated_at: passwordCredential?.updatedAt?.toISOString() ?? null,
     email_verified: !!user.emailVerifiedAt,

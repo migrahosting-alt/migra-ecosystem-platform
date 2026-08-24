@@ -19,7 +19,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
-import { normalizeRecoveryCode, generateRecoveryCodes } from "../modules/mfa/index.js";
+import { normalizeRecoveryCode, generateRecoveryCodes, RECOVERY_CODE_VERSION } from "../modules/mfa/index.js";
 
 const mfaSource = readFileSync(join(process.cwd(), "src", "modules", "mfa", "index.ts"), "utf8");
 
@@ -79,5 +79,38 @@ test("the stored key is a hash, never the code itself", () => {
   const code = generateRecoveryCodes(1)[0]!;
   const key = createHash("sha256").update(normalizeRecoveryCode(code)).digest("hex");
   assert.notEqual(key, normalizeRecoveryCode(code));
-  assert.match(mfa, /metadata: \{ codes: hashed \}/, "only hashes are persisted");
+  // The persisted array is the HASHED one; the marker sits beside it.
+  assert.match(mfa, /metadata: \{ codes: hashed, v: RECOVERY_CODE_VERSION \}/, "only hashes are persisted");
+  assert.doesNotMatch(mfa, /metadata: \{ codes: codes\b/, "raw codes must never be written");
+});
+
+test("pre-fix code sets are detectable, not silently presented as usable", () => {
+  /*
+   * Sets written before the fix hashed the separator in, so no correct verifier
+   * can ever redeem them — structurally impossible, not merely unlikely. Someone
+   * holding that printed sheet believes they have a way back in. The system has
+   * to be able to say otherwise.
+   *
+   * ABSENCE IS THE SIGNAL: every pre-existing row has no marker, so "unmarked"
+   * is exactly "written under the broken normalization". Defaulting an unmarked
+   * set to usable would reintroduce the lie this flag exists to end.
+   */
+  assert.equal(RECOVERY_CODE_VERSION, 2);
+  assert.match(mfa, /metadata: \{ codes: hashed, v: RECOVERY_CODE_VERSION \}/,
+    "newly written sets must carry the marker");
+  assert.match(mfa, /meta\["v"\] !== RECOVERY_CODE_VERSION/,
+    "anything not matching the current version is stale");
+  // No set at all is not stale — there is nothing to mislead anyone about.
+  assert.match(mfa, /if \(!cred\) return false/);
+  /*
+   * Spending a code must not drop the marker, or redeeming one would make a
+   * perfectly good set start reporting itself as unusable.
+   */
+  assert.match(mfa, /data: \{ metadata: \{ codes: storedCodes, v: meta\["v"\] \?\? null \} \}/);
+});
+
+test("the stale flag reaches the surface that can act on it", () => {
+  const routes = readFileSync(join(process.cwd(), "src", "routes", "auth.ts"), "utf8");
+  assert.match(routes, /recovery_codes_stale: recoveryStale/);
+  assert.match(routes, /recoveryCodesAreStale\(user\.id\)/);
 });
