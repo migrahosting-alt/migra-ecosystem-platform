@@ -5,6 +5,7 @@ import Image from "next/image";
 import { Button, toBrandStyle } from "@migrateck/auth-ui";
 import { authFetch } from "@/lib/api";
 import { resolveAuthBrandTheme } from "@/lib/branding";
+import { useRegistryBrand } from "@/lib/useRegistryBrand";
 
 type SessionRow = {
   id: string;
@@ -42,8 +43,21 @@ function describeBrowser(userAgent: string | null | undefined) {
 }
 
 export default function SessionsPage() {
-  const brand = useMemo(() => resolveAuthBrandTheme(null), []);
+  /*
+   * SAME RULE AS /account/password: an account surface reached in a product's
+   * context keeps that product's brand, with MigraAuth named as the authority.
+   * This page links to password management, so leaving it generic broke the
+   * journey one step before the page that was just fixed.
+   *
+   * The client id comes from the SESSION via `/v1/me/security` — trusted state,
+   * stamped when a transaction was consumed. Never a query parameter.
+   */
+  const [productClientId, setProductClientId] = useState<string | null>(null);
+  const [brandResolved, setBrandResolved] = useState(false);
+  const hardcodedBrand = useMemo(() => resolveAuthBrandTheme(productClientId), [productClientId]);
+  const brand = useRegistryBrand(productClientId, hardcodedBrand);
   const brandStyle = useMemo(() => toBrandStyle(brand), [brand]);
+  const isProductContext = brand.productKey !== "migraauth";
 
   const [sessions, setSessions] = useState<SessionRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -52,6 +66,17 @@ export default function SessionsPage() {
   const [revokingOthers, setRevokingOthers] = useState(false);
 
   const currentSession = useMemo(() => sessions.find((session) => session.current) ?? null, [sessions]);
+
+  useEffect(() => {
+    void authFetch<{ product_client_id: string | null }>("/v1/me/security")
+      .then((response) => {
+        if (response.ok) setProductClientId(response.data.product_client_id);
+      })
+      // Branding is cosmetic and must never gate the page it decorates: an
+      // unreadable product context leaves MigraAuth's own brand, not an error.
+      .catch(() => undefined)
+      .finally(() => setBrandResolved(true));
+  }, []);
 
   useEffect(() => {
     authFetch<{ sessions: SessionRow[] }>("/v1/sessions")
@@ -126,17 +151,22 @@ export default function SessionsPage() {
               <div className="flex justify-center">
                 <div className="inline-flex items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 backdrop-blur-sm">
                   <div className="relative h-11 w-11 shrink-0 overflow-hidden rounded-2xl">
-                    <Image
-                      src={brand.logoSrc ?? "/brands/migrateck-logo.png"}
-                      alt={brand.productName}
-                      fill
-                      className="object-contain"
-                      priority
-                    />
+                    {/* Neutral until the product is known — never the wrong brand first. */}
+                    {brandResolved ? (
+                      <Image
+                        src={brand.logoSrc ?? "/brands/migrateck-logo.png"}
+                        alt={brand.productName}
+                        fill
+                        className="object-contain"
+                        priority
+                      />
+                    ) : (
+                      <div className="h-full w-full animate-pulse rounded-2xl bg-white/10" />
+                    )}
                   </div>
                   <div className="text-left leading-none">
                     <div className="text-lg font-semibold tracking-[-0.02em] text-white">
-                      {brand.productName}
+                      {brandResolved ? brand.productName : <span className="inline-block h-4 w-24 animate-pulse rounded bg-white/10" />}
                     </div>
                     <div className="mt-1.5 text-[10px] font-medium uppercase tracking-[0.26em] text-white/50">
                       Session management
@@ -193,6 +223,13 @@ export default function SessionsPage() {
                     {revokingOthers ? "Revoking others…" : "Revoke other sessions"}
                   </Button>
                 </div>
+              ) : null}
+
+              {/* The identity authority stays explicit on a product surface. */}
+              {isProductContext ? (
+                <p className="text-center text-[11px] leading-4 tracking-wide text-white/35">
+                  Secured by MigraAuth
+                </p>
               ) : null}
 
               {/* ── error ─── */}

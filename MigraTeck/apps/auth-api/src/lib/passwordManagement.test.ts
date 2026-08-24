@@ -30,7 +30,16 @@ const src = (relative: string) => read(join("src", relative));
 const web = (relative: string) => read(join("..", "auth-web", "src", relative));
 
 const routes = src("routes/auth.ts");
-const handler = routes.slice(routes.indexOf('app.post("/v1/me/password"'));
+/*
+ * Bounded to THIS route. An unbounded slice runs to end-of-file and picks up
+ * every later handler — which made the "must not revoke every device" assertion
+ * fail on `/v1/me/close`, a route that is supposed to do exactly that.
+ */
+const handler = (() => {
+  const start = routes.indexOf('app.post("/v1/me/password"');
+  const next = routes.indexOf("  app.", start + 10);
+  return next > start ? routes.slice(start, next) : routes.slice(start);
+})();
 const page = web("app/account/password/page.tsx");
 
 test("the password route exists and is behind a real session guard", () => {
@@ -261,6 +270,68 @@ test("the credential stays canonical to the MigraTeck account", () => {
    * breath, or people go looking for a credential that was never created.
    */
   assert.match(page, /works with your MigraTeck account/);
+});
+
+test("a saved password is not a proven one — the session must end", () => {
+  /*
+   * WRITING A CREDENTIAL PROVES STORAGE, NOT USABILITY. A typo, a mangled
+   * encoding, a hashing change — each produces a perfect success screen and a
+   * password that cannot sign anybody in, discovered later from a sign-in page
+   * by someone with no idea what went wrong.
+   */
+  const revokeAt = handler.indexOf("await revokeSession(session.id)");
+  const writeAt = handler.indexOf("await changePassword(");
+  assert.ok(revokeAt > 0, "the session must be revoked after a password change");
+  assert.ok(revokeAt > writeAt, "revoke AFTER the write, never before");
+  assert.match(handler, /clearSessionCookie\(reply\)/);
+  assert.match(handler, /clearRefreshCookie\(reply\)/);
+  assert.match(handler, /required: true/);
+});
+
+test("other devices are NOT signed out — that stays a separate policy", () => {
+  /*
+   * Global revocation has real consequences for someone who changed a password
+   * routinely, and it is not being decided as a side effect of this endpoint.
+   */
+  assert.doesNotMatch(handler, /revokeAllUserSessions|revokeOtherSessions/,
+    "a password change must not revoke every device");
+});
+
+test("the re-auth destination is a registry-owned origin, never a supplied URL", () => {
+  const resolver = routes.slice(routes.indexOf("async function reauthenticationTarget"));
+  const body = resolver.slice(0, resolver.indexOf("\nexport async function"));
+
+  // Proven-owned destinations only: what the client registered, nothing else.
+  assert.match(body, /defaultPostLoginUrl/);
+  assert.match(body, /redirectUris/);
+  assert.match(body, /isActive/, "a deactivated client must not be a destination");
+  // ORIGIN only — a redirect URI's path is a callback that expects a code.
+  assert.match(body, /url\.origin/);
+  assert.doesNotMatch(body, /request\.(query|body)/, "never a caller-supplied destination");
+});
+
+test("the success state is a journey, not a permanent tick", () => {
+  assert.match(page, /reauthenticate\?\.url/);
+  assert.match(page, /window\.location\.assign\(target\)/);
+  // The form is useless once the session is gone.
+  assert.match(page, /facts && !reauthUrl \? \(/);
+  // A blocked redirect must not strand someone on a dead session.
+  assert.match(page, /Continue to sign in/);
+});
+
+test("neither account surface paints the wrong brand first", () => {
+  const sessionsPage = web("app/sessions/page.tsx");
+  /*
+   * Read mid-swap, a MigraAuth-to-MigraPilot flicker says the feature is
+   * broken — it was reported as exactly that. Showing nothing briefly is
+   * honest; showing the wrong identity and correcting it is not.
+   */
+  assert.match(page, /\{loading \? \(\s*<div className="h-full w-full animate-pulse/);
+  assert.match(sessionsPage, /brandResolved \? \(/);
+  assert.match(sessionsPage, /useRegistryBrand\(productClientId, hardcodedBrand\)/);
+  assert.match(sessionsPage, /Secured by MigraAuth/);
+  assert.doesNotMatch(sessionsPage, /useSearchParams|URLSearchParams/,
+    "the sessions page must not take product context from the URL");
 });
 
 test("no raw API error can reach the user", () => {

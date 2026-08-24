@@ -45,6 +45,11 @@ type PasswordResponse = SecurityFacts & {
   success?: boolean;
   created?: boolean;
   message?: string;
+  /**
+   * Set on success. The session that made the change is already revoked by the
+   * time this arrives, so there is nothing to stay on — only somewhere to go.
+   */
+  reauthenticate?: { required?: boolean; url?: string; product_client_id?: string | null };
   error?: { code?: string; message?: string };
 };
 
@@ -117,6 +122,7 @@ export default function PasswordPage() {
   const [confirmPassword, setConfirmPassword] = useState("");
 
   const [saving, setSaving] = useState(false);
+  const [reauthUrl, setReauthUrl] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [needsFreshSignIn, setNeedsFreshSignIn] = useState(false);
@@ -195,15 +201,27 @@ export default function PasswordPage() {
        * than from an assumption about what just happened.
        */
       setFacts(response.data);
-      setSuccess(
-        response.data.created
-          ? "Your password is set. You can now sign in with it as well as your connected accounts."
-          : "Your password has been changed.",
-      );
       setCurrentPassword("");
       setCode("");
       setNewPassword("");
       setConfirmPassword("");
+
+      /*
+       * NOT A PERMANENT SUCCESS SCREEN. The server has already ended this
+       * session, because a stored password is not a working one until it has
+       * signed somebody in. Staying here would show a green tick over a
+       * credential nobody has used yet — and this browser can no longer do
+       * anything on this page anyway.
+       */
+      const target = response.data.reauthenticate?.url ?? "/login";
+      setReauthUrl(target);
+      setSuccess(
+        response.data.created
+          ? "Password saved. Signing you in again to confirm it works…"
+          : "Password changed. Signing you in again to confirm it works…",
+      );
+      // A beat to read the message, then the journey continues on its own.
+      window.setTimeout(() => { window.location.assign(target); }, 1600);
     } catch {
       setError("We could not reach your account. Your password was not changed.");
     } finally {
@@ -226,13 +244,28 @@ export default function PasswordPage() {
             <div className="pointer-events-none absolute inset-[1px] rounded-[27px] border border-white/[0.06]" />
 
             <div className="relative space-y-6">
+              {/*
+                NEUTRAL UNTIL THE PRODUCT IS KNOWN.
+                Product context arrives with `/v1/me/security`, so rendering the
+                default brand first meant MigraPilot users watched a MigraAuth
+                page turn into a MigraPilot one. That flicker is not merely
+                untidy: read mid-swap it says the feature is broken, and it was
+                reported as exactly that. Showing nothing for a moment is honest;
+                showing the wrong identity and correcting it is not.
+              */}
               <div className="flex justify-center">
                 <div className="inline-flex items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 backdrop-blur-sm">
                   <div className="relative h-11 w-11 shrink-0 overflow-hidden rounded-2xl">
-                    <Image src={brand.logoSrc ?? "/brands/migrateck-logo.png"} alt={brand.productName} fill className="object-contain" priority />
+                    {loading ? (
+                      <div className="h-full w-full animate-pulse rounded-2xl bg-white/10" />
+                    ) : (
+                      <Image src={brand.logoSrc ?? "/brands/migrateck-logo.png"} alt={brand.productName} fill className="object-contain" priority />
+                    )}
                   </div>
                   <div className="text-left leading-none">
-                    <div className="text-lg font-semibold tracking-[-0.02em] text-white">{brand.productName}</div>
+                    <div className="text-lg font-semibold tracking-[-0.02em] text-white">
+                      {loading ? <span className="inline-block h-4 w-24 animate-pulse rounded bg-white/10" /> : brand.productName}
+                    </div>
                     <div className="mt-1.5 text-[10px] font-medium uppercase tracking-[0.26em] text-white/50">Account security</div>
                   </div>
                 </div>
@@ -344,8 +377,19 @@ export default function PasswordPage() {
               ) : null}
 
               {success ? (
-                <div className="rounded-2xl border border-emerald-400/30 bg-emerald-400/10 px-4 py-3 text-sm text-emerald-100">
-                  {success}
+                <div className="space-y-3 rounded-2xl border border-emerald-400/30 bg-emerald-400/10 px-4 py-3 text-sm text-emerald-100">
+                  <p>{success}</p>
+                  {/*
+                    A LINK, NOT ONLY A TIMER. If the automatic redirect is
+                    blocked or the tab is backgrounded, the person is stranded on
+                    a page whose session no longer exists — with no way forward
+                    and a password they have not yet proved.
+                  */}
+                  {reauthUrl ? (
+                    <a href={reauthUrl} className="inline-flex text-sm font-semibold text-white underline underline-offset-4">
+                      Continue to sign in
+                    </a>
+                  ) : null}
                 </div>
               ) : null}
 
@@ -360,7 +404,7 @@ export default function PasswordPage() {
                 </div>
               ) : null}
 
-              {facts ? (
+              {facts && !reauthUrl ? (
                 <form onSubmit={submit} className="space-y-4">
                   {/*
                     ASKED FOR ONLY WHEN IT EXISTS. An account with no password
