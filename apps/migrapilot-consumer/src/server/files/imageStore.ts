@@ -6,6 +6,7 @@ import { join } from 'node:path'
 
 import { requireSession } from '@/server/auth'
 import { deriveBrainScope } from '@/server/tenancy/ownerScope'
+import { downscaleForModel, MODEL_IMAGE_MAX_EDGE } from './downscale'
 import { acceptImage, isImageId, type AcceptedImage, type ImageMime } from './images'
 
 /**
@@ -46,6 +47,19 @@ export interface StoredImage {
   displayName: string
   /** The scope that owns it, recorded so provenance survives a directory move. */
   ownerScope: string
+  /**
+   * Hash of the cached copy prepared for the model, when one exists.
+   *
+   * ITS PRESENCE IS THE CACHE INDEX and its value is the integrity check, for
+   * the same reason the original carries `sha256`: a derived file that changed
+   * underneath its record would put a different picture in front of the model
+   * than the one the user is looking at, and an answer about the wrong image is
+   * worse than a slow answer about the right one. Absent on images stored before
+   * the cache existed, which simply derive on first use.
+   */
+  modelSha256?: string
+  /** Size of that copy, so a trace can show what the resize actually bought. */
+  modelBytes?: number
 }
 
 export class ImageRejected extends Error {
@@ -66,6 +80,31 @@ async function imageDirectory(): Promise<{ dir: string; owner: string }> {
 
 /** Metadata lives beside the bytes, named from the same canonical id. */
 const metaPathFor = (dir: string, id: string) => join(dir, `${id}.meta.json`)
+
+const extensionFor = (mime: ImageMime) => (mime === 'image/jpeg' ? 'jpg' : mime.replace('image/', ''))
+
+/**
+ * Where the model's copy lives.
+ *
+ * THE CAP IS IN THE NAME so that changing `MODEL_IMAGE_MAX_EDGE` invalidates
+ * every cached copy by construction. A cache keyed on an id alone would keep
+ * serving 1024px images long after someone decided the cap should be 1568, and
+ * the stale ones would be indistinguishable from correct ones.
+ */
+const modelPathFor = (dir: string, id: string, mime: ImageMime) =>
+  join(dir, `${id}.model-${MODEL_IMAGE_MAX_EDGE}.${extensionFor(mime)}`)
+
+/** Atomic like every other write here: a reader never sees a half-written file. */
+async function writeAtomic(dir: string, target: string, bytes: Buffer): Promise<void> {
+  const temp = join(dir, `.tmp-${randomUUID()}`)
+  try {
+    await writeFile(temp, bytes, { mode: 0o600 })
+    await rename(temp, target)
+  } catch (error) {
+    await rm(temp, { force: true })
+    throw error
+  }
+}
 
 async function readMeta(dir: string, id: string): Promise<StoredImage | null> {
   try {
@@ -150,6 +189,30 @@ export async function saveImage(rawName: string, data: ArrayBuffer): Promise<Sto
     throw error
   }
 
+  /*
+   * The model's copy is derived HERE, not on the chat turn.
+   *
+   * Downscaling a 12MP photo costs about 1.8s of pure-JavaScript decode on this
+   * hardware. Paid during upload it is hidden behind the user still typing their
+   * question; paid on the turn it is 1.8s added to every answer about that image,
+   * for ever. Content-addressed ids make the result permanently valid: a given id
+   * is a given set of bytes, so this is derived once and never recomputed.
+   *
+   * A FAILURE HERE IS NOT AN UPLOAD FAILURE. Without `modelSha256` the turn simply
+   * derives it on demand — slower, and still correct. The image itself is already
+   * safely stored by this point and must not be lost to a cache problem.
+   */
+  try {
+    const forModel = downscaleForModel(Buffer.from(bytes), image.mime, image.width, image.height)
+    if (!forModel.original) {
+      await writeAtomic(dir, modelPathFor(dir, image.id, image.mime), forModel.bytes)
+      meta.modelSha256 = createHash('sha256').update(forModel.bytes).digest('hex')
+      meta.modelBytes = forModel.bytes.byteLength
+    }
+  } catch {
+    // Deliberately swallowed: see above.
+  }
+
   try {
     const metaTemp = join(dir, `.tmp-${randomUUID()}`)
     await writeFile(metaTemp, JSON.stringify(meta), { mode: 0o600 })
@@ -174,8 +237,7 @@ export async function readImageBytes(id: string): Promise<{ meta: StoredImage; b
   const meta = await readMeta(dir, id)
   if (!meta) return null
 
-  const extension = meta.mime === 'image/jpeg' ? 'jpg' : meta.mime.replace('image/', '')
-  const bytes = await readFile(join(dir, `${id}.${extension}`)).catch(() => null)
+  const bytes = await readFile(join(dir, `${id}.${extensionFor(meta.mime)}`)).catch(() => null)
   if (!bytes) return null
 
   /*
@@ -186,6 +248,60 @@ export async function readImageBytes(id: string): Promise<{ meta: StoredImage; b
   if (createHash('sha256').update(bytes).digest('hex') !== meta.sha256) return null
 
   return { meta, bytes }
+}
+
+/**
+ * The copy a vision model should be handed.
+ *
+ * WHY THIS IS NOT `readImageBytes`. What the library stores and what the model
+ * reads are two different artifacts with two different jobs. The library keeps
+ * the user's real picture at full resolution, because that is what they uploaded
+ * and what the transcript shows. The model gets a bounded copy, because prefill
+ * cost scales with image tokens and a full-resolution photo turned a two-second
+ * answer into a twenty-eight-second one. Keeping them separate is what lets both
+ * be right.
+ *
+ * THE CACHED COPY IS VERIFIED, not trusted. It is derived data living in a
+ * directory, and if it no longer matches the hash recorded when it was derived
+ * then it is not the picture this record describes — so it is discarded and
+ * rebuilt from the original, which is itself hash-checked on the way through.
+ */
+export async function readModelImage(
+  id: string,
+): Promise<{ meta: StoredImage; bytes: Buffer; downscaled: boolean; fromCache: boolean } | null> {
+  if (!isImageId(id)) return null
+  const { dir } = await imageDirectory()
+  const meta = await readMeta(dir, id)
+  if (!meta) return null
+
+  if (meta.modelSha256) {
+    const cached = await readFile(modelPathFor(dir, id, meta.mime)).catch(() => null)
+    if (cached && createHash('sha256').update(cached).digest('hex') === meta.modelSha256) {
+      return { meta, bytes: cached, downscaled: true, fromCache: true }
+    }
+  }
+
+  // Cold: an image stored before this cache existed, a failed warm, or a copy
+  // that no longer verifies. Derive from the original and leave it warm.
+  const original = await readImageBytes(id)
+  if (!original) return null
+
+  const forModel = downscaleForModel(original.bytes, meta.mime, meta.width, meta.height)
+  if (!forModel.original) {
+    try {
+      await writeAtomic(dir, modelPathFor(dir, id, meta.mime), forModel.bytes)
+      const next: StoredImage = {
+        ...meta,
+        modelSha256: createHash('sha256').update(forModel.bytes).digest('hex'),
+        modelBytes: forModel.bytes.byteLength,
+      }
+      await writeAtomic(dir, metaPathFor(dir, id), Buffer.from(JSON.stringify(next)))
+    } catch {
+      // The answer does not depend on the cache being written.
+    }
+  }
+
+  return { meta, bytes: forModel.bytes, downscaled: !forModel.original, fromCache: false }
 }
 
 /**
@@ -202,8 +318,10 @@ export async function deleteImage(id: string): Promise<boolean> {
   const meta = await readMeta(dir, id)
   if (!meta) return false
 
-  const extension = meta.mime === 'image/jpeg' ? 'jpg' : meta.mime.replace('image/', '')
-  await rm(join(dir, `${id}.${extension}`), { force: true })
+  await rm(join(dir, `${id}.${extensionFor(meta.mime)}`), { force: true })
+  // The derived copy goes with it. Leaving it behind would keep a picture of a
+  // deleted image on disk, which is not what "delete" means to the person asking.
+  await rm(modelPathFor(dir, id, meta.mime), { force: true })
   await rm(metaPathFor(dir, id), { force: true })
   return true
 }

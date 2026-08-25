@@ -13,10 +13,12 @@ import { mkdtemp, readdir, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { deflateSync } from 'node:zlib'
+import { readFile, rm } from 'node:fs/promises'
+import { PNG } from 'pngjs'
 
 process.env.IMAGE_ROOT = await mkdtemp(join(tmpdir(), 'migrapilot-images-'))
 
-const { saveImage, listImages, readImageBytes, deleteImage, imageUsage, sweepTemporaries, ImageRejected } =
+const { saveImage, listImages, readImageBytes, readModelImage, deleteImage, imageUsage, sweepTemporaries, ImageRejected } =
   await import('./imageStore')
 const { setAuthPort, resetAuthPort } = await import('@/server/auth')
 import type { AppSession, AuthPort } from '@/server/auth/authPort'
@@ -185,3 +187,110 @@ test('stray temporaries are sweepable', async () => {
 })
 
 test.after(() => resetAuthPort())
+
+
+/* ---- the copy the model reads ---- */
+
+/** The directory this user's images landed in, whichever it is. */
+async function dirHolding(id: string): Promise<string> {
+  const root = process.env.IMAGE_ROOT!
+  for (const entry of await readdir(root)) {
+    const files = await readdir(join(root, entry)).catch(() => [] as string[])
+    if (files.some((f) => f.startsWith(id))) return join(root, entry)
+  }
+  throw new Error(`no directory holds ${id}`)
+}
+
+test('a large image is prepared for the model at upload, not on the turn', async () => {
+  current = 'model-copy'
+  // 1.8s of decode on the production CPU. Paid here it is hidden behind the user
+  // still typing; paid on the turn it is added to every answer about this image.
+  const meta = await saveImage('screenshot.png', buf(png(1600, 1200, 90)))
+
+  assert.ok(meta.modelSha256, 'the derived copy is recorded on the image record')
+  assert.ok(meta.modelBytes! < meta.bytes, 'and it is smaller than what was stored')
+
+  const dir = await dirHolding(meta.id)
+  const files = await readdir(dir)
+  assert.ok(
+    files.includes(`${meta.id}.model-1024.png`),
+    `the cap belongs in the name so changing it invalidates the cache: ${files.join(', ')}`,
+  )
+
+  const prepared = await readModelImage(meta.id)
+  assert.ok(prepared)
+  assert.equal(prepared.fromCache, true, 'the turn reads it, it does not compute it')
+  assert.equal(prepared.downscaled, true)
+  const decoded = PNG.sync.read(prepared.bytes)
+  assert.equal(Math.max(decoded.width, decoded.height), 1024)
+
+  // The library still holds the user's real picture, untouched.
+  const original = await readImageBytes(meta.id)
+  assert.equal(original!.bytes.byteLength, meta.bytes)
+  const full = PNG.sync.read(original!.bytes)
+  assert.equal(full.width, 1600)
+})
+
+test('an image already small enough is never re-encoded', async () => {
+  current = 'model-small'
+  const meta = await saveImage('small.png', buf(png(300, 200, 40)))
+  assert.equal(meta.modelSha256, undefined, 'no derived copy is written for it')
+
+  const prepared = await readModelImage(meta.id)
+  assert.equal(prepared!.downscaled, false)
+  const original = await readImageBytes(meta.id)
+  assert.ok(prepared!.bytes.equals(original!.bytes), 'the stored bytes go as they are')
+})
+
+test('a cached copy that no longer verifies is rebuilt, never served', async () => {
+  current = 'model-tamper'
+  const meta = await saveImage('shot.png', buf(png(1600, 1200, 120)))
+  const dir = await dirHolding(meta.id)
+  const cachePath = join(dir, `${meta.id}.model-1024.png`)
+
+  const honest = await readFile(cachePath)
+  // A different picture entirely, planted under the cached name.
+  await writeFile(cachePath, Buffer.from(png(64, 64, 255)))
+
+  const prepared = await readModelImage(meta.id)
+  assert.ok(prepared)
+  assert.equal(prepared.fromCache, false, 'the tampered copy is rejected')
+  const decoded = PNG.sync.read(prepared.bytes)
+  assert.equal(Math.max(decoded.width, decoded.height), 1024, 'and the real one is rebuilt')
+  // Rebuilt deterministically from the same verified original.
+  assert.ok(prepared.bytes.equals(honest))
+  assert.ok((await readFile(cachePath)).equals(honest), 'the good copy is written back')
+})
+
+test('an image stored before the cache existed derives once, then reads warm', async () => {
+  current = 'model-cold'
+  const meta = await saveImage('legacy.png', buf(png(1600, 1200, 200)))
+  const dir = await dirHolding(meta.id)
+
+  // Exactly the shape of an older record: bytes present, no derived copy.
+  await rm(join(dir, `${meta.id}.model-1024.png`), { force: true })
+  const legacy = { ...meta }
+  delete (legacy as { modelSha256?: string }).modelSha256
+  delete (legacy as { modelBytes?: number }).modelBytes
+  await writeFile(join(dir, `${meta.id}.meta.json`), JSON.stringify(legacy))
+
+  const first = await readModelImage(meta.id)
+  assert.equal(first!.fromCache, false, 'the first turn pays for it')
+  assert.equal(first!.downscaled, true)
+
+  const second = await readModelImage(meta.id)
+  assert.equal(second!.fromCache, true, 'every turn after it does not')
+  assert.ok(second!.bytes.equals(first!.bytes))
+})
+
+test('deleting an image takes its derived copy with it', async () => {
+  current = 'model-delete'
+  const meta = await saveImage('gone.png', buf(png(1600, 1200, 33)))
+  const dir = await dirHolding(meta.id)
+  assert.ok((await readdir(dir)).includes(`${meta.id}.model-1024.png`))
+
+  assert.equal(await deleteImage(meta.id), true)
+  const left = await readdir(dir)
+  assert.ok(!left.some((f) => f.startsWith(meta.id)), `nothing is left behind: ${left.join(', ')}`)
+  assert.equal(await readModelImage(meta.id), null)
+})
