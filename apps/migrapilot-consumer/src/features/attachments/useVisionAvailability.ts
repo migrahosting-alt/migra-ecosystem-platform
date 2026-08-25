@@ -39,8 +39,20 @@ export function useVisionAvailability(): VisionCapability | null {
       objectCounting: { qualified: false, model: null },
     })
 
+    const signedOut = (): VisionCapability => ({
+      state: 'signed_out',
+      model: null,
+      installed: 0,
+      message: 'Sign in to attach images.',
+      digest: null,
+      objectCounting: { qualified: false, model: null },
+    })
+
     void fetch('/api/images')
       .then(async (response) => {
+        // A 401 is an ANSWER, not a failed probe: images need an account, and
+        // saying so is both true and actionable.
+        if (response.status === 401) return { vision: signedOut() }
         if (!response.ok) return null
         return (await response.json()) as { vision?: VisionCapability } | null
       })
@@ -71,6 +83,8 @@ export function visionDisabledReason(vision: VisionCapability | null): string {
   switch (vision.state) {
     case 'ready':
       return ''
+    case 'signed_out':
+      return 'Sign in to attach images.'
     case 'unknown':
       return 'We could not check whether images can be read right now.'
     default:

@@ -50,11 +50,11 @@ const portWith = (current: AppSession | null): AuthPort => ({
   clearSession: async () => {},
 })
 
-const post = (body: unknown): Promise<Response> =>
+const post = (body: unknown, headers: Record<string, string> = {}): Promise<Response> =>
   POST(
     new Request('https://chat.example.test/api/chat/stream', {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', ...headers },
       body: typeof body === 'string' ? body : JSON.stringify(body),
     }),
   )
@@ -622,5 +622,84 @@ test('a refusal for want of evidence is reported as such, and persists nothing',
   assert.deepEqual(storedAssistant, [], 'a refusal must not be persisted as an answer')
 
   globalThis.fetch = original
+  resetAuthPort()
+})
+
+
+/* ---- the turn's trace id ---- */
+
+test("the browser's id reaches the Brain, the meta frame and the response header", async () => {
+  /*
+   * ASSERTED AT THE BOUNDARY, not on a type. The whole value of a correlation id
+   * is that the SAME string appears in the browser, in this service's log and in
+   * the Brain's audit record; a version of this that only checked the route
+   * accepted the header would pass while the header never left the process.
+   */
+  const supplied = 'req_0123456789abcdef0123'
+  const brain = brainStub()
+  setAuthPort(portWith(session))
+
+  const response = await post({ prompt: 'hi' }, { 'x-request-id': supplied })
+  assert.equal(response.headers.get('x-request-id'), supplied, 'the response names the turn')
+
+  const frames = await collect(response)
+  assert.equal(frames[0]!.data.requestId, supplied, 'the browser is told the id it was recorded under')
+  const done = frames.find((f) => f.event === 'done')
+  assert.equal(done?.data.requestId, supplied)
+
+  // The leg that actually crosses a network.
+  const upstream = brain.calls.find((c) => c.url.endsWith('/api/ai/chat'))
+  assert.ok(upstream, 'the Brain was called')
+  const sent = new Headers(upstream.init.headers as HeadersInit)
+  assert.equal(sent.get('x-request-id'), supplied, 'the id is on the wire to the Brain')
+
+  brain.restore()
+  resetAuthPort()
+})
+
+test('a malformed id is replaced everywhere it would otherwise be echoed', async () => {
+  /*
+   * A literal newline cannot reach here — the platform refuses to construct such
+   * a header at all, which is why that case is covered as a unit test on
+   * `adoptRequestId` rather than through the route. What CAN arrive is an
+   * over-long or out-of-charset value, and that still lands in this service's
+   * logs and the Brain's durable audit store if it is echoed unchecked.
+   */
+  for (const hostile of ['req_' + 'a'.repeat(4000), 'req_NOT-HEX-AT-ALL!!', 'short']) {
+    const brain = brainStub()
+    setAuthPort(portWith(session))
+
+    const response = await post({ prompt: 'hi' }, { 'x-request-id': hostile })
+    const issued = response.headers.get('x-request-id')!
+    assert.notEqual(issued, hostile, `${hostile.slice(0, 24)} must not be echoed`)
+    assert.match(issued, /^req_[0-9a-f]{16,32}$/)
+
+    const frames = await collect(response)
+    assert.equal(frames[0]!.data.requestId, issued, 'the browser learns the real name')
+
+    const upstream = brain.calls.find((c) => c.url.endsWith('/api/ai/chat'))
+    const sent = new Headers(upstream!.init.headers as HeadersInit)
+    assert.equal(sent.get('x-request-id'), issued, 'and the Brain is given the real name')
+
+    brain.restore()
+    resetAuthPort()
+  }
+})
+
+test('a turn with no id supplied is still named, and named consistently', async () => {
+  const brain = brainStub()
+  setAuthPort(portWith(session))
+
+  const response = await post({ prompt: 'hi' })
+  const issued = response.headers.get('x-request-id')!
+  assert.match(issued, /^req_[0-9a-f]{16,32}$/)
+
+  const frames = await collect(response)
+  // One turn, one name — the header, the frames and the Brain call all agree.
+  assert.equal(frames[0]!.data.requestId, issued)
+  const upstream = brain.calls.find((c) => c.url.endsWith('/api/ai/chat'))
+  assert.equal(new Headers(upstream!.init.headers as HeadersInit).get('x-request-id'), issued)
+
+  brain.restore()
   resetAuthPort()
 })

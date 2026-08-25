@@ -17,7 +17,18 @@ import { callBrain } from '@/server/brain/gateway'
  * app is in no position to make.
  */
 
-export type VisionState = 'ready' | 'no_qualified_model' | 'unknown'
+/**
+ * `signed_out` is separate from `unknown` on purpose.
+ *
+ * A 401 is a DEFINITE answer — images need an account — and the person reading
+ * it can act on it. `unknown` means the probe genuinely failed and nobody knows,
+ * which is a different sentence and a different next step. Collapsing the two
+ * told every signed-out visitor "we could not check whether images can be read
+ * right now", which describes an outage that was not happening and hides the one
+ * thing they could do about it. The Dictate control beside it already said
+ * "sign in"; this one did not.
+ */
+export type VisionState = 'ready' | 'no_qualified_model' | 'signed_out' | 'unknown'
 
 export interface VisionCapability {
   state: VisionState

@@ -52,6 +52,7 @@ import type { Principal } from '@/server/tenancy/principal'
 import type { BrainStreamFrame } from '@/server/brain/gateway'
 import type { ConversationSummary } from '@/server/brain/contracts'
 import { resolveTurnImages } from '@/server/files/resolveTurnImages'
+import { adoptRequestId, TurnTrace } from '@/server/observability/turnTrace'
 
 export const dynamic = 'force-dynamic'
 
@@ -223,6 +224,19 @@ function reasonFor(kind: string): { error: string; message: string } {
 
 export async function POST(request: Request): Promise<Response> {
   /*
+   * THE TRACE ID, BEFORE ANYTHING ELSE CAN FAIL.
+   *
+   * Minted here rather than at the first Brain call, because the stages worth
+   * measuring — resolving a principal, reserving an allowance, reading an
+   * image — all happen before the Brain is asked anything, and those are
+   * precisely the ones that used to be invisible. The browser's id is adopted
+   * when it is well-formed so the client's own timings share the name.
+   */
+  const adopted = adoptRequestId(request.headers.get('x-request-id'))
+  const trace = new TurnTrace(adopted.id)
+  trace.set('client_id', !adopted.minted)
+
+  /*
    * ONE principal for the whole request.
    *
    * Every Brain call below is made as this principal. Resolving it per call
@@ -238,6 +252,8 @@ export async function POST(request: Request): Promise<Response> {
     return json(503, 'session_unavailable', 'A session could not be started. Try again shortly.')
   }
   const principal: Principal = resolved.principal
+  trace.set('anonymous', principal.kind === 'anonymous')
+  trace.mark('principal')
 
   let body: unknown
   try {
@@ -277,6 +293,7 @@ export async function POST(request: Request): Promise<Response> {
     return json(allowance.status, allowance.error, allowance.message)
   }
   const reservationId = allowance.kind === 'reserved' ? allowance.reservationId : null
+  trace.mark('allowance')
 
   /**
    * Give the turn back. Used for every failure BEFORE useful output.
@@ -350,8 +367,30 @@ export async function POST(request: Request): Promise<Response> {
   // caller cannot be part of the thread's set either.
   const resolvedImages = canGround && requestedImages.length > 0
     ? await resolveTurnImages(requestedImages)
-    : { attachments: [], dropped: [] as { ref: string; reason: string }[] }
+    : {
+        attachments: [],
+        dropped: [] as { ref: string; reason: string }[],
+        prepared: [] as { ref: string; storedBytes: number; sentBytes: number; downscaled: boolean; fromCache: boolean }[],
+      }
   const liveImages = resolvedImages.attachments.map((a) => a.name)
+  if (requestedImages.length > 0) {
+    /*
+     * The image cost, stated in the trace rather than inferred from the turn's
+     * total. `warm` is the one that matters: a cold image pays ~1.8s of decode
+     * on this hardware, and without this field a slow turn and a cold cache look
+     * identical from the outside.
+     */
+    trace.set('images', {
+      requested: requestedImages.length,
+      sent: resolvedImages.attachments.length,
+      dropped: resolvedImages.dropped.length,
+      stored_kb: Math.round(resolvedImages.prepared.reduce((n, p) => n + p.storedBytes, 0) / 1024),
+      sent_kb: Math.round(resolvedImages.prepared.reduce((n, p) => n + p.sentBytes, 0) / 1024),
+      downscaled: resolvedImages.prepared.filter((p) => p.downscaled).length,
+      warm: resolvedImages.prepared.filter((p) => p.fromCache).length,
+    })
+  }
+  trace.mark('images')
 
   const imagesChanged =
     liveImages.length !== storedImages.length || liveImages.some((r, i) => r !== storedImages[i])
@@ -368,6 +407,7 @@ export async function POST(request: Request): Promise<Response> {
    * reach the conversation's active set and never the message.
    */
   const storedPrompt = await appendMessage(conversationId, 'user', prompt, { principal }, liveImages)
+  trace.mark('prompt_stored')
   if (storedPrompt.kind !== 'ok') {
     await release('persistence_unavailable')
     // FAIL CLOSED, AND SAY WHY. The prompt is stored before the model runs, so a
@@ -516,6 +556,12 @@ export async function POST(request: Request): Promise<Response> {
       emit('meta', {
         conversationId: durableId,
         /*
+         * The SERVER's id, not the browser's guess. They are the same value when
+         * the client sent a well-formed one, and when it did not this is how the
+         * browser learns the name its turn was actually recorded under.
+         */
+        requestId: trace.id,
+        /*
          * The allowance AFTER this turn was reserved, from the ledger.
          *
          * This is what the composer renders. It is a server fact, read at the
@@ -540,12 +586,16 @@ export async function POST(request: Request): Promise<Response> {
             : {}),
         },
         // The browser going away must stop the model, not just this handler.
-        { signal: request.signal, principal },
+        // The trace id goes with it: the Brain adopts `x-request-id` for its own
+        // audit records, so one grep spans both services.
+        { signal: request.signal, principal, requestId: trace.id },
       )
 
       if (opened.kind !== 'ok') {
         // Nothing reached the user, and the cause is ours — the turn returns.
         const settlement = await settle(false, 'brain_unreachable')
+        trace.set('brain_failure', opened.kind)
+        trace.finish('brain_unreachable')
         emit('error', refusalOr(opened, reconciled.unreadable, reconciled.available))
         if (settlement) emit('quota', settlement)
         closed = true
@@ -557,6 +607,7 @@ export async function POST(request: Request): Promise<Response> {
         return
       }
       frames = opened.frames
+      trace.mark('brain_open')
 
       try {
         for await (const frame of opened.frames) {
@@ -564,6 +615,9 @@ export async function POST(request: Request): Promise<Response> {
             case 'token': {
               const text = (frame.data as { text?: unknown })?.text
               if (typeof text === 'string' && text.length > 0) {
+                // The number the complaint is always about. Marked on the FIRST
+                // token only — the rest is generation speed, a different thing.
+                if (!answer) trace.mark('first_token')
                 answer += text
                 emit('token', { text })
               }
@@ -599,8 +653,19 @@ export async function POST(request: Request): Promise<Response> {
               })
               break
             }
-            // `context` and `route` are Brain diagnostics — retrieval detail,
-            // model ids, failover history. Deliberately not relayed.
+            case 'route': {
+              /*
+               * STILL NOT RELAYED to the browser — a model id is our operational
+               * detail, not the user's answer. But it is recorded here, because
+               * "which model served this turn" is the first question asked of a
+               * slow or wrong one, and the frame carrying it was being dropped
+               * on the floor.
+               */
+              const model = (frame.data as { model?: unknown })?.model
+              if (typeof model === 'string' && model) trace.set('model', model)
+              break
+            }
+            // `context` is Brain retrieval detail. Deliberately not relayed.
             default:
               break
           }
@@ -611,6 +676,8 @@ export async function POST(request: Request): Promise<Response> {
         // dressed up as a finished one.
         completed = false
       }
+
+      trace.mark('generation')
 
       // Attribution, verified against the library rather than trusted.
       const sources = grounded && completed ? await citedFiles(answer) : []
@@ -629,11 +696,14 @@ export async function POST(request: Request): Promise<Response> {
         const stored = await appendMessage(durableId, 'assistant', answer, { principal })
         const quota = await settle(true)
         if (stored.kind === 'ok') {
+          trace.mark('answer_stored')
           emit('done', {
             conversationId: durableId,
+            requestId: trace.id,
             ...(sources.length ? { sources } : {}),
             ...(quota ? { quota } : {}),
           })
+          trace.finish('ok')
         } else {
           // The user watched a complete answer arrive that will not survive a
           // reload. Saying so is the only honest option.
@@ -642,6 +712,7 @@ export async function POST(request: Request): Promise<Response> {
             message: 'The answer arrived but could not be saved, so it will not be here after a reload.',
           })
           if (quota) emit('quota', quota)
+          trace.finish('not_saved')
         }
       } else {
         // Nothing useful reached the user. The turn goes back.
@@ -655,6 +726,7 @@ export async function POST(request: Request): Promise<Response> {
           })
           if (quota) emit('quota', quota)
         }
+        trace.finish(answer ? 'cancelled' : 'no_output')
       }
 
       closed = true
@@ -693,6 +765,9 @@ export async function POST(request: Request): Promise<Response> {
       // nginx buffers proxied responses by default, which would hold every
       // token until the turn finished and silently undo the streaming.
       'x-accel-buffering': 'no',
+      // Present even when the stream carries nothing useful: a turn that dies
+      // before its first frame still has a name in the logs.
+      'x-request-id': trace.id,
     },
   })
 }

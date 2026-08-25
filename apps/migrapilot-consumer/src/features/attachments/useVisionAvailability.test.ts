@@ -91,3 +91,38 @@ test('a qualified capability enables the control', () => {
   assert.equal(ready.state, 'ready')
   assert.equal(visionDisabledReason(ready), '', 'an enabled control needs no excuse')
 })
+
+
+test('a signed-out visitor is told to sign in, not that the check failed', () => {
+  /*
+   * The live defect this covers: an anonymous visitor saw "We could not check
+   * whether images can be read right now" on a probe that returned a clean 401.
+   * That describes an outage that was not happening and hides the one action
+   * available. The Dictate control beside it already said "sign in".
+   */
+  assert.equal(
+    visionDisabledReason({
+      state: 'signed_out',
+      model: null,
+      installed: 0,
+      message: 'Sign in to attach images.',
+      digest: null,
+      objectCounting: { qualified: false, model: null },
+    }),
+    'Sign in to attach images.',
+  )
+})
+
+test('a genuinely failed probe still says so, because that is a different fact', () => {
+  assert.equal(
+    visionDisabledReason({
+      state: 'unknown',
+      model: null,
+      installed: 0,
+      message: 'We could not check whether images can be read right now.',
+      digest: null,
+      objectCounting: { qualified: false, model: null },
+    }),
+    'We could not check whether images can be read right now.',
+  )
+})

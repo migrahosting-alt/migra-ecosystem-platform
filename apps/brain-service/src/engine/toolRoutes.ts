@@ -122,10 +122,29 @@ export function registerToolExecutionRoutes(app: FastifyInstance, deps: ToolRout
   return { registry, approvals, audit };
 }
 
+/**
+ * A BOUND on an inbound correlation id, deliberately not a format.
+ *
+ * This value lands in the DURABLE audit store and in every log line for the
+ * request, and it arrives in a header — so an unchecked one writes arbitrary
+ * text, at arbitrary length, into records this service is meant to be able to
+ * trust. What is actually dangerous is the character set and the length, so
+ * those are what this constrains.
+ *
+ * NO MINIMUM LENGTH. An earlier version required eight characters and broke a
+ * caller using a short id, for no security gain: a short id is not a threat,
+ * it is just short. The strict `req_<hex>` FORMAT check belongs in the consumer,
+ * whose input is a browser; this service's callers are internal and legitimately
+ * use several id shapes, including plain UUIDs.
+ */
+const CORRELATION_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
+
 function correlationId(request: FastifyRequest): string {
   const header = request.headers['x-request-id'];
   const value = Array.isArray(header) ? header[0] : header;
-  return value && value.length > 0 ? value : randomUUID();
+  // A malformed id is REPLACED, not trimmed into shape: a half-accepted
+  // identifier still lets a caller choose part of what gets recorded.
+  return typeof value === 'string' && CORRELATION_ID_PATTERN.test(value) ? value : randomUUID();
 }
 
 /** Shared correlation-id extractor for engine routes. */

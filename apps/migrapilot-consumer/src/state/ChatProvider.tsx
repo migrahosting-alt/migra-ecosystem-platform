@@ -14,6 +14,7 @@ import { useRouter } from 'next/navigation'
 import type { Block, Conversation, Message } from '@/data/types'
 import type { AnonymousChatQuota } from '@migrapilot/shared-types/anonymous-quota'
 import { useAnonymousQuota } from '@/features/anonymous/AnonymousQuotaProvider'
+import { startTurnTrace } from '@/features/observability/clientTrace'
 import { titleFromPrompt } from './demoResponder'
 import { toMessage, timeOf, type WireMessage } from '@/features/conversations/messages'
 
@@ -423,10 +424,16 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       )
     }
 
+    /*
+     * The turn's name, minted BEFORE the request so the wait the user feels is
+     * inside the measurement. The server adopts it when it is well-formed.
+     */
+    const turn = startTurnTrace()
+
     try {
       const response = await fetch('/api/chat/stream', {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: { 'content-type': 'application/json', 'x-request-id': turn.id },
         // A brand-new conversation has only a client-side id, which the Brain
         // has never seen; omitting it is what asks the Brain to create one.
         body: JSON.stringify({
@@ -463,6 +470,8 @@ export function ChatProvider({ children }: { children: ReactNode }) {
             payload?.message ?? 'The assistant could not answer that. Nothing here is a generated answer.',
           ),
         )
+        turn.adopt(response.headers.get('x-request-id'))
+        turn.finish(`http_${response.status}`)
         return
       }
 
@@ -483,6 +492,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
           // still being written.
           const reserved = (frame.data as { quota?: AnonymousChatQuota })?.quota
           if (reserved) applyServerQuota(reserved)
+          turn.adopt((frame.data as { requestId?: unknown })?.requestId)
           continue
         }
         if (frame.event === 'quota') {
@@ -494,6 +504,8 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         if (frame.event === 'token') {
           const text = (frame.data as { text?: string })?.text
           if (typeof text === 'string') {
+            // Marked before painting: this is the moment the wait ends.
+            if (!streamed) turn.firstToken()
             streamed += text
             paint(streamed)
           }
@@ -516,6 +528,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       }
 
       if (done && streamed.trim()) {
+        turn.finish(notSaved ? 'not_saved' : 'ok')
         // Settle the bubble: same text, plus whatever real files it drew on.
         setConversations((current) =>
           current.map((conversation) =>
@@ -559,6 +572,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         )
         setPendingIn(null)
         push(notice(failure ?? 'The answer was produced but could not be saved, so it will not be here after a reload.'))
+        turn.finish('not_saved')
         return
       }
 
@@ -571,10 +585,20 @@ export function ChatProvider({ children }: { children: ReactNode }) {
           failure ?? 'The answer was cut off before it finished, so it was not saved. Try again.',
         ),
       )
+      turn.finish(failure ? 'error_frame' : 'interrupted')
     } catch {
       // A dropped connection is not an answer either.
       discardPartial()
       push(notice('The assistant could not be reached. Nothing here is a generated answer.'))
+      turn.finish('unreachable')
+    } finally {
+      /*
+       * The backstop. A turn that leaves by a path added later still gets a line
+       * — the failures are exactly the ones worth having a trace for, and a
+       * silent exit is how observability rots. `finish` is idempotent, so the
+       * specific outcome recorded above wins over this one.
+       */
+      turn.finish('incomplete')
     }
   }, [router, applyServerQuota])
 
