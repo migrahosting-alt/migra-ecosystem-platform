@@ -19,6 +19,7 @@ import Fastify from 'fastify';
 import type { PoolClient } from 'pg';
 
 import { registerQualificationRoutes } from '../src/engine/media/qualificationRoutes.js';
+import { installJsonBodyParser } from '../src/http/jsonBodyParser.js';
 import {
   signAssertion, sha256Hex, ASSERTION_ENVELOPE_VERSION, type AssertionFields,
 } from '../src/engine/internalAuth/assertion.js';
@@ -81,6 +82,20 @@ async function buildApp(options: { withKey?: boolean } = {}) {
   const store = fakeStore();
   const audits: Array<{ event: string; detail: Record<string, unknown> }> = [];
   const app = Fastify();
+  /*
+   * COMPOSED THE WAY THE SERVER COMPOSES IT.
+   *
+   * This file used to build a bare Fastify instance, and that difference hid a
+   * startup crash: the routes installed their own `application/json` parser,
+   * which a bare instance accepts (it only overrides Fastify's built-in default)
+   * and the real server refuses — FST_ERR_CTP_ALREADY_PRESENT, because the
+   * service already installs one explicitly. Nineteen passing cases against an
+   * app that could not boot.
+   *
+   * So the parser goes on first, exactly as `server.ts` does it. A test whose
+   * setup is simpler than production is testing a different program.
+   */
+  installJsonBodyParser(app);
   const keys = options.withKey === false ? new Map<string, string>() : new Map([['v1', KEY]]);
 
   registerQualificationRoutes(app, {
@@ -137,6 +152,31 @@ async function post(app: Awaited<ReturnType<typeof buildApp>>['app'], opts: {
     },
   });
 }
+
+test('the routes register on a real server composition without throwing', async () => {
+  /*
+   * The assertion the boot on the host made for us, made here instead: whatever
+   * these routes add to the app must survive being added to an app that already
+   * has the service's own parsers.
+   */
+  const { app } = await buildApp();
+  assert.equal(app.hasContentTypeParser('application/json'), true);
+
+  const res = await app.inject({ method: 'GET', url: '/api/ai/model-qualification/vision' });
+  assert.equal(res.statusCode, 200, 'the app is fully booted and serving');
+});
+
+test('the raw bytes survive the shared parser', async () => {
+  const { app } = await buildApp();
+  const signedBytes = JSON.stringify({ modelId: 'qwen2.5vl:7b', capability: 'vision', evidenceRunId: EVIDENCE_ID });
+  //  Whitespace changes the bytes without changing the parsed object — the
+  //  clearest proof that what is digested is what arrived.
+  const spaced = `{"modelId": "qwen2.5vl:7b", "capability": "vision", "evidenceRunId": "${EVIDENCE_ID}"}`;
+  assert.deepEqual(JSON.parse(spaced), JSON.parse(signedBytes));
+
+  const res = await post(app, { header: headerFor(fieldsFor({ requestId: 'whitespace' }), signedBytes), body: spaced });
+  assert.equal(res.json().error, 'body_mismatch');
+});
 
 // ── the matrix ────────────────────────────────────────────────────────────
 

@@ -17,10 +17,23 @@ import type { FastifyInstance } from 'fastify';
  *
  * So: an empty body parses to `undefined`, and only genuinely malformed JSON is
  * rejected — with 400, which is what a bad body actually is.
+ *
+ * IT ALSO KEEPS THE RAW BYTES. Signed-assertion routes authenticate a digest of
+ * the body, and a digest taken over a re-serialisation of the PARSED object is
+ * not the same check: `{"n":1.0}` re-serialises to `{"n":1}`, so a body could
+ * be altered in flight and still satisfy a MAC computed over the original.
+ *
+ * Kept HERE, in the one parser the service installs, rather than in a second
+ * parser scoped to those routes — Fastify refuses a duplicate `application/json`
+ * parser in a child context (FST_ERR_CTP_ALREADY_PRESENT), and that attempt
+ * failed at startup on the host. Routes that need byte-exactness read
+ * `request.rawBody` and REFUSE when it is absent, so this is a capability they
+ * can rely on, never an assumption they make.
  */
 export function installJsonBodyParser(app: FastifyInstance): void {
-  app.addContentTypeParser('application/json', { parseAs: 'string' }, (_request, body: string | Buffer, done) => {
+  app.addContentTypeParser('application/json', { parseAs: 'string' }, (request, body: string | Buffer, done) => {
     const text = typeof body === 'string' ? body : body.toString('utf8');
+    (request as { rawBody?: string }).rawBody = text;
     if (text.trim() === '') return done(null, undefined);
     try {
       done(null, JSON.parse(text));

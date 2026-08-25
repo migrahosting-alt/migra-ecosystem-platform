@@ -50,13 +50,21 @@ test('the signed body is compared byte-for-byte, with no reconstruction path', (
    * compares a RE-SERIALISATION: `{"n":1.0}` becomes `{"n":1}`, so a body could
    * be altered in flight and still satisfy a MAC computed over the original.
    */
-  assert.match(code, /addContentTypeParser/, 'the raw body must be captured for these routes');
-  assert.match(code, /rawBody\s*=\s*body/, 'the parser must keep the exact bytes');
+  const parserSource = readFileSync(join(process.cwd(), 'src', 'http', 'jsonBodyParser.ts'), 'utf8');
+  assert.match(parserSource, /rawBody\s*=\s*text/, 'the service parser must keep the exact bytes');
+
   assert.doesNotMatch(
     code, /rawBody[^\n]*JSON\.stringify\(req\.body/,
     'a fallback to re-serialising the parsed body is the defect, not a safety net',
   );
   assert.match(code, /raw_body_unavailable/, 'missing raw bytes must refuse, not degrade');
+
+  /*
+   * AND NOT BY ADDING A SECOND PARSER. These routes first captured the bytes in
+   * their own `application/json` parser, which Fastify refuses once the service
+   * has installed one — FST_ERR_CTP_ALREADY_PRESENT, at startup, on the host.
+   */
+  assert.doesNotMatch(code, /addContentTypeParser/, 'the capture belongs to the one parser the service installs');
 });
 
 test('no mutation reaches the store outside a verified handler', () => {
