@@ -56,6 +56,10 @@ export async function GET(): Promise<Response> {
        * it. Filenames the caller already owns; no tenancy material is added.
        */
       groundingFiles: conversation.groundingFiles ?? [],
+      // Surfaced so the composer can SHOW why a follow-up works without a new
+      // upload. A durable set the interface never mentions is indistinguishable
+      // from the model guessing.
+      imageRefs: conversation.imageRefs ?? [],
     })),
   })
 }

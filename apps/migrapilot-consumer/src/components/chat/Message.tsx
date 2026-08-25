@@ -150,6 +150,27 @@ function UserTurn({ message }: { message: Message }) {
   return (
     <div className="flex justify-end">
       <div className={cn('w-full', wide ? 'max-w-[620px]' : 'max-w-[440px]')}>
+        {/*
+          THE PICTURE STAYS WITH THE QUESTION.
+          Above the text, because that is the order it was composed in, and
+          because a transcript where the image vanished after sending gives no way
+          to tell which photo an answer was about. Fetched by opaque ref from the
+          caller's own library — nothing is embedded in the transcript.
+        */}
+        {message.images && message.images.length > 0 && (
+          <div className="mb-1.5 flex flex-wrap justify-end gap-2">
+            {message.images.map((ref) => (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                key={ref}
+                src={`/api/images/${ref}`}
+                alt="Image attached to this message"
+                className="h-28 w-28 rounded-xl border border-slate-200 object-cover"
+              />
+            ))}
+          </div>
+        )}
+
         {message.text && (
           <div className="rounded-2xl rounded-br-md bg-brand-50 px-4.5 py-3.5">
             <p className="text-[15px] leading-[1.6] text-slate-800">{message.text}</p>

@@ -26,6 +26,8 @@ interface ChatContextValue {
   loading: boolean
   startConversation: (prompt: string, options?: { attachments?: string[]; images?: string[] }) => string
   sendMessage: (conversationId: string, prompt: string, options?: { attachments?: string[]; images?: string[] }) => void
+  /** Remove an image from the thread's durable set. */
+  detachConversationImage: (conversationId: string, ref: string) => Promise<void>
   /** Load one conversation's durable messages. Safe to call repeatedly. */
   openConversation: (conversationId: string) => void
   /**
@@ -52,6 +54,8 @@ interface WireConversation {
   id: string
   title: string
   updatedAt: number | string | null
+  /** The images this thread is about, from the Brain's durable set. */
+  imageRefs?: string[]
 }
 /**
  * Does this id name a conversation the Brain knows about?
@@ -196,6 +200,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
           icon: 'chat',
           tone: 'blue',
           messages: [],
+          ...(conversation.imageRefs?.length ? { imageRefs: conversation.imageRefs } : {}),
         }))
 
         /*
@@ -605,6 +610,9 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         text: prompt,
         time: clockTime(),
         delivered: true,
+        // The refs travel with the turn on screen too, so the picture stays
+        // beside the question instead of disappearing the moment it is sent.
+        ...(options?.images?.length ? { images: options.images } : {}),
       }
 
       setConversations((current) =>
@@ -619,6 +627,44 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     },
     [appendReply],
   )
+
+  /**
+   * Remove an image from the whole thread.
+   *
+   * The SERVER decides: the durable set is replaced through the same PUT the turn
+   * path uses, so a detach that fails does not leave the screen claiming the
+   * picture is gone while the next answer is still about it.
+   */
+  const detachConversationImage = useCallback(async (conversationId: string, ref: string) => {
+    let previous: string[] | undefined
+    setConversations((current) =>
+      current.map((conversation) => {
+        if (conversation.id !== conversationId) return conversation
+        previous = conversation.imageRefs
+        return { ...conversation, imageRefs: (conversation.imageRefs ?? []).filter((r) => r !== ref) }
+      }),
+    )
+
+    try {
+      const remaining = (previous ?? []).filter((r) => r !== ref)
+      const response = await fetch(`/api/conversations/${encodeURIComponent(conversationId)}/images`, {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ images: remaining }),
+      })
+      if (response.ok) return
+    } catch {
+      // Falls through to the rollback below.
+    }
+
+    if (previous !== undefined) {
+      setConversations((current) =>
+        current.map((conversation) =>
+          conversation.id === conversationId ? { ...conversation, imageRefs: previous } : conversation,
+        ),
+      )
+    }
+  }, [])
 
   const renameConversation = useCallback(async (conversationId: string, title: string) => {
     const trimmed = title.trim()
@@ -691,6 +737,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       loading,
       startConversation,
       sendMessage,
+      detachConversationImage,
       openConversation,
       renameConversation,
       deleteConversation,
@@ -701,6 +748,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       loading,
       startConversation,
       sendMessage,
+      detachConversationImage,
       openConversation,
       renameConversation,
       deleteConversation,

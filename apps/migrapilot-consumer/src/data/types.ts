@@ -58,6 +58,14 @@ export interface Message {
   sources?: Source[]
   /** User turns only — renders the double-check "delivered" mark. */
   delivered?: boolean
+  /**
+   * User turns only — content-addressed refs for images this turn carried.
+   *
+   * Refs, never bytes: the thumbnail is fetched from the caller's own library by
+   * id, so a conversation reopened tomorrow shows the same picture without
+   * anything having been embedded in the transcript.
+   */
+  images?: string[]
   /** Assistant turns only — renders a call to action beneath the answer. */
   action?: 'scope-review'
   /**
@@ -98,6 +106,14 @@ export interface Conversation {
   messages: Message[]
   /** Drives the right rail: media library instead of conversation tools. */
   hasMedia?: boolean
+  /**
+   * Images this conversation is currently about, from the Brain's durable set.
+   *
+   * Shown so a follow-up makes sense: after a reload the user asks "what colour
+   * is it?" with nothing attached, and the interface has to make visible WHY that
+   * works. An invisible durable set is indistinguishable from the model guessing.
+   */
+  imageRefs?: string[]
 }
 
 /* -------------------------------------------------------------------- *
