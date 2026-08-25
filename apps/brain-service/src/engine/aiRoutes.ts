@@ -344,6 +344,16 @@ export function registerAiRoutes(
      */
     const approvedVisionModel = visionGate?.serve ? visionGate.modelId : undefined;
 
+    /*
+     * The attachment NAMES are the canonical refs — the consumer sends the id as
+     * the name precisely so nothing here has to trust a filename. Filtered to the
+     * canonical shape so a non-image attachment cannot enter the transcript as a
+     * picture that will never resolve.
+     */
+    const turnImageRefs = (body.attachments ?? [])
+      .filter((a) => IMAGE_MIME.test(a.mimeType) && /^img_[0-9a-f]{32}$/.test(a.name))
+      .map((a) => a.name);
+
     const spec: RouteSpec = {
       needsVision: hasImage,
       /*
@@ -432,7 +442,16 @@ export function registerAiRoutes(
       // route. Storing the prompt happens before the model runs, so failing here
       // costs no inference — and answering a turn whose prompt was never stored
       // would leave a conversation that cannot be reconstructed.
-      await memoryStore!.appendMessage(conv!.id, scope, { role: 'user', content: redactSecrets(userPrompt).text, status: 'complete', requestId });
+      /*
+       * The refs are recorded ON THE MESSAGE, not inferred later from the
+       * conversation's active set. Message one must still show the picture it
+       * asked about after that picture is dropped from the active context — a
+       * transcript that rewrites itself to match today's context is not a record.
+       */
+      await memoryStore!.appendMessage(conv!.id, scope, {
+        role: 'user', content: redactSecrets(userPrompt).text, status: 'complete', requestId,
+        ...(turnImageRefs.length > 0 ? { imageRefs: turnImageRefs } : {}),
+      });
     }
     // Commit the assistant message ONLY on successful completion — never a
     // partial/cancelled/failed response.

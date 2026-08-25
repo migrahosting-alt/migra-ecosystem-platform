@@ -1012,6 +1012,26 @@ const M18_CONVERSATION_IMAGES = `
 ALTER TABLE conversations ADD COLUMN IF NOT EXISTS image_refs TEXT;
 `;
 
+/**
+ * What a particular message actually carried.
+ *
+ * DISTINCT FROM `conversations.image_refs`, and the distinction is the whole
+ * point. That column is the ACTIVE CONTEXT — which pictures a future follow-up
+ * may ask about without re-attaching. This one is the immutable RECORD of what
+ * was attached to one turn.
+ *
+ * Deriving the transcript from the active set is wrong in a way that only shows
+ * up later: attach A and ask about it, attach B and ask about it, then drop A
+ * from the active context — message one must still show A. A history that
+ * rewrites itself to match today's context is not a history.
+ *
+ * Refs only. Bytes are transport for a single turn; the ref still resolves
+ * tomorrow and keeps the transcript small.
+ */
+const M19_MESSAGE_IMAGES = `
+ALTER TABLE conversation_messages ADD COLUMN IF NOT EXISTS image_refs TEXT;
+`;
+
 export const MIGRATIONS: readonly Migration[] = [
   { version: 1, name: 'foundation', sql: M1_FOUNDATION },
   { version: 2, name: 'tenancy_primitives', sql: M2_TENANCY },
@@ -1031,6 +1051,7 @@ export const MIGRATIONS: readonly Migration[] = [
   { version: 16, name: 'model_qualification', sql: M16_MODEL_QUALIFICATION },
   { version: 17, name: 'internal_assertion_nonce', sql: M17_INTERNAL_ASSERTION_NONCE },
   { version: 18, name: 'conversation_images', sql: M18_CONVERSATION_IMAGES },
+  { version: 19, name: 'message_images', sql: M19_MESSAGE_IMAGES },
 ];
 
 /** Highest version defined in code. */

@@ -101,4 +101,12 @@ export interface ConversationMessage {
   role: 'user' | 'assistant' | 'system'
   content: string
   createdAt?: string | number
+  /**
+   * Images this message carried, in order — its own immutable record.
+   *
+   * Distinct from `ConversationSummary.imageRefs`, which is the active context
+   * for future turns. Detaching a picture from the thread must not erase it from
+   * the message that asked about it.
+   */
+  imageRefs?: string[]
 }

@@ -15,6 +15,14 @@ export interface WireMessage {
   role: 'user' | 'assistant' | 'system'
   content: string
   createdAt: number | string | null
+  /**
+   * Images this message actually carried, from the message's OWN record.
+   *
+   * Never the conversation's current active set: message one must still show the
+   * picture it asked about after that picture is detached from the thread, and a
+   * transcript rebuilt from today's context is not a history.
+   */
+  imageRefs?: string[]
 }
 
 export function timeOf(value: number | string | null): string {
@@ -26,7 +34,14 @@ export function timeOf(value: number | string | null): string {
 export function toMessage(message: WireMessage, index: number): Message {
   const time = timeOf(message.createdAt)
   return message.role === 'user'
-    ? { id: message.id ?? `u-${index}`, role: 'user', text: message.content, time, delivered: true }
+    ? {
+        id: message.id ?? `u-${index}`,
+        role: 'user',
+        text: message.content,
+        time,
+        delivered: true,
+        ...(message.imageRefs?.length ? { images: message.imageRefs } : {}),
+      }
     : {
         id: message.id ?? `a-${index}`,
         role: 'assistant',

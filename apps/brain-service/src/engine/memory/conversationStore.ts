@@ -73,6 +73,14 @@ export interface Message {
   durable: boolean;
   /** For corrections: the message this one supersedes (originals are never edited). */
   supersedesId?: string;
+  /**
+   * Content-addressed image refs this message actually carried, in order.
+   *
+   * The IMMUTABLE RECORD, distinct from `Conversation.imageRefs`, which is the
+   * active context for future turns. Detaching a picture from the conversation
+   * must not erase it from the message that asked about it.
+   */
+  imageRefs?: string[];
 }
 
 export interface SummaryBody {
@@ -478,7 +486,7 @@ export class ConversationStore {
   async appendMessage(
     id: string,
     scope: Scope,
-    msg: { role: MessageRole; content: string; status: MessageStatus; requestId?: string; modelId?: string; providerId?: string; supersedesId?: string },
+    msg: { role: MessageRole; content: string; status: MessageStatus; requestId?: string; modelId?: string; providerId?: string; supersedesId?: string; imageRefs?: string[] },
   ): Promise<Message | null> {
     const c = this.getConversation(id, scope);
     if (!c) return null;
@@ -499,6 +507,14 @@ export class ConversationStore {
       modelId: msg.modelId,
       providerId: msg.providerId,
       supersedesId: msg.supersedesId,
+      /*
+       * Validated to the canonical shape here too: this is the last place before
+       * a durable record, and a value that is not a ref could never resolve to a
+       * picture on any later read of the transcript.
+       */
+      ...(msg.imageRefs?.length
+        ? { imageRefs: msg.imageRefs.filter((r) => /^img_[0-9a-f]{32}$/.test(r)).slice(0, 8) }
+        : {}),
       createdAt: this.now(),
       durable: c.memoryMode === 'durable',
     };

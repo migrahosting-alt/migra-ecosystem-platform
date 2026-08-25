@@ -72,6 +72,13 @@ export async function GET(
         role: message.role,
         content: message.content,
         createdAt: message.createdAt ?? null,
+        /*
+         * This projection is an ALLOWLIST, so a field added upstream is dropped
+         * here silently — the exact way `groundingFiles` was lost once already.
+         * The transcript's pictures come from the message's own record and
+         * nowhere else, so this line is what makes them survive a reload.
+         */
+        ...(message.imageRefs?.length ? { imageRefs: message.imageRefs } : {}),
       })),
   })
 }
