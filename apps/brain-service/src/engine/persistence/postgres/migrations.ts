@@ -865,6 +865,102 @@ BEGIN
 END $$;
 `;
 
+/**
+ * Governed model qualification.
+ *
+ * WHAT THIS REPLACES. Qualification lived in `model-qualification.json`, read
+ * once at boot into a store with no mutating methods. Approving a model meant
+ * hand-editing a file on the host and restarting — no record of who approved it,
+ * when, or on what evidence; revoking a bad model required a deploy; and an
+ * unreadable file silently produced a PERMISSIVE store, so a typo disabled the
+ * gate that decides which models may serve users. It is the same defect as an
+ * env allowlist for admin access: authority in a file instead of a record with
+ * an author.
+ *
+ * EVIDENCE AND DECISION ARE SEPARATE TABLES, and that separation is the point.
+ * An evidence run is a measurement of a model at a moment — immutable, and
+ * reusable by more than one decision. A decision is a judgement that points at
+ * evidence. Keeping them apart means policy can be re-evaluated later without
+ * re-running the battery, and it preserves exactly what justified a model at the
+ * time it was approved.
+ *
+ * GENERIC OVER CAPABILITY. `vision` is the first user, but reasoning, embedding,
+ * audio and generation qualify the same way. One governed system rather than
+ * five that disagree.
+ *
+ * CHAIN OF CUSTODY IS STORED, NOT ASSUMED. A decision records BOTH the human
+ * approver and the calling service plus its request id, because the Brain must
+ * never treat "the operator service says permission was checked" as the only
+ * durable evidence that it was.
+ */
+const M16_MODEL_QUALIFICATION = `
+CREATE TABLE IF NOT EXISTS model_evidence_runs (
+  id                TEXT PRIMARY KEY,
+  model_id          TEXT NOT NULL,
+  /* Exact identity, not just a name: a tag can be repointed at different bytes. */
+  model_version     TEXT,
+  model_digest      TEXT,
+  provider          TEXT NOT NULL,
+  capability        TEXT NOT NULL,
+  license           TEXT,
+  license_source    TEXT,
+  /* The battery and what it measured. Immutable once written. */
+  suite             TEXT NOT NULL,
+  results_json      JSONB NOT NULL,
+  /* Where it ran, so a latency number means something. */
+  environment_json  JSONB,
+  passed            BOOLEAN NOT NULL,
+  created_at        BIGINT NOT NULL,
+  created_by        TEXT
+);
+
+CREATE INDEX IF NOT EXISTS model_evidence_model_idx
+  ON model_evidence_runs (model_id, capability, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS model_qualification_decisions (
+  id                  TEXT PRIMARY KEY,
+  model_id            TEXT NOT NULL,
+  capability          TEXT NOT NULL,
+  model_version       TEXT,
+  model_digest        TEXT,
+  /* candidate | approved | revoked */
+  state               TEXT NOT NULL,
+  /* The measurement this judgement rests on. */
+  evidence_run_id     TEXT REFERENCES model_evidence_runs(id) ON DELETE RESTRICT,
+  /* ── chain of custody ──────────────────────────────────────────────────
+     The human MigraAuth authorized, AND the service that carried the request,
+     AND that request's id. Storing only the first would make the Brain's record
+     depend on an unverifiable claim about what someone else checked. */
+  approver_user_id    TEXT,
+  calling_service     TEXT,
+  request_id          TEXT,
+  note                TEXT,
+  decided_at          BIGINT NOT NULL,
+  /* Revocation preserves history: rows are never deleted, so "what was approved
+     on the day it happened" stays answerable. */
+  revoked_at          BIGINT,
+  revoked_by_user_id  TEXT,
+  revoked_reason      TEXT
+);
+
+/* One LIVE approval per model+capability. Partial, so the historical rows a
+   revocation leaves behind never collide with a later re-approval. */
+CREATE UNIQUE INDEX IF NOT EXISTS model_qualification_live_idx
+  ON model_qualification_decisions (model_id, capability)
+  WHERE revoked_at IS NULL AND state = 'approved';
+
+/* The hot path: "what may serve this capability right now", asked per request. */
+CREATE INDEX IF NOT EXISTS model_qualification_live_capability_idx
+  ON model_qualification_decisions (capability)
+  WHERE revoked_at IS NULL AND state = 'approved';
+
+/* A request id may be used once. Replay of a signed internal assertion must not
+   produce a second decision. */
+CREATE UNIQUE INDEX IF NOT EXISTS model_qualification_request_idx
+  ON model_qualification_decisions (request_id)
+  WHERE request_id IS NOT NULL;
+`;
+
 export const MIGRATIONS: readonly Migration[] = [
   { version: 1, name: 'foundation', sql: M1_FOUNDATION },
   { version: 2, name: 'tenancy_primitives', sql: M2_TENANCY },
@@ -881,6 +977,7 @@ export const MIGRATIONS: readonly Migration[] = [
   { version: 13, name: 'chunk_version_identity', sql: M13_CHUNK_VERSION_IDENTITY },
   { version: 14, name: 'anonymous_quota', sql: M14_ANONYMOUS_QUOTA },
   { version: 15, name: 'user_preferences', sql: M15_USER_PREFERENCES },
+  { version: 16, name: 'model_qualification', sql: M16_MODEL_QUALIFICATION },
 ];
 
 /** Highest version defined in code. */

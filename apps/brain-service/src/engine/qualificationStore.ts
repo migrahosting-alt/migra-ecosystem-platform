@@ -50,13 +50,41 @@ export class QualificationStore {
     this.enforced = manifest.mode === 'enforced';
   }
 
-  /** Load a manifest from disk; a missing/invalid file yields a permissive store
-   * (never throws — the engine must start even without a manifest). */
+  /**
+   * Load a manifest from disk.
+   *
+   * ABSENT AND UNREADABLE ARE DIFFERENT, and conflating them was a real hazard.
+   *
+   * A MISSING file means no manifest was configured: a permissive store is
+   * correct, because the engine must start on a deployment that has not adopted
+   * qualification at all.
+   *
+   * A file that EXISTS but cannot be parsed is the opposite situation. Someone
+   * configured a gate and it is broken — and the old behaviour answered that by
+   * returning a permissive store with `enforced: false`, silently switching OFF
+   * the control that decides which models may serve users. A typo disabled the
+   * gate and nothing said so. That direction of failure is backwards for a
+   * safety control, so a corrupt manifest now yields an ENFORCED store with no
+   * approvals: nothing is served, loudly, rather than everything, quietly.
+   */
   static fromFile(path: string): QualificationStore {
+    let raw: string;
     try {
-      return new QualificationStore(JSON.parse(readFileSync(path, 'utf8')) as Manifest);
+      raw = readFileSync(path, 'utf8');
     } catch {
+      // Genuinely absent — not configured.
       return new QualificationStore();
+    }
+
+    try {
+      return new QualificationStore(JSON.parse(raw) as Manifest);
+    } catch (error) {
+      console.error(
+        `[qualification] manifest at ${path} exists but could not be parsed; ` +
+          'failing CLOSED (enforced, no approvals) rather than disabling the gate',
+        error instanceof Error ? error.message : String(error),
+      );
+      return new QualificationStore({ mode: 'enforced', models: {} });
     }
   }
 
