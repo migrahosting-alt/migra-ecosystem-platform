@@ -142,13 +142,34 @@ export async function socialRoutes(app: FastifyInstance): Promise<void> {
          * A product without its own app resolves to the shared credential, so
          * this is a no-op for every product not yet migrated.
          */
-        productClientId = found.transaction.clientId;
-        const forProduct = resolveConfiguredProvider(slug, productClientId);
-        // Cannot be null: `resolved` already proved the shared credential is
-        // configured, and a product override is complete or the service refused
-        // to boot. Guarded rather than asserted because a crash in the sign-in
-        // path is a worse answer than the default app.
-        if (forProduct) credentials = forProduct.credentials;
+        /*
+         * RECORDED ONLY WHEN THE PRODUCT'S OWN APP IS ACTUALLY USED, which is
+         * what the column means: "Null = shared app".
+         *
+         * Written unconditionally, it said "this trip used MigraPanel's own
+         * Google app" about a trip that used the SHARED one — and the callback
+         * guard, which refuses when a recorded product has no app, then rejected
+         * every legitimate shared-app sign-in. In production that was GitHub for
+         * every product including chat.migrateck.com, and Google for every
+         * product except migrapilot_web, because those were the only overrides
+         * configured. `credentialsFor` documents the opposite intent: unmigrated
+         * products keep using the shared credential so products move one at a
+         * time.
+         *
+         * The fail-closed case is untouched: a product that starts on its own
+         * app records it here, and a callback that finds that app gone still
+         * refuses rather than redeeming the code with a credential that cannot
+         * have issued it.
+         */
+        if (hasOwnProviderApp(descriptor.id, found.transaction.clientId)) {
+          productClientId = found.transaction.clientId;
+          const forProduct = resolveConfiguredProvider(slug, productClientId);
+          // Cannot be null: `resolved` already proved the shared credential is
+          // configured, and a product override is complete or the service refused
+          // to boot. Guarded rather than asserted because a crash in the sign-in
+          // path is a worse answer than the default app.
+          if (forProduct) credentials = forProduct.credentials;
+        }
       }
 
       const created = await createLoginState({

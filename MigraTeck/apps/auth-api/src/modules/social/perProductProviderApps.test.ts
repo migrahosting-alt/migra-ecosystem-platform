@@ -160,3 +160,86 @@ test("the redirect is built with the product's app", () => {
   );
   assert.match(social, /let credentials = resolved\.credentials;/, "credentials must be reassignable");
 });
+
+// ── the regression: a shared-app trip recorded as a product trip ───────────
+
+/**
+ * The two decisions `social.ts` makes, composed exactly as the route composes
+ * them. Modelled here because the route needs a database and a provider round
+ * trip, and the property worth pinning is the composition, not the plumbing.
+ */
+const recordedProduct = (provider: "GOOGLE" | "GITHUB", txnClientId: string): string | null =>
+  hasOwnProviderApp(provider, txnClientId) ? txnClientId : null;
+
+const callbackRefuses = (provider: "GOOGLE" | "GITHUB", recorded: string | null): boolean =>
+  Boolean(recorded) && !hasOwnProviderApp(provider, recorded);
+
+/** Production's real client list, and its real override set: MIGRAPILOT_WEB only. */
+const PRODUCTS = [
+  "migrapilot_web",
+  "migrapilot_qualification_cli",
+  "migrapanel_web",
+  "migrahosting_web",
+  "migradrive_web",
+  "migramail_web",
+  "migravoice_web",
+  "migrateck_web",
+  "migracms_web",
+  "migrahosting_client_portal",
+];
+
+test("no product is locked out of a provider it never had its own app for", () => {
+  /*
+   * THE REGRESSION THIS FILE MISSED. `productClientId` was written for every
+   * transaction, so a trip that used the SHARED credential was recorded as a
+   * product trip — and the callback, which refuses when a recorded product has
+   * no app, rejected it. Measured against production config that was GitHub for
+   * EVERY product including chat.migrateck.com, and Google for every product
+   * except migrapilot_web.
+   */
+  for (const product of PRODUCTS) {
+    for (const provider of ["GOOGLE", "GITHUB"] as const) {
+      const recorded = recordedProduct(provider, product);
+      assert.equal(
+        callbackRefuses(provider, recorded), false,
+        `${provider} sign-in for ${product} must complete, not be refused`,
+      );
+    }
+  }
+});
+
+test("only a product that actually used its own app is recorded as having one", () => {
+  // The column means "Null = shared app". Anything else makes the callback lie.
+  assert.equal(recordedProduct("GOOGLE", "migrapilot_web"), "migrapilot_web");
+  assert.equal(recordedProduct("GITHUB", "migrapilot_web"), null, "no GitHub override exists");
+  assert.equal(recordedProduct("GOOGLE", "migrapanel_web"), null);
+  assert.equal(recordedProduct("GOOGLE", "migrapilot_qualification_cli"), null);
+});
+
+test("a product whose own app disappears mid-trip is still refused", () => {
+  /*
+   * The fail-closed case must survive the fix. A state row naming a product with
+   * no configured app is exactly the shape of "the app was removed during the
+   * ten-minute window" — the shared credential cannot redeem that code, and
+   * letting it try turns a config removal into an opaque provider rejection.
+   */
+  assert.equal(callbackRefuses("GOOGLE", "migrapilot_web"), false, "still configured, so it proceeds");
+  assert.equal(callbackRefuses("GOOGLE", "migrapanel_web"), true, "recorded but unconfigured = refuse");
+  assert.equal(callbackRefuses("GITHUB", "migrapilot_web"), true, "recorded but unconfigured = refuse");
+});
+
+test("the product is recorded only under the guard, in the source", () => {
+  const social = read("routes/social.ts");
+  const at = social.indexOf("productClientId = found.transaction.clientId");
+  assert.ok(at > 0, "the assignment must exist");
+  /*
+   * Asserted over the PRECEDING lines rather than the whole file: the guard has
+   * to be the thing that admits this write, not merely present somewhere else.
+   */
+  const preceding = social.slice(Math.max(0, at - 400), at);
+  assert.match(
+    preceding,
+    /if \(hasOwnProviderApp\(descriptor\.id, found\.transaction\.clientId\)\)/,
+    "the write must be guarded by whether the product actually has its own app",
+  );
+});
