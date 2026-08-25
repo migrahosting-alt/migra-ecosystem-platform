@@ -27,6 +27,29 @@ export interface VisionCapability {
   installed: number
   /** Human-readable, for a UI that must explain why an action is unavailable. */
   message: string
+  /**
+   * The exact bytes that were approved.
+   *
+   * A tag can be repointed at different weights; the digest is what the human
+   * actually signed off. Surfaced so an interface can say WHICH model, not just
+   * that there is one.
+   */
+  digest: string | null
+  /**
+   * Whether exact counting is qualified — separately, because it is not.
+   *
+   * ONE BOOLEAN CANNOT DESCRIBE THIS MODEL. It reads an invoice perfectly and
+   * miscounts what is on it, every run, with no hedge. A UI that offered
+   * "count these" on the strength of `state: 'ready'` would be promising the
+   * one thing the qualification explicitly excluded.
+   */
+  objectCounting: { qualified: boolean; model: string | null }
+}
+
+interface GovernedCapability {
+  qualified?: boolean
+  modelId?: string | null
+  digest?: string | null
 }
 
 interface VisionRegistryResponse {
@@ -34,6 +57,18 @@ interface VisionRegistryResponse {
   enforced?: boolean
   default?: { id?: string } | string | null
   registry?: { qualified?: unknown[] }
+  /**
+   * The durable qualification decisions, per operation.
+   *
+   * Preferred over `default` when present: `default` reflects the deployment
+   * manifest, a file anyone with write access can promote a model in. This comes
+   * from decisions that name a human, a digest and the evidence behind them.
+   */
+  governed?: {
+    source?: string
+    'vision.general'?: GovernedCapability
+    'vision.object_counting'?: GovernedCapability
+  }
 }
 
 const modelIdOf = (value: VisionRegistryResponse['default']): string | null => {
@@ -56,14 +91,34 @@ export async function visionCapability(): Promise<VisionCapability> {
       model: null,
       installed: 0,
       message: 'We could not check whether images can be read right now.',
+      digest: null,
+      objectCounting: { qualified: false, model: null },
     }
   }
 
   const installed = typeof result.value.count === 'number' ? result.value.count : 0
-  const model = modelIdOf(result.value.default)
+  const governed = result.value.governed
+  const general = governed?.['vision.general']
+  const counting = governed?.['vision.object_counting']
+
+  // The governed decision when governance is wired; the manifest only when it
+  // is not, so a deployment without the tables degrades to its old behaviour
+  // rather than reporting a capability nobody approved.
+  const model = general ? (general.qualified ? (general.modelId ?? null) : null) : modelIdOf(result.value.default)
+  const objectCounting = {
+    qualified: counting?.qualified === true,
+    model: counting?.modelId ?? null,
+  }
 
   if (model) {
-    return { state: 'ready', model, installed, message: 'Images can be read in a conversation.' }
+    return {
+      state: 'ready',
+      model,
+      installed,
+      message: 'Images can be read in a conversation.',
+      digest: general?.digest ?? null,
+      objectCounting,
+    }
   }
 
   return {
@@ -74,5 +129,7 @@ export async function visionCapability(): Promise<VisionCapability> {
       installed > 0
         ? 'Your image is saved. Reading images in a conversation is not enabled yet — no vision model has been approved for use.'
         : 'Your image is saved. Reading images in a conversation is not available on this deployment.',
+    digest: null,
+    objectCounting,
   }
 }
