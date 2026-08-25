@@ -394,6 +394,8 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     /** Replace the in-progress answer as tokens arrive. */
     const messageId = `a-${Date.now()}`
     let streamed = ''
+    /** Refs for images this turn generated, in arrival order. */
+    const generated: string[] = []
     const paint = (text: string) => {
       setConversations((current) =>
         current.map((conversation) => {
@@ -405,6 +407,12 @@ export function ChatProvider({ children }: { children: ReactNode }) {
             role: 'assistant',
             time: clockTime(),
             blocks: [{ type: 'paragraph', text }],
+            /*
+             * CARRIED ON EVERY REPAINT. This rebuilds the whole message, so
+             * omitting the refs here would make a generated picture appear and
+             * then vanish on the next frame.
+             */
+            ...(generated.length ? { images: [...generated] } : {}),
           }
           if (last?.id === messageId) messages[messages.length - 1] = partial
           else messages.push(partial)
@@ -412,6 +420,8 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         }),
       )
     }
+    /** Show a picture the moment it is durable, without waiting for `done`. */
+    const attachImages = () => paint(streamed)
 
     /** Drop the in-progress bubble. An interrupted answer is not an answer. */
     const discardPartial = () => {
@@ -501,6 +511,27 @@ export function ChatProvider({ children }: { children: ReactNode }) {
           if (settled && typeof settled.remaining === 'number') applyServerQuota(settled)
           continue
         }
+        if (frame.event === 'stage') {
+          /*
+           * An image generation legitimately takes minutes on a cold checkpoint.
+           * These stages are OBSERVED from the pipeline, so showing them is the
+           * difference between "still loading the image model" and a spinner
+           * that is indistinguishable from a hang.
+           */
+          const detail = (frame.data as { detail?: string })?.detail
+          if (typeof detail === 'string' && detail) paint(detail)
+          continue
+        }
+        if (frame.event === 'image') {
+          // A ref, not bytes — it resolves through the caller's own library, so
+          // the picture is already durable by the time it is shown.
+          const ref = (frame.data as { ref?: string })?.ref
+          if (typeof ref === 'string' && ref) {
+            generated.push(ref)
+            attachImages()
+          }
+          continue
+        }
         if (frame.event === 'token') {
           const text = (frame.data as { text?: string })?.text
           if (typeof text === 'string') {
@@ -537,7 +568,12 @@ export function ChatProvider({ children }: { children: ReactNode }) {
                   ...conversation,
                   messages: conversation.messages.map((message) =>
                     message.id === messageId
-                      ? { ...message, ...(sources.length ? { citedFiles: sources } : {}) }
+                      ? {
+                          ...message,
+                          ...(sources.length ? { citedFiles: sources } : {}),
+                          // Settling must not drop what generation produced.
+                          ...(generated.length ? { images: [...generated] } : {}),
+                        }
                       : message,
                   ),
                 }

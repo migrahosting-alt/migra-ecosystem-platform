@@ -49,6 +49,15 @@ test('anything that is not exactly the shape is replaced, never repaired', () =>
 })
 
 test('a stage reports the time spent inside it, not since the turn began', () => {
+  /*
+   * ASSERTS THE RELATIONSHIP, NOT A STOPWATCH WINDOW.
+   *
+   * An earlier version of this required each stage to land inside an absolute
+   * millisecond range and failed on a machine that happened to be busy — a real
+   * flake, written by me, in a test whose actual subject is arithmetic. What
+   * matters is that `at_ms` accumulates while `ms` does not, and that the two
+   * agree; both hold at any speed.
+   */
   const lines: string[] = []
   const trace = new TurnTrace('req_00000000000000000000', (line) => lines.push(line))
 
@@ -63,10 +72,12 @@ test('a stage reports the time spent inside it, not since the turn began', () =>
   trace.mark('second')
   const built = trace.build('ok')
 
-  // The distinction that makes a slow stage findable at a glance.
   assert.ok(built.at_ms.second! > built.at_ms.first!, 'at_ms accumulates')
-  assert.ok(built.ms.first! >= 15 && built.ms.first! <= 60, `first was ${built.ms.first}`)
-  assert.ok(built.ms.second! >= 20 && built.ms.second! <= 70, `second was ${built.ms.second}`)
+  assert.ok(built.ms.first! > 0 && built.ms.second! > 0, 'each stage has a real duration')
+  // The identity that makes the two columns readable together: a stage's own
+  // duration is the difference between its end and the previous stage's end.
+  assert.equal(built.ms.second, built.at_ms.second! - built.at_ms.first!)
+  assert.equal(built.ms.first, built.at_ms.first!)
   assert.ok(built.total_ms >= built.at_ms.second!)
 })
 

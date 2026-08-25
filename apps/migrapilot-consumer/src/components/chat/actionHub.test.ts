@@ -129,5 +129,12 @@ test('the transcript keeps the image in its own shape', () => {
   // Bounded by a max height rather than forced into a square, so a portrait
   // stays a portrait and the record matches what was actually sent.
   const message = read('components/chat/Message.tsx')
-  assert.match(message, /max-h-64 w-auto max-w-full/)
+  /*
+   * The PROPERTIES, not one exact height. What must never regress is that the
+   * image is bounded on one axis and free on the other; the chosen bound is a
+   * design decision that moved once already (a generated 1024px image needs more
+   * room than a thumbnail) and pinning the literal class turned that into a
+   * false failure.
+   */
+  assert.match(message, /max-h-\d+ w-auto max-w-full/)
 })

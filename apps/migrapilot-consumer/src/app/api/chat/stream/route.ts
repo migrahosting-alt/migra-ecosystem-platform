@@ -52,6 +52,7 @@ import type { Principal } from '@/server/tenancy/principal'
 import type { BrainStreamFrame } from '@/server/brain/gateway'
 import type { ConversationSummary } from '@/server/brain/contracts'
 import { resolveTurnImages } from '@/server/files/resolveTurnImages'
+import { saveImage } from '@/server/files/imageStore'
 import { adoptRequestId, TurnTrace } from '@/server/observability/turnTrace'
 
 export const dynamic = 'force-dynamic'
@@ -505,6 +506,8 @@ export async function POST(request: Request): Promise<Response> {
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
       let answer = ''
+      /** Refs for images this turn GENERATED, in order, persisted with the answer. */
+      const generatedImages: string[] = []
       let completed = false
       let closed = false
 
@@ -653,6 +656,60 @@ export async function POST(request: Request): Promise<Response> {
               })
               break
             }
+            case 'stage': {
+              /*
+               * Passed straight through. These are OBSERVED stages from the
+               * image pipeline, not a timer — and a generation off a cold
+               * checkpoint legitimately takes minutes, which is exactly the wait
+               * that needs explaining rather than hiding behind a spinner.
+               */
+              const stage = (frame.data as { stage?: unknown })?.stage
+              const detail = (frame.data as { detail?: unknown })?.detail
+              if (typeof stage === 'string') {
+                emit('stage', { stage, ...(typeof detail === 'string' ? { detail } : {}) })
+              }
+              break
+            }
+            case 'image': {
+              /*
+               * BYTES BECOME A REF, HERE AND ONLY HERE.
+               *
+               * The Brain produced a PNG; what the transcript keeps is a
+               * content-addressed id in the caller's own library. That is what
+               * makes a generated image survive a reload, render through the
+               * same authorised `/api/images/:id` route as an attachment, and
+               * pick up click-to-view and drag-out without a second code path.
+               *
+               * Stored under the SESSION'S scope, like every other image: the
+               * Brain never names a path and could not choose one if it tried.
+               */
+              const data = (frame.data as { dataBase64?: unknown })?.dataBase64
+              if (typeof data === 'string' && data.length > 0) {
+                try {
+                  const bytes = Buffer.from(data, 'base64')
+                  const stored = await saveImage(
+                    'generated.png',
+                    bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer,
+                  )
+                  generatedImages.push(stored.id)
+                  emit('image', { ref: stored.id })
+                } catch (error) {
+                  /*
+                   * The picture exists but could not be kept. Said plainly
+                   * rather than shown and lost, because a generated image the
+                   * user cannot reload is not an answer they can rely on.
+                   */
+                  emit('error', {
+                    error: 'not_saved',
+                    message:
+                      error instanceof Error && error.message
+                        ? `The image was generated but could not be saved: ${error.message}`
+                        : 'The image was generated but could not be saved.',
+                  })
+                }
+              }
+              break
+            }
             case 'route': {
               /*
                * STILL NOT RELAYED to the browser — a model id is our operational
@@ -690,16 +747,31 @@ export async function POST(request: Request): Promise<Response> {
        * precisely the situation people would learn to reproduce, and it would
        * charge us for inference twice.
        */
-      const producedOutput = completed && answer.trim().length > 0
+      /*
+       * A PICTURE IS OUTPUT. An image-generation turn may produce no text at
+       * all, and judging usefulness on text alone would refund the turn, discard
+       * the image and tell the user nothing was produced — while a real
+       * generated PNG sat in their library.
+       */
+      const producedOutput = completed && (answer.trim().length > 0 || generatedImages.length > 0)
 
       if (producedOutput) {
-        const stored = await appendMessage(durableId, 'assistant', answer, { principal })
+        // The refs persist ON THE MESSAGE, so reopening the conversation shows
+        // the picture where it was produced rather than only in the library.
+        const stored = await appendMessage(
+          durableId,
+          'assistant',
+          answer,
+          { principal },
+          generatedImages,
+        )
         const quota = await settle(true)
         if (stored.kind === 'ok') {
           trace.mark('answer_stored')
           emit('done', {
             conversationId: durableId,
             requestId: trace.id,
+            ...(generatedImages.length ? { images: generatedImages } : {}),
             ...(sources.length ? { sources } : {}),
             ...(quota ? { quota } : {}),
           })

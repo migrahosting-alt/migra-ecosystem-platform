@@ -59,11 +59,18 @@ export interface Message {
   /** User turns only — renders the double-check "delivered" mark. */
   delivered?: boolean
   /**
-   * User turns only — content-addressed refs for images this turn carried.
+   * Content-addressed refs for images this message carries.
    *
-   * Refs, never bytes: the thumbnail is fetched from the caller's own library by
-   * id, so a conversation reopened tomorrow shows the same picture without
-   * anything having been embedded in the transcript.
+   * BOTH ROLES. On a user turn these are the attachments they sent; on an
+   * assistant turn they are images the turn GENERATED. The two are the same kind
+   * of thing at this layer — a ref into the caller's own library — and treating
+   * them alike is what gives a generated picture the same click-to-view,
+   * lightbox and drag-out behaviour as an attached one, rather than a second
+   * renderer that quietly lacks half of it.
+   *
+   * Refs, never bytes: the image is fetched from the caller's own library by id,
+   * so a conversation reopened tomorrow shows the same picture without anything
+   * having been embedded in the transcript.
    */
   images?: string[]
   /** Assistant turns only — renders a call to action beneath the answer. */

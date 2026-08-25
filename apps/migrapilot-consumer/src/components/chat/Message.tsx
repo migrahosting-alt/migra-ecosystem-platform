@@ -151,11 +151,69 @@ function AttachmentGrid({ attachments }: { attachments: Attachment[] }) {
   )
 }
 
-function UserTurn({ message }: { message: Message }) {
-  const wide = Boolean(message.attachments?.length)
-  /** Which attached image is open full size, if any. */
+/**
+ * The images a message carries, shown in the transcript.
+ *
+ * ONE IMPLEMENTATION FOR BOTH TURNS. A user's attachment and a generated picture
+ * are the same thing here — a content-addressed ref rendered from the caller's
+ * own library — and giving the assistant its own copy of this would mean
+ * click-to-view, the lightbox and drag-out working on one side and quietly not
+ * the other.
+ *
+ * REFS, NEVER BYTES. Nothing is embedded in the transcript, so a conversation
+ * reopened tomorrow shows the same picture. `draggable` so it behaves like an
+ * ordinary image: dragging it out carries the real authorised URL rather than a
+ * preview copy.
+ */
+function MessageImages({
+  refs,
+  align,
+  alt,
+}: {
+  refs: string[] | undefined
+  align: 'start' | 'end'
+  alt: string
+}) {
   /** Index of the open image, or null. The whole set travels so the arrows work. */
   const [viewing, setViewing] = useState<number | null>(null)
+  if (!refs || refs.length === 0) return null
+
+  return (
+    <>
+      <div className={cn('mb-1.5 flex flex-wrap gap-2', align === 'end' ? 'justify-end' : 'justify-start')}>
+        {refs.map((ref, index) => (
+          <button
+            key={ref}
+            type="button"
+            onClick={() => setViewing(index)}
+            aria-label="Open image full size"
+            title="Open full size"
+            className="rounded-xl focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={`/api/images/${ref}`}
+              alt={alt}
+              /*
+               * Shown in its OWN shape, bounded rather than cropped. A square box
+               * cropped a portrait photo to its middle, so the record of what was
+               * asked about no longer matched what was sent.
+               */
+              draggable
+              className="max-h-80 w-auto max-w-full cursor-pointer rounded-xl border border-slate-200 object-contain transition hover:border-slate-300"
+            />
+          </button>
+        ))}
+      </div>
+      {viewing !== null && (
+        <ImageViewer refs={refs} startIndex={viewing} alt={alt} onClose={() => setViewing(null)} />
+      )}
+    </>
+  )
+}
+
+function UserTurn({ message }: { message: Message }) {
+  const wide = Boolean(message.attachments?.length)
 
   return (
     <div className="flex justify-end">
@@ -167,45 +225,7 @@ function UserTurn({ message }: { message: Message }) {
           to tell which photo an answer was about. Fetched by opaque ref from the
           caller's own library — nothing is embedded in the transcript.
         */}
-        {message.images && message.images.length > 0 && (
-          <div className="mb-1.5 flex flex-wrap justify-end gap-2">
-            {message.images.map((ref, index) => (
-              <button
-                key={ref}
-                type="button"
-                onClick={() => setViewing(index)}
-                aria-label="Open image full size"
-                title="Open full size"
-                className="rounded-xl focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
-              >
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={`/api/images/${ref}`}
-                  alt="Image attached to this message"
-                  /*
-                   * The transcript shows the image in its OWN shape, bounded
-                   * rather than cropped. A square box cropped a portrait photo
-                   * down to its middle, so the record of what was asked about no
-                   * longer matched what was sent.
-                   *
-                   * `draggable` so it behaves like an ordinary image: dragging it
-                   * out carries the real authorised URL, not a preview copy.
-                   */
-                  draggable
-                  className="max-h-64 w-auto max-w-full cursor-pointer rounded-xl border border-slate-200 object-contain transition hover:border-slate-300"
-                />
-              </button>
-            ))}
-          </div>
-        )}
-        {viewing !== null && message.images && (
-          <ImageViewer
-            refs={message.images}
-            startIndex={viewing}
-            alt="Image attached to this message"
-            onClose={() => setViewing(null)}
-          />
-        )}
+        <MessageImages refs={message.images} align="end" alt="Image attached to this message" />
 
         {message.text && (
           <div className="rounded-2xl rounded-br-md bg-brand-50 px-4.5 py-3.5">
@@ -271,6 +291,14 @@ function AssistantTurn({
 
       <div className="min-w-0 flex-1">
         <div className="rounded-2xl rounded-tl-md border border-hairline bg-raised p-5 shadow-card sm:p-6">
+          {/*
+            A GENERATED IMAGE IS THE ANSWER, so it leads. Someone who asked for a
+            picture should see the picture, not a caption they have to read past
+            to find out whether it worked. Same component as a user attachment:
+            click to view, arrows across a set, drag out.
+          */}
+          <MessageImages refs={message.images} align="start" alt="Generated image" />
+
           <div className="flex flex-col gap-5">
             {blocks.map((block, index) => (
               <BlockView
