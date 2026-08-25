@@ -51,7 +51,28 @@ async function guard(): Promise<Response | null> {
  * handle a client needs, and anything more is a detail it could come to depend
  * on.
  */
-const publicView = (image: Awaited<ReturnType<typeof saveImage>>) => ({
+/**
+ * The upload/list response shape, EXPORTED so callers cannot guess it.
+ *
+ * The composer read `image.id` — a field that does not exist here — and got
+ * `undefined`, which became `src="/api/images/undefined"`, a 404, and a broken
+ * image icon. Nothing failed loudly: the response was parsed through a loose
+ * cast, so the wrong name compiled. Importing this type is what makes the next
+ * rename a compile error instead of a broken thumbnail.
+ */
+export interface PublicImage {
+  /** The canonical `img_<32 hex>` ref. The ONLY handle a client needs. */
+  imageId: string
+  mime: string
+  width: number
+  height: number
+  bytes: number
+  createdAt: number
+  /** What the user called it. Display only. */
+  displayName: string
+}
+
+const publicView = (image: Awaited<ReturnType<typeof saveImage>>): PublicImage => ({
   imageId: image.id,
   mime: image.mime,
   width: image.width,

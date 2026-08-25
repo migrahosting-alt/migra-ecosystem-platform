@@ -63,7 +63,9 @@ test('nothing renders as a finished image until it is stored', () => {
 test('a failure shows the server’s own words', () => {
   // The server knows which limit was hit; "upload failed" hides whether the file
   // was too large, too many pixels, or not an image at all.
-  assert.match(composer, /data\?\.error\?\.message \?\? 'That image could not be attached\.'/)
+  // `fail()` returns { error, message } as STRINGS — reading `error.message`
+  // returned undefined and swallowed the server's reason behind the fallback.
+  assert.match(composer, /data\?\.message \?\? 'That image could not be attached\.'/)
   assert.match(tray, /role="alert"/)
 })
 
@@ -81,4 +83,23 @@ test('thumbnails are fetched by opaque ref, never embedded', () => {
     assert.match(source, /\/api\/images\/\$\{/)
     assert.doesNotMatch(source, /data:image\//, 'bytes must not be inlined into the transcript')
   }
+})
+
+test('the composer reads the canonical ref field, and refuses anything else', () => {
+  /*
+   * THE BROKEN THUMBNAIL. It read `image.id` — not a field on that response — so
+   * the ref was `undefined`, the src became `/api/images/undefined`, and a 404
+   * rendered into an <img> as a broken icon with the filename beside it, still
+   * looking like a successful attachment.
+   */
+  assert.match(composer, /const ref = data\.image\.imageId/)
+  assert.doesNotMatch(composer, /data\.image!?\.id\b/, 'there is no `id` field on that response')
+  // Typed AND guarded: a ref that is not canonical never becomes a URL.
+  assert.match(composer, /IMAGE_REF\.test\(ref\)/)
+  assert.match(composer, /\^img_\[0-9a-f\]\{32\}\$/)
+})
+
+test('the response shape is imported, not re-declared from memory', () => {
+  // A loose inline cast is what let the wrong field name compile.
+  assert.match(composer, /import type \{ PublicImage \} from '@\/app\/api\/images\/route'/)
 })

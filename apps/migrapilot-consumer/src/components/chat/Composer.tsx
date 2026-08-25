@@ -8,6 +8,15 @@ import { useAttachments } from '@/features/attachments/useAttachments'
 import { useVisionAvailability, visionDisabledReason } from '@/features/attachments/useVisionAvailability'
 import { ActionHub, type HubAction } from '@/components/chat/ActionHub'
 import { ImageTray } from '@/components/chat/ImageTray'
+import type { PublicImage } from '@/app/api/images/route'
+
+/**
+ * The canonical reference shape, mirrored here for one purpose: refusing to
+ * build a URL out of anything else. A client-side mirror of a server rule is
+ * normally a liability — this one only ever REFUSES, so it cannot widen what the
+ * server accepts, and it stops a bad ref from reaching an <img> as a broken icon.
+ */
+const IMAGE_REF = /^img_[0-9a-f]{32}$/
 import { micDisabledReason, useMicAvailability } from '@/features/voice/useMicAvailability'
 import { VoicePanel } from '@/features/voice/VoicePanel'
 import { useVoiceRecorder } from '@/features/voice/useVoiceRecorder'
@@ -202,14 +211,26 @@ export function Composer({
       form.append('image', file)
       const response = await fetch('/api/images', { method: 'POST', body: form })
       const data = (await response.json().catch(() => null)) as
-        | { image?: { id: string; displayName: string }; error?: { message?: string } }
+        | { image?: PublicImage; message?: string; error?: string }
         | null
       if (!response.ok || !data?.image) {
         // The server's own words: it knows which limit was hit and why.
-        setImageError(data?.error?.message ?? 'That image could not be attached.')
+        setImageError(data?.message ?? 'That image could not be attached.')
         return
       }
-      setImages((current) => [...current, { id: data.image!.id, name: data.image!.displayName }])
+      /*
+       * `imageId`, not `id`. Reading the wrong name here produced
+       * `/api/images/undefined` — a 404 rendered into an <img> as a broken icon,
+       * with the filename beside it so it still looked like an attachment.
+       * Guarded as well as typed: a ref that is not canonical is never turned
+       * into a URL.
+       */
+      const ref = data.image.imageId
+      if (!IMAGE_REF.test(ref)) {
+        setImageError('That image was stored but came back without a usable reference.')
+        return
+      }
+      setImages((current) => [...current, { id: ref, name: data.image!.displayName }])
     } catch {
       setImageError('That image could not be uploaded.')
     } finally {
