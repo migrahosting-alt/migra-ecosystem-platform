@@ -508,6 +508,8 @@ export async function POST(request: Request): Promise<Response> {
       let answer = ''
       /** Refs for images this turn GENERATED, in order, persisted with the answer. */
       const generatedImages: string[] = []
+      /** True once the user has been told WHY, so nothing generic overwrites it. */
+      let explained = false
       let completed = false
       let closed = false
 
@@ -650,6 +652,7 @@ export async function POST(request: Request): Promise<Response> {
                 })
                 break
               }
+              explained = true
               emit('error', {
                 error: 'brain_error',
                 message: typeof message === 'string' && message ? message : reasonFor('brain_error').message,
@@ -790,12 +793,23 @@ export async function POST(request: Request): Promise<Response> {
         // Nothing useful reached the user. The turn goes back.
         const quota = await settle(false, answer ? 'cancelled' : 'no_output')
         if (!closed) {
-          emit('error', {
-            error: 'stream_interrupted',
-            message: answer
-              ? 'The answer was cut off before it finished, so it was not saved.'
-              : 'The model did not produce an answer.',
-          })
+          /*
+           * A REASON ALREADY GIVEN IS NOT REPLACED BY A GENERIC ONE.
+           *
+           * The engine had already said "Studio could not be reached" — the one
+           * sentence that tells the user what actually happened — and this
+           * generic follow-up overwrote it on the client, which keeps the last
+           * message. The user saw "The model did not produce an answer" for a
+           * turn where no model was involved at all.
+           */
+          if (!explained) {
+            emit('error', {
+              error: 'stream_interrupted',
+              message: answer
+                ? 'The answer was cut off before it finished, so it was not saved.'
+                : 'The model did not produce an answer.',
+            })
+          }
           if (quota) emit('quota', quota)
         }
         trace.finish(answer ? 'cancelled' : 'no_output')

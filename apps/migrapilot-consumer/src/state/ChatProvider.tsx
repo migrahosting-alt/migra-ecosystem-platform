@@ -543,7 +543,13 @@ export function ChatProvider({ children }: { children: ReactNode }) {
           continue
         }
         if (frame.event === 'error') {
-          failure = (frame.data as { message?: string })?.message ?? null
+          /*
+           * THE FIRST REASON WINS. A specific explanation — "Studio could not be
+           * reached" — is the one worth showing, and a later generic frame would
+           * otherwise replace it with something that says nothing.
+           */
+          const reason = (frame.data as { message?: string })?.message ?? null
+          if (failure === null) failure = reason
           // "Generated but not saved" is a different outcome from "generation
           // failed", and only this frame can tell them apart.
           if ((frame.data as { error?: string })?.error === 'not_saved') notSaved = true

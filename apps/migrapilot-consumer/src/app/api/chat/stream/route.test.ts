@@ -703,3 +703,40 @@ test('a turn with no id supplied is still named, and named consistently', async 
   brain.restore()
   resetAuthPort()
 })
+
+
+test('a reason already given is not replaced by a generic one', async () => {
+  /*
+   * FOUND IN THE LIVE BROWSER. An image-generation turn failed with "Studio
+   * could not be reached" — the one sentence that says what happened — and the
+   * end-of-turn generic error overwrote it, so the user was told "The model did
+   * not produce an answer" for a turn where no model was involved at all.
+   */
+  const brain = brainStub({
+    chatBody: sse([['error', { code: 'IMAGE_GENERATION_FAILED', message: 'Studio could not be reached: fetch failed' }]]),
+  })
+  setAuthPort(portWith(session))
+
+  const frames = await collect(await post({ prompt: 'generate letter A in png' }))
+  const errors = frames.filter((f) => f.event === 'error')
+  assert.equal(errors.length, 1, `exactly one explanation, saw ${JSON.stringify(errors.map((e) => e.data))}`)
+  assert.match(String(errors[0]!.data.message), /Studio could not be reached/)
+  assert.doesNotMatch(String(errors[0]!.data.message), /did not produce an answer/)
+
+  brain.restore()
+  resetAuthPort()
+})
+
+test('a turn that simply produced nothing still says so', async () => {
+  // The generic message must survive for the case it was written for.
+  const brain = brainStub({ chatBody: sse([['done', { requestId: 'r' }]]) })
+  setAuthPort(portWith(session))
+
+  const frames = await collect(await post({ prompt: 'hi' }))
+  const errors = frames.filter((f) => f.event === 'error')
+  assert.equal(errors.length, 1)
+  assert.match(String(errors[0]!.data.message), /did not produce an answer/)
+
+  brain.restore()
+  resetAuthPort()
+})
