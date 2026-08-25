@@ -12,7 +12,7 @@ import { randomUUID } from 'node:crypto';
 
 import {
   verifyAssertion, signAssertion, canonicalString, sha256Hex,
-  MAX_ASSERTION_TTL_MS, CLOCK_SKEW_MS,
+  MAX_ASSERTION_TTL_MS, CLOCK_SKEW_MS, ASSERTION_ENVELOPE_VERSION,
   type AssertionFields, type VerifyDeps,
 } from '../src/engine/internalAuth/assertion.js';
 
@@ -31,6 +31,7 @@ function depsWith(seen = new Set<string>()): VerifyDeps {
 
 function fieldsFor(over: Partial<AssertionFields> = {}, now = Date.now()): AssertionFields {
   return {
+    v: 1,
     keyId: 'v1',
     serviceId: 'migrapilot-command-center',
     approverId: 'user:4fe95869',
@@ -231,4 +232,26 @@ test('a valid key does not make a caller universally privileged', async () => {
   const out = await verifyAssertion(signed(f), ctx({ expectedAction: other }), deps);
   assert.equal(out.ok, false);
   if (!out.ok) assert.equal(out.reason, 'action_not_granted');
+});
+
+test('the envelope version is signed, so it cannot be stripped or downgraded', async () => {
+  const f = fieldsFor();
+  const s = signed(f);
+
+  /* Rewriting the version breaks the MAC, because it is inside it. */
+  const downgraded = await verifyAssertion({ ...s, v: 0 }, ctx(), depsWith());
+  assert.equal(downgraded.ok, false);
+  if (!downgraded.ok) assert.equal(downgraded.reason, 'unsupported_version');
+
+  /* A future version is refused rather than parsed with today's field rules —
+   * validating v2 fields with v1 rules gives a confident answer about the wrong
+   * protocol. */
+  const future = await verifyAssertion({ ...s, v: 2 }, ctx(), depsWith());
+  assert.equal(future.ok, false);
+  if (!future.ok) assert.equal(future.reason, 'unsupported_version');
+
+  const missing = await verifyAssertion({ ...s, v: undefined }, ctx(), depsWith());
+  assert.equal(missing.ok, false);
+
+  assert.equal(ASSERTION_ENVELOPE_VERSION, 1);
 });

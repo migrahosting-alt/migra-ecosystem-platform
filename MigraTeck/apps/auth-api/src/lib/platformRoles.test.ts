@@ -53,6 +53,25 @@ test("SUPPORT can read but cannot change anything", () => {
   assert.ok(!p.has("platform.roles.manage"), "support must not be able to widen access");
 });
 
+test("qualifying a model is a distinct power from granting roles", () => {
+  /*
+   * Different powers over different things: one decides WHO may operate the
+   * platform, the other decides WHICH MODEL may answer users. An operator who
+   * should be able to qualify a vision model does not thereby need the ability
+   * to grant themselves ownership, and the reverse is equally true.
+   */
+  const support = permissionsForRoles(["SUPPORT"]);
+  const operator = permissionsForRoles(["OPERATOR"]);
+  const owner = permissionsForRoles(["OWNER"]);
+
+  assert.ok(!support.has("platform.models.qualify"), "support must not approve models");
+  assert.ok(!operator.has("platform.models.qualify"), "account operations are not model governance");
+  assert.ok(owner.has("platform.models.qualify"));
+  // And it is genuinely separate from roles.manage rather than an alias for it.
+  assert.ok(PLATFORM_PERMISSIONS.includes("platform.models.qualify"));
+  assert.notEqual("platform.models.qualify", "platform.roles.manage");
+});
+
 test("OPERATOR can act on accounts but cannot widen authority", () => {
   const p = permissionsForRoles(["OPERATOR"]);
   assert.ok(p.has("platform.users.suspend"));

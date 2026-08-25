@@ -41,6 +41,21 @@ export const PLATFORM_PERMISSIONS = [
   "platform.audit.read",
   /** Grant and revoke platform roles — authority over authority. */
   "platform.roles.manage",
+  /**
+   * Approve or revoke a model for production use.
+   *
+   * SEPARATE FROM `roles.manage`, because they are different powers over
+   * different things: one decides who may operate the platform, the other
+   * decides which model may answer users. An operator who should be able to
+   * qualify a vision model does not thereby need the ability to grant
+   * themselves ownership — and the reverse is just as true.
+   *
+   * It is checked by the operator tool that mints a signed request to the
+   * Brain; the Brain then verifies the SIGNATURE and its own service/action
+   * policy. Two boundaries, deliberately: this one authorizes the human, that
+   * one authenticates the caller.
+   */
+  "platform.models.qualify",
 ] as const;
 
 export type PlatformPermission = (typeof PLATFORM_PERMISSIONS)[number];
@@ -67,6 +82,11 @@ const ROLE_PERMISSIONS: Record<PlatformRole, readonly PlatformPermission[]> = {
     "platform.clients.read",
     "platform.audit.read",
   ],
+  /*
+   * OWNER holds everything, including model qualification. A narrower
+   * model-operator role can be cut later without touching a guard, because
+   * guards ask for the permission rather than the role.
+   */
   OWNER: [...PLATFORM_PERMISSIONS],
 };
 

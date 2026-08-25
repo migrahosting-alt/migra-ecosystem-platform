@@ -26,7 +26,20 @@ import { createHmac, timingSafeEqual, createHash } from 'node:crypto';
  * cannot.
  */
 
+/**
+ * Envelope version.
+ *
+ * SIGNED AS PART OF THE CANONICAL FORM, so it cannot be downgraded by an
+ * attacker stripping or rewriting it — a version field outside the MAC is a
+ * suggestion. Verifying it explicitly means a future v2 (new fields, a different
+ * MAC algorithm) is a controlled change rather than an ambiguous "try both and
+ * see what verifies", which is how protocol downgrades happen.
+ */
+export const ASSERTION_ENVELOPE_VERSION = 1;
+
 export interface AssertionFields {
+  /** Envelope version. Signed; a mismatch is refused, never negotiated. */
+  v: number;
   keyId: string;
   serviceId: string;
   approverId: string;
@@ -46,6 +59,7 @@ export interface SignedAssertion extends AssertionFields {
 
 export type AssertionFailure =
   | 'malformed'
+  | 'unsupported_version'
   | 'unknown_key'
   | 'unknown_service'
   | 'action_not_granted'
@@ -113,6 +127,7 @@ export function sha256Hex(value: string): string {
  */
 export function canonicalString(fields: AssertionFields): string {
   const ordered = [
+    String(fields.v),
     fields.keyId, fields.serviceId, fields.approverId, fields.action,
     fields.method.toUpperCase(), fields.path, fields.bodyDigest,
     String(fields.issuedAt), String(fields.expiresAt), fields.requestId,
@@ -147,6 +162,15 @@ export async function verifyAssertion(
 
   if (!a || typeof a !== 'object') return fail('malformed', 'no assertion supplied');
 
+  /*
+   * Checked FIRST: every field rule below belongs to a specific envelope
+   * version, so validating v2 fields with v1 rules would produce a confident
+   * answer about the wrong protocol.
+   */
+  if (a.v !== ASSERTION_ENVELOPE_VERSION) {
+    return fail('unsupported_version', `envelope version ${String(a.v)} is not supported`);
+  }
+
   for (const field of ['keyId', 'serviceId', 'approverId', 'action', 'method', 'path', 'requestId'] as const) {
     const value = a[field];
     if (typeof value !== 'string' || !FIELD_PATTERN.test(value)) {
@@ -164,6 +188,7 @@ export async function verifyAssertion(
   }
 
   const fields: AssertionFields = {
+    v: ASSERTION_ENVELOPE_VERSION,
     keyId: a.keyId!, serviceId: a.serviceId!, approverId: a.approverId!, action: a.action!,
     method: a.method!, path: a.path!, bodyDigest: a.bodyDigest, issuedAt: a.issuedAt!,
     expiresAt: a.expiresAt!, requestId: a.requestId!,
