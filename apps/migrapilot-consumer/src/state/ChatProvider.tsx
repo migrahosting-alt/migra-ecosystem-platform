@@ -591,7 +591,24 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         icon: 'chat',
         tone: 'blue',
         messages: [
-          { id: `u-${Date.now()}`, role: 'user', text: prompt, time: clockTime(), delivered: true },
+          {
+            id: `u-${Date.now()}`,
+            role: 'user',
+            text: prompt,
+            time: clockTime(),
+            delivered: true,
+            /*
+             * THE FIRST TURN CARRIES ITS PICTURE TOO.
+             *
+             * This was missing while `sendMessage` had it, so a conversation
+             * STARTED with an image showed text only — immediately, before any
+             * reload — and every later turn in the same thread looked fine. A
+             * fresh conversation is exactly how someone attaches their first
+             * image, so the one path that mattered most was the one path without
+             * it.
+             */
+            ...(options?.images?.length ? { images: options.images } : {}),
+          },
         ],
       }
 
