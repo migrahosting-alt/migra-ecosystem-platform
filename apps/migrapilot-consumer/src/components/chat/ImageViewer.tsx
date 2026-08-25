@@ -1,55 +1,81 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { X, ZoomIn, ZoomOut } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Minus, Plus, RotateCcw, X } from 'lucide-react'
 import { cn } from '@/lib/cn'
 
 /**
- * A full-size look at an attached image.
+ * A lightbox for the images on one message.
  *
- * THE THUMBNAIL IS NOT THE IMAGE. A 20-square tile is enough to confirm the
- * right photo was picked and not enough to read a screenshot, which is the case
- * this whole feature exists for — so the picture has to be openable at its real
- * size.
+ * IT FITS BY DEFAULT. The whole picture is inside the viewport the moment it
+ * opens — no scrollbars, no panning, nothing cut off. Scrolling only becomes
+ * possible after the user has chosen to zoom past the fit, which is the only
+ * point at which there is anything off-screen to reach.
  *
- * THE SAME AUTHORISED URL. It loads `/api/images/<ref>`, exactly what the
- * transcript uses: scope from the session, hash re-checked on read. There is no
- * separate "full size" endpoint that could drift from the one with the checks,
- * and nothing is copied into a blob or data URI that would escape them.
+ * IT SITS OVER THE CHAT, NOT INSTEAD OF IT. The backdrop is dimmed rather than
+ * opaque and the controls are small, so this reads as a closer look at something
+ * in the conversation rather than a separate application.
+ *
+ * THE SAME AUTHORISED URL. `/api/images/<ref>`, exactly what the transcript
+ * loads: scope from the session, hash re-checked on read. No second endpoint
+ * that could drift from the one with the checks, and nothing copied into a blob
+ * or data URI that would escape them.
  */
 
-export function ImageViewer({ src, alt, onClose }: {
-  src: string
+const ZOOM_STEPS = [1, 1.5, 2, 3] as const
+
+export function ImageViewer({ refs, startIndex = 0, alt, onClose }: {
+  /** Every image on the message, so the arrows have somewhere to go. */
+  refs: readonly string[]
+  startIndex?: number
   alt: string
   onClose: () => void
 }) {
-  const [zoomed, setZoomed] = useState(false)
-  const closeRef = useRef<HTMLButtonElement>(null)
+  const [index, setIndex] = useState(startIndex)
+  const [zoom, setZoom] = useState(0)
   const restoreFocus = useRef<Element | null>(null)
+  const touchStartX = useRef<number | null>(null)
+
+  const many = refs.length > 1
+  const scale = ZOOM_STEPS[zoom]!
+  const zoomed = zoom > 0
+
+  const go = useCallback((delta: number) => {
+    setIndex((current) => (current + delta + refs.length) % refs.length)
+    // A new picture starts fitted; carrying a zoom across would open the next
+    // one already cropped.
+    setZoom(0)
+  }, [refs.length])
 
   useEffect(() => {
     restoreFocus.current = document.activeElement
-    closeRef.current?.focus()
 
     const onKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') onClose()
+      else if (event.key === 'ArrowRight' && many) go(1)
+      else if (event.key === 'ArrowLeft' && many) go(-1)
+      else if (event.key === '+' || event.key === '=') setZoom((z) => Math.min(z + 1, ZOOM_STEPS.length - 1))
+      else if (event.key === '-') setZoom((z) => Math.max(z - 1, 0))
+      else if (event.key === '0') setZoom(0)
     }
     document.addEventListener('keydown', onKey)
 
-    // The page behind must not scroll while a full-screen layer is open.
     const previous = document.body.style.overflow
     document.body.style.overflow = 'hidden'
 
     return () => {
       document.removeEventListener('keydown', onKey)
       document.body.style.overflow = previous
-      // Focus goes back where it came from, or a keyboard user is stranded at
-      // the top of the document after closing.
+      /*
+       * Back to the image that was clicked. Without this a keyboard user lands
+       * at the top of the document after closing, having lost their place in a
+       * conversation they were reading.
+       */
       if (restoreFocus.current instanceof HTMLElement) restoreFocus.current.focus()
     }
-  }, [onClose])
+  }, [onClose, go, many])
 
-  const stop = useCallback((event: React.MouseEvent) => event.stopPropagation(), [])
+  const stop = (event: React.MouseEvent | React.TouchEvent) => event.stopPropagation()
 
   return (
     <div
@@ -57,55 +83,109 @@ export function ImageViewer({ src, alt, onClose }: {
       aria-modal="true"
       aria-label={alt}
       onClick={onClose}
-      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/85 p-4 sm:p-8"
+      className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-slate-950/70 p-4 backdrop-blur-[2px]"
     >
-      <div className="absolute right-3 top-3 flex items-center gap-2 sm:right-5 sm:top-5">
+      {/* ── controls: small, top-right, out of the picture's way ───────── */}
+      <div className="absolute right-3 top-3 flex items-center gap-1.5" onClick={stop}>
         <button
           type="button"
-          onClick={(e) => { stop(e); setZoomed((v) => !v) }}
-          aria-label={zoomed ? 'Fit image to screen' : 'Zoom to full size'}
-          title={zoomed ? 'Fit to screen' : 'Zoom to full size'}
-          className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-white/10 text-white transition hover:bg-white/20"
+          onClick={() => setZoom((z) => Math.max(z - 1, 0))}
+          disabled={zoom === 0}
+          aria-label="Zoom out"
+          title="Zoom out (−)"
+          className={cn(control, zoom === 0 && 'cursor-not-allowed opacity-40')}
         >
-          {zoomed ? <ZoomOut className="h-[18px] w-[18px]" /> : <ZoomIn className="h-[18px] w-[18px]" />}
+          <Minus className="h-4 w-4" />
         </button>
+        <span className="min-w-[3rem] text-center text-[12px] tabular-nums text-white/80">
+          {Math.round(scale * 100)}%
+        </span>
         <button
-          ref={closeRef}
           type="button"
-          onClick={onClose}
-          aria-label="Close image viewer"
-          title="Close (Esc)"
-          className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-white/10 text-white transition hover:bg-white/20"
+          onClick={() => setZoom((z) => Math.min(z + 1, ZOOM_STEPS.length - 1))}
+          disabled={zoom === ZOOM_STEPS.length - 1}
+          aria-label="Zoom in"
+          title="Zoom in (+)"
+          className={cn(control, zoom === ZOOM_STEPS.length - 1 && 'cursor-not-allowed opacity-40')}
         >
+          <Plus className="h-4 w-4" />
+        </button>
+        {zoomed && (
+          <button type="button" onClick={() => setZoom(0)} aria-label="Reset zoom" title="Fit to screen (0)" className={control}>
+            <RotateCcw className="h-4 w-4" />
+          </button>
+        )}
+        <button type="button" onClick={onClose} aria-label="Close image viewer" title="Close (Esc)" className={control}>
           <X className="h-[18px] w-[18px]" />
         </button>
       </div>
 
-      {/*
-        Scrolls when zoomed rather than overflowing the viewport, so a tall
-        screenshot can actually be read on a phone.
-      */}
+      {/* ── the picture ─────────────────────────────────────────────────── */}
       <div
         onClick={stop}
-        className={cn('max-h-full max-w-full', zoomed && 'scroll-slim overflow-auto')}
+        onTouchStart={(e) => { touchStartX.current = e.touches[0]?.clientX ?? null }}
+        onTouchEnd={(e) => {
+          // Swipe only when fitted: once zoomed, a horizontal drag is panning.
+          if (!many || zoomed || touchStartX.current === null) return
+          const delta = (e.changedTouches[0]?.clientX ?? 0) - touchStartX.current
+          if (Math.abs(delta) > 60) go(delta < 0 ? 1 : -1)
+          touchStartX.current = null
+        }}
+        className={cn(
+          'flex items-center justify-center',
+          // Scrollable ONLY when zoomed past the fit — otherwise there is
+          // nothing off-screen and a scrollbar would be noise.
+          zoomed ? 'scroll-slim max-h-[85vh] max-w-[90vw] overflow-auto' : 'max-h-[85vh] max-w-[90vw]',
+        )}
       >
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
-          src={src}
+          key={refs[index]}
+          src={`/api/images/${refs[index]}`}
           alt={alt}
-          // Draggable and downloadable as an ordinary image: the browser's own
-          // save and drag-out behaviour works because this is the real asset at
-          // its authorised URL, not a canvas copy or an object URL.
+          // Draggable and savable as an ordinary image, because this IS the real
+          // asset at its authorised URL.
           draggable
+          onClick={() => setZoom((z) => (z === 0 ? 1 : 0))}
+          style={zoomed ? { width: `${scale * 100}%`, maxWidth: 'none' } : undefined}
           className={cn(
             'rounded-lg',
             zoomed
-              ? 'max-w-none cursor-zoom-out'
-              : 'max-h-[85vh] max-w-full object-contain cursor-zoom-in',
+              ? 'cursor-zoom-out'
+              : 'max-h-[85vh] max-w-[90vw] object-contain cursor-zoom-in',
           )}
-          onClick={() => setZoomed((v) => !v)}
         />
       </div>
+
+      {/* ── gallery: arrows either side, counter beneath ─────────────────── */}
+      {many && (
+        <>
+          <button
+            type="button"
+            onClick={(e) => { stop(e); go(-1) }}
+            aria-label="Previous image"
+            title="Previous (←)"
+            className={cn(control, 'absolute left-3 top-1/2 -translate-y-1/2 h-10 w-10')}
+          >
+            <ChevronLeft className="h-5 w-5" />
+          </button>
+          <button
+            type="button"
+            onClick={(e) => { stop(e); go(1) }}
+            aria-label="Next image"
+            title="Next (→)"
+            className={cn(control, 'absolute right-3 top-1/2 -translate-y-1/2 h-10 w-10')}
+          >
+            <ChevronRight className="h-5 w-5" />
+          </button>
+          <p className="mt-3 text-[13px] tabular-nums text-white/80" onClick={stop}>
+            {index + 1} / {refs.length}
+          </p>
+        </>
+      )}
     </div>
   )
 }
+
+const control =
+  'inline-flex h-9 w-9 items-center justify-center rounded-lg bg-white/10 text-white transition hover:bg-white/20 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/60'

@@ -154,7 +154,8 @@ function AttachmentGrid({ attachments }: { attachments: Attachment[] }) {
 function UserTurn({ message }: { message: Message }) {
   const wide = Boolean(message.attachments?.length)
   /** Which attached image is open full size, if any. */
-  const [viewing, setViewing] = useState<string | null>(null)
+  /** Index of the open image, or null. The whole set travels so the arrows work. */
+  const [viewing, setViewing] = useState<number | null>(null)
 
   return (
     <div className="flex justify-end">
@@ -168,11 +169,11 @@ function UserTurn({ message }: { message: Message }) {
         */}
         {message.images && message.images.length > 0 && (
           <div className="mb-1.5 flex flex-wrap justify-end gap-2">
-            {message.images.map((ref) => (
+            {message.images.map((ref, index) => (
               <button
                 key={ref}
                 type="button"
-                onClick={() => setViewing(ref)}
+                onClick={() => setViewing(index)}
                 aria-label="Open image full size"
                 title="Open full size"
                 className="rounded-xl focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
@@ -197,9 +198,10 @@ function UserTurn({ message }: { message: Message }) {
             ))}
           </div>
         )}
-        {viewing && (
+        {viewing !== null && message.images && (
           <ImageViewer
-            src={`/api/images/${viewing}`}
+            refs={message.images}
+            startIndex={viewing}
             alt="Image attached to this message"
             onClose={() => setViewing(null)}
           />

@@ -69,8 +69,61 @@ test('the viewer loads the same authorised URL as the transcript', () => {
    * scope and hash checks, and nothing copied into a blob or data URI that would
    * escape them.
    */
-  assert.match(code(message), /src=\{`\/api\/images\/\$\{viewing\}`\}/)
+  assert.match(code(viewer), /src=\{`\/api\/images\/\$\{refs\[index\]\}`\}/)
   assert.doesNotMatch(code(viewer), /createObjectURL|data:image\//)
+})
+
+test('the image fits the viewport by default, with no scrollbars', () => {
+  /*
+   * Nothing is off-screen when it opens, so a scrollbar would be noise. Scrolling
+   * becomes possible only once the user has zoomed past the fit and there is
+   * something to reach.
+   */
+  const v = code(viewer)
+  assert.match(v, /max-h-\[85vh\] max-w-\[90vw\] object-contain/)
+  assert.match(v, /zoomed \? 'scroll-slim max-h-\[85vh\] max-w-\[90vw\] overflow-auto'/)
+})
+
+test('the chat stays visible behind a dimmed backdrop', () => {
+  // A closer look at something in the conversation, not a separate application.
+  assert.match(code(viewer), /bg-slate-950\/70/)
+})
+
+test('multiple images navigate without leaving the viewer', () => {
+  const v = code(viewer)
+  assert.match(v, /aria-label="Previous image"/)
+  assert.match(v, /aria-label="Next image"/)
+  assert.match(v, /\{index \+ 1\} \/ \{refs\.length\}/, 'the counter says where you are')
+  assert.match(v, /event\.key === 'ArrowRight'/)
+  assert.match(v, /event\.key === 'ArrowLeft'/)
+  assert.match(v, /\(current \+ delta \+ refs\.length\) % refs\.length/, 'navigation wraps')
+})
+
+test('arrows and counter are hidden for a single image', () => {
+  // One picture with a "1 / 1" and two dead arrows is chrome for its own sake.
+  assert.match(code(viewer), /const many = refs\.length > 1/)
+})
+
+test('changing image resets the zoom', () => {
+  // Carrying a zoom across would open the next picture already cropped.
+  assert.match(code(viewer), /setIndex\([\s\S]{0,120}setZoom\(0\)/)
+})
+
+test('swiping navigates only while fitted', () => {
+  // Once zoomed, a horizontal drag is panning, not paging.
+  assert.match(code(viewer), /if \(!many \|\| zoomed \|\| touchStartX\.current === null\) return/)
+})
+
+test('zoom can be reset, and the level is visible', () => {
+  const v = code(viewer)
+  assert.match(v, /aria-label="Reset zoom"/)
+  assert.match(v, /Math\.round\(scale \* 100\)/)
+})
+
+test('the backdrop closes, the picture does not', () => {
+  const v = code(viewer)
+  assert.match(v, /onClick=\{onClose\}/)
+  assert.match(v, /onClick=\{stop\}/, 'clicking the image itself must not close it')
 })
 
 test('the viewer closes on Escape and gives focus back', () => {
@@ -89,6 +142,6 @@ test('the page behind the viewer does not scroll', () => {
 test('transcript images stay draggable and open on click', () => {
   const m = code(message)
   assert.match(m, /draggable/, 'dragging out must carry the real authorised URL')
-  assert.match(m, /onClick=\{\(\) => setViewing\(ref\)\}/)
+  assert.match(m, /onClick=\{\(\) => setViewing\(index\)\}/, 'the index opens the gallery at that image')
   assert.match(m, /focus-visible:ring/, 'the control must be reachable by keyboard')
 })
