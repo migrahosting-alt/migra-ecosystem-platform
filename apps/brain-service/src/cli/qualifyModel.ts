@@ -394,6 +394,44 @@ export interface PlannedRecord {
   passed: boolean;
   /** Only one record in the plan may be approved, and only if it passed. */
   approve: boolean;
+  /** The identity the evidence itself names. Never a flag, never the registry. */
+  modelId: string;
+  modelVersion: string;
+  modelDigest: string;
+}
+
+/** `sha256:` followed by exactly 64 hex characters. Anything else is not a digest. */
+export const DIGEST_PATTERN = /^sha256:[0-9a-f]{64}$/;
+
+/**
+ * The identity an evidence record must state about itself.
+ *
+ * AN EVIDENCE RUN THAT DOES NOT NAME ITS BYTES IS A MEASUREMENT OF NOTHING IN
+ * PARTICULAR. The first version of these payloads carried only results and left
+ * identity to `--model` and `--digest` on the command line, which meant the
+ * recorded run and the approved bytes were two separate claims that could
+ * disagree — and the guided flow, which has no flags, had nothing to read at all.
+ *
+ * Read from the record, so the thing that was measured and the thing that gets
+ * approved cannot come apart.
+ */
+export function evidenceIdentity(file: string, evidence: Record<string, unknown>): {
+  modelId: string; modelVersion: string; modelDigest: string;
+} {
+  const str = (key: string): string => {
+    const value = evidence[key];
+    if (typeof value !== 'string' || value.trim().length === 0) {
+      throw new CliRefusal('evidence_incomplete', `${file} does not state ${key}.`);
+    }
+    return value.trim();
+  };
+  const modelDigest = str('model_digest');
+  if (!DIGEST_PATTERN.test(modelDigest)) {
+    // A malformed digest is refused rather than normalised: guessing what
+    // someone meant by a truncated hash is how a tag gets approved as bytes.
+    throw new CliRefusal('malformed_digest', `${file} states a digest that is not sha256:<64 hex>: ${modelDigest}`);
+  }
+  return { modelId: str('model_id'), modelVersion: str('model_version'), modelDigest };
 }
 
 /**
@@ -418,14 +456,58 @@ export function plannedRecords(
     const suite = typeof evidence.suite === 'string' ? evidence.suite : '';
     if (!suite) throw new CliRefusal('unreadable_suite', `${file} does not name a suite.`);
     const passed = verdict === 'PASSED';
+    const identity = evidenceIdentity(file, evidence);
     return {
-      file, capability, suite, passed,
+      file, capability, suite, passed, ...identity,
       // Approval follows a pass, and only for the scoped general capability. A
       // failed run can never carry one — the Brain refuses it anyway, and the
       // plan must not even offer it.
       approve: passed && capability === 'vision.general',
     };
   });
+}
+
+/**
+ * Every record in a plan must be about the SAME model and the same bytes.
+ *
+ * Three files describing three different models would each record cleanly and
+ * produce an approval whose evidence chain nobody could follow. Checked before
+ * anything is shown, so the confirmation screen can state one identity honestly.
+ */
+export function assertOneSubject(plan: readonly PlannedRecord[]): {
+  modelId: string; modelVersion: string; modelDigest: string;
+} {
+  const first = plan[0];
+  if (!first) throw new CliRefusal('no_evidence', 'No evidence files were loaded.');
+  for (const record of plan) {
+    if (record.modelId !== first.modelId || record.modelDigest !== first.modelDigest
+        || record.modelVersion !== first.modelVersion) {
+      throw new CliRefusal(
+        'mixed_subjects',
+        `${record.file} is about ${record.modelId}@${record.modelDigest.slice(0, 19)}…, ` +
+        `but ${first.file} is about ${first.modelId}@${first.modelDigest.slice(0, 19)}…`,
+      );
+    }
+  }
+  return { modelId: first.modelId, modelVersion: first.modelVersion, modelDigest: first.modelDigest };
+}
+
+/**
+ * The recorded run, checked against the plan that produced it, before signing an
+ * approval that points at it.
+ *
+ * The Brain validates independently. This closes the other gap: between what the
+ * operator read and what the recorded row actually says.
+ */
+export function recordedMatchesPlan(step: PlannedRecord, recorded: EvidenceView | null): boolean {
+  if (!recorded) return false;
+  return (
+    recorded.modelId === step.modelId &&
+    recorded.capability === step.capability &&
+    (recorded.modelDigest ?? null) === step.modelDigest &&
+    (recorded.modelVersion ?? null) === step.modelVersion &&
+    recorded.passed === step.passed
+  );
 }
 
 /** The whole plan on one screen, before anything is signed. */

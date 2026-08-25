@@ -50,6 +50,16 @@ const CAPABILITIES: readonly ModelCapability[] = [
   'reasoning', 'embedding', 'audio', 'generation', 'chat', 'coding',
 ];
 
+/**
+ * `sha256:` and exactly 64 hex characters.
+ *
+ * VALIDATED HERE AND NOT ONLY IN THE CALLER. The operator tool checks its own
+ * input, but the Brain is what the decision is durable in — and a decision whose
+ * digest is a truncated hash, a tag, or an empty string names no particular
+ * bytes, which is the one thing an approval exists to do.
+ */
+const DIGEST_PATTERN = /^sha256:[0-9a-f]{64}$/;
+
 const isCapability = (v: unknown): v is ModelCapability =>
   typeof v === 'string' && (CAPABILITIES as readonly string[]).includes(v);
 
@@ -213,6 +223,15 @@ export function registerQualificationRoutes(app: FastifyInstance, deps: Qualific
     if (!isCapability(capability) || typeof body?.modelId !== 'string' || typeof body?.suite !== 'string') {
       return reply.code(400).send({ error: 'invalid_request', message: 'modelId, capability and suite are required.' });
     }
+    // A malformed digest is refused rather than stored: an evidence run carrying
+    // a half-written hash would later be inherited by a decision that then claims
+    // to name exact bytes it cannot identify.
+    if (body.modelDigest !== undefined && (typeof body.modelDigest !== 'string' || !DIGEST_PATTERN.test(body.modelDigest))) {
+      return reply.code(400).send({
+        error: 'malformed_digest',
+        message: 'modelDigest must be sha256: followed by 64 hex characters.',
+      });
+    }
 
     const id = randomUUID();
     await deps.transaction((c) => insertEvidenceRun(c, {
@@ -266,6 +285,15 @@ export function registerQualificationRoutes(app: FastifyInstance, deps: Qualific
           return { ok: false as const, error: 'evidence_mismatch' };
         }
         if (!evidence.passed) return { ok: false as const, error: 'evidence_failed' };
+        /*
+         * AND IT MUST NAME BYTES. The decision inherits its digest from this row,
+         * so evidence recorded without one would produce an approval that
+         * authorises a TAG — exactly the thing a digest exists to pin, since a
+         * tag can be repointed at different weights afterwards.
+         */
+        if (!evidence.modelDigest || !DIGEST_PATTERN.test(evidence.modelDigest)) {
+          return { ok: false as const, error: 'evidence_without_digest' };
+        }
 
         await insertDecision(c, {
           id,

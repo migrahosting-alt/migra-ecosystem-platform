@@ -113,6 +113,7 @@ async function buildApp(options: { withKey?: boolean } = {}) {
 }
 
 const APPROVE_PATH = '/api/ai/model-qualification/approve';
+const EVIDENCE_PATH = '/api/ai/model-qualification/evidence';
 const APPROVE_BODY = JSON.stringify({
   modelId: 'qwen2.5vl:7b', capability: 'vision', evidenceRunId: EVIDENCE_ID,
 });
@@ -352,6 +353,51 @@ test('a signed request pointing at evidence that did not pass is still refused',
   const res = await post(app, { header: headerFor(fieldsFor({ requestId: 'failed-evidence' })) });
   assert.equal(res.statusCode, 409);
   assert.equal(res.json().error, 'evidence_failed');
+});
+
+test('evidence carrying a malformed digest is refused before it is stored', async () => {
+  /*
+   * A decision inherits its digest from the evidence row, so a half-written hash
+   * stored here becomes an approval that claims to name exact bytes it cannot
+   * identify. Checked in the Brain and not only in the operator tool, because the
+   * Brain is where the decision is durable.
+   */
+  const { app } = await buildApp();
+  let n = 0;
+  for (const bad of ['sha256:abc', 'latest', 'sha512:' + 'a'.repeat(64), 'SHA256:' + 'A'.repeat(64)]) {
+    const raw = JSON.stringify({
+      modelId: 'digest-probe:model', capability: 'vision', suite: 's', passed: true, modelDigest: bad,
+    });
+    const res = await post(app, {
+      path: EVIDENCE_PATH,
+      body: raw,
+      header: headerFor(fieldsFor({ path: EVIDENCE_PATH, requestId: `bad-${n += 1}` }, raw)),
+    });
+    assert.equal(res.json().error, 'malformed_digest', `${bad} must be refused`);
+  }
+});
+
+test('an approval cannot be granted against evidence that names no bytes', async () => {
+  /*
+   * Without this, an approval authorises a TAG — and a tag can be repointed at
+   * different weights the moment after it is approved.
+   */
+  const { app, store } = await buildApp();
+  store.client.query = (async (text: string) => {
+    if (text.startsWith('SELECT * FROM model_evidence_runs')) {
+      return { rows: [{
+        id: EVIDENCE_ID, model_id: 'qwen2.5vl:7b', capability: 'vision', provider: 'local',
+        suite: 's', results_json: {}, passed: true, created_at: NOW, model_digest: null,
+      }], rowCount: 1 };
+    }
+    if (text.includes('internal_assertion_nonces')) return { rows: [], rowCount: 1 };
+    return { rows: [], rowCount: 0 };
+  }) as PoolClient['query'];
+
+  const raw = JSON.stringify({ modelId: 'qwen2.5vl:7b', capability: 'vision', evidenceRunId: EVIDENCE_ID });
+  const res = await post(app, { body: raw, header: headerFor(fieldsFor({ requestId: 'nodigest' }, raw)) });
+  assert.equal(res.statusCode, 409);
+  assert.equal(res.json().error, 'evidence_without_digest');
 });
 
 test('a rejected attempt records the claim and never the proof', async () => {

@@ -25,7 +25,7 @@ import {
   CliRefusal, approverFrom, approveRequest, revokeRequest, evidenceRequest,
   evidenceUnchanged, signMutation, confirmationText, askToConfirm, selectKey, readToken,
   requireExplicitOutcome, pkcePair, buildAuthorizeUrl, parseCallback, tokenRequestBody,
-  plannedRecords, guidedPlanText,
+  plannedRecords, guidedPlanText, assertOneSubject, recordedMatchesPlan,
   type AdminMeResponse, type EvidenceView, type MutationRequest,
 } from './qualifyModel.js';
 
@@ -305,15 +305,17 @@ async function guidedApprove(): Promise<void> {
   for (const file of STAGED_EVIDENCE) {
     loaded.push({ file, evidence: (await readJsonFile(file)) as Record<string, unknown> });
   }
+  /*
+   * IDENTITY COMES FROM THE EVIDENCE, NOT FROM A FLAG OR THE REGISTRY.
+   *
+   * `plannedRecords` refuses a file that does not state its model, version and a
+   * well-formed digest, so by here every record names the exact bytes it
+   * measured. Reading the digest from the installed-model registry instead would
+   * approve whatever is installed NOW rather than what was actually measured —
+   * and a tag can be repointed between the two.
+   */
   const plan = plannedRecords(loaded);
-
-  const first = loaded[0]!.evidence;
-  const modelId = String(env.MIGRAPILOT_QUALIFY_MODEL ?? 'qwen2.5vl:7b');
-  const digest = String(first.model_digest ?? env.MIGRAPILOT_QUALIFY_DIGEST ?? '');
-  const version = String(env.MIGRAPILOT_QUALIFY_VERSION ?? 'Q4_K_M-8.3B');
-  if (!digest) {
-    throw new CliRefusal('no_digest', 'No model digest is available; an approval must name exact bytes.');
-  }
+  const { modelId, modelVersion: version, modelDigest: digest } = assertOneSubject(plan);
 
   stdout.write(guidedPlanText({ modelId, version, digest, approverId, approverEmail: email, records: plan }));
   if (!(await askToConfirm('  Type "approve" to sign all of this: '))) {
@@ -327,8 +329,8 @@ async function guidedApprove(): Promise<void> {
     const step = plan[i]!;
     const evidence = loaded[i]!.evidence;
     const request = evidenceRequest({
-      modelId, capability: step.capability, suite: step.suite, passed: step.passed,
-      modelVersion: version, modelDigest: digest,
+      modelId: step.modelId, capability: step.capability, suite: step.suite, passed: step.passed,
+      modelVersion: step.modelVersion, modelDigest: step.modelDigest,
       license: typeof evidence.license === 'string' ? evidence.license : undefined,
       licenseSource: typeof evidence.license_source === 'string' ? evidence.license_source : undefined,
       results: evidence,
@@ -342,8 +344,29 @@ async function guidedApprove(): Promise<void> {
 
   for (const step of plan.filter((p) => p.approve)) {
     const runId = runIds.get(step.capability)!;
-    await sendSigned(approveRequest({ modelId, capability: step.capability, evidenceRunId: runId }), approverId);
+    /*
+     * RE-READ THE ROW IMMEDIATELY BEFORE SIGNING.
+     *
+     * The Brain validates independently, but that closes a different gap. This
+     * one is between what was planned and displayed and what the store actually
+     * holds — a record that landed with a different digest, model or verdict
+     * must abort rather than be approved on the strength of what we intended to
+     * write.
+     */
+    const recorded = await fetchEvidence(runId);
+    if (!recordedMatchesPlan(step, recorded)) {
+      throw new CliRefusal(
+        'evidence_mismatch',
+        `Run ${runId} does not match what was approved on screen ` +
+        `(${step.modelId} ${step.capability} ${step.modelDigest}). Nothing further was signed.`,
+      );
+    }
+    await sendSigned(
+      approveRequest({ modelId: step.modelId, capability: step.capability, evidenceRunId: runId }),
+      approverId,
+    );
     stdout.write(`  APPROVED  ${step.capability}  against run ${runId}\n`);
+    stdout.write(`            digest ${step.modelDigest}\n`);
   }
 
   await proveRegistry(modelId);
