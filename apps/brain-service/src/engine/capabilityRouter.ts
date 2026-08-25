@@ -31,6 +31,12 @@ export interface RouteSpec {
    * `enforce` is on; `evaluation` serves any non-rejected model (for benchmarking
    * through the engine). Rejected models are NEVER served in either mode. */
   mode?: 'production' | 'evaluation';
+  /**
+   * A model id already authorised for this turn by the governed qualification
+   * decision. Treated as approved regardless of the manifest, because a decision
+   * naming an exact digest is the stronger record.
+   */
+  governedApproval?: string;
   /** Enforce approved-only in production. Off preserves pre-qualification
    * behavior (any non-rejected model is eligible). */
   enforce?: boolean;
@@ -98,7 +104,21 @@ function satisfiesHard(m: ModelDescriptor, spec: RouteSpec): boolean {
   // unqualified candidates can be benchmarked through the engine.
   const state = m.qualification?.state;
   if (state === 'rejected' || state === 'deprecated') return false;
-  if (spec.enforce && spec.mode !== 'evaluation' && state !== 'approved') return false;
+  /*
+   * A DURABLE APPROVAL IS AN APPROVAL.
+   *
+   * `qualification.state` comes from the deployment manifest — a file. The
+   * governed decision comes from `model_qualification_decisions`: a human, an
+   * exact digest, and the evidence behind it. When the capability gate has
+   * already authorised THIS model for THIS turn, refusing it here because a JSON
+   * file was never updated makes the stronger authority lose to the weaker one,
+   * and the symptom is a qualified model answering NO_MODEL.
+   *
+   * Scoped to the one model the gate named, so this is not a way around
+   * enforcement for anything else.
+   */
+  if (spec.enforce && spec.mode !== 'evaluation' && state !== 'approved'
+      && m.id !== spec.governedApproval) return false;
 
   if (spec.needsEmbedding) return m.capabilities.embedding;
   // Non-embedding turns need a chat-capable model.

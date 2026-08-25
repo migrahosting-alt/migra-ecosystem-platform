@@ -352,7 +352,9 @@ export function registerAiRoutes(
        * qualified. This is what makes a revocation take effect on the next
        * request with nothing to restart.
        */
-      ...(visionGate?.serve ? { model: visionGate.modelId } : {}),
+      ...(visionGate?.serve
+        ? { model: visionGate.modelId, governedApproval: visionGate.modelId }
+        : {}),
       needsTools: Boolean(body.needsTools),
       needsReasoning: Boolean(body.needsReasoning) || tierFromHints(body) === 'deep',
       preferCoding: Boolean(body.preferCoding) || isCodingIntent(body.feature, userPrompt),

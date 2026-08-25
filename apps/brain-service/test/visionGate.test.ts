@@ -135,3 +135,46 @@ test('the capability snapshot answers per operation, not with one boolean', asyn
   assert.equal(snapshot.general.digest, 'sha256:5ced39df', 'approval is about exact bytes');
   assert.equal(snapshot.objectCounting.qualified, false, 'measured and failed — not merely absent');
 });
+
+// ── the governed decision must actually win ───────────────────────────────
+
+test('a durably approved model is routable even when the manifest never heard of it', async () => {
+  /*
+   * CAUGHT LIVE. The gate approved qwen2.5vl:7b from the durable decision, and
+   * `selectModel` then refused it because `model-qualification.json` — a file —
+   * did not list it as approved. The stronger authority lost to the weaker one
+   * and a qualified model answered NO_MODEL.
+   */
+  const { selectModel } = await import('../src/engine/capabilityRouter.js');
+  const model = {
+    id: 'qwen2.5vl:7b', provider: 'local', tier: 'balanced' as const, paramCount: 7,
+    capabilities: { chat: true, vision: true, tools: false, embedding: false, reasoning: false, coding: false, insert: false },
+    qualification: { state: 'installed' as const },
+  };
+  const registry = { list: async () => [model] } as never;
+
+  const refused = await selectModel(registry, { needsVision: true, enforce: true, mode: 'production' });
+  assert.equal(refused, null, 'without a governed approval the manifest still decides');
+
+  const allowed = await selectModel(registry, {
+    needsVision: true, enforce: true, mode: 'production',
+    model: 'qwen2.5vl:7b', governedApproval: 'qwen2.5vl:7b',
+  });
+  assert.ok(allowed, 'the governed decision authorises its own model');
+  assert.equal(allowed.model.id, 'qwen2.5vl:7b');
+});
+
+test('the exemption covers only the model the gate named', async () => {
+  // Otherwise one approval would quietly unlock every unapproved model installed.
+  const { selectModel } = await import('../src/engine/capabilityRouter.js');
+  const other = {
+    id: 'llava:latest', provider: 'local', tier: 'balanced' as const, paramCount: 7,
+    capabilities: { chat: true, vision: true, tools: false, embedding: false, reasoning: false, coding: false, insert: false },
+    qualification: { state: 'installed' as const },
+  };
+  const registry = { list: async () => [other] } as never;
+  const out = await selectModel(registry, {
+    needsVision: true, enforce: true, mode: 'production', governedApproval: 'qwen2.5vl:7b',
+  });
+  assert.equal(out, null, 'an approval for one model must not authorise another');
+});
