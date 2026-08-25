@@ -11,6 +11,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import sharp from 'sharp'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { MODEL_IMAGE_MAX_EDGE } from './resolveTurnImages'
 
 const photo = (w: number, h: number) =>
@@ -59,4 +61,21 @@ test('PNG stays PNG, so screenshot text is not re-compressed', async () => {
     .resize({ width: MODEL_IMAGE_MAX_EDGE, height: MODEL_IMAGE_MAX_EDGE, fit: 'inside' })
     .png({ compressionLevel: 6 }).toBuffer()
   assert.equal((await sharp(out).metadata()).format, 'png')
+})
+
+test('the resizer is never imported at module scope', () => {
+  /*
+   * THE OUTAGE THIS PREVENTS. A top-level `import sharp` took the whole turn
+   * down in production: sharp's own loader threw while formatting an unrelated
+   * error, the module failed to evaluate, and the route died before any
+   * try/catch inside a function could matter. The user saw "The assistant could
+   * not answer that" on a perfectly good image.
+   *
+   * An optimisation must never be able to break the thing it optimises.
+   */
+  const source = readFileSync(join(process.cwd(), 'src/server/files/resolveTurnImages.ts'), 'utf8')
+  const code = source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
+  assert.doesNotMatch(code, /^import .*from 'sharp'/m, 'sharp must not be a static import')
+  assert.match(code, /await import\('sharp'\)/, 'it must be resolved lazily')
+  assert.match(code, /if \(!sharp\) return \{ bytes, mime \}/, 'a missing resizer must fall through to the original bytes')
 })

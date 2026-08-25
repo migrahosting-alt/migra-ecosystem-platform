@@ -1,7 +1,5 @@
 import 'server-only'
 
-import sharp from 'sharp'
-
 import { readImageBytes } from '@/server/files/imageStore'
 import { isImageId } from '@/server/files/images'
 
@@ -106,6 +104,32 @@ export async function resolveTurnImages(refs: readonly string[]): Promise<TurnIm
  * A RESIZE FAILURE IS NOT A TURN FAILURE. If sharp cannot read it, the original
  * bytes go as they are: slower, and still correct.
  */
+/**
+ * The resizer, loaded LAZILY and never at module scope.
+ *
+ * A top-level `import sharp` took the whole turn down in production: sharp's own
+ * loader threw while formatting an unrelated error, the module failed to
+ * evaluate, and the route died before any try/catch inside a function could
+ * matter. The user saw "The assistant could not answer that" on a perfectly good
+ * image.
+ *
+ * An optimisation must never be able to break the thing it optimises. Resolved on
+ * first use, cached, and a failure means the original bytes go instead — slower,
+ * and still an answer.
+ */
+type Resizer = (typeof import('sharp'))['default']
+let resizer: Resizer | null | undefined
+
+async function loadResizer(): Promise<Resizer | null> {
+  if (resizer !== undefined) return resizer
+  try {
+    resizer = (await import('sharp')).default
+  } catch {
+    resizer = null
+  }
+  return resizer
+}
+
 async function forModel(
   bytes: Buffer,
   mime: string,
@@ -113,6 +137,8 @@ async function forModel(
   height: number,
 ): Promise<{ bytes: Buffer; mime: string }> {
   if (Math.max(width, height) <= MODEL_IMAGE_MAX_EDGE) return { bytes, mime }
+  const sharp = await loadResizer()
+  if (!sharp) return { bytes, mime }
   try {
     const pipeline = sharp(bytes).resize({
       width: MODEL_IMAGE_MAX_EDGE,
