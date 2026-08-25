@@ -307,7 +307,67 @@ export async function POST(request: Request): Promise<Response> {
     }
   }
 
-  const storedPrompt = await appendMessage(conversationId, 'user', prompt, { principal })
+  /*
+   * A SIGNED-OUT VISITOR HAS NO LIBRARY, so there is nothing to ground on.
+   *
+   * Files, indexes and uploads are authenticated-only — the gateway refuses them
+   * for an anonymous principal, and `listFiles` has no directory to read without
+   * a session. Skipping the whole reconciliation is therefore the honest path:
+   * running it would produce an empty set through three failed calls and could
+   * only ever arrive at the same `none`.
+   */
+  const canGround = principal.kind === 'session'
+
+  /*
+   * ── IMAGES ────────────────────────────────────────────────────────────────
+   *
+   * The same durable-set discipline as grounding, against a different store.
+   *
+   * ATTACHING ADDS TO THE THREAD'S SET. That is what makes the follow-up work:
+   * "what colour is the main object?" asked after a reload carries no upload, so
+   * the conversation has to remember which picture it is about — otherwise the
+   * second question is answered about nothing while looking like it worked.
+   *
+   * RECONCILED AGAINST REALITY every turn, because the set outlives the files in
+   * it. A deleted image would otherwise stay named here forever, and a ref that
+   * resolves to nothing is not evidence the model saw anything.
+   */
+  const imagesAttachedNow =
+    canGround && Array.isArray((body as { images?: unknown })?.images)
+      ? ((body as { images: unknown[] }).images.filter(
+          (r): r is string => typeof r === 'string' && r.trim().length > 0,
+        ) as string[])
+      : []
+
+  const priorConversation = canGround && conversationId
+    ? await getConversation(conversationId, { principal })
+    : ({ kind: 'not_found' } as const)
+  const storedImages =
+    priorConversation.kind === 'ok' ? ((priorConversation.value as ConversationSummary)?.imageRefs ?? []) : []
+  const requestedImages = [...new Set([...storedImages, ...imagesAttachedNow])]
+
+  // Resolution IS the reconciliation: a ref that cannot produce bytes for this
+  // caller cannot be part of the thread's set either.
+  const resolvedImages = canGround && requestedImages.length > 0
+    ? await resolveTurnImages(requestedImages)
+    : { attachments: [], dropped: [] as { ref: string; reason: string }[] }
+  const liveImages = resolvedImages.attachments.map((a) => a.name)
+
+  const imagesChanged =
+    liveImages.length !== storedImages.length || liveImages.some((r, i) => r !== storedImages[i])
+  if (canGround && conversationId && imagesChanged) {
+    // Persisted BEFORE answering, for the same reason grounding is: a turn must
+    // not claim an image set the next turn will not have.
+    await setConversationImages(conversationId, liveImages, { principal })
+  }
+
+  /*
+   * RESOLVED BEFORE THE TURN IS STORED, because this append is the one that
+   * records it. The engine's own in-turn append never runs for a streamed turn —
+   * that request carries no conversationId — so refs that arrive after this line
+   * reach the conversation's active set and never the message.
+   */
+  const storedPrompt = await appendMessage(conversationId, 'user', prompt, { principal }, liveImages)
   if (storedPrompt.kind !== 'ok') {
     await release('persistence_unavailable')
     // FAIL CLOSED, AND SAY WHY. The prompt is stored before the model runs, so a
@@ -349,16 +409,6 @@ export async function POST(request: Request): Promise<Response> {
    * back from the Brain on every turn. A reload cannot change the answer because
    * nothing about grounding lives in the tab.
    */
-  /*
-   * A SIGNED-OUT VISITOR HAS NO LIBRARY, so there is nothing to ground on.
-   *
-   * Files, indexes and uploads are authenticated-only — the gateway refuses them
-   * for an anonymous principal, and `listFiles` has no directory to read without
-   * a session. Skipping the whole reconciliation is therefore the honest path:
-   * running it would produce an empty set through three failed calls and could
-   * only ever arrive at the same `none`.
-   */
-  const canGround = principal.kind === 'session'
 
   const attachedNow =
     canGround && Array.isArray((body as { attachments?: unknown })?.attachments)
@@ -403,46 +453,6 @@ export async function POST(request: Request): Promise<Response> {
     // Persist BEFORE answering: if the write fails the turn must not claim a grounding
     // the next turn will not have.
     await setConversationGrounding(conversationId, reconciled.available, { principal })
-  }
-
-  /*
-   * ── IMAGES ────────────────────────────────────────────────────────────────
-   *
-   * The same durable-set discipline as grounding, against a different store.
-   *
-   * ATTACHING ADDS TO THE THREAD'S SET. That is what makes the follow-up work:
-   * "what colour is the main object?" asked after a reload carries no upload, so
-   * the conversation has to remember which picture it is about — otherwise the
-   * second question is answered about nothing while looking like it worked.
-   *
-   * RECONCILED AGAINST REALITY every turn, because the set outlives the files in
-   * it. A deleted image would otherwise stay named here forever, and a ref that
-   * resolves to nothing is not evidence the model saw anything.
-   */
-  const imagesAttachedNow =
-    canGround && Array.isArray((body as { images?: unknown })?.images)
-      ? ((body as { images: unknown[] }).images.filter(
-          (r): r is string => typeof r === 'string' && r.trim().length > 0,
-        ) as string[])
-      : []
-
-  const storedImages =
-    existing.kind === 'ok' ? ((existing.value as ConversationSummary)?.imageRefs ?? []) : []
-  const requestedImages = [...new Set([...storedImages, ...imagesAttachedNow])]
-
-  // Resolution IS the reconciliation: a ref that cannot produce bytes for this
-  // caller cannot be part of the thread's set either.
-  const resolvedImages = canGround && requestedImages.length > 0
-    ? await resolveTurnImages(requestedImages)
-    : { attachments: [], dropped: [] as { ref: string; reason: string }[] }
-  const liveImages = resolvedImages.attachments.map((a) => a.name)
-
-  const imagesChanged =
-    liveImages.length !== storedImages.length || liveImages.some((r, i) => r !== storedImages[i])
-  if (canGround && conversationId && imagesChanged) {
-    // Persisted BEFORE answering, for the same reason grounding is: a turn must
-    // not claim an image set the next turn will not have.
-    await setConversationImages(conversationId, liveImages, { principal })
   }
 
   const grounded = reconciled.grounded

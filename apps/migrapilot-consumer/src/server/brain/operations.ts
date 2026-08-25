@@ -54,7 +54,7 @@ export type BrainOperation =
   | { kind: 'setConversationGrounding'; conversationId: string; files: string[] }
   /** The images a thread is about. Refs only; bytes never persist. */
   | { kind: 'setConversationImages'; conversationId: string; images: string[] }
-  | { kind: 'appendMessage'; conversationId: string; role: MessageRole; content: string }
+  | { kind: 'appendMessage'; conversationId: string; role: MessageRole; content: string; imageRefs?: string[] }
   // ── turns ────────────────────────────────────────────────────────────────
   | {
       kind: 'chatTurn'
@@ -406,7 +406,13 @@ export function resolveOperation(op: BrainOperation): ResolvedRequest {
       return {
         method: 'POST',
         path: `/api/ai/conversations/${id(op.conversationId, 'conversationId')}/messages`,
-        body: { role: op.role, content: text(op.content, 'content') },
+        body: {
+          role: op.role,
+          content: text(op.content, 'content'),
+          // Refs only, and only when present. This is the write that makes a
+          // picture survive a reload on the turn that asked about it.
+          ...(op.imageRefs && op.imageRefs.length > 0 ? { imageRefs: op.imageRefs } : {}),
+        },
       }
 
     case 'chatTurn':

@@ -165,7 +165,7 @@ export function registerMemoryRoutes(app: FastifyInstance, store: ConversationSt
     return { ok: true };
   });
 
-  app.post<{ Params: { id: string }; Body: { role?: string; content?: string; status?: string } }>(
+  app.post<{ Params: { id: string }; Body: { role?: string; content?: string; status?: string; imageRefs?: unknown } }>(
     '/api/ai/conversations/:id/messages',
     async (request, reply) => {
       const scope = scopeFrom(request);
@@ -182,7 +182,25 @@ export function registerMemoryRoutes(app: FastifyInstance, store: ConversationSt
       const clean = redactSecrets(content).text;
       const status = request.body?.status === 'partial' || request.body?.status === 'failed' ? request.body.status : 'complete';
       try {
-        const msg = await store.appendMessage(request.params.id, scope, { role: role as MessageRole, content: clean, status });
+        /*
+         * THE IMAGES THIS TURN CARRIED, recorded on the message itself.
+         *
+         * This route is how the CONSUMER stores a user turn, and it is the path
+         * production actually takes — the engine's own in-turn append never runs
+         * for a streamed turn, because that request carries no conversationId.
+         * Without this the picture was written to the conversation's active set
+         * and nowhere else, so a reload rebuilt the thread with the image in the
+         * composer and gone from the message that asked about it.
+         */
+        const refs = Array.isArray(request.body?.imageRefs)
+          ? (request.body.imageRefs as unknown[]).filter(
+              (r): r is string => typeof r === 'string' && /^img_[0-9a-f]{32}$/.test(r),
+            )
+          : [];
+        const msg = await store.appendMessage(request.params.id, scope, {
+          role: role as MessageRole, content: clean, status,
+          ...(refs.length > 0 ? { imageRefs: refs } : {}),
+        });
         // `off` conversations retain nothing → null; report that honestly.
         return { ok: true, stored: msg !== null, message: msg };
       } catch (error) {

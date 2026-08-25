@@ -114,3 +114,38 @@ test('durability is not conditional on the turn carrying images', () => {
     assert.equal(body.memoryPolicy?.mode, 'durable')
   }
 })
+
+test('the append the consumer actually uses carries the image refs', () => {
+  /*
+   * THE DEFECT, AND WHY EVERY LAYER LOOKED CORRECT. The engine has its own
+   * in-turn append that records refs on the message — and it never runs for a
+   * streamed turn, because `chatTurn` carries no conversationId, so the engine
+   * has no conversation and stores nothing. The CONSUMER writes the user message
+   * itself through `appendMessage`, and that seam had no refs at all.
+   *
+   * So the picture was written to the conversation's ACTIVE SET and nowhere
+   * else: after a reload the composer showed it and the turn that asked about it
+   * did not. Both halves were working; they were writing to different places.
+   */
+  const resolved = resolveOperation({
+    kind: 'appendMessage', conversationId: 'c1', role: 'user',
+    content: 'What do you see in this image?', imageRefs: [IMG_A],
+  })
+  const body = resolved.body as { role: string; content: string; imageRefs?: string[] }
+  assert.match(resolved.path, /\/conversations\/c1\/messages$/)
+  assert.deepEqual(body.imageRefs, [IMG_A], 'without this the message records no picture')
+})
+
+test('a text-only append sends no imageRefs key', () => {
+  const resolved = resolveOperation({
+    kind: 'appendMessage', conversationId: 'c1', role: 'user', content: 'hello',
+  })
+  assert.equal('imageRefs' in (resolved.body as object), false)
+})
+
+test('an assistant append never carries images', () => {
+  const resolved = resolveOperation({
+    kind: 'appendMessage', conversationId: 'c1', role: 'assistant', content: 'Pink tulips.',
+  })
+  assert.equal('imageRefs' in (resolved.body as object), false)
+})

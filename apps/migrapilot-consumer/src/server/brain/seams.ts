@@ -53,8 +53,21 @@ export function appendMessage(
   role: ConversationMessage['role'],
   content: string,
   deps?: GatewayDeps,
+  /**
+   * Images this turn carried, in order.
+   *
+   * THIS is the append production takes. The engine's own in-turn append never
+   * runs for a streamed turn — that request carries no conversationId — so a ref
+   * that does not travel here is a ref the message never records, and a reload
+   * shows the picture in the composer and nowhere on the turn that asked.
+   */
+  imageRefs?: readonly string[],
 ): Promise<BrainResult<ConversationMessage>> {
-  return callBrain({ kind: 'appendMessage', conversationId, role, content }, deps)
+  return callBrain(
+    { kind: 'appendMessage', conversationId, role, content,
+      ...(imageRefs && imageRefs.length > 0 ? { imageRefs: [...imageRefs] } : {}) },
+    deps,
+  )
 }
 
 /**
