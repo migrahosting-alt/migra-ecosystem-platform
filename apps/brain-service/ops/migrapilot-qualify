@@ -1,0 +1,30 @@
+#!/bin/sh
+# Operator wrapper for the governed model-qualification tool.
+#
+# WHY A WRAPPER AT ALL. The signing key lives in a 0600 root:root
+# EnvironmentFile, so the signer must run as root to read it — while the
+# APPROVER must still be a real MigraAuth account. This keeps both true: root
+# supplies the key, and MIGRAAUTH_TOKEN (preserved from the invoking user's
+# environment) supplies the human. Running this with elevation proves nothing on
+# its own; without a token belonging to someone holding platform.models.qualify
+# the tool refuses before it signs anything.
+#
+# THE KEY IS SOURCED, NEVER PASSED. `. <file>` puts it in the environment, where
+# `ps` cannot read it. Passing it as an argument would publish it to every
+# process on the host for the lifetime of the command.
+#
+# Install to /opt/migrapilot/bin/migrapilot-qualify with mode 0755, owner root.
+# Invoke with elevation, preserving MIGRAAUTH_TOKEN from your own environment.
+set -eu
+
+KEY_FILE=/etc/migrapilot/qualification.env
+CLI=/opt/migrapilot/brain-service/current/dist/src/cli/migrapilot-qualify.js
+
+[ -r "$KEY_FILE" ] || { echo "✗ cannot read $KEY_FILE — this needs elevation" >&2; exit 1; }
+[ -r "$CLI" ] || { echo "✗ $CLI not found — is the release deployed?" >&2; exit 1; }
+
+set -a
+. "$KEY_FILE"
+set +a
+
+exec /usr/bin/node "$CLI" "$@"
