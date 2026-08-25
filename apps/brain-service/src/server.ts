@@ -81,6 +81,8 @@ import { resolvePersistence, PersistenceConfigError } from './engine/persistence
 import { wireOperationalPersistence } from './engine/persistence/operationalBridge.js';
 import { OperationalMaintenance, buildRetentionConfig, isMaintainable } from './engine/persistence/operationalMaintenance.js';
 import { auditStore } from './engine/auditLog.js';
+import { registerQualificationRoutes } from './engine/media/qualificationRoutes.js';
+import { loadInternalAuthConfig } from './engine/internalAuth/config.js';
 import { incidentManager } from './engine/incidents.js';
 import { engineVersion } from './engine/version.js';
 import { sanitizeError } from './engine/redaction.js';
@@ -385,6 +387,46 @@ async function main(): Promise<void> {
   const qualStore = QualificationStore.fromFile(
     process.env.MIGRAPILOT_QUALIFICATION_FILE ?? path.join(process.cwd(), 'model-qualification.json'),
   );
+
+  /*
+   * GOVERNED model qualification (/api/ai/model-qualification/*).
+   *
+   * The file manifest above is a deployment artefact: it says which models this
+   * process will serve, and anyone who can write the file can change that. These
+   * routes are the durable replacement — evidence that a battery actually ran, a
+   * decision naming the human MigraAuth authorized, and a signature proving the
+   * caller was permitted to ask. Editing a file cannot say who decided, when, or
+   * on what basis.
+   *
+   * POSTGRESQL-ONLY BY CONSTRUCTION: the tables are migrations 16 and 17. With no
+   * durable store the routes are not registered at all, which is why an
+   * unqualified deployment cannot approve anything — not even by accident.
+   */
+  const internalAuth = loadInternalAuthConfig(process.env);
+  if (durable instanceof PostgresDurableStore) {
+    const store = durable;
+    registerQualificationRoutes(app, {
+      internalAuth,
+      transaction: (fn) => store.platformTransaction(fn),
+      audit: async (event, detail) => {
+        await auditStore.append({
+          correlationId: typeof detail.requestId === 'string' ? detail.requestId : 'qualification',
+          type: event as 'qualification.denied',
+          component: 'model-qualification',
+          outcome: event === 'qualification.denied' ? 'denied' : 'ok',
+          fields: detail,
+        });
+      },
+    });
+    app.log.info(
+      { signingConfigured: internalAuth.enabled },
+      internalAuth.enabled
+        ? 'governed model qualification ready'
+        : 'governed model qualification registered WITHOUT a signing key — every mutation will be refused',
+    );
+  } else {
+    app.log.warn('governed model qualification NOT available — it requires the PostgreSQL durable store');
+  }
   // MigraAI Engine semantic RAG (/api/ai/indexes, /api/ai/retrieve): workspace-
   // scoped vector indexes over nomic-embed-text, exclusion-gated + fail-closed
   // (only an `approved` index backs production chat RAG). Approved indexes +

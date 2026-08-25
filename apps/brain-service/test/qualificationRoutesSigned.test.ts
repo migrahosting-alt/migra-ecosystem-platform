@@ -23,8 +23,12 @@ test('every mutating route requires an assertion; reads do not', () => {
    * Asserted over the SOURCE because the property is structural: it is about
    * which routes exist, not about how one of them behaves. A new write route
    * added without the guard is the failure being prevented.
+   *
+   * MATCHED ON ANY RECEIVER, not on the name `app`. The routes moved into an
+   * encapsulated scope, and a gate that keyed on the old variable name would
+   * have found zero routes and reported the file clean.
    */
-  const writes = [...code.matchAll(/app\.post(?:<[^>]*>)?\(\s*'([^']+)'/g)].map((m) => m[1]!);
+  const writes = [...code.matchAll(/\w+\.post(?:<[^>]*>)?\(\s*'([^']+)'/g)].map((m) => m[1]!);
   assert.ok(writes.length >= 3, `expected the mutation routes, found ${writes.length}`);
 
   for (const path of writes) {
@@ -35,8 +39,24 @@ test('every mutating route requires an assertion; reads do not', () => {
   }
 
   // Reads are ordinary: gating them would only make the router's own lookups awkward.
-  const reads = [...code.matchAll(/app\.get(?:<[^>]*>)?\(\s*'([^']+)'/g)].map((m) => m[1]!);
+  const reads = [...code.matchAll(/\w+\.get(?:<[^>]*>)?\(\s*'([^']+)'/g)].map((m) => m[1]!);
   assert.ok(reads.length >= 2);
+});
+
+test('the signed body is compared byte-for-byte, with no reconstruction path', () => {
+  /*
+   * `req.rawBody` was documented as the digest input and nothing populated it,
+   * so verification silently fell through to `JSON.stringify(req.body)`. That
+   * compares a RE-SERIALISATION: `{"n":1.0}` becomes `{"n":1}`, so a body could
+   * be altered in flight and still satisfy a MAC computed over the original.
+   */
+  assert.match(code, /addContentTypeParser/, 'the raw body must be captured for these routes');
+  assert.match(code, /rawBody\s*=\s*body/, 'the parser must keep the exact bytes');
+  assert.doesNotMatch(
+    code, /rawBody[^\n]*JSON\.stringify\(req\.body/,
+    'a fallback to re-serialising the parsed body is the defect, not a safety net',
+  );
+  assert.match(code, /raw_body_unavailable/, 'missing raw bytes must refuse, not degrade');
 });
 
 test('no mutation reaches the store outside a verified handler', () => {

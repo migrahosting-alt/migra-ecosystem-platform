@@ -194,3 +194,36 @@ function hydrate(r: Record<string, unknown>): QualificationDecision {
     revokedReason: (r.revoked_reason as string) ?? undefined,
   };
 }
+
+/**
+ * Evidence runs for a model+capability, newest first.
+ *
+ * WHY A LIST ROUTE EXISTS AT ALL. Approving requires naming the evidence run
+ * that justifies it, and an operator who cannot look one up ends up reading the
+ * table by hand on the host — the habit this whole slice replaces. The heavy
+ * `results_json` is left out: this answers "which run", and the run itself
+ * answers "what did it measure".
+ */
+export async function listEvidenceRuns(
+  client: PoolClient,
+  modelId: string,
+  capability: ModelCapability,
+  limit = 20,
+): Promise<Array<Omit<EvidenceRun, 'results' | 'environment'>>> {
+  const { rows } = await client.query(
+    `SELECT id, model_id, model_version, model_digest, provider, capability,
+            license, license_source, suite, passed, created_at, created_by
+       FROM model_evidence_runs
+      WHERE model_id = $1 AND capability = $2
+      ORDER BY created_at DESC
+      LIMIT $3`,
+    [modelId, capability, Math.min(Math.max(limit, 1), 100)],
+  );
+  return rows.map((r) => ({
+    id: r.id, modelId: r.model_id, modelVersion: r.model_version ?? undefined,
+    modelDigest: r.model_digest ?? undefined, provider: r.provider, capability: r.capability,
+    license: r.license ?? undefined, licenseSource: r.license_source ?? undefined,
+    suite: r.suite, passed: r.passed, createdAt: num(r.created_at),
+    createdBy: r.created_by ?? undefined,
+  }));
+}

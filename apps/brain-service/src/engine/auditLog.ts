@@ -45,6 +45,13 @@ export type AuditEventType =
   | 'coding.scope_rejected'
   | 'coding.cancellation_requested'
   | 'coding.workflow_failed'
+  /** Governed model qualification. `denied` is the only durable trace a rejected
+   * forgery leaves, so it is recorded with the reason and the CLAIMED identity —
+   * never the assertion, the MAC, or any key material. */
+  | 'qualification.evidence_recorded'
+  | 'qualification.approved'
+  | 'qualification.revoked'
+  | 'qualification.denied'
   | 'containment.terminated'
   | 'execution.timed_out'
   | 'execution.termination_failed'

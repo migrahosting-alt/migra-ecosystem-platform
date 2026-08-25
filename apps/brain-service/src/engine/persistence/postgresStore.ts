@@ -101,6 +101,19 @@ export class PostgresDurableStore implements DurableStore {
     return this.connection.transaction(fn);
   }
 
+  /**
+   * An UNSCOPED transaction, for platform-global tables.
+   *
+   * Model qualification is not tenant data: an approval is a statement about
+   * which model may serve anyone, so there is no owner scope to declare and
+   * `inScope` would be meaningless. Deliberately narrow — anything holding rows
+   * that belong to a tenant goes through `inScope`, where row-level security
+   * decides what is visible.
+   */
+  async platformTransaction<T>(fn: (client: PoolClient) => Promise<T>): Promise<T> {
+    return this.tx(fn);
+  }
+
   /** A transaction that has declared its tenant scope to row-level security. */
   private async inScope<T>(scope: PersistenceScope, fn: (client: PoolClient) => Promise<T>): Promise<T> {
     return this.tx((client) => conversations.withScope(client, scoped(scope), () => fn(client)));

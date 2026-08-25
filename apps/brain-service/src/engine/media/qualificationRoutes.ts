@@ -7,7 +7,7 @@ import { ACTION_MODELS_QUALIFY, type InternalAuthConfig } from '../internalAuth/
 import { consumeNonce } from '../persistence/postgres/assertionNonceRepo.js';
 import {
   insertEvidenceRun, getEvidenceRun, insertDecision, effectiveApproval,
-  approvedForCapability, revokeApproval, decisionHistory,
+  approvedForCapability, revokeApproval, decisionHistory, listEvidenceRuns,
   type ModelCapability,
 } from '../persistence/postgres/modelQualificationRepo.js';
 
@@ -34,7 +34,12 @@ export interface QualificationRouteDeps {
   internalAuth: InternalAuthConfig;
   /** Runs a function inside a database transaction. */
   transaction<T>(fn: (client: PoolClient) => Promise<T>): Promise<T>;
-  audit(event: string, detail: Record<string, unknown>): void;
+  /**
+   * AWAITED at every call site. A fire-and-forget append drops its rejection on
+   * the floor, and the one record that has no other durable home is the DENIAL —
+   * a rejected forgery leaves nothing behind but this.
+   */
+  audit(event: string, detail: Record<string, unknown>): void | Promise<void>;
   now?: () => number;
 }
 
@@ -62,229 +67,296 @@ const STATUS_FOR: Record<AssertionFailure, number> = {
   replayed: 409,
 };
 
-export function registerQualificationRoutes(app: FastifyInstance, deps: QualificationRouteDeps): void {
+export function registerQualificationRoutes(root: FastifyInstance, deps: QualificationRouteDeps): void {
   const now = deps.now ?? (() => Date.now());
 
-  /**
-   * Verify the signed assertion on a mutating request.
+  /*
+   * REGISTERED IN THEIR OWN SCOPE, SO THE RAW BODY SURVIVES.
    *
-   * The RAW body is used for the digest, so what was signed is byte-for-byte
-   * what arrives — re-serialising a parsed object would compare a
-   * reconstruction, and key order or number formatting could differ without
-   * anyone touching the request.
+   * The verifier digests `request.rawBody`, and nothing was populating it — so
+   * it fell through to `JSON.stringify(request.body)`, comparing a
+   * RECONSTRUCTION of the request rather than the bytes that were signed. That
+   * is not a cosmetic difference: `{"n":1.0}` re-serialises to `{"n":1}`, so a
+   * body could be altered in flight and still satisfy a MAC computed over the
+   * original. The guard read as byte-exact and was not.
+   *
+   * A Fastify content-type parser is encapsulated, so keeping the raw string
+   * here changes nothing for the rest of the server.
    */
-  async function requireAssertion(request: unknown, reply: unknown, path: string, method: string) {
-    const req = request as { headers: Record<string, unknown>; body: unknown; rawBody?: string };
-    const res = reply as { code: (n: number) => { send: (b: unknown) => unknown } };
-
-    if (!deps.internalAuth.enabled) {
-      /*
-       * No key configured means privileged mutation is IMPOSSIBLE, not
-       * unchecked. A deployment without the secret must be unable to qualify a
-       * model, never able to do it without proof.
-       */
-      deps.audit('qualification.denied', { reason: 'signing_not_configured', path });
-      res.code(503).send({ error: 'signing_not_configured', message: 'Governed qualification is not configured on this deployment.' });
-      return null;
-    }
-
-    const header = req.headers['x-migrapilot-assertion'];
-    let presented: unknown = null;
-    try {
-      presented = typeof header === 'string' ? JSON.parse(Buffer.from(header, 'base64').toString('utf8')) : null;
-    } catch {
-      presented = null;
-    }
-
-    const rawBody = typeof req.rawBody === 'string' ? req.rawBody : JSON.stringify(req.body ?? {});
-
-    const verifyDeps: VerifyDeps = {
-      keys: deps.internalAuth.keys,
-      servicePolicy: deps.internalAuth.servicePolicy,
-      rememberRequestId: async (requestId, expiresAtMs) =>
-        deps.transaction((c) => consumeNonce(c, {
-          requestId, serviceId: 'pending', action: ACTION_MODELS_QUALIFY,
-          expiresAt: expiresAtMs, now: now(),
-        })),
-    };
-
-    const outcome = await verifyAssertion(
-      presented,
-      { expectedAction: ACTION_MODELS_QUALIFY, method, path, rawBody, now: now() },
-      verifyDeps,
+  root.register(async (app) => {
+    app.addContentTypeParser<string>(
+      'application/json', { parseAs: 'string' },
+      (request, body, done) => {
+        (request as { rawBody?: string }).rawBody = body;
+        if (body.length === 0) return done(null, {});
+        try {
+          done(null, JSON.parse(body));
+        } catch {
+          const error = Object.assign(new Error('Body is not valid JSON.'), { statusCode: 400 });
+          done(error, undefined);
+        }
+      },
     );
 
-    if (!outcome.ok) {
+    /**
+     * Verify the signed assertion on a mutating request.
+     *
+     * The RAW body is used for the digest, so what was signed is byte-for-byte
+     * what arrives — re-serialising a parsed object would compare a
+     * reconstruction, and key order or number formatting could differ without
+     * anyone touching the request.
+     */
+    async function requireAssertion(request: unknown, reply: unknown, path: string, method: string) {
+      const req = request as { headers: Record<string, unknown>; body: unknown; rawBody?: string };
+      const res = reply as { code: (n: number) => { send: (b: unknown) => unknown } };
+
+      if (!deps.internalAuth.enabled) {
+        /*
+         * No key configured means privileged mutation is IMPOSSIBLE, not
+         * unchecked. A deployment without the secret must be unable to qualify a
+         * model, never able to do it without proof.
+         */
+        await deps.audit('qualification.denied', { reason: 'signing_not_configured', path });
+        res.code(503).send({ error: 'signing_not_configured', message: 'Governed qualification is not configured on this deployment.' });
+        return null;
+      }
+
+      const header = req.headers['x-migrapilot-assertion'];
+      let presented: unknown = null;
+      try {
+        presented = typeof header === 'string' ? JSON.parse(Buffer.from(header, 'base64').toString('utf8')) : null;
+      } catch {
+        presented = null;
+      }
+
       /*
-       * DIAGNOSTICS ARE AUDIT-SAFE. The reason and the claimed identity are
-       * recorded because they are what an investigation needs; the assertion
-       * itself, the MAC and any key material never appear — a rejected forgery
-       * must not be logged in a form that helps the next attempt.
-       */
-      const claimed = presented as { serviceId?: unknown; approverId?: unknown; requestId?: unknown } | null;
-      deps.audit('qualification.denied', {
-        reason: outcome.reason,
-        path,
-        claimedService: typeof claimed?.serviceId === 'string' ? claimed.serviceId : null,
-        claimedApprover: typeof claimed?.approverId === 'string' ? claimed.approverId : null,
-        requestId: typeof claimed?.requestId === 'string' ? claimed.requestId : null,
+     * NO FALLBACK. Re-serialising `req.body` here would let the digest check
+     * pass over a reconstruction whenever the raw body was not captured — a
+     * degradation that looks identical to success. If a route ever escapes the
+     * scope that keeps the raw bytes, it refuses instead.
+     */
+    if (typeof req.rawBody !== 'string') {
+      await deps.audit('qualification.denied', { reason: 'raw_body_unavailable', path });
+      res.code(400).send({
+        error: 'raw_body_unavailable',
+        message: 'The signed body could not be compared byte-for-byte.',
       });
-      res.code(STATUS_FOR[outcome.reason]).send({ error: outcome.reason, message: outcome.detail });
       return null;
     }
+    const rawBody = req.rawBody;
 
-    return outcome.assertion;
-  }
+      const verifyDeps: VerifyDeps = {
+        keys: deps.internalAuth.keys,
+        servicePolicy: deps.internalAuth.servicePolicy,
+        rememberRequestId: async (requestId, expiresAtMs) =>
+          deps.transaction((c) => consumeNonce(c, {
+            requestId, serviceId: 'pending', action: ACTION_MODELS_QUALIFY,
+            expiresAt: expiresAtMs, now: now(),
+          })),
+      };
 
-  // ── reads: ordinary, ungated ────────────────────────────────────────────
-  app.get<{ Params: { capability: string } }>('/api/ai/model-qualification/:capability', async (request, reply) => {
-    const capability = request.params.capability;
-    if (!isCapability(capability)) return reply.code(400).send({ error: 'unknown_capability' });
-    const approved = await deps.transaction((c) => approvedForCapability(c, capability));
-    return reply.send({ capability, approved });
-  });
+      const outcome = await verifyAssertion(
+        presented,
+        { expectedAction: ACTION_MODELS_QUALIFY, method, path, rawBody, now: now() },
+        verifyDeps,
+      );
 
-  app.get<{ Params: { modelId: string; capability: string } }>(
-    '/api/ai/model-qualification/:capability/:modelId/history',
-    async (request, reply) => {
-      const { capability, modelId } = request.params;
-      if (!isCapability(capability)) return reply.code(400).send({ error: 'unknown_capability' });
-      const history = await deps.transaction((c) => decisionHistory(c, modelId, capability));
-      return reply.send({ modelId, capability, history });
-    },
-  );
-
-  // ── mutations: signed only ──────────────────────────────────────────────
-
-  /** Record an immutable evidence run. */
-  app.post('/api/ai/model-qualification/evidence', async (request, reply) => {
-    const assertion = await requireAssertion(request, reply, '/api/ai/model-qualification/evidence', 'POST');
-    if (!assertion) return reply;
-
-    const body = request.body as Record<string, unknown>;
-    const capability = body?.capability;
-    if (!isCapability(capability) || typeof body?.modelId !== 'string' || typeof body?.suite !== 'string') {
-      return reply.code(400).send({ error: 'invalid_request', message: 'modelId, capability and suite are required.' });
-    }
-
-    const id = randomUUID();
-    await deps.transaction((c) => insertEvidenceRun(c, {
-      id,
-      modelId: body.modelId as string,
-      modelVersion: typeof body.modelVersion === 'string' ? body.modelVersion : undefined,
-      modelDigest: typeof body.modelDigest === 'string' ? body.modelDigest : undefined,
-      provider: typeof body.provider === 'string' ? body.provider : 'local',
-      capability,
-      license: typeof body.license === 'string' ? body.license : undefined,
-      licenseSource: typeof body.licenseSource === 'string' ? body.licenseSource : undefined,
-      suite: body.suite as string,
-      results: body.results ?? {},
-      environment: body.environment,
-      passed: body.passed === true,
-      createdAt: now(),
-      createdBy: assertion.approverId,
-    }));
-
-    deps.audit('qualification.evidence_recorded', {
-      evidenceRunId: id, modelId: body.modelId, capability: body.capability,
-      passed: body.passed === true, approver: assertion.approverId,
-      service: assertion.serviceId, requestId: assertion.requestId,
-    });
-    return reply.code(201).send({ evidenceRunId: id });
-  });
-
-  /** Approve a model for a capability, pointing at the evidence that justifies it. */
-  app.post('/api/ai/model-qualification/approve', async (request, reply) => {
-    const assertion = await requireAssertion(request, reply, '/api/ai/model-qualification/approve', 'POST');
-    if (!assertion) return reply;
-
-    const body = request.body as Record<string, unknown>;
-    const capability = body?.capability;
-    if (!isCapability(capability) || typeof body?.modelId !== 'string' || typeof body?.evidenceRunId !== 'string') {
-      return reply.code(400).send({ error: 'invalid_request', message: 'modelId, capability and evidenceRunId are required.' });
-    }
-
-    try {
-      const id = randomUUID();
-      const created = await deps.transaction(async (c) => {
+      if (!outcome.ok) {
         /*
-         * THE EVIDENCE MUST EXIST, MATCH, AND HAVE PASSED. An approval pointing
-         * at nothing, at another model, or at a failed run is not a governed
-         * decision — it is the same hand-wave the JSON file allowed, wearing a
-         * foreign key.
+         * DIAGNOSTICS ARE AUDIT-SAFE. The reason and the claimed identity are
+         * recorded because they are what an investigation needs; the assertion
+         * itself, the MAC and any key material never appear — a rejected forgery
+         * must not be logged in a form that helps the next attempt.
          */
-        const evidence = await getEvidenceRun(c, body.evidenceRunId as string);
-        if (!evidence) return { ok: false as const, error: 'unknown_evidence' };
-        if (evidence.modelId !== body.modelId || evidence.capability !== capability) {
-          return { ok: false as const, error: 'evidence_mismatch' };
-        }
-        if (!evidence.passed) return { ok: false as const, error: 'evidence_failed' };
-
-        await insertDecision(c, {
-          id,
-          modelId: body.modelId as string,
-          capability,
-          modelVersion: evidence.modelVersion,
-          modelDigest: evidence.modelDigest,
-          state: 'approved',
-          evidenceRunId: evidence.id,
-          approverUserId: assertion.approverId,
-          callingService: assertion.serviceId,
-          requestId: assertion.requestId,
-          note: typeof body.note === 'string' ? body.note : undefined,
-          decidedAt: now(),
+        const claimed = presented as { serviceId?: unknown; approverId?: unknown; requestId?: unknown } | null;
+        await deps.audit('qualification.denied', {
+          reason: outcome.reason,
+          path,
+          claimedService: typeof claimed?.serviceId === 'string' ? claimed.serviceId : null,
+          claimedApprover: typeof claimed?.approverId === 'string' ? claimed.approverId : null,
+          requestId: typeof claimed?.requestId === 'string' ? claimed.requestId : null,
         });
-        return { ok: true as const, digest: evidence.modelDigest };
-      });
-
-      if (!created.ok) {
-        deps.audit('qualification.denied', { reason: created.error, modelId: body.modelId, approver: assertion.approverId });
-        return reply.code(409).send({ error: created.error });
+        res.code(STATUS_FOR[outcome.reason]).send({ error: outcome.reason, message: outcome.detail });
+        return null;
       }
 
-      deps.audit('qualification.approved', {
-        decisionId: id, modelId: body.modelId, capability: body.capability,
-        modelDigest: created.digest ?? null, evidenceRunId: body.evidenceRunId,
+      return outcome.assertion;
+    }
+
+    // ── reads: ordinary, ungated ────────────────────────────────────────────
+    app.get<{ Params: { capability: string } }>('/api/ai/model-qualification/:capability', async (request, reply) => {
+      const capability = request.params.capability;
+      if (!isCapability(capability)) return reply.code(400).send({ error: 'unknown_capability' });
+      const approved = await deps.transaction((c) => approvedForCapability(c, capability));
+      return reply.send({ capability, approved });
+    });
+
+    /**
+     * One evidence run, in full.
+     *
+     * READ, SO IT IS UNGATED — but it is what makes the approval tool honest: the
+     * operator sees the exact digest and result being approved, and the tool
+     * re-reads it immediately before signing so a run that changed underneath
+     * aborts instead of approving bytes nobody looked at.
+     */
+    app.get<{ Params: { id: string } }>('/api/ai/model-qualification/evidence/:id', async (request, reply) => {
+      const evidence = await deps.transaction((c) => getEvidenceRun(c, request.params.id));
+      if (!evidence) return reply.code(404).send({ error: 'unknown_evidence' });
+      return reply.send({ evidence });
+    });
+
+    app.get<{ Params: { modelId: string; capability: string } }>(
+      '/api/ai/model-qualification/:capability/:modelId/evidence',
+      async (request, reply) => {
+        const { capability, modelId } = request.params;
+        if (!isCapability(capability)) return reply.code(400).send({ error: 'unknown_capability' });
+        const runs = await deps.transaction((c) => listEvidenceRuns(c, modelId, capability));
+        return reply.send({ modelId, capability, runs });
+      },
+    );
+
+    app.get<{ Params: { modelId: string; capability: string } }>(
+      '/api/ai/model-qualification/:capability/:modelId/history',
+      async (request, reply) => {
+        const { capability, modelId } = request.params;
+        if (!isCapability(capability)) return reply.code(400).send({ error: 'unknown_capability' });
+        const history = await deps.transaction((c) => decisionHistory(c, modelId, capability));
+        return reply.send({ modelId, capability, history });
+      },
+    );
+
+    // ── mutations: signed only ──────────────────────────────────────────────
+
+    /** Record an immutable evidence run. */
+    app.post('/api/ai/model-qualification/evidence', async (request, reply) => {
+      const assertion = await requireAssertion(request, reply, '/api/ai/model-qualification/evidence', 'POST');
+      if (!assertion) return reply;
+
+      const body = request.body as Record<string, unknown>;
+      const capability = body?.capability;
+      if (!isCapability(capability) || typeof body?.modelId !== 'string' || typeof body?.suite !== 'string') {
+        return reply.code(400).send({ error: 'invalid_request', message: 'modelId, capability and suite are required.' });
+      }
+
+      const id = randomUUID();
+      await deps.transaction((c) => insertEvidenceRun(c, {
+        id,
+        modelId: body.modelId as string,
+        modelVersion: typeof body.modelVersion === 'string' ? body.modelVersion : undefined,
+        modelDigest: typeof body.modelDigest === 'string' ? body.modelDigest : undefined,
+        provider: typeof body.provider === 'string' ? body.provider : 'local',
+        capability,
+        license: typeof body.license === 'string' ? body.license : undefined,
+        licenseSource: typeof body.licenseSource === 'string' ? body.licenseSource : undefined,
+        suite: body.suite as string,
+        results: body.results ?? {},
+        environment: body.environment,
+        passed: body.passed === true,
+        createdAt: now(),
+        createdBy: assertion.approverId,
+      }));
+
+      await deps.audit('qualification.evidence_recorded', {
+        evidenceRunId: id, modelId: body.modelId, capability: body.capability,
+        passed: body.passed === true, approver: assertion.approverId,
+        service: assertion.serviceId, requestId: assertion.requestId,
+      });
+      return reply.code(201).send({ evidenceRunId: id });
+    });
+
+    /** Approve a model for a capability, pointing at the evidence that justifies it. */
+    app.post('/api/ai/model-qualification/approve', async (request, reply) => {
+      const assertion = await requireAssertion(request, reply, '/api/ai/model-qualification/approve', 'POST');
+      if (!assertion) return reply;
+
+      const body = request.body as Record<string, unknown>;
+      const capability = body?.capability;
+      if (!isCapability(capability) || typeof body?.modelId !== 'string' || typeof body?.evidenceRunId !== 'string') {
+        return reply.code(400).send({ error: 'invalid_request', message: 'modelId, capability and evidenceRunId are required.' });
+      }
+
+      try {
+        const id = randomUUID();
+        const created = await deps.transaction(async (c) => {
+          /*
+           * THE EVIDENCE MUST EXIST, MATCH, AND HAVE PASSED. An approval pointing
+           * at nothing, at another model, or at a failed run is not a governed
+           * decision — it is the same hand-wave the JSON file allowed, wearing a
+           * foreign key.
+           */
+          const evidence = await getEvidenceRun(c, body.evidenceRunId as string);
+          if (!evidence) return { ok: false as const, error: 'unknown_evidence' };
+          if (evidence.modelId !== body.modelId || evidence.capability !== capability) {
+            return { ok: false as const, error: 'evidence_mismatch' };
+          }
+          if (!evidence.passed) return { ok: false as const, error: 'evidence_failed' };
+
+          await insertDecision(c, {
+            id,
+            modelId: body.modelId as string,
+            capability,
+            modelVersion: evidence.modelVersion,
+            modelDigest: evidence.modelDigest,
+            state: 'approved',
+            evidenceRunId: evidence.id,
+            approverUserId: assertion.approverId,
+            callingService: assertion.serviceId,
+            requestId: assertion.requestId,
+            note: typeof body.note === 'string' ? body.note : undefined,
+            decidedAt: now(),
+          });
+          return { ok: true as const, digest: evidence.modelDigest };
+        });
+
+        if (!created.ok) {
+          await deps.audit('qualification.denied', { reason: created.error, modelId: body.modelId, approver: assertion.approverId });
+          return reply.code(409).send({ error: created.error });
+        }
+
+        await deps.audit('qualification.approved', {
+          decisionId: id, modelId: body.modelId, capability: body.capability,
+          modelDigest: created.digest ?? null, evidenceRunId: body.evidenceRunId,
+          approver: assertion.approverId, service: assertion.serviceId, requestId: assertion.requestId,
+        });
+        return reply.code(201).send({ decisionId: id, state: 'approved' });
+      } catch (error) {
+        // The live-approval unique index refusing a duplicate is a conflict, not a fault.
+        const message = error instanceof Error ? error.message : String(error);
+        if (/duplicate key|unique/i.test(message)) {
+          return reply.code(409).send({ error: 'already_approved', message: 'That model is already approved for this capability.' });
+        }
+        throw error;
+      }
+    });
+
+    /** Revoke a live approval. Takes effect on the next request. */
+    app.post('/api/ai/model-qualification/revoke', async (request, reply) => {
+      const assertion = await requireAssertion(request, reply, '/api/ai/model-qualification/revoke', 'POST');
+      if (!assertion) return reply;
+
+      const body = request.body as Record<string, unknown>;
+      const capability = body?.capability;
+      if (!isCapability(capability) || typeof body?.modelId !== 'string' || typeof body?.reason !== 'string') {
+        return reply.code(400).send({ error: 'invalid_request', message: 'modelId, capability and reason are required.' });
+      }
+
+      const revoked = await deps.transaction((c) => revokeApproval(c, {
+        modelId: body.modelId as string,
+        capability,
+        revokedByUserId: assertion.approverId,
+        reason: body.reason as string,
+        at: now(),
+      }));
+
+      if (!revoked) {
+        return reply.code(409).send({ error: 'not_approved', message: 'That model is not currently approved for this capability.' });
+      }
+
+      await deps.audit('qualification.revoked', {
+        modelId: body.modelId, capability: body.capability, reason: body.reason,
         approver: assertion.approverId, service: assertion.serviceId, requestId: assertion.requestId,
       });
-      return reply.code(201).send({ decisionId: id, state: 'approved' });
-    } catch (error) {
-      // The live-approval unique index refusing a duplicate is a conflict, not a fault.
-      const message = error instanceof Error ? error.message : String(error);
-      if (/duplicate key|unique/i.test(message)) {
-        return reply.code(409).send({ error: 'already_approved', message: 'That model is already approved for this capability.' });
-      }
-      throw error;
-    }
-  });
-
-  /** Revoke a live approval. Takes effect on the next request. */
-  app.post('/api/ai/model-qualification/revoke', async (request, reply) => {
-    const assertion = await requireAssertion(request, reply, '/api/ai/model-qualification/revoke', 'POST');
-    if (!assertion) return reply;
-
-    const body = request.body as Record<string, unknown>;
-    const capability = body?.capability;
-    if (!isCapability(capability) || typeof body?.modelId !== 'string' || typeof body?.reason !== 'string') {
-      return reply.code(400).send({ error: 'invalid_request', message: 'modelId, capability and reason are required.' });
-    }
-
-    const revoked = await deps.transaction((c) => revokeApproval(c, {
-      modelId: body.modelId as string,
-      capability,
-      revokedByUserId: assertion.approverId,
-      reason: body.reason as string,
-      at: now(),
-    }));
-
-    if (!revoked) {
-      return reply.code(409).send({ error: 'not_approved', message: 'That model is not currently approved for this capability.' });
-    }
-
-    deps.audit('qualification.revoked', {
-      modelId: body.modelId, capability: body.capability, reason: body.reason,
-      approver: assertion.approverId, service: assertion.serviceId, requestId: assertion.requestId,
+      return reply.send({ revoked: true });
     });
-    return reply.send({ revoked: true });
   });
 }
