@@ -17,20 +17,35 @@
  */
 
 import { readFile } from 'node:fs/promises';
+import { createServer } from 'node:http';
+import { randomBytes } from 'node:crypto';
 import { argv, env, exit, stdout } from 'node:process';
 
 import {
   CliRefusal, approverFrom, approveRequest, revokeRequest, evidenceRequest,
   evidenceUnchanged, signMutation, confirmationText, askToConfirm, selectKey, readToken,
-  requireExplicitOutcome,
+  requireExplicitOutcome, pkcePair, buildAuthorizeUrl, parseCallback, tokenRequestBody,
+  plannedRecords, guidedPlanText,
   type AdminMeResponse, type EvidenceView, type MutationRequest,
 } from './qualifyModel.js';
 
 const AUTH_BASE = (env.MIGRAAUTH_API_URL ?? 'https://auth.migrateck.com').replace(/\/+$/, '');
 const BRAIN_BASE = (env.MIGRAPILOT_BRAIN_URL ?? `http://127.0.0.1:${env.MIGRAPILOT_BRAIN_PORT ?? 3988}`).replace(/\/+$/, '');
 
+const CLI_CLIENT_ID = env.MIGRAAUTH_CLI_CLIENT_ID ?? 'migrapilot_qualification_cli';
+const CLI_REDIRECT_PORT = Number(env.MIGRAAUTH_CLI_PORT ?? 4747);
+const CLI_REDIRECT_URI = `http://127.0.0.1:${CLI_REDIRECT_PORT}/callback`;
+const CLI_SCOPES = ['openid', 'profile', 'email'] as const;
+const STAGED_EVIDENCE = [
+  '/opt/migrapilot/staging/ev-A-full-failed.json',
+  '/opt/migrapilot/staging/ev-B-counting-failed.json',
+  '/opt/migrapilot/staging/ev-C-scoped-passed.json',
+];
+
 const USAGE = `
   migrapilot-qualify — governed model qualification
+
+    guided-approve              sign in, review, record the staged evidence and approve
 
     whoami                      prove the token and the permission behind it
     status   --capability <c>   what is approved to serve that capability right now
@@ -144,7 +159,7 @@ async function fetchEvidence(runId: string): Promise<EvidenceView | null> {
  * prompt after authorization is a second decision made under the first one's
  * approval.
  */
-async function sendSigned(request: MutationRequest, approverId: string): Promise<void> {
+async function sendSigned(request: MutationRequest, approverId: string): Promise<Record<string, unknown> | null> {
   const { keyId, key } = selectKey(env);
   const signed = signMutation({ request, approverId, keyId, key });
 
@@ -167,7 +182,200 @@ async function sendSigned(request: MutationRequest, approverId: string): Promise
     const code = typeof body?.error === 'string' ? body.error : `http_${response.status}`;
     throw new CliRefusal(code, `The Brain refused this: ${code}${body?.message ? ` — ${String(body.message)}` : ''}`);
   }
-  stdout.write(`\n  accepted — request ${signed.requestId}\n  ${JSON.stringify(body)}\n\n`);
+  return body;
+}
+
+// ── operator sign-in (Authorization Code + PKCE over loopback) ────────────
+
+/**
+ * Obtain an access token by having a human sign in, and keep it in memory.
+ *
+ * WHY A BROWSER AT ALL. MigraAuth issues tokens only through
+ * `authorization_code` — there is no client-credentials grant, and that is the
+ * right shape: a machine credential would let anything holding a file approve a
+ * model. The person approving has to be a person.
+ *
+ * THE TOKEN NEVER LEAVES THIS FUNCTION'S RETURN VALUE. Not argv, not an
+ * environment file, not a log line, not disk. It dies with the process, which is
+ * also why this client is registered WITHOUT `offline_access`: there is no
+ * refresh token to leak, and the next approval requires signing in again.
+ *
+ * LOOPBACK, NOT A PASTED CODE. The code arrives over 127.0.0.1, so it is never
+ * shown to the operator and never transits a terminal that may be recorded.
+ */
+async function signIn(): Promise<string> {
+  let discovery: { authorization_endpoint?: string; token_endpoint?: string };
+  try {
+    const response = await fetch(`${AUTH_BASE}/.well-known/openid-configuration`);
+    if (!response.ok) throw new Error(`discovery answered ${response.status}`);
+    discovery = (await response.json()) as typeof discovery;
+  } catch (error) {
+    throw new CliRefusal('discovery_failed', `Cannot read MigraAuth discovery at ${AUTH_BASE}: ${(error as Error).message}`);
+  }
+  const authorizeEndpoint = discovery.authorization_endpoint;
+  const tokenEndpoint = discovery.token_endpoint;
+  if (!authorizeEndpoint || !tokenEndpoint) {
+    throw new CliRefusal('discovery_incomplete', 'MigraAuth discovery did not name both endpoints.');
+  }
+
+  const { verifier, challenge } = pkcePair();
+  const state = randomBytes(16).toString('base64url');
+
+  const received = new Promise<string>((resolve, reject) => {
+    const server = createServer((req, res) => {
+      // Only the registered path answers; anything else gets nothing useful.
+      if (!req.url?.startsWith('/callback')) {
+        res.writeHead(404).end();
+        return;
+      }
+      try {
+        const { code } = parseCallback(req.url, state);
+        res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(
+          '<!doctype html><meta charset="utf-8"><title>Signed in</title>' +
+          '<body style="font:16px system-ui;padding:3rem;max-width:34rem">' +
+          '<h1 style="font-size:1.2rem">Signed in.</h1>' +
+          '<p>Return to the terminal to review what will be recorded. ' +
+          'Nothing has been written yet.</p>',
+        );
+        server.close();
+        resolve(code);
+      } catch (error) {
+        res.writeHead(400, { 'content-type': 'text/plain; charset=utf-8' })
+          .end('That callback was rejected. Return to the terminal.');
+        server.close();
+        reject(error);
+      }
+    });
+    server.on('error', (error) => reject(new CliRefusal(
+      'loopback_unavailable',
+      `Cannot listen on 127.0.0.1:${CLI_REDIRECT_PORT}: ${error.message}. ` +
+      'Free the port, or set MIGRAAUTH_CLI_PORT to one registered for this client.',
+    )));
+    // BOUND TO LOOPBACK EXPLICITLY. A default bind would accept the callback
+    // from the network, which is an authorization code arriving from anywhere.
+    server.listen(CLI_REDIRECT_PORT, '127.0.0.1');
+    setTimeout(() => {
+      server.close();
+      reject(new CliRefusal('sign_in_timeout', 'No callback arrived within five minutes.'));
+    }, 5 * 60_000).unref();
+  });
+
+  const url = buildAuthorizeUrl({
+    authorizeEndpoint, clientId: CLI_CLIENT_ID, redirectUri: CLI_REDIRECT_URI,
+    challenge, state, scopes: CLI_SCOPES,
+  });
+  stdout.write(`\n  Open this in a browser and sign in as the operator account:\n\n    ${url}\n\n  Waiting for the callback on 127.0.0.1:${CLI_REDIRECT_PORT}…\n`);
+
+  const code = await received;
+
+  const response = await fetch(tokenEndpoint, {
+    method: 'POST',
+    headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    body: tokenRequestBody({ code, verifier, clientId: CLI_CLIENT_ID, redirectUri: CLI_REDIRECT_URI }),
+  });
+  if (!response.ok) {
+    // The status, never the body: a token-endpoint error can echo the code back.
+    throw new CliRefusal('token_exchange_failed', `The token endpoint answered ${response.status}.`);
+  }
+  const payload = (await response.json()) as { access_token?: unknown };
+  if (typeof payload.access_token !== 'string' || !payload.access_token) {
+    throw new CliRefusal('no_access_token', 'The token endpoint returned no access token.');
+  }
+  return payload.access_token;
+}
+
+/**
+ * Sign in, review, record every staged evidence run, approve the one that earned
+ * it, and PROVE the registry changed.
+ *
+ * The last step is not a formality. Recording and approving can both succeed
+ * while the running Brain still serves nothing — a stale registry, a different
+ * digest, a capability nobody reads. Until the live registry says so, the
+ * capability is not enabled, and this exits non-zero rather than report success.
+ */
+async function guidedApprove(): Promise<void> {
+  const token = await signIn();
+  const { approverId, email, viaBootstrap } = await whoAmI(token);
+  if (viaBootstrap) {
+    stdout.write('\n  ⚠ This authority comes from AUTH_ADMIN_USER_IDS, not a real grant.\n');
+  }
+  stdout.write(`\n  Authenticated as ${approverId}${email ? ` (${email})` : ''}\n`);
+
+  const loaded: { file: string; evidence: Record<string, unknown> }[] = [];
+  for (const file of STAGED_EVIDENCE) {
+    loaded.push({ file, evidence: (await readJsonFile(file)) as Record<string, unknown> });
+  }
+  const plan = plannedRecords(loaded);
+
+  const first = loaded[0]!.evidence;
+  const modelId = String(env.MIGRAPILOT_QUALIFY_MODEL ?? 'qwen2.5vl:7b');
+  const digest = String(first.model_digest ?? env.MIGRAPILOT_QUALIFY_DIGEST ?? '');
+  const version = String(env.MIGRAPILOT_QUALIFY_VERSION ?? 'Q4_K_M-8.3B');
+  if (!digest) {
+    throw new CliRefusal('no_digest', 'No model digest is available; an approval must name exact bytes.');
+  }
+
+  stdout.write(guidedPlanText({ modelId, version, digest, approverId, approverEmail: email, records: plan }));
+  if (!(await askToConfirm('  Type "approve" to sign all of this: '))) {
+    stdout.write('  Nothing was signed.\n\n');
+    exit(1);
+  }
+
+  // ── non-interactive from here. Every write below was covered by that one yes.
+  const runIds = new Map<string, string>();
+  for (let i = 0; i < plan.length; i += 1) {
+    const step = plan[i]!;
+    const evidence = loaded[i]!.evidence;
+    const request = evidenceRequest({
+      modelId, capability: step.capability, suite: step.suite, passed: step.passed,
+      modelVersion: version, modelDigest: digest,
+      license: typeof evidence.license === 'string' ? evidence.license : undefined,
+      licenseSource: typeof evidence.license_source === 'string' ? evidence.license_source : undefined,
+      results: evidence,
+    });
+    const body = await sendSigned(request, approverId);
+    const runId = typeof body?.evidenceRunId === 'string' ? body.evidenceRunId : null;
+    if (!runId) throw new CliRefusal('no_run_id', `Recording ${step.capability} returned no evidence run id.`);
+    runIds.set(step.capability, runId);
+    stdout.write(`  recorded  ${step.passed ? 'PASSED' : 'FAILED'}  ${step.capability}  (${step.suite})  run ${runId}\n`);
+  }
+
+  for (const step of plan.filter((p) => p.approve)) {
+    const runId = runIds.get(step.capability)!;
+    await sendSigned(approveRequest({ modelId, capability: step.capability, evidenceRunId: runId }), approverId);
+    stdout.write(`  APPROVED  ${step.capability}  against run ${runId}\n`);
+  }
+
+  await proveRegistry(modelId);
+}
+
+/**
+ * The registry, read from the running Brain, after the writes.
+ *
+ * An approval that the serving process does not reflect is not a capability.
+ * This asserts both halves: the scoped one is live, and the excluded one is
+ * still refused — because "counting quietly became qualified" is exactly the
+ * outcome the split capability exists to prevent.
+ */
+async function proveRegistry(modelId: string): Promise<void> {
+  const { status, body } = await brainGet('/api/ai/vision-registry');
+  if (status !== 200) throw new CliRefusal('registry_unreadable', `The Brain answered ${status} for the registry.`);
+  const governed = (body as { governed?: Record<string, { qualified?: boolean; modelId?: string | null }> } | null)?.governed;
+  const general = governed?.['vision.general'];
+  const counting = governed?.['vision.object_counting'];
+
+  stdout.write('\n  ── LIVE REGISTRY ────────────────────────────────────────────\n');
+  stdout.write(`  vision.general          qualified=${general?.qualified === true}  model=${general?.modelId ?? 'none'}\n`);
+  stdout.write(`  vision.object_counting  qualified=${counting?.qualified === true}  model=${counting?.modelId ?? 'none'}\n`);
+
+  const ok = general?.qualified === true && general.modelId === modelId && counting?.qualified !== true;
+  if (!ok) {
+    throw new CliRefusal(
+      'registry_not_updated',
+      'The writes succeeded but the running registry does not reflect them. Image input must stay disabled.',
+    );
+  }
+  stdout.write('\n  ✓ Image understanding is qualified and live. Counting remains refused.\n\n');
 }
 
 // ── commands ──────────────────────────────────────────────────────────────
@@ -203,6 +411,16 @@ async function run(command: string, flags: Flags): Promise<void> {
     const evidence = await fetchEvidence(required(flags, 'evidence'));
     if (!evidence) throw new CliRefusal('unknown_evidence', 'No evidence run with that id.');
     stdout.write(`${JSON.stringify(evidence, null, 2)}\n`);
+    return;
+  }
+
+  /*
+   * The guided path signs a human in itself, so it must come BEFORE the
+   * environment-token requirement — the whole point is that no one has to obtain
+   * a token by hand.
+   */
+  if (command === 'guided-approve') {
+    await guidedApprove();
     return;
   }
 
@@ -246,7 +464,8 @@ async function run(command: string, flags: Flags): Promise<void> {
      * append-only measurement, and approval — which does grant something — makes
      * the human read that measurement's digest and outcome before deciding.
      */
-    await sendSigned(request, approverId);
+    const recorded = await sendSigned(request, approverId);
+    stdout.write(`\n  accepted — ${JSON.stringify(recorded)}\n\n`);
     return;
   }
 
@@ -285,10 +504,11 @@ async function run(command: string, flags: Flags): Promise<void> {
       );
     }
 
-    await sendSigned(
+    const approved = await sendSigned(
       approveRequest({ modelId, capability, evidenceRunId, note: optional(flags, 'note') }),
       approverId,
     );
+    stdout.write(`\n  accepted — ${JSON.stringify(approved)}\n\n`);
     return;
   }
 
@@ -305,7 +525,8 @@ async function run(command: string, flags: Flags): Promise<void> {
       stdout.write('  Not revoked. Nothing was signed.\n\n');
       exit(1);
     }
-    await sendSigned(revokeRequest({ modelId, capability, reason }), approverId);
+    const revoked = await sendSigned(revokeRequest({ modelId, capability, reason }), approverId);
+    stdout.write(`\n  accepted — ${JSON.stringify(revoked)}\n\n`);
     return;
   }
 

@@ -1,5 +1,5 @@
 import { createInterface } from 'node:readline';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 
 import {
   signAssertion, sha256Hex, ASSERTION_ENVELOPE_VERSION, MAX_ASSERTION_TTL_MS,
@@ -307,4 +307,159 @@ export function readToken(env: NodeJS.ProcessEnv = process.env): string {
     );
   }
   return token;
+}
+
+// ── operator authentication (Authorization Code + PKCE, loopback) ──────────
+
+/**
+ * PKCE, because this client has no secret and must not have one.
+ *
+ * A CLI cannot keep a client secret: it ships to an operator's machine, so the
+ * "secret" would be readable by anyone who can run the tool. PKCE replaces it
+ * with a per-attempt proof — the verifier never leaves this process, and an
+ * intercepted authorization code is useless without it.
+ */
+export function pkcePair(): { verifier: string; challenge: string } {
+  const verifier = randomBytes(32).toString('base64url');
+  const challenge = createHash('sha256').update(verifier).digest('base64url');
+  return { verifier, challenge };
+}
+
+export interface AuthorizeParams {
+  authorizeEndpoint: string;
+  clientId: string;
+  redirectUri: string;
+  challenge: string;
+  state: string;
+  scopes: readonly string[];
+}
+
+export function buildAuthorizeUrl(p: AuthorizeParams): string {
+  const url = new URL(p.authorizeEndpoint);
+  url.searchParams.set('response_type', 'code');
+  url.searchParams.set('client_id', p.clientId);
+  url.searchParams.set('redirect_uri', p.redirectUri);
+  url.searchParams.set('scope', p.scopes.join(' '));
+  url.searchParams.set('state', p.state);
+  url.searchParams.set('code_challenge', p.challenge);
+  // S256 only. `plain` puts the verifier itself in the authorization request,
+  // which is the whole thing PKCE exists to avoid sending.
+  url.searchParams.set('code_challenge_method', 'S256');
+  return url.toString();
+}
+
+/**
+ * Read the authorization code out of the loopback callback.
+ *
+ * THE STATE CHECK IS NOT OPTIONAL. Without it, anything that can reach this
+ * loopback port during the window can hand the CLI a code from a different
+ * authorization — a code the operator never approved, for an account they do
+ * not control. Compared before the code is even looked at.
+ */
+export function parseCallback(rawUrl: string, expectedState: string): { code: string } {
+  const url = new URL(rawUrl, 'http://127.0.0.1');
+  const error = url.searchParams.get('error');
+  if (error) {
+    throw new CliRefusal('authorization_denied', `MigraAuth refused the authorization: ${error}`);
+  }
+  const state = url.searchParams.get('state');
+  if (!state || state !== expectedState) {
+    throw new CliRefusal('state_mismatch', 'The callback did not carry the state this attempt issued.');
+  }
+  const code = url.searchParams.get('code');
+  if (!code) {
+    throw new CliRefusal('no_code', 'The callback carried no authorization code.');
+  }
+  return { code };
+}
+
+export function tokenRequestBody(input: {
+  code: string; verifier: string; clientId: string; redirectUri: string;
+}): string {
+  return new URLSearchParams({
+    grant_type: 'authorization_code',
+    code: input.code,
+    code_verifier: input.verifier,
+    client_id: input.clientId,
+    redirect_uri: input.redirectUri,
+  }).toString();
+}
+
+// ── the guided run ─────────────────────────────────────────────────────────
+
+export interface PlannedRecord {
+  file: string;
+  capability: string;
+  suite: string;
+  passed: boolean;
+  /** Only one record in the plan may be approved, and only if it passed. */
+  approve: boolean;
+}
+
+/**
+ * What a guided run will write, decided from the evidence files themselves.
+ *
+ * THE VERDICT COMES FROM THE EVIDENCE, NOT FROM A FLAG. `--passed` on the
+ * command line would let an operator record a pass for a run that failed, which
+ * is the one thing this whole path exists to make impossible. Each file states
+ * its own verdict and the plan follows it.
+ */
+export function plannedRecords(
+  files: readonly { file: string; evidence: Record<string, unknown> }[],
+): PlannedRecord[] {
+  return files.map(({ file, evidence }) => {
+    const verdict = String(evidence.verdict ?? '').toUpperCase();
+    if (verdict !== 'PASSED' && verdict !== 'FAILED') {
+      throw new CliRefusal('unreadable_verdict', `${file} does not state PASSED or FAILED.`);
+    }
+    const capability = typeof evidence.capability_under_test === 'string'
+      ? evidence.capability_under_test
+      : 'vision';
+    const suite = typeof evidence.suite === 'string' ? evidence.suite : '';
+    if (!suite) throw new CliRefusal('unreadable_suite', `${file} does not name a suite.`);
+    const passed = verdict === 'PASSED';
+    return {
+      file, capability, suite, passed,
+      // Approval follows a pass, and only for the scoped general capability. A
+      // failed run can never carry one — the Brain refuses it anyway, and the
+      // plan must not even offer it.
+      approve: passed && capability === 'vision.general',
+    };
+  });
+}
+
+/** The whole plan on one screen, before anything is signed. */
+export function guidedPlanText(input: {
+  modelId: string;
+  version: string;
+  digest: string;
+  approverId: string;
+  approverEmail: string | null;
+  records: readonly PlannedRecord[];
+}): string {
+  const lines = [
+    '',
+    '  ── WHAT THIS WILL RECORD ────────────────────────────────────',
+    `  model         ${input.modelId}`,
+    `  version       ${input.version}`,
+    /* THE FULL DIGEST. Approving a tag must visibly mean approving these exact
+     * bytes, and a truncated hash is a tag with extra steps. */
+    `  digest        ${input.digest}`,
+    `  approver      ${input.approverId}${input.approverEmail ? ` (${input.approverEmail})` : ''}`,
+    '',
+  ];
+  for (const r of input.records) {
+    lines.push(`  ${r.passed ? 'PASSED' : 'FAILED'}  ${r.capability.padEnd(24)} ${r.suite}`);
+  }
+  const approvals = input.records.filter((r) => r.approve);
+  lines.push(
+    '',
+    approvals.length === 0
+      ? '  No approval will be granted.'
+      : `  Then APPROVE: ${approvals.map((r) => r.capability).join(', ')}`,
+    '  Everything else stays unqualified and will be refused at the boundary.',
+    '  ─────────────────────────────────────────────────────────────',
+    '',
+  );
+  return lines.join('\n');
 }
