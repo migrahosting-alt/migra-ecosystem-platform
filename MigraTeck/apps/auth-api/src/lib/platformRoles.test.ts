@@ -53,6 +53,22 @@ test("SUPPORT can read but cannot change anything", () => {
   assert.ok(!p.has("platform.roles.manage"), "support must not be able to widen access");
 });
 
+test("identifying yourself does not require power over other people", () => {
+  /*
+   * `/v1/admin/me` was guarded by `platform.users.read`, which coupled "who am
+   * I" to "enumerate everyone". A narrow model-operator holding only
+   * `platform.models.qualify` could then never discover its own identity — and
+   * the operator tool must derive its approver from exactly that endpoint.
+   */
+  for (const role of ["SUPPORT", "OPERATOR", "OWNER"] as const) {
+    assert.ok(permissionsForRoles([role]).has("platform.self.read"), `${role} must be able to identify itself`);
+  }
+  const me = admin.indexOf('"/v1/admin/me"');
+  assert.match(admin.slice(me, me + 200), /requirePermission\("platform\.self\.read"\)/);
+  // And it must return a canonical id, or the tool has nothing to derive from.
+  assert.match(admin.slice(me, me + 1200), /user_id: user\.id/);
+});
+
 test("qualifying a model is a distinct power from granting roles", () => {
   /*
    * Different powers over different things: one decides WHO may operate the

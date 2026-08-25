@@ -21,6 +21,18 @@ import type { PlatformRole } from "../../prisma-client.js";
  * exposes it. Routes move; the authority they represent does not.
  */
 export const PLATFORM_PERMISSIONS = [
+  /**
+   * Read YOUR OWN platform authority — who you are and what you may do.
+   *
+   * Held by every platform role, because it is not a power over anything: it is
+   * the answer a caller needs before it can act at all. It was previously
+   * implied by `platform.users.read`, which coupled "identify myself" to
+   * "enumerate other people" — so a narrow model-operator holding only
+   * `platform.models.qualify` could never discover its own identity, and the
+   * operator tool that must derive an approver from this endpoint would have
+   * been locked out of it.
+   */
+  "platform.self.read",
   /** Read account records: listing, searching, viewing one. */
   "platform.users.read",
   /** Lock, unlock or disable an account. Changes whether someone can sign in. */
@@ -74,8 +86,9 @@ export type PlatformPermission = (typeof PLATFORM_PERMISSIONS)[number];
  * who acts" is the point of having more than one role at all.
  */
 const ROLE_PERMISSIONS: Record<PlatformRole, readonly PlatformPermission[]> = {
-  SUPPORT: ["platform.users.read", "platform.audit.read"],
+  SUPPORT: ["platform.self.read", "platform.users.read", "platform.audit.read"],
   OPERATOR: [
+    "platform.self.read",
     "platform.users.read",
     "platform.users.suspend",
     "platform.users.mfa_reset",

@@ -219,9 +219,21 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
    * Guarded by the weakest platform permission, so anyone with any operator
    * authority can ask — and nobody without it learns the surface exists.
    */
-  app.get("/v1/admin/me", { preHandler: requirePermission("platform.users.read") }, async (request, reply) => {
+  app.get("/v1/admin/me", { preHandler: requirePermission("platform.self.read") }, async (request, reply) => {
     const authority = request.platformAuthority!;
+    const user = request.authUser!;
     return reply.code(200).send({
+      /*
+       * THE CANONICAL IDENTITY, FROM THE AUTHORITY THAT ESTABLISHED IT.
+       *
+       * The operator tool derives its approver from this and nothing else — not
+       * from a flag it was passed, and not by decoding a token itself. One
+       * authority answers "who is this" and "what may they do", so the two can
+       * never disagree; a caller that decoded its own token would be a second
+       * opinion on the first question with no way to settle a conflict.
+       */
+      user_id: user.id,
+      email: user.email,
       roles: authority.roles.map((r) => r.toLowerCase()),
       permissions: [...authority.permissions],
       // Surfaced so an interface can WARN that this deployment is still running
