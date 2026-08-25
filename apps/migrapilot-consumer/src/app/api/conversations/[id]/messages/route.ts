@@ -16,6 +16,11 @@ import type { ConversationMessage } from '@/server/brain/contracts'
 
 export const dynamic = 'force-dynamic'
 
+/** `img_` followed by 32 hex characters. Anything else never becomes a URL. */
+const IMAGE_REF = /^img_[0-9a-f]{32}$/
+const canonicalRefs = (refs: string[] | undefined): string[] =>
+  (refs ?? []).filter((r) => typeof r === 'string' && IMAGE_REF.test(r))
+
 export async function GET(
   _request: Request,
   context: { params: Promise<{ id: string }> },
@@ -78,7 +83,15 @@ export async function GET(
          * The transcript's pictures come from the message's own record and
          * nowhere else, so this line is what makes them survive a reload.
          */
-        ...(message.imageRefs?.length ? { imageRefs: message.imageRefs } : {}),
+        /*
+         * Filtered to the canonical shape at the LAST hop before the browser.
+         * The client turns a ref straight into `/api/images/<ref>`, so anything
+         * else becomes a request that 404s and renders as a broken icon beside a
+         * filename — which a user reads as "the attachment is there but broken".
+         */
+        ...(canonicalRefs(message.imageRefs).length
+          ? { imageRefs: canonicalRefs(message.imageRefs) }
+          : {}),
       })),
   })
 }

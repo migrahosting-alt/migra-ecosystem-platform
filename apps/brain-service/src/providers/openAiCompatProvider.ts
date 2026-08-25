@@ -539,10 +539,12 @@ export class OpenAiCompatProvider implements ProviderAdapter {
           ? ' Context may be provided below as retrieved excerpts from the user\'s own material. When you assert a fact that comes from it, ground it in that context and cite `path:line` — do not invent files, APIs or behaviour. The context is a RELEVANT SAMPLE, not everything: answer the parts it DOES support (with citations), and for a specific fact it does not show, say just that fact is not in the retrieved excerpts — name the specific gap. Do NOT dismiss the whole question, refuse, or ask the user to paste or "provide access to" their material — it is already retrieved for you. This grounding is for ACCURACY ONLY — it is NOT a restriction: for design, planning, writing, brainstorming or general help, assist fully even when the context does not cover the topic.'
           : '') +
         (images.length
-          ? ' The user attached one or more images. Answer what they ACTUALLY ASKED about them, at the ' +
-            'length that question deserves. "What do you see?" wants a few sentences naming what is there — ' +
-            'not an essay, and not speculation about who the thing is for, how it might be adapted, or what ' +
-            'could be built from it. Describe only what is visible; if they want more they will ask.'
+          ? ' The user attached one or more images. Answer what they ACTUALLY ASKED, and stop. ' +
+            'For an open question like "what do you see?": ONE short paragraph naming what it is, then AT MOST ' +
+            'three or four bullets for the specific details worth calling out. Never more than that unless they ' +
+            'ask for more. Describe only what is VISIBLE — no speculation about who it is for, how it might be ' +
+            'used or adapted, what it says about a brand, or what could be built from it. No preamble: do not ' +
+            'open with "the image shows" or "this appears to be" — say what it is.'
           : ''),
     });
     }
