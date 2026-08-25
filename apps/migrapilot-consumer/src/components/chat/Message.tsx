@@ -19,6 +19,7 @@ import { FileTypeIcon } from '@/components/ui/FileTypeIcon'
 import { LogoMark } from '@/components/brand/Logo'
 import { RichText } from './RichText'
 import { RichAnswer } from '@/features/markdown/RichAnswer'
+import { ImageViewer } from './ImageViewer'
 import { SourceIcon } from './SourceIcon'
 import { DiagramPreview, Waveform } from './DiagramPreview'
 import type { Attachment, Block, Message } from '@/data/types'
@@ -152,6 +153,8 @@ function AttachmentGrid({ attachments }: { attachments: Attachment[] }) {
 
 function UserTurn({ message }: { message: Message }) {
   const wide = Boolean(message.attachments?.length)
+  /** Which attached image is open full size, if any. */
+  const [viewing, setViewing] = useState<string | null>(null)
 
   return (
     <div className="flex justify-end">
@@ -166,21 +169,40 @@ function UserTurn({ message }: { message: Message }) {
         {message.images && message.images.length > 0 && (
           <div className="mb-1.5 flex flex-wrap justify-end gap-2">
             {message.images.map((ref) => (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
+              <button
                 key={ref}
-                src={`/api/images/${ref}`}
-                alt="Image attached to this message"
-                /*
-                 * The transcript shows the image in its OWN shape, bounded
-                 * rather than cropped. A square box cropped a portrait photo
-                 * down to its middle, so the record of what was asked about no
-                 * longer matched what was sent.
-                 */
-                className="max-h-64 w-auto max-w-full rounded-xl border border-slate-200 object-contain"
-              />
+                type="button"
+                onClick={() => setViewing(ref)}
+                aria-label="Open image full size"
+                title="Open full size"
+                className="rounded-xl focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={`/api/images/${ref}`}
+                  alt="Image attached to this message"
+                  /*
+                   * The transcript shows the image in its OWN shape, bounded
+                   * rather than cropped. A square box cropped a portrait photo
+                   * down to its middle, so the record of what was asked about no
+                   * longer matched what was sent.
+                   *
+                   * `draggable` so it behaves like an ordinary image: dragging it
+                   * out carries the real authorised URL, not a preview copy.
+                   */
+                  draggable
+                  className="max-h-64 w-auto max-w-full cursor-zoom-in rounded-xl border border-slate-200 object-contain transition hover:border-slate-300"
+                />
+              </button>
             ))}
           </div>
+        )}
+        {viewing && (
+          <ImageViewer
+            src={`/api/images/${viewing}`}
+            alt="Image attached to this message"
+            onClose={() => setViewing(null)}
+          />
         )}
 
         {message.text && (

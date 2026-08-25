@@ -1,6 +1,6 @@
 'use client'
 
-import { useRef, useState, type ChangeEvent, type FormEvent, type KeyboardEvent } from 'react'
+import { useCallback, useRef, useState, type ChangeEvent, type ClipboardEvent, type DragEvent, type FormEvent, type KeyboardEvent } from 'react'
 import { Lock, Mic, SendHorizontal } from 'lucide-react'
 import { AttachmentChips } from '@/features/attachments/AttachmentChips'
 import { acceptAttribute } from '@/features/attachments/filename'
@@ -17,6 +17,16 @@ import type { PublicImage } from '@/app/api/images/route'
  * server accepts, and it stops a bad ref from reaching an <img> as a broken icon.
  */
 const IMAGE_REF = /^img_[0-9a-f]{32}$/
+
+/**
+ * What the picker offers and what paste and drop accept — one list, so the three
+ * entry points cannot come to disagree about what an image is.
+ */
+const ACCEPTED_IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp']
+const ACCEPTED_LABEL = 'PNG, JPEG, GIF or WebP'
+
+/** Bounded and stated, rather than silently dropping the extras. */
+const MAX_TURN_IMAGES = 4
 import { micDisabledReason, useMicAvailability } from '@/features/voice/useMicAvailability'
 import { VoicePanel } from '@/features/voice/VoicePanel'
 import { useVoiceRecorder } from '@/features/voice/useVoiceRecorder'
@@ -198,14 +208,33 @@ export function Composer({
    * would not survive the reload, and would not be an identity the Brain could
    * verify.
    */
-  const onImagePicked = async (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0]
-    event.target.value = ''
-    if (!file) return
+  /**
+   * The ONE upload path.
+   *
+   * The picker, a clipboard paste and a drop all call this. A second
+   * implementation would drift: validation, quota, scope, the canonical ref and
+   * every failure message live on the server, and a parallel path is how one of
+   * them quietly stops matching.
+   */
+  const uploadImage = useCallback(async (file: File) => {
+    if (!visionReady) {
+      setImageError(visionReason)
+      return
+    }
+    if (!ACCEPTED_IMAGE_TYPES.includes(file.type)) {
+      // Refused before the upload: a HEIC that the server will reject anyway has
+      // wasted the transfer and taught the user nothing.
+      setImageError(`That file type is not supported. Use ${ACCEPTED_LABEL}.`)
+      return
+    }
+    if (images.length >= MAX_TURN_IMAGES) {
+      // Bounded truthfully rather than silently dropping the extras.
+      setImageError(`You can attach up to ${MAX_TURN_IMAGES} images to one message.`)
+      return
+    }
+
     setImageError(null)
-    // The picked file's own name, so the placeholder is about THIS upload rather
-    // than a generic spinner that could belong to anything.
-    setPendingImage({ name: file.name })
+    setPendingImage({ name: file.name || 'pasted image' })
     try {
       const form = new FormData()
       form.append('image', file)
@@ -222,8 +251,6 @@ export function Composer({
        * `imageId`, not `id`. Reading the wrong name here produced
        * `/api/images/undefined` — a 404 rendered into an <img> as a broken icon,
        * with the filename beside it so it still looked like an attachment.
-       * Guarded as well as typed: a ref that is not canonical is never turned
-       * into a URL.
        */
       const ref = data.image.imageId
       if (!IMAGE_REF.test(ref)) {
@@ -236,7 +263,82 @@ export function Composer({
     } finally {
       setPendingImage(null)
     }
+  }, [images.length, visionReady, visionReason])
+
+  const onImagePicked = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (file) await uploadImage(file)
   }
+
+  /**
+   * Ctrl+V with an image on the clipboard.
+   *
+   * DETERMINISTIC, NOT ACCIDENTAL. If the clipboard carries an image it is
+   * attached and the default paste is prevented — copying an image from a page
+   * usually also puts its URL on the clipboard as text, and letting both through
+   * would drop a URL into the box the user did not type. If there is no image,
+   * nothing here runs and text pastes exactly as before.
+   */
+  const onPaste = useCallback((event: ClipboardEvent<HTMLTextAreaElement>) => {
+    const items = Array.from(event.clipboardData?.items ?? [])
+    const imageItem = items.find(
+      (item) => item.kind === 'file' && ACCEPTED_IMAGE_TYPES.includes(item.type),
+    )
+    if (!imageItem) return
+    const file = imageItem.getAsFile()
+    if (!file) return
+    event.preventDefault()
+    void uploadImage(file)
+  }, [uploadImage])
+
+  /**
+   * Drag from the desktop onto the composer.
+   *
+   * `dragCounter` rather than a boolean: dragenter/dragleave fire for every
+   * child element crossed, so a plain flag flickers off the moment the pointer
+   * moves over the textarea inside the drop zone.
+   */
+  const dragCounter = useRef(0)
+  const [dragging, setDragging] = useState(false)
+
+  const hasImageDrag = (event: DragEvent) =>
+    Array.from(event.dataTransfer?.items ?? []).some((item) => item.kind === 'file')
+
+  const onDragEnter = useCallback((event: DragEvent<HTMLFormElement>) => {
+    if (!hasImageDrag(event)) return
+    event.preventDefault()
+    dragCounter.current += 1
+    setDragging(true)
+  }, [])
+
+  const onDragOver = useCallback((event: DragEvent<HTMLFormElement>) => {
+    if (!hasImageDrag(event)) return
+    // Without this the browser navigates away to the dropped file.
+    event.preventDefault()
+  }, [])
+
+  const onDragLeave = useCallback((event: DragEvent<HTMLFormElement>) => {
+    if (!hasImageDrag(event)) return
+    dragCounter.current = Math.max(0, dragCounter.current - 1)
+    if (dragCounter.current === 0) setDragging(false)
+  }, [])
+
+  const onDrop = useCallback((event: DragEvent<HTMLFormElement>) => {
+    const files = Array.from(event.dataTransfer?.files ?? [])
+    if (files.length === 0) return
+    event.preventDefault()
+    dragCounter.current = 0
+    setDragging(false)
+    /*
+     * Sequential, not parallel: each upload checks the per-message cap against
+     * the images already attached, and firing them at once would let every one
+     * of them see the same stale count and all pass.
+     */
+    void (async () => {
+      for (const file of files) await uploadImage(file)
+    })()
+  }, [uploadImage])
 
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === 'Enter' && !event.shiftKey) {
@@ -274,14 +376,34 @@ export function Composer({
   return (
     <form
       onSubmit={submit}
+      onDragEnter={onDragEnter}
+      onDragOver={onDragOver}
+      onDragLeave={onDragLeave}
+      onDrop={onDrop}
       className={cn(
-        'rounded-2xl border bg-raised p-3.5 transition-all duration-200',
+        'relative rounded-2xl border bg-raised p-3.5 transition-all duration-200',
         active
           ? 'border-brand-400 ring-4 ring-brand-500/10'
           : 'border-slate-200 shadow-card hover:border-slate-300',
+        dragging && 'border-brand-500 ring-4 ring-brand-500/20',
         className,
       )}
     >
+      {/*
+        The drop target says what will happen, and covers the composer so the
+        pointer cannot land on a child that is not listening. `pointer-events-none`
+        keeps it from stealing the drop itself.
+      */}
+      {dragging && (
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-2xl border-2 border-dashed border-brand-400 bg-brand-50/85"
+        >
+          <span className="text-[14px] font-medium text-brand-700">
+            Drop an image to attach it
+          </span>
+        </div>
+      )}
       <VoicePanel
         state={voice.state}
         error={voice.error}
@@ -340,6 +462,7 @@ export function Composer({
         onFocus={() => setFocused(true)}
         onBlur={() => setFocused(false)}
         onKeyDown={onKeyDown}
+        onPaste={onPaste}
         onChange={(event) => {
           setValue(event.target.value)
           grow()
