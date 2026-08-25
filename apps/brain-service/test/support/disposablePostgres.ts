@@ -137,6 +137,50 @@ export async function postgresTestSkipReason(): Promise<string | null> {
  * Honours `MIGRAPILOT_TEST_DATABASE_URL` when set, so CI can point at a
  * pre-provisioned instance instead of spawning containers.
  */
+/** Containers younger than this are assumed to belong to a running sibling file. */
+export const STALE_CONTAINER_AGE_MS = 30 * 60 * 1000;
+
+/**
+ * Remove test containers left behind by earlier runs.
+ *
+ * Best effort by design: a failure to reap must never fail the test that was
+ * about to run. The worst case is that the leak persists one more round, which
+ * is exactly where we already were.
+ */
+export async function reapStaleContainers(
+  docker: string,
+  exec: ExecLike = defaultExec,
+  nowMs: number = Date.now(),
+): Promise<string[]> {
+  const reaped: string[] = [];
+  try {
+    // `CreatedAt` is emitted like `2026-08-25 14:12:03 -0400 EDT`; the trailing
+    // zone abbreviation is not parseable, so it is dropped before parsing.
+    const { stdout } = await exec(docker, [
+      'ps',
+      '-a',
+      '--filter',
+      'name=migrapilot-pg-test-',
+      '--format',
+      '{{.Names}}\t{{.CreatedAt}}',
+    ]);
+    for (const line of stdout.replace(/\r/g, '').split('\n')) {
+      const [name, createdAt] = line.split('\t');
+      if (!name || !createdAt) continue;
+      const parsed = Date.parse(createdAt.replace(/\s+[A-Z]{2,5}$/, ''));
+      // An unparseable date is NOT treated as stale: removing a container a
+      // sibling file is using would fail that file instead of this leak.
+      if (!Number.isFinite(parsed)) continue;
+      if (nowMs - parsed < STALE_CONTAINER_AGE_MS) continue;
+      await exec(docker, ['rm', '-f', name]).catch(() => undefined);
+      reaped.push(name);
+    }
+  } catch {
+    // Best effort: see above.
+  }
+  return reaped;
+}
+
 export async function startDisposablePostgres(): Promise<DisposablePostgres> {
   const preset = process.env.MIGRAPILOT_TEST_DATABASE_URL;
   if (preset) {
@@ -151,6 +195,26 @@ export async function startDisposablePostgres(): Promise<DisposablePostgres> {
 
   const docker = await resolveDockerBinary();
   if (!docker) throw new Error("no reachable Docker daemon (checked docker and docker.exe)");
+
+  /*
+   * REAP BEFORE STARTING.
+   *
+   * Every container here is removed by its own `stop()` — when the caller
+   * remembers to call it and the process lives long enough to run it. A crashed
+   * run, a killed suite or a forgotten `after()` leaves one behind FOREVER, and
+   * they accumulate: eighteen were found running, some for fourteen hours.
+   *
+   * That is not a tidiness problem, it is the acceptance gate's determinism.
+   * Docker Desktop degrades as they pile up until container starts fail outright
+   * with `UtilAcceptVsock: accept4 failed 110`, and a whole block of Postgres
+   * tests fails at once — which reads exactly like flaky tests and is not.
+   *
+   * Reaping on the way IN makes the leak self-healing regardless of how the
+   * previous run died. Age-bounded because node's runner executes test files
+   * concurrently, and a young container almost certainly belongs to a sibling
+   * file that is still using it.
+   */
+  await reapStaleContainers(docker);
 
   const name = `migrapilot-pg-test-${randomBytes(4).toString('hex')}`;
   await run(docker, [

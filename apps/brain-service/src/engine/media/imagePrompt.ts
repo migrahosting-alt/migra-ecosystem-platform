@@ -1,0 +1,79 @@
+/**
+ * The user's sentence is not a diffusion prompt.
+ *
+ * WHY THIS EXISTS. "generate letter A in png" contains three things a diffusion
+ * model should never see: an imperative aimed at an assistant, a file format,
+ * and no description of an image. Passed through verbatim it produced four
+ * overlapping letterforms reading "ACAA" — a real PNG, and the wrong picture.
+ *
+ * MEASURED, NOT REASONED. Three phrasings were generated at fixed seed against
+ * the real pipeline and looked at:
+ *
+ *   "letter A"                                     -> a wall of letterforms
+ *   "the single capital letter A, centered, ..."   -> an A textured with garbled text
+ *   "a single capital letter 'A', bold black serif
+ *    typography, ..., one letter only"             -> a clean single A
+ *
+ * SHAPING IS DELIBERATELY NARROW. Only the request grammar is removed, and only
+ * one class of subject — a single character — is expanded, because that is the
+ * class the model demonstrably gets wrong without help. Everything else is
+ * passed through as the user wrote it: rewriting someone's description of the
+ * picture they want is how you return a confident, well-composed image of
+ * something they did not ask for.
+ */
+
+/** Imperatives aimed at the assistant, not at the canvas. */
+const REQUEST_PREFIX =
+  /^\s*(please\s+)?(can you\s+|could you\s+|i want you to\s+|i(?:'d| would) like\s+)?(generate|create|make|draw|paint|render|produce|design|illustrate|show)\s+(me\s+)?((an?|the)\s+(image|picture|drawing|illustration|photo)\s+of\s+)?/i
+
+/*
+ * The article is consumed ONLY as part of "an image of". An earlier version
+ * stripped a leading `a|an|the` unconditionally and ate the subject of
+ * "generate A in png" — the letter A read as the article "a" — leaving "in png",
+ * which then stripped to nothing. It also has to leave "a cat wearing a red hat"
+ * with its article, since that is the user's own phrasing of the picture.
+ */
+
+/** File formats and delivery words: instructions about the artefact, not its content. */
+const FORMAT_SUFFIX =
+  /\s*(,?\s*(in|as|to)\s+(a\s+)?)?(png|jpe?g|webp|gif|svg|image|picture|file|format)\s*(file|format|image)?\s*$/i
+
+/** A request for one character to be drawn. */
+const SINGLE_CHARACTER =
+  /^(the\s+|a\s+)?(capital|uppercase|upper[- ]case|lowercase|lower[- ]case|small)?\s*(letter|character|digit|number|symbol)\s+["'“”]?([A-Za-z0-9])["'“”]?$/i
+
+/** A bare character, once the request grammar is gone: "generate A in png" -> "A". */
+const BARE_CHARACTER = /^["'“”]?([A-Za-z0-9])["'“”]?$/
+
+export function shapeImagePrompt(userPrompt: string): string {
+  let text = userPrompt.trim()
+
+  // Strip the request grammar, then the format instruction. Order matters: the
+  // suffix rule would otherwise eat the word "image" out of "image of a cat".
+  text = text.replace(REQUEST_PREFIX, '')
+  let previous: string
+  do {
+    previous = text
+    text = text.replace(FORMAT_SUFFIX, '').trim()
+  } while (text !== previous && text.length > 0)
+  text = text.replace(/[.!?]+$/, '').trim()
+
+  if (!text) return userPrompt.trim()
+
+  const single = SINGLE_CHARACTER.exec(text)
+  const bare = BARE_CHARACTER.exec(text)
+  const character = single?.[4] ?? bare?.[1]
+  if (character) {
+    const lower = /lower/i.test(single?.[2] ?? '') || /small/i.test(single?.[2] ?? '')
+    const glyph = lower ? character.toLowerCase() : character.toUpperCase()
+    const named = lower ? 'lowercase letter' : /[0-9]/.test(glyph) ? 'digit' : 'capital letter'
+    /*
+     * "one letter only" is load-bearing: without it the model tiles the glyph
+     * across the canvas, which is exactly the ACAA failure. "typography" pulls it
+     * toward a typeface rather than a painting of a shape.
+     */
+    return `a single ${named} '${glyph}', bold black serif typography, centered on a plain white background, one letter only`
+  }
+
+  return text
+}

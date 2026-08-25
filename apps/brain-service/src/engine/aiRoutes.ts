@@ -44,6 +44,9 @@ import { redactSecrets } from './memory/redaction.js';
 import { scopeFrom } from './memory/memoryRoutes.js';
 import { engineCorrelationId } from './toolRoutes.js';
 import { BrainTurnTrace } from './turnTrace.js';
+import { classifyGenerationIntent } from './media/generationIntent.js';
+import { DEFAULT_STUDIO_CONFIG, generateImage, type GenerationStage } from './media/studioImage.js';
+import { shapeImagePrompt } from './media/imagePrompt.js';
 import type { IndexService } from './rag/indexService.js';
 import { auditStore } from './auditLog.js';
 import { gateVisionTurn, visionCapabilitySnapshot, type VisionGateDeps } from './media/visionGate.js';
@@ -423,6 +426,30 @@ export function registerAiRoutes(
       fallback = { policy: resolved.effective, requestedPolicy: resolved.requested, effectivePolicy: resolved.effective, policyReason: resolved.reason, fallbackRecommended: local.fallbackRecommended, reasons: local.fallbackReasons };
     }
 
+    /*
+     * IMAGE GENERATION IS A DIFFERENT CAPABILITY, ROUTED BEFORE A MODEL IS PICKED.
+     *
+     * "generate letter A in png" used to return a tutorial listing Photoshop,
+     * Canva and Pillow. The routing record said why: `alternatives: []`. Nothing
+     * had rejected an image generator — there was never one to consider, so the
+     * turn went to a text model, and a text model did what text models do.
+     *
+     * Decided here rather than after model selection because no completion model
+     * is involved at all: the turn is served by Studio's diffusion pipeline.
+     * Requires a streaming request, because a generation legitimately takes
+     * minutes on a cold checkpoint and a buffered response would just hang.
+     */
+    if (
+      !hasImage &&
+      body.stream &&
+      classifyGenerationIntent(userPrompt) === 'image_generation'
+    ) {
+      trace.set('capability', 'image_generation');
+      trace.mark('route');
+      await streamGeneration(request, reply, requestId, userPrompt, trace);
+      return reply;
+    }
+
     trace.set('model', decision.model.id);
     trace.set('provider', decision.model.provider);
     trace.mark('route');
@@ -763,6 +790,100 @@ export function registerAiRoutes(
       outputMode: 'markdown',
     };
   }
+}
+
+/**
+ * SSE image generation: `stage` frames while Studio works, then one `image`
+ * frame, then `done`.
+ *
+ * STAGES ARE OBSERVED, NEVER INFERRED FROM ELAPSED TIME. A cold FLUX checkpoint
+ * load off Studio's USB disk blocks its HTTP thread for minutes; a progress bar
+ * invented from a timer would be lying during exactly the wait that needs
+ * explaining. Each frame here corresponds to something that actually happened.
+ *
+ * A FAILURE IS AN `error` FRAME, NOT A SENTENCE ABOUT PHOTOSHOP. The whole point
+ * of this path is that a request for a picture either produces a picture or says
+ * truthfully why it could not.
+ */
+async function streamGeneration(
+  request: FastifyRequest,
+  reply: FastifyReply,
+  requestId: string,
+  prompt: string,
+  trace?: BrainTurnTrace,
+): Promise<void> {
+  reply.hijack();
+  const raw = reply.raw;
+  raw.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    Connection: 'keep-alive',
+    'X-Accel-Buffering': 'no',
+  });
+  const send = (event: string, data: unknown): void => {
+    try {
+      raw.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+    } catch {
+      /* connection gone */
+    }
+  };
+
+  // Named immediately, before any wait: the client can say WHAT it is waiting
+  // for rather than showing an unexplained spinner.
+  send('route', { requestId, capability: 'image_generation', model: DEFAULT_STUDIO_CONFIG.checkpoint });
+  send('stage', { stage: 'submitting', detail: 'Sending your prompt to the image pipeline' });
+
+  const describe = (stage: GenerationStage): { stage: string; detail: string } => {
+    switch (stage.kind) {
+      case 'submitted':
+        return { stage: 'queued', detail: 'Queued in the image pipeline' };
+      case 'queued':
+        return { stage: 'queued', detail: `Waiting behind ${stage.ahead} job(s)` };
+      case 'running':
+        // The honest description of a blocked HTTP thread: it IS loading.
+        return { stage: 'generating', detail: 'Loading the image model and generating' };
+      case 'downloading':
+        return { stage: 'downloading', detail: 'Retrieving the finished image' };
+    }
+  };
+
+  /*
+   * The user's sentence is not a diffusion prompt. "generate letter A in png"
+   * passed through verbatim produced four overlapping letterforms — a real PNG
+   * of the wrong thing. Only the request grammar is removed and only a
+   * single-character subject is expanded; a real description goes through as
+   * written.
+   */
+  const shaped = shapeImagePrompt(prompt);
+  trace?.set('shaped_prompt', shaped !== prompt);
+  const result = await generateImage(shaped, DEFAULT_STUDIO_CONFIG, (stage) => send('stage', describe(stage)));
+  trace?.mark('generation');
+
+  if (!result.ok) {
+    trace?.set('generation_failure', result.code);
+    trace?.finish(`generation_${result.code}`);
+    send('error', { code: 'IMAGE_GENERATION_FAILED', message: result.message });
+    raw.end();
+    return;
+  }
+
+  trace?.set('image_bytes', result.bytes);
+  trace?.set('model', result.model);
+  send('image', {
+    mimeType: 'image/png',
+    dataBase64: result.pngBase64,
+    bytes: result.bytes,
+    model: result.model,
+    prompt,
+  });
+  send('done', {
+    requestId,
+    capability: 'image_generation',
+    model: result.model,
+    timing: { totalMs: result.elapsedMs },
+  });
+  trace?.finish('ok');
+  raw.end();
 }
 
 /** SSE chat: emit a `route` frame once a model commits (after failover resolves),
