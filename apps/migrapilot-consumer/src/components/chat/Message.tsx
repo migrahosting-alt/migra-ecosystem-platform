@@ -192,7 +192,7 @@ function UserTurn({ message }: { message: Message }) {
                    * out carries the real authorised URL, not a preview copy.
                    */
                   draggable
-                  className="max-h-64 w-auto max-w-full cursor-zoom-in rounded-xl border border-slate-200 object-contain transition hover:border-slate-300"
+                  className="max-h-64 w-auto max-w-full cursor-pointer rounded-xl border border-slate-200 object-contain transition hover:border-slate-300"
                 />
               </button>
             ))}

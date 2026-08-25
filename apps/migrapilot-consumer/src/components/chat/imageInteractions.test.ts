@@ -73,20 +73,30 @@ test('the viewer loads the same authorised URL as the transcript', () => {
   assert.doesNotMatch(code(viewer), /createObjectURL|data:image\//)
 })
 
-test('the image fits the viewport by default, with no scrollbars', () => {
-  /*
-   * Nothing is off-screen when it opens, so a scrollbar would be noise. Scrolling
-   * becomes possible only once the user has zoomed past the fit and there is
-   * something to reach.
-   */
+test('the whole image fits, with nothing to scroll', () => {
   const v = code(viewer)
-  assert.match(v, /max-h-\[85vh\] max-w-\[90vw\] object-contain/)
-  assert.match(v, /zoomed \? 'scroll-slim max-h-\[85vh\] max-w-\[90vw\] overflow-auto'/)
+  assert.match(v, /max-h-\[85vh\] max-w-\[90vw\] rounded-lg object-contain/)
+  assert.doesNotMatch(v, /overflow-auto|scroll-slim/, 'a bounded image has nothing off-screen')
 })
 
-test('the chat stays visible behind a dimmed backdrop', () => {
-  // A closer look at something in the conversation, not a separate application.
-  assert.match(code(viewer), /bg-slate-950\/70/)
+test('nothing behind the viewer competes with the image', () => {
+  /*
+   * An earlier backdrop was light and blurred, which kept the conversation
+   * readable behind the picture — putting assistant text inside the
+   * image-viewing experience.
+   */
+  const v = code(viewer)
+  assert.match(v, /bg-slate-950\/90/)
+  assert.doesNotMatch(v, /backdrop-blur/)
+})
+
+test('there are no editor-like controls', () => {
+  // Zoom steps, a percentage readout and a reset button made "look closer" feel
+  // like a tool. Close, and navigation when there is somewhere to go.
+  const v = code(viewer)
+  for (const gone of ['ZoomIn', 'ZoomOut', 'RotateCcw', 'setZoom', 'Reset zoom']) {
+    assert.ok(!v.includes(gone), `${gone} must not be in the viewer`)
+  }
 })
 
 test('multiple images navigate without leaving the viewer', () => {
@@ -99,31 +109,15 @@ test('multiple images navigate without leaving the viewer', () => {
   assert.match(v, /\(current \+ delta \+ refs\.length\) % refs\.length/, 'navigation wraps')
 })
 
-test('arrows and counter are hidden for a single image', () => {
+test('a single image gets no arrows and no counter', () => {
   // One picture with a "1 / 1" and two dead arrows is chrome for its own sake.
   assert.match(code(viewer), /const many = refs\.length > 1/)
 })
 
-test('changing image resets the zoom', () => {
-  // Carrying a zoom across would open the next picture already cropped.
-  assert.match(code(viewer), /setIndex\([\s\S]{0,120}setZoom\(0\)/)
-})
-
-test('swiping navigates only while fitted', () => {
-  // Once zoomed, a horizontal drag is panning, not paging.
-  assert.match(code(viewer), /if \(!many \|\| zoomed \|\| touchStartX\.current === null\) return/)
-})
-
-test('zoom can be reset, and the level is visible', () => {
-  const v = code(viewer)
-  assert.match(v, /aria-label="Reset zoom"/)
-  assert.match(v, /Math\.round\(scale \* 100\)/)
-})
-
-test('the backdrop closes, the picture does not', () => {
+test('the backdrop closes, the image does not', () => {
   const v = code(viewer)
   assert.match(v, /onClick=\{onClose\}/)
-  assert.match(v, /onClick=\{stop\}/, 'clicking the image itself must not close it')
+  assert.match(v, /onClick=\{stop\}/, 'clicking the picture itself must not close it')
 })
 
 test('the viewer closes on Escape and gives focus back', () => {
