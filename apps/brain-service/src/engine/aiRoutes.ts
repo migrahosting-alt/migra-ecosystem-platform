@@ -195,14 +195,28 @@ export function registerAiRoutes(
   /** Build a provider bound to a concrete chosen model. Stub backend ignores the
    * model id and returns deterministic output (keeps the engine exercisable with
    * no inference provider present). A test override injects a controllable one. */
-  const providerFor = (model: ModelDescriptor): StreamingProvider => {
+  const providerFor = (model: ModelDescriptor, approvedVisionModel?: string): StreamingProvider => {
     if (providerOverride) return providerOverride(model);
     if (!real) return new StubProvider('default');
     return new OpenAiCompatProvider({
       profile: 'default',
       baseUrl: env.providerBaseUrl,
       model: model.id,
-      visionModel: model.capabilities.vision ? model.id : undefined,
+      /*
+       * THE MODEL THAT ANSWERS AN IMAGE TURN IS THE ONE THAT WAS APPROVED.
+       *
+       * `approvedVisionModel` comes from the qualification gate — a decision
+       * naming an exact digest that a human signed off. Falling back to
+       * "whatever model the router picked, if it happens to accept images" would
+       * let an image turn be served by a model nobody qualified for it, which
+       * makes the gate a formality: it would decide who may ask and then let
+       * something else answer.
+       *
+       * Undefined means no approved vision model for this turn, and the provider
+       * then describes attachments textually instead of analysing them — the
+       * fail-safe direction.
+       */
+      visionModel: approvedVisionModel,
       apiKey: env.openAiApiKey,
       connectTimeoutMs: env.providerConnectTimeoutMs,
       idleTimeoutMs: env.providerIdleTimeoutMs,
@@ -323,6 +337,12 @@ export function registerAiRoutes(
         };
       }
     }
+
+    /*
+     * Bound once, from the gate. Every provider built for this turn analyses
+     * images with the model the approval names, or with none at all.
+     */
+    const approvedVisionModel = visionGate?.serve ? visionGate.modelId : undefined;
 
     const spec: RouteSpec = {
       needsVision: hasImage,
@@ -522,7 +542,8 @@ export function registerAiRoutes(
     });
 
     if (body.stream) {
-      await streamChat(request, reply, requestId, decision.ranked, decision.reason, providerFor, chatRequest, { contextDiagnostics, commit, fallback });
+      await streamChat(request, reply, requestId, decision.ranked, decision.reason,
+        (m) => providerFor(m, approvedVisionModel), chatRequest, { contextDiagnostics, commit, fallback });
       return reply; // response already sent via raw stream
     }
 
@@ -531,7 +552,7 @@ export function registerAiRoutes(
     const failed: string[] = [];
     for (const candidate of attempts) {
       try {
-        const result = await providerFor(candidate).complete(chatRequest);
+        const result = await providerFor(candidate, approvedVisionModel).complete(chatRequest);
         await commit?.(result.content, candidate.id, candidate.provider);
         await auditStore.append({
           correlationId: requestId,

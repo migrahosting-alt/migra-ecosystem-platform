@@ -42,6 +42,19 @@ export interface Conversation {
    * have access to external documents" with the earlier answers still on screen.
    */
   groundingFiles?: string[];
+  /**
+   * Content-addressed image refs this conversation is currently about.
+   *
+   * SEPARATE FROM `groundingFiles`. Those are searchable documents and drive
+   * retrieval; these drive vision, reconcile against a different store, and mean
+   * something different when one goes missing.
+   *
+   * Durable for the same reason grounding is: a follow-up asked after a reload
+   * carries no upload, so the thread has to remember which picture it is about —
+   * otherwise the second question is answered about nothing while looking like
+   * it worked. Refs only; base64 is transport for a single turn.
+   */
+  imageRefs?: string[];
 }
 
 export type MessageRole = 'user' | 'assistant' | 'system';
@@ -397,6 +410,38 @@ export class ConversationStore {
       } catch (error) {
         // A grounding set the store could not persist would answer the next turn
         // from documents this thread will not remember choosing.
+        Object.assign(c, previous);
+        throw error;
+      }
+    }
+    return c;
+  }
+
+  /**
+   * Replace the conversation's image set.
+   *
+   * A MIRROR OF `setGroundingFiles`, not a reuse of it. Images and documents
+   * reconcile against different stores and a missing one means something
+   * different in each, so sharing a column would make every reader guess which
+   * kind of name it was holding.
+   *
+   * Refs are validated to the content-addressed shape here as well as at intake:
+   * this is the last place before durable state, and a ref that is not an id
+   * cannot resolve to bytes on any later turn.
+   */
+  async setImageRefs(id: string, scope: Scope, refs: string[]): Promise<Conversation | undefined> {
+    const c = this.getConversation(id, scope);
+    if (!c) return undefined;
+    const cleaned = [...new Set(refs.filter((r) => typeof r === 'string' && /^img_[0-9a-f]{32}$/.test(r)))].slice(0, 8);
+    const previous = { imageRefs: c.imageRefs, updatedAt: c.updatedAt };
+    c.imageRefs = cleaned;
+    c.updatedAt = this.now();
+    if (c.memoryMode === 'durable') {
+      try {
+        await this.commit('setImageRefs', () => this.persistence.saveConversation(c));
+      } catch (error) {
+        // An image set the store could not persist would leave the next turn
+        // answering about a picture this thread will not remember.
         Object.assign(c, previous);
         throw error;
       }

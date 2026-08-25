@@ -134,6 +134,28 @@ export function registerMemoryRoutes(app: FastifyInstance, store: ConversationSt
     },
   );
 
+  /**
+   * Replace the conversation's image set. PUT for the same reason grounding is:
+   * the whole set is sent, so a retry cannot leave the thread about a picture
+   * nobody chose.
+   */
+  app.put<{ Params: { id: string }; Body: { images?: unknown } }>(
+    '/api/ai/conversations/:id/images',
+    async (request, reply) => {
+      const images = request.body?.images;
+      if (!Array.isArray(images) || images.some((r) => typeof r !== 'string')) {
+        reply.code(400);
+        return { ok: false, code: 'INVALID_INPUT', error: 'An `images` array of image refs is required.' };
+      }
+      const conv = await store.setImageRefs(request.params.id, scopeFrom(request), images as string[]);
+      if (!conv) {
+        reply.code(404);
+        return { ok: false, code: 'UNKNOWN_CONVERSATION', error: 'Conversation not found.' };
+      }
+      return conv;
+    },
+  );
+
   app.delete<{ Params: { id: string } }>('/api/ai/conversations/:id', async (request, reply) => {
     const ok = await store.deleteConversation(request.params.id, scopeFrom(request));
     if (!ok) {

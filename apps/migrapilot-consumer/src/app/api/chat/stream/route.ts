@@ -42,6 +42,7 @@ import {
   createConversation,
   getConversation,
   setConversationGrounding,
+  setConversationImages,
 } from '@/server/brain/seams'
 import { listFiles } from '@/server/files/storage'
 import { reconcileGrounding } from '@/server/files/grounding'
@@ -50,6 +51,7 @@ import { reserveTurnFor, settleTurnFor } from '@/server/anonymous/turnQuota'
 import type { Principal } from '@/server/tenancy/principal'
 import type { BrainStreamFrame } from '@/server/brain/gateway'
 import type { ConversationSummary } from '@/server/brain/contracts'
+import { resolveTurnImages } from '@/server/files/resolveTurnImages'
 
 export const dynamic = 'force-dynamic'
 
@@ -403,6 +405,46 @@ export async function POST(request: Request): Promise<Response> {
     await setConversationGrounding(conversationId, reconciled.available, { principal })
   }
 
+  /*
+   * ── IMAGES ────────────────────────────────────────────────────────────────
+   *
+   * The same durable-set discipline as grounding, against a different store.
+   *
+   * ATTACHING ADDS TO THE THREAD'S SET. That is what makes the follow-up work:
+   * "what colour is the main object?" asked after a reload carries no upload, so
+   * the conversation has to remember which picture it is about — otherwise the
+   * second question is answered about nothing while looking like it worked.
+   *
+   * RECONCILED AGAINST REALITY every turn, because the set outlives the files in
+   * it. A deleted image would otherwise stay named here forever, and a ref that
+   * resolves to nothing is not evidence the model saw anything.
+   */
+  const imagesAttachedNow =
+    canGround && Array.isArray((body as { images?: unknown })?.images)
+      ? ((body as { images: unknown[] }).images.filter(
+          (r): r is string => typeof r === 'string' && r.trim().length > 0,
+        ) as string[])
+      : []
+
+  const storedImages =
+    existing.kind === 'ok' ? ((existing.value as ConversationSummary)?.imageRefs ?? []) : []
+  const requestedImages = [...new Set([...storedImages, ...imagesAttachedNow])]
+
+  // Resolution IS the reconciliation: a ref that cannot produce bytes for this
+  // caller cannot be part of the thread's set either.
+  const resolvedImages = canGround && requestedImages.length > 0
+    ? await resolveTurnImages(requestedImages)
+    : { attachments: [], dropped: [] as { ref: string; reason: string }[] }
+  const liveImages = resolvedImages.attachments.map((a) => a.name)
+
+  const imagesChanged =
+    liveImages.length !== storedImages.length || liveImages.some((r, i) => r !== storedImages[i])
+  if (canGround && conversationId && imagesChanged) {
+    // Persisted BEFORE answering, for the same reason grounding is: a turn must
+    // not claim an image set the next turn will not have.
+    await setConversationImages(conversationId, liveImages, { principal })
+  }
+
   const grounded = reconciled.grounded
   const groundingMode = grounded ? 'approved' : 'none'
 
@@ -481,6 +523,11 @@ export async function POST(request: Request): Promise<Response> {
           // The BOUNDARY for retrieval, not a hint. Sent only when grounded, so an
           // ungrounded turn cannot accidentally scope itself to a stale list.
           ...(grounded ? { groundingFiles: reconciled.available } : {}),
+          // Bytes, resolved server-side from refs the browser never saw the
+          // inside of. Ordered, because "the first one" is a real question.
+          ...(resolvedImages.attachments.length > 0
+            ? { imageAttachments: resolvedImages.attachments }
+            : {}),
         },
         // The browser going away must stop the model, not just this handler.
         { signal: request.signal, principal },

@@ -991,6 +991,27 @@ CREATE INDEX IF NOT EXISTS internal_assertion_nonces_expiry_idx
   ON internal_assertion_nonces (expires_at);
 `;
 
+/**
+ * The images a conversation is currently about.
+ *
+ * SEPARATE FROM `grounding_files`, which names searchable documents and drives
+ * retrieval. These are content-addressed image refs and drive vision; the two
+ * reconcile against different stores and one going missing means something
+ * different in each. Merging them would make the server guess which semantics a
+ * name carried.
+ *
+ * DURABLE BECAUSE THE FOLLOW-UP DEPENDS ON IT. "What colour is the main object?"
+ * asked after a reload has no upload attached to it — the conversation has to
+ * remember which picture it is about, or the second question is answered about
+ * nothing while looking like it worked.
+ *
+ * REFS, NEVER BYTES. Base64 is transport for one turn; the ref is the identity
+ * that still resolves tomorrow.
+ */
+const M18_CONVERSATION_IMAGES = `
+ALTER TABLE conversations ADD COLUMN IF NOT EXISTS image_refs TEXT;
+`;
+
 export const MIGRATIONS: readonly Migration[] = [
   { version: 1, name: 'foundation', sql: M1_FOUNDATION },
   { version: 2, name: 'tenancy_primitives', sql: M2_TENANCY },
@@ -1009,6 +1030,7 @@ export const MIGRATIONS: readonly Migration[] = [
   { version: 15, name: 'user_preferences', sql: M15_USER_PREFERENCES },
   { version: 16, name: 'model_qualification', sql: M16_MODEL_QUALIFICATION },
   { version: 17, name: 'internal_assertion_nonce', sql: M17_INTERNAL_ASSERTION_NONCE },
+  { version: 18, name: 'conversation_images', sql: M18_CONVERSATION_IMAGES },
 ];
 
 /** Highest version defined in code. */

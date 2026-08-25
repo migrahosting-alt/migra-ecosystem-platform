@@ -123,6 +123,15 @@ export function chatTurnStream(
      * library while everything looked correct.
      */
     groundingFiles?: string[]
+    /**
+     * Images already resolved to bytes, in order.
+     *
+     * Declared HERE as well as on the operation because this file's own history
+     * says a field added at one end is silently discarded by the next: excess
+     * properties are not checked through a spread, so the omission compiles and
+     * the tests pass while the value never reaches the wire.
+     */
+    imageAttachments?: readonly { name: string; mimeType: string; dataBase64: string; sizeBytes?: number }[]
   } = {},
   deps?: GatewayDeps,
 ): Promise<BrainStream> {
@@ -134,6 +143,9 @@ export function chatTurnStream(
       ...(options.groundingMode ? { groundingMode: options.groundingMode } : {}),
       ...(options.groundingFiles && options.groundingFiles.length > 0
         ? { groundingFiles: options.groundingFiles }
+        : {}),
+      ...(options.imageAttachments && options.imageAttachments.length > 0
+        ? { imageAttachments: options.imageAttachments }
         : {}),
       stream: true,
     },
@@ -195,6 +207,20 @@ export function getConversation(
  * and the same question started answering "I don't have access to external documents"
  * with the earlier grounded answers still on screen.
  */
+/**
+ * Replace the conversation's image set.
+ *
+ * PUT semantics like grounding: the whole set is sent, so a retry or a race
+ * cannot leave a thread about a picture nobody chose.
+ */
+export function setConversationImages(
+  conversationId: string,
+  images: string[],
+  deps?: GatewayDeps,
+) {
+  return callBrain({ kind: 'setConversationImages', conversationId, images }, deps)
+}
+
 export function setConversationGrounding(
   conversationId: string,
   files: string[],

@@ -52,6 +52,8 @@ export type BrainOperation =
    * leave a thread grounded in something nobody chose.
    */
   | { kind: 'setConversationGrounding'; conversationId: string; files: string[] }
+  /** The images a thread is about. Refs only; bytes never persist. */
+  | { kind: 'setConversationImages'; conversationId: string; images: string[] }
   | { kind: 'appendMessage'; conversationId: string; role: MessageRole; content: string }
   // ── turns ────────────────────────────────────────────────────────────────
   | {
@@ -70,6 +72,21 @@ export type BrainOperation =
        * the moment someone attaches two. See `server/brain/attachments.ts`.
        */
       attachments?: readonly TurnAttachment[]
+      /**
+       * Images RESOLVED to bytes by the consumer, in the order the user attached
+       * them.
+       *
+       * Distinct from `attachments` above, which is the opaque-ref form for a
+       * future where the Brain resolves refs itself. Today the consumer owns the
+       * store, the ownership check and the hash verification, so it resolves and
+       * sends bytes — and the browser still only ever sends `img_*`.
+       */
+      imageAttachments?: readonly {
+        name: string
+        mimeType: string
+        dataBase64: string
+        sizeBytes?: number
+      }[]
       /**
        * Restrict retrieval to these files. A BOUNDARY, not a hint.
        *
@@ -366,6 +383,19 @@ export function resolveOperation(op: BrainOperation): ResolvedRequest {
         body: { files: op.files.map((f) => filename(f)) },
       }
 
+    case 'setConversationImages':
+      return {
+        method: 'PUT',
+        path: `/api/ai/conversations/${id(op.conversationId, 'conversationId')}/images`,
+        /*
+         * Refs pass through unmapped — no `filename()` here. These are opaque
+         * content-addressed ids, and running them through a filename sanitiser
+         * would be treating them as names, which is exactly the confusion the
+         * separate field exists to prevent.
+         */
+        body: { images: op.images },
+      }
+
     case 'listMessages':
       return {
         method: 'GET',
@@ -397,6 +427,15 @@ export function resolveOperation(op: BrainOperation): ResolvedRequest {
            * names a path, and the browser could not supply one if it tried.
            */
           ...(op.attachments && op.attachments.length > 0 ? { attachments: op.attachments } : {}),
+          /*
+           * The Brain reads `attachments` for vision, keyed on `mimeType`. Sent
+           * only when non-empty: an empty array would set `hasImage` false
+           * anyway, but sending one says "this turn had images" to every log and
+           * audit line that counts them.
+           */
+          ...(op.imageAttachments && op.imageAttachments.length > 0
+            ? { attachments: op.imageAttachments }
+            : {}),
           // Only when non-empty: an empty array must not read as "scope to nothing",
           // which would refuse every grounded answer.
           ...(op.groundingFiles && op.groundingFiles.length > 0

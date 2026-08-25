@@ -84,6 +84,14 @@ export interface ConversationSummary {
   memoryMode?: 'off' | 'session' | 'durable'
   /** Files this conversation answers from. Absent or empty means ungrounded. */
   groundingFiles?: string[]
+  /**
+   * Content-addressed image refs this conversation is currently about.
+   *
+   * Separate from `groundingFiles`: those are searchable documents, these drive
+   * vision, and they reconcile against different stores. Refs only — the bytes
+   * are transport for a single turn.
+   */
+  imageRefs?: string[]
   createdAt?: string | number
   updatedAt?: string | number
 }

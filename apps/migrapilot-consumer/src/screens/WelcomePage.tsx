@@ -73,12 +73,20 @@ export function WelcomePage() {
     }
   }, [fromFiles])
 
-  const start = (prompt: string, meta?: { attachments?: string[] }) => {
+  const start = (prompt: string, meta?: { attachments?: string[]; images?: string[] }) => {
     // The server refuses this too; stopping here keeps a visitor with no turns
     // left from watching an optimistic conversation appear and then fail.
     if (outOfTurns) return
     const attachments = [...new Set([...(meta?.attachments ?? []), ...libraryFiles])]
-    router.push(`/chat/${startConversation(prompt, attachments.length > 0 ? { attachments } : undefined)}`)
+    // Images attached on the FIRST turn have to survive the hop into the new
+    // conversation, or attaching a photo here and asking about it would produce
+    // an answer about nothing.
+    const images = meta?.images ?? []
+    const options = {
+      ...(attachments.length > 0 ? { attachments } : {}),
+      ...(images.length > 0 ? { images } : {}),
+    }
+    router.push(`/chat/${startConversation(prompt, Object.keys(options).length > 0 ? options : undefined)}`)
   }
 
   return (

@@ -107,7 +107,18 @@ export class ProviderRegistry {
           profile,
           baseUrl: env.providerBaseUrl,
           model,
-          visionModel: env.visionModel,
+          /*
+           * NO VISION MODEL ON THE PROFILE PATH.
+           *
+           * This used to be `env.visionModel`, defaulting to a concrete model id,
+           * which meant a profile provider would analyse images with a model that
+           * had never been qualified — governance decided who may ask, and an
+           * environment variable decided what answered. Governed image turns are
+           * routed through the capability gate, which names the approved model
+           * explicitly; anything arriving here describes attachments textually
+           * instead, which is the fail-safe direction.
+           */
+          visionModel: undefined,
           apiKey: env.openAiApiKey,
           connectTimeoutMs: env.providerConnectTimeoutMs,
           idleTimeoutMs: env.providerIdleTimeoutMs,

@@ -24,8 +24,8 @@ interface ChatContextValue {
   pendingIn: string | null
   /** True until the caller's durable conversations have been read once. */
   loading: boolean
-  startConversation: (prompt: string, options?: { attachments?: string[] }) => string
-  sendMessage: (conversationId: string, prompt: string, options?: { attachments?: string[] }) => void
+  startConversation: (prompt: string, options?: { attachments?: string[]; images?: string[] }) => string
+  sendMessage: (conversationId: string, prompt: string, options?: { attachments?: string[]; images?: string[] }) => void
   /** Load one conversation's durable messages. Safe to call repeatedly. */
   openConversation: (conversationId: string) => void
   /**
@@ -310,7 +310,15 @@ export function ChatProvider({ children }: { children: ReactNode }) {
    * could be mistaken for a generated answer: if the model did not answer, the
    * message says so and says why.
    */
-  const appendReply = useCallback(async (localId: string, prompt: string, attachments: string[] = []) => {
+  /*
+   * `images` is SEPARATE from `attachments` on purpose.
+   *
+   * `attachments` names searchable documents and drives retrieval grounding;
+   * images are content-addressed refs that drive vision. Overloading one field
+   * would make the server guess which semantics a name carried, and the two
+   * already reconcile against different stores.
+   */
+  const appendReply = useCallback(async (localId: string, prompt: string, attachments: string[] = [], images: string[] = []) => {
     let conversationId = localId
     setPendingIn(conversationId)
 
@@ -422,6 +430,10 @@ export function ChatProvider({ children }: { children: ReactNode }) {
           // Names only: the SERVER decides grounding from the conversation's durable
           // set. A claim from the browser is not state.
           ...(attachments.length > 0 ? { attachments } : {}),
+          // Opaque ids only, in the order the user attached them. The browser
+          // never sends bytes, a filename or a path; the server resolves the ref
+          // against the authenticated caller's own library.
+          ...(images.length > 0 ? { images } : {}),
           ...(isDurableId(conversationId) ? { conversationId } : {}),
         }),
       })
@@ -562,7 +574,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   }, [router, applyServerQuota])
 
   const startConversation = useCallback(
-    (prompt: string, options?: { attachments?: string[] }) => {
+    (prompt: string, options?: { attachments?: string[]; images?: string[] }) => {
       counter.current += 1
       const id = `chat-${Date.now()}-${counter.current}`
       const conversation: Conversation = {
@@ -579,14 +591,14 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       }
 
       setConversations((current) => [conversation, ...current])
-      void appendReply(id, prompt, options?.attachments ?? [])
+      void appendReply(id, prompt, options?.attachments ?? [], options?.images ?? [])
       return id
     },
     [appendReply],
   )
 
   const sendMessage = useCallback(
-    (conversationId: string, prompt: string, options?: { attachments?: string[] }) => {
+    (conversationId: string, prompt: string, options?: { attachments?: string[]; images?: string[] }) => {
       const message: Message = {
         id: `u-${Date.now()}`,
         role: 'user',
@@ -603,7 +615,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         ),
       )
 
-      void appendReply(conversationId, prompt, options?.attachments ?? [])
+      void appendReply(conversationId, prompt, options?.attachments ?? [], options?.images ?? [])
     },
     [appendReply],
   )
