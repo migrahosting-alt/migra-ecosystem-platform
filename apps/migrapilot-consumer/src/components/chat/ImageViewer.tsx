@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { ChevronLeft, ChevronRight, X } from 'lucide-react'
 import { cn } from '@/lib/cn'
 
@@ -19,6 +20,19 @@ import { cn } from '@/lib/cn'
  * NO SCROLLBARS. The image is bounded to fit inside the viewport, so there is
  * never anything off-screen to scroll to.
  *
+ * PORTALLED TO document.body, AND THAT IS THE WHOLE POINT.
+ *
+ * Rendered inside the message it belongs to, it was inside the chat's scroll
+ * container — so the sticky composer, later in DOM order within that same
+ * container, painted on top of it, and `position: fixed` measured against the
+ * nearest ancestor that had established a containing block rather than the
+ * viewport. The result was an image sized past the page, a horizontal scrollbar,
+ * and the composer floating over the picture.
+ *
+ * A portal to the body escapes every stacking context and every scroll
+ * container at once. The existing `Modal` already does this; the viewer simply
+ * did not.
+ *
  * THE SAME AUTHORISED URL as the transcript: scope from the session, hash
  * re-checked on read. No second endpoint that could drift from the one with the
  * checks, and nothing copied into a blob or data URI that would escape them.
@@ -32,6 +46,9 @@ export function ImageViewer({ refs, startIndex = 0, alt, onClose }: {
   onClose: () => void
 }) {
   const [index, setIndex] = useState(startIndex)
+  /** Portals need a document; the first client render is where one exists. */
+  const [mounted, setMounted] = useState(false)
+  useEffect(() => setMounted(true), [])
   const restoreFocus = useRef<Element | null>(null)
   /** Where the conversation was scrolled to when the viewer opened. */
   const scrollY = useRef(0)
@@ -79,7 +96,9 @@ export function ImageViewer({ refs, startIndex = 0, alt, onClose }: {
 
   const stop = (event: React.MouseEvent) => event.stopPropagation()
 
-  return (
+  if (!mounted) return null
+
+  return createPortal(
     <div
       role="dialog"
       aria-modal="true"
@@ -92,7 +111,13 @@ export function ImageViewer({ refs, startIndex = 0, alt, onClose }: {
         if (Math.abs(delta) > 60) go(delta < 0 ? 1 : -1)
         touchStartX.current = null
       }}
-      className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-slate-950/90 p-4"
+      /*
+       * Above every layer the app uses (the highest is z-50) and, being a direct
+       * child of body, outside every stacking context that could otherwise trap
+       * it. `overflow-hidden` guarantees the layer itself can never introduce a
+       * horizontal scrollbar.
+       */
+      className="fixed inset-0 z-[70] flex flex-col items-center justify-center overflow-hidden overscroll-contain bg-slate-950/90 p-4"
     >
       <button
         type="button"
@@ -113,7 +138,19 @@ export function ImageViewer({ refs, startIndex = 0, alt, onClose }: {
         // asset at its authorised URL.
         draggable
         onClick={stop}
-        className="max-h-[85vh] max-w-[90vw] rounded-lg object-contain"
+        /*
+         * Bounded by the VIEWPORT with margins for the controls, in explicit
+         * units rather than percentages of a parent — a portalled layer has no
+         * parent worth measuring against. `auto` on both axes with `contain`
+         * keeps the source aspect ratio and never crops.
+         */
+        style={{
+          maxWidth: 'calc(100vw - 4rem)',
+          maxHeight: 'calc(100vh - 6rem)',
+          width: 'auto',
+          height: 'auto',
+        }}
+        className="rounded-lg object-contain"
       />
 
       {many && (
@@ -141,7 +178,8 @@ export function ImageViewer({ refs, startIndex = 0, alt, onClose }: {
           </p>
         </>
       )}
-    </div>
+    </div>,
+    document.body,
   )
 }
 

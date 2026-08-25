@@ -8,8 +8,17 @@
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
+
+/** Every .tsx under a directory, so the layer scan cannot miss a new surface. */
+function listTsx(dir: string): string[] {
+  return readdirSync(dir).flatMap((entry) => {
+    const full = join(dir, entry)
+    if (statSync(full).isDirectory()) return listTsx(full)
+    return full.endsWith('.tsx') ? [full] : []
+  })
+}
 
 const read = (rel: string) => readFileSync(join(process.cwd(), 'src', rel), 'utf8')
 const composer = read('components/chat/Composer.tsx')
@@ -73,13 +82,71 @@ test('the viewer loads the same authorised URL as the transcript', () => {
   assert.doesNotMatch(code(viewer), /createObjectURL|data:image\//)
 })
 
+test('the viewer is portalled to the body, outside the chat subtree', () => {
+  /*
+   * THE STRUCTURAL DEFECT. Rendered inside the message, the viewer sat inside
+   * the chat's scroll container: the sticky composer — later in DOM order within
+   * that same container — painted on top of it, and `position: fixed` measured
+   * against the nearest ancestor establishing a containing block rather than the
+   * viewport. That produced an image sized past the page, a horizontal
+   * scrollbar, and the composer floating over the picture.
+   */
+  const v = code(viewer)
+  assert.match(v, /createPortal\(/, 'it must escape the chat stacking context')
+  assert.match(v, /document\.body,\s*\)/, 'and mount at the viewport root')
+})
+
+test('the layer is fixed to the viewport and cannot overflow sideways', () => {
+  const v = code(viewer)
+  assert.match(v, /fixed inset-0/)
+  assert.match(v, /overflow-hidden/, 'the layer itself must never add a scrollbar')
+})
+
+test('nothing in the app can paint above the viewer', () => {
+  /*
+   * Asserted against the real z-index landscape rather than a hoped-for one: if
+   * any chat surface starts using a higher layer, this fails instead of the
+   * composer silently reappearing over an image.
+   */
+  const v = code(viewer)
+  const viewerLayer = Number(/z-\[(\d+)\]/.exec(v)?.[1] ?? '0')
+  assert.ok(viewerLayer > 50, `viewer layer ${viewerLayer} must exceed every app layer`)
+
+  const appLayers = ['components', 'screens', 'features'].flatMap((dir) =>
+    listTsx(join(process.cwd(), 'src', dir))
+      .filter((f) => !f.endsWith('ImageViewer.tsx'))
+      .flatMap((f) => [...readFileSync(f, 'utf8').matchAll(/z-\[?(\d+)\]?/g)].map((m) => Number(m[1]))),
+  )
+  const highest = Math.max(0, ...appLayers)
+  assert.ok(highest < viewerLayer, `an app surface uses z-${highest}, at or above the viewer`)
+})
+
+test('page scrolling is locked while the viewer is open', () => {
+  const v = code(viewer)
+  assert.match(v, /document\.body\.style\.overflow = 'hidden'/)
+  assert.match(v, /document\.body\.style\.overflow = previous/, 'and restored exactly')
+})
+
+test('the image is bounded by the viewport, not by a parent', () => {
+  /*
+   * Explicit viewport units with room for the controls. A portalled layer has no
+   * parent worth measuring against, so percentages of one would be meaningless.
+   */
+  const v = code(viewer)
+  assert.match(v, /maxWidth: 'calc\(100vw - 4rem\)'/)
+  assert.match(v, /maxHeight: 'calc\(100vh - 6rem\)'/)
+  assert.match(v, /width: 'auto'/)
+  assert.match(v, /height: 'auto'/)
+  assert.match(v, /object-contain/)
+})
+
 test('the whole image fits, with no cropping and nothing to scroll', () => {
   /*
    * Open-to-view, not zoom-to-100%. The picture is bounded to the viewport, so
    * it is never cropped on open and there is never anything off-screen.
    */
   const v = code(viewer)
-  assert.match(v, /max-h-\[85vh\] max-w-\[90vw\] rounded-lg object-contain/)
+  assert.match(v, /rounded-lg object-contain/)
   assert.doesNotMatch(v, /overflow-auto|scroll-slim/)
   assert.doesNotMatch(v, /object-cover/)
 })
