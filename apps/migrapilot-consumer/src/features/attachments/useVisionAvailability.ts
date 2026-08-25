@@ -16,18 +16,41 @@ import type { VisionCapability } from '@/server/files/visionCapability'
  * digest against `vision.general`, and revoking that approval must close this
  * control on the next check rather than at the next deploy.
  */
+/**
+ * A probe that failed is NOT a probe still running.
+ *
+ * This used to leave the state `null` on failure, which the UI renders as
+ * "Checking whether images can be read…" — a spinner that never finishes, shown
+ * indefinitely. In production the probe was 500ing and the control sat greyed
+ * out behind that message while the capability was live and qualified. Failing
+ * closed is right; describing the failure as an unfinished check is not.
+ */
 export function useVisionAvailability(): VisionCapability | null {
   const [vision, setVision] = useState<VisionCapability | null>(null)
 
   useEffect(() => {
     let cancelled = false
+    const unreachable = (): VisionCapability => ({
+      state: 'unknown',
+      model: null,
+      installed: 0,
+      message: 'We could not check whether images can be read right now.',
+      digest: null,
+      objectCounting: { qualified: false, model: null },
+    })
+
     void fetch('/api/images')
-      .then((r) => (r.ok ? r.json() : null))
-      .then((data: { vision?: VisionCapability } | null) => {
-        if (!cancelled && data?.vision) setVision(data.vision)
+      .then(async (response) => {
+        if (!response.ok) return null
+        return (await response.json()) as { vision?: VisionCapability } | null
+      })
+      .then((data) => {
+        if (cancelled) return
+        // `unknown` either way — still disabled, but honestly described.
+        setVision(data?.vision ?? unreachable())
       })
       .catch(() => {
-        // A failed probe is not permission. Leaving it null keeps the control off.
+        if (!cancelled) setVision(unreachable())
       })
     return () => {
       cancelled = true

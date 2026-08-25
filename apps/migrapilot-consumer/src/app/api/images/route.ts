@@ -65,10 +65,47 @@ export async function GET(): Promise<Response> {
   const denied = await guard()
   if (denied) return denied
 
-  const [images, usage, vision] = await Promise.all([listImages(), imageUsage(), visionCapability()])
+  /*
+   * WHETHER IMAGES CAN BE READ AND WHETHER THE LIBRARY IS READABLE ARE SEPARATE
+   * FACTS, AND THEY ARE ANSWERED SEPARATELY.
+   *
+   * These used to share one `Promise.all`, so a local storage fault took the
+   * whole response down with it. That is exactly what happened in production:
+   * `ProtectSystem=strict` made the images directory read-only, `listImages()`
+   * threw on its own `mkdir`, this route 500'd, and the composer's probe never
+   * resolved — so "Photos & images" sat greyed out saying "Checking whether
+   * images can be read…" while the Brain reported the capability qualified and
+   * live. A storage problem silently disabled a working capability, and the UI
+   * described it as an unfinished check.
+   *
+   * The vision answer comes from the BRAIN and does not depend on this disk at
+   * all, so it is reported even when the library cannot be listed.
+   */
+  const [listed, counted, vision] = await Promise.all([
+    listImages().then(
+      (images) => ({ ok: true as const, images }),
+      (error: unknown) => ({ ok: false as const, error }),
+    ),
+    imageUsage().then(
+      (usage) => ({ ok: true as const, usage }),
+      (error: unknown) => ({ ok: false as const, error }),
+    ),
+    visionCapability(),
+  ])
+
+  const images = listed.ok ? listed.images : []
+  const usage = counted.ok ? counted.usage : { count: 0, bytes: 0 }
+  // Stated, never implied by an empty list: "you have no images" and "your
+  // library could not be read" must not look the same to a client.
+  const libraryReadable = listed.ok && counted.ok
+
   return Response.json({
     images: images.map(publicView),
     usage: { count: usage.count, bytes: usage.bytes },
+    libraryReadable,
+    ...(libraryReadable
+      ? {}
+      : { libraryError: 'Your image library could not be read on this server.' }),
     limits: {
       maxImageBytes: MAX_IMAGE_BYTES,
       maxLibraryBytes: MAX_IMAGE_LIBRARY_BYTES,

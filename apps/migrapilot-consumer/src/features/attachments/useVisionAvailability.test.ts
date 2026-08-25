@@ -65,3 +65,29 @@ test('no caveat is offered when vision is not usable at all', () => {
   assert.equal(visionCaveat({ ...ready, state: 'no_qualified_model' }), null)
   assert.equal(visionCaveat(null), null)
 })
+
+test('the reason distinguishes a check in flight from a check that failed', () => {
+  /*
+   * THE PRODUCTION SYMPTOM. `GET /api/images` was 500ing because the image
+   * directory was read-only under `ProtectSystem=strict`, the probe left the
+   * state null, and the control sat greyed out saying "Checking whether images
+   * can be read…" — a spinner that never finishes — while the Brain reported
+   * vision.general qualified and live.
+   *
+   * Failing closed is right. Describing the failure as an unfinished check is not.
+   */
+  assert.match(visionDisabledReason(null), /checking/i)
+  const failed: VisionCapability = {
+    state: 'unknown', model: null, installed: 0,
+    message: 'We could not check whether images can be read right now.',
+    digest: null, objectCounting: { qualified: false, model: null },
+  }
+  assert.doesNotMatch(visionDisabledReason(failed), /checking/i)
+  assert.match(visionDisabledReason(failed), /could not check/i)
+})
+
+test('a qualified capability enables the control', () => {
+  // The mapping the whole trace was about: governed qualified -> ready -> enabled.
+  assert.equal(ready.state, 'ready')
+  assert.equal(visionDisabledReason(ready), '', 'an enabled control needs no excuse')
+})
