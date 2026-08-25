@@ -164,6 +164,26 @@ export class OpenAiCompatProvider implements ProviderAdapter {
 
   /** Resolve the concrete model + messages for a turn (vision-aware), shared by
    * the buffered {@link complete} and the streaming {@link stream} paths. */
+  /**
+   * The deliberation control, as this endpoint actually accepts it.
+   *
+   * MEASURED AGAINST OLLAMA, not taken from documentation. Three candidates were
+   * tried against the same prompt on the OpenAI-compatible endpoint:
+   *
+   *   baseline                                17.21s   90 tokens
+   *   chat_template_kwargs.enable_thinking    18.63s   92 tokens   (ignored)
+   *   think: false                            32.79s  171 tokens   (ignored)
+   *   reasoning_effort: 'none'                 0.60s    3 tokens   ← honoured
+   *
+   * Only `reasoning_effort` has any effect here; the other two are accepted and
+   * silently discarded, which is the worst kind of setting — one that looks
+   * applied. A model with nothing to disable accepts the field harmlessly
+   * (verified against the vision model), so it needs no per-model allowlist.
+   */
+  private reasoningField(request: ChatTurnRequest): { reasoning_effort: 'none' } | Record<string, never> {
+    return request.reasoning === 'none' ? { reasoning_effort: 'none' } : {};
+  }
+
   private prepare(request: ChatTurnRequest): { model: string; messages: ChatMessage[] } {
     const images = (request.context.attachments ?? []).filter((a) => IMAGE_MIME.test(a.mimeType));
     const useVision = images.length > 0 && Boolean(this.visionModel);
@@ -201,7 +221,7 @@ export class OpenAiCompatProvider implements ProviderAdapter {
             'Content-Type': 'application/json',
             ...(this.apiKey ? { Authorization: `Bearer ${this.apiKey}` } : {}),
           },
-          body: JSON.stringify({ model, messages, stream: false }),
+          body: JSON.stringify({ model, messages, stream: false, ...this.reasoningField(request) }),
         },
         budget,
         signal,
@@ -307,7 +327,13 @@ export class OpenAiCompatProvider implements ProviderAdapter {
           Accept: 'text/event-stream',
           ...(this.apiKey ? { Authorization: `Bearer ${this.apiKey}` } : {}),
         },
-        body: JSON.stringify({ model, messages, stream: true, stream_options: { include_usage: true } }),
+        body: JSON.stringify({
+          model,
+          messages,
+          stream: true,
+          stream_options: { include_usage: true },
+          ...this.reasoningField(request),
+        }),
         signal: controller.signal,
       });
     } catch (err) {

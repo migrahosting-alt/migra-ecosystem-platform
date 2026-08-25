@@ -140,6 +140,19 @@ export interface ChatTurnRequest {
     responseDirectives?: string[];
   };
   outputMode: 'markdown' | 'json_patch' | 'structured_fix';
+  /**
+   * How much hidden deliberation this turn is worth.
+   *
+   * MEASURED, NOT A PREFERENCE. `qwen3` is a reasoning model: asked to "reply
+   * with exactly the word: rendered" it emitted 718 characters of internal
+   * monologue before the 8 characters of answer, and the turn took 26.6s. The
+   * same prompt with deliberation off answered identically in 0.81s — 33x
+   * faster, same words. Every ordinary chat turn was paying that.
+   *
+   * `'none'` is therefore the default for chat. It is NOT a quality trade for
+   * the turns that need thinking: a turn routed as reasoning keeps it.
+   */
+  reasoning?: 'none' | 'default';
 }
 
 export interface ProposedEdit {

@@ -743,6 +743,23 @@ export function registerAiRoutes(
         // trace in the request or the prompt.
         ...(responseDirectives.length ? { responseDirectives } : {}),
       },
+      /*
+       * DELIBERATION IS OPT-IN, and this is why.
+       *
+       * `qwen3` thinks before it answers. Asked to "reply with exactly the word:
+       * rendered" it produced 718 characters of internal monologue and then the
+       * 8-character answer, taking 26.6s; with deliberation off the same prompt
+       * answered identically in 0.81s. Traced end-to-end through the product, a
+       * real browser turn spent 33.0s of 37.0s waiting for the first CONTENT
+       * token while the model deliberated — the stream cannot yield a thinking
+       * token, so the page simply sits there.
+       *
+       * Kept for the turns routed as reasoning: `needsReasoning`, or a `deep`
+       * tier, is the caller saying the thinking is the point. Everything else —
+       * ordinary chat — gets the answer.
+       */
+      reasoning:
+        Boolean(body.needsReasoning) || tierFromHints(body) === 'deep' ? 'default' : 'none',
       outputMode: 'markdown',
     };
   }
