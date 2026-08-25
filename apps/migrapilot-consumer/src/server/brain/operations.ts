@@ -422,6 +422,23 @@ export function resolveOperation(op: BrainOperation): ResolvedRequest {
           // the mode that let an ungrounded answer through.
           groundingMode: op.groundingMode ?? 'none',
           /*
+           * DURABLE, ALWAYS, AND STATED EXPLICITLY.
+           *
+           * The Brain defaults `memoryPolicy.mode` to `session`, which keeps a
+           * conversation in process memory and writes NOTHING. This client never
+           * sent the field, so nothing had ever been persisted: production held
+           * zero conversations and zero messages while the product appeared to
+           * work, because a thread survives exactly as long as the Brain process
+           * that is holding it. A restart discarded every conversation silently.
+           *
+           * That is also why message image refs seemed to vanish on reopen — the
+           * write path was correct and the row was never written at all.
+           *
+           * Always explicit, never inherited: a default that decides whether a
+           * user's history exists is not something to leave unstated.
+           */
+          memoryPolicy: { mode: 'durable', retrieve: true, store: true },
+          /*
            * An ORDERED list of opaque refs, sent only when there is one. The
            * Brain resolves each through its own storage state — nothing here
            * names a path, and the browser could not supply one if it tried.

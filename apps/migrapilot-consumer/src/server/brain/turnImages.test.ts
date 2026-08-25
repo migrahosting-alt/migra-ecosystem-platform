@@ -85,3 +85,32 @@ test('images and grounding files travel as separate fields', () => {
   assert.deepEqual(body.groundingFiles, ['notes.md'])
   assert.equal((body.attachments as unknown[]).length, 1)
 })
+
+test('every turn asks for DURABLE memory, explicitly', () => {
+  /*
+   * THE DEFECT THIS PINS, and it is bigger than images. The Brain defaults
+   * `memoryPolicy.mode` to `session` — process memory, nothing written. This
+   * client never sent the field, so production held ZERO conversations and ZERO
+   * messages while the product appeared to work: a thread survived exactly as
+   * long as the Brain process holding it, and every restart discarded all of it
+   * silently.
+   *
+   * It is also why message image refs looked like they vanished on reopen. The
+   * write path was correct; the row was never written.
+   */
+  const resolved = resolveOperation({ kind: 'chatTurn', prompt: 'hello' })
+  const body = resolved.body as { memoryPolicy?: { mode?: string; store?: boolean } }
+  assert.equal(body.memoryPolicy?.mode, 'durable', 'a session-scoped default loses the user’s history')
+  assert.equal(body.memoryPolicy?.store, true)
+})
+
+test('durability is not conditional on the turn carrying images', () => {
+  // Text-only conversations are exactly as worth keeping.
+  for (const op of [
+    { kind: 'chatTurn' as const, prompt: 'text only' },
+    { kind: 'chatTurn' as const, prompt: 'with a picture', imageAttachments: [bytes(IMG_A)] },
+  ]) {
+    const body = resolveOperation(op).body as { memoryPolicy?: { mode?: string } }
+    assert.equal(body.memoryPolicy?.mode, 'durable')
+  }
+})
