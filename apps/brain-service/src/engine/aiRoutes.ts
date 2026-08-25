@@ -783,6 +783,21 @@ async function streamChat(
     let committed = false;
     let fullText = '';
     let usage: { inputTokens: number; outputTokens: number } | undefined;
+    /*
+     * TIME TO FIRST TOKEN, measured rather than assumed.
+     *
+     * Total latency hides the number that decides whether the product feels
+     * responsive: a 12s answer that starts drawing at 0.4s reads as fast, and the
+     * same answer that appears all at once at 12s reads as broken. Measured from
+     * the moment this turn begins routing, so it includes model load — which is
+     * the dominant cost on a cold model and invisible in a total.
+     */
+    const turnStarted = Date.now();
+    let firstTokenMs: number | undefined;
+    const markFirstToken = () => {
+      if (firstTokenMs === undefined) firstTokenMs = Date.now() - turnStarted;
+    };
+
     try {
       if (typeof provider.stream === 'function') {
         const gen = provider.stream(chatRequest, ac.signal);
@@ -792,11 +807,11 @@ async function streamChat(
         send('route', routeFrame(requestId, candidate, primaryId, primaryReason, failed));
         committed = true;
         if (!first.done && first.value) {
-          if (first.value.delta) { fullText += first.value.delta; send('token', { text: first.value.delta }); }
+          if (first.value.delta) { markFirstToken(); fullText += first.value.delta; send('token', { text: first.value.delta }); }
           if (first.value.usage) usage = first.value.usage;
         }
         for await (const ev of gen) {
-          if (ev.delta) { fullText += ev.delta; send('token', { text: ev.delta }); }
+          if (ev.delta) { markFirstToken(); fullText += ev.delta; send('token', { text: ev.delta }); }
           if (ev.usage) usage = ev.usage;
         }
       } else {
@@ -804,6 +819,8 @@ async function streamChat(
         send('route', routeFrame(requestId, candidate, primaryId, primaryReason, failed));
         committed = true;
         fullText = r.content;
+        // Buffered: the whole answer arrives at once, so first token IS the end.
+        markFirstToken();
         send('token', { text: r.content });
         usage = { inputTokens: r.telemetry.inputTokens, outputTokens: r.telemetry.outputTokens };
       }
@@ -828,7 +845,8 @@ async function streamChat(
         outcome: 'ok',
         fields: { model: candidate.id, provider: candidate.provider, toolCalls: 0 },
       });
-      send('done', { requestId, model: candidate.id, provider: candidate.provider, tier: candidate.tier, usage, failedOver: failed, ...(memory.fallback?.policy ? { policy: memory.fallback.policy, requestedPolicy: memory.fallback.requestedPolicy, effectivePolicy: memory.fallback.effectivePolicy, policyReason: memory.fallback.policyReason, fallbackRecommended: memory.fallback.fallbackRecommended, fallbackReasons: memory.fallback.reasons } : {}) });
+      send('done', { requestId, model: candidate.id, provider: candidate.provider, tier: candidate.tier, usage, failedOver: failed,
+        timing: { firstTokenMs, totalMs: Date.now() - turnStarted }, ...(memory.fallback?.policy ? { policy: memory.fallback.policy, requestedPolicy: memory.fallback.requestedPolicy, effectivePolicy: memory.fallback.effectivePolicy, policyReason: memory.fallback.policyReason, fallbackRecommended: memory.fallback.fallbackRecommended, fallbackReasons: memory.fallback.reasons } : {}) });
       raw.end();
       return;
     } catch (error) {

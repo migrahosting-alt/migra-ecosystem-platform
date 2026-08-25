@@ -18,6 +18,7 @@ import {
 import { FileTypeIcon } from '@/components/ui/FileTypeIcon'
 import { LogoMark } from '@/components/brand/Logo'
 import { RichText } from './RichText'
+import { RichAnswer } from '@/features/markdown/RichAnswer'
 import { SourceIcon } from './SourceIcon'
 import { DiagramPreview, Waveform } from './DiagramPreview'
 import type { Attachment, Block, Message } from '@/data/types'
@@ -37,11 +38,16 @@ const titleIconTones = {
 
 function BlockView({ block, divided }: { block: Block; divided: boolean }) {
   if (block.type === 'paragraph') {
-    return (
-      <p className="text-[15px] leading-[1.7] text-slate-700">
-        <RichText text={block.text} />
-      </p>
-    )
+    /*
+     * A model answer arrives as ONE paragraph block containing markdown, and
+     * rendering it as plain text put `### Key Design Elements`, `**bold**` and
+     * fenced code on screen as literal characters — the transcript showing raw
+     * output instead of an answer.
+     *
+     * `RichAnswer` handles a plain sentence as a single paragraph, so nothing
+     * changes for short replies; structure only appears when the text has any.
+     */
+    return <RichAnswer text={block.text} />
   }
 
   const Icon = block.titleIcon ? titleIcons[block.titleIcon] : null
