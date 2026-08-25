@@ -17,7 +17,27 @@ import type { PoolClient } from 'pg';
  * precisely when a stale cache does the most damage.
  */
 
-export type ModelCapability = 'vision' | 'reasoning' | 'embedding' | 'audio' | 'generation' | 'chat' | 'coding';
+/**
+ * What a model may be trusted to DO, not what it is broadly called.
+ *
+ * `vision` is deliberately not one thing. Qwen2.5-VL reads invoices, screenshots
+ * and charts reliably and cannot count seven circles — and neither can any other
+ * vision model installed here. Calling that single model "vision-capable" would
+ * make one number stand for two very different reliability envelopes, and the
+ * counting one is the envelope a user hits when they ask how many people are in
+ * a photo and get a confident wrong answer.
+ *
+ * So the limit lives in the capability set, where routing can read it, instead of
+ * in a note somebody has to remember. `vision.general` being approved says
+ * nothing about `vision.object_counting`, and an operation classified as counting
+ * finds nothing approved and is refused rather than served by a model that was
+ * never qualified for it.
+ */
+export type ModelCapability =
+  | 'vision'
+  | 'vision.general'
+  | 'vision.object_counting'
+  | 'reasoning' | 'embedding' | 'audio' | 'generation' | 'chat' | 'coding';
 export type DecisionState = 'candidate' | 'approved' | 'revoked';
 
 export interface EvidenceRun {

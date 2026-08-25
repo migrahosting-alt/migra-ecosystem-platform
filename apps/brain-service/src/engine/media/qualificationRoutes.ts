@@ -44,7 +44,10 @@ export interface QualificationRouteDeps {
 }
 
 const CAPABILITIES: readonly ModelCapability[] = [
-  'vision', 'reasoning', 'embedding', 'audio', 'generation', 'chat', 'coding',
+  // `vision` is the legacy broad name and stays so existing decisions remain
+  // readable; new qualifications name the scope they were actually measured for.
+  'vision', 'vision.general', 'vision.object_counting',
+  'reasoning', 'embedding', 'audio', 'generation', 'chat', 'coding',
 ];
 
 const isCapability = (v: unknown): v is ModelCapability =>

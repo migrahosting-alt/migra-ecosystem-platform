@@ -45,6 +45,7 @@ import { scopeFrom } from './memory/memoryRoutes.js';
 import { engineCorrelationId } from './toolRoutes.js';
 import type { IndexService } from './rag/indexService.js';
 import { auditStore } from './auditLog.js';
+import { gateVisionTurn, visionCapabilitySnapshot, type VisionGateDeps } from './media/visionGate.js';
 
 interface AiChatMessage {
   role: 'system' | 'user' | 'assistant';
@@ -169,6 +170,14 @@ export function registerAiRoutes(
    * how the engine behaved before.
    */
   loadPreferences?: (scope: { owner: string; workspace: string }) => Promise<string[]>,
+  /**
+   * Access to the governed qualification tables.
+   *
+   * Absent (no PostgreSQL) means image turns are refused rather than served by
+   * whatever happens to be installed — the same fail-closed rule the routes
+   * themselves follow, applied to their own wiring.
+   */
+  visionDeps?: VisionGateDeps,
 ): ModelRegistry {
   const real = env.localProvider === 'openai-compat';
   const qual = qualStore ?? new QualificationStore();
@@ -235,11 +244,30 @@ export function registerAiRoutes(
     };
     // Production default = the approved vision model the router would actually
     // pick for an image turn (fail-closed: null when none is approved).
+    /*
+     * THE GOVERNED ANSWER WINS.
+     *
+     * `byState` above reflects the deployment manifest, which is a file. The
+     * durable decisions are the authority: a human approved an exact digest
+     * against a named capability, and a revocation must be visible on the very
+     * next request. Reported per operation, because one boolean cannot describe
+     * a model that reads a document perfectly and miscounts what is on it.
+     */
+    const governed = visionDeps ? await visionCapabilitySnapshot(visionDeps) : null;
     const defaultDecision = await selectModel(reg, { needsVision: true, tier: 'balanced', enforce: enforceQual, mode: 'production' });
     return {
       count: vision.length,
       enforced: enforceQual,
-      default: defaultDecision?.model.id ?? null,
+      // The model an image turn would ACTUALLY use, which is the governed one
+      // whenever governance is wired; the manifest choice only when it is not.
+      default: governed ? governed.general.modelId : (defaultDecision?.model.id ?? null),
+      governed: governed
+        ? {
+            source: 'model_qualification_decisions',
+            'vision.general': governed.general,
+            'vision.object_counting': governed.objectCounting,
+          }
+        : { source: 'unavailable', reason: 'the governed qualification store is not wired' },
       registry: byState,
     };
   });
@@ -263,8 +291,48 @@ export function registerAiRoutes(
     });
 
     const hasImage = (body.attachments ?? []).some((a) => IMAGE_MIME.test(a.mimeType));
+
+    /*
+     * GOVERNED VISION. The prompt chooses the capability and the capability
+     * chooses the model — never a vision-capable model chosen first and asked
+     * whatever came in. `vision.general` is approved here; `vision.object_counting`
+     * is not, because the model was measured on counting and fails it silently.
+     *
+     * Refused BEFORE any model call, so a question nothing is qualified for costs
+     * nothing and cannot come back as a confident wrong number.
+     */
+    let visionGate: Awaited<ReturnType<typeof gateVisionTurn>> | null = null;
+    if (hasImage && visionDeps) {
+      visionGate = await gateVisionTurn(visionDeps, userPrompt);
+      if (!visionGate.serve) {
+        await auditStore.append({
+          correlationId: requestId,
+          requestId,
+          type: 'capability.refused',
+          component: 'chat',
+          outcome: 'VISION_NOT_QUALIFIED',
+          fields: { operation: visionGate.operation, capability: visionGate.capability },
+        });
+        reply.code(422);
+        return {
+          ok: false,
+          code: 'VISION_NOT_QUALIFIED',
+          error: visionGate.message,
+          operation: visionGate.operation,
+          capability: visionGate.capability,
+        };
+      }
+    }
+
     const spec: RouteSpec = {
       needsVision: hasImage,
+      /*
+       * The approved decision NAMES the model, so routing follows the durable
+       * record rather than re-deriving a choice that could differ from what was
+       * qualified. This is what makes a revocation take effect on the next
+       * request with nothing to restart.
+       */
+      ...(visionGate?.serve ? { model: visionGate.modelId } : {}),
       needsTools: Boolean(body.needsTools),
       needsReasoning: Boolean(body.needsReasoning) || tierFromHints(body) === 'deep',
       preferCoding: Boolean(body.preferCoding) || isCodingIntent(body.feature, userPrompt),

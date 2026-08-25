@@ -543,7 +543,15 @@ async function main(): Promise<void> {
     return responseDirectives(turnPreferences(normalizePreferences(row.preferences)));
   };
 
-  registerAiRoutes(app, env, modelRegistry, memoryStore, undefined, qualStore, indexService, providerRouting, escalation, indexedBranchFor, responseDirectivesFor);
+  /*
+   * The governed qualification tables, when PostgreSQL is the durable store.
+   * Undefined otherwise, which the routes read as "refuse image turns" — the
+   * same fail-closed rule applied to the wiring as to the data.
+   */
+  const visionGateDeps = durable instanceof PostgresDurableStore
+    ? { transaction: <T,>(fn: Parameters<PostgresDurableStore['platformTransaction']>[0]) => (durable as PostgresDurableStore).platformTransaction(fn) as Promise<T> }
+    : undefined;
+  registerAiRoutes(app, env, modelRegistry, memoryStore, undefined, qualStore, indexService, providerRouting, escalation, indexedBranchFor, responseDirectivesFor, visionGateDeps);
   // Intelligent Provider Router — Slice 1 (/api/ai/providers): read-only, dry-run
   // inspection over the SAME fleet + policy engine. Cloud disabled by default.
   registerProviderRoutes(app, { fleet: providerFleet, engine: policyEngine, defaultPolicy: process.env.MIGRAPILOT_EXECUTION_POLICY });
