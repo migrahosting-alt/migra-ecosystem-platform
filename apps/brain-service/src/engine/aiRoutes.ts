@@ -43,6 +43,7 @@ import { buildContext, type ContextDiagnostics } from './memory/contextBuilder.j
 import { redactSecrets } from './memory/redaction.js';
 import { scopeFrom } from './memory/memoryRoutes.js';
 import { engineCorrelationId } from './toolRoutes.js';
+import { BrainTurnTrace } from './turnTrace.js';
 import type { IndexService } from './rag/indexService.js';
 import { auditStore } from './auditLog.js';
 import { gateVisionTurn, visionCapabilitySnapshot, type VisionGateDeps } from './media/visionGate.js';
@@ -296,6 +297,12 @@ export function registerAiRoutes(
     }
 
     const requestId = engineCorrelationId(request);
+    /*
+     * The engine's own half of the turn, under the caller's id. The consumer can
+     * only see this whole route as one opaque stage; when that stage is 89s, the
+     * question "where?" has to be answerable from in here.
+     */
+    const trace = new BrainTurnTrace(requestId);
     await auditStore.append({
       correlationId: requestId,
       requestId,
@@ -303,6 +310,7 @@ export function registerAiRoutes(
       component: 'chat',
       fields: { streaming: Boolean(body.stream), toolsRequested: Boolean(body.needsTools) },
     });
+    trace.mark('audit');
 
     const hasImage = (body.attachments ?? []).some((a) => IMAGE_MIME.test(a.mimeType));
 
@@ -343,6 +351,9 @@ export function registerAiRoutes(
      * images with the model the approval names, or with none at all.
      */
     const approvedVisionModel = visionGate?.serve ? visionGate.modelId : undefined;
+    trace.set('has_image', hasImage);
+    if (visionGate) trace.set('vision_capability', visionGate.capability);
+    trace.mark('vision_gate');
 
     /*
      * The attachment NAMES are the canonical refs — the consumer sends the id as
@@ -411,6 +422,10 @@ export function registerAiRoutes(
       }
       fallback = { policy: resolved.effective, requestedPolicy: resolved.requested, effectivePolicy: resolved.effective, policyReason: resolved.reason, fallbackRecommended: local.fallbackRecommended, reasons: local.fallbackReasons };
     }
+
+    trace.set('model', decision.model.id);
+    trace.set('provider', decision.model.provider);
+    trace.mark('route');
 
     // ── Conversation memory: the engine decides what prior context enters the
     // window and commits the completed assistant message. Opt-in by policy. ──
@@ -549,7 +564,9 @@ export function registerAiRoutes(
       }
     }
 
+    trace.mark('context')
     const chatRequest = await buildChatRequest(body, userPrompt, effectiveSummary, ragChunks, directives);
+    trace.mark('request_built');
     await auditStore.append({
       correlationId: requestId,
       requestId,
@@ -564,7 +581,7 @@ export function registerAiRoutes(
 
     if (body.stream) {
       await streamChat(request, reply, requestId, decision.ranked, decision.reason,
-        (m) => providerFor(m, approvedVisionModel), chatRequest, { contextDiagnostics, commit, fallback });
+        (m) => providerFor(m, approvedVisionModel), chatRequest, { contextDiagnostics, commit, fallback, trace });
       return reply; // response already sent via raw stream
     }
 
@@ -743,8 +760,9 @@ async function streamChat(
   primaryReason: string,
   providerFor: (m: ModelDescriptor) => StreamingProvider,
   chatRequest: ChatTurnRequest,
-  memory: { contextDiagnostics?: ContextDiagnostics; commit?: (text: string, modelId: string, providerId: string) => void; fallback?: { policy?: string; requestedPolicy?: string; effectivePolicy?: string; policyReason?: string; fallbackRecommended: boolean; reasons: string[] } } = {},
+  memory: { contextDiagnostics?: ContextDiagnostics; commit?: (text: string, modelId: string, providerId: string) => void; fallback?: { policy?: string; requestedPolicy?: string; effectivePolicy?: string; policyReason?: string; fallbackRecommended: boolean; reasons: string[] }; trace?: BrainTurnTrace } = {},
 ): Promise<void> {
+  const trace = memory.trace;
   reply.hijack();
   const raw = reply.raw;
   raw.writeHead(200, {
@@ -795,7 +813,10 @@ async function streamChat(
     const turnStarted = Date.now();
     let firstTokenMs: number | undefined;
     const markFirstToken = () => {
-      if (firstTokenMs === undefined) firstTokenMs = Date.now() - turnStarted;
+      if (firstTokenMs === undefined) {
+        firstTokenMs = Date.now() - turnStarted;
+        trace?.mark('first_token');
+      }
     };
 
     try {
@@ -804,6 +825,13 @@ async function streamChat(
         // Pull the first frame: this forces the upstream connection to open, so an
         // open/HTTP failure happens BEFORE we commit and can still fail over.
         const first = await gen.next();
+        /*
+         * THE STAGE THAT WAS INVISIBLE. Pulling the first frame is what forces
+         * the provider to open its connection AND load the model, so a cold or
+         * evicted model shows up here and nowhere else. A 90s turn with 600ms of
+         * generation is entirely this line.
+         */
+        trace?.mark('upstream_open');
         send('route', routeFrame(requestId, candidate, primaryId, primaryReason, failed));
         committed = true;
         if (!first.done && first.value) {
@@ -847,12 +875,17 @@ async function streamChat(
       });
       send('done', { requestId, model: candidate.id, provider: candidate.provider, tier: candidate.tier, usage, failedOver: failed,
         timing: { firstTokenMs, totalMs: Date.now() - turnStarted }, ...(memory.fallback?.policy ? { policy: memory.fallback.policy, requestedPolicy: memory.fallback.requestedPolicy, effectivePolicy: memory.fallback.effectivePolicy, policyReason: memory.fallback.policyReason, fallbackRecommended: memory.fallback.fallbackRecommended, fallbackReasons: memory.fallback.reasons } : {}) });
+      trace?.mark('generation');
+      if (usage) trace?.set('tokens', usage);
+      trace?.set('served_by', candidate.id);
+      trace?.finish('ok');
       raw.end();
       return;
     } catch (error) {
       if (ac.signal.aborted) {
         // Client cancelled — no `done`, no false answer.
         await auditStore.append({ correlationId: requestId, requestId, type: 'execution.failed', component: 'chat', outcome: 'cancelled', fields: { toolCalls: 0 } });
+        trace?.finish('cancelled');
         raw.end();
         return;
       }
@@ -862,6 +895,8 @@ async function streamChat(
         request.log.warn({ model: candidate.id, err: errText(error) }, 'ai/chat stream broke mid-turn');
         await auditStore.append({ correlationId: requestId, requestId, type: 'execution.failed', component: 'chat', outcome: 'STREAM_INTERRUPTED', fields: { model: candidate.id, toolCalls: 0 } });
         send('error', { code: 'COMPLETION_FAILED', message: 'The engine stream was interrupted.' });
+        trace?.set('failed_model', candidate.id);
+        trace?.finish('stream_interrupted');
         raw.end();
         return;
       }
@@ -871,6 +906,8 @@ async function streamChat(
   }
   await auditStore.append({ correlationId: requestId, requestId, type: 'execution.failed', component: 'chat', outcome: 'COMPLETION_FAILED', fields: { toolCalls: 0 } });
   send('error', { code: 'COMPLETION_FAILED', message: 'The engine could not complete the request.', failedOver: failed });
+  trace?.set('failed_over', failed);
+  trace?.finish('completion_failed');
   raw.end();
 }
 
