@@ -8,12 +8,11 @@
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 const read = (rel: string) => readFileSync(join(process.cwd(), 'src', rel), 'utf8')
 const composer = read('components/chat/Composer.tsx')
-const viewer = read('components/chat/ImageViewer.tsx')
 const message = read('components/chat/Message.tsx')
 const code = (s: string) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
 
@@ -63,79 +62,66 @@ test('a drop uploads sequentially so the per-message cap is real', () => {
   assert.match(c, /You can attach up to \$\{MAX_TURN_IMAGES\} images/, 'the bound is stated, not silent')
 })
 
-test('the viewer loads the same authorised URL as the transcript', () => {
+test('there is no modal image viewer at all', () => {
   /*
-   * No separate "full size" endpoint that could drift from the one with the
-   * scope and hash checks, and nothing copied into a blob or data URI that would
-   * escape them.
+   * Two competing ways to look at an image is one too many. The modal is gone
+   * rather than disabled: an overlay, a backdrop and a close button that still
+   * exist in the tree are a second mechanism waiting to be re-entered.
    */
-  assert.match(code(viewer), /src=\{`\/api\/images\/\$\{refs\[index\]\}`\}/)
-  assert.doesNotMatch(code(viewer), /createObjectURL|data:image\//)
-})
-
-test('the whole image fits, with nothing to scroll', () => {
-  const v = code(viewer)
-  assert.match(v, /max-h-\[85vh\] max-w-\[90vw\] rounded-lg object-contain/)
-  assert.doesNotMatch(v, /overflow-auto|scroll-slim/, 'a bounded image has nothing off-screen')
-})
-
-test('nothing behind the viewer competes with the image', () => {
-  /*
-   * An earlier backdrop was light and blurred, which kept the conversation
-   * readable behind the picture — putting assistant text inside the
-   * image-viewing experience.
-   */
-  const v = code(viewer)
-  assert.match(v, /bg-slate-950\/90/)
-  assert.doesNotMatch(v, /backdrop-blur/)
-})
-
-test('there are no editor-like controls', () => {
-  // Zoom steps, a percentage readout and a reset button made "look closer" feel
-  // like a tool. Close, and navigation when there is somewhere to go.
-  const v = code(viewer)
-  for (const gone of ['ZoomIn', 'ZoomOut', 'RotateCcw', 'setZoom', 'Reset zoom']) {
-    assert.ok(!v.includes(gone), `${gone} must not be in the viewer`)
+  const m = code(message)
+  for (const gone of ['ImageViewer', 'role="dialog"', 'aria-modal', 'backdrop', 'onClose']) {
+    assert.ok(!m.includes(gone), `${gone} must not be in the transcript path`)
   }
+  assert.equal(existsSync(join(process.cwd(), 'src/components/chat/ImageViewer.tsx')), false,
+    'the modal component must be deleted, not left unused')
 })
 
-test('multiple images navigate without leaving the viewer', () => {
-  const v = code(viewer)
-  assert.match(v, /aria-label="Previous image"/)
-  assert.match(v, /aria-label="Next image"/)
-  assert.match(v, /\{index \+ 1\} \/ \{refs\.length\}/, 'the counter says where you are')
-  assert.match(v, /event\.key === 'ArrowRight'/)
-  assert.match(v, /event\.key === 'ArrowLeft'/)
-  assert.match(v, /\(current \+ delta \+ refs\.length\) % refs\.length/, 'navigation wraps')
+test('a click expands the image inline, and another collapses it', () => {
+  const m = code(message)
+  assert.match(m, /onClick=\{\(\) => toggle\(ref\)\}/)
+  assert.match(m, /if \(next\.has\(ref\)\) next\.delete\(ref\)/, 'the same click closes it')
+  assert.match(m, /aria-expanded=\{open\}/, 'the state is announced, not just drawn')
 })
 
-test('a single image gets no arrows and no counter', () => {
-  // One picture with a "1 / 1" and two dead arrows is chrome for its own sake.
-  assert.match(code(viewer), /const many = refs\.length > 1/)
+test('expanded is bounded by content width and viewport height, never cropped', () => {
+  /*
+   * `object-contain` in both states, and no width that could exceed the column —
+   * a very large picture stays usable and the page never scrolls sideways.
+   */
+  const m = code(message)
+  assert.match(m, /open \? 'max-h-\[70vh\] w-full max-w-full' : 'max-h-64 w-auto max-w-full'/)
+  assert.match(m, /object-contain/)
+  assert.doesNotMatch(m, /object-cover/)
 })
 
-test('the backdrop closes, the image does not', () => {
-  const v = code(viewer)
-  assert.match(v, /onClick=\{onClose\}/)
-  assert.match(v, /onClick=\{stop\}/, 'clicking the picture itself must not close it')
+test('each image toggles independently', () => {
+  // Opening one in a two-image message must not collapse the other it is being
+  // compared against.
+  assert.match(code(message), /useState<ReadonlySet<string>>/)
 })
 
-test('the viewer closes on Escape and gives focus back', () => {
-  const v = code(viewer)
-  assert.match(v, /event\.key === 'Escape'/)
-  assert.match(v, /restoreFocus\.current instanceof HTMLElement/,
-    'a keyboard user must not be stranded at the top of the document')
-  assert.match(v, /role="dialog"/)
-  assert.match(v, /aria-modal="true"/)
+test('expansion is not persisted, but the picture is', () => {
+  /*
+   * Expansion is a way of LOOKING at the transcript, not part of it. A reload
+   * returns every message to its preview; what has to survive is the image ref,
+   * which comes from the message's own record.
+   */
+  const m = code(message)
+  assert.match(m, /useState<ReadonlySet<string>>\(\(\) => new Set\(\)\)/, 'starts collapsed every time')
+  assert.match(m, /src=\{`\/api\/images\/\$\{ref\}`\}/, 'the ref still comes from the message')
 })
 
-test('the page behind the viewer does not scroll', () => {
-  assert.match(code(viewer), /document\.body\.style\.overflow = 'hidden'/)
+test('two messages never mix their images', () => {
+  // Each turn maps only over its own refs; there is no shared or conversation
+  // level list feeding the transcript.
+  const m = code(message)
+  assert.match(m, /message\.images\.map\(\(ref\) =>/)
+  assert.doesNotMatch(m, /conversation\.imageRefs/)
 })
 
-test('transcript images stay draggable and open on click', () => {
+test('transcript images stay draggable and expand on click', () => {
   const m = code(message)
   assert.match(m, /draggable/, 'dragging out must carry the real authorised URL')
-  assert.match(m, /onClick=\{\(\) => setViewing\(index\)\}/, 'the index opens the gallery at that image')
+  assert.match(m, /onClick=\{\(\) => toggle\(ref\)\}/)
   assert.match(m, /focus-visible:ring/, 'the control must be reachable by keyboard')
 })

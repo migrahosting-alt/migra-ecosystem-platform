@@ -19,7 +19,6 @@ import { FileTypeIcon } from '@/components/ui/FileTypeIcon'
 import { LogoMark } from '@/components/brand/Logo'
 import { RichText } from './RichText'
 import { RichAnswer } from '@/features/markdown/RichAnswer'
-import { ImageViewer } from './ImageViewer'
 import { SourceIcon } from './SourceIcon'
 import { DiagramPreview, Waveform } from './DiagramPreview'
 import type { Attachment, Block, Message } from '@/data/types'
@@ -153,13 +152,36 @@ function AttachmentGrid({ attachments }: { attachments: Attachment[] }) {
 
 function UserTurn({ message }: { message: Message }) {
   const wide = Boolean(message.attachments?.length)
-  /** Which attached image is open full size, if any. */
-  /** Index of the open image, or null. The whole set travels so the arrows work. */
-  const [viewing, setViewing] = useState<number | null>(null)
+  /**
+   * Which attached images are expanded, by ref.
+   *
+   * A SET, not a single index: each picture toggles on its own, so opening one
+   * in a two-image message does not collapse the other it was being compared
+   * against.
+   *
+   * DELIBERATELY NOT PERSISTED. Expansion is a way of looking at the transcript,
+   * not part of it — a reload returns every message to its preview, and the
+   * picture itself is what has to survive that.
+   */
+  const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set())
+
+  const toggle = (ref: string) =>
+    setExpanded((current) => {
+      const next = new Set(current)
+      if (next.has(ref)) next.delete(ref)
+      else next.add(ref)
+      return next
+    })
+
+  const anyExpanded = expanded.size > 0
 
   return (
     <div className="flex justify-end">
-      <div className={cn('w-full', wide ? 'max-w-[620px]' : 'max-w-[440px]')}>
+      {/*
+        The column widens while something is expanded, so the picture has room
+        without ever exceeding the chat's own content width.
+      */}
+      <div className={cn('w-full', wide || anyExpanded ? 'max-w-[620px]' : 'max-w-[440px]')}>
         {/*
           THE PICTURE STAYS WITH THE QUESTION.
           Above the text, because that is the order it was composed in, and
@@ -169,42 +191,49 @@ function UserTurn({ message }: { message: Message }) {
         */}
         {message.images && message.images.length > 0 && (
           <div className="mb-1.5 flex flex-wrap justify-end gap-2">
-            {message.images.map((ref, index) => (
-              <button
-                key={ref}
-                type="button"
-                onClick={() => setViewing(index)}
-                aria-label="Open image full size"
-                title="Open full size"
-                className="rounded-xl focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
-              >
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={`/api/images/${ref}`}
-                  alt="Image attached to this message"
-                  /*
-                   * The transcript shows the image in its OWN shape, bounded
-                   * rather than cropped. A square box cropped a portrait photo
-                   * down to its middle, so the record of what was asked about no
-                   * longer matched what was sent.
-                   *
-                   * `draggable` so it behaves like an ordinary image: dragging it
-                   * out carries the real authorised URL, not a preview copy.
-                   */
-                  draggable
-                  className="max-h-64 w-auto max-w-full cursor-pointer rounded-xl border border-slate-200 object-contain transition hover:border-slate-300"
-                />
-              </button>
-            ))}
+            {message.images.map((ref) => {
+              const open = expanded.has(ref)
+              return (
+                <button
+                  key={ref}
+                  type="button"
+                  onClick={() => toggle(ref)}
+                  aria-expanded={open}
+                  aria-label={open ? 'Collapse image' : 'Expand image'}
+                  title={open ? 'Click to collapse' : 'Click to expand'}
+                  className={cn(
+                    'rounded-xl focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500',
+                    // Expanded, it takes the row to itself and the conversation
+                    // below simply moves down to make room.
+                    open && 'w-full',
+                  )}
+                >
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={`/api/images/${ref}`}
+                    alt="Image attached to this message"
+                    /*
+                     * Bounded, never cropped, in both states. A square box once
+                     * cropped a portrait photo to its middle, so the record of
+                     * what was asked about no longer matched what was sent.
+                     *
+                     * Expanded is bounded by the content width and the viewport
+                     * height, so a very large picture stays usable and the page
+                     * never scrolls sideways.
+                     *
+                     * `draggable` so it behaves like an ordinary image: dragging
+                     * it out carries the real authorised URL, not a copy.
+                     */
+                    draggable
+                    className={cn(
+                      'cursor-pointer rounded-xl border border-slate-200 object-contain transition hover:border-slate-300',
+                      open ? 'max-h-[70vh] w-full max-w-full' : 'max-h-64 w-auto max-w-full',
+                    )}
+                  />
+                </button>
+              )
+            })}
           </div>
-        )}
-        {viewing !== null && message.images && (
-          <ImageViewer
-            refs={message.images}
-            startIndex={viewing}
-            alt="Image attached to this message"
-            onClose={() => setViewing(null)}
-          />
         )}
 
         {message.text && (
