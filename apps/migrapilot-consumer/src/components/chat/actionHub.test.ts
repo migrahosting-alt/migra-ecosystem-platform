@@ -103,3 +103,31 @@ test('the response shape is imported, not re-declared from memory', () => {
   // A loose inline cast is what let the wrong field name compile.
   assert.match(composer, /import type \{ PublicImage \} from '@\/app\/api\/images\/route'/)
 })
+
+test('previews are contained, never cropped', () => {
+  /*
+   * `object-cover` filled the tile by cutting the picture down to its middle.
+   * The worst case is the one this feature exists for: a tall screenshot whose
+   * error message sits in the half that got cropped away, with no sign to the
+   * user that anything was removed.
+   */
+  /*
+   * Comments are stripped first. The prose above explains why cover is wrong and
+   * therefore CONTAINS the word — a scan over the raw file matches the
+   * explanation and fails on a correct implementation.
+   */
+  const codeOnly = (source: string) =>
+    source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
+  for (const [name, source] of [['tray', tray], ['transcript', read('components/chat/Message.tsx')]] as const) {
+    const code = codeOnly(source)
+    assert.match(code, /object-contain/, `${name} must contain the image`)
+    assert.doesNotMatch(code, /object-cover/, `${name} must not crop it`)
+  }
+})
+
+test('the transcript keeps the image in its own shape', () => {
+  // Bounded by a max height rather than forced into a square, so a portrait
+  // stays a portrait and the record matches what was actually sent.
+  const message = read('components/chat/Message.tsx')
+  assert.match(message, /max-h-64 w-auto max-w-full/)
+})

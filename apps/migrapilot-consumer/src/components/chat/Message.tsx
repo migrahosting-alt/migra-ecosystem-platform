@@ -165,7 +165,13 @@ function UserTurn({ message }: { message: Message }) {
                 key={ref}
                 src={`/api/images/${ref}`}
                 alt="Image attached to this message"
-                className="h-28 w-28 rounded-xl border border-slate-200 object-cover"
+                /*
+                 * The transcript shows the image in its OWN shape, bounded
+                 * rather than cropped. A square box cropped a portrait photo
+                 * down to its middle, so the record of what was asked about no
+                 * longer matched what was sent.
+                 */
+                className="max-h-64 w-auto max-w-full rounded-xl border border-slate-200 object-contain"
               />
             ))}
           </div>

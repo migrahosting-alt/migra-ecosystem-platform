@@ -45,18 +45,26 @@ export function ImageTray({ images, pending, error, onRemove, onDismissError, la
         {images.map((image) => (
           <figure
             key={image.id}
-            className="group relative h-20 w-20 overflow-hidden rounded-lg border border-slate-200 bg-slate-50"
+            className="group relative h-20 w-20 overflow-hidden rounded-lg border border-slate-200 bg-slate-100"
           >
             {/*
               Served from the caller's own library by opaque id. `alt` carries the
               display name so the attachment is still identifiable to a screen
               reader, and to anyone whose images do not load.
             */}
+            {/*
+              CONTAIN, NEVER COVER. `object-cover` filled the tile by cropping,
+              which quietly removed part of the picture the user is about to ask
+              about — the worst case being a tall screenshot whose error message
+              sits in the cropped-away half. The tile stays a compact fixed size;
+              the image is letterboxed inside it so a portrait, a landscape and a
+              square all show completely.
+            */}
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src={`/api/images/${image.id}`}
               alt={image.name}
-              className="h-full w-full object-cover"
+              className="h-full w-full object-contain"
             />
             <button
               type="button"
