@@ -961,6 +961,36 @@ CREATE UNIQUE INDEX IF NOT EXISTS model_qualification_request_idx
   WHERE request_id IS NOT NULL;
 `;
 
+/**
+ * Replay protection for signed internal assertions.
+ *
+ * DURABLE, NOT PROCESS MEMORY. An in-process set reopens every nonce the moment
+ * the service restarts, which turns replay protection into a courtesy that
+ * depends on uptime — and a restart is exactly the moment an attacker with a
+ * captured assertion would retry.
+ *
+ * The primary key IS the request id, so "insert or fail" is the whole
+ * concurrency story: two simultaneous replays contend on one row and precisely
+ * one wins. No read-then-write, which is the shape that lets both callers see
+ * "unused" and both proceed.
+ *
+ * Rows carry their own expiry so cleanup is a bounded delete rather than an
+ * unbounded table that grows for the lifetime of the deployment.
+ */
+const M17_INTERNAL_ASSERTION_NONCE = `
+CREATE TABLE IF NOT EXISTS internal_assertion_nonces (
+  request_id  TEXT PRIMARY KEY,
+  service_id  TEXT NOT NULL,
+  action      TEXT NOT NULL,
+  consumed_at BIGINT NOT NULL,
+  expires_at  BIGINT NOT NULL
+);
+
+/* Cleanup scans by expiry only. */
+CREATE INDEX IF NOT EXISTS internal_assertion_nonces_expiry_idx
+  ON internal_assertion_nonces (expires_at);
+`;
+
 export const MIGRATIONS: readonly Migration[] = [
   { version: 1, name: 'foundation', sql: M1_FOUNDATION },
   { version: 2, name: 'tenancy_primitives', sql: M2_TENANCY },
@@ -978,6 +1008,7 @@ export const MIGRATIONS: readonly Migration[] = [
   { version: 14, name: 'anonymous_quota', sql: M14_ANONYMOUS_QUOTA },
   { version: 15, name: 'user_preferences', sql: M15_USER_PREFERENCES },
   { version: 16, name: 'model_qualification', sql: M16_MODEL_QUALIFICATION },
+  { version: 17, name: 'internal_assertion_nonce', sql: M17_INTERNAL_ASSERTION_NONCE },
 ];
 
 /** Highest version defined in code. */

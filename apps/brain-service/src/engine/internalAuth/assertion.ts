@@ -48,6 +48,7 @@ export type AssertionFailure =
   | 'malformed'
   | 'unknown_key'
   | 'unknown_service'
+  | 'action_not_granted'
   | 'wrong_action'
   | 'request_mismatch'
   | 'body_mismatch'
@@ -69,8 +70,16 @@ export interface VerifyContext {
 export interface VerifyDeps {
   /** Active signing keys by id. An unknown id is refused, never guessed. */
   keys: ReadonlyMap<string, string>;
-  /** Services permitted to make privileged calls. */
-  allowedServices: ReadonlySet<string>;
+  /**
+   * Which actions each service may request — a POLICY, not a membership list.
+   *
+   * Possessing a valid key must not make a caller universally privileged. The
+   * key proves WHO is calling; this decides WHAT that caller may ask for, and
+   * the two are different questions. A signing key leaked from a service that
+   * may only qualify models must not become the power to do everything else the
+   * Brain will ever expose.
+   */
+  servicePolicy: ReadonlyMap<string, ReadonlySet<string>>;
   /**
    * Remember a request id until it expires. Returns false if already seen.
    *
@@ -160,8 +169,16 @@ export async function verifyAssertion(
     expiresAt: a.expiresAt!, requestId: a.requestId!,
   };
 
-  if (!deps.allowedServices.has(fields.serviceId)) {
+  const permitted = deps.servicePolicy.get(fields.serviceId);
+  if (!permitted) {
     return fail('unknown_service', `service ${fields.serviceId} may not make privileged calls`);
+  }
+  /*
+   * BOUND SERVER-SIDE. The caller does not get to widen its own grant by asking
+   * for a different action, and a key is scoped to the job its service does.
+   */
+  if (!permitted.has(context.expectedAction)) {
+    return fail('action_not_granted', `service ${fields.serviceId} is not granted ${context.expectedAction}`);
   }
 
   /*

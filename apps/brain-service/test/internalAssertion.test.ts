@@ -24,7 +24,7 @@ const BODY = JSON.stringify({ modelId: 'qwen2.5vl:7b', capability: 'vision' });
 function depsWith(seen = new Set<string>()): VerifyDeps {
   return {
     keys: new Map([['v1', KEY], ['v2', OLD_KEY]]),
-    allowedServices: new Set(['migrapilot-command-center']),
+    servicePolicy: new Map([['migrapilot-command-center', new Set([ACTION])]]),
     rememberRequestId: async (id) => (seen.has(id) ? false : (seen.add(id), true)),
   };
 }
@@ -213,4 +213,22 @@ test('an empty or absent mac never verifies', async () => {
     const out = await verifyAssertion({ ...f, mac }, ctx(), depsWith());
     assert.equal(out.ok, false);
   }
+});
+
+test('a valid key does not make a caller universally privileged', async () => {
+  /*
+   * The key proves WHO is calling; the policy decides WHAT they may ask for. A
+   * key leaked from a service that may only qualify models must not become the
+   * power to do everything else the Brain will ever expose.
+   */
+  const deps: VerifyDeps = {
+    keys: new Map([['v1', KEY]]),
+    servicePolicy: new Map([['migrapilot-command-center', new Set(['platform.models.qualify'])]]),
+    rememberRequestId: async () => true,
+  };
+  const other = 'platform.models.delete';
+  const f = fieldsFor({ action: other });
+  const out = await verifyAssertion(signed(f), ctx({ expectedAction: other }), deps);
+  assert.equal(out.ok, false);
+  if (!out.ok) assert.equal(out.reason, 'action_not_granted');
 });
