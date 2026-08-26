@@ -1032,6 +1032,67 @@ const M19_MESSAGE_IMAGES = `
 ALTER TABLE conversation_messages ADD COLUMN IF NOT EXISTS image_refs TEXT;
 `;
 
+/**
+ * Where a media artifact's bytes have been moved, and whether that was PROVEN.
+ *
+ * WHY IN POSTGRES AND NOT BESIDE THE BYTES. The first version of this ledger
+ * lived in the destination bucket. If that bucket were lost, the artifact and
+ * the record of where the artifact went would be lost together — the evidence
+ * would share the fate of the thing it is evidence about. The object-side copy
+ * remains as mirrored evidence; this is the authority.
+ *
+ * 🚨 KEYED ON scope + artifact, NEVER ON artifact ALONE. Image ids are
+ * content-addressed, so the SAME id legitimately exists under several owners.
+ * A migration verified for one owner says nothing about another's copy, and
+ * treating the id as globally unique produced a "proof" that read a completely
+ * different scope's bytes. Ownership is part of storage identity here, so it is
+ * part of the key.
+ *
+ * `copied` and `verified` are distinct states on purpose: bytes that arrived are
+ * not bytes proven to be retrievable and intact.
+ */
+const M20_MEDIA_MIGRATIONS = `
+CREATE TABLE IF NOT EXISTS media_migrations (
+  id                    TEXT PRIMARY KEY,
+  /* The owner bucket the artifact belongs to — part of its storage identity. */
+  scope                 TEXT NOT NULL,
+  artifact_id           TEXT NOT NULL,
+  source_provider       TEXT NOT NULL,
+  source_key            TEXT NOT NULL,
+  destination_provider  TEXT NOT NULL,
+  destination_key       TEXT NOT NULL,
+  /* What the artifact's own record claims these bytes hash to. */
+  expected_hash         TEXT NOT NULL,
+  /* What the destination actually returned, re-hashed. NULL until proven. */
+  verified_hash         TEXT,
+  /* pending | copied | verified | failed */
+  status                TEXT NOT NULL,
+  copied_at             BIGINT,
+  verified_at           BIGINT,
+  last_error            TEXT,
+  /* Attempts, so a permanently failing artifact is visible rather than retried
+     forever in silence. */
+  attempts              INTEGER NOT NULL DEFAULT 0,
+  /* Ties a migration to the turn that ran it, across both services' logs. */
+  correlation_id        TEXT,
+  created_at            BIGINT NOT NULL,
+  updated_at            BIGINT NOT NULL
+);
+
+/*
+ * One row per migration TARGET. The same artifact may legitimately be migrated
+ * to more than one destination provider over time, so the provider is part of
+ * the constraint — but it may only have one record per provider, or "has this
+ * moved?" stops having a single answer.
+ */
+CREATE UNIQUE INDEX IF NOT EXISTS media_migrations_target_idx
+  ON media_migrations (scope, artifact_id, destination_provider);
+
+/* The two questions asked of this table: what is left, and what failed. */
+CREATE INDEX IF NOT EXISTS media_migrations_status_idx
+  ON media_migrations (status, updated_at DESC);
+`;
+
 export const MIGRATIONS: readonly Migration[] = [
   { version: 1, name: 'foundation', sql: M1_FOUNDATION },
   { version: 2, name: 'tenancy_primitives', sql: M2_TENANCY },
@@ -1052,6 +1113,7 @@ export const MIGRATIONS: readonly Migration[] = [
   { version: 17, name: 'internal_assertion_nonce', sql: M17_INTERNAL_ASSERTION_NONCE },
   { version: 18, name: 'conversation_images', sql: M18_CONVERSATION_IMAGES },
   { version: 19, name: 'message_images', sql: M19_MESSAGE_IMAGES },
+  { version: 20, name: 'media_migrations', sql: M20_MEDIA_MIGRATIONS },
 ];
 
 /** Highest version defined in code. */
