@@ -21,7 +21,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { OpenAiCompatProvider } from '../src/providers/openAiCompatProvider.js';
-import type { ChatTurnRequest } from '@migrapilot/protocol';
+import type { ChatTurnRequest } from '@migrapilot/shared-types';
 
 /** Captures the request body the provider actually sends. */
 function capturingFetch(): { sent: () => Record<string, unknown>; impl: typeof fetch } {
@@ -50,6 +50,7 @@ function providerWith(impl: typeof fetch): OpenAiCompatProvider {
 }
 
 const turn = (context: ChatTurnRequest['context']): ChatTurnRequest => ({
+  feature: 'chat',
   modelProfile: 'default',
   systemPromptId: 'x',
   userPrompt: 'what is the passphrase in my notes?',
