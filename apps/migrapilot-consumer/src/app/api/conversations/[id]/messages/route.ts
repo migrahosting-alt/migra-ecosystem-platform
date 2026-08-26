@@ -70,8 +70,26 @@ export async function GET(
 
   return Response.json({
     messages: messages
-      // A turn still being written has no content worth rendering yet.
-      .filter((message) => typeof message.content === 'string' && message.content.length > 0)
+      /*
+       * A TURN STILL BEING WRITTEN has no content worth rendering yet — that is
+       * what this filter is for, and it stays.
+       *
+       * BUT CONTENT IS NOT ONLY TEXT. An image-generation turn produces no words
+       * at all, so a perfectly complete assistant message carrying a generated
+       * picture was written durably and then dropped on the way back out. The
+       * image appeared live, survived in the database, showed up in the Media
+       * Library, and vanished on every reload — because the read path judged
+       * emptiness by text alone.
+       *
+       * That is the same rule missed a FOURTH time, after `producedOutput`, the
+       * client's delivery condition, and the reload mapping. Every place that
+       * asks "does this turn contain anything" has to count images.
+       */
+      .filter(
+        (message) =>
+          (typeof message.content === 'string' && message.content.length > 0) ||
+          canonicalRefs(message.imageRefs).length > 0,
+      )
       .map((message) => ({
         id: message.id ?? null,
         role: message.role,

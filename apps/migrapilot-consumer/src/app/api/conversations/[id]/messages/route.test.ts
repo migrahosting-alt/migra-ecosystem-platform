@@ -130,3 +130,51 @@ test('refs that are not canonical never reach the browser', async () => {
 })
 
 test.after(() => resetAuthPort())
+
+
+test('an image-only assistant turn is returned, not filtered away as empty', async () => {
+  /*
+   * THE FOURTH TIME THIS RULE WAS MISSED. An image-generation turn produces no
+   * words, so this route's "still being written" filter — which judged emptiness
+   * by text length alone — dropped a COMPLETE assistant message carrying a
+   * generated picture. It was written durably, it showed in the Media Library,
+   * and it vanished on every reload.
+   *
+   * The filter still has a job, asserted below: a turn genuinely mid-write, with
+   * neither text nor images, must not render.
+   */
+  const restore = brainReturns({
+    messages: [
+      { id: 'm1', conversationId: 'c1', role: 'user', content: 'generate letter A in png',
+        status: 'complete', createdAt: 1, durable: true },
+      { id: 'm2', conversationId: 'c1', role: 'assistant', content: '',
+        status: 'complete', createdAt: 2, durable: true, imageRefs: [A] },
+      { id: 'm3', conversationId: 'c1', role: 'assistant', content: '',
+        status: 'partial', createdAt: 3, durable: true },
+    ],
+  })
+
+  const { body } = await reopen()
+  assert.equal(body.messages.length, 2, `the picture must survive: ${JSON.stringify(body.messages)}`)
+  assert.deepEqual(body.messages[1]!.imageRefs, [A], 'and its ref comes back with it')
+  assert.equal(body.messages[1]!.content, '', 'an image-only turn has no text, and that is fine')
+
+  restore()
+})
+
+test('a turn with neither text nor images is still withheld', async () => {
+  // The filter's original purpose: a turn still being written must not render.
+  const restore = brainReturns({
+    messages: [
+      { id: 'm1', conversationId: 'c1', role: 'user', content: 'hello',
+        status: 'complete', createdAt: 1, durable: true },
+      { id: 'm2', conversationId: 'c1', role: 'assistant', content: '',
+        status: 'partial', createdAt: 2, durable: true },
+    ],
+  })
+
+  const { body } = await reopen()
+  assert.equal(body.messages.length, 1)
+
+  restore()
+})
