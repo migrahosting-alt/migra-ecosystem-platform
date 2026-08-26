@@ -44,9 +44,10 @@ import { redactSecrets } from './memory/redaction.js';
 import { scopeFrom } from './memory/memoryRoutes.js';
 import { engineCorrelationId } from './toolRoutes.js';
 import { BrainTurnTrace } from './turnTrace.js';
-import { classifyGenerationIntent } from './media/generationIntent.js';
+
 import { DEFAULT_STUDIO_CONFIG, generateImage, type GenerationStage } from './media/studioImage.js';
 import { describeImageRequest, shapeImagePrompt } from './media/imagePrompt.js';
+import { classifyImageTurn } from './media/generationIntent.js';
 import { renderTextGlyph } from './media/glyphRender.js';
 import type { IndexService } from './rag/indexService.js';
 import { auditStore } from './auditLog.js';
@@ -319,6 +320,16 @@ export function registerAiRoutes(
     const hasImage = (body.attachments ?? []).some((a) => IMAGE_MIME.test(a.mimeType));
 
     /*
+     * WHAT THE USER ASKED FOR, decided before anything is gated on the presence
+     * of a picture. An explicit request to CREATE outranks an image that merely
+     * happens to be in scope: "generate letter C in png" sent after an upload
+     * used to be answered as a question about the upload, because the route was
+     * gated on `!hasImage` and the user's verb never got a vote.
+     */
+    const imageTurn = classifyImageTurn(userPrompt, hasImage);
+    const wantsNewImage = imageTurn === 'create';
+
+    /*
      * GOVERNED VISION. The prompt chooses the capability and the capability
      * chooses the model — never a vision-capable model chosen first and asked
      * whatever came in. `vision.general` is approved here; `vision.object_counting`
@@ -328,7 +339,10 @@ export function registerAiRoutes(
      * nothing and cannot come back as a confident wrong number.
      */
     let visionGate: Awaited<ReturnType<typeof gateVisionTurn>> | null = null;
-    if (hasImage && visionDeps) {
+    // A turn that asks for a NEW picture is not a vision turn, even with an image
+    // attached — gating it on vision qualification would refuse a creation
+    // request for failing a test about reading the old image.
+    if (hasImage && visionDeps && !wantsNewImage) {
       visionGate = await gateVisionTurn(visionDeps, userPrompt);
       if (!visionGate.serve) {
         await auditStore.append({
@@ -356,6 +370,7 @@ export function registerAiRoutes(
      */
     const approvedVisionModel = visionGate?.serve ? visionGate.modelId : undefined;
     trace.set('has_image', hasImage);
+    trace.set('image_turn', imageTurn);
     if (visionGate) trace.set('vision_capability', visionGate.capability);
     trace.mark('vision_gate');
 
@@ -440,11 +455,7 @@ export function registerAiRoutes(
      * Requires a streaming request, because a generation legitimately takes
      * minutes on a cold checkpoint and a buffered response would just hang.
      */
-    if (
-      !hasImage &&
-      body.stream &&
-      classifyGenerationIntent(userPrompt) === 'image_generation'
-    ) {
+    if (wantsNewImage && body.stream) {
       trace.set('capability', 'image_generation');
       trace.mark('route');
       await streamGeneration(request, reply, requestId, userPrompt, trace);

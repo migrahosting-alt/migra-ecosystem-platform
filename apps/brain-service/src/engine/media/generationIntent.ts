@@ -66,6 +66,83 @@ const EXPLICIT: readonly RegExp[] = [
 
 export type TurnIntent = 'image_generation' | 'text'
 
+/**
+ * What the user wants done, when an image is already in the turn.
+ *
+ * WHY THIS EXISTS. The generation route was gated on `!hasImage`, so ANY picture
+ * in the turn disabled creation outright. "generate letter C in png" sent after
+ * an upload was answered as a question about the upload — the model described
+ * the attached gradient and offered to explain how to make a letter. The user's
+ * verb was ignored because a previous attachment was still in scope.
+ *
+ * THE RULE: an explicit request to CREATE outranks residual image context. An
+ * attached image is evidence, not an automatic override of the current verb. It
+ * only wins when the prompt actually points at it — "edit this image", "what is
+ * in this picture", "make this one blue".
+ *
+ * Lexical, like everything else here, with the same stated limit: a phrasing
+ * outside these lists falls through to treating the attached image as the
+ * subject, which is the safe direction when a picture is genuinely present.
+ */
+export type ImageTurnIntent = 'create' | 'transform' | 'understand' | 'text'
+
+/** Points at an image already in the conversation. */
+const REFERENTIAL: readonly RegExp[] = [
+  /\b(this|that|the) (image|picture|photo|screenshot|png|jpe?g|one)\b/i,
+  /\bthe (image|picture|photo|screenshot) (above|attached|below)\b/i,
+  /\b(i|you) (just )?(sent|uploaded|shared|attached)\b/i,
+  /\battached\b/i,
+  /\bmake it\b/i,
+  /\bchange it\b/i,
+  /\bin (it|here)\b/i,
+]
+
+/** Alters an image that already exists. */
+const TRANSFORM: readonly RegExp[] = [
+  /\b(edit|modify|change|adjust|retouch|fix|clean up)\b/i,
+  /\b(crop|resize|scale|rotate|flip|mirror|upscale)\b/i,
+  /\b(recolou?r|colou?rise|blur|sharpen|brighten|darken|enhance)\b/i,
+  /\b(remove|erase|delete|cut out|take out)\b/i,
+  /\b(add|put|place|insert)\b/i,
+  /\breplace\b/i,
+  /\bmake (it|this|that|them)\b/i,
+]
+
+/** Asks about an image that already exists. */
+const UNDERSTAND: readonly RegExp[] = [
+  /\b(describe|analy[sz]e|identify|recogni[sz]e|transcribe|ocr|summari[sz]e)\b/i,
+  /\bwhat('s| is| are| do you see)\b/i,
+  /\bhow many\b/i,
+  /\b(who|where|when|which)\b/i,
+  /\b(read|count|list)\b/i,
+  /\btell me\b/i,
+]
+
+const matches = (patterns: readonly RegExp[], text: string): boolean =>
+  patterns.some((re) => re.test(text))
+
+export function classifyImageTurn(prompt: string, hasImage: boolean): ImageTurnIntent {
+  const text = prompt.trim()
+  const wantsCreation = classifyGenerationIntent(text) === 'image_generation'
+
+  // Nothing attached: the only question is whether they asked for a picture.
+  if (!hasImage) return wantsCreation ? 'create' : 'text'
+
+  const refersToIt = matches(REFERENTIAL, text)
+
+  // THE INVARIANT. A clear request to make something new wins over an image that
+  // merely happens to be in scope — unless the prompt points at that image.
+  if (wantsCreation && !refersToIt) return 'create'
+
+  if (refersToIt && matches(TRANSFORM, text)) return 'transform'
+  if (matches(UNDERSTAND, text)) return 'understand'
+  if (refersToIt) return 'understand'
+
+  // A picture is present and the prompt named no other subject: it is about the
+  // picture. Guessing "create" here would spend GPU answering the wrong question.
+  return 'understand'
+}
+
 export function classifyGenerationIntent(prompt: string): TurnIntent {
   const text = prompt.trim()
   if (!text) return 'text'
