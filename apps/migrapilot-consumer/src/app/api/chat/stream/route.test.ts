@@ -813,3 +813,56 @@ test('a message with neither text nor images is still refused', async () => {
   brain.restore()
   resetAuthPort()
 })
+
+test('an edit request the product cannot perform is refused honestly, not improvised', async () => {
+  /*
+   * WHY THIS EXISTS. The router learned to recognise "transform" turns before
+   * anything could execute one, and the turn was still handed to a text model.
+   * Asked to "make this one blue", it answered "Sure! Here's the text in blue:
+   * blue" — an invented edit result for an edit that never happened.
+   *
+   * The user must be told the truth: the image can be understood, editing does
+   * not exist yet, and here is the thing that can be done instead.
+   */
+  const original = globalThis.fetch
+  globalThis.fetch = (async (url: string | URL | Request) => {
+    const href = String(url)
+    if (href.endsWith('/api/ai/chat')) {
+      return new Response(
+        JSON.stringify({
+          ok: false,
+          code: 'IMAGE_EDITING_UNAVAILABLE',
+          error:
+            'I can understand the image, but image editing is not available in MigraPilot yet. ' +
+            'I can generate a new image based on your requested change instead.',
+          operation: 'image.transform',
+        }),
+        { status: 422, headers: { 'content-type': 'application/json' } },
+      )
+    }
+    if (href.endsWith('/messages')) {
+      return new Response(JSON.stringify({ ok: true }), { status: 200, headers: { 'content-type': 'application/json' } })
+    }
+    return new Response(JSON.stringify({ id: CONVERSATION_ID }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    })
+  }) as typeof globalThis.fetch
+  setAuthPort(portWith(session))
+
+  const frames = await collect(await post({ prompt: 'make this one blue' }))
+  const last = frames[frames.length - 1]!
+
+  assert.equal(last.event, 'error')
+  assert.equal(last.data.error, 'image_editing_unavailable')
+  // The three things the sentence must carry, asserted individually so a
+  // rewrite cannot quietly drop one.
+  assert.match(last.data.message, /understand the image/i)
+  assert.match(last.data.message, /not available/i)
+  assert.match(last.data.message, /generate a new image/i)
+  // And it must never read as though the edit happened.
+  assert.ok(!/here('s| is) (the|your)/i.test(last.data.message), 'no invented edit result')
+
+  globalThis.fetch = original
+  resetAuthPort()
+})

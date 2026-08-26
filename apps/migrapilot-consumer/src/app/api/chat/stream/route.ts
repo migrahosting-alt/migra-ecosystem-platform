@@ -126,6 +126,23 @@ function refusalOr(
           })()
         : (body as { code?: string; error?: string } | null)
 
+    if (parsed?.code === 'IMAGE_EDITING_UNAVAILABLE') {
+      /*
+       * The Brain's sentence is relayed VERBATIM here, unlike the evidence
+       * refusal below. It was written for this exact situation and for this
+       * audience: it says what MigraPilot can do with the image, what it cannot
+       * do yet, and the one thing the user can do instead. Paraphrasing it in a
+       * second place would let the two drift.
+       */
+      return {
+        error: 'image_editing_unavailable',
+        message:
+          parsed.error ??
+          'I can understand the image, but image editing is not available in MigraPilot yet. ' +
+            'I can generate a new image based on your requested change instead.',
+      }
+    }
+
     if (parsed?.code === 'INSUFFICIENT_APPROVED_EVIDENCE') {
       /*
        * The Brain's own text is NOT relayed. It is written for the repository

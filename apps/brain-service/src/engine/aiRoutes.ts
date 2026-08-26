@@ -48,6 +48,17 @@ import { BrainTurnTrace } from './turnTrace.js';
 import { DEFAULT_STUDIO_CONFIG, generateImage, type GenerationStage } from './media/studioImage.js';
 import { describeImageRequest, shapeImagePrompt } from './media/imagePrompt.js';
 import { classifyImageTurn } from './media/generationIntent.js';
+
+/**
+ * Is there an image editor behind a `transform` turn?
+ *
+ * No, and saying so honestly is the whole point. Kept as a function so the day
+ * an edit pipeline is wired, this answers from its configuration and the
+ * refusal disappears by itself.
+ */
+function imageEditingAvailable(): boolean {
+  return false;
+}
 import { renderTextGlyph } from './media/glyphRender.js';
 import type { IndexService } from './rag/indexService.js';
 import { auditStore } from './auditLog.js';
@@ -328,6 +339,41 @@ export function registerAiRoutes(
      */
     const imageTurn = classifyImageTurn(userPrompt, hasImage);
     const wantsNewImage = imageTurn === 'create';
+
+    /*
+     * FAIL CLOSED ON A CAPABILITY THAT DOES NOT EXIST.
+     *
+     * Classifying a turn as `transform` and then handing it to a text model is
+     * worse than not classifying it: asked to "make this one blue", the model
+     * cheerfully answered "Sure! Here's the text in blue: blue" — an invented
+     * edit result for an edit that never happened. A router that identifies an
+     * operation it cannot perform must say so, not improvise.
+     *
+     * A CONDITION, NOT A HARDCODED REFUSAL. When an edit pipeline is wired this
+     * becomes the check for it, and the refusal stops firing on its own rather
+     * than needing to be hunted down and removed.
+     */
+    if (imageTurn === 'transform' && !imageEditingAvailable()) {
+      await auditStore.append({
+        correlationId: requestId,
+        requestId,
+        type: 'capability.refused',
+        component: 'chat',
+        outcome: 'IMAGE_EDITING_UNAVAILABLE',
+        fields: { operation: 'image.transform' },
+      });
+      trace.set('capability', 'image_transform');
+      trace.mark('route');
+      reply.code(422);
+      return {
+        ok: false,
+        code: 'IMAGE_EDITING_UNAVAILABLE',
+        error:
+          'I can understand the image, but image editing is not available in MigraPilot yet. ' +
+          'I can generate a new image based on your requested change instead.',
+        operation: 'image.transform',
+      };
+    }
 
     /*
      * GOVERNED VISION. The prompt chooses the capability and the capability

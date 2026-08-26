@@ -134,7 +134,13 @@ export function classifyImageTurn(prompt: string, hasImage: boolean): ImageTurnI
   // merely happens to be in scope — unless the prompt points at that image.
   if (wantsCreation && !refersToIt) return 'create'
 
-  if (refersToIt && matches(TRANSFORM, text)) return 'transform'
+  /*
+   * With a picture in the turn, a transform verb IS the reference. "remove the
+   * person on the left" names no demonstrative and is unmistakably about the
+   * attached image; requiring "this image" as well sent it to the vision path,
+   * where a text model would improvise an edit result instead of refusing.
+   */
+  if (matches(TRANSFORM, text)) return 'transform'
   if (matches(UNDERSTAND, text)) return 'understand'
   if (refersToIt) return 'understand'
 

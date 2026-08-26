@@ -76,3 +76,54 @@ test('asking HOW to make an image is instructions, not a picture', () => {
   assert.equal(withoutImage('how do I generate a png in python'), 'text');
   assert.equal(withImage('how do I generate a png in python'), 'understand');
 });
+
+/*
+ * THE REFUSAL CONTRACT. Classification without an executable capability is half
+ * a job: asked to "make this one blue", a text model answered "Sure! Here's the
+ * text in blue: blue" — an invented edit result for an edit that never
+ * happened. These lock the three-way contract that replaced it.
+ *
+ *   create    → generation
+ *   understand→ vision
+ *   transform → a real editor, or a truthful refusal
+ */
+
+test('every transform phrasing is classified as transform, never as create', () => {
+  // A transform misread as `create` is the dangerous direction: it would spend
+  // GPU producing an unrelated new picture instead of refusing honestly.
+  for (const prompt of [
+    'edit this image',
+    'change the background of this photo',
+    'remove the person on the left',
+    'crop this to a square',
+    'resize this image to 512px',
+    'rotate the picture above',
+    'make it brighter',
+    'make this one blue',
+    'add a hat to this picture',
+    'replace the sky in this image',
+    'blur the background of this photo',
+    'upscale this image',
+  ]) {
+    assert.equal(classifyImageTurn(prompt, true), 'transform', prompt);
+  }
+});
+
+test('a transform phrasing with NO image attached is not a transform turn', () => {
+  /*
+   * There is nothing to edit. "remove the background" with no attachment is a
+   * question about how to do it, and refusing an edit nobody can perform on an
+   * image that does not exist would be a non sequitur.
+   */
+  assert.equal(classifyImageTurn('remove the background', false), 'text');
+  assert.equal(classifyImageTurn('crop this to a square', false), 'text');
+});
+
+test('creation is never swallowed by the transform branch', () => {
+  // The refusal must not become a trap that catches ordinary generation.
+  assert.equal(classifyImageTurn('generate letter C in png', true), 'create');
+  assert.equal(classifyImageTurn('create an image of a blue car', true), 'create');
+  // "make ... a picture" reads as creation even though `make` is also a
+  // transform verb, because it names the artefact rather than pointing at one.
+  assert.equal(classifyImageTurn('make a picture of a blue car', true), 'create');
+});
