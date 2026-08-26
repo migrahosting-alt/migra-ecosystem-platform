@@ -47,8 +47,29 @@ const uploadRoot = (): string => process.env.UPLOAD_ROOT ?? '/var/lib/migrapilot
 const ALLOWED = new Set([
   'txt', 'md', 'markdown', 'csv', 'json', 'yaml', 'yml', 'toml', 'log',
   'html', 'xml', 'ts', 'tsx', 'js', 'jsx', 'py', 'rb', 'go', 'rs', 'java',
-  'sh', 'sql', 'css', 'scss', 'ini', 'env', 'conf',
+  'sh', 'css', 'scss', 'ini', 'conf',
 ])
+
+/*
+ * `sql` AND `env` WERE REMOVED FROM THE LIST ABOVE, and the omission is the point.
+ *
+ * Both were accepted here and then silently discarded by the indexer, which
+ * treats `*.sql` as a database dump and a bare `.env` as a secret. A user could
+ * upload `schema.sql`, watch it land in their library, and receive answers that
+ * had never read a line of it — the exact failure the comment above forbids.
+ * `.env` was stranger still: `prod.env` indexed fine while `.env` did not, so
+ * the outcome turned on whether the file happened to have a stem.
+ *
+ * Refusing them is the honest state, not the desired one. A user asking about
+ * their own schema is a reasonable thing to want, and the indexer's rule exists
+ * for scanning REPOSITORIES, where skipping dumps and secrets is correct — it is
+ * not obviously right for a document someone deliberately uploaded. Re-admitting
+ * them means deciding that question, with the credential-exposure risk in view,
+ * rather than quietly widening a list.
+ *
+ * `test/uploadIndexerAgreement.test.ts` in brain-service holds the two lists
+ * together so they cannot drift apart again.
+ */
 
 export const ALLOWED_EXTENSIONS = [...ALLOWED].sort()
 
@@ -132,7 +153,8 @@ export async function saveFile(rawName: string, data: ArrayBuffer): Promise<Stor
   if (!ALLOWED.has(extension)) {
     throw new FileRejected(
       'unsupported_type',
-      `${extension ? `.${extension}` : 'That type'} is not supported yet. Text and code documents can be read; PDF and Office files cannot.`,
+      `${extension ? `.${extension}` : 'That type'} is not supported yet. ` +
+        'Text and code documents can be read; PDF, Office files, database dumps and .env files cannot.',
     )
   }
   if (data.byteLength === 0) throw new FileRejected('empty_file', 'That file is empty.')
