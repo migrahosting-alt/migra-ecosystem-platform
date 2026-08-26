@@ -27,22 +27,30 @@ const KEY = 'abc123/img_one.png'
  * produced an object with no methods at all — which failed as "object wins",
  * looking like a behaviour bug in the code under test rather than in the harness.
  */
-function build(overrides: Partial<MediaStorage> = {}) {
+function build(
+  overrides: Partial<MediaStorage> = {},
+  canonicalWrites: 'local' | 'object' = 'local',
+  localOverrides: Partial<MediaStorage> = {},
+) {
   const object = disk()
-  const local = disk()
+  const localDisk = disk()
   const events: StorageHealthEvent[] = []
-  const facade: MediaStorage = {
-    put: (k, b, o) => object.put(k, b, o),
-    read: (k, o) => object.read(k, o),
-    stat: (k) => object.stat(k),
-    exists: (k) => object.exists(k),
-    delete: (k) => object.delete(k),
-    list: (p) => object.list(p),
-    sweepIncomplete: (p, a) => object.sweepIncomplete(p, a),
-    ...overrides,
-  }
-  const dual = new DualReadMediaStorage({ object: facade, local, onHealth: (e) => events.push(e) })
-  return { dual, object, local, events }
+  const bind = (backing: MediaStorage, extra: Partial<MediaStorage>): MediaStorage => ({
+    put: (k, b, o) => backing.put(k, b, o),
+    read: (k, o) => backing.read(k, o),
+    stat: (k) => backing.stat(k),
+    exists: (k) => backing.exists(k),
+    delete: (k) => backing.delete(k),
+    list: (p) => backing.list(p),
+    sweepIncomplete: (p, a) => backing.sweepIncomplete(p, a),
+    ...extra,
+  })
+  const facade = bind(object, overrides)
+  const local = bind(localDisk, localOverrides)
+  const dual = new DualReadMediaStorage({
+    object: facade, local, onHealth: (e) => events.push(e), canonicalWrites,
+  })
+  return { dual, object, local: localDisk, events }
 }
 
 test('a migrated artifact is served from object storage', async () => {
@@ -198,4 +206,62 @@ test('serving bytes NEVER depends on the ledger being reachable', () => {
       `the read path must not reference "${forbidden}" — the ledger is not a read dependency`,
     )
   }
+})
+
+
+/*
+ * CUTOVER. Everything above describes the staged phase, where object storage is
+ * read but never trusted with a write. These assert the flip itself — that the
+ * authority actually moves, that the rollback copy is still made, and that the
+ * rollback copy failing cannot take down a user's upload.
+ */
+
+test('before cutover, a new artifact is written only locally', async () => {
+  const { dual, object, local } = build()
+  await dual.put(KEY, Buffer.from('staged'))
+
+  assert.equal((await local.read(KEY))?.toString(), 'staged')
+  assert.equal(await object.read(KEY), null, 'object storage must not become authoritative by accident')
+})
+
+test('after cutover, the object store is the authority AND a rollback copy is kept', async () => {
+  const { dual, object, local } = build({}, 'object')
+  await dual.put(KEY, Buffer.from('cut over'))
+
+  assert.equal((await object.read(KEY))?.toString(), 'cut over', 'the remote store holds the artifact')
+  assert.equal((await local.read(KEY))?.toString(), 'cut over', 'and the local copy remains for rollback')
+})
+
+test('after cutover, a failed OBJECT write fails the upload', async () => {
+  // It is the authority now. Reporting success for bytes that did not land
+  // would be the worst outcome available.
+  const { dual, events } = build(
+    { put: async () => { throw new Error('object store unreachable') } },
+    'object',
+  )
+
+  await assert.rejects(() => dual.put(KEY, Buffer.from('x')), /unreachable/)
+  assert.equal(events.some((e) => e.kind === 'write-failed'), true)
+})
+
+test('after cutover, a failed ROLLBACK copy is reported but does NOT fail the upload', async () => {
+  /*
+   * The local copy is rollback material, not truth. Failing the user's upload
+   * because it could not be written would let a convenience take down the
+   * product — but silence would leave the rollback path quietly incomplete and
+   * nobody would find out until they needed it.
+   */
+  const { dual, object, events } = build(
+    {},
+    'object',
+    { put: async () => { throw new Error('disk full') } },
+  )
+
+  await assert.doesNotReject(() => dual.put(KEY, Buffer.from('y')))
+  assert.equal((await object.read(KEY))?.toString(), 'y', 'the authoritative write still happened')
+  assert.equal(
+    events.some((e) => e.kind === 'error' && /rollback copy/.test(e.detail ?? '')),
+    true,
+    'and the missing rollback copy was reported',
+  )
 })

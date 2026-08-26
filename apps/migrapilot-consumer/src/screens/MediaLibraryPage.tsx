@@ -63,6 +63,16 @@ export function MediaLibraryPage() {
   /** Null when the library could not be fetched at all — distinct from empty. */
   const [unreachable, setUnreachable] = useState(false)
   const [signedOut, setSignedOut] = useState(false)
+  /*
+   * Success needs saying, not just failure.
+   *
+   * Deleting an image removed the tile and announced NOTHING — the only
+   * feedback in this screen was for the failure path. For anyone not watching
+   * the exact tile that vanished, and for a screen reader, the action had no
+   * observable outcome at all. Announced in a live region so it is heard, and
+   * cleared on the next action so it cannot go stale.
+   */
+  const [notice, setNotice] = useState<string | null>(null)
   const [filter, setFilter] = useState<Filter>('all')
   const [query, setQuery] = useState('')
   const [viewing, setViewing] = useState<number | null>(null)
@@ -103,6 +113,7 @@ export function MediaLibraryPage() {
   const remove = async (imageId: string) => {
     setDeleting(imageId)
     setError(null)
+    setNotice(null)
     try {
       const response = await fetch(`/api/images/${encodeURIComponent(imageId)}`, { method: 'DELETE' })
       if (!response.ok) {
@@ -111,6 +122,9 @@ export function MediaLibraryPage() {
         return
       }
       await load()
+      // Only after the server confirmed AND the grid reloaded: the message
+      // describes what happened, not what was attempted.
+      setNotice('Media deleted')
     } catch {
       setError('That image could not be deleted. It is still in your library.')
     } finally {
@@ -240,6 +254,12 @@ export function MediaLibraryPage() {
             {error && (
               <p role="alert" className="mt-4 text-[13.5px] text-red-600">
                 {error}
+              </p>
+            )}
+
+            {notice && !error && (
+              <p role="status" className="mt-4 text-[13.5px] text-slate-600">
+                {notice}
               </p>
             )}
 

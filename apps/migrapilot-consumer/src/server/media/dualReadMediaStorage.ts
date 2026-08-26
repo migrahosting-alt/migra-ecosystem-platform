@@ -43,6 +43,20 @@ export interface DualReadOptions {
   /** Where bytes are still written, and the fallback for reads. */
   local: MediaStorage
   /**
+   * Which store a NEW artifact is written to.
+   *
+   * `local` is the staged phase: object storage is exercised by reads under a
+   * safety net while nothing depends on it for durability. `object` is the
+   * cutover: the remote store becomes the authority for new bytes and the local
+   * copy is kept alongside as rollback material, not as truth.
+   *
+   * A FLAG RATHER THAN A CODE CHANGE, deliberately. The flip and the rollback
+   * are then the same one-line operation under the same tested code, which is
+   * what makes reverting a decision an operator can take in seconds instead of
+   * a deployment.
+   */
+  canonicalWrites?: 'local' | 'object'
+  /**
    * Told whenever the object path did not serve a read.
    *
    * A fallback is not an error — the read succeeded — but it IS the number that
@@ -86,15 +100,25 @@ export class DualReadMediaStorage implements MediaStorage {
   }
 
   /**
-   * Writes stay LOCAL until cutover.
+   * Where a new artifact lands.
    *
-   * Writing to both would make object storage authoritative for new media
-   * without any of the durability work being done — the cutover would have
-   * happened quietly, which is the thing the staged plan exists to prevent.
+   * Before cutover both the authority and the only copy are local. After
+   * cutover the remote store is written FIRST and must succeed — it is the
+   * authority — and the local copy follows as rollback material.
+   *
+   * THE LOCAL MIRROR IS BEST-EFFORT BUT NEVER SILENT. Failing the user's upload
+   * because a rollback copy could not be written would let a convenience take
+   * down the product; pretending it succeeded would leave the rollback path
+   * quietly incomplete, and nobody would discover that until they needed it.
+   * So it is reported and the write still succeeds.
    */
   async put(key: string, bytes: Buffer, options?: PutOptions): Promise<void> {
+    const canonical =
+      this.options.canonicalWrites === 'object' ? this.options.object : this.options.local
+    const mirror = this.options.canonicalWrites === 'object' ? this.options.local : null
+
     try {
-      return await this.options.local.put(key, bytes, options)
+      await canonical.put(key, bytes, options)
     } catch (error) {
       // Counted and re-thrown: the caller still fails, but a write that failed
       // is the loudest signal this storage produces and must not be invisible.
@@ -104,6 +128,18 @@ export class DualReadMediaStorage implements MediaStorage {
         detail: error instanceof Error ? error.message : String(error),
       })
       throw error
+    }
+
+    if (mirror) {
+      try {
+        await mirror.put(key, bytes, options)
+      } catch (error) {
+        this.health({
+          kind: 'error',
+          key,
+          detail: `rollback copy not written: ${error instanceof Error ? error.message : error}`,
+        })
+      }
     }
   }
 

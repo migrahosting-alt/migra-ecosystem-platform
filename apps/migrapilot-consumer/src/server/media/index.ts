@@ -61,22 +61,44 @@ function objectStorage(): ObjectMediaStorage | null {
   })
 }
 
+/**
+ * Where new artifacts are written.
+ *
+ * Defaults to `local`, so a deployment that has not been through the cutover
+ * cannot be moved onto object storage by accident — the safe state is the one
+ * you get by saying nothing.
+ */
+function canonicalWriteTarget(): 'local' | 'object' {
+  return process.env.MIGRAPILOT_MEDIA_CANONICAL_WRITES === 'object' ? 'object' : 'local'
+}
+
 export function mediaStorage(): MediaStorage {
   const root = mediaRoot()
   const object = objectStorage()
   // Cached on the shape of the configuration, so a test that changes the
   // environment gets a storage that reflects it.
-  const key = `${root}|${object ? process.env.MIGRAPILOT_MEDIA_ENDPOINT : 'local'}`
+  // The write target is part of the key: without it, a process that had already
+  // built a storage would keep the OLD write behaviour after the flag changed.
+  const key = `${root}|${object ? process.env.MIGRAPILOT_MEDIA_ENDPOINT : 'local'}|${canonicalWriteTarget()}`
   if (configured?.key !== key) {
     const local = new LocalMediaStorage(root)
     configured = {
       key,
       /*
-       * MIGRATION PHASE: reads prefer object storage, writes stay local. Nothing
-       * has cut over — this exercises the object path with real traffic under a
-       * safety net, long before it is trusted with a write.
+       * Reads always prefer object storage. WRITES depend on the deployment:
+       * before cutover they stay local, so the object path is exercised by real
+       * traffic under a safety net long before it is trusted with a write;
+       * after cutover the object store is the authority and the local copy is
+       * kept as rollback material.
        */
-      storage: object ? new DualReadMediaStorage({ object, local, onHealth: reportHealth }) : local,
+      storage: object
+        ? new DualReadMediaStorage({
+            object,
+            local,
+            onHealth: reportHealth,
+            canonicalWrites: canonicalWriteTarget(),
+          })
+        : local,
     }
   }
   return configured.storage
