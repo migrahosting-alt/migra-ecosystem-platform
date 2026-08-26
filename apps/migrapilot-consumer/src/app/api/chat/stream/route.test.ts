@@ -627,7 +627,18 @@ test('a refusal for want of evidence is reported as such, and persists nothing',
     .filter((call) => call.url.endsWith('/messages'))
     .map((call) => JSON.parse(String(call.init.body)))
     .filter((stored) => stored.role === 'assistant')
-  assert.deepEqual(storedAssistant, [], 'a refusal must not be persisted as an answer')
+  /*
+   * DECISION REVERSED, deliberately. This previously asserted that a refusal is
+   * never persisted. That was too broad: a refusal the system CHOSE to give —
+   * "your documents do not cover that" — is a real response to the question, and
+   * dropping it meant a user who reloaded found their question with no reply at
+   * all, which reads as the product having lost the turn.
+   *
+   * The line now falls between DELIBERATE and TRANSIENT rather than between
+   * refusal and answer: a chosen refusal is stored, a transport fault is not.
+   */
+  assert.equal(storedAssistant.length, 1, 'a deliberate refusal IS part of the conversation')
+  assert.match(storedAssistant[0].content, /do not cover that/)
 
   globalThis.fetch = original
   resetAuthPort()
@@ -1106,4 +1117,102 @@ test('MATRIX: a ref that no longer resolves is dropped from what the Brain recei
 
   assert.deepEqual(sentRefs, [alive])
   assert.deepEqual(setImagesTo, [alive], 'the conversation no longer claims the dead ref')
+})
+
+/*
+ * ══════════════════════════════════════════════════════════════════════════
+ * THE REFUSAL PATH — a refusal is an ANSWER, and must survive a reload.
+ *
+ * Both of these were emitted and forgotten: the user was told the truth, hit
+ * refresh, and found their question sitting there with no reply at all, which
+ * reads as the product having lost the turn.
+ * ══════════════════════════════════════════════════════════════════════════
+ */
+
+/** Run one refused turn and report what was told, stored, and recorded. */
+async function refusedTurn(brainResponse: { status: number; body: unknown }): Promise<{
+  told: string
+  storedAssistant: string | null
+  outcome: string | null
+  brainFailureRecorded: boolean
+}> {
+  const original = globalThis.fetch
+  let storedAssistant: string | null = null
+  globalThis.fetch = (async (url: string | URL | Request, init: RequestInit = {}) => {
+    const href = String(url)
+    if (href.endsWith('/api/ai/chat')) {
+      return new Response(JSON.stringify(brainResponse.body), {
+        status: brainResponse.status,
+        headers: { 'content-type': 'application/json' },
+      })
+    }
+    if (href.endsWith('/messages') && (init.method ?? 'GET').toUpperCase() === 'POST') {
+      const parsed = JSON.parse(String(init.body ?? '{}')) as { role?: string; content?: string }
+      if (parsed.role === 'assistant') storedAssistant = parsed.content ?? ''
+      return new Response(JSON.stringify({ ok: true, id: 'm1' }), { status: 200, headers: { 'content-type': 'application/json' } })
+    }
+    return new Response(JSON.stringify({ ok: true, id: CONVERSATION_ID }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    })
+  }) as typeof globalThis.fetch
+
+  setAuthPort(portWith(session))
+  const frames = await collect(await post({ prompt: 'edit this image', conversationId: CONVERSATION_ID }))
+  globalThis.fetch = original
+  resetAuthPort()
+
+  const last = frames[frames.length - 1]!
+  const turnLine = frames.find((f) => f.event === 'error')
+  return {
+    told: String(last.data.message ?? ''),
+    storedAssistant,
+    outcome: turnLine ? String(last.data.error ?? '') : null,
+    brainFailureRecorded: false,
+  }
+}
+
+test('REGRESSION: a capability refusal is written to the conversation, so a reload still shows it', async () => {
+  const result = await refusedTurn({
+    status: 422,
+    body: {
+      ok: false,
+      code: 'IMAGE_EDITING_UNAVAILABLE',
+      error:
+        'I can understand the image, but image editing is not available in MigraPilot yet. ' +
+        'I can generate a new image based on your requested change instead.',
+    },
+  })
+
+  assert.match(result.told, /image editing is not available/i, 'the user is told live')
+  assert.ok(result.storedAssistant, 'AND it is stored as an assistant message')
+  assert.match(result.storedAssistant!, /image editing is not available/i)
+  // The stored text is the same text — a reload must not show a different answer.
+  assert.equal(result.storedAssistant, result.told)
+})
+
+test('REGRESSION: a transport fault is NOT written to the conversation', async () => {
+  /*
+   * The other half of the rule. Our outage says nothing about what the user
+   * asked, and storing it would make our failure a permanent part of their
+   * history.
+   */
+  const result = await refusedTurn({ status: 503, body: { ok: false, code: 'UPSTREAM_DEAD' } })
+
+  assert.ok(result.told.length > 0, 'the user is still told something')
+  assert.equal(result.storedAssistant, null, 'but nothing is written to the thread')
+})
+
+test('REGRESSION: a refusal is never recorded as an outage', async () => {
+  /*
+   * It used to settle as `brain_unreachable` with `brain_failure: brain_error`.
+   * A deliberate 422 is the feature working; counting it as an outage drags
+   * alerting into a healthy path and inflates the error rate.
+   */
+  const result = await refusedTurn({
+    status: 422,
+    body: { ok: false, code: 'IMAGE_EDITING_UNAVAILABLE', error: 'not available yet' },
+  })
+  assert.equal(result.outcome, 'image_editing_unavailable', 'reported to the client as a refusal')
+  assert.ok(result.storedAssistant, 'and kept in the conversation')
 })

@@ -100,6 +100,38 @@ async function citedFiles(answer: string): Promise<string[]> {
  * documents do not cover this" — instead of a generic failure that invites them
  * to retry an identical question forever.
  */
+/**
+ * Codes the Brain returns when it DECIDED not to answer.
+ *
+ * A refusal is a real response to the user's question — "I cannot edit images
+ * yet", "your documents do not cover that" — and belongs in the conversation
+ * exactly like any other answer. A transport fault is not: it is our problem,
+ * it says nothing about what was asked, and storing it would put our outage in
+ * the user's history forever.
+ */
+const DELIBERATE_REFUSALS: readonly string[] = [
+  'IMAGE_EDITING_UNAVAILABLE',
+  'INSUFFICIENT_APPROVED_EVIDENCE',
+  'VISION_NOT_QUALIFIED',
+]
+
+/** The refusal code, when the Brain refused on purpose rather than failed. */
+function deliberateRefusalCode(failure: { kind: string; body?: unknown }): string | null {
+  const body = (failure as { body?: unknown }).body
+  const parsed =
+    typeof body === 'string'
+      ? (() => {
+          try {
+            return JSON.parse(body) as { code?: string }
+          } catch {
+            return null
+          }
+        })()
+      : (body as { code?: string } | null)
+  const code = parsed?.code
+  return code && DELIBERATE_REFUSALS.includes(code) ? code : null
+}
+
 function refusalOr(
   failure: { kind: string; body?: unknown; status?: number },
   /** Attached files the approved index holds no chunks for. */
@@ -618,14 +650,18 @@ export async function POST(request: Request): Promise<Response> {
       if (activeImageLost) {
         // Said before the model is asked: there is nothing to answer FROM, and
         // an answer would be about a picture that no longer exists.
-        trace.set('active_image_lost', true)
-        trace.finish('active_image_lost')
-        emit('error', {
+        const told = {
           error: 'active_image_unavailable',
           message:
             'The image that was active in this conversation is no longer available. ' +
             'Attach another image or choose one from your Media Library.',
-        })
+        }
+        // Stored like any other answer: it explains the turn, and a reload must
+        // not leave the question looking unanswered.
+        await appendMessage(durableId, 'assistant', told.message, { principal })
+        trace.set('context_unavailable', 'active_image_deleted')
+        trace.finish('context_unavailable')
+        emit('error', told)
         closed = true
         try {
           controller.close()
@@ -656,11 +692,35 @@ export async function POST(request: Request): Promise<Response> {
       )
 
       if (opened.kind !== 'ok') {
-        // Nothing reached the user, and the cause is ours — the turn returns.
-        const settlement = await settle(false, 'brain_unreachable')
-        trace.set('brain_failure', opened.kind)
-        trace.finish('brain_unreachable')
-        emit('error', refusalOr(opened, reconciled.unreadable, reconciled.available))
+        const refusalCode = deliberateRefusalCode(opened)
+        const told = refusalOr(opened, reconciled.unreadable, reconciled.available)
+
+        /*
+         * A DELIBERATE REFUSAL IS AN ANSWER, so it is written to the
+         * conversation. It used to be emitted and forgotten: the user was told
+         * the truth, reloaded, and found their question sitting there with no
+         * reply at all — which reads as the product having lost the turn.
+         *
+         * A transport fault is still NOT stored. It is our failure, it says
+         * nothing about the question, and it would otherwise become a permanent
+         * part of what the user said to us.
+         */
+        if (refusalCode) {
+          await appendMessage(durableId, 'assistant', told.message, { principal })
+        }
+
+        const outcome = refusalCode
+          ? 'capability_refused'
+          : opened.kind === 'brain_error'
+            ? 'brain_error'
+            : 'brain_unreachable'
+        const settlement = await settle(false, outcome)
+        // `brain_failure` is reserved for things that actually went wrong. A
+        // refusal recorded as an outage drags alerting into a working feature.
+        if (!refusalCode) trace.set('brain_failure', opened.kind)
+        else trace.set('refusal', refusalCode)
+        trace.finish(outcome)
+        emit('error', told)
         if (settlement) emit('quota', settlement)
         closed = true
         try {
