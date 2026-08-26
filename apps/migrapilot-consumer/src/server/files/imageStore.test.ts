@@ -355,3 +355,92 @@ test('a re-generated identical image does not keep claiming to be an upload', as
   const listed = (await listImages()).find((i) => i.id === uploaded.id)
   assert.equal(listed?.provenance?.origin, 'generated', 'and it is durable')
 })
+
+/*
+ * ══════════════════════════════════════════════════════════════════════════
+ * SECURITY ACCEPTANCE — conversation image context must not leak.
+ *
+ * A conversation carries an ACTIVE image ref forward so a follow-up needs no
+ * reattachment. That ref is a bare content-addressed id travelling in
+ * conversation state, so the only thing standing between it and another
+ * account's picture is that resolution is scoped. These assert that boundary
+ * directly rather than trusting it — including the case that makes a
+ * content-addressed store unusual: the SAME id existing under two owners.
+ * ══════════════════════════════════════════════════════════════════════════
+ */
+
+test('SECURITY: another account cannot resolve an image by its ref', async () => {
+  current = 'leak-owner'
+  const owned = await saveImage('private.png', buf(png(8, 8, 9)))
+
+  current = 'leak-attacker'
+  /*
+   * The attacker holds a VALID, correctly-shaped id — the exact situation a
+   * leaked conversation record would create. Every read path must answer as
+   * though it does not exist.
+   */
+  assert.equal(await readImageBytes(owned.id), null, 'raw bytes must not resolve')
+  assert.equal(await readModelImage(owned.id), null, 'the model-facing copy must not resolve either')
+  assert.equal((await listImages()).some((i) => i.id === owned.id), false, 'and it is not enumerable')
+
+  // The owner is unaffected — this is isolation, not breakage.
+  current = 'leak-owner'
+  assert.ok(await readImageBytes(owned.id), 'the owner still reads their own image')
+})
+
+test('SECURITY: an identical image under two accounts stays two separate artifacts', async () => {
+  /*
+   * THE CASE CONTENT ADDRESSING MAKES SPECIAL. Both users upload the same bytes,
+   * so both get the SAME id. If scope were not part of storage identity, one
+   * user deleting it would delete the other's copy, and one user's ref would
+   * read the other's file. An id is only unique WITHIN an owner.
+   */
+  const bytes = png(8, 8, 42)
+
+  current = 'twin-a'
+  const a = await saveImage('mine.png', buf(bytes))
+  current = 'twin-b'
+  const b = await saveImage('mine-too.png', buf(bytes))
+  assert.equal(a.id, b.id, 'identical bytes really do produce the same id')
+
+  // Each reads their own.
+  current = 'twin-a'
+  assert.ok(await readImageBytes(a.id))
+  current = 'twin-b'
+  assert.ok(await readImageBytes(b.id))
+
+  // And one deleting it must not disturb the other.
+  current = 'twin-a'
+  assert.equal(await deleteImage(a.id), true)
+  assert.equal(await readImageBytes(a.id), null, 'gone for the deleter')
+  current = 'twin-b'
+  assert.ok(await readImageBytes(b.id), 'STILL PRESENT for the other owner')
+})
+
+test('SECURITY: a stale ref fails closed rather than resurrecting an image', async () => {
+  // Exactly what a conversation holds after its active image is deleted.
+  current = 'stale-owner'
+  const image = await saveImage('temporary.png', buf(png(8, 8, 3)))
+  assert.equal(await deleteImage(image.id), true)
+
+  assert.equal(await readModelImage(image.id), null)
+  assert.equal(await readImageBytes(image.id), null)
+})
+
+test('SECURITY: a ref that is not a canonical id is refused without a lookup', async () => {
+  /*
+   * A conversation record is data, not a path. Anything not of this shape did
+   * not come from this store, and handing it to the store invites a traversal
+   * to be read as a name.
+   */
+  current = 'shape-owner'
+  for (const hostile of [
+    '../../etc/passwd',
+    'img_../../etc/passwd',
+    'undefined',
+    'img_' + 'z'.repeat(32),
+    '',
+  ]) {
+    assert.equal(await readModelImage(hostile), null, hostile || '(empty)')
+  }
+})

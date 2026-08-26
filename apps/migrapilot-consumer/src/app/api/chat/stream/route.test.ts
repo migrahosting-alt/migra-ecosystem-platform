@@ -866,3 +866,48 @@ test('an edit request the product cannot perform is refused honestly, not improv
   globalThis.fetch = original
   resetAuthPort()
 })
+
+test('a conversation whose active image was deleted says so instead of answering blind', async () => {
+  /*
+   * WHY THIS EXISTS. An active image ref is carried forward so a follow-up needs
+   * no reattachment. When that artifact is deleted, the ref stops resolving and
+   * is reconciled away correctly — but silently. The next question was answered
+   * as though a picture had never been attached: confident, ungrounded, with
+   * nothing telling the user why the answer no longer described their image.
+   *
+   * This is the case I created for real by deleting an image mid-session, then
+   * misread as "follow-up context is broken".
+   */
+  const original = globalThis.fetch
+  const brainCalls: string[] = []
+  globalThis.fetch = (async (url: string | URL | Request) => {
+    const href = String(url)
+    brainCalls.push(href)
+    if (href.includes('/conversations/') && !href.endsWith('/messages')) {
+      // The conversation still remembers a ref whose artifact no longer exists.
+      return new Response(
+        JSON.stringify({ id: CONVERSATION_ID, imageRefs: ['img_' + 'd'.repeat(32)] }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      )
+    }
+    return new Response(JSON.stringify({ ok: true, id: CONVERSATION_ID }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    })
+  }) as typeof globalThis.fetch
+  setAuthPort(portWith(session))
+
+  const frames = await collect(await post({ prompt: 'what colour is it?', conversationId: CONVERSATION_ID }))
+  const last = frames[frames.length - 1]!
+
+  assert.equal(last.event, 'error')
+  assert.equal(last.data.error, 'active_image_unavailable')
+  assert.match(last.data.message, /no longer available/i)
+  assert.match(last.data.message, /Media Library/i)
+
+  // And the model was never asked — there was nothing to answer from.
+  assert.equal(brainCalls.some((u) => u.includes('/api/ai/chat')), false, 'no model call')
+
+  globalThis.fetch = original
+  resetAuthPort()
+})

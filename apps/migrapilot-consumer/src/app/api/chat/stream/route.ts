@@ -410,6 +410,28 @@ export async function POST(request: Request): Promise<Response> {
   }
   trace.mark('images')
 
+  /*
+   * THE CONVERSATION'S IMAGE IS GONE.
+   *
+   * Its refs are reconciled away above, which is correct — but silently. The
+   * thread was ABOUT a picture, the picture has been deleted, and the next
+   * question would have been answered as though it had never been attached:
+   * confidently, ungrounded, with nothing telling the user why the answer
+   * stopped describing their image.
+   *
+   * Only when the ACTIVE set is what was lost, and nothing replaced it. An
+   * unrelated historical image on an older message is not this situation, and
+   * neither is a turn that brought its own attachment.
+   *
+   * Self-limiting: the refs are cleared just below, so this is said once and the
+   * conversation then behaves as an ordinary text thread.
+   */
+  const activeImageLost =
+    canGround &&
+    storedImages.length > 0 &&
+    liveImages.length === 0 &&
+    imagesAttachedNow.length === 0
+
   const imagesChanged =
     liveImages.length !== storedImages.length || liveImages.some((r, i) => r !== storedImages[i])
   if (canGround && conversationId && imagesChanged) {
@@ -592,6 +614,26 @@ export async function POST(request: Request): Promise<Response> {
          */
         ...(allowance.kind === 'reserved' ? { quota: allowance.quota } : {}),
       })
+
+      if (activeImageLost) {
+        // Said before the model is asked: there is nothing to answer FROM, and
+        // an answer would be about a picture that no longer exists.
+        trace.set('active_image_lost', true)
+        trace.finish('active_image_lost')
+        emit('error', {
+          error: 'active_image_unavailable',
+          message:
+            'The image that was active in this conversation is no longer available. ' +
+            'Attach another image or choose one from your Media Library.',
+        })
+        closed = true
+        try {
+          controller.close()
+        } catch {
+          /* already closed */
+        }
+        return
+      }
 
       const opened = await chatTurnStream(
         prompt,
