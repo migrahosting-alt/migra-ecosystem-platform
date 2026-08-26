@@ -6,6 +6,7 @@ import {
   FileText,
   FolderKanban,
   History,
+  Images,
   Plus,
   Settings,
   Users,
@@ -15,6 +16,9 @@ import { cn } from '@/lib/cn'
 const navItems = [
   { to: '/projects', label: 'Projects', icon: FolderKanban },
   { to: '/files', label: 'Files', icon: FileText },
+  // Media sits beside Files because that is how people think about it: one is
+  // documents to read, the other is pictures — theirs and the ones MigraPilot made.
+  { to: '/media', label: 'Media', icon: Images },
   { to: '/assistants', label: 'Assistants', icon: Users },
   { to: '/history', label: 'History', icon: History },
   { to: '/settings', label: 'Settings', icon: Settings },

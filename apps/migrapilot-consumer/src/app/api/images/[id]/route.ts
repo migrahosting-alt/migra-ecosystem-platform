@@ -18,7 +18,7 @@
 import { requireSession } from '@/server/auth'
 import { UnauthenticatedError } from '@/server/auth/authPort'
 import { isImageId } from '@/server/files/images'
-import { readImageBytes } from '@/server/files/imageStore'
+import { deleteImage, readImageBytes } from '@/server/files/imageStore'
 
 export const dynamic = 'force-dynamic'
 
@@ -58,4 +58,46 @@ export async function GET(
       'x-content-type-options': 'nosniff',
     },
   })
+}
+
+
+/**
+ * Remove one image from the caller's library.
+ *
+ * DELETING FROM THE LIBRARY IS NOT DETACHING FROM A CONVERSATION. Those are
+ * different acts with different consequences, and conflating them would make
+ * "remove this from the message" quietly destroy an image used elsewhere. This
+ * is the destructive one: the bytes, the derived model copy and the record all
+ * go, and a message that referenced the ref will stop resolving it.
+ *
+ * SCOPE COMES FROM THE SESSION, exactly as it does for reads: `deleteImage`
+ * works inside the authenticated caller's own directory, so this cannot be
+ * pointed at another account's library by editing an id.
+ *
+ * A MISSING IMAGE IS 404, NOT SUCCESS. Reporting "deleted" for something that
+ * was never there tells the caller their delete worked on someone else's id.
+ */
+export async function DELETE(
+  _request: Request,
+  context: { params: Promise<{ id: string }> },
+): Promise<Response> {
+  try {
+    await requireSession()
+  } catch (error) {
+    if (error instanceof UnauthenticatedError) {
+      return Response.json({ error: 'unauthenticated' }, { status: 401 })
+    }
+    throw error
+  }
+
+  const { id } = await context.params
+  if (!isImageId(id)) {
+    return Response.json({ error: 'not_found' }, { status: 404 })
+  }
+
+  const removed = await deleteImage(id)
+  if (!removed) {
+    return Response.json({ error: 'not_found' }, { status: 404 })
+  }
+  return Response.json({ ok: true, imageId: id })
 }

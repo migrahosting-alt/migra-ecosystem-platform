@@ -70,6 +70,23 @@ export interface PublicImage {
   createdAt: number
   /** What the user called it. Display only. */
   displayName: string
+  /**
+   * Where it came from, when that is known.
+   *
+   * The Media Library shows uploaded and generated images side by side, and the
+   * difference matters to the person looking: one they chose, one MigraPilot
+   * made. Told by metadata rather than by a separate list or a second renderer.
+   *
+   * The prompt and model are included because "what made this" is the first
+   * question asked of a generated picture, and because it is what a later
+   * "make the A blue" would have to start from. Absent on uploads and on
+   * anything stored before provenance existed — silence rather than a guess.
+   */
+  provenance?: {
+    origin: 'upload' | 'generated'
+    model?: string
+    prompt?: string
+  }
 }
 
 const publicView = (image: Awaited<ReturnType<typeof saveImage>>): PublicImage => ({
@@ -80,6 +97,15 @@ const publicView = (image: Awaited<ReturnType<typeof saveImage>>): PublicImage =
   bytes: image.bytes,
   createdAt: image.createdAt,
   displayName: image.displayName,
+  ...(image.provenance
+    ? {
+        provenance: {
+          origin: image.provenance.origin,
+          ...(image.provenance.model ? { model: image.provenance.model } : {}),
+          ...(image.provenance.prompt ? { prompt: image.provenance.prompt } : {}),
+        },
+      }
+    : {}),
 })
 
 export async function GET(): Promise<Response> {
