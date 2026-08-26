@@ -829,10 +829,23 @@ async function streamGeneration(
     }
   };
 
-  // Named immediately, before any wait: the client can say WHAT it is waiting
-  // for rather than showing an unexplained spinner.
-  send('route', { requestId, capability: 'image_generation', model: DEFAULT_STUDIO_CONFIG.checkpoint });
-  send('stage', { stage: 'submitting', detail: 'Sending your prompt to the image pipeline' });
+  /*
+   * The generator is named AFTER the request is classified, because a single
+   * character is drawn from a typeface and never reaches Studio. Announcing the
+   * diffusion checkpoint first was a small lie in the record: the frame named a
+   * model the turn was not going to use.
+   */
+  const asked = describeImageRequest(prompt);
+  const usesTypeface = asked.kind === 'glyph';
+  send('route', {
+    requestId,
+    capability: 'image_generation',
+    generator: usesTypeface ? 'typeface' : 'studio',
+    model: usesTypeface ? 'deterministic-glyph' : DEFAULT_STUDIO_CONFIG.checkpoint,
+  });
+  if (!usesTypeface) {
+    send('stage', { stage: 'submitting', detail: 'Sending your prompt to the image pipeline' });
+  }
 
   const describe = (stage: GenerationStage): { stage: string; detail: string } => {
     switch (stage.kind) {
@@ -865,7 +878,6 @@ async function streamGeneration(
    * than most times, in about 170ms rather than seconds of GPU, and with no
    * dependence on Studio being reachable at all.
    */
-  const asked = describeImageRequest(prompt);
   if (asked.kind === 'glyph') {
     trace?.set('generator', 'deterministic');
     trace?.set('glyph', asked.text);
