@@ -16,13 +16,32 @@ import type { MediaStorage } from './mediaStorage'
  * that arrived is not the same as a byte stream that arrived intact, and only
  * the second is a reason to stop reading from the source.
  *
- * THE LEDGER LIVES IN THE DESTINATION. It travels with the data it describes, so
- * a restored bucket carries its own account of how it was filled.
+ * 🚨 THIS IS EVIDENCE, NOT AUTHORITY. The authoritative ledger lives in the
+ * Brain's PostgreSQL — see `brainMigrationLedger.ts`. A ledger that lives only
+ * beside the bytes it describes shares their fate: losing the bucket would lose
+ * both the artifact and the proof of where the artifact went.
+ *
+ * It is kept because it travels WITH the data, so a restored bucket carries its
+ * own account of how it was filled. Every record it writes is stamped
+ * `authority: 'evidence_only'` so that nobody recovering from an incident can
+ * mistake it for canonical state — the moment it disagrees with PostgreSQL,
+ * PostgreSQL is right and this is a clue about what happened.
  */
 
 export type MigrationStatus = 'copied' | 'verified' | 'failed'
 
+/**
+ * Stamped into every mirrored record.
+ *
+ * A future reconciliation must be able to rebuild or discard these objects
+ * without touching canonical state, and someone reading one at 3am must be able
+ * to tell in one line that it is not the source of truth.
+ */
+export const EVIDENCE_ONLY = 'evidence_only' as const
+
 export interface MigrationRecord {
+  /** Always `evidence_only`. Present so the file says what it is. */
+  authority?: typeof EVIDENCE_ONLY
   /** The artifact's canonical id — the same handle the product uses. */
   artifactId: string
   sourceProvider: string
@@ -48,7 +67,10 @@ export class MigrationLedger {
   constructor(private readonly storage: MediaStorage) {}
 
   async record(entry: MigrationRecord): Promise<void> {
-    await this.storage.put(recordKey(entry.artifactId), Buffer.from(JSON.stringify(entry, null, 2)))
+    // Stamped on write, never taken from the caller: the marker must describe
+    // where the record IS, not what someone hoped it was.
+    const stamped: MigrationRecord = { ...entry, authority: EVIDENCE_ONLY }
+    await this.storage.put(recordKey(entry.artifactId), Buffer.from(JSON.stringify(stamped, null, 2)))
   }
 
   async get(artifactId: string): Promise<MigrationRecord | null> {

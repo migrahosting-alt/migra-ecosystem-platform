@@ -120,3 +120,37 @@ test('an unreadable ledger entry means unproven, never proven', async () => {
   assert.equal(await ledger.isVerified('img_broken'), false)
   assert.deepEqual(await ledger.all(), [], 'and it does not hide the others')
 })
+
+
+test('every mirrored record says it is evidence, not authority', async () => {
+  /*
+   * The authoritative ledger is in the Brain's PostgreSQL. This copy travels
+   * with the bytes so a restored bucket carries its own account of how it was
+   * filled — but someone recovering from an incident at 3am must be able to tell
+   * in one line that it is not the source of truth. Where the two disagree,
+   * PostgreSQL is right and this is a clue about what happened.
+   */
+  const source = fresh()
+  const destination = fresh()
+  const bytes = Buffer.from('stamped')
+  await source.put(KEY, bytes)
+  await run(source, destination, sha(bytes))
+
+  const raw = await destination.read('_migration/media/img_one.json')
+  const parsed = JSON.parse(raw!.toString('utf8')) as { authority?: string; status: string }
+  assert.equal(parsed.authority, 'evidence_only')
+  assert.equal(parsed.status, 'verified')
+})
+
+test('the marker describes where the record is, not what a caller claims', async () => {
+  // Stamped on write, never taken from the caller.
+  const destination = fresh()
+  const ledger = new MigrationLedger(destination)
+  await ledger.record({
+    artifactId: 'img_claimed', sourceProvider: 'local', destinationProvider: 'object',
+    destinationKey: 'k', expectedHash: 'h', bytes: 1, status: 'verified', migratedAt: 1,
+    authority: 'canonical' as never,
+  })
+  const raw = await destination.read('_migration/media/img_claimed.json')
+  assert.equal((JSON.parse(raw!.toString('utf8')) as { authority: string }).authority, 'evidence_only')
+})

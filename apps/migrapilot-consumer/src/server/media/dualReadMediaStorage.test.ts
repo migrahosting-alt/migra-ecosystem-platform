@@ -9,7 +9,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
-import { mkdtempSync } from 'node:fs'
+import { mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -171,4 +171,25 @@ test('without an expected hash there is nothing to detect corruption against', (
    * its record claims, and why this layer does not invent one.
    */
   assert.ok(true)
+})
+
+test('serving bytes NEVER depends on the ledger being reachable', () => {
+  /*
+   * A STANDING CONSTRAINT, not an accident of the current implementation. The
+   * ledger is truth about migration state, not a runtime prerequisite for
+   * handing bytes to a user: if the Brain or the ledger is unreachable, media
+   * must still serve. A future change that consults the ledger before a read
+   * would make every image depend on a service that has nothing to do with
+   * whether those bytes exist.
+   */
+  const code = readFileSync(join(process.cwd(), 'src/server/media/dualReadMediaStorage.ts'), 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/(^|[^:])\/\/.*$/gm, '$1')
+
+  for (const forbidden of ['Ledger', 'ledger', 'migration', 'brain', 'Brain']) {
+    assert.ok(
+      !code.includes(forbidden),
+      `the read path must not reference "${forbidden}" — the ledger is not a read dependency`,
+    )
+  }
 })
