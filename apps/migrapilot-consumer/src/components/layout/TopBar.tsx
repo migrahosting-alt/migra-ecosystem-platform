@@ -2,7 +2,7 @@
 
 import { useCallback, useState } from 'react'
 import Link from 'next/link'
-import { useRouter } from 'next/navigation'
+import { usePathname, useRouter } from 'next/navigation'
 import { ChevronDown, LogOut, Menu, Settings, User as UserIcon } from 'lucide-react'
 import { Wordmark } from '@/components/brand/Logo'
 import { Avatar } from '@/components/ui/Avatar'
@@ -138,11 +138,23 @@ export function TopBar({
  * OAuth round trip to work. If MigraAuth is unconfigured the route answers 503
  * rather than redirecting, so this control can never lead somewhere that cannot
  * complete a sign-in.
+ *
+ * IT CARRIES WHERE THE USER WAS. This link had no `next`, so signing in from the
+ * middle of a conversation returned the user to the generic welcome screen —
+ * their thread claimed into their account and nowhere on screen. The claim
+ * worked; the destination was simply forgotten. Every other sign-in entry point
+ * in the product already passed `next`, which is why the composer's prompt
+ * returned people correctly and the header button did not.
  */
 function SignedOut() {
+  const pathname = usePathname()
+  // `/` is the default landing anyway, so it is not worth a round trip through a
+  // cookie. Anything else is where they were, and where they should come back to.
+  const next = pathname && pathname !== '/' ? `?next=${encodeURIComponent(pathname)}` : ''
+
   return (
     <a
-      href="/api/auth/login"
+      href={`/api/auth/login${next}`}
       data-testid="sign-in"
       className="rounded-field bg-brand-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-brand-700"
     >
