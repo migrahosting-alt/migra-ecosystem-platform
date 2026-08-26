@@ -20,6 +20,10 @@ import { join } from 'node:path'
 // A real, empty library: reconciliation must be exercised, not short-circuited by an
 // unreadable default root.
 process.env.UPLOAD_ROOT = mkdtempSync(join(tmpdir(), 'migrapilot-chat-'))
+// Likewise for images. Without it a generated image is written to the production
+// default path, which is unwritable here — and the turn then fails for a reason
+// that has nothing to do with what is being tested.
+process.env.IMAGE_ROOT = mkdtempSync(join(tmpdir(), 'migrapilot-chat-images-'))
 
 import { POST } from './route'
 import { setAuthPort, resetAuthPort } from '@/server/auth'
@@ -58,6 +62,10 @@ const post = (body: unknown, headers: Record<string, string> = {}): Promise<Resp
       body: typeof body === 'string' ? body : JSON.stringify(body),
     }),
   )
+
+/** A real 1x1 PNG, so the store's magic-byte check sees genuine bytes. */
+const PNG_BASE64 =
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
 
 const sse = (frames: [string, unknown][]): string =>
   frames.map(([event, data]) => `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`).join('')
@@ -736,6 +744,71 @@ test('a turn that simply produced nothing still says so', async () => {
   const errors = frames.filter((f) => f.event === 'error')
   assert.equal(errors.length, 1)
   assert.match(String(errors[0]!.data.message), /did not produce an answer/)
+
+  brain.restore()
+  resetAuthPort()
+})
+
+
+test('a picture is a message: a generated turn with no text still persists', async () => {
+  /*
+   * THE SIGNED-IN FIXTURE FAILURE. Studio produced a real 194KB PNG, the image
+   * was stored under a canonical ref, and the assistant message was refused
+   * before it left this process: an image-generation turn has NO text, and the
+   * content validator — correct for a prompt — rejects an empty string. The user
+   * was told "the answer arrived but could not be saved" while the artifact sat
+   * perfectly stored in their library.
+   */
+  const brain = brainStub({
+    chatBody: sse([
+      ['route', { capability: 'image_generation', model: 'flux1-schnell-fp8.safetensors' }],
+      ['image', {
+        mimeType: 'image/png',
+        dataBase64: PNG_BASE64,
+        model: 'flux1-schnell-fp8.safetensors',
+        runId: 'studio-run-1',
+        prompt: "a single capital letter 'A', bold black serif typography",
+      }],
+      ['done', { requestId: 'r' }],
+    ]),
+  })
+  setAuthPort(portWith(session))
+
+  const frames = await collect(await post({ prompt: 'generate letter A in png' }))
+
+  const done = frames.find((f) => f.event === 'done')
+  assert.ok(done, `the turn completed, saw ${JSON.stringify(frames.map((f) => f.event))}`)
+  assert.equal(frames.filter((f) => f.event === 'error').length, 0, 'nothing failed')
+
+  // The ref reached the browser AND the assistant message carries it.
+  const imageFrame = frames.find((f) => f.event === 'image')
+  assert.match(String(imageFrame?.data.ref), /^img_[0-9a-f]{32}$/)
+  assert.deepEqual(done!.data.images, [imageFrame!.data.ref])
+
+  const append = brain.calls.find(
+    (c) => c.url.endsWith('/messages') && JSON.parse(String(c.init.body)).role === 'assistant',
+  )
+  assert.ok(append, 'the assistant message was appended')
+  const body = JSON.parse(String(append!.init.body)) as { content: string; imageRefs?: string[] }
+  assert.equal(body.content, '', 'an image-only turn has no text, and that is allowed')
+  assert.deepEqual(body.imageRefs, [imageFrame!.data.ref], 'the ref is on the message, not the bytes')
+  // Never the bytes.
+  assert.doesNotMatch(String(append!.init.body), /iVBORw0KGgo/)
+
+  brain.restore()
+  resetAuthPort()
+})
+
+test('a message with neither text nor images is still refused', async () => {
+  // Emptiness is only allowed BECAUSE a picture is the content.
+  const brain = brainStub({ chatBody: sse([['done', { requestId: 'r' }]]) })
+  setAuthPort(portWith(session))
+
+  await collect(await post({ prompt: 'hi' }))
+  const appended = brain.calls.filter(
+    (c) => c.url.endsWith('/messages') && JSON.parse(String(c.init.body)).role === 'assistant',
+  )
+  assert.equal(appended.length, 0, 'nothing empty was written')
 
   brain.restore()
   resetAuthPort()

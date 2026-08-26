@@ -294,3 +294,64 @@ test('deleting an image takes its derived copy with it', async () => {
   assert.ok(!left.some((f) => f.startsWith(meta.id)), `nothing is left behind: ${left.join(', ')}`)
   assert.equal(await readModelImage(meta.id), null)
 })
+
+
+/* ---- provenance ---- */
+
+test('a generated image records where it came from', async () => {
+  /*
+   * A generated picture and an uploaded one are the same artifact here — a
+   * content-addressed ref, rendered by the same component. What differs is
+   * history, and it belongs in metadata rather than a second store.
+   *
+   * This is also the foundation for "make the A blue": that is only answerable
+   * if the assistant can find which artifact the A was, and with what prompt and
+   * pipeline it was made.
+   */
+  current = 'prov-generated'
+  const meta = await saveImage('generated.png', buf(png(64, 64, 10)), {
+    origin: 'generated',
+    model: 'flux1-schnell-fp8.safetensors',
+    runId: 'studio-run-1',
+    prompt: "a single capital letter 'A', bold black serif typography",
+    requestId: 'req_00112233445566778899',
+  })
+
+  assert.equal(meta.provenance?.origin, 'generated')
+  assert.equal(meta.provenance?.model, 'flux1-schnell-fp8.safetensors')
+  assert.equal(meta.provenance?.runId, 'studio-run-1')
+  assert.match(meta.provenance?.prompt ?? '', /capital letter 'A'/)
+
+  // Durable, not just returned: it survives being read back from disk.
+  const listed = (await listImages()).find((i) => i.id === meta.id)
+  assert.equal(listed?.provenance?.runId, 'studio-run-1')
+})
+
+test('an upload carries no invented tooling claims', async () => {
+  current = 'prov-upload'
+  const meta = await saveImage('holiday.png', buf(png(40, 30, 60)))
+  assert.equal(meta.provenance, undefined, 'silence, rather than a claim about origin')
+})
+
+test('a re-generated identical image does not keep claiming to be an upload', async () => {
+  /*
+   * Ids are content-addressed, so the same bytes resolve to the same record and
+   * `saveImage` returns the existing one. Without this, whichever arrival came
+   * FIRST would decide the picture's history for ever.
+   */
+  current = 'prov-dedupe'
+  const bytes = png(48, 48, 99)
+  const uploaded = await saveImage('mystery.png', buf(bytes))
+  assert.equal(uploaded.provenance, undefined)
+
+  const regenerated = await saveImage('generated.png', buf(bytes), {
+    origin: 'generated',
+    model: 'flux1-schnell-fp8.safetensors',
+    runId: 'studio-run-2',
+  })
+  assert.equal(regenerated.id, uploaded.id, 'same bytes, same canonical ref')
+  assert.equal(regenerated.provenance?.runId, 'studio-run-2')
+
+  const listed = (await listImages()).find((i) => i.id === uploaded.id)
+  assert.equal(listed?.provenance?.origin, 'generated', 'and it is durable')
+})

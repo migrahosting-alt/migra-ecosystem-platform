@@ -338,6 +338,26 @@ function absolutePath(value: string, label: string): string {
   return value
 }
 
+/**
+ * A message's content, which may legitimately be a PICTURE rather than words.
+ *
+ * WHY THIS IS NOT `text()`. An image-generation turn produces no text at all.
+ * `text()` rejects an empty string — correctly, for a prompt — so the assistant
+ * message carrying a generated PNG was refused before it left this process, and
+ * the user was told "the answer arrived but could not be saved" while the image
+ * sat correctly stored in their library with a canonical ref. The turn's whole
+ * output was orphaned by a validator written for a different field.
+ *
+ * Empty is allowed ONLY when the message carries at least one image ref, so a
+ * genuinely empty message is still refused.
+ */
+function messageContent(value: string, imageRefs?: readonly string[]): string {
+  if (typeof value === 'string' && !value.trim() && imageRefs && imageRefs.length > 0) {
+    return ''
+  }
+  return text(value, 'content')
+}
+
 function text(value: string, label: string, max = 32_000): string {
   if (typeof value !== 'string' || !value.trim()) {
     throw new InvalidOperationError(`${label} must be a non-empty string.`)
@@ -408,7 +428,7 @@ export function resolveOperation(op: BrainOperation): ResolvedRequest {
         path: `/api/ai/conversations/${id(op.conversationId, 'conversationId')}/messages`,
         body: {
           role: op.role,
-          content: text(op.content, 'content'),
+          content: messageContent(op.content, op.imageRefs),
           // Refs only, and only when present. This is the write that makes a
           // picture survive a reload on the turn that asked about it.
           ...(op.imageRefs && op.imageRefs.length > 0 ? { imageRefs: op.imageRefs } : {}),

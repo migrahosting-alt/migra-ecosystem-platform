@@ -60,6 +60,33 @@ export interface StoredImage {
   modelSha256?: string
   /** Size of that copy, so a trace can show what the resize actually bought. */
   modelBytes?: number
+  /**
+   * Where this image CAME FROM.
+   *
+   * A generated picture and an uploaded one are the same kind of artifact — a
+   * content-addressed ref in this library — and they render through the same
+   * component on purpose. What differs is their history, and that belongs in
+   * metadata rather than in a second store or a parallel rendering path.
+   *
+   * It is also the foundation for iterating on a generated image. "Make the A
+   * blue" is only answerable if the assistant can find which artifact the A was:
+   * the prompt that produced it, the pipeline that ran, and the run id are what
+   * make that lookup possible rather than guesswork.
+   *
+   * Absent on everything stored before this existed, and on plain uploads, where
+   * `origin: 'upload'` is the honest default rather than a claim about tooling.
+   */
+  provenance?: {
+    origin: 'upload' | 'generated'
+    /** The pipeline/checkpoint that produced it. */
+    model?: string
+    /** Studio's own run id, so a picture can be traced back to that execution. */
+    runId?: string
+    /** The prompt actually sent to the pipeline — shaped, not the raw sentence. */
+    prompt?: string
+    /** The turn that produced it, tying the artifact to a request in the logs. */
+    requestId?: string
+  }
 }
 
 export class ImageRejected extends Error {
@@ -145,7 +172,11 @@ async function libraryBytes(images: StoredImage[]): Promise<number> {
  * photo resolves to the same id, and the existing record is returned rather than
  * a second copy written.
  */
-export async function saveImage(rawName: string, data: ArrayBuffer): Promise<StoredImage> {
+export async function saveImage(
+  rawName: string,
+  data: ArrayBuffer,
+  provenance?: StoredImage['provenance'],
+): Promise<StoredImage> {
   const bytes = new Uint8Array(data)
   const decision = acceptImage(rawName, bytes)
   if (!decision.ok) throw new ImageRejected(decision.rejection.code, decision.rejection.message)
@@ -154,7 +185,23 @@ export async function saveImage(rawName: string, data: ArrayBuffer): Promise<Sto
   const { dir, owner } = await imageDirectory()
 
   const existing = await readMeta(dir, image.id)
-  if (existing) return existing
+  if (existing) {
+    /*
+     * Ids are content-addressed, so re-generating a byte-identical image
+     * resolves to the same record. If that record has no provenance and this
+     * call carries some, record it — otherwise the FIRST arrival of a picture
+     * decides its history forever, and an upload that happens to match a later
+     * generation would keep claiming to be an upload.
+     */
+    if (provenance && !existing.provenance) {
+      const next: StoredImage = { ...existing, provenance }
+      await writeAtomic(dir, metaPathFor(dir, image.id), Buffer.from(JSON.stringify(next))).catch(
+        () => undefined,
+      )
+      return next
+    }
+    return existing
+  }
 
   const current = await listImages()
   if (current.length >= MAX_IMAGES) {
@@ -179,6 +226,7 @@ export async function saveImage(rawName: string, data: ArrayBuffer): Promise<Sto
     createdAt: Date.now(),
     displayName: rawName.slice(0, 200),
     ownerScope: owner,
+    ...(provenance ? { provenance } : {}),
   }
 
   try {

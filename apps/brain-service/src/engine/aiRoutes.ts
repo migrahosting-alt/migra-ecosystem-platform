@@ -873,8 +873,17 @@ async function streamGeneration(
     mimeType: 'image/png',
     dataBase64: result.pngBase64,
     bytes: result.bytes,
+    /*
+     * PROVENANCE TRAVELS WITH THE BYTES. The consumer stores this on the image
+     * record, which is what later makes "make the A blue" answerable: the
+     * pipeline that ran, the run that produced it, and the prompt that was
+     * actually sent — the shaped one, not the user's raw sentence, because that
+     * is what would have to be varied to iterate on the picture.
+     */
     model: result.model,
-    prompt,
+    runId: result.promptId,
+    prompt: shaped,
+    requestId,
   });
   send('done', {
     requestId,

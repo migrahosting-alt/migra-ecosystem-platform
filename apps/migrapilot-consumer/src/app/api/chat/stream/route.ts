@@ -693,9 +693,21 @@ export async function POST(request: Request): Promise<Response> {
               if (typeof data === 'string' && data.length > 0) {
                 try {
                   const bytes = Buffer.from(data, 'base64')
+                  const meta = frame.data as {
+                    model?: unknown
+                    runId?: unknown
+                    prompt?: unknown
+                  }
                   const stored = await saveImage(
                     'generated.png',
                     bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer,
+                    {
+                      origin: 'generated',
+                      ...(typeof meta.model === 'string' ? { model: meta.model } : {}),
+                      ...(typeof meta.runId === 'string' ? { runId: meta.runId } : {}),
+                      ...(typeof meta.prompt === 'string' ? { prompt: meta.prompt } : {}),
+                      requestId: trace.id,
+                    },
                   )
                   generatedImages.push(stored.id)
                   emit('image', { ref: stored.id })
@@ -809,6 +821,27 @@ export async function POST(request: Request): Promise<Response> {
             ...(quota ? { quota } : {}),
           })
           trace.finish('ok')
+        } else if (generatedImages.length > 0) {
+          /*
+           * A GENERATED ARTIFACT THAT COULD NOT BE ATTACHED IS ITS OWN FAILURE.
+           *
+           * The picture is real and durable — it is in the caller's library
+           * under a canonical ref — and only the link from the message to it was
+           * refused. Reporting that as "the answer could not be saved" describes
+           * a lost answer, when what actually happened is a lost ATTACHMENT with
+           * the artifact still recoverable. The correlation id is included so
+           * the turn can be found in both services' logs.
+           */
+          trace.set('orphaned_images', generatedImages)
+          emit('error', {
+            error: 'artifact_save_failed',
+            message:
+              'The image was generated and saved to your library, but it could not be attached to this conversation, so it will not be here after a reload.',
+            requestId: trace.id,
+            images: generatedImages,
+          })
+          if (quota) emit('quota', quota)
+          trace.finish('artifact_save_failed')
         } else {
           // The user watched a complete answer arrive that will not survive a
           // reload. Saying so is the only honest option.
