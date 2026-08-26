@@ -406,7 +406,12 @@ export function ChatProvider({ children }: { children: ReactNode }) {
             id: messageId,
             role: 'assistant',
             time: clockTime(),
-            blocks: [{ type: 'paragraph', text }],
+            /*
+             * No empty paragraph when the answer IS the picture. A generation
+             * turn ends with no text, and a blank block leaves a stray gap above
+             * the image.
+             */
+            ...(text ? { blocks: [{ type: 'paragraph', text }] } : { blocks: [] }),
             /*
              * CARRIED ON EVERY REPAINT. This rebuilds the whole message, so
              * omitting the refs here would make a generated picture appear and
@@ -564,7 +569,17 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         }
       }
 
-      if (done && streamed.trim()) {
+      /*
+       * A PICTURE IS AN ANSWER — the same rule as the server's `producedOutput`.
+       *
+       * This condition judged success by TEXT alone. An image-generation turn
+       * produces none, so a turn the server had completed and persisted fell
+       * through to `discardPartial()` and was reported as "the answer was cut off
+       * before it finished" — while the PNG sat stored under a canonical ref and
+       * the assistant message that owned it had already been written. The whole
+       * delivery failed at the last condition in the browser.
+       */
+      if (done && (streamed.trim() || generated.length > 0)) {
         turn.finish(notSaved ? 'not_saved' : 'ok')
         // Settle the bubble: same text, plus whatever real files it drew on.
         setConversations((current) =>
@@ -599,7 +614,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
        * label is what keeps it honest: it says plainly that a reload will not
        * have it, so nothing here implies a persistence that never happened.
        */
-      if (notSaved && streamed.trim()) {
+      if (notSaved && (streamed.trim() || generated.length > 0)) {
         setConversations((current) =>
           current.map((conversation) =>
             conversation.id === conversationId
