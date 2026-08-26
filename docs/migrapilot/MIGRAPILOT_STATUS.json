@@ -32,7 +32,7 @@
       ]
     },
     "blockers": [
-      "Workstation Ollama (100.86.143.93:11434) answers /api/tags and /api/ps but EVERY /api/generate returns {\"error\":\"unexpected EOF\"} \u2014 including a 1.5B model, so it is the runner, not VRAM. No live chat acceptance is possible until it recovers."
+      "GPU VRAM contention on the workstation RTX 3090 (24GB): ComfyUI holds ~21.5GB, leaving ~3GB. qwen3:8b needs ~6GB and fails with HTTP 500 after ~5min. A 1.5B model still works. Chat and image generation contend for one GPU \u2014 needs an owner decision, not a code fix."
     ],
     "nextAcceptanceTest": "Once the model host recovers: run the citation pass across TXT/MD/CSV/JSON/code and confirm attribution appears for every grounded turn regardless of whether the reply names the file.",
     "doNotWorkOnYet": [
@@ -124,19 +124,19 @@
       "id": "vision-turn-no-output-240s",
       "symptom": "A vision turn held the local model for 240s and returned zero tokens; failover list contained only the failing model.",
       "evidence": "req_775234782f08d9a87827 \u2014 brain completion_failed, consumer brain_open 240032ms, generation 0ms.",
-      "rootCause": "LIKELY the same workstation Ollama failure \u2014 a generation that never returns. See workstation-ollama-generation-failing.",
-      "status": "LIKELY_EXPLAINED",
+      "rootCause": "Same VRAM contention \u2014 a model that cannot fit retries until the deadline.",
+      "status": "EXPLAINED",
       "effort": "MEDIUM",
       "regressionTest": "none",
       "liveAcceptance": "n/a"
     },
     {
       "id": "workstation-ollama-generation-failing",
-      "symptom": "Every model generation on the workstation Ollama returns {\"error\":\"unexpected EOF\"} within ~1s. /api/tags and /api/ps respond normally.",
-      "evidence": "Tested qwen3:8b, qwen2.5vl:7b and qwen2.5-coder:1.5b directly from VM111 \u2014 all identical. qwen2.5vl:7b answered successfully at 22:42 the same evening, so it regressed after that.",
-      "rootCause": "Ollama runner on the workstation, not VRAM (a 1.5B model fails too) and not MigraPilot.",
-      "status": "OPEN_BLOCKS_LIVE_ACCEPTANCE",
-      "effort": "EASY (likely an Ollama restart on the workstation \u2014 needs Bonex, it is his desktop)",
+      "symptom": "qwen3:8b generation fails (HTTP 500 after ~318s) while a 1.5B model succeeds.",
+      "evidence": "GPU at 21589MiB/24576MiB before the attempt. ComfyUI (PID 23820, two instances on :8188) is the holder. A well-formed request to the 1.5B model returns normally.",
+      "rootCause": "VRAM exhaustion, not a broken Ollama runner. MigraPilot chat (Ollama) and image generation (ComfyUI) contend for the same 24GB card.",
+      "status": "OPEN_BLOCKS_LIVE_ACCEPTANCE \u2014 needs an owner decision on GPU sharing",
+      "effort": "EASY to unblock (stop a ComfyUI instance) but it disables image generation while stopped",
       "regressionTest": "n/a",
       "liveAcceptance": "blocked"
     }
@@ -200,6 +200,12 @@
       "assumption": "\"Ollama is inactive\" \u2014 read from `systemctl is-active ollama` on VM111.",
       "disprovedBy": "VM111 has no local Ollama; the model runs on the workstation at 100.86.143.93:11434, which returns HTTP 200.",
       "corrected": "Measured the wrong host. The same wrong-endpoint pattern as the MinIO disk misread.",
+      "priorityChanged": false
+    },
+    {
+      "assumption": "Every model on the workstation fails with \"unexpected EOF\" \u2014 the Ollama runner is broken.",
+      "disprovedBy": "The Ollama log showed those POSTs returning HTTP 400, not 500. \"unexpected EOF\" was Ollama failing to PARSE my request body, mangled by nested quoting through ssh -> qm guest exec -> sh -c -> curl. A well-formed request to the same model succeeded immediately.",
+      "corrected": "Ollama was healthy the whole time. The real fault is VRAM contention with ComfyUI, which affects large models only. I restarted Ollama on the basis of the wrong diagnosis; it was harmless but unnecessary.",
       "priorityChanged": false
     }
   ],

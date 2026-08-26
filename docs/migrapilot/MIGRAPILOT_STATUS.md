@@ -37,9 +37,10 @@ stops grounding.
 
 **Live:** consumer `citations-bc990598` · brain `citations-bc990598`
 
-🚨 **BLOCKED:** the workstation Ollama (`100.86.143.93:11434`) answers `/api/tags` but **every**
-generation returns `{"error":"unexpected EOF"}` — a 1.5B model fails too, so it is the runner, not
-VRAM, and not MigraPilot. No live chat acceptance is possible until it recovers.
+🚨 **BLOCKED — GPU VRAM contention, not a fault.** ComfyUI holds ~21.5 GB of the workstation's 24 GB
+RTX 3090, leaving ~3 GB. `qwen3:8b` needs ~6 GB and fails with HTTP 500 after ~5 minutes; a 1.5 B model
+still works. **MigraPilot chat and MigraPilot image generation contend for the same card** — this is an
+owner decision about GPU sharing, not something to fix in code.
 **Rollback:** consumer `filecard2-` → `filecard-` → `docrefusal-` → `refusalpersist-` → `bc99059`
 
 **Next acceptance test:** citation consistency across TXT/MD/CSV/JSON/code — is the missing citation
@@ -79,7 +80,7 @@ from Bonex. **Not a product blocker.**
 | Defect | Effort | Status |
 |---|---|---|
 | Citation shown for TXT, absent for Markdown | MEDIUM | **Fixed** — attribution now comes from the engine, not the prose. Needs live proof. |
-| Workstation Ollama fails every generation | EASY | Blocks live acceptance — likely an Ollama restart |
+| `qwen3:8b` fails while ComfyUI holds the GPU | EASY to unblock | Blocks live acceptance; stopping ComfyUI disables image generation |
 | Vision turn held 240s and returned nothing | MEDIUM | Operational target, not reproducible |
 
 ---
