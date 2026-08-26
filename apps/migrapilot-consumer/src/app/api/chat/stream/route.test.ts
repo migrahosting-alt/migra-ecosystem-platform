@@ -911,3 +911,199 @@ test('a conversation whose active image was deleted says so instead of answering
   globalThis.fetch = original
   resetAuthPort()
 })
+
+/*
+ * ══════════════════════════════════════════════════════════════════════════
+ * BEHAVIOURAL MATRIX — a conversation's ACTIVE image context.
+ *
+ * Every case asserts what the BRAIN ACTUALLY RECEIVED, not what the interface
+ * shows. The distinction is the point: the UI can look perfectly correct while
+ * the model is sent something else entirely, and that gap is exactly how a
+ * follow-up ends up answered blind.
+ * ══════════════════════════════════════════════════════════════════════════
+ */
+
+/** Store a real image for this session and return its ref. */
+async function storedImage(name: string, fill: number): Promise<string> {
+  // Storing is scoped to the caller, so the session must be in place first —
+  // the previous test's cleanup resets it.
+  setAuthPort(portWith(session))
+  const { saveImage } = await import('@/server/files/imageStore')
+  /*
+   * A genuinely VALID png whose pixels differ per call, so each image gets a
+   * distinct content-addressed id. An earlier version appended a byte to a fixed
+   * PNG to vary the hash — the store accepted it on magic bytes and header, and
+   * then every read dropped it as undecodable, which looked exactly like the
+   * context bug these tests exist to rule out.
+   */
+  const { deflateSync } = await import('node:zlib')
+  const w = 8, h = 8
+  const raw = Buffer.concat(Array.from({ length: h }, () =>
+    Buffer.concat([Buffer.from([0]), Buffer.alloc(w * 3, fill)])))
+  const table = Array.from({ length: 256 }, (_, n) => {
+    let c = n
+    for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1
+    return c >>> 0
+  })
+  const crc = (b: Buffer) => {
+    let c = 0xffffffff
+    for (const x of b) c = table[(c ^ x) & 0xff]! ^ (c >>> 8)
+    return (c ^ 0xffffffff) >>> 0
+  }
+  const chunk = (t: string, d: Buffer) => {
+    const len = Buffer.alloc(4); len.writeUInt32BE(d.length)
+    const body = Buffer.concat([Buffer.from(t, 'ascii'), d])
+    const c = Buffer.alloc(4); c.writeUInt32BE(crc(body))
+    return Buffer.concat([len, body, c])
+  }
+  const ihdr = Buffer.alloc(13)
+  ihdr.writeUInt32BE(w, 0); ihdr.writeUInt32BE(h, 4); ihdr[8] = 8; ihdr[9] = 2
+  const png = Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    chunk('IHDR', ihdr), chunk('IDAT', deflateSync(raw)), chunk('IEND', Buffer.alloc(0)),
+  ])
+  const meta = await saveImage(name, png.buffer.slice(png.byteOffset, png.byteOffset + png.byteLength) as ArrayBuffer)
+  return meta.id
+}
+
+/**
+ * Run one turn against a conversation whose stored active set is `storedRefs`,
+ * and report exactly what the Brain was sent.
+ */
+async function turnWith(options: {
+  storedRefs: string[]
+  attachNow?: string[]
+  prompt?: string
+}): Promise<{ sentRefs: string[]; setImagesTo: string[] | null; askedModel: boolean }> {
+  const original = globalThis.fetch
+  let sentRefs: string[] = []
+  let setImagesTo: string[] | null = null
+  let askedModel = false
+
+  globalThis.fetch = (async (url: string | URL | Request, init: RequestInit = {}) => {
+    const href = String(url)
+    const method = (init.method ?? 'GET').toUpperCase()
+    const parseBody = () => {
+      try {
+        return JSON.parse(String(init.body ?? '{}')) as Record<string, unknown>
+      } catch {
+        return {} as Record<string, unknown>
+      }
+    }
+
+    if (href.endsWith('/api/ai/chat')) {
+      askedModel = true
+      const body = parseBody()
+      /*
+       * The Brain reads `attachments`; the consumer's own option is named
+       * `imageAttachments`. Both are accepted here so this asserts what the
+       * Brain ACTUALLY receives rather than what the consumer called it.
+       */
+      const attachments = ((body.attachments ?? body.imageAttachments ?? []) as { name?: string; ref?: string }[])
+      sentRefs = attachments.map((a) => a.name ?? a.ref ?? '')
+      return new Response('event: done\ndata: {}\n\n', {
+        status: 200,
+        headers: { 'content-type': 'text/event-stream' },
+      })
+    }
+    if (href.includes('/images') && method === 'PUT') {
+      setImagesTo = (parseBody().images ?? []) as string[]
+      return new Response(JSON.stringify({ ok: true }), { status: 200, headers: { 'content-type': 'application/json' } })
+    }
+    if (href.includes('/conversations/') && !href.endsWith('/messages')) {
+      return new Response(JSON.stringify({ id: CONVERSATION_ID, imageRefs: options.storedRefs }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      })
+    }
+    return new Response(JSON.stringify({ ok: true, id: CONVERSATION_ID }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    })
+  }) as typeof globalThis.fetch
+
+  setAuthPort(portWith(session))
+  await collect(
+    await post({
+      prompt: options.prompt ?? 'follow up',
+      conversationId: CONVERSATION_ID,
+      ...(options.attachNow ? { images: options.attachNow } : {}),
+    }),
+  )
+  globalThis.fetch = original
+  resetAuthPort()
+  return { sentRefs, setImagesTo, askedModel }
+}
+
+test('MATRIX: a follow-up with no reattachment still sends the active image to the Brain', async () => {
+  // Refresh and reopen-from-History are the same code path as any other
+  // follow-up: the browser sends a conversationId and no images, and the active
+  // set is read from the conversation. Asserted on what the Brain received.
+  const ref = await storedImage('active.png', 1)
+  const { sentRefs, askedModel } = await turnWith({ storedRefs: [ref] })
+
+  assert.equal(askedModel, true)
+  assert.deepEqual(sentRefs, [ref], 'the stored active image reached the model')
+})
+
+test('MATRIX: attaching a new image adds it to the active set that is sent', async () => {
+  const older = await storedImage('older.png', 2)
+  const fresh = await storedImage('fresh.png', 3)
+  const { sentRefs, setImagesTo } = await turnWith({ storedRefs: [older], attachNow: [fresh] })
+
+  assert.ok(sentRefs.includes(fresh), 'the newly attached image is sent')
+  assert.deepEqual(setImagesTo, sentRefs, 'and the persisted active set matches exactly what was sent')
+})
+
+test('MATRIX: multi-image order is deterministic and survives to the Brain', async () => {
+  /*
+   * "The first one" is a real question a user asks, so the order the model sees
+   * must be the order the conversation recorded — stored refs first, then what
+   * this turn added.
+   */
+  const a = await storedImage('a.png', 4)
+  const b = await storedImage('b.png', 5)
+  const c = await storedImage('c.png', 6)
+
+  const first = await turnWith({ storedRefs: [a, b], attachNow: [c] })
+  assert.deepEqual(first.sentRefs, [a, b, c])
+
+  // Repeated with the same inputs, it must not reshuffle.
+  const again = await turnWith({ storedRefs: [a, b], attachNow: [c] })
+  assert.deepEqual(again.sentRefs, first.sentRefs, 'order is stable across turns')
+})
+
+test('MATRIX: clearing the active set means the next turn sends no image', async () => {
+  // What "remove it from the conversation" must actually mean downstream.
+  const { sentRefs, askedModel } = await turnWith({ storedRefs: [] })
+
+  assert.equal(askedModel, true, 'a text question still gets answered')
+  assert.deepEqual(sentRefs, [], 'and carries no image')
+})
+
+test('MATRIX: a text-only conversation is completely unaffected', async () => {
+  const { sentRefs, setImagesTo, askedModel } = await turnWith({
+    storedRefs: [],
+    prompt: 'what is the capital of France?',
+  })
+
+  assert.equal(askedModel, true)
+  assert.deepEqual(sentRefs, [])
+  // Nothing to reconcile means no write at all — a text thread must not acquire
+  // image state simply by being talked to.
+  assert.equal(setImagesTo, null, 'no image set was written')
+})
+
+test('MATRIX: a ref that no longer resolves is dropped from what the Brain receives', async () => {
+  /*
+   * The partial case, which is the one that leaks if it is wrong: some of the
+   * active set is gone, the rest is fine. The survivors go; the dead ref does
+   * not; and the persisted set is corrected to match.
+   */
+  const alive = await storedImage('alive.png', 7)
+  const dead = 'img_' + 'e'.repeat(32)
+  const { sentRefs, setImagesTo } = await turnWith({ storedRefs: [alive, dead] })
+
+  assert.deepEqual(sentRefs, [alive])
+  assert.deepEqual(setImagesTo, [alive], 'the conversation no longer claims the dead ref')
+})
