@@ -73,7 +73,13 @@ test('a stage reports the time spent inside it, not since the turn began', () =>
   const built = trace.build('ok')
 
   assert.ok(built.at_ms.second! > built.at_ms.first!, 'at_ms accumulates')
-  assert.ok(built.ms.first! > 0 && built.ms.second! > 0, 'each stage has a real duration')
+  /*
+   * NOT `> 0`. That was this test's own flake: a stage's rounded duration can
+   * legitimately land on zero on a loaded machine, and asserting otherwise made
+   * the suite fail for reasons unrelated to the arithmetic being tested. The
+   * identity below is the real subject and holds at any speed.
+   */
+  assert.ok(built.ms.first! >= 0 && built.ms.second! >= 0, 'durations are never negative')
   // The identity that makes the two columns readable together: a stage's own
   // duration is the difference between its end and the previous stage's end.
   assert.equal(built.ms.second, built.at_ms.second! - built.at_ms.first!)

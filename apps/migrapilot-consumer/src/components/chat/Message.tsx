@@ -7,6 +7,7 @@ import {
   CheckCheck,
   Copy,
   ExternalLink,
+  ImageOff,
   Pause,
   Play,
   Rocket,
@@ -176,37 +177,65 @@ function MessageImages({
 }) {
   /** Index of the open image, or null. The whole set travels so the arrows work. */
   const [viewing, setViewing] = useState<number | null>(null)
+  /**
+   * Refs whose bytes are gone.
+   *
+   * DELETING AN ASSET MUST NOT CORRUPT A CONVERSATION. Removing a picture from
+   * the Media Library destroys the artifact, and any message that referred to it
+   * still exists and must still be readable. Left alone, the browser renders a
+   * missing image as a broken icon — which reads as "this is broken" rather than
+   * "you deleted this", and is the kind of orphan-reference surprise that makes
+   * a transcript feel unreliable.
+   *
+   * The message keeps its ref. What changes is only what is DRAWN in its place.
+   */
+  const [missing, setMissing] = useState<Set<string>>(() => new Set())
   if (!refs || refs.length === 0) return null
+
+  const present = refs.filter((ref) => !missing.has(ref))
 
   return (
     <>
       <div className={cn('mb-1.5 flex flex-wrap gap-2', align === 'end' ? 'justify-end' : 'justify-start')}>
-        {refs.map((ref, index) => (
-          <button
-            key={ref}
-            type="button"
-            onClick={() => setViewing(index)}
-            aria-label="Open image full size"
-            title="Open full size"
-            className="rounded-xl focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
-          >
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={`/api/images/${ref}`}
-              alt={alt}
-              /*
-               * Shown in its OWN shape, bounded rather than cropped. A square box
-               * cropped a portrait photo to its middle, so the record of what was
-               * asked about no longer matched what was sent.
-               */
-              draggable
-              className="max-h-80 w-auto max-w-full cursor-pointer rounded-xl border border-slate-200 object-contain transition hover:border-slate-300"
-            />
-          </button>
-        ))}
+        {refs.map((ref) =>
+          missing.has(ref) ? (
+            <p
+              key={ref}
+              className="inline-flex items-center gap-1.5 rounded-xl border border-dashed border-slate-200 bg-slate-50 px-3 py-2 text-[12.5px] text-slate-500"
+            >
+              <ImageOff className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+              Media deleted
+            </p>
+          ) : (
+            <button
+              key={ref}
+              type="button"
+              onClick={() => setViewing(present.indexOf(ref))}
+              aria-label="Open image full size"
+              title="Open full size"
+              className="rounded-xl focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={`/api/images/${ref}`}
+                alt={alt}
+                /*
+                 * Shown in its OWN shape, bounded rather than cropped. A square box
+                 * cropped a portrait photo to its middle, so the record of what was
+                 * asked about no longer matched what was sent.
+                 */
+                draggable
+                onError={() => setMissing((current) => new Set(current).add(ref))}
+                className="max-h-80 w-auto max-w-full cursor-pointer rounded-xl border border-slate-200 object-contain transition hover:border-slate-300"
+              />
+            </button>
+          ),
+        )}
       </div>
-      {viewing !== null && (
-        <ImageViewer refs={refs} startIndex={viewing} alt={alt} onClose={() => setViewing(null)} />
+      {viewing !== null && present.length > 0 && (
+        // Only what still exists: paging into a deleted ref would show the
+        // viewer's own broken state, which is the problem one level deeper.
+        <ImageViewer refs={present} startIndex={Math.min(viewing, present.length - 1)} alt={alt} onClose={() => setViewing(null)} />
       )}
     </>
   )

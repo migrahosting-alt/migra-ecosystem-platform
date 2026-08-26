@@ -204,12 +204,17 @@ test('there is exactly one image-view behaviour', () => {
   const m = code(message)
   assert.ok(!m.includes('toggle(ref)'), 'inline expansion must be gone')
   assert.ok(!m.includes('aria-expanded'), 'no expand/collapse state remains')
-  assert.match(m, /setViewing\(index\)/, 'clicking opens the viewer')
+  /*
+   * The INTENT, not the literal expression. The index now maps into the images
+   * that still exist, because a deleted asset must not be pageable — pinning the
+   * old `setViewing(index)` made that correct change look like a regression.
+   */
+  assert.match(m, /onClick=\{\(\) => setViewing\(/, 'clicking opens the viewer')
 })
 
 test('transcript images stay draggable and open on click', () => {
   const m = code(message)
   assert.match(m, /draggable/, 'dragging out must carry the real authorised URL')
-  assert.match(m, /onClick=\{\(\) => setViewing\(index\)\}/)
+  assert.match(m, /onClick=\{\(\) => setViewing\(/)
   assert.match(m, /focus-visible:ring/, 'the control must be reachable by keyboard')
 })

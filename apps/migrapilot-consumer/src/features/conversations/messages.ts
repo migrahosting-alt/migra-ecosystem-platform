@@ -46,7 +46,21 @@ export function toMessage(message: WireMessage, index: number): Message {
         id: message.id ?? `a-${index}`,
         role: 'assistant',
         time,
-        blocks: [{ type: 'paragraph', text: message.content }],
+        /*
+         * A PICTURE IS AN ANSWER — on reload too.
+         *
+         * This branch dropped `imageRefs` and always emitted a paragraph, so a
+         * generated image was delivered live and then VANISHED on the next hard
+         * refresh: the ref was durably on the message, and the code that rebuilds
+         * the thread simply never looked at it for the assistant.
+         *
+         * That is the same rule missed for the third time — in `producedOutput`,
+         * in the client's delivery condition, and here. Every place that decides
+         * what an assistant turn contains has to consider images, not just text.
+         */
+        ...(message.imageRefs?.length ? { images: message.imageRefs } : {}),
+        // No empty paragraph when the answer IS the picture.
+        blocks: message.content ? [{ type: 'paragraph', text: message.content }] : [],
       }
 }
 
