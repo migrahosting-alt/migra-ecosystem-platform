@@ -53,9 +53,21 @@ export class BrainTurnTrace {
     const ms: Record<string, number> = {};
     let previous = 0;
     for (const stage of this.stages) {
-      at_ms[stage.name] = Math.round(stage.at);
-      ms[stage.name] = Math.round(stage.at - previous);
-      previous = stage.at;
+      /*
+       * `ms` IS DERIVED FROM THE ROUNDED `at_ms`, not from the raw times.
+       *
+       * Rounding each independently means the two columns do not reconcile: with
+       * stages at 20.6ms and 50.4ms, `at_ms` reads 21 and 50 while `ms` reads 21
+       * and 30 — a reader adding them up gets a different total than the one
+       * printed. They now agree by construction, at the cost of at most a
+       * millisecond of precision that nobody reading a latency trace needs.
+       */
+      const at = Math.round(stage.at);
+      at_ms[stage.name] = at;
+      // Duplicate stage names would silently overwrite; the last one wins, which
+      // is the honest reading for a stage that genuinely ran twice.
+      ms[stage.name] = at - previous;
+      previous = at;
     }
     return {
       at: new Date().toISOString(),

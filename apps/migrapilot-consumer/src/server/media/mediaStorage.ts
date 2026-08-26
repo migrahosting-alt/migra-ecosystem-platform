@@ -114,7 +114,13 @@ export class MediaIntegrityError extends Error {
  * check. Refusing is the only safe answer: a "sanitised" key is a different key,
  * and silently reading or writing a different object is worse than failing.
  */
-const SAFE_KEY = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,511}$/
+const SAFE_KEY = /^[A-Za-z0-9_][A-Za-z0-9._/-]{0,511}$/
+
+/*
+ * A LEADING UNDERSCORE IS ALLOWED, a leading dot is not. `_migration/…` is how
+ * the migration ledger namespaces itself away from artifacts, and an underscore
+ * cannot cause traversal. A leading dot can (`.` and `..`), so it stays refused.
+ */
 
 export function assertSafeKey(key: string): string {
   if (!SAFE_KEY.test(key) || key.includes('..') || key.includes('//')) {

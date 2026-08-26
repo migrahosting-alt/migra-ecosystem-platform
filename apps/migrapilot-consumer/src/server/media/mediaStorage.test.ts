@@ -104,12 +104,16 @@ test('a key that could escape the store is refused, never sanitised', async () =
    * "sanitised" key is a DIFFERENT key, and silently reading or writing a
    * different object is worse than failing.
    */
-  for (const key of ['../etc/passwd', '/absolute', 'users//double', 'a/../../b', '', 'has space', 'back\\slash']) {
+  for (const key of ['../etc/passwd', '/absolute', 'users//double', 'a/../../b', '', 'has space', 'back\\slash', '.hidden']) {
     assert.throws(() => assertSafeKey(key), /Unsafe media key/, JSON.stringify(key))
   }
   const s = storage()
   await assert.rejects(() => s.read('../escape'))
   await assert.rejects(() => s.put('../escape', Buffer.from('x')))
+
+  // A leading underscore is fine — it is how the migration ledger namespaces
+  // itself, and it cannot escape anything. A leading dot still cannot.
+  assert.equal(assertSafeKey('_migration/media/img_one.json'), '_migration/media/img_one.json')
 })
 
 test('an interrupted write leaves no object under the canonical key', async () => {
