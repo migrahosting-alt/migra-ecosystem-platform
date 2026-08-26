@@ -58,7 +58,7 @@ function studio(options: {
       });
     }
     if (url.includes('/view')) {
-      return new Response(options.viewBody ?? PNG, { status: 200 });
+      return new Response(new Uint8Array(options.viewBody ?? PNG), { status: 200 });
     }
     return new Response('nope', { status: 404 });
   }) as unknown as typeof fetch;

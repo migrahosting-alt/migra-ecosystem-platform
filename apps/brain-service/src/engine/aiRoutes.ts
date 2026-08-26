@@ -46,7 +46,8 @@ import { engineCorrelationId } from './toolRoutes.js';
 import { BrainTurnTrace } from './turnTrace.js';
 import { classifyGenerationIntent } from './media/generationIntent.js';
 import { DEFAULT_STUDIO_CONFIG, generateImage, type GenerationStage } from './media/studioImage.js';
-import { shapeImagePrompt } from './media/imagePrompt.js';
+import { describeImageRequest, shapeImagePrompt } from './media/imagePrompt.js';
+import { renderTextGlyph } from './media/glyphRender.js';
 import type { IndexService } from './rag/indexService.js';
 import { auditStore } from './auditLog.js';
 import { gateVisionTurn, visionCapabilitySnapshot, type VisionGateDeps } from './media/visionGate.js';
@@ -854,7 +855,63 @@ async function streamGeneration(
    * single-character subject is expanded; a real description goes through as
    * written.
    */
+  /*
+   * A SINGLE CHARACTER IS DRAWN, NOT SAMPLED.
+   *
+   * "generate letter A in png" is not an artistic request, and diffusion cannot
+   * be made to spell: the same shaped prompt produced a clean capital A at one
+   * seed and four glyphs reading "a a I I" at another. A font already contains
+   * the exact outline, so this path fills it instead — correct every time rather
+   * than most times, in about 170ms rather than seconds of GPU, and with no
+   * dependence on Studio being reachable at all.
+   */
+  const asked = describeImageRequest(prompt);
+  if (asked.kind === 'glyph') {
+    trace?.set('generator', 'deterministic');
+    trace?.set('glyph', asked.text);
+    send('stage', { stage: 'generating', detail: `Drawing “${asked.text}” from a typeface` });
+    try {
+      const drawn = renderTextGlyph(asked.text, { size: 1024, background: 'white' });
+      trace?.mark('generation');
+      trace?.set('image_bytes', drawn.png.byteLength);
+      send('image', {
+        mimeType: 'image/png',
+        dataBase64: drawn.png.toString('base64'),
+        bytes: drawn.png.byteLength,
+        model: `typeface:${drawn.fontPath.split('/').pop() ?? 'unknown'}`,
+        prompt: `the character ${asked.text}`,
+        requestId,
+      });
+      send('done', {
+        requestId,
+        capability: 'image_generation',
+        model: 'deterministic-glyph',
+        timing: { totalMs: 0 },
+      });
+      trace?.finish('ok');
+      raw.end();
+      return;
+    } catch (error) {
+      /*
+       * No usable typeface, or a character this font cannot draw. Said plainly
+       * rather than silently falling back to a model that would produce
+       * something that merely looks like the letter.
+       */
+      trace?.finish('glyph_unavailable');
+      send('error', {
+        code: 'IMAGE_GENERATION_FAILED',
+        message:
+          error instanceof Error && error.message
+            ? error.message
+            : 'That character could not be drawn.',
+      });
+      raw.end();
+      return;
+    }
+  }
+
   const shaped = shapeImagePrompt(prompt);
+  trace?.set('generator', 'studio');
   trace?.set('shaped_prompt', shaped !== prompt);
   const result = await generateImage(shaped, DEFAULT_STUDIO_CONFIG, (stage) => send('stage', describe(stage)));
   trace?.mark('generation');

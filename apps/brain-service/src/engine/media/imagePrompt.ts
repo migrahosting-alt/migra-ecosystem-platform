@@ -45,18 +45,22 @@ const SINGLE_CHARACTER =
 /** A bare character, once the request grammar is gone: "generate A in png" -> "A". */
 const BARE_CHARACTER = /^["'“”]?([A-Za-z0-9])["'“”]?$/
 
-export function shapeImagePrompt(userPrompt: string): string {
+/** Remove the imperative aimed at an assistant and the file-format instruction. */
+function stripRequestGrammar(userPrompt: string): string {
   let text = userPrompt.trim()
-
-  // Strip the request grammar, then the format instruction. Order matters: the
-  // suffix rule would otherwise eat the word "image" out of "image of a cat".
+  // Order matters: the suffix rule would otherwise eat the word "image" out of
+  // "image of a cat".
   text = text.replace(REQUEST_PREFIX, '')
   let previous: string
   do {
     previous = text
     text = text.replace(FORMAT_SUFFIX, '').trim()
   } while (text !== previous && text.length > 0)
-  text = text.replace(/[.!?]+$/, '').trim()
+  return text.replace(/[.!?]+$/, '').trim()
+}
+
+export function shapeImagePrompt(userPrompt: string): string {
+  const text = stripRequestGrammar(userPrompt)
 
   if (!text) return userPrompt.trim()
 
@@ -76,4 +80,42 @@ export function shapeImagePrompt(userPrompt: string): string {
   }
 
   return text
+}
+
+
+/**
+ * What KIND of picture was asked for.
+ *
+ * A single character is not an artistic request, and diffusion cannot be made to
+ * spell: the same shaped prompt produced a clean capital A at one seed and four
+ * glyphs reading "a a I I" at another. A font already contains the exact outline,
+ * so a bare glyph is DRAWN rather than sampled — correct every time instead of
+ * most times, and in milliseconds instead of seconds of GPU.
+ *
+ * Deliberately narrow. Only a request that resolves to one character takes the
+ * deterministic path; everything else is a scene and goes to Studio. Widening
+ * this to words or phrases would mean deciding typeface, layout and colour on
+ * the user's behalf, which is a different feature.
+ */
+export type ImageRequest =
+  | { kind: 'glyph'; text: string; lowercase: boolean }
+  | { kind: 'scene'; prompt: string }
+
+export function describeImageRequest(userPrompt: string): ImageRequest {
+  const cleaned = stripRequestGrammar(userPrompt)
+  if (!cleaned) return { kind: 'scene', prompt: userPrompt.trim() }
+
+  const single = SINGLE_CHARACTER.exec(cleaned)
+  const bare = BARE_CHARACTER.exec(cleaned)
+  const character = single?.[4] ?? bare?.[1]
+  if (character) {
+    const modifier = single?.[2] ?? ''
+    const lowercase = /lower/i.test(modifier) || /small/i.test(modifier)
+    return {
+      kind: 'glyph',
+      text: lowercase ? character.toLowerCase() : character.toUpperCase(),
+      lowercase,
+    }
+  }
+  return { kind: 'scene', prompt: cleaned }
 }
