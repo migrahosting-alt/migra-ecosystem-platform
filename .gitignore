@@ -35,6 +35,9 @@
 # never committed. Markdown only.
 !/docs/migrapilot/
 !/docs/migrapilot/*.md
+# The canonical machine-readable status. Named explicitly rather than widening the
+# allowlist to *.json, so no other generated JSON slips into the repository with it.
+!/docs/migrapilot/MIGRAPILOT_STATUS.json
 
 # Allow ONLY nginx infra tree
 !infra/

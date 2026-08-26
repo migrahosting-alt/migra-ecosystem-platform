@@ -1,0 +1,241 @@
+{
+  "$schema": "MIGRAPILOT_STATUS \u2014 canonical cross-agent state. Update on every material change.",
+  "updated": "2026-08-26",
+  "updatedBy": "claude",
+  "rules": {
+    "easyFirst": "Do not start deep capability work while meaningful easy user-facing items remain.",
+    "provenLive": "PROVEN_LIVE requires the real user-facing workflow to pass. Code existing and tests passing is NOT proof.",
+    "acceptanceGate": "The gate is the app's own test command + tsc -b + live browser acceptance. A pre-commit hook is not the acceptance suite.",
+    "costDiscipline": "owned -> open-source -> self-hosted -> free tier -> partner credits -> paid. No recurring paid dependency enters quietly.",
+    "honestUnavailable": "A capability that is not ready must refuse truthfully rather than appear to work."
+  },
+  "activeLane": {
+    "name": "Files & Documents",
+    "objective": "Finish common file/document behaviour before deeper capabilities.",
+    "currentStep": "Two open defects remain before the lane closes: no detach control, and no deleted-file state on historical cards.",
+    "lastProvenMilestone": "All five common formats (TXT, MD, CSV, JSON, code) grounded live; historical file cards render immediately and after reload; deletion preserves history and stops grounding.",
+    "release": {
+      "consumer": "picker-bc990598",
+      "brain": "filerefs-bc990598"
+    },
+    "rollback": {
+      "consumer": [
+        "filecard2-bc990598",
+        "filecard-bc990598",
+        "docrefusal-bc990598",
+        "refusalpersist-bc990598",
+        "bc99059"
+      ],
+      "brain": [
+        "refusal-bc990598",
+        "routing-bc990598",
+        "bc99059"
+      ]
+    },
+    "blockers": [],
+    "nextAcceptanceTest": "Detach a document from active grounding: historical card must remain, future turns must stop grounding, no history mutation.",
+    "doNotWorkOnYet": [
+      "PDF/DOCX extraction (until the text path is fully closed)",
+      "Live Source Intelligence (PAUSED_CHECKPOINTED)",
+      "Provisioning any search vendor",
+      "Deleting local media fallback copies (stabilization window running)"
+    ]
+  },
+  "capabilities": {
+    "PROVEN_LIVE": [
+      "Media Library",
+      "Object-storage canonical media writes",
+      "Helsinki regional replica",
+      "Media monitoring + ILM + object-level restore",
+      "Image generation artifact persistence",
+      "Deterministic glyph generation",
+      "Conversation rename",
+      "Anonymous to authenticated same-chat continuity",
+      "Image attachment history",
+      "Follow-up image context",
+      "Image-context isolation",
+      "Truthful image-editing refusal",
+      "Refusal persistence + telemetry taxonomy",
+      "TXT grounding",
+      "Markdown grounding",
+      "CSV grounding",
+      "JSON grounding",
+      "Source-code grounding",
+      "Historical file cards (live + after reload)",
+      "Truthful refusal when a document question has no attached document",
+      "Deletion preserves history and stops grounding"
+    ],
+    "STABILIZATION": [
+      {
+        "name": "MediaStorage local fallback",
+        "detail": "7 consecutive clean days required before local copies may be removed. Started 2026-08-26. Tracked by migra-media-health window.json. Use migra-media-faultwindow before testing alerts."
+      }
+    ],
+    "PAUSED_CHECKPOINTED": [
+      {
+        "name": "Live Source Intelligence",
+        "resumeCondition": "Only after the Files & Documents lane has a proven, stable end-to-end baseline.",
+        "done": [
+          "Provider-independent contract + freshness detection + router with fallback",
+          "15-case qualification battery + per-category scorecard",
+          "Vendor legal review (all six needs_approval)",
+          "Open source-family coverage map (11 of 15 categories have a candidate)"
+        ],
+        "next": "Compliant free/direct-source investigation. Do NOT start with paid provider integration."
+      }
+    ],
+    "HONESTLY_UNAVAILABLE": [
+      "PDF extraction",
+      "DOCX/XLSX/PPTX extraction",
+      "ZIP understanding",
+      "Existing-image editing",
+      "General live web search",
+      "Deep research",
+      "Agents",
+      "Scheduled automation",
+      "Full Projects capability"
+    ],
+    "SECURITY_HARDENING": [
+      {
+        "name": "Separate Hetzner project for DR credential isolation",
+        "detail": "Hetzner keys are project-scoped with no per-bucket IAM (proven: one key reached fsn1, nbg1, hel1, ash, hil). Real isolation needs a separate project. NOT a blocker to product work.",
+        "needsFromOwner": "Create the project + Object Storage credentials + DR bucket in the Hetzner console."
+      }
+    ]
+  },
+  "openDefects": [
+    {
+      "id": "no-document-detach-control",
+      "symptom": "A user can attach a document to a conversation but can never remove it from active grounding without deleting it from Files entirely.",
+      "evidence": "detachConversationImage exists for images; there is no document equivalent and no /api/conversations/[id]/grounding route.",
+      "rootCause": "Capability was never built.",
+      "status": "OPEN",
+      "effort": "EASY",
+      "regressionTest": "none yet",
+      "liveAcceptance": "not run"
+    },
+    {
+      "id": "deleted-file-card-state",
+      "symptom": "After the underlying library file is deleted, the historical file card still renders exactly like a live one; a reader cannot tell the document is gone.",
+      "evidence": "Verified live 2026-08-26: deleted fixture-scheduler.py, card unchanged on the historical turn.",
+      "rootCause": "The renderer has no unavailable state; history correctly preserves the ref.",
+      "status": "OPEN",
+      "effort": "EASY",
+      "regressionTest": "none yet",
+      "liveAcceptance": "not run"
+    },
+    {
+      "id": "citation-presentation-inconsistency",
+      "symptom": "A grounded TXT answer showed '(from fixture-notes.txt:3-6)' and a 'From your files' attribution; a grounded Markdown answer showed neither, on the same path.",
+      "evidence": "Live, 2026-08-26.",
+      "rootCause": "UNKNOWN \u2014 model variance vs deterministic presentation bug not yet distinguished.",
+      "status": "OPEN_RECORDED_NOT_CHASED",
+      "effort": "MEDIUM",
+      "regressionTest": "none yet",
+      "liveAcceptance": "not run"
+    },
+    {
+      "id": "vision-turn-no-output-240s",
+      "symptom": "A vision turn held the local model for 240s and returned zero tokens; failover list contained only the failing model.",
+      "evidence": "req_775234782f08d9a87827 \u2014 brain completion_failed, consumer brain_open 240032ms, generation 0ms.",
+      "rootCause": "UNKNOWN, not reproducible.",
+      "status": "OPEN_OPERATIONAL_TARGET",
+      "effort": "MEDIUM",
+      "regressionTest": "none",
+      "liveAcceptance": "n/a"
+    }
+  ],
+  "driftControl": [
+    {
+      "assumption": "MinIO data shares cloud-core's 32GB OS filesystem, so media growth would fill the OS disk.",
+      "disprovedBy": "MINIO_VOLUMES=/mnt/client-storage \u2014 a dedicated 200GB disk, 175GB free. I had measured / instead of MinIO's configured volume.",
+      "corrected": "Dedicated capacity was already satisfied.",
+      "priorityChanged": true
+    },
+    {
+      "assumption": "There is no off-host backup of anything.",
+      "disprovedBy": "PBS CT 9002 runs a daily restic backup of the whole datastore to Hetzner Object Storage (192GiB), plus a weekly restore drill.",
+      "corrected": "An off-host copy existed; the gap was object granularity, not existence.",
+      "priorityChanged": true
+    },
+    {
+      "assumption": "Follow-up image context is broken \u2014 every follow-up is answered blind.",
+      "disprovedBy": "Consumer trace showed requested:1 sent:0 dropped:1 \u2014 the artifact had been deleted by me minutes earlier. A clean test showed sent:1 and has_image:true.",
+      "corrected": "Follow-up image context works. No second mechanism was built.",
+      "priorityChanged": true
+    },
+    {
+      "assumption": "The PDF upload rejection is a bug/regression.",
+      "disprovedBy": "storage.ts deliberately excludes pdf/docx/xlsx with a comment explaining that accepting them would fabricate a capability.",
+      "corrected": "It is an intentional honest refusal; the work is building extraction.",
+      "priorityChanged": true
+    },
+    {
+      "assumption": "Backups for VM103 were weekly (5 snapshots).",
+      "disprovedBy": "My own head -6 truncation. Real: 11 snapshots, daily, 6-10s incremental.",
+      "corrected": "Backup cadence was healthy.",
+      "priorityChanged": false
+    },
+    {
+      "assumption": "Production Brain ran on SQLite.",
+      "disprovedBy": "systemctl EnvironmentFiles \u2014 brain-postgres.env loads after brain.env and wins.",
+      "corrected": "Production is PostgreSQL.",
+      "priorityChanged": false
+    },
+    {
+      "assumption": "A green pre-commit hook means the build is green.",
+      "disprovedBy": "Hook runs tsc --noEmit; the suite runs tsc -b. A committed test broke npm test.",
+      "corrected": "Acceptance gate is the app's own test command + tsc -b + live browser.",
+      "priorityChanged": false
+    }
+  ],
+  "promisesVsReality": [
+    {
+      "surface": "Files page: 'Upload and index documents so you can attach them to conversations'",
+      "reality": "Accurate as of 2026-08-26 (corrected from a claim that the library was readable in any chat).",
+      "provenLive": true
+    },
+    {
+      "surface": "Composer chip: 'Ready \u2014 MigraPilot can read this'",
+      "reality": "True \u2014 that chip only appears for a file attached to the conversation.",
+      "provenLive": true
+    },
+    {
+      "surface": "Files & documents picker offers PDF/DOCX/XLSX/ZIP",
+      "reality": "Deliberate: offered, then refused after selection with a reason naming the format.",
+      "provenLive": true
+    },
+    {
+      "surface": "Historical file card on a user turn",
+      "reality": "Renders live and after reload; does NOT indicate when the underlying file was deleted.",
+      "provenLive": true
+    }
+  ],
+  "backlog": {
+    "EASY_NEXT": [
+      "Document detach control (remove from active grounding without deleting)",
+      "Deleted-file state on historical file cards",
+      "Citation presentation consistency review"
+    ],
+    "MEDIUM": [
+      "PDF extraction (verify runtime/library compatibility on VM111 first \u2014 pure-JS is an UNVERIFIED assumption)",
+      "DOCX extraction",
+      "XLSX/PPTX extraction",
+      "ZIP/archive understanding",
+      "Bounded vision timeout + truthful in-progress state + secondary vision route"
+    ],
+    "DEEP": [
+      "Live Source Intelligence resume (free/direct sources first)",
+      "Existing-image editing pipeline",
+      "Connected apps (Gmail/Drive/GitHub)",
+      "Scheduled tasks / automations",
+      "Projects",
+      "Agents",
+      "Deep research"
+    ]
+  },
+  "costStatus": {
+    "paidDependencies": [],
+    "note": "No recurring paid dependency has entered the architecture. Hetzner Object Storage is already owned and in use. All six retrieval vendors are needs_approval and none has credentials."
+  }
+}
