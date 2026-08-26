@@ -14,7 +14,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { RETURN_COOKIE, redirectRememberingReturnPath } from './returnTo'
+import { RETURN_COOKIE, redirectRememberingReturnPath, safeReturnPath } from './returnTo'
 
 const cookieOf = (response: Response): string | null => response.headers.get('set-cookie')
 
@@ -63,4 +63,23 @@ test('the sign-in is never blocked by an unusable destination', () => {
   // Losing the return path degrades the landing; it must never stop the login.
   const response = redirectRememberingReturnPath('https://auth.example.test/a', 'https://evil.example')
   assert.equal(response.headers.get('location'), 'https://auth.example.test/a')
+})
+
+
+test('an encoded cookie value is still recognised as the path it is', () => {
+  /*
+   * THE SECOND HALF OF THE SAME BUG. The cookie is written percent-encoded, and
+   * `safeReturnPath` fails `%2Fchat%2Fc1` on its very first check — it starts
+   * with `%`, not `/`. The destination reached the browser, came back, and was
+   * discarded on arrival.
+   */
+  assert.equal(safeReturnPath('%2Fchat%2Fconv_abc'), null, 'encoded is not a path on its own')
+  assert.equal(safeReturnPath(decodeURIComponent('%2Fchat%2Fconv_abc')), '/chat/conv_abc')
+})
+
+test('decoding does not smuggle an absolute destination past validation', () => {
+  // Decoding happens BEFORE validation, so an encoded hostile value is still
+  // refused — it must not become a way around the open-redirect check.
+  assert.equal(safeReturnPath(decodeURIComponent('https%3A%2F%2Fevil.example')), null)
+  assert.equal(safeReturnPath(decodeURIComponent('%2F%2Fevil.example')), null)
 })

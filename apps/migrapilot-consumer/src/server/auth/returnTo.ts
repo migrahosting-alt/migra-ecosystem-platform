@@ -100,13 +100,32 @@ export function redirectRememberingReturnPath(location: string, value: string | 
 }
 
 
+/**
+ * A cookie value may arrive percent-encoded, and must still be recognised.
+ *
+ * `/chat/c1` written as `%2Fchat%2Fc1` fails `safeReturnPath` on its very first
+ * check — it does not start with `/`, it starts with `%` — so the destination is
+ * silently discarded and the user lands on the home page. Decoding an
+ * unencoded path is a no-op, so this is safe in both directions, and a value
+ * that cannot be decoded is used as-is rather than thrown away.
+ */
+function decodeCookieValue(raw: string | undefined): string | undefined {
+  if (raw === undefined) return undefined
+  try {
+    return decodeURIComponent(raw)
+  } catch {
+    return raw
+  }
+}
+
 /** Read the remembered destination and consume it. Single use, by design. */
 export async function takeReturnPath(): Promise<string | null> {
   try {
     const jar = await cookies()
     const raw = jar.get(RETURN_COOKIE)?.value
     jar.delete(RETURN_COOKIE)
-    return safeReturnPath(raw)
+    // Validated AFTER decoding — the check is on the real path, not its encoding.
+    return safeReturnPath(decodeCookieValue(raw))
   } catch {
     return null
   }
