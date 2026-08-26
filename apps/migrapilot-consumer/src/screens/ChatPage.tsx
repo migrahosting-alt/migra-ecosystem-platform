@@ -30,13 +30,28 @@ import { isExhausted, useAnonymousQuota } from '@/features/anonymous/AnonymousQu
  */
 function ConversationToolsRail({
   conversationId,
+  title,
   onDeleted,
 }: {
   conversationId: string
+  title?: string
   onDeleted: () => void
 }) {
   return (
     <RailCard title="Conversation">
+      {/*
+        THE NAME, WHERE IT IS RENAMED.
+        Renaming worked end to end — the PATCH returned 200, the record changed,
+        and History showed the new name — but this view displayed the title
+        NOWHERE, so from inside the conversation the control looked dead. A rename
+        you cannot see is indistinguishable from one that did not happen, and that
+        is what it was reported as.
+      */}
+      {title && (
+        <p className="mb-1.5 truncate text-[14px] font-semibold text-slate-800" title={title}>
+          {title}
+        </p>
+      )}
       <p className="text-[13px] leading-relaxed text-slate-500">
         Rename it, keep a copy, or delete it for good.
       </p>
@@ -132,6 +147,7 @@ export function ChatPage() {
         rail={
           <ConversationToolsRail
             conversationId={conversation.id}
+            title={conversation.title}
             // The thread the page is showing no longer exists, so the page must
             // not keep showing it.
             onDeleted={() => router.replace('/')}
