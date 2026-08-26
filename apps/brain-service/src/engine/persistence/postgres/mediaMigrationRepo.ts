@@ -26,8 +26,14 @@ export interface MediaMigration {
   expectedHash: string;
   verifiedHash?: string | undefined;
   status: MediaMigrationStatus;
+  /** First ever copy. Never overwritten. */
   copiedAt?: number | undefined;
+  /** First ever proof. Never overwritten — this is provenance. */
   verifiedAt?: number | undefined;
+  /** Most recent successful proof. Answers "how fresh is this answer?". */
+  lastVerifiedAt?: number | undefined;
+  /** Most recent attempt of any outcome. Answers "when did we last look?". */
+  lastAttemptAt?: number | undefined;
   lastError?: string | undefined;
   attempts: number;
   correlationId?: string | undefined;
@@ -55,6 +61,8 @@ function toRecord(r: Record<string, unknown>): MediaMigration {
     status: r.status as MediaMigrationStatus,
     copiedAt: optNum(r.copied_at),
     verifiedAt: optNum(r.verified_at),
+    lastVerifiedAt: optNum(r.last_verified_at),
+    lastAttemptAt: optNum(r.last_attempt_at),
     lastError: (r.last_error as string | null) ?? undefined,
     attempts: num(r.attempts),
     correlationId: (r.correlation_id as string | null) ?? undefined,
@@ -74,15 +82,15 @@ function toRecord(r: Record<string, unknown>): MediaMigration {
  */
 export async function recordMediaMigration(
   client: PoolClient,
-  entry: Omit<MediaMigration, 'attempts' | 'createdAt' | 'updatedAt'> & { at: number },
+  entry: Omit<MediaMigration, 'attempts' | 'createdAt' | 'updatedAt' | 'lastAttemptAt'> & { at: number },
 ): Promise<void> {
   const id = migrationId(entry.scope, entry.artifactId, entry.destinationProvider);
   await client.query(
     `INSERT INTO media_migrations
        (id, scope, artifact_id, source_provider, source_key, destination_provider, destination_key,
-        expected_hash, verified_hash, status, copied_at, verified_at, last_error, attempts,
-        correlation_id, created_at, updated_at)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,1,$14,$15,$15)
+        expected_hash, verified_hash, status, copied_at, verified_at, last_verified_at,
+        last_attempt_at, last_error, attempts, correlation_id, created_at, updated_at)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$16,$15,$13,1,$14,$15,$15)
      ON CONFLICT (id) DO UPDATE SET
        source_key = EXCLUDED.source_key,
        destination_key = EXCLUDED.destination_key,
@@ -91,8 +99,13 @@ export async function recordMediaMigration(
        status = EXCLUDED.status,
        /* Timestamps are never cleared by a later attempt: when something was
           first copied or proven is history, not current state. */
-       copied_at = COALESCE(EXCLUDED.copied_at, media_migrations.copied_at),
-       verified_at = COALESCE(EXCLUDED.verified_at, media_migrations.verified_at),
+       /* First-ever timestamps are provenance and survive every later attempt. */
+       copied_at = COALESCE(media_migrations.copied_at, EXCLUDED.copied_at),
+       verified_at = COALESCE(media_migrations.verified_at, EXCLUDED.verified_at),
+       /* Freshness: overwritten by each NEW successful proof, kept otherwise. */
+       last_verified_at = COALESCE(EXCLUDED.last_verified_at, media_migrations.last_verified_at),
+       /* Always advances — this is when we last looked, whatever the outcome. */
+       last_attempt_at = EXCLUDED.last_attempt_at,
        last_error = EXCLUDED.last_error,
        attempts = media_migrations.attempts + 1,
        correlation_id = COALESCE(EXCLUDED.correlation_id, media_migrations.correlation_id),
@@ -102,6 +115,8 @@ export async function recordMediaMigration(
       entry.destinationProvider, entry.destinationKey, entry.expectedHash,
       entry.verifiedHash ?? null, entry.status, entry.copiedAt ?? null, entry.verifiedAt ?? null,
       entry.lastError ?? null, entry.correlationId ?? null, entry.at,
+      /* $16: a successful proof also refreshes `last_verified_at`. */
+      entry.status === 'verified' ? (entry.lastVerifiedAt ?? entry.at) : (entry.lastVerifiedAt ?? null),
     ],
   );
 }

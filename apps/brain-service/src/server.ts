@@ -82,6 +82,7 @@ import { wireOperationalPersistence } from './engine/persistence/operationalBrid
 import { OperationalMaintenance, buildRetentionConfig, isMaintainable } from './engine/persistence/operationalMaintenance.js';
 import { auditStore } from './engine/auditLog.js';
 import { registerQualificationRoutes } from './engine/media/qualificationRoutes.js';
+import { registerMediaMigrationRoutes } from './engine/media/mediaMigrationRoutes.js';
 import { loadInternalAuthConfig } from './engine/internalAuth/config.js';
 import { incidentManager } from './engine/incidents.js';
 import { engineVersion } from './engine/version.js';
@@ -405,6 +406,14 @@ async function main(): Promise<void> {
   const internalAuth = loadInternalAuthConfig(process.env);
   if (durable instanceof PostgresDurableStore) {
     const store = durable;
+    /*
+     * Migration state for media artifacts. Registered only with a durable store,
+     * for the same reason as qualification: without Postgres there is no
+     * authority to be, and a route that answers from nowhere is worse than one
+     * that is absent.
+     */
+    registerMediaMigrationRoutes(app, { transaction: (fn) => store.platformTransaction(fn) });
+
     registerQualificationRoutes(app, {
       internalAuth,
       transaction: (fn) => store.platformTransaction(fn),

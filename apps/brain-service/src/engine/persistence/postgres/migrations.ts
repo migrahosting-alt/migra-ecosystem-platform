@@ -1067,8 +1067,22 @@ CREATE TABLE IF NOT EXISTS media_migrations (
   verified_hash         TEXT,
   /* pending | copied | verified | failed */
   status                TEXT NOT NULL,
+  /*
+   * THREE DIFFERENT QUESTIONS, THREE COLUMNS.
+   *
+   * The status can regress — an artifact proven today can fail a later re-check —
+   * and overloading one timestamp would make "first ever proven", "most recently
+   * proven" and "what is true now" indistinguishable. They are asked for
+   * different reasons: the first is provenance, the second is freshness, the
+   * third is what to do next.
+   */
   copied_at             BIGINT,
+  /* First ever proof. Never overwritten. */
   verified_at           BIGINT,
+  /* Most recent successful proof, which may be much later than the first. */
+  last_verified_at      BIGINT,
+  /* Every attempt, successful or not — how stale the current answer is. */
+  last_attempt_at       BIGINT,
   last_error            TEXT,
   /* Attempts, so a permanently failing artifact is visible rather than retried
      forever in silence. */

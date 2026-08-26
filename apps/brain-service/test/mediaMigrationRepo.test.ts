@@ -144,3 +144,52 @@ test('an artifact never migrated is not verified', async (t) => {
   if (skip) return t.skip(skip);
   assert.equal(await withClient((c) => isMediaMigrationVerified(c, 'nobody', 'img_' + 'f'.repeat(32), DEST)), false);
 });
+
+
+test('first proof, latest proof and last look are three different facts', async (t) => {
+  if (skip) return t.skip(skip);
+  /*
+   * The status can regress: an artifact proven today can fail a later re-check.
+   * Overloading one timestamp would make "first ever proven", "most recently
+   * proven" and "when did we last look" indistinguishable — and they are asked
+   * for different reasons: provenance, freshness, and what to do next.
+   */
+  const scope = 'scope-timestamps';
+  const FIRST = 1_700_000_000_000;
+  const LATER = 1_700_000_999_000;
+
+  await withClient((c) => recordMediaMigration(c, entry(scope, {
+    at: FIRST, copiedAt: FIRST, verifiedAt: FIRST, lastVerifiedAt: FIRST,
+  })));
+
+  // A later re-check FAILS. First-ever proof must survive; freshness must not
+  // advance; the last look must.
+  await withClient((c) => recordMediaMigration(c, entry(scope, {
+    at: LATER, status: 'failed', verifiedHash: undefined,
+    verifiedAt: undefined, lastVerifiedAt: undefined, copiedAt: undefined,
+    lastError: 'destination unreachable',
+  })));
+
+  const read = await withClient((c) => getMediaMigration(c, scope, SHARED_ID, DEST));
+  assert.equal(read?.status, 'failed', 'current state is honest');
+  assert.equal(read?.verifiedAt, FIRST, 'first proof is provenance and survives');
+  assert.equal(read?.lastVerifiedAt, FIRST, 'freshness does not advance on a failure');
+  assert.equal(read?.lastAttemptAt, LATER, 'but we did look again, and that is recorded');
+  assert.equal(read?.copiedAt, FIRST, 'first copy survives too');
+});
+
+test('a later successful re-check advances freshness without rewriting history', async (t) => {
+  if (skip) return t.skip(skip);
+  const scope = 'scope-reproved';
+  const FIRST = 1_700_000_000_000;
+  const AGAIN = 1_700_500_000_000;
+
+  await withClient((c) => recordMediaMigration(c, entry(scope, { at: FIRST, verifiedAt: FIRST, lastVerifiedAt: FIRST })));
+  await withClient((c) => recordMediaMigration(c, entry(scope, { at: AGAIN, verifiedAt: AGAIN, lastVerifiedAt: AGAIN })));
+
+  const read = await withClient((c) => getMediaMigration(c, scope, SHARED_ID, DEST));
+  assert.equal(read?.verifiedAt, FIRST, 'first ever proof is unchanged');
+  assert.equal(read?.lastVerifiedAt, AGAIN, 'most recent proof moved forward');
+  assert.equal(read?.lastAttemptAt, AGAIN);
+  assert.equal(read?.attempts, 2);
+});
