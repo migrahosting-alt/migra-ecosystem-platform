@@ -1,10 +1,14 @@
 import 'server-only'
 
+import { DualReadMediaStorage, type StorageHealthEvent } from './dualReadMediaStorage'
 import { LocalMediaStorage } from './localMediaStorage'
+import { ObjectMediaStorage } from './objectMediaStorage'
 import type { MediaStorage } from './mediaStorage'
 
 export * from './mediaStorage'
 export { LocalMediaStorage } from './localMediaStorage'
+export { ObjectMediaStorage } from './objectMediaStorage'
+export { DualReadMediaStorage } from './dualReadMediaStorage'
 
 /**
  * The storage this deployment uses.
@@ -17,14 +21,59 @@ export { LocalMediaStorage } from './localMediaStorage'
  * Resolved lazily and cached, because the root is read from the environment and
  * tests set it after import.
  */
-let configured: { root: string; storage: MediaStorage } | null = null
+let configured: { key: string; storage: MediaStorage } | null = null
 
 const mediaRoot = (): string => process.env.IMAGE_ROOT ?? '/var/lib/migrapilot/images'
 
+/**
+ * A storage event worth counting, emitted as one greppable line.
+ *
+ * A fallback is not an error — the read SUCCEEDED — but it is the number that
+ * says whether the migration is working. Without it, object storage could be
+ * broken for weeks while every page looked perfectly healthy.
+ */
+function reportHealth(event: StorageHealthEvent): void {
+  console.info(`migrapilot.media.health ${JSON.stringify(event)}`)
+}
+
+/**
+ * Object storage, when this deployment is configured for it.
+ *
+ * Absent configuration is not a failure: the local backend is the supported
+ * standalone mode, and a workstation needs no infrastructure to run the product.
+ */
+function objectStorage(): ObjectMediaStorage | null {
+  const endpoint = process.env.MIGRAPILOT_MEDIA_ENDPOINT
+  const bucket = process.env.MIGRAPILOT_MEDIA_BUCKET
+  const accessKeyId = process.env.MIGRAPILOT_MEDIA_ACCESS_KEY
+  const secretAccessKey = process.env.MIGRAPILOT_MEDIA_SECRET_KEY
+  if (!endpoint || !bucket || !accessKeyId || !secretAccessKey) return null
+  return new ObjectMediaStorage({
+    endpoint,
+    bucket,
+    ...(process.env.MIGRAPILOT_MEDIA_PREFIX ? { prefix: process.env.MIGRAPILOT_MEDIA_PREFIX } : {}),
+    ...(process.env.MIGRAPILOT_MEDIA_REGION ? { region: process.env.MIGRAPILOT_MEDIA_REGION } : {}),
+    credentials: { accessKeyId, secretAccessKey },
+  })
+}
+
 export function mediaStorage(): MediaStorage {
   const root = mediaRoot()
-  if (configured?.root !== root) {
-    configured = { root, storage: new LocalMediaStorage(root) }
+  const object = objectStorage()
+  // Cached on the shape of the configuration, so a test that changes the
+  // environment gets a storage that reflects it.
+  const key = `${root}|${object ? process.env.MIGRAPILOT_MEDIA_ENDPOINT : 'local'}`
+  if (configured?.key !== key) {
+    const local = new LocalMediaStorage(root)
+    configured = {
+      key,
+      /*
+       * MIGRATION PHASE: reads prefer object storage, writes stay local. Nothing
+       * has cut over — this exercises the object path with real traffic under a
+       * safety net, long before it is trusted with a write.
+       */
+      storage: object ? new DualReadMediaStorage({ object, local, onHealth: reportHealth }) : local,
+    }
   }
   return configured.storage
 }
@@ -32,5 +81,5 @@ export function mediaStorage(): MediaStorage {
 /** Point the application at a different backend. Used by tests and, later, by
  *  the object-store cutover. */
 export function setMediaStorage(storage: MediaStorage): void {
-  configured = { root: mediaRoot(), storage }
+  configured = { key: 'explicit', storage }
 }
