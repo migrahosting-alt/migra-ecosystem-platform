@@ -12,28 +12,29 @@
   "activeLane": {
     "name": "Files & Documents",
     "objective": "Finish common file/document behaviour before deeper capabilities.",
-    "currentStep": "Detach control and deleted-file card state both PROVEN_LIVE. Citation consistency pass is the last item before PDF/DOCX.",
+    "currentStep": "Citation attribution made deterministic and deployed; LIVE PROOF BLOCKED by the workstation model backend failing every generation.",
     "lastProvenMilestone": "All five formats grounded live; historical cards live+reload; deletion preserves history and stops grounding; detach removes active grounding without touching history or the library; a deleted file renders as Deleted.",
     "release": {
-      "consumer": "detach-bc990598",
-      "brain": "filerefs-bc990598"
+      "consumer": "citations-bc990598",
+      "brain": "citations-bc990598"
     },
     "rollback": {
       "consumer": [
+        "detach-bc990598",
         "picker-bc990598",
         "filecard2-bc990598",
-        "filecard-bc990598",
-        "docrefusal-bc990598",
         "bc99059"
       ],
       "brain": [
+        "filerefs-bc990598",
         "refusal-bc990598",
-        "routing-bc990598",
         "bc99059"
       ]
     },
-    "blockers": [],
-    "nextAcceptanceTest": "Citation consistency across TXT/MD/CSV/JSON/code: determine whether the missing citation on Markdown is model variance or a deterministic presentation bug.",
+    "blockers": [
+      "Workstation Ollama (100.86.143.93:11434) answers /api/tags and /api/ps but EVERY /api/generate returns {\"error\":\"unexpected EOF\"} \u2014 including a 1.5B model, so it is the runner, not VRAM. No live chat acceptance is possible until it recovers."
+    ],
+    "nextAcceptanceTest": "Once the model host recovers: run the citation pass across TXT/MD/CSV/JSON/code and confirm attribution appears for every grounded turn regardless of whether the reply names the file.",
     "doNotWorkOnYet": [
       "PDF/DOCX extraction (until the text path is fully closed)",
       "Live Source Intelligence (PAUSED_CHECKPOINTED)",
@@ -103,6 +104,9 @@
         "detail": "Hetzner keys are project-scoped with no per-bucket IAM (proven: one key reached fsn1, nbg1, hel1, ash, hil). Real isolation needs a separate project. NOT a blocker to product work.",
         "needsFromOwner": "Create the project + Object Storage credentials + DR bucket in the Hetzner console."
       }
+    ],
+    "IMPLEMENTED_NEEDS_LIVE_PROOF": [
+      "Deterministic source attribution \u2014 the engine emits a `grounding` frame naming the files it put in front of the model; the consumer attributes from that, intersected with the caller library. Replaces `answer.includes(filename)`."
     ]
   },
   "openDefects": [
@@ -120,11 +124,21 @@
       "id": "vision-turn-no-output-240s",
       "symptom": "A vision turn held the local model for 240s and returned zero tokens; failover list contained only the failing model.",
       "evidence": "req_775234782f08d9a87827 \u2014 brain completion_failed, consumer brain_open 240032ms, generation 0ms.",
-      "rootCause": "UNKNOWN, not reproducible.",
-      "status": "OPEN_OPERATIONAL_TARGET",
+      "rootCause": "LIKELY the same workstation Ollama failure \u2014 a generation that never returns. See workstation-ollama-generation-failing.",
+      "status": "LIKELY_EXPLAINED",
       "effort": "MEDIUM",
       "regressionTest": "none",
       "liveAcceptance": "n/a"
+    },
+    {
+      "id": "workstation-ollama-generation-failing",
+      "symptom": "Every model generation on the workstation Ollama returns {\"error\":\"unexpected EOF\"} within ~1s. /api/tags and /api/ps respond normally.",
+      "evidence": "Tested qwen3:8b, qwen2.5vl:7b and qwen2.5-coder:1.5b directly from VM111 \u2014 all identical. qwen2.5vl:7b answered successfully at 22:42 the same evening, so it regressed after that.",
+      "rootCause": "Ollama runner on the workstation, not VRAM (a 1.5B model fails too) and not MigraPilot.",
+      "status": "OPEN_BLOCKS_LIVE_ACCEPTANCE",
+      "effort": "EASY (likely an Ollama restart on the workstation \u2014 needs Bonex, it is his desktop)",
+      "regressionTest": "n/a",
+      "liveAcceptance": "blocked"
     }
   ],
   "driftControl": [
@@ -174,6 +188,18 @@
       "assumption": "A conversation that predates a feature will show its new UI once the feature ships.",
       "disprovedBy": "A pre-fileRefs conversation showed no historical card after detach \u2014 the record was never written for turns stored before M21.",
       "corrected": "Historical cards exist only for turns stored after the feature. Not a regression; older threads have no record to render.",
+      "priorityChanged": false
+    },
+    {
+      "assumption": "My brain deploy broke the turn path \u2014 two turns returned no_output straight after it.",
+      "disprovedBy": "Rolled the brain back; turns still failed. Then tested the model host directly: every model returns \"unexpected EOF\" standalone, with MigraPilot out of the picture.",
+      "corrected": "The change was innocent and has been rolled forward. The fault is the workstation Ollama runner.",
+      "priorityChanged": false
+    },
+    {
+      "assumption": "\"Ollama is inactive\" \u2014 read from `systemctl is-active ollama` on VM111.",
+      "disprovedBy": "VM111 has no local Ollama; the model runs on the workstation at 100.86.143.93:11434, which returns HTTP 200.",
+      "corrected": "Measured the wrong host. The same wrong-endpoint pattern as the MinIO disk misread.",
       "priorityChanged": false
     }
   ],

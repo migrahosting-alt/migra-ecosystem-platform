@@ -122,6 +122,13 @@ export interface MissionRecord {
     notes?: string;
     focusFile?: string;
     patch?: string;
+    responseActions?: Array<{
+      id: string;
+      action: string;
+      objective: string;
+      mode: "detect" | "contain" | "eradicate" | "recover" | "escalate";
+      priority: "p1" | "p2" | "p3";
+    }>;
   };
   operator: MissionOperator;
   environment: "dev" | "stage" | "staging" | "prod" | "test";

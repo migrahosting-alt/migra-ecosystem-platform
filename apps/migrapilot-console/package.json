@@ -11,6 +11,7 @@
     "ops:backfill-artifacts": "tsx scripts/backfill-artifacts.ts",
     "smoke:mission": "tsx scripts/smoke-mission.ts",
     "smoke:autonomy": "tsx scripts/smoke-autonomy.ts",
+    "smoke:hids-edr": "tsx scripts/smoke-hids-edr-e2e.ts",
     "smoke:drift": "tsx scripts/smoke-drift.ts",
     "smoke:drift-cause": "tsx scripts/smoke-drift-cause.ts",
     "smoke:proposal": "tsx scripts/smoke-proposal.ts",

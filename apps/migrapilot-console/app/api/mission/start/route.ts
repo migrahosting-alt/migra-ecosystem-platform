@@ -11,6 +11,13 @@ export async function POST(request: Request) {
       notes?: string;
       focusFile?: string;
       patch?: string;
+      responseActions?: Array<{
+        id?: string;
+        action?: string;
+        objective?: string;
+        mode?: "detect" | "contain" | "eradicate" | "recover" | "escalate";
+        priority?: "p1" | "p2" | "p3";
+      }>;
     };
     runnerPolicy?: {
       default?: "auto" | "local" | "server";

@@ -13,7 +13,7 @@ function parseSeedFinding(value: unknown): Finding | null {
     return null;
   }
   const row = value as Record<string, unknown>;
-  if (typeof row.source !== "string" || !["repo", "inventory", "health"].includes(row.source)) {
+  if (typeof row.source !== "string" || !["repo", "inventory", "health", "hids_edr"].includes(row.source)) {
     return null;
   }
   if (typeof row.severity !== "string" || !["info", "warn", "critical"].includes(row.severity)) {

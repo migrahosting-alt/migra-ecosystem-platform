@@ -67,7 +67,7 @@ export const FindingSchema = {
   properties: {
     findingId: { type: "string" },
     ts: { type: "string" },
-    source: { type: "string", enum: ["repo", "inventory", "health"] },
+    source: { type: "string", enum: ["repo", "inventory", "health", "hids_edr"] },
     severity: { type: "string", enum: ["info", "warn", "critical"] },
     title: { type: "string" },
     details: { type: "string" },
@@ -274,7 +274,7 @@ export function normalizeFinding(input: unknown): Finding | null {
   ) {
     return null;
   }
-  if (!["repo", "inventory", "health"].includes(root.source)) {
+  if (!["repo", "inventory", "health", "hids_edr"].includes(root.source)) {
     return null;
   }
   if (!["info", "warn", "critical"].includes(root.severity)) {

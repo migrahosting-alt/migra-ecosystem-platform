@@ -35,7 +35,11 @@ _Last updated: 2026-08-26_
 historical file cards render immediately *and* after reload; deleting a file preserves history and
 stops grounding.
 
-**Live:** consumer `detach-bc990598` · brain `filerefs-bc990598`
+**Live:** consumer `citations-bc990598` · brain `citations-bc990598`
+
+🚨 **BLOCKED:** the workstation Ollama (`100.86.143.93:11434`) answers `/api/tags` but **every**
+generation returns `{"error":"unexpected EOF"}` — a 1.5B model fails too, so it is the runner, not
+VRAM, and not MigraPilot. No live chat acceptance is possible until it recovers.
 **Rollback:** consumer `filecard2-` → `filecard-` → `docrefusal-` → `refusalpersist-` → `bc99059`
 
 **Next acceptance test:** citation consistency across TXT/MD/CSV/JSON/code — is the missing citation
@@ -74,7 +78,8 @@ from Bonex. **Not a product blocker.**
 
 | Defect | Effort | Status |
 |---|---|---|
-| Citation shown for TXT, absent for Markdown, same path | MEDIUM | Recorded, not chased |
+| Citation shown for TXT, absent for Markdown | MEDIUM | **Fixed** — attribution now comes from the engine, not the prose. Needs live proof. |
+| Workstation Ollama fails every generation | EASY | Blocks live acceptance — likely an Ollama restart |
 | Vision turn held 240s and returned nothing | MEDIUM | Operational target, not reproducible |
 
 ---

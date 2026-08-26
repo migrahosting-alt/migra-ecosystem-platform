@@ -81,15 +81,18 @@ function titleFrom(prompt: string): string {
  * the correct direction to be wrong in. A fabricated citation is a false claim
  * about provenance; a missing one is merely incomplete.
  */
-async function citedFiles(answer: string): Promise<string[]> {
+export async function attributedFiles(groundedPaths: readonly string[]): Promise<string[]> {
+  if (groundedPaths.length === 0) return []
   const owned = await listFiles().catch(() => [])
   if (owned.length === 0) return []
 
-  const found = owned
-    .filter((file) => answer.includes(file.name))
-    .map((file) => file.name)
-
-  return [...new Set(found)]
+  /*
+   * The engine reports index paths; the library is keyed by name. Matched on the
+   * basename and then INTERSECTED with the caller's own files, so a path that is
+   * not one of their documents can never be surfaced as a source.
+   */
+  const grounded = new Set(groundedPaths.map((p) => p.split('/').pop() ?? p))
+  return [...new Set(owned.filter((file) => grounded.has(file.name)).map((file) => file.name))]
 }
 
 /**
@@ -785,6 +788,8 @@ export async function POST(request: Request): Promise<Response> {
 
       /** Set when the turn is stopped deliberately, so nothing generic follows. */
       let refused = false
+      /** Files the ENGINE said it grounded this turn in — not parsed from prose. */
+      let groundedFiles: string[] = []
 
       try {
         for await (const frame of opened.frames) {
@@ -897,6 +902,23 @@ export async function POST(request: Request): Promise<Response> {
               }
               break
             }
+            case 'grounding': {
+              /*
+               * WHICH FILES THIS ANSWER WAS BUILT FROM — stated by the engine.
+               *
+               * Attribution used to be derived by checking whether the model's
+               * prose contained a filename, which made provenance a property of
+               * WORDING: the same grounded path showed a source for one document
+               * and none for another purely because one reply mentioned the name.
+               * The engine knows exactly which chunks it put in front of the
+               * model, so it says so and this records it.
+               */
+              const files = (frame.data as { files?: unknown })?.files
+              if (Array.isArray(files)) {
+                groundedFiles = files.filter((f): f is string => typeof f === 'string' && f.length > 0)
+              }
+              break
+            }
             case 'route': {
               /*
                * REFUSE BEFORE THE GPU IS SPENT, not after.
@@ -951,7 +973,13 @@ export async function POST(request: Request): Promise<Response> {
       trace.mark('generation')
 
       // Attribution, verified against the library rather than trusted.
-      const sources = grounded && completed ? await citedFiles(answer) : []
+      /*
+       * DETERMINISTIC, not model-dependent. Every file the engine reported as
+       * grounding this turn is attributed, whether or not the reply happened to
+       * name it — and intersected with the caller's own library so a path from
+       * anywhere else can never be presented as one of their documents.
+       */
+      const sources = grounded && completed ? await attributedFiles(groundedFiles) : []
 
       /*
        * USEFUL OUTPUT IS TEXT THE USER RECEIVED, not a successful save.

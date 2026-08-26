@@ -1313,3 +1313,36 @@ test('an ordinary question with no files attached is still answered', async () =
   globalThis.fetch = original
   resetAuthPort()
 })
+
+test('attribution is the ENGINE\'s report, intersected with the caller\'s own library', async () => {
+  /*
+   * THE DEFECT. Attribution was derived with `answer.includes(file.name)`, so
+   * provenance was a property of WORDING: a grounded TXT answer that mentioned
+   * its filename showed "From your files", and an equally grounded Markdown
+   * answer that did not mention it showed nothing. Same path, same evidence,
+   * different trust signal.
+   *
+   * Tested directly rather than through the turn, because the mock harness has
+   * no approved index and so can never reach a grounded turn — a test that
+   * passed there would be passing for the wrong reason.
+   */
+  const { attributedFiles } = await import('./route')
+  const { saveFile } = await import('@/server/files/storage')
+  setAuthPort(portWith(session))
+  await saveFile('attributed-runbook.md', new TextEncoder().encode('# Runbook').buffer as ArrayBuffer)
+
+  // The engine reports index PATHS; the library is keyed by name.
+  assert.deepEqual(
+    await attributedFiles(['some/index/root/attributed-runbook.md']),
+    ['attributed-runbook.md'],
+    'attributed although no prose was consulted at all',
+  )
+
+  // A path that is not one of the caller's documents can never be surfaced.
+  assert.deepEqual(await attributedFiles(['/etc/passwd', 'someone-elses.md']), [])
+
+  // Nothing grounded means nothing attributed — no speculative credit.
+  assert.deepEqual(await attributedFiles([]), [])
+
+  resetAuthPort()
+})

@@ -330,7 +330,8 @@ async function processQueueItem(
     mission = await startMissionViaApi({
       goal: template.goal,
       context: {
-        notes: template.context?.notes
+        notes: template.context?.notes,
+        responseActions: template.context?.responseActions
       },
       runnerPolicy: template.runnerPolicy,
       environment: template.environment,

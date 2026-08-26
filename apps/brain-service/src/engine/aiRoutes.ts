@@ -1061,6 +1061,26 @@ async function streamChat(
     }
   };
 
+  /*
+   * WHICH FILES THIS ANSWER WAS BUILT FROM, stated by the engine.
+   *
+   * The consumer used to derive its "From your files" attribution by checking
+   * whether the model's prose happened to contain a filename. That made
+   * provenance a property of WORDING: the same grounded turn showed a source for
+   * one document and none for another, purely because one answer mentioned the
+   * name and the other did not. Attribution is something we KNOW — these are the
+   * chunks that were put in front of the model — so it is reported rather than
+   * inferred from the reply.
+   *
+   * Emitted once, before any model call, so failover cannot change it and a
+   * cancelled turn still told the client what it was grounded in.
+   */
+  const groundedIn = [
+    ...new Set((chatRequest.context.retrievedChunks ?? []).map((c) => c.path).filter(Boolean)),
+  ];
+  if (groundedIn.length > 0) send('grounding', { files: groundedIn });
+
+
   // The engine's chosen prior context, surfaced to the client as a sanitized
   // diagnostic BEFORE any token (explainable retrieval).
   if (memory.contextDiagnostics) send('context', memory.contextDiagnostics);

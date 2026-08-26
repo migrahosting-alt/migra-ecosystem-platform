@@ -34,7 +34,7 @@ export interface AutonomyConfig {
 export interface Finding {
   findingId: string;
   ts: string;
-  source: "repo" | "inventory" | "health";
+  source: "repo" | "inventory" | "health" | "hids_edr";
   severity: "info" | "warn" | "critical";
   title: string;
   details: string;
@@ -140,6 +140,13 @@ export interface MissionTemplateResult {
   goal: string;
   context?: {
     notes?: string;
+    responseActions?: Array<{
+      id: string;
+      action: string;
+      objective: string;
+      mode: "detect" | "contain" | "eradicate" | "recover" | "escalate";
+      priority: "p1" | "p2" | "p3";
+    }>;
   };
   runnerPolicy: {
     default: AutonomyRunnerTarget;

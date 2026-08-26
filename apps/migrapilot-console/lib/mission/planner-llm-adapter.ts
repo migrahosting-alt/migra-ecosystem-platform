@@ -20,10 +20,18 @@ const PILOT_API_BASE = process.env.PILOT_API_URL ?? process.env.NEXT_PUBLIC_PILO
 
 export const pilotLlmPlannerAdapter: LlmPlannerAdapter = async (input) => {
   try {
+    const responseActions = input.context?.responseActions ?? [];
+    const responseActionSummary = responseActions.length
+      ? `Response actions:\n${responseActions
+          .map((item) => `- [${item.priority}] ${item.mode}: ${item.action} — ${item.objective}`)
+          .join("\n")}`
+      : "";
+
     const planPrompt = [
       `Generate a mission task graph for the following goal.`,
       `Goal: ${input.goal}`,
       input.context?.notes ? `Context: ${input.context.notes}` : "",
+      responseActionSummary,
       `Environment: ${input.environment}`,
       ``,
       `Return ONLY a JSON object with this shape:`,

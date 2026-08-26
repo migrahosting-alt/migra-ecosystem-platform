@@ -38,7 +38,7 @@ interface AutonomyStatus {
 interface Finding {
   findingId: string;
   ts: string;
-  source: "repo" | "inventory" | "health";
+  source: "repo" | "inventory" | "health" | "hids_edr";
   severity: "info" | "warn" | "critical";
   title: string;
   details: string;
