@@ -1,10 +1,9 @@
 import 'server-only'
 
-import { createHash, randomUUID } from 'node:crypto'
-import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { createHash } from 'node:crypto'
 
 import { requireSession } from '@/server/auth'
+import { mediaStorage } from '@/server/media'
 import { deriveBrainScope } from '@/server/tenancy/ownerScope'
 import { downscaleForModel, MODEL_IMAGE_MAX_EDGE } from './downscale'
 import { acceptImage, isImageId, type AcceptedImage, type ImageMime } from './images'
@@ -28,8 +27,6 @@ import { acceptImage, isImageId, type AcceptedImage, type ImageMime } from './im
  * and nothing else, using the SAME bucket derivation as the text library so both
  * belong to one recognisable owner.
  */
-
-const imageRoot = (): string => process.env.IMAGE_ROOT ?? '/var/lib/migrapilot/images'
 
 /** Images are bounded independently of documents. */
 export const MAX_IMAGE_LIBRARY_BYTES = 200 * 1024 * 1024
@@ -96,17 +93,35 @@ export class ImageRejected extends Error {
   }
 }
 
-async function imageDirectory(): Promise<{ dir: string; owner: string }> {
+/**
+ * The key PREFIX this caller's media lives under, and the scope that owns it.
+ *
+ * A prefix, not a directory: the store no longer knows whether bytes are on this
+ * machine or in an object store, and a caller that could see a path would
+ * eventually depend on one.
+ *
+ * TENANCY IS DERIVED, NEVER PASSED. The bucket comes from the verified session
+ * and nothing else, using the SAME derivation as the text library so both belong
+ * to one recognisable owner.
+ */
+async function imageScope(): Promise<{ prefix: string; owner: string }> {
   const session = await requireSession()
   const scope = deriveBrainScope(session)
+  /*
+   * THE PREFIX IS THE EXISTING BUCKET, UNCHANGED.
+   *
+   * A tidier key shape — `users/<bucket>/images/...` — was tempting and wrong:
+   * it would have orphaned every image already stored, because the local backend
+   * maps a key straight onto a path. Re-keying is a MIGRATION with a copy and a
+   * checksum, not a side effect of introducing an interface. This step changes
+   * the seam and nothing else.
+   */
   const bucket = createHash('sha256').update(scope.owner).digest('hex').slice(0, 32)
-  const dir = join(imageRoot(), bucket)
-  await mkdir(dir, { recursive: true, mode: 0o700 })
-  return { dir, owner: scope.owner }
+  return { prefix: bucket, owner: scope.owner }
 }
 
 /** Metadata lives beside the bytes, named from the same canonical id. */
-const metaPathFor = (dir: string, id: string) => join(dir, `${id}.meta.json`)
+const metaKeyFor = (prefix: string, id: string) => `${prefix}/${id}.meta.json`
 
 const extensionFor = (mime: ImageMime) => (mime === 'image/jpeg' ? 'jpg' : mime.replace('image/', ''))
 
@@ -118,24 +133,14 @@ const extensionFor = (mime: ImageMime) => (mime === 'image/jpeg' ? 'jpg' : mime.
  * serving 1024px images long after someone decided the cap should be 1568, and
  * the stale ones would be indistinguishable from correct ones.
  */
-const modelPathFor = (dir: string, id: string, mime: ImageMime) =>
-  join(dir, `${id}.model-${MODEL_IMAGE_MAX_EDGE}.${extensionFor(mime)}`)
+const modelKeyFor = (prefix: string, id: string, mime: ImageMime) =>
+  `${prefix}/${id}.model-${MODEL_IMAGE_MAX_EDGE}.${extensionFor(mime)}`
 
-/** Atomic like every other write here: a reader never sees a half-written file. */
-async function writeAtomic(dir: string, target: string, bytes: Buffer): Promise<void> {
-  const temp = join(dir, `.tmp-${randomUUID()}`)
-  try {
-    await writeFile(temp, bytes, { mode: 0o600 })
-    await rename(temp, target)
-  } catch (error) {
-    await rm(temp, { force: true })
-    throw error
-  }
-}
 
-async function readMeta(dir: string, id: string): Promise<StoredImage | null> {
+async function readMeta(prefix: string, id: string): Promise<StoredImage | null> {
   try {
-    const raw = await readFile(metaPathFor(dir, id), 'utf8')
+    const raw = (await mediaStorage().read(metaKeyFor(prefix, id)))?.toString('utf8')
+    if (raw === undefined) return null
     const parsed = JSON.parse(raw) as StoredImage
     return parsed.id === id ? parsed : null
   } catch {
@@ -144,12 +149,12 @@ async function readMeta(dir: string, id: string): Promise<StoredImage | null> {
 }
 
 export async function listImages(): Promise<StoredImage[]> {
-  const { dir } = await imageDirectory()
-  const entries = await readdir(dir).catch(() => [] as string[])
+  const { prefix } = await imageScope()
+  const entries = (await mediaStorage().list(prefix)).map((key) => key.slice(prefix.length + 1))
   const images: StoredImage[] = []
   for (const entry of entries) {
     if (!entry.endsWith('.meta.json')) continue
-    const meta = await readMeta(dir, entry.slice(0, -'.meta.json'.length))
+    const meta = await readMeta(prefix, entry.slice(0, -'.meta.json'.length))
     if (meta) images.push(meta)
   }
   return images.sort((a, b) => b.createdAt - a.createdAt)
@@ -182,9 +187,9 @@ export async function saveImage(
   if (!decision.ok) throw new ImageRejected(decision.rejection.code, decision.rejection.message)
 
   const image: AcceptedImage = decision.image
-  const { dir, owner } = await imageDirectory()
+  const { prefix, owner } = await imageScope()
 
-  const existing = await readMeta(dir, image.id)
+  const existing = await readMeta(prefix, image.id)
   if (existing) {
     /*
      * Ids are content-addressed, so re-generating a byte-identical image
@@ -195,7 +200,7 @@ export async function saveImage(
      */
     if (provenance && !existing.provenance) {
       const next: StoredImage = { ...existing, provenance }
-      await writeAtomic(dir, metaPathFor(dir, image.id), Buffer.from(JSON.stringify(next))).catch(
+      await mediaStorage().put(metaKeyFor(prefix, image.id), Buffer.from(JSON.stringify(next))).catch(
         () => undefined,
       )
       return next
@@ -214,8 +219,7 @@ export async function saveImage(
     )
   }
 
-  const finalPath = join(dir, image.storedName)
-  const tempPath = join(dir, `.tmp-${randomUUID()}`)
+  const bytesKey = `${prefix}/${image.storedName}`
   const meta: StoredImage = {
     id: image.id,
     mime: image.mime,
@@ -229,13 +233,11 @@ export async function saveImage(
     ...(provenance ? { provenance } : {}),
   }
 
-  try {
-    await writeFile(tempPath, bytes, { mode: 0o600 })
-    await rename(tempPath, finalPath)
-  } catch (error) {
-    await rm(tempPath, { force: true })
-    throw error
-  }
+  /*
+   * The hash the record claims is verified by the storage layer BEFORE the write,
+   * so metadata can never vouch for bytes that are not these.
+   */
+  await mediaStorage().put(bytesKey, Buffer.from(bytes), { sha256: image.sha256 })
 
   /*
    * The model's copy is derived HERE, not on the chat turn.
@@ -253,7 +255,7 @@ export async function saveImage(
   try {
     const forModel = downscaleForModel(Buffer.from(bytes), image.mime, image.width, image.height)
     if (!forModel.original) {
-      await writeAtomic(dir, modelPathFor(dir, image.id, image.mime), forModel.bytes)
+      await mediaStorage().put(modelKeyFor(prefix, image.id, image.mime), forModel.bytes)
       meta.modelSha256 = createHash('sha256').update(forModel.bytes).digest('hex')
       meta.modelBytes = forModel.bytes.byteLength
     }
@@ -262,16 +264,14 @@ export async function saveImage(
   }
 
   try {
-    const metaTemp = join(dir, `.tmp-${randomUUID()}`)
-    await writeFile(metaTemp, JSON.stringify(meta), { mode: 0o600 })
-    await rename(metaTemp, metaPathFor(dir, image.id))
+    await mediaStorage().put(metaKeyFor(prefix, image.id), Buffer.from(JSON.stringify(meta)))
   } catch (error) {
     /*
      * Bytes without metadata is an image nothing can describe or authorize, so
      * the partial artifact is removed rather than left to be discovered later as
      * an untracked file in someone's namespace.
      */
-    await rm(finalPath, { force: true })
+    await mediaStorage().delete(bytesKey).catch(() => false)
     throw error
   }
 
@@ -281,11 +281,13 @@ export async function saveImage(
 /** Bytes for a stored image, or null. Shape-checked before any path is built. */
 export async function readImageBytes(id: string): Promise<{ meta: StoredImage; bytes: Buffer } | null> {
   if (!isImageId(id)) return null
-  const { dir } = await imageDirectory()
-  const meta = await readMeta(dir, id)
+  const { prefix } = await imageScope()
+  const meta = await readMeta(prefix, id)
   if (!meta) return null
 
-  const bytes = await readFile(join(dir, `${id}.${extensionFor(meta.mime)}`)).catch(() => null)
+  const bytes = await mediaStorage()
+    .read(`${prefix}/${id}.${extensionFor(meta.mime)}`, { expectSha256: meta.sha256 })
+    .catch(() => null)
   if (!bytes) return null
 
   /*
@@ -318,12 +320,14 @@ export async function readModelImage(
   id: string,
 ): Promise<{ meta: StoredImage; bytes: Buffer; downscaled: boolean; fromCache: boolean } | null> {
   if (!isImageId(id)) return null
-  const { dir } = await imageDirectory()
-  const meta = await readMeta(dir, id)
+  const { prefix } = await imageScope()
+  const meta = await readMeta(prefix, id)
   if (!meta) return null
 
   if (meta.modelSha256) {
-    const cached = await readFile(modelPathFor(dir, id, meta.mime)).catch(() => null)
+    const cached = await mediaStorage()
+      .read(modelKeyFor(prefix, id, meta.mime), { expectSha256: meta.modelSha256 })
+      .catch(() => null)
     if (cached && createHash('sha256').update(cached).digest('hex') === meta.modelSha256) {
       return { meta, bytes: cached, downscaled: true, fromCache: true }
     }
@@ -337,13 +341,13 @@ export async function readModelImage(
   const forModel = downscaleForModel(original.bytes, meta.mime, meta.width, meta.height)
   if (!forModel.original) {
     try {
-      await writeAtomic(dir, modelPathFor(dir, id, meta.mime), forModel.bytes)
+      await mediaStorage().put(modelKeyFor(prefix, id, meta.mime), forModel.bytes)
       const next: StoredImage = {
         ...meta,
         modelSha256: createHash('sha256').update(forModel.bytes).digest('hex'),
         modelBytes: forModel.bytes.byteLength,
       }
-      await writeAtomic(dir, metaPathFor(dir, id), Buffer.from(JSON.stringify(next)))
+      await mediaStorage().put(metaKeyFor(prefix, id), Buffer.from(JSON.stringify(next)))
     } catch {
       // The answer does not depend on the cache being written.
     }
@@ -362,15 +366,15 @@ export async function readModelImage(
  */
 export async function deleteImage(id: string): Promise<boolean> {
   if (!isImageId(id)) return false
-  const { dir } = await imageDirectory()
-  const meta = await readMeta(dir, id)
+  const { prefix } = await imageScope()
+  const meta = await readMeta(prefix, id)
   if (!meta) return false
 
-  await rm(join(dir, `${id}.${extensionFor(meta.mime)}`), { force: true })
+  await mediaStorage().delete(`${prefix}/${id}.${extensionFor(meta.mime)}`).catch(() => false)
   // The derived copy goes with it. Leaving it behind would keep a picture of a
   // deleted image on disk, which is not what "delete" means to the person asking.
-  await rm(modelPathFor(dir, id, meta.mime), { force: true })
-  await rm(metaPathFor(dir, id), { force: true })
+  await mediaStorage().delete(modelKeyFor(prefix, id, meta.mime)).catch(() => false)
+  await mediaStorage().delete(metaKeyFor(prefix, id)).catch(() => false)
   return true
 }
 
@@ -385,17 +389,15 @@ export async function imageUsage(): Promise<{ count: number; bytes: number; maxB
   }
 }
 
-/** Present so a stray temp file from a crashed write cannot accumulate forever. */
+/**
+ * Present so a stray artifact from a crashed write cannot accumulate forever.
+ *
+ * The storage layer now hides in-flight writes from `list` entirely — a
+ * temporary is not an object — so there is nothing here for the local backend to
+ * find. It stays because an object store can still leave an incomplete multipart
+ * upload behind, and that is the same problem wearing different clothes.
+ */
 export async function sweepTemporaries(olderThanMs = 60 * 60 * 1000): Promise<number> {
-  const { dir } = await imageDirectory()
-  const entries = await readdir(dir).catch(() => [] as string[])
-  let removed = 0
-  for (const entry of entries) {
-    if (!entry.startsWith('.tmp-')) continue
-    const info = await stat(join(dir, entry)).catch(() => null)
-    if (!info || Date.now() - info.mtimeMs < olderThanMs) continue
-    await rm(join(dir, entry), { force: true })
-    removed += 1
-  }
-  return removed
+  const { prefix } = await imageScope()
+  return mediaStorage().sweepIncomplete(prefix, olderThanMs)
 }
