@@ -1,6 +1,7 @@
 import 'server-only'
 
 import { DualReadMediaStorage, type StorageHealthEvent } from './dualReadMediaStorage'
+import { recordMediaHealth } from './healthCounters'
 import { LocalMediaStorage } from './localMediaStorage'
 import { ObjectMediaStorage } from './objectMediaStorage'
 import type { MediaStorage } from './mediaStorage'
@@ -9,6 +10,7 @@ export * from './mediaStorage'
 export { LocalMediaStorage } from './localMediaStorage'
 export { ObjectMediaStorage } from './objectMediaStorage'
 export { DualReadMediaStorage } from './dualReadMediaStorage'
+export { mediaHealthSnapshot, recordMediaHealth, flushMediaHealth } from './healthCounters'
 
 /**
  * The storage this deployment uses.
@@ -34,6 +36,8 @@ const mediaRoot = (): string => process.env.IMAGE_ROOT ?? '/var/lib/migrapilot/i
  */
 function reportHealth(event: StorageHealthEvent): void {
   console.info(`migrapilot.media.health ${JSON.stringify(event)}`)
+  // Counted to a file as well, because the log line above is read by nobody.
+  recordMediaHealth(event)
 }
 
 /**

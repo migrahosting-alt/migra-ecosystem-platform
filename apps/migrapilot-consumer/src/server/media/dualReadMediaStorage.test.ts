@@ -150,7 +150,13 @@ test('a delete still succeeds when object storage cannot be reached', async () =
   })
   await local.put(KEY, Buffer.from('x'))
   assert.equal(await dual.delete(KEY), true)
-  assert.equal(events.some((e) => e.kind === 'error'), true)
+  /*
+   * Reported as `delete-failed` rather than a generic `error`, because the alert
+   * that fires on it is different: an orphaned copy left in object storage would
+   * come back the moment reads cut over — a deletion that silently undid itself.
+   */
+  assert.equal(events.some((e) => e.kind === 'delete-failed'), true)
+  assert.equal(events.some((e) => e.kind === 'error'), false, 'the generic bucket must not also catch it')
 })
 
 test('local remains the authority for what exists', async () => {

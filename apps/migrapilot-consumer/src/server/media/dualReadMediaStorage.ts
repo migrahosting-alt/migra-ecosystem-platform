@@ -26,7 +26,13 @@ import type { MediaStat, MediaStorage, PutOptions, ReadOptions } from './mediaSt
  */
 
 export interface StorageHealthEvent {
-  kind: 'fallback' | 'mismatch' | 'error'
+  /*
+   * The kinds are distinct because the ALERTS are distinct. A fallback is
+   * routine during the staged phase; a failed write is a user losing their
+   * picture. Collapsing both into "error" would force whoever is paged to open
+   * the logs to find out whether anything actually broke.
+   */
+  kind: 'fallback' | 'mismatch' | 'error' | 'write-failed' | 'delete-failed'
   key: string
   detail?: string
 }
@@ -87,7 +93,18 @@ export class DualReadMediaStorage implements MediaStorage {
    * happened quietly, which is the thing the staged plan exists to prevent.
    */
   async put(key: string, bytes: Buffer, options?: PutOptions): Promise<void> {
-    return this.options.local.put(key, bytes, options)
+    try {
+      return await this.options.local.put(key, bytes, options)
+    } catch (error) {
+      // Counted and re-thrown: the caller still fails, but a write that failed
+      // is the loudest signal this storage produces and must not be invisible.
+      this.health({
+        kind: 'write-failed',
+        key,
+        detail: error instanceof Error ? error.message : String(error),
+      })
+      throw error
+    }
   }
 
   /**
@@ -98,13 +115,23 @@ export class DualReadMediaStorage implements MediaStorage {
    * cut over, which is a deletion that silently undid itself.
    */
   async delete(key: string): Promise<boolean> {
-    const removedLocally = await this.options.local.delete(key)
+    let removedLocally: boolean
+    try {
+      removedLocally = await this.options.local.delete(key)
+    } catch (error) {
+      this.health({
+        kind: 'delete-failed',
+        key,
+        detail: error instanceof Error ? error.message : String(error),
+      })
+      throw error
+    }
     try {
       await this.options.object.delete(key)
     } catch (error) {
       // The user's delete succeeded where it counts. The orphan is reported
       // rather than raised, so reconciliation can clean it up later.
-      this.health({ kind: 'error', key, detail: `object copy not removed: ${error instanceof Error ? error.message : error}` })
+      this.health({ kind: 'delete-failed', key, detail: `object copy not removed: ${error instanceof Error ? error.message : error}` })
     }
     return removedLocally
   }
