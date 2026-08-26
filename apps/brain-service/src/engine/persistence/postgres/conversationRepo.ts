@@ -85,6 +85,9 @@ export function rowToMessage(r: Record<string, unknown>): Message {
     createdAt: num(r.created_at),
     durable: Boolean(r.durable),
     ...(optStr(r.supersedes_id) ? { supersedesId: String(r.supersedes_id) } : {}),
+    ...(typeof r.file_refs === 'string' && r.file_refs.length > 0
+      ? { fileRefs: safeJsonArray(r.file_refs) }
+      : {}),
     ...(typeof r.image_refs === 'string' && r.image_refs.length > 0
       ? { imageRefs: safeJsonArray(r.image_refs) }
       : {}),
@@ -173,8 +176,8 @@ export async function saveMessage(client: PoolClient, m: Message, scope: ScopedR
   await client.query(
     `INSERT INTO conversation_messages
        (id, conversation_id, owner_scope, workspace_scope, role, content, status,
-        request_id, model_id, provider_id, created_at, durable, supersedes_id, seq, image_refs)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+        request_id, model_id, provider_id, created_at, durable, supersedes_id, seq, image_refs, file_refs)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
      ON CONFLICT (id) DO NOTHING`,
     [
       m.id, m.conversationId, scope.ownerScope, scope.workspaceScope, m.role, m.content, m.status,
@@ -183,6 +186,7 @@ export async function saveMessage(client: PoolClient, m: Message, scope: ScopedR
       // Refs, never bytes: the transcript stays small and the picture is fetched
       // by id when the message is rendered.
       m.imageRefs === undefined ? null : JSON.stringify(m.imageRefs),
+      m.fileRefs === undefined ? null : JSON.stringify(m.fileRefs),
     ],
   );
 }

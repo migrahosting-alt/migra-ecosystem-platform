@@ -17,6 +17,14 @@ import type { ConversationMessage } from '@/server/brain/contracts'
 
 export const dynamic = 'force-dynamic'
 
+/** File names a message recorded, filtered at the last hop before the browser. */
+const fileRefs = (message: { fileRefs?: unknown }): string[] =>
+  Array.isArray(message.fileRefs)
+    ? (message.fileRefs as unknown[]).filter(
+        (f): f is string => typeof f === 'string' && f.trim().length > 0 && !/[\\/]/.test(f),
+      )
+    : []
+
 export async function GET(
   _request: Request,
   context: { params: Promise<{ id: string }> },
@@ -100,6 +108,16 @@ export async function GET(
          * filename — which a user reads as "the attachment is there but broken".
          */
         ...(artifactRefs(message).length ? { imageRefs: artifactRefs(message) } : {}),
+        /*
+         * The DOCUMENTS this turn carried, from the message's own record.
+         *
+         * The comment above is the warning this line exists because of: the
+         * allowlist drops anything it does not name, and a file that grounded an
+         * answer left no trace on the turn that attached it. Names only, and any
+         * path separator is refused here rather than rendered — a transcript
+         * should never hand the browser something shaped like a path.
+         */
+        ...(fileRefs(message).length ? { fileRefs: fileRefs(message) } : {}),
       })),
   })
 }

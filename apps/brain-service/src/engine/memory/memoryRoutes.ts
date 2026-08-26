@@ -165,7 +165,7 @@ export function registerMemoryRoutes(app: FastifyInstance, store: ConversationSt
     return { ok: true };
   });
 
-  app.post<{ Params: { id: string }; Body: { role?: string; content?: string; status?: string; imageRefs?: unknown } }>(
+  app.post<{ Params: { id: string }; Body: { role?: string; content?: string; status?: string; imageRefs?: unknown; fileRefs?: unknown } }>(
     '/api/ai/conversations/:id/messages',
     async (request, reply) => {
       const scope = scopeFrom(request);
@@ -197,9 +197,24 @@ export function registerMemoryRoutes(app: FastifyInstance, store: ConversationSt
               (r): r is string => typeof r === 'string' && /^img_[0-9a-f]{32}$/.test(r),
             )
           : [];
+        /*
+         * THE DOCUMENTS THIS TURN CARRIED, on the message for the same reason.
+         *
+         * A file grounded an answer and left no trace on the turn that attached
+         * it, so the transcript could only be derived from the conversation's
+         * ACTIVE set — and detaching a file would have erased it from the
+         * message that asked. A name, not a path: anything with a separator did
+         * not come from a file library.
+         */
+        const files = Array.isArray(request.body?.fileRefs)
+          ? (request.body.fileRefs as unknown[]).filter(
+              (f): f is string => typeof f === 'string' && f.trim().length > 0 && !/[\\/]/.test(f),
+            )
+          : [];
         const msg = await store.appendMessage(request.params.id, scope, {
           role: role as MessageRole, content: clean, status,
           ...(refs.length > 0 ? { imageRefs: refs } : {}),
+          ...(files.length > 0 ? { fileRefs: files } : {}),
         });
         // `off` conversations retain nothing → null; report that honestly.
         return { ok: true, stored: msg !== null, message: msg };

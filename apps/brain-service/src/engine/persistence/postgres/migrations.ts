@@ -1051,6 +1051,27 @@ ALTER TABLE conversation_messages ADD COLUMN IF NOT EXISTS image_refs TEXT;
  * `copied` and `verified` are distinct states on purpose: bytes that arrived are
  * not bytes proven to be retrievable and intact.
  */
+/**
+ * Which DOCUMENTS a particular message carried.
+ *
+ * The same distinction M19 draws for pictures, for the same reason and after the
+ * same defect. `conversations.grounding_files` is the ACTIVE CONTEXT — what a
+ * follow-up may still be answered from. This is the immutable RECORD of what was
+ * attached to one turn.
+ *
+ * Without it the transcript could only be derived from today's active set, and a
+ * user who detached a file would watch it vanish from the message that asked
+ * about it — a conversation quietly disagreeing with what actually produced its
+ * answers. Verified in the live product: a Markdown runbook grounded an answer
+ * correctly and left no trace whatsoever on the turn that attached it.
+ *
+ * Refs only. The bytes live in the user's library; the name is what still
+ * resolves tomorrow.
+ */
+const M21_MESSAGE_FILES = `
+ALTER TABLE conversation_messages ADD COLUMN IF NOT EXISTS file_refs TEXT;
+`;
+
 const M20_MEDIA_MIGRATIONS = `
 CREATE TABLE IF NOT EXISTS media_migrations (
   id                    TEXT PRIMARY KEY,
@@ -1128,6 +1149,7 @@ export const MIGRATIONS: readonly Migration[] = [
   { version: 18, name: 'conversation_images', sql: M18_CONVERSATION_IMAGES },
   { version: 19, name: 'message_images', sql: M19_MESSAGE_IMAGES },
   { version: 20, name: 'media_migrations', sql: M20_MEDIA_MIGRATIONS },
+  { version: 21, name: 'message_files', sql: M21_MESSAGE_FILES },
 ];
 
 /** Highest version defined in code. */

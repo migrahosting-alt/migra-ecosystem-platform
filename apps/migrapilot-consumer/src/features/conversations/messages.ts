@@ -23,6 +23,8 @@ export interface WireMessage {
    * transcript rebuilt from today's context is not a history.
    */
   imageRefs?: string[]
+  /** Documents this message actually carried, from the message's OWN record. */
+  fileRefs?: string[]
 }
 
 import { hasDeliverableContent } from '@/lib/turnContent'
@@ -43,6 +45,7 @@ export function toMessage(message: WireMessage, index: number): Message {
         time,
         delivered: true,
         ...(message.imageRefs?.length ? { images: message.imageRefs } : {}),
+        ...(message.fileRefs?.length ? { files: message.fileRefs } : {}),
       }
     : {
         id: message.id ?? `a-${index}`,

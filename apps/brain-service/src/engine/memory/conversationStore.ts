@@ -81,6 +81,16 @@ export interface Message {
    * must not erase it from the message that asked about it.
    */
   imageRefs?: string[];
+  /**
+   * Library file names this message actually carried, in order.
+   *
+   * The same immutable-record role `imageRefs` plays for pictures, and distinct
+   * from `Conversation.groundingFiles`, which is the ACTIVE set a follow-up may
+   * still be answered from. Detaching a document later must not erase it from
+   * the turn that asked about it — a transcript that rewrites itself to match
+   * today's context is not a transcript.
+   */
+  fileRefs?: string[];
 }
 
 export interface SummaryBody {
@@ -486,7 +496,7 @@ export class ConversationStore {
   async appendMessage(
     id: string,
     scope: Scope,
-    msg: { role: MessageRole; content: string; status: MessageStatus; requestId?: string; modelId?: string; providerId?: string; supersedesId?: string; imageRefs?: string[] },
+    msg: { role: MessageRole; content: string; status: MessageStatus; requestId?: string; modelId?: string; providerId?: string; supersedesId?: string; imageRefs?: string[]; fileRefs?: string[] },
   ): Promise<Message | null> {
     const c = this.getConversation(id, scope);
     if (!c) return null;
@@ -514,6 +524,21 @@ export class ConversationStore {
        */
       ...(msg.imageRefs?.length
         ? { imageRefs: msg.imageRefs.filter((r) => /^img_[0-9a-f]{32}$/.test(r)).slice(0, 8) }
+        : {}),
+      /*
+       * File names, bounded and sanitised for the same reason.
+       *
+       * A document ref is a NAME rather than a content hash, so the check is
+       * different: anything with a path separator did not come from a file
+       * library and must never be written into a transcript that a renderer will
+       * later turn into a link.
+       */
+      ...(msg.fileRefs?.length
+        ? {
+            fileRefs: msg.fileRefs
+              .filter((f) => typeof f === 'string' && f.trim().length > 0 && !/[\\/]/.test(f))
+              .slice(0, 12),
+          }
         : {}),
       createdAt: this.now(),
       durable: c.memoryMode === 'durable',

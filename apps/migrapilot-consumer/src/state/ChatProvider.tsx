@@ -714,6 +714,14 @@ export function ChatProvider({ children }: { children: ReactNode }) {
              * it.
              */
             ...(options?.images?.length ? { images: options.images } : {}),
+            /*
+             * And the documents, for the same reason and found the same way: the
+             * card appeared only after a reload, because the durable record was
+             * written while the turn on screen was built from the composer's own
+             * state. A transcript that needs refreshing to show what was attached
+             * is one the user cannot trust in the moment they are reading it.
+             */
+            ...(options?.attachments?.length ? { files: options.attachments } : {}),
           },
         ],
       }
@@ -736,6 +744,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         // The refs travel with the turn on screen too, so the picture stays
         // beside the question instead of disappearing the moment it is sent.
         ...(options?.images?.length ? { images: options.images } : {}),
+        ...(options?.attachments?.length ? { files: options.attachments } : {}),
       }
 
       setConversations((current) =>

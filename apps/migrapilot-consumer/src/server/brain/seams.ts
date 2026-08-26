@@ -62,10 +62,20 @@ export function appendMessage(
    * shows the picture in the composer and nowhere on the turn that asked.
    */
   imageRefs?: readonly string[],
+  /**
+   * Documents this turn carried, in order.
+   *
+   * Same reason as the images above, found the same way: a Markdown runbook
+   * grounded an answer correctly and left no trace on the turn that attached it,
+   * so the transcript could only be rebuilt from the conversation's ACTIVE set —
+   * which changes when a user detaches a file.
+   */
+  fileRefs?: readonly string[],
 ): Promise<BrainResult<ConversationMessage>> {
   return callBrain(
     { kind: 'appendMessage', conversationId, role, content,
-      ...(imageRefs && imageRefs.length > 0 ? { imageRefs: [...imageRefs] } : {}) },
+      ...(imageRefs && imageRefs.length > 0 ? { imageRefs: [...imageRefs] } : {}),
+      ...(fileRefs && fileRefs.length > 0 ? { fileRefs: [...fileRefs] } : {}) },
     deps,
   )
 }

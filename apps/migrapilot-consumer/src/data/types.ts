@@ -73,6 +73,14 @@ export interface Message {
    * having been embedded in the transcript.
    */
   images?: string[]
+  /**
+   * Library file names this message carried, in order.
+   *
+   * The document counterpart of `images`, and the same immutable record: a file
+   * detached from the conversation later must still appear on the turn that
+   * attached it, or the transcript disagrees with what produced the answer.
+   */
+  files?: string[]
   /** Assistant turns only — renders a call to action beneath the answer. */
   action?: 'scope-review'
   /**

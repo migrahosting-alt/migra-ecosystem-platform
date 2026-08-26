@@ -109,4 +109,13 @@ export interface ConversationMessage {
    * the message that asked about it.
    */
   imageRefs?: string[]
+  /**
+   * Documents this message carried, in order — its own immutable record.
+   *
+   * Distinct from `ConversationSummary.groundingFiles`, which is the ACTIVE set
+   * a follow-up may still be answered from. Detaching a document must not erase
+   * it from the turn that asked about it, and a transcript that rewrites itself
+   * to match today's context is not a transcript.
+   */
+  fileRefs?: string[]
 }

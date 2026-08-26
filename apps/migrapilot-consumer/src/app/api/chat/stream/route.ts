@@ -474,42 +474,6 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   /*
-   * RESOLVED BEFORE THE TURN IS STORED, because this append is the one that
-   * records it. The engine's own in-turn append never runs for a streamed turn —
-   * that request carries no conversationId — so refs that arrive after this line
-   * reach the conversation's active set and never the message.
-   */
-  const storedPrompt = await appendMessage(conversationId, 'user', prompt, { principal }, liveImages)
-  trace.mark('prompt_stored')
-  if (storedPrompt.kind !== 'ok') {
-    await release('persistence_unavailable')
-    // FAIL CLOSED, AND SAY WHY. The prompt is stored before the model runs, so a
-    // storage outage stops the turn here — correctly, since answering a turn whose
-    // prompt was never stored leaves a conversation that cannot be reconstructed.
-    // What was wrong was the explanation, not the refusal.
-    const outage = persistenceOutage(storedPrompt)
-    if (outage) return json(503, outage.error, outage.message)
-    const reason = reasonFor(storedPrompt.kind)
-    return json(storedPrompt.kind === 'not_found' ? 404 : 502, reason.error, reason.message)
-  }
-
-  const durableId = conversationId
-  const summary = (body as { conversationSummary?: unknown })?.conversationSummary
-  const conversationSummary = typeof summary === 'string' && summary.trim() ? summary : undefined
-
-  /*
-   * Whether this turn may be answered from the caller's documents.
-   *
-   * `grounded: true` means the Brain must answer from the caller's APPROVED
-   * index or refuse — it may not fall back to its own priors. Anything else
-   * gets `none`, so an ordinary chat turn never quietly pulls a user's private
-   * documents into an unrelated answer.
-   *
-   * A browser-supplied value is safe here because both modes are strictly
-   * narrowing: neither can widen what the caller may see, and tenancy is still
-   * derived server-side from the session.
-   */
-  /*
    * THE CONVERSATION DECIDES, NOT THE BROWSER.
    *
    * `grounded` used to be read straight off the request body, and the client
@@ -581,6 +545,56 @@ export async function POST(request: Request): Promise<Response> {
    * The library is durable storage; a conversation is grounded by the files
    * ATTACHED TO IT. When those two are confused, the turn must say so rather
    * than answer from nothing.
+   */
+
+  /*
+   * RESOLVED BEFORE THE TURN IS STORED, because this append is the one that
+   * records it. The engine's own in-turn append never runs for a streamed turn —
+   * that request carries no conversationId — so refs that arrive after this line
+   * reach the conversation's active set and never the message.
+   */
+  const storedPrompt = await appendMessage(
+    conversationId, 'user', prompt, { principal }, liveImages,
+    /*
+     * THE DOCUMENTS THIS TURN ACTUALLY ANSWERED FROM, recorded on the message.
+     *
+     * `reconciled.available` rather than what the client attached: a name with no
+     * file behind it grounded nothing, so writing it into the transcript would
+     * claim a source the answer never had. Grounding is reconciled ABOVE this
+     * line for exactly the reason the images are — this append is the record, and
+     * anything resolved after it reaches the conversation's active set and never
+     * the turn that asked.
+     */
+    reconciled.available,
+  )
+  trace.mark('prompt_stored')
+  if (storedPrompt.kind !== 'ok') {
+    await release('persistence_unavailable')
+    // FAIL CLOSED, AND SAY WHY. The prompt is stored before the model runs, so a
+    // storage outage stops the turn here — correctly, since answering a turn whose
+    // prompt was never stored leaves a conversation that cannot be reconstructed.
+    // What was wrong was the explanation, not the refusal.
+    const outage = persistenceOutage(storedPrompt)
+    if (outage) return json(503, outage.error, outage.message)
+    const reason = reasonFor(storedPrompt.kind)
+    return json(storedPrompt.kind === 'not_found' ? 404 : 502, reason.error, reason.message)
+  }
+
+  const durableId = conversationId
+  const summary = (body as { conversationSummary?: unknown })?.conversationSummary
+  const conversationSummary = typeof summary === 'string' && summary.trim() ? summary : undefined
+
+  /*
+   * Whether this turn may be answered from the caller's documents.
+   *
+   * `grounded: true` means the Brain must answer from the caller's APPROVED
+   * index or refuse — it may not fall back to its own priors. Anything else
+   * gets `none`, so an ordinary chat turn never quietly pulls a user's private
+   * documents into an unrelated answer.
+   *
+   * A browser-supplied value is safe here because both modes are strictly
+   * narrowing: neither can widen what the caller may see, and tenancy is still
+   * derived server-side from the session.
    */
   const documentIntent = assessDocumentIntent(prompt, grounded)
   const groundingMode = grounded ? 'approved' : 'none'

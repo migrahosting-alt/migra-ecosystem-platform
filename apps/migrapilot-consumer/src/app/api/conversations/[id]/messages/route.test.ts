@@ -178,3 +178,58 @@ test('a turn with neither text nor images is still withheld', async () => {
 
   restore()
 })
+
+test('a document attached to a turn survives the projection to the browser', async () => {
+  /*
+   * THE DEFECT. A Markdown runbook grounded an answer correctly and left NO
+   * trace on the turn that attached it — the conversation could only be rebuilt
+   * from the CURRENT active grounding set, so detaching the file would have
+   * erased it from the message that asked about it.
+   *
+   * This projection is an allowlist, which is precisely how a field added
+   * upstream gets dropped in silence.
+   */
+  const restore = brainReturns({
+    messages: [
+      { id: 'm1', conversationId: 'c1', role: 'user', content: 'what is the rollback marker?',
+        status: 'complete', createdAt: 1, durable: true, fileRefs: ['fixture-runbook.md'] },
+      { id: 'm2', conversationId: 'c1', role: 'assistant', content: 'VIOLET-ANCHOR-19.',
+        status: 'complete', createdAt: 2, durable: true },
+      { id: 'm3', conversationId: 'c1', role: 'user', content: 'and the command?',
+        status: 'complete', createdAt: 3, durable: true },
+    ],
+  })
+  try {
+    const { status, body } = await reopen()
+    assert.equal(status, 200)
+
+    const asked = body.messages.find((m) => m.content.startsWith('what is the rollback'))! as
+      { fileRefs?: string[] }
+    assert.deepEqual(asked.fileRefs, ['fixture-runbook.md'], 'the turn keeps its own document')
+
+    const later = body.messages.find((m) => m.content.startsWith('and the command'))! as
+      { fileRefs?: string[] }
+    assert.equal(later.fileRefs, undefined, 'a later turn does not inherit it')
+
+    // Asserted on the SERIALIZED body, because that string is all the browser gets.
+    assert.match(JSON.stringify(body), /fixture-runbook\.md/)
+  } finally { restore() }
+})
+
+test('a file ref shaped like a path never reaches the browser', async () => {
+  /*
+   * The transcript must not hand the client something it could turn into a link
+   * to somewhere else. Refused at the last hop, on shape, exactly as image refs
+   * are.
+   */
+  const restore = brainReturns({
+    messages: [
+      { id: 'm1', role: 'user', content: 'q', status: 'complete', createdAt: 1,
+        fileRefs: ['../../etc/passwd', 'notes/secret.md', '', 'runbook.md'] },
+    ],
+  })
+  try {
+    const { body } = await reopen()
+    assert.deepEqual((body.messages[0]! as { fileRefs?: string[] }).fileRefs, ['runbook.md'])
+  } finally { restore() }
+})

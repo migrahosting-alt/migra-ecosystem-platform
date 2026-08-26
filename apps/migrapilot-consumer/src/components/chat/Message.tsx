@@ -1,12 +1,13 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, type ReactElement } from 'react'
 import Link from 'next/link'
 import {
   BarChart3,
   CheckCheck,
   Copy,
   ExternalLink,
+  FileText,
   ImageOff,
   Pause,
   Play,
@@ -153,6 +154,34 @@ function AttachmentGrid({ attachments }: { attachments: Attachment[] }) {
 }
 
 /**
+ * The documents a message carried, shown on the turn that attached them.
+ *
+ * A name and nothing else. The file lives in the user's own library, and the
+ * transcript records WHICH document was used rather than a copy of it — the same
+ * refs-not-bytes rule the pictures follow.
+ */
+function MessageFiles({ names }: { names?: string[] }): ReactElement | null {
+  if (!names?.length) return null
+  return (
+    <ul className="mb-2 flex flex-wrap justify-end gap-1.5" aria-label="Documents attached to this message">
+      {names.map((name) => (
+        <li
+          key={name}
+          className="inline-flex max-w-full items-center gap-1.5 rounded-field border border-hairline bg-white px-2.5 py-1.5"
+        >
+          <FileText className="h-3.5 w-3.5 shrink-0 text-slate-400" strokeWidth={2} aria-hidden />
+          <span className="truncate text-[13px] text-slate-700" title={name}>
+            {name}
+          </span>
+          {/* Named for a screen reader, which cannot see the icon that says "file". */}
+          <span className="sr-only">attached document</span>
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+/**
  * The images a message carries, shown in the transcript.
  *
  * ONE IMPLEMENTATION FOR BOTH TURNS. A user's attachment and a generated picture
@@ -255,6 +284,15 @@ function UserTurn({ message }: { message: Message }) {
           caller's own library — nothing is embedded in the transcript.
         */}
         <MessageImages refs={message.images} align="end" alt="Image attached to this message" />
+
+        {/*
+          THE DOCUMENT STAYS WITH THE QUESTION, for the same reason the picture
+          does. A file grounded an answer and left no visible trace on the turn
+          that attached it, so the conversation could not show which document
+          produced the answer — bad for trust, and worse on reload, where the
+          only remaining record was the conversation's CURRENT active set.
+        */}
+        <MessageFiles names={message.files} />
 
         {message.text && (
           <div className="rounded-2xl rounded-br-md bg-brand-50 px-4.5 py-3.5">

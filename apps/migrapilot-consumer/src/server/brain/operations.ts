@@ -54,7 +54,7 @@ export type BrainOperation =
   | { kind: 'setConversationGrounding'; conversationId: string; files: string[] }
   /** The images a thread is about. Refs only; bytes never persist. */
   | { kind: 'setConversationImages'; conversationId: string; images: string[] }
-  | { kind: 'appendMessage'; conversationId: string; role: MessageRole; content: string; imageRefs?: string[] }
+  | { kind: 'appendMessage'; conversationId: string; role: MessageRole; content: string; imageRefs?: string[]; fileRefs?: string[] }
   // ── turns ────────────────────────────────────────────────────────────────
   | {
       kind: 'chatTurn'
@@ -432,6 +432,9 @@ export function resolveOperation(op: BrainOperation): ResolvedRequest {
           // Refs only, and only when present. This is the write that makes a
           // picture survive a reload on the turn that asked about it.
           ...(op.imageRefs && op.imageRefs.length > 0 ? { imageRefs: op.imageRefs } : {}),
+          // And the documents, for the same reason: without this the file that
+          // grounded the answer is recorded nowhere on the turn that attached it.
+          ...(op.fileRefs && op.fileRefs.length > 0 ? { fileRefs: op.fileRefs } : {}),
         },
       }
 
