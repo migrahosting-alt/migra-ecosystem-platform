@@ -32,6 +32,11 @@ interface ChatContextValue {
   /** Load one conversation's durable messages. Safe to call repeatedly. */
   openConversation: (conversationId: string) => void
   /**
+   * True only once this id has been asked for and the server said it is not
+   * theirs. NOT the same as "not loaded yet".
+   */
+  isMissingConversation: (conversationId: string) => boolean
+  /**
    * Rename a conversation. Resolves false when the server refused it.
    *
    * The rename is applied OPTIMISTICALLY and rolled back on refusal, because the
@@ -153,6 +158,17 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const counter = useRef(0)
   /** Conversations whose messages have already been fetched. */
   const hydrated = useRef(new Set<string>())
+  /**
+   * Ids the server has explicitly said are not this account's.
+   *
+   * Signing in from a conversation landed on the home page even though every
+   * server hop was correct: the page's "unknown id" guard fired while the thread
+   * was still in flight, because the conversation LIST finished first and did not
+   * yet hold it. "Not loaded yet" is not "does not exist", and only the second is
+   * a reason to send someone away from a URL they were just given.
+   */
+  const missing = useRef(new Set<string>())
+  const [, setMissingTick] = useState(0)
   const router = useRouter()
   /*
    * The allowance is READ FROM THE TURN, never counted here.
@@ -256,6 +272,15 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         if (!response.ok) {
           // Allow a later retry rather than pinning the failure permanently.
           hydrated.current.delete(conversationId)
+          /*
+           * A DEFINITIVE 404 is the only thing that means "not yours". A 500 or a
+           * dropped connection means we do not know, and treating those alike
+           * would send someone home over a transient fault.
+           */
+          if (response.status === 404) {
+            missing.current.add(conversationId)
+            setMissingTick((n) => n + 1)
+          }
           return
         }
         const { messages } = (await response.json()) as { messages?: WireMessage[] }
@@ -799,6 +824,11 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     return false
   }, [])
 
+  const isMissingConversation = useCallback(
+    (conversationId: string) => missing.current.has(conversationId),
+    [],
+  )
+
   const deleteConversation = useCallback(async (conversationId: string) => {
     /*
      * REMOVED FROM THE SCREEN ONLY ONCE THE SERVER HAS REMOVED IT.
@@ -833,6 +863,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       },
       pendingIn,
       loading,
+      isMissingConversation,
       startConversation,
       sendMessage,
       detachConversationImage,
@@ -844,6 +875,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       conversations,
       pendingIn,
       loading,
+      isMissingConversation,
       startConversation,
       sendMessage,
       detachConversationImage,

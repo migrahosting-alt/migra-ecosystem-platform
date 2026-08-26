@@ -70,7 +70,7 @@ export function ChatPage() {
   const params = useParams<{ id: string }>()
   const router = useRouter()
   const id = typeof params?.id === 'string' ? params.id : ''
-  const { byId, sendMessage, detachConversationImage, pendingIn, loading, openConversation } = useChat()
+  const { byId, sendMessage, detachConversationImage, pendingIn, loading, openConversation, isMissingConversation } = useChat()
   const allowance = useAnonymousQuota()
   const outOfTurns = isExhausted(allowance)
   const conversation = byId(id)
@@ -114,8 +114,16 @@ export function ChatPage() {
   // known yet. Redirecting on that would bounce every reload straight home
   // before the durable history ever arrived.
   useEffect(() => {
-    if (!loading && !conversation) router.replace('/')
-  }, [loading, conversation, router])
+    /*
+     * ONLY WHEN THE SERVER HAS SAID SO. This used to fire on "the list finished
+     * and this id is not in it", which is a race: the thread's own fetch may
+     * still be in flight. Signing in from a conversation landed on the home page
+     * for exactly that reason — every server hop was correct, the claim moved the
+     * conversation, the callback redirected to it, and this bounced the user off
+     * it a moment later.
+     */
+    if (!loading && !conversation && isMissingConversation(id)) router.replace('/')
+  }, [loading, conversation, id, isMissingConversation, router])
 
   if (!conversation) return null
 
