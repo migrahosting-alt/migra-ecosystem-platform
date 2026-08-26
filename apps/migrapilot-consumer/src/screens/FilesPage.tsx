@@ -238,8 +238,15 @@ export function FilesPage() {
                 }
                 title="Ask about these files"
                 subtitle={
+                  /*
+                   * "Attach", not "ask". The library does not ground a chat on its
+                   * own — a conversation is grounded by the files attached to it,
+                   * and this card previously implied the whole library was already
+                   * readable. A user acted on that and received a confident,
+                   * invented answer about a document nobody had opened.
+                   */
                   index.searchable
-                    ? 'Ask a specific question — answers cite your documents'
+                    ? 'Attach a file in chat, then ask — answers cite the documents you attached'
                     : 'Index your files first'
                 }
                 trailing={<ArrowRight className="h-4 w-4 shrink-0 text-slate-300" />}
@@ -266,7 +273,8 @@ export function FilesPage() {
     >
       <h1 className="text-[26px] leading-tight font-bold tracking-[-0.025em] text-slate-900">Your files</h1>
       <p className="mt-2 text-[15px] leading-relaxed text-slate-500">
-        Upload documents, then index them so the assistant can read them in a chat.
+        Upload and index documents so you can attach them to conversations and ask MigraPilot
+        about them.
       </p>
 
       <div

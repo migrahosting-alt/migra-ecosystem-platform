@@ -516,8 +516,22 @@ test('attaching a file that is NOT in the library grounds nothing and stores not
 
   await collect(await post({ prompt: 'summarise my documents', attachments: ['notes.md'] }))
 
-  const chat = brain.calls.find((call) => call.url.endsWith('/api/ai/chat'))!
-  assert.equal(JSON.parse(String(chat.init.body)).groundingMode, 'none')
+  /*
+   * BEHAVIOUR CHANGED, and the change is the improvement. This used to assert
+   * that the turn still reached the model with `groundingMode: 'none'` — an
+   * ungrounded answer to "summarise my documents". That is now refused before
+   * the model is asked, because answering a document question from nothing is
+   * the defect, not the fallback.
+   *
+   * The property this test exists for is unchanged and still asserted below: a
+   * name with no file behind it must never be written to the conversation, or a
+   * stale entry would keep claiming grounding on every later turn.
+   */
+  assert.equal(
+    brain.calls.some((call) => call.url.endsWith('/api/ai/chat')),
+    false,
+    'a document question with nothing behind it does not reach the model',
+  )
 
   const put = brain.calls.find((call) => call.url.endsWith('/grounding'))
   assert.deepEqual(JSON.parse(String(put!.init.body)).files, [], 'a phantom file must not be stored')
@@ -560,8 +574,18 @@ test('a body flag alone can no longer ground a turn', async () => {
   setAuthPort(portWith(session))
 
   await collect(await post({ prompt: 'summarise my documents', grounded: true }))
-  const chat = brain.calls.find((call) => call.url.endsWith('/api/ai/chat'))!
-  assert.equal(JSON.parse(String(chat.init.body)).groundingMode, 'none')
+
+  /*
+   * The client's claim buys nothing. It used to be observable as a turn reaching
+   * the model with `groundingMode: 'none'`; it is now observable as the turn
+   * being refused, since the server knows no document is attached whatever the
+   * body says. Either way the flag grounded nothing — which is the point.
+   */
+  assert.equal(
+    brain.calls.some((call) => call.url.endsWith('/api/ai/chat')),
+    false,
+    'a client-declared grounding flag cannot produce a grounded answer',
+  )
 
   brain.restore()
   resetAuthPort()
@@ -1215,4 +1239,77 @@ test('REGRESSION: a refusal is never recorded as an outage', async () => {
   })
   assert.equal(result.outcome, 'image_editing_unavailable', 'reported to the client as a refusal')
   assert.ok(result.storedAssistant, 'and kept in the conversation')
+})
+
+test('a question about an unattached document is refused, not answered from nothing', async () => {
+  /*
+   * THE DEFECT. Asked for the rollback marker in an indexed runbook that had
+   * never been attached to the conversation, the model answered that the command
+   * "might be `./rollback.sh`" and that the script "typically undoes the changes
+   * made during the cutover". Fluent, confident, invented — and the Files page
+   * had told the user the document was ready, so they had every reason to
+   * believe it had been read.
+   *
+   * The library is durable storage; a conversation is grounded by the files
+   * ATTACHED TO IT.
+   */
+  const original = globalThis.fetch
+  const brainCalls: string[] = []
+  let storedAssistant: string | null = null
+  globalThis.fetch = (async (url: string | URL | Request, init: RequestInit = {}) => {
+    const href = String(url)
+    brainCalls.push(href)
+    if (href.endsWith('/messages') && (init.method ?? 'GET').toUpperCase() === 'POST') {
+      const parsed = JSON.parse(String(init.body ?? '{}')) as { role?: string; content?: string }
+      if (parsed.role === 'assistant') storedAssistant = parsed.content ?? ''
+    }
+    return new Response(JSON.stringify({ ok: true, id: CONVERSATION_ID }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    })
+  }) as typeof globalThis.fetch
+  setAuthPort(portWith(session))
+
+  const frames = await collect(
+    await post({ prompt: 'what is the rollback marker in my runbook?', conversationId: CONVERSATION_ID }),
+  )
+  const last = frames[frames.length - 1]!
+
+  assert.equal(last.event, 'error')
+  assert.equal(last.data.error, 'document_not_attached')
+  assert.match(last.data.message, /attached to this conversation/i)
+  assert.match(last.data.message, /choose it from Files/i)
+
+  // The model is never asked — there is nothing to answer from.
+  assert.equal(brainCalls.some((u) => u.includes('/api/ai/chat')), false, 'no model call')
+  // And the refusal is part of the conversation, like every other deliberate one.
+  assert.ok(storedAssistant, 'the refusal was stored')
+
+  globalThis.fetch = original
+  resetAuthPort()
+})
+
+test('an ordinary question with no files attached is still answered', async () => {
+  // The refusal must not become a trap that catches normal conversation.
+  const original = globalThis.fetch
+  let askedModel = false
+  globalThis.fetch = (async (url: string | URL | Request) => {
+    const href = String(url)
+    if (href.endsWith('/api/ai/chat')) {
+      askedModel = true
+      return new Response('event: done\ndata: {}\n\n', {
+        status: 200, headers: { 'content-type': 'text/event-stream' },
+      })
+    }
+    return new Response(JSON.stringify({ ok: true, id: CONVERSATION_ID }), {
+      status: 200, headers: { 'content-type': 'application/json' },
+    })
+  }) as typeof globalThis.fetch
+  setAuthPort(portWith(session))
+
+  await collect(await post({ prompt: 'what is the capital of France?', conversationId: CONVERSATION_ID }))
+  assert.equal(askedModel, true, 'a normal question still reaches the model')
+
+  globalThis.fetch = original
+  resetAuthPort()
 })

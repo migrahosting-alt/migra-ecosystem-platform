@@ -52,6 +52,7 @@ import type { Principal } from '@/server/tenancy/principal'
 import type { BrainStreamFrame } from '@/server/brain/gateway'
 import type { ConversationSummary } from '@/server/brain/contracts'
 import { resolveTurnImages } from '@/server/files/resolveTurnImages'
+import { assessDocumentIntent } from '@/server/files/documentIntent'
 import { saveImage } from '@/server/files/imageStore'
 import { adoptRequestId, TurnTrace } from '@/server/observability/turnTrace'
 
@@ -568,6 +569,20 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   const grounded = reconciled.grounded
+
+  /*
+   * A DOCUMENT QUESTION WITH NO DOCUMENT.
+   *
+   * Asked for the rollback marker in an indexed runbook that had never been
+   * attached to this conversation, the model answered that the command "might be
+   * `./rollback.sh`" — fluent, confident, invented. The file existed and Files
+   * said "Ready", so the user had every reason to believe it had been read.
+   *
+   * The library is durable storage; a conversation is grounded by the files
+   * ATTACHED TO IT. When those two are confused, the turn must say so rather
+   * than answer from nothing.
+   */
+  const documentIntent = assessDocumentIntent(prompt, grounded)
   const groundingMode = grounded ? 'approved' : 'none'
 
   const encoder = new TextEncoder()
@@ -646,6 +661,27 @@ export async function POST(request: Request): Promise<Response> {
          */
         ...(allowance.kind === 'reserved' ? { quota: allowance.quota } : {}),
       })
+
+      if (documentIntent.needsAttachedDocument) {
+        // Said before the model is asked: there is nothing to answer FROM.
+        trace.set('document_unavailable', documentIntent.reason)
+        trace.finish('context_unavailable')
+        const told = {
+          error: 'document_not_attached',
+          message:
+            'I do not have that document attached to this conversation, so I cannot answer from ' +
+            'it yet. Attach the file here, or choose it from Files.',
+        }
+        await appendMessage(durableId, 'assistant', told.message, { principal })
+        emit('error', told)
+        closed = true
+        try {
+          controller.close()
+        } catch {
+          /* already closed */
+        }
+        return
+      }
 
       if (activeImageLost) {
         // Said before the model is asked: there is nothing to answer FROM, and
