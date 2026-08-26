@@ -233,3 +233,25 @@ test('a file ref shaped like a path never reaches the browser', async () => {
     assert.deepEqual((body.messages[0]! as { fileRefs?: string[] }).fileRefs, ['runbook.md'])
   } finally { restore() }
 })
+
+test('a deleted document is marked, and its card is not erased', async () => {
+  /*
+   * Both halves matter. Erasing the card would make the transcript disagree with
+   * what produced the answer; rendering it identically to a live file tells the
+   * reader the source is still there to open and check.
+   *
+   * `library-file.md` is not in the test library, so it reads as deleted.
+   */
+  const restore = brainReturns({
+    messages: [
+      { id: 'm1', role: 'user', content: 'what does it say?', status: 'complete', createdAt: 1,
+        fileRefs: ['library-file.md'] },
+    ],
+  })
+  try {
+    const { body } = await reopen()
+    const turn = body.messages[0]! as { fileRefs?: string[]; missingFileRefs?: string[] }
+    assert.deepEqual(turn.fileRefs, ['library-file.md'], 'the record is never rewritten')
+    assert.deepEqual(turn.missingFileRefs, ['library-file.md'], 'and it is marked gone')
+  } finally { restore() }
+})

@@ -12,18 +12,18 @@
   "activeLane": {
     "name": "Files & Documents",
     "objective": "Finish common file/document behaviour before deeper capabilities.",
-    "currentStep": "Two open defects remain before the lane closes: no detach control, and no deleted-file state on historical cards.",
-    "lastProvenMilestone": "All five common formats (TXT, MD, CSV, JSON, code) grounded live; historical file cards render immediately and after reload; deletion preserves history and stops grounding.",
+    "currentStep": "Detach control and deleted-file card state both PROVEN_LIVE. Citation consistency pass is the last item before PDF/DOCX.",
+    "lastProvenMilestone": "All five formats grounded live; historical cards live+reload; deletion preserves history and stops grounding; detach removes active grounding without touching history or the library; a deleted file renders as Deleted.",
     "release": {
-      "consumer": "picker-bc990598",
+      "consumer": "detach-bc990598",
       "brain": "filerefs-bc990598"
     },
     "rollback": {
       "consumer": [
+        "picker-bc990598",
         "filecard2-bc990598",
         "filecard-bc990598",
         "docrefusal-bc990598",
-        "refusalpersist-bc990598",
         "bc99059"
       ],
       "brain": [
@@ -33,7 +33,7 @@
       ]
     },
     "blockers": [],
-    "nextAcceptanceTest": "Detach a document from active grounding: historical card must remain, future turns must stop grounding, no history mutation.",
+    "nextAcceptanceTest": "Citation consistency across TXT/MD/CSV/JSON/code: determine whether the missing citation on Markdown is model variance or a deterministic presentation bug.",
     "doNotWorkOnYet": [
       "PDF/DOCX extraction (until the text path is fully closed)",
       "Live Source Intelligence (PAUSED_CHECKPOINTED)",
@@ -63,7 +63,9 @@
       "Source-code grounding",
       "Historical file cards (live + after reload)",
       "Truthful refusal when a document question has no attached document",
-      "Deletion preserves history and stops grounding"
+      "Deletion preserves history and stops grounding",
+      "Detach a document from active grounding (history and library untouched)",
+      "Deleted library file renders as Deleted on its historical turn"
     ],
     "STABILIZATION": [
       {
@@ -104,26 +106,6 @@
     ]
   },
   "openDefects": [
-    {
-      "id": "no-document-detach-control",
-      "symptom": "A user can attach a document to a conversation but can never remove it from active grounding without deleting it from Files entirely.",
-      "evidence": "detachConversationImage exists for images; there is no document equivalent and no /api/conversations/[id]/grounding route.",
-      "rootCause": "Capability was never built.",
-      "status": "OPEN",
-      "effort": "EASY",
-      "regressionTest": "none yet",
-      "liveAcceptance": "not run"
-    },
-    {
-      "id": "deleted-file-card-state",
-      "symptom": "After the underlying library file is deleted, the historical file card still renders exactly like a live one; a reader cannot tell the document is gone.",
-      "evidence": "Verified live 2026-08-26: deleted fixture-scheduler.py, card unchanged on the historical turn.",
-      "rootCause": "The renderer has no unavailable state; history correctly preserves the ref.",
-      "status": "OPEN",
-      "effort": "EASY",
-      "regressionTest": "none yet",
-      "liveAcceptance": "not run"
-    },
     {
       "id": "citation-presentation-inconsistency",
       "symptom": "A grounded TXT answer showed '(from fixture-notes.txt:3-6)' and a 'From your files' attribution; a grounded Markdown answer showed neither, on the same path.",
@@ -187,6 +169,12 @@
       "disprovedBy": "Hook runs tsc --noEmit; the suite runs tsc -b. A committed test broke npm test.",
       "corrected": "Acceptance gate is the app's own test command + tsc -b + live browser.",
       "priorityChanged": false
+    },
+    {
+      "assumption": "A conversation that predates a feature will show its new UI once the feature ships.",
+      "disprovedBy": "A pre-fileRefs conversation showed no historical card after detach \u2014 the record was never written for turns stored before M21.",
+      "corrected": "Historical cards exist only for turns stored after the feature. Not a regression; older threads have no record to render.",
+      "priorityChanged": false
     }
   ],
   "promisesVsReality": [
@@ -213,8 +201,6 @@
   ],
   "backlog": {
     "EASY_NEXT": [
-      "Document detach control (remove from active grounding without deleting)",
-      "Deleted-file state on historical file cards",
       "Citation presentation consistency review"
     ],
     "MEDIUM": [

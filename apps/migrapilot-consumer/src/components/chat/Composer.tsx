@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useRef, useState, type ChangeEvent, type ClipboardEvent, type DragEvent, type FormEvent, type KeyboardEvent } from 'react'
-import { Lock, Mic, SendHorizontal } from 'lucide-react'
+import { FileText, Lock, Mic, SendHorizontal, X } from 'lucide-react'
 import { AttachmentChips } from '@/features/attachments/AttachmentChips'
 import { DOCUMENT_PICKER_ACCEPT } from '@/features/attachments/filename'
 import { useAttachments } from '@/features/attachments/useAttachments'
@@ -64,6 +64,8 @@ export function Composer({
   disabled = false,
   disabledReason,
   conversationImages,
+  conversationFiles,
+  onDetachConversationFile,
   onDetachConversationImage,
 }: {
   /**
@@ -102,6 +104,17 @@ export function Composer({
   conversationImages?: string[]
   /** Detach an image from the whole thread, not just this turn. */
   onDetachConversationImage?: (ref: string) => void
+  /**
+   * Documents currently grounding this conversation — the ACTIVE set.
+   *
+   * Shown for the same reason the images are: after a reload the user asks a
+   * follow-up with nothing attached, and the interface has to make visible WHY
+   * that works. An invisible durable set is indistinguishable from the model
+   * inventing an answer about a document.
+   */
+  conversationFiles?: string[]
+  /** Stop a document grounding the thread. Does NOT delete it from Files. */
+  onDetachConversationFile?: (name: string) => void
 }) {
   const [value, setValue] = useState(defaultValue)
   const [focused, setFocused] = useState(false)
@@ -442,6 +455,34 @@ export function Composer({
         className="hidden"
         onChange={onImagePicked}
       />
+
+      {conversationFiles && conversationFiles.length > 0 && (
+        <div className="mt-2 flex flex-wrap items-center gap-1.5">
+          <span className="text-xs text-slate-500">
+            Grounded in — ask a follow-up without attaching again
+          </span>
+          {conversationFiles.map((name) => (
+            <span
+              key={name}
+              className="inline-flex max-w-full items-center gap-1.5 rounded-field border border-hairline bg-white px-2.5 py-1"
+            >
+              <FileText className="h-3.5 w-3.5 shrink-0 text-slate-400" strokeWidth={2} aria-hidden />
+              <span className="truncate text-[13px] text-slate-700" title={name}>{name}</span>
+              <button
+                type="button"
+                onClick={() => onDetachConversationFile?.(name)}
+                className="rounded-full p-0.5 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600"
+                /* "Stop using", not "delete": the file stays in the library, and
+                   the turn that attached it keeps its own record. */
+                aria-label={`Stop using ${name} in this conversation`}
+                title="Stop using in this conversation"
+              >
+                <X className="h-3.5 w-3.5" strokeWidth={2.5} />
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
 
       {conversationImages && conversationImages.length > 0 && (
         <ImageTray

@@ -29,6 +29,7 @@ interface ChatContextValue {
   sendMessage: (conversationId: string, prompt: string, options?: { attachments?: string[]; images?: string[] }) => void
   /** Remove an image from the thread's durable set. */
   detachConversationImage: (conversationId: string, ref: string) => Promise<void>
+  detachConversationFile: (conversationId: string, name: string) => Promise<void>
   /** Load one conversation's durable messages. Safe to call repeatedly. */
   openConversation: (conversationId: string) => void
   /**
@@ -62,6 +63,8 @@ interface WireConversation {
   updatedAt: number | string | null
   /** The images this thread is about, from the Brain's durable set. */
   imageRefs?: string[]
+  /** The documents this thread is grounded in — the ACTIVE set, not history. */
+  groundingFiles?: string[]
 }
 /**
  * Does this id name a conversation the Brain knows about?
@@ -218,6 +221,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
           tone: 'blue',
           messages: [],
           ...(conversation.imageRefs?.length ? { imageRefs: conversation.imageRefs } : {}),
+          ...(conversation.groundingFiles?.length ? { groundingFiles: conversation.groundingFiles } : {}),
         }))
 
         /*
@@ -767,6 +771,54 @@ export function ChatProvider({ children }: { children: ReactNode }) {
    * path uses, so a detach that fails does not leave the screen claiming the
    * picture is gone while the next answer is still about it.
    */
+  /**
+   * Stop a document grounding this conversation, without deleting it.
+   *
+   * The gap this fills: a user could attach a document and never remove it, so
+   * the only way to stop it answering was to delete it from the library — losing
+   * the file to get rid of the context.
+   *
+   * DETACHING IS NOT DELETING AND NOT HISTORY. The file stays in Files, and the
+   * message that attached it keeps its own record; only future turns change.
+   */
+  const detachConversationFile = useCallback(async (conversationId: string, name: string) => {
+    let previous: string[] | undefined
+    setConversations((current) =>
+      current.map((conversation) => {
+        if (conversation.id !== conversationId) return conversation
+        previous = conversation.groundingFiles
+        return {
+          ...conversation,
+          groundingFiles: (conversation.groundingFiles ?? []).filter((f) => f !== name),
+        }
+      }),
+    )
+
+    try {
+      const remaining = (previous ?? []).filter((f) => f !== name)
+      const response = await fetch(`/api/conversations/${encodeURIComponent(conversationId)}/grounding`, {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ files: remaining }),
+      })
+      if (response.ok) return
+    } catch {
+      // Falls through to the rollback below.
+    }
+
+    // The SERVER decides. A detach that failed must not leave the screen claiming
+    // the document is gone while the next answer is still grounded in it.
+    if (previous !== undefined) {
+      setConversations((current) =>
+        current.map((conversation) =>
+          conversation.id === conversationId
+            ? { ...conversation, groundingFiles: previous }
+            : conversation,
+        ),
+      )
+    }
+  }, [])
+
   const detachConversationImage = useCallback(async (conversationId: string, ref: string) => {
     let previous: string[] | undefined
     setConversations((current) =>
@@ -876,6 +928,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       startConversation,
       sendMessage,
       detachConversationImage,
+      detachConversationFile,
       openConversation,
       renameConversation,
       deleteConversation,
@@ -888,6 +941,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       startConversation,
       sendMessage,
       detachConversationImage,
+      detachConversationFile,
       openConversation,
       renameConversation,
       deleteConversation,

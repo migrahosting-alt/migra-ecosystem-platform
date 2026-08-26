@@ -35,11 +35,11 @@ _Last updated: 2026-08-26_
 historical file cards render immediately *and* after reload; deleting a file preserves history and
 stops grounding.
 
-**Live:** consumer `picker-bc990598` · brain `filerefs-bc990598`
+**Live:** consumer `detach-bc990598` · brain `filerefs-bc990598`
 **Rollback:** consumer `filecard2-` → `filecard-` → `docrefusal-` → `refusalpersist-` → `bc99059`
 
-**Next acceptance test:** detach a document from active grounding — historical card must remain,
-future turns must stop grounding, no history mutation.
+**Next acceptance test:** citation consistency across TXT/MD/CSV/JSON/code — is the missing citation
+on Markdown model variance or a deterministic presentation bug?
 
 **Not yet:** PDF/DOCX extraction · Live Source Intelligence · any search vendor · deleting local
 media fallback copies.
@@ -74,8 +74,6 @@ from Bonex. **Not a product blocker.**
 
 | Defect | Effort | Status |
 |---|---|---|
-| No way to detach a document from active grounding | EASY | OPEN |
-| Deleted library file still renders as a normal card | EASY | OPEN |
 | Citation shown for TXT, absent for Markdown, same path | MEDIUM | Recorded, not chased |
 | Vision turn held 240s and returned nothing | MEDIUM | Operational target, not reproducible |
 
@@ -98,7 +96,7 @@ Read the telemetry that separates *attempted* from *delivered* before concluding
 
 ## Backlog
 
-**Easy / next** — document detach control · deleted-file card state · citation consistency.
+**Easy / next** — citation consistency.
 
 **Medium** — PDF extraction (⚠️ verify runtime/library compatibility on VM111 first; "pure-JS required"
 is an **unverified** assumption) · DOCX · XLSX/PPTX · ZIP · bounded vision timeout.

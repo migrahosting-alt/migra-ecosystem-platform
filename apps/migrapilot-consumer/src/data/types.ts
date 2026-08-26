@@ -81,6 +81,14 @@ export interface Message {
    * attached it, or the transcript disagrees with what produced the answer.
    */
   files?: string[]
+  /**
+   * Files from `files` that are no longer in the library.
+   *
+   * Rendering a deleted document exactly like a live one tells the reader the
+   * source is still there to check. The card stays — the history is real — but
+   * it must say the document is gone.
+   */
+  missingFiles?: string[]
   /** Assistant turns only — renders a call to action beneath the answer. */
   action?: 'scope-review'
   /**
@@ -129,6 +137,16 @@ export interface Conversation {
    * works. An invisible durable set is indistinguishable from the model guessing.
    */
   imageRefs?: string[]
+  /**
+   * Documents this conversation is currently grounded in — the ACTIVE set.
+   *
+   * Shown for the same reason as the images, and detachable for a reason the
+   * images already had: without a control, the only way to stop a document
+   * answering was to delete it from the library, losing the file to get rid of
+   * the context. Distinct from a message's own `files`, which is history and
+   * never changes.
+   */
+  groundingFiles?: string[]
 }
 
 /* -------------------------------------------------------------------- *

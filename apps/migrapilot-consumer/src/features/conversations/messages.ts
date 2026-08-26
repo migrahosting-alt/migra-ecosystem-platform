@@ -25,6 +25,13 @@ export interface WireMessage {
   imageRefs?: string[]
   /** Documents this message actually carried, from the message's OWN record. */
   fileRefs?: string[]
+  /**
+   * Which of those are no longer in the library.
+   *
+   * Computed at read time against the CURRENT library, because "deleted" is a
+   * fact about now rather than about the turn. The record itself never changes.
+   */
+  missingFileRefs?: string[]
 }
 
 import { hasDeliverableContent } from '@/lib/turnContent'
@@ -46,6 +53,7 @@ export function toMessage(message: WireMessage, index: number): Message {
         delivered: true,
         ...(message.imageRefs?.length ? { images: message.imageRefs } : {}),
         ...(message.fileRefs?.length ? { files: message.fileRefs } : {}),
+        ...(message.missingFileRefs?.length ? { missingFiles: message.missingFileRefs } : {}),
       }
     : {
         id: message.id ?? `a-${index}`,

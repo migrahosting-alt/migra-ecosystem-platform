@@ -70,7 +70,8 @@ export function ChatPage() {
   const params = useParams<{ id: string }>()
   const router = useRouter()
   const id = typeof params?.id === 'string' ? params.id : ''
-  const { byId, sendMessage, detachConversationImage, pendingIn, loading, openConversation, isMissingConversation } = useChat()
+  const { byId, sendMessage, detachConversationImage,
+    detachConversationFile, pendingIn, loading, openConversation, isMissingConversation } = useChat()
   const allowance = useAnonymousQuota()
   const outOfTurns = isExhausted(allowance)
   const conversation = byId(id)
@@ -180,6 +181,10 @@ export function ChatPage() {
             }}
             {...(conversation.imageRefs?.length ? { conversationImages: conversation.imageRefs } : {})}
             onDetachConversationImage={(ref) => void detachConversationImage(conversation.id, ref)}
+            {...(conversation.groundingFiles?.length
+              ? { conversationFiles: conversation.groundingFiles }
+              : {})}
+            onDetachConversationFile={(name) => void detachConversationFile(conversation.id, name)}
             disabled={outOfTurns}
             disabledReason="You have used all your free messages. Sign in or create an account to keep going — this conversation comes with you."
           />

@@ -17,6 +17,8 @@ import type { ConversationMessage } from '@/server/brain/contracts'
 
 export const dynamic = 'force-dynamic'
 
+import { listFiles } from '@/server/files/storage'
+
 /** File names a message recorded, filtered at the last hop before the browser. */
 const fileRefs = (message: { fileRefs?: unknown }): string[] =>
   Array.isArray(message.fileRefs)
@@ -70,6 +72,20 @@ export async function GET(
     )
   }
 
+  /*
+   * The caller's CURRENT library, for marking which recorded documents are gone.
+   *
+   * FAILS OPEN, deliberately. If the library cannot be read, nothing is marked
+   * missing — an unreadable directory is not evidence that a file was deleted,
+   * and labelling a live document "no longer available" because of a transient
+   * storage hiccup is a worse lie than the one this fixes.
+   */
+  const library = new Set<string>(
+    await listFiles()
+      .then((files) => files.map((f) => f.name))
+      .catch(() => []),
+  )
+
   const messages = (result.value as { messages?: ConversationMessage[] })?.messages ?? []
 
   return Response.json({
@@ -118,6 +134,18 @@ export async function GET(
          * should never hand the browser something shaped like a path.
          */
         ...(fileRefs(message).length ? { fileRefs: fileRefs(message) } : {}),
+        /*
+         * WHICH OF THOSE DOCUMENTS ARE GONE.
+         *
+         * The historical record is immutable and must stay — but rendering a
+         * deleted file exactly like a live one tells the reader the source is
+         * still there to check. Computed against the CURRENT library at read
+         * time rather than stored, because "deleted" is a fact about now, not
+         * about the turn.
+         */
+        ...(fileRefs(message).filter((f) => !library.has(f)).length
+          ? { missingFileRefs: fileRefs(message).filter((f) => !library.has(f)) }
+          : {}),
       })),
   })
 }

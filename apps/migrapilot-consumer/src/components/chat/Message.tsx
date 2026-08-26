@@ -8,6 +8,7 @@ import {
   Copy,
   ExternalLink,
   FileText,
+  FileX,
   ImageOff,
   Pause,
   Play,
@@ -160,23 +161,50 @@ function AttachmentGrid({ attachments }: { attachments: Attachment[] }) {
  * transcript records WHICH document was used rather than a copy of it — the same
  * refs-not-bytes rule the pictures follow.
  */
-function MessageFiles({ names }: { names?: string[] }): ReactElement | null {
+function MessageFiles({ names, missing }: { names?: string[]; missing?: string[] }): ReactElement | null {
   if (!names?.length) return null
+  const gone = new Set(missing ?? [])
   return (
     <ul className="mb-2 flex flex-wrap justify-end gap-1.5" aria-label="Documents attached to this message">
-      {names.map((name) => (
-        <li
-          key={name}
-          className="inline-flex max-w-full items-center gap-1.5 rounded-field border border-hairline bg-white px-2.5 py-1.5"
-        >
-          <FileText className="h-3.5 w-3.5 shrink-0 text-slate-400" strokeWidth={2} aria-hidden />
-          <span className="truncate text-[13px] text-slate-700" title={name}>
-            {name}
-          </span>
-          {/* Named for a screen reader, which cannot see the icon that says "file". */}
-          <span className="sr-only">attached document</span>
-        </li>
-      ))}
+      {names.map((name) => {
+        const deleted = gone.has(name)
+        return (
+          <li
+            key={name}
+            className={cn(
+              'inline-flex max-w-full items-center gap-1.5 rounded-field border px-2.5 py-1.5',
+              deleted ? 'border-dashed border-slate-300 bg-slate-50' : 'border-hairline bg-white',
+            )}
+          >
+            {deleted ? (
+              <FileX className="h-3.5 w-3.5 shrink-0 text-slate-400" strokeWidth={2} aria-hidden />
+            ) : (
+              <FileText className="h-3.5 w-3.5 shrink-0 text-slate-400" strokeWidth={2} aria-hidden />
+            )}
+            <span
+              className={cn('truncate text-[13px]', deleted ? 'text-slate-500 line-through' : 'text-slate-700')}
+              title={name}
+            >
+              {name}
+            </span>
+            {/*
+              THE CARD STAYS, BUT IT MUST NOT LOOK LIVE.
+              The turn really did use this document, so erasing it would make the
+              transcript disagree with what produced the answer. Rendering it
+              identically to a present file is the other failure: it tells the
+              reader the source is still there to open and check.
+            */}
+            {deleted && (
+              <span className="shrink-0 text-[11px] font-medium uppercase tracking-wide text-slate-400">
+                Deleted
+              </span>
+            )}
+            <span className="sr-only">
+              {deleted ? 'attached document, no longer available' : 'attached document'}
+            </span>
+          </li>
+        )
+      })}
     </ul>
   )
 }
@@ -292,7 +320,7 @@ function UserTurn({ message }: { message: Message }) {
           produced the answer — bad for trust, and worse on reload, where the
           only remaining record was the conversation's CURRENT active set.
         */}
-        <MessageFiles names={message.files} />
+        <MessageFiles names={message.files} missing={message.missingFiles} />
 
         {message.text && (
           <div className="rounded-2xl rounded-br-md bg-brand-50 px-4.5 py-3.5">
