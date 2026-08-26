@@ -118,15 +118,37 @@ function decodeCookieValue(raw: string | undefined): string | undefined {
   }
 }
 
-/** Read the remembered destination and consume it. Single use, by design. */
+/**
+ * Read the remembered destination and consume it. Single use, by design.
+ *
+ * THE READ AND THE DELETE ARE SEPARATE, deliberately. They shared a `try`, so a
+ * `delete` that threw — which depends on where the framework thinks the cookie
+ * jar is mutable — discarded a destination that had just been read successfully.
+ * Failing to CLEAN UP must never lose the value; the cookie expires in ten
+ * minutes anyway.
+ */
 export async function takeReturnPath(): Promise<string | null> {
+  let raw: string | undefined
   try {
     const jar = await cookies()
-    const raw = jar.get(RETURN_COOKIE)?.value
-    jar.delete(RETURN_COOKIE)
-    // Validated AFTER decoding — the check is on the real path, not its encoding.
-    return safeReturnPath(decodeCookieValue(raw))
+    raw = jar.get(RETURN_COOKIE)?.value
+    try {
+      jar.delete(RETURN_COOKIE)
+    } catch {
+      // Single-use is enforced by its short lifetime, not by this line.
+    }
   } catch {
     return null
   }
+  // Validated AFTER decoding — the check is on the real path, not its encoding.
+  const path = safeReturnPath(decodeCookieValue(raw))
+  /*
+   * Logged because this flow has now failed three times for three different
+   * reasons, each invisible from outside. It records only whether a destination
+   * survived — never the value, which is a path inside the user's account.
+   */
+  console.info(
+    `migrapilot.auth.return ${JSON.stringify({ cookiePresent: raw !== undefined, accepted: path !== null })}`,
+  )
+  return path
 }
