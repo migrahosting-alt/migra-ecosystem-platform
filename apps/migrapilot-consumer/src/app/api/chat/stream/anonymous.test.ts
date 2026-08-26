@@ -431,3 +431,38 @@ test('an identity that cannot be written is refused, not served', async () => {
   brain.restore()
   reset()
 })
+
+
+test('an anonymous visitor is refused generation BEFORE Studio is asked to work', async () => {
+  /*
+   * FOUND IN THE LIVE BROWSER. Studio produced a real 209KB PNG in 47 seconds
+   * and the consumer discarded it: a generated image is saved to the caller's
+   * library, and an anonymous session has none — `saveImage` requires a real
+   * session by construction. The GPU cost was paid and nothing was delivered,
+   * which is the worst of both outcomes.
+   *
+   * The engine names the capability in its `route` frame BEFORE it submits
+   * anything, so this is the last moment the turn can be stopped for free.
+   */
+  const brain = brainStub({
+    chatBody: sse([
+      ['route', { capability: 'image_generation', model: 'flux1-schnell-fp8.safetensors' }],
+      ['stage', { stage: 'submitting', detail: 'Sending your prompt to the image pipeline' }],
+      ['image', { mimeType: 'image/png', dataBase64: 'iVBORw0KGgo=' }],
+      ['done', { requestId: 'r' }],
+    ]),
+  })
+
+  const frames = await collect(await post({ prompt: 'generate letter A in png' }))
+  const errors = frames.filter((f) => f.event === 'error')
+  assert.equal(errors.length, 1, `one explanation, saw ${JSON.stringify(errors.map((e) => e.data))}`)
+  assert.equal(errors[0]!.data.error, 'sign_in_required')
+  assert.match(String(errors[0]!.data.message), /Sign in to generate images/)
+
+  // Nothing is claimed to have been produced, and the generic message that would
+  // have replaced the real reason never appears.
+  assert.equal(frames.filter((f) => f.event === 'image').length, 0)
+  assert.doesNotMatch(JSON.stringify(frames), /did not produce an answer/)
+
+  brain.restore()
+})

@@ -614,6 +614,9 @@ export async function POST(request: Request): Promise<Response> {
       frames = opened.frames
       trace.mark('brain_open')
 
+      /** Set when the turn is stopped deliberately, so nothing generic follows. */
+      let refused = false
+
       try {
         for await (const frame of opened.frames) {
           switch (frame.event) {
@@ -715,6 +718,31 @@ export async function POST(request: Request): Promise<Response> {
             }
             case 'route': {
               /*
+               * REFUSE BEFORE THE GPU IS SPENT, not after.
+               *
+               * A generated image is stored in the caller's own library, and an
+               * anonymous session has no library — `saveImage` requires a real
+               * session by construction. Letting the turn proceed meant Studio
+               * spent 47 SECONDS producing a real PNG that was then discarded:
+               * the cost paid and nothing delivered, which is the worst of both.
+               *
+               * The engine names the capability in this frame BEFORE it submits
+               * anything, so this is the last moment the turn can be stopped for
+               * free. Breaking the loop returns the generator, which aborts the
+               * upstream request.
+               */
+              const capability = (frame.data as { capability?: unknown })?.capability
+              if (capability === 'image_generation' && principal.kind === 'anonymous') {
+                explained = true
+                refused = true
+                emit('error', {
+                  error: 'sign_in_required',
+                  message:
+                    'Sign in to generate images. A generated picture is saved to your library, and an anonymous session does not have one.',
+                })
+                break
+              }
+              /*
                * STILL NOT RELAYED to the browser — a model id is our operational
                * detail, not the user's answer. But it is recorded here, because
                * "which model served this turn" is the first question asked of a
@@ -729,6 +757,8 @@ export async function POST(request: Request): Promise<Response> {
             default:
               break
           }
+          // `break` inside a switch leaves the switch, not the loop.
+          if (refused) break
         }
       } catch {
         // The stream broke mid-flight. `completed` stays false, so nothing is
