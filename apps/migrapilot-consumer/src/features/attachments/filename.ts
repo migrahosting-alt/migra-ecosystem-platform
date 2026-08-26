@@ -35,6 +35,37 @@ export function acceptAttribute(allowedExtensions: readonly string[]): string {
   return allowedExtensions.map((ext) => (ext.startsWith('.') ? ext : `.${ext}`)).join(',')
 }
 
+/**
+ * Types the DOCUMENT picker offers, which is deliberately WIDER than the set the
+ * server currently accepts.
+ *
+ * WHY WIDER. "Files & documents" is a category the user already understands, and
+ * a picker built only from today's supported extensions produces two bad
+ * outcomes: the OS dialog reads as an arbitrary "Custom Files" list rather than
+ * normal document selection, and a PDF — the single most common document there
+ * is — appears to not exist rather than to be unsupported yet. Offering it and
+ * then refusing it with a reason is the honest failure; hiding it is a silent one.
+ *
+ * The SERVER stays authoritative. Everything here that is not yet extractable is
+ * refused after selection, with an explanation naming the format.
+ */
+export const DOCUMENT_PICKER_ACCEPT = [
+  // Documents people actually attach.
+  '.pdf', '.doc', '.docx', '.odt', '.rtf', '.txt', '.md', '.markdown',
+  // Structured data and spreadsheets.
+  '.csv', '.tsv', '.json', '.xml', '.yaml', '.yml', '.toml', '.ini', '.conf',
+  '.xls', '.xlsx', '.ods',
+  // Presentations.
+  '.ppt', '.pptx', '.odp',
+  // Code.
+  '.ts', '.tsx', '.js', '.jsx', '.py', '.rb', '.go', '.rs', '.java', '.c', '.h',
+  '.cpp', '.cs', '.php', '.swift', '.kt', '.sh', '.sql', '.html', '.css', '.scss',
+  // Archives, for when extraction can reach inside them.
+  '.zip', '.tar', '.gz',
+  // Logs.
+  '.log',
+].join(',')
+
 export interface FilenameRejection {
   code: 'unsupported_type' | 'too_large'
   message: string

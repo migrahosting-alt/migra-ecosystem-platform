@@ -190,3 +190,56 @@ test('reported sizes are measured, not declared', async () => {
   assert.equal(file!.bytes, new TextEncoder().encode(content).byteLength)
   resetAuthPort()
 })
+
+/*
+ * ══════════════════════════════════════════════════════════════════════════
+ * SECURITY ACCEPTANCE — a document ref in a transcript is a NAME.
+ *
+ * A message now records the files it carried, and those refs travel in
+ * conversation state. Unlike an image ref, a filename is NOT globally unique:
+ * two accounts can both hold `notes.md` with entirely different contents. So a
+ * ref that leaks — from another conversation, another account, or a copied
+ * transcript — must never resolve to someone else's document, and must never
+ * silently resolve to the reader's own file as though it were the one cited.
+ * ══════════════════════════════════════════════════════════════════════════
+ */
+
+test('SECURITY: a filename from another account is not in this caller\'s library', async () => {
+  asUser('doc-owner')
+  await saveFile('private-plan.md', bytes('# Secret plan\nPASSPHRASE-A'))
+
+  asUser('doc-intruder')
+  assert.equal(
+    (await listFiles()).some((f) => f.name === 'private-plan.md'),
+    false,
+    'a foreign document does not appear at all',
+  )
+  // Indistinguishable from never having existed: deletion reports the same
+  // "nothing here" a genuinely absent file would.
+  assert.equal(await deleteFile('private-plan.md'), false)
+})
+
+test('SECURITY: the SAME filename under two accounts is two different documents', async () => {
+  /*
+   * THE CASE A NAME MAKES DANGEROUS. If `fileRefs: ["notes.md"]` from one
+   * account's transcript were resolved by another, the reader would get THEIR
+   * OWN notes.md — different content, presented as the cited source.
+   */
+  asUser('twin-alpha')
+  await saveFile('notes.md', bytes('ALPHA-CONTENT'))
+  asUser('twin-beta')
+  await saveFile('notes.md', bytes('BETA-CONTENT'))
+
+  asUser('twin-alpha')
+  const alphaDir = await userDirectory()
+  assert.match(await readFile(join(alphaDir, 'notes.md'), 'utf8'), /ALPHA-CONTENT/)
+
+  asUser('twin-beta')
+  const betaDir = await userDirectory()
+  const beta = await readFile(join(betaDir, 'notes.md'), 'utf8')
+  assert.match(beta, /BETA-CONTENT/)
+  assert.ok(!beta.includes('ALPHA-CONTENT'), 'the same name never crosses the boundary')
+
+  // And each library lists exactly one file by that name — its own.
+  assert.equal((await listFiles()).filter((f) => f.name === 'notes.md').length, 1)
+})

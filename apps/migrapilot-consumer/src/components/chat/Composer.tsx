@@ -3,7 +3,7 @@
 import { useCallback, useRef, useState, type ChangeEvent, type ClipboardEvent, type DragEvent, type FormEvent, type KeyboardEvent } from 'react'
 import { Lock, Mic, SendHorizontal } from 'lucide-react'
 import { AttachmentChips } from '@/features/attachments/AttachmentChips'
-import { acceptAttribute } from '@/features/attachments/filename'
+import { DOCUMENT_PICKER_ACCEPT } from '@/features/attachments/filename'
 import { useAttachments } from '@/features/attachments/useAttachments'
 import { useVisionAvailability, visionDisabledReason } from '@/features/attachments/useVisionAvailability'
 import { ActionHub, type HubAction } from '@/components/chat/ActionHub'
@@ -112,7 +112,10 @@ export function Composer({
   const [pendingImage, setPendingImage] = useState<{ name: string } | null>(null)
   const [imageError, setImageError] = useState<string | null>(null)
   const imageBusy = pendingImage !== null
-  const { attachments, limits, add, remove, retry, clear, busy } = useAttachments()
+  // `limits` is no longer read here: the picker offers the DOCUMENT category
+  // rather than today's server allowlist, and the server stays authoritative for
+  // what it will actually accept.
+  const { attachments, add, remove, retry, clear, busy } = useAttachments()
   /*
    * THE MIC IS GATED ON THE SHARED CAPABILITY, not on a local guess.
    *
@@ -365,7 +368,7 @@ export function Composer({
     {
       id: 'file',
       label: 'Files & documents',
-      hint: 'Attach text or code MigraPilot can search and quote.',
+      hint: 'Attach a document, data file, or code for MigraPilot to read.',
       icon: 'file',
       onSelect: () => fileInputRef.current?.click(),
     },
@@ -424,7 +427,13 @@ export function Composer({
         multiple
         className="hidden"
         onChange={onPicked}
-        {...(limits ? { accept: acceptAttribute(limits.allowedExtensions) } : {})}
+        /*
+         * The DOCUMENT picker, not a list of today's supported extensions. A
+         * dialog built from the server's allowlist reads as "Custom Files" and
+         * makes PDF look nonexistent rather than not-yet-supported. The server
+         * refuses what it cannot read, with a reason — see DOCUMENT_PICKER_ACCEPT.
+         */
+        accept={DOCUMENT_PICKER_ACCEPT}
       />
       <input
         ref={imageInputRef}
