@@ -10,16 +10,12 @@
  * caller, and saying "forbidden" would confirm the id exists.
  */
 
+import { artifactRefs, hasDeliverableContent } from '@/lib/turnContent'
 import { listMessages } from '@/server/brain/seams'
 import { resolveRequestPrincipal } from '@/server/tenancy/requestPrincipal'
 import type { ConversationMessage } from '@/server/brain/contracts'
 
 export const dynamic = 'force-dynamic'
-
-/** `img_` followed by 32 hex characters. Anything else never becomes a URL. */
-const IMAGE_REF = /^img_[0-9a-f]{32}$/
-const canonicalRefs = (refs: string[] | undefined): string[] =>
-  (refs ?? []).filter((r) => typeof r === 'string' && IMAGE_REF.test(r))
 
 export async function GET(
   _request: Request,
@@ -85,11 +81,7 @@ export async function GET(
        * client's delivery condition, and the reload mapping. Every place that
        * asks "does this turn contain anything" has to count images.
        */
-      .filter(
-        (message) =>
-          (typeof message.content === 'string' && message.content.length > 0) ||
-          canonicalRefs(message.imageRefs).length > 0,
-      )
+      .filter(hasDeliverableContent)
       .map((message) => ({
         id: message.id ?? null,
         role: message.role,
@@ -107,9 +99,7 @@ export async function GET(
          * else becomes a request that 404s and renders as a broken icon beside a
          * filename — which a user reads as "the attachment is there but broken".
          */
-        ...(canonicalRefs(message.imageRefs).length
-          ? { imageRefs: canonicalRefs(message.imageRefs) }
-          : {}),
+        ...(artifactRefs(message).length ? { imageRefs: artifactRefs(message) } : {}),
       })),
   })
 }

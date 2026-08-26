@@ -25,6 +25,8 @@ export interface WireMessage {
   imageRefs?: string[]
 }
 
+import { hasDeliverableContent } from '@/lib/turnContent'
+
 export function timeOf(value: number | string | null): string {
   if (value === null) return ''
   const date = new Date(typeof value === 'number' ? value : Date.parse(value))
@@ -80,6 +82,11 @@ export async function fetchMessages(conversationId: string): Promise<Message[]> 
   if (!response.ok) throw new Error(`messages unavailable (${response.status})`)
   const { messages } = (await response.json()) as { messages?: WireMessage[] }
   return (messages ?? [])
-    .filter((message) => typeof message.content === 'string' && message.content.length > 0)
+    /*
+     * The FIFTH place this rule was re-encoded. Measuring `content.length` here
+     * meant an exported transcript silently omitted a generated image — the turn
+     * happened, the artifact is durable, and the record of it was missing.
+     */
+    .filter(hasDeliverableContent)
     .map(toMessage)
 }
