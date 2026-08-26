@@ -18,7 +18,7 @@
 
 import { getAuthPort } from '@/server/auth'
 import { AuthNotConfiguredError } from '@/server/auth/authPort'
-import { rememberReturnPath } from '@/server/auth/returnTo'
+import { redirectRememberingReturnPath, rememberReturnPath } from '@/server/auth/returnTo'
 
 /** Session-dependent and side-effecting: must never be cached or prerendered. */
 export const dynamic = 'force-dynamic'
@@ -30,11 +30,18 @@ export async function GET(request: Request): Promise<Response> {
    * Stored server-side and re-validated on the way out — see
    * `server/auth/returnTo.ts`.
    */
-  await rememberReturnPath(new URL(request.url).searchParams.get('next'))
+  const next = new URL(request.url).searchParams.get('next')
+  await rememberReturnPath(next)
 
   try {
     const authorizeUrl = await (await getAuthPort()).buildLoginRedirect()
-    return Response.redirect(authorizeUrl, 302)
+    /*
+     * The destination is attached to THIS response, not left to the framework to
+     * associate. `Response.redirect` is not built by Next, so a cookie written
+     * through `cookies()` never reached the browser and every sign-in landed on
+     * the home page regardless of where it started.
+     */
+    return redirectRememberingReturnPath(authorizeUrl, next)
   } catch (error) {
     if (error instanceof AuthNotConfiguredError) {
       return Response.json(

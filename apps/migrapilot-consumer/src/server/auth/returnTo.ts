@@ -62,6 +62,44 @@ export async function rememberReturnPath(value: string | null | undefined): Prom
   }
 }
 
+/**
+ * A redirect that CARRIES the destination.
+ *
+ * WHY THIS EXISTS ALONGSIDE `rememberReturnPath`. A cookie written through
+ * `cookies()` is only emitted when the framework builds the response. The login
+ * route returned a bare `Response.redirect(...)`, so the `Set-Cookie` header was
+ * silently dropped and the destination never left the server — the sign-in link
+ * carried `?next=/chat/<id>`, the value was validated and "stored", and the user
+ * still landed on the home page with their conversation nowhere in sight.
+ *
+ * The response is CONSTRUCTED with the header rather than mutated afterwards:
+ * `Response.redirect()` returns immutable headers, so appending to one throws.
+ * Building it here means the cookie is present because it was put there, with no
+ * dependence on framework association at all.
+ */
+export function redirectRememberingReturnPath(location: string, value: string | null | undefined): Response {
+  const headers = new Headers({ location })
+  const path = safeReturnPath(value)
+  if (path) {
+    headers.append(
+      'set-cookie',
+      [
+        `${RETURN_COOKIE}=${encodeURIComponent(path)}`,
+        `Path=${RETURN_COOKIE_OPTIONS.path}`,
+        `Max-Age=${RETURN_COOKIE_OPTIONS.maxAge}`,
+        // Lax, not Strict: the callback arrives as a top-level navigation FROM
+        // the identity provider, and Strict would withhold the cookie there —
+        // which is the same failure by a different route.
+        'SameSite=Lax',
+        'HttpOnly',
+        'Secure',
+      ].join('; '),
+    )
+  }
+  return new Response(null, { status: 302, headers })
+}
+
+
 /** Read the remembered destination and consume it. Single use, by design. */
 export async function takeReturnPath(): Promise<string | null> {
   try {
