@@ -277,6 +277,26 @@
       },
       "metadataContract": "sourceType, scanIndex, physicalHalf, printedFolio, canonicalPosition, sequenceState, chapter, sectionCandidates, ocrConfidence, alternateCaptures. printedFolio and canonicalPosition are NULL rather than absent when unknown \u2014 a missing key invites a default, and a synthesised folio is the invented continuity this whole lane exists to prevent.",
       "whyDuplicatesAreNotChunks": "A second capture would double the page's weight in retrieval and let one sentence be cited as two independent sources. Kept as corroboration instead, so extra scans raise confidence without polluting the index."
+    },
+    "asyncIngestion": {
+      "status": "FOUNDATION BUILT (durable state + states + notes). Background runner and consumer wiring NOT yet done.",
+      "ownerDecision": "Scanned-PDF ingestion becomes an asynchronous background job. Upload returns immediately, the file appears in Files as \"Reading\u2026\", stages are visible, and readiness is canonical rather than UI-only. 225s is a job, not a request.",
+      "built": {
+        "M23 document_processing": "durable per-scope readiness under RLS, keyed by (owner, workspace, file).",
+        "states": "stored | processing | ready | ready_with_unplaced_pages | no_text_layer | ocr_failed | corrupt | encrypted | too_large_to_process",
+        "stages": "uploaded -> rendering_pages -> reading_text -> reconstructing_order -> indexing -> ready",
+        "whyStagesNotPercent": "A percentage would have to be invented from a duration nobody has measured, and an invented number that drifts is worse than none. The stage the job is in is a fact.",
+        "sequenceComplete": "\ud83d\udea8 STORED as a boolean, never inferred. Sequence-sensitive retrieval must KNOW whether it is operating over the complete ordered set; asking a model to work that out from metadata strings is how a confident wrong order ships.",
+        "notes": "UNPLACED_PAGES_NOTE and SEQUENCE_LIMITED_NOTE live beside the states so wording cannot drift from behaviour."
+      },
+      "provenTests": "Readiness survives a fresh connection (the whole point of storing it); progress writes keep the original startedAt via COALESCE; sequenceComplete round-trips; one tenant cannot see another's document state under RLS; interrupted jobs are discoverable after a crash; deletion removes readiness.",
+      "remaining": [
+        "background runner: rasterise -> OCR -> reconstruct -> index, writing stage transitions durably",
+        "resume or fail interrupted jobs on boot rather than leaving them implying progress",
+        "consumer: upload returns immediately, Files shows the state, polling for progress",
+        "sequence-sensitive retrieval consults sequenceComplete and attaches the note",
+        "end-to-end live acceptance on liv_kreyol_part1.pdf, after which the scanned-PDF refusal is removed"
+      ]
     }
   },
   "capabilities": {

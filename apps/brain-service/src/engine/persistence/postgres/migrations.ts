@@ -1147,6 +1147,48 @@ const M22_INDEX_VERSION_CHUNK_COUNT = `
 ALTER TABLE index_versions ADD COLUMN IF NOT EXISTS chunk_count BIGINT;
 `;
 
+/**
+ * M23 — durable readiness for documents that cannot be read in a request.
+ *
+ * A scanned book takes ~225s to rasterise, OCR and reconstruct. That is a
+ * background JOB, not an upload, and its state has to outlive the browser: the
+ * user closes the tab, reloads, or opens the file tomorrow, and the answer to
+ * "is this readable yet" must still be correct.
+ *
+ * So readiness is stored, not held in memory and not derived in the UI. An
+ * in-memory state would come back as "stored" after every restart and quietly
+ * re-run a four-minute job, or worse, report a half-processed document as ready.
+ *
+ * `stage` is a named step rather than a percentage. A fake percentage would have
+ * to be invented from a duration nobody has measured yet; the stage the job is
+ * actually in is a fact, and it is what the user wants anyway.
+ */
+const M23_DOCUMENT_PROCESSING = `
+CREATE TABLE IF NOT EXISTS document_processing (
+  owner_scope     migra_scope NOT NULL,
+  workspace_scope migra_scope NOT NULL,
+  file_name       TEXT NOT NULL,
+  state           TEXT NOT NULL,
+  stage           TEXT,
+  detail          TEXT,
+  pages_total     INTEGER,
+  pages_done      INTEGER,
+  ordered_pages   INTEGER,
+  unplaced_pages  INTEGER,
+  /* Whether retrieval may treat the ordered set as COMPLETE. Stored rather than
+     inferred: a sequence-sensitive answer must not have to read prose to find
+     out that some pages could not be placed. */
+  sequence_complete BOOLEAN,
+  failure_reason  TEXT,
+  started_at      BIGINT,
+  updated_at      BIGINT,
+  PRIMARY KEY (owner_scope, workspace_scope, file_name)
+);
+
+CREATE INDEX IF NOT EXISTS document_processing_state_idx
+  ON document_processing (owner_scope, workspace_scope, state);
+`;
+
 export const MIGRATIONS: readonly Migration[] = [
   { version: 1, name: 'foundation', sql: M1_FOUNDATION },
   { version: 2, name: 'tenancy_primitives', sql: M2_TENANCY },
@@ -1170,6 +1212,7 @@ export const MIGRATIONS: readonly Migration[] = [
   { version: 20, name: 'media_migrations', sql: M20_MEDIA_MIGRATIONS },
   { version: 21, name: 'message_files', sql: M21_MESSAGE_FILES },
   { version: 22, name: 'index_version_chunk_count', sql: M22_INDEX_VERSION_CHUNK_COUNT },
+  { version: 23, name: 'document_processing', sql: M23_DOCUMENT_PROCESSING },
 ];
 
 
