@@ -27,6 +27,8 @@ export interface ProcessingStatus {
   unplacedPages?: number
   sequenceComplete?: boolean
   failureReason?: string
+  /** Caveat text, supplied by the Brain so there is one definition of it. */
+  sequenceNote?: string
 }
 
 /**
@@ -73,4 +75,44 @@ export async function forgetProcessing(fileName: string): Promise<void> {
 export function contributesToAnswers(status: ProcessingStatus | null | undefined): boolean {
   if (!status) return true // no processing record: an ordinary fast-path document
   return status.state === 'ready' || status.state === 'ready_with_unplaced_pages'
+}
+
+/**
+ * Which sequence caveat, if any, this turn must carry.
+ *
+ * Two conditions, both required. A document whose sequence is complete needs no
+ * caveat however the question is phrased, and an incomplete one needs none for a
+ * content question — which is most of what a language book is used for. Warning
+ * on everything would teach the user to ignore the warning.
+ */
+export function sequenceNoteFor(
+  question: string,
+  statuses: readonly (ProcessingStatus | null | undefined)[],
+): string | null {
+  const incomplete = statuses.find((s) => s && s.sequenceComplete === false)
+  if (!incomplete) return null
+  return isOrderingQuestion(question) ? (incomplete.sequenceNote ?? null) : null
+}
+
+/**
+ * Does the question depend on the document's ORDER?
+ *
+ * Mirrors the Brain's classifier deliberately narrowly: "what does it say" and
+ * "find this phrase" are answerable from any readable page and must not inherit
+ * a caveat about ordering.
+ */
+export function isOrderingQuestion(question: string): boolean {
+  const text = question.trim()
+  if (!text) return false
+  const ordering = [
+    /\b(next|previous|preceding|following|after|before)\s+(lesson|section|chapter|page|part|unit)\b/i,
+    /\bwhat\s+(comes|follows)\b/i,
+    /\bin\s+order\b/i,
+    /\bsequentially\b/i,
+    /\bstep[- ]by[- ]step\b/i,
+    /\b(first|last)\s+(lesson|section|chapter|page)\b/i,
+    /\bcurriculum\b/i,
+    /\blesson\s+plan\b/i,
+  ]
+  return ordering.some((re) => re.test(text))
 }

@@ -46,6 +46,7 @@ import {
 } from '@/server/brain/seams'
 import { listFiles } from '@/server/files/storage'
 import { reconcileGrounding } from '@/server/files/grounding'
+import { readProcessing, sequenceNoteFor } from '@/server/files/documentProcessing'
 import { resolveRequestPrincipal } from '@/server/tenancy/requestPrincipal'
 import { reserveTurnFor, settleTurnFor } from '@/server/anonymous/turnQuota'
 import type { Principal } from '@/server/tenancy/principal'
@@ -1068,6 +1069,19 @@ export async function POST(request: Request): Promise<Response> {
        * anywhere else can never be presented as one of their documents.
        */
       const sources = grounded && completed ? await attributedFiles(groundedFiles) : []
+
+      /*
+       * THE ORDERING CAVEAT, attached only where ordering is load-bearing.
+       *
+       * A reconstructed scan can be fully usable for content while its sequence
+       * is incomplete. Saying so on every question would make a working document
+       * sound unreliable and teach the user to skip the warning; saying nothing
+       * on an ordering question would present an incomplete order as fact.
+       */
+      const groundedStatuses = sources.length
+        ? await Promise.all(sources.map((name) => readProcessing(name).catch(() => null)))
+        : []
+      const sequenceNote = sequenceNoteFor(prompt, groundedStatuses)
       /*
        * "report.pdf · page 7" — and never a range the evidence does not support.
        *
@@ -1120,6 +1134,7 @@ export async function POST(request: Request): Promise<Response> {
             // Keyed by file so the UI pairs each source with its own pages and
             // cannot attach one document's pages to another's name.
             ...(Object.keys(sourcePages).length ? { sourcePages } : {}),
+            ...(sequenceNote ? { sequenceNote } : {}),
             ...(quota ? { quota } : {}),
           })
           trace.finish('ok')

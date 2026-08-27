@@ -12,7 +12,7 @@ import type { FastifyInstance } from 'fastify';
 import { scopeFrom } from '../memory/memoryRoutes.js';
 import type { DocumentJobRunner } from './documentJobs.js';
 import type { DocumentReadiness } from './documentReadiness.js';
-import { describeState, isReadable } from './documentReadiness.js';
+import { describeState, isReadable, SEQUENCE_LIMITED_NOTE } from './documentReadiness.js';
 
 export interface DocumentReadinessStore {
   read(scope: { ownerScope: string; workspaceScope: string }, fileName: string): Promise<DocumentReadiness | undefined>;
@@ -44,6 +44,16 @@ function present(readiness: DocumentReadiness) {
      * a poll that never stops is a background request storm nobody notices.
      */
     polling: readiness.state === 'processing' || readiness.state === 'stored',
+    /*
+     * The caveat text travels WITH the state, so there is one definition of it.
+     * A copy in the consumer would drift from the behaviour it describes the
+     * first time either is edited, and a warning that no longer matches what the
+     * system does is worse than none.
+     *
+     * Present only when it could ever apply; whether it is SHOWN is the caller's
+     * decision, made per question.
+     */
+    ...(readiness.sequenceComplete === false ? { sequenceNote: SEQUENCE_LIMITED_NOTE } : {}),
   };
 }
 
