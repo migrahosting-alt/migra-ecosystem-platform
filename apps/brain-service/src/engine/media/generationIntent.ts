@@ -1,3 +1,4 @@
+import { describeImageRequest } from './imagePrompt.js'
 /**
  * Is this turn asking for an image to be MADE, rather than described?
  *
@@ -158,6 +159,24 @@ export function classifyGenerationIntent(prompt: string): TurnIntent {
   if (INSTRUCTIONAL.some((re) => re.test(text))) return 'text'
 
   if (EXPLICIT.some((re) => re.test(text))) return 'image_generation'
+
+  /*
+   * A request for ONE literal character is a picture request whatever verb it
+   * uses, and it is asked for in ways the make+artefact rule below rejects.
+   *
+   * "make me a capital B" has the verb and no artefact noun; "give me a PNG of C"
+   * has the noun and no creation verb. Both were classified as text, so a request
+   * that can only mean one glyph never reached the deterministic typeface path —
+   * and the phrasings people actually use were the ones that failed.
+   *
+   * This asks `describeImageRequest` rather than restating the rule, so there is
+   * ONE definition of "is this a single glyph". A second copy here would drift
+   * from the renderer's, and the two disagreeing is worse than either being wrong.
+   *
+   * It runs AFTER the instructional guard on purpose: "how do I generate a letter
+   * B in Python?" must stay an explanation.
+   */
+  if (describeImageRequest(text).kind === 'glyph') return 'image_generation'
 
   const asksToMake = MAKE.some((re) => re.test(text))
   const namesArtefact = ARTEFACT.some((re) => re.test(text))

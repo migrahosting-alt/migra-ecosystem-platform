@@ -24,7 +24,7 @@
 
 /** Imperatives aimed at the assistant, not at the canvas. */
 const REQUEST_PREFIX =
-  /^\s*(please\s+)?(can you\s+|could you\s+|i want you to\s+|i(?:'d| would) like\s+)?(generate|create|make|draw|paint|render|produce|design|illustrate|show)\s+(me\s+)?((an?|the)\s+(image|picture|drawing|illustration|photo)\s+of\s+)?/i
+  /^\s*(please\s+)?(can you\s+|could you\s+|i want you to\s+|i(?:'d| would) like\s+)?(generate|create|make|draw|paint|render|produce|design|illustrate|show|give|send|get)\s+(me\s+)?((an?|the)\s+(image|picture|drawing|illustration|photo|png|jpe?g|webp|gif|svg|file)\s+of\s+)?/i
 
 /*
  * The article is consumed ONLY as part of "an image of". An earlier version
@@ -39,8 +39,18 @@ const FORMAT_SUFFIX =
   /\s*(,?\s*(in|as|to)\s+(a\s+)?)?(png|jpe?g|webp|gif|svg|image|picture|file|format)\s*(file|format|image)?\s*$/i
 
 /** A request for one character to be drawn. */
+/*
+ * The NOUN is optional when a case modifier is present.
+ *
+ * "make me a capital B" names no noun and was read as a scene, so a request that
+ * could only ever mean one glyph went to diffusion. "capital"/"lowercase" already
+ * says the subject is a character — nothing else in English is capitalised — so
+ * requiring the word "letter" as well only rejected the shorter phrasing people
+ * actually use. The single-character anchor at the end still does the real work:
+ * "a capital city" cannot match it.
+ */
 const SINGLE_CHARACTER =
-  /^(the\s+|a\s+)?(capital|uppercase|upper[- ]case|lowercase|lower[- ]case|small)?\s*(letter|character|digit|number|symbol)\s+["'“”]?([A-Za-z0-9])["'“”]?$/i
+  /^(the\s+|a\s+)?(?:(capital|uppercase|upper[- ]case|lowercase|lower[- ]case|small)\s*(letter|character|digit|number|symbol)?|(?:capital|uppercase|lowercase|small)?\s*(letter|character|digit|number|symbol))\s+["'“”]?([A-Za-z0-9])["'“”]?$/i
 
 /** A bare character, once the request grammar is gone: "generate A in png" -> "A". */
 const BARE_CHARACTER = /^["'“”]?([A-Za-z0-9])["'“”]?$/
@@ -66,7 +76,7 @@ export function shapeImagePrompt(userPrompt: string): string {
 
   const single = SINGLE_CHARACTER.exec(text)
   const bare = BARE_CHARACTER.exec(text)
-  const character = single?.[4] ?? bare?.[1]
+  const character = single?.[5] ?? bare?.[1]
   if (character) {
     const lower = /lower/i.test(single?.[2] ?? '') || /small/i.test(single?.[2] ?? '')
     const glyph = lower ? character.toLowerCase() : character.toUpperCase()
@@ -107,7 +117,7 @@ export function describeImageRequest(userPrompt: string): ImageRequest {
 
   const single = SINGLE_CHARACTER.exec(cleaned)
   const bare = BARE_CHARACTER.exec(cleaned)
-  const character = single?.[4] ?? bare?.[1]
+  const character = single?.[5] ?? bare?.[1]
   if (character) {
     const modifier = single?.[2] ?? ''
     const lowercase = /lower/i.test(modifier) || /small/i.test(modifier)
