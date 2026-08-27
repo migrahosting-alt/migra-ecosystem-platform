@@ -10,124 +10,130 @@
     "honestUnavailable": "A capability that is not ready must refuse truthfully rather than appear to work."
   },
   "activeLane": {
-    "name": "Files & Documents",
-    "objective": "Finish common file/document behaviour before deeper capabilities.",
-    "currentStep": "Citation attribution deployed and model-independent by design. LIVE PROOF BLOCKED by a measured GPU contention condition on the workstation, not by MigraPilot code: the RTX 3090 sits at 23723/24576 MiB and 100% utilisation while ComfyUI runs a job, and Ollama generation stalls even with qwen3:8b already resident at 11.5GB. Waiting for the ComfyUI queue to drain rather than killing an in-flight render.",
-    "lastProvenMilestone": "All five formats grounded live; historical cards live+reload; deletion preserves history and stops grounding; detach removes active grounding without touching history or the library; a deleted file renders as Deleted.",
-    "release": {
-      "consumer": "citations-bc990598",
-      "brain": "citations-bc990598"
-    },
-    "rollback": {
-      "consumer": [
-        "detach-bc990598",
-        "picker-bc990598",
-        "filecard2-bc990598",
-        "bc99059"
-      ],
-      "brain": [
-        "filerefs-bc990598",
-        "refusal-bc990598",
-        "bc99059"
-      ]
-    },
-    "blockers": [
-      "GPU VRAM contention on the workstation RTX 3090 (24GB): ComfyUI holds ~21.5GB, leaving ~3GB. qwen3:8b needs ~6GB and fails with HTTP 500 after ~5min. A 1.5B model still works. Chat and image generation contend for one GPU \u2014 needs an owner decision, not a code fix."
-    ],
-    "nextAcceptanceTest": "Once the model host recovers: run the citation pass across TXT/MD/CSV/JSON/code and confirm attribution appears for every grounded turn regardless of whether the reply names the file.",
-    "doNotWorkOnYet": [
-      "PDF/DOCX extraction (until the text path is fully closed)",
-      "Live Source Intelligence (PAUSED_CHECKPOINTED)",
-      "Provisioning any search vendor",
-      "Deleting local media fallback copies (stabilization window running)"
-    ],
-    "pendingAcceptance": {
-      "name": "Five-fixture citation pass",
-      "trigger": "ComfyUI /queue drains to zero. Do NOT interrupt an active render to run it.",
-      "design": "Every prompt ends with \"Do not mention any filename.\" That FORBIDS the model from citing, so any attribution still rendered must originate in the engine grounding frame, not model wording. The fixture anchor proves the turn was actually grounded.",
-      "fixtures": [
-        {
-          "format": "markdown",
-          "file": "fixture-runbook.md",
-          "anchor": "VIOLET-ANCHOR-19"
-        },
-        {
-          "format": "text",
-          "file": "fixture-notes.txt",
-          "anchor": "ORANGE-LADDER-42"
-        },
-        {
-          "format": "csv",
-          "file": "fixture-invoices.csv",
-          "anchor": "9930.25"
-        },
-        {
-          "format": "json",
-          "file": "fixture-config.json",
-          "anchor": "TEAL-COMPASS-88"
-        },
-        {
-          "format": "code",
-          "file": "fixture-service.ts",
-          "anchor": "CRIMSON-PIVOT-57"
-        }
-      ],
-      "twoConditionsPerRow": [
-        "GROUNDING CORRECTNESS \u2014 the answer contains the fixture anchor.",
-        "DETERMINISTIC ATTRIBUTION \u2014 the UI attribution appears and names the right file, despite the prompt forbidding the model to name it."
-      ],
-      "verdictRules": {
-        "allFiveBothConditions": "citation attribution -> PROVEN_LIVE; common text/code Files & Documents lane CLOSED; PDF/DOCX extraction begins.",
-        "anyRowAnchorPresentAttributionMissing": "attribution stays IMPLEMENTED_NEEDS_LIVE_PROOF. Lane NOT closed.",
-        "anyRowAttributionPresentAnchorWrongOrMissing": "that is a GROUNDING defect, not an attribution defect. File it as such."
+    "name": "PDF/DOCX extraction",
+    "objective": "Extend the proven document pipeline to PDF and DOCX, the first formats behind an honest refusal today.",
+    "currentStep": "Not started. Groundwork measured \u2014 see nextSliceGroundwork.pdfDocx.",
+    "lastProvenMilestone": "Common text/code Files & Documents lane CLOSED 2026-08-27 with deterministic attribution PROVEN_LIVE 5/5. Closed because the one failing cell was classified correctly as a model-quality defect, NOT because the failure was removed.",
+    "previousLane": {
+      "name": "Files & Documents",
+      "objective": "Finish common file/document behaviour before deeper capabilities.",
+      "currentStep": "Citation attribution deployed and model-independent by design. LIVE PROOF BLOCKED by a measured GPU contention condition on the workstation, not by MigraPilot code: the RTX 3090 sits at 23723/24576 MiB and 100% utilisation while ComfyUI runs a job, and Ollama generation stalls even with qwen3:8b already resident at 11.5GB. Waiting for the ComfyUI queue to drain rather than killing an in-flight render.",
+      "lastProvenMilestone": "All five formats grounded live; historical cards live+reload; deletion preserves history and stops grounding; detach removes active grounding without touching history or the library; a deleted file renders as Deleted.",
+      "release": {
+        "consumer": "citations-bc990598",
+        "brain": "citations-bc990598"
       },
-      "ownerRuling": "Bonex, 2026-08-27: all five rows must pass BOTH conditions before the lane may close.",
-      "runResult": {
-        "ranAt": "2026-08-27 ~21:21-21:25 local, in the GPU window after the ComfyUI queue drained (5.4GB / 12% util).",
-        "model": "qwen3:8b (production default; the temporary override was removed before the run).",
-        "rows": [
+      "rollback": {
+        "consumer": [
+          "detach-bc990598",
+          "picker-bc990598",
+          "filecard2-bc990598",
+          "bc99059"
+        ],
+        "brain": [
+          "filerefs-bc990598",
+          "refusal-bc990598",
+          "bc99059"
+        ]
+      },
+      "blockers": [
+        "GPU VRAM contention on the workstation RTX 3090 (24GB): ComfyUI holds ~21.5GB, leaving ~3GB. qwen3:8b needs ~6GB and fails with HTTP 500 after ~5min. A 1.5B model still works. Chat and image generation contend for one GPU \u2014 needs an owner decision, not a code fix."
+      ],
+      "nextAcceptanceTest": "Once the model host recovers: run the citation pass across TXT/MD/CSV/JSON/code and confirm attribution appears for every grounded turn regardless of whether the reply names the file.",
+      "doNotWorkOnYet": [
+        "PDF/DOCX extraction (until the text path is fully closed)",
+        "Live Source Intelligence (PAUSED_CHECKPOINTED)",
+        "Provisioning any search vendor",
+        "Deleting local media fallback copies (stabilization window running)"
+      ],
+      "pendingAcceptance": {
+        "name": "Five-fixture citation pass",
+        "trigger": "ComfyUI /queue drains to zero. Do NOT interrupt an active render to run it.",
+        "design": "Every prompt ends with \"Do not mention any filename.\" That FORBIDS the model from citing, so any attribution still rendered must originate in the engine grounding frame, not model wording. The fixture anchor proves the turn was actually grounded.",
+        "fixtures": [
           {
             "format": "markdown",
             "file": "fixture-runbook.md",
-            "anchor": "PASS VIOLET-ANCHOR-19",
-            "attribution": "PASS names fixture-runbook.md",
-            "modelNamedFile": false
+            "anchor": "VIOLET-ANCHOR-19"
           },
           {
             "format": "text",
             "file": "fixture-notes.txt",
-            "anchor": "PASS ORANGE-LADDER-42",
-            "attribution": "PASS names fixture-notes.txt",
-            "modelNamedFile": false
+            "anchor": "ORANGE-LADDER-42"
           },
           {
             "format": "csv",
             "file": "fixture-invoices.csv",
-            "anchor": "FAIL answered APAC/7715.75; correct is EMEA/9930.25",
-            "attribution": "PASS names fixture-invoices.csv",
-            "modelNamedFile": false
+            "anchor": "9930.25"
           },
           {
             "format": "json",
             "file": "fixture-config.json",
-            "anchor": "PASS TEAL-COMPASS-88",
-            "attribution": "PASS names fixture-config.json",
-            "modelNamedFile": false
+            "anchor": "TEAL-COMPASS-88"
           },
           {
             "format": "code",
             "file": "fixture-service.ts",
-            "anchor": "PASS CRIMSON-PIVOT-57",
-            "attribution": "PASS names fixture-service.ts",
-            "modelNamedFile": false
+            "anchor": "CRIMSON-PIVOT-57"
           }
         ],
-        "score": "9/10 cells. Attribution 5/5. Anchor 4/5.",
-        "attributionVerdict": "DETERMINISTIC ATTRIBUTION HELD 5/5. In every row the model was forbidden to name a file and obeyed (modelNamedFile false everywhere), yet the UI still attributed the correct single file, and message fileRefs matched exactly. That is the property the fix targeted.",
-        "row3Diagnosis": "NOT a grounding defect and NOT an attribution defect. Retrieval demonstrably delivered the content: asked to list the rows verbatim, the model reproduced all five INCLUDING \"EMEA,Q2,9930.25,Rivera\". Attribution named the right file. The model simply picked the wrong maximum with the correct data in context. REPLICATED and found PROMPT-SENSITIVE, not systematic: re-asked as \"compare every revenue_eur value and state the single largest\", it answered 9930.25 EMEA Q2 correctly. Separately it mis-transcribed 7715.75 as 7015.75 in the verbatim listing \u2014 a second fidelity slip by the same model.",
-        "thirdFailureMode": "The rubric has buckets for (a) anchor right / attribution missing and (b) attribution present / anchor wrong => grounding defect. Row 3 is neither: grounding AND attribution both correct, the MODEL ANSWER wrong. Classification is the owner's call; not self-assigned.",
-        "contaminationNote": "The first markdown run showed TWO files attributed. That was tester contamination, not product behaviour: the fixture-service.ts uploaded through the composer was still a pending attachment and rode along on that turn; fileRefs confirmed both were genuinely attached, so attribution was honest. Re-run clean afterwards and it named exactly one file.",
-        "laneStatus": "NOT CLOSED. 10/10 was the stated bar and this run is 9/10."
+        "twoConditionsPerRow": [
+          "GROUNDING CORRECTNESS \u2014 the answer contains the fixture anchor.",
+          "DETERMINISTIC ATTRIBUTION \u2014 the UI attribution appears and names the right file, despite the prompt forbidding the model to name it."
+        ],
+        "verdictRules": {
+          "allFiveBothConditions": "citation attribution -> PROVEN_LIVE; common text/code Files & Documents lane CLOSED; PDF/DOCX extraction begins.",
+          "anyRowAnchorPresentAttributionMissing": "attribution stays IMPLEMENTED_NEEDS_LIVE_PROOF. Lane NOT closed.",
+          "anyRowAttributionPresentAnchorWrongOrMissing": "that is a GROUNDING defect, not an attribution defect. File it as such."
+        },
+        "ownerRuling": "Bonex, 2026-08-27: all five rows must pass BOTH conditions before the lane may close.",
+        "runResult": {
+          "ranAt": "2026-08-27 ~21:21-21:25 local, in the GPU window after the ComfyUI queue drained (5.4GB / 12% util).",
+          "model": "qwen3:8b (production default; the temporary override was removed before the run).",
+          "rows": [
+            {
+              "format": "markdown",
+              "file": "fixture-runbook.md",
+              "anchor": "PASS VIOLET-ANCHOR-19",
+              "attribution": "PASS names fixture-runbook.md",
+              "modelNamedFile": false
+            },
+            {
+              "format": "text",
+              "file": "fixture-notes.txt",
+              "anchor": "PASS ORANGE-LADDER-42",
+              "attribution": "PASS names fixture-notes.txt",
+              "modelNamedFile": false
+            },
+            {
+              "format": "csv",
+              "file": "fixture-invoices.csv",
+              "anchor": "FAIL answered APAC/7715.75; correct is EMEA/9930.25",
+              "attribution": "PASS names fixture-invoices.csv",
+              "modelNamedFile": false
+            },
+            {
+              "format": "json",
+              "file": "fixture-config.json",
+              "anchor": "PASS TEAL-COMPASS-88",
+              "attribution": "PASS names fixture-config.json",
+              "modelNamedFile": false
+            },
+            {
+              "format": "code",
+              "file": "fixture-service.ts",
+              "anchor": "PASS CRIMSON-PIVOT-57",
+              "attribution": "PASS names fixture-service.ts",
+              "modelNamedFile": false
+            }
+          ],
+          "score": "9/10 cells. Attribution 5/5. Anchor 4/5.",
+          "attributionVerdict": "DETERMINISTIC ATTRIBUTION HELD 5/5. In every row the model was forbidden to name a file and obeyed (modelNamedFile false everywhere), yet the UI still attributed the correct single file, and message fileRefs matched exactly. That is the property the fix targeted.",
+          "row3Diagnosis": "NOT a grounding defect and NOT an attribution defect. Retrieval demonstrably delivered the content: asked to list the rows verbatim, the model reproduced all five INCLUDING \"EMEA,Q2,9930.25,Rivera\". Attribution named the right file. The model simply picked the wrong maximum with the correct data in context. REPLICATED and found PROMPT-SENSITIVE, not systematic: re-asked as \"compare every revenue_eur value and state the single largest\", it answered 9930.25 EMEA Q2 correctly. Separately it mis-transcribed 7715.75 as 7015.75 in the verbatim listing \u2014 a second fidelity slip by the same model.",
+          "thirdFailureMode": "The rubric has buckets for (a) anchor right / attribution missing and (b) attribution present / anchor wrong => grounding defect. Row 3 is neither: grounding AND attribution both correct, the MODEL ANSWER wrong. Classification is the owner's call; not self-assigned.",
+          "contaminationNote": "The first markdown run showed TWO files attributed. That was tester contamination, not product behaviour: the fixture-service.ts uploaded through the composer was still a pending attachment and rode along on that turn; fileRefs confirmed both were genuinely attached, so attribution was honest. Re-run clean afterwards and it named exactly one file.",
+          "laneStatus": "NOT CLOSED. 10/10 was the stated bar and this run is 9/10."
+        }
       }
     }
   },
@@ -155,7 +161,9 @@
       "Truthful refusal when a document question has no attached document",
       "Deletion preserves history and stops grounding",
       "Detach a document from active grounding (history and library untouched)",
-      "Deleted library file renders as Deleted on its historical turn"
+      "Deleted library file renders as Deleted on its historical turn",
+      "Deterministic file attribution \u2014 proven 5/5 on 2026-08-27 across markdown, text, CSV, JSON and code. Every prompt forbade the model from naming a file and every reply obeyed, yet the correct single file was still attributed and message fileRefs matched. Provenance comes from the engine grounding frame, not model wording.",
+      "Files & Documents \u2014 common text/code attachment lane (TXT, MD, CSV, JSON, code): upload, index, ground, attribute, historical attachment record, detach control, deleted-file state."
     ],
     "STABILIZATION": [
       {
@@ -194,21 +202,9 @@
         "needsFromOwner": "Create the project + Object Storage credentials + DR bucket in the Hetzner console."
       }
     ],
-    "IMPLEMENTED_NEEDS_LIVE_PROOF": [
-      "Deterministic source attribution \u2014 the engine emits a `grounding` frame naming the files it put in front of the model; the consumer attributes from that, intersected with the caller library. Replaces `answer.includes(filename)`."
-    ]
+    "IMPLEMENTED_NEEDS_LIVE_PROOF": []
   },
   "openDefects": [
-    {
-      "id": "citation-presentation-inconsistency",
-      "symptom": "A grounded TXT answer showed '(from fixture-notes.txt:3-6)' and a 'From your files' attribution; a grounded Markdown answer showed neither, on the same path.",
-      "evidence": "Live, 2026-08-26.",
-      "rootCause": "UNKNOWN \u2014 model variance vs deterministic presentation bug not yet distinguished.",
-      "status": "OPEN_RECORDED_NOT_CHASED",
-      "effort": "MEDIUM",
-      "regressionTest": "none yet",
-      "liveAcceptance": "not run"
-    },
     {
       "id": "vision-turn-no-output-240s",
       "symptom": "A vision turn held the local model for 240s and returned zero tokens; failover list contained only the failing model.",
@@ -244,6 +240,26 @@
       "effort": "MEDIUM",
       "regressionTest": "Wanted: an approved index that reports zero chunks must answer \"index unavailable, reindex needed\", never \"no readable content was found in <file>\". Approved+empty is contradictory state and must fail loudly.",
       "liveAcceptance": "Not yet proven."
+    },
+    {
+      "id": "csv-quantitative-reasoning-qwen3-8b",
+      "title": "CSV quantitative reasoning weakness \u2014 qwen3:8b",
+      "symptom": "With all rows correctly grounded, the model can still select the wrong maximum or mistranscribe numeric values. Asked which region/quarter had the highest revenue it answered APAC/7715.75 when EMEA/9930.25 is larger, and separately transcribed 7715.75 as 7015.75.",
+      "evidence": "Layers separate cleanly and only the last one failed: correct file attached, correct chunks reached the model (it reproduced all five rows verbatim INCLUDING EMEA,Q2,9930.25), all relevant rows present, correct attribution rendered independently of model wording \u2014 then a comparison error. Rephrasing to \"compare every revenue_eur value and state the single largest\" produced the correct answer, so it is prompt/model-sensitive rather than retrieval loss.",
+      "classification": "NOT a Files & Documents transport, retrieval or provenance defect. A reasoning/fidelity weakness of qwen3:8b on structured tabular data. Owner ruling 2026-08-27.",
+      "status": "OPEN \u2014 separate model/tool-routing quality item; does not hold the document pipeline open.",
+      "effort": "MEDIUM",
+      "evaluationTrack": [
+        "max/min",
+        "sum",
+        "average",
+        "row filtering",
+        "comparisons",
+        "exact numeric transcription",
+        "CSV vs structured-data tool routing"
+      ],
+      "longerTermDirection": "Do not rely on an LLM alone for arithmetic over CSV. MigraPilot should detect that a request is a DETERMINISTIC DATA OPERATION, route it through a table/data tool, and let the model explain the result rather than compute it.",
+      "provenance": "Arose from the 9/10 citation pass. That run is preserved verbatim and was NOT rewritten to 10/10."
     }
   ],
   "driftControl": [
@@ -341,6 +357,7 @@
       "Citation presentation consistency review"
     ],
     "MEDIUM": [
+      "Deterministic data-operation routing \u2014 detect arithmetic/aggregation over tabular data and route to a table/data tool instead of the LLM (see csv-quantitative-reasoning-qwen3-8b)",
       "PDF extraction \u2014 see nextSliceGroundwork.pdfDocx for the MEASURED runtime constraints",
       "DOCX extraction",
       "XLSX/PPTX extraction",
@@ -378,5 +395,18 @@
       ],
       "notStarted": "Groundwork only. The lane does not open until the citation pass is 10/10."
     }
-  }
+  },
+  "resolvedDefects": [
+    {
+      "id": "citation-presentation-inconsistency",
+      "symptom": "A grounded TXT answer showed '(from fixture-notes.txt:3-6)' and a 'From your files' attribution; a grounded Markdown answer showed neither, on the same path.",
+      "evidence": "Live, 2026-08-26.",
+      "rootCause": "UNKNOWN \u2014 model variance vs deterministic presentation bug not yet distinguished.",
+      "status": "RESOLVED 2026-08-27 \u2014 live-proven 5/5 by the citation pass.",
+      "effort": "MEDIUM",
+      "regressionTest": "none yet",
+      "liveAcceptance": "not run",
+      "proof": "Attribution rendered for markdown, text, CSV, JSON and code, in every case with the model forbidden from naming the file. The original asymmetry (citation for TXT, absent for markdown) is gone because provenance no longer depends on the model formatting a citation."
+    }
+  ]
 }

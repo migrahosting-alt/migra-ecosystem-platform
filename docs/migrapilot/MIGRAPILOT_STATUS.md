@@ -27,7 +27,41 @@ _Last updated: 2026-08-26_
 
 ---
 
-## Active lane — Files & Documents
+## Lane CLOSED 2026-08-27 — Files & Documents (common text/code)
+
+**Deterministic file attribution is `PROVEN_LIVE`, 5/5.**
+
+The pass ran five controlled turns on production `qwen3:8b`. Every prompt ended with
+"Do not mention any filename", so the model was forbidden from citing — and every reply
+obeyed. The correct single file was still attributed in all five formats, with message
+`fileRefs` matching exactly. Provenance comes from the engine's `grounding` frame, not
+from model wording, and that is now demonstrated rather than asserted.
+
+| format | file | anchor | attribution |
+|---|---|---|---|
+| Markdown | `fixture-runbook.md` | ✅ | ✅ |
+| Text | `fixture-notes.txt` | ✅ | ✅ |
+| CSV | `fixture-invoices.csv` | ❌ | ✅ |
+| JSON | `fixture-config.json` | ✅ | ✅ |
+| Code | `fixture-service.ts` | ✅ | ✅ |
+
+🚨 **The run is recorded as 9/10 and has NOT been rewritten to 10/10.** The lane closed
+because the failing cell was *classified correctly*, not because it disappeared.
+
+The CSV row failed its anchor, and the layers separate cleanly: correct file attached,
+correct chunks reached the model — it reproduced all five rows verbatim including
+`EMEA,Q2,9930.25` — correct attribution rendered, and *then* the model picked the wrong
+maximum. Rephrasing to compare every value explicitly produced the right answer, so it is
+prompt/model-sensitive, not retrieval loss. That is a weakness of `qwen3:8b` on structured
+tabular data, tracked separately.
+
+Longer term the fix is not a better prompt: MigraPilot should detect a **deterministic data
+operation** and route it to a table/data tool, then let the model explain the result rather
+than compute it.
+
+---
+
+## Active lane — PDF/DOCX extraction
 
 **Objective:** finish common file/document behaviour before deeper capabilities.
 
@@ -79,7 +113,7 @@ from Bonex. **Not a product blocker.**
 
 | Defect | Effort | Status |
 |---|---|---|
-| Citation shown for TXT, absent for Markdown | MEDIUM | **Fixed** — attribution now comes from the engine, not the prose. Needs live proof. |
+| CSV quantitative reasoning — `qwen3:8b` | MEDIUM | **Open.** Model-quality item, not a document-pipeline defect. |
 | GPU contention starves the chat lane | MEDIUM | Blocks live acceptance. **Environmental, not a product defect** — see below. |
 | Index reported `approved` while holding zero chunks | MEDIUM | Seen once, **not reproduced**. Told the user a real file had "no readable content". |
 | Vision turn held 240s and returned nothing | MEDIUM | Operational target, not reproducible |
