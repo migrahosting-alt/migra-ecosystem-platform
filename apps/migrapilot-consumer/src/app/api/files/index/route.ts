@@ -60,6 +60,7 @@ export async function GET(): Promise<Response> {
     state?: string
     stats?: Record<string, unknown>
     chunkCounts?: Record<string, number>
+    chunkIntegrity?: { loaded: number; recorded: number | null; contradictory: boolean }
   }
   const state = value?.state ?? existing.state ?? null
   return Response.json({
@@ -78,6 +79,15 @@ export async function GET(): Promise<Response> {
      * only when the approved index holds chunks FOR THAT FILE.
      */
     chunkCounts: value?.chunkCounts ?? {},
+    /*
+     * Surfaced so a broken index is OBSERVABLE rather than merely handled.
+     *
+     * The chat path already refuses honestly when the index contradicts its own
+     * record, but a refusal the user sees once and nobody can inspect afterwards
+     * is not diagnosis. Relaying it here means the state can be read directly
+     * while it is happening, which is what the untraced restart race needs.
+     */
+    chunkIntegrity: value?.chunkIntegrity ?? null,
   })
 }
 
