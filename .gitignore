@@ -28,6 +28,7 @@
 !/scripts/
 !/scripts/brain-release.sh
 !/scripts/consumer-release.sh
+!/scripts/release-retention.sh
 
 # Allow .github (agents + workflows)
 !.github/

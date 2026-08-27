@@ -63,7 +63,39 @@ RELEASE="$APP_ROOT/releases/$NAME"
 
 step() { printf '\n[%s] %s\n' "$(date +%H:%M:%S)" "$*" ; }
 
-step "1/7 unpack payload into staging"
+# ── PREFLIGHT: CAPACITY ─────────────────────────────────────────────────────
+#
+# Refuse BEFORE touching anything. A deploy that runs out of disk half way
+# through leaves a partial staging tree, a partial release, and a filesystem too
+# full to clean up — and it does that at the exact moment someone is trying to
+# ship a fix. Checking first costs nothing and is the difference between "the
+# deploy declined" and "the box is wedged".
+#
+# 10 GiB is deliberately conservative against MEASURED peaks (2026-08-27):
+# a consumer release is ~577 MB with a ~530 MB staging tree beside it, and a
+# brain release ~700 MB with ~82 MB staging — so roughly 1.2 GB and 0.8 GB
+# respectively at peak. The margin exists because /opt reached 92% full while
+# nothing warned, and headroom is what buys the chance to react.
+MIN_FREE_GIB=${MIN_FREE_GIB:-10}
+FREE_KIB=$(df -Pk /opt | awk 'NR==2 {print $4}')
+FREE_GIB=$((FREE_KIB / 1024 / 1024))
+if [ "$FREE_GIB" -lt "$MIN_FREE_GIB" ]; then
+  cat >&2 <<EOF
+REFUSING TO DEPLOY — not enough free space.
+
+  filesystem holding /opt : $(df -Ph /opt | awk 'NR==2 {print $1" "$5" used, "$4" free"}')
+  required                : ${MIN_FREE_GIB} GiB free
+  found                   : ${FREE_GIB} GiB
+
+Nothing has been changed. Free space first — scripts/release-retention.sh
+reports what can be pruned and deletes nothing without --apply — then re-run.
+Override deliberately with MIN_FREE_GIB=<n> if you know the peak is smaller.
+EOF
+  exit 1
+fi
+echo "preflight: ${FREE_GIB} GiB free on $(df -Ph /opt | awk 'NR==2 {print $1}') (need ${MIN_FREE_GIB})"
+
+step "1/8 unpack payload into staging"
 mkdir -p "$STAGE"
 tar -xzf "$PAYLOAD" -C "$STAGE"
 
@@ -73,7 +105,7 @@ tar -xzf "$PAYLOAD" -C "$STAGE"
 # the hook is safe: `npm ci` validates the lockfile against DEPENDENCIES, not
 # scripts. Verified on the target: with the hook present npm exits 127, without
 # it npm exits 0 and installs all 154 packages.
-step "2/7 strip the dev-only prepare hook"
+step "2/8 strip the dev-only prepare hook"
 node -e '
   const f = process.argv[1] + "/package.json";
   const pkg = require(f);
@@ -90,12 +122,12 @@ node -e '
 # lockfile disagree, which is exactly the guarantee this slice is buying: the
 # release is reproducible from repo state rather than from whatever the previous
 # release happened to contain.
-step "3/7 install exact production dependencies from the lockfile"
+step "3/8 install exact production dependencies from the lockfile"
 ( cd "$STAGE" && npm ci --omit=dev \
     --workspace @migrapilot/brain-service --include-workspace-root ) \
   || { echo "INSTALL FAILED — refusing to build a release" >&2 ; exit 1 ; }
 
-step "4/7 assemble the release (dist + package.json + node_modules)"
+step "4/8 assemble the release (dist + package.json + node_modules)"
 # Layout is deliberately IDENTICAL to the existing releases so systemd's
 # ExecStart path and the rollback chain keep working untouched.
 mkdir -p "$RELEASE"
@@ -121,7 +153,7 @@ if [ -d "$NESTED" ]; then
   cp -rL "$NESTED/." "$RELEASE/node_modules/"
 fi
 
-step "5/7 verify every declared runtime dependency actually loads"
+step "5/8 verify every declared runtime dependency actually loads"
 node -e '
   const path = require("path");
   const { createRequire } = require("module");
@@ -146,7 +178,7 @@ node -e '
   if (missing.length) { console.error("VERIFY FAILED"); process.exit(1); }
 ' "$RELEASE" || { echo "VERIFICATION FAILED — release will NOT be activated" >&2 ; exit 1 ; }
 
-step "6/7 boot-test the release on port $BOOT_TEST_PORT"
+step "6/8 boot-test the release on port $BOOT_TEST_PORT"
 # Proves the release actually starts before it is allowed anywhere near the live
 # symlink. A release that installs and resolves can still die on boot.
 # The port variable is MIGRAPILOT_BRAIN_PORT, not PORT.
@@ -178,13 +210,13 @@ systemctl stop "$BOOT_UNIT" >/dev/null 2>&1 || true
 echo "   boot test passed"
 
 if [ "$ACTIVATE" != 1 ]; then
-  step "7/7 STOPPING — verified but not activated (no --activate)"
+  step "7/8 STOPPING — verified but not activated (no --activate)"
   echo "   release ready at: $RELEASE"
   echo "   live service untouched: $(readlink -f "$APP_ROOT/current")"
   exit 0
 fi
 
-step "7/7 activate atomically, then health-check with rollback"
+step "7/8 activate atomically, then health-check with rollback"
 PREVIOUS="$(readlink -f "$APP_ROOT/current" || true)"
 ln -sfn "$RELEASE" "$APP_ROOT/current.new"
 mv -Tf "$APP_ROOT/current.new" "$APP_ROOT/current"   # atomic rename
@@ -206,6 +238,30 @@ fi
 
 echo "   activated: $RELEASE"
 echo "   rollback target: ${PREVIOUS:-none}"
+
+step "8/8 retention candidates"
+# ── RETENTION, REPORTED ONLY ────────────────────────────────────────────────
+#
+# Deliberately NOT automatic. The selector protects the active release, the
+# rollback target, the N most recent, anything a process is using, and anything
+# a current/previous symlink points at — and that last rule only exists because
+# a report caught the canaries pointing INTO the main release directories from
+# their own roots. A selector that has surprised us once does not get to delete
+# unattended until it has run clean for a while under observation.
+#
+# Never fails the deploy: the release is already live and healthy at this point,
+# and a housekeeping hiccup must not be reported as a failed deployment.
+RETENTION="$(dirname "$0")/release-retention.sh"
+if [ -f "$RETENTION" ]; then
+  echo "   retention (report only):"
+  bash "$RETENTION" 2>/dev/null \
+    | grep -E 'prune candidate|abandoned staging|/dev/' \
+    | sed 's/^/     /' || true
+  echo "     run: bash $RETENTION --apply   # to act on the above"
+else
+  echo "   release-retention.sh is not alongside this script; skipping the report"
+fi
+
 
 # ── Building the payload (run from the repo root on the dev machine) ──────────
 #
