@@ -13,7 +13,7 @@
   "activeLane": {
     "name": "PDF/DOCX extraction",
     "objective": "Extend the proven document pipeline to PDF and DOCX, the first formats behind an honest refusal today.",
-    "currentStep": "Index truthfulness COMPLETE and proven live. Next per owner ordering: glyph phrasing gap (EASY), then PDF extractor qualification.",
+    "currentStep": "Glyph phrasing gap CLOSED. Next: PDF extractor qualification (unpdf, pdfjs-dist, pdf-parse) on the nine-fixture set.",
     "lastProvenMilestone": "Common text/code Files & Documents lane CLOSED 2026-08-27 with deterministic attribution PROVEN_LIVE 5/5. Closed because the one failing cell was classified correctly as a model-quality defect, NOT because the failure was removed.",
     "previousLane": {
       "name": "Files & Documents",
@@ -166,7 +166,8 @@
       "Deterministic file attribution \u2014 proven 5/5 on 2026-08-27 across markdown, text, CSV, JSON and code. Every prompt forbade the model from naming a file and every reply obeyed, yet the correct single file was still attributed and message fileRefs matched. Provenance comes from the engine grounding frame, not model wording.",
       "Files & Documents \u2014 common text/code attachment lane (TXT, MD, CSV, JSON, code): upload, index, ground, attribute, historical attachment record, detach control, deleted-file state.",
       "Reproducible brain-service releases \u2014 lockfile-driven npm ci, dependency verification, boot test, atomic activation with health check and auto-rollback. Activated live 2026-08-27 as lockfile-909d10d8; smoke-verified with a text turn, a deterministic glyph turn and a grounded file turn. The active tree is independent (inode links=1), not inherited.",
-      "Index snapshot integrity \u2014 every committed version is a complete independently loadable snapshot; a Brain restart no longer empties the index. Proven live 2026-08-27 (snapshot-4e3bc7c4)."
+      "Index snapshot integrity \u2014 every committed version is a complete independently loadable snapshot; a Brain restart no longer empties the index. Proven live 2026-08-27 (snapshot-4e3bc7c4).",
+      "Deterministic glyph generation is phrasing-independent \u2014 a request for one literal character routes to the typeface renderer whatever verb it uses. Proven live 2026-08-27 (glyph-436cd359): provenance typeface:DejaVuSerif-Bold.ttf, ComfyUI queue untouched."
     ],
     "STABILIZATION": [
       {
@@ -293,6 +294,16 @@
       "wantedFix": "Every Postgres-backed test file must report environment-unavailable as SKIPPED, never as a failure.",
       "status": "OPEN \u2014 easy backlog. Test-harness truthfulness, NOT part of the index fix.",
       "effort": "EASY"
+    },
+    {
+      "id": "generated-image-not-rendered-live",
+      "title": "Generated image appears only after a reload",
+      "severity": "HIGH",
+      "symptom": "A glyph turn streams route -> stage -> image -> done and the artifact is created, stored and linked to the assistant message, but the chat UI shows an EMPTY assistant message until the page is reloaded. On reload the image is there.",
+      "evidence": "Server side is fully proven: the Brain emits a 23,799-byte PNG frame, the consumer emits image {ref} with no error, GET /api/images/<ref> returns 200 image/png, and the Media Library grew 10 -> 12 for two NEW letters. Waited 112s during the live turn with no DOM image; the same artifact rendered immediately after refresh.",
+      "whyItMatters": "It presents exactly like a total failure. This is what made \"Generate an image of the letter B\" look like a classification bug for hours \u2014 the work succeeded every time and the user was shown nothing.",
+      "status": "OPEN \u2014 client-side rendering, NOT generation. Likely the same family as vision-turn-no-output-240s.",
+      "effort": "MEDIUM"
     }
   ],
   "driftControl": [
@@ -387,6 +398,7 @@
   ],
   "backlog": {
     "EASY_NEXT": [
+      "Generated image must render live, not only after a reload",
       "1. Contradictory index state \u2014 approved+searchable+zero chunks must never answer \"no readable content\"",
       "2. Glyph phrasing gap \u2014 \"Generate an image of the letter B\" should classify as deterministic glyph generation",
       "3. HIGH-VISIBILITY CHAT: image conversational-reference routing",
