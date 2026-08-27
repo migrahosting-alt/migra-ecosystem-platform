@@ -17,6 +17,12 @@
 # Canonical npm workspace lockfile — required for reproducible enterprise builds.
 !/package-lock.json
 
+# MigraPilot release tooling. The deploy path must be reproducible from repo
+# state, so the script that performs it has to live in the repo. Only this one
+# file is tracked — the rest of scripts/ stays ignored deliberately.
+!/scripts/
+!/scripts/brain-release.sh
+
 # Allow .github (agents + workflows)
 !.github/
 !.github/**
