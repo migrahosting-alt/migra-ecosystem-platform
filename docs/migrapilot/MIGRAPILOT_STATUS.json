@@ -506,7 +506,16 @@
         "reopen from History",
         "cross-account isolation",
         "page provenance surfaced in a citation (extraction records it; nothing renders it yet)"
-      ]
+      ],
+      "acceptanceComplete": {
+        "detachKeepsHistoricalCard": "PASS \u2014 grounding cleared to [], historical fileRefs intact, nothing marked missing.",
+        "deleteMakesCardUnavailable": "PASS \u2014 DELETE returned {deleted, searchPurged:true}, the file left the library, historical refs were RETAINED and missingFileRefs became [\"runbook-report.pdf\"].",
+        "reopenFromHistory": "PASS \u2014 reopened via the History list; deleted PDFs render \"Deleted / attached document, no longer available\" while the surviving PDF renders normally.",
+        "refreshAndActiveGrounding": "PASS \u2014 cards and per-turn refs survive a hard reload.",
+        "stillGroundsAfterAll": "PASS \u2014 re-uploaded through the picker after detach/delete/History and the exact token ORDER-CHECK-FINAL came back with attribution \"From your files: runbook-report.pdf\".",
+        "crossAccountIsolation": "COVERED BY TEST, NOT LIVE-PROVEN. Storage scoping is asserted by \"one user cannot see or delete another user's files\", now extended to include a PDF explicitly, and the Brain enforces chunk isolation under FORCE RLS with scope-crossing negatives. NOT verified with two signed-in browser accounts, because only one identity is available to me \u2014 stated rather than implied."
+      },
+      "uploadLimits": "Raised on owner instruction: per-file 1GB, library 20GB, 2000 files, all env-configurable. Not literally unbounded \u2014 extraction loads the whole file into memory, so an unbounded upload could exhaust the process and end chat for every user. \ud83d\udea8 Raising the upload cap alone would have made things WORSE: the indexer silently skipped anything over 200KB, so a 500KB PDF already uploaded fine and was never indexed. Both ceilings now move together and a test reads the consumer default from source to hold them together."
     }
   },
   "resolvedDefects": [

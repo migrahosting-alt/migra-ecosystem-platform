@@ -87,6 +87,10 @@ test('a traversal name writes inside the caller directory or not at all', async 
 test('one user cannot see or delete another user\'s files', async () => {
   asUser('user-alpha')
   await saveFile('alpha-notes.md', bytes('alpha only'))
+  // A PDF is included explicitly. Scoping is format-agnostic by construction, but
+  // "it should apply to PDFs too" is an assumption, and this file exists to hold
+  // assumptions to evidence.
+  await saveFile('alpha-report.pdf', bytes('%PDF-1.4 alpha only'))
   const alphaDir = await userDirectory()
 
   asUser('user-beta')
@@ -94,12 +98,13 @@ test('one user cannot see or delete another user\'s files', async () => {
   assert.notEqual(alphaDir, betaDir, 'each principal gets its own directory')
   assert.deepEqual(await listFiles(), [], 'beta must not see alpha files')
   assert.equal(await deleteFile('alpha-notes.md'), false, 'beta must not delete alpha files')
+  assert.equal(await deleteFile('alpha-report.pdf'), false, 'beta must not delete alpha PDFs')
 
   asUser('user-alpha')
   assert.deepEqual(
-    (await listFiles()).map((file) => file.name),
-    ['alpha-notes.md'],
-    'alpha keeps its file',
+    (await listFiles()).map((file) => file.name).sort(),
+    ['alpha-notes.md', 'alpha-report.pdf'],
+    "alpha keeps both files — beta's failed deletes must not have removed anything",
   )
   resetAuthPort()
 })
