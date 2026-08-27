@@ -124,7 +124,16 @@ test('mixed-width vectors in one index version are rejected on load', async (t) 
 
 // ── INDEX / CHUNK SEMANTICS ─────────────────────────────────────────────────
 
-test('loadChunks is strictly version-scoped, never across versions', async (t) => {
+/*
+ * A COMMITTED VERSION IS A COMPLETE SNAPSHOT.
+ *
+ * This test previously asserted that version 2 held ONLY the file that changed,
+ * which encoded the delta behaviour that caused the production defect: restart,
+ * and every file that did not change in the last sync disappeared. The
+ * assertion is deliberately changed, not deleted — the version-scoping intent it
+ * was written to protect is asserted below and is stronger than before.
+ */
+test('each version loads as a COMPLETE snapshot, and older versions are immutable', async (t) => {
   if (skip) return t.skip(skip);
 
   await scoped(A, async (c) => {
@@ -135,8 +144,82 @@ test('loadChunks is strictly version-scoped, never across versions', async (t) =
 
   const v1 = await scoped(A, (c) => loadChunks(c, 'idx-v', 1));
   const v2 = await scoped(A, (c) => loadChunks(c, 'idx-v', 2));
-  assert.deepEqual(v1.map((c) => c.id), ['c-v1']);
-  assert.deepEqual(v2.map((c) => c.id), ['c-v2']);
+
+  // v1 is untouched by the commit that came after it.
+  assert.deepEqual(v1.map((c) => c.id), ['c-v1'], 'committing v2 must never mutate v1');
+
+  // v2 stands alone: the file that changed AND the file that did not.
+  assert.deepEqual(
+    v2.map((c) => c.id).sort(),
+    ['c-v1', 'c-v2'],
+    'an unchanged file must survive into the new version, or a restart loses it',
+  );
+  assert.deepEqual(
+    [...new Set(v2.map((c) => c.filePath))].sort(),
+    ['a.ts', 'b.ts'],
+    'the snapshot must cover every file in the resulting state',
+  );
+});
+
+test('a NO-OP sync still commits a complete snapshot', async (t) => {
+  if (skip) return t.skip(skip);
+
+  // The case that made the defect visible: nothing changed, so the delta was
+  // empty, so the new version held nothing and the index restored empty.
+  await scoped(A, async (c) => {
+    await saveIndex(c, index('idx-noop'), A);
+    await commitSync(c, 'idx-noop', 1, [
+      chunk('n-a', { indexId: 'idx-noop', filePath: 'a.ts' }),
+      chunk('n-b', { indexId: 'idx-noop', filePath: 'b.ts' }),
+    ], ['a.ts', 'b.ts'], [], 1, A);
+    await commitSync(c, 'idx-noop', 2, [], [], [], 2, A);
+  });
+
+  const v2 = await scoped(A, (c) => loadChunks(c, 'idx-noop', 2));
+  assert.deepEqual(v2.map((c) => c.id).sort(), ['n-a', 'n-b'], 'a no-op sync must not empty the index');
+});
+
+test('a DELETE-only sync keeps every survivor in the new version', async (t) => {
+  if (skip) return t.skip(skip);
+
+  await scoped(A, async (c) => {
+    await saveIndex(c, index('idx-del'), A);
+    await commitSync(c, 'idx-del', 1, [
+      chunk('d-a', { indexId: 'idx-del', filePath: 'a.ts' }),
+      chunk('d-b', { indexId: 'idx-del', filePath: 'b.ts' }),
+      chunk('d-c', { indexId: 'idx-del', filePath: 'c.ts' }),
+    ], ['a.ts', 'b.ts', 'c.ts'], [], 1, A);
+    await commitSync(c, 'idx-del', 2, [], [], ['b.ts'], 2, A);
+  });
+
+  const v2 = await scoped(A, (c) => loadChunks(c, 'idx-del', 2));
+  assert.deepEqual(v2.map((c) => c.id).sort(), ['d-a', 'd-c'], 'deleted file gone, survivors carried');
+});
+
+test('a MIXED add/change/delete sync commits the exact resulting state', async (t) => {
+  if (skip) return t.skip(skip);
+
+  await scoped(A, async (c) => {
+    await saveIndex(c, index('idx-mix'), A);
+    await commitSync(c, 'idx-mix', 1, [
+      chunk('m-a', { indexId: 'idx-mix', filePath: 'a.ts' }),
+      chunk('m-b', { indexId: 'idx-mix', filePath: 'b.ts' }),
+      chunk('m-keep', { indexId: 'idx-mix', filePath: 'keep.ts' }),
+    ], ['a.ts', 'b.ts', 'keep.ts'], [], 1, A);
+    // a.ts changes, c.ts is added, b.ts is deleted, keep.ts is untouched.
+    await commitSync(c, 'idx-mix', 2, [
+      chunk('m-a2', { indexId: 'idx-mix', filePath: 'a.ts' }),
+      chunk('m-c', { indexId: 'idx-mix', filePath: 'c.ts' }),
+    ], ['a.ts', 'c.ts'], ['b.ts'], 2, A);
+  });
+
+  const v2 = await scoped(A, (c) => loadChunks(c, 'idx-mix', 2));
+  assert.deepEqual(
+    [...new Set(v2.map((c) => c.filePath))].sort(),
+    ['a.ts', 'c.ts', 'keep.ts'],
+    'changed + added + untouched present, deleted absent',
+  );
+  assert.deepEqual(v2.map((c) => c.id).sort(), ['m-a2', 'm-c', 'm-keep']);
 });
 
 test('commitSync removes deleted files and is atomic on failure', async (t) => {

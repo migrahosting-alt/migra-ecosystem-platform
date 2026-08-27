@@ -254,10 +254,82 @@ export async function commitSync(
   scope: ScopedRequest,
 ): Promise<void> {
   const touched = [...new Set([...changedFiles, ...deletedFiles])];
+
+  /*
+   * A COMMITTED VERSION IS A COMPLETE SNAPSHOT, NOT A DELTA.
+   *
+   * `loadChunks(indexId, version)` reads ONE version and treats what it finds as
+   * the whole index. Writing only the changed chunks under `version` therefore
+   * produced a version that could not stand alone: restart, and every file that
+   * happened not to change in the last sync simply vanished.
+   *
+   * The no-op sync made it obvious — a version with zero chunks, an index that
+   * restored empty while still reporting approved, and a user told their own file
+   * had "no readable content". The dangerous case is quieter: change ONE file out
+   * of ten and the new version holds only that file, so a restart silently drops
+   * the other nine and retrieval keeps working against a fraction of the evidence.
+   *
+   * The SQLite adapter has always carried untouched files forward. This one did
+   * not, and production runs PostgreSQL — the bug was an adapter parity gap, not a
+   * design disagreement.
+   */
+
+  /*
+   * Retry-safe, and scoped to the files this sync TOUCHED at this version.
+   *
+   * Deleting everything at `version` looks tidier and is wrong: a commit may be
+   * applied more than once against the same version, and wiping the version first
+   * discards rows the caller is not resupplying — turning an incremental commit
+   * into data loss. Sibling versions are immutable and are never touched here.
+   */
   if (touched.length > 0) {
     await client.query(
       'DELETE FROM index_chunks WHERE index_id = $1 AND index_version = $2 AND file_path = ANY($3::text[])',
       [indexId, version, touched],
+    );
+  }
+
+  /*
+   * The version this commit SUPERSEDES is `version - 1`, derived arithmetically
+   * and never read from `workspace_indexes.version`.
+   *
+   * That pointer is mutable and does not always mean "the version before this
+   * one". A legacy import replays historical versions in order while the pointer
+   * already sits at the newest, so carrying forward from it injected rows from a
+   * LATER version into an earlier one — the import stopped being idempotent and
+   * reconciliation reported chunks Postgres had and SQLite did not.
+   *
+   * Sync only ever advances by one (nextVersion = record.version + 1), so this is
+   * the same value in the normal path and the correct one in every other.
+   */
+  const priorVersion = version - 1;
+
+  /*
+   * Carry forward inside the database. An INSERT ... SELECT keeps the vectors
+   * where they already are instead of pulling every unchanged chunk through Node
+   * and re-encoding it, and it runs in the same transaction, so the snapshot is
+   * either complete or absent.
+   *
+   * `row_id` is recomputed from the SAME tuple the insert below uses — with the
+   * NEW version in it — because row identity carries the version. Reusing the old
+   * row_id would collide with the version it was copied from.
+   */
+  if (priorVersion > 0) {
+    await client.query(
+      `INSERT INTO index_chunks
+         (row_id, chunk_key, index_id, workspace_id, owner_scope, workspace_scope, file_path, language, symbol,
+          start_line, end_line, content_hash, embedding_model, embedding_version, indexed_at, text, vector, index_version)
+       SELECT
+         encode(sha256(convert_to(
+           owner_scope::text || E'\x1f' || workspace_scope::text || E'\x1f' || coalesce(index_id,'')
+             || E'\x1f' || $2::bigint::text || E'\x1f' || chunk_key,
+           'UTF8')), 'hex'),
+         chunk_key, index_id, workspace_id, owner_scope, workspace_scope, file_path, language, symbol,
+         start_line, end_line, content_hash, embedding_model, embedding_version, indexed_at, text, vector, $2
+       FROM index_chunks
+       WHERE index_id = $1 AND index_version = $3 AND file_path <> ALL($4::text[])
+       ON CONFLICT (owner_scope, workspace_scope, index_id, index_version, chunk_key) DO NOTHING`,
+      [indexId, version, priorVersion, touched],
     );
   }
 
