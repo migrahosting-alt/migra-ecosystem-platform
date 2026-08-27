@@ -241,6 +241,24 @@
         "derived normalised search field, kept separate from the faithful transcript",
         "end-to-end acceptance on the full 28-scan book through the real product"
       ]
+    },
+    "reconstruction": {
+      "status": "BUILT and proven on the full 28-scan book. NOT yet wired into ingestion.",
+      "fullBookRun": {
+        "input": "56 half-pages from 28 spreads",
+        "ocr": "225s, 19 blank halves skipped before OCR, 37 pages read",
+        "result": "confirmed 7, probable 9, uncertain 3, duplicates 5, validationFailures 0",
+        "orderProof": "Canonical order is 7, 11, 15, 17, 19, 21, 23, 25, 29, 31, 33, 35 by printed folio \u2014 scan order is ignored entirely. Scan 24 sits between scans 12 and 13; scan 22 was discarded as a duplicate of folio 7 first captured on scan 2.",
+        "declarationsParsed": "CHAPIT 2 = sections 29-40, 42-67, 68-70, read from the book's own contents page."
+      },
+      "threeFlawsFoundByRunningIt": [
+        "\ud83d\udea8 EVERY page was marked missing_neighbor and confirmed was ZERO. Recovered folios are all odd (7, 11, 15, 17...) because only rectos were photographed, so consecutive captured pages differ by two. Treating a one-page gap as a hole reported the whole book as damaged. The stride is now MEASURED from the folios instead of assumed to be 1.",
+        "\ud83d\udea8 Duplicate detection missed real duplicates. Scans 2 and 22 both claimed folio 7, scans 12 and 23 both claimed 33, yet transcript-prefix matching caught only one \u2014 OCR noise in the opening words makes two captures of the same page look different. A folio collision is the stronger signal and is now checked first: duplicates went 1 -> 5.",
+        "\ud83d\udea8 Ten validation failures were MY OWN artefact, not evidence conflict. The CHAPIT 2 opening carries no folio, so it sorted after every folio-bearing page, and the validator then correctly reported that sections 29-40 preceded their own chapter. Chapter openings are now anchored by what they DECLARE, half a step before the first page carrying one of their sections. Failures went 10 -> 0."
+      ],
+      "honestStates": "confirmed / probable / sequence_uncertain / duplicate / missing_neighbor \u2014 a page with no folio, section or chapter evidence gets NO position rather than a guessed one.",
+      "twoRepresentations": "sourceText is the exact OCR output with historical orthography untouched; searchText is derived, diacritic-folded, and never written back.",
+      "nextStep": "Wire ingestion: rasterise/split -> adaptive OCR -> reconstruct -> validate -> index canonical units with page provenance. Only then may the scanned-PDF refusal disappear."
     }
   },
   "capabilities": {
