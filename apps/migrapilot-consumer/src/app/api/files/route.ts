@@ -11,6 +11,7 @@
  */
 
 import { requireSession } from '@/server/auth'
+import { listProcessing, forgetProcessing } from '@/server/files/documentProcessing'
 import { reindexLibrary } from '@/server/files/reindex'
 import { UnauthenticatedError } from '@/server/auth/authPort'
 import {
@@ -44,8 +45,40 @@ export async function GET(): Promise<Response> {
   if (denied) return denied
 
   const files = await listFiles()
+
+  /*
+   * Readiness comes from the BRAIN's durable record, never from anything this
+   * process infers. A client that computed its own progress would drift from the
+   * job, and a user reloading would be shown two different truths about the same
+   * file.
+   *
+   * A file with no record is an ordinary fast-path document: absent means "never
+   * needed background reading", not "unknown".
+   */
+  const processing = await listProcessing().catch(() => [])
+  const byName = new Map(processing.map((p) => [p.fileName, p]))
+  const withState = files.map((file) => {
+    const status = byName.get(file.name)
+    return status
+      ? {
+          ...file,
+          processing: {
+            state: status.state,
+            stage: status.stage ?? null,
+            description: status.description,
+            readable: status.readable,
+            polling: status.polling,
+            ...(status.detail ? { detail: status.detail } : {}),
+            ...(status.unplacedPages !== undefined ? { unplacedPages: status.unplacedPages } : {}),
+            ...(status.sequenceComplete !== undefined ? { sequenceComplete: status.sequenceComplete } : {}),
+            ...(status.failureReason ? { failureReason: status.failureReason } : {}),
+          },
+        }
+      : file
+  })
+
   return Response.json({
-    files,
+    files: withState,
     limits: {
       maxFileBytes: MAX_FILE_BYTES,
       maxLibraryBytes: MAX_LIBRARY_BYTES,
@@ -100,6 +133,15 @@ export async function DELETE(request: Request): Promise<Response> {
   try {
     const removed = await deleteFile(name)
     if (!removed) return fail(404, 'not_found', 'That file is not in your library.')
+
+    /*
+     * The processing record goes with the file.
+     *
+     * Left behind it becomes a status for a document the user cannot see — and
+     * worse, a re-upload of the same name would inherit the old file's terminal
+     * state and be reported ready without ever having been read.
+     */
+    await forgetProcessing(name)
 
     /*
      * DELETION IS NOT DONE UNTIL THE CONTENT IS UNANSWERABLE.

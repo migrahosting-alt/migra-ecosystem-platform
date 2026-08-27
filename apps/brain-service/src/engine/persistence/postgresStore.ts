@@ -66,6 +66,7 @@ import type {
 import * as conversations from './postgres/conversationRepo.js';
 import * as memoryWorkspaces from './postgres/memoryWorkspaceRepo.js';
 import * as rag from './postgres/ragRepo.js';
+import * as docs from './postgres/documentProcessingRepo.js';
 import * as operational from './postgres/operationalRepo.js';
 import * as agentRuns from './postgres/agentRunRepo.js';
 import * as agentRunChildren from './postgres/agentRunChildRepo.js';
@@ -409,6 +410,45 @@ export class PostgresDurableStore implements DurableStore {
     scope: PersistenceScope, indexId: string, indexVersion: number,
   ): Promise<number | null> {
     return this.inScope(scope, (client) => rag.recordedChunkCount(client, indexId, indexVersion));
+  }
+
+  /**
+   * Durable readiness for documents read outside a request.
+   *
+   * Scoped like every other tenant-owned table: an undeclared connection sees no
+   * rows, so an empty result means "this scope has no record", never "no such
+   * document".
+   */
+  async recordDocumentReadiness(
+    scope: PersistenceScope, readiness: Parameters<typeof docs.recordReadiness>[2], now: number,
+  ): Promise<void> {
+    await this.inScope(scope, (client) => docs.recordReadiness(client, {
+      ownerScope: scope.owner, workspaceScope: scope.workspace,
+    }, readiness, now));
+  }
+
+  async readDocumentReadiness(scope: PersistenceScope, fileName: string) {
+    return this.inScope(scope, (client) => docs.readReadiness(client, {
+      ownerScope: scope.owner, workspaceScope: scope.workspace,
+    }, fileName));
+  }
+
+  async listDocumentReadiness(scope: PersistenceScope) {
+    return this.inScope(scope, (client) => docs.listReadiness(client, {
+      ownerScope: scope.owner, workspaceScope: scope.workspace,
+    }));
+  }
+
+  async findInterruptedDocuments(scope: PersistenceScope) {
+    return this.inScope(scope, (client) => docs.findInterrupted(client, {
+      ownerScope: scope.owner, workspaceScope: scope.workspace,
+    }));
+  }
+
+  async deleteDocumentReadiness(scope: PersistenceScope, fileName: string): Promise<void> {
+    await this.inScope(scope, (client) => docs.deleteReadiness(client, {
+      ownerScope: scope.owner, workspaceScope: scope.workspace,
+    }, fileName));
   }
 
   /* ── embedding cache ───────────────────────────────────────────────────── */

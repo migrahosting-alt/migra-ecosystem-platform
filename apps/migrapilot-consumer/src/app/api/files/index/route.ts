@@ -17,8 +17,10 @@
 
 import { requireSession } from '@/server/auth'
 import { UnauthenticatedError } from '@/server/auth/authPort'
+import { join } from 'node:path'
 import { callBrain } from '@/server/brain/gateway'
-import { userDirectory } from '@/server/files/storage'
+import { userDirectory, listFiles } from '@/server/files/storage'
+import { requestProcessing } from '@/server/files/documentProcessing'
 
 export const dynamic = 'force-dynamic'
 
@@ -168,6 +170,26 @@ export async function POST(): Promise<Response> {
    */
   const after = await callBrain<{ chunkCounts?: Record<string, number> }>({ kind: 'indexStatus', indexId })
   const chunkCounts = after.kind === 'ok' ? (after.value?.chunkCounts ?? {}) : {}
+
+  /*
+   * A PDF THE FAST PATH COULD NOT READ IS ESCALATED TO BACKGROUND OCR.
+   *
+   * The decision is made from EVIDENCE, not from the extension: a PDF with a
+   * text layer has just been extracted and indexed in milliseconds and keeps
+   * that route untouched. Only one that produced no chunks is handed to the
+   * Brain's reader, because OCR costs minutes and spending them on a document
+   * already read would be pure waste.
+   *
+   * Awaited only until the pending state is durable — the reading itself takes
+   * minutes and happens after this response is long gone.
+   */
+  const uploadRoot = await userDirectory()
+  for (const file of await listFiles().catch(() => [])) {
+    if (!/\.pdf$/i.test(file.name)) continue
+    if ((chunkCounts[file.name] ?? 0) > 0) continue
+    if (file.tooLargeToProcess) continue
+    await requestProcessing(file.name, join(uploadRoot, file.name)).catch(() => null)
+  }
 
   return Response.json({
     indexed: true,

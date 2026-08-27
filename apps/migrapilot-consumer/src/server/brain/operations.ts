@@ -113,6 +113,14 @@ export type BrainOperation =
   | { kind: 'createDocsIndex'; root: string }
   | { kind: 'syncIndex'; indexId: string }
   | { kind: 'indexStatus'; indexId: string }
+  /*
+   * Background reading of a document the fast path could not extract. `path` is
+   * the server-side location the Brain will read; it never comes from a browser.
+   */
+  | { kind: 'processDocument'; fileName: string; path: string }
+  | { kind: 'documentStatus'; fileName: string }
+  | { kind: 'documentList' }
+  | { kind: 'documentForget'; fileName: string }
   | { kind: 'approveIndex'; indexId: string }
   // ── governed coding (observation only) ───────────────────────────────────
   | { kind: 'codingCapability' }

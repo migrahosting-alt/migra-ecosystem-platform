@@ -91,6 +91,9 @@ import { IndexService } from './engine/rag/indexService.js';
 import { FsFileSource } from './engine/rag/fsFileSource.js';
 import { OllamaEmbedder, CachedEmbedder, FakeEmbedder } from './engine/rag/embedder.js';
 import { registerRagRoutes } from './engine/rag/ragRoutes.js';
+import { registerDocumentRoutes } from './engine/rag/documentRoutes.js';
+import { DocumentJobRunner } from './engine/rag/documentJobs.js';
+import { decideRecovery } from './engine/rag/scannedJobRecovery.js';
 import path from 'node:path';
 import { registerMigraPilotCors } from './http/corsPolicy.js';
 
@@ -459,6 +462,79 @@ async function main(): Promise<void> {
   const indexedBranchFor = (scope: { owner: string; workspace: string }): string | undefined =>
     workspaceManager?.list(scope)[0]?.gitBranch;
   registerRagRoutes(app, indexService);
+
+  /*
+   * SCANNED DOCUMENTS ARE READ OUTSIDE THE REQUEST.
+   *
+   * Measured at 569 seconds for a 28-scan book, so it cannot live in an upload.
+   * The runner owns the work; the durable rows own the truth. Wired only when a
+   * durable store exists, because readiness held in memory would come back as
+   * "not started" after every restart and silently re-run a nine-minute job.
+   */
+  const readinessStore = durable as unknown as {
+    recordDocumentReadiness?: (s: { owner: string; workspace: string }, r: unknown, now: number) => Promise<void>;
+    readDocumentReadiness?: (s: { owner: string; workspace: string }, f: string) => Promise<unknown>;
+    listDocumentReadiness?: (s: { owner: string; workspace: string }) => Promise<unknown[]>;
+    findInterruptedDocuments?: (s: { owner: string; workspace: string }) => Promise<unknown[]>;
+    deleteDocumentReadiness?: (s: { owner: string; workspace: string }, f: string) => Promise<void>;
+  } | undefined;
+
+  if (readinessStore?.recordDocumentReadiness) {
+    const toScope = (s: { ownerScope: string; workspaceScope: string }) =>
+      ({ owner: s.ownerScope, workspace: s.workspaceScope });
+
+    const documentRunner = new DocumentJobRunner({
+      persist: async (scope, readiness) => {
+        await readinessStore.recordDocumentReadiness!(toScope(scope), readiness, Date.now());
+      },
+    });
+
+    registerDocumentRoutes(app, documentRunner, {
+      read: async (scope, fileName) =>
+        (await readinessStore.readDocumentReadiness!(toScope(scope), fileName)) as never,
+      list: async (scope) =>
+        (await readinessStore.listDocumentReadiness!(toScope(scope))) as never,
+      remove: async (scope, fileName) => {
+        await readinessStore.deleteDocumentReadiness!(toScope(scope), fileName);
+      },
+    });
+
+    /*
+     * BOOT RECOVERY runs per scope on first sight rather than at startup: this
+     * process cannot enumerate every tenant, and a document nobody asks about
+     * costs nothing to leave alone. What must never happen is a stale row saying
+     * "Reading…" for work that stopped when the process did.
+     */
+    app.addHook('onRequest', async (request) => {
+      if (!String(request.url).startsWith('/api/ai/documents')) return;
+      const scope = { owner: String(request.headers['x-owner-scope'] ?? 'local'),
+        workspace: String(request.headers['x-workspace-scope'] ?? 'default') };
+      const stuck = (await readinessStore.findInterruptedDocuments!(scope).catch(() => [])) as Array<
+        { fileName: string; state: string; updatedAt?: number; startedAt?: number }
+      >;
+      if (stuck.length === 0) return;
+      const active = documentRunner.activeJobs();
+      for (const row of stuck) {
+        const action = decideRecovery(row as never, {
+          now: Date.now(),
+          // The file list is the consumer's; a row whose file is gone is caught
+          // by the consumer's delete path, so recovery here only ages out rows
+          // nothing is working on.
+          existingFiles: new Set([row.fileName]),
+          activeJobs: active,
+        });
+        if (action.kind === 'fail') {
+          await readinessStore.recordDocumentReadiness!(scope, action.readiness, Date.now()).catch(() => {});
+        } else if (action.kind === 'resume') {
+          await readinessStore.recordDocumentReadiness!(scope, {
+            ...row,
+            state: 'ocr_failed',
+            failureReason: 'reading was interrupted by a server restart — upload again to retry',
+          }, Date.now()).catch(() => {});
+        }
+      }
+    });
+  }
   // MigraAI Engine unified facade (/api/ai/*): provider-independent chat,
   // capability-routed model selection, model catalog, embeddings. Chat consumes
   // the memory store above for server-side context + commit, and semantic RAG
