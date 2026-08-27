@@ -357,7 +357,8 @@
       "Image conversational reference + regeneration truthfulness \u2014 \"regenerate it\" resolves the active image and either executes it or refuses honestly; understanding, explicit creation and hard reload are unaffected. Proven live 2026-08-27 (activeimg-61825461).",
       "Unreadable-image error specificity \u2014 a corrupt or undecodable image is reported as \"That image could not be read\u2026 re-saving it as a PNG or JPEG usually fixes it\" instead of the generic engine failure. Proven live 2026-08-27 (brain imgerr-08271521).",
       "Test-harness environment truthfulness \u2014 with no reachable Docker daemon the brain suite reports 0 failures and 249 reasoned skips (was 140 failures + 65 skips); with Docker up it reports 2030 passes and 0 skips, so the tests still genuinely run. Guarded against regression. 2026-08-27.",
-      "Unreadable image drops out of the active-image set \u2014 the 9-step live sequence passed on chat.migrateck.com (consumer imgclear-08271615): broken image -> specific unreadable message -> follow-up carries NO image refs -> good image becomes active alone -> survives hard reload. 2026-08-27."
+      "Unreadable image drops out of the active-image set \u2014 the 9-step live sequence passed on chat.migrateck.com (consumer imgclear-08271615): broken image -> specific unreadable message -> follow-up carries NO image refs -> good image becomes active alone -> survives hard reload. 2026-08-27.",
+      "Reproducible consumer releases \u2014 lockfile-driven npm ci, dependency verification from the release itself, boot test, atomic activation, health check with rollback, and a proven independence control. No node_modules is copied from the outgoing release. Proven live twice 2026-08-27 (repro-08271631, repro2-08271636)."
     ],
     "STABILIZATION": [
       {
@@ -443,6 +444,16 @@
       ],
       "longerTermDirection": "Do not rely on an LLM alone for arithmetic over CSV. MigraPilot should detect that a request is a DETERMINISTIC DATA OPERATION, route it through a table/data tool, and let the model explain the result rather than compute it.",
       "provenance": "Arose from the 9/10 citation pass. That run is preserved verbatim and was NOT rewritten to 10/10."
+    },
+    {
+      "id": "vm111-disk-92-percent",
+      "severity": "MEDIUM",
+      "effort": "EASY",
+      "symptom": "/opt on VM111 is 92% full (7.9 GB free of 96 GB). 71 consumer releases hold 41 GB, 59 brain releases hold 4.5 GB, and 18 brain staging trees hold a further 1.5 GB.",
+      "cause": "Releases are never pruned, and older consumer releases each shipped .next/dev \u2014 the ~207 MB of stale dev-server output the runbook documents.",
+      "risk": "A future deploy can fail part-way for lack of space. Consumer releases are ~577 MB each.",
+      "notActioned": "Out of the authorized scope for this slice, which was exact-path cleanup only. Needs an explicit retention decision from Bonex before anything is pruned.",
+      "foundBy": "consumer release hardening, 2026-08-27"
     }
   ],
   "driftControl": [
@@ -544,9 +555,7 @@
     }
   ],
   "backlog": {
-    "EASY_NEXT": [
-      "5. Consumer reproducible release treatment (does NOT block PDF)"
-    ],
+    "EASY_NEXT": [],
     "MEDIUM": [
       "Deterministic data-operation routing \u2014 detect arithmetic/aggregation over tabular data and route to a table/data tool instead of the LLM (see csv-quantitative-reasoning-qwen3-8b)",
       "PDF extraction \u2014 see nextSliceGroundwork.pdfDocx for the MEASURED runtime constraints",
@@ -713,6 +722,12 @@
       "assertedWhereItCounts": "The decisive checks were made against PERSISTED message state through the app's own authenticated API, not against rendered text \u2014 so they hold regardless of whether a model ever answered.",
       "historicalRecordPreserved": "The first message still carries imageRefs [img_8373c737] and its card still renders. The file was never deleted. Only the ACTIVE set changed.",
       "\ud83d\udea8 stillOwed": "ONE good-image understanding turn answering live. NOT proven in this window: the GPU sat at 24050/24576 MiB and 100% with NO Ollama model resident at all \u2014 a non-MigraPilot workload held the whole card, so even \"what is the capital of France?\" returned nothing. No assistant message was produced for ANY turn. Deferred by Bonex to when the GPU frees; the render was not interrupted."
+    },
+    "consumerReproducibleRelease": {
+      "decisiveNegativeControl": "The outgoing release's node_modules is MOVED aside and the service restarted; the new release must still serve 200. It did, twice. Run only AFTER activation (the old release is then idle), never deleted, and restored by a trap so an interruption cannot damage the rollback target.",
+      "rollbackProvenByBooting": "The previous release was actually started on a spare port and served 200 \u2014 rollback validity proven by booting it, not by checking that files exist.",
+      "payloadGotchas": "Workspaces are an explicit list, not globs, so every workspace package.json must ship or npm ci fails. @migrateck/auth-client is a file: dependency living OUTSIDE the workspace globs and must be included. `next` is a runtime dependency, so --omit=dev keeps it. pngjs nests under the workspace and needs the same overlay the Brain needed.",
+      "stagingNowSelfCleans": "Staging held a second full node_modules (530 MB) after every run. The script now removes exactly its own staging path, guarded by a case statement that refuses any other path."
     }
   },
   "resolvedDefects": [
