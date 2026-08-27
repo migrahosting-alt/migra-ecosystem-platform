@@ -31,8 +31,16 @@ function faultOf(error: unknown): string {
 }
 
 export interface FileSource {
-  /** Workspace-relative files that are candidates for indexing (already bounded). */
-  files(): Promise<Array<{ relPath: string; content: string }>>;
+  /**
+   * Workspace-relative files that are candidates for indexing (already bounded).
+   *
+   * `pageStartLines` is optional and exists for formats that have PAGES rather
+   * than lines. A PDF's line numbers are an artefact of flattening it, so citing
+   * them back to a reader is meaningless — the page is the location they can
+   * actually find. Carried here because extraction is the only place the page
+   * boundaries still exist; once the text is chunked they are gone.
+   */
+  files(): Promise<Array<{ relPath: string; content: string; pageStartLines?: number[] }>>;
 }
 
 /** The scope a persisted index record already carries. */
@@ -408,7 +416,7 @@ export class IndexService {
 
       for (const f of files) {
         seen.add(f.relPath);
-        const raw = chunkFile(f.relPath, f.content);
+        const raw = chunkFile(f.relPath, f.content, f.pageStartLines);
         const newHashes = new Set(raw.map((c) => c.contentHash));
         const existing = staging.fileHashes(f.relPath);
         const unchanged = existing.size === newHashes.size && [...newHashes].every((h) => existing.has(h));

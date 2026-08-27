@@ -52,6 +52,14 @@ export interface GroundingChunk {
   endLine: number;
   snippet: string;
   score: number;
+  /**
+   * Where in the document this came from, when the format has a real location.
+   *
+   * "page 7" for a PDF. Line numbers exist for every file but mean nothing to a
+   * reader of a paged document, so this travels alongside them rather than
+   * replacing them — and it is carried, never derived from the model's reply.
+   */
+  location?: string;
 }
 
 // The mode union lives in `@migrapilot/protocol` so the extension and the Brain

@@ -81,6 +81,30 @@ function titleFrom(prompt: string): string {
  * the correct direction to be wrong in. A fabricated citation is a false claim
  * about provenance; a missing one is merely incomplete.
  */
+/**
+ * Turn retrieved page numbers into something a reader can act on.
+ *
+ * Contiguous runs become "pages 7-8"; a scattered set stays a list. The rule is
+ * that the label must describe pages that were actually retrieved — a range is a
+ * claim about everything between its ends, and inventing one is the citation
+ * equivalent of the filename attribution bug this replaced.
+ */
+export function describePages(pages: readonly number[]): string {
+  const sorted = [...new Set(pages)].filter((n) => Number.isFinite(n) && n > 0).sort((a, b) => a - b)
+  if (sorted.length === 0) return ''
+  if (sorted.length === 1) return `page ${sorted[0]}`
+
+  const runs: Array<[number, number]> = []
+  for (const page of sorted) {
+    const last = runs[runs.length - 1]
+    if (last && page === last[1] + 1) last[1] = page
+    else runs.push([page, page])
+  }
+  // Many scattered pages: a count is honest where a list would be unreadable.
+  if (runs.length > 3) return `${sorted.length} pages`
+  return `pages ${runs.map(([a, b]) => (a === b ? `${a}` : `${a}-${b}`)).join(', ')}`
+}
+
 export async function attributedFiles(groundedPaths: readonly string[]): Promise<string[]> {
   if (groundedPaths.length === 0) return []
   const owned = await listFiles().catch(() => [])
@@ -836,6 +860,7 @@ export async function POST(request: Request): Promise<Response> {
       let refused = false
       /** Files the ENGINE said it grounded this turn in — not parsed from prose. */
       let groundedFiles: string[] = []
+      let groundedPages: Record<string, number[]> = {}
 
       try {
         for await (const frame of opened.frames) {
@@ -963,6 +988,23 @@ export async function POST(request: Request): Promise<Response> {
               if (Array.isArray(files)) {
                 groundedFiles = files.filter((f): f is string => typeof f === 'string' && f.length > 0)
               }
+              /*
+               * Pages arrive as NUMBERS and stay numbers until they are rendered.
+               * A pre-formatted phrase would have to be trusted; a list of pages
+               * can be checked, and it cannot quietly become a range it is not.
+               */
+              const pages = (frame.data as { pages?: unknown })?.pages
+              if (pages && typeof pages === 'object') {
+                groundedPages = Object.fromEntries(
+                  Object.entries(pages as Record<string, unknown>)
+                    .map(([file, list]) => [
+                      file,
+                      (Array.isArray(list) ? list : [])
+                        .filter((n): n is number => typeof n === 'number' && Number.isFinite(n)),
+                    ])
+                    .filter(([, list]) => (list as number[]).length > 0),
+                ) as Record<string, number[]>
+              }
               break
             }
             case 'route': {
@@ -1026,6 +1068,20 @@ export async function POST(request: Request): Promise<Response> {
        * anywhere else can never be presented as one of their documents.
        */
       const sources = grounded && completed ? await attributedFiles(groundedFiles) : []
+      /*
+       * "report.pdf · page 7" — and never a range the evidence does not support.
+       *
+       * Consecutive pages read as a span because that is what they are. Pages
+       * 2, 9 and 40 are listed, not collapsed into "2-40", which would be a
+       * fabricated citation pointing at 38 pages nobody retrieved. Past a few
+       * distinct pages the honest summary is a count rather than a wall of
+       * numbers.
+       */
+      const sourcePages = Object.fromEntries(
+        Object.entries(groundedPages)
+          .map(([file, list]) => [file, describePages(list)] as const)
+          .filter(([, label]) => label.length > 0),
+      )
 
       /*
        * USEFUL OUTPUT IS TEXT THE USER RECEIVED, not a successful save.
@@ -1061,6 +1117,9 @@ export async function POST(request: Request): Promise<Response> {
             requestId: trace.id,
             ...(generatedImages.length ? { images: generatedImages } : {}),
             ...(sources.length ? { sources } : {}),
+            // Keyed by file so the UI pairs each source with its own pages and
+            // cannot attach one document's pages to another's name.
+            ...(Object.keys(sourcePages).length ? { sourcePages } : {}),
             ...(quota ? { quota } : {}),
           })
           trace.finish('ok')

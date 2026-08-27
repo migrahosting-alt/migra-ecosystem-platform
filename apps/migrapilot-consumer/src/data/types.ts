@@ -97,6 +97,14 @@ export interface Message {
    */
   citedFiles?: string[]
   /**
+   * Page provenance per cited file — "page 7", "pages 7-8", or "5 pages".
+   *
+   * Keyed by filename so a document can never be shown with another's pages.
+   * Populated from the engine's grounding frame, which is why a model told not
+   * to name the file still produces correct attribution.
+   */
+  citedPages?: Record<string, string>
+  /**
    * Assistant turns only — this is a system notice, NOT model output.
    *
    * It exists so a failed turn can never be mistaken for a generated answer.

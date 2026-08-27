@@ -25,7 +25,7 @@ process.env.UPLOAD_ROOT = mkdtempSync(join(tmpdir(), 'migrapilot-chat-'))
 // that has nothing to do with what is being tested.
 process.env.IMAGE_ROOT = mkdtempSync(join(tmpdir(), 'migrapilot-chat-images-'))
 
-import { POST } from './route'
+import { POST, describePages } from './route'
 import { setAuthPort, resetAuthPort } from '@/server/auth'
 import { saveFile, userDirectory } from '@/server/files/storage'
 import type { AppSession, AuthPort } from '@/server/auth/authPort'
@@ -1345,4 +1345,48 @@ test('attribution is the ENGINE\'s report, intersected with the caller\'s own li
   assert.deepEqual(await attributedFiles([]), [])
 
   resetAuthPort()
+})
+
+/*
+ * ── PAGE PROVENANCE MUST NOT INVENT A CITATION ──────────────────────────────
+ *
+ * A range is a claim about every page between its ends. Collapsing pages 2, 9
+ * and 40 into "pages 2-40" would cite 38 pages nobody retrieved — the same class
+ * of error as the filename attribution this replaced, where provenance was
+ * inferred instead of carried.
+ */
+
+test('a single retrieved page reads as one page', () => {
+  assert.equal(describePages([7]), 'page 7')
+})
+
+test('the same page cited by several chunks appears once', () => {
+  assert.equal(describePages([7, 7, 7]), 'page 7')
+})
+
+test('adjacent pages read as a span', () => {
+  assert.equal(describePages([7, 8]), 'pages 7-8')
+  assert.equal(describePages([8, 7]), 'pages 7-8', 'order of retrieval must not matter')
+})
+
+test('NONCONTIGUOUS pages are never collapsed into a fake range', () => {
+  const label = describePages([2, 9])
+  assert.equal(label, 'pages 2, 9')
+  assert.doesNotMatch(label, /2-9/, 'must not claim the seven pages in between')
+})
+
+test('a mix of runs and singles keeps both honest', () => {
+  assert.equal(describePages([2, 3, 4, 9]), 'pages 2-4, 9')
+})
+
+test('many scattered pages become a count rather than an unreadable list', () => {
+  // Still true, still checkable, and it does not pretend to a range.
+  const label = describePages([2, 9, 40, 41, 77, 90])
+  assert.equal(label, '6 pages')
+  assert.doesNotMatch(label, /-/, 'a count must not imply contiguity')
+})
+
+test('no pages produces no label, so non-PDF sources are unchanged', () => {
+  assert.equal(describePages([]), '')
+  assert.equal(describePages([0, -3]), '', 'nonsense page numbers are not rendered')
 })

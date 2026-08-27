@@ -58,7 +58,7 @@ export class FsFileSource implements FileSource {
     private readonly maxFileSize = DEFAULT_MAX_INDEX_FILE_BYTES,
   ) {}
 
-  async files(): Promise<Array<{ relPath: string; content: string }>> {
+  async files(): Promise<Array<{ relPath: string; content: string; pageStartLines?: number[] }>> {
     /*
      * AN UNREADABLE ROOT IS NOT AN EMPTY LIBRARY.
      *
@@ -90,7 +90,12 @@ export class FsFileSource implements FileSource {
     return out;
   }
 
-  private async walk(abs: string, rel: string, excl: Exclusions, out: Array<{ relPath: string; content: string }>): Promise<void> {
+  private async walk(
+    abs: string,
+    rel: string,
+    excl: Exclusions,
+    out: Array<{ relPath: string; content: string; pageStartLines?: number[] }>,
+  ): Promise<void> {
     if (out.length >= this.maxFiles) return;
     let entries: Array<{ name: string; isDirectory(): boolean; isFile(): boolean }>;
     try {
@@ -133,7 +138,11 @@ export class FsFileSource implements FileSource {
           if (/\.pdf$/i.test(childRel)) {
             try {
               const extracted = await extractPdf(new Uint8Array(await fs.readFile(childAbs)));
-              out.push({ relPath: childRel, content: extracted.text });
+              out.push({
+                relPath: childRel,
+                content: extracted.text,
+                pageStartLines: extracted.pageStartLines,
+              });
             } catch (error) {
               /*
                * Skipped, deliberately and quietly, because THIS layer has no

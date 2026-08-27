@@ -44,7 +44,35 @@ export function detectLanguage(filePath: string): string {
 
 const CODE_SYMBOL = /^\s*(export\s+)?(default\s+)?(public\s+|private\s+|protected\s+|static\s+)*(async\s+)?(abstract\s+)?(function|class|interface|type|enum|const|let|var|def|func|impl|struct|module|namespace)\b\s*([A-Za-z0-9_$]+)?/;
 
-export function chunkFile(filePath: string, content: string): RawChunk[] {
+/**
+ * Where in the source a chunk sits, for formats whose "location" is not a line.
+ *
+ * A PDF has pages; the line numbers only exist because extraction flattened it,
+ * so citing them back is telling the reader something they cannot use. When page
+ * boundaries are supplied, each chunk records the page or page RANGE it actually
+ * covers, and a chunk spanning a page break says so rather than picking one.
+ *
+ * It rides in `symbol` — the field that already means "the named location inside
+ * this file" and already travels through persistence and retrieval untouched. A
+ * page is exactly that for a document, and reusing it avoids a schema migration
+ * and a second provenance path that could disagree with the first.
+ */
+function pageLabel(pageStartLines: readonly number[], start: number, end: number): string | undefined {
+  if (pageStartLines.length === 0) return undefined;
+  const pageOf = (line: number): number => {
+    let page = 1;
+    for (let i = 0; i < pageStartLines.length; i += 1) {
+      if (line >= (pageStartLines[i] ?? 1)) page = i + 1;
+      else break;
+    }
+    return page;
+  };
+  const first = pageOf(start);
+  const last = pageOf(end);
+  return first === last ? `page ${first}` : `pages ${first}-${last}`;
+}
+
+export function chunkFile(filePath: string, content: string, pageStartLines?: readonly number[]): RawChunk[] {
   const language = detectLanguage(filePath);
   const lines = content.split(/\r?\n/);
   if (content.trim() === '') return [];
@@ -68,7 +96,7 @@ export function chunkFile(filePath: string, content: string): RawChunk[] {
       if (wt.trim()) out.push(mkChunk(filePath, language, b.symbol, w.start, w.end, wt));
     }
   }
-  return out;
+  return pageStartLines && pageStartLines.length > 0 ? withPages(out, pageStartLines) : out;
 }
 
 function isCode(language: string): boolean {
@@ -77,6 +105,20 @@ function isCode(language: string): boolean {
 
 function mkChunk(filePath: string, language: string, symbol: string | undefined, start: number, end: number, text: string): RawChunk {
   return { filePath, language, symbol, startLine: start, endLine: end, text, contentHash: sha1(text) };
+}
+
+/**
+ * A paged document's chunks carry their page INSTEAD of a code symbol.
+ *
+ * Overwriting rather than merging is deliberate: an extracted PDF has no code
+ * symbols, and anything the symbol heuristic matched in flattened prose is a
+ * false positive that would make a worse citation than the page.
+ */
+function withPages(chunks: RawChunk[], pageStartLines: readonly number[]): RawChunk[] {
+  return chunks.map((c) => {
+    const label = pageLabel(pageStartLines, c.startLine, c.endLine);
+    return label ? { ...c, symbol: label } : c;
+  });
 }
 
 function symbolBlocks(lines: string[]): Array<{ symbol?: string; start: number; end: number }> {

@@ -523,6 +523,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       let done = false
       let notSaved = false
       let sources: string[] = []
+      let sourcePages: Record<string, string> = {}
 
       for await (const frame of readEventStream(response.body)) {
         if (frame.event === 'meta') {
@@ -593,6 +594,13 @@ export function ChatProvider({ children }: { children: ReactNode }) {
           done = true
           const named = (frame.data as { sources?: unknown })?.sources
           if (Array.isArray(named)) sources = named.filter((n): n is string => typeof n === 'string')
+          const paged = (frame.data as { sourcePages?: unknown })?.sourcePages
+          if (paged && typeof paged === 'object') {
+            sourcePages = Object.fromEntries(
+              Object.entries(paged as Record<string, unknown>)
+                .filter(([, v]) => typeof v === 'string' && v.length > 0),
+            ) as Record<string, string>
+          }
           const settled = (frame.data as { quota?: AnonymousChatQuota })?.quota
           if (settled) applyServerQuota(settled)
         }
@@ -621,6 +629,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
                       ? {
                           ...message,
                           ...(sources.length ? { citedFiles: sources } : {}),
+                          ...(Object.keys(sourcePages).length ? { citedPages: sourcePages } : {}),
                           // Settling must not drop what generation produced.
                           ...(generated.length ? { images: [...generated] } : {}),
                         }

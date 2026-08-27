@@ -598,7 +598,12 @@ export function registerAiRoutes(
               ...(scopedFiles.length > 0 ? { files: scopedFiles } : {}),
             });
             if (!rag.ok) throw new Error(rag.code);
-            return rag.chunks.map((c) => ({ path: c.filePath, startLine: c.startLine, endLine: c.endLine, snippet: c.snippet, score: c.score }));
+            return rag.chunks.map((c) => ({
+              path: c.filePath, startLine: c.startLine, endLine: c.endLine,
+              snippet: c.snippet, score: c.score,
+              // Carried, not inferred — this is the page the chunk was indexed from.
+              ...(c.symbol ? { location: c.symbol } : {}),
+            }));
           },
           indexIdentity: (indexId) => {
             const rec = indexService.status(indexId, scope);
@@ -1075,10 +1080,39 @@ async function streamChat(
    * Emitted once, before any model call, so failover cannot change it and a
    * cancelled turn still told the client what it was grounded in.
    */
-  const groundedIn = [
-    ...new Set((chatRequest.context.retrievedChunks ?? []).map((c) => c.path).filter(Boolean)),
-  ];
-  if (groundedIn.length > 0) send('grounding', { files: groundedIn });
+  const groundedChunks = chatRequest.context.retrievedChunks ?? [];
+  const groundedIn = [...new Set(groundedChunks.map((c) => c.path).filter(Boolean))];
+
+  /*
+   * PAGES ARE REPORTED AS NUMBERS, not as a pre-formatted phrase.
+   *
+   * The consumer decides how to render "page 7" versus "pages 7-8" versus a
+   * scattered set, and it can only do that honestly if it receives what was
+   * actually retrieved. Sending a formatted string would force this layer to
+   * guess the presentation and would make a fabricated range easy — three chunks
+   * from pages 2, 9 and 40 must never collapse into "pages 2-40".
+   *
+   * Deduplicated and sorted here so the same page cited by two chunks appears
+   * once.
+   */
+  const pages: Record<string, number[]> = {};
+  for (const chunk of groundedChunks) {
+    const label = (chunk as { location?: string }).location;
+    if (!chunk.path || !label) continue;
+    const found = [...label.matchAll(/\d+/g)].map((m) => Number(m[0])).filter(Number.isFinite);
+    if (found.length === 0) continue;
+    const [first, last] = [found[0]!, found[found.length - 1]!];
+    const span = new Set(pages[chunk.path] ?? []);
+    for (let page = first; page <= last; page += 1) span.add(page);
+    pages[chunk.path] = [...span].sort((a, b) => a - b);
+  }
+
+  if (groundedIn.length > 0) {
+    send('grounding', {
+      files: groundedIn,
+      ...(Object.keys(pages).length > 0 ? { pages } : {}),
+    });
+  }
 
 
   // The engine's chosen prior context, surfaced to the client as a sanitized

@@ -453,16 +453,28 @@ function AssistantTurn({
           {message.citedFiles && message.citedFiles.length > 0 && (
             <div className="mt-5 flex flex-wrap items-center gap-2 border-t border-hairline pt-4">
               <span className="text-[13px] font-medium text-slate-500">From your files:</span>
-              {message.citedFiles.map((name) => (
-                <Link
-                  key={name}
-                  href="/files"
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-hairline bg-raised px-2.5 py-1 text-[12.5px] font-semibold text-slate-700 transition-colors hover:border-brand-200 hover:bg-brand-50/40"
-                >
-                  <FileTypeIcon name={name} size="sm" />
-                  {name}
-                </Link>
-              ))}
+              {message.citedFiles.map((name) => {
+                /*
+                 * The page comes from the engine's grounding frame, never from
+                 * the reply. A model asked not to mention the document still
+                 * gets attributed correctly, and a model that volunteers a page
+                 * number cannot change what is shown here.
+                 */
+                const pages = message.citedPages?.[name]
+                return (
+                  <Link
+                    key={name}
+                    href="/files"
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-hairline bg-raised px-2.5 py-1 text-[12.5px] font-semibold text-slate-700 transition-colors hover:border-brand-200 hover:bg-brand-50/40"
+                  >
+                    <FileTypeIcon name={name} size="sm" />
+                    {name}
+                    {pages && (
+                      <span className="font-normal text-slate-500">· {pages}</span>
+                    )}
+                  </Link>
+                )
+              })}
             </div>
           )}
 
