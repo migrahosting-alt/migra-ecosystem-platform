@@ -441,35 +441,6 @@
       "provenance": "Arose from the 9/10 citation pass. That run is preserved verbatim and was NOT rewritten to 10/10."
     },
     {
-      "id": "image-conversational-reference-routing",
-      "title": "Image follow-through / conversational intent",
-      "severity": "HIGH",
-      "reportedBy": "Bonex, observed in a live session 2026-08-27 (screenshots kept as acceptance evidence). NOT independently reproduced by me yet.",
-      "symptom": "With an image already active in the conversation and already successfully analysed, the follow-up \"can you regenerate it?\" failed to resolve against that image and asked the user to provide the content again.",
-      "acceptanceRule": "When an image is active in the conversation, follow-up references \u2014 \"it\", \"this\", \"same one\", \"remake it\", \"regenerate it\", \"make something similar\" \u2014 MUST resolve against that image unless the user clearly refers to something else.",
-      "mustSurvive": [
-        "immediate follow-up",
-        "several turns later",
-        "refresh",
-        "reopen from History"
-      ],
-      "testMustVerify": "\ud83d\udea8 The resolved image actually REACHES the generation/editing routing layer. Proving the UI still displays the image is not proof; it is the same class of error as reading a rendered tile instead of the trace.",
-      "status": "OPEN \u2014 queued under high-visibility chat defects.",
-      "effort": "EASY-MEDIUM"
-    },
-    {
-      "id": "regenerate-promise-execution-mismatch",
-      "title": "Regeneration promise vs execution truthfulness",
-      "severity": "HIGH",
-      "reportedBy": "Bonex, same live session 2026-08-27.",
-      "symptom": "MigraPilot answered \"Sure! Please provide the content you'd like me to regenerate\u2026\", and then when given the image, described it again instead of regenerating or refusing honestly.",
-      "invariant": "NEVER claim an image will be regenerated unless the request is actually being routed to an available image-generation capability.",
-      "requiredFlow": "existing image + \"remake/regenerate/something similar\" -> recognise CREATION intent using the source image as reference -> if reference-based generation is supported, execute it and produce a new Media Library artifact WITH source provenance. If it is not supported: give a truthful capability refusal, do NOT describe the picture as though that satisfied the request, and do NOT say \"Sure, I'll regenerate it\".",
-      "status": "OPEN \u2014 queued under high-visibility chat defects.",
-      "effort": "MEDIUM",
-      "related": "Same family as the image-editing refusal already shipped (IMAGE_EDITING_UNAVAILABLE): describe-instead-of-refuse is the failure mode."
-    },
-    {
       "id": "test-harness-reports-missing-infra-as-regressions",
       "title": "Missing Postgres test infrastructure reports as product regressions",
       "severity": "MEDIUM",
@@ -745,6 +716,43 @@
       "currentProductionState": "HEALTHY as of 2026-08-27 03:2x \u2014 recorded 23 equals loaded 23, so a restart now restores correctly. The bug re-arms the next time a no-op sync commits.",
       "resolution": "Every committed index version is now a complete, independently loadable snapshot. The PostgreSQL writer carries untouched files forward inside the committing transaction; the superseded version is derived arithmetically as version-1, never read from the mutable workspace_indexes pointer.",
       "verification": "Gate 1 \u2014 full PostgreSQL suite 1958/1958, ZERO skips (Docker restored, so no test was silently absent). Gate 2 \u2014 all 8 carry-forward cases passed BY NAME, including MATRIX 8, the atomicity hard-stop: a rolled-back commit leaves no rows at the new version and no recorded count. Gate 3 \u2014 production proof on the live service: 23 chunks, no-op sync, new version still RECORDS 23 (this is the exact condition that used to record 0), Brain restarted, loaded == recorded == 23, and a grounded question answered VIOLET-ANCHOR-19 with correct attribution WITHOUT a reindex."
+    },
+    {
+      "id": "image-conversational-reference-routing",
+      "title": "Image follow-through / conversational intent",
+      "severity": "HIGH",
+      "reportedBy": "Bonex, observed in a live session 2026-08-27 (screenshots kept as acceptance evidence). NOT independently reproduced by me yet.",
+      "symptom": "With an image already active in the conversation and already successfully analysed, the follow-up \"can you regenerate it?\" failed to resolve against that image and asked the user to provide the content again.",
+      "acceptanceRule": "When an image is active in the conversation, follow-up references \u2014 \"it\", \"this\", \"same one\", \"remake it\", \"regenerate it\", \"make something similar\" \u2014 MUST resolve against that image unless the user clearly refers to something else.",
+      "mustSurvive": [
+        "immediate follow-up",
+        "several turns later",
+        "refresh",
+        "reopen from History"
+      ],
+      "testMustVerify": "\ud83d\udea8 The resolved image actually REACHES the generation/editing routing layer. Proving the UI still displays the image is not proof; it is the same class of error as reading a rendered tile instead of the trace.",
+      "status": "FIXED and live-proven 2026-08-27 (activeimg-61825461), one acceptance item pending.",
+      "effort": "EASY-MEDIUM",
+      "rootCause": "TWO causes, and the second was invisible until the first was fixed. (1) \"regenerate it\" had no intent of its own: it matched the UNDERSTAND patterns, so the turn went to the vision path and the model described the picture to someone asking for a new one. Eight of nine natural phrasings behaved that way. (2) The conversation's active image set only ever held UPLOADS \u2014 setConversationImages was never called with what a turn GENERATED \u2014 so after MigraPilot drew something there was no image for \"it\" to refer to.",
+      "fix": "A `regenerate` intent, checked before transform and understand because it overlaps both and loses to either. Executability decided by PROVENANCE: a generated image carries the prompt that made it and is re-run; an upload cannot be reproduced and is refused plainly. And a generated picture now becomes the conversation's active image.",
+      "liveProof": "Before: \"regenerate it\" answered \"Sure! Please provide the text or content you'd like me to regenerate\" \u2014 the reported sentence, reproduced verbatim. After: it produces the image, with no text. An uploaded photo refuses honestly and offers the alternative that works. Survives a hard reload: \"make it again\" executed on a reloaded conversation.",
+      "pending": "Ordinary image UNDERSTANDING regression check is blocked by gpu-contention-starves-chat (GPU 23922MiB/100%, no Ollama models loaded, ComfyUI mid-render). Proven NOT to be a regression from this slice: the prompt classifies as `understand` on the unchanged path and wantsRegeneration is false, so the new code is never entered."
+    },
+    {
+      "id": "regenerate-promise-execution-mismatch",
+      "title": "Regeneration promise vs execution truthfulness",
+      "severity": "HIGH",
+      "reportedBy": "Bonex, same live session 2026-08-27.",
+      "symptom": "MigraPilot answered \"Sure! Please provide the content you'd like me to regenerate\u2026\", and then when given the image, described it again instead of regenerating or refusing honestly.",
+      "invariant": "NEVER claim an image will be regenerated unless the request is actually being routed to an available image-generation capability.",
+      "requiredFlow": "existing image + \"remake/regenerate/something similar\" -> recognise CREATION intent using the source image as reference -> if reference-based generation is supported, execute it and produce a new Media Library artifact WITH source provenance. If it is not supported: give a truthful capability refusal, do NOT describe the picture as though that satisfied the request, and do NOT say \"Sure, I'll regenerate it\".",
+      "status": "FIXED and live-proven 2026-08-27 (activeimg-61825461), one acceptance item pending.",
+      "effort": "MEDIUM",
+      "related": "Same family as the image-editing refusal already shipped (IMAGE_EDITING_UNAVAILABLE): describe-instead-of-refuse is the failure mode.",
+      "rootCause": "TWO causes, and the second was invisible until the first was fixed. (1) \"regenerate it\" had no intent of its own: it matched the UNDERSTAND patterns, so the turn went to the vision path and the model described the picture to someone asking for a new one. Eight of nine natural phrasings behaved that way. (2) The conversation's active image set only ever held UPLOADS \u2014 setConversationImages was never called with what a turn GENERATED \u2014 so after MigraPilot drew something there was no image for \"it\" to refer to.",
+      "fix": "A `regenerate` intent, checked before transform and understand because it overlaps both and loses to either. Executability decided by PROVENANCE: a generated image carries the prompt that made it and is re-run; an upload cannot be reproduced and is refused plainly. And a generated picture now becomes the conversation's active image.",
+      "liveProof": "Before: \"regenerate it\" answered \"Sure! Please provide the text or content you'd like me to regenerate\" \u2014 the reported sentence, reproduced verbatim. After: it produces the image, with no text. An uploaded photo refuses honestly and offers the alternative that works. Survives a hard reload: \"make it again\" executed on a reloaded conversation.",
+      "pending": "Ordinary image UNDERSTANDING regression check is blocked by gpu-contention-starves-chat (GPU 23922MiB/100%, no Ollama models loaded, ComfyUI mid-render). Proven NOT to be a regression from this slice: the prompt classifies as `understand` on the unchanged path and wantsRegeneration is false, so the new code is never entered."
     }
   ],
   "withdrawnFindings": [
