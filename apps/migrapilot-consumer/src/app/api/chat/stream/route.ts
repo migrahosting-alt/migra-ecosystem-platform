@@ -678,6 +678,11 @@ export async function POST(request: Request): Promise<Response> {
       const generatedImages: string[] = []
       /** True once the user has been told WHY, so nothing generic overwrites it. */
       let explained = false
+      /*
+       * Set when the provider proved it could not decode what was sent.
+       * Drives the active-image set being cleared below — see there for why.
+       */
+      let unreadableImage = false
       let completed = false
       let closed = false
 
@@ -952,9 +957,24 @@ export async function POST(request: Request): Promise<Response> {
                 })
                 break
               }
+              /*
+               * AN IMAGE THAT CANNOT BE DECODED MUST STOP BEING THE SUBJECT.
+               *
+               * Otherwise it stays the conversation's active image and is
+               * re-sent on every later turn, so ONE bad upload breaks the
+               * thread for good — including turns that carry a perfectly good
+               * picture. That was observed live, and it is fallout from making
+               * attachments the active image: nothing asked whether the
+               * provider could actually read them.
+               *
+               * Flagged here and cleared after the loop, where the write can be
+               * awaited: a durable state that decides what the NEXT turn sends
+               * must not ride on a promise nobody waits for.
+               */
+              if (code === 'IMAGE_UNREADABLE') unreadableImage = true
               explained = true
               emit('error', {
-                error: 'brain_error',
+                error: unreadableImage ? 'image_unreadable' : 'brain_error',
                 message: typeof message === 'string' && message ? message : reasonFor('brain_error').message,
               })
               break
@@ -1242,6 +1262,29 @@ export async function POST(request: Request): Promise<Response> {
           trace.finish('not_saved')
         }
       } else {
+        /*
+         * DROP AN UNREADABLE IMAGE FROM THE ACTIVE SET.
+         *
+         * Every ref this turn sent goes, not a guessed subset: the provider
+         * fails the whole request on the first image it cannot decode, so it
+         * never says WHICH one — and keeping the others would leave the bad
+         * one active whenever it was not the only attachment. Re-attaching is
+         * cheap; a permanently poisoned conversation is not.
+         *
+         * Only the ACTIVE set. The user's message keeps its attachment refs,
+         * so the card still renders in the transcript, the file stays in the
+         * library, and provenance is untouched — the image stops being what
+         * the conversation is ABOUT, which is the only thing that was wrong.
+         */
+        if (unreadableImage && liveImages.length > 0 && durableId) {
+          const cleared = await setConversationImages(durableId, [], { principal })
+            .then(() => true)
+            .catch(() => false)
+          // Recorded either way: a clear that failed leaves the next turn
+          // carrying the same bad image, and that must be visible in the trace
+          // rather than inferred from a repeat failure.
+          trace.mark(cleared ? 'active_image_cleared' : 'active_image_clear_failed')
+        }
         // Nothing useful reached the user. The turn goes back.
         const quota = await settle(false, answer ? 'cancelled' : 'no_output')
         if (!closed) {

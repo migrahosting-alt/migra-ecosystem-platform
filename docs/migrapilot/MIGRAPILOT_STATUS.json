@@ -393,7 +393,9 @@
         "needsFromOwner": "Create the project + Object Storage credentials + DR bucket in the Hetzner console."
       }
     ],
-    "IMPLEMENTED_NEEDS_LIVE_PROOF": []
+    "IMPLEMENTED_NEEDS_LIVE_PROOF": [
+      "Unreadable image drops out of the active-image set \u2014 a picture the provider cannot decode stops being the conversation subject, so it is not re-sent on later turns. Consumer-side; 5 tests. NOT yet live: the consumer release could not be deployed (see blockers.guestAgentWedged)."
+    ]
   },
   "openDefects": [
     {
@@ -452,15 +454,6 @@
       "wantedFix": "Every Postgres-backed test file must report environment-unavailable as SKIPPED, never as a failure.",
       "status": "OPEN \u2014 easy backlog. Test-harness truthfulness, NOT part of the index fix.",
       "effort": "EASY"
-    },
-    {
-      "id": "unreadable-image-poisons-the-conversation",
-      "severity": "MEDIUM",
-      "effort": "EASY",
-      "symptom": "An image that cannot be decoded stays the conversation's ACTIVE image, so every later turn re-sends it and fails the same way \u2014 including a turn that attaches a perfectly good image. Reproduced live: after the unreadable PNG, a valid blue PNG in the SAME conversation returned \"That image could not be read\"; the identical image in a FRESH conversation did not.",
-      "cause": "A consequence of the conversational-image-reference slice: attachments become the active image unconditionally. Nothing consults whether the provider could actually read them.",
-      "fix": "Do not promote an image to active when the turn failed with IMAGE_UNREADABLE. The brain already emits that code; the consumer currently keeps only the message and maps the code to brain_error.",
-      "foundBy": "the negative control of the unreadable-image slice, 2026-08-27"
     }
   ],
   "driftControl": [
@@ -807,5 +800,15 @@
       "verifiedInstead": "All eight acceptance points pass live: frame arrives, message updates immediately, image renders BEFORE reload, same ref persists after reload, artifact present in the Media Library, a DUPLICATE content-addressed ref still renders immediately, text-only turns unaffected, and zero empty paragraphs on an image-only answer.",
       "probeDiscipline": "For fast deterministic paths, capture the baseline BEFORE triggering the action. And never use artifact-count growth as evidence when content addressing can legitimately deduplicate identical output."
     }
-  ]
+  ],
+  "blockers": {
+    "guestAgentWedged": {
+      "what": "qemu-guest-agent on VM111 is running but does not answer the host, so `qm guest exec` fails.",
+      "evidence": "qm agent 111 ping -> \"QEMU guest agent is not running\", while systemctl inside the guest shows it active since 2026-08-12 using 520 MB (peak 1.0 GB) \u2014 abnormal for qemu-ga.",
+      "cause": "Most likely my own long-output guest-exec commands; it wedged immediately after one timed out.",
+      "whyItBlocks": "Release trees are migrapilot:migrapilot and the ssh user is bonex, so deploying needs root. Guest-exec was the sanctioned root channel; the hook correctly refuses elevated bash/node, and qemu-guest-agent is not a migrapilot-* unit so restarting it falls outside the approved scope.",
+      "fix": "Restart qemu-guest-agent as root on VM111 (one command, by Bonex).",
+      "productImpact": "None. Brain and consumer are healthy and serving; only deployment is blocked."
+    }
+  }
 }

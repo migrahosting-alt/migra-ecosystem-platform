@@ -1009,7 +1009,14 @@ async function turnWith(options: {
   storedRefs: string[]
   attachNow?: string[]
   prompt?: string
-}): Promise<{ sentRefs: string[]; setImagesTo: string[] | null; askedModel: boolean }> {
+  /** Raw SSE the Brain streams back. Defaults to a bare `done`. */
+  modelFrames?: string
+}): Promise<{
+  sentRefs: string[]
+  setImagesTo: string[] | null
+  askedModel: boolean
+  frames: { event: string; data: any }[]
+}> {
   const original = globalThis.fetch
   let sentRefs: string[] = []
   let setImagesTo: string[] | null = null
@@ -1036,7 +1043,7 @@ async function turnWith(options: {
        */
       const attachments = ((body.attachments ?? body.imageAttachments ?? []) as { name?: string; ref?: string }[])
       sentRefs = attachments.map((a) => a.name ?? a.ref ?? '')
-      return new Response('event: done\ndata: {}\n\n', {
+      return new Response(options.modelFrames ?? 'event: done\ndata: {}\n\n', {
         status: 200,
         headers: { 'content-type': 'text/event-stream' },
       })
@@ -1058,7 +1065,7 @@ async function turnWith(options: {
   }) as typeof globalThis.fetch
 
   setAuthPort(portWith(session))
-  await collect(
+  const frames = await collect(
     await post({
       prompt: options.prompt ?? 'follow up',
       conversationId: CONVERSATION_ID,
@@ -1067,7 +1074,7 @@ async function turnWith(options: {
   )
   globalThis.fetch = original
   resetAuthPort()
-  return { sentRefs, setImagesTo, askedModel }
+  return { sentRefs, setImagesTo, askedModel, frames }
 }
 
 test('MATRIX: a follow-up with no reattachment still sends the active image to the Brain', async () => {
@@ -1389,4 +1396,75 @@ test('many scattered pages become a count rather than an unreadable list', () =>
 test('no pages produces no label, so non-PDF sources are unchanged', () => {
   assert.equal(describePages([]), '')
   assert.equal(describePages([0, -3]), '', 'nonsense page numbers are not rendered')
+})
+
+// ── an image the provider cannot decode ─────────────────────────────────────
+//
+// One bad upload used to break the conversation permanently: the image stayed
+// the active subject and was re-sent on every later turn, so turns that carried
+// a perfectly good picture failed too. Observed live before it was fixed.
+
+/** The Brain's terminal frame when the provider rejected the image itself. */
+const UNREADABLE = sse([['error', {
+  code: 'IMAGE_UNREADABLE',
+  message: 'That image could not be read. The file may be corrupt, truncated, or in a format the vision model does not accept — re-saving it as a PNG or JPEG and attaching it again usually fixes it.',
+}]])
+
+test('an unreadable image is dropped from the active set', async () => {
+  const bad = await storedImage('bad.png', 11)
+  const { setImagesTo } = await turnWith({ storedRefs: [bad], modelFrames: UNREADABLE })
+
+  assert.deepEqual(setImagesTo, [], 'the active set is cleared, so the next turn carries no image')
+})
+
+test('and the NEXT turn therefore sends nothing', async () => {
+  /*
+   * The defect itself, stated as a test: the poisoning was never the first
+   * turn's failure, it was every turn after it. With the set cleared, a plain
+   * follow-up is an ordinary text turn again.
+   */
+  const { sentRefs, askedModel } = await turnWith({ storedRefs: [] })
+
+  assert.equal(askedModel, true, 'the follow-up is answered normally')
+  assert.deepEqual(sentRefs, [], 'and the bad image is not re-sent')
+})
+
+test('the failure is reported as an image problem, in the Brain\'s own words', async () => {
+  const bad = await storedImage('bad2.png', 12)
+  const { frames } = await turnWith({ storedRefs: [bad], modelFrames: UNREADABLE })
+
+  const error = frames.find((f) => f.event === 'error')
+  assert.ok(error, 'an error frame reaches the browser')
+  assert.equal(error.data.error, 'image_unreadable', 'distinguished from a generic engine failure')
+  assert.match(error.data.message, /could not be read/i)
+  // The actionable half must survive the trip; a truncated reason is the defect
+  // this whole lane exists to remove.
+  assert.match(error.data.message, /PNG or JPEG/)
+})
+
+test('an ordinary engine failure does NOT clear the active set', async () => {
+  /*
+   * The line that keeps this fix honest. A saturated GPU, a dead upstream, a
+   * timeout — none of those say anything about the picture, and silently
+   * dropping the user's image on an unrelated outage would be its own defect:
+   * they would come back, ask again, and find the subject gone.
+   */
+  const good = await storedImage('good.png', 13)
+  const { setImagesTo } = await turnWith({
+    storedRefs: [good],
+    modelFrames: sse([['error', { code: 'COMPLETION_FAILED', message: 'The engine could not complete the request.' }]]),
+  })
+
+  assert.equal(setImagesTo, null, 'the active set is left exactly as it was')
+})
+
+test('a successful turn never clears the active set', async () => {
+  const good = await storedImage('good2.png', 14)
+  const { sentRefs, setImagesTo } = await turnWith({
+    storedRefs: [good],
+    modelFrames: sse([['token', { text: 'blue' }], ['done', { requestId: 'r' }]]),
+  })
+
+  assert.deepEqual(sentRefs, [good], 'the image was sent')
+  assert.notDeepEqual(setImagesTo, [], 'and it is still the conversation\'s subject afterwards')
 })
