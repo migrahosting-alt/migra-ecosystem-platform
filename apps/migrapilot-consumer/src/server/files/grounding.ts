@@ -43,6 +43,17 @@ export interface GroundingReconciliation {
    * transient fault. Callers must not persist any set derived from this.
    */
   libraryUnreadable: boolean
+  /**
+   * The index contradicts its own record: it reports approved and searchable
+   * while holding none of the chunks its committed version says it has.
+   *
+   * Kept separate from `unreadable` because the two produce OPPOSITE sentences.
+   * An unreadable file genuinely holds no indexable text, and saying so is true.
+   * A contradictory index says nothing about the FILE at all — the file is fine
+   * and the index is not — so claiming "no readable content was found in
+   * <file>" is a confident falsehood about content the user can see.
+   */
+  indexUnavailable: boolean
   /** True when the index can actually serve a grounded answer. */
   searchable: boolean
   /** May this turn be grounded at all? */
@@ -63,26 +74,37 @@ interface IndexRecord {
  * have silently ungrounded every conversation on a version skew. Approval decides whether
  * anything can be served; counts only refine WHICH files are readable.
  */
-async function approvedIndexState(): Promise<{ approved: boolean; counts: Record<string, number> | null }> {
+async function approvedIndexState(): Promise<{ approved: boolean; counts: Record<string, number> | null; contradictory: boolean }> {
   const root = await userDirectory()
   const listed = await callBrain<{ indexes?: IndexRecord[] }>({ kind: 'listIndexes' })
-  if (listed.kind !== 'ok') return { approved: false, counts: null }
+  if (listed.kind !== 'ok') return { approved: false, counts: null, contradictory: false }
   const index = (listed.value?.indexes ?? []).find((i) => i.root === root)
-  if (!index?.id) return { approved: false, counts: null }
-  const status = await callBrain<{ state?: string; chunkCounts?: Record<string, number> }>({
+  if (!index?.id) return { approved: false, counts: null, contradictory: false }
+  const status = await callBrain<{
+    state?: string
+    chunkCounts?: Record<string, number>
+    chunkIntegrity?: { loaded: number; recorded: number | null; contradictory: boolean }
+  }>({
     kind: 'indexStatus',
     indexId: index.id,
   })
-  if (status.kind !== 'ok') return { approved: false, counts: null }
+  if (status.kind !== 'ok') return { approved: false, counts: null, contradictory: false }
   // Only an APPROVED index is reachable by grounding. Anything else is
   // indexed-but-not-searchable and must never be treated as ready.
   const approved = (status.value?.state ?? index.state) === 'approved'
-  return { approved, counts: status.value?.chunkCounts ?? null }
+  // Absent integrity means an older Brain that cannot report it. That is "cannot
+  // tell", not "healthy" — but it must not fabricate a contradiction either, so it
+  // stays false and behaviour is exactly what it was before this field existed.
+  return {
+    approved,
+    counts: status.value?.chunkCounts ?? null,
+    contradictory: status.value?.chunkIntegrity?.contradictory === true,
+  }
 }
 
 export async function reconcileGrounding(requested: string[]): Promise<GroundingReconciliation> {
   if (requested.length === 0) {
-    return { available: [], missing: [], unreadable: [], searchable: false, grounded: false, libraryUnreadable: false }
+    return { available: [], missing: [], unreadable: [], indexUnavailable: false, searchable: false, grounded: false, libraryUnreadable: false }
   }
 
   /*
@@ -106,6 +128,7 @@ export async function reconcileGrounding(requested: string[]): Promise<Grounding
       available: [],
       missing: [],
       unreadable: [],
+      indexUnavailable: false,
       searchable: false,
       grounded: false,
       libraryUnreadable: true,
@@ -114,7 +137,9 @@ export async function reconcileGrounding(requested: string[]): Promise<Grounding
   const present = new Set(listed.map((f) => f.name))
   const available = requested.filter((name) => present.has(name))
   const missing = requested.filter((name) => !present.has(name))
-  const state = available.length > 0 ? await approvedIndexState() : { approved: false, counts: null }
+  const state = available.length > 0
+    ? await approvedIndexState()
+    : { approved: false, counts: null, contradictory: false }
   const searchable = state.approved
   const counts = state.counts
 
@@ -129,12 +154,25 @@ export async function reconcileGrounding(requested: string[]): Promise<Grounding
   // missing from a PRESENT map is the index saying it holds nothing for that file.
   const unreadable = counts ? available.filter((name) => (counts[name] ?? 0) === 0) : []
 
+  /*
+   * A CONTRADICTORY index must not masquerade as a set of unreadable files.
+   *
+   * When the index holds none of the chunks its committed version recorded, the
+   * per-file counts are all zero — so every attachment looks "unreadable" and the
+   * caller says the user's real file has no readable content. That sentence is
+   * about the FILE, and the file is fine. Clearing `unreadable` here keeps the
+   * caller from making any claim about the file at all, leaving it only the true
+   * one: the index cannot answer right now.
+   */
+  const indexUnavailable = state.contradictory
+
   return {
     available,
     missing,
-    unreadable,
+    unreadable: indexUnavailable ? [] : unreadable,
+    indexUnavailable,
     searchable,
-    grounded: available.length > 0 && searchable,
+    grounded: available.length > 0 && searchable && !indexUnavailable,
     libraryUnreadable: false,
   }
 }

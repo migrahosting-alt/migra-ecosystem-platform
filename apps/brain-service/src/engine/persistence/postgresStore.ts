@@ -395,6 +395,22 @@ export class PostgresDurableStore implements DurableStore {
     return this.inScope(scope, (client) => rag.loadChunks(client, indexId, indexVersion));
   }
 
+  /**
+   * How many chunks the committed version RECORDED, read under the caller's scope.
+   *
+   * Exists so a caller can tell an index that RESTORED EMPTY apart from one that
+   * IS empty. Both report zero loaded chunks, and only one of them makes
+   * "no readable content" a true statement about the user's file.
+   *
+   * Null means "cannot tell" — a pre-M22 version, or a row this scope cannot
+   * read — and must never be coerced to zero.
+   */
+  async recordedChunkCountForScope(
+    scope: PersistenceScope, indexId: string, indexVersion: number,
+  ): Promise<number | null> {
+    return this.inScope(scope, (client) => rag.recordedChunkCount(client, indexId, indexVersion));
+  }
+
   /* ── embedding cache ───────────────────────────────────────────────────── */
 
   async getEmbedding(model: string, version: string, contentHash: string): Promise<number[] | undefined> {

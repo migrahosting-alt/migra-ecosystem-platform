@@ -309,6 +309,41 @@ export class IndexService {
     return e.approvedIndex.chunkCounts();
   }
 
+  /**
+   * Whether the APPROVED index is in a state that contradicts its own record.
+   *
+   * An index can report `approved` and `searchable` while holding zero chunks,
+   * and the product then tells the user a file they can see in their library has
+   * "no readable content". That sentence is TRUE for a whitespace-only upload and
+   * a confident falsehood for a file whose chunks failed to restore — and the two
+   * are indistinguishable from the loaded count alone.
+   *
+   * `recorded` is what the committing transaction counted; `loaded` is what
+   * actually came back into memory. Only when a POSITIVE recorded count meets a
+   * zero loaded count is the state provably contradictory. Null recorded means
+   * "cannot tell" (pre-M22, or unreadable under this scope) and is NEVER treated
+   * as evidence either way — an unknown must not manufacture a contradiction any
+   * more than it should hide one.
+   */
+  async approvedChunkIntegrity(
+    id: string, scope: Scope,
+  ): Promise<{ loaded: number; recorded: number | null; contradictory: boolean }> {
+    const e = this.entry(id, scope);
+    const loaded = e?.approvedIndex ? e.approvedIndex.size() : 0;
+    const version = e?.record.approvedVersion;
+    const source = this.persistence as {
+      recordedChunkCountForScope?: (s: Scope, i: string, v: number) => Promise<number | null>;
+    } | undefined;
+    let recorded: number | null = null;
+    if (e && version !== undefined && typeof source?.recordedChunkCountForScope === 'function') {
+      // A failure to READ the count is not evidence of anything; swallow it into
+      // "cannot tell" rather than letting a transient database fault present as
+      // a corrupted index.
+      recorded = await source.recordedChunkCountForScope(scope, id, version).catch(() => null);
+    }
+    return { loaded, recorded, contradictory: recorded !== null && recorded > 0 && loaded === 0 };
+  }
+
   /** Durable deletion first: dropping it from memory while the row survived meant
    * the index came back on the next boot, after the caller was told it was gone. */
   async delete(id: string, scope: Scope): Promise<boolean> {

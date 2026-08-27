@@ -304,10 +304,27 @@ export async function commitSync(
     );
   }
 
+  /*
+   * `chunk_count` comes from a SUBSELECT, never from `changed.length`.
+   *
+   * commitSync receives only the CHANGED chunks of an incremental sync, so the
+   * caller's array is a delta and using it would undercount every sync after the
+   * first. The subselect runs inside this same transaction and under the same
+   * scope that just wrote the rows, so it counts exactly what was committed.
+   *
+   * This number exists to make one specific lie impossible later: an index that
+   * fails to restore reports zero chunks, which is indistinguishable from an
+   * index that is legitimately empty, and the product then tells the user their
+   * real file has "no readable content". Recording the truth at commit time is
+   * what lets a reader tell those apart.
+   */
   await client.query(
-    `INSERT INTO index_versions (index_id, version, owner_scope, workspace_scope, committed_at)
-     VALUES ($1,$2,$3,$4,$5)
-     ON CONFLICT (index_id, version) DO UPDATE SET committed_at = EXCLUDED.committed_at`,
+    `INSERT INTO index_versions (index_id, version, owner_scope, workspace_scope, committed_at, chunk_count)
+     VALUES ($1,$2,$3,$4,$5,
+       (SELECT count(*) FROM index_chunks WHERE index_id = $1 AND index_version = $2))
+     ON CONFLICT (index_id, version) DO UPDATE SET
+       committed_at = EXCLUDED.committed_at,
+       chunk_count  = EXCLUDED.chunk_count`,
     [indexId, version, scope.ownerScope, scope.workspaceScope, updatedAt],
   );
 
@@ -347,4 +364,26 @@ export async function putEmbedding(
 export async function pruneOlderThan(client: PoolClient, cutoffMs: number): Promise<number> {
   const result = await client.query('DELETE FROM embedding_cache WHERE created_at < $1', [cutoffMs]);
   return result.rowCount ?? 0;
+}
+
+/**
+ * How many chunks the committed version RECORDED, independent of how many
+ * loaded into memory.
+ *
+ * Returns null when the version predates M22 (chunk_count IS NULL) or the row is
+ * unreadable. Null means "cannot tell" and MUST NOT be read as zero — treating an
+ * unknown as an empty index would resurrect the very falsehood this column exists
+ * to prevent, just from the opposite direction.
+ */
+export async function recordedChunkCount(
+  client: PoolClient, indexId: string, indexVersion: number,
+): Promise<number | null> {
+  const { rows } = await client.query<{ chunk_count: string | null }>(
+    'SELECT chunk_count FROM index_versions WHERE index_id = $1 AND version = $2',
+    [indexId, indexVersion],
+  );
+  const raw = rows[0]?.chunk_count;
+  if (raw === undefined || raw === null) return null;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : null;
 }

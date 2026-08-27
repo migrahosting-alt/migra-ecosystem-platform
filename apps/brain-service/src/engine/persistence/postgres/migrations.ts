@@ -1128,6 +1128,25 @@ CREATE INDEX IF NOT EXISTS media_migrations_status_idx
   ON media_migrations (status, updated_at DESC);
 `;
 
+/**
+ * M22 — record how many chunks a committed index version actually holds.
+ *
+ * WHY: an index that restores EMPTY is indistinguishable from an index that is
+ * legitimately empty, and the difference decides what the user is told. A
+ * library holding only a whitespace-only upload genuinely has zero chunks and
+ * "no readable content" is the truthful answer. A library whose chunks failed to
+ * restore ALSO reports zero — and there the same sentence is a confident
+ * falsehood about a file the user can see in their own library.
+ *
+ * Recording the count at COMMIT time makes the two distinguishable after the
+ * fact. It is written from a subselect inside the committing transaction rather
+ * than from the caller's delta, because commitSync receives only CHANGED chunks
+ * and would undercount every incremental sync.
+ */
+const M22_INDEX_VERSION_CHUNK_COUNT = `
+ALTER TABLE index_versions ADD COLUMN IF NOT EXISTS chunk_count BIGINT;
+`;
+
 export const MIGRATIONS: readonly Migration[] = [
   { version: 1, name: 'foundation', sql: M1_FOUNDATION },
   { version: 2, name: 'tenancy_primitives', sql: M2_TENANCY },
@@ -1150,7 +1169,9 @@ export const MIGRATIONS: readonly Migration[] = [
   { version: 19, name: 'message_images', sql: M19_MESSAGE_IMAGES },
   { version: 20, name: 'media_migrations', sql: M20_MEDIA_MIGRATIONS },
   { version: 21, name: 'message_files', sql: M21_MESSAGE_FILES },
+  { version: 22, name: 'index_version_chunk_count', sql: M22_INDEX_VERSION_CHUNK_COUNT },
 ];
+
 
 /** Highest version defined in code. */
 export function latestVersion(): number {

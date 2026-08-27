@@ -33,7 +33,7 @@ const port: AuthPort = {
 }
 
 /** Stubs the Brain so index state is controllable. */
-function brainWith(state: string | null) {
+function brainWith(state: string | null, statusExtras: Record<string, unknown> = {}) {
   const original = globalThis.fetch
   globalThis.fetch = (async (url: string | URL) => {
     const href = String(url)
@@ -42,7 +42,7 @@ function brainWith(state: string | null) {
       const root = await userDirectory()
       return state === null ? json({ indexes: [] }) : json({ indexes: [{ id: 'ix1', root, state }] })
     }
-    if (href.includes('/status')) return json({ state })
+    if (href.includes('/status')) return json({ state, ...statusExtras })
     return new Response('{}', { status: 404 })
   }) as typeof globalThis.fetch
   return () => { globalThis.fetch = original }
@@ -175,4 +175,66 @@ test('a genuinely deleted file IS still reported missing', async () => {
 
   brain()
   resetAuthPort()
+})
+
+/*
+ * ── REGRESSION LOCK ─────────────────────────────────────────────────────────
+ *
+ * Observed TWICE in production, both times right after a Brain restart: the
+ * index reports approved and searchable while holding zero chunks, and the
+ * product tells the user a real file in their own library has "no readable
+ * content". These pin the distinction that makes that sentence impossible,
+ * without pretending to know why the chunks went missing.
+ */
+
+test('a CONTRADICTORY index never blames the users files', async () => {
+  // Recorded 4 chunks, loaded 0 — the index lost them. The file is fine.
+  setAuthPort(port)
+  const restore = brainWith('approved', {
+    chunkCounts: { 'runbook.md': 0 },
+    chunkIntegrity: { loaded: 0, recorded: 4, contradictory: true },
+  })
+  await saveFile('runbook.md', new TextEncoder().encode('# marker').buffer as ArrayBuffer)
+
+  const r = await reconcileGrounding(['runbook.md'])
+  assert.equal(r.indexUnavailable, true, 'must report the index, not the file')
+  assert.deepEqual(r.unreadable, [], 'must NOT claim the file has no readable content')
+  assert.deepEqual(r.available, ['runbook.md'], 'the file is present and unchanged')
+  assert.deepEqual(r.missing, [], 'nothing was deleted')
+  assert.equal(r.grounded, false, 'cannot ground from an index that cannot answer')
+
+  restore(); resetAuthPort()
+})
+
+test('a GENUINELY empty file is still reported unreadable', async () => {
+  // The other side of the same coin. Recorded 0 and loaded 0 is not a
+  // contradiction, it is an accurate empty index — and here "no readable
+  // content" is the TRUE answer. Collapsing these two cases into one would
+  // trade a false statement about files for a false statement about the index.
+  setAuthPort(port)
+  const restore = brainWith('approved', {
+    chunkCounts: { 'blank.txt': 0 },
+    chunkIntegrity: { loaded: 0, recorded: 0, contradictory: false },
+  })
+  await saveFile('blank.txt', new TextEncoder().encode('   ').buffer as ArrayBuffer)
+
+  const r = await reconcileGrounding(['blank.txt'])
+  assert.equal(r.indexUnavailable, false)
+  assert.deepEqual(r.unreadable, ['blank.txt'])
+
+  restore(); resetAuthPort()
+})
+
+test('an older Brain that cannot report integrity behaves exactly as before', async () => {
+  // Absent chunkIntegrity means "cannot tell". It must not fabricate a
+  // contradiction, or every version skew would start reporting a false outage.
+  setAuthPort(port)
+  const restore = brainWith('approved', { chunkCounts: { 'notes2.md': 2 } })
+  await saveFile('notes2.md', new TextEncoder().encode('content').buffer as ArrayBuffer)
+
+  const r = await reconcileGrounding(['notes2.md'])
+  assert.equal(r.indexUnavailable, false)
+  assert.equal(r.grounded, true)
+
+  restore(); resetAuthPort()
 })

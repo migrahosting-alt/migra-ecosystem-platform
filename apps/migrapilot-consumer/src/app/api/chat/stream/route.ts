@@ -142,6 +142,8 @@ function refusalOr(
   unreadable: readonly string[] = [],
   /** Attached files that exist and could be used. */
   available: readonly string[] = [],
+  /** The index contradicts its own record — say nothing about the FILES. */
+  indexUnavailable = false,
 ): {
   error: string
   message: string
@@ -192,6 +194,27 @@ function refusalOr(
        * indexed content — naming a file with zero chunks cannot retrieve anything. Advice a
        * user cannot act on is worse than no advice.
        */
+      /*
+       * The index contradicting itself is checked FIRST, and the order matters.
+       *
+       * When chunks fail to restore, every per-file count reads zero, so the
+       * `allUnreadable` branch below would fire and blame the user's files. It is
+       * the more specific truth and it must win: the files are fine, the index
+       * cannot answer, and a reindex fixes it. Saying "no readable content was
+       * found in <file>" here is a confident falsehood about content the user can
+       * see in their own library — worse than an error, because nothing signals
+       * that trying again would work.
+       */
+      if (indexUnavailable) {
+        return {
+          error: 'index_unavailable',
+          message:
+            'Your file index is temporarily unavailable, so nothing could be read from your ' +
+            'documents for this answer. Your files are still there and unchanged — reindex them ' +
+            'and ask again.',
+        }
+      }
+
       const allUnreadable = available.length > 0 && unreadable.length === available.length
       if (allUnreadable) {
         const names = unreadable.join(', ')
@@ -518,7 +541,14 @@ export async function POST(request: Request): Promise<Response> {
    */
   const reconciled = canGround
     ? await reconcileGrounding(requestedGrounding)
-    : { grounded: false, available: [] as string[], missing: [] as string[], unreadable: [] as string[], libraryUnreadable: false }
+    : {
+        grounded: false,
+        available: [] as string[],
+        missing: [] as string[],
+        unreadable: [] as string[],
+        indexUnavailable: false,
+        libraryUnreadable: false,
+      }
 
   // A file that is GONE leaves the set permanently, and the correction is written back
   // so the drift does not outlive the turn. A merely unsearchable index changes nothing
@@ -746,7 +776,7 @@ export async function POST(request: Request): Promise<Response> {
 
       if (opened.kind !== 'ok') {
         const refusalCode = deliberateRefusalCode(opened)
-        const told = refusalOr(opened, reconciled.unreadable, reconciled.available)
+        const told = refusalOr(opened, reconciled.unreadable, reconciled.available, reconciled.indexUnavailable)
 
         /*
          * A DELIBERATE REFUSAL IS AN ANSWER, so it is written to the
@@ -762,11 +792,27 @@ export async function POST(request: Request): Promise<Response> {
           await appendMessage(durableId, 'assistant', told.message, { principal })
         }
 
-        const outcome = refusalCode
-          ? 'capability_refused'
-          : opened.kind === 'brain_error'
-            ? 'brain_error'
-            : 'brain_unreachable'
+        /*
+         * A CONTRADICTORY INDEX IS AN OUTAGE WEARING A REFUSAL'S CLOTHES.
+         *
+         * It arrives on the INSUFFICIENT_APPROVED_EVIDENCE branch, so it would
+         * otherwise be filed as `capability_refused` — the label for a healthy
+         * feature declining on purpose. That inverts the comment below: a refusal
+         * recorded as an outage drags alerting into a working feature, and an
+         * outage recorded as a refusal hides a real fault inside normal traffic.
+         * The user still gets the message stored like any answer; the TELEMETRY
+         * says what actually happened, so this stays visible rather than silently
+         * absorbed.
+         */
+        const indexOutage = told.error === 'index_unavailable'
+        const outcome = indexOutage
+          ? 'index_unavailable'
+          : refusalCode
+            ? 'capability_refused'
+            : opened.kind === 'brain_error'
+              ? 'brain_error'
+              : 'brain_unreachable'
+        if (indexOutage) trace.set('index_unavailable', 'approved_index_holds_no_recorded_chunks')
         const settlement = await settle(false, outcome)
         // `brain_failure` is reserved for things that actually went wrong. A
         // refusal recorded as an outage drags alerting into a working feature.

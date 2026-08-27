@@ -72,10 +72,19 @@ export function registerRagRoutes(app: FastifyInstance, service: IndexService): 
      * produced zero chunks. A caller can now tell readiness per file instead of inferring
      * it from a library-wide boolean.
      */
+    /*
+     * `chunkIntegrity` lets a caller distinguish an index that IS empty from one
+     * that RESTORED empty. Without it both look identical — zero chunks — and the
+     * consumer answers "no readable content was found in <file>", which is true
+     * for a whitespace-only upload and a confident lie about a file whose chunks
+     * failed to load. A caller seeing `contradictory` must report the index as
+     * unavailable rather than make a claim about the file itself.
+     */
     return {
       ...rec,
       status: rec.syncing ? 'indexing' : rec.state,
       chunkCounts: service.approvedChunkCounts(request.params.id, scopeFrom(request)),
+      chunkIntegrity: await service.approvedChunkIntegrity(request.params.id, scopeFrom(request)),
     };
   });
 
