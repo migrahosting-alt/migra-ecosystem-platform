@@ -13,7 +13,7 @@
   "activeLane": {
     "name": "PDF/DOCX extraction",
     "objective": "Extend the proven document pipeline to PDF and DOCX, the first formats behind an honest refusal today.",
-    "currentStep": "Index snapshot fix (option A) IMPLEMENTED and BLOCKED ON VERIFICATION. Docker daemon is down, so the Postgres suite cannot run. MUST NOT DEPLOY until the real Postgres suite is green. Manual action required from owner: start Docker Desktop on Windows.",
+    "currentStep": "Index truthfulness COMPLETE and proven live. Next per owner ordering: glyph phrasing gap (EASY), then PDF extractor qualification.",
     "lastProvenMilestone": "Common text/code Files & Documents lane CLOSED 2026-08-27 with deterministic attribution PROVEN_LIVE 5/5. Closed because the one failing cell was classified correctly as a model-quality defect, NOT because the failure was removed.",
     "previousLane": {
       "name": "Files & Documents",
@@ -165,7 +165,8 @@
       "Deleted library file renders as Deleted on its historical turn",
       "Deterministic file attribution \u2014 proven 5/5 on 2026-08-27 across markdown, text, CSV, JSON and code. Every prompt forbade the model from naming a file and every reply obeyed, yet the correct single file was still attributed and message fileRefs matched. Provenance comes from the engine grounding frame, not model wording.",
       "Files & Documents \u2014 common text/code attachment lane (TXT, MD, CSV, JSON, code): upload, index, ground, attribute, historical attachment record, detach control, deleted-file state.",
-      "Reproducible brain-service releases \u2014 lockfile-driven npm ci, dependency verification, boot test, atomic activation with health check and auto-rollback. Activated live 2026-08-27 as lockfile-909d10d8; smoke-verified with a text turn, a deterministic glyph turn and a grounded file turn. The active tree is independent (inode links=1), not inherited."
+      "Reproducible brain-service releases \u2014 lockfile-driven npm ci, dependency verification, boot test, atomic activation with health check and auto-rollback. Activated live 2026-08-27 as lockfile-909d10d8; smoke-verified with a text turn, a deterministic glyph turn and a grounded file turn. The active tree is independent (inode links=1), not inherited.",
+      "Index snapshot integrity \u2014 every committed version is a complete independently loadable snapshot; a Brain restart no longer empties the index. Proven live 2026-08-27 (snapshot-4e3bc7c4)."
     ],
     "STABILIZATION": [
       {
@@ -232,29 +233,6 @@
         "CORRECTED: \"EASY to unblock by stopping a ComfyUI instance\". ComfyUI was mid-render (/queue reported 1 running job), so stopping it would destroy in-flight owner work. The safe path is to wait for the queue to drain.",
         "REFINED: \"VRAM exhaustion\" is not the whole mechanism. Generation stalls with the model already resident and with a smaller model substituted, and the card reads 100% utilisation \u2014 so compute contention matters, not just memory headroom."
       ]
-    },
-    {
-      "id": "index-reported-approved-while-empty",
-      "symptom": "GET /api/files/index returned state \"approved\", searchable true, and stats files=0 chunks=0 with an EMPTY chunkCounts map. Grounded turns then told the user \"No readable content was found in fixture-runbook.md\" \u2014 a false statement about a file that had 4 chunks.",
-      "evidence": "Observed once at 19:50 after a brain restart. A POST reindex immediately restored 9 files / 18 chunks. NOT REPRODUCED on the next restart, where the index survived intact with all 9 counts present, so the restart itself is NOT established as the cause.",
-      "rootCause": "indexService.sync() sets nextVersion = record.version + 1 on EVERY sync, including a no-op. commitSync() then persists only CHANGED chunks at that new version, so unchanged chunks keep their OLD index_version. A no-op sync therefore commits a version that holds ZERO chunks on disk while memory still holds the complete index. Approval points at that version. On the next restart loadVersion(approvedVersion) returns nothing and the index restores EMPTY while still reporting approved and searchable.",
-      "status": "ROOT CAUSE FOUND AND DETERMINISTICALLY REPRODUCED 2026-08-27. NOT a race. Fix NOT yet written \u2014 the correct repair touches the version model and is an owner decision.",
-      "effort": "MEDIUM \u2014 the honest-state guard is EASY; the root cause is MEDIUM.",
-      "regressionTest": "Wanted: an approved index that reports zero chunks must answer \"index unavailable, reindex needed\", never \"no readable content was found in <file>\". Approved+empty is contradictory state and must fail loudly.",
-      "liveAcceptance": "Not yet proven.",
-      "reproduction": "Occurrence 2 on 2026-08-27 immediately after the brain-release activation restart. Identical signature: state \"approved\", searchable true, stats files=0 chunks=0, empty chunkCounts \u2014 and the live product told the user \"No readable content was found in fixture-notes.txt\" about a real 2-chunk file. A POST reindex restored 10 files / 23 chunks and the same question then answered correctly (MT-PLAT-7731) with attribution.",
-      "triggerEvidence": "BOTH occurrences followed a brain restart. It is NOT every restart: one intermediate restart left the index intact with all 9 counts present, so restart is a trigger but not a sufficient condition. That pattern fits a startup/lazy-restore race \u2014 status answers \"approved\" from the persisted record before the scoped chunk restore has populated the in-memory index \u2014 but the race has NOT been proven and must not be assumed.",
-      "userImpact": "HIGH and silent. It does not error; it states a confident falsehood about the users own file, which is worse than an outage because nothing signals that a retry would work.",
-      "wantedFix": "Approved + zero chunks is CONTRADICTORY state and must fail loudly: answer \"index unavailable, reindex needed\", never \"no readable content was found in <file>\". That guard is correct regardless of the underlying cause, so it can land before the race is proven.",
-      "proof": "Instrumented and reproduced ON DEMAND, no waiting for a race. Before restart: loaded 23, recorded 0 \u2014 the approved version demonstrably held no chunks on disk. Restarted the brain: loaded 0, files 0, still \"approved\"/\"searchable\". Reindexed: loaded 23, recorded 23, because syncing from an EMPTY in-memory index marks every file changed and rewrites all chunks at the new version. That also explains why a reindex always appeared to \"fix\" it, and why only SOME restarts triggered it \u2014 it depends entirely on whether the last sync before the restart was a no-op.",
-      "guardLimitation": "\ud83d\udea8 The shipped guard does NOT catch this. It fires on recorded > 0 with loaded == 0, and here recorded is legitimately 0 because the version really does hold no chunks. The guard is still correct for what it covers and the honest-refusal plumbing is live and useful, but it must not be described as fixing this defect. It is what EXPOSED it.",
-      "fixOptions": [
-        "A. Carry unchanged chunks forward to the new version on commit (re-stamp index_version for files that were not deleted). Correct under the existing snapshot model, but writes many rows.",
-        "B. Do not bump the version when nothing changed. Minimal, but needs care when only deletions occurred.",
-        "C. Make restore fall back to the newest version that actually holds chunks. Least invasive but leaves the incomplete version on disk as a trap for every other reader."
-      ],
-      "ownerDecisionNeeded": "The version model comment in ragRepo.ts is explicit that an index legitimately holds the same chunk at two versions and that rewriting an older version destroys it. Choosing between A, B and C changes that contract, so it should not be decided unilaterally.",
-      "currentProductionState": "HEALTHY as of 2026-08-27 03:2x \u2014 recorded 23 equals loaded 23, so a restart now restores correctly. The bug re-arms the next time a no-op sync commits."
     },
     {
       "id": "csv-quantitative-reasoning-qwen3-8b",
@@ -485,6 +463,31 @@
       "regressionTest": "none yet",
       "liveAcceptance": "not run",
       "proof": "Attribution rendered for markdown, text, CSV, JSON and code, in every case with the model forbidden from naming the file. The original asymmetry (citation for TXT, absent for markdown) is gone because provenance no longer depends on the model formatting a citation."
+    },
+    {
+      "id": "index-reported-approved-while-empty",
+      "symptom": "GET /api/files/index returned state \"approved\", searchable true, and stats files=0 chunks=0 with an EMPTY chunkCounts map. Grounded turns then told the user \"No readable content was found in fixture-runbook.md\" \u2014 a false statement about a file that had 4 chunks.",
+      "evidence": "Observed once at 19:50 after a brain restart. A POST reindex immediately restored 9 files / 18 chunks. NOT REPRODUCED on the next restart, where the index survived intact with all 9 counts present, so the restart itself is NOT established as the cause.",
+      "rootCause": "indexService.sync() sets nextVersion = record.version + 1 on EVERY sync, including a no-op. commitSync() then persists only CHANGED chunks at that new version, so unchanged chunks keep their OLD index_version. A no-op sync therefore commits a version that holds ZERO chunks on disk while memory still holds the complete index. Approval points at that version. On the next restart loadVersion(approvedVersion) returns nothing and the index restores EMPTY while still reporting approved and searchable.",
+      "status": "RESOLVED 2026-08-27 \u2014 option A shipped and proven in production.",
+      "effort": "MEDIUM \u2014 the honest-state guard is EASY; the root cause is MEDIUM.",
+      "regressionTest": "Wanted: an approved index that reports zero chunks must answer \"index unavailable, reindex needed\", never \"no readable content was found in <file>\". Approved+empty is contradictory state and must fail loudly.",
+      "liveAcceptance": "Not yet proven.",
+      "reproduction": "Occurrence 2 on 2026-08-27 immediately after the brain-release activation restart. Identical signature: state \"approved\", searchable true, stats files=0 chunks=0, empty chunkCounts \u2014 and the live product told the user \"No readable content was found in fixture-notes.txt\" about a real 2-chunk file. A POST reindex restored 10 files / 23 chunks and the same question then answered correctly (MT-PLAT-7731) with attribution.",
+      "triggerEvidence": "BOTH occurrences followed a brain restart. It is NOT every restart: one intermediate restart left the index intact with all 9 counts present, so restart is a trigger but not a sufficient condition. That pattern fits a startup/lazy-restore race \u2014 status answers \"approved\" from the persisted record before the scoped chunk restore has populated the in-memory index \u2014 but the race has NOT been proven and must not be assumed.",
+      "userImpact": "HIGH and silent. It does not error; it states a confident falsehood about the users own file, which is worse than an outage because nothing signals that a retry would work.",
+      "wantedFix": "Approved + zero chunks is CONTRADICTORY state and must fail loudly: answer \"index unavailable, reindex needed\", never \"no readable content was found in <file>\". That guard is correct regardless of the underlying cause, so it can land before the race is proven.",
+      "proof": "Instrumented and reproduced ON DEMAND, no waiting for a race. Before restart: loaded 23, recorded 0 \u2014 the approved version demonstrably held no chunks on disk. Restarted the brain: loaded 0, files 0, still \"approved\"/\"searchable\". Reindexed: loaded 23, recorded 23, because syncing from an EMPTY in-memory index marks every file changed and rewrites all chunks at the new version. That also explains why a reindex always appeared to \"fix\" it, and why only SOME restarts triggered it \u2014 it depends entirely on whether the last sync before the restart was a no-op.",
+      "guardLimitation": "\ud83d\udea8 The shipped guard does NOT catch this. It fires on recorded > 0 with loaded == 0, and here recorded is legitimately 0 because the version really does hold no chunks. The guard is still correct for what it covers and the honest-refusal plumbing is live and useful, but it must not be described as fixing this defect. It is what EXPOSED it.",
+      "fixOptions": [
+        "A. Carry unchanged chunks forward to the new version on commit (re-stamp index_version for files that were not deleted). Correct under the existing snapshot model, but writes many rows.",
+        "B. Do not bump the version when nothing changed. Minimal, but needs care when only deletions occurred.",
+        "C. Make restore fall back to the newest version that actually holds chunks. Least invasive but leaves the incomplete version on disk as a trap for every other reader."
+      ],
+      "ownerDecisionNeeded": "The version model comment in ragRepo.ts is explicit that an index legitimately holds the same chunk at two versions and that rewriting an older version destroys it. Choosing between A, B and C changes that contract, so it should not be decided unilaterally.",
+      "currentProductionState": "HEALTHY as of 2026-08-27 03:2x \u2014 recorded 23 equals loaded 23, so a restart now restores correctly. The bug re-arms the next time a no-op sync commits.",
+      "resolution": "Every committed index version is now a complete, independently loadable snapshot. The PostgreSQL writer carries untouched files forward inside the committing transaction; the superseded version is derived arithmetically as version-1, never read from the mutable workspace_indexes pointer.",
+      "verification": "Gate 1 \u2014 full PostgreSQL suite 1958/1958, ZERO skips (Docker restored, so no test was silently absent). Gate 2 \u2014 all 8 carry-forward cases passed BY NAME, including MATRIX 8, the atomicity hard-stop: a rolled-back commit leaves no rows at the new version and no recorded count. Gate 3 \u2014 production proof on the live service: 23 chunks, no-op sync, new version still RECORDS 23 (this is the exact condition that used to record 0), Brain restarted, loaded == recorded == 23, and a grounded question answered VIOLET-ANCHOR-19 with correct attribution WITHOUT a reindex."
     }
   ]
 }
