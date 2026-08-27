@@ -196,6 +196,31 @@
         "mixedOrthography": "Scan 5 (folio 17) is older French-influenced Creole (\"Lor ou lan pays blanc\"); scans 12-13 are modern orthography (\"kreyol la\", \"Egzanp\"). An OCR language choice tuned to one will do worse on the other, and French and Creole appear side by side in the vocabulary columns."
       },
       "consequencesForOcrQualification": "Word accuracy alone would not distinguish the candidates for this job. The engine must also preserve the FOLIO, the SECTION NUMBER, the heading, and the column structure \u2014 a page whose prose reads well but whose \"30-\" or \"39\" is lost is useless for reconstruction. Scored separately."
+    },
+    "ocrQualification": {
+      "ranOn": "2026-08-27, ON VM111 \u2014 the real deploy target, not a dev box.",
+      "installed": "tesseract-ocr 5.3.4, tesseract-ocr-hat, tesseract-ocr-fra, poppler-utils (owner-approved).",
+      "method": "Identical rasterisation for both arms: pdftoppm at 300dpi, then each 3300x2550 spread split into physical left/right halves so scan geometry is retained. Same three representative pages: folio 17 (older-orthography poetry), folio 33 (numbered grammar sections), folio 39 (4-column French/Creole vocabulary + CHAPIT 2 title).",
+      "headline": "\ud83d\udea8 THE ENGINE IS NOT THE DECIDING VARIABLE \u2014 THE PAGE SEGMENTATION MODE IS. At matched psm and language the two arms are structurally IDENTICAL: diacritics 14/14, 34/35, 54/54; folio and section recovery identical; both recover the vocabulary pairing. Native is simply 25-30% faster.",
+      "measuredAtPsm6Hat": {
+        "nativeMsPerHalfPage": [
+          7649,
+          7651,
+          9124
+        ],
+        "wasmMsPerHalfPage": [
+          9903,
+          10282,
+          11805
+        ],
+        "structuralParity": "folio, sections, diacritics and pairing matched on every page."
+      },
+      "psmTradeoff": "\ud83d\udea8 NO SINGLE SEGMENTATION MODE READS THIS BOOK. On the grammar page psm 3 recovers the folio AND all five numbered sections (18- through 22-) while destroying the vocabulary columns; psm 6 recovers the French->Creole pairs perfectly (\"l'absinthe absent la l'orangeade oranjad lo\") but loses that same folio and every section number. Scoring word accuracy alone would have shown both as fine and hidden this entirely.",
+      "languageModes": "hat preserves more Haitian diacritics than fra (35 vs 22, 14 vs 10 on the same pages); hat+fra is no better than hat alone and costs roughly the sum of both runtimes. hat is the choice; fra stays installed for the French vocabulary column.",
+      "orthographyPreserved": "PASS \u2014 the older French-influenced forms survive untouched: \"pays blanc\" and \"lan pays\" come back as printed, not modernised into kreyol. Tesseract does not normalise, so the faithful-transcript rule holds without extra work.",
+      "confidenceAndCoordinates": "Both arms expose per-word confidence; native TSV output gives 257 word rows with left/top/width/height/conf for the vocabulary page, which is what column reconstruction and duplicate detection will need.",
+      "footprint": "WASM adds 51MB of node_modules and downloads language data at runtime. Native is a system package with no .node binary and no runtime download.",
+      "recommendation": "NATIVE Tesseract with hat \u2014 identical structural fidelity, 25-30% faster, no runtime language fetch. But the real design consequence is the segmentation finding: the pipeline needs a PER-PAGE-TYPE segmentation strategy, or a dual pass merging psm 3 for folio/section signals with psm 6 for column structure. Choosing an engine and a single psm would have shipped a reader that silently loses either the vocabulary pairs or the ordering signals."
     }
   },
   "capabilities": {
