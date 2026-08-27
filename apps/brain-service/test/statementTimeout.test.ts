@@ -43,7 +43,8 @@ after(async () => {
 });
 
 test('statement_timeout is in force on the VERY FIRST query of a connection',
-  { skip: skip ?? false }, async () => {
+  async (t) => {
+    if (skip) return t.skip(skip);
     const connection = new PostgresConnection({
       databaseUrl: pg.databaseUrl, statementTimeoutMillis: 4_321,
     });
@@ -59,7 +60,8 @@ test('statement_timeout is in force on the VERY FIRST query of a connection',
     }
   });
 
-test('every pooled connection gets it, not just the first', { skip: skip ?? false }, async () => {
+test('every pooled connection gets it, not just the first', async (t) => {
+  if (skip) return t.skip(skip);
   const connection = new PostgresConnection({
     databaseUrl: pg.databaseUrl, statementTimeoutMillis: 7_000, max: 4,
   });
@@ -77,7 +79,8 @@ test('every pooled connection gets it, not just the first', { skip: skip ?? fals
   }
 });
 
-test('a statement that exceeds the timeout is actually cancelled', { skip: skip ?? false }, async () => {
+test('a statement that exceeds the timeout is actually cancelled', async (t) => {
+  if (skip) return t.skip(skip);
   // Proves the setting has teeth rather than merely being reported by SHOW.
   const connection = new PostgresConnection({
     databaseUrl: pg.databaseUrl, statementTimeoutMillis: 300,
@@ -92,7 +95,8 @@ test('a statement that exceeds the timeout is actually cancelled', { skip: skip 
   }
 });
 
-test('the pool installs NO query-issuing connect handler', { skip: skip ?? false }, async () => {
+test('the pool installs NO query-issuing connect handler', async (t) => {
+  if (skip) return t.skip(skip);
   /*
    * Asserting on the DeprecationWarning itself does not work: Node emits a
    * given deprecation ONCE per process, so by the time this test attached a

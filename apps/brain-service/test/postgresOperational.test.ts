@@ -141,7 +141,8 @@ function reservation(over: Partial<DurableReservation> = {}): DurableReservation
 
 // ─── Round-trip parity ──────────────────────────────────────────────────────
 
-test('audit events round-trip identically to SQLite and are idempotent', { skip: skip ?? false }, async () => {
+test('audit events round-trip identically to SQLite and are idempotent', async (t) => {
+  if (skip) return t.skip(skip);
   const [A, B] = tenantPair();
   const e = audit();
   const bare = audit({ eventId: 'ae2', durationMs: undefined, outcome: undefined, requestId: undefined, seq: 2 });
@@ -165,7 +166,8 @@ test('audit events round-trip identically to SQLite and are idempotent', { skip:
   assert.equal(sqRecent.length, 2, 'the replay must not have double-counted');
 });
 
-test('usage records round-trip identically to SQLite', { skip: skip ?? false }, async () => {
+test('usage records round-trip identically to SQLite', async (t) => {
+  if (skip) return t.skip(skip);
   const [A, B] = tenantPair();
   const r = usage();
   const bare = usage({ usageId: 'u2', costUsd: undefined, escalationReason: undefined, at: 900 });
@@ -186,7 +188,8 @@ test('usage records round-trip identically to SQLite', { skip: skip ?? false }, 
   assert.equal(sqRows.length, 2);
 });
 
-test('incident upsert updates the same subset SQLite updates', { skip: skip ?? false }, async () => {
+test('incident upsert updates the same subset SQLite updates', async (t) => {
+  if (skip) return t.skip(skip);
   const [A, B] = tenantPair();
   const first = incident();
   // Everything changed, including fields the upsert must deliberately ignore.
@@ -215,7 +218,8 @@ test('incident upsert updates the same subset SQLite updates', { skip: skip ?? f
   assert.equal(pgRows[0]!.occurrenceCount, 5, 'occurrence_count IS refreshed');
 });
 
-test('budget scopes and reservations round-trip identically to SQLite', { skip: skip ?? false }, async () => {
+test('budget scopes and reservations round-trip identically to SQLite', async (t) => {
+  if (skip) return t.skip(skip);
   const [A, B] = tenantPair();
   const sq = sqlite();
   sq.saveBudgetScope(budget());
@@ -247,7 +251,8 @@ test('budget scopes and reservations round-trip identically to SQLite', { skip: 
   assert.equal((await scoped(A, (c) => loadReservations(c))).some((r) => r.reservationId === 'res1'), false);
 });
 
-test('retention matches SQLite and spares open incidents', { skip: skip ?? false }, async () => {
+test('retention matches SQLite and spares open incidents', async (t) => {
+  if (skip) return t.skip(skip);
   const [A, B] = tenantPair();
   const seed = {
     audits: [audit({ eventId: 'old', at: 100 }), audit({ eventId: 'new', at: 9_000, seq: 2 })],
@@ -285,7 +290,8 @@ test('retention matches SQLite and spares open incidents', { skip: skip ?? false
     'an open incident outlives its cutoff');
 });
 
-test('pruning an incident nulls its recovery reference instead of failing', { skip: skip ?? false }, async () => {
+test('pruning an incident nulls its recovery reference instead of failing', async (t) => {
+  if (skip) return t.skip(skip);
   const [A, B] = tenantPair();
   // The foreign key must not turn retention into an error. SQLite would simply
   // leave a dangling id; here the reference becomes an honest NULL and the
@@ -307,7 +313,8 @@ test('pruning an incident nulls its recovery reference instead of failing', { sk
   assert.equal(row.incident_id, null, 'the dangling reference is nulled, not left lying');
 });
 
-test('operational counts match SQLite for a single tenant', { skip: skip ?? false }, async () => {
+test('operational counts match SQLite for a single tenant', async (t) => {
+  if (skip) return t.skip(skip);
   const [A, B] = tenantPair();
   const sq = sqlite();
   sq.appendAuditEvent(audit({ eventId: 'c1' }));
@@ -330,7 +337,8 @@ test('operational counts match SQLite for a single tenant', { skip: skip ?? fals
 
 // ─── PostgreSQL-specific tenancy guarantees ─────────────────────────────────
 
-test('an upsert cannot re-home another tenant incident', { skip: skip ?? false }, async () => {
+test('an upsert cannot re-home another tenant incident', async (t) => {
+  if (skip) return t.skip(skip);
   const [A, B] = tenantPair();
   await scoped(A, (c) => upsertIncident(c, incident({ incidentId: 'i_owned', state: 'open' })));
 
@@ -349,7 +357,8 @@ test('an upsert cannot re-home another tenant incident', { skip: skip ?? false }
     false, 'and it never became visible to the other tenant');
 });
 
-test('an upsert cannot re-home another tenant budget scope', { skip: skip ?? false }, async () => {
+test('an upsert cannot re-home another tenant budget scope', async (t) => {
+  if (skip) return t.skip(skip);
   const [A, B] = tenantPair();
   await scoped(A, (c) => saveBudgetScope(c, budget({ scopeId: 'b_owned', hardLimitUsd: 10 })));
   await assert.rejects(
@@ -360,7 +369,8 @@ test('an upsert cannot re-home another tenant budget scope', { skip: skip ?? fal
   assert.equal(owned?.hardLimitUsd, 10);
 });
 
-test('a recovery event cannot reference another tenant incident', { skip: skip ?? false }, async () => {
+test('a recovery event cannot reference another tenant incident', async (t) => {
+  if (skip) return t.skip(skip);
   const [A, B] = tenantPair();
   await scoped(A, (c) => upsertIncident(c, incident({ incidentId: 'i_secret' })));
 
@@ -373,7 +383,8 @@ test('a recovery event cannot reference another tenant incident', { skip: skip ?
   );
 });
 
-test('a recovery event with no incident is accepted', { skip: skip ?? false }, async () => {
+test('a recovery event with no incident is accepted', async (t) => {
+  if (skip) return t.skip(skip);
   const [A, B] = tenantPair();
   // MATCH SIMPLE skips the composite check when incident_id IS NULL. If this
   // regressed, every incident-less recovery event would be rejected.
@@ -385,7 +396,8 @@ test('a recovery event with no incident is accepted', { skip: skip ?? false }, a
   assert.equal(count, 1);
 });
 
-test('operational reads and retention are tenant-isolated', { skip: skip ?? false }, async () => {
+test('operational reads and retention are tenant-isolated', async (t) => {
+  if (skip) return t.skip(skip);
   const [A, B] = tenantPair();
   await scoped(A, async (c) => {
     await appendAuditEvent(c, audit({ eventId: 'iso_a', correlationId: 'iso' }));
@@ -409,7 +421,8 @@ test('operational reads and retention are tenant-isolated', { skip: skip ?? fals
   assert.equal((await scoped(A, (c) => listIncidents(c, 50))).some((i) => i.incidentId === 'iso_a'), true);
 });
 
-test('a tenant cannot delete another tenant reservation', { skip: skip ?? false }, async () => {
+test('a tenant cannot delete another tenant reservation', async (t) => {
+  if (skip) return t.skip(skip);
   const [A, B] = tenantPair();
   await scoped(A, (c) => saveReservation(c, reservation({ reservationId: 'res_owned' })));
   await scoped(B, (c) => removeReservation(c, 'res_owned'));

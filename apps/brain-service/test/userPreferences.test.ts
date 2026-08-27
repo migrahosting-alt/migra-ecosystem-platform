@@ -52,7 +52,8 @@ after(async () => {
   await pg?.stop();
 });
 
-test('a scope that has never saved gets defaults, and no row is created', { skip: skip ?? false }, async () => {
+test('a scope that has never saved gets defaults, and no row is created', async (t) => {
+  if (skip) return t.skip(skip);
   // Opening Settings must not write to the database.
   const first = await store.getUserPreferences(scopeA);
   assert.deepEqual(first.preferences, DEFAULT_PREFERENCES);
@@ -62,7 +63,8 @@ test('a scope that has never saved gets defaults, and no row is created', { skip
   assert.equal(second.stored, false, 'reading twice still creates nothing');
 });
 
-test('a saved preference survives, and reports itself as stored', { skip: skip ?? false }, async () => {
+test('a saved preference survives, and reports itself as stored', async (t) => {
+  if (skip) return t.skip(skip);
   await patch(scopeA, { responseStyle: 'technical', retentionDays: 30 });
   const row = await store.getUserPreferences(scopeA);
   assert.equal(row.stored, true);
@@ -71,7 +73,8 @@ test('a saved preference survives, and reports itself as stored', { skip: skip ?
   assert.equal(row.preferences.detailLevel, DEFAULT_PREFERENCES.detailLevel, 'untouched keys keep defaults');
 });
 
-test('one account cannot see or affect another\'s preferences', { skip: skip ?? false }, async () => {
+test('one account cannot see or affect another\'s preferences', async (t) => {
+  if (skip) return t.skip(skip);
   await patch(scopeB, { responseStyle: 'friendly' });
 
   const a = await store.getUserPreferences(scopeA);
@@ -81,7 +84,8 @@ test('one account cannot see or affect another\'s preferences', { skip: skip ?? 
   assert.equal(b.preferences.retentionDays, DEFAULT_PREFERENCES.retentionDays, "bob never got alice's retention");
 });
 
-test('CONCURRENT saves of different keys do not overwrite each other', { skip: skip ?? false }, async () => {
+test('CONCURRENT saves of different keys do not overwrite each other', async (t) => {
+  if (skip) return t.skip(skip);
   /*
    * Two Settings tabs. Without `FOR UPDATE` both read the same document, each
    * merges its own change, and the second write erases the first's — the user
@@ -99,7 +103,8 @@ test('CONCURRENT saves of different keys do not overwrite each other', { skip: s
   assert.equal(row.preferences.detailLevel, 'thorough', 'and so did the second\'s');
 });
 
-test('audited changes are recorded; cosmetic ones are not', { skip: skip ?? false }, async () => {
+test('audited changes are recorded; cosmetic ones are not', async (t) => {
+  if (skip) return t.skip(skip);
   const before = (await store.listPreferenceEvents(scopeA)).length;
   await patch(scopeA, { theme: 'dark' });
   assert.equal((await store.listPreferenceEvents(scopeA)).length, before, 'theme is not security-relevant');
@@ -110,7 +115,8 @@ test('audited changes are recorded; cosmetic ones are not', { skip: skip ?? fals
   assert.ok(events[0]!.changedKeys.includes('memoryMode'));
 });
 
-test('the audit records WHICH key changed, never the value', { skip: skip ?? false }, async () => {
+test('the audit records WHICH key changed, never the value', async (t) => {
+  if (skip) return t.skip(skip);
   // Custom instructions can contain anything the user typed; the fact that they
   // changed is auditable, the contents are not.
   await patch(scopeA, { customInstructions: 'a private note about my employer' });
@@ -120,7 +126,8 @@ test('the audit records WHICH key changed, never the value', { skip: skip ?? fal
   assert.ok(!serialized.includes('private note'), 'the value must never reach the audit trail');
 });
 
-test('deleting preferences removes the document and its events', { skip: skip ?? false }, async () => {
+test('deleting preferences removes the document and its events', async (t) => {
+  if (skip) return t.skip(skip);
   const removed = await store.deleteUserPreferences(scopeA);
   assert.ok(removed.preferences >= 1);
   assert.ok(removed.events >= 1);

@@ -171,7 +171,8 @@ async function readTransitionSeqs(pool: PostgresConnection, runId: string, scope
 
 // ─── Contention: state-changing transition ──────────────────────────────────
 
-test('N concurrent transitions produce exactly one winner and exactly one event', { skip: skip ?? false }, async () => {
+test('N concurrent transitions produce exactly one winner and exactly one event', async (t) => {
+  if (skip) return t.skip(skip);
   const pool = conn();
   try {
     await seed(pool, 'run-cas-1');
@@ -206,7 +207,8 @@ test('N concurrent transitions produce exactly one winner and exactly one event'
 
 // ─── Contention: SELF-transition (the case a literal port fails) ────────────
 
-test('N concurrent self-transitions match SQLite exactly and never duplicate a sequence', { skip: skip ?? false }, async () => {
+test('N concurrent self-transitions match SQLite exactly and never duplicate a sequence', async (t) => {
+  if (skip) return t.skip(skip);
   const pool = conn();
   const dir = mkdtempSync(join(tmpdir(), 'brain-g4-self-'));
   try {
@@ -271,7 +273,8 @@ test('N concurrent self-transitions match SQLite exactly and never duplicate a s
   }
 });
 
-test('a rejected transition writes no event at all', { skip: skip ?? false }, async () => {
+test('a rejected transition writes no event at all', async (t) => {
+  if (skip) return t.skip(skip);
   const pool = conn();
   try {
     await seed(pool, 'run-noevent');
@@ -292,7 +295,8 @@ test('a rejected transition writes no event at all', { skip: skip ?? false }, as
   }
 });
 
-test('a terminal run refuses all further transitions concurrently', { skip: skip ?? false }, async () => {
+test('a terminal run refuses all further transitions concurrently', async (t) => {
+  if (skip) return t.skip(skip);
   const pool = conn();
   try {
     await seed(pool, 'run-terminal', 'EXECUTING');
@@ -318,7 +322,8 @@ test('a terminal run refuses all further transitions concurrently', { skip: skip
   }
 });
 
-test('entering a terminal state releases the reconciliation lease', { skip: skip ?? false }, async () => {
+test('entering a terminal state releases the reconciliation lease', async (t) => {
+  if (skip) return t.skip(skip);
   const pool = conn();
   try {
     await seed(pool, 'run-lease-release', 'EXECUTING');
@@ -343,7 +348,8 @@ test('entering a terminal state releases the reconciliation lease', { skip: skip
 
 // ─── Contention: reconciliation leases and fencing ──────────────────────────
 
-test('N concurrent lease claims yield one holder and a fence advanced by exactly one', { skip: skip ?? false }, async () => {
+test('N concurrent lease claims yield one holder and a fence advanced by exactly one', async (t) => {
+  if (skip) return t.skip(skip);
   const pool = conn();
   try {
     await seed(pool, 'run-lease-1', 'EXECUTING');
@@ -368,7 +374,8 @@ test('N concurrent lease claims yield one holder and a fence advanced by exactly
   }
 });
 
-test('a stolen lease fences out the previous owner', { skip: skip ?? false }, async () => {
+test('a stolen lease fences out the previous owner', async (t) => {
+  if (skip) return t.skip(skip);
   const pool = conn();
   try {
     await seed(pool, 'run-fence-1', 'EXECUTING');
@@ -407,7 +414,8 @@ test('a stolen lease fences out the previous owner', { skip: skip ?? false }, as
   }
 });
 
-test('an expired lease refuses its own holder mid-write', { skip: skip ?? false }, async () => {
+test('an expired lease refuses its own holder mid-write', async (t) => {
+  if (skip) return t.skip(skip);
   const pool = conn();
   try {
     await seed(pool, 'run-fence-2', 'EXECUTING');
@@ -427,7 +435,8 @@ test('an expired lease refuses its own holder mid-write', { skip: skip ?? false 
   }
 });
 
-test('reconciliation write is refused when expectedVersion has moved', { skip: skip ?? false }, async () => {
+test('reconciliation write is refused when expectedVersion has moved', async (t) => {
+  if (skip) return t.skip(skip);
   const pool = conn();
   try {
     await seed(pool, 'run-fence-3', 'EXECUTING');
@@ -457,7 +466,8 @@ test('reconciliation write is refused when expectedVersion has moved', { skip: s
   }
 });
 
-test('a lease cannot be claimed on a terminal run', { skip: skip ?? false }, async () => {
+test('a lease cannot be claimed on a terminal run', async (t) => {
+  if (skip) return t.skip(skip);
   const pool = conn();
   try {
     await seed(pool, 'run-lease-terminal', 'EXECUTING');
@@ -472,7 +482,8 @@ test('a lease cannot be claimed on a terminal run', { skip: skip ?? false }, asy
   }
 });
 
-test('renewal requires the current fence and a still-valid lease', { skip: skip ?? false }, async () => {
+test('renewal requires the current fence and a still-valid lease', async (t) => {
+  if (skip) return t.skip(skip);
   const pool = conn();
   try {
     await seed(pool, 'run-renew-1', 'EXECUTING');
@@ -504,7 +515,8 @@ test('renewal requires the current fence and a still-valid lease', { skip: skip 
   }
 });
 
-test('N concurrent renewals of a held lease never advance the fence', { skip: skip ?? false }, async () => {
+test('N concurrent renewals of a held lease never advance the fence', async (t) => {
+  if (skip) return t.skip(skip);
   const pool = conn();
   try {
     await seed(pool, 'run-renew-2', 'EXECUTING');
@@ -530,7 +542,8 @@ test('N concurrent renewals of a held lease never advance the fence', { skip: sk
 
 // ─── Event sequencing ───────────────────────────────────────────────────────
 
-test('a contended transition chain yields contiguous gap-free event sequences', { skip: skip ?? false }, async () => {
+test('a contended transition chain yields contiguous gap-free event sequences', async (t) => {
+  if (skip) return t.skip(skip);
   const pool = conn();
   try {
     await seed(pool, 'run-seq-1', 'IDLE');
@@ -577,7 +590,8 @@ test('a contended transition chain yields contiguous gap-free event sequences', 
 
 // ─── Tenant isolation, enforced under a non-superuser role ──────────────────
 
-test('another tenant cannot transition a run it does not own', { skip: skip ?? false }, async () => {
+test('another tenant cannot transition a run it does not own', async (t) => {
+  if (skip) return t.skip(skip);
   const pool = conn();
   try {
     await seed(pool, 'run-tenant-1', 'EXECUTING');
@@ -595,7 +609,8 @@ test('another tenant cannot transition a run it does not own', { skip: skip ?? f
   }
 });
 
-test('another tenant cannot claim a lease on a run it does not own', { skip: skip ?? false }, async () => {
+test('another tenant cannot claim a lease on a run it does not own', async (t) => {
+  if (skip) return t.skip(skip);
   const pool = conn();
   try {
     await seed(pool, 'run-tenant-2', 'EXECUTING');
@@ -608,7 +623,8 @@ test('another tenant cannot claim a lease on a run it does not own', { skip: ski
   }
 });
 
-test('an event cannot be filed against another tenant run', { skip: skip ?? false }, async () => {
+test('an event cannot be filed against another tenant run', async (t) => {
+  if (skip) return t.skip(skip);
   const pool = conn();
   try {
     await seed(pool, 'run-tenant-3', 'EXECUTING');
@@ -634,7 +650,8 @@ test('an event cannot be filed against another tenant run', { skip: skip ?? fals
   }
 });
 
-test('a child cannot be filed against another tenant run', { skip: skip ?? false }, async () => {
+test('a child cannot be filed against another tenant run', async (t) => {
+  if (skip) return t.skip(skip);
   const pool = conn();
   try {
     await seed(pool, 'run-tenant-4', 'EXECUTING');
@@ -653,7 +670,8 @@ test('a child cannot be filed against another tenant run', { skip: skip ?? false
   }
 });
 
-test('two tenants transition same-named runs without interfering', { skip: skip ?? false }, async () => {
+test('two tenants transition same-named runs without interfering', async (t) => {
+  if (skip) return t.skip(skip);
   const pool = conn();
   try {
     // Distinct run ids — run_id is globally unique by primary key — but the

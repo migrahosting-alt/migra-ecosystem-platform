@@ -68,7 +68,8 @@ const call = (method: 'GET' | 'POST', url: string, headers: Record<string, strin
   app.inject({ method, url, headers: { 'content-type': 'application/json', ...headers }, ...(payload ? { payload: JSON.stringify(payload) } : {}) });
 
 test('a brand-new visitor is told their full allowance without a row being created',
-  { skip: skip ?? false }, async () => {
+  async (t) => {
+    if (skip) return t.skip(skip);
     const res = await call('GET', '/api/ai/anonymous/quota', anon('fresh'));
     assert.equal(res.statusCode, 200);
     const body = res.json();
@@ -80,7 +81,8 @@ test('a brand-new visitor is told their full allowance without a row being creat
     assert.equal(await store!.getAnonymousQuota('fresh', 'anon:fresh'), undefined);
   });
 
-test('a NON-anonymous scope is refused on the anonymous routes', { skip: skip ?? false }, async () => {
+test('a NON-anonymous scope is refused on the anonymous routes', async (t) => {
+  if (skip) return t.skip(skip);
   // An authenticated caller reaching these routes means the gateway sent the
   // wrong request; answering it would apply an anonymous limit to a paying user.
   const res = await call('GET', '/api/ai/anonymous/quota', account);
@@ -88,7 +90,8 @@ test('a NON-anonymous scope is refused on the anonymous routes', { skip: skip ??
   assert.equal(res.json().code, 'NOT_ANONYMOUS');
 });
 
-test('reserve decrements, and the count is the SERVER\'s', { skip: skip ?? false }, async () => {
+test('reserve decrements, and the count is the SERVER\'s', async (t) => {
+  if (skip) return t.skip(skip);
   const h = anon('reserve');
   const first = await call('POST', '/api/ai/anonymous/reserve', h, {});
   assert.equal(first.statusCode, 200);
@@ -98,7 +101,8 @@ test('reserve decrements, and the count is the SERVER\'s', { skip: skip ?? false
   assert.equal(seen.json().quota.used, 1, 'the hold counts before any answer exists');
 });
 
-test('the warning fires before exhaustion, not at it', { skip: skip ?? false }, async () => {
+test('the warning fires before exhaustion, not at it', async (t) => {
+  if (skip) return t.skip(skip);
   const h = anon('warn');
   await call('POST', '/api/ai/anonymous/reserve', h, {});
   const q = (await call('GET', '/api/ai/anonymous/quota', h)).json().quota;
@@ -107,7 +111,8 @@ test('the warning fires before exhaustion, not at it', { skip: skip ?? false }, 
   assert.equal(q.exhausted, false);
 });
 
-test('exhaustion returns 429 with the quota, and creates NO hold', { skip: skip ?? false }, async () => {
+test('exhaustion returns 429 with the quota, and creates NO hold', async (t) => {
+  if (skip) return t.skip(skip);
   const h = anon('exhausted');
   for (let i = 0; i < LIMIT; i += 1) {
     assert.equal((await call('POST', '/api/ai/anonymous/reserve', h, {})).statusCode, 200);
@@ -122,7 +127,8 @@ test('exhaustion returns 429 with the quota, and creates NO hold', { skip: skip 
   assert.equal(after.used, LIMIT, 'a refused turn does not consume anything extra');
 });
 
-test('settle with producedOutput consumes; a second settle is refused', { skip: skip ?? false }, async () => {
+test('settle with producedOutput consumes; a second settle is refused', async (t) => {
+  if (skip) return t.skip(skip);
   const h = anon('settle-consume');
   const r = await call('POST', '/api/ai/anonymous/reserve', h, {});
   const id = r.json().reservation.reservationId;
@@ -137,7 +143,8 @@ test('settle with producedOutput consumes; a second settle is refused', { skip: 
 });
 
 test('settle without output RELEASES — our outage is not the visitor\'s cost',
-  { skip: skip ?? false }, async () => {
+  async (t) => {
+    if (skip) return t.skip(skip);
     const h = anon('settle-release');
     const r = await call('POST', '/api/ai/anonymous/reserve', h, {});
     const id = r.json().reservation.reservationId;
@@ -151,7 +158,8 @@ test('settle without output RELEASES — our outage is not the visitor\'s cost',
     assert.equal((await call('GET', '/api/ai/anonymous/quota', h)).json().quota.used, 0);
   });
 
-test('one visitor cannot settle another visitor\'s reservation', { skip: skip ?? false }, async () => {
+test('one visitor cannot settle another visitor\'s reservation', async (t) => {
+  if (skip) return t.skip(skip);
   const victim = anon('settle-victim');
   const r = await call('POST', '/api/ai/anonymous/reserve', victim, {});
   const id = r.json().reservation.reservationId;
@@ -162,7 +170,8 @@ test('one visitor cannot settle another visitor\'s reservation', { skip: skip ??
   assert.equal((await call('GET', '/api/ai/anonymous/quota', victim)).json().quota.used, 1, 'victim untouched');
 });
 
-test('a claim must be made AS the account, never as the visitor', { skip: skip ?? false }, async () => {
+test('a claim must be made AS the account, never as the visitor', async (t) => {
+  if (skip) return t.skip(skip);
   const res = await call('POST', '/api/ai/anonymous/claim', anon('claimer'), {
     conversationId: 'c1', anonymousSessionId: 'claimer', anonymousOwner: 'anon:claimer',
   });
@@ -170,7 +179,8 @@ test('a claim must be made AS the account, never as the visitor', { skip: skip ?
   assert.equal(res.json().code, 'NOT_AUTHENTICATED_SCOPE');
 });
 
-test('a mismatched anonymous pair is refused before any row moves', { skip: skip ?? false }, async () => {
+test('a mismatched anonymous pair is refused before any row moves', async (t) => {
+  if (skip) return t.skip(skip);
   // A pair that does not agree means the caller assembled it rather than
   // deriving it from one verified cookie.
   const res = await call('POST', '/api/ai/anonymous/claim', account, {
@@ -180,7 +190,8 @@ test('a mismatched anonymous pair is refused before any row moves', { skip: skip
   assert.equal(res.json().code, 'ANONYMOUS_SCOPE_MISMATCH');
 });
 
-test('claiming a conversation that is not there is 404, not a leak', { skip: skip ?? false }, async () => {
+test('claiming a conversation that is not there is 404, not a leak', async (t) => {
+  if (skip) return t.skip(skip);
   const res = await call('POST', '/api/ai/anonymous/claim', account, {
     conversationId: 'no-such-conversation', anonymousSessionId: 'ghost', anonymousOwner: 'anon:ghost',
   });
@@ -190,7 +201,8 @@ test('claiming a conversation that is not there is 404, not a leak', { skip: ski
     'the message must not distinguish "does not exist" from "not yours"');
 });
 
-test('a full claim moves the conversation and keeps its id', { skip: skip ?? false }, async () => {
+test('a full claim moves the conversation and keeps its id', async (t) => {
+  if (skip) return t.skip(skip);
   const h = anon('full-claim');
   await store!.saveConversation({
     id: 'conv-http-claim', ownerScope: 'anon:full-claim', workspaceScope: 'anon:full-claim',
@@ -228,7 +240,8 @@ test('a full claim moves the conversation and keeps its id', { skip: skip ?? fal
   assert.match(last?.anonymousOwner ?? '', /^anon:/);
 });
 
-test('persistence unavailable is 503, never an invented allowance', { skip: skip ?? false }, async () => {
+test('persistence unavailable is 503, never an invented allowance', async (t) => {
+  if (skip) return t.skip(skip);
   /*
    * The failure that matters most: if the database is down, the honest answer is
    * "unavailable". Answering with a full allowance would hand out free inference

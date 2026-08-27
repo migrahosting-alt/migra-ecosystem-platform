@@ -116,7 +116,8 @@ function created(runId: string, state: DurableAgentRunState): DurableAgentRunEve
 
 // ─── Field-level parity ─────────────────────────────────────────────────────
 
-test('a fully-populated run round-trips identically to SQLite', { skip: skip ?? false }, async () => {
+test('a fully-populated run round-trips identically to SQLite', async (t) => {
+  if (skip) return t.skip(skip);
   const run = fullRun('run-parity-1');
   const ev = created('run-parity-1', run.state);
 
@@ -132,7 +133,8 @@ test('a fully-populated run round-trips identically to SQLite', { skip: skip ?? 
   assert.deepEqual(fromPg, fromSqlite, 'every column must survive both engines identically');
 });
 
-test('a minimally-populated run round-trips identically to SQLite', { skip: skip ?? false }, async () => {
+test('a minimally-populated run round-trips identically to SQLite', async (t) => {
+  if (skip) return t.skip(skip);
   // The mirror case: absent optionals must come back absent, not as nulls or
   // empty strings.
   const run = {
@@ -158,7 +160,8 @@ test('a minimally-populated run round-trips identically to SQLite', { skip: skip
   assert.deepEqual(fromPg, fromSqlite);
 });
 
-test('creation writes the CREATED event at seq 1 and sets audit_seq to 1', { skip: skip ?? false }, async () => {
+test('creation writes the CREATED event at seq 1 and sets audit_seq to 1', async (t) => {
+  if (skip) return t.skip(skip);
   const run = fullRun('run-created-1', 'IDLE');
   const ev = created('run-created-1', 'IDLE');
 
@@ -177,7 +180,8 @@ test('creation writes the CREATED event at seq 1 and sets audit_seq to 1', { ski
   assert.equal(pgAudit, 1);
 });
 
-test('a transition writes the same event SQLite writes', { skip: skip ?? false }, async () => {
+test('a transition writes the same event SQLite writes', async (t) => {
+  if (skip) return t.skip(skip);
   const run = fullRun('run-trans-1', 'AWAITING_APPROVAL');
   const ev = created('run-trans-1', 'AWAITING_APPROVAL');
   const input = {
@@ -205,7 +209,8 @@ test('a transition writes the same event SQLite writes', { skip: skip ?? false }
 
 // ─── Event append ladder ────────────────────────────────────────────────────
 
-test('appendAgentRunEventNext allocates the next sequence, matching SQLite', { skip: skip ?? false }, async () => {
+test('appendAgentRunEventNext allocates the next sequence, matching SQLite', async (t) => {
+  if (skip) return t.skip(skip);
   const run = fullRun('run-append-1', 'EXECUTING');
   const ev = created('run-append-1', 'EXECUTING');
   const next = {
@@ -230,7 +235,8 @@ test('appendAgentRunEventNext allocates the next sequence, matching SQLite', { s
   assert.equal(pgAudit, sqAudit);
 });
 
-test('appending to an unknown run throws, as in SQLite', { skip: skip ?? false }, async () => {
+test('appending to an unknown run throws, as in SQLite', async (t) => {
+  if (skip) return t.skip(skip);
   await assert.rejects(
     scoped(A, (c) => appendAgentRunEventNext(c, {
       eventId: 'x', runId: 'no-such-run', at: 1, type: 'NOTE', nextState: 'IDLE',
@@ -240,7 +246,8 @@ test('appending to an unknown run throws, as in SQLite', { skip: skip ?? false }
   );
 });
 
-test('re-appending an identical event is a no-op; a changed one is refused', { skip: skip ?? false }, async () => {
+test('re-appending an identical event is a no-op; a changed one is refused', async (t) => {
+  if (skip) return t.skip(skip);
   const run = fullRun('run-idem-1', 'EXECUTING');
   await scoped(A, (c) => insertAgentRun(c, run, created('run-idem-1', 'EXECUTING')));
 
@@ -278,7 +285,8 @@ test('re-appending an identical event is a no-op; a changed one is refused', { s
   assert.equal(events.filter((x) => x.seq === 5).length, 1, 'exactly one event at seq 5');
 });
 
-test('a refused append leaves the transaction usable', { skip: skip ?? false }, async () => {
+test('a refused append leaves the transaction usable', async (t) => {
+  if (skip) return t.skip(skip);
   // PostgreSQL aborts a transaction on a real constraint violation, so the
   // conflict path deliberately avoids throwing at the SQL layer. If it ever
   // regressed to a raw violation, this second statement would fail with
@@ -303,7 +311,8 @@ test('a refused append leaves the transaction usable', { skip: skip ?? false }, 
 
 // ─── Fenced append ──────────────────────────────────────────────────────────
 
-test('a fenced append matches SQLite and is idempotent on replay', { skip: skip ?? false }, async () => {
+test('a fenced append matches SQLite and is idempotent on replay', async (t) => {
+  if (skip) return t.skip(skip);
   const run = fullRun('run-fenced-1', 'EXECUTING');
   const ev = created('run-fenced-1', 'EXECUTING');
 
@@ -341,7 +350,8 @@ test('a fenced append matches SQLite and is idempotent on replay', { skip: skip 
   assert.equal((await scoped(A, (c) => loadAgentRunEvents(c, 'run-fenced-1'))).length, sqEvents.length);
 });
 
-test('a fenced append with the wrong fence writes nothing', { skip: skip ?? false }, async () => {
+test('a fenced append with the wrong fence writes nothing', async (t) => {
+  if (skip) return t.skip(skip);
   const run = fullRun('run-fenced-2', 'EXECUTING');
   await scoped(A, (c) => insertAgentRun(c, run, created('run-fenced-2', 'EXECUTING')));
   const claim = (await scoped(A, (c) => claimAgentRunReconciliation(c, 'run-fenced-2', 'w1', 50_000, 10_000)))!;
@@ -357,7 +367,8 @@ test('a fenced append with the wrong fence writes nothing', { skip: skip ?? fals
 
 // ─── Ordering and limits ────────────────────────────────────────────────────
 
-test('loadAgentRuns orders by updated_at descending and clamps the limit', { skip: skip ?? false }, async () => {
+test('loadAgentRuns orders by updated_at descending and clamps the limit', async (t) => {
+  if (skip) return t.skip(skip);
   for (const [i, id] of ['ord-1', 'ord-2', 'ord-3'].entries()) {
     const run = { ...fullRun(id, 'IDLE'), updatedAt: 100 + i * 10 };
     await scoped(B, (c) => insertAgentRun(c, run, created(id, 'IDLE')));
@@ -371,7 +382,8 @@ test('loadAgentRuns orders by updated_at descending and clamps the limit', { ski
   assert.equal((await scoped(B, (c) => loadAgentRuns(c, -5))).length, 1);
 });
 
-test('loadAgentRunEvents orders by sequence and clamps the limit', { skip: skip ?? false }, async () => {
+test('loadAgentRunEvents orders by sequence and clamps the limit', async (t) => {
+  if (skip) return t.skip(skip);
   const run = fullRun('run-order-ev', 'EXECUTING');
   await scoped(A, (c) => insertAgentRun(c, run, created('run-order-ev', 'EXECUTING')));
   for (let i = 0; i < 4; i++) {
@@ -387,7 +399,8 @@ test('loadAgentRunEvents orders by sequence and clamps the limit', { skip: skip 
 
 // ─── Retention ──────────────────────────────────────────────────────────────
 
-test('prune removes an eligible run and records a tombstone matching SQLite', { skip: skip ?? false }, async () => {
+test('prune removes an eligible run and records a tombstone matching SQLite', async (t) => {
+  if (skip) return t.skip(skip);
   const run = {
     ...fullRun('run-prune-1', 'COMPLETED'),
     terminalAt: 1_000, reconciliationOwner: undefined, reconciliationLeaseUntil: undefined,
@@ -411,7 +424,8 @@ test('prune removes an eligible run and records a tombstone matching SQLite', { 
   assert.equal(await scoped(A, (c) => loadAgentRun(c, 'run-prune-1')), undefined);
 });
 
-test('prune spares a run still under an active reconciliation lease', { skip: skip ?? false }, async () => {
+test('prune spares a run still under an active reconciliation lease', async (t) => {
+  if (skip) return t.skip(skip);
   const run = {
     ...fullRun('run-prune-2', 'COMPLETED'), terminalAt: 1_000,
     reconciliationOwner: 'w1', reconciliationLeaseUntil: 999_000,
@@ -423,7 +437,8 @@ test('prune spares a run still under an active reconciliation lease', { skip: sk
   assert.ok(await scoped(A, (c) => loadAgentRun(c, 'run-prune-2')));
 });
 
-test('prune spares a run whose successor is still live', { skip: skip ?? false }, async () => {
+test('prune spares a run whose successor is still live', async (t) => {
+  if (skip) return t.skip(skip);
   const successor = {
     ...fullRun('run-succ-live', 'EXECUTING'), terminalAt: undefined,
     reconciliationOwner: undefined, reconciliationLeaseUntil: undefined,
@@ -442,7 +457,8 @@ test('prune spares a run whose successor is still live', { skip: skip ?? false }
   assert.ok(await scoped(A, (c) => loadAgentRun(c, 'run-prune-3')));
 });
 
-test('prune cannot reach another tenant runs', { skip: skip ?? false }, async () => {
+test('prune cannot reach another tenant runs', async (t) => {
+  if (skip) return t.skip(skip);
   const run = {
     ...fullRun('run-prune-iso', 'COMPLETED'), terminalAt: 1_000,
     reconciliationOwner: undefined, reconciliationLeaseUntil: undefined,
@@ -556,7 +572,8 @@ function reproposalInput(
   };
 }
 
-test('reproposal links a successor and matches SQLite, including the replay', { skip: skip ?? false }, async () => {
+test('reproposal links a successor and matches SQLite, including the replay', async (t) => {
+  if (skip) return t.skip(skip);
   const sq = sqlite();
   const source = await seedRejectedSource(sq, 'src_ok');
   const events = (await sq.loadAgentRunEvents('src_ok'));
@@ -587,7 +604,8 @@ test('reproposal links a successor and matches SQLite, including the replay', { 
   sq.close();
 });
 
-test('reproposal refusals match SQLite code for code', { skip: skip ?? false }, async () => {
+test('reproposal refusals match SQLite code for code', async (t) => {
+  if (skip) return t.skip(skip);
   const sq = sqlite();
   const source = await seedRejectedSource(sq, 'src_refuse');
   const events = (await sq.loadAgentRunEvents('src_refuse'));
@@ -610,7 +628,8 @@ test('reproposal refusals match SQLite code for code', { skip: skip ?? false }, 
   sq.close();
 });
 
-test('a failed reproposal leaves no successor behind', { skip: skip ?? false }, async () => {
+test('a failed reproposal leaves no successor behind', async (t) => {
+  if (skip) return t.skip(skip);
   // The savepoint test. Without ROLLBACK TO SAVEPOINT, the successor row and its
   // two lineage events would be inserted, the source would fail to link, and the
   // caller would COMMIT that half-built state — a run that exists but is
@@ -650,7 +669,8 @@ function child(childId: string, runId: string, over: Partial<DurableAgentRunChil
   } as DurableAgentRunChild;
 }
 
-test('a child round-trips identically to SQLite', { skip: skip ?? false }, async () => {
+test('a child round-trips identically to SQLite', async (t) => {
+  if (skip) return t.skip(skip);
   const run = fullRun('run-child-1', 'EXECUTING');
   const ev = created('run-child-1', 'EXECUTING');
   const ch = child('child-1', 'run-child-1', {
@@ -671,7 +691,8 @@ test('a child round-trips identically to SQLite', { skip: skip ?? false }, async
   assert.deepEqual(pgLoad, sqLoad);
 });
 
-test('a child under an unknown or terminal parent is refused with the SQLite code', { skip: skip ?? false }, async () => {
+test('a child under an unknown or terminal parent is refused with the SQLite code', async (t) => {
+  if (skip) return t.skip(skip);
   assert.deepEqual(
     await scoped(A, (c) => insertAgentRunChild(c, child('orphan', 'no-such-run'))),
     { ok: false, code: 'UNKNOWN_PARENT' });
@@ -683,7 +704,8 @@ test('a child under an unknown or terminal parent is refused with the SQLite cod
     { ok: false, code: 'PARENT_TERMINAL' });
 });
 
-test('a duplicate child is refused by id and by (run, kind, attempt)', { skip: skip ?? false }, async () => {
+test('a duplicate child is refused by id and by (run, kind, attempt)', async (t) => {
+  if (skip) return t.skip(skip);
   const run = fullRun('run-child-dup', 'EXECUTING');
   await scoped(A, (c) => insertAgentRun(c, run, created('run-child-dup', 'EXECUTING')));
   await scoped(A, (c) => insertAgentRunChild(c, child('dup-1', 'run-child-dup')));
@@ -698,7 +720,8 @@ test('a duplicate child is refused by id and by (run, kind, attempt)', { skip: s
   assert.equal(byIdentity.ok === false ? byIdentity.code : '', 'DUPLICATE_CHILD');
 });
 
-test('child transitions enforce SQLite guard order: terminal beats a fresh revision', { skip: skip ?? false }, async () => {
+test('child transitions enforce SQLite guard order: terminal beats a fresh revision', async (t) => {
+  if (skip) return t.skip(skip);
   const run = fullRun('run-child-2', 'EXECUTING');
   const ev = created('run-child-2', 'EXECUTING');
   const ch = child('child-2', 'run-child-2');
@@ -724,7 +747,8 @@ test('child transitions enforce SQLite guard order: terminal beats a fresh revis
   assert.equal(pgAfter.ok === false ? pgAfter.code : '', 'TERMINAL_CHILD_IMMUTABLE');
 });
 
-test('child transitions refuse stale revisions and illegal moves', { skip: skip ?? false }, async () => {
+test('child transitions refuse stale revisions and illegal moves', async (t) => {
+  if (skip) return t.skip(skip);
   const run = fullRun('run-child-3', 'EXECUTING');
   await scoped(A, (c) => insertAgentRun(c, run, created('run-child-3', 'EXECUTING')));
   await scoped(A, (c) => insertAgentRunChild(c, child('child-3', 'run-child-3')));
@@ -742,7 +766,8 @@ test('child transitions refuse stale revisions and illegal moves', { skip: skip 
   assert.deepEqual(unknown, { ok: false, code: 'UNKNOWN_CHILD' });
 });
 
-test('children are listed in SQLite order and are tenant-isolated', { skip: skip ?? false }, async () => {
+test('children are listed in SQLite order and are tenant-isolated', async (t) => {
+  if (skip) return t.skip(skip);
   const run = fullRun('run-child-4', 'EXECUTING');
   await scoped(A, (c) => insertAgentRun(c, run, created('run-child-4', 'EXECUTING')));
   await scoped(A, (c) => insertAgentRunChild(c, child('c-b', 'run-child-4', { createdAt: 100, kind: 'K1' })));
@@ -759,7 +784,8 @@ test('children are listed in SQLite order and are tenant-isolated', { skip: skip
 
 // ─── Tenant isolation on reads ──────────────────────────────────────────────
 
-test('runs, events and tombstones are invisible across tenants', { skip: skip ?? false }, async () => {
+test('runs, events and tombstones are invisible across tenants', async (t) => {
+  if (skip) return t.skip(skip);
   const run = {
     ...fullRun('run-iso-read', 'COMPLETED'), terminalAt: 1_000,
     reconciliationOwner: undefined, reconciliationLeaseUntil: undefined,

@@ -56,7 +56,8 @@ after(async () => {
   await pg?.stop();
 });
 
-test('a scoped conversation survives a restart and is readable again', { skip: skip ?? false }, async () => {
+test('a scoped conversation survives a restart and is readable again', async (t) => {
+  if (skip) return t.skip(skip);
   await store.saveConversation(conversation('c-survive', A));
   await store.saveMessage(message('m-survive', 'c-survive'), A);
 
@@ -68,7 +69,8 @@ test('a scoped conversation survives a restart and is readable again', { skip: s
   assert.equal(fresh.getMessages('c-survive', A).length, 1, 'and so are its messages');
 });
 
-test('hydrating one scope does NOT populate another scope', { skip: skip ?? false }, async () => {
+test('hydrating one scope does NOT populate another scope', async (t) => {
+  if (skip) return t.skip(skip);
   await store.saveConversation(conversation('c-alpha', A));
   await store.saveConversation(conversation('c-beta', B));
 
@@ -80,7 +82,8 @@ test('hydrating one scope does NOT populate another scope', { skip: skip ?? fals
   assert.equal(fresh.listConversations(B).length, 0, "and beta's list is empty until beta connects");
 });
 
-test('the wrong scope sees nothing even after the other scope is hydrated', { skip: skip ?? false }, async () => {
+test('the wrong scope sees nothing even after the other scope is hydrated', async (t) => {
+  if (skip) return t.skip(skip);
   await store.saveConversation(conversation('c-private', A));
 
   const fresh = restarted();
@@ -91,7 +94,8 @@ test('the wrong scope sees nothing even after the other scope is hydrated', { sk
   assert.ok(!fresh.listConversations(B).some((c) => c.id === 'c-private'));
 });
 
-test('hydration is idempotent — a second call does not duplicate messages', { skip: skip ?? false }, async () => {
+test('hydration is idempotent — a second call does not duplicate messages', async (t) => {
+  if (skip) return t.skip(skip);
   await store.saveConversation(conversation('c-twice', A));
   await store.saveMessage(message('m-twice', 'c-twice'), A);
 
@@ -103,7 +107,8 @@ test('hydration is idempotent — a second call does not duplicate messages', { 
   assert.equal(fresh.getMessages('c-twice', A).length, 1, 'hydrating repeatedly must not append the same message');
 });
 
-test('a failed hydration does not mark the scope loaded', { skip: skip ?? false }, async () => {
+test('a failed hydration does not mark the scope loaded', async (t) => {
+  if (skip) return t.skip(skip);
   // If a failure left the scope marked as hydrated, the next request would read
   // an empty cache and report "no conversations" — a data-loss appearance caused
   // by a transient error.
@@ -128,7 +133,8 @@ test('a failed hydration does not mark the scope loaded', { skip: skip ?? false 
   assert.equal(calls, 1, 'a successful load is cached; only failures are retried');
 });
 
-test('global loads REFUSE rather than returning an empty result', { skip: skip ?? false }, async () => {
+test('global loads REFUSE rather than returning an empty result', async (t) => {
+  if (skip) return t.skip(skip);
   // Every one of these would silently report "you have nothing" under RLS.
   await assert.rejects(() => store.loadDurable(), /row-level security/i);
   await assert.rejects(() => store.loadIndexes(), /row-level security/i);
@@ -139,7 +145,8 @@ test('global loads REFUSE rather than returning an empty result', { skip: skip ?
 
 /* ── the quiet failure: an approved index must survive a restart ──────────── */
 
-test('an APPROVED indexed document survives a restart and is retrievable under scope', { skip: skip ?? false }, async () => {
+test('an APPROVED indexed document survives a restart and is retrievable under scope', async (t) => {
+  if (skip) return t.skip(skip);
   /*
    * THE REGRESSION THIS EXISTS FOR.
    *
@@ -202,7 +209,8 @@ test('an APPROVED indexed document survives a restart and is retrievable under s
   assert.equal(fresh.approvedIndexFor(B), undefined, "beta has no approved index of alpha's");
 });
 
-test('health() reports a real migrated database as ready', { skip: skip ?? false }, async () => {
+test('health() reports a real migrated database as ready', async (t) => {
+  if (skip) return t.skip(skip);
   // This was missing, and its absence let a health() that queried a nonexistent
   // column reach a candidate boot. The candidate reported `persistence:
   // unavailable` with `column "version" does not exist` — correct fail-closed
@@ -215,7 +223,8 @@ test('health() reports a real migrated database as ready', { skip: skip ?? false
   assert.equal(health.detail, undefined, 'a healthy store reports no failure detail');
 });
 
-test('a DELETED conversation stays deleted across a restart — with a control', { skip: skip ?? false }, async () => {
+test('a DELETED conversation stays deleted across a restart — with a control', async (t) => {
+  if (skip) return t.skip(skip);
   /*
    * "It is still gone" passes vacuously if persistence is broken and everything
    * is gone. So a sibling conversation is created and NOT deleted: if it does
@@ -242,7 +251,8 @@ test('a DELETED conversation stays deleted across a restart — with a control',
   assert.equal(fresh.getMessages('c-doomed', A).length, 0, 'and neither did its messages');
 });
 
-test('an APPROVED index is still approved after a restart, read from the database', { skip: skip ?? false }, async () => {
+test('an APPROVED index is still approved after a restart, read from the database', async (t) => {
+  if (skip) return t.skip(skip);
   // The failure this replaces: setIndexState ran unscoped, matched zero rows,
   // reported success, and memory said `approved` while the row said
   // `experimental`. A cold read is the only thing that tells them apart.

@@ -75,7 +75,8 @@ after(async () => {
 
 /* ── 1.1 correct scope succeeds ──────────────────────────────────────────── */
 
-test('1.1 a correctly scoped write commits and reads back', { skip: skip ?? false }, async () => {
+test('1.1 a correctly scoped write commits and reads back', async (t) => {
+  if (skip) return t.skip(skip);
   await store.saveConversation(conversation('c-ok', A));
   await store.saveMessage(message('m-ok', 'c-ok'), A);
 
@@ -86,7 +87,8 @@ test('1.1 a correctly scoped write commits and reads back', { skip: skip ?? fals
 
 /* ── 1.2 cross-OWNER write rejected ──────────────────────────────────────── */
 
-test('1.2 a cross-owner message write is REJECTED by PostgreSQL', { skip: skip ?? false }, async () => {
+test('1.2 a cross-owner message write is REJECTED by PostgreSQL', async (t) => {
+  if (skip) return t.skip(skip);
   await store.saveConversation(conversation('c-owner', A));
 
   // The conversation belongs to alpha. Writing a message to it while declaring
@@ -107,7 +109,8 @@ test('1.2 a cross-owner message write is REJECTED by PostgreSQL', { skip: skip ?
 
 /* ── 1.3 cross-WORKSPACE write rejected ──────────────────────────────────── */
 
-test('1.3 a cross-workspace message write is REJECTED', { skip: skip ?? false }, async () => {
+test('1.3 a cross-workspace message write is REJECTED', async (t) => {
+  if (skip) return t.skip(skip);
   await store.saveConversation(conversation('c-ws', A));
 
   await assert.rejects(
@@ -123,7 +126,8 @@ test('1.3 a cross-workspace message write is REJECTED', { skip: skip ?? false },
 
 /* ── 1.4 isolation between tenants ───────────────────────────────────────── */
 
-test("1.4 one tenant cannot see another's conversations", { skip: skip ?? false }, async () => {
+test("1.4 one tenant cannot see another's conversations", async (t) => {
+  if (skip) return t.skip(skip);
   await store.saveConversation(conversation('c-alpha-only', A));
   await store.saveConversation(conversation('c-beta-only', B));
 
@@ -138,7 +142,8 @@ test("1.4 one tenant cannot see another's conversations", { skip: skip ?? false 
 
 /* ── 1.5 loadDurable refuses rather than returning [] ────────────────────── */
 
-test('1.5 loadDurable() throws instead of reporting an empty Brain', { skip: skip ?? false }, async () => {
+test('1.5 loadDurable() throws instead of reporting an empty Brain', async (t) => {
+  if (skip) return t.skip(skip);
   // An undeclared scope legitimately sees zero rows. Returning [] would be
   // indistinguishable from "this tenant has nothing" and would boot an
   // apparently empty Brain while every row sat safe in the database.
@@ -147,7 +152,8 @@ test('1.5 loadDurable() throws instead of reporting an empty Brain', { skip: ski
 
 /* ── 1.6 summaries obey the same rules ───────────────────────────────────── */
 
-test('1.6 a cross-owner summary write is REJECTED', { skip: skip ?? false }, async () => {
+test('1.6 a cross-owner summary write is REJECTED', async (t) => {
+  if (skip) return t.skip(skip);
   await store.saveConversation(conversation('c-sum', A));
   await assert.rejects(
     () =>
@@ -169,7 +175,8 @@ test('1.6 a cross-owner summary write is REJECTED', { skip: skip ?? false }, asy
 
 /* ── 2.5 the explicit multi-record transaction ───────────────────────────── */
 
-test('2.5 createConversationWithFirstMessage is atomic', { skip: skip ?? false }, async () => {
+test('2.5 createConversationWithFirstMessage is atomic', async (t) => {
+  if (skip) return t.skip(skip);
   await store.createConversationWithFirstMessage(conversation('c-atomic', A), message('m-atomic', 'c-atomic'));
 
   const loaded = await store.loadDurableForScope(A);
@@ -179,7 +186,8 @@ test('2.5 createConversationWithFirstMessage is atomic', { skip: skip ?? false }
 
 /* ── 2.2 rollback leaves nothing ─────────────────────────────────────────── */
 
-test('2.2 a failed multi-record write leaves NO conversation behind', { skip: skip ?? false }, async () => {
+test('2.2 a failed multi-record write leaves NO conversation behind', async (t) => {
+  if (skip) return t.skip(skip);
   // The message declares a conversation id that will violate the FK inside the
   // same transaction, so the conversation insert must roll back with it.
   const bad = { ...message('m-bad', 'does-not-exist'), id: 'm-bad' };
@@ -194,7 +202,8 @@ test('2.2 a failed multi-record write leaves NO conversation behind', { skip: sk
 
 /* ── direct integrity: a child may not name a parent that does not exist ──── */
 
-test('1.9 a message referencing a NONEXISTENT conversation is rejected', { skip: skip ?? false }, async () => {
+test('1.9 a message referencing a NONEXISTENT conversation is rejected', async (t) => {
+  if (skip) return t.skip(skip);
   // Before migration 10 this succeeded: conversation_messages had no foreign key
   // at all, so a message could name a conversation that never existed.
   await assert.rejects(
@@ -203,7 +212,8 @@ test('1.9 a message referencing a NONEXISTENT conversation is rejected', { skip:
   );
 });
 
-test('1.10 a summary referencing a NONEXISTENT conversation is rejected', { skip: skip ?? false }, async () => {
+test('1.10 a summary referencing a NONEXISTENT conversation is rejected', async (t) => {
+  if (skip) return t.skip(skip);
   await assert.rejects(
     () =>
       store.saveSummary(
@@ -258,7 +268,8 @@ const chunk = (id: string, indexId: string, scope: { owner: string; workspace: s
   vector: [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8],
 });
 
-test('1.8 saveIndex stores workspace_scope EQUAL to a conversation in the same workspace', { skip: skip ?? false }, async () => {
+test('1.8 saveIndex stores workspace_scope EQUAL to a conversation in the same workspace', async (t) => {
+  if (skip) return t.skip(skip);
   // The actual question: is `workspaceId` the same semantic value RLS compares
   // against for conversations? If the two diverge, every index write breaks.
   await store.saveConversation(conversation('c-ws-probe', A));
@@ -285,7 +296,8 @@ test('1.8 saveIndex stores workspace_scope EQUAL to a conversation in the same w
   assert.equal(rows[0]?.ws_index, A.workspace);
 });
 
-test('1.8b commitSync under the correct scope succeeds', { skip: skip ?? false }, async () => {
+test('1.8b commitSync under the correct scope succeeds', async (t) => {
+  if (skip) return t.skip(skip);
   await store.saveIndex(indexRecord('idx-commit', A) as never);
   await store.commitSync('idx-commit', 1, [chunk('ch-1', 'idx-commit', A) as never], ['notes.md'], [], 2, A);
 
@@ -293,7 +305,8 @@ test('1.8b commitSync under the correct scope succeeds', { skip: skip ?? false }
   assert.ok(chunks.some((c) => c.id === 'ch-1'), 'the chunk is readable in its own scope');
 });
 
-test('1.8c commitSync under a WRONG owner is rejected', { skip: skip ?? false }, async () => {
+test('1.8c commitSync under a WRONG owner is rejected', async (t) => {
+  if (skip) return t.skip(skip);
   await store.saveIndex(indexRecord('idx-wrong-owner', A) as never);
   await assert.rejects(
     () => store.commitSync('idx-wrong-owner', 1, [chunk('ch-bad', 'idx-wrong-owner', B) as never], ['notes.md'], [], 2, B),
@@ -301,7 +314,8 @@ test('1.8c commitSync under a WRONG owner is rejected', { skip: skip ?? false },
   );
 });
 
-test('1.8d commitSync under a WRONG workspace is rejected', { skip: skip ?? false }, async () => {
+test('1.8d commitSync under a WRONG workspace is rejected', async (t) => {
+  if (skip) return t.skip(skip);
   await store.saveIndex(indexRecord('idx-wrong-ws', A) as never);
   await assert.rejects(
     () => store.commitSync('idx-wrong-ws', 1, [chunk('ch-bad-ws', 'idx-wrong-ws', AY) as never], ['notes.md'], [], 2, AY),
@@ -327,7 +341,8 @@ const chunkNamed = (key: string, indexId: string, scope: { owner: string; worksp
   vector: [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8],
 });
 
-test('11.1 the SAME chunk key coexists across two owners', { skip: skip ?? false }, async () => {
+test('11.1 the SAME chunk key coexists across two owners', async (t) => {
+  if (skip) return t.skip(skip);
   // `README.md#1` is not exotic — it would collide across essentially every
   // workspace. Before migration 11 the second write hit ON CONFLICT and RLS
   // refused it against the first tenant's row; without RLS it would have
@@ -349,7 +364,8 @@ test('11.1 the SAME chunk key coexists across two owners', { skip: skip ?? false
   assert.equal(b[0]!.id, 'README.md#1');
 });
 
-test('11.2 the same chunk key coexists across two indexes in ONE scope', { skip: skip ?? false }, async () => {
+test('11.2 the same chunk key coexists across two indexes in ONE scope', async (t) => {
+  if (skip) return t.skip(skip);
   // Tenant isolation alone does not solve index-to-index collision: both of
   // these belong to the same owner and workspace.
   await store.saveIndex(indexRecord('idx-same-scope-1', A) as never);
@@ -364,7 +380,8 @@ test('11.2 the same chunk key coexists across two indexes in ONE scope', { skip:
   assert.equal(two[0]!.text, 'FROM INDEX TWO', 'the second index did not overwrite the first');
 });
 
-test('11.3 re-syncing the SAME chunk updates in place rather than duplicating', { skip: skip ?? false }, async () => {
+test('11.3 re-syncing the SAME chunk updates in place rather than duplicating', async (t) => {
+  if (skip) return t.skip(skip);
   // row_id is derived from the canonical tuple, so an unchanged chunk resolves
   // to the same row and ON CONFLICT updates it.
   await store.saveIndex(indexRecord('idx-resync', A) as never);
@@ -376,7 +393,8 @@ test('11.3 re-syncing the SAME chunk updates in place rather than duplicating', 
   assert.equal(chunks[0]!.text, 'SECOND', 'and must update it');
 });
 
-test('11.4 the scoped-identity migration backfills rows that ALREADY exist', { skip: skip ?? false }, async () => {
+test('11.4 the scoped-identity migration backfills rows that ALREADY exist', async (t) => {
+  if (skip) return t.skip(skip);
   /*
    * THE CASE THE TEST MATRIX WAS MISSING.
    *
@@ -422,7 +440,8 @@ test('11.4 the scoped-identity migration backfills rows that ALREADY exist', { s
   assert.equal(rows[0]!.chunk_key, 'backfill.md#1', 'chunk_key stays the logical identity');
 });
 
-test('11.5 FORCE row-level security is RESTORED after the migration', { skip: skip ?? false }, async () => {
+test('11.5 FORCE row-level security is RESTORED after the migration', async (t) => {
+  if (skip) return t.skip(skip);
   // The migration lifts FORCE for its owner-run backfill. If it failed to
   // restore it, the table owner would silently bypass tenant isolation from then
   // on — a permanent weakening introduced by a one-off maintenance step.
@@ -460,7 +479,8 @@ const workspaceRecord = (id: string, scope: { owner: string; workspace: string }
 });
 
 test('12.1 setIndexState under a WRONG scope raises rather than silently doing nothing',
-  { skip: skip ?? false }, async () => {
+  async (t) => {
+    if (skip) return t.skip(skip);
     await store.saveIndex(indexRecord('idx-rowcount-state', A) as never);
 
     await assert.rejects(
@@ -476,13 +496,15 @@ test('12.1 setIndexState under a WRONG scope raises rather than silently doing n
   });
 
 test('12.2 setIndexState under the CORRECT scope still succeeds and persists',
-  { skip: skip ?? false }, async () => {
+  async (t) => {
+    if (skip) return t.skip(skip);
     await store.setIndexState('idx-rowcount-state', 'approved', 10, A);
     const indexes = await store.loadIndexesForScope(A);
     assert.equal(indexes.find((i) => i.id === 'idx-rowcount-state')?.state, 'approved');
   });
 
-test('12.3 setApprovedVersion under a WRONG scope raises', { skip: skip ?? false }, async () => {
+test('12.3 setApprovedVersion under a WRONG scope raises', async (t) => {
+  if (skip) return t.skip(skip);
   await assert.rejects(
     () => store.setApprovedVersion('idx-rowcount-state', 1, 11, B),
     /affected no rows/,
@@ -496,14 +518,16 @@ test('12.3 setApprovedVersion under a WRONG scope raises', { skip: skip ?? false
 });
 
 test('12.4 setApprovedVersion under the CORRECT scope persists the approval',
-  { skip: skip ?? false }, async () => {
+  async (t) => {
+    if (skip) return t.skip(skip);
     await store.setApprovedVersion('idx-rowcount-state', 1, 12, A);
     const indexes = await store.loadIndexesForScope(A);
     assert.equal(indexes.find((i) => i.id === 'idx-rowcount-state')?.approvedVersion, 1);
   });
 
 test('12.5 deleteIndex under a WRONG scope raises and the index SURVIVES',
-  { skip: skip ?? false }, async () => {
+  async (t) => {
+    if (skip) return t.skip(skip);
     await assert.rejects(() => store.deleteIndex('idx-rowcount-state', B), /affected no rows/);
     const indexes = await store.loadIndexesForScope(A);
     assert.ok(
@@ -513,7 +537,8 @@ test('12.5 deleteIndex under a WRONG scope raises and the index SURVIVES',
   });
 
 test('12.6 deleting an index that does not exist is a MISMATCH, not idempotent success',
-  { skip: skip ?? false }, async () => {
+  async (t) => {
+    if (skip) return t.skip(skip);
     /*
      * DECIDED, not defaulted: "already absent" is an error.
      *
@@ -527,7 +552,8 @@ test('12.6 deleting an index that does not exist is a MISMATCH, not idempotent s
   });
 
 test('12.7 deleteConversation: wrong scope raises, correct scope deletes, repeat raises',
-  { skip: skip ?? false }, async () => {
+  async (t) => {
+    if (skip) return t.skip(skip);
     await store.saveConversation(conversation('c-rowcount', A));
     await store.saveMessage(message('m-rowcount', 'c-rowcount'), A);
 
@@ -545,7 +571,8 @@ test('12.7 deleteConversation: wrong scope raises, correct scope deletes, repeat
   });
 
 test('12.8 deleting a conversation with NO messages still succeeds',
-  { skip: skip ?? false }, async () => {
+  async (t) => {
+    if (skip) return t.skip(skip);
     // Only the PARENT row count is required. Demanding rows from the child
     // tables would fail a perfectly correct delete of an empty conversation.
     await store.saveConversation(conversation('c-rowcount-empty', A));
@@ -555,7 +582,8 @@ test('12.8 deleting a conversation with NO messages still succeeds',
   });
 
 test('12.9 deleteWorkspace: wrong scope raises and the workspace SURVIVES',
-  { skip: skip ?? false }, async () => {
+  async (t) => {
+    if (skip) return t.skip(skip);
     await store.saveWorkspace(workspaceRecord('ws-rowcount', A) as never);
 
     await assert.rejects(() => store.deleteWorkspace('ws-rowcount', B), /affected no rows/);

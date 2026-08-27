@@ -167,7 +167,8 @@ async function importerFor(runId: string, source: LegacySource): Promise<Importe
 }
 
 test('the source is opened READ-ONLY — the artifact being migrated cannot be damaged',
-  { skip: skip ?? false }, async () => {
+  async (t) => {
+    if (skip) return t.skip(skip);
     const source = new LegacySource(sourcePath);
     assert.throws(
       () => (source as unknown as { db: DatabaseSync }).db.exec('DELETE FROM conversations'),
@@ -177,7 +178,8 @@ test('the source is opened READ-ONLY — the artifact being migrated cannot be d
     source.close();
   });
 
-test('a full import reconciles EXACTLY against the source', { skip: skip ?? false }, async () => {
+test('a full import reconciles EXACTLY against the source', async (t) => {
+  if (skip) return t.skip(skip);
   const source = new LegacySource(sourcePath);
   const totals = await (await importerFor('run-exact', source)).importAll();
 
@@ -198,7 +200,8 @@ test('a full import reconciles EXACTLY against the source', { skip: skip ?? fals
   source.close();
 });
 
-test('message ORDER survives, not just message count', { skip: skip ?? false }, async () => {
+test('message ORDER survives, not just message count', async (t) => {
+  if (skip) return t.skip(skip);
   // The legacy rows were inserted out of order on purpose; `seq` is the truth.
   const loaded = await store.loadDurableForScope({ owner: A.ownerScope, workspace: A.workspaceScope });
   const forA1 = loaded.messages.filter((m) => m.conversationId === 'c-a1');
@@ -206,7 +209,8 @@ test('message ORDER survives, not just message count', { skip: skip ?? false }, 
   assert.deepEqual(forA1.map((m) => m.content), ['first message', 'second message', 'third message']);
 });
 
-test('SQLite 0/1 becomes a real boolean, not a truthy number', { skip: skip ?? false }, async () => {
+test('SQLite 0/1 becomes a real boolean, not a truthy number', async (t) => {
+  if (skip) return t.skip(skip);
   const loaded = await store.loadDurableForScope({ owner: A.ownerScope, workspace: A.workspaceScope });
   const durable = loaded.messages.find((m) => m.id === 'm-a1-1');
   const notDurable = loaded.messages.find((m) => m.id === 'm-a1-3');
@@ -214,7 +218,8 @@ test('SQLite 0/1 becomes a real boolean, not a truthy number', { skip: skip ?? f
   assert.equal(notDurable?.durable, false);
 });
 
-test('an EMPTY grounding set stays distinct from NO grounding set', { skip: skip ?? false }, async () => {
+test('an EMPTY grounding set stays distinct from NO grounding set', async (t) => {
+  if (skip) return t.skip(skip);
   // Collapsing these loses a real user fact: "I detached every file" is not the
   // same as "I never attached one".
   const loaded = await store.loadDurableForScope({ owner: A.ownerScope, workspace: A.workspaceScope });
@@ -223,7 +228,8 @@ test('an EMPTY grounding set stays distinct from NO grounding set', { skip: skip
   assert.equal(loaded.conversations.find((c) => c.id === 'c-a3')?.groundingFiles, undefined);
 });
 
-test('multi-version chunk history is preserved, not flattened to the latest', { skip: skip ?? false }, async () => {
+test('multi-version chunk history is preserved, not flattened to the latest', async (t) => {
+  if (skip) return t.skip(skip);
   const scope = { owner: A.ownerScope, workspace: A.workspaceScope };
   const v1 = await store.loadChunksForScope(scope, 'idx-a', 1);
   const v2 = await store.loadChunksForScope(scope, 'idx-a', 2);
@@ -233,7 +239,8 @@ test('multi-version chunk history is preserved, not flattened to the latest', { 
   assert.deepEqual(v2.map((c) => c.text).sort(), ['ALPHA NEW CONTENT', 'ALPHA SPEC']);
 });
 
-test('the legacy STORAGE key is rewritten to the engine LOGICAL key', { skip: skip ?? false }, async () => {
+test('the legacy STORAGE key is rewritten to the engine LOGICAL key', async (t) => {
+  if (skip) return t.skip(skip);
   /*
    * The legacy row id was `idx-a:v2:notes.md#1`. PostgreSQL must hold
    * `notes.md#1` — what indexService produces on a fresh sync. Carrying the
@@ -246,7 +253,8 @@ test('the legacy STORAGE key is rewritten to the engine LOGICAL key', { skip: sk
   assert.ok(!keys.some((k) => k.includes(':v')), 'no legacy storage key survived the import');
 });
 
-test('two tenants keep IDENTICAL logical chunk keys without colliding', { skip: skip ?? false }, async () => {
+test('two tenants keep IDENTICAL logical chunk keys without colliding', async (t) => {
+  if (skip) return t.skip(skip);
   // This exact pair is what the first PostgreSQL port collapsed into one row.
   const a = await store.loadChunksForScope({ owner: A.ownerScope, workspace: A.workspaceScope }, 'idx-a', 2);
   const b = await store.loadChunksForScope({ owner: B.ownerScope, workspace: B.workspaceScope }, 'idx-b', 1);
@@ -256,7 +264,8 @@ test('two tenants keep IDENTICAL logical chunk keys without colliding', { skip: 
   assert.equal(bNotes?.text, 'BETA CONTENT', 'beta must not be serving alpha content');
 });
 
-test('the approved pointer and version survive the version replay', { skip: skip ?? false }, async () => {
+test('the approved pointer and version survive the version replay', async (t) => {
+  if (skip) return t.skip(skip);
   // commitSync moves `version` as a side effect of every version it replays, so
   // the importer restores the legacy pointers afterwards.
   const indexes = await store.loadIndexesForScope({ owner: A.ownerScope, workspace: A.workspaceScope });
@@ -266,7 +275,8 @@ test('the approved pointer and version survive the version replay', { skip: skip
   assert.equal(idx?.approvedVersion, 2);
 });
 
-test('re-running the SAME import is idempotent — no duplicates, still exact', { skip: skip ?? false }, async () => {
+test('re-running the SAME import is idempotent — no duplicates, still exact', async (t) => {
+  if (skip) return t.skip(skip);
   const source = new LegacySource(sourcePath);
   // A fresh run id, so no checkpoint lets it skip: every write is replayed.
   await (await importerFor('run-again', source)).importAll();
@@ -279,7 +289,8 @@ test('re-running the SAME import is idempotent — no duplicates, still exact', 
   source.close();
 });
 
-test('a crashed import RESUMES where it stopped instead of starting over', { skip: skip ?? false }, async () => {
+test('a crashed import RESUMES where it stopped instead of starting over', async (t) => {
+  if (skip) return t.skip(skip);
   /*
    * The failure this models is the real one: the process dies partway through.
    * The importer is driven to throw inside a specific scope, then re-run with
@@ -319,7 +330,8 @@ test('a crashed import RESUMES where it stopped instead of starting over', { ski
   source.close();
 });
 
-test('a resume REFUSES when the source changed underneath it', { skip: skip ?? false }, async () => {
+test('a resume REFUSES when the source changed underneath it', async (t) => {
+  if (skip) return t.skip(skip);
   const checkpoints = new CheckpointStore(connection);
   const real = await LegacySource.fingerprint(sourcePath);
   await checkpoints.beginOrResume('run-fingerprint', sourcePath, real, 1_000);
@@ -335,7 +347,8 @@ test('a resume REFUSES when the source changed underneath it', { skip: skip ?? f
   assert.equal(again.resumed, true);
 });
 
-test('reconciliation FAILS when the target diverges — the check has teeth', { skip: skip ?? false }, async () => {
+test('reconciliation FAILS when the target diverges — the check has teeth', async (t) => {
+  if (skip) return t.skip(skip);
   /*
    * A parity checker that never fails proves nothing. A conversation is mutated
    * in PostgreSQL only, and reconciliation must name it.
@@ -358,7 +371,8 @@ test('reconciliation FAILS when the target diverges — the check has teeth', { 
 });
 
 test('the audit reports UNVERIFIED rather than a clean number when the source is gone',
-  { skip: skip ?? false }, async () => {
+  async (t) => {
+    if (skip) return t.skip(skip);
     // Both fixture roots are absent, exactly like three of the four production
     // indexes whose upload directories were deleted.
     const source = new LegacySource(sourcePath);
@@ -375,7 +389,8 @@ test('the audit reports UNVERIFIED rather than a clean number when the source is
     source.close();
   });
 
-test('the audit verifies against a source that DOES still exist', { skip: skip ?? false }, async () => {
+test('the audit verifies against a source that DOES still exist', async (t) => {
+  if (skip) return t.skip(skip);
   const root = join(workDir, 'library-present');
   await mkdir(root, { recursive: true });
   await writeFile(join(root, 'present.md'), 'content');
@@ -402,7 +417,8 @@ test('the audit verifies against a source that DOES still exist', { skip: skip ?
   source.close();
 });
 
-test('the audit NAMES a file that is persisted but no longer in the source', { skip: skip ?? false }, async () => {
+test('the audit NAMES a file that is persisted but no longer in the source', async (t) => {
+  if (skip) return t.skip(skip);
   const root = join(workDir, 'library-partial');
   await mkdir(root, { recursive: true });
   await writeFile(join(root, 'kept.md'), 'still here');
@@ -423,7 +439,8 @@ test('the audit NAMES a file that is persisted but no longer in the source', { s
   source.close();
 });
 
-test('a soft-deleted conversation migrates as DELETED and does not come back', { skip: skip ?? false }, async () => {
+test('a soft-deleted conversation migrates as DELETED and does not come back', async (t) => {
+  if (skip) return t.skip(skip);
   /*
    * Resurrecting a thread the user deleted is worse than losing one: it puts
    * content back in front of them that they removed on purpose.
@@ -446,7 +463,8 @@ test('a soft-deleted conversation migrates as DELETED and does not come back', {
   assert.equal(Number(rows[0]?.deleted_at), 515, 'and it kept the exact deletion timestamp');
 });
 
-test('an UNREADABLE source is not reported as a missing one', { skip: skip ?? false }, async () => {
+test('an UNREADABLE source is not reported as a missing one', async (t) => {
+  if (skip) return t.skip(skip);
   /*
    * The defect this replaces shipped into a written report.
    *
@@ -488,7 +506,8 @@ test('an UNREADABLE source is not reported as a missing one', { skip: skip ?? fa
   }
 });
 
-test('a genuinely ABSENT source still reports ENOENT and "gone"', { skip: skip ?? false }, async () => {
+test('a genuinely ABSENT source still reports ENOENT and "gone"', async (t) => {
+  if (skip) return t.skip(skip);
   // The other half of the distinction: the original behaviour must survive.
   const source = new LegacySource(sourcePath);
   const audit = await auditChunkIntegrity(source);

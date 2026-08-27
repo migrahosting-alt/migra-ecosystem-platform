@@ -53,7 +53,8 @@ const reserve = (s: { id: string; scope: string }, now = 1_000, conversationId?:
     reservationId: rid(), holdMs: HOLD, now, ...(conversationId ? { conversationId } : {}),
   });
 
-test('a first-time visitor gets their full allowance', { skip: skip ?? false }, async () => {
+test('a first-time visitor gets their full allowance', async (t) => {
+  if (skip) return t.skip(skip);
   const s = session('first');
   const r = await reserve(s);
   assert.equal(r.ok, true);
@@ -61,7 +62,8 @@ test('a first-time visitor gets their full allowance', { skip: skip ?? false }, 
   assert.equal(r.quota.used, 1, 'the reservation itself counts immediately, before any answer exists');
 });
 
-test('holds count toward usage — an unsettled turn is not free', { skip: skip ?? false }, async () => {
+test('holds count toward usage — an unsettled turn is not free', async (t) => {
+  if (skip) return t.skip(skip);
   const s = session('holds');
   await reserve(s);
   await reserve(s);
@@ -69,7 +71,8 @@ test('holds count toward usage — an unsettled turn is not free', { skip: skip 
   assert.equal(q?.used, 2, 'two turns in flight consume two of the allowance');
 });
 
-test('a released reservation returns the allowance', { skip: skip ?? false }, async () => {
+test('a released reservation returns the allowance', async (t) => {
+  if (skip) return t.skip(skip);
   const s = session('release');
   const r = await reserve(s);
   assert.equal((await store.getAnonymousQuota(s.id, s.scope))?.used, 1);
@@ -79,7 +82,8 @@ test('a released reservation returns the allowance', { skip: skip ?? false }, as
   assert.equal((await store.getAnonymousQuota(s.id, s.scope))?.used, 0, 'our outage does not cost the visitor a turn');
 });
 
-test('a consumed reservation does NOT return the allowance', { skip: skip ?? false }, async () => {
+test('a consumed reservation does NOT return the allowance', async (t) => {
+  if (skip) return t.skip(skip);
   const s = session('consume');
   const r = await reserve(s);
   await store.consumeAnonymousReservation(r.reservationId!, s.scope, 2_000);
@@ -90,7 +94,8 @@ test('a consumed reservation does NOT return the allowance', { skip: skip ?? fal
   assert.equal((await store.getAnonymousQuota(s.id, s.scope))?.used, 1, 'a served answer stays paid for');
 });
 
-test('consuming the same reservation twice is REFUSED', { skip: skip ?? false }, async () => {
+test('consuming the same reservation twice is REFUSED', async (t) => {
+  if (skip) return t.skip(skip);
   // Otherwise a retried settle charges the visitor twice for one answer.
   const s = session('double-consume');
   const r = await reserve(s);
@@ -102,7 +107,8 @@ test('consuming the same reservation twice is REFUSED', { skip: skip ?? false },
   assert.equal((await store.getAnonymousQuota(s.id, s.scope))?.used, 1);
 });
 
-test('exhaustion refuses further turns', { skip: skip ?? false }, async () => {
+test('exhaustion refuses further turns', async (t) => {
+  if (skip) return t.skip(skip);
   const s = session('exhaust');
   for (let i = 0; i < LIMIT; i += 1) {
     assert.equal((await reserve(s)).ok, true, `turn ${i + 1} of ${LIMIT} must be allowed`);
@@ -113,7 +119,8 @@ test('exhaustion refuses further turns', { skip: skip ?? false }, async () => {
   assert.equal(overflow.reservationId, undefined, 'no hold is created for a refused turn');
 });
 
-test('CONCURRENT turns cannot both take the last allowance', { skip: skip ?? false }, async () => {
+test('CONCURRENT turns cannot both take the last allowance', async (t) => {
+  if (skip) return t.skip(skip);
   /*
    * The reason this ledger exists. Two tabs press send at the same instant with
    * one turn left. Without `FOR UPDATE` both read `remaining: 1`, both insert,
@@ -133,7 +140,8 @@ test('CONCURRENT turns cannot both take the last allowance', { skip: skip ?? fal
 });
 
 test('an EXPIRED hold is reclaimed — a dead turn does not cost forever',
-  { skip: skip ?? false }, async () => {
+  async (t) => {
+    if (skip) return t.skip(skip);
     // The browser closed mid-stream and nothing ever settled.
     const s = session('expiry');
     await store.reserveAnonymousTurn({
@@ -148,7 +156,8 @@ test('an EXPIRED hold is reclaimed — a dead turn does not cost forever',
     assert.equal(later.quota.used, 1, 'the dead hold was reclaimed, not stacked on top of');
   });
 
-test('one visitor cannot see or spend another visitor\'s allowance', { skip: skip ?? false }, async () => {
+test('one visitor cannot see or spend another visitor\'s allowance', async (t) => {
+  if (skip) return t.skip(skip);
   const a = session('iso-a');
   const b = session('iso-b');
   const ra = await reserve(a);
@@ -168,7 +177,8 @@ test('one visitor cannot see or spend another visitor\'s allowance', { skip: ski
   assert.equal((await store.getAnonymousQuota(a.id, a.scope))?.used, 1, 'A is untouched');
 });
 
-test('the ledger and the render-time projection agree', { skip: skip ?? false }, async () => {
+test('the ledger and the render-time projection agree', async (t) => {
+  if (skip) return t.skip(skip);
   /*
    * `evaluateAnonymousQuota` is what the UI renders; the ledger is what decides.
    * If they disagree the user is told one thing and charged another — warning
@@ -194,7 +204,8 @@ test('the ledger and the render-time projection agree', { skip: skip ?? false },
   assert.equal((await reserve(s)).ok, false, 'and the ledger refuses, matching what the UI showed');
 });
 
-test('claiming records the account and cannot be repeated', { skip: skip ?? false }, async () => {
+test('claiming records the account and cannot be repeated', async (t) => {
+  if (skip) return t.skip(skip);
   const s = session('claim');
   await reserve(s);
   await store.markAnonymousClaimed(s.id, s.scope, 'user:real-account', 5_000);
@@ -219,7 +230,8 @@ test('claiming records the account and cannot be repeated', { skip: skip ?? fals
  * inference, and repeatable for as long as anyone cared to. Found on
  * chat.migrateck.com after the claim itself was fixed.
  */
-test('a CLAIMED session cannot buy a fresh allowance', { skip: skip ?? false }, async () => {
+test('a CLAIMED session cannot buy a fresh allowance', async (t) => {
+  if (skip) return t.skip(skip);
   const s = session('claim-refresh');
   await reserve(s);
   await store.saveConversation(conversation('conv-refresh', s.scope, s.scope) as never);
@@ -238,7 +250,8 @@ test('a CLAIMED session cannot buy a fresh allowance', { skip: skip ?? false }, 
 });
 
 test('a claimed session keeps its spent allowance — no fresh quota by re-presenting the cookie',
-  { skip: skip ?? false }, async () => {
+  async (t) => {
+    if (skip) return t.skip(skip);
     const s = session('claim-quota');
     for (let i = 0; i < LIMIT; i += 1) await reserve(s);
     await store.markAnonymousClaimed(s.id, s.scope, 'user:acct', 5_000);
@@ -261,7 +274,8 @@ const message = (id: string, conversationId: string, content: string) => ({
   status: 'complete' as const, createdAt: 20, durable: true,
 });
 
-test('signing in moves the conversation, keeping its ID and content', { skip: skip ?? false }, async () => {
+test('signing in moves the conversation, keeping its ID and content', async (t) => {
+  if (skip) return t.skip(skip);
   const s = session('claim-move');
   const ACCOUNT = { owner: 'user:claimer', workspace: 'personal:claimer' };
   const anonScope = { owner: s.scope, workspace: s.scope };
@@ -289,7 +303,8 @@ test('signing in moves the conversation, keeping its ID and content', { skip: sk
   );
 });
 
-test('the old anonymous token CANNOT read the conversation back', { skip: skip ?? false }, async () => {
+test('the old anonymous token CANNOT read the conversation back', async (t) => {
+  if (skip) return t.skip(skip);
   /*
    * The whole security point of the claim. Whoever still holds the anonymous
    * cookie — including someone who stole it — must not be able to keep reading
@@ -302,7 +317,8 @@ test('the old anonymous token CANNOT read the conversation back', { skip: skip ?
     'nor its messages');
 });
 
-test('a second account cannot claim the same anonymous session', { skip: skip ?? false }, async () => {
+test('a second account cannot claim the same anonymous session', async (t) => {
+  if (skip) return t.skip(skip);
   await store.saveConversation(conversation('conv-second', 'anon:claim-move', 'anon:claim-move') as never);
   await assert.rejects(
     () => store.claimAnonymousConversation({
@@ -313,7 +329,8 @@ test('a second account cannot claim the same anonymous session', { skip: skip ??
   );
 });
 
-test('a FAILED claim moves nothing — the conversation stays where it was', { skip: skip ?? false }, async () => {
+test('a FAILED claim moves nothing — the conversation stays where it was', async (t) => {
+  if (skip) return t.skip(skip);
   /*
    * The rejection above happens AFTER the rows were moved inside the same
    * transaction. If that transaction did not roll back, the conversation would
@@ -328,7 +345,8 @@ test('a FAILED claim moves nothing — the conversation stays where it was', { s
 });
 
 test('claiming a conversation that is not yours reports NOT_FOUND, not someone else\'s data',
-  { skip: skip ?? false }, async () => {
+  async (t) => {
+    if (skip) return t.skip(skip);
     const other = session('claim-other');
     await store.saveConversation(conversation('conv-elsewhere', other.scope, other.scope) as never);
     await reserve(other);
@@ -361,7 +379,8 @@ test('claiming a conversation that is not yours reports NOT_FOUND, not someone e
  * Measured on chat.migrateck.com before the fix: three conversations in, one
  * reported "claimed", none actually moved.
  */
-test('a visitor with SEVERAL conversations keeps all of them', { skip: skip ?? false }, async () => {
+test('a visitor with SEVERAL conversations keeps all of them', async (t) => {
+  if (skip) return t.skip(skip);
   const s = session('claim-many');
   const ACCOUNT = { owner: 'user:many', workspace: 'personal:many' };
   const anonScope = { owner: s.scope, workspace: s.scope };
@@ -396,7 +415,8 @@ test('a visitor with SEVERAL conversations keeps all of them', { skip: skip ?? f
   );
 });
 
-test('a DIFFERENT account is still refused after the first has claimed', { skip: skip ?? false }, async () => {
+test('a DIFFERENT account is still refused after the first has claimed', async (t) => {
+  if (skip) return t.skip(skip);
   // The idempotency above must not have opened the door: re-asserting the SAME
   // account is a retry, a different one is a theft.
   await store.saveConversation(conversation('conv-many-4', 'anon:claim-many', 'anon:claim-many') as never);
