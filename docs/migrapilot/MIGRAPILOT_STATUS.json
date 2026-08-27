@@ -394,6 +394,24 @@
         "Shelling out to poppler/libreoffice would mean installing system packages on VM111 \u2014 an owner decision with a dependency and attack-surface cost, not a free option."
       ],
       "notStarted": "Groundwork only. The lane does not open until the citation pass is 10/10."
+    },
+    "deployDependencyPath": {
+      "tracedOn": "2026-08-27, read-only. No production change.",
+      "howNodeModulesArrives": "cp -al HARDLINK from a prior release. Proven by inode identity: consumer node_modules/next/package.json is inode 9490805 with links=15 across 60 releases; the brain tree is inode 9453191 links=5.",
+      "doesProductionInstall": "NO install runs in the release flow. npm ci is IMPOSSIBLE in current releases because there is NO package-lock.json (older releases 867ac0f and v30 still have one; current ones do not). The historical install was \"npm install --omit dev --no-audit --no-fund\" run in a staging dir ON VM111 (/opt/migrapilot/staging/v6, 2026-08-16).",
+      "nativeInstallHost": "VM111 itself \u2014 x86_64, Ubuntu, glibc 2.39, identical to the runtime. So any prebuilt binary fetched there matches the runtime exactly. But VM111 has NO compiler, so only pure-JS or prebuilt-binary packages can install.",
+      "prebuiltBinariesSurviveCpAl": "YES \u2014 proven, not assumed. The consumer release carries 4 working .node binaries (@img/sharp-linux-x64, @img/sharp-linuxmusl-x64, @next/swc-linux-x64-gnu, -musl) inherited through the hardlink chain.",
+      "doesDependencyChangeRefresh": "NO \u2014 it SILENTLY INHERITS STALE. Observed in production, not induced: 5 of 12 declared consumer runtime dependencies are ABSENT from the deployed node_modules (jpeg-js, pngjs, qrcode, plus the two workspace links @migrapilot/shared-types and @migrateck/auth-client).",
+      "whyThatIsCurrentlyHarmless": "The consumer is Next.js and BUNDLES those deps into .next/server at build time \u2014 verified by finding jpeg-js, pngjs and qrcode all referenced there. Runtime node_modules is not load-bearing for bundled code.",
+      "criticalAsymmetry": "\ud83d\udea8 brain-service is NOT bundled. It runs /usr/bin/node dist/src/server.js directly, so its runtime node_modules IS load-bearing. It is currently complete (13/13 declared deps present) and 100% pure JS with ZERO .node binaries. Since the indexer and exclusions.ts live in brain-service, a PDF extractor added there MUST physically exist in its runtime node_modules \u2014 and the release flow will not put it there.",
+      "registryReachable": "YES from VM111 \u2014 pdf-parse 2.4.5, unpdf 1.8.1, pdfjs-dist 6.2.108, mammoth 1.12.1 all resolve. mammoth declares no install script.",
+      "extractorClassification": {
+        "pureJS": "SAFE \u2014 installs without a compiler, survives the hardlink flow once installed. Preferred.",
+        "prebuiltBinary": "POSSIBLE and precedented (sharp), but requires an explicit install on VM111; the release flow does not deliver it.",
+        "nativeCompileRequired": "UNSUITABLE \u2014 no make/g++/cc on VM111 unless a build stage/toolchain is added deliberately."
+      },
+      "deployRisk": "There is no automated deploy script for consumer/brain and no lockfile, so nothing ENFORCES a dependency install. A new brain runtime dep will be missing unless installed by hand. This should become a deploy-path fix (lockfile + explicit install step) before any load-bearing dep is added.",
+      "keepSeparate": "PDF and DOCX evaluated separately \u2014 the best extractor for each may differ."
     }
   },
   "resolvedDefects": [
