@@ -13,7 +13,7 @@
   "activeLane": {
     "name": "Scanned-PDF OCR",
     "objective": "Make image-only PDFs readable, with liv_kreyol_part1.pdf (28 pages, 0 extractable characters, Haitian Creole) as the canonical acceptance fixture.",
-    "currentStep": "Not started. NEXT: qualify OCR options against that book BEFORE implementing.",
+    "currentStep": "Scanned-PDF slice CLOSED. Next lane not started.",
     "design": "OCR is an ESCALATION PATH, never the default: PDF -> text layer exists -> unpdf; no text layer -> OCR -> page provenance preserved -> indexed normally.",
     "shortlist": [
       "Native Tesseract + Haitian `hat` language data \u2014 prebuilt Ubuntu packages, so the missing compiler on VM111 may not matter. CORRECTION to my earlier framing, which wrongly assumed native meant compiling from source.",
@@ -297,6 +297,28 @@
         "sequence-sensitive retrieval consults sequenceComplete and attaches the note",
         "end-to-end live acceptance on liv_kreyol_part1.pdf, after which the scanned-PDF refusal is removed"
       ]
+    },
+    "liveAcceptance": {
+      "fixture": "liv_kreyol_part1.pdf \u2014 5MB, 28 scans, 56 half-pages, ZERO extractable characters.",
+      "results": {
+        "uploadReturnsImmediately": "PASS \u2014 405ms index call, file visible at once",
+        "stagesPersist": "PASS \u2014 rendering_pages -> reading_text -> indexing (262s) -> ready (272s)",
+        "reloadPreservesState": "PASS \u2014 full page load mid-job, state intact and advancing",
+        "terminalStopsPolling": "PASS \u2014 polling:false at ready_with_unplaced_pages",
+        "chunksExistBeforeReady": "PASS \u2014 36 chunks, and `indexing` precedes `ready` in the stage log",
+        "groundedContentAnswer": "PASS \u2014 \"chokola\" (le chocolat) and \"kafe\" (le cafe) from OCR text",
+        "provenance": "PASS \u2014 sources [\"liv_kreyol_part1.pdf\"], pages 2-5, 12, 23. The PDF, never the sidecar.",
+        "caveatOnOrderingOnly": "PASS \u2014 \"What comes after section 30 in order?\" carried the note; \"What is the Creole word for le cafe?\" did not.",
+        "chatResponsiveDuringJob": "PASS \u2014 answered in 19s while the job advanced scan 1 -> 9",
+        "deleteCleansUp": "PASS \u2014 file, readiness record and chunks all removed",
+        "noDuplicateRetrieval": "PASS \u2014 the sidecar is excluded from the walk; sources list the PDF once"
+      },
+      "refusalStatus": "The scanned-PDF refusal is superseded for the QUALIFIED path only, exactly as instructed. A PDF that OCR still cannot read, or that is encrypted or damaged, keeps its own honest terminal state and contributes no chunks.",
+      "defectsFoundByLiveAcceptance": [
+        "\ud83d\udea8 \"ready\" claimed a document nobody had indexed \u2014 the runner's index step was unwired, so the state said readable while the index held zero chunks. Now ENFORCED: the terminal state is written only after counting searchable chunks, and zero lands in a truthful failure instead.",
+        "\ud83d\udea8 Four brain-client operations existed in the type union with no transport case. The client could NAME them and not send them; the escalation silently produced no request. Now pinned by a test that parses the union and the switch from source.",
+        "The ordering caveat existed, was tested, and was never called by any request path."
+      ]
     }
   },
   "capabilities": {
@@ -330,7 +352,8 @@
       "Index snapshot integrity \u2014 every committed version is a complete independently loadable snapshot; a Brain restart no longer empties the index. Proven live 2026-08-27 (snapshot-4e3bc7c4).",
       "Deterministic glyph generation is phrasing-independent \u2014 a request for one literal character routes to the typeface renderer whatever verb it uses. Proven live 2026-08-27 (glyph-436cd359): provenance typeface:DejaVuSerif-Bold.ttf, ComfyUI queue untouched.",
       "Generated images render live from the stream path exactly as from persisted history \u2014 verified across new refs, duplicate content-addressed refs, and reload, with text-only turns unaffected.",
-      "PDF text-layer reading + page provenance \u2014 a PDF with a text layer uploads, extracts, indexes, grounds, and is attributed as \"From your files: report.pdf \u00b7 page N\", carried from the extractor rather than the model. Proven live 2026-08-27 (pages-fa69cf16)."
+      "PDF text-layer reading + page provenance \u2014 a PDF with a text layer uploads, extracts, indexes, grounds, and is attributed as \"From your files: report.pdf \u00b7 page N\", carried from the extractor rather than the model. Proven live 2026-08-27 (pages-fa69cf16).",
+      "Scanned-PDF reading (OCR) \u2014 a 28-scan image-only Haitian Creole book uploads instantly, is read in the background with visible stages, reaches ready_with_unplaced_pages, and ANSWERS: \"chokola\" for le chocolat, \"kafe\" for le cafe, attributed to the PDF with page provenance. Proven live 2026-08-27 (caveat-9dc77388)."
     ],
     "STABILIZATION": [
       {
@@ -352,7 +375,6 @@
       }
     ],
     "HONESTLY_UNAVAILABLE": [
-      "PDF extraction",
       "DOCX/XLSX/PPTX extraction",
       "ZIP understanding",
       "Existing-image editing",
@@ -360,8 +382,7 @@
       "Deep research",
       "Agents",
       "Scheduled automation",
-      "Full Projects capability",
-      "Scanned / image-only PDF reading \u2014 refused truthfully today (zero chunks, no false readiness). Next capability slice: OCR."
+      "Full Projects capability"
     ],
     "SECURITY_HARDENING": [
       {
