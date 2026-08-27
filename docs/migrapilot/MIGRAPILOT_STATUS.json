@@ -545,10 +545,6 @@
   ],
   "backlog": {
     "EASY_NEXT": [
-      "1. Contradictory index state \u2014 approved+searchable+zero chunks must never answer \"no readable content\"",
-      "2. Glyph phrasing gap \u2014 \"Generate an image of the letter B\" should classify as deterministic glyph generation",
-      "3. HIGH-VISIBILITY CHAT: image conversational-reference routing",
-      "4. HIGH-VISIBILITY CHAT: regenerate promise vs execution truthfulness",
       "5. Consumer reproducible release treatment (does NOT block PDF)"
     ],
     "MEDIUM": [
@@ -817,5 +813,8 @@
       "\ud83d\udea8 notEmpiricallyProven": "That the OLD password is now rejected was NOT proven. The first attempt reported \"rotation confirmed\" and was invalid: it ran unprivileged, could not read the 600 root:root backup, and was connecting with an EMPTY string \u2014 caught because all three fingerprints came back e3b0c44298fc, the sha256 of \"\". Operational rotation rests on ALTER ROLE succeeding plus successful auth with the new credential, not on a negative test. Recorded rather than rewritten.",
       "pendingCleanup": "Remove exactly two retired-credential backups when privileged access returns: /etc/migrapilot/brain.env.bak-20260827195015 and the matching brain-pg-candidate.env backup. Leave brain-rehearsal.env and every unrelated backup untouched."
     }
+  },
+  "backlogHygiene": {
+    "2026-08-27": "EASY_NEXT had drifted: four entries were still listed as pending while the capabilities they describe were already in PROVEN_LIVE. Pruned only after matching each against the proven entry, not on memory. A backlog that lists finished work is how the same slice gets opened twice."
   }
 }
