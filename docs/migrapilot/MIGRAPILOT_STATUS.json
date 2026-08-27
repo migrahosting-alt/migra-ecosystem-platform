@@ -13,7 +13,7 @@
   "activeLane": {
     "name": "PDF/DOCX extraction",
     "objective": "Extend the proven document pipeline to PDF and DOCX, the first formats behind an honest refusal today.",
-    "currentStep": "Glyph lane fully closed. NEXT: PDF extractor qualification (unpdf, pdfjs-dist, pdf-parse).",
+    "currentStep": "PDF qualification COMPLETE. Next: PDF implementation behind unpdf, then live acceptance, then DOCX.",
     "lastProvenMilestone": "Common text/code Files & Documents lane CLOSED 2026-08-27 with deterministic attribution PROVEN_LIVE 5/5. Closed because the one failing cell was classified correctly as a model-quality defect, NOT because the failure was removed.",
     "previousLane": {
       "name": "Files & Documents",
@@ -452,6 +452,31 @@
       },
       "deployRisk": "There is no automated deploy script for consumer/brain and no lockfile, so nothing ENFORCES a dependency install. A new brain runtime dep will be missing unless installed by hand. This should become a deploy-path fix (lockfile + explicit install step) before any load-bearing dep is added.",
       "keepSeparate": "PDF and DOCX evaluated separately \u2014 the best extractor for each may differ."
+    },
+    "pdfQualification": {
+      "ranOn": "2026-08-27. Nine fixtures, three candidates, verdicts kept separate by layer.",
+      "fixtures": "Built rather than assumed: clean text, 5-page multipage, headings/order, table, mixed text+image (Chrome headless); image-only via ghostscript rasterisation and VERIFIED to have no text layer (pdftotext returns nothing); encrypted via pypdf; malformed by truncating a valid PDF so the xref is destroyed; and a real 26-page 116KB document.",
+      "candidates": {
+        "unpdf": "1.8.1",
+        "pdfjs-dist": "6.2.108",
+        "pdf-parse": "2.4.5"
+      },
+      "layerVerdicts": {
+        "textExtraction": "ALL THREE correct on every text fixture.",
+        "readingOrder": "ALL THREE preserved order across h1/h2/h3/paragraph sequences.",
+        "headingsSections": "NONE preserve heading LEVEL. All three return flat text \u2014 headings survive as ordered lines, not as structure. Any heading awareness would be ours to build downstream.",
+        "tables": "unpdf preserves ROW structure as lines (\"EMEA Q2 9930.25 Rivera\") \u2014 usable as-is. pdfjs-dist returns cell-level items WITH coordinates, so columns can be reconstructed precisely but only with work. pdf-parse sits between. No library returns a real table model.",
+        "pageBoundariesMetadata": "ALL THREE report page counts correctly (5/5 and 26/26). pdf-parse also emits explicit \"-- N of M --\" separators.",
+        "scannedDetection": "\ud83d\udea8 THE SHARPEST DIFFERENCE. unpdf and pdfjs-dist return EXACTLY 0 characters on an image-only PDF, so \"no text layer\" is detectable. pdf-parse returns 12 characters of SYNTHETIC page separator (\"-- 1 of 1 --\"), so a naive empty-text check silently concludes the page has text. Adopting pdf-parse would require stripping its decorations before any scanned check.",
+        "encrypted": "ALL THREE throw PasswordException(\"No password given\") \u2014 clear, identical, actionable.",
+        "malformed": "ALL THREE throw InvalidPDFException(\"Invalid PDF structure\") \u2014 fails safely, no partial text.",
+        "cpuMemory": "Comparable. 26-page real document: unpdf 188ms, pdfjs-dist 227ms, pdf-parse 172ms. Peak heap ~11MB.",
+        "footprint": "unpdf 2.6MB with ZERO dependencies. pdfjs-dist 68MB. pdf-parse 57MB. Both of the latter pull @napi-rs/canvas with a native .node binary.",
+        "license": "unpdf MIT; pdfjs-dist Apache-2.0; pdf-parse Apache-2.0. All commercially usable.",
+        "deployPathCompatibility": "PROVEN ON VM111, not inferred: unpdf installs as 1 package / 2.6MB with ZERO native binaries and extracted correctly on the real runtime. No install scripts on any candidate, so none requires the compiler VM111 lacks \u2014 but pdfjs-dist and pdf-parse depend on a prebuilt native canvas binary, which the deploy path can carry only because the install host IS the runtime host."
+      },
+      "recommendation": "NOT a single winner. unpdf as the DEFAULT extractor: smallest surface by a wide margin, zero dependencies, no native binary, best out-of-the-box line and table-row fidelity, and honest zero-length output on scanned pages. pdfjs-dist as the ESCALATION path if column-accurate table reconstruction is ever needed, since it exposes per-item coordinates and is the same engine unpdf wraps. pdf-parse NOT adopted: it costs 57MB and a native canvas dependency, and its synthetic page separators actively break the scanned-page check.",
+      "harnessErrorsWorthKeeping": "Three of my own probe errors nearly scored two libraries as broken. pdfjs-dist and pdf-parse both need their worker MODULE IMPORTED in Node \u2014 setting workerSrc to the file path is not enough and produces a version-mismatch that reads exactly like a broken package. pdf-parse v2 exposes a PDFParse CLASS, not v1's default function. And its worker must be imported by FILE URL because its exports map blocks the deep specifier. Separately, my assertion normalised whitespace and so reported a missing anchor that was really the PDF's own line wrap (\"ANCHOR-TEXT-\\nOMEGA\") \u2014 the fixture's wrapping, measured as if it were the parser's fidelity."
     }
   },
   "resolvedDefects": [
@@ -500,10 +525,11 @@
       "symptom": "A glyph turn streams route -> stage -> image -> done and the artifact is created, stored and linked to the assistant message, but the chat UI shows an EMPTY assistant message until the page is reloaded. On reload the image is there.",
       "evidence": "Server side is fully proven: the Brain emits a 23,799-byte PNG frame, the consumer emits image {ref} with no error, GET /api/images/<ref> returns 200 image/png, and the Media Library grew 10 -> 12 for two NEW letters. Waited 112s during the live turn with no DOM image; the same artifact rendered immediately after refresh.",
       "whyItMatters": "It presents exactly like a total failure. This is what made \"Generate an image of the letter B\" look like a classification bug for hours \u2014 the work succeeded every time and the user was shown nothing.",
-      "status": "WITHDRAWN 2026-08-27 \u2014 NOT A DEFECT. My measurement was invalid.",
+      "status": "DISPROVEN / CLOSED 2026-08-27 \u2014 retained in drift-control history only.",
       "effort": "MEDIUM",
       "withdrawal": "I captured the \"before\" set of rendered images AFTER submitting the turn. The glyph path takes ~170ms, so the image was already in the DOM and was counted as part of the baseline \u2014 \"no new image\" was an artefact of the probe, not the product. Re-run with the baseline captured BEFORE submitting: the image renders live, visible at 1024x1024.",
-      "verifiedInstead": "All eight acceptance points pass live: frame arrives, message updates immediately, image renders BEFORE reload, same ref persists after reload, artifact present in the Media Library, a DUPLICATE content-addressed ref still renders immediately, text-only turns unaffected, and zero empty paragraphs on an image-only answer."
+      "verifiedInstead": "All eight acceptance points pass live: frame arrives, message updates immediately, image renders BEFORE reload, same ref persists after reload, artifact present in the Media Library, a DUPLICATE content-addressed ref still renders immediately, text-only turns unaffected, and zero empty paragraphs on an image-only answer.",
+      "probeDiscipline": "For fast deterministic paths, capture the baseline BEFORE triggering the action. And never use artifact-count growth as evidence when content addressing can legitimately deduplicate identical output."
     }
   ]
 }
