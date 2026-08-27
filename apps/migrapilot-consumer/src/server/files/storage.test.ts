@@ -120,12 +120,30 @@ test('the directory is derived from the session, not from any argument', async (
 
 test('formats the indexer cannot read are refused, not silently stored', async () => {
   asUser('user-types')
-  // The Brain excludes PDF as a binary extension. Storing one would put a file
-  // in the library that contributes nothing to any answer.
-  for (const name of ['report.pdf', 'sheet.xlsx', 'deck.pptx', 'photo.png', 'archive.zip', 'notes']) {
+  /*
+   * PDF LEFT THIS LIST when extraction shipped, not before.
+   *
+   * The rule the list encodes has not changed: a format belongs here while
+   * storing it would put a file in the library that contributes nothing to any
+   * answer. That was true of PDF while the Brain excluded it as binary, and is
+   * no longer true now that it is extracted to text. Every other entry stays
+   * refused for exactly the original reason.
+   */
+  for (const name of ['sheet.xlsx', 'deck.pptx', 'photo.png', 'archive.zip', 'notes']) {
     await assert.rejects(() => saveFile(name, bytes('x')), FileRejected, `${name} should be refused`)
   }
   assert.deepEqual(await listFiles(), [])
+  resetAuthPort()
+})
+
+test('a PDF is accepted now that the indexer can read one', async () => {
+  asUser('user-pdf')
+  // Acceptance here is only about STORAGE. Whether a particular PDF yields
+  // readable text is decided by extraction, and a scan or a locked file is
+  // refused there with its own message rather than at the door.
+  const stored = await saveFile('report.pdf', bytes('%PDF-1.4 placeholder'))
+  assert.equal(stored.name, 'report.pdf')
+  assert.deepEqual((await listFiles()).map((f) => f.name), ['report.pdf'])
   resetAuthPort()
 })
 

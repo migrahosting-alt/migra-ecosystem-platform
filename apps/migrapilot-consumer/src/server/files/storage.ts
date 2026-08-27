@@ -48,6 +48,14 @@ const ALLOWED = new Set([
   'txt', 'md', 'markdown', 'csv', 'json', 'yaml', 'yml', 'toml', 'log',
   'html', 'xml', 'ts', 'tsx', 'js', 'jsx', 'py', 'rb', 'go', 'rs', 'java',
   'sh', 'css', 'scss', 'ini', 'conf',
+  /*
+   * `pdf` is admitted because the indexer now EXTRACTS it, not because the list
+   * was widened. That order matters: the entry above this one documents how
+   * `sql` and `env` were accepted here and then silently discarded downstream,
+   * leaving users with answers that had never read their file. A format belongs
+   * in this set only once something can actually read it.
+   */
+  'pdf',
 ])
 
 /*
@@ -154,7 +162,7 @@ export async function saveFile(rawName: string, data: ArrayBuffer): Promise<Stor
     throw new FileRejected(
       'unsupported_type',
       `${extension ? `.${extension}` : 'That type'} is not supported yet. ` +
-        'Text and code documents can be read; PDF, Office files, database dumps and .env files cannot.',
+        'Text, code and PDF documents can be read; Office files, database dumps and .env files cannot.',
     )
   }
   if (data.byteLength === 0) throw new FileRejected('empty_file', 'That file is empty.')

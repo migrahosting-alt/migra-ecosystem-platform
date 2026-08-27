@@ -74,7 +74,16 @@ const SECRET_PATTERNS: RegExp[] = [
 ];
 
 /** Binary / non-text extensions. */
-const BINARY_EXT = /\.(png|jpe?g|gif|webp|bmp|ico|svg|pdf|zip|gz|tar|tgz|7z|rar|exe|dll|so|dylib|bin|wasm|woff2?|ttf|otf|eot|mp[34]|mov|avi|mkv|class|jar|node|onnx|gguf|safetensors|pt|pth|ckpt)$/i;
+/*
+ * `pdf` is deliberately ABSENT from this list.
+ *
+ * A PDF is binary on disk, and treating it as binary was correct while nothing
+ * could read one. It is now extracted to text before it reaches the indexer, so
+ * excluding it here would refuse a document the pipeline can genuinely answer
+ * from. Every other entry stays: they are still unreadable, and the exclusion is
+ * what keeps them from being indexed as mojibake.
+ */
+const BINARY_EXT = /\.(png|jpe?g|gif|webp|bmp|ico|svg|zip|gz|tar|tgz|7z|rar|exe|dll|so|dylib|bin|wasm|woff2?|ttf|otf|eot|mp[34]|mov|avi|mkv|class|jar|node|onnx|gguf|safetensors|pt|pth|ckpt)$/i;
 
 /** Generated / vendored / build directories — excluded by default. */
 const GENERATED_DIR = /(^|\/)(node_modules|dist|build|out|coverage|\.next|\.turbo|\.cache|\.git|vendor|__pycache__|\.venv|venv|target|\.gradle|\.idea|\.vscode-test)(\/|$)/;

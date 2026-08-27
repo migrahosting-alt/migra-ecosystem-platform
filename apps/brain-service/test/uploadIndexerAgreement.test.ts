@@ -21,8 +21,10 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { Exclusions } from '../src/engine/rag/exclusions.js';
+import { extractPdf } from '../src/engine/rag/pdfText.js';
 
 const STORAGE = join(
   process.cwd(), '..', 'migrapilot-consumer', 'src', 'server', 'files', 'storage.ts',
@@ -70,4 +72,23 @@ test('a bare dotfile the consumer allows is still indexable', () => {
     [],
     `these types index differently as a bare dotfile than as a named file: ${inconsistent.join(', ')}`,
   );
+});
+
+test('PDF is accepted AND actually readable, not merely un-excluded', async () => {
+  /*
+   * The third gate, and the reason it exists.
+   *
+   * Removing `pdf` from the binary exclusion list is enough to make the
+   * agreement test above pass, and would have been enough to ship a format the
+   * pipeline could not read — the exact failure `sql` and `env` already caused,
+   * where a file was accepted, indexed as nothing, and answered about anyway.
+   * Being allowed and being readable are different claims, so both are asserted.
+   */
+  assert.ok(allowedExtensions().includes('pdf'), 'the consumer must accept .pdf');
+  assert.equal(new Exclusions().reason('user-document.pdf'), null, 'the indexer must not drop .pdf');
+
+  const bytes = new Uint8Array(readFileSync(fileURLToPath(new URL('../../test/fixtures/sample-text.pdf', import.meta.url))));
+  const extracted = await extractPdf(bytes);
+  assert.ok(extracted.text.trim().length > 50, 'acceptance requires real extracted text');
+  assert.ok(extracted.totalPages >= 1);
 });

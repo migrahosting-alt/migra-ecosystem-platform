@@ -5,11 +5,16 @@
  * .gitignore + MigraAI list) and hard bounds (max files, max file size). Reads
  * text only; anything with NUL bytes is skipped. Never returns a whole repo's
  * worth of unbounded content.
+ *
+ * PDFs are the one exception to "text only": they are EXTRACTED rather than
+ * read, and a PDF that cannot be extracted yields no chunks instead of yielding
+ * garbage. See `pdfText.ts`.
  */
 
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { Exclusions, DEFAULT_MIGRAAI_EXCLUSIONS } from './exclusions.js';
+import { extractPdf, PdfExtractionError } from './pdfText.js';
 import type { FileSource } from './indexService.js';
 
 /** The root could not be read at all — distinct from a root that is empty. */
@@ -91,6 +96,32 @@ export class FsFileSource implements FileSource {
         try {
           const stat = await fs.stat(childAbs);
           if (stat.size > this.maxFileSize || stat.size === 0) continue;
+
+          /*
+           * A PDF NEVER takes the UTF-8 path.
+           *
+           * Reading one as text produces mojibake that chunks and indexes
+           * perfectly happily, so the failure surfaces later as confident
+           * nonsense in an answer rather than as a read error here. Extraction
+           * is a different operation and is treated as one.
+           */
+          if (/\.pdf$/i.test(childRel)) {
+            try {
+              const extracted = await extractPdf(new Uint8Array(await fs.readFile(childAbs)));
+              out.push({ relPath: childRel, content: extracted.text });
+            } catch (error) {
+              /*
+               * Skipped, deliberately and quietly, because THIS layer has no
+               * user to talk to — it is a directory walk. The honest message
+               * belongs upstream where the upload happened, and the file simply
+               * yields no chunks here. What must not happen is indexing a
+               * scanned or damaged PDF as if it held text.
+               */
+              if (!(error instanceof PdfExtractionError)) throw error;
+            }
+            continue;
+          }
+
           const content = await fs.readFile(childAbs, 'utf8');
           if (/\u0000/.test(content)) continue; // NUL byte -> binary; skip
           out.push({ relPath: childRel, content });

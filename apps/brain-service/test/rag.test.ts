@@ -16,7 +16,15 @@ test('exclusions: secrets / binary / generated / gitignore / MigraAI list', () =
   for (const p of ['.env', 'config/.env.production', 'server.pem', 'id_rsa', 'app/credentials.json', 'dump.sql', 'db.sqlite3'])
     assert.equal(e.isExcluded(p), true, `secret should be excluded: ${p}`);
   assert.equal(e.reason('.env'), 'secret');
-  for (const p of ['logo.png', 'app.pdf', 'model.gguf']) assert.equal(e.isExcluded(p), true, `binary: ${p}`);
+  for (const p of ['logo.png', 'model.gguf']) assert.equal(e.isExcluded(p), true, `binary: ${p}`);
+  /*
+   * `.pdf` USED to be asserted here as binary, and that was right while nothing
+   * could read one. It is now extracted to text before indexing, so excluding it
+   * would refuse a document the pipeline can genuinely answer from. The
+   * assertion is inverted deliberately rather than deleted — the change is the
+   * point, and a silently dropped case would hide it.
+   */
+  assert.equal(e.isExcluded('app.pdf'), false, 'pdf is extracted, not treated as opaque binary');
   for (const p of ['node_modules/x/i.js', 'dist/out.js', 'a.min.js', 'package-lock.json', 'x.d.ts']) assert.equal(e.isExcluded(p), true, `generated: ${p}`);
   assert.equal(e.isExcluded('private/secret.txt'), true, 'gitignore dir');
   assert.equal(e.isExcluded('notes.local'), true, 'gitignore glob');
