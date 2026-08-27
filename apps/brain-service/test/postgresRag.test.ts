@@ -15,8 +15,8 @@ import { PostgresConnection } from '../src/engine/persistence/postgres/pool.js';
 import { withScope } from '../src/engine/persistence/postgres/conversationRepo.js';
 import {
   InvalidVectorError, commitSync, deleteIndex, fromVectorBytes, getEmbedding, loadChunks,
-  loadIndexes, pruneOlderThan, putEmbedding, saveIndex, setApprovedVersion, setIndexState,
-  toVectorBytes,
+  loadIndexes, pruneOlderThan, putEmbedding, recordedChunkCount, saveIndex, setApprovedVersion,
+  setIndexState, toVectorBytes,
 } from '../src/engine/persistence/postgres/ragRepo.js';
 import { SqliteDurableStore } from '../src/engine/persistence/sqliteStore.js';
 import type { PersistedChunk, PersistedIndexRecord } from '../src/engine/persistence/types.js';
@@ -414,4 +414,104 @@ test('embedding cache round-trip matches SQLite', async (t) => {
 
   assert.deepEqual(fromPg, fromSqlite);
   assert.equal(pgMiss, sqliteMiss, 'both return undefined for a version miss');
+});
+
+/*
+ * ── REMAINING CARRY-FORWARD MATRIX ──────────────────────────────────────────
+ *
+ * PostgreSQL is production truth. SQLite's behaviour is historical evidence
+ * only and proves nothing here, so every case is asserted directly against the
+ * PostgreSQL writer.
+ */
+
+test('MATRIX 1 — an initial full index commits every chunk it was given', async (t) => {
+  if (skip) return t.skip(skip);
+
+  await scoped(A, async (c) => {
+    await saveIndex(c, index('idx-full'), A);
+    await commitSync(c, 'idx-full', 1, [
+      chunk('f-a', { indexId: 'idx-full', filePath: 'a.ts' }),
+      chunk('f-b', { indexId: 'idx-full', filePath: 'b.ts' }),
+      chunk('f-c', { indexId: 'idx-full', filePath: 'c.ts' }),
+    ], ['a.ts', 'b.ts', 'c.ts'], [], 1, A);
+  });
+
+  const v1 = await scoped(A, (c) => loadChunks(c, 'idx-full', 1));
+  assert.deepEqual(v1.map((c) => c.id).sort(), ['f-a', 'f-b', 'f-c'], 'disk must equal what was committed');
+  const recorded = await scoped(A, (c) => recordedChunkCount(c, 'idx-full', 1));
+  assert.equal(recorded, 3, 'chunk_count must equal the rows of THIS complete version');
+});
+
+test('MATRIX 4 — an ADD-ONLY sync keeps the previous chunks and adds the new ones', async (t) => {
+  if (skip) return t.skip(skip);
+
+  await scoped(A, async (c) => {
+    await saveIndex(c, index('idx-add'), A);
+    await commitSync(c, 'idx-add', 1, [
+      chunk('a-1', { indexId: 'idx-add', filePath: 'a.ts' }),
+      chunk('a-2', { indexId: 'idx-add', filePath: 'b.ts' }),
+    ], ['a.ts', 'b.ts'], [], 1, A);
+    await commitSync(c, 'idx-add', 2, [
+      chunk('a-3', { indexId: 'idx-add', filePath: 'c.ts' }),
+    ], ['c.ts'], [], 2, A);
+  });
+
+  const v2 = await scoped(A, (c) => loadChunks(c, 'idx-add', 2));
+  assert.deepEqual(v2.map((c) => c.id).sort(), ['a-1', 'a-2', 'a-3'], 'previous + new');
+  const recorded = await scoped(A, (c) => recordedChunkCount(c, 'idx-add', 2));
+  assert.equal(recorded, 3, 'chunk_count counts the whole snapshot, not the delta');
+});
+
+test('MATRIX 8 — a failed commit never publishes a partial new version', async (t) => {
+  if (skip) return t.skip(skip);
+
+  await scoped(A, async (c) => {
+    await saveIndex(c, index('idx-atomic'), A);
+    await commitSync(c, 'idx-atomic', 1, [
+      chunk('at-a', { indexId: 'idx-atomic', filePath: 'a.ts' }),
+      chunk('at-b', { indexId: 'idx-atomic', filePath: 'b.ts' }),
+    ], ['a.ts', 'b.ts'], [], 1, A);
+  });
+
+  // A bad vector mid-batch while committing the NEXT version.
+  await assert.rejects(() => scoped(A, (c) => commitSync(c, 'idx-atomic', 2, [
+    chunk('at-good', { indexId: 'idx-atomic', filePath: 'c.ts' }),
+    chunk('at-bad', { indexId: 'idx-atomic', filePath: 'd.ts', vector: [Number.NaN] }),
+  ], ['c.ts', 'd.ts'], [], 2, A)));
+
+  // v1 is untouched...
+  const v1 = await scoped(A, (c) => loadChunks(c, 'idx-atomic', 1));
+  assert.deepEqual(v1.map((c) => c.id).sort(), ['at-a', 'at-b'], 'the previous version must survive intact');
+
+  // ...and v2 must not exist even partially. A half-written snapshot that still
+  // loads is the most dangerous outcome of all: it looks healthy and silently
+  // omits evidence.
+  const v2 = await scoped(A, (c) => loadChunks(c, 'idx-atomic', 2));
+  assert.deepEqual(v2, [], 'a rolled-back commit must leave NO rows at the new version');
+  const recorded = await scoped(A, (c) => recordedChunkCount(c, 'idx-atomic', 2));
+  assert.equal(recorded, null, 'a version that never committed must not be recorded');
+});
+
+test('MATRIX 9 — chunk_count equals the committed snapshot across a sequence', async (t) => {
+  if (skip) return t.skip(skip);
+
+  await scoped(A, async (c) => {
+    await saveIndex(c, index('idx-count'), A);
+    await commitSync(c, 'idx-count', 1, [
+      chunk('k-a', { indexId: 'idx-count', filePath: 'a.ts' }),
+      chunk('k-b', { indexId: 'idx-count', filePath: 'b.ts' }),
+    ], ['a.ts', 'b.ts'], [], 1, A);
+    await commitSync(c, 'idx-count', 2, [], [], [], 2, A);          // no-op
+    await commitSync(c, 'idx-count', 3, [
+      chunk('k-c', { indexId: 'idx-count', filePath: 'c.ts' }),
+    ], ['c.ts'], [], 3, A);                                          // add
+    await commitSync(c, 'idx-count', 4, [], [], ['a.ts'], 4, A);     // delete
+  });
+
+  for (const [version, expected] of [[1, 2], [2, 2], [3, 3], [4, 2]] as const) {
+    const rows = await scoped(A, (c) => loadChunks(c, 'idx-count', version));
+    const recorded = await scoped(A, (c) => recordedChunkCount(c, 'idx-count', version));
+    assert.equal(rows.length, expected, `v${version} must hold ${expected} chunks on disk`);
+    assert.equal(recorded, expected, `v${version} chunk_count must agree with the rows`);
+  }
 });

@@ -7,12 +7,13 @@
     "provenLive": "PROVEN_LIVE requires the real user-facing workflow to pass. Code existing and tests passing is NOT proof.",
     "acceptanceGate": "The gate is the app's own test command + tsc -b + live browser acceptance. A pre-commit hook is not the acceptance suite.",
     "costDiscipline": "owned -> open-source -> self-hosted -> free tier -> partner credits -> paid. No recurring paid dependency enters quietly.",
-    "honestUnavailable": "A capability that is not ready must refuse truthfully rather than appear to work."
+    "honestUnavailable": "A capability that is not ready must refuse truthfully rather than appear to work.",
+    "productionTruthIsPostgres": "PostgreSQL is production truth. SQLite is LEGACY / REFERENCE-ONLY: useful as historical implementation evidence, never qualified, deployed, or designed around. Any adapter-parity comparison is INFORMATIONAL ONLY unless the PostgreSQL implementation is independently proven. Owner ruling 2026-08-27, prompted by the carry-forward defect \u2014 \"SQLite already does it correctly\" explained the bug but proved nothing about the fix."
   },
   "activeLane": {
     "name": "PDF/DOCX extraction",
     "objective": "Extend the proven document pipeline to PDF and DOCX, the first formats behind an honest refusal today.",
-    "currentStep": "REORDERED by owner 2026-08-27: index truthfulness/race FIRST, then the glyph phrasing gap, then PDF qualification. Rationale: PDF is already HONESTLY refused, so it harms nobody; the index contradiction gives users FALSE answers about files they can see in their own library.",
+    "currentStep": "Index snapshot fix (option A) IMPLEMENTED and BLOCKED ON VERIFICATION. Docker daemon is down, so the Postgres suite cannot run. MUST NOT DEPLOY until the real Postgres suite is green. Manual action required from owner: start Docker Desktop on Windows.",
     "lastProvenMilestone": "Common text/code Files & Documents lane CLOSED 2026-08-27 with deterministic attribution PROVEN_LIVE 5/5. Closed because the one failing cell was classified correctly as a model-quality defect, NOT because the failure was removed.",
     "previousLane": {
       "name": "Files & Documents",
@@ -303,6 +304,17 @@
       "status": "OPEN \u2014 queued under high-visibility chat defects.",
       "effort": "MEDIUM",
       "related": "Same family as the image-editing refusal already shipped (IMAGE_EDITING_UNAVAILABLE): describe-instead-of-refuse is the failure mode."
+    },
+    {
+      "id": "test-harness-reports-missing-infra-as-regressions",
+      "title": "Missing Postgres test infrastructure reports as product regressions",
+      "severity": "MEDIUM",
+      "symptom": "With the Docker daemon down, the brain suite reported 140 FAILURES and 65 skips. The failures are all \"Cannot read properties of undefined\" from a store that was never constructed, across unrelated domains \u2014 conversations, hydration, health.",
+      "whyItMatters": "An environment outage becomes indistinguishable from 140 code regressions. I nearly misread it as one. A suite that cannot tell \"infrastructure absent\" from \"product broken\" will eventually be used to justify either shipping a real regression or reverting a good change.",
+      "evidence": "postgresRag.test.ts guards correctly with `if (skip) return t.skip(skip)` and skips cleanly. scopedHydration.test.ts and others do not, and fail instead.",
+      "wantedFix": "Every Postgres-backed test file must report environment-unavailable as SKIPPED, never as a failure.",
+      "status": "OPEN \u2014 easy backlog. Test-harness truthfulness, NOT part of the index fix.",
+      "effort": "EASY"
     }
   ],
   "driftControl": [
@@ -401,7 +413,8 @@
       "2. Glyph phrasing gap \u2014 \"Generate an image of the letter B\" should classify as deterministic glyph generation",
       "3. HIGH-VISIBILITY CHAT: image conversational-reference routing",
       "4. HIGH-VISIBILITY CHAT: regenerate promise vs execution truthfulness",
-      "5. Consumer reproducible release treatment (does NOT block PDF)"
+      "5. Consumer reproducible release treatment (does NOT block PDF)",
+      "Postgres-backed tests must SKIP when Docker/Postgres is unavailable instead of failing as regressions"
     ],
     "MEDIUM": [
       "Deterministic data-operation routing \u2014 detect arithmetic/aggregation over tabular data and route to a table/data tool instead of the LLM (see csv-quantitative-reasoning-qwen3-8b)",
