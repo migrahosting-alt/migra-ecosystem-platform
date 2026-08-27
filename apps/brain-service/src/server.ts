@@ -505,6 +505,19 @@ async function main(): Promise<void> {
        * beside the uploads and the index is re-synced, so by the time the state
        * says ready the chunks genuinely exist.
        */
+      /*
+       * The check that makes `ready` earned rather than assumed. Counts what the
+       * APPROVED index holds for this file — the same numbers grounding uses, not
+       * a separate optimistic tally.
+       */
+      countIndexedChunks: async (scope, fileName) => {
+        const root = documentUploadRoot?.(toScope(scope));
+        const record = root
+          ? indexService.listForScope(toScope(scope)).find((i) => i.root === root)
+          : undefined;
+        if (!record?.id) return 0;
+        return indexService.approvedChunkCounts(record.id, toScope(scope))[fileName] ?? 0;
+      },
       index: async (scope, fileName, map) => {
         const uploadRoot = documentUploadRoot?.(toScope(scope));
         if (!uploadRoot) return;

@@ -25,6 +25,15 @@ export interface DocumentJobDeps {
   persist(scope: JobScope, readiness: DocumentReadiness): Promise<void>;
   /** Called once a document is readable, so its pages can be indexed. */
   index?(scope: JobScope, fileName: string, map: DocumentMap): Promise<void>;
+  /**
+   * How many SEARCHABLE chunks now exist for this document.
+   *
+   * The terminal state is not allowed to be optimistic. Reconstruction finishing
+   * says the pages were read; it says nothing about whether anything can be
+   * retrieved, and those came apart in production — the job reported a readable
+   * book while the index held zero chunks for it.
+   */
+  countIndexedChunks?(scope: JobScope, fileName: string): Promise<number>;
   now?(): number;
 }
 
@@ -122,7 +131,36 @@ export class DocumentJobRunner {
       await this.deps.index(job.scope, job.fileName, map);
     }
 
-    await this.deps.persist(job.scope, readinessFromMap(job.fileName, map, startedAt));
+    const terminal = readinessFromMap(job.fileName, map, startedAt);
+
+    /*
+     * READY IS EARNED, NOT ASSUMED.
+     *
+     * A state claiming the document is readable while nothing is searchable is
+     * worse than the refusal it replaced: the user is told to ask questions of a
+     * book the retriever cannot see. So when the pipeline believes it succeeded,
+     * that belief is CHECKED against the index before it is written down.
+     *
+     * A missing counter is not treated as zero — an older wiring that cannot
+     * count must not turn every success into a failure — but a counter that
+     * answers zero is believed.
+     */
+    if ((terminal.state === 'ready' || terminal.state === 'ready_with_unplaced_pages')
+        && this.deps.countIndexedChunks) {
+      const chunks = await this.deps.countIndexedChunks(job.scope, job.fileName).catch(() => undefined);
+      if (chunks === 0) {
+        await this.deps.persist(job.scope, {
+          fileName: job.fileName,
+          state: 'ocr_failed',
+          startedAt,
+          failureReason:
+            'the pages were read but nothing could be indexed from them, so this document is not searchable',
+        });
+        return;
+      }
+    }
+
+    await this.deps.persist(job.scope, terminal);
   }
 }
 
