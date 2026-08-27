@@ -86,6 +86,12 @@ const SECRET_PATTERNS: RegExp[] = [
 const BINARY_EXT = /\.(png|jpe?g|gif|webp|bmp|ico|svg|zip|gz|tar|tgz|7z|rar|exe|dll|so|dylib|bin|wasm|woff2?|ttf|otf|eot|mp[34]|mov|avi|mkv|class|jar|node|onnx|gguf|safetensors|pt|pth|ckpt)$/i;
 
 /** Generated / vendored / build directories — excluded by default. */
+/* Derived OCR text, written beside the uploads. Indexed VIA the PDF it belongs
+ * to, never as a document of its own — otherwise every scanned page would be
+ * retrievable twice, once under the book's name and once under a filename the
+ * user never created. */
+const OCR_SIDECAR = /(^|\/)\.migrapilot-ocr(\/|$)/;
+
 const GENERATED_DIR = /(^|\/)(node_modules|dist|build|out|coverage|\.next|\.turbo|\.cache|\.git|vendor|__pycache__|\.venv|venv|target|\.gradle|\.idea|\.vscode-test)(\/|$)/;
 const GENERATED_FILE = /(\.min\.(js|css)|\.map|\.lock|package-lock\.json|pnpm-lock\.yaml|yarn\.lock|\.tsbuildinfo|\.d\.ts)$/i;
 
@@ -206,6 +212,7 @@ export class Exclusions {
     const p = normalize(relPath);
     if (SECRET_PATTERNS.some((re) => re.test(p))) return 'secret';
     if (BINARY_EXT.test(p)) return 'binary';
+    if (OCR_SIDECAR.test(p)) return 'generated';
     if (GENERATED_DIR.test(p) || GENERATED_FILE.test(p)) return 'generated';
     if (this.extra.some((re) => re.test(p))) return 'exclusion-list';
     if (this.gitignoreExcludes(p, isDirectory)) return 'gitignore';
@@ -220,6 +227,7 @@ export class Exclusions {
   private hardExcluded(p: string): boolean {
     if (SECRET_PATTERNS.some((re) => re.test(p))) return true;
     if (BINARY_EXT.test(p)) return true;
+    if (OCR_SIDECAR.test(p)) return true;
     if (GENERATED_DIR.test(p) || GENERATED_FILE.test(p)) return true;
     if (this.extra.some((re) => re.test(p))) return true;
     return false;

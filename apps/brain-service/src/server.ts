@@ -93,6 +93,7 @@ import { OllamaEmbedder, CachedEmbedder, FakeEmbedder } from './engine/rag/embed
 import { registerRagRoutes } from './engine/rag/ragRoutes.js';
 import { registerDocumentRoutes } from './engine/rag/documentRoutes.js';
 import { DocumentJobRunner } from './engine/rag/documentJobs.js';
+import { writeOcrSidecar } from './engine/rag/scannedPdfJob.js';
 import { decideRecovery } from './engine/rag/scannedJobRecovery.js';
 import path from 'node:path';
 import { registerMigraPilotCors } from './http/corsPolicy.js';
@@ -479,6 +480,14 @@ async function main(): Promise<void> {
     deleteDocumentReadiness?: (s: { owner: string; workspace: string }, f: string) => Promise<void>;
   } | undefined;
 
+  /*
+   * The upload root for a scope, taken from the index the consumer created for
+   * it. Derived rather than configured: the Brain must never guess where another
+   * service keeps a tenant's files.
+   */
+  const documentUploadRoot = (scope: { owner: string; workspace: string }): string | undefined =>
+    indexService.listForScope(scope).find((i) => i.sourceType === 'docs')?.root;
+
   if (readinessStore?.recordDocumentReadiness) {
     const toScope = (s: { ownerScope: string; workspaceScope: string }) =>
       ({ owner: s.ownerScope, workspace: s.workspaceScope });
@@ -486,6 +495,27 @@ async function main(): Promise<void> {
     const documentRunner = new DocumentJobRunner({
       persist: async (scope, readiness) => {
         await readinessStore.recordDocumentReadiness!(toScope(scope), readiness, Date.now());
+      },
+      /*
+       * WITHOUT THIS, "ready" WOULD BE A LIE.
+       *
+       * The job can finish reconstruction and report a readable document while
+       * the index still holds nothing for it — which is precisely the false
+       * readiness this lane exists to prevent. The recovered pages are written
+       * beside the uploads and the index is re-synced, so by the time the state
+       * says ready the chunks genuinely exist.
+       */
+      index: async (scope, fileName, map) => {
+        const uploadRoot = documentUploadRoot?.(toScope(scope));
+        if (!uploadRoot) return;
+        await writeOcrSidecar(uploadRoot, fileName, map);
+        const record = indexService.listForScope(toScope(scope)).find((i) => i.root === uploadRoot);
+        if (record?.id) {
+          await indexService.sync(record.id, toScope(scope));
+          // Promotion is what makes an index reachable by grounding; a synced but
+          // unapproved index would leave the document readable in name only.
+          await indexService.setState(record.id, toScope(scope), 'approved').catch(() => undefined);
+        }
       },
     });
 

@@ -15,6 +15,9 @@ import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import { writeFile as writeFileFs, mkdir } from 'node:fs/promises';
+import { dirname } from 'node:path';
+
 import { ocrPage, type ScannedPageRecord, type PhysicalPosition } from './scannedOcr.js';
 import { reconstructDocument, type DocumentMap } from './documentMap.js';
 import type { DocumentReadiness, ProcessingStage } from './documentReadiness.js';
@@ -173,4 +176,60 @@ export function readinessFromMap(fileName: string, map: DocumentMap, startedAt: 
     sequenceComplete: unplaced === 0,
     startedAt,
   };
+}
+
+/** Where a document's recovered text lives, beside the uploads but not in them. */
+export const OCR_SIDECAR_DIR = '.migrapilot-ocr';
+
+export function ocrSidecarPath(uploadRoot: string, fileName: string): string {
+  return join(uploadRoot, OCR_SIDECAR_DIR, `${fileName}.json`);
+}
+
+/**
+ * Persist what OCR recovered, so indexing reads it instead of redoing the work.
+ *
+ * Written as a SIDECAR rather than a file in the library: it is derived content,
+ * and putting it beside the user's own documents would show them a file they did
+ * not upload and cannot explain.
+ *
+ * Pages are joined in CANONICAL order with their page boundaries recorded, so the
+ * existing chunker gives these chunks the same page provenance a text-layer PDF
+ * gets. Unplaced pages are appended after the ordered ones — indexed, and never
+ * inserted into a sequence they could not be placed in.
+ */
+export async function writeOcrSidecar(
+  uploadRoot: string,
+  fileName: string,
+  map: DocumentMap,
+): Promise<{ text: string; pageStartLines: number[] }> {
+  const usable = map.pages.filter((p) => p.indexAction === 'index' || p.indexAction === 'index_unplaced');
+
+  const parts: string[] = [];
+  const pageStartLines: number[] = [];
+  let line = 1;
+  for (const page of usable) {
+    pageStartLines.push(line);
+    const body = page.sourceText.replace(/\r\n?/g, '\n');
+    parts.push(body);
+    line += body.split('\n').length + 1;
+  }
+
+  const payload = {
+    fileName,
+    text: parts.join('\n\n'),
+    pageStartLines,
+    pages: usable.map((p) => ({
+      scanIndex: p.scanIndex,
+      physicalPosition: p.physicalPosition,
+      folio: p.folio ?? null,
+      canonicalIndex: p.canonicalIndex ?? null,
+      state: p.state,
+      indexAction: p.indexAction,
+    })),
+  };
+
+  const path = ocrSidecarPath(uploadRoot, fileName);
+  await mkdir(dirname(path), { recursive: true });
+  await writeFileFs(path, JSON.stringify(payload), 'utf8');
+  return { text: payload.text, pageStartLines };
 }

@@ -15,6 +15,7 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { Exclusions, DEFAULT_MIGRAAI_EXCLUSIONS } from './exclusions.js';
 import { extractPdf, PdfExtractionError } from './pdfText.js';
+import { OCR_SIDECAR_DIR } from './scannedPdfJob.js';
 import type { FileSource } from './indexService.js';
 
 /** The root could not be read at all — distinct from a root that is empty. */
@@ -136,6 +137,28 @@ export class FsFileSource implements FileSource {
            * is a different operation and is treated as one.
            */
           if (/\.pdf$/i.test(childRel)) {
+            /*
+             * A SCANNED PDF IS READ FROM ITS OCR SIDECAR, not re-read here.
+             *
+             * The background job already rasterised, recognised and reconstructed
+             * it — nine minutes of work — and doing that again inside a sync would
+             * block indexing for every other file. The sidecar holds the pages in
+             * CANONICAL order with their boundaries, so these chunks get the same
+             * page provenance a text-layer PDF gets.
+             */
+            const sidecar = await fs
+              .readFile(path.join(this.root, OCR_SIDECAR_DIR, `${childRel}.json`), 'utf8')
+              .then((raw) => JSON.parse(raw) as { text?: string; pageStartLines?: number[] })
+              .catch(() => null);
+            if (sidecar?.text) {
+              out.push({
+                relPath: childRel,
+                content: sidecar.text,
+                ...(sidecar.pageStartLines?.length ? { pageStartLines: sidecar.pageStartLines } : {}),
+              });
+              continue;
+            }
+
             try {
               const extracted = await extractPdf(new Uint8Array(await fs.readFile(childAbs)));
               out.push({
