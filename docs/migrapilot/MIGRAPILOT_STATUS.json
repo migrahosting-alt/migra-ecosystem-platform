@@ -148,6 +148,54 @@
           }
         }
       }
+    },
+    "requirement_scannedDocumentReconstruction": {
+      "rule": "PAGE UPLOAD ORDER MUST NEVER BE ASSUMED TO EQUAL SOURCE ORDER. MigraPilot reconstructs logical order from printed page numbers, headings, section numbering, continuation cues, duplicate detection and document structure BEFORE building lessons or summaries.",
+      "why": "A scan of a real book arrives with two book pages in one image, repeats, gaps, front matter mixed into chapters, pages scanned backwards, duplicated sections, and reversed spreads. Teaching in scan order would teach the book wrong while looking confident.",
+      "pipeline": "scan pages -> OCR each page -> detect printed page number -> detect chapter/section heading -> detect numbered lesson/topic -> classify content type -> infer continuation across pages -> reconstruct canonical order -> only then build lessons.",
+      "perPageRecord": [
+        "scanIndex",
+        "printedPageNumber",
+        "chapter",
+        "section",
+        "subsection",
+        "lessonNumber",
+        "title",
+        "contentType (explanation | vocabulary | grammar | example | exercise | table)",
+        "precedingFollowingClues",
+        "ocrConfidence",
+        "duplicateProbability"
+      ],
+      "honestFailure": "Pages that cannot be confidently placed are marked `sequence_uncertain`. Never silently invent an order \u2014 the same rule as never inventing a page range in a citation.",
+      "twoDistinctOrders": "SOURCE ORDER reconstructs the book faithfully. TEACHING ORDER may reorganise into a curriculum (beginner/intermediate/advanced, or pronunciation -> alphabet -> grammar -> vocabulary -> sentence construction -> exercises). They are not the same thing, and citations must always point back to the exact source pages regardless of teaching order.",
+      "observedSignalsInFixture": [
+        "PREMYE PATI \u2014 Reg Grame yo",
+        "numbered grammar sections",
+        "CHAPIT 2 \u2014 Vokabile kreyol",
+        "vocabulary categories",
+        "conjugation/grammar tables",
+        "comparison/adjective sections"
+      ],
+      "impactOnOcrQualification": "Adds a scoring criterion that would otherwise have been missed: an engine must preserve the STRUCTURAL SIGNALS, not just readable prose. Accurate paragraphs with a mangled \"CHAPIT 2\" or a lost printed folio is useless for reconstruction, so heading and page-number fidelity are scored separately from word accuracy."
+    },
+    "fixtureInspection": {
+      "file": "liv_kreyol_part1.pdf \u2014 4.9MB, 28 scan images, ZERO extractable characters.",
+      "method": "Rasterised at 200dpi with pdftoppm and READ, rather than assumed from metadata.",
+      "findings": {
+        "twoPagesPerImage": "Every scan is 2200x1700 landscape and holds TWO book pages, not one. A per-image OCR pass would merge two unrelated pages into a single chunk.",
+        "pagesAreREVERSEDwithinTheImage": "\ud83d\udea8 THE DECISIVE FINDING, and it breaks the obvious assumption. In each spread the RIGHT page is EARLIER in the book than the LEFT. Proven twice: scan 12 has folio 33 (sections 18-22) on the right and sections 26-27 on the left; scan 13 has the CHAPIT 2 title page on the right and folio 39 \u2014 content from INSIDE chapter 2 \u2014 on the left. A chapter opening cannot follow its own contents, so right precedes left. Reading spreads left-to-right would produce confidently wrong order.",
+        "occlusion": "The binding curl physically cuts off part of a page \u2014 scan 12 left is badly truncated mid-word. Such a page can lose its printed folio entirely, which is why page number alone cannot be the ordering signal.",
+        "structuralSignalsAvailable": [
+          "printed folio numbers (17, 33, 39 observed)",
+          "numbered sections (18-, 19-, 26-, 27.1-, 30-)",
+          "chapter markers (CHAPIT 2 - Vokabile kreyol)",
+          "CHAPTER CONTENTS listing section RANGES (\"Mo ki soti nan franse # 29 rive # 40\") \u2014 an in-book cross-reference the reconstruction can use to VALIDATE an inferred order rather than trust it",
+          "colour-coded headings: blue for sections, red for chapter/category",
+          "content types visible: poetry, grammar rules with Egzanp, 4-column vocabulary, footnotes"
+        ],
+        "mixedOrthography": "Scan 5 (folio 17) is older French-influenced Creole (\"Lor ou lan pays blanc\"); scans 12-13 are modern orthography (\"kreyol la\", \"Egzanp\"). An OCR language choice tuned to one will do worse on the other, and French and Creole appear side by side in the vocabulary columns."
+      },
+      "consequencesForOcrQualification": "Word accuracy alone would not distinguish the candidates for this job. The engine must also preserve the FOLIO, the SECTION NUMBER, the heading, and the column structure \u2014 a page whose prose reads well but whose \"30-\" or \"39\" is lost is useless for reconstruction. Scored separately."
     }
   },
   "capabilities": {
