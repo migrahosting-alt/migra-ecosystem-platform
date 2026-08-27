@@ -82,9 +82,26 @@ const ALLOWED = new Set([
 export const ALLOWED_EXTENSIONS = [...ALLOWED].sort()
 
 /** A single upload, and the whole library, are both bounded. */
-export const MAX_FILE_BYTES = 2 * 1024 * 1024
-export const MAX_LIBRARY_BYTES = 50 * 1024 * 1024
-export const MAX_FILES = 200
+/*
+ * Limits are CONFIGURABLE and deliberately generous. Real documents — a scanned
+ * book, a long report — routinely exceed the 2MB this used to allow, and a cap
+ * that rejects the user's actual file is a cap in the wrong place.
+ *
+ * They are not removed entirely, and that is an engineering judgement rather
+ * than timidity: extraction loads the whole file into memory, so a genuinely
+ * unbounded upload can exhaust the process and take chat down for EVERY user,
+ * not just the one who uploaded it. The ceiling is therefore high enough not to
+ * be met in normal use and low enough to keep one upload from ending the
+ * service — and it is one environment variable away from anything else.
+ */
+const megabytes = (value: string | undefined, fallback: number): number => {
+  const parsed = Number(value)
+  return Number.isFinite(parsed) && parsed > 0 ? parsed * 1024 * 1024 : fallback * 1024 * 1024
+}
+
+export const MAX_FILE_BYTES = megabytes(process.env.MIGRAPILOT_MAX_FILE_MB, 1024)
+export const MAX_LIBRARY_BYTES = megabytes(process.env.MIGRAPILOT_MAX_LIBRARY_MB, 20 * 1024)
+export const MAX_FILES = Number(process.env.MIGRAPILOT_MAX_FILES) || 2000
 
 export class FileRejected extends Error {
   constructor(
@@ -167,7 +184,9 @@ export async function saveFile(rawName: string, data: ArrayBuffer): Promise<Stor
   }
   if (data.byteLength === 0) throw new FileRejected('empty_file', 'That file is empty.')
   if (data.byteLength > MAX_FILE_BYTES) {
-    throw new FileRejected('too_large', `Files are limited to ${MAX_FILE_BYTES / 1024 / 1024} MB.`)
+    const limitMb = MAX_FILE_BYTES / 1024 / 1024
+    const readable = limitMb >= 1024 ? `${(limitMb / 1024).toFixed(0)} GB` : `${limitMb} MB`
+    throw new FileRejected('too_large', `Files are limited to ${readable}.`)
   }
 
   const dir = await userDirectory()

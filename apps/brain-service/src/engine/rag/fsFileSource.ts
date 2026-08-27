@@ -26,11 +26,28 @@ export class FileSourceUnavailableError extends Error {
   }
 }
 
+/** The indexer's per-file ceiling, exported so the upload side can be held to it. */
+export const DEFAULT_MAX_INDEX_FILE_BYTES =
+  Number(process.env.MIGRAPILOT_MAX_INDEX_FILE_BYTES) || 1024 * 1024 * 1024;
+
 export class FsFileSource implements FileSource {
   constructor(
     private readonly root: string,
     private readonly maxFiles = 4000,
-    private readonly maxFileSize = 200 * 1024,
+    /*
+     * 🚨 THIS WAS 200KB AND IT SILENTLY DROPPED REAL DOCUMENTS.
+     *
+     * A file larger than this is skipped by the walk with no error anywhere: the
+     * upload succeeds, the file sits in the library, and it contributes nothing
+     * to any answer. That is the precise failure `uploadIndexerAgreement` exists
+     * to prevent, and the agreement test could not see it because it compares
+     * EXTENSIONS, not sizes — so a 500KB PDF passed every check and was still
+     * never indexed.
+     *
+     * It must stay at least as large as the consumer's per-file limit, or the
+     * two disagree again in exactly the same invisible way.
+     */
+    private readonly maxFileSize = DEFAULT_MAX_INDEX_FILE_BYTES,
   ) {}
 
   async files(): Promise<Array<{ relPath: string; content: string }>> {

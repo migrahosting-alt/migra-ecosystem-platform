@@ -25,6 +25,7 @@ import { fileURLToPath } from 'node:url';
 
 import { Exclusions } from '../src/engine/rag/exclusions.js';
 import { extractPdf } from '../src/engine/rag/pdfText.js';
+import { DEFAULT_MAX_INDEX_FILE_BYTES } from '../src/engine/rag/fsFileSource.js';
 
 const STORAGE = join(
   process.cwd(), '..', 'migrapilot-consumer', 'src', 'server', 'files', 'storage.ts',
@@ -91,4 +92,29 @@ test('PDF is accepted AND actually readable, not merely un-excluded', async () =
   const extracted = await extractPdf(bytes);
   assert.ok(extracted.text.trim().length > 50, 'acceptance requires real extracted text');
   assert.ok(extracted.totalPages >= 1);
+});
+
+test('the indexer accepts files at least as large as the consumer will store', () => {
+  /*
+   * THE GAP THIS TEST EXISTS TO CLOSE.
+   *
+   * The agreement test above compares EXTENSIONS, so it could never see that the
+   * indexer skipped anything over 200KB while the consumer happily stored up to
+   * 2MB. A 500KB PDF passed every check, landed in the library, and contributed
+   * nothing to any answer — accepted and silently dropped, which is the exact
+   * failure this file was written to prevent, hiding behind a different axis.
+   *
+   * Read from the consumer's source rather than duplicated here, for the same
+   * reason the extension list is: a copy would drift and agree with nothing.
+   */
+  const source = readFileSync(STORAGE, 'utf8');
+  const uploadDefault = /MIGRAPILOT_MAX_FILE_MB,\s*(\d+)\s*\)/.exec(source);
+  assert.ok(uploadDefault, 'could not find the consumer per-file default — has it moved?');
+  const uploadBytes = Number(uploadDefault[1]) * 1024 * 1024;
+
+  assert.ok(
+    DEFAULT_MAX_INDEX_FILE_BYTES >= uploadBytes,
+    `the indexer skips files over ${DEFAULT_MAX_INDEX_FILE_BYTES} bytes while uploads accept ` +
+      `${uploadBytes} — anything between the two is stored and never indexed`,
+  );
 });
