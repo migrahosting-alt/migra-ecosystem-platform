@@ -530,6 +530,26 @@ export function resolveOperation(op: BrainOperation): ResolvedRequest {
     case 'indexStatus':
       return { method: 'GET', path: `/api/ai/indexes/${id(op.indexId, 'indexId')}/status` }
 
+    case 'processDocument':
+      /*
+       * Returns as soon as the Brain has recorded the pending state. The reading
+       * itself takes minutes and happens long after this response.
+       */
+      return {
+        method: 'POST',
+        path: '/api/ai/documents/process',
+        body: { fileName: op.fileName, path: op.path },
+      };
+
+    case 'documentStatus':
+      return { method: 'GET', path: `/api/ai/documents/${encodeURIComponent(op.fileName)}` };
+
+    case 'documentList':
+      return { method: 'GET', path: '/api/ai/documents' };
+
+    case 'documentForget':
+      return { method: 'DELETE', path: `/api/ai/documents/${encodeURIComponent(op.fileName)}` };
+
     case 'approveIndex':
       // Promotion to `approved` is what makes an index eligible for grounding:
       // `approvedIndexFor` ignores any index without an approved version. The
