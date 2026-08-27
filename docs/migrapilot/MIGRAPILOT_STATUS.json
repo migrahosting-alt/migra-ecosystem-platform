@@ -12,7 +12,7 @@
   "activeLane": {
     "name": "PDF/DOCX extraction",
     "objective": "Extend the proven document pipeline to PDF and DOCX, the first formats behind an honest refusal today.",
-    "currentStep": "Not started. Groundwork measured \u2014 see nextSliceGroundwork.pdfDocx.",
+    "currentStep": "Deploy path hardened and ACTIVATED. Next: PDF extractor qualification \u2014 evaluate unpdf, pdfjs-dist and pdf-parse separately on real representative PDFs before choosing.",
     "lastProvenMilestone": "Common text/code Files & Documents lane CLOSED 2026-08-27 with deterministic attribution PROVEN_LIVE 5/5. Closed because the one failing cell was classified correctly as a model-quality defect, NOT because the failure was removed.",
     "previousLane": {
       "name": "Files & Documents",
@@ -163,7 +163,8 @@
       "Detach a document from active grounding (history and library untouched)",
       "Deleted library file renders as Deleted on its historical turn",
       "Deterministic file attribution \u2014 proven 5/5 on 2026-08-27 across markdown, text, CSV, JSON and code. Every prompt forbade the model from naming a file and every reply obeyed, yet the correct single file was still attributed and message fileRefs matched. Provenance comes from the engine grounding frame, not model wording.",
-      "Files & Documents \u2014 common text/code attachment lane (TXT, MD, CSV, JSON, code): upload, index, ground, attribute, historical attachment record, detach control, deleted-file state."
+      "Files & Documents \u2014 common text/code attachment lane (TXT, MD, CSV, JSON, code): upload, index, ground, attribute, historical attachment record, detach control, deleted-file state.",
+      "Reproducible brain-service releases \u2014 lockfile-driven npm ci, dependency verification, boot test, atomic activation with health check and auto-rollback. Activated live 2026-08-27 as lockfile-909d10d8; smoke-verified with a text turn, a deterministic glyph turn and a grounded file turn. The active tree is independent (inode links=1), not inherited."
     ],
     "STABILIZATION": [
       {
@@ -236,10 +237,14 @@
       "symptom": "GET /api/files/index returned state \"approved\", searchable true, and stats files=0 chunks=0 with an EMPTY chunkCounts map. Grounded turns then told the user \"No readable content was found in fixture-runbook.md\" \u2014 a false statement about a file that had 4 chunks.",
       "evidence": "Observed once at 19:50 after a brain restart. A POST reindex immediately restored 9 files / 18 chunks. NOT REPRODUCED on the next restart, where the index survived intact with all 9 counts present, so the restart itself is NOT established as the cause.",
       "rootCause": "UNDETERMINED. Candidates: a startup race where the scoped restore has not completed while status already answers approved, or a scope-resolution miss returning zero rows silently (the pattern in scoped-mutation-row-count-invariant). Not attributed on n=1.",
-      "status": "OPEN \u2014 needs replication before a fix. Do not fix by guess.",
-      "effort": "MEDIUM",
+      "status": "OPEN \u2014 now REPRODUCED. Cause still not proven, but the trigger is no longer unknown.",
+      "effort": "MEDIUM \u2014 the honest-state guard is EASY; the root cause is MEDIUM.",
       "regressionTest": "Wanted: an approved index that reports zero chunks must answer \"index unavailable, reindex needed\", never \"no readable content was found in <file>\". Approved+empty is contradictory state and must fail loudly.",
-      "liveAcceptance": "Not yet proven."
+      "liveAcceptance": "Not yet proven.",
+      "reproduction": "Occurrence 2 on 2026-08-27 immediately after the brain-release activation restart. Identical signature: state \"approved\", searchable true, stats files=0 chunks=0, empty chunkCounts \u2014 and the live product told the user \"No readable content was found in fixture-notes.txt\" about a real 2-chunk file. A POST reindex restored 10 files / 23 chunks and the same question then answered correctly (MT-PLAT-7731) with attribution.",
+      "triggerEvidence": "BOTH occurrences followed a brain restart. It is NOT every restart: one intermediate restart left the index intact with all 9 counts present, so restart is a trigger but not a sufficient condition. That pattern fits a startup/lazy-restore race \u2014 status answers \"approved\" from the persisted record before the scoped chunk restore has populated the in-memory index \u2014 but the race has NOT been proven and must not be assumed.",
+      "userImpact": "HIGH and silent. It does not error; it states a confident falsehood about the users own file, which is worse than an outage because nothing signals that a retry would work.",
+      "wantedFix": "Approved + zero chunks is CONTRADICTORY state and must fail loudly: answer \"index unavailable, reindex needed\", never \"no readable content was found in <file>\". That guard is correct regardless of the underlying cause, so it can land before the race is proven."
     },
     {
       "id": "csv-quantitative-reasoning-qwen3-8b",
@@ -354,7 +359,9 @@
   ],
   "backlog": {
     "EASY_NEXT": [
-      "Citation presentation consistency review"
+      "Citation presentation consistency review",
+      "Give the CONSUMER the same reproducible release treatment. Next bundling masks stale dependency inheritance today (5 declared deps already absent from the deployed tree), but it is deployment drift waiting to matter. Owner-assigned 2026-08-27; does NOT block PDF.",
+      "Honest-state guard: an approved index holding zero chunks must report \"index unavailable, reindex needed\" instead of claiming a real file has no readable content."
     ],
     "MEDIUM": [
       "Deterministic data-operation routing \u2014 detect arithmetic/aggregation over tabular data and route to a table/data tool instead of the LLM (see csv-quantitative-reasoning-qwen3-8b)",
