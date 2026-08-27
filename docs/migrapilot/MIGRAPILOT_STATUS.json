@@ -40,7 +40,49 @@
       "Live Source Intelligence (PAUSED_CHECKPOINTED)",
       "Provisioning any search vendor",
       "Deleting local media fallback copies (stabilization window running)"
-    ]
+    ],
+    "pendingAcceptance": {
+      "name": "Five-fixture citation pass",
+      "trigger": "ComfyUI /queue drains to zero. Do NOT interrupt an active render to run it.",
+      "design": "Every prompt ends with \"Do not mention any filename.\" That FORBIDS the model from citing, so any attribution still rendered must originate in the engine grounding frame, not model wording. The fixture anchor proves the turn was actually grounded.",
+      "fixtures": [
+        {
+          "format": "markdown",
+          "file": "fixture-runbook.md",
+          "anchor": "VIOLET-ANCHOR-19"
+        },
+        {
+          "format": "text",
+          "file": "fixture-notes.txt",
+          "anchor": "ORANGE-LADDER-42"
+        },
+        {
+          "format": "csv",
+          "file": "fixture-invoices.csv",
+          "anchor": "9930.25"
+        },
+        {
+          "format": "json",
+          "file": "fixture-config.json",
+          "anchor": "TEAL-COMPASS-88"
+        },
+        {
+          "format": "code",
+          "file": "fixture-service.ts",
+          "anchor": "CRIMSON-PIVOT-57"
+        }
+      ],
+      "twoConditionsPerRow": [
+        "GROUNDING CORRECTNESS \u2014 the answer contains the fixture anchor.",
+        "DETERMINISTIC ATTRIBUTION \u2014 the UI attribution appears and names the right file, despite the prompt forbidding the model to name it."
+      ],
+      "verdictRules": {
+        "allFiveBothConditions": "citation attribution -> PROVEN_LIVE; common text/code Files & Documents lane CLOSED; PDF/DOCX extraction begins.",
+        "anyRowAnchorPresentAttributionMissing": "attribution stays IMPLEMENTED_NEEDS_LIVE_PROOF. Lane NOT closed.",
+        "anyRowAttributionPresentAnchorWrongOrMissing": "that is a GROUNDING defect, not an attribution defect. File it as such."
+      },
+      "ownerRuling": "Bonex, 2026-08-27: all five rows must pass BOTH conditions before the lane may close."
+    }
   },
   "capabilities": {
     "PROVEN_LIVE": [
