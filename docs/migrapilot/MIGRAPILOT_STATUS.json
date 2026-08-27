@@ -294,7 +294,7 @@
       "Citation presentation consistency review"
     ],
     "MEDIUM": [
-      "PDF extraction (verify runtime/library compatibility on VM111 first \u2014 pure-JS is an UNVERIFIED assumption)",
+      "PDF extraction \u2014 see nextSliceGroundwork.pdfDocx for the MEASURED runtime constraints",
       "DOCX extraction",
       "XLSX/PPTX extraction",
       "ZIP/archive understanding",
@@ -314,5 +314,22 @@
   "costStatus": {
     "paidDependencies": [],
     "note": "No recurring paid dependency has entered the architecture. Hetzner Object Storage is already owned and in use. All six retrieval vendors are needs_approval and none has credentials."
+  },
+  "nextSliceGroundwork": {
+    "pdfDocx": {
+      "measuredOn": "2026-08-27, VM111, read-only probe. No code written, no packages installed.",
+      "runtime": "Node v22.23.2, npm 10.9.8, x86_64, Ubuntu glibc 2.39.",
+      "findings": {
+        "cToolchain": "ABSENT \u2014 make, g++, cc, pkg-config all missing (python3 present).",
+        "systemPdfTools": "ABSENT \u2014 no pdftotext/poppler, no libreoffice/soffice.",
+        "existingDeps": "NONE \u2014 no pdfjs-dist, pdf-parse, unpdf or mammoth in any workspace manifest."
+      },
+      "correctsAssumption": "\"VM111 requires pure-JS PDF extraction\" was recorded as UNVERIFIED and is now REFINED rather than confirmed. The runtime does not forbid native modules; the BUILD ENVIRONMENT cannot compile them. A native module that ships prebuilt linux-x64 glibc binaries could still install. So pure-JS is the LOWEST-FRICTION path and the safe default, not a proven hard requirement.",
+      "openQuestions": [
+        "Where is node_modules actually built? Releases are seeded by cp -al from the previous release, so the original install host decides whether a compiler was ever available.",
+        "Shelling out to poppler/libreoffice would mean installing system packages on VM111 \u2014 an owner decision with a dependency and attack-surface cost, not a free option."
+      ],
+      "notStarted": "Groundwork only. The lane does not open until the citation pass is 10/10."
+    }
   }
 }
