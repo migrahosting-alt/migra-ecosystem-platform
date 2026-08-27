@@ -354,7 +354,8 @@
       "Generated images render live from the stream path exactly as from persisted history \u2014 verified across new refs, duplicate content-addressed refs, and reload, with text-only turns unaffected.",
       "PDF text-layer reading + page provenance \u2014 a PDF with a text layer uploads, extracts, indexes, grounds, and is attributed as \"From your files: report.pdf \u00b7 page N\", carried from the extractor rather than the model. Proven live 2026-08-27 (pages-fa69cf16).",
       "Scanned-PDF reading (OCR) \u2014 a 28-scan image-only Haitian Creole book uploads instantly, is read in the background with visible stages, reaches ready_with_unplaced_pages, and ANSWERS: \"chokola\" for le chocolat, \"kafe\" for le cafe, attributed to the PDF with page provenance. Proven live 2026-08-27 (caveat-9dc77388).",
-      "Image conversational reference + regeneration truthfulness \u2014 \"regenerate it\" resolves the active image and either executes it or refuses honestly; understanding, explicit creation and hard reload are unaffected. Proven live 2026-08-27 (activeimg-61825461)."
+      "Image conversational reference + regeneration truthfulness \u2014 \"regenerate it\" resolves the active image and either executes it or refuses honestly; understanding, explicit creation and hard reload are unaffected. Proven live 2026-08-27 (activeimg-61825461).",
+      "Unreadable-image error specificity \u2014 a corrupt or undecodable image is reported as \"That image could not be read\u2026 re-saving it as a PNG or JPEG usually fixes it\" instead of the generic engine failure. Proven live 2026-08-27 (brain imgerr-08271521)."
     ],
     "STABILIZATION": [
       {
@@ -451,6 +452,15 @@
       "wantedFix": "Every Postgres-backed test file must report environment-unavailable as SKIPPED, never as a failure.",
       "status": "OPEN \u2014 easy backlog. Test-harness truthfulness, NOT part of the index fix.",
       "effort": "EASY"
+    },
+    {
+      "id": "unreadable-image-poisons-the-conversation",
+      "severity": "MEDIUM",
+      "effort": "EASY",
+      "symptom": "An image that cannot be decoded stays the conversation's ACTIVE image, so every later turn re-sends it and fails the same way \u2014 including a turn that attaches a perfectly good image. Reproduced live: after the unreadable PNG, a valid blue PNG in the SAME conversation returned \"That image could not be read\"; the identical image in a FRESH conversation did not.",
+      "cause": "A consequence of the conversational-image-reference slice: attachments become the active image unconditionally. Nothing consults whether the provider could actually read them.",
+      "fix": "Do not promote an image to active when the turn failed with IMAGE_UNREADABLE. The brain already emits that code; the consumer currently keeps only the message and maps the code to brain_error.",
+      "foundBy": "the negative control of the unreadable-image slice, 2026-08-27"
     }
   ],
   "driftControl": [
@@ -558,8 +568,7 @@
       "3. HIGH-VISIBILITY CHAT: image conversational-reference routing",
       "4. HIGH-VISIBILITY CHAT: regenerate promise vs execution truthfulness",
       "5. Consumer reproducible release treatment (does NOT block PDF)",
-      "Postgres-backed tests must SKIP when Docker/Postgres is unavailable instead of failing as regressions",
-      "An image the model cannot load should say so, not \"the engine could not complete the request\""
+      "Postgres-backed tests must SKIP when Docker/Postgres is unavailable instead of failing as regressions"
     ],
     "MEDIUM": [
       "Deterministic data-operation routing \u2014 detect arithmetic/aggregation over tabular data and route to a table/data tool instead of the LLM (see csv-quantitative-reasoning-qwen3-8b)",
@@ -701,6 +710,12 @@
       "modelAccuracyNote": "On a second reload turn the model answered \"solid green background\" for a blue image. Vision REACHED the image \u2014 it correctly saw a solid background \u2014 and mis-named the colour, where the first turn said \"Blue\" correctly. Recorded as model accuracy, same family as the CSV comparison weakness, NOT as a routing defect.",
       "testFixtureDefectOfMine": "\ud83d\udea8 The understanding check failed twice and neither failure was the product. My test image was a 133-byte hand-pasted PNG, and Ollama rejects it outright with HTTP 400 \"Failed to load image or audio file\" \u2014 proven by probing the model directly, which answered \"Red\" in ONE SECOND for a properly generated PNG. I had attributed the failure to GPU contention; contention was real and concurrent, but it was not the cause. A bad fixture and a real environmental problem looked identical from the product surface.",
       "productObservation": "MigraPilot reported an unloadable image as \"The engine could not complete the request\". Truthful but unhelpful \u2014 the file could not be read, which is actionable. Small, not blocking, worth a backlog item rather than a fix inside this slice."
+    },
+    "unreadableImageSlice": {
+      "mechanismVerifiedNotAssumed": "The provider's real text was captured before the matcher was trusted: Ollama returns HTTP 400 {\"error\":\"Failed to load image or audio file\"}. The pattern was written against that string, not against a guess at it.",
+      "deployedBundleAsserted": "providerFailure.js present in the live release, classifyProviderFailure called 3x in the deployed aiRoutes.js, and the old hardcoded generic sentence now appears 0 times there \u2014 it survives only inside the classifier.",
+      "negativeControl": "A good image does NOT get the image message. Its turn hung instead, on the separately-filed GPU contention defect. Structurally the classifier cannot touch the success path: it runs only after every candidate has failed.",
+      "positiveControlLimit": "A good image answering correctly could NOT be re-proven in this slice: the GPU sat at 23.8/24.5 GB and 100% with qwen2.5vl:7b resident, and the turn never returned. That path was proven live earlier today (\"Blue\"), and this change cannot reach it."
     }
   },
   "resolvedDefects": [

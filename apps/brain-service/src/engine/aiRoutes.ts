@@ -63,6 +63,7 @@ import { renderTextGlyph } from './media/glyphRender.js';
 import type { IndexService } from './rag/indexService.js';
 import { auditStore } from './auditLog.js';
 import { gateVisionTurn, visionCapabilitySnapshot, type VisionGateDeps } from './media/visionGate.js';
+import { classifyProviderFailure } from './providerFailure.js';
 
 interface AiChatMessage {
   role: 'system' | 'user' | 'assistant';
@@ -678,6 +679,8 @@ export function registerAiRoutes(
     // Buffered path with the same failover semantics.
     const attempts = decision.ranked.slice(0, MAX_FAILOVER);
     const failed: string[] = [];
+    /* Kept so the terminal error can name a cause the user can act on. */
+    let lastError: string | undefined;
     for (const candidate of attempts) {
       try {
         const result = await providerFor(candidate, approvedVisionModel).complete(chatRequest);
@@ -718,7 +721,8 @@ export function registerAiRoutes(
         // inference on a storage outage, and eventually reporting "every model
         // failed" for a database that would not open.
         if (error instanceof PersistenceUnavailableError) throw error;
-        request.log.warn({ model: candidate.id, err: errText(error) }, 'ai/chat model failed; trying next');
+        lastError = errText(error);
+        request.log.warn({ model: candidate.id, err: lastError }, 'ai/chat model failed; trying next');
         failed.push(candidate.id);
       }
     }
@@ -735,7 +739,8 @@ export function registerAiRoutes(
     }
     await auditStore.append({ correlationId: requestId, requestId, type: 'execution.failed', component: 'chat', outcome: 'COMPLETION_FAILED' });
     reply.code(502);
-    return { ok: false, code: 'COMPLETION_FAILED', error: 'The engine could not complete the request.', failedOver: failed };
+    const failure = classifyProviderFailure(lastError);
+    return { ok: false, code: failure.code, error: failure.message, failedOver: failed };
   });
 
   // ── Embeddings ───────────────────────────────────────────────────────────────
@@ -1121,6 +1126,8 @@ async function streamChat(
 
   const attempts = ranked.slice(0, MAX_FAILOVER);
   const failed: string[] = [];
+  /* Kept so the terminal error can name a cause the user can act on. */
+  let lastError: string | undefined;
   const primaryId = ranked[0]?.id;
 
   for (const candidate of attempts) {
@@ -1227,12 +1234,14 @@ async function streamChat(
         raw.end();
         return;
       }
-      request.log.warn({ model: candidate.id, err: errText(error) }, 'ai/chat stream open failed; trying next');
+      lastError = errText(error);
+      request.log.warn({ model: candidate.id, err: lastError }, 'ai/chat stream open failed; trying next');
       failed.push(candidate.id);
     }
   }
   await auditStore.append({ correlationId: requestId, requestId, type: 'execution.failed', component: 'chat', outcome: 'COMPLETION_FAILED', fields: { toolCalls: 0 } });
-  send('error', { code: 'COMPLETION_FAILED', message: 'The engine could not complete the request.', failedOver: failed });
+  const failure = classifyProviderFailure(lastError);
+  send('error', { code: failure.code, message: failure.message, failedOver: failed });
   trace?.set('failed_over', failed);
   trace?.finish('completion_failed');
   raw.end();
