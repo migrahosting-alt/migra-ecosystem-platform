@@ -13,7 +13,7 @@
   "activeLane": {
     "name": "PDF/DOCX extraction",
     "objective": "Extend the proven document pipeline to PDF and DOCX, the first formats behind an honest refusal today.",
-    "currentStep": "PDF qualification COMPLETE. Next: PDF implementation behind unpdf, then live acceptance, then DOCX.",
+    "currentStep": "PDF extraction SHIPPED and grounded end to end. Remaining before the lane closes: specific refusal messages (scanned vs encrypted vs damaged), the detach/delete/History/isolation checks, and rendering page provenance.",
     "lastProvenMilestone": "Common text/code Files & Documents lane CLOSED 2026-08-27 with deterministic attribution PROVEN_LIVE 5/5. Closed because the one failing cell was classified correctly as a model-quality defect, NOT because the failure was removed.",
     "previousLane": {
       "name": "Files & Documents",
@@ -477,6 +477,36 @@
       },
       "recommendation": "NOT a single winner. unpdf as the DEFAULT extractor: smallest surface by a wide margin, zero dependencies, no native binary, best out-of-the-box line and table-row fidelity, and honest zero-length output on scanned pages. pdfjs-dist as the ESCALATION path if column-accurate table reconstruction is ever needed, since it exposes per-item coordinates and is the same engine unpdf wraps. pdf-parse NOT adopted: it costs 57MB and a native canvas dependency, and its synthetic page separators actively break the scanned-page check.",
       "harnessErrorsWorthKeeping": "Three of my own probe errors nearly scored two libraries as broken. pdfjs-dist and pdf-parse both need their worker MODULE IMPORTED in Node \u2014 setting workerSrc to the file path is not enough and produces a version-mismatch that reads exactly like a broken package. pdf-parse v2 exposes a PDFParse CLASS, not v1's default function. And its worker must be imported by FILE URL because its exports map blocks the deep specifier. Separately, my assertion normalised whitespace and so reported a missing anchor that was really the PDF's own line wrap (\"ANCHOR-TEXT-\\nOMEGA\") \u2014 the fixture's wrapping, measured as if it were the parser's fidelity."
+    },
+    "pdfImplementation": {
+      "shipped": "pdf-4c2fbba0 (brain + consumer), live 2026-08-27.",
+      "proven": [
+        "Upload through the REAL composer picker \u2014 .pdf accepted at all three gates.",
+        "Extraction + indexing: runbook-report.pdf -> 1 chunk; library 11 files / 24 chunks.",
+        "Grounded answer with deterministic attribution: \"From your files: runbook-report.pdf\", with the model forbidden from naming the file.",
+        "Extraction fidelity: asked for the exact hyphenated token, returned ORDER-CHECK-FINAL verbatim.",
+        "Follow-up with NO re-upload answered from the conversation grounding set.",
+        "Hard reload: the PDF card persists on the exact user turn with correct per-turn fileRefs.",
+        "READINESS SEMANTICS CORRECT: scanned / encrypted / damaged PDFs are present in Files with ZERO chunks. They exist, and nothing claims MigraPilot can answer from them.",
+        "The hardened release path installed the NEW dependency from the lockfile: 14 declared deps, all resolvable, boot-tested before activation."
+      ],
+      "openGap": {
+        "what": "Refusal messages are truthful but GENERIC.",
+        "detail": "A grounded turn on a scanned PDF answers \"No readable content was found in scanned-doc.pdf\". That is honest and it is not specific: the identical sentence would appear for a password-protected file and for a damaged one, which are three different remedies \u2014 re-scan, supply a password, re-upload.",
+        "cause": "ARCHITECTURAL, not an oversight. extractPdf classifies the failure precisely, but it runs inside the Brain's directory walk, which has no channel back to the consumer. The consumer sees only \"this file has zero chunks\" and cannot know why.",
+        "options": [
+          "A. Extract at UPLOAD time in the consumer and record the outcome per file. Best UX \u2014 the user learns their scan is unreadable when they upload it, not after asking a question. Needs a per-file status store.",
+          "B. Have the Brain report per-file skip reasons through indexStatus. Smaller change, but the user still only finds out at question time."
+        ],
+        "status": "OPEN \u2014 item 3 of the PDF slice is PARTIALLY met. Not claimed as done."
+      },
+      "notYetVerified": [
+        "detach from active grounding while the historical card remains",
+        "delete from Files -> historical card becomes unavailable",
+        "reopen from History",
+        "cross-account isolation",
+        "page provenance surfaced in a citation (extraction records it; nothing renders it yet)"
+      ]
     }
   },
   "resolvedDefects": [
