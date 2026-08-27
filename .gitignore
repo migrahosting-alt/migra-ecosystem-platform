@@ -18,10 +18,16 @@
 !/package-lock.json
 
 # MigraPilot release tooling. The deploy path must be reproducible from repo
-# state, so the script that performs it has to live in the repo. Only this one
-# file is tracked — the rest of scripts/ stays ignored deliberately.
+# state, so the scripts that perform it have to live in the repo. Only these
+# files are tracked — the rest of scripts/ stays ignored deliberately.
+#
+# This is an allowlist ignore (`*` at the top), so a NEW release script is
+# silently untracked until it is named here. That already happened once: the
+# consumer script was written, deployed twice, and committed — except git had
+# quietly dropped it, and the commit shipped only the docs.
 !/scripts/
 !/scripts/brain-release.sh
+!/scripts/consumer-release.sh
 
 # Allow .github (agents + workflows)
 !.github/
