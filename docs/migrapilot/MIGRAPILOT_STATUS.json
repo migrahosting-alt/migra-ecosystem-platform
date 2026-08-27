@@ -356,7 +356,8 @@
       "Scanned-PDF reading (OCR) \u2014 a 28-scan image-only Haitian Creole book uploads instantly, is read in the background with visible stages, reaches ready_with_unplaced_pages, and ANSWERS: \"chokola\" for le chocolat, \"kafe\" for le cafe, attributed to the PDF with page provenance. Proven live 2026-08-27 (caveat-9dc77388).",
       "Image conversational reference + regeneration truthfulness \u2014 \"regenerate it\" resolves the active image and either executes it or refuses honestly; understanding, explicit creation and hard reload are unaffected. Proven live 2026-08-27 (activeimg-61825461).",
       "Unreadable-image error specificity \u2014 a corrupt or undecodable image is reported as \"That image could not be read\u2026 re-saving it as a PNG or JPEG usually fixes it\" instead of the generic engine failure. Proven live 2026-08-27 (brain imgerr-08271521).",
-      "Test-harness environment truthfulness \u2014 with no reachable Docker daemon the brain suite reports 0 failures and 249 reasoned skips (was 140 failures + 65 skips); with Docker up it reports 2030 passes and 0 skips, so the tests still genuinely run. Guarded against regression. 2026-08-27."
+      "Test-harness environment truthfulness \u2014 with no reachable Docker daemon the brain suite reports 0 failures and 249 reasoned skips (was 140 failures + 65 skips); with Docker up it reports 2030 passes and 0 skips, so the tests still genuinely run. Guarded against regression. 2026-08-27.",
+      "Unreadable image drops out of the active-image set \u2014 the 9-step live sequence passed on chat.migrateck.com (consumer imgclear-08271615): broken image -> specific unreadable message -> follow-up carries NO image refs -> good image becomes active alone -> survives hard reload. 2026-08-27."
     ],
     "STABILIZATION": [
       {
@@ -394,9 +395,7 @@
         "needsFromOwner": "Create the project + Object Storage credentials + DR bucket in the Hetzner console."
       }
     ],
-    "IMPLEMENTED_NEEDS_LIVE_PROOF": [
-      "Unreadable image drops out of the active-image set \u2014 a picture the provider cannot decode stops being the conversation subject, so it is not re-sent on later turns. Consumer-side; 5 tests. NOT yet live: the consumer release could not be deployed (see blockers.guestAgentWedged)."
-    ]
+    "IMPLEMENTED_NEEDS_LIVE_PROOF": []
   },
   "openDefects": [
     {
@@ -705,6 +704,19 @@
       "bothDirectionsProven": "Docker absent -> 0 fail / 249 skip, each naming the reason. Docker present -> 2030 pass / 0 skip, which is the control that matters: a \"fix\" that skipped forever would be a false GREEN and worse than the false RED it replaced.",
       "regressionGuard": "test/skipIdiomIsRuntime.test.ts fails if any test decides to skip at load time, or if a suite asks for a skip reason and never acts on it. Verified to BITE by reintroducing the idiom \u2014 it named the exact file:line \u2014 then restored.",
       "notADaemonChange": "Proven with a docker shim that prints nothing and exits 1. The real daemon was never stopped."
+    },
+    "unreadableImagePoisoningAcceptance": {
+      "conversation": "conv_ytrq190mf2qwt2jq2csl2",
+      "steps": {
+        "1-2_attachBrokenAndAsk": "PASS",
+        "3_specificUnreadableMessage": "PASS \u2014 and the attachment card still rendered",
+        "4-5_plainFollowUpDoesNotResend": "PASS \u2014 the follow-up message persisted with imageRefs: null",
+        "6-7_goodImageBecomesActive": "PASS \u2014 the new turn carried ONLY img_a3888e70, not the broken img_8373c737",
+        "8-9_hardReload": "PASS \u2014 a post-reload turn carried the good image; brokenImageEverResent = false"
+      },
+      "assertedWhereItCounts": "The decisive checks were made against PERSISTED message state through the app's own authenticated API, not against rendered text \u2014 so they hold regardless of whether a model ever answered.",
+      "historicalRecordPreserved": "The first message still carries imageRefs [img_8373c737] and its card still renders. The file was never deleted. Only the ACTIVE set changed.",
+      "\ud83d\udea8 stillOwed": "ONE good-image understanding turn answering live. NOT proven in this window: the GPU sat at 24050/24576 MiB and 100% with NO Ollama model resident at all \u2014 a non-MigraPilot workload held the whole card, so even \"what is the capital of France?\" returned nothing. No assistant message was produced for ANY turn. Deferred by Bonex to when the GPU frees; the render was not interrupted."
     }
   },
   "resolvedDefects": [
@@ -797,16 +809,6 @@
       "probeDiscipline": "For fast deterministic paths, capture the baseline BEFORE triggering the action. And never use artifact-count growth as evidence when content addressing can legitimately deduplicate identical output."
     }
   ],
-  "blockers": {
-    "guestAgentWedged": {
-      "what": "qemu-guest-agent on VM111 is running but does not answer the host, so `qm guest exec` fails.",
-      "evidence": "qm agent 111 ping -> \"QEMU guest agent is not running\", while systemctl inside the guest shows it active since 2026-08-12 using 520 MB (peak 1.0 GB) \u2014 abnormal for qemu-ga.",
-      "cause": "Most likely my own long-output guest-exec commands; it wedged immediately after one timed out.",
-      "whyItBlocks": "Release trees are migrapilot:migrapilot and the ssh user is bonex, so deploying needs root. Guest-exec was the sanctioned root channel; the hook correctly refuses elevated bash/node, and qemu-guest-agent is not a migrapilot-* unit so restarting it falls outside the approved scope.",
-      "fix": "Restart qemu-guest-agent as root on VM111 (one command, by Bonex).",
-      "productImpact": "None. Brain and consumer are healthy and serving; only deployment is blocked."
-    }
-  },
   "operationalRecord": {
     "brainDbCredentialRotation2026_08_27": {
       "reason": "The production password printed into session output during an env-file read; treated as exposed.",
