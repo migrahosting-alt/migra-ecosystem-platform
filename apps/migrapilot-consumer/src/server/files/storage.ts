@@ -103,6 +103,26 @@ export const MAX_FILE_BYTES = megabytes(process.env.MIGRAPILOT_MAX_FILE_MB, 1024
 export const MAX_LIBRARY_BYTES = megabytes(process.env.MIGRAPILOT_MAX_LIBRARY_MB, 20 * 1024)
 export const MAX_FILES = Number(process.env.MIGRAPILOT_MAX_FILES) || 2000
 
+/*
+ * STORABLE AND PARSEABLE ARE DIFFERENT LIMITS, and conflating them was a real
+ * mistake in the previous change.
+ *
+ * How much MigraPilot may RETAIN is a storage question. How much it may PARSE is
+ * a question about the process doing the parsing — and extraction currently
+ * loads the whole file into memory inside the synchronous Brain, so a single
+ * enormous document could exhaust it and end chat for every user. Raising both
+ * numbers together made a storage decision on the service's behalf.
+ *
+ * A file may therefore be perfectly storable without being safe to parse yet.
+ * Above this ceiling the file is KEPT and reported as unprocessed rather than
+ * pushed through the parser, and the ceiling rises when streaming or chunked
+ * parsing or worker isolation exists — not before.
+ *
+ * The Brain reads the same env var and default, so the two sides cannot drift
+ * apart quietly; `uploadIndexerAgreement` holds them to it.
+ */
+export const MAX_EXTRACT_BYTES = megabytes(process.env.MIGRAPILOT_MAX_EXTRACT_MB, 25)
+
 export class FileRejected extends Error {
   constructor(
     readonly code: string,
@@ -117,6 +137,15 @@ export interface StoredFile {
   name: string
   bytes: number
   updatedAt: number
+  /**
+   * Stored, but beyond what the parser may safely load — so NOT indexed.
+   *
+   * Present so the gap can never be silent. The file is genuinely kept and the
+   * user's copy is intact; what is untrue is any claim that MigraPilot can
+   * answer from it, and a caller that cannot see this flag would make exactly
+   * that claim.
+   */
+  tooLargeToProcess?: boolean
 }
 
 export const extensionOf = (name: string): string => {
@@ -166,7 +195,12 @@ export async function listFiles(): Promise<StoredFile[]> {
     if (!entry.isFile()) continue
     const info = await stat(join(dir, entry.name)).catch(() => null)
     if (!info) continue
-    files.push({ name: entry.name, bytes: info.size, updatedAt: info.mtimeMs })
+    files.push({
+      name: entry.name,
+      bytes: info.size,
+      updatedAt: info.mtimeMs,
+      ...(info.size > MAX_EXTRACT_BYTES ? { tooLargeToProcess: true } : {}),
+    })
   }
   return files.sort((a, b) => b.updatedAt - a.updatedAt)
 }

@@ -94,7 +94,7 @@ test('PDF is accepted AND actually readable, not merely un-excluded', async () =
   assert.ok(extracted.totalPages >= 1);
 });
 
-test('the indexer accepts files at least as large as the consumer will store', () => {
+test('both sides agree on the EXTRACTION ceiling, which is not the storage limit', () => {
   /*
    * THE GAP THIS TEST EXISTS TO CLOSE.
    *
@@ -108,13 +108,30 @@ test('the indexer accepts files at least as large as the consumer will store', (
    * reason the extension list is: a copy would drift and agree with nothing.
    */
   const source = readFileSync(STORAGE, 'utf8');
-  const uploadDefault = /MIGRAPILOT_MAX_FILE_MB,\s*(\d+)\s*\)/.exec(source);
-  assert.ok(uploadDefault, 'could not find the consumer per-file default — has it moved?');
-  const uploadBytes = Number(uploadDefault[1]) * 1024 * 1024;
+  const extractDefault = /MIGRAPILOT_MAX_EXTRACT_MB,\s*(\d+)\s*\)/.exec(source);
+  assert.ok(extractDefault, 'could not find the consumer extraction ceiling — has it moved?');
+  const consumerExtractBytes = Number(extractDefault[1]) * 1024 * 1024;
 
+  assert.equal(
+    DEFAULT_MAX_INDEX_FILE_BYTES,
+    consumerExtractBytes,
+    'the two sides must parse to exactly the same ceiling, or one will skip what the other promised',
+  );
+
+  /*
+   * The STORAGE limit is deliberately larger, and that is not the same defect.
+   *
+   * The original bug was a SILENT disagreement: uploads accepted 2MB while the
+   * indexer skipped everything over 200KB, so files were stored and quietly
+   * never indexed. The fix is not "make every number equal" — it is that a file
+   * which cannot be parsed must be KNOWN to be unparsed rather than presumed
+   * ready. Storage above the extraction ceiling is therefore expected, and the
+   * ceilings above are what must never diverge.
+   */
+  const storageDefault = /MIGRAPILOT_MAX_FILE_MB,\s*(\d+)\s*\)/.exec(source);
+  assert.ok(storageDefault, 'could not find the consumer storage limit');
   assert.ok(
-    DEFAULT_MAX_INDEX_FILE_BYTES >= uploadBytes,
-    `the indexer skips files over ${DEFAULT_MAX_INDEX_FILE_BYTES} bytes while uploads accept ` +
-      `${uploadBytes} — anything between the two is stored and never indexed`,
+    Number(storageDefault[1]) * 1024 * 1024 >= consumerExtractBytes,
+    'storage must be at least the extraction ceiling, or parseable files could be refused outright',
   );
 });

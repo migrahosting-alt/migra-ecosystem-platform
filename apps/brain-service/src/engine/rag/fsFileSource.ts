@@ -26,9 +26,17 @@ export class FileSourceUnavailableError extends Error {
   }
 }
 
-/** The indexer's per-file ceiling, exported so the upload side can be held to it. */
+/**
+ * How much this process will PARSE, which is not how much may be stored.
+ *
+ * Extraction is synchronous and in-memory, so this ceiling protects the service
+ * rather than the disk. It deliberately does NOT track the upload limit: a file
+ * may be storable without being safe to parse here. The consumer reads the same
+ * env var and default so the two can never disagree quietly — a silent
+ * disagreement is what let a 500KB PDF be stored and never indexed.
+ */
 export const DEFAULT_MAX_INDEX_FILE_BYTES =
-  Number(process.env.MIGRAPILOT_MAX_INDEX_FILE_BYTES) || 1024 * 1024 * 1024;
+  (Number(process.env.MIGRAPILOT_MAX_EXTRACT_MB) || 25) * 1024 * 1024;
 
 export class FsFileSource implements FileSource {
   constructor(
