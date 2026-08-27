@@ -1177,6 +1177,27 @@ export async function POST(request: Request): Promise<Response> {
         const quota = await settle(true)
         if (stored.kind === 'ok') {
           trace.mark('answer_stored')
+
+          /*
+           * A PICTURE WE JUST MADE IS NOW THE IMAGE IN THIS CONVERSATION.
+           *
+           * Without this the active set only ever held UPLOADS, so every phrase
+           * that points at a picture — "regenerate it", "make it brighter",
+           * "what's in it" — had nothing to point at after a generation, and the
+           * turn was answered as though no image existed. That is what produced
+           * "Please provide the content you'd like me to regenerate" immediately
+           * after MigraPilot had drawn the thing being referred to.
+           *
+           * Written after the answer is durable, so a picture only becomes the
+           * conversation's subject once the turn it belongs to is real. A failure
+           * here must not lose the answer: the artifact is already stored and
+           * linked to the message, and the cost is that the NEXT turn cannot say
+           * "it" — worth a degraded reference, never a discarded reply.
+           */
+          if (generatedImages.length > 0) {
+            await setConversationImages(durableId, generatedImages, { principal }).catch(() => undefined)
+          }
+
           emit('done', {
             conversationId: durableId,
             requestId: trace.id,
