@@ -64,6 +64,7 @@ import type { IndexService } from './rag/indexService.js';
 import { auditStore } from './auditLog.js';
 import { gateVisionTurn, visionCapabilitySnapshot, type VisionGateDeps } from './media/visionGate.js';
 import { classifyProviderFailure } from './providerFailure.js';
+import { probeGpuCapacity, shouldRefuse, type CapacityReading } from './capacity/gpuCapacity.js';
 
 interface AiChatMessage {
   role: 'system' | 'user' | 'assistant';
@@ -242,6 +243,21 @@ export function registerAiRoutes(
       absoluteTimeoutMs: env.providerAbsoluteTimeoutMs,
     });
   };
+
+  /*
+   * The capacity reading, built once so chat and /health cannot disagree.
+   *
+   * `real` mirrors providerFor: with a stub provider there is no GPU to be busy,
+   * and gating tests behind a probe of a machine that is not there would make
+   * the suite depend on the workstation being awake.
+   */
+  const capacityProbe = real
+    ? (model?: string) => probeGpuCapacity({
+        providerBaseUrl: env.providerBaseUrl,
+        ...(process.env.MIGRAPILOT_STUDIO_URL ? { studioBaseUrl: process.env.MIGRAPILOT_STUDIO_URL } : {}),
+        ...(model ? { model } : {}),
+      })
+    : undefined;
 
   // ── Catalog ────────────────────────────────────────────────────────────────
   app.get('/api/ai/models', async () => {
@@ -672,7 +688,8 @@ export function registerAiRoutes(
 
     if (body.stream) {
       await streamChat(request, reply, requestId, decision.ranked, decision.reason,
-        (m) => providerFor(m, approvedVisionModel), chatRequest, { contextDiagnostics, commit, fallback, trace });
+        (m) => providerFor(m, approvedVisionModel), chatRequest,
+        { contextDiagnostics, commit, fallback, trace, capacityProbe });
       return reply; // response already sent via raw stream
     }
 
@@ -1043,7 +1060,7 @@ async function streamChat(
   primaryReason: string,
   providerFor: (m: ModelDescriptor) => StreamingProvider,
   chatRequest: ChatTurnRequest,
-  memory: { contextDiagnostics?: ContextDiagnostics; commit?: (text: string, modelId: string, providerId: string) => void; fallback?: { policy?: string; requestedPolicy?: string; effectivePolicy?: string; policyReason?: string; fallbackRecommended: boolean; reasons: string[] }; trace?: BrainTurnTrace } = {},
+  memory: { capacityProbe?: (model?: string) => Promise<CapacityReading>; contextDiagnostics?: ContextDiagnostics; commit?: (text: string, modelId: string, providerId: string) => void; fallback?: { policy?: string; requestedPolicy?: string; effectivePolicy?: string; policyReason?: string; fallbackRecommended: boolean; reasons: string[] }; trace?: BrainTurnTrace } = {},
 ): Promise<void> {
   const trace = memory.trace;
   reply.hijack();
@@ -1124,6 +1141,36 @@ async function streamChat(
   // diagnostic BEFORE any token (explainable retrieval).
   if (memory.contextDiagnostics) send('context', memory.contextDiagnostics);
 
+  /*
+   * CAPACITY IS CHECKED BEFORE ANY MODEL REQUEST IS SENT.
+   *
+   * Reachability said yes while the card was pinned — `GET /models` needs no
+   * GPU — so the turn was accepted and then could not be served. Refusing here
+   * means no request is submitted at all, and the user learns in under three
+   * seconds instead of watching nothing happen for eight minutes.
+   *
+   * A probe that cannot read its signals returns `unknown` and does NOT refuse:
+   * a monitoring outage must never become a chat outage. The first-token
+   * deadline below is what protects that turn instead.
+   */
+  if (memory.capacityProbe) {
+    const reading = await memory.capacityProbe(ranked[0]?.id).catch(() => undefined);
+    if (reading && shouldRefuse(reading)) {
+      await auditStore.append({ correlationId: requestId, requestId, type: 'execution.failed', component: 'chat',
+        outcome: reading.state === 'busy' ? 'GPU_BUSY' : 'ENGINE_UNAVAILABLE', fields: { toolCalls: 0 } });
+      send('error', {
+        code: reading.state === 'busy' ? 'GPU_BUSY' : 'ENGINE_UNAVAILABLE',
+        message: reading.message,
+        capacity: reading.state,
+      });
+      trace?.set('capacity', reading.state);
+      trace?.finish(reading.state === 'busy' ? 'gpu_busy' : 'engine_unavailable');
+      raw.end();
+      return;
+    }
+    if (reading) trace?.set('capacity', reading.state);
+  }
+
   const attempts = ranked.slice(0, MAX_FAILOVER);
   const failed: string[] = [];
   /* Kept so the terminal error can name a cause the user can act on. */
@@ -1158,7 +1205,7 @@ async function streamChat(
         const gen = provider.stream(chatRequest, ac.signal);
         // Pull the first frame: this forces the upstream connection to open, so an
         // open/HTTP failure happens BEFORE we commit and can still fail over.
-        const first = await gen.next();
+        const first = await withFirstTokenDeadline(gen.next(), ac);
         /*
          * THE STAGE THAT WAS INVISIBLE. Pulling the first frame is what forces
          * the provider to open its connection AND load the model, so a cold or
@@ -1216,6 +1263,30 @@ async function streamChat(
       raw.end();
       return;
     } catch (error) {
+      /*
+       * 🚨 CHECKED BEFORE THE ABORT TEST, AND THE ORDER IS THE WHOLE POINT.
+       *
+       * The deadline enforces itself by calling ac.abort(), so by the time this
+       * catch runs `signal.aborted` is true and the clause below would file a
+       * starved turn as a CLIENT CANCELLATION — ending the stream with no
+       * error, no answer and no explanation. That is precisely the silent
+       * failure this deadline exists to remove, reintroduced by the mechanism
+       * meant to fix it.
+       */
+      if (error instanceof FirstTokenTimeout) {
+        await auditStore.append({ correlationId: requestId, requestId, type: 'execution.failed', component: 'chat', outcome: 'FIRST_TOKEN_TIMEOUT', fields: { model: candidate.id, toolCalls: 0 } });
+        send('error', {
+          code: 'GENERATION_TIMEOUT',
+          message: `The AI engine did not begin responding within ${Math.round(error.waitedMs / 1000)} seconds, `
+            + 'so the request was stopped. The graphics card is most likely busy with another task — '
+            + 'nothing was lost, try again in a moment.',
+          waitedMs: error.waitedMs,
+        });
+        trace?.set('failed_model', candidate.id);
+        trace?.finish('first_token_timeout');
+        raw.end();
+        return;
+      }
       if (ac.signal.aborted) {
         // Client cancelled — no `done`, no false answer.
         await auditStore.append({ correlationId: requestId, requestId, type: 'execution.failed', component: 'chat', outcome: 'cancelled', fields: { toolCalls: 0 } });
@@ -1260,6 +1331,48 @@ function routeFrame(requestId: string, candidate: ModelDescriptor, primaryId: st
 
 /** Never leak stack traces or full provider bodies to clients — this is for
  * server-side logs only. */
+/**
+ * How long a turn may wait for its FIRST frame before it is called a failure.
+ *
+ * The provider's own ceiling is 480s, which is where "no answer for eight
+ * minutes" came from. Measured on a free card: 0.29s warm, and 5.9s cold
+ * including loading a 13.5 GB vision model from disk. 60s is therefore ten times
+ * the worst measured cold path and eight times tighter than the ceiling — long
+ * enough to never trip on a legitimately slow load, short enough that a starved
+ * turn ends while the person is still watching.
+ */
+const FIRST_TOKEN_DEADLINE_MS = Number(process.env.MIGRAPILOT_FIRST_TOKEN_DEADLINE_MS ?? 60_000);
+
+export class FirstTokenTimeout extends Error {
+  constructor(readonly waitedMs: number) {
+    super(`no first token within ${Math.round(waitedMs / 1000)}s`);
+    this.name = 'FirstTokenTimeout';
+  }
+}
+
+/**
+ * Race the first frame against the deadline, aborting upstream when it expires.
+ *
+ * Aborting matters as much as returning: without it the provider keeps the
+ * request open and the GPU keeps queueing work nobody is waiting for any more.
+ */
+async function withFirstTokenDeadline<T>(pending: Promise<T>, ac: AbortController): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([
+      pending,
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => {
+          ac.abort();
+          reject(new FirstTokenTimeout(FIRST_TOKEN_DEADLINE_MS));
+        }, FIRST_TOKEN_DEADLINE_MS);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 function errText(error: unknown): string {
   return error instanceof Error ? error.message.slice(0, 300) : String(error).slice(0, 300);
 }

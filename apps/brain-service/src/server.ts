@@ -97,6 +97,7 @@ import { writeOcrSidecar } from './engine/rag/scannedPdfJob.js';
 import { decideRecovery } from './engine/rag/scannedJobRecovery.js';
 import path from 'node:path';
 import { registerMigraPilotCors } from './http/corsPolicy.js';
+import { probeGpuCapacity } from './engine/capacity/gpuCapacity.js';
 
 // A code assistant's chat/retrieve requests legitimately carry large payloads —
 // multi-file context, retrieved snippets, and base64 VISION image attachments —
@@ -141,6 +142,16 @@ async function getHealth(): Promise<HealthResponse> {
   ]);
 
   const inferenceReady = defaultOk || cheapOk || localOk;
+
+  /*
+   * The capacity reading, from signals that move when the card moves. Best
+   * effort: /health must answer even when the workstation is asleep, so a probe
+   * failure leaves the field absent rather than failing the endpoint.
+   */
+  const capacity = await probeGpuCapacity({
+    providerBaseUrl: env.providerBaseUrl,
+    ...(process.env.MIGRAPILOT_STUDIO_URL ? { studioBaseUrl: process.env.MIGRAPILOT_STUDIO_URL } : {}),
+  }).catch(() => undefined);
 
   // Persistence readiness — a running process is NOT proof of full readiness.
   const memoryDisabled = selectionKind === 'off';
@@ -187,7 +198,20 @@ async function getHealth(): Promise<HealthResponse> {
     // A running HTTP process ≠ full readiness. Distinguish the real axes.
     readiness: {
       process: 'running',
+      /*
+       * 🚨 REACHABLE, NOT READY — and the distinction is the whole defect.
+       *
+       * This flag comes from `GET /models`, which answers in milliseconds with
+       * the graphics card 100% pinned, because listing models needs no GPU. It
+       * is a LIVENESS signal and it is kept as one. It said "available" through
+       * the entire outage where chat produced nothing for minutes.
+       *
+       * `gpuCapacity` below is the readiness signal for GPU-backed inference:
+       * it reads the render queue, resident models and VRAM headroom, and it is
+       * what the chat path actually gates on.
+       */
       inferenceProviders: inferenceReady ? 'available' : 'unavailable',
+      ...(capacity ? { gpuCapacity: capacity.state, gpuSignals: capacity.signals } : {}),
       persistence: persistence.memoryStore,
       memory: persistence.memoryStore,
       rag: persistence.ragStore,

@@ -359,7 +359,8 @@
       "Test-harness environment truthfulness \u2014 with no reachable Docker daemon the brain suite reports 0 failures and 249 reasoned skips (was 140 failures + 65 skips); with Docker up it reports 2030 passes and 0 skips, so the tests still genuinely run. Guarded against regression. 2026-08-27.",
       "Unreadable image drops out of the active-image set \u2014 the 9-step live sequence passed on chat.migrateck.com (consumer imgclear-08271615): broken image -> specific unreadable message -> follow-up carries NO image refs -> good image becomes active alone -> survives hard reload. 2026-08-27.",
       "Reproducible consumer releases \u2014 lockfile-driven npm ci, dependency verification from the release itself, boot test, atomic activation, health check with rollback, and a proven independence control. No node_modules is copied from the outgoing release. Proven live twice 2026-08-27 (repro-08271631, repro2-08271636).",
-      "VM111 release retention + deploy capacity gate \u2014 /opt taken from 92% (7.9 GB free) to 49% (50 GB free) by pruning 132 exact paths; both release scripts now refuse to deploy below 10 GiB free before changing anything. 2026-08-27."
+      "VM111 release retention + deploy capacity gate \u2014 /opt taken from 92% (7.9 GB free) to 49% (50 GB free) by pruning 132 exact paths; both release scripts now refuse to deploy below 10 GiB free before changing anything. 2026-08-27.",
+      "GPU capacity readiness + bounded wait \u2014 a pinned card is refused in ~0.5-1.1 s with an honest \"has not started yet\" state and NO model request submitted, instead of 480 s of silence; recovery needs no cleanup. Proven live both directions 2026-08-27."
     ],
     "STABILIZATION": [
       {
@@ -408,7 +409,8 @@
       "status": "EXPLAINED",
       "effort": "MEDIUM",
       "regressionTest": "none",
-      "liveAcceptance": "n/a"
+      "liveAcceptance": "n/a",
+      "slice1": "TRUTHFUL READINESS + BOUNDED WAIT SHIPPED (brain capacity2-08271948). The worst part \u2014 accepting work the system cannot execute \u2014 is closed. Arbitration/scheduling is slice 2 and is NOT built: nothing evicts models, kills renders, or moves workloads."
     },
     {
       "id": "gpu-contention-starves-chat",
@@ -425,7 +427,8 @@
         "CORRECTED: \"EASY to unblock by stopping a ComfyUI instance\". ComfyUI was mid-render (/queue reported 1 running job), so stopping it would destroy in-flight owner work. The safe path is to wait for the queue to drain.",
         "REFINED: \"VRAM exhaustion\" is not the whole mechanism. Generation stalls with the model already resident and with a smaller model substituted, and the card reads 100% utilisation \u2014 so compute contention matters, not just memory headroom."
       ],
-      "measuredContrast": "Same conversation, same question, same model: NO answer in >5 minutes at 24.0/24.5 GB and 100% util; \"Red\" in 15 s at 5.7 GB and 11%. The failure is resource starvation, not prompting or routing."
+      "measuredContrast": "Same conversation, same question, same model: NO answer in >5 minutes at 24.0/24.5 GB and 100% util; \"Red\" in 15 s at 5.7 GB and 11%. The failure is resource starvation, not prompting or routing.",
+      "slice1": "TRUTHFUL READINESS + BOUNDED WAIT SHIPPED (brain capacity2-08271948). The worst part \u2014 accepting work the system cannot execute \u2014 is closed. Arbitration/scheduling is slice 2 and is NOT built: nothing evicts models, kills renders, or moves workloads."
     },
     {
       "id": "csv-quantitative-reasoning-qwen3-8b",
@@ -729,6 +732,23 @@
       "capacityGate": "Both scripts refuse below MIN_FREE_GIB (default 10) BEFORE creating staging or a release. Proven both ways on the target: with MIN_FREE_GIB=999999 it exited 1 and created ZERO directories; at the real threshold it reports \"49 GiB free ... (need 10)\". Measured peaks: consumer ~577 MB release + ~530 MB staging, brain ~700 MB + ~82 MB \u2014 so 10 GiB is deliberate margin, not an estimate of need.",
       "retentionIsReportedNotAutomatic": "Both release scripts now print prune candidates after activation and delete nothing. The selector has already surprised us once; it does not run unattended until it has been observed clean.",
       "stillLarge": "/home 8.9 GB and /tmp 5.0 GB on VM111 hold deploy payloads and logs \u2014 not touched, not urgent at 49%."
+    },
+    "gpuCapacitySlice1": {
+      "threeInvariants": {
+        "reachableIsNotReady": "GET /models answers in ms with the card 100% pinned, so it stays a LIVENESS signal. /health now reports gpuCapacity separately, from render queue + resident models + VRAM headroom, and chat gates on that.",
+        "boundedWait": "First-token deadline 60 s (MIGRAPILOT_FIRST_TOKEN_DEADLINE_MS), against a measured 0.29 s warm and 5.9 s cold load of a 13.5 GB vision model \u2014 10x the worst measured path, 8x tighter than the 480 s ceiling. Aborts upstream so an abandoned turn stops consuming the card.",
+        "truthfulStateImmediately": "GPU_BUSY / ENGINE_UNAVAILABLE / GENERATION_TIMEOUT, each with a sentence saying the work has NOT started."
+      },
+      "liveAcceptance": {
+        "gpuFree": "capacity ready -> route/token/done in 17.8 s",
+        "gpuPinned": "capacity busy -> GPU_BUSY in 0.5-1.1 s, NO route frame, so no model request was submitted",
+        "recovery": "card freed -> ready -> normal turn in 16.6 s, no restart and no manual cleanup",
+        "noHangingTurn": "every turn ended in a terminal frame"
+      },
+      "\ud83d\udea8 measurementArtifactCaughtLive": "ComfyUI /system_stats vram_free is OPTIMISTIC and would have called a pinned card ready: with 23.5 of 24.0 GiB allocated and ~1 GB actually free it reported 14.2 GB free. The first version passed only because a GiB/GB unit mismatch made the threshold accidentally strict. Free VRAM is now the MINIMUM of ComfyUI's figure and total minus the exact resident-model VRAM from /api/ps \u2014 live it reads 2.5 GB where ComfyUI still claims 14.2 GB.",
+      "orderingBugAvoided": "The deadline enforces itself with ac.abort(), and the existing catch treats signal.aborted as a CLIENT CANCELLATION \u2014 which would have ended a starved turn with no error at all, reintroducing the silence the deadline exists to remove. The timeout is checked BEFORE the abort test.",
+      "failsOpen": "Unreadable probes return `unknown` and proceed; a monitoring outage must not become a chat outage. The bounded deadline protects that turn.",
+      "notYetBrowserVerified": "The browser session was signed out and I cannot sign in on Bonex's behalf, so the GPU_BUSY state was proven through the Brain API rather than the chat UI. The consumer forwards the Brain's message verbatim (same path already proven live for IMAGE_UNREADABLE), but the UI rendering of this specific state is UNVERIFIED."
     }
   },
   "resolvedDefects": [
