@@ -221,6 +221,26 @@
       "confidenceAndCoordinates": "Both arms expose per-word confidence; native TSV output gives 257 word rows with left/top/width/height/conf for the vocabulary page, which is what column reconstruction and duplicate detection will need.",
       "footprint": "WASM adds 51MB of node_modules and downloads language data at runtime. Native is a system package with no .node binary and no runtime download.",
       "recommendation": "NATIVE Tesseract with hat \u2014 identical structural fidelity, 25-30% faster, no runtime language fetch. But the real design consequence is the segmentation finding: the pipeline needs a PER-PAGE-TYPE segmentation strategy, or a dual pass merging psm 3 for folio/section signals with psm 6 for column structure. Choosing an engine and a single psm would have shipped a reader that silently loses either the vocabulary pairs or the ordering signals."
+    },
+    "ocrPipelineBuilt": {
+      "status": "BUILT and measured on VM111. NOT yet wired into upload/indexing.",
+      "decision": "Native Tesseract + hat, adaptive segmentation: classify -> preferred pass -> validate -> escalate only on failure.",
+      "measuredOnRealPages": {
+        "blankHalf": "detected pre-OCR, ZERO passes run",
+        "prose folio 17": "psm 3, 1 pass, folio [17]",
+        "grammar folio 33": "psm 3, 1 pass, folio [33], 5 section markers",
+        "vocabulary folio 39": "psm 6, 1 pass, folio [39] AND 29 column pair rows",
+        "chapter title": "psm 3, 1 pass, CHAPIT 2 marker recovered",
+        "total": "27.3s for 6 half-pages, one pass each, no escalation needed"
+      },
+      "bugFoundAndFixed": "\ud83d\udea8 My first implementation could NEVER validate a vocabulary page. It counted column pairs by splitting the reconstructed transcript on runs of spaces \u2014 but the transcript is rebuilt by joining words with a SINGLE space, so the detector searched for gaps its own input had already removed. It reported 0 pairs on a page whose columns had been recovered perfectly, forcing a pointless second pass and then discarding the correct result. Pairs are now measured from TSV BOUNDING BOXES, with the gutter derived from the page median word width so it holds at any DPI. That fix alone cut the run from 33.8s to 27.3s and turned s13-left from \"2 passes, wrong answer\" into \"1 pass, folio + 29 pairs\".",
+      "notYetDone": [
+        "wire OCR into the PDF ingestion path (currently scanned PDFs still refuse honestly)",
+        "spread splitting inside the pipeline (halves are produced by pdftoppm crop today)",
+        "document reconstruction: order pages from folios/sections/chapter ranges, mark sequence_uncertain",
+        "derived normalised search field, kept separate from the faithful transcript",
+        "end-to-end acceptance on the full 28-scan book through the real product"
+      ]
     }
   },
   "capabilities": {

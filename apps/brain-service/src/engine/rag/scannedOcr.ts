@@ -46,6 +46,16 @@ export interface OcrPass {
   confidence: number;
   words: number;
   ms: number;
+  /**
+   * Rows whose words are separated by real horizontal GAPS — a column structure.
+   *
+   * Measured from bounding boxes, never from the reconstructed string. The first
+   * version counted runs of spaces in the transcript, which could not work: the
+   * transcript is rebuilt by joining words with a single space, so the detector
+   * was looking for gaps its own input had already removed and reported zero
+   * pairs on a page whose columns had in fact been recovered perfectly.
+   */
+  columnPairRows: number;
 }
 
 /**
@@ -102,17 +112,33 @@ function chapterMarkers(text: string): string[] {
 }
 
 /**
- * Rows that look like a French/Creole pair — two or more entries on one line.
+ * Rows carrying two or more entries separated by a real gutter.
  *
- * Counted rather than parsed: the question here is only "did the column
- * structure survive this pass", and a count answers it without committing to a
- * column model that the reconstruction step will do properly.
+ * Counted rather than parsed: the question is only "did the column structure
+ * survive this pass", and a count answers it without committing to a column
+ * model that reconstruction will build properly later.
+ *
+ * A gutter is a horizontal gap wider than a normal word space. Word spacing is
+ * estimated from the page's own median word width, so it holds at any DPI
+ * instead of hard-coding pixels for one scan resolution.
  */
-function columnPairRows(text: string): number {
+function countColumnPairRows(words: Array<{ line: string; left: number; right: number }>): number {
+  const byLine = new Map<string, Array<{ left: number; right: number }>>();
+  for (const w of words) (byLine.get(w.line) ?? byLine.set(w.line, []).get(w.line)!).push(w);
+
+  const widths = words.map((w) => w.right - w.left).filter((n) => n > 0).sort((a, b) => a - b);
+  if (widths.length === 0) return 0;
+  const medianWidth = widths[Math.floor(widths.length / 2)]!;
+  const gutter = medianWidth * 1.5;
+
   let rows = 0;
-  for (const line of text.split('\n')) {
-    const cells = line.trim().split(/\s{2,}/).filter((c) => c.length > 1);
-    if (cells.length >= 2) rows += 1;
+  for (const line of byLine.values()) {
+    const sorted = [...line].sort((a, b) => a.left - b.left);
+    let gaps = 0;
+    for (let i = 1; i < sorted.length; i += 1) {
+      if (sorted[i]!.left - sorted[i - 1]!.right > gutter) gaps += 1;
+    }
+    if (gaps >= 1) rows += 1;
   }
   return rows;
 }
@@ -168,9 +194,15 @@ async function ocrOnce(imagePath: string, language: string, psm: string): Promis
 
   // Rebuild lines from block/paragraph/line numbers so column structure survives.
   const lines = new Map<string, string[]>();
+  const geometry: Array<{ line: string; left: number; right: number }> = [];
   for (const r of words) {
     const key = `${r[2]}|${r[3]}|${r[4]}`;
     (lines.get(key) ?? lines.set(key, []).get(key)!).push((r[11] ?? '').trim());
+    const left = Number(r[6]);
+    const width = Number(r[8]);
+    if (Number.isFinite(left) && Number.isFinite(width)) {
+      geometry.push({ line: key, left, right: left + width });
+    }
   }
   const text = [...lines.values()].map((w) => w.join(' ')).join('\n');
 
@@ -180,6 +212,7 @@ async function ocrOnce(imagePath: string, language: string, psm: string): Promis
     confidence: confidences.length ? Math.round(confidences.reduce((a, b) => a + b, 0) / confidences.length) : 0,
     words: words.length,
     ms: Date.now() - started,
+    columnPairRows: countColumnPairRows(geometry),
   };
 }
 
@@ -188,7 +221,7 @@ function summarise(pass: OcrPass) {
     folioCandidates: folioCandidates(pass.text),
     sectionCandidates: sectionCandidates(pass.text),
     chapterMarkers: chapterMarkers(pass.text),
-    columnPairs: columnPairRows(pass.text),
+    columnPairs: pass.columnPairRows,
     text: pass.text,
   };
 }
