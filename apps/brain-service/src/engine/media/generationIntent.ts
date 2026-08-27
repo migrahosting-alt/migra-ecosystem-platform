@@ -85,7 +85,7 @@ export type TurnIntent = 'image_generation' | 'text'
  * outside these lists falls through to treating the attached image as the
  * subject, which is the safe direction when a picture is genuinely present.
  */
-export type ImageTurnIntent = 'create' | 'transform' | 'understand' | 'text'
+export type ImageTurnIntent = 'create' | 'regenerate' | 'transform' | 'understand' | 'text'
 
 /** Points at an image already in the conversation. */
 const REFERENTIAL: readonly RegExp[] = [
@@ -96,6 +96,29 @@ const REFERENTIAL: readonly RegExp[] = [
   /\bmake it\b/i,
   /\bchange it\b/i,
   /\bin (it|here)\b/i,
+]
+
+/**
+ * Asks for the SAME picture again — not a change to it, and not a question about it.
+ *
+ * This had no intent of its own, and that was the defect. "regenerate it" matched
+ * the UNDERSTAND patterns, because it IS a phrase about an image already in the
+ * conversation, so the turn went to the vision path and the model described the
+ * picture back to someone who had just asked for a new one. Eight of nine natural
+ * phrasings behaved that way; "make it again" instead matched TRANSFORM and would
+ * have been refused as an edit.
+ *
+ * Neither refusal nor description is right, because regenerating from the prompt
+ * that produced the image is something the system can genuinely do.
+ */
+const REGENERATE: readonly RegExp[] = [
+  /\b(re-?generate|re-?make|re-?create|re-?draw|re-?do|re-?run)\b/i,
+  /\b(make|generate|create|draw|do)\s+(it|this|that|one)\s+again\b/i,
+  /\b(again|another)\s+(one|version|time)\b/i,
+  /\bsame\s+(one|image|picture|thing)\b/i,
+  /\b(one|something)\s+(like|similar to)\s+(it|this|that)\b/i,
+  /\bsomething\s+similar\b/i,
+  /\btry\s+(it\s+)?again\b/i,
 ]
 
 /** Alters an image that already exists. */
@@ -141,6 +164,13 @@ export function classifyImageTurn(prompt: string, hasImage: boolean): ImageTurnI
    * attached image; requiring "this image" as well sent it to the vision path,
    * where a text model would improvise an edit result instead of refusing.
    */
+  /*
+   * Checked BEFORE transform and understand, because it overlaps both and would
+   * otherwise lose to either. "remake it" reads as a transform verb; "same one"
+   * reads as a question about the attached image. Neither is what was asked, and
+   * the second was the shipped defect.
+   */
+  if (matches(REGENERATE, text)) return 'regenerate'
   if (matches(TRANSFORM, text)) return 'transform'
   if (matches(UNDERSTAND, text)) return 'understand'
   if (refersToIt) return 'understand'

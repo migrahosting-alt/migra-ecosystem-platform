@@ -54,6 +54,7 @@ import type { BrainStreamFrame } from '@/server/brain/gateway'
 import type { ConversationSummary } from '@/server/brain/contracts'
 import { resolveTurnImages } from '@/server/files/resolveTurnImages'
 import { assessDocumentIntent } from '@/server/files/documentIntent'
+import { planRegeneration, wantsRegeneration } from '@/server/files/regenerate'
 import { saveImage } from '@/server/files/imageStore'
 import { adoptRequestId, TurnTrace } from '@/server/observability/turnTrace'
 
@@ -655,6 +656,15 @@ export async function POST(request: Request): Promise<Response> {
    * derived server-side from the session.
    */
   const documentIntent = assessDocumentIntent(prompt, grounded)
+
+  /*
+   * Only for a turn that actually asks to regenerate, and only when an image is
+   * in play. Planning it for every turn would read the library on every message
+   * for a decision almost none of them need.
+   */
+  const regeneration = wantsRegeneration(prompt) && liveImages.length > 0
+    ? await planRegeneration(liveImages[liveImages.length - 1])
+    : null
   const groundingMode = grounded ? 'approved' : 'none'
 
   const encoder = new TextEncoder()
@@ -734,6 +744,37 @@ export async function POST(request: Request): Promise<Response> {
         ...(allowance.kind === 'reserved' ? { quota: allowance.quota } : {}),
       })
 
+      /*
+       * "REGENERATE IT" IS ANSWERED, NOT DESCRIBED.
+       *
+       * The shipped defect was that this turn classified as a question about the
+       * attached image, so the model described the picture to someone who had
+       * asked for a new one — neither doing the work nor refusing it. The active
+       * image is already resolved above, so the only question left is whether the
+       * request can be executed, and provenance answers it: an image we generated
+       * carries the prompt that made it and can be run again; an upload cannot be
+       * reproduced and is refused plainly.
+       *
+       * Decided BEFORE the model is asked, so a refusal is never a model opinion
+       * and an execution never depends on the model choosing to cooperate.
+       */
+      if (regeneration) {
+        if (regeneration.kind === 'refuse') {
+          trace.set('regenerate_refused', regeneration.reason)
+          trace.finish('capability_refused')
+          await appendMessage(durableId, 'assistant', regeneration.message, { principal })
+          emit('error', { error: 'regenerate_unavailable', message: regeneration.message })
+          closed = true
+          try {
+            controller.close()
+          } catch {
+            /* already closed */
+          }
+          return
+        }
+        trace.set('regenerate_prompt', regeneration.prompt.slice(0, 120))
+      }
+
       if (documentIntent.needsAttachedDocument) {
         // Said before the model is asked: there is nothing to answer FROM.
         trace.set('document_unavailable', documentIntent.reason)
@@ -779,8 +820,18 @@ export async function POST(request: Request): Promise<Response> {
         return
       }
 
+      /*
+       * A REGENERATION RUNS THE ORIGINAL PROMPT, WITHOUT THE OLD PICTURE.
+       *
+       * Sending "regenerate it" would be classified as a question about the
+       * attached image — the defect itself — and sending the recovered prompt
+       * WITH the image attached would look like a request to alter that image.
+       * Running the prompt alone is what the user asked for and is exactly how
+       * the picture was made the first time.
+       */
+      const executing = regeneration?.kind === 'execute' ? regeneration : null
       const opened = await chatTurnStream(
-        prompt,
+        executing ? executing.prompt : prompt,
         {
           ...(conversationSummary ? { conversationSummary } : {}),
           groundingMode,
@@ -789,7 +840,7 @@ export async function POST(request: Request): Promise<Response> {
           ...(grounded ? { groundingFiles: reconciled.available } : {}),
           // Bytes, resolved server-side from refs the browser never saw the
           // inside of. Ordered, because "the first one" is a real question.
-          ...(resolvedImages.attachments.length > 0
+          ...(!executing && resolvedImages.attachments.length > 0
             ? { imageAttachments: resolvedImages.attachments }
             : {}),
         },
