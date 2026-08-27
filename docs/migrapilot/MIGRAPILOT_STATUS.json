@@ -391,7 +391,9 @@
         "needsFromOwner": "Create the project + Object Storage credentials + DR bucket in the Hetzner console."
       }
     ],
-    "IMPLEMENTED_NEEDS_LIVE_PROOF": []
+    "IMPLEMENTED_NEEDS_LIVE_PROOF": [
+      "Image conversational reference + regeneration truthfulness \u2014 target defects fixed and live-proven (execute path, refusal path, hard reload, no regression to explicit creation). NOT closed: the ordinary image-understanding check is blocked by GPU contention and must pass through the real product before the slice is PROVEN_LIVE."
+    ]
   },
   "openDefects": [
     {
@@ -518,6 +520,14 @@
       "disprovedBy": "The Ollama log showed those POSTs returning HTTP 400, not 500. \"unexpected EOF\" was Ollama failing to PARSE my request body, mangled by nested quoting through ssh -> qm guest exec -> sh -c -> curl. A well-formed request to the same model succeeded immediately.",
       "corrected": "Ollama was healthy the whole time. The real fault is VRAM contention with ComfyUI, which affects large models only. I restarted Ollama on the basis of the wrong diagnosis; it was harmless but unnecessary.",
       "priorityChanged": false
+    },
+    {
+      "claim": "\"Active image resolution already works \u2014 the defect is purely intent.\"",
+      "verdict": "DISPROVEN FOR GENERATED IMAGES. True for uploads.",
+      "detail": "The conversation's active image set was populated only from resolved ATTACHMENTS \u2014 setConversationImages was never called with what a turn GENERATED. So an uploaded picture could be referred to as \"it\" and a picture MigraPilot had just drawn could not. Half the statement was correct, which is why reading the code confirmed it.",
+      "howItSurfaced": "Only because the intent fix was deployed FIRST and the reported sentence still reproduced verbatim. With the routing correct and the behaviour unchanged, the remaining cause had nowhere left to hide.",
+      "lesson": "A partially true claim survives code reading, because the half you check is the half that holds. Fixing one cause and re-testing is what separates them.",
+      "recordedOn": "2026-08-27"
     }
   ],
   "promisesVsReality": [
