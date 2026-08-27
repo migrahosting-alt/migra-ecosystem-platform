@@ -1,6 +1,6 @@
 {
   "$schema": "MIGRAPILOT_STATUS \u2014 canonical cross-agent state. Update on every material change.",
-  "updated": "2026-08-26",
+  "updated": "2026-08-27",
   "updatedBy": "claude",
   "rules": {
     "easyFirst": "Do not start deep capability work while meaningful easy user-facing items remain.",
@@ -12,7 +12,7 @@
   "activeLane": {
     "name": "Files & Documents",
     "objective": "Finish common file/document behaviour before deeper capabilities.",
-    "currentStep": "Citation attribution made deterministic and deployed; LIVE PROOF BLOCKED by the workstation model backend failing every generation.",
+    "currentStep": "Citation attribution deployed and model-independent by design. LIVE PROOF BLOCKED by a measured GPU contention condition on the workstation, not by MigraPilot code: the RTX 3090 sits at 23723/24576 MiB and 100% utilisation while ComfyUI runs a job, and Ollama generation stalls even with qwen3:8b already resident at 11.5GB. Waiting for the ComfyUI queue to drain rather than killing an in-flight render.",
     "lastProvenMilestone": "All five formats grounded live; historical cards live+reload; deletion preserves history and stops grounding; detach removes active grounding without touching history or the library; a deleted file renders as Deleted.",
     "release": {
       "consumer": "citations-bc990598",
@@ -131,14 +131,30 @@
       "liveAcceptance": "n/a"
     },
     {
-      "id": "workstation-ollama-generation-failing",
-      "symptom": "qwen3:8b generation fails (HTTP 500 after ~318s) while a 1.5B model succeeds.",
-      "evidence": "GPU at 21589MiB/24576MiB before the attempt. ComfyUI (PID 23820, two instances on :8188) is the holder. A well-formed request to the 1.5B model returns normally.",
-      "rootCause": "VRAM exhaustion, not a broken Ollama runner. MigraPilot chat (Ollama) and image generation (ComfyUI) contend for the same 24GB card.",
-      "status": "OPEN_BLOCKS_LIVE_ACCEPTANCE \u2014 needs an owner decision on GPU sharing",
-      "effort": "EASY to unblock (stop a ComfyUI instance) but it disables image generation while stopped",
-      "regressionTest": "n/a",
-      "liveAcceptance": "blocked"
+      "id": "gpu-contention-starves-chat",
+      "symptom": "Every grounded chat turn ends in \"The engine could not complete the request\" after ~240s while ComfyUI holds the GPU.",
+      "evidence": "nvidia-smi: 23723/24576 MiB used, utilization.gpu 100%, 69C, with ComfyUI /queue reporting 1 running job. Ollama /api/ps shows qwen3:8b RESIDENT at 11.5GB, so this is not a model-load failure. A direct /api/generate probe for the trivial prompt \"Reply with exactly the word: READY\" hung past 600s, proving the stall is in generation and is upstream of MigraPilot. Substituting the smaller qwen2.5vl:7b failed identically, so model size is not the variable.",
+      "rootCause": "Unarbitrated GPU sharing between ComfyUI (image) and Ollama (chat) on one 24GB card.",
+      "status": "OPEN \u2014 environmental, not a product defect. Chat and image generation cannot both hold the card.",
+      "effort": "MEDIUM",
+      "regressionTest": "None yet; needs the GPU orchestration item on the backlog.",
+      "liveAcceptance": "Blocked until the card is free.",
+      "supersedes": "workstation-ollama-generation-failing",
+      "correctedClaims": [
+        "CORRECTED: \"two ComfyUI instances on :8188\". There is ONE ComfyUI \u2014 PID 42312 (launcher), PID 23820 (worker, listening 127.0.0.1:8188), PID 41308 (comfy-tailscale-bridge.py, listening 100.86.143.93:8188). Nothing is redundant, so there is no spare instance to stop.",
+        "CORRECTED: \"EASY to unblock by stopping a ComfyUI instance\". ComfyUI was mid-render (/queue reported 1 running job), so stopping it would destroy in-flight owner work. The safe path is to wait for the queue to drain.",
+        "REFINED: \"VRAM exhaustion\" is not the whole mechanism. Generation stalls with the model already resident and with a smaller model substituted, and the card reads 100% utilisation \u2014 so compute contention matters, not just memory headroom."
+      ]
+    },
+    {
+      "id": "index-reported-approved-while-empty",
+      "symptom": "GET /api/files/index returned state \"approved\", searchable true, and stats files=0 chunks=0 with an EMPTY chunkCounts map. Grounded turns then told the user \"No readable content was found in fixture-runbook.md\" \u2014 a false statement about a file that had 4 chunks.",
+      "evidence": "Observed once at 19:50 after a brain restart. A POST reindex immediately restored 9 files / 18 chunks. NOT REPRODUCED on the next restart, where the index survived intact with all 9 counts present, so the restart itself is NOT established as the cause.",
+      "rootCause": "UNDETERMINED. Candidates: a startup race where the scoped restore has not completed while status already answers approved, or a scope-resolution miss returning zero rows silently (the pattern in scoped-mutation-row-count-invariant). Not attributed on n=1.",
+      "status": "OPEN \u2014 needs replication before a fix. Do not fix by guess.",
+      "effort": "MEDIUM",
+      "regressionTest": "Wanted: an approved index that reports zero chunks must answer \"index unavailable, reindex needed\", never \"no readable content was found in <file>\". Approved+empty is contradictory state and must fail loudly.",
+      "liveAcceptance": "Not yet proven."
     }
   ],
   "driftControl": [
@@ -240,7 +256,8 @@
       "DOCX extraction",
       "XLSX/PPTX extraction",
       "ZIP/archive understanding",
-      "Bounded vision timeout + truthful in-progress state + secondary vision route"
+      "Bounded vision timeout + truthful in-progress state + secondary vision route",
+      "GPU resource orchestration (arbitrate ComfyUI vs Ollama on the single 24GB card)"
     ],
     "DEEP": [
       "Live Source Intelligence resume (free/direct sources first)",

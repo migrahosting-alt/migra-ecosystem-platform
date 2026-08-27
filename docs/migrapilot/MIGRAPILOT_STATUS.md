@@ -80,8 +80,31 @@ from Bonex. **Not a product blocker.**
 | Defect | Effort | Status |
 |---|---|---|
 | Citation shown for TXT, absent for Markdown | MEDIUM | **Fixed** — attribution now comes from the engine, not the prose. Needs live proof. |
-| `qwen3:8b` fails while ComfyUI holds the GPU | EASY to unblock | Blocks live acceptance; stopping ComfyUI disables image generation |
+| GPU contention starves the chat lane | MEDIUM | Blocks live acceptance. **Environmental, not a product defect** — see below. |
+| Index reported `approved` while holding zero chunks | MEDIUM | Seen once, **not reproduced**. Told the user a real file had "no readable content". |
 | Vision turn held 240s and returned nothing | MEDIUM | Operational target, not reproducible |
+
+
+### GPU contention — the measured facts
+
+The RTX 3090 reads **23,723 / 24,576 MiB and 100% utilisation** while ComfyUI runs a job.
+Under that load every grounded chat turn ends in "The engine could not complete the request"
+after ~240s (the Brain-call timeout).
+
+Three things rule out the explanations I reached for first:
+
+- **Not a model-load failure.** `qwen3:8b` was already **resident at 11.5 GB** when the turns failed.
+- **Not model size.** Substituting the smaller `qwen2.5vl:7b` failed identically.
+- **Not MigraPilot.** A direct `/api/generate` probe for `"Reply with exactly the word: READY"`
+  hung past **600s**, upstream of the product entirely.
+
+So the variable is **compute**, not just memory headroom, and the honest description is
+unarbitrated GPU sharing between image generation and chat on one card.
+
+Two earlier claims of mine were wrong and are corrected here: there is **one** ComfyUI
+(launcher 42312, worker 23820, Tailscale bridge 41308 — nothing redundant), and stopping it is
+**not** a cheap unblock, because it was **mid-render**. Killing it would have destroyed in-flight
+owner work, so the chat lane waits for the queue to drain instead.
 
 ---
 
