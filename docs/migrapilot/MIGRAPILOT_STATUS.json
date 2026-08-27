@@ -423,7 +423,8 @@
         "CORRECTED: \"two ComfyUI instances on :8188\". There is ONE ComfyUI \u2014 PID 42312 (launcher), PID 23820 (worker, listening 127.0.0.1:8188), PID 41308 (comfy-tailscale-bridge.py, listening 100.86.143.93:8188). Nothing is redundant, so there is no spare instance to stop.",
         "CORRECTED: \"EASY to unblock by stopping a ComfyUI instance\". ComfyUI was mid-render (/queue reported 1 running job), so stopping it would destroy in-flight owner work. The safe path is to wait for the queue to drain.",
         "REFINED: \"VRAM exhaustion\" is not the whole mechanism. Generation stalls with the model already resident and with a smaller model substituted, and the card reads 100% utilisation \u2014 so compute contention matters, not just memory headroom."
-      ]
+      ],
+      "measuredContrast": "Same conversation, same question, same model: NO answer in >5 minutes at 24.0/24.5 GB and 100% util; \"Red\" in 15 s at 5.7 GB and 11%. The failure is resource starvation, not prompting or routing."
     },
     {
       "id": "csv-quantitative-reasoning-qwen3-8b",
@@ -721,7 +722,7 @@
       },
       "assertedWhereItCounts": "The decisive checks were made against PERSISTED message state through the app's own authenticated API, not against rendered text \u2014 so they hold regardless of whether a model ever answered.",
       "historicalRecordPreserved": "The first message still carries imageRefs [img_8373c737] and its card still renders. The file was never deleted. Only the ACTIVE set changed.",
-      "\ud83d\udea8 stillOwed": "ONE good-image understanding turn answering live. NOT proven in this window: the GPU sat at 24050/24576 MiB and 100% with NO Ollama model resident at all \u2014 a non-MigraPilot workload held the whole card, so even \"what is the capital of France?\" returned nothing. No assistant message was produced for ANY turn. Deferred by Bonex to when the GPU frees; the render was not interrupted."
+      "goodImageUnderstandingTurn": "\u2705 CLOSED 2026-08-27. Asked in the SAME conversation the broken image had poisoned; answered \"Red\" for the solid red PNG in 15 seconds with the GPU at 5.7/24.5 GB and 11%. The identical turn never completed at all while the card was pinned \u2014 a direct measurement for the GPU lane, not just a passing check."
     },
     "consumerReproducibleRelease": {
       "decisiveNegativeControl": "The outgoing release's node_modules is MOVED aside and the service restarted; the new release must still serve 200. It did, twice. Run only AFTER activation (the old release is then idle), never deleted, and restored by a trap so an interruption cannot damage the rollback target.",
