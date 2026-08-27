@@ -259,6 +259,24 @@
       "honestStates": "confirmed / probable / sequence_uncertain / duplicate / missing_neighbor \u2014 a page with no folio, section or chapter evidence gets NO position rather than a guessed one.",
       "twoRepresentations": "sourceText is the exact OCR output with historical orthography untouched; searchText is derived, diacritic-folded, and never written back.",
       "nextStep": "Wire ingestion: rasterise/split -> adaptive OCR -> reconstruct -> validate -> index canonical units with page provenance. Only then may the scanned-PDF refusal disappear."
+    },
+    "ingestionPolicy": {
+      "rule": "Placement uncertainty must reduce ORDERING confidence, never erase readable content.",
+      "policy": {
+        "confirmed/probable/missing_neighbor": "index normally \u2014 usable for sequence questions",
+        "sequence_uncertain": "INDEX, but unplaced: retrievable for content, excluded from ordering logic",
+        "duplicate": "not indexed twice; attached to the canonical page as alternate-source evidence",
+        "blank/unreadable": "no chunks"
+      },
+      "verifiedOnTheBook": {
+        "index": 29,
+        "alternate_evidence": 5,
+        "index_unplaced": 3,
+        "orderedPagesUsableForSequence": 21,
+        "corroboratedPages": "folio 7 by scan 22, folio 33 by 23, folio 39 by 26, folio 41 by 27, and the chapter page by 25"
+      },
+      "metadataContract": "sourceType, scanIndex, physicalHalf, printedFolio, canonicalPosition, sequenceState, chapter, sectionCandidates, ocrConfidence, alternateCaptures. printedFolio and canonicalPosition are NULL rather than absent when unknown \u2014 a missing key invites a default, and a synthesised folio is the invented continuity this whole lane exists to prevent.",
+      "whyDuplicatesAreNotChunks": "A second capture would double the page's weight in retrieval and let one sentence be cited as two independent sources. Kept as corroboration instead, so extra scans raise confidence without polluting the index."
     }
   },
   "capabilities": {

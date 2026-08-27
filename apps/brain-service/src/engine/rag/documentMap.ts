@@ -31,6 +31,25 @@ export type PlacementBasis =
   | 'continuation'
   | 'scan_order';
 
+/**
+ * What indexing should DO with this page.
+ *
+ * Placement uncertainty reduces ordering confidence; it must never erase
+ * readable content. A page whose folio the binding curl removed still holds
+ * vocabulary, grammar and historical spellings that OCR recovered — refusing to
+ * index it would mean pretending that evidence does not exist because we cannot
+ * say where it sits.
+ */
+export type IndexAction =
+  /** Placed and ordered. Usable for sequence questions. */
+  | 'index'
+  /** Readable but unplaced: retrievable, and excluded from ordering logic. */
+  | 'index_unplaced'
+  /** A second capture of a page already indexed — evidence, not a chunk. */
+  | 'alternate_evidence'
+  /** Nothing readable to index. */
+  | 'skip';
+
 export interface PlacedPage {
   scanIndex: number;
   physicalPosition: ScannedPageRecord['physicalPosition'];
@@ -47,6 +66,17 @@ export interface PlacedPage {
   confidence: number;
   /** Exact OCR output. NEVER normalised — see `searchText` for the derived form. */
   sourceText: string;
+  /** What ingestion should do with this page — see {@link IndexAction}. */
+  indexAction: IndexAction;
+  /**
+   * Other scans that captured this same page.
+   *
+   * Duplicates are NOT indexed twice: a second capture would double the page's
+   * weight in retrieval and let the same sentence be cited as two sources. They
+   * are kept here so the extra capture still earns its keep as corroboration of
+   * the canonical page rather than polluting the index.
+   */
+  alternateCaptures: number[];
   /**
    * Derived, lossy, and strictly additional.
    *
@@ -218,6 +248,8 @@ export function reconstructDocument(records: readonly ScannedPageRecord[]): Docu
       confidence: record.confidence,
       sourceText: record.selectedText,
       searchText: toSearchText(record.selectedText),
+      indexAction: 'index',
+      alternateCaptures: [],
     });
   }
 
@@ -269,6 +301,28 @@ export function reconstructDocument(records: readonly ScannedPageRecord[]): Docu
     if (b.canonicalIndex !== undefined) return 1;
     return a.scanIndex - b.scanIndex;
   });
+
+  /*
+   * Ingestion policy, applied here so indexing never has to re-derive it:
+   *   confirmed / probable / missing_neighbor -> index normally
+   *   sequence_uncertain                      -> index, but unplaced
+   *   duplicate                               -> attach to the canonical page
+   */
+  for (const page of placed) {
+    if (page.state === 'duplicate') {
+      page.indexAction = 'alternate_evidence';
+      const canonical = placed.find((c) =>
+        c.state !== 'duplicate'
+        && ((page.folio !== undefined && c.folio === page.folio)
+          || (page.chapterMarkers.length > 0
+            && page.chapterMarkers.some((m) => c.chapterMarkers.includes(m)))));
+      if (canonical) canonical.alternateCaptures.push(page.scanIndex);
+    } else if (page.state === 'sequence_uncertain') {
+      page.indexAction = 'index_unplaced';
+    } else {
+      page.indexAction = 'index';
+    }
+  }
 
   const validationFailures = validateAgainstDeclarations(placed, declaredRanges);
 
@@ -349,4 +403,60 @@ export function validateAgainstDeclarations(
     }
   }
   return failures;
+}
+
+/**
+ * The metadata every chunk from a scanned page must carry.
+ *
+ * `canonicalPosition` and `printedFolio` are NULL rather than absent when the
+ * page could not be placed — a missing key invites a caller to substitute a
+ * default, and a synthesised folio is exactly the invented continuity this
+ * module exists to prevent. Null says "we looked and could not tell", which is
+ * a fact worth carrying.
+ */
+export interface ScannedChunkMetadata {
+  sourceType: 'scanned_pdf';
+  scanIndex: number;
+  physicalHalf: PlacedPage['physicalPosition'];
+  printedFolio: number | null;
+  canonicalPosition: number | null;
+  sequenceState: PlacementState;
+  chapter: string | null;
+  sectionCandidates: string[];
+  ocrConfidence: number;
+  /** Scans that captured this same page, kept as corroboration. */
+  alternateCaptures: number[];
+}
+
+export function chunkMetadata(page: PlacedPage): ScannedChunkMetadata {
+  return {
+    sourceType: 'scanned_pdf',
+    scanIndex: page.scanIndex,
+    physicalHalf: page.physicalPosition,
+    printedFolio: page.folio ?? null,
+    canonicalPosition: page.canonicalIndex ?? null,
+    sequenceState: page.state,
+    chapter: page.chapterMarkers[0] ?? null,
+    sectionCandidates: page.sections,
+    ocrConfidence: page.confidence,
+    alternateCaptures: page.alternateCaptures,
+  };
+}
+
+/**
+ * The pages a SEQUENCE-SENSITIVE question may reason over.
+ *
+ * "What comes after section 33?" and "teach the next lesson" must not be
+ * answered from pages nobody could place, because the answer would be ordering
+ * dressed up as fact. Those pages stay fully retrievable for questions about
+ * content — vocabulary, wording, examples, older spellings — which is most of
+ * what this book is useful for.
+ */
+export function orderedPages(map: DocumentMap): PlacedPage[] {
+  return map.pages.filter((p) => p.indexAction === 'index' && p.canonicalIndex !== undefined);
+}
+
+/** Readable pages that could not be placed — surfaced honestly, never silently dropped. */
+export function unplacedPages(map: DocumentMap): PlacedPage[] {
+  return map.pages.filter((p) => p.indexAction === 'index_unplaced');
 }

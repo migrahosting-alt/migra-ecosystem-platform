@@ -8,7 +8,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { reconstructDocument, parseDeclaredRanges, toSearchText } from '../src/engine/rag/documentMap.js';
+import {
+  reconstructDocument, parseDeclaredRanges, toSearchText,
+  chunkMetadata, orderedPages, unplacedPages,
+} from '../src/engine/rag/documentMap.js';
 import type { ScannedPageRecord } from '../src/engine/rag/scannedOcr.js';
 
 const page = (over: Partial<ScannedPageRecord> = {}): ScannedPageRecord => ({
@@ -82,4 +85,50 @@ test('the source transcript is never normalised', () => {
   assert.equal(map.pages[0]!.sourceText, historical, 'older orthography must survive exactly');
   assert.notEqual(map.pages[0]!.searchText, historical, 'the derived field is separate');
   assert.match(toSearchText(historical), /oue mango/, 'search text folds diacritics for matching only');
+});
+
+/*
+ * ── INGESTION POLICY ────────────────────────────────────────────────────────
+ *
+ * Placement uncertainty reduces ordering confidence; it must never erase
+ * readable content. Holding an unplaced page out of the index would mean
+ * pretending OCR never recovered it.
+ */
+
+test('an unplaced page is INDEXED, but excluded from ordering', () => {
+  const map = reconstructDocument([
+    page({ scanIndex: 5, folioCandidates: [17], selectedText: 'placed page' }),
+    page({ scanIndex: 9, selectedText: 'readable vocabulary page with no folio or section at all' }),
+  ]);
+  const unplaced = unplacedPages(map);
+  assert.equal(unplaced.length, 1);
+  assert.equal(unplaced[0]!.indexAction, 'index_unplaced', 'its content must still reach the index');
+  assert.ok(unplaced[0]!.sourceText.length > 0, 'the transcript is kept');
+
+  // ...and it must not be available to answer "what comes next".
+  assert.deepEqual(orderedPages(map).map((p) => p.scanIndex), [5]);
+});
+
+test('a duplicate is attached as evidence, never indexed twice', () => {
+  const map = reconstructDocument([
+    page({ scanIndex: 12, folioCandidates: [33], selectedText: 'first capture of the page' }),
+    page({ scanIndex: 23, folioCandidates: [33], selectedText: 'second capture, noisier OCR' }),
+  ]);
+  const canonical = map.pages.find((p) => p.scanIndex === 12)!;
+  const dupe = map.pages.find((p) => p.scanIndex === 23)!;
+
+  assert.equal(dupe.indexAction, 'alternate_evidence', 'a second capture must not become a second chunk');
+  assert.deepEqual(canonical.alternateCaptures, [23], 'it corroborates the canonical page instead');
+  assert.equal(orderedPages(map).length, 1, 'one page, one position');
+});
+
+test('chunk metadata says NULL rather than inventing a position', () => {
+  const map = reconstructDocument([page({ scanIndex: 9, physicalPosition: 'left', selectedText: 'unplaceable but readable' })]);
+  const meta = chunkMetadata(map.pages[0]!);
+  assert.equal(meta.sourceType, 'scanned_pdf');
+  assert.equal(meta.printedFolio, null, 'no folio may be synthesised');
+  assert.equal(meta.canonicalPosition, null, 'no position may be inferred');
+  assert.equal(meta.sequenceState, 'sequence_uncertain');
+  assert.equal(meta.physicalHalf, 'left', 'scan geometry is still a recorded fact');
+  assert.equal(meta.scanIndex, 9);
 });
