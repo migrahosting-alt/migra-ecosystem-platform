@@ -98,7 +98,20 @@ const megabytes = (value: string | undefined, fallback: number): number => {
   return Number.isFinite(parsed) && parsed > 0 ? parsed * 1024 * 1024 : fallback * 1024 * 1024
 }
 
-export const MAX_FILE_BYTES = megabytes(process.env.MIGRAPILOT_MAX_FILE_MB, 1024)
+/*
+ * 🚨 THIS MUST NOT EXCEED WHAT THE TRANSPORT WILL CARRY.
+ *
+ * It advertised 1024 MB while the reverse proxy in front of the app rejects
+ * anything over roughly 32 MB with a 413 — measured by binary search against
+ * production. So the app promised a gigabyte, the user picked a 35 MB PDF, and
+ * the upload died at a hop the app never saw.
+ *
+ * Set to the measured transport ceiling so an oversized file is refused BEFORE
+ * the upload, with a message that says what is wrong. Raising it means raising
+ * `client_max_body_size` on the proxy FIRST — otherwise this reintroduces the
+ * same lie with a bigger number.
+ */
+export const MAX_FILE_BYTES = megabytes(process.env.MIGRAPILOT_MAX_FILE_MB, 31)
 export const MAX_LIBRARY_BYTES = megabytes(process.env.MIGRAPILOT_MAX_LIBRARY_MB, 20 * 1024)
 export const MAX_FILES = Number(process.env.MIGRAPILOT_MAX_FILES) || 2000
 

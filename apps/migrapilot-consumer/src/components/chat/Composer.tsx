@@ -123,6 +123,14 @@ export function Composer({
   const [images, setImages] = useState<{ id: string; name: string }[]>([])
   const [pendingImage, setPendingImage] = useState<{ name: string } | null>(null)
   const [imageError, setImageError] = useState<string | null>(null)
+  /*
+   * Refusals carry the NAME of the file that caused them.
+   *
+   * They used to share one global slot with image errors, which is how a .wav
+   * refusal outlived the selection that produced it and sat above an unrelated
+   * PDF. Identity is what makes a notice dismissible without guessing.
+   */
+  const [refusals, setRefusals] = useState<{ name: string; message: string }[]>([])
   const imageBusy = pendingImage !== null
   // `limits` is no longer read here: the picker offers the DOCUMENT category
   // rather than today's server allowlist, and the server stays authoritative for
@@ -226,19 +234,33 @@ export function Composer({
     event.target.value = ''
     if (picked.length === 0) return
 
+    /*
+     * 🚨 A NEW SELECTION CLEARS THE OLD COMPLAINT.
+     *
+     * A refusal about a .wav stayed on screen while a PDF was being attached,
+     * so the composer showed a message about a file that was no longer part of
+     * anything. Every notice here belongs to the selection that produced it, and
+     * a new selection replaces it — never accumulates beside it.
+     */
+    setRefusals([])
+    setImageError(null)
+
     const documents: File[] = []
+    const refused: { name: string; message: string }[] = []
     for (const file of picked) {
       // The first bytes are the evidence. Read once, here, so no downstream
       // layer has to guess from the name.
       const head = new Uint8Array(await file.slice(0, 512).arrayBuffer())
       const verdict = classifyAttachment(file.name, file.type, head)
       if (!verdict.ok) {
-        setImageError(verdict.message)
+        // Named, because one refusal among four selected files has to say WHICH.
+        refused.push({ name: file.name, message: verdict.message })
         continue
       }
       if (verdict.pipeline === 'image') await uploadImage(file)
       else documents.push(file)
     }
+    if (refused.length > 0) setRefusals(refused)
     if (documents.length > 0) add(documents as unknown as FileList)
   }
 
@@ -525,6 +547,29 @@ export function Composer({
           onRemove={(ref) => onDetachConversationImage?.(ref)}
         />
       )}
+
+      {/*
+        * Each refusal names its file and is dismissed on its own. One shared slot
+        * is how a .wav complaint ended up sitting above an unrelated PDF.
+        */}
+      {refusals.map((r) => (
+        <div
+          key={r.name}
+          role="status"
+          className="mt-2 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50/70 px-3 py-2 text-[12.5px] text-amber-900"
+        >
+          <span className="min-w-0 flex-1">
+            <strong className="font-semibold">{r.name}</strong> — {r.message}
+          </span>
+          <button
+            type="button"
+            onClick={() => setRefusals((current) => current.filter((x) => x.name !== r.name))}
+            className="shrink-0 rounded px-1 text-amber-700 underline hover:text-amber-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-amber-500"
+          >
+            dismiss
+          </button>
+        </div>
+      ))}
 
       <ImageTray
         images={images}

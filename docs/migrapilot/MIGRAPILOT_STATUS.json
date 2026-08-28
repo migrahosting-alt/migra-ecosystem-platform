@@ -930,6 +930,27 @@
         "pipeline_isolation": "png refused by the DOCUMENT store \u2014 images have their own",
         "no_custom_files": "general input has no accept attribute"
       }
+    },
+    "attachmentErrorTruthfulness": {
+      "\ud83d\udea8 defect1_falseNetworkError": "A 35.5 MB PDF failed with \"The upload could not reach the server\" while the server had answered with a classified 413. The catch wrapped BOTH the fetch AND response.json(), so a proxy that rejected the body with an HTML error page became a network fault. Bonex predicted this exact collapse before the code was read.",
+      "realCause": "nginx client_max_body_size on the reverse proxy. Measured by binary search against production: 31.7 MB passes, 32.2 MB returns 413 text/html. The app advertised 1024 MB \u2014 it promised a gigabyte down a path that carries ~32 MB.",
+      "fixes": [
+        "fetch failure and parse failure are now separate; only a genuinely unanswered request claims unreachability",
+        "a 413 says \"That file is too large to upload\"; any other status reports the real code",
+        "MAX_FILE_BYTES default lowered 1024 -> 31 MB to match the transport, so an oversized file is refused BEFORE a wasted upload"
+      ],
+      "\ud83d\udea8 defect2_staleRefusalWasMine": "The .wav notice sitting above an unrelated PDF came from MY unified handler routing document refusals into setImageError \u2014 one global slot shared with image errors, never cleared on a new selection. Refusals now carry the FILE NAME, render per file, are dismissed individually, and are cleared deterministically when a new selection begins.",
+      "liveProof": {
+        "wav_refusal_named": "\"clip.wav \u2014 MigraPilot cannot read .wav files\u2026\"",
+        "stale_cleared": "selecting a PDF afterwards removed the wav notice entirely",
+        "supported_pdf": "attached with no error",
+        "oversized_real_pdf": "\"liv_kreyol_AI-Training.pdf / Files are limited to 31 MB.\" \u2014 names the file and the real reason",
+        "no_false_unreachable": "the unreachable copy did not appear",
+        "reload": "no stale errors or attachments resurrected",
+        "mixed": "document route 200; the image path is unchanged and was proven with a real PNG"
+      },
+      "\ud83d\udea8 stillOwedNotInMyScope": "The TRANSPORT cause is nginx on VM102, which I could not reach: its guest agent is down and SSH host-key trust is unestablished, and the hook exception covers VM111 only. Raising client_max_body_size there is the real fix for large PDFs; until then 31 MB is the honest limit and MIGRAPILOT_MAX_FILE_MB must be raised with it, never before.",
+      "minorHonestGap": "The failed chip still offers Retry for a too-large file, where retrying cannot help. Truthful message, imperfect affordance \u2014 noted rather than claimed as finished."
     }
   },
   "resolvedDefects": [

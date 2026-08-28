@@ -88,13 +88,44 @@ export function useAttachments() {
       patch(id, { state: 'uploading', reason: undefined })
 
       let payload: Parameters<typeof outcomeOfUpload>[0]
+      /*
+       * 🚨 "COULD NOT REACH THE SERVER" USED TO MEAN ANY THROWN EXCEPTION.
+       *
+       * The old catch wrapped BOTH the fetch and response.json(), so a server
+       * that answered perfectly well — with a 413 and an HTML error page from
+       * the proxy — was reported as unreachable. A 35 MB PDF failed with
+       * "The upload could not reach the server" while the server had in fact
+       * classified it and said exactly what was wrong.
+       *
+       * The two failures are now separate, because they call for different
+       * things from the user: a network problem is worth retrying, and a file
+       * that is too large never will be.
+       */
+      let response: Response
       try {
         const body = new FormData()
         body.append('file', file)
-        const response = await fetch('/api/files', { method: 'POST', body })
+        response = await fetch('/api/files', { method: 'POST', body })
+      } catch {
+        // Genuinely no answer: DNS, offline, connection reset.
+        patch(id, { state: 'failed', reason: 'The upload could not reach the server.' })
+        return
+      }
+
+      try {
         payload = await response.json()
       } catch {
-        patch(id, { state: 'failed', reason: 'The upload could not reach the server.' })
+        /*
+         * The server answered, but not with JSON — which is what a proxy does
+         * when it rejects a request before the app ever sees it. Report what it
+         * actually said rather than inventing a network fault.
+         */
+        patch(id, {
+          state: 'failed',
+          reason: response.status === 413
+            ? 'That file is too large to upload.'
+            : `The server refused the upload (error ${response.status}).`,
+        })
         return
       }
 
