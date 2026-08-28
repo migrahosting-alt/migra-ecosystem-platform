@@ -806,6 +806,19 @@
         "deleteSource": "answer remains; persisted record immutable; server flags it missing; UI shows it struck through and deleted",
         "noModelFilenames": "sources are intersected server-side with the real library, so an invented filename cannot reach the record"
       }
+    },
+    "speechOutputQualification": {
+      "status": "\u23f8 AWAITING BONEX'S EAR. Nothing integrated. Both candidates pass every objective gate.",
+      "listeningPage": "https://claude.ai/code/artifact/1faef590-6b56-46a9-82ee-798e45caae9d",
+      "measuredCpuOnly": {
+        "piper": "MIT. First audio 113-297 ms, RTF 0.042-0.050, peak 358 MB, model load 1.17 s, 61 MB voice file, no GPU.",
+        "kokoro": "Apache-2.0. First audio 1,243 ms (sentence-split), RTF 0.31-0.49, peak 2,144 MB, model load 5.52 s, ~2 GB with PyTorch, no GPU required.",
+        "espeakNg": "Included ONLY as the reference floor \u2014 it is the robotic baseline Bonex explicitly rejected."
+      },
+      "\ud83d\udea8 measurementIWouldHaveGotWrong": "Kokoro first measured 9,978 ms to first audio, which reads as unusable. That compared Piper's internal streaming against Kokoro's batch synthesis. Split into sentences \u2014 what Piper already does for itself \u2014 it drops to 1,243 ms with RTF 0.31, so playback starts in about a second and never starves. The unfair comparison would have eliminated the more natural engine on a setup artefact.",
+      "twoSetupErrorsOfMineFixedBeforeJudging": "Kokoro's bundled espeak loader pointed at a CI build path and failed \u2014 redirected to the system espeak-ng. And my first Piper locale query used the wrong path shape and returned zero languages, which would have produced a false claim about Creole support.",
+      "haitianCreole": "NOT AVAILABLE in either \u2014 Piper ships 56 locales, Kokoro 9, and Creole is in neither. It needs a trained voice, which is its own program rather than part of shipping speech output. French is the nearest neighbour and is not a substitute.",
+      "whatRemains": "Both are permissive, self-hosted, CPU-only, no paid dependency, no new GPU contention. The numbers cannot decide it: Piper is far lighter and ~10x faster to first word; Kokoro is generally judged more natural for ~1 s and 2 GB. Bonex listens, then integration begins."
     }
   },
   "resolvedDefects": [
