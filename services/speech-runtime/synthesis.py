@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import base64
 import io
+import json
 import os
 import re
 import subprocess
@@ -189,6 +190,29 @@ def _piper_synth(text: str) -> tuple[bytes, int]:
         w.setframerate(rate)
         w.writeframes(bytes(frames))
     return buf.getvalue(), rate
+
+
+def warm_up() -> None:
+    """Load the synthesiser in the background at startup.
+
+    🚨 Without this the FIRST person to press Read aloud after any restart pays
+    the model load — measured at ~5.5 s — on top of their synthesis, and
+    experiences the product as far slower than it is. That is a bad number to
+    judge a voice by, and it is entirely avoidable: the load happens once and
+    nothing is waiting on it here.
+
+    Deliberately silent about failure. A synthesiser that cannot load must not
+    stop the ASR service from starting; `synthesis_capability` and the first real
+    request will both report the problem honestly when asked.
+    """
+    def _load() -> None:
+        started = time.time()
+        engine = "kokoro" if _load_kokoro() is not None else ("piper" if _load_piper() is not None else None)
+        print(json.dumps({"event": "tts.warm", "engine": engine,
+                          "ms": int((time.time() - started) * 1000),
+                          **({"error": _kokoro_error} if engine != "kokoro" and _kokoro_error else {})}),
+              flush=True)
+    threading.Thread(target=_load, name="tts-warmup", daemon=True).start()
 
 
 def synthesis_capability() -> dict:

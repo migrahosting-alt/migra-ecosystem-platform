@@ -852,7 +852,18 @@
       },
       "noFakeState": "Audio is not persisted, and that is the honest choice rather than a shortcut: after a reload there IS no audio, so the control is idle. Restoring a play-ready control for audio that no longer exists is exactly the false state the rule forbids.",
       "stillOwed": "Bonex listens INSIDE MigraPilot. Until then this is not PROVEN_LIVE.",
-      "knownConstraint": "HARDWARE, recorded not compensated for: synthesis is whole-answer, so the wait is ~0.4x the spoken length. Sentence-streaming would cut it to ~1.2 s regardless of answer length and is the next increment \u2014 the slice is complete within its defined scope, not disguised as finished."
+      "knownConstraint": "HARDWARE, recorded not compensated for: synthesis is whole-answer, so the wait is ~0.4x the spoken length. Sentence-streaming would cut it to ~1.2 s regardless of answer length and is the next increment \u2014 the slice is complete within its defined scope, not disguised as finished.",
+      "\ud83d\udea8 acceptanceIsBonexEarsOnly": {
+        "rule": "The remaining gate is HUMAN PERCEPTUAL ACCEPTANCE in the real product \u2014 voice quality, intelligibility, pacing, pronunciation, startup delay, and whether Read aloud feels natural enough to keep enabled. Implementation evidence does NOT substitute, and the agent must not self-certify any of the three outcomes.",
+        "outcomes": {
+          "PROVEN_LIVE": "Warm is good enough as shipped.",
+          "IMPLEMENTED_NEEDS_VOICE_TUNING": "Plumbing correct; voice or pacing not acceptable.",
+          "IMPLEMENTED_NEEDS_LATENCY_WORK": "The whole-answer startup materially hurts the experience."
+        },
+        "whereToTest": "chat.migrateck.com, a real conversation, the Read aloud control beside Copy."
+      },
+      "nonPersistenceAccepted": "Bonex confirmed: the synthesised artifact is ephemeral, so returning to idle after reload is TRUTHFUL. Persisting a phantom \"ready\" state would be worse than deliberately starting clean.",
+      "warmupAddedBeforeTheGate": "The engine now loads in a background thread at runtime startup (measured 4,339 ms). Without it the first Read aloud after any restart paid that on top of synthesis \u2014 which would have made a LATENCY judgement about a cold start rather than about the product. Steady state is RTF ~0.47."
     }
   },
   "resolvedDefects": [
@@ -1021,5 +1032,6 @@
       "\ud83d\udea8 pageDiscrepancy": "Directive states 603 distinct pages; corpus measures 726. Tested the overlap hypothesis by rendering and hashing every page of the suspected duplicates: ZERO pixel-identical pages. Not duplicate scans. Content-level comparison belongs in PASS 2; neither figure is certified.",
       "note": "Separate program from MigraPilot product work; tracked here only so it is not lost."
     }
-  }
+  },
+  "nextAfterListeningGate": "Krey\u00f2l PASS 2. Keep 726 as the measured source-page inventory; treat 603 as an unresolved historical/accounting figure until SEMANTIC comparison explains it \u2014 pixel hashing already proved there are no duplicate scans, so it cannot settle this."
 }

@@ -381,6 +381,9 @@ class Handler(BaseHTTPRequestHandler):
 def main() -> None:
     _guard_exposure()
     load_model()
+    # Non-blocking: ASR is ready the moment its own model is, and the voice
+    # loads alongside so the first person to press Read aloud does not pay for it.
+    synthesis.warm_up()
     server = ThreadingHTTPServer((HOST, PORT), Handler)
     print(
         json.dumps({
