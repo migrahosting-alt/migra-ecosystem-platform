@@ -365,7 +365,8 @@
       "Consumer rendering of GPU_BUSY \u2014 all 7 steps passed in the signed-in browser: the exact busy sentence renders, no spinner, no assistant placeholder row, the active image survives, and after contention clears the same conversation answers \"Purple.\" in 15 s. Slice 1 CLOSED 2026-08-27.",
       "Durable answer attribution (whole document lane) \u2014 \"From your files\" is persisted on the answer itself, survives hard reload and History reopen, and a source deleted afterwards renders as struck through and \"deleted\" rather than a link to nothing. Proven live on Bonex's OWN document 2026-08-27 (consumer attrib-08272139).",
       "Speech output \u2014 MigraPilot reads an answer aloud. Bonex triggered it himself in the real product and accepted it (\"clean\", \"its good\"), which is the only thing that could close this gate. Live 2026-08-27 (brain speak-08272230, consumer gesture-08272252).",
-      "Message feedback + report bad answer (Chat matrix rows 67, 68) \u2014 thumbs persist against the exact message, negative feedback captures a structured reason and optional note, changing a vote updates one row, retracting removes it, state survives reload, and a failed write leaves NOTHING selected. Full acceptance path passed live 2026-08-28 (brain fb-08280112, consumer fbui-08280112)."
+      "Message feedback + report bad answer (Chat matrix rows 67, 68) \u2014 thumbs persist against the exact message, negative feedback captures a structured reason and optional note, changing a vote updates one row, retracting removes it, state survives reload, and a failed write leaves NOTHING selected. Full acceptance path passed live 2026-08-28 (brain fb-08280112, consumer fbui-08280112).",
+      "Picker/storage agreement (Chat matrix 22-24) \u2014 one canonical attachment definition drives the picker, validator, refusal copy and published contract. 35 offered = 35 accepted, and a binary file wearing a text extension is refused. Proven live 2026-08-28 (consumer sniff-08280125)."
     ],
     "STABILIZATION": [
       {
@@ -880,6 +881,24 @@
       "engineerSeam": "schema_version plus turn provenance (request/model/provider/turnContext) travel with every record so a later evaluation pipeline reads them without a migration. Those fields CANNOT be back-filled: by the time anyone wants them the turn is gone. Building the consumer is a different slice.",
       "notAControl": "Feedback never edits, regenerates or re-ranks. A button that silently changed your answer would be worse than one that did nothing.",
       "noOptimisticUpdate": "The UI updates only after the server agrees. An optimistic update would recreate the original defect in subtler form \u2014 a thumb that looks saved while the write failed."
+    },
+    "pickerStorageAgreement": {
+      "canonicalDefinition": "src/features/attachments/capability.ts \u2014 picker accept, storage allowlist, refusal copy and GET /api/files/capability all derive from it. Separate hand-maintained lists were the defect.",
+      "classification": {
+        "indexed_35": "pdf, docx, and every plain-text document/data/code type the indexer genuinely reads \u2014 verified per-extension against Exclusions, not assumed.",
+        "refused_13": "Office binaries and Open Document (no extractor), archives (containers), sql (indexer treats it as a dump).",
+        "xlsx_pptx_held_deliberately": "Refused for a REASON, not for want of a parser: spreadsheet ANALYSIS is a known open defect, and shipping ingestion on top of it would advertise a capability that answers confidently and wrongly.",
+        "expandedWhereItGenuinelyWorks": "c, h, cpp, cs, php, swift, kt, tsv added \u2014 plain text the indexer already reads. Correcting an under-inclusive list, not blind expansion."
+      },
+      "smugglingGapFoundLive": "A zip renamed to .csv was ACCEPTED (200) during the acceptance run: the validator trusted the extension and never read the bytes. It would have stored an archive as text, been skipped by the indexer at its first NUL byte, and sat in the library looking accepted. Closed with a content check on text-shaped types ONLY. PDF and DOCX are legitimately binary with real extractors, so the rule is: no binary wearing a text file name \u2014 not: no binary.",
+      "liveAcceptance": {
+        "1_selectable_upload": "csv 200, cpp 200",
+        "2_non_selectable_blocked": "xlsx / pptx / zip / sql all 400",
+        "4_smuggling": "zip-as-csv 400 after the fix, 200 before it",
+        "5_server_authoritative": "every refusal enforced server-side with the picker bypassed entirely",
+        "6_ui_from_contract": "picker accept == GET /api/files/capability: 35 == 35, zero drift",
+        "7_no_regression": "docx 200; the image path is separate and untouched"
+      }
     }
   },
   "resolvedDefects": [
@@ -1130,7 +1149,8 @@
         "reload_again": "exact state restored",
         "retract": "UI shows nothing selected; backend returns []",
         "failure": "forced 503 on the write \u2014 UI shows \"could not be saved. Try again in a moment.\", nothing selected, no row created"
-      }
+      },
+      "22-24 picker/storage agreement": "LIVE"
     }
   }
 }
