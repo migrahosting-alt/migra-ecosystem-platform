@@ -139,6 +139,8 @@ export type BrainOperation =
    * defaulted anywhere along this path.
    */
   | { kind: 'transcribe'; audioBase64: string; audioMime: string; requestedLanguage?: string }
+  | { kind: 'synthesisCapability' }
+  | { kind: 'synthesizeSpeech'; text: string; voice?: string }
 
   // ── MigraPilot preferences ───────────────────────────────────────────────
   /**
@@ -567,6 +569,14 @@ export function resolveOperation(op: BrainOperation): ResolvedRequest {
     case 'getCodingRun':
       return { method: 'GET', path: `/api/ai/coding/runs/${id(op.runId, 'runId')}` }
 
+    case 'synthesisCapability':
+      return { method: 'GET', path: '/api/ai/speech/synthesis/capability' };
+    case 'synthesizeSpeech':
+      return {
+        method: 'POST',
+        path: '/api/ai/speech/synthesize',
+        body: { text: op.text, ...(op.voice ? { voice: op.voice } : {}) },
+      };
     case 'transcriptionCapability':
       return { method: 'GET', path: '/api/ai/speech/capability' }
 

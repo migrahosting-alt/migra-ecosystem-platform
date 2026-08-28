@@ -2,8 +2,10 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 
 import {
   probeSpeechCapability,
+  probeSynthesisCapability,
   readSpeechRuntimeConfig,
   SpeechRuntimeError,
+  synthesizeWithRuntime,
   transcribeWithRuntime,
   type SpeechRuntimeConfig,
 } from './speechRuntime.js';
@@ -12,6 +14,9 @@ import {
 const MAX_AUDIO_BASE64 = 34 * 1024 * 1024;
 const LANGUAGE_CODE = /^[a-z]{2,3}(-[A-Za-z]{2,8})?$/;
 const AUDIO_MIME = /^audio\/[A-Za-z0-9.+-]{1,64}$/;
+/** Matches the runtime's own ceiling; bounded here too so a huge body never travels. */
+const MAX_SPEAK_CHARS = 4000;
+const VOICE_ID = /^[a-z][a-z0-9-]{0,31}$/;
 
 interface TranscribeBody {
   audio?: unknown;
@@ -33,6 +38,43 @@ export function registerSpeechRoutes(
   config: SpeechRuntimeConfig = readSpeechRuntimeConfig(),
 ): void {
   app.get('/api/ai/speech/capability', async () => probeSpeechCapability(config));
+
+  /*
+   * Registered unconditionally, like the routes above and for the same reason: a
+   * surface must be able to learn that speaking is unavailable AND why, rather
+   * than inferring it from a 404 that might just mean the route moved.
+   */
+  app.get('/api/ai/speech/synthesis/capability', async () => probeSynthesisCapability(config));
+
+  app.post(
+    '/api/ai/speech/synthesize',
+    async (request: FastifyRequest<{ Body: { text?: unknown; voice?: unknown } }>, reply: FastifyReply) => {
+      const body = request.body ?? {};
+      if (typeof body.text !== 'string' || body.text.trim().length === 0) {
+        return reply.code(400).send({ error: 'text must be a non-empty string.' });
+      }
+      if (body.text.length > MAX_SPEAK_CHARS) {
+        return reply.code(413).send({ error: 'That answer is too long to read aloud.' });
+      }
+      if (body.voice !== undefined && (typeof body.voice !== 'string' || !VOICE_ID.test(body.voice))) {
+        return reply.code(400).send({ error: 'voice is not a valid voice id.' });
+      }
+      try {
+        return await synthesizeWithRuntime(config, {
+          text: body.text,
+          ...(typeof body.voice === 'string' ? { voice: body.voice } : {}),
+        });
+      } catch (error) {
+        if (error instanceof SpeechRuntimeError) {
+          // 503, not 500: the answer is fine and the request was valid — the
+          // voice service is what is unavailable, and that is worth saying
+          // precisely so the caller can keep the text and explain the rest.
+          return reply.code(503).send({ error: error.message });
+        }
+        throw error;
+      }
+    },
+  );
 
   app.post(
     '/api/ai/speech/transcribe',

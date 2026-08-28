@@ -401,7 +401,9 @@
         "needsFromOwner": "Create the project + Object Storage credentials + DR bucket in the Hetzner console."
       }
     ],
-    "IMPLEMENTED_NEEDS_LIVE_PROOF": []
+    "IMPLEMENTED_NEEDS_LIVE_PROOF": [
+      "Speech output \u2014 MigraPilot reads an answer aloud. Every acceptance point passes in the real product EXCEPT the one only Bonex can do: listening to it. Live at brain speak-08272230 / consumer speakui-08272230."
+    ]
   },
   "openDefects": [
     {
@@ -835,6 +837,22 @@
         ],
         "acceptance": "Bonex listens INSIDE MigraPilot, not to qualification samples. Only then PROVEN_LIVE."
       }
+    },
+    "speechOutputSlice": {
+      "architecture": "Synthesis lives in the EXISTING speech runtime (services/speech-runtime) beside ASR \u2014 same process, same auth, same capability seam. A second service would have meant a second secret, a second unit and a second thing to forget to start. The Brain owns the capability and delegates, so moving synthesis to a bigger machine later is a URL change, not a redesign.",
+      "\ud83d\udea8 engineIdentityStrippedAtTheBoundary": "The runtime reports which engine spoke and why it fell back; the Brain strips those fields in ONE place before the product sees anything. Verified live: the product response carries no underscore-prefixed field. No consumer can grow a dependency on a name it never receives, which is what keeps the engine replaceable.",
+      "measuredOnCpu": "Warm RTF 0.41-0.44 \u2014 a 7.5 s answer synthesises in ~3 s. 2.3 GB resident for whisper AND Kokoro together. No GPU touched.",
+      "liveProof": {
+        "controlPresent": "Read aloud appears on assistant answers",
+        "playback": "preparing -> playing -> ended -> idle, driven by the real HTMLAudioElement",
+        "replay": "instant, no re-synthesis",
+        "stop": "mid-playback stop returns the control to idle immediately",
+        "reload": "control is idle; NO false playing/preparing state, no lingering error, answer intact",
+        "failure": "413 \"That answer is too long to read aloud in one go.\" and the answer survived untouched"
+      },
+      "noFakeState": "Audio is not persisted, and that is the honest choice rather than a shortcut: after a reload there IS no audio, so the control is idle. Restoring a play-ready control for audio that no longer exists is exactly the false state the rule forbids.",
+      "stillOwed": "Bonex listens INSIDE MigraPilot. Until then this is not PROVEN_LIVE.",
+      "knownConstraint": "HARDWARE, recorded not compensated for: synthesis is whole-answer, so the wait is ~0.4x the spoken length. Sentence-streaming would cut it to ~1.2 s regardless of answer length and is the next increment \u2014 the slice is complete within its defined scope, not disguised as finished."
     }
   },
   "resolvedDefects": [

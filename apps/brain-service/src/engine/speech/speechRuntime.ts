@@ -226,3 +226,112 @@ export async function transcribeWithRuntime(
 
 /** Exposed so callers can name the language without importing the package directly. */
 export { HAITIAN_CREOLE };
+
+// ── speaking an answer ──────────────────────────────────────────────────────
+//
+// The same port, the other direction. The Brain owns the CAPABILITY and the
+// runtime does the work, so moving synthesis to a bigger machine later is a URL
+// change rather than a redesign.
+
+/** What the product may know about synthesis. Engine names are NOT in here. */
+export interface SynthesisCapability {
+  ready: boolean;
+  /** Voices a user can choose, by product name. */
+  voices: { id: string; label: string }[];
+  defaultVoice?: string;
+  maxChars?: number;
+  unavailableReason?: string;
+}
+
+export interface SynthesizedSpeech {
+  audioBase64: string;
+  mimeType: string;
+  durationSec: number;
+  voice: string;
+  synthesisMs: number;
+}
+
+/**
+ * 🚨 Engine identity is stripped HERE, once.
+ *
+ * The runtime reports which engine spoke and why it fell back, because we need
+ * that to diagnose a bad voice. The product must never see it: a user chose
+ * "Warm", and telling them the warm voice came from a fallback synthesiser is
+ * an implementation detail they cannot act on. Stripping it at the boundary is
+ * what keeps the engine replaceable — no consumer can grow a dependency on a
+ * name it never receives.
+ */
+function publicSpeech(payload: Record<string, unknown>): SynthesizedSpeech {
+  return {
+    audioBase64: String(payload.audioBase64 ?? ''),
+    mimeType: String(payload.mimeType ?? 'audio/mpeg'),
+    durationSec: Number(payload.durationSec ?? 0),
+    voice: String(payload.voice ?? ''),
+    synthesisMs: Number(payload.synthesisMs ?? 0),
+  };
+}
+
+export async function probeSynthesisCapability(
+  config: SpeechRuntimeConfig,
+  fetchImpl: typeof fetch = fetch,
+): Promise<SynthesisCapability> {
+  if (!config.url) {
+    return { ready: false, voices: [], unavailableReason: 'No speech runtime is configured.' };
+  }
+  try {
+    const response = await withTimeout(config.timeoutMs, (signal) =>
+      fetchImpl(`${config.url}/synthesis/capability`, { headers: { ...authHeaders(config) }, signal }),
+    );
+    if (!response.ok) {
+      return { ready: false, voices: [], unavailableReason: `The speech runtime answered HTTP ${response.status}.` };
+    }
+    const raw = (await response.json()) as Record<string, unknown>;
+    const voices = Array.isArray(raw.voices)
+      ? (raw.voices as { id?: unknown; label?: unknown }[])
+          .filter((v) => typeof v?.id === 'string' && typeof v?.label === 'string')
+          .map((v) => ({ id: String(v.id), label: String(v.label) }))
+      : [];
+    return {
+      ready: raw.ready === true && voices.length > 0,
+      voices,
+      ...(typeof raw.defaultVoice === 'string' ? { defaultVoice: raw.defaultVoice } : {}),
+      ...(typeof raw.maxChars === 'number' ? { maxChars: raw.maxChars } : {}),
+      ...(typeof raw.unavailableReason === 'string' ? { unavailableReason: raw.unavailableReason } : {}),
+    };
+  } catch (error) {
+    return { ready: false, voices: [], unavailableReason: `The speech runtime could not be reached: ${(error as Error).message}` };
+  }
+}
+
+export async function synthesizeWithRuntime(
+  config: SpeechRuntimeConfig,
+  input: { text: string; voice?: string },
+  fetchImpl: typeof fetch = fetch,
+): Promise<SynthesizedSpeech> {
+  if (!config.url) throw new SpeechRuntimeError('No speech runtime is configured.');
+
+  let payload: Record<string, unknown>;
+  try {
+    const response = await withTimeout(config.timeoutMs, (signal) =>
+      fetchImpl(`${config.url}/synthesize`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...authHeaders(config) },
+        body: JSON.stringify({ text: input.text, ...(input.voice ? { voice: input.voice } : {}) }),
+        signal,
+      }),
+    );
+    if (!response.ok) {
+      const detail = (await response.json().catch(() => ({}))) as { error?: string };
+      throw new SpeechRuntimeError(detail.error ?? `The speech runtime answered HTTP ${response.status}.`);
+    }
+    payload = (await response.json()) as Record<string, unknown>;
+  } catch (error) {
+    if (error instanceof SpeechRuntimeError) throw error;
+    throw new SpeechRuntimeError(`The speech runtime could not be reached: ${(error as Error).message}`);
+  }
+
+  if (typeof payload.error === 'string') throw new SpeechRuntimeError(payload.error);
+  const speech = publicSpeech(payload);
+  if (!speech.audioBase64) throw new SpeechRuntimeError('The speech runtime returned no audio.');
+  return speech;
+}

@@ -399,3 +399,20 @@ export function preferenceEvents(
 ): Promise<BrainResult<{ ok: boolean; events: { id: string; changedKeys: string[]; createdAt: number }[] }>> {
   return callBrain({ kind: 'preferenceEvents' }, deps)
 }
+
+// ── speaking an answer ──────────────────────────────────────────────────────
+
+/** Voices the product may offer. Never engine names — the Brain strips those. */
+export function synthesisCapability(deps?: GatewayDeps) {
+  return callBrain<{ ready: boolean; voices: { id: string; label: string }[]; defaultVoice?: string; unavailableReason?: string }>(
+    { kind: 'synthesisCapability' },
+    deps,
+  )
+}
+
+export function synthesizeSpeech(text: string, voice: string | undefined, deps?: GatewayDeps) {
+  return callBrain<{ audioBase64: string; mimeType: string; durationSec: number; voice: string; synthesisMs: number }>(
+    { kind: 'synthesizeSpeech', text, ...(voice ? { voice } : {}) },
+    deps,
+  )
+}

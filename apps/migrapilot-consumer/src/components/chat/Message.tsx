@@ -2,6 +2,7 @@
 
 import { useState, type ReactElement } from 'react'
 import Link from 'next/link'
+import { SpeakButton } from './SpeakButton'
 import {
   BarChart3,
   CheckCheck,
@@ -505,6 +506,22 @@ function AssistantTurn({
           <div className="mt-5 flex items-center justify-between border-t border-hairline pt-3.5">
             <span className="text-xs text-slate-400">{message.time}</span>
             <div className="flex items-center gap-1">
+              {/*
+                * Reading aloud sits with copy and feedback because it is the same
+                * kind of act: something you do WITH a finished answer, never a
+                * step in producing one. The text is already here and stays here
+                * whether or not the voice works.
+                */}
+              <SpeakButton
+                text={blocks
+                  .map((block) =>
+                    block.type === 'paragraph'
+                      ? block.text
+                      : [block.title, ...block.items].filter(Boolean).join('. '),
+                  )
+                  .join(' ')
+                  .replace(/\*\*/g, '')}
+              />
               <button
                 aria-label="Copy answer"
                 title="Copy answer"

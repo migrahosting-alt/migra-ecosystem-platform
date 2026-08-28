@@ -33,6 +33,8 @@ MODEL_NAME = os.environ.get("SPEECH_MODEL", "large-v3")
 DEVICE = os.environ.get("SPEECH_DEVICE", "auto")
 COMPUTE = os.environ.get("SPEECH_COMPUTE", "")
 HOST = os.environ.get("SPEECH_HOST", "127.0.0.1")
+import synthesis
+
 PORT = int(os.environ.get("SPEECH_PORT", "4600"))
 MAX_AUDIO_BYTES = int(os.environ.get("SPEECH_MAX_AUDIO_BYTES", str(25 * 1024 * 1024)))
 # Colon-separated directories holding libcublas.so.12 / libcudnn*.so.9. CTranslate2 dlopens
@@ -282,6 +284,38 @@ def transcribe(data: bytes, requested: str | None) -> dict:
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
+    def _synthesize(self) -> None:
+        """Speak an answer. Separated from the transcribe path because the two
+        share only a port — different payload, different failures, and blending
+        them would make each harder to read."""
+        length = int(self.headers.get("content-length") or 0)
+        if length <= 0:
+            return self._send(400, {"error": "empty body"})
+        try:
+            body = json.loads(self.rfile.read(length))
+        except Exception:  # noqa: BLE001
+            return self._send(400, {"error": "invalid JSON body"})
+        text = body.get("text")
+        if not isinstance(text, str) or not text.strip():
+            return self._send(400, {"error": "text must be a non-empty string"})
+        voice = body.get("voice")
+        if voice is not None and not isinstance(voice, str):
+            return self._send(400, {"error": "voice must be a string"})
+        try:
+            result = synthesis.synthesize(text, voice)
+        except ValueError as exc:
+            # The caller sent something we cannot speak — their fault, and
+            # actionable, so it is a 400 with the reason.
+            return self._send(400, {"error": str(exc)})
+        except Exception as exc:  # noqa: BLE001
+            return self._send(500, {"error": f"{type(exc).__name__}: {exc}"})
+        print(json.dumps({"event": "tts.synthesized", "engine": result.get("_engine"),
+                          "voice": result.get("voice"), "ms": result.get("synthesisMs"),
+                          "chars": len(text),
+                          **({"fallback": result["_fallbackReason"]} if "_fallbackReason" in result else {})}),
+              flush=True)
+        return self._send(200, result)
+
     def _send(self, code: int, body: dict) -> None:
         payload = json.dumps(body).encode()
         self.send_response(code)
@@ -303,11 +337,15 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(401, {"error": "unauthorized"})
         if self.path == "/capability":
             return self._send(200, capability())
+        if self.path == "/synthesis/capability":
+            return self._send(200, synthesis.synthesis_capability())
         self._send(404, {"error": "not found"})
 
     def do_POST(self):  # noqa: N802
         if not _authorized(self.headers):
             return self._send(401, {"error": "unauthorized"})
+        if self.path == "/synthesize":
+            return self._synthesize()
         if self.path != "/transcribe":
             return self._send(404, {"error": "not found"})
         length = int(self.headers.get("content-length") or 0)
