@@ -863,7 +863,10 @@
         "whereToTest": "chat.migrateck.com, a real conversation, the Read aloud control beside Copy."
       },
       "nonPersistenceAccepted": "Bonex confirmed: the synthesised artifact is ephemeral, so returning to idle after reload is TRUTHFUL. Persisting a phantom \"ready\" state would be worse than deliberately starting clean.",
-      "warmupAddedBeforeTheGate": "The engine now loads in a background thread at runtime startup (measured 4,339 ms). Without it the first Read aloud after any restart paid that on top of synthesis \u2014 which would have made a LATENCY judgement about a cold start rather than about the product. Steady state is RTF ~0.47."
+      "warmupAddedBeforeTheGate": "The engine now loads in a background thread at runtime startup (measured 4,339 ms). Without it the first Read aloud after any restart paid that on top of synthesis \u2014 which would have made a LATENCY judgement about a cold start rather than about the product. Steady state is RTF ~0.47.",
+      "\ud83d\udea8 affordanceFailedOnFirstContact": "Shipped as a bare speaker icon among the secondary actions. The first person to use it reported the feature had \"no play option\" \u2014 WHILE IT WAS WORKING. Two causes, both mine: a speaker glyph reads as volume/mute rather than \"play this\", and an unlabelled spinner through several seconds of synthesis looks like nothing happened. Now a play triangle, the word \"Listen\", and a visible \"Preparing audio\u2026\". A capability nobody can find is not shipped.",
+      "\ud83d\udea8 measuredLatencyInTheProduct": "CLICK TO AUDIO: 8.5 s for a two-sentence answer, measured through the real UI \u2014 worse than the ~3.7 s runtime figure because the product number includes MP3 encode, two service hops and blob handling. This is direct evidence for the IMPLEMENTED_NEEDS_LATENCY_WORK outcome. The agent does NOT get to decide that; it is reported for Bonex to judge against how it actually feels.",
+      "latencyFixIfNeeded": "Sentence-streaming: synthesise and play the first sentence while the rest continues. Measured first-audio would drop to ~1.2 s REGARDLESS of answer length. Not built \u2014 it is a real increment, not a tweak, and it should follow the listening judgement rather than pre-empt it."
     }
   },
   "resolvedDefects": [

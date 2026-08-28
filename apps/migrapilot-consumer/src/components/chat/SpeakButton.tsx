@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { Loader2, Volume2, VolumeX } from 'lucide-react'
+import { Loader2, Play, Square } from 'lucide-react'
 
 /**
  * Read this answer aloud.
@@ -101,28 +101,42 @@ export function SpeakButton({ text, voice }: { text: string; voice?: string }): 
     }
   }
 
+  /*
+   * 🚨 THIS CONTROL SAYS WHAT IT DOES, IN WORDS.
+   *
+   * It shipped as a bare speaker icon sitting in a row of secondary actions, and
+   * the first person to use it reported that the feature had "no play option" —
+   * while it was working correctly. A speaker glyph reads as volume or mute, not
+   * as "play this"; and synthesis takes seconds, so an unlabelled spinner looked
+   * like nothing had happened at all.
+   *
+   * So: a play triangle, the word Listen, and — while it works — a visible
+   * "Preparing audio…" rather than a silent spin. The wait is real and the user
+   * is told about it instead of being left to guess.
+   */
   const label =
-    state === 'playing' ? 'Stop reading' : state === 'preparing' ? 'Preparing audio' : 'Read aloud'
+    state === 'playing' ? 'Stop' : state === 'preparing' ? 'Preparing audio…' : 'Listen'
 
   return (
     <>
       <button
         type="button"
-        aria-label={label}
-        title={label}
+        aria-label={state === 'playing' ? 'Stop reading' : state === 'preparing' ? 'Preparing audio' : 'Listen to this answer'}
+        title={state === 'preparing' ? 'Preparing audio…' : state === 'playing' ? 'Stop' : 'Listen to this answer'}
         disabled={state === 'preparing'}
         onClick={() => (state === 'playing' ? stop() : void play())}
-        className="rounded-md p-1.5 text-slate-400 transition-colors hover:bg-raised hover:text-slate-600 disabled:cursor-wait disabled:opacity-70 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-400"
+        className="inline-flex items-center gap-1.5 rounded-md px-2 py-1.5 text-[12.5px] font-medium text-slate-500 transition-colors hover:bg-raised hover:text-slate-700 disabled:cursor-wait focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-400"
       >
         {state === 'preparing' ? (
           // A real pending state, not a progress bar pretending to know how far
           // along a synthesis is. It spins because something IS happening.
-          <Loader2 className="h-4 w-4 animate-spin" strokeWidth={1.8} />
+          <Loader2 className="h-3.5 w-3.5 animate-spin" strokeWidth={2} />
         ) : state === 'playing' ? (
-          <VolumeX className="h-4 w-4" strokeWidth={1.8} />
+          <Square className="h-3.5 w-3.5 fill-current" strokeWidth={2} />
         ) : (
-          <Volume2 className="h-4 w-4" strokeWidth={1.8} />
+          <Play className="h-3.5 w-3.5 fill-current" strokeWidth={2} />
         )}
+        <span>{label}</span>
       </button>
       {state === 'error' && problem && (
         <span className="text-[12.5px] text-slate-500" role="status">
