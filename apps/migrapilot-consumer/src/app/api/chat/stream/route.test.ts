@@ -1468,3 +1468,62 @@ test('a successful turn never clears the active set', async () => {
   assert.deepEqual(sentRefs, [good], 'the image was sent')
   assert.notDeepEqual(setImagesTo, [], 'and it is still the conversation\'s subject afterwards')
 })
+
+// ── the graphics card is busy ───────────────────────────────────────────────
+//
+// The Brain refuses these turns before submitting any model request. What must
+// be true HERE is narrower and just as important: the reason survives the trip,
+// the turn ends, and nothing is left on screen pretending to be an answer.
+//
+// This does not prove the pixels. It proves everything up to them, so the
+// browser check that remains is genuinely only about rendering.
+
+const GPU_BUSY_MESSAGE =
+  'The AI vision engine is busy with another task on the graphics card, so your request has not '
+  + 'started yet. Nothing was lost — send it again in a moment and it will run.'
+
+const GPU_BUSY = sse([['error', { code: 'GPU_BUSY', message: GPU_BUSY_MESSAGE, capacity: 'busy' }]])
+
+test('a busy graphics card reaches the client in the Brain\'s own words', async () => {
+  const { frames } = await turnWith({ storedRefs: [], modelFrames: GPU_BUSY })
+
+  const error = frames.find((f) => f.event === 'error')
+  assert.ok(error, 'an error frame reaches the browser')
+  assert.equal(error.data.message, GPU_BUSY_MESSAGE, 'forwarded verbatim, not re-worded')
+  // The half a user acts on: their request did NOT start, and nothing was lost.
+  assert.match(error.data.message, /has not started yet/)
+  assert.match(error.data.message, /Nothing was lost/)
+})
+
+test('a busy turn TERMINATES — no spinner left running', async () => {
+  const { frames } = await turnWith({ storedRefs: [], modelFrames: GPU_BUSY })
+
+  // Something terminal must arrive, or the client spins forever. That was the
+  // original defect's whole shape: a turn that never ends.
+  const terminal = frames.filter((f) => f.event === 'error' || f.event === 'done')
+  assert.ok(terminal.length > 0, 'the stream reaches a terminal frame')
+  assert.equal(frames[frames.length - 1]!.event === 'token', false, 'it does not end mid-token')
+})
+
+test('a busy turn leaves no assistant placeholder behind', async () => {
+  const stub = brainStub({ chatBody: GPU_BUSY })
+  setAuthPort(portWith(session))
+  try {
+    await collect(await post({ prompt: 'what is in this picture?', conversationId: CONVERSATION_ID }))
+    // An assistant row here would reload as an answer the model never gave.
+    assert.deepEqual(stub.storedAssistant(), [], 'nothing was persisted as an answer')
+  } finally {
+    stub.restore()
+    resetAuthPort()
+  }
+})
+
+test('a busy turn does not disturb the conversation\'s active image', async () => {
+  // Only an UNREADABLE image clears the active set. A busy card says nothing
+  // about the picture, and dropping it here would lose the user's subject to an
+  // unrelated resource problem.
+  const ref = await storedImage('busy-keep.png', 21)
+  const { setImagesTo } = await turnWith({ storedRefs: [ref], modelFrames: GPU_BUSY })
+
+  assert.notDeepEqual(setImagesTo, [], 'the active image survives a busy card')
+})

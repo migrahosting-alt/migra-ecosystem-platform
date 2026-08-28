@@ -762,7 +762,8 @@
         "no assistant placeholder left behind",
         "the turn terminates cleanly",
         "clear contention, prove the next turn works normally"
-      ]
+      ],
+      "narrowedByRouteTests": "Four consumer route tests now cover everything up to the pixels: the Brain's message is forwarded VERBATIM, the stream reaches a terminal frame (no spinner), NO assistant row is persisted (no placeholder that would reload as an answer), and a busy card does NOT disturb the active image \u2014 only an unreadable image clears that. What remains for the browser is genuinely only rendering."
     },
     "gpuSlice2Boundary": {
       "scope": "Queue/backpressure + arbitration SEMANTICS only \u2014 what MigraPilot should do when capacity is busy.",
