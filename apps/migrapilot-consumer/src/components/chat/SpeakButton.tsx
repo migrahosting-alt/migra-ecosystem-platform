@@ -24,7 +24,20 @@ import { Loader2, Play, Square } from 'lucide-react'
  * is untouched and the failure is said plainly, next to the button that caused it.
  */
 
-type State = 'idle' | 'preparing' | 'playing' | 'error'
+type State = 'idle' | 'preparing' | 'playing' | 'ready' | 'error'
+
+/*
+ * 🚨 A ONE-SAMPLE SILENT WAV, PLAYED INSIDE THE CLICK.
+ *
+ * Browsers grant audio permission to an element the USER started, and revoke it
+ * across an async gap. Synthesis takes seconds, so by the time real audio exists
+ * the gesture is long gone and `play()` is refused — which is exactly why this
+ * worked under test automation (permissive autoplay policy) and did nothing in a
+ * real browser. Starting the element on this silent clip, synchronously, while
+ * the click is still live, is what carries the permission across the wait.
+ */
+const SILENT_WAV =
+  'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA='
 
 export function SpeakButton({ text, voice }: { text: string; voice?: string }): React.ReactElement | null {
   const [state, setState] = useState<State>('idle')
@@ -52,7 +65,7 @@ export function SpeakButton({ text, voice }: { text: string; voice?: string }): 
     setProblem(null)
 
     // Already synthesised: replay costs nothing and must not re-synthesise.
-    if (audioRef.current) {
+    if (audioRef.current?.src && audioRef.current.src !== SILENT_WAV) {
       audioRef.current.currentTime = 0
       try {
         await audioRef.current.play()
@@ -62,6 +75,21 @@ export function SpeakButton({ text, voice }: { text: string; voice?: string }): 
       }
       return
     }
+
+    /*
+     * BEFORE ANY AWAIT. This is the whole fix: the element is created and
+     * started here, while the browser still considers this a user gesture. The
+     * clip is silent, so nothing is heard — the point is that the element is now
+     * one the user has played, and may be played again later.
+     */
+    let audio = audioRef.current
+    if (!audio) {
+      audio = new Audio()
+      audio.preload = 'auto'
+      audioRef.current = audio
+    }
+    audio.src = SILENT_WAV
+    void audio.play().catch(() => undefined)
 
     setState('preparing')
     try {
@@ -83,8 +111,9 @@ export function SpeakButton({ text, voice }: { text: string; voice?: string }): 
       const blob = await (await fetch(data.audio)).blob()
       const url = URL.createObjectURL(blob)
       urlRef.current = url
-      const audio = new Audio(url)
-      audioRef.current = audio
+      // The SAME element the user already started — swapping the source keeps
+      // the permission a fresh `new Audio()` would not have.
+      audio.src = url
       // State follows the element. `ended` is what returns the control to idle,
       // not a setTimeout guessing at the duration.
       audio.addEventListener('ended', () => setState('idle'))
@@ -93,8 +122,19 @@ export function SpeakButton({ text, voice }: { text: string; voice?: string }): 
         setProblem('The audio could not be played in this browser.')
         setState('error')
       })
-      await audio.play()
-      setState('playing')
+      try {
+        await audio.play()
+        setState('playing')
+      } catch {
+        /*
+         * Still refused — some browsers are stricter than the unlock above can
+         * satisfy. The audio EXISTS and is ready, so the honest move is to say
+         * so and let the next click play it: that click is a fresh gesture and
+         * always succeeds. Reporting a failure here would be wrong, because
+         * nothing failed except the timing of the permission.
+         */
+        setState('ready')
+      }
     } catch {
       setProblem('The answer could not be read aloud just now.')
       setState('error')
@@ -115,7 +155,10 @@ export function SpeakButton({ text, voice }: { text: string; voice?: string }): 
    * is told about it instead of being left to guess.
    */
   const label =
-    state === 'playing' ? 'Stop' : state === 'preparing' ? 'Preparing audio…' : 'Listen'
+    state === 'playing' ? 'Stop'
+      : state === 'preparing' ? 'Preparing audio…'
+        : state === 'ready' ? 'Play'
+          : 'Listen'
 
   return (
     <>
