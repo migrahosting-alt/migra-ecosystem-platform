@@ -1,6 +1,6 @@
 {
   "$schema": "MIGRAPILOT_STATUS \u2014 canonical cross-agent state. Update on every material change.",
-  "updated": "2026-08-27",
+  "updated": "2026-08-28",
   "updatedBy": "claude",
   "rules": {
     "easyFirst": "Do not start deep capability work while meaningful easy user-facing items remain.",
@@ -1077,5 +1077,41 @@
     "Consumer engine exposure": "NONE",
     "GPU dependency for TTS": "NONE",
     "_note": "Latency is an optimization backlog item and does NOT reopen the feature."
+  },
+  "chatCapabilityAudit": {
+    "version": "Chat Capability Matrix v1",
+    "date": "2026-08-28",
+    "document": "https://claude.ai/code/artifact/f0f08fab-81cb-43e4-8cce-fceb204ac579",
+    "rule": "A capability counts only where the PRODUCTION CONSUMER UI reaches it. Brain code no consumer route calls is inventory, not capability.",
+    "tally": {
+      "LIVE": 21,
+      "NEEDS_LIVE_PROOF": 4,
+      "PARTIAL": 22,
+      "MISSING": 36,
+      "BLOCKED": 2,
+      "total": 85
+    },
+    "surface": "31 consumer API routes; 77 Brain routes of which 28 are reachable. Most unreachable Brain routes are Engineer/control-plane and correctly out of the product.",
+    "\ud83d\udea8 sharpestFindings": [
+      "DEAD CONTROL: thumbs up/down are useState only \u2014 zero fetch calls in Message.tsx, no feedback route. The vote never leaves the browser.",
+      "PICKER/STORAGE MISMATCH: the file picker offers 48 types, storage accepts 27. 21 types (xlsx, pptx, doc, zip, sql, cpp\u2026) are offered and then refused.",
+      "NO STOP: a running turn cannot be stopped; the Brain aborts only on browser disconnect.",
+      "VOICES BUILT, NOT EXPOSED: Warm/Bright/Steady exist in routing and the Brain reports them; the UI has no picker.",
+      "HISTORY SEARCH is client-side over title+preview only \u2014 message content is not searchable."
+    ],
+    "rankedGaps": [
+      "1 message feedback (dead control, smallest fix)",
+      "2 picker/storage agreement",
+      "3 stop generation",
+      "4 voice picker",
+      "5 regenerate + edit/resend (shared branch semantics)",
+      "6 history search over content (needs a server route)",
+      "7 fix spreadsheet ANALYSIS before shipping XLSX reading",
+      "8 memory (Brain has the store; Chat has no path)",
+      "9 GPU independence of text chat (needs the frozen arbitration work)",
+      "10 web search + research (blocked on licensing, not engineering)"
+    ],
+    "preserved": "ASR and TTS remain LIVE \u2014 no regression evidence found.",
+    "notTouched": "Projects."
   }
 }
