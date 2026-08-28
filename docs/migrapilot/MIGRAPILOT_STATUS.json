@@ -1045,9 +1045,25 @@
         "transcription": "RUNNING on VM111 (the only host with tesseract 5.3.4 + hat/fra). ~21 s/page on 3 cores, ~4 h for 726 pages. Resumable: already-recorded pages are skipped.",
         "validatedOnOneSource": "HC-S001, 28 pages: mean confidence 92.9, zero flagged, diacritics intact (Krey\u00f2l, k\u00e8k, lib\u00e8te, espay\u00f2l, pwov\u00e8b).",
         "\ud83d\udea8 knownLimitation": "Multi-column pages interleave in READING ORDER \u2014 the words are recovered but sentences can run together across columns. Affects sentence segmentation, so PASS 3 (structure) must not assume the transcription is linearly ordered within a page. Recorded now rather than discovered later.",
-        "provenanceModel": "Every page leaves as machine_extracted with certified:false. reviewed_transcription and canonical_modern_ht are created EMPTY and never written by the script \u2014 overwriting a human review with a machine pass is the one irreversible mistake available to it. Low-confidence pages and words are flagged, never smoothed. No normalisation of any kind."
+        "provenanceModel": "Every page leaves as machine_extracted with certified:false. reviewed_transcription and canonical_modern_ht are created EMPTY and never written by the script \u2014 overwriting a human review with a machine pass is the one irreversible mistake available to it. Low-confidence pages and words are flagged, never smoothed. No normalisation of any kind.",
+        "\ud83d\udea8 doNotTouchMidRun": "OCR parameters are FROZEN until all 726 pages finish. One consistent extraction regime across the corpus is worth more than a better regime applied to half of it \u2014 mixed methodology makes every later comparison between sources ambiguous. The multi-column issue is a PASS 3 problem.",
+        "completionReportRequired": [
+          "total pages completed / failed / flagged",
+          "confidence distribution BY SOURCE",
+          "worst pages",
+          "OCR and runtime errors",
+          "multi-column incidence, if measurable",
+          "output completeness",
+          "confirmation that every one of the 726 source pages has an accounted-for state"
+        ]
       },
-      "authoritativeInventory": "726 pages. Authoritative unless later PROVENANCE evidence identifies what the old 603 represented \u2014 not to be revisited by re-measuring."
+      "authoritativeInventory": "726 pages. Authoritative unless later PROVENANCE evidence identifies what the old 603 represented \u2014 not to be revisited by re-measuring.",
+      "pass3": {
+        "decision": "COLUMN DETECTION BEFORE SENTENCE RECONSTRUCTION. Page-level OCR is acceptable as raw evidence but is NOT sufficient as canonical sentence order where columns exist. Detect layout regions/columns, preserve their COORDINATES and reading order, then segment sentences from that structure.",
+        "chain": "scanned page -> machine text -> structured reading order -> reviewed transcription -> canonical modern Haitian Creole",
+        "designFromEvidence": "Design PASS 3 from the PASS 2 completion report, not from assumptions."
+      },
+      "\ud83d\udea8 confidenceIsTriageOnly": "Encouraging numbers (92.9 mean, diacritics preserved) are a TRIAGE SIGNAL, never a correctness claim. High-confidence OCR can still be linguistically wrong \u2014 particularly around punctuation, apostrophes, accents, proper nouns, older orthography and tightly spaced print. Confidence routes a page to review; it never certifies one."
     }
   },
   "nextAfterListeningGate": "Krey\u00f2l PASS 2. Keep 726 as the measured source-page inventory; treat 603 as an unresolved historical/accounting figure until SEMANTIC comparison explains it \u2014 pixel hashing already proved there are no duplicate scans, so it cannot settle this.",
