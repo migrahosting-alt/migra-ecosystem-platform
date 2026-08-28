@@ -454,6 +454,7 @@ function AssistantTurn({
             <div className="mt-5 flex flex-wrap items-center gap-2 border-t border-hairline pt-4">
               <span className="text-[13px] font-medium text-slate-500">From your files:</span>
               {message.citedFiles.map((name) => {
+                const deleted = message.missingCitedFiles?.includes(name) ?? false
                 /*
                  * The page comes from the engine's grounding frame, never from
                  * the reply. A model asked not to mention the document still
@@ -461,6 +462,28 @@ function AssistantTurn({
                  * number cannot change what is shown here.
                  */
                 const pages = message.citedPages?.[name]
+                /*
+                 * A DELETED SOURCE IS NOT A LINK.
+                 *
+                 * The answer stays — it was really produced from that file — but
+                 * offering a link to a document that is gone invites the reader
+                 * to go and check something that cannot be checked, which is a
+                 * worse lie than saying nothing. It renders as plain, muted text
+                 * that says what happened.
+                 */
+                if (deleted) {
+                  return (
+                    <span
+                      key={name}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-dashed border-hairline px-2.5 py-1 text-[12.5px] font-medium text-slate-400"
+                      title={`${name} is no longer in your library`}
+                    >
+                      <FileTypeIcon name={name} size="sm" />
+                      <span className="line-through">{name}</span>
+                      <span className="not-italic">· deleted</span>
+                    </span>
+                  )
+                }
                 return (
                   <Link
                     key={name}

@@ -72,6 +72,21 @@ export function toMessage(message: WireMessage, index: number): Message {
          * what an assistant turn contains has to consider images, not just text.
          */
         ...(message.imageRefs?.length ? { images: message.imageRefs } : {}),
+        /*
+         * PROVENANCE IS PART OF THE ANSWER — on reload too.
+         *
+         * The same omission as `imageRefs` above, one field over: this branch
+         * dropped `fileRefs`, so attribution rendered during the turn and was
+         * gone the moment the page reloaded. Attribution is how someone checks
+         * an answer against their own document, and it was the half that did not
+         * survive.
+         *
+         * `missingFileRefs` is computed at read time against the CURRENT
+         * library, so a source deleted since the turn is shown as deleted rather
+         * than as a link the reader would follow to nothing.
+         */
+        ...(message.fileRefs?.length ? { citedFiles: message.fileRefs } : {}),
+        ...(message.missingFileRefs?.length ? { missingCitedFiles: message.missingFileRefs } : {}),
         // No empty paragraph when the answer IS the picture.
         blocks: message.content ? [{ type: 'paragraph', text: message.content }] : [],
       }

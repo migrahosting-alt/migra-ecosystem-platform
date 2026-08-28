@@ -346,7 +346,7 @@
       "Deletion preserves history and stops grounding",
       "Detach a document from active grounding (history and library untouched)",
       "Deleted library file renders as Deleted on its historical turn",
-      "Deterministic file attribution \u2014 proven 5/5 on 2026-08-27 across markdown, text, CSV, JSON and code. Every prompt forbade the model from naming a file and every reply obeyed, yet the correct single file was still attributed and message fileRefs matched. Provenance comes from the engine grounding frame, not model wording.",
+      "Deterministic file attribution \u2014 proven 5/5 on 2026-08-27 across markdown, text, CSV and code. \u26a0\ufe0f That run was LIVE ONLY and did not survive reload; durable attribution was fixed separately the same day.",
       "Files & Documents \u2014 common text/code attachment lane (TXT, MD, CSV, JSON, code): upload, index, ground, attribute, historical attachment record, detach control, deleted-file state.",
       "Reproducible brain-service releases \u2014 lockfile-driven npm ci, dependency verification, boot test, atomic activation with health check and auto-rollback. Activated live 2026-08-27 as lockfile-909d10d8; smoke-verified with a text turn, a deterministic glyph turn and a grounded file turn. The active tree is independent (inode links=1), not inherited.",
       "Index snapshot integrity \u2014 every committed version is a complete independently loadable snapshot; a Brain restart no longer empties the index. Proven live 2026-08-27 (snapshot-4e3bc7c4).",
@@ -362,7 +362,8 @@
       "VM111 release retention + deploy capacity gate \u2014 /opt taken from 92% (7.9 GB free) to 49% (50 GB free) by pruning 132 exact paths; both release scripts now refuse to deploy below 10 GiB free before changing anything. 2026-08-27.",
       "Brain GPU readiness + backpressure \u2014 a pinned card is refused in ~0.5-1.1 s with NO model request submitted, recovery needs no cleanup, and /health reports capacity separately from liveness. Proven live both directions through the Brain API 2026-08-27 (capacity2-08271948).",
       "DOCX reading \u2014 a Word document uploads, extracts, grounds, answers from its TABLE, is attributed \"From your files\", survives reload, and deletes while its history stays. Proven live 2026-08-27 (brain docx-08272122, consumer docxui2-08272124).",
-      "Consumer rendering of GPU_BUSY \u2014 all 7 steps passed in the signed-in browser: the exact busy sentence renders, no spinner, no assistant placeholder row, the active image survives, and after contention clears the same conversation answers \"Purple.\" in 15 s. Slice 1 CLOSED 2026-08-27."
+      "Consumer rendering of GPU_BUSY \u2014 all 7 steps passed in the signed-in browser: the exact busy sentence renders, no spinner, no assistant placeholder row, the active image survives, and after contention clears the same conversation answers \"Purple.\" in 15 s. Slice 1 CLOSED 2026-08-27.",
+      "Durable answer attribution (whole document lane) \u2014 \"From your files\" is persisted on the answer itself, survives hard reload and History reopen, and a source deleted afterwards renders as struck through and \"deleted\" rather than a link to nothing. Proven live on Bonex's OWN document 2026-08-27 (consumer attrib-08272139)."
     ],
     "STABILIZATION": [
       {
@@ -451,16 +452,6 @@
       ],
       "longerTermDirection": "Do not rely on an LLM alone for arithmetic over CSV. MigraPilot should detect that a request is a DETERMINISTIC DATA OPERATION, route it through a table/data tool, and let the model explain the result rather than compute it.",
       "provenance": "Arose from the 9/10 citation pass. That run is preserved verbatim and was NOT rewritten to 10/10."
-    },
-    {
-      "id": "answer-attribution-does-not-survive-reload",
-      "severity": "MEDIUM",
-      "effort": "EASY",
-      "appliesTo": "EVERY document format \u2014 pre-existing and general, NOT introduced by DOCX.",
-      "symptom": "\"From your files: <name>\" renders live under an answer and is GONE after a reload. The persisted assistant message carries only id, role, content, createdAt \u2014 there is no sources field at all. The user message keeps fileRefs, which is why the attachment card survives and the attribution does not.",
-      "whyItMatters": "Attribution is how someone checks an answer against their own document. It disappearing on reload means the record of WHICH file an answer came from is lost, while the answer stays.",
-      "statusFileCorrection": "\"Deterministic file attribution \u2014 proven 5/5\" is recorded as PROVEN_LIVE. That proof was LIVE ONLY; it did not survive reload, and the record overstated it.",
-      "foundBy": "the DOCX reload check, 2026-08-27"
     }
   ],
   "driftControl": [
@@ -803,6 +794,18 @@
         "delete": "removed from the library; the historical turn keeps the answer, the card, and shows Deleted"
       },
       "falseGreenIHit": "My four extraction tests passed run directly with tsx and FAILED under `npm test`, which runs the COMPILED tests from dist/test/ where the fixtures do not exist. Green from the wrong runner. The gate is the app's own test command, and I ran something else first."
+    },
+    "durableAttribution": {
+      "rootCause": "The assistant branch of toMessage dropped fileRefs entirely \u2014 the SAME omission its own comment documents for imageRefs, one field over. Sources lived only in client state from the `done` frame, so the persisted conversation was less truthful than the live one: the answer survived, the record of what it was drawn from did not.",
+      "noMigrationNeeded": "file_refs is already a JSON TEXT column documented as \"library file names this message actually carried\" \u2014 which is exactly what an answer's sources are, and explicitly distinct from the ACTIVE grounding set. The messages API already computed missingFileRefs per message regardless of role.",
+      "ownFileAcceptance": {
+        "file": "Bonex's own TAP Haiti payment-system concept document (46 KB, real Word)",
+        "attribution": "shown with the real filename",
+        "hardReload": "attribution survives",
+        "historyReopen": "attribution survives",
+        "deleteSource": "answer remains; persisted record immutable; server flags it missing; UI shows it struck through and deleted",
+        "noModelFilenames": "sources are intersected server-side with the real library, so an invented filename cannot reach the record"
+      }
     }
   },
   "resolvedDefects": [
@@ -907,7 +910,7 @@
   "backlogHygiene": {
     "2026-08-27": "EASY_NEXT had drifted: four entries were still listed as pending while the capabilities they describe were already in PROVEN_LIVE. Pruned only after matching each against the proven entry, not on memory. A backlog that lists finished work is how the same slice gets opened twice."
   },
-  "governingRule": "\u2b50 Manage the roadmap by CAPABILITY COVERAGE, not by backend subsystem. For every user need ask: can the user do it now; is it exposed in the product; is it real end to end; does it persist across reload; does it fail honestly; is it useful without knowing the backend. Infrastructure work only gets priority when it directly blocks a capability the user should have in hand.",
+  "governingRule": "\u2b50 Manage the roadmap by CAPABILITY COVERAGE, not by backend subsystem. For every user need ask: can the user do it now; is it exposed in the product; is it real end to end; does it persist across reload; does it fail honestly; is it useful without knowing the backend. Infrastructure work only gets priority when it directly blocks a capability the user should have in hand. \u2b50 AND: no capability is PROVEN_LIVE until tested with the owner's OWN real file/content/use case. Fixtures qualify an implementation; they never close a capability.",
   "capabilityCoverage": {
     "_method": "Audited against the CONSUMER product surface (chat.migrateck.com), not backends. A backend that exists but is not reachable from the product counts as MISSING, because the user cannot use it.",
     "LIVE": {

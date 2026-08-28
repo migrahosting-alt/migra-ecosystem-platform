@@ -1193,6 +1193,21 @@ export async function POST(request: Request): Promise<Response> {
           answer,
           { principal },
           generatedImages,
+          /*
+           * THE ANSWER'S SOURCES, ON THE ANSWER'S OWN RECORD.
+           *
+           * "From your files: report.pdf" rendered live and vanished on every
+           * reload, for EVERY format, because nothing was ever written down:
+           * the names lived only in client state from the `done` frame. The
+           * persisted conversation was therefore less truthful than the live
+           * one — the answer survived, the record of what it was drawn from did
+           * not.
+           *
+           * These are `sources`, already intersected server-side with the
+           * caller's real library, so a model-invented filename cannot reach
+           * this record any more than it could reach the frame.
+           */
+          sources,
         )
         const quota = await settle(true)
         if (stored.kind === 'ok') {

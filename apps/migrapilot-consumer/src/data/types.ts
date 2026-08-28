@@ -97,6 +97,14 @@ export interface Message {
    */
   citedFiles?: string[]
   /**
+   * Cited sources no longer in the library.
+   *
+   * Computed at read time, because "deleted" is a fact about now rather than
+   * about the turn. Rendering a deleted source identically to a live one would
+   * tell the reader it is still there to check.
+   */
+  missingCitedFiles?: string[]
+  /**
    * Page provenance per cited file — "page 7", "pages 7-8", or "5 pages".
    *
    * Keyed by filename so a document can never be shown with another's pages.
