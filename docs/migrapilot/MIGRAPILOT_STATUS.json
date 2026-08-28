@@ -360,7 +360,8 @@
       "Unreadable image drops out of the active-image set \u2014 the 9-step live sequence passed on chat.migrateck.com (consumer imgclear-08271615): broken image -> specific unreadable message -> follow-up carries NO image refs -> good image becomes active alone -> survives hard reload. 2026-08-27.",
       "Reproducible consumer releases \u2014 lockfile-driven npm ci, dependency verification from the release itself, boot test, atomic activation, health check with rollback, and a proven independence control. No node_modules is copied from the outgoing release. Proven live twice 2026-08-27 (repro-08271631, repro2-08271636).",
       "VM111 release retention + deploy capacity gate \u2014 /opt taken from 92% (7.9 GB free) to 49% (50 GB free) by pruning 132 exact paths; both release scripts now refuse to deploy below 10 GiB free before changing anything. 2026-08-27.",
-      "Brain GPU readiness + backpressure \u2014 a pinned card is refused in ~0.5-1.1 s with NO model request submitted, recovery needs no cleanup, and /health reports capacity separately from liveness. Proven live both directions through the Brain API 2026-08-27 (capacity2-08271948)."
+      "Brain GPU readiness + backpressure \u2014 a pinned card is refused in ~0.5-1.1 s with NO model request submitted, recovery needs no cleanup, and /health reports capacity separately from liveness. Proven live both directions through the Brain API 2026-08-27 (capacity2-08271948).",
+      "DOCX reading \u2014 a Word document uploads, extracts, grounds, answers from its TABLE, is attributed \"From your files\", survives reload, and deletes while its history stays. Proven live 2026-08-27 (brain docx-08272122, consumer docxui2-08272124)."
     ],
     "STABILIZATION": [
       {
@@ -451,6 +452,16 @@
       ],
       "longerTermDirection": "Do not rely on an LLM alone for arithmetic over CSV. MigraPilot should detect that a request is a DETERMINISTIC DATA OPERATION, route it through a table/data tool, and let the model explain the result rather than compute it.",
       "provenance": "Arose from the 9/10 citation pass. That run is preserved verbatim and was NOT rewritten to 10/10."
+    },
+    {
+      "id": "answer-attribution-does-not-survive-reload",
+      "severity": "MEDIUM",
+      "effort": "EASY",
+      "appliesTo": "EVERY document format \u2014 pre-existing and general, NOT introduced by DOCX.",
+      "symptom": "\"From your files: <name>\" renders live under an answer and is GONE after a reload. The persisted assistant message carries only id, role, content, createdAt \u2014 there is no sources field at all. The user message keeps fileRefs, which is why the attachment card survives and the attribution does not.",
+      "whyItMatters": "Attribution is how someone checks an answer against their own document. It disappearing on reload means the record of WHICH file an answer came from is lost, while the answer stays.",
+      "statusFileCorrection": "\"Deterministic file attribution \u2014 proven 5/5\" is recorded as PROVEN_LIVE. That proof was LIVE ONLY; it did not survive reload, and the record overstated it.",
+      "foundBy": "the DOCX reload check, 2026-08-27"
     }
   ],
   "driftControl": [
@@ -778,6 +789,19 @@
       "\ud83d\udea8 explicitlyOutOfScope": "No blind model eviction, no killing ComfyUI, no automatic destructive resource moves \u2014 not until the policy itself is defined and proven.",
       "residentModelIsACapabilityDistinction": "\u2b50 KEEP THIS SIGNAL SEPARATE. \"GPU busy\" must never collapse into \"all GPU-backed work is impossible\". Measured: a RESIDENT model answered in 0.29 s while the card was otherwise committed, against 5.9 s for a cold load on a free card. Residency is the difference between work that can still be served within budget and work that cannot, and the policy must treat those as different cases rather than one blunt busy flag.",
       "status": "\u2744\ufe0f FROZEN 2026-08-27 by Bonex. Not to be opened. GPU orchestration is infrastructure, and infrastructure only earns priority when it directly blocks a capability the user should have."
+    },
+    "docxSlice": {
+      "userVisibleChange": "A user can attach a Word document and get answers from it. Before today the upload was refused.",
+      "extractorQualification": "mammoth (BSD-2) chosen on evidence, not reputation. Measured against a zero-dependency baseline (unzip word/document.xml + strip tags) on four fixtures including two real Word-authored documents: output was BYTE-IDENTICAL every time. So the library bought no extra quality, and the decision turned on the baseline needing the `unzip` BINARY, which is NOT INSTALLED on VM111 \u2014 a system package on production to avoid a library that carries its own zip reader. officeparser was measured too and offered nothing further.",
+      "\ud83d\udea8 gapAllThreeExtractorsHad": "Mammoth, officeparser AND the raw-XML baseline all dropped FOOTNOTES silently \u2014 proven with a contract fixture whose footnote vanished from every one. A contract puts its conditions there. docxText.ts recovers footnotes, endnotes, headers and footers from their own XML parts and labels them, deduplicated because a header repeats per section and would otherwise outweigh the body.",
+      "liveProof": {
+        "upload": "accepted (docx admitted to the allowlist only because extraction now exists)",
+        "answerFromTheTABLE": "\"Port-au-Prince, with an amount of 1,904,000 gourdes\" plus \"ZANMI-4417\" \u2014 both facts exist only in the document, and the amount only in its table. 10 s.",
+        "attribution": "\"From your files: quarterly-report.docx\"",
+        "reload": "attachment card and answer both survive",
+        "delete": "removed from the library; the historical turn keeps the answer, the card, and shows Deleted"
+      },
+      "falseGreenIHit": "My four extraction tests passed run directly with tsx and FAILED under `npm test`, which runs the COMPILED tests from dist/test/ where the fixtures do not exist. Green from the wrong runner. The gate is the app's own test command, and I ran something else first."
     }
   },
   "resolvedDefects": [
@@ -887,7 +911,7 @@
     "_method": "Audited against the CONSUMER product surface (chat.migrateck.com), not backends. A backend that exists but is not reachable from the product counts as MISSING, because the user cannot use it.",
     "LIVE": {
       "chat / reasoning": "Proven repeatedly today, including under GPU recovery.",
-      "files and documents": "TXT, MD, CSV, JSON, source code, PDF text-layer, scanned PDF via OCR \u2014 with attribution, history, detach, deletion, readiness states.",
+      "files and documents": "TXT, MD, CSV, JSON, source code, PDF text-layer, scanned PDF via OCR, and DOCX \u2014 with attribution, history, detach, deletion, readiness states.",
       "images (understanding)": "Vision answers from the image; attachment history, per-conversation isolation, unreadable-image handling.",
       "image generation": "Generation, persistence, glyph rendering, conversational reference and truthful regeneration."
     },
@@ -907,7 +931,7 @@
       "image editing": "Refuses honestly today (that refusal is PROVEN_LIVE), but the capability does not exist.",
       "video": "No surface.",
       "email, calendar, cloud files, GitHub, connected apps": "No surface. Only auth providers exist.",
-      "document formats": "DOCX, XLSX, PPTX, ZIP \u2014 the remaining holes in an otherwise complete document lane."
+      "document formats": "XLSX, PPTX, ZIP. DOCX is done."
     },
     "BLOCKED_NOT_ENGINEERING": {
       "web / current information, research": "No consumer surface, and the blocker is LICENSING not code: all six retrieval vendors are needs_approval \u2014 Brave forbids storing results, Tavily trains on customer input, Perplexity terms unreadable. Needs a commercial decision before any engineering."

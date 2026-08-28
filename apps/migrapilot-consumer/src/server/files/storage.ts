@@ -56,6 +56,13 @@ const ALLOWED = new Set([
    * in this set only once something can actually read it.
    */
   'pdf',
+  /*
+   * `docx` follows the same rule as `pdf` above: admitted only because the
+   * indexer now EXTRACTS it. A .docx is a ZIP of XML, so before extraction
+   * existed it would have indexed as compressed bytes — a file sitting in
+   * the library, looking accepted, contributing nothing to any answer.
+   */
+  'docx',
 ])
 
 /*
