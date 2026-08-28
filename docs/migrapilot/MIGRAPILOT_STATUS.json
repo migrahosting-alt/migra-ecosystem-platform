@@ -808,7 +808,7 @@
       }
     },
     "speechOutputQualification": {
-      "status": "\u23f8 AWAITING BONEX'S EAR. Nothing integrated. Both candidates pass every objective gate.",
+      "status": "\u2705 DECIDED by Bonex 2026-08-27 \u2014 implementation is the next slice.",
       "listeningPage": "https://claude.ai/code/artifact/1faef590-6b56-46a9-82ee-798e45caae9d",
       "measuredCpuOnly": {
         "piper": "MIT. First audio 113-297 ms, RTF 0.042-0.050, peak 358 MB, model load 1.17 s, 61 MB voice file, no GPU.",
@@ -819,7 +819,22 @@
       "twoSetupErrorsOfMineFixedBeforeJudging": "Kokoro's bundled espeak loader pointed at a CI build path and failed \u2014 redirected to the system espeak-ng. And my first Piper locale query used the wrong path shape and returned zero languages, which would have produced a false claim about Creole support.",
       "haitianCreole": "NOT AVAILABLE in either \u2014 Piper ships 56 locales, Kokoro 9, and Creole is in neither. It needs a trained voice, which is its own program rather than part of shipping speech output. French is the nearest neighbour and is not a substitute.",
       "whatRemains": "Both are permissive, self-hosted, CPU-only, no paid dependency, no new GPU contention. The numbers cannot decide it: Piper is far lighter and ~10x faster to first word; Kokoro is generally judged more natural for ~1 s and 2 GB. Bonex listens, then integration begins.",
-      "\u2b50 readUnderTheProductStandard": "The standard forbids choosing an engine because it is easier on TODAY'S hardware. Piper's advantage is 358 MB vs 2.1 GB and ~1 s of latency \u2014 both are hardware-scale concerns that a real deployment target erases, and Kokoro already needs no GPU. So the choice must be made on VOICE QUALITY at production scale; if Kokoro sounds materially better, its second of latency is a performance constraint to record, not a reason to ship the weaker voice."
+      "\u2b50 readUnderTheProductStandard": "The standard forbids choosing an engine because it is easier on TODAY'S hardware. Piper's advantage is 358 MB vs 2.1 GB and ~1 s of latency \u2014 both are hardware-scale concerns that a real deployment target erases, and Kokoro already needs no GPU. So the choice must be made on VOICE QUALITY at production scale; if Kokoro sounds materially better, its second of latency is a performance constraint to record, not a reason to ship the weaker voice.",
+      "decision": {
+        "primary": "Kokoro (Apache-2.0) \u2014 chosen on voice quality, which is the only axis the product standard allows here.",
+        "fallback": "Piper (MIT) \u2014 much lighter and faster; the low-resource route, never the primary voice.",
+        "\ud83d\udea8 engineNamesAreInternal": "Users never see \"Kokoro\" or \"Piper\". MigraPilot offers polished VOICE CHOICES; a routing layer decides which qualified engine serves them. That keeps the engine replaceable without a product change and stops an implementation detail leaking into the UI.",
+        "productPath": [
+          "assistant answer -> speaker control",
+          "Kokoro CPU synthesis",
+          "playback starts quickly (sentence-split; measured 1,243 ms to first audio)",
+          "stop / replay",
+          "text answer survives if synthesis fails",
+          "truthful, specific failure",
+          "no fake playback state after reload"
+        ],
+        "acceptance": "Bonex listens INSIDE MigraPilot, not to qualification samples. Only then PROVEN_LIVE."
+      }
     }
   },
   "resolvedDefects": [
@@ -979,5 +994,14 @@
     "roadmapDiscipline": "Capabilities in the user's hands, never backend subsystems. Ask constantly: \"What can the user do now that they could not do before?\" If a batch cannot answer that, verify it directly unblocks a user-facing capability \u2014 otherwise it is drift.",
     "acceptanceAuthority": "Live product behaviour. Tests are necessary but never sufficient. Ask: \"If this feature were completely absent, what observable behaviour would be different?\" \u2014 then prove that difference through the real product.",
     "target": "A system demonstrable to investors, partners, buyers or customers as a complete, ownable, scalable AI platform. Build the product we intend to sell, not what today's workstation runs comfortably."
+  },
+  "programs": {
+    "migraKreyolLanguagePlatform": {
+      "authorized": "Bonex, 2026-08-27",
+      "root": "E:/MigraTeck/AI/MigraAI-Engineer/training/haitian-creole/",
+      "pass1": "DONE \u2014 10 sources registered with sha256, page counts, rights placeholders.",
+      "\ud83d\udea8 pageDiscrepancy": "Directive states 603 distinct pages; corpus measures 726. Tested the overlap hypothesis by rendering and hashing every page of the suspected duplicates: ZERO pixel-identical pages. Not duplicate scans. Content-level comparison belongs in PASS 2; neither figure is certified.",
+      "note": "Separate program from MigraPilot product work; tracked here only so it is not lost."
+    }
   }
 }
