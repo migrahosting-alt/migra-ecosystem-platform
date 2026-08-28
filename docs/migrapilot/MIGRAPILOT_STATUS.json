@@ -1035,8 +1035,9 @@
       "authorized": "Bonex, 2026-08-27",
       "root": "E:/MigraTeck/AI/MigraAI-Engineer/training/haitian-creole/",
       "pass1": "DONE \u2014 10 sources registered with sha256, page counts, rights placeholders.",
-      "\ud83d\udea8 pageDiscrepancy": "Directive states 603 distinct pages; corpus measures 726. Tested the overlap hypothesis by rendering and hashing every page of the suspected duplicates: ZERO pixel-identical pages. Not duplicate scans. Content-level comparison belongs in PASS 2; neither figure is certified.",
-      "note": "Separate program from MigraPilot product work; tracked here only so it is not lost."
+      "\ud83d\udea8 pageDiscrepancy": "RESOLVED AS FAR AS THE CORPUS CAN RESOLVE IT. 726 measured. Zero cross-source page overlap at BOTH the file level (pixel-identical) and the content level (256-bit perceptual hash, threshold calibrated against random-pair distances). No page appears in two books, so 603 is not explained by duplication. 726 stands; 603 is an unresolved historical/accounting figure and must not be reconciled by adjusting the measurement.",
+      "note": "Separate program from MigraPilot product work; tracked here only so it is not lost.",
+      "pass2": "Rendering + content comparison DONE (726 pages at 40dpi). Transcription not started \u2014 OCR over 726 scanned pages is the bulk of the pass and its own run."
     }
   },
   "nextAfterListeningGate": "Krey\u00f2l PASS 2. Keep 726 as the measured source-page inventory; treat 603 as an unresolved historical/accounting figure until SEMANTIC comparison explains it \u2014 pixel hashing already proved there are no duplicate scans, so it cannot settle this."
