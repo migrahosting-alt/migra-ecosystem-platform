@@ -361,7 +361,8 @@
       "Reproducible consumer releases \u2014 lockfile-driven npm ci, dependency verification from the release itself, boot test, atomic activation, health check with rollback, and a proven independence control. No node_modules is copied from the outgoing release. Proven live twice 2026-08-27 (repro-08271631, repro2-08271636).",
       "VM111 release retention + deploy capacity gate \u2014 /opt taken from 92% (7.9 GB free) to 49% (50 GB free) by pruning 132 exact paths; both release scripts now refuse to deploy below 10 GiB free before changing anything. 2026-08-27.",
       "Brain GPU readiness + backpressure \u2014 a pinned card is refused in ~0.5-1.1 s with NO model request submitted, recovery needs no cleanup, and /health reports capacity separately from liveness. Proven live both directions through the Brain API 2026-08-27 (capacity2-08271948).",
-      "DOCX reading \u2014 a Word document uploads, extracts, grounds, answers from its TABLE, is attributed \"From your files\", survives reload, and deletes while its history stays. Proven live 2026-08-27 (brain docx-08272122, consumer docxui2-08272124)."
+      "DOCX reading \u2014 a Word document uploads, extracts, grounds, answers from its TABLE, is attributed \"From your files\", survives reload, and deletes while its history stays. Proven live 2026-08-27 (brain docx-08272122, consumer docxui2-08272124).",
+      "Consumer rendering of GPU_BUSY \u2014 all 7 steps passed in the signed-in browser: the exact busy sentence renders, no spinner, no assistant placeholder row, the active image survives, and after contention clears the same conversation answers \"Purple.\" in 15 s. Slice 1 CLOSED 2026-08-27."
     ],
     "STABILIZATION": [
       {
@@ -399,9 +400,7 @@
         "needsFromOwner": "Create the project + Object Storage credentials + DR bucket in the Hetzner console."
       }
     ],
-    "IMPLEMENTED_NEEDS_LIVE_PROOF": [
-      "Consumer rendering of GPU_BUSY \u2014 the Brain emits the honest busy state and the consumer forwards message verbatim on the same path already proven for IMAGE_UNREADABLE, but the CHAT UI rendering of this state is UNVERIFIED. Needs a signed-in browser."
-    ]
+    "IMPLEMENTED_NEEDS_LIVE_PROOF": []
   },
   "openDefects": [
     {
@@ -775,7 +774,9 @@
         "clear contention, prove the next turn works normally"
       ],
       "narrowedByRouteTests": "Four consumer route tests now cover everything up to the pixels: the Brain's message is forwarded VERBATIM, the stream reaches a terminal frame (no spinner), NO assistant row is persisted (no placeholder that would reload as an answer), and a busy card does NOT disturb the active image \u2014 only an unreadable image clears that. What remains for the browser is genuinely only rendering.",
-      "priority": "OPPORTUNISTIC. A tiny pending acceptance item, closed whenever a signed-in session happens to be available. It does NOT control the roadmap."
+      "priority": "OPPORTUNISTIC. A tiny pending acceptance item, closed whenever a signed-in session happens to be available. It does NOT control the roadmap.",
+      "result": "PASSED 7/7 \u2014 closed opportunistically while a session happened to be available.",
+      "observedDuringTeardown": "Right after a 23 GB model unload, Ollama's API is briefly unresponsive and capacity read `unavailable` for a few seconds before returning to `ready` on three consecutive probes. Not a defect: the classifier failed in the safe direction, refusing rather than hanging. Recorded because a future reader will otherwise see it and think something is wrong."
     },
     "gpuSlice2Boundary": {
       "scope": "Queue/backpressure + arbitration SEMANTICS only \u2014 what MigraPilot should do when capacity is busy.",
