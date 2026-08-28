@@ -818,7 +818,8 @@
       "\ud83d\udea8 measurementIWouldHaveGotWrong": "Kokoro first measured 9,978 ms to first audio, which reads as unusable. That compared Piper's internal streaming against Kokoro's batch synthesis. Split into sentences \u2014 what Piper already does for itself \u2014 it drops to 1,243 ms with RTF 0.31, so playback starts in about a second and never starves. The unfair comparison would have eliminated the more natural engine on a setup artefact.",
       "twoSetupErrorsOfMineFixedBeforeJudging": "Kokoro's bundled espeak loader pointed at a CI build path and failed \u2014 redirected to the system espeak-ng. And my first Piper locale query used the wrong path shape and returned zero languages, which would have produced a false claim about Creole support.",
       "haitianCreole": "NOT AVAILABLE in either \u2014 Piper ships 56 locales, Kokoro 9, and Creole is in neither. It needs a trained voice, which is its own program rather than part of shipping speech output. French is the nearest neighbour and is not a substitute.",
-      "whatRemains": "Both are permissive, self-hosted, CPU-only, no paid dependency, no new GPU contention. The numbers cannot decide it: Piper is far lighter and ~10x faster to first word; Kokoro is generally judged more natural for ~1 s and 2 GB. Bonex listens, then integration begins."
+      "whatRemains": "Both are permissive, self-hosted, CPU-only, no paid dependency, no new GPU contention. The numbers cannot decide it: Piper is far lighter and ~10x faster to first word; Kokoro is generally judged more natural for ~1 s and 2 GB. Bonex listens, then integration begins.",
+      "\u2b50 readUnderTheProductStandard": "The standard forbids choosing an engine because it is easier on TODAY'S hardware. Piper's advantage is 358 MB vs 2.1 GB and ~1 s of latency \u2014 both are hardware-scale concerns that a real deployment target erases, and Kokoro already needs no GPU. So the choice must be made on VOICE QUALITY at production scale; if Kokoro sounds materially better, its second of latency is a performance constraint to record, not a reason to ship the weaker voice."
     }
   },
   "resolvedDefects": [
@@ -958,5 +959,25 @@
     },
     "_nextPick": "DOCX. Smallest missing capability inside the lane that is otherwise complete \u2014 extraction is the only new part; upload, index, ground, attribute, history, detach, delete, readiness and async processing all already exist and are proven.",
     "\ud83d\udea8 sequencingWarning": "XLSX should NOT follow DOCX automatically. Spreadsheet READING would land on top of a known quantitative-reasoning defect, producing a capability that looks live and answers wrongly \u2014 a false green at the product level, which is worse than the honest gap. Fix the reasoning path, or ship XLSX with an explicit limitation."
+  },
+  "productStandard": {
+    "_authority": "Bonex, 2026-08-27. Governing. Supersedes any narrower rule it conflicts with.",
+    "premise": "MigraPilot is built on limited local infrastructure today but must be designed and implemented as if it will compete with major AI systems at production scale.",
+    "currentStageRule": "The workstation and its RTX 3090 are a DEVELOPMENT/PROOF environment, not the deployment target. Slower performance caused strictly by limited local hardware is ACCEPTABLE. Incomplete, fake, fragile, mediocre or shortcut implementations are NOT. Never lower capability quality because the machine is small \u2014 record slowness as a hardware/performance constraint instead.",
+    "everyCapabilityMust": [
+      "work end to end through the real user product",
+      "be complete within its defined scope",
+      "persist correctly across reload/history/recovery",
+      "fail honestly and specifically",
+      "use real backend logic \u2014 no placeholders, no UI-only behaviour",
+      "be live-tested in the actual product, not accepted on unit/integration tests alone",
+      "be tested against Bonex's own real files/content/use cases before PROVEN_LIVE",
+      "preserve provenance, ownership, isolation and canonical state",
+      "be architected to scale onto larger servers/GPU clusters later WITHOUT redesigning the capability"
+    ],
+    "technologySelection": "Prefer the best self-hosted, open-source, free-commercial or already-owned option, qualified on actual measured quality and licensing. Custom-build orchestration, UX, persistence, routing, safety, quality control and integration where that produces a stronger owned product. No recurring paid dependencies unless there is no viable alternative and the value justifies it.",
+    "roadmapDiscipline": "Capabilities in the user's hands, never backend subsystems. Ask constantly: \"What can the user do now that they could not do before?\" If a batch cannot answer that, verify it directly unblocks a user-facing capability \u2014 otherwise it is drift.",
+    "acceptanceAuthority": "Live product behaviour. Tests are necessary but never sufficient. Ask: \"If this feature were completely absent, what observable behaviour would be different?\" \u2014 then prove that difference through the real product.",
+    "target": "A system demonstrable to investors, partners, buyers or customers as a complete, ownable, scalable AI platform. Build the product we intend to sell, not what today's workstation runs comfortably."
   }
 }
