@@ -49,22 +49,15 @@ export function acceptAttribute(allowedExtensions: readonly string[]): string {
  * The SERVER stays authoritative. Everything here that is not yet extractable is
  * refused after selection, with an explanation naming the format.
  */
-export const DOCUMENT_PICKER_ACCEPT = [
-  // Documents people actually attach.
-  '.pdf', '.doc', '.docx', '.odt', '.rtf', '.txt', '.md', '.markdown',
-  // Structured data and spreadsheets.
-  '.csv', '.tsv', '.json', '.xml', '.yaml', '.yml', '.toml', '.ini', '.conf',
-  '.xls', '.xlsx', '.ods',
-  // Presentations.
-  '.ppt', '.pptx', '.odp',
-  // Code.
-  '.ts', '.tsx', '.js', '.jsx', '.py', '.rb', '.go', '.rs', '.java', '.c', '.h',
-  '.cpp', '.cs', '.php', '.swift', '.kt', '.sh', '.sql', '.html', '.css', '.scss',
-  // Archives, for when extraction can reach inside them.
-  '.zip', '.tar', '.gz',
-  // Logs.
-  '.log',
-].join(',')
+/*
+ * 🚨 MOVED. This list was written by hand beside a separately hand-written
+ * storage allowlist, and they drifted until the picker offered 48 types and
+ * storage accepted 27. Both now derive from one definition.
+ *
+ * Re-exported so existing imports keep working and nobody is tempted to write a
+ * third list here.
+ */
+export { DOCUMENT_PICKER_ACCEPT } from './capability'
 
 export interface FilenameRejection {
   code: 'unsupported_type' | 'too_large'

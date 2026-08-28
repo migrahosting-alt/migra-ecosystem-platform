@@ -27,16 +27,30 @@ import { Exclusions } from '../src/engine/rag/exclusions.js';
 import { extractPdf } from '../src/engine/rag/pdfText.js';
 import { DEFAULT_MAX_INDEX_FILE_BYTES } from '../src/engine/rag/fsFileSource.js';
 
+/*
+ * cwd-based like the original, because `npm test` runs the COMPILED tests from
+ * dist/test — a path relative to the module resolves differently there and the
+ * check silently reads nothing.
+ */
 const STORAGE = join(
   process.cwd(), '..', 'migrapilot-consumer', 'src', 'server', 'files', 'storage.ts',
 );
+const CAPABILITY = join(
+  process.cwd(), '..', 'migrapilot-consumer', 'src', 'features', 'attachments', 'capability.ts',
+);
 
-/** The extensions the consumer actually accepts today, read from its source. */
+/*
+ * Reads the consumer's CANONICAL attachment definition. The allowlist used to be
+ * written out inside storage.ts beside a separately hand-written picker list;
+ * they drifted until the product offered 48 types and accepted 27. Both now come
+ * from capability.ts, and this parses that one file.
+ */
 function allowedExtensions(): string[] {
-  const source = readFileSync(STORAGE, 'utf8');
-  const block = /const ALLOWED = new Set\(\[([\s\S]*?)\]\)/.exec(source);
-  assert.ok(block, 'could not find the consumer ALLOWED set — has it moved?');
-  return [...block[1]!.matchAll(/'([a-z0-9]+)'/g)].map((m) => m[1]!);
+  const source = readFileSync(CAPABILITY, 'utf8');
+  const indexed = [...source.matchAll(/\{\s*ext:\s*'([a-z0-9]+)'[^}]*support:\s*'indexed'/g)]
+    .map((m) => m[1]!);
+  assert.ok(indexed.length > 10, 'could not parse the canonical attachment list — has it moved?');
+  return indexed;
 }
 
 test('the consumer accepts nothing the indexer will silently drop', () => {

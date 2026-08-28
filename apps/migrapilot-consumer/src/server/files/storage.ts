@@ -1,3 +1,4 @@
+import { INDEXED_EXTENSIONS, contentMismatch, refusalFor } from '@/features/attachments/capability'
 import 'server-only'
 
 import { createHash } from 'node:crypto'
@@ -44,26 +45,14 @@ const uploadRoot = (): string => process.env.UPLOAD_ROOT ?? '/var/lib/migrapilot
  * silently contributes nothing to an answer — the storage-layer equivalent of
  * fabricating a capability. Extraction is a separate slice.
  */
-const ALLOWED = new Set([
-  'txt', 'md', 'markdown', 'csv', 'json', 'yaml', 'yml', 'toml', 'log',
-  'html', 'xml', 'ts', 'tsx', 'js', 'jsx', 'py', 'rb', 'go', 'rs', 'java',
-  'sh', 'css', 'scss', 'ini', 'conf',
-  /*
-   * `pdf` is admitted because the indexer now EXTRACTS it, not because the list
-   * was widened. That order matters: the entry above this one documents how
-   * `sql` and `env` were accepted here and then silently discarded downstream,
-   * leaving users with answers that had never read their file. A format belongs
-   * in this set only once something can actually read it.
-   */
-  'pdf',
-  /*
-   * `docx` follows the same rule as `pdf` above: admitted only because the
-   * indexer now EXTRACTS it. A .docx is a ZIP of XML, so before extraction
-   * existed it would have indexed as compressed bytes — a file sitting in
-   * the library, looking accepted, contributing nothing to any answer.
-   */
-  'docx',
-])
+/*
+ * 🚨 DERIVED, NOT DECLARED. This set used to be written out by hand beside a
+ * separately hand-written picker list, and the two drifted until the product
+ * offered 48 file types and accepted 27. Both now come from one definition, so
+ * they cannot disagree again — see features/attachments/capability.ts for why a
+ * type is or is not on it.
+ */
+const ALLOWED = new Set<string>(INDEXED_EXTENSIONS)
 
 /*
  * `sql` AND `env` WERE REMOVED FROM THE LIST ABOVE, and the omission is the point.
@@ -217,12 +206,22 @@ export async function saveFile(rawName: string, data: ArrayBuffer): Promise<Stor
   const extension = extensionOf(name)
 
   if (!ALLOWED.has(extension)) {
-    throw new FileRejected(
-      'unsupported_type',
-      `${extension ? `.${extension}` : 'That type'} is not supported yet. ` +
-        'Text, code and PDF documents can be read; Office files, database dumps and .env files cannot.',
-    )
+    /*
+     * The reason comes from the same definition that decides selectability, so
+     * a refusal can be SPECIFIC: "export the sheet as CSV" is actionable where
+     * "unsupported file type" is not, and the two can never describe different
+     * rules.
+     */
+    throw new FileRejected('unsupported_type', refusalFor(name))
   }
+
+  /*
+   * THE NAME IS A CLAIM; THE BYTES ARE THE EVIDENCE. An .xlsx renamed to .csv
+   * passed the check above and stored an archive as a text file, which the
+   * indexer then skipped — accepted in the library, unreadable in every answer.
+   */
+  const mismatch = contentMismatch(name, new Uint8Array(data.slice(0, 512)))
+  if (mismatch) throw new FileRejected('unsupported_type', mismatch)
   if (data.byteLength === 0) throw new FileRejected('empty_file', 'That file is empty.')
   if (data.byteLength > MAX_FILE_BYTES) {
     const limitMb = MAX_FILE_BYTES / 1024 / 1024
