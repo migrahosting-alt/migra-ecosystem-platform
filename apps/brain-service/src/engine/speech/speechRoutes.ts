@@ -13,7 +13,29 @@ import {
 /** ~25 MB of audio once decoded. Bounded here as well as at the caller. */
 const MAX_AUDIO_BASE64 = 34 * 1024 * 1024;
 const LANGUAGE_CODE = /^[a-z]{2,3}(-[A-Za-z]{2,8})?$/;
+/*
+ * 🚨 A MEDIA TYPE MAY CARRY PARAMETERS, AND BROWSERS ALWAYS SEND THEM.
+ *
+ * This pattern had no room for `;codecs=opus`, so it rejected the exact string
+ * every MediaRecorder produces — `audio/webm;codecs=opus` in Chrome,
+ * `audio/mp4;codecs=opus` in Safari. Every real microphone recording was refused
+ * at the boundary and surfaced to the user as "That recording could not be
+ * transcribed", while the runtime behind it was healthy the whole time.
+ *
+ * Proven by sending IDENTICAL bytes twice: declared audio/mpeg it transcribed
+ * perfectly, declared audio/webm;codecs=opus it failed. The audio was never the
+ * problem.
+ *
+ * Only the ESSENCE is validated and passed on. ffmpeg sniffs the container
+ * anyway, so the codec parameter tells the decoder nothing it does not already
+ * know — and a parameter list is a poor thing to pattern-match on.
+ */
 const AUDIO_MIME = /^audio\/[A-Za-z0-9.+-]{1,64}$/;
+
+/** `audio/webm;codecs=opus` -> `audio/webm`. Whitespace and case normalised. */
+function mimeEssence(raw: string): string {
+  return raw.split(';')[0]!.trim().toLowerCase();
+}
 /** Matches the runtime's own ceiling; bounded here too so a huge body never travels. */
 const MAX_SPEAK_CHARS = 4000;
 const VOICE_ID = /^[a-z][a-z0-9-]{0,31}$/;
@@ -87,7 +109,8 @@ export function registerSpeechRoutes(
       if (body.audio.length > MAX_AUDIO_BASE64) {
         return reply.code(413).send({ error: 'audio is too large to transcribe.' });
       }
-      if (typeof body.mime !== 'string' || !AUDIO_MIME.test(body.mime)) {
+      const mimeEssenceValue = typeof body.mime === 'string' ? mimeEssence(body.mime) : '';
+      if (!mimeEssenceValue || !AUDIO_MIME.test(mimeEssenceValue)) {
         return reply.code(400).send({ error: 'mime must be an audio/* media type.' });
       }
       // ONLY an explicit choice. Absent stays absent: a default here would be indistinguishable
@@ -102,7 +125,9 @@ export function registerSpeechRoutes(
       try {
         const result = await transcribeWithRuntime(config, {
           audioBase64: body.audio,
-          audioMime: body.mime,
+          // The essence, not the raw header: the decoder sniffs the container,
+          // and passing the parameter list on only spreads it further.
+          audioMime: mimeEssenceValue,
           ...(typeof body.requestedLanguage === 'string' ? { requestedLanguage: body.requestedLanguage } : {}),
         });
         return result;

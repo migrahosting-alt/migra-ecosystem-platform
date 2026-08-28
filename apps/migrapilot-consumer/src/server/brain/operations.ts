@@ -244,13 +244,26 @@ function boundedAudio(value: string): string {
   return value
 }
 
+/*
+ * 🚨 A SECOND COPY OF THE SAME BUG. This pattern also had no room for media-type
+ * parameters, so it rejected `audio/webm;codecs=opus` — what every browser
+ * MediaRecorder produces — and the user was told "That recording could not be
+ * transcribed" while the ASR runtime was healthy. Fixing only the Brain's copy
+ * left the failure exactly where it was, because this gate runs first.
+ *
+ * Two identical regexes in two services is how one fix misses half the defect.
+ */
 const AUDIO_MIME = /^audio\/[A-Za-z0-9.+-]{1,64}$/
 
+/** `audio/webm;codecs=opus` -> `audio/webm`. */
 function audioMime(value: string): string {
-  if (typeof value !== 'string' || !AUDIO_MIME.test(value)) {
+  const essence = typeof value === 'string' ? value.split(';')[0]!.trim().toLowerCase() : ''
+  if (!essence || !AUDIO_MIME.test(essence)) {
     throw new InvalidOperationError('audioMime must be an audio/* media type.')
   }
-  return value
+  // The essence travels on: the decoder sniffs the container, so the parameter
+  // list adds nothing but another string to validate downstream.
+  return essence
 }
 
 /** A library filename, not a path: no separators, no traversal, bounded. */

@@ -39,6 +39,17 @@ export async function POST(request: Request): Promise<Response> {
   if (!(audio instanceof Blob) || audio.size === 0) {
     return Response.json({ error: 'no_audio', message: 'No audio was provided.' }, { status: 400 })
   }
+  /*
+   * A type that is PRESENT and not audio is refused here, with words about what
+   * happened. It used to be silently rewritten to 'audio/webm' and transcribed
+   * anyway — a video file came back as a successful recording.
+   */
+  if (audio.type && !audio.type.split(';')[0]!.trim().toLowerCase().startsWith('audio/')) {
+    return Response.json(
+      { error: 'not_audio', message: 'That file is not an audio recording.' },
+      { status: 400 },
+    )
+  }
   if (audio.size > MAX_AUDIO_BYTES) {
     return Response.json({ error: 'too_large', message: 'That recording is too long.' }, { status: 413 })
   }
@@ -51,7 +62,17 @@ export async function POST(request: Request): Promise<Response> {
 
   const result = await transcribe({
     audioBase64: Buffer.from(await audio.arrayBuffer()).toString('base64'),
-    audioMime: audio.type && audio.type.startsWith('audio/') ? audio.type : 'audio/webm',
+    /*
+     * 🚨 NO SILENT RELABELLING. This used to coerce anything non-audio to
+     * 'audio/webm', which meant a video file was accepted and transcribed as
+     * though someone had recorded it — proven live: video/mp4 returned 200. A
+     * default that rewrites the caller's claim is not a default, it is a lie
+     * with a fallback value.
+     *
+     * An absent type still defaults, because a Blob legitimately arrives without
+     * one; a type that is present and wrong is refused above.
+     */
+    audioMime: audio.type ? audio.type : 'audio/webm',
     ...(requestedLanguage ? { requestedLanguage } : {}),
   })
 

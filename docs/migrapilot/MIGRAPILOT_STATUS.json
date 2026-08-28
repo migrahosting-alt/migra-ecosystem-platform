@@ -455,6 +455,24 @@
       ],
       "longerTermDirection": "Do not rely on an LLM alone for arithmetic over CSV. MigraPilot should detect that a request is a DETERMINISTIC DATA OPERATION, route it through a table/data tool, and let the model explain the result rather than compute it.",
       "provenance": "Arose from the 9/10 citation pass. That run is preserved verbatim and was NOT rewritten to 10/10."
+    },
+    {
+      "id": "voice-input-transcription-regression",
+      "severity": "HIGH",
+      "status": "FIXED \u2014 awaiting live mic proof in the browser before row 8 returns to LIVE",
+      "symptom": "Production shows \"That recording could not be transcribed.\" The mic records but the slice does not complete.",
+      "rule": "A prior LIVE classification does not survive a current user-visible failure. Reopened on Bonex's instruction.",
+      "rootCause": "The audio MIME validator had no room for media-type PARAMETERS, so it rejected \"audio/webm;codecs=opus\" \u2014 the exact string every browser MediaRecorder produces. Chrome, Safari and Firefox all send a codec parameter. Every real microphone recording was refused at the boundary while the ASR runtime was healthy the whole time.",
+      "howItWasProven": "Identical bytes sent twice through the production route: declared audio/mpeg it transcribed perfectly; declared audio/webm;codecs=opus it returned \"That recording could not be transcribed\". The audio was never the problem.",
+      "\ud83d\udea8 theSameBugTwice": "The regex existed in TWO services. Fixing only the Brain left the failure exactly where it was, because the consumer gate runs first. Two identical patterns in two codebases is how one fix misses half a defect.",
+      "secondDefectFound": "The consumer coerced any non-audio type to \"audio/webm\" and transcribed it anyway \u2014 video/mp4 returned 200 with a transcript. A default that rewrites the caller's claim is not a default. Now refused with \"That file is not an audio recording.\"",
+      "liveProof": "chrome webm;codecs=opus, safari mp4;codecs=opus, firefox ogg;codecs=opus all 200 with correct text; video/mp4 400."
+    },
+    {
+      "id": "attachment-picker-is-a-capability-gate",
+      "severity": "HIGH",
+      "symptom": "The native dialog reads \"Custom Files\"; a PNG chosen through Files is REFUSED with a wall of extensions instead of being routed to the image pipeline. The picker acts as a capability gate rather than a selection mechanism.",
+      "\ud83d\udea8 myIncompleteFix": "The refusal copy in that screenshot is NOT the canonical refusalFor() text, which means the Composer keeps its OWN client-side allowlist and message. My previous slice unified the picker accept, the storage validator and the refusal copy \u2014 and missed a third list. The claim \"one list decides what MigraPilot accepts\" was therefore overstated."
     }
   ],
   "driftControl": [
