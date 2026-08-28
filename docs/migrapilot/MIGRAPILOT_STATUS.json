@@ -360,7 +360,7 @@
       "Unreadable image drops out of the active-image set \u2014 the 9-step live sequence passed on chat.migrateck.com (consumer imgclear-08271615): broken image -> specific unreadable message -> follow-up carries NO image refs -> good image becomes active alone -> survives hard reload. 2026-08-27.",
       "Reproducible consumer releases \u2014 lockfile-driven npm ci, dependency verification from the release itself, boot test, atomic activation, health check with rollback, and a proven independence control. No node_modules is copied from the outgoing release. Proven live twice 2026-08-27 (repro-08271631, repro2-08271636).",
       "VM111 release retention + deploy capacity gate \u2014 /opt taken from 92% (7.9 GB free) to 49% (50 GB free) by pruning 132 exact paths; both release scripts now refuse to deploy below 10 GiB free before changing anything. 2026-08-27.",
-      "GPU capacity readiness + bounded wait \u2014 a pinned card is refused in ~0.5-1.1 s with an honest \"has not started yet\" state and NO model request submitted, instead of 480 s of silence; recovery needs no cleanup. Proven live both directions 2026-08-27."
+      "Brain GPU readiness + backpressure \u2014 a pinned card is refused in ~0.5-1.1 s with NO model request submitted, recovery needs no cleanup, and /health reports capacity separately from liveness. Proven live both directions through the Brain API 2026-08-27 (capacity2-08271948)."
     ],
     "STABILIZATION": [
       {
@@ -398,7 +398,9 @@
         "needsFromOwner": "Create the project + Object Storage credentials + DR bucket in the Hetzner console."
       }
     ],
-    "IMPLEMENTED_NEEDS_LIVE_PROOF": []
+    "IMPLEMENTED_NEEDS_LIVE_PROOF": [
+      "Consumer rendering of GPU_BUSY \u2014 the Brain emits the honest busy state and the consumer forwards message verbatim on the same path already proven for IMAGE_UNREADABLE, but the CHAT UI rendering of this state is UNVERIFIED. Needs a signed-in browser."
+    ]
   },
   "openDefects": [
     {
@@ -749,6 +751,30 @@
       "orderingBugAvoided": "The deadline enforces itself with ac.abort(), and the existing catch treats signal.aborted as a CLIENT CANCELLATION \u2014 which would have ended a starved turn with no error at all, reintroducing the silence the deadline exists to remove. The timeout is checked BEFORE the abort test.",
       "failsOpen": "Unreadable probes return `unknown` and proceed; a monitoring outage must not become a chat outage. The bounded deadline protects that turn.",
       "notYetBrowserVerified": "The browser session was signed out and I cannot sign in on Bonex's behalf, so the GPU_BUSY state was proven through the Brain API rather than the chat UI. The consumer forwards the Brain's message verbatim (same path already proven live for IMAGE_UNREADABLE), but the UI rendering of this specific state is UNVERIFIED."
+    },
+    "gpuBusyUiProofPending": {
+      "blockedBy": "The browser session is signed out; signing in on the owner's behalf is not something I do.",
+      "narrowCheck": [
+        "observe or force GPU-busy state",
+        "submit ONE vision turn",
+        "the UI shows the exact honest busy message",
+        "no endless spinner",
+        "no assistant placeholder left behind",
+        "the turn terminates cleanly",
+        "clear contention, prove the next turn works normally"
+      ]
+    },
+    "gpuSlice2Boundary": {
+      "scope": "Queue/backpressure + arbitration SEMANTICS only \u2014 what MigraPilot should do when capacity is busy.",
+      "options": [
+        "reject immediately",
+        "queue",
+        "defer",
+        "route elsewhere",
+        "wait under bounded policy"
+      ],
+      "\ud83d\udea8 explicitlyOutOfScope": "No blind model eviction, no killing ComfyUI, no automatic destructive resource moves \u2014 not until the policy itself is defined and proven.",
+      "residentModelIsACapabilityDistinction": "\u2b50 KEEP THIS SIGNAL SEPARATE. \"GPU busy\" must never collapse into \"all GPU-backed work is impossible\". Measured: a RESIDENT model answered in 0.29 s while the card was otherwise committed, against 5.9 s for a cold load on a free card. Residency is the difference between work that can still be served within budget and work that cannot, and the policy must treat those as different cases rather than one blunt busy flag."
     }
   },
   "resolvedDefects": [
