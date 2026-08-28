@@ -363,7 +363,8 @@
       "Brain GPU readiness + backpressure \u2014 a pinned card is refused in ~0.5-1.1 s with NO model request submitted, recovery needs no cleanup, and /health reports capacity separately from liveness. Proven live both directions through the Brain API 2026-08-27 (capacity2-08271948).",
       "DOCX reading \u2014 a Word document uploads, extracts, grounds, answers from its TABLE, is attributed \"From your files\", survives reload, and deletes while its history stays. Proven live 2026-08-27 (brain docx-08272122, consumer docxui2-08272124).",
       "Consumer rendering of GPU_BUSY \u2014 all 7 steps passed in the signed-in browser: the exact busy sentence renders, no spinner, no assistant placeholder row, the active image survives, and after contention clears the same conversation answers \"Purple.\" in 15 s. Slice 1 CLOSED 2026-08-27.",
-      "Durable answer attribution (whole document lane) \u2014 \"From your files\" is persisted on the answer itself, survives hard reload and History reopen, and a source deleted afterwards renders as struck through and \"deleted\" rather than a link to nothing. Proven live on Bonex's OWN document 2026-08-27 (consumer attrib-08272139)."
+      "Durable answer attribution (whole document lane) \u2014 \"From your files\" is persisted on the answer itself, survives hard reload and History reopen, and a source deleted afterwards renders as struck through and \"deleted\" rather than a link to nothing. Proven live on Bonex's OWN document 2026-08-27 (consumer attrib-08272139).",
+      "Speech output \u2014 MigraPilot reads an answer aloud. Bonex triggered it himself in the real product and accepted it (\"clean\", \"its good\"), which is the only thing that could close this gate. Live 2026-08-27 (brain speak-08272230, consumer gesture-08272252)."
     ],
     "STABILIZATION": [
       {
@@ -401,9 +402,7 @@
         "needsFromOwner": "Create the project + Object Storage credentials + DR bucket in the Hetzner console."
       }
     ],
-    "IMPLEMENTED_NEEDS_LIVE_PROOF": [
-      "Speech output \u2014 MigraPilot reads an answer aloud. Every acceptance point passes in the real product EXCEPT the one only Bonex can do: listening to it. Live at brain speak-08272230 / consumer speakui-08272230."
-    ]
+    "IMPLEMENTED_NEEDS_LIVE_PROOF": []
   },
   "openDefects": [
     {
@@ -869,7 +868,8 @@
       "latencyFixIfNeeded": "Sentence-streaming: synthesise and play the first sentence while the rest continues. Measured first-audio would drop to ~1.2 s REGARDLESS of answer length. Not built \u2014 it is a real increment, not a tweak, and it should follow the listening judgement rather than pre-empt it.",
       "\ud83d\udea8 falseGreenMyTestEnvironmentHid": "Playback worked under Playwright and did NOTHING in Bonex's real browser. `audio.play()` was called after two awaits on a brand-new element the user had never touched \u2014 browsers revoke audio permission across an async gap, and synthesis takes seconds, so the gesture was always long gone. Test automation runs a permissive autoplay policy, so my environment differed from the user's in EXACTLY the way that mattered. He only heard it because MY automated click played through the workstation speakers.",
       "gestureFix": "The element is now created and started on a one-sample SILENT clip synchronously inside the click, before any await, then the real audio is swapped into that same element. Permission belongs to an element the user has already played. If a stricter browser still refuses, the state becomes \"Play\" \u2014 the audio exists and is ready, and the next click is a fresh gesture that always works. Reporting a failure there would be wrong: nothing failed except the timing of a permission.",
-      "bonexPerceptualFeedbackSoFar": "Heard the voice (female English) and called it CLEAN. That is positive on the voice-quality axis but does NOT close the gate \u2014 he had not been able to trigger it himself, so pacing, startup delay and whether it feels worth keeping enabled are still unjudged."
+      "bonexPerceptualFeedbackSoFar": "Heard the voice (female English) and called it CLEAN. That is positive on the voice-quality axis but does NOT close the gate \u2014 he had not been able to trigger it himself, so pacing, startup delay and whether it feels worth keeping enabled are still unjudged.",
+      "ACCEPTED": "\u2705 PROVEN_LIVE 2026-08-27. Outcome: the first of the three \u2014 Warm is good enough as shipped. Bonex triggered it from his own browser after the gesture fix and judged it good; he did NOT call for latency work, so the ~8.5 s whole-answer start is accepted for now and sentence-streaming stays available as a future increment rather than a required one."
     }
   },
   "resolvedDefects": [
@@ -981,10 +981,10 @@
       "chat / reasoning": "Proven repeatedly today, including under GPU recovery.",
       "files and documents": "TXT, MD, CSV, JSON, source code, PDF text-layer, scanned PDF via OCR, and DOCX \u2014 with attribution, history, detach, deletion, readiness states.",
       "images (understanding)": "Vision answers from the image; attachment history, per-conversation isolation, unreadable-image handling.",
-      "image generation": "Generation, persistence, glyph rendering, conversational reference and truthful regeneration."
+      "image generation": "Generation, persistence, glyph rendering, conversational reference and truthful regeneration.",
+      "audio / voice": "Input (dictate/transcribe) AND output (Read aloud, Kokoro primary with Piper fallback, engine names never exposed). Both self-hosted, both CPU, neither touching the GPU."
     },
     "PARTIAL": {
-      "audio / voice": "INPUT ONLY \u2014 /api/speech/transcribe and a Dictate control. No speech OUTPUT at all.",
       "spreadsheets / data analysis": "CSV reads, grounds and attributes correctly, but quantitative reasoning is a known open defect (wrong maximum, mistranscribed numbers). Reading works; ANALYSIS does not.",
       "exports / sharing": "Account-data export exists. No conversation export or sharing.",
       "memory / personalization": "Preferences route and Brain memory exist; not verified end to end through the product recently."
