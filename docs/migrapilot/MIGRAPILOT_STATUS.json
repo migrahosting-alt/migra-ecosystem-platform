@@ -763,7 +763,8 @@
         "the turn terminates cleanly",
         "clear contention, prove the next turn works normally"
       ],
-      "narrowedByRouteTests": "Four consumer route tests now cover everything up to the pixels: the Brain's message is forwarded VERBATIM, the stream reaches a terminal frame (no spinner), NO assistant row is persisted (no placeholder that would reload as an answer), and a busy card does NOT disturb the active image \u2014 only an unreadable image clears that. What remains for the browser is genuinely only rendering."
+      "narrowedByRouteTests": "Four consumer route tests now cover everything up to the pixels: the Brain's message is forwarded VERBATIM, the stream reaches a terminal frame (no spinner), NO assistant row is persisted (no placeholder that would reload as an answer), and a busy card does NOT disturb the active image \u2014 only an unreadable image clears that. What remains for the browser is genuinely only rendering.",
+      "priority": "OPPORTUNISTIC. A tiny pending acceptance item, closed whenever a signed-in session happens to be available. It does NOT control the roadmap."
     },
     "gpuSlice2Boundary": {
       "scope": "Queue/backpressure + arbitration SEMANTICS only \u2014 what MigraPilot should do when capacity is busy.",
@@ -775,7 +776,8 @@
         "wait under bounded policy"
       ],
       "\ud83d\udea8 explicitlyOutOfScope": "No blind model eviction, no killing ComfyUI, no automatic destructive resource moves \u2014 not until the policy itself is defined and proven.",
-      "residentModelIsACapabilityDistinction": "\u2b50 KEEP THIS SIGNAL SEPARATE. \"GPU busy\" must never collapse into \"all GPU-backed work is impossible\". Measured: a RESIDENT model answered in 0.29 s while the card was otherwise committed, against 5.9 s for a cold load on a free card. Residency is the difference between work that can still be served within budget and work that cannot, and the policy must treat those as different cases rather than one blunt busy flag."
+      "residentModelIsACapabilityDistinction": "\u2b50 KEEP THIS SIGNAL SEPARATE. \"GPU busy\" must never collapse into \"all GPU-backed work is impossible\". Measured: a RESIDENT model answered in 0.29 s while the card was otherwise committed, against 5.9 s for a cold load on a free card. Residency is the difference between work that can still be served within budget and work that cannot, and the policy must treat those as different cases rather than one blunt busy flag.",
+      "status": "\u2744\ufe0f FROZEN 2026-08-27 by Bonex. Not to be opened. GPU orchestration is infrastructure, and infrastructure only earns priority when it directly blocks a capability the user should have."
     }
   },
   "resolvedDefects": [
@@ -879,5 +881,41 @@
   },
   "backlogHygiene": {
     "2026-08-27": "EASY_NEXT had drifted: four entries were still listed as pending while the capabilities they describe were already in PROVEN_LIVE. Pruned only after matching each against the proven entry, not on memory. A backlog that lists finished work is how the same slice gets opened twice."
+  },
+  "governingRule": "\u2b50 Manage the roadmap by CAPABILITY COVERAGE, not by backend subsystem. For every user need ask: can the user do it now; is it exposed in the product; is it real end to end; does it persist across reload; does it fail honestly; is it useful without knowing the backend. Infrastructure work only gets priority when it directly blocks a capability the user should have in hand.",
+  "capabilityCoverage": {
+    "_method": "Audited against the CONSUMER product surface (chat.migrateck.com), not backends. A backend that exists but is not reachable from the product counts as MISSING, because the user cannot use it.",
+    "LIVE": {
+      "chat / reasoning": "Proven repeatedly today, including under GPU recovery.",
+      "files and documents": "TXT, MD, CSV, JSON, source code, PDF text-layer, scanned PDF via OCR \u2014 with attribution, history, detach, deletion, readiness states.",
+      "images (understanding)": "Vision answers from the image; attachment history, per-conversation isolation, unreadable-image handling.",
+      "image generation": "Generation, persistence, glyph rendering, conversational reference and truthful regeneration."
+    },
+    "PARTIAL": {
+      "audio / voice": "INPUT ONLY \u2014 /api/speech/transcribe and a Dictate control. No speech OUTPUT at all.",
+      "spreadsheets / data analysis": "CSV reads, grounds and attributes correctly, but quantitative reasoning is a known open defect (wrong maximum, mistranscribed numbers). Reading works; ANALYSIS does not.",
+      "exports / sharing": "Account-data export exists. No conversation export or sharing.",
+      "memory / personalization": "Preferences route and Brain memory exist; not verified end to end through the product recently."
+    },
+    "MISSING_HONESTLY_STATED": {
+      "_note": "These render an explicit NotBuiltState rather than a fake surface \u2014 the correct failure mode.",
+      "projects / persistent work": "ProjectsPage says so plainly; its four invented projects and fabricated counts were already removed.",
+      "assistants": "\"Assistants aren't available yet\".",
+      "tasks / automations, agents / multi-step": "Run surfaces are not built."
+    },
+    "MISSING": {
+      "image editing": "Refuses honestly today (that refusal is PROVEN_LIVE), but the capability does not exist.",
+      "video": "No surface.",
+      "email, calendar, cloud files, GitHub, connected apps": "No surface. Only auth providers exist.",
+      "document formats": "DOCX, XLSX, PPTX, ZIP \u2014 the remaining holes in an otherwise complete document lane."
+    },
+    "BLOCKED_NOT_ENGINEERING": {
+      "web / current information, research": "No consumer surface, and the blocker is LICENSING not code: all six retrieval vendors are needs_approval \u2014 Brave forbids storing results, Tavily trains on customer input, Perplexity terms unreadable. Needs a commercial decision before any engineering."
+    },
+    "_notThisProduct": {
+      "code": "Coding is the VS Code extension surface, per the locked product-vs-control-plane rule. In the consumer, code files are readable as documents."
+    },
+    "_nextPick": "DOCX. Smallest missing capability inside the lane that is otherwise complete \u2014 extraction is the only new part; upload, index, ground, attribute, history, detach, delete, readiness and async processing all already exist and are proven.",
+    "\ud83d\udea8 sequencingWarning": "XLSX should NOT follow DOCX automatically. Spreadsheet READING would land on top of a known quantitative-reasoning defect, producing a capability that looks live and answers wrongly \u2014 a false green at the product level, which is worse than the honest gap. Fix the reasoning path, or ship XLSX with an explicit limitation."
   }
 }
