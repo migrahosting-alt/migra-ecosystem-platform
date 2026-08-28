@@ -416,3 +416,33 @@ export function synthesizeSpeech(text: string, voice: string | undefined, deps?:
     deps,
   )
 }
+
+// ── feedback on an answer ───────────────────────────────────────────────────
+
+export interface StoredFeedback {
+  conversationId: string
+  messageId: string
+  rating: 'up' | 'down'
+  reason?: string
+  detail?: string
+  updatedAt: number
+}
+
+export function listFeedback(conversationId: string, deps?: GatewayDeps) {
+  return callBrain<{ feedback: StoredFeedback[] }>({ kind: 'listFeedback', conversationId }, deps)
+}
+
+export function putFeedback(
+  input: {
+    conversationId: string; messageId: string; rating: 'up' | 'down'
+    reason?: string; detail?: string; requestId?: string; modelId?: string
+    providerId?: string; turnContext?: Record<string, unknown>
+  },
+  deps?: GatewayDeps,
+) {
+  return callBrain<{ feedback: StoredFeedback }>({ kind: 'putFeedback', ...input }, deps)
+}
+
+export function removeFeedback(conversationId: string, messageId: string, deps?: GatewayDeps) {
+  return callBrain<{ removed: boolean }>({ kind: 'removeFeedback', conversationId, messageId }, deps)
+}

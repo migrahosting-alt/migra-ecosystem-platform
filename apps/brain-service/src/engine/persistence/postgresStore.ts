@@ -67,6 +67,7 @@ import * as conversations from './postgres/conversationRepo.js';
 import * as memoryWorkspaces from './postgres/memoryWorkspaceRepo.js';
 import * as rag from './postgres/ragRepo.js';
 import * as docs from './postgres/documentProcessingRepo.js';
+import * as feedback from './postgres/messageFeedbackRepo.js';
 import * as operational from './postgres/operationalRepo.js';
 import * as agentRuns from './postgres/agentRunRepo.js';
 import * as agentRunChildren from './postgres/agentRunChildRepo.js';
@@ -425,6 +426,32 @@ export class PostgresDurableStore implements DurableStore {
     await this.inScope(scope, (client) => docs.recordReadiness(client, {
       ownerScope: scope.owner, workspaceScope: scope.workspace,
     }, readiness, now));
+  }
+
+  /*
+   * Message feedback. Scoped exactly like every other tenant-owned table, so a
+   * vote is visible only to the person who cast it — feedback names a specific
+   * answer in a specific conversation, and leaking it across tenants would leak
+   * both.
+   */
+  async putMessageFeedback(
+    scope: PersistenceScope, input: Parameters<typeof feedback.putFeedback>[2], now: number,
+  ) {
+    return this.inScope(scope, (client) => feedback.putFeedback(client, {
+      ownerScope: scope.owner, workspaceScope: scope.workspace,
+    }, input, now));
+  }
+
+  async removeMessageFeedback(scope: PersistenceScope, conversationId: string, messageId: string) {
+    return this.inScope(scope, (client) => feedback.removeFeedback(client, {
+      ownerScope: scope.owner, workspaceScope: scope.workspace,
+    }, conversationId, messageId));
+  }
+
+  async listMessageFeedback(scope: PersistenceScope, conversationId: string) {
+    return this.inScope(scope, (client) => feedback.listFeedbackForConversation(client, {
+      ownerScope: scope.owner, workspaceScope: scope.workspace,
+    }, conversationId));
   }
 
   async readDocumentReadiness(scope: PersistenceScope, fileName: string) {

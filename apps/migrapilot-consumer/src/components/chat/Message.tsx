@@ -3,6 +3,8 @@
 import { useState, type ReactElement } from 'react'
 import Link from 'next/link'
 import { SpeakButton } from './SpeakButton'
+import { FeedbackControls } from './FeedbackControls'
+import { useFeedback } from '@/state/FeedbackProvider'
 import {
   BarChart3,
   CheckCheck,
@@ -15,8 +17,6 @@ import {
   Play,
   Rocket,
   ShieldCheck,
-  ThumbsDown,
-  ThumbsUp,
   TriangleAlert,
 } from 'lucide-react'
 import { FileTypeIcon } from '@/components/ui/FileTypeIcon'
@@ -352,7 +352,7 @@ function AssistantTurn({
 }: {
   message: Message
 }) {
-  const [vote, setVote] = useState<'up' | 'down' | null>(null)
+  const feedback = useFeedback()
   const blocks = message.blocks ?? []
 
   /*
@@ -540,32 +540,22 @@ function AssistantTurn({
               >
                 <Copy className="h-4 w-4" />
               </button>
-              <button
-                aria-label="Good response"
-                aria-pressed={vote === 'up'}
-                onClick={() => setVote(vote === 'up' ? null : 'up')}
-                className={cn(
-                  'inline-flex h-8 w-8 items-center justify-center rounded-lg transition-colors',
-                  vote === 'up'
-                    ? 'bg-emerald-50 text-emerald-600'
-                    : 'text-slate-400 hover:bg-slate-100 hover:text-slate-600',
-                )}
-              >
-                <ThumbsUp className="h-4 w-4" />
-              </button>
-              <button
-                aria-label="Bad response"
-                aria-pressed={vote === 'down'}
-                onClick={() => setVote(vote === 'down' ? null : 'down')}
-                className={cn(
-                  'inline-flex h-8 w-8 items-center justify-center rounded-lg transition-colors',
-                  vote === 'down'
-                    ? 'bg-red-50 text-red-600'
-                    : 'text-slate-400 hover:bg-slate-100 hover:text-slate-600',
-                )}
-              >
-                <ThumbsDown className="h-4 w-4" />
-              </button>
+              {/*
+                * Replaced two useState buttons that had no route behind them. The
+                * selection now comes from the persisted record, and a failed
+                * write leaves nothing selected rather than painting a saved
+                * state over an error.
+                */}
+              {feedback && message.id && (
+                <FeedbackControls
+                  current={feedback.get(message.id)}
+                  busy={feedback.busy(message.id)}
+                  problem={feedback.problem(message.id)}
+                  onVote={(rating) => void feedback.vote(message.id!, rating)}
+                  onRetract={() => void feedback.retract(message.id!)}
+                  onDetail={(reason, note) => void feedback.detail(message.id!, reason, note)}
+                />
+              )}
             </div>
           </div>
         </div>

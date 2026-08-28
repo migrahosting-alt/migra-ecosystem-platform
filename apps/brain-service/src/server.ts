@@ -92,6 +92,7 @@ import { FsFileSource } from './engine/rag/fsFileSource.js';
 import { OllamaEmbedder, CachedEmbedder, FakeEmbedder } from './engine/rag/embedder.js';
 import { registerRagRoutes } from './engine/rag/ragRoutes.js';
 import { registerDocumentRoutes } from './engine/rag/documentRoutes.js';
+import { registerFeedbackRoutes } from './engine/feedback/feedbackRoutes.js';
 import { DocumentJobRunner } from './engine/rag/documentJobs.js';
 import { writeOcrSidecar } from './engine/rag/scannedPdfJob.js';
 import { decideRecovery } from './engine/rag/scannedJobRecovery.js';
@@ -555,6 +556,38 @@ async function main(): Promise<void> {
         }
       },
     });
+
+    /*
+     * Feedback rides the same durable store as everything else tenant-owned, so
+     * a vote is scoped by row-level security rather than by the route
+     * remembering to filter. Registered only where a store exists: without one,
+     * the routes would accept a vote and drop it, which is the exact dishonesty
+     * this slice was opened to remove.
+     */
+    /*
+     * Feedback rides the same durable store as everything else tenant-owned, so
+     * a vote is scoped by row-level security rather than by the route
+     * remembering to filter. Registered only where a store implements it:
+     * without one the routes would accept a vote and drop it, which is the exact
+     * dishonesty this slice was opened to remove.
+     */
+    const feedbackCapable = readinessStore as Partial<Pick<
+      PostgresDurableStore,
+      'putMessageFeedback' | 'removeMessageFeedback' | 'listMessageFeedback'
+    >>;
+    if (feedbackCapable.putMessageFeedback && feedbackCapable.removeMessageFeedback
+        && feedbackCapable.listMessageFeedback) {
+      const put = feedbackCapable.putMessageFeedback.bind(readinessStore);
+      const drop = feedbackCapable.removeMessageFeedback.bind(readinessStore);
+      const list = feedbackCapable.listMessageFeedback.bind(readinessStore);
+      registerFeedbackRoutes(app, {
+        // Already a PersistenceScope: `toScope` converts the OTHER direction and
+        // using it here inverted the shape.
+        putMessageFeedback: (scope, input, now) => put(scope, input, now),
+        removeMessageFeedback: (scope, c, m) => drop(scope, c, m),
+        listMessageFeedback: (scope, c) => list(scope, c),
+      });
+    }
 
     registerDocumentRoutes(app, documentRunner, {
       read: async (scope, fileName) =>

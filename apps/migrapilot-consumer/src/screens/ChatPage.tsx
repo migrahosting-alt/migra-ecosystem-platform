@@ -7,6 +7,7 @@ import { Composer, ComposerDisclaimer } from '@/components/chat/Composer'
 import { MessageView, TypingIndicator } from '@/components/chat/Message'
 import { RailCard } from '@/components/rail/RailPanels'
 import { useChat } from '@/state/ChatProvider'
+import { FeedbackProvider } from '@/state/FeedbackProvider'
 import { ConversationMenu } from '@/features/conversations/ConversationMenu'
 import { AnonymousQuotaNotice } from '@/features/anonymous/AnonymousQuotaNotice'
 import { isExhausted, useAnonymousQuota } from '@/features/anonymous/AnonymousQuotaProvider'
@@ -137,17 +138,25 @@ export function ChatPage() {
    * gets three broken controls and no warning that they were never wired. It
    * comes back with real attachments and a real share, not before.
    */
+  /*
+   * Feedback is loaded ONCE for the whole conversation and provided to every
+   * turn, rather than each message fetching its own. Wrapping the thread also
+   * means the state resets when the conversation changes — a thumb from another
+   * conversation must never render here.
+   */
   const thread = (
-    <div className="flex flex-col gap-6">
-      {conversation.messages.map((message) => (
-        <MessageView
-          key={message.id}
-          message={message}
-        />
-      ))}
-      {pending && <TypingIndicator />}
-      <div ref={bottomRef} />
-    </div>
+    <FeedbackProvider conversationId={conversation.id}>
+      <div className="flex flex-col gap-6">
+        {conversation.messages.map((message) => (
+          <MessageView
+            key={message.id}
+            message={message}
+          />
+        ))}
+        {pending && <TypingIndicator />}
+        <div ref={bottomRef} />
+      </div>
+    </FeedbackProvider>
   )
 
   return (

@@ -141,6 +141,11 @@ export type BrainOperation =
   | { kind: 'transcribe'; audioBase64: string; audioMime: string; requestedLanguage?: string }
   | { kind: 'synthesisCapability' }
   | { kind: 'synthesizeSpeech'; text: string; voice?: string }
+  | { kind: 'listFeedback'; conversationId: string }
+  | { kind: 'putFeedback'; conversationId: string; messageId: string; rating: 'up' | 'down';
+      reason?: string; detail?: string; requestId?: string; modelId?: string; providerId?: string;
+      turnContext?: Record<string, unknown> }
+  | { kind: 'removeFeedback'; conversationId: string; messageId: string }
 
   // ── MigraPilot preferences ───────────────────────────────────────────────
   /**
@@ -569,6 +574,33 @@ export function resolveOperation(op: BrainOperation): ResolvedRequest {
     case 'getCodingRun':
       return { method: 'GET', path: `/api/ai/coding/runs/${id(op.runId, 'runId')}` }
 
+    // Union and transport added together, always. A declared operation with no
+    // case type-checks perfectly and sends nothing — this codebase has shipped
+    // that defect once already.
+    case 'listFeedback':
+      return { method: 'GET', path: `/api/ai/conversations/${id(op.conversationId, 'conversationId')}/feedback` };
+    case 'putFeedback':
+      return {
+        method: 'PUT',
+        path: '/api/ai/feedback',
+        body: {
+          conversationId: op.conversationId,
+          messageId: op.messageId,
+          rating: op.rating,
+          ...(op.reason ? { reason: op.reason } : {}),
+          ...(op.detail ? { detail: op.detail } : {}),
+          ...(op.requestId ? { requestId: op.requestId } : {}),
+          ...(op.modelId ? { modelId: op.modelId } : {}),
+          ...(op.providerId ? { providerId: op.providerId } : {}),
+          ...(op.turnContext ? { turnContext: op.turnContext } : {}),
+        },
+      };
+    case 'removeFeedback':
+      return {
+        method: 'DELETE',
+        path: '/api/ai/feedback',
+        body: { conversationId: op.conversationId, messageId: op.messageId },
+      };
     case 'synthesisCapability':
       return { method: 'GET', path: '/api/ai/speech/synthesis/capability' };
     case 'synthesizeSpeech':

@@ -1189,6 +1189,81 @@ CREATE INDEX IF NOT EXISTS document_processing_state_idx
   ON document_processing (owner_scope, workspace_scope, state);
 `;
 
+/**
+ * M24 — message feedback.
+ *
+ * The thumbs shipped as browser state: no route, no row, and a vote that never
+ * left the page. This is the record that makes them mean something.
+ *
+ * ONE ROW PER MESSAGE PER OWNER, enforced by the primary key. That is what makes
+ * "click again to change your mind" an UPDATE and "click the same one again" a
+ * DELETE, instead of an append-only pile that has to be de-duplicated later by
+ * whoever reads it.
+ *
+ * 🚨 SHAPED FOR THE ENGINEER PIPELINE THAT DOES NOT EXIST YET. `schema_version`
+ * and the turn-provenance columns are here now so a later evaluation consumer can
+ * read these records without a migration: what was asked, which model answered,
+ * which trace it belongs to, and what the user thought. Adding those after the
+ * fact would mean re-deriving them for every row already collected — which is
+ * impossible, because the turn is gone.
+ *
+ * What is deliberately NOT stored: the answer text, the prompt, any credential,
+ * or raw internal state. The message id points at all of it, and copying it here
+ * would duplicate user content into a second place with its own retention.
+ */
+const M24_MESSAGE_FEEDBACK = `
+CREATE TABLE IF NOT EXISTS message_feedback (
+  owner_scope     migra_scope NOT NULL,
+  workspace_scope migra_scope NOT NULL,
+  conversation_id TEXT NOT NULL,
+  message_id      TEXT NOT NULL,
+  /* 'up' | 'down'. A retraction DELETEs the row rather than writing a third
+     value: "no opinion" and "an opinion that was withdrawn" are the same fact to
+     every consumer, and a tombstone would invite them to differ. */
+  rating          TEXT NOT NULL,
+  /* Structured reason, negative feedback only. Free text alone is unusable in
+     aggregate; a fixed vocabulary is what makes a hundred votes into a signal. */
+  reason          TEXT,
+  detail          TEXT,
+  /* Turn provenance, captured at vote time because it cannot be recovered later. */
+  request_id      TEXT,
+  model_id        TEXT,
+  provider_id     TEXT,
+  /* Small, bounded JSON: the capability state that was true for this turn
+     (grounding used, images present, whether it was refused). Enough to tell a
+     bad answer apart from a bad retrieval. */
+  turn_context    TEXT,
+  schema_version  INTEGER NOT NULL DEFAULT 1,
+  created_at      BIGINT NOT NULL,
+  updated_at      BIGINT NOT NULL,
+  PRIMARY KEY (owner_scope, workspace_scope, conversation_id, message_id)
+);
+
+CREATE INDEX IF NOT EXISTS message_feedback_rating_idx
+  ON message_feedback (owner_scope, workspace_scope, rating, updated_at DESC);
+
+/* For the Engineer consumer: negative feedback newest-first across a workspace,
+   without scanning every vote ever cast. */
+CREATE INDEX IF NOT EXISTS message_feedback_reason_idx
+  ON message_feedback (workspace_scope, reason, updated_at DESC)
+  WHERE reason IS NOT NULL;
+
+ALTER TABLE message_feedback ENABLE ROW LEVEL SECURITY;
+ALTER TABLE message_feedback FORCE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS message_feedback_scope ON message_feedback;
+CREATE POLICY message_feedback_scope ON message_feedback
+  USING (owner_scope = migra_current_owner())
+  WITH CHECK (owner_scope = migra_current_owner());
+
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'migrapilot_app') THEN
+    GRANT SELECT, INSERT, UPDATE, DELETE ON message_feedback TO migrapilot_app;
+  END IF;
+END $$;
+`;
+
 export const MIGRATIONS: readonly Migration[] = [
   { version: 1, name: 'foundation', sql: M1_FOUNDATION },
   { version: 2, name: 'tenancy_primitives', sql: M2_TENANCY },
@@ -1213,6 +1288,7 @@ export const MIGRATIONS: readonly Migration[] = [
   { version: 21, name: 'message_files', sql: M21_MESSAGE_FILES },
   { version: 22, name: 'index_version_chunk_count', sql: M22_INDEX_VERSION_CHUNK_COUNT },
   { version: 23, name: 'document_processing', sql: M23_DOCUMENT_PROCESSING },
+  { version: 24, name: 'message_feedback', sql: M24_MESSAGE_FEEDBACK },
 ];
 
 
