@@ -572,6 +572,9 @@
       "Projects",
       "Agents",
       "Deep research"
+    ],
+    "PERFORMANCE": [
+      "Speech sentence-streaming \u2014 play the first sentence while the rest synthesises. Would put first audio at ~1.2 s regardless of answer length, against ~8.5 s today. Optimization only; the capability is accepted and live."
     ]
   },
   "costStatus": {
@@ -1037,8 +1040,26 @@
       "pass1": "DONE \u2014 10 sources registered with sha256, page counts, rights placeholders.",
       "\ud83d\udea8 pageDiscrepancy": "RESOLVED AS FAR AS THE CORPUS CAN RESOLVE IT. 726 measured. Zero cross-source page overlap at BOTH the file level (pixel-identical) and the content level (256-bit perceptual hash, threshold calibrated against random-pair distances). No page appears in two books, so 603 is not explained by duplication. 726 stands; 603 is an unresolved historical/accounting figure and must not be reconciled by adjusting the measurement.",
       "note": "Separate program from MigraPilot product work; tracked here only so it is not lost.",
-      "pass2": "Rendering + content comparison DONE (726 pages at 40dpi). Transcription not started \u2014 OCR over 726 scanned pages is the bulk of the pass and its own run."
+      "pass2": {
+        "reconciliation": "DONE \u2014 zero cross-source overlap; 726 authoritative.",
+        "transcription": "RUNNING on VM111 (the only host with tesseract 5.3.4 + hat/fra). ~21 s/page on 3 cores, ~4 h for 726 pages. Resumable: already-recorded pages are skipped.",
+        "validatedOnOneSource": "HC-S001, 28 pages: mean confidence 92.9, zero flagged, diacritics intact (Krey\u00f2l, k\u00e8k, lib\u00e8te, espay\u00f2l, pwov\u00e8b).",
+        "\ud83d\udea8 knownLimitation": "Multi-column pages interleave in READING ORDER \u2014 the words are recovered but sentences can run together across columns. Affects sentence segmentation, so PASS 3 (structure) must not assume the transcription is linearly ordered within a page. Recorded now rather than discovered later.",
+        "provenanceModel": "Every page leaves as machine_extracted with certified:false. reviewed_transcription and canonical_modern_ht are created EMPTY and never written by the script \u2014 overwriting a human review with a machine pass is the one irreversible mistake available to it. Low-confidence pages and words are flagged, never smoothed. No normalisation of any kind."
+      },
+      "authoritativeInventory": "726 pages. Authoritative unless later PROVENANCE evidence identifies what the old 603 represented \u2014 not to be revisited by re-measuring."
     }
   },
-  "nextAfterListeningGate": "Krey\u00f2l PASS 2. Keep 726 as the measured source-page inventory; treat 603 as an unresolved historical/accounting figure until SEMANTIC comparison explains it \u2014 pixel hashing already proved there are no duplicate scans, so it cannot settle this."
+  "nextAfterListeningGate": "Krey\u00f2l PASS 2. Keep 726 as the measured source-page inventory; treat 603 as an unresolved historical/accounting figure until SEMANTIC comparison explains it \u2014 pixel hashing already proved there are no duplicate scans, so it cannot settle this.",
+  "migraPilotSpeech": {
+    "Listen / ASR": "LIVE",
+    "Read aloud / TTS": "LIVE",
+    "Voice quality": "ACCEPTED",
+    "Text fidelity": "ACCEPTED",
+    "Startup latency": "ACCEPTED WITH OPTIMIZATION AVAILABLE",
+    "Sentence streaming": "BACKLOG / PERFORMANCE IMPROVEMENT",
+    "Consumer engine exposure": "NONE",
+    "GPU dependency for TTS": "NONE",
+    "_note": "Latency is an optimization backlog item and does NOT reopen the feature."
+  }
 }

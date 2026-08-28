@@ -30,6 +30,12 @@
 !/scripts/consumer-release.sh
 !/scripts/release-retention.sh
 
+# Kreyòl extraction pipeline. Same rule as the release scripts: the pass that
+# produces the language corpus must be reproducible from repo state.
+!/services/
+!/services/kreyol-extract/
+!/services/kreyol-extract/*.py
+
 # Allow .github (agents + workflows)
 !.github/
 !.github/**
