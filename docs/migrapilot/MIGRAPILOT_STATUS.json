@@ -366,7 +366,8 @@
       "Durable answer attribution (whole document lane) \u2014 \"From your files\" is persisted on the answer itself, survives hard reload and History reopen, and a source deleted afterwards renders as struck through and \"deleted\" rather than a link to nothing. Proven live on Bonex's OWN document 2026-08-27 (consumer attrib-08272139).",
       "Speech output \u2014 MigraPilot reads an answer aloud. Bonex triggered it himself in the real product and accepted it (\"clean\", \"its good\"), which is the only thing that could close this gate. Live 2026-08-27 (brain speak-08272230, consumer gesture-08272252).",
       "Message feedback + report bad answer (Chat matrix rows 67, 68) \u2014 thumbs persist against the exact message, negative feedback captures a structured reason and optional note, changing a vote updates one row, retracting removes it, state survives reload, and a failed write leaves NOTHING selected. Full acceptance path passed live 2026-08-28 (brain fb-08280112, consumer fbui-08280112).",
-      "Picker/storage agreement (Chat matrix 22-24) \u2014 one canonical attachment definition drives the picker, validator, refusal copy and published contract. 35 offered = 35 accepted, and a binary file wearing a text extension is refused. Proven live 2026-08-28 (consumer sniff-08280125)."
+      "Picker/storage agreement (Chat matrix 22-24) \u2014 one canonical attachment definition drives the picker, validator, refusal copy and published contract. 35 offered = 35 accepted, and a binary file wearing a text extension is refused. Proven live 2026-08-28 (consumer sniff-08280125).",
+      "Unified attachment system \u2014 one canonical contract classifies by extension, MIME and BYTES, then dispatches to the image or document pipeline. A PNG chosen through Files becomes an image; a PDF and a photo attach to the same turn and are reasoned over jointly. Proven live 2026-08-28 (consumer unified-08280202)."
     ],
     "STABILIZATION": [
       {
@@ -467,12 +468,6 @@
       "\ud83d\udea8 theSameBugTwice": "The regex existed in TWO services. Fixing only the Brain left the failure exactly where it was, because the consumer gate runs first. Two identical patterns in two codebases is how one fix misses half a defect.",
       "secondDefectFound": "The consumer coerced any non-audio type to \"audio/webm\" and transcribed it anyway \u2014 video/mp4 returned 200 with a transcript. A default that rewrites the caller's claim is not a default. Now refused with \"That file is not an audio recording.\"",
       "liveProof": "chrome webm;codecs=opus, safari mp4;codecs=opus, firefox ogg;codecs=opus all 200 with correct text; video/mp4 400."
-    },
-    {
-      "id": "attachment-picker-is-a-capability-gate",
-      "severity": "HIGH",
-      "symptom": "The native dialog reads \"Custom Files\"; a PNG chosen through Files is REFUSED with a wall of extensions instead of being routed to the image pipeline. The picker acts as a capability gate rather than a selection mechanism.",
-      "\ud83d\udea8 myIncompleteFix": "The refusal copy in that screenshot is NOT the canonical refusalFor() text, which means the Composer keeps its OWN client-side allowlist and message. My previous slice unified the picker accept, the storage validator and the refusal copy \u2014 and missed a third list. The claim \"one list decides what MigraPilot accepts\" was therefore overstated."
     }
   ],
   "driftControl": [
@@ -916,6 +911,24 @@
         "5_server_authoritative": "every refusal enforced server-side with the picker bypassed entirely",
         "6_ui_from_contract": "picker accept == GET /api/files/capability: 35 == 35, zero drift",
         "7_no_regression": "docx 200; the image path is separate and untouched"
+      }
+    },
+    "unifiedAttachments": {
+      "fiveAllowlistsFound": "capability.ts, storage ALLOWED, filename.ts rejectionFor, Composer ACCEPTED_IMAGE_TYPES, and images.ts IMAGE_EXTENSIONS \u2014 plus two separate accept attributes. My earlier claim that \"one list decides what MigraPilot accepts\" covered three of them and was overstated.",
+      "architecture": "The picker SELECTS; the system CLASSIFIES. One handler reads the first 512 bytes of every chosen file, classifies by extension + MIME + signature, and dispatches to the image or document pipeline. Action Hub entries are filters over that same handler.",
+      "noCustomFiles": "The general attach input carries NO accept attribute, so the native dialog reads \"All Files\" rather than \"Custom Files\" \u2014 HTML offers no way to NAME a filter group, so this is the closest honest label. Nothing is filtered out before classification.",
+      "\ud83d\udea8 aTestCaughtABugIIntroduced": "Adding images to INDEXED_EXTENSIONS made the DOCUMENT store accept PNGs, because storage derived its allowlist from every selectable type. An existing test \u2014 \"formats the indexer cannot read are refused\" \u2014 failed and was right. One contract does not mean one bucket: DOCUMENT_EXTENSIONS and IMAGE_EXTENSIONS_CANONICAL now derive per pipeline.",
+      "testsUpdatedNotDeleted": "Six tests asserted the old architecture. One of them literally asserted that photo.png was an unsupported type \u2014 it encoded the bug. Each was rewritten to assert the same INTENT against the new mechanism; the .env protection moved to the classifier rather than disappearing.",
+      "liveProof": {
+        "png_through_files": "attached as an image, no refusal",
+        "pdf_through_files": "attached as a document",
+        "mixed_turn": "both attached from ONE selection; turn carries fileRefs AND imageRefs",
+        "joint_reasoning": "\"the inspection reference is SITE-7741, and the attached photo appears to be orange\" \u2014 the reference exists only in the PDF, the colour only in the image",
+        "reload": "pdf card, image and answer all survive",
+        "unsupported": "xlsx 400",
+        "smuggled": "zip-as-csv 400",
+        "pipeline_isolation": "png refused by the DOCUMENT store \u2014 images have their own",
+        "no_custom_files": "general input has no accept attribute"
       }
     }
   },

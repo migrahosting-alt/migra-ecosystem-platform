@@ -39,11 +39,25 @@ test('both actions are real, and each opens its own picker', () => {
   assert.match(composer, /onSelect: \(\) => fileInputRef\.current\?\.click\(\)/)
 })
 
-test('the image picker offers only types the server will accept', () => {
-  // A picker that lets someone choose a HEIC and then refuses it server-side has
-  // wasted the upload and taught nothing.
-  const accept = /accept="image\/png,image\/jpeg,image\/gif,image\/webp"/
-  assert.match(composer, accept)
+test('the Photos entry is a filter over the one attachment system', () => {
+  /*
+   * It used to hard-code a MIME list, which is how the image and document
+   * pickers came to disagree — a JPEG chosen through Files was refused as an
+   * unsupported document. The shortcut now narrows the CHOOSER using the
+   * canonical image list and sends what it finds through the same handler as
+   * every other entry point.
+   */
+  assert.match(composer, /accept=\{IMAGE_ACCEPT\}/, 'the filter comes from the contract')
+  assert.match(composer, /onChange=\{onPicked\}/, 'and lands in the shared handler')
+})
+
+test('the general attach entry does not filter before classification', () => {
+  // No `accept` on the general input: the native dialog reads "All Files" rather
+  // than "Custom Files", and nothing is excluded before the system has looked at
+  // it. Selection and classification are separate acts.
+  const general = composer.slice(composer.indexOf('ref={fileInputRef}'))
+  const untilClose = general.slice(0, general.indexOf('/>'))
+  assert.doesNotMatch(untilClose, /accept=/, 'the general picker must not pre-filter')
 })
 
 test('the menu is dismissible without a mouse', () => {

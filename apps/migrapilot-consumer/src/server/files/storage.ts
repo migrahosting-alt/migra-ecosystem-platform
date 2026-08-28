@@ -1,4 +1,4 @@
-import { INDEXED_EXTENSIONS, contentMismatch, refusalFor } from '@/features/attachments/capability'
+import { DOCUMENT_EXTENSIONS, contentMismatch, refusalFor } from '@/features/attachments/capability'
 import 'server-only'
 
 import { createHash } from 'node:crypto'
@@ -52,7 +52,10 @@ const uploadRoot = (): string => process.env.UPLOAD_ROOT ?? '/var/lib/migrapilot
  * they cannot disagree again — see features/attachments/capability.ts for why a
  * type is or is not on it.
  */
-const ALLOWED = new Set<string>(INDEXED_EXTENSIONS)
+// The DOCUMENT pipeline only. Images have their own store and their own
+// reader; letting a PNG into the file library would put it where nothing
+// can look at it.
+const ALLOWED = new Set<string>(DOCUMENT_EXTENSIONS)
 
 /*
  * `sql` AND `env` WERE REMOVED FROM THE LIST ABOVE, and the omission is the point.

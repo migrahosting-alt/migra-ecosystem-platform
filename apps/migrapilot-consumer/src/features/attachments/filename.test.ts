@@ -65,18 +65,52 @@ test('a dotfile is a NAME, not an extension', () => {
   // `.env` must not be read as "extension env" — that would walk a secrets file straight
   // through a check written to stop it.
   assert.equal(extensionOf('.env'), '')
-  assert.notEqual(rejectionFor({ name: '.env', size: 10 }, limits), null)
 })
 
-test('a genuinely unsupported type is still refused, and names itself with a dot', () => {
-  const rejection = rejectionFor({ name: 'photo.png', size: 10 }, limits)
-  assert.equal(rejection?.code, 'unsupported_type')
-  assert.match(String(rejection?.message), /^\.png is not supported/)
+/*
+ * 🚨 THE PROTECTION MOVED; IT DID NOT GO AWAY.
+ *
+ * The client no longer refuses by type — that mirror rejected supported files
+ * before classification and is what made a JPEG "unsupported". `.env` is still
+ * refused, now by the canonical classifier and the server, which are the layers
+ * that can actually be trusted.
+ */
+test('a secrets file is still refused, by the classifier', async () => {
+  const { classifyAttachment } = await import('./capability')
+  const verdict = classifyAttachment('.env', 'text/plain', new TextEncoder().encode('KEY=x'))
+  assert.equal(verdict.ok, false)
 })
 
-test('an extensionless file is refused without claiming a type', () => {
-  const rejection = rejectionFor({ name: 'Makefile', size: 10 }, limits)
-  assert.match(String(rejection?.message), /^That file type is not supported/)
+/*
+ * 🚨 THIS TEST USED TO ENCODE THE BUG.
+ *
+ * It asserted that `photo.png` was refused as an unsupported type — which is
+ * exactly what a user saw when they chose a photo through "Files". A PNG is
+ * supported; it belongs on the image pipeline. The assertion is now the
+ * opposite, and that is the fix.
+ */
+test('a PNG chosen through Files becomes an image, not an error', async () => {
+  const { classifyAttachment } = await import('./capability')
+  const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
+  const verdict = classifyAttachment('photo.png', 'image/png', png)
+  assert.equal(verdict.ok, true)
+  assert.equal(verdict.ok && verdict.pipeline, 'image')
+})
+
+test('a genuinely unsupported type is still refused, with a usable reason', async () => {
+  const { classifyAttachment } = await import('./capability')
+  const verdict = classifyAttachment('sheet.xlsx', 'application/vnd.ms-excel', new Uint8Array([0x50, 0x4b, 3, 4]))
+  assert.equal(verdict.ok, false)
+  assert.match(verdict.ok ? '' : verdict.message, /CSV/, 'says what to do instead')
+})
+
+test('an extensionless file is refused without claiming a type', async () => {
+  // Moved to the classifier with the rest of the type decision. The message must
+  // still not invent an extension it never saw.
+  const { classifyAttachment } = await import('./capability')
+  const verdict = classifyAttachment('Makefile', 'text/plain', new TextEncoder().encode('all:'))
+  assert.equal(verdict.ok, false)
+  assert.match(verdict.ok ? '' : verdict.message, /no extension/i)
 })
 
 test('oversize is caught, but only for an otherwise-allowed type', () => {

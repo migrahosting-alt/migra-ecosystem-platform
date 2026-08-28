@@ -3,10 +3,10 @@
 import { useCallback, useRef, useState, type ChangeEvent, type ClipboardEvent, type DragEvent, type FormEvent, type KeyboardEvent } from 'react'
 import { FileText, Lock, Mic, SendHorizontal, X } from 'lucide-react'
 import { AttachmentChips } from '@/features/attachments/AttachmentChips'
-import { DOCUMENT_PICKER_ACCEPT } from '@/features/attachments/filename'
 import { useAttachments } from '@/features/attachments/useAttachments'
 import { useVisionAvailability, visionDisabledReason } from '@/features/attachments/useVisionAvailability'
 import { ActionHub, type HubAction } from '@/components/chat/ActionHub'
+import { IMAGE_ACCEPT, classifyAttachment } from '@/features/attachments/capability'
 import { ImageTray } from '@/components/chat/ImageTray'
 import type { PublicImage } from '@/app/api/images/route'
 
@@ -23,7 +23,6 @@ const IMAGE_REF = /^img_[0-9a-f]{32}$/
  * entry points cannot come to disagree about what an image is.
  */
 const ACCEPTED_IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp']
-const ACCEPTED_LABEL = 'PNG, JPEG, GIF or WebP'
 
 /** Bounded and stated, rather than silently dropping the extras. */
 const MAX_TURN_IMAGES = 4
@@ -209,10 +208,38 @@ export function Composer({
     requestAnimationFrame(grow)
   }
 
-  const onPicked = (event: ChangeEvent<HTMLInputElement>) => {
-    if (event.target.files?.length) add(event.target.files)
+  /**
+   * ONE ENTRY POINT. Classify, then dispatch.
+   *
+   * 🚨 The picker used to decide capability: a JPEG chosen through "Files" was
+   * refused as an unsupported document, because the menu entry had already
+   * decided what kind of thing you were allowed to be holding. Selection and
+   * classification are now separate acts — whatever is chosen is inspected by
+   * extension, MIME and BYTES, then sent down its own pipeline.
+   *
+   * Mixed selections are the point, not an edge case: a PDF and a photo chosen
+   * together both attach to the same turn and both reach the model.
+   */
+  const onPicked = async (event: ChangeEvent<HTMLInputElement>) => {
+    const picked = Array.from(event.target.files ?? [])
     // Reset so picking the SAME file twice still fires a change event.
     event.target.value = ''
+    if (picked.length === 0) return
+
+    const documents: File[] = []
+    for (const file of picked) {
+      // The first bytes are the evidence. Read once, here, so no downstream
+      // layer has to guess from the name.
+      const head = new Uint8Array(await file.slice(0, 512).arrayBuffer())
+      const verdict = classifyAttachment(file.name, file.type, head)
+      if (!verdict.ok) {
+        setImageError(verdict.message)
+        continue
+      }
+      if (verdict.pipeline === 'image') await uploadImage(file)
+      else documents.push(file)
+    }
+    if (documents.length > 0) add(documents as unknown as FileList)
   }
 
   /*
@@ -237,12 +264,14 @@ export function Composer({
       setImageError(visionReason)
       return
     }
-    if (!ACCEPTED_IMAGE_TYPES.includes(file.type)) {
-      // Refused before the upload: a HEIC that the server will reject anyway has
-      // wasted the transfer and taught the user nothing.
-      setImageError(`That file type is not supported. Use ${ACCEPTED_LABEL}.`)
-      return
-    }
+    /*
+     * 🚨 NO SECOND GATE HERE. Classification already established that this is an
+     * image, from its bytes rather than its declared type — and a browser
+     * routinely reports an empty or odd MIME for a perfectly good photo. Judging
+     * it again on that field would refuse files the system had just recognised,
+     * which is the split-brain this slice exists to remove. The server remains
+     * authoritative.
+     */
     if (images.length >= MAX_TURN_IMAGES) {
       // Bounded truthfully rather than silently dropping the extras.
       setImageError(`You can attach up to ${MAX_TURN_IMAGES} images to one message.`)
@@ -280,12 +309,6 @@ export function Composer({
       setPendingImage(null)
     }
   }, [images.length, visionReady, visionReason])
-
-  const onImagePicked = async (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0]
-    event.target.value = ''
-    if (file) await uploadImage(file)
-  }
 
   /**
    * Ctrl+V with an image on the clipboard.
@@ -441,19 +464,30 @@ export function Composer({
         className="hidden"
         onChange={onPicked}
         /*
-         * The DOCUMENT picker, not a list of today's supported extensions. A
-         * dialog built from the server's allowlist reads as "Custom Files" and
-         * makes PDF look nonexistent rather than not-yet-supported. The server
-         * refuses what it cannot read, with a reason — see DOCUMENT_PICKER_ACCEPT.
+         * 🚨 NO `accept`, DELIBERATELY.
+         *
+         * An accept list makes the native dialog read "Custom Files" — a label
+         * describing our internal category boundaries to someone who should
+         * never have to learn them — and it filters the chooser before anything
+         * has been classified. Without it the dialog says "All Files", the user
+         * picks what they actually have, and the system decides what it is.
+         *
+         * HTML offers no way to NAME a filter group, so "All Files" is the
+         * closest honest label available.
          */
-        accept={DOCUMENT_PICKER_ACCEPT}
       />
+      {/*
+        * The Photos shortcut is a FILTER over the same handler — same
+        * classification, same dispatch, same refusals. It narrows the chooser
+        * for convenience; it never narrows what the system accepts.
+        */}
       <input
         ref={imageInputRef}
         type="file"
-        accept="image/png,image/jpeg,image/gif,image/webp"
+        multiple
+        accept={IMAGE_ACCEPT}
         className="hidden"
-        onChange={onImagePicked}
+        onChange={onPicked}
       />
 
       {conversationFiles && conversationFiles.length > 0 && (

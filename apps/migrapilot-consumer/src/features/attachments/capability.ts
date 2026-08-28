@@ -30,10 +30,22 @@
 
 export type AttachmentSupport = 'indexed' | 'unsupported'
 
+/**
+ * Which canonical path an attachment travels once classified.
+ *
+ * 🚨 THE PICKER IS A SELECTION MECHANISM, NOT A CAPABILITY GATE. A JPEG chosen
+ * through "Files" is an IMAGE, and it becomes one — it does not become an error
+ * because of which menu entry opened the dialog. Action Hub entries are filters
+ * over this one system; they never create a second universe with its own rules.
+ */
+export type AttachmentPipeline = 'image' | 'document'
+
 export interface AttachmentType {
   ext: string
   /** Grouping for the picker and for what we tell people. */
-  kind: 'document' | 'data' | 'code'
+  kind: 'document' | 'data' | 'code' | 'image'
+  /** Where a supported attachment is dispatched after classification. */
+  pipeline?: AttachmentPipeline
   support: AttachmentSupport
   /** Why it is refused. Shown to the user, so it must be true and useful. */
   reason?: string
@@ -49,46 +61,59 @@ const DUMP =
   'Database dumps are not accepted. Paste the part you want read, or attach it as a .txt file.'
 
 export const ATTACHMENT_TYPES: readonly AttachmentType[] = [
+  /*
+   * ── images ──
+   * In the SAME table as documents, deliberately. They lived in a separate list
+   * with a separate picker and a separate validator, which is why choosing a
+   * PNG through Files produced ".png is not supported" beside a wall of
+   * extensions — two universes, one of which had never heard of the other.
+   */
+  { ext: 'png', kind: 'image', pipeline: 'image', support: 'indexed' },
+  { ext: 'jpg', kind: 'image', pipeline: 'image', support: 'indexed' },
+  { ext: 'jpeg', kind: 'image', pipeline: 'image', support: 'indexed' },
+  { ext: 'gif', kind: 'image', pipeline: 'image', support: 'indexed' },
+  { ext: 'webp', kind: 'image', pipeline: 'image', support: 'indexed' },
+
   // ── documents that work end to end ──
-  { ext: 'pdf', kind: 'document', support: 'indexed' },
-  { ext: 'docx', kind: 'document', support: 'indexed' },
-  { ext: 'txt', kind: 'document', support: 'indexed' },
-  { ext: 'md', kind: 'document', support: 'indexed' },
-  { ext: 'markdown', kind: 'document', support: 'indexed' },
-  { ext: 'log', kind: 'document', support: 'indexed' },
+  { ext: 'pdf', kind: 'document', pipeline: 'document', support: 'indexed' },
+  { ext: 'docx', kind: 'document', pipeline: 'document', support: 'indexed' },
+  { ext: 'txt', kind: 'document', pipeline: 'document', support: 'indexed' },
+  { ext: 'md', kind: 'document', pipeline: 'document', support: 'indexed' },
+  { ext: 'markdown', kind: 'document', pipeline: 'document', support: 'indexed' },
+  { ext: 'log', kind: 'document', pipeline: 'document', support: 'indexed' },
 
   // ── structured data read as text ──
-  { ext: 'csv', kind: 'data', support: 'indexed' },
-  { ext: 'tsv', kind: 'data', support: 'indexed' },
-  { ext: 'json', kind: 'data', support: 'indexed' },
-  { ext: 'xml', kind: 'data', support: 'indexed' },
-  { ext: 'yaml', kind: 'data', support: 'indexed' },
-  { ext: 'yml', kind: 'data', support: 'indexed' },
-  { ext: 'toml', kind: 'data', support: 'indexed' },
-  { ext: 'ini', kind: 'data', support: 'indexed' },
-  { ext: 'conf', kind: 'data', support: 'indexed' },
+  { ext: 'csv', kind: 'data', pipeline: 'document', support: 'indexed' },
+  { ext: 'tsv', kind: 'data', pipeline: 'document', support: 'indexed' },
+  { ext: 'json', kind: 'data', pipeline: 'document', support: 'indexed' },
+  { ext: 'xml', kind: 'data', pipeline: 'document', support: 'indexed' },
+  { ext: 'yaml', kind: 'data', pipeline: 'document', support: 'indexed' },
+  { ext: 'yml', kind: 'data', pipeline: 'document', support: 'indexed' },
+  { ext: 'toml', kind: 'data', pipeline: 'document', support: 'indexed' },
+  { ext: 'ini', kind: 'data', pipeline: 'document', support: 'indexed' },
+  { ext: 'conf', kind: 'data', pipeline: 'document', support: 'indexed' },
 
   // ── source code, all plain text and genuinely indexed ──
-  { ext: 'ts', kind: 'code', support: 'indexed' },
-  { ext: 'tsx', kind: 'code', support: 'indexed' },
-  { ext: 'js', kind: 'code', support: 'indexed' },
-  { ext: 'jsx', kind: 'code', support: 'indexed' },
-  { ext: 'py', kind: 'code', support: 'indexed' },
-  { ext: 'rb', kind: 'code', support: 'indexed' },
-  { ext: 'go', kind: 'code', support: 'indexed' },
-  { ext: 'rs', kind: 'code', support: 'indexed' },
-  { ext: 'java', kind: 'code', support: 'indexed' },
-  { ext: 'c', kind: 'code', support: 'indexed' },
-  { ext: 'h', kind: 'code', support: 'indexed' },
-  { ext: 'cpp', kind: 'code', support: 'indexed' },
-  { ext: 'cs', kind: 'code', support: 'indexed' },
-  { ext: 'php', kind: 'code', support: 'indexed' },
-  { ext: 'swift', kind: 'code', support: 'indexed' },
-  { ext: 'kt', kind: 'code', support: 'indexed' },
-  { ext: 'sh', kind: 'code', support: 'indexed' },
-  { ext: 'html', kind: 'code', support: 'indexed' },
-  { ext: 'css', kind: 'code', support: 'indexed' },
-  { ext: 'scss', kind: 'code', support: 'indexed' },
+  { ext: 'ts', kind: 'code', pipeline: 'document', support: 'indexed' },
+  { ext: 'tsx', kind: 'code', pipeline: 'document', support: 'indexed' },
+  { ext: 'js', kind: 'code', pipeline: 'document', support: 'indexed' },
+  { ext: 'jsx', kind: 'code', pipeline: 'document', support: 'indexed' },
+  { ext: 'py', kind: 'code', pipeline: 'document', support: 'indexed' },
+  { ext: 'rb', kind: 'code', pipeline: 'document', support: 'indexed' },
+  { ext: 'go', kind: 'code', pipeline: 'document', support: 'indexed' },
+  { ext: 'rs', kind: 'code', pipeline: 'document', support: 'indexed' },
+  { ext: 'java', kind: 'code', pipeline: 'document', support: 'indexed' },
+  { ext: 'c', kind: 'code', pipeline: 'document', support: 'indexed' },
+  { ext: 'h', kind: 'code', pipeline: 'document', support: 'indexed' },
+  { ext: 'cpp', kind: 'code', pipeline: 'document', support: 'indexed' },
+  { ext: 'cs', kind: 'code', pipeline: 'document', support: 'indexed' },
+  { ext: 'php', kind: 'code', pipeline: 'document', support: 'indexed' },
+  { ext: 'swift', kind: 'code', pipeline: 'document', support: 'indexed' },
+  { ext: 'kt', kind: 'code', pipeline: 'document', support: 'indexed' },
+  { ext: 'sh', kind: 'code', pipeline: 'document', support: 'indexed' },
+  { ext: 'html', kind: 'code', pipeline: 'document', support: 'indexed' },
+  { ext: 'css', kind: 'code', pipeline: 'document', support: 'indexed' },
+  { ext: 'scss', kind: 'code', pipeline: 'document', support: 'indexed' },
 
   // ── refused, with the reason the user is told ──
   { ext: 'doc', kind: 'document', support: 'unsupported', reason: NO_EXTRACTOR },
@@ -106,9 +131,28 @@ export const ATTACHMENT_TYPES: readonly AttachmentType[] = [
   { ext: 'sql', kind: 'data', support: 'unsupported', reason: DUMP },
 ]
 
-/** Extensions the whole path supports. THE allowlist — storage derives from this. */
+/** Everything selectable, across every pipeline. What the picker offers. */
 export const INDEXED_EXTENSIONS: readonly string[] = ATTACHMENT_TYPES
   .filter((t) => t.support === 'indexed')
+  .map((t) => t.ext)
+  .sort()
+
+/*
+ * 🚨 EACH STORE TAKES ITS OWN PIPELINE, and this distinction is load-bearing.
+ *
+ * One contract does not mean one bucket. Images live in a content-addressed
+ * image library and documents in the file library, and they are read by
+ * different machinery. Deriving the DOCUMENT allowlist from everything
+ * selectable made the document store accept a PNG — caught by a test that
+ * already knew images are not documents.
+ */
+export const DOCUMENT_EXTENSIONS: readonly string[] = ATTACHMENT_TYPES
+  .filter((t) => t.support === 'indexed' && t.pipeline === 'document')
+  .map((t) => t.ext)
+  .sort()
+
+export const IMAGE_EXTENSIONS_CANONICAL: readonly string[] = ATTACHMENT_TYPES
+  .filter((t) => t.support === 'indexed' && t.pipeline === 'image')
   .map((t) => t.ext)
   .sort()
 
@@ -209,3 +253,97 @@ export function contentMismatch(fileName: string, head: Uint8Array): string | nu
   }
   return null
 }
+
+
+// ── classification ──────────────────────────────────────────────────────────
+
+/**
+ * What this attachment IS, and where it goes.
+ *
+ * 🚨 CLASSIFY, THEN DISPATCH. The old design decided validity at the picker: a
+ * JPEG selected through "Files" was refused as an unsupported document, because
+ * the menu entry had already decided what kind of thing you were allowed to be
+ * holding. The picker now only selects; this decides.
+ *
+ * Three sources of evidence, in increasing order of authority:
+ *   extension — what the file is NAMED. A claim.
+ *   MIME      — what the browser GUESSED, usually from the same extension.
+ *   bytes     — what it actually IS.
+ *
+ * The extension chooses the pipeline, because that is what the user meant. The
+ * bytes are then required to agree, which is what stops a zip wearing a .csv
+ * name from being stored as text and silently skipped by the indexer.
+ */
+export type Classification =
+  | { ok: true; pipeline: AttachmentPipeline; ext: string }
+  | { ok: false; message: string }
+
+const IMAGE_SIGNATURES: readonly { bytes: readonly number[]; ext: string }[] = [
+  { bytes: [0x89, 0x50, 0x4e, 0x47], ext: 'png' },
+  { bytes: [0xff, 0xd8, 0xff], ext: 'jpg' },
+  { bytes: [0x47, 0x49, 0x46, 0x38], ext: 'gif' },
+  // WEBP is RIFF....WEBP — the container is checked, then the form at byte 8.
+  { bytes: [0x52, 0x49, 0x46, 0x46], ext: 'webp' },
+]
+
+function looksLikeImage(head: Uint8Array): boolean {
+  return IMAGE_SIGNATURES.some((s) => s.bytes.every((b, i) => head[i] === b))
+}
+
+export function classifyAttachment(
+  fileName: string,
+  declaredMime: string | undefined,
+  head: Uint8Array,
+): Classification {
+  const ext = extensionOf(fileName)
+  const known = BY_EXT.get(ext)
+
+  // A type we know and have decided against keeps its specific reason.
+  if (known?.support === 'unsupported') return { ok: false, message: known.reason ?? refusalFor(fileName) }
+
+  /*
+   * An unknown extension is not automatically hopeless. If the BYTES are an
+   * image, the user is holding a photo whatever it is called, and refusing it on
+   * a name would be pedantry — but the name must not actively contradict a
+   * different supported type.
+   */
+  if (!known) {
+    if (looksLikeImage(head) && (declaredMime ?? '').startsWith('image/')) {
+      return { ok: true, pipeline: 'image', ext: 'png' }
+    }
+    return { ok: false, message: refusalFor(fileName) }
+  }
+
+  const pipeline = known.pipeline ?? 'document'
+
+  if (pipeline === 'image') {
+    // Named as an image; the bytes have to be one. Otherwise it is a document
+    // (or something worse) wearing a photo's name.
+    if (head.length >= 4 && !looksLikeImage(head)) {
+      return { ok: false, message: `That .${ext} file is not a real image, so MigraPilot cannot open it.` }
+    }
+    return { ok: true, pipeline: 'image', ext }
+  }
+
+  // Document pipeline: the existing content rule already refuses a binary file
+  // wearing a text file's name, and PDF/DOCX are exempt because they are
+  // legitimately binary and have real extractors.
+  const mismatch = contentMismatch(fileName, head)
+  if (mismatch) return { ok: false, message: mismatch }
+  return { ok: true, pipeline: 'document', ext }
+}
+
+/**
+ * The `accept` for the GENERAL attach entry.
+ *
+ * Every supported type, images included, so one control reaches everything
+ * MigraPilot can actually use. The specialised Action Hub entries narrow this
+ * for convenience; none of them narrows what the SYSTEM will accept.
+ */
+export const ALL_SUPPORTED_ACCEPT = INDEXED_EXTENSIONS.map((e) => `.${e}`).join(',')
+
+/** Just the images, for the "Photos" shortcut. A filter, not a different rule. */
+export const IMAGE_ACCEPT = ATTACHMENT_TYPES
+  .filter((t) => t.pipeline === 'image')
+  .map((t) => `.${t.ext}`)
+  .join(',')

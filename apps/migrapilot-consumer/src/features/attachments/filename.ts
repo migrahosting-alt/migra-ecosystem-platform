@@ -77,18 +77,18 @@ export function rejectionFor(
 ): FilenameRejection | null {
   if (!limits) return null
 
-  const extension = extensionOf(file.name)
-  const allowed = new Set(limits.allowedExtensions.map((e) => (e.startsWith('.') ? e.slice(1) : e).toLowerCase()))
-
-  if (!allowed.has(extension)) {
-    return {
-      code: 'unsupported_type',
-      message: `${extension ? `.${extension}` : 'That file type'} is not supported. Allowed: ${limits.allowedExtensions
-        .map((e) => (e.startsWith('.') ? e : `.${e}`))
-        .join(', ')}.`,
-    }
-  }
-
+  /*
+   * 🚨 THE EXTENSION CHECK IS GONE, ON PURPOSE.
+   *
+   * This mirrored a server allowlist and rejected anything outside it before
+   * classification had happened — which is how a JPEG chosen through "Files"
+   * became ".png is not supported" followed by a wall of extensions. The client
+   * does not get to decide that a supported object is invalid; it selects, the
+   * system classifies, and the server stays authoritative.
+   *
+   * Size survives because it needs no knowledge of TYPE to be right, and
+   * catching an oversized file before the upload saves a real round trip.
+   */
   if (file.size > limits.maxFileBytes) {
     return {
       code: 'too_large',

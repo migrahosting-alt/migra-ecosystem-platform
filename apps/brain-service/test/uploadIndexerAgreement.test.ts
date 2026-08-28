@@ -47,7 +47,13 @@ const CAPABILITY = join(
  */
 function allowedExtensions(): string[] {
   const source = readFileSync(CAPABILITY, 'utf8');
-  const indexed = [...source.matchAll(/\{\s*ext:\s*'([a-z0-9]+)'[^}]*support:\s*'indexed'/g)]
+  /*
+   * The DOCUMENT pipeline only. Images are selectable too, but they go to the
+   * image library and are read by vision — the indexer excludes them as binary
+   * and is right to. Comparing every selectable type against the INDEXER would
+   * report a disagreement that does not exist.
+   */
+  const indexed = [...source.matchAll(/\{\s*ext:\s*'([a-z0-9]+)'[^}]*pipeline:\s*'document',\s*support:\s*'indexed'/g)]
     .map((m) => m[1]!);
   assert.ok(indexed.length > 10, 'could not parse the canonical attachment list — has it moved?');
   return indexed;

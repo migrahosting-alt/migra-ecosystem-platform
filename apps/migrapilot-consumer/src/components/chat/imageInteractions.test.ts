@@ -31,17 +31,28 @@ test('picker, paste and drop all go through the same upload', () => {
   // Exactly one place posts to the images endpoint.
   const posts = [...c.matchAll(/fetch\('\/api\/images', \{ method: 'POST'/g)]
   assert.equal(posts.length, 1, `expected one upload implementation, found ${posts.length}`)
-  for (const caller of ['onImagePicked', 'onPaste', 'onDrop']) {
+  // onImagePicked is gone: the picker now shares ONE classify-then-dispatch
+  // handler with every other entry point, which is a stronger version of the
+  // property this test was written to protect.
+  for (const caller of ['onPicked', 'onPaste', 'onDrop']) {
     assert.match(c, new RegExp(`${caller}[\\s\\S]{0,700}uploadImage\\(`), `${caller} must reuse it`)
   }
 })
 
-test('one list decides what counts as an image', () => {
-  // Three entry points with three opinions is how they come to disagree.
+test('one classifier decides what counts as an image', () => {
+  /*
+   * The intent is unchanged and the mechanism is stronger. This used to assert a
+   * MIME list local to the Composer; that list WAS the problem — it disagreed
+   * with the document picker, so a JPEG chosen through Files was refused as an
+   * unsupported document. There is now one canonical classifier, and the
+   * Composer must not second-guess it.
+   */
   const c = code(composer)
-  assert.match(c, /const ACCEPTED_IMAGE_TYPES = \['image\/png', 'image\/jpeg', 'image\/gif', 'image\/webp'\]/)
-  assert.match(c, /ACCEPTED_IMAGE_TYPES\.includes\(file\.type\)/, 'upload checks it')
-  assert.match(c, /ACCEPTED_IMAGE_TYPES\.includes\(item\.type\)/, 'paste checks it')
+  assert.match(c, /classifyAttachment\(/, 'the composer classifies rather than deciding for itself')
+  assert.doesNotMatch(
+    c, /ACCEPTED_IMAGE_TYPES\.includes\(file\.type\)/,
+    'the upload path must not re-judge a file the classifier already accepted',
+  )
 })
 
 test('a paste with no image leaves text alone', () => {
