@@ -1,7 +1,7 @@
 {
   "$schema": "MIGRAPILOT_STATUS — canonical cross-agent state. Update on every material change.",
   "updated": "2026-08-30",
-  "updatedBy": "Claude Opus 5 — deployment backlog verification",
+  "updatedBy": "Claude Opus 5 — image attachment slice",
   "rules": {
     "easyFirst": "Do not start deep capability work while meaningful easy user-facing items remain.",
     "provenLive": "PROVEN_LIVE requires the real user-facing workflow to pass. Code existing and tests passing is NOT proof.",
@@ -1155,7 +1155,7 @@
       "nextPass": "PASS 3: column detection BEFORE sentence reconstruction (Bonex's decision). Add volume-based triage alongside confidence. Human verification remains the only path out of machine_extracted."
     },
     "attachmentProcessingArchitecture_2026_08_28": {
-      "status": "DOCUMENTS PROVEN_LIVE 2026-08-30 (deployed, upload-triggered, grounded answers with provenance). IMAGES still NOT live-proven — the image half of this slice has not been exercised since deployment.",
+      "status": "PROVEN_LIVE 2026-08-30 — documents AND images. The image half found TWO real defects live; both fixed and deployed in consumer release imgrefusal-08300925.",
       "scope": "Bonex reopened attachments after production screenshots: transport is fixed, processing limits are not.",
       "🚨 empiricalFinding_bonexPdfNeedsOcr": "liv_kreyol_AI-Training.pdf (36 MB, 245 pages) has NO TEXT LAYER — probed on VM111, pages 122/123/124 each yield 0 characters. It is the scanned Kreyol book (HC-S009, 245 pages, the same source PASS 2 OCR'd). So the new text-layer fast path does NOT apply to it: the probe correctly routes it to the existing OCR pipeline. Expect roughly 1.5-2 hours for 245 pages at the PASS 2 measured rate (~24 s/page), not seconds. This is a real capability where there was none — the file used to be skipped outright — but it is SLOW for this document, and that must not be described as if it were instant.",
       "dragDropDefectFound": "onDrop sent EVERY dropped file to uploadImage with no classification, so a dragged PDF was pushed at the image endpoint while the identical PDF chosen through the paperclip attached correctly. onPaste only looked for clipboard image MIME types, so a copied PDF pasted in did nothing at all — no attachment, no refusal, no explanation. Picker, drop and paste now share one `intake` that classifies from bytes via classifyAttachment. A local ACCEPTED_IMAGE_TYPES list was deleted; it claimed to be the shared definition but only paste consulted it.",
@@ -1193,6 +1193,26 @@
         "severity": "This would have made the ENTIRE large-document feature silently fail after two hours of the user's time. Every component was correct in isolation; only the ORDER of two checks was wrong, which is why no existing test could see it. Found by tracing the full path from job -> writeOcrSidecar -> indexService.sync -> walk, not by a failing test.",
         "fix": "The sidecar is checked FIRST for PDFs; the size ceiling then applies to every path that reads SOURCE bytes. The ceiling protects this walk from loading a large file into memory, and a sidecar is a different, already-bounded artifact whose existence proves the source was read out-of-band.",
         "regressionTestVerified": "test/largePdfSidecarIndexing.test.ts. PROVEN to catch the defect: with the old ordering temporarily restored the suite failed 1/2071 on exactly that test, and passed again once reverted. A test that passes both before and after would have proven nothing."
+      },
+      "imageLiveAcceptance_2026_08_30": {
+        "visionWorks": "PASS — attached PNG, invented content. 'HANGAR TALLY KROTON-52 … four red triangles and one blue square.' Read the invented heading verbatim and got the shapes right.",
+        "byteCeiling": "PASS — 46.8 MB JPEG refused: 'big-photo.jpg — Images are limited to 25 MB.'",
+        "unresizableDimension": "PASS — 'oversized.webp — That WEBP is 4000×3000. MigraPilot cannot resize WEBP images, so they are limited to 2048px per side. Save it as PNG or JPEG to attach it at this size.'",
+        "🚨 defect1_visionRefusalShownAsServiceFault": {
+          "found": "Asked for an exact count, the Brain refused 422 VISION_NOT_QUALIFIED and supplied the reason. The user was shown 'The assistant service could not complete this request.'",
+          "whyItMatters": "Inverts the honest-unavailable rule. A permanent, explainable limit was dressed as a transient fault, inviting endless retries of the identical question and making a correctly-behaving system look broken. Telemetry proved the image was fine: requested 1, sent 1, dropped 0.",
+          "fix": "stream/route.ts relays the Brain's sentence VERBATIM, exactly as IMAGE_EDITING_UNAVAILABLE already did, so the limit has one definition where the measurement lives.",
+          "provenLive": "PASS — now reads 'The vision model running here was measured on counting and is not reliable at it — it miscounts without any sign that it has… Ask me what is in the image and I can answer that.'"
+        },
+        "🚨 defect2_onlyOneImageRefusalSurvived": {
+          "found": "A 46.8 MB JPEG and a 4000×3000 WEBP selected together produced ONE message. The JPEG vanished — no chip, no refusal, no explanation — because every per-file image complaint wrote to a single `imageError` slot.",
+          "whyItMatters": "Same family as the onPaste defect this slice was opened to remove: a file silently disappears and nothing says why. The document path had already fixed it with a per-file list; images had not.",
+          "fix": "uploadImage RETURNS a named refusal; intake accumulates it into the same per-file list documents use, keeping one accumulation point. Turn-level notices (vision unavailable, per-message cap) stay in the shared slot deliberately — naming a file for them would be a small lie.",
+          "provenLive": "PASS — the same two-file selection now shows both: 'big-photo.jpg — Images are limited to 25 MB.' and 'oversized.webp — That WEBP is 4000×3000…'"
+        },
+        "testing": "stream route test is behavioural and mutation-checked. The Composer guard is STRUCTURAL and labelled as such — there is no component-render harness in this app — so the runtime behaviour was proven live instead.",
+        "notCovered": "Paste and drag-drop classification were not re-exercised live (no clipboard/DnD synthesis available here); they remain covered by the existing structural tests.",
+        "cleanup": "PASS — test image deleted BY ID (img_e8636a…), 31 -> 30 images; two test conversations deleted, 178 remain."
       }
     },
     "largeDocAsyncAndReuse_2026_08_28": {

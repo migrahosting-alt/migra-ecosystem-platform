@@ -31,12 +31,27 @@ test('picker, paste and drop all go through the same upload', () => {
   // Exactly one place posts to the images endpoint.
   const posts = [...c.matchAll(/fetch\('\/api\/images', \{ method: 'POST'/g)]
   assert.equal(posts.length, 1, `expected one upload implementation, found ${posts.length}`)
-  // onImagePicked is gone: the picker now shares ONE classify-then-dispatch
-  // handler with every other entry point, which is a stronger version of the
-  // property this test was written to protect.
+  /*
+   * 🚨 STRONGER THAN IT WAS, because the defect it was written against turned
+   * out to be real in the other two entry points. This asserted that each
+   * handler eventually reached `uploadImage`; it passed while `onDrop` sent
+   * EVERY dropped file — PDFs included — to the image endpoint, and while
+   * `onPaste` ignored non-image clipboard files entirely. Reaching the image
+   * uploader was never the property worth protecting.
+   *
+   * All three now hand their files to ONE intake that classifies from bytes and
+   * routes each to its own pipeline, so the same file behaves identically
+   * however it enters the composer.
+   */
   for (const caller of ['onPicked', 'onPaste', 'onDrop']) {
-    assert.match(c, new RegExp(`${caller}[\\s\\S]{0,700}uploadImage\\(`), `${caller} must reuse it`)
+    assert.match(c, new RegExp(`${caller}[\\s\\S]{0,900}intake\\(`), `${caller} must go through intake`)
   }
+  // And no entry point may reach the image uploader behind intake's back.
+  const direct = [...c.matchAll(/uploadImage\(/g)]
+  assert.equal(direct.length, 1,
+    `the image uploader must have exactly one call site, found ${direct.length}`)
+  const intakeBlock = c.slice(c.indexOf('const intake'), c.indexOf('const onPicked'))
+  assert.match(intakeBlock, /uploadImage\(file\)/, 'and that call site is inside intake')
 })
 
 test('one classifier decides what counts as an image', () => {
@@ -62,9 +77,13 @@ test('a paste with no image leaves text alone', () => {
    * screenshot.
    */
   const c = code(composer)
-  const paste = c.slice(c.indexOf('const onPaste'), c.indexOf('const onPaste') + 700)
-  assert.match(paste, /if \(!imageItem\) return[\s\S]*event\.preventDefault\(\)/,
+  const paste = c.slice(c.indexOf('const onPaste'), c.indexOf('const onPaste') + 900)
+  assert.match(paste, /if \(files\.length === 0\) return[\s\S]*event\.preventDefault\(\)/,
     'the early return must come before preventDefault')
+  // A pasted FILE of any kind is now taken, not just one whose clipboard MIME
+  // happens to look like an image — browsers report that field inconsistently,
+  // and a copied PDF used to vanish silently.
+  assert.match(paste, /item\.kind === 'file'/)
 })
 
 test('the drop target does not flicker across child elements', () => {
@@ -77,8 +96,12 @@ test('the drop target does not flicker across child elements', () => {
 
 test('a drop uploads sequentially so the per-message cap is real', () => {
   // Fired in parallel, every upload reads the same stale count and all pass.
+  // The loop moved into `intake` when drop and picker were unified; it is still
+  // sequential, and it now protects the picker and paste as well as drop.
   const c = code(composer)
-  assert.match(c, /for \(const file of files\) await uploadImage\(file\)/)
+  const intake = c.slice(c.indexOf('const intake'), c.indexOf('const onPicked'))
+  assert.match(intake, /for \(const file of incoming\)/, 'files are handled one at a time')
+  assert.match(intake, /await uploadImage\(file\)/, 'and each image upload is awaited')
   assert.match(c, /MAX_TURN_IMAGES = 4/)
   assert.match(c, /You can attach up to \$\{MAX_TURN_IMAGES\} images/, 'the bound is stated, not silent')
 })
@@ -228,4 +251,56 @@ test('transcript images stay draggable and open on click', () => {
   assert.match(m, /draggable/, 'dragging out must carry the real authorised URL')
   assert.match(m, /onClick=\{\(\) => setViewing\(/)
   assert.match(m, /focus-visible:ring/, 'the control must be reachable by keyboard')
+})
+
+test('a per-file image refusal cannot be overwritten by the next one', () => {
+  /*
+   * FOUND LIVE. A 46.8 MB JPEG and a 4000x3000 WEBP were selected together.
+   * Only the WEBP was ever mentioned; the JPEG vanished with no chip, no
+   * refusal and no explanation, because every per-file image complaint wrote to
+   * one `imageError` slot and the second overwrote the first.
+   *
+   * The document path already carries the fix — a per-file list, each entry
+   * naming its file and dismissed on its own — and its own comment records the
+   * same lesson ("one shared slot is how a .wav complaint ended up sitting above
+   * an unrelated PDF"). Images now feed that same list.
+   *
+   * STRUCTURAL, and deliberately labelled as such: this pins the shape that
+   * makes the bug impossible — per-file failures RETURN a named refusal, and one
+   * place accumulates them. It cannot prove the rendered result, which is why
+   * the two-file selection above is also run against production.
+   */
+  const c = code(composer)
+
+  const upload = c.slice(c.indexOf('const uploadImage'), c.indexOf('const intake'))
+  assert.ok(upload.length > 0, 'uploadImage and intake must both still exist')
+
+  /*
+   * The three per-file outcomes — the server's own refusal, an unusable
+   * reference, a failed upload — must hand back a named refusal.
+   */
+  const returned = [...upload.matchAll(/return \{ name: imageName, message:/g)]
+  assert.equal(returned.length, 3, `expected 3 per-file refusals to be returned, found ${returned.length}`)
+
+  /*
+   * Only turn-level facts may still use the shared slot: vision unavailable and
+   * the per-message cap. Neither is about a particular file, so neither can be
+   * lost behind another file's message.
+   */
+  const shared = [...upload.matchAll(/setImageError\((?!null\))/g)]
+  assert.equal(shared.length, 2, `only turn-level notices may share a slot, found ${shared.length}`)
+  assert.ok(upload.includes('setImageError(visionReason)'), 'vision availability stays turn-level')
+  assert.ok(/setImageError\(`You can attach up to/.test(upload), 'the per-message cap stays turn-level')
+
+  // One accumulation point, so nothing races the assignment that follows the loop.
+  const intake = c.slice(c.indexOf('const intake'))
+  assert.ok(
+    /if \(refusal\) refused\.push\(refusal\)/.test(intake),
+    'image refusals must join the same list the document refusals use',
+  )
+  assert.equal(
+    [...intake.matchAll(/setRefusals\(refused\)/g)].length,
+    1,
+    'exactly one place assigns the collected refusals',
+  )
 })

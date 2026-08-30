@@ -44,7 +44,7 @@ import {
   setConversationGrounding,
   setConversationImages,
 } from '@/server/brain/seams'
-import { listFiles } from '@/server/files/storage'
+import { listFiles, userDirectory } from '@/server/files/storage'
 import { reconcileGrounding } from '@/server/files/grounding'
 import { readProcessing, sequenceNoteFor } from '@/server/files/documentProcessing'
 import { resolveRequestPrincipal } from '@/server/tenancy/requestPrincipal'
@@ -53,6 +53,8 @@ import type { Principal } from '@/server/tenancy/principal'
 import type { BrainStreamFrame } from '@/server/brain/gateway'
 import type { ConversationSummary } from '@/server/brain/contracts'
 import { resolveTurnImages } from '@/server/files/resolveTurnImages'
+import { selectTurnGrounding } from '@/server/files/turnGrounding'
+import { tableEvidenceFor } from '@/server/tables/tableEvidence'
 import { assessDocumentIntent } from '@/server/files/documentIntent'
 import { planRegeneration, wantsRegeneration } from '@/server/files/regenerate'
 import { saveImage } from '@/server/files/imageStore'
@@ -204,6 +206,34 @@ function refusalOr(
           parsed.error ??
           'I can understand the image, but image editing is not available in MigraPilot yet. ' +
             'I can generate a new image based on your requested change instead.',
+      }
+    }
+
+    if (parsed?.code === 'VISION_NOT_QUALIFIED') {
+      /*
+       * A MEASURED CAPABILITY LIMIT, NOT A FAULT — and it reached the user as
+       * "The assistant service could not complete this request."
+       *
+       * The Brain refuses 422 VISION_NOT_QUALIFIED when a question needs a
+       * vision skill the running model was measured on and failed: counting is
+       * the current one, because it miscounts with no signal that it has, so a
+       * number would look confident and be wrong. Refusing is the correct
+       * behaviour. Reporting it as a service fault is not: it hides a permanent,
+       * explainable limit behind a message that invites the user to retry the
+       * identical question forever, and it makes an honest system look broken.
+       *
+       * Relayed VERBATIM for the same reason as IMAGE_EDITING_UNAVAILABLE above:
+       * the sentence was written where the measurement lives, and a paraphrase
+       * here would be a second definition of the limit, free to drift from the
+       * evidence that set it.
+       */
+      return {
+        error: 'vision_not_qualified',
+        message:
+          parsed.error ??
+          'I can look at this image, but not answer that particular question about it — ' +
+            'the vision model running here was measured on that skill and is not reliable at it. ' +
+            'Ask me to describe what the image shows instead.',
       }
     }
 
@@ -554,7 +584,16 @@ export async function POST(request: Request): Promise<Response> {
   const storedGrounding =
     existing.kind === 'ok' ? ((existing.value as ConversationSummary)?.groundingFiles ?? []) : []
 
-  // Attaching adds to the thread's set; it never silently replaces what is there.
+  /*
+   * 🚨 THE THREAD KEEPS EVERY FILE. THIS TURN DOES NOT ANSWER FROM ALL OF THEM.
+   *
+   * `requestedGrounding` is still the full set, because that is what the
+   * conversation owns and what gets persisted — naming a file later must bring
+   * it back. What changed is that the ACTIVE set below is chosen per turn, so
+   * attaching a new document and asking about it no longer answers from an
+   * unrelated older one. See `selectTurnGrounding` for the rules and for why
+   * this was safe to change only after conversation history started flowing.
+   */
   const requestedGrounding = [...new Set([...storedGrounding, ...attachedNow])]
 
   /*
@@ -590,6 +629,15 @@ export async function POST(request: Request): Promise<Response> {
     // the next turn will not have.
     await setConversationGrounding(conversationId, reconciled.available, { principal })
   }
+
+  /*
+   * Chosen from what actually EXISTS, not from what was requested: reconciling
+   * first means a named-but-deleted file cannot become this turn's boundary.
+   */
+  const turnGrounding = selectTurnGrounding(prompt, attachedNow, reconciled.available)
+  trace.set('grounding_reason', turnGrounding.reason)
+  trace.set('grounding_active', String(turnGrounding.active.length))
+  trace.set('grounding_withheld', String(turnGrounding.withheld.length))
 
   const grounded = reconciled.grounded
 
@@ -835,14 +883,52 @@ export async function POST(request: Request): Promise<Response> {
        * the picture was made the first time.
        */
       const executing = regeneration?.kind === 'execute' ? regeneration : null
+
+      /*
+       * 🚨 ARITHMETIC IS DONE BY ARITHMETIC, NOT BY THE MODEL.
+       *
+       * A CSV question was parsed and cited correctly and then footed wrong —
+       * 473,250 and 473,000 for a column summing to 474,000. The figures are now
+       * computed from the parsed file and handed to the model as evidence; its
+       * job is to say them, not to derive them.
+       *
+       * PREPENDED TO THE MODEL'S PROMPT ONLY. The user's own message was already
+       * persisted above, unmodified, so the transcript still shows what they
+       * actually typed. Returns null whenever anything is uncertain, and the turn
+       * proceeds as an ordinary grounded answer.
+       */
+      const tableEvidence = executing || !grounded
+        ? null
+        : await tableEvidenceFor(prompt, turnGrounding.active, await userDirectory()).catch(() => null)
+      if (tableEvidence) {
+        trace.set('table_computed', `${tableEvidence.operation}:${tableEvidence.file}`)
+      }
+
+      const modelPrompt = executing
+        ? executing.prompt
+        : tableEvidence
+          ? `${tableEvidence.text}\n${prompt}`
+          : prompt
+
       const opened = await chatTurnStream(
-        executing ? executing.prompt : prompt,
+        modelPrompt,
         {
+          /*
+           * 🚨 THE THREAD IDENTITY, WHICH WAS NEVER SENT.
+           *
+           * This route has always known the conversation — it persists every
+           * message against it — and never forwarded it. The Brain gates its
+           * entire durable-memory path on `body.conversationId`, so history was
+           * neither retrieved nor stored, and every turn reached the model
+           * standalone. That is why a follow-up referring to the previous answer
+           * was answered from parametric knowledge instead.
+           */
+          conversationId,
           ...(conversationSummary ? { conversationSummary } : {}),
           groundingMode,
           // The BOUNDARY for retrieval, not a hint. Sent only when grounded, so an
           // ungrounded turn cannot accidentally scope itself to a stale list.
-          ...(grounded ? { groundingFiles: reconciled.available } : {}),
+          ...(grounded ? { groundingFiles: turnGrounding.active } : {}),
           // Bytes, resolved server-side from refs the browser never saw the
           // inside of. Ordered, because "the first one" is a real question.
           ...(!executing && resolvedImages.attachments.length > 0

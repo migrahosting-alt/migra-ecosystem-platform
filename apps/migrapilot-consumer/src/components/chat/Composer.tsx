@@ -18,11 +18,17 @@ import type { PublicImage } from '@/app/api/images/route'
  */
 const IMAGE_REF = /^img_[0-9a-f]{32}$/
 
-/**
- * What the picker offers and what paste and drop accept — one list, so the three
- * entry points cannot come to disagree about what an image is.
+/*
+ * 🚨 THE LOCAL IMAGE-MIME LIST IS GONE.
+ *
+ * It claimed to be the one list "so the three entry points cannot come to
+ * disagree about what an image is" — but only paste ever consulted it, and it
+ * judged by `item.type`, a field browsers fill in inconsistently. Meanwhile the
+ * picker classified from bytes and drop classified not at all. All three now go
+ * through `intake`, which asks `classifyAttachment` — extension, MIME AND magic
+ * bytes, from the shared capability contract. A fourth hand-written list here
+ * would be the drift this slice removes.
  */
-const ACCEPTED_IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp']
 
 /** Bounded and stated, rather than silently dropping the extras. */
 const MAX_TURN_IMAGES = 4
@@ -216,53 +222,6 @@ export function Composer({
     requestAnimationFrame(grow)
   }
 
-  /**
-   * ONE ENTRY POINT. Classify, then dispatch.
-   *
-   * 🚨 The picker used to decide capability: a JPEG chosen through "Files" was
-   * refused as an unsupported document, because the menu entry had already
-   * decided what kind of thing you were allowed to be holding. Selection and
-   * classification are now separate acts — whatever is chosen is inspected by
-   * extension, MIME and BYTES, then sent down its own pipeline.
-   *
-   * Mixed selections are the point, not an edge case: a PDF and a photo chosen
-   * together both attach to the same turn and both reach the model.
-   */
-  const onPicked = async (event: ChangeEvent<HTMLInputElement>) => {
-    const picked = Array.from(event.target.files ?? [])
-    // Reset so picking the SAME file twice still fires a change event.
-    event.target.value = ''
-    if (picked.length === 0) return
-
-    /*
-     * 🚨 A NEW SELECTION CLEARS THE OLD COMPLAINT.
-     *
-     * A refusal about a .wav stayed on screen while a PDF was being attached,
-     * so the composer showed a message about a file that was no longer part of
-     * anything. Every notice here belongs to the selection that produced it, and
-     * a new selection replaces it — never accumulates beside it.
-     */
-    setRefusals([])
-    setImageError(null)
-
-    const documents: File[] = []
-    const refused: { name: string; message: string }[] = []
-    for (const file of picked) {
-      // The first bytes are the evidence. Read once, here, so no downstream
-      // layer has to guess from the name.
-      const head = new Uint8Array(await file.slice(0, 512).arrayBuffer())
-      const verdict = classifyAttachment(file.name, file.type, head)
-      if (!verdict.ok) {
-        // Named, because one refusal among four selected files has to say WHICH.
-        refused.push({ name: file.name, message: verdict.message })
-        continue
-      }
-      if (verdict.pipeline === 'image') await uploadImage(file)
-      else documents.push(file)
-    }
-    if (refused.length > 0) setRefusals(refused)
-    if (documents.length > 0) add(documents as unknown as FileList)
-  }
 
   /*
    * Images go to the image library, not the document attachment path.
@@ -281,10 +240,28 @@ export function Composer({
    * every failure message live on the server, and a parallel path is how one of
    * them quietly stops matching.
    */
-  const uploadImage = useCallback(async (file: File) => {
+  /*
+   * RETURNS the refusal rather than writing it to a shared slot.
+   *
+   * Per-file complaints — the size ceiling, the unresizable-dimension rule, a
+   * failed upload — used to go to a single `imageError`, so selecting two bad
+   * images showed ONE message and the other file disappeared with no
+   * explanation. Measured live: a 46.8 MB JPEG and a 4000x3000 WEBP were picked
+   * together and only the WEBP was ever mentioned.
+   *
+   * The document path already learned this and keeps a per-file list; images now
+   * feed the SAME list, so each refusal names its file and is dismissed on its
+   * own. Returning the message keeps one accumulation point in `intake` — a
+   * second writer would race the `setRefusals` that runs after the loop.
+   *
+   * Turn-level facts stay in the shared slot deliberately: "vision is
+   * unavailable" and the per-message image cap are not about any one file, and
+   * naming a file for them would be a small lie.
+   */
+  const uploadImage = useCallback(async (file: File): Promise<{ name: string; message: string } | null> => {
     if (!visionReady) {
       setImageError(visionReason)
-      return
+      return null
     }
     /*
      * 🚨 NO SECOND GATE HERE. Classification already established that this is an
@@ -297,11 +274,12 @@ export function Composer({
     if (images.length >= MAX_TURN_IMAGES) {
       // Bounded truthfully rather than silently dropping the extras.
       setImageError(`You can attach up to ${MAX_TURN_IMAGES} images to one message.`)
-      return
+      return null
     }
 
     setImageError(null)
-    setPendingImage({ name: file.name || 'pasted image' })
+    const imageName = file.name || 'pasted image'
+    setPendingImage({ name: imageName })
     try {
       const form = new FormData()
       form.append('image', file)
@@ -311,8 +289,7 @@ export function Composer({
         | null
       if (!response.ok || !data?.image) {
         // The server's own words: it knows which limit was hit and why.
-        setImageError(data?.message ?? 'That image could not be attached.')
-        return
+        return { name: imageName, message: data?.message ?? 'That image could not be attached.' }
       }
       /*
        * `imageId`, not `id`. Reading the wrong name here produced
@@ -321,16 +298,89 @@ export function Composer({
        */
       const ref = data.image.imageId
       if (!IMAGE_REF.test(ref)) {
-        setImageError('That image was stored but came back without a usable reference.')
-        return
+        return { name: imageName, message: 'That image was stored but came back without a usable reference.' }
       }
       setImages((current) => [...current, { id: ref, name: data.image!.displayName }])
+      return null
     } catch {
-      setImageError('That image could not be uploaded.')
+      return { name: imageName, message: 'That image could not be uploaded.' }
     } finally {
       setPendingImage(null)
     }
   }, [images.length, visionReady, visionReason])
+
+  /**
+   * ONE ENTRY POINT. Classify, then dispatch.
+   *
+   * 🚨 The picker used to decide capability: a JPEG chosen through "Files" was
+   * refused as an unsupported document, because the menu entry had already
+   * decided what kind of thing you were allowed to be holding. Selection and
+   * classification are now separate acts — whatever is chosen is inspected by
+   * extension, MIME and BYTES, then sent down its own pipeline.
+   *
+   * Mixed selections are the point, not an edge case: a PDF and a photo chosen
+   * together both attach to the same turn and both reach the model.
+   */
+  /**
+   * 🚨 THE ONE INTAKE. Picker, drop and paste all end up here.
+   *
+   * They did not. `onPicked` classified by bytes and routed each file to its own
+   * pipeline, while `onDrop` sent EVERY dropped file — PDF, CSV, anything — to
+   * `uploadImage`, and `onPaste` looked only for clipboard image MIME types. So
+   * the same PDF behaved differently depending on whether it was chosen or
+   * dragged, which is precisely the split-brain the capability contract exists
+   * to prevent: one file, one classification, one answer, regardless of how it
+   * entered the composer.
+   *
+   * Everything below — classification from bytes, refusal wording, pipeline
+   * routing, per-file error scoping — is therefore shared by all three.
+   */
+  const intake = useCallback(async (incoming: File[]) => {
+    if (incoming.length === 0) return
+
+    /*
+     * 🚨 A NEW SELECTION CLEARS THE OLD COMPLAINT.
+     *
+     * A refusal about a .wav stayed on screen while a PDF was being attached,
+     * so the composer showed a message about a file that was no longer part of
+     * anything. Every notice here belongs to the selection that produced it, and
+     * a new selection replaces it — never accumulates beside it.
+     */
+    setRefusals([])
+    setImageError(null)
+
+    const documents: File[] = []
+    const refused: { name: string; message: string }[] = []
+    for (const file of incoming) {
+      // The first bytes are the evidence. Read once, here, so no downstream
+      // layer has to guess from the name.
+      const head = new Uint8Array(await file.slice(0, 512).arrayBuffer())
+      const verdict = classifyAttachment(file.name, file.type, head)
+      if (!verdict.ok) {
+        // Named, because one refusal among four selected files has to say WHICH.
+        refused.push({ name: file.name, message: verdict.message })
+        continue
+      }
+      /*
+       * Images are awaited one at a time on purpose: each upload checks the
+       * per-message cap against the images already attached, and firing them
+       * together would let every one of them read the same stale count and pass.
+       */
+      if (verdict.pipeline === 'image') {
+        const refusal = await uploadImage(file)
+        if (refusal) refused.push(refusal)
+      } else documents.push(file)
+    }
+    if (refused.length > 0) setRefusals(refused)
+    if (documents.length > 0) add(documents as unknown as FileList)
+  }, [add, uploadImage])
+
+  const onPicked = async (event: ChangeEvent<HTMLInputElement>) => {
+    const picked = Array.from(event.target.files ?? [])
+    // Reset so picking the SAME file twice still fires a change event.
+    event.target.value = ''
+    await intake(picked)
+  }
 
   /**
    * Ctrl+V with an image on the clipboard.
@@ -342,16 +392,24 @@ export function Composer({
    * nothing here runs and text pastes exactly as before.
    */
   const onPaste = useCallback((event: ClipboardEvent<HTMLTextAreaElement>) => {
-    const items = Array.from(event.clipboardData?.items ?? [])
-    const imageItem = items.find(
-      (item) => item.kind === 'file' && ACCEPTED_IMAGE_TYPES.includes(item.type),
-    )
-    if (!imageItem) return
-    const file = imageItem.getAsFile()
-    if (!file) return
+    /*
+     * Every pasted FILE, not just the ones whose clipboard MIME looks like an
+     * image. The old filter meant a copied PDF pasted into the composer did
+     * nothing at all — no attachment, no refusal, no explanation — and it judged
+     * by `item.type`, which browsers report inconsistently. `intake` decides
+     * from the bytes, the same way it does for the picker and for a drop.
+     *
+     * Text pastes are untouched: they carry no files, so this falls straight
+     * through to the textarea's own handling.
+     */
+    const files = Array.from(event.clipboardData?.items ?? [])
+      .filter((item) => item.kind === 'file')
+      .map((item) => item.getAsFile())
+      .filter((file): file is File => file !== null)
+    if (files.length === 0) return
     event.preventDefault()
-    void uploadImage(file)
-  }, [uploadImage])
+    void intake(files)
+  }, [intake])
 
   /**
    * Drag from the desktop onto the composer.
@@ -392,14 +450,15 @@ export function Composer({
     dragCounter.current = 0
     setDragging(false)
     /*
-     * Sequential, not parallel: each upload checks the per-message cap against
-     * the images already attached, and firing them at once would let every one
-     * of them see the same stale count and all pass.
+     * 🚨 THROUGH THE SAME INTAKE AS THE PICKER.
+     *
+     * This used to call `uploadImage` on every dropped file, so a dragged PDF
+     * was pushed at the image endpoint and refused as "not an image" — while the
+     * identical PDF chosen through the paperclip attached correctly. Dropping
+     * and picking are two ways of naming a file, not two kinds of file.
      */
-    void (async () => {
-      for (const file of files) await uploadImage(file)
-    })()
-  }, [uploadImage])
+    void intake(files)
+  }, [intake])
 
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === 'Enter' && !event.shiftKey) {
@@ -477,7 +536,15 @@ export function Composer({
         onRetry={() => void voice.start()}
       />
 
-      <AttachmentChips attachments={attachments} onRemove={remove} onRetry={retry} />
+      <AttachmentChips
+        attachments={attachments}
+        onRemove={remove}
+        onRetry={retry}
+        // The general picker, not the image one: a file that was refused could
+        // have been either kind, and reopening the narrower dialog would hide
+        // half of what the user might reach for next.
+        onChooseAnother={() => fileInputRef.current?.click()}
+      />
 
       <input
         ref={fileInputRef}

@@ -1248,6 +1248,41 @@ test('REGRESSION: a refusal is never recorded as an outage', async () => {
   assert.ok(result.storedAssistant, 'and kept in the conversation')
 })
 
+test("REGRESSION: a measured vision limit is explained, not reported as a service fault", async () => {
+  /*
+   * FOUND IN PRODUCTION. Asked to count shapes in an attached image, the Brain
+   * refused 422 VISION_NOT_QUALIFIED and supplied the reason: the vision model
+   * running here was measured on counting and miscounts without any signal that
+   * it has, so a number would look confident and be wrong. The user was shown
+   * "The assistant service could not complete this request."
+   *
+   * That inverts the honest-unavailable rule. A permanent, explainable limit was
+   * dressed as a transient fault, which invites the user to retry the identical
+   * question forever and makes a system that is behaving correctly look broken.
+   * Telemetry proved the image itself was fine: requested 1, sent 1, dropped 0.
+   */
+  const measured =
+    'I can look at this image, but I am not able to give you an exact count. The vision model ' +
+    'running here was measured on counting and is not reliable at it.'
+
+  const result = await refusedTurn({
+    status: 422,
+    body: { ok: false, code: 'VISION_NOT_QUALIFIED', error: measured },
+  })
+
+  const shown = result.told
+  assert.ok(
+    shown.includes('measured on counting'),
+    `the Brain's own explanation must reach the user, got: ${shown}`,
+  )
+  assert.ok(
+    !shown.includes('could not complete this request'),
+    'and must not be replaced by the generic service failure',
+  )
+  assert.equal(result.outcome, 'vision_not_qualified', 'reported as a refusal, not an outage')
+  assert.ok(result.storedAssistant, 'and kept in the conversation, so a reload still shows it')
+})
+
 test('a question about an unattached document is refused, not answered from nothing', async () => {
   /*
    * THE DEFECT. Asked for the rollback marker in an indexed runbook that had
