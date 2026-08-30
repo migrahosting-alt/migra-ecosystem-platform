@@ -7,7 +7,7 @@ Why this exists: work kept discovering something, moving three lanes away, and t
 reconstruct what was finished — or why a decision was made — from conversation history. Every agent
 (Claude, Engineer, MigraPilot) reads this instead.
 
-_Last updated: 2026-08-26_
+_Last updated: 2026-08-30_
 
 > ⚠️ `CLAUDE.md` and `AGENTS.md` are **gitignored** in this repository, so the pointers added there are
 > local only. This file and its JSON are the tracked copies — link to `docs/migrapilot/` from any new
@@ -24,6 +24,38 @@ _Last updated: 2026-08-26_
 | **Acceptance gate** | The app's own test command **+ `tsc -b` + live browser**. A pre-commit hook is not the acceptance suite. |
 | **Cost discipline** | owned → open-source → self-hosted → free tier → partner credits → paid. Nothing recurring enters quietly. |
 | **Honest unavailable** | A capability that is not ready refuses truthfully rather than appearing to work. |
+
+---
+
+## Lane `BUILT_NOT_INTEGRATED` 2026-08-30 — Scanned-PDF ingestion
+
+**Every stage worked. Nothing started them on upload.**
+
+The pipeline — classification → rasterisation → OCR → folio reconstruction → validation →
+canonical persistence → indexing → retrieval — was built, deployed and genuinely proven. But
+`requestProcessing` had exactly **one** caller: the indexer's escalation pass. Upload never asked
+for a read. A user who uploaded a scanned PDF saw a stored file, no stages, and nothing to suggest a
+step was missing.
+
+The status said `CLOSED` because the live acceptance run reached the pipeline through an index call
+— recorded in its own notes as "405ms index call". Every stage *after* the trigger was real. The
+trigger was never under test, so a truthful pass certified a path the user cannot reach. It
+contradicted the lane's own owner decision: *"Upload returns immediately, the file appears in Files
+as 'Reading…'"*.
+
+**Measured before the fix**, on `chat.migrateck.com` with a 4-page derivative of the canonical Creole
+fixture (0 extractable characters): file uploaded, appeared, **no processing started**. After a
+manual index call the whole pipeline ran — `reading_text` page 1/8 → 3 → 4 → 6 → 7 → `ready` in ~90s,
+`readable: true`, `unplacedPages: 0`, `sequenceComplete: true`, 4 indexed chunks, index approved and
+searchable. Eight pages from four landscape scans confirms the half-page split.
+
+**The fix:** the upload route now asks the Brain to read each saved PDF. PDFs only, matching the
+indexer's rule; the Brain still classifies, so a digital PDF is read with `pdftotext` and never
+rasterised. `enqueue` is idempotent, so the escalation pass cannot double-read. A reader outage
+never turns a saved upload into a reported failure.
+
+**Not yet `PROVEN_LIVE`** — green locally, not deployed. The remaining proof is one upload reaching
+`ready` with no index call.
 
 ---
 

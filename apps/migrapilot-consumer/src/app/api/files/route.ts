@@ -10,8 +10,10 @@
  * the two services and how tenancy is derived.
  */
 
+import { join } from 'node:path'
+
 import { requireSession } from '@/server/auth'
-import { listProcessing, forgetProcessing } from '@/server/files/documentProcessing'
+import { listProcessing, forgetProcessing, requestProcessing } from '@/server/files/documentProcessing'
 import { reindexLibrary } from '@/server/files/reindex'
 import { UnauthenticatedError } from '@/server/auth/authPort'
 import {
@@ -23,6 +25,7 @@ import {
   deleteFile,
   listFiles,
   saveFile,
+  userDirectory,
 } from '@/server/files/storage'
 
 export const dynamic = 'force-dynamic'
@@ -117,6 +120,39 @@ export async function POST(request: Request): Promise<Response> {
       } else {
         rejected.push({ name: entry.name, error: 'write_failed', message: 'That file could not be saved.' })
       }
+    }
+  }
+
+  /*
+   * READING STARTS AT UPLOAD, NOT AT INDEXING.
+   *
+   * A scanned PDF used to sit in the library untouched until something else
+   * happened to trigger an index pass: every stage below this line was built,
+   * deployed and working, and a user who only uploaded never saw any of it. The
+   * file simply appeared, readable by nothing, with no indication that anything
+   * was missing. Indexing was never the thing the user asked for — uploading was.
+   *
+   * Only PDFs, matching the indexer's own escalation rule. The Brain classifies
+   * from there: a PDF with a text layer is read with `pdftotext` in seconds and
+   * OCR is never reached, so this does not spend minutes of rasterisation on
+   * documents that already contain their own text.
+   *
+   * AWAITED, THOUGH THE WORK IS NOT. `requestProcessing` returns once the Brain
+   * has RECORDED the pending state, not once the document is read. That is the
+   * difference between a library that shows "Reading…" on the next refresh and
+   * one that shows nothing until the first stage happens to land. The read
+   * itself continues in the background.
+   *
+   * Failures here are deliberately not surfaced: the file IS saved, and an
+   * upload that succeeded must not report itself as failed because the reader
+   * was briefly unreachable. The indexer's escalation pass remains the backstop,
+   * and `enqueue` is idempotent per document, so the two cannot double-read.
+   */
+  if (saved.length) {
+    const uploadRoot = await userDirectory()
+    for (const file of saved) {
+      if (!/\.pdf$/i.test(file.name)) continue
+      await requestProcessing(file.name, join(uploadRoot, file.name)).catch(() => null)
     }
   }
 
