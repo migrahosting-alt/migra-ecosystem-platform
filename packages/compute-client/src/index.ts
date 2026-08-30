@@ -114,6 +114,42 @@ export class ComputeClient {
     const res = await this.f(`${this.baseUrl}${path}`, {
       method, headers, body: opts.body === undefined ? undefined : JSON.stringify(opts.body),
     });
+    /*
+     * THE AUTHORITY ANNOUNCES ITS CONTRACT ON EVERY RESPONSE, AND NOTHING WAS LISTENING.
+     *
+     * Sending the version was only half the handshake. The authority refuses a request whose
+     * declared version it does not support; a client that never reads the version coming BACK
+     * discovers a moved authority as a storm of 409s, one per call, with nothing saying why. The
+     * header is the authority telling every client exactly what it speaks — checking it turns a
+     * silent fork into one refusal that names both sides.
+     *
+     * Checked BEFORE the body is read, mirroring the authority's own order: the version is what
+     * says how to interpret the bytes, so interpreting them first would be reading a document in a
+     * language you have not confirmed.
+     *
+     * A MISMATCH always refuses, including on an error response — a 409 from a drifted authority is
+     * explained by the drift, and reporting only the status would hide the cause behind its effect.
+     * An ABSENT header refuses only on success: a proxy or gateway can return 502 without ever
+     * reaching the authority, and calling that a contract fault would blame the wrong component.
+     * A 2xx with no version is different — something answered as the authority without identifying
+     * itself as one, and an unversioned success is exactly the thing that must not be interpreted.
+     */
+    const advertised = res.headers?.get("x-migraai-contract-version") ?? null;
+    if (advertised !== null && advertised !== CLIENT_CONTRACT_VERSION) {
+      throw new ComputeAuthorityError(
+        res.status,
+        `authority speaks contract ${advertised}, this client speaks ${CLIENT_CONTRACT_VERSION} — ` +
+          `refusing to interpret the response rather than guessing at a contract it was not written against`,
+      );
+    }
+    if (res.ok && advertised === null) {
+      throw new ComputeAuthorityError(
+        res.status,
+        "authority did not advertise a contract version on a successful response — refusing to " +
+          "interpret an unversioned answer as if it came from a known contract",
+      );
+    }
+
     const text = await res.text();
     let parsed: unknown;
     try { parsed = JSON.parse(text); } catch { throw new ComputeAuthorityError(res.status, `authority returned non-JSON: ${text.slice(0, 200)}`); }

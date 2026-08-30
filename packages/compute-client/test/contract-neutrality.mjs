@@ -36,9 +36,12 @@ console.log("=== the client decides nothing ===");
 
 // A stub authority. Records what was sent; returns exactly what we tell it to.
 const calls = [];
-const stub = (payload, { status = 200, body } = {}) => async (url, opts) => {
+const stub = (payload, { status = 200, body, advertise = CLIENT_CONTRACT_VERSION } = {}) => async (url, opts) => {
   calls.push({ url, method: opts.method, headers: opts.headers, body: opts.body });
+  // The real authority advertises its contract on EVERY response. The stub must too, or these
+  // tests would exercise a transport the authority does not actually present.
   return { ok: status >= 200 && status < 300, status,
+           headers: { get: (k) => (k.toLowerCase() === "x-migraai-contract-version" ? advertise : null) },
            text: async () => body ?? JSON.stringify(payload) };
 };
 
@@ -113,18 +116,49 @@ t("its runtime surface is exactly the transport",
   `exports are ${JSON.stringify(exported)} — anything else is logic that escaped the authority`);
 
 console.log("\n=== no drift while two copies exist ===");
+console.log("\n=== the client verifies the contract it is answered in ===");
+
+// A DRIFTED AUTHORITY IS REFUSED, NOT INTERPRETED. Sending the version was half the handshake;
+// until now nothing read the one coming back, so a moved authority surfaced as a 409 storm with
+// nothing naming the cause.
+c = new ComputeClient({ actor: "studio", fetchImpl: stub(authorityPlan, { advertise: "1.1.0" }) });
+let drift = null;
+try { await c.plan({ jobId: "j", pipeline: "p" }); } catch (e) { drift = e; }
+t("a drifted authority is refused rather than interpreted",
+  drift instanceof ComputeAuthorityError && /speaks contract 1\.1\.0/.test(drift.message) &&
+    new RegExp(`this client speaks ${CLIENT_CONTRACT_VERSION}`).test(drift.message),
+  `expected a refusal naming both versions, got: ${drift && drift.message}`);
+
+// AN UNVERSIONED SUCCESS IS NOT A SUCCESS. Something answered as the authority without identifying
+// itself as one; interpreting that is exactly what the version exists to prevent.
+c = new ComputeClient({ actor: "studio", fetchImpl: stub(authorityPlan, { advertise: null }) });
+let unversioned = null;
+try { await c.plan({ jobId: "j", pipeline: "p" }); } catch (e) { unversioned = e; }
+t("an unversioned successful response is refused",
+  unversioned instanceof ComputeAuthorityError && /did not advertise a contract version/.test(unversioned.message),
+  `expected a refusal, got: ${unversioned && unversioned.message}`);
+
+// BUT A TRANSPORT FAILURE STAYS A TRANSPORT FAILURE. A proxy can return 502 without ever reaching
+// the authority; calling that a contract fault would blame the wrong component.
+c = new ComputeClient({ actor: "studio", fetchImpl: stub(null, { status: 502, body: JSON.stringify({ error: "bad gateway" }), advertise: null }) });
+let gateway = null;
+try { await c.plan({ jobId: "j", pipeline: "p" }); } catch (e) { gateway = e; }
+t("an unversioned ERROR response is reported as its status, not as contract drift",
+  gateway instanceof ComputeAuthorityError && gateway.status === 502 && !/contract version/.test(gateway.message),
+  `expected the 502 to survive as a 502, got: ${gateway && gateway.status} ${gateway && gateway.message}`);
+
 // The Studio repo still holds a copy until its consumption is repointed. Two copies of a contract
 // with nothing comparing them is precisely how a contract silently forks. Absent Studio is reported
 // NOT_MEASURED — never a pass, because an unchecked copy is not a matching copy.
 const studio = process.env.MIGRAAI_STUDIO_REPO || "/mnt/e/MigraTeck/AI/MigraAI-Studio";
 const studioSrc = join(studio, "packages", "compute-client", "src", "index.ts");
 if (!existsSync(studioSrc)) {
-  unmeasured("dev and Studio copies are identical",
+  unmeasured("dev and Studio compute-client contract source is identical",
     `Studio copy not present at ${studioSrc} — set MIGRAAI_STUDIO_REPO to compare. Not a pass: an unchecked copy is not a matching copy.`);
 } else {
   const h = (p) => createHash("sha256").update(readFileSync(p)).digest("hex");
   const a = h(join(PKG, "src", "index.ts")), b = h(studioSrc);
-  t("dev and Studio copies are identical", a === b,
+  t("dev and Studio compute-client contract source is identical", a === b,
     `dev ${a.slice(0, 12)} != studio ${b.slice(0, 12)} — the contract has forked; the copies must be reconciled before either is trusted`);
 }
 
