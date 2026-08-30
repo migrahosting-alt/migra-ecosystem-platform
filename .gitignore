@@ -188,6 +188,14 @@
 !/packages/evidence/package.json
 !/packages/evidence/tsconfig.json
 
+# iBridge: compute decision and execution authority. It decides what runs where
+# and gates spending, so it must be reproducible from repo state. Source only.
+!/packages/ibridge/
+!/packages/ibridge/src/
+!/packages/ibridge/src/*.ts
+!/packages/ibridge/package.json
+!/packages/ibridge/tsconfig.json
+
 # The speech runtime is a real service the Brain delegates to (MIGRAPILOT_SPEECH_RUNTIME_URL).
 # Source and docs only — no models, no audio, no caches.
 !/services/
