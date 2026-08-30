@@ -7,8 +7,6 @@
     "apps/brain-service",
     "apps/migrapilot-consumer",
     "apps/vscode-extension",
-    "packages/evidence",
-    "packages/ibridge",
     "packages/protocol",
     "packages/shared-types",
     "packages/pilot-client",
