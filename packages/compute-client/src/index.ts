@@ -102,9 +102,16 @@ export class ComputeClient {
   }
 
   private async call<T>(method: string, path: string, opts: { body?: unknown; reason?: string } = {}): Promise<T> {
-    // Every request declares the wire contract it was written against. The authority refuses a
-    // request that does not — missing, older and newer alike — before interpreting it, because the
-    // version is what says how to interpret it. Discovery (GET /capabilities) is the one exemption.
+    // Every request declares the wire contract it was written against — ALL SIX operations,
+    // /capabilities included. The authority refuses a request that does not — missing, older and
+    // newer alike — before interpreting it, because the version is what says how to interpret it.
+    //
+    // /capabilities is exempt on the AUTHORITY side ONLY: it answers a request declaring no version,
+    // or an unsupported one, because a client cannot be required to know the contract before it has
+    // any way to discover it. That exemption is the authority's to GRANT, not the client's to TAKE.
+    // This client sends the header there too. The previous wording called discovery "the one
+    // exemption" here, which described behaviour this code does not have — headers are built once,
+    // with no per-path branch — and would have invited someone to remove it and call that a fix.
     const headers: Record<string, string> = {
       "x-migraai-actor": this.actor,
       "x-migraai-contract-version": CLIENT_CONTRACT_VERSION,
