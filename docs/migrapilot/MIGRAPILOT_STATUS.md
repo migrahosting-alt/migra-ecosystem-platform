@@ -27,7 +27,7 @@ _Last updated: 2026-08-30_
 
 ---
 
-## Lane `BUILT_NOT_INTEGRATED` 2026-08-30 — Scanned-PDF ingestion
+## Lane `PROVEN_LIVE` 2026-08-30 — Scanned-PDF ingestion
 
 **Every stage worked. Nothing started them on upload.**
 
@@ -54,8 +54,32 @@ indexer's rule; the Brain still classifies, so a digital PDF is read with `pdfto
 rasterised. `enqueue` is idempotent, so the escalation pass cannot double-read. A reader outage
 never turns a saved upload into a reported failure.
 
-**Not yet `PROVEN_LIVE`** — green locally, not deployed. The remaining proof is one upload reaching
-`ready` with no index call.
+**Deployed and proven.** Consumer release `uploadread-08300728` (rollback `numeric-08290240`); Brain
+untouched at `multifact-08292338`. Deployed artifacts md5-matched the local build, and the candidate
+was boot-tested on a spare port before the symlink swap.
+
+**Upload-triggered acceptance — no index call anywhere in the run.** Fixtures carry facts invented
+for this run, so a correct answer cannot come from general knowledge.
+
+| Check | Result |
+|---|---|
+| Upload starts the read | PASS — `POST /api/files` only; no index call before readiness |
+| Truthful `Reading…` state | PASS — `rendering_pages → reading_text → indexing → ready` |
+| Page progress advances | PASS — rendering 5..13 of 14, then reading text 1..14 of 14 |
+| Reaches `ready` | PASS — 3-page 11s, 14-page 52s, polling stops |
+| Grounded answer from OCR alone | PASS — 738 barrels, 62 centimetres, from a 0-character PDF |
+| Provenance | PASS — `(cite: acceptance-scan-9012.pdf:1-5)` + "From your files · pages 1-3" |
+| Hard refresh during processing | PASS — reloaded page rendered "Rendering pages — page 2 of 14" |
+| Hard refresh after ready | PASS — clean terminal render |
+| No duplicate read job | PASS — escalation pass left state `ready`, chunks held at 14 |
+| Digital PDF not forced through OCR | PASS — 12-page text PDF ready in <1.2s, never rasterised |
+| Cleanup | PASS — 31 → 24 files, no leftover chunks |
+
+**One open observation, cause not established.** Synthetic single-page scans report every page
+unplaced, where the canonical Creole book reports none. Retrieval is unaffected — readable, indexed,
+correctly cited — and the ordering caveat is stated truthfully. I proposed a folio-parsing cause and
+then **disproved it** with a fixture carrying bare printed folios, which still reported all pages
+unplaced. The spread-reconstruction explanation remains unverified and is not being asserted.
 
 ---
 

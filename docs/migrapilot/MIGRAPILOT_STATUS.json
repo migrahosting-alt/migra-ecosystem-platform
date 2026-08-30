@@ -1,7 +1,7 @@
 {
   "$schema": "MIGRAPILOT_STATUS — canonical cross-agent state. Update on every material change.",
   "updated": "2026-08-30",
-  "updatedBy": "Claude Opus 5 — scanned-PDF end-to-end wiring",
+  "updatedBy": "Claude Opus 5 — upload-triggered scanned-PDF acceptance",
   "rules": {
     "easyFirst": "Do not start deep capability work while meaningful easy user-facing items remain.",
     "provenLive": "PROVEN_LIVE requires the real user-facing workflow to pass. Code existing and tests passing is NOT proof.",
@@ -13,7 +13,7 @@
   "activeLane": {
     "name": "Scanned-PDF OCR",
     "objective": "Make image-only PDFs readable, with liv_kreyol_part1.pdf (28 pages, 0 extractable characters, Haitian Creole) as the canonical acceptance fixture.",
-    "currentStep": "REOPENED then wired. The slice was marked CLOSED while upload did not start reading: requestProcessing had exactly ONE caller, the indexer. Upload now triggers the read. BUILT_NOT_INTEGRATED until deployed — the fix is green locally and NOT yet on chat.migrateck.com.",
+    "currentStep": "Scanned-PDF ingestion PROVEN_LIVE end to end from the normal product action. Upload alone starts the read; no index call anywhere in the acceptance run. Deployed as consumer release uploadread-08300728; Brain untouched at multifact-08292338.",
     "design": "OCR is an ESCALATION PATH, never the default: PDF -> text layer exists -> unpdf; no text layer -> OCR -> page provenance preserved -> indexed normally.",
     "shortlist": [
       "Native Tesseract + Haitian `hat` language data — prebuilt Ubuntu packages, so the missing compiler on VM111 may not matter. CORRECTION to my earlier framing, which wrongly assumed native meant compiling from source.",
@@ -279,7 +279,7 @@
       "whyDuplicatesAreNotChunks": "A second capture would double the page's weight in retrieval and let one sentence be cited as two independent sources. Kept as corroboration instead, so extra scans raise confidence without polluting the index."
     },
     "asyncIngestion": {
-      "status": "Runner BUILT and PROVEN LIVE. Consumer wiring: upload→read now implemented and green locally (BUILT_NOT_INTEGRATED — not yet deployed). Previously this field said 'Background runner and consumer wiring NOT yet done', which was stale in one direction and right in the other.",
+      "status": "Runner BUILT and PROVEN_LIVE. Consumer wiring COMPLETE and PROVEN_LIVE: upload itself starts the read.",
       "ownerDecision": "Scanned-PDF ingestion becomes an asynchronous background job. Upload returns immediately, the file appears in Files as \"Reading…\", stages are visible, and readiness is canonical rather than UI-only. 225s is a job, not a request.",
       "built": {
         "M23 document_processing": "durable per-scope readiness under RLS, keyed by (owner, workspace, file).",
@@ -319,10 +319,10 @@
         "🚨 Four brain-client operations existed in the type union with no transport case. The client could NAME them and not send them; the escalation silently produced no request. Now pinned by a test that parses the union and the switch from source.",
         "The ordering caveat existed, was tested, and was never called by any request path."
       ],
-      "triggerCaveat": "⚠️ Every result in `results` was measured AFTER an index call, not after a bare upload. The stages are real; the trigger was not under test. See activeLane.integrationGap."
+      "triggerCaveat": "⚠️ Results in `results` were measured after an index call. The upload-triggered path is proven separately in activeLane.uploadTriggeredAcceptance, which used no index call at all."
     },
     "integrationGap": {
-      "state": "BUILT_NOT_INTEGRATED",
+      "state": "RESOLVED — PROVEN_LIVE",
       "foundOn": "2026-08-30",
       "whatWasWrong": "Every stage — classification, rasterisation, OCR, folio reconstruction, validation, canonical persistence, indexing, retrieval — was built, deployed and working. Nothing called it on upload. `requestProcessing` had a single caller: apps/migrapilot-consumer/src/app/api/files/index/route.ts, the indexer's escalation pass. A user who uploaded a scanned PDF and did not trigger an index saw a stored file, no stages, and no indication that anything was missing.",
       "whyTheStatusSaidCLOSED": "The live acceptance run reached the pipeline through an index call — recorded verbatim in liveAcceptance as '405ms index call'. Every stage after the trigger was genuinely proven. The trigger itself was never the thing under test, so a real pass certified a path the user cannot reach. Contradicted the lane's own ownerDecision: 'Upload returns immediately, the file appears in Files as \"Reading…\"'.",
@@ -335,7 +335,32 @@
         "uploadNeverFailsOnReaderOutage": "The bytes are saved; a 503 from the Brain must not tell the user their upload failed and make them upload it twice."
       },
       "regressionTest": "apps/migrapilot-consumer/src/app/api/files/uploadStartsReading.test.ts — 5 tests. Mutation-checked: removing the wire fails 2 of them.",
-      "remainingToProve": "Live: upload a scanned PDF to chat.migrateck.com and see it reach ready WITHOUT any index call. Requires deployment."
+      "remainingToProve": "Live: upload a scanned PDF to chat.migrateck.com and see it reach ready WITHOUT any index call. Requires deployment.",
+      "deployed": "2026-08-30, consumer only. Release uploadread-08300728 (rollback numeric-08290240). Deployed artifacts md5-matched the local build; Brain symlink unchanged. Boot-tested on port 3011 before the symlink swap."
+    },
+    "uploadTriggeredAcceptance": {
+      "date": "2026-08-30",
+      "rule": "A capability is not complete because its backend path works when manually invoked. It is complete only when the normal product action reaches that path automatically.",
+      "method": "Every fixture uploaded through the real Files picker or the chat composer. NO manual index call at any point. Facts in the fixtures were invented for this run, so a correct answer cannot come from general knowledge.",
+      "results": {
+        "uploadStartsTheRead": "PASS — POST /api/files only; the network log for the run contains no POST /api/files/index before readiness.",
+        "truthfulReadingState": "PASS — rendering_pages -> reading_text -> indexing -> ready, readable:false until terminal.",
+        "pageProgressAdvances": "PASS — 14-page scan: rendering 5..13 of 14, then reading text 1..14 of 14.",
+        "reachesReady": "PASS — 3-page scan 11s; 14-page scan 52s; polling:false at terminal.",
+        "groundedAnswerFromOcrOnly": "PASS — 'The upper cistern holds 738 barrels when sealed at the north valve … The fracture on the eastern wall is 62 centimetres long.' Both facts exist only inside an image-only PDF with 0 extractable characters.",
+        "provenance": "PASS — inline (cite: acceptance-scan-9012.pdf:1-5) and (…:7-11), plus 'From your files: acceptance-scan-9012.pdf · pages 1-3'. The PDF, never a sidecar.",
+        "hardRefreshDuringProcessing": "PASS — full page load mid-job rendered 'Rendering pages — page 2 of 14'; state durable, not UI-local.",
+        "hardRefreshAfterReady": "PASS — terminal state renders clean, no stale Reading… text.",
+        "noDuplicateReadJob": "PASS — after triggering the index/escalation path on an already-read document, state held ready/polling:false for 20s and chunks stayed at exactly 14.",
+        "digitalPdfNotForcedThroughOcr": "PASS — 12-page text-layer PDF was ready in <1.2s, NEVER entered rendering_pages, 12 chunks. The 14-page scan took 52s through rasterisation and OCR.",
+        "composerShowsLiveState": "PASS — attachment chip showed 'Rendering pages — page 3 of 3', then 'Ready — MigraPilot can read this'.",
+        "cleanup": "PASS — 7 fixtures deleted (incl. scan-accept-4p.pdf); 31 -> 24 files, zero leftover files and zero leftover chunk entries."
+      },
+      "openObservation": {
+        "what": "Every synthetic single-page-per-sheet scan reported ALL pages unplaced (3/3, 3/3, 14/14, 4/4), while the canonical Creole book reports 0 unplaced.",
+        "impact": "None on retrieval. readable:true, chunks indexed, answers correct and cited. The caveat is ordering-only and is stated truthfully.",
+        "causeNotEstablished": "🚨 I proposed that folioCandidates only trusts a line of bare digits (scannedOcr.ts:99) and that my fixtures print 'Page 1'. A fixture WITH a bare folio alone on its line still reported 4/4 unplaced, so that explanation is DISPROVEN. A remaining possibility — that reconstruction is built for two-up book spreads and single-page sheets have no spread to place — is UNVERIFIED and is not being asserted. The OCR sidecar that would settle it is not readable with my access."
+      }
     }
   },
   "capabilities": {
