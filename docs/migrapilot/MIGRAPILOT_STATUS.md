@@ -27,6 +27,42 @@ _Last updated: 2026-08-30_
 
 ---
 
+## Deployment backlog cleared 2026-08-30 — four records were stale, one capability was missing
+
+The consumer deploy that shipped the upload trigger also carried work that had been sitting
+**built, green and undeployed** since 28–29 August. Verified in production:
+
+**Upload ceiling — `PROVEN_LIVE`.** A 47.7 MB PDF (50,062,914 bytes) uploaded through the real
+picker landed intact and started reading. The old proxy cut was measured at 32.2 MB → 413.
+Advertised `maxFileBytes` is 268435456 (256 MB), so the app no longer promises a ceiling the
+transport will not carry. The ordering constraint recorded in that slice was honoured: nginx on
+VM102 was raised to 256M **before** the app advertised it.
+
+**Multi-turn conversation memory — `PROVEN_LIVE`, and it never worked before.** The consumer had
+no `conversationId` on its chat-turn operation, so the Brain's entire durable-memory path was
+gated on a value that never arrived. Fresh chat, no attachments:
+
+> "Remember this code: DELTA-8836" → "Acknowledged: DELTA-8836."
+> "What was the code I just gave you?" → "The code you just gave me was DELTA-8836."
+
+That is the exchange that previously answered with an invented Python function. After a **full page
+reload** it still answered "…was DELTA-8836", so the memory is reconstructed from the Brain rather
+than held in the page.
+
+**Grounding isolation — `PROVEN_LIVE`.** In that same conversation, with 24 files in the library and
+none attached: *"I do not have that document attached to this conversation, so I cannot answer from
+it yet."* No library file was dragged in. Previously every file ever attached stayed an active
+retrieval target forever.
+
+**Reload restores state — `PROVEN_LIVE`.** The page half of that defect is fixed and deployed: a
+hard refresh mid-job rendered "Rendering pages — page 2 of 14" from a cold load.
+
+**Still not proven, and named as such:** corpus reuse (the corpus is not registered, so the
+known-source match path is unexercised); the **image** half of the attachment slice; and
+cross-account isolation, which needs a second disposable identity.
+
+---
+
 ## Lane `PROVEN_LIVE` 2026-08-30 — Scanned-PDF ingestion
 
 **Every stage worked. Nothing started them on upload.**

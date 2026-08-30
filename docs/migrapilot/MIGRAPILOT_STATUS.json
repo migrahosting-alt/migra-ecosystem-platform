@@ -1,7 +1,7 @@
 {
   "$schema": "MIGRAPILOT_STATUS — canonical cross-agent state. Update on every material change.",
   "updated": "2026-08-30",
-  "updatedBy": "Claude Opus 5 — upload-triggered scanned-PDF acceptance",
+  "updatedBy": "Claude Opus 5 — deployment backlog verification",
   "rules": {
     "easyFirst": "Do not start deep capability work while meaningful easy user-facing items remain.",
     "provenLive": "PROVEN_LIVE requires the real user-facing workflow to pass. Code existing and tests passing is NOT proof.",
@@ -1084,7 +1084,7 @@
     },
     "uploadCeiling256MB_2026_08_28": {
       "objective": "Raise the Chat upload ceiling from the nginx-imposed 31 MB to 256 MB, truthful at every hop.",
-      "status": "TRANSPORT PROVEN IN PRODUCTION. Consumer NOT yet deployed — the deploy needs Bonex. Not PROVEN_LIVE.",
+      "status": "PROVEN_LIVE 2026-08-30. A 47.7 MB PDF (50,062,914 bytes) uploaded through the real Files picker landed intact and began reading automatically. The old proxy cut was measured at 32.2 MB -> 413. Advertised maxFileBytes is 268435456 (256 MB), so the advertised ceiling and the transport now agree.",
       "rootCauseMeasured": "chat.migrateck.com.conf on VM102 (NGINX-PROXY-CORE, 10.10.0.2) carried `client_max_body_size 32M`. That single directive is the entire ceiling: the config value and the measured production boundary agree exactly.",
       "baselineMeasured2026_08_28": "Probed the real public route unauthenticated: 1 MB -> 401 application/json (body crossed the proxy, app answered); 33 MB -> 413 text/html (proxy cut it off before any MigraPilot code ran). The 413 HTML body is what broke response.json() and produced the false 'could not reach the server'.",
       "routeAudited": {
@@ -1111,7 +1111,7 @@
         "production transport": "PROVEN — full boundary sweep above"
       },
       "blocked": "The nginx change needs elevation on VM102, a host outside the agent's two approved scopes. VM102's guest agent is down (qm agent 102 ping fails) and root@10.10.0.2 has no key; the working route is pve -> debian@10.10.0.2, where the vhost is root-owned and not writable. The agent prepared the exact scoped hook rule (docs/migrapilot/hook-patch-vm102-nginx.md) but was correctly stopped from patching its own guardrail. Bonex runs scripts/vm102-raise-upload-ceiling.sh instead — no self-widening required.",
-      "🚨 notDeployedOnPurpose": "The application changes are complete and green but NOT deployed. Shipping an app that advertises 256 MB while the proxy still cuts at 32 MB would recreate the exact defect this slice removes, with a bigger number. Order is: raise nginx -> verify transport -> deploy consumer -> live browser proof.",
+      "🚨 notDeployedOnPurpose": "RESOLVED. The ordering constraint was honoured: VM102 nginx client_max_body_size was raised to 256M BEFORE the app shipped the 256 MB advertisement. Verified live on 2026-08-30 — the app does not advertise a ceiling the proxy will not carry.",
       "largeMediaDocumented": "docs/migrapilot/large-media-uploads.md records why this path stops at 256 MB and does not grow toward a gigabyte: a buffered body occupies proxy disk (VM102 has ~9 GB free), there is no resume, progress cannot be trusted, and the bytes cross hops that gain nothing from carrying them. Hundreds of MB to multi-GB media wants direct/resumable upload to object storage — migra-storage-primary (MinIO) already speaks the S3 multipart API needed.",
       "proxyRaised2026_08_28": {
         "how": "scripts/vm102-raise-upload-ceiling.sh, run at Bonex's explicit written instruction naming that exact command.",
@@ -1155,7 +1155,7 @@
       "nextPass": "PASS 3: column detection BEFORE sentence reconstruction (Bonex's decision). Add volume-based triage alongside confidence. Human verification remains the only path out of machine_extracted."
     },
     "attachmentProcessingArchitecture_2026_08_28": {
-      "status": "BUILT AND GREEN — documents AND images. NOT DEPLOYED, so NOT PROVEN_LIVE.",
+      "status": "DOCUMENTS PROVEN_LIVE 2026-08-30 (deployed, upload-triggered, grounded answers with provenance). IMAGES still NOT live-proven — the image half of this slice has not been exercised since deployment.",
       "scope": "Bonex reopened attachments after production screenshots: transport is fixed, processing limits are not.",
       "🚨 empiricalFinding_bonexPdfNeedsOcr": "liv_kreyol_AI-Training.pdf (36 MB, 245 pages) has NO TEXT LAYER — probed on VM111, pages 122/123/124 each yield 0 characters. It is the scanned Kreyol book (HC-S009, 245 pages, the same source PASS 2 OCR'd). So the new text-layer fast path does NOT apply to it: the probe correctly routes it to the existing OCR pipeline. Expect roughly 1.5-2 hours for 245 pages at the PASS 2 measured rate (~24 s/page), not seconds. This is a real capability where there was none — the file used to be skipped outright — but it is SLOW for this document, and that must not be described as if it were instant.",
       "dragDropDefectFound": "onDrop sent EVERY dropped file to uploadImage with no classification, so a dragged PDF was pushed at the image endpoint while the identical PDF chosen through the paperclip attached correctly. onPaste only looked for clipboard image MIME types, so a copied PDF pasted in did nothing at all — no attachment, no refusal, no explanation. Picker, drop and paste now share one `intake` that classifies from bytes via classifyAttachment. A local ACCEPTED_IMAGE_TYPES list was deleted; it claimed to be the shared definition but only paste consulted it.",
@@ -1196,7 +1196,7 @@
       }
     },
     "largeDocAsyncAndReuse_2026_08_28": {
-      "status": "BUILT AND GREEN. NOT DEPLOYED, corpus NOT yet registered, so NOT PROVEN_LIVE.",
+      "status": "ASYNC INGESTION PROVEN_LIVE 2026-08-30 — background jobs, durable stage progress, reload recovery and clean mid-job teardown all verified in production, including a 47.7 MB document. CORPUS REUSE still NOT proven: the corpus is not registered, so the known-source match path is unexercised.",
       "🚨 sharpDisprovenOnTheTarget": {
         "bonexCondition": "'approve it, but only for the image slice... as long as the release script proves it resolves on the target'",
         "measured": "Ran it on VM111. `npm install sharp` SUCCEEDS (9 packages, 2s). `require.resolve('sharp')` SUCCEEDS. `require('sharp')` CRASHES: TypeError: Cannot read properties of undefined (reading 'endsWith') at sharp.cjs:115 — sharp's own error formatter dies because the underlying load error carries no `code`. CPU is 'Common KVM processor' with sse4_2, avx, avx2 and popcnt ALL ABSENT, so the x86-64-v2 guard refuses the native binding and the WASM fallback dies on missing SIMD.",
@@ -1248,7 +1248,7 @@
       "step3_liveAcceptance": "NOT RUN - waiting on the deploy. Bonex's 9 required outcomes are recorded and each will be exercised: HC-S009 hash match with zero OCR; altered bytes must NOT reuse; unknown scanned PDF queued->processing->ready with advancing page progress; reload during processing; forced Brain restart with a queued job; 25 MB JPEG/PNG with original preserved and derivative used; oversized WebP/GIF refusal; mixed PDF+image turn; no stale attachment errors."
     },
     "attachmentLiveAcceptance_2026_08_28": {
-      "status": "MOSTLY PASSED. Two defects FOUND LIVE and fixed but NOT YET DEPLOYED. One check still running.",
+      "status": "PASSED. The two defects found live are fixed, deployed in uploadread-08300728, and re-verified 2026-08-30.",
       "deployed": "brain-service and consumer both on release reuse-08281730.",
       "1_HC_S009_reuse": {
         "verdict": "PASSED - the headline proof.",
@@ -1268,7 +1268,7 @@
         "observed": "A 3-page unregistered scan (built with pdftocairo, 0 extractable characters) went stored -> queued -> processing with the chip reading 'Reading text - page 5 of 6' -> 'Ready' in about 90 seconds, with tesseract confirmed running. Real page progress through the real UI."
       },
       "4_reloadRestoresState": {
-        "verdict": "SERVER PASSED, PAGE FAILED - fixed, not deployed.",
+        "verdict": "PROVEN_LIVE 2026-08-30 — a hard refresh mid-job rendered 'Rendering pages — page 2 of 14' from a cold page load, and a refresh after ready rendered the terminal state cleanly. The page defect is fixed and deployed.",
         "observed": "After reload during an active job the API returned fully truthful durable state: {state: processing, stage: reading_text, description: 'Reading text - page 7 of 24', readable: false, polling: true}. The FILES PAGE rendered only the name and size - a document being read was indistinguishable from one sitting idle, at exactly the moment a user reloads to check.",
         "fix": "FilesPage now renders the processing description it was already receiving, and polls every 5s while any file reports polling:true so the page does not freeze on a stale page number. The server decides when to stop, never a timer in the client."
       },
@@ -1354,7 +1354,7 @@
       "npmAuditUntouched": "3 vulnerabilities still reported (fast-uri high on the Fastify request path; hono moderate and ip-address high, both only via @modelcontextprotocol/sdk). No dependency changes were mixed into this acceptance run, per instruction. Separate security slice after attachments."
     },
     "chatRepairPass_rootCause_2026_08_29": {
-      "status": "ROOT CAUSE ESTABLISHED for defects #1 and #2. They SHARE one. No code changed yet.",
+      "status": "PROVEN_LIVE 2026-08-30. Both defects fixed, deployed and verified through the real chat UI.",
       "🚨 headline": "MigraPilot Chat has NO multi-turn conversational memory through the Brain, and never has. The consumer never sends `conversationId` on a chat turn, so the Brain cannot scope anything to a conversation - not history, not grounding. Every turn reaches the model standalone: prompt + groundingFiles + imageAttachments, and nothing else.",
       "codeEvidence": {
         "consumer": "The ChatTurn operation type in src/server/brain/operations.ts has NO conversationId field. Its fields are prompt, conversationSummary, stream, groundingMode, attachments, imageAttachments, groundingFiles. The stream route HAS the conversationId - it uses it to persist messages - and simply never forwards it.",
@@ -1366,7 +1366,7 @@
       "whyThisMattersForTheFix": "Fixing #2 alone - scoping grounding to the current turn - would REMOVE the only continuity the product has and make follow-ups worse. The two must be fixed together: send conversationId so real history works, THEN narrow grounding to current-turn attachments plus explicitly referenced ones.",
       "notYetInvestigated": "Defects #3 (large digital PDF), #4 (DOCX), #5 (arithmetic), #6 (GPU readiness), #7 (vision text), #8 (blank conversation).",
       "implemented": {
-        "status": "IMPLEMENTED_NEEDS_LIVE_PROOF. Built, green, staged. NOT deployed, so NOT proven.",
+        "status": "PROVEN_LIVE 2026-08-30 (deployed in consumer release uploadread-08300728).",
         "defect1_conversationMemory": {
           "rootCause": "The consumer's ChatTurn operation type had no `conversationId` field, so it was never sent, so the Brain's `body.conversationId` was always undefined - and its entire durable-memory path is gated on that one value. Chat had NO cross-turn memory.",
           "fix": "conversationId declared on the operation type, declared again on the chatTurnStream seam (this file's own comments warn twice that excess properties are not checked through a spread, so a field declared at one end and not the other is silently dropped), included in the request body, and forwarded from the stream route which had always known it.",
@@ -1391,7 +1391,12 @@
         "testsAdded": "consumer: src/server/files/turnGrounding.test.ts - 10 tests, every case a reproduction of a named production failure (File A then File B; CSV citing a DOCX; named-file reactivation; short-stem false match; attach-plus-name activating both; bare follow-up in a one-doc thread; plus wiring assertions that conversationId is declared and forwarded at all three layers and that the route sends the ACTIVE set). brain: 3 tests for the probe fix and the empty-OCR salvage.",
         "counts": "brain 2093/2093, consumer 649/649, tsc -b clean on both.",
         "🚨 testCaughtAnOverCorrection": "Widening the probe initially misclassified the scanned fixture. The failure was in my new ASSERTION (it pinned the exact prose of the reason string, which I had changed), not in the behaviour - the fixture has 0 extractable chars and still correctly probes false. Assertion rewritten to check substance, and a sampledCharsPerPage == 0 check added.",
-        "remaining": "Defects #4 DOCX, #5 arithmetic, #6 GPU readiness, #7 vision text, #8 blank conversation - NOT started."
+        "remaining": "Defects #4 DOCX, #5 arithmetic, #6 GPU readiness, #7 vision text, #8 blank conversation - NOT started.",
+        "liveProof": {
+          "defect1_conversationMemory": "PASS — fresh chat, no attachments. 'Remember this code: DELTA-8836' -> 'Acknowledged: DELTA-8836.' Next turn 'What was the code I just gave you?' -> 'The code you just gave me was DELTA-8836.' This is the exact exchange that previously invented a Python add_numbers function.",
+          "durableAcrossReload": "PASS — after a full page load, 'Without me repeating it, what code did I ask you to remember earlier in this conversation?' -> 'The code you asked me to remember earlier in this conversation was DELTA-8836.' So the memory is reconstructed from the Brain, not held in the page.",
+          "defect2_groundingIsolation": "PASS — in that same conversation, with 24 files in the library and none attached, 'Summarise the reference document I attached to this conversation.' -> 'I do not have that document attached to this conversation, so I cannot answer from it yet. Attach the file here, or choose it from Files.' No library file was dragged in."
+        }
       }
     },
     "chatArchitectureRepair_LIVE_2026_08_29": {
