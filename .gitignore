@@ -29,6 +29,15 @@
 !/scripts/brain-release.sh
 !/scripts/consumer-release.sh
 !/scripts/release-retention.sh
+# The proxy's upload ceiling is production configuration that the app's own
+# MAX_UPLOAD_MB must agree with, so the script that sets it and the probe that
+# proves it belong beside the code rather than in someone's shell history.
+!/scripts/vm102-raise-upload-ceiling.sh
+!/scripts/verify-upload-ceiling.sh
+# Registers a completed corpus extraction against the source PDF's hash so
+# ingestion never repeats work already paid for. Belongs with the code that
+# reads the registry, not in a shell history.
+!/scripts/register-corpus-extraction.mjs
 
 # Kreyòl extraction pipeline. Same rule as the release scripts: the pass that
 # produces the language corpus must be reproducible from repo state.
@@ -168,6 +177,16 @@
 !/packages/shared-types/
 !/packages/shared-types/src/
 !/packages/shared-types/src/*.ts
+
+# Shared enforcement primitive for evidence-backed claims. It governs what every
+# product may call PROVEN_LIVE, so it has to be reproducible from repo state —
+# and this file is an ALLOWLIST, which already dropped a script that had been
+# written, deployed twice and committed. Source only.
+!/packages/evidence/
+!/packages/evidence/src/
+!/packages/evidence/src/*.ts
+!/packages/evidence/package.json
+!/packages/evidence/tsconfig.json
 
 # The speech runtime is a real service the Brain delegates to (MIGRAPILOT_SPEECH_RUNTIME_URL).
 # Source and docs only — no models, no audio, no caches.
