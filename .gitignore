@@ -184,12 +184,6 @@
 !/packages/shared-types/src/
 !/packages/shared-types/src/*.ts
 
-# Shared enforcement primitive for evidence-backed claims. It governs what every
-# product may call PROVEN_LIVE, so it has to be reproducible from repo state —
-# and this file is an ALLOWLIST, which already dropped a script that had been
-
-# iBridge: compute decision and execution authority. It decides what runs where
-
 # The speech runtime is a real service the Brain delegates to (MIGRAPILOT_SPEECH_RUNTIME_URL).
 # Source and docs only — no models, no audio, no caches.
 !/services/
