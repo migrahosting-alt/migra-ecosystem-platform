@@ -63,6 +63,12 @@
 # never committed. Markdown only.
 !/docs/migrapilot/
 !/docs/migrapilot/*.md
+# A runbook's executable half belongs with it. "Markdown only" reopened the very
+# hole the comment above describes: two provisioning scripts were written, `git
+# add` skipped them silently, the commit succeeded naming them, and they existed
+# on exactly one disk. Extension-scoped, like the *.md line, so the next one does
+# not have to rediscover this.
+!/docs/migrapilot/*.sh
 # The canonical machine-readable status. Named explicitly rather than widening the
 # allowlist to *.json, so no other generated JSON slips into the repository with it.
 !/docs/migrapilot/MIGRAPILOT_STATUS.json
