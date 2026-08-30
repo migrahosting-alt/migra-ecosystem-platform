@@ -184,6 +184,23 @@
 !/packages/shared-types/src/
 !/packages/shared-types/src/*.ts
 
+# @migraai/compute-client is the typed client for the Shared Compute Authority — the ONE package
+# Studio, Brain, Engineer, MigraPilot and the CLI all talk to the authority through. It is a
+# contract, not an implementation: no provider, scheduling, evidence or lifecycle logic, enforced
+# behaviourally by test/contract-neutrality.mjs rather than asserted in a comment.
+#
+# It is listed here for exactly the reason the shared-types block above records: this file is an
+# ALLOWLIST, so a new shared contract can be written, built, tested and still never reach a
+# commit. That happened to this package — it was created, compiled and fully verified while being
+# completely invisible to git. Source and tests only; dist/ and tsbuildinfo stay ignored.
+!/packages/compute-client/
+!/packages/compute-client/src/
+!/packages/compute-client/src/*.ts
+!/packages/compute-client/test/
+!/packages/compute-client/test/*.mjs
+!/packages/compute-client/package.json
+!/packages/compute-client/tsconfig.json
+
 # The speech runtime is a real service the Brain delegates to (MIGRAPILOT_SPEECH_RUNTIME_URL).
 # Source and docs only — no models, no audio, no caches.
 !/services/
