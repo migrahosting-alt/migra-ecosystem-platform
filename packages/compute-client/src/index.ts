@@ -15,8 +15,62 @@
  * The wire contract this client speaks. Sent on every request and checked by the authority
  * before the request is read. It is a constant, not a parameter: a client that could be told
  * to claim a different version could be told to claim a compatible one it does not implement.
+ *
+ * Versions:
+ *   1.0.0  six operations
+ *   1.1.0  seven operations - adds recordObservation() -> POST /observations
+ *
+ * Distinct from the Studio ACCEPTANCE framework version, which is also 1.1.0 and is an unrelated
+ * axis. Same number, different meaning; never conflate them.
  */
-export const CLIENT_CONTRACT_VERSION = "1.0.0";
+export const CLIENT_CONTRACT_VERSION = "1.1.0";
+
+/**
+ * Parse a strict x.y.z into components, or null if it is not a version at all.
+ *
+ * Returns a fixed TUPLE rather than number[]: the regex already guarantees exactly three parts, and
+ * the tuple is how that guarantee reaches the type system. Under the monorepo's
+ * noUncheckedIndexedAccess an array would make every component `number | undefined` and force
+ * non-null assertions into the comparison below — assertions that would be dead weight here and a
+ * lie anywhere the regex ever changed. Capturing groups carry the same guarantee to the values.
+ */
+function parseSemver(v: string): [number, number, number] | null {
+  const m = /^(\d+)\.(\d+)\.(\d+)$/.exec(v);
+  if (!m) return null;
+  return [Number(m[1]), Number(m[2]), Number(m[3])];
+}
+
+/**
+ * May this client interpret a response from an authority advertising `advertised`?
+ *
+ * Exact equality was the previous rule, and it turns an ADDITIVE bump into a breaking one: the
+ * moment the authority moved to 1.1.0, every 1.0.0 client would refuse every response - including
+ * responses to the six operations that had not changed at all. That would make "additive" true on
+ * paper and false in practice.
+ *
+ * The rule that matches the guarantee the version actually makes:
+ *
+ *   same major, authority >= client   accept. Every operation this client knows still exists and
+ *                                     behaves the same; new response fields are optional and go unread.
+ *   authority OLDER than client       refuse. This client may call an operation the authority has
+ *                                     never had - the skew case, and the dangerous direction.
+ *   different major                   refuse. A major bump is where behaviour may change beneath a
+ *                                     name this client already knows.
+ */
+function canInterpret(advertised: string): boolean {
+  const a = parseSemver(advertised);
+  const c = parseSemver(CLIENT_CONTRACT_VERSION);
+  if (!a || !c) return false;
+  /*
+   * Compared component by component with LITERAL indices rather than a loop. A variable index is
+   * `number | undefined` under noUncheckedIndexedAccess even on a tuple, because the compiler
+   * cannot prove the counter stays in range; literals it can. Identical semantics — same major,
+   * then authority >= client on minor, then on patch.
+   */
+  if (a[0] !== c[0]) return false;
+  if (a[1] !== c[1]) return a[1] > c[1];
+  return a[2] >= c[2];
+}
 
 export type ExecutionTarget = "local/windows" | "local/wsl" | "remote/runpod";
 export type CallerIdentity = "studio" | "brain" | "engineer" | "migrapilot" | "operator";
@@ -57,10 +111,67 @@ export interface PlanResult {
     target: string; qualified: boolean; class: string | null; requiredMib: number | null;
     requiredSource: string | null; ceilingMib: number | null; usableNowMib: number | null;
     gpu: string | null; reasons: string[];
+    /**
+     * How requiredMib was derived. "peak" is a measured ceiling and a shortfall against it is
+     * physical; "demonstrated-floor" is a witnessed lower bound on an offloading engine, where a
+     * shortfall means only that no run has been observed that low — never that it cannot work.
+     * A client must not render the second as an unoverridable refusal.
+     */
+    requiredBasis?: "peak" | "demonstrated-floor" | "caller-estimate" | "stated-minimum" | "none" | null;
   }>;
+  /** Peak VRAM observed for this pipeline/variant. An observation, not an admission gate. */
+  vramEvidence?: { known?: boolean; matched?: string; peakVramMib?: number | null; crossTarget?: boolean };
+  /** What must be FREE for the job to start, and on what evidence. */
+  admissionEvidence?: {
+    known?: boolean; matched?: string; basis?: string; admissionMib?: number | null;
+    peakVramMib?: number | null; offloadProven?: boolean; crossTarget?: boolean; note?: string;
+  };
   /** Stated by the authority so a plan can never be mistaken for an execution. */
   sideEffects: string;
   error?: string;
+}
+
+/**
+ * What a render OBSERVED when it reached a terminal state.
+ *
+ * Split deliberately into `requested` and `actual`: only the observed side may inform placement.
+ * A peak may carry a number only when sampling covered the whole run, which is why the status is a
+ * separate field rather than an inference from null.
+ */
+export interface ExecutionObservation {
+  /** Identity of this render attempt, and the idempotency key. */
+  runId: string;
+  pipeline: string;
+  variant?: string | null;
+  outcome: "completed" | "failed" | "cancelled";
+  executionMode: "local" | "remote";
+  executionTarget: string;
+  peakVramStatus: "MEASURED" | "PARTIAL" | "NOT_MEASURED";
+  peakVramMib?: number | null;
+  freeVramAtStartMib?: number | null;
+  /** Required when outcome is "completed"; meaningless otherwise, since a cancelled run has no known duration. */
+  runtimeSeconds?: number | null;
+  /** Required when outcome is "cancelled", e.g. "CANCELLED_LATENCY_BOUNDARY". */
+  cancellationReason?: string | null;
+  error?: string | null;
+  model?: string | null;
+  precision?: string | null;
+  gpu?: string | null;
+  provider?: string | null;
+  requested?: Record<string, unknown> | null;
+  actual?: Record<string, unknown> | null;
+  outputBytes?: number | null;
+  provenance?: string | null;
+}
+
+export interface RecordObservationResult {
+  ok: boolean;
+  recorded: boolean;
+  duplicate: boolean;
+  runId?: string | null;
+  total?: number;
+  error?: string;
+  errors?: string[];
 }
 
 export interface JobState {
@@ -142,7 +253,7 @@ export class ComputeClient {
      * itself as one, and an unversioned success is exactly the thing that must not be interpreted.
      */
     const advertised = res.headers?.get("x-migraai-contract-version") ?? null;
-    if (advertised !== null && advertised !== CLIENT_CONTRACT_VERSION) {
+    if (advertised !== null && !canInterpret(advertised)) {
       throw new ComputeAuthorityError(
         res.status,
         `authority speaks contract ${advertised}, this client speaks ${CLIENT_CONTRACT_VERSION} — ` +
@@ -176,6 +287,16 @@ export class ComputeClient {
   submit(job: JobRequest, reason: string): Promise<{ ok: boolean; accepted: boolean; mode: string; provider?: string; result?: unknown }> {
     if (!reason) throw new ComputeAuthorityError(400, "submit requires a reason — spend must record why");
     return this.call("POST", "/jobs", { body: job, reason });
+  }
+
+  /**
+   * Record one terminal render attempt as scheduling evidence.
+   *
+   * No reason header: this is append-only evidence, not spend. Idempotent on runId, so a retry
+   * after a timeout is safe and returns duplicate:true rather than double-counting the run.
+   */
+  recordObservation(observation: ExecutionObservation): Promise<RecordObservationResult> {
+    return this.call<RecordObservationResult>("POST", "/observations", { body: observation });
   }
 
   getState(jobId: string): Promise<JobState> {

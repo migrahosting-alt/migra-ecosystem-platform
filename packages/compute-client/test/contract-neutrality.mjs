@@ -14,10 +14,8 @@
  * the authority said, unchanged. So that is what gets tested — with an injected fetch, which makes
  * "did it transform the answer" directly observable.
  */
-import { readFileSync, existsSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createHash } from "node:crypto";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const PKG = join(HERE, "..");
@@ -86,10 +84,17 @@ await c.getCapabilities();
 await c.getEvidence("j");
 await c.submit({ jobId: "j", pipeline: "p" }, "because");
 await c.cancel("j", "because");
-t("all six operations send the contract version",
-  calls.length === 6 && calls.every((x) => x.headers["x-migraai-contract-version"] === CLIENT_CONTRACT_VERSION),
+/*
+ * THE SEVENTH. /observations arrived with service contract 1.1.0 and sends the version like every
+ * other operation — the discovery exemption on GET /capabilities is the only one, and it is
+ * authority-side. Counting operations here is deliberate: a client that grows an operation without
+ * this number moving is a client whose contract claim has quietly stopped describing it.
+ */
+await c.recordObservation({ runId: "r", pipeline: "p", outcome: "completed", executionMode: "local", executionTarget: "local/wsl", peakVramStatus: "NOT_MEASURED" });
+t("all seven operations send the contract version",
+  calls.length === 7 && calls.every((x) => x.headers["x-migraai-contract-version"] === CLIENT_CONTRACT_VERSION),
   `${calls.filter((x) => !x.headers["x-migraai-contract-version"]).length} of ${calls.length} omitted it`);
-t("all six operations identify the caller",
+t("all seven operations identify the caller",
   calls.every((x) => x.headers["x-migraai-actor"] === "brain"),
   "an unidentified request cannot be attributed to a caller");
 
@@ -103,31 +108,59 @@ for (const [op, run] of [["submit", () => c.submit({ jobId: "j", pipeline: "p" }
     "spend and teardown must record why; the client refuses rather than inventing a reason");
 }
 
-console.log("\n=== the package carries no implementation ===");
-const src = readFileSync(join(PKG, "src", "index.ts"), "utf8");
-const imports = src.match(/^\s*import\s.+$/gm) ?? [];
-t("the client imports nothing at all",
-  imports.length === 0,
-  `imports found: ${imports.join(" | ")} — a contract package that pulls in a dependency can pull in a decision`);
-
+/*
+ * ARTIFACT-CAPABLE FROM HERE, AND THAT IS THE POINT OF THE SPLIT.
+ *
+ * This file reads NOTHING from the source tree. It exercises the BUILT module, so it runs
+ * unchanged against a published tarball installed into a stranger's project — which is the only
+ * place the claim "this package carries no logic" can actually be tested. Source-tree integrity
+ * lives in source-integrity.mjs and cannot run here: a correct package ships no `src`.
+ *
+ * Found the hard way. This suite once crashed on ENOENT reading src/index.ts out of an installed
+ * package, after seven behavioural tests had already passed — a suite that audited the repository
+ * while claiming to audit the artifact.
+ */
+console.log("\n=== the shipped artifact carries no implementation ===");
 const exported = Object.keys(await import(new URL("../dist/index.js", import.meta.url).href)).sort();
 t("its runtime surface is exactly the transport",
   JSON.stringify(exported) === JSON.stringify(["CLIENT_CONTRACT_VERSION", "ComputeAuthorityError", "ComputeClient"]),
   `exports are ${JSON.stringify(exported)} — anything else is logic that escaped the authority`);
 
-console.log("\n=== no drift while two copies exist ===");
 console.log("\n=== the client verifies the contract it is answered in ===");
 
-// A DRIFTED AUTHORITY IS REFUSED, NOT INTERPRETED. Sending the version was half the handshake;
-// until now nothing read the one coming back, so a moved authority surfaced as a 409 storm with
-// nothing naming the cause.
-c = new ComputeClient({ actor: "studio", fetchImpl: stub(authorityPlan, { advertise: "1.1.0" }) });
-let drift = null;
-try { await c.plan({ jobId: "j", pipeline: "p" }); } catch (e) { drift = e; }
-t("a drifted authority is refused rather than interpreted",
-  drift instanceof ComputeAuthorityError && /speaks contract 1\.1\.0/.test(drift.message) &&
-    new RegExp(`this client speaks ${CLIENT_CONTRACT_VERSION}`).test(drift.message),
-  `expected a refusal naming both versions, got: ${drift && drift.message}`);
+/*
+ * VERSION SKEW, IN THE DIRECTION THAT ACTUALLY MATTERS.
+ *
+ * Exact equality used to be the rule, and it made an ADDITIVE server bump breaking: the moment the
+ * authority moved to 1.1.0 a 1.0.0 client refused every response, including responses to the six
+ * operations that had not changed. So the rule is now "same major, authority >= client".
+ *
+ * A NEWER authority is SAFE: every operation this client knows still exists, and new response
+ * fields are optional and simply go unread. An OLDER authority is the dangerous one — this client
+ * carries seven operations and an older authority may never have had the seventh, so a call would
+ * 404 after passing a version gate that said compatible. That asymmetry is the whole point, and a
+ * test that only checked inequality would have passed against a rule that had it backwards.
+ */
+c = new ComputeClient({ actor: "studio", fetchImpl: stub(authorityPlan, { advertise: "1.2.0" }) });
+let newer = null;
+try { await c.plan({ jobId: "j", pipeline: "p" }); } catch (e) { newer = e; }
+t("a NEWER authority within the same major is accepted, not refused",
+  newer === null,
+  `an additive server bump must not brick this client, got: ${newer && newer.message}`);
+
+c = new ComputeClient({ actor: "studio", fetchImpl: stub(authorityPlan, { advertise: "1.0.0" }) });
+let older = null;
+try { await c.plan({ jobId: "j", pipeline: "p" }); } catch (e) { older = e; }
+t("an OLDER authority is refused — this client may call an operation it never had",
+  older instanceof ComputeAuthorityError && /1\.0\.0/.test(older.message),
+  `expected a refusal naming the advertised version, got: ${older && older.message}`);
+
+c = new ComputeClient({ actor: "studio", fetchImpl: stub(authorityPlan, { advertise: "2.0.0" }) });
+let major = null;
+try { await c.plan({ jobId: "j", pipeline: "p" }); } catch (e) { major = e; }
+t("a different MAJOR is refused whichever way it moved",
+  major instanceof ComputeAuthorityError,
+  `a major bump may change behaviour beneath a name this client knows, got: ${major && major.message}`);
 
 // AN UNVERSIONED SUCCESS IS NOT A SUCCESS. Something answered as the authority without identifying
 // itself as one; interpreting that is exactly what the version exists to prevent.
@@ -146,21 +179,6 @@ try { await c.plan({ jobId: "j", pipeline: "p" }); } catch (e) { gateway = e; }
 t("an unversioned ERROR response is reported as its status, not as contract drift",
   gateway instanceof ComputeAuthorityError && gateway.status === 502 && !/contract version/.test(gateway.message),
   `expected the 502 to survive as a 502, got: ${gateway && gateway.status} ${gateway && gateway.message}`);
-
-// The Studio repo still holds a copy until its consumption is repointed. Two copies of a contract
-// with nothing comparing them is precisely how a contract silently forks. Absent Studio is reported
-// NOT_MEASURED — never a pass, because an unchecked copy is not a matching copy.
-const studio = process.env.MIGRAAI_STUDIO_REPO || "/mnt/e/MigraTeck/AI/MigraAI-Studio";
-const studioSrc = join(studio, "packages", "compute-client", "src", "index.ts");
-if (!existsSync(studioSrc)) {
-  unmeasured("dev and Studio compute-client contract source is identical",
-    `Studio copy not present at ${studioSrc} — set MIGRAAI_STUDIO_REPO to compare. Not a pass: an unchecked copy is not a matching copy.`);
-} else {
-  const h = (p) => createHash("sha256").update(readFileSync(p)).digest("hex");
-  const a = h(join(PKG, "src", "index.ts")), b = h(studioSrc);
-  t("dev and Studio compute-client contract source is identical", a === b,
-    `dev ${a.slice(0, 12)} != studio ${b.slice(0, 12)} — the contract has forked; the copies must be reconciled before either is trusted`);
-}
 
 console.log(fail ? "\nCONTRACT NEUTRALITY VIOLATED" : `\nCONTRACT NEUTRALITY HOLDS${notMeasured ? ` (${notMeasured} not measured)` : ""}`);
 process.exit(fail ? 1 : 0);

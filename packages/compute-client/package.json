@@ -1,11 +1,9 @@
 {
-  "name": "@migraai/compute-client",
+  "name": "@migrateck-ecosystem/compute-client",
   "version": "0.1.0",
-  "private": true,
   "type": "module",
-  "description": "Typed client for the Shared Compute Authority. Contract only — no provider, scheduling, evidence or lifecycle logic.",
+  "description": "Typed client for the Shared Compute Authority. Contract only \u2014 no provider, scheduling, evidence or lifecycle logic.",
   "main": "dist/index.js",
-  "files": ["dist"],
   "types": "dist/index.d.ts",
   "exports": {
     ".": {
@@ -13,9 +11,20 @@
       "default": "./dist/index.js"
     }
   },
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Migrateck-Ecosystem/migra-ecosystem-platform.git",
+    "directory": "packages/compute-client"
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
   },
   "devDependencies": {
     "@types/node": "^22.13.10",
