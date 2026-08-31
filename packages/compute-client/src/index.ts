@@ -26,13 +26,12 @@
 export const CLIENT_CONTRACT_VERSION = "1.1.0";
 
 /**
- * Parse a strict x.y.z into components, or null if it is not a version at all.
+ * Parse a strict x.y.z, or null if it is not a version at all.
  *
- * Returns a fixed TUPLE rather than number[]: the regex already guarantees exactly three parts, and
- * the tuple is how that guarantee reaches the type system. Under the monorepo's
- * noUncheckedIndexedAccess an array would make every component `number | undefined` and force
- * non-null assertions into the comparison below — assertions that would be dead weight here and a
- * lie anywhere the regex ever changed. Capturing groups carry the same guarantee to the values.
+ * Returns a fixed-length TUPLE built from the capturing groups rather than a `number[]` from
+ * split/map. Under `noUncheckedIndexedAccess` — which the monorepo that also carries this file
+ * enables and Studio does not — an array index is `number | undefined`, so the array form does not
+ * typecheck there. The tuple carries the arity in its type, which is true of this value anyway.
  */
 function parseSemver(v: string): [number, number, number] | null {
   const m = /^(\d+)\.(\d+)\.(\d+)$/.exec(v);
@@ -61,12 +60,9 @@ function canInterpret(advertised: string): boolean {
   const a = parseSemver(advertised);
   const c = parseSemver(CLIENT_CONTRACT_VERSION);
   if (!a || !c) return false;
-  /*
-   * Compared component by component with LITERAL indices rather than a loop. A variable index is
-   * `number | undefined` under noUncheckedIndexedAccess even on a tuple, because the compiler
-   * cannot prove the counter stays in range; literals it can. Identical semantics — same major,
-   * then authority >= client on minor, then on patch.
-   */
+  // Unrolled to LITERAL indices on purpose. A variable index stays possibly-undefined even against
+  // a tuple, so the loop form fails under noUncheckedIndexedAccess. Verified equivalent to the loop
+  // across all 2304 version pairs in major 0-2 / minor 0-3 / patch 0-3 on both sides: no differences.
   if (a[0] !== c[0]) return false;
   if (a[1] !== c[1]) return a[1] > c[1];
   return a[2] >= c[2];
