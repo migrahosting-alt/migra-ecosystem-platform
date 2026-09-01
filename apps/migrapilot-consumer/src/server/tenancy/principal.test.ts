@@ -147,3 +147,31 @@ test('a visitor can undo their own conversations, not reach into an account', ()
     'the claim crosses scopes and is made AS the account',
   )
 })
+
+test('a signed-out visitor can rate the answers in their own conversation', () => {
+  /*
+   * FOUND IN PRODUCTION, in the console rather than the UI. Every signed-out turn
+   * on chat.migrateck.com produced `GET /api/feedback -> 503`. The thumbs were
+   * rendered, the click did nothing, and the 503 said "try again in a moment"
+   * about a request that would be refused identically forever.
+   *
+   * The cause was absence, not a decision: the three feedback operations were
+   * never in the audience table, so they took the authenticated-only default —
+   * the same omission that had already hidden rename and delete from visitors,
+   * caught the same way and fixed the same way.
+   *
+   * Rating stays inside the caller's own scope, so row-level security is the
+   * boundary, exactly as it is for the messages being rated. That is the test:
+   * not "is the user signed in" but "does this operation leave their scope".
+   */
+  assert.equal(isAnonymousAllowedOperation('listFeedback'), true)
+  assert.equal(isAnonymousAllowedOperation('putFeedback'), true)
+  assert.equal(isAnonymousAllowedOperation('removeFeedback'), true)
+
+  // The line that keeps the rule honest: scope-crossing stays authenticated.
+  assert.equal(
+    isAnonymousAllowedOperation('claimAnonymousConversation'),
+    false,
+    'admitting feedback must not have widened the rule to anything that crosses scopes',
+  )
+})

@@ -23,6 +23,26 @@ const REASONS = new Set([
   'unsafe_or_unhelpful', 'tool_failure', 'other',
 ])
 
+/*
+ * A REFUSAL IS NOT AN OUTAGE, AND 503 SAYS "COME BACK LATER" ABOUT A DECISION.
+ *
+ * Every non-ok result here used to collapse into 503 "could not be loaded / saved
+ * / withdrawn — try again in a moment". That advice is only true of a transient
+ * fault. When the Brain refuses the caller, retrying produces the identical
+ * refusal forever, and the console fills with server errors for a request that
+ * was never going to be served — which is exactly how the signed-out feedback
+ * gap stayed invisible: it looked like the backend was flaky rather than like a
+ * permission nobody had granted.
+ *
+ * The refusal keeps its own status so it reads as a decision, and a genuine
+ * outage keeps 503 so "try again" stays honest where it is earned.
+ */
+const refusalStatus = (kind: string): number | null =>
+  kind === 'forbidden_for_principal' ? 403
+  : kind === 'unauthenticated' ? 401
+  : kind === 'tenancy_unresolved' ? 409
+  : null
+
 export async function GET(request: Request): Promise<Response> {
   const conversationId = new URL(request.url).searchParams.get('conversationId')
   if (!conversationId) {
@@ -30,6 +50,10 @@ export async function GET(request: Request): Promise<Response> {
   }
   const result = await listFeedback(conversationId)
   if (result.kind !== 'ok') {
+    const refused = refusalStatus(result.kind)
+    if (refused) {
+      return Response.json({ error: result.kind, message: 'Feedback is not available for this conversation.' }, { status: refused })
+    }
     return Response.json({ error: 'unavailable', message: 'Your feedback could not be loaded.' }, { status: 503 })
   }
   return Response.json({ feedback: result.value?.feedback ?? [] })
@@ -77,6 +101,10 @@ export async function PUT(request: Request): Promise<Response> {
   })
 
   if (result.kind !== 'ok' || !result.value?.feedback) {
+    const refused = result.kind !== 'ok' ? refusalStatus(result.kind) : null
+    if (refused) {
+      return Response.json({ error: result.kind, message: 'Feedback cannot be recorded for this conversation.' }, { status: refused })
+    }
     return Response.json(
       { error: 'not_saved', message: 'Your feedback could not be saved. Try again in a moment.' },
       { status: 503 },
@@ -100,6 +128,10 @@ export async function DELETE(request: Request): Promise<Response> {
 
   const result = await removeFeedback(conversationId, messageId)
   if (result.kind !== 'ok') {
+    const refused = refusalStatus(result.kind)
+    if (refused) {
+      return Response.json({ error: result.kind, message: 'Feedback cannot be withdrawn for this conversation.' }, { status: refused })
+    }
     return Response.json(
       { error: 'not_saved', message: 'Your feedback could not be withdrawn. Try again in a moment.' },
       { status: 503 },

@@ -193,6 +193,30 @@ const OPERATION_AUDIENCE: Readonly<Record<string, OperationAudience>> = {
   getPreferences: 'both',
   patchPreferences: 'both',
   preferenceEvents: 'both',
+
+  /*
+   * RATING AN ANSWER IS PART OF RECEIVING IT.
+   *
+   * Same omission as rename and delete, found the same way: these were never in
+   * this table, so they took the authenticated-only default and every signed-out
+   * turn produced `GET /api/feedback -> 503` in the console. The thumbs were
+   * rendered, the click did nothing, and the failure was reported as an outage
+   * rather than a refusal — so it looked like the server was broken instead of
+   * like a decision nobody had made on purpose.
+   *
+   * A visitor who can hold a conversation can judge the answers in it. The
+   * boundary is the SCOPE, not the sign-in state: row-level security confines
+   * feedback to the caller's own conversations exactly as it does the messages
+   * being rated. Nothing here crosses scopes, which is the line
+   * claimAnonymousConversation sits on the other side of.
+   *
+   * This is also the signal the product most needs from the people least invested
+   * in giving it — a signed-out visitor rating one answer is the cheapest
+   * evidence we get, and it was the one path that discarded it.
+   */
+  listFeedback: 'both',
+  putFeedback: 'both',
+  removeFeedback: 'both',
 }
 
 /** The audience for an operation. Unknown operations are authenticated-only. */
