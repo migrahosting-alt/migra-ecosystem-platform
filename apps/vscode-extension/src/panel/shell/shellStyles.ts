@@ -362,8 +362,6 @@ button:disabled { cursor: default; opacity: .45; }
   font-size: 12px;
   transition: border-color .12s, background .12s;
 }
-/* The gloss belonged to a menu row. A chip is its own label. */
-.wcard .wsub { display: none; }
 .wcard:hover { border-color: var(--mp-accent); background: var(--mp-elevated); }
 /*
  * The icon rode a 30px tinted block because it anchored a tile. On a chip that
@@ -387,7 +385,14 @@ button:disabled { cursor: default; opacity: .45; }
 /* block, not inline: the subtitle must sit UNDER the title on every card,
  * regardless of how short the title happens to be. */
 .wcard .wtitle { display: block; font-size: 12.5px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.wcard .wsub { display: block; font-size: 11px; color: var(--mp-fg-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/*
+ * The gloss belonged to a menu row; a chip is its own label. Hidden HERE rather
+ * than in a second rule earlier in the sheet — the first attempt added
+ * a duplicate .wcard .wsub rule above this line, same specificity, and this
+ * display:block simply won. Two rules disagreeing about one element is how a
+ * style change reports success and ships nothing.
+ */
+.wcard .wsub { display: none; }
 
 /* ── Message thread (§6) ────────────────────────────────────────────────── */
 #thread { display: none; flex-direction: column; gap: 14px; }

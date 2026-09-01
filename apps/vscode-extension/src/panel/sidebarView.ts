@@ -2,18 +2,30 @@ import * as vscode from 'vscode';
 import type { MigraPilotShell } from './shell/shellProvider.js';
 
 /**
- * The MigraPilot sidebar view — the LEFT NAVIGATION REGION of the redesigned
- * command centre (§3).
+ * The MigraPilot sidebar view — THE PRODUCT, not a navigation region.
  *
- * It renders the navigation surface from the shell's single authoritative state
- * (conversations, Agent Mode with canonical counts, workspace summary, tools &
- * services, footer identity, status summary), so the sidebar and the Studio
- * editor panel can never disagree.
+ * This used to render the navigation surface as "the LEFT NAVIGATION REGION of
+ * the redesigned command centre". That framing is the defect: a command centre
+ * has a nav region and a main region, so opening MigraPilot produced TWO panels
+ * — a list on one side and the place you actually type on the other. The verdict
+ * from using it was "it still come as 2 panels", and before that "appears more a
+ * developer console, not like claude, copilot, or codex". Two panels IS the
+ * console; no comparable assistant has a nav region, because there is only one
+ * thing to navigate to.
+ *
+ * So the sidebar now hosts the shell itself, compact. Opening MigraPilot gives
+ * you a composer and your conversation, in one place, which is the shape every
+ * tool it is measured against has.
+ *
+ * `compact` is a density HINT and nothing more — CSS decides the layout, and the
+ * same document serves the editor panel. That is what keeps the two hosts from
+ * drifting into two different products, which was the original and correct worry
+ * behind rendering both from one authoritative state.
  *
  * The view id is unchanged (`migrapilot.sidebar`) so every existing
- * registration, focus command and test target keeps working. It still dispatches
- * only existing commands — the shell enforces the allow-list — and never mutates
- * backend state on its own.
+ * registration, focus command and test target keeps working. The editor panel
+ * remains available for anyone who wants a wider surface; it is no longer
+ * REQUIRED to reach the composer.
  */
 export class MigraPilotSidebarProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = 'migrapilot.sidebar';
@@ -25,7 +37,7 @@ export class MigraPilotSidebarProvider implements vscode.WebviewViewProvider {
   resolveWebviewView(webviewView: vscode.WebviewView): void {
     this.view = webviewView;
     this.attachment?.dispose();
-    this.attachment = this.shell.attachNavigation(webviewView.webview);
+    this.attachment = this.shell.attach(webviewView.webview, { compact: true });
     webviewView.onDidDispose(() => {
       this.attachment?.dispose();
       this.attachment = undefined;
