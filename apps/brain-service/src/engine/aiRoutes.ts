@@ -64,7 +64,7 @@ import type { IndexService } from './rag/indexService.js';
 import { auditStore } from './auditLog.js';
 import { gateVisionTurn, visionCapabilitySnapshot, type VisionGateDeps } from './media/visionGate.js';
 import { classifyProviderFailure } from './providerFailure.js';
-import { probeGpuCapacity, shouldRefuse, type CapacityReading } from './capacity/gpuCapacity.js';
+import { probeGpuCapacity, shouldRefuse, isModelResident, type CapacityReading } from './capacity/gpuCapacity.js';
 
 interface AiChatMessage {
   role: 'system' | 'user' | 'assistant';
@@ -1169,6 +1169,39 @@ async function streamChat(
       return;
     }
     if (reading) trace?.set('capacity', reading.state);
+
+    /*
+     * SAY THAT THE MODEL IS LOADING, BECAUSE THAT IS WHAT THE WAIT IS.
+     *
+     * A cold model costs seconds before a single token exists, and the text path
+     * emitted nothing across that gap — meta, then silence, then the answer. The
+     * image path already solved this and its comment says why: an observed stage
+     * is "the difference between 'still loading the image model' and a spinner
+     * that is indistinguishable from a hang". Text had the same gap and none of
+     * the same honesty.
+     *
+     * OBSERVED, NOT GUESSED. `/api/ps` is authoritative for what is resident, and
+     * this fires only when the probe SUCCEEDED and the chosen model is absent
+     * from it. If the probe failed, residentModels is undefined and nothing is
+     * claimed — silence is the correct output when the evidence is missing, and
+     * a confident "Loading…" over a model that was already warm would be exactly
+     * the fabricated progress this codebase refuses elsewhere.
+     *
+     * Matched on the tag-stripped name because a provider id and an Ollama tag
+     * are not guaranteed to be spelled identically; a mismatch here would invent
+     * a load that is not happening.
+     */
+    const resident = reading?.signals?.residentModels;
+    const chosenId = ranked[0]?.id;
+    if (resident && chosenId) {
+      if (!isModelResident(resident, chosenId)) {
+        send('stage', {
+          stage: 'loading_model',
+          detail: 'Loading the language model — the first answer after a pause takes longer to start.',
+        });
+        trace?.set('cold_model', chosenId);
+      }
+    }
   }
 
   const attempts = ranked.slice(0, MAX_FAILOVER);

@@ -73,6 +73,27 @@ export const BUSY_MESSAGE =
   'The AI vision engine is busy with another task on the graphics card, so your request has not '
   + 'started yet. Nothing was lost — send it again in a moment and it will run.';
 
+/**
+ * Is `modelId` among the models the inference server reports RESIDENT?
+ *
+ * Lives here because `/api/ps` is the evidence and this is the only honest way to
+ * read it. Returns false when `resident` is undefined — an unmeasured probe is
+ * not a warm model, and callers use this to decide whether to TELL the user a
+ * load is happening. Claiming a load that is not occurring would be worse than
+ * saying nothing, so the unmeasured case must not look like the absent case to
+ * the caller; that is why callers check `resident` before asking.
+ *
+ * Compared on the tag-stripped name as well as in full: a provider id and an
+ * Ollama tag are not guaranteed to be spelled identically ("qwen3:8b" vs
+ * "qwen3"), and a spelling mismatch would invent a cold start on a warm model.
+ */
+export function isModelResident(resident: readonly string[] | undefined, modelId: string): boolean {
+  if (!resident || !modelId) return false;
+  const bare = (n: string): string => n.split(':')[0]!.toLowerCase();
+  const want = modelId.toLowerCase();
+  return resident.some((m) => m.toLowerCase() === want || bare(m) === bare(modelId));
+}
+
 export const UNAVAILABLE_MESSAGE =
   'The AI engine is not reachable right now, so your request has not started. Nothing was lost.';
 

@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
-  probeGpuCapacity, shouldRefuse, BUSY_MESSAGE, UNAVAILABLE_MESSAGE,
+  probeGpuCapacity, shouldRefuse, isModelResident, BUSY_MESSAGE, UNAVAILABLE_MESSAGE,
 } from '../src/engine/capacity/gpuCapacity.js';
 
 const GB = 1024 * 1024 * 1024;
@@ -165,4 +165,39 @@ test('the optimistic figure still wins when IT is the lower one', async () => {
   });
   assert.equal(r.state, 'busy');
   assert.equal(r.signals.effectiveFreeBytes, 2e9);
+});
+
+
+test('residency is read from evidence, and absence of evidence is not absence of the model', () => {
+  /*
+   * This decides whether a waiting user is TOLD the model is loading. The text
+   * path used to say nothing across that gap — meta, then silence for seconds,
+   * then the answer — while the image path had shown observed stages all along.
+   *
+   * The failure mode worth guarding is not a missed message; it is a CONFIDENT
+   * WRONG one. "Loading the language model" over a model that was already warm
+   * invents progress, which is the thing this codebase refuses everywhere else.
+   */
+  assert.equal(isModelResident(['qwen3:8b', 'nomic-embed-text:latest'], 'qwen3:8b'), true);
+
+  // A provider id and an Ollama tag need not be spelled identically. Treating
+  // "qwen3" as absent while "qwen3:8b" is resident would announce a cold start
+  // on a warm model.
+  assert.equal(isModelResident(['qwen3:8b'], 'qwen3'), true);
+  assert.equal(isModelResident(['qwen3'], 'qwen3:8b'), true);
+  assert.equal(isModelResident(['QWEN3:8B'], 'qwen3:8b'), true, 'case is not a difference in identity');
+
+  // Genuinely absent — this is the only case that should produce the message.
+  assert.equal(isModelResident(['nomic-embed-text:latest'], 'qwen3:8b'), false);
+
+  /*
+   * UNMEASURED IS NOT ABSENT. When /api/ps could not be read the list is
+   * undefined, and the caller must stay silent rather than assert a load. The
+   * helper returns false so the caller cannot accidentally announce residency —
+   * and the caller guards on the list being present before asking at all, which
+   * is what keeps "false" from meaning "tell them it is loading".
+   */
+  assert.equal(isModelResident(undefined, 'qwen3:8b'), false);
+  assert.equal(isModelResident([], 'qwen3:8b'), false);
+  assert.equal(isModelResident(['qwen3:8b'], ''), false, 'no model asked for is not a resident model');
 });
