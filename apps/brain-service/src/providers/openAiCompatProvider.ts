@@ -189,7 +189,16 @@ export class OpenAiCompatProvider implements ProviderAdapter {
     const useVision = images.length > 0 && Boolean(this.visionModel);
     return {
       model: useVision ? (this.visionModel as string) : this.model,
-      messages: this.buildMessages(request, useVision ? images : []),
+      /*
+       * WITHHELD IMAGES ARE STILL FACTS ABOUT THE TURN.
+       *
+       * When no vision model is configured the pictures cannot be analysed — that
+       * is deliberate, because governance names the approved vision model and an
+       * env var must not. But dropping them SILENTLY made the model answer "you
+       * have not attached any image" to a person who had just attached one. The
+       * refusal was correct and its reporting was a falsehood.
+       */
+      messages: this.buildMessages(request, useVision ? images : [], useVision ? [] : images),
     };
   }
 
@@ -401,6 +410,7 @@ export class OpenAiCompatProvider implements ProviderAdapter {
   private buildMessages(
     request: ChatTurnRequest,
     images: ReadonlyArray<{ name: string; mimeType: string; dataBase64: string }>,
+    withheld: ReadonlyArray<{ name: string; mimeType: string }> = [],
   ): ChatMessage[] {
     const hasWorkspaceContext =
       (request.context.retrievedChunks?.length ?? 0) > 0 || Boolean(request.context.selectionText);
@@ -628,6 +638,30 @@ export class OpenAiCompatProvider implements ProviderAdapter {
         content.push({ type: 'image_url', image_url: { url: `data:${img.mimeType};base64,${img.dataBase64}` } });
       }
       parts.push({ role: 'user', content });
+    } else if (withheld.length) {
+      /*
+       * THE FALLBACK THIS FILE ALREADY DOCUMENTED AND DID NOT HAVE.
+       *
+       * The option comment above says image attachments "are described textually
+       * instead of analyzed" when no vision model is set. Nothing described them:
+       * the images were filtered out and the prompt went on alone, so the model
+       * was never told a picture existed and said so — confidently, to someone
+       * looking at the thumbnail they had just attached.
+       *
+       * Naming them turns a false statement into a true one the caller can act
+       * on. It deliberately does NOT guess at content: the file name and type are
+       * everything actually known here, and inventing a description of an image
+       * nobody looked at would be the same defect wearing better manners.
+       */
+      const listed = withheld.map((a) => `${a.name} (${a.mimeType})`).join(', ');
+      parts.push({
+        role: 'user',
+        content:
+          `${userText}\n\n[The user attached ${withheld.length} image file(s): ${listed}. `
+          + 'You cannot see them — no vision-capable model is available for this turn. '
+          + 'Say so plainly and answer whatever part of the request does not require seeing them. '
+          + 'Do not state or imply that nothing was attached.]',
+      });
     } else {
       parts.push({ role: 'user', content: userText });
     }
