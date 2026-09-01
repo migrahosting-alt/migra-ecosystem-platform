@@ -874,7 +874,22 @@ details.raw pre { max-height: 240px; overflow: auto; }
 /* Narrow: chat is the primary content; navigation and context are drawers,
  * proposal actions stack, and the header compacts. */
 @media (max-width: 640px) {
-  #shell { grid-template-rows: auto auto auto minmax(0, 1fr) auto auto; }
+  /*
+   * FIVE ROWS FOR FIVE CHILDREN — header, tabs, body, composer, footer.
+   *
+   * This declared SIX. With one row more than there are children the 1fr landed
+   * on the COMPOSER instead of the body, so the conversation area collapsed to
+   * its content and the composer's own row absorbed everything beneath it. In
+   * the sidebar — which is under 640px and therefore always takes this branch —
+   * that put the typing box a third of the way down with dead space below, while
+   * the wide layout stayed correct and hid the bug from the panel most testing
+   * used.
+   *
+   * The row count must equal the child count. shellWebview asserts it now, in
+   * both templates, because an off-by-one here is invisible until someone opens
+   * the narrow host and it looks like a styling preference rather than a defect.
+   */
+  #shell { grid-template-rows: auto auto minmax(0, 1fr) auto auto; }
   #nav-toggle { display: inline-flex; }
   .brand .subtitle { display: none; }
   #hdr { gap: 6px; padding: 6px 8px; }

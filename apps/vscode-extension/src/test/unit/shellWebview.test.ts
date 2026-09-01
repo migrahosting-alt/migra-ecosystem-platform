@@ -558,3 +558,50 @@ test('the navigation surface has no composer, no agent approval controls, and no
   // reveals conversations, never a second composer or execution path.
   assert.ok(document.includes('id="nav-conversations"'));
 });
+
+test('every #shell grid template has one row per child, in both layouts', () => {
+  /*
+   * THE COMPOSER SAT A THIRD OF THE WAY DOWN THE SIDEBAR because the narrow
+   * template declared SIX rows for FIVE children. Grid assigns rows in order, so
+   * the extra row shifted `minmax(0, 1fr)` off the conversation area and onto the
+   * composer: the body collapsed to its content and the composer's row absorbed
+   * the rest. The wide layout was correct throughout, which is why it survived —
+   * the bug only appears under 640px, and the sidebar is always under 640px.
+   *
+   * Counting rows against children is the assertion that would have caught it.
+   * "Does it look right" would not: the panel most testing uses looked right.
+   */
+  const document = shellHtml({
+    nonce: NONCE, csp: CSP, initialTab: 'chat', script: '', compact: false,
+  });
+
+  // The five direct children of #shell, in DOM order. The last is the status
+  // row, not a <footer> — I assumed the tag and the guard caught it, which is
+  // the same class of mistake it exists to catch in the stylesheet.
+  const shellChildren = ['id="hdr"', 'id="tabs"', 'id="body"', 'id="composer"', 'id="statusrow"'];
+  const present = shellChildren.filter((id) => document.includes(id));
+
+  const templates = [...document.matchAll(/#shell\s*\{[^}]*grid-template-rows:\s*([^;]+);/g)]
+    .map((m) => m[1]!.trim());
+  assert.ok(templates.length >= 2, `expected a wide and a narrow template, found ${templates.length}`);
+
+  for (const template of templates) {
+    // `minmax(0, 1fr)` is ONE track that contains a comma — count tracks, not commas.
+    const tracks = template.replace(/minmax\([^)]*\)/g, 'minmax').split(/\s+/).filter(Boolean);
+    assert.equal(
+      tracks.length,
+      present.length,
+      `"${template}" declares ${tracks.length} rows for ${present.length} children`,
+    );
+    assert.equal(
+      tracks.filter((t) => t === 'minmax').length,
+      1,
+      `"${template}" must give exactly one row the flexible track`,
+    );
+    assert.equal(
+      tracks.indexOf('minmax'),
+      present.indexOf('id="body"'),
+      `"${template}" must put the flexible row on the conversation area, not the composer`,
+    );
+  }
+});
