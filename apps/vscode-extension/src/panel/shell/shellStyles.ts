@@ -316,45 +316,73 @@ button:disabled { cursor: default; opacity: .45; }
 .abtn.k-danger:hover:not(:disabled) { background: var(--mp-error-soft); }
 
 /* ── Welcome (§5) ───────────────────────────────────────────────────────── */
-#welcome { padding: 10px 0 4px; }
-.welcome-head { text-align: center; margin-bottom: 16px; }
-.welcome-head .wlogo { display: flex; align-items: center; justify-content: center; gap: 9px; margin-bottom: 6px; }
-.welcome-head .wlogo img { width: 26px; height: 26px; }
-.welcome-head h2 { font-size: 20px; font-weight: 800; letter-spacing: -.01em; }
-.welcome-head p { font-size: 12.5px; color: var(--mp-fg-dim); }
+/*
+ * THE EMPTY STATE IS A PROMPT, NOT A MENU.
+ *
+ * These six actions used to render as a grid of minmax(196px, 1fr) tiles, which
+ * in a panel this narrow stacks into six full-width slabs that fill the viewport
+ * and push the composer to the bottom edge. The verdict from using it was exact:
+ * "appears more a developer console, not like claude, copilot, or codex" — and
+ * that is what a wall of tiles IS. It asks the user to choose a mode before they
+ * are allowed to start.
+ *
+ * Every comparable tool opens into one conversation and lets you type. The
+ * capabilities are found by ASKING, not by picking from a launcher. So the
+ * actions stay — none is removed, every one still resolves to the same command
+ * or chat turn — but they become quiet suggestion chips beside the composer
+ * instead of the first thing the product says.
+ *
+ * The subtitles go with the tiles. "Understand this file or repository" explains
+ * a menu item; a chip that says "Explain code" needs no gloss, and six glosses
+ * are six sentences to read before typing one.
+ */
+#welcome { padding: 4px 0 2px; }
+.welcome-head { text-align: center; margin-bottom: 10px; }
+.welcome-head .wlogo { display: flex; align-items: center; justify-content: center; gap: 8px; margin-bottom: 4px; }
+.welcome-head .wlogo img { width: 20px; height: 20px; }
+.welcome-head h2 { font-size: 15px; font-weight: 700; letter-spacing: -.01em; }
+.welcome-head p { font-size: 11.5px; color: var(--mp-fg-dim); }
 .wcards {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(196px, 1fr));
-  gap: 9px;
-  max-width: 780px;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px;
+  max-width: 620px;
   margin: 0 auto;
 }
 .wcard {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: 10px;
+  gap: 6px;
   text-align: left;
-  padding: 11px 12px;
-  border-radius: var(--mp-radius-lg);
+  padding: 5px 10px;
+  border-radius: 999px;
   border: 1px solid var(--mp-border);
   background: var(--mp-panel);
-  transition: border-color .12s, background .12s, transform .12s;
+  font-size: 12px;
+  transition: border-color .12s, background .12s;
 }
-.wcard:hover { border-color: var(--mp-accent); background: var(--mp-elevated); transform: translateY(-1px); }
+/* The gloss belonged to a menu row. A chip is its own label. */
+.wcard .wsub { display: none; }
+.wcard:hover { border-color: var(--mp-accent); background: var(--mp-elevated); }
+/*
+ * The icon rode a 30px tinted block because it anchored a tile. On a chip that
+ * block IS the chip, so the tint goes and only the glyph stays — the accent still
+ * distinguishes governed actions through the border and text, which is where a
+ * chip carries meaning.
+ */
 .wcard .wicon {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 30px;
-  height: 30px;
-  border-radius: var(--mp-radius);
-  background: var(--mp-accent-soft);
+  width: 14px;
+  height: 14px;
   color: var(--mp-accent);
   flex: 0 0 auto;
 }
-.wcard.a-governed .wicon { background: var(--mp-governed-soft); color: var(--mp-governed); }
+.wcard.a-governed .wicon { color: var(--mp-governed); }
 .wcard.a-governed:hover { border-color: var(--mp-governed); }
-.wcard.a-neutral .wicon { background: var(--vscode-list-hoverBackground); color: var(--mp-fg-dim); }
+.wcard.a-neutral .wicon { color: var(--mp-fg-dim); }
 .wcard .wtext { min-width: 0; display: flex; flex-direction: column; }
 /* block, not inline: the subtitle must sit UNDER the title on every card,
  * regardless of how short the title happens to be. */

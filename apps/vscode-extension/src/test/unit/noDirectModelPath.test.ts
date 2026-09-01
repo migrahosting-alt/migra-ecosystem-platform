@@ -76,7 +76,30 @@ test('no production extension file can reach a model directly', async () => {
 
   const violations: string[] = [];
   for (const file of files) {
-    const text = await readFile(file, 'utf8');
+    /*
+     * A FILE THAT VANISHES BETWEEN ENUMERATION AND READ IS NOT A VIOLATION.
+     *
+     * `node --test` runs test FILES concurrently, and a sibling suite writes and
+     * then deletes `src/interaction/__probe.control.ts` as its own positive
+     * control. This scan lists the directory first and reads afterwards, so that
+     * probe can disappear inside the gap and the whole suite dies on ENOENT —
+     * intermittently, which is the worst way for a gate to fail: it reports a
+     * direct-model-path regression that does not exist, and it does so on maybe
+     * one run in three.
+     *
+     * Caught because an unrelated CSS change shifted the timing enough to widen
+     * the window; three consecutive runs then gave fail, pass, pass. Skipping the
+     * missing file is correct on the merits and not merely convenient — this test
+     * asserts what the source CONTAINS, and a path with no file behind it
+     * contains nothing to forbid.
+     */
+    let text: string;
+    try {
+      text = await readFile(file, 'utf8');
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') continue;
+      throw error;
+    }
     for (const { pattern, why } of FORBIDDEN) {
       if (pattern.test(text)) {
         violations.push(`${path.relative(SRC, file)} — ${why}`);
