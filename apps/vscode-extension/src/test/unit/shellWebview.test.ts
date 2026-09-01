@@ -344,12 +344,30 @@ test('reduced motion and forced colors are honoured', () => {
 
 // ── Navigation surface ───────────────────────────────────────────────────────
 
-test('THE PRODUCT SIDEBAR IS FOUR THINGS: start, resume, where, and four outcomes', () => {
+test('THE PRODUCT SIDEBAR IS THREE THINGS: start, resume, and where', () => {
+  /*
+   * THIS REVERSES THIS TEST'S OWN EARLIER SHAPE, which required a fourth thing —
+   * a Quick Actions section repeating Explain / Fix / Review / Run. The owner's
+   * verdict on using the built extension was that it "appears more a developer
+   * console, not like claude, copilot, or codex", and offering the same four
+   * choices in two places is precisely that: a console surfaces every capability
+   * everywhere, an assistant keeps ONE place to type and one list of what you
+   * have said.
+   *
+   * The four outcomes are not lost and the test below proves it — they remain
+   * registered commands and remain beside the composer, which is where the work
+   * happens. What changed is that the sidebar stopped being a second launcher.
+   */
   const document = navigationHtml({ nonce: NONCE, csp: CSP, logoUri: 'https://file%2B.vscode-resource/logo.svg' });
-  for (const section of ['Recent', 'Workspace', 'Quick Actions']) {
+  for (const section of ['Recent', 'Workspace']) {
     assert.ok(document.includes(`<span>${section}</span>`), `${section} must be a sidebar section`);
   }
-  for (const id of ['nav-conversations', 'nav-workspace', 'nav-quick-actions', 'nav-approvals', 'nav-identity', 'brain-badge']) {
+  assert.ok(
+    !document.includes('<span>Quick Actions</span>'),
+    'the sidebar must not repeat the actions the composer already offers',
+  );
+  assert.ok(!document.includes('id="nav-quick-actions"'), 'the quick-action container must be gone, not merely hidden');
+  for (const id of ['nav-conversations', 'nav-workspace', 'nav-approvals', 'nav-identity', 'brain-badge']) {
     assert.ok(document.includes(`id="${id}"`), `#${id} must exist on the sidebar`);
   }
   assert.equal(document.split('<script').length - 1, 1);
@@ -397,8 +415,15 @@ test('developer mode restores every engineering section, unchanged', () => {
   ]) {
     assert.ok(developer.includes(kept), `developer mode must keep "${kept}"`);
   }
-  // …and it still shows the product sections. Developer mode ADDS; it never swaps.
-  for (const product of ['id="nav-quick-actions"', 'id="nav-conversations"', 'id="nav-workspace"']) {
+  /*
+   * …and it still shows the product sections. Developer mode ADDS; it never swaps.
+   *
+   * nav-quick-actions left this list because it exists in NEITHER mode now, not
+   * because developer mode stopped showing it. The invariant is unchanged and is
+   * the reason this list is checked at all: an engineering flag must never be the
+   * thing that decides whether a product surface appears.
+   */
+  for (const product of ['id="nav-conversations"', 'id="nav-workspace"']) {
     assert.ok(developer.includes(product), `developer mode must keep "${product}"`);
   }
 });
@@ -448,10 +473,20 @@ test('the primary action STARTS A TASK, which is what a person came to do', () =
   assert.match(document, /<button class="newchat" data-nav-action="newTask">/);
 });
 
-test('QUICK ACTIONS ARE FOUR OUTCOMES, each reaching a real product surface', () => {
+test('THE FOUR OUTCOMES SURVIVE THE SIDEBAR THEY LEFT', () => {
+  /*
+   * Removing a surface is only safe if the capability behind it still exists, so
+   * this asserts the harder half of that change: the four outcomes remain real,
+   * product-classified, and reachable — and are NOT rendered in the sidebar.
+   *
+   * Without the second half this would have been a deletion dressed as a
+   * simplification. Without the first, a tidy sidebar could have quietly stranded
+   * four commands.
+   */
   assert.deepEqual(
     navActionsFor('quick', false).map((action) => action.label),
     ['Explain Code', 'Fix Code', 'Review Changes', 'Run Tests'],
+    'the outcomes themselves are unchanged — only where they are offered moved',
   );
   for (const action of navActionsFor('quick', false)) {
     assert.equal(isProductSurface('nav-action', action.id), true, `${action.id} must be product`);
@@ -464,7 +499,10 @@ test('QUICK ACTIONS ARE FOUR OUTCOMES, each reaching a real product surface', ()
   }
   const document = navigationHtml({ nonce: NONCE, csp: CSP });
   for (const action of navActionsFor('quick', false)) {
-    assert.ok(document.includes(`data-nav-action="${action.id}"`), `${action.label} is not rendered`);
+    assert.ok(
+      !document.includes(`data-nav-action="${action.id}"`),
+      `${action.label} must no longer be a sidebar row — the composer offers it`,
+    );
   }
 });
 

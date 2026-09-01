@@ -143,9 +143,23 @@ body { padding: 8px 10px 12px; background: var(--mp-rail); }
 
   <div id="nav-approvals" role="status" aria-live="polite"></div>
 
+  <!--
+    THE SIDEBAR IS A CONVERSATION LIST, NOT A SECOND LAUNCHER.
+
+    Quick Actions lived here and repeated Explain / Fix / Review / Run, which the
+    main panel already offered beside the composer. The same four choices in two
+    places is what made the product read as a console rather than an assistant:
+    a console surfaces every capability everywhere, an assistant keeps one place
+    to type and one list of what you have said.
+
+    Nothing is stranded. All four are registered commands reachable from the
+    palette, and all four remain as chips next to the composer where the work
+    actually happens. Recent stays because a list of your own conversations is
+    the sidebar's job; Workspace stays because it is CONTEXT — which repository
+    and branch you are addressing — rather than a menu of things to do.
+  -->
   <section class="navsec"><h3><span>Recent</span></h3><div id="nav-conversations"></div></section>
   <section class="navsec"><h3><span>Workspace</span></h3><div id="nav-workspace"></div></section>
-  <section class="navsec"><h3><span>Quick Actions</span></h3><div id="nav-quick-actions">${actionRows('quick', developerMode)}</div></section>
 
   ${only('nav-agent-actions', `<section class="navsec">
     <h3><span>Agent Mode</span><span id="nav-agent-status" class="badge b-muted">OFF</span></h3>
