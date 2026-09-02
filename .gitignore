@@ -73,6 +73,12 @@
 # allowlist to *.json, so no other generated JSON slips into the repository with it.
 !/docs/migrapilot/MIGRAPILOT_STATUS.json
 
+# Evidence packages: the recorded proof behind a PROVEN_LIVE / qualification
+# claim. Tracked deliberately — an evidence file that lives only on one machine
+# is not evidence, and the status documents point at these.
+!/docs/migrapilot/evidence/
+!/docs/migrapilot/evidence/*.json
+
 # Allow ONLY nginx infra tree
 !infra/
 !infra/nginx/

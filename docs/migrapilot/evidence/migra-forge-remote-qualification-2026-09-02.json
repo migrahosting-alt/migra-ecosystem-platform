@@ -1,0 +1,67 @@
+{
+  "requestedFamily": "migra-forge",
+  "resolvedBackend": "qwen3-coder:30b",
+  "governed": true,
+  "basis": "grant:typed-implementation",
+  "executedModel": "qwen3-coder:30b",
+  "executedProvider": "local",
+  "effectivePolicy": "local-only",
+  "delegatedTools": [
+    {
+      "tool": "git.status",
+      "ok": true
+    },
+    {
+      "tool": "workspace.list",
+      "ok": true
+    },
+    {
+      "tool": "fs.proposeChangeset",
+      "ok": true
+    }
+  ],
+  "agentSteps": [
+    "git.status",
+    "workspace.list",
+    "fs.proposeChangeset"
+  ],
+  "proposalSeen": true,
+  "outcome": "completed",
+  "errors": [],
+  "finalExcerpt": "I have proposed creating the file `src/forge.txt` with the content 'QUALIFIED'. This file will be created in the workspace as part of the changeset. The proposal has been recorded successfully and is ready for approval.\n\n---\n_Proposed edits above were NOT applied \u2014 the engineer runs preview-only. Ap",
+  "run": {
+    "purpose": "Migra Forge qualification under the real multi-tool workload",
+    "date": "2026-09-02",
+    "whyRemote": "local GPU fully occupied by AI Studio (5.0GB free, 100% util) \u2014 remote compute justified, not preferred"
+  },
+  "executedRuntime": {
+    "gpu": "NVIDIA GeForce RTX 3090, 24576 MiB",
+    "driver": "550.163.01",
+    "ollama": "0.33.2",
+    "modelDigest": "06c1097efce0",
+    "quantization": "Q4_K_M",
+    "parameterSize": "30.5B",
+    "vramInUse": "21045 MiB of 24576 MiB",
+    "podId": "5in34084opfkxb",
+    "provider": "RunPod COMMUNITY, $0.22/hr, volumeInGb=0 (no persistent volume)",
+    "reachedVia": "private SSH tunnel chain VM111 -> workstation -> pod; Ollama bound to pod loopback, never publicly exposed"
+  },
+  "inputIntegrity": {
+    "modelDigestMatchesCanonical": true,
+    "note": "pod digest 06c1097efce0 == local canonical digest; nothing else was transferred, because workspace delegation keeps the source on the developer machine by design"
+  },
+  "negativeControls": [
+    "Migra Vision reported UNAVAILABLE (\"the approved model for vision.general is not installed\") rather than substituting the only model present \u2014 proven under a genuinely constrained one-model catalog",
+    "A chat turn naming qwen2.5-coder:14b (absent from the pod) returned \"No suitable model is available from any configured provider\" instead of silently using qwen3-coder:30b"
+  ],
+  "notProven": "The VS Code PANEL leg (selecting Migra Forge in the picker by hand) was not driven by this session. Everything above ran through the extension's real compiled client and executor, but not its UI.",
+  "teardown": {
+    "brainConfigReverted": "drop-in 99-remote-forge.conf and /opt/migrapilot/remote-forge.env both removed; catalog verified back to 16 workstation models; brain ok / governance ready / schema 24",
+    "tunnelsClosed": "both legs killed BY PID, never by pattern",
+    "podTerminated": "5in34084opfkxb \u2014 DELETE returned 204",
+    "billingSurface": "0 running pods, 0 network volumes \u2014 no recurring idle cost",
+    "orderingNote": "Production was restored BEFORE the pod was destroyed. The Brain was pointed at the pod at that moment, so terminating first would have taken MigraPilot down rather than merely ending the experiment.",
+    "approxCost": "about $0.09 (RTX 3090 community @ $0.22/hr)"
+  },
+  "systemdFinding": "A first attempt used Environment= in a systemd drop-in and silently did nothing: systemd gives EnvironmentFile= precedence over Environment= regardless of drop-in order, so /etc/migrapilot/brain.env always won. systemctl show reported the variable as set, which made it look applied. The decisive check was the model catalog: 16 -> 1. Use an EnvironmentFile listed last, never Environment=, to override a value that an env file sets."
+}
