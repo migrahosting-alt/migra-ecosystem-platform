@@ -154,6 +154,15 @@
       },
       "mandatoryProof": "apps/brain-service/test/familyFollowsGovernance.test.ts — change ONLY the decision and both surfaces follow with no client code, catalog edit or rebuild (day 1 backend A, day 2 backend B). Also asserts the two surfaces never resolve a shared family differently, that a revoked approval yields unavailable rather than a fallback, and that the catalog serialises with no model, provider, GPU, digest or readiness word in it.",
       "coreGovernanceNext": "The chat.general contract and resolution are SHIPPED. Qualifying a model against it needs measured evidence plus a SIGNED operator approval (the qualification signing key), which this session does not hold — the same boundary as the vision approval."
+    },
+    "outcomeOrchestration": {
+      "principle": "Surface is not capability. Authority is capability.",
+      "shipped": "Typed outcome plans (packages/shared-types/src/outcomePlan.ts), a project authority model (projectAuthority.ts) and the dispatcher that consumes them (apps/brain-service/src/engine/orchestration/outcomeDispatcher.ts).",
+      "parentObjectivePreserved": "A child result is intermediate context unless its step is marked terminal. This is the defect that answered a build request with a description of a screenshot.",
+      "provenancePerChild": "parent turn id, capability requested, selected family, executed backend, tool authority, outcome, failure.",
+      "provenTest": "The SAME plan runs to completion under a VS Code workspace and under a connected repo with an identical step sequence; with no authority it stops exactly at workspace.inspect; read-only stops exactly at changeset.propose after inspection succeeded.",
+      "consumerToday": "Declares NO_AUTHORITY, so a build is refused with the missing prerequisite AND the blocking step named. Verified live. It becomes capable when a repo authority is connected — no code change in the routing.",
+      "notYetBuilt": "The dispatcher is not yet wired into the Brain chat/engineer routes — the extension still uses its own chatEngine path. Server-side project authority (connected-repo / platform-project) is defined but has no implementation behind it."
     }
   },
   "capabilities": {
