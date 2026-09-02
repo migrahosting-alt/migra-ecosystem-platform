@@ -396,6 +396,14 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   const prompt = (body as { prompt?: unknown })?.prompt
+  /*
+   * The Migra family the browser selected, if any. Validated only as a string
+   * here — the Brain owns which families exist and whether one is currently
+   * serviceable, and duplicating that judgement in this route is how two
+   * surfaces start disagreeing.
+   */
+  const rawFamily = (body as { modelFamily?: unknown })?.modelFamily
+  const modelFamily = typeof rawFamily === 'string' && rawFamily.trim() ? rawFamily.trim() : undefined
   if (typeof prompt !== 'string' || !prompt.trim()) {
     return json(400, 'invalid_prompt', 'A non-empty prompt is required.')
   }
@@ -925,6 +933,9 @@ export async function POST(request: Request): Promise<Response> {
            */
           conversationId,
           ...(conversationSummary ? { conversationSummary } : {}),
+          // The user's family choice reaches the Brain's resolver, or is absent
+          // and the Brain routes automatically.
+          ...(modelFamily ? { modelFamily } : {}),
           groundingMode,
           // The BOUNDARY for retrieval, not a hint. Sent only when grounded, so an
           // ungrounded turn cannot accidentally scope itself to a stale list.

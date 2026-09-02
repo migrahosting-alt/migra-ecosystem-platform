@@ -63,11 +63,13 @@ import { renderTextGlyph } from './media/glyphRender.js';
 import type { IndexService } from './rag/indexService.js';
 import { auditStore } from './auditLog.js';
 import { gateVisionTurn, visionCapabilitySnapshot, type VisionGateDeps } from './media/visionGate.js';
-import { resolveFamiliesForSurface } from './modelFamilyResolver.js';
+import { resolveFamiliesForSurface, resolveFamily } from './modelFamilyResolver.js';
 import { MEASURED_GRANTS } from './capability/capabilityGrants.js';
 import {
   familiesForSurface,
   MIGRA_MODEL_CATALOG_REVISION,
+  type MigraProductSurface,
+  type MigraModelFamilyId,
 } from '@migrapilot/shared-types/model-families';
 import { classifyProviderFailure } from './providerFailure.js';
 import { probeGpuCapacity, shouldRefuse, isModelResident, type CapacityReading } from './capacity/gpuCapacity.js';
@@ -83,6 +85,15 @@ interface AiChatBody {
   attachments?: ChatAttachment[];
   tier?: string;
   model?: string;
+  /**
+   * The Migra family the USER chose, e.g. `migra-forge`.
+   *
+   * A product identity, not a model. It is resolved here through the canonical
+   * resolver so the mapping stays governed and replaceable — a surface that sent
+   * a backend id instead would pin the product to one model and bypass every
+   * approval decision behind it.
+   */
+  modelFamily?: string;
   feature?: string;
   profile?: string;
   needsTools?: boolean;
@@ -285,10 +296,36 @@ export function registerAiRoutes(
    * `selectedBackend` for provenance and diagnostics; they are deliberately NOT
    * what a surface shows as the choice.
    */
-  app.get('/api/ai/model-families', async (request) => {
-    const surface = ((request.query as { surface?: string })?.surface ?? 'vscode-extension') as
-      | 'migrapilot-consumer'
-      | 'vscode-extension';
+  app.get('/api/ai/model-families', async (request, reply) => {
+    /*
+     * VALIDATE THE SURFACE — an unknown one is a 400, not an empty list.
+     *
+     * It previously fell through to a cast and returned `families: []` while
+     * echoing the bogus name back as if it were real. A caller asking for
+     * "consumer" therefore rendered an EMPTY selector and looked like a product
+     * with no models, which is indistinguishable from everything being
+     * unavailable. A typo in a surface name must fail loudly at the boundary.
+     *
+     * `consumer` is accepted as a documented alias because it is the obvious
+     * short form and was already in use; it resolves to the canonical id rather
+     * than becoming a second surface with its own list.
+     */
+    const raw = String((request.query as { surface?: string })?.surface ?? 'vscode-extension').trim();
+    const ALIASES: Record<string, MigraProductSurface> = {
+      consumer: 'migrapilot-consumer',
+      'migrapilot-consumer': 'migrapilot-consumer',
+      extension: 'vscode-extension',
+      'vscode-extension': 'vscode-extension',
+    };
+    const surface = ALIASES[raw];
+    if (!surface) {
+      reply.code(400);
+      return {
+        ok: false,
+        code: 'UNKNOWN_SURFACE',
+        error: `Unknown surface "${raw}". Valid: ${[...new Set(Object.values(ALIASES))].join(', ')}.`,
+      };
+    }
     const models = await reg.list();
     const governed = visionDeps ? await visionCapabilitySnapshot(visionDeps) : null;
 
@@ -321,6 +358,10 @@ export function registerAiRoutes(
        * model is far cheaper than wrongly offering an unusable one.
        */
       executable: (m) => !/-cloud$/i.test(m.id),
+      // Exactly the rule the router applies: under enforcement, only an approved
+      // model may run. Without this the catalog names one backend and the turn
+      // executes another.
+      routerAccepts: (m) => !enforceQual || m.qualification?.state === 'approved',
     });
 
     return {
@@ -544,6 +585,54 @@ export function registerAiRoutes(
       mode: body.evaluation ? 'evaluation' : 'production',
     };
 
+    /*
+     * RESOLVE THE REQUESTED FAMILY, OR REFUSE.
+     *
+     * A family that cannot be served must fail the turn, not quietly fall
+     * through to whatever tier-matching finds. The user asked for a capability;
+     * answering from something else while keeping the label is the substitution
+     * this whole layer exists to forbid. Provenance keeps requested and executed
+     * separate, so a divergence stays visible rather than being reconciled away.
+     */
+    let requestedFamily: string | undefined;
+    if (body.modelFamily) {
+      requestedFamily = body.modelFamily;
+      // The SAME inputs the catalog endpoint uses, including the durable vision
+      // decision — otherwise a family could resolve one way when listed and
+      // another way when actually used, which is drift inside a single request.
+      const govSnapshot = visionDeps ? await visionCapabilitySnapshot(visionDeps) : null;
+      const resolved = resolveFamily(body.modelFamily as MigraModelFamilyId, {
+        models: await reg.list(),
+        governedDecision: (capability: string) => {
+          if (capability === 'vision.general' && govSnapshot) {
+            return { qualified: govSnapshot.general.qualified, modelId: govSnapshot.general.modelId };
+          }
+          if (capability === 'vision.object_counting' && govSnapshot) {
+            return {
+              qualified: govSnapshot.objectCounting.qualified,
+              modelId: govSnapshot.objectCounting.modelId,
+            };
+          }
+          return undefined;
+        },
+        approvedForTaskClass: (taskClass: string) =>
+          MEASURED_GRANTS.filter((g) => g.taskClass === taskClass).map((g) => g.model),
+        executable: (m: ModelDescriptor) => !/-cloud$/i.test(m.id),
+        routerAccepts: (m: ModelDescriptor) => !enforceQual || m.qualification?.state === 'approved',
+      });
+      if (!resolved.available || !resolved.selectedBackend) {
+        reply.code(409);
+        return {
+          ok: false,
+          code: 'FAMILY_UNAVAILABLE',
+          family: body.modelFamily,
+          error: resolved.unavailableReason ?? 'That model family has no qualified path right now.',
+        };
+      }
+      spec.model = resolved.selectedBackend;
+      spec.governedApproval = resolved.governed ? resolved.selectedBackend : undefined;
+    }
+
     let decision = await selectModel(reg, spec);
     if (!decision) {
       await auditStore.append({
@@ -757,6 +846,15 @@ export function registerAiRoutes(
       type: 'execution.routed',
       component: 'chat',
       fields: {
+        /*
+         * REQUESTED AND EXECUTED, KEPT APART.
+         *
+         * `requestedFamily` is what the user asked for; `model` is what actually
+         * ran. They are recorded as separate fields on purpose — collapsing them
+         * into one "model" line is how a divergence stops being visible, and a
+         * divergence is exactly the thing an audit needs to see.
+         */
+        ...(requestedFamily ? { requestedFamily } : {}),
         model: decision.model.id,
         provider: decision.model.provider,
         toolsRequested: spec.needsTools,

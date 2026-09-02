@@ -25,8 +25,8 @@ interface ChatContextValue {
   pendingIn: string | null
   /** True until the caller's durable conversations have been read once. */
   loading: boolean
-  startConversation: (prompt: string, options?: { attachments?: string[]; images?: string[] }) => string
-  sendMessage: (conversationId: string, prompt: string, options?: { attachments?: string[]; images?: string[] }) => void
+  startConversation: (prompt: string, options?: { attachments?: string[]; images?: string[]; modelFamily?: string }) => string
+  sendMessage: (conversationId: string, prompt: string, options?: { attachments?: string[]; images?: string[]; modelFamily?: string }) => void
   /** Remove an image from the thread's durable set. */
   detachConversationImage: (conversationId: string, ref: string) => Promise<void>
   detachConversationFile: (conversationId: string, name: string) => Promise<void>
@@ -353,7 +353,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
    * would make the server guess which semantics a name carried, and the two
    * already reconcile against different stores.
    */
-  const appendReply = useCallback(async (localId: string, prompt: string, attachments: string[] = [], images: string[] = []) => {
+  const appendReply = useCallback(async (localId: string, prompt: string, attachments: string[] = [], images: string[] = [], modelFamily?: string) => {
     let conversationId = localId
     setPendingIn(conversationId)
 
@@ -491,6 +491,13 @@ export function ChatProvider({ children }: { children: ReactNode }) {
           // against the authenticated caller's own library.
           ...(images.length > 0 ? { images } : {}),
           ...(isDurableId(conversationId) ? { conversationId } : {}),
+          /*
+           * The Migra FAMILY the user chose — a product identity, never a model
+           * id. The Brain resolves it through the canonical resolver, so the
+           * backend behind a family stays governed and replaceable and the
+           * browser never learns which model answered.
+           */
+          ...(modelFamily ? { modelFamily } : {}),
         }),
       })
 
@@ -698,7 +705,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   }, [router, applyServerQuota])
 
   const startConversation = useCallback(
-    (prompt: string, options?: { attachments?: string[]; images?: string[] }) => {
+    (prompt: string, options?: { attachments?: string[]; images?: string[]; modelFamily?: string }) => {
       counter.current += 1
       const id = `chat-${Date.now()}-${counter.current}`
       const conversation: Conversation = {
@@ -740,14 +747,17 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       }
 
       setConversations((current) => [conversation, ...current])
-      void appendReply(id, prompt, options?.attachments ?? [], options?.images ?? [])
+      // The FIRST turn carries the family too. It did not, and the selector
+      // looked like it worked: the answer came back normally, having routed
+      // automatically, because this call site dropped the field silently.
+      void appendReply(id, prompt, options?.attachments ?? [], options?.images ?? [], options?.modelFamily)
       return id
     },
     [appendReply],
   )
 
   const sendMessage = useCallback(
-    (conversationId: string, prompt: string, options?: { attachments?: string[]; images?: string[] }) => {
+    (conversationId: string, prompt: string, options?: { attachments?: string[]; images?: string[]; modelFamily?: string }) => {
       const message: Message = {
         id: `u-${Date.now()}`,
         role: 'user',
@@ -768,7 +778,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         ),
       )
 
-      void appendReply(conversationId, prompt, options?.attachments ?? [], options?.images ?? [])
+      void appendReply(conversationId, prompt, options?.attachments ?? [], options?.images ?? [], options?.modelFamily)
     },
     [appendReply],
   )

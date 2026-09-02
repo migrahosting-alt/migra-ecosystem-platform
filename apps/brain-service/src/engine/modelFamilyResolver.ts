@@ -50,6 +50,17 @@ export interface ResolveDeps {
    * a smaller error than an offered unusable one.
    */
   executable?: (model: ModelDescriptor) => boolean;
+  /**
+   * Is this model ACCEPTABLE to the router that will actually run the turn?
+   *
+   * The catalog must be exactly as strict as execution. It was not: the resolver
+   * matched on capability and tier alone and named a model the router then
+   * refused for lacking an approved qualification state, so the selector
+   * advertised one backend while every turn ran another. A catalog that predicts
+   * a different answer than the router gives is worse than no catalog, because
+   * it is confidently wrong.
+   */
+  routerAccepts?: (model: ModelDescriptor) => boolean;
 }
 
 /**
@@ -130,6 +141,8 @@ export function resolveFamily(id: MigraModelFamilyId, deps: ResolveDeps): MigraF
       };
     }
     // The decision names a model; it must still be installed AND runnable.
+    // A governed decision names the model explicitly, so the router admits it by
+    // name — routerAccepts is deliberately NOT applied here.
     const present = deps.models.some(
       (m) => m.id === decision.modelId && (deps.executable?.(m) ?? true),
     );
@@ -155,6 +168,16 @@ export function resolveFamily(id: MigraModelFamilyId, deps: ResolveDeps): MigraF
   if (req.taskClasses?.length && deps.approvedForTaskClass) {
     for (const taskClass of req.taskClasses) {
       const approved = deps.approvedForTaskClass(taskClass);
+      /*
+       * routerAccepts is deliberately NOT applied to a granted model.
+       *
+       * A measured task-class grant is a governance decision of the same kind as
+       * a durable capability approval, and the caller passes it to the router as
+       * `governedApproval`, which admits it BY NAME. Applying the generic
+       * "must be manifest-approved" rule here vetoed a model the router would
+       * happily run — it made Migra Forge read as unavailable immediately after
+       * it had been proven executing a real multi-tool workload.
+       */
       const usable = deps.models.filter(
         (m) => approved.includes(m.id) && meetsRequirements(m, family) && (deps.executable?.(m) ?? true),
       );
@@ -173,7 +196,9 @@ export function resolveFamily(id: MigraModelFamilyId, deps: ResolveDeps): MigraF
 
   // 3 — capability + tier only. Honest, and honestly labelled UNGOVERNED, so a
   // surface can show that this family rests on no approval decision.
-  const candidates = deps.models.filter((m) => meetsRequirements(m, family) && (deps.executable?.(m) ?? true));
+  const candidates = deps.models.filter(
+    (m) => meetsRequirements(m, family) && (deps.executable?.(m) ?? true) && (deps.routerAccepts?.(m) ?? true),
+  );
   if (!candidates.length) {
     return {
       family: id,

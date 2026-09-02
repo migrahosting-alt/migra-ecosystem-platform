@@ -134,6 +134,17 @@ export function chatTurn(
 export function chatTurnStream(
   prompt: string,
   options: {
+    /**
+     * 🚨 THE THREAD THIS TURN BELONGS TO.
+     *
+     * Declared here as well as on the operation for the reason this file already
+     * gives twice below: excess properties are not checked through a spread, so
+     * a field declared at one end and not the other is silently dropped and
+     * everything still compiles. That is precisely how this one went missing —
+     * except it was never declared anywhere, and the Brain's whole durable
+     * memory path is gated on it. Chat had no cross-turn memory as a result.
+     */
+    conversationId?: string
     conversationSummary?: string
     groundingMode?: GroundingMode
     /**
@@ -155,6 +166,15 @@ export function chatTurnStream(
      * the tests pass while the value never reaches the wire.
      */
     imageAttachments?: readonly { name: string; mimeType: string; dataBase64: string; sizeBytes?: number }[]
+    /**
+     * The Migra family the user chose, e.g. `migra-forge`.
+     *
+     * Declared here AND on the operation, for the reason stated above: a field
+     * added at one end only is dropped by the spread without a type error, and
+     * the symptom is a selector that appears to work while every turn routes
+     * automatically.
+     */
+    modelFamily?: string
   } = {},
   deps?: GatewayDeps,
 ): Promise<BrainStream> {
@@ -162,6 +182,7 @@ export function chatTurnStream(
     {
       kind: 'chatTurn',
       prompt,
+      ...(options.conversationId ? { conversationId: options.conversationId } : {}),
       ...(options.conversationSummary ? { conversationSummary: options.conversationSummary } : {}),
       ...(options.groundingMode ? { groundingMode: options.groundingMode } : {}),
       ...(options.groundingFiles && options.groundingFiles.length > 0
@@ -170,6 +191,7 @@ export function chatTurnStream(
       ...(options.imageAttachments && options.imageAttachments.length > 0
         ? { imageAttachments: options.imageAttachments }
         : {}),
+      ...(options.modelFamily ? { modelFamily: options.modelFamily } : {}),
       stream: true,
     },
     deps,
@@ -400,7 +422,22 @@ export function preferenceEvents(
   return callBrain({ kind: 'preferenceEvents' }, deps)
 }
 
+// ── which Migra model families this surface may offer ──────────────────────
+
+/**
+ * The Migra model families this surface may offer, with LIVE availability.
+ *
+ * Server-only, like every other Brain call here. The browser never learns the
+ * Brain's address, and — just as importantly — never receives a backend model id
+ * as a choice: the family is the product identity, and the mapping behind it is
+ * internal and replaceable.
+ */
+export async function getModelFamilies(deps: GatewayDeps = {}): Promise<BrainResult<unknown>> {
+  return callBrain({ kind: 'modelFamilies' }, deps)
+}
+
 // ── speaking an answer ──────────────────────────────────────────────────────
+
 
 /** Voices the product may offer. Never engine names — the Brain strips those. */
 export function synthesisCapability(deps?: GatewayDeps) {

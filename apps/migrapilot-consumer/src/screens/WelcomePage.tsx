@@ -8,6 +8,7 @@ import { LogoMark } from '@/components/brand/Logo'
 import { Composer, ComposerDisclaimer } from '@/components/chat/Composer'
 import { IconTile } from '@/components/ui/Badge'
 import { useChat } from '@/state/ChatProvider'
+import { ModelFamilySelector } from '@/features/models/ModelFamilySelector'
 import { AnonymousQuotaNotice } from '@/features/anonymous/AnonymousQuotaNotice'
 import { isExhausted, useAnonymousQuota } from '@/features/anonymous/AnonymousQuotaProvider'
 
@@ -73,6 +74,9 @@ export function WelcomePage() {
     }
   }, [fromFiles])
 
+  /** The Migra family chosen for the first turn, or undefined for automatic. */
+  const [modelFamily, setModelFamily] = useState<string | undefined>(undefined)
+
   const start = (prompt: string, meta?: { attachments?: string[]; images?: string[] }) => {
     // The server refuses this too; stopping here keeps a visitor with no turns
     // left from watching an optimistic conversation appear and then fail.
@@ -85,6 +89,9 @@ export function WelcomePage() {
     const options = {
       ...(attachments.length > 0 ? { attachments } : {}),
       ...(images.length > 0 ? { images } : {}),
+      // The family chosen BEFORE the first message travels into the new
+      // conversation, or the choice would silently apply only from turn two.
+      ...(modelFamily ? { modelFamily } : {}),
     }
     router.push(`/chat/${startConversation(prompt, Object.keys(options).length > 0 ? options : undefined)}`)
   }
@@ -128,6 +135,8 @@ export function WelcomePage() {
 
       <div className="mt-auto">
         <AnonymousQuotaNotice className="mb-3.5" />
+        {/* Choosing a model before the first question, where the choice matters. */}
+        <ModelFamilySelector className="mb-2" onChange={setModelFamily} />
         <Composer
           onSubmit={start}
           autoFocus

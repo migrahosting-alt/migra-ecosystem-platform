@@ -190,3 +190,43 @@ test('PARTIAL and PROVEN_LIVE families still resolve — the gate is not a blank
   const forge = resolveFamily('migra-forge', { models: [coder], approvedForTaskClass: () => ['qwen3-coder:30b'] });
   assert.equal(forge.available, true);
 });
+
+test('the catalog is exactly as strict as the router — it cannot name a model the router refuses', () => {
+  // The observed defect: the catalog advertised llama3.1:8b for Core while every
+  // turn executed qwen3:8b, because the router admits only approved models under
+  // enforcement and the resolver did not apply that rule.
+  const unapproved = model('unapproved:8b', 'balanced', { chat: true, tools: true });
+  const approved = model('approved:8b', 'balanced', { chat: true, tools: true });
+  const r = resolveFamily('migra-core', {
+    models: [unapproved, approved],
+    routerAccepts: (m) => m.id === 'approved:8b',
+  });
+  assert.equal(r.selectedBackend, 'approved:8b', 'the catalog must not name a model the router will refuse');
+})
+
+test('a governed decision is admitted BY NAME, so router strictness does not veto it', () => {
+  // The router admits the gate-named model explicitly; the catalog must agree,
+  // or an approved-by-a-human model would read as unavailable.
+  const visionModel = model('qwen2.5vl:7b', 'balanced', { chat: true, vision: true }, 128000);
+  const r = resolveFamily('migra-vision', {
+    models: [visionModel],
+    governedDecision: () => ({ qualified: true, modelId: 'qwen2.5vl:7b' }),
+    routerAccepts: () => false, // nothing passes the generic rule
+  });
+  assert.equal(r.available, true);
+  assert.equal(r.selectedBackend, 'qwen2.5vl:7b');
+})
+
+test('a GRANTED model is admitted by name too — strictness must not veto a governance decision', () => {
+  // Regression: applying the generic manifest rule to the grant path made Forge
+  // read unavailable right after it had been proven running a real workload.
+  const coder = model('qwen3-coder:30b', 'deep', { chat: true, coding: true, tools: true }, 262144);
+  const r = resolveFamily('migra-forge', {
+    models: [coder],
+    approvedForTaskClass: (tc) => (tc === 'typed-implementation' ? ['qwen3-coder:30b'] : []),
+    routerAccepts: () => false, // nothing passes the generic rule
+  });
+  assert.equal(r.available, true);
+  assert.equal(r.governed, true);
+  assert.equal(r.selectedBackend, 'qwen3-coder:30b');
+})

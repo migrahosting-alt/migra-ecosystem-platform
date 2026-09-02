@@ -59,6 +59,31 @@ export type BrainOperation =
   | {
       kind: 'chatTurn'
       prompt: string
+      /**
+       * 🚨 THE CONVERSATION THIS TURN BELONGS TO. Without it the Brain has no
+       * thread to attach anything to.
+       *
+       * This field did not exist, so it was never sent, so `body.conversationId`
+       * on the Brain was always undefined — and its entire durable-memory path
+       * is gated on that one value. The result: MigraPilot Chat had NO
+       * multi-turn memory at all. Proven in production on a brand-new chat with
+       * no attachments: "Remember this code: ZULU-4417" was acknowledged, and
+       * the very next turn, "What was the code I just gave you?", invented a
+       * Python add_numbers function.
+       *
+       * It also explains why every file ever attached stayed an active retrieval
+       * target: with no history, `groundingFiles` was the only cross-turn
+       * context that existed, so continuity had to be carried by documents.
+       */
+      conversationId?: string
+      /**
+       * The Migra FAMILY the user selected — never a backend model id.
+       *
+       * The Brain resolves it through the canonical resolver, so the model
+       * behind a family stays a governance decision rather than something a
+       * client pins.
+       */
+      modelFamily?: string
       conversationSummary?: string
       stream?: boolean
       /** Which evidence the Brain may ground on. See GROUNDING_MODES below. */
@@ -123,6 +148,15 @@ export type BrainOperation =
   | { kind: 'documentForget'; fileName: string }
   | { kind: 'approveIndex'; indexId: string }
   // ── governed coding (observation only) ───────────────────────────────────
+  /**
+   * The canonical Migra model families, resolved live by the Brain.
+   *
+   * The consumer does NOT keep its own family list. Both this surface and the VS
+   * Code extension read the same catalog through the same resolver, so a family
+   * cannot be described one way here and another way there — the drift this
+   * whole layer exists to prevent.
+   */
+  | { kind: 'modelFamilies' }
   | { kind: 'codingCapability' }
   | { kind: 'getCodingRun'; runId: string }
 
@@ -472,7 +506,14 @@ export function resolveOperation(op: BrainOperation): ResolvedRequest {
         path: '/api/ai/chat',
         body: {
           prompt: text(op.prompt, 'prompt'),
+          // The thread identity. Everything the Brain scopes to a conversation —
+          // history retrieval, message storage — hangs off this one field.
+          ...(op.conversationId ? { conversationId: op.conversationId } : {}),
           ...(op.conversationSummary ? { conversationSummary: op.conversationSummary } : {}),
+          // The chosen family reaches the Brain's canonical resolver. Omitted
+          // entirely when absent, so "no choice" means automatic routing rather
+          // than an empty string the Brain would have to interpret.
+          ...(op.modelFamily ? { modelFamily: op.modelFamily } : {}),
           // The Brain streams SSE when this is truthy and buffers otherwise.
           ...(op.stream ? { stream: true } : {}),
           // Always explicit. Omitting it defaults the Brain to `auto`, which is
@@ -494,7 +535,23 @@ export function resolveOperation(op: BrainOperation): ResolvedRequest {
            * Always explicit, never inherited: a default that decides whether a
            * user's history exists is not something to leave unstated.
            */
-          memoryPolicy: { mode: 'durable', retrieve: true, store: true },
+          /*
+           * 🚨 RETRIEVE, BUT DO NOT STORE. ONE WRITER, NOT TWO.
+           *
+           * `store: true` was harmless only while `conversationId` was never
+           * sent — the Brain had no thread to write to, so nothing happened.
+           * The moment the id started flowing, BOTH sides began appending to the
+           * same conversation: this route explicitly appends the prompt and the
+           * answer (and every refusal, and the image/file refs that go with
+           * them), and the Brain appended its own copy. Proven live immediately
+           * after the fix: six messages, twelve rows, every turn rendered twice.
+           *
+           * The consumer stays the sole writer because it is the one that knows
+           * the whole turn — refusals, regenerations, attachment refs — and the
+           * Brain's copy would be a partial duplicate of it. `retrieve` is what
+           * this turn actually needed.
+           */
+          memoryPolicy: { mode: 'durable', retrieve: true, store: false },
           /*
            * An ORDERED list of opaque refs, sent only when there is one. The
            * Brain resolves each through its own storage state — nothing here
@@ -580,6 +637,11 @@ export function resolveOperation(op: BrainOperation): ResolvedRequest {
         path: `/api/ai/indexes/${id(op.indexId, 'indexId')}`,
         body: { state: 'approved' },
       }
+
+    case 'modelFamilies':
+      // The surface is named explicitly: the Brain filters the catalog by it, and
+      // an unknown surface is a 400 rather than an empty list.
+      return { method: 'GET', path: '/api/ai/model-families?surface=migrapilot-consumer' }
 
     case 'codingCapability':
       return { method: 'GET', path: '/api/ai/coding/capability' }

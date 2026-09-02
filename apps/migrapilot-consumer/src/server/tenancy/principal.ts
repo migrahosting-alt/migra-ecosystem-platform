@@ -150,6 +150,15 @@ export type OperationAudience = 'both' | 'anonymous' | 'authenticated'
 
 const OPERATION_AUDIENCE: Readonly<Record<string, OperationAudience>> = {
   // Chat, and the conversation it lives in.
+  /*
+   * The product's capability list, not anybody's data.
+   *
+   * Anonymous callers can chat, so they must be able to see which Migra families
+   * exist and which are currently serviceable. Gating this behind sign-in would
+   * show a signed-out user an empty or broken selector for a product they are
+   * allowed to use.
+   */
+  modelFamilies: 'both',
   listConversations: 'both',
   createConversation: 'both',
   getConversation: 'both',

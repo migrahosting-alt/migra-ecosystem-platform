@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useLayoutEffect, useRef } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { Workspace } from '@/components/layout/AppShell'
 import { Composer, ComposerDisclaimer } from '@/components/chat/Composer'
@@ -9,6 +9,7 @@ import { RailCard } from '@/components/rail/RailPanels'
 import { useChat } from '@/state/ChatProvider'
 import { FeedbackProvider } from '@/state/FeedbackProvider'
 import { ConversationMenu } from '@/features/conversations/ConversationMenu'
+import { ModelFamilySelector } from '@/features/models/ModelFamilySelector'
 import { AnonymousQuotaNotice } from '@/features/anonymous/AnonymousQuotaNotice'
 import { isExhausted, useAnonymousQuota } from '@/features/anonymous/AnonymousQuotaProvider'
 
@@ -74,6 +75,13 @@ export function ChatPage() {
   const { byId, sendMessage, detachConversationImage,
     detachConversationFile, pendingIn, loading, openConversation, isMissingConversation } = useChat()
   const allowance = useAnonymousQuota()
+  /*
+   * The chosen Migra family, or undefined for automatic routing.
+   *
+   * Held here rather than in the composer: it is a property of the turn being
+   * sent, and the composer's job is the text.
+   */
+  const [modelFamily, setModelFamily] = useState<string | undefined>(undefined)
   const outOfTurns = isExhausted(allowance)
   const conversation = byId(id)
   const bottomRef = useRef<HTMLDivElement>(null)
@@ -183,10 +191,16 @@ export function ChatPage() {
             before typing, which is when the count actually changes a decision.
           */}
           <AnonymousQuotaNotice className="mb-3.5" />
+          {/*
+            The model choice sits directly above the composer, because it is read
+            in the same glance as the thing being typed. It shows Migra families
+            — product identities — and never the backend serving them.
+          */}
+          <ModelFamilySelector className="mb-2" onChange={setModelFamily} />
           <Composer
             onSubmit={(value, meta) => {
               if (outOfTurns) return
-              sendMessage(conversation.id, value, meta)
+              sendMessage(conversation.id, value, { ...meta, ...(modelFamily ? { modelFamily } : {}) })
             }}
             {...(conversation.imageRefs?.length ? { conversationImages: conversation.imageRefs } : {})}
             onDetachConversationImage={(ref) => void detachConversationImage(conversation.id, ref)}

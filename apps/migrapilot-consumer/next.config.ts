@@ -9,6 +9,14 @@ import type { NextConfig } from 'next'
  * of which this application deliberately defines none.
  */
 const nextConfig: NextConfig = {
+  /*
+   * Local browsers reach this dev server as a cross-origin host, and Next blocks
+   * /_next assets for such origins by default — the HTML loads, every chunk
+   * 403s, and the page silently never hydrates, so client components appear
+   * simply not to exist. Dev-only: `next build` ignores this entirely.
+   */
+  allowedDevOrigins: ['127.0.0.1', 'localhost'],
+
   reactStrictMode: true,
   poweredByHeader: false,
 
