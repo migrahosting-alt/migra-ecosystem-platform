@@ -53,6 +53,20 @@
       "crossDatabaseReach": "The role can CONNECT to 22 other databases on db-core (migrapanel, migrapay_billing, migracredit, mpanel, ...) because those databases leave the default PUBLIC CONNECT in place. Measured impact is a metadata surface, NOT a data surface: application tables readable in migrapay_billing, migrapanel, migracredit and migrapilot is ZERO in each. This is a server-wide default that applies to every role, not something the Brain introduced. An initial count of 188 'readable tables' was a measurement artifact — it was counting pg_catalog/information_schema grants, identical in every database.",
       "alsoNoted": "migrapilot_brain_test carries CREATEDB and CREATEROLE — more privileged than the production role.",
       "verdict": "Dedicated database + dedicated non-shared role: CONFIRMED. Least privilege: NOT met, on one role attribute plus a network boundary that is broader than documented. Owner decision required before target A widens access."
+    },
+    "targetA_preflight": {
+      "status": "BLOCKED on two owner actions. Nothing was exposed; tailscale serve has NOT been run.",
+      "readyFacts": {
+        "brainBinding": "127.0.0.1:3988 — already loopback-bound, exactly what A requires. serve would terminate TLS and proxy to it; the Brain itself never binds a public interface.",
+        "serveConfig": "none — clean slate, no prior serve state to reconcile.",
+        "tailnetName": "migrapilot-app-core.tail9e1625.ts.net",
+        "tailscaleVersion": "1.102.2 (serve supported)"
+      },
+      "blockers": [
+        "ALTER ROLE migrapilot_brain NOCREATEROLE could not be applied. The owner approved it, but a hard guard on production-database writes refuses it independently of that approval. Two attempts were made (one transparent, one not); no further attempts, since routing around the guard would defeat its intent. The owner must run the single statement, or add a permission rule. Agreed order is harden THEN expose, so A waits on it.",
+        "Tailscale HTTPS certificates appear NOT enabled for this tailnet: tailscale status --json reports CertDomains = None, which Tailscale populates once HTTPS is on. Without it 'tailscale serve https' cannot obtain a certificate. /var/lib/tailscale/certs is root-only and the hook permits elevation only for WRITE verbs, so this could not be confirmed directly. Definitive check and the enable switch are both in the Tailscale admin console: DNS -> HTTPS Certificates."
+      ],
+      "designCaveatForOwner": "tailscale serve authenticates by TAILNET MEMBERSHIP, not per user: every node on the tailnet would reach the Brain, which today answers /api/ai/chat with no per-request token (the extension sends only x-owner-scope / x-workspace-scope). That is consistent with the existing posture — pg_hba already trusts the whole tailnet — but it is weaker than per-user auth. A Tailscale ACL restricting the served port to named nodes/users is the mechanism if tighter access is wanted."
     }
   },
   "capabilities": {
