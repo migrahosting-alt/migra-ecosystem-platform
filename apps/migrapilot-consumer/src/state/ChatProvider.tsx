@@ -23,6 +23,8 @@ interface ChatContextValue {
   byId: (id: string) => Conversation | undefined
   /** Conversation id currently awaiting a reply, if any. */
   pendingIn: string | null
+  /** Transient runtime progress for the in-flight turn. Never message content. */
+  progressIn: { conversationId: string; detail: string } | null
   /** True until the caller's durable conversations have been read once. */
   loading: boolean
   startConversation: (prompt: string, options?: { attachments?: string[]; images?: string[]; modelFamily?: string }) => string
@@ -157,6 +159,20 @@ export function ChatProvider({ children }: { children: ReactNode }) {
    */
   const [conversations, setConversations] = useState<Conversation[]>([])
   const [pendingIn, setPendingIn] = useState<string | null>(null)
+  /*
+   * TRANSIENT RUNTIME PROGRESS — never message content.
+   *
+   * Cold starts, provider waits and routing waits are infrastructure state. They
+   * were being painted into the assistant's message body, so "Loading the
+   * language model" became the ANSWER to "can you help me build this page",
+   * persisted with a timestamp and a Listen button, while a second typing
+   * indicator span below it. Two progress surfaces, one of them permanent, and
+   * the real work never visibly started.
+   *
+   * It lives here instead: one ephemeral line, cleared the instant generation
+   * begins or the turn ends.
+   */
+  const [progressIn, setProgressIn] = useState<{ conversationId: string; detail: string } | null>(null)
   const [loading, setLoading] = useState(true)
   const counter = useRef(0)
   /** Conversations whose messages have already been fetched. */
@@ -408,6 +424,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         ),
       )
       setPendingIn(null)
+      setProgressIn(null)
     }
 
     const notice = (text: string): Message => ({
@@ -561,7 +578,9 @@ export function ChatProvider({ children }: { children: ReactNode }) {
            * that is indistinguishable from a hang.
            */
           const detail = (frame.data as { detail?: string })?.detail
-          if (typeof detail === 'string' && detail) paint(detail)
+          // Augments the progress indicator; it is NOT the assistant's answer and
+          // must never survive the turn.
+          if (typeof detail === 'string' && detail) setProgressIn({ conversationId, detail })
           continue
         }
         if (frame.event === 'image') {
@@ -577,8 +596,13 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         if (frame.event === 'token') {
           const text = (frame.data as { text?: string })?.text
           if (typeof text === 'string') {
-            // Marked before painting: this is the moment the wait ends.
-            if (!streamed) turn.firstToken()
+            // Marked before painting: this is the moment the wait ends — and the
+            // moment the progress line must disappear, because generation has
+            // demonstrably begun.
+            if (!streamed) {
+              turn.firstToken()
+              setProgressIn(null)
+            }
             streamed += text
             paint(streamed)
           }
@@ -647,6 +671,8 @@ export function ChatProvider({ children }: { children: ReactNode }) {
           ),
         )
         setPendingIn(null)
+        setProgressIn(null)
+      setProgressIn(null)
         return
       }
 
@@ -673,6 +699,8 @@ export function ChatProvider({ children }: { children: ReactNode }) {
           ),
         )
         setPendingIn(null)
+        setProgressIn(null)
+      setProgressIn(null)
         push(notice(failure ?? 'The answer was produced but could not be saved, so it will not be here after a reload.'))
         turn.finish('not_saved')
         return
@@ -942,6 +970,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         return aliased ? conversations.find((conversation) => conversation.id === aliased) : undefined
       },
       pendingIn,
+      progressIn,
       loading,
       isMissingConversation,
       startConversation,
@@ -954,6 +983,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     }),
     [
       conversations,
+      progressIn,
       pendingIn,
       loading,
       isMissingConversation,

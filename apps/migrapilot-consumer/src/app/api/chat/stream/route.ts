@@ -44,6 +44,7 @@ import {
   setConversationGrounding,
   setConversationImages,
 } from '@/server/brain/seams'
+import { planTurn, unmetPrerequisites } from '@migrapilot/shared-types/turn-intent'
 import { listFiles, userDirectory } from '@/server/files/storage'
 import { reconcileGrounding } from '@/server/files/grounding'
 import { readProcessing, sequenceNoteFor } from '@/server/files/documentProcessing'
@@ -917,6 +918,49 @@ export async function POST(request: Request): Promise<Response> {
         : tableEvidence
           ? `${tableEvidence.text}\n${prompt}`
           : prompt
+
+      /*
+       * WHAT IS THIS TURN ACTUALLY FOR?
+       *
+       * Routed from a typed plan rather than from the words. A mockup plus "can
+       * you help me build this page" is an IMPLEMENTATION intent: the image is
+       * the means and working software is the outcome. Answering it with a
+       * description of the screenshot — which is what happened — is a routing
+       * failure dressed as a helpful reply.
+       *
+       * This surface has no editable project (workspaceRoot is deliberately
+       * never sent from here), so an implementation intent cannot be satisfied.
+       * The honest response names that exact prerequisite. Generic development
+       * advice would look like an answer while delivering nothing that was asked
+       * for, which is the failure mode this path exists to remove.
+       */
+      const turnPlan = planTurn({
+        text: typeof prompt === 'string' ? prompt : '',
+        // Any image in play this turn — freshly attached or carried by the thread.
+        hasImageAttachment: requestedImages.length > 0,
+      })
+      const missing = unmetPrerequisites(turnPlan, {
+        // A fact about this surface, not a guess per request.
+        workspaceAvailable: false,
+        engineerAvailable: false,
+      })
+      if (missing.length > 0) {
+        const what = turnPlan.intent === 'modify_existing' ? 'change your existing project' : 'build this'
+        // "has no an editable project" — the list carries its own articles, so the
+        // sentence must not supply one.
+        const list =
+          missing.length > 1 ? `${missing.slice(0, -1).join(', ')} and ${missing[missing.length - 1]}` : missing[0]
+        const body =
+          `I can read the design, but I cannot ${what} from here: this chat is missing ${list}.\n\n` +
+          'To have it actually built, open the project in VS Code and ask MigraPilot there — the extension can ' +
+          'read your workspace, propose the files, and show you a diff before anything is written.\n\n' +
+          'If you would rather stay here, I can analyse the design and describe the layout, components and ' +
+          'styles it implies.'
+        for (const chunk of body.match(/[\s\S]{1,80}/g) ?? [body]) emit('token', { text: chunk })
+        emit('done', { outcome: 'prerequisite_missing', intent: turnPlan.intent, missing })
+        controller.close()
+        return
+      }
 
       const opened = await chatTurnStream(
         modelPrompt,

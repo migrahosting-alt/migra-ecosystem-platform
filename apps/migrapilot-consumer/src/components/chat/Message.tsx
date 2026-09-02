@@ -581,11 +581,21 @@ export function MessageView({
 }
 
 /** Three-dot thinking indicator shown while a reply is being generated. */
-export function TypingIndicator() {
+/**
+ * The ONE progress surface for an in-flight turn.
+ *
+ * `detail` carries transient runtime state — a cold model, a provider wait —
+ * and AUGMENTS this indicator rather than becoming a message. It used to be
+ * painted into the assistant's bubble, which made infrastructure status look
+ * like the answer and left this indicator running underneath it: two surfaces
+ * for one turn, one of which never went away.
+ */
+export function TypingIndicator({ detail }: { detail?: string } = {}) {
   return (
     <div className="flex animate-fade gap-3.5">
       <LogoMark className="mt-1 h-8 w-8 shrink-0" id="typing" />
-      <div className="flex items-center gap-1.5 rounded-2xl rounded-tl-md border border-hairline bg-raised px-5 py-4 shadow-card">
+      <div className="flex items-center gap-2.5 rounded-2xl rounded-tl-md border border-hairline bg-raised px-5 py-4 shadow-card">
+        {detail && <span className="text-sm text-muted">{detail}</span>}
         {[0, 1, 2].map((index) => (
           <span
             key={index}

@@ -73,7 +73,7 @@ export function ChatPage() {
   const router = useRouter()
   const id = typeof params?.id === 'string' ? params.id : ''
   const { byId, sendMessage, detachConversationImage,
-    detachConversationFile, pendingIn, loading, openConversation, isMissingConversation } = useChat()
+    detachConversationFile, pendingIn, progressIn, loading, openConversation, isMissingConversation } = useChat()
   const allowance = useAnonymousQuota()
   /*
    * The chosen Migra family, or undefined for automatic routing.
@@ -161,7 +161,14 @@ export function ChatPage() {
             message={message}
           />
         ))}
-        {pending && <TypingIndicator />}
+        {/*
+          EXACTLY ONE progress surface per turn. The transient detail rides on
+          this indicator; it is never a message, and there is never a second
+          indicator beneath a "loading" bubble.
+        */}
+        {pending && (
+          <TypingIndicator {...(progressIn?.conversationId === id && progressIn.detail ? { detail: progressIn.detail } : {})} />
+        )}
         <div ref={bottomRef} />
       </div>
     </FeedbackProvider>

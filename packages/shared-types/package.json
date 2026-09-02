@@ -29,6 +29,10 @@
     "./model-families": {
       "types": "./src/modelFamilies.ts",
       "default": "./dist/modelFamilies.js"
+    },
+    "./turn-intent": {
+      "types": "./src/turnIntent.ts",
+      "default": "./dist/turnIntent.js"
     }
   },
   "files": [
