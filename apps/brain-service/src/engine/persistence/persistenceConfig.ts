@@ -151,14 +151,40 @@ export function resolvePersistence(env: PersistenceEnv, cwd: string): Persistenc
     return { kind: 'postgres', databaseUrl, reason: 'MIGRAPILOT_PERSISTENCE=postgres' };
   }
 
-  // Default outside production stays SQLite, preserving existing local behaviour.
+  /*
+   * SQLITE IS TEST-ONLY, AND IT MUST BE ASKED FOR BY NAME.
+   *
+   * This used to be the silent default outside production. A Brain started with
+   * no configuration chose SQLite, logged it as the "default local/dev/test
+   * adapter", and came up WITHOUT governed model qualification — which requires
+   * the PostgreSQL store. That is not a second supported architecture. It is a
+   * misconfiguration that looks like a healthy service: /health returns ok, chat
+   * answers, and the qualification routes simply do not exist.
+   *
+   * It was found from the outside. A VS Code Extension session was pointed at
+   * such a Brain and behaved plausibly for everything except the governed paths,
+   * and the difference only surfaced when GET /api/ai/model-qualification/vision
+   * returned 404 against a production Brain's 200. A developer would have read
+   * that as "vision is not implemented" rather than "this Brain is not governed".
+   *
+   * So an unconfigured Brain now REFUSES to start. The two honest outcomes are a
+   * governed PostgreSQL Brain or an explicit, named test adapter — never a silent
+   * downgrade that a real session can end up talking to.
+   */
+  if (requested !== 'sqlite') {
+    throw new PersistenceConfigError(
+      'No persistence configured. Set MIGRAPILOT_PERSISTENCE=postgres with MIGRAPILOT_BRAIN_DATABASE_URL ' +
+        '(governed, canonical), or MIGRAPILOT_PERSISTENCE=sqlite for an isolated TEST-ONLY adapter. ' +
+        'SQLite is not a supported MigraPilot persistence mode and provides no governed model qualification; ' +
+        'refusing to start silently without it.',
+    );
+  }
+
   const path = stateDb ?? `${cwd.replace(/\/+$/, '')}/migraai-state.db`;
   return {
     kind: 'sqlite',
     sqlitePath: path,
-    reason: requested === 'sqlite'
-      ? 'MIGRAPILOT_PERSISTENCE=sqlite (local/dev/test adapter)'
-      : 'default local/dev/test adapter (no MIGRAPILOT_PERSISTENCE set, NODE_ENV is not production)',
+    reason: 'MIGRAPILOT_PERSISTENCE=sqlite — TEST-ONLY adapter, ungoverned, never canonical',
   };
 }
 

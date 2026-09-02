@@ -73,16 +73,42 @@ test('an unknown persistence kind is rejected, not defaulted', () => {
 
 // ── local/dev/test behaviour is preserved ───────────────────────────────────
 
-test('default outside production stays sqlite at the legacy path', () => {
-  const selection = resolvePersistence({}, CWD);
-  assert.equal(selection.kind, 'sqlite');
-  assert.equal(selection.sqlitePath, '/srv/app/migraai-state.db');
+test('an UNCONFIGURED Brain refuses to start rather than silently choosing sqlite', () => {
+  /*
+   * THIS REVERSES ITS OWN EARLIER ASSERTION, which required a bare environment to
+   * select sqlite "at the legacy path". Owner ruling: SQLite is not an accepted
+   * MigraPilot persistence mode, and a real session must never silently fall back
+   * to it when PostgreSQL and governance are unavailable.
+   *
+   * The silent default was not a harmless convenience. A Brain started with no
+   * configuration came up looking healthy — /health ok, chat answering — while
+   * the governed qualification routes did not exist at all, because those need
+   * the PostgreSQL store. Pointed at such a Brain, the VS Code Extension behaved
+   * plausibly right up to the governed paths, and the difference only showed as
+   * a 404 where a production Brain returns 200. That reads as "vision is not
+   * implemented" rather than "this Brain is not governed", which is the wrong
+   * conclusion drawn confidently.
+   */
+  assert.throws(() => resolvePersistence({}, CWD), PersistenceConfigError);
+  assert.throws(
+    () => resolvePersistence({ MIGRAPILOT_STATE_DB: '/tmp/x.db' }, CWD),
+    PersistenceConfigError,
+    'a state-db path is not a request for sqlite — the adapter must be named',
+  );
 });
 
-test('MIGRAPILOT_STATE_DB still selects an explicit sqlite path', () => {
-  const selection = resolvePersistence({ MIGRAPILOT_STATE_DB: '/tmp/x.db' }, CWD);
+test('sqlite is available ONLY when named, and says it is test-only', () => {
+  /*
+   * The adapter still exists for isolated unit/dev runs — removing it would break
+   * every test that needs a store without a database. What changed is that it can
+   * no longer be arrived at by accident, and that its own reason string says what
+   * it is, so a log line can never again read as a supported deployment.
+   */
+  const selection = resolvePersistence({ MIGRAPILOT_PERSISTENCE: 'sqlite', MIGRAPILOT_STATE_DB: '/tmp/x.db' }, CWD);
   assert.equal(selection.kind, 'sqlite');
   assert.equal(selection.sqlitePath, '/tmp/x.db');
+  assert.match(selection.reason, /TEST-ONLY/, 'the reason must mark it test-only');
+  assert.match(selection.reason, /ungoverned|never canonical/, 'and must not read as a supported deployment');
 });
 
 test('MIGRAPILOT_STATE_DB=off remains supported outside production', () => {
@@ -104,7 +130,14 @@ test('database url redaction removes credentials', () => {
 });
 
 test('every selection reason is human-readable and non-empty', () => {
-  for (const env of [{}, { MIGRAPILOT_STATE_DB: 'off' }, { MIGRAPILOT_PERSISTENCE: 'postgres', DATABASE_URL: PG }]) {
+  // `{}` left this list when an unconfigured Brain stopped being a SELECTION and
+  // became a refusal — it has no reason string to read because it never returns.
+  // Its replacement is the named test adapter, which does.
+  for (const env of [
+    { MIGRAPILOT_PERSISTENCE: 'sqlite' },
+    { MIGRAPILOT_STATE_DB: 'off' },
+    { MIGRAPILOT_PERSISTENCE: 'postgres', DATABASE_URL: PG },
+  ]) {
     const selection = resolvePersistence(env as PersistenceEnv, CWD);
     assert.ok(selection.reason.length > 10, `reason too terse: ${selection.reason}`);
     assert.ok(!selection.reason.includes('secret'), 'reason must not carry credentials');

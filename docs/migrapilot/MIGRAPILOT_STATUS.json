@@ -1,39 +1,37 @@
 {
   "$schema": "MIGRAPILOT_STATUS — canonical cross-agent state. Update on every material change.",
   "updated": "2026-09-01",
-  "updatedBy": "Claude Opus 5 — signed-out consumer lane",
+  "updatedBy": "Claude Opus 5 — extension on the governed Brain",
   "rules": {
     "easyFirst": "Do not start deep capability work while meaningful easy user-facing items remain.",
     "provenLive": "PROVEN_LIVE requires the real user-facing workflow to pass. Code existing and tests passing is NOT proof.",
     "acceptanceGate": "The gate is the app's own test command + tsc -b + live browser acceptance. A pre-commit hook is not the acceptance suite.",
     "costDiscipline": "owned -> open-source -> self-hosted -> free tier -> partner credits -> paid. No recurring paid dependency enters quietly.",
     "honestUnavailable": "A capability that is not ready must refuse truthfully rather than appear to work.",
-    "productionTruthIsPostgres": "PostgreSQL is production truth. SQLite is LEGACY / REFERENCE-ONLY: useful as historical implementation evidence, never qualified, deployed, or designed around. Any adapter-parity comparison is INFORMATIONAL ONLY unless the PostgreSQL implementation is independently proven. Owner ruling 2026-08-27, prompted by the carry-forward defect — \"SQLite already does it correctly\" explained the bug but proved nothing about the fix."
+    "productionTruthIsPostgres": "PostgreSQL is production truth. SQLite is LEGACY / REFERENCE-ONLY: useful as historical implementation evidence, never qualified, deployed, or designed around. Any adapter-parity comparison is INFORMATIONAL ONLY unless the PostgreSQL implementation is independently proven. Owner ruling 2026-08-27, prompted by the carry-forward defect — \"SQLite already does it correctly\" explained the bug but proved nothing about the fix.",
+    "noSilentSqliteFallback": "🚨 SQLite is NOT an accepted MigraPilot/MigraAI persistence mode. The docs already said so; the CODE contradicted them by silently defaulting to SQLite outside production. Such a Brain looks healthy — /health ok, chat answering — while the governed qualification routes DO NOT EXIST, because they require the PostgreSQL store. An unconfigured Brain now REFUSES to start. SQLite remains only as an explicitly named TEST-ONLY adapter whose own reason string says 'ungoverned, never canonical'. Owner ruling 2026-09-01."
   },
   "activeLane": {
-    "name": "MigraPilot consumer — the signed-out experience",
-    "objective": "Behave like ChatGPT for a visitor who has not signed in: no dead controls, no silent waits, no refusal dressed as an outage.",
-    "currentStep": "Two defects found by USING the product signed out, fixed, deployed and verified live. Next: the VS Code extension against the Claude/Codex/Copilot bar.",
-    "shipped_2026_09_01": {
-      "feedback_refused_and_mislabelled": {
-        "found": "Every anonymous turn produced GET /api/feedback -> 503. Thumbs rendered, click did nothing.",
-        "cause": "TWO faults stacked. listFeedback/putFeedback/removeFeedback were never in OPERATION_AUDIENCE so they took the authenticated-only default — third time that default silently decided a product question. Then the route collapsed every non-ok result into 503 'try again in a moment', which is only true of a transient fault; a refusal retried is the same refusal, so the permission gap hid behind an apparently flaky backend.",
-        "fix": "Feedback ops are 'both' — scope is the boundary, not sign-in state, and RLS confines feedback exactly as it confines the messages being rated. Refusals now carry 403/401/409; 503 stays for outages.",
-        "provenLive": "PASS — GET /api/feedback returns 200 {\"feedback\":[]} on production, signed out. Was 503."
-      },
-      "silent_wait_before_first_token": {
-        "found": "Measured on production: meta at 184ms, first token at 3.2s trivial / ~14s reasoning, and NOTHING emitted across the gap. A working system indistinguishable from a hung one.",
-        "cause": "The image path already emitted observed stages; the text path emitted none. The capacity probe already read Ollama /api/ps one line earlier for the refusal gate — the evidence was in hand and discarded.",
-        "fix": "Emit stage 'loading_model' when the probe SUCCEEDED and the chosen model is absent from residentModels. Silent when the probe failed: an unmeasured probe is not a cold model. Match strips tags so a warm model is never announced as loading.",
-        "provenLive": "PASS on production — stage at 3735ms, first token at 8274ms. Local cold/warm controls: cold fires at 2058ms (first token 9056ms); warm fires 0 and answers in 147ms."
-      }
+    "name": "MigraPilot VS Code Extension on the governed Brain",
+    "objective": "The extension is the product surface under test. It must use the single production Brain (db-core persistence, governed), never a local dev instance.",
+    "currentStep": "Bridge C PROVEN_LIVE. Next slice is A — an authenticated HTTPS endpoint on VM111 with the Brain staying loopback-bound.",
+    "beforeTopology": {
+      "extension": "http://127.0.0.1:3988 — set in BOTH Machine and workspace settings",
+      "thatBrain": "LOCAL dev instance on the workstation. persistence=sqlite, reason 'default local/dev/test adapter'. MIGRAPILOT_BRAIN_DATABASE_URL and DATABASE_URL both UNSET. Governance NOT available.",
+      "productionBrain": "VM111 migrapilot-brain.service, bind 127.0.0.1:3988 ONLY. persistence=postgres, 'governed model qualification ready', signingConfigured=true. Established socket 100.95.14.29 -> 100.77.51.91:5432 (db-core).",
+      "port5440": "Stock Ubuntu PostgreSQL 16 'main' cluster. NOT a Brain database — the Brain never used it, proven by unset DB vars plus the sqlite selection. No canonical Brain data to migrate."
     },
-    "notDefects": "The remaining two console 401s (/api/files, /api/images) are DELIBERATE. useVisionAvailability treats 401 as an answer and renders 'Sign in to attach images'; useAttachments fetches limits and degrades to server-side validation. Console errors dropped 9 -> 2 and the 2 are by design. Changing them would mean breaking correct behaviour to tidy a log.",
-    "withdrawnClaims": [
-      "'Chat does not stream' — WRONG. First measurement showed a 14s gap then a burst; second showed tokens every 10-20ms. The gap was reasoning time.",
-      "'The /api/files and /api/images 401s are defects' — WRONG. Both are deliberate and documented in place."
-    ],
-    "nextLane": "MigraPilot VS Code extension vs Claude Code / Codex / Copilot. Builds clean, 844/844 unit. The two recorded coding-loop defects are verified closed: guards are in productionCodingDriver.ts (not the test-only codingRun.ts) and the baseline is captured before the first apply."
+    "afterTopology": "extension -> 127.0.0.1:13988 -> SSH tunnel -> VM111 127.0.0.1:3988 -> production Brain -> db-core. Local sqlite Brain left running but NON-CANONICAL and no longer addressed by the extension.",
+    "bridgeC_provenLive": {
+      "status": "PROVEN_LIVE",
+      "discriminator": "GET /api/ai/model-qualification/vision — a route that exists ONLY when the PostgreSQL-backed governance store is present. Tunnel :13988 -> HTTP 200 {\"capability\":\"vision\",\"approved\":[]}. Local :3988 -> HTTP 404 route not found. Independent uptimes confirm two processes.",
+      "realTurn": "POST /api/ai/chat over the tunnel: HTTP 200 in 1117ms, model qwen3:8b, answered 'TUNNEL OK'.",
+      "rollback": "/tmp/claude-1001/vscode-settings.bak restores the workspace brainUrl."
+    },
+    "🚨 visionNotApprovedAnywhere": "Production's governance is READY but approved=[] — NO vision model is qualified there either. Reaching the production Brain does not by itself give the extension vision; a signed qualification for qwen2.5vl:7b is still required. This is now ONE decision for both surfaces rather than two.",
+    "phase3Blocked": "db name and db role on db-core are UNKNOWN to me. Host/port confirmed independently from the socket (100.77.51.91:5432). The env files are behind sudo, which this session may use only for WRITE verbs under the MigraPilot paths — reading is deliberately excluded. Needs the privileged operator.",
+    "port5440Decision": "OUT OF SCOPE. Proven only that the Brain has no dependency on it. Another local service may use it; retirement is a separate inventory task. Untouched.",
+    "notDoneDeliberately": "Option B (pointing the local Brain at db-core) REJECTED by the owner and not attempted — it would create a second Brain authority writing to canonical persistence."
   },
   "capabilities": {
     "PROVEN_LIVE": [
