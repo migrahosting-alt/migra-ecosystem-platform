@@ -78,7 +78,7 @@ export class MigraPilotStatusBar {
   /** Reflect the local brain lifecycle outcome as a first-class state: a
    * conflict/unable/disabled result while in local mode is degraded, not an
    * error. 'already-brain'/'started' leave the healthy local state in place. */
-  showLocalLifecycle(result: 'already-brain' | 'started' | 'conflict' | 'unable' | 'disabled'): void {
+  showLocalLifecycle(result: 'already-brain' | 'started' | 'conflict' | 'unable' | 'disabled' | 'remote'): void {
     if (result === 'already-brain' || result === 'started') {
       this.item.text = this.topology('$(server) MigraPilot: local', '$(sparkle) MigraPilot: ready');
       this.item.tooltip = developerMode() ? 'MigraPilot backend: local brain-service (running)' : 'MigraPilot is ready.';
@@ -89,7 +89,9 @@ export class MigraPilotStatusBar {
     this.item.tooltip = developerMode()
       ? result === 'conflict'
         ? 'Local brain port is held by another service. Run "MigraPilot: Repair Connection".'
-        : 'Local brain is not running. Configure migrapilot.brainAutoStartCommand or start it manually.'
+        : result === 'remote'
+          ? 'The governed Brain endpoint is unreachable. MigraPilot will NOT start a local brain for a remote URL — check the network or the service.'
+          : 'Local brain is not running. Configure migrapilot.brainAutoStartCommand or start it manually.'
       : 'MigraPilot is not running. Reload the window to start it again.';
     this.item.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
   }

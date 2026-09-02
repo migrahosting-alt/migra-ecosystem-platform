@@ -227,6 +227,7 @@ function localProbeFor(result: EnsureResult): LocalProbe {
       return 'conflict';
     case 'unable':
     case 'disabled':
+    case 'remote':
       return 'down';
   }
 }

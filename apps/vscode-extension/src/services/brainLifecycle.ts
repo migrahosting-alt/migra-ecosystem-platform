@@ -30,7 +30,8 @@ export type EnsureResult =
   | 'started' // we spawned it and it became ready
   | 'conflict' // port held by a non-brain service — refused to adopt/spawn
   | 'unable' // auto-start couldn't make it ready (no command / timeout)
-  | 'disabled'; // auto-start turned off and nothing was listening
+  | 'disabled' // auto-start turned off and nothing was listening
+  | 'remote'; // the brain URL is not local — we must never spawn a second brain for it
 
 export interface EnsureOptions {
   url: string;
@@ -42,6 +43,24 @@ export interface EnsureOptions {
   maxAttempts?: number;
   baseDelayMs?: number;
   maxDelayMs?: number;
+}
+
+/**
+ * Is this URL a brain we may legitimately start ourselves?
+ *
+ * Only loopback. A hostname that merely CONTAINS "localhost" (say
+ * `localhost.evil.example`) is not loopback, so this parses rather than
+ * substring-matches. An unparseable URL is treated as remote — the safe answer,
+ * since the cost of guessing wrong is a second brain on unknown persistence.
+ */
+export function isLocalBrainUrl(url: string): boolean {
+  let host: string;
+  try {
+    host = new URL(url).hostname.toLowerCase();
+  } catch {
+    return false;
+  }
+  return host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '[::1]';
 }
 
 export class BrainLifecycle {
@@ -66,6 +85,22 @@ export class BrainLifecycle {
     if (initial === 'foreign') {
       this.log(`brain port ${opts.url} is held by a non-brain service; refusing to adopt or start`);
       return 'conflict';
+    }
+
+    /*
+     * NEVER SPAWN A SECOND BRAIN FOR A REMOTE URL.
+     *
+     * autoStart exists for the local development brain on loopback. Once the
+     * extension points at the governed Brain over the tailnet, an unreachable
+     * endpoint means the network or the service is down — it does NOT mean
+     * "start your own". Spawning here would boot a second Brain against
+     * different persistence, which is the exact fallback this lane exists to
+     * remove: the product would look healthy while answering from an ungoverned
+     * store. Fail closed and report the endpoint as down instead.
+     */
+    if (!isLocalBrainUrl(opts.url)) {
+      this.log(`brain URL ${opts.url} is remote — not starting a local brain; the governed endpoint is unreachable`);
+      return 'remote';
     }
 
     // Nothing listening.
