@@ -131,7 +131,7 @@ export const CHAT_GENERAL_CASES: readonly EvalCase[] = [
     dimension: 'factual_discipline',
     turns: ['How many days are in a leap year? Answer with the number only.'],
     grade: (a) => /\b366\b/.test(a),
-    intent: 'A precise quantity is precise.',
+    intent: 'A precise quantity is stated precisely — 366, not "about a year" and not 365.',
   },
 
   // ── ambiguity handling ───────────────────────────────────────────────────
@@ -237,7 +237,7 @@ export const CHAT_GENERAL_CASES: readonly EvalCase[] = [
     dimension: 'basic_reasoning',
     turns: ['Alice is taller than Bob. Bob is taller than Carol. Who is shortest? One word.'],
     grade: (a) => /carol/i.test(a),
-    intent: 'Simple transitive ordering.',
+    intent: 'Simple transitive ordering — the everyday inference that keeps ordinary advice coherent.',
   },
   {
     id: 'reason-arithmetic',
