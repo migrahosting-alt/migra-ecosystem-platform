@@ -14,7 +14,7 @@
   "activeLane": {
     "name": "MigraPilot VS Code Extension on the governed Brain",
     "objective": "The extension is the product surface under test. It must use the single production Brain (db-core persistence, governed), never a local dev instance.",
-    "currentStep": "Phase 3 MEASURED (db migrapilot_brain, role migrapilot_brain). A is HELD pending the owner's call on two hardening items: ALTER ROLE migrapilot_brain NOCREATEROLE, and the pg_hba catch-all that admits the whole tailnet to all databases. tailscale serve has NOT been run.",
+    "currentStep": "Target A ACTIVATED and hardened. Remaining: the owner's extension-UI acceptance pass (which also covers the mockup design-read seam), and a decision on whether tailnet-wide reach needs an ACL.",
     "beforeTopology": {
       "extension": "http://127.0.0.1:3988 — set in BOTH Machine and workspace settings",
       "thatBrain": "LOCAL dev instance on the workstation. persistence=sqlite, reason 'default local/dev/test adapter'. MIGRAPILOT_BRAIN_DATABASE_URL and DATABASE_URL both UNSET. Governance NOT available.",
@@ -54,20 +54,22 @@
       "alsoNoted": "migrapilot_brain_test carries CREATEDB and CREATEROLE — more privileged than the production role.",
       "verdict": "Dedicated database + dedicated non-shared role: CONFIRMED. Least privilege: NOT met, on one role attribute plus a network boundary that is broader than documented. Owner decision required before target A widens access."
     },
-    "targetA_preflight": {
-      "status": "BLOCKED on two owner actions. Nothing was exposed; tailscale serve has NOT been run.",
-      "readyFacts": {
-        "brainBinding": "127.0.0.1:3988 — already loopback-bound, exactly what A requires. serve would terminate TLS and proxy to it; the Brain itself never binds a public interface.",
-        "serveConfig": "none — clean slate, no prior serve state to reconcile.",
-        "tailnetName": "migrapilot-app-core.tail9e1625.ts.net",
-        "tailscaleVersion": "1.102.2 (serve supported)"
-      },
-      "blockers": [
-        "SERVE IS NOT ENABLED ON THE TAILNET. Measured, not inferred: 'tailscale serve --bg 3988' on VM111 returns 'Serve is not enabled on your tailnet' and then BLOCKS waiting for it to be turned on, which is why a first attempt appeared to hang and left no config. Enable link, node-specific: https://login.tailscale.com/f/serve?node=nZW6KcTfZ911CNTRL — one click after an owner login. The Playwright browser has no Tailscale session and this session does not handle credentials.",
-        "ALTER ROLE migrapilot_brain NOCREATEROLE is STILL NOT APPLIED — re-checked read-only, rolcreaterole is still true. A hard guard refuses production-database writes from this session regardless of the owner's approval. Owner authorized proceeding with tailscale anyway, so this is knowingly outstanding rather than forgotten."
+    "targetA_ACTIVATED": {
+      "status": "ACTIVATED 2026-09-01. Endpoint live, extension repointed, tunnel retired.",
+      "endpoint": "https://migrapilot-app-core.tail9e1625.ts.net -> proxy http://127.0.0.1:3988",
+      "brainBinding": "127.0.0.1:3988 UNCHANGED — Serve terminates TLS and proxies; the Brain never binds a public interface.",
+      "hardening": "ALTER ROLE migrapilot_brain NOCREATEROLE APPLIED by the owner and verified read-only: super=f, createdb=f, createrole=f, canlogin=t, replication=f, bypassrls=f. The role now matches POSTGRES_CUTOVER_ACCEPTANCE.md exactly. Durable write + read-back through the new endpoint confirmed nothing broke.",
+      "provenOverHttps": [
+        "GET /health — status ok, governance ready, persistence ready, schema 24",
+        "POST /api/ai/conversations (durable) then GET it back — persistence round-trip",
+        "POST /api/ai/chat — routed qwen3:8b, returned the exact sentinel A-ENDPOINT-LIVE",
+        "POST /api/ai/chat with a real PNG — routed the governed qwen2.5vl:7b, read the planted 8317"
       ],
-      "designCaveatForOwner": "tailscale serve authenticates by TAILNET MEMBERSHIP, not per user: every node on the tailnet would reach the Brain, which today answers /api/ai/chat with no per-request token (the extension sends only x-owner-scope / x-workspace-scope). That is consistent with the existing posture — pg_hba already trusts the whole tailnet — but it is weaker than per-user auth. A Tailscale ACL restricting the served port to named nodes/users is the mechanism if tighter access is wanted.",
-      "correction": "An earlier report named 'Tailscale HTTPS certificates not enabled' as the blocker, inferred from CertDomains = None. That pointed at the right area but named the wrong feature: the actual gate is the SERVE feature itself. Withdrawn in favour of the measured error message."
+      "tunnelRetired": "ssh -L 13988 pid 603039 killed by pid, not by pattern. 127.0.0.1:13988 now refuses connections, so a silent fallback to it is impossible.",
+      "settingsRepointed": "BOTH scopes. Workspace .vscode/settings.json was on the tunnel (13988); MACHINE settings were still on http://127.0.0.1:3988 — the OLD local dev Brain, i.e. the second-Brain hazard this lane exists to remove. Backups: /tmp/claude-1001/machine-settings.pre-A.bak and workspace-settings.pre-A.bak.",
+      "defectFoundAndFixed": "Repointing exposed a real fallback: BrainLifecycle.ensureRunning had NO loopback guard, so an unreachable REMOTE endpoint took the same branch as a missing local brain and spawned one from apps/brain-service — a second Brain on different persistence, looking healthy while answering from an ungoverned store. Fixed: a distinct 'remote' result (not 'disabled', which is a different fact), a status bar message that is true, and isLocalBrainUrl that PARSES rather than substring matches. 6 regression tests; suite 861/861.",
+      "openDecision": "tailscale serve authenticates by TAILNET MEMBERSHIP, not per user, and /api/ai/chat still takes no per-request token. Every tailnet node can reach the Brain. Consistent with pg_hba, which already trusts the whole tailnet, but weaker than per-user auth. A Tailscale ACL restricting the served port is the mechanism if the owner wants tighter.",
+      "notProven": "The 10-item acceptance list through the actual extension UI is NOT done. Everything above was measured over the wire. The extension has been repackaged and reinstalled; the UI gate is the owner's to run after a window reload."
     }
   },
   "capabilities": {

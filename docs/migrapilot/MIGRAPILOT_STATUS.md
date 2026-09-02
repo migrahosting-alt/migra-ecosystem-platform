@@ -124,6 +124,52 @@ Brain introduced.
 
 ---
 
+## Target A ACTIVATED 2026-09-01 — the extension is on the governed Brain
+
+```text
+https://migrapilot-app-core.tail9e1625.ts.net  ->  proxy http://127.0.0.1:3988
+```
+
+The Brain's binding is **unchanged** at `127.0.0.1:3988`. Serve terminates TLS and proxies to it, so
+nothing new binds a public interface.
+
+Hardening landed first: `ALTER ROLE migrapilot_brain NOCREATEROLE` is applied and verified read-only
+(`super=f, createdb=f, createrole=f, canlogin=t, replication=f, bypassrls=f`). The role now matches
+`POSTGRES_CUTOVER_ACCEPTANCE.md` exactly, and a durable write plus read-back through the new endpoint
+confirmed nothing broke.
+
+Proven over HTTPS: health (`governance: ready`, schema 24); a durable conversation write and
+read-back; a chat turn routed to `qwen3:8b` returning the exact sentinel; and an image turn routed to
+the governed `qwen2.5vl:7b`, reading the planted `8317`.
+
+The SSH tunnel is retired — killed **by pid, not by pattern** — and `127.0.0.1:13988` now refuses
+connections, so falling back to it silently is impossible.
+
+### Repointing exposed a real defect
+
+Both scopes were wrong in different ways: the workspace file pointed at the tunnel, and **machine
+settings still pointed at `http://127.0.0.1:3988` — the old local dev Brain**, the very second-Brain
+hazard this lane exists to remove.
+
+Worse, `BrainLifecycle.ensureRunning` had **no loopback guard**. With auto-start on, an unreachable
+*remote* endpoint took the same branch as a missing *local* one and spawned a brain from
+`apps/brain-service`. A second Brain runs against different persistence, so the product would look
+healthy while answering from an ungoverned store — the forbidden fallback wearing a different hat.
+
+Fixed with a distinct `remote` result (not `disabled`, which is a different fact), a status-bar
+message that is actually true, and an `isLocalBrainUrl` that **parses** rather than substring-matches,
+so `localhost.evil.example` is not loopback. Six regression tests; suite **861/861**.
+
+### Open for the owner
+
+- `tailscale serve` authenticates by **tailnet membership, not per user**, and `/api/ai/chat` still
+  takes no per-request token. Consistent with `pg_hba` (which already trusts the whole tailnet) but
+  weaker than per-user auth. A Tailscale ACL on the served port is the mechanism if you want tighter.
+- The **10-item acceptance list through the extension UI is not done**. Everything above was measured
+  over the wire. The extension is repackaged and reinstalled; the UI gate needs a window reload.
+
+---
+
 ## Standing rules
 
 | Rule | Meaning |
