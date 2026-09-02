@@ -33,6 +33,14 @@
     "./turn-intent": {
       "types": "./src/turnIntent.ts",
       "default": "./dist/turnIntent.js"
+    },
+    "./project-authority": {
+      "types": "./src/projectAuthority.ts",
+      "default": "./dist/projectAuthority.js"
+    },
+    "./outcome-plan": {
+      "types": "./src/outcomePlan.ts",
+      "default": "./dist/outcomePlan.js"
     }
   },
   "files": [

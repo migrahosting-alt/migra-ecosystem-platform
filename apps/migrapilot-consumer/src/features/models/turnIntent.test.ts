@@ -8,7 +8,9 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { planTurn, unmetPrerequisites } from '@migrapilot/shared-types/turn-intent'
+import { planTurn } from '@migrapilot/shared-types/turn-intent'
+import { planOutcome, unsupportedSteps } from '@migrapilot/shared-types/outcome-plan'
+import { NO_AUTHORITY, authoritySatisfies, vscodeWorkspaceAuthority } from '@migrapilot/shared-types/project-authority'
 
 const withImage = (text: string) => planTurn({ text, hasImageAttachment: true })
 
@@ -63,12 +65,18 @@ test('an image with no outcome verb defaults to describing, never to building', 
   assert.equal(p.requiresEngineer, false, 'guessing "build" would risk the user’s project')
 })
 
-test('missing prerequisites are named concretely, not answered around', () => {
-  const plan = withImage('build this page')
-  const missing = unmetPrerequisites(plan, { workspaceAvailable: false, engineerAvailable: true })
-  assert.deepEqual(missing, ['an editable project to build in'])
-  // With everything present, nothing is missing.
-  assert.deepEqual(unmetPrerequisites(plan, { workspaceAvailable: true, engineerAvailable: true }), [])
+test('SURFACE IS NOT CAPABILITY — the same request succeeds or fails on AUTHORITY alone', () => {
+  const intent = withImage('build this page').intent
+  const outcome = planOutcome({ objective: 'build this page', intent, hasImage: true })
+
+  // No project connected: blocked, and at a named step.
+  const blockedHere = unsupportedSteps(outcome, (n) => authoritySatisfies(NO_AUTHORITY, n))
+  assert.ok(blockedHere.length > 0)
+  assert.equal(blockedHere[0], 'workspace.inspect')
+
+  // The IDENTICAL plan, with an authority that can carry it, is not blocked.
+  const withWorkspace = unsupportedSteps(outcome, (n) => authoritySatisfies(vscodeWorkspaceAuthority('/ws'), n))
+  assert.deepEqual(withWorkspace, [], 'the plan is the contract; authority is only where it lands')
 })
 
 test('plain conversation needs neither vision nor engineer', () => {

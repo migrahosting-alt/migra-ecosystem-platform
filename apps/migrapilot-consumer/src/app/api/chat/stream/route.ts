@@ -44,7 +44,9 @@ import {
   setConversationGrounding,
   setConversationImages,
 } from '@/server/brain/seams'
-import { planTurn, unmetPrerequisites } from '@migrapilot/shared-types/turn-intent'
+import { planTurn } from '@migrapilot/shared-types/turn-intent'
+import { planOutcome, unsupportedSteps } from '@migrapilot/shared-types/outcome-plan'
+import { NO_AUTHORITY, authoritySatisfies, authorityShortfall } from '@migrapilot/shared-types/project-authority'
 import { listFiles, userDirectory } from '@/server/files/storage'
 import { reconcileGrounding } from '@/server/files/grounding'
 import { readProcessing, sequenceNoteFor } from '@/server/files/documentProcessing'
@@ -920,44 +922,52 @@ export async function POST(request: Request): Promise<Response> {
           : prompt
 
       /*
-       * WHAT IS THIS TURN ACTUALLY FOR?
+       * WHAT IS THIS TURN FOR, AND MAY IT HAPPEN HERE?
        *
-       * Routed from a typed plan rather than from the words. A mockup plus "can
-       * you help me build this page" is an IMPLEMENTATION intent: the image is
-       * the means and working software is the outcome. Answering it with a
-       * description of the screenshot — which is what happened — is a routing
-       * failure dressed as a helpful reply.
+       * SURFACE IS NOT CAPABILITY. AUTHORITY IS CAPABILITY.
        *
-       * This surface has no editable project (workspaceRoot is deliberately
-       * never sent from here), so an implementation intent cannot be satisfied.
-       * The honest response names that exact prerequisite. Generic development
-       * advice would look like an answer while delivering nothing that was asked
-       * for, which is the failure mode this path exists to remove.
+       * This does not ask "am I the consumer?" — it asks what project authority
+       * the caller presented. Today that is none, so a build cannot happen and
+       * the answer says exactly which prerequisite is missing. The moment a repo
+       * is connected under an explicit grant, THIS SAME CODE becomes capable
+       * without being edited, which is the difference between a temporary
+       * limitation and "consumer = planner, extension = builder" hard-coded into
+       * the architecture forever.
        */
       const turnPlan = planTurn({
         text: typeof prompt === 'string' ? prompt : '',
         // Any image in play this turn — freshly attached or carried by the thread.
         hasImageAttachment: requestedImages.length > 0,
       })
-      const missing = unmetPrerequisites(turnPlan, {
-        // A fact about this surface, not a guess per request.
-        workspaceAvailable: false,
-        engineerAvailable: false,
+      const outcome = planOutcome({
+        objective: typeof prompt === 'string' ? prompt : '',
+        intent: turnPlan.intent,
+        hasImage: requestedImages.length > 0,
       })
-      if (missing.length > 0) {
+      /*
+       * No project is connected to a consumer conversation yet. Declared as an
+       * AUTHORITY the Brain evaluates, not as a fact about which app this is.
+       */
+      const authority = NO_AUTHORITY
+      const blocked = unsupportedSteps(outcome, (needs) => authoritySatisfies(authority, needs))
+
+      if (blocked.length > 0) {
         const what = turnPlan.intent === 'modify_existing' ? 'change your existing project' : 'build this'
-        // "has no an editable project" — the list carries its own articles, so the
-        // sentence must not supply one.
-        const list =
-          missing.length > 1 ? `${missing.slice(0, -1).join(', ')} and ${missing[missing.length - 1]}` : missing[0]
         const body =
-          `I can read the design, but I cannot ${what} from here: this chat is missing ${list}.\n\n` +
-          'To have it actually built, open the project in VS Code and ask MigraPilot there — the extension can ' +
-          'read your workspace, propose the files, and show you a diff before anything is written.\n\n' +
+          `I can read the design, but I cannot ${what} from here: ${authorityShortfall(authority)}.\n\n` +
+          `The step that needs it is ${blocked[0]}. To have it actually built, open the project in VS Code and ` +
+          'ask MigraPilot there — the extension can read your workspace, propose the files, and show you a diff ' +
+          'before anything is written.\n\n' +
           'If you would rather stay here, I can analyse the design and describe the layout, components and ' +
           'styles it implies.'
         for (const chunk of body.match(/[\s\S]{1,80}/g) ?? [body]) emit('token', { text: chunk })
-        emit('done', { outcome: 'prerequisite_missing', intent: turnPlan.intent, missing })
+        emit('done', {
+          outcome: 'authority_missing',
+          intent: turnPlan.intent,
+          // Provenance: which step, and under which authority it was refused.
+          stoppedAt: blocked[0],
+          authority: authority.kind,
+        })
         controller.close()
         return
       }
