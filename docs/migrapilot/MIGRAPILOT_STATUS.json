@@ -92,6 +92,14 @@
       ],
       "escapeHatches": "MIGRAPILOT_BRAIN_REQUIRE_TAILNET_IDENTITY=0 disables enforcement without a redeploy. MIGRAPILOT_BRAIN_ALLOWED_LOGINS narrows to named users; empty means any tailnet user, not nobody. /health and /api/identity/whoami stay exempt.",
       "tests": "apps/brain-service/test/tailnetIdentity.test.ts — suite 2119/2119."
+    },
+    "postReloadVerification": {
+      "when": "2026-09-01, after the owner reloaded VS Code",
+      "extensionConnected": "Extension log shows 'backend resolved: local-brain' then 'brain lifecycle: already-brain' with NO errors and NO 403. Both settings scopes read the tailnet URL, and that URL answers a probe with 200, so the adoption is the governed Brain.",
+      "staleLocalBrainFound": "A leftover Brain was still listening on the workstation's 127.0.0.1:3988 — pid 107740, started 18:20, launched from apps/brain-service. It reported governance NONE and schema 8 against production's schema 24: an ungoverned second Brain on a divergent store, exactly what this lane forbids. Nothing was connected to it (0 established sockets) and no setting pointed at it. Stopped by PID.",
+      "whyItMattered": "Not because the extension was using it — it was not — but because it was a trap: any tool or setting defaulting to :3988 would have silently used a schema-8 ungoverned store while looking healthy. The autoStart loopback guard shipped earlier is now load-bearing: autoStartBrain is still true, and only that guard stops a remote-URL outage from spawning another one.",
+      "journalCaveat": "The Brain's journald output is not readable from this session — a control request I made myself did not appear either. So log silence was NOT evidence about the extension, and was not used as any.",
+      "stillOwnerOnly": "The 10-item UI acceptance pass and the mockup design-read seam still need the owner driving the extension."
     }
   },
   "capabilities": {
