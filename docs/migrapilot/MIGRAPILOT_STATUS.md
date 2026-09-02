@@ -17,7 +17,11 @@ _Last updated: 2026-09-01_
 
 ## Lane 2026-09-01 — An attached mockup can be BUILT, not only described
 
-`PROVEN_LIVE`. Images used to be routed away from the workspace agent because the agent loop has no
+`IMPLEMENTED_NEEDS_LIVE_PROOF`. The Brain path is proven; the extension UX gate is not yet run.
+Owner ruling 2026-09-01: the synthetic `8317` badge is strong evidence vision truly read the image,
+but it does not replace attaching a real mockup in VS Code and inspecting the workspace change.
+
+Images used to be routed away from the workspace agent because the agent loop has no
 vision. That branch was correct and also terminal: sight and tools sat on opposite sides of it, so
 "build this mockup" could only ever produce prose. **The capability was not missing — it was
 unreachable.**
@@ -64,6 +68,59 @@ Two corrections went into the JSON's drift control:
 
 **Still blocked:** Phase 3 needs the db name and role from the operator, and the owner's constraint
 is that Phase 3 precedes any exposure change (`tailscale serve` for target A).
+
+---
+
+## Phase 3 MEASURED 2026-09-01 — the Brain's database and role
+
+Measured with read-only `pg_catalog` queries on db-core, authorized by the owner. No env file was
+read, no credential was read, nothing was written.
+
+```text
+Host:        100.77.51.91   (db-core; LAN 10.10.0.6 — same machine, confirmed)
+Port:        5432
+Database:    migrapilot_brain
+Role:        migrapilot_brain
+Persistence: postgres
+Version:     PostgreSQL 16.15
+```
+
+This is **measured, not recorded**: `pg_stat_activity` showed one live session on `migrapilot_brain`
+as `migrapilot_brain` from `100.95.14.29`, which is `migrapilot-app-core` (VM111, the Brain host).
+That is the Brain's own connection.
+
+### The ownership boundary — dedicated, but not least-privilege
+
+Confirmed good:
+
+- Dedicated database, **owned by its own role** (`migrapilot_brain`).
+- **PUBLIC revoked** on it — `datacl` is `migrapilot_brain=CTc/migrapilot_brain`.
+- The role has **no memberships**, is not `postgres`, and is not a shared application role.
+- `rolsuper`, `rolcreatedb`, `rolreplication`, `rolbypassrls` are all false.
+
+Two deviations from `POSTGRES_CUTOVER_ACCEPTANCE.md`:
+
+1. **`rolcreaterole` is TRUE**, where the spec says `NOCREATEROLE`. On PostgreSQL 16 a CREATEROLE role
+   may only administer roles it created, so this is *not* the pre-16 escalate-to-any-role hole — but
+   it is not least privilege and not what the spec says. One line fixes it, with no functional impact:
+   the Brain migrates schema inside its own database and never creates roles.
+2. **The pg_hba restriction in that document does not exist.** There is no rule naming the brain
+   database or role. Access comes from two catch-alls: `host all all 100.64.0.0/10` (the whole
+   tailnet) and `host all all 10.10.0.0/24`. Password auth still applies, so possession of the DSN is
+   the real boundary — but the network boundary is far broader than documented.
+
+### Cross-database reach — a metadata surface, not a data surface
+
+The role can `CONNECT` to 22 other databases because those leave the default PUBLIC CONNECT in place.
+Measured impact is zero readable application tables in `migrapay_billing`, `migrapanel`,
+`migracredit` and `migrapilot`. This is a server-wide default affecting every role, not something the
+Brain introduced.
+
+> An initial count of "188 readable tables" in three different databases was a **measurement
+> artifact** — identical in all three because it was counting `pg_catalog`/`information_schema`
+> grants. Restricting to application schemas gave 0.
+
+**A is HELD.** `tailscale serve` has not been run.
 
 ---
 

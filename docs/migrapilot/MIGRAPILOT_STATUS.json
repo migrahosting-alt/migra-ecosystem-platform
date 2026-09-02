@@ -14,7 +14,7 @@
   "activeLane": {
     "name": "MigraPilot VS Code Extension on the governed Brain",
     "objective": "The extension is the product surface under test. It must use the single production Brain (db-core persistence, governed), never a local dev instance.",
-    "currentStep": "Brain redeployed with readiness.governance (release gov-09012017): production now reports governance=ready, persistence=ready, schema 24. Vision qualification verified ENFORCED on production (vision.general -> qwen2.5vl:7b; object_counting deliberately unqualified). Design-read seam shipped: an attached mockup is read into a literal spec and handed to the tool-capable agent. STILL BLOCKED: Phase 3 needs the db name and role from the operator, and the owner's constraint is that Phase 3 precedes any exposure change (tailscale serve for A).",
+    "currentStep": "Phase 3 MEASURED (db migrapilot_brain, role migrapilot_brain). A is HELD pending the owner's call on two hardening items: ALTER ROLE migrapilot_brain NOCREATEROLE, and the pg_hba catch-all that admits the whole tailnet to all databases. tailscale serve has NOT been run.",
     "beforeTopology": {
       "extension": "http://127.0.0.1:3988 — set in BOTH Machine and workspace settings",
       "thatBrain": "LOCAL dev instance on the workstation. persistence=sqlite, reason 'default local/dev/test adapter'. MIGRAPILOT_BRAIN_DATABASE_URL and DATABASE_URL both UNSET. Governance NOT available.",
@@ -29,9 +29,31 @@
       "rollback": "/tmp/claude-1001/vscode-settings.bak restores the workspace brainUrl."
     },
     "🚨 visionNotApprovedAnywhere": "Production's governance is READY but approved=[] — NO vision model is qualified there either. Reaching the production Brain does not by itself give the extension vision; a signed qualification for qwen2.5vl:7b is still required. This is now ONE decision for both surfaces rather than two.",
-    "phase3Blocked": "db name and db role on db-core are UNKNOWN to me. Host/port confirmed independently from the socket (100.77.51.91:5432). The env files are behind sudo, which this session may use only for WRITE verbs under the MigraPilot paths — reading is deliberately excluded. Needs the privileged operator.",
     "port5440Decision": "OUT OF SCOPE. Proven only that the Brain has no dependency on it. Another local service may use it; retirement is a separate inventory task. Untouched.",
-    "notDoneDeliberately": "Option B (pointing the local Brain at db-core) REJECTED by the owner and not attempted — it would create a second Brain authority writing to canonical persistence."
+    "notDoneDeliberately": "Option B (pointing the local Brain at db-core) REJECTED by the owner and not attempted — it would create a second Brain authority writing to canonical persistence.",
+    "phase3Measured": {
+      "status": "MEASURED 2026-09-01 — read-only pg_catalog queries on db-core, authorized by owner. No env file read, no credential read, no writes.",
+      "host": "100.77.51.91 (db-core; LAN 10.10.0.6) — confirmed same machine",
+      "port": 5432,
+      "database": "migrapilot_brain",
+      "role": "migrapilot_brain",
+      "persistence": "postgres",
+      "serverVersion": "16.15",
+      "howMeasured": "pg_stat_activity showed exactly one session on database migrapilot_brain as role migrapilot_brain from client 100.95.14.29, which is migrapilot-app-core (VM111, the Brain host) confirmed by hostname + tailscale ip. This is the Brain's own live connection, not an inventory record.",
+      "ownershipBoundary": {
+        "dedicatedDatabase": "YES — migrapilot_brain is owned by role migrapilot_brain.",
+        "publicRevoked": "YES — datacl is migrapilot_brain=CTc/migrapilot_brain, so PUBLIC cannot connect.",
+        "roleMemberships": "NONE — the role inherits nothing.",
+        "notShared": "YES — not postgres, not a shared application role."
+      },
+      "deviationsFromPOSTGRES_CUTOVER_ACCEPTANCE": [
+        "rolcreaterole is TRUE. The acceptance doc specifies LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION. Everything else matches (super=f, createdb=f, replication=f, bypassrls=f). On PostgreSQL 16 a CREATEROLE role may only administer roles it created, so this is not the pre-16 escalate-to-any-role hole — but it is still not least privilege, and it is not what the spec says. One-line fix: ALTER ROLE migrapilot_brain NOCREATEROLE. The Brain runs schema migrations inside its own database and does not create roles, so there is no functional impact.",
+        "The claimed pg_hba restriction to 10.10.0.13/32 + 100.95.14.29/32 DOES NOT EXIST in production. pg_hba_file_rules contains no rule naming the brain database or role at all. The Brain is admitted by two catch-alls: line 141 'host all all 100.64.0.0/10 scram-sha-256' (the whole tailnet) and line 154 'host all all 10.10.0.0/24 scram-sha-256'. Password auth is still required, so possession of the DSN is the real boundary — but the network boundary is much broader than the acceptance document asserts."
+      ],
+      "crossDatabaseReach": "The role can CONNECT to 22 other databases on db-core (migrapanel, migrapay_billing, migracredit, mpanel, ...) because those databases leave the default PUBLIC CONNECT in place. Measured impact is a metadata surface, NOT a data surface: application tables readable in migrapay_billing, migrapanel, migracredit and migrapilot is ZERO in each. This is a server-wide default that applies to every role, not something the Brain introduced. An initial count of 188 'readable tables' was a measurement artifact — it was counting pg_catalog/information_schema grants, identical in every database.",
+      "alsoNoted": "migrapilot_brain_test carries CREATEDB and CREATEROLE — more privileged than the production role.",
+      "verdict": "Dedicated database + dedicated non-shared role: CONFIRMED. Least privilege: NOT met, on one role attribute plus a network boundary that is broader than documented. Owner decision required before target A widens access."
+    }
   },
   "capabilities": {
     "PROVEN_LIVE": [
@@ -81,7 +103,6 @@
       "Picker/storage agreement (Chat matrix 22-24) — one canonical attachment definition drives the picker, validator, refusal copy and published contract. 35 offered = 35 accepted, and a binary file wearing a text extension is refused. Proven live 2026-08-28 (consumer sniff-08280125).",
       "Unified attachment system — one canonical contract classifies by extension, MIME and BYTES, then dispatches to the image or document pipeline. A PNG chosen through Files becomes an image; a PDF and a photo attach to the same turn and are reasoned over jointly. Proven live 2026-08-28 (consumer unified-08280202).",
       "Voice input / ASR (Chat matrix row 8) — RESTORED to LIVE 2026-08-28 after the MIME-parameter regression. Bonex used the real consumer microphone and produced an editable transcription.",
-      "Attached mockup -> buildable spec (design read)",
       "Governed vision qualification enforced end to end"
     ],
     "STABILIZATION": [
@@ -120,7 +141,9 @@
         "needsFromOwner": "Create the project + Object Storage credentials + DR bucket in the Hetzner console."
       }
     ],
-    "IMPLEMENTED_NEEDS_LIVE_PROOF": []
+    "IMPLEMENTED_NEEDS_LIVE_PROOF": [
+      "Attached mockup -> buildable spec (design read) — Brain path proven; awaiting the extension UX gate (owner reloads VS Code, attaches a real mockup, inspects the workspace change)"
+    ]
   },
   "openDefects": [
     {
@@ -270,6 +293,12 @@
       "verdict": "DISPROVEN. Those boot tests never loaded the production environment.",
       "detail": "/etc/migrapilot/*.env is root-only, so 'sudo -u migrapilot bash -c . brain.env' sourced NOTHING and the candidate booted on defaults. Older builds silently fell back to SQLite, so the test passed while proving almost nothing; the new fail-closed persistence rule is what exposed it, by refusing to start. Releases are now swapped through systemd, which reads the env as root, with a named rollback target.",
       "corrected": "Boot-test claims downgraded; deploy verification is post-swap health + readiness axes."
+    },
+    {
+      "claim": "\"POSTGRES_CUTOVER_ACCEPTANCE.md records the production privilege boundary.\"",
+      "verdict": "PARTLY FALSE. The document asserts a pg_hba restriction production does not have.",
+      "detail": "The doc states pg_hba is limited to 10.10.0.13/32 and 100.95.14.29/32 with scram-sha-256. pg_hba_file_rules has no rule naming the brain database or role; access comes from 'host all all 100.64.0.0/10' and 'host all all 10.10.0.0/24'. The role also carries CREATEROLE where the doc says NOCREATEROLE. Treat that document as the INTENT of the cutover, not as evidence of the current boundary.",
+      "corrected": "Phase 3 now records measured catalog facts; the acceptance doc is demoted to intent."
     }
   ],
   "promisesVsReality": [
@@ -296,7 +325,8 @@
     {
       "surface": "Attach a UI mockup and ask MigraPilot to build it",
       "reality": "The image is read once into a literal spec by the governed vision model and handed to the tool-capable agent, so a mockup now reaches the build path instead of stopping at a description. Measured on the live Brain: the spec alone, with no image, rebuilt all 9 mockup elements as real HTML with working inputs and a button, and rendered with the header badge in its mockup position. LIMIT: layout fidelity is the coding model's — the sidebar rebuilt as a stacked full-width block rather than a left column. Requires migrapilot.enableWorkspaceAgent = true.",
-      "provenLive": true
+      "provenLive": false,
+      "gate": "Owner ruling 2026-09-01: the synthetic 8317 badge proves the vision model truly read the image, but it does not replace the extension UX gate. Stays IMPLEMENTED_NEEDS_LIVE_PROOF until Bonex reloads VS Code, attaches a real mockup, asks MigraPilot to build it, and inspects the resulting workspace change."
     }
   ],
   "backlog": {
