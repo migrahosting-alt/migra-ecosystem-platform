@@ -24,3 +24,20 @@ export {
   type DiagnosticsGetRequest,
   type DiagnosticsGetResponse,
 } from '@migrapilot/protocol';
+
+/*
+ * The tree/file/git tools, shared verbatim by every runtime that executes them.
+ *
+ * They lived in the brain until the brain stopped being the machine that holds
+ * the workspace. Rather than reimplement them client-side — two implementations
+ * that agree today and drift tomorrow — they moved here and BOTH sides import
+ * these exact functions.
+ */
+export * from './workspaceList.js';
+export * from './workspaceFind.js';
+export * from './workspaceSearch.js';
+export * from './fileRead.js';
+export * from './fileReadRange.js';
+export * from './gitStatus.js';
+export * from './gitDiff.js';
+export * from './gitInsight.js';

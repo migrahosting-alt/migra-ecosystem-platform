@@ -12,7 +12,8 @@
 
 import type { GovernedWorkflowId, GroundingMode, LiveKnowledgeMode, TaskClass } from '@migrapilot/protocol';
 import { REQUEST_ID_HEADER, newRequestId } from '@migrapilot/pilot-client';
-import { executeWorkspaceTool } from './workspaceTools.js';
+import { CLIENT_CONTRACT_VERSION, type WorkspaceToolExecutor } from './workspaceTools.js';
+import { CLIENT_EXECUTABLE_TOOL_IDS } from '@migrapilot/workspace-tools';
 import { PilotError, type PilotErrorCode } from '@migrapilot/pilot-client';
 import { randomUUID } from 'node:crypto';
 import {
@@ -450,6 +451,17 @@ export class MigraAiClient {
   private readonly agentActivationId = randomUUID();
   private agentActivation?: AgentModeBootstrapResponse;
   private readonly agentRunWorkspaces = new Map<string, string>();
+  /*
+   * Set during activation, because executing workspace tools needs the EDITOR
+   * (diagnostics, symbols, the approval modal) and this class must stay usable
+   * in tests without one. Unset means delegated tools are refused truthfully
+   * rather than answered wrongly.
+   */
+  private workspaceToolExecutor: WorkspaceToolExecutor | undefined;
+
+  setWorkspaceToolExecutor(executor: WorkspaceToolExecutor): void {
+    this.workspaceToolExecutor = executor;
+  }
 
   constructor(private readonly cfg: MigraAiConfig) {}
 
@@ -784,7 +796,10 @@ export class MigraAiClient {
     }
     let payload: Record<string, unknown>;
     try {
-      const result = await executeWorkspaceTool(tool, call.input);
+      if (!this.workspaceToolExecutor) {
+        throw new Error('this client has no workspace tool executor wired');
+      }
+      const result = await this.workspaceToolExecutor(tool, call.input);
       payload = { correlationId, callId, ok: true, result };
       this.cfg.log(`workspace tool ${tool} ran locally [${callId}]`);
     } catch (err) {
@@ -832,7 +847,14 @@ export class MigraAiClient {
          * call site that forgot the flag would silently run workspace tools on the
          * Brain host again, which is the bug this whole path exists to fix.
          */
-        body: JSON.stringify({ ...body, clientWorkspaceTools: true }),
+        body: JSON.stringify({
+          ...body,
+          clientWorkspaceTools: true,
+          // Declared so the Brain can refuse a MAJOR mismatch outright instead of
+          // sending a tool request this client would answer with the wrong shape —
+          // a wrong answer that parses is the failure mode with no symptom.
+          workspaceToolContract: CLIENT_CONTRACT_VERSION,
+        }),
         signal,
       });
     } catch (err) {
@@ -922,6 +944,27 @@ export class MigraAiClient {
    * retries model/tool selection. Failures throw a correlated {@link PilotError}.
    */
   async executeTool(request: ToolExecuteRequest, signal?: AbortSignal): Promise<ToolExecuteResult> {
+    /*
+     * A WORKSPACE TOOL RUNS HERE, WHOEVER ASKED FOR IT.
+     *
+     * Not only inside the agent loop. The operator's own approved apply reached
+     * the Brain through this method, which meant a change the user had just
+     * confirmed would have been written to the SERVER's filesystem — the same
+     * bug as the agent's, arriving by a different door and with the user's
+     * explicit blessing attached to it.
+     *
+     * Routing on the shared registry rather than on the call site means every
+     * present and future caller is correct by construction.
+     */
+    if (this.workspaceToolExecutor && CLIENT_EXECUTABLE_TOOL_IDS.includes(request.tool)) {
+      try {
+        const result = await this.workspaceToolExecutor(request.tool, request.input);
+        return { status: 'ok', tool: request.tool, result } as unknown as ToolExecuteResult;
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        return { status: 'error', tool: request.tool, error: message } as unknown as ToolExecuteResult;
+      }
+    }
     const body = await this.jsonRequest<Record<string, unknown>>('POST', TOOLS_PATH, request, signal);
     return body as unknown as ToolExecuteResult;
   }

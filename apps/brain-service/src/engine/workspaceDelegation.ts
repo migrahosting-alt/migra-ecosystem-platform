@@ -29,25 +29,16 @@
  * is the exact lie this module exists to remove.
  */
 
-/** Tools whose answer depends on the caller's filesystem, so the caller must run them. */
-export const CLIENT_WORKSPACE_TOOLS: ReadonlySet<string> = new Set([
-  'workspace.list',
-  'workspace.find',
-  'workspace.search',
-  'file.read',
-  'file.readRange',
-  'file.readSymbol',
-  'git.status',
-  'git.diff',
-  'git.history',
-  'git.blame',
-  'git.overview',
-  'diagnostics.get',
-  'fs.proposeChangeset',
-  'fs.applyChangeset',
-  'edit.preview',
-  'edit.apply',
-]);
+/*
+ * Tools whose answer depends on the caller's filesystem, so the caller must run
+ * them. NOT a list maintained here: it is derived from the canonical registry in
+ * @migrapilot/workspace-tools, so a tool cannot be delegated without also being
+ * classified, and cannot be classified one way here and another way in the
+ * client. A hand-kept copy in this file was the drift risk itself.
+ */
+import { CLIENT_EXECUTABLE_TOOL_IDS } from '@migrapilot/workspace-tools';
+
+export const CLIENT_WORKSPACE_TOOLS: ReadonlySet<string> = new Set(CLIENT_EXECUTABLE_TOOL_IDS);
 
 export interface DelegatedCall {
   callId: string;

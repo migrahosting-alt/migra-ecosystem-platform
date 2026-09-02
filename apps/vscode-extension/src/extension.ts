@@ -1,4 +1,6 @@
 import { capabilityStatusLine } from './services/capabilityContractVscode.js';
+import { createWorkspaceToolExecutor } from './services/workspaceTools.js';
+import { createVscodeWorkspaceHost } from './services/vscodeWorkspaceHost.js';
 import * as vscode from 'vscode';
 import { randomBytes } from 'node:crypto';
 import type { DiagnosticsGetResponse } from '@migrapilot/protocol';
@@ -271,6 +273,14 @@ async function ensureAgentAuthorization(root: string, explicitSecret?: string, b
 }
 
 export async function activate(context: vscode.ExtensionContext): Promise<MigraPilotApi> {
+  /*
+   * The client executes workspace tools, so give it the editor it needs.
+   * Wired at activation because diagnostics, symbols and the approval modal all
+   * require a live VS Code; without this the client refuses delegated tools
+   * truthfully rather than answering them wrongly.
+   */
+  migraAiClient.setWorkspaceToolExecutor(createWorkspaceToolExecutor(createVscodeWorkspaceHost()));
+
   agentBootstrapSecret = randomBytes(32).toString('base64url');
   inheritedAgentBootstrapSecret = process.env.MIGRAPILOT_AGENT_BOOTSTRAP_SECRET;
   delete process.env.MIGRAPILOT_AGENT_BOOTSTRAP_SECRET;

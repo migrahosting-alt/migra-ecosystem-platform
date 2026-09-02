@@ -1,41 +1,48 @@
 /*
  * THE WORKSPACE TOOLS, RUN WHERE THE WORKSPACE IS.
  *
- * These used to execute inside the Brain, which was fine while the Brain ran on
- * the developer's machine. Once it moved to a shared governed server the files
- * were no longer there: reads failed, and a directory listing came back EMPTY —
- * telling the agent the project had no files and inviting it to invent some.
+ * These executed inside the Brain while the Brain ran on the developer's
+ * machine. Once it moved to a shared governed server the files were no longer
+ * there: reads failed, and a directory listing came back EMPTY — telling the
+ * agent the project had no files and inviting it to invent some.
  *
- * So the Brain asks and the extension answers. Everything here is deliberately
- * plain filesystem work with no model in it: the Brain still decides WHAT to
- * look at and WHY, and this module only reports what is actually on disk.
+ * So the Brain plans and governs; this client executes. Two rules shape
+ * everything below.
  *
- * TWO RULES HOLD EVERY IMPLEMENTATION BELOW.
+ * ONE IMPLEMENTATION, NOT TWO THAT AGREE TODAY. The tree, file and git tools are
+ * imported from @migrapilot/workspace-tools — the same functions the Brain runs
+ * — rather than rewritten here. A second implementation would pass its own tests
+ * and drift on the first edge case nobody thought to mirror. Only tools that are
+ * genuinely EDITOR capabilities get a local adapter, and those are better here
+ * than in the Brain: real language-server symbols and real diagnostics, not a
+ * parser's approximation of them.
  *
- * 1. Absence is an ERROR, never an empty success. That distinction is the whole
- *    reason this module exists, and re-introducing a silent empty anywhere would
- *    recreate the original defect on the other side of the wire.
- * 2. Nothing here writes. Proposals are computed and returned for the operator
- *    to approve through the existing preview-and-apply path, which stays the
- *    only thing that touches the working tree.
+ * A PLANNER DOES NOT GET TO WRITE. The two mutating tools are gated on explicit
+ * operator approval, taken from the shared registry rather than remembered here,
+ * so a remote model cannot reach the working tree on its own say-so. A refusal is
+ * returned as a structured RESULT the agent can reason about, not an error that
+ * looks like a malfunction.
  */
 
-import { execFile } from 'node:child_process';
-import { promises as fs } from 'node:fs';
-import * as path from 'node:path';
-import { promisify } from 'node:util';
+import {
+  workspaceList,
+  workspaceFind,
+  workspaceSearch,
+  fileRead,
+  fileReadRange,
+  gitStatus,
+  gitDiff,
+  gitOverview,
+  gitHistory,
+  gitBlame,
+  workspaceToolMeta,
+  applyRequiresApproval,
+  WORKSPACE_TOOL_IDS,
+  WORKSPACE_TOOL_CONTRACT_VERSION,
+} from '@migrapilot/workspace-tools';
 
-const run = promisify(execFile);
-
-/** Tools this extension can answer. Anything else is refused by name, not ignored. */
-export const SUPPORTED_WORKSPACE_TOOLS = [
-  'workspace.list',
-  'file.read',
-  'git.status',
-  'fs.proposeChangeset',
-] as const;
-
-export type SupportedWorkspaceTool = (typeof SUPPORTED_WORKSPACE_TOOLS)[number];
+/** The contract this client speaks. Sent with every run so the Brain can refuse a mismatch. */
+export const CLIENT_CONTRACT_VERSION = WORKSPACE_TOOL_CONTRACT_VERSION;
 
 export class WorkspaceToolError extends Error {
   constructor(message: string) {
@@ -44,32 +51,38 @@ export class WorkspaceToolError extends Error {
   }
 }
 
+/**
+ * Editor capabilities this client provides, injected so the executor stays
+ * testable without a running VS Code.
+ */
+export interface WorkspaceToolHost {
+  /** Problems as the EDITOR sees them — every language server, not one parser. */
+  diagnostics(rootPath: string, filePath?: string): Promise<unknown>;
+  /** Symbols from the language server that owns the file. */
+  documentSymbols(rootPath: string, filePath: string): Promise<unknown>;
+  /**
+   * Ask the operator to approve a mutating change. Returning false is a normal
+   * answer, not a failure: the human declined.
+   */
+  requestApproval(summary: { tool: string; fileCount: number; paths: string[] }): Promise<boolean>;
+  /** Apply an approved changeset to the working tree. */
+  applyChangeset(input: { rootPath: string; ops: Array<Record<string, unknown>> }): Promise<unknown>;
+}
+
 const asRecord = (input: unknown): Record<string, unknown> =>
   input && typeof input === 'object' ? (input as Record<string, unknown>) : {};
 
-const str = (value: unknown): string | undefined => (typeof value === 'string' && value ? value : undefined);
+const str = (v: unknown): string | undefined => (typeof v === 'string' && v ? v : undefined);
 
 /**
- * Resolve a path INSIDE the root, refusing anything that escapes it.
- *
- * The Brain is a model-driven caller, so a traversal is a realistic accident
- * rather than a hypothetical: the boundary is enforced here, on the machine that
- * actually holds the files, not upstream where it could be reasoned around.
+ * Assert the root exists. The check whose ABSENCE caused the original defect:
+ * without it a missing workspace lists as empty, and "empty" is the answer that
+ * makes a model start inventing.
  */
-function contained(root: string, rel: string | undefined): string {
-  const base = path.resolve(root);
-  const target = path.resolve(base, rel ?? '.');
-  const withSep = base.endsWith(path.sep) ? base : base + path.sep;
-  if (target !== base && !target.startsWith(withSep)) {
-    throw new WorkspaceToolError(`path "${rel}" escapes the workspace root`);
-  }
-  return target;
-}
-
-/** Assert the root exists and is a directory — the check whose absence caused the original bug. */
-async function assertRoot(rootPath: string | undefined): Promise<string> {
+async function assertRoot(rootPath: unknown): Promise<string> {
   const root = str(rootPath);
   if (!root) throw new WorkspaceToolError('rootPath is required');
+  const { promises: fs } = await import('node:fs');
   let stat;
   try {
     stat = await fs.stat(root);
@@ -77,121 +90,30 @@ async function assertRoot(rootPath: string | undefined): Promise<string> {
     throw new WorkspaceToolError(`workspace root "${root}" does not exist on this machine`);
   }
   if (!stat.isDirectory()) throw new WorkspaceToolError(`workspace root "${root}" is not a directory`);
-  return path.resolve(root);
+  return root;
 }
 
-const SKIP_DIRS = new Set(['node_modules', '.git', 'dist', 'out', '.next', 'coverage']);
-const LIST_LIMIT = 500;
-const READ_LIMIT_BYTES = 512 * 1024;
-
-async function workspaceList(input: Record<string, unknown>): Promise<unknown> {
-  const root = await assertRoot(str(input.rootPath));
-  const dir = contained(root, str(input.path));
-  const maxDepth = typeof input.depth === 'number' ? input.depth : 0;
-  const limit = typeof input.limit === 'number' ? Math.min(input.limit, LIST_LIMIT) : LIST_LIMIT;
-
-  const entries: Array<{ path: string; type: string; size?: number }> = [];
-  let truncated = false;
-
-  const walk = async (current: string, depth: number): Promise<void> => {
-    if (truncated) return;
-    let dirents;
-    try {
-      dirents = await fs.readdir(current, { withFileTypes: true });
-    } catch {
-      // One unreadable directory must not sink the listing — but see assertRoot:
-      // the ROOT is checked separately, so this can never mean "workspace missing".
-      return;
-    }
-    dirents.sort((a, b) => a.name.localeCompare(b.name));
-    for (const d of dirents) {
-      if (entries.length >= limit) {
-        truncated = true;
-        return;
-      }
-      const abs = path.join(current, d.name);
-      const rel = path.relative(root, abs).split(path.sep).join('/');
-      if (d.isDirectory()) {
-        entries.push({ path: rel, type: 'dir' });
-        if (depth < maxDepth && !SKIP_DIRS.has(d.name)) await walk(abs, depth + 1);
-      } else if (d.isSymbolicLink()) {
-        entries.push({ path: rel, type: 'symlink' });
-      } else {
-        let size: number | undefined;
-        try {
-          size = (await fs.stat(abs)).size;
-        } catch {
-          size = undefined;
-        }
-        entries.push({ path: rel, type: 'file', ...(size === undefined ? {} : { size }) });
-      }
-    }
-  };
-
-  await walk(dir, 0);
-  return {
-    tool: 'workspace.list',
-    dir: path.relative(root, dir).split(path.sep).join('/') || '.',
-    entries,
-    truncated,
-  };
-}
-
-async function fileRead(input: Record<string, unknown>): Promise<unknown> {
-  const root = await assertRoot(str(input.rootPath));
-  const rel = str(input.path);
-  if (!rel) throw new WorkspaceToolError('path is required');
-  const target = contained(root, rel);
-  let stat;
-  try {
-    stat = await fs.stat(target);
-  } catch {
-    // Say it plainly. A model told a file is missing asks for a different one;
-    // a model handed empty content believes the file exists and is blank.
-    throw new WorkspaceToolError(`"${rel}" does not exist in this workspace`);
-  }
-  if (stat.isDirectory()) throw new WorkspaceToolError(`"${rel}" is a directory — use workspace.list`);
-  if (stat.size > READ_LIMIT_BYTES) {
-    throw new WorkspaceToolError(`"${rel}" is ${stat.size} bytes, larger than the ${READ_LIMIT_BYTES}-byte read limit`);
-  }
-  const text = await fs.readFile(target, 'utf8');
-  return { tool: 'file.read', path: rel, text, bytes: stat.size };
-}
-
-async function gitStatus(input: Record<string, unknown>): Promise<unknown> {
-  const root = await assertRoot(str(input.rootPath));
-  try {
-    const { stdout } = await run('git', ['status', '--porcelain=v1', '--branch'], { cwd: root, maxBuffer: 4 << 20 });
-    const lines = stdout.split('\n').filter(Boolean);
-    const branchLine = lines.find((l) => l.startsWith('##')) ?? '';
-    const files = lines
-      .filter((l) => !l.startsWith('##'))
-      .map((l) => ({ status: l.slice(0, 2).trim(), path: l.slice(3) }));
-    return { tool: 'git.status', branch: branchLine.replace(/^##\s*/, ''), files, clean: files.length === 0 };
-  } catch (err) {
-    throw new WorkspaceToolError(`git status failed: ${(err as Error).message}`);
-  }
-}
-
-/**
- * Compute a changeset PROPOSAL. Nothing is written here.
- *
- * Each op is resolved and classified against what is actually on disk, so the
- * Brain learns whether a "create" would in fact overwrite — a distinction the
- * operator needs before approving, and one only this machine can answer.
- */
-async function proposeChangeset(input: Record<string, unknown>): Promise<unknown> {
-  const root = await assertRoot(str(input.rootPath));
-  const ops = Array.isArray(input.ops) ? (input.ops as Array<Record<string, unknown>>) : [];
+/** Ops as the changeset tools describe them, resolved against what is really on disk. */
+async function resolveOps(root: string, rawOps: unknown): Promise<{
+  ops: Array<Record<string, unknown>>;
+  resolved: Array<{ op: string; path: string; exists: boolean; effect: string; bytes: number }>;
+  totalBytes: number;
+}> {
+  const ops = Array.isArray(rawOps) ? (rawOps as Array<Record<string, unknown>>) : [];
   if (!ops.length) throw new WorkspaceToolError('ops must contain at least one operation');
-
+  const { promises: fs } = await import('node:fs');
+  const path = await import('node:path');
   const resolved = [];
   let totalBytes = 0;
   for (const op of ops) {
     const rel = str(op.path);
     if (!rel) throw new WorkspaceToolError('every op needs a path');
-    const target = contained(root, rel);
-    const kind = str(op.op) ?? 'create';
+    const base = path.resolve(root);
+    const target = path.resolve(base, rel);
+    const withSep = base.endsWith(path.sep) ? base : base + path.sep;
+    if (target !== base && !target.startsWith(withSep)) {
+      throw new WorkspaceToolError(`path "${rel}" escapes the workspace root`);
+    }
     const content = typeof op.content === 'string' ? op.content : '';
     let exists = true;
     try {
@@ -199,43 +121,142 @@ async function proposeChangeset(input: Record<string, unknown>): Promise<unknown
     } catch {
       exists = false;
     }
-    totalBytes += Buffer.byteLength(content, 'utf8');
+    const bytes = Buffer.byteLength(content, 'utf8');
+    totalBytes += bytes;
+    const kind = str(op.op) ?? 'create';
     resolved.push({
       op: kind,
       path: rel,
       exists,
-      // Named explicitly so an approving human is never surprised by an overwrite.
+      // Named plainly so an approving human is never surprised by an overwrite.
       effect: kind === 'delete' ? 'delete' : exists ? 'overwrite' : 'create',
-      bytes: Buffer.byteLength(content, 'utf8'),
+      bytes,
     });
   }
+  return { ops, resolved, totalBytes };
+}
 
+/** Compute a proposal. Reads the disk to classify each op; writes nothing. */
+async function proposeChangeset(tool: string, args: Record<string, unknown>): Promise<unknown> {
+  const root = await assertRoot(args.rootPath);
+  const { ops, resolved, totalBytes } = await resolveOps(root, args.ops ?? args.changes);
   return {
-    tool: 'fs.proposeChangeset',
+    tool,
     fileCount: resolved.length,
     totalBytes,
     changeset: { rootPath: root, ops },
     ops: resolved,
-    // Stated, not implied: this call changed nothing.
     applied: false,
   };
 }
 
-/** Run one delegated workspace tool. Unknown tools are refused by name. */
-export async function executeWorkspaceTool(tool: string, input: unknown): Promise<unknown> {
-  const args = asRecord(input);
-  switch (tool) {
-    case 'workspace.list':
-      return workspaceList(args);
-    case 'file.read':
-      return fileRead(args);
-    case 'git.status':
-      return gitStatus(args);
-    case 'fs.proposeChangeset':
-      return proposeChangeset(args);
-    default:
-      throw new WorkspaceToolError(
-        `${tool} is not implemented by this client yet (supported: ${SUPPORTED_WORKSPACE_TOOLS.join(', ')})`,
-      );
+/**
+ * Apply — the only path that touches the working tree, and only with a human.
+ *
+ * The refusal is a RESULT rather than a thrown error on purpose: "the operator
+ * declined" is information the agent should reason about and explain, whereas an
+ * exception reads as a malfunction and invites it to retry the same call.
+ */
+async function applyChangeset(
+  tool: string,
+  args: Record<string, unknown>,
+  host: WorkspaceToolHost,
+): Promise<unknown> {
+  const root = await assertRoot(args.rootPath);
+  const { ops, resolved } = await resolveOps(root, args.ops ?? args.changes);
+
+  if (applyRequiresApproval(tool)) {
+    const approved = await host.requestApproval({
+      tool,
+      fileCount: resolved.length,
+      paths: resolved.map((o) => o.path),
+    });
+    if (!approved) {
+      return {
+        tool,
+        applied: false,
+        approved: false,
+        reason: 'the operator did not approve this change',
+        ops: resolved,
+      };
+    }
   }
+
+  const result = await host.applyChangeset({ rootPath: root, ops });
+  return { tool, applied: true, approved: true, ops: resolved, result };
 }
+
+/** Build an executor bound to this client's editor capabilities. */
+export function createWorkspaceToolExecutor(host: WorkspaceToolHost) {
+  return async function executeWorkspaceTool(tool: string, input: unknown): Promise<unknown> {
+    const args = asRecord(input);
+    const meta = workspaceToolMeta(tool);
+    if (!meta) {
+      // Refused BY NAME. An unknown tool answered with a plausible-looking empty
+      // result is far worse than one that says it does not exist.
+      throw new WorkspaceToolError(
+        `${tool} is not a declared workspace tool (declared: ${WORKSPACE_TOOL_IDS.join(', ')})`,
+      );
+    }
+
+    switch (tool) {
+      // ── Shared implementations: the SAME functions the Brain runs ───────────
+      case 'workspace.list':
+        await assertRoot(args.rootPath);
+        return workspaceList(args as never);
+      case 'workspace.find':
+        await assertRoot(args.rootPath);
+        return workspaceFind(args as never);
+      case 'workspace.search':
+        await assertRoot(args.rootPath);
+        return workspaceSearch(args as never);
+      case 'file.read':
+        await assertRoot(args.rootPath);
+        return fileRead(args as never);
+      case 'file.readRange':
+        await assertRoot(args.rootPath);
+        return fileReadRange(args as never);
+      case 'git.status':
+        await assertRoot(args.rootPath);
+        return gitStatus(args as never);
+      case 'git.diff':
+        await assertRoot(args.rootPath);
+        return gitDiff(args as never);
+      case 'git.overview':
+        await assertRoot(args.rootPath);
+        return gitOverview(args as never);
+      case 'git.history':
+        await assertRoot(args.rootPath);
+        return gitHistory(args as never);
+      case 'git.blame':
+        await assertRoot(args.rootPath);
+        return gitBlame(args as never);
+
+      // ── Editor capabilities: better HERE than in the Brain ──────────────────
+      case 'diagnostics.get': {
+        const root = await assertRoot(args.rootPath);
+        return host.diagnostics(root, str(args.path));
+      }
+      case 'file.readSymbol': {
+        const root = await assertRoot(args.rootPath);
+        const rel = str(args.path);
+        if (!rel) throw new WorkspaceToolError('path is required');
+        return host.documentSymbols(root, rel);
+      }
+
+      // ── Proposals (read-only) and applies (human-gated) ─────────────────────
+      case 'fs.proposeChangeset':
+      case 'edit.preview':
+        return proposeChangeset(tool, args);
+      case 'fs.applyChangeset':
+      case 'edit.apply':
+        return applyChangeset(tool, args, host);
+
+      default:
+        // Declared in the registry but not routed here — a real gap, named as one.
+        throw new WorkspaceToolError(`${tool} is declared but this client has no adapter for it yet`);
+    }
+  };
+}
+
+export type WorkspaceToolExecutor = ReturnType<typeof createWorkspaceToolExecutor>;

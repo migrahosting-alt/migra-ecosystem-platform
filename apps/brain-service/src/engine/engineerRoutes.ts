@@ -67,6 +67,7 @@ import { incidentManager } from './incidents.js';
 import { sanitizeError } from './redaction.js';
 import { recoveryManager, RecoveryError } from './recovery.js';
 import { nodeChangesetFs } from '../tools/changesetFs.js';
+import { contractCompatible, WORKSPACE_TOOL_CONTRACT_VERSION } from '@migrapilot/workspace-tools';
 import {
   WorkspaceDelegate,
   CLIENT_WORKSPACE_TOOLS,
@@ -103,6 +104,15 @@ const EngineerBodySchema = z.object({
    * answer once the Brain and the files live on different machines.
    */
   clientWorkspaceTools: z.boolean().optional(),
+  /**
+   * The workspace-tool contract the client speaks.
+   *
+   * Checked rather than trusted: a MAJOR mismatch means an existing tool's
+   * meaning or result shape changed, so the client's answer would be WRONG while
+   * still parsing — the failure mode with no symptom. Refusing the run is louder
+   * and cheaper than reasoning over a confidently mis-shaped result.
+   */
+  workspaceToolContract: z.string().optional(),
   requireApproved: z.boolean().optional(),
   /**
    * Explicit evidence-source mode. Supersedes `requireApproved`, which is kept for
@@ -540,6 +550,24 @@ export function registerEngineerRoutes(
      * created here because it needs `send`, and registered under the run's
      * correlation id so the separate result callback can find this suspended run.
      */
+    if (body.clientWorkspaceTools) {
+      const compat = contractCompatible(body.workspaceToolContract);
+      if (!compat.compatible) {
+        // Fail the run rather than fall back to running these on THIS host: the
+        // fallback answers questions about a filesystem the caller does not have,
+        // which is the original defect wearing a compatibility hat.
+        send('error', {
+          type: 'error',
+          code: 'WORKSPACE_CONTRACT_MISMATCH',
+          error: `${compat.reason}. Update the MigraPilot extension.`,
+          serverContract: WORKSPACE_TOOL_CONTRACT_VERSION,
+        });
+        send('done', { correlationId, outcome: 'refused', code: 'WORKSPACE_CONTRACT_MISMATCH' });
+        // No keepalive exists yet — the refusal happens before the heartbeat starts.
+        raw.end();
+        return;
+      }
+    }
     const delegate = body.clientWorkspaceTools
       ? // The client answers on a SEPARATE request, so the frame must carry the run's
         // identity: a callId alone would not tell it which run to reply to.

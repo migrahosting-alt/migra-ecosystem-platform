@@ -198,6 +198,15 @@
 !/packages/compute-client/src/*.ts
 !/packages/compute-client/test/
 !/packages/compute-client/test/*.mjs
+
+# The canonical workspace-tool contract + implementations, shared by the brain and
+# the VS Code client. It had tracked files but no allowlist entry, so new tools
+# could not be added to the one package that exists to stop them drifting apart.
+!/packages/workspace-tools/
+!/packages/workspace-tools/src/
+!/packages/workspace-tools/src/*.ts
+!/packages/workspace-tools/package.json
+!/packages/workspace-tools/tsconfig.json
 !/packages/compute-client/package.json
 !/packages/compute-client/tsconfig.json
 

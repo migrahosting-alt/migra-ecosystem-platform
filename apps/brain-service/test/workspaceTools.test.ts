@@ -11,6 +11,11 @@ import {
   WORKSPACE_TOOLS,
   WorkspaceToolError,
   type WorkspaceFs,
+  WORKSPACE_TOOL_IDS,
+  CLIENT_EXECUTABLE_TOOL_IDS,
+  workspaceToolMeta,
+  applyRequiresApproval,
+  contractCompatible,
 } from '@migrapilot/workspace-tools';
 
 // An in-memory WorkspaceFs for deterministic containment/write tests.
@@ -30,8 +35,42 @@ function memFs(files: Record<string, string>, opts: { root: string; failWriteOn?
 }
 
 test('metadata: canonical classification (diagnostics.get read-only; edit.apply mutating+approval+dry-run)', () => {
-  assert.deepEqual(WORKSPACE_TOOLS['diagnostics.get'], { id: 'diagnostics.get', readOnly: true, mutating: false, approvalRequired: false, supportsDryRun: false });
-  assert.deepEqual(WORKSPACE_TOOLS['edit.apply'], { id: 'edit.apply', readOnly: false, mutating: true, approvalRequired: true, supportsDryRun: true });
+  assert.deepEqual(WORKSPACE_TOOLS['diagnostics.get'], { id: 'diagnostics.get', readOnly: true, mutating: false, approvalRequired: false, supportsDryRun: false, clientExecutable: true });
+  assert.deepEqual(WORKSPACE_TOOLS['edit.apply'], { id: 'edit.apply', readOnly: false, mutating: true, approvalRequired: true, supportsDryRun: true, clientExecutable: true });
+});
+
+// The registry is the ONE place a tool is named and authorized, so its contents
+// are pinned here: a tool added without a decision about mutation and approval,
+// or quietly reclassified on one side, fails this test rather than shipping.
+test('metadata: the full governed surface is declared, with exactly two mutating tools', () => {
+  assert.deepEqual(
+    [...WORKSPACE_TOOL_IDS].sort(),
+    [
+      'diagnostics.get', 'edit.apply', 'edit.preview', 'file.read', 'file.readRange', 'file.readSymbol',
+      'fs.applyChangeset', 'fs.proposeChangeset', 'git.blame', 'git.diff', 'git.history', 'git.overview',
+      'git.status', 'workspace.find', 'workspace.list', 'workspace.search',
+    ],
+    'the governed workspace surface changed — classify the new tool here, deliberately',
+  );
+  const mutating = WORKSPACE_TOOL_IDS.filter((id) => workspaceToolMeta(id)!.mutating).sort();
+  assert.deepEqual(mutating, ['edit.apply', 'fs.applyChangeset']);
+  // Anything that mutates must require approval. A planner does not get to write.
+  for (const id of mutating) assert.equal(applyRequiresApproval(id), true, id);
+});
+
+test('metadata: every declared tool answers from the caller workspace', () => {
+  // If this ever stops being true, delegation needs a per-tool decision rather
+  // than a blanket one — so the assumption is pinned instead of assumed.
+  assert.deepEqual([...CLIENT_EXECUTABLE_TOOL_IDS].sort(), [...WORKSPACE_TOOL_IDS].sort());
+});
+
+test('contract: a major mismatch is incompatible; a missing version is refused', () => {
+  assert.equal(contractCompatible('1.0.0').compatible, true);
+  assert.equal(contractCompatible('1.4.2').compatible, true, 'a newer minor client is fine');
+  assert.equal(contractCompatible('2.0.0').compatible, false);
+  assert.equal(contractCompatible(undefined).compatible, false);
+  assert.equal(contractCompatible('nonsense').compatible, false);
+  assert.match(contractCompatible('2.0.0').reason ?? '', /major mismatch/);
 });
 
 test('containment: absolute path + `..` traversal are refused', () => {
