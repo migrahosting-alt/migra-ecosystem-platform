@@ -14,7 +14,7 @@
   "activeLane": {
     "name": "MigraPilot VS Code Extension on the governed Brain",
     "objective": "The extension is the product surface under test. It must use the single production Brain (db-core persistence, governed), never a local dev instance.",
-    "currentStep": "Target A activated, hardened, and now access-controlled by tailnet USER identity. Remaining: the owner's extension-UI acceptance pass, which also covers the mockup design-read seam.",
+    "currentStep": "Workspace delegation shipped and proven over the wire. Next: the owner's extension-UI pass (attach the mockup and check the proposed files), then implementing the remaining 12 client-side tools.",
     "beforeTopology": {
       "extension": "http://127.0.0.1:3988 — set in BOTH Machine and workspace settings",
       "thatBrain": "LOCAL dev instance on the workstation. persistence=sqlite, reason 'default local/dev/test adapter'. MIGRAPILOT_BRAIN_DATABASE_URL and DATABASE_URL both UNSET. Governance NOT available.",
@@ -268,7 +268,11 @@
         "C. Sync or mount the workspace onto VM111. Copies the developer's source to a server; heaviest, and raises data-location questions."
       ],
       "recommendation": "A is the correct architecture; B is the pragmatic interim that keeps governance intact.",
-      "status": "OPEN — owner decision required"
+      "status": "FIXED — delegation shipped and proven live (release delegate-09020500)",
+      "fix": "Option A: the client runs the workspace tools. Brain emits event: tool_request over the existing SSE stream; the extension executes locally and POSTs to /api/ai/engineer/tool-result. Client-initiated throughout, so no inbound path to a developer machine is needed, and the agent loop is unchanged — it awaits executeTool as before and cannot tell where the work ran.",
+      "provenLive": "A file planted seconds earlier with an unguessable name (zz-marker-7741.txt), existing ONLY on the workstation, was named back by the agent running on VM111. It could not have been guessed. Delegated calls in that run: workspace.list and fs.proposeChangeset, both executed by the compiled extension module.",
+      "safety": "Every delegated call settles: a deadline per call, disposal on stream close AND on completion, and a timeout surfaces as a tool FAILURE — never an empty success. Delegation is opt-in so an older client cannot deadlock. Client tools propose without writing and contain paths to the root.",
+      "partialCoverage": "4 of 16 tools implemented client-side so far: workspace.list, file.read, git.status, fs.proposeChangeset. The rest are refused BY NAME, so the gap is diagnosable rather than silent. Remaining: workspace.find, workspace.search, file.readRange, file.readSymbol, git.diff, git.history, git.blame, git.overview, diagnostics.get, fs.applyChangeset, edit.preview, edit.apply."
     }
   ],
   "driftControl": [
@@ -369,6 +373,12 @@
       "verdict": "WRONG, withdrawn. Tailscale has no deny rule.",
       "detail": "The policy model is default-deny with explicit accepts, so you cannot except one port from a permissive tailnet — you must replace the blanket accept and enumerate everything, across every production server, with lockout risk. The boundary was expressible in the application instead: require a tailnet USER identity, which Serve supplies for user-owned nodes and withholds for tagged servers.",
       "corrected": "Implemented as a Brain-side identity gate; ACL restructuring left as an optional separate lane."
+    },
+    {
+      "claim": "\"The engineer path broke — PROVIDER_CONNECT_TIMEOUT after the delegation change.\"",
+      "verdict": "NOT CAUSED BY THE CHANGE. Transient cold-model load.",
+      "detail": "An engineer run failed with a 240s connect timeout to the Ollama provider, which looked like a regression. Two controls disproved it: the same request with clientWorkspaceTools=false failed identically, and once qwen2.5-coder:14b (15GB) was resident both succeeded. A separate false step: Ollama appeared unreachable on its tailnet IP when probed FROM WSL, but the Brain connects from VM111, where it answered in 0.26s — the wrong vantage point, not a fault.",
+      "corrected": "Provider timeouts under cold load are a capacity signal, not evidence about the delegation path."
     }
   ],
   "promisesVsReality": [
