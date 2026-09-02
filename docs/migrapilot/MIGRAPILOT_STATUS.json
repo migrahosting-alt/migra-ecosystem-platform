@@ -14,7 +14,7 @@
   "activeLane": {
     "name": "MigraPilot VS Code Extension on the governed Brain",
     "objective": "The extension is the product surface under test. It must use the single production Brain (db-core persistence, governed), never a local dev instance.",
-    "currentStep": "Target A ACTIVATED and hardened. Remaining: the owner's extension-UI acceptance pass (which also covers the mockup design-read seam), and a decision on whether tailnet-wide reach needs an ACL.",
+    "currentStep": "Target A activated, hardened, and now access-controlled by tailnet USER identity. Remaining: the owner's extension-UI acceptance pass, which also covers the mockup design-read seam.",
     "beforeTopology": {
       "extension": "http://127.0.0.1:3988 — set in BOTH Machine and workspace settings",
       "thatBrain": "LOCAL dev instance on the workstation. persistence=sqlite, reason 'default local/dev/test adapter'. MIGRAPILOT_BRAIN_DATABASE_URL and DATABASE_URL both UNSET. Governance NOT available.",
@@ -70,6 +70,28 @@
       "defectFoundAndFixed": "Repointing exposed a real fallback: BrainLifecycle.ensureRunning had NO loopback guard, so an unreachable REMOTE endpoint took the same branch as a missing local brain and spawned one from apps/brain-service — a second Brain on different persistence, looking healthy while answering from an ungoverned store. Fixed: a distinct 'remote' result (not 'disabled', which is a different fact), a status bar message that is true, and isLocalBrainUrl that PARSES rather than substring matches. 6 regression tests; suite 861/861.",
       "openDecision": "tailscale serve authenticates by TAILNET MEMBERSHIP, not per user, and /api/ai/chat still takes no per-request token. Every tailnet node can reach the Brain. Consistent with pg_hba, which already trusts the whole tailnet, but weaker than per-user auth. A Tailscale ACL restricting the served port is the mechanism if the owner wants tighter.",
       "notProven": "The 10-item acceptance list through the actual extension UI is NOT done. Everything above was measured over the wire. The extension has been repackaged and reinstalled; the UI gate is the owner's to run after a window reload."
+    },
+    "tailnetIdentityGate": {
+      "status": "PROVEN_LIVE 2026-09-01. Deployed as release identgate-09020310 (rollback ident-09020230, then gov-09012017).",
+      "problem": "Serving the Brain over the tailnet made it reachable by every node on it. Measured: mail-core and voip-core — a mail server and a VoIP box — both returned 200 on /health.",
+      "whyNotAnAcl": "Tailscale's policy model is default-deny with explicit ACCEPTS and no deny rule, so a permissive tailnet cannot have a single port carved out of it. Tightening would mean re-enumerating every rule across 8+ production servers, with real lockout risk. An earlier report called the ACL 'the mechanism' — that was wrong and is withdrawn.",
+      "measuredBeforeBuilding": {
+        "user-owned node via Serve": "identity PRESENT (login + name), x-forwarded-for set",
+        "tagged server via Serve": "identity absent, x-forwarded-for set",
+        "on-host loopback": "identity absent, x-forwarded-for ABSENT"
+      },
+      "spoofTested": "mail-core sent its own Tailscale-User-Login header and arrived with NO identity: Serve overrides client-supplied identity headers. A proxied request also cannot hide by omitting x-forwarded-for, because Serve sets it.",
+      "trustCondition": "Holds only while the Brain is loopback-bound and Serve is the sole route in. Stated in code at the point of use.",
+      "liveVerification": [
+        "workstation (user): /health 200; chat -> qwen3:8b returned the exact sentinel GATE-OK",
+        "workstation (user): image turn -> governed qwen2.5vl:7b read the planted 8317",
+        "workstation (user): durable conversation write succeeded",
+        "mail-core: 403 TAILNET_IDENTITY_REQUIRED on /api/ai/models",
+        "voip-core: 403 TAILNET_IDENTITY_REQUIRED on /api/ai/models",
+        "on-host loopback: /api/ai/models 200 — monitoring untouched"
+      ],
+      "escapeHatches": "MIGRAPILOT_BRAIN_REQUIRE_TAILNET_IDENTITY=0 disables enforcement without a redeploy. MIGRAPILOT_BRAIN_ALLOWED_LOGINS narrows to named users; empty means any tailnet user, not nobody. /health and /api/identity/whoami stay exempt.",
+      "tests": "apps/brain-service/test/tailnetIdentity.test.ts — suite 2119/2119."
     }
   },
   "capabilities": {
@@ -316,6 +338,12 @@
       "verdict": "PARTLY FALSE. The document asserts a pg_hba restriction production does not have.",
       "detail": "The doc states pg_hba is limited to 10.10.0.13/32 and 100.95.14.29/32 with scram-sha-256. pg_hba_file_rules has no rule naming the brain database or role; access comes from 'host all all 100.64.0.0/10' and 'host all all 10.10.0.0/24'. The role also carries CREATEROLE where the doc says NOCREATEROLE. Treat that document as the INTENT of the cutover, not as evidence of the current boundary.",
       "corrected": "Phase 3 now records measured catalog facts; the acceptance doc is demoted to intent."
+    },
+    {
+      "claim": "\"A Tailscale ACL is the mechanism for restricting the served Brain port.\"",
+      "verdict": "WRONG, withdrawn. Tailscale has no deny rule.",
+      "detail": "The policy model is default-deny with explicit accepts, so you cannot except one port from a permissive tailnet — you must replace the blanket accept and enumerate everything, across every production server, with lockout risk. The boundary was expressible in the application instead: require a tailnet USER identity, which Serve supplies for user-owned nodes and withholds for tagged servers.",
+      "corrected": "Implemented as a Brain-side identity gate; ACL restructuring left as an optional separate lane."
     }
   ],
   "promisesVsReality": [

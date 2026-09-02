@@ -170,6 +170,45 @@ so `localhost.evil.example` is not loopback. Six regression tests; suite **861/8
 
 ---
 
+## Tailnet identity gate — PROVEN_LIVE 2026-09-01
+
+Serving the Brain over the tailnet made it reachable by **everything** on the tailnet. Measured, not
+theorised: `mail-core` and `voip-core` — a mail server and a VoIP box — both returned `200` on
+`/health`.
+
+**An ACL could not fix this, and saying it could was wrong.** Tailscale's policy model is default-deny
+with explicit *accepts* and no deny rule, so a permissive tailnet cannot have one port carved out of
+it. Tightening would mean re-enumerating every rule across 8+ production servers, with real lockout
+risk. That earlier recommendation is withdrawn.
+
+The boundary was expressible in the application instead. Three caller shapes were measured against the
+live endpoint **before any rule was written**:
+
+| Caller | identity | `x-forwarded-for` |
+|---|---|---|
+| user-owned node via Serve | **present** | set |
+| tagged server via Serve | absent | set |
+| on-host loopback | absent | **absent** |
+
+So `x-forwarded-for` answers *"did this come through Serve"* and the identity headers answer *"is
+there a person behind it"*. Identity-less requests are refused only when proxied, which leaves on-host
+monitoring and local services untouched.
+
+**Spoofing was tested, not assumed.** `mail-core` sending its own `Tailscale-User-Login` arrived with
+no identity at all — Serve overrides client-supplied identity headers. A proxied request also cannot
+hide by omitting `x-forwarded-for`, because Serve sets it. The remaining trust condition — loopback
+binding, Serve as the only route in — is stated in code at the point of use.
+
+Verified live: workstation gets `200` and a real chat (`GATE-OK`) plus a governed vision turn (`8317`)
+and a durable write; `mail-core` and `voip-core` both get **403 `TAILNET_IDENTITY_REQUIRED`**; on-host
+loopback still `200`. Suite **2119/2119**.
+
+Escape hatches: `MIGRAPILOT_BRAIN_REQUIRE_TAILNET_IDENTITY=0` disables enforcement without a redeploy;
+`MIGRAPILOT_BRAIN_ALLOWED_LOGINS` narrows to named users (empty means *any tailnet user*, not nobody);
+`/health` and `/api/identity/whoami` stay exempt.
+
+---
+
 ## Standing rules
 
 | Rule | Meaning |
