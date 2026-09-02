@@ -7,11 +7,63 @@ Why this exists: work kept discovering something, moving three lanes away, and t
 reconstruct what was finished — or why a decision was made — from conversation history. Every agent
 (Claude, Engineer, MigraPilot) reads this instead.
 
-_Last updated: 2026-08-30_
+_Last updated: 2026-09-01_
 
 > ⚠️ `CLAUDE.md` and `AGENTS.md` are **gitignored** in this repository, so the pointers added there are
 > local only. This file and its JSON are the tracked copies — link to `docs/migrapilot/` from any new
 > instruction file rather than relying on a root-level one to travel.
+
+---
+
+## Lane 2026-09-01 — An attached mockup can be BUILT, not only described
+
+`PROVEN_LIVE`. Images used to be routed away from the workspace agent because the agent loop has no
+vision. That branch was correct and also terminal: sight and tools sat on opposite sides of it, so
+"build this mockup" could only ever produce prose. **The capability was not missing — it was
+unreachable.**
+
+The governed vision model now reads the image once into a literal spec, and the agent builds from
+that text with every tool it already had. Neither side gains the other's capability. The read is a
+registered dispatch site (`design_read`), so an interrupted read is recorded as interrupted, and an
+empty read deliberately does *not* enter the agent — that would be building blind.
+
+**Proven live, not inferred:** a real PNG mockup through the production Brain routed to
+`qwen2.5vl:7b` and read back every element including a small `8317` badge planted to catch a
+plausible guess. The derived spec *alone, with no image*, then rebuilt all 9 elements as real HTML
+with working inputs and a button, rendering with the badge in its mockup position.
+
+**Two honest limits.** Layout fidelity is the coding model's: the sidebar rebuilt as a stacked
+full-width block, not a left column. And a single vision read is unreliable — see the omission
+defect below. Requires `migrapilot.enableWorkspaceAgent = true` (off by default).
+
+### What measurement changed
+
+A first read scored 8/9 and one tightened prompt scored 9/9 — which looked like a fix. Replicating
+disproved it: the next run scored **3/9**. Across eight runs the same mockup returned the full set
+five times and dropped whole regions in the rest, at essentially unchanged output length. That is
+omission, not truncation, and the chat path exposes no temperature or seed to turn it down. A second
+pass now asks the model what its *own* transcription is missing; across six runs the worst case
+improved from 3/9 to 8/9 with no region dropped. Mitigated, not eliminated.
+
+## Deploy 2026-09-01 — governance readiness, and a boot test that proved less than claimed
+
+Brain release `gov-09012017` is live on VM111 (rollback `vision-09011820`). Production reports
+`governance: ready`, `persistence: ready`, schema 24, `migrationState: current`.
+
+Two corrections went into the JSON's drift control:
+
+- **Phase 8 was not blocked.** Production already enforces a governed vision decision
+  (`vision.general` → `qwen2.5vl:7b` against an exact digest). An earlier probe seemed to show a
+  fail-closed `null` only because it read keys the route does not emit. The registry was right; the
+  probe was wrong.
+- **Spare-port boot tests never loaded the production environment.** `/etc/migrapilot/*.env` is
+  root-only, so sourcing it as the service user read nothing, and older builds silently fell back to
+  SQLite — so the test passed while proving almost nothing. The new fail-closed persistence rule is
+  what exposed it, by refusing to start. Releases now swap through systemd, which reads the env as
+  root, with a named rollback target.
+
+**Still blocked:** Phase 3 needs the db name and role from the operator, and the owner's constraint
+is that Phase 3 precedes any exposure change (`tailscale serve` for target A).
 
 ---
 

@@ -1,7 +1,7 @@
 {
   "$schema": "MIGRAPILOT_STATUS — canonical cross-agent state. Update on every material change.",
   "updated": "2026-09-01",
-  "updatedBy": "Claude Opus 5 — extension on the governed Brain",
+  "updatedBy": "Claude (Opus 5) — design-read seam + governance readiness deploy",
   "rules": {
     "easyFirst": "Do not start deep capability work while meaningful easy user-facing items remain.",
     "provenLive": "PROVEN_LIVE requires the real user-facing workflow to pass. Code existing and tests passing is NOT proof.",
@@ -14,7 +14,7 @@
   "activeLane": {
     "name": "MigraPilot VS Code Extension on the governed Brain",
     "objective": "The extension is the product surface under test. It must use the single production Brain (db-core persistence, governed), never a local dev instance.",
-    "currentStep": "Bridge C PROVEN_LIVE. Next slice is A — an authenticated HTTPS endpoint on VM111 with the Brain staying loopback-bound.",
+    "currentStep": "Brain redeployed with readiness.governance (release gov-09012017): production now reports governance=ready, persistence=ready, schema 24. Vision qualification verified ENFORCED on production (vision.general -> qwen2.5vl:7b; object_counting deliberately unqualified). Design-read seam shipped: an attached mockup is read into a literal spec and handed to the tool-capable agent. STILL BLOCKED: Phase 3 needs the db name and role from the operator, and the owner's constraint is that Phase 3 precedes any exposure change (tailscale serve for A).",
     "beforeTopology": {
       "extension": "http://127.0.0.1:3988 — set in BOTH Machine and workspace settings",
       "thatBrain": "LOCAL dev instance on the workstation. persistence=sqlite, reason 'default local/dev/test adapter'. MIGRAPILOT_BRAIN_DATABASE_URL and DATABASE_URL both UNSET. Governance NOT available.",
@@ -80,7 +80,9 @@
       "Message feedback + report bad answer (Chat matrix rows 67, 68) — thumbs persist against the exact message, negative feedback captures a structured reason and optional note, changing a vote updates one row, retracting removes it, state survives reload, and a failed write leaves NOTHING selected. Full acceptance path passed live 2026-08-28 (brain fb-08280112, consumer fbui-08280112).",
       "Picker/storage agreement (Chat matrix 22-24) — one canonical attachment definition drives the picker, validator, refusal copy and published contract. 35 offered = 35 accepted, and a binary file wearing a text extension is refused. Proven live 2026-08-28 (consumer sniff-08280125).",
       "Unified attachment system — one canonical contract classifies by extension, MIME and BYTES, then dispatches to the image or document pipeline. A PNG chosen through Files becomes an image; a PDF and a photo attach to the same turn and are reasoned over jointly. Proven live 2026-08-28 (consumer unified-08280202).",
-      "Voice input / ASR (Chat matrix row 8) — RESTORED to LIVE 2026-08-28 after the MIME-parameter regression. Bonex used the real consumer microphone and produced an editable transcription."
+      "Voice input / ASR (Chat matrix row 8) — RESTORED to LIVE 2026-08-28 after the MIME-parameter regression. Bonex used the real consumer microphone and produced an editable transcription.",
+      "Attached mockup -> buildable spec (design read)",
+      "Governed vision qualification enforced end to end"
     ],
     "STABILIZATION": [
       {
@@ -169,6 +171,17 @@
       ],
       "longerTermDirection": "Do not rely on an LLM alone for arithmetic over CSV. MigraPilot should detect that a request is a DETERMINISTIC DATA OPERATION, route it through a table/data tool, and let the model explain the result rather than compute it.",
       "provenance": "Arose from the 9/10 citation pass. That run is preserved verbatim and was NOT rewritten to 10/10."
+    },
+    {
+      "id": "vision-read-omission-variance",
+      "title": "A single vision read of a mockup silently drops whole regions",
+      "symptom": "Eight reads of the SAME mockup through the governed path returned the full 9-element set five times; the others dropped regions (sidebar, card heading), once falling to 3/9. Output length barely moved (1231 chars for both a 5/9 and a 9/9 read), so this is omission, not truncation.",
+      "evidence": "Measured live against qwen2.5vl:7b via the production Brain, 8 runs then 6 runs.",
+      "rootCause": "Model non-determinism. The chat path exposes no temperature, top_p or seed at the route or provider layer, so the variance cannot be turned down — only caught.",
+      "status": "MITIGATED, NOT ELIMINATED",
+      "mitigation": "A second pass asks the model what its own transcription is missing, with the image still in front of it. Across 6 runs the worst case improved from 3/9 to 8/9 and no run dropped a region. Mean is still below 9/9, so a complex design can lose detail.",
+      "regressionTest": "apps/vscode-extension/src/test/unit/designRead.test.ts (11 tests)",
+      "liveAcceptance": "Re-measure element carry-through when a determinism knob or a stronger vision model lands."
     }
   ],
   "driftControl": [
@@ -245,6 +258,18 @@
       "howItSurfaced": "Only because the intent fix was deployed FIRST and the reported sentence still reproduced verbatim. With the routing correct and the behaviour unchanged, the remaining cause had nowhere left to hide.",
       "lesson": "A partially true claim survives code reading, because the half you check is the half that holds. Fixing one cause and re-testing is what separates them.",
       "recordedOn": "2026-08-27"
+    },
+    {
+      "claim": "\"Vision is not approved on production (approved: []) — Phase 8 is blocked.\"",
+      "verdict": "STALE / WRONG. Production already enforces a governed vision decision.",
+      "detail": "/api/ai/vision-registry on production returns enforced=true with vision.general qualified to qwen2.5vl:7b against an exact digest, and names it as the model an image turn would actually use. A first probe appeared to show a fail-closed null only because it read keys ('byState', 'defaultDecision') the route does not emit — the real keys are 'registry' and 'default'. The registry was right; the probe was wrong.",
+      "corrected": "Phase 8 recorded as satisfied on production, verified live with a real image."
+    },
+    {
+      "claim": "\"A spare-port boot test proves a Brain release works under production configuration.\"",
+      "verdict": "DISPROVEN. Those boot tests never loaded the production environment.",
+      "detail": "/etc/migrapilot/*.env is root-only, so 'sudo -u migrapilot bash -c . brain.env' sourced NOTHING and the candidate booted on defaults. Older builds silently fell back to SQLite, so the test passed while proving almost nothing; the new fail-closed persistence rule is what exposed it, by refusing to start. Releases are now swapped through systemd, which reads the env as root, with a named rollback target.",
+      "corrected": "Boot-test claims downgraded; deploy verification is post-swap health + readiness axes."
     }
   ],
   "promisesVsReality": [
@@ -266,6 +291,11 @@
     {
       "surface": "Historical file card on a user turn",
       "reality": "Renders live and after reload; does NOT indicate when the underlying file was deleted.",
+      "provenLive": true
+    },
+    {
+      "surface": "Attach a UI mockup and ask MigraPilot to build it",
+      "reality": "The image is read once into a literal spec by the governed vision model and handed to the tool-capable agent, so a mockup now reaches the build path instead of stopping at a description. Measured on the live Brain: the spec alone, with no image, rebuilt all 9 mockup elements as real HTML with working inputs and a button, and rendered with the header badge in its mockup position. LIMIT: layout fidelity is the coding model's — the sidebar rebuilt as a stacked full-width block rather than a left column. Requires migrapilot.enableWorkspaceAgent = true.",
       "provenLive": true
     }
   ],
