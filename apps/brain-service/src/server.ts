@@ -20,6 +20,11 @@ import { retrieveContext } from './retrieval/retrieve.js';
 import { decideRoute } from './router/policy.js';
 import { registerToolRoutes } from './tools/index.js';
 import { registerAiRoutes } from './engine/aiRoutes.js';
+import {
+  readTailnetIdentity,
+  decideTailnetAccess,
+  IDENTITY_EXEMPT_PATHS,
+} from './engine/tailnetIdentity.js';
 import { registerToolExecutionRoutes } from './engine/toolRoutes.js';
 import { registerInspectRoutes } from './engine/inspectRoutes.js';
 import { registerCommandRunRoutes } from './engine/commandRunRoutes.js';
@@ -298,7 +303,79 @@ async function main(): Promise<void> {
     });
   });
 
+  /*
+   * TAILNET IDENTITY GATE.
+   *
+   * Any node on the tailnet can open a connection to the served endpoint —
+   * measured, not theorised: mail-core and voip-core both got 200 on /health.
+   * Tailscale's policy model has no deny rule, so an ACL cannot carve this one
+   * port out of a permissive tailnet without restructuring every rule on it.
+   * This expresses the boundary where it can actually be expressed: a request
+   * arriving through Serve must carry a PERSON.
+   *
+   * On-host callers are untouched (no x-forwarded-for), so monitoring and local
+   * services keep working. Set MIGRAPILOT_BRAIN_REQUIRE_TAILNET_IDENTITY=0 to
+   * disable without a redeploy if this ever refuses something it should not.
+   */
+  const identityEnforced = process.env.MIGRAPILOT_BRAIN_REQUIRE_TAILNET_IDENTITY !== '0';
+  const allowedLogins = (process.env.MIGRAPILOT_BRAIN_ALLOWED_LOGINS ?? '')
+    .split(',')
+    .map((l) => l.trim())
+    .filter(Boolean);
+  app.addHook('onRequest', async (request, reply) => {
+    const path = request.url.split('?')[0] ?? '';
+    if (IDENTITY_EXEMPT_PATHS.includes(path)) return;
+    const decision = decideTailnetAccess(
+      request.headers as Record<string, string | string[] | undefined>,
+      { enforce: identityEnforced, allowedLogins },
+    );
+    if (decision.allow) return;
+    request.log.warn(
+      { path, reason: decision.reason, forwardedFor: request.headers['x-forwarded-for'] },
+      'refused: tailnet request without an allowed user identity',
+    );
+    reply.code(403);
+    // Say WHY and how to diagnose it, rather than a bare 403 someone has to guess at.
+    return reply.send({
+      ok: false,
+      code: 'TAILNET_IDENTITY_REQUIRED',
+      error:
+        decision.reason === 'tagged_node_without_user'
+          ? 'This Brain is reachable only to tailnet users, not to tagged nodes. Call it from a user-owned device.'
+          : 'That tailnet user is not on this Brain\'s allowlist.',
+      diagnose: '/api/identity/whoami reports the identity this Brain actually received.',
+    });
+  });
+
   app.get('/health', async () => getHealth());
+  /*
+   * OBSERVE-ONLY identity probe. It reflects the caller's OWN tailnet identity
+   * back to them and nothing else, so it discloses nothing they do not already
+   * know. It exists because enforcement must not be built on an assumption
+   * about which headers Serve actually sends — this measures it, on the real
+   * path, before any request is refused on that basis.
+   */
+  app.get('/api/identity/whoami', async (request) => {
+    const identity = readTailnetIdentity(request.headers as Record<string, string | string[] | undefined>);
+    const h = request.headers as Record<string, string | string[] | undefined>;
+    return {
+      identity,
+      /*
+       * An identity-less request is AMBIGUOUS and must not be refused on that
+       * alone: it is either a tagged node arriving through Serve, or an on-host
+       * caller (monitoring, a local service) talking straight to loopback. Those
+       * deserve opposite answers, so this records what actually distinguishes
+       * them before any rule is written.
+       */
+      forwardedFor: h['x-forwarded-for'] ?? null,
+      forwardedProto: h['x-forwarded-proto'] ?? null,
+      forwardedHost: h['x-forwarded-host'] ?? null,
+      hostHeader: h.host ?? null,
+      remoteAddress: request.ip,
+      // Stated so the trust boundary is visible at the point of use, not only in a doc.
+      trustworthyOnlyIf: 'the Brain is loopback-bound and reached exclusively through tailscale serve',
+    };
+  });
   app.get('/api/ai/version', async () => engineVersion((await durable?.health())?.schemaVersion ?? 0));
   app.post<{ Body: RouteRequest }>('/route', async (request) => decideRoute(request.body));
   app.post<{ Body: RetrieveRequest }>('/retrieve', async (request) => retrieveContext(request.body));
