@@ -67,6 +67,13 @@ import { incidentManager } from './incidents.js';
 import { sanitizeError } from './redaction.js';
 import { recoveryManager, RecoveryError } from './recovery.js';
 import { nodeChangesetFs } from '../tools/changesetFs.js';
+import {
+  WorkspaceDelegate,
+  CLIENT_WORKSPACE_TOOLS,
+  registerDelegate,
+  unregisterDelegate,
+  delegateFor,
+} from './workspaceDelegation.js';
 
 /** Total characters of seeded code the agent is given. Enough for a few whole
  * definitions; beyond that a small local model loses the question itself. */
@@ -86,6 +93,16 @@ const EngineerBodySchema = z.object({
    * checkout. Defaults to false, so existing callers keep today's behaviour — but
    * their evidence is now LABELLED with its source mode.
    */
+  /**
+   * The CALLER holds the workspace, so the caller runs the workspace tools.
+   *
+   * Opt-in and explicit: an older client that cannot service tool_request frames
+   * must keep today's behaviour rather than deadlock waiting for an answer it
+   * will never send. When set, filesystem tools are delegated back over the SSE
+   * stream instead of being run against this host — which is the only correct
+   * answer once the Brain and the files live on different machines.
+   */
+  clientWorkspaceTools: z.boolean().optional(),
   requireApproved: z.boolean().optional(),
   /**
    * Explicit evidence-source mode. Supersedes `requireApproved`, which is kept for
@@ -293,6 +310,44 @@ export function registerEngineerRoutes(
   // Read-only store health/telemetry (Slice 2). Aggregate health + counters +
   // eviction stats + a small recent-events window — NO proposal bodies, approval
   // tokens, raw paths, or request data. Local, non-production.
+  /*
+   * The other half of delegation: the client's answer to one tool_request.
+   *
+   * Addressed by correlation id + call id. The correlation id is already
+   * unguessable and already how the audit trail names a run, so there is one
+   * notion of "which run" rather than a second parallel token. An unknown pair
+   * is a 404 rather than a silent success: a result that lands nowhere means the
+   * run is waiting on something it will never receive, and that must be visible.
+   */
+  app.post<{ Body: { correlationId?: string; callId?: string; ok?: boolean; result?: unknown; error?: string } }>(
+    '/api/ai/engineer/tool-result',
+    async (request, reply) => {
+      const body = request.body ?? {};
+      const correlationId = String(body.correlationId ?? '').trim();
+      const callId = String(body.callId ?? '').trim();
+      if (!correlationId || !callId) {
+        reply.code(400);
+        return { ok: false, code: 'INVALID_INPUT', error: 'correlationId and callId are required.' };
+      }
+      const delegate = delegateFor(correlationId);
+      if (!delegate) {
+        reply.code(404);
+        return { ok: false, code: 'UNKNOWN_RUN', error: 'No active run is waiting on that correlation id.' };
+      }
+      const settled = delegate.settle(
+        callId,
+        body.ok === false
+          ? { ok: false, error: String(body.error ?? 'the client could not run that tool') }
+          : { ok: true, result: body.result },
+      );
+      if (!settled) {
+        reply.code(404);
+        return { ok: false, code: 'UNKNOWN_CALL', error: 'That call is not in flight — it may have timed out already.' };
+      }
+      return { ok: true };
+    },
+  );
+
   app.get('/api/ai/engineer/stores/health', async () => {
     const proposal = changesetProposals.health();
     const approval = toolDeps.approvals.health();
@@ -479,6 +534,23 @@ export function registerEngineerRoutes(
         closed = true;
       }
     };
+
+    /*
+     * The client runs the workspace tools when it says it can. The delegate is
+     * created here because it needs `send`, and registered under the run's
+     * correlation id so the separate result callback can find this suspended run.
+     */
+    const delegate = body.clientWorkspaceTools
+      ? // The client answers on a SEPARATE request, so the frame must carry the run's
+        // identity: a callId alone would not tell it which run to reply to.
+        new WorkspaceDelegate((call) => send('tool_request', { ...call, correlationId }))
+      : undefined;
+    if (delegate) {
+      registerDelegate(correlationId, delegate);
+      // A client that disconnects must not leave the loop waiting on a tool that
+      // can no longer be answered.
+      request.raw.on('close', () => unregisterDelegate(correlationId));
+    }
 
     // KEEPALIVE — the only thing that distinguishes slow work from dead work.
     //
@@ -776,6 +848,19 @@ export function registerEngineerRoutes(
             }
           : {}),
         executeTool: async (tool, input) => {
+          /*
+           * DELEGATE FIRST, before this host's registry is consulted at all.
+           *
+           * These tools answer questions about the CALLER's filesystem. Running
+           * them here would not merely fail — workspace.list happily reported an
+           * empty directory for a path that simply is not on this machine, which
+           * is how an agent ends up inventing files. Whoever holds the workspace
+           * answers, or nobody does.
+           */
+          if (delegate && CLIENT_WORKSPACE_TOOLS.has(tool)) {
+            stage.log('tool', { tool, delegated: true });
+            return delegate.request(tool, input);
+          }
           // AUTHORITY IS CHECKED HERE, not only in the advertised list. `executeToolCore`
           // validates that a tool exists, is available and is approved — it never checked
           // the tool against what THIS turn was shown, so a model naming an unadvertised
@@ -931,6 +1016,9 @@ export function registerEngineerRoutes(
     // it from holding the process open, but one interval per completed request is
     // still an orphan, and "no orphan remains" is the contract.
     clearInterval(keepalive);
+    // Same contract for the delegate: the run is over, so nothing may still be
+    // waiting on a client answer, and the registry must not accumulate entries.
+    unregisterDelegate(correlationId);
     raw.end();
   });
 }

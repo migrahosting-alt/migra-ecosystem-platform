@@ -12,6 +12,7 @@
 
 import type { GovernedWorkflowId, GroundingMode, LiveKnowledgeMode, TaskClass } from '@migrapilot/protocol';
 import { REQUEST_ID_HEADER, newRequestId } from '@migrapilot/pilot-client';
+import { executeWorkspaceTool } from './workspaceTools.js';
 import { PilotError, type PilotErrorCode } from '@migrapilot/pilot-client';
 import { randomUUID } from 'node:crypto';
 import {
@@ -259,6 +260,14 @@ export type InspectResponse =
 export interface EngineerRequest {
   rootPath: string;
   task: string;
+  /**
+   * This client runs the workspace tools itself.
+   *
+   * Always true from the extension: it is the side that HAS the files. The Brain
+   * treats it as opt-in so an older client, which would never answer a
+   * tool_request, keeps the previous behaviour instead of deadlocking.
+   */
+  clientWorkspaceTools?: boolean;
   ecosystem?: boolean;
   /** Prior turns (oldest first) — the unified agent serves ordinary chat too,
    * so it carries the conversation the chat path used to hold. */
@@ -758,6 +767,43 @@ export class MigraAiClient {
    * runtime, so disabled delegation cannot block local work. Events: `route`,
    * `step`, `proposal`, `final`, `error`, `done`.
    */
+  /**
+   * Run one delegated workspace tool and report the outcome back.
+   *
+   * A FAILURE IS STILL AN ANSWER. Whatever happens — unknown tool, missing file,
+   * a throw we did not anticipate — something must be posted, because the run is
+   * suspended waiting on this exact call. Staying silent would trade a clean tool
+   * error for a stalled turn that only ends on a timeout.
+   */
+  private async answerToolRequest(data: unknown): Promise<void> {
+    const call = (data ?? {}) as { callId?: string; tool?: string; input?: unknown; correlationId?: string };
+    const { callId, tool, correlationId } = call;
+    if (!callId || !tool || !correlationId) {
+      this.cfg.log(`tool_request ignored: missing ${!callId ? 'callId' : !tool ? 'tool' : 'correlationId'}`);
+      return;
+    }
+    let payload: Record<string, unknown>;
+    try {
+      const result = await executeWorkspaceTool(tool, call.input);
+      payload = { correlationId, callId, ok: true, result };
+      this.cfg.log(`workspace tool ${tool} ran locally [${callId}]`);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      payload = { correlationId, callId, ok: false, error: message };
+      this.cfg.log(`workspace tool ${tool} failed locally [${callId}]: ${message}`);
+    }
+    try {
+      await fetch(`${this.base()}/api/ai/engineer/tool-result`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...this.scopeHeaders() },
+        body: JSON.stringify(payload),
+      });
+    } catch (err) {
+      // Nothing more we can do; the run's own deadline will fail the call.
+      this.cfg.log(`could not deliver tool result [${callId}]: ${(err as Error).message}`);
+    }
+  }
+
   async *engineerStream(body: EngineerRequest, signal?: AbortSignal): AsyncGenerator<EngineerStreamEvent> {
     const requestId = newRequestId();
     const url = `${this.base()}/api/ai/engineer`;
@@ -779,7 +825,14 @@ export class MigraAiClient {
           [REQUEST_ID_HEADER]: requestId,
           ...this.scopeHeaders(),
         },
-        body: JSON.stringify(body),
+        /*
+         * Declared HERE, not at each call site, because it is a property of this
+         * client rather than of any particular request: the extension is the side
+         * that holds the workspace, and it answers tool_request frames above. A
+         * call site that forgot the flag would silently run workspace tools on the
+         * Brain host again, which is the bug this whole path exists to fix.
+         */
+        body: JSON.stringify({ ...body, clientWorkspaceTools: true }),
         signal,
       });
     } catch (err) {
@@ -809,6 +862,23 @@ export class MigraAiClient {
           // the whole point, because reading it resets every patience clock.
           if (parsed.event === 'keepalive') continue;
           if (parsed.event === 'done') { completed = true; return; }
+          /*
+           * THE ENGINE IS ASKING US TO READ OUR OWN DISK.
+           *
+           * Workspace tools moved to this side when the Brain moved to another
+           * machine — it can no longer see the files, and answering from there
+           * produced empty listings that read as "your project has no files".
+           * Handled here rather than yielded, so the turn logic never learns that
+           * some tools run locally; it only sees the run proceed.
+           *
+           * Deliberately NOT awaited in the frame loop: a slow tool must not stall
+           * the reader, or a keepalive arriving mid-tool would queue behind it and
+           * the run would look dead exactly when it is working hardest.
+           */
+          if (parsed.event === 'tool_request') {
+            void this.answerToolRequest(parsed.data);
+            continue;
+          }
           yield { event: parsed.event, data: parsed.data } as EngineerStreamEvent;
         }
       }
