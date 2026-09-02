@@ -502,6 +502,32 @@ export class MigraAiClient {
   }
 
   /** GET /api/ai/models — the live capability catalog. */
+  /**
+   * The canonical Migra model families, resolved live by the Brain.
+   *
+   * The selector derives from THIS, never from a local list: a hard-coded copy
+   * here and another in the consumer would be two products with two different
+   * ideas of what exists. Availability is computed server-side against
+   * governance, so a family the Brain cannot honestly serve arrives already
+   * marked unavailable with a reason.
+   */
+  async getModelFamilies(signal?: AbortSignal): Promise<{
+    catalogRevision: string;
+    families: Array<{
+      id: string;
+      displayName: string;
+      tagline: string;
+      recommended: boolean;
+      available: boolean;
+      governed: boolean;
+      unavailableReason?: string;
+      selectedBackend?: string;
+      basis?: string;
+    }>;
+  }> {
+    return this.jsonRequest('GET', '/api/ai/model-families?surface=vscode-extension', undefined, signal);
+  }
+
   async getModels(signal?: AbortSignal): Promise<{ count: number; providers: string[]; models: AiModel[] }> {
     const requestId = newRequestId();
     const { signal: combined, done, timedOut } = this.withTimeout(signal);

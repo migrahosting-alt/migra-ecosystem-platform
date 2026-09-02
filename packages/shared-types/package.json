@@ -25,6 +25,10 @@
     "./user-preferences": {
       "types": "./src/user-preferences.ts",
       "default": "./dist/user-preferences.js"
+    },
+    "./model-families": {
+      "types": "./src/modelFamilies.ts",
+      "default": "./dist/modelFamilies.js"
     }
   },
   "files": [

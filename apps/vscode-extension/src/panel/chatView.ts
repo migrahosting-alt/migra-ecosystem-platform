@@ -259,6 +259,23 @@ export class MigraPilotChatViewProvider implements vscode.WebviewViewProvider {
           vision: Boolean(m.capabilities?.vision),
         }));
       void this.view.webview.postMessage({ type: 'models', models: slim });
+
+      /*
+       * The USER-FACING selector is the Migra family list, not this catalog.
+       *
+       * `models` above stays for diagnostics and for the power-user pin, but the
+       * ordinary picker must never present a raw backend model id as a choice: those
+       * are internal, governed and replaceable, and showing them makes the
+       * product's identity a backend implementation detail. Fetched separately so
+       * a family-endpoint failure degrades to Auto rather than leaking ids.
+       */
+      try {
+        const catalog = await this.deps.migraAiClient.getModelFamilies();
+        void this.view.webview.postMessage({ type: 'families', ...catalog });
+      } catch (err) {
+        // Degrade to Auto rather than leak backend ids; nothing user-facing breaks.
+        void err;
+      }
     } catch (err) {
       this.deps.output.appendLine(`[chat] model catalog unavailable: ${err instanceof Error ? err.message : String(err)}`);
     }
@@ -2316,6 +2333,34 @@ export class MigraPilotChatViewProvider implements vscode.WebviewViewProvider {
         if (!msg) return;
 
         switch (msg.type) {
+          case 'families': {
+            /*
+             * MIGRA MODELS v1 — the ordinary selector.
+             *
+             * Product identities only. A family the Brain cannot honestly serve
+             * arrives marked unavailable with a reason, and is rendered DISABLED
+             * with that reason rather than hidden — a user who wonders where
+             * Migra Atlas went deserves to read why, and a silent omission would
+             * look like the feature never existed.
+             *
+             * No backend id appears here. That is the point of the whole layer.
+             */
+            if (!modelPicker || !Array.isArray(msg.families)) break;
+            const prevFam = modelPicker.value;
+            let famHtml = '<option value="auto">Auto — let MigraPilot choose</option>';
+            famHtml += '<optgroup label="Migra models">';
+            msg.families.forEach((f) => {
+              const label = f.displayName + (f.recommended ? ' — Recommended' : '');
+              const detail = f.available ? f.tagline : 'Unavailable — ' + (f.unavailableReason || 'no qualified path');
+              famHtml += '<option value="family:' + escapeHtml(f.id) + '"' + (f.available ? '' : ' disabled') +
+                ' title="' + escapeHtml(detail) + '">' + escapeHtml(label) + ' · ' + escapeHtml(f.tagline) + (f.available ? '' : ' (unavailable)') + '</option>';
+            });
+            famHtml += '</optgroup>';
+            modelPicker.innerHTML = famHtml;
+            const keepFam = Array.prototype.some.call(modelPicker.options, (o) => o.value === prevFam && !o.disabled);
+            modelPicker.value = keepFam ? prevFam : 'auto';
+            break;
+          }
           case 'models': {
             // Rebuild the model picker from the live engine catalog (real installed
             // models, e.g. Ollama). Keep 'Auto' + size-tier shortcuts, then list the

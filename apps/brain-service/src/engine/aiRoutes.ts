@@ -63,6 +63,12 @@ import { renderTextGlyph } from './media/glyphRender.js';
 import type { IndexService } from './rag/indexService.js';
 import { auditStore } from './auditLog.js';
 import { gateVisionTurn, visionCapabilitySnapshot, type VisionGateDeps } from './media/visionGate.js';
+import { resolveFamiliesForSurface } from './modelFamilyResolver.js';
+import { MEASURED_GRANTS } from './capability/capabilityGrants.js';
+import {
+  familiesForSurface,
+  MIGRA_MODEL_CATALOG_REVISION,
+} from '@migrapilot/shared-types/model-families';
 import { classifyProviderFailure } from './providerFailure.js';
 import { probeGpuCapacity, shouldRefuse, isModelResident, type CapacityReading } from './capacity/gpuCapacity.js';
 
@@ -270,6 +276,77 @@ export function registerAiRoutes(
   // becomes the default only after it is licensed, measured, and proven. This
   // groups vision-capable models by qualification state and names the current
   // production default (the top-tier approved vision model, or none = fail-closed).
+  /*
+   * MIGRA MODELS v1 — the one endpoint every surface derives its selector from.
+   *
+   * Returns the canonical catalog PLUS what each family resolves to right now,
+   * so the consumer and the extension cannot drift into two different lists or
+   * two different ideas of what is available. Backend ids appear here under
+   * `selectedBackend` for provenance and diagnostics; they are deliberately NOT
+   * what a surface shows as the choice.
+   */
+  app.get('/api/ai/model-families', async (request) => {
+    const surface = ((request.query as { surface?: string })?.surface ?? 'vscode-extension') as
+      | 'migrapilot-consumer'
+      | 'vscode-extension';
+    const models = await reg.list();
+    const governed = visionDeps ? await visionCapabilitySnapshot(visionDeps) : null;
+
+    const resolutions = resolveFamiliesForSurface(surface, {
+      models,
+      // A durable human decision, not a capability flag.
+      governedDecision: (capability) => {
+        if (capability === 'vision.general' && governed) {
+          return { qualified: governed.general.qualified, modelId: governed.general.modelId };
+        }
+        if (capability === 'vision.object_counting' && governed) {
+          return { qualified: governed.objectCounting.qualified, modelId: governed.objectCounting.modelId };
+        }
+        return undefined;
+      },
+      // Only models carrying an APPROVED grant for that task class.
+      // MEASURED_GRANTS is one entry per (model, task class) WITH evidence, so the
+      // approved set is derived from actual measurements rather than a policy list.
+      approvedForTaskClass: (taskClass) =>
+        MEASURED_GRANTS.filter((g) => g.taskClass === taskClass).map((g) => g.model),
+      /*
+       * Runnable under the CURRENT policy, not merely listed.
+       *
+       * Ollama surfaces its cloud-hosted models (`…-cloud`) in the same catalog
+       * as local ones, and this deployment runs local-only — the router itself
+       * reports "Cloud providers are disabled or unavailable". Offering one would
+       * make four families look available while every turn failed, which is
+       * exactly the fake readiness this catalog forbids. The suffix is Ollama's
+       * own convention; the check fails CLOSED because wrongly excluding a usable
+       * model is far cheaper than wrongly offering an unusable one.
+       */
+      executable: (m) => !/-cloud$/i.test(m.id),
+    });
+
+    return {
+      catalogRevision: MIGRA_MODEL_CATALOG_REVISION,
+      surface,
+      families: familiesForSurface(surface).map((f) => {
+        const r = resolutions.find((x) => x.family === f.id)!;
+        return {
+          id: f.id,
+          displayName: f.displayName,
+          tagline: f.tagline,
+          description: f.description,
+          recommended: Boolean(f.recommended),
+          // Live resolution — computed now, never asserted by the catalog.
+          available: r.available,
+          governed: r.governed,
+          ...(r.unavailableReason ? { unavailableReason: r.unavailableReason } : {}),
+          ...(r.selectedBackend ? { selectedBackend: r.selectedBackend } : {}),
+          ...(r.basis ? { basis: r.basis } : {}),
+          // The audit is evidence with a date, kept distinct from live readiness.
+          auditedStatus: f.auditedStatus,
+        };
+      }),
+    };
+  });
+
   app.get('/api/ai/vision-registry', async () => {
     const vision = (await reg.list()).filter((m) => m.capabilities.vision);
     const entry = (m: (typeof vision)[number]) => ({
