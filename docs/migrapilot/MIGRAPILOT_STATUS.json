@@ -141,7 +141,19 @@
           "The FIRST turn dropped the family entirely: startConversation was never widened, the spread discarded it with no type error, and the answer returned looking correct while routing automatically. This is exactly the hazard seams.ts warns about in prose, and only the live browser proof exposed it."
         ],
         "notProven": "Not exercised on the deployed consumer at chat.migrateck.com — this ran against a local dev instance."
-      }
+      },
+      "governingRule": "Configuration may declare stable product identities; runtime behaviour must come from canonical contracts and measured state. No hard-coded capability, infrastructure or provider truth anywhere on the platform.",
+      "statusesNowResolved": "Per-family status was REMOVED from the catalog. It was a hand-written literal that also gated availability, which is hard-coded operational truth. Availability is now resolved from governance at request time, and every unavailable answer names the capability that has no approved model.",
+      "governedCapabilities": {
+        "migra-core": "chat.general — NOT YET QUALIFIED, so Core is honestly unavailable",
+        "migra-logic": "reasoning.deep — not yet qualified",
+        "migra-swift": "chat.fast — not yet qualified",
+        "migra-atlas": "chat.long_context — not yet qualified",
+        "migra-vision": "vision.general — QUALIFIED (durable decision, exact digest)",
+        "migra-forge": "measured task-class grants (typed-implementation) — QUALIFIED"
+      },
+      "mandatoryProof": "apps/brain-service/test/familyFollowsGovernance.test.ts — change ONLY the decision and both surfaces follow with no client code, catalog edit or rebuild (day 1 backend A, day 2 backend B). Also asserts the two surfaces never resolve a shared family differently, that a revoked approval yields unavailable rather than a fallback, and that the catalog serialises with no model, provider, GPU, digest or readiness word in it.",
+      "coreGovernanceNext": "The chat.general contract and resolution are SHIPPED. Qualifying a model against it needs measured evidence plus a SIGNED operator approval (the qualification signing key), which this session does not hold — the same boundary as the vision approval."
     }
   },
   "capabilities": {
