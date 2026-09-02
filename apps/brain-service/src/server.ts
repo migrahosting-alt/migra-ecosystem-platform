@@ -95,6 +95,7 @@ import { registerDocumentRoutes } from './engine/rag/documentRoutes.js';
 import { registerFeedbackRoutes } from './engine/feedback/feedbackRoutes.js';
 import { DocumentJobRunner } from './engine/rag/documentJobs.js';
 import { writeOcrSidecar } from './engine/rag/scannedPdfJob.js';
+import { hashFile } from './engine/rag/artifactReuse.js';
 import { decideRecovery } from './engine/rag/scannedJobRecovery.js';
 import path from 'node:path';
 import { registerMigraPilotCors } from './http/corsPolicy.js';
@@ -128,6 +129,28 @@ let opMaintenance: OperationalMaintenance | undefined;
 async function registerPlugins(): Promise<void> {
   await registerMigraPilotCors(app);
 }
+
+/*
+ * IS THIS BRAIN GOVERNED, AND CAN A CALLER TELL FROM OUTSIDE?
+ *
+ * "The process is up" and "this Brain is an authority" are different facts, and
+ * until now only the first was reported. An ungoverned Brain answered /health
+ * with status ok while the qualification routes did not exist at all, so the only
+ * way to tell the two apart was to call a governed route and read a 404 — which
+ * says "not implemented" far more loudly than it says "not governed".
+ *
+ * A VS Code Extension session was pointed at exactly such a Brain and behaved
+ * plausibly right up to the governed paths. A gateway in front of this service
+ * needs to distinguish "gateway up" from "Brain governed and usable" without
+ * probing for the absence of a route, so the fact is reported here instead of
+ * inferred there.
+ *
+ *   unavailable  no durable PostgreSQL store — qualification is not registered
+ *   unsigned     registered, but no signing key: every mutation will be refused
+ *   ready        registered and able to record a signed decision
+ */
+type GovernanceState = 'unavailable' | 'unsigned' | 'ready';
+let governanceState: GovernanceState = 'unavailable';
 
 async function getHealth(): Promise<HealthResponse> {
   const localProvider = providerRegistry.get('local');
@@ -212,6 +235,8 @@ async function getHealth(): Promise<HealthResponse> {
        * what the chat path actually gates on.
        */
       inferenceProviders: inferenceReady ? 'available' : 'unavailable',
+      /* Governed authority, reported rather than inferred from a missing route. */
+      governance: governanceState,
       ...(capacity ? { gpuCapacity: capacity.state, gpuSignals: capacity.signals } : {}),
       persistence: persistence.memoryStore,
       memory: persistence.memoryStore,
@@ -456,6 +481,7 @@ async function main(): Promise<void> {
         });
       },
     });
+    governanceState = internalAuth.enabled ? 'ready' : 'unsigned';
     app.log.info(
       { signingConfigured: internalAuth.enabled },
       internalAuth.enabled
@@ -463,6 +489,7 @@ async function main(): Promise<void> {
         : 'governed model qualification registered WITHOUT a signing key — every mutation will be refused',
     );
   } else {
+    governanceState = 'unavailable';
     app.log.warn('governed model qualification NOT available — it requires the PostgreSQL durable store');
   }
   // MigraAI Engine semantic RAG (/api/ai/indexes, /api/ai/retrieve): workspace-
@@ -546,7 +573,13 @@ async function main(): Promise<void> {
       index: async (scope, fileName, map) => {
         const uploadRoot = documentUploadRoot?.(toScope(scope));
         if (!uploadRoot) return;
-        await writeOcrSidecar(uploadRoot, fileName, map);
+        /*
+         * The digest travels with the text. A sidecar is named after the file,
+         * and a filename is not an identity — without this, a different document
+         * uploaded under the same name inherits this one's extracted text.
+         */
+        const sourceDigest = await hashFile(path.join(uploadRoot, fileName)).catch(() => undefined);
+        await writeOcrSidecar(uploadRoot, fileName, map, sourceDigest);
         const record = indexService.listForScope(toScope(scope)).find((i) => i.root === uploadRoot);
         if (record?.id) {
           await indexService.sync(record.id, toScope(scope));
@@ -597,7 +630,9 @@ async function main(): Promise<void> {
       remove: async (scope, fileName) => {
         await readinessStore.deleteDocumentReadiness!(toScope(scope), fileName);
       },
-    });
+    },
+    // So a delete also removes the derived OCR text, not just the row.
+    (scope) => documentUploadRoot({ owner: scope.ownerScope, workspace: scope.workspaceScope }));
 
     /*
      * BOOT RECOVERY runs per scope on first sight rather than at startup: this
