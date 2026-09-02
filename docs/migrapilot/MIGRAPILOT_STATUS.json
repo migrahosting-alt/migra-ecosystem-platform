@@ -100,6 +100,17 @@
       "whyItMattered": "Not because the extension was using it — it was not — but because it was a trap: any tool or setting defaulting to :3988 would have silently used a schema-8 ungoverned store while looking healthy. The autoStart loopback guard shipped earlier is now load-bearing: autoStartBrain is still true, and only that guard stops a remote-URL outage from spawning another one.",
       "journalCaveat": "The Brain's journald output is not readable from this session — a control request I made myself did not appear either. So log silence was NOT evidence about the extension, and was not used as any.",
       "stillOwnerOnly": "The 10-item UI acceptance pass and the mockup design-read seam still need the owner driving the extension."
+    },
+    "toolSurfaceCompletion": {
+      "status": "16/16 implemented. No tool is refused for want of a client adapter.",
+      "canonicalContract": "@migrapilot/workspace-tools/src/metadata.ts is the ONLY place a workspace tool is named and authorized. Pinned by a test, so adding a tool without deciding whether it mutates and needs approval fails rather than ships.",
+      "driftFoundAndClosed": "The brain's own capability registry advertised diagnostics.get as supporting dry-run while the shared registry said it did not — two registries, one tool, two answers, nothing forcing reconciliation. A dry run of a read has no meaning, so the shared answer stands.",
+      "authorityBoundary": "Mutating tools (fs.applyChangeset, edit.apply) pass through an operator modal, gated from the shared registry. A decline returns a structured RESULT rather than an exception, so the agent reasons about it instead of retrying. Proposals write nothing.",
+      "secondDoorClosed": "Client executeTool now routes EVERY client-executable tool locally, not just those inside the agent loop. The operator's own approved apply went through the brain, so a change the user had just confirmed would have been written to the SERVER's filesystem.",
+      "versionNegotiation": "Clients declare workspaceToolContract; the brain refuses a MAJOR mismatch and a missing version outright rather than sending a request the client would answer in the wrong shape. Verified live: both refused, a newer minor accepted.",
+      "verified": "16/16 executed against a real workspace through the compiled client executor. Live through the production Brain: git.status and workspace.search delegated, executed locally, and the agent continued on their results. Brain 2139/2139, extension 874/874.",
+      "notYetProven": "Per-tool acceptance driven from the real VS Code UI is NOT done for all 16 — it needs the owner at the keyboard, and the local GPU is currently fully held by AI Studio (1GB free), so a larger coding model cannot run without evicting that work.",
+      "modelVsArchitecture": "A multi-tool run with qwen2.5-coder:7b delegated both tools correctly and then emitted invalid JSON at step 4. That is judgment, not capability: the adapter delivered structured results and the agent used them. Recorded as a model/training concern, deliberately NOT as a missing tool."
     }
   },
   "capabilities": {
@@ -268,11 +279,11 @@
         "C. Sync or mount the workspace onto VM111. Copies the developer's source to a server; heaviest, and raises data-location questions."
       ],
       "recommendation": "A is the correct architecture; B is the pragmatic interim that keeps governance intact.",
-      "status": "FIXED — delegation shipped and proven live (release delegate-09020500)",
+      "status": "FIXED and COMPLETE — 16/16 tools execute (release toolsurface-09020630)",
       "fix": "Option A: the client runs the workspace tools. Brain emits event: tool_request over the existing SSE stream; the extension executes locally and POSTs to /api/ai/engineer/tool-result. Client-initiated throughout, so no inbound path to a developer machine is needed, and the agent loop is unchanged — it awaits executeTool as before and cannot tell where the work ran.",
       "provenLive": "A file planted seconds earlier with an unguessable name (zz-marker-7741.txt), existing ONLY on the workstation, was named back by the agent running on VM111. It could not have been guessed. Delegated calls in that run: workspace.list and fs.proposeChangeset, both executed by the compiled extension module.",
       "safety": "Every delegated call settles: a deadline per call, disposal on stream close AND on completion, and a timeout surfaces as a tool FAILURE — never an empty success. Delegation is opt-in so an older client cannot deadlock. Client tools propose without writing and contain paths to the root.",
-      "partialCoverage": "4 of 16 tools implemented client-side so far: workspace.list, file.read, git.status, fs.proposeChangeset. The rest are refused BY NAME, so the gap is diagnosable rather than silent. Remaining: workspace.find, workspace.search, file.readRange, file.readSymbol, git.diff, git.history, git.blame, git.overview, diagnostics.get, fs.applyChangeset, edit.preview, edit.apply."
+      "toolSurface": "COMPLETE — 16/16. The canonical registry in @migrapilot/workspace-tools now declares all 16 with mutation/approval/dry-run classified in ONE place; the brain's delegation allowlist and the client's routing both derive from it. The tree/file/git implementations MOVED into that package and the brain re-exports them, so both sides run the same functions. diagnostics.get and file.readSymbol get a VS Code adapter — better there than on a server (real language servers, not one parser) and it keeps the TypeScript compiler out of the bundle."
     }
   ],
   "driftControl": [
