@@ -252,6 +252,23 @@
       "mitigation": "A second pass asks the model what its own transcription is missing, with the image still in front of it. Across 6 runs the worst case improved from 3/9 to 8/9 and no run dropped a region. Mean is still below 9/9, so a complex design can lose detail.",
       "regressionTest": "apps/vscode-extension/src/test/unit/designRead.test.ts (11 tests)",
       "liveAcceptance": "Re-measure element carry-through when a determinism knob or a stronger vision model lands."
+    },
+    {
+      "id": "workspace-tools-run-on-brain-host",
+      "title": "🚨 The remote Brain cannot see the developer's workspace",
+      "severity": "CRITICAL — blocks the coding-assistant north star",
+      "symptom": "An attached mockup reaches the agent, the agent calls fs.proposeChangeset, and the tool fails. The final answer says nothing was created — which is at least truthful.",
+      "rootCause": "Workspace tools execute on the BRAIN HOST's filesystem. The Brain now runs on VM111; the developer's files are on the workstation. Proven by control: the identical fs.proposeChangeset call with rootPath=/tmp (which exists on VM111) SUCCEEDS, while the workstation path fails, and that path does not exist on VM111.",
+      "scope": "16 capabilities read the workspace: diagnostics.get, edit.apply, edit.preview, file.read, file.readRange, file.readSymbol, fs.applyChangeset, fs.proposeChangeset, git.blame, git.diff, git.history, git.overview, git.status, workspace.find, workspace.list, workspace.search. Measured: git.status and file.read return TOOL_FAILED; workspace.list returned a SILENT EMPTY.",
+      "notCausedByTargetA": "This is not the HTTPS switch. The SSH tunnel pointed at the same remote Brain, so the breakage arrived with the Brain migration itself and was simply never exercised by a coding turn until now.",
+      "partialFixShipped": "The silent-empty is fixed and deployed (release rootguard-09020400): a missing ROOT now fails loudly and explains that workspace tools read the Brain host's filesystem. That stops the agent being told its project is empty and inventing files, but it does NOT restore the capability.",
+      "optionsForOwner": [
+        "A. Execute workspace tools EXTENSION-SIDE. The Brain plans; the extension performs filesystem work locally and returns results. This is how Claude Code and Copilot actually work, keeps one governed Brain, and needs no credentials or code on the workstation. Largest change: a tool-execution callback.",
+        "B. Run a Brain process ON THE WORKSTATION pointed at the governed db-core PostgreSQL. Files resolve, and there is still exactly ONE governed database. Cost: the DSN lives on the workstation, and there are two Brain processes against one store.",
+        "C. Sync or mount the workspace onto VM111. Copies the developer's source to a server; heaviest, and raises data-location questions."
+      ],
+      "recommendation": "A is the correct architecture; B is the pragmatic interim that keeps governance intact.",
+      "status": "OPEN — owner decision required"
     }
   ],
   "driftControl": [
