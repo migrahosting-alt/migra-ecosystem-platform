@@ -48,6 +48,8 @@ export interface EvidencePackage {
   suiteRevision: string;
   thresholdRevision: string;
   candidate: { model: string; digest: string; runtime: string; hardware: string };
+  /** Harness parameters that shape the result and must travel with it. */
+  harness: { maxTokens: number; replicationRuns: number };
   startedAt: string;
   finishedAt: string;
   cases: CaseOutcome[];
@@ -57,6 +59,9 @@ export interface EvidencePackage {
   negativeControls: CaseOutcome[];
 }
 
+/** Recorded in the evidence, because it materially affects what a model can produce. */
+export const MAX_TOKENS = 3072;
+
 async function ask(opts: RunnerOptions, turns: string[]): Promise<string> {
   const messages: Array<{ role: 'user' | 'assistant'; content: string }> = [];
   let last = '';
@@ -65,7 +70,17 @@ async function ask(opts: RunnerOptions, turns: string[]): Promise<string> {
     const res = await fetch(`${opts.baseUrl}/chat/completions`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ model: opts.model, messages, max_tokens: 700 }),
+      /*
+       * A generous budget, because a THINKING model spends it before it speaks.
+       *
+       * Measured: at 700 tokens a reasoning candidate returned finish_reason
+       * "length" with 3500 characters of internal reasoning and an EMPTY answer,
+       * and the suite scored that as a failed case. It was the harness truncating
+       * the model, not the model failing the contract — the same class of error
+       * as a grader that rejects a correct answer, and just as capable of
+       * disqualifying a good candidate.
+       */
+      body: JSON.stringify({ model: opts.model, messages, max_tokens: MAX_TOKENS }),
       signal: AbortSignal.timeout(opts.timeoutMs ?? 240_000),
     });
     if (!res.ok) throw new Error(`HTTP ${res.status} from provider`);
@@ -135,6 +150,7 @@ export async function runChatGeneralSuite(opts: RunnerOptions): Promise<Evidence
       runtime: opts.runtime,
       hardware: opts.hardware,
     },
+    harness: { maxTokens: MAX_TOKENS, replicationRuns: REPLICATION_RUNS },
     startedAt,
     finishedAt: new Date().toISOString(),
     cases: outcomes,

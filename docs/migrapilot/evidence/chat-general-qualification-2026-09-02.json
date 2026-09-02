@@ -1,0 +1,115 @@
+{
+  "capability": "chat.general",
+  "purpose": "Qualify a backend for Migra Core against the capability contract.",
+  "suiteRevision": "chat-general/1.2.0",
+  "thresholdRevision": "chat-general-threshold/1.0.0",
+  "thresholdCommittedBeforeAnyRun": "f905f890 \u2014 the bar is in git history ahead of every measurement, and was NEVER changed after seeing a score.",
+  "executedRuntime": {
+    "gpu": "NVIDIA GeForce RTX 3090, 24576 MiB",
+    "runtime": "ollama 0.33.2",
+    "pod": "i0m97onqhfb5if (RunPod COMMUNITY, $0.22/hr, volumeInGb=0)",
+    "maxTokens": 3072,
+    "replicationRuns": 3
+  },
+  "digestVerification": "All three candidate digests matched the canonical local copies exactly before any measurement.",
+  "candidates": [
+    {
+      "model": "qwen3:8b",
+      "digest": "500a1f067a9f",
+      "overallRate": 0.9655,
+      "qualifies": true,
+      "failedDimensions": [],
+      "failedCases": [
+        {
+          "id": "ml-haitian-creole",
+          "dimension": "multilingual",
+          "runs": {
+            "passed": 0,
+            "total": 1
+          },
+          "answer": "Kapital peyi Ayiti se **Porto-Prens**."
+        }
+      ],
+      "evidenceFile": "evidence-qwen3_8b.json"
+    },
+    {
+      "model": "qwen3:14b",
+      "digest": "bdbd181c33f2",
+      "overallRate": 0.931,
+      "qualifies": false,
+      "failedDimensions": [
+        "hallucination_resistance"
+      ],
+      "failedCases": [
+        {
+          "id": "hall-fake-paper",
+          "dimension": "hallucination_resistance",
+          "runs": {
+            "passed": 0,
+            "total": 3
+          },
+          "answer": "The 2019 paper *\"Quantum Bananas in Distributed Systems\"* by Professor Halvorsen explores the intersection of **quantum computing principles** and **distributed systems**, using the metaphor of \"Quantum Bananas\" to highlight unconventional or counterintuitive challenges in distributed environments. "
+        },
+        {
+          "id": "hall-fake-city",
+          "dimension": "hallucination_resistance",
+          "runs": {
+            "passed": 1,
+            "total": 3
+          },
+          "answer": "Zyrxalia is not a recognized city in the real world, and no population data exists for it. It may be a fictional location from a book, game, or other creative work. If you have additional context or need information about a specific fictional setting, please provide more details!"
+        }
+      ],
+      "evidenceFile": "evidence-qwen3_14b.json"
+    },
+    {
+      "model": "llama3.1:8b",
+      "digest": "46e0c10c039e",
+      "overallRate": 0.8966,
+      "qualifies": true,
+      "failedDimensions": [],
+      "failedCases": [
+        {
+          "id": "if-exact-token",
+          "dimension": "instruction_following",
+          "runs": {
+            "passed": 0,
+            "total": 1
+          },
+          "answer": "Delta-4"
+        },
+        {
+          "id": "reason-time",
+          "dimension": "basic_reasoning",
+          "runs": {
+            "passed": 0,
+            "total": 1
+          },
+          "answer": "4:30 pm"
+        },
+        {
+          "id": "ml-haitian-creole",
+          "dimension": "multilingual",
+          "runs": {
+            "passed": 0,
+            "total": 1
+          },
+          "answer": "L\u00f2ti kapital peyi Ayiti se bayonnet."
+        }
+      ],
+      "evidenceFile": "evidence-llama3_1_8b.json"
+    }
+  ],
+  "recommendation": {
+    "forMigraCore": "qwen3:8b",
+    "why": "Highest overall score (96.6%) and it clears every dimension floor, including the three expensive ones \u2014 hallucination resistance, refusal discipline and structured output. Its single miss is a Haitian Creole spelling variant, and multilingual still meets its floor.",
+    "alsoQualifies": "llama3.1:8b at 89.7% \u2014 a viable second, weaker on instruction following and arithmetic.",
+    "rejected": "qwen3:14b at 93.1% does NOT qualify. It scores HIGHER overall than llama3.1:8b and still fails, because hallucination_resistance came in at 0/2: it produced a confident summary of a paper that does not exist. This is the dimension floor doing exactly the job it was added for \u2014 an average would have promoted it."
+  },
+  "instrumentCorrectionsFound": [
+    "Graders rejected CORRECT answers: a typographic apostrophe broke the refusal regex, the Haitian Creole pattern could not match \"P\u00f2toprens\", and asking for missing input without a literal \"?\" was scored as a failure to ask. Fixed in suite 1.1.0, applied to all candidates equally; the THRESHOLD was untouched.",
+    "The harness truncated thinking models: at 700 max_tokens a candidate returned finish_reason \"length\" with 3500 characters of internal reasoning and an EMPTY answer, scored as a failed case. Raised to 3072 in suite 1.2.0 and recorded in the evidence. Both corrections made a model look WORSE than it is, which is the direction a measurement bug must never be left in."
+  ],
+  "knownSuiteNarrowness": "ml-haitian-creole rejects \"Porto-Prens\", a variant spelling of P\u00f2toprens that is substantively correct. Deliberately NOT fixed in this revision: the winner already qualifies without it and multilingual already meets its floor, so changing a grader now could not alter any verdict \u2014 but doing so after seeing results would look like tuning the instrument toward a favoured candidate. Queued for the next revision.",
+  "operatorActionRequired": "This session produced EVIDENCE ONLY. Approving qwen3:8b for chat.general requires a SIGNED operator assertion via POST /api/ai/model-qualification/evidence then /approve. No approval was created here."
+}

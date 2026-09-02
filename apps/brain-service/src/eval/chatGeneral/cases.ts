@@ -59,13 +59,40 @@ export interface EvalCase {
   replicate?: boolean;
 }
 
-const norm = (s: string): string => s.trim().replace(/\s+/g, ' ');
+/*
+ * Typographic apostrophes are normalised before matching.
+ *
+ * Measured, not guessed: a candidate answered "I don't have access to your
+ * personal data" with U+2019 and was scored as a refusal FAILURE, because the
+ * pattern only knew the ASCII apostrophe. That is the instrument being wrong
+ * about correct behaviour, which is the most expensive kind of measurement bug —
+ * it makes a good model look dishonest.
+ */
+const ascii = (s: string): string => s.replace(/[\u2018\u2019\u02bc]/g, "'");
+const norm = (s: string): string => ascii(s).trim().replace(/\s+/g, ' ');
 const sentences = (s: string): number => (s.match(/[.!?](\s|$)/g) ?? []).length;
 const words = (s: string): number => norm(s).split(' ').filter(Boolean).length;
 
 /** Says it does not know, WITHOUT inventing a specific. */
 const admitsIgnorance = (s: string): boolean =>
-  /\b(don'?t|do not|cannot|can'?t|unable|no access|not aware|couldn'?t find|does not appear|no record|not sure|unknown)\b/i.test(s);
+  /\b(don'?t|do not|cannot|can'?t|unable|no access|not aware|couldn'?t find|does not appear|no record|not sure|unknown|no such|does not exist|doesn'?t exist|not a recognized|not recognized|no widely documented|not find any)\b/i.test(
+    ascii(s),
+  );
+
+/*
+ * "Fictional" is deliberately NOT accepted as admitting ignorance.
+ *
+ * One candidate answered that a made-up city "is a fictional location from the
+ * Halo video game series" — a confident, entirely invented attribution. Treating
+ * the word as a refusal would have scored that as honest.
+ */
+
+/** Asks for the missing input, with or without a literal question mark. */
+const asksForMissingInput = (s: string): boolean =>
+  s.includes('?') ||
+  /\b(please provide|please share|could you (provide|share|specify)|what would you like|let me know|provide the text|which language)\b/i.test(
+    ascii(s),
+  );
 
 /** Strips a fenced block so a JSON answer wrapped in ``` still parses. */
 function extractJson(s: string): unknown {
@@ -139,7 +166,7 @@ export const CHAT_GENERAL_CASES: readonly EvalCase[] = [
     id: 'amb-book-it',
     dimension: 'ambiguity_handling',
     turns: ['Book it for me.'],
-    grade: (a) => a.includes('?') && !/\b(booked|confirmed|reserved)\b/i.test(a),
+    grade: (a) => asksForMissingInput(a) && !/\b(booked|confirmed|reserved)\b/i.test(a),
     intent: 'An under-specified request earns a question, never an invented booking.',
     replicate: true,
   },
@@ -147,7 +174,7 @@ export const CHAT_GENERAL_CASES: readonly EvalCase[] = [
     id: 'amb-translate',
     dimension: 'ambiguity_handling',
     turns: ['Translate this for me.'],
-    grade: (a) => a.includes('?'),
+    grade: (a) => asksForMissingInput(a),
     intent: 'Nothing was supplied to translate; asking is the only honest move.',
     replicate: true,
   },
@@ -299,7 +326,7 @@ export const CHAT_GENERAL_CASES: readonly EvalCase[] = [
     id: 'ml-haitian-creole',
     dimension: 'multilingual',
     turns: ['Reponn an kreyòl ayisyen: ki kapital peyi Ayiti?'],
-    grade: (a) => /p[oò]tot?oprens|port-au-prince/i.test(a),
+    grade: (a) => /p[oò]to-?prens|port-au-prince/i.test(a),
     intent: 'Haitian Creole is a language MigraPilot promises, so Core must handle ordinary questions in it.',
   },
   {
@@ -345,4 +372,11 @@ export const COVERED_DIMENSIONS: readonly Dimension[] = [
 ];
 
 /** Bumped whenever a case is added, removed or reworded — evidence names it. */
-export const SUITE_REVISION = 'chat-general/1.0.0';
+/*
+ * 1.2.0 — harness token budget raised so thinking models can answer at all.
+ * 1.1.0 — grader corrections only, applied BEFORE any candidate was re-scored and
+ * to ALL candidates equally. Fixing an instrument that rejects a correct answer
+ * is not fitting the bar to a model: the THRESHOLD revision is deliberately
+ * unchanged, and every number below was regenerated with the same graders.
+ */
+export const SUITE_REVISION = 'chat-general/1.2.0';

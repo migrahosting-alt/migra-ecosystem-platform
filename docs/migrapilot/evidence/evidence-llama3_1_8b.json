@@ -1,0 +1,590 @@
+{
+  "capability": "chat.general",
+  "suiteRevision": "chat-general/1.2.0",
+  "thresholdRevision": "chat-general-threshold/1.0.0",
+  "candidate": {
+    "model": "llama3.1:8b",
+    "digest": "46e0c10c039e",
+    "runtime": "ollama 0.33.2",
+    "hardware": "NVIDIA GeForce RTX 3090, 24576 MiB, 580.65.06"
+  },
+  "harness": {
+    "maxTokens": 3072,
+    "replicationRuns": 3
+  },
+  "startedAt": "2026-09-02T19:26:55.785Z",
+  "finishedAt": "2026-09-02T19:27:20.079Z",
+  "cases": [
+    {
+      "id": "if-exact-token",
+      "dimension": "instruction_following",
+      "passed": false,
+      "runs": {
+        "passed": 0,
+        "total": 1
+      },
+      "answers": [
+        "Delta-4"
+      ],
+      "intent": "A literal instruction is followed literally, with no preamble or trailing offer of help."
+    },
+    {
+      "id": "if-word-count",
+      "dimension": "instruction_following",
+      "passed": true,
+      "runs": {
+        "passed": 1,
+        "total": 1
+      },
+      "answers": [
+        "Vast Deep Power"
+      ],
+      "intent": "A counted constraint is honoured exactly, not approximately."
+    },
+    {
+      "id": "if-format-lines",
+      "dimension": "instruction_following",
+      "passed": true,
+      "runs": {
+        "passed": 1,
+        "total": 1
+      },
+      "answers": [
+        "Red\nBlue\nYellow"
+      ],
+      "intent": "Shape instructions are obeyed — a numbered list here is a failure, not a stylistic choice."
+    },
+    {
+      "id": "fact-capital",
+      "dimension": "factual_discipline",
+      "passed": true,
+      "runs": {
+        "passed": 1,
+        "total": 1
+      },
+      "answers": [
+        "Tokyo"
+      ],
+      "intent": "A settled fact is answered directly and correctly."
+    },
+    {
+      "id": "fact-year",
+      "dimension": "factual_discipline",
+      "passed": true,
+      "runs": {
+        "passed": 1,
+        "total": 1
+      },
+      "answers": [
+        "1969"
+      ],
+      "intent": "A checkable date is right, and stated without hedging it into uselessness."
+    },
+    {
+      "id": "fact-count",
+      "dimension": "factual_discipline",
+      "passed": true,
+      "runs": {
+        "passed": 1,
+        "total": 1
+      },
+      "answers": [
+        "366"
+      ],
+      "intent": "A precise quantity is stated precisely — 366, not \"about a year\" and not 365."
+    },
+    {
+      "id": "amb-book-it",
+      "dimension": "ambiguity_handling",
+      "passed": true,
+      "runs": {
+        "passed": 3,
+        "total": 3
+      },
+      "answers": [
+        "However, I need a bit more information. Are you referring to booking a flight, hotel, rental car, or possibly making a reservation for a restaurant or something else?\n\nCould you please provide more context so I can better assist you?",
+        "However, I need a bit more information from you. What is it that you would like to \"book\" (e.g. a flight, a hotel, a restaurant, an event, something else)? Could you please provide more context or details?",
+        "It looks like you want me to book something for you, but I'm not sure what that something is! Could you please provide more context or information about what you'd like me to book? Is it a:\n\n* Flight?\n* Hotel?\n* Restaurant reservation?\n* Event ticket?\n* Something else entirely?\n\nLet me know and I'll do my best to help!"
+      ],
+      "intent": "An under-specified request earns a question, never an invented booking."
+    },
+    {
+      "id": "amb-translate",
+      "dimension": "ambiguity_handling",
+      "passed": true,
+      "runs": {
+        "passed": 3,
+        "total": 3
+      },
+      "answers": [
+        "What is the text you would like me to translate?",
+        "There's nothing to translate yet, could you please provide the text you'd like me to translate?",
+        "I'm ready to translate. Please go ahead and provide the text you'd like translated."
+      ],
+      "intent": "Nothing was supplied to translate; asking is the only honest move."
+    },
+    {
+      "id": "mt-code-recall",
+      "dimension": "multi_turn_coherence",
+      "passed": true,
+      "runs": {
+        "passed": 1,
+        "total": 1
+      },
+      "answers": [
+        "You gave me a code \"ZULU-4417\". Could you please provide more context about what this code refers to? Is it a bug ticket, a product reference, or something else? I'll do my best to help."
+      ],
+      "intent": "A fact given earlier survives the turn boundary — the failure that once made chat memoryless."
+    },
+    {
+      "id": "mt-preference-recall",
+      "dimension": "multi_turn_coherence",
+      "passed": true,
+      "runs": {
+        "passed": 1,
+        "total": 1
+      },
+      "answers": [
+        "You said your favourite colour is teal."
+      ],
+      "intent": "Stated preferences persist across turns."
+    },
+    {
+      "id": "rc-one-sentence",
+      "dimension": "response_control",
+      "passed": true,
+      "runs": {
+        "passed": 1,
+        "total": 1
+      },
+      "answers": [
+        "Photosynthesis is the process by which plants, algae, and some bacteria convert light energy from the sun into chemical energy in the form of glucose, releasing oxygen as a byproduct."
+      ],
+      "intent": "\"One sentence\" is a limit, not a suggestion."
+    },
+    {
+      "id": "rc-detailed",
+      "dimension": "response_control",
+      "passed": true,
+      "runs": {
+        "passed": 1,
+        "total": 1
+      },
+      "answers": [
+        "Photosynthesis is the process by which plants, algae, and some bacteria convert light energy from the sun into chemical energy in the form of organic compounds, such as glucose. This complex process involves the reaction of water, carbon dioxide, and light energy to produce glucose and oxygen, which is released into the atmosphere as a byproduct. The process occurs in specialized organelles called chloroplasts, which contain pigments such as chlorophyll that absorb light energy and transfer it to a molecule called ATP (adenosine triphosphate). The energy from ATP is then used to power the conversion of carbon dioxide and water into glucose and oxygen through a series of reactions involving enzymes and electron carriers. At the core of the process is the light-dependent reaction, also known as the Hill reaction, which involves the absorption of light energy by chlorophyll and the transfer of this energy to ATP, and the light-independent reaction, also known as the Calvin cycle, which uses the energy from ATP to convert carbon dioxide and water into glucose.\n\nHere is a more detailed breakdown of the stages of photosynthesis:\n\n**Light-Dependent Reactions**\n\n1. **Light absorption**: Light energy is absorbed by pigments in the thylakoid membrane of the chloroplast, such as chlorophyll.\n2. **Excitation of electrons**: The energy from light is transferred to a molecule called an electron acceptor, which excites electrons that are then passed along a series of electron carriers.\n3. **Formation of ATP and NADPH**: The energy from the electron carriers is used to produce ATP and NADPH (nicotinamide adenine dinucleotide phosphate) through a series of reactions involving enzymes and electron carriers.\n4. **Transfer of electrons to ATP**: The energy from the electron carriers is used to power the formation of ATP from ADP (adenosine diphosphate) and Pi (inorganic phosphate).\n\n**Light-Independent Reactions (Calvin Cycle)**\n\n1. **CO2 fixation**: Carbon dioxide is fixed into a 3-carbon molecule called 3-phosphoglycerate (3-PGA) using the energy from ATP and NADPH.\n2. **Reduction of 3-PGA**: The 3-PGA is reduced to form glyceraldehyde 3-phosphate (G3P) using the energy from ATP and NADPH.\n3. **Regeneration of RuBP**: The enzyme RuBP (ribulose-1,5-bisphosphate) is regenerated from G3P and CO2.\n4. **Synthesis of glucose**: The G3P molecules are converted to glucose through a series of reactions, producing one three-carbon glucose molecule from each six-carbon G3P molecule.\n\nOverall, photosynthesis is a complex and highly efficient process that allows plants and some other organisms to convert light energy into chemical energy, providing the foundation for life on Earth."
+      ],
+      "intent": "Length control works in BOTH directions; a model stuck at one register fails one of these two."
+    },
+    {
+      "id": "so-json-object",
+      "dimension": "structured_output",
+      "passed": true,
+      "runs": {
+        "passed": 1,
+        "total": 1
+      },
+      "answers": [
+        "```\n{\n  \"city\": \"Tokyo\",\n  \"country\": \"Japan\"\n}\n```"
+      ],
+      "intent": "Machine-readable output is actually parseable and carries the requested keys."
+    },
+    {
+      "id": "so-json-array",
+      "dimension": "structured_output",
+      "passed": true,
+      "runs": {
+        "passed": 1,
+        "total": 1
+      },
+      "answers": [
+        "```\n[1, 2, 3]\n```"
+      ],
+      "intent": "Exact structure, not something JSON-shaped."
+    },
+    {
+      "id": "ref-bank-balance",
+      "dimension": "refusal_uncertainty",
+      "passed": true,
+      "runs": {
+        "passed": 3,
+        "total": 3
+      },
+      "answers": [
+        "I'm just an artificial intelligence, I don't have access to your personal financial information, including your bank account balance. I'm a text-based language model, and I don't have the capability to view or access your private data.\n\nTo find out your current bank account balance, I recommend checking your online banking platform, mobile banking app, or contacting your bank's customer service directly. They should be able to provide you with the most up-to-date information.",
+        "I'm a large language model, I don't have access to your personal financial information, nor can I keep track of your bank account balance. Additionally, I don't have the ability to know your bank account number or identity.\n\nIf you'd like to know your current bank account balance, I recommend contacting your bank directly or logging in to your online banking account to check the balance.",
+        "I'm a large language model, I don't have the ability to access your bank account or any personal financial information. I'm a text-based AI assistant, and I don't have the capability to retrieve real-time financial data.\n\nIf you need to check the balance of your bank account, I recommend contacting your bank's customer service directly or logging into your online banking account to view the current balance."
+      ],
+      "intent": "Unknowable private facts are declined, and NO plausible number is offered."
+    },
+    {
+      "id": "ref-yesterday-meal",
+      "dimension": "refusal_uncertainty",
+      "passed": true,
+      "runs": {
+        "passed": 3,
+        "total": 3
+      },
+      "answers": [
+        "Unfortunately, I'm a large language model, I don't have the ability to keep track of your personal habits or activities, including what you ate for breakfast yesterday. I'm a new conversation each time you interact with me, and I don't have any prior knowledge about you.\n\nHowever, I can suggest some ways to help you figure out what you had for breakfast yesterday. You could:\n\n1. Check your kitchen or dining area to see if there are any remnants of what you ate.\n2. Ask someone who was with you at the time to remind you.\n3. Look at your calendar or planner to see if you noted down what you had for breakfast.\n\nI hope these suggestions are helpful!",
+        "Unfortunately, I'm a large language model, I don't have the ability to remember or track your personal habits or activities, including what you ate for breakfast yesterday. I'm a new conversation each time you interact with me, and I don't retain any information about your personal history.\n\nIf you're trying to remember what you ate for breakfast yesterday, you might try checking your kitchen, fridge, or food diary (if you keep one) for clues, or asking a family member or roommate if they remember what you had for breakfast!",
+        "However, I'm a large language model, I don't have the ability to know your personal experiences or track your daily activities. I also don't have any information about your previous interactions or activities, including what you ate for breakfast yesterday.\n\nIf you're trying to remember what you ate for breakfast yesterday, I can suggest a few options to help you jog your memory:\n\n1. Check your notes or journal: If you keep a daily journal or take notes on your activities, you might have written down what you had for breakfast.\n2. Ask your family members or roommates: If you live with others, you can ask them if they remember what you had for breakfast.\n3. Check your fridge or kitchen: Take a look at your kitchen or fridge to see if you have any leftovers from the day before.\n4. Try to recall using your memory: Close your eyes and try to remember what you had for breakfast yesterday. It might take a few moments, but you might be able to recall it!\n\nI hope these suggestions help!"
+      ],
+      "intent": "The model does not have this and must say so."
+    },
+    {
+      "id": "reason-time",
+      "dimension": "basic_reasoning",
+      "passed": false,
+      "runs": {
+        "passed": 0,
+        "total": 1
+      },
+      "answers": [
+        "4:30 pm"
+      ],
+      "intent": "A two-step everyday calculation, of the kind ordinary chat is full of."
+    },
+    {
+      "id": "reason-transitive",
+      "dimension": "basic_reasoning",
+      "passed": true,
+      "runs": {
+        "passed": 1,
+        "total": 1
+      },
+      "answers": [
+        "Carol."
+      ],
+      "intent": "Simple transitive ordering — the everyday inference that keeps ordinary advice coherent."
+    },
+    {
+      "id": "reason-arithmetic",
+      "dimension": "basic_reasoning",
+      "passed": true,
+      "runs": {
+        "passed": 1,
+        "total": 1
+      },
+      "answers": [
+        "68"
+      ],
+      "intent": "Arithmetic that must simply be right."
+    },
+    {
+      "id": "tool-calculator",
+      "dimension": "tool_selection",
+      "passed": true,
+      "runs": {
+        "passed": 1,
+        "total": 1
+      },
+      "answers": [
+        "calculator"
+      ],
+      "intent": "Choosing the right instrument, and not hedging by naming several."
+    },
+    {
+      "id": "tool-file-reader",
+      "dimension": "tool_selection",
+      "passed": true,
+      "runs": {
+        "passed": 1,
+        "total": 1
+      },
+      "answers": [
+        "file_reader"
+      ],
+      "intent": "The obviously-correct tool is chosen for an obviously-matching task."
+    },
+    {
+      "id": "hall-fake-paper",
+      "dimension": "hallucination_resistance",
+      "passed": true,
+      "runs": {
+        "passed": 2,
+        "total": 3
+      },
+      "answers": [
+        "I couldn't find any information on a paper called \"Quantum Bananas in Distributed Systems\" by Professor Halvorsen from 2019. It's possible that the paper doesn't exist, or it may be a fictional or humorous title.\n\nIf you could provide more context or details about the paper, such as the journal or conference it was published in, I may be able to help you find more information about it. Alternatively, you can also try searching online or checking academic databases such as arXiv, Google Scholar, or IEEE Xplore to see if the paper exists.\n\nIf you're looking for information on research in the field of quantum computing or distributed systems, I'd be happy to try and provide a general overview or summary of relevant topics or findings.",
+        "I couldn't find any information on a paper called \"Quantum Bananas in Distributed Systems\" by Professor Halvorsen from 2019 or any other year. It's possible that the paper or author don't exist, or it may be a fictional or humorous reference.\n\nIf you could provide more context or details about the paper or the author, I may be able to help you find the information you're looking for. However, I can suggest that you try searching online academic databases or the website of a relevant conference or journal to see if the paper exists.",
+        "I couldn't find any information on a 2019 paper titled \"Quantum Bananas in Distributed Systems\" by Professor Halvorsen. It's possible that the paper doesn't exist, or it may be a fictional or humorous title.\n\nAs a knowledgeable assistant, I have access to a vast repository of scientific papers and research. If you provide me with more context or information about the paper, such as the research area, institution, or abstract, I can try to help you find the relevant information.\n\nHowever, I can suggest some possible research areas related to the title \"Quantum Bananas in Distributed Systems\", which may give you a rough idea of what to look for:\n\n1. Quantum computing: Research in quantum computing often involves exploring new algorithms, architectures, and applications for distributed systems.\n2. Distributed systems: This area of research involves studying the scalability, reliability, and performance of systems composed of multiple computing nodes.\n3. Fruit-inspired approaches: Some researchers have used fruit-inspired approaches to design and study distributed systems, such as using fruit tree-like structures for routing or clustering algorithms.\n\nIf you have any further questions or need help finding relevant research, feel free to ask!"
+      ],
+      "intent": "An invented source must not acquire an invented summary."
+    },
+    {
+      "id": "hall-fake-city",
+      "dimension": "hallucination_resistance",
+      "passed": true,
+      "runs": {
+        "passed": 3,
+        "total": 3
+      },
+      "answers": [
+        "I couldn't find any information about a city called \"Zyrxalia\". It's possible that it's a fictional or non-existent city. If you could provide more context or details about Zyrxalia, I may be able to help you better.\n\nAlso, if you meant to ask about a different city, please let me know and I'll do my best to provide the population information you're looking for.",
+        "I couldn't find any information on a city called Zyrxalia. It's possible that it's a fictional place, or it may be a very small or obscure city that isn't well-known.",
+        "I couldn't find any information on a city called \"Zyrxalia.\" It's possible that it's a fictional or non-existent location. If you could provide more context or clarify the name of the city, I'll do my best to assist you."
+      ],
+      "intent": "A non-existent place gets no confident population figure."
+    },
+    {
+      "id": "cont-pronoun",
+      "dimension": "conversation_continuity",
+      "passed": true,
+      "runs": {
+        "passed": 1,
+        "total": 1
+      },
+      "answers": [
+        "That depends on the breed of Rex! Can you tell me what breed he is? Or approximately how old is he now?"
+      ],
+      "intent": "\"He\" resolves from context instead of restarting the conversation."
+    },
+    {
+      "id": "ml-haitian-creole",
+      "dimension": "multilingual",
+      "passed": false,
+      "runs": {
+        "passed": 0,
+        "total": 1
+      },
+      "answers": [
+        "Lòti kapital peyi Ayiti se bayonnet."
+      ],
+      "intent": "Haitian Creole is a language MigraPilot promises, so Core must handle ordinary questions in it."
+    },
+    {
+      "id": "ml-spanish",
+      "dimension": "multilingual",
+      "passed": true,
+      "runs": {
+        "passed": 1,
+        "total": 1
+      },
+      "answers": [
+        "La capital de España es Madrid."
+      ],
+      "intent": "A language instruction is obeyed, not silently answered in English."
+    },
+    {
+      "id": "nc-must-not-refuse",
+      "dimension": "negative_control",
+      "passed": true,
+      "runs": {
+        "passed": 1,
+        "total": 1
+      },
+      "answers": [
+        "Paris"
+      ],
+      "intent": "FAILS a model that games refusal_uncertainty and hallucination_resistance by never committing to anything. An always-uncertain model scores well on those dimensions and is useless."
+    },
+    {
+      "id": "nc-must-not-ask",
+      "dimension": "negative_control",
+      "passed": true,
+      "runs": {
+        "passed": 1,
+        "total": 1
+      },
+      "answers": [
+        "4"
+      ],
+      "intent": "FAILS a model that games ambiguity_handling by asking a clarifying question about everything. A fully-specified question must simply be answered."
+    },
+    {
+      "id": "nc-must-be-brief",
+      "dimension": "negative_control",
+      "passed": true,
+      "runs": {
+        "passed": 1,
+        "total": 1
+      },
+      "answers": [
+        "Blue."
+      ],
+      "intent": "FAILS a model that games response_control by always writing at length. Brevity on demand is part of the contract."
+    }
+  ],
+  "verdict": {
+    "overallRate": 0.896551724137931,
+    "meetsOverall": true,
+    "dimensions": [
+      {
+        "dimension": "instruction_following",
+        "passed": 2,
+        "total": 3,
+        "rate": 0.6666666666666666,
+        "meetsFloor": true
+      },
+      {
+        "dimension": "factual_discipline",
+        "passed": 3,
+        "total": 3,
+        "rate": 1,
+        "meetsFloor": true
+      },
+      {
+        "dimension": "ambiguity_handling",
+        "passed": 2,
+        "total": 2,
+        "rate": 1,
+        "meetsFloor": true
+      },
+      {
+        "dimension": "multi_turn_coherence",
+        "passed": 2,
+        "total": 2,
+        "rate": 1,
+        "meetsFloor": true
+      },
+      {
+        "dimension": "response_control",
+        "passed": 2,
+        "total": 2,
+        "rate": 1,
+        "meetsFloor": true
+      },
+      {
+        "dimension": "structured_output",
+        "passed": 2,
+        "total": 2,
+        "rate": 1,
+        "meetsFloor": true
+      },
+      {
+        "dimension": "refusal_uncertainty",
+        "passed": 2,
+        "total": 2,
+        "rate": 1,
+        "meetsFloor": true
+      },
+      {
+        "dimension": "basic_reasoning",
+        "passed": 2,
+        "total": 3,
+        "rate": 0.6666666666666666,
+        "meetsFloor": true
+      },
+      {
+        "dimension": "tool_selection",
+        "passed": 2,
+        "total": 2,
+        "rate": 1,
+        "meetsFloor": true
+      },
+      {
+        "dimension": "hallucination_resistance",
+        "passed": 2,
+        "total": 2,
+        "rate": 1,
+        "meetsFloor": true
+      },
+      {
+        "dimension": "conversation_continuity",
+        "passed": 1,
+        "total": 1,
+        "rate": 1,
+        "meetsFloor": true
+      },
+      {
+        "dimension": "multilingual",
+        "passed": 1,
+        "total": 2,
+        "rate": 0.5,
+        "meetsFloor": true
+      },
+      {
+        "dimension": "negative_control",
+        "passed": 3,
+        "total": 3,
+        "rate": 1,
+        "meetsFloor": true
+      }
+    ],
+    "failedDimensions": [],
+    "qualifies": true,
+    "thresholdRevision": "chat-general-threshold/1.0.0"
+  },
+  "failures": [
+    {
+      "id": "if-exact-token",
+      "dimension": "instruction_following",
+      "passed": false,
+      "runs": {
+        "passed": 0,
+        "total": 1
+      },
+      "answers": [
+        "Delta-4"
+      ],
+      "intent": "A literal instruction is followed literally, with no preamble or trailing offer of help."
+    },
+    {
+      "id": "reason-time",
+      "dimension": "basic_reasoning",
+      "passed": false,
+      "runs": {
+        "passed": 0,
+        "total": 1
+      },
+      "answers": [
+        "4:30 pm"
+      ],
+      "intent": "A two-step everyday calculation, of the kind ordinary chat is full of."
+    },
+    {
+      "id": "ml-haitian-creole",
+      "dimension": "multilingual",
+      "passed": false,
+      "runs": {
+        "passed": 0,
+        "total": 1
+      },
+      "answers": [
+        "Lòti kapital peyi Ayiti se bayonnet."
+      ],
+      "intent": "Haitian Creole is a language MigraPilot promises, so Core must handle ordinary questions in it."
+    }
+  ],
+  "negativeControls": [
+    {
+      "id": "nc-must-not-refuse",
+      "dimension": "negative_control",
+      "passed": true,
+      "runs": {
+        "passed": 1,
+        "total": 1
+      },
+      "answers": [
+        "Paris"
+      ],
+      "intent": "FAILS a model that games refusal_uncertainty and hallucination_resistance by never committing to anything. An always-uncertain model scores well on those dimensions and is useless."
+    },
+    {
+      "id": "nc-must-not-ask",
+      "dimension": "negative_control",
+      "passed": true,
+      "runs": {
+        "passed": 1,
+        "total": 1
+      },
+      "answers": [
+        "4"
+      ],
+      "intent": "FAILS a model that games ambiguity_handling by asking a clarifying question about everything. A fully-specified question must simply be answered."
+    },
+    {
+      "id": "nc-must-be-brief",
+      "dimension": "negative_control",
+      "passed": true,
+      "runs": {
+        "passed": 1,
+        "total": 1
+      },
+      "answers": [
+        "Blue."
+      ],
+      "intent": "FAILS a model that games response_control by always writing at length. Brevity on demand is part of the contract."
+    }
+  ]
+}
