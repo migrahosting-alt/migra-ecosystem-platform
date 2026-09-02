@@ -118,7 +118,7 @@
       "statuses": {
         "migra-vision": "PROVEN_LIVE — the ONLY fully proven family",
         "migra-forge": "PARTIAL, advanced for the tested VS Code multi-tool workload only. Qualified 2026-09-02 on ephemeral remote compute: requested family -> governed backend (qwen3-coder:30b via a MEASURED grant) -> RTX 3090 pod -> git.status + workspace.list + fs.proposeChangeset delegated to the developer machine -> proposal -> provenance -> pod destroyed. The PANEL selection leg was NOT driven, so this is not a blanket promotion.",
-        "migra-core": "PARTIAL — resolves and answers, but no governed capability exists for general chat",
+        "migra-core": "PARTIAL — selectable and answering through the consumer selector, but still no governed capability for general chat, so the path rests on capability matching.",
         "migra-logic": "BLOCKED — its task classes require the disabled cloud tier",
         "migra-swift": "BLOCKED — no fast general-purpose chat model is installed",
         "migra-atlas": "INTENT — advertised context is a spec sheet, not a measured capability"
@@ -130,7 +130,18 @@
         "3. Swift — install and qualify an actually fast general-purpose model",
         "4. Atlas — measure long-context behaviour instead of trusting advertised context",
         "5. Per-turn executed-route evidence so local-vs-remote divergence is permanently auditable"
-      ]
+      ],
+      "consumerSelector": {
+        "status": "PROVEN_LIVE in the real browser for the selector itself — all six families listed, three disabled with reasons, Core default, no backend name shown, modelFamily captured on the wire, answer returned, selection surviving a hard reload. Run against a local dev consumer pointed at the PRODUCTION Brain.",
+        "contract": "GET /api/model-families (consumer) -> Brain GET /api/ai/model-families?surface=migrapilot-consumer",
+        "noSecondList": "Structural tests fail if the consumer hard-codes a family id, display name, tagline or description as a literal, or if any backend/provider name appears in the selector or hook.",
+        "defectsCaughtByLiveProof": [
+          "An unknown ?surface= returned families: [] and echoed the bogus name back as valid, so the documented consumer URL rendered an EMPTY selector silently. Unknown surfaces are now 400; `consumer` is an alias.",
+          "The catalog was LESS strict than the router: it advertised llama3.1:8b for Core while every turn executed qwen3:8b, because the router admits only approved models under enforcement. Fixed — and deliberately NOT applied to a governed decision or measured grant, which the router admits by name.",
+          "The FIRST turn dropped the family entirely: startConversation was never widened, the spread discarded it with no type error, and the answer returned looking correct while routing automatically. This is exactly the hazard seams.ts warns about in prose, and only the live browser proof exposed it."
+        ],
+        "notProven": "Not exercised on the deployed consumer at chat.migrateck.com — this ran against a local dev instance."
+      }
     }
   },
   "capabilities": {
