@@ -33,10 +33,32 @@ import type { PoolClient } from 'pg';
  * finds nothing approved and is refused rather than served by a model that was
  * never qualified for it.
  */
+/*
+ * The capabilities a human can approve a model FOR.
+ *
+ * A stable governance vocabulary, not an operational fact: the list of
+ * capabilities is a contract, while WHICH model satisfies one is a durable
+ * decision held in `model_qualification_decisions` and resolved at runtime.
+ *
+ * The dotted names are deliberately narrower than the bare ones. "chat" is not a
+ * capability anyone can meaningfully approve a model for — reading a document
+ * well and holding a fast conversation are different claims with different
+ * evidence, which is exactly why vision was split into general and
+ * object_counting after a model that described images perfectly miscounted what
+ * was in them.
+ */
 export type ModelCapability =
   | 'vision'
   | 'vision.general'
   | 'vision.object_counting'
+  /** Everyday conversation and general work — the Migra Core contract. */
+  | 'chat.general'
+  /** Low-latency routine answers, where speed is the product promise. */
+  | 'chat.fast'
+  /** Sustained work over long documents and large context. */
+  | 'chat.long_context'
+  /** Multi-step analysis and planning, beyond a single-shot answer. */
+  | 'reasoning.deep'
   | 'reasoning' | 'embedding' | 'audio' | 'generation' | 'chat' | 'coding';
 export type DecisionState = 'candidate' | 'approved' | 'revoked';
 

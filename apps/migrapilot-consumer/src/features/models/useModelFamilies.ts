@@ -25,8 +25,8 @@ export interface MigraFamilyView {
   unavailableReason?: string
   /** INTERNAL provenance. Never rendered as the user's choice. */
   selectedBackend?: string
+  /** What the availability decision rested on — a capability or a grant. */
   basis?: string
-  auditedStatus: { status: string; measuredOn: string; finding: string; toAdvance?: string }
 }
 
 export type FamiliesState =

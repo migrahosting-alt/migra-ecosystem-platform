@@ -62,12 +62,13 @@ function imageEditingAvailable(): boolean {
 import { renderTextGlyph } from './media/glyphRender.js';
 import type { IndexService } from './rag/indexService.js';
 import { auditStore } from './auditLog.js';
-import { gateVisionTurn, visionCapabilitySnapshot, type VisionGateDeps } from './media/visionGate.js';
+import { gateVisionTurn, visionCapabilitySnapshot, approvedByCapability, type VisionGateDeps } from './media/visionGate.js';
 import { resolveFamiliesForSurface, resolveFamily } from './modelFamilyResolver.js';
 import { MEASURED_GRANTS } from './capability/capabilityGrants.js';
 import {
   familiesForSurface,
   MIGRA_MODEL_CATALOG_REVISION,
+  MIGRA_MODEL_FAMILIES,
   type MigraProductSurface,
   type MigraModelFamilyId,
 } from '@migrapilot/shared-types/model-families';
@@ -327,20 +328,37 @@ export function registerAiRoutes(
       };
     }
     const models = await reg.list();
-    const governed = visionDeps ? await visionCapabilitySnapshot(visionDeps) : null;
+    /*
+     * Ask governance about exactly the capabilities THE CATALOG declares.
+     *
+     * Derived from the catalog rather than listed here, so a family that starts
+     * requiring a new capability is answered correctly with no change to this
+     * route — which is the whole point of the families being a contract.
+     */
+    const declared = [
+      ...new Set(
+        familiesForSurface(surface)
+          .map((f) => f.requirements.governedCapability)
+          .filter((c): c is string => Boolean(c)),
+      ),
+    ];
+    const governedByCapability = visionDeps
+      ? await approvedByCapability(visionDeps, declared as never)
+      : new Map<string, { qualified: boolean; modelId: string | null; digest: string | null }>();
 
     const resolutions = resolveFamiliesForSurface(surface, {
       models,
       // A durable human decision, not a capability flag.
-      governedDecision: (capability) => {
-        if (capability === 'vision.general' && governed) {
-          return { qualified: governed.general.qualified, modelId: governed.general.modelId };
-        }
-        if (capability === 'vision.object_counting' && governed) {
-          return { qualified: governed.objectCounting.qualified, modelId: governed.objectCounting.modelId };
-        }
-        return undefined;
-      },
+      /*
+       * GENERIC, not a list of known capabilities.
+       *
+       * An if/else over capability names would be the same hard-coded truth in a
+       * different shape: adding a governed capability would then require editing
+       * this route, and until someone did, a family declaring it would silently
+       * resolve as if no governance existed. The decision table is queried by
+       * whatever name the catalog declares.
+       */
+      governedDecision: (capability) => governedByCapability.get(capability),
       // Only models carrying an APPROVED grant for that task class.
       // MEASURED_GRANTS is one entry per (model, task class) WITH evidence, so the
       // approved set is derived from actual measurements rather than a policy list.
@@ -381,8 +399,6 @@ export function registerAiRoutes(
           ...(r.unavailableReason ? { unavailableReason: r.unavailableReason } : {}),
           ...(r.selectedBackend ? { selectedBackend: r.selectedBackend } : {}),
           ...(r.basis ? { basis: r.basis } : {}),
-          // The audit is evidence with a date, kept distinct from live readiness.
-          auditedStatus: f.auditedStatus,
         };
       }),
     };
@@ -597,24 +613,23 @@ export function registerAiRoutes(
     let requestedFamily: string | undefined;
     if (body.modelFamily) {
       requestedFamily = body.modelFamily;
-      // The SAME inputs the catalog endpoint uses, including the durable vision
-      // decision — otherwise a family could resolve one way when listed and
-      // another way when actually used, which is drift inside a single request.
-      const govSnapshot = visionDeps ? await visionCapabilitySnapshot(visionDeps) : null;
+      /*
+       * The SAME inputs the catalog endpoint uses, resolved the SAME generic way.
+       *
+       * A family must not resolve one way when listed and another way when
+       * actually used — that is drift inside a single request, and it is exactly
+       * what an if/else over capability names produces the moment the two lists
+       * fall out of step.
+       */
+      const capability = MIGRA_MODEL_FAMILIES[body.modelFamily as MigraModelFamilyId]
+        ?.requirements.governedCapability;
+      const governedForTurn =
+        visionDeps && capability
+          ? await approvedByCapability(visionDeps, [capability] as never)
+          : new Map<string, { qualified: boolean; modelId: string | null; digest: string | null }>();
       const resolved = resolveFamily(body.modelFamily as MigraModelFamilyId, {
         models: await reg.list(),
-        governedDecision: (capability: string) => {
-          if (capability === 'vision.general' && govSnapshot) {
-            return { qualified: govSnapshot.general.qualified, modelId: govSnapshot.general.modelId };
-          }
-          if (capability === 'vision.object_counting' && govSnapshot) {
-            return {
-              qualified: govSnapshot.objectCounting.qualified,
-              modelId: govSnapshot.objectCounting.modelId,
-            };
-          }
-          return undefined;
-        },
+        governedDecision: (cap: string) => governedForTurn.get(cap),
         approvedForTaskClass: (taskClass: string) =>
           MEASURED_GRANTS.filter((g) => g.taskClass === taskClass).map((g) => g.model),
         executable: (m: ModelDescriptor) => !/-cloud$/i.test(m.id),

@@ -19,10 +19,18 @@
  * A hard-coded `family -> model` table would be a UI constant wearing a
  * governance costume.
  *
- * READINESS IS COMPUTED, NEVER ASSERTED. `auditedStatus` below records what was
- * MEASURED on the date given — it is evidence, not a promise. A surface must ask
- * the Brain what is resolvable right now; a family with no qualified path is
- * reported unavailable rather than quietly served by something weaker.
+ * READINESS IS COMPUTED, NEVER ASSERTED — and this file once broke its own rule.
+ * It carried an `auditedStatus` per family (PROVEN_LIVE, PARTIAL, BLOCKED) and
+ * the resolver GATED availability on it, so a hand-written literal decided what
+ * the product could do. That is hard-coded operational truth: it goes stale
+ * silently, and it cannot follow a qualification that changed five minutes ago.
+ *
+ * It is gone. What stays here is only what is genuinely stable — the six
+ * identities, their product semantics, and the CAPABILITY each one requires.
+ * Everything operational is resolved at runtime: which model satisfies a
+ * capability, whether it is installed, whether it can run, and therefore whether
+ * the family is available at all. Status belongs to evidence and governance, not
+ * to a constant in a source file.
  */
 
 /** Stable internal ids. These never change, even if a display name does. */
@@ -36,19 +44,6 @@ export type MigraModelFamilyId =
 
 /** Where a family may be offered. A family can be right for one surface and wrong for another. */
 export type MigraProductSurface = 'migrapilot-consumer' | 'vscode-extension';
-
-/** Honest lifecycle state. Ordered from strongest to weakest claim. */
-export type MigraFamilyStatus =
-  /** The real user-facing workflow passed on a live product surface. */
-  | 'PROVEN_LIVE'
-  /** Built and wired, but the live product-surface proof has not been run. */
-  | 'IMPLEMENTED_NEEDS_LIVE_PROOF'
-  /** Some capability qualified, others not. The gap must be named. */
-  | 'PARTIAL'
-  /** A specific, identified thing prevents it. The blocker must be named. */
-  | 'BLOCKED'
-  /** Named and specified only. Nothing is wired. */
-  | 'INTENT';
 
 export type MigraSpeedTier = 'fast' | 'balanced' | 'deep';
 
@@ -90,16 +85,6 @@ export type MigraFallbackPolicy =
   | { kind: 'none' }
   | { kind: 'qualified-only'; note: string };
 
-export interface MigraFamilyAudit {
-  status: MigraFamilyStatus;
-  /** ISO date the status was measured. A status without a date is an opinion. */
-  measuredOn: string;
-  /** What was actually observed — the basis for the status. */
-  finding: string;
-  /** What must happen to raise the status. Empty only for PROVEN_LIVE. */
-  toAdvance?: string;
-}
-
 export interface MigraModelFamily {
   id: MigraModelFamilyId;
   displayName: string;
@@ -111,7 +96,6 @@ export interface MigraModelFamily {
   fallback: MigraFallbackPolicy;
   /** Recommended default for a surface with no explicit choice. */
   recommended?: boolean;
-  auditedStatus: MigraFamilyAudit;
 }
 
 /*
@@ -135,19 +119,15 @@ export const MIGRA_MODEL_FAMILIES: Record<MigraModelFamilyId, MigraModelFamily> 
     displayName: 'Migra Core',
     tagline: 'Best for everyday work and general tasks',
     description: 'The balanced default for chat, general work and mixed tasks.',
-    requirements: { capabilities: ['chat', 'tools'], minTier: 'balanced', prefer: 'fastest' },
+    requirements: {
+      capabilities: ['chat', 'tools'],
+      minTier: 'balanced',
+      prefer: 'fastest',
+      governedCapability: 'chat.general',
+    },
     surfaces: ['migrapilot-consumer', 'vscode-extension'],
     fallback: { kind: 'none' },
     recommended: true,
-    auditedStatus: {
-      status: 'PARTIAL',
-      measuredOn: '2026-09-02',
-      finding:
-        'A balanced chat+tools model resolves and answers live (chat turns routed and returned real ' +
-        'answers). But there is no governed capability for general chat at all, so the path is ' +
-        'UNGOVERNED — nothing qualified it, and nothing would stop it changing.',
-      toAdvance: 'Define and qualify a general-chat capability so Core resolves through governance rather than tier alone.',
-    },
   },
 
   'migra-logic': {
@@ -159,21 +139,11 @@ export const MIGRA_MODEL_FAMILIES: Record<MigraModelFamilyId, MigraModelFamily> 
       capabilities: ['chat', 'reasoning'],
       minTier: 'deep',
       prefer: 'strongest',
+      governedCapability: 'reasoning.deep',
       taskClasses: ['patch-planning', 'dependency-analysis'],
     },
     surfaces: ['migrapilot-consumer', 'vscode-extension'],
     fallback: { kind: 'none' },
-    auditedStatus: {
-      status: 'BLOCKED',
-      measuredOn: '2026-09-02',
-      finding:
-        'Reasoning-capable deep models are installed. But the task classes this family exists to serve ' +
-        '— patch-planning, code-review, security-review — all require the CLOUD tier, and the Brain ' +
-        'reports "Cloud providers are disabled or unavailable". dependency-analysis is deep-local but ' +
-        'carries approvedLocalCapability: [] (never measured).',
-      toAdvance:
-        'Either measure a deep-local model against those task families and grant it, or enable a governed cloud path.',
-    },
   },
 
   'migra-forge': {
@@ -189,19 +159,6 @@ export const MIGRA_MODEL_FAMILIES: Record<MigraModelFamilyId, MigraModelFamily> 
     },
     surfaces: ['vscode-extension', 'migrapilot-consumer'],
     fallback: { kind: 'qualified-only', note: 'may drop to a smaller coder ONLY where that model holds an approved grant for the task class' },
-    auditedStatus: {
-      status: 'PARTIAL',
-      measuredOn: '2026-09-02',
-      finding:
-        'Coding models resolve and the full 16-tool workspace surface executes through the extension ' +
-        'with governed delegation. Grants are approved for typed-implementation (fast-local) and ' +
-        'repository-diagnosis (deep-local) only; multi-file-change, refactoring, regression-repair, ' +
-        'test-generation and tool-use-decision all carry approvedLocalCapability: []. A live multi-tool ' +
-        'run also failed on model judgment, not capability: the tools returned structured results and ' +
-        'the model then emitted invalid JSON.',
-      toAdvance:
-        'Measure and grant the remaining coding task classes, and re-run multi-tool acceptance on a deep-local coder.',
-    },
   },
 
   'migra-swift': {
@@ -209,19 +166,14 @@ export const MIGRA_MODEL_FAMILIES: Record<MigraModelFamilyId, MigraModelFamily> 
     displayName: 'Migra Swift',
     tagline: 'Fastest for quick and routine tasks',
     description: 'Fast, lightweight answers for quick and routine work.',
-    requirements: { capabilities: ['chat'], minTier: 'fast', prefer: 'fastest' },
+    requirements: {
+      capabilities: ['chat'],
+      minTier: 'fast',
+      prefer: 'fastest',
+      governedCapability: 'chat.fast',
+    },
     surfaces: ['migrapilot-consumer', 'vscode-extension'],
     fallback: { kind: 'none' },
-    auditedStatus: {
-      status: 'BLOCKED',
-      measuredOn: '2026-09-02',
-      finding:
-        'There is no fast GENERAL-chat model installed. The fast tier holds only coder models ' +
-        '(qwen2.5-coder 1.5b/7b) and vision models (llava, minicpm-v); the smallest general chat model, ' +
-        'qwen3:8b, is classified balanced. Resolving Swift today would hand general questions to a ' +
-        'coder model, which is exactly the silent downgrade this catalog forbids.',
-      toAdvance: 'Install and qualify a small general-purpose chat model, or reclassify one honestly.',
-    },
   },
 
   'migra-vision': {
@@ -237,18 +189,6 @@ export const MIGRA_MODEL_FAMILIES: Record<MigraModelFamilyId, MigraModelFamily> 
     },
     surfaces: ['migrapilot-consumer', 'vscode-extension'],
     fallback: { kind: 'none' },
-    auditedStatus: {
-      status: 'PROVEN_LIVE',
-      measuredOn: '2026-09-02',
-      finding:
-        'vision.general holds a durable governed decision against an exact digest, enforcement is ON, ' +
-        'and the production Brain names it as the model an image turn would actually use. Proven on the ' +
-        'real path: a mockup carrying a planted unguessable token was read back correctly, so the answer ' +
-        'cannot have been a plausible guess.',
-      toAdvance:
-        'vision.object_counting remains deliberately unqualified — counting is a separate capability and ' +
-        'is correctly reported as unavailable rather than approximated.',
-    },
   },
 
   'migra-atlas': {
@@ -256,19 +196,15 @@ export const MIGRA_MODEL_FAMILIES: Record<MigraModelFamilyId, MigraModelFamily> 
     displayName: 'Migra Atlas',
     tagline: 'Best for long documents and large-context work',
     description: 'Long-context work: long conversations, large PDFs, large document sets and corpus-heavy analysis.',
-    requirements: { capabilities: ['chat'], minTier: 'balanced', minContextTokens: 128_000, prefer: 'strongest' },
+    requirements: {
+      capabilities: ['chat'],
+      minTier: 'balanced',
+      minContextTokens: 128_000,
+      prefer: 'strongest',
+      governedCapability: 'chat.long_context',
+    },
     surfaces: ['migrapilot-consumer', 'vscode-extension'],
     fallback: { kind: 'none' },
-    auditedStatus: {
-      status: 'INTENT',
-      measuredOn: '2026-09-02',
-      finding:
-        'Models advertising large context exist (up to 262144 tokens). But NOTHING has measured whether ' +
-        'the Brain actually drives that window end to end, and no qualification covers long-context work. ' +
-        'An advertised context length is a spec sheet, not a capability.',
-      toAdvance:
-        'Measure real retrieval and answer quality at depth, then define and qualify a long-context capability.',
-    },
   },
 };
 

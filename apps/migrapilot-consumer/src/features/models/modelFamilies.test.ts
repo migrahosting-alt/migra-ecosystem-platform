@@ -20,7 +20,6 @@ const family = (id: string, over: Partial<MigraFamilyView> = {}): MigraFamilyVie
   recommended: false,
   available: true,
   governed: false,
-  auditedStatus: { status: 'PARTIAL', measuredOn: '2026-09-02', finding: 'x'.repeat(50) },
   ...over,
 })
 

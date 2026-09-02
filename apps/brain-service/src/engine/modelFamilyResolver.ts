@@ -107,27 +107,6 @@ export function resolveFamily(id: MigraModelFamilyId, deps: ResolveDeps): MigraF
   const family = MIGRA_MODEL_FAMILIES[id];
   const req = family.requirements;
 
-  /*
-   * THE AUDIT IS A GATE, NOT A LABEL.
-   *
-   * BLOCKED and INTENT mean a human looked and found no honest path. Capability
-   * matching does not know that, and left to itself it will happily find
-   * something that satisfies the letter of the requirements while betraying
-   * their intent — Migra Swift, audited BLOCKED for want of a fast GENERAL chat
-   * model, resolved to a 1.5B CODER because coder models also advertise `chat`.
-   * That is the silent downgrade this catalog exists to forbid, so the audit
-   * wins and the family reports unavailable with the finding as its reason.
-   */
-  if (family.auditedStatus.status === 'BLOCKED' || family.auditedStatus.status === 'INTENT') {
-    return {
-      family: id,
-      available: false,
-      governed: false,
-      unavailableReason: family.auditedStatus.finding,
-      basis: `audit:${family.auditedStatus.status}`,
-    };
-  }
-
   // 1 — a governed capability decision is the strongest possible basis.
   if (req.governedCapability) {
     const decision = deps.governedDecision?.(req.governedCapability);

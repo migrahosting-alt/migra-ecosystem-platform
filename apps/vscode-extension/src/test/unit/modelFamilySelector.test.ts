@@ -60,11 +60,21 @@ test('exactly one family is the recommended default', () => {
   assert.deepEqual(rec, ['migra-core']);
 });
 
-test('every family declares an audited status with a measurement date', () => {
+test('the catalog declares NO status — readiness is resolved, not written down', () => {
+  // A hand-written PROVEN_LIVE/PARTIAL per family used to live here AND gate
+  // availability, so a literal decided what the product could do. Status now
+  // comes from governance and evidence; the catalog only declares identity and
+  // requirements.
+  const serialised = JSON.stringify(MIGRA_MODEL_FAMILIES);
+  for (const word of ['PROVEN_LIVE', 'PARTIAL', 'BLOCKED', 'INTENT', 'auditedStatus']) {
+    assert.equal(serialised.includes(word), false, `the catalog still encodes "${word}"`);
+  }
+});
+
+test('every family declares a governance basis rather than a status', () => {
   for (const id of MIGRA_FAMILY_IDS) {
-    const a = MIGRA_MODEL_FAMILIES[id].auditedStatus;
-    assert.match(a.measuredOn, /^\d{4}-\d{2}-\d{2}$/, `${id} status needs a date`);
-    assert.ok(a.finding.length > 40, `${id} needs a real finding, not a label`);
-    if (a.status !== 'PROVEN_LIVE') assert.ok(a.toAdvance, `${id} must say what would advance it`);
+    const req = MIGRA_MODEL_FAMILIES[id].requirements;
+    const governed = Boolean(req.governedCapability) || Boolean(req.taskClasses?.length);
+    assert.equal(governed, true, `${id} rests on no governance basis`);
   }
 });

@@ -94,3 +94,35 @@ export async function visionCapabilitySnapshot(deps: VisionGateDeps): Promise<{
     },
   };
 }
+
+/**
+ * Every live approval, keyed by the capability it was granted for.
+ *
+ * Generic on purpose: callers ask for whatever capability their contract names,
+ * so a newly governed capability works without editing a lookup table. The
+ * alternative — an if/else over capability names — is hard-coded truth wearing a
+ * function's clothes, and a family whose capability was missing from it would
+ * resolve as though no governance existed at all.
+ */
+export async function approvedByCapability(
+  deps: VisionGateDeps,
+  capabilities: readonly ModelCapability[],
+): Promise<Map<string, { qualified: boolean; modelId: string | null; digest: string | null }>> {
+  const rows = await deps.transaction(async (client) => {
+    const out: Array<[string, QualificationDecision[]]> = [];
+    for (const capability of capabilities) {
+      out.push([capability, await approvedForCapability(client, capability)]);
+    }
+    return out;
+  });
+  const map = new Map<string, { qualified: boolean; modelId: string | null; digest: string | null }>();
+  for (const [capability, decisions] of rows) {
+    map.set(capability, {
+      qualified: decisions.length > 0,
+      modelId: decisions[0]?.modelId ?? null,
+      // The digest travels with the answer: an approval is about exact bytes.
+      digest: decisions[0]?.modelDigest ?? null,
+    });
+  }
+  return map;
+}

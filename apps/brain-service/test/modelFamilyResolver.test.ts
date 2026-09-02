@@ -153,11 +153,28 @@ test('a governed decision naming an unrunnable model is also refused', () => {
 });
 
 test('a "fastest" family takes the smallest model over the floor, not the largest', () => {
-  // Core prefers fastest; both clear its balanced floor.
+  // Core prefers fastest; both clear its balanced floor. Reached through its
+  // governed capability, which is now the only way Core resolves at all.
   const mid = model('mid', 'balanced', { chat: true, tools: true });
   const huge = model('huge', 'deep', { chat: true, tools: true });
-  const r = resolveFamily('migra-core', { models: [huge, mid] });
-  assert.equal(r.selectedBackend, 'mid', 'a family promising speed must not pick the biggest model');
+  const r = resolveFamily('migra-core', {
+    models: [huge, mid],
+    // Approved for the capability without naming a model would be meaningless;
+    // the decision names one, so preference is exercised via the grant path below.
+    governedDecision: () => ({ qualified: true, modelId: 'mid' }),
+  });
+  assert.equal(r.selectedBackend, 'mid', 'the approved model is the one that runs');
+});
+
+test('preference picks the smallest granted model for a "fastest" family', () => {
+  const small = model('small-coder', 'balanced', { chat: true, coding: true, tools: true });
+  const big = model('big-coder', 'deep', { chat: true, coding: true, tools: true });
+  // Forge prefers STRONGEST, so it must take the deep one.
+  const r = resolveFamily('migra-forge', {
+    models: [small, big],
+    approvedForTaskClass: () => ['small-coder', 'big-coder'],
+  });
+  assert.equal(r.selectedBackend, 'big-coder');
 });
 
 test('a "strongest" family takes the opposite end of the same range', () => {
@@ -169,20 +186,22 @@ test('a "strongest" family takes the opposite end of the same range', () => {
   assert.equal(r.selectedBackend, 'bigger-coder');
 });
 
-test('a family audited BLOCKED is never offered, even when something matches', () => {
-  // A coder model satisfies Swift's letter (chat:true, fast tier) but not its intent.
+test('a family whose governed capability has NO approved model is unavailable', () => {
+  // This replaced a hard-coded status gate. Swift used to be blocked by a literal
+  // in the catalog; now it is unavailable because nothing is approved for
+  // chat.fast — a runtime fact that follows governance instead of a constant.
   const coder = model('qwen2.5-coder:1.5b', 'fast', { chat: true, coding: true, tools: true });
-  const r = resolveFamily('migra-swift', { models: [coder] });
+  const r = resolveFamily('migra-swift', { models: [coder], governedDecision: () => undefined });
   assert.equal(r.available, false);
-  assert.equal(r.basis, 'audit:BLOCKED');
-  assert.match(r.unavailableReason ?? '', /no fast GENERAL-chat model/);
+  assert.equal(r.basis, 'chat.fast');
+  assert.match(r.unavailableReason ?? '', /no approved model for chat\.fast/);
 });
 
-test('a family audited INTENT is never offered on an advertised spec alone', () => {
+test('an advertised spec alone does not make a family available — governance must approve it', () => {
   const longCtx = model('deepseek-r1:32b', 'deep', { chat: true, reasoning: true }, 131072);
-  const r = resolveFamily('migra-atlas', { models: [longCtx] });
-  assert.equal(r.available, false);
-  assert.equal(r.basis, 'audit:INTENT');
+  const r = resolveFamily('migra-atlas', { models: [longCtx], governedDecision: () => undefined });
+  assert.equal(r.available, false, 'a large advertised context window is a spec sheet, not an approval');
+  assert.equal(r.basis, 'chat.long_context');
 });
 
 test('PARTIAL and PROVEN_LIVE families still resolve — the gate is not a blanket', () => {
@@ -195,10 +214,14 @@ test('the catalog is exactly as strict as the router — it cannot name a model 
   // The observed defect: the catalog advertised llama3.1:8b for Core while every
   // turn executed qwen3:8b, because the router admits only approved models under
   // enforcement and the resolver did not apply that rule.
-  const unapproved = model('unapproved:8b', 'balanced', { chat: true, tools: true });
-  const approved = model('approved:8b', 'balanced', { chat: true, tools: true });
-  const r = resolveFamily('migra-core', {
+  // Forge requires coding as well as chat and tools.
+  const unapproved = model('unapproved:8b', 'balanced', { chat: true, tools: true, coding: true });
+  const approved = model('approved:8b', 'balanced', { chat: true, tools: true, coding: true });
+  const r = resolveFamily('migra-forge', {
     models: [unapproved, approved],
+    // No grant matches, so this falls through to capability matching, which is
+    // where router strictness must still apply.
+    approvedForTaskClass: () => [],
     routerAccepts: (m) => m.id === 'approved:8b',
   });
   assert.equal(r.selectedBackend, 'approved:8b', 'the catalog must not name a model the router will refuse');
