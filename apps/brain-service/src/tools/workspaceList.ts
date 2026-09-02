@@ -72,6 +72,35 @@ export async function workspaceList(input: WorkspaceListRequest): Promise<Worksp
   const limit = req.limit ?? DEFAULT_LIMIT;
   const maxDepth = req.depth ?? 0;
 
+  /*
+   * A MISSING ROOT IS NOT AN EMPTY WORKSPACE.
+   *
+   * The walk below deliberately swallows an unreadable directory, which is right
+   * for one permission-denied folder deep in a tree — it should not sink the
+   * whole listing. Applied to the ROOT, though, it turns "that path does not
+   * exist" into "your project has no files", and a model told its workspace is
+   * empty does not stop: it invents plausible files and reports work it never
+   * did. That was observed when the Brain moved to another host and every
+   * workspace path stopped existing on it.
+   *
+   * So the ROOT is checked and fails loudly. A missing SUBPATH under a valid
+   * root keeps returning an empty listing, which is the existing contract and a
+   * different question: the caller named a directory that is not there, inside a
+   * workspace that is.
+   */
+  let rootStat: fs.Stats;
+  try {
+    rootStat = fs.statSync(root);
+  } catch {
+    throw new Error(
+      `workspace root "${root}" does not exist on the machine running this tool. ` +
+        'Workspace tools read the filesystem of the Brain host, so a path from another machine will not resolve here.',
+    );
+  }
+  if (!rootStat.isDirectory()) {
+    throw new Error(`workspace root "${root}" is not a directory`);
+  }
+
   const entries: WorkspaceListEntry[] = [];
   let truncated = false;
 
