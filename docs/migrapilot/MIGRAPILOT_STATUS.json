@@ -111,6 +111,26 @@
       "verified": "16/16 executed against a real workspace through the compiled client executor. Live through the production Brain: git.status and workspace.search delegated, executed locally, and the agent continued on their results. Brain 2139/2139, extension 874/874.",
       "notYetProven": "Per-tool acceptance driven from the real VS Code UI is NOT done for all 16 — it needs the owner at the keyboard, and the local GPU is currently fully held by AI Studio (1GB free), so a larger coding model cannot run without evicting that work.",
       "modelVsArchitecture": "A multi-tool run with qwen2.5-coder:7b delegated both tools correctly and then emitted invalid JSON at step 4. That is judgment, not capability: the adapter delivered structured results and the agent used them. Recorded as a model/training concern, deliberately NOT as a missing tool."
+    },
+    "migraModelsV1": {
+      "catalog": "packages/shared-types/src/modelFamilies.ts — one catalog, shared by Brain, consumer and extension",
+      "contract": "GET /api/ai/model-families?surface=… — catalog + LIVE resolution against governance",
+      "statuses": {
+        "migra-vision": "PROVEN_LIVE — the ONLY fully proven family",
+        "migra-forge": "PARTIAL, advanced for the tested VS Code multi-tool workload only. Qualified 2026-09-02 on ephemeral remote compute: requested family -> governed backend (qwen3-coder:30b via a MEASURED grant) -> RTX 3090 pod -> git.status + workspace.list + fs.proposeChangeset delegated to the developer machine -> proposal -> provenance -> pod destroyed. The PANEL selection leg was NOT driven, so this is not a blanket promotion.",
+        "migra-core": "PARTIAL — resolves and answers, but no governed capability exists for general chat",
+        "migra-logic": "BLOCKED — its task classes require the disabled cloud tier",
+        "migra-swift": "BLOCKED — no fast general-purpose chat model is installed",
+        "migra-atlas": "INTENT — advertised context is a spec sheet, not a measured capability"
+      },
+      "evidence": "docs/migrapilot/evidence/migra-forge-remote-qualification-2026-09-02.json",
+      "nextGapsInOwnerOrder": [
+        "1. Consumer model selector on the same /api/ai/model-families contract",
+        "2. Core governance — create and qualify a real general-chat capability",
+        "3. Swift — install and qualify an actually fast general-purpose model",
+        "4. Atlas — measure long-context behaviour instead of trusting advertised context",
+        "5. Per-turn executed-route evidence so local-vs-remote divergence is permanently auditable"
+      ]
     }
   },
   "capabilities": {
@@ -390,6 +410,12 @@
       "verdict": "NOT CAUSED BY THE CHANGE. Transient cold-model load.",
       "detail": "An engineer run failed with a 240s connect timeout to the Ollama provider, which looked like a regression. Two controls disproved it: the same request with clientWorkspaceTools=false failed identically, and once qwen2.5-coder:14b (15GB) was resident both succeeded. A separate false step: Ollama appeared unreachable on its tailnet IP when probed FROM WSL, but the Brain connects from VM111, where it answered in 0.26s — the wrong vantage point, not a fault.",
       "corrected": "Provider timeouts under cold load are a capacity signal, not evidence about the delegation path."
+    },
+    {
+      "claim": "\"A systemd drop-in with Environment= overrides a value set in an EnvironmentFile.\"",
+      "verdict": "FALSE. EnvironmentFile= takes precedence over Environment=, whatever the order.",
+      "detail": "A drop-in setting Environment=MIGRAPILOT_PROVIDER_URL was merged, sorted last, and reported as set by `systemctl show` — while the Brain kept using brain.env's value. The only honest check was behavioural: the model catalog stayed at 16 instead of collapsing to the pod's 1. Overriding an env-file value requires another EnvironmentFile listed last.",
+      "corrected": "Remote-provider overrides now use an EnvironmentFile drop-in, verified by catalog size."
     }
   ],
   "promisesVsReality": [
