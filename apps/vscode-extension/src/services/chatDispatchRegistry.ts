@@ -84,6 +84,16 @@ export const CHAT_DISPATCH_SITES: readonly DispatchSite[] = [
     rationale: 'The main build loop. The most consequential dispatch in the turn.',
   },
   {
+    id: 'design_read',
+    callee: 'readAttachedDesign',
+    classification: 'migraai_provider',
+    requiresChild: true,
+    rationale:
+      'Sends the attached image to the governed vision model and waits for a spec. Remote ' +
+      'generation that continues server-side after an abort — and the build that follows is ' +
+      'driven entirely by its result, so an interrupted read must be recorded as interrupted.',
+  },
+  {
     id: 'apply_changeset',
     callee: 'previewAndMaybeApplyChangeset',
     classification: 'repository_command',

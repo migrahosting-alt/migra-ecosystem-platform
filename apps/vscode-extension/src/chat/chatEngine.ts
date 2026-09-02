@@ -23,6 +23,7 @@ import { buildAiRequest } from './intentMapping.js';
 import { parseSummaryTurns } from './conversationSummary.js';
 import { ChatTurnExecution } from '../services/chatTurnExecution.js';
 import { governedChild } from '../services/chatChildDispatch.js';
+import { readAttachedDesign } from './designRead.js';
 import type { BrainStore } from '../services/brainPersistence.js';
 
 /** A backend-agnostic output surface for a chat turn. Both the native chat
@@ -257,7 +258,9 @@ async function runChatTurnInner(
   // a claim of work is backed by a tool call that actually ran.
   //
   // Two deliberate exceptions remain, and NEITHER is a guess about wording:
-  //  1. image attachments → the vision chat path (the agent loop has no vision);
+  //  1. image attachments → read by the vision model FIRST (the agent loop has no
+  //     vision), then handed to the agent as a spec; vision chat only if that read
+  //     comes back empty. See the design-read stage below;
   //  2. no folder open AND no path named in the message → chat, since there is
   //     no workspace to act in. (When the message DOES name a folder, or the
   //     user wants to work outside the open one, the resolver below asks.)
@@ -274,7 +277,36 @@ async function runChatTurnInner(
   // to decide whether prompting for a folder is warranted — a wrong guess here
   // cannot strand real work, because there is no workspace to strand it in.
   const mayPromptForFolder = Boolean(openWorkspace) || classifyIntent(trimmed) === 'workspace-task';
-  if (workspaceAgentEnabled && backend.kind === 'local' && !hasImageAttachment && mayPromptForFolder) {
+  /*
+   * AN ATTACHED DESIGN BECOMES ACTIONABLE HERE.
+   *
+   * Exception 1 above still holds — the agent loop has no vision — but it used
+   * to end the turn: an image could only ever be DESCRIBED, so "build this
+   * mockup" produced prose and no files. The capability was not missing, it was
+   * unreachable, because sight and tools sat on opposite sides of this branch.
+   *
+   * So the qualified vision model reads the image ONCE into a literal spec, and
+   * the agent builds from that text with every tool it already had. Neither side
+   * gains the other's capability, and the governance path is unchanged.
+   *
+   * If the read yields nothing usable we deliberately do NOT enter the agent: it
+   * would be working blind on an image it cannot see. The turn falls through to
+   * the vision-chat path below, which is exactly today's behaviour.
+   */
+  let designSpec: string | undefined;
+  if (hasImageAttachment && workspaceAgentEnabled && backend.kind === 'local' && mayPromptForFolder) {
+    sink.markdown('\n_Reading the attached design…_\n');
+    const design = await governedChild(turn, 'design_read', () =>
+      readAttachedDesign(deps.migraAiClient, options.attachments ?? [], tokenToSignal(token)),
+    );
+    if (design) {
+      designSpec = design.spec;
+      sink.markdown(
+        `_Read \`${design.fileNames.join('`, `')}\`${design.model ? ` with ${design.model}` : ''}._\n`,
+      );
+    }
+  }
+  if (workspaceAgentEnabled && backend.kind === 'local' && (!hasImageAttachment || designSpec) && mayPromptForFolder) {
     // Resolve WHICH folder to work in: an explicit path in the message, else the
     // open workspace, else ASK via a folder picker — so MigraPilot can work on any
     // folder on the machine, not only the one open in VS Code.
@@ -352,7 +384,7 @@ async function runChatTurnInner(
         deps.migraAiClient,
         {
           rootPath: workspaceRootForTask,
-          task: trimmed,
+          task: designSpec ? `${trimmed}\n\n${designSpec}` : trimmed,
           ecosystem: detectEcosystem({ rootPath: workspaceRootForTask, prompt: trimmed }),
           // The agent now serves ordinary conversation too, so it must carry the
           // same memory the chat path held — otherwise "now build it" loses what

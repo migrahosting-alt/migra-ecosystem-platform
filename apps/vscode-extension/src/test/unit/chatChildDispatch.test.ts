@@ -48,8 +48,8 @@ async function harness(turnId = 't') {
 }
 
 // 1
-test('parent-child · all nine required sites resolve to a distinct execution class', () => {
-  assert.equal(REQUIRED_CHILD_SITES.length, 9, 'the registry must still describe nine required sites');
+test('parent-child · all ten required sites resolve to a distinct execution class', () => {
+  assert.equal(REQUIRED_CHILD_SITES.length, 10, 'the registry must still describe ten required sites');
   for (const s of REQUIRED_CHILD_SITES) {
     assert.notEqual(classOf(s.id), 'passive_local', `${s.id} must carry a real execution class`);
   }
