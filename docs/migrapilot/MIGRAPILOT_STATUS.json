@@ -162,7 +162,8 @@
       "provenancePerChild": "parent turn id, capability requested, selected family, executed backend, tool authority, outcome, failure.",
       "provenTest": "The SAME plan runs to completion under a VS Code workspace and under a connected repo with an identical step sequence; with no authority it stops exactly at workspace.inspect; read-only stops exactly at changeset.propose after inspection succeeded.",
       "consumerToday": "Declares NO_AUTHORITY, so a build is refused with the missing prerequisite AND the blocking step named. Verified live. It becomes capable when a repo authority is connected — no code change in the routing.",
-      "notYetBuilt": "The dispatcher is not yet wired into the Brain chat/engineer routes — the extension still uses its own chatEngine path. Server-side project authority (connected-repo / platform-project) is defined but has no implementation behind it."
+      "notYetBuilt": "The dispatcher itself is still not wired into the Brain routes — both surfaces now share the INTENT contract, but the step sequencing (vision.read -> design.spec -> engineer.plan -> ...) runs only in the extension's own chatEngine path. Server-side project authority (connected-repo / platform-project) remains defined with no implementation.",
+      "bothSurfacesOnOneContract": "The extension now routes from the SAME typed plan as the consumer. It previously decided locally, and the drift produced OPPOSITE bugs from one cause: the consumer answered a build request with a description, while the extension entered the workspace agent whenever an image had yielded a design spec — so a \"what is in this image?\" turn was dragged into the build path. A spec existing is not a reason to build. Pinned by a regression test across six acceptance cases, which also checks the plain no-image workspace path still reaches the agent."
     }
   },
   "capabilities": {
