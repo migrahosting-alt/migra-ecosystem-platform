@@ -46,7 +46,22 @@ export interface OutcomePlan {
 const ANSWER: OutcomeStep = { step: 'answer', terminal: true };
 
 /** Build the step sequence an intent requires. Data, not control flow. */
-export function planOutcome(input: { objective: string; intent: TurnIntent; hasImage: boolean }): OutcomePlan {
+export function planOutcome(input: {
+  objective: string;
+  intent: TurnIntent;
+  hasImage: boolean;
+  /**
+   * Does the caller hold a project it can read?
+   *
+   * This changes the shape of an ORDINARY turn, and deliberately so. Where a
+   * workspace exists, every ordinary turn runs the tool-capable agent: a keyword
+   * classifier deciding which phrasings are "allowed" to touch the workspace is
+   * what once stranded real build orders in a tool-less path, where the model —
+   * asked for a completion report it could not produce — invented one. Where
+   * there is no project, the same turn is simply a conversation.
+   */
+  workspaceAvailable?: boolean;
+}): OutcomePlan {
   const { objective, intent, hasImage } = input;
   const visionFirst: OutcomeStep[] = hasImage
     ? [
@@ -92,7 +107,18 @@ export function planOutcome(input: { objective: string; intent: TurnIntent; hasI
         steps: hasImage ? [{ step: 'vision.read', terminal: true }] : [ANSWER],
       };
     default:
-      return { objective, intent, steps: [ANSWER] };
+      // An ordinary turn WITH a project is agent-eligible; without one it is a
+      // conversation. Authority decides, not phrasing.
+      return input.workspaceAvailable
+        ? {
+            objective,
+            intent,
+            steps: [
+              { step: 'engineer.plan', terminal: false },
+              { step: 'workspace.inspect', needs: { read: true }, terminal: true },
+            ],
+          }
+        : { objective, intent, steps: [ANSWER] };
   }
 }
 

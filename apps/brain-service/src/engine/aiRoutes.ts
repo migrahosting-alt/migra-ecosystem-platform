@@ -64,6 +64,8 @@ import type { IndexService } from './rag/indexService.js';
 import { auditStore } from './auditLog.js';
 import { gateVisionTurn, visionCapabilitySnapshot, approvedByCapability, type VisionGateDeps } from './media/visionGate.js';
 import { resolveFamiliesForSurface, resolveFamily } from './modelFamilyResolver.js';
+import { decideOrchestration } from './orchestration/decide.js';
+import type { OrchestrationRequest } from '@migrapilot/shared-types/orchestration-decision';
 import { MEASURED_GRANTS } from './capability/capabilityGrants.js';
 import {
   familiesForSurface,
@@ -297,6 +299,34 @@ export function registerAiRoutes(
    * `selectedBackend` for provenance and diagnostics; they are deliberately NOT
    * what a surface shows as the choice.
    */
+  /*
+   * ORCHESTRATION — the Brain's routing answer, and the only one a client acts on.
+   *
+   * Deliberately a decision rather than an execution: the client already holds
+   * the workspace and already executes delegated tools, so having it EXECUTE the
+   * sequence the Brain ORDERED keeps the authority split intact. What it must
+   * never do again is decide the sequence.
+   *
+   * `surface` is recorded for provenance and is not read when deciding. A
+   * decision that varied by surface would recreate "consumer = planner,
+   * extension = builder" through the back door.
+   */
+  app.post('/api/ai/orchestrate', async (request, reply) => {
+    const body = (request.body ?? {}) as Partial<OrchestrationRequest>;
+    if (typeof body.objective !== 'string' || !body.objective.trim()) {
+      reply.code(400);
+      return { ok: false, code: 'INVALID_INPUT', error: 'objective is required.' };
+    }
+    const decision = decideOrchestration({
+      objective: body.objective,
+      attachmentMimeTypes: Array.isArray(body.attachmentMimeTypes) ? body.attachmentMimeTypes : [],
+      // An absent authority is NO authority, never an assumed one.
+      authority: body.authority ?? { kind: 'none' },
+      surface: body.surface === 'migrapilot-consumer' ? 'migrapilot-consumer' : 'vscode-extension',
+    });
+    return decision;
+  });
+
   app.get('/api/ai/model-families', async (request, reply) => {
     /*
      * VALIDATE THE SURFACE — an unknown one is a 400, not an empty list.

@@ -41,6 +41,10 @@
     "./outcome-plan": {
       "types": "./src/outcomePlan.ts",
       "default": "./dist/outcomePlan.js"
+    },
+    "./orchestration-decision": {
+      "types": "./src/orchestrationDecision.ts",
+      "default": "./dist/orchestrationDecision.js"
     }
   },
   "files": [
