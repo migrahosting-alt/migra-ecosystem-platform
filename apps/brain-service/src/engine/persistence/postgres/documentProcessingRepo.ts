@@ -119,6 +119,13 @@ export async function listReadiness(
  * they must not sit there implying progress forever. The caller decides whether
  * to resume or to mark them failed; this only reports them, because "interrupted"
  * is a fact and "abandoned" is a judgement.
+ *
+ * 🚨 `queued` COUNTS, AND MORE CERTAINLY THAN `processing`. The queue is held in
+ * memory and lost on restart, so a document that was waiting its turn is not
+ * waiting for anything — nothing references it any more. Selecting only
+ * `processing` left those rows saying "Waiting to start" for ever, which is the
+ * same never-ending status this query exists to surface. A row genuinely owned
+ * by a live job is filtered out downstream by `activeJobs`, not here.
  */
 export async function findInterrupted(
   client: PoolClient,
@@ -126,7 +133,8 @@ export async function findInterrupted(
 ): Promise<DocumentReadiness[]> {
   const { rows } = await client.query<Record<string, unknown>>(
     `SELECT * FROM document_processing
-      WHERE owner_scope = $1 AND workspace_scope = $2 AND state = 'processing'`,
+      WHERE owner_scope = $1 AND workspace_scope = $2
+        AND state IN ('processing', 'queued')`,
     [scope.ownerScope, scope.workspaceScope],
   );
   return rows.map(toReadiness);

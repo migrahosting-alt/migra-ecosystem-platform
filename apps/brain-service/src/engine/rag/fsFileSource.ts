@@ -13,6 +13,8 @@
 
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
+import { createHash } from 'node:crypto';
+import { createReadStream } from 'node:fs';
 import { Exclusions, DEFAULT_MIGRAAI_EXCLUSIONS } from './exclusions.js';
 import { extractPdf, PdfExtractionError } from './pdfText.js';
 import { extractDocx, DocxExtractionError } from './docxText.js';
@@ -40,6 +42,37 @@ export class FileSourceUnavailableError extends Error {
 export const DEFAULT_MAX_INDEX_FILE_BYTES =
   (Number(process.env.MIGRAPILOT_MAX_EXTRACT_MB) || 25) * 1024 * 1024;
 
+/** SHA-256 of a file, streamed so a large PDF is never held in memory. */
+async function sha256Of(filePath: string): Promise<string> {
+  const hash = createHash('sha256');
+  await new Promise<void>((resolve, reject) => {
+    const stream = createReadStream(filePath);
+    stream.on('data', (chunk) => hash.update(chunk));
+    stream.on('error', reject);
+    stream.on('end', () => resolve());
+  });
+  return hash.digest('hex');
+}
+
+/**
+ * Does this sidecar describe the bytes currently on disk?
+ *
+ * A sidecar with NO recorded digest predates the field and is trusted: refusing
+ * it would silently discard hours of completed OCR the moment this shipped. One
+ * that DOES record a digest must match, and every new write records one — so the
+ * exception closes itself as sidecars are rewritten.
+ *
+ * An unreadable file answers "no". Indexing text for something we cannot read is
+ * exactly the mismatch this guards against.
+ */
+async function sidecarBelongsTo(
+  sidecar: { sourceSha256?: string },
+  filePath: string,
+): Promise<boolean> {
+  if (!sidecar.sourceSha256) return true;
+  return (await sha256Of(filePath).catch(() => null)) === sidecar.sourceSha256;
+}
+
 export class FsFileSource implements FileSource {
   constructor(
     private readonly root: string,
@@ -54,8 +87,18 @@ export class FsFileSource implements FileSource {
      * EXTENSIONS, not sizes — so a 500KB PDF passed every check and was still
      * never indexed.
      *
-     * It must stay at least as large as the consumer's per-file limit, or the
-     * two disagree again in exactly the same invisible way.
+     * 🚨 DO NOT RAISE THIS TO MATCH THE UPLOAD LIMIT. An earlier note here said
+     * it must stay at least as large as the consumer's per-file limit; that was
+     * written when the two numbers were close and it is now wrong. Uploads are
+     * capped by TRANSPORT (256 MB); parsing is capped by THIS PROCESS, which
+     * reads whole files into memory synchronously — matching them would let one
+     * 256 MB document exhaust the Brain and end chat for every user.
+     *
+     * The gap is handled honestly instead of hidden: a file above this ceiling
+     * is stored, named in the index route's `tooLargeToProcess`, and reported to
+     * the user as too large to read — never as containing nothing readable.
+     * Closing the gap needs streaming or worker-isolated extraction, not a
+     * bigger constant.
      */
     private readonly maxFileSize = DEFAULT_MAX_INDEX_FILE_BYTES,
   ) {}
@@ -127,7 +170,7 @@ export class FsFileSource implements FileSource {
         if (excl.isExcluded(childRel)) continue;
         try {
           const stat = await fs.stat(childAbs);
-          if (stat.size > this.maxFileSize || stat.size === 0) continue;
+          if (stat.size === 0) continue;
 
           /*
            * A PDF NEVER takes the UTF-8 path.
@@ -146,12 +189,41 @@ export class FsFileSource implements FileSource {
              * block indexing for every other file. The sidecar holds the pages in
              * CANONICAL order with their boundaries, so these chunks get the same
              * page provenance a text-layer PDF gets.
+             *
+             * 🚨 CHECKED BEFORE THE SIZE CEILING, AND THAT ORDER IS THE WHOLE
+             * POINT. The ceiling exists to stop THIS walk loading a large file
+             * into memory. A sidecar is a different, already-bounded artifact,
+             * and its existence means the source was read out-of-band by the
+             * background job. Skipping on the source's size first — which is
+             * what this did — meant a 36 MB PDF could be OCR'd for two hours,
+             * write a perfectly good sidecar, and then be passed over here: zero
+             * chunks, and a terminal state of "the pages were read but nothing
+             * could be indexed". The work happened and the user never saw it.
              */
             const sidecar = await fs
               .readFile(path.join(this.root, OCR_SIDECAR_DIR, `${childRel}.json`), 'utf8')
-              .then((raw) => JSON.parse(raw) as { text?: string; pageStartLines?: number[] })
+              .then((raw) => JSON.parse(raw) as {
+                text?: string; pageStartLines?: number[]; sourceSha256?: string;
+              })
               .catch(() => null);
-            if (sidecar?.text) {
+
+            /*
+             * 🚨 THE SIDECAR MUST BELONG TO THESE BYTES.
+             *
+             * It is named after the FILE, and a filename is not an identity.
+             * Deleting `report.pdf` and uploading a completely different
+             * `report.pdf` left the old sidecar in place, and this walk indexed
+             * the PREVIOUS document's text under the new file — reported ready,
+             * searchable, and citing a document that no longer exists. Observed
+             * live: an altered copy of a 245-page book went to "Ready" in
+             * seconds with no OCR, carrying the original's text.
+             *
+             * A sidecar written before this field existed has no digest. Those
+             * are still trusted, because refusing them would silently discard
+             * hours of completed OCR on upgrade — but a sidecar that DOES claim
+             * a digest must match, and any future write records one.
+             */
+            if (sidecar?.text && await sidecarBelongsTo(sidecar, childAbs)) {
               out.push({
                 relPath: childRel,
                 content: sidecar.text,
@@ -159,7 +231,17 @@ export class FsFileSource implements FileSource {
               });
               continue;
             }
+          }
 
+          /*
+           * From here every path READS THE SOURCE FILE, so the ceiling applies.
+           * A document above it is left to the background reader, which extracts
+           * it a page at a time and leaves a sidecar the branch above will pick
+           * up on the next sync.
+           */
+          if (stat.size > this.maxFileSize) continue;
+
+          if (/\.pdf$/i.test(childRel)) {
             try {
               const extracted = await extractPdf(new Uint8Array(await fs.readFile(childAbs)));
               out.push({

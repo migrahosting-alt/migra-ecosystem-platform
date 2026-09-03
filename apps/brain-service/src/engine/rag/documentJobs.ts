@@ -12,6 +12,14 @@
  */
 
 import { processScannedPdf, readinessFromMap } from './scannedPdfJob.js';
+import {
+  processTextLayerPdf,
+  readinessFromTextExtraction,
+  type TextLayerPdfJobResult,
+} from './textLayerPdfJob.js';
+import { probePdfTextLayer } from './pdfTextLayer.js';
+import { findRegisteredArtifact, hashFile } from './artifactReuse.js';
+import { processRegisteredArtifact, readinessFromReuse } from './reusedArtifactJob.js';
 import type { DocumentReadiness } from './documentReadiness.js';
 import type { DocumentMap } from './documentMap.js';
 
@@ -74,10 +82,17 @@ export class DocumentJobRunner {
 
     this.queued.add(id);
     this.queue.push({ scope, fileName, pdfPath });
+    /*
+     * 🚨 QUEUED, NOT PROCESSING. The queue is serial — each job pins a CPU for
+     * minutes — so a document accepted while another is running has not started
+     * and may not for a long time. Writing `processing` here told every waiting
+     * user that work was happening on their file, and made a stalled queue
+     * indistinguishable from slow progress.
+     */
     await this.deps.persist(scope, {
       fileName,
-      state: 'processing',
-      stage: 'uploaded',
+      state: 'queued',
+      stage: 'waiting_for_a_free_worker',
       startedAt: (this.deps.now ?? Date.now)(),
     });
 
@@ -119,19 +134,134 @@ export class DocumentJobRunner {
 
   private async runOne(job: QueuedJob): Promise<void> {
     const startedAt = (this.deps.now ?? Date.now)();
-    const { map } = await processScannedPdf(job.pdfPath, job.fileName, {
-      report: (readiness) => this.deps.persist(job.scope, readiness),
-      ...(this.deps.now ? { now: this.deps.now } : {}),
-    });
+    const report = (readiness: DocumentReadiness) => this.deps.persist(job.scope, readiness);
+    const clock = this.deps.now ? { now: this.deps.now } : {};
 
+    /*
+     * 🚨 WHICH PIPELINE, DECIDED FROM THE DOCUMENT — NOT FROM ITS SIZE OR NAME.
+     *
+     * A PDF that already contains text is read with `pdftotext`, one page per
+     * subprocess: seconds of work, a page of peak memory, and an order the file
+     * states rather than one we infer. A PDF without a text layer still gets the
+     * full scanned pipeline — rasterise, OCR, reconstruct — because for those the
+     * order genuinely is lost and recovering it is the whole job.
+     *
+     * Choosing wrongly is expensive in both directions: OCR on a digital PDF
+     * burns minutes to recover text that was already there, and text extraction
+     * on a scan silently indexes a handful of scanner artefacts as if they were
+     * the book. So the probe samples actual pages and the fallback below covers
+     * the case where it was too optimistic.
+     */
+    /*
+     * 🚨 HAVE WE ALREADY READ THESE EXACT BYTES?
+     *
+     * Asked FIRST, before any probing or rendering, because the cheapest work is
+     * the work not done. `liv_kreyol_AI-Training.pdf` is a 245-page scan whose
+     * OCR was already paid for once; without this it would be paid for again,
+     * from zero, every time it is uploaded.
+     *
+     * Identity is the SHA-256 of the bytes, never the filename — a name is a
+     * label a user can change, and two different books can share one. Reuse is
+     * an optimisation, so every failure here falls through to real ingestion
+     * rather than failing the document.
+     */
+    await this.deps.persist(job.scope, {
+      fileName: job.fileName, state: 'processing', stage: 'matching_known_source', startedAt,
+    });
+    const digest = await hashFile(job.pdfPath).catch(() => null);
+    const known = digest ? await findRegisteredArtifact(digest) : null;
+
+    if (known) {
+      const reused = await processRegisteredArtifact(known, job.fileName, { report, ...clock });
+      await this.indexAndFinish(job, reused.map, startedAt,
+        readinessFromReuse(job.fileName, reused, startedAt));
+      return;
+    }
+
+    const probe = await probePdfTextLayer(job.pdfPath).catch(() => null);
+
+    let map: DocumentMap;
+    let textResult: TextLayerPdfJobResult | null = null;
+
+    if (probe?.hasTextLayer) {
+      try {
+        textResult = await processTextLayerPdf(job.pdfPath, job.fileName, { report, ...clock }, probe);
+        map = textResult.map;
+      } catch (error) {
+        /*
+         * The probe sampled three pages and was wrong about the rest. Falling
+         * back to OCR is strictly better than failing: the document is readable
+         * either way, and the user should not have to know which internal route
+         * recovered it.
+         */
+        if ((error as { failure?: { kind?: string } })?.failure?.kind !== 'no_text_layer') throw error;
+        textResult = null;
+        map = (await processScannedPdf(job.pdfPath, job.fileName, { report, ...clock })).map;
+      }
+    } else {
+      map = (await processScannedPdf(job.pdfPath, job.fileName, { report, ...clock })).map;
+
+      /*
+       * 🚨 OCR RECOVERED NOTHING — TRY THE TEXT LAYER BEFORE GIVING UP.
+       *
+       * A 40 MB digital PDF was probed as having no text layer, sent to OCR, and
+       * reported to the user as "the pages were rendered but no readable text was
+       * recovered" — a readable document declared unreadable. The probe has been
+       * widened, but a probe is a SAMPLE and will always be wrong on some
+       * document; the honest safety net is to check the cheap path before
+       * reporting failure, because "OCR found nothing" and "there is nothing to
+       * find" are different claims.
+       *
+       * Costs nothing on a genuine scan: extraction of a page with no text layer
+       * returns empty in milliseconds, and the result is the same failure it was
+       * already heading for.
+       */
+      if (map.pages.length === 0) {
+        await report({
+          fileName: job.fileName, state: 'processing', stage: 'reading_text', startedAt,
+          detail: 'OCR recovered nothing; checking for a text layer',
+        });
+        const salvage = await processTextLayerPdf(job.pdfPath, job.fileName, { report, ...clock })
+          .catch(() => null);
+        if (salvage && salvage.map.pages.length > 0) {
+          textResult = salvage;
+          map = salvage.map;
+        }
+      }
+    }
+
+    /*
+     * The terminal state comes from whichever pipeline actually ran. A text
+     * extraction has no unplaced pages and no folio reconstruction to report, so
+     * judging it with the scanned job's rules would describe work that never
+     * happened.
+     */
+    const terminal = textResult
+      ? readinessFromTextExtraction(job.fileName, textResult, startedAt)
+      : readinessFromMap(job.fileName, map, startedAt);
+
+    await this.indexAndFinish(job, map, startedAt, terminal);
+  }
+
+  /**
+   * Index the recovered pages and write the terminal state.
+   *
+   * SHARED BY ALL THREE PATHS — reuse, text layer and OCR — so the guarantee
+   * below cannot hold for two of them and quietly lapse for the third. A reused
+   * artifact is exactly as capable of indexing nothing as a freshly OCR'd one.
+   */
+  private async indexAndFinish(
+    job: QueuedJob,
+    map: DocumentMap,
+    startedAt: number,
+    terminal: DocumentReadiness,
+  ): Promise<void> {
     if (this.deps.index) {
       await this.deps.persist(job.scope, {
         fileName: job.fileName, state: 'processing', stage: 'indexing', startedAt,
       });
       await this.deps.index(job.scope, job.fileName, map);
     }
-
-    const terminal = readinessFromMap(job.fileName, map, startedAt);
 
     /*
      * READY IS EARNED, NOT ASSUMED.

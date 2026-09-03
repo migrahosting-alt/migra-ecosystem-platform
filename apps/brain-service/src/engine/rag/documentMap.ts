@@ -29,7 +29,17 @@ export type PlacementBasis =
   | 'section_number'
   | 'chapter_range'
   | 'continuation'
-  | 'scan_order';
+  | 'scan_order'
+  /**
+   * The PDF's own page sequence, for a document that never lost its order.
+   *
+   * Distinct from `scan_order`, which means "the sequence the photographs
+   * happened to arrive in" — a weak signal that reconstruction is allowed to
+   * overrule. This is the file stating where a page belongs, and there is
+   * nothing to infer or contradict. Collapsing the two would let a digital PDF's
+   * certain order be treated as a guess.
+   */
+  | 'file_page_order';
 
 /**
  * What indexing should DO with this page.

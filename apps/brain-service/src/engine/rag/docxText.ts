@@ -90,6 +90,56 @@ function textFromPart(xml: string): string {
 }
 
 /**
+ * Tables, with their rows intact.
+ *
+ * 🚨 THE DEFECT. mammoth flattens a table into one paragraph per CELL, so
+ *
+ *     | component | count |
+ *     | sensors   | 12    |
+ *
+ * arrived as "component\n\ncount\n\nsensors\n\n12" — four lines that read as
+ * four unrelated statements. Every value was technically present and the
+ * RELATIONSHIP between them was gone, which is why a document whose prose values
+ * were all recovered still could not answer "how many sensors?". Chunking makes
+ * it worse: "sensors" and "12" can land in different chunks entirely.
+ *
+ * Rows are emitted as `cell | cell`, so a row survives as one line and one
+ * retrievable unit. Cells keep their own text exactly; only the arrangement is
+ * reconstructed.
+ */
+function tablesFromDocument(xml: string): string[] {
+  const tables: string[] = [];
+  for (const table of xml.match(/<w:tbl>[\s\S]*?<\/w:tbl>/g) ?? []) {
+    const rows: string[] = [];
+    for (const row of table.match(/<w:tr[ >][\s\S]*?<\/w:tr>/g) ?? []) {
+      const cells = (row.match(/<w:tc[ >][\s\S]*?<\/w:tc>/g) ?? [])
+        // A cell may hold several paragraphs; they belong to one cell, so they
+        // are joined with a space rather than becoming separate rows.
+        .map((cell) => textFromPart(cell).replace(/\s*\n\s*/g, ' ').trim());
+      if (cells.some((c) => c !== '')) rows.push(cells.join(' | '));
+    }
+    if (rows.length > 0) tables.push(rows.join('\n'));
+  }
+  return tables;
+}
+
+/**
+ * Text boxes, callouts and shapes.
+ *
+ * 🚨 DROPPED ENTIRELY BEFORE THIS. `w:txbxContent` lives inside a drawing, which
+ * mammoth's raw-text extraction does not descend into, so a value in a callout
+ * box was absent from the extracted document with no error anywhere — the
+ * silent-discard failure this pipeline exists to prevent, in a part nobody had
+ * looked at. Proven with a probe document: a boxed value was missing while every
+ * prose value was recovered.
+ */
+function textBoxesFromDocument(xml: string): string[] {
+  return (xml.match(/<w:txbxContent>[\s\S]*?<\/w:txbxContent>/g) ?? [])
+    .map((box) => textFromPart(box))
+    .filter((t) => t !== '');
+}
+
+/**
  * Word's own separator/continuation notes, which are structural rather than
  * authored. They arrive as empty or single-character parts and would otherwise
  * appear to the user as a footnote that says nothing.
@@ -128,6 +178,14 @@ export async function extractDocx(bytes: Uint8Array): Promise<DocxExtraction> {
     throw new DocxExtractionError('the Word document could not be read', error);
   }
 
+  /*
+   * The body's OWN XML, read once and used for the two things mammoth loses:
+   * table structure and anything inside a drawing.
+   */
+  const documentXml = (await zip.file('word/document.xml')?.async('string')) ?? '';
+  const tables = tablesFromDocument(documentXml);
+  const textBoxes = textBoxesFromDocument(documentXml);
+
   const auxiliary: string[] = [];
   for (const { prefix, label } of AUXILIARY_PARTS) {
     // Sorted so header1 precedes header2 — the order they appear in the document.
@@ -149,9 +207,28 @@ export async function extractDocx(bytes: Uint8Array): Promise<DocxExtraction> {
    */
   const unique = [...new Set(auxiliary)];
 
-  const text = unique.length > 0
-    ? `${body}\n\nDocument notes, headers and footers:\n${unique.join('\n')}`
-    : body;
+  const sections: string[] = [body];
 
-  return { text: text.trim(), hasAuxiliaryText: unique.length > 0 };
+  /*
+   * Tables are appended in STRUCTURED form even though mammoth already emitted
+   * their cells as loose paragraphs. The duplication is deliberate and cheap:
+   * the flattened copy still serves plain keyword matching, while this copy is
+   * the one that can answer "how many sensors?" because the row survives as a
+   * single line. Dropping mammoth's copy would mean re-deriving the whole body
+   * from XML and losing its handling of lists, styles and numbering.
+   */
+  if (tables.length > 0) {
+    sections.push(`Tables in this document:\n${tables.join('\n\n')}`);
+  }
+  if (textBoxes.length > 0) {
+    sections.push(`Text boxes and callouts:\n${textBoxes.join('\n')}`);
+  }
+  if (unique.length > 0) {
+    sections.push(`Document notes, headers and footers:\n${unique.join('\n')}`);
+  }
+
+  return {
+    text: sections.filter((s) => s.trim() !== '').join('\n\n').trim(),
+    hasAuxiliaryText: unique.length > 0 || textBoxes.length > 0,
+  };
 }

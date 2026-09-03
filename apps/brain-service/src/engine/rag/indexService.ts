@@ -20,6 +20,7 @@ import { Exclusions, DEFAULT_MIGRAAI_EXCLUSIONS } from './exclusions.js';
 import { chunkFile } from './chunker.js';
 import type { Embedder } from './embedder.js';
 import { VectorIndex, type IndexedChunk } from './vectorIndex.js';
+import { factObligations } from './factObligations.js';
 import { hybridRetrieve, type HybridOptions, type RetrievedRagChunk, type RetrieveDiagnostics } from './hybridRetriever.js';
 import type { RagIndexPersistence, PersistedChunk, PersistedIndexRecord } from '../persistence/types.js';
 
@@ -532,9 +533,80 @@ export class IndexService {
       }
       source = e.approvedIndex;
     }
-    const [queryVec] = await this.embedder.embed([queryText]);
-    const { chunks, diagnostics } = await hybridRetrieve(source, queryVec!, queryText, opts);
-    return { ok: true, chunks, diagnostics, indexState: e.record.state };
+    /*
+     * 🚨 MULTI-FACT QUESTIONS RETRIEVE PER FACT, NOT PER QUESTION.
+     *
+     * "Give me the reference code, the review month, the accent colour and the
+     * sensor count" was answered with three of four, because one embedding over
+     * a four-part question is near everything and nearest to nothing, and the
+     * four parts then shared one fixed candidate budget. The missing value was
+     * indexed and individually retrievable the whole time.
+     *
+     * Each obligation gets its own budget, so a fact cannot be crowded out by
+     * three others that are also relevant. NOT solved by enlarging topK: that
+     * adds noise and context for every question to fix a few, and eventually
+     * makes grounding worse.
+     */
+    const { obligations, multiFact } = factObligations(queryText);
+
+    if (!multiFact) {
+      const [queryVec] = await this.embedder.embed([queryText]);
+      const { chunks, diagnostics } = await hybridRetrieve(source, queryVec!, queryText, opts);
+      return { ok: true, chunks, diagnostics, indexState: e.record.state };
+    }
+
+    const vectors = await this.embedder.embed(obligations);
+    const totalCap = opts.maxChunks ?? 6;
+    /*
+     * A floor of 2 per obligation: one chunk is often the wrong half of a
+     * sentence, and the whole point is that each fact gets enough room to
+     * actually arrive. The union is capped below, so this widens coverage
+     * without letting context grow without bound.
+     */
+    const perObligation = Math.max(2, Math.ceil(totalCap / obligations.length));
+
+    const merged = new Map<string, RetrievedRagChunk>();
+    let candidatesConsidered = 0;
+    let reranked = false;
+
+    for (const [i, obligation] of obligations.entries()) {
+      const result = await hybridRetrieve(source, vectors[i]!, obligation, {
+        ...opts,
+        maxChunks: perObligation,
+      });
+      candidatesConsidered += result.diagnostics.candidatesConsidered;
+      reranked = reranked || result.diagnostics.reranked;
+      for (const chunk of result.chunks) {
+        // Same span retrieved for two obligations is ONE piece of evidence.
+        // Keeping the higher score preserves the ranking the union is sorted by.
+        const key = `${chunk.filePath}:${chunk.startLine}-${chunk.endLine}`;
+        const existing = merged.get(key);
+        if (!existing || chunk.score > existing.score) merged.set(key, chunk);
+      }
+    }
+
+    /*
+     * The union is allowed to exceed the single-question budget, because the
+     * question asked for more. It is still bounded: at most one budget per
+     * obligation, and the cap below keeps a long list from becoming unbounded
+     * context.
+     */
+    const unionCap = Math.min(totalCap * 3, perObligation * obligations.length);
+    const chunks = [...merged.values()].sort((a, b) => b.score - a.score).slice(0, unionCap);
+
+    return {
+      ok: true,
+      chunks,
+      diagnostics: {
+        candidatesConsidered,
+        returned: chunks.length,
+        deduped: 0,
+        omittedForBudget: 0,
+        estimatedTokens: chunks.reduce((n, c) => n + Math.ceil(c.snippet.length / 4), 0),
+        reranked,
+      },
+      indexState: e.record.state,
+    };
   }
 
   /** First approved index for a workspace (for chat integration). */

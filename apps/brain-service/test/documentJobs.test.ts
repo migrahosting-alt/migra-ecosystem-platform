@@ -10,7 +10,7 @@ import type { DocumentReadiness } from '../src/engine/rag/documentReadiness.js';
 
 const scope = { ownerScope: 'user:a', workspaceScope: 'org:a' };
 
-test('enqueue records PENDING state before returning', async () => {
+test('enqueue records QUEUED state before returning', async () => {
   // The caller's request ends here. If nothing were written first, the user would
   // reload and find no status at all for a file that is genuinely being worked on.
   const writes: DocumentReadiness[] = [];
@@ -18,8 +18,15 @@ test('enqueue records PENDING state before returning', async () => {
     persist: async (_s, r) => { writes.push(r) },
   });
   await runner.enqueue(scope, 'book.pdf', '/nonexistent/book.pdf');
-  assert.equal(writes[0]?.state, 'processing');
-  assert.equal(writes[0]?.stage, 'uploaded', 'the first durable fact is that work is pending');
+  /*
+   * `queued`, not `processing`. The queue is serial — each job pins a CPU for
+   * minutes — so a document accepted while another runs has NOT started. Saying
+   * `processing` told every waiting user that work was happening on their file,
+   * and made a stalled queue indistinguishable from slow progress.
+   */
+  assert.equal(writes[0]?.state, 'queued');
+  assert.equal(writes[0]?.stage, 'waiting_for_a_free_worker',
+    'the first durable fact is that the work is accepted but not started');
 });
 
 test('the same document is not queued twice', async () => {
@@ -27,7 +34,8 @@ test('the same document is not queued twice', async () => {
   const runner = new DocumentJobRunner({ persist: async (_s, r) => { writes.push(r) } });
   await runner.enqueue(scope, 'book.pdf', '/nonexistent/book.pdf');
   await runner.enqueue(scope, 'book.pdf', '/nonexistent/book.pdf');
-  assert.equal(writes.filter((w) => w.stage === 'uploaded').length, 1, 'a double upload must not run twice');
+  assert.equal(writes.filter((w) => w.stage === 'waiting_for_a_free_worker').length, 1,
+    'a double upload must not run twice');
 });
 
 test('a failing job lands in a TERMINAL state, never stuck processing', async () => {

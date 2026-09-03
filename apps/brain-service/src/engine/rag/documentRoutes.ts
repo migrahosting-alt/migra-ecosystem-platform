@@ -9,7 +9,10 @@
 
 import type { FastifyInstance } from 'fastify';
 
+import { rm } from 'node:fs/promises';
+
 import { scopeFrom } from '../memory/memoryRoutes.js';
+import { ocrSidecarPath } from './scannedPdfJob.js';
 import type { DocumentJobRunner } from './documentJobs.js';
 import type { DocumentReadiness } from './documentReadiness.js';
 import { describeState, isReadable, SEQUENCE_LIMITED_NOTE } from './documentReadiness.js';
@@ -61,6 +64,12 @@ export function registerDocumentRoutes(
   app: FastifyInstance,
   runner: DocumentJobRunner,
   store: DocumentReadinessStore,
+  /**
+   * Where this scope's uploads live, so a delete can also remove the derived
+   * text. Optional: without it the delete still works and the digest check in
+   * `fsFileSource` still refuses a stale sidecar.
+   */
+  uploadRootFor?: (scope: { ownerScope: string; workspaceScope: string }) => string | undefined,
 ): void {
   /** Everything this scope knows about, for the Files list. */
   app.get('/api/ai/documents', async (request) => {
@@ -113,9 +122,26 @@ export function registerDocumentRoutes(
     return { ok: true, document: queued ? present(queued) : { fileName, state: 'processing' }, alreadyQueued: false };
   });
 
-  /** Deleting a document must take its readiness with it. */
+  /**
+   * Deleting a document must take its readiness AND its recovered text with it.
+   *
+   * 🚨 THE SIDECAR USED TO SURVIVE THE DELETE. Removing only the readiness row
+   * left the OCR output on disk under the document's NAME, so uploading a
+   * different file with the same name inherited the deleted document's text —
+   * indexed, reported ready, and cited in answers. Observed live. The digest
+   * check in `fsFileSource` now refuses a mismatched sidecar, but leaving stale
+   * derived content on disk after the user deleted its source is wrong on its
+   * own terms, so it goes too.
+   */
   app.delete<{ Params: { name: string } }>('/api/ai/documents/:name', async (request) => {
-    await store.remove(scoped(request), decodeURIComponent(request.params.name));
+    const fileName = decodeURIComponent(request.params.name);
+    await store.remove(scoped(request), fileName);
+    const uploadRoot = uploadRootFor?.(scoped(request));
+    if (uploadRoot) {
+      // Never fails the delete: the readiness row is already gone, and a
+      // leftover sidecar is now refused by its digest anyway.
+      await rm(ocrSidecarPath(uploadRoot, fileName), { force: true }).catch(() => {});
+    }
     return { ok: true };
   });
 }

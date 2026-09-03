@@ -13,8 +13,30 @@
 
 import type { DocumentReadiness, ProcessingStage } from './documentReadiness.js';
 
-/** How long a `processing` row may go unwritten before it is presumed dead. */
-export const STALE_AFTER_MS = 15 * 60 * 1000;
+/**
+ * How long a row may go UNWRITTEN before it is presumed dead.
+ *
+ * 🚨 REDUCED FROM 15 MINUTES, WHICH WAS A LIE WITH A LONG TAIL. After a Brain
+ * restart the UI kept reporting "Reading text — page 10 of 24" for work that had
+ * already stopped: a specific, advancing-looking number describing a process
+ * that no longer existed. Fifteen minutes of that is worse than an honest
+ * failure, because the user waits on it.
+ *
+ * MEASURED FROM THE LAST WRITE, NOT FROM THE START. Every stage transition
+ * upserts `updated_at`, and the scanned job writes BEFORE each page — a
+ * heartbeat every 15–24 seconds at the measured OCR rate. Two minutes therefore
+ * allows five to eight missed heartbeats before anything is presumed dead.
+ *
+ * WHY IT IS SAFE TO BE THIS AGGRESSIVE. The clock is NOT what protects a running
+ * job: `activeJobs` is. A job owned by this process is returned as `leave`
+ * before the idle check is ever reached, whatever the stage and however long it
+ * has been quiet — which matters for `indexing`, the one stage that is a single
+ * long operation rather than a per-page loop. The threshold governs only rows
+ * whose owning process is GONE, and for those a shorter window is strictly more
+ * truthful. A different process holding the same row is not the deployment model
+ * here; there is one Brain.
+ */
+export const STALE_AFTER_MS = 2 * 60 * 1000;
 
 export type RecoveryAction =
   /** Still being worked on by a live job — leave it alone. */
@@ -44,7 +66,17 @@ export function decideRecovery(
   readiness: DocumentReadiness,
   context: RecoveryContext,
 ): RecoveryAction {
-  if (readiness.state !== 'processing') {
+  /*
+   * 🚨 `queued` IS INTERRUPTED TOO, AND MORE CERTAINLY THAN `processing`.
+   *
+   * The queue is in-memory and lost on restart, so a document that was waiting
+   * its turn when the process died is not waiting for anything — nothing holds a
+   * reference to it any more. Covering only `processing` left those rows saying
+   * "Waiting to start" for ever, which is the same never-ending status this
+   * recovery exists to clear, reached through the state added to make queueing
+   * honest.
+   */
+  if (readiness.state !== 'processing' && readiness.state !== 'queued') {
     return { kind: 'leave', reason: 'not an interrupted job' };
   }
 

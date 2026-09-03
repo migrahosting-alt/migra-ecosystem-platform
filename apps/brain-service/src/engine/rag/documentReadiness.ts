@@ -13,6 +13,16 @@
 export type DocumentState =
   /** Uploaded and kept, nothing attempted yet. */
   | 'stored'
+  /**
+   * Accepted for background reading, but not started.
+   *
+   * 🚨 A DISTINCT STATE BECAUSE THE QUEUE IS SERIAL. Jobs run one at a time —
+   * each pins a CPU for minutes and running several would starve chat — so a
+   * document can legitimately wait behind another for a long time. Reporting
+   * that as `processing` told the user work was happening on their file while
+   * nothing was, and made a stalled queue indistinguishable from slow progress.
+   */
+  | 'queued'
   /** A background job is working on it right now; see the stage. */
   | 'processing'
   /** Fully readable and fully placed. */
@@ -44,6 +54,9 @@ export type DocumentState =
  */
 export type ProcessingStage =
   | 'uploaded'
+  | 'waiting_for_a_free_worker'
+  /** Reused from an identical artifact already extracted — see artifactReuse.ts. */
+  | 'matching_known_source'
   | 'rendering_pages'
   | 'reading_text'
   | 'reconstructing_order'
@@ -52,6 +65,8 @@ export type ProcessingStage =
 
 export const STAGE_LABELS: Record<ProcessingStage, string> = {
   uploaded: 'Uploaded',
+  waiting_for_a_free_worker: 'Waiting to start',
+  matching_known_source: 'Checking for an existing extraction',
   rendering_pages: 'Rendering pages',
   reading_text: 'Reading text',
   reconstructing_order: 'Reconstructing order',
@@ -84,7 +99,9 @@ export interface DocumentReadiness {
 
 /** Terminal states: nothing further will happen without the user acting. */
 export function isTerminal(state: DocumentState): boolean {
-  return state !== 'stored' && state !== 'processing';
+  // `queued` is as non-terminal as `processing`: the client must keep asking, or
+  // a document waiting its turn would look finished and never update.
+  return state !== 'stored' && state !== 'processing' && state !== 'queued';
 }
 
 /** Can this document contribute to an answer at all? */
@@ -102,8 +119,27 @@ export function describeState(readiness: DocumentReadiness): string {
   switch (readiness.state) {
     case 'stored':
       return 'Stored, not read yet.';
+    case 'queued':
+      /*
+       * Says WHY it has not started. The queue is serial, so "waiting" is the
+       * honest answer and "processing" would have been a small lie told to
+       * every document behind the one actually running.
+       */
+      return readiness.pagesTotal
+        ? `Waiting to start — ${readiness.pagesTotal} pages to read.`
+        : 'Waiting to start reading this document.';
     case 'processing': {
       const label = STAGE_LABELS[readiness.stage ?? 'uploaded'];
+      /*
+       * 🚨 PROGRESS THE USER CAN JUDGE TIME BY.
+       *
+       * "Reading text…" for ninety minutes is indistinguishable from a hang. A
+       * page count is the difference between waiting and giving up, so it is
+       * preferred over the free-text detail whenever the job has measured it.
+       */
+      if (readiness.pagesTotal && readiness.pagesDone !== undefined) {
+        return `${label} — page ${readiness.pagesDone + 1} of ${readiness.pagesTotal}`;
+      }
       return readiness.detail ? `${label} — ${readiness.detail}` : `${label}…`;
     }
     case 'ready':

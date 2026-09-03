@@ -201,6 +201,17 @@ export async function writeOcrSidecar(
   uploadRoot: string,
   fileName: string,
   map: DocumentMap,
+  /**
+   * 🚨 THE DIGEST OF THE BYTES THIS TEXT CAME FROM.
+   *
+   * A sidecar is named after the FILE, and a filename is not an identity. Delete
+   * `report.pdf`, upload a completely different `report.pdf`, and the walk found
+   * the old sidecar and indexed the previous document's text under the new
+   * file — ready, searchable, and citing a document that is no longer there.
+   * Recording the source digest lets the reader refuse a sidecar that does not
+   * belong to the bytes in front of it.
+   */
+  sourceSha256?: string,
 ): Promise<{ text: string; pageStartLines: number[] }> {
   const usable = map.pages.filter((p) => p.indexAction === 'index' || p.indexAction === 'index_unplaced');
 
@@ -216,6 +227,7 @@ export async function writeOcrSidecar(
 
   const payload = {
     fileName,
+    ...(sourceSha256 ? { sourceSha256 } : {}),
     text: parts.join('\n\n'),
     pageStartLines,
     pages: usable.map((p) => ({

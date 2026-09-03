@@ -148,10 +148,36 @@ test('both sides agree on the EXTRACTION ceiling, which is not the storage limit
    * ready. Storage above the extraction ceiling is therefore expected, and the
    * ceilings above are what must never diverge.
    */
-  const storageDefault = /MIGRAPILOT_MAX_FILE_MB,\s*(\d+)\s*\)/.exec(source);
-  assert.ok(storageDefault, 'could not find the consumer storage limit');
+  /*
+   * FOLLOWED THROUGH THE INDIRECTION, not read as a literal.
+   *
+   * Storage used to carry its own hand-written number here, which this test
+   * matched directly. It now derives from `MAX_UPLOAD_MB` in the attachment
+   * capability contract — the single constant the picker, the client pre-check,
+   * the API's advertised limits and the proxy config all agree on. Resolving it
+   * is the stronger check: it proves storage is still fed by that contract, and
+   * a return to a hard-coded number would fail here rather than pass quietly.
+   */
+  const storageDefault = /MIGRAPILOT_MAX_FILE_MB,\s*([A-Za-z_$][\w$]*|\d+)\s*\)/.exec(source);
+  assert.ok(storageDefault, 'could not find the consumer storage limit — has it moved?');
+
+  let storageMb: number;
+  if (/^\d+$/.test(storageDefault[1]!)) {
+    storageMb = Number(storageDefault[1]);
+  } else {
+    assert.equal(
+      storageDefault[1],
+      'MAX_UPLOAD_MB',
+      'storage must take its ceiling from the capability contract, not a new name',
+    );
+    const capability = readFileSync(CAPABILITY, 'utf8');
+    const declared = /export const MAX_UPLOAD_MB\s*=\s*(\d+)/.exec(capability);
+    assert.ok(declared, 'MAX_UPLOAD_MB is not declared in the capability contract');
+    storageMb = Number(declared[1]);
+  }
+
   assert.ok(
-    Number(storageDefault[1]) * 1024 * 1024 >= consumerExtractBytes,
+    storageMb * 1024 * 1024 >= consumerExtractBytes,
     'storage must be at least the extraction ceiling, or parseable files could be refused outright',
   );
 });
