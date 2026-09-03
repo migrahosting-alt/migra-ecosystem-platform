@@ -159,6 +159,8 @@ const OPERATION_AUDIENCE: Readonly<Record<string, OperationAudience>> = {
    * allowed to use.
    */
   modelFamilies: 'both',
+  // Routing is product behaviour, not user data: a signed-out visitor chats too.
+  orchestrate: 'both',
   listConversations: 'both',
   createConversation: 'both',
   getConversation: 'both',

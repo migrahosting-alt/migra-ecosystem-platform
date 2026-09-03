@@ -422,6 +422,32 @@ export function preferenceEvents(
   return callBrain({ kind: 'preferenceEvents' }, deps)
 }
 
+// ── what the Brain says this turn requires ─────────────────────────────────
+
+/**
+ * The orchestration decision for one turn.
+ *
+ * Server-only, like every Brain call here. Deliberately returns the raw
+ * `BrainResult` so a caller must handle failure explicitly — a helper that
+ * swallowed the error would invite exactly the silent local fallback this
+ * cutover removes.
+ */
+export async function orchestrateTurn(
+  input: { objective: string; attachmentMimeTypes: string[]; authority: Record<string, unknown> },
+  deps: GatewayDeps = {},
+): Promise<BrainResult<unknown>> {
+  return callBrain(
+    {
+      kind: 'orchestrate',
+      objective: input.objective,
+      attachmentMimeTypes: input.attachmentMimeTypes,
+      authority: input.authority,
+      surface: 'migrapilot-consumer',
+    },
+    deps,
+  )
+}
+
 // ── which Migra model families this surface may offer ──────────────────────
 
 /**

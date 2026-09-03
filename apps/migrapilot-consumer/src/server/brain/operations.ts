@@ -157,6 +157,20 @@ export type BrainOperation =
    * whole layer exists to prevent.
    */
   | { kind: 'modelFamilies' }
+  /**
+   * Ask the Brain what this turn is for and what must happen.
+   *
+   * The consumer does not decide. It sends what it holds and executes the
+   * returned sequence — the same contract the extension uses, so parity is
+   * structural rather than two clients happening to agree.
+   */
+  | {
+      kind: 'orchestrate'
+      objective: string
+      attachmentMimeTypes: string[]
+      authority: Record<string, unknown>
+      surface: 'migrapilot-consumer'
+    }
   | { kind: 'codingCapability' }
   | { kind: 'getCodingRun'; runId: string }
 
@@ -636,6 +650,20 @@ export function resolveOperation(op: BrainOperation): ResolvedRequest {
         method: 'PATCH',
         path: `/api/ai/indexes/${id(op.indexId, 'indexId')}`,
         body: { state: 'approved' },
+      }
+
+    case 'orchestrate':
+      return {
+        method: 'POST',
+        path: '/api/ai/orchestrate',
+        body: {
+          objective: text(op.objective, 'objective'),
+          attachmentMimeTypes: op.attachmentMimeTypes,
+          // Declared truthfully. `surface` is provenance; the Brain does not
+          // route on it, and this client must not imply authority it lacks.
+          authority: op.authority,
+          surface: op.surface,
+        },
       }
 
     case 'modelFamilies':

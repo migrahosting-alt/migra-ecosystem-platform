@@ -24,7 +24,8 @@ import { parseSummaryTurns } from './conversationSummary.js';
 import { ChatTurnExecution } from '../services/chatTurnExecution.js';
 import { governedChild } from '../services/chatChildDispatch.js';
 import { readAttachedDesign } from './designRead.js';
-import { planTurn } from '@migrapilot/shared-types/turn-intent';
+import type { OrchestrationDecision } from '@migrapilot/shared-types/orchestration-decision';
+import { NO_AUTHORITY, vscodeWorkspaceAuthority } from '@migrapilot/shared-types/project-authority';
 import type { BrainStore } from '../services/brainPersistence.js';
 
 /** A backend-agnostic output surface for a chat turn. Both the native chat
@@ -267,19 +268,51 @@ async function runChatTurnInner(
   //     user wants to work outside the open one, the resolver below asks.)
   const hasImageAttachment = (options.attachments ?? []).some((a) => /^image\//i.test(a.mimeType ?? ''));
   /*
-   * ONE ROUTING CONTRACT, SHARED WITH THE CONSUMER.
+   * THE BRAIN DECIDES; THIS CLIENT EXECUTES.
    *
-   * This surface used to decide for itself, and the two products drifted in a
-   * way that produced opposite bugs from the same cause. The consumer answered a
-   * BUILD request with a description; this side did the reverse — any image that
-   * yielded a spec entered the workspace agent, so "what is in this image?"
-   * dragged a describe turn into the build path.
+   * It used to compute routing here, and so did the consumer — two copies of one
+   * decision, which drifted into opposite bugs from a single cause. Now it sends
+   * what it HOLDS (objective, attachment types, the authority it actually has)
+   * and executes the returned sequence.
    *
-   * `planTurn` answers what the user wants DONE, and `visionIsTerminal` says
-   * whether a design read is allowed to be the answer. Both surfaces now read
-   * the same fields, so neither can quietly grow its own opinion.
+   * AUTHORITY IS DECLARED TRUTHFULLY, never inferred from being the extension: a
+   * workspace only when a folder is genuinely open, otherwise none. `surface` is
+   * provenance and the Brain does not route on it.
+   *
+   * FAIL CLOSED. If the decision cannot be obtained, the turn stops with an
+   * honest orchestration failure. It must NOT fall back to local routing — that
+   * fallback is precisely what hid an ordinary coding request never reaching the
+   * agent, while every unit test passed.
    */
-  const turnPlan = planTurn({ text: trimmed, hasImageAttachment });
+  const openWorkspaceForAuthority = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  let decision: OrchestrationDecision;
+  try {
+    decision = await governedChild(turn, 'orchestration_decision', () =>
+      deps.migraAiClient.orchestrate(
+      {
+        objective: trimmed,
+        attachmentMimeTypes: (options.attachments ?? []).map((a) => a.mimeType ?? ''),
+        authority: openWorkspaceForAuthority
+          ? vscodeWorkspaceAuthority(openWorkspaceForAuthority)
+          : NO_AUTHORITY,
+        surface: 'vscode-extension',
+      },
+      tokenToSignal(token),
+      ),
+    );
+  } catch (err) {
+    sink.markdown(
+      `⚠️ MigraPilot could not reach the orchestration service, so it cannot tell what this turn needs.\n\n` +
+        `_${err instanceof Error ? err.message : String(err)} — request ${requestId}._`,
+    );
+    return;
+  }
+  const turnPlan = {
+    intent: decision.intent,
+    requiresVision: decision.requiresVision,
+    requiresEngineer: decision.requiresEngineer,
+    visionIsTerminal: decision.visionIsTerminal,
+  };
   const openWorkspace = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   // Controlled-restart safety boundary: ordinary chat is tool-free by default.
   // The existing workspace engineer remains available only after an operator

@@ -44,9 +44,8 @@ import {
   setConversationGrounding,
   setConversationImages,
 } from '@/server/brain/seams'
-import { planTurn } from '@migrapilot/shared-types/turn-intent'
-import { planOutcome, unsupportedSteps } from '@migrapilot/shared-types/outcome-plan'
-import { NO_AUTHORITY, authoritySatisfies, authorityShortfall } from '@migrapilot/shared-types/project-authority'
+import { orchestrateTurn } from '@/server/brain/seams'
+import { NO_AUTHORITY } from '@migrapilot/shared-types/project-authority'
 import { listFiles, userDirectory } from '@/server/files/storage'
 import { reconcileGrounding } from '@/server/files/grounding'
 import { readProcessing, sequenceNoteFor } from '@/server/files/documentProcessing'
@@ -922,51 +921,62 @@ export async function POST(request: Request): Promise<Response> {
           : prompt
 
       /*
-       * WHAT IS THIS TURN FOR, AND MAY IT HAPPEN HERE?
+       * THE BRAIN DECIDES; THIS SURFACE EXECUTES.
        *
-       * SURFACE IS NOT CAPABILITY. AUTHORITY IS CAPABILITY.
+       * Routing is not computed here any more. This client sends what it holds —
+       * the objective, the attachment types, and the authority it ACTUALLY has —
+       * and acts on the returned decision. Two clients computing the same answer
+       * is what let them drift into opposite bugs from one cause.
        *
-       * This does not ask "am I the consumer?" — it asks what project authority
-       * the caller presented. Today that is none, so a build cannot happen and
-       * the answer says exactly which prerequisite is missing. The moment a repo
-       * is connected under an explicit grant, THIS SAME CODE becomes capable
-       * without being edited, which is the difference between a temporary
-       * limitation and "consumer = planner, extension = builder" hard-coded into
-       * the architecture forever.
+       * Authority is `none` because no project is connected to a consumer
+       * conversation yet. Declared as a fact, never inferred from being the
+       * consumer: when a repo authority exists, this same code becomes capable.
+       *
+       * FAIL CLOSED. If the decision cannot be obtained the turn stops honestly.
+       * It must never fall back to local routing.
        */
-      const turnPlan = planTurn({
-        text: typeof prompt === 'string' ? prompt : '',
-        // Any image in play this turn — freshly attached or carried by the thread.
-        hasImageAttachment: requestedImages.length > 0,
-      })
-      const outcome = planOutcome({
+      const orchestration = await orchestrateTurn({
         objective: typeof prompt === 'string' ? prompt : '',
-        intent: turnPlan.intent,
-        hasImage: requestedImages.length > 0,
+        attachmentMimeTypes: requestedImages.length > 0 ? ['image/*'] : [],
+        authority: NO_AUTHORITY as unknown as Record<string, unknown>,
       })
-      /*
-       * No project is connected to a consumer conversation yet. Declared as an
-       * AUTHORITY the Brain evaluates, not as a fact about which app this is.
-       */
-      const authority = NO_AUTHORITY
-      const blocked = unsupportedSteps(outcome, (needs) => authoritySatisfies(authority, needs))
 
-      if (blocked.length > 0) {
-        const what = turnPlan.intent === 'modify_existing' ? 'change your existing project' : 'build this'
+      if (orchestration.kind !== 'ok') {
         const body =
-          `I can read the design, but I cannot ${what} from here: ${authorityShortfall(authority)}.\n\n` +
-          `The step that needs it is ${blocked[0]}. To have it actually built, open the project in VS Code and ` +
-          'ask MigraPilot there — the extension can read your workspace, propose the files, and show you a diff ' +
-          'before anything is written.\n\n' +
+          'I could not reach the service that decides how to handle this request, so I do not know what it ' +
+          'needs. Rather than guess, I have stopped here — please try again in a moment.'
+        for (const chunk of body.match(/[\s\S]{1,80}/g) ?? [body]) emit('token', { text: chunk })
+        emit('done', { outcome: 'orchestration_unavailable', reason: orchestration.kind })
+        controller.close()
+        return
+      }
+
+      const decision = orchestration.value as {
+        intent: string
+        executable: boolean
+        failureBoundary?: string
+        reason: string
+        planRevision: string
+      }
+
+      if (!decision.executable) {
+        const what = decision.intent === 'modify_existing' ? 'change your existing project' : 'build this'
+        const body =
+          // The Brain's reason already names the blocking step; repeating it here
+          // read as a stutter.
+          `I can read the design, but I cannot ${what} from here: ${decision.reason}.\n\n` +
+          `To have it actually built, open the project ` +
+          'in VS Code and ask MigraPilot there — the extension can read your workspace, propose the files, and ' +
+          'show you a diff before anything is written.\n\n' +
           'If you would rather stay here, I can analyse the design and describe the layout, components and ' +
           'styles it implies.'
         for (const chunk of body.match(/[\s\S]{1,80}/g) ?? [body]) emit('token', { text: chunk })
         emit('done', {
           outcome: 'authority_missing',
-          intent: turnPlan.intent,
-          // Provenance: which step, and under which authority it was refused.
-          stoppedAt: blocked[0],
-          authority: authority.kind,
+          intent: decision.intent,
+          stoppedAt: decision.failureBoundary,
+          // Provenance: which decision this turn executed.
+          planRevision: decision.planRevision,
         })
         controller.close()
         return

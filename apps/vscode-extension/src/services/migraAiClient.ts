@@ -14,6 +14,8 @@ import type { GovernedWorkflowId, GroundingMode, LiveKnowledgeMode, TaskClass } 
 import { REQUEST_ID_HEADER, newRequestId } from '@migrapilot/pilot-client';
 import { CLIENT_CONTRACT_VERSION, type WorkspaceToolExecutor } from './workspaceTools.js';
 import { CLIENT_EXECUTABLE_TOOL_IDS } from '@migrapilot/workspace-tools';
+import type { OrchestrationDecision } from '@migrapilot/shared-types/orchestration-decision';
+import type { ProjectAuthority } from '@migrapilot/shared-types/project-authority';
 import { PilotError, type PilotErrorCode } from '@migrapilot/pilot-client';
 import { randomUUID } from 'node:crypto';
 import {
@@ -511,6 +513,31 @@ export class MigraAiClient {
    * governance, so a family the Brain cannot honestly serve arrives already
    * marked unavailable with a reason.
    */
+  /**
+   * Ask the Brain what this turn is for and what must happen.
+   *
+   * The client no longer decides. It sends what it HOLDS — the objective, what is
+   * attached, and the authority it actually has — and executes the returned
+   * sequence. Two clients computing the same answer locally is what let them
+   * drift into opposite bugs from one cause.
+   *
+   * Deliberately throws on failure. A caller must not be able to shrug and route
+   * locally, because the local fallback is exactly what masked an ordinary coding
+   * request never reaching the agent.
+   */
+  async orchestrate(
+    request: {
+      objective: string;
+      attachmentMimeTypes: string[];
+      /** The authority the caller ACTUALLY holds — declared, never inferred. */
+      authority: ProjectAuthority;
+      surface: 'vscode-extension';
+    },
+    signal?: AbortSignal,
+  ): Promise<OrchestrationDecision> {
+    return this.jsonRequest<OrchestrationDecision>('POST', '/api/ai/orchestrate', request, signal);
+  }
+
   async getModelFamilies(signal?: AbortSignal): Promise<{
     catalogRevision: string;
     families: Array<{

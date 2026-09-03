@@ -15,10 +15,26 @@ import { planTurn } from '@migrapilot/shared-types/turn-intent';
 
 const ENGINE = readFileSync(join(__dirname, '..', '..', '..', 'src', 'chat', 'chatEngine.ts'), 'utf8');
 
-test('the extension routes from the SHARED plan, not its own image flag', () => {
-  assert.match(ENGINE, /planTurn\(\{ text: trimmed, hasImageAttachment \}\)/, 'it must build the shared plan');
-  assert.match(ENGINE, /turnPlan\.requiresVision/, 'the design read must be plan-driven');
-  assert.match(ENGINE, /turnPlan\.requiresEngineer/, 'the agent must be entered on INTENT');
+test('the extension CONSUMES the Brain decision and does not compute one', () => {
+  // Cutover: routing is no longer computed here at all. It is requested.
+  assert.match(ENGINE, /migraAiClient\.orchestrate\(/, 'it must ask the Brain');
+  assert.doesNotMatch(ENGINE, /\bplanTurn\(/, 'the local plan builder must not run at runtime');
+  assert.match(ENGINE, /decision\.requiresVision/, 'the design read follows the decision');
+  assert.match(ENGINE, /decision\.requiresEngineer/, 'the agent follows the decision');
+});
+
+test('FAIL CLOSED: no local fallback when orchestration is unavailable', () => {
+  // The old fallback is exactly what hid an ordinary coding request never
+  // reaching the agent, while every unit test passed.
+  const catchBlock = ENGINE.slice(ENGINE.indexOf('} catch (err) {'), ENGINE.indexOf('const turnPlan'));
+  assert.match(catchBlock, /could not reach the orchestration service/);
+  assert.match(catchBlock, /return;/, 'the turn must stop, not guess');
+  assert.doesNotMatch(catchBlock, /planTurn|planOutcome/, 'it must not route locally on failure');
+});
+
+test('authority is declared truthfully, never inferred from being the extension', () => {
+  assert.match(ENGINE, /openWorkspaceForAuthority\s*\?\s*\n?\s*vscodeWorkspaceAuthority/, 'a workspace only when one is open');
+  assert.match(ENGINE, /NO_AUTHORITY/, 'otherwise none');
 });
 
 test('THE REGRESSION: entering the agent must not depend on a spec merely existing', () => {

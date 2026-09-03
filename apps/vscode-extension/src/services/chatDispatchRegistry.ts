@@ -84,6 +84,16 @@ export const CHAT_DISPATCH_SITES: readonly DispatchSite[] = [
     rationale: 'The main build loop. The most consequential dispatch in the turn.',
   },
   {
+    id: 'orchestration_decision',
+    callee: 'migraAiClient.orchestrate',
+    classification: 'brain_operation',
+    requiresChild: true,
+    rationale:
+      'The Brain decides what this turn is for and what must happen. It is the most consequential dispatch ' +
+      'in the turn — every later child follows from it — so the record must show which decision the run was ' +
+      'executing, not merely that some work happened afterwards.',
+  },
+  {
     id: 'design_read',
     callee: 'readAttachedDesign',
     classification: 'migraai_provider',

@@ -61,3 +61,51 @@ test('routing inputs are FACTS a client holds, not opinions it forms', () => {
     assert.doesNotMatch(src, /function\s+classifyBuildIntent|function\s+decideRoute/, `${f} derives its own route`);
   }
 });
+
+// ── after the cutover: clients must CONSUME the decision, not compute one ───
+
+test('neither client runs a local plan builder at runtime', () => {
+  // The shared builders may remain as a contract/test helper, but a client that
+  // calls one at runtime has quietly become a second source of truth again.
+  const offenders = CLIENT_FILES.filter((f) => /\bplanTurn\(|\bplanOutcome\(|unsupportedSteps\(/.test(code(f)));
+  assert.deepEqual(offenders, [], 'a client is computing its own routing plan');
+});
+
+test('both clients ASK the Brain', () => {
+  const asks = [
+    ['apps/vscode-extension/src/chat/chatEngine.ts', /migraAiClient\.orchestrate\(/],
+    ['apps/migrapilot-consumer/src/app/api/chat/stream/route.ts', /orchestrateTurn\(/],
+  ] as const;
+  const missing = asks.filter(([f, re]) => !re.test(code(f))).map(([f]) => f);
+  assert.deepEqual(missing, [], 'a client is not requesting the decision');
+});
+
+test('FAIL CLOSED: neither client falls back locally when orchestration fails', () => {
+  // The old fallback is what hid an ordinary coding request never reaching the
+  // agent while every unit test passed.
+  for (const f of CLIENT_FILES) {
+    const src = code(f);
+    // Find the failure handling around the orchestration call and prove it does
+    // not route: no plan builder, and the turn stops.
+    const idx = Math.max(src.indexOf('orchestrate'), 0);
+    const region = src.slice(idx, idx + 2000);
+    assert.doesNotMatch(region, /planTurn\(|planOutcome\(/, `${f} guesses locally when orchestration fails`);
+  }
+});
+
+test('neither client alters the decision based on SURFACE', () => {
+  // `surface` is provenance. Branching on it would rebuild "consumer = planner,
+  // extension = builder" inside the client instead of the Brain.
+  for (const f of CLIENT_FILES) {
+    const src = code(f);
+    assert.doesNotMatch(src, /surface\s*===\s*['"]vscode-extension['"]\s*\?/, `${f} routes on surface`);
+    assert.doesNotMatch(src, /surface\s*===\s*['"]migrapilot-consumer['"]\s*\?/, `${f} routes on surface`);
+  }
+});
+
+test('authority is declared, never inferred from the surface name', () => {
+  const ext = code('apps/vscode-extension/src/chat/chatEngine.ts');
+  // A workspace authority only when a folder is actually open.
+  assert.match(ext, /workspaceFolders/, 'the extension must check for a real workspace');
+  assert.match(ext, /NO_AUTHORITY/, 'and declare none when there is not one');
+});

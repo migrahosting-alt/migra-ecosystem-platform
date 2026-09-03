@@ -101,6 +101,28 @@ function brainStub(
     const json = (status: number, value: unknown) =>
       new Response(JSON.stringify(value), { status, headers: { 'content-type': 'application/json' } })
 
+    /*
+     * Routing is decided by the Brain on every turn now, so every stub must
+     * answer it. Defaulting to "ordinary conversation, executable" keeps these
+     * tests about streaming and persistence rather than silently exercising the
+     * fail-closed orchestration path.
+     */
+    if (href.endsWith('/api/ai/orchestrate')) {
+      // Self-contained: this stub has no local `json` helper in scope.
+      return new Response(JSON.stringify({
+        planRevision: 'orchestration/1.0.0',
+        objective: '',
+        intent: 'converse',
+        steps: [{ step: 'answer', terminal: true, permitted: true }],
+        terminalStep: 'answer',
+        executable: true,
+        reason: 'ordinary conversation',
+        requiresVision: false,
+        requiresEngineer: false,
+        visionIsTerminal: false,
+      }), { status: 200, headers: { 'content-type': 'application/json' } })
+    }
+
     if (href.endsWith('/api/ai/chat')) {
       const payload = options.chatBody ?? sse([['token', { text: 'hello' }], ['done', { requestId: 'r' }]])
       const bytes = new TextEncoder().encode(payload)
@@ -215,6 +237,28 @@ test('the first frame is emitted before the Brain is even asked', async () => {
   let chatAsked = false
   globalThis.fetch = (async (url: string | URL | Request) => {
     const href = String(url)
+    /*
+     * Routing is decided by the Brain on every turn now, so every stub must
+     * answer it. Defaulting to "ordinary conversation, executable" keeps these
+     * tests about streaming and persistence rather than silently exercising the
+     * fail-closed orchestration path.
+     */
+    if (href.endsWith('/api/ai/orchestrate')) {
+      // Self-contained: this stub has no local `json` helper in scope.
+      return new Response(JSON.stringify({
+        planRevision: 'orchestration/1.0.0',
+        objective: '',
+        intent: 'converse',
+        steps: [{ step: 'answer', terminal: true, permitted: true }],
+        terminalStep: 'answer',
+        executable: true,
+        reason: 'ordinary conversation',
+        requiresVision: false,
+        requiresEngineer: false,
+        visionIsTerminal: false,
+      }), { status: 200, headers: { 'content-type': 'application/json' } })
+    }
+
     if (href.endsWith('/api/ai/chat')) {
       chatAsked = true
       return new Promise<Response>(() => {}) // never resolves
@@ -618,6 +662,28 @@ test('a refusal for want of evidence is reported as such, and persists nothing',
   globalThis.fetch = (async (url: string | URL | Request, init: RequestInit = {}) => {
     const href = String(url)
     calls.push({ url: href, init })
+    /*
+     * Routing is decided by the Brain on every turn now, so every stub must
+     * answer it. Defaulting to "ordinary conversation, executable" keeps these
+     * tests about streaming and persistence rather than silently exercising the
+     * fail-closed orchestration path.
+     */
+    if (href.endsWith('/api/ai/orchestrate')) {
+      // Self-contained: this stub has no local `json` helper in scope.
+      return new Response(JSON.stringify({
+        planRevision: 'orchestration/1.0.0',
+        objective: '',
+        intent: 'converse',
+        steps: [{ step: 'answer', terminal: true, permitted: true }],
+        terminalStep: 'answer',
+        executable: true,
+        reason: 'ordinary conversation',
+        requiresVision: false,
+        requiresEngineer: false,
+        visionIsTerminal: false,
+      }), { status: 200, headers: { 'content-type': 'application/json' } })
+    }
+
     if (href.endsWith('/api/ai/chat')) {
       return new Response(
         JSON.stringify({
@@ -862,6 +928,28 @@ test('an edit request the product cannot perform is refused honestly, not improv
   const original = globalThis.fetch
   globalThis.fetch = (async (url: string | URL | Request) => {
     const href = String(url)
+    /*
+     * Routing is decided by the Brain on every turn now, so every stub must
+     * answer it. Defaulting to "ordinary conversation, executable" keeps these
+     * tests about streaming and persistence rather than silently exercising the
+     * fail-closed orchestration path.
+     */
+    if (href.endsWith('/api/ai/orchestrate')) {
+      // Self-contained: this stub has no local `json` helper in scope.
+      return new Response(JSON.stringify({
+        planRevision: 'orchestration/1.0.0',
+        objective: '',
+        intent: 'converse',
+        steps: [{ step: 'answer', terminal: true, permitted: true }],
+        terminalStep: 'answer',
+        executable: true,
+        reason: 'ordinary conversation',
+        requiresVision: false,
+        requiresEngineer: false,
+        visionIsTerminal: false,
+      }), { status: 200, headers: { 'content-type': 'application/json' } })
+    }
+
     if (href.endsWith('/api/ai/chat')) {
       return new Response(
         JSON.stringify({
@@ -1033,6 +1121,28 @@ async function turnWith(options: {
       }
     }
 
+    /*
+     * Routing is decided by the Brain on every turn now, so every stub must
+     * answer it. Defaulting to "ordinary conversation, executable" keeps these
+     * tests about streaming and persistence rather than silently exercising the
+     * fail-closed orchestration path.
+     */
+    if (href.endsWith('/api/ai/orchestrate')) {
+      // Self-contained: this stub has no local `json` helper in scope.
+      return new Response(JSON.stringify({
+        planRevision: 'orchestration/1.0.0',
+        objective: '',
+        intent: 'converse',
+        steps: [{ step: 'answer', terminal: true, permitted: true }],
+        terminalStep: 'answer',
+        executable: true,
+        reason: 'ordinary conversation',
+        requiresVision: false,
+        requiresEngineer: false,
+        visionIsTerminal: false,
+      }), { status: 200, headers: { 'content-type': 'application/json' } })
+    }
+
     if (href.endsWith('/api/ai/chat')) {
       askedModel = true
       const body = parseBody()
@@ -1171,6 +1281,28 @@ async function refusedTurn(brainResponse: { status: number; body: unknown }): Pr
   let storedAssistant: string | null = null
   globalThis.fetch = (async (url: string | URL | Request, init: RequestInit = {}) => {
     const href = String(url)
+    /*
+     * Routing is decided by the Brain on every turn now, so every stub must
+     * answer it. Defaulting to "ordinary conversation, executable" keeps these
+     * tests about streaming and persistence rather than silently exercising the
+     * fail-closed orchestration path.
+     */
+    if (href.endsWith('/api/ai/orchestrate')) {
+      // Self-contained: this stub has no local `json` helper in scope.
+      return new Response(JSON.stringify({
+        planRevision: 'orchestration/1.0.0',
+        objective: '',
+        intent: 'converse',
+        steps: [{ step: 'answer', terminal: true, permitted: true }],
+        terminalStep: 'answer',
+        executable: true,
+        reason: 'ordinary conversation',
+        requiresVision: false,
+        requiresEngineer: false,
+        visionIsTerminal: false,
+      }), { status: 200, headers: { 'content-type': 'application/json' } })
+    }
+
     if (href.endsWith('/api/ai/chat')) {
       return new Response(JSON.stringify(brainResponse.body), {
         status: brainResponse.status,
@@ -1337,6 +1469,28 @@ test('an ordinary question with no files attached is still answered', async () =
   let askedModel = false
   globalThis.fetch = (async (url: string | URL | Request) => {
     const href = String(url)
+    /*
+     * Routing is decided by the Brain on every turn now, so every stub must
+     * answer it. Defaulting to "ordinary conversation, executable" keeps these
+     * tests about streaming and persistence rather than silently exercising the
+     * fail-closed orchestration path.
+     */
+    if (href.endsWith('/api/ai/orchestrate')) {
+      // Self-contained: this stub has no local `json` helper in scope.
+      return new Response(JSON.stringify({
+        planRevision: 'orchestration/1.0.0',
+        objective: '',
+        intent: 'converse',
+        steps: [{ step: 'answer', terminal: true, permitted: true }],
+        terminalStep: 'answer',
+        executable: true,
+        reason: 'ordinary conversation',
+        requiresVision: false,
+        requiresEngineer: false,
+        visionIsTerminal: false,
+      }), { status: 200, headers: { 'content-type': 'application/json' } })
+    }
+
     if (href.endsWith('/api/ai/chat')) {
       askedModel = true
       return new Response('event: done\ndata: {}\n\n', {

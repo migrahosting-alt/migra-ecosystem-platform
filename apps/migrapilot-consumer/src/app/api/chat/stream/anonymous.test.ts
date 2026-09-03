@@ -79,6 +79,8 @@ const quotaOf = (limit: number, used: number) => ({
 })
 
 interface StubOptions {
+  /** Force the orchestration decision to fail, to prove the client does not guess. */
+  orchestrationDown?: boolean
   /** 429 from reserve: the visitor is out of turns. */
   exhausted?: boolean
   /** 503 from reserve: the ledger is unreachable. Never a free turn. */
@@ -113,6 +115,29 @@ function brainStub(options: StubOptions = {}) {
     const json = (status: number, value: unknown) =>
       new Response(JSON.stringify(value), { status, headers: { 'content-type': 'application/json' } })
 
+    /*
+     * The Brain now decides routing for every turn, so the stub must answer it.
+     * A default of "ordinary conversation, executable" keeps these tests about
+     * what they are actually testing — quota, refunds, persistence — instead of
+     * silently exercising the fail-closed orchestration path.
+     */
+    if (path === '/api/ai/orchestrate') {
+      if (options.orchestrationDown) {
+        return json(503, { ok: false, code: 'UNAVAILABLE', error: 'orchestration down' })
+      }
+      return json(200, {
+        planRevision: 'orchestration/1.0.0',
+        objective: parsed?.objective ?? '',
+        intent: 'converse',
+        steps: [{ step: 'answer', terminal: true, permitted: true }],
+        terminalStep: 'answer',
+        executable: true,
+        reason: 'ordinary conversation',
+        requiresVision: false,
+        requiresEngineer: false,
+        visionIsTerminal: false,
+      })
+    }
     if (path === '/api/ai/anonymous/reserve') {
       if (options.ledgerDown) {
         return json(503, { ok: false, code: 'PERSISTENCE_UNAVAILABLE', error: 'down' })
