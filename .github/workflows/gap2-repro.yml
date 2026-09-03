@@ -3,12 +3,32 @@ name: gap2-repro
 # install → build every workspace → brain suite → extension unit suite.
 # No Docker/Postgres required (deterministic Tier-A tests only); delegation stays
 # OFF by default and nothing here enables or deploys it.
+#
+# 🚨 THE TRIGGERS ARE THE POINT, AND THEY WERE THE HOLE.
+#
+# This job would have caught the Brain becoming unbuildable from a clean clone —
+# `server.ts` committed importing five RAG modules that were never added to git —
+# on the commit that introduced it. It never ran, because it only fired for PRs
+# into two named branches and pushes to a third, and the work happened on none of
+# them. A correct gate wired to the wrong branch is not a gate; the defect reached
+# production and was found by hand.
+#
+# So it now runs on EVERY branch, filtered by the paths that can actually break it
+# rather than by which branch someone happened to be on.
 
 on:
   pull_request:
-    branches: [phase-1/canonical-vscode-extension, main]
+    paths: &build_inputs
+      - 'apps/brain-service/**'
+      - 'apps/vscode-extension/**'
+      - 'packages/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/gap2-repro.yml'
   push:
-    branches: [gap2/nonprod-agent-delegation-validated]
+    branches: ['**']
+    paths: *build_inputs
+  workflow_dispatch:
 
 jobs:
   fresh-clone-proof:
@@ -18,8 +38,12 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22 # brain-service uses node:sqlite (Node >= 22)
-      - name: Install (fresh)
-        run: npm install --no-audit --no-fund
+      # `ci`, not `install`: it installs the lockfile EXACTLY and fails when
+      # package.json and the lockfile disagree. `install` will quietly resolve a
+      # working tree that a clean clone could not reproduce, which is the whole
+      # class of problem this job exists to detect.
+      - name: Install (clean, lockfile-exact)
+        run: npm ci --no-audit --no-fund
       - name: Build all workspaces
         run: npm run build -ws
       - name: Brain suite
