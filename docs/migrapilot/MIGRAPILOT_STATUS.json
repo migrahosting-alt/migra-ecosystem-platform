@@ -1,7 +1,7 @@
 {
  "$schema": "MIGRAPILOT_STATUS — canonical cross-agent state. Update on every material change.",
  "updated": "2026-09-03",
- "updatedBy": "Claude (Opus 5) — repository integrity closed (clean-clone build restored, gated, pushed); mockup-build acceptance still owed",
+ "updatedBy": "Claude (Opus 5) — repo integrity closed + pushed; mockup build proven Brain-side with a real model; panel acceptance owed",
  "rules": {
   "easyFirst": "Do not start deep capability work while meaningful easy user-facing items remain.",
   "provenLive": "PROVEN_LIVE requires the real user-facing workflow to pass. Code existing and tests passing is NOT proof.",
@@ -276,14 +276,16 @@
    "symptom": "\"use the mockup draft and build this page exactly as it is.\" with the mockup attached and read: the agent ran ONE workspace.find for index.html,styles.css,app.js, found nothing, and answered \"I have not created or proposed any files yet. Please provide more details or clarify your request.\" No files proposed.",
    "evidence": "Live in the extension panel, 2026-09-03 03:09 (engineer request 9f2a02ca). Reproduced deterministically before any fix: 2 model calls, no correction, no decision event.",
    "rootCause": "TWO defects met. (1) The guard against handing work back was gated on `toolStepCount === 0`, so a single search disabled every correction below it — including the directive written for exactly this ending. (2) The controller's intent was hard-coded 'UNKNOWN' and the design spec was concatenated onto the user's message by the client, so nothing downstream could tell a turn that CAME WITH its requirement from one that lacked it.",
-   "status": "DEPLOYED (release repro-09030600, rollback buildspec-09030358), AWAITING LIVE ACCEPTANCE — commit 7229383f. NOT PROVEN_LIVE: nobody has built from a mockup through the panel yet.",
+   "status": "DEPLOYED (release repro-09030600), BRAIN-SIDE BEHAVIOUR PROVEN WITH A REAL MODEL, PANEL ACCEPTANCE STILL OWED — commit 7229383f. NOT PROVEN_LIVE.",
    "effort": "MEDIUM",
    "regressionTest": "apps/brain-service/test/buildFromSpecification.test.ts (5 cases, incl. Record #1 non-regression), apps/brain-service/test/engineerSpecificationRoute.test.ts (route->model wiring), apps/brain-service/test/turnDecision.test.ts (+4), apps/vscode-extension/src/test/unit/designSpecBoundary.test.ts (transport boundary).",
    "liveAcceptance": "NOT RUN — requires the Brain deploy. Acceptance = attach the mockup in the panel, ask to build it, and see proposed files with real contents.",
    "deployOrder": "🚨 BRAIN FIRST. A new client against an old Brain sends a specification nothing reads, and the spec is DROPPED — strictly worse than the defect. Old client + new Brain is safe (today's behaviour).",
    "guardrail": "The fix is gated on the turn HOLDING a specification. With none, Record #1 (\"build me a website\" -> \"what kind?\" overruled into three unwanted file creations) stays fixed and its test is unchanged. Authority stays READ_ONLY: one re-prompt, never permission to write.",
    "deployProof": "Brain: the live endpoint rejected an oversized `designSpec` BY NAME and BY BOUND (400 INVALID_INPUT, path designSpec, max 20000) — a field that exists only in the new build; the old one strips unknown keys and proceeds. A valid designSpec passes (only rootPath flagged). Extension: the INSTALLED bundle carries designSpec and keeps the constructor-before-wiring order.",
-   "deployNotes": "Built from a CLEAN worktree check — which FAILED and exposed a separate defect (see repo-hygiene entry). Fell back to the working tree only after proving all 14 rag/*.js build outputs are byte-identical (md5) to what was already deployed, so the in-progress file-attachment lane added nothing new to production."
+   "deployNotes": "Built from a CLEAN worktree check — which FAILED and exposed a separate defect (see repo-hygiene entry). Fell back to the working tree only after proving all 14 rag/*.js build outputs are byte-identical (md5) to what was already deployed, so the in-progress file-attachment lane added nothing new to production.",
+   "liveEvidence": "2026-09-03, live Brain + real qwen2.5-coder:14b, task 'use the mockup draft and build this page exactly as it is.' with a designSpec. The agent called fs.proposeChangeset ON STEP 1 with complete file content (index.html, full DOCTYPE) — it did NOT search for the files and did NOT ask the user to restate the design, which is the exact failure being fixed. ⚠️ HONEST SCOPE: this exercised the PROMPT half of the fix (the specification block telling the model the spec IS the requirement). The deferral guard never fired because the model never deferred, so that half remains proven by unit tests only. The run then failed at tool execution because the curl harness omitted `clientWorkspaceTools`, so the Brain tried to run the changeset on VM111 instead of delegating it. Logs show delegated fs.proposeChangeset succeeding (138ms, outcome ok) on extension-driven runs. The harness was wrong, not the product.",
+   "remaining": "Owner drives the panel: attach the mockup, ask 'build this page', confirm it inspects the real workspace, proposes complete files, and inspect the diff before applying."
   },
   {
    "id": "vision-turn-no-output-240s",
@@ -1391,7 +1393,8 @@
    "🚨 fixturesAreReconstructions": "04_reference_document.docx, 05_numeric_analysis.csv and 06_numeric_analysis.tsv were rebuilt to match the stated controlled values; Bonex's originals are on his machine. The CSV/TSV are byte-trivial and equivalent. The DOCX is NOT equivalent in the way that matters: if his file puts sensors=12 in a content control, SmartArt or a floating frame, the mechanism added here would not reach it. #4 is therefore PROVEN_LIVE (mechanism), not PROVEN_LIVE (production fixture).",
    "counts": "brain 2099/2099, consumer 676/676, tsc -b clean on both.",
    "remaining": "#6 GPU false-busy, #7 vision/OCR text accuracy (incl. the SCAN-CODE-O4 letter-O finding), #8 blank-pane instrumentation."
-  }
+  },
+  "gpuContentionBlockedAcceptance2026_09_03": "The first two acceptance attempts died with PROVIDER_CONNECT_TIMEOUT (240s). Not connectivity: a ComfyUI render (started Aug 29) held the RTX 3090 at 100% and starved Ollama — /api/version answered in 0.28s while /v1/chat/completions hung past 180s from BOTH VM111 and the workstation itself. Owner authorised freeing the GPU; ComfyUI stopped, utilisation 100%->3%, inference then returned in 0.4s. 🚨 STANDING FRAGILITY: the production Brain's ONLY inference provider is this workstation over Tailscale under a local-only policy. Any long GPU job on it silently turns every production turn into a 240s timeout."
  },
  "backlogHygiene": {
   "2026-08-27": "EASY_NEXT had drifted: four entries were still listed as pending while the capabilities they describe were already in PROVEN_LIVE. Pruned only after matching each against the proven entry, not on memory. A backlog that lists finished work is how the same slice gets opened twice."
