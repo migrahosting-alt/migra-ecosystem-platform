@@ -1,7 +1,7 @@
 {
  "$schema": "MIGRAPILOT_STATUS — canonical cross-agent state. Update on every material change.",
  "updated": "2026-09-03",
- "updatedBy": "Claude (Opus 5) — build-from-mockup deferral defect: output-keyed guard + intent/specification plumbing",
+ "updatedBy": "Claude (Opus 5) — build-from-mockup fix deployed to VM111 + extension installed; live acceptance still owed",
  "rules": {
   "easyFirst": "Do not start deep capability work while meaningful easy user-facing items remain.",
   "provenLive": "PROVEN_LIVE requires the real user-facing workflow to pass. Code existing and tests passing is NOT proof.",
@@ -14,7 +14,7 @@
  "activeLane": {
   "name": "MigraPilot VS Code Extension on the governed Brain",
   "objective": "The extension is the product surface under test. It must use the single production Brain (db-core persistence, governed), never a local dev instance.",
-  "currentStep": "Extension activation outage fixed (917ad83d) and the panel loads. Build-from-mockup then failed at the next seam: the agent searched for the files it was asked to author and handed the work back. Fixed in code (7229383f) with regression tests at every seam; NOT live-proven — the Brain must be deployed FIRST, then the extension repackaged, then the owner's panel pass (attach the mockup, expect proposed files).",
+  "currentStep": "Build-from-mockup deferral fixed and DEPLOYED both halves (Brain release buildspec-09030358, extension VSIX installed). Deploy verified by a discriminating schema probe, not by liveness. REMAINING: the owner reloads the window, attaches the mockup, asks to build it, and we see whether real files are proposed — that is the acceptance. Also open: HEAD does not build from a clean checkout (untracked rag/ modules).",
   "beforeTopology": {
    "extension": "http://127.0.0.1:3988 — set in BOTH Machine and workspace settings",
    "thatBrain": "LOCAL dev instance on the workstation. persistence=sqlite, reason 'default local/dev/test adapter'. MIGRAPILOT_BRAIN_DATABASE_URL and DATABASE_URL both UNSET. Governance NOT available.",
@@ -276,12 +276,25 @@
    "symptom": "\"use the mockup draft and build this page exactly as it is.\" with the mockup attached and read: the agent ran ONE workspace.find for index.html,styles.css,app.js, found nothing, and answered \"I have not created or proposed any files yet. Please provide more details or clarify your request.\" No files proposed.",
    "evidence": "Live in the extension panel, 2026-09-03 03:09 (engineer request 9f2a02ca). Reproduced deterministically before any fix: 2 model calls, no correction, no decision event.",
    "rootCause": "TWO defects met. (1) The guard against handing work back was gated on `toolStepCount === 0`, so a single search disabled every correction below it — including the directive written for exactly this ending. (2) The controller's intent was hard-coded 'UNKNOWN' and the design spec was concatenated onto the user's message by the client, so nothing downstream could tell a turn that CAME WITH its requirement from one that lacked it.",
-   "status": "FIXED IN CODE, NOT LIVE — commit 7229383f. Deploy pending owner approval; NOT PROVEN_LIVE.",
+   "status": "DEPLOYED BOTH HALVES 2026-09-03, AWAITING LIVE ACCEPTANCE — commit 7229383f. Brain release buildspec-09030358 (rollback: families-09020730); extension VSIX installed. NOT PROVEN_LIVE: the owner has not yet built from a mockup through the panel.",
    "effort": "MEDIUM",
    "regressionTest": "apps/brain-service/test/buildFromSpecification.test.ts (5 cases, incl. Record #1 non-regression), apps/brain-service/test/engineerSpecificationRoute.test.ts (route->model wiring), apps/brain-service/test/turnDecision.test.ts (+4), apps/vscode-extension/src/test/unit/designSpecBoundary.test.ts (transport boundary).",
    "liveAcceptance": "NOT RUN — requires the Brain deploy. Acceptance = attach the mockup in the panel, ask to build it, and see proposed files with real contents.",
    "deployOrder": "🚨 BRAIN FIRST. A new client against an old Brain sends a specification nothing reads, and the spec is DROPPED — strictly worse than the defect. Old client + new Brain is safe (today's behaviour).",
-   "guardrail": "The fix is gated on the turn HOLDING a specification. With none, Record #1 (\"build me a website\" -> \"what kind?\" overruled into three unwanted file creations) stays fixed and its test is unchanged. Authority stays READ_ONLY: one re-prompt, never permission to write."
+   "guardrail": "The fix is gated on the turn HOLDING a specification. With none, Record #1 (\"build me a website\" -> \"what kind?\" overruled into three unwanted file creations) stays fixed and its test is unchanged. Authority stays READ_ONLY: one re-prompt, never permission to write.",
+   "deployProof": "Brain: the live endpoint rejected an oversized `designSpec` BY NAME and BY BOUND (400 INVALID_INPUT, path designSpec, max 20000) — a field that exists only in the new build; the old one strips unknown keys and proceeds. A valid designSpec passes (only rootPath flagged). Extension: the INSTALLED bundle carries designSpec and keeps the constructor-before-wiring order.",
+   "deployNotes": "Built from a CLEAN worktree check — which FAILED and exposed a separate defect (see repo-hygiene entry). Fell back to the working tree only after proving all 14 rag/*.js build outputs are byte-identical (md5) to what was already deployed, so the in-progress file-attachment lane added nothing new to production."
+  },
+  {
+   "id": "head-not-buildable-from-clean-checkout",
+   "symptom": "`tsc -b` on a clean worktree at HEAD fails: src/server.ts(103) cannot find './engine/rag/artifactReuse.js'.",
+   "evidence": "git worktree at d877512a, 2026-09-03. server.ts is COMMITTED and clean; artifactReuse.ts is UNTRACKED. Local builds only work because the file happens to be on disk.",
+   "rootCause": "The file-attachment lane committed server.ts with imports of five rag/ modules that were never committed: artifactReuse, factObligations, pdfTextLayer, reusedArtifactJob, textLayerPdfJob.",
+   "status": "OPEN — found while preparing a deploy; NOT fixed. It blocks clean-tree and CI builds, and it is Bonex's call whether that in-progress lane gets committed.",
+   "effort": "SMALL (commit the files) but the CONTENT is someone's in-progress work, not mine to land.",
+   "risk": "🚨 That source exists ONLY on this workstation's disk and inside production's dist. Losing the workstation loses it.",
+   "regressionTest": "none — a clean-checkout build check would catch this class.",
+   "liveAcceptance": "n/a"
   },
   {
    "id": "vision-turn-no-output-240s",
