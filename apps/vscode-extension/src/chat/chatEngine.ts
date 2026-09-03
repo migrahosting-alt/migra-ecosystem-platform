@@ -24,6 +24,7 @@ import { parseSummaryTurns } from './conversationSummary.js';
 import { ChatTurnExecution } from '../services/chatTurnExecution.js';
 import { governedChild } from '../services/chatChildDispatch.js';
 import { readAttachedDesign } from './designRead.js';
+import { planTurn } from '@migrapilot/shared-types/turn-intent';
 import type { BrainStore } from '../services/brainPersistence.js';
 
 /** A backend-agnostic output surface for a chat turn. Both the native chat
@@ -265,6 +266,20 @@ async function runChatTurnInner(
   //     no workspace to act in. (When the message DOES name a folder, or the
   //     user wants to work outside the open one, the resolver below asks.)
   const hasImageAttachment = (options.attachments ?? []).some((a) => /^image\//i.test(a.mimeType ?? ''));
+  /*
+   * ONE ROUTING CONTRACT, SHARED WITH THE CONSUMER.
+   *
+   * This surface used to decide for itself, and the two products drifted in a
+   * way that produced opposite bugs from the same cause. The consumer answered a
+   * BUILD request with a description; this side did the reverse — any image that
+   * yielded a spec entered the workspace agent, so "what is in this image?"
+   * dragged a describe turn into the build path.
+   *
+   * `planTurn` answers what the user wants DONE, and `visionIsTerminal` says
+   * whether a design read is allowed to be the answer. Both surfaces now read
+   * the same fields, so neither can quietly grow its own opinion.
+   */
+  const turnPlan = planTurn({ text: trimmed, hasImageAttachment });
   const openWorkspace = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   // Controlled-restart safety boundary: ordinary chat is tool-free by default.
   // The existing workspace engineer remains available only after an operator
@@ -294,7 +309,7 @@ async function runChatTurnInner(
    * the vision-chat path below, which is exactly today's behaviour.
    */
   let designSpec: string | undefined;
-  if (hasImageAttachment && workspaceAgentEnabled && backend.kind === 'local' && mayPromptForFolder) {
+  if (turnPlan.requiresVision && workspaceAgentEnabled && backend.kind === 'local' && mayPromptForFolder) {
     sink.markdown('\n_Reading the attached design…_\n');
     const design = await governedChild(turn, 'design_read', () =>
       readAttachedDesign(deps.migraAiClient, options.attachments ?? [], tokenToSignal(token)),
@@ -306,7 +321,14 @@ async function runChatTurnInner(
       );
     }
   }
-  if (workspaceAgentEnabled && backend.kind === 'local' && (!hasImageAttachment || designSpec) && mayPromptForFolder) {
+  /*
+   * The agent runs when the OBJECTIVE needs it. A design spec existing is not a
+   * reason to build — that conflated "we read the picture" with "the user asked
+   * for software", which is how a describe turn ended up in the build path.
+   * When vision may terminate the turn, the read below IS the answer.
+   */
+  const engineerWanted = turnPlan.requiresEngineer || (!hasImageAttachment && !turnPlan.visionIsTerminal);
+  if (workspaceAgentEnabled && backend.kind === 'local' && engineerWanted && (!turnPlan.requiresVision || designSpec) && mayPromptForFolder) {
     // Resolve WHICH folder to work in: an explicit path in the message, else the
     // open workspace, else ASK via a folder picker — so MigraPilot can work on any
     // folder on the machine, not only the one open in VS Code.
