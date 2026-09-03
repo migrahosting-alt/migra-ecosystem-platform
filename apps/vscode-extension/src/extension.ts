@@ -273,14 +273,6 @@ async function ensureAgentAuthorization(root: string, explicitSecret?: string, b
 }
 
 export async function activate(context: vscode.ExtensionContext): Promise<MigraPilotApi> {
-  /*
-   * The client executes workspace tools, so give it the editor it needs.
-   * Wired at activation because diagnostics, symbols and the approval modal all
-   * require a live VS Code; without this the client refuses delegated tools
-   * truthfully rather than answering them wrongly.
-   */
-  migraAiClient.setWorkspaceToolExecutor(createWorkspaceToolExecutor(createVscodeWorkspaceHost()));
-
   agentBootstrapSecret = randomBytes(32).toString('base64url');
   inheritedAgentBootstrapSecret = process.env.MIGRAPILOT_AGENT_BOOTSTRAP_SECRET;
   delete process.env.MIGRAPILOT_AGENT_BOOTSTRAP_SECRET;
@@ -326,6 +318,19 @@ export async function activate(context: vscode.ExtensionContext): Promise<MigraP
     // Memory isolation: one workspace's conversations never leak into another.
     scope: () => ({ owner: 'local', workspace: vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? 'default' }),
   });
+
+  /*
+   * The client executes workspace tools, so give it the editor it needs —
+   * AFTER it exists.
+   *
+   * This sat at the top of activate(), before `migraAiClient` was constructed,
+   * so activation threw "Cannot read properties of undefined" and the ENTIRE
+   * extension failed to load: the view registered from package.json, the panel
+   * rendered blank, and nothing reached the output channel because activation
+   * never got far enough to create it. A silent, total outage from one line in
+   * the wrong place.
+   */
+  migraAiClient.setWorkspaceToolExecutor(createWorkspaceToolExecutor(createVscodeWorkspaceHost()));
   // Governed coding runs. Shares the brain base URL; a longer timeout than chat
   // because planning and validation are server-side stages, not a streamed reply.
   codingRunClient = new CodingRunClient({
