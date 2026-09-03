@@ -281,6 +281,16 @@ export interface EngineerRequest {
   /** Slice 5: per-request execution-policy preference (server resolves). */
   policy?: string;
   /**
+   * The design specification read out of an attached mockup, sent as its OWN
+   * field rather than pasted onto the end of `task`.
+   *
+   * Concatenating it made the requirement look like the user's own prose, so the
+   * Brain could not tell a request that CAME WITH a specification from one that
+   * lacked it — and answered "build this mockup" by asking for more details. The
+   * Brain appends it to the prompt; the wire keeps them apart.
+   */
+  designSpec?: string;
+  /**
    * Where this turn may draw repository evidence from.
    *
    * The shared protocol union, so the extension cannot send a value the Brain does

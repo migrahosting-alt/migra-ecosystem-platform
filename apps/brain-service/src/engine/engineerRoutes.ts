@@ -75,10 +75,36 @@ import {
   unregisterDelegate,
   delegateFor,
 } from './workspaceDelegation.js';
+import { planTurn } from '@migrapilot/shared-types/turn-intent';
+import type { TurnIntent as TurnDecisionIntent } from './turnDecision.js';
 
 /** Total characters of seeded code the agent is given. Enough for a few whole
  * definitions; beyond that a small local model loses the question itself. */
 const SEEDED_CONTEXT_CHARS = 6_000;
+
+/**
+ * What is this turn trying to DO, in the controller's vocabulary.
+ *
+ * Classified here, from the ONE shared classifier the consumer and the extension
+ * already route on — not re-derived with a second set of verbs. The engineer
+ * controller previously hard-coded `'UNKNOWN'`, so a request that every other
+ * surface had already recognised as a build arrived at the loop with its intent
+ * stripped, and the loop could only fail closed.
+ */
+function controllerIntent(task: string, hasSpecification: boolean): TurnDecisionIntent {
+  switch (planTurn({ text: task, hasImageAttachment: hasSpecification }).intent) {
+    case 'implement':
+      return 'BUILD';
+    case 'modify_existing':
+      return 'MODIFY';
+    case 'analyze':
+    case 'describe':
+    case 'critique':
+      return 'INSPECT';
+    default:
+      return 'DISCUSS';
+  }
+}
 
 const EngineerBodySchema = z.object({
   rootPath: z.string().min(1),
@@ -164,6 +190,19 @@ const EngineerBodySchema = z.object({
   /** Slice 5: a per-request execution-policy PREFERENCE (server resolves to an
    * effective policy; never bypasses local-first / consent / privacy / budget). */
   policy: z.string().optional(),
+  /**
+   * The specification the caller was asked to build FROM — today, a design read
+   * out of an attached mockup by the vision model.
+   *
+   * A SEPARATE FIELD ON PURPOSE. The client used to paste this onto the end of
+   * `task`, which made it indistinguishable from the user's own words: the
+   * controller could not tell "build me a website" (no requirement given) from
+   * "build this mockup" (the requirement is right here), and answered the second
+   * by asking the user to supply what they had already supplied. Sending it
+   * apart also keeps it out of the retrieval query, where a paragraph of design
+   * prose is noise.
+   */
+  designSpec: z.string().max(20_000).optional(),
 });
 
 /** One-line input hints shown to the model per tool (kept beside the route so
@@ -937,6 +976,11 @@ export function registerEngineerRoutes(
       {
         rootPath: body.rootPath,
         task: body.task,
+        // Passed through, never spliced into the message. The runtime owns prompt
+        // assembly, so there is exactly ONE place that decides how a specification
+        // is presented to the model — and the controller keeps it as evidence.
+        ...(body.designSpec ? { specification: body.designSpec } : {}),
+        intent: controllerIntent(body.task, Boolean(body.designSpec)),
         ecosystem: body.ecosystem,
         history: body.history,
         context: seededContext,

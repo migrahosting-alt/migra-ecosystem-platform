@@ -194,3 +194,43 @@ test('no path through the decision grants MUTATION while governance is unconsume
     }
   }
 });
+
+// ── build-from-specification ─────────────────────────────────────────────────
+// The variable that separates these from the fail-closed case above is not the
+// intent and not the wording: it is whether the turn was HANDED the requirement.
+
+test('BUILD holding the specification it was given is re-prompted, not returned to the user', () => {
+  const d = decideTurn(
+    base({ intent: 'BUILD', declaration: undefined, specificationAvailable: true, producedArtifacts: false }),
+  );
+  assert.equal(d.disposition, 'CONTINUE_TO_INSPECT');
+  // READ_ONLY, never MUTATION: this buys one more round, never permission to write.
+  assert.equal(d.toolAuthority, 'READ_ONLY');
+});
+
+test('a held specification does NOT override a declared user gap', () => {
+  const d = decideTurn(
+    base({
+      intent: 'BUILD',
+      declaration: { kind: 'USER_PREFERENCE', subject: 'which brand colours' },
+      specificationAvailable: true,
+      producedArtifacts: false,
+    }),
+  );
+  assert.equal(d.disposition, 'NEEDS_USER_INPUT');
+  assert.equal(d.toolAuthority, 'NONE');
+});
+
+test('a BUILD that already produced artifacts is left alone', () => {
+  const d = decideTurn(
+    base({ intent: 'BUILD', declaration: undefined, specificationAvailable: true, producedArtifacts: true }),
+  );
+  assert.equal(d.disposition, 'NEEDS_USER_INPUT');
+});
+
+test('a specification does not grant INSPECT or DISCUSS a re-prompt', () => {
+  for (const intent of ['INSPECT', 'DISCUSS', 'UNKNOWN'] as const) {
+    const d = decideTurn(base({ intent, declaration: undefined, specificationAvailable: true }));
+    assert.equal(d.disposition, 'NEEDS_USER_INPUT', `${intent} must still fail closed`);
+  }
+});

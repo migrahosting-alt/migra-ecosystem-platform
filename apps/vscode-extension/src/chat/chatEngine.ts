@@ -439,7 +439,12 @@ async function runChatTurnInner(
         deps.migraAiClient,
         {
           rootPath: workspaceRootForTask,
-          task: designSpec ? `${trimmed}\n\n${designSpec}` : trimmed,
+          task: trimmed,
+          // Sent APART from the task. The Brain appends it to the prompt, so the
+          // model sees the same text as before — but the controller can now tell
+          // that this turn was handed its requirement, which is the difference
+          // between building the mockup and asking the user to describe it again.
+          ...(designSpec ? { designSpec } : {}),
           ecosystem: detectEcosystem({ rootPath: workspaceRootForTask, prompt: trimmed }),
           // The agent now serves ordinary conversation too, so it must carry the
           // same memory the chat path held — otherwise "now build it" loses what

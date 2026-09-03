@@ -9,7 +9,7 @@
   "findings": [
     {
       "file": "src/chat/chatEngine.ts",
-      "line": 328,
+      "line": 383,
       "api": "showWarningMessage",
       "classification": "consumed",
       "snippet": "await vscode.window.showWarningMessage("
@@ -72,7 +72,7 @@
     },
     {
       "file": "src/extension.ts",
-      "line": 376,
+      "line": 381,
       "api": "showWarningMessage",
       "classification": "consumed",
       "snippet": "await vscode.window.showWarningMessage([card.title, '', ...card.lines].join('\\n'), { modal: true }, 'Approve once', 'Sta"

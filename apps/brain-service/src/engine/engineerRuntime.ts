@@ -28,7 +28,7 @@
 // side effects (npm install, etc.) are permitted, contained, and reported.
 
 import { NOOP_STAGE_LOGGER, type StageLogger } from './correlation.js';
-import { decideTurn, type MissingInformationDeclaration, type TurnDecision } from './turnDecision.js';
+import { decideTurn, type MissingInformationDeclaration, type TurnDecision, type TurnIntent } from './turnDecision.js';
 import { existsSync } from 'node:fs';
 import { lintChangeset, summarizeDefects } from '../tools/changesetLint.js';
 import { FinalAnswerStreamer } from './finalAnswerStream.js';
@@ -105,6 +105,23 @@ export interface EngineerInput {
   contextIndexVersion?: number;
   /** Set when the approved index was built from a different branch than the checkout. */
   contextBranchNotice?: string;
+  /**
+   * What the turn is TRYING to do, classified by the caller from the one shared
+   * classifier (`planTurn`). Absent ⇒ UNKNOWN ⇒ the controller fails closed
+   * exactly as before, so an older caller loses nothing.
+   *
+   * This was hard-coded `'UNKNOWN'` at the decision site, which meant the loop
+   * could not tell "answer a question" from "produce a page" no matter how
+   * clearly the user had said it — the classification existed upstream and was
+   * thrown away on the way in.
+   */
+  intent?: TurnIntent;
+  /**
+   * The specification the turn was asked to build FROM, when it was handed one
+   * (today: a design read from an attached mockup). The text itself, not a flag,
+   * because the controller must weigh evidence rather than a caller's claim.
+   */
+  specification?: string;
 }
 
 export type EngineerNoteKind = 'normalized' | 'duplicate' | 'command-effect' | 'replan' | 'policy' | 'quality' | 'plan';
@@ -300,6 +317,28 @@ function protocolPrompt(input: EngineerInput, tools: EngineerToolInfo[]): string
       : '',
     history ? `CONVERSATION SO FAR:\n${history}\n` : '',
     `THE USER'S CURRENT MESSAGE: ${input.task}`,
+    /*
+     * The requirement the user handed over, kept as its own block.
+     *
+     * Composed HERE because this function is the one place that decides what the
+     * model reads; the client used to paste it onto the message before sending,
+     * which is how the Brain lost the ability to tell "I was given a design" from
+     * "the user wrote a long message". Labelled as a specification so the model
+     * treats it as the thing to build, and told plainly that a missing detail is
+     * a default to choose rather than a question to ask.
+     */
+    (input.specification ?? '').trim()
+      ? [
+          '',
+          'THE SPECIFICATION YOU WERE ASKED TO BUILD FROM:',
+          (input.specification ?? '').trim(),
+          '',
+          'That specification IS the requirement — the user has already told you what they',
+          'want. Do not ask them to restate it, and do not search for the files it',
+          'describes: they do not exist yet, which is why you were asked to create them.',
+          'Where it leaves something unstated, choose a sensible default and say which.',
+        ].join('\n')
+      : '',
   ].filter((l) => l !== '').join('\n');
 }
 
@@ -704,6 +743,22 @@ const LOOK_FIRST_DIRECTIVE = [
   'what you checked — never a blanket refusal.',
 ].join(' ');
 
+/** The turn was handed a specification and answered by asking for one.
+ *
+ * Separate from {@link LOOK_FIRST_DIRECTIVE} because the generic version tells the
+ * model to go and LOOK, and looking is exactly the move that failed here: it
+ * searched for the files it was supposed to author. This one names the mistake. */
+const BUILD_FROM_SPEC_DIRECTIVE = [
+  'STOP. You were given a complete specification of what to build — it is in the task',
+  'above — and you produced nothing. Searching the workspace for those files was the',
+  'WRONG move: they do not exist yet, which is exactly why you were asked to create',
+  'them, and "I could not find them" is not an answer. Do NOT ask the user to clarify;',
+  'the specification IS the requirement and they have already given it to you.',
+  'Call fs.proposeChangeset NOW with the COMPLETE, runnable contents of every file the',
+  'result needs — not a plan, not a summary, not a diff sketch. Where the specification',
+  'does not state something, choose a sensible default and say which defaults you chose.',
+].join(' ');
+
 /** Name a tool the final CLAIMS a result from but which never actually ran.
  *
  * Observed live: after calling only `diagnostics.get`, the agent answered "the
@@ -1050,7 +1105,23 @@ export async function* runEngineerTask(deps: EngineerDeps, input: EngineerInput)
       // regex would leave it deciding whether the controller may think at all — the
       // same authority in a quieter place. Either signal opens the decision.
       const deferredObserved = DEFERRED_TO_USER.test(step.markdown);
-      if (answeredDirectly && (deferredObserved || step.missing !== undefined) && !finalCorrected) {
+      /*
+       * 🚨 KEYED ON OUTPUT, NOT ON WHETHER A TOOL RAN.
+       *
+       * This read `answeredDirectly` — toolStepCount === 0 — so ONE tool call
+       * disabled every correction below it. Observed live: asked to build a page
+       * from an attached mockup, the agent ran a single workspace search, found
+       * nothing, and replied "Please provide more details or clarify your
+       * request." The guard for exactly that ending sat right here and never ran,
+       * because a search had happened.
+       *
+       * Calling a tool is not evidence of doing the work; PRODUCING something is.
+       * The phantom-work check a few lines up already learned this and says so in
+       * its own comment — this is the same lesson applied to the mirror-image
+       * failure. Turns that DID produce a proposal keep their ending untouched,
+       * so "here are the files, want tests too?" is never treated as a deferral.
+       */
+      if (producedNothing && (deferredObserved || step.missing !== undefined) && !finalCorrected) {
         // Step 6B. THE REGEX IS NOW AN OBSERVATION ONLY. It answers exactly one
         // question — "did the model appear to defer?" — and has no say in whether the
         // turn continues into tools. That decision belongs to the controller, and rests
@@ -1060,11 +1131,18 @@ export async function* runEngineerTask(deps: EngineerDeps, input: EngineerInput)
         // a directive to call fs.proposeChangeset. Three unwanted file creations
         // followed, and the user's question went unanswered.
         const decision = decideTurn({
-          intent: 'UNKNOWN',
+          // Classified upstream by the ONE shared classifier and passed in. It was
+          // pinned to 'UNKNOWN' here, which silently discarded the only signal that
+          // could tell a build apart from a question.
+          intent: input.intent ?? 'UNKNOWN',
           declaration: step.missing,
           deferredObserved,
           workspaceExists: (deps.workspaceExists ?? existsSync)(input.rootPath),
           readCapabilityGranted: deps.tools.some((t) => READ_ONLY_TOOL_IDS.has(t.id)),
+          // The specification itself, so the controller weighs evidence it holds
+          // rather than a claim that evidence exists.
+          specificationAvailable: (input.specification ?? '').trim().length > 0,
+          producedArtifacts: !producedNothing,
           // Mutation is unreachable from this branch by construction, and is gated
           // independently at dispatch (6C) rather than inherited from here.
           governanceConsumed: false,
@@ -1080,7 +1158,14 @@ export async function* runEngineerTask(deps: EngineerDeps, input: EngineerInput)
         };
         if (decision.disposition === 'CONTINUE_TO_INSPECT') {
           finalCorrected = true;
-          transcript.push(LOOK_FIRST_DIRECTIVE);
+          // Two different mistakes, so two different corrections. Telling a turn
+          // that already HELD the design to "go and look" would be repeating the
+          // move that just failed.
+          transcript.push(
+            decision.verification.some((v) => v.check === 'specification held by the turn')
+              ? BUILD_FROM_SPEC_DIRECTIVE
+              : LOOK_FIRST_DIRECTIVE,
+          );
           continue;
         }
         // Otherwise the model's answer STANDS — unparaphrased, unreplaced. The

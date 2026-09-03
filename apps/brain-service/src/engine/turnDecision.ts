@@ -102,6 +102,19 @@ export interface TurnDecisionInput {
   /** 6C. Mutation is never reachable while this is false. */
   governanceConsumed: boolean;
   mutationCapabilityGranted: boolean;
+  /**
+   * Does the turn already HOLD a specification of what to build?
+   *
+   * Not a claim that one exists — the caller passes the specification itself, so
+   * this is primary evidence. Today that is a design read from an attached
+   * mockup; tomorrow it could be an issue body or a written brief. It is the one
+   * variable that separates the two build deferrals below, and it is deliberately
+   * about the SPECIFICATION rather than about attachments, so a future source
+   * costs a caller field and no change here.
+   */
+  specificationAvailable?: boolean;
+  /** Did the turn actually produce anything (a proposal, a created file)? */
+  producedArtifacts?: boolean;
 }
 
 const KINDS: readonly MissingInformationKind[] = [
@@ -214,6 +227,58 @@ export function decideTurn(input: TurnDecisionInput): TurnDecision {
       verification,
       declarationOverridden: true,
     };
+  }
+
+  /*
+   * ⭐ ASKED TO BUILD FROM A SPECIFICATION IT WAS GIVEN, AND BUILT NOTHING.
+   *
+   * OBSERVED LIVE. "use the mockup draft and build this page exactly as it is",
+   * with the mockup attached and already read into a design specification. The
+   * agent ran ONE workspace search for `index.html,styles.css,app.js`, found
+   * nothing — of course it did; the page does not exist yet, which is precisely
+   * why it was asked for — and finished with "Please provide more details or
+   * clarify your request."
+   *
+   * 🚨 WHY THIS IS NOT RECORD #1 COMING BACK. Record #1 was "build me a website"
+   * with NO specification, where "what kind?" is a correct question and the
+   * controller was wrong to overrule it. The variable that separates them is not
+   * the intent, not the wording, and not whether a referent was named — it is
+   * whether the turn was HANDED the requirement. Here it was, so there is nothing
+   * the user could usefully add: they already said everything by attaching it.
+   * With no specification this branch is unreachable and Record #1 keeps failing
+   * closed to the user, which the tests pin.
+   *
+   * A declared USER_PREFERENCE gap still wins, because it returns above. Reaching
+   * here means the model deferred WITHOUT saying what it lacked, and that is not a
+   * requirements question — it is giving up.
+   *
+   * Authority stays READ_ONLY. This buys one re-prompt, never permission: the
+   * proposal itself is gated independently at dispatch (6C), so a misfire costs a
+   * round, not the user's files.
+   */
+  if (
+    (input.intent === 'BUILD' || input.intent === 'MODIFY') &&
+    input.specificationAvailable === true &&
+    input.producedArtifacts !== true
+  ) {
+    verification.push(
+      { check: 'specification held by the turn', passed: true },
+      { check: 'workspace exists', passed: input.workspaceExists },
+      { check: 'read capability granted', passed: input.readCapabilityGranted },
+    );
+    if (verification.every((v) => v.passed)) {
+      return {
+        intent: input.intent,
+        missingInformationKind: 'NONE',
+        disposition: 'CONTINUE_TO_INSPECT',
+        toolAuthority: 'READ_ONLY',
+        reason:
+          'the turn holds the specification it was asked to build from and produced nothing; ' +
+          're-prompting to build rather than returning the request to the user',
+        verification,
+        declarationOverridden: input.declaration !== undefined,
+      };
+    }
   }
 
   // Deferred with no usable declaration. Fail closed to the user — never to execution.
