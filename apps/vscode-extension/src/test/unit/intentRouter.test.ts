@@ -371,3 +371,51 @@ test('an unknown refusal code says so rather than guessing a cause', async () =>
   assert.match(out, /SOME_FUTURE_BOUNDARY/, 'name the code instead of inventing a cause');
   assert.doesNotMatch(out, /approved evidence/i);
 });
+
+test('provenance is one muted line, not a wall above the answer', async () => {
+  // OBSERVED: "hi" produced SIX stacked italic lines — source mode, live knowledge,
+  // sources accepted, capability, tier, unverified task class — above a one-line
+  // greeting. Every line true, none informative for that turn.
+  const md: string[] = [];
+  await runEngineerTurn(
+    fakeStream([
+      { event: 'grounding', data: { sourceMode: 'working-tree', requestedMode: 'auto', forced: false } },
+      { event: 'liveKnowledge', data: { headline: 'Live knowledge: Off', sourcesAccepted: 0, citations: [], unavailable: [] } },
+      { event: 'capability', data: { disclosure: ['Capability: coder-14b — ungoverned for unclassified', 'Tier: deep-local'] } },
+      { event: 'final', data: { markdown: 'Hello! How can I assist you today?' } },
+      { event: 'done', data: { outcome: 'completed' } },
+    ]),
+    { rootPath: '/w', task: 'hi' },
+    { markdown: (t) => md.push(t) },
+  );
+  const out = md.join('');
+
+  // Nothing is dropped — the facts still reach the reader.
+  assert.match(out, /no approved evidence matched/);
+  assert.match(out, /Live knowledge: Off/);
+  assert.match(out, /ungoverned for unclassified/);
+
+  // But as ONE line, and before the answer.
+  const provenanceLines = out.split('\n').filter((l) => /Source mode|Live knowledge|Capability:/.test(l));
+  assert.equal(provenanceLines.length, 1, `expected one provenance line, got:\n${provenanceLines.join('\n')}`);
+  assert.ok(
+    out.indexOf('Source mode') < out.indexOf('Hello!'),
+    'provenance must still precede the answer',
+  );
+});
+
+test('a refusal still gets its provenance, flushed before the refusal text', async () => {
+  const md: string[] = [];
+  await runEngineerTurn(
+    fakeStream([
+      { event: 'grounding', data: { sourceMode: 'approved-index', indexVersion: 7 } },
+      { event: 'refusal', data: { code: 'GPU_BUSY', message: 'The card is busy. Nothing was lost.' } },
+      { event: 'done', data: { ok: false, code: 'GPU_BUSY' } },
+    ]),
+    { rootPath: '/w', task: 'build this' },
+    { markdown: (t) => md.push(t) },
+  );
+  const out = md.join('');
+  assert.match(out, /Approved index v7/, 'a refused turn must still say what it was grounded on');
+  assert.ok(out.indexOf('Approved index') < out.indexOf('graphics card'), 'provenance precedes the refusal');
+});

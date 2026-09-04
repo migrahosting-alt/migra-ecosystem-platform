@@ -315,3 +315,17 @@ test('the audit carries no prompt, no model output and no scoring prose', () => 
     assert.ok(!blob.includes(forbidden), `audit must not carry grant prose: ${forbidden}`);
   }
 });
+
+test('the tier requirement is named only when the turn fell short of it', () => {
+  // Printing it whenever it merely DIFFERED meant an over-provisioned turn announced
+  // "Tier: deep-local (this class requires fast-local)" — formatted like a caveat,
+  // and in fact the opposite. Seen above a one-line greeting.
+  const over = { ...resolveCapability({ taskClass: 'refactoring', model: FAST_LOCAL_MODEL }), belowRequiredTier: false };
+  assert.doesNotMatch(capabilityDisclosure(over).join('\n'), /this class requires/);
+
+  // A genuine shortfall still names it, right beside the warning it belongs to.
+  const short = resolveCapability({ taskClass: 'code-review', model: FAST_LOCAL_MODEL });
+  assert.equal(short.belowRequiredTier, true);
+  assert.match(capabilityDisclosure(short).join('\n'), /this class requires cloud/);
+});
+

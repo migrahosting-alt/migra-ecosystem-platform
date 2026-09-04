@@ -295,7 +295,20 @@ export interface CapabilityRefusal {
  */
 export function capabilityDisclosure(d: CapabilityDecision): string[] {
   const lines = [`Capability: ${d.model} — ${d.authority} for ${d.taskClass}`];
-  lines.push(`Tier: ${d.routedTier}${d.requiredTier !== d.routedTier ? ` (this class requires ${d.requiredTier})` : ''}`);
+  /*
+   * 🚨 THE REQUIREMENT IS NAMED ONLY WHEN THE TURN FELL SHORT OF IT.
+   *
+   * This printed the requirement whenever it differed from the routed tier — in
+   * EITHER direction. So a turn routed deep-local for a class needing fast-local
+   * announced "Tier: deep-local (this class requires fast-local)", which is
+   * formatted exactly like a caveat and is in fact the opposite: the turn was
+   * over-provisioned. Observed above a one-line greeting, where it sent the reader
+   * looking for a problem that did not exist.
+   *
+   * `belowRequiredTier` rather than an inequality, because it is the decision's own
+   * verdict on shortfall and cannot disagree with the warning line below it.
+   */
+  lines.push(`Tier: ${d.routedTier}${d.belowRequiredTier ? ` (this class requires ${d.requiredTier})` : ''}`);
   if (d.belowRequiredTier) {
     lines.push(`⚠ This turn ran below the tier its task class requires — treat the result as unreviewed.`);
   }

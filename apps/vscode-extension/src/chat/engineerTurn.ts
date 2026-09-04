@@ -96,26 +96,52 @@ export async function runEngineerTurn(
    * the generator early is indistinguishable from a truncated stream.
    */
   let answerRendered = false;
+  /*
+   * 🚨 PROVENANCE IS ONE LINE, NOT A WALL.
+   *
+   * OBSERVED: a user typed "hi" and read SIX stacked italic lines — source mode,
+   * live knowledge, sources accepted, capability, tier, and an unverified task
+   * class — above a one-line greeting. Every line was true. None was informative
+   * for that turn, and together they made the product look unsure of itself.
+   *
+   * The fix is density, not deletion. Nothing is dropped: the same facts are
+   * joined into a single muted line, so a reader who wants them has them and a
+   * reader who does not is not made to scroll past them. Deleting them was the
+   * tempting fix and the wrong one — a turn that answers from the working tree
+   * when approved evidence was requested MUST still say so, and there is no
+   * reliable way at this point in the stream to know which turn that is.
+   *
+   * Buffered because the three frames arrive separately. That costs nothing: the
+   * Brain sends all of them BEFORE generation begins, and the buffer is flushed
+   * the moment any answer text appears, so provenance still precedes the answer.
+   */
+  const provenance: string[] = [];
+  let provenanceFlushed = false;
+  const flushProvenance = (): void => {
+    if (provenanceFlushed) return;
+    provenanceFlushed = true;
+    if (provenance.length) sink.markdown(`_${provenance.join(' · ')}_\n\n`);
+  };
   try {
     for await (const ev of client.engineerStream(req, signal)) {
       if (ev.event === 'grounding') {
         // HOST-RENDERED provenance. The model does not decide whether this shows:
         // "say that you used the working tree" is an instruction, not a guarantee.
         const badge = sourceModeBadge(ev.data as Parameters<typeof sourceModeBadge>[0]);
-        if (badge) sink.markdown(`_${badge}_\n\n`);
+        if (badge) provenance.push(badge);
       } else if (ev.event === 'liveKnowledge') {
-        // The SECOND frame, rendered separately from the repository one. Collapsing them
-        // would make "no repository evidence" and "no external evidence" indistinguishable,
-        // and they are independent statements about entirely different boundaries.
-        const lines = liveKnowledgeBadge(ev.data as Parameters<typeof liveKnowledgeBadge>[0]);
-        if (lines.length) sink.markdown(`${lines.map((l) => `_${l}_`).join('\n')}\n\n`);
+        // The SECOND frame. Still a SEPARATE statement from the repository one —
+        // "no repository evidence" and "no external evidence" describe different
+        // boundaries and must stay distinguishable. Sharing a line does not merge
+        // them; each keeps its own wording, separated by a divider.
+        provenance.push(...liveKnowledgeBadge(ev.data as Parameters<typeof liveKnowledgeBadge>[0]));
       } else if (ev.event === 'capability') {
         // The THIRD host-owned frame: which model acted, with what standing, and what went
         // unverified. Separate from the other two because it answers a different question —
         // those describe the EVIDENCE a turn used, this describes the AUTHORITY it had.
-        const lines = (ev.data as { disclosure?: string[] }).disclosure ?? [];
-        if (lines.length) sink.markdown(`${lines.map((l) => `_${l}_`).join('\n')}\n\n`);
+        provenance.push(...((ev.data as { disclosure?: string[] }).disclosure ?? []));
       } else if (ev.event === 'refusal') {
+        flushProvenance();
         // Refusals now come from TWO boundaries and must not wear each other's wording. A
         // capability denial rendered as "insufficient approved evidence" would send an
         // operator to re-approve an index that was never the problem.
@@ -193,12 +219,14 @@ export async function runEngineerTurn(
       } else if (ev.event === 'done') {
         sink.onAttribution?.((ev.data as { routing?: unknown }).routing);
       } else if (ev.event === 'token') {
+        flushProvenance();
         const text = (ev.data as TokenData).text ?? '';
         if (text) {
           streamed += text;
           sink.markdown(text);
         }
       } else if (ev.event === 'final') {
+        flushProvenance();
         if (answerRendered) continue; // exactly one answer, however many frames arrive
         const d = ev.data as FinalData;
         const markdown = d.markdown ?? '';
@@ -214,6 +242,7 @@ export async function runEngineerTurn(
         }
         answerRendered = true;
       } else if (ev.event === 'error') {
+        flushProvenance();
         if (answerRendered) continue;
         answerRendered = true;
         const d = ev.data as ErrorData;
