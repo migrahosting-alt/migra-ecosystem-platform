@@ -14,7 +14,9 @@ import {
   FileX,
   ImageOff,
   Pause,
+  Pencil,
   Play,
+  RotateCcw,
   Rocket,
   ShieldCheck,
   TriangleAlert,
@@ -299,7 +301,22 @@ function MessageImages({
   )
 }
 
-function UserTurn({ message }: { message: Message }) {
+function UserTurn({
+  message,
+  onReuse,
+}: {
+  message: Message
+  /**
+   * Put this question back in the composer to be rewritten.
+   *
+   * 🚨 IT DOES NOT EDIT HISTORY, and the label says so. MigraPilot's
+   * conversation store is append-only — there is no way to replace a message or
+   * fork a thread — so a control named "Edit" would promise a rewrite the
+   * product cannot perform, and the original would still be sitting there after
+   * a reload. What this actually does is save the retyping.
+   */
+  onReuse?: (text: string) => void
+}) {
   const wide = Boolean(message.attachments?.length)
 
   return (
@@ -342,6 +359,28 @@ function UserTurn({ message }: { message: Message }) {
             </p>
           </>
         )}
+
+        {/*
+          NAMED FOR WHAT IT DOES. "Edit" would say this question is about to be
+          rewritten and its answer replaced; nothing here can do that, and the
+          original would still be in the transcript after a reload. It loads the
+          words back into the composer so a long question can be adjusted instead
+          of retyped, and what follows is a new turn — visibly.
+        */}
+        {onReuse && message.text && (
+          <div className="mt-1.5 flex justify-end">
+            <button
+              type="button"
+              onClick={() => onReuse(message.text ?? '')}
+              title="Load this question into the composer to change and ask again"
+              aria-label="Edit this question and ask again"
+              className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[12.5px] font-medium text-slate-400 transition-colors hover:bg-raised hover:text-slate-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-400"
+            >
+              <Pencil className="h-3.5 w-3.5" strokeWidth={2} />
+              <span>Edit and ask again</span>
+            </button>
+          </div>
+        )}
       </div>
     </div>
   )
@@ -349,8 +388,21 @@ function UserTurn({ message }: { message: Message }) {
 
 function AssistantTurn({
   message,
+  onRetry,
+  retryDisabledReason,
 }: {
   message: Message
+  /**
+   * Ask the same question again, for a second answer.
+   *
+   * 🚨 NOT "regenerate". Nothing is replaced: the store is append-only, so the
+   * answer already on screen stays exactly where it is and a new one arrives
+   * below it. A control that said "regenerate" would promise a rewrite the
+   * product cannot perform, and the reload would expose it.
+   */
+  onRetry?: () => void
+  /** Why it cannot be used right now. Disabled controls state their reason. */
+  retryDisabledReason?: string
 }) {
   const feedback = useFeedback()
   const blocks = message.blocks ?? []
@@ -532,6 +584,26 @@ function AssistantTurn({
                 * step in producing one. The text is already here and stays here
                 * whether or not the voice works.
                 */}
+              {onRetry && (
+                <button
+                  type="button"
+                  disabled={Boolean(retryDisabledReason)}
+                  onClick={onRetry}
+                  aria-label={
+                    retryDisabledReason
+                      ? `Try again (unavailable: ${retryDisabledReason})`
+                      : 'Ask this question again for another answer'
+                  }
+                  title={retryDisabledReason || 'Ask this question again for another answer'}
+                  className={cn(
+                    'inline-flex items-center gap-1.5 rounded-md px-2 py-1.5 text-[12.5px] font-medium text-slate-500 transition-colors hover:bg-raised hover:text-slate-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-400',
+                    retryDisabledReason && 'cursor-not-allowed opacity-50 hover:bg-transparent hover:text-slate-500',
+                  )}
+                >
+                  <RotateCcw className="h-3.5 w-3.5" strokeWidth={2} />
+                  <span>Try again</span>
+                </button>
+              )}
               <SpeakButton
                 text={blocks
                   .map((block) =>
@@ -586,15 +658,27 @@ function AssistantTurn({
 
 export function MessageView({
   message,
+  onRetry,
+  retryDisabledReason,
+  onReuse,
 }: {
   message: Message
+  /** Offered on the LAST answer only — see ChatPage for why. */
+  onRetry?: () => void
+  retryDisabledReason?: string
+  /** Load this question back into the composer. User turns only. */
+  onReuse?: (text: string) => void
 }) {
   return (
     <div className="animate-fade-up">
       {message.role === 'user' ? (
-        <UserTurn message={message} />
+        <UserTurn message={message} {...(onReuse ? { onReuse } : {})} />
       ) : (
-        <AssistantTurn message={message} />
+        <AssistantTurn
+          message={message}
+          {...(onRetry ? { onRetry } : {})}
+          {...(retryDisabledReason ? { retryDisabledReason } : {})}
+        />
       )}
     </div>
   )

@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useRef, useState, type ChangeEvent, type ClipboardEvent, type DragEvent, type FormEvent, type KeyboardEvent } from 'react'
+import { useCallback, useEffect, useRef, useState, type ChangeEvent, type ClipboardEvent, type DragEvent, type FormEvent, type KeyboardEvent } from 'react'
 import { FileText, Lock, Mic, SendHorizontal, Square, X } from 'lucide-react'
 import { AttachmentChips } from '@/features/attachments/AttachmentChips'
 import { useAttachments } from '@/features/attachments/useAttachments'
@@ -70,6 +70,7 @@ export function Composer({
   disabledReason,
   streaming = false,
   onStop,
+  draft,
   conversationImages,
   conversationFiles,
   onDetachConversationFile,
@@ -111,6 +112,15 @@ export function Composer({
   streaming?: boolean
   /** End the streaming turn. Required for the Stop control to appear at all. */
   onStop?: () => void
+  /**
+   * Text to load into the composer from outside — an earlier question the user
+   * wants to ask again in different words.
+   *
+   * The `token` is what makes it repeatable: loading the SAME question twice is
+   * a real thing to do, and a plain string would look unchanged to React the
+   * second time and silently do nothing.
+   */
+  draft?: { text: string; token: number }
   /**
    * Images this conversation is ALREADY about, from the Brain's durable set.
    *
@@ -211,6 +221,25 @@ export function Composer({
    * are required before this composer changes behaviour at all.
    */
   const stoppable = streaming && Boolean(onStop)
+
+  /*
+   * Loading a question back in REPLACES the box, and says so by focusing it.
+   *
+   * Appending would silently merge two questions into one; the user asked to
+   * rewrite this one. The cursor lands in the text so the next keystroke edits
+   * it rather than starting somewhere unexpected.
+   */
+  useEffect(() => {
+    if (!draft) return
+    setValue(draft.text)
+    requestAnimationFrame(() => {
+      grow()
+      const el = textareaRef.current
+      el?.focus()
+      el?.setSelectionRange(draft.text.length, draft.text.length)
+    })
+    // Keyed on the token: the same question may be loaded more than once.
+  }, [draft?.token])
 
   const submit = (event?: FormEvent) => {
     event?.preventDefault()

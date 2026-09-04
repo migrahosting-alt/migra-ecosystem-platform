@@ -11,6 +11,7 @@ import { FeedbackProvider } from '@/state/FeedbackProvider'
 import { ConversationMenu } from '@/features/conversations/ConversationMenu'
 import { ModelFamilySelector } from '@/features/models/ModelFamilySelector'
 import { AnonymousQuotaNotice } from '@/features/anonymous/AnonymousQuotaNotice'
+import { askAgainOptions, canAskAgain, lastQuestionOf } from '@/features/conversations/askAgain'
 import { isExhausted, useAnonymousQuota } from '@/features/anonymous/AnonymousQuotaProvider'
 
 /* ---------------------------------------------------------------- *
@@ -82,6 +83,14 @@ export function ChatPage() {
    * sent, and the composer's job is the text.
    */
   const [modelFamily, setModelFamily] = useState<string | undefined>(undefined)
+  /*
+   * A question loaded back into the composer to be rewritten.
+   *
+   * The token, not the text, is what the composer keys on: asking the same
+   * question twice is ordinary, and a bare string would look unchanged to React
+   * the second time and quietly do nothing.
+   */
+  const [draft, setDraft] = useState<{ text: string; token: number } | undefined>(undefined)
   const outOfTurns = isExhausted(allowance)
   const conversation = byId(id)
   const bottomRef = useRef<HTMLDivElement>(null)
@@ -152,13 +161,52 @@ export function ChatPage() {
    * means the state resets when the conversation changes — a thumb from another
    * conversation must never render here.
    */
+  /*
+   * ASK AGAIN — and nothing is replaced, because nothing CAN be.
+   *
+   * The conversation store is append-only: there is no operation to remove a
+   * message or fork a thread, so "regenerate" and "edit" in the sense other
+   * chat products mean them (the old answer disappears behind an arrow) are not
+   * capabilities this product has. Building them as if it did would produce a
+   * transcript that rearranges itself on reload.
+   *
+   * What is real: asking the same question again, and rewriting a question
+   * before asking it again. Both append, both are visible, and the labels say
+   * exactly that.
+   *
+   * Offered on the LAST answer only. A "try again" on an answer halfway up the
+   * thread would append its retry at the BOTTOM, far from the control that was
+   * clicked and after everything said since — an answer to a question that is no
+   * longer the one being discussed.
+   */
+  const messages = conversation.messages
+  const lastQuestion = lastQuestionOf(messages)
+  const offerAskAgain = canAskAgain({ messages, pending })
+
+  const askAgain = () => {
+    const question = lastQuestion?.text
+    if (!question || outOfTurns) return
+    sendMessage(conversation.id, question, askAgainOptions(lastQuestion, modelFamily))
+  }
+
   const thread = (
     <FeedbackProvider conversationId={conversation.id}>
       <div className="flex flex-col gap-6">
-        {conversation.messages.map((message) => (
+        {messages.map((message, index) => (
           <MessageView
             key={message.id}
             message={message}
+            {...(index === messages.length - 1 && offerAskAgain
+              ? {
+                  onRetry: askAgain,
+                  ...(outOfTurns
+                    ? { retryDisabledReason: 'You have used all your free messages. Sign in or create an account to keep going.' }
+                    : {}),
+                }
+              : {})}
+            {...(message.role === 'user'
+              ? { onReuse: (text: string) => setDraft({ text, token: Date.now() }) }
+              : {})}
           />
         ))}
         {/*
@@ -220,6 +268,7 @@ export function ChatPage() {
               ? { conversationFiles: conversation.groundingFiles }
               : {})}
             onDetachConversationFile={(name) => void detachConversationFile(conversation.id, name)}
+            {...(draft ? { draft } : {})}
             streaming={pending}
             onStop={() => stopTurn(conversation.id)}
             disabled={outOfTurns}

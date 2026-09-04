@@ -1,7 +1,7 @@
 {
  "$schema": "MIGRAPILOT_STATUS — canonical cross-agent state. Update on every material change.",
  "updated": "2026-09-04",
- "updatedBy": "Claude (Opus 5) — consumer chat: Stop generation, then the voice picker and the dead Listen control (gaps #3 and #4)",
+ "updatedBy": "Claude (Opus 5) — consumer chat gaps #3, #4 shipped; #5 shipped as the honest subset (append-only storage blocks branch semantics)",
  "rules": {
   "easyFirst": "Do not start deep capability work while meaningful easy user-facing items remain.",
   "provenLive": "PROVEN_LIVE requires the real user-facing workflow to pass. Code existing and tests passing is NOT proof.",
@@ -1535,12 +1535,12 @@
   "rankedGaps": [
    "1 message feedback (dead control, smallest fix)",
    "2 picker/storage agreement",
-   "5 regenerate + edit/resend (shared branch semantics)",
    "6 history search over content (needs a server route)",
    "7 fix spreadsheet ANALYSIS before shipping XLSX reading",
    "8 memory (Brain has the store; Chat has no path)",
    "9 GPU independence of text chat (needs the frozen arbitration work)",
-   "10 web search + research (blocked on licensing, not engineering)"
+   "10 web search + research (blocked on licensing, not engineering)",
+   "5b BRANCH SEMANTICS (Brain): message delete/truncate or a parent-branch model — the remainder of #5"
   ],
   "preserved": "ASR and TTS remain LIVE — no regression evidence found.",
   "notTouched": "Projects.",
@@ -1579,8 +1579,20 @@
     "liveProof": "Signed-out: Listen disabled, \"Sign in to have answers read aloud.\", no picker, nothing POSTed — 6/6 checks. Authorized (audience granted TEMPORARILY and LOCALLY for the run, then reverted; the shipped table is unchanged): three voices offered, engine default selected, first read sent voice=warm, picker changed to Bright, second read RE-SYNTHESISED with voice=bright, choice survived a reload — 9/9 checks.",
     "tests": "+31: src/app/api/speech/speak/route.test.ts (11 — the route had NO tests at all) and src/features/speech/voicePicker.test.ts (20). Four mutations each caught by the right test.",
     "gate": "typecheck 0 · 768/768 tests pass (from 737) · next build green."
+   },
+   "5 regenerate + edit/resend": "PARTIAL — the honest subset is LIVE; true branch semantics are BLOCKED on Brain storage",
+   "evidence_askAgain": {
+    "🚨 theConstraint": "THE CONVERSATION STORE IS APPEND-ONLY, and that decides the feature. Measured, not assumed: the Brain exposes create / append message / list messages / delete-whole-conversation and NOTHING else — no remove-one-message, no truncate-after, no parent or branch column anywhere in memoryRoutes or the Postgres repos. So the regenerate and edit of other chat products (the old answer disappears behind a 2-of-2 arrow) are capabilities MigraPilot does not have.",
+    "whyNotBuiltAnyway": "It would produce a transcript that rearranges itself on reload: one answer in the browser, two in the durable record, and no way for the reader to tell which they were looking at. Verified the opposite holds — after a reload the screen and the durable record show the same 6 messages.",
+    "shipped": "\"Try again\" on the last answer (asks the same question again, carrying the same attachments, images and Migra family) and \"Edit and ask again\" on any question (loads it back into the composer, focused, cursor at the end). Both APPEND and both are visible. The labels are the honesty: no \"Regenerate\", no bare \"Edit\" — a test fails if either word appears.",
+    "offeredOnlyOnTheLastAnswer": "A repeat appends to the BOTTOM of the thread, so repeating an older question would drop its answer underneath a conversation that has moved past it. Never offered while a turn is streaming — that would be a second door into the defect Stop exists to prevent.",
+    "measuredBeforeBuilding": "Does the same prompt even give a different answer? 3 runs of one short prompt through the production Brain gave 2 distinct answers, so the control is real rather than decorative. NOT a rate — n=3.",
+    "liveProof": "14/14 checks against the production Brain: no repeat offered mid-stream · offered once the answer lands · the repeat sent the SAME prompt · the first answer stayed on screen · a second answer was appended and genuinely differed · the question loaded into a focused composer · the rewritten text was sent as a new turn · the original question survived · and the reload showed the identical transcript.",
+    "tests": "+19: src/features/conversations/askAgain.test.ts. The decision is a PURE MODULE (lastQuestionOf / canAskAgain / askAgainOptions) so the tests are behavioural rather than greps over JSX. Four mutations each caught by the right test.",
+    "gate": "typecheck 0 · 787/787 tests pass (from 768) · next build green · client-bundle scan PASS.",
+    "⭐ whatIsSTILLMISSING": "Branch semantics. To replace an answer or fork a thread, the Brain needs a message model it does not have: either delete/truncate-after-a-message, or a parent/branch reference plus a rule for which branch is live. That is brain-service + a Postgres migration + a deploy, so it could not be proven live from here and was NOT started. Gap #5 stays open in that sense and should be re-ranked as a Brain slice rather than a chat one."
    }
   },
-  "nextGap": "5 regenerate + edit/resend (shared branch semantics)"
+  "nextGap": "6 history search over content (needs a server route) — also Brain-side; 7 spreadsheet analysis is the next consumer-side one."
  }
 }

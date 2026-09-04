@@ -15,6 +15,46 @@ _Last updated: 2026-09-04_
 
 ---
 
+## Lane 2026-09-04 — Ask again, without pretending anything was replaced
+
+Gap #5, shipped as the honest subset. `LIVE` for what was built; the rest is **blocked on Brain
+storage** and is now tracked as its own item.
+
+**The constraint decided the feature, and it was measured rather than assumed.** The Brain exposes
+create-conversation, append-message, list-messages and delete-the-whole-thing — and nothing else. No
+remove-one-message, no truncate-after, no parent or branch column anywhere in the routes or the
+Postgres repos. So "regenerate" and "edit" as other chat products mean them — the old answer
+disappears behind a *2 of 2* arrow — are capabilities this product does not have. Building them
+anyway would give a transcript that rearranges itself on reload: one answer in the browser, two in
+the durable record, and no way for the reader to know which they were looking at.
+
+**What shipped is what is true.** *Try again* on the last answer asks the same question again,
+carrying the same attachments, images and Migra family. *Edit and ask again* on any question loads it
+back into a focused composer to be rewritten. Both append, both are visible, and the labels are the
+honesty — a test fails if the word "Regenerate" or a bare "Edit" appears.
+
+Offered on the last answer only: a repeat appends to the bottom, so repeating an older question would
+drop its answer underneath a conversation that has moved past it. Never offered mid-stream — that
+would be a second door into the defect Stop exists to prevent.
+
+**Measured before building:** does the same prompt even produce a different answer? Three runs of one
+short prompt through the production Brain gave two distinct answers, so the control is real rather
+than decorative. That is not a rate — n=3.
+
+**Gate:** typecheck 0 · 787/787 tests (from 768) · `next build` green · **14/14 live checks**,
+including the one that matters most: after a reload the screen and the durable record show the same
+six messages.
+
+### What is still missing, and where it belongs
+
+Branch semantics. Replacing an answer or forking a thread needs a message model the Brain does not
+have — either delete/truncate-after-a-message, or a parent/branch reference plus a rule for which
+branch is live. That is brain-service plus a PostgreSQL migration plus a deploy, so it could not be
+proven live from here and was not started. It is now ranked separately as a **Brain** slice, not a
+chat one.
+
+---
+
 ## Lane 2026-09-04 — The voices existed; nothing could choose one, and Listen was dead
 
 `LIVE`. Gap #4 of the Chat Capability Matrix, plus a defect found while opening it.
