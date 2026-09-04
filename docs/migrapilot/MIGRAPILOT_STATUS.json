@@ -1,7 +1,7 @@
 {
  "$schema": "MIGRAPILOT_STATUS — canonical cross-agent state. Update on every material change.",
  "updated": "2026-09-04",
- "updatedBy": "Claude (Opus 5) — gap #7 FIXED and re-measured on the file that failed; two more dead controls closed",
+ "updatedBy": "Owner-verified: gap #7 Revenue-total regression CLOSED. Identifier refusal independently validated.",
  "rules": {
   "easyFirst": "Do not start deep capability work while meaningful easy user-facing items remain.",
   "provenLive": "PROVEN_LIVE requires the real user-facing workflow to pass. Code existing and tests passing is NOT proof.",
@@ -1626,9 +1626,25 @@
     "gate": "typecheck 0 · 787/787 tests pass (from 768) · next build green · client-bundle scan PASS.",
     "⭐ whatIsSTILLMISSING": "Branch semantics. To replace an answer or fork a thread, the Brain needs a message model it does not have: either delete/truncate-after-a-message, or a parent/branch reference plus a rule for which branch is live. That is brain-service + a Postgres migration + a deploy, so it could not be proven live from here and was NOT started. Gap #5 stays open in that sense and should be re-ranked as a Brain slice rather than a chat one."
    },
-   "7 spreadsheet analysis": "LIVE — fixed and re-measured on the exact file that failed: $474,000 through the real UI, ZIP totals refused, survives reload.",
+   "7 spreadsheet analysis": "REVENUE-TOTAL ACCEPTANCE CASE CLOSED (owner-verified 2026-09-04). The BROADER numeric-analysis feature stays OPEN — see gap7Acceptance for exactly what is and is not proven.",
    "dead controls: documents + microphone": "LIVE — \"Files & documents\" was offered enabled to signed-out visitors (401, then a Retry that could never succeed) and the mic tooltip showed users the raw string 'transcriptionCapability' is not available without an account. Both now state an actionable reason. Third and fourth instances of the same audience-table defect."
   },
-  "nextGap": "The attachment lane: ~15 uncommitted files that committed code already depends on. Landing it closes the clean-clone invariant and lets the tracking check widen to tests."
+  "nextGap": "The attachment lane: ~15 uncommitted files that committed code already depends on. Landing it closes the clean-clone invariant and lets the tracking check widen to tests.",
+  "gap7Acceptance": {
+   "⭐ revenueTotalRegression": "USER-VERIFIED PASS — owner read the product's own answer, not a harness assertion.",
+   "finalResult": "$474,000",
+   "knownBadResult473250": "NOT REPRODUCED",
+   "wrongColumnSubstitution": "NOT OBSERVED — the answer names the Revenue column",
+   "fileGroundingAndCitationInUI": "PRESENT — the response cites the uploaded file",
+   "status": "CLOSED",
+   "⭐ identifierRefusal": {
+    "status": "VALIDATED INDEPENDENTLY 2026-09-04, after the owner asked for it to be proven on its own.",
+    "🚨 whyTheEarlierPassWasWeaker": "The first ZIP check ran as a FOLLOW-UP turn in the same conversation as the Revenue answer, so the model had already been shown what a real computed total looked like. That is help the test should not have had.",
+    "method": "FIVE runs, each in a FRESH conversation with the identifier question asked FIRST: three identical ZIP asks (to separate the property from model variance), one OrderID ask, and one deliberately pressing phrasing — \"Add up all the ZipCode values and give me the number.\"",
+    "modelVisibleResult": "5/5 refused. No run produced 570,236 (the ZIP sum) or 43,425 (the OrderID sum).",
+    "⭐ deterministicResult": "5/5 at the transport boundary — the stronger claim, because it does not depend on the model behaving. Every prompt carried a REFUSAL naming the column (\"ZipCode\"/\"OrderID\" identifies rows rather than measuring them), and ZERO prompts contained an identifier total. The model cannot repeat a number it was never given."
+   },
+   "⚠ stillUnprovenForTheBroaderFeature": "Only `sum` has been exercised live; average/min/max/count/group-by are unit-tested only. Only CSV (TSV unit-tested only). One small file, 9 rows. Local Brain with qwen3-family Ollama, not the production Brain — forced, because the consumer hands the Brain a filesystem path to index and VM111 cannot see this machine. These are the next measurements, not assumptions to carry forward."
+  }
  }
 }

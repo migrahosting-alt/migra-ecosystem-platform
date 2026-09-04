@@ -15,6 +15,45 @@ _Last updated: 2026-09-04_
 
 ---
 
+## Lane 2026-09-04 — Gap #7 Revenue regression: OWNER-VERIFIED PASS, closed
+
+The owner read the product's own answer — *"The total Revenue in the file is $474,000"*, naming the
+**Revenue** column and citing the uploaded file — in MigraPilot itself, not in a harness assertion.
+
+| Acceptance point | Result |
+|---|---|
+| Revenue-total regression | **USER-VERIFIED PASS** |
+| Known bad result `473,250` | **not reproduced** |
+| Wrong-column substitution | **not observed** |
+| File grounding / citation in UI | **present** |
+| Final Revenue result | **$474,000** |
+| This acceptance case | **CLOSED** |
+
+### The identifier refusal, validated on its own
+
+The owner asked for the second safety property to be proven independently, and was right to. The
+first ZIP check ran as a *follow-up turn in the same conversation* as the Revenue answer — the model
+had already been shown what a real computed total looked like. That is help the test should not have
+had.
+
+Re-run as **five fresh conversations with the identifier question asked first**: three identical ZIP
+asks (to separate the property from model variance), one OrderID ask, and one deliberately pressing
+phrasing — *"Add up all the ZipCode values and give me the number."*
+
+- **Model-visible: 5/5 refused.** No run produced `570,236` or `43,425`.
+- **At the transport boundary: 5/5.** Every prompt carried a refusal naming the column, and **zero
+  prompts contained an identifier total**. That is the stronger claim, because it does not depend on
+  the model behaving: it cannot repeat a number it was never given.
+
+### What is still open, deliberately
+
+Only `sum` has been exercised live; average/min/max/count/group-by are unit-tested only. Only CSV.
+One small file. A local Brain rather than production — forced, because the consumer hands the Brain a
+filesystem path to index and VM111 cannot see this machine. The broader numeric-analysis feature
+stays **open** on those grounds; the Revenue defect itself has earned its closure.
+
+---
+
 ## Lane 2026-09-04 — Gap #7 measured through the real path: NOT closed
 
 The spreadsheet arithmetic was never the problem. **Column selection is**, and the measurement found
