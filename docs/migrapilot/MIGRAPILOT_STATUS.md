@@ -45,8 +45,29 @@ module, so the gate stays fully self-applying.
 
 **Gate:** typecheck 0 · 795/795 tests · `next build` green · bundle scan PASS.
 
-**Gap #7 itself is now a measurement, not a build.** The arithmetic exists and is wired; what nobody
-has shown is that a real CSV, attached in the real UI, produces the right total. That is next.
+### 🚨 Correction, same session: I called this resolved before verifying it
+
+Committing the untracked modules closed one half. Checking a **real clean worktree** — which should
+have come before the claim, not after — showed `HEAD` still fails to typecheck, for two further
+reasons:
+
+- **Pre-existing, not mine.** Commit `125a7f13` (the file-attachment lane) committed a `Composer.tsx`
+  that passes `onChooseAnother` to `AttachmentChips`, whose matching change is still uncommitted.
+- **Mine.** I committed `uploadCeiling.test.ts`, which imports three symbols that exist only in that
+  same lane's uncommitted `capability.ts` and `outcome.ts`. Tracking it made the break worse. It is
+  un-tracked again and belongs with the work it depends on.
+
+**The gate has a limit worth stating:** it checks that files are tracked and that imports resolve to
+tracked *files*. It does not check that the needed *exports* exist in the committed content — which is
+exactly how my own mistake slipped past it. The stronger gate is a typecheck in a clean worktree, and
+it cannot be added green until the attachment lane's ~15 modified files land.
+
+A third error — `Logo.tsx` failing to resolve a `.png` — was **not** a defect: `next-env.d.ts` is
+Next-generated and deliberately untracked, so a worktree that has never been built lacks the image
+module declaration. Checked before reporting it.
+
+**Gap #7 itself is a measurement, not a build.** The arithmetic exists and is wired; what nobody has
+shown is that a real CSV, attached in the real UI, produces the right total.
 
 ---
 
