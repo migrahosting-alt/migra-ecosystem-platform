@@ -9,9 +9,9 @@
 // © MigraTeck LLC.
 
 import { randomUUID } from 'node:crypto';
-import { auditStore } from '../auditLog.js';
-import { newCorrelationId } from '../correlation.js';
-import { redactString } from '../redaction.js';
+import { auditStore } from '../observability/auditLog.js';
+import { newCorrelationId } from '../observability/correlation.js';
+import { redactString } from '../observability/redaction.js';
 import {
   DiagnosticError,
   RESULT_CAPS,

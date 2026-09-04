@@ -6,18 +6,18 @@ import test from 'node:test';
 import Fastify from 'fastify';
 
 import { registerEngineerRoutes } from '../src/engine/engineer/engineerRoutes.js';
-import { registerToolExecutionRoutes } from '../src/engine/toolRoutes.js';
-import { ModelRegistry, type ModelDescriptor } from '../src/engine/modelRegistry.js';
+import { registerToolExecutionRoutes } from '../src/engine/tools/toolRoutes.js';
+import { ModelRegistry, type ModelDescriptor } from '../src/engine/models/modelRegistry.js';
 import { IndexService, type FileSource, type Scope } from '../src/engine/rag/indexService.js';
 import { FakeEmbedder } from '../src/engine/rag/embedder.js';
-import { AuditStore, auditStore } from '../src/engine/auditLog.js';
+import { AuditStore, auditStore } from '../src/engine/observability/auditLog.js';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { SqliteDurableStore } from '../src/engine/persistence/sqliteStore.js';
 import { wireOperationalPersistence } from '../src/engine/persistence/operationalBridge.js';
 import { UsageLedger } from '../src/engine/providers/budget/usageLedger.js';
-import { IncidentManager, LocalAlertSink } from '../src/engine/incidents.js';
+import { IncidentManager, LocalAlertSink } from '../src/engine/observability/incidents.js';
 import { BudgetManager } from '../src/engine/providers/budget/budgetManager.js';
 import { DEFAULT_MIN_APPROVED_SCORE, decideGrounding, groundingAuditFields } from '../src/engine/grounding/groundingDecision.js';
 
@@ -247,7 +247,7 @@ test('retrieval metadata is emitted and carries no prompt or source text', async
 // ── 8: one shared decision path ─────────────────────────────────────────────
 
 test('chat and engineer share ONE grounding decision implementation', () => {
-  const chat = readSource('src/engine/aiRoutes.ts');
+  const chat = readSource('src/engine/chat/aiRoutes.ts');
   const engineer = readSource('src/engine/engineer/engineerRoutes.ts');
 
   for (const [name, src] of [['aiRoutes', chat], ['engineerRoutes', engineer]] as const) {
@@ -263,7 +263,7 @@ test('chat and engineer share ONE grounding decision implementation', () => {
 });
 
 test('the chat path can no longer silently substitute working-tree chunks', () => {
-  const chat = readSource('src/engine/aiRoutes.ts');
+  const chat = readSource('src/engine/chat/aiRoutes.ts');
   // The fallback still exists for ordinary turns, but must be guarded by the flag.
   const idx = chat.indexOf('if (!retrievedChunks?.length && body.workspaceRoot)');
   assert.ok(idx > 0, 'the lexical fallback is still present for ordinary turns');

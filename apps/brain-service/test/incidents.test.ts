@@ -2,7 +2,7 @@
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { IncidentManager, LocalAlertSink, type InconsistentStateAlert, type RaiseInput } from '../src/engine/incidents.js';
+import { IncidentManager, LocalAlertSink, type InconsistentStateAlert, type RaiseInput } from '../src/engine/observability/incidents.js';
 
 let idc = 0;
 const ids = () => `inc_${idc++}`;

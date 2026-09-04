@@ -26,7 +26,7 @@
 
 import type { DurableAgentRunChild, DurableAgentRunState } from '../persistence/types.js';
 import { DURABLE_CHILD_TERMINAL_STATES } from '../persistence/types.js';
-import type { AgentRunJournal } from '../agentRunJournal.js';
+import type { AgentRunJournal } from '../agents/agentRunJournal.js';
 import {
   codingCompletionEligibility,
   confirmCodingChildCancellation,

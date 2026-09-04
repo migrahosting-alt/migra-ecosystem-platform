@@ -3,14 +3,14 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
-import { CapabilityRegistry } from '../src/engine/capabilityRegistry.js';
-import { ToolApprovalStore, hashInput } from '../src/engine/toolApprovalStore.js';
-import { ToolAudit } from '../src/engine/toolAudit.js';
-import { AGENT_MODE_RECONCILIATION_TERMINAL_EMITTERS, agentModeReconciliationEmitterContractParity, agentModeRecoveryMetadataFor, type AgentModeRequestContext, AgentModeCommandService } from '../src/engine/agentModeCommandService.js';
-import { AgentRunJournal, MemoryAgentRunJournalPersistence } from '../src/engine/agentRunJournal.js';
-import { AGENT_RECIPE_OUTPUT_CAP_BYTES, AGENT_RECIPE_POLICY_VERSION, AgentRecipePolicyError, containmentIdentityForPlan, containmentIdentityForTrustedRun, type AgentContainmentIdentity, type AgentContainmentReconcileOutcome, type AgentRecipeExecutionOutcome, type AgentRecipePlan, type AgentRecipeProcessManagerLike, type AgentRecipeResolverLike } from '../src/engine/agentRecipe.js';
+import { CapabilityRegistry } from '../src/engine/models/capabilityRegistry.js';
+import { ToolApprovalStore, hashInput } from '../src/engine/tools/toolApprovalStore.js';
+import { ToolAudit } from '../src/engine/tools/toolAudit.js';
+import { AGENT_MODE_RECONCILIATION_TERMINAL_EMITTERS, agentModeReconciliationEmitterContractParity, agentModeRecoveryMetadataFor, type AgentModeRequestContext, AgentModeCommandService } from '../src/engine/agents/agentModeCommandService.js';
+import { AgentRunJournal, MemoryAgentRunJournalPersistence } from '../src/engine/agents/agentRunJournal.js';
+import { AGENT_RECIPE_OUTPUT_CAP_BYTES, AGENT_RECIPE_POLICY_VERSION, AgentRecipePolicyError, containmentIdentityForPlan, containmentIdentityForTrustedRun, type AgentContainmentIdentity, type AgentContainmentReconcileOutcome, type AgentRecipeExecutionOutcome, type AgentRecipePlan, type AgentRecipeProcessManagerLike, type AgentRecipeResolverLike } from '../src/engine/agents/agentRecipe.js';
 import type { DurableAgentRun, DurableAgentRunEvent, DurableAgentRunState } from '../src/engine/persistence/types.js';
-import { recoveryClassCanCreateFreshProposal, recoveryProductionReasonContracts } from '../src/engine/recoverySourceProvenance.js';
+import { recoveryClassCanCreateFreshProposal, recoveryProductionReasonContracts } from '../src/engine/recovery/recoverySourceProvenance.js';
 
 const ACTIVATION = '11111111-1111-4111-8111-111111111111';
 

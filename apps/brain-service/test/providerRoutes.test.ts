@@ -10,7 +10,7 @@ import { registerProviderRoutes } from '../src/engine/providers/routes.js';
 import { FleetRegistry } from '../src/engine/providers/fleetRegistry.js';
 import { PolicyEngine } from '../src/engine/providers/executionPolicy.js';
 import { buildProviderRegistry } from '../src/engine/providers/config.js';
-import { ModelRegistry } from '../src/engine/modelRegistry.js';
+import { ModelRegistry } from '../src/engine/models/modelRegistry.js';
 
 function appWith(env: NodeJS.ProcessEnv) {
   const providerRegistry = buildProviderRegistry(env);

@@ -13,9 +13,9 @@ import type {
 } from '@migrapilot/protocol';
 import { AGENT_TERMINAL_STATES, AgentRunJournal } from './agentRunJournal.js';
 import type { AgentModeRequestContext } from './agentModeCommandService.js';
-import { validateRecoverySourceProvenance } from './recoverySourceProvenance.js';
-import { redactValue } from './redaction.js';
-import type { DurableAgentRun, DurableAgentRunEvent, DurableAgentRunTombstone } from './persistence/types.js';
+import { validateRecoverySourceProvenance } from '../recovery/recoverySourceProvenance.js';
+import { redactValue } from '../observability/redaction.js';
+import type { DurableAgentRun, DurableAgentRunEvent, DurableAgentRunTombstone } from '../persistence/types.js';
 
 export type AgentRunHistoryResult<T> =
   | { ok: true; value: T }

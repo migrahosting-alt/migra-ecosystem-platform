@@ -9,7 +9,7 @@
 //
 // © MigraTeck LLC.
 
-import type { ModelDescriptor, ModelTier } from '../modelRegistry.js';
+import type { ModelDescriptor, ModelTier } from '../models/modelRegistry.js';
 import type { FleetRegistry, FleetProvider } from './fleetRegistry.js';
 import { PolicyEngine, type ExecutionPolicyId, type PlanHints, type SelectionPlan } from './executionPolicy.js';
 

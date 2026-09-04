@@ -30,12 +30,12 @@
 
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { randomUUID } from 'node:crypto';
-import { CapabilityRegistry } from './capabilityRegistry.js';
+import { CapabilityRegistry } from '../models/capabilityRegistry.js';
 import { ToolApprovalStore } from './toolApprovalStore.js';
 import { ToolAudit } from './toolAudit.js';
 import { executeToolCore } from './toolExecutor.js';
-import { telemetryHub } from './telemetryHub.js';
-import { makeStageLogger, jsonLineSink } from './correlation.js';
+import { telemetryHub } from '../observability/telemetryHub.js';
+import { makeStageLogger, jsonLineSink } from '../observability/correlation.js';
 
 export interface ToolRoutesDeps {
   registry?: CapabilityRegistry;

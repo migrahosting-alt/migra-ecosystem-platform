@@ -20,7 +20,7 @@
  */
 
 import * as fs from 'node:fs';
-import { runInspection, resolveWorkspacePath } from '../inspectRoutes.js';
+import { runInspection, resolveWorkspacePath } from '../workspace/inspectRoutes.js';
 import type { EvidenceSource } from '../grounding/evidenceLedger.js';
 
 export function makeSpanSource(workspaceRoot: string, relPath: string, startLine: number, endLine: number): EvidenceSource {

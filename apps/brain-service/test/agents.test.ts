@@ -2,13 +2,13 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { z } from 'zod';
 import Fastify from 'fastify';
-import { CapabilityRegistry } from '../src/engine/capabilityRegistry.js';
-import { ToolApprovalStore } from '../src/engine/toolApprovalStore.js';
-import { ToolAudit } from '../src/engine/toolAudit.js';
-import { AgentRegistry, type AgentDefinition, type AgentDescriptor } from '../src/engine/agentRegistry.js';
-import { AgentRunStore, canTransition } from '../src/engine/agentRunStore.js';
-import { AgentService, toRunView } from '../src/engine/agentRuntime.js';
-import { registerAgentRoutes } from '../src/engine/agentRoutes.js';
+import { CapabilityRegistry } from '../src/engine/models/capabilityRegistry.js';
+import { ToolApprovalStore } from '../src/engine/tools/toolApprovalStore.js';
+import { ToolAudit } from '../src/engine/tools/toolAudit.js';
+import { AgentRegistry, type AgentDefinition, type AgentDescriptor } from '../src/engine/agents/agentRegistry.js';
+import { AgentRunStore, canTransition } from '../src/engine/agents/agentRunStore.js';
+import { AgentService, toRunView } from '../src/engine/agents/agentRuntime.js';
+import { registerAgentRoutes } from '../src/engine/agents/agentRoutes.js';
 
 // A tool registry whose 3 agent-used tools are deterministic in-memory fakes, so
 // agent runs never touch the filesystem. `applied` records real mutations.

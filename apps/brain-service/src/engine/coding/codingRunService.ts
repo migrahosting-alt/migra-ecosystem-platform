@@ -29,7 +29,7 @@ import { randomUUID } from 'node:crypto';
 import type { AgentModeCommandPreview } from '@migrapilot/protocol';
 import { realpath, stat } from 'node:fs/promises';
 import { isAbsolute, resolve, sep } from 'node:path';
-import { auditHash, auditStore, type AuditEventType } from '../auditLog.js';
+import { auditHash, auditStore, type AuditEventType } from '../observability/auditLog.js';
 
 /** The coding events this service may emit. Narrowed from AuditEventType so a
  * typo cannot silently become an unaudited mutation. */
@@ -39,7 +39,7 @@ import {
   readDomainPayload,
   serializeDomainPayload,
   type AgentRunJournalConfig,
-} from '../agentRunJournal.js';
+} from '../agents/agentRunJournal.js';
 import type { DurableAgentRun, DurableAgentRunState } from '../persistence/types.js';
 import { JournaledCodingRun, type CodingDiagnosticSink, type CodingRunStore } from './journaledCodingRun.js';
 import { codingCompletionEligibility } from './codingChildren.js';

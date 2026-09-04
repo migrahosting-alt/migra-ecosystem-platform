@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { z } from 'zod';
-import { CapabilityRegistry } from '../src/engine/capabilityRegistry.js';
-import { ToolApprovalStore } from '../src/engine/toolApprovalStore.js';
-import { ToolAudit } from '../src/engine/toolAudit.js';
-import { AgentRegistry, type AgentDefinition, type AgentDescriptor } from '../src/engine/agentRegistry.js';
-import { AgentRunStore } from '../src/engine/agentRunStore.js';
-import { AgentService, toRunView } from '../src/engine/agentRuntime.js';
+import { CapabilityRegistry } from '../src/engine/models/capabilityRegistry.js';
+import { ToolApprovalStore } from '../src/engine/tools/toolApprovalStore.js';
+import { ToolAudit } from '../src/engine/tools/toolAudit.js';
+import { AgentRegistry, type AgentDefinition, type AgentDescriptor } from '../src/engine/agents/agentRegistry.js';
+import { AgentRunStore } from '../src/engine/agents/agentRunStore.js';
+import { AgentService, toRunView } from '../src/engine/agents/agentRuntime.js';
 import type { PilotRuntimeClient, PilotRunOutcome } from '../src/engine/pilot/pilotRuntimeClient.js';
 
 // A tool registry whose edit.apply records mutations — a delegated (pilot) run
@@ -73,7 +73,7 @@ const WAITING: PilotRunOutcome = { status: 'waiting', pilotRunId: 'pr_1', action
 test('delegated start → COMPLETED, result surfaced, NO local tool execution', async () => {
   const client = new FakePilot();
   const { service, fake } = svc(client);
-  const { run } = await service.createRun(REQ) as { run: import('../src/engine/agentRunStore.js').RunRecord };
+  const { run } = await service.createRun(REQ) as { run: import('../src/engine/agents/agentRunStore.js').RunRecord };
   assert.equal(run.state, 'COMPLETED');
   assert.deepEqual(run.result, { done: true });
   assert.deepEqual(client.calls, ['probe', 'startRun']);

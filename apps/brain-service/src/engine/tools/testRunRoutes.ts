@@ -11,7 +11,7 @@
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { ToolErrorSchema } from '@migrapilot/protocol';
-import { testRun } from '../tools/testRun.js';
+import { testRun } from '../../tools/testRun.js';
 
 /** Register `POST /api/ai/test-run`. */
 export function registerTestRunRoutes(app: FastifyInstance): void {

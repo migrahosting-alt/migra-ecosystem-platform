@@ -9,7 +9,7 @@
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { AgentRunJournal, DEFAULT_AGENT_RUN_JOURNAL_CONFIG, MemoryAgentRunJournalPersistence } from '../src/engine/agentRunJournal.js';
+import { AgentRunJournal, DEFAULT_AGENT_RUN_JOURNAL_CONFIG, MemoryAgentRunJournalPersistence } from '../src/engine/agents/agentRunJournal.js';
 import type { DurableAgentRun, DurableAgentRunChild, DurableAgentRunState } from '../src/engine/persistence/types.js';
 import { JournaledCodingRun, type CodingRunStore, type StageWorkResult } from '../src/engine/coding/journaledCodingRun.js';
 import { markInterruptedChildren, reconcileCodingChildren } from '../src/engine/coding/codingChildren.js';

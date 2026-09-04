@@ -16,7 +16,7 @@
 
 import type { FastifyInstance } from 'fastify';
 import { WorkspaceManager } from './workspaceManager.js';
-import { scopeFrom } from './memory/memoryRoutes.js';
+import { scopeFrom } from '../memory/memoryRoutes.js';
 
 export function registerWorkspaceRoutes(app: FastifyInstance, manager: WorkspaceManager): WorkspaceManager {
   // Hydrate the caller's own workspaces before any handler reads. A global load

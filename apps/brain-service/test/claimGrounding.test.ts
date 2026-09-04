@@ -238,11 +238,11 @@ test('adversarial: opening a file does not make it evidence for an unrelated cla
 
 test('adversarial: filenames alone force a refusal that states the gap', () => {
   const ledger = new EvidenceLedger();
-  ledger.notePath('src/engine/agenticAnswer.ts');
-  ledger.notePath('src/engine/answerRoutes.ts');
+  ledger.notePath('src/engine/agents/agenticAnswer.ts');
+  ledger.notePath('src/engine/chat/answerRoutes.ts');
 
   const v = verifyAnswer(
-    'The agentic loop caps itself at eight tool steps and then synthesises. (`src/engine/agenticAnswer.ts:48`)',
+    'The agentic loop caps itself at eight tool steps and then synthesises. (`src/engine/agents/agenticAnswer.ts:48`)',
     ledger,
     { question: 'how many tool steps does the loop allow?' },
   );
@@ -251,7 +251,7 @@ test('adversarial: filenames alone force a refusal that states the gap', () => {
   assert.deepEqual(reasons(v.rejected), ['citation-not-retrieved']);
   assert.match(v.answer, /could not support an answer/i);
   assert.match(v.answer, /read none of them/i, 'the gap says paths were located but not read');
-  assert.match(v.answer, /src\/engine\/agenticAnswer\.ts/);
+  assert.match(v.answer, /src\/engine\/agents\/agenticAnswer\.ts/);
 });
 
 test('adversarial: an empty model answer refuses and lists the content actually retrieved', () => {

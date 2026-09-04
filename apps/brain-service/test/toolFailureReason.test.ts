@@ -6,7 +6,7 @@
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { classifyToolFailure } from '../src/engine/toolFailureReason.js';
+import { classifyToolFailure } from '../src/engine/tools/toolFailureReason.js';
 import { ChangesetError } from '../src/tools/changeset.js';
 
 /** A path and a hash of the kind the engine really interpolates into its messages. */

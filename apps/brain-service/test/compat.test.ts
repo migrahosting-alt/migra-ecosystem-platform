@@ -5,7 +5,7 @@ import type { ChatTurnRequest } from '@migrapilot/shared-types';
 import type { BrainEnv } from '../src/config/env.js';
 import { ProviderRegistry } from '../src/providers/providerRegistry.js';
 import { selectEffectiveProfile } from '../src/providers/selectProvider.js';
-import { registerAiRoutes } from '../src/engine/aiRoutes.js';
+import { registerAiRoutes } from '../src/engine/chat/aiRoutes.js';
 
 // Proves the /api/ai/* migration is ADDITIVE and REVERSIBLE: the new engine
 // facade and the legacy /chat endpoint coexist on the same server, each working

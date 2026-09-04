@@ -27,7 +27,7 @@
 // it is substituted with edit.preview and surfaced as a PROPOSAL. command.run
 // side effects (npm install, etc.) are permitted, contained, and reported.
 
-import { NOOP_STAGE_LOGGER, type StageLogger } from '../correlation.js';
+import { NOOP_STAGE_LOGGER, type StageLogger } from '../observability/correlation.js';
 import { decideTurn, type MissingInformationDeclaration, type TurnDecision, type TurnIntent } from './turnDecision.js';
 import { existsSync } from 'node:fs';
 import { lintChangeset, summarizeDefects } from '../../tools/changesetLint.js';

@@ -17,7 +17,7 @@
  */
 
 import { createHash, randomBytes } from 'node:crypto';
-import { StoreHealth, shortId, safeSink, NOOP_TELEMETRY, type TelemetrySink, type StoreHealthSnapshot } from './storeTelemetry.js';
+import { StoreHealth, shortId, safeSink, NOOP_TELEMETRY, type TelemetrySink, type StoreHealthSnapshot } from '../observability/storeTelemetry.js';
 
 export type ApprovalState = 'PENDING' | 'CONSUMED' | 'EXPIRED' | 'REJECTED';
 

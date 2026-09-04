@@ -14,7 +14,7 @@
 import { spawn } from 'node:child_process';
 import { realpath } from 'node:fs/promises';
 import * as path from 'node:path';
-import { MARKERS, redactCommandOutput } from '../engine/redaction.js';
+import { MARKERS, redactCommandOutput } from '../engine/observability/redaction.js';
 import {
   CommandRunRequestSchema,
   type CommandRunRequest,

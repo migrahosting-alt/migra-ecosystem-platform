@@ -9,7 +9,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import Fastify from 'fastify';
 
-import { engineCorrelationId } from '../src/engine/toolRoutes.js';
+import { engineCorrelationId } from '../src/engine/tools/toolRoutes.js';
 
 async function idFor(headers: Record<string, string>): Promise<string> {
   const app = Fastify();

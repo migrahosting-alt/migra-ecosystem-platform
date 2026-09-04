@@ -19,7 +19,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { EvidenceLedger } from '../src/engine/grounding/evidenceLedger.js';
 import { verifyAnswer } from '../src/engine/grounding/claimVerifier.js';
-import { AnswerTimeline } from '../src/engine/answerTimings.js';
+import { AnswerTimeline } from '../src/engine/observability/answerTimings.js';
 import { buildRepoMap, clearRepoMapCache } from '../src/engine/planning/repoMap.js';
 import { rankCandidates, aboveRelevanceFloor, isCompoundOf } from '../src/engine/planning/candidateRanking.js';
 import { decompose, extractSignals, splitToken, GENERIC_TOKENS } from '../src/engine/planning/contentSignals.js';

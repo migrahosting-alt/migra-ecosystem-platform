@@ -17,10 +17,10 @@ import {
   type ChangesetFs,
 } from '../src/tools/changeset.js';
 import { nodeChangesetFs } from '../src/tools/changesetFs.js';
-import { CapabilityRegistry } from '../src/engine/capabilityRegistry.js';
-import { ToolApprovalStore } from '../src/engine/toolApprovalStore.js';
-import { ToolAudit } from '../src/engine/toolAudit.js';
-import { executeToolCore } from '../src/engine/toolExecutor.js';
+import { CapabilityRegistry } from '../src/engine/models/capabilityRegistry.js';
+import { ToolApprovalStore } from '../src/engine/tools/toolApprovalStore.js';
+import { ToolAudit } from '../src/engine/tools/toolAudit.js';
+import { executeToolCore } from '../src/engine/tools/toolExecutor.js';
 
 const fs: ChangesetFs = nodeChangesetFs();
 function ws(seed: Record<string, string> = {}): string {

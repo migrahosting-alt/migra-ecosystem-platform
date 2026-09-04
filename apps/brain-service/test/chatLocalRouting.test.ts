@@ -4,8 +4,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import Fastify from 'fastify';
-import { registerAiRoutes } from '../src/engine/aiRoutes.js';
-import { ModelRegistry, type ModelDescriptor } from '../src/engine/modelRegistry.js';
+import { registerAiRoutes } from '../src/engine/chat/aiRoutes.js';
+import { ModelRegistry, type ModelDescriptor } from '../src/engine/models/modelRegistry.js';
 import { StubProvider } from '../src/providers/providerRegistry.js';
 import { FleetRegistry } from '../src/engine/providers/fleetRegistry.js';
 import { ProviderRegistry } from '../src/engine/providers/providerRegistry.js';

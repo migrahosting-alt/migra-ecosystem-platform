@@ -1,7 +1,7 @@
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { realpath, stat } from 'node:fs/promises';
 import type { AgentModeBootstrapResponse, AgentModeRecipeId } from '@migrapilot/protocol';
-import { auditHash, auditStore } from './auditLog.js';
+import { auditHash, auditStore } from '../observability/auditLog.js';
 
 const BOOTSTRAP_TTL_MS = 2 * 60_000;
 const ACTIVATION_TTL_MS = 60 * 60_000;

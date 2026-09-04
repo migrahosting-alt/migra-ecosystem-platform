@@ -7,12 +7,12 @@ import Fastify from 'fastify';
 import { mkdtempSync, writeFileSync, existsSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
-import { registerToolExecutionRoutes } from '../src/engine/toolRoutes.js';
+import { registerToolExecutionRoutes } from '../src/engine/tools/toolRoutes.js';
 import { registerEngineerRoutes } from '../src/engine/engineer/engineerRoutes.js';
-import { ModelRegistry } from '../src/engine/modelRegistry.js';
-import { incidentManager } from '../src/engine/incidents.js';
-import { recoveryManager } from '../src/engine/recovery.js';
-import { sanitizeError } from '../src/engine/redaction.js';
+import { ModelRegistry } from '../src/engine/models/modelRegistry.js';
+import { incidentManager } from '../src/engine/observability/incidents.js';
+import { recoveryManager } from '../src/engine/recovery/recovery.js';
+import { sanitizeError } from '../src/engine/observability/redaction.js';
 
 function appWithRoutes() {
   const app = Fastify({ logger: false });

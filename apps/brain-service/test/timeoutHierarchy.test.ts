@@ -8,7 +8,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { DEFAULT_TIMEOUTS, checkHierarchy, type TimeoutHierarchy } from '../src/config/timeoutHierarchy.js';
-import { classifyOutcome, describeOutcome } from '../src/engine/operationOutcome.js';
+import { classifyOutcome, describeOutcome } from '../src/engine/observability/operationOutcome.js';
 import { readEnv } from '../src/config/env.js';
 
 /** The SHIPPED defaults, read with an empty environment. */

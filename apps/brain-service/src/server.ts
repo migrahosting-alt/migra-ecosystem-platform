@@ -19,24 +19,24 @@ import { selectEffectiveProfile } from './providers/selectProvider.js';
 import { retrieveContext } from './retrieval/retrieve.js';
 import { decideRoute } from './router/policy.js';
 import { registerToolRoutes } from './tools/index.js';
-import { registerAiRoutes } from './engine/aiRoutes.js';
+import { registerAiRoutes } from './engine/chat/aiRoutes.js';
 import {
   readTailnetIdentity,
   decideTailnetAccess,
   IDENTITY_EXEMPT_PATHS,
-} from './engine/tailnetIdentity.js';
-import { registerToolExecutionRoutes } from './engine/toolRoutes.js';
-import { registerInspectRoutes } from './engine/inspectRoutes.js';
-import { registerCommandRunRoutes } from './engine/commandRunRoutes.js';
-import { registerTestRunRoutes } from './engine/testRunRoutes.js';
-import { registerAnswerRoutes } from './engine/answerRoutes.js';
+} from './engine/gateway/tailnetIdentity.js';
+import { registerToolExecutionRoutes } from './engine/tools/toolRoutes.js';
+import { registerInspectRoutes } from './engine/workspace/inspectRoutes.js';
+import { registerCommandRunRoutes } from './engine/tools/commandRunRoutes.js';
+import { registerTestRunRoutes } from './engine/tools/testRunRoutes.js';
+import { registerAnswerRoutes } from './engine/chat/answerRoutes.js';
 import { lookup as dnsLookup } from 'node:dns/promises';
 import { registerEngineerRoutes } from './engine/engineer/engineerRoutes.js';
 import { LiveConnectorRegistry } from './engine/liveKnowledge/liveResearch.js';
 import { buildAuthoritativeConnectors } from './engine/liveKnowledge/connectors/index.js';
 import { startMcp } from './mcp/mcpRuntime.js';
-import { telemetryHub } from './engine/telemetryHub.js';
-import { registerAgentRoutes } from './engine/agentRoutes.js';
+import { telemetryHub } from './engine/observability/telemetryHub.js';
+import { registerAgentRoutes } from './engine/agents/agentRoutes.js';
 import { registerProductionDiagnosticsRoutes } from './engine/production/routes.js';
 import { buildProductionDiagnosticsProvider } from './engine/production/config.js';
 import { registerProviderRoutes } from './engine/providers/routes.js';
@@ -44,7 +44,7 @@ import { buildProviderRegistry } from './engine/providers/config.js';
 import { FleetRegistry } from './engine/providers/fleetRegistry.js';
 import { PolicyEngine, DEFAULT_POLICY, isExecutionPolicyId, type ExecutionPolicyId } from './engine/providers/executionPolicy.js';
 import { makeReachabilityProbe } from './engine/providers/health.js';
-import { buildEngineModelRegistry } from './engine/aiRoutes.js';
+import { buildEngineModelRegistry } from './engine/chat/aiRoutes.js';
 import type { LocalRoutingDeps } from './engine/providers/localCodingRouter.js';
 import { EscalationController } from './engine/providers/escalationController.js';
 import { EscalationOfferStore } from './engine/providers/escalationStore.js';
@@ -52,32 +52,32 @@ import { CloudEscalationExecutor } from './engine/providers/cloudEscalationExecu
 import { registerEscalationRoutes } from './engine/providers/escalationRoutes.js';
 import { buildPricingBook, buildBudgetManager, buildUsageLedger } from './engine/providers/budget/config.js';
 import { registerBudgetRoutes } from './engine/providers/budget/budgetRoutes.js';
-import { AgentRegistry } from './engine/agentRegistry.js';
-import { registerAgentModeCommandRoutes } from './engine/agentModeCommandRoutes.js';
+import { AgentRegistry } from './engine/agents/agentRegistry.js';
+import { registerAgentModeCommandRoutes } from './engine/agents/agentModeCommandRoutes.js';
 import { registerCodingRunRoutes } from './engine/coding/codingRunRoutes.js';
 import { registerSpeechRoutes } from './engine/speech/speechRoutes.js';
 import { CodingRunService } from './engine/coding/codingRunService.js';
 import { createProductionCodingDriver } from './engine/coding/productionCodingDriver.js';
 import { PREFERRED_CODING_MODEL } from './engine/capability/capabilityGrants.js';
 import { codingCapability, codingStructuredModel, readCodingConfig, readCodingValidationCommand, recoverCodingRuns } from './engine/coding/codingRuntime.js';
-import { buildAgentRunJournalConfig } from './engine/agentRunJournal.js';
-import { AgentActivationAuthority } from './engine/agentActivation.js';
-import { buildAgentModeCommandService } from './engine/agentModeCommandService.js';
-import { scavengeStaleAgentSnapshots } from './engine/agentRecipe.js';
-import { AgentService } from './engine/agentRuntime.js';
-import { AgentRunStore } from './engine/agentRunStore.js';
+import { buildAgentRunJournalConfig } from './engine/agents/agentRunJournal.js';
+import { AgentActivationAuthority } from './engine/agents/agentActivation.js';
+import { buildAgentModeCommandService } from './engine/agents/agentModeCommandService.js';
+import { scavengeStaleAgentSnapshots } from './engine/agents/agentRecipe.js';
+import { AgentService } from './engine/agents/agentRuntime.js';
+import { AgentRunStore } from './engine/agents/agentRunStore.js';
 import { buildPilotRuntimeClient } from './engine/pilot/pilotApiRuntimeClient.js';
-import { WorkspaceManager } from './engine/workspaceManager.js';
-import { registerWorkspaceRoutes } from './engine/workspaceRoutes.js';
-import { gitInfo } from './engine/gitInfo.js';
+import { WorkspaceManager } from './engine/workspace/workspaceManager.js';
+import { registerWorkspaceRoutes } from './engine/workspace/workspaceRoutes.js';
+import { gitInfo } from './engine/workspace/gitInfo.js';
 import { registerMemoryRoutes } from './engine/memory/memoryRoutes.js';
 import { randomUUID } from 'node:crypto';
-import { registerAnonymousQuotaRoutes } from './engine/anonymousQuotaRoutes.js';
-import { registerPreferencesRoutes } from './engine/preferencesRoutes.js';
-import { anonymousLimitsFromEnv } from './engine/anonymousQuotaDeps.js';
+import { registerAnonymousQuotaRoutes } from './engine/gateway/anonymousQuotaRoutes.js';
+import { registerPreferencesRoutes } from './engine/preferences/preferencesRoutes.js';
+import { anonymousLimitsFromEnv } from './engine/gateway/anonymousQuotaDeps.js';
 import { installJsonBodyParser } from './http/jsonBodyParser.js';
 import { ConversationStore } from './engine/memory/conversationStore.js';
-import { QualificationStore } from './engine/qualificationStore.js';
+import { QualificationStore } from './engine/models/qualificationStore.js';
 import { PostgresDurableStore } from './engine/persistence/postgresStore.js';
 import { PostgresConnection } from './engine/persistence/postgres/pool.js';
 import { SqliteDurableStore } from './engine/persistence/sqliteStore.js';
@@ -85,13 +85,13 @@ import type { DurableStore } from './engine/persistence/types.js';
 import { resolvePersistence, PersistenceConfigError } from './engine/persistence/persistenceConfig.js';
 import { wireOperationalPersistence } from './engine/persistence/operationalBridge.js';
 import { OperationalMaintenance, buildRetentionConfig, isMaintainable } from './engine/persistence/operationalMaintenance.js';
-import { auditStore } from './engine/auditLog.js';
+import { auditStore } from './engine/observability/auditLog.js';
 import { registerQualificationRoutes } from './engine/media/qualificationRoutes.js';
 import { registerMediaMigrationRoutes } from './engine/media/mediaMigrationRoutes.js';
 import { loadInternalAuthConfig } from './engine/internalAuth/config.js';
-import { incidentManager } from './engine/incidents.js';
-import { engineVersion } from './engine/version.js';
-import { sanitizeError } from './engine/redaction.js';
+import { incidentManager } from './engine/observability/incidents.js';
+import { engineVersion } from './engine/platform/version.js';
+import { sanitizeError } from './engine/observability/redaction.js';
 import { IndexService } from './engine/rag/indexService.js';
 import { FsFileSource } from './engine/rag/fsFileSource.js';
 import { OllamaEmbedder, CachedEmbedder, FakeEmbedder } from './engine/rag/embedder.js';
@@ -1015,7 +1015,7 @@ async function main(): Promise<void> {
   // MigraAI Workspace Manager (/api/ai/workspaces): the object every client uses —
   // a workspace owns its index, memory, agents, models, health. Clients just
   // "Open" / "Sync"; the engine knows the rest. Durable + scope-isolated.
-  const approvedModelsByTier = async (): Promise<import('./engine/workspaceManager.js').WorkspaceView['models']> => {
+  const approvedModelsByTier = async (): Promise<import('./engine/workspace/workspaceManager.js').WorkspaceView['models']> => {
     const models = (await modelRegistry.list()).filter((m) => m.qualification?.state === 'approved');
     return {
       coding: models.filter((m) => m.capabilities.coding).map((m) => m.id),

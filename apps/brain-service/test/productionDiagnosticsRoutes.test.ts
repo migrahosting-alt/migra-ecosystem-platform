@@ -9,7 +9,7 @@ import { ProductionDiagnosticsProvider, type ProviderConfig } from '../src/engin
 import { ProductionTargetRegistry, type ProductionTarget } from '../src/engine/production/targetRegistry.js';
 import { defaultCapabilities } from '../src/engine/production/capabilities.js';
 import { NullProber, type ServiceStatus } from '../src/engine/production/deps.js';
-import { ToolApprovalStore } from '../src/engine/toolApprovalStore.js';
+import { ToolApprovalStore } from '../src/engine/tools/toolApprovalStore.js';
 
 const OP = 'ops:alice';
 const TOKEN = 'diag-token-abc';

@@ -28,7 +28,7 @@ import {
 import {
   insertAgentRunChild, loadAgentRunChild, loadAgentRunChildren, transitionAgentRunChild,
 } from '../src/engine/persistence/postgres/agentRunChildRepo.js';
-import { recoveryEventDigest } from '../src/engine/recoverySourceProvenance.js';
+import { recoveryEventDigest } from '../src/engine/recovery/recoverySourceProvenance.js';
 import type {
   AgentRunReproposalInput, DurableAgentRun, DurableAgentRunChild, DurableAgentRunEvent,
   DurableAgentRunState,

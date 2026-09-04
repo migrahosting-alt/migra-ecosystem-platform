@@ -11,7 +11,7 @@
  * asserting that time passed.
  */
 
-import type { PostgresDurableStore } from './persistence/postgresStore.js';
+import type { PostgresDurableStore } from '../persistence/postgresStore.js';
 
 /** Namespace prefix, shared with the consumer's `anonymousIdentity.ts`. */
 export const ANON_PREFIX = 'anon:';

@@ -3,7 +3,7 @@
 // path, so disabled remote delegation can never block ordinary local work.
 
 import { DEFAULT_TIMEOUTS } from '../../config/timeoutHierarchy.js';
-import { classifyOutcome, type OperationOutcome } from '../operationOutcome.js';
+import { classifyOutcome, type OperationOutcome } from '../observability/operationOutcome.js';
 
 /** Which clock a provider timeout code refers to, for an honest message. */
 function timeoutClock(code: string): 'connect' | 'idle' | 'response' | 'absolute' {
@@ -23,8 +23,8 @@ import { readdir } from 'node:fs/promises';
 import * as path from 'node:path';
 import { z } from 'zod';
 import type { BrainEnv } from '../../config/env.js';
-import type { ModelRegistry, ModelDescriptor } from '../modelRegistry.js';
-import { selectModel, tierFromHints } from '../capabilityRouter.js';
+import type { ModelRegistry, ModelDescriptor } from '../models/modelRegistry.js';
+import { selectModel, tierFromHints } from '../models/capabilityRouter.js';
 import { capabilityAuditFields, resolveCapability, tierPolicyFor } from '../capability/capabilityGrants.js';
 import { ToolGate, permittedTools, toolAuthoritySummary, ToolNotPermittedError } from '../capability/capabilityTools.js';
 import { resolveOperatorPrincipal } from '../capability/operatorPrincipal.js';
@@ -57,15 +57,15 @@ import type { EscalationController } from '../providers/escalationController.js'
 import type { ChatTurnRequest } from '@migrapilot/shared-types';
 import { StubProvider, type ProviderAdapter } from '../../providers/providerRegistry.js';
 import { OpenAiCompatProvider, classifyProviderFailure, type ProviderFailure } from '../../providers/openAiCompatProvider.js';
-import { executeToolCore, type ToolExecDeps } from '../toolExecutor.js';
-import { newCorrelationId, makeStageLogger, jsonLineSink, type StageLogger } from '../correlation.js';
+import { executeToolCore, type ToolExecDeps } from '../tools/toolExecutor.js';
+import { newCorrelationId, makeStageLogger, jsonLineSink, type StageLogger } from '../observability/correlation.js';
 import { runEngineerTask, type EngineerToolInfo } from './engineerRuntime.js';
-import { changesetProposals } from '../capabilityRegistry.js';
-import { telemetryHub } from '../telemetryHub.js';
-import { auditStore, auditHash } from '../auditLog.js';
-import { incidentManager } from '../incidents.js';
-import { sanitizeError } from '../redaction.js';
-import { recoveryManager, RecoveryError } from '../recovery.js';
+import { changesetProposals } from '../models/capabilityRegistry.js';
+import { telemetryHub } from '../observability/telemetryHub.js';
+import { auditStore, auditHash } from '../observability/auditLog.js';
+import { incidentManager } from '../observability/incidents.js';
+import { sanitizeError } from '../observability/redaction.js';
+import { recoveryManager, RecoveryError } from '../recovery/recovery.js';
 import { nodeChangesetFs } from '../../tools/changesetFs.js';
 import { contractCompatible, WORKSPACE_TOOL_CONTRACT_VERSION } from '@migrapilot/workspace-tools';
 import {
@@ -74,7 +74,7 @@ import {
   registerDelegate,
   unregisterDelegate,
   delegateFor,
-} from '../workspaceDelegation.js';
+} from '../workspace/workspaceDelegation.js';
 import { planTurn } from '@migrapilot/shared-types/turn-intent';
 import { AdmissionGate } from '../admission/index.js';
 import type { TurnIntent as TurnDecisionIntent } from './turnDecision.js';

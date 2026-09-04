@@ -18,11 +18,11 @@
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { ChatAttachment, ChatTurnRequest, RetrieveRequest } from '@migrapilot/shared-types';
-import type { BrainEnv } from '../config/env.js';
-import type { ProviderAdapter } from '../providers/providerRegistry.js';
-import { StubProvider } from '../providers/providerRegistry.js';
-import { OpenAiCompatProvider } from '../providers/openAiCompatProvider.js';
-import { retrieveContext } from '../retrieval/retrieve.js';
+import type { BrainEnv } from '../../config/env.js';
+import type { ProviderAdapter } from '../../providers/providerRegistry.js';
+import { StubProvider } from '../../providers/providerRegistry.js';
+import { OpenAiCompatProvider } from '../../providers/openAiCompatProvider.js';
+import { retrieveContext } from '../../retrieval/retrieve.js';
 import {
   DEFAULT_MIN_APPROVED_SCORE,
   decideGrounding,
@@ -31,23 +31,23 @@ import {
   refusalMessage,
   type GroundingDecision,
   type GroundingMode,
-} from './grounding/groundingDecision.js';
-import { ModelRegistry, type ModelDescriptor, type ProviderSource } from './modelRegistry.js';
-import { selectModel, tierFromHints, type RouteSpec } from './capabilityRouter.js';
-import { selectLocalCoding, type LocalRoutingDeps } from './providers/localCodingRouter.js';
-import { resolveEffectivePolicy } from './providers/executionPolicy.js';
-import type { EscalationController } from './providers/escalationController.js';
-import { QualificationStore } from './qualificationStore.js';
-import { ConversationStore, PersistenceUnavailableError, type Scope } from './memory/conversationStore.js';
-import { buildContext, type ContextDiagnostics } from './memory/contextBuilder.js';
-import { redactSecrets } from './memory/redaction.js';
-import { scopeFrom } from './memory/memoryRoutes.js';
-import { engineCorrelationId } from './toolRoutes.js';
-import { BrainTurnTrace } from './turnTrace.js';
+} from '../grounding/groundingDecision.js';
+import { ModelRegistry, type ModelDescriptor, type ProviderSource } from '../models/modelRegistry.js';
+import { selectModel, tierFromHints, type RouteSpec } from '../models/capabilityRouter.js';
+import { selectLocalCoding, type LocalRoutingDeps } from '../providers/localCodingRouter.js';
+import { resolveEffectivePolicy } from '../providers/executionPolicy.js';
+import type { EscalationController } from '../providers/escalationController.js';
+import { QualificationStore } from '../models/qualificationStore.js';
+import { ConversationStore, PersistenceUnavailableError, type Scope } from '../memory/conversationStore.js';
+import { buildContext, type ContextDiagnostics } from '../memory/contextBuilder.js';
+import { redactSecrets } from '../memory/redaction.js';
+import { scopeFrom } from '../memory/memoryRoutes.js';
+import { engineCorrelationId } from '../tools/toolRoutes.js';
+import { BrainTurnTrace } from '../observability/turnTrace.js';
 
-import { DEFAULT_STUDIO_CONFIG, generateImage, type GenerationStage } from './media/studioImage.js';
-import { describeImageRequest, shapeImagePrompt } from './media/imagePrompt.js';
-import { classifyImageTurn } from './media/generationIntent.js';
+import { DEFAULT_STUDIO_CONFIG, generateImage, type GenerationStage } from '../media/studioImage.js';
+import { describeImageRequest, shapeImagePrompt } from '../media/imagePrompt.js';
+import { classifyImageTurn } from '../media/generationIntent.js';
 
 /**
  * Is there an image editor behind a `transform` turn?
@@ -59,14 +59,14 @@ import { classifyImageTurn } from './media/generationIntent.js';
 function imageEditingAvailable(): boolean {
   return false;
 }
-import { renderTextGlyph } from './media/glyphRender.js';
-import type { IndexService } from './rag/indexService.js';
-import { auditStore } from './auditLog.js';
-import { gateVisionTurn, visionCapabilitySnapshot, approvedByCapability, type VisionGateDeps } from './media/visionGate.js';
-import { resolveFamiliesForSurface, resolveFamily } from './modelFamilyResolver.js';
-import { decideOrchestration } from './orchestration/decide.js';
+import { renderTextGlyph } from '../media/glyphRender.js';
+import type { IndexService } from '../rag/indexService.js';
+import { auditStore } from '../observability/auditLog.js';
+import { gateVisionTurn, visionCapabilitySnapshot, approvedByCapability, type VisionGateDeps } from '../media/visionGate.js';
+import { resolveFamiliesForSurface, resolveFamily } from '../models/modelFamilyResolver.js';
+import { decideOrchestration } from '../orchestration/decide.js';
 import type { OrchestrationRequest } from '@migrapilot/shared-types/orchestration-decision';
-import { MEASURED_GRANTS } from './capability/capabilityGrants.js';
+import { MEASURED_GRANTS } from '../capability/capabilityGrants.js';
 import {
   familiesForSurface,
   MIGRA_MODEL_CATALOG_REVISION,
@@ -74,8 +74,8 @@ import {
   type MigraProductSurface,
   type MigraModelFamilyId,
 } from '@migrapilot/shared-types/model-families';
-import { classifyProviderFailure } from './providerFailure.js';
-import { AdmissionGate, isModelResident, type AdmissionDecision } from './admission/index.js';
+import { classifyProviderFailure } from '../observability/providerFailure.js';
+import { AdmissionGate, isModelResident, type AdmissionDecision } from '../admission/index.js';
 
 interface AiChatMessage {
   role: 'system' | 'user' | 'assistant';

@@ -21,7 +21,7 @@ import {
   DEFAULT_AGENT_RUN_JOURNAL_CONFIG,
   readDomainPayload,
   serializeDomainPayload,
-} from '../src/engine/agentRunJournal.js';
+} from '../src/engine/agents/agentRunJournal.js';
 import { isLegalChildTransition, type DurableAgentRun } from '../src/engine/persistence/types.js';
 import {
   CODING_DOMAIN_KIND,

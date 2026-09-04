@@ -24,7 +24,7 @@ import {
   type ProposeChangesetResponse,
   type ApplyChangesetResponse,
 } from '@migrapilot/protocol';
-import { StoreHealth, shortId, safeSink, NOOP_TELEMETRY, type TelemetrySink, type StoreHealthSnapshot } from '../engine/storeTelemetry.js';
+import { StoreHealth, shortId, safeSink, NOOP_TELEMETRY, type TelemetrySink, type StoreHealthSnapshot } from '../engine/observability/storeTelemetry.js';
 
 // Proposal-size guardrails (owner threat checklist). A proposal exceeding any of
 // these is refused at propose time — before it can be stored or approved.

@@ -6,10 +6,10 @@ import { test } from 'node:test';
 import { mkdtempSync, writeFileSync, existsSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
-import { RecoveryManager, RecoveryError, type ReverseEntry } from '../src/engine/recovery.js';
-import { IncidentManager, LocalAlertSink } from '../src/engine/incidents.js';
+import { RecoveryManager, RecoveryError, type ReverseEntry } from '../src/engine/recovery/recovery.js';
+import { IncidentManager, LocalAlertSink } from '../src/engine/observability/incidents.js';
 import { nodeChangesetFs } from '../src/tools/changesetFs.js';
-import { auditStore } from '../src/engine/auditLog.js';
+import { auditStore } from '../src/engine/observability/auditLog.js';
 
 const fs = nodeChangesetFs();
 

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { ModelRegistry, parseParamSize, tierFor } from '../src/engine/modelRegistry.js';
-import { selectModel, tierFromHints } from '../src/engine/capabilityRouter.js';
+import { ModelRegistry, parseParamSize, tierFor } from '../src/engine/models/modelRegistry.js';
+import { selectModel, tierFromHints } from '../src/engine/models/capabilityRouter.js';
 
 const TAGS_FIXTURE = {
   models: [

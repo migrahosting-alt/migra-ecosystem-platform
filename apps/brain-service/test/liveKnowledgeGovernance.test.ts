@@ -379,9 +379,9 @@ test('freshness is per source class and configurable', () => {
 test('repository mode and live mode never imply one another', async (t) => {
   const Fastify = (await import('fastify')).default;
   const { registerEngineerRoutes } = await import('../src/engine/engineer/engineerRoutes.js');
-  const { registerToolExecutionRoutes } = await import('../src/engine/toolRoutes.js');
-  const { ModelRegistry } = await import('../src/engine/modelRegistry.js');
-  const { auditStore } = await import('../src/engine/auditLog.js');
+  const { registerToolExecutionRoutes } = await import('../src/engine/tools/toolRoutes.js');
+  const { ModelRegistry } = await import('../src/engine/models/modelRegistry.js');
+  const { auditStore } = await import('../src/engine/observability/auditLog.js');
   const { mkdtempSync } = await import('node:fs');
   const { tmpdir } = await import('node:os');
 
@@ -446,9 +446,9 @@ test('repository mode and live mode never imply one another', async (t) => {
 test('a request with no live field is recorded as off on the real route', async (t) => {
   const Fastify = (await import('fastify')).default;
   const { registerEngineerRoutes } = await import('../src/engine/engineer/engineerRoutes.js');
-  const { registerToolExecutionRoutes } = await import('../src/engine/toolRoutes.js');
-  const { ModelRegistry } = await import('../src/engine/modelRegistry.js');
-  const { auditStore } = await import('../src/engine/auditLog.js');
+  const { registerToolExecutionRoutes } = await import('../src/engine/tools/toolRoutes.js');
+  const { ModelRegistry } = await import('../src/engine/models/modelRegistry.js');
+  const { auditStore } = await import('../src/engine/observability/auditLog.js');
   const { mkdtempSync } = await import('node:fs');
   const { tmpdir } = await import('node:os');
 

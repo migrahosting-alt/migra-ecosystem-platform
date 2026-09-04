@@ -8,7 +8,7 @@
 // © MigraTeck LLC.
 
 import { randomUUID } from 'node:crypto';
-import { redactString } from '../../redaction.js';
+import { redactString } from '../../observability/redaction.js';
 
 export type ExecutionMode = 'engineer' | 'chat' | 'escalation';
 export type LocalOrCloud = 'local' | 'cloud';

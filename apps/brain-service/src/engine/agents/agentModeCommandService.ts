@@ -9,10 +9,10 @@ import {
   type AgentModeRecipeId,
   type AgentModeState,
 } from '@migrapilot/protocol';
-import { auditStore, auditHash } from './auditLog.js';
-import { redactCommandOutput } from './redaction.js';
-import type { ToolExecDeps } from './toolExecutor.js';
-import { ApprovalCapacityError, hashInput } from './toolApprovalStore.js';
+import { auditStore, auditHash } from '../observability/auditLog.js';
+import { redactCommandOutput } from '../observability/redaction.js';
+import type { ToolExecDeps } from '../tools/toolExecutor.js';
+import { ApprovalCapacityError, hashInput } from '../tools/toolApprovalStore.js';
 import {
   AgentRecipePolicyError,
   AgentRecipeProcessManager,
@@ -25,8 +25,8 @@ import {
   type AgentRecipeResolverLike,
 } from './agentRecipe.js';
 import { AgentRunJournal, AGENT_TERMINAL_STATES, buildAgentRunJournalConfig, durableRunToView } from './agentRunJournal.js';
-import type { AgentRunJournalPersistence, AgentRunReconciliationClaim, DurableAgentRun, DurableAgentRunEvent } from './persistence/types.js';
-import { recoveryProductionReasonContracts, validateRecoverySourceProvenance } from './recoverySourceProvenance.js';
+import type { AgentRunJournalPersistence, AgentRunReconciliationClaim, DurableAgentRun, DurableAgentRunEvent } from '../persistence/types.js';
+import { recoveryProductionReasonContracts, validateRecoverySourceProvenance } from '../recovery/recoverySourceProvenance.js';
 
 const TERMINAL = new Set<AgentModeState>(['COMPLETED', 'REJECTED', 'EXPIRED', 'STALE', 'FAILED', 'CANCELLED']);
 const MAX_RUNS = 200;

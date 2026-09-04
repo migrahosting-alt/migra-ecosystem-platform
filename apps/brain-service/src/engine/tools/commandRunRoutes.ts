@@ -33,7 +33,7 @@
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { ToolErrorSchema } from '@migrapilot/protocol';
-import { CommandPolicyError, commandRun } from '../tools/commandRun.js';
+import { CommandPolicyError, commandRun } from '../../tools/commandRun.js';
 
 /**
  * A POLICY REFUSAL is not an internal error.

@@ -7,7 +7,7 @@
 //
 // © MigraTeck LLC.
 
-import type { ModelDescriptor, ModelTier } from '../modelRegistry.js';
+import type { ModelDescriptor, ModelTier } from '../models/modelRegistry.js';
 import type { ProviderKind } from './types.js';
 import type { FleetProvider, FleetSnapshot } from './fleetRegistry.js';
 

@@ -29,7 +29,7 @@
 
 import { verifyAnswer, type VerifiedAnswer } from '../grounding/claimVerifier.js';
 import { EvidenceLedger, normalizePath, spanHeader, spanUnits, type EvidenceSource } from '../grounding/evidenceLedger.js';
-import type { AnswerTimeline, CallPhase, RunPhase } from '../answerTimings.js';
+import type { AnswerTimeline, CallPhase, RunPhase } from '../observability/answerTimings.js';
 import { BudgetLedger, type EvidenceBudget, type BudgetSpend, type StopReason } from './evidenceBudget.js';
 import { aboveRelevanceFloor, importNeighbours, rankCandidates, type RankedCandidate } from './candidateRanking.js';
 import { describeCandidates, type RepoMap, type RepoMapEntry } from './repoMap.js';

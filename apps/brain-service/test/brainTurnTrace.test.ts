@@ -9,7 +9,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { BrainTurnTrace } from '../src/engine/turnTrace.js';
+import { BrainTurnTrace } from '../src/engine/observability/turnTrace.js';
 
 const busy = (ms: number): void => {
   const until = performance.now() + ms;

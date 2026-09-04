@@ -9,10 +9,10 @@ import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import { commandRun, commandAllowlist, commandRunEnabled, previewCommandRun } from '../src/tools/commandRun.js';
 import { runEngineerTask, parseStep, type EngineerEvent, type EngineerToolInfo } from '../src/engine/engineer/engineerRuntime.js';
-import { CapabilityRegistry } from '../src/engine/capabilityRegistry.js';
-import { ToolApprovalStore } from '../src/engine/toolApprovalStore.js';
-import { ToolAudit } from '../src/engine/toolAudit.js';
-import { executeToolCore } from '../src/engine/toolExecutor.js';
+import { CapabilityRegistry } from '../src/engine/models/capabilityRegistry.js';
+import { ToolApprovalStore } from '../src/engine/tools/toolApprovalStore.js';
+import { ToolAudit } from '../src/engine/tools/toolAudit.js';
+import { executeToolCore } from '../src/engine/tools/toolExecutor.js';
 
 function ws(): string {
   const root = mkdtempSync(path.join(tmpdir(), 'migra-engineer-'));

@@ -18,8 +18,8 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { AgentRegistry } from './agentRegistry.js';
 import { AgentRunStore } from './agentRunStore.js';
 import { AgentService, toRunView } from './agentRuntime.js';
-import type { ToolExecDeps } from './toolExecutor.js';
-import { engineCorrelationId } from './toolRoutes.js';
+import type { ToolExecDeps } from '../tools/toolExecutor.js';
+import { engineCorrelationId } from '../tools/toolRoutes.js';
 
 export interface AgentRoutesDeps {
   toolDeps: ToolExecDeps;

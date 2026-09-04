@@ -13,8 +13,8 @@ import path from 'node:path';
 import { realpathSync } from 'node:fs';
 import { test } from 'node:test';
 import Fastify, { type FastifyInstance } from 'fastify';
-import { AgentRunJournal, MemoryAgentRunJournalPersistence, DEFAULT_AGENT_RUN_JOURNAL_CONFIG } from '../src/engine/agentRunJournal.js';
-import { auditStore } from '../src/engine/auditLog.js';
+import { AgentRunJournal, MemoryAgentRunJournalPersistence, DEFAULT_AGENT_RUN_JOURNAL_CONFIG } from '../src/engine/agents/agentRunJournal.js';
+import { auditStore } from '../src/engine/observability/auditLog.js';
 import { registerCodingRunRoutes } from '../src/engine/coding/codingRunRoutes.js';
 import {
   CodingRunService,

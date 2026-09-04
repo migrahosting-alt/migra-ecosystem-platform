@@ -10,10 +10,10 @@
 // © MigraTeck LLC.
 
 import { randomUUID } from 'node:crypto';
-import { auditStore, auditHash } from './auditLog.js';
-import { newCorrelationId } from './correlation.js';
-import { incidentManager, type IncidentManager } from './incidents.js';
-import { ChangesetProposalStore, proposeChangeset, applyChangeset, type ChangesetFs } from '../tools/changeset.js';
+import { auditStore, auditHash } from '../observability/auditLog.js';
+import { newCorrelationId } from '../observability/correlation.js';
+import { incidentManager, type IncidentManager } from '../observability/incidents.js';
+import { ChangesetProposalStore, proposeChangeset, applyChangeset, type ChangesetFs } from '../../tools/changeset.js';
 import type { ChangeOp, ChangesetRequest } from '@migrapilot/protocol';
 
 export interface ReverseEntry {

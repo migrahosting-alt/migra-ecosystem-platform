@@ -10,7 +10,7 @@
 // © MigraTeck LLC.
 
 import { randomUUID } from 'node:crypto';
-import { auditStore } from '../../auditLog.js';
+import { auditStore } from '../../observability/auditLog.js';
 import type { CostEstimate } from './costEstimation.js';
 
 export type BudgetScopeKind = 'per_request' | 'daily' | 'monthly' | 'provider' | 'model' | 'workspace_or_tenant';

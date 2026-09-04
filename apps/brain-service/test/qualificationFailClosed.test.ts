@@ -16,7 +16,7 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { QualificationStore } from '../src/engine/qualificationStore.js';
+import { QualificationStore } from '../src/engine/models/qualificationStore.js';
 
 const dir = mkdtempSync(join(tmpdir(), 'qual-'));
 

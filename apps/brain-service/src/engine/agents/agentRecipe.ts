@@ -5,8 +5,8 @@ import { access, chmod, cp, lstat, mkdir, readFile, readdir, readlink, realpath,
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { AgentModeCommandResult, AgentModeRecipeId } from '@migrapilot/protocol';
-import { redactCommandOutput } from './redaction.js';
-import { hashInput } from './toolApprovalStore.js';
+import { redactCommandOutput } from '../observability/redaction.js';
+import { hashInput } from '../tools/toolApprovalStore.js';
 import {
   materializeGovernedSnapshot,
   planGovernedSnapshot,

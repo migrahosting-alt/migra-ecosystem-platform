@@ -25,8 +25,8 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { z } from 'zod';
 import { randomUUID } from 'node:crypto';
-import { workspaceSearch } from '../tools/workspaceSearch.js';
-import { fileReadRange } from '../tools/fileReadRange.js';
+import { workspaceSearch } from '../../tools/workspaceSearch.js';
+import { fileReadRange } from '../../tools/fileReadRange.js';
 
 const execFileAsync = promisify(execFile);
 const GIT_MAX_BUFFER = 64 * 1024 * 1024;

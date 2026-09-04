@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { QualificationStore } from '../src/engine/qualificationStore.js';
-import { ModelRegistry, type ModelDescriptor } from '../src/engine/modelRegistry.js';
-import { selectModel } from '../src/engine/capabilityRouter.js';
+import { QualificationStore } from '../src/engine/models/qualificationStore.js';
+import { ModelRegistry, type ModelDescriptor } from '../src/engine/models/modelRegistry.js';
+import { selectModel } from '../src/engine/models/capabilityRouter.js';
 
 function model(id: string, tier: ModelDescriptor['tier'], caps: Partial<ModelDescriptor['capabilities']> = {}): ModelDescriptor {
   return {

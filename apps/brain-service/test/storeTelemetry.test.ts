@@ -10,8 +10,8 @@ import * as path from 'node:path';
 import { ChangesetProposalStore, proposeChangeset, applyChangeset } from '../src/tools/changeset.js';
 import type { ChangesetRequest } from '@migrapilot/protocol';
 import { nodeChangesetFs } from '../src/tools/changesetFs.js';
-import { ToolApprovalStore, hashInput } from '../src/engine/toolApprovalStore.js';
-import { StoreHealth, type TelemetryEvent } from '../src/engine/storeTelemetry.js';
+import { ToolApprovalStore, hashInput } from '../src/engine/tools/toolApprovalStore.js';
+import { StoreHealth, type TelemetryEvent } from '../src/engine/observability/storeTelemetry.js';
 
 const fs = nodeChangesetFs();
 function ws(seed: Record<string, string> = {}): string {

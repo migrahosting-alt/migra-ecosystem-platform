@@ -9,9 +9,9 @@
 
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { randomUUID } from 'node:crypto';
-import { agenticAnswer, streamAgentic } from './agenticAnswer.js';
-import { describeTimings } from './answerTimings.js';
-import { DEFAULT_EVIDENCE_BUDGET, type EvidenceBudget } from './planning/evidenceBudget.js';
+import { agenticAnswer, streamAgentic } from '../agents/agenticAnswer.js';
+import { describeTimings } from '../observability/answerTimings.js';
+import { DEFAULT_EVIDENCE_BUDGET, type EvidenceBudget } from '../planning/evidenceBudget.js';
 
 /**
  * The tier vocabulary of THIS route.

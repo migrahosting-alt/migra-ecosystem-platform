@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { classifyProviderFailure } from '../src/engine/providerFailure.js';
+import { classifyProviderFailure } from '../src/engine/observability/providerFailure.js';
 
 /*
  * The exact string Ollama returned when handed a 133-byte PNG, wrapped the way

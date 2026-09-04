@@ -12,8 +12,8 @@ import { after, before, test } from 'node:test';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { PostgresConnection } from '../src/engine/persistence/postgres/pool.js';
 import { PostgresDurableStore } from '../src/engine/persistence/postgresStore.js';
-import { registerAnonymousQuotaRoutes } from '../src/engine/anonymousQuotaRoutes.js';
-import { anonymousLimitsFromEnv } from '../src/engine/anonymousQuotaDeps.js';
+import { registerAnonymousQuotaRoutes } from '../src/engine/gateway/anonymousQuotaRoutes.js';
+import { anonymousLimitsFromEnv } from '../src/engine/gateway/anonymousQuotaDeps.js';
 import { installJsonBodyParser } from '../src/http/jsonBodyParser.js';
 import {
   appRoleUrl, postgresTestSkipReason, startDisposablePostgres, type DisposablePostgres,

@@ -22,8 +22,8 @@ import {
   type RunRecord,
   type RunState,
 } from './agentRunStore.js';
-import { executeToolCore, type ToolExecDeps } from './toolExecutor.js';
-import type { PilotRuntimeClient, PilotRunOutcome } from './pilot/pilotRuntimeClient.js';
+import { executeToolCore, type ToolExecDeps } from '../tools/toolExecutor.js';
+import type { PilotRuntimeClient, PilotRunOutcome } from '../pilot/pilotRuntimeClient.js';
 
 class AgentStepError extends Error {
   constructor(public readonly code: string) {

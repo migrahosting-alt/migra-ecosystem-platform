@@ -72,8 +72,8 @@ async function bootRoute(
 }> {
   const Fastify = (await import('fastify')).default;
   const { registerEngineerRoutes } = await import('../src/engine/engineer/engineerRoutes.js');
-  const { registerToolExecutionRoutes } = await import('../src/engine/toolRoutes.js');
-  const { ModelRegistry } = await import('../src/engine/modelRegistry.js');
+  const { registerToolExecutionRoutes } = await import('../src/engine/tools/toolRoutes.js');
+  const { ModelRegistry } = await import('../src/engine/models/modelRegistry.js');
 
   // Counts every model invocation, so "no model call" can be asserted rather than assumed.
   modelCalls.length = 0;
@@ -254,7 +254,7 @@ test('both provenance frames are emitted, separately, for one turn', async (t) =
 // ── audit ────────────────────────────────────────────────────────────────────
 
 test('the durable audit for a route turn carries metadata only', async (t) => {
-  const { auditStore } = await import('../src/engine/auditLog.js');
+  const { auditStore } = await import('../src/engine/observability/auditLog.js');
   const { impl } = recordingFetch({ ...NPM_DOC, description: 'BODY_SENTINEL_TEXT' });
   const registry = new LiveConnectorRegistry().registerAuthoritative([createNpmConnector(connectorDeps(impl))]);
   const route = await bootRoute(t, registry);
@@ -282,7 +282,7 @@ test('the capability frame is emitted and audited for every turn', async (t) => 
   const { impl } = recordingFetch();
   const registry = new LiveConnectorRegistry().registerAuthoritative([createNpmConnector(connectorDeps(impl))]);
   const route = await bootRoute(t, registry);
-  const { auditStore } = await import('../src/engine/auditLog.js');
+  const { auditStore } = await import('../src/engine/observability/auditLog.js');
 
   const { events, correlationId } = await route.turn({ taskClass: 'code-review' });
   const frame = events.find((e) => e.event === 'capability')!.data as {
@@ -375,7 +375,7 @@ test('a DENIED class makes zero model calls and exposes zero tools', async (t) =
   const { impl } = recordingFetch();
   const registry = new LiveConnectorRegistry().registerAuthoritative([createNpmConnector(connectorDeps(impl))]);
   const route = await bootRoute(t, registry);
-  const { auditStore } = await import('../src/engine/auditLog.js');
+  const { auditStore } = await import('../src/engine/observability/auditLog.js');
 
   const { events, correlationId } = await route.turn({ taskClass: 'security-review' });
   const order = events.map((e) => e.event);
@@ -424,7 +424,7 @@ test('the capability audit records authority, tiers, basis and the benchmark ref
   const { impl } = recordingFetch();
   const registry = new LiveConnectorRegistry().registerAuthoritative([createNpmConnector(connectorDeps(impl))]);
   const route = await bootRoute(t, registry);
-  const { auditStore } = await import('../src/engine/auditLog.js');
+  const { auditStore } = await import('../src/engine/observability/auditLog.js');
 
   const { correlationId } = await route.turn({
     taskClass: 'patch-planning',
@@ -456,7 +456,7 @@ test('a request cannot spoof the operator principal through the route', async (t
   const { impl } = recordingFetch();
   const registry = new LiveConnectorRegistry().registerAuthoritative([createNpmConnector(connectorDeps(impl))]);
   const route = await bootRoute(t, registry);
-  const { auditStore } = await import('../src/engine/auditLog.js');
+  const { auditStore } = await import('../src/engine/observability/auditLog.js');
 
   const { correlationId } = await route.turn({
     taskClass: 'typed-implementation',

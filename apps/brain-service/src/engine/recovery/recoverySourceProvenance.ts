@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { AgentModeRecoveryClass, AgentModeState } from '@migrapilot/protocol';
-import type { DurableAgentRun, DurableAgentRunEvent, DurableAgentRunState } from './persistence/types.js';
+import type { DurableAgentRun, DurableAgentRunEvent, DurableAgentRunState } from '../persistence/types.js';
 
 export type RecoverySourceProvenanceCode =
   | 'TRUSTED'

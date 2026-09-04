@@ -23,7 +23,7 @@ import {
   AUDITED_PREFERENCE_KEYS,
   MAX_CUSTOM_INSTRUCTIONS,
 } from '@migrapilot/shared-types/user-preferences';
-import type { PostgresDurableStore } from './persistence/postgresStore.js';
+import type { PostgresDurableStore } from '../persistence/postgresStore.js';
 
 export interface PreferencesDeps {
   /** Undefined when durable persistence is unavailable — never a silent fake. */

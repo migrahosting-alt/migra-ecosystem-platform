@@ -6,15 +6,15 @@ import Fastify from 'fastify';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
-import { registerToolExecutionRoutes } from '../src/engine/toolRoutes.js';
+import { registerToolExecutionRoutes } from '../src/engine/tools/toolRoutes.js';
 import { registerEngineerRoutes } from '../src/engine/engineer/engineerRoutes.js';
-import { ModelRegistry } from '../src/engine/modelRegistry.js';
+import { ModelRegistry } from '../src/engine/models/modelRegistry.js';
 import { ChangesetProposalStore, proposeChangeset, applyChangeset } from '../src/tools/changeset.js';
 import { nodeChangesetFs } from '../src/tools/changesetFs.js';
-import { ToolApprovalStore, hashInput } from '../src/engine/toolApprovalStore.js';
-import { CapabilityRegistry } from '../src/engine/capabilityRegistry.js';
-import { ToolAudit } from '../src/engine/toolAudit.js';
-import { executeToolCore } from '../src/engine/toolExecutor.js';
+import { ToolApprovalStore, hashInput } from '../src/engine/tools/toolApprovalStore.js';
+import { CapabilityRegistry } from '../src/engine/models/capabilityRegistry.js';
+import { ToolAudit } from '../src/engine/tools/toolAudit.js';
+import { executeToolCore } from '../src/engine/tools/toolExecutor.js';
 
 const fs = nodeChangesetFs();
 function ws(seed: Record<string, string> = {}): string {

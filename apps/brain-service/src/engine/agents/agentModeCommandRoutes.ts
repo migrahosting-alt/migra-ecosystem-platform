@@ -12,8 +12,8 @@ import {
   type AgentModeRunHistoryList,
   type AgentModeRunRecoveryStatus,
 } from '@migrapilot/protocol';
-import type { ToolExecDeps } from './toolExecutor.js';
-import { engineCorrelationId } from './toolRoutes.js';
+import type { ToolExecDeps } from '../tools/toolExecutor.js';
+import { engineCorrelationId } from '../tools/toolRoutes.js';
 import { AgentActivationAuthority, AgentActivationError, AGENT_CAPABILITY_HEADER } from './agentActivation.js';
 import { AgentModeCommandService, type AgentModeActionResult, type AgentModeRequestContext } from './agentModeCommandService.js';
 import { AgentRunHistoryService, type AgentRunHistoryResult } from './agentRunHistory.js';

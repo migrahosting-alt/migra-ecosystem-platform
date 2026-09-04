@@ -23,7 +23,7 @@ import type {
 } from './types.js';
 import { DURABLE_CHILD_TERMINAL_STATES, isLegalChildTransition } from './types.js';
 import type { Conversation, Message, Summary, MemoryItem } from '../memory/conversationStore.js';
-import { validateRecoverySourceProvenance } from '../recoverySourceProvenance.js';
+import { validateRecoverySourceProvenance } from '../recovery/recoverySourceProvenance.js';
 
 export const SCHEMA_VERSION = 8;
 

@@ -17,7 +17,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { EvidenceLedger } from '../src/engine/grounding/evidenceLedger.js';
-import { AnswerTimeline } from '../src/engine/answerTimings.js';
+import { AnswerTimeline } from '../src/engine/observability/answerTimings.js';
 import { buildRepoMap, clearRepoMapCache, classifyRole, describeCandidates } from '../src/engine/planning/repoMap.js';
 import { rankCandidates, importNeighbours, aboveRelevanceFloor, questionTerms } from '../src/engine/planning/candidateRanking.js';
 import { resolveBudget, DEFAULT_EVIDENCE_BUDGET, MIN_BUDGET } from '../src/engine/planning/evidenceBudget.js';

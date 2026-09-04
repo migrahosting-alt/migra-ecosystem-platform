@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import Fastify, { type FastifyInstance } from 'fastify';
-import { CapabilityRegistry } from '../src/engine/capabilityRegistry.js';
-import { ToolApprovalStore, hashInput } from '../src/engine/toolApprovalStore.js';
-import { ToolAudit } from '../src/engine/toolAudit.js';
-import { registerToolExecutionRoutes } from '../src/engine/toolRoutes.js';
+import { CapabilityRegistry } from '../src/engine/models/capabilityRegistry.js';
+import { ToolApprovalStore, hashInput } from '../src/engine/tools/toolApprovalStore.js';
+import { ToolAudit } from '../src/engine/tools/toolAudit.js';
+import { registerToolExecutionRoutes } from '../src/engine/tools/toolRoutes.js';
 
 function buildApp(overrides?: {
   approvals?: ToolApprovalStore;

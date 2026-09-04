@@ -32,24 +32,24 @@ import {
   GitHistoryRequestSchema,
   GitBlameRequestSchema,
 } from '@migrapilot/protocol';
-import { proposeChangeset, applyChangeset, previewStoredChangeset, ChangesetProposalStore, ChangesetError } from '../tools/changeset.js';
-import { nodeChangesetFs } from '../tools/changesetFs.js';
-import { telemetryHub } from './telemetryHub.js';
-import { auditStore, auditHash } from './auditLog.js';
-import { incidentManager } from './incidents.js';
-import { recoveryManager } from './recovery.js';
-import { workspaceSearch } from '../tools/workspaceSearch.js';
-import { gitOverview, gitHistory, gitBlame } from '../tools/gitInsight.js';
-import { workspaceList, WorkspaceListRequestSchema } from '../tools/workspaceList.js';
-import { fileRead, FileReadRequestSchema } from '../tools/fileRead.js';
-import { workspaceFind, WorkspaceFindRequestSchema } from '../tools/workspaceFind.js';
-import { fileReadRange } from '../tools/fileReadRange.js';
-import { fileReadSymbol } from '../tools/fileReadSymbol.js';
-import { gitStatus } from '../tools/gitStatus.js';
-import { gitDiff } from '../tools/gitDiff.js';
-import { editPreview } from '../tools/editPreview.js';
-import { editApply } from '../tools/editApply.js';
-import { diagnosticsGet } from '../tools/diagnosticsGet.js';
+import { proposeChangeset, applyChangeset, previewStoredChangeset, ChangesetProposalStore, ChangesetError } from '../../tools/changeset.js';
+import { nodeChangesetFs } from '../../tools/changesetFs.js';
+import { telemetryHub } from '../observability/telemetryHub.js';
+import { auditStore, auditHash } from '../observability/auditLog.js';
+import { incidentManager } from '../observability/incidents.js';
+import { recoveryManager } from '../recovery/recovery.js';
+import { workspaceSearch } from '../../tools/workspaceSearch.js';
+import { gitOverview, gitHistory, gitBlame } from '../../tools/gitInsight.js';
+import { workspaceList, WorkspaceListRequestSchema } from '../../tools/workspaceList.js';
+import { fileRead, FileReadRequestSchema } from '../../tools/fileRead.js';
+import { workspaceFind, WorkspaceFindRequestSchema } from '../../tools/workspaceFind.js';
+import { fileReadRange } from '../../tools/fileReadRange.js';
+import { fileReadSymbol } from '../../tools/fileReadSymbol.js';
+import { gitStatus } from '../../tools/gitStatus.js';
+import { gitDiff } from '../../tools/gitDiff.js';
+import { editPreview } from '../../tools/editPreview.js';
+import { editApply } from '../../tools/editApply.js';
+import { diagnosticsGet } from '../../tools/diagnosticsGet.js';
 
 export type CapabilityKind = 'tool' | 'agent' | 'model' | 'deployment' | 'workflow';
 export type CapabilityCategory =

@@ -8,7 +8,7 @@
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { classifyOutcome, describeOutcome, isSubstantive } from '../src/engine/operationOutcome.js';
+import { classifyOutcome, describeOutcome, isSubstantive } from '../src/engine/observability/operationOutcome.js';
 import { assessProgress, failureSignature } from '../src/engine/coding/verificationProgress.js';
 import type { ValidationRecord } from '../src/engine/coding/validationRun.js';
 

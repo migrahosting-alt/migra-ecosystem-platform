@@ -4,13 +4,13 @@ import { closeSync, existsSync, ftruncateSync, lstatSync, mkdirSync, mkdtempSync
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
-import { AgentRecipePolicyError, AgentRecipeResolver, AGENT_SNAPSHOT_TEMP_PREFIX, scavengeStaleAgentSnapshots } from '../src/engine/agentRecipe.js';
+import { AgentRecipePolicyError, AgentRecipeResolver, AGENT_SNAPSHOT_TEMP_PREFIX, scavengeStaleAgentSnapshots } from '../src/engine/agents/agentRecipe.js';
 import {
   materializeGovernedSnapshot,
   planGovernedSnapshot,
   SnapshotPlanError,
   type GitPathEnumerator,
-} from '../src/engine/agentSnapshotPlan.js';
+} from '../src/engine/agents/agentSnapshotPlan.js';
 
 const ACTIVATION = 'agentact_snapshot_plan';
 
@@ -216,7 +216,7 @@ test('cancellation before and during preparation removes the snapshot', async ()
   // Abort after enumeration completes but before payloads are copied.
   const midController = new AbortController();
   const enumerateThenAbort: GitPathEnumerator = async (workspace, signal) => {
-    const { enumerateGitPaths } = await import('../src/engine/agentSnapshotPlan.js');
+    const { enumerateGitPaths } = await import('../src/engine/agents/agentSnapshotPlan.js');
     const result = await enumerateGitPaths(workspace, signal);
     midController.abort();
     return result;
@@ -366,11 +366,11 @@ test('startup scavenger reclaims only stale owner-owned snapshot directories', a
 test('a client disconnect aborts server-side snapshot planning and abandons no snapshot', async () => {
   const workspace = makeRepo();
   const { default: Fastify } = await import('fastify');
-  const { AgentActivationAuthority } = await import('../src/engine/agentActivation.js');
-  const { AgentModeCommandService } = await import('../src/engine/agentModeCommandService.js');
-  const { registerAgentModeCommandRoutes } = await import('../src/engine/agentModeCommandRoutes.js');
-  const { registerToolExecutionRoutes } = await import('../src/engine/toolRoutes.js');
-  const { enumerateGitPaths, SnapshotPlanError } = await import('../src/engine/agentSnapshotPlan.js');
+  const { AgentActivationAuthority } = await import('../src/engine/agents/agentActivation.js');
+  const { AgentModeCommandService } = await import('../src/engine/agents/agentModeCommandService.js');
+  const { registerAgentModeCommandRoutes } = await import('../src/engine/agents/agentModeCommandRoutes.js');
+  const { registerToolExecutionRoutes } = await import('../src/engine/tools/toolRoutes.js');
+  const { enumerateGitPaths, SnapshotPlanError } = await import('../src/engine/agents/agentSnapshotPlan.js');
 
   // Enumeration completes, then preparation stalls until the client goes away.
   let sawAbort = false;
@@ -442,8 +442,8 @@ test('a client disconnect aborts server-side snapshot planning and abandons no s
 test('rejecting a proposal releases its snapshot without waiting for shutdown', async () => {
   const workspace = makeRepo();
   const { default: Fastify } = await import('fastify');
-  const { AgentModeCommandService } = await import('../src/engine/agentModeCommandService.js');
-  const { registerToolExecutionRoutes } = await import('../src/engine/toolRoutes.js');
+  const { AgentModeCommandService } = await import('../src/engine/agents/agentModeCommandService.js');
+  const { registerToolExecutionRoutes } = await import('../src/engine/tools/toolRoutes.js');
   const app = Fastify({ logger: false });
   const toolDeps = registerToolExecutionRoutes(app);
   const service = new AgentModeCommandService(toolDeps, undefined, undefined, new AgentRecipeResolver());
@@ -480,8 +480,8 @@ test('rejecting a proposal releases its snapshot without waiting for shutdown', 
 // (9) A proposal the client never received must not remain executable.
 test('a proposal aborted after preparation is released and never becomes executable', async () => {
   const workspace = makeRepo();
-  const { AgentModeCommandService } = await import('../src/engine/agentModeCommandService.js');
-  const { registerToolExecutionRoutes } = await import('../src/engine/toolRoutes.js');
+  const { AgentModeCommandService } = await import('../src/engine/agents/agentModeCommandService.js');
+  const { registerToolExecutionRoutes } = await import('../src/engine/tools/toolRoutes.js');
   const { default: Fastify } = await import('fastify');
   const app = Fastify({ logger: false });
   const toolDeps = registerToolExecutionRoutes(app);

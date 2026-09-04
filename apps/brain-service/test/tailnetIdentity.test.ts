@@ -13,7 +13,7 @@ import {
   readTailnetIdentity,
   decideTailnetAccess,
   IDENTITY_EXEMPT_PATHS,
-} from '../src/engine/tailnetIdentity.js';
+} from '../src/engine/gateway/tailnetIdentity.js';
 
 const USER = {
   'tailscale-user-login': 'migrahosting@gmail.com',

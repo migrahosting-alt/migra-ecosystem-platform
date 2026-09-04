@@ -39,7 +39,7 @@ import { proposeEditScope, approveEditScope } from '../src/engine/coding/editSco
 import { EvidenceLedger } from '../src/engine/grounding/evidenceLedger.js';
 import { makeSpanSource } from '../src/engine/planning/workspaceSpanSource.js';
 import { runValidation } from '../src/engine/coding/validationRun.js';
-import { AgentRunJournal, buildAgentRunJournalConfig } from '../src/engine/agentRunJournal.js';
+import { AgentRunJournal, buildAgentRunJournalConfig } from '../src/engine/agents/agentRunJournal.js';
 import { SqliteDurableStore } from '../src/engine/persistence/sqliteStore.js';
 import { registerCodingRunRoutes } from '../src/engine/coding/codingRunRoutes.js';
 import { CodingRunService } from '../src/engine/coding/codingRunService.js';

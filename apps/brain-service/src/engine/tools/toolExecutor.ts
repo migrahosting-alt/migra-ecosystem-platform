@@ -7,11 +7,11 @@
  * and audit as a direct client call — no bypass boundary.
  */
 
-import { CapabilityRegistry } from './capabilityRegistry.js';
+import { CapabilityRegistry } from '../models/capabilityRegistry.js';
 import { ApprovalCapacityError, ToolApprovalStore, hashInput } from './toolApprovalStore.js';
 import { ToolAudit } from './toolAudit.js';
-import { NOOP_STAGE_LOGGER, type StageLogger } from './correlation.js';
-import { auditStore, type AuditEventType } from './auditLog.js';
+import { NOOP_STAGE_LOGGER, type StageLogger } from '../observability/correlation.js';
+import { auditStore, type AuditEventType } from '../observability/auditLog.js';
 import { classifyToolFailure } from './toolFailureReason.js';
 
 export interface ToolExecInput {

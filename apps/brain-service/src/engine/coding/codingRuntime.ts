@@ -16,8 +16,8 @@
 
 import { realpathSync, statSync } from 'node:fs';
 import { delimiter, isAbsolute } from 'node:path';
-import type { AgentRunJournal } from '../agentRunJournal.js';
-import { readDomainPayload } from '../agentRunJournal.js';
+import type { AgentRunJournal } from '../agents/agentRunJournal.js';
+import { readDomainPayload } from '../agents/agentRunJournal.js';
 import { markInterruptedChildren } from './codingChildren.js';
 import type { DeclaredValidation } from './validationRun.js';
 import { classifyInterruptedExecution, recoverPendingScope, type SpanReader } from './codingRecovery.js';

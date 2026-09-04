@@ -9,7 +9,7 @@ import * as path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { SqliteDurableStore, SCHEMA_VERSION, type AgentRunReproposalFaultPhase } from '../src/engine/persistence/sqliteStore.js';
 import type { DurableAgentRun, DurableAgentRunEvent, DurableAuditEvent, DurableUsageRecord, DurableIncident, AgentRunReproposalInput } from '../src/engine/persistence/types.js';
-import { recoveryEventDigest } from '../src/engine/recoverySourceProvenance.js';
+import { recoveryEventDigest } from '../src/engine/recovery/recoverySourceProvenance.js';
 
 function tmpDb(): string {
   return path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'migraai-opdb-')), 'state.db');

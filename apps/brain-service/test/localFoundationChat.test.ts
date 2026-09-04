@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
 import Fastify, { type FastifyInstance } from 'fastify';
-import { registerAiRoutes } from '../src/engine/aiRoutes.js';
-import { auditStore } from '../src/engine/auditLog.js';
+import { registerAiRoutes } from '../src/engine/chat/aiRoutes.js';
+import { auditStore } from '../src/engine/observability/auditLog.js';
 
 const STUB_ENV = {
   localProvider: 'stub',

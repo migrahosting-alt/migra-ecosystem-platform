@@ -8,7 +8,7 @@
 //
 // © MigraTeck LLC.
 
-import type { ModelDescriptor, ModelRegistry } from '../modelRegistry.js';
+import type { ModelDescriptor, ModelRegistry } from '../models/modelRegistry.js';
 import type { ProviderCapabilities, ProviderHealth, ProviderSummary } from './types.js';
 import { ProviderRegistry } from './providerRegistry.js';
 import { deriveHealth, type ProbeOutcome, type ProviderProbe } from './health.js';

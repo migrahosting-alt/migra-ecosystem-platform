@@ -2,13 +2,13 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import Fastify, { type FastifyInstance } from 'fastify';
 import type { BrainEnv } from '../src/config/env.js';
-import type { ModelDescriptor } from '../src/engine/modelRegistry.js';
+import type { ModelDescriptor } from '../src/engine/models/modelRegistry.js';
 import { ConversationStore, type MemoryPersistence, type Scope } from '../src/engine/memory/conversationStore.js';
 import { redactSecrets, sanitizeForMemory } from '../src/engine/memory/redaction.js';
 import { buildContext } from '../src/engine/memory/contextBuilder.js';
 import { summarizeConversation } from '../src/engine/memory/summarizer.js';
 import { registerMemoryRoutes } from '../src/engine/memory/memoryRoutes.js';
-import { registerAiRoutes } from '../src/engine/aiRoutes.js';
+import { registerAiRoutes } from '../src/engine/chat/aiRoutes.js';
 
 const A: Scope = { owner: 'local', workspace: 'wsA' };
 const B: Scope = { owner: 'local', workspace: 'wsB' };

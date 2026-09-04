@@ -12,7 +12,7 @@
 // © MigraTeck LLC.
 
 import type { ChatTurnRequest } from '@migrapilot/shared-types';
-import { auditStore } from '../auditLog.js';
+import { auditStore } from '../observability/auditLog.js';
 import type { ExecutionPolicyId } from './executionPolicy.js';
 import type { FleetRegistry } from './fleetRegistry.js';
 import { ProviderRegistry } from './providerRegistry.js';

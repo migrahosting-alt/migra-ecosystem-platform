@@ -4,7 +4,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { CloudEscalationExecutor, type CloudProviderFactory } from '../src/engine/providers/cloudEscalationExecutor.js';
-import { auditStore } from '../src/engine/auditLog.js';
+import { auditStore } from '../src/engine/observability/auditLog.js';
 import type { Provider } from '../src/engine/providers/types.js';
 import type { ChatTurnRequest } from '@migrapilot/shared-types';
 

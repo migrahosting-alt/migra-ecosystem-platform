@@ -11,11 +11,11 @@
  * restart. A workspace maps 1:1 to a scope, so it is idempotent to open.
  */
 
-import type { IndexService, Scope } from './rag/indexService.js';
-import type { ConversationStore } from './memory/conversationStore.js';
-import type { AgentRegistry } from './agentRegistry.js';
-import type { WorkspacePersistence, PersistedWorkspace } from './persistence/types.js';
-import type { EngineVersion } from './version.js';
+import type { IndexService, Scope } from '../rag/indexService.js';
+import type { ConversationStore } from '../memory/conversationStore.js';
+import type { AgentRegistry } from '../agents/agentRegistry.js';
+import type { WorkspacePersistence, PersistedWorkspace } from '../persistence/types.js';
+import type { EngineVersion } from '../platform/version.js';
 
 export interface WorkspaceRecord {
   id: string;

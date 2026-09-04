@@ -16,7 +16,7 @@ import {
   registerAnswerRoutes,
   resolveRunner,
   validateAnswerRequest,
-} from '../src/engine/answerRoutes.js';
+} from '../src/engine/chat/answerRoutes.js';
 
 const OPTS = { providerBaseUrl: 'http://127.0.0.1:1/v1', defaultModel: 'local-model', cloudModel: 'gpt-oss:120b-cloud' };
 

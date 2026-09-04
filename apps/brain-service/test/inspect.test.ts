@@ -8,7 +8,7 @@ import { execFileSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { runInspection, type InspectErrorCode } from '../src/engine/inspectRoutes.js';
+import { runInspection, type InspectErrorCode } from '../src/engine/workspace/inspectRoutes.js';
 
 function tmpRepo(withGit: boolean): string {
   const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'migra-inspect-')));

@@ -9,7 +9,7 @@ import { selectLocalCoding } from '../src/engine/providers/localCodingRouter.js'
 import { FleetRegistry } from '../src/engine/providers/fleetRegistry.js';
 import { ProviderRegistry } from '../src/engine/providers/providerRegistry.js';
 import { PolicyEngine, EXECUTION_POLICIES, type ExecutionPolicyId } from '../src/engine/providers/executionPolicy.js';
-import { ModelRegistry, type ModelDescriptor } from '../src/engine/modelRegistry.js';
+import { ModelRegistry, type ModelDescriptor } from '../src/engine/models/modelRegistry.js';
 import type { Provider } from '../src/engine/providers/types.js';
 
 const CAPS = { chat: true, vision: true, tools: true, embedding: true, reasoning: true, coding: true };

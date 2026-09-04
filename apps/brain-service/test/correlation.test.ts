@@ -12,14 +12,14 @@ import {
   makeStageLogger,
   jsonLineSink,
   type StageEvent,
-} from '../src/engine/correlation.js';
+} from '../src/engine/observability/correlation.js';
 import { runEngineerTask, type EngineerToolInfo } from '../src/engine/engineer/engineerRuntime.js';
 import { proposeChangeset, applyChangeset, ChangesetProposalStore } from '../src/tools/changeset.js';
 import { nodeChangesetFs } from '../src/tools/changesetFs.js';
-import { CapabilityRegistry } from '../src/engine/capabilityRegistry.js';
-import { ToolApprovalStore } from '../src/engine/toolApprovalStore.js';
-import { ToolAudit } from '../src/engine/toolAudit.js';
-import { executeToolCore } from '../src/engine/toolExecutor.js';
+import { CapabilityRegistry } from '../src/engine/models/capabilityRegistry.js';
+import { ToolApprovalStore } from '../src/engine/tools/toolApprovalStore.js';
+import { ToolAudit } from '../src/engine/tools/toolAudit.js';
+import { executeToolCore } from '../src/engine/tools/toolExecutor.js';
 
 test('newCorrelationId is deterministic under injected time/rand and prefixed', () => {
   const id = newCorrelationId(() => 100, () => 0.5);

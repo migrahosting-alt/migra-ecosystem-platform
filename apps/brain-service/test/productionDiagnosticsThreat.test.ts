@@ -17,7 +17,7 @@ import { defaultCapabilities } from '../src/engine/production/capabilities.js';
 import { DIAGNOSTIC_CAPABILITY_IDS } from '../src/engine/production/types.js';
 import { NetworkProber } from '../src/engine/production/networkProber.js';
 import { NullProber, type ServiceStatus } from '../src/engine/production/deps.js';
-import { auditStore } from '../src/engine/auditLog.js';
+import { auditStore } from '../src/engine/observability/auditLog.js';
 
 const OP = 'ops:alice';
 function target(over: Partial<ProductionTarget> = {}): ProductionTarget {

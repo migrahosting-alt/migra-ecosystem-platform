@@ -14,7 +14,7 @@ import { ProviderRegistry } from '../src/engine/providers/providerRegistry.js';
 import { PricingBook } from '../src/engine/providers/budget/pricing.js';
 import { BudgetManager, type BudgetScope } from '../src/engine/providers/budget/budgetManager.js';
 import { UsageLedger } from '../src/engine/providers/budget/usageLedger.js';
-import { ModelRegistry } from '../src/engine/modelRegistry.js';
+import { ModelRegistry } from '../src/engine/models/modelRegistry.js';
 import type { Provider } from '../src/engine/providers/types.js';
 import type { ChatTurnRequest } from '@migrapilot/shared-types';
 

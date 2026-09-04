@@ -15,8 +15,8 @@ import Fastify from 'fastify';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { registerEngineerRoutes } from '../src/engine/engineer/engineerRoutes.js';
-import { registerToolExecutionRoutes } from '../src/engine/toolRoutes.js';
-import { ModelRegistry, type ModelDescriptor } from '../src/engine/modelRegistry.js';
+import { registerToolExecutionRoutes } from '../src/engine/tools/toolRoutes.js';
+import { ModelRegistry, type ModelDescriptor } from '../src/engine/models/modelRegistry.js';
 import type { ProviderAdapter } from '../src/providers/providerRegistry.js';
 
 /** `openai-compat` is what makes the route treat the GPU as real and probe it. */

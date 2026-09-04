@@ -58,7 +58,7 @@
  */
 
 import type { PoolClient } from 'pg';
-import { validateRecoverySourceProvenance } from '../../recoverySourceProvenance.js';
+import { validateRecoverySourceProvenance } from '../../recovery/recoverySourceProvenance.js';
 import type {
   AgentRunReproposalInput,
   AgentRunReproposalResult,

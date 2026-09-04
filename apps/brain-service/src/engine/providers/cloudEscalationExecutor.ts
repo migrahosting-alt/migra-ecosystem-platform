@@ -10,8 +10,8 @@
 import type { ChatTurnRequest } from '@migrapilot/shared-types';
 import { OpenAiCompatProvider } from '../../providers/openAiCompatProvider.js';
 import type { ProviderAdapter } from '../../providers/providerRegistry.js';
-import { auditStore } from '../auditLog.js';
-import { sanitizeError } from '../redaction.js';
+import { auditStore } from '../observability/auditLog.js';
+import { sanitizeError } from '../observability/redaction.js';
 import type { EscalationReason } from './escalation.js';
 import type { Provider } from './types.js';
 

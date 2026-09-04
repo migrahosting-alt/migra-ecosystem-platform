@@ -9,9 +9,9 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { SqliteDurableStore } from '../src/engine/persistence/sqliteStore.js';
 import { wireOperationalPersistence } from '../src/engine/persistence/operationalBridge.js';
-import { AuditStore } from '../src/engine/auditLog.js';
+import { AuditStore } from '../src/engine/observability/auditLog.js';
 import { UsageLedger } from '../src/engine/providers/budget/usageLedger.js';
-import { IncidentManager, LocalAlertSink } from '../src/engine/incidents.js';
+import { IncidentManager, LocalAlertSink } from '../src/engine/observability/incidents.js';
 import { BudgetManager, type BudgetScope } from '../src/engine/providers/budget/budgetManager.js';
 import type { CostEstimate } from '../src/engine/providers/budget/costEstimation.js';
 

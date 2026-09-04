@@ -3,12 +3,12 @@ import { test } from 'node:test';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { engineVersion, ENGINE_VERSION, PROTOCOL_VERSION } from '../src/engine/version.js';
-import { WorkspaceManager, type WorkspaceView } from '../src/engine/workspaceManager.js';
+import { engineVersion, ENGINE_VERSION, PROTOCOL_VERSION } from '../src/engine/platform/version.js';
+import { WorkspaceManager, type WorkspaceView } from '../src/engine/workspace/workspaceManager.js';
 import { IndexService, type FileSource, type Scope } from '../src/engine/rag/indexService.js';
 import { FakeEmbedder } from '../src/engine/rag/embedder.js';
 import { ConversationStore } from '../src/engine/memory/conversationStore.js';
-import { AgentRegistry } from '../src/engine/agentRegistry.js';
+import { AgentRegistry } from '../src/engine/agents/agentRegistry.js';
 import { SqliteDurableStore } from '../src/engine/persistence/sqliteStore.js';
 
 const A: Scope = { owner: 'local', workspace: '/ws/A' };

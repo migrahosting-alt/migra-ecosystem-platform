@@ -17,7 +17,7 @@ import {
   activeDelegateCount,
   DelegationError,
   type DelegatedCall,
-} from '../src/engine/workspaceDelegation.js';
+} from '../src/engine/workspace/workspaceDelegation.js';
 
 test('filesystem tools are delegated; model and index tools are not', () => {
   for (const t of ['workspace.list', 'file.read', 'git.status', 'fs.proposeChangeset', 'edit.apply']) {

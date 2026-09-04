@@ -4,7 +4,7 @@
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { AuditStore, AuditCriticalWriteError, auditHash, type AuditRecord } from '../src/engine/auditLog.js';
+import { AuditStore, AuditCriticalWriteError, auditHash, type AuditRecord } from '../src/engine/observability/auditLog.js';
 
 let idc = 0;
 const ids = () => `ev_${idc++}`;

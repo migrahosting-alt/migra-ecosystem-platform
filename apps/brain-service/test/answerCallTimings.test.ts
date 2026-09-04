@@ -18,10 +18,10 @@ import * as http from 'node:http';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import type { AddressInfo, Socket } from 'node:net';
-import { agenticAnswer, describeTimeout, executeTool, executeToolCached, validateLineRange } from '../src/engine/agenticAnswer.js';
+import { agenticAnswer, describeTimeout, executeTool, executeToolCached, validateLineRange } from '../src/engine/agents/agenticAnswer.js';
 import { EvidenceLedger } from '../src/engine/grounding/evidenceLedger.js';
 import { clearRepoMapCache } from '../src/engine/planning/repoMap.js';
-import type { AnswerRunTimings, TimeoutEvidence } from '../src/engine/answerTimings.js';
+import type { AnswerRunTimings, TimeoutEvidence } from '../src/engine/observability/answerTimings.js';
 
 /** One scripted model turn. */
 type Turn =

@@ -16,7 +16,7 @@ import { evaluateEscalation } from '../src/engine/providers/escalation.js';
 import { PricingBook } from '../src/engine/providers/budget/pricing.js';
 import { BudgetManager } from '../src/engine/providers/budget/budgetManager.js';
 import { UsageLedger } from '../src/engine/providers/budget/usageLedger.js';
-import { ModelRegistry } from '../src/engine/modelRegistry.js';
+import { ModelRegistry } from '../src/engine/models/modelRegistry.js';
 import type { Provider } from '../src/engine/providers/types.js';
 import type { ExecutionPolicyId } from '../src/engine/providers/executionPolicy.js';
 
@@ -62,7 +62,7 @@ test('INVARIANT: no route or control-plane file runs a cloud attempt inline — 
   // executor or the approval path inline.
   const surfaces = [
     path.join(root, 'src', 'engine', 'engineer', 'engineerRoutes.ts'),
-    path.join(root, 'src', 'engine', 'aiRoutes.ts'),
+    path.join(root, 'src', 'engine', 'chat', 'aiRoutes.ts'),
   ];
   const stripComments = (s: string): string => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
   for (const file of surfaces) {

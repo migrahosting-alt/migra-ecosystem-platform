@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { FleetRegistry } from '../src/engine/providers/fleetRegistry.js';
 import { ProviderRegistry } from '../src/engine/providers/providerRegistry.js';
-import { ModelRegistry, type ModelDescriptor } from '../src/engine/modelRegistry.js';
+import { ModelRegistry, type ModelDescriptor } from '../src/engine/models/modelRegistry.js';
 import type { Provider } from '../src/engine/providers/types.js';
 import type { ProviderProbe } from '../src/engine/providers/health.js';
 

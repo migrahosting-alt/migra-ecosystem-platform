@@ -11,7 +11,7 @@
 
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { ChatTurnRequest } from '@migrapilot/shared-types';
-import { newCorrelationId } from '../correlation.js';
+import { newCorrelationId } from '../observability/correlation.js';
 import { isGateRejection, type EscalationController } from './escalationController.js';
 
 interface ApproveBody {

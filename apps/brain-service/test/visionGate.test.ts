@@ -145,7 +145,7 @@ test('a durably approved model is routable even when the manifest never heard of
    * did not list it as approved. The stronger authority lost to the weaker one
    * and a qualified model answered NO_MODEL.
    */
-  const { selectModel } = await import('../src/engine/capabilityRouter.js');
+  const { selectModel } = await import('../src/engine/models/capabilityRouter.js');
   const model = {
     id: 'qwen2.5vl:7b', provider: 'local', tier: 'balanced' as const, paramCount: 7,
     capabilities: { chat: true, vision: true, tools: false, embedding: false, reasoning: false, coding: false, insert: false },
@@ -166,7 +166,7 @@ test('a durably approved model is routable even when the manifest never heard of
 
 test('the exemption covers only the model the gate named', async () => {
   // Otherwise one approval would quietly unlock every unapproved model installed.
-  const { selectModel } = await import('../src/engine/capabilityRouter.js');
+  const { selectModel } = await import('../src/engine/models/capabilityRouter.js');
   const other = {
     id: 'llava:latest', provider: 'local', tier: 'balanced' as const, paramCount: 7,
     capabilities: { chat: true, vision: true, tools: false, embedding: false, reasoning: false, coding: false, insert: false },

@@ -11,8 +11,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { resolveFamily, resolveFamiliesForSurface } from '../src/engine/modelFamilyResolver.js';
-import type { ModelDescriptor } from '../src/engine/modelRegistry.js';
+import { resolveFamily, resolveFamiliesForSurface } from '../src/engine/models/modelFamilyResolver.js';
+import type { ModelDescriptor } from '../src/engine/models/modelRegistry.js';
 import { MIGRA_MODEL_FAMILIES, MIGRA_FAMILY_IDS } from '@migrapilot/shared-types/model-families';
 
 const chatModel = (id: string): ModelDescriptor => ({

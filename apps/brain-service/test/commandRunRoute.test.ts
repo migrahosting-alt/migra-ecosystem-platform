@@ -10,7 +10,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import Fastify, { type FastifyInstance } from 'fastify';
-import { registerCommandRunRoutes } from '../src/engine/commandRunRoutes.js';
+import { registerCommandRunRoutes } from '../src/engine/tools/commandRunRoutes.js';
 
 function app(): FastifyInstance {
   const instance = Fastify();

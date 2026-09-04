@@ -1,8 +1,8 @@
 import { createHash, randomUUID } from 'node:crypto';
 import type { AgentModeCommandPreview, AgentModeCommandResult, AgentModeCommandRunView, AgentModeState } from '@migrapilot/protocol';
-import { auditHash } from './auditLog.js';
-import { MARKERS, redactString, redactValue } from './redaction.js';
-import { validateRecoverySourceProvenance } from './recoverySourceProvenance.js';
+import { auditHash } from '../observability/auditLog.js';
+import { MARKERS, redactString, redactValue } from '../observability/redaction.js';
+import { validateRecoverySourceProvenance } from '../recovery/recoverySourceProvenance.js';
 import type {
   AgentRunJournalPersistence,
   AgentRunFencedEventInput,
@@ -19,8 +19,8 @@ import type {
   DurableAgentRunState,
   DurableAgentRunTombstone,
   DurableChildState,
-} from './persistence/types.js';
-import { DURABLE_CHILD_TERMINAL_STATES, isLegalChildTransition } from './persistence/types.js';
+} from '../persistence/types.js';
+import { DURABLE_CHILD_TERMINAL_STATES, isLegalChildTransition } from '../persistence/types.js';
 
 export const AGENT_RUN_SCHEMA_VERSION = 1;
 export const AGENT_TERMINAL_STATES = new Set<AgentModeState>(['COMPLETED', 'REJECTED', 'EXPIRED', 'STALE', 'FAILED', 'CANCELLED']);

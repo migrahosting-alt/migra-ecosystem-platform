@@ -8,9 +8,9 @@
 // © MigraTeck LLC.
 
 import type { OperationalPersistence, DurableAuditEvent, DurableUsageRecord, DurableIncident, DurableBudgetScope, DurableReservation } from './types.js';
-import type { AuditStore, AuditRecord, AuditEventType } from '../auditLog.js';
+import type { AuditStore, AuditRecord, AuditEventType } from '../observability/auditLog.js';
 import type { UsageLedger, UsageRecord } from '../providers/budget/usageLedger.js';
-import type { IncidentManager, Incident, IncidentState } from '../incidents.js';
+import type { IncidentManager, Incident, IncidentState } from '../observability/incidents.js';
 import type { BudgetManager, BudgetScope, Reservation } from '../providers/budget/budgetManager.js';
 
 // ── record ↔ durable-row mappers ─────────────────────────────────────────────

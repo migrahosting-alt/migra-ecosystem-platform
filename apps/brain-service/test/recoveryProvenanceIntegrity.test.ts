@@ -4,14 +4,14 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import type { AgentModeCommandPreview, AgentModeRecoveryClass } from '@migrapilot/protocol';
-import { AgentModeCommandService, type AgentModeRequestContext } from '../src/engine/agentModeCommandService.js';
-import { AgentRunHistoryService } from '../src/engine/agentRunHistory.js';
-import { AgentRunJournal, MemoryAgentRunJournalPersistence } from '../src/engine/agentRunJournal.js';
-import { AGENT_RECIPE_OUTPUT_CAP_BYTES, AGENT_RECIPE_POLICY_VERSION, containmentIdentityForPlan, type AgentContainmentIdentity, type AgentRecipeExecutionOutcome, type AgentRecipePlan, type AgentRecipeProcessManagerLike, type AgentRecipeResolverLike } from '../src/engine/agentRecipe.js';
-import { CapabilityRegistry } from '../src/engine/capabilityRegistry.js';
-import { validateRecoverySourceProvenance } from '../src/engine/recoverySourceProvenance.js';
-import { ToolApprovalStore, hashInput } from '../src/engine/toolApprovalStore.js';
-import { ToolAudit } from '../src/engine/toolAudit.js';
+import { AgentModeCommandService, type AgentModeRequestContext } from '../src/engine/agents/agentModeCommandService.js';
+import { AgentRunHistoryService } from '../src/engine/agents/agentRunHistory.js';
+import { AgentRunJournal, MemoryAgentRunJournalPersistence } from '../src/engine/agents/agentRunJournal.js';
+import { AGENT_RECIPE_OUTPUT_CAP_BYTES, AGENT_RECIPE_POLICY_VERSION, containmentIdentityForPlan, type AgentContainmentIdentity, type AgentRecipeExecutionOutcome, type AgentRecipePlan, type AgentRecipeProcessManagerLike, type AgentRecipeResolverLike } from '../src/engine/agents/agentRecipe.js';
+import { CapabilityRegistry } from '../src/engine/models/capabilityRegistry.js';
+import { validateRecoverySourceProvenance } from '../src/engine/recovery/recoverySourceProvenance.js';
+import { ToolApprovalStore, hashInput } from '../src/engine/tools/toolApprovalStore.js';
+import { ToolAudit } from '../src/engine/tools/toolAudit.js';
 
 const ACTIVATION = '44444444-4444-4444-8444-444444444444';
 

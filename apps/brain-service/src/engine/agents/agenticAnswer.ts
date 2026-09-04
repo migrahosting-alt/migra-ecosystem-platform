@@ -16,14 +16,14 @@
 // this instead of populating `tool_calls`). © MigraTeck LLC.
 
 import * as path from 'node:path';
-import { runInspection, type InspectOp } from './inspectRoutes.js';
-import { retrieveContext } from '../retrieval/retrieve.js';
-import { EvidenceLedger, type EvidenceCacheStats } from './grounding/evidenceLedger.js';
-import { verifyAnswer, type GroundedClaim, type RejectedClaim, type VerifiedAnswer } from './grounding/claimVerifier.js';
-import { buildRepoMap } from './planning/repoMap.js';
-import { runEvidencePlan, type EvidencePlanResult } from './planning/evidencePlan.js';
-import { BudgetLedger, resolveBudget, type EvidenceBudget, type BudgetSpend, type StopReason } from './planning/evidenceBudget.js';
-import { makeSpanSource } from './planning/workspaceSpanSource.js';
+import { runInspection, type InspectOp } from '../workspace/inspectRoutes.js';
+import { retrieveContext } from '../../retrieval/retrieve.js';
+import { EvidenceLedger, type EvidenceCacheStats } from '../grounding/evidenceLedger.js';
+import { verifyAnswer, type GroundedClaim, type RejectedClaim, type VerifiedAnswer } from '../grounding/claimVerifier.js';
+import { buildRepoMap } from '../planning/repoMap.js';
+import { runEvidencePlan, type EvidencePlanResult } from '../planning/evidencePlan.js';
+import { BudgetLedger, resolveBudget, type EvidenceBudget, type BudgetSpend, type StopReason } from '../planning/evidenceBudget.js';
+import { makeSpanSource } from '../planning/workspaceSpanSource.js';
 import {
   AnswerTimeline,
   type AnswerRunTimings,
@@ -31,7 +31,7 @@ import {
   type RunPhase,
   type TimeoutCategory,
   type TimeoutEvidence,
-} from './answerTimings.js';
+} from '../observability/answerTimings.js';
 
 export interface AgenticStep {
   tool: string;
