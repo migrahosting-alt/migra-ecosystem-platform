@@ -32,6 +32,20 @@ export interface PilotErrorInit {
   retriable?: boolean;
   requestId?: string;
   cause?: unknown;
+  /**
+   * The engine's OWN error code, kept alongside the mapped {@link PilotErrorCode}.
+   *
+   * The mapping is lossy on purpose — clients branch on a small stable union — but
+   * that union cannot express every server condition, and the detail was surviving
+   * only inside the human-readable message. A caller wanting to recover from one
+   * specific condition then had to string-match prose, which is the kind of check
+   * that breaks silently when the wording improves.
+   *
+   * Recorded here so recovery can be exact: `UNKNOWN_CONVERSATION` and a generic
+   * 404 both map to CAPABILITY_MISSING, and only one of them means "your stored
+   * conversation is gone, start a new one".
+   */
+  serverCode?: string;
 }
 
 export class PilotError extends Error {
@@ -39,6 +53,8 @@ export class PilotError extends Error {
   readonly httpStatus?: number;
   readonly retriable: boolean;
   readonly requestId?: string;
+  /** The engine's own code, when it sent one. See {@link PilotErrorInit.serverCode}. */
+  readonly serverCode?: string;
   override readonly cause?: unknown;
 
   constructor(code: PilotErrorCode, message: string, init: PilotErrorInit = {}) {
@@ -48,6 +64,7 @@ export class PilotError extends Error {
     this.httpStatus = init.httpStatus;
     this.retriable = init.retriable ?? false;
     this.requestId = init.requestId;
+    this.serverCode = init.serverCode;
     this.cause = init.cause;
   }
 }

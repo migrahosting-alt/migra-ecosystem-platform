@@ -1350,6 +1350,9 @@ export class MigraAiClient {
     return new PilotError(code, `Engine tool responded ${res.status}${serverCode ? ` (${serverCode})` : ''}.`, {
       httpStatus: res.status,
       requestId,
+      // Kept as data, not only inside the message: a caller recovering from one
+      // specific condition must not have to parse prose to find it.
+      ...(serverCode ? { serverCode } : {}),
     });
   }
 

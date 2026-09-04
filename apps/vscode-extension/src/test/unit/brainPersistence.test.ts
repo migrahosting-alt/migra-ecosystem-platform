@@ -14,6 +14,7 @@ import {
   type PersistedBrainOperation,
   operationPersister,
   type StorageFs,
+  connectionPersister,
 } from '../../services/brainPersistence.js';
 
 /** In-memory filesystem with a fault injector, so an interrupted write is deterministic
@@ -397,4 +398,57 @@ test('operation persister · each operation owns its own revision chain', async 
   await b.persistTerminal(bare({ operationId: 'op-b' }));
   assert.equal(a.currentRevision(), 2);
   assert.equal(b.currentRevision(), 1, 'operations must not share a counter');
+});
+
+// ── connection revisions survive a window reload ─────────────────────────────
+//
+// OBSERVED LIVE 2026-09-04, twice in one session log:
+//   brain-store: connection revision 1 not persisted — StaleRevisionError:
+//     stale write rejected: expected revision 1, found 8
+//   brain-store: connection revision 2 not persisted — ... found 8
+//
+// The in-memory counter restarted at 0 on every activation while the store kept
+// the previous session's high-water mark, so each reload opened with a run of
+// writes that saveConnection correctly refused. Connection state silently stopped
+// being recorded until the counter climbed past the old value, and the only sign
+// was two lines in an output channel nobody has open.
+
+test('a new session continues the connection revision instead of restarting it', async () => {
+  const { s } = store();
+  await s.init();
+
+  const logs: string[] = [];
+  const first = connectionPersister(s, (m) => logs.push(m), () => '2026-01-02T00:00:00.000Z');
+  const conn = { readiness: 'ready' as const, endpointIdentity: 'http://127.0.0.1:3988', consecutiveFailures: 0, reconnectAttempts: 0 };
+  for (let i = 0; i < 8; i++) first.persist(conn);
+  await new Promise((r) => setImmediate(r));
+  assert.equal(await s.connectionRevision(), 8, 'eight writes land as revisions 1..8');
+  // NOT deepEqual against []: its `asserts actual is T` signature narrows `logs`
+  // to never[] for the rest of the test, and the next push stops compiling.
+  assert.equal(logs.length, 0, `none of them may be refused: ${logs.join(' | ')}`);
+
+  // The window reloads: a brand-new persister against the SAME store.
+  const reloaded = connectionPersister(s, (m) => logs.push(m), () => '2026-01-02T00:00:00.000Z');
+  reloaded.persist(conn);
+  await new Promise((r) => setImmediate(r));
+
+  assert.equal(logs.length, 0, `the first write after a reload must not be refused: ${logs.join(' | ')}`);
+  assert.equal(await s.connectionRevision(), 9, 'it continues the sequence');
+});
+
+test('the monotonic guard still refuses an out-of-order write', async () => {
+  // The guard is not the bug and must survive the fix: two writes racing within one
+  // session still cannot land out of order.
+  const { s } = store();
+  await s.init();
+  const base = {
+    schemaVersion: SCHEMA_VERSION,
+    updatedAt: '2026-01-02T00:00:00.000Z',
+    readiness: 'ready' as const,
+    endpointIdentity: 'http://127.0.0.1:3988',
+    consecutiveFailures: 0,
+    reconnectAttempts: 0,
+  };
+  await s.saveConnection({ ...base, revision: 5 });
+  await assert.rejects(() => s.saveConnection({ ...base, revision: 4 }), /stale write rejected/);
 });

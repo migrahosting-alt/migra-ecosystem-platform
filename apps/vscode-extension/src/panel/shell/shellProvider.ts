@@ -27,6 +27,7 @@ import { spawn } from 'node:child_process';
 import type { AgentModeCommandRunView, AgentModeRunHistoryDetail, AgentModeRunHistoryList } from '@migrapilot/protocol';
 import type { ChatAttachment } from '@migrapilot/shared-types';
 import { isPilotError } from '@migrapilot/pilot-client';
+import { conversationWasForgotten, FORGOTTEN_CONVERSATION_NOTICE } from './conversationRecovery.js';
 import { type ChatSink, type SelectableProfile, runChatTurn, summarizeTurns } from '../../chat/chatEngine.js';
 import { type GitResult, type GitRunner, assertReadOnly } from '../../commitGen/git.js';
 import { BrainClient } from '../../services/brainClient.js';
@@ -898,6 +899,30 @@ export class MigraPilotShell {
       this.post({ type: 'restore', messages: this.savedMessages });
     } catch (error) {
       this.deps.output.appendLine(`[shell] reload history failed: ${this.reason(error)}`);
+      /*
+       * 🚨 A CONVERSATION THE ENGINE NO LONGER HAS IS NOT A LOGGING EVENT.
+       *
+       * The stored id outlives the Brain that issued it — its session store is
+       * in-memory, so every restart forgets every conversation. This caught the
+       * 404, wrote a line to an output channel nobody has open, and kept the dead
+       * id forever: `ensureConversation` returns the cached value without ever
+       * revalidating it. Every later turn then carried an id the engine did not
+       * know, so memory was silently OFF while the UI showed it on.
+       *
+       * Measured 2026-09-04: the panel held an id while the Brain reported zero
+       * conversations. An assistant that quietly forgets is worse than one that
+       * cannot remember, because the user keeps relying on it.
+       *
+       * So the stale id is dropped, the next turn opens a fresh conversation, and
+       * the loss is SAID — once, plainly, without pretending the history survived.
+       */
+      if (conversationWasForgotten(error)) {
+        this.conversationId = undefined;
+        await this.deps.memento.update(CONVERSATION_KEY, undefined);
+        this.savedMessages = [];
+        this.post({ type: 'restore', messages: [] });
+        this.notice(FORGOTTEN_CONVERSATION_NOTICE, 'warn');
+      }
     }
   }
 

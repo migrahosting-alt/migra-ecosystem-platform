@@ -259,6 +259,23 @@ export class BrainStore {
     return out;
   }
 
+  /**
+   * The revision already on disk, or 0 when there is none.
+   *
+   * Exists so a NEW SESSION can continue the sequence instead of restarting it.
+   * The monotonic guard in `saveConnection` is right — it stops concurrent writes
+   * landing out of order — but an in-memory counter that resets to 0 on every
+   * activation meant the first writes of each session were rejected as stale
+   * against the previous session's high-water mark. Observed: revisions 1 and 2
+   * refused against a stored 8, so connection state silently stopped being
+   * recorded after every window reload until the counter caught up.
+   */
+  async connectionRevision(): Promise<number> {
+    if (!(await this.fs.exists(this.connPath))) return 0;
+    const current = (await this.readJson(this.connPath)) as PersistedBrainConnection | undefined;
+    return typeof current?.revision === 'number' ? current.revision : 0;
+  }
+
   async saveConnection(record: PersistedBrainConnection): Promise<PersistedBrainConnection> {
     if (await this.fs.exists(this.connPath)) {
       const current = (await this.readJson(this.connPath)) as PersistedBrainConnection | undefined;
@@ -577,26 +594,46 @@ export function connectionPersister(
   log: (message: string) => void,
   clock: () => string = () => new Date().toISOString(),
 ): ConnectionPersister {
-  let revision = 0;
+  /*
+   * 🚨 SEEDED FROM DISK, NOT FROM ZERO.
+   *
+   * This counter used to start at 0 on every activation while the store kept the
+   * previous session's high-water mark. Every window reload therefore opened with
+   * a run of writes that `saveConnection` correctly rejected as stale — observed
+   * live as revisions 1 and 2 refused against a stored 8 — and connection state
+   * silently stopped being recorded until the counter climbed past it. The failure
+   * announced itself only as two lines in an output channel.
+   *
+   * The monotonic guard is not the bug: it stops concurrent writes landing out of
+   * order, and it stays. What was wrong is restarting a sequence that is persisted.
+   *
+   * Resolved lazily and exactly once, INSIDE the chain, so the read cannot race the
+   * first write and `persist` stays synchronous for its callers.
+   */
+  let revision: number | undefined;
   let inFlight: Promise<unknown> = Promise.resolve();
   return {
     persist(record) {
-      revision += 1;
-      const rev = revision;
-      // Serialised through one chain so rapid transitions stay monotonic on disk
-      // rather than racing each other into out-of-order revisions.
       inFlight = inFlight
-        .then(() =>
-          store.saveConnection({
-            schemaVersion: SCHEMA_VERSION,
-            revision: rev,
-            updatedAt: clock(),
-            ...record,
-          }),
-        )
-        .catch((err: unknown) => {
-          log(`brain-store: connection revision ${rev} not persisted — ${String(err)}`);
-        });
+        .then(async () => {
+          if (revision === undefined) {
+            revision = await store.connectionRevision().catch(() => 0);
+          }
+          revision += 1;
+          const rev = revision;
+          try {
+            await store.saveConnection({
+              schemaVersion: SCHEMA_VERSION,
+              revision: rev,
+              updatedAt: clock(),
+              ...record,
+            });
+          } catch (err: unknown) {
+            log(`brain-store: connection revision ${rev} not persisted — ${String(err)}`);
+          }
+        })
+        // A failure resolving the seed must not poison every later write.
+        .catch(() => undefined);
     },
   };
 }
