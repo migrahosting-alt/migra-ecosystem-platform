@@ -1,7 +1,7 @@
 {
  "$schema": "MIGRAPILOT_STATUS — canonical cross-agent state. Update on every material change.",
  "updated": "2026-09-03",
- "updatedBy": "Claude (Opus 5) — repo integrity closed + pushed; mockup build proven Brain-side with a real model; panel acceptance owed",
+ "updatedBy": "Claude (Opus 5) — capacity gate for the coding agent + engineer-turn truthfulness/attribution fixes",
  "rules": {
   "easyFirst": "Do not start deep capability work while meaningful easy user-facing items remain.",
   "provenLive": "PROVEN_LIVE requires the real user-facing workflow to pass. Code existing and tests passing is NOT proof.",
@@ -14,7 +14,7 @@
  "activeLane": {
   "name": "MigraPilot VS Code Extension on the governed Brain",
   "objective": "The extension is the product surface under test. It must use the single production Brain (db-core persistence, governed), never a local dev instance.",
-  "currentStep": "Repository integrity CLOSED: the Brain builds from a clean clone again, the rescued RAG source is on the remote, and two gates now guard it (a tracking/import test proven by reintroducing the defect, plus the fresh-clone CI job rewired to run on every branch). Deployed artifact is bit-identical to a clean-source build. REMAINING and owed: the owner reloads the window, attaches the mockup, asks 'build this page', and we see whether complete files are proposed — that is the acceptance this fix has still not had.",
+  "currentStep": "Four defects fixed and pushed (73690997), NOT yet deployed: the coding agent now refuses in seconds on a busy card instead of waiting 240s; capacity measures compute rather than inferring it from residency; the no-work footer no longer denies a tool that ran; routing attribution reaches the UI. Next: deploy Brain + extension, then the owner's panel pass (attach the mockup, ask 'build this page', inspect the diff) — still the acceptance this lane has never had.",
   "beforeTopology": {
    "extension": "http://127.0.0.1:3988 — set in BOTH Machine and workspace settings",
    "thatBrain": "LOCAL dev instance on the workstation. persistence=sqlite, reason 'default local/dev/test adapter'. MIGRAPILOT_BRAIN_DATABASE_URL and DATABASE_URL both UNSET. Governance NOT available.",
@@ -272,6 +272,15 @@
  },
  "openDefects": [
   {
+   "id": "engineer-turn-truthfulness-and-attribution",
+   "symptom": "Two defects seen in the live acceptance run: the machine-authored footer printed \"No tool ran during this turn\" beneath the model's own accurate report that fs.proposeChangeset had run and FAILED; and routing attribution never reached the UI on any successful engineer turn.",
+   "rootCause": "The footer is triggered by OUTPUT (`producedNothing`) but asserted a tool COUNT it never checked. Separately, the client returned on the `final` frame and the server always sends `final` before `done`, so the frame carrying model/policy/fallback was never read — which also made healthy runs log \"stream ended without a done frame\".",
+   "status": "FIXED IN CODE 2026-09-03 (commit 73690997), NOT YET DEPLOYED.",
+   "effort": "SMALL",
+   "regressionTest": "unifiedAgent.test.ts (footer may not deny a tool that ran) and intentRouter.test.ts (attribution delivered exactly once; failed runs still attribute; one answer per turn; each refusal code renders its own boundary). Both proven by reintroducing the defect.",
+   "liveAcceptance": "NOT RUN — needs a deploy."
+  },
+  {
    "id": "build-from-mockup-defers-to-user",
    "symptom": "\"use the mockup draft and build this page exactly as it is.\" with the mockup attached and read: the agent ran ONE workspace.find for index.html,styles.css,app.js, found nothing, and answered \"I have not created or proposed any files yet. Please provide more details or clarify your request.\" No files proposed.",
    "evidence": "Live in the extension panel, 2026-09-03 03:09 (engineer request 9f2a02ca). Reproduced deterministically before any fix: 2 model calls, no correction, no decision event.",
@@ -303,9 +312,9 @@
    "symptom": "Every grounded chat turn ends in \"The engine could not complete the request\" after ~240s while ComfyUI holds the GPU.",
    "evidence": "nvidia-smi: 23723/24576 MiB used, utilization.gpu 100%, 69C, with ComfyUI /queue reporting 1 running job. Ollama /api/ps shows qwen3:8b RESIDENT at 11.5GB, so this is not a model-load failure. A direct /api/generate probe for the trivial prompt \"Reply with exactly the word: READY\" hung past 600s, proving the stall is in generation and is upstream of MigraPilot. Substituting the smaller qwen2.5vl:7b failed identically, so model size is not the variable.",
    "rootCause": "Unarbitrated GPU sharing between ComfyUI (image) and Ollama (chat) on one 24GB card.",
-   "status": "OPEN — environmental, not a product defect. Chat and image generation cannot both hold the card.",
+   "status": "PRODUCT BEHAVIOUR FIXED IN CODE 2026-09-03 (commit 73690997), NOT YET DEPLOYED. The environmental cause stands; what is fixed is that the product no longer answers it with a 240s wait and a generic failure.",
    "effort": "MEDIUM",
-   "regressionTest": "None yet; needs the GPU orchestration item on the backlog.",
+   "regressionTest": "apps/brain-service/test/engineerCapacityGate.test.ts (refuses before any model call; does NOT refuse a card that still answers), plus rewritten cases in gpuCapacity.test.ts.",
    "liveAcceptance": "Blocked until the card is free.",
    "supersedes": "workstation-ollama-generation-failing",
    "correctedClaims": [
@@ -314,7 +323,8 @@
     "REFINED: \"VRAM exhaustion\" is not the whole mechanism. Generation stalls with the model already resident and with a smaller model substituted, and the card reads 100% utilisation — so compute contention matters, not just memory headroom."
    ],
    "measuredContrast": "Same conversation, same question, same model: NO answer in >5 minutes at 24.0/24.5 GB and 100% util; \"Red\" in 15 s at 5.7 GB and 11%. The failure is resource starvation, not prompting or routing.",
-   "slice1": "TRUTHFUL READINESS + BOUNDED WAIT SHIPPED (brain capacity2-08271948). The worst part — accepting work the system cannot execute — is closed. Arbitration/scheduling is slice 2 and is NOT built: nothing evicts models, kills renders, or moves workloads."
+   "slice1": "TRUTHFUL READINESS + BOUNDED WAIT SHIPPED (brain capacity2-08271948). The worst part — accepting work the system cannot execute — is closed. Arbitration/scheduling is slice 2 and is NOT built: nothing evicts models, kills renders, or moves workloads.",
+   "fix": "THREE gaps, each measured. (a) engineerRoutes consulted GPU capacity ZERO times — the chat path had gated on it for a while, the coding agent never did, which is why a build-from-mockup turn burned the full 240s provider deadline. It now refuses before any model call. (b) gpuCapacity returned `ready` the moment a model was resident, short-circuiting the render check; measured, a resident 15.3GB model beside a render did not answer in 180s while /health said ready. Residency now keeps its fast path only when nothing is competing; otherwise one token is requested and the answer decides. (c) ComfyUI going silent was read as an idle card, when its /queue had stopped answering BECAUSE a render was blocking its event loop."
   },
   {
    "id": "csv-quantitative-reasoning-qwen3-8b",
