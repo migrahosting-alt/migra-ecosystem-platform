@@ -16,9 +16,17 @@ name: gap2-repro
 # So it now runs on EVERY branch, filtered by the paths that can actually break it
 # rather than by which branch someone happened to be on.
 
+# 🚨 THE PATH LIST IS WRITTEN OUT TWICE ON PURPOSE.
+#
+# It was a YAML anchor (&build_inputs / *build_inputs), which is valid YAML and is
+# NOT supported by the GitHub Actions parser. The workflow still reported `state:
+# active`, so it looked fine — and silently did not run on a single push for the
+# whole day after it was "fixed". Duplication that runs beats elegance that does
+# not; if these two lists drift, CI runs on more than it needs to, which is the
+# safe direction.
 on:
   pull_request:
-    paths: &build_inputs
+    paths:
       - 'apps/brain-service/**'
       - 'apps/vscode-extension/**'
       - 'packages/**'
@@ -27,7 +35,13 @@ on:
       - '.github/workflows/gap2-repro.yml'
   push:
     branches: ['**']
-    paths: *build_inputs
+    paths:
+      - 'apps/brain-service/**'
+      - 'apps/vscode-extension/**'
+      - 'packages/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/gap2-repro.yml'
   workflow_dispatch:
 
 jobs:
