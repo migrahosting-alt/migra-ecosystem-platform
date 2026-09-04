@@ -72,9 +72,25 @@ const EN_GROUPED = /^\d{1,3}(,\d{3})+(\.\d+)?$/
 const DE_GROUPED = /^\d{1,3}(\.\d{3})+(,\d+)?$/
 const PLAIN = /^\d+(\.\d+)?$/
 
+/**
+ * The markers real exports use for "there is no value here".
+ *
+ * 🚨 MEASURED DEFECT: these were classified as TEXT, which is technically true
+ * and practically wrong. A column is only computable when ≥90% of its non-blank
+ * cells are quantities, so ONE `n/a` in a nine-row export dropped a genuine
+ * currency column to 87.5% and disqualified it — and the turn then answered
+ * about a different column entirely. A missing value is an absence, not a word;
+ * counting it as evidence AGAINST the column being numeric inverts its meaning.
+ *
+ * Deliberately a short, explicit list. Anything not on it stays text, because a
+ * loose rule here would start swallowing real values.
+ */
+const MISSING = /^(n\/?a|na|nil|none|null|nan|-{1,2}|–|—|\?)$/i
+
 export function parseCell(raw: string): Cell {
   const trimmed = raw.trim()
   if (trimmed === '') return { raw, kind: 'blank', note: 'empty cell' }
+  if (MISSING.test(trimmed)) return { raw, kind: 'blank', note: `"${trimmed}" means no value` }
 
   /*
    * NEGATIVES IN BOTH NOTATIONS. Accounting exports write -1234 and (1234) for

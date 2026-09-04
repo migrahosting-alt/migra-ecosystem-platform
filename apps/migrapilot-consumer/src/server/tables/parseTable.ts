@@ -20,6 +20,15 @@ export interface TableColumn {
    * whose values are all amounts is.
    */
   quantitative: boolean
+  /**
+   * The HEADER says this column identifies something rather than measures it.
+   *
+   * Cell shape cannot settle this: `94105` is a perfectly good number and a
+   * perfectly good ZIP code. Only the name distinguishes them, so the name is
+   * what gets consulted — and a column so named is never computable, however
+   * numeric its contents look.
+   */
+  identifierName: boolean
   /** How many rows actually carried a usable quantity. Reported, never assumed. */
   numericCells: number
   blankCells: number
@@ -33,6 +42,37 @@ export interface ParsedTable {
   delimiter: ',' | '\t'
   /** Rows whose column count disagreed with the header. Kept and reported. */
   malformedRows: number[]
+}
+
+/**
+ * Header words that mean "this identifies something", not "this measures it".
+ *
+ * 🚨 MEASURED DEFECT. `cellValue` catches the id-shaped values it can — leading
+ * zeros, dates, versions — but a plain five-digit US ZIP is indistinguishable
+ * from a quantity by shape alone, so a ZipCode column read as 100% numeric and
+ * the product summed postcodes and offered the figure as a total. The module's
+ * own promise is that "a ZIP code, an order id … must never be summed"; nothing
+ * was keeping it for the commonest case.
+ *
+ * Matched on TOKENS, never on a substring: `paid` and `grid` end in "id" and are
+ * not identifiers, and a substring rule would silently disqualify a money column.
+ * Where this is wrong it errs toward REFUSING to compute, which is the safe
+ * direction — a stated refusal, never a confident wrong number.
+ */
+const IDENTIFIER_WORDS = new Set([
+  'id', 'ids', 'uuid', 'guid', 'zip', 'zipcode', 'postcode', 'postal',
+  'sku', 'upc', 'ean', 'isbn', 'ssn', 'ein', 'serial', 'barcode', 'phone', 'fax',
+])
+
+export function identifies(header: string): boolean {
+  const tokens = header
+    // camelCase and PascalCase carry the boundary in the capital: `OrderID`,
+    // `zipCode`. Splitting only on punctuation would miss both.
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean)
+  return tokens.some((token) => IDENTIFIER_WORDS.has(token))
 }
 
 export class TableParseError extends Error {
@@ -132,7 +172,8 @@ export function parseTable(text: string): ParsedTable {
        * stray number in a text column must not make the column summable, and a
        * column of ids must not qualify because ids are numeric-shaped.
        */
-      quantitative: considered > 0 && numericCells / considered >= 0.9,
+      quantitative: considered > 0 && numericCells / considered >= 0.9 && !identifies(name),
+      identifierName: identifies(name),
       numericCells,
       blankCells,
     }

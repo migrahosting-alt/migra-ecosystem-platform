@@ -36,22 +36,72 @@ function detectOperation(prompt: string): Operation | 'group' | null {
 }
 
 /**
- * The column the question is about.
+ * The column the question is about — or an explicit refusal.
  *
- * Named columns win. Otherwise, if exactly ONE column is quantitative there is
- * nothing to be ambiguous about; with several, this returns null and the turn
- * falls back rather than picking one and being confidently wrong about which
- * number the user meant.
+ * A named column wins. A named column that CANNOT be computed refuses; it never
+ * falls through to another one. Only a question that named nothing may take the
+ * "exactly one quantitative column" shortcut, and with several it declines
+ * rather than picking one and being confidently wrong about which number the
+ * user meant.
  */
-function chooseValueColumn(prompt: string, table: ParsedTable): TableColumn | null {
+function chooseValueColumn(prompt: string, table: ParsedTable): ColumnChoice {
   const p = prompt.toLowerCase()
   const named = table.columns.filter((c) => c.name && p.includes(c.name.toLowerCase()))
   const namedQuantitative = named.filter((c) => c.quantitative)
-  if (namedQuantitative.length === 1) return namedQuantitative[0]!
+  if (namedQuantitative.length === 1) return { kind: 'column', column: namedQuantitative[0]! }
+
+  /*
+   * 🚨 A NAMED COLUMN IS NEVER SILENTLY SWAPPED FOR ANOTHER ONE.
+   *
+   * MEASURED, in the real product: asked "What is the total Revenue in this
+   * file?" over a file whose Revenue column had one `n/a`, this fell through to
+   * the branch below and computed the sum of the ZIPCODE column — then handed it
+   * to the model as "exact arithmetic … use verbatim and do not recalculate".
+   * The user asked about revenue and was answered about postcodes, with an
+   * authority claim attached.
+   *
+   * If the question names columns, the answer comes from one of THOSE or from
+   * nowhere. `refused` carries the reason so the turn can say what it could not
+   * do, rather than going quiet and letting the model foot the table itself —
+   * which is the exact failure this whole module exists to remove.
+   */
+  if (named.length > 0) {
+    if (namedQuantitative.length > 1) {
+      return { kind: 'refused', reason: `the question names more than one column that could be totalled` }
+    }
+    const [only] = named
+    return {
+      kind: 'refused',
+      reason:
+        named.length === 1 && only
+          ? only.identifierName
+            // Named for what it is: a code, not a measure. Saying THAT is more
+            // use than a row count the reader cannot act on.
+            ? `"${only.name}" identifies rows rather than measuring them, so totalling it would not mean anything`
+            : `"${only.name}" holds ${only.numericCells} value${only.numericCells === 1 ? '' : 's'} that can be` +
+              ` calculated with, out of ${table.rows.length - only.blankCells} that are not empty — too few to total`
+          : `no column named in the question holds values that can be calculated with`,
+    }
+  }
 
   const quantitative = table.columns.filter((c) => c.quantitative)
-  return quantitative.length === 1 ? quantitative[0]! : null
+  return quantitative.length === 1
+    ? { kind: 'column', column: quantitative[0]! }
+    : { kind: 'none' }
 }
+
+/**
+ * Which column to compute, or why not.
+ *
+ * `none` means the question did not point at anything — an ordinary turn, no
+ * evidence, nothing to say. `refused` means it DID point somewhere and that
+ * place cannot be totalled, which the model must be told so it does not invent
+ * a figure instead.
+ */
+type ColumnChoice =
+  | { kind: 'column'; column: TableColumn }
+  | { kind: 'refused'; reason: string }
+  | { kind: 'none' }
 
 /** A label column for min/max — the first non-quantitative column, which is
  *  overwhelmingly the name/region/category the user wants back. */
@@ -107,8 +157,29 @@ export async function tableEvidenceFor(
     return null
   }
 
-  const value = chooseValueColumn(prompt, table)
-  if (!value) return null
+  const choice = chooseValueColumn(prompt, table)
+  if (choice.kind === 'none') return null
+  if (choice.kind === 'refused') {
+    /*
+     * SAY WHAT COULD NOT BE DONE, rather than nothing at all.
+     *
+     * Going quiet here leaves the model holding a table and a question about a
+     * total, which is precisely the situation that produced 473,250 and 367,500
+     * for a column summing to 474,000. A stated limit is the one thing that
+     * reliably stops it: it cannot be "used verbatim" into a wrong number.
+     */
+    return {
+      file: fileName,
+      operation: `refused:${operation}`,
+      text: [
+        `[MigraPilot could not calculate this from ${fileName}: ${choice.reason}.`,
+        `Say so plainly. Do NOT add the numbers up yourself and do NOT estimate a total —`,
+        `an invented figure here is worse than no answer. You may still describe the file.]`,
+        '',
+      ].join('\n'),
+    }
+  }
+  const value = choice.column
 
   const lines: string[] = []
   try {

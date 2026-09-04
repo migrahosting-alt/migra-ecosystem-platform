@@ -1,7 +1,7 @@
 {
  "$schema": "MIGRAPILOT_STATUS — canonical cross-agent state. Update on every material change.",
  "updated": "2026-09-04",
- "updatedBy": "Claude (Opus 5) — CI green + Brain CD built and disarmed pending runner registration",
+ "updatedBy": "Claude (Opus 5) — gap #7 FIXED and re-measured on the file that failed; two more dead controls closed",
  "rules": {
   "easyFirst": "Do not start deep capability work while meaningful easy user-facing items remain.",
   "provenLive": "PROVEN_LIVE requires the real user-facing workflow to pass. Code existing and tests passing is NOT proof.",
@@ -279,8 +279,11 @@
    "🚨 whyThisIsWorseThanTheOriginal": "The module exists because the model footed tables wrong. It now produces a wrong number AND tells the model not to recalculate it. Its own docblock promises \"a ZIP code, an order id ... must never be summed\"; a ZIP code was summed and presented as the answer to a question about revenue.",
    "measuredNotInferred": "Run against the product's own modules: Region 0/9, OrderID 0/9 (leading zeros -> identifier, correctly excluded), ZipCode 9/9 = 100% quantitative, Revenue 7/8 = 87.5% -> NOT quantitative. The same parser sums those very Revenue cells to exactly 474,000, so the ARITHMETIC is sound; the COLUMN SELECTION is the defect.",
    "provenBothWays": "With one character changed — the \"n/a\" replaced by an empty cell — Revenue clears the threshold (7/7) and the whole path is correct end to end: evidence \"sum of \\\"Revenue\\\": 474,000 (7 rows used, 2 blank)\", model answer \"The total Revenue in this file is $474,000\", outcome=ok, and the durable record after reload holds the same sentence.",
-   "status": "OPEN — reported, NOT fixed. This was a measurement task.",
-   "suggestedDirection": "Do not simply lower the threshold. The honest options are (a) refuse rather than substitute: if a NAMED column is disqualified, emit no evidence instead of computing a different column, and (b) let a named column report why it was disqualified. Silence beats a confident wrong figure; substitution is the part that must go."
+   "status": "RESOLVED 2026-09-04 — three rules, each proven by reintroducing it, then re-measured live on the SAME fixture that failed.",
+   "suggestedDirection": "Do not simply lower the threshold. The honest options are (a) refuse rather than substitute: if a NAMED column is disqualified, emit no evidence instead of computing a different column, and (b) let a named column report why it was disqualified. Silence beats a confident wrong figure; substitution is the part that must go.",
+   "fix": "(1) A missing marker (n/a, N/A, null, none, nil, NaN, -, --, em dash, ?) is a BLANK, not text — an absence must not argue against a column being numeric. Revenue goes 7/8=87.5% to 7/7=100%. (2) A NAMED column is never silently swapped: if the question names columns, the answer comes from one of those or from a refusal that names it. (3) A column whose HEADER identifies rather than measures (zip/zipcode/postcode/id/sku/phone…) is not computable however numeric its cells look — matched on TOKENS so \"paid\" and \"grid\" are untouched. Where wrong it errs toward refusing, which is the safe direction.",
+   "refusalIsSpoken": "Silence was not enough: going quiet leaves the model holding a table and a question about a total, which is how 473,250 and 367,500 happened. A refusal now carries text telling the model to say so plainly and NOT to add the numbers up itself.",
+   "reMeasuredLive": "Same fixture, same question, real UI: \"The total Revenue in this file is $474,000.\" Not 570,236 (the ZIP sum), not 367,500 (the invented figure), not 473,250 (the historical one). Survives reload. And \"What is the sum of the ZipCode column?\" now answers \"not meaningful or applicable because ZipCodes are identifiers and not numerical values to be summed up.\""
   },
   {
    "id": "engineer-turn-truthfulness-and-attribution",
@@ -1622,8 +1625,9 @@
     "gate": "typecheck 0 · 787/787 tests pass (from 768) · next build green · client-bundle scan PASS.",
     "⭐ whatIsSTILLMISSING": "Branch semantics. To replace an answer or fork a thread, the Brain needs a message model it does not have: either delete/truncate-after-a-message, or a parent/branch reference plus a rule for which branch is live. That is brain-service + a Postgres migration + a deploy, so it could not be proven live from here and was NOT started. Gap #5 stays open in that sense and should be re-ranked as a Brain slice rather than a chat one."
    },
-   "7 spreadsheet analysis": "NOT CLOSED — measured live, and the measurement found a HIGH defect (see openDefects: table-evidence-answers-with-the-wrong-column). The arithmetic engine is correct; column selection is not."
+   "7 spreadsheet analysis": "LIVE — fixed and re-measured on the exact file that failed: $474,000 through the real UI, ZIP totals refused, survives reload.",
+   "dead controls: documents + microphone": "LIVE — \"Files & documents\" was offered enabled to signed-out visitors (401, then a Retry that could never succeed) and the mic tooltip showed users the raw string 'transcriptionCapability' is not available without an account. Both now state an actionable reason. Third and fourth instances of the same audience-table defect."
   },
-  "nextGap": "Fix table-evidence-answers-with-the-wrong-column, then re-run this same measurement. The fixture, harness and full evidence chain are recorded and repeatable."
+  "nextGap": "The attachment lane: ~15 uncommitted files that committed code already depends on. Landing it closes the clean-clone invariant and lets the tracking check widen to tests."
  }
 }

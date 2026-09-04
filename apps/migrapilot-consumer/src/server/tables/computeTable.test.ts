@@ -141,12 +141,30 @@ test('a mixed numeric/text column is not summable', () => {
 })
 
 test('one stray non-numeric cell does not disqualify a real column', () => {
-  const rows = ['k,v', ...Array.from({ length: 20 }, (_, i) => `r${i},${i * 10}`), 'bad,n/a']
+  const rows = ['k,v', ...Array.from({ length: 20 }, (_, i) => `r${i},${i * 10}`), 'bad,pending']
   const table = parseTable(rows.join('\n'))
   const v = cols(table, 'v')
   assert.equal(v.quantitative, true)
   const sum = computeColumn(table, v, 'sum')
   assert.equal(sum.provenance.rowsNonNumeric, 1, 'and the skipped row is reported, not hidden')
+})
+
+test('and a MISSING value is counted as absent rather than as non-numeric', () => {
+  /*
+   * This case used `n/a` as its stray "non-numeric" value, which was the
+   * classification that produced the production defect: one `n/a` in nine rows
+   * dropped a real currency column below the 90% bar and the turn answered about
+   * a different column entirely. A missing marker is an ABSENCE — the same fact
+   * as an empty cell — so it is reported as blank and no longer argues against
+   * the column being numeric. See columnSelection.test.ts.
+   */
+  const rows = ['k,v', ...Array.from({ length: 20 }, (_, i) => `r${i},${i * 10}`), 'bad,n/a']
+  const table = parseTable(rows.join('\n'))
+  const v = cols(table, 'v')
+  assert.equal(v.quantitative, true)
+  const sum = computeColumn(table, v, 'sum')
+  assert.equal(sum.provenance.rowsNonNumeric, 0, 'nothing here was unreadable')
+  assert.equal(sum.provenance.rowsBlank, 1, 'it was simply not filled in')
 })
 
 test('malformed rows are recorded and travel with the result', () => {
