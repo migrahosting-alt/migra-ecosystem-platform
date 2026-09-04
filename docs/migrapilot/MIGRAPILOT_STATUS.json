@@ -1,7 +1,7 @@
 {
  "$schema": "MIGRAPILOT_STATUS — canonical cross-agent state. Update on every material change.",
  "updated": "2026-09-04",
- "updatedBy": "Claude (Opus 5) — admission deadline resized from measurement and deployed; cold-load latency logged",
+ "updatedBy": "Release-identity standard added; consumer deploy prepared and PENDING OWNER APPROVAL",
  "rules": {
   "easyFirst": "Do not start deep capability work while meaningful easy user-facing items remain.",
   "provenLive": "PROVEN_LIVE requires the real user-facing workflow to pass. Code existing and tests passing is NOT proof.",
@@ -9,7 +9,8 @@
   "costDiscipline": "owned -> open-source -> self-hosted -> free tier -> partner credits -> paid. No recurring paid dependency enters quietly.",
   "honestUnavailable": "A capability that is not ready must refuse truthfully rather than appear to work.",
   "productionTruthIsPostgres": "PostgreSQL is production truth. SQLite is LEGACY / REFERENCE-ONLY: useful as historical implementation evidence, never qualified, deployed, or designed around. Any adapter-parity comparison is INFORMATIONAL ONLY unless the PostgreSQL implementation is independently proven. Owner ruling 2026-08-27, prompted by the carry-forward defect — \"SQLite already does it correctly\" explained the bug but proved nothing about the fix.",
-  "noSilentSqliteFallback": "🚨 SQLite is NOT an accepted MigraPilot/MigraAI persistence mode. The docs already said so; the CODE contradicted them by silently defaulting to SQLite outside production. Such a Brain looks healthy — /health ok, chat answering — while the governed qualification routes DO NOT EXIST, because they require the PostgreSQL store. An unconfigured Brain now REFUSES to start. SQLite remains only as an explicitly named TEST-ONLY adapter whose own reason string says 'ungoverned, never canonical'. Owner ruling 2026-09-01."
+  "noSilentSqliteFallback": "🚨 SQLite is NOT an accepted MigraPilot/MigraAI persistence mode. The docs already said so; the CODE contradicted them by silently defaulting to SQLite outside production. Such a Brain looks healthy — /health ok, chat answering — while the governed qualification routes DO NOT EXIST, because they require the PostgreSQL store. An unconfigured Brain now REFUSES to start. SQLite remains only as an explicitly named TEST-ONLY adapter whose own reason string says 'ungoverned, never canonical'. Owner ruling 2026-09-01.",
+  "🚨 releaseIdentityInEvidence": "NO LIVE-PRODUCT EVIDENCE IS VALID UNLESS THE EXACT RUNNING RELEASE IDENTITY IS CAPTURED WITH IT. \"Tested live\" means \"tested live against release X, commit Y\" — never merely \"I opened the product\". Owner standard, added 2026-09-04 after a fix that was committed, tested, mutation-proven and pushed was invisible to the person testing the product because production had been serving a build from three days earlier. A truthful harness still produced a false sense of readiness, because nothing in the loop ever asked what was running. Deployment provenance is part of acceptance evidence, not an operational afterthought."
  },
  "activeLane": {
   "name": "MigraPilot VS Code Extension on the governed Brain",
@@ -291,7 +292,9 @@
    "liveOnFixedCode": "Fresh conversation each: \"total ZipCode\" refused · \"Add up all the ZipCode values and give me the number\" refused · \"total OrderID\" answered honestly that the column is absent · \"total revenue\" still $474,000.",
    "status": "FIX READY, NOT DEPLOYED. 🚨 DEPLOY BLOCKED — the privileged VM111 step was refused by the safety classifier and needs the owner to approve or run it. Until then the real product still returns 132,737.",
    "howToShip": "scripts/migrapilot/deploy-consumer.sh <release-name>. Refuses a dirty tree, runs the full gate, hardlinks node_modules, BOOT-TESTS on a spare port before swapping, and finally greps the SERVING bundle for the rule — the step whose absence let this failure happen.",
-   "rollback": "feedback-08312352"
+   "rollback": "feedback-08312352",
+   "deployReadiness": "PREPARED, PENDING OWNER APPROVAL. docs/migrapilot/deploy-consumer.sh now implements the owner's 11-point sequence and asserts RELEASE IDENTITY rather than grepping for source text — a grep can pass on a bundle that never serves. It aborts unless the boot-tested artifact AND the running production process both report the exact commit, release and buildId just built. Rollback feedback-08312352 is printed with the previous release already substituted.",
+   "retestFixture": "~/acceptance/08_identifier_spellings.csv — ORDERID + PostCode + Revenue. Revenue total 474,000 must be returned; PostCode sum 132,737 (the number reported on 09-04) and ORDERID sum 19,290 must never appear."
   },
   {
    "id": "grounding-resolves-against-a-stale-index",
@@ -1726,5 +1729,12 @@
   "identifier refusal": "🚨 FAILED IN THE REAL PRODUCT 2026-09-04 (owner). Cause: stale production build, not the rule. Fixed + two further header-spelling gaps closed. READY FOR REAL-SYSTEM RETEST ONLY AFTER DEPLOY.",
   "laneStatus": "NOT CLOSED — blocked on deploying the consumer to VM111."
  },
- "csvGroundingTopology": "OPEN ARCHITECTURE CONCERN, owner-flagged. The consumer hands the Brain a machine-local filesystem path to index, so CSV grounding only works where both processes share a disk. That is a deployment constraint to solve — canonical object/blob storage, or some location both sides can resolve — not something to institutionalise. It is also what forces every structured-data measurement onto a co-located Brain rather than production."
+ "csvGroundingTopology": "OPEN ARCHITECTURE CONCERN, owner-flagged. The consumer hands the Brain a machine-local filesystem path to index, so CSV grounding only works where both processes share a disk. That is a deployment constraint to solve — canonical object/blob storage, or some location both sides can resolve — not something to institutionalise. It is also what forces every structured-data measurement onto a co-located Brain rather than production.",
+ "releaseIdentity": {
+  "endpoint": "GET /api/version on the consumer — unauthenticated by design, because a check that needs a session is a check nobody runs.",
+  "answersFromTheArtifact": "`buildId` is Next's per-build id read from the `.next` being served, so it cannot be set by configuration. `commit`/`release`/`builtAt` come from `.next/RELEASE.json`, stamped INTO the artifact at build time so they travel with it. An env var would describe the machine, not the code it runs.",
+  "honestNulls": "An unstamped build reports null and `stamped:false` rather than inventing an identity; a malformed stamp is treated as absent, because a deployment check that accepts junk is not a check.",
+  "provenOnARunningBuild": "A real `next start` of the production build returned buildId 2aEpc6kafMZmDz50_qZyH with the matching commit — verified against the artifact on disk, not just unit-tested.",
+  "evidenceChain": "expected commit -> built artifact -> boot-tested artifact -> activated release -> RUNNING PROCESS REPORTS THE SAME ONE. The last link is the one whose absence caused the incident."
+ }
 }

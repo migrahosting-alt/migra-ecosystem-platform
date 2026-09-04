@@ -1,79 +1,139 @@
 #!/usr/bin/env bash
 #
-# Deploy the MigraPilot consumer to VM111.
+# Deploy the MigraPilot consumer to VM111, and PROVE which release is serving.
 #
-# 🚨 WHY THIS EXISTS AS A SCRIPT. The 2026-09-04 identifier-refusal acceptance
-# failure was not a code defect. "What is the total ZipCode in this file?"
-# returned 132,737 in the real product because production was serving a build
-# from three days earlier — so a fix that was committed, tested, mutation-proven
-# and pushed was invisible to the person testing the product. Every step below is
-# one somebody has to remember otherwise, and the last one is the step that would
-# have caught that failure before a human did.
+# 🚨 WHY THIS EXISTS. The 2026-09-04 identifier-refusal acceptance failure was not
+# a code defect. "What is the total ZipCode in this file?" returned 132,737 in the
+# real product because production was serving a build from three days earlier — a
+# fix that was committed, tested, mutation-proven and pushed was invisible to the
+# person testing the product. The validation loop had no assertion that the
+# running artifact corresponded to the source being evaluated, so a truthful
+# harness still produced a false sense of product readiness.
+#
+# THE EVIDENCE CHAIN THIS SCRIPT PRODUCES, and refuses to skip a link of:
+#
+#   expected commit -> built artifact -> boot-tested artifact
+#                   -> activated release -> RUNNING PROCESS REPORTS THE SAME ONE
+#
+# The last link is the one that was missing. It is asserted against /api/version,
+# which answers from the artifact itself (Next's per-build BUILD_ID, plus a
+# RELEASE.json stamped into `.next` at build time) and never from configuration —
+# an environment variable would describe the machine, not the code it runs.
 #
 # Requires root on VM111 for the release directory and the systemd restart, which
 # is inside the owner's bounded VM111 elevation (paths under /opt/migrapilot and
 # migrapilot-* units only).
 #
-#   usage:  scripts/migrapilot/deploy-consumer.sh <release-name>
-#   e.g.    scripts/migrapilot/deploy-consumer.sh identifier-09040504
+#   usage:  docs/migrapilot/deploy-consumer.sh <release-name>
+#   e.g.    docs/migrapilot/deploy-consumer.sh identifier-09040504
 #
 set -euo pipefail
 
 REL="${1:?usage: deploy-consumer.sh <release-name>}"
-APP="$(cd "$(dirname "$0")/../../apps/migrapilot-consumer" && pwd)"
+REPO="$(cd "$(dirname "$0")/.." && cd .. && pwd)"
+APP="$REPO/apps/migrapilot-consumer"
 HOST=migrapilot-app-core
 ROOT=/opt/migrapilot/consumer
+PORT=3097
 
-echo "==> nothing uncommitted may ship"
-# A release built from a dirty tree is a release nobody can reproduce — which is
-# the same family of problem as the untracked source this repo already fixed.
-git -C "$APP" diff --quiet -- . || { echo "consumer working tree is dirty; commit first"; exit 1; }
-echo "    HEAD: $(git -C "$APP" rev-parse --short HEAD)"
+step() { printf '\n== %s\n' "$1"; }
+fail() { printf '\nDEPLOY ABORTED: %s\n' "$1" >&2; exit 1; }
 
-echo "==> the gate, not a subset of it"
+# ── 1. source tree is clean ────────────────────────────────────────────────
+step "1. source tree is clean"
+git -C "$APP" diff --quiet -- . || fail "consumer working tree is dirty; commit before deploying"
+git -C "$REPO" diff --quiet -- docs/migrapilot || fail "docs/migrapilot is dirty; commit before deploying"
+echo "   clean"
+
+# ── 2. HEAD is the commit being shipped ────────────────────────────────────
+step "2. HEAD is the commit being shipped"
+COMMIT="$(git -C "$REPO" rev-parse HEAD)"
+SHORT="$(git -C "$REPO" rev-parse --short HEAD)"
+echo "   $SHORT  $(git -C "$REPO" log -1 --format=%s)"
+# The fix this release exists for must actually be in the tree being built.
+git -C "$APP" grep -q 'identifies rows rather than measuring them' -- src/server/tables \
+  || fail "the identifier rule is not present in HEAD — wrong branch or wrong commit"
+echo "   identifier rule present in source"
+
+# ── 3. the full gate, not a subset ─────────────────────────────────────────
+step "3. full consumer gate"
 ( cd "$APP" && npm run verify )
 
-echo "==> the live release, which is also the rollback target"
-PREVIOUS="$(ssh "$HOST" "readlink $ROOT/current")"
-echo "    rollback target: $PREVIOUS"
+# ── 4. stamp the artifact, then build the release directory ────────────────
+step "4. stamping the artifact with its identity"
+# Written INTO .next so it travels with the bundle. This is what /api/version
+# reports, which is what step 10 asserts against.
+cat > "$APP/.next/RELEASE.json" <<STAMP
+{"commit":"$COMMIT","release":"$REL","builtAt":"$(date -u +%Y-%m-%dT%H:%M:%SZ)"}
+STAMP
+BUILD_ID="$(cat "$APP/.next/BUILD_ID")"
+echo "   commit=$SHORT release=$REL buildId=$BUILD_ID"
 
-echo "==> staging $REL"
+step "4b. constructing the release directory"
+PREVIOUS="$(ssh "$HOST" "readlink $ROOT/current")"
+echo "   rollback target: $PREVIOUS"
 ssh "$HOST" "sudo mkdir -p $ROOT/releases/$REL && sudo chown \$(id -un):\$(id -gn) $ROOT/releases/$REL"
 tar -C "$APP" -czf - --exclude='.next/cache' .next package.json next.config.ts public \
   | ssh "$HOST" "tar -C $ROOT/releases/$REL -xzf -"
-
-# node_modules is HARDLINKED from the live release rather than installed. The
-# release flow has no lockfile step, so a fresh install here would produce a
-# different tree from the one production has been running — and the difference
-# would only show up at runtime.
-echo "==> hardlinking node_modules from the live release"
+# node_modules is HARDLINKED from the live release rather than installed: the
+# release flow has no lockfile step, so a fresh install would be a different tree
+# from the one production has been running, and the difference would only appear
+# at runtime.
 ssh "$HOST" "sudo cp -al $ROOT/current/node_modules $ROOT/releases/$REL/node_modules"
+echo "   staged"
 
-# 🚨 BOOT IT BEFORE SWAPPING THE SYMLINK. A release that cannot start is
-# discovered here, on a spare port, rather than by the first user after the swap.
-echo "==> boot test on a spare port"
+# ── 5+6+7. boot the new release on a spare port and interrogate it ─────────
+step "5. boot test on a spare port (before anything is swapped)"
 ssh "$HOST" "cd $ROOT/releases/$REL && \
   sudo -u migrapilot env \$(grep -v '^#' /etc/migrapilot/consumer.env | xargs) \
-    node node_modules/next/dist/bin/next start -p 3097 -H 127.0.0.1 >/tmp/$REL-boot.log 2>&1 & \
-  sleep 12; \
-  code=\$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 http://127.0.0.1:3097/ || echo 000); \
-  echo \"    boot test: \$code\"; \
-  pkill -f 'next start -p 3097' || true; \
-  [ \"\$code\" = 200 ]"
+    node node_modules/next/dist/bin/next start -p $PORT -H 127.0.0.1 >/tmp/$REL-boot.log 2>&1 & \
+  sleep 14; true"
 
-echo "==> swapping and restarting"
-ssh "$HOST" "sudo ln -sfn $ROOT/releases/$REL $ROOT/current && \
-  sudo systemctl restart migrapilot-consumer.service && sleep 5 && \
-  systemctl is-active migrapilot-consumer.service"
+step "6. the boot-tested instance answers"
+HEALTH="$(ssh "$HOST" "curl -s -o /dev/null -w '%{http_code}' --max-time 8 http://127.0.0.1:$PORT/ || echo 000")"
+[ "$HEALTH" = "200" ] || { ssh "$HOST" "tail -30 /tmp/$REL-boot.log; pkill -f 'next start -p $PORT' || true"; fail "boot test returned $HEALTH"; }
+echo "   HTTP $HEALTH"
 
-# 🚨 THE STEP THAT WOULD HAVE CAUGHT THE 09-04 FAILURE. Proving the artifact that
-# is SERVING contains the code you think you shipped, rather than assuming the
-# symlink swap means what it looks like it means.
-echo "==> proving the serving bundle is the code that was just built"
-ssh "$HOST" "grep -rlq 'identifies rows rather than measuring them' $ROOT/current/.next \
-  && echo '    identifier rule present in the serving bundle' \
-  || { echo '    WARNING: rule NOT found in the serving bundle — wrong artifact'; exit 1; }"
+step "7. the BOOT-TESTED artifact reports the identity we just built"
+BOOT_ID="$(ssh "$HOST" "curl -s --max-time 8 http://127.0.0.1:$PORT/api/version")"
+echo "   $BOOT_ID"
+ssh "$HOST" "pkill -f 'next start -p $PORT' || true"
+echo "$BOOT_ID" | grep -q "\"commit\":\"$COMMIT\"" || fail "boot-tested artifact reports a different commit"
+echo "$BOOT_ID" | grep -q "\"release\":\"$REL\""    || fail "boot-tested artifact reports a different release"
+echo "$BOOT_ID" | grep -q "\"buildId\":\"$BUILD_ID\"" || fail "boot-tested artifact reports a different build id"
+echo "   commit, release and buildId all match"
 
-echo
-echo "deployed $REL"
-echo "rollback: ssh $HOST \"sudo ln -sfn $ROOT/releases/$PREVIOUS $ROOT/current && sudo systemctl restart migrapilot-consumer.service\""
+# ── 8+9. only now does anything move ───────────────────────────────────────
+step "8. activating the release"
+ssh "$HOST" "sudo ln -sfn $ROOT/releases/$REL $ROOT/current"
+echo "   current -> $(ssh "$HOST" "readlink $ROOT/current")"
+
+step "9. restarting production against it"
+ssh "$HOST" "sudo systemctl restart migrapilot-consumer.service && sleep 6 && systemctl is-active migrapilot-consumer.service"
+
+# ── 10. the running process reports the same release ───────────────────────
+step "10. THE RUNNING PRODUCTION PROCESS REPORTS THE SAME RELEASE"
+# The link whose absence caused the incident. Asked of the live service on its
+# real bind address, not of the directory and not of the symlink.
+RUNNING="$(ssh "$HOST" "curl -s --max-time 8 http://10.10.0.13:3000/api/version")"
+echo "   $RUNNING"
+echo "$RUNNING" | grep -q "\"commit\":\"$COMMIT\""   || fail "PRODUCTION IS SERVING A DIFFERENT COMMIT — roll back"
+echo "$RUNNING" | grep -q "\"release\":\"$REL\""     || fail "PRODUCTION IS SERVING A DIFFERENT RELEASE — roll back"
+echo "$RUNNING" | grep -q "\"buildId\":\"$BUILD_ID\"" || fail "PRODUCTION IS SERVING A DIFFERENT BUILD — roll back"
+
+# ── 11. rollback stays available and is printed, not remembered ────────────
+cat <<DONE
+
+DEPLOYED — and proven, link by link:
+  expected commit  $SHORT
+  built artifact   buildId $BUILD_ID
+  boot-tested      identity matched on port $PORT
+  activated        current -> $REL
+  RUNNING PROCESS  reports commit $SHORT / release $REL / buildId $BUILD_ID
+
+11. rollback:
+  ssh $HOST "sudo ln -sfn $ROOT/releases/$PREVIOUS $ROOT/current && sudo systemctl restart migrapilot-consumer.service"
+
+NOT ACCEPTED. This script proves what is RUNNING; it does not prove the product
+is correct. Hand back for real-system retest.
+DONE
