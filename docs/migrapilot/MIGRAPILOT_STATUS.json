@@ -1,7 +1,7 @@
 {
  "$schema": "MIGRAPILOT_STATUS — canonical cross-agent state. Update on every material change.",
  "updated": "2026-09-04",
- "updatedBy": "Claude (Opus 5) — consumer chat gaps #3, #4 shipped; #5 shipped as the honest subset (append-only storage blocks branch semantics)",
+ "updatedBy": "Claude (Opus 5) — consumer chat gaps #3/#4/#5, then the consumer clean-clone defect found while opening #7",
  "rules": {
   "easyFirst": "Do not start deep capability work while meaningful easy user-facing items remain.",
   "provenLive": "PROVEN_LIVE requires the real user-facing workflow to pass. Code existing and tests passing is NOT proof.",
@@ -906,6 +906,18 @@
  },
  "resolvedDefects": [
   {
+   "id": "consumer-not-buildable-from-clean-checkout",
+   "symptom": "The committed chat stream route imported `@/server/files/turnGrounding` and `@/server/tables/tableEvidence`. Neither was ever added to git. Every local build succeeded, 787 tests passed, and production ran a bundle whose source existed only on one workstation's disk.",
+   "howFound": "Opening chat gap #7 (spreadsheet analysis). The analysis module turned out to be already written, already wired into the route — and untracked.",
+   "proof": "MEASURED, not inferred: moved aside exactly the 8 untracked source files a clean checkout would lack, ran tsc, got two TS2307 errors naming both imports on the committed route. Restored afterwards.",
+   "rootCause": "The consumer had NO repository-integrity guard. 🚨 And the brain-service guard added days earlier for the identical defect WOULD NOT HAVE CAUGHT THIS ONE: it scans relative specifiers only, and the consumer imports itself through the `@/*` alias. A guard copied without checking which specifier shapes the package actually uses is a guard that passes while the build is broken.",
+   "fix": "The 8 orphaned files are committed (5 table-arithmetic modules, turnGrounding + its test, an upload-ceiling test — 931 lines, 51 tests, all passing and read before committing). New `src/repositoryIntegrity.test.ts` mirrors the brain-service gate and adds alias resolution.",
+   "provenByReintroduction": "Un-tracking the tables module fails BOTH checks and names the exact edge: `route.ts -> src/server/tables/tableEvidence.ts (UNTRACKED)`. Green again once restored.",
+   "⭐ noteWorthKeeping": "The guard flagged its OWN fixtures on the first run (`@/c`). The wrong fix was an exemption for the file that defines the rule; the right one was to make every fixture specifier name a real module, so the gate stays fully self-applying.",
+   "status": "RESOLVED 2026-09-04 — not yet pushed.",
+   "gate": "typecheck 0 · 795/795 tests · next build green · client-bundle scan PASS."
+  },
+  {
    "id": "head-not-buildable-from-clean-checkout",
    "symptom": "`tsc -b` on a clean worktree failed: server.ts could not find './engine/rag/artifactReuse.js'. The Brain could not be rebuilt from a clean clone; production ran compiled output whose source existed only on one workstation and inside the deployed dist.",
    "rootCause": "TWO independent causes. (1) Five RAG modules were imported by committed files but never added to git — brain-service had no tracking guard, though the extension has had one for a while. (2) The CI job that would have caught it, `gap2-repro` (fresh-clone install/build/test), fired only for PRs into two named branches and pushes to a third; the work happened on none of them. A correct gate wired to the wrong branch is not a gate.",
@@ -1593,6 +1605,6 @@
     "⭐ whatIsSTILLMISSING": "Branch semantics. To replace an answer or fork a thread, the Brain needs a message model it does not have: either delete/truncate-after-a-message, or a parent/branch reference plus a rule for which branch is live. That is brain-service + a Postgres migration + a deploy, so it could not be proven live from here and was NOT started. Gap #5 stays open in that sense and should be re-ranked as a Brain slice rather than a chat one."
    }
   },
-  "nextGap": "6 history search over content (needs a server route) — also Brain-side; 7 spreadsheet analysis is the next consumer-side one."
+  "nextGap": "7 spreadsheet analysis — the arithmetic module EXISTS, is wired into the stream route, and has 22 passing tests; what is unmeasured is whether it produces the right number through the real UI. That measurement is the next step, not new code."
  }
 }

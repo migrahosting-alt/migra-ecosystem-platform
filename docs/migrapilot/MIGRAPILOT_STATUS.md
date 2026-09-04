@@ -15,6 +15,41 @@ _Last updated: 2026-09-04_
 
 ---
 
+## Lane 2026-09-04 — The consumer could not build from a clean clone either
+
+Found while opening chat gap #7, and it outranked the gap. `RESOLVED`.
+
+The spreadsheet analysis the gap asks for **already existed**: five careful modules that parse a
+CSV, classify each cell, refuse to sum anything merely numeric-shaped, compute the figure and hand
+it to the model as evidence with full provenance. Already wired into the chat stream route. Already
+covered by 22 passing tests. **And untracked** — along with `turnGrounding.ts`, which the same
+committed route imports.
+
+**Measured, not inferred.** Moving aside exactly the eight untracked source files a clean checkout
+would lack and running `tsc` produced two `TS2307` errors on the committed route. The consumer could
+not be built from its own repository; production ran a bundle whose source lived on one workstation's
+disk.
+
+🚨 **The brain-service guard added days earlier for the identical defect would not have caught this
+one.** It scans relative specifiers only, and this app imports itself through the `@/*` alias. A
+guard copied without checking which specifier shapes the package actually uses is a guard that passes
+while the build is broken.
+
+So the consumer now has its own `repositoryIntegrity.test.ts`: every source file tracked, and no
+tracked file importing a missing or untracked target — with alias resolution. Proven by reintroducing
+the defect: un-tracking the tables module fails both checks and names the exact edge.
+
+One detail worth keeping: the guard flagged **its own fixtures** on the first run. The wrong fix was
+an exemption for the file that defines the rule; the right one was to make every fixture name a real
+module, so the gate stays fully self-applying.
+
+**Gate:** typecheck 0 · 795/795 tests · `next build` green · bundle scan PASS.
+
+**Gap #7 itself is now a measurement, not a build.** The arithmetic exists and is wired; what nobody
+has shown is that a real CSV, attached in the real UI, produces the right total. That is next.
+
+---
+
 ## Lane 2026-09-04 — Ask again, without pretending anything was replaced
 
 Gap #5, shipped as the honest subset. `LIVE` for what was built; the rest is **blocked on Brain
