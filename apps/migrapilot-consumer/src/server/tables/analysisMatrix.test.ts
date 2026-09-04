@@ -24,6 +24,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { parseCell } from './cellValue'
+import { identifies } from './parseTable'
 import { tableEvidenceFor } from './tableEvidence'
 
 const dir = mkdtempSync(join(tmpdir(), 'migrapilot-matrix-'))
@@ -249,4 +250,66 @@ test('while a leading-zero INTEGER is still a code', () => {
 test('so a price column with a zero in it is computable again', async () => {
   const e = await ask('What is the total UnitPrice?')
   assert.match(e!.text, /sum of "UnitPrice": 6,586\.6/)
+})
+
+// ── THE REAL-SYSTEM FAILURE, 2026-09-04 ────────────────────────────────────
+
+test('🚨 REGRESSION: a named identifier column is never summed — the reported case', async () => {
+  /*
+   * REPORTED BY THE OWNER against the real product: "What is the total ZipCode
+   * in this file?" returned "The total ZipCode in this file is 132,737 …
+   * derived by summing the ZipCode column … exact arithmetic."
+   *
+   * The cause was NOT model behaviour and NOT this rule: production was running
+   * a build from 2026-08-31 that predates the identifier rule entirely. The
+   * deployed logic was reproduced outside the UI and returns exactly
+   * `sum of "ZipCode": 132,737`. This case pins the fixed behaviour so the
+   * deployed and the tested paths can never diverge on it again.
+   */
+  const dir2 = mkdtempSync(join(tmpdir(), 'migrapilot-reported-'))
+  writeFileSync(join(dir2, 'reported.csv'), [
+    'region,ZipCode,revenue',
+    'North,10018,120500',
+    'South,60601,98500',
+    'East,33101,143250',
+    'West,29017,111750',
+  ].join('\n'))
+  for (const q of [
+    'What is the total ZipCode in this file?',
+    'Add up all the ZipCode values and give me the number.',
+    'What is the total OrderID in this file?',
+  ]) {
+    const e = await tableEvidenceFor(q, ['reported.csv'], dir2)
+    assert.doesNotMatch(e?.text ?? '', /132,737/, `the identifier total must never appear: ${q}`)
+    assert.doesNotMatch(e?.text ?? '', /\bsum of "ZipCode"/, q)
+  }
+  // And the measure in the same file is untouched.
+  const revenue = await tableEvidenceFor('What is the total revenue in this file?', ['reported.csv'], dir2)
+  assert.match(revenue!.text, /sum of "revenue": 474,000/, 'the Revenue behaviour must survive the fix')
+})
+
+test('🚨 HEADER SPELLINGS: the rule was written for one fixture and missed two ordinary ones', () => {
+  /*
+   * `PostCode` split to "post" + "code" and `ORDERID` stayed a single token, so
+   * both were treated as measures — found by probing the rule against real
+   * spellings rather than against the file it was written for.
+   */
+  for (const header of [
+    'ZipCode', 'zipcode', 'ZIP', 'Zip Code', 'zip_code', 'ZIPCODE',
+    'PostCode', 'postcode', 'Postal Code', 'AreaCode', 'ProductCode',
+    'OrderID', 'order_id', 'Order Id', 'orderId', 'ORDERID', 'CUSTOMERID',
+    'SKU', 'Phone', 'phone_number', 'Fax', 'UUID', 'ISBN', 'Barcode', 'Serial',
+  ]) {
+    assert.equal(identifies(header), true, `${header} identifies rows`)
+  }
+})
+
+test('and the words it must NOT eat, which is where a substring rule would fail', () => {
+  for (const header of [
+    'Revenue', 'Paid', 'PAID', 'Grid Size', 'Bid', 'Rapid Spend', 'Amount', 'Cost',
+    'Units', 'UnitPrice', 'Margin', 'Total', 'Price', 'Salary', 'Quantity',
+    'Valid Rows', 'Solid Units', 'Video Minutes',
+  ]) {
+    assert.equal(identifies(header), false, `${header} measures something`)
+  }
 })

@@ -83,7 +83,38 @@ export function identifies(header: string): boolean {
     .toLowerCase()
     .split(/[^a-z0-9]+/)
     .filter(Boolean)
-  return tokens.some((token) => IDENTIFIER_WORDS.has(token))
+  if (tokens.some((token) => IDENTIFIER_WORDS.has(token))) return true
+
+  /*
+   * 🚨 HEADERS WRITTEN WITHOUT ANY BOUNDARY, which token-splitting cannot see.
+   *
+   * Found by probing the rule against ordinary spellings rather than against the
+   * one fixture it was written for: `PostCode` split to "post" + "code" and
+   * `ORDERID` stayed one token, so BOTH were treated as measures. `ORDERID` is
+   * how a mainframe export writes it and `PostCode` is how half the world writes
+   * a postcode.
+   */
+  const squashed = header.toLowerCase().replace(/[^a-z0-9]/g, '')
+  const enoughBefore = (suffix: string) => squashed.length >= suffix.length + 3
+
+  // `code` has no measure-word collisions worth worrying about — barcode,
+  // areacode, productcode, postcode are all identifiers; encode/decode are not
+  // numeric columns.
+  if (squashed.endsWith('code') && enoughBefore('code')) return true
+
+  /*
+   * `id` collides with ordinary English — paid, grid, bid, valid, rapid — so it
+   * is only trusted when the header is written ALL CAPS, which is how a export
+   * writes ORDERID and is not how anyone writes the word "paid" as a column.
+   * `PAID` is still safe: two letters before the suffix is under the floor.
+   *
+   * Where this is wrong it REFUSES to compute and says why, which is the
+   * direction to be wrong in.
+   */
+  const allCaps = header === header.toUpperCase() && /[A-Z]/.test(header)
+  if (allCaps && (squashed.endsWith('id') || squashed.endsWith('ids')) && enoughBefore('id')) return true
+
+  return false
 }
 
 export class TableParseError extends Error {
