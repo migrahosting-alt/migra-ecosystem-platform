@@ -1,7 +1,7 @@
 {
  "$schema": "MIGRAPILOT_STATUS — canonical cross-agent state. Update on every material change.",
  "updated": "2026-09-04",
- "updatedBy": "Claude (Opus 5) — structured-data acceptance matrix: 10 live cases green, 4 defects found and fixed",
+ "updatedBy": "🚨 REAL-SYSTEM ACCEPTANCE FAILURE diagnosed: production was 3 days stale. Fix ready; DEPLOY BLOCKED on permission.",
  "rules": {
   "easyFirst": "Do not start deep capability work while meaningful easy user-facing items remain.",
   "provenLive": "PROVEN_LIVE requires the real user-facing workflow to pass. Code existing and tests passing is NOT proof.",
@@ -271,6 +271,18 @@
   ]
  },
  "openDefects": [
+  {
+   "id": "identifier-refusal-failed-in-the-real-product",
+   "severity": "HIGH — reported by the owner against the real product",
+   "symptom": "\"What is the total ZipCode in this file?\" over 07_identifier_refusal.csv returned \"The total ZipCode in this file is 132,737 … derived by summing the ZipCode column … exact arithmetic.\"",
+   "🚨 rootCause": "NOT the model and NOT the classification rule. PRODUCTION WAS RUNNING A BUILD FROM 2026-08-31. Release feedback-08312352 (deployed 09-01 03:53, commit ca0d7686) contains the pre-fix table-evidence code and does NOT contain the identifier rule at all. A fix that was committed, tested, mutation-proven and pushed was invisible to the person testing the product.",
+   "reproducedOutsideTheUI": "Ran the deployed table logic — the modules as committed verbatim in 1f216b57, which is what was built — against an equivalent fixture: `sum of \"ZipCode\": 132,737`, the reported number exactly. The same probe at HEAD refuses both ZipCode questions and still returns `sum of \"revenue\": 474,000`.",
+   "secondDefectFound": "The probe also exposed two real gaps in the rule itself, which had only ever been tested against the fixture it was written for: `PostCode` split to \"post\"+\"code\" and `ORDERID` stayed one token, so BOTH were treated as measures. Closed by a squashed-suffix rule for `code`, and for `id` only when the header is ALL CAPS (because id collides with paid/grid/bid/valid/rapid). Both mutation-proven.",
+   "liveOnFixedCode": "Fresh conversation each: \"total ZipCode\" refused · \"Add up all the ZipCode values and give me the number\" refused · \"total OrderID\" answered honestly that the column is absent · \"total revenue\" still $474,000.",
+   "status": "FIX READY, NOT DEPLOYED. 🚨 DEPLOY BLOCKED — the privileged VM111 step was refused by the safety classifier and needs the owner to approve or run it. Until then the real product still returns 132,737.",
+   "howToShip": "scripts/migrapilot/deploy-consumer.sh <release-name>. Refuses a dirty tree, runs the full gate, hardlinks node_modules, BOOT-TESTS on a spare port before swapping, and finally greps the SERVING bundle for the rule — the step whose absence let this failure happen.",
+   "rollback": "feedback-08312352"
+  },
   {
    "id": "grounding-resolves-against-a-stale-index",
    "severity": "LOW in production, REAL in principle",
@@ -1699,7 +1711,9 @@
    "🚨 AN AMOUNT UNDER ONE WAS READ AS A CODE. The leading-zero identifier test stripped \".\" and \",\" first, so `0.00` became `000` and matched. Every amount under a pound, and zero itself, was an \"identifier\" — which put a real price column at 8/9 = 88.9%, under the bar, and disqualified it SILENTLY. Fixed by anchoring the rule to all-digits: `007` is a code, `0.50` is money.",
    "AMBIGUITY WENT QUIET. \"What is the total?\" over Revenue AND Cost correctly declined to compute — and the model then footed the table itself and answered $60,000. Right on three rows; the original defect on five thousand. The same reasoning that made a refusal SPEAK had not been applied to this branch."
   ],
-  "gramar": "\"East: 156,250 (1 rows)\" reached the model verbatim. Now \"1 row\"."
+  "gramar": "\"East: 156,250 (1 rows)\" reached the model verbatim. Now \"1 row\".",
+  "identifier refusal": "🚨 FAILED IN THE REAL PRODUCT 2026-09-04 (owner). Cause: stale production build, not the rule. Fixed + two further header-spelling gaps closed. READY FOR REAL-SYSTEM RETEST ONLY AFTER DEPLOY.",
+  "laneStatus": "NOT CLOSED — blocked on deploying the consumer to VM111."
  },
  "csvGroundingTopology": "OPEN ARCHITECTURE CONCERN, owner-flagged. The consumer hands the Brain a machine-local filesystem path to index, so CSV grounding only works where both processes share a disk. That is a deployment constraint to solve — canonical object/blob storage, or some location both sides can resolve — not something to institutionalise. It is also what forces every structured-data measurement onto a co-located Brain rather than production."
 }
