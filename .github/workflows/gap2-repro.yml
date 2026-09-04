@@ -16,6 +16,15 @@ name: gap2-repro
 # So it now runs on EVERY branch, filtered by the paths that can actually break it
 # rather than by which branch someone happened to be on.
 
+# 🚨 THE FILTER MUST COVER EVERYTHING THE JOB BUILDS.
+#
+# It listed brain-service, the extension and packages/ — but the job runs
+# `npm run build -ws`, which builds EVERY workspace. So a change to
+# migrapilot-consumer could break this gate without triggering it, and did: the
+# commit that finally fixed a day of red builds did not run the gate at all,
+# because it touched only the consumer. A filter narrower than the job is a gate
+# with holes in it.
+#
 # 🚨 THE PATH LIST IS WRITTEN OUT TWICE ON PURPOSE.
 #
 # It was a YAML anchor (&build_inputs / *build_inputs), which is valid YAML and is
@@ -29,7 +38,9 @@ on:
     paths:
       - 'apps/brain-service/**'
       - 'apps/vscode-extension/**'
+      - 'apps/migrapilot-consumer/**'
       - 'packages/**'
+      - 'MigraTeck/packages/auth-client/**'
       - 'package.json'
       - 'package-lock.json'
       - '.github/workflows/gap2-repro.yml'
@@ -38,7 +49,9 @@ on:
     paths:
       - 'apps/brain-service/**'
       - 'apps/vscode-extension/**'
+      - 'apps/migrapilot-consumer/**'
       - 'packages/**'
+      - 'MigraTeck/packages/auth-client/**'
       - 'package.json'
       - 'package-lock.json'
       - '.github/workflows/gap2-repro.yml'
