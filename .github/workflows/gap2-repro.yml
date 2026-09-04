@@ -65,6 +65,23 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22 # brain-service uses node:sqlite (Node >= 22)
+      # ── SYSTEM DEPENDENCIES PRODUCTION ACTUALLY HAS ────────────────────────
+      #
+      # poppler-utils is a RUNTIME dependency of the Brain, not a test fixture:
+      # scannedPdfJob.ts and pdfTextLayer.ts spawn `pdfinfo` and `pdftotext` to
+      # read one PDF page per subprocess, which is how a 35 MB document is
+      # ingested without the parser ever holding it in memory.
+      #
+      # VM111 has it and so does the workstation, so the suite passed everywhere
+      # anyone looked while failing here with `spawn pdfinfo ENOENT`. Skipping
+      # those tests would have been the easy fix and the wrong one — it would
+      # hide a real, undeclared system requirement of the service. The gate
+      # should provision what production runs, and then prove it.
+      - name: System dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq poppler-utils
+          pdfinfo -v 2>&1 | head -1
       # `ci`, not `install`: it installs the lockfile EXACTLY and fails when
       # package.json and the lockfile disagree. `install` will quietly resolve a
       # working tree that a clean clone could not reproduce, which is the whole
