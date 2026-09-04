@@ -1,0 +1,124 @@
+name: deploy-brain
+# Continuous delivery for the Brain, onto VM111.
+#
+# ── WHY A SELF-HOSTED RUNNER ───────────────────────────────────────────────────
+# VM111 has no inbound path: it sits behind pve and the tailnet, so GitHub cannot
+# webhook it and a hosted runner cannot reach it. A self-hosted runner solves this
+# by connecting OUTBOUND and long-polling, which needs no firewall change and no
+# credential stored on GitHub's side.
+#
+# ── WHAT IT WILL NOT DO ────────────────────────────────────────────────────────
+# It does not deploy every green commit. The team shares one working branch and
+# lanes land continuously — on the day this was written, an unrelated in-flight
+# lane was mid-feature on that branch. Auto-deploying "whatever is green" would
+# ship someone's half-built work to production the moment it compiled.
+#
+# So the trigger is an EXPLICIT ref: `deploy/brain`. Deploying is the deliberate
+# act of moving that ref to a commit you have decided to ship. Until that ref
+# exists nothing here fires, which is also how this stays disarmed until setup is
+# finished.
+#
+# ── WHAT IS DEPLOYED ───────────────────────────────────────────────────────────
+# The exact commit that PASSED the gate — `workflow_run.head_sha` — never the tip
+# of a branch. Between a run finishing and this job starting the branch can move;
+# deploying the tip would ship a commit nothing tested.
+#
+# Safety below the workflow: brain-release.sh installs from the lockfile, verifies
+# every declared dependency loads, boot-tests on a spare port, and only then moves
+# the `current` symlink — rolling back automatically if the health check fails.
+
+on:
+  workflow_run:
+    workflows: ['gap2-repro']
+    types: [completed]
+  # Manual, for the first controlled run and for redeploying a known-good sha.
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: 'Commit to deploy (must have passed gap2-repro)'
+        required: true
+
+# One deploy at a time, and never cancel one midway: a cancelled release can leave
+# `current` pointing at a half-copied tree.
+concurrency:
+  group: deploy-brain
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.head_branch == 'deploy/brain')
+    runs-on: [self-hosted, vm111]
+    timeout-minutes: 30
+    steps:
+      - name: Kill switch
+        # A file on the box, so a deploy can be stopped from the box — without a
+        # commit, a GitHub login, or waiting for anyone.
+        run: |
+          if [ -f /etc/migrapilot/deploy.disabled ]; then
+            echo "::notice::deploys are disabled on this host (/etc/migrapilot/deploy.disabled)"
+            cat /etc/migrapilot/deploy.disabled 2>/dev/null || true
+            exit 1
+          fi
+
+      - name: Resolve the commit that passed
+        id: target
+        run: |
+          SHA='${{ github.event_name == 'workflow_dispatch' && inputs.sha || github.event.workflow_run.head_sha }}'
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          echo "name=brain-${SHA:0:8}-$(date -u +%m%d%H%M)" >> "$GITHUB_OUTPUT"
+          echo "deploying $SHA"
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.target.outputs.sha }}
+          clean: true
+
+      - name: Install (clean, lockfile-exact)
+        run: npm ci --no-audit --no-fund
+
+      - name: Build
+        run: npm run build -ws
+
+      - name: Brain suite
+        # Re-run on the deployment host. CI proved it on a hosted runner; this
+        # proves it on the machine the code will actually run on.
+        working-directory: apps/brain-service
+        run: node --test 'dist/test/*.test.js'
+
+      - name: Build payload
+        run: ./scripts/build-brain-payload.sh "$RUNNER_TEMP/brain-payload.tgz"
+
+      - name: Release (boot-test, activate, health-check, auto-rollback)
+        run: |
+          /usr/bin/sudo /opt/migrapilot/bin/brain-release.sh \
+            --payload "$RUNNER_TEMP/brain-payload.tgz" \
+            --name '${{ steps.target.outputs.name }}' \
+            --activate
+
+      - name: Verify the service serves the new build
+        run: |
+          set -e
+          code=000
+          for i in $(seq 1 20); do
+            code=$(curl -s -o /tmp/h.json -w '%{http_code}' http://127.0.0.1:3988/health || true)
+            [ "$code" = "200" ] && break
+            sleep 3
+          done
+          [ "$code" = "200" ] || { echo "health did not return 200 (last: $code)"; exit 1; }
+          node -e '
+            const h = require("/tmp/h.json");
+            const r = h.readiness || {};
+            console.log("status:", h.status, "| gpuCapacity:", r.gpuCapacity, "| admission:", !!r.admission);
+            if (h.status !== "ok") { console.error("service is not ok"); process.exit(1); }
+          '
+
+      - name: Record
+        if: always()
+        run: |
+          echo "### Brain deploy: ${{ steps.target.outputs.name }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- commit: \`${{ steps.target.outputs.sha }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- result: ${{ job.status }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- rollback: point \`current\` at the previous release directory and restart the unit" >> "$GITHUB_STEP_SUMMARY"
