@@ -7,11 +7,50 @@ Why this exists: work kept discovering something, moving three lanes away, and t
 reconstruct what was finished — or why a decision was made — from conversation history. Every agent
 (Claude, Engineer, MigraPilot) reads this instead.
 
-_Last updated: 2026-09-03_
+_Last updated: 2026-09-04_
 
 > ⚠️ `CLAUDE.md` and `AGENTS.md` are **gitignored** in this repository, so the pointers added there are
 > local only. This file and its JSON are the tracked copies — link to `docs/migrapilot/` from any new
 > instruction file rather than relying on a root-level one to travel.
+
+---
+
+## Lane 2026-09-04 — The voices existed; nothing could choose one, and Listen was dead
+
+`LIVE`. Gap #4 of the Chat Capability Matrix, plus a defect found while opening it.
+
+**The gap.** The speech runtime has offered Warm, Bright and Steady all along and reported all
+three on every capability probe. No control could pick one, so every answer was read in the engine
+default and two voices were inventory. There is now a picker beside Listen — offered only where
+speech works, and only when the engine offers more than one voice. The voices and the default come
+FROM THE ENGINE; nothing is hardcoded in the browser, and a test asserts it. One choice for the
+whole screen, remembered per device, like the Migra family selector.
+
+🚨 **The defect that was there first: Listen was a dead control for every signed-out visitor.**
+`synthesisCapability` and `synthesizeSpeech` are absent from the operation audience table, so they
+took the closed-by-default fallback and were refused — and the route collapsed every failure into
+"The voice service could not be reached." A live button on every answer, failing on click, blaming
+our own infrastructure for a decision about accounts. **This is the same defect that table already
+documents twice** — for rename/delete, then for the thumbs — live again in a third place. The
+refusal and the outage are now separate facts: `requiresAccount` on the probe, `403 requires_account`
+instead of `503`, and the control renders disabled with the true sentence in both its tooltip and
+its aria-label. A real engine fault still reads as an outage.
+
+🚨 **Changing the voice had to throw away the audio synthesised in the old one.** Replay reuses the
+cached clip rather than re-synthesising, so without that the picker fails in the most convincing way
+there is: select Bright, press Listen, hear Warm — and no error, because nothing failed.
+
+### Owner ruling 2026-09-04 — speech stays signed-in only
+
+Asked because it had never been decided: those operations were simply never listed, so the audience
+was a fallback rather than a choice. Chat is already open to visitors on the same GPU, and the
+table's own principle ("the boundary is the SCOPE, not the sign-in state") argued for opening it —
+but there is an open GPU-contention defect and public TTS is uncapped compute. **Kept closed.**
+Opening it is a one-line change; a capped version is its own slice.
+
+**Gate:** typecheck 0 · 768/768 tests (from 737) · `next build` green · live: 6/6 signed-out checks
+and 9/9 picker checks against the production speech runtime. The route had no tests at all before
+this; it has 11 now. Next chat gap: #5, regenerate + edit/resend.
 
 ---
 

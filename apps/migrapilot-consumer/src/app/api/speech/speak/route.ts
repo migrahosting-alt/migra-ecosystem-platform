@@ -18,8 +18,27 @@ export const dynamic = 'force-dynamic'
 /** Matches the Brain's ceiling so an over-long answer fails here, cheaply. */
 const MAX_CHARS = 4000
 
+/**
+ * 🚨 A REFUSAL IS NOT AN OUTAGE, and this route used to report it as one.
+ *
+ * `synthesisCapability` and `synthesizeSpeech` are absent from the operation
+ * audience table, so a signed-out visitor is refused with
+ * `forbidden_for_principal` — and every failure here collapsed into "the voice
+ * service could not be reached". The Listen control therefore rendered live for
+ * every visitor, failed on click, and blamed our infrastructure for a decision
+ * about accounts. That is the same defect this product already fixed twice, for
+ * rename/delete and for the thumbs.
+ *
+ * The reason is separated here so the control can be honestly disabled with the
+ * true sentence instead of enabled with a false one.
+ */
+const REQUIRES_ACCOUNT = 'Sign in to have answers read aloud.'
+
 export async function GET(): Promise<Response> {
   const result = await synthesisCapability()
+  if (result.kind === 'forbidden_for_principal') {
+    return Response.json({ ready: false, voices: [], reason: REQUIRES_ACCOUNT, requiresAccount: true })
+  }
   if (result.kind !== 'ok') {
     // Not an error state for the caller: "we cannot speak right now" is a valid
     // answer to "can you speak", and the composer must render it as a disabled
@@ -56,6 +75,17 @@ export async function POST(request: Request): Promise<Response> {
   const voice = typeof body.voice === 'string' ? body.voice : undefined
 
   const result = await synthesizeSpeech(text, voice)
+  if (result.kind === 'forbidden_for_principal') {
+    /*
+     * 403, not 503. The service is fine; this caller may not use it. Returning
+     * an outage code here is what made "sign in for this" look like a fault the
+     * user should retry — and retrying can never succeed.
+     */
+    return Response.json(
+      { error: 'requires_account', message: `${REQUIRES_ACCOUNT} The text above is unaffected.` },
+      { status: 403 },
+    )
+  }
   if (result.kind !== 'ok' || !result.value?.audioBase64) {
     /*
      * Specific, and about the voice alone. The answer is on screen and stays

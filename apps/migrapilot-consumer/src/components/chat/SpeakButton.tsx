@@ -1,7 +1,15 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import { Loader2, Play, Square } from 'lucide-react'
+import { cn } from '@/lib/cn'
+import {
+  chooseVoice,
+  resolveVoice,
+  speechDisabledReason,
+  useChosenVoice,
+  useSpeechCapability,
+} from '@/features/speech/useSpeechVoices'
 
 /**
  * Read this answer aloud.
@@ -44,6 +52,18 @@ export function SpeakButton({ text, voice }: { text: string; voice?: string }): 
   const [problem, setProblem] = useState<string | null>(null)
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const urlRef = useRef<string | null>(null)
+  const voiceId = useId()
+  /*
+   * WHAT THE ENGINE SAYS IT CAN DO, asked once for the whole screen.
+   *
+   * An explicit `voice` prop still wins — a caller that has already decided is
+   * not overruled by a preference — but nothing has to pass one for the chosen
+   * voice to be honoured.
+   */
+  const capability = useSpeechCapability()
+  const remembered = useChosenVoice()
+  const speaking = voice ?? (capability ? resolveVoice(remembered, capability) : undefined)
+  const unavailable = speechDisabledReason(capability)
 
   // Releases the object URL and stops any sound when the turn scrolls away or
   // the conversation changes. Without this, navigating mid-playback leaves audio
@@ -52,6 +72,27 @@ export function SpeakButton({ text, voice }: { text: string; voice?: string }): 
     audioRef.current?.pause()
     if (urlRef.current) URL.revokeObjectURL(urlRef.current)
   }, [])
+
+  /*
+   * 🚨 CHANGING THE VOICE THROWS AWAY THE AUDIO SYNTHESISED IN THE OLD ONE.
+   *
+   * Replay deliberately reuses the cached clip rather than re-synthesising, so
+   * without this the picker would look broken in the most convincing way
+   * possible: the user selects Bright, presses Listen, and hears Warm again —
+   * with no error, because nothing failed. The choice is only real if the next
+   * read is actually made in it.
+   */
+  useEffect(() => {
+    const audio = audioRef.current
+    if (!audio) return
+    audio.pause()
+    if (urlRef.current) {
+      URL.revokeObjectURL(urlRef.current)
+      urlRef.current = null
+    }
+    audio.removeAttribute('src')
+    setState('idle')
+  }, [speaking])
 
   if (!text.trim()) return null
 
@@ -97,7 +138,7 @@ export function SpeakButton({ text, voice }: { text: string; voice?: string }): 
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         credentials: 'same-origin',
-        body: JSON.stringify({ text, ...(voice ? { voice } : {}) }),
+        body: JSON.stringify({ text, ...(speaking ? { voice: speaking } : {}) }),
       })
       const data = (await res.json()) as { audio?: string; message?: string }
       if (!res.ok || !data.audio) {
@@ -164,11 +205,33 @@ export function SpeakButton({ text, voice }: { text: string; voice?: string }): 
     <>
       <button
         type="button"
-        aria-label={state === 'playing' ? 'Stop reading' : state === 'preparing' ? 'Preparing audio' : 'Listen to this answer'}
-        title={state === 'preparing' ? 'Preparing audio…' : state === 'playing' ? 'Stop' : 'Listen to this answer'}
-        disabled={state === 'preparing'}
+        /*
+         * 🚨 OFF, WITH THE REAL REASON — not on and failing.
+         *
+         * Speech is an authenticated capability, so a signed-out visitor was
+         * shown a live Listen control that refused on click and reported the
+         * refusal as "the answer could not be read aloud just now", as though
+         * our service had faltered. The reason now comes from the capability
+         * probe, which knows the difference between "sign in" and "down".
+         */
+        aria-label={
+          unavailable
+            ? `Listen to this answer (unavailable: ${unavailable})`
+            : state === 'playing' ? 'Stop reading'
+              : state === 'preparing' ? 'Preparing audio' : 'Listen to this answer'
+        }
+        title={
+          unavailable ? unavailable
+            : state === 'preparing' ? 'Preparing audio…'
+              : state === 'playing' ? 'Stop' : 'Listen to this answer'
+        }
+        disabled={state === 'preparing' || Boolean(unavailable)}
         onClick={() => (state === 'playing' ? stop() : void play())}
-        className="inline-flex items-center gap-1.5 rounded-md px-2 py-1.5 text-[12.5px] font-medium text-slate-500 transition-colors hover:bg-raised hover:text-slate-700 disabled:cursor-wait focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-400"
+        className={cn(
+          'inline-flex items-center gap-1.5 rounded-md px-2 py-1.5 text-[12.5px] font-medium text-slate-500 transition-colors hover:bg-raised hover:text-slate-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-400',
+          // A wait and a refusal are not the same state and must not look alike.
+          unavailable ? 'cursor-not-allowed opacity-50 hover:bg-transparent hover:text-slate-500' : 'disabled:cursor-wait',
+        )}
       >
         {state === 'preparing' ? (
           // A real pending state, not a progress bar pretending to know how far
@@ -181,6 +244,36 @@ export function SpeakButton({ text, voice }: { text: string; voice?: string }): 
         )}
         <span>{label}</span>
       </button>
+
+      {/*
+        THE VOICES THE ENGINE ALREADY HAD, finally reachable.
+        Warm, Bright and Steady existed in the speech runtime and were reported
+        on every capability probe; nothing in the product let anyone choose one,
+        so every answer was read in the default and the other two were
+        inventory. Offered only where speech actually works, and only when there
+        is more than one — a picker with a single option is decoration.
+      */}
+      {capability?.ready && capability.voices.length > 1 && (
+        <>
+          <label htmlFor={voiceId} className="sr-only">
+            Voice for reading answers
+          </label>
+          <select
+            id={voiceId}
+            value={speaking ?? ''}
+            onChange={(event) => chooseVoice(event.target.value)}
+            title="Voice for reading answers"
+            className="rounded-md border border-hairline bg-raised px-1.5 py-1 text-[12.5px] font-medium text-slate-500 transition-colors hover:text-slate-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-400"
+          >
+            {capability.voices.map((option) => (
+              <option key={option.id} value={option.id}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </>
+      )}
+
       {state === 'error' && problem && (
         <span className="text-[12.5px] text-slate-500" role="status">
           {problem}
