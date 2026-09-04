@@ -15,6 +15,7 @@ import type { Block, Conversation, Message } from '@/data/types'
 import type { AnonymousChatQuota } from '@migrapilot/shared-types/anonymous-quota'
 import { useAnonymousQuota } from '@/features/anonymous/AnonymousQuotaProvider'
 import { startTurnTrace } from '@/features/observability/clientTrace'
+import { TurnRegistry, stoppedOutcome } from './turnControl'
 import { titleFromPrompt } from './demoResponder'
 import { toMessage, timeOf, type WireMessage } from '@/features/conversations/messages'
 
@@ -23,6 +24,14 @@ interface ChatContextValue {
   byId: (id: string) => Conversation | undefined
   /** Conversation id currently awaiting a reply, if any. */
   pendingIn: string | null
+  /**
+   * Stop the turn streaming in this conversation. Returns whether one was.
+   *
+   * The abort travels: the browser drops the request, the stream route's
+   * `cancel()` returns the Brain generator, and the model stops producing
+   * tokens for an answer nobody is waiting for. It is not a UI-only gesture.
+   */
+  stopTurn: (conversationId: string) => boolean
   /** Transient runtime progress for the in-flight turn. Never message content. */
   progressIn: { conversationId: string; detail: string } | null
   /** True until the caller's durable conversations have been read once. */
@@ -215,6 +224,15 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const pendingRef = useRef<string | null>(null)
   pendingRef.current = pendingIn
 
+  /**
+   * Every turn currently streaming, so one of them can be stopped.
+   *
+   * A ref, not state: aborting must reach the exact controller that owns the
+   * live request, and a re-render between opening the turn and pressing Stop
+   * must not hand the control a stale copy of it.
+   */
+  const turns = useRef(new TurnRegistry())
+
   /** Read the caller's durable conversations once, on mount. */
   useEffect(() => {
     let cancelled = false
@@ -372,6 +390,13 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const appendReply = useCallback(async (localId: string, prompt: string, attachments: string[] = [], images: string[] = [], modelFamily?: string) => {
     let conversationId = localId
     setPendingIn(conversationId)
+    /*
+     * Registered BEFORE the request is built. The turn becomes stoppable at the
+     * same moment it becomes pending — the composer's Stop control is driven by
+     * `pendingIn`, so a window where the button is showing and the registry has
+     * nothing to abort would be a control that does nothing.
+     */
+    const inFlight = turns.current.open(conversationId)
 
     /*
      * Adopt the Brain's id in place of the optimistic client-side one.
@@ -402,6 +427,13 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     const adoptDurableId = (from: string, to: string) => {
       hydrated.current.add(to)
       aliases.current.set(from, to)
+      /*
+       * The running turn follows the rename too. Stop is pressed against the id
+       * the PAGE is showing, and the page follows the Brain's id — so without
+       * this, the one turn long enough to want stopping (a new conversation,
+       * mid-stream) is the one Stop could not find.
+       */
+      turns.current.rekey(from, to)
       setConversations((current) =>
         current.map((conversation) =>
           conversation.id === from ? { ...conversation, id: to } : conversation,
@@ -474,6 +506,31 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     /** Show a picture the moment it is durable, without waiting for `done`. */
     const attachImages = () => paint(streamed)
 
+    /**
+     * Keep what the user chose to stop, and say what it is.
+     *
+     * The opposite of `discardPartial`, and deliberately so: an interrupted turn
+     * is a fault whose half-answer nobody asked for, while a STOPPED one is text
+     * the reader had already decided was enough. Deleting it would throw away the
+     * thing they stopped FOR. The mark is what keeps it honest — the stream route
+     * persists only completed turns, so this text exists on screen and nowhere
+     * else, and the message says exactly that.
+     */
+    const markStopped = () => {
+      setConversations((current) =>
+        current.map((conversation) =>
+          conversation.id === conversationId
+            ? {
+                ...conversation,
+                messages: conversation.messages.map((message) =>
+                  message.id === messageId ? { ...message, stopped: true } : message,
+                ),
+              }
+            : conversation,
+        ),
+      )
+    }
+
     /** Drop the in-progress bubble. An interrupted answer is not an answer. */
     const discardPartial = () => {
       setConversations((current) =>
@@ -495,6 +552,13 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       const response = await fetch('/api/chat/stream', {
         method: 'POST',
         headers: { 'content-type': 'application/json', 'x-request-id': turn.id },
+        /*
+         * What actually stops the model. Dropping this request is what runs the
+         * stream route's `cancel()`, which returns the Brain generator upstream;
+         * a Stop that only cleared the spinner would leave the turn running and
+         * still being paid for, invisibly.
+         */
+        signal: inFlight.controller.signal,
         // A brand-new conversation has only a client-side id, which the Brain
         // has never seen; omitting it is what asks the Brain to create one.
         body: JSON.stringify({
@@ -717,11 +781,35 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       )
       turn.finish(failure ? 'error_frame' : 'interrupted')
     } catch {
+      /*
+       * A STOP IS NOT AN OUTAGE.
+       *
+       * Both arrive here as a rejected read — the abort and a dropped
+       * connection are the same event to `fetch` — and only the registry knows
+       * which one happened. Reporting the user's own decision as "the assistant
+       * could not be reached" would blame the product for a button they pressed,
+       * and would send them back to retry a turn they meant to end.
+       */
+      if (inFlight.stopped) {
+        const outcome = stoppedOutcome({ streamed, generated: generated.length })
+        if (outcome.keep) markStopped()
+        else {
+          discardPartial()
+          push(notice(outcome.notice))
+        }
+        setPendingIn(null)
+        setProgressIn(null)
+        turn.finish('stopped')
+        return
+      }
       // A dropped connection is not an answer either.
       discardPartial()
       push(notice('The assistant could not be reached. Nothing here is a generated answer.'))
       turn.finish('unreachable')
     } finally {
+      // The turn is over however it ended: leaving it registered would leave a
+      // Stop control pointed at a request that is already gone.
+      turns.current.close(inFlight)
       /*
        * The backstop. A turn that leaves by a path added later still gets a line
        * — the failures are exactly the ones worth having a trace for, and a
@@ -960,6 +1048,19 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     return true
   }, [])
 
+  /**
+   * Stop the turn running in a conversation.
+   *
+   * The alias fallback covers the one render where the two ids disagree: the
+   * page can still be mounted on the optimistic id at the instant the Brain's
+   * name lands, and a Stop pressed in that window is about the same turn.
+   */
+  const stopTurn = useCallback((conversationId: string): boolean => {
+    if (turns.current.stop(conversationId)) return true
+    const aliased = aliases.current.get(conversationId)
+    return aliased ? turns.current.stop(aliased) : false
+  }, [])
+
   const value = useMemo<ChatContextValue>(
     () => ({
       conversations,
@@ -970,6 +1071,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         return aliased ? conversations.find((conversation) => conversation.id === aliased) : undefined
       },
       pendingIn,
+      stopTurn,
       progressIn,
       loading,
       isMissingConversation,
@@ -985,6 +1087,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       conversations,
       progressIn,
       pendingIn,
+      stopTurn,
       loading,
       isMissingConversation,
       startConversation,

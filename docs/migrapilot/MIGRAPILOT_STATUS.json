@@ -1,7 +1,7 @@
 {
  "$schema": "MIGRAPILOT_STATUS — canonical cross-agent state. Update on every material change.",
  "updated": "2026-09-03",
- "updatedBy": "Claude (Opus 5) — capacity gate for the coding agent + engineer-turn truthfulness/attribution fixes",
+ "updatedBy": "Claude (Opus 5) — consumer chat: Stop generation shipped and proven live (gap #3 of the Chat Capability Matrix)",
  "rules": {
   "easyFirst": "Do not start deep capability work while meaningful easy user-facing items remain.",
   "provenLive": "PROVEN_LIVE requires the real user-facing workflow to pass. Code existing and tests passing is NOT proof.",
@@ -1534,7 +1534,6 @@
   "rankedGaps": [
    "1 message feedback (dead control, smallest fix)",
    "2 picker/storage agreement",
-   "3 stop generation",
    "4 voice picker",
    "5 regenerate + edit/resend (shared branch semantics)",
    "6 history search over content (needs a server route)",
@@ -1556,7 +1555,20 @@
     "retract": "UI shows nothing selected; backend returns []",
     "failure": "forced 503 on the write — UI shows \"could not be saved. Try again in a moment.\", nothing selected, no row created"
    },
-   "22-24 picker/storage agreement": "LIVE"
-  }
+   "22-24 picker/storage agreement": "LIVE",
+   "3 stop generation": "LIVE — proven end to end against the production Brain (qwen3:8b) on 2026-09-03",
+   "evidence_stop": {
+    "control": "The send button BECOMES Stop while a turn streams — one slot, two states, so a second turn can no longer be fired into a conversation already receiving one. Enter obeys the same rule.",
+    "mechanism": "The browser aborts the request (network shows ERR_ABORTED). The route's cancel() returns the Brain generator, whose finally releases the upstream reader. Server trace for the stopped turn: outcome=\"cancelled\", model qwen3:8b.",
+    "🚨 loadBearingMechanism": "The REQUEST SIGNAL, not the response cancel. Proven by writing the test the other way first: cancelling only the response stream calls cancel(), which awaits frames.return() — and the generator is suspended on an upstream read a still-generating model never settles, so the return queues behind it and NOTHING unwinds. request.signal is what rejects that read. Removing `signal: request.signal` from the route makes the regression test hang.",
+    "partialAnswer": "KEPT on screen and labelled \"You stopped this answer. It was not finished, so it was not saved.\" Neutral, not amber: a stop is not a fault. A turn stopped before any output keeps nothing and says so.",
+    "honesty": "Verified by reload: the question survives, the stopped partial does not — exactly what the label promises.",
+    "🚨 defectFoundAndFixed": "My own first implementation SENT A MESSAGE when Stop was clicked. Reproduced deterministically in a real browser: two requests for one click. type=\"button\" was already correct and did not save it — onStop aborts, the rejection lands on the microtask checkpoint at the end of the click handler, React clears pending and re-renders, and because both branches render a <button> in the same position React PATCHED THE CLICKED NODE to type=\"submit\" before the browser ran the click default action. Fixed with preventDefault() plus distinct React keys so the node is replaced, not retyped. Both defences mutation-tested.",
+    "tests": "+28: src/state/stopGeneration.test.ts (27 — registry behaviour, the stopped-vs-dropped distinction, the outcome rule, and wiring guards) and one route test, \"STOP: a browser that hangs up mid-answer cuts the Brain off\". Every guard proven by reintroducing its defect.",
+    "gate": "typecheck 0 · 737/737 tests pass (from 709) · next build green · client-bundle scan PASS · 13/13 live browser checks pass.",
+    "notDone": "The partial answer is not persisted, so a stopped turn still vanishes on reload. That is the stream route's existing rule (only a completed turn is stored), stated honestly rather than changed. Persisting stopped partials is a separate decision."
+   }
+  },
+  "nextGap": "4 voice picker — Warm/Bright/Steady exist in routing and the Brain reports them; the UI still has no picker."
  }
 }

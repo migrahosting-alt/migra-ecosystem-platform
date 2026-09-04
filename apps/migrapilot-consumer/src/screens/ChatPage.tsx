@@ -73,7 +73,7 @@ export function ChatPage() {
   const router = useRouter()
   const id = typeof params?.id === 'string' ? params.id : ''
   const { byId, sendMessage, detachConversationImage,
-    detachConversationFile, pendingIn, progressIn, loading, openConversation, isMissingConversation } = useChat()
+    detachConversationFile, pendingIn, stopTurn, progressIn, loading, openConversation, isMissingConversation } = useChat()
   const allowance = useAnonymousQuota()
   /*
    * The chosen Migra family, or undefined for automatic routing.
@@ -204,6 +204,11 @@ export function ChatPage() {
             — product identities — and never the backend serving them.
           */}
           <ModelFamilySelector className="mb-2" onChange={setModelFamily} />
+          {/*
+            `streaming` is the SAME `pending` that drives the typing indicator, so
+            the send/stop control and the spinner can never disagree about whether
+            a turn is running — and Stop is offered exactly while one is.
+          */}
           <Composer
             onSubmit={(value, meta) => {
               if (outOfTurns) return
@@ -215,6 +220,8 @@ export function ChatPage() {
               ? { conversationFiles: conversation.groundingFiles }
               : {})}
             onDetachConversationFile={(name) => void detachConversationFile(conversation.id, name)}
+            streaming={pending}
+            onStop={() => stopTurn(conversation.id)}
             disabled={outOfTurns}
             disabledReason="You have used all your free messages. Sign in or create an account to keep going — this conversation comes with you."
           />

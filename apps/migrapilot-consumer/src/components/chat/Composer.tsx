@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useRef, useState, type ChangeEvent, type ClipboardEvent, type DragEvent, type FormEvent, type KeyboardEvent } from 'react'
-import { FileText, Lock, Mic, SendHorizontal, X } from 'lucide-react'
+import { FileText, Lock, Mic, SendHorizontal, Square, X } from 'lucide-react'
 import { AttachmentChips } from '@/features/attachments/AttachmentChips'
 import { useAttachments } from '@/features/attachments/useAttachments'
 import { useVisionAvailability, visionDisabledReason } from '@/features/attachments/useVisionAvailability'
@@ -68,6 +68,8 @@ export function Composer({
   highlighted,
   disabled = false,
   disabledReason,
+  streaming = false,
+  onStop,
   conversationImages,
   conversationFiles,
   onDetachConversationFile,
@@ -98,6 +100,17 @@ export function Composer({
   disabled?: boolean
   /** Shown in the tooltip. A disabled control with no reason is a dead end. */
   disabledReason?: string
+  /**
+   * A turn is streaming into this conversation right now.
+   *
+   * The send control becomes Stop while it is — the same slot, because that is
+   * where the hand already is, and because it is the only way to make the two
+   * states mutually exclusive. Leaving Send live during a stream let a second
+   * turn be fired into a conversation already receiving one.
+   */
+  streaming?: boolean
+  /** End the streaming turn. Required for the Stop control to appear at all. */
+  onStop?: () => void
   /**
    * Images this conversation is ALREADY about, from the Brain's durable set.
    *
@@ -192,9 +205,25 @@ export function Composer({
     el.style.height = `${Math.min(el.scrollHeight, 168)}px`
   }
 
+  /*
+   * Opting in is all or nothing. A surface that reports `streaming` but hands
+   * over no way to stop would lose its send control and gain nothing — so both
+   * are required before this composer changes behaviour at all.
+   */
+  const stoppable = streaming && Boolean(onStop)
+
   const submit = (event?: FormEvent) => {
     event?.preventDefault()
     if (disabled) return
+    /*
+     * Enter obeys the same rule as the button.
+     *
+     * Swapping the control would be cosmetic on its own: the keyboard is how
+     * most turns are sent, so leaving Enter live would keep the exact defect —
+     * a second turn fired into a conversation that is already streaming one,
+     * which overwrites the pending id and leaves the first turn unstoppable.
+     */
+    if (stoppable) return
     const trimmed = value.trim()
     if (!trimmed) return
     // Never send while an attachment is still uploading or indexing: the turn would be
@@ -710,17 +739,56 @@ export function Composer({
               <Mic className="h-[18px] w-[18px]" strokeWidth={1.9} />
             </button>
           )}
-          <button
-            type="submit"
-            aria-label="Send message"
-            className="inline-flex h-10 w-10 items-center justify-center rounded-field bg-brand-600 text-white shadow-brand transition-all hover:bg-brand-700 active:scale-95 disabled:opacity-40 disabled:shadow-none"
-            disabled={disabled || !value.trim() || busy}
-            title={
-              disabled ? disabledReason : busy ? 'Waiting for your attachment to finish' : undefined
-            }
-          >
-            <SendHorizontal className="h-[18px] w-[18px]" strokeWidth={2} />
-          </button>
+          {/*
+            ONE SLOT, TWO STATES — never both. The turn is either being sent or
+            being stopped, and rendering Send beside a running stream is what
+            allowed a second turn to be fired into it.
+
+            🚨 THREE THINGS KEEP STOP FROM SENDING A MESSAGE, and the first two
+            alone were not enough — measured in a real browser, not reasoned
+            about. Clicking Stop with anything typed in the box SENT IT as a new
+            turn: `onStop` aborts, the rejection lands on the microtask
+            checkpoint at the end of the click handler, React clears `pending`
+            and re-renders — and because both branches render a `<button>` in
+            the same position, React PATCHED the very node being clicked from
+            `type="button"` to `type="submit"`. The browser then ran the click's
+            default action against a submit button and posted the composer.
+
+              1. `type="button"` — correct, and defeated by the patch above.
+              2. Distinct `key`s, so React REPLACES the node instead of
+                 retyping it. The clicked element is gone before the default
+                 action, and a disconnected button has no form to submit.
+              3. `preventDefault()` — the guarantee that does not depend on
+                 reconciliation timing at all.
+          */}
+          {stoppable ? (
+            <button
+              key="stop"
+              type="button"
+              aria-label="Stop generating"
+              title="Stop generating"
+              onClick={(event) => {
+                event.preventDefault()
+                onStop?.()
+              }}
+              className="inline-flex h-10 w-10 items-center justify-center rounded-field border border-slate-300 bg-raised text-slate-700 transition-all hover:border-slate-400 hover:bg-slate-50 active:scale-95"
+            >
+              <Square className="h-[15px] w-[15px]" fill="currentColor" strokeWidth={0} />
+            </button>
+          ) : (
+            <button
+              key="send"
+              type="submit"
+              aria-label="Send message"
+              className="inline-flex h-10 w-10 items-center justify-center rounded-field bg-brand-600 text-white shadow-brand transition-all hover:bg-brand-700 active:scale-95 disabled:opacity-40 disabled:shadow-none"
+              disabled={disabled || !value.trim() || busy}
+              title={
+                disabled ? disabledReason : busy ? 'Waiting for your attachment to finish' : undefined
+              }
+            >
+              <SendHorizontal className="h-[18px] w-[18px]" strokeWidth={2} />
+            </button>
+          )}
         </div>
       </div>
     </form>

@@ -429,6 +429,26 @@ function AssistantTurn({
           )}
 
           {/*
+            * An answer the reader ended themselves.
+            *
+            * Neutral, not amber: nothing failed, so a warning colour would read
+            * as an error the user caused. What it does say is the one fact that
+            * is not obvious — the text on screen is all there is of it.
+            */}
+          {message.stopped && (
+            <div
+              role="status"
+              className="mt-5 flex items-start gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-[13px] text-slate-600"
+            >
+              <span aria-hidden="true">■</span>
+              <span>
+                <strong className="font-semibold text-slate-700">You stopped this answer.</strong>{' '}
+                It was not finished, so it was not saved — it will not be here after you reload.
+              </span>
+            </div>
+          )}
+
+          {/*
             * A real answer that storage refused. Stated in the user's terms —
             * what will happen to it — not in ours.
             */}

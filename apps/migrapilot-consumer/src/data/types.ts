@@ -131,6 +131,16 @@ export interface Message {
    * happen. So it is shown, and it is labelled.
    */
   unsaved?: boolean
+  /**
+   * Assistant turns only — a partial answer the USER stopped.
+   *
+   * Distinct from `unsaved`, which is a storage fault, and from `error`, which
+   * is a failure to generate. Nothing went wrong here: the reader had seen
+   * enough and ended the turn, so the text is kept rather than discarded. It is
+   * still not durable — the stream route persists only completed turns — and the
+   * label is what stops the transcript implying otherwise.
+   */
+  stopped?: boolean
 }
 
 export interface Conversation {

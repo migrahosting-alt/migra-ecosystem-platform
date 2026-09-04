@@ -7,11 +7,53 @@ Why this exists: work kept discovering something, moving three lanes away, and t
 reconstruct what was finished — or why a decision was made — from conversation history. Every agent
 (Claude, Engineer, MigraPilot) reads this instead.
 
-_Last updated: 2026-09-01_
+_Last updated: 2026-09-03_
 
 > ⚠️ `CLAUDE.md` and `AGENTS.md` are **gitignored** in this repository, so the pointers added there are
 > local only. This file and its JSON are the tracked copies — link to `docs/migrapilot/` from any new
 > instruction file rather than relying on a root-level one to travel.
+
+---
+
+## Lane 2026-09-03 — A running answer can be stopped
+
+`LIVE`. Gap #3 of the Chat Capability Matrix ("NO STOP: a running turn cannot be stopped; the Brain
+aborts only on browser disconnect") is closed, proven end to end against the production Brain.
+
+The send button **becomes** Stop while a turn streams — one slot, two states — and Enter obeys the
+same rule. That is not only how Stop got a home: rendering Send beside a running stream is what let a
+second turn be fired into a conversation already receiving one.
+
+**The abort travels.** The browser drops the request, the stream route's `cancel()` returns the Brain
+generator, and the generator's `finally` releases the upstream reader. The server trace for a stopped
+turn reads `outcome: "cancelled"`. A Stop that only cleared the spinner would leave a graphics card
+producing an answer nobody would ever read.
+
+🚨 **The load-bearing mechanism is the REQUEST SIGNAL, not the response cancel** — established by
+writing the regression test the wrong way round first. Cancelling only the response stream calls
+`cancel()`, which awaits `frames.return()`; the generator is suspended on an upstream `read()` that a
+still-generating model never settles, so the return queues behind it and nothing unwinds. Deleting
+`signal: request.signal` from the route makes that test hang, which is how we know.
+
+**What the user is left holding.** Text they already read is kept and labelled — "You stopped this
+answer. It was not finished, so it was not saved." — in neutral grey, because a stop is not a fault.
+A turn stopped before any output keeps nothing and says so. An image-only turn counts as an answer,
+the same rule as the delivery path. Verified by reload: the question survives, the partial does not,
+exactly as the label promises.
+
+### The defect the live run found in the fix itself
+
+The first implementation **sent a message when Stop was clicked** — two requests for one click,
+reproduced deterministically in a real browser. `type="button"` was already there and did not save
+it: `onStop` aborts, the rejection lands on the microtask checkpoint at the end of the click handler,
+React clears `pending` and re-renders, and because both branches render a `<button>` in the same
+position React **patched the clicked node** to `type="submit"` before the browser ran the click's
+default action. Fixed with `preventDefault()` and distinct React keys so the node is replaced rather
+than retyped; both defences are mutation-tested. Structural reasoning would not have found this — the
+browser did.
+
+**Gate:** typecheck 0 · 737/737 tests (from 709) · `next build` green · client-bundle scan PASS ·
+13/13 live browser checks. Not committed, not deployed. Next chat gap: #4, the voice picker.
 
 ---
 

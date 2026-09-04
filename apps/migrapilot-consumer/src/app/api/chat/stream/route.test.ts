@@ -90,10 +90,20 @@ function brainStub(
     conversationGrounding?: string[]
     /** Serve an APPROVED index so reconciliation can find one. */
     approvedIndex?: boolean
+    /**
+     * Stream one token and then NEVER end — a model still generating.
+     *
+     * This is the only way to test a stop: a stub that closes its own stream has
+     * already finished by the time anything could interrupt it, so cancelling it
+     * would prove nothing about whether the browser can end a live turn.
+     */
+    holdChatOpen?: boolean
   } = {},
 ) {
   const calls: { url: string; init: RequestInit }[] = []
   const original = globalThis.fetch
+  /** Set when the route releases the upstream reader — i.e. the Brain was cut off. */
+  let chatCancelled = false
 
   globalThis.fetch = (async (url: string | URL | Request, init: RequestInit = {}) => {
     const href = String(url)
@@ -124,6 +134,34 @@ function brainStub(
     }
 
     if (href.endsWith('/api/ai/chat')) {
+      if (options.holdChatOpen) {
+        const opening = new TextEncoder().encode(sse([['token', { text: 'The first half' }]]))
+        /*
+         * Honours `init.signal`, because real `fetch` does and the difference is
+         * the whole point of the test: a body that ignored the abort would leave
+         * the route's read pending forever, which is precisely the deadlock this
+         * stub has to be able to reproduce.
+         */
+        const signal = init.signal as AbortSignal | undefined
+        const body = new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(opening)
+            // Deliberately never closed: the model is still producing.
+            signal?.addEventListener('abort', () => {
+              chatCancelled = true
+              try {
+                controller.error(new DOMException('The operation was aborted.', 'AbortError'))
+              } catch {
+                /* already closed by the reader */
+              }
+            })
+          },
+          cancel() {
+            chatCancelled = true
+          },
+        })
+        return new Response(body, { status: 200, headers: { 'content-type': 'text/event-stream' } })
+      }
       const payload = options.chatBody ?? sse([['token', { text: 'hello' }], ['done', { requestId: 'r' }]])
       const bytes = new TextEncoder().encode(payload)
       const split = options.chunkAt ?? bytes.length
@@ -167,6 +205,8 @@ function brainStub(
 
   return {
     calls,
+    /** Did the route cut the Brain off, rather than merely stop reading it? */
+    chatCancelled: () => chatCancelled,
     paths: () => calls.map((call) => new URL(call.url).pathname),
     /** Assistant messages the route asked the Brain to persist. */
     storedAssistant: () =>
@@ -366,6 +406,66 @@ test('a stream that ends without `done` persists NOTHING', async () => {
   const last = frames[frames.length - 1]!
   assert.equal(last.event, 'error')
   assert.equal(last.data.error, 'stream_interrupted')
+
+  brain.restore()
+  resetAuthPort()
+})
+
+test('STOP: a browser that hangs up mid-answer cuts the Brain off', async () => {
+  /*
+   * What makes Stop real rather than cosmetic.
+   *
+   * A stopped turn must stop COSTING. If the model keeps producing tokens for an
+   * answer nobody is reading, all the button did was hide the spinner while the
+   * graphics card stayed occupied and the bill kept running.
+   *
+   * 🚨 THE MECHANISM IS THE REQUEST SIGNAL, not the response cancel — proven by
+   * writing this test the other way first. Cancelling only the browser-side
+   * stream calls this route's `cancel()`, which awaits `frames.return()`; the
+   * generator is suspended on an upstream `read()` that a still-generating model
+   * never settles, so the return QUEUES BEHIND IT and nothing unwinds. Aborting
+   * the request is what rejects that read and lets the whole chain collapse.
+   * Both fire on a real disconnect, and this test models both — but only one of
+   * them is load-bearing, so the route must keep passing `request.signal` to the
+   * Brain call.
+   */
+  const brain = brainStub({ holdChatOpen: true })
+  setAuthPort(portWith(session))
+
+  const stop = new AbortController()
+  const response = await POST(
+    new Request('https://chat.example.test/api/chat/stream', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ prompt: 'write me something long' }),
+      signal: stop.signal,
+    }),
+  )
+  assert.equal(response.status, 200)
+
+  const reader = response.body!.getReader()
+  const decoder = new TextDecoder()
+  let seen = ''
+  // Read until the answer is genuinely under way. Stopping before the first
+  // token would exercise the pre-stream path, not a running turn.
+  while (!seen.includes('event: token')) {
+    const { value, done } = await reader.read()
+    if (done) break
+    seen += decoder.decode(value, { stream: true })
+  }
+  assert.match(seen, /The first half/, 'the turn was mid-answer when it was stopped')
+  assert.equal(brain.chatCancelled(), false, 'and the Brain is still generating')
+
+  // The browser going away, as the runtime reports it: the request is aborted
+  // and the response body is released.
+  stop.abort()
+  await reader.cancel().catch(() => undefined)
+
+  for (let attempt = 0; attempt < 200 && !brain.chatCancelled(); attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 5))
+  }
+  assert.equal(brain.chatCancelled(), true, 'the upstream Brain request was cut off')
+  assert.deepEqual(brain.storedAssistant(), [], 'and a stopped turn persists nothing')
 
   brain.restore()
   resetAuthPort()
