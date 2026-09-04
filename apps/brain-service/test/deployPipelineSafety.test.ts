@@ -136,7 +136,11 @@ test('every script the pipeline runs is TRACKED, not merely present on someone d
    * machine that wrote it and does not exist on the runner. `existsSync` above
    * cannot see the difference; only git can.
    */
-  const scripts = ['scripts/brain-release.sh', 'scripts/build-brain-payload.sh'];
+  const scripts = [
+    'scripts/brain-release.sh',
+    'scripts/build-brain-payload.sh',
+    'scripts/install-brain-deploy-runner.sh',
+  ];
   const tracked = new Set(
     execFileSync('git', ['ls-files', '--', 'scripts'], { cwd: ROOT, encoding: 'utf8' })
       .split('\n')

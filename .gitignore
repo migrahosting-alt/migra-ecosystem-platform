@@ -28,6 +28,7 @@
 !/scripts/
 !/scripts/brain-release.sh
 !/scripts/build-brain-payload.sh
+!/scripts/install-brain-deploy-runner.sh
 !/scripts/consumer-release.sh
 !/scripts/release-retention.sh
 # The proxy's upload ceiling is production configuration that the app's own

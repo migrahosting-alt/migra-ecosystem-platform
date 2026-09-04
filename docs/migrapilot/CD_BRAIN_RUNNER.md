@@ -19,68 +19,59 @@ as the runner user on VM111. That is acceptable for a private repo with a small
 trusted team, and it is the reason for steps 2 and 3 below — the runner is an
 unprivileged user that can invoke exactly one privileged command, and nothing else.
 
-## 1. Register the runner  *(you — it needs a token)*
+## 1-3. Install the runner  *(one command, on VM111, as root)*
+
+Steps 1 to 3 below are automated by `scripts/install-brain-deploy-runner.sh`. It is
+idempotent, and it validates the sudoers file with `visudo -c` before installing it —
+a malformed one can lock everybody out of sudo on the box.
+
+`/opt/migrapilot/bin/brain-release.sh` is **already installed** (`root:root 0755`,
+2026-09-04). The installer verifies it rather than placing it, so re-copy it from
+`scripts/brain-release.sh` after changing that file:
+
+```
+sudo cp scripts/brain-release.sh /opt/migrapilot/bin/brain-release.sh
+sudo chown root:root /opt/migrapilot/bin/brain-release.sh
+sudo chmod 0755 /opt/migrapilot/bin/brain-release.sh
+```
 
 Get a **runner registration token** from:
 
 > GitHub → `Migrateck-Ecosystem/migra-ecosystem-platform` → Settings → Actions →
 > Runners → **New self-hosted runner** → Linux x64
 
-It is short-lived (about an hour) and is not a PAT. Do not paste it into chat, a
-commit, or a file — pass it to `config.sh` and let the runner store its own
-credential.
-
-On VM111, as a **dedicated unprivileged user** (not root, not `bonex`):
-
-```bash
-sudo useradd -m -s /bin/bash migradeploy
-sudo -u migradeploy -H bash -lc '
-  mkdir -p ~/actions-runner && cd ~/actions-runner
-  curl -sSLo r.tar.gz https://github.com/actions/runner/releases/download/v2.319.1/actions-runner-linux-x64-2.319.1.tar.gz
-  tar xzf r.tar.gz && rm r.tar.gz
-  ./config.sh --unattended \
-    --url https://github.com/Migrateck-Ecosystem/migra-ecosystem-platform \
-    --labels self-hosted,vm111 \
-    --name vm111 \
-    --token <PASTE_TOKEN_HERE>
-'
-cd /home/migradeploy/actions-runner && sudo ./svc.sh install migradeploy && sudo ./svc.sh start
-```
-
-The label **`vm111`** is what `runs-on: [self-hosted, vm111]` selects. If it does not
-match, jobs queue forever rather than failing — check `./svc.sh status`.
-
-## 2. Install the release script where the pipeline expects it — ✅ ALREADY DONE
-
-The workflow calls `/opt/migrapilot/bin/brain-release.sh`. It is installed from the
-repo copy, `root:root 0755`, verified 2026-09-04. Re-run these after changing the
-script, so the deployed copy stays the reviewed one:
-
-```bash
-sudo mkdir -p /opt/migrapilot/bin
-sudo cp scripts/brain-release.sh /opt/migrapilot/bin/brain-release.sh
-sudo chown root:root /opt/migrapilot/bin/brain-release.sh
-sudo chmod 0755 /opt/migrapilot/bin/brain-release.sh
-```
-
-Root-owned and not writable by the runner user **on purpose**: the runner is allowed
-to *invoke* it, never to *edit* it. Otherwise "run one privileged command" becomes
-"run any command", because the runner could rewrite the script first.
-
-## 3. Grant exactly one privileged command  *(you — it is a security change)*
-
-```bash
-sudo visudo -f /etc/sudoers.d/migradeploy
-```
+It is short-lived (~1 hour) and is not a PAT. The runner exchanges it for its own
+credential and it is never needed again. Then, on VM111:
 
 ```
-migradeploy ALL=(root) NOPASSWD: /opt/migrapilot/bin/brain-release.sh --payload * --name * --activate
+sudo ./scripts/install-brain-deploy-runner.sh --token <PASTE_TOKEN>
 ```
 
-Then `sudo chmod 0440 /etc/sudoers.d/migradeploy`.
+The script never echoes, logs or writes the token. Do not put it in a commit.
 
-That is the whole grant: one script, one argument shape. Not `ALL`, not `systemctl`,
-not a wildcard path.
+What it does, and why each part is shaped that way:
+
+1. **Verifies `/opt/migrapilot/bin/brain-release.sh` is root-owned and not
+   group/other writable — first, before anything else.** The whole privilege model
+   rests on it: the runner may *invoke* that file, never *edit* it. If the runner
+   could rewrite it, "one privileged command" would silently mean "any command".
+2. **Creates `migradeploy`** — a system account with `/usr/sbin/nologin`. The runner
+   does not need a login shell.
+3. **Installs the runner under `/opt/migrapilot/actions-runner`** with the labels
+   `self-hosted,vm111`, which is what `runs-on:` selects. A label mismatch makes jobs
+   queue forever rather than fail, so check `./svc.sh status` if nothing runs.
+4. **Grants exactly one privileged command** via `/etc/sudoers.d/migradeploy`:
+   `migradeploy ALL=(root) NOPASSWD: /opt/migrapilot/bin/brain-release.sh *`.
+   Not `ALL`, not `systemctl`, not a wildcard path.
+5. **Installs and starts the systemd service.**
+
+### The trust boundary, stated plainly
+
+A self-hosted runner executes workflow code from the repository on a production
+host. Anyone who can push a workflow change can run code as `migradeploy` on VM111.
+That is inherent to continuous delivery, not a flaw in the setup — and it is exactly
+why the runner is unprivileged and its one privileged capability is a root-owned
+script it cannot modify.
 
 ## 4. Arm it
 
