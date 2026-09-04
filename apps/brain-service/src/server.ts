@@ -31,7 +31,7 @@ import { registerCommandRunRoutes } from './engine/commandRunRoutes.js';
 import { registerTestRunRoutes } from './engine/testRunRoutes.js';
 import { registerAnswerRoutes } from './engine/answerRoutes.js';
 import { lookup as dnsLookup } from 'node:dns/promises';
-import { registerEngineerRoutes } from './engine/engineerRoutes.js';
+import { registerEngineerRoutes } from './engine/engineer/engineerRoutes.js';
 import { LiveConnectorRegistry } from './engine/liveKnowledge/liveResearch.js';
 import { buildAuthoritativeConnectors } from './engine/liveKnowledge/connectors/index.js';
 import { startMcp } from './mcp/mcpRuntime.js';

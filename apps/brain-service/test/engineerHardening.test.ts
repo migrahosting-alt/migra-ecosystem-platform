@@ -11,7 +11,7 @@ import {
   isWeakFinal,
   type EngineerEvent,
   type EngineerToolInfo,
-} from '../src/engine/engineerRuntime.js';
+} from '../src/engine/engineer/engineerRuntime.js';
 
 const TOOLS: EngineerToolInfo[] = [
   { id: 'file.readRange', description: 'read', readOnly: true, inputHint: '{}' },

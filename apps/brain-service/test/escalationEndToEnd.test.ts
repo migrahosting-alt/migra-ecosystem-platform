@@ -7,7 +7,7 @@ import Fastify from 'fastify';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { registerEscalationRoutes } from '../src/engine/providers/escalationRoutes.js';
-import { registerEngineerRoutes } from '../src/engine/engineerRoutes.js';
+import { registerEngineerRoutes } from '../src/engine/engineer/engineerRoutes.js';
 import { registerToolExecutionRoutes } from '../src/engine/toolRoutes.js';
 import { registerAiRoutes } from '../src/engine/aiRoutes.js';
 import { EscalationController } from '../src/engine/providers/escalationController.js';

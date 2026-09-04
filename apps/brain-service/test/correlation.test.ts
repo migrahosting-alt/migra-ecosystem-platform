@@ -13,7 +13,7 @@ import {
   jsonLineSink,
   type StageEvent,
 } from '../src/engine/correlation.js';
-import { runEngineerTask, type EngineerToolInfo } from '../src/engine/engineerRuntime.js';
+import { runEngineerTask, type EngineerToolInfo } from '../src/engine/engineer/engineerRuntime.js';
 import { proposeChangeset, applyChangeset, ChangesetProposalStore } from '../src/tools/changeset.js';
 import { nodeChangesetFs } from '../src/tools/changesetFs.js';
 import { CapabilityRegistry } from '../src/engine/capabilityRegistry.js';

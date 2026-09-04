@@ -4,7 +4,7 @@
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { FinalAnswerStreamer } from '../src/engine/finalAnswerStream.js';
+import { FinalAnswerStreamer } from '../src/engine/engineer/finalAnswerStream.js';
 
 /** Feed a reply one character at a time — the worst case for chunk boundaries. */
 function streamCharByChar(reply: string): { text: string; isFinal: boolean } {

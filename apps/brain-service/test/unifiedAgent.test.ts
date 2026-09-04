@@ -11,7 +11,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { camelCandidates } from '../src/retrieval/retrieve.js';
-import { runEngineerTask, parseStep, claimedUnrunTool, repairJsonEscapes, repairJsonControlChars, type EngineerEvent, type EngineerToolInfo } from '../src/engine/engineerRuntime.js';
+import { runEngineerTask, parseStep, claimedUnrunTool, repairJsonEscapes, repairJsonControlChars, type EngineerEvent, type EngineerToolInfo } from '../src/engine/engineer/engineerRuntime.js';
 
 const TOOLS: EngineerToolInfo[] = [
   { id: 'workspace.search', description: 'search', readOnly: true, inputHint: '{}' },
@@ -609,7 +609,7 @@ test('an answer that cites the seeded file is accepted as-is', async () => {
 });
 
 test('with nothing seeded the citation check never fires', async () => {
-  const { ignoredSeededContext } = await import('../src/engine/engineerRuntime.js');
+  const { ignoredSeededContext } = await import('../src/engine/engineer/engineerRuntime.js');
   assert.equal(ignoredSeededContext('any answer at all', []), false);
   assert.equal(ignoredSeededContext('see src/tools/changesetLint.ts', SEEDED), false);
   assert.equal(ignoredSeededContext('I could not find anything', SEEDED), true);

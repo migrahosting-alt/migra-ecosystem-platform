@@ -71,7 +71,7 @@ async function bootRoute(
   turn(payload: Record<string, unknown>): Promise<{ events: Array<{ event: string; data: unknown }>; raw: string; correlationId: string }>;
 }> {
   const Fastify = (await import('fastify')).default;
-  const { registerEngineerRoutes } = await import('../src/engine/engineerRoutes.js');
+  const { registerEngineerRoutes } = await import('../src/engine/engineer/engineerRoutes.js');
   const { registerToolExecutionRoutes } = await import('../src/engine/toolRoutes.js');
   const { ModelRegistry } = await import('../src/engine/modelRegistry.js');
 

@@ -161,7 +161,7 @@ test('the class survives extension → Brain transport exactly', () => {
   assert.match(client, /taskClass\?: TaskClass;/, 'the request type carries the protocol union');
   // The Brain accepts exactly these values; anything else degrades to unclassified there.
   const routes = readFileSync(
-    join(__dirname, '..', '..', '..', '..', 'brain-service', 'src', 'engine', 'engineerRoutes.ts'),
+    join(__dirname, '..', '..', '..', '..', 'brain-service', 'src', 'engine', 'engineer', 'engineerRoutes.ts'),
     'utf8',
   );
   const accepted = /taskClass: z\s*\.enum\(\[([\s\S]*?)\]\)/.exec(routes)?.[1] ?? '';

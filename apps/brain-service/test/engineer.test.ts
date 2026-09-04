@@ -8,7 +8,7 @@ import { mkdtempSync, writeFileSync, readFileSync, mkdirSync, symlinkSync } from
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import { commandRun, commandAllowlist, commandRunEnabled, previewCommandRun } from '../src/tools/commandRun.js';
-import { runEngineerTask, parseStep, type EngineerEvent, type EngineerToolInfo } from '../src/engine/engineerRuntime.js';
+import { runEngineerTask, parseStep, type EngineerEvent, type EngineerToolInfo } from '../src/engine/engineer/engineerRuntime.js';
 import { CapabilityRegistry } from '../src/engine/capabilityRegistry.js';
 import { ToolApprovalStore } from '../src/engine/toolApprovalStore.js';
 import { ToolAudit } from '../src/engine/toolAudit.js';

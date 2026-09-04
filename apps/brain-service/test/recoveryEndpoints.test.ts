@@ -8,7 +8,7 @@ import { mkdtempSync, writeFileSync, existsSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import { registerToolExecutionRoutes } from '../src/engine/toolRoutes.js';
-import { registerEngineerRoutes } from '../src/engine/engineerRoutes.js';
+import { registerEngineerRoutes } from '../src/engine/engineer/engineerRoutes.js';
 import { ModelRegistry } from '../src/engine/modelRegistry.js';
 import { incidentManager } from '../src/engine/incidents.js';
 import { recoveryManager } from '../src/engine/recovery.js';

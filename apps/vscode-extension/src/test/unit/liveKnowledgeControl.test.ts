@@ -373,7 +373,7 @@ test('the two frames are rendered separately, and provenance precedes the answer
   // cannot run is the waste the gate exists to prevent. So the ordering is now
   // asserted per boundary, which is what the test always meant.
   const routes = readFileSync(
-    join(__dirname, '..', '..', '..', '..', 'brain-service', 'src', 'engine', 'engineerRoutes.ts'),
+    join(__dirname, '..', '..', '..', '..', 'brain-service', 'src', 'engine', 'engineer', 'engineerRoutes.ts'),
     'utf8',
   );
   const liveFrame = routes.indexOf("send('liveKnowledge'");

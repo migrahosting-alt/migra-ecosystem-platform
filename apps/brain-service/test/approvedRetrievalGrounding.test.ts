@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import test from 'node:test';
 import Fastify from 'fastify';
 
-import { registerEngineerRoutes } from '../src/engine/engineerRoutes.js';
+import { registerEngineerRoutes } from '../src/engine/engineer/engineerRoutes.js';
 import { registerToolExecutionRoutes } from '../src/engine/toolRoutes.js';
 import { ModelRegistry, type ModelDescriptor } from '../src/engine/modelRegistry.js';
 import { IndexService, type FileSource, type Scope } from '../src/engine/rag/indexService.js';
@@ -248,12 +248,14 @@ test('retrieval metadata is emitted and carries no prompt or source text', async
 
 test('chat and engineer share ONE grounding decision implementation', () => {
   const chat = readSource('src/engine/aiRoutes.ts');
-  const engineer = readSource('src/engine/engineerRoutes.ts');
+  const engineer = readSource('src/engine/engineer/engineerRoutes.ts');
 
   for (const [name, src] of [['aiRoutes', chat], ['engineerRoutes', engineer]] as const) {
     assert.match(src, /decideGrounding\(/, `${name} must use the shared boundary`);
     assert.match(src, /groundingAuditFields\(/, `${name} must audit its decision`);
-    assert.match(src, /from '\.\/grounding\/groundingDecision\.js'/, `${name} must import the one module`);
+    // Depth-agnostic on purpose: the assertion is that both reach the SAME module,
+    // not how many `../` a file happens to sit behind it.
+    assert.match(src, /from '(?:\.\.?\/)+grounding\/groundingDecision\.js'/, `${name} must import the one module`);
   }
   // No second copy of the policy: refusal reasons live in the module only.
   assert.ok(!/'insufficient-relevance'/.test(chat), 'chat must not re-implement the gate');

@@ -15,7 +15,7 @@ import {
   type EngineerEvent,
   type EngineerToolInfo,
   type PlanStep,
-} from '../src/engine/engineerRuntime.js';
+} from '../src/engine/engineer/engineerRuntime.js';
 
 const TOOLS: EngineerToolInfo[] = [
   { id: 'workspace.list', description: 'list', readOnly: true, inputHint: '{}' },

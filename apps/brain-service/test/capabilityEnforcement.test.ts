@@ -80,7 +80,7 @@ test('the real route routes BOTH tool paths through the gate', () => {
   // runs it. Locally it pointed at `apps/src/...` and the test failed with ENOENT
   // for a file that was never missing, so the check looked broken on every
   // developer machine and green in CI.
-  const text = readFileSync(path.join(packageRoot(), 'src/engine/engineerRoutes.ts'), 'utf8');
+  const text = readFileSync(path.join(packageRoot(), 'src/engine/engineer/engineerRoutes.ts'), 'utf8');
   const opened = text.indexOf('new ToolGate().open(capability)');
   const advertised = text.indexOf('permittedTools(toolGate,');
   const executed = text.indexOf('toolGate.assertPermitted(');

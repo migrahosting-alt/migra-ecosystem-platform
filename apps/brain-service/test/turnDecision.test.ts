@@ -5,7 +5,7 @@ import {
   decideTurn,
   parseDeclaredKind,
   type TurnDecisionInput,
-} from '../src/engine/turnDecision.js';
+} from '../src/engine/engineer/turnDecision.js';
 
 /** A workspace that exists, with read granted and mutation NOT granted. */
 const base = (over: Partial<TurnDecisionInput> = {}): TurnDecisionInput => ({

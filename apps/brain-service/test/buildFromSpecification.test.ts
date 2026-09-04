@@ -21,7 +21,7 @@
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { runEngineerTask, type EngineerEvent, type EngineerToolInfo } from '../src/engine/engineerRuntime.js';
+import { runEngineerTask, type EngineerEvent, type EngineerToolInfo } from '../src/engine/engineer/engineerRuntime.js';
 
 const TOOLS: EngineerToolInfo[] = [
   { id: 'workspace.search', description: 'search', readOnly: true, inputHint: '{}' },

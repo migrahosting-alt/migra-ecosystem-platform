@@ -17,7 +17,7 @@ import { nodeChangesetFs } from '../src/tools/changesetFs.js';
 import { IncidentManager, LocalAlertSink } from '../src/engine/incidents.js';
 import { telemetryHub } from '../src/engine/telemetryHub.js';
 import { registerToolExecutionRoutes } from '../src/engine/toolRoutes.js';
-import { registerEngineerRoutes } from '../src/engine/engineerRoutes.js';
+import { registerEngineerRoutes } from '../src/engine/engineer/engineerRoutes.js';
 import { ModelRegistry } from '../src/engine/modelRegistry.js';
 
 const fs = nodeChangesetFs();

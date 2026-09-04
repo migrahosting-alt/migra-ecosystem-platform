@@ -61,7 +61,7 @@ test('INVARIANT: no route or control-plane file runs a cloud attempt inline — 
   // The coding surfaces + control plane must OFFER only; they must never call the
   // executor or the approval path inline.
   const surfaces = [
-    path.join(root, 'src', 'engine', 'engineerRoutes.ts'),
+    path.join(root, 'src', 'engine', 'engineer', 'engineerRoutes.ts'),
     path.join(root, 'src', 'engine', 'aiRoutes.ts'),
   ];
   const stripComments = (s: string): string => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');

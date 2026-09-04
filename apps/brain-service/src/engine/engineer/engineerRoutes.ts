@@ -2,8 +2,8 @@
 // engineer (Slice 2). Local-only: no pilot-api involvement anywhere on this
 // path, so disabled remote delegation can never block ordinary local work.
 
-import { DEFAULT_TIMEOUTS } from '../config/timeoutHierarchy.js';
-import { classifyOutcome, type OperationOutcome } from './operationOutcome.js';
+import { DEFAULT_TIMEOUTS } from '../../config/timeoutHierarchy.js';
+import { classifyOutcome, type OperationOutcome } from '../operationOutcome.js';
 
 /** Which clock a provider timeout code refers to, for an honest message. */
 function timeoutClock(code: string): 'connect' | 'idle' | 'response' | 'absolute' {
@@ -22,25 +22,25 @@ import type { FastifyInstance } from 'fastify';
 import { readdir } from 'node:fs/promises';
 import * as path from 'node:path';
 import { z } from 'zod';
-import type { BrainEnv } from '../config/env.js';
-import type { ModelRegistry, ModelDescriptor } from './modelRegistry.js';
-import { selectModel, tierFromHints } from './capabilityRouter.js';
-import { capabilityAuditFields, resolveCapability, tierPolicyFor } from './capability/capabilityGrants.js';
-import { ToolGate, permittedTools, toolAuthoritySummary, ToolNotPermittedError } from './capability/capabilityTools.js';
-import { resolveOperatorPrincipal } from './capability/operatorPrincipal.js';
+import type { BrainEnv } from '../../config/env.js';
+import type { ModelRegistry, ModelDescriptor } from '../modelRegistry.js';
+import { selectModel, tierFromHints } from '../capabilityRouter.js';
+import { capabilityAuditFields, resolveCapability, tierPolicyFor } from '../capability/capabilityGrants.js';
+import { ToolGate, permittedTools, toolAuthoritySummary, ToolNotPermittedError } from '../capability/capabilityTools.js';
+import { resolveOperatorPrincipal } from '../capability/operatorPrincipal.js';
 import { GOVERNED_WORKFLOW_IDS, capabilityDisclosure, principalAuditFields } from '@migrapilot/protocol';
-import { selectLocalCoding, type LocalRoutingDeps } from './providers/localCodingRouter.js';
-import { retrieveContext } from '../retrieval/retrieve.js';
-import type { IndexService, Scope } from './rag/indexService.js';
-import { scopeFrom } from './memory/memoryRoutes.js';
+import { selectLocalCoding, type LocalRoutingDeps } from '../providers/localCodingRouter.js';
+import { retrieveContext } from '../../retrieval/retrieve.js';
+import type { IndexService, Scope } from '../rag/indexService.js';
+import { scopeFrom } from '../memory/memoryRoutes.js';
 import { lookup as dnsLookup } from 'node:dns/promises';
-import { parseLiveKnowledgeMode, type LiveKnowledgeConnector } from './liveKnowledge/liveKnowledgeDecision.js';
+import { parseLiveKnowledgeMode, type LiveKnowledgeConnector } from '../liveKnowledge/liveKnowledgeDecision.js';
 import {
   LiveConnectorRegistry,
   buildLiveKnowledgeFrame,
   liveResearchAuditFields,
   researchLive,
-} from './liveKnowledge/liveResearch.js';
+} from '../liveKnowledge/liveResearch.js';
 import {
   DEFAULT_MIN_APPROVED_SCORE,
   decideGrounding,
@@ -50,23 +50,23 @@ import {
   withholdsWorkspaceTools,
   type GroundingDecision,
   type GroundingMode,
-} from './grounding/groundingDecision.js';
-import { resolveEffectivePolicy } from './providers/executionPolicy.js';
-import { assessCodingOutcome } from './providers/codingAssessment.js';
-import type { EscalationController } from './providers/escalationController.js';
+} from '../grounding/groundingDecision.js';
+import { resolveEffectivePolicy } from '../providers/executionPolicy.js';
+import { assessCodingOutcome } from '../providers/codingAssessment.js';
+import type { EscalationController } from '../providers/escalationController.js';
 import type { ChatTurnRequest } from '@migrapilot/shared-types';
-import { StubProvider, type ProviderAdapter } from '../providers/providerRegistry.js';
-import { OpenAiCompatProvider, classifyProviderFailure, type ProviderFailure } from '../providers/openAiCompatProvider.js';
-import { executeToolCore, type ToolExecDeps } from './toolExecutor.js';
-import { newCorrelationId, makeStageLogger, jsonLineSink, type StageLogger } from './correlation.js';
+import { StubProvider, type ProviderAdapter } from '../../providers/providerRegistry.js';
+import { OpenAiCompatProvider, classifyProviderFailure, type ProviderFailure } from '../../providers/openAiCompatProvider.js';
+import { executeToolCore, type ToolExecDeps } from '../toolExecutor.js';
+import { newCorrelationId, makeStageLogger, jsonLineSink, type StageLogger } from '../correlation.js';
 import { runEngineerTask, type EngineerToolInfo } from './engineerRuntime.js';
-import { changesetProposals } from './capabilityRegistry.js';
-import { telemetryHub } from './telemetryHub.js';
-import { auditStore, auditHash } from './auditLog.js';
-import { incidentManager } from './incidents.js';
-import { sanitizeError } from './redaction.js';
-import { recoveryManager, RecoveryError } from './recovery.js';
-import { nodeChangesetFs } from '../tools/changesetFs.js';
+import { changesetProposals } from '../capabilityRegistry.js';
+import { telemetryHub } from '../telemetryHub.js';
+import { auditStore, auditHash } from '../auditLog.js';
+import { incidentManager } from '../incidents.js';
+import { sanitizeError } from '../redaction.js';
+import { recoveryManager, RecoveryError } from '../recovery.js';
+import { nodeChangesetFs } from '../../tools/changesetFs.js';
 import { contractCompatible, WORKSPACE_TOOL_CONTRACT_VERSION } from '@migrapilot/workspace-tools';
 import {
   WorkspaceDelegate,
@@ -74,9 +74,9 @@ import {
   registerDelegate,
   unregisterDelegate,
   delegateFor,
-} from './workspaceDelegation.js';
+} from '../workspaceDelegation.js';
 import { planTurn } from '@migrapilot/shared-types/turn-intent';
-import { AdmissionGate } from './admission/index.js';
+import { AdmissionGate } from '../admission/index.js';
 import type { TurnIntent as TurnDecisionIntent } from './turnDecision.js';
 
 /** Total characters of seeded code the agent is given. Enough for a few whole
