@@ -15,6 +15,55 @@ _Last updated: 2026-09-04_
 
 ---
 
+## Lane 2026-09-04 — Gap #7 measured through the real path: NOT closed
+
+The spreadsheet arithmetic was never the problem. **Column selection is**, and the measurement found
+it in the first run.
+
+**The run.** A 9-row CSV — `Region, OrderID, ZipCode, Revenue` — submitted through the composer's own
+picker by a signed-in user, indexed, then asked *"What is the total Revenue in this file?"*. True
+total: **474,000**.
+
+**What the deterministic layer handed the model:**
+
+```
+[Computed directly from q3-regional-revenue.csv by MigraPilot. These figures are exact
+arithmetic over the parsed file, not estimates. Use them verbatim and do not
+recalculate them:]
+sum of "ZipCode": 570,236
+  (9 rows used)
+```
+
+It computed the **ZIP code** column. The model, given evidence that did not answer the question,
+footed the table itself and replied **"The total Revenue in this file is $367,500."** — wrong, and
+arrived at by exactly the mechanism this module exists to eliminate.
+
+**Root cause — two rules meeting.** A column counts as quantitative only when ≥90% of its non-blank
+cells are quantities. One `n/a` among nine rows put Revenue at **7/8 = 87.5%**, so the actual money
+column was disqualified. `chooseValueColumn` then fell back from "the named column" to "the only
+quantitative column" — **ZipCode**, because plain 5-digit ZIPs are not caught by the leading-zero
+identifier rule. The substitution is silent, and the evidence block then asserts authority over it.
+
+🚨 **That is worse than the defect it replaced.** The module's own docblock promises "a ZIP code, an
+order id … must never be summed". A ZIP code was summed and offered as the answer about revenue —
+with a sentence telling the model not to check it.
+
+**The arithmetic itself is sound.** Change one character — the `n/a` to an empty cell — and Revenue
+clears the threshold, and the whole path is correct end to end: evidence `sum of "Revenue": 474,000
+(7 rows used, 2 blank)`, answer *"The total Revenue in this file is $474,000"*, `outcome=ok`, and the
+durable record still holds that sentence after a reload.
+
+**Also found:** for a signed-out visitor the composer offers **"Files & documents"** fully enabled,
+while every document operation behind it is authenticated-only. The upload 401s and the chip offers a
+**Retry** that can never succeed. Same dead-control defect as Listen, one row below the images entry
+that *was* fixed.
+
+**Not fixed here — this was a measurement task.** The direction that keeps the guarantee: when a
+*named* column is disqualified, emit no evidence at all rather than computing a different column.
+Silence beats a confident wrong figure; the substitution is the part that has to go.
+
+---
+
 ## Lane 2026-09-04 — The consumer could not build from a clean clone either
 
 Found while opening chat gap #7, and it outranked the gap. `RESOLVED`.

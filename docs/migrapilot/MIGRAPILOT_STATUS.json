@@ -1,7 +1,7 @@
 {
  "$schema": "MIGRAPILOT_STATUS — canonical cross-agent state. Update on every material change.",
  "updated": "2026-09-04",
- "updatedBy": "Claude (Opus 5) — consumer chat gaps #3/#4/#5, then the consumer clean-clone defect found while opening #7",
+ "updatedBy": "Claude (Opus 5) — gap #7 MEASURED through the real path: NOT CLOSED, a column-selection defect found",
  "rules": {
   "easyFirst": "Do not start deep capability work while meaningful easy user-facing items remain.",
   "provenLive": "PROVEN_LIVE requires the real user-facing workflow to pass. Code existing and tests passing is NOT proof.",
@@ -271,6 +271,17 @@
   ]
  },
  "openDefects": [
+  {
+   "id": "table-evidence-answers-with-the-wrong-column",
+   "severity": "HIGH — a wrong figure is asserted to the model as exact arithmetic it must not recalculate",
+   "symptom": "Asked \"What is the total Revenue in this file?\" over a 9-row CSV, the deterministic table layer computed the sum of the ZIPCODE column (570,236) and injected it as \"[Computed directly ... exact arithmetic ... Use them verbatim and do not recalculate them:] sum of \\\"ZipCode\\\": 570,236\". The model, handed evidence that did not answer the question, footed the table itself and returned $367,500. The true total is 474,000.",
+   "rootCause": "TWO rules meeting. (1) parseTable marks a column quantitative only when >=90% of non-blank cells are quantities. One \"n/a\" among nine rows put Revenue at 7/8 = 87.5%, so the actual money column was DISQUALIFIED. (2) chooseValueColumn then falls back from \"the named column\" to \"the only quantitative column\" — which was ZipCode, because plain 5-digit ZIPs are not caught by the leading-zero identifier rule. The fallback substitutes a DIFFERENT column silently and the evidence block then asserts authority over it.",
+   "🚨 whyThisIsWorseThanTheOriginal": "The module exists because the model footed tables wrong. It now produces a wrong number AND tells the model not to recalculate it. Its own docblock promises \"a ZIP code, an order id ... must never be summed\"; a ZIP code was summed and presented as the answer to a question about revenue.",
+   "measuredNotInferred": "Run against the product's own modules: Region 0/9, OrderID 0/9 (leading zeros -> identifier, correctly excluded), ZipCode 9/9 = 100% quantitative, Revenue 7/8 = 87.5% -> NOT quantitative. The same parser sums those very Revenue cells to exactly 474,000, so the ARITHMETIC is sound; the COLUMN SELECTION is the defect.",
+   "provenBothWays": "With one character changed — the \"n/a\" replaced by an empty cell — Revenue clears the threshold (7/7) and the whole path is correct end to end: evidence \"sum of \\\"Revenue\\\": 474,000 (7 rows used, 2 blank)\", model answer \"The total Revenue in this file is $474,000\", outcome=ok, and the durable record after reload holds the same sentence.",
+   "status": "OPEN — reported, NOT fixed. This was a measurement task.",
+   "suggestedDirection": "Do not simply lower the threshold. The honest options are (a) refuse rather than substitute: if a NAMED column is disqualified, emit no evidence instead of computing a different column, and (b) let a named column report why it was disqualified. Silence beats a confident wrong figure; substitution is the part that must go."
+  },
   {
    "id": "engineer-turn-truthfulness-and-attribution",
    "symptom": "Two defects seen in the live acceptance run: the machine-authored footer printed \"No tool ran during this turn\" beneath the model's own accurate report that fs.proposeChangeset had run and FAILED; and routing attribution never reached the UI on any successful engineer turn.",
@@ -1608,8 +1619,9 @@
     "tests": "+19: src/features/conversations/askAgain.test.ts. The decision is a PURE MODULE (lastQuestionOf / canAskAgain / askAgainOptions) so the tests are behavioural rather than greps over JSX. Four mutations each caught by the right test.",
     "gate": "typecheck 0 · 787/787 tests pass (from 768) · next build green · client-bundle scan PASS.",
     "⭐ whatIsSTILLMISSING": "Branch semantics. To replace an answer or fork a thread, the Brain needs a message model it does not have: either delete/truncate-after-a-message, or a parent/branch reference plus a rule for which branch is live. That is brain-service + a Postgres migration + a deploy, so it could not be proven live from here and was NOT started. Gap #5 stays open in that sense and should be re-ranked as a Brain slice rather than a chat one."
-   }
+   },
+   "7 spreadsheet analysis": "NOT CLOSED — measured live, and the measurement found a HIGH defect (see openDefects: table-evidence-answers-with-the-wrong-column). The arithmetic engine is correct; column selection is not."
   },
-  "nextGap": "BLOCKER FIRST: the file-attachment lane has ~15 uncommitted modifications that committed code already depends on (Composer -> AttachmentChips). Until those land, the consumer cannot build from a clean clone and no clean-worktree gate can be added. Then #7 spreadsheet analysis, which is a MEASUREMENT: the arithmetic module exists, is wired into the stream route and has 22 passing tests; nobody has shown it produces the right total through the real UI."
+  "nextGap": "Fix table-evidence-answers-with-the-wrong-column, then re-run this same measurement. The fixture, harness and full evidence chain are recorded and repeatable."
  }
 }
