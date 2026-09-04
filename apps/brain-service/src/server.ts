@@ -104,7 +104,7 @@ import { hashFile } from './engine/rag/artifactReuse.js';
 import { decideRecovery } from './engine/rag/scannedJobRecovery.js';
 import path from 'node:path';
 import { registerMigraPilotCors } from './http/corsPolicy.js';
-import { probeGpuCapacity } from './engine/capacity/gpuCapacity.js';
+import { AdmissionGate, admissionCounters } from './engine/admission/index.js';
 
 // A code assistant's chat/retrieve requests legitimately carry large payloads —
 // multi-file context, retrieved snippets, and base64 VISION image attachments —
@@ -177,10 +177,11 @@ async function getHealth(): Promise<HealthResponse> {
    * effort: /health must answer even when the workstation is asleep, so a probe
    * failure leaves the field absent rather than failing the endpoint.
    */
-  const capacity = await probeGpuCapacity({
+  const capacity = await new AdmissionGate({
     providerBaseUrl: env.providerBaseUrl,
     ...(process.env.MIGRAPILOT_STUDIO_URL ? { studioBaseUrl: process.env.MIGRAPILOT_STUDIO_URL } : {}),
-  }).catch(() => undefined);
+    enabled: true,
+  }).admit().catch(() => undefined);
 
   // Persistence readiness — a running process is NOT proof of full readiness.
   const memoryDisabled = selectionKind === 'off';
@@ -242,7 +243,11 @@ async function getHealth(): Promise<HealthResponse> {
       inferenceProviders: inferenceReady ? 'available' : 'unavailable',
       /* Governed authority, reported rather than inferred from a missing route. */
       governance: governanceState,
-      ...(capacity ? { gpuCapacity: capacity.state, gpuSignals: capacity.signals } : {}),
+      ...(capacity ? { gpuCapacity: capacity.state, gpuCapacityReason: capacity.reason, gpuSignals: capacity.signals } : {}),
+      /* What admission control has actually DONE, not just what it would say now.
+       * "The gate refuses everything" and "the gate never fires" are
+       * indistinguishable from a single state field. */
+      admission: admissionCounters(),
       persistence: persistence.memoryStore,
       memory: persistence.memoryStore,
       rag: persistence.ragStore,

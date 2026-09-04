@@ -75,7 +75,7 @@ import {
   type MigraModelFamilyId,
 } from '@migrapilot/shared-types/model-families';
 import { classifyProviderFailure } from './providerFailure.js';
-import { probeGpuCapacity, shouldRefuse, isModelResident, type CapacityReading } from './capacity/gpuCapacity.js';
+import { AdmissionGate, isModelResident, type AdmissionDecision } from './admission/index.js';
 
 interface AiChatMessage {
   role: 'system' | 'user' | 'assistant';
@@ -271,12 +271,16 @@ export function registerAiRoutes(
    * and gating tests behind a probe of a machine that is not there would make
    * the suite depend on the workstation being awake.
    */
+  const chatAdmissionGate = new AdmissionGate({
+    providerBaseUrl: env.providerBaseUrl,
+    ...(process.env.MIGRAPILOT_STUDIO_URL ? { studioBaseUrl: process.env.MIGRAPILOT_STUDIO_URL } : {}),
+    enabled: real,
+  });
+  /* Built ONCE and shared with the engineer path's sibling gate: both reach the
+   * same card, and a per-request gate would throw away the cache and the
+   * single-flight latch that stop the probe amplifying the contention it reads. */
   const capacityProbe = real
-    ? (model?: string) => probeGpuCapacity({
-        providerBaseUrl: env.providerBaseUrl,
-        ...(process.env.MIGRAPILOT_STUDIO_URL ? { studioBaseUrl: process.env.MIGRAPILOT_STUDIO_URL } : {}),
-        ...(model ? { model } : {}),
-      })
+    ? (model?: string) => chatAdmissionGate.admit({ ...(model ? { model } : {}) })
     : undefined;
 
   // ── Catalog ────────────────────────────────────────────────────────────────
@@ -1280,7 +1284,7 @@ async function streamChat(
   primaryReason: string,
   providerFor: (m: ModelDescriptor) => StreamingProvider,
   chatRequest: ChatTurnRequest,
-  memory: { capacityProbe?: (model?: string) => Promise<CapacityReading>; contextDiagnostics?: ContextDiagnostics; commit?: (text: string, modelId: string, providerId: string) => void; fallback?: { policy?: string; requestedPolicy?: string; effectivePolicy?: string; policyReason?: string; fallbackRecommended: boolean; reasons: string[] }; trace?: BrainTurnTrace } = {},
+  memory: { capacityProbe?: (model?: string) => Promise<AdmissionDecision>; contextDiagnostics?: ContextDiagnostics; commit?: (text: string, modelId: string, providerId: string) => void; fallback?: { policy?: string; requestedPolicy?: string; effectivePolicy?: string; policyReason?: string; fallbackRecommended: boolean; reasons: string[] }; trace?: BrainTurnTrace } = {},
 ): Promise<void> {
   const trace = memory.trace;
   reply.hijack();
@@ -1375,13 +1379,14 @@ async function streamChat(
    */
   if (memory.capacityProbe) {
     const reading = await memory.capacityProbe(ranked[0]?.id).catch(() => undefined);
-    if (reading && shouldRefuse(reading)) {
+    if (reading && reading.outcome === 'refused') {
       await auditStore.append({ correlationId: requestId, requestId, type: 'execution.failed', component: 'chat',
-        outcome: reading.state === 'busy' ? 'GPU_BUSY' : 'ENGINE_UNAVAILABLE', fields: { toolCalls: 0 } });
+        outcome: reading.code!, fields: { toolCalls: 0, reason: reading.reason, cached: reading.cached } });
       send('error', {
-        code: reading.state === 'busy' ? 'GPU_BUSY' : 'ENGINE_UNAVAILABLE',
+        code: reading.code,
         message: reading.message,
         capacity: reading.state,
+        reason: reading.reason,
       });
       trace?.set('capacity', reading.state);
       trace?.finish(reading.state === 'busy' ? 'gpu_busy' : 'engine_unavailable');

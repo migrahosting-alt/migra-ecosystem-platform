@@ -1,0 +1,16 @@
+/**
+ * The sentences a blocked user reads. One place, so wording is reviewed once.
+ *
+ * Each says three things on purpose: what is happening, that the request has NOT
+ * started, and that nothing was lost. "Please wait" is deliberately absent — it
+ * would imply progress that is not occurring.
+ *
+ * © MigraTeck LLC.
+ */
+
+export const BUSY_MESSAGE =
+  'The AI vision engine is busy with another task on the graphics card, so your request has not '
+  + 'started yet. Nothing was lost — send it again in a moment and it will run.';
+
+export const UNAVAILABLE_MESSAGE =
+  'The AI engine is not reachable right now, so your request has not started. Nothing was lost.';

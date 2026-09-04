@@ -380,14 +380,16 @@ test('the two frames are rendered separately, and provenance precedes the answer
   const groundingFrame = routes.indexOf("send('grounding'");
   const capabilityDenied = routes.indexOf("code: 'CAPABILITY_DENIED',");
   const insufficientEvidence = routes.indexOf("send('refusal', { code: 'INSUFFICIENT_APPROVED_EVIDENCE'");
-  const capacityRefusal = routes.indexOf('send(\'refusal\', { code, message: capacityReading.message');
+  // Keyed on the admission DECISION rather than on the wording of one send(),
+  // so renaming a variable cannot silently make this assertion vacuous.
+  const capacityRefusal = routes.indexOf("admission.outcome === 'refused'");
   assert.ok(liveFrame > 0, 'the Brain emits the live frame');
   assert.ok(groundingFrame > 0, 'and the repository-provenance frame');
   assert.ok(liveFrame < capabilityDenied, 'provenance precedes a capability refusal');
   assert.ok(liveFrame < insufficientEvidence, 'provenance precedes an evidence refusal');
   assert.ok(liveFrame < routes.indexOf('INSUFFICIENT_APPROVED_EVIDENCE'), 'and precedes the loop');
   // Pinned deliberately: the pre-flight belongs BEFORE retrieval, not after it.
-  assert.ok(capacityRefusal > 0, 'the capacity pre-flight exists');
+  assert.ok(capacityRefusal > 0, 'the admission pre-flight exists');
   assert.ok(capacityRefusal < groundingFrame, 'a card that cannot serve is caught before any retrieval');
 });
 

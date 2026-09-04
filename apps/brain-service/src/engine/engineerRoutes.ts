@@ -76,7 +76,7 @@ import {
   delegateFor,
 } from './workspaceDelegation.js';
 import { planTurn } from '@migrapilot/shared-types/turn-intent';
-import { probeGpuCapacity, shouldRefuse } from './capacity/gpuCapacity.js';
+import { AdmissionGate } from './admission/index.js';
 import type { TurnIntent as TurnDecisionIntent } from './turnDecision.js';
 
 /** Total characters of seeded code the agent is given. Enough for a few whole
@@ -310,6 +310,16 @@ export function registerEngineerRoutes(
       ? new LiveConnectorRegistry().register(liveKnowledgeConnector, ['official', 'web'])
       : new LiveConnectorRegistry());
   const real = env.localProvider === 'openai-compat';
+  /*
+   * ONE gate for this deployment, built once. Per-request construction would
+   * discard the cache and the single-flight latch between turns, which are the
+   * entire reason the compute probe does not amplify the contention it measures.
+   */
+  const admissionGate = new AdmissionGate({
+    providerBaseUrl: env.providerBaseUrl,
+    ...(process.env.MIGRAPILOT_STUDIO_URL ? { studioBaseUrl: process.env.MIGRAPILOT_STUDIO_URL } : {}),
+    enabled: real,
+  });
   const providerFor = (model: ModelDescriptor): ProviderAdapter => {
     if (providerOverride) return providerOverride(model);
     if (!real) return new StubProvider('default');
@@ -693,28 +703,26 @@ export function registerEngineerRoutes(
      * probe returns `unknown` and does NOT refuse — a monitoring outage must never
      * become an outage of the thing being monitored.
      */
-    if (real) {
-      const capacityReading = await probeGpuCapacity({
-        providerBaseUrl: env.providerBaseUrl,
-        ...(process.env.MIGRAPILOT_STUDIO_URL ? { studioBaseUrl: process.env.MIGRAPILOT_STUDIO_URL } : {}),
-        model: decision.model.id,
-      }).catch(() => undefined);
-      if (capacityReading && shouldRefuse(capacityReading)) {
-        const code = capacityReading.state === 'busy' ? 'GPU_BUSY' : 'ENGINE_UNAVAILABLE';
-        stage.log('error', { code });
-        await auditStore.append({
-          correlationId,
-          type: 'execution.failed',
-          component: 'engineer',
-          requestId: headerId || undefined,
-          outcome: code,
-          fields: { refusedBeforeModelCall: true, capacity: capacityReading.state },
-        });
-        send('refusal', { code, message: capacityReading.message, capacity: capacityReading.state });
-        send('done', { ok: false, code, outcome: 'refused', correlationId });
-        raw.end();
-        return;
-      }
+    const admission = await admissionGate.admit({ model: decision.model.id });
+    if (admission.outcome === 'refused') {
+      stage.log('error', { code: admission.code });
+      await auditStore.append({
+        correlationId,
+        type: 'execution.failed',
+        component: 'engineer',
+        requestId: headerId || undefined,
+        outcome: admission.code!,
+        fields: {
+          refusedBeforeModelCall: true,
+          capacity: admission.state,
+          reason: admission.reason,
+          cached: admission.cached,
+        },
+      });
+      send('refusal', { code: admission.code, message: admission.message, capacity: admission.state, reason: admission.reason });
+      send('done', { ok: false, code: admission.code, outcome: 'refused', correlationId });
+      raw.end();
+      return;
     }
 
     // Seed the agent with the SAME tuned lexical grounding the chat path used
