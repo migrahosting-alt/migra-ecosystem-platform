@@ -1,7 +1,7 @@
 {
  "$schema": "MIGRAPILOT_STATUS — canonical cross-agent state. Update on every material change.",
- "updated": "2026-09-03",
- "updatedBy": "Claude (Opus 5) — consumer chat: Stop generation shipped and proven live (gap #3 of the Chat Capability Matrix)",
+ "updated": "2026-09-04",
+ "updatedBy": "Claude (Opus 5) — admission control as a module + engine/ regrouped into domains, both CI-enforced",
  "rules": {
   "easyFirst": "Do not start deep capability work while meaningful easy user-facing items remain.",
   "provenLive": "PROVEN_LIVE requires the real user-facing workflow to pass. Code existing and tests passing is NOT proof.",
@@ -1404,7 +1404,8 @@
    "counts": "brain 2099/2099, consumer 676/676, tsc -b clean on both.",
    "remaining": "#6 GPU false-busy, #7 vision/OCR text accuracy (incl. the SCAN-CODE-O4 letter-O finding), #8 blank-pane instrumentation."
   },
-  "gpuContentionBlockedAcceptance2026_09_03": "The first two acceptance attempts died with PROVIDER_CONNECT_TIMEOUT (240s). Not connectivity: a ComfyUI render (started Aug 29) held the RTX 3090 at 100% and starved Ollama — /api/version answered in 0.28s while /v1/chat/completions hung past 180s from BOTH VM111 and the workstation itself. Owner authorised freeing the GPU; ComfyUI stopped, utilisation 100%->3%, inference then returned in 0.4s. 🚨 STANDING FRAGILITY: the production Brain's ONLY inference provider is this workstation over Tailscale under a local-only policy. Any long GPU job on it silently turns every production turn into a 240s timeout."
+  "gpuContentionBlockedAcceptance2026_09_03": "The first two acceptance attempts died with PROVIDER_CONNECT_TIMEOUT (240s). Not connectivity: a ComfyUI render (started Aug 29) held the RTX 3090 at 100% and starved Ollama — /api/version answered in 0.28s while /v1/chat/completions hung past 180s from BOTH VM111 and the workstation itself. Owner authorised freeing the GPU; ComfyUI stopped, utilisation 100%->3%, inference then returned in 0.4s. 🚨 STANDING FRAGILITY: the production Brain's ONLY inference provider is this workstation over Tailscale under a local-only policy. Any long GPU job on it silently turns every production turn into a 240s timeout.",
+  "engineStructure2026_09_04": "engine/ went from 52 loose files beside 19 directories to 0 loose files in 30 modules. Domains were assigned by reading each file's own header, not by name prefix. Done with a resolver that maps every relative specifier through the move (48 renames, 119 importers rewritten, tsc -b clean first attempt; git records renames so history follows). Guarded by engineModuleBoundaries.test.ts: every engine source must live in a module, no misc/common/shared/utils bucket is allowed, and the rule asserts it matched the tree so it cannot pass vacuously. Admission control was rebuilt as engine/admission/ (10 files: pure policy, signals, thresholds with measured provenance, single-flight+TTL gate, telemetry) and is enforced by admissionArchitecture.test.ts: any file calling providerFor MUST use AdmissionGate — the guard that would have caught the original ungated-coding-agent defect on the commit that introduced it."
  },
  "backlogHygiene": {
   "2026-08-27": "EASY_NEXT had drifted: four entries were still listed as pending while the capabilities they describe were already in PROVEN_LIVE. Pruned only after matching each against the proven entry, not on memory. A backlog that lists finished work is how the same slice gets opened twice."
