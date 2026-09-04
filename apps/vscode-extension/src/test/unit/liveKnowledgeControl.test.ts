@@ -361,17 +361,34 @@ test('the two frames are rendered separately, and provenance precedes the answer
   assert.match(turn, /liveKnowledgeBadge\(/);
   assert.match(turn, /sourceModeBadge\(/);
 
-  // The Brain emits both frames before any answer text, including before a refusal.
+  // The Brain emits both frames before any answer text, and before any refusal
+  // that is ABOUT evidence — those must arrive after their own provenance, or an
+  // operator cannot see what was consulted before being told it was not enough.
+  //
+  // This used to compare against the FIRST `send('refusal'` in the file, which was
+  // a fair proxy while every refusal came from an evidence boundary. It no longer
+  // is: a GPU-capacity pre-flight refuses BEFORE any retrieval happens, and it is
+  // correct for it to do so — nothing has been consulted at that point, so there is
+  // no provenance to report, and spending retrieval budget on a turn the card
+  // cannot run is the waste the gate exists to prevent. So the ordering is now
+  // asserted per boundary, which is what the test always meant.
   const routes = readFileSync(
     join(__dirname, '..', '..', '..', '..', 'brain-service', 'src', 'engine', 'engineerRoutes.ts'),
     'utf8',
   );
   const liveFrame = routes.indexOf("send('liveKnowledge'");
-  const refusal = routes.indexOf("send('refusal'");
-  const loopStart = routes.indexOf('INSUFFICIENT_APPROVED_EVIDENCE');
+  const groundingFrame = routes.indexOf("send('grounding'");
+  const capabilityDenied = routes.indexOf("code: 'CAPABILITY_DENIED',");
+  const insufficientEvidence = routes.indexOf("send('refusal', { code: 'INSUFFICIENT_APPROVED_EVIDENCE'");
+  const capacityRefusal = routes.indexOf('send(\'refusal\', { code, message: capacityReading.message');
   assert.ok(liveFrame > 0, 'the Brain emits the live frame');
-  assert.ok(liveFrame < refusal, 'provenance precedes a refusal');
-  assert.ok(liveFrame < loopStart, 'and precedes the loop');
+  assert.ok(groundingFrame > 0, 'and the repository-provenance frame');
+  assert.ok(liveFrame < capabilityDenied, 'provenance precedes a capability refusal');
+  assert.ok(liveFrame < insufficientEvidence, 'provenance precedes an evidence refusal');
+  assert.ok(liveFrame < routes.indexOf('INSUFFICIENT_APPROVED_EVIDENCE'), 'and precedes the loop');
+  // Pinned deliberately: the pre-flight belongs BEFORE retrieval, not after it.
+  assert.ok(capacityRefusal > 0, 'the capacity pre-flight exists');
+  assert.ok(capacityRefusal < groundingFrame, 'a card that cannot serve is caught before any retrieval');
 });
 
 test('the confirmation states what each mode enforces', () => {

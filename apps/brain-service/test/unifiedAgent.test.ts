@@ -796,3 +796,47 @@ test('the prompt names workspace.list as the only way to see what exists', async
   assert.match(h.prompts[0]!, /To see WHAT FILES EXIST use workspace\.list/);
   assert.match(h.prompts[0]!, /Guessing a listing is a serious error/);
 });
+
+test('the no-work footer never claims "no tool ran" when a tool ran and failed', async () => {
+  // OBSERVED LIVE (2026-09-03, real qwen2.5-coder:14b): asked to build a page from
+  // an attached design, the agent called fs.proposeChangeset, the tool FAILED, and
+  // the machine-authored footer printed "No tool ran during this turn" directly
+  // beneath the model's own accurate report that the tool had failed.
+  //
+  // This footer exists BECAUSE the model's prose cannot be trusted. A false sentence
+  // in it is worse than no footer at all, so it may assert only what was observed.
+  const calls: string[] = [];
+  let i = 0;
+  const replies = [
+    '{"action":{"tool":"fs.proposeChangeset","input":{"rootPath":"/w","ops":[{"op":"create","path":"index.html","content":"<h1>Hi</h1>"}]}}}',
+    '{"final":"I have created index.html with the landing page markup."}',
+    '{"final":"I have created index.html with the landing page markup."}',
+  ];
+  const events = await drain(
+    runEngineerTask(
+      {
+        workspaceExists: () => true,
+        complete: async () => replies[Math.min(i++, replies.length - 1)]!,
+        executeTool: async (tool: string) => {
+          calls.push(tool);
+          throw new Error('the tool could not complete');
+        },
+        tools: TOOLS,
+      } as Parameters<typeof runEngineerTask>[0],
+      { rootPath: '/w', task: 'build the landing page' },
+    ),
+  );
+
+  assert.deepEqual(calls, ['fs.proposeChangeset'], 'the tool must have been attempted');
+  const final = events.find((e) => e.type === 'final') as { markdown: string };
+  // The invariant worth stating holds either way, and must still be stated.
+  assert.match(final.markdown, /Nothing was created or changed/);
+  assert.match(final.markdown, /do not exist/);
+  // The falsehood must be gone, and replaced by what actually happened.
+  assert.doesNotMatch(
+    final.markdown,
+    /No tool ran during this turn/,
+    'a tool DID run — the footer must not deny it',
+  );
+  assert.match(final.markdown, /1 tool call ran but produced nothing/);
+});

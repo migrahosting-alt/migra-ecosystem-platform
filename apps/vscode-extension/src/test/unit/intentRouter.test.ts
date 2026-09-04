@@ -269,3 +269,105 @@ test('a plan note renders as a readable block, not a squeezed one-liner', async 
   assert.match(out, /\[ \] 1\. audit the repo/);
   assert.match(out, /```text/, 'multi-line plan is a block');
 });
+
+test('routing attribution survives the final frame — done is read, not skipped', async () => {
+  // The server always sends `final` BEFORE `done`, and this consumer used to
+  // `return` on `final`. So `done` — which carries which model answered, under
+  // which policy, and whether a fallback was recommended — was never read on ANY
+  // successful run. It also made the client log "engineer stream ended without a
+  // done frame" on perfectly healthy turns.
+  const md: string[] = [];
+  const attributions: unknown[] = [];
+  await runEngineerTurn(
+    fakeStream([
+      { event: 'final', data: { markdown: 'Proposed index.html.' } },
+      { event: 'done', data: { outcome: 'completed', routing: { model: 'coder-14b', policy: 'local-only' } } },
+    ]),
+    { rootPath: '/w', task: 'build the page' },
+    { markdown: (t) => md.push(t), onAttribution: (r: unknown) => attributions.push(r) },
+  );
+  assert.equal(attributions.length, 1, 'attribution must be delivered exactly once');
+  assert.deepEqual(attributions[0], { model: 'coder-14b', policy: 'local-only' });
+  assert.match(md.join(''), /Proposed index\.html\./, 'and the answer still renders');
+});
+
+test('a failed run still reports which model and policy produced the failure', async () => {
+  const md: string[] = [];
+  const attributions: unknown[] = [];
+  await runEngineerTurn(
+    fakeStream([
+      { event: 'error', data: { code: 'PROVIDER_CONNECT_TIMEOUT', message: 'provider did not accept the connection' } },
+      { event: 'done', data: { outcome: 'timed_out', routing: { model: 'coder-14b', policy: 'local-only' } } },
+    ]),
+    { rootPath: '/w', task: 'build the page' },
+    { markdown: (t) => md.push(t), onAttribution: (r: unknown) => attributions.push(r) },
+  );
+  assert.match(md.join(''), /PROVIDER_CONNECT_TIMEOUT/);
+  assert.deepEqual(attributions[0], { model: 'coder-14b', policy: 'local-only' },
+    'knowing which model failed matters most exactly when it failed');
+});
+
+test('only one answer is rendered even if the stream repeats a final frame', async () => {
+  const md: string[] = [];
+  await runEngineerTurn(
+    fakeStream([
+      { event: 'final', data: { markdown: 'The answer.' } },
+      { event: 'final', data: { markdown: 'The answer.' } },
+      { event: 'done', data: { outcome: 'completed' } },
+    ]),
+    { rootPath: '/w', task: 't' },
+    { markdown: (t) => md.push(t) },
+  );
+  assert.equal((md.join('').match(/The answer\./g) ?? []).length, 1, 'no duplicated answer');
+});
+
+test('a GPU_BUSY refusal is not dressed up as an evidence problem', async () => {
+  // The renderer used to send EVERY non-capability refusal down the
+  // "Insufficient approved evidence" branch. A busy graphics card would have sent
+  // the operator to re-approve a semantic index that was never involved.
+  const md: string[] = [];
+  await runEngineerTurn(
+    fakeStream([
+      { event: 'refusal', data: { code: 'GPU_BUSY', capacity: 'busy',
+        message: 'The AI vision engine is busy with another task on the graphics card, so your request has not started yet. Nothing was lost — send it again in a moment and it will run.' } },
+      { event: 'done', data: { ok: false, code: 'GPU_BUSY' } },
+    ]),
+    { rootPath: '/w', task: 'build this page' },
+    { markdown: (t) => md.push(t) },
+  );
+  const out = md.join('');
+  assert.match(out, /graphics card is busy/i);
+  assert.match(out, /Nothing was lost/, "the Brain's own sentence is rendered verbatim");
+  assert.doesNotMatch(out, /approved evidence/i, 'wrong boundary — never say this here');
+  assert.match(out, /nothing in your workspace changed/i);
+});
+
+test('an unreachable engine reads as unreachable, not as a refused request', async () => {
+  const md: string[] = [];
+  await runEngineerTurn(
+    fakeStream([
+      { event: 'refusal', data: { code: 'ENGINE_UNAVAILABLE', capacity: 'unavailable',
+        message: 'The AI engine is not reachable right now, so your request has not started. Nothing was lost.' } },
+      { event: 'done', data: { ok: false, code: 'ENGINE_UNAVAILABLE' } },
+    ]),
+    { rootPath: '/w', task: 'build this page' },
+    { markdown: (t) => md.push(t) },
+  );
+  assert.match(md.join(''), /engine is not reachable/i);
+  assert.doesNotMatch(md.join(''), /approved evidence/i);
+});
+
+test('an unknown refusal code says so rather than guessing a cause', async () => {
+  const md: string[] = [];
+  await runEngineerTurn(
+    fakeStream([
+      { event: 'refusal', data: { code: 'SOME_FUTURE_BOUNDARY', message: 'Refused for a reason this client predates.' } },
+      { event: 'done', data: { ok: false } },
+    ]),
+    { rootPath: '/w', task: 't' },
+    { markdown: (t) => md.push(t) },
+  );
+  const out = md.join('');
+  assert.match(out, /SOME_FUTURE_BOUNDARY/, 'name the code instead of inventing a cause');
+  assert.doesNotMatch(out, /approved evidence/i);
+});

@@ -84,6 +84,18 @@ export async function runEngineerTurn(
   // it is written, so the `final` event usually repeats what the user can
   // already see — we append only the remainder.
   let streamed = '';
+  /*
+   * The answer is rendered ONCE, but the stream is read to its end.
+   *
+   * Both the `final` and `error` branches used to `return` here, and the server
+   * always sends `final` BEFORE `done` — so `done` was never read and
+   * `onAttribution` never fired on a successful run. Which model answered, under
+   * which policy, and whether a fallback was recommended was computed, streamed,
+   * and dropped on the floor every single time. It also made the client log
+   * "engineer stream ended without a done frame" on healthy runs, because closing
+   * the generator early is indistinguishable from a truncated stream.
+   */
+  let answerRendered = false;
   try {
     for await (const ev of client.engineerStream(req, signal)) {
       if (ev.event === 'grounding') {
@@ -108,14 +120,38 @@ export async function runEngineerTurn(
         // capability denial rendered as "insufficient approved evidence" would send an
         // operator to re-approve an index that was never the problem.
         const d = ev.data as { code?: string; message?: string; reason?: string };
+        /*
+         * SWITCH ON THE CODE, and default to saying only what is known.
+         *
+         * This was an if/else whose else-branch called EVERY non-capability refusal
+         * "Insufficient approved evidence" — so a GPU_BUSY refusal, which is about
+         * the graphics card being committed elsewhere, would have sent the operator
+         * off to re-approve a semantic index that was never involved. The file's own
+         * comment warns that refusals from different boundaries must not wear each
+         * other's wording; an open-ended else could not honour that.
+         */
         if (d.code === 'CAPABILITY_DENIED') {
           sink.markdown(
             `\n**Capability authority denied.**\n\n${d.message ?? 'This model has no measured standing for this class of work.'}\n\n_No model was called for this request._\n`,
           );
-        } else {
+        } else if (d.code === 'GPU_BUSY') {
+          // Not a failure of the request: the card is committed to other work. The
+          // Brain's sentence already says nothing was lost, so it is rendered verbatim.
+          sink.markdown(
+            `\n**The graphics card is busy.**\n\n${d.message ?? 'Another workload is using the GPU, so this request has not started.'}\n\n_Nothing was sent to a model, and nothing in your workspace changed._\n`,
+          );
+        } else if (d.code === 'ENGINE_UNAVAILABLE') {
+          sink.markdown(
+            `\n**The AI engine is not reachable.**\n\n${d.message ?? 'The engine could not be reached, so this request has not started.'}\n\n_Nothing was sent to a model, and nothing in your workspace changed._\n`,
+          );
+        } else if (d.code === 'INSUFFICIENT_APPROVED_EVIDENCE' || d.code === undefined) {
           // An approved-only turn the Brain could not ground. Rendered verbatim from
           // the Brain's reason — the loop never started, so there is nothing else.
           sink.markdown(`\n**Insufficient approved evidence.**\n\n${d.message ?? 'The approved semantic index does not support this request.'}\n\n_No working-tree files were consulted._\n`);
+        } else {
+          // A refusal code this client does not know yet. Say that, rather than
+          // guessing at a cause and sending someone to fix the wrong thing.
+          sink.markdown(`\n**Request refused: ${d.code}.**\n\n${d.message ?? d.reason ?? 'The Brain refused this request before starting.'}\n\n_The loop never started._\n`);
         }
       } else if (ev.event === 'route') {
         const d = ev.data as { model?: string; correlationId?: string; taskClass?: string; workflow?: string };
@@ -163,6 +199,7 @@ export async function runEngineerTurn(
           sink.markdown(text);
         }
       } else if (ev.event === 'final') {
+        if (answerRendered) continue; // exactly one answer, however many frames arrive
         const d = ev.data as FinalData;
         const markdown = d.markdown ?? '';
         if (d.streamedPrefix && streamed && markdown.startsWith(streamed)) {
@@ -175,8 +212,10 @@ export async function runEngineerTurn(
           // separate the two rather than running them together.
           sink.markdown(`${streamed ? '\n\n---\n' : '\n'}${markdown}\n`);
         }
-        return;
+        answerRendered = true;
       } else if (ev.event === 'error') {
+        if (answerRendered) continue;
+        answerRendered = true;
         const d = ev.data as ErrorData;
         sink.markdown([
           '\n**Engineer run failed.**',
@@ -185,7 +224,8 @@ export async function runEngineerTurn(
           'No further tools executed.',
           '```',
         ].join('\n'));
-        return;
+        // Deliberately NOT returning: a failed run still reports which model and
+        // policy produced the failure, and that is exactly when it is worth knowing.
       }
     }
   } catch (err) {

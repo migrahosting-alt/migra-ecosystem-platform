@@ -53,6 +53,10 @@ export interface CapacitySignals {
   effectiveFreeBytes?: number;
   /** Whether the model this turn needs is already loaded. */
   modelResident?: boolean;
+  /** Did a one-token generation actually come back? Compute, not memory. */
+  computeResponsive?: boolean;
+  /** How long that probe took, in ms. Recorded whether it passed or failed. */
+  computeProbeMs?: number;
   /** Probes that could not be reached, by name. */
   unreachable?: string[];
 }
@@ -117,6 +121,15 @@ export interface CapacityProbeDeps {
   fetchImpl?: typeof fetch;
   /** Probe budget. Deliberately small: this gates a user-facing turn. */
   timeoutMs?: number;
+  /**
+   * Deadline for the one-token compute probe.
+   *
+   * Sized from measurement, not taste: a warm resident model answered in 0.29-0.4 s,
+   * and a card committed to a render did not answer in 180 s. Anywhere between those
+   * separates the two cleanly, so this sits ~15x above the warm case and ~40x below
+   * the failure it prevents.
+   */
+  computeTimeoutMs?: number;
 }
 
 async function getJson(
@@ -130,6 +143,39 @@ async function getJson(
     return await res.json();
   } catch {
     return undefined;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Ask the card to actually DO something, briefly.
+ *
+ * Every other signal here is about memory. This is the only one about compute,
+ * and compute is what a contended GPU runs out of first. One token from a model
+ * that is already resident needs no load, no context and no scheduling — if that
+ * cannot come back in seconds, the card is not available to this turn no matter
+ * what the VRAM figures say.
+ */
+async function probeCompute(
+  base: string, model: string, timeoutMs: number, fetchImpl: typeof fetch,
+): Promise<{ ok: boolean; ms: number }> {
+  const started = Date.now();
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetchImpl(`${base}/api/generate`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      // `num_predict: 1` and no streaming: the smallest unit of real GPU work.
+      // `keep_alive` is deliberately omitted so the probe never changes how long
+      // the model stays resident — measuring must not perturb what it measures.
+      body: JSON.stringify({ model, prompt: '.', stream: false, options: { num_predict: 1 } }),
+      signal: controller.signal,
+    });
+    return { ok: res.ok, ms: Date.now() - started };
+  } catch {
+    return { ok: false, ms: Date.now() - started };
   } finally {
     clearTimeout(timer);
   }
@@ -195,11 +241,41 @@ export async function probeGpuCapacity(deps: CapacityProbeDeps): Promise<Capacit
   // Nothing readable at all: proceed, protected by the bounded wait.
   if (!ps && !queue) return { state: 'unknown', signals };
 
-  // A resident model answers from VRAM it already holds — measured 0.29 s warm.
-  // This is checked BEFORE the render check on purpose: a ComfyUI job running
-  // beside an already-loaded model is contention, not a blockade, and refusing
-  // there would deny work the card can actually do.
-  if (signals.modelResident) return { state: 'ready', signals };
+  /*
+   * 🚨 RESIDENCY IS NOT AVAILABILITY — MEASURED, NOT ASSUMED.
+   *
+   * This used to return `ready` the moment the model was loaded, on the reasoning
+   * that "a ComfyUI job running beside an already-loaded model is contention, not
+   * a blockade". OBSERVED 2026-09-03, disproving it: `qwen2.5-coder:14b` was
+   * resident (15.3 GB) while a ComfyUI render held the card at 100% util, and a
+   * completion did NOT return in 0.29 s — it did not return in 180 s, from the
+   * Brain's host AND from the workstation itself. Every production turn spent
+   * 240 s reaching a generic failure, while `/health` reported `gpuCapacity:
+   * ready` throughout, because this line short-circuited the render check.
+   *
+   * Residency rules out a COLD LOAD. It says nothing about whether the card has
+   * compute to spare, and compute is what a render takes.
+   *
+   * So the fast path is kept exactly where it was earned — nothing else is
+   * competing — and where something IS competing the question is settled by
+   * asking for one token rather than by assuming. Note the second trigger:
+   * ComfyUI unreachable is not evidence of an idle card. Its `/queue` stopped
+   * answering *because* a long node execution was blocking its event loop, so the
+   * authoritative render signal went silent at precisely the moment it mattered.
+   */
+  if (signals.modelResident) {
+    const contentionPossible =
+      (signals.comfyRunning ?? 0) > 0 || unreachable.includes('studio');
+    if (!contentionPossible) return { state: 'ready', signals };
+    const probe = await probeCompute(
+      ollamaBase, String(deps.model), deps.computeTimeoutMs ?? 6_000, fetchImpl,
+    );
+    signals.computeResponsive = probe.ok;
+    signals.computeProbeMs = probe.ms;
+    return probe.ok
+      ? { state: 'ready', signals }
+      : { state: 'busy', message: BUSY_MESSAGE, signals };
+  }
 
   // A render owns the card, and this turn would need a cold load behind it.
   if ((signals.comfyRunning ?? 0) > 0) {

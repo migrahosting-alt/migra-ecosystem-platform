@@ -59,16 +59,86 @@ test('a running render makes a cold-load turn busy, not ready', async () => {
  * already in VRAM answered in 0.29 s while a render was running; refusing there
  * would deny work the card can demonstrably do.
  */
-test('an ALREADY-RESIDENT model stays ready even while a render runs', async () => {
+/* ── residency vs. availability ──────────────────────────────────────────────
+ *
+ * This block replaces a test that asserted "an ALREADY-RESIDENT model stays ready
+ * even while a render runs". That was a hypothesis, and it was FALSIFIED on
+ * 2026-09-03: qwen2.5-coder:14b was resident (15.3 GB) while a ComfyUI render held
+ * the card at 100% util, and a completion did not return in 180 s — from the
+ * Brain's host and from the workstation itself. `/health` said `gpuCapacity: ready`
+ * the whole time.
+ *
+ * The old test's CONCERN was right and is kept below: a card that can still serve
+ * must not be refused. What changed is that the question is now measured instead of
+ * assumed. */
+
+/** A route that never answers, so only the probe deadline ends it. */
+function hangingGenerate(routes: Record<string, unknown>): typeof fetch {
+  const base = serve(routes);
+  return (async (url: any, init?: any) => {
+    if (String(url).includes('/api/generate')) {
+      return await new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => reject(new Error('aborted')));
+      });
+    }
+    return base(url, init);
+  }) as typeof fetch;
+}
+
+test('a resident model beside a render is READY when the card still answers', async () => {
   const r = await probeGpuCapacity({
     ...BASE, model: 'qwen2.5vl:7b',
     fetchImpl: serve({
       '/api/ps': { models: [{ name: 'qwen2.5vl:7b', size_vram: 13.5e9 }] },
       '/queue': busyQueue, '/system_stats': tight,
+      '/api/generate': { response: '.', done: true },
     }),
   });
+  assert.equal(r.state, 'ready', 'work the card can still do must not be refused');
+  assert.equal(r.signals.computeResponsive, true);
+});
+
+test('a resident model beside a render is BUSY when the card cannot answer', async () => {
+  const r = await probeGpuCapacity({
+    ...BASE, model: 'qwen2.5vl:7b', computeTimeoutMs: 40,
+    fetchImpl: hangingGenerate({
+      '/api/ps': { models: [{ name: 'qwen2.5vl:7b', size_vram: 13.5e9 }] },
+      '/queue': busyQueue, '/system_stats': tight,
+    }),
+  });
+  assert.equal(r.state, 'busy', 'residency must not override a card that cannot serve');
+  assert.equal(r.signals.computeResponsive, false);
+  assert.equal(shouldRefuse(r), true, 'and the turn must be refused fast, not after 240s');
+});
+
+test('ComfyUI going silent is not evidence of an idle card', async () => {
+  // The exact live shape: /queue stopped answering BECAUSE a long node execution
+  // was blocking its event loop, so the authoritative render signal disappeared at
+  // precisely the moment it mattered.
+  const r = await probeGpuCapacity({
+    ...BASE, model: 'qwen2.5-coder:14b', computeTimeoutMs: 40,
+    fetchImpl: hangingGenerate({
+      '/api/ps': { models: [{ name: 'qwen2.5-coder:14b', size_vram: 15.3e9 }] },
+    }),
+  });
+  assert.equal(r.state, 'busy');
+  assert.ok(r.signals.unreachable?.includes('studio'));
+});
+
+test('the fast path is untouched: no render means no compute probe at all', async () => {
+  const hits: string[] = [];
+  const base = serve({
+    '/api/ps': { models: [{ name: 'qwen2.5vl:7b', size_vram: 13.5e9 }] },
+    '/queue': idle, '/system_stats': roomy,
+  });
+  const counting: typeof fetch = (async (url: any, init?: any) => {
+    hits.push(String(url));
+    return base(url, init);
+  }) as typeof fetch;
+  const r = await probeGpuCapacity({ ...BASE, model: 'qwen2.5vl:7b', fetchImpl: counting });
   assert.equal(r.state, 'ready');
-  assert.equal(r.signals.modelResident, true);
+  assert.equal(hits.filter((h) => h.includes('/api/generate')).length, 0,
+    'an idle card must not pay for a probe on every turn');
 });
 
 test('no headroom for a cold load is busy', async () => {
@@ -121,10 +191,14 @@ test('the model name matches with or without an explicit tag', async () => {
   for (const asked of ['qwen2.5vl', 'qwen2.5vl:7b']) {
     const r = await probeGpuCapacity({
       ...BASE, model: asked,
+      // An IDLE queue on purpose: the subject here is name matching, and pairing it
+      // with a render dragged the test through the contention path, where it was
+      // really asserting something else.
       fetchImpl: serve({
-        '/api/ps': { models: [{ name: 'qwen2.5vl:7b' }] }, '/queue': busyQueue, '/system_stats': tight,
+        '/api/ps': { models: [{ name: 'qwen2.5vl:7b' }] }, '/queue': idle, '/system_stats': roomy,
       }),
     });
+    assert.equal(r.signals.modelResident, true, asked);
     assert.equal(r.state, 'ready', asked);
   }
 });

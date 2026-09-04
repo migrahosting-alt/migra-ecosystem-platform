@@ -957,9 +957,24 @@ export async function* runEngineerTask(deps: EngineerDeps, input: EngineerInput)
   const NO_COMMAND_FOOTER =
     '\n\n---\n**⚠️ No commands were run.** Any install, typecheck, lint, test, build, migration or health-check result stated above did not happen — nothing was executed this turn.';
 
-  // Ground truth for a final that still describes work after zero tool calls.
-  const NO_WORK_FOOTER =
-    '\n\n---\n**⚠️ Nothing was created or changed.** No tool ran during this turn, so any files named above do not exist. Ask again to have them actually built.';
+  /* Ground truth for a final that still describes work when nothing was produced.
+   *
+   * 🚨 IT MUST NOT ASSERT A TOOL COUNT IT NEVER CHECKED. This is triggered by
+   * OUTPUT — `producedNothing` — but its text used to say "No tool ran during this
+   * turn" unconditionally. Observed live: a turn whose `fs.proposeChangeset` call
+   * ran and FAILED printed that sentence directly beneath the model's own accurate
+   * report that the tool had failed. The footer is the machine-authored truth note
+   * that exists precisely because the model's prose cannot be trusted, so a false
+   * sentence here is worse than none.
+   *
+   * The claim worth making is the same either way — the files do not exist — so
+   * only the reason varies. */
+  const noWorkFooter = (toolCalls: number): string =>
+    '\n\n---\n**⚠️ Nothing was created or changed.** ' +
+    (toolCalls === 0
+      ? 'No tool ran during this turn, so any files named above do not exist.'
+      : `${toolCalls} tool call${toolCalls === 1 ? '' : 's'} ran but produced nothing, so any files named above do not exist.`) +
+    ' Ask again to have them actually built.';
 
   // One completion, reported as it arrives. The streamer emits nothing until the
   // reply is confirmed to be a final answer, so a tool call never leaks protocol
@@ -1187,7 +1202,7 @@ export async function* runEngineerTask(deps: EngineerDeps, input: EngineerInput)
       // …and the same for a phantom claim of work that survived its correction:
       // state the ground truth deterministically rather than let the prose stand.
       if (producedNothing && claimsPhantomWork(markdown)) {
-        markdown += NO_WORK_FOOTER;
+        markdown += noWorkFooter(toolStepCount);
       }
       if (!executedTools.has('command.run') && claimsCommandResult(markdown)) {
         markdown += NO_COMMAND_FOOTER;

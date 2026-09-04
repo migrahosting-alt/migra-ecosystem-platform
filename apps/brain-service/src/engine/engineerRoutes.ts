@@ -76,6 +76,7 @@ import {
   delegateFor,
 } from './workspaceDelegation.js';
 import { planTurn } from '@migrapilot/shared-types/turn-intent';
+import { probeGpuCapacity, shouldRefuse } from './capacity/gpuCapacity.js';
 import type { TurnIntent as TurnDecisionIntent } from './turnDecision.js';
 
 /** Total characters of seeded code the agent is given. Enough for a few whole
@@ -673,6 +674,48 @@ export function registerEngineerRoutes(
 
     // Surface the correlation id to the client so it can be quoted in support.
     send('route', { model: decision.model.id, provider: decision.model.provider, reason: decision.reason, correlationId, policy: routing.policy, requestedPolicy: routing.requestedPolicy, effectivePolicy: routing.effectivePolicy, policyReason: routing.policyReason, fallbackRecommended: routing.fallbackRecommended });
+
+    /*
+     * 🚨 CAN THE CARD ACTUALLY SERVE THIS TURN? ASK BEFORE SPENDING THE USER'S TIME.
+     *
+     * The chat path has gated on this for a while. THIS path — the coding agent,
+     * which is the product — never did, and the gap is not theoretical: measured
+     * 2026-09-03, a build-from-mockup turn sat for the full 240 s provider deadline
+     * and then returned a generic failure, while a ComfyUI render held the GPU. The
+     * user waits four minutes to be told nothing useful, having been given no way to
+     * know the card was already committed.
+     *
+     * Refusing here costs a probe and returns in seconds with a sentence that says
+     * what is actually happening and that nothing was lost.
+     *
+     * `real` mirrors providerFor: with a stub provider there is no GPU to be busy,
+     * so the suite must not depend on the workstation being awake. An unreadable
+     * probe returns `unknown` and does NOT refuse — a monitoring outage must never
+     * become an outage of the thing being monitored.
+     */
+    if (real) {
+      const capacityReading = await probeGpuCapacity({
+        providerBaseUrl: env.providerBaseUrl,
+        ...(process.env.MIGRAPILOT_STUDIO_URL ? { studioBaseUrl: process.env.MIGRAPILOT_STUDIO_URL } : {}),
+        model: decision.model.id,
+      }).catch(() => undefined);
+      if (capacityReading && shouldRefuse(capacityReading)) {
+        const code = capacityReading.state === 'busy' ? 'GPU_BUSY' : 'ENGINE_UNAVAILABLE';
+        stage.log('error', { code });
+        await auditStore.append({
+          correlationId,
+          type: 'execution.failed',
+          component: 'engineer',
+          requestId: headerId || undefined,
+          outcome: code,
+          fields: { refusedBeforeModelCall: true, capacity: capacityReading.state },
+        });
+        send('refusal', { code, message: capacityReading.message, capacity: capacityReading.state });
+        send('done', { ok: false, code, outcome: 'refused', correlationId });
+        raw.end();
+        return;
+      }
+    }
 
     // Seed the agent with the SAME tuned lexical grounding the chat path used
     // (definition-first ranking, filename bonus, copy-path penalty). Routing
