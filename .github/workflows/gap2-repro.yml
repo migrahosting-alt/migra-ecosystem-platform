@@ -96,3 +96,18 @@ jobs:
       - name: Extension unit suite
         working-directory: apps/vscode-extension
         run: node --test dist/test/unit/*.test.js
+      # ── THE CONSUMER'S OWN SUITE ──────────────────────────────────────────
+      #
+      # The consumer already TRIGGERS this job and its build is covered by
+      # `npm run build -ws`, but nothing anywhere ran its tests — including
+      # `repositoryIntegrity.test.ts`, the guard that exists because a committed
+      # route imported two modules nobody had added to git. A tracking guard that
+      # only runs on the author's laptop protects the one tree that never needed
+      # it.
+      #
+      # It runs from source rather than from a build output because that is the
+      # app's own acceptance command, and a clean clone is exactly where the
+      # tracking checks have something to say.
+      - name: Consumer suite
+        working-directory: apps/migrapilot-consumer
+        run: npm test

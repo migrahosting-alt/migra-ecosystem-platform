@@ -1,5 +1,12 @@
 # Handoff — the file-attachment lane blocks the clean-clone invariant
 
+> ✅ **CLOSED 2026-09-04.** The lane's owner landed it as one unit in `876a2e68`
+> ("land the other half of the attachment lane, which reds every build"). A clean
+> worktree of `HEAD` now typechecks, `uploadCeiling.test.ts` is committed, the
+> tracking check has been widened back to every source file, and the fresh-clone CI
+> job now runs the consumer suite so the guard actually fires somewhere other than a
+> laptop. The record below is kept as written, for the next time this shape appears.
+
 **For:** the owner of the file-attachment lane.
 **From:** the consumer chat lane, 2026-09-04. **Nothing in this handoff has been changed by me.**
 

@@ -62,25 +62,21 @@ const isTransientProbe = (p: string): boolean => path.basename(p).startsWith('__
 const isSource = (p: string): boolean => /\.tsx?$/.test(p) && !p.endsWith('.d.ts')
 
 /**
- * A test file is in-flight work until the code it exercises exists.
+ * EVERY source file, tests included — the narrowing is lifted.
  *
- * ⚠️ A DELIBERATE NARROWING, and the trade-off is stated rather than hidden.
- * brain-service and the extension fail on ANY untracked source, tests included.
- * This app cannot: `uploadCeiling.test.ts` imports exports that live only in the
- * file-attachment lane's uncommitted `capability.ts` and `outcome.ts`, so
- * committing it BREAKS the clean checkout — measured, four fresh errors — and
- * leaving it untracked is the correct state until that lane lands.
+ * This check briefly skipped test files, for one honest reason: the file-attachment
+ * lane's `uploadCeiling.test.ts` imported exports that existed only in that lane's
+ * uncommitted working tree, so committing it BROKE the clean checkout (measured:
+ * four fresh errors) while leaving it untracked broke this check. The narrowing was
+ * documented as temporary and as a real cost — an untracked test does not run in CI.
  *
- * What is given up: an untracked test does not run in CI, which is a real gap,
- * just a smaller one than a build that cannot be reproduced. What is kept: every
- * non-test module must be tracked, and check 2 below covers ALL files including
- * tests — so the moment anything committed depends on an untracked file, test or
- * not, this suite fails. That is the edge that actually broke production.
+ * That lane landed (`876a2e68`), the clean worktree typechecks, and the test is
+ * committed, so the exception has no remaining justification and is gone. This now
+ * matches the brain-service and extension guards: any untracked source is a file
+ * that will never reach a clean checkout, whatever it contains.
  */
-const isTest = (p: string): boolean => /\.test\.tsx?$/.test(p)
-
-test('every consumer source MODULE is tracked by git', () => {
-  const stray = [...untracked].filter((p) => isSource(p) && !isTest(p) && !isTransientProbe(p)).sort()
+test('every consumer source file is tracked by git', () => {
+  const stray = [...untracked].filter((p) => isSource(p) && !isTransientProbe(p)).sort()
   assert.deepEqual(
     stray,
     [],
