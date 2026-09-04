@@ -93,14 +93,14 @@
     },
     {
       "file": "src/panel/shell/shellProvider.ts",
-      "line": 1371,
+      "line": 1396,
       "api": "showWarningMessage",
       "classification": "consumed",
       "snippet": "await vscode.window.showWarningMessage("
     },
     {
       "file": "src/panel/shell/shellProvider.ts",
-      "line": 1387,
+      "line": 1412,
       "api": "showWarningMessage",
       "classification": "consumed",
       "snippet": "await vscode.window.showWarningMessage("
