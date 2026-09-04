@@ -14,7 +14,7 @@ import assert from 'node:assert/strict';
 import { classify, applyComputeProbe, shouldRefuse } from '../src/engine/admission/policy.js';
 import { isModelResident } from '../src/engine/admission/signals/inference.js';
 import { DEFAULT_THRESHOLDS } from '../src/engine/admission/thresholds.js';
-import { BUSY_MESSAGE, UNAVAILABLE_MESSAGE } from '../src/engine/admission/messages.js';
+import { BUSY_MESSAGE, UNAVAILABLE_MESSAGE, UNRESPONSIVE_MESSAGE } from '../src/engine/admission/messages.js';
 import type { PolicyInput } from '../src/engine/admission/policy.js';
 
 const GB = 1024 * 1024 * 1024;
@@ -173,4 +173,54 @@ test('every reason is reachable and distinct', () => {
   seen.add(applyComputeProbe({}, { ok: false, ms: 1 }).reason);
   seen.add((decide({ residency: residency([{ name: 'o:34b', vram: 23.2e9 }]), studio: reachableStudio({ vramFreeBytes: 1e9 }), model: 'm' }) as never as { reading: { reason: string } }).reading.reason);
   assert.equal(seen.size, 8, `expected 8 distinct reasons, saw ${[...seen].sort().join(', ')}`);
+});
+
+/* ── what a failed probe is, and is not, evidence of ─────────────────────────
+ *
+ * MEASURED 2026-09-04. Ollama unloads an idle model, so the first request after a
+ * pause pays a cold load: 5.08 s, 11.8 s, and 55 s straight after a machine
+ * restart. The original 6 s probe deadline sat INSIDE that range, so the gate
+ * refused turns the card would have served — and told the user the GPU was busy
+ * when it was merely loading. The deadline is 20 s now, sized from those numbers.
+ *
+ * The second half is what the refusal SAYS. A failed probe proves the card did not
+ * produce a token in time; it does not prove what was using it. The probe also runs
+ * when ComfyUI is unreachable — which is exactly what a STOPPED ComfyUI looks like. */
+
+test('a failed probe with a CONFIRMED render says another task holds the card', () => {
+  const step = decide({
+    residency: residency([{ name: 'coder:14b', vram: 15.3e9 }]),
+    studio: reachableStudio({ running: 1 }), model: 'coder:14b',
+  });
+  assert.equal(step.kind, 'needs-compute-probe');
+  if (step.kind !== 'needs-compute-probe') return;
+  const r = applyComputeProbe(step.signals, { ok: false, ms: 20_000 });
+  assert.equal(r.message, BUSY_MESSAGE, 'a seen render earns the stronger claim');
+});
+
+test('a failed probe with NO confirmed render claims only what it observed', () => {
+  // Studio unreachable — indistinguishable from ComfyUI being stopped. Telling the
+  // user the card is "busy with another task" here sent someone hunting for a
+  // workload that had already been shut down.
+  const step = decide({
+    residency: residency([{ name: 'coder:14b', vram: 15.3e9 }]),
+    studio: { reachable: false }, model: 'coder:14b',
+  });
+  assert.equal(step.kind, 'needs-compute-probe');
+  if (step.kind !== 'needs-compute-probe') return;
+  const r = applyComputeProbe(step.signals, { ok: false, ms: 20_000 });
+  assert.equal(r.state, 'busy');
+  assert.equal(r.message, UNRESPONSIVE_MESSAGE);
+  assert.doesNotMatch(String(r.message), /another task/, 'no unevidenced claim about a competing workload');
+});
+
+test('the probe deadline clears a normal cold load', () => {
+  // 5.08 s and 11.8 s were measured cold loads. A deadline inside that range
+  // refuses turns the card would have served.
+  assert.ok(
+    DEFAULT_THRESHOLDS.computeTimeoutMs > 11_800,
+    `probe deadline ${DEFAULT_THRESHOLDS.computeTimeoutMs}ms must clear a measured 11.8s cold load`,
+  );
+  // ...and still beat the provider deadline it exists to prevent, by a wide margin.
+  assert.ok(DEFAULT_THRESHOLDS.computeTimeoutMs <= 30_000, 'but must stay far below the 240s provider deadline');
 });

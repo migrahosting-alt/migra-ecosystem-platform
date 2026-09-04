@@ -13,7 +13,7 @@
  * © MigraTeck LLC.
  */
 
-import { BUSY_MESSAGE, UNAVAILABLE_MESSAGE } from './messages.js';
+import { BUSY_MESSAGE, UNAVAILABLE_MESSAGE, UNRESPONSIVE_MESSAGE } from './messages.js';
 import { isModelResident, type ComputeReading, type ResidencyReading } from './signals/inference.js';
 import type { StudioReading } from './signals/studio.js';
 import type { AdmissionThresholds } from './thresholds.js';
@@ -120,9 +120,23 @@ export function classify(input: PolicyInput): PolicyStep {
 /** Finish a classification that needed the card to prove it had cycles. */
 export function applyComputeProbe(signals: CapacitySignals, compute: ComputeReading): CapacityReading {
   const withProbe: CapacitySignals = { ...signals, computeResponsive: compute.ok, computeProbeMs: compute.ms };
-  return compute.ok
-    ? { state: 'ready', reason: 'compute-verified', signals: withProbe }
-    : { state: 'busy', reason: 'compute-starved', message: BUSY_MESSAGE, signals: withProbe };
+  if (compute.ok) return { state: 'ready', reason: 'compute-verified', signals: withProbe };
+  /*
+   * 🚨 ONLY CLAIM A COMPETING RENDER WHEN ONE WAS SEEN.
+   *
+   * A failed probe proves the card did not produce a token in time. It does NOT
+   * prove what was using it. The probe also runs when ComfyUI is merely
+   * UNREACHABLE — which is what a STOPPED ComfyUI looks like — and telling a user
+   * the card is "busy with another task" there sent someone hunting for a workload
+   * that had already been shut down.
+   */
+  const renderConfirmed = (signals.comfyRunning ?? 0) > 0;
+  return {
+    state: 'busy',
+    reason: 'compute-starved',
+    message: renderConfirmed ? BUSY_MESSAGE : UNRESPONSIVE_MESSAGE,
+    signals: withProbe,
+  };
 }
 
 /**

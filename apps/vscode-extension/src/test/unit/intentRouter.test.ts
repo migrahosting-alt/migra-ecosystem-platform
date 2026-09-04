@@ -336,8 +336,11 @@ test('a GPU_BUSY refusal is not dressed up as an evidence problem', async () => 
     { markdown: (t) => md.push(t) },
   );
   const out = md.join('');
-  assert.match(out, /graphics card is busy/i);
+  assert.match(out, /has not started/i);
   assert.match(out, /Nothing was lost/, "the Brain's own sentence is rendered verbatim");
+  // The heading must not assert a competing workload the Brain may not have seen —
+  // when ComfyUI is merely unreachable, "busy with another task" is unevidenced.
+  assert.doesNotMatch(out.split('\n').find((l) => l.startsWith('**')) ?? '', /busy/i);
   assert.doesNotMatch(out, /approved evidence/i, 'wrong boundary — never say this here');
   assert.match(out, /nothing in your workspace changed/i);
 });
@@ -417,5 +420,10 @@ test('a refusal still gets its provenance, flushed before the refusal text', asy
   );
   const out = md.join('');
   assert.match(out, /Approved index v7/, 'a refused turn must still say what it was grounded on');
-  assert.ok(out.indexOf('Approved index') < out.indexOf('graphics card'), 'provenance precedes the refusal');
+  // Anchored on the refusal's OWN text, not on a heading: this previously keyed on
+  // wording in the heading, so changing the heading made indexOf return -1 and the
+  // ordering check passed judgement on text that was not there.
+  const refusalAt = out.indexOf('The card is busy');
+  assert.ok(refusalAt > 0, 'the refusal text must be rendered');
+  assert.ok(out.indexOf('Approved index') < refusalAt, 'provenance precedes the refusal');
 });

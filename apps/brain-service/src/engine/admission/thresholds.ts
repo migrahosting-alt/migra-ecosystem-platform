@@ -41,11 +41,22 @@ export interface AdmissionThresholds {
  * - `signalTimeoutMs` 2 500 — these endpoints answer in milliseconds when healthy;
  *   this gates a user-facing turn, so the budget is deliberately small.
  *
- * - `computeTimeoutMs` 6 000 — a warm resident model answered in 0.29-0.40 s, and a
- *   card committed to a render did not answer in 180 s (measured 2026-09-03, from
- *   the Brain's host and from the workstation). Anywhere between those separates
- *   the two cleanly; 6 s sits ~15x above the warm case and ~40x below the 240 s
- *   failure it exists to prevent.
+ * - `computeTimeoutMs` 20 000 — RAISED FROM 6 000 ON MEASUREMENT, not on taste.
+ *
+ *   The original 6 s came from two numbers: warm answers at 0.29-0.40 s, and a card
+ *   held by a render not answering in 180 s. Those do separate cleanly, and 6 s sat
+ *   between them. What that reasoning missed is a THIRD state.
+ *
+ *   Ollama unloads an idle model, so the first request after a pause pays a cold
+ *   load: measured 5.08 s, 11.8 s, and 55 s immediately after a machine restart. A
+ *   6 s deadline sits INSIDE that range, so the gate refused turns the card would
+ *   have served — the user's first message after a coffee break, told the GPU was
+ *   busy when it was merely loading.
+ *
+ *   20 s clears the common cold load with margin and is still 12x faster than the
+ *   240 s provider deadline this exists to prevent. A genuinely contended card now
+ *   costs at most 20 s before an honest refusal, which is the right trade: waiting
+ *   20 s and getting an answer beats being refused in 6 s and retrying.
  *
  * - `coldLoadHeadroomBytes` 14 GB — sized from the measured vision model at 13.5 GB
  *   resident. Applies only when the model is NOT already loaded.
@@ -57,7 +68,7 @@ export interface AdmissionThresholds {
  */
 export const DEFAULT_THRESHOLDS: AdmissionThresholds = {
   signalTimeoutMs: 2_500,
-  computeTimeoutMs: 6_000,
+  computeTimeoutMs: 20_000,
   coldLoadHeadroomBytes: 14 * GB,
   cacheTtlMs: 3_000,
 };

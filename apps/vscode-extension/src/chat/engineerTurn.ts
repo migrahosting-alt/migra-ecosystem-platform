@@ -161,10 +161,18 @@ export async function runEngineerTurn(
             `\n**Capability authority denied.**\n\n${d.message ?? 'This model has no measured standing for this class of work.'}\n\n_No model was called for this request._\n`,
           );
         } else if (d.code === 'GPU_BUSY') {
-          // Not a failure of the request: the card is committed to other work. The
-          // Brain's sentence already says nothing was lost, so it is rendered verbatim.
+          /*
+           * The HEADING must not out-claim the sentence beneath it.
+           *
+           * It used to read "The graphics card is busy", which asserts a competing
+           * workload. The Brain only has evidence for that when it actually saw a
+           * render; otherwise all it knows is that the card did not answer in time —
+           * and it now sends a sentence that says exactly that. A confident heading
+           * above a careful sentence is still a confident claim, so the heading
+           * states the outcome and the Brain's own wording supplies the cause.
+           */
           sink.markdown(
-            `\n**The graphics card is busy.**\n\n${d.message ?? 'Another workload is using the GPU, so this request has not started.'}\n\n_Nothing was sent to a model, and nothing in your workspace changed._\n`,
+            `\n**Your request has not started.**\n\n${d.message ?? 'The graphics card did not respond in time.'}\n\n_Nothing was sent to a model, and nothing in your workspace changed._\n`,
           );
         } else if (d.code === 'ENGINE_UNAVAILABLE') {
           sink.markdown(
