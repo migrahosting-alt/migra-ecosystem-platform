@@ -1,7 +1,7 @@
 {
  "$schema": "MIGRAPILOT_STATUS — canonical cross-agent state. Update on every material change.",
  "updated": "2026-09-04",
- "updatedBy": "Claude (Opus 5) — panel sweep: 3 defects fixed and deployed; routing/controls remain",
+ "updatedBy": "Claude (Opus 5) — structured-data acceptance matrix: 10 live cases green, 4 defects found and fixed",
  "rules": {
   "easyFirst": "Do not start deep capability work while meaningful easy user-facing items remain.",
   "provenLive": "PROVEN_LIVE requires the real user-facing workflow to pass. Code existing and tests passing is NOT proof.",
@@ -271,6 +271,14 @@
   ]
  },
  "openDefects": [
+  {
+   "id": "grounding-resolves-against-a-stale-index",
+   "severity": "LOW in production, REAL in principle",
+   "symptom": "With TWO approved indexes in one owner scope, every grounded question was refused with \"Your indexed documents do not cover that\" — although the file was uploaded, indexed and approved in the second index (4 files, 128 chunks).",
+   "howFound": "Self-inflicted while building the matrix: changing UPLOAD_ROOT mid-session created a second index for the same scope. A fresh scope answered correctly on the first try, which is what isolated it.",
+   "whyItMatters": "A user whose upload root changes — a migration, a redeploy on a different path — lands in exactly this state, and the refusal is indistinguishable from \"your file is not indexed\". NOT the topology issue; this one is index selection within one scope.",
+   "status": "OPEN — reported, not fixed. Outside the structured-data lane; belongs to grounding/retrieval."
+  },
   {
    "id": "panel-parity-routing-and-controls",
    "symptom": "A greeting routed to qwen2.5-coder:14b (deep-local) when fast-local would answer instantly; and 30 contributed commands have only 7 declared controls.",
@@ -1657,5 +1665,41 @@
    },
    "⚠ stillUnprovenForTheBroaderFeature": "Only `sum` has been exercised live; average/min/max/count/group-by are unit-tested only. Only CSV (TSV unit-tested only). One small file, 9 rows. Local Brain with qwen3-family Ollama, not the production Brain — forced, because the consumer hands the Brain a filesystem path to index and VM111 cannot see this machine. These are the next measurements, not assumptions to carry forward."
   }
- }
+ },
+ "structuredDataMatrix": {
+  "rule": "The deterministic layer produces the number and its provenance; the model explains the evidence and never improvises arithmetic. Every case is asserted on the EVIDENCE the model is handed, not on what a model happened to say.",
+  "liveVerified2026-09-04": {
+   "sum": "LIVE — 474,000 (owner-verified separately)",
+   "average": "LIVE — $67,714.29, divided by the 7 rows that HAD a value, not by 9",
+   "minimum": "LIVE — -$3,750 (West, OrderID 004824): finds an accounting-notation negative and labels its row",
+   "maximum": "LIVE — $156,250 (East)",
+   "count": "LIVE — 9 rows",
+   "group-by": "LIVE — North 165,000 / South 156,500 / East 156,250 / West -3,750",
+   "named-column selection": "LIVE",
+   "identifier refusal": "LIVE — 5 independent runs, deterministic evidence carried NO identifier total in any of them",
+   "missing values": "LIVE — blanks and n/a both counted absent, never zero",
+   "mixed data types": "LIVE — ints, currency, percentages, negatives, blanks, markers and identifiers in one file",
+   "currency formatting": "LIVE — $, thousands separators, and (3,750) as -3750",
+   "percentages": "LIVE — average Margin 12.75%",
+   "negative values": "LIVE",
+   "large tables": "LIVE — 5,000 rows, total 24,112,952 matching an independently computed truth, with 75 blank / 9 non-numeric reported",
+   "multiple candidate numeric columns": "LIVE — asks which column was meant, naming all candidates",
+   "CSV": "LIVE",
+   "TSV": "LIVE — 474,000",
+   "multi-operation questions": "REFUSED BY DESIGN and stated — \"the question names more than one column that could be totalled\"",
+   "ambiguous questions": "LIVE — clarification, not a guess"
+  },
+  "stillOpen": {
+   "XLSX": "NOT IMPLEMENTED. Prerequisite analysis substrate is now proven, so it can reuse it rather than mixing a new parser with unfinished reasoning.",
+   "production topology": "The measurement needs consumer and Brain co-located because the consumer hands the Brain a machine-local filesystem path. Recorded as an architecture concern, not institutionalised — see csvGroundingTopology."
+  },
+  "🚨 fourDefectsFoundByBuildingTheMatrix": [
+   "COUNT produced NO evidence at all — it resolved to `count`, fell through column selection because several columns were quantitative and none was named, so the one operation impossible to get wrong was answered from raw text.",
+   "PERCENTAGES reached the model as bare fractions: `average of \"Margin\": 0.1275` about a file that says 12.75%. Stored as a fraction so averaging is correct; the EVIDENCE has to dress it back up.",
+   "🚨 AN AMOUNT UNDER ONE WAS READ AS A CODE. The leading-zero identifier test stripped \".\" and \",\" first, so `0.00` became `000` and matched. Every amount under a pound, and zero itself, was an \"identifier\" — which put a real price column at 8/9 = 88.9%, under the bar, and disqualified it SILENTLY. Fixed by anchoring the rule to all-digits: `007` is a code, `0.50` is money.",
+   "AMBIGUITY WENT QUIET. \"What is the total?\" over Revenue AND Cost correctly declined to compute — and the model then footed the table itself and answered $60,000. Right on three rows; the original defect on five thousand. The same reasoning that made a refusal SPEAK had not been applied to this branch."
+  ],
+  "gramar": "\"East: 156,250 (1 rows)\" reached the model verbatim. Now \"1 row\"."
+ },
+ "csvGroundingTopology": "OPEN ARCHITECTURE CONCERN, owner-flagged. The consumer hands the Brain a machine-local filesystem path to index, so CSV grounding only works where both processes share a disk. That is a deployment constraint to solve — canonical object/blob storage, or some location both sides can resolve — not something to institutionalise. It is also what forces every structured-data measurement onto a co-located Brain rather than production."
 }

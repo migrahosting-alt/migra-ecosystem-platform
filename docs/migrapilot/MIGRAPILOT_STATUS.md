@@ -15,6 +15,56 @@ _Last updated: 2026-09-04_
 
 ---
 
+## Lane 2026-09-04 — Structured-data acceptance matrix: 10 live cases green
+
+"CSV works" is not a status, so this was built as a matrix instead. Every case run through the real
+product, each in a fresh conversation with the file attached through the composer's own picker.
+
+| Case | Live result |
+|---|---|
+| sum | 474,000 (owner-verified) |
+| average | $67,714.29 — over the 7 rows that had a value, not 9 |
+| minimum | −$3,750, West, OrderID 004824 |
+| maximum | $156,250, East |
+| count | 9 rows |
+| group-by | North 165,000 · South 156,500 · East 156,250 · West −3,750 |
+| identifier refusal | 5 independent runs, no identifier total in any evidence |
+| percentages | average Margin **12.75%** |
+| currency / negatives / missing values | `$`, thousands separators, `(3,750)` → −3750, blanks and `n/a` absent not zero |
+| large table | 5,000 rows → **24,112,952**, matching an independently computed truth |
+| multiple candidates | asks which column was meant, naming all of them |
+| TSV | 474,000 |
+| ambiguous question | clarification, not a guess |
+
+### Four defects, found by building the matrix rather than by reading the code
+
+1. **`count` produced no evidence at all.** It resolved to `count`, then fell through *column*
+   selection — several columns were quantitative, none was named — so the one operation impossible to
+   get wrong was answered from raw text. Counting rows needs no value column.
+2. **Percentages reached the model as bare fractions.** `average of "Margin": 0.1275`, about a file
+   that says 12.75%. Stored as a fraction so averaging is correct; the evidence has to dress it back up.
+3. 🚨 **An amount under one was read as a code.** The leading-zero identifier test stripped `.` and `,`
+   first, so `0.00` became `000` and matched. Every amount under a pound — and zero itself — was an
+   "identifier". That put a real price column at 8/9 = 88.9%, under the bar, and **disqualified it
+   silently**. Now anchored to all-digits: `007` is a code, `0.50` is money.
+4. **Ambiguity went quiet.** *"What is the total?"* over Revenue **and** Cost correctly declined to
+   compute — and the model then footed the table itself and answered $60,000. Right, on three rows;
+   the original defect on five thousand. The reasoning that made a refusal *speak* had not been
+   applied to this branch.
+
+### Also found, and not in this lane
+
+With **two approved indexes in one owner scope**, every grounded question is refused with "Your
+indexed documents do not cover that" even though the file is indexed and approved. Self-inflicted
+here — changing the upload root mid-session — but a user whose root changes in a migration or a
+redeploy lands in the same state, and the refusal is indistinguishable from "not indexed". Recorded
+as an open grounding/retrieval defect, not fixed in this lane.
+
+**XLSX stays closed** until implemented — but the substrate it would reuse is now proven, which was
+the point of doing this first.
+
+---
+
 ## Lane 2026-09-04 — Gap #7 Revenue regression: OWNER-VERIFIED PASS, closed
 
 The owner read the product's own answer — *"The total Revenue in the file is $474,000"*, naming the

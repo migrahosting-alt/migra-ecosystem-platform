@@ -55,8 +55,15 @@ const CURRENCY = /^([$€£¥₦]|R\$|CHF|USD|EUR|GBP)\s?/i
  * `00123` is a part number, `01730` is a ZIP. Anyone who meant one hundred and
  * twenty-three would have written it. Summing these produces a plausible-looking
  * total from data that was never quantitative.
+ *
+ * 🚨 ALL DIGITS, NO SEPARATOR — and the anchor at the end is the whole fix. This
+ * used to strip `.` and `,` before testing, so `0.00` became `000` and matched:
+ * every amount under one pound, and zero itself, was read as a code. Measured on
+ * a real price column — `$0.00` classified as an identifier, which dragged
+ * UnitPrice to 8/9 = 88.9% and disqualified the column outright, silently.
+ * `0.50` is money; `007` is a code; `0` is a number.
  */
-const LEADING_ZERO = /^0\d/
+const LEADING_ZERO = /^0\d+$/
 
 /** `1.2.3`, `2026-08-29`, `08/29/2026` — shaped like numbers, none of them are. */
 const VERSION_OR_DATE = /^\d+([.\-/]\d+){2,}$/
@@ -129,7 +136,7 @@ export function parseCell(raw: string): Cell {
   if (VERSION_OR_DATE.test(body)) {
     return { raw, kind: 'identifier', note: 'looks like a date or version, not a quantity' }
   }
-  if (LEADING_ZERO.test(body.replace(/[.,]/g, ''))) {
+  if (LEADING_ZERO.test(body)) {
     return { raw, kind: 'identifier', note: 'leading zero — an id or code, not a quantity' }
   }
 

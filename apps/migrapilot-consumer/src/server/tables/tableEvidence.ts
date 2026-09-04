@@ -85,9 +85,24 @@ function chooseValueColumn(prompt: string, table: ParsedTable): ColumnChoice {
   }
 
   const quantitative = table.columns.filter((c) => c.quantitative)
-  return quantitative.length === 1
-    ? { kind: 'column', column: quantitative[0]! }
-    : { kind: 'none' }
+  if (quantitative.length === 1) return { kind: 'column', column: quantitative[0]! }
+
+  /*
+   * 🚨 AMBIGUITY IS ASKED ABOUT, NOT GUESSED AT — AND NOT PASSED OVER IN SILENCE.
+   *
+   * MEASURED: "What is the total?" over a file with Revenue AND Cost produced no
+   * evidence, correctly — and the model then footed the table itself and
+   * answered "$60,000". It was right, on three rows. On the five-thousand-row
+   * file it is the original defect, and nothing here would have stopped it.
+   *
+   * The same reasoning that made a refusal SPEAK applies here and was not
+   * applied: silence leaves the model holding a table and a question about a
+   * total. So the candidates are named and the turn asks which was meant.
+   */
+  if (quantitative.length > 1) {
+    return { kind: 'clarify', candidates: quantitative.map((c) => c.name) }
+  }
+  return { kind: 'none' }
 }
 
 /**
@@ -101,6 +116,8 @@ function chooseValueColumn(prompt: string, table: ParsedTable): ColumnChoice {
 type ColumnChoice =
   | { kind: 'column'; column: TableColumn }
   | { kind: 'refused'; reason: string }
+  /** Several columns could be meant and none was named. Ask, never pick. */
+  | { kind: 'clarify'; candidates: string[] }
   | { kind: 'none' }
 
 /** A label column for min/max — the first non-quantitative column, which is
@@ -119,6 +136,20 @@ function detectFilter(prompt: string, table: ParsedTable): { column: TableColumn
 
 const fmt = (n: number): string =>
   Number.isInteger(n) ? n.toLocaleString('en-US') : n.toLocaleString('en-US', { maximumFractionDigits: 6 })
+
+/**
+ * A figure in the units the FILE used.
+ *
+ * 🚨 A percentage is stored as its fraction so that averaging it is correct, and
+ * that fraction was reaching the model undressed: the average of a Margin column
+ * arrived as `0.1275` and the answer said 0.1275 about a file that says 12.75%.
+ * Computation and presentation want different forms of the same number.
+ */
+const fmtIn = (n: number, column: TableColumn): string =>
+  column.percent ? `${fmt(Number((n * 100).toFixed(6)))}%` : fmt(n)
+
+/** "1 rows" reaches the model verbatim, so it is written the way a person would. */
+const rows = (n: number): string => `${n} row${n === 1 ? '' : 's'}`
 
 export interface TableEvidence {
   /** Prepended to the model's prompt. Never stored as the user's message. */
@@ -157,8 +188,54 @@ export async function tableEvidenceFor(
     return null
   }
 
+  /*
+   * 🚨 COUNTING NEEDS NO VALUE COLUMN, and requiring one silenced it entirely.
+   *
+   * "How many rows are in this file?" resolved to `count`, then fell through
+   * column selection — several columns were quantitative, none was named — and
+   * produced NO evidence at all, so the one operation that is impossible to get
+   * wrong was answered by the model from raw text.
+   *
+   * A count is also not arithmetic ON the values, so an identifier column is a
+   * perfectly good thing to count: "how many order ids are there" is a real
+   * question and refusing it would be pedantry. It counts what is THERE, and
+   * says which of the two things it counted.
+   */
+  if (operation === 'count') {
+    const named = table.columns.filter((c) => c.name && prompt.toLowerCase().includes(c.name.toLowerCase()))
+    const target = named.length === 1 ? named[0]! : undefined
+    const filled = target
+      ? table.rows.filter((r) => r[target.index] && r[target.index]!.kind !== 'blank').length
+      : table.rows.length
+    return {
+      file: fileName,
+      operation: 'count',
+      text: [
+        `[Computed directly from ${fileName} by MigraPilot. These figures are exact`,
+        `arithmetic over the parsed file, not estimates. Use them verbatim and do not`,
+        `recalculate them:]`,
+        target
+          ? `count of values in "${target.name}": ${filled} (of ${rows(table.rows.length)})`
+          : `count of rows: ${filled}`,
+        '',
+      ].join('\n'),
+    }
+  }
+
   const choice = chooseValueColumn(prompt, table)
   if (choice.kind === 'none') return null
+  if (choice.kind === 'clarify') {
+    return {
+      file: fileName,
+      operation: `clarify:${operation}`,
+      text: [
+        `[MigraPilot did not calculate this from ${fileName}: the question could mean more than one`,
+        `column — ${choice.candidates.map((c) => `"${c}"`).join(', ')}. Ask which one is meant.`,
+        `Do NOT add the numbers up yourself and do NOT pick a column on the user's behalf.]`,
+        '',
+      ].join('\n'),
+    }
+  }
   if (choice.kind === 'refused') {
     /*
      * SAY WHAT COULD NOT BE DONE, rather than nothing at all.
@@ -189,7 +266,7 @@ export async function tableEvidenceFor(
       const groups = groupBy(table, groupCol, value)
       if (groups.length === 0) return null
       lines.push(`${value.name} by ${groupCol.name}:`)
-      for (const g of groups) lines.push(`  ${g.group}: ${fmt(g.value)} (${g.rows} rows)`)
+      for (const g of groups) lines.push(`  ${g.group}: ${fmtIn(g.value, value)} (${rows(g.rows)})`)
     } else {
       const filter = detectFilter(prompt, table)
       const result = computeColumn(table, value, operation, {
@@ -202,10 +279,10 @@ export async function tableEvidenceFor(
       const label = result.labels?.length
         ? ` (${result.tied ? 'tied: ' : ''}${result.labels.join(', ')})`
         : ''
-      lines.push(`${operation} of "${value.name}": ${fmt(result.value)}${label}`)
+      lines.push(`${operation} of "${value.name}": ${fmtIn(result.value, value)}${label}`)
 
       const p = result.provenance
-      const detail = [`${p.rowsUsed} rows used`]
+      const detail = [`${rows(p.rowsUsed)} used`]
       if (p.rowsBlank) detail.push(`${p.rowsBlank} blank`)
       if (p.rowsNonNumeric) detail.push(`${p.rowsNonNumeric} non-numeric`)
       if (p.rowsFiltered) detail.push(`${p.rowsFiltered} excluded by ${p.filter!.column}=${p.filter!.equals}`)

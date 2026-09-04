@@ -29,6 +29,17 @@ export interface TableColumn {
    * numeric its contents look.
    */
   identifierName: boolean
+  /**
+   * The column's values are PERCENTAGES.
+   *
+   * `cellValue` stores a percentage as its fraction, deliberately — averaging
+   * "45%" as 45 and as 0.45 give different answers and only one is right. But
+   * the fraction is a computation detail, and it reached the model bare: the
+   * average of a Margin column arrived as `0.1275`, so the answer said 0.1275
+   * where the file said percentages. Whoever renders a result needs to know to
+   * dress it back up.
+   */
+  percent: boolean
   /** How many rows actually carried a usable quantity. Reported, never assumed. */
   numericCells: number
   blankCells: number
@@ -174,6 +185,9 @@ export function parseTable(text: string): ParsedTable {
        */
       quantitative: considered > 0 && numericCells / considered >= 0.9 && !identifies(name),
       identifierName: identifies(name),
+      // The same >=90% bar the quantitative test uses, for the same reason: one
+      // stray percentage in a money column must not relabel the whole column.
+      percent: considered > 0 && cells.filter((c) => c.kind === 'percent').length / considered >= 0.9,
       numericCells,
       blankCells,
     }

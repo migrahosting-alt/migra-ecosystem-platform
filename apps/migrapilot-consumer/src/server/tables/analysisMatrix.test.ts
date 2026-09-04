@@ -23,6 +23,7 @@ import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
+import { parseCell } from './cellValue'
 import { tableEvidenceFor } from './tableEvidence'
 
 const dir = mkdtempSync(join(tmpdir(), 'migrapilot-matrix-'))
@@ -148,9 +149,16 @@ test('TSV is the same product as CSV', async () => {
 
 // ── ambiguity, which must never be resolved by guessing ────────────────────
 
-test('🚨 TWO CANDIDATE MEASURES AND NO NAME — declines rather than picking one', async () => {
-  assert.equal(await ask('What is the total?', 'ambiguous.csv'), null,
-    'guessing which number the user meant is how this module got its worst bug')
+test('🚨 TWO CANDIDATE MEASURES AND NO NAME — never picks one', async () => {
+  /*
+   * This case used to assert `null`, and `null` was not good enough: the layer
+   * declined correctly and the MODEL then did the arithmetic instead. Declining
+   * to compute is still the rule — what changed is that it now says so, which is
+   * asserted below in "AMBIGUITY IS ASKED ABOUT".
+   */
+  const e = await ask('What is the total?', 'ambiguous.csv')
+  assert.notEqual(e?.operation, 'sum', 'guessing which number the user meant is how this module got its worst bug')
+  assert.doesNotMatch(e?.text ?? '', /60,000/, 'and no figure is offered for a question it did not resolve')
 })
 
 test('but naming one of them resolves it', async () => {
@@ -188,4 +196,57 @@ test('and every computed figure is announced as exact, not as an estimate', asyn
   const text = await evidenceOf('What is the total Revenue?')
   assert.match(text, /exact\s+arithmetic over the parsed file, not estimates/)
   assert.match(text, /do not\s+recalculate them/)
+})
+
+// ── ambiguity asks; it does not go quiet ───────────────────────────────────
+
+test('🚨 AMBIGUITY IS ASKED ABOUT — silence let the model foot the table itself', async () => {
+  /*
+   * MEASURED live: "What is the total?" over Revenue AND Cost produced no
+   * evidence, correctly — and the model then answered "$10,000 + $20,000 +
+   * $30,000 = $60,000" on its own. Right, on three rows. On the five-thousand-row
+   * file it is the original defect, and nothing was stopping it.
+   */
+  const e = await ask('What is the total?', 'ambiguous.csv')
+  assert.ok(e, 'a quantitative question over a table must never leave the model unattended')
+  assert.match(e.operation, /^clarify:/)
+  assert.match(e.text, /"Revenue", "Cost"/, 'the candidates are named, so the question can be asked back')
+  assert.match(e.text, /Do NOT add the numbers up yourself/)
+  assert.match(e.text, /do NOT pick a column on the user's behalf/)
+})
+
+test('and it names every candidate, not just the first two', async () => {
+  const e = await ask('What is the average?')
+  assert.match(e!.text, /"Units", "UnitPrice", "Margin", "Revenue"/)
+})
+
+test('naming the column still resolves it without a clarification', async () => {
+  const e = await ask('What is the total Revenue?', 'ambiguous.csv')
+  assert.equal(e!.operation, 'sum')
+})
+
+// ── the leading-zero rule, which was eating money ──────────────────────────
+
+test('🚨 AN AMOUNT UNDER ONE IS MONEY, NOT A CODE', async () => {
+  /*
+   * MEASURED on a real price column. The identifier test stripped `.` and `,`
+   * before checking for a leading zero, so `0.00` became `000` and matched: every
+   * amount under a pound, and zero itself, was read as a code. Eight of nine
+   * UnitPrice cells parsed and the ninth ($0.00) did not, which put the column at
+   * 88.9% — under the bar — and disqualified it silently.
+   */
+  for (const [raw, kind] of [['$0.00', 'currency'], ['0.50', 'number'], ['$0.75', 'currency'], ['0.99', 'number'], ['0', 'number']] as const) {
+    assert.equal(parseCell(raw).kind, kind, raw)
+  }
+})
+
+test('while a leading-zero INTEGER is still a code', () => {
+  for (const raw of ['007', '00123', '01730']) {
+    assert.equal(parseCell(raw).kind, 'identifier', raw)
+  }
+})
+
+test('so a price column with a zero in it is computable again', async () => {
+  const e = await ask('What is the total UnitPrice?')
+  assert.match(e!.text, /sum of "UnitPrice": 6,586\.6/)
 })
