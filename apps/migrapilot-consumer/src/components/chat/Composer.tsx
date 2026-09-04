@@ -5,6 +5,7 @@ import { FileText, Lock, Mic, SendHorizontal, Square, X } from 'lucide-react'
 import { AttachmentChips } from '@/features/attachments/AttachmentChips'
 import { useAttachments } from '@/features/attachments/useAttachments'
 import { useVisionAvailability, visionDisabledReason } from '@/features/attachments/useVisionAvailability'
+import { useDocumentAvailability, documentDisabledReason } from '@/features/attachments/useDocumentAvailability'
 import { ActionHub, type HubAction } from '@/components/chat/ActionHub'
 import { IMAGE_ACCEPT, classifyAttachment } from '@/features/attachments/capability'
 import { ImageTray } from '@/components/chat/ImageTray'
@@ -531,6 +532,10 @@ export function Composer({
    * carrying the server's own reason, never as a hidden entry or a click that
    * quietly does nothing.
    */
+  const documents = useDocumentAvailability()
+  const documentsReason = documentDisabledReason(documents)
+  const documentsReady = documents?.ready === true
+
   const hubActions: HubAction[] = [
     {
       id: 'image',
@@ -545,6 +550,14 @@ export function Composer({
       label: 'Files & documents',
       hint: 'Attach a document, data file, or code for MigraPilot to read.',
       icon: 'file',
+      /*
+       * 🚨 OFFERED ONLY WHERE IT WORKS. This row was live for signed-out
+       * visitors while every document operation behind it needs an account:
+       * picking a file produced a 401, a chip saying "Sign in to manage files",
+       * and a Retry that could never succeed. Its neighbour above was already
+       * gated — one row apart, one honest and one not.
+       */
+      ...(documentsReady ? {} : { unavailableReason: documentsReason }),
       onSelect: () => fileInputRef.current?.click(),
     },
   ]

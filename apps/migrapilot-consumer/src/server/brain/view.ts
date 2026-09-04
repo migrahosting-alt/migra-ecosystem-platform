@@ -31,6 +31,22 @@ export type BrainView<T> =
   /** No live session. The screen must not render tenant data. */
   | { state: 'signed_out'; reason: string }
 
+/**
+ * Was this refused because the caller has no account?
+ *
+ * 🚨 THE DETAIL ON `forbidden_for_principal` IS FOR DEVELOPERS. It names the
+ * operation on purpose — "a capability refusal a developer cannot locate becomes
+ * a bug report about chat being broken" — and it reached real users verbatim:
+ * the microphone's tooltip read
+ *   'transcriptionCapability' is not available without an account. Sign in to use it.
+ * An internal identifier in a tooltip tells the reader nothing they can act on
+ * and leaks the shape of the system. Surfaces use this to choose their OWN
+ * sentence; the detail stays in the logs, where it was useful.
+ */
+export function refusedForWantOfAnAccount(result: { kind: string }): boolean {
+  return result.kind === 'forbidden_for_principal'
+}
+
 export function toBrainView<T>(result: BrainResult<T>): BrainView<T> {
   switch (result.kind) {
     case 'ok':
@@ -150,6 +166,15 @@ export function micAvailability(result: BrainResult<TranscriptionCapability>): M
         'This app expects a speech capability the connected Brain does not provide. The ' +
         'Brain is likely older than this build.',
     }
+  }
+
+  /*
+   * For THIS capability a principal refusal can only mean one thing: transcription
+   * needs an account, and no signed-in caller is refused it. So the surface can
+   * say the actionable sentence instead of relaying an internal operation name.
+   */
+  if (refusedForWantOfAnAccount(result)) {
+    return { state: 'disabled', cause: 'signed_out', reason: 'Sign in to use voice input.' }
   }
 
   const view = toBrainView(result)
