@@ -1,6 +1,6 @@
 'use client'
 
-import { AlertTriangle, CheckCircle2, Loader2, RotateCw, X } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, FilePlus2, Loader2, RotateCw, X } from 'lucide-react'
 import { FileTypeIcon } from '@/components/ui/FileTypeIcon'
 import type { Attachment } from './useAttachments'
 import { cn } from '@/lib/cn'
@@ -19,6 +19,11 @@ const label = (attachment: Attachment): string => {
       return 'Uploading…'
     case 'indexing':
       return 'Making it searchable…'
+    case 'processing':
+      // The job's own words when it has sent them — "page 40 of 220" beats any
+      // generic reassurance, and it is the difference between a user who waits
+      // and a user who assumes the product has hung.
+      return attachment.reason ?? 'Reading this document…'
     case 'ready':
       return 'Ready — MigraPilot can read this'
     case 'unsearchable':
@@ -37,10 +42,13 @@ export function AttachmentChips({
   attachments,
   onRemove,
   onRetry,
+  onChooseAnother,
 }: {
   attachments: Attachment[]
   onRemove: (id: string) => void
   onRetry: (id: string) => void
+  /** Opens the picker. Offered instead of Retry on a terminal failure. */
+  onChooseAnother?: () => void
 }) {
   if (attachments.length === 0) return null
 
@@ -49,7 +57,10 @@ export function AttachmentChips({
       {attachments.map((attachment) => {
         const bad = attachment.state === 'failed'
         const warn = attachment.state === 'unsearchable'
-        const working = attachment.state === 'uploading' || attachment.state === 'indexing'
+        const working =
+          attachment.state === 'uploading' ||
+          attachment.state === 'indexing' ||
+          attachment.state === 'processing'
         return (
           <li
             key={attachment.id}
@@ -93,7 +104,21 @@ export function AttachmentChips({
               </span>
             </span>
 
-            {bad && (
+            {/*
+              * 🚨 RETRY IS NOT OFFERED FOR A FAILURE THAT CANNOT PASS.
+              *
+              * Every failed chip used to carry Retry, so a file rejected for
+              * being too large invited the user to send identical bytes at an
+              * unchanged limit. It could only fail again, and it crowded out the
+              * one action that helps. A terminal failure offers "Choose another
+              * file" instead; Remove stays on both, because either way the chip
+              * should be dismissible.
+              *
+              * `retryable !== false` and not `=== true`: an attachment from an
+              * older render that never carried the field must keep the button
+              * rather than silently lose it.
+              */}
+            {bad && attachment.retryable !== false && (
               <button
                 type="button"
                 onClick={() => onRetry(attachment.id)}
@@ -102,6 +127,18 @@ export function AttachmentChips({
               >
                 <RotateCw className="h-3.5 w-3.5" />
                 Retry
+              </button>
+            )}
+
+            {bad && attachment.retryable === false && onChooseAnother && (
+              <button
+                type="button"
+                onClick={onChooseAnother}
+                aria-label={`Choose another file instead of ${attachment.name}`}
+                className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-lg border border-slate-200 bg-raised px-2 text-[12px] font-semibold text-slate-600 hover:bg-slate-50"
+              >
+                <FilePlus2 className="h-3.5 w-3.5" />
+                Choose another file
               </button>
             )}
 

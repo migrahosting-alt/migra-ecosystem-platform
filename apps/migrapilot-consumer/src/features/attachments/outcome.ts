@@ -10,8 +10,31 @@
 export type AttachmentOutcome =
   | { state: 'indexing'; name: string; bytes: number }
   | { state: 'ready' }
+  /** Stored, being read in the background, not usable YET. Worth waiting for. */
+  | { state: 'processing'; reason: string }
   | { state: 'unsearchable'; reason: string }
-  | { state: 'failed'; reason: string }
+  | { state: 'failed'; reason: string; retryable: boolean }
+
+/**
+ * 🚨 FAILURES THAT THE SAME BYTES CAN NEVER SURVIVE.
+ *
+ * Every failed attachment used to offer Retry, including a file rejected for
+ * being too large. Retrying identical bytes against an unchanged limit cannot
+ * succeed — the button was an invitation to fail again, and it hid the only
+ * thing that would actually help: pick a different file.
+ *
+ * These three are properties OF THE FILE, so no number of attempts changes the
+ * answer. Everything else — a write that failed, a library that is full, a
+ * connection that dropped, a server that was briefly unwell — describes a
+ * MOMENT, and a second attempt may genuinely land. That is the line: retry is
+ * offered when the same bytes could plausibly pass later, and withheld when
+ * they provably cannot.
+ */
+const PERMANENT_REJECTIONS = new Set(['too_large', 'unsupported_type', 'empty_file'])
+
+export function isPermanentRejection(code: string | undefined): boolean {
+  return code !== undefined && PERMANENT_REJECTIONS.has(code)
+}
 
 export interface UploadResponse {
   saved?: { name: string; bytes: number }[]
@@ -28,15 +51,32 @@ export interface UploadResponse {
  */
 export function outcomeOfUpload(response: UploadResponse): AttachmentOutcome {
   const rejected = response.rejected?.[0]
-  if (rejected) return { state: 'failed', reason: rejected.message }
+  if (rejected) {
+    return {
+      state: 'failed',
+      reason: rejected.message,
+      retryable: !isPermanentRejection(rejected.error),
+    }
+  }
 
   // A guard denial (401) has neither saved nor rejected — it must not be read as success.
   if (response.error) {
-    return { state: 'failed', reason: response.message ?? `Upload refused: ${response.error}.` }
+    // Signing in again and retrying is exactly what the user should do here.
+    return {
+      state: 'failed',
+      reason: response.message ?? `Upload refused: ${response.error}.`,
+      retryable: true,
+    }
   }
 
   const saved = response.saved?.[0]
-  if (!saved) return { state: 'failed', reason: 'The server did not confirm the file was saved.' }
+  if (!saved) {
+    return {
+      state: 'failed',
+      reason: 'The server did not confirm the file was saved.',
+      retryable: true,
+    }
+  }
 
   // Stored is NOT ready. Indexing decides whether the Brain can actually read it.
   return { state: 'indexing', name: saved.name, bytes: saved.bytes }
@@ -47,6 +87,10 @@ export interface IndexResponse {
   message?: string
   /** Retrievable chunks PER FILE, from the approved index. */
   chunkCounts?: Record<string, number>
+  /** Stored, but above the extraction ceiling — read but never parsed. */
+  tooLargeToProcess?: string[]
+  /** Being read by a background job right now. Not terminal. */
+  processing?: string[]
 }
 
 /**
@@ -73,6 +117,33 @@ export function outcomeOfIndex(ok: boolean, response: IndexResponse, fileName?: 
    * failure to read them back, leaves the field ABSENT, and absent must not be read as
    * "zero chunks" — that would mark every file unreadable on a version skew.
    */
+  /*
+   * 🚨 CHECKED FIRST, AHEAD OF THE CHUNK COUNT.
+   *
+   * A document being read in the background has no chunks yet, which is
+   * indistinguishable from a document that yielded nothing — and the wrong
+   * reading tells the user to abandon a file that is minutes from working. Being
+   * read is the one non-terminal answer here, so it has to win.
+   */
+  if (fileName && response.processing?.includes(fileName)) {
+    return {
+      state: 'processing',
+      reason: 'Reading this document — large files can take a few minutes.',
+    }
+  }
+
+  /*
+   * CHECKED BEFORE THE CHUNK COUNT, because a file the extractor never opened
+   * is absent from `chunkCounts` and would otherwise be explained as having no
+   * readable content — which is the opposite of true for a large document.
+   */
+  if (fileName && response.tooLargeToProcess?.includes(fileName)) {
+    return {
+      state: 'unsearchable',
+      reason: 'This file is too large for MigraPilot to read yet. It is stored, but answers cannot use it.',
+    }
+  }
+
   if (response.searchable === true && fileName && response.chunkCounts) {
     /*
      * A file that yielded nothing is OMITTED from the map, not recorded as 0 — the indexer

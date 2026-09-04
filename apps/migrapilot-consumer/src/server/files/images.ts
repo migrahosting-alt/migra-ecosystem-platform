@@ -26,8 +26,55 @@ export type ImageMime = 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp'
 /** The only image types accepted at intake. */
 export const IMAGE_EXTENSIONS = ['gif', 'jpeg', 'jpg', 'png', 'webp'] as const
 
-/** Images are bounded separately: a photo is legitimately larger than a text note. */
-export const MAX_IMAGE_BYTES = 8 * 1024 * 1024
+/**
+ * Images are bounded separately: a photo is legitimately larger than a text note.
+ *
+ * 🚨 RAISED FROM 8 MB, WHICH REFUSED ORDINARY PHONE PHOTOS. A modern camera
+ * routinely produces 12–24 MB files, so the old ceiling rejected the single most
+ * common thing anyone would attach.
+ *
+ * Raising the number was only safe because what the MODEL sees is not what is
+ * stored: `downscaleForModel` caps the copy handed to vision at 1024px on its
+ * longest edge, measured at 1.94s to first token against 28.4s for a
+ * full-resolution 4032x3024 photo. The original bytes stay in the library and in
+ * the transcript. Without that derivative this ceiling would simply have moved
+ * the cost onto the GPU and onto the user's wait.
+ */
+export const MAX_IMAGE_BYTES = 25 * 1024 * 1024
+
+/**
+ * Formats there is a pure-JavaScript decoder for, and therefore a derivative.
+ *
+ * 🚨 THE SET IS SMALL FOR A HARD REASON. sharp cannot run on the production VM —
+ * its prebuilt binaries need x86-64-v2 and the hypervisor exposes a "Common KVM
+ * processor" with neither SSE4.2 nor AVX2, so it falls through to a WebAssembly
+ * build that fails on missing Wasm SIMD and takes the importing module down with
+ * it. See `downscale.ts`. GIF and WebP have no dependable pure-JS decoder of a
+ * sensible size, so they cannot be resized here at all.
+ *
+ * `downscale.ts` derives its decoder switch from THIS set, so a format can never
+ * be believed resizable by one file and not the other.
+ */
+export const RESIZABLE_FOR_MODEL: ReadonlySet<ImageMime> = new Set<ImageMime>([
+  'image/jpeg',
+  'image/png',
+])
+
+/**
+ * The largest an image may be when nothing can shrink it.
+ *
+ * A GIF or WebP is passed to the model AT FULL RESOLUTION, because there is no
+ * decoder to produce a derivative from. Vision cost is set by pixels, not by
+ * bytes, so the ceiling that matters for these is a dimension — a 25 MB WebP at
+ * 6000px would be handed to the model whole, which is exactly what the byte
+ * ceiling was raised on the understanding we would not do.
+ *
+ * 2048 is chosen from the same measurements as `MODEL_IMAGE_MAX_EDGE`: 1568px
+ * answered in 3.56s and 4032px in 28.4s, so this sits in the seconds, not the
+ * half-minute. Formats we CAN resize are unaffected — their derivative already
+ * bounds what vision sees, whatever the original's dimensions.
+ */
+export const MAX_UNRESIZABLE_EDGE = 2048
 
 const EXTENSION_MIME: Record<string, ImageMime> = {
   png: 'image/png',
@@ -156,6 +203,13 @@ export interface ImageRejection {
     | 'empty_file'
     | 'unreadable_dimensions'
     | 'dimensions_too_large'
+    /**
+     * Within every size limit, but in a format nothing here can shrink — so
+     * sending it would mean handing the model the full-resolution original.
+     * Distinct from `dimensions_too_large` because the fix is different: this
+     * one is solved by re-saving as PNG or JPEG, not by cropping.
+     */
+    | 'unresizable_too_large'
   message: string
 }
 
@@ -282,6 +336,35 @@ export function acceptImage(
       rejection: {
         code: 'dimensions_too_large',
         message: `That image is ${dimensions.width}×${dimensions.height}. Images are limited to ${MAX_IMAGE_DIMENSION}px per side.`,
+      },
+    }
+  }
+
+  /*
+   * 🚨 A FORMAT NOTHING CAN SHRINK IS HELD TO A SMALLER PICTURE.
+   *
+   * The byte ceiling was raised to 25 MB on the strength of the derivative: what
+   * vision receives is capped at 1024px however large the original is. GIF and
+   * WebP have no pure-JS decoder, so they get no derivative and reach the model
+   * at full resolution — and vision cost is set by PIXELS, not bytes. Without
+   * this check, raising the byte limit would have quietly handed the model a
+   * 6000px image and spent half a minute of somebody's turn on it.
+   *
+   * Checked here rather than at send time because a refusal a user can act on
+   * belongs at the moment they choose the file, not after it is in their library.
+   */
+  if (
+    !RESIZABLE_FOR_MODEL.has(sniffed) &&
+    Math.max(dimensions.width, dimensions.height) > MAX_UNRESIZABLE_EDGE
+  ) {
+    const kind = sniffed.replace('image/', '').toUpperCase()
+    return {
+      ok: false,
+      rejection: {
+        code: 'unresizable_too_large',
+        message:
+          `That ${kind} is ${dimensions.width}×${dimensions.height}. MigraPilot cannot resize ${kind} images, ` +
+          `so they are limited to ${MAX_UNRESIZABLE_EDGE}px per side. Save it as PNG or JPEG to attach it at this size.`,
       },
     }
   }

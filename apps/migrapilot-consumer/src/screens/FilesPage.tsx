@@ -36,6 +36,22 @@ interface StoredFile {
   name: string
   bytes: number
   updatedAt: number
+  /**
+   * What a background reader is doing with this file, when one is.
+   *
+   * 🚨 THE SERVER WAS ALREADY SENDING THIS AND THE PAGE THREW IT AWAY. During
+   * live acceptance a 12-page scan was being OCR'd — the API reported
+   * "Reading text — page 7 of 24" — while this page showed the filename and its
+   * size and nothing else. After a reload, which is exactly when a user checks,
+   * a document being read was indistinguishable from one sitting idle.
+   */
+  processing?: {
+    state: string
+    description: string
+    readable: boolean
+    polling: boolean
+    failureReason?: string
+  }
 }
 
 interface Limits {
@@ -105,6 +121,21 @@ export function FilesPage() {
     void refresh()
     void refreshIndex()
   }, [refresh, refreshIndex])
+
+  /*
+   * Keep asking while a background reader is working.
+   *
+   * Rendering the state once at load would show "page 7 of 24" frozen for the
+   * rest of the job, which is its own small untruth — the number is right and
+   * stops being right a second later. THE SERVER decides when to stop: `polling`
+   * is the job saying it has not reached a terminal state, so no timer here has
+   * to guess how long OCR takes.
+   */
+  useEffect(() => {
+    if (!files.some((f) => f.processing?.polling)) return
+    const timer = window.setInterval(() => { void refresh() }, 5000)
+    return () => window.clearInterval(timer)
+  }, [files, refresh])
 
   const upload = useCallback(
     async (incoming: FileList | null) => {
@@ -296,9 +327,20 @@ export function FilesPage() {
         <CloudUpload className="h-8 w-8 text-slate-300" strokeWidth={1.6} />
         <p className="mt-3 text-[15px] font-semibold text-slate-800">Drop files here</p>
         <p className="mt-1 text-[13px] text-slate-500">
-          {/* The real allowlist, from the server — not a hopeful sentence. */}
-          Text and code documents up to {limits ? sizeLabel(limits.maxFileBytes) : '2 MB'}. PDF and Office
-          files are not supported yet.
+          {/*
+            * 🚨 THIS SENTENCE WAS FALSE, AND SAID SO ON THE PAGE THAT DISPROVED IT.
+            *
+            * "PDF and Office files are not supported yet" was true when written
+            * and stayed on screen after PDFs shipped — the list directly beneath
+            * it showed indexed PDFs while the caption denied they could exist. A
+            * scanned 245-page book was read and answered from during acceptance
+            * with this text sitting above it.
+            *
+            * The size comes from the server's own limits, as before; the claim
+            * about types now matches what the capability contract accepts.
+            */}
+          Documents, data and code up to {limits ? sizeLabel(limits.maxFileBytes) : '25 MB'}, including PDFs.
+          Large scanned PDFs are read in the background and become searchable when that finishes.
         </p>
         <Button className="mt-5" variant="secondary" onClick={() => inputRef.current?.click()} disabled={busy !== null}>
           Browse files
@@ -342,7 +384,27 @@ export function FilesPage() {
                 <FileTypeIcon name={file.name} size="md" />
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-[15px] font-semibold text-slate-800">{file.name}</span>
-                  <span className="block text-[13px] text-slate-500">{sizeLabel(file.bytes)}</span>
+                  <span
+                    className={cn(
+                      'block truncate text-[13px]',
+                      file.processing && !file.processing.readable && file.processing.polling
+                        ? 'text-slate-600'
+                        : file.processing && !file.processing.readable
+                          ? 'text-amber-700'
+                          : 'text-slate-500',
+                    )}
+                  >
+                    {/*
+                      * The job's OWN words — "Reading text — page 7 of 24" beats
+                      * any generic reassurance, and it is the difference between
+                      * a user who waits and one who assumes the product hung.
+                      * A file with no record is an ordinary document: absent
+                      * means "never needed background reading", not "unknown".
+                      */}
+                    {file.processing && !file.processing.readable
+                      ? `${file.processing.failureReason ?? file.processing.description} · ${sizeLabel(file.bytes)}`
+                      : sizeLabel(file.bytes)}
+                  </span>
                 </span>
                 <button
                   aria-label={`Delete ${file.name}`}

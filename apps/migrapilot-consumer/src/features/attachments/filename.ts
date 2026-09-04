@@ -90,11 +90,25 @@ export function rejectionFor(
    * catching an oversized file before the upload saves a real round trip.
    */
   if (file.size > limits.maxFileBytes) {
+    /*
+     * Worded exactly as the server words it, and from the SERVER'S limit — this
+     * check exists to save a round trip, not to author a second opinion. A user
+     * who hits it in the browser and a user whose bytes reach the validator must
+     * read the same sentence, or the two will drift into disagreeing about what
+     * the ceiling is.
+     */
     return {
       code: 'too_large',
-      message: `Files are limited to ${Math.round(limits.maxFileBytes / 1024 / 1024)} MB.`,
+      message: `That file is ${readableSize(file.size)}. Files are limited to ${readableSize(limits.maxFileBytes)}.`,
     }
   }
 
   return null
+}
+
+/** Matches `server/files/storage.ts`, for the reason given above. */
+function readableSize(bytes: number): string {
+  if (bytes >= 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024 / 1024).toFixed(1)} GB`
+  if (bytes >= 1024 * 1024) return `${Math.round(bytes / 1024 / 1024)} MB`
+  return `${Math.max(1, Math.round(bytes / 1024))} KB`
 }

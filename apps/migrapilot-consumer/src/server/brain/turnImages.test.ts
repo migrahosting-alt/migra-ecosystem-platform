@@ -99,9 +99,23 @@ test('every turn asks for DURABLE memory, explicitly', () => {
    * write path was correct; the row was never written.
    */
   const resolved = resolveOperation({ kind: 'chatTurn', prompt: 'hello' })
-  const body = resolved.body as { memoryPolicy?: { mode?: string; store?: boolean } }
+  const body = resolved.body as { memoryPolicy?: { mode?: string; store?: boolean; retrieve?: boolean } }
   assert.equal(body.memoryPolicy?.mode, 'durable', 'a session-scoped default loses the user’s history')
-  assert.equal(body.memoryPolicy?.store, true)
+  /*
+   * 🚨 `store` IS NOW FALSE, AND THAT IS THE DURABLE ANSWER.
+   *
+   * The durability this test guards is real and unchanged — it is the CONSUMER
+   * that writes, via appendMessage, for both halves of every turn. Asking the
+   * Brain to store as well was harmless only while `conversationId` was never
+   * sent: it had no thread to write to. The moment the id started flowing, both
+   * sides appended to the same conversation and every message was stored twice.
+   * Proven live: six messages, twelve rows.
+   *
+   * `mode: durable` still matters — it selects the durable store that
+   * `retrieve` reads history from.
+   */
+  assert.equal(body.memoryPolicy?.store, false, 'one writer, not two')
+  assert.equal(body.memoryPolicy?.retrieve, true, 'history must still be read back')
 })
 
 test('durability is not conditional on the turn carrying images', () => {

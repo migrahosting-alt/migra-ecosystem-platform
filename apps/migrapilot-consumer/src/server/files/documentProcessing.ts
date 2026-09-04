@@ -15,7 +15,7 @@ import { callBrain } from '@/server/brain/gateway'
 export interface ProcessingStatus {
   fileName: string
   state:
-    | 'stored' | 'processing' | 'ready' | 'ready_with_unplaced_pages'
+    | 'stored' | 'queued' | 'processing' | 'ready' | 'ready_with_unplaced_pages'
     | 'no_text_layer' | 'ocr_failed' | 'corrupt' | 'encrypted' | 'too_large_to_process'
   stage?: string
   detail?: string

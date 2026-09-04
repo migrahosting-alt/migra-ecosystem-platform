@@ -153,7 +153,12 @@ test('size and emptiness are bounded with readable reasons', () => {
   huge.set(PNG.slice(0, 8))
   const big = acceptImage('a.png', huge)
   assert.ok(!big.ok && big.rejection.code === 'too_large')
-  if (!big.ok) assert.match(big.rejection.message, /limited to 8 MB/)
+  // Derived from the constant, not restated: the ceiling moved from 8 MB to
+  // 25 MB when the model derivative made a larger original safe, and a message
+  // pinned to the old number would have quietly started lying.
+  if (!big.ok) {
+    assert.match(big.rejection.message, new RegExp(`limited to ${MAX_IMAGE_BYTES / 1024 / 1024} MB`))
+  }
 })
 
 test('the accepted extension list and the mime map agree', () => {
@@ -257,5 +262,77 @@ test('an accepted image carries its dimensions forward', () => {
   if (out.ok) {
     assert.equal(out.image.width, 20)
     assert.equal(out.image.height, 30)
+  }
+})
+
+/*
+ * 🚨 THE 25 MB CEILING IS ONLY SAFE BECAUSE OF THE DERIVATIVE.
+ *
+ * Intake was raised from 8 MB — which refused ordinary phone photos — on the
+ * strength of `downscaleForModel` capping what vision actually receives at
+ * 1024px, measured at 1.94s to first token against 28.4s for a full-resolution
+ * 4032x3024 photo. Formats with no pure-JS decoder get NO derivative and reach
+ * the model whole, and vision cost is set by pixels rather than bytes. Without
+ * the rule below, raising the byte ceiling would have handed the model a 6000px
+ * WebP and spent half a minute of somebody's turn on it.
+ */
+test('a large photo in a resizable format is accepted', () => {
+  // 4032x3024 is the phone photo the downscale measurements were taken from.
+  const photo = acceptImage('photo.jpg', jpegOf(4032, 3024))
+  assert.ok(photo.ok, 'a modern phone photo must not be refused for its dimensions')
+})
+
+test('an unresizable format is bounded by pixels, not by bytes', () => {
+  const big = acceptImage('animation.webp', webpOf(4000, 3000))
+  assert.ok(!big.ok, 'a 4000px WebP would reach the model at full resolution')
+  if (!big.ok) {
+    assert.equal(big.rejection.code, 'unresizable_too_large')
+    // The refusal has to name the way out. "Too large" alone would leave the
+    // user cropping a picture when re-saving it would have worked.
+    assert.match(big.rejection.message, /cannot resize WEBP/)
+    assert.match(big.rejection.message, /Save it as PNG or JPEG/)
+    assert.match(big.rejection.message, /4000×3000/, 'and state the actual size')
+  }
+})
+
+test('a modest unresizable image is still fine', () => {
+  assert.ok(acceptImage('small.webp', webpOf(1200, 900)).ok)
+  assert.ok(acceptImage('small.gif', realGif(24, 16)).ok)
+})
+
+test('the resizable set and the decoder agree', async () => {
+  /*
+   * Two places that must never disagree: intake decides whether to APPLY the
+   * pixel rule, and downscale decides whether a derivative is actually produced.
+   * If they drift, either a format is refused for being unresizable while the
+   * decoder handles it fine, or one sails past the rule and reaches the model
+   * whole. `downscale.ts` imports the set from here for exactly this reason.
+   */
+  const { decodesForModel } = await import('./downscale')
+  const { RESIZABLE_FOR_MODEL } = await import('./images')
+  for (const mime of ['image/jpeg', 'image/png', 'image/gif', 'image/webp'] as const) {
+    assert.equal(decodesForModel(mime), RESIZABLE_FOR_MODEL.has(mime), `${mime} must agree`)
+  }
+  assert.equal(RESIZABLE_FOR_MODEL.has('image/jpeg'), true)
+  assert.equal(RESIZABLE_FOR_MODEL.has('image/webp'), false)
+})
+
+test('the original is what gets stored, whatever the model is shown', () => {
+  /*
+   * The derivative is for vision only. The library keeps the user's real file,
+   * its content hash stays valid, and the transcript shows the picture they
+   * attached — the whole point of resizing a COPY.
+   */
+  const bytes = jpegOf(4032, 3024)
+  const accepted = acceptImage('photo.jpg', bytes)
+  assert.ok(accepted.ok)
+  if (accepted.ok) {
+    assert.equal(accepted.image.bytes, bytes.byteLength, 'the recorded size is the ORIGINAL size')
+    // The identity is the hash of the bytes the user gave us. If a derivative
+    // were ever stored in place of the original this would change, and every
+    // ref already issued would point at different pixels.
+    assert.equal(accepted.image.sha256, createHash('sha256').update(bytes).digest('hex'))
+    assert.equal(accepted.image.width, 4032, 'the original dimensions are recorded, not the derivative\'s')
+    assert.equal(accepted.image.height, 3024)
   }
 })

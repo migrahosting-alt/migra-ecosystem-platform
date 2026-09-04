@@ -20,7 +20,7 @@ import { UnauthenticatedError } from '@/server/auth/authPort'
 import { join } from 'node:path'
 import { callBrain } from '@/server/brain/gateway'
 import { userDirectory, listFiles } from '@/server/files/storage'
-import { requestProcessing } from '@/server/files/documentProcessing'
+import { listProcessing, requestProcessing } from '@/server/files/documentProcessing'
 
 export const dynamic = 'force-dynamic'
 
@@ -184,12 +184,56 @@ export async function POST(): Promise<Response> {
    * minutes and happens after this response is long gone.
    */
   const uploadRoot = await userDirectory()
-  for (const file of await listFiles().catch(() => [])) {
+  const library = await listFiles().catch(() => [])
+
+  /*
+   * 🚨 TOO LARGE TO PARSE IS NOT "NOTHING TO READ", AND SAYING SO IS A LIE.
+   *
+   * A file above the extraction ceiling is stored, skipped by the extractor, and
+   * therefore absent from `chunkCounts` — which the client reads as zero chunks
+   * and reports as "No readable content was found in this file." For a 100 MB
+   * PDF dense with text that explanation is simply false, and it points the user
+   * at the one thing that is not wrong with their document.
+   *
+   * Naming these files explicitly matters more now than it did: while uploads
+   * were capped near the extraction ceiling this band was a few megabytes wide.
+   * Raising transport to 256 MB makes it the majority of what can be uploaded,
+   * so the wrong explanation would become the common one.
+   */
+  /*
+   * 🚨 A LARGE PDF IS NOW READ, NOT ABANDONED.
+   *
+   * This used to `continue` past anything above the synchronous extraction
+   * ceiling, which is how a 35.5 MB PDF became a stored object no answer could
+   * ever use. The ceiling protects the SYNCHRONOUS parser — it was never a
+   * statement that the document is unreadable — so an oversized PDF goes to the
+   * background reader, which extracts it a page at a time with `pdftotext` and
+   * never holds the whole file in memory.
+   *
+   * The escalation rule is unchanged for everything else: a PDF the fast path
+   * already read keeps its chunks and is left alone, because re-reading a
+   * document that produced text would be pure waste.
+   */
+  for (const file of library) {
     if (!/\.pdf$/i.test(file.name)) continue
     if ((chunkCounts[file.name] ?? 0) > 0) continue
-    if (file.tooLargeToProcess) continue
     await requestProcessing(file.name, join(uploadRoot, file.name)).catch(() => null)
   }
+
+  /*
+   * Reported ONLY for files nothing will read.
+   *
+   * A large PDF is no longer in this list — it is being processed, and saying
+   * "too large to read" about a document actively being read would be the same
+   * class of lie as the one this field was added to remove. Non-PDF files above
+   * the ceiling have no background reader yet, so for those it stays true.
+   */
+  const processing = new Set(
+    (await listProcessing().catch(() => [])).filter((p) => p.polling).map((p) => p.fileName),
+  )
+  const tooLargeToProcess = library
+    .filter((file) => file.tooLargeToProcess && !/\.pdf$/i.test(file.name) && !processing.has(file.name))
+    .map((file) => file.name)
 
   return Response.json({
     indexed: true,
@@ -197,5 +241,17 @@ export async function POST(): Promise<Response> {
     state: record?.state ?? null,
     stats: record?.stats ?? synced.value?.index?.stats ?? null,
     chunkCounts,
+    tooLargeToProcess,
+    /*
+     * Documents a background reader is actively working on.
+     *
+     * The client needs this to tell three states apart that all look like "no
+     * chunks yet": a file that yielded nothing readable, a file nothing will
+     * ever read, and a file being read right now. Only the last one is worth
+     * waiting for, and calling it "no readable content" — which is what happened
+     * before this field existed — tells the user to give up on a document that
+     * is about to work.
+     */
+    processing: [...processing],
   })
 }

@@ -18,8 +18,22 @@ test('a server that answers is never reported as unreachable', () => {
   const fetchCatch = /response = await fetch\('\/api\/files'[\s\S]{0,200}?\} catch \{[\s\S]{0,200}?could not reach the server/
   assert.match(hook, fetchCatch, 'only a failed fetch may claim unreachability')
 
-  const parseCatch = /payload = await response\.json\(\)[\s\S]{0,400}?response\.status === 413/
-  assert.match(hook, parseCatch, 'a non-JSON answer must report what the server actually said')
+  /*
+   * Bounded by the code that FOLLOWS the parse rather than by a character
+   * budget. The previous form allowed 400 characters between the two anchors, so
+   * adding a comment to the very block it guards broke it while the invariant
+   * still held — a test that fails on prose is measuring the wrong thing.
+   *
+   * This is also the stronger claim: it checks not only that the 413 branch
+   * exists, but that nothing in the parse-failure path claims unreachability.
+   */
+  const afterParse = hook.slice(hook.indexOf('payload = await response.json()'))
+  const parseFailurePath = afterParse.slice(0, afterParse.indexOf('const uploaded = outcomeOfUpload'))
+  assert.ok(parseFailurePath.length > 0, 'the parse-failure path must be locatable')
+  assert.match(parseFailurePath, /response\.status === 413/,
+    'a non-JSON answer must report what the server actually said')
+  assert.doesNotMatch(parseFailurePath, /could not reach the server/,
+    'a server that answered must never be described as unreachable')
 })
 
 test('a 413 says the file is too large, not that the server vanished', () => {
@@ -33,8 +47,14 @@ test('a 413 says the file is too large, not that the server vanished', () => {
  * was attached, because every refusal shared one global slot with image errors.
  */
 test('a new selection clears the previous refusals', () => {
-  const picked = composer.slice(composer.indexOf('const onPicked'))
-  const body = picked.slice(0, picked.indexOf('if (documents.length'))
+  /*
+   * Read from `intake` rather than `onPicked`. The clearing moved there when the
+   * picker, drop and paste were unified onto one handler — which means this
+   * property now holds for all three entry points instead of only the picker.
+   * A dropped file used to leave a stale refusal from an earlier pick on screen.
+   */
+  const intake = composer.slice(composer.indexOf('const intake'))
+  const body = intake.slice(0, intake.indexOf('if (documents.length'))
   assert.match(body, /setRefusals\(\[\]\)/, 'stale refusals are cleared on a new selection')
   assert.match(body, /setImageError\(null\)/, 'and so is the image slot')
 })

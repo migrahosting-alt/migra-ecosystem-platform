@@ -35,10 +35,13 @@ test('an image turn sends real bytes to the model, keyed by mime', () => {
 
 test('the turn is durable, or the thread does not survive a restart', () => {
   const body = resolveOperation({ kind: 'chatTurn', prompt: 'q' }).body as {
-    memoryPolicy?: { mode?: string; store?: boolean }
+    memoryPolicy?: { mode?: string; store?: boolean; retrieve?: boolean }
   }
   assert.equal(body.memoryPolicy?.mode, 'durable')
-  assert.equal(body.memoryPolicy?.store, true)
+  // The CONSUMER writes both halves of the turn; the Brain reads them back.
+  // Both storing duplicated every message once conversationId started flowing.
+  assert.equal(body.memoryPolicy?.store, false, 'one writer, not two')
+  assert.equal(body.memoryPolicy?.retrieve, true)
 })
 
 // ── 2. the picture is recorded ON the message ─────────────────────────────

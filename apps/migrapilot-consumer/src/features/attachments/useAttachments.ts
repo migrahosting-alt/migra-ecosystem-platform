@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 
-import { outcomeOfIndex, outcomeOfUpload } from './outcome'
+import { isPermanentRejection, outcomeOfIndex, outcomeOfUpload } from './outcome'
 import { rejectionFor } from './filename'
 
 /**
@@ -26,6 +26,13 @@ export type AttachmentState =
   | 'uploading'
   /** Stored, now being made searchable. It is NOT usable for grounding yet. */
   | 'indexing'
+  /**
+   * Stored and being READ by a background job — a large PDF extracted page by
+   * page. Minutes, not milliseconds, and still not usable for grounding.
+   * Distinct from `indexing` because it resolves by polling, not by the response
+   * to the request that started it.
+   */
+  | 'processing'
   /** Stored and searchable. The Brain can answer from it. */
   | 'ready'
   /** Stored but NOT searchable — an honest half-success, never shown as ready. */
@@ -41,6 +48,12 @@ export interface Attachment {
   bytes: number
   state: AttachmentState
   reason?: string
+  /**
+   * Whether offering Retry would be honest. Only meaningful when `state` is
+   * `'failed'`; see `PERMANENT_REJECTIONS` in `outcome.ts` for where the line
+   * sits and why a too-large file must never be offered a second attempt.
+   */
+  retryable?: boolean
 }
 
 export interface AttachmentLimits {
@@ -59,6 +72,8 @@ export function useAttachments() {
   const [limits, setLimits] = useState<AttachmentLimits | null>(null)
   /** Kept so a failed upload can be retried without asking the user to pick again. */
   const originals = useRef(new Map<string, File>())
+  /** Attachments with a poll in flight, so a re-render cannot start a second one. */
+  const watching = useRef(new Set<string>())
 
   /**
    * Limits come from the server, never from constants copied into the client. If they
@@ -81,6 +96,72 @@ export function useAttachments() {
   const patch = useCallback((id: string, next: Partial<Attachment>) => {
     setAttachments((current) => current.map((a) => (a.id === id ? { ...a, ...next } : a)))
   }, [])
+
+  /**
+   * Follow a background read to its terminal state.
+   *
+   * 🚨 THE SERVER DECIDES WHEN TO STOP, NOT A TIMER HERE. `polling: false` is the
+   * job saying it has reached a terminal state; inventing a client-side deadline
+   * would mark a document failed while it was still being read — and a 400-page
+   * book legitimately takes minutes.
+   *
+   * The interval is deliberately unhurried. This is a job measured in minutes, so
+   * asking every two seconds would add hundreds of requests to learn nothing
+   * sooner. A ceiling on attempts exists only so a browser left open overnight
+   * against a job that died without writing a terminal state does not poll for
+   * ever; reaching it reports honestly rather than guessing an outcome.
+   */
+  const watch = useCallback((id: string, fileName: string) => {
+    if (watching.current.has(id)) return
+    watching.current.add(id)
+
+    let attempts = 0
+    const MAX_ATTEMPTS = 240 // ~20 minutes at 5s
+
+    const tick = async () => {
+      if (!watching.current.has(id)) return
+      attempts += 1
+      try {
+        const response = await fetch('/api/files')
+        const data = (await response.json()) as {
+          files?: { name: string; processing?: { readable: boolean; polling: boolean; description: string; failureReason?: string } }[]
+        }
+        const record = data.files?.find((f) => f.name === fileName)
+        const status = record?.processing
+
+        if (status && !status.polling) {
+          watching.current.delete(id)
+          /*
+           * READABLE IS THE FACT THAT MATTERS. A finished job is not the same as
+           * a usable document — the reader can complete having recovered
+           * nothing — so the terminal state is taken from what the server says
+           * about readability, never from the job merely having stopped.
+           */
+          patch(id, status.readable
+            ? { state: 'ready', reason: undefined }
+            : { state: 'unsearchable', reason: status.failureReason ?? status.description })
+          return
+        }
+        // Still going: keep the user informed with the job's own words.
+        if (status?.description) patch(id, { state: 'processing', reason: status.description })
+      } catch {
+        // A failed poll is not a failed job. Try again; the attempt ceiling is
+        // what stops this, not one bad response.
+      }
+
+      if (attempts >= MAX_ATTEMPTS) {
+        watching.current.delete(id)
+        patch(id, {
+          state: 'unsearchable',
+          reason: 'This document is still being read. Check your Files page for its progress.',
+        })
+        return
+      }
+      window.setTimeout(() => void tick(), 5000)
+    }
+
+    window.setTimeout(() => void tick(), 5000)
+  }, [patch])
 
   /** Upload one already-registered attachment, then index the library. */
   const send = useCallback(
@@ -107,8 +188,12 @@ export function useAttachments() {
         body.append('file', file)
         response = await fetch('/api/files', { method: 'POST', body })
       } catch {
-        // Genuinely no answer: DNS, offline, connection reset.
-        patch(id, { state: 'failed', reason: 'The upload could not reach the server.' })
+        // Genuinely no answer: DNS, offline, connection reset. Worth retrying.
+        patch(id, {
+          state: 'failed',
+          reason: 'The upload could not reach the server.',
+          retryable: true,
+        })
         return
       }
 
@@ -119,12 +204,19 @@ export function useAttachments() {
          * The server answered, but not with JSON — which is what a proxy does
          * when it rejects a request before the app ever sees it. Report what it
          * actually said rather than inventing a network fault.
+         *
+         * A 413 HERE IS THE PROXY, NOT THE APP. The app's own size check returns
+         * JSON; an HTML 413 means the request was cut off upstream, before any
+         * MigraPilot code ran. It is still terminal for these bytes — the
+         * transport will refuse them every time — so it gets the same no-retry
+         * treatment as the app's own too-large rejection.
          */
         patch(id, {
           state: 'failed',
           reason: response.status === 413
             ? 'That file is too large to upload.'
             : `The server refused the upload (error ${response.status}).`,
+          retryable: response.status !== 413,
         })
         return
       }
@@ -133,7 +225,11 @@ export function useAttachments() {
       // ships is the rule that is checked.
       const uploaded = outcomeOfUpload(payload)
       if (uploaded.state !== 'indexing') {
-        patch(id, { state: uploaded.state, reason: 'reason' in uploaded ? uploaded.reason : undefined })
+        patch(id, {
+          state: uploaded.state,
+          reason: 'reason' in uploaded ? uploaded.reason : undefined,
+          ...('retryable' in uploaded ? { retryable: uploaded.retryable } : {}),
+        })
         return
       }
       patch(id, { state: 'indexing', name: uploaded.name, bytes: uploaded.bytes })
@@ -146,6 +242,12 @@ export function useAttachments() {
           state: indexed.state,
           reason: 'reason' in indexed ? indexed.reason : undefined,
         })
+        /*
+         * A background read resolves LATER, so the chip has to keep asking.
+         * Without this it would sit on "Reading this document…" forever — the
+         * same dead-end as the state it replaced, just a friendlier one.
+         */
+        if (indexed.state === 'processing') watch(id, uploaded.name)
       } catch {
         patch(id, {
           state: 'unsearchable',
@@ -171,7 +273,17 @@ export function useAttachments() {
         if (rejection) {
           setAttachments((c) => [
             ...c,
-            { id, name: file.name, bytes: file.size, state: 'failed', reason: rejection.message },
+            {
+              id,
+              name: file.name,
+              bytes: file.size,
+              state: 'failed',
+              reason: rejection.message,
+              // Decided by the same rule the server's own rejections go through,
+              // so a size refusal caught in the browser and one caught on disk
+              // offer the user the same (absent) button.
+              retryable: !isPermanentRejection(rejection.code),
+            },
           ])
           continue
         }
@@ -185,14 +297,27 @@ export function useAttachments() {
 
   const retry = useCallback(
     (id: string) => {
+      /*
+       * Refuses a retry the UI would not have offered. The button is hidden for
+       * a terminal failure, but hiding a control is a presentation decision and
+       * this is the rule — a keyboard path, a stale render or a future caller
+       * must not be able to re-send bytes that provably cannot pass.
+       */
+      const attachment = attachments.find((a) => a.id === id)
+      if (attachment?.state === 'failed' && attachment.retryable === false) return
+
       const file = originals.current.get(id)
       if (!file) {
-        patch(id, { state: 'failed', reason: 'The original file is no longer available. Attach it again.' })
+        patch(id, {
+          state: 'failed',
+          reason: 'The original file is no longer available. Attach it again.',
+          retryable: false,
+        })
         return
       }
       void send(id, file)
     },
-    [patch, send],
+    [attachments, patch, send],
   )
 
   /**
@@ -205,6 +330,10 @@ export function useAttachments() {
       const stored = attachment && attachment.state !== 'uploading' && attachment.state !== 'failed'
       setAttachments((current) => current.filter((a) => a.id !== id))
       originals.current.delete(id)
+      // Stops any background-read poll for this chip. The job on the server
+      // continues — removing an attachment is not a reason to abandon work
+      // already underway — but nothing is left asking about a chip that is gone.
+      watching.current.delete(id)
       if (stored && attachment) {
         try {
           await fetch(`/api/files?name=${encodeURIComponent(attachment.name)}`, { method: 'DELETE' })
@@ -220,10 +349,20 @@ export function useAttachments() {
   const clear = useCallback(() => {
     setAttachments([])
     originals.current.clear()
+    watching.current.clear()
   }, [])
 
+  /*
+   * `processing` is deliberately NOT busy.
+   *
+   * Busy holds the composer, and a background read takes minutes — locking
+   * someone out of their own chat because a large PDF is being indexed would
+   * trade one broken capability for a worse one. The chip states plainly that
+   * the document is still being read, and `groundable` below refuses to let it
+   * ground anything until it truly can, which is where the honesty has to live.
+   */
   const busy = attachments.some((a) => a.state === 'uploading' || a.state === 'indexing')
-  /** Only a searchable attachment can ground an answer. */
+  /** Only a searchable attachment can ground an answer — never one still being read. */
   const groundable = attachments.some((a) => a.state === 'ready')
 
   return { attachments, limits, add, remove, retry, clear, busy, groundable }

@@ -3,7 +3,7 @@ import 'server-only'
 import { decode as decodeJpeg, encode as encodeJpeg } from 'jpeg-js'
 import { PNG } from 'pngjs'
 
-import type { ImageMime } from '@/server/files/images'
+import { RESIZABLE_FOR_MODEL, type ImageMime } from '@/server/files/images'
 
 /**
  * The copy of an image a vision model is asked to look at.
@@ -265,11 +265,23 @@ function decode(bytes: Buffer, mime: ImageMime): Raster | null {
     const png = PNG.sync.read(bytes)
     return { data: png.data, width: png.width, height: png.height }
   }
-  // GIF and WebP have no dependable pure-JavaScript decoder of this size, so
-  // they are passed through at full resolution rather than half-handled. They
-  // are a small minority of what is attached, and a slow correct answer beats a
-  // corrupted fast one.
+  /*
+   * GIF and WebP have no dependable pure-JavaScript decoder of this size, so
+   * they are passed through at full resolution rather than half-handled. A slow
+   * correct answer beats a corrupted fast one.
+   *
+   * INTAKE KNOWS THIS TOO. `RESIZABLE_FOR_MODEL` is the shared definition, and
+   * `acceptImage` refuses an unresizable image whose dimensions would be
+   * expensive to send whole — which is what makes the 25 MB byte ceiling safe.
+   * If a format is ever added here it must be added to that set in the same
+   * change, or intake will keep refusing pictures this can now handle.
+   */
   return null
+}
+
+/** Guards the invariant above: every mime this decodes is declared resizable. */
+export function decodesForModel(mime: ImageMime): boolean {
+  return RESIZABLE_FOR_MODEL.has(mime)
 }
 
 function encode(raster: Raster, mime: ImageMime): Buffer {

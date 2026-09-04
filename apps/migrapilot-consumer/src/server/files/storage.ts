@@ -1,4 +1,4 @@
-import { DOCUMENT_EXTENSIONS, contentMismatch, refusalFor } from '@/features/attachments/capability'
+import { DOCUMENT_EXTENSIONS, MAX_UPLOAD_MB, contentMismatch, refusalFor } from '@/features/attachments/capability'
 import 'server-only'
 
 import { createHash } from 'node:crypto'
@@ -98,20 +98,29 @@ const megabytes = (value: string | undefined, fallback: number): number => {
   return Number.isFinite(parsed) && parsed > 0 ? parsed * 1024 * 1024 : fallback * 1024 * 1024
 }
 
+/** Sizes as a person reads them. Whole MB, because a tenth of a megabyte has
+ *  never helped anyone decide whether a file is too big. */
+const readableSize = (bytes: number): string =>
+  bytes >= 1024 * 1024 * 1024
+    ? `${(bytes / 1024 / 1024 / 1024).toFixed(1)} GB`
+    : bytes >= 1024 * 1024
+      ? `${Math.round(bytes / 1024 / 1024)} MB`
+      : `${Math.max(1, Math.round(bytes / 1024))} KB`
+
 /*
- * 🚨 THIS MUST NOT EXCEED WHAT THE TRANSPORT WILL CARRY.
+ * 🚨 NOT ITS OWN NUMBER ANY MORE.
  *
- * It advertised 1024 MB while the reverse proxy in front of the app rejects
- * anything over roughly 32 MB with a 413 — measured by binary search against
- * production. So the app promised a gigabyte, the user picked a 35 MB PDF, and
- * the upload died at a hop the app never saw.
+ * This used to hold a hand-written ceiling beside a hand-written one in the
+ * client and a third in nginx. It advertised 1024 MB while the proxy rejected
+ * anything over roughly 32 MB with a 413 — so the app promised a gigabyte, the
+ * user picked a 35 MB PDF, and the upload died at a hop the app never saw.
  *
- * Set to the measured transport ceiling so an oversized file is refused BEFORE
- * the upload, with a message that says what is wrong. Raising it means raising
- * `client_max_body_size` on the proxy FIRST — otherwise this reintroduces the
- * same lie with a bigger number.
+ * The value now comes from `MAX_UPLOAD_BYTES` in the attachment capability
+ * contract, which is the same definition the picker and the chip read. Raising
+ * the ceiling means raising `client_max_body_size` on the proxy FIRST and then
+ * changing that one constant — there is no longer a second place to forget.
  */
-export const MAX_FILE_BYTES = megabytes(process.env.MIGRAPILOT_MAX_FILE_MB, 31)
+export const MAX_FILE_BYTES = megabytes(process.env.MIGRAPILOT_MAX_FILE_MB, MAX_UPLOAD_MB)
 export const MAX_LIBRARY_BYTES = megabytes(process.env.MIGRAPILOT_MAX_LIBRARY_MB, 20 * 1024)
 export const MAX_FILES = Number(process.env.MIGRAPILOT_MAX_FILES) || 2000
 
@@ -240,9 +249,17 @@ export async function saveFile(rawName: string, data: ArrayBuffer): Promise<Stor
   if (mismatch) throw new FileRejected('unsupported_type', mismatch)
   if (data.byteLength === 0) throw new FileRejected('empty_file', 'That file is empty.')
   if (data.byteLength > MAX_FILE_BYTES) {
-    const limitMb = MAX_FILE_BYTES / 1024 / 1024
-    const readable = limitMb >= 1024 ? `${(limitMb / 1024).toFixed(0)} GB` : `${limitMb} MB`
-    throw new FileRejected('too_large', `Files are limited to ${readable}.`)
+    /*
+     * NAMES BOTH NUMBERS, because "files are limited to 256 MB" alone leaves the
+     * user to work out whether their file is over by a little or by tenfold —
+     * which decides whether trimming it is even worth attempting. This is a
+     * terminal state: the same bytes can never pass, so the message has to be
+     * enough to act on without a retry to learn more.
+     */
+    throw new FileRejected(
+      'too_large',
+      `That file is ${readableSize(data.byteLength)}. Files are limited to ${readableSize(MAX_FILE_BYTES)}.`,
+    )
   }
 
   const dir = await userDirectory()

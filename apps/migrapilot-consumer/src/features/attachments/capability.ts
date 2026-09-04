@@ -192,11 +192,44 @@ export function refusalFor(fileName: string): string {
     : 'That file has no extension, so MigraPilot cannot tell what it is.'
 }
 
+/**
+ * 🚨 THE TRANSPORT CEILING — ONE NUMBER, FOR THE WHOLE ROUTE.
+ *
+ * An upload crosses five things that can each refuse it by size: the browser
+ * pre-check, nginx on VM102, this app's API route, the storage validator, and
+ * the extractor. When they each carried their own number the product lied: the
+ * app advertised 1024 MB while the proxy cut every request off at 32 MB, so a
+ * 35 MB PDF died at a hop the app could not see and reported a network fault.
+ *
+ * THIS VALUE MUST NEVER EXCEED `client_max_body_size` ON THE PROXY. It is the
+ * narrowest real transport limit, not an aspiration — everything downstream
+ * derives from it, so raising it here without raising the proxy first would
+ * reintroduce exactly that defect with a bigger number.
+ *
+ * The route it must agree with:
+ *
+ *     browser → pve 138.201.255.55:443 (DNAT, no body limit)
+ *             → nginx VM102  chat.migrateck.com  client_max_body_size
+ *             → consumer 10.10.0.13:3000  /api/files
+ *             → storage MAX_FILE_BYTES → extractor MAX_EXTRACT_BYTES
+ *
+ * NOT THE PATH FOR LARGE MEDIA. Hundreds of megabytes to multiple gigabytes —
+ * video especially — must not be carried by raising a proxied request body
+ * toward 1 GB. A buffered body that size occupies proxy disk, cannot resume
+ * after a dropped connection, and gives the user no progress they can trust.
+ * That case wants direct/resumable upload to object storage with the app
+ * issuing credentials and observing completion; see
+ * `docs/migrapilot/large-media-uploads.md`.
+ */
+export const MAX_UPLOAD_MB = 256
+export const MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024
+
 /** The contract a UI renders from, so the displayed list cannot drift either. */
 export function attachmentCapability() {
   return {
     accepted: INDEXED_EXTENSIONS,
     accept: DOCUMENT_PICKER_ACCEPT,
+    maxUploadBytes: MAX_UPLOAD_BYTES,
     refused: ATTACHMENT_TYPES
       .filter((t) => t.support === 'unsupported')
       .map((t) => ({ ext: t.ext, reason: t.reason })),
