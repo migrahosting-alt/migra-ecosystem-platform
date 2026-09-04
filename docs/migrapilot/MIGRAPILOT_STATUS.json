@@ -1,7 +1,7 @@
 {
  "$schema": "MIGRAPILOT_STATUS — canonical cross-agent state. Update on every material change.",
  "updated": "2026-09-04",
- "updatedBy": "Claude (Opus 5) — admission control as a module + engine/ regrouped into domains, both CI-enforced",
+ "updatedBy": "Claude (Opus 5) — admission module + engine regrouping DEPLOYED (Brain admission-09040433, extension installed)",
  "rules": {
   "easyFirst": "Do not start deep capability work while meaningful easy user-facing items remain.",
   "provenLive": "PROVEN_LIVE requires the real user-facing workflow to pass. Code existing and tests passing is NOT proof.",
@@ -14,7 +14,7 @@
  "activeLane": {
   "name": "MigraPilot VS Code Extension on the governed Brain",
   "objective": "The extension is the product surface under test. It must use the single production Brain (db-core persistence, governed), never a local dev instance.",
-  "currentStep": "Four defects fixed and pushed (73690997), NOT yet deployed: the coding agent now refuses in seconds on a busy card instead of waiting 240s; capacity measures compute rather than inferring it from residency; the no-work footer no longer denies a tool that ran; routing attribution reaches the UI. Next: deploy Brain + extension, then the owner's panel pass (attach the mockup, ask 'build this page', inspect the diff) — still the acceptance this lane has never had.",
+  "currentStep": "Both halves DEPLOYED and verified: Brain release admission-09040433 (rollback repro-09030600), extension VSIX installed. New-build discriminator confirmed live (the /health `admission` telemetry block exists only in this build). Brain-side mockup behaviour re-verified with a real model after the refactor. REMAINING and owed, unchanged: the owner reloads the window, attaches the mockup, asks 'build this page', and inspects the diff before applying. That is the acceptance this lane has never had.",
   "beforeTopology": {
    "extension": "http://127.0.0.1:3988 — set in BOTH Machine and workspace settings",
    "thatBrain": "LOCAL dev instance on the workstation. persistence=sqlite, reason 'default local/dev/test adapter'. MIGRAPILOT_BRAIN_DATABASE_URL and DATABASE_URL both UNSET. Governance NOT available.",
@@ -275,7 +275,7 @@
    "id": "engineer-turn-truthfulness-and-attribution",
    "symptom": "Two defects seen in the live acceptance run: the machine-authored footer printed \"No tool ran during this turn\" beneath the model's own accurate report that fs.proposeChangeset had run and FAILED; and routing attribution never reached the UI on any successful engineer turn.",
    "rootCause": "The footer is triggered by OUTPUT (`producedNothing`) but asserted a tool COUNT it never checked. Separately, the client returned on the `final` frame and the server always sends `final` before `done`, so the frame carrying model/policy/fallback was never read — which also made healthy runs log \"stream ended without a done frame\".",
-   "status": "FIXED IN CODE 2026-09-03 (commit 73690997), NOT YET DEPLOYED.",
+   "status": "FIXED AND DEPLOYED 2026-09-04 (release admission-09040433 + extension VSIX installed).",
    "effort": "SMALL",
    "regressionTest": "unifiedAgent.test.ts (footer may not deny a tool that ran) and intentRouter.test.ts (attribution delivered exactly once; failed runs still attribute; one answer per turn; each refusal code renders its own boundary). Both proven by reintroducing the defect.",
    "liveAcceptance": "NOT RUN — needs a deploy."
@@ -285,7 +285,7 @@
    "symptom": "\"use the mockup draft and build this page exactly as it is.\" with the mockup attached and read: the agent ran ONE workspace.find for index.html,styles.css,app.js, found nothing, and answered \"I have not created or proposed any files yet. Please provide more details or clarify your request.\" No files proposed.",
    "evidence": "Live in the extension panel, 2026-09-03 03:09 (engineer request 9f2a02ca). Reproduced deterministically before any fix: 2 model calls, no correction, no decision event.",
    "rootCause": "TWO defects met. (1) The guard against handing work back was gated on `toolStepCount === 0`, so a single search disabled every correction below it — including the directive written for exactly this ending. (2) The controller's intent was hard-coded 'UNKNOWN' and the design spec was concatenated onto the user's message by the client, so nothing downstream could tell a turn that CAME WITH its requirement from one that lacked it.",
-   "status": "DEPLOYED (release repro-09030600), BRAIN-SIDE BEHAVIOUR PROVEN WITH A REAL MODEL, PANEL ACCEPTANCE STILL OWED — commit 7229383f. NOT PROVEN_LIVE.",
+   "status": "DEPLOYED (release admission-09040433), BRAIN-SIDE BEHAVIOUR RE-VERIFIED AFTER THE REFACTOR, PANEL ACCEPTANCE STILL OWED — NOT PROVEN_LIVE.",
    "effort": "MEDIUM",
    "regressionTest": "apps/brain-service/test/buildFromSpecification.test.ts (5 cases, incl. Record #1 non-regression), apps/brain-service/test/engineerSpecificationRoute.test.ts (route->model wiring), apps/brain-service/test/turnDecision.test.ts (+4), apps/vscode-extension/src/test/unit/designSpecBoundary.test.ts (transport boundary).",
    "liveAcceptance": "NOT RUN — requires the Brain deploy. Acceptance = attach the mockup in the panel, ask to build it, and see proposed files with real contents.",
@@ -293,7 +293,7 @@
    "guardrail": "The fix is gated on the turn HOLDING a specification. With none, Record #1 (\"build me a website\" -> \"what kind?\" overruled into three unwanted file creations) stays fixed and its test is unchanged. Authority stays READ_ONLY: one re-prompt, never permission to write.",
    "deployProof": "Brain: the live endpoint rejected an oversized `designSpec` BY NAME and BY BOUND (400 INVALID_INPUT, path designSpec, max 20000) — a field that exists only in the new build; the old one strips unknown keys and proceeds. A valid designSpec passes (only rootPath flagged). Extension: the INSTALLED bundle carries designSpec and keeps the constructor-before-wiring order.",
    "deployNotes": "Built from a CLEAN worktree check — which FAILED and exposed a separate defect (see repo-hygiene entry). Fell back to the working tree only after proving all 14 rag/*.js build outputs are byte-identical (md5) to what was already deployed, so the in-progress file-attachment lane added nothing new to production.",
-   "liveEvidence": "2026-09-03, live Brain + real qwen2.5-coder:14b, task 'use the mockup draft and build this page exactly as it is.' with a designSpec. The agent called fs.proposeChangeset ON STEP 1 with complete file content (index.html, full DOCTYPE) — it did NOT search for the files and did NOT ask the user to restate the design, which is the exact failure being fixed. ⚠️ HONEST SCOPE: this exercised the PROMPT half of the fix (the specification block telling the model the spec IS the requirement). The deferral guard never fired because the model never deferred, so that half remains proven by unit tests only. The run then failed at tool execution because the curl harness omitted `clientWorkspaceTools`, so the Brain tried to run the changeset on VM111 instead of delegating it. Logs show delegated fs.proposeChangeset succeeding (138ms, outcome ok) on extension-driven runs. The harness was wrong, not the product.",
+   "liveEvidence": "2026-09-03, live Brain + real qwen2.5-coder:14b, task 'use the mockup draft and build this page exactly as it is.' with a designSpec. The agent called fs.proposeChangeset ON STEP 1 with complete file content (index.html, full DOCTYPE) — it did NOT search for the files and did NOT ask the user to restate the design, which is the exact failure being fixed. ⚠️ HONEST SCOPE: this exercised the PROMPT half of the fix (the specification block telling the model the spec IS the requirement). The deferral guard never fired because the model never deferred, so that half remains proven by unit tests only. The run then failed at tool execution because the curl harness omitted `clientWorkspaceTools`, so the Brain tried to run the changeset on VM111 instead of delegating it. Logs show delegated fs.proposeChangeset succeeding (138ms, outcome ok) on extension-driven runs. The harness was wrong, not the product. RE-VERIFIED 2026-09-04 on release admission-09040433 with real qwen2.5-coder:14b: the agent again called fs.proposeChangeset on STEP 1 with complete file content, no search and no deferral, and emitted no false \"no tool ran\" footer. The engine/ regrouping and the admission module did not change the behaviour.",
    "remaining": "Owner drives the panel: attach the mockup, ask 'build this page', confirm it inspects the real workspace, proposes complete files, and inspect the diff before applying."
   },
   {
@@ -312,7 +312,7 @@
    "symptom": "Every grounded chat turn ends in \"The engine could not complete the request\" after ~240s while ComfyUI holds the GPU.",
    "evidence": "nvidia-smi: 23723/24576 MiB used, utilization.gpu 100%, 69C, with ComfyUI /queue reporting 1 running job. Ollama /api/ps shows qwen3:8b RESIDENT at 11.5GB, so this is not a model-load failure. A direct /api/generate probe for the trivial prompt \"Reply with exactly the word: READY\" hung past 600s, proving the stall is in generation and is upstream of MigraPilot. Substituting the smaller qwen2.5vl:7b failed identically, so model size is not the variable.",
    "rootCause": "Unarbitrated GPU sharing between ComfyUI (image) and Ollama (chat) on one 24GB card.",
-   "status": "PRODUCT BEHAVIOUR FIXED IN CODE 2026-09-03 (commit 73690997), NOT YET DEPLOYED. The environmental cause stands; what is fixed is that the product no longer answers it with a 240s wait and a generic failure.",
+   "status": "PRODUCT BEHAVIOUR FIXED AND DEPLOYED 2026-09-04 (release admission-09040433, rollback repro-09030600). The environmental cause stands; what is fixed is that the product no longer answers it with a 240s wait and a generic failure.",
    "effort": "MEDIUM",
    "regressionTest": "apps/brain-service/test/engineerCapacityGate.test.ts (refuses before any model call; does NOT refuse a card that still answers), plus rewritten cases in gpuCapacity.test.ts.",
    "liveAcceptance": "Blocked until the card is free.",
