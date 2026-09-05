@@ -2,6 +2,8 @@ import { randomUUID } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import type { PoolClient } from 'pg';
 
+import { MIGRA_MODEL_FAMILIES } from '@migrapilot/shared-types/model-families';
+
 import { verifyAssertion, type VerifyDeps, type AssertionFailure } from '../internalAuth/assertion.js';
 import { ACTION_MODELS_QUALIFY, type InternalAuthConfig } from '../internalAuth/config.js';
 import { consumeNonce } from '../persistence/postgres/assertionNonceRepo.js';
@@ -43,12 +45,53 @@ export interface QualificationRouteDeps {
   now?: () => number;
 }
 
+/**
+ * Capabilities this deployment will accept evidence and decisions for.
+ *
+ * 🚨 THIS LIST IS A TRANSPORT BOUNDARY, NOT A TYPE. `ModelCapability` declared
+ * `chat.general`, `chat.fast`, `chat.long_context` and `reasoning.deep`, and the
+ * model-family catalog named all four as the `governedCapability` of Migra Core,
+ * Swift, Atlas and Logic — but this array did not list them, so every request
+ * about them was rejected `unknown_capability` at runtime. Those four families
+ * were therefore UNQUALIFIABLE BY CONSTRUCTION: they reported "no approved model
+ * for chat.general" in the product, and the canonical approval path could not
+ * have fixed it, because the approval itself would have been refused. A passing
+ * typecheck proved nothing here; only a request crossing this boundary does.
+ *
+ * The catalog's governed capabilities are therefore folded in FROM THE CATALOG
+ * rather than retyped, so a family that starts declaring a new one cannot become
+ * unqualifiable again by omission. `governedCapabilitiesInCatalog` is asserted
+ * against this list in the tests.
+ */
 const CAPABILITIES: readonly ModelCapability[] = [
   // `vision` is the legacy broad name and stays so existing decisions remain
   // readable; new qualifications name the scope they were actually measured for.
   'vision', 'vision.general', 'vision.object_counting',
   'reasoning', 'embedding', 'audio', 'generation', 'chat', 'coding',
+  // Declared by the model-family catalog; see governedCapabilitiesInCatalog().
+  'chat.general', 'chat.fast', 'chat.long_context', 'reasoning.deep',
 ];
+
+/**
+ * Every governed capability the model-family catalog actually declares.
+ *
+ * Derived, so the test that guards this boundary reads the same source the
+ * resolver does instead of a second copy that can quietly disagree.
+ */
+export function governedCapabilitiesInCatalog(): readonly string[] {
+  return [
+    ...new Set(
+      Object.values(MIGRA_MODEL_FAMILIES)
+        .map((f) => f.requirements.governedCapability)
+        .filter((c): c is string => Boolean(c)),
+    ),
+  ];
+}
+
+/** Exposed so the boundary can be asserted directly rather than through a route. */
+export function acceptsCapability(value: unknown): boolean {
+  return isCapability(value);
+}
 
 /**
  * `sha256:` and exactly 64 hex characters.
