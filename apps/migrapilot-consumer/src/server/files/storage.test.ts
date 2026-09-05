@@ -157,7 +157,9 @@ test('a real .xlsx is stored, because it can now be analysed', async () => {
    * text-shaped binary check deliberately does not apply to it.
    */
   asUser('user-xlsx')
-  const zip = new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0, 0, 0, 0])
+  // A real .xlsx begins with the zip signature. saveFile takes an ArrayBuffer,
+  // matching the `bytes` helper above.
+  const zip = new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0, 0, 0, 0]).buffer as ArrayBuffer
   await saveFile('budget.xlsx', zip)
   const listed = await listFiles()
   assert.ok(listed.some((f) => f.name === 'budget.xlsx'), 'the workbook was not stored')

@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
 import {
-  ATTACHABLE_EXTENSIONS, ATTACHMENT_TYPES, DOCUMENT_PICKER_ACCEPT, INDEXED_EXTENSIONS,
+  ATTACHABLE_EXTENSIONS, ATTACHMENT_TYPES, DOCUMENT_PICKER_ACCEPT,
   attachmentCapability, isIndexable, refusalFor,
 } from './capability'
 
