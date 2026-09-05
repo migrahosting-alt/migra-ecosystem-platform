@@ -97,39 +97,59 @@ echo "   staged"
 
 # ── 5+6+7. boot the new release on a spare port and interrogate it ─────────
 step "5. boot test on a spare port (before anything is swapped)"
-# Two failures on 2026-09-04, both here, both silent in their own way:
+# THE BOOT TEST RUNS AS A TRANSIENT COPY OF THE PRODUCTION UNIT.
 #
-#  1. `grep /etc/migrapilot/consumer.env` ran as the SSH user. That file is
-#     root-only, so it returned "Permission denied", the trailing `; true`
-#     swallowed it, and Next booted with NO production environment. The boot test
-#     still answered 200 and still reported the right identity — so the link
-#     looked sound while testing an artifact configured differently from
-#     production. The env read now runs under sudo, and a failure to read it
-#     ABORTS instead of booting an unconfigured instance.
+# Three attempts to hand-roll this failed on 2026-09-04, each differently, and
+# each taught the same lesson: an approximation of the service is not the
+# service.
 #
-#  2. The backgrounded process inherited the SSH channel, so this command never
-#     returned and the deploy hung for ~20 minutes. `ssh -n` plus `</dev/null`
-#     and `setsid` detach it.
+#   · A plain `grep` of the root-only env file returned "Permission denied",
+#     the trailing `; true` swallowed it, and Next booted with NO environment.
+#     It still answered 200 and still reported the right identity — the chain
+#     looked intact while testing something production would never run.
+#   · The backgrounded process inherited the SSH channel and hung the deploy.
+#   · `env $(... | xargs)` word-split a value containing a space, so `env` tried
+#     to execute part of it: "env: 'profile': No such file or directory". Shell
+#     sourcing has the same flaw; only systemd parses systemd's own format.
 #
-# The env expansion stays entirely on the host: no secret is ever transported to
-# the deploying workstation or printed.
-ssh -n "$HOST" "sudo -n test -r /etc/migrapilot/consumer.env" \
-  || fail "cannot read /etc/migrapilot/consumer.env as root on $HOST — the boot test would run unconfigured, which is not a boot test"
-ssh -n "$HOST" "cd $ROOT/releases/$REL && \
-  setsid sudo -n -u migrapilot env \$(sudo -n grep -v '^#' /etc/migrapilot/consumer.env | xargs) \
-    node node_modules/next/dist/bin/next start -p $PORT -H 127.0.0.1 \
-    </dev/null >/tmp/$REL-boot.log 2>&1 & \
-  sleep 14; true"
+# So the test asks systemd to run it, with the SAME EnvironmentFiles (both of
+# them — the drop-in adds a second that a hand-rolled test silently missed), the
+# same user, and the same sandboxing. If the hardening would break this release,
+# that surfaces here rather than after the cutover. No secret is ever read by,
+# transported to, or printed on the deploying workstation.
+BOOT_UNIT="migrapilot-boottest-$REL"
+stop_boot() { ssh -n "$HOST" "sudo -n systemctl stop $BOOT_UNIT.service >/dev/null 2>&1; sudo -n systemctl reset-failed $BOOT_UNIT.service >/dev/null 2>&1; true"; }
+stop_boot
+ssh -n "$HOST" "sudo -n systemd-run --unit=$BOOT_UNIT --collect --quiet \
+  --property=Type=simple \
+  --property=User=migrapilot --property=Group=migrapilot \
+  --property=EnvironmentFile=/etc/migrapilot/consumer.env \
+  --property=EnvironmentFile=/etc/migrapilot/consumer-auth-origins.env \
+  --property=WorkingDirectory=$ROOT/releases/$REL \
+  --property=NoNewPrivileges=true \
+  --property=PrivateTmp=true \
+  --property=ProtectHome=true \
+  --property=ProtectSystem=strict \
+  --property=RestrictSUIDSGID=true \
+  --property=ReadWritePaths=$ROOT/releases/$REL/.next \
+  /usr/bin/node $ROOT/releases/$REL/node_modules/next/dist/bin/next start -p $PORT -H 127.0.0.1" \
+  || fail "could not start the transient boot unit"
+sleep 14
+ssh -n "$HOST" "systemctl is-active $BOOT_UNIT.service" >/dev/null 2>&1 \
+  || { ssh -n "$HOST" "journalctl -u $BOOT_UNIT.service -n 30 --no-pager"; stop_boot; fail "boot unit is not running"; }
+echo "   transient unit $BOOT_UNIT active"
 
 step "6. the boot-tested instance answers"
-HEALTH="$(ssh "$HOST" "curl -s -o /dev/null -w '%{http_code}' --max-time 8 http://127.0.0.1:$PORT/ || echo 000")"
-[ "$HEALTH" = "200" ] || { ssh "$HOST" "tail -30 /tmp/$REL-boot.log; pkill -f 'next start -p $PORT' || true"; fail "boot test returned $HEALTH"; }
+HEALTH="$(ssh -n "$HOST" "curl -s -o /dev/null -w '%{http_code}' --max-time 8 http://127.0.0.1:$PORT/ || echo 000")"
+[ "$HEALTH" = "200" ] || { ssh -n "$HOST" "journalctl -u $BOOT_UNIT.service -n 30 --no-pager"; stop_boot; fail "boot test returned $HEALTH"; }
 echo "   HTTP $HEALTH"
 
 step "7. the BOOT-TESTED artifact reports the identity we just built"
-BOOT_ID="$(ssh "$HOST" "curl -s --max-time 8 http://127.0.0.1:$PORT/api/version")"
+BOOT_ID="$(ssh -n "$HOST" "curl -s --max-time 8 http://127.0.0.1:$PORT/api/version")"
 echo "   $BOOT_ID"
-ssh "$HOST" "pkill -f 'next start -p $PORT' || true"
+# Stopping by unit name, not by a command-line pattern. A `pkill -f` whose
+# pattern also matches the shell issuing it kills that shell instead.
+stop_boot
 echo "$BOOT_ID" | grep -q "\"commit\":\"$COMMIT\"" || fail "boot-tested artifact reports a different commit"
 echo "$BOOT_ID" | grep -q "\"release\":\"$REL\""    || fail "boot-tested artifact reports a different release"
 echo "$BOOT_ID" | grep -q "\"buildId\":\"$BUILD_ID\"" || fail "boot-tested artifact reports a different build id"
