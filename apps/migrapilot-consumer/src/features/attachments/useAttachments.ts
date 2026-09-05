@@ -37,6 +37,8 @@ export type AttachmentState =
   | 'ready'
   /** Stored but NOT searchable — an honest half-success, never shown as ready. */
   | 'unsearchable'
+  /** Stored and analysable as a table, but not prose-indexed. A workbook. */
+  | 'structured'
   /** Rejected or failed. `reason` is the server's own words. */
   | 'failed'
 
@@ -363,7 +365,9 @@ export function useAttachments() {
    */
   const busy = attachments.some((a) => a.state === 'uploading' || a.state === 'indexing')
   /** Only a searchable attachment can ground an answer — never one still being read. */
-  const groundable = attachments.some((a) => a.state === 'ready')
+  // A workbook grounds a table answer, so it counts. `ready` alone meant the
+  // composer treated an analysable file as nothing to ground on.
+  const groundable = attachments.some((a) => a.state === 'ready' || a.state === 'structured')
 
   return { attachments, limits, add, remove, retry, clear, busy, groundable }
 }

@@ -1,3 +1,5 @@
+import { canAnalyzeStructurally, canIndex, extensionOf } from './capability'
+
 /**
  * Server response → what the user is told. Pure, so it can be tested.
  *
@@ -13,6 +15,17 @@ export type AttachmentOutcome =
   /** Stored, being read in the background, not usable YET. Worth waiting for. */
   | { state: 'processing'; reason: string }
   | { state: 'unsearchable'; reason: string }
+  /**
+   * Stored and ANALYSABLE, but never prose-indexed. A workbook.
+   *
+   * Distinct from `unsearchable`, which means the file cannot contribute at all.
+   * A structured file answers questions about totals, columns and sheets — it
+   * just holds no index chunks, so it looked identical to an empty upload and
+   * was described as having "no readable content … cannot be used to answer
+   * questions". Both halves of that sentence were false about a workbook whose
+   * Revenue column the product had already totalled correctly.
+   */
+  | { state: 'structured'; reason: string }
   | { state: 'failed'; reason: string; retryable: boolean }
 
 /**
@@ -101,6 +114,26 @@ export interface IndexResponse {
  * how "your file is ready" gets said about a file no question can reach.
  */
 export function outcomeOfIndex(ok: boolean, response: IndexResponse, fileName?: string): AttachmentOutcome {
+  /*
+   * 🚨 A STRUCTURED FILE IS DECIDED BEFORE THE INDEX IS CONSULTED AT ALL.
+   *
+   * It is never indexed, so every index answer about it is silence — and every
+   * branch below reads silence as failure. Placed later, this lost twice in the
+   * real product: the chip said "No readable content was found in this file, so
+   * it cannot be used to answer questions", and after that was fixed it said
+   * "Your files could not be read. Nothing was indexed." Both were false beside a
+   * workbook the product was already totalling correctly.
+   *
+   * The index has nothing to say about this file. That is not a fault, and the
+   * only truthful thing to report is what the file IS good for.
+   */
+  if (fileName && canAnalyzeStructurally(extensionOf(fileName)) && !canIndex(extensionOf(fileName))) {
+    return {
+      state: 'structured',
+      reason: 'Ready for table analysis — totals, averages, columns and sheets. Text inside it is not searchable.',
+    }
+  }
+
   if (!ok) {
     return { state: 'unsearchable', reason: response.message ?? 'Indexing failed.' }
   }

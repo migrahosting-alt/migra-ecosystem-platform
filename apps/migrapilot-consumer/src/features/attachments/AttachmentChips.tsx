@@ -26,6 +26,9 @@ const label = (attachment: Attachment): string => {
       return attachment.reason ?? 'Reading this document…'
     case 'ready':
       return 'Ready — MigraPilot can read this'
+    case 'structured':
+      // Not a warning: this file works, for the thing it is for.
+      return attachment.reason ?? 'Ready for table analysis'
     case 'unsearchable':
       return attachment.reason ?? 'Stored, but not searchable'
     case 'failed':

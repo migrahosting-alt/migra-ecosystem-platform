@@ -16,6 +16,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
+import { outcomeOfIndex } from './outcome'
 import {
   ATTACHABLE_EXTENSIONS,
   ATTACHMENT_TYPES,
@@ -125,5 +126,50 @@ describe('what the user is told', () => {
     for (const word of ['indexed', 'searchable', 'full-text']) {
       assert.ok(!copy.includes(word), `copy claims ${word}: ${copy}`)
     }
+  })
+})
+
+describe('what the attachment chip says', () => {
+  /*
+   * 🚨 CAUGHT IN THE REAL PRODUCT, not by any test here. The chip read
+   * "No readable content was found in this file, so it cannot be used to answer
+   * questions" beside a workbook the product was already totalling correctly.
+   * Both halves were false, and the acceptance run missed it because it asserted
+   * on the ANSWER and never on the chip.
+   */
+  it('a workbook is ready for analysis, not empty', () => {
+    const outcome = outcomeOfIndex(true, { searchable: true, chunkCounts: {} }, 'budget.xlsx')
+    assert.equal(outcome.state, 'structured', JSON.stringify(outcome))
+    const reason = 'reason' in outcome ? outcome.reason : ''
+    assert.match(reason, /table analysis|totals/i, reason)
+    assert.ok(!/no readable content/i.test(reason), reason)
+    assert.ok(!/cannot be used to answer/i.test(reason), reason)
+  })
+
+  it('a genuinely empty document still says so', () => {
+    // The negative half: widening this must not silence a real empty upload.
+    const outcome = outcomeOfIndex(true, { searchable: true, chunkCounts: {} }, 'notes.txt')
+    assert.equal(outcome.state, 'unsearchable', JSON.stringify(outcome))
+    const reason = 'reason' in outcome ? outcome.reason : ''
+    assert.match(reason, /no readable content/i, reason)
+  })
+
+  it('stays truthful even when the whole index run FAILED', () => {
+    // The second false message came from the !ok branch. The index failing says
+    // nothing about a file the index was never going to hold.
+    const outcome = outcomeOfIndex(false, { message: 'Your files could not be read. Nothing was indexed.' }, 'budget.xlsx')
+    assert.equal(outcome.state, 'structured', JSON.stringify(outcome))
+    const reason = 'reason' in outcome ? outcome.reason : ''
+    assert.ok(!/could not be read|nothing was indexed/i.test(reason), reason)
+  })
+
+  it('a real document still reports an index failure', () => {
+    const outcome = outcomeOfIndex(false, { message: 'Your files could not be read. Nothing was indexed.' }, 'report.pdf')
+    assert.equal(outcome.state, 'unsearchable')
+  })
+
+  it('an indexed document with chunks is still ready', () => {
+    const outcome = outcomeOfIndex(true, { searchable: true, chunkCounts: { 'report.pdf': 12 } }, 'report.pdf')
+    assert.equal(outcome.state, 'ready')
   })
 })
