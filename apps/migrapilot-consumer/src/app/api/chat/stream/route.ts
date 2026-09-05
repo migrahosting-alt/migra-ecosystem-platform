@@ -936,7 +936,26 @@ export async function POST(request: Request): Promise<Response> {
        * actually typed. Returns null whenever anything is uncertain, and the turn
        * proceeds as an ordinary grounded answer.
        */
-      const tableEvidence = executing || !grounded
+      /*
+       * 🚨 NOT GATED ON `grounded`, and that gate was a real defect.
+       *
+       * `grounded` means an approved PROSE INDEX can serve this turn. Table
+       * analysis needs no index at all — it reads the attached file from disk
+       * and computes. Requiring both meant a `structured` attachment, which by
+       * definition can never be indexed, silently skipped the table layer: an
+       * .xlsx uploaded successfully, the turn ran, and the model answered "if you
+       * provide the specific numbers or data, I can help you calculate the total
+       * revenue" while holding a workbook whose Revenue column sums to 474,000.
+       *
+       * Found by running the acceptance matrix through the real UI. Every unit
+       * test passed throughout, because they call tableEvidenceFor directly and
+       * never crossed this gate.
+       *
+       * Safe to widen: tableEvidenceFor returns null for anything uncertain — no
+       * recognisable operation, no unambiguous column, an unreadable file — so an
+       * ungrounded turn with no table simply proceeds as it did before.
+       */
+      const tableEvidence = executing
         ? null
         : await tableEvidenceFor(prompt, turnGrounding.active, await userDirectory()).catch(() => null)
       if (tableEvidence) {

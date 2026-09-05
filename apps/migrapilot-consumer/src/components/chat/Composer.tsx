@@ -1,5 +1,6 @@
 'use client'
 
+import { canAnalyzeStructurally, extensionOf } from '@/features/attachments/capability'
 import { useCallback, useEffect, useRef, useState, type ChangeEvent, type ClipboardEvent, type DragEvent, type FormEvent, type KeyboardEvent } from 'react'
 import { FileText, Lock, Mic, SendHorizontal, Square, X } from 'lucide-react'
 import { AttachmentChips } from '@/features/attachments/AttachmentChips'
@@ -264,10 +265,27 @@ export function Composer({
     // Sending while audio is still being captured or transcribed would send the turn
     // WITHOUT the words the user is in the middle of speaking.
     if (recording || voice.state === 'transcribing') return
-    // The NAMES, not a claim: the server adds them to the conversation's durable
-    // grounding set and decides from that. Only `ready` files are sent — one that is
-    // stored but not searchable cannot ground anything and must not pretend to.
-    const readyFiles = attachments.filter((a) => a.state === 'ready').map((a) => a.name)
+    /*
+     * The NAMES, not a claim: the server adds them to the conversation's durable
+     * grounding set and decides from that.
+     *
+     * 🚨 `ready` MEANS SEARCHABLE, AND THAT IS NOT THE ONLY WAY A FILE IS USEFUL.
+     *
+     * A structured file — an .xlsx — is stored and analysable but never indexed,
+     * so it settles at `unsearchable` and this filter dropped it. The server then
+     * saw no attachment, chose an empty active set, and never reached the table
+     * layer: the workbook uploaded, the chip appeared, and the model answered
+     * "if you provide the specific numbers or data, I can help you calculate the
+     * total revenue" while holding a file whose Revenue column sums to 474,000.
+     *
+     * The old comment was true when retrieval was the only use for a file. It is
+     * not true now, so the rule is "can this file contribute anything", not "is
+     * it searchable". An unsearchable PDF still cannot contribute and is still
+     * dropped; an unsearchable workbook can.
+     */
+    const readyFiles = attachments
+      .filter((a) => a.state === 'ready' || canAnalyzeStructurally(extensionOf(a.name)))
+      .map((a) => a.name)
     const imageIds = images.map((i) => i.id)
     const meta = {
       ...(readyFiles.length > 0 ? { attachments: readyFiles } : {}),
