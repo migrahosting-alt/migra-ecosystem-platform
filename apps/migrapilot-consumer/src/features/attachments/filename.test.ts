@@ -99,9 +99,14 @@ test('a PNG chosen through Files becomes an image, not an error', async () => {
 
 test('a genuinely unsupported type is still refused, with a usable reason', async () => {
   const { classifyAttachment } = await import('./capability')
-  const verdict = classifyAttachment('sheet.xlsx', 'application/vnd.ms-excel', new Uint8Array([0x50, 0x4b, 3, 4]))
+  // .xlsx moved to `structured` when the table reader shipped: accepted and
+  // analysed, deliberately not indexed. .xls has no reader and is still refused.
+  const accepted = classifyAttachment('sheet.xlsx', 'application/vnd.ms-excel', new Uint8Array([0x50, 0x4b, 3, 4]))
+  assert.equal(accepted.ok, true, 'a real .xlsx is accepted for structured analysis')
+
+  const verdict = classifyAttachment('sheet.ods', 'application/vnd.oasis.opendocument.spreadsheet', new Uint8Array([0x50, 0x4b, 3, 4]))
   assert.equal(verdict.ok, false)
-  assert.match(verdict.ok ? '' : verdict.message, /CSV/, 'says what to do instead')
+  assert.match(verdict.ok ? '' : verdict.message, /CSV|\.xlsx/i, 'says what to do instead')
 })
 
 test('an extensionless file is refused without claiming a type', async () => {

@@ -56,6 +56,7 @@ import type { BrainStreamFrame } from '@/server/brain/gateway'
 import type { ConversationSummary } from '@/server/brain/contracts'
 import { resolveTurnImages } from '@/server/files/resolveTurnImages'
 import { selectTurnGrounding } from '@/server/files/turnGrounding'
+import { canAnalyzeStructurally, canIndex, extensionOf } from '@/features/attachments/capability'
 import { tableEvidenceFor } from '@/server/tables/tableEvidence'
 import { assessDocumentIntent } from '@/server/files/documentIntent'
 import { planRegeneration, wantsRegeneration } from '@/server/files/regenerate'
@@ -275,6 +276,34 @@ function refusalOr(
 
       const allUnreadable = available.length > 0 && unreadable.length === available.length
       if (allUnreadable) {
+        /*
+         * 🚨 A STRUCTURED FILE IS NOT AN EMPTY ONE, and must not be described as
+         * one. A workbook is accepted for deterministic table analysis and is
+         * deliberately NOT indexed for prose — the Brain cannot retrieve text
+         * from a zip container. It therefore holds zero chunks and lands here
+         * looking identical to a genuinely empty document.
+         *
+         * "No readable content was found in budget.xlsx" is a confident
+         * falsehood about content the user is looking at. The sentence has to
+         * say what is actually true: the tables can be analysed, the text cannot
+         * be searched.
+         */
+        const structuredOnly = unreadable.filter(
+          (name) => canAnalyzeStructurally(extensionOf(name)) && !canIndex(extensionOf(name)),
+        )
+        if (structuredOnly.length === unreadable.length) {
+          const names = structuredOnly.join(', ')
+          const plural = structuredOnly.length > 1
+          return {
+            error: 'insufficient_evidence',
+            message:
+              `MigraPilot can analyse ${names} for tables — totals, averages, columns and sheets — ` +
+              `but cannot search the text inside ${plural ? 'them' : 'it'}, so there is nothing to ` +
+              `answer this question from. Ask about a total, a column or a sheet, or attach a CSV ` +
+              `if you need the text searched.`,
+          }
+        }
+
         const names = unreadable.join(', ')
         return {
           error: 'insufficient_evidence',

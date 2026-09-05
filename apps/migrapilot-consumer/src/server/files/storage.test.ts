@@ -134,11 +134,33 @@ test('formats the indexer cannot read are refused, not silently stored', async (
    * no longer true now that it is extracted to text. Every other entry stays
    * refused for exactly the original reason.
    */
-  for (const name of ['sheet.xlsx', 'deck.pptx', 'photo.png', 'archive.zip', 'notes']) {
+  /*
+   * .xlsx LEFT THIS LIST when the structured table reader shipped, for exactly
+   * the reason PDF did: storing it no longer puts a file in the library that
+   * contributes nothing. It contributes deterministic totals, columns and sheets
+   * — it is simply not indexed for prose, which is what `structured` states.
+   */
+  for (const name of ['sheet.xls', 'deck.pptx', 'photo.png', 'archive.zip', 'notes']) {
     await assert.rejects(() => saveFile(name, bytes('x')), FileRejected, `${name} should be refused`)
   }
   assert.deepEqual(await listFiles(), [])
   resetAuthPort()
+})
+
+test('a real .xlsx is stored, because it can now be analysed', async () => {
+  /*
+   * The other half of the rule above. A format is refused while storing it
+   * would contribute nothing; .xlsx now contributes deterministic table
+   * answers, so refusing it would hide a capability that works.
+   *
+   * Zip bytes are correct here: an .xlsx IS a zip container, and the
+   * text-shaped binary check deliberately does not apply to it.
+   */
+  asUser('user-xlsx')
+  const zip = new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0, 0, 0, 0])
+  await saveFile('budget.xlsx', zip)
+  const listed = await listFiles()
+  assert.ok(listed.some((f) => f.name === 'budget.xlsx'), 'the workbook was not stored')
 })
 
 test('a PDF is accepted now that the indexer can read one', async () => {

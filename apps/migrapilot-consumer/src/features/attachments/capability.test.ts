@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
 import {
-  ATTACHMENT_TYPES, DOCUMENT_PICKER_ACCEPT, INDEXED_EXTENSIONS,
+  ATTACHABLE_EXTENSIONS, ATTACHMENT_TYPES, DOCUMENT_PICKER_ACCEPT, INDEXED_EXTENSIONS,
   attachmentCapability, isIndexable, refusalFor,
 } from './capability'
 
@@ -14,10 +14,12 @@ import {
  */
 test('every offered extension is one the product actually accepts', () => {
   const offered = DOCUMENT_PICKER_ACCEPT.split(',').map((e) => e.replace(/^\./, ''))
-  const accepted = new Set(INDEXED_EXTENSIONS)
+  // ATTACHABLE, not INDEXED: a structured file is accepted and analysed without
+  // being indexed for prose, and the picker must offer it.
+  const accepted = new Set(ATTACHABLE_EXTENSIONS)
   const broken = offered.filter((e) => !accepted.has(e))
   assert.deepEqual(broken, [], 'the picker offers types storage would refuse')
-  assert.equal(offered.length, INDEXED_EXTENSIONS.length, 'and offers all of them')
+  assert.equal(offered.length, ATTACHABLE_EXTENSIONS.length, 'and offers all of them')
 })
 
 test('nothing unsupported leaks into the picker', () => {
@@ -32,7 +34,9 @@ test('nothing unsupported leaks into the picker', () => {
  * holding a spreadsheet nothing they can act on.
  */
 test('a refused type explains itself in a way the user can act on', () => {
-  assert.match(refusalFor('budget.xlsx'), /CSV/, 'says what to do instead')
+  // .xlsx is no longer refused — it is accepted for structured analysis, and its
+  // copy is asserted in structuredSupport.test.ts. .xls still has no reader.
+  assert.match(refusalFor('old.xls'), /CSV|\.xlsx/i, 'says what to do instead')
   assert.match(refusalFor('deck.pptx'), /cannot read/i)
   assert.match(refusalFor('backup.zip'), /files inside/i)
   assert.match(refusalFor('dump.sql'), /dumps/i)
@@ -64,7 +68,7 @@ test('plain-text code types are supported, because the indexer really reads them
 
 test('the published contract matches the enforced list', () => {
   const c = attachmentCapability()
-  assert.deepEqual([...c.accepted], [...INDEXED_EXTENSIONS])
+  assert.deepEqual([...c.accepted], [...ATTACHABLE_EXTENSIONS])
   assert.equal(c.accept, DOCUMENT_PICKER_ACCEPT)
   assert.ok(c.refused.every((r) => r.reason), 'the contract explains every refusal too')
 })

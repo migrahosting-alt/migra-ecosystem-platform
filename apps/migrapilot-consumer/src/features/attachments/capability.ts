@@ -28,7 +28,25 @@
  *    until that question is decided rather than quietly re-admitted.
  */
 
-export type AttachmentSupport = 'indexed' | 'unsupported'
+/**
+ * What MigraPilot can actually DO with a file.
+ *
+ * 🚨 THREE STATES, BECAUSE TWO WERE MADE TO MEAN THREE THINGS. `.xlsx` sat at
+ * `unsupported` while a deterministic table reader for it existed and passed its
+ * acceptance matrix — but flipping it to `indexed` would have claimed prose
+ * retrieval the Brain cannot do over a zip container. One flag was being asked
+ * to carry two independent questions, so the honest answer was neither value.
+ *
+ *  · `indexed`      — full ingestion: prose retrieval and search work.
+ *  · `structured`   — accepted and analysed deterministically (tables, totals,
+ *                     columns, sheets), but NOT indexed for prose retrieval.
+ *  · `unsupported`  — cannot be meaningfully processed; refused with a reason.
+ *
+ * `structured` is named for the shape of the analysis, not for spreadsheets, so
+ * it covers any machine-readable structured format without the enum having to
+ * grow a synonym later.
+ */
+export type AttachmentSupport = 'indexed' | 'structured' | 'unsupported'
 
 /**
  * Which canonical path an attachment travels once classified.
@@ -47,14 +65,29 @@ export interface AttachmentType {
   /** Where a supported attachment is dispatched after classification. */
   pipeline?: AttachmentPipeline
   support: AttachmentSupport
-  /** Why it is refused. Shown to the user, so it must be true and useful. */
+  /**
+   * Can this file be read as a table by the deterministic analysis layer?
+   *
+   * INDEPENDENT OF `support`, deliberately. A CSV is both indexed and
+   * structurally analysable; an .xlsx is analysable and not indexed. Folding the
+   * two into one string is what produced the state this type now avoids.
+   */
+  structured?: true
+  /**
+   * What MigraPilot can and cannot do with it. Shown to the user, so it must be
+   * true — for `unsupported` this is the refusal, and for `structured` it is the
+   * boundary of what works.
+   */
   reason?: string
 }
 
 const NO_EXTRACTOR =
   'MigraPilot cannot read this format yet — it would be stored without being understood.'
-const SPREADSHEET_HELD =
-  'Spreadsheet reading is not enabled yet. Export the sheet as CSV and MigraPilot can read it.'
+const SPREADSHEET_STRUCTURED =
+  'Excel files can be analysed for tables, totals, columns and sheets. ' +
+  'General document search inside spreadsheets is not available yet.'
+const SPREADSHEET_OTHER =
+  'MigraPilot reads .xlsx spreadsheets. Save this as .xlsx, or export the sheet as CSV.'
 const ARCHIVE =
   'Archives are not opened yet. Attach the files inside it instead.'
 const DUMP =
@@ -83,8 +116,8 @@ export const ATTACHMENT_TYPES: readonly AttachmentType[] = [
   { ext: 'log', kind: 'document', pipeline: 'document', support: 'indexed' },
 
   // ── structured data read as text ──
-  { ext: 'csv', kind: 'data', pipeline: 'document', support: 'indexed' },
-  { ext: 'tsv', kind: 'data', pipeline: 'document', support: 'indexed' },
+  { ext: 'csv', kind: 'data', pipeline: 'document', support: 'indexed', structured: true },
+  { ext: 'tsv', kind: 'data', pipeline: 'document', support: 'indexed', structured: true },
   { ext: 'json', kind: 'data', pipeline: 'document', support: 'indexed' },
   { ext: 'xml', kind: 'data', pipeline: 'document', support: 'indexed' },
   { ext: 'yaml', kind: 'data', pipeline: 'document', support: 'indexed' },
@@ -119,9 +152,17 @@ export const ATTACHMENT_TYPES: readonly AttachmentType[] = [
   { ext: 'doc', kind: 'document', support: 'unsupported', reason: NO_EXTRACTOR },
   { ext: 'odt', kind: 'document', support: 'unsupported', reason: NO_EXTRACTOR },
   { ext: 'rtf', kind: 'document', support: 'unsupported', reason: NO_EXTRACTOR },
-  { ext: 'xls', kind: 'data', support: 'unsupported', reason: SPREADSHEET_HELD },
-  { ext: 'xlsx', kind: 'data', support: 'unsupported', reason: SPREADSHEET_HELD },
-  { ext: 'ods', kind: 'data', support: 'unsupported', reason: SPREADSHEET_HELD },
+  { ext: 'xls', kind: 'data', support: 'unsupported', reason: SPREADSHEET_OTHER },
+  /*
+   * Accepted for deterministic table analysis only. The reader is bounded and
+   * dependency-free, and everything the delimited lane proved — identifier
+   * refusal, dates, ambiguity, the 90% bar — applies because a sheet becomes the
+   * same ParsedTable a CSV becomes. What it is NOT is indexed: the Brain cannot
+   * retrieve prose from a zip container, and saying otherwise would be the
+   * capability lie this table exists to prevent.
+   */
+  { ext: 'xlsx', kind: 'data', pipeline: 'document', support: 'structured', structured: true, reason: SPREADSHEET_STRUCTURED },
+  { ext: 'ods', kind: 'data', support: 'unsupported', reason: SPREADSHEET_OTHER },
   { ext: 'ppt', kind: 'document', support: 'unsupported', reason: NO_EXTRACTOR },
   { ext: 'pptx', kind: 'document', support: 'unsupported', reason: NO_EXTRACTOR },
   { ext: 'odp', kind: 'document', support: 'unsupported', reason: NO_EXTRACTOR },
@@ -137,6 +178,18 @@ export const INDEXED_EXTENSIONS: readonly string[] = ATTACHMENT_TYPES
   .map((t) => t.ext)
   .sort()
 
+/**
+ * Everything a person may actually attach — indexed OR structured.
+ *
+ * The picker offers THIS. Offering only indexed types would hide .xlsx behind a
+ * menu that refuses it, which is the drift this file was written to end: the
+ * product once listed 48 types and accepted 27.
+ */
+export const ATTACHABLE_EXTENSIONS: readonly string[] = ATTACHMENT_TYPES
+  .filter((t) => t.support !== 'unsupported')
+  .map((t) => t.ext)
+  .sort()
+
 /*
  * 🚨 EACH STORE TAKES ITS OWN PIPELINE, and this distinction is load-bearing.
  *
@@ -147,7 +200,16 @@ export const INDEXED_EXTENSIONS: readonly string[] = ATTACHMENT_TYPES
  * already knew images are not documents.
  */
 export const DOCUMENT_EXTENSIONS: readonly string[] = ATTACHMENT_TYPES
-  .filter((t) => t.support === 'indexed' && t.pipeline === 'document')
+  .filter((t) => t.pipeline === 'document' && t.support !== 'unsupported')
+  .map((t) => t.ext)
+  .sort()
+
+/**
+ * Accepted, but analysed rather than indexed. Named so a caller can tell the
+ * user what will actually happen instead of discovering it at question time.
+ */
+export const STRUCTURED_ONLY_EXTENSIONS: readonly string[] = ATTACHMENT_TYPES
+  .filter((t) => t.support === 'structured')
   .map((t) => t.ext)
   .sort()
 
@@ -163,7 +225,7 @@ export const IMAGE_EXTENSIONS_CANONICAL: readonly string[] = ATTACHMENT_TYPES
  * Only selectable types appear. Offering an extension in order to explain the
  * refusal afterwards wastes the user's file-chooser trip.
  */
-export const DOCUMENT_PICKER_ACCEPT = INDEXED_EXTENSIONS.map((e) => `.${e}`).join(',')
+export const DOCUMENT_PICKER_ACCEPT = ATTACHABLE_EXTENSIONS.map((e) => `.${e}`).join(',')
 
 const BY_EXT = new Map(ATTACHMENT_TYPES.map((t) => [t.ext, t]))
 
@@ -172,8 +234,44 @@ export function extensionOf(fileName: string): string {
   return dot > 0 ? fileName.slice(dot + 1).toLowerCase() : ''
 }
 
-export function isIndexable(ext: string): boolean {
+/*
+ * ── CAPABILITY QUESTIONS ───────────────────────────────────────────────────
+ *
+ * Downstream code asks what it can DO, never what the extension is. A single
+ * support string forced every caller to re-derive the answer, and they drifted:
+ * the picker offered types the store refused. Each question below has exactly
+ * one definition.
+ */
+
+/** Can prose be retrieved and searched inside this file? */
+export function canIndex(ext: string): boolean {
   return BY_EXT.get(ext)?.support === 'indexed'
+}
+
+/** Can the deterministic table layer read it — totals, columns, sheets? */
+export function canAnalyzeStructurally(ext: string): boolean {
+  const type = BY_EXT.get(ext)
+  return Boolean(type?.structured) && type!.support !== 'unsupported'
+}
+
+/** May it be uploaded and kept at all? */
+export function canAttach(ext: string): boolean {
+  const support = BY_EXT.get(ext)?.support
+  return support === 'indexed' || support === 'structured'
+}
+
+/** May it be sent to a vision model? */
+export function canUseForVision(ext: string): boolean {
+  const type = BY_EXT.get(ext)
+  return type?.pipeline === 'image' && type.support === 'indexed'
+}
+
+/**
+ * Retained as the name most call sites used. Prose retrieval is what "indexable"
+ * always meant, and a structured file is emphatically not that.
+ */
+export function isIndexable(ext: string): boolean {
+  return canIndex(ext)
 }
 
 /**
@@ -227,7 +325,12 @@ export const MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024
 /** The contract a UI renders from, so the displayed list cannot drift either. */
 export function attachmentCapability() {
   return {
-    accepted: INDEXED_EXTENSIONS,
+    accepted: ATTACHABLE_EXTENSIONS,
+    /*
+     * Named separately so a UI can say what will happen rather than implying
+     * every accepted file is searchable.
+     */
+    structuredOnly: STRUCTURED_ONLY_EXTENSIONS,
     accept: DOCUMENT_PICKER_ACCEPT,
     maxUploadBytes: MAX_UPLOAD_BYTES,
     refused: ATTACHMENT_TYPES
