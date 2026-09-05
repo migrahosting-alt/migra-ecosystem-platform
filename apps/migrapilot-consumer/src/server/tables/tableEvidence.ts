@@ -5,6 +5,8 @@ import { join } from 'node:path'
 
 import { parseTable, TableParseError, type ParsedTable, type TableColumn } from './parseTable'
 import { computeColumn, groupBy, ComputationRefused, type Operation } from './computeTable'
+import { readWorkbook, WorkbookError } from './readWorkbook'
+import { chooseSheet, sheetToTable } from './workbookTable'
 
 /**
  * Answering a quantitative question with arithmetic instead of prediction.
@@ -21,7 +23,8 @@ import { computeColumn, groupBy, ComputationRefused, type Operation } from './co
  * doing it in a new place would not be an improvement.
  */
 
-const TABLE_EXTENSIONS = /\.(csv|tsv)$/i
+const TABLE_EXTENSIONS = /\.(csv|tsv|xlsx)$/i
+const WORKBOOK_EXTENSION = /\.xlsx$/i
 
 /** Which operation the question is asking for, if any. */
 function detectOperation(prompt: string): Operation | 'group' | null {
@@ -157,6 +160,86 @@ export interface TableEvidence {
   /** For the turn trace. */
   file: string
   operation: string
+  /** Which sheet the figures came from, when the source was a workbook. */
+  sheet?: string
+}
+
+
+/**
+ * Load the attached table, whatever container it arrived in.
+ *
+ * ONE DOWNSTREAM PATH. A workbook becomes the same ParsedTable a CSV becomes, so
+ * column selection, the identifier rules, the 90% bar, ambiguity and the
+ * arithmetic below are literally the same code for both. The only thing that
+ * differs is what had to be read to get here.
+ */
+type LoadedTable =
+  | { kind: 'table'; table: ParsedTable; sheetName?: string; formulaColumns: number[] }
+  | { kind: 'refused'; reason: string }
+  | { kind: 'none' }
+
+async function loadTable(
+  prompt: string,
+  fileName: string,
+  uploadRoot: string,
+): Promise<LoadedTable> {
+  const path = join(uploadRoot, fileName)
+
+  if (!WORKBOOK_EXTENSION.test(fileName)) {
+    try {
+      return { kind: 'table', table: parseTable(await readFile(path, 'utf8')), formulaColumns: [] }
+    } catch (error) {
+      // A parse failure is not an answer. The turn continues as ordinary grounding.
+      if (error instanceof TableParseError) return { kind: 'none' }
+      return { kind: 'none' }
+    }
+  }
+
+  let workbook
+  try {
+    workbook = readWorkbook(await readFile(path))
+  } catch (error) {
+    /*
+     * A workbook that cannot be read is STATED rather than passed over. The user
+     * attached a spreadsheet and asked about a total; silence there invites the
+     * model to read the file some other way and produce a figure, which is the
+     * failure this whole lane exists to prevent. The message says what kind of
+     * problem it is without describing internals.
+     */
+    if (error instanceof WorkbookError) {
+      return { kind: 'refused', reason: error.message }
+    }
+    return { kind: 'none' }
+  }
+
+  const choice = chooseSheet(prompt, workbook.sheets)
+  if (choice.kind === 'none') return { kind: 'none' }
+  if (choice.kind === 'ambiguous') {
+    /*
+     * NEVER SILENTLY SUBSTITUTE ANOTHER SHEET. "The total" across sheets is a
+     * different question, and taking the first one would be confidently wrong
+     * about which number was meant — the same rule the delimited path applies
+     * when two files are attached.
+     */
+    const names = choice.names.map((n) => `"${n}"`).join(', ')
+    return {
+      kind: 'refused',
+      reason: `the workbook has more than one sheet (${names}) and the question does not say which one`,
+    }
+  }
+
+  try {
+    const table = sheetToTable(choice.sheet)
+    return {
+      kind: 'table',
+      table,
+      sheetName: table.sheetName,
+      formulaColumns: table.formulaColumns,
+    }
+  } catch (error) {
+    if (error instanceof TableParseError) return { kind: 'none' }
+    return { kind: 'none' }
+  }
 }
 
 /**
@@ -179,14 +262,29 @@ export async function tableEvidenceFor(
   if (!operation) return null
 
   const fileName = tables[0]!
-  let table: ParsedTable
-  try {
-    table = parseTable(await readFile(join(uploadRoot, fileName), 'utf8'))
-  } catch (error) {
-    // A parse failure is not an answer. The turn continues as ordinary grounding.
-    if (error instanceof TableParseError) return null
-    return null
+  const loaded = await loadTable(prompt, fileName, uploadRoot)
+  if (loaded.kind === 'none') return null
+  if (loaded.kind === 'refused') {
+    /*
+     * A load-level refusal is stated, not swallowed. An ambiguous workbook is
+     * the same shape of problem as an ambiguous column: going quiet leaves the
+     * model holding a spreadsheet and a question about a total, which is the
+     * situation that produces a confident wrong number.
+     */
+    return {
+      file: fileName,
+      operation: `refused:${operation}`,
+      text: [
+        `[MigraPilot could not calculate this from ${fileName}: ${loaded.reason}.`,
+        `Say so plainly. Do NOT add the numbers up yourself and do NOT estimate a total —`,
+        `an invented figure here is worse than no answer. You may still describe the file.]`,
+        '',
+      ].join('\n'),
+    }
   }
+  const { table, sheetName, formulaColumns } = loaded
+  /** Names the workbook AND the sheet, so a figure can be traced to where it came from. */
+  const source = sheetName ? `${fileName} (sheet "${sheetName}")` : fileName
 
   /*
    * 🚨 COUNTING NEEDS NO VALUE COLUMN, and requiring one silenced it entirely.
@@ -209,9 +307,10 @@ export async function tableEvidenceFor(
       : table.rows.length
     return {
       file: fileName,
+      ...(sheetName ? { sheet: sheetName } : {}),
       operation: 'count',
       text: [
-        `[Computed directly from ${fileName} by MigraPilot. These figures are exact`,
+        `[Computed directly from ${source} by MigraPilot. These figures are exact`,
         `arithmetic over the parsed file, not estimates. Use them verbatim and do not`,
         `recalculate them:]`,
         target
@@ -227,9 +326,10 @@ export async function tableEvidenceFor(
   if (choice.kind === 'clarify') {
     return {
       file: fileName,
+      ...(sheetName ? { sheet: sheetName } : {}),
       operation: `clarify:${operation}`,
       text: [
-        `[MigraPilot did not calculate this from ${fileName}: the question could mean more than one`,
+        `[MigraPilot did not calculate this from ${source}: the question could mean more than one`,
         `column — ${choice.candidates.map((c) => `"${c}"`).join(', ')}. Ask which one is meant.`,
         `Do NOT add the numbers up yourself and do NOT pick a column on the user's behalf.]`,
         '',
@@ -247,9 +347,10 @@ export async function tableEvidenceFor(
      */
     return {
       file: fileName,
+      ...(sheetName ? { sheet: sheetName } : {}),
       operation: `refused:${operation}`,
       text: [
-        `[MigraPilot could not calculate this from ${fileName}: ${choice.reason}.`,
+        `[MigraPilot could not calculate this from ${source}: ${choice.reason}.`,
         `Say so plainly. Do NOT add the numbers up yourself and do NOT estimate a total —`,
         `an invented figure here is worse than no answer. You may still describe the file.]`,
         '',
@@ -288,6 +389,18 @@ export async function tableEvidenceFor(
       if (p.rowsFiltered) detail.push(`${p.rowsFiltered} excluded by ${p.filter!.column}=${p.filter!.equals}`)
       if (p.malformedRows?.length) detail.push(`malformed rows: ${p.malformedRows.join(', ')}`)
       lines.push(`  (${detail.join(', ')})`)
+      /*
+       * 🚨 SAY WHERE A FORMULA'S VALUE CAME FROM. MigraPilot does not evaluate
+       * spreadsheet formulas — there is no qualified calculation engine here, and
+       * a partial one would be worse than none. What it read is the result the
+       * spreadsheet itself last stored, so the provenance says exactly that
+       * rather than implying the figure was recomputed.
+       */
+      if (formulaColumns.includes(value.index)) {
+        lines.push(
+          `  (values in "${value.name}" are the workbook's stored formula results, read as saved, not recalculated by MigraPilot)`,
+        )
+      }
     }
   } catch (error) {
     /*
@@ -302,9 +415,10 @@ export async function tableEvidenceFor(
 
   return {
     file: fileName,
+    ...(sheetName ? { sheet: sheetName } : {}),
     operation,
     text: [
-      `[Computed directly from ${fileName} by MigraPilot. These figures are exact`,
+      `[Computed directly from ${source} by MigraPilot. These figures are exact`,
       `arithmetic over the parsed file, not estimates. Use them verbatim and do not`,
       `recalculate them:]`,
       ...lines,
