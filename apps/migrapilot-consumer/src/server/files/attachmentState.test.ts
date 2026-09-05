@@ -111,6 +111,26 @@ describe('the four states stay distinct', () => {
     assert.equal(state.kind, 'indexed', JSON.stringify(state))
   })
 
+  it('a NAMED file that does not exist is absent, not an attachment', () => {
+    // "summarise my documents" with a phantom name must be refused before the
+    // model, not answered from nothing.
+    const state = decideAttachmentState({
+      prompt: 'summarise my documents',
+      activeFiles: ['notes.md'],
+      missingFiles: ['notes.md'],
+    })
+    assert.equal(state.kind, 'absent', JSON.stringify(state))
+  })
+
+  it('a phantom workbook is absent rather than structured_only', () => {
+    const state = decideAttachmentState({
+      prompt: 'Summarize the document for me.',
+      activeFiles: ['ghost.xlsx'],
+      missingFiles: ['ghost.xlsx'],
+    })
+    assert.equal(state.kind, 'absent', JSON.stringify(state))
+  })
+
   it('unreadable — attached, indexable, and holding nothing', () => {
     const state = decideAttachmentState({
       prompt: 'Summarize the document for me.',

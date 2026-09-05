@@ -42,6 +42,15 @@ export interface AttachmentStateInput {
   activeFiles: readonly string[]
   /** Files the approved index holds no chunks for. */
   unreadableFiles?: readonly string[]
+  /**
+   * Named for this turn but not actually in the library.
+   *
+   * `activeFiles` includes whatever the client attached, and a name with no file
+   * behind it is still a name. Counting it as a usable attachment let "summarise
+   * my documents" reach the model with nothing behind it — the exact ungrounded
+   * answer this whole path exists to refuse.
+   */
+  missingFiles?: readonly string[]
   /** The deterministic table layer already produced figures for this turn. */
   hasTableEvidence?: boolean
 }
@@ -68,28 +77,31 @@ export function structuredOnly(files: readonly string[]): string[] {
  * refusal may speak over them.
  */
 export function decideAttachmentState(input: AttachmentStateInput): AttachmentTurnState {
-  const { prompt, activeFiles, unreadableFiles = [], hasTableEvidence = false } = input
+  const { prompt, activeFiles, unreadableFiles = [], missingFiles = [], hasTableEvidence = false } = input
 
   // Computed figures mean the question was answered. Nothing else applies.
   if (hasTableEvidence) return { kind: 'indexed' }
 
-  if (activeFiles.length === 0) {
+  // A name with no file behind it is not an attachment.
+  const present = activeFiles.filter((name) => !missingFiles.includes(name))
+
+  if (present.length === 0) {
     // Only a question that actually asks something of a document is refused for
     // the lack of one; "how do I write a runbook" is not about a file.
     return asksOfDocument(prompt) ? { kind: 'absent' } : { kind: 'indexed' }
   }
 
-  const structured = structuredOnly(activeFiles)
-  if (structured.length === activeFiles.length) {
+  const structured = structuredOnly(present)
+  if (structured.length === present.length) {
     // Every attachment is a table-only file. A prose question cannot be served
     // from it, and saying so is the only truthful answer.
     return asksOfDocument(prompt)
-      ? { kind: 'structured_only', files: [...activeFiles] }
+      ? { kind: 'structured_only', files: [...present] }
       : { kind: 'indexed' }
   }
 
-  const unreadable = activeFiles.filter((name) => unreadableFiles.includes(name))
-  if (unreadable.length === activeFiles.length && unreadable.length > 0) {
+  const unreadable = present.filter((name) => unreadableFiles.includes(name))
+  if (unreadable.length === present.length && unreadable.length > 0) {
     return { kind: 'unreadable', files: unreadable }
   }
 

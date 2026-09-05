@@ -931,7 +931,44 @@ export async function POST(request: Request): Promise<Response> {
         trace.set('regenerate_prompt', regeneration.prompt.slice(0, 120))
       }
 
-      if (documentIntent.needsAttachedDocument) {
+      /*
+       * Hoisted so ONE decision governs every refusal below. `executing` is a
+       * pure read of `regeneration`, which was resolved before the stream opened.
+       */
+      const executing = regeneration?.kind === 'execute' ? regeneration : null
+
+      const tableEvidence = executing || !canGround || turnGrounding.active.length === 0
+        ? null
+        : await tableEvidenceFor(prompt, turnGrounding.active, await userDirectory()).catch(() => null)
+
+      /*
+       * 🚨 ATTACHED, BUT NOT SEARCHABLE — a different fact from "not attached",
+       * and from "empty".
+       *
+       * Placed AFTER the table evidence deliberately. A table question about a
+       * workbook is answerable and must not be refused, so this only speaks when
+       * the deterministic layer produced nothing AND the question asks something
+       * of the document. It is gated on `asksOfDocument`, not on
+       * `documentIntent`, because the latter goes quiet the moment the account
+       * owns an approved index.
+       */
+      const attachmentState = decideAttachmentState({
+        prompt,
+        activeFiles: turnGrounding.active,
+        unreadableFiles: reconciled.unreadable,
+        missingFiles: reconciled.missing,
+        hasTableEvidence: Boolean(tableEvidence),
+      })
+      trace.set('attachment_state', attachmentState.kind)
+
+      /*
+       * `absent`, from the shared decision — not `documentIntent`, which answers
+       * a different question and goes quiet whenever the account owns an index.
+       * This branch used to run AHEAD of the structured one and swallow the turn
+       * first, so a workbook was still told "I do not have that document
+       * attached" even after the structured branch was fixed.
+       */
+      if (attachmentState.kind === 'absent') {
         // Said before the model is asked: there is nothing to answer FROM.
         trace.set('document_unavailable', documentIntent.reason)
         trace.finish('context_unavailable')
@@ -985,7 +1022,6 @@ export async function POST(request: Request): Promise<Response> {
        * Running the prompt alone is what the user asked for and is exactly how
        * the picture was made the first time.
        */
-      const executing = regeneration?.kind === 'execute' ? regeneration : null
 
       /*
        * 🚨 ARITHMETIC IS DONE BY ARITHMETIC, NOT BY THE MODEL.
@@ -1027,28 +1063,6 @@ export async function POST(request: Request): Promise<Response> {
        * is exactly how removing the old gate broke every anonymous turn until the
        * suite caught it.
        */
-      const tableEvidence = executing || !canGround || turnGrounding.active.length === 0
-        ? null
-        : await tableEvidenceFor(prompt, turnGrounding.active, await userDirectory()).catch(() => null)
-
-      /*
-       * 🚨 ATTACHED, BUT NOT SEARCHABLE — a different fact from "not attached",
-       * and from "empty".
-       *
-       * Placed AFTER the table evidence deliberately. A table question about a
-       * workbook is answerable and must not be refused, so this only speaks when
-       * the deterministic layer produced nothing AND the question asks something
-       * of the document. It is gated on `asksOfDocument`, not on
-       * `documentIntent`, because the latter goes quiet the moment the account
-       * owns an approved index.
-       */
-      const attachmentState = decideAttachmentState({
-        prompt,
-        activeFiles: turnGrounding.active,
-        unreadableFiles: reconciled.unreadable,
-        hasTableEvidence: Boolean(tableEvidence),
-      })
-      trace.set('attachment_state', attachmentState.kind)
 
       if (attachmentState.kind === 'structured_only') {
         trace.set('document_structured_only', turnGrounding.active.join(','))
