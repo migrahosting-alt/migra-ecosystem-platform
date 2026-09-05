@@ -30,6 +30,12 @@
 set -euo pipefail
 
 REL="${1:?usage: deploy-consumer.sh <release-name>}"
+# The release name is interpolated into a privileged recursive delete below, so
+# it is constrained here rather than trusted there. No slashes, no dots, no
+# emptiness: it must name one directory inside the releases/ directory.
+case "$REL" in
+  ""|*/*|*..*|.*) printf 'refusing release name %q — it must be a single plain directory name\n' "$REL" >&2; exit 1 ;;
+esac
 REPO="$(cd "$(dirname "$0")/.." && cd .. && pwd)"
 APP="$REPO/apps/migrapilot-consumer"
 HOST=migrapilot-app-core
@@ -72,7 +78,14 @@ echo "   commit=$SHORT release=$REL buildId=$BUILD_ID"
 step "4b. constructing the release directory"
 PREVIOUS="$(ssh "$HOST" "readlink $ROOT/current")"
 echo "   rollback target: $PREVIOUS"
-ssh "$HOST" "sudo mkdir -p $ROOT/releases/$REL && sudo chown \$(id -un):\$(id -gn) $ROOT/releases/$REL"
+# Staging must be idempotent: a run that aborts after this point leaves a
+# populated directory behind, and `cp -al src dst` into an EXISTING dst nests it
+# as node_modules/node_modules instead of failing loudly. Clear a stale release
+# first — but never the one production is actually serving.
+[ "$PREVIOUS" = "$ROOT/releases/$REL" ] \
+  && fail "$REL is the currently-serving release; refusing to restage it underneath production"
+ssh -n "$HOST" "sudo -n rm -rf --one-file-system $ROOT/releases/$REL"
+ssh -n "$HOST" "sudo mkdir -p $ROOT/releases/$REL && sudo chown \$(id -un):\$(id -gn) $ROOT/releases/$REL"
 tar -C "$APP" -czf - --exclude='.next/cache' .next package.json next.config.ts public \
   | ssh "$HOST" "tar -C $ROOT/releases/$REL -xzf -"
 # node_modules is HARDLINKED from the live release rather than installed: the
@@ -84,9 +97,28 @@ echo "   staged"
 
 # ── 5+6+7. boot the new release on a spare port and interrogate it ─────────
 step "5. boot test on a spare port (before anything is swapped)"
-ssh "$HOST" "cd $ROOT/releases/$REL && \
-  sudo -u migrapilot env \$(grep -v '^#' /etc/migrapilot/consumer.env | xargs) \
-    node node_modules/next/dist/bin/next start -p $PORT -H 127.0.0.1 >/tmp/$REL-boot.log 2>&1 & \
+# Two failures on 2026-09-04, both here, both silent in their own way:
+#
+#  1. `grep /etc/migrapilot/consumer.env` ran as the SSH user. That file is
+#     root-only, so it returned "Permission denied", the trailing `; true`
+#     swallowed it, and Next booted with NO production environment. The boot test
+#     still answered 200 and still reported the right identity — so the link
+#     looked sound while testing an artifact configured differently from
+#     production. The env read now runs under sudo, and a failure to read it
+#     ABORTS instead of booting an unconfigured instance.
+#
+#  2. The backgrounded process inherited the SSH channel, so this command never
+#     returned and the deploy hung for ~20 minutes. `ssh -n` plus `</dev/null`
+#     and `setsid` detach it.
+#
+# The env expansion stays entirely on the host: no secret is ever transported to
+# the deploying workstation or printed.
+ssh -n "$HOST" "sudo -n test -r /etc/migrapilot/consumer.env" \
+  || fail "cannot read /etc/migrapilot/consumer.env as root on $HOST — the boot test would run unconfigured, which is not a boot test"
+ssh -n "$HOST" "cd $ROOT/releases/$REL && \
+  setsid sudo -n -u migrapilot env \$(sudo -n grep -v '^#' /etc/migrapilot/consumer.env | xargs) \
+    node node_modules/next/dist/bin/next start -p $PORT -H 127.0.0.1 \
+    </dev/null >/tmp/$REL-boot.log 2>&1 & \
   sleep 14; true"
 
 step "6. the boot-tested instance answers"
