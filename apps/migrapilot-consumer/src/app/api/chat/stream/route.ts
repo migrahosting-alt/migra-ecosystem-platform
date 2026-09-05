@@ -56,6 +56,7 @@ import type { BrainStreamFrame } from '@/server/brain/gateway'
 import type { ConversationSummary } from '@/server/brain/contracts'
 import { resolveTurnImages } from '@/server/files/resolveTurnImages'
 import { selectTurnGrounding } from '@/server/files/turnGrounding'
+import { decideAttachmentState } from '@/server/files/attachmentState'
 import { canAnalyzeStructurally, canIndex, extensionOf } from '@/features/attachments/capability'
 import { tableEvidenceFor } from '@/server/tables/tableEvidence'
 import { assessDocumentIntent } from '@/server/files/documentIntent'
@@ -768,6 +769,21 @@ export async function POST(request: Request): Promise<Response> {
    * Four states have to be distinguishable, and only these two need computing
    * here: the rest fall through to the paths that already handle them.
    */
+  /*
+   * 🚨 THE INTENT SIGNAL, DECOUPLED FROM THE INDEX.
+   *
+   * `assessDocumentIntent(prompt, grounded)` short-circuits to "no document
+   * needed" whenever the caller HAS an approved index — which is true of every
+   * real account and of no fresh one. The structured branch was gated on that
+   * signal, so it never fired in production: "Summarize the document for me."
+   * over an attached workbook went to the model with no context and came back
+   * "I cannot summarize a document as no document was provided", about a file
+   * whose chip was on screen.
+   *
+   * Asking with `false` gives the question's OWN shape — does this prompt ask
+   * something of a document — with no opinion about what is indexed. Whether a
+   * document is available is decided separately, from the attachments.
+   */
   const activeExts = turnGrounding.active.map((name) => extensionOf(name))
   const hasActiveAttachment = turnGrounding.active.length > 0
   const activeAllStructuredOnly =
@@ -915,39 +931,6 @@ export async function POST(request: Request): Promise<Response> {
         trace.set('regenerate_prompt', regeneration.prompt.slice(0, 120))
       }
 
-      /*
-       * 🚨 ATTACHED, BUT NOT SEARCHABLE — a different fact from "not attached".
-       *
-       * The workbook is here and can be analysed as a table; what is missing is
-       * prose retrieval inside it, which `structured` states plainly. Saying
-       * "I do not have that document attached" about a file the user just
-       * attached is false, and saying "no readable content was found" about a
-       * file full of content is also false. This says the true thing and names
-       * what does work.
-       */
-      if (documentIntent.needsAttachedDocument && activeAllStructuredOnly) {
-        trace.set('document_structured_only', turnGrounding.active.join(','))
-        trace.finish('structured_only')
-        const names = turnGrounding.active.join(', ')
-        const told = {
-          error: 'document_structured_only',
-          message:
-            `${names} is attached and can be analysed as structured table data — totals, ` +
-            `averages, columns and sheets. General document search inside spreadsheets is not ` +
-            `available yet, so this question cannot be answered from its text. Ask about a ` +
-            `total, a column or a sheet instead.`,
-        }
-        await appendMessage(durableId, 'assistant', told.message, { principal })
-        emit('error', told)
-        closed = true
-        try {
-          controller.close()
-        } catch {
-          /* already closed */
-        }
-        return
-      }
-
       if (documentIntent.needsAttachedDocument) {
         // Said before the model is asked: there is nothing to answer FROM.
         trace.set('document_unavailable', documentIntent.reason)
@@ -1047,6 +1030,48 @@ export async function POST(request: Request): Promise<Response> {
       const tableEvidence = executing || !canGround || turnGrounding.active.length === 0
         ? null
         : await tableEvidenceFor(prompt, turnGrounding.active, await userDirectory()).catch(() => null)
+
+      /*
+       * 🚨 ATTACHED, BUT NOT SEARCHABLE — a different fact from "not attached",
+       * and from "empty".
+       *
+       * Placed AFTER the table evidence deliberately. A table question about a
+       * workbook is answerable and must not be refused, so this only speaks when
+       * the deterministic layer produced nothing AND the question asks something
+       * of the document. It is gated on `asksOfDocument`, not on
+       * `documentIntent`, because the latter goes quiet the moment the account
+       * owns an approved index.
+       */
+      const attachmentState = decideAttachmentState({
+        prompt,
+        activeFiles: turnGrounding.active,
+        unreadableFiles: reconciled.unreadable,
+        hasTableEvidence: Boolean(tableEvidence),
+      })
+      trace.set('attachment_state', attachmentState.kind)
+
+      if (attachmentState.kind === 'structured_only') {
+        trace.set('document_structured_only', turnGrounding.active.join(','))
+        trace.finish('structured_only')
+        const names = turnGrounding.active.join(', ')
+        const told = {
+          error: 'document_structured_only',
+          message:
+            `${names} is attached and can be analysed as structured table data — totals, ` +
+            `averages, columns and sheets. General document search inside spreadsheets is not ` +
+            `available yet, so this question cannot be answered from its text. Ask about a ` +
+            `total, a column or a sheet instead.`,
+        }
+        await appendMessage(durableId, 'assistant', told.message, { principal })
+        emit('error', told)
+        closed = true
+        try {
+          controller.close()
+        } catch {
+          /* already closed */
+        }
+        return
+      }
       if (tableEvidence) {
         trace.set('table_computed', `${tableEvidence.operation}:${tableEvidence.file}`)
       }
