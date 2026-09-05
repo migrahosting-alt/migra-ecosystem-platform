@@ -178,6 +178,27 @@ describe('xlsx · formulas', () => {
     )
   })
 
+  it('flags formula provenance as DATA, so the disclosure cannot be optional', async () => {
+    // The model dropped the prose provenance and answered "The total Amount is
+    // 30" with nothing to say the figure was a saved result. The route forces the
+    // disclosure from this flag, so it must be set.
+    const e = await ask('What is the total Amount?', 'matrix_formula.xlsx')
+    assert.equal(e!.formulaDerived, true, 'formula provenance is not machine-readable')
+  })
+
+  it('does NOT flag an ordinary numeric column', async () => {
+    // The negative half: a disclosure that appears on every answer means nothing.
+    for (const [q, f] of [
+      ['What is the total Revenue?', 'matrix_sales.xlsx'],
+      ['What is the total Amount in Q2?', 'matrix_multisheet.xlsx'],
+      ['What is the total Amount?', 'matrix_large.xlsx'],
+    ] as const) {
+      const e = await ask(q, f)
+      assert.ok(e, `${f} produced no evidence`)
+      assert.notEqual(e!.formulaDerived, true, `${f} wrongly flagged as formula-derived`)
+    }
+  })
+
   it('does not claim to have evaluated anything', async () => {
     const e = await ask('What is the total Amount?', 'matrix_formula.xlsx')
     assert.ok(!/evaluat|recomputed|calculated the formula/i.test(e!.text), e!.text)

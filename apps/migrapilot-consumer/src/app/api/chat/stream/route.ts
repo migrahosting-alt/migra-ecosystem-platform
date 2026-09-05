@@ -745,6 +745,23 @@ export async function POST(request: Request): Promise<Response> {
   const documentIntent = assessDocumentIntent(prompt, grounded)
 
   /*
+   * WHAT IS ACTUALLY ATTACHED, independent of whether it is indexed.
+   *
+   * `grounded` answers "can an approved prose index serve this turn", which is
+   * false for a structured attachment by definition. Asking a prose question
+   * about an attached workbook therefore reached the "I do not have that
+   * document attached to this conversation" refusal — a statement the user can
+   * see is false, about a file whose chip is on screen.
+   *
+   * Four states have to be distinguishable, and only these two need computing
+   * here: the rest fall through to the paths that already handle them.
+   */
+  const activeExts = turnGrounding.active.map((name) => extensionOf(name))
+  const hasActiveAttachment = turnGrounding.active.length > 0
+  const activeAllStructuredOnly =
+    hasActiveAttachment && activeExts.every((e) => canAnalyzeStructurally(e) && !canIndex(e))
+
+  /*
    * Only for a turn that actually asks to regenerate, and only when an image is
    * in play. Planning it for every turn would read the library on every message
    * for a decision almost none of them need.
@@ -867,6 +884,39 @@ export async function POST(request: Request): Promise<Response> {
         trace.set('regenerate_prompt', regeneration.prompt.slice(0, 120))
       }
 
+      /*
+       * 🚨 ATTACHED, BUT NOT SEARCHABLE — a different fact from "not attached".
+       *
+       * The workbook is here and can be analysed as a table; what is missing is
+       * prose retrieval inside it, which `structured` states plainly. Saying
+       * "I do not have that document attached" about a file the user just
+       * attached is false, and saying "no readable content was found" about a
+       * file full of content is also false. This says the true thing and names
+       * what does work.
+       */
+      if (documentIntent.needsAttachedDocument && activeAllStructuredOnly) {
+        trace.set('document_structured_only', turnGrounding.active.join(','))
+        trace.finish('structured_only')
+        const names = turnGrounding.active.join(', ')
+        const told = {
+          error: 'document_structured_only',
+          message:
+            `${names} is attached and can be analysed as structured table data — totals, ` +
+            `averages, columns and sheets. General document search inside spreadsheets is not ` +
+            `available yet, so this question cannot be answered from its text. Ask about a ` +
+            `total, a column or a sheet instead.`,
+        }
+        await appendMessage(durableId, 'assistant', told.message, { principal })
+        emit('error', told)
+        closed = true
+        try {
+          controller.close()
+        } catch {
+          /* already closed */
+        }
+        return
+      }
+
       if (documentIntent.needsAttachedDocument) {
         // Said before the model is asked: there is nothing to answer FROM.
         trace.set('document_unavailable', documentIntent.reason)
@@ -955,7 +1005,15 @@ export async function POST(request: Request): Promise<Response> {
        * recognisable operation, no unambiguous column, an unreadable file — so an
        * ungrounded turn with no table simply proceeds as it did before.
        */
-      const tableEvidence = executing
+      /*
+       * `canGround` here is "this caller has a session", NOT "an index can serve
+       * the turn". Both matter and they are different questions: userDirectory()
+       * requires a session and throws for an anonymous visitor, and that throw is
+       * outside the catch below because the argument is evaluated first — which
+       * is exactly how removing the old gate broke every anonymous turn until the
+       * suite caught it.
+       */
+      const tableEvidence = executing || !canGround || turnGrounding.active.length === 0
         ? null
         : await tableEvidenceFor(prompt, turnGrounding.active, await userDirectory()).catch(() => null)
       if (tableEvidence) {
@@ -1391,6 +1449,27 @@ export async function POST(request: Request): Promise<Response> {
        * the image and tell the user nothing was produced — while a real
        * generated PNG sat in their library.
        */
+      /*
+       * 🚨 THE FORMULA DISCLOSURE IS FORCED, NOT REQUESTED.
+       *
+       * The evidence already carried "the workbook's stored formula results,
+       * read as saved, not recalculated by MigraPilot" — and the model dropped
+       * it, answering "The total Amount is 30" with nothing to say the figure
+       * came from a value the spreadsheet had saved. A disclosure the model may
+       * omit is not a disclosure, so it is appended deterministically from the
+       * evidence flag and streamed like any other text, which also makes it part
+       * of the stored message rather than live-only decoration.
+       *
+       * Appended only when there is an answer to append it to: a refused or
+       * empty turn gets nothing.
+       */
+      if (tableEvidence?.formulaDerived && completed && answer.trim().length > 0) {
+        const disclosure =
+          '\n\nThis uses the workbook\u2019s saved formula result; MigraPilot did not recalculate the formula.'
+        answer += disclosure
+        emit('token', { text: disclosure })
+      }
+
       const producedOutput = completed && (answer.trim().length > 0 || generatedImages.length > 0)
 
       if (producedOutput) {

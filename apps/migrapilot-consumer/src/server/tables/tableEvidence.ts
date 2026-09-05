@@ -162,6 +162,16 @@ export interface TableEvidence {
   operation: string
   /** Which sheet the figures came from, when the source was a workbook. */
   sheet?: string
+  /**
+   * The figures came from values a spreadsheet computed and SAVED.
+   *
+   * Structured metadata, not a sentence in the prompt. The provenance line was
+   * already in the evidence text and the model simply did not repeat it, so the
+   * user was told "The total Amount is 30" with no indication the number came
+   * from stored formula results. A disclosure that depends on the model choosing
+   * to make it is not a disclosure.
+   */
+  formulaDerived?: boolean
 }
 
 
@@ -360,6 +370,7 @@ export async function tableEvidenceFor(
   const value = choice.column
 
   const lines: string[] = []
+  let formulaDerived = false
   try {
     if (operation === 'group') {
       const groupCol = table.columns.find((c) => !c.quantitative)
@@ -397,6 +408,7 @@ export async function tableEvidenceFor(
        * rather than implying the figure was recomputed.
        */
       if (formulaColumns.includes(value.index)) {
+        formulaDerived = true
         lines.push(
           `  (values in "${value.name}" are the workbook's stored formula results, read as saved, not recalculated by MigraPilot)`,
         )
@@ -416,6 +428,7 @@ export async function tableEvidenceFor(
   return {
     file: fileName,
     ...(sheetName ? { sheet: sheetName } : {}),
+    ...(formulaDerived ? { formulaDerived: true } : {}),
     operation,
     text: [
       `[Computed directly from ${source} by MigraPilot. These figures are exact`,
