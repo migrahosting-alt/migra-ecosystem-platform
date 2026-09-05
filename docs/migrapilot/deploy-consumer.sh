@@ -184,7 +184,7 @@ DEPLOYED — and proven, link by link:
   RUNNING PROCESS  reports commit $SHORT / release $REL / buildId $BUILD_ID
 
 11. rollback:
-  ssh $HOST "sudo ln -sfn $ROOT/releases/$PREVIOUS $ROOT/current && sudo systemctl restart migrapilot-consumer.service"
+  ssh $HOST "sudo ln -sfn $PREVIOUS $ROOT/current && sudo systemctl restart migrapilot-consumer.service"
 
 NOT ACCEPTED. This script proves what is RUNNING; it does not prove the product
 is correct. Hand back for real-system retest.
