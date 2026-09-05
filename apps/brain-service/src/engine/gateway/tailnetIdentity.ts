@@ -129,4 +129,10 @@ export function decideTailnetAccess(headers: HeaderBag, opts: AccessOptions): Ta
  * it from another node. whoami is here because it is the tool for diagnosing a
  * refusal — locking it behind the rule it explains would be self-defeating.
  */
-export const IDENTITY_EXEMPT_PATHS: readonly string[] = ['/health', '/api/identity/whoami'];
+export const IDENTITY_EXEMPT_PATHS: readonly string[] = [
+  '/health',
+  '/api/identity/whoami',
+  // The deploy asserts release identity BEFORE any user identity exists on the
+  // new process, and it carries no data beyond which build is running.
+  '/api/version',
+];

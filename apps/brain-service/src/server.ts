@@ -44,6 +44,7 @@ import { buildProviderRegistry } from './engine/providers/config.js';
 import { FleetRegistry } from './engine/providers/fleetRegistry.js';
 import { PolicyEngine, DEFAULT_POLICY, isExecutionPolicyId, type ExecutionPolicyId } from './engine/providers/executionPolicy.js';
 import { makeReachabilityProbe } from './engine/providers/health.js';
+import { readReleaseIdentity } from './engine/release/releaseIdentity.js';
 import { buildEngineModelRegistry } from './engine/chat/aiRoutes.js';
 import type { LocalRoutingDeps } from './engine/providers/localCodingRouter.js';
 import { EscalationController } from './engine/providers/escalationController.js';
@@ -353,6 +354,16 @@ async function main(): Promise<void> {
   });
 
   app.get('/health', async () => getHealth());
+  /*
+   * WHICH RELEASE IS RUNNING. Answered from the artifact's own stamp, never from
+   * configuration — an env var describes the machine, not the code on it, and
+   * would survive a failed deploy reporting the release someone intended.
+   * deploy-brain.sh refuses to cut over unless this matches what it just built.
+   */
+  app.get('/api/version', async (_request, reply) => {
+    reply.header('cache-control', 'no-store');
+    return readReleaseIdentity();
+  });
   /*
    * OBSERVE-ONLY identity probe. It reflects the caller's OWN tailnet identity
    * back to them and nothing else, so it discloses nothing they do not already
