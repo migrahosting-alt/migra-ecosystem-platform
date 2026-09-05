@@ -200,7 +200,21 @@ export function parseTable(text: string): ParsedTable {
     rows.push(cells)
   }
 
-  const columns: TableColumn[] = headers.map((name, index) => {
+  const columns = buildColumns(headers, rows)
+
+  return { headers, columns, rows, delimiter, malformedRows }
+}
+
+/**
+ * Classify each column from its cells.
+ *
+ * Exported so a non-delimited source — an .xlsx sheet — reaches the SAME
+ * decision by the same code. A workbook reader that re-implemented "is this
+ * column quantitative" would be a second semantic classifier, and the two would
+ * disagree the first time one of them was tuned.
+ */
+export function buildColumns(headers: string[], rows: Cell[][]): TableColumn[] {
+  return headers.map((name, index) => {
     const cells = rows.map((r) => r[index]!).filter(Boolean)
     const numericCells = cells.filter(isQuantitative).length
     const blankCells = cells.filter((c) => c.kind === 'blank').length
@@ -223,6 +237,4 @@ export function parseTable(text: string): ParsedTable {
       blankCells,
     }
   })
-
-  return { headers, columns, rows, delimiter, malformedRows }
 }
