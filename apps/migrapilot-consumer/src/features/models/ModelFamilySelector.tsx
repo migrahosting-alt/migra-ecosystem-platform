@@ -15,6 +15,7 @@
 
 import { useEffect, useState } from 'react'
 
+import { humanUnavailableReason } from './unavailableReason'
 import {
   useModelFamilies,
   restoreSelection,
@@ -29,9 +30,15 @@ export interface ModelFamilySelectorProps {
   className?: string
 }
 
-/** A short, honest note for a family that cannot be chosen. */
+/**
+ * A short, honest note for a family that cannot be chosen.
+ *
+ * Translated, never passed through: the resolver's reasons name the internal
+ * governed capability, and rendering them verbatim put `chat.general` and three
+ * more like it in front of users.
+ */
 function unavailableNote(f: MigraFamilyView): string {
-  return f.unavailableReason ?? 'No qualified path is available for this family right now.'
+  return humanUnavailableReason(f)
 }
 
 export function ModelFamilySelector({ onChange, className }: ModelFamilySelectorProps) {
@@ -117,9 +124,9 @@ export function ModelFamilySelector({ onChange, className }: ModelFamilySelector
           {state.families
             .filter((f) => !f.available)
             .map((f) => (
-              <li key={f.id}>
-                <strong>{f.displayName}</strong> unavailable — {unavailableNote(f)}
-              </li>
+              // The sentence already names the family, so the name is not
+              // repeated ahead of it.
+              <li key={f.id}>{unavailableNote(f)}</li>
             ))}
         </ul>
       )}
