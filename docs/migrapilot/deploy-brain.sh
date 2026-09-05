@@ -174,8 +174,23 @@ stop_boot
 # the remote shell split it and systemd-run took /var/log/migrapilot as the start
 # of the command.
 #
-# The port is overridden AFTER the env files so it wins over brain.env. Values
-# are never word-split by a shell: systemd parses the EnvironmentFiles itself.
+# 🚨 THE PORT OVERRIDE IS AN ENVIRONMENT FILE, NOT --setenv.
+#
+# `--setenv` becomes Environment=, and systemd applies EnvironmentFile= AFTER
+# Environment= regardless of the order they are written — so brain.env put the
+# port back to 3988 and the boot instance tried to bind the PRODUCTION port. It
+# found production already there, logged "port already in use; reusing the
+# existing healthy local service", and stayed `active` while serving nothing.
+#
+# That is exactly the false-confidence shape this script exists to prevent, and
+# it was caught only because /health is probed on the SPARE port: a probe against
+# 3988 would have got production's healthy answer and passed. A boot-test that
+# can accidentally interrogate production is not a boot test.
+#
+# A last-listed EnvironmentFile wins over the earlier ones — the same mechanism
+# the real unit's own drop-in uses to add configuration.
+BOOT_ENV="$ROOT/releases/$REL/.boot-test.env"
+ssh -n "$HOST" "printf 'MIGRAPILOT_BRAIN_PORT=%s\nMIGRAPILOT_BRAIN_HOST=127.0.0.1\n' '$BOOT_PORT' > $BOOT_ENV"
 ssh -n "$HOST" "sudo -n systemd-run --unit=$BOOT_UNIT --collect --quiet \
   --property=Type=simple \
   --property=User=migrapilot --property=Group=migrapilot \
@@ -190,8 +205,7 @@ ssh -n "$HOST" "sudo -n systemd-run --unit=$BOOT_UNIT --collect --quiet \
   --property=ProtectKernelTunables=true \
   --property=RestrictSUIDSGID=true \
   --property='ReadWritePaths=/var/lib/migrapilot /var/log/migrapilot' \
-  --setenv=MIGRAPILOT_BRAIN_PORT=$BOOT_PORT \
-  --setenv=MIGRAPILOT_BRAIN_HOST=127.0.0.1 \
+  --property=EnvironmentFile=$BOOT_ENV \
   /usr/bin/node $ROOT/releases/$REL/dist/src/server.js" \
   || fail "could not start the transient boot unit"
 sleep 16
@@ -213,6 +227,10 @@ echo "$BOOT_ID" | grep -q "\"release\":\"$REL\""              || fail "boot-test
 echo "$BOOT_ID" | grep -q "\"buildId\":\"sha256:$BUILD_ID\""  || fail "boot-tested artifact reports a different build id"
 echo "$BOOT_ID" | grep -q '"stamped":true'                    || fail "boot-tested artifact is not stamped"
 echo "   commit, release and buildId all match"
+# The boot-test override must not travel into production. It is inert there —
+# nothing in the real unit reads it — but a release directory should contain the
+# release and nothing else.
+ssh -n "$HOST" "rm -f $BOOT_ENV"
 
 # ── 11+12. only now does anything move ─────────────────────────────────────
 step "11. activating the release"
