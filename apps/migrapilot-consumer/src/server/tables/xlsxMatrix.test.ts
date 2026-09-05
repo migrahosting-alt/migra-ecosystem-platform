@@ -252,3 +252,61 @@ describe('xlsx · persistence', () => {
     assert.equal(b!.operation, 'refused:sum')
   })
 })
+
+describe('xlsx · summarise', () => {
+  /*
+   * 🚨 REFUSING SOMETHING WE CAN DO IS A DEFECT. "Summarize the document for me."
+   * used to produce no evidence, so the turn was refused with "general document
+   * search inside spreadsheets is not available yet" — truthful about prose, and
+   * useless, while the sheet, its columns, its row count and its totals sat
+   * right there.
+   */
+  it('summarises a sheet from computed structure, not impressions', async () => {
+    const e = await ask('Summarize the document for me.', 'matrix_sales.xlsx')
+    assert.ok(e, 'no evidence for a summary request')
+    assert.equal(e!.operation, 'describe')
+    assert.ok(e!.text.includes('4 rows'), e!.text)
+    assert.ok(e!.text.includes('474,000'), 'the real total is missing')
+    for (const column of ['Region', 'Revenue', 'Margin', 'Units', 'ZipCode', 'ORDERID', 'Booked']) {
+      assert.ok(e!.text.includes(`"${column}"`), `${column} missing from the summary`)
+    }
+  })
+
+  it('names identifiers and dates as such instead of totalling them', async () => {
+    const e = await ask('Summarize the document for me.', 'matrix_sales.xlsx')
+    assert.match(e!.text, /"ZipCode": identifies rows/, e!.text)
+    assert.match(e!.text, /"Booked": dates or codes/, e!.text)
+    // Their sums must never appear.
+    assert.ok(!e!.text.includes('132,737'))
+    assert.ok(!e!.text.includes('185,062'))
+  })
+
+  it('describes EVERY sheet of a multi-sheet workbook', async () => {
+    // Ambiguity matters for a total, not for a summary.
+    const e = await ask('Summarize the document for me.', 'matrix_multisheet.xlsx')
+    assert.equal(e!.operation, 'describe')
+    assert.ok(e!.text.includes('sheet "Q1"') && e!.text.includes('sheet "Q2"'), e!.text)
+    assert.ok(e!.text.includes('30') && e!.text.includes('700'), 'per-sheet totals missing')
+  })
+
+  it('a multi-sheet TOTAL still refuses, because that is genuinely ambiguous', async () => {
+    const e = await ask('What is the total Amount?', 'matrix_multisheet.xlsx')
+    assert.equal(e!.operation, 'refused:sum')
+  })
+
+  it('flags the workbook boundary as DATA, so the disclosure cannot be optional', async () => {
+    // The evidence asked the model to state it and the model complied on one
+    // prompt and not another. The route forces it from this flag.
+    for (const f of ['matrix_sales.xlsx', 'matrix_multisheet.xlsx', 'matrix_formula.xlsx']) {
+      const e = await ask('Summarize the document for me.', f)
+      assert.ok(e, `${f} produced no evidence`)
+      assert.equal(e!.workbookBoundary, true, `${f} is not flagged`)
+    }
+  })
+
+  it('flags formula provenance in a summary too', async () => {
+    const e = await ask('Summarize this file', 'matrix_formula.xlsx')
+    assert.equal(e!.formulaDerived, true)
+    assert.match(e!.text, /did not recalculate/i, e!.text)
+  })
+})

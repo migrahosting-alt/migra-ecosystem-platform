@@ -27,8 +27,24 @@ const TABLE_EXTENSIONS = /\.(csv|tsv|xlsx)$/i
 const WORKBOOK_EXTENSION = /\.xlsx$/i
 
 /** Which operation the question is asking for, if any. */
-function detectOperation(prompt: string): Operation | 'group' | null {
+function detectOperation(prompt: string): Operation | 'group' | 'describe' | null {
   const p = prompt.toLowerCase()
+  /*
+   * 🚨 "SUMMARISE THIS SPREADSHEET" IS A QUESTION THIS CAN ANSWER.
+   *
+   * It used to fall through to null, so a workbook produced no evidence and the
+   * turn was refused with "general document search inside spreadsheets is not
+   * available yet" — truthful about prose retrieval, and useless, because the
+   * sheet, its columns, its row count and its totals were all sitting right
+   * there. Refusing something the deterministic layer can do is the same defect
+   * as a dead control: the capability exists and was not offered.
+   *
+   * Checked FIRST: "summarise the revenue" is still a summary of the file, and
+   * the describe evidence names every column including that one.
+   */
+  if (/\b(summar(y|ise|ize|ised|ized)|describe|overview|walk me through|what.s in|whats in|tell me about)\b/.test(p)) {
+    return 'describe'
+  }
   if (/\b(per|by|each|breakdown|group)\b/.test(p) && /\b(total|sum|revenue|amount)\b/.test(p)) return 'group'
   if (/\b(total|sum|summed|altogether|combined|add up)\b/.test(p)) return 'sum'
   if (/\b(average|mean|avg)\b/.test(p)) return 'average'
@@ -163,6 +179,16 @@ export interface TableEvidence {
   /** Which sheet the figures came from, when the source was a workbook. */
   sheet?: string
   /**
+   * This description was built from a workbook's structure, with no cell text read.
+   *
+   * Structured metadata for the same reason `formulaDerived` is: the evidence
+   * already ASKED the model to state the boundary and it complied on one prompt
+   * and not another, answering "there are no written commentary or narrative
+   * paragraphs" — a claim about text nobody read. For this file that happened to
+   * be true; for a workbook with prose in its cells it would be a fabrication.
+   */
+  workbookBoundary?: boolean
+  /**
    * The figures came from values a spreadsheet computed and SAVED.
    *
    * Structured metadata, not a sentence in the prompt. The provenance line was
@@ -185,6 +211,8 @@ export interface TableEvidence {
  */
 type LoadedTable =
   | { kind: 'table'; table: ParsedTable; sheetName?: string; formulaColumns: number[] }
+  /** Every sheet, for a whole-workbook description. */
+  | { kind: 'workbook'; sheets: readonly import('./readWorkbook').WorkbookSheet[] }
   | { kind: 'refused'; reason: string }
   | { kind: 'none' }
 
@@ -192,6 +220,7 @@ async function loadTable(
   prompt: string,
   fileName: string,
   uploadRoot: string,
+  operation: Operation | 'group' | 'describe',
 ): Promise<LoadedTable> {
   const path = join(uploadRoot, fileName)
 
@@ -224,6 +253,17 @@ async function loadTable(
 
   const choice = chooseSheet(prompt, workbook.sheets)
   if (choice.kind === 'none') return { kind: 'none' }
+  /*
+   * 🚨 AMBIGUITY MATTERS FOR A TOTAL, NOT FOR A SUMMARY.
+   *
+   * "The total Amount" across two sheets is genuinely ambiguous and must refuse.
+   * "Summarise this workbook" is not — the honest answer covers every sheet, and
+   * refusing it repeats the mistake of declining something the deterministic
+   * layer can do perfectly well.
+   */
+  if (choice.kind === 'ambiguous' && operation === 'describe') {
+    return { kind: 'workbook', sheets: workbook.sheets }
+  }
   if (choice.kind === 'ambiguous') {
     /*
      * NEVER SILENTLY SUBSTITUTE ANOTHER SHEET. "The total" across sheets is a
@@ -252,6 +292,76 @@ async function loadTable(
   }
 }
 
+
+/**
+ * What a sheet IS: its shape, what each column holds, and the totals that are
+ * genuinely quantities. Shared by the single-sheet and whole-workbook cases so
+ * the two can never describe the same column differently.
+ */
+function describeLines(table: ParsedTable, formulaColumns: readonly number[], label: string): string[] {
+  const lines: string[] = [`${label} — ${rows(table.rows.length)}, ${table.headers.length} columns.`]
+  for (const column of table.columns) {
+    if (!column.name) continue
+    if (column.quantitative) {
+      try {
+        const total = computeColumn(table, column, 'sum')
+        const blank = total.provenance.rowsBlank ? `, ${total.provenance.rowsBlank} blank` : ''
+        lines.push(
+          `  "${column.name}": ${column.percent ? 'percentages' : 'numeric'}, ` +
+          `totals ${fmtIn(total.value, column)} over ${rows(total.provenance.rowsUsed)}${blank}`,
+        )
+      } catch (error) {
+        if (!(error instanceof ComputationRefused)) throw error
+        lines.push(`  "${column.name}": numeric`)
+      }
+    } else if (column.identifierName) {
+      lines.push(`  "${column.name}": identifies rows — not a quantity, never totalled`)
+    } else {
+      /*
+       * "text or labels" was true of a date column and useless. The cells know
+       * what they are — a date renders as an identifier-shaped value — so this
+       * says so rather than flattening everything non-numeric.
+       */
+      const cells = table.rows.map((r) => r[column.index]).filter(Boolean)
+      const filled = cells.filter((c) => c!.kind !== 'blank')
+      const idLike = filled.filter((c) => c!.kind === 'identifier').length
+      const blank = column.blankCells ? `, ${column.blankCells} blank` : ''
+      lines.push(
+        filled.length > 0 && idLike / filled.length >= 0.9
+          ? `  "${column.name}": dates or codes — not a quantity, never totalled${blank}`
+          : `  "${column.name}": text or labels${blank}`,
+      )
+    }
+  }
+  if (formulaColumns.length > 0) {
+    const named = formulaColumns.map((i) => `"${table.headers[i] ?? i}"`).join(', ')
+    lines.push(`  ${named} hold values the spreadsheet computed and saved; MigraPilot did not recalculate them.`)
+  }
+  return lines
+}
+
+const DESCRIBE_HEADER = (source: string): string[] => [
+  `[Computed directly from ${source} by MigraPilot. This is the file's real`,
+  `structure and exact arithmetic, not an impression of it. Use these figures`,
+  `verbatim and do not recalculate them. Describe the file to the user from this:]`,
+]
+
+/**
+ * The boundary, stated inside the evidence for a workbook.
+ *
+ * 🚨 A USEFUL SUMMARY MUST NOT BECOME AN OVERCLAIM. This description is built
+ * from structure and computed values — no text inside the sheet was searched. A
+ * model handed only the structure will happily conclude "there is no narrative
+ * content here", which is a claim about text nobody read. Saying what the
+ * description IS keeps `structured` from quietly reading as `indexed`.
+ */
+const WORKBOOK_BOUNDARY =
+  '  (This description comes from the sheet structure and computed values. ' +
+  'MigraPilot cannot search the text inside a spreadsheet, so say that plainly ' +
+  'rather than concluding anything about prose the file may contain.)'
+
+const isWorkbook = (fileName: string): boolean => WORKBOOK_EXTENSION.test(fileName)
+
 /**
  * Compute an answer for a quantitative question over one attached table.
  *
@@ -272,7 +382,7 @@ export async function tableEvidenceFor(
   if (!operation) return null
 
   const fileName = tables[0]!
-  const loaded = await loadTable(prompt, fileName, uploadRoot)
+  const loaded = await loadTable(prompt, fileName, uploadRoot, operation)
   if (loaded.kind === 'none') return null
   if (loaded.kind === 'refused') {
     /*
@@ -292,6 +402,32 @@ export async function tableEvidenceFor(
       ].join('\n'),
     }
   }
+  if (loaded.kind === 'workbook') {
+    const lines: string[] = []
+    for (const sheet of loaded.sheets) {
+      try {
+        const sheetTable = sheetToTable(sheet)
+        lines.push(...describeLines(sheetTable, sheetTable.formulaColumns, `sheet "${sheet.name}"`))
+      } catch (error) {
+        // A sheet that is not a table is REPORTED, not skipped silently.
+        if (error instanceof TableParseError) {
+          lines.push(`sheet "${sheet.name}" — not a table with a header row and data.`)
+        } else throw error
+      }
+    }
+    return {
+      file: fileName,
+      operation: 'describe',
+      workbookBoundary: true,
+      text: [
+        ...DESCRIBE_HEADER(`${fileName} (${loaded.sheets.length} sheets)`),
+        ...lines,
+        WORKBOOK_BOUNDARY,
+        '',
+      ].join('\n'),
+    }
+  }
+
   const { table, sheetName, formulaColumns } = loaded
   /** Names the workbook AND the sheet, so a figure can be traced to where it came from. */
   const source = sheetName ? `${fileName} (sheet "${sheetName}")` : fileName
@@ -309,6 +445,30 @@ export async function tableEvidenceFor(
    * question and refusing it would be pedantry. It counts what is THERE, and
    * says which of the two things it counted.
    */
+  /*
+   * A STRUCTURAL SUMMARY, COMPUTED — never a model's impression of the file.
+   *
+   * Says what the sheet IS: how many rows, what each column holds, and the total
+   * of anything genuinely quantitative. Identifier and date columns are named as
+   * such rather than totalled, which is the same rule every other operation here
+   * obeys.
+   */
+  if (operation === 'describe') {
+    return {
+      file: fileName,
+      ...(sheetName ? { sheet: sheetName } : {}),
+      ...(formulaColumns.length > 0 ? { formulaDerived: true } : {}),
+      ...(isWorkbook(fileName) ? { workbookBoundary: true } : {}),
+      operation: 'describe',
+      text: [
+        ...DESCRIBE_HEADER(source),
+        ...describeLines(table, formulaColumns, source),
+        ...(isWorkbook(fileName) ? [WORKBOOK_BOUNDARY] : []),
+        '',
+      ].join('\n'),
+    }
+  }
+
   if (operation === 'count') {
     const named = table.columns.filter((c) => c.name && prompt.toLowerCase().includes(c.name.toLowerCase()))
     const target = named.length === 1 ? named[0]! : undefined

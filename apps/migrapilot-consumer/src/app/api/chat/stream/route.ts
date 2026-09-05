@@ -1539,6 +1539,28 @@ export async function POST(request: Request): Promise<Response> {
        * Appended only when there is an answer to append it to: a refused or
        * empty turn gets nothing.
        */
+      /*
+       * 🚨 THE WORKBOOK BOUNDARY IS FORCED TOO.
+       *
+       * The evidence asks the model to say that no cell text was read, and the
+       * model complied on one prompt and not another — answering "there are no
+       * written commentary or narrative paragraphs" about text it never looked
+       * at. True of that file by luck; a fabrication for a workbook with prose in
+       * its cells. Appended here so it cannot be dropped, and only when the model
+       * has not already said it in its own words.
+       */
+      if (
+        tableEvidence?.workbookBoundary &&
+        completed &&
+        answer.trim().length > 0 &&
+        !/cannot search|no text .*was (read|analy)|did not read the text/i.test(answer)
+      ) {
+        const boundary =
+          '\n\nMigraPilot cannot search the text inside a spreadsheet, so this describes its structure and computed values only.'
+        answer += boundary
+        emit('token', { text: boundary })
+      }
+
       if (tableEvidence?.formulaDerived && completed && answer.trim().length > 0) {
         const disclosure =
           '\n\nThis uses the workbook\u2019s saved formula result; MigraPilot did not recalculate the formula.'
