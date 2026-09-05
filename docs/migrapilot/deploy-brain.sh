@@ -154,11 +154,28 @@ echo "   staged"
 step "8. boot test on port $BOOT_PORT (before anything is swapped)"
 BOOT_UNIT="migrapilot-brain-boottest-$REL"
 stop_boot() { ssh -n "$HOST" "sudo -n systemctl stop $BOOT_UNIT.service >/dev/null 2>&1; sudo -n systemctl reset-failed $BOOT_UNIT.service >/dev/null 2>&1; true"; }
+# EVERY exit path, not the ones we remembered. `fail` can be reached from the
+# health check, the identity comparisons, or systemd-run itself failing after it
+# has already created the unit — and a leaked boot instance holds the port and
+# the database connections against the next attempt.
+trap stop_boot EXIT
 stop_boot
-# Mirrors migrapilot-brain.service: same user, all three EnvironmentFiles (the
-# third is optional there and stays optional here), and the same sandboxing, so a
-# release that the hardening would break fails HERE rather than after cutover.
-# The port is overridden AFTER the env files so it wins over brain.env.
+# Mirrors migrapilot-brain.service: same user and group, all three
+# EnvironmentFiles (the third is optional there and stays optional here), and the
+# same sandboxing, so a release that the hardening would break fails HERE rather
+# than after cutover. Verified directive-by-directive against `systemctl cat`.
+#
+# Two deliberate differences. WorkingDirectory points at the NEW release rather
+# than `current`, which is the whole point. And Restart= is NOT copied: the real
+# unit restarts on failure, but a boot test must not — a crash-looping process
+# reports `active` and would mask exactly the failure this step exists to catch.
+#
+# ReadWritePaths is single-quoted because its value contains a space. Unquoted,
+# the remote shell split it and systemd-run took /var/log/migrapilot as the start
+# of the command.
+#
+# The port is overridden AFTER the env files so it wins over brain.env. Values
+# are never word-split by a shell: systemd parses the EnvironmentFiles itself.
 ssh -n "$HOST" "sudo -n systemd-run --unit=$BOOT_UNIT --collect --quiet \
   --property=Type=simple \
   --property=User=migrapilot --property=Group=migrapilot \
@@ -172,7 +189,7 @@ ssh -n "$HOST" "sudo -n systemd-run --unit=$BOOT_UNIT --collect --quiet \
   --property=ProtectSystem=strict \
   --property=ProtectKernelTunables=true \
   --property=RestrictSUIDSGID=true \
-  --property=ReadWritePaths=/var/lib/migrapilot /var/log/migrapilot \
+  --property='ReadWritePaths=/var/lib/migrapilot /var/log/migrapilot' \
   --setenv=MIGRAPILOT_BRAIN_PORT=$BOOT_PORT \
   --setenv=MIGRAPILOT_BRAIN_HOST=127.0.0.1 \
   /usr/bin/node $ROOT/releases/$REL/dist/src/server.js" \
