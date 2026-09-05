@@ -175,6 +175,13 @@ function refusalOr(
   available: readonly string[] = [],
   /** The index contradicts its own record — say nothing about the FILES. */
   indexUnavailable = false,
+  /**
+   * The table layer already produced figures for this turn.
+   *
+   * A computed answer means the question WAS answerable, so no refusal here may
+   * speak over it.
+   */
+  hasTableEvidence = false,
 ): {
   error: string
   message: string
@@ -291,7 +298,12 @@ function refusalOr(
         const structuredOnly = unreadable.filter(
           (name) => canAnalyzeStructurally(extensionOf(name)) && !canIndex(extensionOf(name)),
         )
-        if (structuredOnly.length === unreadable.length) {
+        /*
+         * Belt and braces: if the table layer produced figures, the question was
+         * answerable and this refusal must not speak over it. The mode fix above
+         * should mean we never arrive here with evidence in hand.
+         */
+        if (structuredOnly.length === unreadable.length && !hasTableEvidence) {
           const names = structuredOnly.join(', ')
           const plural = structuredOnly.length > 1
           return {
@@ -769,7 +781,26 @@ export async function POST(request: Request): Promise<Response> {
   const regeneration = wantsRegeneration(prompt) && liveImages.length > 0
     ? await planRegeneration(liveImages[liveImages.length - 1])
     : null
-  const groundingMode = grounded ? 'approved' : 'none'
+  /*
+   * 🚨 NEVER CLAIM PROSE GROUNDING FOR A FILE THAT HAS NONE.
+   *
+   * `grounded` is true whenever the caller has an approved index and the named
+   * file exists on disk — and a structured file satisfies both while holding
+   * zero chunks. Sending `approved` then asks the Brain to answer from prose
+   * that does not exist, it refuses for insufficient evidence, and the refusal
+   * fires BEFORE the deterministic table evidence in the prompt is ever used.
+   *
+   * Measured in production: "What is the total Revenue?" over an attached
+   * workbook returned "MigraPilot can analyse … but cannot search the text
+   * inside it" — a table question answered as though it were a prose one, while
+   * the evidence layer had already computed 474,000. It did not reproduce
+   * locally because a fresh account has no approved index, so `grounded` was
+   * false and the same turn worked.
+   *
+   * A workbook has no prose to retrieve, so the honest mode is `none`. The table
+   * evidence still travels in the prompt and is what answers the question.
+   */
+  const groundingMode = grounded && !activeAllStructuredOnly ? 'approved' : 'none'
 
   const encoder = new TextEncoder()
   /** Set once the upstream stream opens; stays null if the client leaves first. */
@@ -1124,7 +1155,13 @@ export async function POST(request: Request): Promise<Response> {
 
       if (opened.kind !== 'ok') {
         const refusalCode = deliberateRefusalCode(opened)
-        const told = refusalOr(opened, reconciled.unreadable, reconciled.available, reconciled.indexUnavailable)
+        const told = refusalOr(
+          opened,
+          reconciled.unreadable,
+          reconciled.available,
+          reconciled.indexUnavailable,
+          Boolean(tableEvidence),
+        )
 
         /*
          * A DELIBERATE REFUSAL IS AN ANSWER, so it is written to the
