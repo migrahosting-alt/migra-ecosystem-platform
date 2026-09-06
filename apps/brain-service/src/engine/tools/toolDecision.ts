@@ -45,6 +45,8 @@ export type BlockedAt =
   | 'registry:backend-unavailable'
   | 'connection:not-connected'
   | 'authorization:denied'
+  | 'preflight:failed'
+  | 'preflight:not-run'
   | 'consent:required'
   | 'consent:invalid';
 
@@ -75,6 +77,16 @@ export type ConsentState =
   | 'consumed'
   | 'mismatched';
 
+/**
+ * Whether the side-effect-free checks have run, and what they found.
+ *
+ * `not_run` is a state, not an absence. A mutating tool that reaches the consent
+ * gate without preflight would ask the user to approve an action already known
+ * to fail — so "nobody ran it" is reported as a fault rather than waved through,
+ * which is what silently defaulting to `passed` would do.
+ */
+export type PreflightState = 'not_required' | 'not_run' | 'passed' | 'failed';
+
 export interface ToolDecisionInput {
   capability: string;
   toolId: string;
@@ -100,6 +112,13 @@ export interface ToolDecisionInput {
   /** Why authorization was decided as it was, for provenance. Never a secret. */
   authorizationBasis?: string;
 
+  /**
+   * Side-effect-free validation: schema, recipients, existence, limits, dry-run
+   * where safe. Runs BEFORE consent so the user is never asked to approve an
+   * action that was going to fail for a knowable reason.
+   */
+  preflight?: { state: PreflightState; reason?: string };
+
   /** Does this tool mutate anything? Read-only tools take no consent path. */
   mutating: boolean;
   /** From toolApprovalStore, for THIS invocation's exact input. */
@@ -117,6 +136,7 @@ export interface ToolDecision {
   platformAvailable: boolean;
   connection: ConnectionState;
   userAuthorized: boolean;
+  preflightState: PreflightState;
   requiresConsent: boolean;
   consentState: ConsentState;
 
@@ -156,6 +176,7 @@ const block = (
   platformAvailable: input.registered && input.grantHeld && input.backendAvailable,
   connection: input.connection,
   userAuthorized: input.userAuthorized,
+  preflightState: input.preflight?.state ?? 'not_run',
   requiresConsent: input.mutating,
   consentState: input.mutating ? (input.consent?.state ?? 'absent') : 'not_required',
   executable: false,
@@ -218,6 +239,25 @@ export function decideToolInvocation(input: ToolDecisionInput): ToolDecision {
     );
   }
 
+  /*
+   * PREFLIGHT, BEFORE CONSENT. Asking someone to approve a transfer to an
+   * address that does not exist, or a push to a branch that is protected, spends
+   * their attention on a decision that cannot matter. Everything knowable
+   * without a side effect is settled first.
+   */
+  const preflight = input.preflight?.state ?? 'not_run';
+  if (preflight === 'failed') {
+    return block(input, 'preflight:failed', input.preflight?.reason ?? `${label} cannot run with these inputs.`);
+  }
+  if (preflight === 'not_run') {
+    /*
+     * A fault, reported rather than assumed away. Defaulting to `passed` here
+     * would let a caller skip validation by simply not mentioning it — the same
+     * shape as an exception clause in a truthfulness directive.
+     */
+    return block(input, 'preflight:not-run', `${label} could not be checked before running.`);
+  }
+
   if (input.mutating) {
     const consent = input.consent?.state ?? 'absent';
     if (consent === 'valid') {
@@ -260,6 +300,7 @@ export function decideToolInvocation(input: ToolDecisionInput): ToolDecision {
     platformAvailable: true,
     connection: input.connection,
     userAuthorized: true,
+    preflightState: preflight,
     requiresConsent: input.mutating,
     consentState: input.mutating ? 'valid' : 'not_required',
     executable: true,

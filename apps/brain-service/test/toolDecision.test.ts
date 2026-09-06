@@ -30,6 +30,9 @@ const base: ToolDecisionInput = {
   connection: 'connected',
   userAuthorized: true,
   authorizationBasis: 'workspace-member',
+  // Declared explicitly: `not_run` is a fault, not a default, so every fixture
+  // that expects to reach a later gate has to say preflight actually happened.
+  preflight: { state: 'passed' },
   mutating: false,
 };
 
@@ -99,6 +102,7 @@ test('the order is registry → connection → authorization → consent', () =>
     backendAvailable: false,
     connection: 'not_connected',
     userAuthorized: false,
+    preflight: { state: 'passed' },
     mutating: true,
     inputHash: 'h1',
   };
@@ -242,4 +246,31 @@ test('provenance records absence as null, never as a guess', () => {
   const p = provenanceOf(d, 'inv-1');
   assert.equal(p.approvalId, null);
   assert.equal(p.inputHash, null);
+});
+
+test('🚨 preflight that never ran blocks, and is reported as a fault', () => {
+  // A gate added later must not be skippable by callers that predate it.
+  const d = decideToolInvocation({ ...base, preflight: undefined, mutating: true, inputHash: 'h1' });
+  assert.equal(d.executable, false);
+  assert.equal(d.blockedAt, 'preflight:not-run');
+  assert.equal(d.preflightState, 'not_run');
+});
+
+test('preflight failure blocks BEFORE consent is considered', () => {
+  const d = decideToolInvocation({
+    ...base,
+    preflight: { state: 'failed', reason: 'That recipient does not exist.' },
+    mutating: true,
+    inputHash: 'h1',
+  });
+  assert.equal(d.blockedAt, 'preflight:failed');
+  assert.equal(d.reason, 'That recipient does not exist.');
+  // Consent is not even reported as required-yet-missing; it was never reached.
+  assert.equal(d.consentState, 'absent');
+});
+
+test('a tool declaring no preflight must say so explicitly', () => {
+  const d = decideToolInvocation({ ...base, preflight: { state: 'not_required' } });
+  assert.equal(d.executable, true);
+  assert.equal(d.preflightState, 'not_required');
 });
