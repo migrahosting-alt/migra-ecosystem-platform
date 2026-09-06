@@ -609,13 +609,81 @@ export class IndexService {
     };
   }
 
-  /** First approved index for a workspace (for chat integration). */
+  /**
+   * The approved index a scope should be GROUNDED ON.
+   *
+   * 🚨 THIS USED TO RETURN "THE FIRST ONE", AND THAT IS A DEFECT, NOT A SHORTHAND.
+   *
+   * It iterated `byId` and returned whichever approved index it met first —
+   * insertion order, i.e. load order. One scope normally holds one approved
+   * index, so it looked fine. With two, it silently binds to the older one.
+   *
+   * MEASURED: a scope acquired a second index when its upload root changed
+   * mid-session. The user's file was uploaded, indexed and approved in the NEW
+   * index (4 files, 128 chunks); this returned the OLD one, and every grounded
+   * question came back "Your indexed documents do not cover that" — a refusal
+   * indistinguishable from "your file is not indexed". A user hits the same
+   * state through a migration or a redeploy onto a different path.
+   *
+   * The fix is not to detect ambiguity and fail closed: a scope with two
+   * approved indexes has a right answer, and refusing valid questions because we
+   * cannot be bothered to rank them is the same defect wearing a hat. So the
+   * choice is deterministic and ordered by what actually matters:
+   *
+   *   1. AN INDEX WITH CONTENT BEATS AN EMPTY ONE. An approved index holding
+   *      zero chunks cannot answer anything, and preferring it IS the observed
+   *      failure. Read from the approved version's own content, not from
+   *      `stats`, which describes the latest candidate and can disagree.
+   *   2. MORE RECENTLY UPDATED WINS. The index the user just wrote into is the
+   *      one they mean.
+   *   3. Then higher approved version, then id — a TOTAL order, so the result
+   *      never depends on Map insertion order again.
+   *
+   * Multiplicity is reported rather than hidden: see {@link approvedIndexesFor}.
+   */
   approvedIndexFor(scope: Scope): string | undefined {
+    return this.approvedIndexesFor(scope)[0]?.id;
+  }
+
+  /**
+   * Every approved index for a scope, best first, by the ranking above.
+   *
+   * Exported so the choice is inspectable and testable, and so a caller can see
+   * that a scope holds more than one — which is a condition worth surfacing,
+   * not a detail to bury inside a getter.
+   */
+  approvedIndexesFor(scope: Scope): Array<{ id: string; chunks: number; record: IndexRecord }> {
+    const candidates: Array<{ id: string; chunks: number; record: IndexRecord }> = [];
     for (const [id, e] of this.byId) {
       if (e.record.workspaceId !== scope.workspace || e.record.ownerScope !== scope.owner) continue;
-      if (e.record.approvedVersion !== undefined) return id;
+      if (e.record.approvedVersion === undefined) continue;
+      // The approved version's OWN content. `stats` tracks the latest candidate
+      // and can report chunks an approved version does not have.
+      candidates.push({ id, chunks: e.approvedIndex?.size() ?? 0, record: e.record });
     }
-    return undefined;
+    return candidates.sort((a, b) => {
+      const aHas = a.chunks > 0 ? 1 : 0;
+      const bHas = b.chunks > 0 ? 1 : 0;
+      if (aHas !== bHas) return bHas - aHas;
+      if (a.record.updatedAt !== b.record.updatedAt) return b.record.updatedAt - a.record.updatedAt;
+      /*
+       * `updatedAt` is milliseconds and two indexes can be created and synced
+       * inside one — measured, in the test for this very ranking, which flipped
+       * between runs until this line existed. Creation time breaks that tie in
+       * the same direction: newer wins.
+       */
+      if (a.record.createdAt !== b.record.createdAt) return b.record.createdAt - a.record.createdAt;
+      const av = a.record.approvedVersion ?? 0;
+      const bv = b.record.approvedVersion ?? 0;
+      if (av !== bv) return bv - av;
+      /*
+       * Deterministic, and ARBITRARY — say so rather than implying it is
+       * meaningful. Two approved indexes identical in content, update time,
+       * creation time and version are genuinely indistinguishable from here; the
+       * id tiebreak exists so the answer is stable, not because it is right.
+       */
+      return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+    });
   }
 
   listForScope(scope: Scope): IndexRecord[] {
