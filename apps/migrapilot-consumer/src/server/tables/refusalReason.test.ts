@@ -83,13 +83,29 @@ describe('🚨 the date refusal cannot be restated as "not enough data"', () => 
 })
 
 describe('scarcity is still said when scarcity IS the cause', () => {
-  // The negative half: widening the date branch must not silence a real one.
-  const SPARSE = table(['Item,Score', 'a,7', 'b,', 'c,', 'd,'].join('\n'))
+  /*
+   * The negative half: widening the date branch must not silence a real one.
+   *
+   * 🚨 THE FIXTURE HAD TO BE CORRECTED. It was one number plus three BLANKS,
+   * which passes this function but is a state the product never reaches: blanks
+   * are excluded from the quantitative ratio, so of the values present 100% were
+   * numbers and the column is legitimately summable — the real path computes a
+   * sum and never refuses. Scarcity is reachable only for a MIXED column, where
+   * the values present are not overwhelmingly quantities.
+   */
+  const MIXED = table(
+    ['Item,Score', 'a,7', 'b,pending', 'c,not taken', 'd,sensor offline'].join('\n'),
+  )
 
-  it('a mostly-empty numeric column reports too few', () => {
-    const c = col(SPARSE, 'Score')
-    assert.equal(classifyNonQuantitative(SPARSE, c), 'too-few-numbers')
-    assert.match(refusalReasonFor(SPARSE, c), /too few to total/i)
+  it('the mixed column is genuinely not quantitative', () => {
+    // If this ever becomes quantitative, the test below stops testing anything.
+    assert.equal(col(MIXED, 'Score').quantitative, false)
+  })
+
+  it('a mixed text/number column reports too few', () => {
+    const c = col(MIXED, 'Score')
+    assert.equal(classifyNonQuantitative(MIXED, c), 'too-few-numbers')
+    assert.match(refusalReasonFor(MIXED, c), /too few to total/i)
   })
 })
 

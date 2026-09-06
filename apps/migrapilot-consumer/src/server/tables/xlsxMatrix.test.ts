@@ -329,6 +329,44 @@ describe('xlsx · summarise', () => {
     }
   })
 
+  it('🚨 scarcity is STILL the reason when scarcity is genuinely the cause', async () => {
+    /*
+     * THE NEGATIVE HALF of the refusal-cause fix. A date column stopped saying
+     * "too few to total" because that was never why it was refused. This column
+     * must keep saying it, because that is exactly why.
+     *
+     * 🚨 THE SHAPE HAD TO BE CORRECTED. My first fixture was one number plus four
+     * BLANKS, and it came back as `sum` — blanks are excluded from the ratio, so
+     * of the values present 100% were quantities and the column was legitimately
+     * summable. The scarcity branch is reachable only for a MIXED column: one
+     * number among four text entries, where the values present are not
+     * overwhelmingly quantities. The first version asserted on a state the
+     * product cannot produce.
+     */
+    const e = await ask('What is the total Readings?', 'matrix_mixed.xlsx')
+    assert.ok(e, 'no evidence for the mixed workbook')
+    assert.match(e!.operation, /refused/, e!.operation)
+    assert.match(e!.text, /too few to total/i, e!.text)
+  })
+
+  it('a date column is refused for being dates, never for being sparse', async () => {
+    const e = await ask('What is the total Booked?', 'matrix_sales.xlsx')
+    assert.match(e!.operation, /refused/)
+    assert.match(e!.text, /dates or codes/i, e!.text)
+    // The sentence the model turned into "there is not enough data".
+    assert.ok(!/too few to total/i.test(e!.text), e!.text)
+    assert.ok(!/out of \d+ that are not empty/i.test(e!.text), e!.text)
+  })
+
+  it('every refusal tells the model not to blame the user\'s file', async () => {
+    for (const [q, f] of [['What is the total Booked?', 'matrix_sales.xlsx'],
+                          ['What is the total Amount?', 'matrix_multisheet.xlsx']] as const) {
+      const e = await ask(q, f)
+      assert.match(e!.text, /do not substitute a different one/i, `${f}: ${e!.text}`)
+      assert.match(e!.text, /not a fault in their file/i, `${f}: ${e!.text}`)
+    }
+  })
+
   it('proves cell text WAS read, which is why the denial is false', async () => {
     // The labels below are text, taken out of cells by this layer. Any claim
     // that cell text is unreadable is contradicted by the evidence carrying it.
