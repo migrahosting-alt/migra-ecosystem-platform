@@ -40,11 +40,17 @@ export type MutationOutcome =
  * once this framework reaches sends, deletes and billing.
  */
 export type DispatchStage =
-  | 'approved'
+  /** Proposed to the user; an approval exists and is PENDING. */
+  | 'approval_minted'
+  /** The user approved and the single-use token was spent. */
+  | 'approval_consumed'
+  /** The side effect was actually attempted. */
   | 'dispatch_started'
   | 'committed'
   | 'failed_before_commit'
-  | 'outcome_unknown';
+  | 'outcome_unknown'
+  /** The user said no. Nothing was attempted. */
+  | 'declined';
 
 /**
  * Does this error mean the write MIGHT have landed?
