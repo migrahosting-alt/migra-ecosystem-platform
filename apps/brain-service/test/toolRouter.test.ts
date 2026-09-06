@@ -59,10 +59,13 @@ function resolvers(over: Partial<RouterResolvers<Input>> & { capability?: Capabi
   return { calls, r };
 }
 
+/*
+ * Mutability comes from the MANIFEST, so the fixture names a tool rather than
+ * declaring a property. `documents.search` is read-only; `test.mutating` is the
+ * mutating fixture registered for these tests.
+ */
 const req = (mutating: boolean): ToolRequest<Input> => ({
-  capability: 'Gmail',
-  toolId: 'gmail.send',
-  mutating,
+  toolId: mutating ? 'test.mutating' : 'documents.search',
   input: { to: '  ME@Example.com ', body: ' hello ' },
 });
 
@@ -211,9 +214,12 @@ test('🚨 the router adds no policy of its own', async () => {
     for (const mutating of [false, true]) {
       const { r } = resolvers({ capability });
       const routed = await routeToolInvocation(req(mutating), r);
+      const manifest = (await import('../src/engine/tools/toolManifest.js')).toolManifest(
+        mutating ? 'test.mutating' : 'documents.search',
+      )!;
       const direct = decideToolInvocation({
-        capability: 'Gmail',
-        toolId: 'gmail.send',
+        capability: manifest.capability,
+        toolId: manifest.toolId,
         registered: capability !== 'unknown',
         grantHeld: capability !== 'unknown' && capability !== 'ungranted',
         backendAvailable: capability === 'available',

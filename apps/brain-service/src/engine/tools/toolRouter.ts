@@ -32,6 +32,7 @@
 
 import { createHash } from 'node:crypto';
 
+import { toolManifest } from './toolManifest.js';
 import {
   decideToolInvocation,
   type ConnectionState,
@@ -84,10 +85,17 @@ export interface RouterResolvers<TInput> {
   consent(toolId: string, inputHash: string): Promise<ConsentFact> | ConsentFact;
 }
 
+/**
+ * A routing request.
+ *
+ * 🚨 IT CANNOT DECLARE MUTABILITY, and it cannot name its own capability. Both
+ * come from the canonical manifest, looked up by `toolId`. The first shape of
+ * this interface carried `mutating`, which meant a caller could skip the consent
+ * gate by declaring itself read-only — a bypass with a polite name. What a
+ * request may say is which tool, and with what input.
+ */
 export interface ToolRequest<TInput> {
-  capability: string;
   toolId: string;
-  mutating: boolean;
   input: TInput;
 }
 
@@ -153,7 +161,39 @@ export async function routeToolInvocation<TInput>(
   mkId: () => string = () => `dec_${createHash('sha256').update(String(Math.random())).digest('hex').slice(0, 12)}`,
 ): Promise<RoutedDecision<TInput>> {
   const decisionId = mkId();
-  const { capability, toolId, mutating } = request;
+  const { toolId } = request;
+
+  /*
+   * The manifest is consulted FIRST, and an unknown tool is refused rather than
+   * defaulted. Treating an undeclared tool as read-only would reopen the bypass
+   * this table exists to close, by a different road.
+   */
+  const manifest = toolManifest(toolId);
+  if (!manifest) {
+    return {
+      decisionId,
+      capabilityState: 'unknown',
+      connectionState: UNRESOLVED_CONNECTION,
+      authorizationState: null,
+      preflightState: UNRESOLVED_PREFLIGHT,
+      consentState: UNRESOLVED_CONSENT,
+      normalizedInput: null,
+      inputHash: null,
+      decision: decideToolInvocation({
+        capability: toolId,
+        toolId,
+        registered: false,
+        grantHeld: false,
+        backendAvailable: false,
+        connection: 'not_required',
+        userAuthorized: false,
+        mutating: false,
+      }),
+    };
+  }
+
+  const capability = manifest.capability;
+  const mutating = manifest.mutating;
 
   const capabilityState = await resolvers.capabilityState(capability, toolId);
   const caps = fromCapabilityState(capabilityState);
