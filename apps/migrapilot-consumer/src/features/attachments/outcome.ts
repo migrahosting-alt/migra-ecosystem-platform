@@ -130,7 +130,15 @@ export function outcomeOfIndex(ok: boolean, response: IndexResponse, fileName?: 
   if (fileName && canAnalyzeStructurally(extensionOf(fileName)) && !canIndex(extensionOf(fileName))) {
     return {
       state: 'structured',
-      reason: 'Ready for table analysis — totals, averages, columns and sheets. Text inside it is not searchable.',
+      /*
+       * "Text inside it is not searchable" was the third false chip on this
+       * file. Cell text IS read — the labels and headers come from it. Only
+       * document-style search across the workbook is missing, and the chip now
+       * says that instead of denying the reading.
+       */
+      reason:
+        'Ready for table analysis — sheets, columns, labels and numeric values. ' +
+        'Document-style text search inside spreadsheets is not available yet.',
     }
   }
 

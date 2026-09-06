@@ -21,6 +21,8 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, it } from 'node:test'
 
+import { deniesCellText } from '@/features/attachments/spreadsheetDisclosure'
+
 import { tableEvidenceFor } from './tableEvidence'
 
 const DIR = join(dirname(fileURLToPath(import.meta.url)), '__fixtures__')
@@ -301,6 +303,38 @@ describe('xlsx · summarise', () => {
       const e = await ask('Summarize the document for me.', f)
       assert.ok(e, `${f} produced no evidence`)
       assert.equal(e!.workbookBoundary, true, `${f} is not flagged`)
+    }
+  })
+
+  it('never tells the model that cell text is inaccessible', async () => {
+    /*
+     * 🚨 THE SECOND PRODUCTION DEFECT, AT ITS SOURCE. The evidence used to carry
+     * "MigraPilot cannot search the text inside a spreadsheet", and the model
+     * restated it as "no text content within cells is accessible … it cannot
+     * process or interpret text within spreadsheet cells" — false, in a reply
+     * that had just listed the column headers this same evidence read out of
+     * cells.
+     *
+     * The prompt is where that started, so the prompt is where it is asserted.
+     */
+    for (const f of ['matrix_sales.xlsx', 'matrix_multisheet.xlsx', 'matrix_formula.xlsx']) {
+      const e = await ask('Summarize the document for me.', f)
+      assert.equal(deniesCellText(e!.text), false, `${f} evidence denies cell text:\n${e!.text}`)
+      assert.ok(
+        !/cannot search the text inside/i.test(e!.text),
+        `${f} still carries the retired wording:\n${e!.text}`,
+      )
+      // And it must actively forbid the denial, not merely avoid making it.
+      assert.match(e!.text, /never say MigraPilot cannot read, process or interpret/i, e!.text)
+    }
+  })
+
+  it('proves cell text WAS read, which is why the denial is false', async () => {
+    // The labels below are text, taken out of cells by this layer. Any claim
+    // that cell text is unreadable is contradicted by the evidence carrying it.
+    const e = await ask('Summarize the document for me.', 'matrix_sales.xlsx')
+    for (const label of ['Region', 'Revenue', 'Booked']) {
+      assert.ok(e!.text.includes(`"${label}"`), `${label} — a cell string — is missing`)
     }
   })
 

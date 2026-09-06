@@ -84,8 +84,9 @@ export interface AttachmentType {
 const NO_EXTRACTOR =
   'MigraPilot cannot read this format yet — it would be stored without being understood.'
 const SPREADSHEET_STRUCTURED =
-  'Excel files can be analysed for tables, totals, columns and sheets. ' +
-  'General document search inside spreadsheets is not available yet.'
+  'Excel files can be analyzed as structured spreadsheet data — sheets, columns, ' +
+  'labels and numeric values. General document-style text search inside ' +
+  'spreadsheets is not available yet.'
 const SPREADSHEET_OTHER =
   'MigraPilot reads .xlsx spreadsheets. Save this as .xlsx, or export the sheet as CSV.'
 const ARCHIVE =

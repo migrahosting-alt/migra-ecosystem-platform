@@ -349,16 +349,28 @@ const DESCRIBE_HEADER = (source: string): string[] => [
 /**
  * The boundary, stated inside the evidence for a workbook.
  *
- * 🚨 A USEFUL SUMMARY MUST NOT BECOME AN OVERCLAIM. This description is built
- * from structure and computed values — no text inside the sheet was searched. A
- * model handed only the structure will happily conclude "there is no narrative
- * content here", which is a claim about text nobody read. Saying what the
- * description IS keeps `structured` from quietly reading as `indexed`.
+ * 🚨 A USEFUL SUMMARY MUST NOT BECOME AN OVERCLAIM — IN EITHER DIRECTION. The
+ * description is built from structure, labels and computed values, so a model
+ * handed it will happily conclude "there is no narrative content here", a claim
+ * about prose nobody retrieved.
+ *
+ * The first version of this note over-corrected. It told the model "MigraPilot
+ * cannot search the text inside a spreadsheet", and production came back with
+ * "no text content within cells is accessible … it cannot process or interpret
+ * text within spreadsheet cells" — false, and contradicted by the sheet names
+ * and column labels in the same reply, all of which are cell text this layer
+ * read. A directive phrased as a capability denial gets restated as a bigger
+ * one.
+ *
+ * So this states the boundary as a fact about RETRIEVAL and explicitly forbids
+ * the denial. The user-facing sentence is appended by the route regardless; this
+ * only stops the model contradicting it.
  */
 const WORKBOOK_BOUNDARY =
-  '  (This description comes from the sheet structure and computed values. ' +
-  'MigraPilot cannot search the text inside a spreadsheet, so say that plainly ' +
-  'rather than concluding anything about prose the file may contain.)'
+  '  (This description comes from the sheet structure, labels and computed values above. ' +
+  'Those labels ARE cell text, so never say MigraPilot cannot read, process or interpret ' +
+  'the text in cells — it can. What does not exist yet is document-style text search across ' +
+  'a spreadsheet, so draw no conclusion about prose elsewhere in the file.)'
 
 const isWorkbook = (fileName: string): boolean => WORKBOOK_EXTENSION.test(fileName)
 

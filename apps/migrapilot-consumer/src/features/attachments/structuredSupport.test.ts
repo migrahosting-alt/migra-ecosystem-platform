@@ -106,7 +106,9 @@ describe('the derived lists cannot disagree with each other', () => {
 describe('what the user is told', () => {
   it('the xlsx copy states the boundary instead of denying the capability', () => {
     const copy = refusalFor('budget.xlsx')
-    assert.match(copy, /analys/i, copy)
+    // Both spellings: the capability statement is Bonex's own wording, and it is
+    // reproduced verbatim across every surface rather than re-spelled per file.
+    assert.match(copy, /analys|analyz/i, copy)
     assert.match(copy, /tables|totals|columns|sheets/i, copy)
     // The old message claimed spreadsheet reading was not enabled at all. It is.
     assert.ok(!/not enabled yet/i.test(copy), `stale copy: ${copy}`)

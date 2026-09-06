@@ -58,6 +58,7 @@ import { resolveTurnImages } from '@/server/files/resolveTurnImages'
 import { selectTurnGrounding } from '@/server/files/turnGrounding'
 import { decideAttachmentState } from '@/server/files/attachmentState'
 import { canAnalyzeStructurally, canIndex, extensionOf } from '@/features/attachments/capability'
+import { workbookDisclosureFor } from '@/features/attachments/spreadsheetDisclosure'
 import { tableEvidenceFor } from '@/server/tables/tableEvidence'
 import { assessDocumentIntent } from '@/server/files/documentIntent'
 import { planRegeneration, wantsRegeneration } from '@/server/files/regenerate'
@@ -306,14 +307,13 @@ function refusalOr(
          */
         if (structuredOnly.length === unreadable.length && !hasTableEvidence) {
           const names = structuredOnly.join(', ')
-          const plural = structuredOnly.length > 1
           return {
             error: 'insufficient_evidence',
             message:
-              `MigraPilot can analyse ${names} for tables — totals, averages, columns and sheets — ` +
-              `but cannot search the text inside ${plural ? 'them' : 'it'}, so there is nothing to ` +
-              `answer this question from. Ask about a total, a column or a sheet, or attach a CSV ` +
-              `if you need the text searched.`,
+              `MigraPilot can analyze ${names} as structured spreadsheet data — sheets, columns, ` +
+              `labels and numeric values — but general document-style text search inside ` +
+              `spreadsheets is not available yet, so this question cannot be answered that way. ` +
+              `Ask about a total, a column or a sheet, or attach a CSV if you need its text searched.`,
           }
         }
 
@@ -1071,10 +1071,10 @@ export async function POST(request: Request): Promise<Response> {
         const told = {
           error: 'document_structured_only',
           message:
-            `${names} is attached and can be analysed as structured table data — totals, ` +
-            `averages, columns and sheets. General document search inside spreadsheets is not ` +
-            `available yet, so this question cannot be answered from its text. Ask about a ` +
-            `total, a column or a sheet instead.`,
+            `${names} is attached, and MigraPilot can analyze structured spreadsheet data such ` +
+            `as sheets, columns, labels, and numeric values. General document-style text search ` +
+            `inside spreadsheets is not available yet, so this question cannot be answered that ` +
+            `way. Ask about a total, a column or a sheet instead.`,
         }
         await appendMessage(durableId, 'assistant', told.message, { principal })
         emit('error', told)
@@ -1540,23 +1540,26 @@ export async function POST(request: Request): Promise<Response> {
        * empty turn gets nothing.
        */
       /*
-       * 🚨 THE WORKBOOK BOUNDARY IS FORCED TOO.
+       * 🚨 THE WORKBOOK BOUNDARY IS FORCED, AND IT IS FORCED ALWAYS.
        *
-       * The evidence asks the model to say that no cell text was read, and the
-       * model complied on one prompt and not another — answering "there are no
-       * written commentary or narrative paragraphs" about text it never looked
-       * at. True of that file by luck; a fabrication for a workbook with prose in
-       * its cells. Appended here so it cannot be dropped, and only when the model
-       * has not already said it in its own words.
+       * Twice now this sentence has been wrong in production. First it was
+       * missing, and the model answered "there are no written commentary or
+       * narrative paragraphs" about text it never looked at. Then it was present
+       * but overstated — "MigraPilot cannot search the text inside a
+       * spreadsheet" — and the model escalated that into "no text content
+       * within cells is accessible … it cannot process or interpret text within
+       * spreadsheet cells", in the same reply that had just quoted the column
+       * headers and the labels "North" and "South".
+       *
+       * The old version also suppressed itself whenever the model had said
+       * something boundary-shaped, which is what let the false paraphrase stand
+       * in place of the true statement. It no longer defers to the model at all:
+       * the precise sentence goes out on every workbook description, and if the
+       * reply denied reading cell text, the denial is contradicted in place
+       * rather than merely followed by something better.
        */
-      if (
-        tableEvidence?.workbookBoundary &&
-        completed &&
-        answer.trim().length > 0 &&
-        !/cannot search|no text .*was (read|analy)|did not read the text/i.test(answer)
-      ) {
-        const boundary =
-          '\n\nMigraPilot cannot search the text inside a spreadsheet, so this describes its structure and computed values only.'
+      if (tableEvidence?.workbookBoundary && completed && answer.trim().length > 0) {
+        const boundary = `\n\n${workbookDisclosureFor(answer)}`
         answer += boundary
         emit('token', { text: boundary })
       }
