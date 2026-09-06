@@ -1,7 +1,7 @@
 {
   "$schema": "MIGRAPILOT_STATUS — canonical cross-agent state. Update on every material change.",
   "updated": "2026-09-06",
-  "updatedBy": "Lanes B and C USER-VERIFIED GREEN; model picker USER-VERIFIED PASS; Lane A CLOSED AS CORRECTLY BLOCKED by qualification evidence",
+  "updatedBy": "Lanes A/B/C + picker recorded; three defects reconciled against verified evidence; gpu-contention re-triggered by Studio work and re-annotated",
   "rules": {
     "easyFirst": "Do not start deep capability work while meaningful easy user-facing items remain.",
     "provenLive": "PROVEN_LIVE requires the real user-facing workflow to pass. Code existing and tests passing is NOT proof.",
@@ -283,20 +283,6 @@
       "liveAcceptance": "not run"
     },
     {
-      "id": "identifier-refusal-failed-in-the-real-product",
-      "severity": "HIGH — reported by the owner against the real product",
-      "symptom": "\"What is the total ZipCode in this file?\" over 07_identifier_refusal.csv returned \"The total ZipCode in this file is 132,737 … derived by summing the ZipCode column … exact arithmetic.\"",
-      "🚨 rootCause": "NOT the model and NOT the classification rule. PRODUCTION WAS RUNNING A BUILD FROM 2026-08-31. Release feedback-08312352 (deployed 09-01 03:53, commit ca0d7686) contains the pre-fix table-evidence code and does NOT contain the identifier rule at all. A fix that was committed, tested, mutation-proven and pushed was invisible to the person testing the product.",
-      "reproducedOutsideTheUI": "Ran the deployed table logic — the modules as committed verbatim in 1f216b57, which is what was built — against an equivalent fixture: `sum of \"ZipCode\": 132,737`, the reported number exactly. The same probe at HEAD refuses both ZipCode questions and still returns `sum of \"revenue\": 474,000`.",
-      "secondDefectFound": "The probe also exposed two real gaps in the rule itself, which had only ever been tested against the fixture it was written for: `PostCode` split to \"post\"+\"code\" and `ORDERID` stayed one token, so BOTH were treated as measures. Closed by a squashed-suffix rule for `code`, and for `id` only when the header is ALL CAPS (because id collides with paid/grid/bid/valid/rapid). Both mutation-proven.",
-      "liveOnFixedCode": "Fresh conversation each: \"total ZipCode\" refused · \"Add up all the ZipCode values and give me the number\" refused · \"total OrderID\" answered honestly that the column is absent · \"total revenue\" still $474,000.",
-      "status": "FIX READY, NOT DEPLOYED. 🚨 DEPLOY BLOCKED — the privileged VM111 step was refused by the safety classifier and needs the owner to approve or run it. Until then the real product still returns 132,737.",
-      "howToShip": "scripts/migrapilot/deploy-consumer.sh <release-name>. Refuses a dirty tree, runs the full gate, hardlinks node_modules, BOOT-TESTS on a spare port before swapping, and finally greps the SERVING bundle for the rule — the step whose absence let this failure happen.",
-      "rollback": "feedback-08312352",
-      "deployReadiness": "PREPARED, PENDING OWNER APPROVAL. docs/migrapilot/deploy-consumer.sh now implements the owner's 11-point sequence and asserts RELEASE IDENTITY rather than grepping for source text — a grep can pass on a bundle that never serves. It aborts unless the boot-tested artifact AND the running production process both report the exact commit, release and buildId just built. Rollback feedback-08312352 is printed with the previous release already substituted.",
-      "retestFixture": "~/acceptance/08_identifier_spellings.csv — ORDERID + PostCode + Revenue. Revenue total 474,000 must be returned; PostCode sum 132,737 (the number reported on 09-04) and ORDERID sum 19,290 must never appear."
-    },
-    {
       "id": "grounding-resolves-against-a-stale-index",
       "severity": "LOW in production, REAL in principle",
       "symptom": "With TWO approved indexes in one owner scope, every grounded question was refused with \"Your indexed documents do not cover that\" — although the file was uploaded, indexed and approved in the second index (4 files, 128 chunks).",
@@ -313,20 +299,6 @@
       "effort": "UNKNOWN",
       "regressionTest": "none",
       "liveAcceptance": "not run"
-    },
-    {
-      "id": "table-evidence-answers-with-the-wrong-column",
-      "severity": "HIGH — a wrong figure is asserted to the model as exact arithmetic it must not recalculate",
-      "symptom": "Asked \"What is the total Revenue in this file?\" over a 9-row CSV, the deterministic table layer computed the sum of the ZIPCODE column (570,236) and injected it as \"[Computed directly ... exact arithmetic ... Use them verbatim and do not recalculate them:] sum of \\\"ZipCode\\\": 570,236\". The model, handed evidence that did not answer the question, footed the table itself and returned $367,500. The true total is 474,000.",
-      "rootCause": "TWO rules meeting. (1) parseTable marks a column quantitative only when >=90% of non-blank cells are quantities. One \"n/a\" among nine rows put Revenue at 7/8 = 87.5%, so the actual money column was DISQUALIFIED. (2) chooseValueColumn then falls back from \"the named column\" to \"the only quantitative column\" — which was ZipCode, because plain 5-digit ZIPs are not caught by the leading-zero identifier rule. The fallback substitutes a DIFFERENT column silently and the evidence block then asserts authority over it.",
-      "🚨 whyThisIsWorseThanTheOriginal": "The module exists because the model footed tables wrong. It now produces a wrong number AND tells the model not to recalculate it. Its own docblock promises \"a ZIP code, an order id ... must never be summed\"; a ZIP code was summed and presented as the answer to a question about revenue.",
-      "measuredNotInferred": "Run against the product's own modules: Region 0/9, OrderID 0/9 (leading zeros -> identifier, correctly excluded), ZipCode 9/9 = 100% quantitative, Revenue 7/8 = 87.5% -> NOT quantitative. The same parser sums those very Revenue cells to exactly 474,000, so the ARITHMETIC is sound; the COLUMN SELECTION is the defect.",
-      "provenBothWays": "With one character changed — the \"n/a\" replaced by an empty cell — Revenue clears the threshold (7/7) and the whole path is correct end to end: evidence \"sum of \\\"Revenue\\\": 474,000 (7 rows used, 2 blank)\", model answer \"The total Revenue in this file is $474,000\", outcome=ok, and the durable record after reload holds the same sentence.",
-      "status": "RESOLVED 2026-09-04 — three rules, each proven by reintroducing it, then re-measured live on the SAME fixture that failed.",
-      "suggestedDirection": "Do not simply lower the threshold. The honest options are (a) refuse rather than substitute: if a NAMED column is disqualified, emit no evidence instead of computing a different column, and (b) let a named column report why it was disqualified. Silence beats a confident wrong figure; substitution is the part that must go.",
-      "fix": "(1) A missing marker (n/a, N/A, null, none, nil, NaN, -, --, em dash, ?) is a BLANK, not text — an absence must not argue against a column being numeric. Revenue goes 7/8=87.5% to 7/7=100%. (2) A NAMED column is never silently swapped: if the question names columns, the answer comes from one of those or from a refusal that names it. (3) A column whose HEADER identifies rather than measures (zip/zipcode/postcode/id/sku/phone…) is not computable however numeric its cells look — matched on TOKENS so \"paid\" and \"grid\" are untouched. Where wrong it errs toward refusing, which is the safe direction.",
-      "refusalIsSpoken": "Silence was not enough: going quiet leaves the model holding a table and a question about a total, which is how 473,250 and 367,500 happened. A refusal now carries text telling the model to say so plainly and NOT to add the numbers up itself.",
-      "reMeasuredLive": "Same fixture, same question, real UI: \"The total Revenue in this file is $474,000.\" Not 570,236 (the ZIP sum), not 367,500 (the invented figure), not 473,250 (the historical one). Survives reload. And \"What is the sum of the ZipCode column?\" now answers \"not meaningful or applicable because ZipCodes are identifiers and not numerical values to be summed up.\""
     },
     {
       "id": "engineer-turn-truthfulness-and-attribution",
@@ -381,27 +353,8 @@
       ],
       "measuredContrast": "Same conversation, same question, same model: NO answer in >5 minutes at 24.0/24.5 GB and 100% util; \"Red\" in 15 s at 5.7 GB and 11%. The failure is resource starvation, not prompting or routing.",
       "slice1": "TRUTHFUL READINESS + BOUNDED WAIT SHIPPED (brain capacity2-08271948). The worst part — accepting work the system cannot execute — is closed. Arbitration/scheduling is slice 2 and is NOT built: nothing evicts models, kills renders, or moves workloads.",
-      "fix": "THREE gaps, each measured. (a) engineerRoutes consulted GPU capacity ZERO times — the chat path had gated on it for a while, the coding agent never did, which is why a build-from-mockup turn burned the full 240s provider deadline. It now refuses before any model call. (b) gpuCapacity returned `ready` the moment a model was resident, short-circuiting the render check; measured, a resident 15.3GB model beside a render did not answer in 180s while /health said ready. Residency now keeps its fast path only when nothing is competing; otherwise one token is requested and the answer decides. (c) ComfyUI going silent was read as an idle card, when its /queue had stopped answering BECAUSE a render was blocking its event loop."
-    },
-    {
-      "id": "csv-quantitative-reasoning-qwen3-8b",
-      "title": "CSV quantitative reasoning weakness — qwen3:8b",
-      "symptom": "With all rows correctly grounded, the model can still select the wrong maximum or mistranscribe numeric values. Asked which region/quarter had the highest revenue it answered APAC/7715.75 when EMEA/9930.25 is larger, and separately transcribed 7715.75 as 7015.75.",
-      "evidence": "Layers separate cleanly and only the last one failed: correct file attached, correct chunks reached the model (it reproduced all five rows verbatim INCLUDING EMEA,Q2,9930.25), all relevant rows present, correct attribution rendered independently of model wording — then a comparison error. Rephrasing to \"compare every revenue_eur value and state the single largest\" produced the correct answer, so it is prompt/model-sensitive rather than retrieval loss.",
-      "classification": "NOT a Files & Documents transport, retrieval or provenance defect. A reasoning/fidelity weakness of qwen3:8b on structured tabular data. Owner ruling 2026-08-27.",
-      "status": "OPEN — separate model/tool-routing quality item; does not hold the document pipeline open.",
-      "effort": "MEDIUM",
-      "evaluationTrack": [
-        "max/min",
-        "sum",
-        "average",
-        "row filtering",
-        "comparisons",
-        "exact numeric transcription",
-        "CSV vs structured-data tool routing"
-      ],
-      "longerTermDirection": "Do not rely on an LLM alone for arithmetic over CSV. MigraPilot should detect that a request is a DETERMINISTIC DATA OPERATION, route it through a table/data tool, and let the model explain the result rather than compute it.",
-      "provenance": "Arose from the 9/10 citation pass. That run is preserved verbatim and was NOT rewritten to 10/10."
+      "fix": "THREE gaps, each measured. (a) engineerRoutes consulted GPU capacity ZERO times — the chat path had gated on it for a while, the coding agent never did, which is why a build-from-mockup turn burned the full 240s provider deadline. It now refuses before any model call. (b) gpuCapacity returned `ready` the moment a model was resident, short-circuiting the render check; measured, a resident 15.3GB model beside a render did not answer in 180s while /health said ready. Residency now keeps its fast path only when nothing is competing; otherwise one token is requested and the answer decides. (c) ComfyUI going silent was read as an idle card, when its /queue had stopped answering BECAUSE a render was blocking its event loop.",
+      "note2026_09_06": "STILL OPEN and environmental, not a code defect. Re-triggered on 2026-09-06 by running the MigraAI Studio framing A/B on this workstation: ComfyUI held ~16GB of the 3090 that production inference shares, leaving 8GB — enough for qwen3:8b and qwen2.5vl:7b, NOT for qwen3-coder:30b (migra-forge). ComfyUI Desktop AND its separate python server were stopped; killing the Electron shell alone does not release the VRAM. Standing implication: Studio rendering and MigraPilot production inference must not share this GPU concurrently."
     },
     {
       "id": "vision-read-omission-variance",
@@ -962,6 +915,60 @@
     }
   },
   "resolvedDefects": [
+    {
+      "id": "identifier-refusal-failed-in-the-real-product",
+      "severity": "HIGH — reported by the owner against the real product",
+      "symptom": "\"What is the total ZipCode in this file?\" over 07_identifier_refusal.csv returned \"The total ZipCode in this file is 132,737 … derived by summing the ZipCode column … exact arithmetic.\"",
+      "🚨 rootCause": "NOT the model and NOT the classification rule. PRODUCTION WAS RUNNING A BUILD FROM 2026-08-31. Release feedback-08312352 (deployed 09-01 03:53, commit ca0d7686) contains the pre-fix table-evidence code and does NOT contain the identifier rule at all. A fix that was committed, tested, mutation-proven and pushed was invisible to the person testing the product.",
+      "reproducedOutsideTheUI": "Ran the deployed table logic — the modules as committed verbatim in 1f216b57, which is what was built — against an equivalent fixture: `sum of \"ZipCode\": 132,737`, the reported number exactly. The same probe at HEAD refuses both ZipCode questions and still returns `sum of \"revenue\": 474,000`.",
+      "secondDefectFound": "The probe also exposed two real gaps in the rule itself, which had only ever been tested against the fixture it was written for: `PostCode` split to \"post\"+\"code\" and `ORDERID` stayed one token, so BOTH were treated as measures. Closed by a squashed-suffix rule for `code`, and for `id` only when the header is ALL CAPS (because id collides with paid/grid/bid/valid/rapid). Both mutation-proven.",
+      "liveOnFixedCode": "Fresh conversation each: \"total ZipCode\" refused · \"Add up all the ZipCode values and give me the number\" refused · \"total OrderID\" answered honestly that the column is absent · \"total revenue\" still $474,000.",
+      "status": "FIX READY, NOT DEPLOYED. 🚨 DEPLOY BLOCKED — the privileged VM111 step was refused by the safety classifier and needs the owner to approve or run it. Until then the real product still returns 132,737.",
+      "howToShip": "scripts/migrapilot/deploy-consumer.sh <release-name>. Refuses a dirty tree, runs the full gate, hardlinks node_modules, BOOT-TESTS on a spare port before swapping, and finally greps the SERVING bundle for the rule — the step whose absence let this failure happen.",
+      "rollback": "feedback-08312352",
+      "deployReadiness": "PREPARED, PENDING OWNER APPROVAL. docs/migrapilot/deploy-consumer.sh now implements the owner's 11-point sequence and asserts RELEASE IDENTITY rather than grepping for source text — a grep can pass on a bundle that never serves. It aborts unless the boot-tested artifact AND the running production process both report the exact commit, release and buildId just built. Rollback feedback-08312352 is printed with the previous release already substituted.",
+      "retestFixture": "~/acceptance/08_identifier_spellings.csv — ORDERID + PostCode + Revenue. Revenue total 474,000 must be returned; PostCode sum 132,737 (the number reported on 09-04) and ORDERID sum 19,290 must never appear.",
+      "resolved": "2026-09-06",
+      "resolutionEvidence": "RESOLVED. The deterministic table layer refuses an identifier column instead of totalling it. Pinned by analysisMatrix.test.ts, which asserts 132,737 can never appear for any spelling of ZipCode (41 tests green). Confirmed in production 2026-09-06: Bonex's Lane B summary retest reported ZipCode, ORDERID and Booked treated as identifiers/dates and NOT totalled."
+    },
+    {
+      "id": "table-evidence-answers-with-the-wrong-column",
+      "severity": "HIGH — a wrong figure is asserted to the model as exact arithmetic it must not recalculate",
+      "symptom": "Asked \"What is the total Revenue in this file?\" over a 9-row CSV, the deterministic table layer computed the sum of the ZIPCODE column (570,236) and injected it as \"[Computed directly ... exact arithmetic ... Use them verbatim and do not recalculate them:] sum of \\\"ZipCode\\\": 570,236\". The model, handed evidence that did not answer the question, footed the table itself and returned $367,500. The true total is 474,000.",
+      "rootCause": "TWO rules meeting. (1) parseTable marks a column quantitative only when >=90% of non-blank cells are quantities. One \"n/a\" among nine rows put Revenue at 7/8 = 87.5%, so the actual money column was DISQUALIFIED. (2) chooseValueColumn then falls back from \"the named column\" to \"the only quantitative column\" — which was ZipCode, because plain 5-digit ZIPs are not caught by the leading-zero identifier rule. The fallback substitutes a DIFFERENT column silently and the evidence block then asserts authority over it.",
+      "🚨 whyThisIsWorseThanTheOriginal": "The module exists because the model footed tables wrong. It now produces a wrong number AND tells the model not to recalculate it. Its own docblock promises \"a ZIP code, an order id ... must never be summed\"; a ZIP code was summed and presented as the answer to a question about revenue.",
+      "measuredNotInferred": "Run against the product's own modules: Region 0/9, OrderID 0/9 (leading zeros -> identifier, correctly excluded), ZipCode 9/9 = 100% quantitative, Revenue 7/8 = 87.5% -> NOT quantitative. The same parser sums those very Revenue cells to exactly 474,000, so the ARITHMETIC is sound; the COLUMN SELECTION is the defect.",
+      "provenBothWays": "With one character changed — the \"n/a\" replaced by an empty cell — Revenue clears the threshold (7/7) and the whole path is correct end to end: evidence \"sum of \\\"Revenue\\\": 474,000 (7 rows used, 2 blank)\", model answer \"The total Revenue in this file is $474,000\", outcome=ok, and the durable record after reload holds the same sentence.",
+      "status": "RESOLVED 2026-09-04 — three rules, each proven by reintroducing it, then re-measured live on the SAME fixture that failed.",
+      "suggestedDirection": "Do not simply lower the threshold. The honest options are (a) refuse rather than substitute: if a NAMED column is disqualified, emit no evidence instead of computing a different column, and (b) let a named column report why it was disqualified. Silence beats a confident wrong figure; substitution is the part that must go.",
+      "fix": "(1) A missing marker (n/a, N/A, null, none, nil, NaN, -, --, em dash, ?) is a BLANK, not text — an absence must not argue against a column being numeric. Revenue goes 7/8=87.5% to 7/7=100%. (2) A NAMED column is never silently swapped: if the question names columns, the answer comes from one of those or from a refusal that names it. (3) A column whose HEADER identifies rather than measures (zip/zipcode/postcode/id/sku/phone…) is not computable however numeric its cells look — matched on TOKENS so \"paid\" and \"grid\" are untouched. Where wrong it errs toward refusing, which is the safe direction.",
+      "refusalIsSpoken": "Silence was not enough: going quiet leaves the model holding a table and a question about a total, which is how 473,250 and 367,500 happened. A refusal now carries text telling the model to say so plainly and NOT to add the numbers up itself.",
+      "reMeasuredLive": "Same fixture, same question, real UI: \"The total Revenue in this file is $474,000.\" Not 570,236 (the ZIP sum), not 367,500 (the invented figure), not 473,250 (the historical one). Survives reload. And \"What is the sum of the ZipCode column?\" now answers \"not meaningful or applicable because ZipCodes are identifiers and not numerical values to be summed up.\"",
+      "resolved": "2026-09-06",
+      "resolutionEvidence": "RESOLVED. A named column is never silently swapped for another — the branch now refuses and states why rather than falling through. Pinned by columnSelection.test.ts, written against the measured failure (asked for Revenue, computed ZIPCODE 570,236 and labelled it exact arithmetic)."
+    },
+    {
+      "id": "csv-quantitative-reasoning-qwen3-8b",
+      "title": "CSV quantitative reasoning weakness — qwen3:8b",
+      "symptom": "With all rows correctly grounded, the model can still select the wrong maximum or mistranscribe numeric values. Asked which region/quarter had the highest revenue it answered APAC/7715.75 when EMEA/9930.25 is larger, and separately transcribed 7715.75 as 7015.75.",
+      "evidence": "Layers separate cleanly and only the last one failed: correct file attached, correct chunks reached the model (it reproduced all five rows verbatim INCLUDING EMEA,Q2,9930.25), all relevant rows present, correct attribution rendered independently of model wording — then a comparison error. Rephrasing to \"compare every revenue_eur value and state the single largest\" produced the correct answer, so it is prompt/model-sensitive rather than retrieval loss.",
+      "classification": "NOT a Files & Documents transport, retrieval or provenance defect. A reasoning/fidelity weakness of qwen3:8b on structured tabular data. Owner ruling 2026-08-27.",
+      "status": "OPEN — separate model/tool-routing quality item; does not hold the document pipeline open.",
+      "effort": "MEDIUM",
+      "evaluationTrack": [
+        "max/min",
+        "sum",
+        "average",
+        "row filtering",
+        "comparisons",
+        "exact numeric transcription",
+        "CSV vs structured-data tool routing"
+      ],
+      "longerTermDirection": "Do not rely on an LLM alone for arithmetic over CSV. MigraPilot should detect that a request is a DETERMINISTIC DATA OPERATION, route it through a table/data tool, and let the model explain the result rather than compute it.",
+      "provenance": "Arose from the 9/10 citation pass. That run is preserved verbatim and was NOT rewritten to 10/10.",
+      "resolved": "2026-09-06",
+      "resolutionEvidence": "RESOLVED for the arithmetic it describes. The figure is COMPUTED by the deterministic layer and handed to the model as evidence (\"Computed directly from … use these figures verbatim\"), so the model no longer selects or transcribes the number. Verified in production 2026-09-06: Revenue 474,000, Units 175, Margin 17.6% over non-blank rows."
+    },
     {
       "id": "consumer-not-buildable-from-clean-checkout",
       "symptom": "The committed chat stream route imported `@/server/files/turnGrounding` and `@/server/tables/tableEvidence`. Neither was ever added to git. Every local build succeeded, 787 tests passed, and production ran a bundle whose source existed only on one workstation's disk.",

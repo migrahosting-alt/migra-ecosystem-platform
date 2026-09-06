@@ -832,3 +832,26 @@ picker reports that truthfully. Evidence packages are committed in full at
   candidate-shopping around the gate. If it is evaluated later it must be a **new pre-registered
   campaign**, with the candidate chosen for an architectural reason before results are seen — never
   as a rescue attempt for this lane.
+
+### Defect list reconciled, 2026-09-06
+
+Three entries described behaviour that this session fixed and Bonex verified in production. A defect
+list that outlives its defects is the same failure this file exists to prevent, so they were moved to
+`resolvedDefects` **with their evidence**, not just deleted:
+
+| defect | evidence |
+|---|---|
+| `identifier-refusal-failed-in-the-real-product` | `analysisMatrix.test.ts` asserts 132,737 can never appear for any spelling of ZipCode; production summary retest reported ZipCode/ORDERID/Booked as identifiers/dates, not totalled |
+| `table-evidence-answers-with-the-wrong-column` | a named column is never silently swapped — it refuses and says why; pinned by `columnSelection.test.ts` |
+| `csv-quantitative-reasoning-qwen3-8b` | the figure is computed by the deterministic layer, not selected by the model; production returned Revenue 474,000, Units 175, Margin 17.6% |
+
+`gpu-contention-starves-chat` **stays open** — it is environmental, not a code defect, and it was
+**re-triggered on 2026-09-06** by running the MigraAI Studio framing A/B on this workstation.
+ComfyUI held ~16 GB of the 3090 that production inference shares, leaving 8 GB: enough for
+`qwen3:8b` and `qwen2.5vl:7b`, **not** for `qwen3-coder:30b` (migra-forge).
+
+> 🚨 Killing the ComfyUI Desktop shell does **not** release the VRAM — its python server is a
+> separate process and keeps serving on :8188. Both must be stopped.
+
+**Standing implication: Studio rendering and MigraPilot production inference must not share this GPU
+concurrently.**
