@@ -93,12 +93,9 @@ function chooseValueColumn(prompt: string, table: ParsedTable): ColumnChoice {
       kind: 'refused',
       reason:
         named.length === 1 && only
-          ? only.identifierName
-            // Named for what it is: a code, not a measure. Saying THAT is more
-            // use than a row count the reader cannot act on.
-            ? `"${only.name}" identifies rows rather than measuring them, so totalling it would not mean anything`
-            : `"${only.name}" holds ${only.numericCells} value${only.numericCells === 1 ? '' : 's'} that can be` +
-              ` calculated with, out of ${table.rows.length - only.blankCells} that are not empty — too few to total`
+          // Named for WHAT IT IS — an identifier, a date, text — because a
+          // generic reason gets restated as a specific and wrong one.
+          ? refusalReasonFor(table, only)
           : `no column named in the question holds values that can be calculated with`,
     }
   }
@@ -314,22 +311,20 @@ function describeLines(table: ParsedTable, formulaColumns: readonly number[], la
         if (!(error instanceof ComputationRefused)) throw error
         lines.push(`  "${column.name}": numeric`)
       }
-    } else if (column.identifierName) {
-      lines.push(`  "${column.name}": identifies rows — not a quantity, never totalled`)
     } else {
       /*
-       * "text or labels" was true of a date column and useless. The cells know
-       * what they are — a date renders as an identifier-shaped value — so this
-       * says so rather than flattening everything non-numeric.
+       * ONE CLASSIFIER, read here and by the refusal path. These used to decide
+       * separately: the description knew `Booked` was "dates or codes" while the
+       * refusal called it "too few to total", and the model believed the refusal.
        */
-      const cells = table.rows.map((r) => r[column.index]).filter(Boolean)
-      const filled = cells.filter((c) => c!.kind !== 'blank')
-      const idLike = filled.filter((c) => c!.kind === 'identifier').length
       const blank = column.blankCells ? `, ${column.blankCells} blank` : ''
+      const kind = classifyNonQuantitative(table, column)
       lines.push(
-        filled.length > 0 && idLike / filled.length >= 0.9
-          ? `  "${column.name}": dates or codes — not a quantity, never totalled${blank}`
-          : `  "${column.name}": text or labels${blank}`,
+        kind === 'identifier-name'
+          ? `  "${column.name}": identifies rows — not a quantity, never totalled`
+          : kind === 'dates-or-codes'
+            ? `  "${column.name}": dates or codes — not a quantity, never totalled${blank}`
+            : `  "${column.name}": text or labels${blank}`,
       )
     }
   }
@@ -338,6 +333,89 @@ function describeLines(table: ParsedTable, formulaColumns: readonly number[], la
     lines.push(`  ${named} hold values the spreadsheet computed and saved; MigraPilot did not recalculate them.`)
   }
   return lines
+}
+
+/**
+ * WHY a column cannot be computed on — the cause, not a symptom of it.
+ *
+ * 🚨 THE DEFECT THIS EXISTS TO FIX. `chooseValueColumn` had exactly two refusal
+ * reasons for a named column: "identifies rows" when the HEADER said so, and
+ * otherwise a numeric-scarcity sentence — "holds 0 values that can be calculated
+ * with, out of 4 that are not empty — too few to total".
+ *
+ * A date column is neither. `Booked` holds four perfectly good dates, so it fell
+ * to the scarcity branch, and production said:
+ *
+ *     "The 'Booked' column contains 4 non-empty values, but none of them can be
+ *      used to calculate a total. There is not enough data to provide an
+ *      accurate answer."
+ *
+ * Every clause traceable to our reason, and the conclusion false. The file is
+ * not short of data. Dates are simply not a thing you total — a categorically
+ * different fact from "too few values", and one that blames the user's file for
+ * a limit that is ours.
+ *
+ * A reason that is true-but-generic gets restated as something specific and
+ * wrong. So the cause is classified once, here, and both the description and the
+ * refusal read it — they cannot disagree about what a column is.
+ */
+/**
+ * What the model is told to do with a refusal — ONE copy, read by every refusal site.
+ *
+ * 🚨 THE SUBSTITUTION IS THE DEFECT. The directive used to say only "say so
+ * plainly", and a date-column refusal came back as "There is not enough data to
+ * provide an accurate answer" — the model swapping our reason for a plausible
+ * one, which blamed the user's file for a limit that is ours. Naming the wrong
+ * answer explicitly is the only version that has held.
+ *
+ * There were two refusal sites and they had drifted; a fix applied to one would
+ * have left the other saying the old thing.
+ */
+const REFUSAL_DIRECTIVE = [
+  `Give THAT reason to the user — do not substitute a different one. In particular do not`,
+  `say the file lacks data or has too few values unless the reason above says so: the limit`,
+  `is MigraPilot's, not a fault in their file.`,
+  `Do NOT add the numbers up yourself and do NOT estimate a total —`,
+  `an invented figure here is worse than no answer. You may still describe the file.]`,
+]
+
+export type ColumnRefusalKind = 'identifier-name' | 'dates-or-codes' | 'text' | 'too-few-numbers'
+
+export function classifyNonQuantitative(table: ParsedTable, column: TableColumn): ColumnRefusalKind {
+  // The header settles this one: `94105` is a fine number and a fine ZIP code.
+  if (column.identifierName) return 'identifier-name'
+
+  const filled = table.rows
+    .map((r) => r[column.index])
+    .filter((c): c is NonNullable<typeof c> => Boolean(c) && c!.kind !== 'blank')
+
+  if (filled.length === 0) return 'text'
+  const idLike = filled.filter((c) => c.kind === 'identifier').length
+  if (idLike / filled.length >= 0.9) return 'dates-or-codes'
+  // Some numbers, but not enough to stand on — the only case where scarcity is
+  // genuinely the reason.
+  if (column.numericCells > 0) return 'too-few-numbers'
+  return 'text'
+}
+
+/** The refusal sentence for a named column that cannot be totalled. */
+export function refusalReasonFor(table: ParsedTable, column: TableColumn): string {
+  const notEmpty = table.rows.length - column.blankCells
+  switch (classifyNonQuantitative(table, column)) {
+    case 'identifier-name':
+      return `"${column.name}" identifies rows rather than measuring them, so totalling it would not mean anything`
+    case 'dates-or-codes':
+      // Names the cause. "Not enough data" is not available as a paraphrase of
+      // this sentence, which is the entire point of it.
+      return `"${column.name}" holds dates or codes, not quantities — adding them together would not mean anything`
+    case 'text':
+      return `"${column.name}" holds text rather than numbers, so there is nothing to total`
+    case 'too-few-numbers':
+      return (
+        `"${column.name}" holds ${column.numericCells} value${column.numericCells === 1 ? '' : 's'} that can be` +
+        ` calculated with, out of ${notEmpty} that are not empty — too few to total`
+      )
+  }
 }
 
 const DESCRIBE_HEADER = (source: string): string[] => [
@@ -408,8 +486,7 @@ export async function tableEvidenceFor(
       operation: `refused:${operation}`,
       text: [
         `[MigraPilot could not calculate this from ${fileName}: ${loaded.reason}.`,
-        `Say so plainly. Do NOT add the numbers up yourself and do NOT estimate a total —`,
-        `an invented figure here is worse than no answer. You may still describe the file.]`,
+        ...REFUSAL_DIRECTIVE,
         '',
       ].join('\n'),
     }
@@ -533,8 +610,7 @@ export async function tableEvidenceFor(
       operation: `refused:${operation}`,
       text: [
         `[MigraPilot could not calculate this from ${source}: ${choice.reason}.`,
-        `Say so plainly. Do NOT add the numbers up yourself and do NOT estimate a total —`,
-        `an invented figure here is worse than no answer. You may still describe the file.]`,
+        ...REFUSAL_DIRECTIVE,
         '',
       ].join('\n'),
     }
