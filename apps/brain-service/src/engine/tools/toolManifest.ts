@@ -50,6 +50,13 @@ const ENTRIES: readonly ToolManifestEntry[] = [
     summary: 'Fixture used to exercise the consent path. Not exposed to users.',
   },
   {
+    toolId: 'conversations.rename',
+    capability: 'Rename conversation',
+    mutating: true,
+    connection: 'none',
+    summary: 'Change the title of one of your conversations.',
+  },
+  {
     toolId: 'documents.search',
     capability: 'Document search',
     mutating: false,
