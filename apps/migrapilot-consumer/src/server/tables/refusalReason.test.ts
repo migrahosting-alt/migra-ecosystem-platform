@@ -104,8 +104,9 @@ describe('scarcity is still said when scarcity IS the cause', () => {
 
   it('a mixed text/number column reports too few', () => {
     const c = col(MIXED, 'Score')
-    assert.equal(classifyNonQuantitative(MIXED, c), 'too-few-numbers')
-    assert.match(refusalReasonFor(MIXED, c), /too few to total/i)
+    assert.equal(classifyNonQuantitative(MIXED, c), 'mixed-with-text')
+    assert.match(refusalReasonFor(MIXED, c), /mixes text with numbers/i)
+    assert.ok(!/too few|insufficient|lacks/i.test(refusalReasonFor(MIXED, c)))
   })
 })
 

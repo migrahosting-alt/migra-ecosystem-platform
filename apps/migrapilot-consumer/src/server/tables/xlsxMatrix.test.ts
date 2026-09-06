@@ -329,7 +329,7 @@ describe('xlsx · summarise', () => {
     }
   })
 
-  it('🚨 scarcity is STILL the reason when scarcity is genuinely the cause', async () => {
+  it('🚨 a mixed column is described as a MIXTURE, never as a shortage', async () => {
     /*
      * THE NEGATIVE HALF of the refusal-cause fix. A date column stopped saying
      * "too few to total" because that was never why it was refused. This column
@@ -346,7 +346,20 @@ describe('xlsx · summarise', () => {
     const e = await ask('What is the total Readings?', 'matrix_mixed.xlsx')
     assert.ok(e, 'no evidence for the mixed workbook')
     assert.match(e!.operation, /refused/, e!.operation)
-    assert.match(e!.text, /too few to total/i, e!.text)
+    assert.match(e!.text, /mixes text with numbers/i, e!.text)
+    /*
+     * 🚨 AND NEVER AS A SHORTAGE. "too few to total" produced, in production:
+     * "the data lacks the necessary quantity of numeric entries … the remaining
+     * 4 cells contain non-numeric or invalid data". The cells hold "pending",
+     * "not taken", "sensor offline" — valid entries, none of them invalid.
+     */
+    // Scoped to the REASON line: the directive below it necessarily contains
+    // "invalid" in order to forbid it, and matching the whole blob would fail on
+    // the very sentence that prevents the defect.
+    const reasonLine = e!.text.split('\n')[0]!
+    for (const accusation of [/too few/i, /insufficient/i, /lacks/i, /invalid/i, /\bbad\b/i]) {
+      assert.ok(!accusation.test(reasonLine), `accusatory framing survived: ${reasonLine}`)
+    }
   })
 
   it('a date column is refused for being dates, never for being sparse', async () => {
@@ -363,7 +376,10 @@ describe('xlsx · summarise', () => {
                           ['What is the total Amount?', 'matrix_multisheet.xlsx']] as const) {
       const e = await ask(q, f)
       assert.match(e!.text, /do not substitute a different one/i, `${f}: ${e!.text}`)
-      assert.match(e!.text, /not a fault in their file/i, `${f}: ${e!.text}`)
+      assert.match(e!.text, /never a fault in their file/i, `${f}: ${e!.text}`)
+      // The directive must forbid calling the user's values invalid, which is
+      // what the model reached for once scarcity framing licensed it.
+      assert.match(e!.text, /invalid, bad or wrong/i, `${f}: ${e!.text}`)
     }
   })
 

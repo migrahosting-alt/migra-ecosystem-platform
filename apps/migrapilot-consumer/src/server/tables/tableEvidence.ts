@@ -372,14 +372,16 @@ function describeLines(table: ParsedTable, formulaColumns: readonly number[], la
  * have left the other saying the old thing.
  */
 const REFUSAL_DIRECTIVE = [
-  `Give THAT reason to the user — do not substitute a different one. In particular do not`,
-  `say the file lacks data or has too few values unless the reason above says so: the limit`,
-  `is MigraPilot's, not a fault in their file.`,
+  `Give THAT reason to the user — do not substitute a different one.`,
+  `Never say the file lacks data, is missing values, has too few values, or that any of its`,
+  `cells are invalid, bad or wrong. Values MigraPilot cannot total are still perfectly good`,
+  `entries — "pending" in a readings column is data, not an error. The limit is MigraPilot's,`,
+  `never a fault in their file.`,
   `Do NOT add the numbers up yourself and do NOT estimate a total —`,
   `an invented figure here is worse than no answer. You may still describe the file.]`,
 ]
 
-export type ColumnRefusalKind = 'identifier-name' | 'dates-or-codes' | 'text' | 'too-few-numbers'
+export type ColumnRefusalKind = 'identifier-name' | 'dates-or-codes' | 'text' | 'mixed-with-text'
 
 export function classifyNonQuantitative(table: ParsedTable, column: TableColumn): ColumnRefusalKind {
   // The header settles this one: `94105` is a fine number and a fine ZIP code.
@@ -392,9 +394,13 @@ export function classifyNonQuantitative(table: ParsedTable, column: TableColumn)
   if (filled.length === 0) return 'text'
   const idLike = filled.filter((c) => c.kind === 'identifier').length
   if (idLike / filled.length >= 0.9) return 'dates-or-codes'
-  // Some numbers, but not enough to stand on — the only case where scarcity is
-  // genuinely the reason.
-  if (column.numericCells > 0) return 'too-few-numbers'
+  /*
+   * Some numbers among text. NOT a shortage — a MIXTURE. Framing it as "too few"
+   * implies the file would work with more numbers, which is an accusation about
+   * the user's data; the truth is that a column mixing prose with quantities is
+   * not a quantity column at all.
+   */
+  if (column.numericCells > 0) return 'mixed-with-text'
   return 'text'
 }
 
@@ -410,10 +416,21 @@ export function refusalReasonFor(table: ParsedTable, column: TableColumn): strin
       return `"${column.name}" holds dates or codes, not quantities — adding them together would not mean anything`
     case 'text':
       return `"${column.name}" holds text rather than numbers, so there is nothing to total`
-    case 'too-few-numbers':
+    case 'mixed-with-text':
+      /*
+       * 🚨 MEASURED IN PRODUCTION. This used to read "holds 1 value that can be
+       * calculated with, out of 5 that are not empty — too few to total", and the
+       * reply came back: "the data lacks the necessary quantity of numeric
+       * entries … the remaining 4 cells contain non-numeric or INVALID data".
+       *
+       * Both halves wrong. The cells hold "pending", "not taken", "sensor
+       * offline" — ordinary, valid entries in a column someone keeps by hand.
+       * Nothing about them is invalid, and the column is not short of anything.
+       * It simply is not a column of quantities.
+       */
       return (
-        `"${column.name}" holds ${column.numericCells} value${column.numericCells === 1 ? '' : 's'} that can be` +
-        ` calculated with, out of ${notEmpty} that are not empty — too few to total`
+        `"${column.name}" mixes text with numbers — only ${column.numericCells} of its ${notEmpty} ` +
+        `entries is a quantity, and the rest are ordinary text — so it is not a column that can be totalled`
       )
   }
 }
