@@ -62,6 +62,7 @@ export function ModelFamilySelector({ onChange, className }: ModelFamilySelector
   const wrapper = useRef<HTMLDivElement>(null)
   const trigger = useRef<HTMLButtonElement>(null)
   const items = useRef<Array<HTMLButtonElement | null>>([])
+  const menu = useRef<HTMLDivElement>(null)
 
   // Restore only a choice that is still OFFERED and still AVAILABLE.
   useEffect(() => {
@@ -128,11 +129,23 @@ export function ModelFamilySelector({ onChange, className }: ModelFamilySelector
     return () => window.removeEventListener('resize', measure)
   }, [open])
 
-  // Move real focus with the active index, so a screen reader announces the row
-  // it lands on — including a disabled one, which is the row carrying the reason.
+  /*
+   * Move real focus with the active index, so a screen reader announces the row
+   * it lands on — including a disabled one, which is the row carrying the reason.
+   *
+   * `preventScroll` matters visually: a plain focus() scrolls the item flush
+   * against the container edge, which ate the menu's top padding and CLIPPED the
+   * word "Automatic" the moment the menu opened. Scrolling is then done only
+   * when the row is actually out of view, and the first row pins the list to the
+   * top so its label is never cut.
+   */
   useEffect(() => {
     if (!open) return
-    items.current[activeIndex]?.focus()
+    const el = items.current[activeIndex]
+    if (!el) return
+    el.focus({ preventScroll: true })
+    if (activeIndex === 0) menu.current?.scrollTo({ top: 0 })
+    else el.scrollIntoView({ block: 'nearest' })
   }, [open, activeIndex])
 
   const families = state.phase === 'ready' ? state.families : []
@@ -236,6 +249,7 @@ export function ModelFamilySelector({ onChange, className }: ModelFamilySelector
 
       {open && (
         <div
+          ref={menu}
           role="menu"
           aria-label="Migra models"
           onKeyDown={onMenuKey}
