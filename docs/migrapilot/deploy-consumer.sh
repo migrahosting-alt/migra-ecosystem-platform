@@ -167,7 +167,39 @@ ssh "$HOST" "sudo systemctl restart migrapilot-consumer.service && sleep 6 && sy
 step "10. THE RUNNING PRODUCTION PROCESS REPORTS THE SAME RELEASE"
 # The link whose absence caused the incident. Asked of the live service on its
 # real bind address, not of the directory and not of the symlink.
-RUNNING="$(ssh "$HOST" "curl -s --max-time 8 http://10.10.0.13:3000/api/version")"
+#
+# 🚨 UNREACHABLE IS NOT "WRONG COMMIT", AND A BLIP IS NOT A VERDICT.
+#
+# This was one ssh call whose output fed straight into grep. A transient
+# `kex_exchange_identification: Connection reset by peer` — seen once, on a
+# deploy that was in fact perfectly good — left $RUNNING empty, and `set -e`
+# killed the script AT THE ASSIGNMENT. The log showed step 10 starting, three
+# lines of ssh noise, and then nothing: no pass, no fail, no verdict at all,
+# on the one step whose entire job is to state whether production is correct.
+#
+# Had it survived to the greps it would have been worse — an empty response
+# fails every one of them, so a network blip would have printed "PRODUCTION IS
+# SERVING A DIFFERENT COMMIT — roll back" about a correct release. That is the
+# same defect this product just fixed in its own refusals: never translate one
+# failure ("I could not reach it") into a different and wronger claim ("it is
+# serving the wrong thing").
+RUNNING=""
+for attempt in 1 2 3 4 5; do
+  RUNNING="$(ssh -o ConnectTimeout=15 "$HOST" "curl -s --max-time 8 http://10.10.0.13:3000/api/version" 2>/dev/null || true)"
+  [ -n "$RUNNING" ] && break
+  echo "   attempt $attempt: no answer from the running service, retrying…"
+  sleep 5
+done
+
+if [ -z "$RUNNING" ]; then
+  fail "COULD NOT VERIFY what production is serving — the service did not answer after 5 attempts.
+   This is NOT evidence of a bad release: the symlink was swapped and the unit restarted.
+   Check it yourself before deciding anything:
+     curl -s https://chat.migrateck.com/api/version
+   Expected: commit $COMMIT / release $REL / buildId $BUILD_ID
+   Roll back ONLY if that disagrees."
+fi
+
 echo "   $RUNNING"
 echo "$RUNNING" | grep -q "\"commit\":\"$COMMIT\""   || fail "PRODUCTION IS SERVING A DIFFERENT COMMIT — roll back"
 echo "$RUNNING" | grep -q "\"release\":\"$REL\""     || fail "PRODUCTION IS SERVING A DIFFERENT RELEASE — roll back"
