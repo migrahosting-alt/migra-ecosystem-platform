@@ -244,7 +244,32 @@ ssh -n "$HOST" "sudo systemctl restart $UNIT && sleep 8 && systemctl is-active $
 step "13. THE RUNNING PRODUCTION PROCESS REPORTS THE SAME RELEASE"
 # Asked of the live service on its real bind address, not of the directory and
 # not of the symlink.
-RUNNING="$(ssh -n "$HOST" "curl -s --max-time 10 http://$PROD_BIND:$PROD_PORT/api/version")"
+#
+# 🚨 UNREACHABLE IS NOT "WRONG COMMIT". The consumer deploy carried this same
+# single-ssh pattern and hit a transient
+# `kex_exchange_identification: Connection reset by peer` on a release that was
+# in fact correct. $RUNNING came back empty, `set -e` killed the script at the
+# assignment, and the log showed this step starting and then nothing — no
+# verdict on the one step whose job is to give one. Surviving to the greps would
+# have been worse: an empty response fails all four, so a network blip would
+# have ordered a rollback of a good release.
+RUNNING=""
+for attempt in 1 2 3 4 5; do
+  RUNNING="$(ssh -n -o ConnectTimeout=15 "$HOST" "curl -s --max-time 10 http://$PROD_BIND:$PROD_PORT/api/version" 2>/dev/null || true)"
+  [ -n "$RUNNING" ] && break
+  echo "   attempt $attempt: no answer from the running service, retrying…"
+  sleep 5
+done
+
+if [ -z "$RUNNING" ]; then
+  fail "COULD NOT VERIFY what production is serving — no answer after 5 attempts.
+   This is NOT evidence of a bad release: the symlink was swapped and the unit restarted.
+   Check before deciding anything, and roll back ONLY if it disagrees:
+     ssh $HOST \"curl -s http://$PROD_BIND:$PROD_PORT/api/version\"
+   Expected: commit $COMMIT / release $REL / buildId sha256:$BUILD_ID
+   Rollback if needed: $ROLLBACK_CMD"
+fi
+
 echo "   $RUNNING"
 echo "$RUNNING" | grep -q "\"commit\":\"$COMMIT\""            || fail "PRODUCTION IS SERVING A DIFFERENT COMMIT — roll back: $ROLLBACK_CMD"
 echo "$RUNNING" | grep -q "\"release\":\"$REL\""              || fail "PRODUCTION IS SERVING A DIFFERENT RELEASE — roll back: $ROLLBACK_CMD"
