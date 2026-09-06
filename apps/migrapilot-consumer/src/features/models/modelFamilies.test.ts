@@ -88,15 +88,57 @@ test('no backend model or provider name appears in the consumer selector', () =>
   }
 })
 
+const options = readFileSync(join(process.cwd(), 'src/features/models/modelOptions.ts'), 'utf8')
+
 test('the selector renders the availability REASON, never just hides a family', () => {
-  assert.match(selector, /unavailableReason/, 'the reason must reach the user')
-  assert.match(selector, /disabled=\{!f\.available\}/, 'unavailable families must render disabled')
-  // And it must not filter them out of the list.
-  assert.doesNotMatch(selector, /families\.filter\(\(f\) => f\.available\)\.map/, 'unavailable families must stay visible')
+  // The reason moved into the option model when the picker moved into the
+  // composer, but the property is unchanged: it must reach the user, and an
+  // unavailable family must not be filtered out of the list.
+  assert.match(options, /unavailableNote/, 'the reason must reach the user')
+  assert.match(options, /status: 'unavailable'/, 'unavailable families must be marked as such')
+  assert.doesNotMatch(options, /families\.filter\(\(f\) => f\.available\)/, 'unavailable families must stay visible')
+  assert.doesNotMatch(selector, /families\.filter\(\(f\) => f\.available\)/, 'unavailable families must stay visible')
 })
 
 test('an unavailable family cannot be selected even if the event fires', () => {
-  assert.match(selector, /if \(!family \|\| !family\.available\) return/)
+  assert.match(selector, /if \(!selectable\(families, id\)\) return/)
+  // aria-disabled, not disabled: a natively disabled row is skipped by keyboard
+  // focus, which would make the blocked families the one thing a keyboard user
+  // could never read the reason for — in the only place the reason is shown.
+  assert.match(selector, /aria-disabled=\{blocked\}/)
+  assert.doesNotMatch(selector, /\n\s*disabled=\{blocked\}/)
+})
+
+test('🚨 the unavailable REASONS render only inside the opened menu', () => {
+  /*
+   * THE DEFECT THIS PINS. The chat page printed four governance sentences
+   * permanently above the composer — "Migra Core isn't available yet", and three
+   * more — on every turn, forever. True, and the loudest thing on a page that
+   * exists for typing a message.
+   *
+   * The distinction is preserved, not softened: families stay listed and stay
+   * unselectable with their real reason. What is pinned here is WHEN the reason
+   * is allowed to render.
+   */
+  for (const screen of ['screens/ChatPage.tsx', 'screens/WelcomePage.tsx']) {
+    const src = readSrc(screen)
+    assert.doesNotMatch(src, /unavailableReason|unavailableNote|humanUnavailableReason/, `${screen} renders a governance reason on the page`)
+    assert.doesNotMatch(src, /isn.t available yet/, `${screen} hard-codes an unavailability sentence`)
+  }
+
+  // And in the selector itself, every reason sits inside the `open &&` branch.
+  const openBranch = selector.slice(selector.indexOf('{open && ('))
+  assert.ok(openBranch.length > 0, 'the menu is no longer conditional on `open`')
+  assert.match(openBranch, /option\.hint/, 'the reason is not rendered inside the opened menu')
+  const beforeMenu = selector.slice(0, selector.indexOf('{open && ('))
+  assert.doesNotMatch(beforeMenu, /option\.hint/, 'a reason renders before the menu opens')
+})
+
+test('the collapsed control says only Automatic or the chosen family', () => {
+  // Status in the closed state would put the same four sentences back on the
+  // page in a shorter form.
+  assert.match(selector, /collapsedLabel\(families, selected\)/)
+  assert.doesNotMatch(selector, /Unavailable.*collapsed|collapsed.*Unavailable/i)
 })
 
 // ── the field must actually reach the wire ─────────────────────────────────
@@ -133,7 +175,16 @@ test('modelFamily is declared and forwarded at EVERY hop to the Brain', () => {
   assert.deepEqual(missing, [], 'modelFamily is dropped at one of these hops and never reaches the Brain')
 })
 
-test('the selector is actually mounted in the chat screen', () => {
-  // A component nobody renders passes every unit test it has.
-  assert.match(readSrc('screens/ChatPage.tsx'), /<ModelFamilySelector/)
+test('the selector is actually mounted, through the composer', () => {
+  /*
+   * A component nobody renders passes every unit test it has. There are TWO hops
+   * now that the picker lives inside the composer: the Composer must render it,
+   * and each screen must pass the handler that opts into offering the choice.
+   * Miss the second and the picker silently disappears from the product while
+   * every test here still passes.
+   */
+  assert.match(readSrc('components/chat/Composer.tsx'), /<ModelFamilySelector/)
+  for (const screen of ['screens/ChatPage.tsx', 'screens/WelcomePage.tsx']) {
+    assert.match(readSrc(screen), /onModelFamilyChange=\{setModelFamily\}/, `${screen} does not offer the picker`)
+  }
 })

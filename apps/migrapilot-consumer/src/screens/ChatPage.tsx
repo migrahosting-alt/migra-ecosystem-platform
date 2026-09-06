@@ -9,7 +9,6 @@ import { RailCard } from '@/components/rail/RailPanels'
 import { useChat } from '@/state/ChatProvider'
 import { FeedbackProvider } from '@/state/FeedbackProvider'
 import { ConversationMenu } from '@/features/conversations/ConversationMenu'
-import { ModelFamilySelector } from '@/features/models/ModelFamilySelector'
 import { AnonymousQuotaNotice } from '@/features/anonymous/AnonymousQuotaNotice'
 import { askAgainOptions, canAskAgain, lastQuestionOf } from '@/features/conversations/askAgain'
 import { isExhausted, useAnonymousQuota } from '@/features/anonymous/AnonymousQuotaProvider'
@@ -247,12 +246,6 @@ export function ChatPage() {
           */}
           <AnonymousQuotaNotice className="mb-3.5" />
           {/*
-            The model choice sits directly above the composer, because it is read
-            in the same glance as the thing being typed. It shows Migra families
-            — product identities — and never the backend serving them.
-          */}
-          <ModelFamilySelector className="mb-2" onChange={setModelFamily} />
-          {/*
             `streaming` is the SAME `pending` that drives the typing indicator, so
             the send/stop control and the spinner can never disagree about whether
             a turn is running — and Stop is offered exactly while one is.
@@ -269,6 +262,7 @@ export function ChatPage() {
               : {})}
             onDetachConversationFile={(name) => void detachConversationFile(conversation.id, name)}
             {...(draft ? { draft } : {})}
+            onModelFamilyChange={setModelFamily}
             streaming={pending}
             onStop={() => stopTurn(conversation.id)}
             disabled={outOfTurns}

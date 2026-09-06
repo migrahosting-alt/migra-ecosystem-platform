@@ -8,7 +8,6 @@ import { LogoMark } from '@/components/brand/Logo'
 import { Composer, ComposerDisclaimer } from '@/components/chat/Composer'
 import { IconTile } from '@/components/ui/Badge'
 import { useChat } from '@/state/ChatProvider'
-import { ModelFamilySelector } from '@/features/models/ModelFamilySelector'
 import { AnonymousQuotaNotice } from '@/features/anonymous/AnonymousQuotaNotice'
 import { isExhausted, useAnonymousQuota } from '@/features/anonymous/AnonymousQuotaProvider'
 
@@ -135,10 +134,9 @@ export function WelcomePage() {
 
       <div className="mt-auto">
         <AnonymousQuotaNotice className="mb-3.5" />
-        {/* Choosing a model before the first question, where the choice matters. */}
-        <ModelFamilySelector className="mb-2" onChange={setModelFamily} />
         <Composer
           onSubmit={start}
+          onModelFamilyChange={setModelFamily}
           autoFocus
           disabled={outOfTurns}
           disabledReason="You have used all your free messages. Sign in or create an account to keep going."

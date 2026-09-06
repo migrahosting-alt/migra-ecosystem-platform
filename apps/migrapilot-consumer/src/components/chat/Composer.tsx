@@ -35,6 +35,7 @@ const IMAGE_REF = /^img_[0-9a-f]{32}$/
 /** Bounded and stated, rather than silently dropping the extras. */
 const MAX_TURN_IMAGES = 4
 import { micDisabledReason, useMicAvailability } from '@/features/voice/useMicAvailability'
+import { ModelFamilySelector } from '@/features/models/ModelFamilySelector'
 import { VoicePanel } from '@/features/voice/VoicePanel'
 import { useVoiceRecorder } from '@/features/voice/useVoiceRecorder'
 import { cn } from '@/lib/cn'
@@ -77,6 +78,7 @@ export function Composer({
   conversationFiles,
   onDetachConversationFile,
   onDetachConversationImage,
+  onModelFamilyChange,
 }: {
   /**
    * `meta.attachments` names the searchable files this turn attached, if any.
@@ -92,6 +94,14 @@ export function Composer({
   className?: string
   /** Renders the resting state already focused, as in the research mockup. */
   highlighted?: boolean
+  /**
+   * Choose which Migra model answers. Rendered as a control INSIDE the composer,
+   * beside the attachment button, rather than as a banner above it.
+   *
+   * Omit it and no picker appears — the server routes, which is the governed
+   * default. Passing the handler is what opts a surface into offering the choice.
+   */
+  onModelFamilyChange?: (familyId: string | undefined) => void
   /**
    * The composer may not send.
    *
@@ -784,6 +794,16 @@ export function Composer({
             disabledReason={disabledReason}
             actions={hubActions}
           />
+
+          {/*
+            The model choice sits WITH the other composer controls, because it is
+            read in the same glance as the thing being typed. Collapsed it says
+            only "Automatic" or the chosen family; the governance detail — which
+            families are unavailable and why — lives in the opened menu, where a
+            person is actually choosing, instead of printed permanently over the
+            chat page.
+          */}
+          {onModelFamilyChange && <ModelFamilySelector onChange={onModelFamilyChange} />}
         </div>
 
         <div className="flex items-center gap-2.5">
