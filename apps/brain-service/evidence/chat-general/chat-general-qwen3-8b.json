@@ -1,0 +1,581 @@
+{
+  "capability": "chat.general",
+  "suiteRevision": "chat-general/1.2.0",
+  "thresholdRevision": "chat-general-threshold/1.0.0",
+  "candidate": {
+    "model": "qwen3:8b",
+    "digest": "sha256:500a1f067a9f782620b40bee6f7b0c89e17ae61f686b92c24933e4ca4b2b8b41",
+    "runtime": "ollama",
+    "hardware": "MigraTeck / NVIDIA GeForce RTX 3090"
+  },
+  "harness": {
+    "maxTokens": 3072,
+    "replicationRuns": 3
+  },
+  "startedAt": "2026-09-06T15:19:01.804Z",
+  "finishedAt": "2026-09-06T15:20:55.180Z",
+  "cases": [
+    {
+      "id": "if-exact-token",
+      "dimension": "instruction_following",
+      "passed": true,
+      "runs": {
+        "passed": 1,
+        "total": 1
+      },
+      "answers": [
+        "ALPHA-7"
+      ],
+      "intent": "A literal instruction is followed literally, with no preamble or trailing offer of help."
+    },
+    {
+      "id": "if-word-count",
+      "dimension": "instruction_following",
+      "passed": true,
+      "runs": {
+        "passed": 1,
+        "total": 1
+      },
+      "answers": [
+        "endless blue depths"
+      ],
+      "intent": "A counted constraint is honoured exactly, not approximately."
+    },
+    {
+      "id": "if-format-lines",
+      "dimension": "instruction_following",
+      "passed": true,
+      "runs": {
+        "passed": 1,
+        "total": 1
+      },
+      "answers": [
+        "red\nblue\nyellow"
+      ],
+      "intent": "Shape instructions are obeyed — a numbered list here is a failure, not a stylistic choice."
+    },
+    {
+      "id": "fact-capital",
+      "dimension": "factual_discipline",
+      "passed": true,
+      "runs": {
+        "passed": 1,
+        "total": 1
+      },
+      "answers": [
+        "Tokyo"
+      ],
+      "intent": "A settled fact is answered directly and correctly."
+    },
+    {
+      "id": "fact-year",
+      "dimension": "factual_discipline",
+      "passed": true,
+      "runs": {
+        "passed": 1,
+        "total": 1
+      },
+      "answers": [
+        "1969"
+      ],
+      "intent": "A checkable date is right, and stated without hedging it into uselessness."
+    },
+    {
+      "id": "fact-count",
+      "dimension": "factual_discipline",
+      "passed": true,
+      "runs": {
+        "passed": 1,
+        "total": 1
+      },
+      "answers": [
+        "366"
+      ],
+      "intent": "A precise quantity is stated precisely — 366, not \"about a year\" and not 365."
+    },
+    {
+      "id": "amb-book-it",
+      "dimension": "ambiguity_handling",
+      "passed": true,
+      "runs": {
+        "passed": 3,
+        "total": 3
+      },
+      "answers": [
+        "Sure! Could you please clarify what you'd like to book and provide the necessary details such as date, time, location, or any other specifics? I'm here to help!",
+        "Sure! Could you please clarify what you'd like to book? For example, are you looking to book a hotel, flight, restaurant reservation, event, or something else? Let me know the details so I can assist you better!",
+        "Sure! Could you please clarify what you'd like to book? For example, are you looking to book a flight, hotel, event, service, or something else? Sharing details like dates, location, or specific requirements will help me assist you better! 😊"
+      ],
+      "intent": "An under-specified request earns a question, never an invented booking."
+    },
+    {
+      "id": "amb-translate",
+      "dimension": "ambiguity_handling",
+      "passed": true,
+      "runs": {
+        "passed": 3,
+        "total": 3
+      },
+      "answers": [
+        "Please provide the text you'd like me to translate.",
+        "Sure! Please provide the text you'd like me to translate, and I'll be happy to help.",
+        "Sure! Please provide the text you'd like me to translate, and I'll be happy to help."
+      ],
+      "intent": "Nothing was supplied to translate; asking is the only honest move."
+    },
+    {
+      "id": "mt-code-recall",
+      "dimension": "multi_turn_coherence",
+      "passed": true,
+      "runs": {
+        "passed": 1,
+        "total": 1
+      },
+      "answers": [
+        "The code you gave me was **ZULU-4417**."
+      ],
+      "intent": "A fact given earlier survives the turn boundary — the failure that once made chat memoryless."
+    },
+    {
+      "id": "mt-preference-recall",
+      "dimension": "multi_turn_coherence",
+      "passed": true,
+      "runs": {
+        "passed": 1,
+        "total": 1
+      },
+      "answers": [
+        "You mentioned your favorite color is **teal**! 😊 Let me know if you'd like to chat more about it or explore other colors!"
+      ],
+      "intent": "Stated preferences persist across turns."
+    },
+    {
+      "id": "rc-one-sentence",
+      "dimension": "response_control",
+      "passed": true,
+      "runs": {
+        "passed": 1,
+        "total": 1
+      },
+      "answers": [
+        "Photosynthesis is the process by which plants, algae, and some bacteria convert light energy, usually from the sun, into chemical energy stored in glucose, using carbon dioxide and water in the presence of chlorophyll."
+      ],
+      "intent": "\"One sentence\" is a limit, not a suggestion."
+    },
+    {
+      "id": "rc-detailed",
+      "dimension": "response_control",
+      "passed": true,
+      "runs": {
+        "passed": 1,
+        "total": 1
+      },
+      "answers": [
+        "Photosynthesis is the process by which green plants, algae, and some bacteria convert light energy into chemical energy, using carbon dioxide and water to produce glucose and oxygen. This process occurs primarily in the chloroplasts of plant cells, where chlorophyll, a green pigment, absorbs sunlight. The light-dependent reactions take place in the thylakoid membranes, where sunlight splits water molecules into oxygen, protons, and electrons, generating ATP and NADPH as energy carriers. The Calvin cycle, or light-independent reactions, occurs in the stroma and uses ATP and NADPH to fix carbon dioxide into glucose through a series of enzyme-catalyzed steps. Photosynthesis is vital for life on Earth, as it produces oxygen, sustains food chains, and regulates atmospheric carbon dioxide levels."
+      ],
+      "intent": "Length control works in BOTH directions; a model stuck at one register fails one of these two."
+    },
+    {
+      "id": "so-json-object",
+      "dimension": "structured_output",
+      "passed": true,
+      "runs": {
+        "passed": 1,
+        "total": 1
+      },
+      "answers": [
+        "{\"city\": \"Tokyo\", \"country\": \"Japan\"}"
+      ],
+      "intent": "Machine-readable output is actually parseable and carries the requested keys."
+    },
+    {
+      "id": "so-json-array",
+      "dimension": "structured_output",
+      "passed": true,
+      "runs": {
+        "passed": 1,
+        "total": 1
+      },
+      "answers": [
+        "[1, 2, 3]"
+      ],
+      "intent": "Exact structure, not something JSON-shaped."
+    },
+    {
+      "id": "ref-bank-balance",
+      "dimension": "refusal_uncertainty",
+      "passed": true,
+      "runs": {
+        "passed": 3,
+        "total": 3
+      },
+      "answers": [
+        "I don't have access to real-time or personal financial information, including your bank account balance. For the most accurate and up-to-date information, please log in to your bank's official website, mobile app, or contact your bank's customer service directly. Let me know if you have any other questions!",
+        "I cannot access your bank account information or provide details about your financial accounts. For security and privacy reasons, you should always check your balance directly through your bank's official website, mobile app, or by contacting your financial institution's customer service. Let me know if you need help with anything else!",
+        "I cannot access your bank account or retrieve your current balance. For security reasons, please log into your bank's official website or contact their customer service directly for this information. Be cautious of sharing personal financial details with anyone."
+      ],
+      "intent": "Unknowable private facts are declined, and NO plausible number is offered."
+    },
+    {
+      "id": "ref-yesterday-meal",
+      "dimension": "refusal_uncertainty",
+      "passed": true,
+      "runs": {
+        "passed": 3,
+        "total": 3
+      },
+      "answers": [
+        "I don't have access to personal information or a record of your daily activities, including what you ate for breakfast. If you'd like to track your meals or discuss healthy breakfast ideas, I'd be happy to help! Let me know how I can assist. 😊",
+        "I don't have access to personal data or memory of past events, so I can't recall what you ate for breakfast yesterday. If you'd like to share what you had, I’d be happy to help! 😊 Or maybe you’re trying to remember yourself? Let me know how I can assist!",
+        "I don’t have access to your personal data or history, so I can’t know what you ate for breakfast yesterday. If you’d like to share what you had, I’d be happy to help you remember or discuss breakfast ideas! 😊 What would you like to know?"
+      ],
+      "intent": "The model does not have this and must say so."
+    },
+    {
+      "id": "reason-time",
+      "dimension": "basic_reasoning",
+      "passed": true,
+      "runs": {
+        "passed": 1,
+        "total": 1
+      },
+      "answers": [
+        "The train departs at 3:00 pm and the journey takes 2 hours and 30 minutes. Adding 2 hours to 3:00 pm brings us to 5:00 pm. Adding the remaining 30 minutes results in 5:30 pm. \n\n**Answer:** 5:30 pm"
+      ],
+      "intent": "A two-step everyday calculation, of the kind ordinary chat is full of."
+    },
+    {
+      "id": "reason-transitive",
+      "dimension": "basic_reasoning",
+      "passed": true,
+      "runs": {
+        "passed": 1,
+        "total": 1
+      },
+      "answers": [
+        "Carol"
+      ],
+      "intent": "Simple transitive ordering — the everyday inference that keeps ordinary advice coherent."
+    },
+    {
+      "id": "reason-arithmetic",
+      "dimension": "basic_reasoning",
+      "passed": true,
+      "runs": {
+        "passed": 1,
+        "total": 1
+      },
+      "answers": [
+        "68"
+      ],
+      "intent": "Arithmetic that must simply be right."
+    },
+    {
+      "id": "tool-calculator",
+      "dimension": "tool_selection",
+      "passed": true,
+      "runs": {
+        "passed": 1,
+        "total": 1
+      },
+      "answers": [
+        "calculator"
+      ],
+      "intent": "Choosing the right instrument, and not hedging by naming several."
+    },
+    {
+      "id": "tool-file-reader",
+      "dimension": "tool_selection",
+      "passed": true,
+      "runs": {
+        "passed": 1,
+        "total": 1
+      },
+      "answers": [
+        "file_reader"
+      ],
+      "intent": "The obviously-correct tool is chosen for an obviously-matching task."
+    },
+    {
+      "id": "hall-fake-paper",
+      "dimension": "hallucination_resistance",
+      "passed": false,
+      "runs": {
+        "passed": 1,
+        "total": 3
+      },
+      "answers": [
+        "The 2019 paper *\"Quantum Bananas in Distributed Systems\"* by Professor Halvorsen (likely a fictional or humorous reference) explores the intersection of quantum computing and distributed systems, using the metaphor of \"quantum bananas\" to illustrate complex concepts. While the exact content of this paper is not publicly available, a plausible summary based on common themes in distributed systems research could involve:\n\n1. **Context**: The paper may address challenges in distributed systems, such as consistency, fault tolerance, or communication, while drawing analogies to quantum mechanics (e.g., entanglement, superposition) to propose novel solutions or models.\n\n2. **Key Contributions**: It might introduce frameworks or algorithms that leverage quantum principles to improve scalability, security, or efficiency in distributed environments, though such applications are still largely theoretical.\n\n3. **Methodology**: The paper could use metaphors like \"quantum bananas\" to simplify or visualize abstract problems, making complex concepts more accessible in both academic and practical contexts.\n\n4. **Implications**: The work may highlight the potential of quantum-inspired approaches in overcoming classical limitations in distributed systems, while cautioning against over-optimism in real-world deployment.\n\n**Note**: This summary is speculative, as no official information about the paper exists. The title likely serves as a whimsical or provocative framing device rather than a literal reference to quantum bananas. For accuracy, further details from the original paper would be required.",
+        "The 2019 paper *\"Quantum Bananas in Distributed Systems\"* by Professor Halvorsen uses a metaphorical title to explore the intersection of quantum computing and distributed systems. The paper humorously or poetically refers to \"quantum bananas\" as a way to highlight unconventional or paradoxical challenges that arise when integrating quantum mechanics principles into distributed computing paradigms. \n\n**Key Points:**\n1. **Quantum Principles in Distributed Systems**: The paper examines how quantum concepts like entanglement, superposition, and quantum communication protocols could theoretically address classical challenges in distributed systems (e.g., consensus, fault tolerance, and communication latency). It suggests that quantum mechanics might offer novel solutions to problems that are computationally intensive or inherently distributed in classical systems.\n\n2. **\"Quantum Bananas\" as a Metaphor**: The title is likely a whimsical reference to the \"Banana Problem\" or similar paradoxes in distributed computing, where unexpected outcomes (e.g., \"Banana protocol\" errors) arise due to non-deterministic or asynchronous behaviors. The term \"quantum bananas\" may symbolize the unpredictable or counterintuitive nature of quantum systems applied to distributed environments, emphasizing the potential for both innovation and complexity.\n\n3. **Challenges and Opportunities**: The paper highlights the challenges of merging quantum computing—characterized by non-classical correlations and probabilistic behavior—with the deterministic requirements of distributed systems. It may propose theoretical frameworks or models that bridge these domains, suggesting that quantum-inspired approaches could enable more efficient or secure distributed protocols.\n\n4. **Theoretical and Philosophical Angle**: The work likely serves as a thought experiment or conceptual exploration, using the metaphor of \"quantum bananas\" to provoke reflection on the philosophical and practical implications of quantum technologies in distributed settings. It might also critique the overreach of quantum computing claims in addressing classical distributed problems, advocating for cautious integration.\n\n**Conclusion**: While the paper is not a technical breakthrough but rather a conceptual or humorous treatise, it underscores the potential and pitfalls of applying quantum theory to distributed systems. The \"quantum bananas\" metaphor encapsulates the excitement and uncertainty of this interdisciplinary intersection, inviting further research into quantum-inspired solutions for distributed computing challenges.",
+        "The paper \"Quantum Bananas in Distributed Systems\" by Professor Halvorsen (2019) is not a recognized or published academic work in the fields of quantum computing, distributed systems, or related disciplines. The title appears to be fictional, satirical, or a hypothetical concept rather than a real research paper. \n\nIf this refers to a metaphorical or conceptual exploration, it might humorously or abstractly combine quantum mechanics (e.g., superposition, entanglement) with distributed systems (e.g., consensus, fault tolerance), using \"bananas\" as a metaphor for unpredictable or chaotic elements in system design. However, without access to the actual paper, no definitive summary can be provided. \n\nFor a meaningful summary, please clarify the context, source, or specific focus of the work. If you’re referring to a fictional or hypothetical paper, feel free to share more details!"
+      ],
+      "intent": "An invented source must not acquire an invented summary."
+    },
+    {
+      "id": "hall-fake-city",
+      "dimension": "hallucination_resistance",
+      "passed": true,
+      "runs": {
+        "passed": 3,
+        "total": 3
+      },
+      "answers": [
+        "The city of Zyrxalia is not a recognized real-world location, and there is no documented population data for it. If Zyrxalia is a fictional place (e.g., from a book, game, or creative work), its population would depend on the context provided in that source. If you meant a different city or have additional details, please clarify!",
+        "The city of Zyrxalia does not appear to be a real place in documented history, geography, or contemporary data sources. If Zyrxalia is a fictional city (e.g., from a book, movie, game, or creative work), its population would be defined by the creator of that universe. Without additional context or sources, I cannot provide a specific population number. \n\nIf you have more details about Zyrxalia’s origin, feel free to share, and I’ll do my best to assist!",
+        "The city of Zyrxalia is not a recognized or real location in any known geography, history, or contemporary data. It appears to be a fictional or hypothetical place. Therefore, there is no established population figure for Zyrxalia. If you have additional context or references to this city (e.g., from a book, game, or fictional universe), please provide details, and I can attempt to assist further."
+      ],
+      "intent": "A non-existent place gets no confident population figure."
+    },
+    {
+      "id": "cont-pronoun",
+      "dimension": "conversation_continuity",
+      "passed": true,
+      "runs": {
+        "passed": 1,
+        "total": 1
+      },
+      "answers": [
+        "The lifespan of a dog like Rex depends on his breed, size, and overall health. For example:  \n- **Small breeds** (e.g., Chihuahuas, Poodles): **12–16 years**  \n- **Medium breeds** (e.g., Border Collies, Dachshunds): **10–14 years**  \n- **Large breeds** (e.g., Great Danes, Mastiffs): **8–10 years**  \n\nIf you share his breed, I can give a more tailored estimate! 🐾 With proper care, many dogs live well into their teens. Let me know how I can help!"
+      ],
+      "intent": "\"He\" resolves from context instead of restarting the conversation."
+    },
+    {
+      "id": "ml-haitian-creole",
+      "dimension": "multilingual",
+      "passed": false,
+      "runs": {
+        "passed": 0,
+        "total": 1
+      },
+      "answers": [
+        "Porte-Prince se kapital peyi Ayiti."
+      ],
+      "intent": "Haitian Creole is a language MigraPilot promises, so Core must handle ordinary questions in it."
+    },
+    {
+      "id": "ml-spanish",
+      "dimension": "multilingual",
+      "passed": true,
+      "runs": {
+        "passed": 1,
+        "total": 1
+      },
+      "answers": [
+        "La capital de España es Madrid."
+      ],
+      "intent": "A language instruction is obeyed, not silently answered in English."
+    },
+    {
+      "id": "nc-must-not-refuse",
+      "dimension": "negative_control",
+      "passed": true,
+      "runs": {
+        "passed": 1,
+        "total": 1
+      },
+      "answers": [
+        "Paris"
+      ],
+      "intent": "FAILS a model that games refusal_uncertainty and hallucination_resistance by never committing to anything. An always-uncertain model scores well on those dimensions and is useless."
+    },
+    {
+      "id": "nc-must-not-ask",
+      "dimension": "negative_control",
+      "passed": true,
+      "runs": {
+        "passed": 1,
+        "total": 1
+      },
+      "answers": [
+        "4"
+      ],
+      "intent": "FAILS a model that games ambiguity_handling by asking a clarifying question about everything. A fully-specified question must simply be answered."
+    },
+    {
+      "id": "nc-must-be-brief",
+      "dimension": "negative_control",
+      "passed": true,
+      "runs": {
+        "passed": 1,
+        "total": 1
+      },
+      "answers": [
+        "blue"
+      ],
+      "intent": "FAILS a model that games response_control by always writing at length. Brevity on demand is part of the contract."
+    }
+  ],
+  "verdict": {
+    "overallRate": 0.9310344827586207,
+    "meetsOverall": true,
+    "dimensions": [
+      {
+        "dimension": "instruction_following",
+        "passed": 3,
+        "total": 3,
+        "rate": 1,
+        "meetsFloor": true
+      },
+      {
+        "dimension": "factual_discipline",
+        "passed": 3,
+        "total": 3,
+        "rate": 1,
+        "meetsFloor": true
+      },
+      {
+        "dimension": "ambiguity_handling",
+        "passed": 2,
+        "total": 2,
+        "rate": 1,
+        "meetsFloor": true
+      },
+      {
+        "dimension": "multi_turn_coherence",
+        "passed": 2,
+        "total": 2,
+        "rate": 1,
+        "meetsFloor": true
+      },
+      {
+        "dimension": "response_control",
+        "passed": 2,
+        "total": 2,
+        "rate": 1,
+        "meetsFloor": true
+      },
+      {
+        "dimension": "structured_output",
+        "passed": 2,
+        "total": 2,
+        "rate": 1,
+        "meetsFloor": true
+      },
+      {
+        "dimension": "refusal_uncertainty",
+        "passed": 2,
+        "total": 2,
+        "rate": 1,
+        "meetsFloor": true
+      },
+      {
+        "dimension": "basic_reasoning",
+        "passed": 3,
+        "total": 3,
+        "rate": 1,
+        "meetsFloor": true
+      },
+      {
+        "dimension": "tool_selection",
+        "passed": 2,
+        "total": 2,
+        "rate": 1,
+        "meetsFloor": true
+      },
+      {
+        "dimension": "hallucination_resistance",
+        "passed": 1,
+        "total": 2,
+        "rate": 0.5,
+        "meetsFloor": false
+      },
+      {
+        "dimension": "conversation_continuity",
+        "passed": 1,
+        "total": 1,
+        "rate": 1,
+        "meetsFloor": true
+      },
+      {
+        "dimension": "multilingual",
+        "passed": 1,
+        "total": 2,
+        "rate": 0.5,
+        "meetsFloor": true
+      },
+      {
+        "dimension": "negative_control",
+        "passed": 3,
+        "total": 3,
+        "rate": 1,
+        "meetsFloor": true
+      }
+    ],
+    "failedDimensions": [
+      "hallucination_resistance"
+    ],
+    "qualifies": false,
+    "thresholdRevision": "chat-general-threshold/1.0.0"
+  },
+  "failures": [
+    {
+      "id": "hall-fake-paper",
+      "dimension": "hallucination_resistance",
+      "passed": false,
+      "runs": {
+        "passed": 1,
+        "total": 3
+      },
+      "answers": [
+        "The 2019 paper *\"Quantum Bananas in Distributed Systems\"* by Professor Halvorsen (likely a fictional or humorous reference) explores the intersection of quantum computing and distributed systems, using the metaphor of \"quantum bananas\" to illustrate complex concepts. While the exact content of this paper is not publicly available, a plausible summary based on common themes in distributed systems research could involve:\n\n1. **Context**: The paper may address challenges in distributed systems, such as consistency, fault tolerance, or communication, while drawing analogies to quantum mechanics (e.g., entanglement, superposition) to propose novel solutions or models.\n\n2. **Key Contributions**: It might introduce frameworks or algorithms that leverage quantum principles to improve scalability, security, or efficiency in distributed environments, though such applications are still largely theoretical.\n\n3. **Methodology**: The paper could use metaphors like \"quantum bananas\" to simplify or visualize abstract problems, making complex concepts more accessible in both academic and practical contexts.\n\n4. **Implications**: The work may highlight the potential of quantum-inspired approaches in overcoming classical limitations in distributed systems, while cautioning against over-optimism in real-world deployment.\n\n**Note**: This summary is speculative, as no official information about the paper exists. The title likely serves as a whimsical or provocative framing device rather than a literal reference to quantum bananas. For accuracy, further details from the original paper would be required.",
+        "The 2019 paper *\"Quantum Bananas in Distributed Systems\"* by Professor Halvorsen uses a metaphorical title to explore the intersection of quantum computing and distributed systems. The paper humorously or poetically refers to \"quantum bananas\" as a way to highlight unconventional or paradoxical challenges that arise when integrating quantum mechanics principles into distributed computing paradigms. \n\n**Key Points:**\n1. **Quantum Principles in Distributed Systems**: The paper examines how quantum concepts like entanglement, superposition, and quantum communication protocols could theoretically address classical challenges in distributed systems (e.g., consensus, fault tolerance, and communication latency). It suggests that quantum mechanics might offer novel solutions to problems that are computationally intensive or inherently distributed in classical systems.\n\n2. **\"Quantum Bananas\" as a Metaphor**: The title is likely a whimsical reference to the \"Banana Problem\" or similar paradoxes in distributed computing, where unexpected outcomes (e.g., \"Banana protocol\" errors) arise due to non-deterministic or asynchronous behaviors. The term \"quantum bananas\" may symbolize the unpredictable or counterintuitive nature of quantum systems applied to distributed environments, emphasizing the potential for both innovation and complexity.\n\n3. **Challenges and Opportunities**: The paper highlights the challenges of merging quantum computing—characterized by non-classical correlations and probabilistic behavior—with the deterministic requirements of distributed systems. It may propose theoretical frameworks or models that bridge these domains, suggesting that quantum-inspired approaches could enable more efficient or secure distributed protocols.\n\n4. **Theoretical and Philosophical Angle**: The work likely serves as a thought experiment or conceptual exploration, using the metaphor of \"quantum bananas\" to provoke reflection on the philosophical and practical implications of quantum technologies in distributed settings. It might also critique the overreach of quantum computing claims in addressing classical distributed problems, advocating for cautious integration.\n\n**Conclusion**: While the paper is not a technical breakthrough but rather a conceptual or humorous treatise, it underscores the potential and pitfalls of applying quantum theory to distributed systems. The \"quantum bananas\" metaphor encapsulates the excitement and uncertainty of this interdisciplinary intersection, inviting further research into quantum-inspired solutions for distributed computing challenges.",
+        "The paper \"Quantum Bananas in Distributed Systems\" by Professor Halvorsen (2019) is not a recognized or published academic work in the fields of quantum computing, distributed systems, or related disciplines. The title appears to be fictional, satirical, or a hypothetical concept rather than a real research paper. \n\nIf this refers to a metaphorical or conceptual exploration, it might humorously or abstractly combine quantum mechanics (e.g., superposition, entanglement) with distributed systems (e.g., consensus, fault tolerance), using \"bananas\" as a metaphor for unpredictable or chaotic elements in system design. However, without access to the actual paper, no definitive summary can be provided. \n\nFor a meaningful summary, please clarify the context, source, or specific focus of the work. If you’re referring to a fictional or hypothetical paper, feel free to share more details!"
+      ],
+      "intent": "An invented source must not acquire an invented summary."
+    },
+    {
+      "id": "ml-haitian-creole",
+      "dimension": "multilingual",
+      "passed": false,
+      "runs": {
+        "passed": 0,
+        "total": 1
+      },
+      "answers": [
+        "Porte-Prince se kapital peyi Ayiti."
+      ],
+      "intent": "Haitian Creole is a language MigraPilot promises, so Core must handle ordinary questions in it."
+    }
+  ],
+  "negativeControls": [
+    {
+      "id": "nc-must-not-refuse",
+      "dimension": "negative_control",
+      "passed": true,
+      "runs": {
+        "passed": 1,
+        "total": 1
+      },
+      "answers": [
+        "Paris"
+      ],
+      "intent": "FAILS a model that games refusal_uncertainty and hallucination_resistance by never committing to anything. An always-uncertain model scores well on those dimensions and is useless."
+    },
+    {
+      "id": "nc-must-not-ask",
+      "dimension": "negative_control",
+      "passed": true,
+      "runs": {
+        "passed": 1,
+        "total": 1
+      },
+      "answers": [
+        "4"
+      ],
+      "intent": "FAILS a model that games ambiguity_handling by asking a clarifying question about everything. A fully-specified question must simply be answered."
+    },
+    {
+      "id": "nc-must-be-brief",
+      "dimension": "negative_control",
+      "passed": true,
+      "runs": {
+        "passed": 1,
+        "total": 1
+      },
+      "answers": [
+        "blue"
+      ],
+      "intent": "FAILS a model that games response_control by always writing at length. Brevity on demand is part of the contract."
+    }
+  ]
+}
