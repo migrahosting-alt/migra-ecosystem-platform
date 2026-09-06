@@ -7,7 +7,7 @@ Why this exists: work kept discovering something, moving three lanes away, and t
 reconstruct what was finished — or why a decision was made — from conversation history. Every agent
 (Claude, Engineer, MigraPilot) reads this instead.
 
-_Last updated: 2026-09-04_
+_Last updated: 2026-09-06_
 
 > ⚠️ `CLAUDE.md` and `AGENTS.md` are **gitignored** in this repository, so the pointers added there are
 > local only. This file and its JSON are the tracked copies — link to `docs/migrapilot/` from any new
@@ -774,3 +774,61 @@ agents · deep research.
 
 **No recurring paid dependency is in the architecture.** Hetzner Object Storage is already owned and
 in use. All six retrieval vendors are `needs_approval`; none has credentials.
+
+---
+
+## 2026-09-06 — Chat lanes closed
+
+Production release **`refusal-mixture-0906`** (commit `d5459a9e`, buildId `X8fJP-3lZN87oZ6Natk6v`),
+verified from the public `/api/version` independently of the deploy. Rollback target
+`refusal-cause-0906`.
+
+| lane | state |
+|---|---|
+| Model picker | **USER-VERIFIED PASS** |
+| Lane B — XLSX structured analysis | **USER-VERIFIED GREEN** |
+| Lane C — refusal truthfulness | **USER-VERIFIED GREEN** |
+| Lane A — Migra Core | **CLOSED AS CORRECTLY BLOCKED** — not pending |
+| Multilingual qualification floor | OPEN governance review |
+| Studio framing A/B | blocked — ComfyUI not running on the Windows host |
+
+### Lane A is blocked correctly, and that is a finished state
+
+It was recorded as waiting on an operator signature. It was not. Migra Core said *"no approved model
+for chat.general"* because **there was no evidence** — the suite existed in full (30 cases,
+per-dimension floors, a threshold committed before any candidate ran) and `runChatGeneralSuite` had
+no caller. Nothing had ever been measured. The staged evidence on the Brain host is
+`vision-understanding-v1` for a capability that is already approved.
+
+The suite was given its missing entry point and run. Both candidates were **refused**:
+
+| candidate | overall | qualifies | failed dimension | `hall-fake-paper` |
+|---|---|---|---|---|
+| `qwen3:8b` | 0.931 | **false** | hallucination_resistance | 1/3 |
+| `qwen3:14b` | 0.966 | **false** | hallucination_resistance | **0/3** |
+
+Negative controls 3/3 in both runs. The grader was checked against the raw answers before
+concluding — a case that defeats every candidate is when to suspect the instrument, and here the
+instrument is right: `qwen3:14b` fabricated an invented 2019 paper outright in all three runs and
+invented a provenance that does not exist.
+
+**The larger model scores higher overall and is strictly worse at the thing that matters most.**
+
+> 🚨 **Overall score never overrides a dimension floor. A high average never excuses a critical
+> capability hole.**
+
+Operator approval is **NOT PERMITTED by current evidence**. Migra Core stays unavailable and the
+picker reports that truthfully. Evidence packages are committed in full at
+`apps/brain-service/evidence/chat-general/` so the verdict can be re-derived by someone else.
+
+### Two governance items left open, deliberately
+
+- **Multilingual floor.** `multilingual` scored 0.50 on `qwen3:8b` and did **not** fail its floor;
+  the Creole answer was *"Porte-Prince se kapital peyi Ayiti"* (the capital is **Pòtoprens**). The
+  floor appears more lenient than the flagship Creole promise. **Do not change it retroactively
+  against these runs** — create a new threshold version with explicit rationale and evaluate future
+  candidates under it.
+- **`deepseek-r1:32b` was not tested.** Stepping through candidates after seeing failures is
+  candidate-shopping around the gate. If it is evaluated later it must be a **new pre-registered
+  campaign**, with the candidate chosen for an architectural reason before results are seen — never
+  as a rescue attempt for this lane.
