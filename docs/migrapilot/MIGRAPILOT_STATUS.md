@@ -987,6 +987,16 @@ Reachability is not identity — the response that proves a server is listening 
 another product would give, which is precisely how the false green happened. A harness that reaches its
 target and stops there has confirmed nothing about what answered.
 
+And one hop further out, added 2026-09-07 during the cold-start acceptance:
+
+> **Build identity on the server is not evidence that the browser is executing that build.**
+
+`/api/version` reported the fixed build and the served chunk contained the fixed markup — both true —
+while an open tab still ran the pre-fix client and produced a screenshot of the old defect. A human
+test starts with a **hard reload**; an automated browser harness must assert the **client** build
+before collecting evidence and fail closed on a mismatch. A fresh Playwright profile sidesteps this by
+accident, which is exactly why the harness did not catch it — that accident is not a guard.
+
 **2. Durable idempotency — the gate before every meaningful mutating tool.** A platform primitive, one
 authority, no per-tool copies, keyed on canonical normalized operation identity:
 

@@ -1869,6 +1869,7 @@
       "rigIdentity": "A successful HTTP response is not evidence that you reached the application you launched. Every local acceptance rig must verify application identity — run id, build id, route fingerprint — before browser evidence counts.",
       "incident": "Port 3399 was held by another session running AnnouPale. It answered 200 throughout, so some browser runs tested a different product while reporting success; and a kill -9 over the port missed their process only because their command used --port and the pattern required -p.",
       "enforcement": "apps/migrapilot-consumer/scripts/assert-rig-identity.js, called by both browser harnesses",
+      "serverBuildIsNotClientBuild": "Bonex, 2026-09-07. Build identity on the SERVER is not evidence that the BROWSER is executing that build. /api/version reported the fixed build and the served chunk contained the fixed markup — both true — while an open tab still ran the pre-fix client and produced a screenshot of the old defect. A human test starts with a hard reload; an automated harness must assert the client build before evidence and fail closed. A fresh Playwright profile avoids this by accident, which is why the harness did not catch it.",
       "identityIsNotConfiguration": "Measured 2026-09-07 while fixing the cold-start regression: a rig restarted WITHOUT its original launch environment passed assert-rig-identity (the version contract was intact) and was signed out, model-less and useless. Identity answers 'which product is this'. It does not answer 'is it configured as the one I meant to test'. Relaunch from the recorded launch script, never from a bare start command."
     },
     "renderedOutputIsTheClaim": {
@@ -1907,6 +1908,7 @@
         "fail closed on missing or mismatched identity",
         "never find the product by scanning ports",
         "reachability is not identity — a 200 from the target never substitutes for the identity assertion",
+        "assert the CLIENT build, not only the server build, before collecting browser evidence — fail closed on mismatch",
         "preserve recorded-PID ownership",
         "mutation-test: restoring a hardcoded target must break the guard"
       ],
