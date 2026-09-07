@@ -32,6 +32,10 @@
 set -euo pipefail
 
 REPO="${1:?repo}"; APP="${2:?app dir}"; HOST="${3:?host}"; RELEASE="${4:?release dir}"
+# The release a rollback would return to. Optional only so the script stays
+# usable in isolation; when present its bytes are proven UNCHANGED across
+# staging, which is the second failure direction — a corrupted way back.
+ROLLBACK="${5:-}"
 HERE="$(cd "$(dirname "$0")" && pwd)"
 
 fail() { echo "   ✗ $*" >&2; exit 1; }
@@ -50,6 +54,22 @@ mapfile -t DEPS < <(node -e "
 
 [ "${#DEPS[@]}" -eq 0 ] && { echo "   no workspace dependencies to stage"; exit 0; }
 echo "   workspace dependencies: ${DEPS[*]}"
+
+HERE_DIGEST_REMOTE=/tmp/workspace-digest.mjs
+scp -q "$HERE/workspace-digest.mjs" "$HOST:$HERE_DIGEST_REMOTE"
+
+# ── rollback fingerprint, BEFORE anything is written ────────────────────────
+# Captured first so "unchanged" is a comparison rather than an assumption. The
+# hazard is specific: cp -al hardlinks, so a staging step that wrote through a
+# link would edit the very bytes a rollback depends on.
+declare -A ROLLBACK_BEFORE=()
+if [ -n "$ROLLBACK" ]; then
+  for NAME in "${DEPS[@]}"; do
+    ROLLBACK_BEFORE[$NAME]="$(ssh -n "$HOST" \
+      "node $HERE_DIGEST_REMOTE '$ROLLBACK/node_modules/$NAME' 2>/dev/null || echo '{\"ok\":false}'")"
+  done
+  echo "   rollback fingerprint captured for ${#DEPS[@]} package(s)"
+fi
 
 for NAME in "${DEPS[@]}"; do
   SHORT="${NAME#@migrapilot/}"
@@ -76,8 +96,6 @@ done
 # package that still satisfies every import produces no error at all — just old
 # behaviour — so bytes are compared rather than trusting the copy succeeded.
 echo "   verifying staged workspace packages against the build"
-REMOTE_DIGEST="$(mktemp)"; trap 'rm -f "$REMOTE_DIGEST"' EXIT
-scp -q "$HERE/workspace-digest.mjs" "$HOST:/tmp/workspace-digest.mjs"
 
 for NAME in "${DEPS[@]}"; do
   SHORT="${NAME#@migrapilot/}"
@@ -110,5 +128,27 @@ for NAME in "${DEPS[@]}"; do
   " "$LOCAL" "$STAGED" || fail "workspace staging verification failed for $NAME"
 done
 
-ssh -n "$HOST" "rm -f /tmp/workspace-digest.mjs" || true
+echo "   ✓ staged bytes match the build (direction 1 of 2)"
+
+# ── direction 2: the way back is still intact ──────────────────────────────
+if [ -n "$ROLLBACK" ]; then
+  for NAME in "${DEPS[@]}"; do
+    AFTER="$(ssh -n "$HOST" "node $HERE_DIGEST_REMOTE '$ROLLBACK/node_modules/$NAME' 2>/dev/null || echo '{\"ok\":false}'")"
+    node -e "
+      const before = JSON.parse(process.argv[1]); const after = JSON.parse(process.argv[2]);
+      const name = process.argv[3];
+      if (before.distDigest !== after.distDigest) {
+        console.error('   ✗ ROLLBACK RELEASE WAS MUTATED for ' + name + '.');
+        console.error('     Staging wrote through a hardlink and changed the bytes a rollback');
+        console.error('     depends on. The way back is no longer the release that was running.');
+        console.error('     before: ' + String(before.distDigest).slice(0,16) + '…');
+        console.error('     after:  ' + String(after.distDigest).slice(0,16) + '…');
+        process.exit(1);
+      }
+    " "${ROLLBACK_BEFORE[$NAME]}" "$AFTER" "$NAME" || fail "rollback integrity check failed for $NAME"
+  done
+  echo "   ✓ rollback release bytes unchanged (direction 2 of 2)"
+fi
+
+ssh -n "$HOST" "rm -f $HERE_DIGEST_REMOTE" || true
 echo "   all workspace dependencies match the build they were tested against"

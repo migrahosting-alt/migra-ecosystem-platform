@@ -162,7 +162,7 @@ ssh -n "$HOST" "sudo cp -al $PREVIOUS/node_modules $ROOT/releases/$REL/node_modu
 # staged bytes against the built bytes. A stale package that still satisfies
 # every import raises no error at all — just old behaviour — so the check is a
 # digest, not a copy that appeared to succeed.
-bash "$(dirname "$0")/stage-workspace-deps.sh" "$REPO" "$APP" "$HOST" "$ROOT/releases/$REL"
+bash "$(dirname "$0")/stage-workspace-deps.sh" "$REPO" "$APP" "$HOST" "$ROOT/releases/$REL" "$PREVIOUS"
 echo "   staged"
 
 # ── 8. boot test, as a transient copy of the production unit ───────────────
@@ -248,6 +248,23 @@ echo "   commit, release and buildId all match"
 ssh -n "$HOST" "rm -f $BOOT_ENV"
 
 # ── 11+12. only now does anything move ─────────────────────────────────────
+# ── QUALIFY-ONLY STOPS HERE ────────────────────────────────────────────────
+#
+# Everything above proves the candidate WITHOUT touching what users are served:
+# gates, staged workspace parity, rollback integrity, a boot on a spare port and
+# an identity assertion against the artifact that actually booted. Everything
+# below moves production.
+#
+# A release candidate needs exactly the first half. Running the whole script and
+# hoping to interrupt it before the symlink swap is not a qualification method.
+if [ "${MIGRAPILOT_QUALIFY_ONLY:-0}" = "1" ]; then
+  printf '\n== QUALIFIED, NOT DEPLOYED\n'
+  echo "   release $REL is staged, boot-tested and identity-checked at $ROOT/releases/$REL"
+  echo "   production is UNCHANGED: current -> $PREVIOUS"
+  echo "   to deploy it, re-run without MIGRAPILOT_QUALIFY_ONLY"
+  exit 0
+fi
+
 step "11. activating the release"
 ssh -n "$HOST" "sudo ln -sfn $ROOT/releases/$REL $ROOT/current"
 echo "   current -> $(ssh -n "$HOST" "readlink $ROOT/current")"

@@ -101,7 +101,7 @@ ssh "$HOST" "sudo cp -al $ROOT/current/node_modules $ROOT/releases/$REL/node_mod
 # verified for the same reason — and before the boot test, so a stale package
 # that still satisfies every import is caught by its bytes rather than by
 # whether it happens to crash.
-bash "$(dirname "$0")/stage-workspace-deps.sh" "$REPO" "$APP" "$HOST" "$ROOT/releases/$REL"
+bash "$(dirname "$0")/stage-workspace-deps.sh" "$REPO" "$APP" "$HOST" "$ROOT/releases/$REL" "$ROOT/current"
 echo "   staged"
 
 # ── 5+6+7. boot the new release on a spare port and interrogate it ─────────
@@ -163,6 +163,17 @@ echo "$BOOT_ID" | grep -q "\"commit\":\"$COMMIT\"" || fail "boot-tested artifact
 echo "$BOOT_ID" | grep -q "\"release\":\"$REL\""    || fail "boot-tested artifact reports a different release"
 echo "$BOOT_ID" | grep -q "\"buildId\":\"$BUILD_ID\"" || fail "boot-tested artifact reports a different build id"
 echo "   commit, release and buildId all match"
+
+# ── QUALIFY-ONLY STOPS HERE ────────────────────────────────────────────────
+# Everything above proves the candidate without touching what users are served.
+# Everything below moves production. See the Brain script for the reasoning.
+if [ "${MIGRAPILOT_QUALIFY_ONLY:-0}" = "1" ]; then
+  printf '\n== QUALIFIED, NOT DEPLOYED\n'
+  echo "   release $REL is staged, boot-tested and identity-checked at $ROOT/releases/$REL"
+  echo "   production is UNCHANGED: current -> $PREVIOUS"
+  echo "   to deploy it, re-run without MIGRAPILOT_QUALIFY_ONLY"
+  exit 0
+fi
 
 # ── 8+9. only now does anything move ───────────────────────────────────────
 step "8. activating the release"
