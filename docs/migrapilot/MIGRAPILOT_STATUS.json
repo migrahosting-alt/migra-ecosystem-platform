@@ -1954,7 +1954,21 @@
       "permissionsHasNoWriter": "workspaces.permissions is in the schema and on the record, but patch does not accept it and no route sets it. Today every workspace resolves read-yes / propose-no. The live revocation was produced by writing that column directly, simulating a registry that has recorded one — the grant source read it normally.",
       "canApply": "FALSE unconditionally through the whole read-only path, whatever the registry says."
     },
-    "next": "(3) consumer API + Migra-native Connect control against this source. Still no write/apply, no auto-resume, no VS Code-specific wording."
+    "next": "🚨 CHAT DOES NOT YET CONSUME THE BINDING. Connect, bind and read-only inspect are proven end to end through the API and the control, but the chat turn has NO reference to the project binding — asking MigraPilot in conversation to look at project files still refuses, because nothing on the chat path calls inspectProject. That is the last mile of the Priority A gap Bonex originally observed, and it is the next slice.",
+    "acceptanceWalk": {
+      "_authority": "Bonex, 2026-09-07. A focused visible-behaviour walk instead of all ten cases, since the full matrix is artifact-pinned and green.",
+      "artifacts": "consumer aSS18Qo0IyhaafGQP6Osg · brain digest 82ba5ae4…4fe539",
+      "steps": [
+        "1. Rename → approval shown BEFORE anything changes",
+        "2. Decline → nothing changes",
+        "3. Approve → the title changes once and survives a reload",
+        "4. No internal ids, hashes or tool vocabulary anywhere",
+        "5. Connect project → select a real authorized project",
+        "6. The connected project context appears in the conversation rail",
+        "7. ⚠️ ADJUSTED: inspecting the project cannot be done from CHAT yet. Prove it instead from the browser console on the conversation: POST /api/conversations/<id>/inspect {\"op\":\"search\",\"query\":\"<a string only that project contains>\"} — a label in the UI is not proof the right project was read."
+      ],
+      "note": "Step 5 needs a workspace registered in the tester's DERIVED scope (user:<id> / personal:<id>), not 'tester'/'default'. With none registered, the truthful empty state is the correct and expected result."
+    }
   },
   "agreedSchedule": {
     "_authority": "Bonex, 2026-09-07. Fixed order. No drift to Projects, no higher-risk tools, no Studio detour unless a shared dependency genuinely blocks Priority A.",
