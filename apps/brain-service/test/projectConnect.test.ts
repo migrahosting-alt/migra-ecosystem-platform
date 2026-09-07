@@ -49,6 +49,7 @@ const readable: ProjectGrant = {
   kind: 'connected-repo',
   canRead: true,
   canPropose: false,
+  rootPath: '/tmp/does-not-need-to-exist',
 };
 
 const bind = async (store: ProjectBindingStore, projectId: string, scope = SCOPE) =>

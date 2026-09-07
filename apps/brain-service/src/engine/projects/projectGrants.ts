@@ -44,6 +44,16 @@ export interface ProjectGrant {
   canRead: boolean;
   /** Granted separately and rarely. Never implied by connecting. */
   canPropose: boolean;
+  /**
+   * WHERE the project actually is, resolved by the grant source.
+   *
+   * 🚨 NEVER FROM THE CLIENT. The existing inspect route takes a `rootPath`
+   * from the request body, which is right for the extension — it is describing
+   * the folder the user has open on their own machine. It would be a
+   * path-traversal hole for a web caller, who would be naming a directory on
+   * the server. The client says WHICH project; the grant source says where.
+   */
+  rootPath: string;
 }
 
 /**

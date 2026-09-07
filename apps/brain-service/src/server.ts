@@ -28,6 +28,10 @@ import {
 import { registerToolExecutionRoutes } from './engine/tools/toolRoutes.js';
 import { registerToolConsentRoutes } from './engine/tools/toolConsentRoutes.js';
 import { registerInspectRoutes } from './engine/workspace/inspectRoutes.js';
+import { registerProjectRoutes } from './engine/projects/projectRoutes.js';
+import { registerProjectInspectRoutes } from './engine/projects/projectInspect.js';
+import { InMemoryProjectBindingStore } from './engine/projects/projectBinding.js';
+import { EmptyProjectGrantSource } from './engine/projects/emptyGrantSource.js';
 import { registerCommandRunRoutes } from './engine/tools/commandRunRoutes.js';
 import { registerTestRunRoutes } from './engine/tools/testRunRoutes.js';
 import { registerAnswerRoutes } from './engine/chat/answerRoutes.js';
@@ -888,6 +892,31 @@ async function main(): Promise<void> {
    * exactly that, instead of implying a richer check than exists. When a real
    * role or entitlement model arrives, this resolver is where it lands.
    */
+  /*
+   * PROJECT ACCESS — connect, select, and inspect through the binding.
+   *
+   * 🚨 THE GRANT SOURCE IS EMPTY UNTIL A REAL ONE IS CONFIGURED, and that is
+   * the honest default. An empty source lists nothing, resolves nothing, and
+   * every route answers "No projects are available to connect yet" — which is
+   * TRUE for a deployment that has not integrated a project directory yet.
+   *
+   * The alternative would be a source that invents a project from a path, and
+   * that is precisely the client-manufactured authority this design refuses.
+   */
+  const projectBindings = new InMemoryProjectBindingStore();
+  const projectGrants = new EmptyProjectGrantSource();
+  registerProjectRoutes(app, {
+    grants: projectGrants,
+    bindings: projectBindings,
+    scopeFrom: memoryScopeFrom,
+    actorFrom: (request) => String(request.headers['x-owner-scope'] ?? 'local'),
+  });
+  registerProjectInspectRoutes(app, {
+    grants: projectGrants,
+    bindings: projectBindings,
+    scopeFrom: memoryScopeFrom,
+  });
+
   registerToolConsentRoutes(app, {
     approvals: toolDeps.approvals,
     conversations: memoryStore,

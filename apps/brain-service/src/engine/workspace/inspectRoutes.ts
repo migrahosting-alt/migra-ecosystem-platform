@@ -55,7 +55,7 @@ export const INSPECT_OPS = [
 ] as const;
 export type InspectOp = (typeof INSPECT_OPS)[number];
 
-const InspectRequestSchema = z.object({
+export const InspectRequestSchema = z.object({
   rootPath: z.string(),
   op: z.enum(INSPECT_OPS),
   /** Relative sub-path (for `list`/`read`) — must stay inside rootPath. */
