@@ -1824,7 +1824,28 @@
     "_rule": "⭐ ONE CAPABILITY, ONE AUTHORITY, MANY CLIENTS. Shared semantics, client-specific presentation. No client gets its own business logic or a private bypass around a canonical capability.",
     "renameGovernance": {
       "platformWide": "ENFORCED",
-      "consumerFlow": "READY FOR USER TEST — not closed until Bonex runs it signed in",
+      "consumerFlow": "FULL 10-CASE MATRIX VERIFIED BY HARNESS; READY FOR USER ACCEPTANCE — NOT CLOSED. Agent-verified is not user-verified; only Bonex walking it in the product closes this.",
+  "tenCaseMatrix": {
+    "_authority": "Bonex's canonical enumeration, 2026-09-07. Agent-run on rig hmn0hRAMQSMkumcJOKq5o; all non-fault cases re-run against the RESTORED Brain so the whole matrix sits on one instance.",
+    "1_proposeApprovePersisted": "PASS",
+    "2_proposeDeclineUnchanged": "PASS",
+    "3_duplicateDispatchOneMutation": "PASS — 2 concurrent dispatches on one token, 1 of 2 succeeded, other refused 'already used'; plus a real double click on Approve",
+    "4_titleChangedUnderApproval": "PASS — 'This action changed since you approved it, so it needs approving again.', title unchanged",
+    "5_expired": "PASS — 'That approval has expired. Approve it again to continue.', no mutation, no retry offered",
+    "6_revoked": "PASS — 'You do not have access to Rename conversation in this workspace.', suggestedAction request-access; the approval was minted while access existed and refused at dispatch, so it never became authority",
+    "7_outcomeUnknown": "PASS — HTTP 202, 'sent but could not be confirmed, check the conversation before trying again', no retry action anywhere",
+    "8_reloadPersists": "PASS",
+    "9_noInternalLeak": "PASS — none, including all three fault screens",
+    "10_noReplay": "PASS — spent token replayed AFTER a later rename so a successful replay would be visible; refused, title stayed at the interim value",
+    "harnesses": [
+      "scripts/verify-rename-approval.cjs — 1, 2, 8, 9",
+      "scripts/verify-rename-replay.cjs — 3, 4, 10 (new, 144734b1)",
+      "scripts/verify-rename-faults.cjs — 5, 6, 7, one Brain restart per fault"
+    ],
+    "supersededClaim": "'A second rename works' was previously standing in for cases 3, 4 and 10. It is the happy path twice and proves none of them.",
+    "harnessBugsFound": "The first replay run reported 3 failures, all mine: the URL carries the OPTIMISTIC conversation id, not the durable conv_…, and there is no GET /api/conversations/:id (405). Case 4 PASSED in that broken run for the wrong reason — a refusal from a bad id is indistinguishable from a refusal from input mismatch unless you read the message. Only the wording made it evidence.",
+    "faultDiscipline": "Ownership re-checked by cwd immediately before each signal, never by port or pattern. Injection confirmed from the live /proc/<pid>/environ each run. Restored from scratchpad/local/brain.sh; new live PID carries no MIGRAPILOT_TEST_* or *FAULT* variable, and both withdrawn verbs are back at 410."
+  },
       "whatWasClosed": [
         "PATCH /api/conversations/:id (consumer) → 410, names the replacement",
         "PATCH /api/ai/conversations/:id (Brain) → 410, names the replacement"
