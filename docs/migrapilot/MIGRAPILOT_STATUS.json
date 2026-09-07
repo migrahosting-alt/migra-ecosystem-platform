@@ -1828,7 +1828,7 @@
   "tenCaseMatrix": {
     "_authority": "Bonex's canonical enumeration, 2026-09-07. RE-RUN on the CURRENT Brain artifact after the project-access work changed it — 'rename code unchanged' is not sufficient, because a different Brain build can change shared routing, auth, persistence, consent or error semantics indirectly.",
     "artifactUnderTest": {
-      "consumer": "buildId XAyJNzGPi3ecUtriOgwUq (pinned throughout)",
+      "consumer": "buildId aSS18Qo0IyhaafGQP6Osg — RE-RUN AGAIN after the Connect-project work moved the consumer artifact. The Brain staying unchanged is not enough: acceptance attaches to the exact client under test. Client build asserted during every browser case (9 assets, all from this build), so no stale bundle contributed.",
       "brainGitHead": "61d78ddc, clean tree",
       "brainDistDigest": "82ba5ae443f760697de6ff44857f4ceae2204e92f9fa87b8902515c4484fe539 — sha256 over every emitted dist/src/*.js",
       "why": "The Brain exposes no buildId at /api/ai/version, so identity is the git HEAD of a clean tree plus a digest of the emitted artifact. Re-verified IDENTICAL after the three fault restarts, so every case ran against one artifact.",
