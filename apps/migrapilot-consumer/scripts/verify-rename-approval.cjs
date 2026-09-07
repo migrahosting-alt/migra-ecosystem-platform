@@ -13,6 +13,7 @@
  * item, and a user whose name shares no substring with the control under test.
  */
 const { chromium } = require('/home/bonex/.npm/_npx/420ff84f11983ee5/node_modules/playwright')
+const { assertRigIdentity } = require('./assert-rig-identity.cjs')
 const crypto=require('node:crypto'), fs=require('node:fs')
 const SP='/tmp/claude-1001/-home-bonex-workspace-active-MigraTeck-Ecosystem-dev/d929835d-8849-4c9d-92e6-3d1922fab393/scratchpad'
 const SECRET=fs.readFileSync(`${SP}/local/secret`,'utf8').trim()
@@ -58,6 +59,14 @@ const openRename = async (page, title) => {
   // A user name sharing no substring with the control under test — see the header.
   await c.addCookies([cookie('tester')])
   const page = await c.newPage()
+  /*
+   * 🚨 PROVE WHICH APP IS ANSWERING BEFORE CLICKING ANYTHING. This rig once lost
+   * its port to another session's product; the port kept returning 200 and the
+   * run reported success against someone else's application.
+   */
+  const identity = await assertRigIdentity('http://127.0.0.1:3407')
+  console.log('rig identity   :', identity.buildId)
+
   await page.goto('http://127.0.0.1:3407/',{waitUntil:'networkidle',timeout:60000})
   const box=page.locator('textarea').first(); await box.click(); await box.fill('hello there'); await box.press('Enter')
   await sleep(9000)

@@ -6,6 +6,7 @@
  * is offered anywhere near it.
  */
 const { chromium } = require('/home/bonex/.npm/_npx/420ff84f11983ee5/node_modules/playwright')
+const { assertRigIdentity } = require('./assert-rig-identity.cjs')
 const crypto=require('node:crypto'), fs=require('node:fs')
 const SP='/tmp/claude-1001/-home-bonex-workspace-active-MigraTeck-Ecosystem-dev/d929835d-8849-4c9d-92e6-3d1922fab393/scratchpad'
 const SECRET=fs.readFileSync(`${SP}/local/secret`,'utf8').trim()
@@ -21,6 +22,14 @@ function cookie(u){const n=Date.now();const s={sessionId:'f-'+n,authUserId:u,ema
       console.log(`   [${r.status()}] ${r.url().split('/api')[1]} -> ${body.slice(0,220)}`)
     }
   })
+  /*
+   * 🚨 PROVE WHICH APP IS ANSWERING BEFORE CLICKING ANYTHING. This rig once lost
+   * its port to another session's product; the port kept returning 200 and the
+   * run reported success against someone else's application.
+   */
+  const identity = await assertRigIdentity('http://127.0.0.1:3407')
+  console.log('rig identity   :', identity.buildId)
+
   await page.goto('http://127.0.0.1:3407/',{waitUntil:'networkidle',timeout:60000})
   const box=page.locator('textarea').first(); await box.click(); await box.fill('fault case'); await box.press('Enter')
 
