@@ -5,6 +5,7 @@ import Fastify from 'fastify';
 import { ConversationStore, type Scope } from '../src/engine/memory/conversationStore.js';
 import { ToolApprovalStore } from '../src/engine/tools/toolApprovalStore.js';
 import { registerToolConsentRoutes } from '../src/engine/tools/toolConsentRoutes.js';
+import { registerMemoryRoutes } from '../src/engine/memory/memoryRoutes.js';
 import type { CapabilityState } from '../src/engine/tools/toolRouter.js';
 
 /**
@@ -44,6 +45,9 @@ async function harness(opts: { approvalClock?: () => number } = {}): Promise<Har
   let renames = 0;
 
   const app = Fastify({ logger: false });
+  // Mounted so the WITHDRAWN direct verb is present and can be asserted on —
+  // a bypass test that never registers the route proves nothing.
+  registerMemoryRoutes(app, conversations);
   registerToolConsentRoutes(app, {
     approvals,
     conversations: {
@@ -398,3 +402,62 @@ for (const [fault, expect] of [
     }
   });
 }
+
+// ── one authority: the direct verb is withdrawn ────────────────────────────
+
+/**
+ * 🚨 PLATFORM RULE, enforced here for the first time:
+ *
+ *     No client gets its own business logic or a private bypass around a
+ *     canonical capability.
+ *
+ * `PATCH /api/ai/conversations/:id` renamed on request, with no confirmation and
+ * no consent. It was a second authority for a mutation the product now asks
+ * users to approve — and the VS Code extension held a client method for it, so
+ * the bypass was not theoretical.
+ *
+ * MUTATION TEST: restoring that route makes the first assertion below fail.
+ */
+test('🚨 the Brain’s direct rename verb is WITHDRAWN and mutates nothing', async () => {
+  const h = await harness();
+  const before = h.conversations.getConversation(h.conversationId, scope)!.title;
+
+  const res = await h.app.inject({
+    method: 'PATCH',
+    url: `/api/ai/conversations/${h.conversationId}`,
+    payload: { title: 'renamed without approval' },
+  });
+
+  assert.equal(res.statusCode, 410, 'the withdrawn verb still renames');
+  assert.equal(h.renames(), 0, '🚨 a direct PATCH reached the store');
+  assert.equal(h.conversations.getConversation(h.conversationId, scope)!.title, before);
+
+  const body = res.json() as { code: string; use: string };
+  assert.equal(body.code, 'RENAME_REQUIRES_APPROVAL');
+  // The replacement is named, so a caller migrates instead of guessing.
+  assert.match(body.use, /rename\/propose/);
+});
+
+test('the withdrawal does not depend on the body', async () => {
+  // Validating first would imply a well-formed request could still rename.
+  const h = await harness();
+  for (const payload of [{ title: '' }, { title: 'x'.repeat(400) }, {}, { nope: 1 }]) {
+    const res = await h.app.inject({
+      method: 'PATCH', url: `/api/ai/conversations/${h.conversationId}`, payload,
+    });
+    assert.equal(res.statusCode, 410, `bypassed with ${JSON.stringify(payload).slice(0, 30)}`);
+  }
+  assert.equal(h.renames(), 0);
+});
+
+test('🚨 the governed path still performs the same store mutation', async () => {
+  // The other half: closing the bypass must not have closed renaming.
+  const h = await harness();
+  const p = await post(h, 'propose', { conversationId: h.conversationId, title: 'Through the flow' });
+  const d = await post(h, 'dispatch', {
+    approvalToken: p.body.approvalToken, conversationId: h.conversationId, title: 'Through the flow',
+  });
+  assert.equal(d.body.status, 'done');
+  assert.equal(h.renames(), 1, 'the governed path must reach the same mutation');
+  assert.equal(h.conversations.getConversation(h.conversationId, scope)!.title, 'Through the flow');
+});

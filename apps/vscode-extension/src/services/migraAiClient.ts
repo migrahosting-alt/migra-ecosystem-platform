@@ -498,8 +498,76 @@ export class MigraAiClient {
   async getConversation(id: string, signal?: AbortSignal): Promise<ConversationMeta> {
     return this.jsonRequest('GET', `/api/ai/conversations/${encodeURIComponent(id)}`, undefined, signal);
   }
-  async renameConversation(id: string, title: string, signal?: AbortSignal): Promise<ConversationMeta> {
-    return this.jsonRequest('PATCH', `/api/ai/conversations/${encodeURIComponent(id)}`, { title }, signal);
+  /**
+   * Rename a conversation — through the CANONICAL capability, in three steps.
+   *
+   * 🚨 THIS USED TO BE `PATCH /api/ai/conversations/:id`, which renamed on
+   * request with no confirmation and no consent. That endpoint is withdrawn: it
+   * was a second authority for a mutation the product now asks users to approve,
+   * and a consent boundary any client can step around is a convention.
+   *
+   * The extension is a CLIENT of the shared capability, not an alternative
+   * implementation of it. It does not decide whether consent is required, does
+   * not compose the confirmation text, and does not interpret the outcome — the
+   * service answers all three. What the extension owns is PRESENTATION: VS Code
+   * can confirm with a modal, a quick pick or a notification where the web uses
+   * a dialog. Shared semantics, client-specific surface.
+   *
+   * `proposeRename` returns the exact normalized mutation to show the user, and
+   * a token. Show that sentence verbatim — it describes what will actually run.
+   */
+  async proposeRename(
+    id: string,
+    title: string,
+    signal?: AbortSignal,
+  ): Promise<{ status: 'needs_approval' | 'blocked'; action?: string; approvalToken?: string; message?: string }> {
+    return this.jsonRequest(
+      'POST',
+      '/api/ai/tools/conversations/rename/propose',
+      { conversationId: id, title },
+      signal,
+    );
+  }
+
+  /** The user said no. Nothing is dispatched, ever. */
+  async declineRename(
+    id: string,
+    title: string,
+    approvalToken: string,
+    signal?: AbortSignal,
+  ): Promise<{ status: string; message?: string }> {
+    return this.jsonRequest(
+      'POST',
+      '/api/ai/tools/conversations/rename/decline',
+      { conversationId: id, title, approvalToken },
+      signal,
+    );
+  }
+
+  /**
+   * The user approved. The service re-checks every gate, spends the single-use
+   * token and dispatches once.
+   *
+   * `status: 'unknown'` (HTTP 202) means the rename was sent and could not be
+   * confirmed. It is NOT a failure and NOT a success: never retry it
+   * automatically — tell the user to check the conversation.
+   */
+  async dispatchRename(
+    id: string,
+    title: string,
+    approvalToken: string,
+    signal?: AbortSignal,
+  ): Promise<{
+    status: 'done' | 'blocked' | 'failed' | 'unknown';
+    conversation?: { id: string; title: string };
+    message?: string;
+  }> {
+    return this.jsonRequest(
+      'POST',
+      '/api/ai/tools/conversations/rename/dispatch',
+      { conversationId: id, title, approvalToken },
+      signal,
+    );
   }
   async deleteConversation(id: string, signal?: AbortSignal): Promise<{ ok: boolean }> {
     return this.jsonRequest('DELETE', `/api/ai/conversations/${encodeURIComponent(id)}`, undefined, signal);

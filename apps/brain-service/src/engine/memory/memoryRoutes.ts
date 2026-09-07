@@ -8,7 +8,7 @@
  *   GET    /api/ai/conversations/:id/messages           → list messages
  *   POST   /api/ai/conversations/:id/summarize          → summarize (idempotent)
  *   DELETE /api/ai/conversations/:id                    → delete (cascade)
- *   PATCH  /api/ai/conversations/:id                    → rename (additive)
+ *   PATCH  /api/ai/conversations/:id                    → WITHDRAWN (410) — use the rename approval flow
  *
  * Scope (owner + workspace) comes from `X-Owner-Scope` / `X-Workspace-Scope`
  * headers and is enforced by the store — a conversation is invisible outside its
@@ -95,18 +95,35 @@ export function registerMemoryRoutes(app: FastifyInstance, store: ConversationSt
     return conv;
   });
 
-  app.patch<{ Params: { id: string }; Body: { title?: string } }>('/api/ai/conversations/:id', async (request, reply) => {
-    const title = request.body?.title;
-    if (!title) {
-      reply.code(400);
-      return { ok: false, code: 'INVALID_INPUT', error: 'A `title` is required.' };
-    }
-    const conv = await store.renameConversation(request.params.id, scopeFrom(request), title);
-    if (!conv) {
-      reply.code(404);
-      return { ok: false, code: 'UNKNOWN_CONVERSATION', error: 'Conversation not found.' };
-    }
-    return conv;
+  /**
+   * 🚨 DIRECT RENAME IS WITHDRAWN. There is ONE rename authority.
+   *
+   * This verb renamed a conversation on request, with no confirmation and no
+   * consent. Once the product started asking a user to approve an exact rename,
+   * keeping this path meant two authorities for one mutation — and a consent
+   * boundary that any client could step around is a convention, not a boundary.
+   *
+   * The rule it now enforces: no client gets its own business logic or a private
+   * bypass around a canonical capability. Every caller — consumer, extension,
+   * anything later — goes through propose → approve → dispatch, which runs the
+   * capability, authorization, preflight and consent gates and then performs the
+   * SAME store mutation this used to call directly.
+   *
+   * If an operator capability to rename without user consent is ever wanted, it
+   * is a DIFFERENT capability with its own authorization, audit and provenance —
+   * declared as such, not smuggled in by leaving this endpoint alive.
+   *
+   * 410, not 404: it existed and was deliberately withdrawn, and the response
+   * names the replacement so a caller fixes it rather than hunting for a typo.
+   */
+  app.patch<{ Params: { id: string } }>('/api/ai/conversations/:id', async (_request, reply) => {
+    reply.code(410);
+    return {
+      ok: false,
+      code: 'RENAME_REQUIRES_APPROVAL',
+      error: 'Renaming a conversation goes through the approval flow.',
+      use: 'POST /api/ai/tools/conversations/rename/propose then …/dispatch',
+    };
   });
 
   /**
