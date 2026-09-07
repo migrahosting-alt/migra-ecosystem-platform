@@ -148,6 +148,21 @@ tar -C "$APP" -czf - dist package.json \
 # from the one production has been running, and the difference would only appear
 # at runtime.
 ssh -n "$HOST" "sudo cp -al $PREVIOUS/node_modules $ROOT/releases/$REL/node_modules"
+
+# 🚨 WORKSPACE PACKAGES COME FROM *THIS* BUILD, NOT THE PREVIOUS RELEASE.
+#
+# The hardlink above is right for third-party packages and wrong for the ones
+# this repo builds. chat-platform-rc-0907 inherited a @migrapilot/shared-types
+# built three days earlier and aborted at the boot test on a missing export,
+# while every local gate passed — the repo resolves that specifier through a
+# symlink to freshly built output, the artifact carried a copied snapshot.
+#
+# This replaces each workspace package (removing first, so the hardlink to the
+# rollback release is BROKEN rather than written through) and then verifies the
+# staged bytes against the built bytes. A stale package that still satisfies
+# every import raises no error at all — just old behaviour — so the check is a
+# digest, not a copy that appeared to succeed.
+bash "$(dirname "$0")/stage-workspace-deps.sh" "$REPO" "$APP" "$HOST" "$ROOT/releases/$REL"
 echo "   staged"
 
 # ── 8. boot test, as a transient copy of the production unit ───────────────

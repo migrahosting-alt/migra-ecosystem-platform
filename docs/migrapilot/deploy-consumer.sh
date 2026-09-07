@@ -93,6 +93,15 @@ tar -C "$APP" -czf - --exclude='.next/cache' .next package.json next.config.ts p
 # from the one production has been running, and the difference would only appear
 # at runtime.
 ssh "$HOST" "sudo cp -al $ROOT/current/node_modules $ROOT/releases/$REL/node_modules"
+
+# The same defect class as the Brain's, currently LATENT rather than absent:
+# `.next` bundles most server code, but it still references
+# @migrapilot/shared-types BY NAME in three files, so that package is resolved
+# from the inherited node_modules at runtime. Staged from this build and
+# verified for the same reason — and before the boot test, so a stale package
+# that still satisfies every import is caught by its bytes rather than by
+# whether it happens to crash.
+bash "$(dirname "$0")/stage-workspace-deps.sh" "$REPO" "$APP" "$HOST" "$ROOT/releases/$REL"
 echo "   staged"
 
 # ── 5+6+7. boot the new release on a spare port and interrogate it ─────────
