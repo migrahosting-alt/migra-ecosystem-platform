@@ -13,6 +13,7 @@ import assert from 'node:assert/strict'
 process.env.APP_SESSION_SECRET = 'conversation-route-test-secret-value'
 
 import { PATCH, DELETE } from './route'
+import { POST as RENAME_APPROVAL } from './rename-approval/route'
 import { setAuthPort, resetAuthPort } from '@/server/auth'
 import type { AppSession, AuthPort } from '@/server/auth/authPort'
 import { __resetCookies } from '../../../../../test/nextHeadersStub.mjs'
@@ -75,72 +76,84 @@ const reset = () => {
 
 // ── rename ──────────────────────────────────────────────────────────────────
 
-test('a rename reaches the Brain as a PATCH carrying the new title', async () => {
-  const brain = brainStub()
+/*
+ * ── THE BYPASS THAT WAS CLOSED ────────────────────────────────────────────
+ *
+ * These four tests used to assert that PATCH renamed a conversation: title
+ * carried through, empty refused, over-long refused, anonymous scoped. Every one
+ * of them passed, and together they pinned a CONSENT BYPASS in place.
+ *
+ * The product now asks the user to approve an exact rename before it happens.
+ * This route performed the same mutation without asking anyone, which made the
+ * governance contract true of one client and false at the service boundary — a
+ * convention rather than a boundary.
+ *
+ * What is pinned now is the refusal, and that the approved path still reaches
+ * the same backend mutation.
+ */
+
+test('🚨 direct rename through the API is REFUSED, with no Brain call at all', async () => {
+  const brain = brainStub(200, { ok: true })
   setAuthPort(portWith(session))
 
-  const response = await patch('conv_1', { title: '  Migration planning  ' })
+  const response = await patch('conv_1', { title: 'renamed without approval' })
+  assert.equal(response.status, 410, 'the withdrawn verb must not still rename')
+  assert.equal(brain.calls.length, 0, '🚨 a direct rename reached the Brain')
 
-  assert.equal(response.status, 200)
-  assert.equal((await response.json()).title, 'renamed')
-  assert.equal(brain.calls[0]?.method, 'PATCH')
-  assert.equal(brain.calls[0]?.path, '/api/ai/conversations/conv_1')
-  assert.deepEqual(brain.calls[0]?.body, { title: 'Migration planning' }, 'trimmed before it is stored')
-
+  const body = (await response.json()) as { error: string; message: string; use: string }
+  assert.equal(body.error, 'rename_requires_approval')
+  assert.match(body.message, /approval/i)
+  // The replacement is named, so a caller fixes it instead of hunting for a typo.
+  assert.match(body.use, /rename-approval/)
   brain.restore()
-  reset()
 })
 
-test('an empty or whitespace title is refused before the Brain is asked', async () => {
-  // A blank title renders as an unidentifiable row in the sidebar.
-  for (const title of ['', '   ', 42, null]) {
-    const brain = brainStub()
-    setAuthPort(portWith(session))
-
-    const response = await patch('conv_1', { title })
-    assert.equal(response.status, 400)
-    assert.equal(brain.calls.length, 0)
-
-    brain.restore()
-    reset()
+test('the refusal does not depend on the body being valid', async () => {
+  // An empty, over-long or malformed title must be refused for the SAME reason —
+  // validating first would imply a well-formed request could still rename.
+  const brain = brainStub(200, { ok: true })
+  setAuthPort(portWith(session))
+  for (const body of [{ title: '' }, { title: 'x'.repeat(400) }, {}, 'not json']) {
+    const response = await patch('conv_1', body)
+    assert.equal(response.status, 410, `bypassed with ${JSON.stringify(body).slice(0, 30)}`)
   }
-})
-
-test('an over-long title is refused rather than truncated behind the user\'s back', async () => {
-  const brain = brainStub()
-  setAuthPort(portWith(session))
-
-  const response = await patch('conv_1', { title: 'x'.repeat(201) })
-  assert.equal(response.status, 400)
   assert.equal(brain.calls.length, 0)
-
   brain.restore()
-  reset()
 })
 
-test('a signed-out visitor can rename their OWN conversation, scoped to them', async () => {
-  /*
-   * This test used to assert the opposite — that a signed-out rename never
-   * reached the Brain. That refusal was not protecting anything: anonymous chat
-   * creates conversations in the visitor's own scope, so the conversation being
-   * renamed is already theirs, and row-level security is what keeps it theirs.
-   * All the refusal achieved was a rename control in the sidebar that silently
-   * failed for every signed-out visitor.
-   *
-   * What still matters is pinned below: the call carries the ANONYMOUS scope, so
-   * a visitor renames inside their own boundary and nowhere else.
-   */
+test('a signed-out visitor cannot bypass approval either', async () => {
   const brain = brainStub(200, { ok: true })
   setAuthPort(portWith(null))
-
   const response = await patch('conv_1', { title: 'mine now' })
-  assert.equal(response.status, 200, 'the visitor owns this conversation')
-  assert.equal(brain.calls.length, 1)
-  const scope = brain.calls[0]?.scope ?? ''
-  assert.ok(scope.length > 0, 'the rename must carry a scope, never run unscoped')
-
+  assert.equal(response.status, 410)
+  assert.equal(brain.calls.length, 0)
   brain.restore()
-  reset()
+})
+
+test('🚨 the APPROVED path still reaches the same backend mutation', async () => {
+  /*
+   * The other half: closing the bypass must not have closed renaming. The
+   * approval route dispatches to the Brain's consent endpoint, which performs the
+   * same store mutation the withdrawn verb used to.
+   */
+  const brain = brainStub(200, { status: 'done', conversation: { id: 'conv_1', title: 'renamed' } })
+  setAuthPort(portWith(session))
+
+  const response = await RENAME_APPROVAL(
+    new Request('https://chat.example.test/api/conversations/conv_1/rename-approval', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ step: 'dispatch', approvalToken: 'ap_1', title: 'renamed' }),
+    }),
+    params('conv_1'),
+  )
+  assert.equal(response.status, 200)
+  assert.equal(brain.calls.length, 1, 'the approved path must still reach the Brain')
+  assert.equal(brain.calls[0]?.method, 'POST')
+  assert.match(brain.calls[0]?.path ?? '', /rename\/dispatch$/)
+  const scope = brain.calls[0]?.scope ?? ''
+  assert.ok(scope.length > 0, 'the dispatch must carry a scope, never run unscoped')
+  brain.restore()
 })
 
 // ── delete ──────────────────────────────────────────────────────────────────

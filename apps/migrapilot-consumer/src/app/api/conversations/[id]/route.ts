@@ -1,5 +1,5 @@
 /**
- * One conversation: rename it, or delete it.
+ * One conversation: delete it. (Renaming moved behind the approval round-trip.)
  *
  * The Brain has served both since Phase 1 and the product could reach neither,
  * so every thread a person started was permanent and stuck with whatever title
@@ -19,9 +19,8 @@
  * backstop rather than a dead end someone walks into.
  */
 
-import { deleteConversation, renameConversation } from '@/server/brain/seams'
+import { deleteConversation } from '@/server/brain/seams'
 import { resolveRequestPrincipal } from '@/server/tenancy/requestPrincipal'
-import type { ConversationSummary } from '@/server/brain/contracts'
 
 export const dynamic = 'force-dynamic'
 
@@ -51,41 +50,37 @@ function refusal(kind: string): { status: number; error: string; message: string
   }
 }
 
+/**
+ * 🚨 DIRECT RENAME IS REFUSED. Renaming goes through the approval round-trip.
+ *
+ * This route renamed a conversation on request, with no confirmation and no
+ * consent. That is a fine API and a hole in the governance contract the product
+ * now claims: the UI asks the user to approve an exact mutation, and this path
+ * performed the same mutation without asking anyone. A consent boundary that
+ * only one client honours is not a boundary — it is a convention.
+ *
+ * So there is ONE rename authority in the product, and it is
+ * `POST /api/conversations/:id/rename-approval`. Keeping this verb alive as a
+ * shortcut would preserve exactly the bypass that was closed.
+ *
+ * 410, not 404: the endpoint EXISTED and was deliberately withdrawn. A 404 would
+ * suggest a wrong URL and send a caller looking for a typo, and the response
+ * names the replacement so the fix is obvious rather than archaeological.
+ */
 export async function PATCH(
-  request: Request,
+  _request: Request,
   context: { params: Promise<{ id: string }> },
 ): Promise<Response> {
-  const { id } = await context.params
-
-  const resolved = await resolveRequestPrincipal()
-  if (!resolved) return fail(401, 'unauthenticated', 'Sign in to manage your conversations.')
-
-  let body: unknown
-  try {
-    body = await request.json()
-  } catch {
-    return fail(400, 'invalid_body', 'Expected a JSON body.')
-  }
-
-  const raw = (body as { title?: unknown })?.title
-  const title = typeof raw === 'string' ? raw.trim() : ''
-  if (!title) {
-    // An empty title would render as a blank row in the sidebar — a conversation
-    // the user can no longer identify. Refusing is kinder than accepting it.
-    return fail(400, 'invalid_title', 'A conversation needs a name.')
-  }
-  if (title.length > 200) {
-    return fail(400, 'invalid_title', 'That name is too long — keep it under 200 characters.')
-  }
-
-  const result = await renameConversation(id, title, { principal: resolved.principal })
-  if (result.kind !== 'ok') {
-    const r = refusal(result.kind)
-    return fail(r.status, r.error, r.message)
-  }
-
-  const renamed = result.value as ConversationSummary
-  return Response.json({ id, title: renamed?.title ?? title })
+  await context.params
+  return Response.json(
+    {
+      error: 'rename_requires_approval',
+      message:
+        'Renaming a conversation needs your approval. Propose the change first, then confirm it.',
+      use: 'POST /api/conversations/:id/rename-approval',
+    },
+    { status: 410 },
+  )
 }
 
 export async function DELETE(

@@ -338,3 +338,63 @@ test('every refusal is a readable sentence, not a code', async () => {
   assert.ok(/^[A-Z]/.test(message), 'a message shown to a person starts like a sentence');
   assert.ok(!/_/.test(message), `looks like a code: ${message}`);
 });
+
+// ── bounded fault injection ────────────────────────────────────────────────
+
+/**
+ * The three states a click cannot produce, and the one rule that governs them:
+ * the switch must be unreachable in production. A control that can fabricate a
+ * revoked authorization or a lost write is not something to leave merely
+ * "unlikely to be set".
+ */
+test('🚨 fault injection is refused outright in production', async () => {
+  const priorEnv = process.env.NODE_ENV;
+  const priorFault = process.env.MIGRAPILOT_TEST_FAULT_RENAME;
+  try {
+    (process.env as Record<string, string>).NODE_ENV = 'production';
+    process.env.MIGRAPILOT_TEST_FAULT_RENAME = 'revoked';
+
+    const h = await harness();
+    const p = await post(h, 'propose', { conversationId: h.conversationId, title: 'New title' });
+    const d = await post(h, 'dispatch', {
+      approvalToken: p.body.approvalToken, conversationId: h.conversationId, title: 'New title',
+    });
+    // The fault is ignored, so the rename simply succeeds.
+    assert.equal(d.body.status, 'done', 'a fault switch took effect in production');
+    assert.equal(h.renames(), 1);
+  } finally {
+    if (priorEnv === undefined) delete (process.env as Record<string, string>).NODE_ENV;
+    else (process.env as Record<string, string>).NODE_ENV = priorEnv;
+    if (priorFault === undefined) delete process.env.MIGRAPILOT_TEST_FAULT_RENAME;
+    else process.env.MIGRAPILOT_TEST_FAULT_RENAME = priorFault;
+  }
+});
+
+for (const [fault, expect] of [
+  ['expired', { status: 'blocked', http: 200, says: /expired/i }],
+  ['revoked', { status: 'blocked', http: 200, says: /no longer|do not have access/i }],
+  ['unknown', { status: 'unknown', http: 202, says: /could not be confirmed/i }],
+] as const) {
+  test(`fault "${fault}" produces its own distinct outcome`, async () => {
+    const prior = process.env.MIGRAPILOT_TEST_FAULT_RENAME;
+    process.env.MIGRAPILOT_TEST_FAULT_RENAME = fault;
+    try {
+      const h = await harness();
+      const p = await post(h, 'propose', { conversationId: h.conversationId, title: 'New title' });
+      const d = await post(h, 'dispatch', {
+        approvalToken: p.body.approvalToken, conversationId: h.conversationId, title: 'New title',
+      });
+      assert.equal(d.body.status, expect.status, JSON.stringify(d.body));
+      assert.equal(d.status, expect.http);
+      assert.match(String(d.body.message), expect.says);
+      if (fault !== 'unknown') {
+        assert.equal(h.renames(), 0, 'a refused dispatch renamed anyway');
+      }
+      // No internals in any of them.
+      assert.ok(!/CONSUMED|PENDING|sha256:|injected/.test(JSON.stringify(d.body)), JSON.stringify(d.body));
+    } finally {
+      if (prior === undefined) delete process.env.MIGRAPILOT_TEST_FAULT_RENAME;
+      else process.env.MIGRAPILOT_TEST_FAULT_RENAME = prior;
+    }
+  });
+}

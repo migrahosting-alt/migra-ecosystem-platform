@@ -58,7 +58,7 @@ const openRename = async (page, title) => {
   // A user name sharing no substring with the control under test — see the header.
   await c.addCookies([cookie('tester')])
   const page = await c.newPage()
-  await page.goto('http://127.0.0.1:3399/',{waitUntil:'networkidle',timeout:60000})
+  await page.goto('http://127.0.0.1:3407/',{waitUntil:'networkidle',timeout:60000})
   const box=page.locator('textarea').first(); await box.click(); await box.fill('hello there'); await box.press('Enter')
   await sleep(9000)
   const bodyText = async () => page.locator('body').innerText()

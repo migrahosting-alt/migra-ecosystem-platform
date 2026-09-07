@@ -49,6 +49,28 @@ import type {
 /** The one tool exposed so far. Named here, not accepted from the request. */
 const RENAME = 'conversations.rename';
 
+/**
+ * BOUNDED FAULT INJECTION — test and dev only, off unless asked for.
+ *
+ * Three states decide what a user reads at the worst moment, and none of them
+ * can be produced by clicking: an approval that expired, access revoked between
+ * approving and dispatching, and a write whose outcome cannot be observed.
+ * Proving them only at the engine seam leaves the WORDING unverified, and the
+ * wording is most of what protects someone here.
+ *
+ * 🚨 REFUSED OUTRIGHT IN PRODUCTION. Not "unlikely to be set" — a switch that
+ * can fabricate a revoked authorization or a lost write has no business being
+ * reachable on a running product, whatever the environment happens to contain.
+ * The check is on NODE_ENV, and it is the first thing this function does.
+ */
+type RenameFault = 'expired' | 'revoked' | 'unknown' | null;
+
+function injectedFault(): RenameFault {
+  if (process.env.NODE_ENV === 'production') return null;
+  const raw = process.env.MIGRAPILOT_TEST_FAULT_RENAME;
+  return raw === 'expired' || raw === 'revoked' || raw === 'unknown' ? raw : null;
+}
+
 export interface ConsentRouteDeps {
   approvals: ToolApprovalStore;
   conversations: ConversationStore;
@@ -173,6 +195,7 @@ export function registerToolConsentRoutes(app: FastifyInstance, deps: ConsentRou
         return { status: 'blocked', message: 'A pending approval is required.' };
       }
       const scope = deps.scopeFrom(request);
+      const fault = injectedFault();
 
       /*
        * 🚨 A THROW MUST NOT BECOME A 500 HERE.
@@ -188,12 +211,43 @@ export function registerToolConsentRoutes(app: FastifyInstance, deps: ConsentRou
        * ran — the token is spent and the answer is a clean failure. A throw
        * around execution may or may not have landed, and that is unknown.
        */
+      /*
+       * The faults are applied by SUBSTITUTING A DEPENDENCY, never by branching
+       * around the logic. `expired` makes the store report the approval as
+       * lapsed; `revoked` makes the authorization resolver say no. Both then run
+       * exactly the code a real occurrence would.
+       */
+      const base = roundTripDeps(request, scope);
+      const faulted =
+        fault === 'expired'
+          ? {
+              ...base,
+              /*
+               * A PROXY, not a hand-built stand-in. Copying the store's public
+               * methods produced an object missing its private state, which the
+               * compiler correctly refused — and a cast would have silenced a
+               * true objection. This forwards everything and overrides one call.
+               */
+              approvals: new Proxy(deps.approvals, {
+                get: (target, prop, receiver) =>
+                  prop === 'consume'
+                    ? () => ({ ok: false as const, reason: 'expired' as const })
+                    : Reflect.get(target, prop, receiver),
+              }),
+            }
+          : fault === 'revoked'
+            ? {
+                ...base,
+                resolvers: { ...base.resolvers, authorization: () => ({ authorized: false, basis: 'access-revoked' }) },
+              }
+            : base;
+
       let attempt;
       try {
         attempt = await approveAndPrepare(
           approvalToken,
           { toolId: RENAME, input: { conversationId, title } },
-          roundTripDeps(request, scope),
+          faulted,
         );
       } catch {
         // Nothing was dispatched: the failure is in the gates, not the write.
@@ -211,8 +265,18 @@ export function registerToolConsentRoutes(app: FastifyInstance, deps: ConsentRou
       let result;
       try {
         result = await executeRename(attempt.routed, {
-          getConversation: (id, s) => deps.conversations.getConversation(id, s),
-          renameConversation: (id, s, t) => deps.conversations.renameConversation(id, s, t),
+          getConversation: (id, s) => {
+            // `unknown` also blinds the read-back, which is what makes the
+            // outcome genuinely unobservable rather than merely uncertain.
+            if (fault === 'unknown') throw new Error('injected: read unavailable');
+            return deps.conversations.getConversation(id, s);
+          },
+          renameConversation: async (id, s, t) => {
+            if (fault === 'unknown') {
+              throw Object.assign(new Error('injected: connection lost after dispatch'), { code: 'ETIMEDOUT' });
+            }
+            return deps.conversations.renameConversation(id, s, t);
+          },
           scope,
         });
       } catch {
