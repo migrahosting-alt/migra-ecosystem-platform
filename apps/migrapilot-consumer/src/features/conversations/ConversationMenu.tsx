@@ -2,6 +2,7 @@
 
 import { useCallback, useRef, useState } from 'react'
 import { Download, MoreHorizontal, Pencil, Trash2 } from 'lucide-react'
+import { useRenameApproval } from './useRenameApproval'
 import { useChat } from '@/state/ChatProvider'
 import { useDismissable } from '@/lib/hooks'
 import { cn } from '@/lib/cn'
@@ -36,7 +37,8 @@ export function ConversationMenu({
   onDeleted?: () => void
   align?: 'left' | 'right'
 }) {
-  const { byId, renameConversation, deleteConversation } = useChat()
+  const { byId, applyRenamedTitle, deleteConversation } = useChat()
+  const approval = useRenameApproval(conversationId)
   /*
    * THE SIGN-IN GATE IS GONE, because the policy it mirrored is gone.
    *
@@ -74,15 +76,36 @@ export function ConversationMenu({
   const conversation = byId(conversationId)
   if (!conversation) return null
 
+  /**
+   * Saving no longer renames. It PROPOSES.
+   *
+   * The mutation goes through the approval round-trip: the backend runs every
+   * gate, returns the exact action it would perform, and nothing changes until
+   * the user reads that sentence and says yes.
+   */
   const submitRename = async (event: React.FormEvent) => {
     event.preventDefault()
     const next = inputRef.current?.value ?? ''
     if (!next.trim()) return
-    setBusy(true)
-    const ok = await renameConversation(conversationId, next)
-    setBusy(false)
-    if (ok) close()
-    else setError('That name could not be saved. Try again.')
+    setError(null)
+    await approval.propose(next)
+  }
+
+  /*
+   * The list is refreshed from the SERVER after a confirmed rename, rather than
+   * patched optimistically. The old path applied the new title immediately and
+   * rolled back on refusal, which cannot represent "we do not know whether it
+   * landed" — the one state this flow exists to be honest about.
+   */
+  const onApprove = async () => {
+    await approval.approveRename()
+  }
+
+  /** Reflect a title the server CONFIRMED, then close. Never before. */
+  if (approval.phase.kind === 'done') {
+    applyRenamedTitle(conversationId, approval.phase.title)
+    approval.reset()
+    close()
   }
 
   /**
@@ -199,13 +222,79 @@ export function ConversationMenu({
                 </button>
                 <button
                   type="submit"
-                  disabled={busy}
+                  disabled={approval.phase.kind === 'proposing'}
                   data-testid="rename-save"
                   className="rounded-field bg-brand-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-brand-700 disabled:opacity-50"
                 >
-                  {busy ? 'Saving…' : 'Save'}
+                  {approval.phase.kind === 'proposing' ? 'Checking…' : 'Save'}
                 </button>
               </div>
+
+              {/*
+                THE APPROVAL STEP. The action text is rendered EXACTLY as the
+                backend composed it — it describes the normalized mutation that
+                will actually run, and rewriting it here would let the screen
+                promise something different from what executes.
+              */}
+              {approval.phase.kind === 'needs_approval' && (
+                <div className="mt-3 rounded-field border border-brand-200 bg-brand-50/60 p-2.5" data-testid="rename-approval">
+                  <p className="text-[13px] leading-snug text-slate-800">{approval.phase.action}</p>
+                  <div className="mt-2.5 flex justify-end gap-2">
+                    <button
+                      type="button"
+                      onClick={() => void approval.declineRename()}
+                      data-testid="rename-decline"
+                      className="rounded-field px-3 py-1.5 text-sm font-semibold text-slate-500 hover:bg-slate-100"
+                    >
+                      Don’t rename
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void onApprove()}
+                      data-testid="rename-approve"
+                      className="rounded-field bg-brand-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-brand-700 disabled:opacity-50"
+                    >
+                      Rename
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {approval.phase.kind === 'dispatching' && (
+                /* Disabled the instant it is pressed — a guard against a double
+                   click, NOT the correctness mechanism. Correctness is the
+                   single-use token the server spends before it acts. */
+                <p className="mt-3 text-[13px] text-slate-500" data-testid="rename-dispatching">
+                  Renaming…
+                </p>
+              )}
+
+              {approval.phase.kind === 'blocked' && (
+                <p className="mt-3 text-[13px] leading-snug text-red-600" data-testid="rename-blocked">
+                  {approval.phase.message}
+                </p>
+              )}
+
+              {approval.phase.kind === 'unknown' && (
+                /*
+                  🚨 NO RETRY BUTTON. The rename was dispatched and could not be
+                  confirmed; offering "Try again" invites repeating an action
+                  that may already have happened. For a rename that is untidy —
+                  the same button on a send or a charge is a duplicate.
+                */
+                <div className="mt-3 rounded-field border border-amber-300 bg-amber-50 p-2.5" data-testid="rename-unknown">
+                  <p className="text-[13px] leading-snug text-amber-800">{approval.phase.message}</p>
+                  <div className="mt-2 flex justify-end">
+                    <button
+                      type="button"
+                      onClick={close}
+                      className="rounded-field px-3 py-1.5 text-sm font-semibold text-amber-800 hover:bg-amber-100"
+                    >
+                      Close
+                    </button>
+                  </div>
+                </div>
+              )}
             </form>
           ) : confirming ? (
             <div className="p-2">

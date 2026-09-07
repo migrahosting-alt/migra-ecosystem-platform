@@ -43,6 +43,14 @@ export type BrainOperation =
   | { kind: 'createConversation'; title?: string; memoryMode?: 'off' | 'session' | 'durable' }
   | { kind: 'getConversation'; conversationId: string }
   | { kind: 'renameConversation'; conversationId: string; title: string }
+  /*
+   * The APPROVAL ROUND-TRIP for a rename. Three operations, not one, because
+   * proposing, declining and dispatching are three different acts and the
+   * consumer must not be able to collapse them.
+   */
+  | { kind: 'proposeRename'; conversationId: string; title: string }
+  | { kind: 'declineRename'; approvalToken: string; conversationId: string; title: string }
+  | { kind: 'dispatchRename'; approvalToken: string; conversationId: string; title: string }
   | { kind: 'deleteConversation'; conversationId: string }
   | { kind: 'listMessages'; conversationId: string }
   /**
@@ -464,6 +472,35 @@ export function resolveOperation(op: BrainOperation): ResolvedRequest {
         method: 'PATCH',
         path: `/api/ai/conversations/${id(op.conversationId, 'conversationId')}`,
         body: { title: text(op.title, 'title', 400) },
+      }
+
+    case 'proposeRename':
+      return {
+        method: 'POST',
+        path: '/api/ai/tools/conversations/rename/propose',
+        body: { conversationId: id(op.conversationId, 'conversationId'), title: text(op.title, 'title', 400) },
+      }
+
+    case 'declineRename':
+      return {
+        method: 'POST',
+        path: '/api/ai/tools/conversations/rename/decline',
+        body: {
+          approvalToken: text(op.approvalToken, 'approvalToken', 200),
+          conversationId: id(op.conversationId, 'conversationId'),
+          title: text(op.title, 'title', 400),
+        },
+      }
+
+    case 'dispatchRename':
+      return {
+        method: 'POST',
+        path: '/api/ai/tools/conversations/rename/dispatch',
+        body: {
+          approvalToken: text(op.approvalToken, 'approvalToken', 200),
+          conversationId: id(op.conversationId, 'conversationId'),
+          title: text(op.title, 'title', 400),
+        },
       }
 
     case 'deleteConversation':

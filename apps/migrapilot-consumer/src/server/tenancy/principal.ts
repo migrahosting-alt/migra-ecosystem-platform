@@ -182,6 +182,16 @@ const OPERATION_AUDIENCE: Readonly<Record<string, OperationAudience>> = {
    * below — that one crosses scopes; these do not.
    */
   renameConversation: 'both',
+  /*
+   * The rename APPROVAL round-trip carries the same audience as the rename it
+   * approves. Listing them explicitly rather than letting them default: an
+   * unlisted operation falls to `authenticated`, which would silently deny a
+   * signed-out visitor the confirmation step for a rename they ARE allowed to
+   * perform — a refusal produced by an omission rather than by a decision.
+   */
+  proposeRename: 'both',
+  declineRename: 'both',
+  dispatchRename: 'both',
   deleteConversation: 'both',
   // Streaming is a FLAG on this operation, not a separate kind — so admitting
   // `chatTurn` admits both paths, which is what the slice needs and is why the

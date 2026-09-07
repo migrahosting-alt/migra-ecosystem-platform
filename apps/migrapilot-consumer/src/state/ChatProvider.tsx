@@ -57,6 +57,17 @@ interface ChatContextValue {
    * rejected is a lie the next reload silently corrects.
    */
   renameConversation: (conversationId: string, title: string) => Promise<boolean>
+  /**
+   * Reflect a title the SERVER has already confirmed.
+   *
+   * Local state only — it performs no request and grants no permission. The
+   * approval flow calls it after a dispatch comes back `done`, because that flow
+   * cannot use the optimistic path above: applying a title immediately and
+   * rolling back on refusal has no way to represent "dispatched, and we do not
+   * know whether it landed", which is the one state it exists to be honest
+   * about.
+   */
+  applyRenamedTitle: (conversationId: string, title: string) => void
   /** Delete a conversation. Resolves false when the server refused it. */
   deleteConversation: (conversationId: string) => Promise<boolean>
 }
@@ -1020,6 +1031,14 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     return false
   }, [])
 
+  const applyRenamedTitle = useCallback((conversationId: string, title: string) => {
+    setConversations((current) =>
+      current.map((conversation) =>
+        conversation.id === conversationId ? { ...conversation, title } : conversation,
+      ),
+    )
+  }, [])
+
   const isMissingConversation = useCallback(
     (conversationId: string) => missing.current.has(conversationId),
     [],
@@ -1081,6 +1100,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       detachConversationFile,
       openConversation,
       renameConversation,
+      applyRenamedTitle,
       deleteConversation,
     }),
     [
@@ -1096,6 +1116,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       detachConversationFile,
       openConversation,
       renameConversation,
+      applyRenamedTitle,
       deleteConversation,
     ],
   )
