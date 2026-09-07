@@ -61,6 +61,8 @@ import type {
   AgentRunTransitionInput,
   AgentRunReproposalInput,
   AgentRunReproposalResult,
+  ProjectBindingRow,
+  IdempotencyRow,
 } from './types.js';
 
 import * as conversations from './postgres/conversationRepo.js';
@@ -71,6 +73,8 @@ import * as feedback from './postgres/messageFeedbackRepo.js';
 import * as operational from './postgres/operationalRepo.js';
 import * as agentRuns from './postgres/agentRunRepo.js';
 import * as agentRunChildren from './postgres/agentRunChildRepo.js';
+import * as projectBindings from './postgres/projectBindingRepo.js';
+import * as idempotency from './postgres/idempotencyRepo.js';
 import { latestVersion } from './postgres/migrations.js';
 import type { PostgresConnection } from './postgres/pool.js';
 
@@ -119,6 +123,51 @@ export class PostgresDurableStore implements DurableStore {
   /** A transaction that has declared its tenant scope to row-level security. */
   private async inScope<T>(scope: PersistenceScope, fn: (client: PoolClient) => Promise<T>): Promise<T> {
     return this.tx((client) => conversations.withScope(client, scoped(scope), () => fn(client)));
+  }
+
+  /* ── project bindings ──────────────────────────────────────────────────── */
+
+  /*
+   * Scoped, because `conversation_project` carries migra_scope columns and
+   * row-level security decides what is visible. A binding is tenant data.
+   */
+  async getProjectBinding(conversationId: string, scope: PersistenceScope) {
+    return this.inScope(scope, (c) =>
+      projectBindings.getBinding(c, conversationId, { owner: scope.owner, workspace: scope.workspace }));
+  }
+
+  async bindProject(binding: ProjectBindingRow, scope: PersistenceScope): Promise<void> {
+    await this.inScope(scope, (c) =>
+      projectBindings.bindProject(c, binding, { owner: scope.owner, workspace: scope.workspace }));
+  }
+
+  async unbindProject(conversationId: string, scope: PersistenceScope): Promise<void> {
+    await this.inScope(scope, (c) =>
+      projectBindings.unbindProject(c, conversationId, { owner: scope.owner, workspace: scope.workspace }));
+  }
+
+  /* ── idempotency ───────────────────────────────────────────────────────── */
+
+  /*
+   * 🚨 ISOLATION HERE IS THE PRIMARY KEY, NOT ROW-LEVEL SECURITY.
+   *
+   * `tool_idempotency.scope` is a serialized string supplied by the tool layer,
+   * not a migra_scope column, so RLS policies do not apply to it. Isolation is
+   * enforced because scope is part of the primary key and every read passes it —
+   * the same guarantee the SQLite adapter gives, and the same one the pure layer
+   * assumes. Promoting it to an RLS-scoped table is defence in depth and is
+   * recorded as follow-up rather than claimed here.
+   */
+  async idempotencyInsertIfAbsent(record: IdempotencyRow): Promise<IdempotencyRow | null> {
+    return this.platformTransaction((c) => idempotency.insertIfAbsent(c, record as never)) as Promise<IdempotencyRow | null>;
+  }
+
+  async idempotencyRead(key: string, actor: string, scope: string): Promise<IdempotencyRow | null> {
+    return this.platformTransaction((c) => idempotency.readRecord(c, key, actor, scope)) as Promise<IdempotencyRow | null>;
+  }
+
+  async idempotencyWrite(record: IdempotencyRow): Promise<void> {
+    await this.platformTransaction((c) => idempotency.writeRecord(c, record as never));
   }
 
   /* ── lifecycle ─────────────────────────────────────────────────────────── */

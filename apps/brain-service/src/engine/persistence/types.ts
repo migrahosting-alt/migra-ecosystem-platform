@@ -622,7 +622,75 @@ export interface OperationalPersistence {
 }
 
 /** A composite durable store exposing every persistence facet + health. */
-export interface DurableStore extends ConversationPersistence, MemoryItemPersistence, RagIndexPersistence, EmbeddingCachePersistence, WorkspacePersistence, OperationalPersistence, AgentRunJournalPersistence {
+/**
+ * Durable state for features that would otherwise silently degrade.
+ *
+ * 🚨 A CAPABILITY, NOT A CLASS — and the reason is a real production defect.
+ * The project binding shipped with a composition root that read
+ * `durable instanceof SqliteDurableStore ? durable.projectBindingStore() : new
+ * InMemoryProjectBindingStore()`. Production runs PostgreSQL, so production
+ * took the memory branch and a connected project would have been lost on the
+ * next restart, silently. `operationalMaintenance.ts` already warned that an
+ * `instanceof` check "would silently disable maintenance for every future
+ * adapter rather than telling anyone"; this is that warning, enforced by the
+ * type instead of remembered.
+ *
+ * An adapter earns these by implementing them. A caller asks the STORE, never
+ * the store's class.
+ */
+export interface ProjectBindingPersistence {
+  getProjectBinding(conversationId: string, scope: PersistenceScope): Promise<ProjectBindingRow | null>;
+  bindProject(binding: ProjectBindingRow, scope: PersistenceScope): Promise<void>;
+  unbindProject(conversationId: string, scope: PersistenceScope): Promise<void>;
+}
+
+/** The pointer, and nothing about permission. See the migration for why. */
+export interface ProjectBindingRow {
+  conversationId: string;
+  projectId: string;
+  boundBy: string;
+  boundAt: number;
+}
+
+export interface IdempotencyPersistence {
+  /** Insert if absent → null; otherwise the stored record, unmodified. Atomic. */
+  idempotencyInsertIfAbsent(record: IdempotencyRow): Promise<IdempotencyRow | null>;
+  idempotencyRead(key: string, actor: string, scope: string): Promise<IdempotencyRow | null>;
+  idempotencyWrite(record: IdempotencyRow): Promise<void>;
+}
+
+/** Structurally identical to the engine's IdempotencyRecord, by design. */
+export interface IdempotencyRow {
+  identity: { idempotencyKey: string; toolId: string; actor: string; scope: string; normalizedInputHash: string };
+  state: 'pending' | 'committed' | 'failed_before_dispatch' | 'outcome_unknown';
+  attempt: number;
+  createdAt: number;
+  updatedAt: number;
+  result?: unknown;
+  detail?: string;
+  provenance?: { requestId: string; approvalId?: string; dispatchedAt?: number; settledAt?: number };
+}
+
+/**
+ * Capability detection, structural — the same shape `isMaintainable` uses.
+ *
+ * Checks for the METHODS rather than a class, so an adapter earns the
+ * capability by implementing it. A store that lacks these is not "probably
+ * fine"; it is a store on which these features must be REFUSED, not degraded.
+ */
+export function hasProjectBindings<T extends object>(s: T): s is T & ProjectBindingPersistence {
+  const p = s as Partial<ProjectBindingPersistence>;
+  return typeof p.getProjectBinding === 'function' && typeof p.bindProject === 'function'
+    && typeof p.unbindProject === 'function';
+}
+
+export function hasIdempotency<T extends object>(s: T): s is T & IdempotencyPersistence {
+  const p = s as Partial<IdempotencyPersistence>;
+  return typeof p.idempotencyInsertIfAbsent === 'function' && typeof p.idempotencyRead === 'function'
+    && typeof p.idempotencyWrite === 'function';
+}
+
+export interface DurableStore extends ConversationPersistence, MemoryItemPersistence, RagIndexPersistence, EmbeddingCachePersistence, WorkspacePersistence, OperationalPersistence, AgentRunJournalPersistence, ProjectBindingPersistence, IdempotencyPersistence {
   health(): Promise<PersistenceHealth>;
   integrityCheck(): Promise<string>;
   close(): Promise<void>;

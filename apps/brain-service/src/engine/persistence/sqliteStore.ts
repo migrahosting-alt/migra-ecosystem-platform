@@ -13,7 +13,9 @@
 
 import { DatabaseSync } from 'node:sqlite';
 import { SqliteProjectBindingStore } from '../projects/sqliteProjectBinding.js';
+import { SqliteIdempotencyPersistence } from '../tools/sqliteIdempotency.js';
 import type { ProjectBindingStore } from '../projects/projectBinding.js';
+import type { ProjectBindingRow, IdempotencyRow } from './types.js';
 import { statSync } from 'node:fs';
 import type {
   ConversationPersistence, MemoryItemPersistence, RagIndexPersistence, EmbeddingCachePersistence,
@@ -632,9 +634,52 @@ export class SqliteDurableStore implements DurableStore {
    * `DatabaseSync` onto the same file is two writers with two opinions about a
    * transaction. The store that owns the file owns the handle.
    */
-  projectBindingStore(): ProjectBindingStore {
-    return new SqliteProjectBindingStore(this.db);
+  /* ── project bindings + idempotency, as CAPABILITIES ───────────────────── */
+
+  /*
+   * These used to be reachable only through `durable instanceof
+   * SqliteDurableStore`, which is how production ended up on an in-memory
+   * binding store. They are now part of the shared `DurableStore` contract, so
+   * the compiler requires every adapter to answer them and no caller has to
+   * know which adapter it holds.
+   */
+  async getProjectBinding(conversationId: string, scope: PersistenceScope) {
+    return this.bindings().get(conversationId, { owner: scope.owner, workspace: scope.workspace });
   }
+
+  async bindProject(binding: ProjectBindingRow, scope: PersistenceScope): Promise<void> {
+    await this.bindings().bind(binding, { owner: scope.owner, workspace: scope.workspace });
+  }
+
+  async unbindProject(conversationId: string, scope: PersistenceScope): Promise<void> {
+    await this.bindings().unbind(conversationId, { owner: scope.owner, workspace: scope.workspace });
+  }
+
+  async idempotencyInsertIfAbsent(record: IdempotencyRow): Promise<IdempotencyRow | null> {
+    return this.idem().insertIfAbsent(record as never) as Promise<IdempotencyRow | null>;
+  }
+
+  async idempotencyRead(key: string, actor: string, scope: string): Promise<IdempotencyRow | null> {
+    return this.idem().read(key, actor, scope) as Promise<IdempotencyRow | null>;
+  }
+
+  async idempotencyWrite(record: IdempotencyRow): Promise<void> {
+    await this.idem().write(record as never);
+  }
+
+  /** Built lazily on THIS connection — never a second handle to the same file. */
+  private bindings(): ProjectBindingStore {
+    this.bindingStore ??= new SqliteProjectBindingStore(this.db);
+    return this.bindingStore;
+  }
+
+  private idem(): SqliteIdempotencyPersistence {
+    this.idempotencyStore ??= new SqliteIdempotencyPersistence(this.db);
+    return this.idempotencyStore;
+  }
+
+  private bindingStore?: ProjectBindingStore;
+  private idempotencyStore?: SqliteIdempotencyPersistence;
 
   private schemaVersion = 0;
   private migrationState = 'pending';

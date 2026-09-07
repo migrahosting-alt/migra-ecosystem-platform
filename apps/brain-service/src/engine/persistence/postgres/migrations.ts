@@ -1264,6 +1264,79 @@ BEGIN
 END $$;
 `;
 
+
+/**
+ * M25 — the conversation→project binding.
+ *
+ * 🚨 THIS TABLE'S ABSENCE WAS A REAL PRODUCTION DEFECT. The feature shipped with
+ * a SQLite table and a composition root that read
+ * `durable instanceof SqliteDurableStore ? durable.projectBindingStore() : new
+ * InMemoryProjectBindingStore()` — so on a Postgres production Brain a connected
+ * project was held IN MEMORY and would have vanished on the next restart, with
+ * no error and no warning. Local acceptance could not see it: the rig runs
+ * SQLite, so the durable branch was always the one taken.
+ *
+ * A POINTER, NOT A PERMISSION. There is deliberately no can_read / can_propose /
+ * can_apply column and adding one would be the defect, not a feature: a binding
+ * that recorded what the user was allowed to do at connect time is a snapshot of
+ * a grant, and a snapshot of a grant is how a revoked user keeps working. Every
+ * use re-resolves against the grant source.
+ */
+const M25_CONVERSATION_PROJECT = `
+CREATE TABLE IF NOT EXISTS conversation_project (
+  conversation_id TEXT        NOT NULL,
+  owner_scope     migra_scope NOT NULL,
+  workspace_scope migra_scope NOT NULL,
+  project_id      TEXT        NOT NULL,
+  /* Who connected it. Provenance, not authority. */
+  bound_by        TEXT        NOT NULL,
+  bound_at        BIGINT      NOT NULL,
+  PRIMARY KEY (conversation_id, owner_scope, workspace_scope)
+);
+
+CREATE INDEX IF NOT EXISTS conversation_project_scope_idx
+  ON conversation_project (owner_scope, workspace_scope);
+`;
+
+/**
+ * M26 — durable idempotency.
+ *
+ * THE PRIMARY KEY IS (idempotency_key, actor, scope), and the choice matters.
+ * Not the key alone: two tenants may legitimately pick the same key and neither
+ * should see the other's operation. Not the whole operation identity either —
+ * if tool_id or input_hash were in the key, the same key with edited input would
+ * INSERT A SECOND ROW instead of colliding, and the reuse this primitive exists
+ * to refuse would succeed as a brand-new operation.
+ *
+ * So tool and input hash are ATTRIBUTES, compared on read. The collision has to
+ * happen for the refusal to be possible.
+ *
+ * The claim is one INSERT and the database decides who wins. Read-then-write
+ * loses the double-click race: both callers read "nothing stored", both
+ * dispatch, and the operation happens twice with an audit trail saying once.
+ */
+const M26_TOOL_IDEMPOTENCY = `
+CREATE TABLE IF NOT EXISTS tool_idempotency (
+  idempotency_key TEXT        NOT NULL,
+  actor           TEXT        NOT NULL,
+  scope           TEXT        NOT NULL,
+  tool_id         TEXT        NOT NULL,
+  input_hash      TEXT        NOT NULL,
+  /* pending | committed | failed_before_dispatch | outcome_unknown */
+  state           TEXT        NOT NULL,
+  attempt         INTEGER     NOT NULL,
+  created_at      BIGINT      NOT NULL,
+  updated_at      BIGINT      NOT NULL,
+  result_json     JSONB,
+  detail          TEXT,
+  provenance_json JSONB,
+  PRIMARY KEY (idempotency_key, actor, scope)
+);
+
+CREATE INDEX IF NOT EXISTS tool_idempotency_state_idx
+  ON tool_idempotency (state, updated_at);
+`;
+
 export const MIGRATIONS: readonly Migration[] = [
   { version: 1, name: 'foundation', sql: M1_FOUNDATION },
   { version: 2, name: 'tenancy_primitives', sql: M2_TENANCY },
@@ -1289,6 +1362,8 @@ export const MIGRATIONS: readonly Migration[] = [
   { version: 22, name: 'index_version_chunk_count', sql: M22_INDEX_VERSION_CHUNK_COUNT },
   { version: 23, name: 'document_processing', sql: M23_DOCUMENT_PROCESSING },
   { version: 24, name: 'message_feedback', sql: M24_MESSAGE_FEEDBACK },
+  { version: 25, name: 'conversation_project', sql: M25_CONVERSATION_PROJECT },
+  { version: 26, name: 'tool_idempotency', sql: M26_TOOL_IDEMPOTENCY },
 ];
 
 

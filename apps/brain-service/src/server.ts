@@ -30,7 +30,8 @@ import { registerToolConsentRoutes } from './engine/tools/toolConsentRoutes.js';
 import { registerInspectRoutes } from './engine/workspace/inspectRoutes.js';
 import { registerProjectRoutes } from './engine/projects/projectRoutes.js';
 import { registerProjectInspectRoutes } from './engine/projects/projectInspect.js';
-import { InMemoryProjectBindingStore } from './engine/projects/projectBinding.js';
+import { durableProjectBindings } from './engine/projects/durableProjectBindings.js';
+import { hasProjectBindings } from './engine/persistence/types.js';
 import { WorkspaceProjectGrantSource } from './engine/projects/workspaceGrantSource.js';
 import { registerCommandRunRoutes } from './engine/tools/commandRunRoutes.js';
 import { registerTestRunRoutes } from './engine/tools/testRunRoutes.js';
@@ -1091,18 +1092,46 @@ async function main(): Promise<void> {
    * the database it would live in, and pretending otherwise would promise a
    * connection that silently vanishes on restart.
    */
+  /*
+   * 🚨 NO SILENT IN-MEMORY FALLBACK. THIS IS THE RULE THIS BLOCK EXISTS FOR.
+   *
+   * It previously read `durable instanceof SqliteDurableStore ? … : new
+   * InMemoryProjectBindingStore()`. Production runs PostgreSQL, so production
+   * took the memory branch: a connected project would have been lost on the
+   * next Brain restart, with no error and no warning. Local acceptance could
+   * not see it, because the rig runs SQLite and always took the durable branch.
+   *
+   * The rule now enforced, in the words of the platform invariant:
+   *
+   *   If a feature requires durable state, production must either have its
+   *   canonical durable repository or refuse to expose that feature. It may
+   *   never silently substitute in-memory state.
+   *
+   * So the capability is asked of the STORE, structurally — never of its class,
+   * which is what `operationalMaintenance` already warned would "silently
+   * disable [a feature] for every future adapter rather than telling anyone".
+   * When it is absent the routes are NOT REGISTERED and the reason is logged,
+   * so the feature is missing rather than quietly broken.
+   */
   const projectBindings =
-    durable instanceof SqliteDurableStore
-      ? durable.projectBindingStore()
-      : new InMemoryProjectBindingStore();
+    durable && hasProjectBindings(durable) ? durableProjectBindings(durable) : null;
+
+  if (!projectBindings) {
+    app.log.warn(
+      { persistence: selection.kind },
+      'PROJECT CONNECT DISABLED — the configured durable store has no project-binding repository. ' +
+        'Refusing to serve the feature from memory: a connection that vanishes on restart is worse ' +
+        'than one that was never offered.',
+    );
+  }
   const projectGrants = new WorkspaceProjectGrantSource(workspaceManager);
-  registerProjectRoutes(app, {
+  if (projectBindings) registerProjectRoutes(app, {
     grants: projectGrants,
     bindings: projectBindings,
     scopeFrom: memoryScopeFrom,
     actorFrom: (request) => String(request.headers['x-owner-scope'] ?? 'local'),
   });
-  registerProjectInspectRoutes(app, {
+  if (projectBindings) registerProjectInspectRoutes(app, {
     grants: projectGrants,
     bindings: projectBindings,
     scopeFrom: memoryScopeFrom,
