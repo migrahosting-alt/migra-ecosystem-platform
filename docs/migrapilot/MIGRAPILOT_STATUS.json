@@ -1889,7 +1889,8 @@
       "interruptedBy": {
         "defect": "chat cold-start rendered as an assistant message, with a second floating indicator",
         "foundBy": "Bonex, during acceptance, 2026-09-07",
-        "state": "FIXED (79b0409b) — READY FOR USER TEST, not done",
+        "state": "FIXED (79b0409b, then f4008e13 after a second USER TEST FAIL) — READY FOR USER TEST, not done",
+        "secondFailure": "Bonex rejected the first fix on the screenshot. It had moved the sentence to a status row and left the WORDLESS case untouched — avatar, rounded bordered card, dots inside — so a cold start still showed MigraPilot's mark beside a message-shaped container. Both fixes were argued as 'this is not a Message'; both times the screen said otherwise. THE BAR IS WHAT THE USER PERCEIVES, NOT COMPONENT OWNERSHIP. Now one surface only: an inline status line, no avatar, no bubble, no border/radius/shadow, no timestamp, no controls.",
         "whyItPreempted": "A Chat truthfulness defect on the product's primary surface, and Chat is the governing program. Accepting a rename battery on a build that presents runtime state as MigraPilot's own words would be accepting the wrong thing.",
         "rigImpact": "The rig was rebuilt and relaunched to serve the fix: buildId LIHliv21952a3JHldzh2L → EmWrBUfJwH2HCY24sUObl. The frozen rename COMMITS are untouched; only the running build moved. verify-rename-approval.cjs re-run green against the new build, and the Brain was neither rebuilt nor faulted."
       }

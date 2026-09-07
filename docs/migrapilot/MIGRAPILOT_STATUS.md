@@ -941,10 +941,30 @@ rendered under `node --test`** — a missing `.png` loader made it impossible, s
 was the only guard available. `test/serverOnlyLoader.mjs` now stubs static assets and `next/image`,
 and the suite renders real components and asserts on real markup.
 
-Two surfaces now, never both: a **status row** for the detail (no avatar, no bubble, no timestamp, no
-Listen) and the wordless three dots, which keep the bubble because they carry no words to mistake for
-an answer. `showsTurnProgress` retires the indicator once the answer starts arriving — `pending` alone
-had kept it mounted underneath the streaming bubble for the rest of the turn.
+### It then failed acceptance a SECOND time — read this before touching the indicator
+
+The first fix moved the sentence to a status row and **left the wordless case exactly as it was**:
+avatar, rounded bordered card, dots inside. So a cold start still showed MigraPilot's mark beside a
+message-shaped container, and Bonex rejected it on the screenshot.
+
+Both fixes were argued the same way — *"this is not a Message"* — and both times the screen said
+otherwise.
+
+> **Acceptance is about what the user perceives, not about component ownership.** A reader does not
+> know which component rendered a thing. They know that an avatar next to a bordered card means
+> MigraPilot spoke.
+
+There is now **one** surface with no branch: an inline status line, dots always, the observed detail
+when there is one. No avatar, no bubble or card, no border/radius/shadow on the container, no
+timestamp, no Listen/copy/feedback. Two branches is how one of them got left behind, so a test pins
+that the container does not change shape with its content.
+
+`showsTurnProgress` retires the indicator once the answer starts arriving — `pending` alone had kept
+it mounted underneath the streaming bubble for the rest of the turn.
+
+Both guards assert **visual structure**, not just where the text lives: the suite names the chrome it
+refuses (border, shadow, card radius, raised surface, avatar, controls, timestamp), and the live
+harness reads **computed style** in the browser so it fails on chrome however the classes are spelled.
 
 Verified against a **real** cold start: `scripts/verify-cold-start.mjs` evicts the model from Ollama,
 drives a signed-in turn through the browser, and reports **INCONCLUSIVE with a non-zero exit** if the
