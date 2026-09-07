@@ -59,9 +59,71 @@ const textOf = (html: string): string =>
     .replace(/&#x27;|&quot;|&amp;/g, '')
     .trim()
 
+/** The container's own class list — the first element in a render. */
+const rootClass = (html: string): string => classValues(html)[0] ?? ''
+
+/**
+ * The visual grammar of an assistant message, named explicitly.
+ *
+ * Acceptance is about what the user PERCEIVES, so these are asserted by name
+ * rather than only by comparison: an avatar beside a bordered, rounded,
+ * shadowed card is what "MigraPilot said this" looks like, and the progress
+ * surface must have none of it.
+ */
+const MESSAGE_GRAMMAR = [
+  { name: 'a card border', pattern: /\bborder\b/ },
+  { name: 'a card shadow', pattern: /shadow-/ },
+  { name: 'a bubble radius', pattern: /rounded-(?:2xl|xl|tl-md|br-md)/ },
+  { name: 'a raised message surface', pattern: /bg-raised/ },
+]
+
 /* ------------------------------------------------------------------ *
  * The regression itself
  * ------------------------------------------------------------------ */
+
+test('the progress surface has NONE of the assistant message grammar', () => {
+  /*
+   * FAILED ACCEPTANCE TWICE. First the sentence sat in the assistant bubble;
+   * then the wordless case still rendered the avatar and the bubble, so a cold
+   * start still showed MigraPilot's mark beside a bordered card with dots in
+   * it. Both were defensible as "not a Message" and both looked like one.
+   *
+   * Asserted for BOTH the detailed and wordless renders, because the second
+   * failure was entirely in the branch the first fix left alone.
+   */
+  for (const [label, html] of [
+    ['with a cold-start detail', render(createElement(TypingIndicator, { detail: COLD_START }))],
+    ['with no detail at all', render(createElement(TypingIndicator, {}))],
+  ]) {
+    assert.doesNotMatch(html, /<img/, `${label}: the progress surface carries the assistant avatar`)
+    const root = rootClass(html)
+    for (const { name, pattern } of MESSAGE_GRAMMAR) {
+      assert.ok(
+        !pattern.test(root),
+        `${label}: the progress container has ${name} — that is message chrome (class="${root}")`,
+      )
+    }
+  }
+})
+
+test('the progress surface offers none of a message’s controls', () => {
+  for (const html of [
+    render(createElement(TypingIndicator, { detail: COLD_START })),
+    render(createElement(TypingIndicator, {})),
+  ]) {
+    assert.doesNotMatch(html, /<button/, 'no Listen, copy or feedback on transient state')
+    // A timestamp is the other thing that says "this was said at a moment".
+    assert.doesNotMatch(html, /\d{1,2}:\d{2}/, 'no timestamp on transient state')
+  }
+})
+
+test('there is ONE presentation, so no branch can quietly keep the old chrome', () => {
+  // The second acceptance failure existed because there were two branches and
+  // only one was fixed. Structure, not vigilance, is what prevents a third.
+  const withDetail = rootClass(render(createElement(TypingIndicator, { detail: COLD_START })))
+  const without = rootClass(render(createElement(TypingIndicator, {})))
+  assert.equal(withDetail, without, 'the progress container must not change shape with its content')
+})
 
 test('the cold-start line does NOT render in the assistant bubble', () => {
   const progress = render(createElement(TypingIndicator, { detail: COLD_START }))
@@ -117,10 +179,9 @@ test('the cold-start detail is the only text in the progress surface', () => {
 })
 
 test('the wordless indicator stays wordless', () => {
-  // Putting a sentence back into the bubble branch is exactly how this defect
-  // was built the first time.
+  // Putting a sentence into a surface that has no words is how this began.
   const dots = render(createElement(TypingIndicator, {}))
-  assert.equal(textOf(dots), '', 'the three-dot indicator must never carry words')
+  assert.equal(textOf(dots), '', 'the dots-only state must never carry words')
 })
 
 /* ------------------------------------------------------------------ *

@@ -13,7 +13,6 @@ import {
   FileText,
   FileX,
   ImageOff,
-  Loader2,
   Pause,
   Pencil,
   Play,
@@ -691,63 +690,52 @@ export function MessageView({
 }
 
 /**
- * The ONE progress surface for an in-flight turn — in two presentations, and
- * never both at once.
+ * THE ONE PROGRESS SURFACE — one presentation, always. Never a second one, and
+ * never anything that borrows the assistant's visual grammar.
  *
  * ---------------------------------------------------------------------------
- * 🚨 WORDS INSIDE THE ASSISTANT'S BUBBLE ARE AN ANSWER, WHATEVER WE CALL THEM
+ * 🚨 ACCEPTANCE IS ABOUT WHAT THE USER PERCEIVES, NOT COMPONENT OWNERSHIP
  *
- * An earlier fix moved the cold-start text out of the message DATA — it stopped
- * being persisted, stopped being copyable, stopped surviving a reload — and
- * then rendered it here, inside `LogoMark` plus `rounded-2xl rounded-tl-md
- * border border-hairline bg-raised … shadow-card`. That is character-for-
- * character the assistant bubble on line 441. So on screen, "Loading the
- * language model…" arrived wearing MigraPilot's avatar in MigraPilot's bubble,
- * and a user has no access to our data model to know the difference.
+ * This has now failed acceptance twice, and both times the code was defensible
+ * on its own terms:
  *
- * The lesson is that "not a message" is a claim about RENDERED OUTPUT, not
- * about which state variable holds the string.
+ *   1. the sentence was kept out of message DATA, then rendered in `LogoMark`
+ *      plus the assistant bubble's exact classes;
+ *   2. the sentence moved to a status row, but the WORDLESS case kept the
+ *      avatar and the bubble — so a cold start still showed MigraPilot's mark
+ *      and a rounded bordered card with dots in it.
  *
- * So the two presentations are kept structurally apart:
+ * Each time the argument was "this is not a Message". Each time the screen said
+ * otherwise. A reader does not know which component rendered a thing; they know
+ * that MigraPilot's avatar next to a bordered card means MigraPilot spoke.
  *
- *   · with a detail  → a status row. No avatar, no bubble, no card. It reads as
- *                      what it is: the system saying what it is doing.
- *   · with none      → the wordless three dots, in the bubble, unchanged. It is
- *                      the recognised idiom and it carries NO TEXT, so there is
- *                      nothing there to mistake for an authored answer.
+ * So the branch is gone. There is ONE surface: an inline status line, dots
+ * always, the observed detail when there is one. No avatar. No bubble or card.
+ * No border, radius or shadow on the container. No timestamp. No Listen, copy
+ * or feedback. It cannot impersonate a message because it has nothing in common
+ * with one.
  *
- * The wordless branch must STAY wordless. Putting a sentence back into it
- * recreates this defect exactly, and `coldStartProgress.test.ts` renders both
- * branches to make sure that fails.
+ * `coldStartProgress.test.ts` renders this and asserts every one of those
+ * absences against a real assistant message; `scripts/verify-cold-start.mjs`
+ * asserts the same structure in a real browser on a real cold model.
  * ---------------------------------------------------------------------------
  */
 export function TypingIndicator({ detail }: { detail?: string }) {
-  if (detail) {
-    return (
-      <div
-        role="status"
-        aria-live="polite"
-        data-testid="turn-progress"
-        className="flex animate-fade items-center gap-2.5 py-1 pl-1 text-sm text-muted"
-      >
-        <Loader2 className="h-4 w-4 shrink-0 animate-spin text-brand-400" strokeWidth={2} aria-hidden />
-        <span>{detail}</span>
-      </div>
-    )
-  }
-
   return (
-    <div role="status" aria-live="polite" data-testid="turn-progress" className="flex animate-fade gap-3.5">
-      <LogoMark className="mt-1 h-8 w-8 shrink-0" id="typing" />
-      <div className="flex items-center gap-2.5 rounded-2xl rounded-tl-md border border-hairline bg-raised px-5 py-4 shadow-card">
-        {[0, 1, 2].map((index) => (
-          <span
-            key={index}
-            className="h-2 w-2 animate-bounce rounded-full bg-brand-300"
-            style={{ animationDelay: `${index * 140}ms`, animationDuration: '1s' }}
-          />
-        ))}
-      </div>
+    <div
+      role="status"
+      aria-live="polite"
+      data-testid="turn-progress"
+      className="flex animate-fade items-center gap-2.5 py-1 pl-1 text-sm text-muted"
+    >
+      {detail && <span>{detail}</span>}
+      {[0, 1, 2].map((index) => (
+        <span
+          key={index}
+          className="h-2 w-2 animate-bounce rounded-full bg-brand-300"
+          style={{ animationDelay: `${index * 140}ms`, animationDuration: '1s' }}
+        />
+      ))}
     </div>
   )
 }

@@ -121,13 +121,42 @@ async function evictModels() {
   return resident
 }
 
-/** What the page looks like right now, in the terms this test cares about. */
+/**
+ * What the page looks like right now, in the terms this test cares about.
+ *
+ * 🚨 THE STRUCTURAL FACTS ARE READ FROM COMPUTED STYLE, not from class names.
+ *
+ * The first fix moved the text out of message data and was accepted on that
+ * basis; the screen still showed MigraPilot's avatar beside a bordered card.
+ * Acceptance is about what the user perceives, so this asks the browser what
+ * the pixels are: does the progress surface carry an image, does anything in
+ * it have a border, a shadow, a card radius. Those are the properties that
+ * make a reader see "MigraPilot said this".
+ */
 const SAMPLE = () => {
   const progress = [...document.querySelectorAll('[data-testid=turn-progress]')]
   const messages = [...document.querySelectorAll('[data-testid=assistant-message]')]
+
+  const chrome = progress.flatMap((root) =>
+    [root, ...root.querySelectorAll('*')].flatMap((el) => {
+      const style = getComputedStyle(el)
+      const found = []
+      if (el.tagName === 'IMG') found.push('an avatar/image')
+      if (parseFloat(style.borderTopWidth) > 0) found.push('a border')
+      if (style.boxShadow && style.boxShadow !== 'none') found.push('a card shadow')
+      // Dots are circles; a CARD radius is what matters, so only flag a radius
+      // on something wide enough to be a container.
+      if (parseFloat(style.borderTopLeftRadius) > 6 && el.getBoundingClientRect().width > 60) {
+        found.push('a bubble radius')
+      }
+      return found
+    }),
+  )
+
   return {
     progressCount: progress.length,
     progressText: progress.map((el) => el.textContent?.trim() ?? '').join(' | '),
+    progressChrome: [...new Set(chrome)],
     messageTexts: messages.map((el) => el.textContent?.trim() ?? ''),
   }
 }
@@ -154,6 +183,7 @@ const SAMPLE = () => {
   let maxProgress = 0
   let coexisted = null
   let leakedIntoMessage = null
+  let messageChrome = null
 
   try {
     await page.goto(`${RIG}/`, { waitUntil: 'networkidle', timeout: 60_000 })
@@ -177,6 +207,11 @@ const SAMPLE = () => {
         sawColdStart = true
       }
       maxProgress = Math.max(maxProgress, sample.progressCount)
+
+      // The SECOND acceptance failure was not the text — it was the chrome
+      // around it. An avatar beside a bordered card is what "MigraPilot said
+      // this" looks like, whatever component drew it.
+      if (sample.progressChrome.length > 0 && !messageChrome) messageChrome = sample.progressChrome
 
       // The regression: the loading line inside a message bubble.
       const leak = sample.messageTexts.find((text) => text.includes(COLD_START))
@@ -213,6 +248,12 @@ const SAMPLE = () => {
     if (leakedIntoMessage) {
       failures.push(`the loading line rendered INSIDE an assistant message: “${leakedIntoMessage.slice(0, 90)}”`)
     }
+    if (messageChrome) {
+      failures.push(
+        `the progress surface is dressed as a message — it has ${messageChrome.join(', ')}.\n` +
+          '     A reader does not know which component rendered it; they know that chrome means MigraPilot spoke.',
+      )
+    }
     if (maxProgress > 1) {
       failures.push(`${maxProgress} progress surfaces were on screen at once — there must be exactly one`)
     }
@@ -232,6 +273,7 @@ const SAMPLE = () => {
 
     console.log(`   cold start observed:        ${sawColdStart ? 'yes' : 'NO'}`)
     console.log(`   max progress surfaces:      ${maxProgress}`)
+    console.log(`   message chrome on progress: ${messageChrome ? `YES — ${messageChrome.join(', ')}` : 'none'}`)
     console.log(`   loading text in a message:  ${leakedIntoMessage ? 'YES — defect' : 'no'}`)
     console.log(`   progress outlived the start:${coexisted ? ' YES — defect' : ' no'}`)
     console.log(`   present after reload:       ${afterReload.includes(COLD_START) ? 'YES — defect' : 'no'}`)
