@@ -1970,6 +1970,34 @@
       "note": "Step 5 needs a workspace registered in the tester's DERIVED scope (user:<id> / personal:<id>), not 'tester'/'default'. With none registered, the truthful empty state is the correct and expected result."
     }
   },
+  "frozenAcceptancePair": {
+    "_authority": "Bonex, 2026-09-07. FROZEN. No consumer changes before the user walk unless the walk exposes a real defect.",
+    "consumer": "z8sWzBmyddBPwOczlQ45U",
+    "brain": "82ba5ae443f760697de6ff44857f4ceae2204e92f9fa87b8902515c4484fe539 (git e1885bfe, clean tree)",
+    "renameMatrix": "ALL TEN GREEN on this exact pair — the final repin. Client build asserted during every browser case, so no stale bundle contributed. Brain digest re-verified identical after the three fault restarts.",
+    "brainRestored": "pid 537397: no MIGRAPILOT_TEST_* and no *FAULT* variable of any kind; both withdrawn rename verbs at 410.",
+    "userWalk": [
+      "1. Rename → approval before mutation",
+      "2. Decline → unchanged",
+      "3. Approve → one rename, persists after reload",
+      "4. No internal ids/hashes/tool vocabulary",
+      "5. Connect project → authorized chooser/binding",
+      "6. Fresh context → project still connected",
+      "7. Ask in normal Chat to inspect unique project content → correct files returned",
+      "8. Disconnect/remove project → Chat no longer claims access or invents results",
+      "9. No raw evidence-envelope/scaffolding copy in spreadsheet or project responses",
+      "10. Cold-start state remains a transient non-message surface"
+    ],
+    "note": "Step 5 needs a workspace registered in the tester's DERIVED scope (user:<id> / personal:<id>). With none, the truthful empty state is the correct result. The synthetic rename fault matrix stays artifact-pinned AGENT evidence — no need to cycle the Brain manually unless the wording is worth inspecting."
+  },
+  "refusalVoiceCandidate": {
+    "_authority": "Bonex, 2026-09-07. RECORDED, NOT CHANGED — changing it would invalidate the frozen build.",
+    "observed": "After the seam fix, a no-project-connected turn answered: \"I'm sorry, but I can't assist with that request. Please connect a project to this conversation.\"",
+    "problem": "That opening reads as a generic SAFETY refusal. The real condition is missing project context, and a user may conclude their request itself is prohibited.",
+    "wanted": "\"I can help with that, but this conversation doesn't have a project connected yet. Connect a project and ask me again.\" — capability affirmed first, then the missing precondition.",
+    "state": "The semantics are correct and the seam is structurally fixed; this is voice. Watch it during the manual walk. Change only if the walk finds it unacceptable.",
+    "scope": "A candidate for the VOICE instruction in src/server/evidence/composition.ts — shared, so it would apply to every capability at once rather than to the project path alone."
+  },
   "agreedSchedule": {
     "_authority": "Bonex, 2026-09-07. Fixed order. No drift to Projects, no higher-risk tools, no Studio detour unless a shared dependency genuinely blocks Priority A.",
     "0_userAcceptance": {
