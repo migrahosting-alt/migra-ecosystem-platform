@@ -1928,6 +1928,27 @@
     "whyItStillMatters": "Internal evidence phrasing should not leak into conversational copy. It reads as scaffolding.",
     "state": "RECORDED — a UX refinement. Does not preempt the roadmap."
   },
+  "projectAccessLane": {
+    "_authority": "Bonex, 2026-09-07. Read-only inspect is the acceptance target; the write half stays behind explicit authorization plus durable idempotency.",
+    "state": "BRAIN PATH PROVEN LIVE (b8a68eb8, 669feefc, afe69e7e, 028341b1). Consumer API + Connect control NOT built — the UI is still dark by instruction.",
+    "grantSource": "The REAL Workspace Manager registry, not a dev stand-in. A durable scoped table the engine already owns: id, name, root, git provenance, permissions, unique on (owner, workspace). A filesystem browser was rejected — enumerating directories makes 'what counts as a project' a question about the server's disk rather than about entitlement.",
+    "liveChain": {
+      "emptyState": "PASS — tester scope with no workspaces: {projects:[],empty:true}, 'No projects are available to connect yet.', inspect 409 connect-project. Not a dead control and not a failure.",
+      "noInventedProject": "PASS — POST with projectId '/etc' → 403. No filesystem fallback, no manufactured authority.",
+      "listSelectBind": "PASS — one workspace registered through the real POST /api/ai/workspaces route; the wire carried only {projectId}.",
+      "inspectReadsIntendedProject": "PASS — a sentinel file (MIGRAPILOT_CONNECT_SENTINEL_7A3F9C) was found in both fixture files, so the inspect read THAT project rather than 'some directory'.",
+      "persistence": "PASS — Brain stopped and restarted (pid 4112562 → 4123326); the conversation was still connected and inspect still read the sentinel with no reconnect.",
+      "revocation": "PASS — the registry recorded a permission list without read; the next inspect returned 403 request-read-access, the project left the list, and THE BINDING WAS UNTOUCHED.",
+      "unavailable": "PASS — the workspace was then deleted through its real route and the SAME binding resolved 409 connect-project. Revoked and missing stayed distinct facts live, not only in tests.",
+      "cleanup": "The workspace was deleted, the conversation unbound and the sentinel directory removed. Tester scope verified empty: no bindings, no workspaces."
+    },
+    "openBoundaries": {
+      "registrationRoot": "🚨 SEPARATE QUESTION, recorded not conflated. POST /api/ai/workspaces registers a workspace with a root THE CALLER SUPPLIES — correct for the extension, and it predates this lane. The architecture under test is 'connect only to an already registered workspace in your scope', which holds. But WHO may register an arbitrary root is a real future boundary question and is not answered here.",
+      "permissionsHasNoWriter": "workspaces.permissions is in the schema and on the record, but patch does not accept it and no route sets it. Today every workspace resolves read-yes / propose-no. The live revocation was produced by writing that column directly, simulating a registry that has recorded one — the grant source read it normally.",
+      "canApply": "FALSE unconditionally through the whole read-only path, whatever the registry says."
+    },
+    "next": "(3) consumer API + Migra-native Connect control against this source. Still no write/apply, no auto-resume, no VS Code-specific wording."
+  },
   "agreedSchedule": {
     "_authority": "Bonex, 2026-09-07. Fixed order. No drift to Projects, no higher-risk tools, no Studio detour unless a shared dependency genuinely blocks Priority A.",
     "0_userAcceptance": {
