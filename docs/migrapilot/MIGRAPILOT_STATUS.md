@@ -1009,3 +1009,56 @@ Until it exists: no Gmail send, no create operations, no deploy, no destructive 
 **3. Spreadsheet quantitative reasoning — the one PARTIAL inside Priority A.**
 🚨 Do not stack more XLSX-specific patches. Finish the **shared quantitative substrate** so CSV, TSV
 and XLSX all consume the same reasoning/aggregation contract.
+
+---
+
+## Project access is a platform capability, not a VS Code feature
+
+**Bonex, 2026-09-07, from real Pilot Web behaviour. Priority A finding — RECORDED, NOT STARTED.**
+The queued acceptance → harness → idempotency → spreadsheets work finishes first. This does not block
+the current slice.
+
+A design/build request in Pilot Web **refused truthfully** because the conversation had no connected
+project — and then exposed the internal capability id `workspace.inspect` and told the user to move to
+VS Code.
+
+> **The refusal is correct and must survive any fix.** There was no connected project; inventing one
+> or answering anyway is the failure this codebase refuses everywhere else. What is wrong is the
+> wording, and the architecture the wording reveals.
+
+### Two defects in one sentence
+
+**An internal identifier on a screen.** The copy interpolates the plan step id directly:
+
+- [outcomeDispatcher.ts:115](apps/brain-service/src/engine/orchestration/outcomeDispatcher.ts#L115)
+- [decide.ts:95](apps/brain-service/src/engine/orchestration/decide.ts#L95)
+
+both build `` `${step.step} needs a project it can use, but …` ``. `workspace.inspect` is a capability
+identifier from [outcomePlan.ts](packages/shared-types/src/outcomePlan.ts) — the same class of leak
+already closed on the model picker.
+
+**Remediation that assumes one client.**
+[inspectRoutes.ts:74](apps/brain-service/src/engine/workspace/inspectRoutes.ts#L74) hardcodes
+*"Open a folder in VS Code (File → Open Folder), then retry."*, and
+[projectAuthority.ts:59](packages/shared-types/src/projectAuthority.ts#L59) labels the authority
+*"the workspace open in VS Code"*. A **platform** capability is telling a web user to install a
+different product.
+
+### Required architecture
+
+- no internal capability identifiers in user copy
+- project/workspace access is a shared Brain/platform capability, **not** VS Code-specific logic
+- Web must eventually connect/select an **authorized** project and invoke the same
+  inspect → propose → diff → write pipeline
+- with no project connected, offer a canonical **Connect project** action rather than redirecting to
+  another client
+- VS Code may supply richer local filesystem context — a **client context advantage**, not ownership
+  of the capability
+- every write still passes shared authorization, preflight, consent, provenance and idempotency
+
+The write half depends on **durable idempotency** (schedule item 2), already the gate in front of every
+non-idempotent tool. Connect-project and read-only inspect from Web do not.
+
+🚨 **Do not fix the wording alone.** A remediation string that stops naming VS Code while the
+capability is still owned by one client hides the architecture defect instead of closing it — the leak
+is only the symptom that made it visible.

@@ -1881,6 +1881,25 @@
       "enforcement": "apps/migrapilot-consumer/src/state/coldStartProgress.test.ts (renders, self-calibrating off a real message) + scripts/verify-cold-start.mjs (real eviction, real browser, INCONCLUSIVE if the cold start was not observed)"
     }
   },
+  "projectAccessCapabilityBoundary": {
+    "_authority": "Bonex, 2026-09-07, from real Pilot Web behaviour. Priority A finding. RECORDED, NOT STARTED — the queued acceptance/harness/idempotency work finishes first unless this blocks the current slice. It does not.",
+    "found": "A design/build request in Pilot Web refused truthfully because the conversation had no connected project — and the refusal exposed the internal capability id 'workspace.inspect' and told the user to move to VS Code.",
+    "keepTheRefusal": "The refusal itself is CORRECT and must survive any fix. There was no connected project, and inventing one or answering anyway is the failure mode this codebase refuses elsewhere. What is wrong is the wording and the architecture it reveals — not the decision.",
+    "twoDefectsInOneSentence": {
+      "internalIdentifierLeak": "The user-facing string interpolates the plan step id directly: apps/brain-service/src/engine/orchestration/outcomeDispatcher.ts:115 and apps/brain-service/src/engine/orchestration/decide.ts:95 both build '${step.step} needs a project it can use, but …'. 'workspace.inspect' is a capability identifier from packages/shared-types/src/outcomePlan.ts and has no business on a screen. Same class as the model-picker leak already closed.",
+      "clientSpecificRemediation": "The remediation copy assumes one client. apps/brain-service/src/engine/workspace/inspectRoutes.ts:74 hardcodes 'Open a folder in VS Code (File → Open Folder), then retry.' for workspace_not_open, and packages/shared-types/src/projectAuthority.ts:59 labels the authority 'the workspace open in VS Code'. A platform capability is telling a web user to go and install a different product."
+    },
+    "requiredArchitecture": [
+      "no internal capability identifiers in user copy",
+      "project/workspace access is a shared Brain/platform capability, NOT VS Code-specific business logic",
+      "Web must eventually connect/select an AUTHORIZED project and invoke the same inspect → propose → diff → write pipeline",
+      "with no project connected, offer a canonical 'Connect project' action rather than redirecting to another client",
+      "VS Code may supply richer local filesystem context — that is a CLIENT CONTEXT ADVANTAGE, not ownership of the capability",
+      "every write still passes shared authorization, preflight, consent, provenance and idempotency"
+    ],
+    "dependency": "The write half depends on durable idempotency (schedule item 2), which is already the gate in front of every non-idempotent tool. Connect-project and read-only inspect from Web do not.",
+    "doNotDo": "Do not fix the wording alone. A remediation string that stops naming VS Code while the capability is still owned by one client hides the architecture defect instead of closing it — the leak is the symptom that made it visible."
+  },
   "agreedSchedule": {
     "_authority": "Bonex, 2026-09-07. Fixed order. No drift to Projects, no higher-risk tools, no Studio detour unless a shared dependency genuinely blocks Priority A.",
     "0_userAcceptance": {
