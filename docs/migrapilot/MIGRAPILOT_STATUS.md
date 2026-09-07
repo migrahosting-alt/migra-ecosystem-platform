@@ -926,6 +926,11 @@ No literal port and no literal fallback · URL from env/config/run metadata · i
 evidence · fail closed on missing or mismatched identity · never find the product by scanning ports ·
 recorded-PID ownership preserved · **mutation-tested**, so restoring a hardcoded target breaks the guard.
 
+Neither prohibited discovery mechanism may return: not **assuming a port**, and not **trusting a 200**.
+Reachability is not identity — the response that proves a server is listening is the same response
+another product would give, which is precisely how the false green happened. A harness that reaches its
+target and stops there has confirmed nothing about what answered.
+
 **2. Durable idempotency — the gate before every meaningful mutating tool.** A platform primitive, one
 authority, no per-tool copies, keyed on canonical normalized operation identity:
 

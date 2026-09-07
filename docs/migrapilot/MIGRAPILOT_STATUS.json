@@ -1889,6 +1889,7 @@
         "verify buildId/run identity before acceptance",
         "fail closed on missing or mismatched identity",
         "never find the product by scanning ports",
+        "reachability is not identity — a 200 from the target never substitutes for the identity assertion",
         "preserve recorded-PID ownership",
         "mutation-test: restoring a hardcoded target must break the guard"
       ],
