@@ -60,6 +60,7 @@ import { decideAttachmentState } from '@/server/files/attachmentState'
 import { canAnalyzeStructurally, canIndex, extensionOf } from '@/features/attachments/capability'
 import { workbookDisclosureFor } from '@/features/attachments/spreadsheetDisclosure'
 import { tableEvidenceFor } from '@/server/tables/tableEvidence'
+import { projectEvidenceFor } from '@/server/projects/projectEvidence'
 import { assessDocumentIntent } from '@/server/files/documentIntent'
 import { planRegeneration, wantsRegeneration } from '@/server/files/regenerate'
 import { saveImage } from '@/server/files/imageStore'
@@ -1090,11 +1091,31 @@ export async function POST(request: Request): Promise<Response> {
         trace.set('table_computed', `${tableEvidence.operation}:${tableEvidence.file}`)
       }
 
-      const modelPrompt = executing
-        ? executing.prompt
-        : tableEvidence
-          ? `${tableEvidence.text}\n${prompt}`
-          : prompt
+      /*
+       * THE CONNECTED PROJECT.
+       *
+       * Resolved SERVER-SIDE from the conversation alone — the browser sends no
+       * root, no permission and no project id. The Brain re-resolves the
+       * binding and the grant on this turn, so a connection made yesterday is
+       * not authorization today.
+       *
+       * Skipped while executing a prepared plan, exactly like the table
+       * evidence: that path carries its own prompt and must not have a second
+       * one prepended to it.
+       */
+      const projectEvidence = executing
+        ? null
+        : await projectEvidenceFor(prompt, conversationId, resolved.principal).catch(() => null)
+      if (projectEvidence) {
+        trace.set('project_read', `${projectEvidence.op}${projectEvidence.project ? `:${projectEvidence.project}` : ''}`)
+      }
+
+      /*
+       * Ordered deliberately: a project refusal must reach the model BEFORE any
+       * other evidence, so it cannot be read as commentary on a table.
+       */
+      const prefix = [projectEvidence?.text, tableEvidence?.text].filter(Boolean).join('\n')
+      const modelPrompt = executing ? executing.prompt : prefix ? `${prefix}\n${prompt}` : prompt
 
       /*
        * THE BRAIN DECIDES; THIS SURFACE EXECUTES.
