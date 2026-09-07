@@ -12,6 +12,8 @@
  */
 
 import { DatabaseSync } from 'node:sqlite';
+import { SqliteProjectBindingStore } from '../projects/sqliteProjectBinding.js';
+import type { ProjectBindingStore } from '../projects/projectBinding.js';
 import { statSync } from 'node:fs';
 import type {
   ConversationPersistence, MemoryItemPersistence, RagIndexPersistence, EmbeddingCachePersistence,
@@ -622,6 +624,18 @@ function eventEquivalent(a: DurableAgentRunEvent, b: DurableAgentRunEvent): bool
 
 export class SqliteDurableStore implements DurableStore {
   private readonly db: DatabaseSync;
+
+  /**
+   * The conversation→project binding store, on THIS connection.
+   *
+   * Handed out rather than constructed elsewhere because a second
+   * `DatabaseSync` onto the same file is two writers with two opinions about a
+   * transaction. The store that owns the file owns the handle.
+   */
+  projectBindingStore(): ProjectBindingStore {
+    return new SqliteProjectBindingStore(this.db);
+  }
+
   private schemaVersion = 0;
   private migrationState = 'pending';
   private healthy: 'ready' | 'degraded' | 'unavailable' = 'unavailable';

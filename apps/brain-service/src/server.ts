@@ -31,7 +31,7 @@ import { registerInspectRoutes } from './engine/workspace/inspectRoutes.js';
 import { registerProjectRoutes } from './engine/projects/projectRoutes.js';
 import { registerProjectInspectRoutes } from './engine/projects/projectInspect.js';
 import { InMemoryProjectBindingStore } from './engine/projects/projectBinding.js';
-import { EmptyProjectGrantSource } from './engine/projects/emptyGrantSource.js';
+import { WorkspaceProjectGrantSource } from './engine/projects/workspaceGrantSource.js';
 import { registerCommandRunRoutes } from './engine/tools/commandRunRoutes.js';
 import { registerTestRunRoutes } from './engine/tools/testRunRoutes.js';
 import { registerAnswerRoutes } from './engine/chat/answerRoutes.js';
@@ -892,31 +892,6 @@ async function main(): Promise<void> {
    * exactly that, instead of implying a richer check than exists. When a real
    * role or entitlement model arrives, this resolver is where it lands.
    */
-  /*
-   * PROJECT ACCESS — connect, select, and inspect through the binding.
-   *
-   * 🚨 THE GRANT SOURCE IS EMPTY UNTIL A REAL ONE IS CONFIGURED, and that is
-   * the honest default. An empty source lists nothing, resolves nothing, and
-   * every route answers "No projects are available to connect yet" — which is
-   * TRUE for a deployment that has not integrated a project directory yet.
-   *
-   * The alternative would be a source that invents a project from a path, and
-   * that is precisely the client-manufactured authority this design refuses.
-   */
-  const projectBindings = new InMemoryProjectBindingStore();
-  const projectGrants = new EmptyProjectGrantSource();
-  registerProjectRoutes(app, {
-    grants: projectGrants,
-    bindings: projectBindings,
-    scopeFrom: memoryScopeFrom,
-    actorFrom: (request) => String(request.headers['x-owner-scope'] ?? 'local'),
-  });
-  registerProjectInspectRoutes(app, {
-    grants: projectGrants,
-    bindings: projectBindings,
-    scopeFrom: memoryScopeFrom,
-  });
-
   registerToolConsentRoutes(app, {
     approvals: toolDeps.approvals,
     conversations: memoryStore,
@@ -1101,6 +1076,37 @@ async function main(): Promise<void> {
   // routes below can serve them.
   // Scope-loaded on first request, for the same reason as the index above.
   registerWorkspaceRoutes(app, workspaceManager);
+
+  /*
+   * PROJECT ACCESS — connect, select, and inspect through the binding.
+   *
+   * Registered HERE, after the workspace manager exists, because the grant
+   * source IS that registry: a durable, scoped table the engine owns, carrying
+   * id, name, root, git provenance and permissions. A user sees the workspaces
+   * already registered in their own scope and nothing else, and the inspect
+   * root comes from that row rather than from the connect request.
+   *
+   * The binding is durable when persistence is configured and in-memory when
+   * the engine is running without it — a binding cannot be more durable than
+   * the database it would live in, and pretending otherwise would promise a
+   * connection that silently vanishes on restart.
+   */
+  const projectBindings =
+    durable instanceof SqliteDurableStore
+      ? durable.projectBindingStore()
+      : new InMemoryProjectBindingStore();
+  const projectGrants = new WorkspaceProjectGrantSource(workspaceManager);
+  registerProjectRoutes(app, {
+    grants: projectGrants,
+    bindings: projectBindings,
+    scopeFrom: memoryScopeFrom,
+    actorFrom: (request) => String(request.headers['x-owner-scope'] ?? 'local'),
+  });
+  registerProjectInspectRoutes(app, {
+    grants: projectGrants,
+    bindings: projectBindings,
+    scopeFrom: memoryScopeFrom,
+  });
   app.post<{ Body: TelemetryEventRequest }>('/telemetry/event', async (request, reply) => {
     if (env.enableTelemetry) {
       app.log.info({ telemetry: request.body }, 'Telemetry event received');
