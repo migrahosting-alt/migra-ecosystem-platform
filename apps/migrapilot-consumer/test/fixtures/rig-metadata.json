@@ -1,0 +1,6 @@
+{
+  "url": "http://example.invalid:4321",
+  "buildId": "BUILD_FROM_METADATA",
+  "pid": 0,
+  "note": "Fixture for harnessIntegrity.test.ts. Deliberately an unroutable host: the resolver must never contact its target."
+}

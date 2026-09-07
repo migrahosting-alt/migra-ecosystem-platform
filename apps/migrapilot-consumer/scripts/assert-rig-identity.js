@@ -18,7 +18,7 @@
 
 /**
  * @param {string} base  e.g. http://127.0.0.1:3407
- * @param {{ expectCommit?: string }} [opts]
+ * @param {{ expectCommit?: string, expectBuildId?: string }} [opts]
  * @returns {Promise<{ commit: string, release: string, buildId: string }>}
  */
 export async function assertRigIdentity(base, opts = {}) {
@@ -57,6 +57,20 @@ export async function assertRigIdentity(base, opts = {}) {
     throw new Error(
       `RIG IDENTITY UNRECOGNISED at ${base}: ${JSON.stringify(payload).slice(0, 200)}\n` +
         `  This does not look like the MigraPilot consumer. Refusing to run.`,
+    )
+  }
+  /*
+   * The build the LAUNCHER recorded, checked against the build ANSWERING. This
+   * is what makes run metadata worth more than a bare URL: identity stops being
+   * whatever the responder claims and becomes a comparison.
+   */
+  if (opts.expectBuildId && payload.buildId !== opts.expectBuildId) {
+    throw new Error(
+      `RIG IS SERVING A DIFFERENT BUILD than the launcher recorded, at ${base}
+` +
+        `  run metadata says ${opts.expectBuildId}, the rig answers ${payload.buildId}
+` +
+        '  Something restarted or rebuilt underneath this run. Refusing to collect evidence.',
     )
   }
   if (opts.expectCommit && typeof payload.commit !== 'string') {

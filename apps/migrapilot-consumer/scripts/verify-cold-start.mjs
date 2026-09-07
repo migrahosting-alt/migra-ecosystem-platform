@@ -37,6 +37,9 @@ import { chromium } from '/home/bonex/.npm/_npx/420ff84f11983ee5/node_modules/pl
 import crypto from 'node:crypto'
 import fs from 'node:fs'
 import { assertRigIdentity } from './assert-rig-identity.js'
+import { assertClientBuild, resolveRigTarget } from './rigTarget.js'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 const COLD_START = 'Loading the language model'
 const SP = '/tmp/claude-1001/-home-bonex-workspace-active-MigraTeck-Ecosystem-dev/d929835d-8849-4c9d-92e6-3d1922fab393/scratchpad'
@@ -59,7 +62,8 @@ const need = (name) => {
   return value.replace(/\/$/, '')
 }
 
-const RIG = need('MIGRAPILOT_RIG_URL')
+const TARGET = resolveRigTarget()
+const RIG = TARGET.url
 const OLLAMA = need('OLLAMA_API_BASE')
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
@@ -166,8 +170,8 @@ const SAMPLE = () => {
   console.log('─'.repeat(72))
 
   // 1. Identity BEFORE evidence. A mismatch is a hard stop, not a warning.
-  const identity = await assertRigIdentity(RIG)
-  console.log(`   rig ${RIG} → buildId ${identity.buildId}`)
+  const identity = await assertRigIdentity(RIG, TARGET.expectedBuildId ? { expectBuildId: TARGET.expectedBuildId } : {})
+  console.log(`   rig ${RIG} (${TARGET.source}) → buildId ${identity.buildId}`)
 
   // 2. Make the cold start real.
   console.log('\n2. evicting resident models')
@@ -186,7 +190,12 @@ const SAMPLE = () => {
   let messageChrome = null
 
   try {
+    // RULE 4 — the server's build is not the browser's build.
+    const loadedAssets = []
+    page.on('response', (res) => { const u = res.url(); if (u.includes('/_next/static/')) loadedAssets.push(u) })
     await page.goto(`${RIG}/`, { waitUntil: 'networkidle', timeout: 60_000 })
+    const client = assertClientBuild(loadedAssets, path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '.next', 'static'), fs.existsSync)
+    console.log(`   client build: ${client.assets} assets, all from this build`)
 
     console.log('\n3. sending a turn as a signed-in user')
     const box = page.getByLabel('Message MigraPilot')

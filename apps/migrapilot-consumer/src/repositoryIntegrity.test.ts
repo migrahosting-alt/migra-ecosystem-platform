@@ -125,8 +125,15 @@ export function resolveSpecifier(fromFile: string, spec: string): string | null 
   const base = spec.startsWith('@/')
     ? path.join(ROOT, APP, 'src', spec.slice(2))
     : path.resolve(path.dirname(path.join(ROOT, fromFile)), spec)
+  /*
+   * A `.js` specifier is USUALLY TypeScript's emit convention — `./x.js` meaning
+   * `./x.ts` — so those are tried first. But it is not always: harness tooling
+   * under `scripts/` is real JavaScript, and resolving only to `.ts` reported a
+   * file that exists and is tracked as MISSING. The literal path is the last
+   * candidate, so the TS convention still wins where both could match.
+   */
   const candidates = base.endsWith('.js')
-    ? [base.replace(/\.js$/, '.ts'), base.replace(/\.js$/, '.tsx')]
+    ? [base.replace(/\.js$/, '.ts'), base.replace(/\.js$/, '.tsx'), base]
     : [`${base}.ts`, `${base}.tsx`, path.join(base, 'index.ts'), path.join(base, 'index.tsx'), base]
   for (const candidate of candidates) {
     if (existsSync(candidate) && statSync(candidate).isFile()) return path.relative(ROOT, candidate)
@@ -191,6 +198,15 @@ test('the alias resolves against the app root, not the importing file', () => {
   // `@/lib/cn` is src/lib/cn.ts however deep the importer is.
   const target = resolveSpecifier(`${APP}/src/app/api/chat/stream/route.ts`, '@/lib/cn')
   assert.equal(target, `${APP}/src/lib/cn.ts`)
+})
+
+test('a REAL .js file resolves, not only TypeScript emit', () => {
+  // Harness tooling under scripts/ is genuine JavaScript. Resolving `.js` only
+  // to `.ts` reported a tracked, existing file as MISSING.
+  assert.equal(
+    resolveSpecifier(`${APP}/src/harnessIntegrity.test.ts`, '../scripts/rigTarget.js'),
+    `${APP}/scripts/rigTarget.js`,
+  )
 })
 
 test('a specifier pointing at nothing resolves to null', () => {

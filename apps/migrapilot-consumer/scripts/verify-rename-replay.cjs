@@ -32,15 +32,11 @@
  */
 const { chromium } = require('/home/bonex/.npm/_npx/420ff84f11983ee5/node_modules/playwright')
 const { assertRigIdentity } = require('./assert-rig-identity.cjs')
+const { resolveRigTarget, assertClientBuild } = require('./rigTarget.cjs')
 const crypto = require('node:crypto')
 const fs = require('node:fs')
 
 const SP = '/tmp/claude-1001/-home-bonex-workspace-active-MigraTeck-Ecosystem-dev/d929835d-8849-4c9d-92e6-3d1922fab393/scratchpad'
-const RIG = process.env.MIGRAPILOT_RIG_URL
-if (!RIG) {
-  console.error('MIGRAPILOT_RIG_URL is not set. This harness does not guess its target.')
-  process.exit(1)
-}
 const SECRET = fs.readFileSync(`${SP}/local/secret`, 'utf8').trim()
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
@@ -101,8 +97,11 @@ const record = (n, name, pass, detail) => {
 }
 
 ;(async () => {
-  const identity = await assertRigIdentity(RIG)
-  console.log(`rig identity : ${identity.buildId}\n`)
+  const target = await resolveRigTarget()
+  const RIG = target.url
+  const identity = await assertRigIdentity(RIG, target.expectedBuildId ? { expectBuildId: target.expectedBuildId } : {})
+  console.log(`rig target   : ${RIG} (${target.source})`)
+  console.log(`rig identity : ${identity.buildId}`)
 
   const browser = await chromium.launch({ headless: true })
   const context = await browser.newContext({ viewport: { width: 1280, height: 860 } })
@@ -110,7 +109,11 @@ const record = (n, name, pass, detail) => {
   const page = await context.newPage()
 
   try {
+    const loaded = []
+    page.on('response', (res) => { const u = res.url(); if (u.includes('/_next/static/')) loaded.push(u) })
     await page.goto(`${RIG}/`, { waitUntil: 'networkidle', timeout: 60000 })
+    const client = await assertClientBuild(loaded, require('node:path').join(__dirname, '..', '.next', 'static'), require('node:fs').existsSync)
+    console.log(`client build : ${client.assets} assets, all from this build\n`)
     const box = page.getByLabel('Message MigraPilot')
     await box.waitFor({ timeout: 20000 })
     const SEED = `replay case ${Date.now()}`

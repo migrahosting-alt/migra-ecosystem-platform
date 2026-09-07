@@ -7,15 +7,23 @@
  */
 const { chromium } = require('/home/bonex/.npm/_npx/420ff84f11983ee5/node_modules/playwright')
 const { assertRigIdentity } = require('./assert-rig-identity.cjs')
+const { resolveRigTarget, assertClientBuild } = require('./rigTarget.cjs')
 const crypto=require('node:crypto'), fs=require('node:fs')
 const SP='/tmp/claude-1001/-home-bonex-workspace-active-MigraTeck-Ecosystem-dev/d929835d-8849-4c9d-92e6-3d1922fab393/scratchpad'
 const SECRET=fs.readFileSync(`${SP}/local/secret`,'utf8').trim()
 const sleep=ms=>new Promise(r=>setTimeout(r,ms))
-function cookie(u){const n=Date.now();const s={sessionId:'f-'+n,authUserId:u,email:u+'@e.invalid',displayName:u,permissions:[],createdAt:n,expiresAt:n+3600000};const p=Buffer.from(JSON.stringify(s)).toString('base64url');return{name:'migrapilot_consumer_session',value:`${p}.${crypto.createHmac('sha256',SECRET).update(p).digest('hex')}`,domain:'127.0.0.1',path:'/',httpOnly:true,secure:false,sameSite:'Lax'}}
+function cookie(u,DOMAIN){const n=Date.now();const s={sessionId:'f-'+n,authUserId:u,email:u+'@e.invalid',displayName:u,permissions:[],createdAt:n,expiresAt:n+3600000};const p=Buffer.from(JSON.stringify(s)).toString('base64url');return{name:'migrapilot_consumer_session',value:`${p}.${crypto.createHmac('sha256',SECRET).update(p).digest('hex')}`,domain:DOMAIN,path:'/',httpOnly:true,secure:false,sameSite:'Lax'}}
 
 ;(async()=>{
+  /*
+   * THE TARGET IS RESOLVED, NEVER WRITTEN DOWN. See scripts/rigTarget.js —
+   * no literal, no fallback, no discovery, fail closed.
+   */
+  const target = await resolveRigTarget()
+  const identity = await assertRigIdentity(target.url, target.expectedBuildId ? { expectBuildId: target.expectedBuildId } : {})
+  console.log('rig target     :', target.url, '(' + target.source + ')')
   const b=await chromium.launch({headless:true}); const c=await b.newContext({viewport:{width:1280,height:860}})
-  await c.addCookies([cookie('tester')]); const page=await c.newPage()
+  await c.addCookies([cookie('tester', new URL(target.url).hostname)]); const page=await c.newPage()
   page.on('response', async r => {
     if (r.url().includes('rename-approval')) {
       const body = await r.text().catch(()=> '')
@@ -27,10 +35,18 @@ function cookie(u){const n=Date.now();const s={sessionId:'f-'+n,authUserId:u,ema
    * its port to another session's product; the port kept returning 200 and the
    * run reported success against someone else's application.
    */
-  const identity = await assertRigIdentity('http://127.0.0.1:3407')
   console.log('rig identity   :', identity.buildId)
 
-  await page.goto('http://127.0.0.1:3407/',{waitUntil:'networkidle',timeout:60000})
+  /*
+   * RULE 4 — the server's build is not the browser's build. Every asset the
+   * page actually executes is checked against the build on disk BEFORE any
+   * evidence is collected.
+   */
+  const loaded = []
+  page.on('response', r => { const u = r.url(); if (u.includes('/_next/static/')) loaded.push(u) })
+  await page.goto(target.url + '/',{waitUntil:'networkidle',timeout:60000})
+  const client = await assertClientBuild(loaded, require('node:path').join(__dirname,'..','.next','static'), require('node:fs').existsSync)
+  console.log('client build   :', client.assets, 'assets, all from this build')
   const box=page.locator('textarea').first(); await box.click(); await box.fill('fault case'); await box.press('Enter')
 
   /*
