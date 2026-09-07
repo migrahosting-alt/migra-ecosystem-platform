@@ -7,7 +7,7 @@ Why this exists: work kept discovering something, moving three lanes away, and t
 reconstruct what was finished — or why a decision was made — from conversation history. Every agent
 (Claude, Engineer, MigraPilot) reads this instead.
 
-_Last updated: 2026-09-06_
+_Last updated: 2026-09-07_
 
 > ⚠️ `CLAUDE.md` and `AGENTS.md` are **gitignored** in this repository, so the pointers added there are
 > local only. This file and its JSON are the tracked copies — link to `docs/migrapilot/` from any new
@@ -855,3 +855,49 @@ ComfyUI held ~16 GB of the 3090 that production inference shares, leaving 8 GB: 
 
 **Standing implication: Studio rendering and MigraPilot production inference must not share this GPU
 concurrently.**
+
+---
+
+## 2026-09-07 — User-tool framework, and one rename authority
+
+> ⭐ **ONE CAPABILITY, ONE AUTHORITY, MANY CLIENTS.**
+> Shared semantics, client-specific presentation.
+> **No client gets its own business logic or a private bypass around a canonical capability.**
+
+| claim | state |
+|---|---|
+| Platform-wide rename governance | **ENFORCED** |
+| Consumer rename flow | **READY FOR USER TEST** — not closed until Bonex runs it signed in |
+
+Two direct-mutation verbs are withdrawn (410, each naming its replacement):
+`PATCH /api/conversations/:id` and `PATCH /api/ai/conversations/:id`. Both the consumer and the
+VS Code extension now call the same `propose → approve/decline → dispatch` contract. Restoring
+either verb fails exactly the regressions written to guard it.
+
+**A correction I owe the record.** I reported that the VS Code extension *called* the Brain's PATCH.
+It did not — the client method existed with no caller, no contributed command and no webview path.
+The bypass was real; the shipping flow I said would break was not, and I had used that claim to argue
+for keeping an exception.
+
+**Authorization caveat, unchanged and deliberate.** Workspace-scope recheck at dispatch is proven, and
+an approval never becomes delegated authority. Role/entitlement authorization is **not** proven,
+because that system does not exist. When it arrives, replace the resolver behind `authorize` — do not
+change the consent protocol.
+
+**Before any non-idempotent tool** (send / create / charge / deploy / destructive), durable
+backend-enforced idempotency is a hard prerequisite. Rename is safe only because it is naturally
+idempotent.
+
+### Engineering invariants added
+
+> **Never terminate a process because it owns a port.** Terminate only a process whose ownership was
+> recorded by the current run. If a port is occupied by something else, allocate another port.
+
+> **A successful HTTP response is not evidence that you reached the application you launched.**
+> Verify application identity — run id, build id, route fingerprint — before browser evidence counts.
+
+Both came from one incident: port 3399 was held by another session running AnnouPale. It answered
+**200** throughout, so some browser runs tested a different product while reporting success — and a
+`kill -9` over the port missed their process only because their command used `--port` and the pattern
+required `-p`. Enforced by `scripts/assert-rig-identity.js`, which both browser harnesses now call
+before clicking anything.

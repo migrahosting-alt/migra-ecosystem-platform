@@ -1,7 +1,7 @@
 {
   "$schema": "MIGRAPILOT_STATUS — canonical cross-agent state. Update on every material change.",
-  "updated": "2026-09-06",
-  "updatedBy": "Lanes A/B/C + picker recorded; three defects reconciled against verified evidence; gpu-contention re-triggered by Studio work and re-annotated",
+  "updated": "2026-09-07",
+  "updatedBy": "Platform-wide rename governance ENFORCED; consumer rename flow READY FOR USER TEST",
   "rules": {
     "easyFirst": "Do not start deep capability work while meaningful easy user-facing items remain.",
     "provenLive": "PROVEN_LIVE requires the real user-facing workflow to pass. Code existing and tests passing is NOT proof.",
@@ -1818,6 +1818,57 @@
         "state": "NOT TESTED in this campaign — deliberately",
         "constraint": "🚨 Stepping through candidates after seeing failures is candidate-shopping around the gate. If evaluated later, do it as a NEW PRE-REGISTERED campaign with the candidate chosen for an architectural reason BEFORE looking at results — never as a rescue attempt for this lane."
       }
+    }
+  },
+  "userToolFramework": {
+    "_rule": "⭐ ONE CAPABILITY, ONE AUTHORITY, MANY CLIENTS. Shared semantics, client-specific presentation. No client gets its own business logic or a private bypass around a canonical capability.",
+    "renameGovernance": {
+      "platformWide": "ENFORCED",
+      "consumerFlow": "READY FOR USER TEST — not closed until Bonex runs it signed in",
+      "whatWasClosed": [
+        "PATCH /api/conversations/:id (consumer) → 410, names the replacement",
+        "PATCH /api/ai/conversations/:id (Brain) → 410, names the replacement"
+      ],
+      "clients": {
+        "consumer": "propose → approve/decline → dispatch, via /api/conversations/:id/rename-approval",
+        "vscodeExtension": "proposeRename / declineRename / dispatchRename against the same contract"
+      },
+      "correction": "I reported the VS Code extension \"calls\" the Brain PATCH. It did not — the method existed with no caller, no contributed command, no webview path. The bypass was real; the shipping flow I claimed would break was not, and I had used it to argue for an exception.",
+      "mutationTested": "restoring either direct verb fails exactly the regressions guarding it",
+      "authorizationCaveat": "Workspace-scope recheck at dispatch is PROVEN, and approval never becomes delegated authority. Role/entitlement authorization is NOT proven because that system does not exist. Replace the resolver behind `authorize` when it does; do not change the consent protocol.",
+      "stillOpen": [
+        "durable backend-enforced idempotency, required BEFORE any non-idempotent tool (send/create/charge/deploy/destructive)"
+      ]
+    },
+    "architecture": {
+      "authorities": {
+        "CapabilityRegistry": "can the platform truthfully offer this capability now?",
+        "productAuth": "may THIS user invoke it in THIS context?",
+        "toolApprovalStore": "did the user consent to THIS EXACT mutating action?",
+        "invocation": "did it actually execute?"
+      },
+      "invariants": [
+        "registered ≠ available",
+        "available ≠ authorized",
+        "authorized ≠ consented",
+        "consented ≠ succeeded"
+      ],
+      "outcomes": [
+        "success",
+        "refused_policy",
+        "preflight_failed",
+        "backend_failed_before_side_effect",
+        "outcome_unknown_after_dispatch"
+      ]
+    }
+  },
+  "engineeringInvariants": {
+    "processOwnershipAndRigIdentity": {
+      "_authority": "Bonex, 2026-09-07. Permanent, ecosystem-wide.",
+      "ownership": "Never terminate a process because it owns a port. Terminate only a process whose ownership was recorded by the current run. If a port is occupied by something else, allocate another port.",
+      "rigIdentity": "A successful HTTP response is not evidence that you reached the application you launched. Every local acceptance rig must verify application identity — run id, build id, route fingerprint — before browser evidence counts.",
+      "incident": "Port 3399 was held by another session running AnnouPale. It answered 200 throughout, so some browser runs tested a different product while reporting success; and a kill -9 over the port missed their process only because their command used --port and the pattern required -p.",
+      "enforcement": "apps/migrapilot-consumer/scripts/assert-rig-identity.js, called by both browser harnesses"
     }
   }
 }
