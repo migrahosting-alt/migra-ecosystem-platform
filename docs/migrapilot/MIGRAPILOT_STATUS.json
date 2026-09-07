@@ -1974,6 +1974,8 @@
     "_authority": "Bonex, 2026-09-07. FROZEN. No consumer changes before the user walk unless the walk exposes a real defect.",
     "consumer": "z8sWzBmyddBPwOczlQ45U",
     "brain": "82ba5ae443f760697de6ff44857f4ceae2204e92f9fa87b8902515c4484fe539 (git e1885bfe, clean tree)",
+    "walkResult": "STEPS 1-10 ALL PASS. Rename visible walk accepted; Web project connect + read-only Chat inspect USER-VERIFIED PASS; scaffolding sweep clean across both capabilities; cold-start transient surface clean.",
+    "rigRestoreNote": "The scratchpad was wiped at a session boundary, taking the launch scripts, session secret and upload root with it. The ARTIFACTS survived and were verified against the frozen values before restarting — consumer .next/BUILD_ID z8sWzBmyddBPwOczlQ45U and brain dist digest 82ba5ae4. A new session secret was generated: that is launch configuration, not the acceptance artifact. Nothing was rebuilt.",
     "renameMatrix": "ALL TEN GREEN on this exact pair — the final repin. Client build asserted during every browser case, so no stale bundle contributed. Brain digest re-verified identical after the three fault restarts.",
     "brainRestored": "pid 537397: no MIGRAPILOT_TEST_* and no *FAULT* variable of any kind; both withdrawn rename verbs at 410.",
     "userWalk": [
@@ -2011,6 +2013,11 @@
     "wanted": "\"I can help with that, but this conversation doesn't have a project connected yet. Connect a project and ask me again.\" — capability affirmed first, then the missing precondition.",
     "state": "The semantics are correct and the seam is structurally fixed; this is voice. Watch it during the manual walk. Change only if the walk finds it unacceptable.",
     "scope": "A candidate for the VOICE instruction in src/server/evidence/composition.ts — shared, so it would apply to every capability at once rather than to the project path alone.",
+    "canonicalRule": "🚨 Bonex, walk step 9: CONVERSATIONAL REWRITING MAY SIMPLIFY WORDING, BUT IT MUST NOT STRENGTHEN, BROADEN, NARROW, OR CHANGE THE FACTUAL CONDITION OR REMEDY CLASS SUPPLIED BY DETERMINISTIC EVIDENCE.",
+    "thirdAndFourthInstances": [
+      "spreadsheet identifier refusal opened 'I'm sorry, but I can't help with that request' — the generic-safety opener, now seen in the SPREADSHEET path too, so it is not project-specific",
+      "project-not-connected said 'No projects are currently available for me to search' — BROADER than the evidence, which said no project is CONNECTED to this conversation. True for a user with none; false for a user who has projects and simply has not connected one."
+    ],
     "sharpenedRequirement": "🚨 Bonex, walk step 8: PRESERVE THE EXACT REMEDY CLASS when translating deterministic refusal evidence into conversational language. Presentation may become natural; it may NOT change connect-project into retry, request-access into reconnect, or a permanent condition into a transient one.",
     "instances": [
       "no project connected → opened 'I'm sorry, but I can't assist with that request' — reads as a generic SAFETY refusal",
