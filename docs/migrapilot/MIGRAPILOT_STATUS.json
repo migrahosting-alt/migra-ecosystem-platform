@@ -1937,7 +1937,7 @@
       }
     },
     "1_harnessEvidenceIntegrity": {
-      "state": "QUEUED — first after acceptance",
+      "state": "DONE (112a75aa) — closed as an engineering slice by Bonex, 2026-09-07",
       "why": "NOT cosmetic debt. A hardcoded 127.0.0.1:3407 in verification tooling reproduces the exact false-green class already hit when another session occupied the expected port. An evidence-integrity defect OUTRANKS feature expansion.",
       "rule": "Verification harnesses must never assume the application URL, port, PID or service identity. They consume the run metadata the launcher produced and verify build/run identity before collecting evidence.",
       "acceptance": [
@@ -1958,9 +1958,20 @@
       ]
     },
     "2_durableIdempotency": {
-      "state": "QUEUED — gate in front of every meaningful mutating tool",
+      "state": "DONE (4143efa9) — the primitive exists; no capability is wired to it yet",
       "why": "Until it exists, do NOT start Gmail send, create operations, deploy, destructive file actions, charges, or any non-idempotent capability.",
-      "design": "A PLATFORM PRIMITIVE, not a rename special case. One authority, no per-tool copies. Keyed on canonical normalized operation identity: idempotencyKey + toolId + actor + scope + normalizedInputHash → pending | committed | failed_before_dispatch | outcome_unknown, with a durable result / reconciliation record."
+      "shipped": {
+      "files": "apps/brain-service/src/engine/tools/idempotency.ts (pure state machine), idempotencyStore.ts (port + in-memory), sqliteIdempotency.ts (durable), test/idempotency.test.ts",
+      "uniqueKey": "PRIMARY KEY (idempotency_key, actor, scope). NOT the key alone — two tenants would collide. NOT the whole identity — a changed input hash would INSERT A SECOND ROW instead of colliding, so the reuse would succeed as a new operation. Tool and input hash are columns compared on read; the collision has to happen for the refusal to be possible.",
+      "atomicClaim": "One INSERT; the database decides who wins. Read-then-write loses the double-click race: both callers dispatch and the operation happens twice with an audit trail saying it happened once. Proven by a concurrent-claim test.",
+      "identityBeforeState": "A committed record whose key was reused for different input reports the REUSE, never the stored result — otherwise a caller receives a stranger's outcome for their own operation.",
+      "outcomeUnknown": "Not a retry state, and there is no flag to make it one. reattempt() refuses from it by name; only reconcile() moves it, and only when the caller has found out what happened.",
+      "freshAttempt": "failed_before_dispatch → pending is deliberately NOT a transition. reattempt() mints a new attempt with an incremented counter, so the second try is visible rather than erasing the first.",
+      "durability": "Every invariant runs against BOTH the in-memory and SQLite backings, and durability is proven by closing the database and reopening it. An invariant proven only in memory says nothing about the property this exists to provide.",
+      "mutationTested": "All four named classes fail targeted tests: dropping uniqueness, allowing a changed hash, letting outcome_unknown retry, letting a committed record dispatch.",
+      "notYetWired": "🚨 NO capability consumes this yet. Wiring the first non-idempotent tool is a separate slice with its own acceptance."
+    },
+    "design": "A PLATFORM PRIMITIVE, not a rename special case. One authority, no per-tool copies. Keyed on canonical normalized operation identity: idempotencyKey + toolId + actor + scope + normalizedInputHash → pending | committed | failed_before_dispatch | outcome_unknown, with a durable result / reconciliation record."
     },
     "3_spreadsheetQuantitativeReasoning": {
       "state": "QUEUED — the one PARTIAL inside Priority A",
