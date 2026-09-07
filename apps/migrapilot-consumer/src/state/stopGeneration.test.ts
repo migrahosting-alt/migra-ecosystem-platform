@@ -290,10 +290,26 @@ test('opting in requires BOTH a streaming flag and a way to stop', () => {
   assert.match(composer, /const stoppable = streaming && Boolean\(onStop\)/)
 })
 
-test('the chat page arms the control from the same state as the typing indicator', () => {
+test('Stop is armed for the whole turn; the indicator is armed for less', () => {
   assert.match(chatPage, /streaming=\{pending\}/)
   assert.match(chatPage, /onStop=\{\(\) => stopTurn\(conversation\.id\)\}/)
-  assert.match(chatPage, /pending && \(\s*<TypingIndicator/, 'and that state still drives the spinner')
+  /*
+   * THESE TWO DELIBERATELY DIVERGED, and the divergence is the fix.
+   *
+   * They were the same state, which is what produced the duplicate: an answer
+   * streaming into its bubble with a second floating bubble of dots underneath
+   * it for the rest of the turn. Stop must stay armed the whole time — a long
+   * answer is precisely what someone wants to stop — while the indicator has to
+   * retire the moment the answer starts arriving.
+   *
+   * `showsTurnProgress` is NARROWER than `pending` and derived from it, so the
+   * indicator still cannot outlive the turn.
+   */
+  assert.match(
+    chatPage,
+    /showsTurnProgress\(\{ messages, pending \}\) && \(\s*<TypingIndicator/,
+    'the indicator is driven by the narrower rule, not by `pending`',
+  )
 })
 
 test('a stopped answer is labelled as kept-but-not-saved', () => {

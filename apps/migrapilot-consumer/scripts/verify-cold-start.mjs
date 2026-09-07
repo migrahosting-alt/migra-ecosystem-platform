@@ -1,0 +1,248 @@
+/**
+ * COLD START, THROUGH THE REAL PRODUCT.
+ *
+ * ---------------------------------------------------------------------------
+ * WHY THIS EXISTS AT ALL
+ *
+ * The unit suite for this defect matched `ChatProvider.tsx` as TEXT and passed
+ * for as long as the defect was on screen. It could not have done otherwise: it
+ * was asking whether a string reached the message data, and the defect was that
+ * the string was RENDERED in the assistant's avatar and bubble. Only a real
+ * browser against a real cold model can answer that.
+ *
+ * So this evicts the model for real, sends a real turn as a signed-in user, and
+ * watches the DOM while the wait happens.
+ *
+ * ---------------------------------------------------------------------------
+ * 🚨 AN UNOBSERVED COLD START IS NOT A PASS
+ *
+ * If the model happened to be warm, every assertion here would hold vacuously
+ * and the run would print green having tested nothing. That is the false-green
+ * shape this repository has been bitten by twice. So the run REQUIRES having
+ * seen the cold-start line at least once, and reports INCONCLUSIVE — a failure
+ * exit — when it did not.
+ *
+ * ---------------------------------------------------------------------------
+ * 🚨 THE TARGET IS NEVER ASSUMED
+ *
+ * No port literal, and no fallback to one. The rig URL comes from the
+ * environment and the rig must then PROVE its identity before a single sample
+ * is collected; a missing or unrecognised identity is a hard stop. A port is
+ * not an identity — this machine runs several products at once, and one of them
+ * has already answered 200 to a harness that assumed otherwise.
+ * ---------------------------------------------------------------------------
+ */
+
+import { chromium } from '/home/bonex/.npm/_npx/420ff84f11983ee5/node_modules/playwright/index.mjs'
+import crypto from 'node:crypto'
+import fs from 'node:fs'
+import { assertRigIdentity } from './assert-rig-identity.js'
+
+const COLD_START = 'Loading the language model'
+const SP = '/tmp/claude-1001/-home-bonex-workspace-active-MigraTeck-Ecosystem-dev/d929835d-8849-4c9d-92e6-3d1922fab393/scratchpad'
+
+const fail = (message) => {
+  console.error(`\n✗ ${message}`)
+  process.exit(1)
+}
+
+/** Required, and never defaulted. See the header. */
+const need = (name) => {
+  const value = process.env[name]
+  if (!value) {
+    fail(
+      `${name} is not set.\n` +
+        '  This harness does not guess its target and does not scan for one.\n' +
+        `  Run it as: ${name}=<url> node scripts/verify-cold-start.mjs`,
+    )
+  }
+  return value.replace(/\/$/, '')
+}
+
+const RIG = need('MIGRAPILOT_RIG_URL')
+const OLLAMA = need('OLLAMA_API_BASE')
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+
+function sessionCookie(user, domain) {
+  const secret = fs.readFileSync(`${SP}/local/secret`, 'utf8').trim()
+  const now = Date.now()
+  const session = {
+    sessionId: `cs-${now}`,
+    authUserId: user,
+    email: `${user}@e.invalid`,
+    displayName: user,
+    permissions: [],
+    createdAt: now,
+    expiresAt: now + 3_600_000,
+  }
+  const payload = Buffer.from(JSON.stringify(session)).toString('base64url')
+  const signature = crypto.createHmac('sha256', secret).update(payload).digest('hex')
+  return {
+    name: 'migrapilot_consumer_session',
+    value: `${payload}.${signature}`,
+    domain,
+    path: '/',
+    httpOnly: true,
+    secure: false,
+    sameSite: 'Lax',
+  }
+}
+
+/**
+ * Evict the resident chat models so the next turn genuinely pays the load cost.
+ *
+ * `keep_alive: 0` is Ollama's own unload. NOTHING IS KILLED — no process is
+ * signalled and no port is touched; the model reloads on its next use. That
+ * distinction is the whole of the process-ownership rule.
+ */
+async function evictModels() {
+  const ps = await fetch(`${OLLAMA}/api/ps`).then((r) => r.json())
+  const resident = (ps.models ?? []).map((m) => m.name).filter((n) => !/embed/i.test(n))
+  if (resident.length === 0) {
+    console.log('   nothing resident — the next turn is cold already')
+    return []
+  }
+  for (const model of resident) {
+    await fetch(`${OLLAMA}/api/generate`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ model, keep_alive: 0 }),
+    }).catch(() => {})
+    console.log(`   evicted ${model}`)
+  }
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const now = await fetch(`${OLLAMA}/api/ps`).then((r) => r.json())
+    const left = (now.models ?? []).filter((m) => !/embed/i.test(m.name))
+    if (left.length === 0) return resident
+    await sleep(500)
+  }
+  console.log('   ⚠ some models are still resident; the turn may not be cold')
+  return resident
+}
+
+/** What the page looks like right now, in the terms this test cares about. */
+const SAMPLE = () => {
+  const progress = [...document.querySelectorAll('[data-testid=turn-progress]')]
+  const messages = [...document.querySelectorAll('[data-testid=assistant-message]')]
+  return {
+    progressCount: progress.length,
+    progressText: progress.map((el) => el.textContent?.trim() ?? '').join(' | '),
+    messageTexts: messages.map((el) => el.textContent?.trim() ?? ''),
+  }
+}
+
+;(async () => {
+  console.log('COLD-START VERIFICATION')
+  console.log('─'.repeat(72))
+
+  // 1. Identity BEFORE evidence. A mismatch is a hard stop, not a warning.
+  const identity = await assertRigIdentity(RIG)
+  console.log(`   rig ${RIG} → buildId ${identity.buildId}`)
+
+  // 2. Make the cold start real.
+  console.log('\n2. evicting resident models')
+  await evictModels()
+
+  const browser = await chromium.launch({ headless: true })
+  const context = await browser.newContext({ viewport: { width: 1280, height: 900 } })
+  await context.addCookies([sessionCookie('tester', new URL(RIG).hostname)])
+  const page = await context.newPage()
+
+  const failures = []
+  let sawColdStart = false
+  let maxProgress = 0
+  let coexisted = null
+  let leakedIntoMessage = null
+
+  try {
+    await page.goto(`${RIG}/`, { waitUntil: 'networkidle', timeout: 60_000 })
+
+    console.log('\n3. sending a turn as a signed-in user')
+    const box = page.getByLabel('Message MigraPilot')
+    await box.waitFor({ timeout: 20_000 })
+    await box.fill('In one short sentence, what is a checklist for?')
+    await page.getByLabel('Send message').click()
+
+    console.log('\n4. watching the wait')
+    const started = Date.now()
+    let answered = ''
+    while (Date.now() - started < 240_000) {
+      const sample = await page.evaluate(SAMPLE)
+
+      if (sample.progressText.includes(COLD_START)) {
+        // Capture the moment itself, once. This is the frame the defect was
+        // reported from, and the only honest way to show it is fixed.
+        if (!sawColdStart) await page.screenshot({ path: `${SP}/cold-start-during.png` })
+        sawColdStart = true
+      }
+      maxProgress = Math.max(maxProgress, sample.progressCount)
+
+      // The regression: the loading line inside a message bubble.
+      const leak = sample.messageTexts.find((text) => text.includes(COLD_START))
+      if (leak && !leakedIntoMessage) leakedIntoMessage = leak
+
+      // The duplicate: progress still up while the answer is being written.
+      const written = sample.messageTexts.filter((t) => t.length > 0)
+      if (sample.progressCount > 0 && written.length > 0 && !coexisted) {
+        coexisted = { progress: sample.progressText, message: written[written.length - 1] }
+      }
+
+      answered = written[written.length - 1] ?? ''
+      if (answered.length > 60) break
+      await sleep(120)
+    }
+    console.log(`   answer began: ${answered ? `“${answered.slice(0, 60)}…”` : 'NOTHING ARRIVED'}`)
+    await page.screenshot({ path: `${SP}/cold-start-after.png` })
+
+    // 5. Settle, then reload: history must not carry runtime state.
+    await sleep(4000)
+    await page.reload({ waitUntil: 'networkidle', timeout: 60_000 })
+    await sleep(2000)
+    const afterReload = await page.evaluate(() => document.body.innerText)
+
+    /* ---------------- verdict ---------------- */
+    console.log('\n5. verdict')
+
+    if (!sawColdStart) {
+      failures.push(
+        'INCONCLUSIVE: the cold-start line was never observed, so nothing here was tested.\n' +
+          '     The model was probably still warm. Re-run; do not read this as a pass.',
+      )
+    }
+    if (leakedIntoMessage) {
+      failures.push(`the loading line rendered INSIDE an assistant message: “${leakedIntoMessage.slice(0, 90)}”`)
+    }
+    if (maxProgress > 1) {
+      failures.push(`${maxProgress} progress surfaces were on screen at once — there must be exactly one`)
+    }
+    if (coexisted) {
+      failures.push(
+        'a progress surface was still showing while the answer was being written:\n' +
+          `     progress: “${coexisted.progress.slice(0, 70)}”\n` +
+          `     answer:   “${coexisted.message.slice(0, 70)}”`,
+      )
+    }
+    if (!answered) {
+      failures.push('no answer ever arrived, so the transient state was never replaced by one')
+    }
+    if (afterReload.includes(COLD_START)) {
+      failures.push('the loading line survived a reload — runtime state was persisted as conversation content')
+    }
+
+    console.log(`   cold start observed:        ${sawColdStart ? 'yes' : 'NO'}`)
+    console.log(`   max progress surfaces:      ${maxProgress}`)
+    console.log(`   loading text in a message:  ${leakedIntoMessage ? 'YES — defect' : 'no'}`)
+    console.log(`   progress outlived the start:${coexisted ? ' YES — defect' : ' no'}`)
+    console.log(`   present after reload:       ${afterReload.includes(COLD_START) ? 'YES — defect' : 'no'}`)
+  } finally {
+    await browser.close()
+  }
+
+  if (failures.length > 0) {
+    console.error('\n✗ COLD-START VERIFICATION FAILED')
+    for (const failure of failures) console.error(`   · ${failure}`)
+    process.exit(1)
+  }
+  console.log('\n✓ COLD-START VERIFICATION PASSED')
+})().catch((error) => fail(error.stack ?? String(error)))

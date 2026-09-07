@@ -13,6 +13,7 @@ import {
   FileText,
   FileX,
   ImageOff,
+  Loader2,
   Pause,
   Pencil,
   Play,
@@ -434,7 +435,12 @@ function AssistantTurn({
   }
 
   return (
-    <div className="flex gap-3.5">
+    /*
+     * `data-testid` so a LIVE harness can ask the only question that matters —
+     * "is this thing a message?" — without matching Tailwind classes, which
+     * change with the design and would make the guard rot silently.
+     */
+    <div className="flex gap-3.5" data-testid="assistant-message">
       <LogoMark className="mt-1 h-8 w-8 shrink-0" id={`msg-${message.id}`} />
 
       <div className="min-w-0 flex-1">
@@ -684,22 +690,56 @@ export function MessageView({
   )
 }
 
-/** Three-dot thinking indicator shown while a reply is being generated. */
 /**
- * The ONE progress surface for an in-flight turn.
+ * The ONE progress surface for an in-flight turn — in two presentations, and
+ * never both at once.
  *
- * `detail` carries transient runtime state — a cold model, a provider wait —
- * and AUGMENTS this indicator rather than becoming a message. It used to be
- * painted into the assistant's bubble, which made infrastructure status look
- * like the answer and left this indicator running underneath it: two surfaces
- * for one turn, one of which never went away.
+ * ---------------------------------------------------------------------------
+ * 🚨 WORDS INSIDE THE ASSISTANT'S BUBBLE ARE AN ANSWER, WHATEVER WE CALL THEM
+ *
+ * An earlier fix moved the cold-start text out of the message DATA — it stopped
+ * being persisted, stopped being copyable, stopped surviving a reload — and
+ * then rendered it here, inside `LogoMark` plus `rounded-2xl rounded-tl-md
+ * border border-hairline bg-raised … shadow-card`. That is character-for-
+ * character the assistant bubble on line 441. So on screen, "Loading the
+ * language model…" arrived wearing MigraPilot's avatar in MigraPilot's bubble,
+ * and a user has no access to our data model to know the difference.
+ *
+ * The lesson is that "not a message" is a claim about RENDERED OUTPUT, not
+ * about which state variable holds the string.
+ *
+ * So the two presentations are kept structurally apart:
+ *
+ *   · with a detail  → a status row. No avatar, no bubble, no card. It reads as
+ *                      what it is: the system saying what it is doing.
+ *   · with none      → the wordless three dots, in the bubble, unchanged. It is
+ *                      the recognised idiom and it carries NO TEXT, so there is
+ *                      nothing there to mistake for an authored answer.
+ *
+ * The wordless branch must STAY wordless. Putting a sentence back into it
+ * recreates this defect exactly, and `coldStartProgress.test.ts` renders both
+ * branches to make sure that fails.
+ * ---------------------------------------------------------------------------
  */
-export function TypingIndicator({ detail }: { detail?: string } = {}) {
+export function TypingIndicator({ detail }: { detail?: string }) {
+  if (detail) {
+    return (
+      <div
+        role="status"
+        aria-live="polite"
+        data-testid="turn-progress"
+        className="flex animate-fade items-center gap-2.5 py-1 pl-1 text-sm text-muted"
+      >
+        <Loader2 className="h-4 w-4 shrink-0 animate-spin text-brand-400" strokeWidth={2} aria-hidden />
+        <span>{detail}</span>
+      </div>
+    )
+  }
+
   return (
-    <div className="flex animate-fade gap-3.5">
+    <div role="status" aria-live="polite" data-testid="turn-progress" className="flex animate-fade gap-3.5">
       <LogoMark className="mt-1 h-8 w-8 shrink-0" id="typing" />
       <div className="flex items-center gap-2.5 rounded-2xl rounded-tl-md border border-hairline bg-raised px-5 py-4 shadow-card">
-        {detail && <span className="text-sm text-muted">{detail}</span>}
         {[0, 1, 2].map((index) => (
           <span
             key={index}

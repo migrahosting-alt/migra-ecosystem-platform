@@ -11,6 +11,7 @@ import { FeedbackProvider } from '@/state/FeedbackProvider'
 import { ConversationMenu } from '@/features/conversations/ConversationMenu'
 import { AnonymousQuotaNotice } from '@/features/anonymous/AnonymousQuotaNotice'
 import { askAgainOptions, canAskAgain, lastQuestionOf } from '@/features/conversations/askAgain'
+import { showsTurnProgress } from '@/state/turnProgress'
 import { isExhausted, useAnonymousQuota } from '@/features/anonymous/AnonymousQuotaProvider'
 
 /* ---------------------------------------------------------------- *
@@ -209,11 +210,13 @@ export function ChatPage() {
           />
         ))}
         {/*
-          EXACTLY ONE progress surface per turn. The transient detail rides on
-          this indicator; it is never a message, and there is never a second
-          indicator beneath a "loading" bubble.
+          EXACTLY ONE progress surface per turn, and only while the answer has
+          not started arriving. `pending` alone kept this mounted underneath the
+          streaming bubble for the whole turn — two surfaces describing one
+          turn. `showsTurnProgress` is what retires it the moment the answer
+          itself becomes the progress.
         */}
-        {pending && (
+        {showsTurnProgress({ messages, pending }) && (
           <TypingIndicator {...(progressIn?.conversationId === id && progressIn.detail ? { detail: progressIn.detail } : {})} />
         )}
         <div ref={bottomRef} />

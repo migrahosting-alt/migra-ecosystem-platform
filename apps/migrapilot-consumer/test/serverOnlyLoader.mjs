@@ -19,10 +19,20 @@
  *    entire signed-out flow (mint the identity, write it, read it back on the
  *    next request) could only be exercised in production.
  *
- * `next build` resolves all three for real.
+ * 4. Static image imports and `next/image` resolve to stubs, so a COMPONENT CAN
+ *    BE RENDERED. Node cannot load `.png` bytes, and that single missing loader
+ *    is why the chat components had never been rendered in a test: the guard
+ *    against runtime state appearing as an answer could only match the source
+ *    file as text, and text-matching a source file proves nothing about what a
+ *    user sees. It passed while the defect was live on screen.
+ *
+ * `next build` resolves all of these for real.
  */
 
 const SRC = new URL('../src/', import.meta.url)
+
+/** Extensions `next build` treats as static assets rather than modules. */
+const ASSET = /\.(png|jpe?g|gif|svg|webp|avif|ico|woff2?)$/i
 
 export async function resolve(specifier, context, next) {
   if (specifier === 'server-only') {
@@ -35,6 +45,20 @@ export async function resolve(specifier, context, next) {
   if (specifier === 'next/headers') {
     return {
       url: new URL('./nextHeadersStub.mjs', import.meta.url).href,
+      shortCircuit: true,
+    }
+  }
+
+  if (specifier === 'next/image') {
+    return {
+      url: new URL('./nextImageStub.mjs', import.meta.url).href,
+      shortCircuit: true,
+    }
+  }
+
+  if (ASSET.test(specifier)) {
+    return {
+      url: new URL('./staticAssetStub.mjs', import.meta.url).href,
       shortCircuit: true,
     }
   }

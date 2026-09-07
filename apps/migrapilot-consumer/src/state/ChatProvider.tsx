@@ -747,7 +747,6 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         )
         setPendingIn(null)
         setProgressIn(null)
-      setProgressIn(null)
         return
       }
 
@@ -775,7 +774,6 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         )
         setPendingIn(null)
         setProgressIn(null)
-      setProgressIn(null)
         push(notice(failure ?? 'The answer was produced but could not be saved, so it will not be here after a reload.'))
         turn.finish('not_saved')
         return
