@@ -52,6 +52,19 @@ export type BrainOperation =
   | { kind: 'declineRename'; approvalToken: string; conversationId: string; title: string }
   | { kind: 'dispatchRename'; approvalToken: string; conversationId: string; title: string }
   | { kind: 'deleteConversation'; conversationId: string }
+  /*
+   * PROJECT ACCESS — read-only.
+   *
+   * 🚨 THE CLIENT SENDS A projectId AND NOTHING ELSE. There is no field here
+   * for a root path, a permission or an authority kind, and adding one would
+   * make "connect a project" a self-service grant. The Brain resolves what the
+   * caller may do from its own registry, on every use.
+   */
+  | { kind: 'listProjects' }
+  | { kind: 'conversationProject'; conversationId: string }
+  | { kind: 'connectProject'; conversationId: string; projectId: string }
+  | { kind: 'disconnectProject'; conversationId: string }
+  | { kind: 'inspectProject'; conversationId: string; op: string; query?: string; path?: string }
   | { kind: 'listMessages'; conversationId: string }
   /**
    * Replace the files this conversation answers from.
@@ -472,6 +485,40 @@ export function resolveOperation(op: BrainOperation): ResolvedRequest {
         method: 'PATCH',
         path: `/api/ai/conversations/${id(op.conversationId, 'conversationId')}`,
         body: { title: text(op.title, 'title', 400) },
+      }
+
+    case 'listProjects':
+      return { method: 'GET', path: '/api/ai/projects' }
+
+    case 'conversationProject':
+      return {
+        method: 'GET',
+        path: `/api/ai/conversations/${encodeURIComponent(id(op.conversationId, 'conversationId'))}/project`,
+      }
+
+    case 'connectProject':
+      return {
+        method: 'POST',
+        path: `/api/ai/conversations/${encodeURIComponent(id(op.conversationId, 'conversationId'))}/project`,
+        // The whole body. No root, no permissions — see the union.
+        body: { projectId: id(op.projectId, 'projectId') },
+      }
+
+    case 'disconnectProject':
+      return {
+        method: 'DELETE',
+        path: `/api/ai/conversations/${encodeURIComponent(id(op.conversationId, 'conversationId'))}/project`,
+      }
+
+    case 'inspectProject':
+      return {
+        method: 'POST',
+        path: `/api/ai/conversations/${encodeURIComponent(id(op.conversationId, 'conversationId'))}/inspect`,
+        body: {
+          op: text(op.op, 'op', 40),
+          ...(op.query ? { query: text(op.query, 'query', 400) } : {}),
+          ...(op.path ? { path: text(op.path, 'path', 400) } : {}),
+        },
       }
 
     case 'proposeRename':

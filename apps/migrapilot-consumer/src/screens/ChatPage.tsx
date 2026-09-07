@@ -9,6 +9,7 @@ import { RailCard } from '@/components/rail/RailPanels'
 import { useChat } from '@/state/ChatProvider'
 import { FeedbackProvider } from '@/state/FeedbackProvider'
 import { ConversationMenu } from '@/features/conversations/ConversationMenu'
+import { ConnectProject } from '@/features/projects/ConnectProject'
 import { AnonymousQuotaNotice } from '@/features/anonymous/AnonymousQuotaNotice'
 import { askAgainOptions, canAskAgain, lastQuestionOf } from '@/features/conversations/askAgain'
 import { showsTurnProgress } from '@/state/turnProgress'
@@ -60,6 +61,16 @@ function ConversationToolsRail({
       </p>
       <div className="mt-3">
         <ConversationMenu conversationId={conversationId} onDeleted={onDeleted} align="left" />
+      </div>
+
+      {/*
+        THE PROJECT THIS CONVERSATION WORKS WITH.
+        In the rail beside the conversation's other controls, NOT in the chat —
+        a registry dumped into the transcript would be a list of things to read
+        rather than a thing to operate, and it would be there forever.
+      */}
+      <div className="mt-3 border-t border-hairline pt-3">
+        <ConnectProject conversationId={conversationId} />
       </div>
     </RailCard>
   )
