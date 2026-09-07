@@ -121,7 +121,15 @@ test('a missing specialist is a named capability gap, never a skipped step', asy
     executors,
   });
   assert.equal(res.stoppedAt, 'engineer.plan');
-  assert.match(res.failure ?? '', /not available in this runtime/);
+  /*
+   * The wording moved from "not available in this runtime" to the user-facing
+   * "is not available here yet" when capability IDS were removed from copy.
+   * What this test protects is unchanged: the gap is NAMED, and named by the
+   * step's readable label rather than skipped silently.
+   */
+  assert.match(res.failure ?? '', /not available here yet/);
+  assert.match(res.failure ?? '', /Planning the work/, 'named by its label, not its id');
+  assert.doesNotMatch(res.failure ?? '', /engineer\.plan/, 'the capability id must not reach copy');
 });
 
 test('every child dispatch is recorded, including the one that failed', async () => {

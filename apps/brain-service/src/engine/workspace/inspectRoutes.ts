@@ -71,7 +71,17 @@ const InspectRequestSchema = z.object({
 export type InspectRequest = z.infer<typeof InspectRequestSchema>;
 
 const REMEDIATION: Record<InspectErrorCode, string> = {
-  workspace_not_open: 'Open a folder in VS Code (File → Open Folder), then retry.',
+  /*
+   * 🚨 CLIENT-NEUTRAL, DELIBERATELY. This said "Open a folder in VS Code
+   * (File → Open Folder)" — a PLATFORM capability telling a web user to install
+   * a different product. Project access is not a VS Code feature; VS Code
+   * supplies richer local context, which is a client advantage, not ownership.
+   *
+   * Each client offers what it actually has: the web a Connect project control,
+   * the extension a folder to open. The Brain names the missing thing and does
+   * not presume which door the caller has.
+   */
+  workspace_not_open: 'Connect a project to this conversation, then ask again.',
   scope_not_authorized: 'The path is outside the authorized workspace. Use a path inside the open workspace.',
   tool_not_available: 'This inspection operation is not supported by the local runner.',
   policy_denied: 'The active policy disables this operation. Adjust the MigraPilot policy to allow read-only inspection.',

@@ -65,6 +65,50 @@ export function vscodeWorkspaceAuthority(rootPath: string): ProjectAuthority {
   };
 }
 
+/**
+ * A repository the platform may READ on the user's behalf, under explicit grant.
+ *
+ * 🚨 THIS IS THE ONE THE WEB NEEDED AND DID NOT HAVE. Until now the only
+ * constructor granting read/propose/apply was `vscodeWorkspaceAuthority`, so a
+ * web caller could hold no usable authority at all — and the refusal it got
+ * told it to go and install a different product. That made project access a VS
+ * Code feature in practice while the type said it was a platform capability.
+ *
+ * Read-only by construction. Proposing and applying are separate grants and are
+ * NOT implied by connecting: a read-only connection that could apply a
+ * changeset is precisely what splitting these three booleans exists to prevent.
+ */
+export function connectedRepoAuthority(id: string, label: string): ProjectAuthority {
+  return { kind: 'connected-repo', id, label, canRead: true, canPropose: false, canApply: false };
+}
+
+/**
+ * A project the platform itself hosts. Same read-only default, same reason.
+ *
+ * Hosting a project is not consent to change it, and the grant that adds
+ * `canPropose` is a different decision made somewhere a user can see it.
+ */
+export function platformProjectAuthority(id: string, label: string): ProjectAuthority {
+  return { kind: 'platform-project', id, label, canRead: true, canPropose: false, canApply: false };
+}
+
+/**
+ * What the caller should DO about a shortfall — as a code, not a sentence.
+ *
+ * The sentence used to name VS Code, on a platform capability, in shared code.
+ * A structured action lets each client offer the thing it actually has: the web
+ * a Connect project control, the extension a folder to open. Neither is
+ * hardcoded into the Brain's answer.
+ */
+export type AuthorityRemedy = 'connect-project' | 'request-read-access' | 'request-write-access' | 'none';
+
+export function authorityRemedy(authority: ProjectAuthority): AuthorityRemedy {
+  if (authority.kind === 'none') return 'connect-project';
+  if (!authority.canRead) return 'request-read-access';
+  if (!authority.canPropose || !authority.canApply) return 'request-write-access';
+  return 'none';
+}
+
 /** Does this authority satisfy what a step needs? */
 export function authoritySatisfies(
   authority: ProjectAuthority,

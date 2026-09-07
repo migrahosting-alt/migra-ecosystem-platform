@@ -15,6 +15,7 @@
 
 import {
   planOutcome,
+  STEP_LABEL,
   type CapabilityStep,
   type OutcomeStep,
 } from '@migrapilot/shared-types/outcome-plan';
@@ -92,7 +93,13 @@ export function decideOrchestration(request: OrchestrationRequest): Orchestratio
     executable: !firstBlocked,
     ...(firstBlocked ? { failureBoundary: firstBlocked.step as CapabilityStep } : {}),
     reason: firstBlocked
-      ? `${firstBlocked.step} needs a project it can use, but ${authorityShortfall(authority)}`
+      /*
+       * 🚨 THE LABEL, NEVER THE STEP ID. This line put `workspace.inspect` on a
+       * user's screen in the real product. The refusal was correct; the
+       * identifier was internal vocabulary that tells a person nothing they can
+       * act on.
+       */
+      ? `${STEP_LABEL[firstBlocked.step]} needs a project, and ${authorityShortfall(authority)}`
       : turn.reason,
     requiresVision,
     requiresEngineer,

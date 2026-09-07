@@ -19,6 +19,7 @@
  * while delivering nothing asked for is worse than a refusal.
  */
 
+import { STEP_LABEL } from '@migrapilot/shared-types/outcome-plan';
 import {
   authoritySatisfies,
   authorityShortfall,
@@ -112,7 +113,8 @@ export async function dispatchOutcome(plan: OutcomePlan, deps: DispatchDeps): Pr
      * act on. The boundary is the honest place to stop.
      */
     if (step.needs && !authoritySatisfies(deps.authority, step.needs)) {
-      const failure = `${step.step} needs a project it can use, but ${authorityShortfall(deps.authority)}`;
+      // The label, never the id — see decide.ts. Same leak, same fix.
+      const failure = `${STEP_LABEL[step.step]} needs a project, and ${authorityShortfall(deps.authority)}`;
       emit(record(base, startedAt, { outcome: 'failed', failure }));
       return { completed: false, stoppedAt: step.step, failure, records };
     }
@@ -120,7 +122,7 @@ export async function dispatchOutcome(plan: OutcomePlan, deps: DispatchDeps): Pr
     const executor = deps.executors[step.step];
     if (!executor) {
       // A missing executor is a CAPABILITY gap, named as one rather than skipped.
-      const failure = `${step.step} is not available in this runtime`;
+      const failure = `${STEP_LABEL[step.step]} is not available here yet`;
       emit(record(base, startedAt, { outcome: 'failed', failure }));
       return { completed: false, stoppedAt: step.step, failure, records };
     }

@@ -22,6 +22,33 @@ export type CapabilityStep =
   /** Answer the user directly. Terminal by construction. */
   | 'answer';
 
+/**
+ * WHAT EACH STEP IS, IN THE USER'S WORDS.
+ *
+ * 🚨 A CAPABILITY ID IS NOT USER COPY. Found in the real product: a build
+ * request refused truthfully and the refusal read
+ *
+ *     "workspace.inspect needs a project it can use, but no project is
+ *      connected to this conversation"
+ *
+ * The refusal was correct. Putting `workspace.inspect` on a screen was not —
+ * it is an internal identifier from this file, and it tells a person nothing
+ * they can act on. Same class as the model-picker leak already closed.
+ *
+ * Every step gets a label here, so a new step cannot reach a screen as an id by
+ * omission: the map is exhaustive over `CapabilityStep` and the compiler
+ * enforces it.
+ */
+export const STEP_LABEL: Record<CapabilityStep, string> = {
+  'vision.read': 'Reading the image you attached',
+  'design.spec': 'Turning that into a design spec',
+  'engineer.plan': 'Planning the work',
+  'workspace.inspect': 'Looking at your project files',
+  'changeset.propose': 'Proposing the changes',
+  verification: 'Checking the result',
+  answer: 'Answering',
+};
+
 export interface OutcomeStep {
   step: CapabilityStep;
   /** What this step needs from the project authority, if anything. */
