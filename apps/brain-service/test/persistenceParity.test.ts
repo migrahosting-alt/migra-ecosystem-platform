@@ -16,11 +16,16 @@
  * differs between them is a failure rather than a footnote.
  *
  * ---------------------------------------------------------------------------
- * POSTGRES IS THE CANONICAL BACKEND, SO IT IS NOT OPTIONAL HERE
+ * 🚨 POSTGRES IS THE CANONICAL BACKEND, SO THIS SUITE FAILS WITHOUT IT
  *
- * When no Postgres is reachable the Postgres cases SKIP with a reason — they do
- * not silently pass. A green run that quietly exercised only SQLite is exactly
- * the false green that produced this defect.
+ * Not "skips". A skip still exits zero, so a CI run with no database would go
+ * GREEN having exercised only SQLite — which is precisely the false green that
+ * produced this defect and would hide its return.
+ *
+ * There is deliberately no opt-out environment variable either: a flag that
+ * downgrades this to a skip is the silent-degradation door in a different
+ * costume. If Postgres is unreachable, the parity claim cannot be made, and a
+ * claim that cannot be made must not be reported as proven.
  * ---------------------------------------------------------------------------
  */
 
@@ -70,7 +75,16 @@ before(async () => {
   sqlitePath = join(mkdtempSync(join(tmpdir(), 'parity-')), 'state.db');
 
   pgSkip = await postgresTestSkipReason();
-  if (pgSkip) return;
+  if (pgSkip) {
+    // FAIL, not skip. See the header.
+    throw new Error(
+      `PERSISTENCE PARITY CANNOT BE PROVEN: ${pgSkip}\n` +
+        '  PostgreSQL is the canonical production backend. A run that exercised only\n' +
+        '  SQLite would report parity it never tested — the exact false green that let\n' +
+        '  project bindings reach production as in-memory state.\n' +
+        '  Start a PostgreSQL the disposable harness can reach, then re-run.',
+    );
+  }
   pg = await startDisposablePostgres();
   const owner = new PostgresConnection({ databaseUrl: pg.databaseUrl });
   await owner.migrate();
@@ -108,7 +122,7 @@ describe('capability detection is structural, never a class check', () => {
   });
 
   it('🚨 POSTGRES implements both capabilities — the gap that shipped', (t) => {
-    if (pgSkip) return void t.skip(pgSkip);
+    if (pgSkip) throw new Error(`postgres unavailable: ${pgSkip}`);
     assert.ok(hasProjectBindings(pgStore as never), 'Postgres must offer project bindings');
     assert.ok(hasIdempotency(pgStore as never), 'Postgres must offer idempotency');
   });
@@ -130,9 +144,12 @@ const backings: Array<[string, () => DurableStore | undefined]> = [
 ];
 
 for (const [name, make] of backings) {
-  /** Postgres is CANONICAL, so its cases skip loudly rather than pass quietly. */
-  const guard = (t: { skip: (reason?: string) => void }): boolean => {
-    if (name === 'postgres' && pgSkip) { t.skip(pgSkip); return true; }
+  /*
+   * Unreachable in practice — `before` already threw. Kept so a future change
+   * that relaxes the setup cannot quietly turn these into silent passes.
+   */
+  const guard = (_t: { skip: (reason?: string) => void }): boolean => {
+    if (name === 'postgres' && pgSkip) throw new Error(`postgres unavailable: ${pgSkip}`);
     return false;
   };
 
@@ -296,7 +313,7 @@ describe('durability across a restart', () => {
   });
 
   it('🚨 POSTGRES: the same, on the canonical backend', async (t) => {
-    if (pgSkip) return void t.skip(pgSkip);
+    if (pgSkip) throw new Error(`postgres unavailable: ${pgSkip}`);
     const store = pgStore as unknown as DurableStore;
     await durableProjectBindings(store).bind(
       { conversationId: 'conv_pg_restart', projectId: 'ws_pg', boundBy: 'u', boundAt: 7 }, SCOPE);
