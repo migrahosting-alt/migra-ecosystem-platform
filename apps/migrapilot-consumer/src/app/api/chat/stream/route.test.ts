@@ -13,6 +13,7 @@
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -1608,6 +1609,42 @@ test('an ordinary question with no files attached is still answered', async () =
 
   globalThis.fetch = original
   resetAuthPort()
+})
+
+test('a COMPUTED figure is attributed too, not only retrieved text', () => {
+  /*
+   * MEASURED IN THE REAL PRODUCT, and a cross-format divergence of exactly the
+   * kind the shared substrate exists to remove.
+   *
+   * `groundedFiles` is the Brain's grounding frame — documents whose TEXT was
+   * retrieved. A table computation never goes through that path: the figures
+   * are computed in this route from one named file. So the same table gave the
+   * same number as CSV and as XLSX, and only the CSV carried a "From your
+   * files" citation, because a CSV is also text-indexed and a workbook
+   * deliberately is not. Whether a user could verify the figure depended on the
+   * format they happened to upload.
+   *
+   * A WIRING CHECK, and only that: it asserts the table file joins the
+   * attributable set BEFORE the library intersection, so attribution can never
+   * name a file the caller does not own. The behaviour is proven live by
+   * `scripts/verify-table-persistence.mjs` across all three formats.
+   */
+  const source = readFileSync(new URL('./route.ts', import.meta.url), 'utf8')
+  assert.match(
+    source,
+    /\[\.\.\.new Set\(\[\.\.\.groundedFiles, tableEvidence\.file\]\)\]/,
+    'the computed file must join the attributable set',
+  )
+  assert.match(
+    source,
+    /await attributedFiles\(attributable\)/,
+    'and must still pass through the ownership intersection',
+  )
+  assert.match(
+    source,
+    /\(grounded \|\| Boolean\(tableEvidence\)\) && completed/,
+    'a turn grounded ONLY by a computation must still attribute',
+  )
 })
 
 test('attribution is the ENGINE\'s report, intersected with the caller\'s own library', async () => {

@@ -1,0 +1,10 @@
+Region,ZipCode,Revenue,Readings
+North,10001,120000,42
+South,30301,95000,pending
+East,02108,156250,not taken
+West,94105,-3750,sensor offline
+North,10002,45000,awaiting calibration
+South,30302,61500,not taken
+East,02109,,pending
+West,94106,n/a,sensor offline
+North,10003,,pending

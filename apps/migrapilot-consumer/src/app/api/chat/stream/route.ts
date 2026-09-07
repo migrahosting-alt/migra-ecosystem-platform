@@ -1482,7 +1482,32 @@ export async function POST(request: Request): Promise<Response> {
        * name it — and intersected with the caller's own library so a path from
        * anywhere else can never be presented as one of their documents.
        */
-      const sources = grounded && completed ? await attributedFiles(groundedFiles) : []
+      /*
+       * 🚨 A COMPUTED FIGURE HAS A SOURCE TOO, AND IT IS NOT TEXT RETRIEVAL.
+       *
+       * `groundedFiles` comes from the Brain's grounding frame — the documents
+       * whose TEXT was retrieved. A table computation does not go through that
+       * path at all: the figures are computed here, from one named file, and
+       * prepended to the prompt.
+       *
+       * Measured in the real product, and it is a cross-format divergence of
+       * exactly the kind this substrate exists to remove. The same table as CSV
+       * and as XLSX gave the same number, and only the CSV carried a "From your
+       * files" citation — because a CSV is also text-indexed and a workbook
+       * deliberately is not. So the answer a user could verify depended on the
+       * format they happened to upload.
+       *
+       * The file is UNIONED IN BEFORE `attributedFiles`, never after, so the
+       * intersection with the caller's own library still applies. Attribution
+       * that skipped that check would be a way to name a file the user does not
+       * own.
+       */
+      const attributable =
+        tableEvidence && completed
+          ? [...new Set([...groundedFiles, tableEvidence.file])]
+          : groundedFiles
+      const sources =
+        (grounded || Boolean(tableEvidence)) && completed ? await attributedFiles(attributable) : []
 
       /*
        * THE ORDERING CAVEAT, attached only where ordering is load-bearing.

@@ -230,4 +230,25 @@ emit(
     ],
 )
 
+# 12. THE ROUND-TRIP TABLE — one file carrying all three question types, so the
+#      real-product persistence slice needs ONE upload per format rather than
+#      three. Revenue sums (474,000, the closed regression), ZipCode is an
+#      identifier that must be refused, and Readings is mostly text with one
+#      number so its refusal is mixed-with-text rather than scarcity.
+emit(
+    "eq_roundtrip",
+    ["Region", "ZipCode", "Revenue", "Readings"],
+    [
+        ["North", "10001", 120000, 42],
+        ["South", "30301", 95000, "pending"],
+        ["East", "02108", 156250, "not taken"],
+        ["West", "94105", -3750, "sensor offline"],
+        ["North", "10002", 45000, "awaiting calibration"],
+        ["South", "30302", 61500, "not taken"],
+        ["East", "02109", None, "pending"],
+        ["West", "94106", "n/a", "sensor offline"],
+        ["North", "10003", None, "pending"],
+    ],
+)
+
 print("done.")
