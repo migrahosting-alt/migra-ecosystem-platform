@@ -1990,13 +1990,33 @@
     ],
     "note": "Step 5 needs a workspace registered in the tester's DERIVED scope (user:<id> / personal:<id>). With none, the truthful empty state is the correct result. The synthetic rename fault matrix stays artifact-pinned AGENT evidence — no need to cycle the Brain manually unless the wording is worth inspecting."
   },
+  "emptyStateRemediationGap": {
+    "_authority": "Bonex, walk step 5, 2026-09-07. UX GAP recorded, slice NOT failed.",
+    "gap": "The empty state explains the condition but provides no remediation path, because Web has no workspace-registration capability yet.",
+    "whatPasses": "No fabricated projects, no filesystem enumeration, no dead rows, no internal vocabulary, no false 'Add project' control.",
+    "whyNotFailed": "The consumer genuinely cannot register a workspace, and inventing an affordance that cannot work is the dead-control failure in a different costume — worse than saying nothing.",
+    "state": "RECORDED. Do not change the frozen build. Closing it means giving Web a real registration surface, which is a separate capability."
+  },
+  "postDeclineFormCandidate": {
+    "_authority": "Bonex, walk step 2, 2026-09-07. UX refinement candidate — NOT changed during the frozen acceptance.",
+    "observed": "After 'Don't rename', the confirmation closes but the rename FORM stays open with the typed name still in it.",
+    "notADefect": "No mutation happened, no approval remains live, pressing Save would mint a fresh proposal needing approval again, the title never flashed optimistically, and the server stayed unchanged.",
+    "preference": "Close the rename form after 'Don't rename'. That action reads like abandoning the proposed rename; keeping the text leaves an ambiguous half-state.",
+    "state": "RECORDED. Do not change during this acceptance."
+  },
   "refusalVoiceCandidate": {
     "_authority": "Bonex, 2026-09-07. RECORDED, NOT CHANGED — changing it would invalidate the frozen build.",
     "observed": "After the seam fix, a no-project-connected turn answered: \"I'm sorry, but I can't assist with that request. Please connect a project to this conversation.\"",
     "problem": "That opening reads as a generic SAFETY refusal. The real condition is missing project context, and a user may conclude their request itself is prohibited.",
     "wanted": "\"I can help with that, but this conversation doesn't have a project connected yet. Connect a project and ask me again.\" — capability affirmed first, then the missing precondition.",
     "state": "The semantics are correct and the seam is structurally fixed; this is voice. Watch it during the manual walk. Change only if the walk finds it unacceptable.",
-    "scope": "A candidate for the VOICE instruction in src/server/evidence/composition.ts — shared, so it would apply to every capability at once rather than to the project path alone."
+    "scope": "A candidate for the VOICE instruction in src/server/evidence/composition.ts — shared, so it would apply to every capability at once rather than to the project path alone.",
+    "sharpenedRequirement": "🚨 Bonex, walk step 8: PRESERVE THE EXACT REMEDY CLASS when translating deterministic refusal evidence into conversational language. Presentation may become natural; it may NOT change connect-project into retry, request-access into reconnect, or a permanent condition into a transient one.",
+    "instances": [
+      "no project connected → opened 'I'm sorry, but I can't assist with that request' — reads as a generic SAFETY refusal",
+      "project DELETED → 'check if the project is still available and try again' — a permanent condition softened into a transient one"
+    ],
+    "whyItIsOneProblem": "Both are the same failure: the voice instruction told the model to say the meaning in its own words, and said nothing about preserving the REMEDY. A remedy is part of the meaning, not part of the wording."
   },
   "agreedSchedule": {
     "_authority": "Bonex, 2026-09-07. Fixed order. No drift to Projects, no higher-risk tools, no Studio detour unless a shared dependency genuinely blocks Priority A.",
