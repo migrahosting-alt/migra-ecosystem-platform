@@ -26,6 +26,7 @@ import {
   IDENTITY_EXEMPT_PATHS,
 } from './engine/gateway/tailnetIdentity.js';
 import { registerToolExecutionRoutes } from './engine/tools/toolRoutes.js';
+import { registerToolConsentRoutes } from './engine/tools/toolConsentRoutes.js';
 import { registerInspectRoutes } from './engine/workspace/inspectRoutes.js';
 import { registerCommandRunRoutes } from './engine/tools/commandRunRoutes.js';
 import { registerTestRunRoutes } from './engine/tools/testRunRoutes.js';
@@ -71,7 +72,7 @@ import { buildPilotRuntimeClient } from './engine/pilot/pilotApiRuntimeClient.js
 import { WorkspaceManager } from './engine/workspace/workspaceManager.js';
 import { registerWorkspaceRoutes } from './engine/workspace/workspaceRoutes.js';
 import { gitInfo } from './engine/workspace/gitInfo.js';
-import { registerMemoryRoutes } from './engine/memory/memoryRoutes.js';
+import { registerMemoryRoutes, scopeFrom as memoryScopeFrom } from './engine/memory/memoryRoutes.js';
 import { randomUUID } from 'node:crypto';
 import { registerAnonymousQuotaRoutes } from './engine/gateway/anonymousQuotaRoutes.js';
 import { registerPreferencesRoutes } from './engine/preferences/preferencesRoutes.js';
@@ -872,6 +873,27 @@ async function main(): Promise<void> {
   // tool validation, availability, dispatch, and the approval lifecycle. Additive
   // — the legacy /tools/* routes remain for compatibility.
   const toolDeps = registerToolExecutionRoutes(app);
+
+  /*
+   * The user-tool approval round-trip (propose → decline | dispatch).
+   *
+   * Shares `toolDeps.approvals` deliberately: two approval stores would mean two
+   * answers to "was this consented to", and a token minted by one path would be
+   * unknown to the other.
+   *
+   * AUTHORIZATION IS SCOPE, AND THAT IS STATED RATHER THAN DRESSED UP. The Brain
+   * has no per-user role model today — a caller may act on what their owner and
+   * workspace scope contains, and the conversation store enforces that by
+   * returning nothing outside it. So the basis recorded in provenance says
+   * exactly that, instead of implying a richer check than exists. When a real
+   * role or entitlement model arrives, this resolver is where it lands.
+   */
+  registerToolConsentRoutes(app, {
+    approvals: toolDeps.approvals,
+    conversations: memoryStore,
+    authorize: (_request, _toolId, _scope) => ({ authorized: true, basis: 'workspace-scope' }),
+    scopeFrom: memoryScopeFrom,
+  });
   // Stage 2: explicit local Agent Mode command lifecycle. This dedicated route
   // renders server-authoritative proposals and resumes by run id; ordinary chat
   // has no reference to it and cannot approve or execute commands.
