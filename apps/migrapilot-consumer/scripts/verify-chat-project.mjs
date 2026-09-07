@@ -132,7 +132,15 @@ const QUESTION = `Find the string "${SENTINEL}" in my connected project and tell
       const r = await fetch('/api/conversations')
       return ((await r.json()).conversations ?? [])[0]?.id
     })
-    check(!before.includes(SENTINEL), 'it does not claim to have found anything')
+    /*
+     * 🚨 MENTIONING THE QUERY IS NOT CLAIMING TO HAVE FOUND IT.
+     *
+     * My first version asserted the sentinel was absent, and the fixed wording
+     * failed it — because a natural reply repeats what the user asked for: "I
+     * can't search for X". That is correct behaviour. What must be absent is a
+     * claim of a RESULT: found/appears/located in, or any file name.
+     */
+    check(!/\b(found|appears?|located|contained)\s+(in|at)\b/i.test(before), 'it claims no result')
     check(/connect/i.test(before), `and asks for a project: "${before.slice(0, 90).replace(/\n/g, ' ')}"`)
     check(!/VS ?Code|open a folder/i.test(before), 'without naming another product')
     await s1.context.close()
@@ -177,7 +185,10 @@ const QUESTION = `Find the string "${SENTINEL}" in my connected project and tell
     await sleep(2000)
     const revoked = await ask(s4.page, QUESTION)
     console.log(`   answer: "${revoked.slice(0, 160).replace(/\n/g, ' ')}…"`)
-    check(!revoked.includes(SENTINEL), '🚨 it does not still report the sentinel from a project it can no longer read')
+    check(
+      !/\b(found|appears?|located|contained)\s+(in|at)\b/i.test(revoked),
+      '🚨 it reports no result from a project it can no longer read',
+    )
     check(!/unrelated\.ts|config\.ts/i.test(revoked), 'and invents no file names')
     await s4.page.screenshot({ path: `${SP}/chat-project-revoked.png` })
     await s4.context.close()

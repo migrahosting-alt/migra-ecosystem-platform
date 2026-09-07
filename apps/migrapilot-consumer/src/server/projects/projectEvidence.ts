@@ -40,6 +40,7 @@ import 'server-only'
 
 import { callBrain } from '@/server/brain/gateway'
 import type { Principal } from '@/server/tenancy/principal'
+import { composeEvidence } from '@/server/evidence/composition'
 
 /** What a question is asking of the project, if anything. */
 export type ProjectIntent =
@@ -148,13 +149,14 @@ export async function projectEvidenceFor(
       op: `unavailable:${intent.op}`,
       refused: true,
       remedy: 'retry',
-      text: [
-        '[MigraPilot could not reach the project service, so nothing was read from the',
-        'connected project. This is a temporary service problem, NOT a problem with the',
-        'user’s project or their access to it.',
-        ...REFUSED_DIRECTIVE,
-        '',
-      ].join('\n'),
+      text: composeEvidence({
+        fact: [
+          '[MigraPilot could not reach the project service, so nothing was read from the',
+          'connected project. This is a temporary service problem, NOT a problem with the',
+          'user’s project or their access to it.',
+        ],
+        directives: REFUSED_DIRECTIVE,
+      }),
     }
   }
 
@@ -170,7 +172,10 @@ export async function projectEvidenceFor(
       op: `refused:${intent.op}`,
       refused: true,
       ...(payload?.remedy ? { remedy: payload.remedy } : {}),
-      text: [`[MigraPilot could not read the connected project: ${reason}`, ...REFUSED_DIRECTIVE, ''].join('\n'),
+      text: composeEvidence({
+        fact: [`[MigraPilot could not read the connected project: ${reason}`],
+        directives: REFUSED_DIRECTIVE,
+      }),
     }
   }
 
@@ -190,25 +195,30 @@ export async function projectEvidenceFor(
         op: 'search',
         project: label,
         refused: false,
-        text: [
-          `[MigraPilot searched the connected project${label ? ` (${label})` : ''} for`,
-          `"${intent.query}" and found NO matches. Say so plainly. Do not speculate about`,
-          'where it might be or suggest files that were not searched.',
-          '',
-        ].join('\n'),
+        text: composeEvidence({
+          fact: [
+            `[MigraPilot searched the connected project${label ? ` (${label})` : ''} for`,
+            `"${intent.query}" and found NO matches.`,
+          ],
+          directives: [
+            'Say so plainly. Do not speculate about where it might be or suggest files that',
+            'were not searched.]',
+          ],
+        }),
       }
     }
     return {
       op: 'search',
       project: label,
       refused: false,
-      text: [
-        `[Read directly from the connected project${label ? ` (${label})` : ''} by MigraPilot.`,
-        `Searching for "${intent.query}" matched ${matches.length} location(s):]`,
-        ...matches.slice(0, 40).map((m) => `  ${m.path}:${m.line} — ${m.preview.trim().slice(0, 160)}`),
-        ...FOUND_DIRECTIVE,
-        '',
-      ].join('\n'),
+      text: composeEvidence({
+        fact: [
+          `[Read directly from the connected project${label ? ` (${label})` : ''} by MigraPilot.`,
+          `Searching for "${intent.query}" matched ${matches.length} location(s):]`,
+          ...matches.slice(0, 40).map((m) => `  ${m.path}:${m.line} — ${m.preview.trim().slice(0, 160)}`),
+        ],
+        directives: FOUND_DIRECTIVE,
+      }),
     }
   }
 
@@ -217,13 +227,14 @@ export async function projectEvidenceFor(
     op: intent.op,
     project: label,
     refused: false,
-    text: [
-      `[Read directly from the connected project${label ? ` (${label})` : ''} by MigraPilot:]`,
-      ...(entries.length
-        ? entries.slice(0, 60).map((e) => `  ${e.name}${e.type === 'dir' ? '/' : ''}`)
-        : [`  ${JSON.stringify(data ?? {}).slice(0, 600)}`]),
-      ...FOUND_DIRECTIVE,
-      '',
-    ].join('\n'),
+    text: composeEvidence({
+      fact: [
+        `[Read directly from the connected project${label ? ` (${label})` : ''} by MigraPilot:]`,
+        ...(entries.length
+          ? entries.slice(0, 60).map((e) => `  ${e.name}${e.type === 'dir' ? '/' : ''}`)
+          : [`  ${JSON.stringify(data ?? {}).slice(0, 600)}`]),
+      ],
+      directives: FOUND_DIRECTIVE,
+    }),
   }
 }

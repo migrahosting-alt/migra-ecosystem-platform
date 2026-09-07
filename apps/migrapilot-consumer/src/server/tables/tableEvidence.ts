@@ -7,6 +7,7 @@ import { parseTable, TableParseError, type ParsedTable, type TableColumn } from 
 import { computeColumn, groupBy, ComputationRefused, type Operation } from './computeTable'
 import { readWorkbook, WorkbookError } from './readWorkbook'
 import { chooseSheet, sheetToTable } from './workbookTable'
+import { composeEvidence } from '@/server/evidence/composition'
 
 /**
  * Answering a quantitative question with arithmetic instead of prediction.
@@ -501,11 +502,10 @@ export async function tableEvidenceFor(
     return {
       file: fileName,
       operation: `refused:${operation}`,
-      text: [
-        `[MigraPilot could not calculate this from ${fileName}: ${loaded.reason}.`,
-        ...REFUSAL_DIRECTIVE,
-        '',
-      ].join('\n'),
+      text: composeEvidence({
+        fact: [`[MigraPilot could not calculate this from ${fileName}: ${loaded.reason}.`],
+        directives: REFUSAL_DIRECTIVE,
+      }),
     }
   }
   if (loaded.kind === 'workbook') {
@@ -525,12 +525,10 @@ export async function tableEvidenceFor(
       file: fileName,
       operation: 'describe',
       workbookBoundary: true,
-      text: [
-        ...DESCRIBE_HEADER(`${fileName} (${loaded.sheets.length} sheets)`),
-        ...lines,
-        WORKBOOK_BOUNDARY,
-        '',
-      ].join('\n'),
+      text: composeEvidence({
+        fact: [...DESCRIBE_HEADER(`${fileName} (${loaded.sheets.length} sheets)`), ...lines],
+        directives: [WORKBOOK_BOUNDARY],
+      }),
     }
   }
 
@@ -566,12 +564,10 @@ export async function tableEvidenceFor(
       ...(formulaColumns.length > 0 ? { formulaDerived: true } : {}),
       ...(isWorkbook(fileName) ? { workbookBoundary: true } : {}),
       operation: 'describe',
-      text: [
-        ...DESCRIBE_HEADER(source),
-        ...describeLines(table, formulaColumns, source),
-        ...(isWorkbook(fileName) ? [WORKBOOK_BOUNDARY] : []),
-        '',
-      ].join('\n'),
+      text: composeEvidence({
+        fact: [...DESCRIBE_HEADER(source), ...describeLines(table, formulaColumns, source)],
+        directives: isWorkbook(fileName) ? [WORKBOOK_BOUNDARY] : [],
+      }),
     }
   }
 
@@ -585,15 +581,17 @@ export async function tableEvidenceFor(
       file: fileName,
       ...(sheetName ? { sheet: sheetName } : {}),
       operation: 'count',
-      text: [
-        `[Computed directly from ${source} by MigraPilot. These figures are exact`,
-        `arithmetic over the parsed file, not estimates. Use them verbatim and do not`,
-        `recalculate them:]`,
-        target
-          ? `count of values in "${target.name}": ${filled} (of ${rows(table.rows.length)})`
-          : `count of rows: ${filled}`,
-        '',
-      ].join('\n'),
+      text: composeEvidence({
+        fact: [
+          `[Computed directly from ${source} by MigraPilot. These figures are exact`,
+          `arithmetic over the parsed file, not estimates. Use them verbatim and do not`,
+          `recalculate them:]`,
+          target
+            ? `count of values in "${target.name}": ${filled} (of ${rows(table.rows.length)})`
+            : `count of rows: ${filled}`,
+        ],
+        directives: [],
+      }),
     }
   }
 
@@ -604,12 +602,17 @@ export async function tableEvidenceFor(
       file: fileName,
       ...(sheetName ? { sheet: sheetName } : {}),
       operation: `clarify:${operation}`,
-      text: [
-        `[MigraPilot did not calculate this from ${source}: the question could mean more than one`,
-        `column — ${choice.candidates.map((c) => `"${c}"`).join(', ')}. Ask which one is meant.`,
-        `Do NOT add the numbers up yourself and do NOT pick a column on the user's behalf.]`,
-        '',
-      ].join('\n'),
+      text: composeEvidence({
+        fact: [
+          `[MigraPilot did not calculate this from ${source}: the question could mean more than one`,
+          `column — ${choice.candidates.map((c) => `"${c}"`).join(', ')}.`,
+        ],
+        directives: [
+          // Kept on ONE line: the phrase is asserted whole, and a reflow that
+          // splits it changes nothing semantically and breaks the guard anyway.
+          `Ask which one is meant. Do NOT add the numbers up yourself and do NOT pick a column on the user's behalf.]`,
+        ],
+      }),
     }
   }
   if (choice.kind === 'refused') {
@@ -625,11 +628,10 @@ export async function tableEvidenceFor(
       file: fileName,
       ...(sheetName ? { sheet: sheetName } : {}),
       operation: `refused:${operation}`,
-      text: [
-        `[MigraPilot could not calculate this from ${source}: ${choice.reason}.`,
-        ...REFUSAL_DIRECTIVE,
-        '',
-      ].join('\n'),
+      text: composeEvidence({
+        fact: [`[MigraPilot could not calculate this from ${source}: ${choice.reason}.`],
+        directives: REFUSAL_DIRECTIVE,
+      }),
     }
   }
   const value = choice.column
@@ -695,12 +697,14 @@ export async function tableEvidenceFor(
     ...(sheetName ? { sheet: sheetName } : {}),
     ...(formulaDerived ? { formulaDerived: true } : {}),
     operation,
-    text: [
-      `[Computed directly from ${source} by MigraPilot. These figures are exact`,
-      `arithmetic over the parsed file, not estimates. Use them verbatim and do not`,
-      `recalculate them:]`,
-      ...lines,
-      '',
-    ].join('\n'),
+    text: composeEvidence({
+      fact: [
+        `[Computed directly from ${source} by MigraPilot. These figures are exact`,
+        `arithmetic over the parsed file, not estimates. Use them verbatim and do not`,
+        `recalculate them:]`,
+        ...lines,
+      ],
+      directives: [],
+    }),
   }
 }
