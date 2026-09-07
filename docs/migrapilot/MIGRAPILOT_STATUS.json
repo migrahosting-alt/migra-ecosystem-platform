@@ -1921,6 +1921,13 @@
     "dependency": "The write half depends on durable idempotency (schedule item 2), which is already the gate in front of every non-idempotent tool. Connect-project and read-only inspect from Web do not.",
     "doNotDo": "Do not fix the wording alone. A remediation string that stops naming VS Code while the capability is still owned by one client hides the architecture defect instead of closing it — the leak is the symptom that made it visible."
   },
+  "xlsxRefusalCopyRefinement": {
+    "_authority": "Bonex, 2026-09-07. Classified as PRESENTATION/COPY, not a quantitative-reasoning defect.",
+    "observed": "XLSX refusals consistently echoed the evidence wording verbatim — 'MigraPilot could not calculate this from eq_roundtrip.xlsx (sheet \"Data\")…' — where CSV and TSV paraphrased.",
+    "classification": "Model phrasing variance, not a substrate divergence: the SAME evidence text is prepended for all three formats. The semantics are correct and the behaviour is not format-specific at the substrate level.",
+    "whyItStillMatters": "Internal evidence phrasing should not leak into conversational copy. It reads as scaffolding.",
+    "state": "RECORDED — a UX refinement. Does not preempt the roadmap."
+  },
   "agreedSchedule": {
     "_authority": "Bonex, 2026-09-07. Fixed order. No drift to Projects, no higher-risk tools, no Studio detour unless a shared dependency genuinely blocks Priority A.",
     "0_userAcceptance": {
@@ -1974,7 +1981,20 @@
     "design": "A PLATFORM PRIMITIVE, not a rename special case. One authority, no per-tool copies. Keyed on canonical normalized operation identity: idempotencyKey + toolId + actor + scope + normalizedInputHash → pending | committed | failed_before_dispatch | outcome_unknown, with a durable result / reconciliation record."
     },
     "3_spreadsheetQuantitativeReasoning": {
-      "state": "QUEUED — the one PARTIAL inside Priority A",
+      "state": "AGENT-VERIFIED COMPLETE; READY FOR USER ACCEPTANCE (b3e24479 substrate, 9ef69ae7 persistence). Agent-verified is not user-verified.",
+    "proven": [
+      "one shared quantitative path across CSV, TSV and XLSX — sum, average, min/max, count, percentages, currency and negatives, missing values, group-by, 5,000 rows, ambiguity naming candidates, every identifier family, dates and timestamps, mixed text+numbers",
+      "Revenue remains 474,000",
+      "identifiers remain non-additive",
+      "mixed text refused for the RIGHT reason, never as a deficient file",
+      "fresh-session persistence with no re-attachment — a new browser context carrying only the session cookie",
+      "the file remains bound to the conversation",
+      "citations persist",
+      "XLSX now receives the same user-verifiable attribution guarantee as CSV/TSV"
+    ],
+    "attributionDefectFound": "Real, and found only by the persistence slice. groundedFiles is the Brain's TEXT-retrieval frame; a table computation never goes through it. A CSV is also text-indexed so it was cited; a workbook deliberately is not, so it was not. Same table, same number, and whether the user could VERIFY it depended on the format uploaded. Fixed in the shared attribution path — the computed file joins the attributable set BEFORE the library intersection, so attribution still cannot name a file the caller does not own.",
+    "harnessNearMiss": "Every assertion passed while XLSX carried no citation; visible only because a truncated log line showed the difference. The harness was not asserting citations at all. Second time this session a suite passed while the thing it claimed to guard was broken — both times an unasserted property, not a wrong assertion.",
+    "instrumentHole": "Making the workbook adapter ROUND its numbers passed all fifteen equivalence tests: every numeric XLSX cell happened to be an integer, and currency/percentages are TEXT in a workbook so they use the shared parser rather than the numeric path. eq_decimals closes it.",
       "constraint": "🚨 Do NOT stack more XLSX-specific patches. Finish the SHARED quantitative substrate so CSV, TSV and XLSX all consume the same reasoning/aggregation contract."
     }
   }
