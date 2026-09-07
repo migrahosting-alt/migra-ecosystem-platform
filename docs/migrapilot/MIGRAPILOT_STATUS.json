@@ -1826,7 +1826,14 @@
       "platformWide": "ENFORCED",
       "consumerFlow": "FULL 10-CASE MATRIX VERIFIED BY HARNESS; READY FOR USER ACCEPTANCE — NOT CLOSED. Agent-verified is not user-verified; only Bonex walking it in the product closes this.",
   "tenCaseMatrix": {
-    "_authority": "Bonex's canonical enumeration, 2026-09-07. Agent-run on rig hmn0hRAMQSMkumcJOKq5o; all non-fault cases re-run against the RESTORED Brain so the whole matrix sits on one instance.",
+    "_authority": "Bonex's canonical enumeration, 2026-09-07. RE-RUN on the CURRENT Brain artifact after the project-access work changed it — 'rename code unchanged' is not sufficient, because a different Brain build can change shared routing, auth, persistence, consent or error semantics indirectly.",
+    "artifactUnderTest": {
+      "consumer": "buildId XAyJNzGPi3ecUtriOgwUq (pinned throughout)",
+      "brainGitHead": "61d78ddc, clean tree",
+      "brainDistDigest": "82ba5ae443f760697de6ff44857f4ceae2204e92f9fa87b8902515c4484fe539 — sha256 over every emitted dist/src/*.js",
+      "why": "The Brain exposes no buildId at /api/ai/version, so identity is the git HEAD of a clean tree plus a digest of the emitted artifact. Re-verified IDENTICAL after the three fault restarts, so every case ran against one artifact.",
+      "restoredClean": "New live pid carries no MIGRAPILOT_TEST_FAULT_RENAME and no MIGRAPILOT_TEST_* variable at all; both withdrawn verbs back at 410."
+    },
     "1_proposeApprovePersisted": "PASS",
     "2_proposeDeclineUnchanged": "PASS",
     "3_duplicateDispatchOneMutation": "PASS — 2 concurrent dispatches on one token, 1 of 2 succeeded, other refused 'already used'; plus a real double click on Approve",
