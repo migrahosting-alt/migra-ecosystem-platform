@@ -914,6 +914,42 @@ blocks Priority A.
 **0. User acceptance — IN PROGRESS, and the gate.** The 10-case signed-in rename battery on the local
 rig, port 3407. Everything below is frozen until it completes; the rig must stay stable.
 
+> **Interrupted 2026-09-07 by a Chat regression Bonex found during acceptance**, and fixed first:
+> cold model startup rendered *"Loading the language model — the first answer after a pause takes
+> longer to start."* as an assistant conversation bubble, with a second floating indicator around it.
+> **FIXED (`79b0409b`) — READY FOR USER TEST, not done.** It preempted the queue because it is a
+> truthfulness defect on Chat, the governing program: accepting a rename battery on a build that
+> presents runtime state as MigraPilot's own words would be accepting the wrong thing.
+>
+> The rig was rebuilt to serve the fix — buildId `LIHliv21952a3JHldzh2L` → `EmWrBUfJwH2HCY24sUObl`.
+> The frozen rename **commits** are untouched; only the running build moved. `verify-rename-approval.cjs`
+> re-ran green against the new build, and the Brain was neither rebuilt nor faulted.
+
+### What was actually wrong, and why the guard missed it
+
+The earlier fix was correct on the side it was tested on. The string never reached message data, was
+never persisted, never survived a reload. It was **rendered** inside `LogoMark` and
+`rounded-2xl rounded-tl-md border border-hairline bg-raised … shadow-card` — character for character
+the assistant's own bubble. So it arrived wearing MigraPilot's avatar in MigraPilot's bubble.
+
+> **"This is not a message" is a claim about rendered output, not about which variable holds the string.**
+
+The guard could not have caught it: it matched `ChatProvider.tsx` as **text** for the absence of
+`paint(detail)` — true the whole time, and irrelevant to what was on screen. That is the keyword-proxy
+defect in a test rather than a metric. The deeper cause is that **no chat component had ever been
+rendered under `node --test`** — a missing `.png` loader made it impossible, so matching source text
+was the only guard available. `test/serverOnlyLoader.mjs` now stubs static assets and `next/image`,
+and the suite renders real components and asserts on real markup.
+
+Two surfaces now, never both: a **status row** for the detail (no avatar, no bubble, no timestamp, no
+Listen) and the wordless three dots, which keep the bubble because they carry no words to mistake for
+an answer. `showsTurnProgress` retires the indicator once the answer starts arriving — `pending` alone
+had kept it mounted underneath the streaming bubble for the rest of the turn.
+
+Verified against a **real** cold start: `scripts/verify-cold-start.mjs` evicts the model from Ollama,
+drives a signed-in turn through the browser, and reports **INCONCLUSIVE with a non-zero exit** if the
+cold-start line was never observed — so a warm model cannot print green.
+
 **1. Harness evidence integrity — first after acceptance.** Not cosmetic debt: a hardcoded
 `127.0.0.1:3407` in verification tooling reproduces the exact false-green class already hit when
 another session occupied the expected port, so it **outranks feature expansion**.

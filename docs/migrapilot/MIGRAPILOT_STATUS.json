@@ -1868,7 +1868,16 @@
       "ownership": "Never terminate a process because it owns a port. Terminate only a process whose ownership was recorded by the current run. If a port is occupied by something else, allocate another port.",
       "rigIdentity": "A successful HTTP response is not evidence that you reached the application you launched. Every local acceptance rig must verify application identity — run id, build id, route fingerprint — before browser evidence counts.",
       "incident": "Port 3399 was held by another session running AnnouPale. It answered 200 throughout, so some browser runs tested a different product while reporting success; and a kill -9 over the port missed their process only because their command used --port and the pattern required -p.",
-      "enforcement": "apps/migrapilot-consumer/scripts/assert-rig-identity.js, called by both browser harnesses"
+      "enforcement": "apps/migrapilot-consumer/scripts/assert-rig-identity.js, called by both browser harnesses",
+      "identityIsNotConfiguration": "Measured 2026-09-07 while fixing the cold-start regression: a rig restarted WITHOUT its original launch environment passed assert-rig-identity (the version contract was intact) and was signed out, model-less and useless. Identity answers 'which product is this'. It does not answer 'is it configured as the one I meant to test'. Relaunch from the recorded launch script, never from a bare start command."
+    },
+    "renderedOutputIsTheClaim": {
+      "_authority": "Bonex acceptance, 2026-09-07. Permanent.",
+      "invariant": "'This is not a message' is a claim about RENDERED OUTPUT, not about which state variable holds the string. A sentence shown inside the assistant's avatar and bubble IS a message to the reader, whatever the data model calls it.",
+      "incident": "The cold-start line was correctly kept out of message data — never persisted, never in history, never copyable — and then rendered in LogoMark plus the exact assistant bubble classes. It reached acceptance looking like something MigraPilot said.",
+      "testLesson": "The guard matched ChatProvider.tsx as TEXT for the absence of paint(detail). That was true throughout and irrelevant to what was on screen — the keyword-proxy defect in a test rather than a metric. A claim about appearance can only be tested by rendering.",
+      "enabler": "No chat component had EVER been rendered under node --test: a missing .png loader made it impossible, so source-matching was the only guard available. test/serverOnlyLoader.mjs now stubs static assets and next/image, and the suite renders real components.",
+      "enforcement": "apps/migrapilot-consumer/src/state/coldStartProgress.test.ts (renders, self-calibrating off a real message) + scripts/verify-cold-start.mjs (real eviction, real browser, INCONCLUSIVE if the cold start was not observed)"
     }
   },
   "agreedSchedule": {
@@ -1876,7 +1885,14 @@
     "0_userAcceptance": {
       "state": "IN PROGRESS — the gate",
       "what": "Bonex runs the 10-case signed-in rename battery on the local rig, port 3407",
-      "note": "Everything below is FROZEN until this completes. The rig must stay stable."
+      "note": "Everything below is FROZEN until this completes. The rig must stay stable.",
+      "interruptedBy": {
+        "defect": "chat cold-start rendered as an assistant message, with a second floating indicator",
+        "foundBy": "Bonex, during acceptance, 2026-09-07",
+        "state": "FIXED (79b0409b) — READY FOR USER TEST, not done",
+        "whyItPreempted": "A Chat truthfulness defect on the product's primary surface, and Chat is the governing program. Accepting a rename battery on a build that presents runtime state as MigraPilot's own words would be accepting the wrong thing.",
+        "rigImpact": "The rig was rebuilt and relaunched to serve the fix: buildId LIHliv21952a3JHldzh2L → EmWrBUfJwH2HCY24sUObl. The frozen rename COMMITS are untouched; only the running build moved. verify-rename-approval.cjs re-run green against the new build, and the Brain was neither rebuilt nor faulted."
+      }
     },
     "1_harnessEvidenceIntegrity": {
       "state": "QUEUED — first after acceptance",
