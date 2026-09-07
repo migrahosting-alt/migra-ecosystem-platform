@@ -1,7 +1,7 @@
 {
   "$schema": "MIGRAPILOT_STATUS — canonical cross-agent state. Update on every material change.",
   "updated": "2026-09-07",
-  "updatedBy": "Platform-wide rename governance ENFORCED; consumer rename flow READY FOR USER TEST",
+  "updatedBy": "Execution charter recorded; work schedule fixed behind the rename acceptance run",
   "rules": {
     "easyFirst": "Do not start deep capability work while meaningful easy user-facing items remain.",
     "provenLive": "PROVEN_LIVE requires the real user-facing workflow to pass. Code existing and tests passing is NOT proof.",
@@ -1869,6 +1869,42 @@
       "rigIdentity": "A successful HTTP response is not evidence that you reached the application you launched. Every local acceptance rig must verify application identity — run id, build id, route fingerprint — before browser evidence counts.",
       "incident": "Port 3399 was held by another session running AnnouPale. It answered 200 throughout, so some browser runs tested a different product while reporting success; and a kill -9 over the port missed their process only because their command used --port and the pattern required -p.",
       "enforcement": "apps/migrapilot-consumer/scripts/assert-rig-identity.js, called by both browser harnesses"
+    }
+  },
+  "agreedSchedule": {
+    "_authority": "Bonex, 2026-09-07. Fixed order. No drift to Projects, no higher-risk tools, no Studio detour unless a shared dependency genuinely blocks Priority A.",
+    "0_userAcceptance": {
+      "state": "IN PROGRESS — the gate",
+      "what": "Bonex runs the 10-case signed-in rename battery on the local rig, port 3407",
+      "note": "Everything below is FROZEN until this completes. The rig must stay stable."
+    },
+    "1_harnessEvidenceIntegrity": {
+      "state": "QUEUED — first after acceptance",
+      "why": "NOT cosmetic debt. A hardcoded 127.0.0.1:3407 in verification tooling reproduces the exact false-green class already hit when another session occupied the expected port. An evidence-integrity defect OUTRANKS feature expansion.",
+      "rule": "Verification harnesses must never assume the application URL, port, PID or service identity. They consume the run metadata the launcher produced and verify build/run identity before collecting evidence.",
+      "acceptance": [
+        "no literal 3407",
+        "no literal fallback to 3399",
+        "rig URL from env/config/run metadata",
+        "verify buildId/run identity before acceptance",
+        "fail closed on missing or mismatched identity",
+        "never find the product by scanning ports",
+        "preserve recorded-PID ownership",
+        "mutation-test: restoring a hardcoded target must break the guard"
+      ],
+      "offenders": [
+        "apps/migrapilot-consumer/scripts/verify-rename-approval.cjs",
+        "apps/migrapilot-consumer/scripts/verify-rename-faults.cjs"
+      ]
+    },
+    "2_durableIdempotency": {
+      "state": "QUEUED — gate in front of every meaningful mutating tool",
+      "why": "Until it exists, do NOT start Gmail send, create operations, deploy, destructive file actions, charges, or any non-idempotent capability.",
+      "design": "A PLATFORM PRIMITIVE, not a rename special case. One authority, no per-tool copies. Keyed on canonical normalized operation identity: idempotencyKey + toolId + actor + scope + normalizedInputHash → pending | committed | failed_before_dispatch | outcome_unknown, with a durable result / reconciliation record."
+    },
+    "3_spreadsheetQuantitativeReasoning": {
+      "state": "QUEUED — the one PARTIAL inside Priority A",
+      "constraint": "🚨 Do NOT stack more XLSX-specific patches. Finish the SHARED quantitative substrate so CSV, TSV and XLSX all consume the same reasoning/aggregation contract."
     }
   }
 }

@@ -901,3 +901,40 @@ Both came from one incident: port 3399 was held by another session running Annou
 `kill -9` over the port missed their process only because their command used `--port` and the pattern
 required `-p`. Enforced by `scripts/assert-rig-identity.js`, which both browser harnesses now call
 before clicking anything.
+
+---
+
+## Agreed schedule (Bonex, 2026-09-07) — fixed order
+
+    user acceptance → harness evidence-integrity fix → durable idempotency → spreadsheet quantitative reasoning
+
+No drift to Projects, no higher-risk tools, no Studio detour unless a shared dependency genuinely
+blocks Priority A.
+
+**0. User acceptance — IN PROGRESS, and the gate.** The 10-case signed-in rename battery on the local
+rig, port 3407. Everything below is frozen until it completes; the rig must stay stable.
+
+**1. Harness evidence integrity — first after acceptance.** Not cosmetic debt: a hardcoded
+`127.0.0.1:3407` in verification tooling reproduces the exact false-green class already hit when
+another session occupied the expected port, so it **outranks feature expansion**.
+
+> Verification harnesses must never assume the application URL, port, PID or service identity. They
+> consume the run metadata the launcher produced, and verify build/run identity before collecting
+> evidence.
+
+No literal port and no literal fallback · URL from env/config/run metadata · identity verified before
+evidence · fail closed on missing or mismatched identity · never find the product by scanning ports ·
+recorded-PID ownership preserved · **mutation-tested**, so restoring a hardcoded target breaks the guard.
+
+**2. Durable idempotency — the gate before every meaningful mutating tool.** A platform primitive, one
+authority, no per-tool copies, keyed on canonical normalized operation identity:
+
+    idempotencyKey + toolId + actor + scope + normalizedInputHash
+      → pending | committed | failed_before_dispatch | outcome_unknown
+      → durable result / reconciliation record
+
+Until it exists: no Gmail send, no create operations, no deploy, no destructive file actions, no charges.
+
+**3. Spreadsheet quantitative reasoning — the one PARTIAL inside Priority A.**
+🚨 Do not stack more XLSX-specific patches. Finish the **shared quantitative substrate** so CSV, TSV
+and XLSX all consume the same reasoning/aggregation contract.
