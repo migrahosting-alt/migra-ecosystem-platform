@@ -1970,6 +1970,20 @@
       "note": "Step 5 needs a workspace registered in the tester's DERIVED scope (user:<id> / personal:<id>), not 'tester'/'default'. With none registered, the truthful empty state is the correct and expected result."
     }
   },
+  "productionState": {
+    "_authority": "Bonex, 2026-09-07. Recorded because the database CHANGED even though nothing was cut over.",
+    "state": "🚨 SCHEMA PRE-MIGRATED TO 26; APPLICATION CUTOVER PENDING",
+    "plainly": "Production database migrated to schema 26; old application code still serving; application cutover not yet performed.",
+    "detail": {
+      "productionBrainCode": "releases/stale-index-0906 (schema-24-era), uptime unbroken — never restarted",
+      "productionConsumer": "refusal-mixture-0906 / commit d5459a9e — unchanged",
+      "productionSchema": "26 — M25 conversation_project and M26 tool_idempotency APPLIED",
+      "howItHappened": "The Brain deploy script's boot test runs against the REAL environment, so startup migrations reached the production database. That is documented behaviour and the reason the script demands MIGRAPILOT_ALLOW_MIGRATIONS=1; it was explicitly authorized.",
+      "userFacingChange": "None. Both migrations are additive tables the old code never references.",
+      "rollbackSemantics": "🚨 CODE-ONLY from here. Reverting to stale-index-0906 restores code, not schema. Nothing currently requires it to."
+    },
+    "notToBeCalled": "Do NOT describe production as 'unchanged'. The database changed."
+  },
   "frozenAcceptancePair": {
     "_authority": "Bonex, 2026-09-07. FROZEN. No consumer changes before the user walk unless the walk exposes a real defect.",
     "consumer": "z8sWzBmyddBPwOczlQ45U",
