@@ -2350,5 +2350,40 @@
       "Strengthening the third exposed a real fabrication in the newly written code: 'n/a' was printed as '(blank)', because kind==='blank' covers both an empty cell and a written non-value.",
       "The live cold-start harness had the same disease: it DETECTED cold starts by the forbidden string and watched that string on the progress surface throughout without objecting. That is how a green harness coexisted with the production failure."
     ]
+  },
+  "capabilityHubMilestone": {
+    "_authority": "Bonex, 2026-09-08. Supersedes Projects as the active milestone.",
+    "milestone": "Finish MigraPilot Chat as the complete consumer AI workspace and ACTION HUB.",
+    "model": "User asks for an outcome -> MigraPilot determines which capability is needed -> checks connection/authorization -> executes -> reports truthful progress, result and provenance.",
+    "notDoingNext": [
+      "Projects module \u2014 the creation gap is real but needs the control-plane authority; it must not derail the Chat milestone. Projects later becomes another governed CONTEXT SOURCE that Chat consumes.",
+      "Images-from-Files-library storage authority \u2014 tracked, solved when Media/Files semantics are unified."
+    ],
+    "buildOrder": [
+      "0. Capability-driven action hub (NO external dependency) \u2014 the hub reads the registry instead of hardcoding rows",
+      "1. Web Search + Research \u2014 foundational; many later capabilities need fresh external information",
+      "2. Maps / Local Discovery \u2014 real place results, never a fake embedded map with no backend authority",
+      "3. Email (Gmail/Workspace) \u2014 read/search/summarise, then draft, then send behind explicit mutation consent",
+      "4. Calendar \u2014 read/free-busy first; create/change/cancel behind governed consent",
+      "5. Cloud files \u2014 Google Drive first, then OneDrive/Dropbox, all feeding the SAME canonical attachment layer",
+      "6. GitHub \u2014 search repos/code/issues/PRs, explain, review; mutations later through the same consent/idempotency framework"
+    ],
+    "architectureFound": {
+      "registryExists": "apps/brain-service/src/engine/models/capabilityRegistry.ts is already the single catalog. Its header states the intent exactly: clients get sanitized METADATA only, and AVAILABILITY IS THE ENGINE'S DECISION, gated on requiredCapabilities being in the granted set.",
+      "routeExists": "GET /api/ai/tools already returns that sanitized list, and GET /api/ai/tools/:id one entry.",
+      "theGap": "The consumer does not consume it. The composer hub hardcodes its rows and decides availability with per-capability probes (useVisionAvailability, useDocumentAvailability). That is the 'buttons pretending capabilities exist' problem.",
+      "egress": "Verified: the Brain host reaches the public internet (HTTP 200 in 82ms). External providers are reachable."
+    },
+    "blockedOnOwner": {
+      "what": "Web Search and Maps each need an external PROVIDER and an API credential. The Brain makes zero outbound external calls today \u2014 these would be its first.",
+      "whyIcannotProceed": "A provider account and key must be created by Bonex. The agent must never create, request or handle credentials, and a mock implementation is forbidden by the repo rules.",
+      "alsoWeigh": "The public-beta north star is ZERO PAID INFERENCE on owned hardware. A search/maps API is not inference, but it is a paid external dependency and touches the same principle. Worth a deliberate decision rather than a default."
+    },
+    "targetUX": [
+      "Find a good waterfront restaurant near me for Saturday, check my calendar, and draft an email to my wife with the options.",
+      "Find the contract in my Google Drive, summarize the termination clause, and email the summary to James.",
+      "Look at the latest GitHub issues for MigraPilot, tell me what is blocking the release, and create an implementation plan."
+    ],
+    "standing": "Study products like ChatGPT for expected capability coverage and UX lessons; the implementation and interaction model stay Migra-native, never a clone."
   }
 }
