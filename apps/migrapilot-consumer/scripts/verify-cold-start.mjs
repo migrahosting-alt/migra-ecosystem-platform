@@ -41,7 +41,27 @@ import { assertClientBuild, resolveRigTarget } from './rigTarget.js'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-const COLD_START = 'Loading the language model'
+/**
+ * The product's own word for the cold-start condition — the OBSERVATION signal.
+ *
+ * It used to be the Brain's sentence, "Loading the language model …", because
+ * the consumer displayed that sentence verbatim. It no longer does: the stream
+ * boundary drops the Brain's prose and `state/turnStatus.ts` maps the stage
+ * code to this. Left unchanged, this harness would have looked for a string
+ * that can no longer appear and reported INCONCLUSIVE for ever — a guard that
+ * silently stops being able to see its own subject.
+ */
+const COLD_START = 'Starting up'
+
+/**
+ * The sentence a user was actually shown in production, kept as the thing that
+ * must NEVER appear — in the progress surface, in a message, or after a reload.
+ *
+ * Checked as a substring of the Brain's wording rather than the whole
+ * paragraph, so a reworded variant of the same infrastructure talk is caught
+ * too.
+ */
+const FORBIDDEN = ['Loading the language model', 'Loading the image model', 'image pipeline']
 const SP = '/tmp/claude-1001/-home-bonex-workspace-active-MigraTeck-Ecosystem-dev/d929835d-8849-4c9d-92e6-3d1922fab393/scratchpad'
 
 const fail = (message) => {
@@ -186,6 +206,7 @@ const SAMPLE = () => {
   let sawColdStart = false
   let maxProgress = 0
   let coexisted = null
+  let infrastructureShown = null
   let leakedIntoMessage = null
   let messageChrome = null
 
@@ -223,8 +244,19 @@ const SAMPLE = () => {
       if (sample.progressChrome.length > 0 && !messageChrome) messageChrome = sample.progressChrome
 
       // The regression: the loading line inside a message bubble.
-      const leak = sample.messageTexts.find((text) => text.includes(COLD_START))
+      const leak = sample.messageTexts.find((text) => FORBIDDEN.some((f) => text.includes(f)))
       if (leak && !leakedIntoMessage) leakedIntoMessage = leak
+
+      /*
+       * THE PRODUCTION DEFECT, ASSERTED WHEREVER IT WOULD SHOW.
+       *
+       * The previous version only asked whether infrastructure wording reached
+       * a MESSAGE. It reached the progress surface instead, which this harness
+       * watched the whole time and never questioned — the text was treated as
+       * the expected signal rather than as something to object to.
+       */
+      const spoken = FORBIDDEN.find((f) => sample.progressText.includes(f))
+      if (spoken && !infrastructureShown) infrastructureShown = spoken
 
       // The duplicate: progress still up while the answer is being written.
       const written = sample.messageTexts.filter((t) => t.length > 0)
@@ -254,6 +286,12 @@ const SAMPLE = () => {
           '     The model was probably still warm. Re-run; do not read this as a pass.',
       )
     }
+    if (infrastructureShown) {
+      failures.push(
+        `infrastructure wording was shown to the user: “${infrastructureShown}”.\n` +
+          '     Status copy describes the user’s work, never the machinery doing it.',
+      )
+    }
     if (leakedIntoMessage) {
       failures.push(`the loading line rendered INSIDE an assistant message: “${leakedIntoMessage.slice(0, 90)}”`)
     }
@@ -276,16 +314,17 @@ const SAMPLE = () => {
     if (!answered) {
       failures.push('no answer ever arrived, so the transient state was never replaced by one')
     }
-    if (afterReload.includes(COLD_START)) {
+    if (afterReload.includes(COLD_START) || FORBIDDEN.some((f) => afterReload.includes(f))) {
       failures.push('the loading line survived a reload — runtime state was persisted as conversation content')
     }
 
     console.log(`   cold start observed:        ${sawColdStart ? 'yes' : 'NO'}`)
+    console.log(`   infrastructure wording:     ${infrastructureShown ? `YES — defect (“${infrastructureShown}”)` : 'none'}`)
     console.log(`   max progress surfaces:      ${maxProgress}`)
     console.log(`   message chrome on progress: ${messageChrome ? `YES — ${messageChrome.join(', ')}` : 'none'}`)
     console.log(`   loading text in a message:  ${leakedIntoMessage ? 'YES — defect' : 'no'}`)
     console.log(`   progress outlived the start:${coexisted ? ' YES — defect' : ' no'}`)
-    console.log(`   present after reload:       ${afterReload.includes(COLD_START) ? 'YES — defect' : 'no'}`)
+    console.log(`   present after reload:       ${afterReload.includes(COLD_START) || FORBIDDEN.some((f) => afterReload.includes(f)) ? 'YES — defect' : 'no'}`)
   } finally {
     await browser.close()
   }
