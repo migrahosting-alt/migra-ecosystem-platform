@@ -1,7 +1,7 @@
 {
   "$schema": "MIGRAPILOT_STATUS — canonical cross-agent state. Update on every material change.",
-  "updated": "2026-09-07",
-  "updatedBy": "Execution charter recorded; work schedule fixed behind the rename acceptance run",
+  "updated": "2026-09-08",
+  "updatedBy": "Claude (Opus 5) under Bonex governance — pre-cutover freeze",
   "rules": {
     "easyFirst": "Do not start deep capability work while meaningful easy user-facing items remain.",
     "provenLive": "PROVEN_LIVE requires the real user-facing workflow to pass. Code existing and tests passing is NOT proof.",
@@ -1825,34 +1825,34 @@
     "renameGovernance": {
       "platformWide": "ENFORCED",
       "consumerFlow": "FULL 10-CASE MATRIX VERIFIED BY HARNESS; READY FOR USER ACCEPTANCE — NOT CLOSED. Agent-verified is not user-verified; only Bonex walking it in the product closes this.",
-  "tenCaseMatrix": {
-    "_authority": "Bonex's canonical enumeration, 2026-09-07. RE-RUN on the CURRENT Brain artifact after the project-access work changed it — 'rename code unchanged' is not sufficient, because a different Brain build can change shared routing, auth, persistence, consent or error semantics indirectly.",
-    "artifactUnderTest": {
-      "consumer": "buildId aSS18Qo0IyhaafGQP6Osg — RE-RUN AGAIN after the Connect-project work moved the consumer artifact. The Brain staying unchanged is not enough: acceptance attaches to the exact client under test. Client build asserted during every browser case (9 assets, all from this build), so no stale bundle contributed.",
-      "brainGitHead": "61d78ddc, clean tree",
-      "brainDistDigest": "82ba5ae443f760697de6ff44857f4ceae2204e92f9fa87b8902515c4484fe539 — sha256 over every emitted dist/src/*.js",
-      "why": "The Brain exposes no buildId at /api/ai/version, so identity is the git HEAD of a clean tree plus a digest of the emitted artifact. Re-verified IDENTICAL after the three fault restarts, so every case ran against one artifact.",
-      "restoredClean": "New live pid carries no MIGRAPILOT_TEST_FAULT_RENAME and no MIGRAPILOT_TEST_* variable at all; both withdrawn verbs back at 410."
-    },
-    "1_proposeApprovePersisted": "PASS",
-    "2_proposeDeclineUnchanged": "PASS",
-    "3_duplicateDispatchOneMutation": "PASS — 2 concurrent dispatches on one token, 1 of 2 succeeded, other refused 'already used'; plus a real double click on Approve",
-    "4_titleChangedUnderApproval": "PASS — 'This action changed since you approved it, so it needs approving again.', title unchanged",
-    "5_expired": "PASS — 'That approval has expired. Approve it again to continue.', no mutation, no retry offered",
-    "6_revoked": "PASS — 'You do not have access to Rename conversation in this workspace.', suggestedAction request-access; the approval was minted while access existed and refused at dispatch, so it never became authority",
-    "7_outcomeUnknown": "PASS — HTTP 202, 'sent but could not be confirmed, check the conversation before trying again', no retry action anywhere",
-    "8_reloadPersists": "PASS",
-    "9_noInternalLeak": "PASS — none, including all three fault screens",
-    "10_noReplay": "PASS — spent token replayed AFTER a later rename so a successful replay would be visible; refused, title stayed at the interim value",
-    "harnesses": [
-      "scripts/verify-rename-approval.cjs — 1, 2, 8, 9",
-      "scripts/verify-rename-replay.cjs — 3, 4, 10 (new, 144734b1)",
-      "scripts/verify-rename-faults.cjs — 5, 6, 7, one Brain restart per fault"
-    ],
-    "supersededClaim": "'A second rename works' was previously standing in for cases 3, 4 and 10. It is the happy path twice and proves none of them.",
-    "harnessBugsFound": "The first replay run reported 3 failures, all mine: the URL carries the OPTIMISTIC conversation id, not the durable conv_…, and there is no GET /api/conversations/:id (405). Case 4 PASSED in that broken run for the wrong reason — a refusal from a bad id is indistinguishable from a refusal from input mismatch unless you read the message. Only the wording made it evidence.",
-    "faultDiscipline": "Ownership re-checked by cwd immediately before each signal, never by port or pattern. Injection confirmed from the live /proc/<pid>/environ each run. Restored from scratchpad/local/brain.sh; new live PID carries no MIGRAPILOT_TEST_* or *FAULT* variable, and both withdrawn verbs are back at 410."
-  },
+      "tenCaseMatrix": {
+        "_authority": "Bonex's canonical enumeration, 2026-09-07. RE-RUN on the CURRENT Brain artifact after the project-access work changed it — 'rename code unchanged' is not sufficient, because a different Brain build can change shared routing, auth, persistence, consent or error semantics indirectly.",
+        "artifactUnderTest": {
+          "consumer": "buildId aSS18Qo0IyhaafGQP6Osg — RE-RUN AGAIN after the Connect-project work moved the consumer artifact. The Brain staying unchanged is not enough: acceptance attaches to the exact client under test. Client build asserted during every browser case (9 assets, all from this build), so no stale bundle contributed.",
+          "brainGitHead": "61d78ddc, clean tree",
+          "brainDistDigest": "82ba5ae443f760697de6ff44857f4ceae2204e92f9fa87b8902515c4484fe539 — sha256 over every emitted dist/src/*.js",
+          "why": "The Brain exposes no buildId at /api/ai/version, so identity is the git HEAD of a clean tree plus a digest of the emitted artifact. Re-verified IDENTICAL after the three fault restarts, so every case ran against one artifact.",
+          "restoredClean": "New live pid carries no MIGRAPILOT_TEST_FAULT_RENAME and no MIGRAPILOT_TEST_* variable at all; both withdrawn verbs back at 410."
+        },
+        "1_proposeApprovePersisted": "PASS",
+        "2_proposeDeclineUnchanged": "PASS",
+        "3_duplicateDispatchOneMutation": "PASS — 2 concurrent dispatches on one token, 1 of 2 succeeded, other refused 'already used'; plus a real double click on Approve",
+        "4_titleChangedUnderApproval": "PASS — 'This action changed since you approved it, so it needs approving again.', title unchanged",
+        "5_expired": "PASS — 'That approval has expired. Approve it again to continue.', no mutation, no retry offered",
+        "6_revoked": "PASS — 'You do not have access to Rename conversation in this workspace.', suggestedAction request-access; the approval was minted while access existed and refused at dispatch, so it never became authority",
+        "7_outcomeUnknown": "PASS — HTTP 202, 'sent but could not be confirmed, check the conversation before trying again', no retry action anywhere",
+        "8_reloadPersists": "PASS",
+        "9_noInternalLeak": "PASS — none, including all three fault screens",
+        "10_noReplay": "PASS — spent token replayed AFTER a later rename so a successful replay would be visible; refused, title stayed at the interim value",
+        "harnesses": [
+          "scripts/verify-rename-approval.cjs — 1, 2, 8, 9",
+          "scripts/verify-rename-replay.cjs — 3, 4, 10 (new, 144734b1)",
+          "scripts/verify-rename-faults.cjs — 5, 6, 7, one Brain restart per fault"
+        ],
+        "supersededClaim": "'A second rename works' was previously standing in for cases 3, 4 and 10. It is the happy path twice and proves none of them.",
+        "harnessBugsFound": "The first replay run reported 3 failures, all mine: the URL carries the OPTIMISTIC conversation id, not the durable conv_…, and there is no GET /api/conversations/:id (405). Case 4 PASSED in that broken run for the wrong reason — a refusal from a bad id is indistinguishable from a refusal from input mismatch unless you read the message. Only the wording made it evidence.",
+        "faultDiscipline": "Ownership re-checked by cwd immediately before each signal, never by port or pattern. Injection confirmed from the live /proc/<pid>/environ each run. Restored from scratchpad/local/brain.sh; new live PID carries no MIGRAPILOT_TEST_* or *FAULT* variable, and both withdrawn verbs are back at 410."
+      },
       "whatWasClosed": [
         "PATCH /api/conversations/:id (consumer) → 410, names the replacement",
         "PATCH /api/ai/conversations/:id (Brain) → 410, names the replacement"
@@ -2080,34 +2080,153 @@
       "state": "DONE (4143efa9) — the primitive exists; no capability is wired to it yet",
       "why": "Until it exists, do NOT start Gmail send, create operations, deploy, destructive file actions, charges, or any non-idempotent capability.",
       "shipped": {
-      "files": "apps/brain-service/src/engine/tools/idempotency.ts (pure state machine), idempotencyStore.ts (port + in-memory), sqliteIdempotency.ts (durable), test/idempotency.test.ts",
-      "uniqueKey": "PRIMARY KEY (idempotency_key, actor, scope). NOT the key alone — two tenants would collide. NOT the whole identity — a changed input hash would INSERT A SECOND ROW instead of colliding, so the reuse would succeed as a new operation. Tool and input hash are columns compared on read; the collision has to happen for the refusal to be possible.",
-      "atomicClaim": "One INSERT; the database decides who wins. Read-then-write loses the double-click race: both callers dispatch and the operation happens twice with an audit trail saying it happened once. Proven by a concurrent-claim test.",
-      "identityBeforeState": "A committed record whose key was reused for different input reports the REUSE, never the stored result — otherwise a caller receives a stranger's outcome for their own operation.",
-      "outcomeUnknown": "Not a retry state, and there is no flag to make it one. reattempt() refuses from it by name; only reconcile() moves it, and only when the caller has found out what happened.",
-      "freshAttempt": "failed_before_dispatch → pending is deliberately NOT a transition. reattempt() mints a new attempt with an incremented counter, so the second try is visible rather than erasing the first.",
-      "durability": "Every invariant runs against BOTH the in-memory and SQLite backings, and durability is proven by closing the database and reopening it. An invariant proven only in memory says nothing about the property this exists to provide.",
-      "mutationTested": "All four named classes fail targeted tests: dropping uniqueness, allowing a changed hash, letting outcome_unknown retry, letting a committed record dispatch.",
-      "notYetWired": "🚨 NO capability consumes this yet. Wiring the first non-idempotent tool is a separate slice with its own acceptance."
-    },
-    "design": "A PLATFORM PRIMITIVE, not a rename special case. One authority, no per-tool copies. Keyed on canonical normalized operation identity: idempotencyKey + toolId + actor + scope + normalizedInputHash → pending | committed | failed_before_dispatch | outcome_unknown, with a durable result / reconciliation record."
+        "files": "apps/brain-service/src/engine/tools/idempotency.ts (pure state machine), idempotencyStore.ts (port + in-memory), sqliteIdempotency.ts (durable), test/idempotency.test.ts",
+        "uniqueKey": "PRIMARY KEY (idempotency_key, actor, scope). NOT the key alone — two tenants would collide. NOT the whole identity — a changed input hash would INSERT A SECOND ROW instead of colliding, so the reuse would succeed as a new operation. Tool and input hash are columns compared on read; the collision has to happen for the refusal to be possible.",
+        "atomicClaim": "One INSERT; the database decides who wins. Read-then-write loses the double-click race: both callers dispatch and the operation happens twice with an audit trail saying it happened once. Proven by a concurrent-claim test.",
+        "identityBeforeState": "A committed record whose key was reused for different input reports the REUSE, never the stored result — otherwise a caller receives a stranger's outcome for their own operation.",
+        "outcomeUnknown": "Not a retry state, and there is no flag to make it one. reattempt() refuses from it by name; only reconcile() moves it, and only when the caller has found out what happened.",
+        "freshAttempt": "failed_before_dispatch → pending is deliberately NOT a transition. reattempt() mints a new attempt with an incremented counter, so the second try is visible rather than erasing the first.",
+        "durability": "Every invariant runs against BOTH the in-memory and SQLite backings, and durability is proven by closing the database and reopening it. An invariant proven only in memory says nothing about the property this exists to provide.",
+        "mutationTested": "All four named classes fail targeted tests: dropping uniqueness, allowing a changed hash, letting outcome_unknown retry, letting a committed record dispatch.",
+        "notYetWired": "🚨 NO capability consumes this yet. Wiring the first non-idempotent tool is a separate slice with its own acceptance."
+      },
+      "design": "A PLATFORM PRIMITIVE, not a rename special case. One authority, no per-tool copies. Keyed on canonical normalized operation identity: idempotencyKey + toolId + actor + scope + normalizedInputHash → pending | committed | failed_before_dispatch | outcome_unknown, with a durable result / reconciliation record."
     },
     "3_spreadsheetQuantitativeReasoning": {
       "state": "AGENT-VERIFIED COMPLETE; READY FOR USER ACCEPTANCE (b3e24479 substrate, 9ef69ae7 persistence). Agent-verified is not user-verified.",
-    "proven": [
-      "one shared quantitative path across CSV, TSV and XLSX — sum, average, min/max, count, percentages, currency and negatives, missing values, group-by, 5,000 rows, ambiguity naming candidates, every identifier family, dates and timestamps, mixed text+numbers",
-      "Revenue remains 474,000",
-      "identifiers remain non-additive",
-      "mixed text refused for the RIGHT reason, never as a deficient file",
-      "fresh-session persistence with no re-attachment — a new browser context carrying only the session cookie",
-      "the file remains bound to the conversation",
-      "citations persist",
-      "XLSX now receives the same user-verifiable attribution guarantee as CSV/TSV"
-    ],
-    "attributionDefectFound": "Real, and found only by the persistence slice. groundedFiles is the Brain's TEXT-retrieval frame; a table computation never goes through it. A CSV is also text-indexed so it was cited; a workbook deliberately is not, so it was not. Same table, same number, and whether the user could VERIFY it depended on the format uploaded. Fixed in the shared attribution path — the computed file joins the attributable set BEFORE the library intersection, so attribution still cannot name a file the caller does not own.",
-    "harnessNearMiss": "Every assertion passed while XLSX carried no citation; visible only because a truncated log line showed the difference. The harness was not asserting citations at all. Second time this session a suite passed while the thing it claimed to guard was broken — both times an unasserted property, not a wrong assertion.",
-    "instrumentHole": "Making the workbook adapter ROUND its numbers passed all fifteen equivalence tests: every numeric XLSX cell happened to be an integer, and currency/percentages are TEXT in a workbook so they use the shared parser rather than the numeric path. eq_decimals closes it.",
+      "proven": [
+        "one shared quantitative path across CSV, TSV and XLSX — sum, average, min/max, count, percentages, currency and negatives, missing values, group-by, 5,000 rows, ambiguity naming candidates, every identifier family, dates and timestamps, mixed text+numbers",
+        "Revenue remains 474,000",
+        "identifiers remain non-additive",
+        "mixed text refused for the RIGHT reason, never as a deficient file",
+        "fresh-session persistence with no re-attachment — a new browser context carrying only the session cookie",
+        "the file remains bound to the conversation",
+        "citations persist",
+        "XLSX now receives the same user-verifiable attribution guarantee as CSV/TSV"
+      ],
+      "attributionDefectFound": "Real, and found only by the persistence slice. groundedFiles is the Brain's TEXT-retrieval frame; a table computation never goes through it. A CSV is also text-indexed so it was cited; a workbook deliberately is not, so it was not. Same table, same number, and whether the user could VERIFY it depended on the format uploaded. Fixed in the shared attribution path — the computed file joins the attributable set BEFORE the library intersection, so attribution still cannot name a file the caller does not own.",
+      "harnessNearMiss": "Every assertion passed while XLSX carried no citation; visible only because a truncated log line showed the difference. The harness was not asserting citations at all. Second time this session a suite passed while the thing it claimed to guard was broken — both times an unasserted property, not a wrong assertion.",
+      "instrumentHole": "Making the workbook adapter ROUND its numbers passed all fifteen equivalence tests: every numeric XLSX cell happened to be an integer, and currency/percentages are TEXT in a workbook so they use the shared parser rather than the numeric path. eq_decimals closes it.",
       "constraint": "🚨 Do NOT stack more XLSX-specific patches. Finish the SHARED quantitative substrate so CSV, TSV and XLSX all consume the same reasoning/aggregation contract."
+    }
+  },
+  "releaseModel": {
+    "_authority": "Bonex, 2026-09-08. Named explicitly so the two models are not conflated.",
+    "model": "SINGLE-PASS QUALIFICATION-AND-ACTIVATION",
+    "notThis": "prequalified immutable artifact promotion",
+    "why": "The consumer deploy rebuilds from source, and Next mints a random BUILD_ID per build, so no prequalification build can BE the artifact later activated.",
+    "whatMakesItValid": "One uninterrupted run must build, stage, boot-test, identity-assert, cut over, and independently verify the running process, with NO rebuild between boot qualification and activation.",
+    "verifiedHow": "Read deploy-consumer.sh step order: npm run verify (step 3, the only build) -> stamp+read BUILD_ID from that .next (4) -> tar THAT .next to the release dir (4b) -> boot-test that directory (5-7) -> ln -sfn to the same directory (8) -> assert running process (10). No build command exists between step 4 and step 8.",
+    "invariant": "If HEAD changes after the final handoff, cutover approval is VOID and the release must be re-qualified from the new HEAD. This prevents single-pass from degrading into qualify-one-commit-deploy-another.",
+    "rehearsalMeaning": "A MIGRAPILOT_QUALIFY_ONLY run is evidence about the PIPELINE, not the identity of the future production artifact."
+  },
+  "schema26CompatibilitySmoke": {
+    "_authority": "Bonex required this before any cutover: prove the old Brain OPERATES correctly on schema 26, not merely that it reports healthy.",
+    "verdict": "PASS — schema 26 + old Brain",
+    "runningCode": "releases/stale-index-0906, commit 27da0172, buildId sha256:3db4b302cda78dc5e088c9e56345bfa7d679a4df, uptime unbroken (31h+, PID 358507 never restarted)",
+    "scope": "user:deploy-smoke / personal:deploy-smoke — an internal smoke scope. Never a customer tenant.",
+    "realWrites": [
+      "workspace CREATE -> ws_riwagvdvb8, READ back in list, DELETE -> {ok:true}, scope empty again",
+      "conversation CREATE -> conv_1glks2906c3eih0ulqb0r, READ back with correct scopes, DELETE -> {ok:true}, scope empty again"
+    ],
+    "reportedByOldCode": {
+      "persistence": "ready",
+      "memory": "ready",
+      "rag": "ready",
+      "schemaVersion": 26,
+      "migrationState": "current",
+      "detail": null
+    },
+    "cleanup": "Both smoke scopes verified EMPTY afterwards.",
+    "whyItAlsoProvesRollback": "stale-index-0906 IS the Brain rollback target, so rollback-runnable-against-schema-26 is proven by the LIVE process rather than inferred."
+  },
+  "rollbackSemantics": {
+    "_authority": "Bonex wording correction, 2026-09-08.",
+    "correct": "Rollback target proven runnable against schema 26; rollback is CODE-ONLY, schema remains 26.",
+    "incorrect": "rollback restores code AND schema",
+    "whyTheScriptSaysTheWrongThing": "deploy-brain.sh step 4 prints that line from its BUILT == LIVE branch, which assumes equality means THIS DEPLOY APPLIED NO MIGRATION. Production was pre-migrated ahead of the code, so equality now means something different and the message no longer describes reality.",
+    "status": "Message flagged as a POST-CUTOVER script fix. Not changed mid-release."
+  },
+  "releaseIntegrityHardening": {
+    "_authority": "Bonex, 2026-09-08: record as post-release hardening; do NOT change the RC now.",
+    "item1": {
+      "title": "Brain buildId is not a complete release identity",
+      "evidence": "FAILED chat-platform-rc-0907 and QUALIFIED chat-platform-rc-0907b share buildId sha256:90fd92a97e630bbe53a3d9c720c48a45998fb252.",
+      "why": "BUILD_ID digests dist/ only. The rc-0907 failure lived in node_modules (a stale workspace package), which the digest does not cover. The fix was entirely in docs/migrapilot/*.sh, which do not compile into Brain dist, so the compiled bytes are genuinely identical.",
+      "consequence": "Identity assertion by buildId alone would have PASSED the release that could not boot. Only the workspace staging-parity gate distinguishes them.",
+      "remedy": "Report a manifest/digest over the whole RUNTIME CLOSURE as the deployable artifact identity: Brain dist + runtime workspace-package bytes + package metadata/export maps + the staged runtime dependency manifest."
+    },
+    "item2": {
+      "title": "Next buildId is a RUN identity, not a source/content identity",
+      "evidence": "Two rehearsals over IDENTICAL consumer source (only docs/migrapilot changed between 909ea46f and 94c6c20c) produced ILw_YGfCaw10U3fRcAi4Q and z3Xkf4jduHFJlR-zk5fWe. A content-derived id would have been unchanged.",
+      "why": "apps/migrapilot-consumer/next.config.* declares no generateBuildId override, so Next emits a random per-build id.",
+      "consequence": "No prequalification build can be the artifact later activated. This is what makes single-pass qualification-and-activation the correct DESCRIPTION of the current chain rather than a workaround.",
+      "remedy": "A content-derived generateBuildId, so a consumer artifact identity is reproducible from source."
+    }
+  },
+  "postgresMaintainabilityGap": {
+    "_authority": "Found 2026-09-08 during the schema-26 compatibility smoke. Recorded, not fixed mid-release.",
+    "finding": "Retention/integrity operational workers are UNAVAILABLE in production because PostgresDurableStore does not implement the maintenance interface.",
+    "mechanism": "isMaintainable(durable) requires integrityCheck + probeWriteLatencyMs + storageBytes. Only sqliteStore.ts implements them; nothing under engine/persistence/postgres/ does. server.ts therefore never constructs OperationalMaintenance, and /health reports operational: unavailable.",
+    "notCausedBySchema26": "The decision is made ONCE at boot. The running process started 31h before the migration existed.",
+    "notFixedByThisRelease": "Production runs Postgres either way, so the cutover does not change this.",
+    "alsoNote": "server.ts logs this LOUDLY at app.log.error — the code already treats it as a real gap, not a silent skip."
+  },
+  "invalidatedReleaseArtifacts": {
+    "_authority": "Bonex authorised removal 2026-09-08, after the good RC is frozen and before any operator is asked to cut over by release name.",
+    "chat-platform-rc-0907": {
+      "status": "INVALID — never activated, never a rollback target. Directory removed from the Brain host.",
+      "identity": {
+        "commit": "7c06e5665bd9382982765027e21099e0eba0d91f",
+        "release": "chat-platform-rc-0907",
+        "buildId": "sha256:90fd92a97e630bbe53a3d9c720c48a45998fb252",
+        "builtAt": "2026-09-07T23:02:46Z"
+      },
+      "failureReason": "Aborted at the boot test: SyntaxError — the requested module @migrapilot/shared-types/outcome-plan does not provide an export named STEP_LABEL.",
+      "rootCause": "cp -al inherited node_modules from the previous release, so the artifact carried a @migrapilot/shared-types built three days earlier. Confirmed in place before deletion: its node_modules/@migrapilot/shared-types/dist/outcomePlan.js was dated 2026-09-04 09:24 and contained 0 occurrences of STEP_LABEL.",
+      "whyRemoved": "A near-identical, selectable release name beside the qualified one is avoidable operator risk during a cutover performed by name.",
+      "safeguardsVerifiedBeforeDeletion": [
+        "current symlink pointed to releases/stale-index-0906, NOT this directory",
+        "no process had it as cwd or exe (0 matches in /proc/*/cwd, /proc/*/exe)",
+        "no process had files mapped from it (0 matches in /proc/*/maps)",
+        "it was not the rollback target (rollback target is stale-index-0906)",
+        "its failed identity and reason were recorded here BEFORE deletion",
+        "chat-platform-rc-0907b confirmed intact afterwards"
+      ],
+      "deletedBy": "full explicit path /opt/migrapilot/brain-service/releases/chat-platform-rc-0907 — never a glob or prefix match"
+    }
+  },
+  "cutoverCandidate": {
+    "_authority": "Frozen 2026-09-08 for Bonex cutover approval. NOT deployed.",
+    "head": "the commit containing this record — assert git rev-parse HEAD equals it before cutover; if HEAD has moved, approval is VOID and the release must be re-qualified from the new HEAD",
+    "brain": {
+      "release": "chat-platform-rc-0907b",
+      "commit": "94c6c20c5b4f75a0cd94818bbf62b1d811e69081",
+      "buildId": "sha256:90fd92a97e630bbe53a3d9c720c48a45998fb252",
+      "tests": "2484/2484 pass, 0 fail, 0 skipped",
+      "schemaDelta": "built 26 == production 26, no migrations pending",
+      "workspaceParity": "5/5 packages: staged bytes match build; rollback bytes unchanged",
+      "bootTest": "HTTP 200, commit+release+buildId all matched"
+    },
+    "consumer": {
+      "release": "chat-platform-rc-0907b",
+      "commit": "94c6c20c5b4f75a0cd94818bbf62b1d811e69081",
+      "rehearsalBuildId": "z3Xkf4jduHFJlR-zk5fWe",
+      "rehearsalBuildIdCaveat": "REHEARSAL ONLY — the cutover run rebuilds and mints a different random id. Not the identity of the future production artifact.",
+      "gate": "npm run verify = typecheck && test && build && verify:bundle, exit 0; client bundle check PASS (no server-only material)",
+      "workspaceParity": "2/2 packages: staged bytes match build; rollback bytes unchanged",
+      "bootTest": "HTTP 200, commit+release+buildId all matched"
+    },
+    "production": {
+      "brain": "releases/stale-index-0906, commit 27da0172, buildId sha256:3db4b302cda78dc5e088c9e56345bfa7d679a4df — OLD application code still serving",
+      "consumer": "releases/refusal-mixture-0906, commit d5459a9e, BUILD_ID X8fJP-3lZN87oZ6Natk6v — confirmed identical from the PUBLIC edge and internally",
+      "schema": "26 (pre-migrated ahead of the code)",
+      "state": "SCHEMA PRE-MIGRATED TO 26; APPLICATION CUTOVER PENDING"
+    },
+    "rollback": {
+      "brain": "releases/stale-index-0906 — proven runnable on schema 26 by the live process itself",
+      "consumer": "releases/refusal-mixture-0906",
+      "nature": "CODE-ONLY; schema remains 26"
     }
   }
 }
