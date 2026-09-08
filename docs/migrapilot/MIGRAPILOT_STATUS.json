@@ -2357,6 +2357,16 @@
       "whyItMatters": "This is the same shape as every other false-green in this record: a check that exists, appears to pass, and is not actually connected to the thing it claims to guard. Reading the number from a direct run rather than from the gate is what made the claim wrong.",
       "caughtBy": "test/suiteCoverage.test.ts, which compares what exists in source against what the runner will load. The repo already knew this mistake was possible before it was made.",
       "rule": "Report counts only from the suite command. Never from a targeted invocation."
+    },
+    "fixturesCanPassForTheWrongReason": {
+      "_authority": "Bonex, 2026-09-08: these are evidence-quality failures, not implementation mistakes.",
+      "lesson": "A fixture that passes does not show the factor under test is doing anything. Isolate it: hold every other component equal and give the factor the disadvantage, so only it can move the outcome.",
+      "instances": [
+        "Dedup reordered results when rank and array position disagreed \u2014 real providers return in rank order, so it would have hidden until one did not.",
+        "The `web` catalog row had no handler: unclickable while unavailable, a dead control the moment a provider is configured.",
+        "A readiness test asserted a set of four literals it declared itself \u2014 worthless against any implementation.",
+        "Ranking fixtures for directness and syndication passed while those factors were disabled entirely."
+      ]
     }
   },
   "capabilityHubMilestone": {
@@ -2396,9 +2406,9 @@
   },
   "migraSearchProgress": {
     "_authority": "Bonex work order chunk 2, 2026-09-08. SearXNG is the first retrieval backend, never the product contract.",
-    "status": "READY FOR PROVIDER INTEGRATION \u2014 substrate complete enough to drop a provider in; nothing deployed",
+    "status": "RANKING GREEN \u2014 ready for infrastructure, then real provider integration",
     "suiteGate": {
-      "brain": "2602/2602",
+      "brain": "2621/2621",
       "consumer": "1111/1111"
     },
     "completed": {
@@ -2408,16 +2418,12 @@
       "readiness": "The registry gained an optional cheap synchronous readiness probe and an engine-owned unavailableReason. A missing GRANT deliberately gets no user-facing reason \u2014 'you lack terminal.exec' is scaffolding. Four failure states held apart: not_configured, provider_unavailable, provider_timeout, no_results. Only the last is a claim about the world.",
       "registration": "migra.search registered with the web.search grant HELD and no provider. Reports 'Web search is not set up yet.' Omitting it until a backend exists would teach people the product cannot search \u2014 a worse untruth than saying it is not set up.",
       "composer": "One catalog entry, four lines, naming a capability id. No composer change was needed, as the hub slice predicted. The composer does not know which backend answers a search, whether it is healthy, or that none exists.",
-      "planner": "Deterministic routing with reason codes. Default is NOT to search: being wrong that way costs freshness, being wrong the other way costs quota and an answer contaminated by a page the user never chose \u2014 and only the second is hard to notice. Attachments beat topical signals, because 'the LATEST figure in this spreadsheet' carries the strongest positive signal and is not a web question. An explicit request beats attachments. 5 mutations, all caught."
-    },
-    "notDone": {
-      "ranking": "P0. Migra-owned reranking above provider order is NOT built. Provider order is currently the only ordering, which the work order explicitly names as insufficient.",
-      "cacheContract": "P1, not built.",
-      "observability": "P1, not built.",
-      "benchmarkHarness": "P1, not built."
+      "planner": "Deterministic routing with reason codes. Default is NOT to search: being wrong that way costs freshness, being wrong the other way costs quota and an answer contaminated by a page the user never chose \u2014 and only the second is hard to notice. Attachments beat topical signals, because 'the LATEST figure in this spreadsheet' carries the strongest positive signal and is not a web question. An explicit request beats attachments. 5 mutations, all caught.",
+      "ranking": "Migra-owned reranking above provider order. No favourite-domain list: directness is DERIVED from the query, so an unknown vendor ranks correctly on the day they launch. Weights are chosen PER QUESTION \u2014 a fixed table let a 2019 page beat a week-old one on a query that said 'latest', because a table that cannot express 'the user asked for recency' makes provider rank the final authority wherever it matters. Every profile is asserted to sum to one. Extraction quality is a MULTIPLIER, not a weighted term: an unreadable page cannot support a citation, so its other virtues are irrelevant rather than outweighed."
     },
     "escapedMutations": [
-      "Hardcoding the provider reason in the UI ESCAPED the first time. Swapping Search's catalog source from `registry` to a `local` readiness carrying 'SearXNG is not running' passed the entire suite: the row rendered, showed an excuse, and the excuse was written by the browser about a backend it must not know exists. Two guards added \u2014 the row must be registry-backed, and no consumer source may name a search backend."
+      "UI hardcoding the provider reason. Swapping Search's catalog source from `registry` to a `local` readiness carrying 'SearXNG is not running' passed the entire suite. The authority boundary could be INVERTED while every user-visible test stayed green. Guards are permanent, per Bonex.",
+      "Ranking: removing DIRECTNESS and removing the SYNDICATION PENALTY both left all sixteen ranking tests green. The fixtures were passing for the wrong reasons \u2014 the docs case carried by intent-path matching, the syndication case by the original happening to hold the best provider rank. Isolating fixtures added that hold every other component equal and give the factor under test the worse provider rank, so it must overturn something. Both now fail."
     ],
     "defectsFoundInOwnWork": [
       "Dedup moved a group to its later member's position when rank and array position disagreed \u2014 a reorder from a stage whose contract is that it only removes. Real providers return in rank order so it would have hidden until one did not.",
@@ -2429,6 +2435,14 @@
       "grant": "docs/migrapilot/hook-patch-search-core.md \u2014 PREPARED, NOT APPLIED.",
       "consequence": "No provider can be integrated until both are done. Everything above is provider-shaped and waiting."
     },
-    "productionState": "UNCHANGED \u2014 chat-platform-rc-0908. Nothing in this chunk is staged or deployed."
+    "productionState": "UNCHANGED \u2014 chat-platform-rc-0908. Nothing in this chunk is staged or deployed.",
+    "notDone": {
+      "cacheContract": "P1, not built. Deferred by Bonex until real provider behaviour exists.",
+      "observability": "P1, not built. Same reason.",
+      "benchmarkHarness": "P1, not built. Same reason."
+    },
+    "knownHeuristicLimits": [
+      "Originality treats the best-ranked member of a near-identical group as the original, because provider rank is the only signal available without another fetch. If the true original is ranked third, this picks the wrong one. Resolving it needs canonical-link inspection at fetch time."
+    ]
   }
 }
