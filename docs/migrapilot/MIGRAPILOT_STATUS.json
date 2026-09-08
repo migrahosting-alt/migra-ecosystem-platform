@@ -2406,9 +2406,9 @@
   },
   "migraSearchProgress": {
     "_authority": "Bonex work order chunk 2, 2026-09-08. SearXNG is the first retrieval backend, never the product contract.",
-    "status": "RANKING GREEN \u2014 ready for infrastructure, then real provider integration",
+    "status": "READY FOR PROVIDER INTEGRATION \u2014 every code path built and mutation-tested; waiting on hardware",
     "suiteGate": {
-      "brain": "2621/2621",
+      "brain": "2642/2642",
       "consumer": "1111/1111"
     },
     "completed": {
@@ -2420,7 +2420,8 @@
       "composer": "One catalog entry, four lines, naming a capability id. No composer change was needed, as the hub slice predicted. The composer does not know which backend answers a search, whether it is healthy, or that none exists.",
       "planner": "Deterministic routing with reason codes. Default is NOT to search: being wrong that way costs freshness, being wrong the other way costs quota and an answer contaminated by a page the user never chose \u2014 and only the second is hard to notice. Attachments beat topical signals, because 'the LATEST figure in this spreadsheet' carries the strongest positive signal and is not a web question. An explicit request beats attachments. 5 mutations, all caught.",
       "ranking": "Migra-owned reranking above provider order. No favourite-domain list: directness is DERIVED from the query, so an unknown vendor ranks correctly on the day they launch. Weights are chosen PER QUESTION \u2014 a fixed table let a 2019 page beat a week-old one on a query that said 'latest', because a table that cannot express 'the user asked for recency' makes provider rank the final authority wherever it matters. Every profile is asserted to sum to one. Extraction quality is a MULTIPLIER, not a weighted term: an unreadable page cannot support a citation, so its other virtues are irrelevant rather than outweighed.",
-      "canonicalOriginality": "Canonical-link evidence resolves the recorded provider-rank guess: a third-ranked original now outranks a first-ranked syndication when copies name it. A cross-domain canonical is accepted ONLY as SELF-DEMOTION, never as a claim over another page \u2014 otherwise any site could declare itself canonical for a competitor's article and inherit its standing. Provider-rank fallback retained and now says 'by provider rank' in its reason so a trace shows which basis was used."
+      "canonicalOriginality": "Canonical-link evidence resolves the recorded provider-rank guess: a third-ranked original now outranks a first-ranked syndication when copies name it. A cross-domain canonical is accepted ONLY as SELF-DEMOTION, never as a claim over another page \u2014 otherwise any site could declare itself canonical for a competitor's article and inherit its standing. Provider-rank fallback retained and now says 'by provider rank' in its reason so a trace shows which basis was used.",
+      "searxngAdapter": "The only file that knows SearXNG exists \u2014 its parameters, JSON, engine names, error strings and host all stop there. Written and mutation-tested against recorded payloads with NO backend, which is also the state it must keep working in when the backend is down. No exception becomes 'nothing found': a 429 is unavailability (SearXNG returns it when upstreams rate-limit), and a 200 with an unrecognised shape is a broken backend. Only an empty results array yields no_results. providerRank is the row position, not SearXNG's score, whose scale is not stable across queries or versions."
     },
     "escapedMutations": [
       "UI hardcoding the provider reason. Swapping Search's catalog source from `registry` to a `local` readiness carrying 'SearXNG is not running' passed the entire suite. The authority boundary could be INVERTED while every user-visible test stayed green. Guards are permanent, per Bonex.",
@@ -2469,6 +2470,26 @@
       "Defer. The architecture already handles this honestly \u2014 migra.search stays registered-but-unavailable with 'Web search is not set up yet.' Nothing is broken by waiting."
     ],
     "phasesBlocked": "1 through 7, and 9 through 13. All depend on the host existing.",
-    "phaseCompletedAnyway": "Phase 8 (canonical-link originality) needed no provider and is done."
+    "phaseCompletedAnyway": "Phase 8 (canonical-link originality) needed no provider and is done.",
+    "decision": {
+      "_authority": "Bonex, 2026-09-08.",
+      "chosen": "OPTION 2 \u2014 provision a SECOND Proxmox node for shared platform services.",
+      "target": "128 GB RAM minimum, with CPU and NVMe headroom, so Search + Maps + later platform services do not immediately recreate the same ceiling.",
+      "hostsWhat": "migra-search-core first, then migra-local-core, then other shared non-customer-facing platform services.",
+      "currentNode": "Keep as-is until a deliberate rebalance. Recorded separately as an operational capacity risk.",
+      "rejectedAndWhy": {
+        "addRamToExistingNode": "Helps, but leaves one failure domain and customer workloads competing with platform services.",
+        "lxcInsteadOfVm": "The dedicated VM was chosen for isolation and a clean service boundary. Switching to LXC because the host is saturated solves the symptom by weakening the architecture.",
+        "shrinkAGuest": "Not without a workload-by-workload capacity study. RSS evidence shows real consumption."
+      },
+      "blockedOn": "PROCUREMENT. Provisioning a second physical node means ordering hardware, which the agent cannot do. This is Bonex's purchase decision."
+    },
+    "ballooningInvestigated": {
+      "_note": "Checked as a possible way to avoid buying hardware. It does NOT hold, and the check is recorded so nobody re-derives it.",
+      "whatLookedPromising": "Guest `free -m` reported ~27 GB 'available' across six VMs, which looked like reclaimable slack.",
+      "whyItIsNot": "The balloon device reports the guests' real free memory: app-core 556MB free of 16004, migrapilot-app-core 316MB of 5925, migrapanel-core 328MB of 7941. The 'available' figure is almost entirely PAGE CACHE. Reclaiming it via ballooning would force guests to drop their caches, trading host memory for guest I/O.",
+      "worseStill": "MigraPanel-Core reports mem_swapped_out=3.3GB \u2014 that guest is already swapping INTERNALLY, so it is memory-pressured, not idle.",
+      "separateFinding": "`balloon` is UNSET on every guest except one. Worth configuring on its own merits for elasticity, but it is not a way to fit a search VM on this node."
+    }
   }
 }
