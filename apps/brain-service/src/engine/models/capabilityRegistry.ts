@@ -16,7 +16,10 @@
  * `terminal.exec` ships registered-but-unavailable until its grant is enabled.
  */
 
+import { z } from 'zod';
 import type { ZodType } from 'zod';
+
+import { migraSearch } from '../search/migraSearch.js';
 import {
   WorkspaceSearchRequestSchema,
   FileReadRangeRequestSchema,
@@ -60,7 +63,9 @@ export type CapabilityCategory =
   | 'edit'
   | 'terminal'
   | 'deployment'
-  | 'mcp';
+  | 'mcp'
+  /** Capabilities the engine executes against the outside world. */
+  | 'web';
 
 /** Client-facing capability metadata — safe to serialize; no implementation. */
 export interface CapabilityDescriptor {
@@ -79,6 +84,17 @@ export interface CapabilityDescriptor {
   outputSchemaVersion: number;
   /** Engine's decision: is this capability executable right now? */
   available: boolean;
+  /**
+   * Why not, in words the ENGINE owns and a person could read.
+   *
+   * Present only when `available` is false. It exists because "not registered"
+   * and "registered but cannot run" are different facts that a client must be
+   * able to show differently — and because a client that wrote its own excuse
+   * would be guessing at a state only the engine can see. It must never name a
+   * backend, host or version: infrastructure describing itself to a user is a
+   * defect this codebase has already shipped once.
+   */
+  unavailableReason?: string;
 }
 
 /** Per-call execution context threaded from the tool boundary (Slice 2): lets a
@@ -90,17 +106,51 @@ export interface ToolHandlerContext {
 type Handler = (input: unknown, ctx?: ToolHandlerContext) => Promise<unknown>;
 
 interface RunnableCapability {
-  descriptor: Omit<CapabilityDescriptor, 'available'>;
+  descriptor: Omit<CapabilityDescriptor, 'available' | 'unavailableReason'>;
   inputSchema: ZodType;
   handler: Handler;
   /** For mutating capabilities that support dry-run: how to produce a preview. */
   preview?: Handler;
+  /**
+   * Optional dynamic readiness, ON TOP OF the grant check.
+   *
+   * Grants are static: a capability either has its tokens or it does not. Some
+   * capabilities also depend on something that changes — a provider that is
+   * configured or not, reachable or not. Those cannot be answered by the grant
+   * set, and answering them by attempting the operation would make rendering a
+   * menu cost a real request.
+   *
+   * MUST be synchronous and cheap. `list()` is called to draw a UI; a probe
+   * that reached the network here would put an outbound call on every render.
+   * The provider layer keeps its own cached health and reports it from memory.
+   */
+  readiness?: () => { ready: boolean; reason?: string };
 }
 
 /** Grants held by the local engine deployment. The read/write/git grants make the
  * bounded workspace tools available; `terminal.exec` / `deployment.*` are intentionally
  * NOT granted, so those future capabilities register as unavailable. */
-export const LOCAL_GRANTS: ReadonlySet<string> = new Set(['workspace.read', 'workspace.write', 'git.read']);
+export const LOCAL_GRANTS: ReadonlySet<string> = new Set([
+  'workspace.read',
+  'workspace.write',
+  'git.read',
+  /*
+   * Read-only web search is granted. Whether it can actually RUN is a separate
+   * question answered by provider readiness — which is the distinction the
+   * `readiness` probe exists for. Withholding the grant instead would make
+   * "nobody has set up a backend" indistinguishable from "this deployment is
+   * not allowed to search", and those call for different actions.
+   */
+  'web.search',
+]);
+
+/** Input for `migra.search`. Deliberately small: a query and how fresh it must be. */
+export const WebSearchRequestSchema = z.object({
+  query: z.string().min(1).max(500),
+  freshness: z.enum(['any', 'recent', 'latest']).optional(),
+  limit: z.number().int().min(1).max(20).optional(),
+});
+
 
 const changesetFs = nodeChangesetFs();
 // One proposal store shared by propose (writes) + apply (consumes by hash).
@@ -307,6 +357,45 @@ const TOOLS: RunnableCapability[] = [
       throw new Error('terminal.exec is not enabled');
     },
   },
+  {
+    /*
+     * MIGRA SEARCH — registered now, available only when a provider exists.
+     *
+     * 🚨 THIS IS THE STATE DISTINCTION THE REGISTRY WAS EXTENDED FOR.
+     *
+     * `terminal.exec` above is unavailable because a GRANT is withheld: a
+     * static deployment fact. Search is different — the grant is held, and
+     * whether it can run depends on something that changes underneath. That
+     * cannot be answered from the grant set, and answering it by attempting a
+     * search would make drawing a menu cost a real query.
+     *
+     * So availability comes from `migraSearch.readiness()`, which reads a
+     * cached snapshot, and the REASON travels with it. Today there is no
+     * provider, so this is registered, visible, and honestly unusable:
+     *
+     *   "Web search is not set up yet."
+     *
+     * The alternative — omitting the capability until a backend exists — would
+     * teach people the product cannot search, which is a different and worse
+     * untruth than saying it is not set up.
+     *
+     * The handler refuses rather than pretending. Dispatch is already gated on
+     * availability, so this is defence in depth, not the primary check.
+     */
+    descriptor: meta(
+      'migra.search',
+      'Search the web',
+      'Find current information on the web and read the sources.',
+      'web',
+      ['web.search'],
+      { readOnly: true },
+    ),
+    inputSchema: WebSearchRequestSchema,
+    readiness: () => migraSearch.readiness(),
+    handler: async () => {
+      throw new Error('migra.search has no provider configured');
+    },
+  },
 ];
 
 export function meta(
@@ -395,11 +484,24 @@ export class CapabilityRegistry {
   }
 
   private available(cap: RunnableCapability): boolean {
-    return cap.descriptor.requiredCapabilities.every((c) => this.grants.has(c));
+    if (!cap.descriptor.requiredCapabilities.every((c) => this.grants.has(c))) return false;
+    // Grants first, then dynamic readiness. A capability whose grant is missing
+    // is unavailable regardless of what a provider says, so the cheaper and
+    // more fundamental check runs first.
+    return cap.readiness ? cap.readiness().ready === true : true;
   }
 
   private describe(cap: RunnableCapability): CapabilityDescriptor {
-    return { ...cap.descriptor, available: this.available(cap) };
+    const available = this.available(cap);
+    if (available) return { ...cap.descriptor, available };
+    /*
+     * The reason comes from the readiness probe when it has one. A missing
+     * GRANT gets no reason on purpose: grants are an internal deployment fact,
+     * and "you lack workspace.write" is scaffolding, not something a person
+     * can act on.
+     */
+    const reason = cap.readiness?.().reason;
+    return { ...cap.descriptor, available, ...(reason ? { unavailableReason: reason } : {}) };
   }
 
   list(filter: CapabilityFilter = {}): CapabilityDescriptor[] {
