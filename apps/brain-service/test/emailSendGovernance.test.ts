@@ -52,12 +52,12 @@ function harness(over: {
   const deps: SendDeps = {
     provider: {
       id: 'test',
-      send: async (d): Promise<EmailOutcome<{ providerMessageId: string }>> => {
+      send: async (d: EmailDraft): Promise<EmailOutcome<{ providerMessageId: string }>> => {
         sends.push(d);
         return { ok: true, value: { providerMessageId: 'msg_1' }, provider: 'test', tookMs: 1 };
       },
       ...over.provider,
-    } as EmailProvider,
+    } as unknown as EmailProvider,
     currentConnection: async () => over.conn ?? connection(),
     approvalFor: async (fp) => {
       if (over.approval === null || over.approval === undefined) return null;
@@ -340,11 +340,11 @@ test('🚨 a LENIENT approval lookup is still refused when the message changed',
   const deps: SendDeps = {
     provider: {
       id: 'test',
-      send: async (d) => {
+      send: async (d: EmailDraft) => {
         sends.push(d);
         return { ok: true, value: { providerMessageId: 'msg_1' }, provider: 'test', tookMs: 1 };
       },
-    } as EmailProvider,
+    } as unknown as EmailProvider,
     currentConnection: async () => connection(),
     /*
      * Returns the approval regardless of fingerprint — modelling a store keyed
@@ -376,11 +376,11 @@ test('a lenient lookup with an UNCHANGED message still sends', async () => {
   const deps: SendDeps = {
     provider: {
       id: 'test',
-      send: async (d) => {
+      send: async (d: EmailDraft) => {
         sends.push(d);
         return { ok: true, value: { providerMessageId: 'msg_1' }, provider: 'test', tookMs: 1 };
       },
-    } as EmailProvider,
+    } as unknown as EmailProvider,
     currentConnection: async () => connection(),
     approvalFor: async () => ({ state: 'approved', binding: bindingFor(ACCOUNT, draft()) }),
     loadRecord: async () => null,
