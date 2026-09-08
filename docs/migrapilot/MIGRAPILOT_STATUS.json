@@ -1,7 +1,7 @@
 {
   "$schema": "MIGRAPILOT_STATUS — canonical cross-agent state. Update on every material change.",
   "updated": "2026-09-08",
-  "updatedBy": "Claude (Opus 5) under Bonex governance — pre-cutover freeze",
+  "updatedBy": "Claude (Opus 5) under Bonex governance — post-cutover",
   "rules": {
     "easyFirst": "Do not start deep capability work while meaningful easy user-facing items remain.",
     "provenLive": "PROVEN_LIVE requires the real user-facing workflow to pass. Code existing and tests passing is NOT proof.",
@@ -1971,18 +1971,33 @@
     }
   },
   "productionState": {
-    "_authority": "Bonex, 2026-09-07. Recorded because the database CHANGED even though nothing was cut over.",
-    "state": "🚨 SCHEMA PRE-MIGRATED TO 26; APPLICATION CUTOVER PENDING",
-    "plainly": "Production database migrated to schema 26; old application code still serving; application cutover not yet performed.",
-    "detail": {
-      "productionBrainCode": "releases/stale-index-0906 (schema-24-era), uptime unbroken — never restarted",
-      "productionConsumer": "refusal-mixture-0906 / commit d5459a9e — unchanged",
-      "productionSchema": "26 — M25 conversation_project and M26 tool_idempotency APPLIED",
-      "howItHappened": "The Brain deploy script's boot test runs against the REAL environment, so startup migrations reached the production database. That is documented behaviour and the reason the script demands MIGRAPILOT_ALLOW_MIGRATIONS=1; it was explicitly authorized.",
-      "userFacingChange": "None. Both migrations are additive tables the old code never references.",
-      "rollbackSemantics": "🚨 CODE-ONLY from here. Reverting to stale-index-0906 restores code, not schema. Nothing currently requires it to."
+    "_authority": "Bonex-governed cutover executed 2026-09-08.",
+    "state": "PRODUCTION DEPLOYED — READY FOR LIVE USER RETEST",
+    "plainly": "Both Brain and Consumer are serving chat-platform-rc-0907b at commit 5c8881a1. Deployed and proven running; NOT user-accepted.",
+    "liveCommitPrecision": "The live commit is the CUTOVER HEAD 5c8881a1, not the earlier rehearsal/qualification commit 94c6c20c. The Brain buildId is identical across both because it digests dist/ only, so the cutover run OWN staging-parity and boot-test evidence is part of this release identity proof — not the buildId alone.",
+    "brain": {
+      "release": "chat-platform-rc-0907b",
+      "commit": "5c8881a174dfa56fb904e7b648d8a0ce13bf4b7a",
+      "buildId": "sha256:90fd92a97e630bbe53a3d9c720c48a45998fb252",
+      "pid": 377613,
+      "restarts": 0,
+      "health": "status=ok persistence=ready rag=ready schema=26 migrationState=current",
+      "workspaceParity": "5/5 staged bytes match build; rollback bytes unchanged",
+      "migrationActivity": "NONE — built 26 against production 26"
     },
-    "notToBeCalled": "Do NOT describe production as 'unchanged'. The database changed."
+    "consumer": {
+      "release": "chat-platform-rc-0907b",
+      "commit": "5c8881a174dfa56fb904e7b648d8a0ce13bf4b7a",
+      "buildId": "CuZ2K1-OZLMfp5gi2wxuy",
+      "identityAgreement": "public edge and internal 10.10.0.13:3000 report IDENTICAL identity",
+      "workspaceParity": "2/2 staged bytes match build; rollback bytes unchanged"
+    },
+    "rollback": {
+      "brain": "releases/stale-index-0906 (present, complete, servable)",
+      "consumer": "releases/refusal-mixture-0906",
+      "nature": "CODE-ONLY; schema remains 26"
+    },
+    "buildIdNonDeterminismObserved": "Three consumer builds of the same release produced ILw_YGfCaw10U3fRcAi4Q, z3Xkf4jduHFJlR-zk5fWe and CuZ2K1-OZLMfp5gi2wxuy. Confirms Next BUILD_ID is a run identity."
   },
   "frozenAcceptancePair": {
     "_authority": "Bonex, 2026-09-07. FROZEN. No consumer changes before the user walk unless the walk exposes a real defect.",
@@ -2227,6 +2242,32 @@
       "brain": "releases/stale-index-0906 — proven runnable on schema 26 by the live process itself",
       "consumer": "releases/refusal-mixture-0906",
       "nature": "CODE-ONLY; schema remains 26"
+    }
+  },
+  "postCutoverSurfaceSmoke": {
+    "_scope": "SURFACE SMOKE ONLY — supports READY FOR LIVE USER RETEST. It is NOT user acceptance.",
+    "target": "https://chat.migrateck.com (public edge), isolated browser profile, signed out",
+    "rule4": {
+      "verdict": "PASS",
+      "how": "/_next/static/CuZ2K1-OZLMfp5gi2wxuy/_buildManifest.js returns 200 while the previous production id X8fJP-3lZN87oZ6Natk6v and the rehearsal id ILw_YGfCaw10U3fRcAi4Q both return 404. The browser cannot be executing a build whose manifest is no longer served.",
+      "correction": "The first assertion — that loaded asset URLs contain the buildId — FAILED and was MY error: the App Router serves runtime chunks under /_next/static/chunks/ with content hashes, not under the buildId. The corrected check is stronger."
+    },
+    "observed": {
+      "pageLoads": "HTTP 200",
+      "composer": "textarea present and enabled",
+      "send": "present, correctly disabled with an empty composer",
+      "attachment": "present — aria-label \"Add a photo or a file\", two file inputs",
+      "microphone": "present and TRUTHFUL — aria-label \"Dictate (unavailable: Sign in to use voice input.)\", disabled, reason stated",
+      "modelSelector": "present and correct — \"Model: Automatic. Choose a Migra model.\"",
+      "coldStartAtRest": "no [data-testid=turn-progress] and 0 assistant messages on a fresh load",
+      "renameWithdrawn": "PATCH /api/conversations/:id returns 410 rename_requires_approval",
+      "pageErrors": "none",
+      "fourOhOnes": "/api/files and /api/images return 401 while signed out — correct fail-closed refusal, not a regression"
+    },
+    "notObserved": {
+      "connectProject": "NOT observed on screen. It renders in the ChatPage rail, routed only at /chat/[id]; New Chat stays on / until a first message is sent, and sending a production turn to prove a rail renders is a bad trade. Verified in the shipped code path only.",
+      "coldStartTransientBehaviour": "NOT observed live. Proving it needs a real turn on a cold model under production load — that is live retest.",
+      "falseFailuresCorrected": "The smoke initially reported microphone, model selector and Connect project as MISSING. All three were selector errors on my side, not regressions; the DOM was then enumerated rather than guessed at."
     }
   }
 }
