@@ -1,7 +1,7 @@
 {
   "$schema": "MIGRAPILOT_STATUS \u2014 canonical cross-agent state. Update on every material change.",
   "updated": "2026-09-08",
-  "updatedBy": "Claude (Opus 5) \u2014 overnight production fix cycle",
+  "updatedBy": "Claude (Opus 5) \u2014 rc-0908 cutover",
   "rules": {
     "easyFirst": "Do not start deep capability work while meaningful easy user-facing items remain.",
     "provenLive": "PROVEN_LIVE requires the real user-facing workflow to pass. Code existing and tests passing is NOT proof.",
@@ -1971,33 +1971,53 @@
     }
   },
   "productionState": {
-    "_authority": "Bonex-governed cutover executed 2026-09-08.",
+    "_authority": "Bonex authorised the rc-0908 cutover, 2026-09-08, valid only at HEAD 0f494d27.",
     "state": "PRODUCTION DEPLOYED \u2014 READY FOR LIVE USER RETEST",
-    "plainly": "Both Brain and Consumer are serving chat-platform-rc-0907b at commit 5c8881a1. Deployed and proven running; NOT user-accepted.",
-    "liveCommitPrecision": "The live commit is the CUTOVER HEAD 5c8881a1, not the earlier rehearsal/qualification commit 94c6c20c. The Brain buildId is identical across both because it digests dist/ only, so the cutover run OWN staging-parity and boot-test evidence is part of this release identity proof \u2014 not the buildId alone.",
+    "plainly": "Both services serve chat-platform-rc-0908 at commit 0f494d27. Deployed and proven running; NOT user-accepted.",
     "brain": {
-      "release": "chat-platform-rc-0907b",
-      "commit": "5c8881a174dfa56fb904e7b648d8a0ce13bf4b7a",
-      "buildId": "sha256:90fd92a97e630bbe53a3d9c720c48a45998fb252",
-      "pid": 377613,
+      "release": "chat-platform-rc-0908",
+      "commit": "0f494d27111ce91c30cbbc7ce077c18fd90155c6",
+      "buildId": "sha256:d9d9c1e3a87044258dd45d05fd643216cc30cdfe",
+      "pid": "391859 (was 377613)",
       "restarts": 0,
-      "health": "status=ok persistence=ready rag=ready schema=26 migrationState=current",
+      "health": "status=ok persistence=ready rag=ready governance=ready inference=available schema=26 migrationState=current",
       "workspaceParity": "5/5 staged bytes match build; rollback bytes unchanged",
       "migrationActivity": "NONE \u2014 built 26 against production 26"
     },
     "consumer": {
-      "release": "chat-platform-rc-0907b",
-      "commit": "5c8881a174dfa56fb904e7b648d8a0ce13bf4b7a",
-      "buildId": "CuZ2K1-OZLMfp5gi2wxuy",
-      "identityAgreement": "public edge and internal 10.10.0.13:3000 report IDENTICAL identity",
+      "release": "chat-platform-rc-0908",
+      "commit": "0f494d27111ce91c30cbbc7ce077c18fd90155c6",
+      "buildId": "AV5gDWNOlGsz3wDMI-NIf",
+      "pid": "393605",
+      "restarts": 0,
+      "identityAgreement": "public edge and internal 10.10.0.13:3000 byte-identical",
       "workspaceParity": "2/2 staged bytes match build; rollback bytes unchanged"
     },
     "rollback": {
-      "brain": "releases/stale-index-0906 (present, complete, servable)",
-      "consumer": "releases/refusal-mixture-0906",
+      "brain": "releases/chat-platform-rc-0907b (verified servable after cutover)",
+      "consumer": "releases/chat-platform-rc-0907b",
       "nature": "CODE-ONLY; schema remains 26"
     },
-    "buildIdNonDeterminismObserved": "Three consumer builds of the same release produced ILw_YGfCaw10U3fRcAi4Q, z3Xkf4jduHFJlR-zk5fWe and CuZ2K1-OZLMfp5gi2wxuy. Confirms Next BUILD_ID is a run identity."
+    "boundedSmoke": {
+      "renameGoverned": "410 on BOTH tiers",
+      "migrationDrift": "none \u2014 schemaVersion 26",
+      "faultInjection": "0 vars in both running processes",
+      "degradation": "none",
+      "filesPage": "HTTP 200",
+      "ordinaryChat": "answered; exactly one progress surface; no page errors",
+      "controlsRender": "Dictate (truthfully disabled while signed out), Listen, model selector, paperclip",
+      "notRun": "XLSX sum \u2014 uploading a file needs an account and no session was available. Rests on the 1092-test suite and Bonex's retest."
+    },
+    "lanesAwaitingUserRetest": [
+      "Image turn after a pause \u2014 the Brain-authored loading sentence should be gone",
+      "Anonymous conversation project rail \u2014 should now offer a truthful sign-in state and action",
+      "Spreadsheet: 'List the four Revenue values from the spreadsheet, exactly as they appear.'",
+      "New Chat -> paperclip -> Your files \u2014 matrix_sales.xlsx selectable without re-uploading"
+    ],
+    "stillOpen": {
+      "imagesFromFilesLibrary": "OPEN \u2014 separate content-addressed storage authority; convergence was NOT faked.",
+      "webProjectCreation": "BLOCKED BY ARCHITECTURE \u2014 see p1WebProjectCreation. Next architecture discussion is the operator-governed project catalog in the control plane."
+    }
   },
   "frozenAcceptancePair": {
     "_authority": "Bonex, 2026-09-07. FROZEN. No consumer changes before the user walk unless the walk exposes a real defect.",
@@ -2318,5 +2338,17 @@
       "recommendation": "Introduce an operator-governed catalog of authorized project roots in the Migra control plane. Web users connect to what the catalog has granted them; the browser never names a path, and the Brain resolves the root from the catalog row. This fits the existing governance split, closes the caller-supplied-root hazard for every client at once, and does not require the Web app and the Brain to share a disk.",
       "currentUserState": "Truthful and unchanged: 'No projects are available to connect yet.' A dead end, but it asserts nothing false and does not send a Web user to VS Code."
     }
+  },
+  "evidenceQualityLesson": {
+    "_authority": "Bonex, 2026-09-08, asked that this be preserved as a standing lesson.",
+    "lesson": "A mutation test must prove the assertion is sensitive to the actual SEMANTIC CONDITION, not merely that it executes the path.",
+    "howItWasLearnedHere": [
+      "Three mutations escaped the new spreadsheet suite and the TESTS were at fault, not the code.",
+      "The leading-zero guard was vacuous: ZipCode parses as an identifier, so swapping raw text for the parsed value produced identical output and the mutant survived.",
+      "The truncation guard matched a DIRECTIVE line that happened to contain the same words as the FACT it meant to guard, so deleting the fact still passed.",
+      "Blank-cell handling was unasserted entirely.",
+      "Strengthening the third exposed a real fabrication in the newly written code: 'n/a' was printed as '(blank)', because kind==='blank' covers both an empty cell and a written non-value.",
+      "The live cold-start harness had the same disease: it DETECTED cold starts by the forbidden string and watched that string on the progress surface throughout without objecting. That is how a green harness coexisted with the production failure."
+    ]
   }
 }
