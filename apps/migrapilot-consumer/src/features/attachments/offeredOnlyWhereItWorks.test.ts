@@ -85,6 +85,7 @@ const src = (rel: string): string => {
   return raw.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1')
 }
 const composer = src('components/chat/Composer.tsx')
+const catalogSource = src('features/capabilities/catalog.ts')
 const hook = src('features/attachments/useDocumentAvailability.ts')
 
 test('🚨 EVERY ROW IS GATED — and gating is no longer something a row can forget', () => {
@@ -106,9 +107,14 @@ test('🚨 EVERY ROW IS GATED — and gating is no longer something a row can fo
    * structure that makes it inexpressible, which is a claim that survives the
    * next row rather than breaking on it.
    */
-  const catalog = readFileSync(join(process.cwd(), 'src/features/capabilities/catalog.ts'), 'utf8')
-  const entries = [...catalog.matchAll(/^\s{6}id: '([a-z-]+)'/gm)].map((m) => m[1])
-  const sources = [...catalog.matchAll(/source: \{ kind: '(local|registry)'/g)]
+  /*
+   * Read through `src()`, which strips comments first. Matching raw source
+   * would let a comment ABOUT a gate count as a gate — the prohibition-frame
+   * false positive this repository has already been bitten by, where text that
+   * forbids a thing contains the thing.
+   */
+  const entries = [...catalogSource.matchAll(/id: '([a-z-]+)'/g)].map((m) => m[1])
+  const sources = [...catalogSource.matchAll(/source: \{ kind: '(local|registry)'/g)]
 
   assert.ok(entries.length >= 3, `expected the three real surfaces, found ${entries.length}`)
   assert.equal(
@@ -122,7 +128,6 @@ test('🚨 EVERY ROW IS GATED — and gating is no longer something a row can fo
    * its own availability next to the resolver would be a second opinion about
    * the same fact, which is how the original defect happened.
    */
-  const composer = readFileSync(join(process.cwd(), 'src/components/chat/Composer.tsx'), 'utf8')
   const hub = composer.slice(composer.indexOf('const hubActions'), composer.indexOf('const active ='))
   assert.doesNotMatch(
     hub,
