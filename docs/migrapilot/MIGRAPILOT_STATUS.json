@@ -2419,7 +2419,8 @@
       "registration": "migra.search registered with the web.search grant HELD and no provider. Reports 'Web search is not set up yet.' Omitting it until a backend exists would teach people the product cannot search \u2014 a worse untruth than saying it is not set up.",
       "composer": "One catalog entry, four lines, naming a capability id. No composer change was needed, as the hub slice predicted. The composer does not know which backend answers a search, whether it is healthy, or that none exists.",
       "planner": "Deterministic routing with reason codes. Default is NOT to search: being wrong that way costs freshness, being wrong the other way costs quota and an answer contaminated by a page the user never chose \u2014 and only the second is hard to notice. Attachments beat topical signals, because 'the LATEST figure in this spreadsheet' carries the strongest positive signal and is not a web question. An explicit request beats attachments. 5 mutations, all caught.",
-      "ranking": "Migra-owned reranking above provider order. No favourite-domain list: directness is DERIVED from the query, so an unknown vendor ranks correctly on the day they launch. Weights are chosen PER QUESTION \u2014 a fixed table let a 2019 page beat a week-old one on a query that said 'latest', because a table that cannot express 'the user asked for recency' makes provider rank the final authority wherever it matters. Every profile is asserted to sum to one. Extraction quality is a MULTIPLIER, not a weighted term: an unreadable page cannot support a citation, so its other virtues are irrelevant rather than outweighed."
+      "ranking": "Migra-owned reranking above provider order. No favourite-domain list: directness is DERIVED from the query, so an unknown vendor ranks correctly on the day they launch. Weights are chosen PER QUESTION \u2014 a fixed table let a 2019 page beat a week-old one on a query that said 'latest', because a table that cannot express 'the user asked for recency' makes provider rank the final authority wherever it matters. Every profile is asserted to sum to one. Extraction quality is a MULTIPLIER, not a weighted term: an unreadable page cannot support a citation, so its other virtues are irrelevant rather than outweighed.",
+      "canonicalOriginality": "Canonical-link evidence resolves the recorded provider-rank guess: a third-ranked original now outranks a first-ranked syndication when copies name it. A cross-domain canonical is accepted ONLY as SELF-DEMOTION, never as a claim over another page \u2014 otherwise any site could declare itself canonical for a competitor's article and inherit its standing. Provider-rank fallback retained and now says 'by provider rank' in its reason so a trace shows which basis was used."
     },
     "escapedMutations": [
       "UI hardcoding the provider reason. Swapping Search's catalog source from `registry` to a `local` readiness carrying 'SearXNG is not running' passed the entire suite. The authority boundary could be INVERTED while every user-visible test stayed green. Guards are permanent, per Bonex.",
@@ -2442,7 +2443,32 @@
       "benchmarkHarness": "P1, not built. Same reason."
     },
     "knownHeuristicLimits": [
-      "Originality treats the best-ranked member of a near-identical group as the original, because provider rank is the only signal available without another fetch. If the true original is ranked third, this picks the wrong one. Resolving it needs canonical-link inspection at fetch time."
+      "Canonical evidence is only available AFTER a page is fetched. At ranking time, before fetching, originality still falls back to provider rank and says so."
     ]
+  },
+  "searchCoreCapacityBlocker": {
+    "_authority": "Measured on the Proxmox node, 2026-09-08, before creating anything. Bonex authorised VM creation IF legitimate Proxmox access existed; it does, and the host cannot take the VM.",
+    "verdict": "BLOCKED \u2014 migra-search-core NOT created. The node has no memory to give it.",
+    "proxmoxAccess": "Confirmed available: root on the node, qm and pvesh present. The blocker is CAPACITY, not authority.",
+    "measured": {
+      "node": "single node \u2014 pvesh get /nodes returns one entry, so there is no cluster member to place it on",
+      "hostMemory": "64,081 MB total / 61,834 used / 2,247 available",
+      "swap": "8,191 MB total / 7,570 used / 621 MB free",
+      "allocatedToGuests": "~81.5 GB (VMs 62.6 GB + LXC limits 18.9 GB) on a 64 GB host \u2014 27% oversubscribed",
+      "actualVmRss": "59,117 MB across 12 running VMs. Guests are USING their allocations; this is not idle over-allocation.",
+      "disk": "96 GB free \u2014 disk is NOT the constraint",
+      "cpu": "8 cores"
+    },
+    "whyNotProceed": "Adding a VM means taking memory from a running guest or pushing the host deeper into swap. Either risks the production services on this node \u2014 including the VM running the Brain and Consumer deployed 2026-09-08. That crosses the standing rule: never break production for acceptance work.",
+    "secondaryFinding": "INDEPENDENT OF SEARCH: this host is already precarious at 96% memory and 92% swap, with customer-facing services co-resident alongside production MigraPilot. Worth attention regardless of whether search ever ships here.",
+    "optionsForBonex": [
+      "Add RAM to the node. 64 -> 128 GB is the cleanest fix and also relieves the pre-existing pressure.",
+      "A second Proxmox node for platform services. Larger change; matches the 'search is a platform service' framing.",
+      "Reclaim from a guest \u2014 but RSS shows they are using what they hold, so this means genuinely shrinking a workload, not trimming slack.",
+      "An LXC instead of a VM. Far lower overhead (no guest kernel), SearXNG plausibly fits in ~512MB-1GB. Still needs memory this host does not comfortably have, and departs from the 'dedicated VM' instruction.",
+      "Defer. The architecture already handles this honestly \u2014 migra.search stays registered-but-unavailable with 'Web search is not set up yet.' Nothing is broken by waiting."
+    ],
+    "phasesBlocked": "1 through 7, and 9 through 13. All depend on the host existing.",
+    "phaseCompletedAnyway": "Phase 8 (canonical-link originality) needed no provider and is done."
   }
 }
