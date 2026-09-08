@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState, type ChangeEvent, type Clipbo
 import { FileText, Lock, Mic, SendHorizontal, Square, X } from 'lucide-react'
 import { AttachmentChips } from '@/features/attachments/AttachmentChips'
 import { useAttachments } from '@/features/attachments/useAttachments'
+import { FileLibraryPicker } from '@/features/attachments/FileLibraryPicker'
 import { useVisionAvailability, visionDisabledReason } from '@/features/attachments/useVisionAvailability'
 import { useDocumentAvailability, documentDisabledReason } from '@/features/attachments/useDocumentAvailability'
 import { ActionHub, type HubAction } from '@/components/chat/ActionHub'
@@ -162,6 +163,9 @@ export function Composer({
   const fileInputRef = useRef<HTMLInputElement>(null)
   const imageInputRef = useRef<HTMLInputElement>(null)
   const [images, setImages] = useState<{ id: string; name: string }[]>([])
+  /* The in-app library chooser. Distinct from the OS picker, which cannot see
+   * files that already live on the server. */
+  const [libraryOpen, setLibraryOpen] = useState(false)
   const [pendingImage, setPendingImage] = useState<{ name: string } | null>(null)
   const [imageError, setImageError] = useState<string | null>(null)
   /*
@@ -176,7 +180,7 @@ export function Composer({
   // `limits` is no longer read here: the picker offers the DOCUMENT category
   // rather than today's server allowlist, and the server stays authoritative for
   // what it will actually accept.
-  const { attachments, add, remove, retry, clear, busy } = useAttachments()
+  const { attachments, add, addFromLibrary, remove, retry, clear, busy } = useAttachments()
   /*
    * THE MIC IS GATED ON THE SHARED CAPABILITY, not on a local guess.
    *
@@ -588,6 +592,25 @@ export function Composer({
       ...(documentsReady ? {} : { unavailableReason: documentsReason }),
       onSelect: () => fileInputRef.current?.click(),
     },
+    {
+      /*
+       * 🚨 THE ROW THAT WAS MISSING. Both rows above open the OPERATING
+       * SYSTEM's picker, which cannot see a file that is already on the server.
+       * A user who had uploaded a spreadsheet had to find the original on disk
+       * and send the bytes again — so "upload once, reuse across
+       * conversations" was not true of the product.
+       *
+       * Gated on the same availability as documents: the library is the same
+       * storage, and offering a row that needs an account to a signed-out
+       * visitor is the dead control this menu already learned about once.
+       */
+      id: 'library',
+      label: 'Your files',
+      hint: 'Reuse something you have already uploaded, without sending it again.',
+      icon: 'file',
+      ...(documentsReady ? {} : { unavailableReason: documentsReason }),
+      onSelect: () => setLibraryOpen(true),
+    },
   ]
 
   const active = focused || highlighted
@@ -789,11 +812,24 @@ export function Composer({
             MigraPilot could read it — the capability shipped governed and
             qualified, and stayed invisible.
           */}
-          <ActionHub
-            disabled={disabled}
-            disabledReason={disabledReason}
-            actions={hubActions}
-          />
+          <span className="relative">
+            <ActionHub
+              disabled={disabled}
+              disabledReason={disabledReason}
+              actions={hubActions}
+            />
+            {/*
+              Anchored to the hub that opened it, so the list appears where the
+              user just clicked rather than over the message they are writing.
+            */}
+            {libraryOpen && (
+              <FileLibraryPicker
+                attachedNames={attachments.map((a) => a.name)}
+                onPick={addFromLibrary}
+                onClose={() => setLibraryOpen(false)}
+              />
+            )}
+          </span>
 
           {/*
             The model choice sits WITH the other composer controls, because it is

@@ -87,12 +87,29 @@ const src = (rel: string): string => {
 const composer = src('components/chat/Composer.tsx')
 const hook = src('features/attachments/useDocumentAvailability.ts')
 
-test('🚨 BOTH ROWS OF THE ACTION MENU ARE GATED, not just the one that was noticed', () => {
+test('🚨 EVERY ROW OF THE ACTION MENU IS GATED, not just the ones that were noticed', () => {
+  /*
+   * Counted against the number of ROWS rather than a fixed number.
+   *
+   * This asserted `gates.length === 2` and broke the moment a third row was
+   * added — reporting the new row as a failure while saying nothing about
+   * whether it was gated. The property was always "a menu is only as honest as
+   * its least-gated row", and a hardcoded count states that badly: it fails on
+   * a correctly-gated addition and would pass a fourth row that had no gate at
+   * all if someone removed a gate elsewhere to balance the total.
+   */
   const hub = composer.slice(composer.indexOf('const hubActions'), composer.indexOf('const active ='))
+  const rows = [...hub.matchAll(/^\s{6}id: '/gm)]
   const gates = [...hub.matchAll(/unavailableReason:/g)]
-  assert.equal(gates.length, 2, 'photos AND files — a menu is only as honest as its least-gated row')
+  assert.ok(rows.length >= 2, `expected at least the two original rows, found ${rows.length}`)
+  assert.equal(
+    gates.length,
+    rows.length,
+    `${rows.length} rows but ${gates.length} gates — an ungated row offers a control that cannot work`,
+  )
   assert.match(hub, /id: 'image'[\s\S]*?unavailableReason: visionReason/)
   assert.match(hub, /id: 'file'[\s\S]*?unavailableReason: documentsReason/)
+  assert.match(hub, /id: 'library'[\s\S]*?unavailableReason: documentsReason/)
 })
 
 test('the gate is a real probe of the real route, not a guess about sign-in state', () => {

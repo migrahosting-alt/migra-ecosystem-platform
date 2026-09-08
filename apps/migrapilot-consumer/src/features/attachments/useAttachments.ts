@@ -165,6 +165,45 @@ export function useAttachments() {
     window.setTimeout(() => void tick(), 5000)
   }, [patch])
 
+  /**
+   * Make an already-STORED file answerable, and settle the chip on the truth.
+   *
+   * Shared by both ways a file becomes an attachment — a fresh upload and a
+   * pick from the library — because the readiness rules must not fork. A
+   * library file that skipped this would show as ready while the Brain could
+   * not search it, which is the exact "uploaded is not answerable" confusion
+   * this hook exists to prevent.
+   *
+   * `POST /api/files/index` takes no body: it indexes the caller's library, so
+   * it is already the right call for a file that is merely being re-attached.
+   * No bytes are re-sent in either path.
+   */
+  const settle = useCallback(
+    async (id: string, storedName: string) => {
+      try {
+        const response = await fetch('/api/files/index', { method: 'POST' })
+        // The SERVER's stored name, not the picked one — they can differ.
+        const indexed = outcomeOfIndex(response.ok, await response.json(), storedName)
+        patch(id, {
+          state: indexed.state,
+          reason: 'reason' in indexed ? indexed.reason : undefined,
+        })
+        /*
+         * A background read resolves LATER, so the chip has to keep asking.
+         * Without this it would sit on "Reading this document…" forever — the
+         * same dead-end as the state it replaced, just a friendlier one.
+         */
+        if (indexed.state === 'processing') watch(id, storedName)
+      } catch {
+        patch(id, {
+          state: 'unsearchable',
+          reason: 'The file is stored, but indexing could not reach the server.',
+        })
+      }
+    },
+    [patch, watch],
+  )
+
   /** Upload one already-registered attachment, then index the library. */
   const send = useCallback(
     async (id: string, file: File) => {
@@ -235,29 +274,9 @@ export function useAttachments() {
         return
       }
       patch(id, { state: 'indexing', name: uploaded.name, bytes: uploaded.bytes })
-
-      try {
-        const response = await fetch('/api/files/index', { method: 'POST' })
-        // The SERVER's stored name, not the picked one — they can differ.
-        const indexed = outcomeOfIndex(response.ok, await response.json(), uploaded.name)
-        patch(id, {
-          state: indexed.state,
-          reason: 'reason' in indexed ? indexed.reason : undefined,
-        })
-        /*
-         * A background read resolves LATER, so the chip has to keep asking.
-         * Without this it would sit on "Reading this document…" forever — the
-         * same dead-end as the state it replaced, just a friendlier one.
-         */
-        if (indexed.state === 'processing') watch(id, uploaded.name)
-      } catch {
-        patch(id, {
-          state: 'unsearchable',
-          reason: 'The file is stored, but indexing could not reach the server.',
-        })
-      }
+      await settle(id, uploaded.name)
     },
-    [patch],
+    [patch, settle],
   )
 
   const add = useCallback(
@@ -295,6 +314,51 @@ export function useAttachments() {
       }
     },
     [limits, send],
+  )
+
+  /**
+   * ATTACH A FILE THAT IS ALREADY IN THE LIBRARY — without uploading it again.
+   *
+   * 🚨 THE GAP THIS CLOSES. The Files page persisted `matrix_sales.xlsx`
+   * correctly and the paperclip could not reach it: both rows opened the
+   * operating system's picker, so the only way to use a file already on the
+   * server was to find the original on disk and send the bytes a second time.
+   * "Upload once, reuse across conversations" was not true of the product.
+   *
+   * NO SECOND COPY. The file is addressed by the name the server already stores
+   * it under, in the caller's own directory; nothing is re-sent. It then goes
+   * through `settle` — the same readiness path an upload takes — so a library
+   * pick and a fresh upload produce the SAME attachment shape, and the chat
+   * dispatch below cannot tell them apart. That convergence is the point: a
+   * separate "library attachment" concept would be a second source of truth
+   * about what this turn is grounded in.
+   *
+   * Already-attached files are skipped rather than duplicated — attaching the
+   * same document twice grounds the turn in it twice and says nothing new.
+   */
+  const addFromLibrary = useCallback(
+    (picked: readonly { name: string; bytes: number }[]) => {
+      for (const file of picked) {
+        let already = false
+        setAttachments((current) => {
+          already = current.some((a) => a.name === file.name && a.state !== 'failed')
+          return already ? current : [...current, { id: '', name: file.name, bytes: file.bytes, state: 'indexing' }]
+        })
+        if (already) continue
+
+        /*
+         * The id is assigned here rather than inside the updater, because a
+         * state updater may run twice under StrictMode and would mint two ids
+         * for one file.
+         */
+        const id = nextId()
+        setAttachments((current) =>
+          current.map((a) => (a.id === '' && a.name === file.name ? { ...a, id } : a)),
+        )
+        void settle(id, file.name)
+      }
+    },
+    [settle],
   )
 
   const retry = useCallback(
@@ -369,5 +433,5 @@ export function useAttachments() {
   // composer treated an analysable file as nothing to ground on.
   const groundable = attachments.some((a) => a.state === 'ready' || a.state === 'structured')
 
-  return { attachments, limits, add, remove, retry, clear, busy, groundable }
+  return { attachments, limits, add, addFromLibrary, remove, retry, clear, busy, groundable }
 }
