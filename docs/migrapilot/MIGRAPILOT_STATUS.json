@@ -2349,7 +2349,15 @@
       "Blank-cell handling was unasserted entirely.",
       "Strengthening the third exposed a real fabrication in the newly written code: 'n/a' was printed as '(blank)', because kind==='blank' covers both an empty cell and a written non-value.",
       "The live cold-start harness had the same disease: it DETECTED cold starts by the forbidden string and watched that string on the progress surface throughout without objecting. That is how a green harness coexisted with the production failure."
-    ]
+    ],
+    "suiteInclusionIsTheAuthority": {
+      "_authority": "Bonex, 2026-09-08, asked that this be kept in the engineering record.",
+      "lesson": "A direct test invocation is not suite-inclusion evidence. The suite gate is the authority.",
+      "whatHappened": "17 search tests were written under src/engine/search/. The Brain's runner globs dist/test/**, so the suite never loaded them. They compiled and passed when invoked directly, and a commit message claimed 'Brain 2501/2501' when the real count was 2484 and those assertions were guarding nothing.",
+      "whyItMatters": "This is the same shape as every other false-green in this record: a check that exists, appears to pass, and is not actually connected to the thing it claims to guard. Reading the number from a direct run rather than from the gate is what made the claim wrong.",
+      "caughtBy": "test/suiteCoverage.test.ts, which compares what exists in source against what the runner will load. The repo already knew this mistake was possible before it was made.",
+      "rule": "Report counts only from the suite command. Never from a targeted invocation."
+    }
   },
   "capabilityHubMilestone": {
     "_authority": "Bonex, 2026-09-08. Supersedes Projects as the active milestone.",
@@ -2385,5 +2393,29 @@
       "Look at the latest GitHub issues for MigraPilot, tell me what is blocking the release, and create an implementation plan."
     ],
     "standing": "Study products like ChatGPT for expected capability coverage and UX lessons; the implementation and interaction model stay Migra-native, never a clone."
+  },
+  "migraSearchProgress": {
+    "_authority": "Bonex work order 2026-09-08. SearXNG is the first retrieval backend, never the product contract.",
+    "status": "IN PROGRESS \u2014 nothing deployed, no provider configured",
+    "done": [
+      "Contract (types.ts): SearchRequest/SearchResult/SearchProvider/ProviderHealth. Failure is an ENUMERATION \u2014 provider_unavailable, provider_timeout, no_results, not_configured, refused \u2014 because 'the provider was down' and 'there is nothing to find' are opposite claims and collapsing them is a lie the user cannot detect. health() is separate from search() so a readiness probe never costs a real query.",
+      "Canonicalisation + dedup (normalize.ts, 17 tests): prevents MANUFACTURED CORROBORATION \u2014 one syndicated story cited as five independent sources. Collapses only on evidence; two outlets covering one event stay two sources.",
+      "SSRF screening (fetchGuard.ts, 19 tests, 6 mutations): the tailnet range 100.64/10 is blocked alongside RFC1918, loopback and cloud metadata \u2014 on this fleet the tailnet is the bigger prize. IPv4-mapped IPv6 is resolved, or every IPv4 rule would be bypassable by respelling. Refusals never echo the blocked address, which would make every refusal a network-mapping oracle."
+    ],
+    "knownGap": "screenUrl decides on the URL. A HOSTNAME that resolves to a private address (DNS rebinding, or an attacker A record) cannot be caught before resolution. The fetcher must also check the resolved address before connecting and again on every redirect; isBlockedAddress exists for that caller. Recorded in the module header, not glossed.",
+    "blockedOnOwner": {
+      "host": "migra-search-core does not exist \u2014 no DNS, no SSH alias. Creating the VM is Proxmox work and is not covered by any grant.",
+      "grant": "docs/migrapilot/hook-patch-search-core.md holds the exact scoped rule Bonex specified. PREPARED, NOT APPLIED \u2014 the agent does not author or broaden its own authorization, matching every other exception in that file.",
+      "decision": "Dedicated host + container, Tailscale-only, no public admin surface. Boundary is MigraPilot/Brain -> Migra Search authority -> SearchProvider adapter -> SearXNG, never MigraPilot -> SearXNG."
+    },
+    "next": [
+      "page fetch + extraction",
+      "Migra-owned ranking",
+      "evidence/citation model",
+      "registry readiness so availability tracks provider health with an engine-owned reason",
+      "capability registration",
+      "catalog entry",
+      "search-intent planner"
+    ]
   }
 }
