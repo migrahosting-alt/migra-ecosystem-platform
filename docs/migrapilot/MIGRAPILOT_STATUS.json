@@ -2367,6 +2367,15 @@
         "A readiness test asserted a set of four literals it declared itself \u2014 worthless against any implementation.",
         "Ranking fixtures for directness and syndication passed while those factors were disabled entirely."
       ]
+    },
+    "emptyOutputIsNotEvidence": {
+      "_authority": "Bonex, 2026-09-08, asked that this be preserved permanently.",
+      "rule": "A suite gate only counts if the gate actually COMPLETED and PRINTED the result. Empty output is not evidence.",
+      "whatHappened": "A commit claimed 'Brain 2694/2694, from the suite gate' while `tsc -b` was failing, so the suite never ran. The verification grep matched nothing, and the number was stated anyway. This was the SECOND count-reporting failure in one session; the first read a count from a direct invocation the suite had never loaded.",
+      "whyTheFirstLessonWasInsufficient": "'The suite gate is the authority' is true and does not help if you do not read what it says. Silence was treated as success.",
+      "mechanicalFix": "docs/migrapilot/suite-gate.sh runs the suite and REFUSES to report unless a final count was printed, the counts reconcile (pass+fail+skipped == tests), no test failed, and the runner exited zero. Verified against a broken build and a failing test.",
+      "preCommitFinding": "\ud83d\udea8 The pre-commit hook's `npx tsc --noEmit || true` would NOT have caught this. Measured: with a deliberate type error in a brain-service test, the ROOT tsc reports 0 matches while the app's own `tsc -b` reports it. The hook typechecks a different project, so removing `|| true` is a real improvement in principle and would not have prevented this incident.",
+      "preCommitRecommendation": "Removing `|| true` is safe TODAY (root tsc is currently clean at 0 errors) but is a repo-wide policy change: a future unrelated app breaking would block every commit across the monorepo. Recorded as backlog rather than changed unilaterally, per Bonex's instruction. The protection that actually works for this failure is running suite-gate.sh before quoting a count."
     }
   },
   "capabilityHubMilestone": {
