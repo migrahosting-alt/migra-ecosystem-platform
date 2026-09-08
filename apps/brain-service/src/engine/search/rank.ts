@@ -123,7 +123,48 @@ export interface RankInput {
   intent?: 'official_source_lookup' | 'news_intent' | 'comparative_research' | 'general';
   /** Extraction quality per canonical URL, when pages have been fetched. */
   extractionQuality?: ReadonlyMap<string, number>;
+  /**
+   * `<link rel="canonical">` per fetched URL, when pages have been read.
+   *
+   * Available only AFTER fetching, which is why originality has a provider-rank
+   * fallback: at ranking time we may have nothing but the provider's order.
+   */
+  canonicalLinks?: ReadonlyMap<string, string>;
   now?: () => number;
+}
+
+/**
+ * Does a canonical link count as EVIDENCE that this page is a copy?
+ *
+ * 🚨 A CANONICAL TAG IS A CLAIM BY WHOEVER SERVED THE PAGE, NOT A FACT.
+ *
+ * Trusting it across unrelated domains is an attack: any site can declare
+ * itself canonical for a competitor's article and inherit its standing, or
+ * declare a rival a copy of itself. So a cross-domain canonical is accepted
+ * ONLY as self-demotion — a page saying "the original is elsewhere" is
+ * evidence against ITSELF, which nobody has an incentive to fake.
+ *
+ * A page declaring itself canonical tells us nothing, and a page pointing at
+ * another domain as a copy OF it is ignored entirely.
+ */
+function canonicalVerdict(
+  result: SearchResult,
+  canonicalLinks: ReadonlyMap<string, string> | undefined,
+): { kind: 'self' | 'points_elsewhere' | 'unknown'; target?: string } {
+  const declared = canonicalLinks?.get(result.canonicalUrl);
+  if (!declared) return { kind: 'unknown' };
+  let target: URL;
+  try {
+    target = new URL(declared, result.canonicalUrl);
+  } catch {
+    return { kind: 'unknown' };
+  }
+  const targetHost = target.hostname.replace(/^www\./, '').toLowerCase();
+  if (targetHost === result.domain.toLowerCase() && target.pathname === new URL(result.canonicalUrl).pathname) {
+    return { kind: 'self' };
+  }
+  // Self-demotion: this page says the original is somewhere else.
+  return { kind: 'points_elsewhere', target: target.toString() };
 }
 
 const meaningfulTerms = (text: string): string[] =>
@@ -221,15 +262,55 @@ function intentOf(input: RankInput, result: SearchResult): { score: number; reas
 function originalityOf(
   result: SearchResult,
   all: readonly SearchResult[],
+  canonicalLinks?: ReadonlyMap<string, string>,
 ): { score: number; reason: string } {
   const twins = all.filter((other) => other !== result && nearlyIdentical(other.snippet, result.snippet));
   if (twins.length === 0) return { score: 1, reason: 'no near-identical copies' };
 
+  /*
+   * CANONICAL EVIDENCE FIRST, when we have it.
+   *
+   * This resolves the limitation recorded when originality shipped: provider
+   * rank was the only signal, so a third-ranked original lost to a first-ranked
+   * syndication. A page that DECLARES the original is elsewhere has told us
+   * something provider rank cannot.
+   */
+  const verdict = canonicalVerdict(result, canonicalLinks);
+  if (verdict.kind === 'points_elsewhere') {
+    return { score: 0.15, reason: 'the page itself names a different canonical source' };
+  }
+
+  /*
+   * If any TWIN self-demotes toward this result, this is the original — and
+   * that is stronger than being first in the provider's list, because it is
+   * the copy's own admission.
+   */
+  const admittedBy = twins.filter((twin) => {
+    const twinVerdict = canonicalVerdict(twin, canonicalLinks);
+    if (twinVerdict.kind !== 'points_elsewhere' || !twinVerdict.target) return false;
+    try {
+      const target = new URL(twinVerdict.target);
+      const here = new URL(result.canonicalUrl);
+      return target.hostname.replace(/^www\./, '') === here.hostname.replace(/^www\./, '')
+        && target.pathname === here.pathname;
+    } catch {
+      return false;
+    }
+  });
+  if (admittedBy.length > 0) {
+    return { score: 1, reason: `${admittedBy.length} copy(ies) name this page as canonical` };
+  }
+
+  /*
+   * FALLBACK: provider rank, and it is explicitly a guess. Kept because at
+   * ranking time pages may not have been fetched at all, and a guess that
+   * usually holds beats no ordering.
+   */
   const bestRank = Math.min(...twins.map((t) => t.providerRank), result.providerRank);
   if (result.providerRank === bestRank) {
-    return { score: 0.9, reason: `likely the original of ${twins.length} near-identical copies` };
+    return { score: 0.9, reason: `likely the original of ${twins.length} near-identical copies (by provider rank)` };
   }
-  return { score: 0.2, reason: `appears to be a syndicated copy (${twins.length} near-identical)` };
+  return { score: 0.2, reason: `appears to be a syndicated copy (${twins.length} near-identical, by provider rank)` };
 }
 
 /**
@@ -277,7 +358,7 @@ export function rankResults(input: RankInput): RankedResult[] {
       { name: 'relevance', ...relevanceOf(input.query, result) },
       { name: 'intent', ...intentOf(input, result) },
       { name: 'directness', ...directnessOf(input.query, result) },
-      { name: 'originality', ...originalityOf(result, input.results) },
+      { name: 'originality', ...originalityOf(result, input.results, input.canonicalLinks) },
       { name: 'freshness', ...freshnessOf(input, result) },
     ];
 

@@ -406,3 +406,122 @@ test('🚨 a syndicated copy loses to an unrelated result it would otherwise bea
     `a syndicated copy outranked an independent source: ${ranked.join(' > ')}`,
   );
 });
+
+/* ------------------------------------------------------------------ *
+ * 🚨 CANONICAL EVIDENCE — resolving the recorded provider-rank guess
+ *
+ * Originality shipped with a limitation stated plainly: provider rank was the
+ * only signal, so a third-ranked original lost to a first-ranked syndication.
+ * Once pages are fetched, a copy that DECLARES the original elsewhere has told
+ * us something provider rank cannot.
+ * ------------------------------------------------------------------ */
+
+const BODY = 'The council approved the new transit plan after eighteen months of public consultation.';
+
+test('🚨 a THIRD-ranked original outranks a FIRST-ranked syndication on canonical evidence', () => {
+  /*
+   * The exact case the recorded limitation named. Without canonical links the
+   * first-ranked copy wins; with them, the copies name the original and the
+   * ordering inverts.
+   */
+  const results = [
+    result({ url: 'https://agg-one.com/story', title: 'Transit plan approved', snippet: BODY, providerRank: 0 }),
+    result({ url: 'https://agg-two.com/story', title: 'Transit plan approved', snippet: BODY, providerRank: 1 }),
+    result({ url: 'https://originalpaper.com/transit', title: 'Council approves transit plan', snippet: BODY, providerRank: 2 }),
+  ];
+
+  const withoutEvidence = order({ query: 'council transit plan', results, freshness: 'any' });
+  assert.equal(withoutEvidence[0], 'agg-one.com', 'the fallback should favour provider rank without evidence');
+
+  const canonicalLinks = new Map([
+    ['https://agg-one.com/story', 'https://originalpaper.com/transit'],
+    ['https://agg-two.com/story', 'https://originalpaper.com/transit'],
+  ]);
+  const withEvidence = order({ query: 'council transit plan', results, freshness: 'any', canonicalLinks });
+  assert.equal(
+    withEvidence[0],
+    'originalpaper.com',
+    `canonical evidence did not overturn provider rank: ${withEvidence.join(' > ')}`,
+  );
+});
+
+test('🚨 a cross-domain canonical is NOT trusted as a claim of ownership', () => {
+  /*
+   * The attack. Any site can declare itself canonical for a competitor's
+   * article and inherit its standing. A canonical pointing AT another domain is
+   * accepted only as SELF-DEMOTION — evidence against the page that served it,
+   * which nobody has an incentive to fake — and never as a claim over someone
+   * else's page.
+   *
+   * A FORWARD GUARD, labelled honestly: no current mutation breaks it, because
+   * the code never implements ownership claims in the first place. It exists to
+   * fail the day someone adds "if X claims canonical over Y, boost X", which is
+   * a tempting and entirely reasonable-looking change.
+   */
+  const results = [
+    result({ url: 'https://honest.com/article', title: 'Transit plan approved', snippet: BODY, providerRank: 0 }),
+    result({ url: 'https://thief.com/copy', title: 'Transit plan approved', snippet: BODY, providerRank: 1 }),
+  ];
+  // thief.com claims honest.com is a copy OF thief.com.
+  const canonicalLinks = new Map([['https://honest.com/article', 'https://honest.com/article']]);
+  const hostile = new Map([...canonicalLinks, ['https://thief.com/copy', 'https://thief.com/copy']]);
+
+  const ranked = rank({ query: 'council transit plan', results, freshness: 'any', canonicalLinks: hostile });
+
+  const honest = ranked.find((r) => r.result.domain === 'honest.com')!;
+  const thief = ranked.find((r) => r.result.domain === 'thief.com')!;
+  const honestOriginality = honest.components.find((c) => c.name === 'originality')!;
+  const thiefOriginality = thief.components.find((c) => c.name === 'originality')!;
+
+  // The victim is not demoted...
+  assert.ok(
+    honestOriginality.score >= 0.5,
+    `a self-declared canonical demoted an unrelated page: ${honestOriginality.reason}`,
+  );
+  // ...and the claimant gains nothing from declaring itself.
+  assert.ok(
+    thiefOriginality.score < honestOriginality.score,
+    `self-declaration bought standing: thief ${thiefOriginality.score} vs honest ${honestOriginality.score}`,
+  );
+  assert.match(
+    thiefOriginality.reason,
+    /provider rank/,
+    'a self-declaration was treated as evidence rather than falling back',
+  );
+  assert.equal(ranked[0]!.result.domain, 'honest.com');
+});
+
+test('a page declaring ITSELF canonical gains nothing', () => {
+  // It tells us nothing: every page can say it. Only self-demotion is evidence.
+  const results = [
+    result({ url: 'https://a.com/x', title: 'Transit plan', snippet: BODY, providerRank: 0 }),
+    result({ url: 'https://b.com/x', title: 'Transit plan', snippet: BODY, providerRank: 1 }),
+  ];
+  const selfDeclared = new Map([['https://b.com/x', 'https://b.com/x']]);
+  const ranked = rank({ query: 'council transit plan', results, freshness: 'any', canonicalLinks: selfDeclared });
+  const b = ranked.find((r) => r.result.domain === 'b.com')!;
+  const originality = b.components.find((c) => c.name === 'originality')!;
+  assert.match(originality.reason, /provider rank/, 'a self-declaration was treated as evidence');
+});
+
+test('the provider-rank fallback survives when no canonical evidence exists', () => {
+  // At ranking time pages may not have been fetched at all. A guess that
+  // usually holds beats no ordering.
+  const results = [
+    result({ url: 'https://first.com/x', title: 'Transit plan', snippet: BODY, providerRank: 0 }),
+    result({ url: 'https://second.com/x', title: 'Transit plan', snippet: BODY, providerRank: 1 }),
+  ];
+  const ranked = rank({ query: 'council transit plan', results, freshness: 'any' });
+  const originality = ranked[0]!.components.find((c) => c.name === 'originality')!;
+  assert.match(originality.reason, /by provider rank/, 'the fallback stopped saying it is a guess');
+});
+
+test('a malformed canonical link is ignored rather than trusted', () => {
+  const results = [
+    result({ url: 'https://a.com/x', title: 'Transit plan', snippet: BODY, providerRank: 0 }),
+    result({ url: 'https://b.com/x', title: 'Transit plan', snippet: BODY, providerRank: 1 }),
+  ];
+  const broken = new Map([['https://b.com/x', 'not a url at all']]);
+  const ranked = rank({ query: 'council transit plan', results, freshness: 'any', canonicalLinks: broken });
+  assert.equal(ranked.length, 2, 'a malformed canonical broke ranking');
+});
