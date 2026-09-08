@@ -18,7 +18,7 @@ import {
   identityOf,
   nearlyIdentical,
   resolveMirror,
-} from './normalize.js';
+} from '../src/engine/search/normalize.js';
 
 /* ------------------------------------------------------------------ *
  * Canonicalisation
