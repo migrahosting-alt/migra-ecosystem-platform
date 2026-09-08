@@ -6,6 +6,9 @@ import { FileText, Lock, Mic, SendHorizontal, Square, X } from 'lucide-react'
 import { AttachmentChips } from '@/features/attachments/AttachmentChips'
 import { useAttachments } from '@/features/attachments/useAttachments'
 import { FileLibraryPicker } from '@/features/attachments/FileLibraryPicker'
+import { buildCatalog, registryIdsIn } from '@/features/capabilities/catalog'
+import { resolveCapabilities } from '@/features/capabilities/resolveCapabilities'
+import { useRegistryCapabilities } from '@/features/capabilities/useRegistryCapabilities'
 import { useVisionAvailability, visionDisabledReason } from '@/features/attachments/useVisionAvailability'
 import { useDocumentAvailability, documentDisabledReason } from '@/features/attachments/useDocumentAvailability'
 import { ActionHub, type HubAction } from '@/components/chat/ActionHub'
@@ -568,50 +571,51 @@ export function Composer({
   const documentsReason = documentDisabledReason(documents)
   const documentsReady = documents?.ready === true
 
-  const hubActions: HubAction[] = [
-    {
-      id: 'image',
-      label: 'Photos & images',
-      hint: 'Ask about a photo, a screenshot, or a chart.',
-      icon: 'image',
-      ...(visionReady ? {} : { unavailableReason: visionReason }),
-      onSelect: () => imageInputRef.current?.click(),
-    },
-    {
-      id: 'file',
-      label: 'Files & documents',
-      hint: 'Attach a document, data file, or code for MigraPilot to read.',
-      icon: 'file',
-      /*
-       * 🚨 OFFERED ONLY WHERE IT WORKS. This row was live for signed-out
-       * visitors while every document operation behind it needs an account:
-       * picking a file produced a 401, a chip saying "Sign in to manage files",
-       * and a Retry that could never succeed. Its neighbour above was already
-       * gated — one row apart, one honest and one not.
-       */
-      ...(documentsReady ? {} : { unavailableReason: documentsReason }),
-      onSelect: () => fileInputRef.current?.click(),
-    },
-    {
-      /*
-       * 🚨 THE ROW THAT WAS MISSING. Both rows above open the OPERATING
-       * SYSTEM's picker, which cannot see a file that is already on the server.
-       * A user who had uploaded a spreadsheet had to find the original on disk
-       * and send the bytes again — so "upload once, reuse across
-       * conversations" was not true of the product.
-       *
-       * Gated on the same availability as documents: the library is the same
-       * storage, and offering a row that needs an account to a signed-out
-       * visitor is the dead control this menu already learned about once.
-       */
-      id: 'library',
-      label: 'Your files',
-      hint: 'Reuse something you have already uploaded, without sending it again.',
-      icon: 'file',
-      ...(documentsReady ? {} : { unavailableReason: documentsReason }),
-      onSelect: () => setLibraryOpen(true),
-    },
-  ]
+  /*
+   * THE HUB IS RESOLVED, NOT LISTED.
+   *
+   * These rows used to be a hardcoded array in which each entry decided its own
+   * availability inline. That shape produced two real defects here — a row live
+   * for signed-out visitors while everything behind it needed an account, and a
+   * paperclip that opened a picker for a chat that could not receive a file.
+   *
+   * Now the catalog DECLARES the rows and `resolveCapabilities` decides which
+   * exist, from authorities. The onSelect handlers stay here because they are
+   * this component's business; nothing else about a row is.
+   *
+   * Web, Maps, Email, Drive and GitHub join by adding one catalog entry naming
+   * a registered capability id. No change to this file.
+   */
+  const onSelect: Record<string, () => void> = {
+    image: () => imageInputRef.current?.click(),
+    file: () => fileInputRef.current?.click(),
+    library: () => setLibraryOpen(true),
+  }
+
+  /*
+   * Built here rather than at the top with the other hooks because it depends
+   * on the availability probes above. `useRegistryCapabilities` is still a
+   * hook and still runs unconditionally — it simply asks for nothing while the
+   * catalog declares no engine-executed capability.
+   */
+  const catalog = buildCatalog({
+    images: visionReady ? { ready: true } : { ready: false, reason: visionReason },
+    documents: documentsReady ? { ready: true } : { ready: false, reason: documentsReason },
+  })
+
+  const capabilities = useRegistryCapabilities(registryIdsIn(catalog))
+
+  const hubActions: HubAction[] = resolveCapabilities({
+    catalog,
+    registry: capabilities,
+  }).map((row) => ({
+    id: row.id,
+    label: row.label,
+    hint: row.hint,
+    icon: row.icon as HubAction['icon'],
+    ...(row.unavailableReason ? { unavailableReason: row.unavailableReason } : {}),
+    onSelect: onSelect[row.id] ?? (() => {}),
+  }))
 
   const active = focused || highlighted
 

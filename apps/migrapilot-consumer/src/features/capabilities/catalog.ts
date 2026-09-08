@@ -1,0 +1,95 @@
+'use client'
+
+/**
+ * THE CATALOG — what Chat can offer, declared in one place.
+ *
+ * ---------------------------------------------------------------------------
+ * WHAT BELONGS HERE, AND WHAT DOES NOT
+ *
+ * An entry declares a row's IDENTITY — its label, its hint, its icon — and
+ * names the authority that decides whether it exists. It does not decide
+ * availability itself, and it never carries a hardcoded boolean.
+ *
+ * There are exactly two kinds of authority:
+ *
+ *   local     a surface this app implements (photos, files, the library).
+ *             Its readiness comes from the probe that already governed it.
+ *
+ *   registry  a capability the ENGINE executes. It renders only when the id is
+ *             actually registered. Until then there is no row — see
+ *             `resolveCapabilities.ts` for why absence, not greying out.
+ *
+ * ---------------------------------------------------------------------------
+ * 🚨 WHY WEB, MAPS, EMAIL, DRIVE AND GITHUB ARE NOT LISTED YET
+ *
+ * They are the next milestone, and it would be easy to declare them now so the
+ * menu "looks" complete. They are deliberately absent, because a catalog entry
+ * for a capability nobody has built is the same lie as a hardcoded button —
+ * one indirection further away, which makes it harder to spot rather than less
+ * false.
+ *
+ * Adding Migra Search later is two edits and no new machinery: register the
+ * capability in the engine, and add one entry here naming its id. Nothing in
+ * the composer changes. That is the whole point of this slice.
+ */
+
+import type { CatalogEntry, LocalReadiness } from './resolveCapabilities'
+
+/**
+ * Readiness of every locally-implemented surface, gathered by the caller.
+ *
+ * Passed in rather than read here so the catalog stays a declaration: a module
+ * that fetched its own state could not be reasoned about in one reading, and
+ * this is the file someone will scan to answer "what can Chat do".
+ */
+export interface LocalProbes {
+  /** Vision availability — a model approved AND the Brain reachable. */
+  images: LocalReadiness | null
+  /** Document availability — the file routes need an account. */
+  documents: LocalReadiness | null
+}
+
+export function buildCatalog(probes: LocalProbes): CatalogEntry[] {
+  return [
+    {
+      id: 'image',
+      label: 'Photos & images',
+      hint: 'Ask about a photo, a screenshot, or a chart.',
+      icon: 'image',
+      source: { kind: 'local', readiness: probes.images },
+    },
+    {
+      id: 'file',
+      label: 'Files & documents',
+      hint: 'Attach a document, data file, or code for MigraPilot to read.',
+      icon: 'file',
+      source: { kind: 'local', readiness: probes.documents },
+    },
+    {
+      /*
+       * The library shares the documents authority because it is the same
+       * storage: the row needs an account for exactly the reason the upload
+       * row does, and giving it a second opinion is how two rows about one
+       * capability start disagreeing.
+       */
+      id: 'library',
+      label: 'Your files',
+      hint: 'Reuse something you have already uploaded, without sending it again.',
+      icon: 'file',
+      source: { kind: 'local', readiness: probes.documents },
+    },
+  ]
+}
+
+/**
+ * Capability ids this catalog needs from the engine.
+ *
+ * Empty today, and that is the honest answer: no engine-executed capability is
+ * offered in Chat yet. The caller uses this to decide whether to ask the
+ * registry at all, so an empty catalog costs no request.
+ */
+export function registryIdsIn(catalog: readonly CatalogEntry[]): string[] {
+  return catalog
+    .filter((entry) => entry.source.kind === 'registry')
+    .map((entry) => (entry.source as { capabilityId: string }).capabilityId)
+}

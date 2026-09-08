@@ -118,14 +118,23 @@ test('the picker never names a filesystem path', () => {
   assert.match(picker, /fetch\('\/api\/files'\)/)
 })
 
-test('the library row is gated on the same availability as documents', () => {
-  // A row that needs an account, offered to a signed-out visitor, is the dead
-  // control this menu already learned about once.
-  const composer = readFileSync(join(process.cwd(), 'src/components/chat/Composer.tsx'), 'utf8')
-  const row = composer.slice(composer.indexOf("id: 'library'"), composer.indexOf("id: 'library'") + 400)
+test('the library row draws on the same authority as documents', () => {
+  /*
+   * A row that needs an account, offered to a signed-out visitor, is the dead
+   * control this menu already learned about once.
+   *
+   * The assertion changed shape when the hub became capability-driven, and the
+   * new one is stronger. Gating is no longer something a row can forget: every
+   * catalog entry names a SOURCE, and `resolveCapabilities` derives
+   * availability from it. What still has to be checked is that the library
+   * names the DOCUMENTS authority — sharing storage but consulting a second
+   * opinion is how two rows about one capability start disagreeing.
+   */
+  const catalog = readFileSync(join(process.cwd(), 'src/features/capabilities/catalog.ts'), 'utf8')
+  const row = catalog.slice(catalog.indexOf("id: 'library'"), catalog.indexOf("id: 'library'") + 400)
   assert.match(
     row,
-    /documentsReady \? \{\} : \{ unavailableReason: documentsReason \}/,
-    'the library row is not gated — it would 401 for a signed-out visitor',
+    /source: \{ kind: 'local', readiness: probes\.documents \}/,
+    'the library row does not use the documents authority — it would 401 for a signed-out visitor',
   )
 })

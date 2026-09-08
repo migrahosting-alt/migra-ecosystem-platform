@@ -87,29 +87,49 @@ const src = (rel: string): string => {
 const composer = src('components/chat/Composer.tsx')
 const hook = src('features/attachments/useDocumentAvailability.ts')
 
-test('🚨 EVERY ROW OF THE ACTION MENU IS GATED, not just the ones that were noticed', () => {
+test('🚨 EVERY ROW IS GATED — and gating is no longer something a row can forget', () => {
   /*
-   * Counted against the number of ROWS rather than a fixed number.
+   * This has now been wrong twice, in two different ways, and the second
+   * rewrite is the interesting one.
    *
-   * This asserted `gates.length === 2` and broke the moment a third row was
-   * added — reporting the new row as a failure while saying nothing about
-   * whether it was gated. The property was always "a menu is only as honest as
-   * its least-gated row", and a hardcoded count states that badly: it fails on
-   * a correctly-gated addition and would pass a fourth row that had no gate at
-   * all if someone removed a gate elsewhere to balance the total.
+   * v1 asserted `gates.length === 2` and broke when a correctly-gated third row
+   * arrived — reporting the addition as a failure while saying nothing about
+   * whether it was gated.
+   *
+   * v2 counted gates against rows. Better, but it still assumed the rows were a
+   * hand-written array in the composer, each responsible for remembering its
+   * own gate. That assumption is what the capability-driven hub removed.
+   *
+   * Now every catalog entry must name a SOURCE, and `resolveCapabilities`
+   * derives availability from that source. An ungated row is not something
+   * someone forgets to write — it is not expressible. So this asserts the
+   * structure that makes it inexpressible, which is a claim that survives the
+   * next row rather than breaking on it.
    */
-  const hub = composer.slice(composer.indexOf('const hubActions'), composer.indexOf('const active ='))
-  const rows = [...hub.matchAll(/^\s{6}id: '/gm)]
-  const gates = [...hub.matchAll(/unavailableReason:/g)]
-  assert.ok(rows.length >= 2, `expected at least the two original rows, found ${rows.length}`)
+  const catalog = readFileSync(join(process.cwd(), 'src/features/capabilities/catalog.ts'), 'utf8')
+  const entries = [...catalog.matchAll(/^\s{6}id: '([a-z-]+)'/gm)].map((m) => m[1])
+  const sources = [...catalog.matchAll(/source: \{ kind: '(local|registry)'/g)]
+
+  assert.ok(entries.length >= 3, `expected the three real surfaces, found ${entries.length}`)
   assert.equal(
-    gates.length,
-    rows.length,
-    `${rows.length} rows but ${gates.length} gates — an ungated row offers a control that cannot work`,
+    sources.length,
+    entries.length,
+    `${entries.length} catalog entries but ${sources.length} sources — an entry without an authority is a button pretending to be a capability`,
   )
-  assert.match(hub, /id: 'image'[\s\S]*?unavailableReason: visionReason/)
-  assert.match(hub, /id: 'file'[\s\S]*?unavailableReason: documentsReason/)
-  assert.match(hub, /id: 'library'[\s\S]*?unavailableReason: documentsReason/)
+
+  /*
+   * And the composer must not reintroduce an inline gate. A row that decided
+   * its own availability next to the resolver would be a second opinion about
+   * the same fact, which is how the original defect happened.
+   */
+  const composer = readFileSync(join(process.cwd(), 'src/components/chat/Composer.tsx'), 'utf8')
+  const hub = composer.slice(composer.indexOf('const hubActions'), composer.indexOf('const active ='))
+  assert.doesNotMatch(
+    hub,
+    /unavailableReason:\s*(visionReason|documentsReason)/,
+    'the composer gates a row inline again — availability belongs to the resolver',
+  )
+  assert.match(hub, /resolveCapabilities\(/, 'the hub no longer resolves capabilities from authorities')
 })
 
 test('the gate is a real probe of the real route, not a guess about sign-in state', () => {

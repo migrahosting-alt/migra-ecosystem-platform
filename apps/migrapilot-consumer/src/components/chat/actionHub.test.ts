@@ -32,11 +32,24 @@ test('a blocked action cannot fire even if the click lands', () => {
   assert.match(hub, /if \(blocked\) return/)
 })
 
-test('both actions are real, and each opens its own picker', () => {
-  assert.match(composer, /label: 'Photos & images'/)
-  assert.match(composer, /label: 'Files & documents'/)
-  assert.match(composer, /onSelect: \(\) => imageInputRef\.current\?\.click\(\)/)
-  assert.match(composer, /onSelect: \(\) => fileInputRef\.current\?\.click\(\)/)
+test('every action is real, and each opens its own picker', () => {
+  /*
+   * The rows moved to `features/capabilities/catalog.ts` when the hub became
+   * capability-driven; the HANDLERS stayed here, because what a row does when
+   * clicked is this component's business and nothing else about it is.
+   *
+   * So the identity is asserted against the catalog and the behaviour against
+   * the composer. Asserting both in one file was only ever possible because
+   * the two were tangled together.
+   */
+  const catalog = readFileSync(join(process.cwd(), 'src/features/capabilities/catalog.ts'), 'utf8')
+  assert.match(catalog, /label: 'Photos & images'/)
+  assert.match(catalog, /label: 'Files & documents'/)
+  assert.match(catalog, /label: 'Your files'/)
+
+  assert.match(composer, /image: \(\) => imageInputRef\.current\?\.click\(\)/)
+  assert.match(composer, /file: \(\) => fileInputRef\.current\?\.click\(\)/)
+  assert.match(composer, /library: \(\) => setLibraryOpen\(true\)/)
 })
 
 test('the Photos entry is a filter over the one attachment system', () => {
