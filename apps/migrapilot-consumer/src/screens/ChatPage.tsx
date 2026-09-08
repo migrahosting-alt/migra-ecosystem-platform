@@ -13,6 +13,7 @@ import { ConnectProject } from '@/features/projects/ConnectProject'
 import { AnonymousQuotaNotice } from '@/features/anonymous/AnonymousQuotaNotice'
 import { askAgainOptions, canAskAgain, lastQuestionOf } from '@/features/conversations/askAgain'
 import { showsTurnProgress } from '@/state/turnProgress'
+import { statusLabelFor } from '@/state/turnStatus'
 import { isExhausted, useAnonymousQuota } from '@/features/anonymous/AnonymousQuotaProvider'
 
 /* ---------------------------------------------------------------- *
@@ -228,7 +229,16 @@ export function ChatPage() {
           itself becomes the progress.
         */}
         {showsTurnProgress({ messages, pending }) && (
-          <TypingIndicator {...(progressIn?.conversationId === id && progressIn.detail ? { detail: progressIn.detail } : {})} />
+          <TypingIndicator
+            {...(() => {
+              // The stage code becomes words in exactly one place. An unknown
+              // stage yields null and the indicator renders bare, rather than
+              // this screen inventing a description for it.
+              const label =
+                progressIn?.conversationId === id ? statusLabelFor(progressIn.stage) : null
+              return label ? { label } : {}
+            })()}
+          />
         )}
         <div ref={bottomRef} />
       </div>

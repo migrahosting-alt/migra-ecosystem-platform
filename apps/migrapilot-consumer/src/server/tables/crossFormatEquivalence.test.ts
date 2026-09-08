@@ -280,3 +280,205 @@ describe('what may differ between formats, and only this', () => {
     assert.equal(csv.reasoning, tsv.reasoning)
   })
 })
+
+/* ------------------------------------------------------------------ *
+ * 🚨 ENUMERATION — the operation that did not exist
+ *
+ * MEASURED in production. "List the four Revenue values from the spreadsheet,
+ * exactly as they appear." matched no operation, produced no evidence, and was
+ * refused with "general document-style text search inside spreadsheets is not
+ * available yet … Ask about a total, a column or a sheet instead." The user had
+ * asked about a column; the refusal advised asking about a column.
+ *
+ * Enumeration is a STRUCTURED operation over a known column. These prove it is
+ * one, and that it stays identical across the three representations.
+ * ------------------------------------------------------------------ */
+
+describe('listing a column enumerates it, and does so identically in every format', () => {
+  it('the exact production question is answered, not refused', async () => {
+    const answers = await askAll('eq_revenue', 'List the Revenue values from the spreadsheet, exactly as they appear.')
+    assertEquivalent(answers, 'enumeration of Revenue')
+
+    for (const answer of answers) {
+      assert.equal(answer.operation, 'list', `${answer.format} did not enumerate`)
+      // The refusal that used to happen must not be anywhere in the evidence.
+      assert.doesNotMatch(
+        answer.raw,
+        /document-style text search/,
+        `${answer.format} still routes a column question into the document-search refusal`,
+      )
+      for (const value of ['120000', '95000', '156250', '-3750']) {
+        assert.ok(answer.raw.includes(value), `${answer.format} omitted the value ${value}`)
+      }
+    }
+  })
+
+  it('an identifier column LISTS — refusing to enumerate ids would be pedantry', async () => {
+    /*
+     * Identifier semantics are about ARITHMETIC. Summing postcodes is
+     * meaningless and stays refused; reading them back is an ordinary question
+     * with an exact answer. Collapsing the two would remove a real capability
+     * in the name of a rule that was never about it.
+     */
+    const answers = await askAll('eq_identifiers', 'List the ZipCode values.')
+    assertEquivalent(answers, 'enumeration of an identifier column')
+    for (const answer of answers) {
+      assert.equal(answer.operation, 'list')
+      assert.doesNotMatch(answer.raw, /could not calculate/i, `${answer.format} refused to enumerate identifiers`)
+    }
+  })
+
+  it('leading zeros survive — "exactly as they appear" is the whole request', async () => {
+    /*
+     * The sharpest cross-format hazard in the suite. `02108` is a ZIP code; a
+     * workbook that stored it as a number would hand back 2108, and the answer
+     * would be confidently, invisibly wrong in exactly one of the three formats.
+     */
+    const answers = await askAll('eq_revenue', 'List the ZipCode values exactly as they appear.')
+    for (const answer of answers) {
+      assert.ok(
+        answer.raw.includes('02108'),
+        `${answer.format} lost the leading zero on 02108 — it reported: ${answer.raw.slice(0, 400)}`,
+      )
+    }
+    assertEquivalent(answers, 'enumeration preserving leading zeros')
+  })
+
+  it('a 5,000-row column is bounded, and says so rather than implying completeness', async () => {
+    const answers = await askAll('eq_large', 'List the Value column.')
+    for (const answer of answers) {
+      assert.equal(answer.operation, 'list')
+      assert.match(answer.raw, /5000/, `${answer.format} did not state the true row count`)
+      /*
+       * The FACT line specifically, not "somewhere in the evidence".
+       *
+       * A first version matched /not listed|first 50/ against the whole text
+       * and passed with the disclosure deleted, because the DIRECTIVE also
+       * contains "first 50". Removing the fact left the model told to say
+       * something the evidence no longer supported, and the test approved it.
+       */
+      assert.match(
+        answer.raw,
+        /further row\(s\) not listed/,
+        `${answer.format} truncated silently — the first 50 would read as all of them`,
+      )
+      assert.ok(
+        answer.raw.includes('4950 further row(s) not listed'),
+        `${answer.format} did not state how many rows it withheld`,
+      )
+    }
+    assertEquivalent(answers, 'bounded enumeration')
+  })
+
+  it('naming no column asks which one, rather than picking', async () => {
+    // Same rule the computation path obeys. A guess here is a wrong answer
+    // delivered with the authority of "read directly from the file".
+    const answers = await askAll('eq_revenue', 'List the values.')
+    for (const answer of answers) {
+      assert.equal(answer.operation, 'clarify:list')
+      assert.match(answer.raw, /could mean more than one/)
+    }
+    assertEquivalent(answers, 'ambiguous enumeration')
+  })
+
+  it('an explicit aggregation still wins over the listing phrasing', async () => {
+    // "List the total Revenue" wants a total. Enumeration is checked last for
+    // exactly this reason, and that ordering needs a test or it will be moved.
+    const answers = await askAll('eq_revenue', 'List the total Revenue.')
+    for (const answer of answers) {
+      assert.equal(answer.operation, 'sum', `${answer.format} enumerated instead of totalling`)
+    }
+  })
+
+  it('the STORED text is listed, never the parsed number', async () => {
+    /*
+     * 🚨 THIS TEST EXISTS BECAUSE A MUTATION ESCAPED.
+     *
+     * Swapping `cell.raw` for `cell.value` survived the whole suite. The
+     * leading-zero test that was supposed to catch it could not: ZipCode parses
+     * as an IDENTIFIER, so `value` is undefined and the mutant fell back to
+     * `raw` and produced identical output. The test was vacuous and looked
+     * like coverage.
+     *
+     * Currency is the case where the two genuinely differ. "$1,250.50" parses
+     * to 1250.5, and a user who asked for the values "exactly as they appear"
+     * is entitled to the symbol, the separator and the parentheses that mean
+     * negative. Those are provenance, not formatting noise.
+     */
+    const answers = await askAll('eq_currency', 'List the Amount values exactly as they appear.')
+    for (const answer of answers) {
+      assert.equal(answer.operation, 'list')
+      for (const literal of ['$1,250.50', '(3,750)', '-$125.25']) {
+        assert.ok(
+          answer.raw.includes(literal),
+          `${answer.format} reformatted ${literal} instead of reproducing it — it reported:\n${answer.raw.slice(0, 500)}`,
+        )
+      }
+      // 1250.5 is what the parsed value would print as. Its presence means the
+      // number was substituted for the text the file actually holds.
+      assert.ok(
+        !answer.raw.includes('1250.5'),
+        `${answer.format} listed the parsed number rather than the stored text`,
+      )
+      /*
+       * MISSING VALUES KEEP THEIR MEANING, and keep their POSITION.
+       *
+       * Added after a mutation escaped: rendering a blank as '' left "4. " on
+       * the line and every assertion still passed. An empty slot in a numbered
+       * list is unreadable, and worse, a blank dropped entirely would shift
+       * every row after it — so the nth value listed would no longer be the nth
+       * row of the file, silently.
+       *
+       * A blank and an "n/a" are also different facts: one is an empty cell,
+       * the other is something the author wrote. Neither is a zero.
+       */
+      assert.ok(
+        answer.raw.includes('(blank)'),
+        `${answer.format} did not name the empty cell — an unlabelled gap shifts every row after it`,
+      )
+      assert.ok(
+        answer.raw.includes('n/a'),
+        `${answer.format} dropped the literal "n/a", which the file's author actually wrote`,
+      )
+      // Five rows in, five rows out. Positions are the contract.
+      assert.match(answer.raw, /5\. /, `${answer.format} did not list all five rows`)
+    }
+    assertEquivalent(answers, 'enumeration reproduces stored text')
+  })
+
+  it('genuine free-form text search is STILL not offered', async () => {
+    /*
+     * The refusal was wrong for column enumeration; it is right for this. A
+     * question that asks the file to be searched as prose has no structured
+     * operation behind it, so no evidence is produced and the turn falls
+     * through to the honest "not available yet" — which is what that sentence
+     * was always for.
+     *
+     * Widening enumeration until it swallowed this would replace a false
+     * refusal with a false capability, which is the worse trade.
+     */
+    for (const format of FORMATS) {
+      const { root, file } = await stage('eq_revenue', format)
+      for (const prompt of [
+        'Find every mention of the word urgent in this spreadsheet.',
+        'Search the file for notes about shipping delays.',
+        'Which cells talk about customer complaints?',
+      ]) {
+        const evidence = await tableEvidenceFor(prompt, [file], root)
+        assert.equal(
+          evidence,
+          null,
+          `${format}: "${prompt}" produced structured evidence — enumeration has widened into document search`,
+        )
+      }
+    }
+  })
+
+  it('a formula-derived column discloses cached values when listed', async () => {
+    const answers = await askAll('eq_formula', 'List the Amount values.')
+    const byFormat = new Map(answers.map((a) => [a.format, a]))
+    assert.equal(byFormat.get('xlsx')!.formulaDerived, true, 'the workbook must disclose cached results')
+    assert.equal(byFormat.get('csv')!.formulaDerived, false, 'a CSV holds literals — nothing to disclose')
+    assertEquivalent(answers, 'enumeration of a formula column')
+  })
+})

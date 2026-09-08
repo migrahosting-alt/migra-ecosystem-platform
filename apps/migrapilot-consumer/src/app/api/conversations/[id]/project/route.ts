@@ -35,6 +35,7 @@
 
 import { callBrain } from '@/server/brain/gateway'
 import { resolveRequestPrincipal } from '@/server/tenancy/requestPrincipal'
+import { PROJECT_SIGN_IN, canHoldProjects } from '@/server/projects/projectPrincipal'
 
 export const dynamic = 'force-dynamic'
 
@@ -43,7 +44,22 @@ const fail = (status: number, error: string, message: string, remedy?: string): 
 
 /** The two things the consumer alone knows. Everything else is the Brain's. */
 const UNAUTHENTICATED = () =>
-  fail(401, 'unauthenticated', 'Sign in to connect a project.', 'sign-in')
+  fail(PROJECT_SIGN_IN.status, PROJECT_SIGN_IN.error, PROJECT_SIGN_IN.message, PROJECT_SIGN_IN.remedy)
+
+/**
+ * Resolve, and refuse callers who cannot hold a project AT ALL.
+ *
+ * An anonymous visitor is a real principal — that is why anonymous chat works —
+ * so `!resolved` never caught them. They fell through to the Brain, which
+ * correctly found no grant, and the 403 below told a person who had just
+ * created the conversation that they had no access to it. See
+ * `server/projects/projectPrincipal.ts`.
+ */
+const projectPrincipal = async () => {
+  const resolved = await resolveRequestPrincipal()
+  if (!resolved || !canHoldProjects(resolved.principal)) return null
+  return resolved
+}
 
 const UNREACHABLE = () =>
   fail(
@@ -60,7 +76,7 @@ export async function GET(
   context: { params: Promise<{ id: string }> },
 ): Promise<Response> {
   const { id } = await context.params
-  const resolved = await resolveRequestPrincipal()
+  const resolved = await projectPrincipal()
   if (!resolved) return UNAUTHENTICATED()
 
   const result = await callBrain(
@@ -83,7 +99,7 @@ export async function POST(
   context: { params: Promise<{ id: string }> },
 ): Promise<Response> {
   const { id } = await context.params
-  const resolved = await resolveRequestPrincipal()
+  const resolved = await projectPrincipal()
   if (!resolved) return UNAUTHENTICATED()
 
   let body: unknown
@@ -124,7 +140,7 @@ export async function DELETE(
   context: { params: Promise<{ id: string }> },
 ): Promise<Response> {
   const { id } = await context.params
-  const resolved = await resolveRequestPrincipal()
+  const resolved = await projectPrincipal()
   if (!resolved) return UNAUTHENTICATED()
 
   const result = await callBrain(

@@ -1420,6 +1420,18 @@ async function streamChat(
     const chosenId = ranked[0]?.id;
     if (resident && chosenId) {
       if (!isModelResident(resident, chosenId)) {
+        /*
+         * 🚨 `detail` IS DIAGNOSTIC, NOT USER-FACING COPY. `stage` is the fact.
+         *
+         * This sentence was rendered verbatim to a user mid-conversation in
+         * production, because the consumer forwarded `detail` to the browser
+         * and displayed it. The consumer now drops it at its stream boundary
+         * and maps the STAGE CODE to its own wording.
+         *
+         * A client that displays this string is reintroducing that defect:
+         * infrastructure describing itself to someone who asked a question
+         * about their own work. Consume `stage`; write your own copy.
+         */
         send('stage', {
           stage: 'loading_model',
           detail: 'Loading the language model — the first answer after a pause takes longer to start.',

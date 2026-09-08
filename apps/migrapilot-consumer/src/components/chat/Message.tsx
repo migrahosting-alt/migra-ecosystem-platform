@@ -720,7 +720,18 @@ export function MessageView({
  * asserts the same structure in a real browser on a real cold model.
  * ---------------------------------------------------------------------------
  */
-export function TypingIndicator({ detail }: { detail?: string }) {
+/**
+ * `label` is PRODUCT copy resolved by `state/turnStatus.ts` from a semantic
+ * stage code — never a string the Brain authored. The prop was called `detail`
+ * and carried the Brain's own sentence straight through, which is how
+ * "Loading the language model — the first answer after a pause takes longer to
+ * start." reached a user mid-conversation. Renamed rather than filtered: with
+ * no channel for backend prose, the defect has nowhere to reappear.
+ *
+ * Absent label renders bare dots — motion without a claim, which is the right
+ * output for a stage nothing can truthfully describe.
+ */
+export function TypingIndicator({ label }: { label?: string }) {
   return (
     <div
       role="status"
@@ -728,7 +739,7 @@ export function TypingIndicator({ detail }: { detail?: string }) {
       data-testid="turn-progress"
       className="flex animate-fade items-center gap-2.5 py-1 pl-1 text-sm text-muted"
     >
-      {detail && <span>{detail}</span>}
+      {label && <span>{label}</span>}
       {[0, 1, 2].map((index) => (
         <span
           key={index}

@@ -9,17 +9,25 @@
 
 import { callBrain } from '@/server/brain/gateway'
 import { resolveRequestPrincipal } from '@/server/tenancy/requestPrincipal'
+import { PROJECT_LIST_SIGN_IN, canHoldProjects } from '@/server/projects/projectPrincipal'
 
 export const dynamic = 'force-dynamic'
 
 export async function GET(): Promise<Response> {
   const resolved = await resolveRequestPrincipal()
-  if (!resolved) {
+  // NOT an empty list. An empty list says "you have none"; this says "we do not
+  // know who you are", and they are not the same screen. An ANONYMOUS visitor
+  // lands here too: they are a real principal, but not one that can hold a
+  // project, and telling them the list is empty would assert an entitlement
+  // nobody looked up.
+  if (!resolved || !canHoldProjects(resolved.principal)) {
     return Response.json(
-      // NOT an empty list. An empty list says "you have none"; this says
-      // "we do not know who you are", and they are not the same screen.
-      { error: 'unauthenticated', message: 'Sign in to see your projects.', remedy: 'sign-in' },
-      { status: 401 },
+      {
+        error: PROJECT_LIST_SIGN_IN.error,
+        message: PROJECT_LIST_SIGN_IN.message,
+        remedy: PROJECT_LIST_SIGN_IN.remedy,
+      },
+      { status: PROJECT_LIST_SIGN_IN.status },
     )
   }
 

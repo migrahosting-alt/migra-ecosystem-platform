@@ -28,7 +28,7 @@ const TABLE_EXTENSIONS = /\.(csv|tsv|xlsx)$/i
 const WORKBOOK_EXTENSION = /\.xlsx$/i
 
 /** Which operation the question is asking for, if any. */
-function detectOperation(prompt: string): Operation | 'group' | 'describe' | null {
+function detectOperation(prompt: string): Operation | 'group' | 'describe' | 'list' | null {
   const p = prompt.toLowerCase()
   /*
    * 🚨 "SUMMARISE THIS SPREADSHEET" IS A QUESTION THIS CAN ANSWER.
@@ -52,7 +52,55 @@ function detectOperation(prompt: string): Operation | 'group' | 'describe' | nul
   if (/\b(highest|largest|biggest|max|maximum|most|top)\b/.test(p)) return 'max'
   if (/\b(lowest|smallest|min|minimum|least)\b/.test(p)) return 'min'
   if (/\bhow many\b|\bcount\b|\bnumber of rows\b/.test(p)) return 'count'
+
+  /*
+   * 🚨 ENUMERATION IS A STRUCTURED OPERATION, NOT DOCUMENT SEARCH.
+   *
+   * MEASURED, in the real product. Asked
+   *
+   *   "List the four Revenue values from the spreadsheet, exactly as they appear."
+   *
+   * nothing above matched, `detectOperation` returned null, no evidence was
+   * produced, and the turn was refused with "general document-style text search
+   * inside spreadsheets is not available yet … Ask about a total, a column or a
+   * sheet instead."
+   *
+   * The user HAD asked about a column. The refusal advised doing the thing that
+   * had just been done, which tells someone the product is broken and gives
+   * them nowhere to go. Worse, the capability existed the whole time: the cells
+   * were parsed, typed and sitting in memory.
+   *
+   * LAST, deliberately. "List the total by region" is a grouped total that
+   * happens to start with "list", and "show me the highest value" is a max —
+   * an explicit aggregation always wins over the enumeration phrasing.
+   */
+  if (/\b(list|enumerate)\b/.test(p)) return 'list'
+  if (/\bexactly as they appear\b|\bverbatim\b/.test(p)) return 'list'
+  if (/\b(what|which) are the\b/.test(p) && /\bvalues?\b/.test(p)) return 'list'
+  if (/\bshow (me )?(all |the )*(values|entries)\b/.test(p)) return 'list'
+  if (/\ball (of )?the values\b/.test(p)) return 'list'
   return null
+}
+
+/**
+ * The column to ENUMERATE — which is not the same question as which column to
+ * compute with.
+ *
+ * `chooseValueColumn` requires `quantitative`, and rightly: summing postcodes
+ * is meaningless. Listing them is not. "What are the ZIP codes in this file"
+ * is an ordinary question with an exact answer, so enumeration accepts any
+ * column and keeps identifier semantics where they belong — on arithmetic.
+ *
+ * Ambiguity is handled identically to computation: named wins, several named
+ * asks, none named with several columns asks. Never a guess.
+ */
+function chooseListColumn(prompt: string, table: ParsedTable): ColumnChoice {
+  const p = prompt.toLowerCase()
+  const named = table.columns.filter((c) => c.name && p.includes(c.name.toLowerCase()))
+  if (named.length === 1) return { kind: 'column', column: named[0]! }
+  if (named.length > 1) return { kind: 'clarify', candidates: named.map((c) => c.name) }
+  if (table.columns.length === 1) return { kind: 'column', column: table.columns[0]! }
+  return { kind: 'clarify', candidates: table.columns.map((c) => c.name) }
 }
 
 /**
@@ -218,7 +266,10 @@ async function loadTable(
   prompt: string,
   fileName: string,
   uploadRoot: string,
-  operation: Operation | 'group' | 'describe',
+  // 'list' is accepted but only compared against 'describe' below: an
+  // ambiguous workbook cannot be enumerated either, so it takes the same
+  // "which sheet did you mean" refusal rather than picking one.
+  operation: Operation | 'group' | 'describe' | 'list',
 ): Promise<LoadedTable> {
   const path = join(uploadRoot, fileName)
 
@@ -591,6 +642,91 @@ export async function tableEvidenceFor(
             : `count of rows: ${filled}`,
         ],
         directives: [],
+      }),
+    }
+  }
+
+  /*
+   * ENUMERATION — the values themselves, exactly as the file wrote them.
+   *
+   * `cell.raw` is used rather than the parsed number precisely because the
+   * question is usually "as they appear": "$12,500" must come back as
+   * "$12,500", not 12500. Reformatting here would answer a question nobody
+   * asked and quietly discard the currency symbol, which is provenance.
+   *
+   * Bounded, and truthful about the bound. A 5,000-row column cannot go into a
+   * prompt, and silently sending the first 50 as if they were all of them is
+   * the fabrication this module exists to prevent — so the cap is stated and
+   * the true row count travels with it.
+   */
+  if (operation === 'list') {
+    const picked = chooseListColumn(prompt, table)
+    if (picked.kind === 'clarify') {
+      return {
+        file: fileName,
+        ...(sheetName ? { sheet: sheetName } : {}),
+        operation: 'clarify:list',
+        text: composeEvidence({
+          fact: [
+            `[MigraPilot did not list values from ${source}: the question could mean more than one`,
+            `column — ${picked.candidates.map((c) => `"${c}"`).join(', ')}.`,
+          ],
+          directives: [
+            `Ask which one is meant. Do NOT read the values out of the file yourself and do NOT pick a column on the user's behalf.]`,
+          ],
+        }),
+      }
+    }
+    if (picked.kind !== 'column') return null
+
+    const column = picked.column
+    const LIST_LIMIT = 50
+    const all = table.rows.map((r) => r[column.index])
+    const shown = all.slice(0, LIST_LIMIT)
+    const truncated = all.length > LIST_LIMIT
+    const isFormula = formulaColumns.includes(column.index)
+
+    const values = shown.map((cell, i) => {
+      /*
+       * 🚨 EMPTINESS IS ABOUT THE TEXT, NOT THE ARITHMETIC KIND.
+       *
+       * `kind === 'blank'` covers a truly empty cell AND written non-values
+       * like "n/a" — correct for computation, where neither may become a zero.
+       * Keying the LABEL off it printed "(blank)" where the file says "n/a",
+       * which is a fabrication in a list whose entire promise is "exactly as
+       * they appear". The author wrote something; it gets reproduced.
+       *
+       * A genuinely empty cell is still NAMED rather than left as an empty
+       * slot, because an unlabelled gap in a numbered list shifts nothing but
+       * reads as an error — and a dropped row would shift every position after
+       * it, so the nth value listed would stop being the nth row of the file.
+       */
+      const raw = cell?.raw ?? ''
+      return `  ${i + 1}. ${raw.trim() === '' ? '(blank)' : raw}`
+    })
+
+    return {
+      file: fileName,
+      ...(sheetName ? { sheet: sheetName } : {}),
+      ...(isFormula ? { formulaDerived: true } : {}),
+      operation: 'list',
+      text: composeEvidence({
+        fact: [
+          `[Read directly from ${source} by MigraPilot. These are the stored cell values,`,
+          `reproduced exactly as the file writes them. Use them verbatim and do not reformat,`,
+          `round or re-order them:]`,
+          `values in "${column.name}" (${rows(all.length)}):`,
+          ...values,
+          ...(truncated
+            ? [`… ${all.length - LIST_LIMIT} further row(s) not listed. This is the first ${LIST_LIMIT} of ${all.length}.`]
+            : []),
+          ...(isFormula
+            ? [`Note: "${column.name}" is formula-derived; these are the values last cached in the workbook.`]
+            : []),
+        ],
+        directives: truncated
+          ? [`Say plainly that only the first ${LIST_LIMIT} of ${all.length} rows are shown. Do NOT present them as the complete set.]`]
+          : [],
       }),
     }
   }

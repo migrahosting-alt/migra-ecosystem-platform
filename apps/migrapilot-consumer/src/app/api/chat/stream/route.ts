@@ -1345,15 +1345,27 @@ export async function POST(request: Request): Promise<Response> {
             }
             case 'stage': {
               /*
-               * Passed straight through. These are OBSERVED stages from the
-               * image pipeline, not a timer — and a generation off a cold
-               * checkpoint legitimately takes minutes, which is exactly the wait
-               * that needs explaining rather than hiding behind a spinner.
+               * THE STAGE CODE CROSSES. THE BRAIN'S PROSE DOES NOT.
+               *
+               * These are OBSERVED stages, not a timer, and a generation off a
+               * cold checkpoint legitimately takes minutes — so the wait still
+               * needs explaining rather than hiding behind a spinner. What
+               * changed is WHO explains it.
+               *
+               * `detail` is Brain-authored English written in infrastructure
+               * vocabulary, and forwarding it put "Loading the language model —
+               * the first answer after a pause takes longer to start." in front
+               * of a user mid-conversation. Dropping it HERE, at the boundary,
+               * means that sentence never reaches the browser bundle at all;
+               * `state/turnStatus.ts` maps the code to copy this product owns.
+               *
+               * Deliberately not sanitised, not rewritten, not filtered — a
+               * denylist would pass the next sentence nobody thought to ban.
+               * The prose simply does not travel.
                */
               const stage = (frame.data as { stage?: unknown })?.stage
-              const detail = (frame.data as { detail?: unknown })?.detail
               if (typeof stage === 'string') {
-                emit('stage', { stage, ...(typeof detail === 'string' ? { detail } : {}) })
+                emit('stage', { stage })
               }
               break
             }

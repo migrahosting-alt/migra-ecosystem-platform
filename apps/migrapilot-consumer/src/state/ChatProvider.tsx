@@ -32,8 +32,14 @@ interface ChatContextValue {
    * tokens for an answer nobody is waiting for. It is not a UI-only gesture.
    */
   stopTurn: (conversationId: string) => boolean
-  /** Transient runtime progress for the in-flight turn. Never message content. */
-  progressIn: { conversationId: string; detail: string } | null
+  /**
+   * Transient runtime progress for the in-flight turn. Never message content.
+   *
+   * A semantic STAGE CODE, not text. The Brain's prose is dropped at the
+   * stream boundary, so there is no sentence here to leak into the UI;
+   * `state/turnStatus.ts` decides what a code says to a person.
+   */
+  progressIn: { conversationId: string; stage: string } | null
   /** True until the caller's durable conversations have been read once. */
   loading: boolean
   startConversation: (prompt: string, options?: { attachments?: string[]; images?: string[]; modelFamily?: string }) => string
@@ -192,7 +198,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
    * It lives here instead: one ephemeral line, cleared the instant generation
    * begins or the turn ends.
    */
-  const [progressIn, setProgressIn] = useState<{ conversationId: string; detail: string } | null>(null)
+  const [progressIn, setProgressIn] = useState<{ conversationId: string; stage: string } | null>(null)
   const [loading, setLoading] = useState(true)
   const counter = useRef(0)
   /** Conversations whose messages have already been fetched. */
@@ -647,15 +653,19 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         }
         if (frame.event === 'stage') {
           /*
-           * An image generation legitimately takes minutes on a cold checkpoint.
-           * These stages are OBSERVED from the pipeline, so showing them is the
-           * difference between "still loading the image model" and a spinner
-           * that is indistinguishable from a hang.
+           * A generation legitimately takes minutes on a cold checkpoint, so an
+           * OBSERVED stage is still the difference between visible progress and
+           * a spinner indistinguishable from a hang.
+           *
+           * What is kept is the CODE. The Brain's sentence was dropped upstream
+           * at the stream boundary, because infrastructure describing itself
+           * ("Loading the language model …") reached a real user in production.
+           * Turning a code into words is `turnStatus.ts`'s job, not this one's.
            */
-          const detail = (frame.data as { detail?: string })?.detail
+          const stage = (frame.data as { stage?: string })?.stage
           // Augments the progress indicator; it is NOT the assistant's answer and
           // must never survive the turn.
-          if (typeof detail === 'string' && detail) setProgressIn({ conversationId, detail })
+          if (typeof stage === 'string' && stage) setProgressIn({ conversationId, stage })
           continue
         }
         if (frame.event === 'image') {

@@ -16,6 +16,7 @@
 
 import { callBrain } from '@/server/brain/gateway'
 import { resolveRequestPrincipal } from '@/server/tenancy/requestPrincipal'
+import { canHoldProjects } from '@/server/projects/projectPrincipal'
 
 export const dynamic = 'force-dynamic'
 
@@ -28,7 +29,10 @@ export async function POST(
 ): Promise<Response> {
   const { id } = await context.params
   const resolved = await resolveRequestPrincipal()
-  if (!resolved) {
+  // Anonymous visitors are real principals but cannot hold a project, so they
+  // must reach the sign-in state rather than a Brain refusal rendered as
+  // revoked access. See `server/projects/projectPrincipal.ts`.
+  if (!resolved || !canHoldProjects(resolved.principal)) {
     return Response.json({ ok: false, error: 'Sign in to work with a project.', remedy: 'sign-in' }, { status: 401 })
   }
 

@@ -15,7 +15,7 @@
  * clients end up disagreeing about what someone may open.
  *
  * ---------------------------------------------------------------------------
- * THE FIVE NEGATIVE STATES ARE RENDERED AS FIVE DIFFERENT THINGS
+ * THE NEGATIVE STATES ARE RENDERED AS DIFFERENT THINGS
  *
  * Collapsing them is the failure mode. "No projects available" shown to a user
  * whose access was revoked sends them hunting for something that is right
@@ -26,7 +26,17 @@
  *   request-read-access  → tell them to ask; do NOT offer reconnect, which
  *                          would fail identically
  *   retry                → offer retry; their access is fine
- *   sign-in              → sign in
+ *   sign-in              → sign in, WITH a sign-in action
+ *
+ * 🚨 `sign-in` and `retry` shared a branch, and only `retry` had a button — so
+ * a visitor who needed to sign in got a sentence and no way to act on it. They
+ * are separate now. A remedy the user cannot perform is not a remedy.
+ *
+ * That mattered because anonymous visitors were not reaching `sign-in` at all:
+ * they were reaching `request-read-access` and being told they had no access to
+ * a conversation they had just created. The mapping fix is server-side, in
+ * `server/projects/projectPrincipal.ts`; this file's job was to give the
+ * corrected state somewhere to land.
  * ---------------------------------------------------------------------------
  */
 
@@ -60,6 +70,14 @@ const api = async (url: string, init?: RequestInit): Promise<{ status: number; b
 }
 
 export function ConnectProject({ conversationId }: { conversationId: string }) {
+  /*
+   * Where sign-in returns the visitor. Read at render rather than stored, so a
+   * user who signs in from the rail lands back in the conversation they were
+   * reading instead of at the root — the anonymous case only exists inside a
+   * conversation, so returning them to "/" would lose it.
+   */
+  const returnPath = typeof window === 'undefined' ? `/chat/${conversationId}` : window.location.pathname
+
   const [state, setState] = useState<ConnectionState | null>(null)
   const [choosing, setChoosing] = useState(false)
   const [projects, setProjects] = useState<Project[] | null>(null)
@@ -156,24 +174,50 @@ export function ConnectProject({ conversationId }: { conversationId: string }) {
   }
 
   /*
+   * NOT SIGNED IN — its own state, with the action that actually resolves it.
+   *
+   * 🚨 An anonymous visitor used to land in `request-read-access` and be told
+   * "You do not have access to this conversation. Ask whoever manages it for
+   * access." — about a conversation they had just created and were reading.
+   * The server now sends `sign-in` for callers who cannot hold a project at
+   * all, and this renders the one thing they can act on.
+   *
+   * Sharing the `retry` branch left this state with a sentence and no way out.
+   * A remedy the user cannot perform is not a remedy.
+   */
+  if (remedy === 'sign-in') {
+    return (
+      <div className="flex items-start gap-2" role="status" data-testid="project-sign-in">
+        <FolderGit2 className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" strokeWidth={2} aria-hidden />
+        <p className="flex-1 text-[13px] leading-snug text-slate-600">{state.message}</p>
+        <a
+          href={`/api/auth/login?next=${encodeURIComponent(returnPath)}`}
+          data-testid="project-sign-in-action"
+          className="shrink-0 rounded-field px-2 py-1 text-[13px] font-medium text-brand-text transition-colors hover:bg-brand-50"
+        >
+          Sign in
+        </a>
+      </div>
+    )
+  }
+
+  /*
    * WE COULD NOT ASK. Their access is fine and unknown, so this offers a retry
    * and says nothing at all about what projects they have.
    */
-  if (remedy === 'retry' || remedy === 'sign-in') {
+  if (remedy === 'retry') {
     return (
       <div className="flex items-start gap-2" role="status" data-testid="project-unavailable">
         <FolderGit2 className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" strokeWidth={2} aria-hidden />
         <p className="flex-1 text-[13px] leading-snug text-slate-600">{state.message}</p>
-        {remedy === 'retry' && (
-          <button
-            type="button"
-            onClick={() => void refresh()}
-            className="inline-flex items-center gap-1 rounded-field px-2 py-1 text-[13px] font-medium text-brand-text transition-colors hover:bg-brand-50"
-          >
-            <RefreshCw className="h-3.5 w-3.5" strokeWidth={2} aria-hidden />
-            Try again
-          </button>
-        )}
+        <button
+          type="button"
+          onClick={() => void refresh()}
+          className="inline-flex items-center gap-1 rounded-field px-2 py-1 text-[13px] font-medium text-brand-text transition-colors hover:bg-brand-50"
+        >
+          <RefreshCw className="h-3.5 w-3.5" strokeWidth={2} aria-hidden />
+          Try again
+        </button>
       </div>
     )
   }

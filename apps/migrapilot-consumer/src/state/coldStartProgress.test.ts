@@ -30,11 +30,20 @@ import { renderToStaticMarkup } from 'react-dom/server'
 
 import { MessageView, TypingIndicator } from '@/components/chat/Message'
 import { showsTurnProgress } from '@/state/turnProgress'
+import { INFRASTRUCTURE_VOCABULARY, allStatusLabels, statusLabelFor } from '@/state/turnStatus'
 import type { Message } from '@/data/types'
 
-/** The exact sentence the Brain sends on a cold model. */
+/**
+ * The exact sentence the Brain sends on a cold model.
+ *
+ * It is kept here as the thing that must NEVER be renderable, not as an input.
+ * The component no longer accepts Brain prose at all — see `turnStatus.ts`.
+ */
 const COLD_START =
   'Loading the language model — the first answer after a pause takes longer to start.'
+
+/** What the product actually says for that same condition. Product voice. */
+const PRODUCT_LABEL = statusLabelFor('loading_model') ?? ''
 
 const answer = (text: string): Message => ({
   id: 'a1',
@@ -92,8 +101,8 @@ test('the progress surface has NONE of the assistant message grammar', () => {
    * failure was entirely in the branch the first fix left alone.
    */
   for (const [label, html] of [
-    ['with a cold-start detail', render(createElement(TypingIndicator, { detail: COLD_START }))],
-    ['with no detail at all', render(createElement(TypingIndicator, {}))],
+    ['with a status label', render(createElement(TypingIndicator, { label: PRODUCT_LABEL }))],
+    ['with no label at all', render(createElement(TypingIndicator, {}))],
   ]) {
     assert.doesNotMatch(html, /<img/, `${label}: the progress surface carries the assistant avatar`)
     const root = rootClass(html)
@@ -108,7 +117,7 @@ test('the progress surface has NONE of the assistant message grammar', () => {
 
 test('the progress surface offers none of a message’s controls', () => {
   for (const html of [
-    render(createElement(TypingIndicator, { detail: COLD_START })),
+    render(createElement(TypingIndicator, { label: PRODUCT_LABEL })),
     render(createElement(TypingIndicator, {})),
   ]) {
     assert.doesNotMatch(html, /<button/, 'no Listen, copy or feedback on transient state')
@@ -120,13 +129,13 @@ test('the progress surface offers none of a message’s controls', () => {
 test('there is ONE presentation, so no branch can quietly keep the old chrome', () => {
   // The second acceptance failure existed because there were two branches and
   // only one was fixed. Structure, not vigilance, is what prevents a third.
-  const withDetail = rootClass(render(createElement(TypingIndicator, { detail: COLD_START })))
+  const withLabel = rootClass(render(createElement(TypingIndicator, { label: PRODUCT_LABEL })))
   const without = rootClass(render(createElement(TypingIndicator, {})))
-  assert.equal(withDetail, without, 'the progress container must not change shape with its content')
+  assert.equal(withLabel, without, 'the progress container must not change shape with its content')
 })
 
 test('the cold-start line does NOT render in the assistant bubble', () => {
-  const progress = render(createElement(TypingIndicator, { detail: COLD_START }))
+  const progress = render(createElement(TypingIndicator, { label: PRODUCT_LABEL }))
   const message = render(createElement(MessageView, { message: answer('A real answer.') }))
 
   /*
@@ -149,7 +158,7 @@ test('the cold-start line does NOT render in the assistant bubble', () => {
 })
 
 test('the cold-start line carries no assistant identity — no avatar', () => {
-  const progress = render(createElement(TypingIndicator, { detail: COLD_START }))
+  const progress = render(createElement(TypingIndicator, { label: PRODUCT_LABEL }))
   const message = render(createElement(MessageView, { message: answer('A real answer.') }))
 
   assert.match(message, /<img/, 'an assistant message is expected to carry the brand mark')
@@ -161,7 +170,7 @@ test('the cold-start line carries no assistant identity — no avatar', () => {
 })
 
 test('the cold-start line is announced as status, not as content', () => {
-  const progress = render(createElement(TypingIndicator, { detail: COLD_START }))
+  const progress = render(createElement(TypingIndicator, { label: PRODUCT_LABEL }))
   assert.match(progress, /role="status"/, 'transient state must be a status region')
   assert.match(progress, /aria-live="polite"/)
 
@@ -173,9 +182,9 @@ test('the cold-start line is announced as status, not as content', () => {
   )
 })
 
-test('the cold-start detail is the only text in the progress surface', () => {
-  const progress = render(createElement(TypingIndicator, { detail: COLD_START }))
-  assert.equal(textOf(progress), COLD_START)
+test('the status label is the only text in the progress surface', () => {
+  const progress = render(createElement(TypingIndicator, { label: PRODUCT_LABEL }))
+  assert.equal(textOf(progress), PRODUCT_LABEL)
 })
 
 test('the wordless indicator stays wordless', () => {
@@ -266,4 +275,118 @@ test('a load failure renders as a system notice, not as the assistant speaking',
    */
   assert.match(spoken, /<button/, 'a real answer is expected to offer its controls')
   assert.doesNotMatch(notice, /<button/, 'a failure must not offer Listen, copy or feedback')
+})
+
+/* ------------------------------------------------------------------ *
+ * 🚨 THE PRODUCTION REGRESSION: infrastructure speaking to the user
+ *
+ * The suite above proved the indicator does not LOOK like a message, and that
+ * held. Production then showed a user this, mid-conversation, on an
+ * image-understanding turn:
+ *
+ *   "Loading the language model — the first answer after a pause takes longer
+ *    to start."
+ *
+ * Correct shape, wrong voice. Nothing here asked what the words WERE, so the
+ * suite passed while infrastructure described itself to a person who had asked
+ * about a spreadsheet. These tests ask that question.
+ * ------------------------------------------------------------------ */
+
+/** Every stage the Brain emits today, text lane and image lane. */
+const BRAIN_STAGES = ['loading_model', 'submitting', 'queued', 'generating', 'downloading']
+
+/** The sentences the Brain authors for them. Copied from `aiRoutes.ts`. */
+const BRAIN_PROSE = [
+  'Loading the language model — the first answer after a pause takes longer to start.',
+  'Sending your prompt to the image pipeline',
+  'Queued in the image pipeline',
+  'Waiting behind 3 job(s)',
+  'Loading the image model and generating',
+  'Retrieving the finished image',
+]
+
+test('no producible status label contains infrastructure vocabulary', () => {
+  /*
+   * The mutation gate. Mapping any stage back to the Brain's wording — or to
+   * anything else about models, pipelines or checkpoints — fails here.
+   *
+   * The vocabulary list is imported from the seam rather than restated, so the
+   * rule and its guard cannot drift apart.
+   */
+  for (const label of allStatusLabels()) {
+    for (const word of INFRASTRUCTURE_VOCABULARY) {
+      assert.ok(
+        !label.toLowerCase().includes(word),
+        `status copy "${label}" contains infrastructure vocabulary "${word}".\n` +
+          '  Status copy describes the USER’S work, never the machinery doing it.',
+      )
+    }
+  }
+})
+
+test('every Brain stage renders product copy, never the Brain’s own sentence', () => {
+  // Both lanes: the text lane (loading_model — the production defect) and the
+  // image lane, which shipped the same shape and would have failed the same way.
+  for (const stage of BRAIN_STAGES) {
+    const label = statusLabelFor(stage)
+    assert.ok(label, `stage "${stage}" has no product copy — it would render bare`)
+    const html = render(createElement(TypingIndicator, { label }))
+    for (const prose of BRAIN_PROSE) {
+      assert.ok(
+        !html.includes(prose),
+        `stage "${stage}" rendered the Brain's own sentence: "${prose}"`,
+      )
+    }
+  }
+})
+
+test('the exact production sentence cannot be produced by any stage', () => {
+  // Named on its own because this is the string a user actually saw.
+  for (const stage of [...BRAIN_STAGES, 'unknown_future_stage', '', 'vision', 'cold_start']) {
+    assert.notEqual(statusLabelFor(stage), COLD_START)
+  }
+})
+
+test('an unknown stage renders motion with NO claim', () => {
+  /*
+   * A stage nobody has mapped must not be narrated. Inventing a description
+   * for an unrecognised condition is the fabricated-progress failure this
+   * codebase refuses elsewhere — and it is also how a future Brain stage would
+   * smuggle new wording onto the screen.
+   */
+  assert.equal(statusLabelFor('a_stage_added_next_month'), null)
+  assert.equal(statusLabelFor(undefined), null)
+  assert.equal(statusLabelFor(42), null)
+  const bare = render(createElement(TypingIndicator, {}))
+  assert.equal(textOf(bare), '')
+})
+
+test('the stream boundary does not carry the Brain’s prose to the client', () => {
+  /*
+   * A WIRING CHECK at the seam, and only that.
+   *
+   * The rendering claims above are proven by rendering. What source text CAN
+   * answer is whether `detail` is still read off the frame and forwarded — the
+   * single line that made every rendering guard irrelevant, because the prose
+   * arrived already-formed and the UI merely displayed what it was given.
+   */
+  const route = readFileSync(join(process.cwd(), 'src/app/api/chat/stream/route.ts'), 'utf8')
+  const stageCase = route.slice(route.indexOf("case 'stage':"), route.indexOf("case 'image':"))
+  assert.ok(stageCase.length > 0, 'the stage case could not be located')
+  assert.doesNotMatch(
+    stageCase,
+    /emit\('stage',\s*\{[^}]*detail/,
+    'the stage frame forwards `detail` again — Brain prose is reaching the browser',
+  )
+})
+
+test('progress never coexists with an answer that has arrived', () => {
+  // "No duplicate indicator" stated as the property rather than the symptom:
+  // once the answer has content, the indicator is gone, so two surfaces
+  // describing one turn cannot be on screen together.
+  const withAnswer = showsTurnProgress({
+    messages: [question('what is in the sheet?'), answer('Revenue totals 391.')],
+    pending: true,
+  })
+  assert.equal(withAnswer, false)
 })
