@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { FileText, ImageIcon, Paperclip } from 'lucide-react'
+import { FileText, Globe, ImageIcon, Paperclip } from 'lucide-react'
 import { cn } from '@/lib/cn'
 
 /**
@@ -23,13 +23,13 @@ export interface HubAction {
   id: string
   label: string
   hint: string
-  icon: 'image' | 'file'
+  icon: 'image' | 'file' | 'globe'
   /** Disabled when set; shown verbatim, because the server knows why. */
   unavailableReason?: string
   onSelect: () => void
 }
 
-const ICONS = { image: ImageIcon, file: FileText }
+const ICONS = { image: ImageIcon, file: FileText, globe: Globe }
 
 export function ActionHub({ actions, disabled, disabledReason, className }: {
   actions: HubAction[]

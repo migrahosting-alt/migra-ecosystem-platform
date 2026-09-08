@@ -12,6 +12,8 @@
  */
 
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import test from 'node:test'
 
 import {
@@ -163,4 +165,86 @@ test('no implementation detail reaches the row', () => {
     assert.equal(row[leaked], undefined, `the resolved row carries "${leaked}"`)
   }
   assert.ok(!JSON.stringify(row).includes('migra.search'), 'the capability id leaked into the row')
+})
+
+/* ------------------------------------------------------------------ *
+ * 🚨 Dead controls — the defect this menu has shipped twice
+ * ------------------------------------------------------------------ */
+
+test('🚨 every catalog row has a handler, or it is a dead control waiting to happen', async () => {
+  /*
+   * Caught while adding Search. The row is registry-backed and currently
+   * unavailable, so it cannot be clicked — and the moment a provider is
+   * configured it becomes available with no handler behind it. That is exactly
+   * the paperclip-with-no-picker defect, deferred by one deployment.
+   *
+   * The handler map lives in the composer because what a row DOES is that
+   * component's business. What must not diverge is the set of ids: a catalog
+   * entry with no matching handler is a promise nobody kept.
+   */
+  const catalogSource = readFileSync(join(process.cwd(), 'src/features/capabilities/catalog.ts'), 'utf8')
+  const composer = readFileSync(join(process.cwd(), 'src/components/chat/Composer.tsx'), 'utf8')
+
+  const declared = [...catalogSource.matchAll(/^\s{6}id: '([a-z-]+)'/gm)].map((m) => m[1]!)
+  const handlerBlock = composer.slice(
+    composer.indexOf('const onSelect: Record<string, () => void>'),
+    composer.indexOf('const catalog = buildCatalog'),
+  )
+  const handled = [...handlerBlock.matchAll(/^\s{4}([a-z-]+):/gm)].map((m) => m[1]!)
+
+  const missing = declared.filter((id) => !handled.includes(id))
+  assert.deepEqual(
+    missing,
+    [],
+    `catalog rows with no handler: ${missing.join(', ')} — each becomes a dead control the moment it is available`,
+  )
+})
+
+test('🚨 an engine-executed capability is REGISTRY-backed, never a local guess', () => {
+  /*
+   * 🚨 ADDED BECAUSE A MUTATION ESCAPED.
+   *
+   * Swapping Search's source from `registry` to a `local` readiness carrying a
+   * hardcoded reason passed the entire suite. The row still rendered, still
+   * showed an excuse, and the excuse was now written by the browser about a
+   * backend it must not know exists.
+   *
+   * That is the whole architecture inverted in four lines, and nothing noticed.
+   */
+  const catalogSource = readFileSync(join(process.cwd(), 'src/features/capabilities/catalog.ts'), 'utf8')
+  const web = catalogSource.slice(catalogSource.indexOf("id: 'web'"), catalogSource.indexOf("id: 'web'") + 500)
+  assert.match(
+    web,
+    /source: \{ kind: 'registry', capabilityId: 'migra\.search' \}/,
+    'Search is not registry-backed — its availability is being decided in the browser',
+  )
+})
+
+test('🚨 no consumer source names a search backend', () => {
+  /*
+   * The composer may know presentation metadata. It may not know how search
+   * works, which provider is underneath, or whether that provider is healthy.
+   *
+   * Checked across the whole capability + composer surface rather than one
+   * file, because the leak that matters is the one someone adds later "just to
+   * make the message clearer".
+   */
+  const FORBIDDEN = ['searxng', 'SearXNG', 'search-core', 'migra-search-core']
+  const files = [
+    'src/features/capabilities/catalog.ts',
+    'src/features/capabilities/resolveCapabilities.ts',
+    'src/features/capabilities/useRegistryCapabilities.ts',
+    'src/components/chat/Composer.tsx',
+    'src/components/chat/ActionHub.tsx',
+    'src/app/api/capabilities/route.ts',
+  ]
+  for (const file of files) {
+    const source = readFileSync(join(process.cwd(), file), 'utf8')
+    for (const term of FORBIDDEN) {
+      assert.ok(
+        !source.includes(term),
+        `${file} names a search backend ("${term}") — that truth belongs to the engine`,
+      )
+    }
+  }
 })

@@ -61,6 +61,7 @@ export type BrainOperation =
    * caller may do from its own registry, on every use.
    */
   | { kind: 'listProjects' }
+  | { kind: 'listCapabilities' }
   | { kind: 'conversationProject'; conversationId: string }
   | { kind: 'connectProject'; conversationId: string; projectId: string }
   | { kind: 'disconnectProject'; conversationId: string }
@@ -489,6 +490,15 @@ export function resolveOperation(op: BrainOperation): ResolvedRequest {
 
     case 'listProjects':
       return { method: 'GET', path: '/api/ai/projects' }
+
+    case 'listCapabilities':
+      /*
+       * `includeUnavailable` is the whole point. The default listing answers
+       * "what can run right now"; the hub needs "what EXISTS and why it cannot
+       * run", because a capability that vanishes when its backend is missing
+       * teaches people it was never built.
+       */
+      return { method: 'GET', path: '/api/ai/tools?includeUnavailable=true' }
 
     case 'conversationProject':
       return {

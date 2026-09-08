@@ -590,6 +590,24 @@ export function Composer({
     image: () => imageInputRef.current?.click(),
     file: () => fileInputRef.current?.click(),
     library: () => setLibraryOpen(true),
+    /*
+     * Search is normally reached by asking naturally — the engine routes it.
+     * This row exists for discoverability, so it does the one honest thing a
+     * menu entry can do: put the user in a state that WILL route to search,
+     * and let them finish the sentence.
+     *
+     * It prefills rather than dispatching because there is nothing to search
+     * for yet. A row that fired an empty search would be a control that
+     * appears to work and produces nothing.
+     */
+    web: () => {
+      setValue((current) => (current.trim() ? current : 'Search the web for '))
+      requestAnimationFrame(() => {
+        const el = textareaRef.current
+        el?.focus()
+        el?.setSelectionRange(el.value.length, el.value.length)
+      })
+    },
   }
 
   /*

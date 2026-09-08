@@ -20,17 +20,18 @@
  *             `resolveCapabilities.ts` for why absence, not greying out.
  *
  * ---------------------------------------------------------------------------
- * 🚨 WHY WEB, MAPS, EMAIL, DRIVE AND GITHUB ARE NOT LISTED YET
+ * 🚨 WHY MAPS, EMAIL, DRIVE AND GITHUB ARE STILL NOT LISTED
  *
- * They are the next milestone, and it would be easy to declare them now so the
+ * They are later milestones, and it would be easy to declare them now so the
  * menu "looks" complete. They are deliberately absent, because a catalog entry
  * for a capability nobody has built is the same lie as a hardcoded button —
  * one indirection further away, which makes it harder to spot rather than less
  * false.
  *
- * Adding Migra Search later is two edits and no new machinery: register the
- * capability in the engine, and add one entry here naming its id. Nothing in
- * the composer changes. That is the whole point of this slice.
+ * Search is here because it is REGISTERED in the engine. It is not usable yet,
+ * and that is a different fact: the row renders with the engine's own reason
+ * rather than being hidden. Adding it took exactly what this slice predicted —
+ * one entry naming a capability id, and no change to the composer.
  */
 
 import type { CatalogEntry, LocalReadiness } from './resolveCapabilities'
@@ -77,6 +78,26 @@ export function buildCatalog(probes: LocalProbes): CatalogEntry[] {
       hint: 'Reuse something you have already uploaded, without sending it again.',
       icon: 'file',
       source: { kind: 'local', readiness: probes.documents },
+    },
+    {
+      /*
+       * MIGRA SEARCH. The first engine-executed capability in this menu.
+       *
+       * Everything this file knows about it is on these four lines: a label, a
+       * hint, an icon, and an id. It does not know which backend answers a
+       * search, whether that backend is healthy, or that one is missing right
+       * now — the engine owns all of it, and the reason a user sees when it
+       * cannot run is a sentence the engine wrote.
+       *
+       * Today it renders as registered-but-unavailable: "Web search is not set
+       * up yet." When a provider is configured the row becomes usable, with no
+       * edit here.
+       */
+      id: 'web',
+      label: 'Search the web',
+      hint: 'Find current information and read the sources.',
+      icon: 'globe',
+      source: { kind: 'registry', capabilityId: 'migra.search' },
     },
   ]
 }
