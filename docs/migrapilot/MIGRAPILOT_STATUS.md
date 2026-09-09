@@ -15,6 +15,69 @@ _Last updated: 2026-09-09_
 
 ---
 
+## Lane 2026-09-09 — summary as orchestration; the second router deleted
+
+`0de85e61`. Every Migra Email surface is now either product-reachable or gone.
+
+### routeEmail: deleted, not parked
+
+It turned a sentence into a tool call with no identity. The agent loop already reaches `migra.email`
+through the same authenticated capability executor the HTTP route uses, so keeping it would have
+meant **two routing authorities**.
+
+It was checked for a legitimate candidate-generation caller first: every export of `emailRouting.ts`
+*and* `plan.ts` had **zero consumers**, and `planTurn` — the orchestration classifier that genuinely
+exists and is called — has no email awareness and no hint-consuming surface. A pure classifier with
+no caller is still dead architecture, and dormant architecture gets wired back up by someone who does
+not know why it was parked. Both files and their 39 tests are gone. If an email hint is wanted for
+Automatic later it belongs **inside `planTurn`** — a second classifier beside the real one is the
+same shape of problem as a second router.
+
+### `migra.email { op: summarize }`
+
+    principal → connection → canonical provider read → evidence → completeness → prose → provenance
+
+The provider is never told a summary is happening. The summariser is handed **finished text and
+nothing to fetch with** — no provider, no connection, no credential, no principal.
+
+| Invariant | How it holds |
+|---|---|
+| 1. no cross-principal evidence | the fixture transport answers per bearer token, so a wrong-connection summary carries visibly wrong subjects |
+| 2. partial evidence → partial summary | the disclosure is **attached**, whatever the model wrote |
+| 3. failure ≠ confident summary | provider failure, empty mailbox and generator failure all return **before any prose exists**; the generator is asserted never to have run |
+| 4. claims trace to evidence | sources are canonical evidence ids + provider message ids; a thread summary carries only its own thread |
+| 5. one implementation | `executeEmailSummarize` has exactly one call site, asserted by counting |
+| 6. no identity → fail closed | refused, generator never runs |
+| 7. no planner bypass | asserted by **absence** of the deleted files |
+
+Mutations caught: trusting the model's prose instead of attaching the disclosure; summarising an
+empty mailbox; building the scope with owner in place of workspace.
+
+**Not implemented, deliberately:** per-sentence claim attribution. Grounding is enforced at the
+**source** level. The repo claim verifier was not reused — it is built on paths, line spans and repo
+terms, and applying those heuristics to email prose would be wrong.
+
+### 🚨 My own test was vacuous first
+
+`if (!r.ok && 'failure' in r) assert(...)` **skips silently** when the outcome shape differs. Removing
+the empty-mailbox guard turned the result into a refusal, and the test passed anyway. Caught by
+mutation, not by review. Every conditional shape check now asserts the shape unconditionally before
+reading into it.
+
+### Build gotcha
+
+Deleting a source file leaves its **compiled output** in `dist/`. `tsc -b` does not remove orphans, so
+the suite kept running `emailRouting.test.js` against code that no longer existed, and the gate failed
+on a test for a deleted module.
+
+Gate: brain **3032/3032** (3058 − 39 deleted + 13 new), consumer **1173/1173**.
+
+### Next
+Live qualification only, and it is blocked on the mailbox: seed it and reconnect. Nothing is accepted
+or deployed; production remains `chat-platform-rc-0908`, schema 26.
+
+---
+
 ## Lane 2026-09-09 (final) — one policy, one identity, attachments reachable
 
 Three commits, each its own evidence boundary: `e78a9bea` transport, `fde2defa` file policy,

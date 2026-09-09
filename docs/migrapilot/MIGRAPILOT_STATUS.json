@@ -1,7 +1,7 @@
 {
   "$schema": "MIGRAPILOT_STATUS — canonical cross-agent state. Update on every material change.",
   "updated": "2026-09-09",
-  "updatedBy": "Claude (Opus 5) — file policy extracted, identity boundary closed, attachments reachable",
+  "updatedBy": "Claude (Opus 5) — summary is canonical orchestration; routeEmail deleted",
   "rules": {
     "easyFirst": "Do not start deep capability work while meaningful easy user-facing items remain.",
     "provenLive": "PROVEN_LIVE requires the real user-facing workflow to pass. Code existing and tests passing is NOT proof.",
@@ -2503,7 +2503,7 @@
   },
   "migraEmailProgress": {
     "_authority": "Bonex work order, 2026-09-08. Gmail is the first provider, never the product contract.",
-    "status": "READ QUALIFIED LIVE (search/read/thread/refresh/isolation/disconnect). Attachments and the autonomous identity boundary are now BUILT AND WIRED but not yet live-qualified: the QA mailbox still has no seeded mail, and the disconnect test removed the grant again. Summarisation and the deterministic routeEmail planner remain unreachable.",
+    "status": "ALL SURFACES NOW PRODUCT-REACHABLE OR DELETED. migra.email carries search, readMessage, readThread, listAttachments, fetchAttachment and summarize. routeEmail and plan.ts were DELETED (zero consumers on every export). Remaining work is LIVE QUALIFICATION ONLY: the QA mailbox has never been seeded (users.getProfile reports messagesTotal=2) and the grant was revoked by the disconnect test.",
     "suiteGate": {
       "brain": "3050/3050 pass, 0 fail, 0 skipped (was 3016; +25 Gmail transport tests, 3 mutations caught)",
       "consumer": "1171/1171 pass, 0 fail, 0 skipped (unchanged this batch)",
@@ -2644,11 +2644,10 @@
     },
     "operationalLossThisSession": "The Brain qualification Postgres (127.0.0.1:32790, db migrapilot_test) was REMOVED mid-session — no container, no volume, no record of it. The sealed Gmail connection went with it. Replaced by a NAMED, non-ephemeral container `migrapilot-brainqual` recorded in /tmp/qual-brain-container.txt; schema 28 reapplied, mail_connection back to 0 rows. Cost: one more Connect email click.",
     "unwiredSurfaces": {
-      "_finding": "Same defect class as the missing Gmail transport: built, mutation-tested, declared complete, reachable by nothing.",
-      "attachmentExecution": "CLOSED. migra.email now takes op: listAttachments | fetchAttachment. The caller names two IDS only — evidence is derived server-side from a message the caller's own connection returned, and the policy is resolved inside the executor.",
-      "agentRuntimeIdentity": "CLOSED. ExecutionIdentity is derived at the authenticated boundary, frozen onto the run, and carries principalId/workspaceId only. Readiness is no longer an executor INPUT — it is derived from the principal by one resolver shared by the HTTP path and the agent loop.",
-      "routeEmail": "STILL UNWIRED. apps/brain-service/src/engine/email/emailRouting.ts has zero callers. The autonomous loop can now reach migra.email through the model's own tool selection, so this deterministic planner may be redundant — that is a decision, not an oversight, and it is open.",
-      "emailSummary": "STILL UNWIRED. summaryContextFrom / summaryMaterial / summaryInstructions / renderSummary have zero callers. Needs a turn-level caller that consumes resolved-scope evidence."
+      "attachmentExecution": "CLOSED — op: listAttachments | fetchAttachment; caller names two IDS only.",
+      "agentRuntimeIdentity": "CLOSED — ExecutionIdentity derived at the authenticated boundary; readiness derived from the principal by one shared resolver.",
+      "emailSummary": "CLOSED — op: summarize. principal -> connection -> canonical provider read -> evidence -> completeness -> prose -> provenance. The provider knows nothing about summarisation; the summariser is handed text and nothing to fetch with.",
+      "routeEmail": "DELETED with plan.ts and their 39 tests. Every export had zero consumers, and planTurn (the orchestration classifier that IS called) has no email awareness and no hint-consuming surface. A pure classifier with no caller is still dead architecture. If an email hint is wanted for Automatic later it belongs INSIDE planTurn — a second classifier beside the real one is the same shape of problem as a second router."
     },
     "reconnectRequired": "The disconnect qualification ran on the freshly reconnected grant and revoked it again (pg_stat_user_tables on mail_connection: inserts=1, updates=2, deletes=1 — the reconnect, the forced expiry plus the refresh, and the disconnect). Reconnect is needed once more, together with seeding, which never landed: Gmail users.getProfile still reports messagesTotal=2.",
     "filePolicyAuthority": {
@@ -2666,6 +2665,20 @@
       "4": "A policy change moves both upload and Gmail ingestion; neither side redeclares the table or the ceiling; the capability accepts no policy and no file description.",
       "mutationsCaught": "3/3 — a runtime caching the last principal (fails 1 and 2), a global readiness fallback (fails 3), and the Gmail path growing its own policy (fails 4b and 4c)."
     },
-    "halfWireFound": "registerToolExecutionRoutes returned { registry, approvals, audit } WITHOUT the readiness resolver — and those deps are what the agent service is handed. Threading identity alone would have left the autonomous loop still resolving nothing, with the denial still looking like a correct refusal."
+    "halfWireFound": "registerToolExecutionRoutes returned { registry, approvals, audit } WITHOUT the readiness resolver — and those deps are what the agent service is handed. Threading identity alone would have left the autonomous loop still resolving nothing, with the denial still looking like a correct refusal.",
+    "summaryInvariants": {
+      "file": "apps/brain-service/test/emailSummarizeOrchestration.test.ts (13 tests)",
+      "1": "Evidence cannot come from another principal or workspace — the transport answers per bearer token, so a wrong-connection summary would visibly carry the wrong subjects.",
+      "2": "A snippet-only evidence set produces an explicitly partial summary; the disclosure is ATTACHED whatever the model wrote. A complete set carries no caveat it does not have.",
+      "3": "A provider failure, an empty mailbox and a generator failure all return BEFORE any prose exists. The generator is asserted never to have run.",
+      "4": "Every source is canonical evidence with a provider message id; a thread summary carries only that thread. No provider id or credential reaches the model context.",
+      "5": "One implementation — executeEmailSummarize is invoked from exactly one place, asserted by counting call sites in the registry.",
+      "6": "No execution identity -> refused, and the generator never runs.",
+      "7": "Asserted by ABSENCE: emailRouting.ts and plan.ts must not exist.",
+      "mutationsCaught": "3/3 — trusting the model prose instead of attaching the disclosure; summarising an empty mailbox; building the scope with owner in place of workspace.",
+      "notImplemented": "CLAIM-LEVEL attribution per sentence. Grounding is enforced at the SOURCE level: a summary can only cite messages that were retrieved, and a thread summary only its own thread. The repo claim verifier was NOT reused — it is built on paths, line spans and repo terms, and applying those heuristics to email prose would be wrong."
+    },
+    "ownDefectFound": "My own test was vacuous first: `if (!r.ok && 'failure' in r) assert(...)` SKIPS silently when the outcome shape differs, so removing the empty-mailbox guard turned the result into a refusal and the test still passed. Caught by mutation, not by review. Every conditional shape check now asserts the shape unconditionally before reading into it.",
+    "buildGotcha": "Deleting a source file leaves its COMPILED output in dist/. `tsc -b` does not remove orphans, so the suite kept running emailRouting.test.js against code that no longer existed and the gate failed on a test for a deleted module. Remove dist/ counterparts when deleting sources, or clean before the gate."
   }
 }
