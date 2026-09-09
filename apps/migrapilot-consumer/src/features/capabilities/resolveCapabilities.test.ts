@@ -212,12 +212,27 @@ test('🚨 an engine-executed capability is REGISTRY-backed, never a local guess
    * That is the whole architecture inverted in four lines, and nothing noticed.
    */
   const catalogSource = readFileSync(join(process.cwd(), 'src/features/capabilities/catalog.ts'), 'utf8')
-  const web = catalogSource.slice(catalogSource.indexOf("id: 'web'"), catalogSource.indexOf("id: 'web'") + 500)
-  assert.match(
-    web,
-    /source: \{ kind: 'registry', capabilityId: 'migra\.search' \}/,
-    'Search is not registry-backed — its availability is being decided in the browser',
-  )
+
+  /*
+   * Checked for EVERY engine-executed row, not just the first one written.
+   * The earlier version named `web` explicitly and would have let a later
+   * capability be switched to a local readiness with a neutral-sounding reason
+   * — the same inversion, one row over.
+   */
+  const ENGINE_BACKED: Array<[string, string]> = [
+    ['web', 'migra.search'],
+    ['email', 'migra.email'],
+  ]
+  for (const [row, capabilityId] of ENGINE_BACKED) {
+    const start = catalogSource.indexOf(`id: '${row}'`)
+    assert.ok(start > 0, `catalog row '${row}' is missing`)
+    const block = catalogSource.slice(start, start + 700)
+    assert.match(
+      block,
+      new RegExp(`source: \\{ kind: 'registry', capabilityId: '${capabilityId.replace('.', '\\.')}' \\}`),
+      `'${row}' is not registry-backed — its availability is being decided in the browser`,
+    )
+  }
 })
 
 test('🚨 no consumer source names a search backend', () => {
@@ -229,7 +244,13 @@ test('🚨 no consumer source names a search backend', () => {
    * file, because the leak that matters is the one someone adds later "just to
    * make the message clearer".
    */
-  const FORBIDDEN = ['searxng', 'SearXNG', 'search-core', 'migra-search-core']
+  const FORBIDDEN = [
+    'searxng', 'SearXNG', 'search-core', 'migra-search-core',
+    // Email's equivalents. The composer may know a label and a capability id;
+    // it may not know which mail provider is underneath, what OAuth is, or
+    // which scopes a connected account holds.
+    'gmail', 'Gmail', 'googleapis', 'oauth', 'OAuth', 'refresh_token', 'access_token',
+  ]
   const files = [
     'src/features/capabilities/catalog.ts',
     'src/features/capabilities/resolveCapabilities.ts',
@@ -238,8 +259,19 @@ test('🚨 no consumer source names a search backend', () => {
     'src/components/chat/ActionHub.tsx',
     'src/app/api/capabilities/route.ts',
   ]
+  /*
+   * 🚨 COMMENTS ARE STRIPPED FIRST.
+   *
+   * This caught its own documentation: catalog.ts explains that the file does
+   * NOT know the provider is Gmail or what OAuth is — prose that forbids a
+   * thing necessarily contains it. That is the prohibition-frame false
+   * positive this repository has hit before, and the guard is about CODE.
+   */
+  const codeOf = (raw: string): string =>
+    raw.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(^|[^:])\/\/.*$/gm, '$1')
+
   for (const file of files) {
-    const source = readFileSync(join(process.cwd(), file), 'utf8')
+    const source = codeOf(readFileSync(join(process.cwd(), file), 'utf8'))
     for (const term of FORBIDDEN) {
       assert.ok(
         !source.includes(term),

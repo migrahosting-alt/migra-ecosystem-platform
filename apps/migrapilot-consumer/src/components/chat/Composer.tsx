@@ -600,6 +600,20 @@ export function Composer({
      * for yet. A row that fired an empty search would be a control that
      * appears to work and produces nothing.
      */
+    /*
+     * Email, like search, is normally reached by asking naturally. The row
+     * prefills rather than dispatching, because there is nothing to search for
+     * yet — a row that fired an empty query would appear to work and return
+     * nothing.
+     */
+    email: () => {
+      setValue((current) => (current.trim() ? current : 'Find the email about '))
+      requestAnimationFrame(() => {
+        const el = textareaRef.current
+        el?.focus()
+        el?.setSelectionRange(el.value.length, el.value.length)
+      })
+    },
     web: () => {
       setValue((current) => (current.trim() ? current : 'Search the web for '))
       requestAnimationFrame(() => {

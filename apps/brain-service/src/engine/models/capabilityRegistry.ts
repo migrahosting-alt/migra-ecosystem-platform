@@ -20,6 +20,7 @@ import { z } from 'zod';
 import type { ZodType } from 'zod';
 
 import { migraSearch } from '../search/migraSearch.js';
+import { migraEmail } from '../email/migraEmail.js';
 import {
   WorkspaceSearchRequestSchema,
   FileReadRangeRequestSchema,
@@ -65,7 +66,9 @@ export type CapabilityCategory =
   | 'deployment'
   | 'mcp'
   /** Capabilities the engine executes against the outside world. */
-  | 'web';
+  | 'web'
+  /** The user's own connected accounts — mail, and later calendar and files. */
+  | 'account';
 
 /** Client-facing capability metadata — safe to serialize; no implementation. */
 export interface CapabilityDescriptor {
@@ -142,7 +145,27 @@ export const LOCAL_GRANTS: ReadonlySet<string> = new Set([
    * not allowed to search", and those call for different actions.
    */
   'web.search',
+  /*
+   * Read-only mail is granted. Whether it can RUN depends on whether this user
+   * has connected an account — a per-user fact the grant set cannot express,
+   * and the reason the readiness probe exists.
+   */
+  'email.read',
 ]);
+
+/** Input for `migra.email`. Search criteria, structured rather than a query string. */
+export const EmailSearchRequestSchema = z.object({
+  from: z.string().max(200).optional(),
+  to: z.string().max(200).optional(),
+  subjectContains: z.string().max(300).optional(),
+  keywords: z.string().max(500).optional(),
+  after: z.string().max(40).optional(),
+  before: z.string().max(40).optional(),
+  unreadOnly: z.boolean().optional(),
+  hasAttachment: z.boolean().optional(),
+  threadId: z.string().max(200).optional(),
+  limit: z.number().int().min(1).max(50).optional(),
+});
 
 /** Input for `migra.search`. Deliberately small: a query and how fresh it must be. */
 export const WebSearchRequestSchema = z.object({
@@ -394,6 +417,42 @@ const TOOLS: RunnableCapability[] = [
     readiness: () => migraSearch.readiness(),
     handler: async () => {
       throw new Error('migra.search has no provider configured');
+    },
+  },
+  {
+    /*
+     * MIGRA EMAIL — reading. Sending is a SEPARATE capability, deliberately.
+     *
+     * 🚨 ONE CAPABILITY CANNOT REPRESENT BOTH. A connected account may hold
+     * read scope and not send scope — common, and entirely reasonable. A
+     * single entry would either hide working search or advertise a send that
+     * is refused at dispatch, and the hub would have no way to show the truth.
+     *
+     * So read is registered here as read-only and non-approval-gated, and send
+     * lives in its own registration governed by consent and durable
+     * idempotency. Availability comes from `migraEmail.readiness()`, which is
+     * per-operation for exactly this reason.
+     *
+     * Today no provider is configured, so this is registered, visible, and
+     * honestly unusable: "Email is not set up yet."
+     */
+    descriptor: meta(
+      'migra.email',
+      'Email',
+      'Search and read your connected email.',
+      'account',
+      ['email.read'],
+      { readOnly: true },
+    ),
+    inputSchema: EmailSearchRequestSchema,
+    readiness: () => {
+      const readiness = migraEmail.readiness();
+      return readiness.readAvailable
+        ? { ready: true }
+        : { ready: false, ...(readiness.reason ? { reason: readiness.reason } : {}) };
+    },
+    handler: async () => {
+      throw new Error('migra.email has no provider configured');
     },
   },
 ];

@@ -99,6 +99,23 @@ export function buildCatalog(probes: LocalProbes): CatalogEntry[] {
       icon: 'globe',
       source: { kind: 'registry', capabilityId: 'migra.search' },
     },
+    {
+      /*
+       * MIGRA EMAIL. Same four lines, same ignorance.
+       *
+       * This file does not know the provider is Gmail, what OAuth is, which
+       * scopes are held, or whether an account is connected. It knows a label,
+       * a hint, an icon and a capability id. The engine decides the rest, and
+       * the sentence a user reads when it cannot run is one the engine wrote.
+       *
+       * Today: "Email is not set up yet."
+       */
+      id: 'email',
+      label: 'Email',
+      hint: 'Search and read your connected email.',
+      icon: 'mail',
+      source: { kind: 'registry', capabilityId: 'migra.email' },
+    },
   ]
 }
 
