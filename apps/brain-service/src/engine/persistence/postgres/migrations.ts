@@ -1337,6 +1337,82 @@ CREATE INDEX IF NOT EXISTS tool_idempotency_state_idx
   ON tool_idempotency (state, updated_at);
 `;
 
+/**
+ * Migration 27 — connected mail accounts.
+ *
+ * 🚨 Both token columns hold CIPHERTEXT, sealed with a key that lives outside
+ * this database. That is the point of the design: a dump of this database — a
+ * backup on a laptop, a snapshot restored into staging, a forgotten replica —
+ * must not be a permanent key to every connected user's mailbox. A refresh
+ * token is a credential to a system that is not ours; it survives a Migra
+ * password change and does not expire on its own.
+ *
+ * `authorization_revoked_at` rather than deleting the row: a revoked grant
+ * still means the user connected once, which is what makes the remedy
+ * "reconnect" instead of "start from nothing". Only an explicit disconnect
+ * removes a row.
+ *
+ * The primary key leads with scope, so a query that forgets the tenant filter
+ * cannot use the index — the property every other scoped table here has.
+ */
+const M27_MAIL_CONNECTIONS = `
+CREATE TABLE IF NOT EXISTS mail_connection (
+  owner_scope              migra_scope NOT NULL,
+  workspace_scope          migra_scope NOT NULL,
+  provider                 TEXT        NOT NULL,
+  /* The provider's stable id. NOT the address, which can be reassigned. */
+  provider_account_id      TEXT        NOT NULL,
+  /* Display only. Never used to decide anything. */
+  account_address          TEXT        NOT NULL,
+
+  /* Sealed values: {keyId, iv, tag, ciphertext}. No plaintext token is ever
+     written to this table. The key id is stored alongside so a key can be
+     rotated without a flag day, and so "wrong key" is diagnosable. */
+  access_token_sealed      JSONB       NOT NULL,
+  refresh_token_sealed     JSONB       NOT NULL,
+  access_token_expires_at  BIGINT      NOT NULL,
+
+  /* What the provider actually granted, which may be less than was asked. */
+  granted_scopes           TEXT[]      NOT NULL,
+
+  /* Non-null means authorization_expired. The row is RETAINED. */
+  authorization_revoked_at BIGINT,
+
+  connected_at             BIGINT      NOT NULL,
+  last_refresh_at          BIGINT,
+  updated_at               BIGINT      NOT NULL,
+
+  PRIMARY KEY (owner_scope, workspace_scope, provider, provider_account_id)
+);
+
+CREATE INDEX IF NOT EXISTS mail_connection_scope_idx
+  ON mail_connection (owner_scope, workspace_scope, provider);
+
+/*
+ * 🚨 ROW-LEVEL SECURITY, LIKE EVERY OTHER SCOPED TABLE — and least optional
+ * here, because this is the table that holds mailbox credentials.
+ *
+ * The repo also writes an explicit scope predicate into every statement. That
+ * is not redundancy for its own sake: the predicate is what a reviewer can see
+ * in a diff, and RLS is what holds when someone forgets one. FORCE matters
+ * because the table owner would otherwise bypass its own policy.
+ */
+ALTER TABLE mail_connection ENABLE ROW LEVEL SECURITY;
+ALTER TABLE mail_connection FORCE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS mail_connection_scope ON mail_connection;
+CREATE POLICY mail_connection_scope ON mail_connection
+  USING (owner_scope = migra_current_owner())
+  WITH CHECK (owner_scope = migra_current_owner());
+
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'migrapilot_app') THEN
+    GRANT SELECT, INSERT, UPDATE, DELETE ON mail_connection TO migrapilot_app;
+  END IF;
+END $$;
+`;
+
 export const MIGRATIONS: readonly Migration[] = [
   { version: 1, name: 'foundation', sql: M1_FOUNDATION },
   { version: 2, name: 'tenancy_primitives', sql: M2_TENANCY },
@@ -1364,6 +1440,7 @@ export const MIGRATIONS: readonly Migration[] = [
   { version: 24, name: 'message_feedback', sql: M24_MESSAGE_FEEDBACK },
   { version: 25, name: 'conversation_project', sql: M25_CONVERSATION_PROJECT },
   { version: 26, name: 'tool_idempotency', sql: M26_TOOL_IDEMPOTENCY },
+  { version: 27, name: 'mail_connections', sql: M27_MAIL_CONNECTIONS },
 ];
 
 

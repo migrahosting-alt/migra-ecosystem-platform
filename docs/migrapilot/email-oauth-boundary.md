@@ -37,6 +37,61 @@ its config in an ES `#private` field with an explicit `toJSON`, after a test
 caught `JSON.stringify(provider)` serialising the access token in plain text.
 TypeScript's `private` would not have prevented that.
 
+## 1a. How the refresh token is stored — BUILT
+
+Sealed with AES-256-GCM before it reaches the database, under a key held
+**outside** the database in `MIGRAPILOT_MAIL_TOKEN_KEY` (32 bytes, base64).
+
+The claim is narrow and worth stating exactly: the durable store already holds
+sensitive things — conversations, documents. A refresh token is a different
+*kind* of thing. It is a credential to a system that is not ours, it opens the
+user's actual mailbox from anywhere with no Migra process involved, it survives
+a Migra password change, and it does not expire on its own. So a dump of the
+store — a backup on a laptop, a snapshot restored into staging, a forgotten
+replica — would be a permanent key to every connected mailbox. Encryption under
+an external key makes the dump insufficient on its own.
+
+🚨 **The associated data is the point, not a detail.** GCM's AAD binds each
+ciphertext to `owner + workspace + provider + provider account id + purpose`,
+length-prefixed so two different bindings cannot serialise identically.
+Encryption alone stops a *reader* of the database and does nothing about a
+*writer*: without AAD an attacker connects their own mailbox, copies their own
+sealed refresh token into a victim's row, and every "my email" question the
+victim asks reads the attacker's inbox. That is the same graft the callback's
+principal check refuses, arriving through the storage layer instead of the
+browser.
+
+🚨 **A seal that will not open is an operator fault, not a user fault.** If the
+key is wrong or missing, every connection in the deployment fails to open. The
+tempting classification is `authorization_expired` — and it is exactly wrong,
+because that state's remedy is "reconnect", and reconnecting overwrites a good
+row to work around a misconfigured environment variable, destroying the
+evidence. It surfaces as provider unavailability instead.
+
+Other decisions this settled:
+
+- **A grant with no refresh token is refused, not stored.** The authorization
+  URL always asks for offline access and forces consent, so it is anomalous;
+  storing it would create a connection that works for an hour and then asks for
+  reconnection forever, indistinguishable from a real revocation.
+- **A refresh never writes the refresh token.** Google does not reissue one on
+  an ordinary refresh, so a statement that updated both columns would
+  eventually overwrite the one credential that cannot be recovered.
+- **Row-level security is enabled AND forced** on `mail_connection`, and every
+  statement also carries an explicit scope predicate. The predicate is what a
+  reviewer sees in a diff; RLS is what holds when someone forgets one.
+- **Durability is a capability on the store contract**, not an `instanceof`
+  check. That check is exactly how the project binding ended up in memory on
+  production while every local test passed.
+- **`MIGRAPILOT_MAIL_TOKEN_KEY` missing does not stop the Brain booting.** The
+  email capability reports as unconfigured and names the variable; a feature
+  nobody has enabled must not prevent startup.
+
+### Known gap, recorded not fixed
+
+`conversation_project` (migration 25) has no row-level security, unlike every
+other scoped table. It is outside this work and needs its own migration.
+
 ## 2. Account ownership
 
 A connection record binds:

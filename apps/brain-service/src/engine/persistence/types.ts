@@ -690,7 +690,84 @@ export function hasIdempotency<T extends object>(s: T): s is T & IdempotencyPers
     && typeof p.idempotencyWrite === 'function';
 }
 
-export interface DurableStore extends ConversationPersistence, MemoryItemPersistence, RagIndexPersistence, EmbeddingCachePersistence, WorkspacePersistence, OperationalPersistence, AgentRunJournalPersistence, ProjectBindingPersistence, IdempotencyPersistence {
+/**
+ * Connected mail accounts.
+ *
+ * 🚨 A CAPABILITY, for the same reason project bindings are one. The mail
+ * connection is exactly the kind of state that would be lost silently: a
+ * memory-backed fallback works perfectly in a local rig, and in production a
+ * user reconnects their mailbox after every Brain restart without ever being
+ * told why. A store that does not implement these must REFUSE email, not
+ * degrade to a store that forgets.
+ *
+ * Every method takes the scope, because the provider account id narrows within
+ * a principal and never identifies a connection on its own.
+ */
+/**
+ * A sealed token, structurally. Declared here rather than imported from the
+ * email module so the persistence layer does not depend on a feature that
+ * depends on it — the shape is identical, so the two are assignable without a
+ * cast in either direction.
+ */
+export interface SealedTokenValue {
+  keyId: string;
+  iv: string;
+  tag: string;
+  ciphertext: string;
+}
+
+export interface MailConnectionPersistence {
+  listMailConnections(scope: PersistenceScope, provider: string): Promise<MailConnectionRow[]>;
+  getMailConnection(scope: PersistenceScope, provider: string, providerAccountId: string): Promise<MailConnectionRow | null>;
+  putMailConnection(record: MailConnectionRow, scope: PersistenceScope): Promise<void>;
+  recordMailRefresh(input: {
+    scope: PersistenceScope;
+    provider: string;
+    providerAccountId: string;
+    sealedAccessToken: SealedTokenValue;
+    accessTokenExpiresAt: number;
+    at: number;
+  }): Promise<void>;
+  markMailAuthorizationRevoked(input: {
+    scope: PersistenceScope;
+    provider: string;
+    providerAccountId: string;
+    at: number;
+  }): Promise<void>;
+  /** True when a row was actually removed. See the repo for why that matters. */
+  deleteMailConnection(scope: PersistenceScope, provider: string, providerAccountId: string): Promise<boolean>;
+}
+
+/**
+ * The stored row. Both token fields are SEALED VALUES — ciphertext — so this
+ * row can be logged, serialised or dumped without exposing a credential.
+ * That property is structural, not a convention: there is no field that could
+ * hold a plaintext token.
+ */
+export interface MailConnectionRow {
+  ownerScope: string;
+  workspaceScope: string;
+  provider: string;
+  providerAccountId: string;
+  accountAddress: string;
+  sealedAccessToken: SealedTokenValue;
+  sealedRefreshToken: SealedTokenValue;
+  accessTokenExpiresAt: number;
+  grantedScopes: string[];
+  authorizationRevokedAt: number | null;
+  connectedAt: number;
+  lastRefreshAt: number | null;
+  updatedAt: number;
+}
+
+export function hasMailConnections<T extends object>(s: T): s is T & MailConnectionPersistence {
+  const p = s as Partial<MailConnectionPersistence>;
+  return typeof p.listMailConnections === 'function' && typeof p.getMailConnection === 'function'
+    && typeof p.putMailConnection === 'function' && typeof p.recordMailRefresh === 'function'
+    && typeof p.markMailAuthorizationRevoked === 'function' && typeof p.deleteMailConnection === 'function';
+}
+
+export interface DurableStore extends ConversationPersistence, MemoryItemPersistence, RagIndexPersistence, EmbeddingCachePersistence, WorkspacePersistence, OperationalPersistence, AgentRunJournalPersistence, ProjectBindingPersistence, IdempotencyPersistence, MailConnectionPersistence {
   health(): Promise<PersistenceHealth>;
   integrityCheck(): Promise<string>;
   close(): Promise<void>;

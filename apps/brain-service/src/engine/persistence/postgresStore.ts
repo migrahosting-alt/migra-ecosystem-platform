@@ -61,7 +61,9 @@ import type {
   AgentRunTransitionInput,
   AgentRunReproposalInput,
   AgentRunReproposalResult,
+  MailConnectionRow,
   ProjectBindingRow,
+  SealedTokenValue,
   IdempotencyRow,
 } from './types.js';
 
@@ -73,6 +75,7 @@ import * as feedback from './postgres/messageFeedbackRepo.js';
 import * as operational from './postgres/operationalRepo.js';
 import * as agentRuns from './postgres/agentRunRepo.js';
 import * as agentRunChildren from './postgres/agentRunChildRepo.js';
+import * as mailConnections from './postgres/mailConnectionRepo.js';
 import * as projectBindings from './postgres/projectBindingRepo.js';
 import * as idempotency from './postgres/idempotencyRepo.js';
 import { latestVersion } from './postgres/migrations.js';
@@ -144,6 +147,61 @@ export class PostgresDurableStore implements DurableStore {
   async unbindProject(conversationId: string, scope: PersistenceScope): Promise<void> {
     await this.inScope(scope, (c) =>
       projectBindings.unbindProject(c, conversationId, { owner: scope.owner, workspace: scope.workspace }));
+  }
+
+  /* ── mail connections ──────────────────────────────────────────────────── */
+
+  /*
+   * Scoped, like every other tenant table. The provider account id NARROWS
+   * within the scope; it never identifies a connection on its own, which is
+   * why it is never the sole predicate anywhere below.
+   */
+
+  async listMailConnections(scope: PersistenceScope, provider: string) {
+    return this.inScope(scope, (c) =>
+      mailConnections.listConnections(c, { owner: scope.owner, workspace: scope.workspace }, provider));
+  }
+
+  async getMailConnection(scope: PersistenceScope, provider: string, providerAccountId: string) {
+    return this.inScope(scope, (c) =>
+      mailConnections.getConnection(c, { owner: scope.owner, workspace: scope.workspace }, provider, providerAccountId));
+  }
+
+  async putMailConnection(record: MailConnectionRow, scope: PersistenceScope): Promise<void> {
+    await this.inScope(scope, (c) => mailConnections.putConnection(c, record));
+  }
+
+  async recordMailRefresh(input: {
+    scope: PersistenceScope;
+    provider: string;
+    providerAccountId: string;
+    sealedAccessToken: SealedTokenValue;
+    accessTokenExpiresAt: number;
+    at: number;
+  }): Promise<void> {
+    await this.inScope(input.scope, (c) =>
+      mailConnections.recordRefresh(c, {
+        ...input,
+        scope: { owner: input.scope.owner, workspace: input.scope.workspace },
+      }));
+  }
+
+  async markMailAuthorizationRevoked(input: {
+    scope: PersistenceScope;
+    provider: string;
+    providerAccountId: string;
+    at: number;
+  }): Promise<void> {
+    await this.inScope(input.scope, (c) =>
+      mailConnections.markAuthorizationRevoked(c, {
+        ...input,
+        scope: { owner: input.scope.owner, workspace: input.scope.workspace },
+      }));
+  }
+
+  async deleteMailConnection(scope: PersistenceScope, provider: string, providerAccountId: string): Promise<boolean> {
+    return this.inScope(scope, (c) =>
+      mailConnections.deleteConnection(c, { owner: scope.owner, workspace: scope.workspace }, provider, providerAccountId));
   }
 
   /* ── idempotency ───────────────────────────────────────────────────────── */

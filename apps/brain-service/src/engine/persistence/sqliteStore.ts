@@ -12,10 +12,11 @@
  */
 
 import { DatabaseSync } from 'node:sqlite';
+import { SqliteMailConnectionStore } from '../email/sqliteMailConnection.js';
 import { SqliteProjectBindingStore } from '../projects/sqliteProjectBinding.js';
 import { SqliteIdempotencyPersistence } from '../tools/sqliteIdempotency.js';
 import type { ProjectBindingStore } from '../projects/projectBinding.js';
-import type { ProjectBindingRow, IdempotencyRow } from './types.js';
+import type { ProjectBindingRow, IdempotencyRow, MailConnectionRow, SealedTokenValue } from './types.js';
 import { statSync } from 'node:fs';
 import type {
   ConversationPersistence, MemoryItemPersistence, RagIndexPersistence, EmbeddingCachePersistence,
@@ -655,6 +656,55 @@ export class SqliteDurableStore implements DurableStore {
     await this.bindings().unbind(conversationId, { owner: scope.owner, workspace: scope.workspace });
   }
 
+  /*
+   * Mail connections — part of the shared contract for the same reason project
+   * bindings are. A memory fallback here would work perfectly in the local rig
+   * and quietly make users reconnect their mailbox after every restart.
+   */
+  async listMailConnections(scope: PersistenceScope, provider: string) {
+    return this.mail().list({ owner: scope.owner, workspace: scope.workspace }, provider);
+  }
+
+  async getMailConnection(scope: PersistenceScope, provider: string, providerAccountId: string) {
+    return this.mail().get({ owner: scope.owner, workspace: scope.workspace }, provider, providerAccountId);
+  }
+
+  async putMailConnection(record: MailConnectionRow, scope: PersistenceScope): Promise<void> {
+    void scope; // The record carries its own scope; the parameter keeps the
+    // signature identical across adapters, where Postgres needs it for RLS.
+    await this.mail().put(record as never);
+  }
+
+  async recordMailRefresh(input: {
+    scope: PersistenceScope;
+    provider: string;
+    providerAccountId: string;
+    sealedAccessToken: SealedTokenValue;
+    accessTokenExpiresAt: number;
+    at: number;
+  }): Promise<void> {
+    await this.mail().recordRefresh({
+      ...input,
+      scope: { owner: input.scope.owner, workspace: input.scope.workspace },
+    });
+  }
+
+  async markMailAuthorizationRevoked(input: {
+    scope: PersistenceScope;
+    provider: string;
+    providerAccountId: string;
+    at: number;
+  }): Promise<void> {
+    await this.mail().markAuthorizationRevoked({
+      ...input,
+      scope: { owner: input.scope.owner, workspace: input.scope.workspace },
+    });
+  }
+
+  async deleteMailConnection(scope: PersistenceScope, provider: string, providerAccountId: string): Promise<boolean> {
+    return this.mail().disconnect({ owner: scope.owner, workspace: scope.workspace }, provider, providerAccountId);
+  }
+
   async idempotencyInsertIfAbsent(record: IdempotencyRow): Promise<IdempotencyRow | null> {
     return this.idem().insertIfAbsent(record as never) as Promise<IdempotencyRow | null>;
   }
@@ -673,6 +723,11 @@ export class SqliteDurableStore implements DurableStore {
     return this.bindingStore;
   }
 
+  private mail(): SqliteMailConnectionStore {
+    this.mailStore ??= new SqliteMailConnectionStore(this.db);
+    return this.mailStore;
+  }
+
   private idem(): SqliteIdempotencyPersistence {
     this.idempotencyStore ??= new SqliteIdempotencyPersistence(this.db);
     return this.idempotencyStore;
@@ -680,6 +735,7 @@ export class SqliteDurableStore implements DurableStore {
 
   private bindingStore?: ProjectBindingStore;
   private idempotencyStore?: SqliteIdempotencyPersistence;
+  private mailStore?: SqliteMailConnectionStore;
 
   private schemaVersion = 0;
   private migrationState = 'pending';
