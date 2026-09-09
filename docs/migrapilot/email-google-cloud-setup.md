@@ -93,9 +93,14 @@ longer emits one, and a test asserts it emits only the redirect URI.
      connect. That is fine for qualification; it is a real constraint before
      any wider release.
 
-4. **OAuth client ID**, type **Web application**
-   - Enter the two values from the table above.
-   - This produces a client ID and a client secret.
+4. **OAuth client ID**, type **Web application** — *form already filled by the
+   agent and left unsubmitted; press Create yourself.*
+   - Name: `MigraPilot Email (read-only)`
+   - Authorized redirect URI: the single value from the table above. Leave
+     JavaScript origins empty.
+   - Pressing Create produces a client ID and a client secret. **The secret is
+     shown once.** Copy it straight into the Brain's env file; do not paste it
+     into chat, a commit, a screenshot, or shell history.
 
 ---
 
