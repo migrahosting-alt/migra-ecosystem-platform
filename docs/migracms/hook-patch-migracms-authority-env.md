@@ -1,7 +1,8 @@
 # Hook grant — MigraCMS commercial-authority env (Part G)
 
 **Status: AUTHORIZED by Bonex 2026-09-09, INSTALLED, TEMPORARY.**
-Remove once `/v1/plans` is proven from MigraCMS.
+Includes a one-shot repair extension, also authorized 2026-09-09.
+Both are removed together once `/v1/plans` is proven from MigraCMS.
 
 ## Why a grant is needed
 
@@ -13,9 +14,9 @@ Group=migracms
 EnvironmentFile=/etc/migracms/migracms.env
 ```
 
-`/etc/migracms` is `750 migracms:migracms`. The account we reach the host as
-(`migraadmin`) can neither read nor write it — verified, not assumed. Extending
-that existing file, rather than inventing a second secret store, needs elevation.
+`/etc/migracms` is `750 migracms:migracms`; the account we reach the host as
+(`migraadmin`) can neither read nor write it. Extending that existing file —
+rather than inventing a second secret store — needs elevation.
 
 ## Why there is a two-host clause
 
@@ -23,8 +24,7 @@ that existing file, rather than inventing a second secret store, needs elevation
 on migrapanel-core. Moving it means printing it (forbidden), staging it on the
 workstation (same exposure, and it persists), or piping it host-to-host so it
 exists only in memory. Only the third is acceptable, and it inherently names two
-hosts — so the one-host rule is kept and the **read half gets its own stricter
-rule**.
+hosts — so the one-host rule stands and the read half gets its own stricter rule.
 
 ## Authorized scope
 
@@ -33,51 +33,96 @@ rule**.
 | Host | migrapanel-core only | migracms-core only |
 | Path | `/opt/MigraPanel/apps/panel-api/.env`, nothing else | `/etc/migracms/migracms.env`, its directory, `/dev/null` |
 | Extraction | `sed -n` performing the rename; **no arbitrary grep** | — |
-| Keys | may extract only `PANEL_INTERNAL_TOKEN`, output renamed to `MIGRAPANEL_API_KEY=` | only the four `MIGRAPANEL_*` keys |
+| Keys | only `PANEL_INTERNAL_TOKEN`, renamed to `MIGRAPANEL_API_KEY=` | only the four `MIGRAPANEL_*` keys |
 | Elevation | forbidden | `tee stat grep systemctl ls wc` |
 | Write shape | — | append only; `tee` must carry `-a` |
 | Redirection | none | `/dev/null` only (plus `2>&1`) |
-| Reading back | — | `grep -c`/`-q` only; every dumping verb refused |
+| Reading back | — | `grep -c`/`-q` only |
 | systemd | — | `restart\|status\|is-active\|show\|cat migracms`; `--property`/`-p` refused |
 
-Also refused everywhere: shell tracing, ssh options that run commands
+Refused everywhere: shell tracing, ssh options that run commands
 (`ProxyCommand`, `LocalCommand`, `RemoteCommand`, `ProxyJump`), wildcards,
-`install(1)` (it overwrites), running as another user, and any second pipe.
+`install(1)`, running as another user, any second pipe.
+
+### One-shot repair extension
+
+Part G is append-only by design, so it cannot undo a bad write. The extension is
+**not** a `sed -i` permission: exactly two commands are permitted, compared as
+whole strings after stripping a leading `timeout N` and `ssh -o Option=value`
+pairs. A different path, expression, extra `-e`, `-i.bak`, `-n`, `$` or backtick
+changes the string and fails equality.
+
+```
+repair    sudo sed -i -e '/^MIGRAPANEL_/d' -e '/^# MigraPanel/d' /etc/migracms/migracms.env
+checksum  sudo sed    -e '/^MIGRAPANEL_/d' -e '/^# MigraPanel/d' /etc/migracms/migracms.env | sha256sum
+```
+
+The checksum cannot disclose the secret: the API key line is one of the lines it
+filters out.
 
 ## Six defects the permit/deny suite caught
 
-The suite (46 cases) is `partg_controls.sh`; every case is fed to the real hook,
-not a copy. Four of these were found only because the suite was written *before*
-the grant was used, which is the point of running controls first.
+The suite is `hook-patch-migracms-authority-env.controls.sh` (61 cases), fed to
+the real hook rather than a copy. Four of these nothing else would have caught.
 
 | # | Defect | Consequence |
 |---|---|---|
-| 1 | `grep` allowed unconditionally | `grep MIGRAPANEL_API_KEY <envfile>` **prints the matching line** — the one thing the rule exists to prevent |
-| 2 | content verbs matched case-sensitively | `systemctl show migracms --property=Environment` contains `Environ`, not `environ` |
-| 3 | `tee` echoes what it writes | without a forced `>/dev/null` the relayed secret lands in tool output |
-| 4 | the read half needs no elevation | the `${ELEV}` dispatch never saw it, so **staging the token locally and piping it to an external collector were both ALLOWED**; fixed with an unconditional companion rule that any command touching the token must be the approved relay |
-| 5 | `*"sh -"*` (meant for `sh -x`) also matched `ssh -o` | refused the legitimate relay; replaced with word-boundary regexes |
-| 6 | `2>&1` parsed as a file-redirect target | refused every diagnostic; a redirect to `&<digit>` is a descriptor, not a file |
+| 1 | `grep` allowed unconditionally | `grep MIGRAPANEL_API_KEY <envfile>` **prints the matching line** |
+| 2 | content verbs matched case-sensitively | `--property=Environment` contains `Environ`, not `environ` |
+| 3 | `tee` echoes what it writes | without a forced discard the relayed secret lands in tool output |
+| 4 | **the read half needs no elevation** | the elevation dispatch never saw it: staging the token locally *and* piping it to an external collector were **both ALLOWED**. Closed with an unconditional companion rule |
+| 5 | `*"sh -"*` (for `sh -x`) also matched `ssh -o` | refused the legitimate relay |
+| 6 | `2>&1` parsed as a file-redirect target | refused every diagnostic |
 
-An ssh option that runs a command (`ProxyCommand`) was closed at the same time.
+## UNRESOLVED PROVISIONING ANOMALY
 
-## Known defect in the provisioning run — NOT yet repaired
+The first provisioning run left the file with duplicate keys. The end state has
+been corrected; **the cause has not been explained.** These are different things
+and this record keeps them apart deliberately.
 
-After provisioning, `/etc/migracms/migracms.env` holds **two identical copies of
-each of the four keys** (8 lines where 4 were intended). Every line in the file
-is accounted for — 16 original lines, one blank, one comment, eight key lines —
-so nothing unexpected was written, and because the duplicates are byte-identical
-the effective configuration is unambiguous (systemd takes the last assignment).
+```text
+Observed:
+8 MigraPanel key lines, 2 identical copies of each
 
-The cause is **not established**. Ruled out by direct test on the same hosts:
-the heredoc append writes exactly its 3 lines; the two-hop relay writes exactly
-1 line; the permit/deny suite does not execute its cases (its `DATABASE_URL=postgres://x`
-fixture is absent from the file); and the reader emits exactly one line, proven
-by piping it into `grep -c -F -f -`.
+Proven:
+- heredoc emits once
+- relay emits once
+- reader emits once
+- tests did not execute writes
+- all duplicate values identical
+- no unexpected lines written
 
-Repair means deleting four lines, which this grant deliberately cannot do — it
-is append-only precisely so it can never replace or truncate the file. That
-capability was not authorized and has not been taken.
+Cause:
+UNKNOWN
+
+Remediation:
+exact-scope normalization + single reprovision
+```
+
+Each "proven" line is a direct test on the same hosts, not an inference: a
+3-line heredoc appended exactly 3 lines to a scratch file; the two-hop relay
+appended exactly 1; piping the reader into `grep -c -F -f -` returned a count
+consistent with one emitted pattern; and the suite's `DATABASE_URL=postgres://x`
+fixture never appeared in the file, which is what it would have done had the
+harness executed its cases.
+
+One correlated observation, recorded as a lead and **not** as a cause: the
+re-provisioning run used `ssh -n` on the read half, closing its stdin, and did
+not duplicate. That is a single unreplicated trial. It does not establish that
+an inherited stdin or a lingering connection caused the original duplication,
+and it must not be written up as though it did.
+
+### Repair evidence
+
+```
+before   MIGRAPANEL_* = 8, comment = 1, 26 lines
+filtered sha256 (MigraPanel lines excluded) = 62f99061e3bc08e3a4f64bd7bbb449076d6266ef57402af85b7eb97b4464cf74
+after deletion   MIGRAPANEL_* = 0, comment = 0, 17 lines, 640 migracms:migracms
+filtered sha256  = 62f99061...4464cf74   (IDENTICAL — repair touched only the intended slice)
+after reprovision MIGRAPANEL_* = 4, one of each, 22 lines, 640 migracms:migracms
+filtered sha256  = 62f99061...4464cf74   (IDENTICAL)
+API key byte-identity vs PANEL_INTERNAL_TOKEN: grep -c -F -f - = 1
+```
 
 ## The exact rule as installed
 
@@ -177,8 +222,41 @@ panel_token_reader() {
   return 0
 }
 
+# ── ONE-SHOT REPAIR, authorized by Bonex 2026-09-09 as a narrow addition to
+#    Part G. Part G is append-only by design, so it cannot undo a bad write; the
+#    provisioning run left two identical copies of each key and there was no way
+#    to normalise the file under the grant.
+#
+#    This is NOT a `sed -i` permission. Exactly two commands are permitted,
+#    compared as WHOLE STRINGS after stripping a leading `timeout N` and any
+#    `ssh -o Option=value` pairs. A different path, a different expression, an
+#    extra -e, `-i.bak`, `-n`, or any `$`/backtick changes the string and fails
+#    equality. Both are removed with Part G.
+#
+#      repair    delete only /^MIGRAPANEL_/ and /^# MigraPanel/ from the env file
+#      checksum  sha256 of the file with exactly those lines filtered out, which
+#                proves the repair touched nothing else (and cannot disclose the
+#                secret, since the API key line is one of the filtered ones)
+migracms_env_exact_repair() {
+  local c="$1" norm del f
+  norm="$(printf '%s' "$c" \
+    | sed -E 's#^[[:space:]]*timeout[[:space:]]+[0-9]+[[:space:]]+##' \
+    | sed -E 's#-o[[:space:]]+[A-Za-z]+=[A-Za-z0-9]+[[:space:]]+##g' \
+    | tr -s '[:space:]' ' ' \
+    | sed -E 's#^ ##; s# $##')"
+  del="-e '/^MIGRAPANEL_/d' -e '/^# MigraPanel/d'"
+  f="/etc/migracms/migracms.env"
+  [ "$norm" = "ssh migracms-core \"${ELEV} sed -i $del $f\"" ] && return 0
+  [ "$norm" = "ssh migracms-core \"${ELEV} sed $del $f | sha256sum\"" ] && return 0
+  return 1
+}
+
 migracms_authority_env() {
   local c="$1" reader="" writer="$1" relay=0
+
+  # The two exact repair commands are judged first: they carry a remote pipe and
+  # a `sed`, both of which the rules below refuse on purpose.
+  migracms_env_exact_repair "$c" && return 0
 
   # 0. SECRET RELAY — the one permitted two-host shape is
   #      ssh migrapanel-core '<rename one key line>' | ssh migracms-core '<sink>'

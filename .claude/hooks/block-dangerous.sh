@@ -460,8 +460,41 @@ panel_token_reader() {
   return 0
 }
 
+# ── ONE-SHOT REPAIR, authorized by Bonex 2026-09-09 as a narrow addition to
+#    Part G. Part G is append-only by design, so it cannot undo a bad write; the
+#    provisioning run left two identical copies of each key and there was no way
+#    to normalise the file under the grant.
+#
+#    This is NOT a `sed -i` permission. Exactly two commands are permitted,
+#    compared as WHOLE STRINGS after stripping a leading `timeout N` and any
+#    `ssh -o Option=value` pairs. A different path, a different expression, an
+#    extra -e, `-i.bak`, `-n`, or any `$`/backtick changes the string and fails
+#    equality. Both are removed with Part G.
+#
+#      repair    delete only /^MIGRAPANEL_/ and /^# MigraPanel/ from the env file
+#      checksum  sha256 of the file with exactly those lines filtered out, which
+#                proves the repair touched nothing else (and cannot disclose the
+#                secret, since the API key line is one of the filtered ones)
+migracms_env_exact_repair() {
+  local c="$1" norm del f
+  norm="$(printf '%s' "$c" \
+    | sed -E 's#^[[:space:]]*timeout[[:space:]]+[0-9]+[[:space:]]+##' \
+    | sed -E 's#-o[[:space:]]+[A-Za-z]+=[A-Za-z0-9]+[[:space:]]+##g' \
+    | tr -s '[:space:]' ' ' \
+    | sed -E 's#^ ##; s# $##')"
+  del="-e '/^MIGRAPANEL_/d' -e '/^# MigraPanel/d'"
+  f="/etc/migracms/migracms.env"
+  [ "$norm" = "ssh migracms-core \"${ELEV} sed -i $del $f\"" ] && return 0
+  [ "$norm" = "ssh migracms-core \"${ELEV} sed $del $f | sha256sum\"" ] && return 0
+  return 1
+}
+
 migracms_authority_env() {
   local c="$1" reader="" writer="$1" relay=0
+
+  # The two exact repair commands are judged first: they carry a remote pipe and
+  # a `sed`, both of which the rules below refuse on purpose.
+  migracms_env_exact_repair "$c" && return 0
 
   # 0. SECRET RELAY — the one permitted two-host shape is
   #      ssh migrapanel-core '<rename one key line>' | ssh migracms-core '<sink>'

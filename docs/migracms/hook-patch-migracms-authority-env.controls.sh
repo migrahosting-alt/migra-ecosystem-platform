@@ -104,5 +104,28 @@ check BLOCK "read half without the destination rename" \
   "ssh migrapanel-core 'sed -n \"#^PANEL_INTERNAL_TOKEN=#p\" $PANEL_ENV' | ssh migracms-core '$E tee -a $CMS_ENV >/dev/null'"
 
 echo
+echo "=== ONE-SHOT REPAIR: exactly two commands, matched whole ==="
+DEL="-e '/^MIGRAPANEL_/d' -e '/^# MigraPanel/d'"
+REPAIR="ssh migracms-core \"$E sed -i $DEL $CMS_ENV\""
+SUMCMD="ssh migracms-core \"$E sed $DEL $CMS_ENV | sha256sum\""
+
+check ALLOW "the exact repair command"                   "$REPAIR"
+check ALLOW "the exact filtered-checksum command"        "$SUMCMD"
+check ALLOW "repair with timeout and ssh options"        "timeout 60 ssh -o BatchMode=yes -o ConnectTimeout=10 migracms-core \"$E sed -i $DEL $CMS_ENV\""
+
+check BLOCK "a different target path"                    "ssh migracms-core \"$E sed -i $DEL /etc/passwd\""
+check BLOCK "a different deletion expression"            "ssh migracms-core \"$E sed -i -e '/^DATABASE_/d' $CMS_ENV\""
+check BLOCK "an extra expression smuggled in"            "ssh migracms-core \"$E sed -i $DEL -e '/^DATABASE_URL/d' $CMS_ENV\""
+check BLOCK "a backup suffix writes a second file"       "ssh migracms-core \"$E sed -i.bak $DEL $CMS_ENV\""
+check BLOCK "print mode"                                 "ssh migracms-core \"$E sed -i -n $DEL $CMS_ENV\""
+check BLOCK "a substitution instead of a deletion"       "ssh migracms-core \"$E sed -i -e 's/^MIGRAPANEL_/X/' $CMS_ENV\""
+check BLOCK "shell expansion in the expression"          "ssh migracms-core \"$E sed -i -e '/^\$PREFIX/d' $CMS_ENV\""
+check BLOCK "command substitution in the expression"     "ssh migracms-core \"$E sed -i -e '/^\`id\`/d' $CMS_ENV\""
+check BLOCK "the wrong host"                             "ssh db-core \"$E sed -i $DEL $CMS_ENV\""
+check BLOCK "checksum of the UNfiltered file"            "ssh migracms-core \"$E sed '' $CMS_ENV | sha256sum\""
+check BLOCK "checksum piped somewhere else"              "ssh migracms-core \"$E sed $DEL $CMS_ENV | tee /dev/null\""
+check BLOCK "generic sed -i once the exact form is gone" "ssh migracms-core \"$E sed -i -e '/^x/d' $CMS_ENV\""
+
+echo
 printf '\n  pass=%d fail=%d\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
