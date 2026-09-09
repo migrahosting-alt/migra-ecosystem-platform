@@ -1,7 +1,7 @@
 {
   "$schema": "MIGRAPILOT_STATUS — canonical cross-agent state. Update on every material change.",
   "updated": "2026-09-08",
-  "updatedBy": "Claude (Opus 5) — Migra Email OAuth path, steps 1-7",
+  "updatedBy": "Claude (Opus 5) — Migra Email read slice, part 1",
   "rules": {
     "easyFirst": "Do not start deep capability work while meaningful easy user-facing items remain.",
     "provenLive": "PROVEN_LIVE requires the real user-facing workflow to pass. Code existing and tests passing is NOT proof.",
@@ -2503,11 +2503,11 @@
   },
   "migraEmailProgress": {
     "_authority": "Bonex work order, 2026-09-08. Gmail is the first provider, never the product contract.",
-    "status": "OAUTH PATH COMPLETE AND TESTED — steps 1-7 of the ordered plan built, mutation-tested and committed. Step 8 (Google Cloud) is BONEX'S action; no Google Cloud resource exists and no credential has been created, read or stored.",
+    "status": "READ SLICE IN PROGRESS — Google Cloud configured up to the Create button (Bonex presses it). Hub connect surface, per-caller readiness and execution wiring built and mutation-tested.",
     "suiteGate": {
-      "brain": "2938/2938 pass, 0 fail, 0 skipped",
-      "consumer": "1124/1124 pass, 0 fail, 0 skipped",
-      "postgres": "12 tests against a real PostgreSQL (Docker), 0 skipped — this is what proves migrations 27 and 28 apply",
+      "brain": "2963/2963 pass, 0 fail, 0 skipped",
+      "consumer": "1158/1158 pass, 0 fail, 0 skipped",
+      "build": "consumer `npm run build` exit 0",
       "readVia": "docs/migrapilot/suite-gate.sh"
     },
     "built": [
@@ -2528,7 +2528,11 @@
       "Address parsing split '\"Okafor, James\" <j@x>' inside the quoted display name, producing a recipient called 'James' and losing the real one.",
       "🚨 ROUTING: 'My inbox is a disaster, anyway — what is the capital of Peru?' routed into a mailbox SEARCH. A bare state word was sufficient, so a noun being present was enough to open private correspondence to answer a geography question.",
       "'Make this email shorter' fell through to an incidental mention because the rewrite pattern required adjacency.",
-      "The email address validator allowed only one dot in the domain and rejected first.last+tag@sub.example.com."
+      "The email address validator allowed only one dot in the domain and rejected first.last+tag@sub.example.com.",
+      "🚨 CROSS-TENANT: readiness was computed from a process-wide singleton while a mailbox belongs to a principal. It would have reported — and been one wiring mistake from executing against — whoever connected most recently, for everyone. Found before any real credential existed.",
+      "🚨 migra.email could NEVER have executed: the availability gate ran isAvailable() with no readiness context, so a capability whose readiness depends on the caller was denied for everyone. That reads as \"not available\", not as a bug. Found only by executing through the REAL executor.",
+      "A test assertion passed vacuously — it inspected a CAPABILITY_DENIED response that happened not to contain the phrase it searched for. Now asserts both directions.",
+      "A resolver test could not distinguish the real implementation from a /connect/i regex over the reason text, because every fixture reason contained the word."
     ],
     "mutationsCaught": "31 in the earlier chunk, plus 60 in this one across sealing, both storage adapters, migrations, refresh, provider construction, the Google client, and the routes on both sides. Every one killed a test.",
     "structuralGuardsMadePermanent": [
@@ -2540,7 +2544,7 @@
       "credentials": "Google Cloud project, OAuth client, sealing key and a controlled test account. Bonex creates them; the agent must never create, request, read back or store them. Exact values and steps: docs/migrapilot/email-google-cloud-setup.md",
       "schemaChange": "Migrations 27 and 28 have NOT been applied to production. Applying them is a schema change and needs its own approval. Production remains at schema 26."
     },
-    "productionState": "UNCHANGED — chat-platform-rc-0908. Nothing staged, nothing deployed, schema still 26.",
+    "productionState": "UNCHANGED — chat-platform-rc-0908, schema 26. Migrations 27/28 NOT applied by owner decision: no user-reachable UI yet, so schema + backend + UI ship as ONE candidate.",
     "oauthPathBuilt": {
       "1_configContract": "Redirect URI derived from deployment config and asserted exactly. googleConsoleSetup() GENERATES the two console values so the console is configured from the code, not the code from the console. http://localhost accepted OUTSIDE production only.",
       "2_callbackFlow": "state minted per attempt, bound to the principal, taken-not-read, expiring. The principal check runs BEFORE the exchange, so a forged callback costs nothing. Three forged-callback refusals share one sentence — distinguishing them is a probing oracle.",
@@ -2564,6 +2568,27 @@
       "Rotating MIGRAPILOT_MAIL_TOKEN_KEY is possible in principle — the key id is stored beside each ciphertext, so \"sealed with a different key\" is distinguishable — but no re-sealing pass exists. Losing or changing the key makes every stored connection unopenable.",
       "Single-flight refresh is PER PROCESS. Two Brain instances can refresh one connection concurrently; acceptable only because the loser persists a token that is older, not broken."
     ],
-    "scopeRequestedFirst": "gmail.readonly ONLY. compose and send are deliberately not requested until governed send is wired end to end — asking for the irreversible permission first asks on the strength of a promise."
+    "scopeRequestedFirst": "gmail.readonly ONLY. compose and send are deliberately not requested until governed send is wired end to end — asking for the irreversible permission first asks on the strength of a promise.",
+    "googleCloud": {
+      "done": "Gmail API enabled; gmail.readonly registered as the ONLY scope (restricted; sensitive and non-sensitive tables empty); branding left untouched because it was already complete.",
+      "waiting": "The Web application OAuth client form is FILLED AND UNSUBMITTED: type Web application, name \"MigraPilot Email (read-only)\", one redirect URI verified character-identical, no JavaScript origins. Bonex presses Create — that is when the secret is displayed.",
+      "notDone": "No test user added: Google requires them (External/Testing, 0 users), but the controlled test account has not been named and guessing risks enabling a personal mailbox.",
+      "correction": "googleConsoleSetup() emitted an authorized JavaScript origin. Wrong for a server-side flow — the browser never calls a Google endpoint — and caught at the console with the value typed. Removed; the test now asserts the KEY SET so adding a field fails loudly."
+    },
+    "readSliceBuilt": {
+      "remedyContract": "A capability that cannot run now says whether the USER can fix it, as a token. Reading `unavailableReason` for the word \"connect\" is a keyword proxy that breaks the moment someone improves the copy.",
+      "connectControl": "A remediable hub row is clickable and runs the REMEDY, never the row's own action. A row with a reason and no remedy stays inert. A failed START does not navigate.",
+      "callbackUI": "Outcome travels as a token in ?mail=, never a message — a query string is logged, kept in history and forwarded in a Referer. Unknown token renders nothing; the param is cleared once read.",
+      "perCallerReadiness": "ReadinessContext resolved by the route; the registry answers per principal.",
+      "execution": "Handler resolves a provider from the caller's connection; refuses without a principal."
+    },
+    "readSliceRemaining": [
+      "Disconnect control in the UI (the route exists and is tested; nothing renders it).",
+      "Read/thread/attachment orchestration beyond search.",
+      "Grounded summarization prose.",
+      "Attachment bridge wired into the canonical file pipeline.",
+      "Intent routing wired to the live capability.",
+      "Read-only observability wired to the execution path."
+    ]
   }
 }
